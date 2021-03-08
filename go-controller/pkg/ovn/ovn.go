@@ -6,14 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"net/http"
 	"reflect"
 	"strconv"
 	"sync"
 	"time"
 
 	goovn "github.com/ebay/go-ovn"
-	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -34,19 +32,21 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+
 	"k8s.io/client-go/informers"
+
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
+	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	ref "k8s.io/client-go/tools/reference"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 )
 
@@ -204,19 +204,11 @@ type Controller struct {
 	// v6HostSubnetsUsed keeps track of number of v6 subnets currently assigned to nodes
 	v6HostSubnetsUsed float64
 
-	// Map of pods that need to be retried, and the timestamp of when they last failed
-	retryPods     map[types.UID]*retryEntry
-	retryPodsLock sync.Mutex
-
-	// channel to indicate we need to retry pods immediately
-	retryPodsChan chan struct{}
-}
-
-type retryEntry struct {
-	pod       *kapi.Pod
-	timeStamp time.Time
-	// whether to include this pod in retry iterations
-	ignore bool
+	// podController
+	pods       listers.PodLister
+	podsSynced cache.InformerSynced
+	podsQueue  workqueue.RateLimitingInterface
+	podsCache  sync.Map
 }
 
 const (
@@ -287,8 +279,6 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		multicastSupport:         config.EnableMulticast,
 		aclLoggingEnabled:        true,
 		joinSwIPManager:          nil,
-		retryPods:                make(map[types.UID]*retryEntry),
-		retryPodsChan:            make(chan struct{}, 1),
 		recorder:                 recorder,
 		ovnNBClient:              ovnNBClient,
 		ovnSBClient:              ovnSBClient,
@@ -318,7 +308,12 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
 	oc.WatchNodes()
 
-	oc.WatchPods()
+	oc.initPodController(oc.watchFactory.PodInformer())
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		oc.runPodController(1, oc.stopChan)
+	}()
 
 	// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
 	oc.WatchNetworkPolicy()
@@ -432,206 +427,6 @@ func (oc *Controller) recordPodEvent(addErr error, pod *kapi.Pod) {
 		klog.V(5).Infof("Posting a %s event for Pod %s/%s", kapi.EventTypeWarning, pod.Namespace, pod.Name)
 		oc.recorder.Eventf(podRef, kapi.EventTypeWarning, "ErrorAddingLogicalPort", addErr.Error())
 	}
-}
-
-// iterateRetryPods checks if any outstanding pods have been waiting for 60 seconds of last known failure
-// then tries to re-add them if so
-// updateAll forces all pods to be attempted to be retried regardless of the 1 minute delay
-func (oc *Controller) iterateRetryPods(updateAll bool) {
-	oc.retryPodsLock.Lock()
-	defer oc.retryPodsLock.Unlock()
-	now := time.Now()
-	for uid, podEntry := range oc.retryPods {
-		if podEntry.ignore {
-			continue
-		}
-		pod := podEntry.pod
-		if !util.PodScheduled(pod) {
-			continue
-		}
-		podTimer := podEntry.timeStamp.Add(time.Minute)
-		if updateAll || now.After(podTimer) {
-			podDesc := fmt.Sprintf("[%s/%s/%s]", pod.UID, pod.Namespace, pod.Name)
-			// it could be that the Pod got deleted, but Pod's DeleteFunc has not been called yet, so don't retry
-			_, err := oc.watchFactory.GetPod(pod.Namespace, pod.Name)
-			if err != nil {
-				if e, ok := err.(*errors.StatusError); ok && e.ErrStatus.Code == http.StatusNotFound {
-					klog.Infof("%s pod not found in the informers cache, not going to retry pod setup", podDesc)
-					delete(oc.retryPods, uid)
-					continue
-				}
-			}
-
-			klog.Infof("%s retry pod setup", podDesc)
-
-			if oc.ensurePod(nil, pod, true) {
-				klog.Infof("%s pod setup successful", podDesc)
-				delete(oc.retryPods, uid)
-			} else {
-				klog.Infof("%s setup retry failed; will try again later", podDesc)
-				oc.retryPods[uid] = &retryEntry{pod, time.Now(), false}
-			}
-		}
-	}
-}
-
-// checkAndDeleteRetryPod deletes a specific entry from the map, if it existed, returns true
-func (oc *Controller) checkAndDeleteRetryPod(uid types.UID) bool {
-	oc.retryPodsLock.Lock()
-	defer oc.retryPodsLock.Unlock()
-	if _, ok := oc.retryPods[uid]; ok {
-		delete(oc.retryPods, uid)
-		return true
-	}
-	return false
-}
-
-// checkAndSkipRetryPod sets a specific entry from the map to be ignored for subsequent retries
-// if it existed, returns true
-func (oc *Controller) checkAndSkipRetryPod(uid types.UID) bool {
-	oc.retryPodsLock.Lock()
-	defer oc.retryPodsLock.Unlock()
-	if entry, ok := oc.retryPods[uid]; ok {
-		entry.ignore = true
-		return true
-	}
-	return false
-}
-
-// unSkipRetryPod ensures a pod is no longer ignored for retry loop
-func (oc *Controller) unSkipRetryPod(pod *kapi.Pod) {
-	oc.retryPodsLock.Lock()
-	defer oc.retryPodsLock.Unlock()
-	if entry, ok := oc.retryPods[pod.UID]; ok {
-		entry.ignore = false
-	}
-}
-
-// initRetryPod tracks a failed pod to potentially retry later
-// initially it is marked as skipped for retry loop (ignore = true)
-func (oc *Controller) initRetryPod(pod *kapi.Pod) {
-	oc.retryPodsLock.Lock()
-	defer oc.retryPodsLock.Unlock()
-	if entry, ok := oc.retryPods[pod.UID]; ok {
-		entry.timeStamp = time.Now()
-	} else {
-		oc.retryPods[pod.UID] = &retryEntry{pod, time.Now(), true}
-	}
-}
-
-// addRetryPods adds multiple pods to retry later
-func (oc *Controller) addRetryPods(pods []kapi.Pod) {
-	oc.retryPodsLock.Lock()
-	defer oc.retryPodsLock.Unlock()
-	for _, pod := range pods {
-		if entry, ok := oc.retryPods[pod.UID]; ok {
-			entry.timeStamp = time.Now()
-		} else {
-			oc.retryPods[pod.UID] = &retryEntry{&pod, time.Now(), false}
-		}
-	}
-}
-
-func exGatewayAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
-	return oldPod.Annotations[routingNamespaceAnnotation] != newPod.Annotations[routingNamespaceAnnotation] ||
-		oldPod.Annotations[routingNetworkAnnotation] != newPod.Annotations[routingNetworkAnnotation] ||
-		oldPod.Annotations[bfdAnnotation] != newPod.Annotations[bfdAnnotation]
-}
-
-func networkStatusAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
-	return oldPod.Annotations[nettypes.NetworkStatusAnnot] != newPod.Annotations[nettypes.NetworkStatusAnnot]
-}
-
-// ensurePod tries to set up a pod. It returns success or failure; failure
-// indicates the pod should be retried later.
-func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
-	// Try unscheduled pods later
-	if !util.PodScheduled(pod) {
-		return false
-	}
-
-	if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
-		// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
-		// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
-		// care of updating the exgw updates
-		oc.deletePodExternalGW(oldPod)
-	}
-
-	if util.PodWantsNetwork(pod) && addPort {
-		if err := oc.addLogicalPort(pod); err != nil {
-			klog.Errorf(err.Error())
-			oc.recordPodEvent(err, pod)
-			return false
-		}
-	} else {
-		if err := oc.addPodExternalGW(pod); err != nil {
-			klog.Errorf(err.Error())
-			oc.recordPodEvent(err, pod)
-			return false
-		}
-	}
-
-	return true
-}
-
-func (oc *Controller) requestRetryPods() {
-	select {
-	case oc.retryPodsChan <- struct{}{}:
-		klog.V(5).Infof("Iterate retry pods requested")
-	default:
-		klog.V(5).Infof("Iterate retry pods already requested")
-	}
-}
-
-// WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
-func (oc *Controller) WatchPods() {
-	go func() {
-		// track the retryPods map and every 30 seconds check if any pods need to be retried
-		for {
-			select {
-			case <-time.After(30 * time.Second):
-				oc.iterateRetryPods(false)
-			case <-oc.retryPodsChan:
-				oc.iterateRetryPods(true)
-			case <-oc.stopChan:
-				return
-			}
-		}
-	}()
-
-	start := time.Now()
-	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			pod := obj.(*kapi.Pod)
-			oc.initRetryPod(pod)
-			if !oc.ensurePod(nil, pod, true) {
-				oc.unSkipRetryPod(pod)
-				return
-			}
-			oc.checkAndDeleteRetryPod(pod.UID)
-		},
-		UpdateFunc: func(old, newer interface{}) {
-			oldPod := old.(*kapi.Pod)
-			pod := newer.(*kapi.Pod)
-			if !oc.ensurePod(oldPod, pod, oc.checkAndSkipRetryPod(pod.UID)) {
-				// unskip failed pod for next retry iteration
-				oc.unSkipRetryPod(pod)
-				return
-			}
-			oc.checkAndDeleteRetryPod(pod.UID)
-		},
-		DeleteFunc: func(obj interface{}) {
-			pod := obj.(*kapi.Pod)
-			oc.checkAndDeleteRetryPod(pod.UID)
-			if !util.PodWantsNetwork(pod) {
-				oc.deletePodExternalGW(pod)
-				return
-			}
-			// deleteLogicalPort will take care of removing exgw for ovn networked pods
-			oc.deleteLogicalPort(pod)
-		},
-	}, oc.syncPods)
-	klog.Infof("Bootstrapping existing pods and cleaning stale pods took %v", time.Since(start))
 }
 
 // WatchNetworkPolicy starts the watching of network policy resource and calls
@@ -931,10 +726,6 @@ func (oc *Controller) WatchNodes() {
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			if noHostSubnet := noHostSubnet(node); noHostSubnet {
-				err := oc.lsManager.AddNoHostSubnetNode(node.Name)
-				if err != nil {
-					klog.Errorf("Error creating logical switch cache for node %s: %v", node.Name, err)
-				}
 				return
 			}
 
@@ -963,14 +754,20 @@ func (oc *Controller) WatchNodes() {
 				gatewaysFailed.Store(node.Name, true)
 			}
 
-			// ensure pods that already exist on this node have their logical ports created
-			options := metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String()}
-			pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
+			// retry pods scheduled to the node that may have failed because the node's
+			// OVN resources weren't set up yet
+			pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), metav1.ListOptions{
+				FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String(),
+			})
 			if err != nil {
 				klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
 			} else {
-				oc.addRetryPods(pods.Items)
-				oc.requestRetryPods()
+				for _, pod := range pods.Items {
+					key, err := cache.MetaNamespaceKeyFunc(pod)
+					if err == nil {
+						oc.podsQueue.Add(key)
+					}
+				}
 			}
 
 		},

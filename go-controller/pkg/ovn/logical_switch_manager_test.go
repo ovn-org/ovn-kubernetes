@@ -83,25 +83,6 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("manages no host subnet nodes correctly", func() {
-			app.Action = func(ctx *cli.Context) error {
-				_, err := config.InitConfig(ctx, fexec, nil)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				testNode := testNodeSubnetData{
-					nodeName: "testNode1",
-					subnets:  []string{},
-				}
-
-				err = lsManager.AddNode(testNode.nodeName, ovntest.MustParseIPNets(testNode.subnets...))
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				noHostSubnet := lsManager.IsNonHostSubnetSwitch(testNode.nodeName)
-				gomega.Expect(noHostSubnet).To(gomega.BeTrue())
-				return nil
-			}
-			err := app.Run([]string{app.Name})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		})
-
 		ginkgo.It("handles updates to the host subnets correctly", func() {
 			app.Action = func(ctx *cli.Context) error {
 				_, err := config.InitConfig(ctx, fexec, nil)

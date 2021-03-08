@@ -180,15 +180,15 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 
 // deletePodExternalGW detects if a given pod is acting as an external GW and removes all routes in all namespaces
 // associated with that pod
-func (oc *Controller) deletePodExternalGW(pod *kapi.Pod) {
-	podRoutingNamespaceAnno := pod.Annotations[routingNamespaceAnnotation]
+func (oc *Controller) deletePodExternalGW(pe *podCacheEntry) {
+	podRoutingNamespaceAnno := pe.Annotations[routingNamespaceAnnotation]
 	if podRoutingNamespaceAnno == "" {
 		return
 	}
-	klog.Infof("Deleting routes for external gateway pod: %s, for namespace(s) %s", pod.Name,
+	klog.Infof("Deleting routes for external gateway pod: %s, for namespace(s) %s", pe.Name,
 		podRoutingNamespaceAnno)
 	for _, namespace := range strings.Split(podRoutingNamespaceAnno, ",") {
-		oc.deletePodGWRoutesForNamespace(pod.Name, namespace)
+		oc.deletePodGWRoutesForNamespace(pe.Name, namespace)
 	}
 }
 

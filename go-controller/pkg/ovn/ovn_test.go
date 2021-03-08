@@ -92,8 +92,20 @@ func (o *FakeOVN) startWithDBSetup(ctx *cli.Context, dbSetup libovsdbtest.TestSe
 	o.start(ctx, objects...)
 }
 
-func (o *FakeOVN) restart() {
+func (o *FakeOVN) InitAndRunPodController(wg *sync.WaitGroup) {
+	o.controller.initPodController(o.watcher.PodInformer())
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		o.controller.runPodController(1, o.stopChan)
+	}()
+}
+
+func (o *FakeOVN) restart(wg *sync.WaitGroup) {
 	o.shutdown()
+	if wg != nil {
+		wg.Wait()
+	}
 	o.init()
 }
 

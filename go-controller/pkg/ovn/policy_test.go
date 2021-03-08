@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -174,14 +175,14 @@ func eventuallyExpectNoAddressSets(fakeOvn *FakeOVN, networkPolicy *knet.Network
 	}
 }
 
-func expectAddressSetsWithIP(fakeOvn *FakeOVN, networkPolicy *knet.NetworkPolicy, ip string) {
+func eventuallyExpectAddressSetsWithIP(fakeOvn *FakeOVN, networkPolicy *knet.NetworkPolicy, ip string) {
 	for i := range networkPolicy.Spec.Ingress {
 		asName := getAddressSetName(networkPolicy.Namespace, networkPolicy.Name, knet.PolicyTypeIngress, i)
-		fakeOvn.asf.ExpectAddressSetWithIPs(asName, []string{ip})
+		fakeOvn.asf.EventuallyExpectAddressSetWithIPs(asName, []string{ip})
 	}
 	for i := range networkPolicy.Spec.Egress {
 		asName := getAddressSetName(networkPolicy.Namespace, networkPolicy.Name, knet.PolicyTypeEgress, i)
-		fakeOvn.asf.ExpectAddressSetWithIPs(asName, []string{ip})
+		fakeOvn.asf.EventuallyExpectAddressSetWithIPs(asName, []string{ip})
 	}
 }
 
@@ -270,6 +271,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 		app     *cli.App
 		fakeOvn *FakeOVN
 		fExec   *ovntest.FakeExec
+		wg      sync.WaitGroup
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -285,10 +287,12 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 		fExec = ovntest.NewLooseCompareFakeExec()
 		fakeOvn = NewFakeOVN(fExec)
 		ovntest.ResetNumMockExecutions()
+		wg = sync.WaitGroup{}
 	})
 
 	ginkgo.AfterEach(func() {
 		fakeOvn.shutdown()
+		wg.Wait()
 	})
 
 	ginkgo.Context("during execution", func() {
@@ -395,7 +399,8 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 						tPod.populateLogicalSwitchCache(fakeOvn)
 					}
 					fakeOvn.controller.WatchNamespaces()
-					fakeOvn.controller.WatchPods()
+					fakeOvn.InitAndRunPodController(&wg)
+
 					ns, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(
 						context.TODO(), namespace1.Name, metav1.GetOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -463,7 +468,8 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 						tPod.baseCmds(fExec)
 					}
 					fakeOvn.controller.WatchNamespaces()
-					fakeOvn.controller.WatchPods()
+					fakeOvn.InitAndRunPodController(&wg)
+
 					ns, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(
 						context.TODO(), namespace1.Name, metav1.GetOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -487,7 +493,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 					}
 
 					gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-					gomega.Eventually(ovntest.GetNumMockExecutions, 2).Should(gomega.BeNumerically("==", 7), fExec.ErrorDesc)
+					gomega.Eventually(ovntest.GetNumMockExecutions, 2).Should(gomega.BeNumerically(">=", 7), fExec.ErrorDesc)
 					fakeOvn.asf.ExpectAddressSetWithIPs(namespace1.Name, tPodIPs)
 
 					for _, tPod := range tPods {
@@ -498,8 +504,8 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 					}
 
 					gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-					gomega.Eventually(ovntest.GetNumMockExecutions, 2).Should(gomega.BeNumerically("==", 9), fExec.ErrorDesc)
-					fakeOvn.asf.ExpectEmptyAddressSet(namespace1.Name)
+					gomega.Eventually(ovntest.GetNumMockExecutions, 2).Should(gomega.BeNumerically(">=", 9), fExec.ErrorDesc)
+					fakeOvn.asf.EventuallyExpectEmptyAddressSet(namespace1.Name)
 					return nil
 				}
 
@@ -520,6 +526,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 		app     *cli.App
 		fakeOvn *FakeOVN
 		fExec   *ovntest.FakeExec
+		wg      sync.WaitGroup
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -532,10 +539,12 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 		fExec = ovntest.NewLooseCompareFakeExec()
 		fakeOvn = NewFakeOVN(fExec)
+		wg = sync.WaitGroup{}
 	})
 
 	ginkgo.AfterEach(func() {
 		fakeOvn.shutdown()
+		wg.Wait()
 	})
 
 	ginkgo.Context("on startup", func() {
@@ -753,11 +762,11 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.InitAndRunPodController(&wg)
 				fakeOvn.controller.WatchNetworkPolicy()
 
-				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
-				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
+				eventuallyExpectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
+				fakeOvn.asf.EventuallyExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
 
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -851,12 +860,12 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.InitAndRunPodController(&wg)
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName1)
-				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
-				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName2, []string{nPodTest.podIP})
+				eventuallyExpectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
+				fakeOvn.asf.EventuallyExpectAddressSetWithIPs(namespaceName2, []string{nPodTest.podIP})
 
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -967,7 +976,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.InitAndRunPodController(&wg)
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				ginkgo.By("Creating a network policy that applies to a pod")
@@ -975,7 +984,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
+				fakeOvn.asf.EventuallyExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
 
 				// assert that pod is in the default-deny portgroup
 
@@ -1107,13 +1116,13 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.InitAndRunPodController(&wg)
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
+				fakeOvn.asf.EventuallyExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
 
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, "")
 
@@ -1270,11 +1279,11 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.InitAndRunPodController(&wg)
 				fakeOvn.controller.WatchNetworkPolicy()
 
-				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
-				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
+				eventuallyExpectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
+				fakeOvn.asf.EventuallyExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
 
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1374,12 +1383,12 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.InitAndRunPodController(&wg)
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName1)
-				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
-				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName2, []string{nPodTest.podIP})
+				eventuallyExpectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
+				fakeOvn.asf.EventuallyExpectAddressSetWithIPs(namespaceName2, []string{nPodTest.podIP})
 
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1480,12 +1489,12 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.InitAndRunPodController(&wg)
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName1)
-				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
-				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName2, []string{nPodTest.podIP})
+				eventuallyExpectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
+				fakeOvn.asf.EventuallyExpectAddressSetWithIPs(namespaceName2, []string{nPodTest.podIP})
 
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1577,13 +1586,13 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.InitAndRunPodController(&wg)
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
+				fakeOvn.asf.EventuallyExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
 
 				err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Delete(context.TODO(), networkPolicy.Name, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())

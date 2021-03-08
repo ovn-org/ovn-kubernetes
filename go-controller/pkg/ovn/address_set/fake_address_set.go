@@ -133,6 +133,43 @@ func (f *FakeAddressSetFactory) ExpectAddressSetWithIPs(name string, ips []strin
 	gomega.Expect(lenAddressSet).To(gomega.Equal(len(ips)))
 }
 
+// EventuallyExpectAddressSetWithIPs ensures the named address set eventually exists with the given set of IPs
+func (f *FakeAddressSetFactory) EventuallyExpectAddressSetWithIPs(name string, ips []string) {
+	name4, name6 := MakeAddressSetName(name)
+	gomega.Eventually(func() bool {
+		var lenAddressSet int
+		as4 := f.getAddressSet(name4)
+		if as4 != nil {
+			defer as4.Unlock()
+			lenAddressSet = lenAddressSet + len(as4.ips)
+		}
+		as6 := f.getAddressSet(name6)
+		if as6 != nil {
+			defer as6.Unlock()
+			lenAddressSet = lenAddressSet + len(as6.ips)
+		}
+
+		for _, ip := range ips {
+			if utilnet.IsIPv6(net.ParseIP(ip)) {
+				if as6 == nil {
+					return false
+				}
+				if _, ok := as6.ips[ip]; !ok {
+					return false
+				}
+			} else {
+				if as4 == nil {
+					return false
+				}
+				if _, ok := as4.ips[ip]; !ok {
+					return false
+				}
+			}
+		}
+		return lenAddressSet == len(ips)
+	}, 2).Should(gomega.BeTrue())
+}
+
 // ExpectEmptyAddressSet ensures the named address set exists with no IPs
 func (f *FakeAddressSetFactory) ExpectEmptyAddressSet(name string) {
 	f.ExpectAddressSetWithIPs(name, nil)
@@ -140,15 +177,21 @@ func (f *FakeAddressSetFactory) ExpectEmptyAddressSet(name string) {
 
 // EventuallyExpectEmptyAddressSet ensures the named address set eventually exists with no IPs
 func (f *FakeAddressSetFactory) EventuallyExpectEmptyAddressSet(name string) {
-	name4, _ := MakeAddressSetName(name)
+	name4, name6 := MakeAddressSetName(name)
 	gomega.Eventually(func() bool {
-		as := f.getAddressSet(name4)
-		if as == nil {
-			return false
+		var lenAddressSet int
+		as4 := f.getAddressSet(name4)
+		if as4 != nil {
+			defer as4.Unlock()
+			lenAddressSet = lenAddressSet + len(as4.ips)
 		}
-		defer as.Unlock()
-		return len(as.ips) == 0
-	}).Should(gomega.BeTrue())
+		as6 := f.getAddressSet(name6)
+		if as6 != nil {
+			defer as6.Unlock()
+			lenAddressSet = lenAddressSet + len(as6.ips)
+		}
+		return lenAddressSet == 0
+	}, 2).Should(gomega.BeTrue())
 }
 
 // EventuallyExpectNoAddressSet ensures the named address set eventually does not exist

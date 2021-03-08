@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	goovn "github.com/ebay/go-ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -16,6 +17,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -726,16 +728,18 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 		return
 	}
 
-	// Get the logical port info
-	logicalPort := podLogicalPortName(pod)
-	portInfo, err := oc.logicalPortCache.get(logicalPort)
-	if err != nil {
+	// Wait for the logical port info
+	var portInfo *lpInfo
+	if err := wait.PollImmediate(30*time.Millisecond, 10*time.Second, func() (bool, error) {
+		portInfo, _ = oc.logicalPortCache.get(podLogicalPortName(pod))
+		return portInfo != nil, nil
+	}); err != nil {
 		klog.Errorf(err.Error())
 		return
 	}
 
 	// If we've already processed this pod, shortcut.
-	if _, ok := np.localPods.Load(logicalPort); ok {
+	if _, ok := np.localPods.Load(portInfo.name); ok {
 		return
 	}
 
@@ -751,14 +755,12 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 		return
 	}
 
-	err = addToPortGroup(oc.ovnNBClient, np.portGroupName, portInfo)
-
-	if err != nil {
+	if err := addToPortGroup(oc.ovnNBClient, np.portGroupName, portInfo); err != nil {
 		klog.Errorf("Failed to add logicalPort %s to portGroup %s (%v)",
-			logicalPort, np.portGroupUUID, err)
+			portInfo.name, np.portGroupUUID, err)
 	}
 
-	np.localPods.Store(logicalPort, portInfo)
+	np.localPods.Store(portInfo.name, portInfo)
 }
 
 // handleLocalPodSelectorSetPods is a more efficient way of
@@ -791,10 +793,13 @@ func (oc *Controller) handleLocalPodSelectorSetPods(
 			continue
 		}
 
-		portInfo, err := oc.logicalPortCache.get(podLogicalPortName(pod))
-		// pod is not yet handled
-		// no big deal, we'll get the update when it is.
-		if err != nil {
+		var portInfo *lpInfo
+		if err := wait.PollImmediate(30*time.Millisecond, 10*time.Second, func() (bool, error) {
+			portInfo, _ = oc.logicalPortCache.get(podLogicalPortName(pod))
+			return portInfo != nil, nil
+		}); err != nil {
+			// pod is not yet handled
+			// no big deal, we'll get the update when it is.
 			continue
 		}
 

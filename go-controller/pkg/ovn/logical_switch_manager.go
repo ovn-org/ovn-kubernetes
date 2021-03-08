@@ -18,9 +18,8 @@ import (
 // subnet allocations (v4 and v6) as well as the IPAM allocator instances for each
 // subnet managed for this node
 type logicalSwitchInfo struct {
-	hostSubnets  []*net.IPNet
-	ipams        []ipam.Interface
-	noHostSubnet bool
+	hostSubnets []*net.IPNet
+	ipams       []ipam.Interface
 }
 
 type ipamFactoryFunc func(*net.IPNet) (ipam.Interface, error)
@@ -107,21 +106,11 @@ func (manager *logicalSwitchManager) AddNode(nodeName string, hostSubnets []*net
 		ipams = append(ipams, ipam)
 	}
 	manager.cache[nodeName] = logicalSwitchInfo{
-		hostSubnets:  hostSubnets,
-		ipams:        ipams,
-		noHostSubnet: len(hostSubnets) == 0,
+		hostSubnets: hostSubnets,
+		ipams:       ipams,
 	}
 
 	return nil
-}
-
-// AddNoHostSubnetNode adds/updates a node without any host subnets
-// to the logical switch manager
-func (manager *logicalSwitchManager) AddNoHostSubnetNode(nodeName string) error {
-	// setting the hostSubnets slice argument to nil in the cache means an object
-	// exists for the switch but it was not assigned a hostSubnet by ovn-kubernetes
-	// this will be true for nodes that are marked as host-subnet only.
-	return manager.AddNode(nodeName, nil)
 }
 
 // Remove a switch/node from the the logical switch manager
@@ -131,30 +120,24 @@ func (manager *logicalSwitchManager) DeleteNode(nodeName string) {
 	delete(manager.cache, nodeName)
 }
 
-// Given a switch name, checks if the switch is a noHostSubnet switch
-func (manager *logicalSwitchManager) IsNonHostSubnetSwitch(nodeName string) bool {
-	manager.RLock()
-	defer manager.RUnlock()
-	lsi, ok := manager.cache[nodeName]
-	return ok && lsi.noHostSubnet
-}
-
-// Given a switch name, get all its host-subnets
+// Given a switch name, return all its host-subnets and whether we expect the
+// switch to have none (eg true if it is a "non-hostsubnet node"
 func (manager *logicalSwitchManager) GetSwitchSubnets(nodeName string) []*net.IPNet {
 	manager.RLock()
 	defer manager.RUnlock()
 	lsi, ok := manager.cache[nodeName]
+	if !ok {
+		return nil
+	}
+
 	// make a deep-copy of the underlying slice and return so that there is no
 	// resource contention
-	if ok && len(lsi.hostSubnets) > 0 {
-		subnets := make([]*net.IPNet, len(lsi.hostSubnets))
-		for i, hsn := range lsi.hostSubnets {
-			subnet := *hsn
-			subnets[i] = &subnet
-		}
-		return subnets
+	subnets := make([]*net.IPNet, len(lsi.hostSubnets))
+	for i, hsn := range lsi.hostSubnets {
+		subnet := *hsn
+		subnets[i] = &subnet
 	}
-	return nil
+	return subnets
 }
 
 // AllocateIPs will block off IPs in the ipnets slice as already allocated
