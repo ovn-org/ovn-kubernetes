@@ -17,9 +17,15 @@ import (
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
 	egressipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions"
-	apiextensionsapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	apiextensionsapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextensionsscheme "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/scheme"
 	apiextensionsinformerfactory "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
+
+	dnsobjectapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/dnsobject/v1"
+	dnsobjectclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/dnsobject/v1/apis/clientset/versioned"
+	dnsobjectscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/dnsobject/v1/apis/clientset/versioned/scheme"
+	dnsobjectinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/dnsobject/v1/apis/informers/externalversions"
+	apiextensionslister "k8s.io/apiextensions-apiserver/pkg/client/listers/apiextensions/v1"
 
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
@@ -42,12 +48,14 @@ type WatchFactory struct {
 	// requirements with atomic accesses
 	handlerCounter uint64
 
-	iFactory    informerfactory.SharedInformerFactory
-	eipFactory  egressipinformerfactory.SharedInformerFactory
-	efFactory   egressfirewallinformerfactory.SharedInformerFactory
-	efClientset egressfirewallclientset.Interface
-	crdFactory  apiextensionsinformerfactory.SharedInformerFactory
-	informers   map[reflect.Type]*informer
+	iFactory           informerfactory.SharedInformerFactory
+	eipFactory         egressipinformerfactory.SharedInformerFactory
+	efFactory          egressfirewallinformerfactory.SharedInformerFactory
+	efClientset        egressfirewallclientset.Interface
+	dnsObjectClientset dnsobjectclientset.Interface
+	dnsObjectFactory   dnsobjectinformerfactory.SharedInformerFactory
+	crdFactory         apiextensionsinformerfactory.SharedInformerFactory
+	informers          map[reflect.Type]*informer
 
 	stopChan               chan struct{}
 	egressFirewallStopChan chan struct{}
@@ -79,6 +87,7 @@ var (
 	egressFirewallType reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
 	crdType            reflect.Type = reflect.TypeOf(&apiextensionsapi.CustomResourceDefinition{})
 	egressIPType       reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
+	dnsObjectType      reflect.Type = reflect.TypeOf(&dnsobjectapi.DNSObject{})
 )
 
 // NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
@@ -90,12 +99,13 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	wf := &WatchFactory{
-		iFactory:    informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		eipFactory:  egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
-		efClientset: ovnClientset.EgressFirewallClient,
-		crdFactory:  apiextensionsinformerfactory.NewSharedInformerFactory(ovnClientset.APIExtensionsClient, resyncInterval),
-		informers:   make(map[reflect.Type]*informer),
-		stopChan:    make(chan struct{}),
+		iFactory:           informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		eipFactory:         egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
+		efClientset:        ovnClientset.EgressFirewallClient,
+		dnsObjectClientset: ovnClientset.DNSObjectClient,
+		crdFactory:         apiextensionsinformerfactory.NewSharedInformerFactory(ovnClientset.APIExtensionsClient, resyncInterval),
+		informers:          make(map[reflect.Type]*informer),
+		stopChan:           make(chan struct{}),
 	}
 	var err error
 
@@ -149,7 +159,7 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[crdType], err = newInformer(crdType, wf.crdFactory.Apiextensions().V1beta1().CustomResourceDefinitions().Informer())
+	wf.informers[crdType], err = newInformer(crdType, wf.crdFactory.Apiextensions().V1().CustomResourceDefinitions().Informer())
 	if err != nil {
 		return nil, err
 	}
@@ -274,12 +284,28 @@ func (wf *WatchFactory) InitializeEgressFirewallWatchFactory() error {
 			return fmt.Errorf("error in syncing cache for %v informer", oType)
 		}
 	}
+	err = dnsobjectapi.AddToScheme(dnsobjectscheme.Scheme)
+	if err != nil {
+		return err
+	}
+	wf.dnsObjectFactory = dnsobjectinformerfactory.NewSharedInformerFactory(wf.dnsObjectClientset, resyncInterval)
+	wf.informers[dnsObjectType], err = newInformer(dnsObjectType, wf.dnsObjectFactory.K8s().V1().DNSObjects().Informer())
+	if err != nil {
+		return err
+	}
+	wf.dnsObjectFactory.Start(wf.stopChan)
+	for oType, synced := range wf.dnsObjectFactory.WaitForCacheSync(wf.stopChan) {
+		if !synced {
+			return fmt.Errorf("error in syncing cache for %v informer", oType)
+		}
+	}
 	return nil
 }
 
 func (wf *WatchFactory) ShutdownEgressFirewallWatchFactory() {
 	close(wf.egressFirewallStopChan)
 	wf.informers[egressFirewallType].shutdown()
+	wf.informers[dnsObjectType].shutdown()
 }
 
 func (wf *WatchFactory) Shutdown() {
@@ -320,6 +346,10 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 	case egressFirewallType:
 		if egressFirewall, ok := obj.(*egressfirewallapi.EgressFirewall); ok {
 			return &egressFirewall.ObjectMeta, nil
+		}
+	case dnsObjectType:
+		if dnsObject, ok := obj.(*dnsobjectapi.DNSObject); ok {
+			return &dnsObject.ObjectMeta, nil
 		}
 	case egressIPType:
 		if egressIP, ok := obj.(*egressipapi.EgressIP); ok {
@@ -434,6 +464,11 @@ func (wf *WatchFactory) RemovePolicyHandler(handler *Handler) {
 	wf.removeHandler(policyType, handler)
 }
 
+// AddDNSObjectHandler adds a handler function that will be executed on dnsObjects changes
+func (wf *WatchFactory) AddDNSObjectHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(dnsObjectType, "", nil, handlerFuncs, processExisting)
+}
+
 // AddEgressFirewallHandler adds a handler function that will be executed on EgressFirewall object changes
 func (wf *WatchFactory) AddEgressFirewallHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(egressFirewallType, "", nil, handlerFuncs, processExisting)
@@ -442,6 +477,11 @@ func (wf *WatchFactory) AddEgressFirewallHandler(handlerFuncs cache.ResourceEven
 // RemoveEgressFirewallHandler removes an EgressFirewall object event handler function
 func (wf *WatchFactory) RemoveEgressFirewallHandler(handler *Handler) {
 	wf.removeHandler(egressFirewallType, handler)
+}
+
+// RemoveDNSObjectHandler removes an DNSObject object event handler function
+func (wf *WatchFactory) RemoveDNSObjectHandler(handler *Handler) {
+	wf.removeHandler(dnsObjectType, handler)
 }
 
 // AddCRDHandler adds a handler function that will be executed on CRD obje changes
@@ -546,6 +586,11 @@ func (wf *WatchFactory) GetNamespace(name string) (*kapi.Namespace, error) {
 func (wf *WatchFactory) GetNamespaces() ([]*kapi.Namespace, error) {
 	namespaceLister := wf.informers[namespaceType].lister.(listers.NamespaceLister)
 	return namespaceLister.List(labels.Everything())
+}
+
+func (wf *WatchFactory) GetCRDS() ([]*apiextensionsapi.CustomResourceDefinition, error) {
+	crdLister := wf.informers[crdType].lister.(apiextensionslister.CustomResourceDefinitionLister)
+	return crdLister.List(labels.Everything())
 }
 
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {

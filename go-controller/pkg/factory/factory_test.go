@@ -22,7 +22,10 @@ import (
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	apiextensions "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	dnsobject "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/dnsobject/v1"
+	dnsobjectfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/dnsobject/v1/apis/clientset/versioned/fake"
+
+	apiextensions "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -126,6 +129,21 @@ func newEgressFirewall(name, namespace string) *egressfirewall.EgressFirewall {
 	}
 }
 
+func newDNSObject(name string) *dnsobject.DNSObject {
+	return &dnsobject.DNSObject{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+			UID:  types.UID(name),
+			Labels: map[string]string{
+				"name": name,
+			},
+		},
+		Spec: dnsobject.DNSObjectSpec{
+			DNSObjectEntries: make(map[string]dnsobject.DNSObjectEntry),
+		},
+	}
+}
+
 func newEgressIP(name, namespace string) *egressip.EgressIP {
 	return &egressip.EgressIP{
 		ObjectMeta: newObjectMeta(name, namespace),
@@ -158,6 +176,13 @@ func objSetup(c *fake.Clientset, objType string, listFn func(core.Action) (bool,
 }
 
 func egressFirewallObjSetup(c *egressfirewallfake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
+	w := watch.NewFake()
+	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
+	c.AddReactor("list", objType, listFn)
+	return w
+}
+
+func dnsObjectObjSetup(c *dnsobjectfake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
 	w := watch.NewFake()
 	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
 	c.AddReactor("list", objType, listFn)
@@ -202,11 +227,12 @@ var _ = Describe("Watch Factory Operations", func() {
 		fakeClient                                *fake.Clientset
 		egressIPFakeClient                        *egressipfake.Clientset
 		egressFirewallFakeClient                  *egressfirewallfake.Clientset
+		dnsObjectFakeClient                       *dnsobjectfake.Clientset
 		crdFakeClient                             *apiextensionsfake.Clientset
 		podWatch, namespaceWatch, nodeWatch       *watch.FakeWatcher
 		policyWatch, endpointsWatch, serviceWatch *watch.FakeWatcher
-		egressFirewallWatch, crdWatch             *watch.FakeWatcher
-		egressIPWatch                             *watch.FakeWatcher
+		egressFirewallWatch, dnsObjectWatch       *watch.FakeWatcher
+		crdWatch, egressIPWatch                   *watch.FakeWatcher
 		pods                                      []*v1.Pod
 		namespaces                                []*v1.Namespace
 		nodes                                     []*v1.Node
@@ -216,6 +242,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		egressIPs                                 []*egressip.EgressIP
 		wf                                        *WatchFactory
 		egressFirewalls                           []*egressfirewall.EgressFirewall
+		dnsObjects                                []*dnsobject.DNSObject
 		crds                                      []*apiextensions.CustomResourceDefinition
 		err                                       error
 	)
@@ -228,6 +255,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		fakeClient = &fake.Clientset{}
 		egressFirewallFakeClient = &egressfirewallfake.Clientset{}
+		dnsObjectFakeClient = &dnsobjectfake.Clientset{}
 		crdFakeClient = &apiextensionsfake.Clientset{}
 		egressIPFakeClient = &egressipfake.Clientset{}
 
@@ -235,6 +263,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			KubeClient:           fakeClient,
 			EgressIPClient:       egressIPFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
+			DNSObjectClient:      dnsObjectFakeClient,
 			APIExtensionsClient:  crdFakeClient,
 		}
 
@@ -296,6 +325,14 @@ var _ = Describe("Watch Factory Operations", func() {
 		egressFirewallWatch = egressFirewallObjSetup(egressFirewallFakeClient, "egressfirewalls", func(core.Action) (bool, runtime.Object, error) {
 			obj := &egressfirewall.EgressFirewallList{}
 			for _, p := range egressFirewalls {
+				obj.Items = append(obj.Items, *p)
+			}
+			return true, obj, nil
+		})
+		dnsObjects = make([]*dnsobject.DNSObject, 0)
+		dnsObjectWatch = dnsObjectObjSetup(dnsObjectFakeClient, "dnsobjects", func(core.Action) (bool, runtime.Object, error) {
+			obj := &dnsobject.DNSObjectList{}
+			for _, p := range dnsObjects {
 				obj.Items = append(obj.Items, *p)
 			}
 			return true, obj, nil
@@ -381,6 +418,10 @@ var _ = Describe("Watch Factory Operations", func() {
 			crds = append(crds, newCRD("myCRD", ""))
 			testExisting(crdType, "", nil)
 		})
+		It("is called for each existing DNSObject", func() {
+			dnsObjects = append(dnsObjects, newDNSObject("myDNSObject"))
+			testExisting(dnsObjectType, "", nil)
+		})
 		It("is called for each existing egressIP", func() {
 			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
 			testExisting(egressIPType, "", nil)
@@ -465,6 +506,11 @@ var _ = Describe("Watch Factory Operations", func() {
 			crds = append(crds, newCRD("crd1", ""))
 			crds = append(crds, newCRD("crd2", ""))
 			testExisting(crdType)
+		})
+		It("calls ADD for each existing DNSObject", func() {
+			dnsObjects = append(dnsObjects, newDNSObject("node1"))
+			dnsObjects = append(dnsObjects, newDNSObject("node2"))
+			testExisting(dnsObjectType)
 		})
 		It("calls ADD for each existing egressIP", func() {
 			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
@@ -1076,6 +1122,41 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(c.getDeleted, 2).Should(Equal(1))
 
 		wf.RemoveEgressFirewallHandler(h)
+	})
+	It("responds to dnsObject add/update/delete events", func() {
+		wf, err = NewMasterWatchFactory(ovnClientset)
+		err = wf.InitializeEgressFirewallWatchFactory()
+		Expect(err).NotTo(HaveOccurred())
+
+		added := newDNSObject("myDNSObject")
+		h, c := addHandler(wf, dnsObjectType, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				dnsObject := obj.(*dnsobject.DNSObject)
+				Expect(reflect.DeepEqual(dnsObject, added)).To(BeTrue())
+			},
+			UpdateFunc: func(old, new interface{}) {
+				newDNSObject := new.(*dnsobject.DNSObject)
+				Expect(reflect.DeepEqual(newDNSObject, added)).To(BeTrue())
+
+			},
+			DeleteFunc: func(obj interface{}) {
+				dnsObject := obj.(*dnsobject.DNSObject)
+				Expect(reflect.DeepEqual(dnsObject, added)).To(BeTrue())
+			},
+		})
+
+		dnsObjects = append(dnsObjects, added)
+		dnsObjectWatch.Add(added)
+		Eventually(c.getAdded, 2).Should(Equal(1))
+		added.Spec.DNSObjectEntries["www.test.com"] = dnsobject.DNSObjectEntry{
+			IPAddresses: []string{"1.1.1.1"},
+		}
+		dnsObjectWatch.Modify(added)
+		Eventually(c.getUpdated, 2).Should(Equal(1))
+		dnsObjects = dnsObjects[:0]
+		dnsObjectWatch.Delete(added)
+		Eventually(c.getDeleted, 2).Should(Equal(1))
+		wf.RemoveDNSObjectHandler(h)
 	})
 	It("responds to crd add/update/delete events", func() {
 		wf, err = NewMasterWatchFactory(ovnClientset)

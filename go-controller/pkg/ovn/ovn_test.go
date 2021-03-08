@@ -14,6 +14,8 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
 
+	dnsobject "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/dnsobject/v1"
+	dnsobjectfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/dnsobject/v1/apis/clientset/versioned/fake"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -55,12 +57,15 @@ func NewFakeOVN(fexec *ovntest.FakeExec) *FakeOVN {
 func (o *FakeOVN) start(ctx *cli.Context, objects ...runtime.Object) {
 	egressIPObjects := []runtime.Object{}
 	egressFirewallObjects := []runtime.Object{}
+	dnsObjectObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	for _, object := range objects {
 		if _, isEgressIPObject := object.(*egressip.EgressIPList); isEgressIPObject {
 			egressIPObjects = append(egressIPObjects, object)
 		} else if _, isEgressFirewallObject := object.(*egressfirewall.EgressFirewallList); isEgressFirewallObject {
 			egressFirewallObjects = append(egressFirewallObjects, object)
+		} else if _, isDNSObjectObject := object.(*dnsobject.DNSObjectList); isDNSObjectObject {
+			dnsObjectObjects = append(dnsObjectObjects, object)
 		} else {
 			v1Objects = append(v1Objects, object)
 		}
@@ -71,6 +76,7 @@ func (o *FakeOVN) start(ctx *cli.Context, objects ...runtime.Object) {
 		KubeClient:           fake.NewSimpleClientset(v1Objects...),
 		EgressIPClient:       egressipfake.NewSimpleClientset(egressIPObjects...),
 		EgressFirewallClient: egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
+		DNSObjectClient:      dnsobjectfake.NewSimpleClientset(dnsObjectObjects...),
 		APIExtensionsClient:  apiextensionsfake.NewSimpleClientset(),
 	}
 	o.init()

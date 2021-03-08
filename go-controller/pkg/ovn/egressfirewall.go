@@ -10,6 +10,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -24,6 +25,18 @@ const (
 	egressFirewallAddError         = "EgressFirewall Rules not correctly added"
 	egressFirewallUpdateError      = "EgressFirewall Rules not correctly updated"
 )
+
+type dnsInformation struct {
+	Namespaces map[string]struct{}
+	as         addressset.AddressSet
+	// stores a map of node names that reported each IP address
+	// Keep this information because more then one node can resolve
+	// a dnsName to the same IP address and if it is only removed from one Node
+	// cannot remove from the whole address set
+
+	//by using a map with empty struct makes it easier to find the node names as needed
+	ipNodes map[string]map[string]struct{}
+}
 
 type egressFirewall struct {
 	name        string
@@ -174,22 +187,29 @@ func (oc *Controller) updateEgressFirewall(oldEgressFirewall, newEgressFirewall 
 
 func (oc *Controller) deleteEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall) error {
 	klog.Infof("Deleting egress Firewall %s in namespace %s", egressFirewall.Name, egressFirewall.Namespace)
-	deleteDNS := false
+	//deleteDNS := false
 
 	nsInfo := oc.getNamespaceLocked(egressFirewall.Namespace)
 	if nsInfo != nil {
 		// clear it so an error does not prevent future egressFirewalls
 		for _, rule := range nsInfo.egressFirewallPolicy.egressRules {
 			if len(rule.to.dnsName) > 0 {
-				deleteDNS = true
-				break
+				oc.egressfirewallDNSMutex.Lock()
+				delete(oc.egressfirewallDNSInfo[rule.to.dnsName].Namespaces, egressFirewall.Namespace)
+
+				if len(oc.egressfirewallDNSInfo[rule.to.dnsName].Namespaces) == 0 {
+					// there is no namespace using the egressfirewall rule so it is safe to delete the addressSet
+					err := oc.egressfirewallDNSInfo[rule.to.dnsName].as.Destroy()
+					if err != nil {
+						return err
+					}
+					delete(oc.egressfirewallDNSInfo, rule.to.dnsName)
+				}
+				oc.egressfirewallDNSMutex.Unlock()
 			}
 		}
 		nsInfo.egressFirewallPolicy = nil
 		nsInfo.Unlock()
-	}
-	if deleteDNS {
-		oc.egressFirewallDNS.Delete(egressFirewall.Namespace)
 	}
 
 	return deleteEgressFirewallRules(egressFirewall.Namespace)
@@ -224,12 +244,28 @@ func (oc *Controller) addEgressFirewallRules(hashedAddressSetNameIPv4, hashedAdd
 				matchTargets = []matchTarget{{matchKindV4CIDR, rule.to.cidrSelector}}
 			}
 		} else {
-			// rule based on DNS NAME
-			dnsNameAddressSets, err := oc.egressFirewallDNS.Add(ef.namespace, rule.to.dnsName)
-			if err != nil {
-				return fmt.Errorf("error with EgressFirewallDNS - %v", err)
+			var addressSet addressset.AddressSet
+			oc.egressfirewallDNSMutex.Lock()
+			if _, ok := oc.egressfirewallDNSInfo[rule.to.dnsName]; ok {
+				//the dnsName already exists in another addressSet
+				addressSet = oc.egressfirewallDNSInfo[rule.to.dnsName].as
+			} else {
+
+				addressSet, err = oc.addressSetFactory.NewAddressSet(rule.to.dnsName, nil)
+				if err != nil {
+					oc.egressfirewallDNSMutex.Unlock()
+					return err
+				}
+				oc.egressfirewallDNSInfo[rule.to.dnsName] = &dnsInformation{
+					as:         addressSet,
+					ipNodes:    make(map[string]map[string]struct{}),
+					Namespaces: make(map[string]struct{})}
 			}
-			dnsNameIPv4ASHashName, dnsNameIPv6ASHashName := dnsNameAddressSets.GetASHashNames()
+
+			oc.egressfirewallDNSInfo[rule.to.dnsName].Namespaces[namespace] = struct{}{}
+			oc.egressfirewallDNSMutex.Unlock()
+
+			dnsNameIPv4ASHashName, dnsNameIPv6ASHashName := addressSet.GetASHashNames()
 			if dnsNameIPv4ASHashName != "" {
 				matchTargets = append(matchTargets, matchTarget{matchKindV4AddressSet, dnsNameIPv4ASHashName})
 			}

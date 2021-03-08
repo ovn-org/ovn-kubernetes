@@ -12,6 +12,7 @@ import (
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	dnsobjectfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/dnsobject/v1/apis/clientset/versioned/fake"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -1044,12 +1045,14 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				Items: []v1.Node{testNode},
 			})
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-			crdFakeClient := &apiextensionsfake.Clientset{}
+			dnsObjectFakeClient := &dnsobjectfake.Clientset{}
+			crdFakeClient := apiextensionsfake.NewSimpleClientset()
 			egressIPFakeClient := &egressipfake.Clientset{}
 			fakeClient := &util.OVNClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
+				DNSObjectClient:      dnsObjectFakeClient,
 				APIExtensionsClient:  crdFakeClient,
 			}
 
@@ -1060,7 +1063,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient}, &testNode)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, dnsObjectFakeClient}, &testNode)
 			ifaceID := physicalBridgeName + "_" + nodeName
 			vlanID := uint(1024)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
@@ -1442,7 +1445,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			defer close(stopChan)
 			kubeFakeClient := fake.NewSimpleClientset()
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-			crdFakeClient := &apiextensionsfake.Clientset{}
+			crdFakeClient := apiextensionsfake.NewSimpleClientset()
 			egressIPFakeClient := &egressipfake.Clientset{}
 			fakeClient := &util.OVNClientset{
 				KubeClient:           kubeFakeClient,
