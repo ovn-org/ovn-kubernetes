@@ -54,8 +54,6 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 		sleepCommand             = []string{"bash", "-c", "sleep 20000"}
 		addressesv4, addressesv6 gatewayTestIPs
 		clientSet                kubernetes.Interface
-		testContainer            = fmt.Sprintf("%s-container", srcPingPodName)
-		testContainerFlag        = fmt.Sprintf("--container=%s", testContainer)
 	)
 
 	f := framework.NewDefaultFramework(svcname)
@@ -149,7 +147,7 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 				go func(target string) {
 					defer ginkgo.GinkgoRecover()
 					defer pingSync.Done()
-					_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, testContainerFlag, "--", "ping", "-c", testTimeout, target)
+					_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
 					framework.ExpectNoError(err, "Failed to ping the remote gateway network from pod", target, srcPingPodName)
 				}(t)
 			}
@@ -180,7 +178,7 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 			target := addresses.targetIPs[0]
 			success := false
 			for i := 0; i < 20; i++ {
-				args := []string{"exec", srcPingPodName, testContainerFlag, "--"}
+				args := []string{"exec", srcPingPodName, "--"}
 				if protocol == "tcp" {
 					args = append(args, "bash", "-c", fmt.Sprintf("echo | nc -w 1 %s %d", target, destPort))
 				} else {
@@ -233,9 +231,6 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 		externalTCPPort        = 80
 		externalUDPPort        = 90
 	)
-
-	testContainer := fmt.Sprintf("%s-container", srcPodName)
-	testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
 
 	f := framework.NewDefaultFramework(svcname)
 
@@ -309,7 +304,7 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 			go func(target string) {
 				defer ginkgo.GinkgoRecover()
 				defer pingSync.Done()
-				_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "ping", "-c", testTimeout, target)
+				_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, "--", "ping", "-c", testTimeout, target)
 				if err != nil {
 					framework.Logf("error generating a ping from the test pod %s: %v", srcPodName, err)
 				}
@@ -354,7 +349,7 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 		// Picking only the first address, the one the udp listener is set for
 		target := addresses.targetIPs[0]
 		for i := 0; i < 20; i++ {
-			args := []string{"exec", srcPodName, testContainerFlag, "--"}
+			args := []string{"exec", srcPodName, "--"}
 			if protocol == "tcp" {
 				args = append(args, "bash", "-c", fmt.Sprintf("echo | nc -w 1 %s %d", target, destPort))
 			} else {
