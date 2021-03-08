@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"k8s.io/klog/v2"
 
+	dnsobject "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/dnsobject/v1"
+	dnsobjectclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/dnsobject/v1/apis/clientset/versioned"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -26,6 +28,7 @@ type Interface interface {
 	UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewall) error
 	UpdateEgressIP(eIP *egressipv1.EgressIP) error
 	UpdateNodeStatus(node *kapi.Node) error
+	UpdateDNSObject(dnsObject *dnsobject.DNSObject) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
 	GetNodes() (*kapi.NodeList, error)
 	GetEgressIP(name string) (*egressipv1.EgressIP, error)
@@ -35,6 +38,8 @@ type Interface interface {
 	GetNode(name string) (*kapi.Node, error)
 	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
 	CreateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error)
+	CreateDNSObject(dnsObject *dnsobject.DNSObject) (*dnsobject.DNSObject, error)
+	DeleteDNSObject(name string) error
 	Events() kv1core.EventInterface
 }
 
@@ -43,6 +48,7 @@ type Kube struct {
 	KClient              kubernetes.Interface
 	EIPClient            egressipclientset.Interface
 	EgressFirewallClient egressfirewallclientset.Interface
+	DNSObjectClient      dnsobjectclientset.Interface
 }
 
 // SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
@@ -138,6 +144,13 @@ func (k *Kube) UpdateEgressIP(eIP *egressipv1.EgressIP) error {
 	return err
 }
 
+// UpdateDNSObject updates the DNSObject with the provided DNSObject data
+func (k *Kube) UpdateDNSObject(dnsObject *dnsobject.DNSObject) error {
+	klog.Infof("Updating dnsObject %s", dnsObject.Name)
+	_, err := k.DNSObjectClient.K8sV1().DNSObjects().Update(context.TODO(), dnsObject, metav1.UpdateOptions{})
+	return err
+}
+
 // UpdateNodeStatus takes the node object and sets the provided update status
 func (k *Kube) UpdateNodeStatus(node *kapi.Node) error {
 	klog.Infof("Updating status on node %s", node.Name)
@@ -199,6 +212,16 @@ func (k *Kube) GetEndpoint(namespace, name string) (*kapi.Endpoints, error) {
 // CreateEndpoint creates the Endpoints resource
 func (k *Kube) CreateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error) {
 	return k.KClient.CoreV1().Endpoints(namespace).Create(context.TODO(), ep, metav1.CreateOptions{})
+}
+
+// CreateDNSObject creates the dnsObject resource
+func (k *Kube) CreateDNSObject(dnsObject *dnsobject.DNSObject) (*dnsobject.DNSObject, error) {
+	return k.DNSObjectClient.K8sV1().DNSObjects().Create(context.TODO(), dnsObject, metav1.CreateOptions{})
+}
+
+// DeleteDNSObject deletes a dnsObject resource
+func (k *Kube) DeleteDNSObject(name string) error {
+	return k.DNSObjectClient.K8sV1().DNSObjects().Delete(context.TODO(), name, *metav1.NewDeleteOptions(0))
 }
 
 // Events returns events to use when creating an EventSinkImpl
