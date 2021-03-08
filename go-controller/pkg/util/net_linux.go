@@ -19,6 +19,7 @@ import (
 type NetLinkOps interface {
 	LinkByName(ifaceName string) (netlink.Link, error)
 	LinkSetDown(link netlink.Link) error
+	LinkDelete(link netlink.Link) error
 	LinkSetName(link netlink.Link, newName string) error
 	LinkSetUp(link netlink.Link) error
 	LinkSetNsFd(link netlink.Link, fd int) error
@@ -58,6 +59,10 @@ func (defaultNetLinkOps) LinkByName(ifaceName string) (netlink.Link, error) {
 
 func (defaultNetLinkOps) LinkSetDown(link netlink.Link) error {
 	return netlink.LinkSetDown(link)
+}
+
+func (defaultNetLinkOps) LinkDelete(link netlink.Link) error {
+	return netlink.LinkDel(link)
 }
 
 func (defaultNetLinkOps) LinkSetUp(link netlink.Link) error {
@@ -143,6 +148,19 @@ func LinkSetUp(interfaceName string) (netlink.Link, error) {
 		return nil, fmt.Errorf("failed to set the link %s up: %v", interfaceName, err)
 	}
 	return link, nil
+}
+
+// LinkDelete removes an interface
+func LinkDelete(interfaceName string) error {
+	link, err := netLinkOps.LinkByName(interfaceName)
+	if err != nil {
+		return fmt.Errorf("failed to lookup link %s: %v", interfaceName, err)
+	}
+	err = netLinkOps.LinkDelete(link)
+	if err != nil {
+		return fmt.Errorf("failed to remove link %s, error: %v", interfaceName, err)
+	}
+	return nil
 }
 
 // LinkAddrFlush flushes all the addresses on the given link, except IPv6 link-local addresses

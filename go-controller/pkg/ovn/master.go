@@ -37,9 +37,6 @@ const (
 	OvnServiceIdledAt              = "k8s.ovn.org/idled-at"
 	OvnNodeAnnotationRetryInterval = 100 * time.Millisecond
 	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
-	OvnSingleJoinSwitchTopoVersion = 1
-	OvnNamespacedDenyPGTopoVersion = 2
-	OvnCurrentTopologyVersion      = OvnNamespacedDenyPGTopoVersion
 )
 
 type ovnkubeMasterLeaderMetrics struct{}
@@ -93,7 +90,7 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup) error {
 				if err := oc.StartClusterMaster(nodeName); err != nil {
 					panic(err.Error())
 				}
-				if err := oc.Run(wg); err != nil {
+				if err := oc.Run(wg, nodeName); err != nil {
 					panic(err.Error())
 				}
 			},
@@ -182,44 +179,23 @@ func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.No
 }
 
 func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
-	// Find out the current OVN topology version. If "k8s-ovn-topo-version" key in external_ids column does not exist,
-	// it is prior to OVN topology versioning and therefore set version number to OvnCurrentTopologyVersion
-	ver := 0
-	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-headings", "--columns=name", "find", "logical_router",
-		fmt.Sprintf("name=%s", types.OVNClusterRouter))
+	ver, err := util.DetermineOVNTopoVersionFromOVN()
 	if err != nil {
-		return fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
-			"stderr: %q, error: %v", types.OVNClusterRouter, stderr, err)
-	}
-	if len(stdout) == 0 {
-		// no OVNClusterRouter exists, DB is empty, nothing to upgrade
-		return nil
-	}
-
-	stdout, stderr, err = util.RunOVNNbctl("--if-exists", "get", "logical_router", types.OVNClusterRouter,
-		"external_ids:k8s-ovn-topo-version")
-	if err != nil {
-		return fmt.Errorf("failed to determine the current version of OVN logical topology: stderr: %q, error: %v",
-			stderr, err)
-	} else if len(stdout) == 0 {
-		klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
-	} else {
-		v, err := strconv.Atoi(stdout)
-		if err != nil {
-			return fmt.Errorf("invalid OVN topology version string for the cluster: %s", stdout)
-		} else {
-			ver = v
-		}
+		return err
 	}
 
 	// If current DB version is greater than OvnSingleJoinSwitchTopoVersion, no need to upgrade to single switch topology
-	if ver < OvnSingleJoinSwitchTopoVersion {
+	if ver < types.OvnSingleJoinSwitchTopoVersion {
 		klog.Infof("Upgrading to Single Switch OVN Topology")
 		err = oc.upgradeToSingleSwitchOVNTopology(existingNodes)
 	}
-	if err == nil && ver < OvnNamespacedDenyPGTopoVersion {
+	if err == nil && ver < types.OvnNamespacedDenyPGTopoVersion {
 		klog.Infof("Upgrading to Namespace Deny PortGroup OVN Topology")
 		err = oc.upgradeToNamespacedDenyPGOVNTopology(existingNodes)
+	}
+	// If version is less than Host -> Service with OpenFlow, we need to remove and cleanup DGP
+	if err == nil && ver < types.OvnHostToSvcOFTopoVersion && config.Gateway.Mode == config.GatewayModeShared {
+		err = cleanupDGP(existingNodes)
 	}
 	return err
 }
@@ -293,7 +269,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	klog.V(5).Infof("Existing number of nodes: %d", len(existingNodes.Items))
 	err = oc.upgradeOVNTopology(existingNodes)
 	if err != nil {
-		klog.Errorf("Failed to upgrade OVN topology to version %d: %v", OvnCurrentTopologyVersion, err)
+		klog.Errorf("Failed to upgrade OVN topology to version %d: %v", types.OvnCurrentTopologyVersion, err)
 		return err
 	}
 
@@ -385,8 +361,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 func (oc *Controller) SetupMaster(masterNodeName string) error {
 	// Create a single common distributed router for the cluster.
 	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", types.OVNClusterRouter,
-		"--", "set", "logical_router", types.OVNClusterRouter, "external_ids:k8s-cluster-router=yes",
-		fmt.Sprintf("external_ids:k8s-ovn-topo-version=%d", OvnCurrentTopologyVersion))
+		"--", "set", "logical_router", types.OVNClusterRouter, "external_ids:k8s-cluster-router=yes")
 	if err != nil {
 		klog.Errorf("Failed to create a single common distributed router for the cluster, "+
 			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)

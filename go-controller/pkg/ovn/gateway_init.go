@@ -578,7 +578,7 @@ func addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet) er
 		}
 	} else if config.Gateway.Mode == config.GatewayModeShared {
 		// if we are upgrading from Local to Shared gateway mode, we need to ensure the inter-node LRP is removed
-		removeLRP(nodeName, []string{types.InterNodePolicyPriority})
+		removeLRPolicies(nodeName, []string{types.InterNodePolicyPriority})
 	}
 
 	return nil

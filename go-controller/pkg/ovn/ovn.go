@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strconv"
 	"sync"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
@@ -288,7 +290,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 }
 
 // Run starts the actual watching.
-func (oc *Controller) Run(wg *sync.WaitGroup) error {
+func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	oc.syncPeriodic()
 	klog.Infof("Starting all the Watchers...")
 	start := time.Now()
@@ -381,6 +383,25 @@ func (oc *Controller) Run(wg *sync.WaitGroup) error {
 			defer wg.Done()
 			oc.hoMaster.Run(oc.stopChan)
 		}()
+	}
+
+	// Master is fully running and resource handlers have synced, update Topology version in OVN
+	stdout, stderr, err := util.RunOVNNbctl("set", "logical_router", ovntypes.OVNClusterRouter,
+		fmt.Sprintf("external_ids:k8s-ovn-topo-version=%d", ovntypes.OvnCurrentTopologyVersion))
+	if err != nil {
+		klog.Errorf("Failed to set topology version in OVN, "+
+			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return err
+	}
+
+	// Update topology version on node
+	node, err := oc.kube.GetNode(nodeName)
+	if err != nil {
+		return fmt.Errorf("unable to get node: %s", nodeName)
+	}
+	err = oc.kube.SetAnnotationsOnNode(node, map[string]interface{}{ovntypes.OvnK8sTopoAnno: strconv.Itoa(ovntypes.OvnCurrentTopologyVersion)})
+	if err != nil {
+		return fmt.Errorf("failed to set topology annotation for node %s", node.Name)
 	}
 
 	return nil
