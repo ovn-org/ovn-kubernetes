@@ -138,7 +138,7 @@ func newNodeDNSInfo(name string) *nodednsinfo.NodeDNSInfo {
 				"name": name,
 			},
 		},
-		Spec: nodednsinfo.NodeDNSInfoSpec{
+		Status: nodednsinfo.NodeDNSInfoStatus{
 			DNSEntries: make(map[string]nodednsinfo.DNSEntry),
 		},
 	}
@@ -1148,7 +1148,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		nodeDNSInfos = append(nodeDNSInfos, added)
 		nodeDNSInfoWatch.Add(added)
 		Eventually(c.getAdded, 2).Should(Equal(1))
-		added.Spec.DNSEntries["www.test.com"] = nodednsinfo.DNSEntry{
+		added.Status.DNSEntries["www.test.com"] = nodednsinfo.DNSEntry{
 			IPAddresses: []string{"1.1.1.1"},
 		}
 		nodeDNSInfoWatch.Modify(added)
