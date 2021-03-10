@@ -18,6 +18,9 @@ const serverRunDir string = "/var/run/ovn-kubernetes/cni/"
 const serverSocketName string = "ovn-cni-server.sock"
 const serverSocketPath string = serverRunDir + "/" + serverSocketName
 
+// CNILibDir is the directory for caching SR-IOV interface data
+const CNILibDir string = "/var/lib/cni/ovn-kubernetes"
+
 // PodInterfaceInfo consists of interface info result from cni server if cni client configure's interface
 type PodInterfaceInfo struct {
 	util.PodAnnotation
@@ -25,6 +28,11 @@ type PodInterfaceInfo struct {
 	MTU     int   `json:"mtu"`
 	Ingress int64 `json:"ingress"`
 	Egress  int64 `json:"egress"`
+}
+
+// SriovInterfaceInfo consists of SR-IOV interface info
+type SriovInterfaceInfo struct {
+	VFRepName string `json:"vfRepName"`
 }
 
 // Explicit type for CNI commands the server handles
