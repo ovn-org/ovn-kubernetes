@@ -1,0 +1,10 @@
+# This dockerfile is used to build the image
+# consumed by the external gateway tests as the BFD variants need to have
+# frr deployed on the external container
+FROM fedora:33
+
+RUN INSTALL_PKGS="tcpdump frr iputils iproute nc hostname" && \
+    dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
+    dnf clean all && rm -rf /var/cache/dnf/*
+
+RUN sed -i 's/^bfdd=no/bfdd=yes/g' /etc/frr/daemons

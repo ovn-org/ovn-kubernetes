@@ -28,9 +28,10 @@ import (
 )
 
 type EntityType string
-const(
-	PORT_GROUP EntityType = "PORT_GROUP"
-	LOGICAL_SWITCH EntityType = "LOICAL_SWITCH"
+
+const (
+	PORT_GROUP     EntityType = "PORT_GROUP"
+	LOGICAL_SWITCH EntityType = "LOGICAL_SWITCH"
 )
 
 // Client ovnnb/sb client
@@ -203,6 +204,13 @@ type Client interface {
 	// List chassis
 	ChassisList() ([]*Chassis, error)
 
+	// Delete Chassis row from Chassis_Private with given name
+	ChassisPrivateDel(chName string) (*OvnCommand, error)
+	// List Chassis rows in chassis_private table
+	ChassisPrivateList() ([]*ChassisPrivate, error)
+	// Get Chassis row in chassis_private table by given name
+	ChassisPrivateGet(chName string) ([]*ChassisPrivate, error)
+
 	// Get encaps by chassis name
 	EncapList(chname string) ([]*Encap, error)
 
@@ -233,6 +241,9 @@ type Client interface {
 
 	// Close connection to OVN
 	Close() error
+
+	// GetSchema() returns ovn-db schema
+	GetSchema() libovsdb.DatabaseSchema
 }
 
 var _ Client = &ovndb{}
@@ -327,15 +338,30 @@ func (c *ovndb) reconnect() {
 	}()
 }
 
-func (c *ovndb) MonitorTables(jsonContext interface{}) (*libovsdb.TableUpdates, error) {
-	// get the table list based on the DB
+// filterTablesFromSchema checks whether tables in
+// NBTablesOrder / SBTablesOrder exists in current ovn-db schema
+func (c *ovndb) filterTablesFromSchema() []string {
 	var tables []string
+
+	// get the table list based on the DB
 	if c.db == DBNB {
 		tables = NBTablesOrder
 	} else {
 		tables = SBTablesOrder
 	}
 
+	dbSchema := c.GetSchema()
+	schemaTables := make([]string, 0)
+	for _, table := range tables {
+		if _, ok := dbSchema.Tables[table]; ok {
+			schemaTables = append(schemaTables, table)
+		}
+	}
+	return schemaTables
+}
+
+func (c *ovndb) MonitorTables(jsonContext interface{}) (*libovsdb.TableUpdates, error) {
+	tables := c.filterTablesFromSchema()
 	// verify whether user specified table and its columns are legit
 	if len(c.tableCols) != 0 {
 		supportedTableMaps := make(map[string]bool)
@@ -381,6 +407,10 @@ func (c *ovndb) Close() error {
 	return nil
 }
 
+func (c *ovndb) GetSchema() libovsdb.DatabaseSchema {
+	return c.client.Schema[c.db]
+}
+
 func (c *ovndb) EncapList(chname string) ([]*Encap, error) {
 	return c.encapListImp(chname)
 }
@@ -400,6 +430,22 @@ func (c *ovndb) ChassisAdd(name string, hostname string, etype []string, ip stri
 
 func (c *ovndb) ChassisDel(name string) (*OvnCommand, error) {
 	return c.chassisDelImp(name)
+}
+
+func (c *ovndb) chassisPrivateAdd(name string, external_ids map[string]string) (*OvnCommand, error) {
+	return c.chassisPrivateAddImp(name, external_ids)
+}
+
+func (c *ovndb) ChassisPrivateList() ([]*ChassisPrivate, error) {
+	return c.chassisPrivateListImp()
+}
+
+func (c *ovndb) ChassisPrivateGet(name string) ([]*ChassisPrivate, error) {
+	return c.chassisPrivateGetImp(name)
+}
+
+func (c *ovndb) ChassisPrivateDel(name string) (*OvnCommand, error) {
+	return c.chassisPrivateDelImp(name)
 }
 
 func (c *ovndb) LSAdd(ls string) (*OvnCommand, error) {
