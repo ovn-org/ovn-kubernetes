@@ -223,6 +223,13 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
 			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --columns _uuid --no-headings find logical_router_policy external_ids=name=hybrid-subnet-node1",
+				Output: "2222",
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 lr-policy-del ovn_cluster_router 2222",
+			})
 
 			err = fakeClient.CoreV1().Nodes().Delete(context.TODO(), nodeName, *metav1.NewDeleteOptions(0))
 			Expect(err).NotTo(HaveOccurred())
@@ -262,6 +269,9 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			populatePortAddresses(nodeName, nodeHOMAC, nodeHOIP, mockOVNNBClient)
 
+			updateLogicalRouterPolicy(fexec)
+			updateLogicalRouterPolicy(fexec)
+
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
@@ -289,6 +299,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				}
 				return updatedNode.Annotations, nil
 			}, 2).Should(HaveKeyWithValue(hotypes.HybridOverlayDRMAC, nodeHOMAC))
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 		err := app.Run([]string{
@@ -314,10 +325,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 					newTestNode(nodeName, "linux", nodeSubnet, "", nodeHOMAC),
 				},
 			})
-
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
-			})
+			updateLogicalRouterPolicy(fexec)
 
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
@@ -346,6 +354,10 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			}()
 			f.WaitForCacheSync(stopChan)
 
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
+			})
 			k := &kube.Kube{KClient: fakeClient}
 			updatedNode, err := k.GetNode(nodeName)
 			Expect(err).NotTo(HaveOccurred())
@@ -378,6 +390,8 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 })
 
 func addLinuxNodeCommands(fexec *ovntest.FakeExec, nodeHOMAC, nodeName, nodeHOIP string) {
+	updateLogicalRouterPolicy(fexec)
+
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		// Setting the mac on the lsp
 		"ovn-nbctl --timeout=15 -- " +
@@ -391,5 +405,15 @@ func addLinuxNodeCommands(fexec *ovntest.FakeExec, nodeHOMAC, nodeName, nodeHOIP
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 -- --if-exists set logical_switch " + nodeName + " other-config:exclude_ips=" + nodeHOIP,
+	})
+}
+
+func updateLogicalRouterPolicy(fexec *ovntest.FakeExec) {
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		// Find if policy exists already
+		Cmd: "ovn-nbctl --timeout=15 --columns _uuid --no-headings find logical_router_policy priority=1002 " +
+			"external_ids=name=hybrid-subnet-node1 action=reroute nexthops=10.1.2.3 " +
+			`match="inport == rtos-node1 && ip4.dst == 11.1.0.0/16"`,
+		Output: "19df5ce5-2802-4ee5-891f-4fb27ca776e9",
 	})
 }
