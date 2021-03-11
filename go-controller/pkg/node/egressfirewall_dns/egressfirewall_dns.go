@@ -248,8 +248,8 @@ func (e *EgressDNS) signalAdded(dnsNS dnsNamespace) {
 
 // returns the fields of a dnsEntry for a given name
 func (e *EgressDNS) GetDNSEntry(dnsName string) ([]net.IP, []string, bool) {
-	e.lock.Lock()
-	defer e.lock.Unlock()
+	//e.lock.Lock()
+	//defer e.lock.Unlock()
 	var namespaces []string
 	if dnsEntry, exists := e.dnsEntries[dnsName]; exists {
 		for namespace := range dnsEntry.namespaces {
@@ -260,4 +260,12 @@ func (e *EgressDNS) GetDNSEntry(dnsName string) ([]net.IP, []string, bool) {
 	}
 	return nil, nil, false
 
+}
+
+func (e *EgressDNS) LockEgressDNS() {
+	e.lock.Lock()
+}
+
+func (e *EgressDNS) UnlockEgressDNS() {
+	e.lock.Unlock()
 }

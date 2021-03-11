@@ -175,6 +175,8 @@ var _ = Describe("Node EgressFirewall Operations", func() {
 			fakeNode.node.WatchEgressFirewall()
 
 			Eventually(func() bool {
+				fakeNode.node.egressFirewallDNS.LockEgressDNS()
+				defer fakeNode.node.egressFirewallDNS.UnlockEgressDNS()
 				ips, namespaces, _ := fakeNode.node.egressFirewallDNS.GetDNSEntry(dnsName)
 				return areTwoIPSlicesTheSame(ips, []net.IP{net.ParseIP(resolvedIP)}) && areTwoStringSlicesTheSame(namespaces, []string{namespace})
 
@@ -252,15 +254,23 @@ var _ = Describe("Node EgressFirewall Operations", func() {
 			fakeNode.node.WatchEgressFirewall()
 
 			Eventually(func() bool {
+				fakeNode.node.egressFirewallDNS.LockEgressDNS()
+				defer fakeNode.node.egressFirewallDNS.UnlockEgressDNS()
 				ips, namespaces, _ := fakeNode.node.egressFirewallDNS.GetDNSEntry(dnsName)
 				return areTwoIPSlicesTheSame(ips, []net.IP{net.ParseIP(resolvedIP)}) && areTwoStringSlicesTheSame(namespaces, []string{namespace})
 
 			}).Should(BeTrue())
+			fakeNode.node.egressFirewallDNS.LockEgressDNS()
 			dnsObject, err := fakeNode.node.watchFactory.GetDNSObject(nodeName)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(areTwoStringSlicesTheSame(dnsObject.Spec.DNSObjectEntries[dnsName].IPAddresses, []string{resolvedIP})).To(Equal(true))
+			fakeNode.node.egressFirewallDNS.UnlockEgressDNS()
+			//need to wait until the dnsRecord times out
+			time.Sleep(2 * time.Second)
 
 			Eventually(func() bool {
+				fakeNode.node.egressFirewallDNS.LockEgressDNS()
+				defer fakeNode.node.egressFirewallDNS.UnlockEgressDNS()
 				ips, namespaces, _ := fakeNode.node.egressFirewallDNS.GetDNSEntry(dnsName)
 				return areTwoIPSlicesTheSame(ips, []net.IP{net.ParseIP(resolvedIPUpdate)}) && areTwoStringSlicesTheSame(namespaces, []string{namespace})
 
@@ -342,6 +352,8 @@ var _ = Describe("Node EgressFirewall Operations", func() {
 			fakeNode.node.WatchEgressFirewall()
 
 			Eventually(func() bool {
+				fakeNode.node.egressFirewallDNS.LockEgressDNS()
+				defer fakeNode.node.egressFirewallDNS.UnlockEgressDNS()
 				ips, namespaces, _ := fakeNode.node.egressFirewallDNS.GetDNSEntry(dnsName)
 				return areTwoIPSlicesTheSame(ips, []net.IP{net.ParseIP(resolvedIP)}) && areTwoStringSlicesTheSame(namespaces, []string{namespace1, namespace2})
 			}).Should(BeTrue())
@@ -353,6 +365,8 @@ var _ = Describe("Node EgressFirewall Operations", func() {
 			err = fakeNode.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall2.Namespace).Delete(context.TODO(), egressFirewall2.Name, *metav1.NewDeleteOptions(0))
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func() bool {
+				fakeNode.node.egressFirewallDNS.LockEgressDNS()
+				defer fakeNode.node.egressFirewallDNS.UnlockEgressDNS()
 				ips, namespaces, _ := fakeNode.node.egressFirewallDNS.GetDNSEntry(dnsName)
 				return areTwoIPSlicesTheSame(ips, []net.IP{net.ParseIP(resolvedIP)}) && areTwoStringSlicesTheSame(namespaces, []string{namespace1})
 			}).Should(BeTrue())
@@ -361,6 +375,8 @@ var _ = Describe("Node EgressFirewall Operations", func() {
 			err = fakeNode.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall1.Namespace).Delete(context.TODO(), egressFirewall1.Name, *metav1.NewDeleteOptions(0))
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func() bool {
+				fakeNode.node.egressFirewallDNS.LockEgressDNS()
+				defer fakeNode.node.egressFirewallDNS.UnlockEgressDNS()
 				_, _, exists := fakeNode.node.egressFirewallDNS.GetDNSEntry(dnsName)
 				return exists
 			}).Should(BeFalse())
@@ -440,6 +456,8 @@ var _ = Describe("Node EgressFirewall Operations", func() {
 			fakeNode.node.WatchEgressFirewall()
 
 			Eventually(func() bool {
+				fakeNode.node.egressFirewallDNS.LockEgressDNS()
+				defer fakeNode.node.egressFirewallDNS.UnlockEgressDNS()
 				ips, namespaces, _ := fakeNode.node.egressFirewallDNS.GetDNSEntry(dnsName1)
 				return areTwoIPSlicesTheSame(ips, []net.IP{net.ParseIP(resolvedIP1)}) && areTwoStringSlicesTheSame(namespaces, []string{namespace})
 
@@ -458,6 +476,8 @@ var _ = Describe("Node EgressFirewall Operations", func() {
 			_, err = fakeNode.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Update(context.TODO(), egressFirewall, metav1.UpdateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func() bool {
+				fakeNode.node.egressFirewallDNS.LockEgressDNS()
+				defer fakeNode.node.egressFirewallDNS.UnlockEgressDNS()
 				ips, namespaces, _ := fakeNode.node.egressFirewallDNS.GetDNSEntry(dnsName1)
 				return areTwoIPSlicesTheSame(ips, []net.IP{net.ParseIP(resolvedIP1)}) && areTwoStringSlicesTheSame(namespaces, []string{namespace})
 
@@ -481,11 +501,15 @@ var _ = Describe("Node EgressFirewall Operations", func() {
 			_, err = fakeNode.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Update(context.TODO(), egressFirewall, metav1.UpdateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func() bool {
+				fakeNode.node.egressFirewallDNS.LockEgressDNS()
+				defer fakeNode.node.egressFirewallDNS.UnlockEgressDNS()
 				ips, namespaces, _ := fakeNode.node.egressFirewallDNS.GetDNSEntry(dnsName1)
 				return areTwoIPSlicesTheSame(ips, []net.IP{net.ParseIP(resolvedIP1)}) && areTwoStringSlicesTheSame(namespaces, []string{namespace})
 
 			}).Should(BeTrue())
 			Eventually(func() bool {
+				fakeNode.node.egressFirewallDNS.LockEgressDNS()
+				defer fakeNode.node.egressFirewallDNS.UnlockEgressDNS()
 				ips, namespaces, _ := fakeNode.node.egressFirewallDNS.GetDNSEntry(dnsName2)
 				return areTwoIPSlicesTheSame(ips, []net.IP{net.ParseIP(resolvedIP2)}) && areTwoStringSlicesTheSame(namespaces, []string{namespace})
 
@@ -508,11 +532,15 @@ var _ = Describe("Node EgressFirewall Operations", func() {
 			_, err = fakeNode.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Update(context.TODO(), egressFirewall, metav1.UpdateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func() bool {
+				fakeNode.node.egressFirewallDNS.LockEgressDNS()
+				defer fakeNode.node.egressFirewallDNS.UnlockEgressDNS()
 				ips, namespaces, _ := fakeNode.node.egressFirewallDNS.GetDNSEntry(dnsName1)
 				return areTwoIPSlicesTheSame(ips, []net.IP{net.ParseIP(resolvedIP1)}) && areTwoStringSlicesTheSame(namespaces, []string{namespace})
 
 			}).Should(BeTrue())
 			Eventually(func() bool {
+				fakeNode.node.egressFirewallDNS.LockEgressDNS()
+				defer fakeNode.node.egressFirewallDNS.UnlockEgressDNS()
 				_, _, exists := fakeNode.node.egressFirewallDNS.GetDNSEntry(dnsName2)
 				return exists
 
