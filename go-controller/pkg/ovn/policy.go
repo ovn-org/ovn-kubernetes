@@ -985,8 +985,8 @@ func (oc *Controller) handlePeerService(
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
 				// If Service Is updated make sure same pods are still matched
-				oldSvc := oldObj.(kapi.Service)
-				newSvc := newObj.(kapi.Service)
+				oldSvc := oldObj.(*kapi.Service)
+				newSvc := newObj.(*kapi.Service)
 				if reflect.DeepEqual(newSvc.Spec.ExternalIPs, oldSvc.Spec.ExternalIPs) &&
 					reflect.DeepEqual(newSvc.Spec.ClusterIP, oldSvc.Spec.ClusterIP) &&
 					reflect.DeepEqual(newSvc.Spec.Type, oldSvc.Spec.Type) &&
