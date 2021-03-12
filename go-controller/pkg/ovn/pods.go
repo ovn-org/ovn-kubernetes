@@ -171,7 +171,7 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 			otherDefaultRoute = otherDefaultRouteV6
 		}
 		var gatewayIP net.IP
-		hasRoutingExternalGWs := len(oc.getRoutingExternalGWs(pod.Namespace)) > 0
+		hasRoutingExternalGWs := len(oc.getRoutingExternalGWs(pod.Namespace).gws) > 0
 		hasPodRoutingGWs := len(oc.getRoutingPodGWs(pod.Namespace)) > 0
 		if otherDefaultRoute || (hasRoutingExternalGWs && hasPodRoutingGWs) {
 			for _, clusterSubnet := range config.Default.ClusterSubnets {
@@ -214,22 +214,39 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 	return nil
 }
 
-func (oc *Controller) getRoutingExternalGWs(ns string) []net.IP {
+func (oc *Controller) getRoutingExternalGWs(ns string) gatewayInfo {
+	res := gatewayInfo{}
 	nsInfo := oc.getNamespaceLocked(ns)
 	if nsInfo == nil {
-		return nil
+		return res
 	}
 	defer nsInfo.Unlock()
-	return nsInfo.routingExternalGWs
+	// return a copy of the object so it can be handled without the
+	// namespace locked
+	res.bfdEnabled = nsInfo.routingExternalGWs.bfdEnabled
+	res.gws = make([]net.IP, len(nsInfo.routingExternalGWs.gws))
+	copy(res.gws, nsInfo.routingExternalGWs.gws)
+	return res
 }
 
-func (oc *Controller) getRoutingPodGWs(ns string) map[string][]net.IP {
+func (oc *Controller) getRoutingPodGWs(ns string) map[string]gatewayInfo {
 	nsInfo := oc.getNamespaceLocked(ns)
 	if nsInfo == nil {
 		return nil
 	}
 	defer nsInfo.Unlock()
-	return nsInfo.routingExternalPodGWs
+	// return a copy of the object so it can be handled without the
+	// namespace locked
+	res := make(map[string]gatewayInfo)
+	for k, v := range nsInfo.routingExternalPodGWs {
+		item := gatewayInfo{
+			bfdEnabled: v.bfdEnabled,
+			gws:        make([]net.IP, len(v.gws)),
+		}
+		copy(item.gws, v.gws)
+		res[k] = item
+	}
+	return res
 }
 
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
@@ -444,12 +461,21 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	routingPodGWs := oc.getRoutingPodGWs(pod.Namespace)
 
 	// if we have any external or pod Gateways, add routes
-	if len(routingExternalGWs) > 0 || len(routingPodGWs) > 0 {
-		routingGWs := routingExternalGWs
-		for _, ipNets := range routingPodGWs {
-			routingGWs = append(routingGWs, ipNets...)
+	gateways := make([]gatewayInfo, 0)
+
+	if len(routingExternalGWs.gws) > 0 {
+		gateways = append(gateways, routingExternalGWs)
+	}
+	for _, gw := range routingPodGWs {
+		if len(gw.gws) > 0 {
+			gateways = append(gateways, gw)
+		} else {
+			klog.Warningf("Found routingPodGW with no gateways ip set for namespace %s", pod.Namespace)
 		}
-		err = oc.addGWRoutesForPod(routingGWs, podIfAddrs, pod.Namespace, pod.Spec.NodeName)
+	}
+
+	if len(gateways) > 0 {
+		err = oc.addGWRoutesForPod(gateways, podIfAddrs, pod.Namespace, pod.Spec.NodeName)
 		if err != nil {
 			return err
 		}
