@@ -1135,11 +1135,6 @@ func (oc *Controller) removeServiceEndpoints(lb, vip string) {
 func gatewayChanged(oldNode, newNode *kapi.Node) bool {
 	oldL3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(oldNode)
 	l3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(newNode)
-
-	if oldL3GatewayConfig == nil && l3GatewayConfig == nil {
-		return false
-	}
-
 	return !reflect.DeepEqual(oldL3GatewayConfig, l3GatewayConfig)
 }
 
