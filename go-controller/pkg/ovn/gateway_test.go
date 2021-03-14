@@ -111,7 +111,9 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node 0.0.0.0/0 169.254.33.1 rtoe-GR_test-node",
 			"ovn-nbctl --timeout=15 --may-exist lr-route-add ovn_cluster_router 100.64.0.3 100.64.0.3",
 			"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add ovn_cluster_router 10.130.0.0/23 100.64.0.3",
-			"ovn-nbctl --timeout=15 --if-exists lr-nat-del GR_test-node snat 10.128.0.0/14 -- lr-nat-add GR_test-node snat 169.254.33.2 10.128.0.0/14",
+			"ovn-nbctl --timeout=15 --columns _uuid --format=csv --no-headings find nat external_ip=169.254.33.2 type=snat logical_ip=10.128.0.0/14",
+			"ovn-nbctl --timeout=15 --if-exists lr-nat-del GR_test-node snat 10.128.0.0/14",
+			"ovn-nbctl --timeout=15 lr-nat-add GR_test-node snat 169.254.33.2 10.128.0.0/14",
 		})
 
 		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
@@ -184,7 +186,9 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node ::/0 fd99::1 rtoe-GR_test-node",
 			"ovn-nbctl --timeout=15 --may-exist lr-route-add ovn_cluster_router fd98::3 fd98::3",
 			"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add ovn_cluster_router fd01:0:0:2::/64 fd98::3",
-			"ovn-nbctl --timeout=15 --if-exists lr-nat-del GR_test-node snat fd01::/48 -- lr-nat-add GR_test-node snat fd99::2 fd01::/48",
+			"ovn-nbctl --timeout=15 --columns _uuid --format=csv --no-headings find nat external_ip=fd99::2 type=snat logical_ip=fd01::/48",
+			"ovn-nbctl --timeout=15 --if-exists lr-nat-del GR_test-node snat fd01::/48",
+			"ovn-nbctl --timeout=15 lr-nat-add GR_test-node snat fd99::2 fd01::/48",
 		})
 
 		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
@@ -259,8 +263,12 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 --may-exist lr-route-add ovn_cluster_router fd98::3 fd98::3",
 			"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add ovn_cluster_router 10.130.0.0/23 100.64.0.3",
 			"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add ovn_cluster_router fd01:0:0:2::/64 fd98::3",
-			"ovn-nbctl --timeout=15 --if-exists lr-nat-del GR_test-node snat 10.128.0.0/14 -- lr-nat-add GR_test-node snat 169.254.33.2 10.128.0.0/14",
-			"ovn-nbctl --timeout=15 --if-exists lr-nat-del GR_test-node snat fd01::/48 -- lr-nat-add GR_test-node snat fd99::2 fd01::/48",
+			"ovn-nbctl --timeout=15 --columns _uuid --format=csv --no-headings find nat external_ip=169.254.33.2 type=snat logical_ip=10.128.0.0/14",
+			"ovn-nbctl --timeout=15 --if-exists lr-nat-del GR_test-node snat 10.128.0.0/14",
+			"ovn-nbctl --timeout=15 lr-nat-add GR_test-node snat 169.254.33.2 10.128.0.0/14",
+			"ovn-nbctl --timeout=15 --columns _uuid --format=csv --no-headings find nat external_ip=fd99::2 type=snat logical_ip=fd01::/48",
+			"ovn-nbctl --timeout=15 --if-exists lr-nat-del GR_test-node snat fd01::/48",
+			"ovn-nbctl --timeout=15 lr-nat-add GR_test-node snat fd99::2 fd01::/48",
 		})
 
 		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
