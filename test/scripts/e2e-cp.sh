@@ -18,7 +18,7 @@ if [ "$OVN_HA" == false ]; then
   	SKIPPED_TESTS+="|"
   fi
   # No support for these features in no-ha mode yet
-  SKIPPED_TESTS+="e2e delete databases"
+  SKIPPED_TESTS+="recovering from deleting db files while maintain connectivity"
 fi
 
 # setting these is required to make RuntimeClass tests work ... :/
