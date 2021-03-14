@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/onsi/ginkgo"
@@ -22,9 +23,11 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	utilnet "k8s.io/utils/net"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	testutils "k8s.io/kubernetes/test/utils"
 )
 
 const (
@@ -35,6 +38,8 @@ const (
 	ciNetworkName        = "kind"
 	agnhostImage         = "k8s.gcr.io/e2e-test-images/agnhost:2.26"
 )
+
+type podCondition = func(pod *v1.Pod) (bool, error)
 
 func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host string, port, timeout int, podChan chan *v1.Pod, errChan chan error) {
 	contName := fmt.Sprintf("%s-container", podName)
@@ -2148,7 +2153,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		northDBFileName           string        = "ovnnb_db.db"
 		southDBFileName           string        = "ovnsb_db.db"
 		dirDB                     string        = "/etc/ovn/"
-		waitingPeriod             time.Duration = 90 * time.Second // polling timeout
+		waitingPeriod             time.Duration = 180 * time.Second // polling timeout
 		ovnWorkerNode             string        = "ovn-worker"
 		ovnWorkerNode2            string        = "ovn-worker2"
 		haModeMinDb               int           = 0
@@ -2275,6 +2280,41 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		errChan <- nil
 	}
 
+	// WaitForPodConditionAllowNotFoundError is a wrapper for WaitForPodCondition that allows at most 6 times for the pod not to be found.
+	WaitForPodConditionAllowNotFoundErrors := func(f *framework.Framework, ns, podName, desc string, timeout time.Duration, condition podCondition) error {
+		max_tries := 6               // 6 tries to waiting for the pod to restart
+		cooldown := 10 * time.Second // 10 sec to cooldown between each try
+		for i := 0; i < max_tries; i++ {
+			err := e2epod.WaitForPodCondition(f.ClientSet, ns, podName, desc, 5*time.Minute, condition)
+			if apierrors.IsNotFound(err) {
+				// pod not found,try again after cooldown
+				time.Sleep(cooldown)
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			return nil
+		}
+		return fmt.Errorf("Gave up after waiting %v for pod %q to be %q: pod is not found", timeout, podName, desc)
+	}
+
+	// waitForPodToFinishFullRestart waits for a the pod to finish it's reset cycle and returns.
+	waitForPodToFinishFullRestart := func(f *framework.Framework, pod *v1.Pod) {
+		err := e2epod.WaitForPodCondition(f.ClientSet, pod.Namespace, pod.Name, "not ready", 5*time.Minute, testutils.PodNotReady)
+		if err != nil {
+			framework.Failf("pod %v is not arrived to not-ready state: %v", pod.Name, err)
+		}
+		// during this stage on the restarting process we can encounter "pod not found" errors.
+		// this type of errors is valid because the pod is during restart so it will have a period that it will not be available.
+		// so we will use "WaitForPodConditionAllowNotFoundErrors" in order to handle properly those errors.
+		err = WaitForPodConditionAllowNotFoundErrors(f, pod.Namespace, pod.Name, "running and ready", 5*time.Minute, testutils.PodRunningReady)
+		if err != nil {
+			framework.Failf("pod %v is not arrived to running and ready state: %v", pod.Name, err)
+		}
+		return
+	}
+
 	table.DescribeTable("recovering from deleting db files while maintain connectivity",
 		func(db_pod_num int, DBFileNamesToDelete []string) {
 			if db_pod_num < haModeMinDb || db_pod_num > haModeMaxDb {
@@ -2317,4 +2357,41 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		//table.Entry("when delete north db on ovnkube-db-2", 2, []string{northDBFileName}),
 		//table.Entry("when delete south db on ovnkube-db-2", 2, []string{southDBFileName}),
 	)
+
+	ginkgo.It("Should validate connectivity before and after deleting all the db-pods at once", func() {
+		dbPods, err := e2epod.GetPods(f.ClientSet, ovnNs, map[string]string{"name": databasePodPrefix})
+		if err != nil {
+			framework.Failf("Error: Failed to get pods, err: %v", err)
+		}
+		if len(dbPods) == 0 {
+			framework.Failf("Error: db pods not found")
+		}
+
+		framework.Logf("test simple connectivity from new pod to API server,before deleting db pods")
+		singlePodConnectivityTest(f, "before-delete-db-pods")
+
+		framework.Logf("deleting all the db pods")
+		for _, dbPod := range dbPods {
+			dbPodName := dbPod.Name
+			framework.Logf("deleting db pod: %v", dbPodName)
+			//delete the db-pod in order to emulate the pod restart
+			dbPod.Status.Message = "check"
+			deletePod(f, ovnNs, dbPodName)
+		}
+
+		framework.Logf("wait for all the pods to finish full restart")
+		var wg sync.WaitGroup
+		for _, pod := range dbPods {
+			wg.Add(1)
+			go func(pod v1.Pod) {
+				defer wg.Done()
+				waitForPodToFinishFullRestart(f, &pod)
+			}(pod)
+		}
+		wg.Wait()
+		framework.Logf("all the pods finish full restart")
+
+		framework.Logf("test simple connectivity from new pod to API server,after recovery")
+		singlePodConnectivityTest(f, "after-delete-db-pods")
+	})
 })
