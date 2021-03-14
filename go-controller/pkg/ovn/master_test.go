@@ -1146,8 +1146,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + types.OVNClusterRouter + " " + lrpIP + " " + lrpIP,
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + types.OVNClusterRouter + " " + lrpIPv6 + " " + lrpIPv6,
 				"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add " + types.OVNClusterRouter + " " + nodeSubnet + " " + lrpIP,
-				"ovn-nbctl --timeout=15 --if-exists lr-nat-del " + gwRouter + " snat " + clusterCIDR +
-					" -- lr-nat-add " + gwRouter + " snat " + gatewayRouterIP + " " + clusterCIDR,
+				"ovn-nbctl --timeout=15 --columns _uuid --format=csv --no-headings find nat external_ip=" + gatewayRouterIP + " type=snat logical_ip=" + clusterCIDR,
+				"ovn-nbctl --timeout=15 --if-exists lr-nat-del " + gwRouter + " snat " + clusterCIDR,
+				"ovn-nbctl --timeout=15 lr-nat-add " + gwRouter + " snat " + gatewayRouterIP + " " + clusterCIDR,
 			})
 
 			addPBRandNATRules(fexec, nodeName, nodeSubnet, gatewayRouterIP, nodeMgmtPortIP, nodeMgmtPortMAC)
@@ -1181,8 +1182,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + types.OVNClusterRouter + " " + lrpIP + " " + lrpIP,
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + types.OVNClusterRouter + " " + lrpIPv6 + " " + lrpIPv6,
 				"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add " + types.OVNClusterRouter + " " + nodeSubnet + " " + lrpIP,
-				"ovn-nbctl --timeout=15 --if-exists lr-nat-del " + gwRouter + " snat " + clusterCIDR +
-					" -- lr-nat-add " + gwRouter + " snat " + gatewayRouterIP + " " + clusterCIDR,
+				"ovn-nbctl --timeout=15 --columns _uuid --format=csv --no-headings find nat external_ip=" + gatewayRouterIP + " type=snat logical_ip=" + clusterCIDR,
+				"ovn-nbctl --timeout=15 --if-exists lr-nat-del " + gwRouter + " snat " + clusterCIDR,
+				"ovn-nbctl --timeout=15 lr-nat-add " + gwRouter + " snat " + gatewayRouterIP + " " + clusterCIDR,
 			})
 
 			addPBRandNATRules(fexec, nodeName, nodeSubnet, gatewayRouterIP, nodeMgmtPortIP, nodeMgmtPortMAC)
