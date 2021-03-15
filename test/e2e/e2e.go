@@ -1182,11 +1182,10 @@ spec:
 			framework.Failf("Failed to curl the remote host %s from container %s on node %s: %v", exFWPermitTcpWwwDest, ovnContainer, serverNodeInfo.name, err)
 		}
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host by DNS name %s is permitted as defined by external firewall policy", "www.google.com"))
-		_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, "www.google.com.", "443")
+		_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, "www.google.com", "443")
 		if err != nil {
-			_, _ = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "cat", "/etc/resolv.conf")
 
-			framework.Failf("Failed to reach remote host %s from container %s on node %s: %+v", "www.google.com", ovnContainer, serverNodeInfo.name, err)
+			framework.Failf("Failed to reach remote host %s from container %s on node %s: %+v", "www.google.com", srcPodName, serverNodeInfo.name, err)
 		}
 
 		deleteArgs := []string{
