@@ -18,6 +18,10 @@ import (
 	"k8s.io/klog/v2"
 )
 
+const (
+	DuplicateECMPError = "duplicate nexthop for the same ECMP route"
+)
+
 type gatewayInfo struct {
 	gws        []net.IP
 	bfdEnabled bool
@@ -130,7 +134,7 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 
 				_, stderr, err := util.RunOVNNbctl(nbctlArgs...)
 
-				if err != nil {
+				if err != nil && !strings.Contains(err.Error(), DuplicateECMPError) {
 					return fmt.Errorf("unable to add src-ip route to GR router, stderr:%q, err:%v", stderr, err)
 				}
 				if err := oc.addHybridRoutePolicyForPod(net.ParseIP(podIP.IP), pod.Spec.NodeName); err != nil {
@@ -303,7 +307,7 @@ func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*ne
 							"lr-route-add", gr, podIP + mask, gw.String(), types.GWRouterToExtSwitchPrefix + gr}
 					}
 					_, stderr, err := util.RunOVNNbctl(nbctlArgs...)
-					if err != nil {
+					if err != nil && !strings.Contains(err.Error(), DuplicateECMPError) {
 						return fmt.Errorf("unable to add external gwStr src-ip route to GR router, stderr:%q, err:%gw", stderr, err)
 					}
 					if err := oc.addHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
