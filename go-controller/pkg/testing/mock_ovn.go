@@ -13,6 +13,7 @@ import (
 
 const (
 	LogicalSwitchType     string = "Logical_Switch"
+	LogicalRouterType     string = "Logical_Router"
 	LogicalSwitchPortType string = "Logical_Switch_Port"
 	ChassisType           string = "Chassis"
 	ACLType               string = "ACL"
@@ -78,6 +79,7 @@ func NewMockOVNClient(db string) *MockOVNClient {
 	mock.cache[ChassisType] = make(MockObjectCacheByName)
 	mock.cache[LogicalSwitchType] = make(MockObjectCacheByName)
 	mock.cache[ChassisPrivateType] = make(MockObjectCacheByName)
+	mock.cache[LogicalRouterType] = make(MockObjectCacheByName)
 	return mock
 }
 
