@@ -1123,16 +1123,6 @@ spec:
 				framework.Logf("Unable to remove the CRD config from disk: %v", err)
 			}
 		}()
-		// create the CRD config parameters
-		applyArgs := []string{
-			"apply",
-			frameworkNsFlag,
-			"-f",
-			egressFirewallYamlFile,
-		}
-		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
-		// apply the egress firewall configuration
-		framework.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
 		// create the pod that will be used as the source for the connectivity test
 		createGenericPod(f, srcPodName, serverNodeInfo.name, f.Namespace.Name, command)
 
@@ -1149,6 +1139,23 @@ spec:
 		if err != nil {
 			framework.Failf("Error trying to get the pod IP address %v", err)
 		}
+		// Verify the the explicitly allowed host/port tcp port 80 rule is functional
+		ginkgo.By(fmt.Sprintf("Verifying connectivity to an external host from inside a pod www.google.com"))
+		_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, "www.google.com.", "443")
+		if err != nil {
+			framework.Failf("Failed to curl the remote host %s from container %s on node %s: %v", "www.google.com", ovnContainer, serverNodeInfo.name, err)
+		}
+
+		// create the CRD config parameters
+		applyArgs := []string{
+			"apply",
+			frameworkNsFlag,
+			"-f",
+			egressFirewallYamlFile,
+		}
+		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
+		// apply the egress firewall configuration
+		framework.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
 		// Verify the remote host/port as explicitly allowed by the firewall policy is reachable
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host %s is permitted as defined by the external firewall policy", exFWPermitTcpDnsDest))
 		_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpDnsDest, "53")
