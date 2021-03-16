@@ -1356,7 +1356,9 @@ spec:
 		if err == nil {
 			framework.Failf("Failed to curl the remote host %s from container %s on node %s: %v", exFWPermitTcpWwwDest, ovnContainer, serverNodeInfo.name, err)
 		}
-		if os.GetEnv("OVN_HA") == "false" {
+
+		//FIXME: (jtanenba) I discovered that at least in github CI in shared gateway mode pods cannot resolve DNS names, the resolve fails returning `nc: getaddrinfo: Try again`
+		if os.Getenv("OVN_GATEWAY_MODE") != "shared" {
 			ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host by DNS name %s is permitted as defined by external firewall policy", "www.google.com"))
 			_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, "www.google.com.", "443")
 			if err != nil {
