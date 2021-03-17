@@ -463,7 +463,6 @@ create_ovn_kube_manifests() {
     --multicast-enabled="${OVN_MULTICAST_ENABLE}" \
     --k8s-apiserver="${API_URL}" \
     --ovn-master-count="${KIND_NUM_MASTER}" \
-    --kind \
     --ovn-unprivileged-mode=no \
     --master-loglevel="${MASTER_LOG_LEVEL}" \
     --node-loglevel="${NODE_LOG_LEVEL}" \

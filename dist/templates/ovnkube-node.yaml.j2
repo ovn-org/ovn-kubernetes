@@ -140,11 +140,9 @@ spec:
         - mountPath: /etc/ovn/
           name: host-var-lib-ovs
           readOnly: true
-        {% if kind is defined and kind -%}
         - mountPath: /var/run/netns
           name: host-netns
           mountPropagation: Bidirectional
-        {% endif %}
 
         resources:
           requests:
@@ -300,11 +298,9 @@ spec:
       - name: host-var-lib-ovs
         hostPath:
           path: /var/lib/openvswitch
-      {% if kind is defined and kind -%}
       - name: host-netns
         hostPath:
           path: /var/run/netns
-      {% endif %}
 
       tolerations:
       - operator: "Exists"
