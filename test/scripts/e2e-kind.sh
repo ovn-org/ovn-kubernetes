@@ -9,10 +9,13 @@ groomTestList() {
 }
 
 SKIPPED_TESTS="
-# PERFORMANCE AND DISRUPTIVE TESTS: NOT WANTED FOR CI
+# PERFORMANCE, DISRUPTIVE, OR UNRELATED TESTS: NOT WANTED FOR CI
 Networking IPerf IPv[46]
 \[Feature:PerformanceDNS\]
 Disruptive
+DisruptionController
+\[sig-apps\] CronJob
+\[sig-storage\]
 
 # FEATURES NOT AVAILABLE IN OUR CI ENVIRONMENT
 \[Feature:Federation\]
@@ -25,9 +28,6 @@ should set TCP CLOSE_WAIT timeout
 
 # TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/819
 Services.+session affinity
-
-# TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/1116
-EndpointSlices
 
 # NOT IMPLEMENTED; SEE DISCUSSION IN https://github.com/ovn-org/ovn-kubernetes/pull/1225
 named port.+\[Feature:NetworkPolicy\]
