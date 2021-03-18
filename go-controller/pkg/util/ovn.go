@@ -31,9 +31,9 @@ func UpdateRouterSNAT(router string, externalIP net.IP, logicalSubnet *net.IPNet
 
 	// Search for exact match to see if entry already exists
 	uuids, stderr, err := RunOVNNbctl("--columns", "_uuid", "--format=csv", "--no-headings", "find", "nat",
-		"external_ip="+externalIP.String(),
+		fmt.Sprintf("external_ip=\"%s\"", externalIP.String()),
 		"type="+natType,
-		"logical_ip="+logicalIPVal,
+		fmt.Sprintf("logical_ip=\"%s\"", logicalIPVal),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to search NAT rules for external_ip %s, logicalSubnet: %s, "+
