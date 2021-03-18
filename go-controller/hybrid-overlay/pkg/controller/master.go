@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -179,6 +180,13 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 		return nil
 	}
 
+	// we need to setup a reroute policy for hybrid overlay subnet
+	// this is so hybrid pod -> service -> hybrid endpoint will reroute to the DR IP
+	if err := setupHybridLRPolicySharedGw(subnets, node.Name); err != nil {
+		return fmt.Errorf("unable to setup Hybrid Subnet Logical Route Policy for node: %s, error: %v",
+			node.Name, err)
+	}
+
 	// retrieve port configuration. If port isn't set up, portMAC will be nil
 	portMAC, _, _ = util.GetPortAddresses(portName, m.ovnNBClient)
 
@@ -284,6 +292,88 @@ func (m *MasterController) DeleteNode(node *kapi.Node) error {
 	if _, ok := node.Annotations[types.HybridOverlayDRMAC]; ok && !houtil.IsHybridOverlayNode(node) {
 		m.deleteOverlayPort(node)
 	}
+
+	if err := removeHybridLRPolicySharedGW(node.Name); err != nil {
+		return err
+	}
 	klog.V(5).Infof("Node delete for %s completed", node.Name)
+	return nil
+}
+
+func setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet, nodeName string) error {
+	klog.Infof("Setting up logical route policy for hybrid subnet on node: %s", nodeName)
+	var L3Prefix string
+	for _, nodeSubnet := range nodeSubnets {
+		if utilnet.IsIPv6CIDR(nodeSubnet) {
+			L3Prefix = "ip6"
+		} else {
+			L3Prefix = "ip4"
+		}
+		var hybridCIDR *net.IPNet
+		for _, hybridSubnet := range config.HybridOverlay.ClusterSubnets {
+			if utilnet.IsIPv6CIDR(hybridSubnet.CIDR) == utilnet.IsIPv6CIDR(nodeSubnet) {
+				hybridCIDR = hybridSubnet.CIDR
+				break
+			}
+		}
+
+		drIP := util.GetNodeHybridOverlayIfAddr(nodeSubnet).IP
+		matchStr := fmt.Sprintf(`inport == %s%s && %s.dst == %s`,
+			ovntypes.RouterToSwitchPrefix, nodeName, L3Prefix, hybridCIDR)
+		// Search for exact match to see if we need to update anything
+		uuid, stderr, err := util.RunOVNNbctl("--columns", "_uuid", "--no-headings", "find", "logical_router_policy",
+			"priority="+ovntypes.HybridOverlaySubnetPriority,
+			"external_ids=name="+ovntypes.HybridSubnetPrefix+nodeName,
+			"action=reroute",
+			"nexthops="+drIP.String(),
+			fmt.Sprintf(`match="%s"`, matchStr),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to run find logical_router_policy for '%s' for host %q "+
+				"stderr: %s, error: %v", matchStr, nodeName, stderr, err)
+		}
+		// UUID exists with exact match, no update needed
+		if len(uuid) > 0 {
+			continue
+		}
+		// No exact match, see if there is an entry already that we need to delete
+		if err := removeHybridLRPolicySharedGW(nodeName); err != nil {
+			return err
+		}
+		// Create logical_router_policy
+		uuid, stderr, err = util.RunOVNNbctl("--id=@lrp", "create", "logical_router_policy",
+			"priority="+ovntypes.HybridOverlaySubnetPriority,
+			"external_ids=name="+ovntypes.HybridSubnetPrefix+nodeName,
+			"action=reroute",
+			"nexthops="+drIP.String(),
+			fmt.Sprintf(`match="%s"`, matchStr),
+			"--", "add", "logical_router", ovntypes.OVNClusterRouter, "policies", "@lrp",
+		)
+		if err != nil {
+			return fmt.Errorf("failed to add policy route '%s' for host %q on %s "+
+				"stderr: %s, error: %v", matchStr, nodeName, ovntypes.OVNClusterRouter, stderr, err)
+		}
+		klog.Infof("Created hybrid overlay logical route policy for node %s, uuid: %s", nodeName, uuid)
+	}
+	return nil
+}
+
+func removeHybridLRPolicySharedGW(nodeName string) error {
+	// see if there is an entry already that we need to delete
+	uuid, stderr, err := util.RunOVNNbctl("--columns", "_uuid", "--no-headings", "find", "logical_router_policy",
+		"external_ids=name="+ovntypes.HybridSubnetPrefix+nodeName,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to run find logical_router_policy for host %q "+
+			"stderr: %s, error: %v", nodeName, stderr, err)
+	}
+
+	if len(uuid) > 0 {
+		_, stderr, err = util.RunOVNNbctl("lr-policy-del", ovntypes.OVNClusterRouter, uuid)
+		if err != nil {
+			return fmt.Errorf("failed to delete policy %s, from %s, stderr: %s, error: %v",
+				uuid, ovntypes.OVNClusterRouter, stderr, err)
+		}
+	}
 	return nil
 }
