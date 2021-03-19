@@ -4,14 +4,12 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -432,10 +430,9 @@ func addDistributedGWPort() error {
 	// be learnt and added by the chassis to which the distributed gateway port (DGP) is
 	// bound. However, in our case we don't send any traffic out with the DGP port's IP
 	// as source IP, so that binding will never be learnt and we need to seed it.
-	var dnatSnatNextHopMac string
-	// Only used for Error Strings
+
 	var nodeLocalNatSubnetNextHop string
-	dnatSnatNextHopMac = util.IPAddrToHWAddr(net.ParseIP(types.V4NodeLocalNATSubnetNextHop)).String()
+	dnatSnatNextHopMac := util.IPAddrToHWAddr(net.ParseIP(types.V4NodeLocalNATSubnetNextHop))
 	nodeLocalNatSubnetNextHop = types.V4NodeLocalNATSubnetNextHop + " " + types.V6NodeLocalNATSubnetNextHop
 	stdout, stderr, err = util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "MAC_Binding",
 		"logical_port="+dgpName, fmt.Sprintf(`mac="%s"`, dnatSnatNextHopMac))
@@ -449,31 +446,13 @@ func addDistributedGWPort() error {
 		return nil
 	}
 
-	// Wait a bit for northd to create the cluster router's datapath in southbound
-	var datapath string
-	err = wait.PollImmediate(time.Second, 30*time.Second, func() (bool, error) {
-		datapath, stderr, err = util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "datapath",
-			"external_ids:name="+types.OVNClusterRouter)
-		// Ignore errors; can't easily detect which are transient or fatal
-		return datapath != "", nil
-	})
-	if err != nil {
-		return fmt.Errorf("failed to get the datapatah UUID of %s from OVN SB "+
-			"stdout: %q, stderr: %q, error: %v", types.OVNClusterRouter, datapath, stderr, err)
+	for _, ip := range []string{types.V4NodeLocalNATSubnetNextHop, types.V6NodeLocalNATSubnetNextHop} {
+		nextHop := net.ParseIP(ip)
+		if err := util.CreateMACBinding(dgpName, types.OVNClusterRouter, dnatSnatNextHopMac, nextHop); err != nil {
+			return fmt.Errorf("unable to create mac binding for DGP: %v", err)
+		}
 	}
 
-	_, stderr, err = util.RunOVNSbctl("create", "mac_binding", "datapath="+datapath, "ip="+types.V4NodeLocalNATSubnetNextHop,
-		"logical_port="+dgpName, fmt.Sprintf(`mac="%s"`, dnatSnatNextHopMac))
-	if err != nil {
-		return fmt.Errorf("failed to create a MAC_Binding entry of (%s, %s) for distributed router port %s "+
-			"stderr: %q, error: %v", types.V4NodeLocalNATSubnetNextHop, dnatSnatNextHopMac, dgpName, stderr, err)
-	}
-	_, stderr, err = util.RunOVNSbctl("create", "mac_binding", "datapath="+datapath, fmt.Sprintf(`ip="%s"`, types.V6NodeLocalNATSubnetNextHop),
-		"logical_port="+dgpName, fmt.Sprintf(`mac="%s"`, dnatSnatNextHopMac))
-	if err != nil {
-		return fmt.Errorf("failed to create a MAC_Binding entry of (%s, %s) for distributed router port %s "+
-			"stderr: %q, error: %v", types.V6NodeLocalNATSubnetNextHop, dnatSnatNextHopMac, dgpName, stderr, err)
-	}
 	return nil
 }
 

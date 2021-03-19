@@ -180,13 +180,6 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 		return nil
 	}
 
-	// we need to setup a reroute policy for hybrid overlay subnet
-	// this is so hybrid pod -> service -> hybrid endpoint will reroute to the DR IP
-	if err := setupHybridLRPolicySharedGw(subnets, node.Name); err != nil {
-		return fmt.Errorf("unable to setup Hybrid Subnet Logical Route Policy for node: %s, error: %v",
-			node.Name, err)
-	}
-
 	// retrieve port configuration. If port isn't set up, portMAC will be nil
 	portMAC, _, _ = util.GetPortAddresses(portName, m.ovnNBClient)
 
@@ -216,6 +209,13 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 		} else {
 			lspOK = true
 		}
+	}
+
+	// we need to setup a reroute policy for hybrid overlay subnet
+	// this is so hybrid pod -> service -> hybrid endpoint will reroute to the DR IP
+	if err := setupHybridLRPolicySharedGw(subnets, node.Name, portMAC); err != nil {
+		return fmt.Errorf("unable to setup Hybrid Subnet Logical Route Policy for node: %s, error: %v",
+			node.Name, err)
 	}
 
 	if !lspOK {
@@ -300,7 +300,7 @@ func (m *MasterController) DeleteNode(node *kapi.Node) error {
 	return nil
 }
 
-func setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet, nodeName string) error {
+func setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet, nodeName string, portMac net.HardwareAddr) error {
 	klog.Infof("Setting up logical route policy for hybrid subnet on node: %s", nodeName)
 	var L3Prefix string
 	for _, nodeSubnet := range nodeSubnets {
@@ -318,14 +318,14 @@ func setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet, nodeName string) erro
 		}
 
 		drIP := util.GetNodeHybridOverlayIfAddr(nodeSubnet).IP
-		matchStr := fmt.Sprintf(`inport == %s%s && %s.dst == %s`,
+		matchStr := fmt.Sprintf(`inport == \"%s%s\" && %s.dst == %s`,
 			ovntypes.RouterToSwitchPrefix, nodeName, L3Prefix, hybridCIDR)
 		// Search for exact match to see if we need to update anything
 		uuid, stderr, err := util.RunOVNNbctl("--columns", "_uuid", "--no-headings", "find", "logical_router_policy",
 			"priority="+ovntypes.HybridOverlaySubnetPriority,
 			"external_ids=name="+ovntypes.HybridSubnetPrefix+nodeName,
 			"action=reroute",
-			"nexthops="+drIP.String(),
+			fmt.Sprintf("nexthops=\"%s\"", drIP),
 			fmt.Sprintf(`match="%s"`, matchStr),
 		)
 		if err != nil {
@@ -345,7 +345,7 @@ func setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet, nodeName string) erro
 			"priority="+ovntypes.HybridOverlaySubnetPriority,
 			"external_ids=name="+ovntypes.HybridSubnetPrefix+nodeName,
 			"action=reroute",
-			"nexthops="+drIP.String(),
+			fmt.Sprintf("nexthops=\"%s\"", drIP),
 			fmt.Sprintf(`match="%s"`, matchStr),
 			"--", "add", "logical_router", ovntypes.OVNClusterRouter, "policies", "@lrp",
 		)
@@ -354,6 +354,11 @@ func setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet, nodeName string) erro
 				"stderr: %s, error: %v", matchStr, nodeName, ovntypes.OVNClusterRouter, stderr, err)
 		}
 		klog.Infof("Created hybrid overlay logical route policy for node %s, uuid: %s", nodeName, uuid)
+
+		logicalPort := ovntypes.RouterToSwitchPrefix + nodeName
+		if err := util.CreateMACBinding(logicalPort, ovntypes.OVNClusterRouter, portMac, drIP); err != nil {
+			return fmt.Errorf("failed to create MAC Binding for hybrid overlay: %v", err)
+		}
 	}
 	return nil
 }
