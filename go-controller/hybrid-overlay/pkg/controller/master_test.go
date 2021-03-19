@@ -412,8 +412,8 @@ func updateLogicalRouterPolicy(fexec *ovntest.FakeExec) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		// Find if policy exists already
 		Cmd: "ovn-nbctl --timeout=15 --columns _uuid --no-headings find logical_router_policy priority=1002 " +
-			"external_ids=name=hybrid-subnet-node1 action=reroute nexthops=10.1.2.3 " +
-			`match="inport == rtos-node1 && ip4.dst == 11.1.0.0/16"`,
+			"external_ids=name=hybrid-subnet-node1 action=reroute nexthops=\"10.1.2.3\" " +
+			`match="inport == \"rtos-node1\" && ip4.dst == 11.1.0.0/16"`,
 		Output: "19df5ce5-2802-4ee5-891f-4fb27ca776e9",
 	})
 }
