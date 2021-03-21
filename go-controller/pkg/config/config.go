@@ -1785,7 +1785,6 @@ func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
 	if err := overrideFields(&OvnKubeNode, &file.OvnKubeNode, &savedOvnKubeNode); err != nil {
 		return err
 	}
-	//cli.OvnKubeNode.Mode = ctx.String("ovnkube-node-mode")
 
 	// And CLI overrides over config file and default values
 	if err := overrideFields(&OvnKubeNode, &cli.OvnKubeNode, &savedOvnKubeNode); err != nil {

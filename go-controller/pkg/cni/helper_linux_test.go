@@ -699,6 +699,34 @@ func TestSetupSriovInterface(t *testing.T) {
 				{OnCallMethodName: "Do", OnCallMethodArgType: []string{"func(ns.NetNS) error"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
 		},
+		{
+			desc:         "test code path when IsSmartNIC set to true",
+			inpNetNS:     mockNS,
+			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
+			inpIfaceName: "eth0",
+			inpPodIfaceInfo: &PodInterfaceInfo{
+				PodAnnotation: util.PodAnnotation{},
+				MTU:           1500,
+				IsSmartNic:    true,
+			},
+			inpPCIAddrs: "0000:03:00.1",
+			errExp:      false,
+			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "GetNetDevicesFromPci", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{[]string{"en01"}, nil}},
+			},
+			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
+				// The below two mock calls are needed for the moveIfToNetns() call that internally invokes them
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
+				{OnCallMethodName: "LinkSetNsFd", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{nil}},
+			},
+			linkMockHelper: []ovntest.TestifyMockHelper{},
+			nsMockHelper: []ovntest.TestifyMockHelper{
+				// The below mock call is needed when moveIfToNetns() is called
+				{OnCallMethodName: "Fd", OnCallMethodArgType: []string{}, RetArgList: []interface{}{uintptr(123456)}},
+				// The below mock call is for the netns.Do() invocation
+				{OnCallMethodName: "Do", OnCallMethodArgType: []string{"func(ns.NetNS) error"}, RetArgList: []interface{}{nil}},
+			},
+		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {

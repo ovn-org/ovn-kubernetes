@@ -16,17 +16,27 @@ import (
 
 var runner kexec.Interface
 var vsctlPath string
+var ofctlPath string
 
-func setExec(r kexec.Interface) error {
+func SetExec(r kexec.Interface) error {
 	runner = r
 	var err error
 	vsctlPath, err = r.LookPath("ovs-vsctl")
+	if err != nil {
+		return err
+	}
+	ofctlPath, err = r.LookPath("ovs-ofctl")
 	return err
+}
+
+// ResetRunner used by unit-tests to reset runner to its initial (un-initialized) value
+func ResetRunner() {
+	runner = nil
 }
 
 func ovsExec(args ...string) (string, error) {
 	if runner == nil {
-		if err := setExec(kexec.New()); err != nil {
+		if err := SetExec(kexec.New()); err != nil {
 			return "", err
 		}
 	}
@@ -86,23 +96,29 @@ func ovsClear(table, record string, columns ...string) error {
 }
 
 func ofctlExec(args ...string) (string, error) {
+	if runner == nil {
+		if err := SetExec(kexec.New()); err != nil {
+			return "", err
+		}
+	}
+
 	args = append([]string{"--timeout=10", "--no-stats", "--strict"}, args...)
 	var stdout, stderr bytes.Buffer
-	cmd := runner.Command("ovs-ofctl", args...)
+	cmd := runner.Command(ofctlPath, args...)
 	cmd.SetStdout(&stdout)
 	cmd.SetStderr(&stderr)
 
 	cmdStr := strings.Join(args, " ")
-	klog.V(5).Infof("exec: ovs-ofctl %s", cmdStr)
+	klog.V(5).Infof("exec: %s %s", ofctlPath, cmdStr)
 
 	err := cmd.Run()
 	if err != nil {
 		stderrStr := stderr.String()
-		klog.Errorf("exec: ovs-ofctl %s : stderr: %q", cmdStr, stderrStr)
-		return "", fmt.Errorf("failed to run 'ovs-ofctl %s': %v\n  %q", cmdStr, err, stderrStr)
+		klog.Errorf("exec: %s %s : stderr: %q", ofctlPath, cmdStr, stderrStr)
+		return "", fmt.Errorf("failed to run '%s %s': %v\n  %q", ofctlPath, cmdStr, err, stderrStr)
 	}
 	stdoutStr := stdout.String()
-	klog.V(5).Infof("exec: ovs-ofctl %s: stdout: %q", cmdStr, stdoutStr)
+	klog.V(5).Infof("exec: %s %s: stdout: %q", ofctlPath, cmdStr, stdoutStr)
 
 	trimmed := strings.TrimSpace(stdoutStr)
 	// If output is a single line, strip the trailing newline
