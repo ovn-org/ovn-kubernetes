@@ -197,16 +197,6 @@ func GenerateACLName(lb string, sourceIP string, sourcePort int32) string {
 	return aclName
 }
 
-// GenerateACLNameForOVNCommand sanitize the ACL name because the generateACLName
-// function was including backslash escapes for the ACL
-// name for use in OVN commands that have trouble with literal ":". That
-// was causing a mismatch when services were syncing because the name
-// actually returned from an OVN command does not include any backslashes
-// so the names would not match. #1749
-func GenerateACLNameForOVNCommand(lb string, sourceIP string, sourcePort int32) string {
-	return strings.ReplaceAll(GenerateACLName(lb, sourceIP, sourcePort), ":", "\\:")
-}
-
 func GetWorkerLoadBalancer(node string, protocol kapi.Protocol) (string, error) {
 	var out string
 	var err error

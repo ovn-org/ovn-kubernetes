@@ -255,50 +255,6 @@ func TestGetLogicalRoutersForLoadBalancer(t *testing.T) {
 	}
 }
 
-func TestGenerateACLName(t *testing.T) {
-	type args struct {
-		lb         string
-		sourceIP   string
-		sourcePort int32
-	}
-	tests := []struct {
-		name string
-		args args
-		want string
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := GenerateACLName(tt.args.lb, tt.args.sourceIP, tt.args.sourcePort); got != tt.want {
-				t.Errorf("GenerateACLName() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestGenerateACLNameForOVNCommand(t *testing.T) {
-	type args struct {
-		lb         string
-		sourceIP   string
-		sourcePort int32
-	}
-	tests := []struct {
-		name string
-		args args
-		want string
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := GenerateACLNameForOVNCommand(tt.args.lb, tt.args.sourceIP, tt.args.sourcePort); got != tt.want {
-				t.Errorf("GenerateACLNameForOVNCommand() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestGetGRLogicalSwitchForLoadBalancer(t *testing.T) {
 	type args struct {
 		lb string

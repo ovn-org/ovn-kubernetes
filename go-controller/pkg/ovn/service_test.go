@@ -165,6 +165,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
+		config.Kubernetes.OVNEmptyLbEvents = true
 
 		app = cli.NewApp()
 		app.Name = "test"

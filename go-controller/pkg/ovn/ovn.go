@@ -1066,20 +1066,6 @@ func (oc *Controller) aclLoggingCanEnable(annotation string, nsInfo *namespaceIn
 	return okCnt > 0
 }
 
-// setServiceLBToACL associates an empty load balancer with its associated ACL reject rule
-func (oc *Controller) setServiceACLToLB(lb, vip, acl string) {
-	if _, ok := oc.serviceLBMap[lb]; !ok {
-		oc.serviceLBMap[lb] = make(map[string]*loadBalancerConf)
-		oc.serviceLBMap[lb][vip] = &loadBalancerConf{rejectACL: acl}
-		return
-	}
-	if _, ok := oc.serviceLBMap[lb][vip]; !ok {
-		oc.serviceLBMap[lb][vip] = &loadBalancerConf{rejectACL: acl}
-		return
-	}
-	oc.serviceLBMap[lb][vip].rejectACL = acl
-}
-
 // setServiceEndpointsToLB associates a load balancer with endpoints
 func (oc *Controller) setServiceEndpointsToLB(lb, vip string, eps []string) {
 	if _, ok := oc.serviceLBMap[lb]; !ok {
@@ -1110,15 +1096,6 @@ func (oc *Controller) removeServiceLB(lb, vip string) {
 	oc.serviceLBLock.Lock()
 	defer oc.serviceLBLock.Unlock()
 	delete(oc.serviceLBMap[lb], vip)
-}
-
-// removeServiceACL removes a specific ACL associated with a load balancer and ip:port
-func (oc *Controller) removeServiceACL(lb, vip string) {
-	oc.serviceLBLock.Lock()
-	defer oc.serviceLBLock.Unlock()
-	if _, ok := oc.serviceLBMap[lb][vip]; ok {
-		oc.serviceLBMap[lb][vip].rejectACL = ""
-	}
 }
 
 // removeServiceEndpoints removes endpoints associated with a load balancer and ip:port

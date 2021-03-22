@@ -34,9 +34,9 @@ import (
 )
 
 const (
-	// OvnServiceIdledAt is a constant string representing the Service annotation key
+	// IdledServiceAnnotationSuffix is a constant string representing the suffix of the Service annotation key
 	// whose value indicates the time stamp in RFC3339 format when a Service was idled
-	OvnServiceIdledAt              = "k8s.ovn.org/idled-at"
+	IdledServiceAnnotationSuffix   = "idled-at"
 	OvnNodeAnnotationRetryInterval = 100 * time.Millisecond
 	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
 )
