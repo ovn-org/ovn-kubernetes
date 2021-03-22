@@ -52,24 +52,12 @@ func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
 }
 
 const (
-	toLport   = "to-lport"
-	fromLport = "from-lport"
 	noneMatch = "None"
 	// Default ACL logging severity
 	defaultACLLoggingSeverity = "info"
 	// IPv6 multicast traffic destined to dynamic groups must have the "T" bit
 	// set to 1: https://tools.ietf.org/html/rfc3307#section-4.3
 	ipv6DynamicMulticastMatch = "(ip6.dst[120..127] == 0xff && ip6.dst[116] == 1)"
-	// Default deny acl rule priority
-	defaultDenyPriority = "1000"
-	// Default allow acl rule priority
-	defaultAllowPriority = "1001"
-	// Default multicast deny acl rule priority
-	defaultMcastDenyPriority = "1011"
-	// Default multicast allow acl rule priority
-	defaultMcastAllowPriority = "1012"
-	// Default routed multicast allow acl rule priority
-	defaultRoutedMcastAllowPriority = "1013"
 )
 
 func getACLLoggingSeverity(aclLogging string) string {
@@ -123,8 +111,8 @@ func addAllowACLFromNode(logicalSwitch string, mgmtPortIP net.IP, ovnNBClient go
 	}
 	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtPortIP.String())
 
-	priority, _ := strconv.Atoi(defaultAllowPriority)
-	aclcmd, err := ovnNBClient.ACLAdd(logicalSwitch, "to-lport", match, "allow-related", priority, nil, false, "", "")
+	priority, _ := strconv.Atoi(types.DefaultAllowPriority)
+	aclcmd, err := ovnNBClient.ACLAdd(logicalSwitch, types.DirectionToLPort, match, "allow-related", priority, nil, false, "", "")
 
 	// NOTE: goovn.ErrorExist is returned if the ACL already exists, in such a case ignore that error.
 	// Additional Context-> Per Tim Rozet's review comments, there could be scenarios where ovnkube restarts, in which
@@ -168,7 +156,7 @@ func getACLPortGroupUUID(match, action string, policyType knet.PolicyType) (stri
 	return uuid, nil
 }
 
-func addACLPortGroup(policyNamespace, portGroupUUID, direction, priority, match, action string, policyType knet.PolicyType, aclLogging string) error {
+func addACLPortGroup(policyNamespace, portGroupUUID, direction, priority, match, action string, policyType knet.PolicyType, aclLogging string, policyName string) error {
 	uuid, err := getACLPortGroupUUID(match, action, policyType)
 	if err != nil {
 		return err
@@ -179,13 +167,17 @@ func addACLPortGroup(policyNamespace, portGroupUUID, direction, priority, match,
 	if policyNamespace == "" {
 		policyNamespace = portGroupUUID
 	}
-
+	if policyName != "" {
+		policyName = fmt.Sprintf("%s_%s", policyNamespace, policyName)
+	} else {
+		policyName = policyNamespace
+	}
 	_, stderr, err := util.RunOVNNbctl("--id=@acl", "create", "acl",
 		fmt.Sprintf("priority=%s", priority),
 		fmt.Sprintf("direction=%s", direction), match, "action="+action,
 		fmt.Sprintf("log=%t", aclLogging != ""), fmt.Sprintf("severity=%s", getACLLoggingSeverity(aclLogging)),
 		fmt.Sprintf("meter=%s", types.OvnACLLoggingMeter),
-		fmt.Sprintf("name=%.63s", policyNamespace),
+		fmt.Sprintf("name=%.63s", policyName),
 		fmt.Sprintf("external-ids:default-deny-policy-type=%s", policyType),
 		"--", "add", "port_group", portGroupUUID,
 		"acls", "@acl")
@@ -242,7 +234,7 @@ func defaultDenyPortGroup(namespace, gressSuffix string) string {
 	return hashedPortGroup(namespace) + "_" + gressSuffix
 }
 
-func (oc *Controller) createDefaultDenyPortGroup(ns string, nsInfo *namespaceInfo, policyType knet.PolicyType, aclLogging string) error {
+func (oc *Controller) createDefaultDenyPortGroup(ns string, nsInfo *namespaceInfo, policyType knet.PolicyType, aclLogging string, policyName string) error {
 	var portGroupName string
 	if policyType == knet.PolicyTypeIngress {
 		portGroupName = defaultDenyPortGroup(ns, "ingressDefaultDeny")
@@ -255,15 +247,15 @@ func (oc *Controller) createDefaultDenyPortGroup(ns string, nsInfo *namespaceInf
 			portGroupName, err)
 	}
 	match := getACLMatch(portGroupName, "", policyType)
-	err = addACLPortGroup(ns, portGroupUUID, toLport,
-		defaultDenyPriority, match, "drop", policyType, aclLogging)
+	err = addACLPortGroup(ns, portGroupUUID, types.DirectionToLPort,
+		types.DefaultDenyPriority, match, "drop", policyType, aclLogging, policyName)
 	if err != nil {
 		return fmt.Errorf("failed to create default deny ACL for port group %v", err)
 	}
 
 	match = getACLMatch(portGroupName, "arp", policyType)
-	err = addACLPortGroup(ns, portGroupUUID, toLport,
-		defaultAllowPriority, match, "allow", policyType, "")
+	err = addACLPortGroup(ns, portGroupUUID, types.DirectionToLPort,
+		types.DefaultAllowPriority, match, "allow", policyType, "", "ARPallowPolicy")
 	if err != nil {
 		return fmt.Errorf("failed to create default allow ARP ACL for port group %v", err)
 	}
@@ -382,8 +374,8 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 	portGroupName := hashedPortGroup(ns)
 	match := getACLMatch(portGroupName, getMulticastACLEgrMatch(),
 		knet.PolicyTypeEgress)
-	err = addACLPortGroup(ns, nsInfo.portGroupUUID, fromLport,
-		defaultMcastAllowPriority, match, "allow", knet.PolicyTypeEgress, "")
+	err = addACLPortGroup(ns, nsInfo.portGroupUUID, types.DirectionFromLPort,
+		types.DefaultMcastAllowPriority, match, "allow", knet.PolicyTypeEgress, "", "MulticastAllowEgress")
 	if err != nil {
 		return fmt.Errorf("failed to create allow egress multicast ACL for %s (%v)",
 			ns, err)
@@ -391,8 +383,8 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 
 	match = getACLMatch(portGroupName, getMulticastACLIgrMatch(nsInfo),
 		knet.PolicyTypeIngress)
-	err = addACLPortGroup(ns, nsInfo.portGroupUUID, toLport,
-		defaultMcastAllowPriority, match, "allow", knet.PolicyTypeIngress, "")
+	err = addACLPortGroup(ns, nsInfo.portGroupUUID, types.DirectionToLPort,
+		types.DefaultMcastAllowPriority, match, "allow", knet.PolicyTypeIngress, "", "MulticastAllowIngress")
 	if err != nil {
 		return fmt.Errorf("failed to create allow ingress multicast ACL for %s (%v)",
 			ns, err)
@@ -416,15 +408,15 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 }
 
 func deleteMulticastACLs(ns, portGroupHash string, nsInfo *namespaceInfo) error {
-	err := deleteACLPortGroup(portGroupHash, fromLport,
-		defaultMcastAllowPriority, getMulticastACLEgrMatch(), "allow",
+	err := deleteACLPortGroup(portGroupHash, types.DirectionFromLPort,
+		types.DefaultMcastAllowPriority, getMulticastACLEgrMatch(), "allow",
 		knet.PolicyTypeEgress)
 	if err != nil {
 		return fmt.Errorf("failed to delete allow egress multicast ACL for %s (%v)",
 			ns, err)
 	}
 
-	err = deleteACLPortGroup(portGroupHash, toLport, defaultMcastAllowPriority,
+	err = deleteACLPortGroup(portGroupHash, types.DirectionToLPort, types.DefaultMcastAllowPriority,
 		getMulticastACLIgrMatch(nsInfo), "allow", knet.PolicyTypeIngress)
 	if err != nil {
 		return fmt.Errorf("failed to delete allow ingress multicast ACL for %s (%v)",
@@ -458,15 +450,15 @@ func (oc *Controller) createDefaultDenyMulticastPolicy() error {
 	// IP multicast membership reports therefore denying any multicast traffic
 	// to be forwarded to pods.
 	match := "match=\"" + getMulticastACLMatch() + "\""
-	err := addACLPortGroup("", oc.clusterPortGroupUUID, fromLport,
-		defaultMcastDenyPriority, match, "drop", knet.PolicyTypeEgress, "")
+	err := addACLPortGroup("", oc.clusterPortGroupUUID, types.DirectionFromLPort,
+		types.DefaultMcastDenyPriority, match, "drop", knet.PolicyTypeEgress, "", "DefaultDenyMulticastEgress")
 	if err != nil {
 		return fmt.Errorf("failed to create default deny multicast egress ACL: %v", err)
 	}
 
 	// By default deny any ingress multicast traffic to any pod.
-	err = addACLPortGroup("", oc.clusterPortGroupUUID, toLport,
-		defaultMcastDenyPriority, match, "drop", knet.PolicyTypeIngress, "")
+	err = addACLPortGroup("", oc.clusterPortGroupUUID, types.DirectionToLPort,
+		types.DefaultMcastDenyPriority, match, "drop", knet.PolicyTypeIngress, "", "DefaultDenyMulticastIngress")
 	if err != nil {
 		return fmt.Errorf("failed to create default deny multicast ingress ACL: %v", err)
 	}
@@ -484,15 +476,15 @@ func (oc *Controller) createDefaultDenyMulticastPolicy() error {
 func (oc *Controller) createDefaultAllowMulticastPolicy() error {
 	mcastMatch := getMulticastACLMatch()
 	match := getACLMatch(clusterRtrPortGroupName, mcastMatch, knet.PolicyTypeEgress)
-	err := addACLPortGroup("", oc.clusterRtrPortGroupUUID, fromLport,
-		defaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeEgress, "")
+	err := addACLPortGroup("", oc.clusterRtrPortGroupUUID, types.DirectionFromLPort,
+		types.DefaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeEgress, "", "DefaultAllowMulticastEgress")
 	if err != nil {
 		return fmt.Errorf("failed to create default allow multicast egress ACL: %v", err)
 	}
 
 	match = getACLMatch(clusterRtrPortGroupName, mcastMatch, knet.PolicyTypeIngress)
-	err = addACLPortGroup("", oc.clusterRtrPortGroupUUID, toLport,
-		defaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeIngress, "")
+	err = addACLPortGroup("", oc.clusterRtrPortGroupUUID, types.DirectionToLPort,
+		types.DefaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeIngress, "", "DefaultAllowMulticastIngress")
 	if err != nil {
 		return fmt.Errorf("failed to create default allow multicast ingress ACL: %v", err)
 	}
@@ -728,13 +720,13 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	np := NewNetworkPolicy(policy)
 
 	if len(nsInfo.networkPolicies) == 0 {
-		err := oc.createDefaultDenyPortGroup(policy.Namespace, nsInfo, knet.PolicyTypeIngress, nsInfo.aclLogging.Deny)
+		err := oc.createDefaultDenyPortGroup(policy.Namespace, nsInfo, knet.PolicyTypeIngress, nsInfo.aclLogging.Deny, policy.Name)
 		if err != nil {
 			nsInfo.Unlock()
 			klog.Errorf(err.Error())
 			return
 		}
-		err = oc.createDefaultDenyPortGroup(policy.Namespace, nsInfo, knet.PolicyTypeEgress, nsInfo.aclLogging.Deny)
+		err = oc.createDefaultDenyPortGroup(policy.Namespace, nsInfo, knet.PolicyTypeEgress, nsInfo.aclLogging.Deny, policy.Name)
 		if err != nil {
 			nsInfo.Unlock()
 			klog.Errorf(err.Error())
@@ -985,8 +977,8 @@ func (oc *Controller) handlePeerService(
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
 				// If Service Is updated make sure same pods are still matched
-				oldSvc := oldObj.(kapi.Service)
-				newSvc := newObj.(kapi.Service)
+				oldSvc := oldObj.(*kapi.Service)
+				newSvc := newObj.(*kapi.Service)
 				if reflect.DeepEqual(newSvc.Spec.ExternalIPs, oldSvc.Spec.ExternalIPs) &&
 					reflect.DeepEqual(newSvc.Spec.ClusterIP, oldSvc.Spec.ClusterIP) &&
 					reflect.DeepEqual(newSvc.Spec.Type, oldSvc.Spec.Type) &&

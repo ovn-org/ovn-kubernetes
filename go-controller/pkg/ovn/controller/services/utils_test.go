@@ -23,7 +23,7 @@ func Test_getLbEndpoints(t *testing.T) {
 	tests := []struct {
 		name string
 		args args
-		want []string
+		want lbEndpoints
 	}{
 		{
 			name: "empty slices",
@@ -36,7 +36,7 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				family: v1.IPv4Protocol,
 			},
-			want: []string{},
+			want: lbEndpoints{[]string{}, 0},
 		},
 		{
 			name: "slices with endpoints",
@@ -73,7 +73,7 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				family: v1.IPv4Protocol,
 			},
-			want: []string{"10.0.0.2:80"},
+			want: lbEndpoints{[]string{"10.0.0.2"}, 80},
 		},
 		{
 			name: "slices with different ports",
@@ -110,7 +110,7 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				family: v1.IPv4Protocol,
 			},
-			want: []string{},
+			want: lbEndpoints{[]string{}, 0},
 		},
 		{
 			name: "slices with different IP family",
@@ -147,7 +147,7 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				family: v1.IPv4Protocol,
 			},
-			want: []string{},
+			want: lbEndpoints{[]string{}, 0},
 		},
 		{
 			name: "multiples slices with duplicate endpoints",
@@ -207,7 +207,7 @@ func Test_getLbEndpoints(t *testing.T) {
 				},
 				family: v1.IPv4Protocol,
 			},
-			want: []string{"10.0.0.2:80", "10.1.1.2:80", "10.2.2.2:80"},
+			want: lbEndpoints{[]string{"10.0.0.2", "10.1.1.2", "10.2.2.2"}, 80},
 		},
 	}
 	for _, tt := range tests {

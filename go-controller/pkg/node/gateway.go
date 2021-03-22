@@ -24,6 +24,7 @@ type Gateway interface {
 	informer.ServiceAndEndpointsEventHandler
 	Init(factory.NodeWatchFactory) error
 	Run(<-chan struct{}, *sync.WaitGroup)
+	GetGatewayBridgeIface() string
 }
 
 type gateway struct {
@@ -212,9 +213,11 @@ func gatewayInitInternal(nodeName, gwIntf string, subnets []*net.IPNet, gwNextHo
 		return bridgeName, uplinkName, nil, nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
-	err = setupLocalNodeAccessBridge(nodeName, subnets)
-	if err != nil {
-		return bridgeName, uplinkName, nil, nil, err
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		err = setupLocalNodeAccessBridge(nodeName, subnets)
+		if err != nil {
+			return bridgeName, uplinkName, nil, nil, err
+		}
 	}
 	chassisID, err := util.GetNodeChassisID()
 	if err != nil {
@@ -242,4 +245,8 @@ func gatewayReady(patchPort string) (bool, error) {
 	}
 	klog.Info("Gateway is ready")
 	return true, nil
+}
+
+func (g *gateway) GetGatewayBridgeIface() string {
+	return g.openflowManager.gwBridge
 }

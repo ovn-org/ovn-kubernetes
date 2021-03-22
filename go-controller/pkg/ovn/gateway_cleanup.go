@@ -75,11 +75,11 @@ func gatewayCleanup(nodeName string) error {
 
 	// We don't know the gateway mode as this is running in the master, try to delete the additional local
 	// gateway for the shared gateway mode. it will be no op if this is done for other gateway modes.
-	delPbrAndNatRules(nodeName)
+	delPbrAndNatRules(nodeName, nil)
 	return nil
 }
 
-func delPbrAndNatRules(nodeName string) {
+func delPbrAndNatRules(nodeName string, lrpTypes []string) {
 	// delete the dnat_and_snat entry that we added for the management port IP
 	// Note: we don't need to delete any MAC bindings that are dynamically learned from OVN SB DB
 	// because there will be none since this NAT is only for outbound traffic and not for inbound
@@ -99,38 +99,8 @@ func delPbrAndNatRules(nodeName string) {
 		}
 	}
 
-	// find the pbr rules associated with the node and delete them
-	matches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=match",
-		"find", "logical_router_policy")
-	if err != nil {
-		klog.Errorf("Failed to fetch the policy route for the node subnet "+
-			"stdout: %s, stderr: %s, error: %v", matches, stderr, err)
-		matches = ""
-	}
-	// matches inport for a policy, must use ending quote to substring match to avoid matching other nodes accidentally
-	// i.e. rtos-ovn-worker would match rtos-ovn-worker2
-	nodeSubnetMatchSubStr := fmt.Sprintf("%s%s\"", types.RouterToSwitchPrefix, nodeName)
-	// for inter node, match the comment in the policy, and include extra space to avoid accidental submatch
-	interNodeMatchSubStr := fmt.Sprintf("%s%s ", types.InterPrefix, nodeName)
-	// mgmt port policy matches node name in comment, use extra spaces to avoid accidental match of other nodes
-	mgmtPortPolicyMatchSubStr := fmt.Sprintf(" %s ", nodeName)
-	for _, match := range strings.Split(matches, "\n\n") {
-		var priority string
-		if strings.Contains(match, nodeSubnetMatchSubStr) {
-			priority = types.NodeSubnetPolicyPriority
-		} else if strings.Contains(match, interNodeMatchSubStr) {
-			priority = types.InterNodePolicyPriority
-		} else if strings.Contains(match, mgmtPortPolicyMatchSubStr) {
-			priority = types.MGMTPortPolicyPriority
-		} else {
-			continue
-		}
-		_, stderr, err = util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, priority, match)
-		if err != nil {
-			klog.Errorf("Failed to remove the policy routes (%s, %s) associated with the node %s: stderr: %s, error: %v",
-				priority, match, nodeName, stderr, err)
-		}
-	}
+	// delete all logical router policies on ovn_cluster_router
+	removeLRPolicies(nodeName, lrpTypes)
 }
 
 func staticRouteCleanup(nextHops []net.IP) {
@@ -269,6 +239,89 @@ func multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly bool) error {
 
 	// We don't know the gateway mode as this is running in the master, try to delete the additional local
 	// gateway for the shared gateway mode. it will be no op if this is done for other gateway modes.
-	delPbrAndNatRules(nodeName)
+	delPbrAndNatRules(nodeName, nil)
+	return nil
+}
+
+// remove Logical Router Policy on ovn_cluster_router for a specific node.
+// Specify priorities to only delete specific types
+func removeLRPolicies(nodeName string, priorities []string) {
+	if len(priorities) == 0 {
+		priorities = []string{types.InterNodePolicyPriority, types.NodeSubnetPolicyPriority, types.MGMTPortPolicyPriority}
+	}
+
+	// find the pbr rules associated with the node and delete them
+	matches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=match",
+		"find", "logical_router_policy")
+	if err != nil {
+		klog.Errorf("Failed to fetch the policy route for the node subnet "+
+			"stdout: %s, stderr: %s, error: %v", matches, stderr, err)
+		matches = ""
+	}
+
+	// matches inport for a policy, must use ending quote to substring match to avoid matching other nodes accidentally
+	// i.e. rtos-ovn-worker would match rtos-ovn-worker2
+	nodeSubnetMatchSubStr := fmt.Sprintf("%s%s\"", types.RouterToSwitchPrefix, nodeName)
+	// for inter node, match the comment in the policy, and include extra space to avoid accidental submatch
+	interNodeMatchSubStr := fmt.Sprintf("%s%s ", types.InterPrefix, nodeName)
+	// mgmt port policy matches node name in comment, use extra spaces to avoid accidental match of other nodes
+	mgmtPortPolicyMatchSubStr := fmt.Sprintf(" %s ", nodeName)
+	for _, match := range strings.Split(matches, "\n\n") {
+		var priority string
+		if strings.Contains(match, nodeSubnetMatchSubStr) {
+			priority = types.NodeSubnetPolicyPriority
+		} else if strings.Contains(match, interNodeMatchSubStr) {
+			priority = types.InterNodePolicyPriority
+		} else if strings.Contains(match, mgmtPortPolicyMatchSubStr) {
+			priority = types.MGMTPortPolicyPriority
+		} else {
+			continue
+		}
+
+		for _, pri := range priorities {
+			if pri == priority {
+				_, stderr, err = util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, priority, match)
+				if err != nil {
+					klog.Errorf("Failed to remove the policy routes (%s, %s) associated with the node %s: stderr: %s, error: %v",
+						priority, match, nodeName, stderr, err)
+				}
+				break
+			}
+		}
+	}
+}
+
+// removes DGP, snat_and_dnat entries, and LRPs
+func cleanupDGP(nodes *kapi.NodeList) error {
+	// remove dnat_snat entries as well as LRPs
+	for _, node := range nodes.Items {
+		delPbrAndNatRules(node.Name, []string{types.InterNodePolicyPriority, types.MGMTPortPolicyPriority})
+	}
+	// remove SBDB MAC bindings for DGP
+	for _, ip := range []string{types.V4NodeLocalNATSubnetNextHop, types.V6NodeLocalNATSubnetNextHop} {
+		uuid, stderr, err := util.RunOVNSbctl("--columns=_uuid", "--no-headings", "find", "mac_binding",
+			fmt.Sprintf(`ip="%s"`, ip))
+		if err != nil {
+			return fmt.Errorf("unable to get DGP MAC binding, err: %v, stderr: %s", err, stderr)
+		}
+		if len(uuid) > 0 {
+			_, stderr, err = util.RunOVNSbctl("destroy", "mac_binding", uuid)
+			if err != nil {
+				return fmt.Errorf("unable to remove mac_binding for DGP, err: %v, stderr: %s", err, stderr)
+			}
+		}
+	}
+	// remove node local switch
+	_, stderr, err := util.RunOVNNbctl("--if-exists", "ls-del", types.NodeLocalSwitch)
+	if err != nil {
+		return fmt.Errorf("unable to remove node local switch, err: %v, stderr: %s", err, stderr)
+	}
+	dgpName := types.RouterToSwitchPrefix + types.NodeLocalSwitch
+
+	// remove lrp on ovn_cluster_router. Will also remove gateway chassis.
+	_, stderr, err = util.RunOVNNbctl("--if-exists", "lrp-del", dgpName)
+	if err != nil {
+		return fmt.Errorf("unable to delete DGP LRP, error: %v, stderr: %s", err, stderr)
+	}
 	return nil
 }

@@ -50,7 +50,7 @@ func main() {
 		}
 
 		if err := runHybridOverlay(c); err != nil {
-			panic(err.Error())
+			klog.Exit(err)
 		}
 		return nil
 	}

@@ -3,6 +3,8 @@ package loadbalancer
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/pkg/errors"
+	utilnet "k8s.io/utils/net"
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -150,4 +152,72 @@ func GenerateACLName(lb string, sourceIP string, sourcePort int32) string {
 // so the names would not match. #1749
 func GenerateACLNameForOVNCommand(lb string, sourceIP string, sourcePort int32) string {
 	return strings.ReplaceAll(GenerateACLName(lb, sourceIP, sourcePort), ":", "\\:")
+}
+
+func GetWorkerLoadBalancer(node string, protocol kapi.Protocol) (string, error) {
+	var out string
+	var err error
+	if protocol == kapi.ProtocolTCP {
+		out, _, err = util.FindOVNLoadBalancer(types.WorkerLBTCP, node)
+	} else if protocol == kapi.ProtocolUDP {
+		out, _, err = util.FindOVNLoadBalancer(types.WorkerLBUDP, node)
+	} else if protocol == kapi.ProtocolSCTP {
+		out, _, err = util.FindOVNLoadBalancer(types.WorkerLBSCTP, node)
+	}
+	if err != nil {
+		return "", err
+	}
+	if out == "" {
+		return "", fmt.Errorf("no %s load balancer found in the database for worker %s", protocol, node)
+	}
+
+	return out, nil
+}
+
+// GetWorkerLoadBalancers find TCP, SCTP, UDP load-balancers from worker
+func GetWorkerLoadBalancers(node string) (string, string, string, error) {
+	lbTCP, stderr, err := util.FindOVNLoadBalancer(types.WorkerLBTCP, node)
+	if err != nil {
+		return "", "", "", errors.Wrapf(err, "failed to get gateway router %q TCP "+
+			"load balancer, stderr: %q", node, stderr)
+	}
+
+	lbUDP, stderr, err := util.FindOVNLoadBalancer(types.WorkerLBUDP, node)
+	if err != nil {
+		return "", "", "", errors.Wrapf(err, "failed to get gateway router %q UDP "+
+			"load balancer, stderr: %q", node, stderr)
+	}
+
+	lbSCTP, stderr, err := util.FindOVNLoadBalancer(types.WorkerLBSCTP, node)
+	if err != nil {
+		return "", "", "", errors.Wrapf(err, "failed to get gateway router %q SCTP "+
+			"load balancer, stderr: %q", node, stderr)
+	}
+	return lbTCP, lbUDP, lbSCTP, nil
+}
+
+// CreateLoadBalancerVIPs either creates or updates a set of load balancer VIPs mapping
+// from sourcePort on each IP of a given address family in sourceIPs, to targetPort on
+// each IP of the same address family in targetIPs
+func CreateLoadBalancerVIPs(lb string,
+	sourceIPs []string, sourcePort int32,
+	targetIPs []string, targetPort int32) error {
+	klog.V(5).Infof("Creating lb with %s, [%v], %d, [%v], %d", lb, sourceIPs, sourcePort, targetIPs, targetPort)
+
+	for _, sourceIP := range sourceIPs {
+		isIPv6 := utilnet.IsIPv6String(sourceIP)
+
+		var targets []string
+		for _, targetIP := range targetIPs {
+			if utilnet.IsIPv6String(targetIP) == isIPv6 {
+				targets = append(targets, util.JoinHostPortInt32(targetIP, targetPort))
+			}
+		}
+		vip := util.JoinHostPortInt32(sourceIP, sourcePort)
+		err := UpdateLoadBalancer(lb, vip, targets)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
