@@ -181,10 +181,6 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 	if !util.IsClusterIPSet(svc) {
 		return nil
 	}
-	gateways, _, err := ovn.getOvnGateways()
-	if err != nil {
-		klog.Error(err)
-	}
 
 	if svcNeedsIdling(svc.Annotations) {
 		ovn.addServiceToIdlingBalancer(svc)
@@ -192,6 +188,11 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 		return nil
 	}
 	ovn.deleteServiceFromIdlingBalancer(svc)
+
+	gateways, _, err := ovn.getOvnGateways()
+	if err != nil {
+		klog.Error(err)
+	}
 
 	for _, svcPort := range svc.Spec.Ports {
 		clusterLB, err := ovn.getLoadBalancer(svcPort.Protocol)
