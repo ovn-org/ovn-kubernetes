@@ -271,7 +271,7 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb, sourceIP string, sourcePo
 
 	aclMatch = fmt.Sprintf("match=\"%s.dst==%s && %s && %s.dst==%d\"", l3Prefix, sourceIP,
 		strings.ToLower(string(proto)), strings.ToLower(string(proto)), sourcePort)
-	cmd := []string{"--id=@reject-acl", "create", "acl", "direction=from-lport", "priority=1000", aclMatch, "action=reject",
+	cmd := []string{"--id=@reject-acl", "create", "acl", "direction=" + types.DirectionFromLPort, "priority=" + types.DefaultDenyPriority, aclMatch, "action=reject",
 		fmt.Sprintf("log=%t", aclLogging != ""), fmt.Sprintf("severity=%s", getACLLoggingSeverity(aclLogging)),
 		fmt.Sprintf("meter=%s", types.OvnACLLoggingMeter),
 		fmt.Sprintf("name=%s", aclName)}

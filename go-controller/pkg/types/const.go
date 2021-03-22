@@ -36,6 +36,23 @@ const (
 
 	NodeLocalSwitch = "node_local_switch"
 
+	// ACL directions
+	DirectionToLPort   = "to-lport"
+	DirectionFromLPort = "from-lport"
+
+	// ACL Priorities
+
+	// Default routed multicast allow acl rule priority
+	DefaultRoutedMcastAllowPriority = "1013"
+	// Default multicast allow acl rule priority
+	DefaultMcastAllowPriority = "1012"
+	// Default multicast deny acl rule priority
+	DefaultMcastDenyPriority = "1011"
+	// Default allow acl rule priority
+	DefaultAllowPriority = "1001"
+	// Default deny acl rule priority
+	DefaultDenyPriority = "1000"
+
 	// priority of logical router policies on the OVNClusterRouter
 	EgressFirewallStartPriority           = "10000"
 	MinimumReservedEgressFirewallPriority = "2000"

@@ -9,17 +9,18 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
+	apimachinerytypes "k8s.io/apimachinery/pkg/types"
 )
 
 type service struct{}
 
 func newServiceMeta(name, namespace string) metav1.ObjectMeta {
 	return metav1.ObjectMeta{
-		UID:       types.UID(namespace),
+		UID:       apimachinerytypes.UID(namespace),
 		Name:      name,
 		Namespace: namespace,
 		Labels: map[string]string{
@@ -136,7 +137,7 @@ func (s service) addCmds(fexec *ovntest.FakeExec, service v1.Service) {
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=%s-%s\\:%v",
 				k8sTCPLoadBalancerIP, service.Spec.ClusterIP, port.Port),
-			fmt.Sprintf("ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=from-lport priority=1000 match=\"ip4.dst==%s && tcp "+
+			fmt.Sprintf("ovn-nbctl --timeout=15 --id=@reject-acl create acl direction="+types.DirectionFromLPort+" priority="+types.DefaultDenyPriority+" match=\"ip4.dst==%s && tcp "+
 				"&& tcp.dst==%v\" action=reject log=false severity=info meter=acl-logging name=%s-%s\\:%v -- add port_group %s acls @reject-acl", service.Spec.ClusterIP, port.Port,
 				k8sTCPLoadBalancerIP, service.Spec.ClusterIP, port.Port, ovnClusterPortGroupUUID),
 		})

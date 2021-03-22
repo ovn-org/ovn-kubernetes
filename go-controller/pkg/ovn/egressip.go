@@ -32,12 +32,6 @@ type egressIPDialer interface {
 
 var dialer egressIPDialer = &egressIPDial{}
 
-const (
-	// In case we restart we need accept executing ovn-nbctl commands with this error.
-	// The ovn-nbctl API does not support `--may-exist` for `lr-policy-add`
-	policyAlreadyExistsMsg = "Same routing policy already existed"
-)
-
 func (oc *Controller) addEgressIP(eIP *egressipv1.EgressIP) error {
 	// If the status is set at this point, then we know it's valid from syncEgressIP and we have no assignment to do.
 	// Just initialize all watchers (which should not re-create any already existing items in the OVN DB)
@@ -741,7 +735,7 @@ func (e *egressIPController) createEgressReroutePolicy(podIps []net.IP, status e
 				"action=reroute",
 				fmt.Sprintf("match=\"%s\"", filterOption),
 				fmt.Sprintf("priority=%v", types.EgressIPReroutePriority),
-				fmt.Sprintf("nexthop=%s", gatewayRouterIP),
+				fmt.Sprintf("nexthop=\"%s\"", gatewayRouterIP),
 				fmt.Sprintf("external_ids:name=%s", egressIPName),
 				"--",
 				"add",
@@ -802,7 +796,7 @@ func findReroutePolicyIDs(filterOption, egressIPName string, gatewayRouterIP net
 		fmt.Sprintf("match=\"%s\"", filterOption),
 		fmt.Sprintf("priority=%v", types.EgressIPReroutePriority),
 		fmt.Sprintf("external_ids:name=%s", egressIPName),
-		fmt.Sprintf("nexthop=%s", gatewayRouterIP),
+		fmt.Sprintf("nexthop=\"%s\"", gatewayRouterIP),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to find logical router policy for EgressIP: %s, stderr: %s, err: %v", egressIPName, stderr, err)
@@ -891,16 +885,17 @@ func (e *egressIPDial) dial(ip net.IP) bool {
 	return true
 }
 
-func getClusterSubnets() (*net.IPNet, *net.IPNet) {
-	var v4ClusterSubnet, v6ClusterSubnet *net.IPNet
+func getClusterSubnets() ([]*net.IPNet, []*net.IPNet) {
+	var v4ClusterSubnets = []*net.IPNet{}
+	var v6ClusterSubnets = []*net.IPNet{}
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
 		if !utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-			v4ClusterSubnet = clusterSubnet.CIDR
+			v4ClusterSubnets = append(v4ClusterSubnets, clusterSubnet.CIDR)
 		} else {
-			v6ClusterSubnet = clusterSubnet.CIDR
+			v6ClusterSubnets = append(v6ClusterSubnets, clusterSubnet.CIDR)
 		}
 	}
-	return v4ClusterSubnet, v6ClusterSubnet
+	return v4ClusterSubnets, v6ClusterSubnets
 }
 
 func getNodeInternalAddrs(node *v1.Node) (net.IP, net.IP) {
@@ -920,18 +915,18 @@ func getNodeInternalAddrs(node *v1.Node) (net.IP, net.IP) {
 
 // createDefaultNoReroutePodPolicies ensures egress pods east<->west traffic with regular pods,
 // i.e: ensuring that an egress pod can still communicate with a regular pod / service backed by regular pods
-func createDefaultNoReroutePodPolicies(v4ClusterSubnet, v6ClusterSubnet *net.IPNet) {
-	if v4ClusterSubnet != nil {
-		_, stderr, err := util.RunOVNNbctl("lr-policy-add", types.OVNClusterRouter, types.DefaultNoRereoutePriority,
-			fmt.Sprintf("ip4.src == %s && ip4.dst == %s", v4ClusterSubnet.String(), v4ClusterSubnet.String()), "allow")
-		if err != nil && !strings.Contains(stderr, policyAlreadyExistsMsg) {
+func createDefaultNoReroutePodPolicies(v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) {
+	for _, v4Subnet := range v4ClusterSubnet {
+		_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-policy-add", types.OVNClusterRouter, types.DefaultNoRereoutePriority,
+			fmt.Sprintf("ip4.src == %s && ip4.dst == %s", v4Subnet.String(), v4Subnet.String()), "allow")
+		if err != nil {
 			klog.Errorf("Unable to create IPv4 default no-reroute logical router policy, stderr: %s, err: %v", stderr, err)
 		}
 	}
-	if v6ClusterSubnet != nil {
-		_, stderr, err := util.RunOVNNbctl("lr-policy-add", types.OVNClusterRouter, types.DefaultNoRereoutePriority,
-			fmt.Sprintf("ip6.src == %s && ip6.dst == %s", v6ClusterSubnet.String(), v6ClusterSubnet.String()), "allow")
-		if err != nil && !strings.Contains(stderr, policyAlreadyExistsMsg) {
+	for _, v6Subnet := range v6ClusterSubnet {
+		_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-policy-add", types.OVNClusterRouter, types.DefaultNoRereoutePriority,
+			fmt.Sprintf("ip6.src == %s && ip6.dst == %s", v6Subnet.String(), v6Subnet.String()), "allow")
+		if err != nil {
 			klog.Errorf("Unable to create IPv6 default no-reroute logical router policy, stderr: %s, err: %v", stderr, err)
 		}
 	}
@@ -939,37 +934,45 @@ func createDefaultNoReroutePodPolicies(v4ClusterSubnet, v6ClusterSubnet *net.IPN
 
 // createDefaultNoRerouteNodePolicies ensures egress pods east<->west traffic with hostNetwork pods,
 // i.e: ensuring that an egress pod can still communicate with a hostNetwork pod / service backed by hostNetwork pods
-func createDefaultNoRerouteNodePolicies(v4NodeAddr, v6NodeAddr net.IP, v4ClusterSubnet, v6ClusterSubnet *net.IPNet) error {
-	if v4NodeAddr != nil && v4ClusterSubnet != nil {
-		_, stderr, err := util.RunOVNNbctl("lr-policy-add", types.OVNClusterRouter, types.DefaultNoRereoutePriority,
-			fmt.Sprintf("ip4.src == %s && ip4.dst == %s/32", v4ClusterSubnet.String(), v4NodeAddr.String()), "allow")
-		if err != nil && !strings.Contains(stderr, policyAlreadyExistsMsg) {
-			return fmt.Errorf("unable to create IPv4 default no-reroute logical router policy, stderr: %s, err: %v", stderr, err)
+func createDefaultNoRerouteNodePolicies(v4NodeAddr, v6NodeAddr net.IP, v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) error {
+	if v4NodeAddr != nil {
+		for _, v4Subnet := range v4ClusterSubnet {
+			_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-policy-add", types.OVNClusterRouter, types.DefaultNoRereoutePriority,
+				fmt.Sprintf("ip4.src == %s && ip4.dst == %s/32", v4Subnet.String(), v4NodeAddr.String()), "allow")
+			if err != nil {
+				return fmt.Errorf("unable to create IPv4 default no-reroute logical router policy, stderr: %s, err: %v", stderr, err)
+			}
 		}
 	}
-	if v6NodeAddr != nil && v6ClusterSubnet != nil {
-		_, stderr, err := util.RunOVNNbctl("lr-policy-add", types.OVNClusterRouter, types.DefaultNoRereoutePriority,
-			fmt.Sprintf("ip6.src == %s && ip6.dst == %s/128", v6ClusterSubnet.String(), v6NodeAddr.String()), "allow")
-		if err != nil && !strings.Contains(stderr, policyAlreadyExistsMsg) {
-			return fmt.Errorf("unable to create IPv6 default no-reroute logical router policy, stderr: %s, err: %v", stderr, err)
+	if v6NodeAddr != nil {
+		for _, v6Subnet := range v6ClusterSubnet {
+			_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-policy-add", types.OVNClusterRouter, types.DefaultNoRereoutePriority,
+				fmt.Sprintf("ip6.src == %s && ip6.dst == %s/128", v6Subnet.String(), v6NodeAddr.String()), "allow")
+			if err != nil {
+				return fmt.Errorf("unable to create IPv6 default no-reroute logical router policy, stderr: %s, err: %v", stderr, err)
+			}
 		}
 	}
 	return nil
 }
 
-func deleteDefaultNoRerouteNodePolicies(v4NodeAddr, v6NodeAddr net.IP, v4ClusterSubnet, v6ClusterSubnet *net.IPNet) error {
-	if v4NodeAddr != nil && v4ClusterSubnet != nil {
-		_, stderr, err := util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, types.DefaultNoRereoutePriority,
-			fmt.Sprintf("ip4.src == %s && ip4.dst == %s/32", v4ClusterSubnet.String(), v4NodeAddr.String()))
-		if err != nil && !strings.Contains(stderr, policyAlreadyExistsMsg) {
-			return fmt.Errorf("unable to create IPv4 default no-reroute logical router policy, stderr: %s, err: %v", stderr, err)
+func deleteDefaultNoRerouteNodePolicies(v4NodeAddr, v6NodeAddr net.IP, v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) error {
+	if v4NodeAddr != nil {
+		for _, v4Subnet := range v4ClusterSubnet {
+			_, stderr, err := util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, types.DefaultNoRereoutePriority,
+				fmt.Sprintf("ip4.src == %s && ip4.dst == %s/32", v4Subnet.String(), v4NodeAddr.String()))
+			if err != nil {
+				return fmt.Errorf("unable to create IPv4 default no-reroute logical router policy, stderr: %s, err: %v", stderr, err)
+			}
 		}
 	}
-	if v6NodeAddr != nil && v6ClusterSubnet != nil {
-		_, stderr, err := util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, types.DefaultNoRereoutePriority,
-			fmt.Sprintf("ip6.src == %s && ip6.dst == %s/128", v6ClusterSubnet.String(), v6NodeAddr.String()))
-		if err != nil && !strings.Contains(stderr, policyAlreadyExistsMsg) {
-			return fmt.Errorf("unable to create IPv6 default no-reroute logical router policy, stderr: %s, err: %v", stderr, err)
+	if v6NodeAddr != nil {
+		for _, v6Subnet := range v6ClusterSubnet {
+			_, stderr, err := util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, types.DefaultNoRereoutePriority,
+				fmt.Sprintf("ip6.src == %s && ip6.dst == %s/128", v6Subnet.String(), v6NodeAddr.String()))
+			if err != nil {
+				return fmt.Errorf("unable to create IPv6 default no-reroute logical router policy, stderr: %s, err: %v", stderr, err)
+			}
 		}
 	}
 	return nil
@@ -989,8 +992,8 @@ func createNATRule(podIPs []net.IP, status egressipv1.EgressIPStatusItem, egress
 					"nat",
 					"type=snat",
 					fmt.Sprintf("logical_port=k8s-%s", status.Node),
-					fmt.Sprintf("external_ip=%s", status.EgressIP),
-					fmt.Sprintf("logical_ip=%s", podIP),
+					fmt.Sprintf("external_ip=\"%s\"", status.EgressIP),
+					fmt.Sprintf("logical_ip=\"%s\"", podIP),
 					fmt.Sprintf("external_ids:name=%s", egressIPName),
 					"--",
 					"add",
@@ -1041,8 +1044,8 @@ func findNatIDs(egressIPName, podIP, egressIP string) ([]string, error) {
 		"find",
 		"nat",
 		fmt.Sprintf("external_ids:name=%s", egressIPName),
-		fmt.Sprintf("logical_ip=%s", podIP),
-		fmt.Sprintf("external_ip=%s", egressIP),
+		fmt.Sprintf("logical_ip=\"%s\"", podIP),
+		fmt.Sprintf("external_ip=\"%s\"", egressIP),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to find nat ID, stderr: %s, err: %v", stderr, err)

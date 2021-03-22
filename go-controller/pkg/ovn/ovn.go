@@ -84,8 +84,8 @@ type namespaceInfo struct {
 	// the policy itself.
 	networkPolicies map[string]*networkPolicy
 
-	// defines the namespaces egressFirewallPolicy
-	egressFirewallPolicy *egressFirewall
+	// defines the namespaces egressFirewall
+	egressFirewall *egressFirewall
 
 	// routingExternalGWs is a slice of net.IP containing the values parsed from
 	// annotation k8s.ovn.org/routing-external-gws
@@ -735,7 +735,7 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 				klog.Error(deleteErrors)
 			}
 		},
-	}, nil)
+	}, oc.syncEgressFirewall)
 }
 
 // WatchEgressNodes starts the watching of egress assignable nodes and calls
