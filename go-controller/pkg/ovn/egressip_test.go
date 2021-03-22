@@ -244,6 +244,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 						fmt.Sprintf("ovn-nbctl --timeout=15 set logical_switch_port etor-GR_node1 options:nat-addresses=router"),
 					},
@@ -383,6 +384,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 						fmt.Sprintf("ovn-nbctl --timeout=15 set logical_switch_port etor-GR_node1 options:nat-addresses=router"),
 					},
@@ -493,7 +495,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
+					},
+				)
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_%s networks", node2.name),
@@ -594,7 +600,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
+					},
+				)
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_%s networks", node2.name),
@@ -677,6 +687,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
+					},
+				)
+
 				fakeOvn.controller.WatchEgressIP()
 
 				_, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
@@ -755,6 +771,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
+					},
+				)
+
 				fakeOvn.controller.WatchEgressIP()
 
 				_, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
@@ -817,6 +839,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
+					},
+				)
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_%s networks", node2.name),
@@ -917,6 +944,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
+					},
+				)
+
 				fakeOvn.controller.WatchEgressIP()
 
 				_, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
@@ -982,6 +1015,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
+					},
+				)
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_%s networks", node2.name),
@@ -1106,6 +1144,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
+					},
+				)
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_%s networks", node2.name),
@@ -1209,6 +1252,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.start(ctx)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 						fmt.Sprintf("ovn-nbctl --timeout=15 set logical_switch_port etor-GR_node1 options:nat-addresses=router"),
 						fmt.Sprintf("ovn-nbctl --timeout=15 set logical_switch_port etor-GR_node2 options:nat-addresses=router"),
@@ -1276,6 +1320,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				})
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 						fmt.Sprintf("ovn-nbctl --timeout=15 set logical_switch_port etor-GR_node1 options:nat-addresses=router"),
 					},
@@ -1351,6 +1396,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 					},
 				)
@@ -1463,6 +1509,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 						fmt.Sprintf("ovn-nbctl --timeout=15 set logical_switch_port etor-GR_node1 options:nat-addresses=router"),
 						fmt.Sprintf("ovn-nbctl --timeout=15 set logical_switch_port etor-GR_node2 options:nat-addresses=router"),
@@ -1549,6 +1596,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 						fmt.Sprintf("ovn-nbctl --timeout=15 set logical_switch_port etor-GR_node1 options:nat-addresses=router"),
 					},
@@ -1644,6 +1692,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 					},
 				)
@@ -1768,6 +1817,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 					},
 				)
@@ -1890,6 +1940,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 						fmt.Sprintf("ovn-nbctl --timeout=15 set logical_switch_port etor-GR_node1 options:nat-addresses=router"),
 						fmt.Sprintf("ovn-nbctl --timeout=15 set logical_switch_port etor-GR_node2 options:nat-addresses=router"),
@@ -2368,6 +2419,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				}
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 					},
 				)
@@ -2407,6 +2459,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				}
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 					},
 				)
@@ -2447,6 +2500,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				}
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 					},
 				)
@@ -2509,6 +2563,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 					},
 				)
@@ -2564,6 +2619,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 					},
 				)
@@ -2614,6 +2670,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 					},
 				)
@@ -2670,6 +2727,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 					},
 				)
@@ -2721,6 +2779,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 					},
 				)
@@ -2770,6 +2829,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 					},
 				)
@@ -2818,6 +2878,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 					},
 				)
@@ -2862,6 +2923,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 					},
 				)
@@ -2912,6 +2974,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
 						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
 					},
 				)
