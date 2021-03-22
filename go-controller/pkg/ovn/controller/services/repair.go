@@ -6,6 +6,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/acl"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -25,14 +26,16 @@ import (
 type Repair struct {
 	interval time.Duration
 	// serviceTracker tracks services and maps them to OVN LoadBalancers
-	serviceLister corelisters.ServiceLister
+	serviceLister        corelisters.ServiceLister
+	clusterPortGroupUUID string
 }
 
 // NewRepair creates a controller that periodically ensures that there is no stale data in OVN
-func NewRepair(interval time.Duration, serviceLister corelisters.ServiceLister) *Repair {
+func NewRepair(interval time.Duration, serviceLister corelisters.ServiceLister, clusterPortGroupUUID string) *Repair {
 	return &Repair{
-		interval:      interval,
-		serviceLister: serviceLister,
+		interval:             interval,
+		serviceLister:        serviceLister,
+		clusterPortGroupUUID: clusterPortGroupUUID,
 	}
 }
 
@@ -113,6 +116,14 @@ func (r *Repair) runOnce() error {
 				}
 			}
 		}
+	}
+
+	// Remove existing reject rules. They are not used anymore
+	// given the introduction of idling loadbalancers
+	err = acl.PurgeRejectRules(r.clusterPortGroupUUID)
+	if err != nil {
+		klog.Errorf("Failed to purge existing reject rules: %v", err)
+		return err
 	}
 	return nil
 }

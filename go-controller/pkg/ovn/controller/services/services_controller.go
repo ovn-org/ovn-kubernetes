@@ -48,6 +48,7 @@ const (
 func NewController(client clientset.Interface,
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
+	clusterPortGroupUUID string,
 ) *Controller {
 	klog.V(4).Info("Creating event broadcaster")
 	broadcaster := record.NewBroadcaster()
@@ -89,7 +90,7 @@ func NewController(client clientset.Interface,
 	c.eventRecorder = recorder
 
 	// repair controller
-	c.repair = NewRepair(0, serviceInformer.Lister())
+	c.repair = NewRepair(0, serviceInformer.Lister(), clusterPortGroupUUID)
 
 	return c
 }

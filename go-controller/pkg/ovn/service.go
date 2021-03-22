@@ -6,6 +6,7 @@ import (
 	"reflect"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/acl"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -132,6 +133,12 @@ func (ovn *Controller) syncServices(services []interface{}) {
 				}
 			}
 		}
+	}
+	// Remove existing reject rules. They are not used anymore
+	// given the introduction of idling loadbalancers
+	err = acl.PurgeRejectRules(ovn.clusterPortGroupUUID)
+	if err != nil {
+		klog.Errorf("Failed to purge existing reject rules: %v", err)
 	}
 }
 
