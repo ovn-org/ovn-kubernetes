@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	v1 "k8s.io/api/core/v1"
@@ -220,7 +221,6 @@ func Test_getLbEndpoints(t *testing.T) {
 }
 
 func Test_deleteVIPsFromOVN(t *testing.T) {
-	const clusterPortGroupUUID = "c62dd6d4-38b3-11eb-b663-a8a1590cda29"
 	type args struct {
 		vips   sets.String
 		svc    *v1.Service
@@ -295,7 +295,7 @@ func Test_deleteVIPsFromOVN(t *testing.T) {
 			if err != nil {
 				t.Errorf("fexec error: %v", err)
 			}
-			if err := deleteVIPsFromOVN(tt.args.vips, st, tt.args.svc.Name, tt.args.svc.Namespace, clusterPortGroupUUID); (err != nil) != tt.wantErr {
+			if err := deleteVIPsFromOVN(tt.args.vips, st, tt.args.svc.Name, tt.args.svc.Namespace); (err != nil) != tt.wantErr {
 				t.Errorf("deleteVIPsFromOVN() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
@@ -307,4 +307,48 @@ func Test_deleteVIPsFromOVN(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestServiceNeedsIdling(t *testing.T) {
+	config.Kubernetes.OVNEmptyLbEvents = true
+	defer func() {
+		config.Kubernetes.OVNEmptyLbEvents = false
+	}()
+
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		needsIdling bool
+	}{
+		{
+			name: "delete endpoint slice with no service",
+			annotations: map[string]string{
+				"foo": "bar",
+			},
+			needsIdling: false,
+		},
+		{
+			name: "delete endpoint slice with no service",
+			annotations: map[string]string{
+				"idling.alpha.openshift.io/idled-at": "2021-03-25T21:58:54Z",
+			},
+			needsIdling: true,
+		},
+
+		{
+			name: "delete endpoint slice with no service",
+			annotations: map[string]string{
+				"k8s.ovn.org/idled-at": "2021-03-25T21:58:54Z",
+			},
+			needsIdling: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if svcNeedsIdling(tt.annotations) != tt.needsIdling {
+				t.Errorf("needs Idling does not match")
+			}
+		})
+	}
+
 }

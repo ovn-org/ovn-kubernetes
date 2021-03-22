@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -18,6 +19,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/cert"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
@@ -271,6 +273,100 @@ func UseEndpointSlices(kubeClient kubernetes.Interface) bool {
 	if _, err := kubeClient.Discovery().ServerResourcesForGroupVersion(discovery.SchemeGroupVersion.String()); err == nil {
 		klog.V(2).Infof("Kubernetes Endpoint Slices enabled on the cluster: %s", discovery.SchemeGroupVersion.String())
 		return true
+	}
+	return false
+}
+
+type LbEndpoints struct {
+	IPs  []string
+	Port int32
+}
+
+// GetLbEndpoints return the endpoints that belong to the IPFamily as a slice of IPs
+func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort, family kapi.IPFamily) LbEndpoints {
+	epsSet := sets.NewString()
+	lbEps := LbEndpoints{[]string{}, 0}
+	// return an empty object so the caller don't have to check for nil and can use it as an iterator
+	if len(slices) == 0 {
+		return lbEps
+	}
+
+	for _, slice := range slices {
+		klog.V(4).Infof("Getting endpoints for slice %s", slice.Name)
+		// Only return addresses that belong to the requested IP family
+		if slice.AddressType != discovery.AddressType(family) {
+			klog.V(4).Infof("Slice %s with different IP Family endpoints, requested: %s received: %s",
+				slice.Name, slice.AddressType, family)
+			continue
+		}
+
+		// build the list of endpoints in the slice
+		for _, port := range slice.Ports {
+			// If Service port name set it must match the name field in the endpoint
+			if svcPort.Name != "" && svcPort.Name != *port.Name {
+				klog.V(5).Infof("Slice %s with different Port name, requested: %s received: %s",
+					slice.Name, svcPort.Name, *port.Name)
+				continue
+			}
+
+			// Get the targeted port
+			tgtPort := int32(svcPort.TargetPort.IntValue())
+			// If this is a string, it will return 0
+			// it has to match the port name
+			// otherwise, it has to match the port number
+			if (tgtPort == 0 && svcPort.TargetPort.String() != *port.Name) ||
+				(tgtPort > 0 && tgtPort != *port.Port) {
+				continue
+			}
+
+			// Skip ports that doesn't match the protocol
+			if *port.Protocol != svcPort.Protocol {
+				klog.V(5).Infof("Slice %s with different Port protocol, requested: %s received: %s",
+					slice.Name, svcPort.Protocol, *port.Protocol)
+				continue
+			}
+
+			lbEps.Port = *port.Port
+			for _, endpoint := range slice.Endpoints {
+				// Skip endpoints that are not ready
+				if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
+					klog.V(4).Infof("Slice endpoints Not Ready")
+					continue
+				}
+				for _, ip := range endpoint.Addresses {
+					klog.V(4).Infof("Adding slice %s endpoints: %v, port: %d", slice.Name, endpoint.Addresses, *port.Port)
+					epsSet.Insert(ip)
+				}
+			}
+		}
+	}
+
+	lbEps.IPs = epsSet.List()
+	klog.V(4).Infof("LB Endpoints for %s are: %v on port: %d", slices[0].Labels[discovery.LabelServiceName],
+		lbEps.IPs, lbEps.Port)
+	return lbEps
+}
+
+// HasValidEndpoint returns true if at least one valid endpoint is contained in the given
+// slices
+func HasValidEndpoint(service *kapi.Service, slices []*discovery.EndpointSlice) bool {
+	if slices == nil {
+		return false
+	}
+	if len(slices) == 0 {
+		return false
+	}
+	for _, ip := range GetClusterIPs(service) {
+		family := kapi.IPv4Protocol
+		if utilnet.IsIPv6String(ip) {
+			family = kapi.IPv6Protocol
+		}
+		for _, svcPort := range service.Spec.Ports {
+			eps := GetLbEndpoints(slices, svcPort, family)
+			if len(eps.IPs) > 0 {
+				return true
+			}
+		}
 	}
 	return false
 }

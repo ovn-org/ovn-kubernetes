@@ -66,14 +66,13 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints, addClusterLBs bool) erro
 	klog.V(5).Infof("Matching service %s found for ep: %s, with cluster IP: %s", svc.Name, ep.Name, svc.Spec.ClusterIP)
 
 	protoPortMap := ovn.getLbEndpoints(ep)
-	if !svcNeedsIdling(svc.Annotations) || len(ep.Subsets) > 0 {
-		ovn.deleteServiceFromIdlingBalancer(svc)
-		// and let the existing logic go forward
-	} else {
+	if svcNeedsIdling(svc.Annotations) && len(ep.Subsets) == 0 {
 		ovn.addServiceToIdlingBalancer(svc)
 		ovn.deleteServiceFromBalancers(svc)
 		return nil
 	}
+
+	ovn.deleteServiceFromIdlingBalancer(svc)
 
 	klog.V(5).Infof("Matching service %s ports: %v", svc.Name, svc.Spec.Ports)
 	for _, svcPort := range svc.Spec.Ports {
@@ -187,14 +186,12 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 		klog.Error(err)
 	}
 
-	if !svcNeedsIdling(svc.Annotations) {
-		ovn.deleteServiceFromIdlingBalancer(svc)
-		// and let the existing logic go forward
-	} else {
+	if svcNeedsIdling(svc.Annotations) {
 		ovn.addServiceToIdlingBalancer(svc)
 		ovn.deleteServiceFromBalancers(svc)
 		return nil
 	}
+	ovn.deleteServiceFromIdlingBalancer(svc)
 
 	for _, svcPort := range svc.Spec.Ports {
 		clusterLB, err := ovn.getLoadBalancer(svcPort.Protocol)

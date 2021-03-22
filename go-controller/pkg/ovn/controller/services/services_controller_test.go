@@ -1,10 +1,10 @@
 package services
 
 import (
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"net"
 	"testing"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -516,115 +516,6 @@ func TestUpdateServicePorts(t *testing.T) {
 	if !controller.serviceTracker.hasServiceVIP(serviceName, ns, "192.168.1.1:8888", v1.ProtocolTCP) {
 		t.Fatalf("Service with port 8888 should exist")
 	}
-}
-
-// A service created has no VIP entry and reject acl is created
-func TestServiceCreateReject(t *testing.T) {
-	// Expected OVN commands
-	fexec := ovntest.NewFakeExec()
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-tcp=yes",
-		Output: loadbalancerTCP,
-	})
-	// Find if ACL exists
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80`,
-		Output: "",
-	})
-	// Create ACL
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=from-lport priority=` + types.DefaultDenyPriority + ` match="ip4.dst==192.168.1.1 && tcp && tcp.dst==80" action=reject name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80 -- add port_group 58a1ef18-3649-11eb-bd94-a8a1590cda29 acls @reject-acl`,
-		Output: "",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-tcp=yes",
-		Output: loadbalancerTCP,
-	})
-	// Endpoints got added, create LB entry
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    `ovn-nbctl --timeout=15 set load_balancer a08ea426-2288-11eb-a30b-a8a1590cda29 vips:"192.168.1.1:80"="10.0.0.2:3456"`,
-		Output: loadbalancerTCP,
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null",
-		Output: FakeGRs,
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_1`,
-		Output: "load_balancer_1",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    `ovn-nbctl --timeout=15 --if-exists remove load_balancer load_balancer_1 vips "192.168.1.1:80"`,
-		Output: "",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_2`,
-		Output: "",
-	})
-	// Find existing ACL
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80`,
-		Output: "1234",
-	})
-	// Remove ACL
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    `ovn-nbctl --timeout=15 -- --if-exists remove port_group 58a1ef18-3649-11eb-bd94-a8a1590cda29 acls 1234`,
-		Output: "",
-	})
-
-	err := util.SetExec(fexec)
-	if err != nil {
-		t.Errorf("fexec error: %v", err)
-	}
-
-	ns := "testns"
-	serviceName := "foo"
-	service := &v1.Service{
-		ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
-		Spec: v1.ServiceSpec{
-			Type:       v1.ServiceTypeClusterIP,
-			ClusterIP:  "192.168.1.1",
-			ClusterIPs: []string{"192.168.1.1"},
-			Selector:   map[string]string{"foo": "bar"},
-			Ports: []v1.ServicePort{{
-				Port:       80,
-				Protocol:   v1.ProtocolTCP,
-				TargetPort: intstr.FromInt(3456),
-			}},
-		},
-	}
-	slice := &discovery.EndpointSlice{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      serviceName + "ab23",
-			Namespace: ns,
-			Labels:    map[string]string{discovery.LabelServiceName: serviceName},
-		},
-		Ports: []discovery.EndpointPort{
-			{
-				Name:     utilpointer.StringPtr("tcp-example"),
-				Protocol: protoPtr(v1.ProtocolTCP),
-				Port:     utilpointer.Int32Ptr(int32(3456)),
-			},
-		},
-		AddressType: discovery.AddressTypeIPv4,
-		Endpoints: []discovery.Endpoint{
-			{
-				Conditions: discovery.EndpointConditions{
-					Ready: utilpointer.BoolPtr(true),
-				},
-				Addresses: []string{"10.0.0.2"},
-				Topology:  map[string]string{"kubernetes.io/hostname": "node-1"},
-			},
-		},
-	}
-	controller := newController()
-	// Process the first service, should not create VIP in LB and create reject ACL instead
-	controller.serviceStore.Add(service)
-	controller.syncServices(ns + "/" + serviceName)
-
-	// Now add endpoints and ensure ACL is removed and LB VIP gets created
-	controller.endpointSliceStore.Add(slice)
-	controller.syncServices(ns + "/" + serviceName)
 }
 
 // A service can mutate its ports, we need to be sure we don´t left dangling ports
