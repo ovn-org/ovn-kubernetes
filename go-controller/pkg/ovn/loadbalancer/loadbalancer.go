@@ -3,9 +3,10 @@ package loadbalancer
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
+
 	"github.com/pkg/errors"
 	utilnet "k8s.io/utils/net"
-	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -14,19 +15,71 @@ import (
 	"k8s.io/klog/v2"
 )
 
+type NotFoundError struct {
+	What string
+}
+
+func (e NotFoundError) Error() string {
+	return e.What + " not found"
+}
+
+var LBNotFound = NotFoundError{What: "Load balancer"}
+
 // GetOVNKubeLoadBalancer returns the LoadBalancer matching the protocol
-// in the OVN database using the external_ids = k8s-cluster-lb-${protocol}
 func GetOVNKubeLoadBalancer(protocol kapi.Protocol) (string, error) {
-	id := fmt.Sprintf("external_ids:k8s-cluster-lb-%s=yes", strings.ToLower(string(protocol)))
-	out, _, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid",
-		"find", "load_balancer", id)
+	return getLoadBalancerByProtocolType(protocol, types.ClusterLBPrefix)
+}
+
+// GetOVNKubeLoadBalancer returns the LoadBalancer matching the protocol
+func GetOVNKubeIdlingLoadBalancer(protocol kapi.Protocol) (string, error) {
+	return getLoadBalancerByProtocolType(protocol, types.ClusterIdlingLBPrefix)
+}
+
+func getLoadBalancerByProtocolType(protocol kapi.Protocol, idkey string) (string, error) {
+	id, value := fmt.Sprintf("%s-%s", idkey, strings.ToLower(string(protocol))), "yes"
+	res, _, err := util.FindOVNLoadBalancer(id, value)
 	if err != nil {
+		return "", errors.Wrapf(err, "Failed to get ovnkube balancer %v %s", protocol, idkey)
+	}
+	if res == "" {
+		return "", LBNotFound
+	}
+	return res, nil
+}
+
+// CreateLoadBalancer creates the loadbalancer if it doesn´t exist to avoid
+// consumers to create duplicate loadbalancers with the same name and externalID
+func CreateLoadBalancer(protocol kapi.Protocol, idkey string) (string, error) {
+	lbUUID, err := getLoadBalancerByProtocolType(protocol, idkey)
+	if err != nil && !errors.Is(err, LBNotFound) {
+		return "", errors.Wrapf(err, "Failed to get OVN load balancer for protocol %s", protocol)
+	}
+	// create the load balancer if it doesn't exist yet
+	if lbUUID == "" {
+		lbUUID, err = createLoadBalancer(protocol, idkey)
+		if err != nil {
+			return "", errors.Wrapf(err, "Failed to create OVN load balancer for protocol %s", protocol)
+		}
+	}
+	return lbUUID, nil
+}
+
+// createLoadBalancer creates a loadbalancer for the specified protocol
+// all loadbalancers but idling ones reject packets for vips without endpoints by default
+func createLoadBalancer(protocol kapi.Protocol, idkey string) (string, error) {
+	id := fmt.Sprintf("external_ids:%s-%s=yes", idkey, strings.ToLower(string(protocol)))
+	proto := fmt.Sprintf("protocol=%s", strings.ToLower(string(protocol)))
+	reject := true
+	if idkey == types.ClusterIdlingLBPrefix {
+		reject = false
+	}
+	options := fmt.Sprintf("options:reject=%t", reject)
+	lbID, stderr, err := util.RunOVNNbctl("create", "load_balancer", id, proto, options)
+	if err != nil {
+		klog.Errorf("Failed to create %s load balancer, stderr: %q, error: %v", protocol, stderr, err)
 		return "", err
 	}
-	if out == "" {
-		return "", fmt.Errorf("no load balancer found in the database")
-	}
-	return out, nil
+	return lbID, nil
 }
 
 // GetLoadBalancerVIPs returns a map whose keys are VIPs (IP:port) on loadBalancer

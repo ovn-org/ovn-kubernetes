@@ -128,10 +128,9 @@ type Controller struct {
 
 	hoMaster *hocontroller.MasterController
 
-	TCPLoadBalancerUUID  string
-	UDPLoadBalancerUUID  string
-	SCTPLoadBalancerUUID string
-	SCTPSupport          bool
+	// All the uuid related to global load balancers
+	clusterLBsUUIDs []string
+	SCTPSupport     bool
 
 	// For TCP, UDP, and SCTP type traffic, cache OVN load-balancers used for the
 	// cluster's east-west traffic.
@@ -286,6 +285,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		recorder:                 recorder,
 		ovnNBClient:              ovnNBClient,
 		ovnSBClient:              ovnSBClient,
+		clusterLBsUUIDs:          make([]string, 0),
 	}
 }
 
@@ -334,7 +334,6 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 			oc.client,
 			informerFactory.Core().V1().Services(),
 			informerFactory.Discovery().V1beta1().EndpointSlices(),
-			oc.clusterPortGroupUUID,
 		)
 		informerFactory.Start(oc.stopChan)
 		wg.Add(1)
