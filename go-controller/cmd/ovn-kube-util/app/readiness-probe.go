@@ -103,7 +103,7 @@ func ovnSBDBReadiness(target string) error {
 }
 
 func ovnNorthdReadiness(target string) error {
-	// checking version works as it conntects to northd and returns the version
+	// checking version works as it connects to northd and returns the version
 	// if northd isn't ready, version may fail to return
 	_, _, err := util.RunOVNAppctlWithTimeout(5, "-t", target, "version")
 	if err != nil {
@@ -113,8 +113,10 @@ func ovnNorthdReadiness(target string) error {
 }
 
 func ovnNbCtlReadiness(target string) error {
-	// checking version works as it conntects to nbctld and returns the version
-	// if nbctld isn't ready, version may fail to return
+	// checking version works as it connects to the ovn-nbctl daemon and returns the version
+	// if nbctl isn't ready, version may fail to return
+	// NOTE: There is no nbctld process, but nbctl provides a daemon mode,
+	// which is invoked by using --detach option to start an ovn-nbctl in a daemon mode.
 	_, _, err := util.RunOVNAppctlWithTimeout(5, "-t", target, "version")
 	if err != nil {
 		return fmt.Errorf("failed to get version from %s: (%v)", target, err)
