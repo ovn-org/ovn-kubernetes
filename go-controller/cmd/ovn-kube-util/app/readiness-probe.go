@@ -18,7 +18,7 @@ var callbacks = map[string]readinessFunc{
 	"ovnnb-db":       ovnNBDBReadiness,
 	"ovnsb-db":       ovnSBDBReadiness,
 	"ovn-northd":     ovnNorthdReadiness,
-	"ovn-nbctl":     ovnNbCtlReadiness,
+	"ovn-nbctl":      ovnNbCtlReadiness,
 	"ovs-daemons":    ovsDaemonsReadiness,
 	"ovnkube-node":   ovnNodeReadiness,
 	"ovnnb-db-raft":  ovnNBDBRaftReadiness,
