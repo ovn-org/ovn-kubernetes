@@ -34,6 +34,7 @@ usage() {
     echo "usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]"
     echo "                 [-ho |--hybrid-enabled] [-ii|--install-ingress] [-n4|--no-ipv4]"
     echo "                 [-i6 |--ipv6] [-wk|--num-workers <num>] [-ds|--disable-snat-multiple-gws]"
+    echo "                 [-nf |--netflow-targets <targets>] [sf|--sflow-targets <targets>] [-if|--ipfix-targets]"
     echo "                 [-sw |--allow-system-writes] [-gm|--gateway-mode <mode>]"
     echo "                 [-nl |--node-loglevel <num>] [-ml|--master-loglevel <num>]"
     echo "                 [-dbl|--dbchecker-loglevel <num>] [-ndl|--ovn-loglevel-northd <loglevel>]"
@@ -48,6 +49,9 @@ usage() {
     echo "-ha  | --ha-enabled                Enable high availability. DEFAULT: HA Disabled."
     echo "-ho  | --hybrid-enabled            Enable hybrid overlay. DEFAULT: Disabled."
     echo "-ds  | --disable-snat-multiple-gws Disable SNAT for multiple gws. DEFAULT: Disabled."
+    echo "-nf  | --netflow-targets           Comma delimited list of ip:port netflow collectors. DEFAULT: Disabled."
+    echo "-sf  | --sflow-targets             Comma delimited list of ip:port sflow collectors. DEFAULT: Disabled."
+    echo "-if  | --ipfix-targets             Comma delimited list of ip:port ipfix collectors. DEFAULT: Disabled."
     echo "-el  | --ovn-empty-lb-events       Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled"
     echo "-ii  | --install-ingress           Flag to install Ingress Components."
     echo "                                   DEFAULT: Don't install ingress components."
@@ -93,6 +97,15 @@ parse_args() {
             -ho | --hybrid-enabled )            OVN_HYBRID_OVERLAY_ENABLE=true
                                                 ;;
             -ds | --disable-snat-multiple-gws ) OVN_DISABLE_SNAT_MULTIPLE_GWS=true
+                                                ;;
+            -nf | --netflow-targets )           shift
+                                                OVN_NETFLOW_TARGETS=$1
+                                                ;;
+            -sf | --sflow-targets )             shift
+                                                OVN_SFLOW_TARGETS=$1
+                                                ;;
+            -if | --ipfix-targets )             shift
+                                                OVN_IPFIX_TARGETS=$1
                                                 ;;
             -el | --ovn-empty-lb-events )       OVN_EMPTY_LB_EVENTS=true
                                                 ;;
@@ -189,6 +202,9 @@ print_params() {
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
      echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
      echo "OVN_DISABLE_SNAT_MULTIPLE_GWS = $OVN_DISABLE_SNAT_MULTIPLE_GWS"
+     echo "OVN_NETFLOW_TARGETS = $OVN_NETFLOW_TARGETS"
+     echo "OVN_SFLOW_TARGETS = $OVN_SFLOW_TARGETS"
+     echo "OVN_IPFIX_TARGETS = $OVN_IPFIX_TARGETS"
      echo "OVN_EMPTY_LB_EVENTS = $OVN_EMPTY_LB_EVENTS"
      echo "OVN_MULTICAST_ENABLE = $OVN_MULTICAST_ENABLE"
      echo "OVN_IMAGE = $OVN_IMAGE"

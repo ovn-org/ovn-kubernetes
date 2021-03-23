@@ -76,6 +76,13 @@ var (
 		ACLLoggingRateLimit: 20,
 	}
 
+	// Monitoring holds monitoring-related parsed config file parameters and command-line overrides
+	Monitoring = MonitoringConfig{
+		RawNetFlowTargets: "",
+		RawSFlowTargets:   "",
+		RawIPFIXTargets:   "",
+	}
+
 	// CNI holds CNI-related parsed config file parameters and command-line overrides
 	CNI = CNIConfig{
 		ConfDir: "/etc/cni/net.d",
@@ -186,6 +193,22 @@ type LoggingConfig struct {
 	LogFileMaxAge int `gcfg:"logfile-maxage"`
 	// Logging rate-limiting meter
 	ACLLoggingRateLimit int `gcfg:"acl-logging-rate-limit"`
+}
+
+// MonitoringConfig holds monitoring-related parsed config file parameters and command-line overrides
+type MonitoringConfig struct {
+	// RawNetFlowTargets holds the unparsed NetFlow targets. Should only be used inside the config module.
+	RawNetFlowTargets string `gcfg:"netflow-targets"`
+	// RawSFlowTargets holds the unparsed SFlow targets. Should only be used inside the config module.
+	RawSFlowTargets string `gcfg:"sflow-targets"`
+	// RawIPFIXTargets holds the unparsed IPFIX targets. Should only be used inside the config module.
+	RawIPFIXTargets string `gcfg:"ipfix-targets"`
+	// NetFlowTargets holds the parsed NetFlow targets and may be used outside the config module.
+	NetFlowTargets []HostPort
+	// SFlowTargets holds the parsed SFlow targets and may be used outside the config module.
+	SFlowTargets []HostPort
+	// IPFIXTargets holds the parsed IPFIX targets and may be used outside the config module.
+	IPFIXTargets []HostPort
 }
 
 // CNIConfig holds CNI-related parsed config file parameters and command-line overrides
@@ -307,6 +330,7 @@ const (
 type config struct {
 	Default              DefaultConfig
 	Logging              LoggingConfig
+	Monitoring           MonitoringConfig
 	CNI                  CNIConfig
 	OVNKubernetesFeature OVNKubernetesFeatureConfig
 	Kubernetes           KubernetesConfig
@@ -320,6 +344,7 @@ type config struct {
 var (
 	savedDefault              DefaultConfig
 	savedLogging              LoggingConfig
+	savedMonitoring           MonitoringConfig
 	savedCNI                  CNIConfig
 	savedOVNKubernetesFeature OVNKubernetesFeatureConfig
 	savedKubernetes           KubernetesConfig
@@ -342,6 +367,7 @@ func init() {
 	// Cache original default config values
 	savedDefault = Default
 	savedLogging = Logging
+	savedMonitoring = Monitoring
 	savedCNI = CNI
 	savedOVNKubernetesFeature = OVNKubernetesFeature
 	savedKubernetes = Kubernetes
@@ -367,6 +393,7 @@ func init() {
 	Flags = append(Flags, OVNGatewayFlags...)
 	Flags = append(Flags, MasterHAFlags...)
 	Flags = append(Flags, HybridOverlayFlags...)
+	Flags = append(Flags, MonitoringFlags...)
 }
 
 // PrepareTestConfig restores default config values. Used by testcases to
@@ -375,6 +402,7 @@ func PrepareTestConfig() {
 	Default = savedDefault
 	Logging = savedLogging
 	Logging.Level = 5
+	Monitoring = savedMonitoring
 	CNI = savedCNI
 	OVNKubernetesFeature = savedOVNKubernetesFeature
 	Kubernetes = savedKubernetes
@@ -592,6 +620,32 @@ var CommonFlags = []cli.Flag{
 		Usage:       "The largest number of messages per second that gets logged before drop (default 20)",
 		Destination: &cliConfig.Logging.ACLLoggingRateLimit,
 		Value:       20,
+	},
+}
+
+// MonitoringFlags capture monitoring-related options
+var MonitoringFlags = []cli.Flag{
+	// Monitoring options
+	&cli.StringFlag{
+		Name:  "netflow-targets",
+		Value: Monitoring.RawNetFlowTargets,
+		Usage: "A comma separated set of NetFlow collectors to export flow data (eg, \"10.128.0.150:2056,10.0.0.151:2056\")." +
+			"Each entry is given in the form [IP address:port]",
+		Destination: &cliConfig.Monitoring.RawNetFlowTargets,
+	},
+	&cli.StringFlag{
+		Name:  "sflow-targets",
+		Value: Monitoring.RawSFlowTargets,
+		Usage: "A comma separated set of SFlow collectors to export flow data (eg, \"10.128.0.150:6343,10.0.0.151:6343\")." +
+			"Each entry is given in the form [IP address:port]",
+		Destination: &cliConfig.Monitoring.RawSFlowTargets,
+	},
+	&cli.StringFlag{
+		Name:  "ipfix-targets",
+		Value: Monitoring.RawIPFIXTargets,
+		Usage: "A comma separated set of IPFIX collectors to export flow data (eg, \"10.128.0.150:2055,10.0.0.151:2055\")." +
+			"Each entry is given in the form [IP address:port]",
+		Destination: &cliConfig.Monitoring.RawIPFIXTargets,
 	},
 }
 
@@ -907,6 +961,7 @@ func GetFlags(customFlags []cli.Flag) []cli.Flag {
 	flags = append(flags, OVNGatewayFlags...)
 	flags = append(flags, MasterHAFlags...)
 	flags = append(flags, HybridOverlayFlags...)
+	flags = append(flags, MonitoringFlags...)
 	flags = append(flags, customFlags...)
 	return flags
 }
@@ -1183,6 +1238,36 @@ func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
 	return nil
 }
 
+func buildMonitoringConfig(ctx *cli.Context, cli, file *config) error {
+	var err error
+	if err = overrideFields(&Monitoring, &file.Monitoring, &savedMonitoring); err != nil {
+		return err
+	}
+	if err = overrideFields(&Monitoring, &cli.Monitoring, &savedMonitoring); err != nil {
+		return err
+	}
+
+	if Monitoring.RawNetFlowTargets != "" {
+		Monitoring.NetFlowTargets, err = ParseFlowCollectors(Monitoring.RawNetFlowTargets)
+		if err != nil {
+			return fmt.Errorf("netflow targets invalid: %v", err)
+		}
+	}
+	if Monitoring.RawSFlowTargets != "" {
+		Monitoring.SFlowTargets, err = ParseFlowCollectors(Monitoring.RawSFlowTargets)
+		if err != nil {
+			return fmt.Errorf("sflow targets invalid: %v", err)
+		}
+	}
+	if Monitoring.RawIPFIXTargets != "" {
+		Monitoring.IPFIXTargets, err = ParseFlowCollectors(Monitoring.RawIPFIXTargets)
+		if err != nil {
+			return fmt.Errorf("ipfix targets invalid: %v", err)
+		}
+	}
+	return nil
+}
+
 func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config, allSubnets *configSubnets) error {
 	// Copy config file values over default values
 	if err := overrideFields(&HybridOverlay, &file.HybridOverlay, &savedHybridOverlay); err != nil {
@@ -1377,6 +1462,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
+	if err = buildMonitoringConfig(ctx, &cliConfig, &cfg); err != nil {
+		return "", err
+	}
+
 	if err = buildHybridOverlayConfig(ctx, &cliConfig, &cfg, allSubnets); err != nil {
 		return "", err
 	}
@@ -1405,6 +1494,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 
 	klog.V(5).Infof("Default config: %+v", Default)
 	klog.V(5).Infof("Logging config: %+v", Logging)
+	klog.V(5).Infof("Monitoring config: %+v", Monitoring)
 	klog.V(5).Infof("CNI config: %+v", CNI)
 	klog.V(5).Infof("Kubernetes config: %+v", Kubernetes)
 	klog.V(5).Infof("Gateway config: %+v", Gateway)

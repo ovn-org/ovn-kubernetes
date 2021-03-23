@@ -148,6 +148,11 @@ no-hostsubnet-nodes=label=another-test-label
 loglevel=5
 logfile=/var/log/ovnkube.log
 
+[monitoring]
+netflow-targets=2.2.2.2:2055
+sflow-targets=2.2.2.2:2056
+ipfix-targets=2.2.2.2:2057
+
 [cni]
 conf-dir=/etc/cni/net.d22
 plugin=ovn-k8s-cni-overlay22
@@ -234,6 +239,9 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Default.ConntrackZone).To(gomega.Equal(64000))
 			gomega.Expect(Logging.File).To(gomega.Equal(""))
 			gomega.Expect(Logging.Level).To(gomega.Equal(5))
+			gomega.Expect(Monitoring.RawNetFlowTargets).To(gomega.Equal(""))
+			gomega.Expect(Monitoring.RawSFlowTargets).To(gomega.Equal(""))
+			gomega.Expect(Monitoring.RawIPFIXTargets).To(gomega.Equal(""))
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/etc/cni/net.d"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("ovn-k8s-cni-overlay"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(""))
@@ -475,6 +483,9 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Logging.File).To(gomega.Equal("/var/log/ovnkube.log"))
 			gomega.Expect(Logging.Level).To(gomega.Equal(5))
 			gomega.Expect(Logging.ACLLoggingRateLimit).To(gomega.Equal(20))
+			gomega.Expect(Monitoring.RawNetFlowTargets).To(gomega.Equal("2.2.2.2:2055"))
+			gomega.Expect(Monitoring.RawSFlowTargets).To(gomega.Equal("2.2.2.2:2056"))
+			gomega.Expect(Monitoring.RawIPFIXTargets).To(gomega.Equal("2.2.2.2:2057"))
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/etc/cni/net.d22"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("ovn-k8s-cni-overlay22"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
@@ -855,6 +866,9 @@ mode=shared
 			gomega.Expect(Default.ConntrackZone).To(gomega.Equal(5555))
 			gomega.Expect(Logging.File).To(gomega.Equal("/some/logfile"))
 			gomega.Expect(Logging.Level).To(gomega.Equal(3))
+			gomega.Expect(Monitoring.RawNetFlowTargets).To(gomega.Equal("2.2.2.2:2055"))
+			gomega.Expect(Monitoring.RawSFlowTargets).To(gomega.Equal("2.2.2.2:2056"))
+			gomega.Expect(Monitoring.RawIPFIXTargets).To(gomega.Equal("2.2.2.2:2057"))
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/some/cni/dir"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("a-plugin"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
@@ -889,6 +903,9 @@ mode=shared
 			"-conntrack-zone=5555",
 			"-loglevel=3",
 			"-logfile=/some/logfile",
+			"-netflow-targets=2.2.2.2:2055",
+			"-sflow-targets=2.2.2.2:2056",
+			"-ipfix-targets=2.2.2.2:2057",
 			"-cni-conf-dir=/some/cni/dir",
 			"-cni-plugin=a-plugin",
 			"-k8s-kubeconfig=" + kubeconfigFile,
