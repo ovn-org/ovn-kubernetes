@@ -323,7 +323,7 @@ func (gp *gressPolicy) localPodAddACL(portGroupName, portGroupUUID string, aclLo
 // addACLAllow adds an ACL with a given match to the given Port Group
 func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlockCidr bool, aclLogging string) error {
 	var direction, action string
-	direction = toLport
+	direction = types.DirectionToLPort
 	action = "allow-related"
 
 	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
@@ -345,13 +345,13 @@ func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlock
 	}
 
 	_, stderr, err = util.RunOVNNbctl("--id=@acl", "create",
-		"acl", fmt.Sprintf("priority=%s", defaultAllowPriority),
+		"acl", fmt.Sprintf("priority=%s", types.DefaultAllowPriority),
 		fmt.Sprintf("direction=%s", direction), match,
 		fmt.Sprintf("action=%s", action),
 		fmt.Sprintf("log=%t", aclLogging != ""),
 		fmt.Sprintf("severity=%s", getACLLoggingSeverity(aclLogging)),
 		fmt.Sprintf("meter=%s", types.OvnACLLoggingMeter),
-		fmt.Sprintf("name=%s", gp.policyNamespace),
+		fmt.Sprintf("name=%.63s", gp.policyName),
 		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
 		fmt.Sprintf("external-ids:ipblock_cidr=%t", ipBlockCidr),
 		fmt.Sprintf("external-ids:namespace=%s", gp.policyNamespace),

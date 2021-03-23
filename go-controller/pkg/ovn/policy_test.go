@@ -12,13 +12,14 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
 
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
+	apimachinerytypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
@@ -51,7 +52,7 @@ type kNetworkPolicy struct{}
 
 func newNetworkPolicyMeta(name, namespace string) metav1.ObjectMeta {
 	return metav1.ObjectMeta{
-		UID:       types.UID(namespace),
+		UID:       apimachinerytypes.UID(namespace),
 		Name:      name,
 		Namespace: namespace,
 		Labels: map[string]string{
@@ -139,7 +140,7 @@ func (n kNetworkPolicy) addNamespaceSelectorCmds(fexec *ovntest.FakeExec, networ
 	for i := range networkPolicy.Spec.Ingress {
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Ingress_num=%v external-ids:policy_type=Ingress", networkPolicy.Namespace, networkPolicy.Name, i),
-			"ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4.src == {$a3128014386057836746} && outport == @a14195333570786048679\" action=allow-related log=false severity=info meter=acl-logging name=namespace1 external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group " + readableGroupName + " acls @acl",
+			"ovn-nbctl --timeout=15 --id=@acl create acl priority=" + types.DefaultAllowPriority + " direction=" + types.DirectionToLPort + " match=\"ip4.src == {$a3128014386057836746} && outport == @a14195333570786048679\" action=allow-related log=false severity=info meter=acl-logging name=" + networkPolicy.Name + " external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group " + readableGroupName + " acls @acl",
 		})
 		if findAgain {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -150,7 +151,7 @@ func (n kNetworkPolicy) addNamespaceSelectorCmds(fexec *ovntest.FakeExec, networ
 	for i := range networkPolicy.Spec.Egress {
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=%v external-ids:policy_type=Egress", networkPolicy.Namespace, networkPolicy.Name, i),
-			"ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4.dst == {$a17928043879887565554} && inport == @a14195333570786048679\" action=allow-related log=false severity=info meter=acl-logging name=namespace1 external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group " + readableGroupName + " acls @acl",
+			"ovn-nbctl --timeout=15 --id=@acl create acl priority=" + types.DefaultAllowPriority + " direction=" + types.DirectionToLPort + " match=\"ip4.dst == {$a17928043879887565554} && inport == @a14195333570786048679\" action=allow-related log=false severity=info meter=acl-logging name=" + networkPolicy.Name + " external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group " + readableGroupName + " acls @acl",
 		})
 		if findAgain {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -258,8 +259,8 @@ func (p multicastPolicy) enableCmds(fExec *ovntest.FakeExec, ns string) {
 			match + " action=allow external-ids:default-deny-policy-type=Egress",
 	})
 	fExec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --id=@acl create acl priority=1012 direction=from-lport " +
-			match + " action=allow log=false severity=info meter=acl-logging name=namespace1 external-ids:default-deny-policy-type=Egress " +
+		"ovn-nbctl --timeout=15 --id=@acl create acl priority=" + types.DefaultMcastAllowPriority + " direction=" + types.DirectionFromLPort + " " +
+			match + " action=allow log=false severity=info meter=acl-logging name=namespace1_MulticastAllowEgress external-ids:default-deny-policy-type=Egress " +
 			"-- add port_group fake_uuid acls @acl",
 	})
 
@@ -272,8 +273,8 @@ func (p multicastPolicy) enableCmds(fExec *ovntest.FakeExec, ns string) {
 			match + " action=allow external-ids:default-deny-policy-type=Ingress",
 	})
 	fExec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --id=@acl create acl priority=1012 direction=to-lport " +
-			match + " action=allow log=false severity=info meter=acl-logging name=namespace1 external-ids:default-deny-policy-type=Ingress " +
+		"ovn-nbctl --timeout=15 --id=@acl create acl priority=" + types.DefaultMcastAllowPriority + " direction=" + types.DirectionToLPort + " " +
+			match + " action=allow log=false severity=info meter=acl-logging name=namespace1_MulticastAllowIngress external-ids:default-deny-policy-type=Ingress " +
 			"-- add port_group fake_uuid acls @acl",
 	})
 }
@@ -923,9 +924,9 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				readableGroupName := fmt.Sprintf("%s_%s", networkPolicy.Namespace, networkPolicy.Name)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress", portNum, networkPolicy.Namespace, networkPolicy.Name),
-					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4 && tcp && tcp.dst==%d && outport == @a14195333570786048679\" action=allow-related log=false severity=info meter=acl-logging name=%s external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group %s acls @acl", portNum, networkPolicy.Namespace, portNum, networkPolicy.Namespace, networkPolicy.Name, readableGroupName),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority="+types.DefaultAllowPriority+" direction="+types.DirectionToLPort+" match=\"ip4 && tcp && tcp.dst==%d && outport == @a14195333570786048679\" action=allow-related log=false severity=info meter=acl-logging name=%s external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group %s acls @acl", portNum, networkPolicy.Name, portNum, networkPolicy.Namespace, networkPolicy.Name, readableGroupName),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=0 external-ids:policy_type=Egress", portNum, networkPolicy.Namespace, networkPolicy.Name),
-					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4 && tcp && tcp.dst==%d && inport == @a14195333570786048679\" action=allow-related log=false severity=info meter=acl-logging name=%s external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group %s acls @acl", portNum, networkPolicy.Namespace, portNum, networkPolicy.Namespace, networkPolicy.Name, readableGroupName),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority="+types.DefaultAllowPriority+" direction="+types.DirectionToLPort+" match=\"ip4 && tcp && tcp.dst==%d && inport == @a14195333570786048679\" action=allow-related log=false severity=info meter=acl-logging name=%s external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group %s acls @acl", portNum, networkPolicy.Name, portNum, networkPolicy.Namespace, networkPolicy.Name, readableGroupName),
 				})
 
 				fakeOvn.start(ctx,
@@ -1604,7 +1605,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 
 		policy := &knet.NetworkPolicy{
 			ObjectMeta: metav1.ObjectMeta{
-				UID:       types.UID("testing"),
+				UID:       apimachinerytypes.UID("testing"),
 				Name:      "policy",
 				Namespace: "testing",
 			},

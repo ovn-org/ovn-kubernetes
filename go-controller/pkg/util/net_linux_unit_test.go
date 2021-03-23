@@ -411,6 +411,26 @@ func TestLinkRoutesDel(t *testing.T) {
 				},
 			},
 		},
+		{
+			desc:         "delete all routes for a link",
+			inputLink:    mockLink,
+			inputSubnets: nil,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{
+					OnCallMethodName:    "RouteList",
+					OnCallMethodArgType: []string{"*mocks.Link", "int"},
+					RetArgList: []interface{}{
+						[]netlink.Route{
+							{Dst: ovntest.MustParseIPNet("192.168.1.0/24")},
+						},
+						nil,
+					},
+				},
+				{
+					OnCallMethodName: "RouteDel", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil},
+				},
+			},
+		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {

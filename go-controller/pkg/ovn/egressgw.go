@@ -18,6 +18,10 @@ import (
 	"k8s.io/klog/v2"
 )
 
+const (
+	DuplicateECMPError = "duplicate nexthop for the same ECMP route"
+)
+
 type gatewayInfo struct {
 	gws        []net.IP
 	bfdEnabled bool
@@ -113,7 +117,7 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 	}
 	// TODO (trozet): use the go bindings here and batch commands
 	for _, pod := range existingPods {
-		gr := "GR_" + pod.Spec.NodeName
+		gr := util.GetGatewayRouterFromNode(pod.Spec.NodeName)
 		for _, gw := range egress.gws {
 			for _, podIP := range pod.Status.PodIPs {
 				if utilnet.IsIPv6(gw) != utilnet.IsIPv6String(podIP.IP) {
@@ -130,7 +134,7 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 
 				_, stderr, err := util.RunOVNNbctl(nbctlArgs...)
 
-				if err != nil {
+				if err != nil && !strings.Contains(err.Error(), DuplicateECMPError) {
 					return fmt.Errorf("unable to add src-ip route to GR router, stderr:%q, err:%v", stderr, err)
 				}
 				if err := oc.addHybridRoutePolicyForPod(net.ParseIP(podIP.IP), pod.Spec.NodeName); err != nil {
@@ -186,7 +190,7 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
 				continue
 			}
 			mask := GetIPFullMask(podIP)
-			node := strings.TrimPrefix(gr, "GR_")
+			node := util.GetWorkerFromGatewayRouter(gr)
 			_, stderr, err := util.RunOVNNbctl("--if-exists", "--policy=src-ip",
 				"lr-route-del", gr, podIP+mask, gwIP.String())
 			if err != nil {
@@ -226,7 +230,7 @@ func (oc *Controller) deleteGWRoutesForNamespace(nsInfo *namespaceInfo) {
 				continue
 			}
 			mask := GetIPFullMask(podIP)
-			node := strings.TrimPrefix(gr, "GR_")
+			node := util.GetWorkerFromGatewayRouter(gr)
 			if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
 				klog.Error(err)
 			}
@@ -260,7 +264,7 @@ func (oc *Controller) deleteGWRoutesForPod(namespace string, podIPNets []*net.IP
 			}
 			mask := GetIPFullMask(pod)
 			for gw, gr := range gwToGr {
-				node := strings.TrimPrefix(gr, "GR_")
+				node := util.GetWorkerFromGatewayRouter(gr)
 				if err := oc.delHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
 					klog.Error(err)
 				}
@@ -284,7 +288,7 @@ func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*ne
 		return err
 	}
 	defer nsInfo.Unlock()
-	gr := "GR_" + node
+	gr := util.GetGatewayRouterFromNode(node)
 	for _, podIPNet := range podIfAddrs {
 		for _, gateway := range gateways {
 			routesAdded := 0
@@ -303,7 +307,7 @@ func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*ne
 							"lr-route-add", gr, podIP + mask, gw.String(), types.GWRouterToExtSwitchPrefix + gr}
 					}
 					_, stderr, err := util.RunOVNNbctl(nbctlArgs...)
-					if err != nil {
+					if err != nil && !strings.Contains(err.Error(), DuplicateECMPError) {
 						return fmt.Errorf("unable to add external gwStr src-ip route to GR router, stderr:%q, err:%gw", stderr, err)
 					}
 					if err := oc.addHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
@@ -331,7 +335,7 @@ func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*ne
 // deletePerPodGRSNAT removes per pod SNAT rules that are applied to the GR where the pod resides if
 // there are no gateways
 func (oc *Controller) deletePerPodGRSNAT(node string, podIPNets []*net.IPNet) {
-	gr := "GR_" + node
+	gr := util.GetGatewayRouterFromNode(node)
 	for _, podIPNet := range podIPNets {
 		podIP := podIPNet.IP.String()
 		stdout, stderr, err := util.RunOVNNbctl("--if-exists", "lr-nat-del",
@@ -362,18 +366,12 @@ func (oc *Controller) addPerPodGRSNAT(pod *kapi.Pod, podIfAddrs []*net.IPNet) er
 				continue
 			}
 			mask := GetIPFullMask(podIP)
-			// may-exist works only if the the nat rule being added has everything the same i.e.,
-			// the type, the router name, external IP and the logical IP must match
-			// else the tuple is considered different one than existing.
-			// If the type is snat and the logical IP is the same, but external IP is different,
-			// even with --may-exist, the add may error out. this is because, for snat,
-			// (type, router, logical ip) is considered a key for uniqueness
-			stdout, stderr, err := util.RunOVNNbctl("--if-exists", "lr-nat-del", gr, "snat", podIP+mask,
-				"--", "lr-nat-add",
-				gr, "snat", gwIP, podIP+mask)
+			_, fullMaskPodNet, err := net.ParseCIDR(podIP + mask)
 			if err != nil {
-				return fmt.Errorf("failed to create SNAT rule for pod on gateway router %s, "+
-					"stdout: %q, stderr: %q, error: %v", gr, stdout, stderr, err)
+				return fmt.Errorf("invalid IP: %s and mask: %s combination, error: %v", podIP, mask, err)
+			}
+			if err := util.UpdateRouterSNAT(gr, gwIPNet.IP, fullMaskPodNet); err != nil {
+				return fmt.Errorf("failed to update NAT for pod: %s, error: %v", pod.Name, err)
 			}
 		}
 	}

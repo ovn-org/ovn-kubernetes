@@ -37,9 +37,6 @@ const (
 	OvnServiceIdledAt              = "k8s.ovn.org/idled-at"
 	OvnNodeAnnotationRetryInterval = 100 * time.Millisecond
 	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
-	OvnSingleJoinSwitchTopoVersion = 1
-	OvnNamespacedDenyPGTopoVersion = 2
-	OvnCurrentTopologyVersion      = OvnNamespacedDenyPGTopoVersion
 )
 
 type ovnkubeMasterLeaderMetrics struct{}
@@ -93,7 +90,7 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup) error {
 				if err := oc.StartClusterMaster(nodeName); err != nil {
 					panic(err.Error())
 				}
-				if err := oc.Run(wg); err != nil {
+				if err := oc.Run(wg, nodeName); err != nil {
 					panic(err.Error())
 				}
 			},
@@ -182,44 +179,23 @@ func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.No
 }
 
 func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
-	// Find out the current OVN topology version. If "k8s-ovn-topo-version" key in external_ids column does not exist,
-	// it is prior to OVN topology versioning and therefore set version number to OvnCurrentTopologyVersion
-	ver := 0
-	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-headings", "--columns=name", "find", "logical_router",
-		fmt.Sprintf("name=%s", types.OVNClusterRouter))
+	ver, err := util.DetermineOVNTopoVersionFromOVN()
 	if err != nil {
-		return fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
-			"stderr: %q, error: %v", types.OVNClusterRouter, stderr, err)
-	}
-	if len(stdout) == 0 {
-		// no OVNClusterRouter exists, DB is empty, nothing to upgrade
-		return nil
-	}
-
-	stdout, stderr, err = util.RunOVNNbctl("--if-exists", "get", "logical_router", types.OVNClusterRouter,
-		"external_ids:k8s-ovn-topo-version")
-	if err != nil {
-		return fmt.Errorf("failed to determine the current version of OVN logical topology: stderr: %q, error: %v",
-			stderr, err)
-	} else if len(stdout) == 0 {
-		klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
-	} else {
-		v, err := strconv.Atoi(stdout)
-		if err != nil {
-			return fmt.Errorf("invalid OVN topology version string for the cluster: %s", stdout)
-		} else {
-			ver = v
-		}
+		return err
 	}
 
 	// If current DB version is greater than OvnSingleJoinSwitchTopoVersion, no need to upgrade to single switch topology
-	if ver < OvnSingleJoinSwitchTopoVersion {
+	if ver < types.OvnSingleJoinSwitchTopoVersion {
 		klog.Infof("Upgrading to Single Switch OVN Topology")
 		err = oc.upgradeToSingleSwitchOVNTopology(existingNodes)
 	}
-	if err == nil && ver < OvnNamespacedDenyPGTopoVersion {
+	if err == nil && ver < types.OvnNamespacedDenyPGTopoVersion {
 		klog.Infof("Upgrading to Namespace Deny PortGroup OVN Topology")
 		err = oc.upgradeToNamespacedDenyPGOVNTopology(existingNodes)
+	}
+	// If version is less than Host -> Service with OpenFlow, we need to remove and cleanup DGP
+	if err == nil && ver < types.OvnHostToSvcOFTopoVersion && config.Gateway.Mode == config.GatewayModeShared {
+		err = cleanupDGP(existingNodes)
 	}
 	return err
 }
@@ -261,21 +237,23 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	klog.Infof("Starting cluster master")
 	// The gateway router need to be connected to the distributed router via a per-node join switch.
 	// We need a subnet allocator that allocates subnet for this per-node join switch.
-	if config.IPv4Mode {
-		// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
-		_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(types.V4NodeLocalNATSubnet)
-		oc.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
-		// set aside the first two IPs for the nextHop on the host and for distributed gateway port
-		_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(types.V4NodeLocalNATSubnetNextHop))
-		_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(types.V4NodeLocalDistributedGWPortIP))
-	}
-	if config.IPv6Mode {
-		// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
-		_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(types.V6NodeLocalNATSubnet)
-		oc.nodeLocalNatIPv6Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
-		// set aside the first two IPs for the nextHop on the host and for distributed gateway port
-		_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalNATSubnetNextHop))
-		_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalDistributedGWPortIP))
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		if config.IPv4Mode {
+			// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
+			_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(types.V4NodeLocalNATSubnet)
+			oc.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
+			// set aside the first two IPs for the nextHop on the host and for distributed gateway port
+			_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(types.V4NodeLocalNATSubnetNextHop))
+			_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(types.V4NodeLocalDistributedGWPortIP))
+		}
+		if config.IPv6Mode {
+			// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
+			_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(types.V6NodeLocalNATSubnet)
+			oc.nodeLocalNatIPv6Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
+			// set aside the first two IPs for the nextHop on the host and for distributed gateway port
+			_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalNATSubnetNextHop))
+			_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalDistributedGWPortIP))
+		}
 	}
 
 	// Enable logical datapath groups for OVN 20.12 and later
@@ -291,7 +269,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	klog.V(5).Infof("Existing number of nodes: %d", len(existingNodes.Items))
 	err = oc.upgradeOVNTopology(existingNodes)
 	if err != nil {
-		klog.Errorf("Failed to upgrade OVN topology to version %d: %v", OvnCurrentTopologyVersion, err)
+		klog.Errorf("Failed to upgrade OVN topology to version %d: %v", types.OvnCurrentTopologyVersion, err)
 		return err
 	}
 
@@ -315,17 +293,19 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 			}
 			util.UpdateUsedHostSubnetsCount(hostSubnet, &oc.v4HostSubnetsUsed, &oc.v6HostSubnetsUsed, true)
 		}
-		nodeLocalNatIPs, _ := util.ParseNodeLocalNatIPAnnotation(&node)
-		klog.V(5).Infof("Node %s contains local NAT IPs: %v", node.Name, nodeLocalNatIPs)
-		for _, nodeLocalNatIP := range nodeLocalNatIPs {
-			var err error
-			if utilnet.IsIPv6(nodeLocalNatIP) {
-				err = oc.nodeLocalNatIPv6Allocator.Allocate(nodeLocalNatIP)
-			} else {
-				err = oc.nodeLocalNatIPv4Allocator.Allocate(nodeLocalNatIP)
-			}
-			if err != nil {
-				utilruntime.HandleError(err)
+		if config.Gateway.Mode == config.GatewayModeLocal {
+			nodeLocalNatIPs, _ := util.ParseNodeLocalNatIPAnnotation(&node)
+			klog.V(5).Infof("Node %s contains local NAT IPs: %v", node.Name, nodeLocalNatIPs)
+			for _, nodeLocalNatIP := range nodeLocalNatIPs {
+				var err error
+				if utilnet.IsIPv6(nodeLocalNatIP) {
+					err = oc.nodeLocalNatIPv6Allocator.Allocate(nodeLocalNatIP)
+				} else {
+					err = oc.nodeLocalNatIPv4Allocator.Allocate(nodeLocalNatIP)
+				}
+				if err != nil {
+					utilruntime.HandleError(err)
+				}
 			}
 		}
 	}
@@ -381,16 +361,17 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 func (oc *Controller) SetupMaster(masterNodeName string) error {
 	// Create a single common distributed router for the cluster.
 	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", types.OVNClusterRouter,
-		"--", "set", "logical_router", types.OVNClusterRouter, "external_ids:k8s-cluster-router=yes",
-		fmt.Sprintf("external_ids:k8s-ovn-topo-version=%d", OvnCurrentTopologyVersion))
+		"--", "set", "logical_router", types.OVNClusterRouter, "external_ids:k8s-cluster-router=yes")
 	if err != nil {
 		klog.Errorf("Failed to create a single common distributed router for the cluster, "+
 			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
 
-	if err := addDistributedGWPort(); err != nil {
-		return err
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		if err := addDistributedGWPort(); err != nil {
+			return err
+		}
 	}
 
 	// Determine SCTP support
@@ -668,6 +649,22 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		}
 	}
 
+	// Add cluster load balancers to GR for Host -> Cluster IP Service traffic
+	if config.Gateway.Mode != config.GatewayModeLocal {
+		clusterLBs := []string{oc.TCPLoadBalancerUUID, oc.UDPLoadBalancerUUID}
+		if oc.SCTPSupport {
+			clusterLBs = append(clusterLBs, oc.SCTPLoadBalancerUUID)
+		}
+		gr := util.GetGatewayRouterFromNode(node.Name)
+		for _, clusterLB := range clusterLBs {
+			_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-lb-add", gr, clusterLB)
+			if err != nil {
+				return fmt.Errorf("unable to add cluster LB: %s to %s, stderr: %q, error: %v",
+					clusterLB, gr, stderr, err)
+			}
+		}
+	}
+
 	// in the case of shared gateway mode, we need to setup
 	// 1. two policy based routes to steer traffic to the k8s node IP
 	// 	  - from the management port via the node_local_switch's localnet port
@@ -691,8 +688,10 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 			return err
 		}
 
-		if err := oc.addNodeLocalNatEntries(node, mpMAC.String(), hostIfAddr); err != nil {
-			return err
+		if config.Gateway.Mode == config.GatewayModeLocal {
+			if err := oc.addNodeLocalNatEntries(node, mpMAC.String(), hostIfAddr); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -700,7 +699,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		err = oc.handleNodePortLB(node)
 	} else {
 		// nodePort disabled, delete gateway load balancers for this node.
-		gatewayRouter := "GR_" + node.Name
+		gatewayRouter := util.GetGatewayRouterFromNode(node.Name)
 		for _, proto := range []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP, kapi.ProtocolSCTP} {
 			lbUUID, _ := oc.getGatewayLoadBalancer(gatewayRouter, proto)
 			if lbUUID != "" {
@@ -1090,15 +1089,17 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet, node
 	// update metrics
 	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
 
-	for _, nodeLocalNatIP := range nodeLocalNatIPs {
-		var err error
-		if utilnet.IsIPv6(nodeLocalNatIP) {
-			err = oc.nodeLocalNatIPv6Allocator.Release(nodeLocalNatIP)
-		} else {
-			err = oc.nodeLocalNatIPv4Allocator.Release(nodeLocalNatIP)
-		}
-		if err != nil {
-			klog.Errorf("Error deleting node %s's node local NAT IP %s from %v: %v", nodeName, nodeLocalNatIP, nodeLocalNatIPs, err)
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		for _, nodeLocalNatIP := range nodeLocalNatIPs {
+			var err error
+			if utilnet.IsIPv6(nodeLocalNatIP) {
+				err = oc.nodeLocalNatIPv6Allocator.Release(nodeLocalNatIP)
+			} else {
+				err = oc.nodeLocalNatIPv4Allocator.Release(nodeLocalNatIP)
+			}
+			if err != nil {
+				klog.Errorf("Error deleting node %s's node local NAT IP %s from %v: %v", nodeName, nodeLocalNatIP, nodeLocalNatIPs, err)
+			}
 		}
 	}
 

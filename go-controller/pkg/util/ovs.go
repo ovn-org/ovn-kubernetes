@@ -4,15 +4,19 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 	"unicode"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/afero"
 
@@ -765,4 +769,49 @@ func DetectSCTPSupport() (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// Finds any OVN Load Balancer based on external ID and value
+func FindOVNLoadBalancer(externalID, externalValue string) (string, string, error) {
+	out, stderr, err := RunOVNNbctl("--data=bare",
+		"--no-heading", "--columns=_uuid", "find", "load_balancer",
+		"external_ids:"+externalID+"="+externalValue)
+	if err != nil {
+		return "", stderr, err
+	}
+	return out, "", nil
+}
+
+// DetermineOVNTopoVersionFromOVN determines what OVN Topology version is being used
+// If "k8s-ovn-topo-version" key in external_ids column does not exist, it is prior to OVN topology versioning
+// and therefore set version number to OvnCurrentTopologyVersion
+func DetermineOVNTopoVersionFromOVN() (int, error) {
+	ver := 0
+	stdout, stderr, err := RunOVNNbctl("--data=bare", "--no-headings", "--columns=name", "find", "logical_router",
+		fmt.Sprintf("name=%s", types.OVNClusterRouter))
+	if err != nil {
+		return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
+			"stderr: %q, error: %v", types.OVNClusterRouter, stderr, err)
+	}
+	if len(stdout) == 0 {
+		// no OVNClusterRouter exists, DB is empty, nothing to upgrade
+		return math.MaxInt32, nil
+	}
+
+	stdout, stderr, err = RunOVNNbctl("--if-exists", "get", "logical_router", types.OVNClusterRouter,
+		"external_ids:k8s-ovn-topo-version")
+	if err != nil {
+		return 0, fmt.Errorf("failed to determine the current version of OVN logical topology: stderr: %q, error: %v",
+			stderr, err)
+	} else if len(stdout) == 0 {
+		klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
+	} else {
+		v, err := strconv.Atoi(stdout)
+		if err != nil {
+			return 0, fmt.Errorf("invalid OVN topology version string for the cluster: %s", stdout)
+		} else {
+			ver = v
+		}
+	}
+	return ver, nil
 }
