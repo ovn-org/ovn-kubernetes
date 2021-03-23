@@ -56,21 +56,17 @@ jobs:
       run: |
         set -x
         go get golang.org/x/tools/cmd/cover
+        go get github.com/modocache/gover
+        go get github.com/jandelgado/gcov2lcov
         pushd go-controller
            make
            make windows
            COVERALLS=1 make check
+           # Combine separate code coverage profiles into one
+           gover go-controller/ gover.coverprofile
+           # Convert coverage profile to LCOV format for coveralls github action
+           gcov2lcov -infile gover.coverprofile -outfile ../coverage.lcov
         popd
-
-        # Combine separate code coverage profiles into one
-        go get github.com/modocache/gover
-        gover go-controller/ gover.coverprofile
-
-        # Convert coverage profile to LCOV format for coveralls github action
-        go get github.com/jandelgado/gcov2lcov
-        mkdir -p src/github.com/ovn-org
-        ln -sf $(pwd) src/github.com/ovn-org/ovn-kubernetes
-        GOPATH=$(pwd) gcov2lcov -infile gover.coverprofile -outfile coverage.lcov
 
     - name: Build docker image
       run: |
