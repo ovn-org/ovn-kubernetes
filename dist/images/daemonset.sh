@@ -43,6 +43,9 @@ OVN_MULTICAST_ENABLE=""
 OVN_EGRESSIP_ENABLE=
 OVN_V4_JOIN_SUBNET=""
 OVN_V6_JOIN_SUBNET=""
+OVN_NETFLOW_TARGETS=""
+OVN_SFLOW_TARGETS=""
+OVN_IPFIX_TARGETS=""
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -163,6 +166,15 @@ while [ "$1" != "" ]; do
   --v6-join-subnet)
     OVN_V6_JOIN_SUBNET=$VALUE
     ;;
+  --netflow-targets)
+    OVN_NETFLOW_TARGETS=$VALUE
+    ;;
+  --sflow-targets)
+    OVN_SFLOW_TARGETS=$VALUE
+    ;;
+  --ipfix-targets)
+    OVN_IPFIX_TARGETS=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -250,6 +262,12 @@ ovn_v4_join_subnet=${OVN_V4_JOIN_SUBNET}
 echo "ovn_v4_join_subnet: ${ovn_v4_join_subnet}"
 ovn_v6_join_subnet=${OVN_V6_JOIN_SUBNET}
 echo "ovn_v6_join_subnet: ${ovn_v6_join_subnet}"
+ovn_netflow_targets=${OVN_NETFLOW_TARGETS}
+echo "ovn_netflow_targets: ${ovn_netflow_targets}"
+ovn_sflow_targets=${OVN_SFLOW_TARGETS}
+echo "ovn_sflow_targets: ${ovn_sflow_targets}"
+ovn_ipfix_targets=${OVN_IPFIX_TARGETS}
+echo "ovn_ipfix_targets: ${ovn_ipfix_targets}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -271,6 +289,9 @@ ovn_image=${image} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
+  ovn_netflow_targets=${ovn_netflow_targets} \
+  ovn_sflow_targets=${ovn_netflow_targets} \
+  ovn_ipfix_targets=${ovn_ipfix_targets} \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
 
 ovn_image=${image} \
