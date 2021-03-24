@@ -24,7 +24,7 @@ func (n *OvnNode) watchSmartNicPods(isOvnUpEnabled bool) {
 	// servedPods tracks the pods that got a VF
 	var servedPods sync.Map
 
-	podLister := corev1listers.NewPodLister(n.watchFactory.LocalPodInformer().GetIndexer())
+	podLister := corev1listers.NewPodLister(n.watchFactory.LocalPodInformer().Informer().GetIndexer())
 	kclient := n.Kube.(*kube.Kube)
 
 	_ = n.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
