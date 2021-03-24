@@ -3,11 +3,14 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/onsi/ginkgo"
+	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
@@ -19,10 +22,19 @@ import (
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 )
 
+type serviceStatus int
+
+const (
+	works serviceStatus = iota
+	rejects
+	failsWithNoReject
+)
+
 // Validate that Services with the well-known annotation k8s.ovn.org/idled-at
 // generate a NeedPods Event if the service doesn´t have endpoints and
 // OVN EmptyLB-Backends feature is enabled
 var _ = ginkgo.Describe("Unidling", func() {
+
 	const (
 		serviceName       = "empty-service"
 		podName           = "execpod-noendpoints"
@@ -98,4 +110,252 @@ var _ = ginkgo.Describe("Unidling", func() {
 		}
 	})
 
+	// Check the creation of needPods events starting with annotated services.
+	// All the tests start with a given configuration, waits for the behaviour of the service to settle
+	// (if must reject or must timeout), then try to hit the service again and check if new events are
+	// generated or not according to the test scenario. This is done to avoid races and make sure that
+	// the right configuration is applied.
+	ginkgo.Context("With annotated service", func() {
+		var (
+			clientPod   *v1.Pod
+			node        string
+			cmd         string
+			namespace   string
+			serviceName string
+			service     *v1.Service
+			jig         *e2eservice.TestJig
+		)
+
+		ginkgo.BeforeEach(func() {
+			namespace = f.Namespace.Name
+			serviceName = "testservice" + randString(5)
+			jig = e2eservice.NewTestJig(cs, namespace, serviceName)
+			nodes, err := e2enode.GetBoundedReadySchedulableNodes(cs, e2eservice.MaxNodesForEndpointsTests)
+			framework.ExpectNoError(err)
+			node = nodes.Items[0].Name
+			ginkgo.By("creating an annotated service with no endpoints and idle annotation")
+			service, err = jig.CreateTCPServiceWithPort(func(svc *v1.Service) {
+				svc.Annotations = map[string]string{ovnServiceIdledAt: "true"}
+			}, int32(port))
+			framework.ExpectNoError(err)
+
+			ginkgo.By(fmt.Sprintf("creating %v on node %v", podName, node))
+			clientPod = e2epod.CreateExecPodOrFail(f.ClientSet, namespace, podName, func(pod *v1.Pod) {
+				pod.Spec.NodeName = node
+			})
+			serviceAddress := net.JoinHostPort(serviceName, strconv.Itoa(port))
+			framework.Logf("waiting up to %v to connect to %v", e2eservice.KubeProxyEndpointLagTimeout, serviceAddress)
+			cmd = fmt.Sprintf("/agnhost connect --timeout=3s %s", serviceAddress)
+		})
+
+		ginkgo.It("Should generate a NeedPods event for traffic destined to idled services", func() {
+			gomega.Eventually(func() serviceStatus {
+				return checkService(clientPod, cmd)
+			}, 5*time.Second, 1*time.Second).Should(gomega.Equal(failsWithNoReject), "Service is rejecting")
+
+			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
+			framework.ExpectEqual(generatesNewEvents, true, "New events are not generated")
+		})
+
+		ginkgo.It("Should not generate a NeedPods event when removing the annotation", func() {
+			_, err := jig.UpdateService(func(service *v1.Service) {
+				service.Annotations = nil
+			})
+			framework.ExpectNoError(err)
+
+			gomega.Eventually(func() serviceStatus {
+				return checkService(clientPod, cmd)
+			}, 5*time.Second, 1*time.Second).Should(gomega.Equal(rejects), "Service is not rejecting")
+
+			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
+			framework.ExpectEqual(generatesNewEvents, false, "New events are generated")
+		})
+
+		ginkgo.It("Should not generate a NeedPods event when has backend", func() {
+			createBackend(f, serviceName, namespace, node, jig.Labels, port)
+			gomega.Eventually(func() serviceStatus {
+				return checkService(clientPod, cmd)
+			}, 5*time.Second, 1*time.Second).Should(gomega.Equal(works), "Service is failing")
+
+			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
+			framework.ExpectEqual(generatesNewEvents, false, "New events are generated")
+		})
+
+		ginkgo.It("Should generate a NeedPods event when backends were added and then removed", func() {
+			be := createBackend(f, serviceName, namespace, node, jig.Labels, port)
+			f.PodClient().DeleteSync(be.Name, metav1.DeleteOptions{}, framework.DefaultPodDeletionTimeout)
+			err := framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, 0, time.Second, wait.ForeverTestTimeout)
+			framework.ExpectNoError(err)
+
+			gomega.Eventually(func() serviceStatus {
+				return checkService(clientPod, cmd)
+			}, 5*time.Second, 1*time.Second).Should(gomega.Equal(failsWithNoReject), "Service is not timing out")
+
+			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
+			framework.ExpectEqual(generatesNewEvents, true, "New events are not generated")
+		})
+	})
+
+	// Check the creation of needPods events starting with non annotated services.
+	// All the tests start with a given configuration, waits for the behaviour of the service to settle
+	// (if must reject or must timeout), then try to hit the service again and check if new events are
+	// generated or not according to the test scenario. This is done to avoid races and make sure that
+	// the right configuration is applied.
+	ginkgo.Context("With non annotated service", func() {
+		var (
+			clientPod   *v1.Pod
+			node        string
+			cmd         string
+			namespace   string
+			serviceName string
+			service     *v1.Service
+			jig         *e2eservice.TestJig
+		)
+
+		ginkgo.BeforeEach(func() {
+			namespace = f.Namespace.Name
+			serviceName = "testservice" + randString(5)
+			jig = e2eservice.NewTestJig(cs, namespace, serviceName)
+			nodes, err := e2enode.GetBoundedReadySchedulableNodes(cs, e2eservice.MaxNodesForEndpointsTests)
+			framework.ExpectNoError(err)
+			node = nodes.Items[0].Name
+			ginkgo.By("creating an annotated service with no endpoints and idle annotation")
+			service, err = jig.CreateTCPServiceWithPort(func(svc *v1.Service) {
+			}, int32(port))
+			framework.ExpectNoError(err)
+
+			ginkgo.By(fmt.Sprintf("creating %v on node %v", podName, node))
+			clientPod = e2epod.CreateExecPodOrFail(f.ClientSet, namespace, podName, func(pod *v1.Pod) {
+				pod.Spec.NodeName = node
+			})
+			serviceAddress := net.JoinHostPort(serviceName, strconv.Itoa(port))
+			framework.Logf("waiting up to %v to connect to %v", e2eservice.KubeProxyEndpointLagTimeout, serviceAddress)
+			cmd = fmt.Sprintf("/agnhost connect --timeout=3s %s", serviceAddress)
+		})
+
+		ginkgo.It("Should not generate a NeedPods event for traffic destined to idled services", func() {
+			gomega.Eventually(func() serviceStatus {
+				return checkService(clientPod, cmd)
+			}, 5*time.Second, 1*time.Second).Should(gomega.Equal(rejects), "Service is not rejecting")
+
+			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
+			framework.ExpectEqual(generatesNewEvents, false, "New events are generated")
+		})
+
+		ginkgo.It("Should generate a NeedPods event when adding the annotation", func() {
+			_, err := jig.UpdateService(func(service *v1.Service) {
+				service.Annotations = map[string]string{ovnServiceIdledAt: "true"}
+			})
+			framework.ExpectNoError(err)
+
+			gomega.Eventually(func() serviceStatus {
+				return checkService(clientPod, cmd)
+			}, 5*time.Second, 1*time.Second).Should(gomega.Equal(failsWithNoReject), "Service is not timing out")
+
+			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
+			framework.ExpectEqual(generatesNewEvents, true, "New events are not generated")
+		})
+
+		ginkgo.It("Should not generate a NeedPods event when has backend", func() {
+			createBackend(f, serviceName, namespace, node, jig.Labels, port)
+			gomega.Eventually(func() serviceStatus {
+				return checkService(clientPod, cmd)
+			}, 5*time.Second, 1*time.Second).Should(gomega.Equal(works), "Service is failing")
+
+			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
+			framework.ExpectEqual(generatesNewEvents, false, "New events are generated")
+		})
+
+		ginkgo.It("Should not generate a NeedPods event when backends were added and then removed", func() {
+			be := createBackend(f, serviceName, namespace, node, jig.Labels, port)
+			f.PodClient().DeleteSync(be.Name, metav1.DeleteOptions{}, framework.DefaultPodDeletionTimeout)
+			err := framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, 0, time.Second, wait.ForeverTestTimeout)
+			framework.ExpectNoError(err)
+
+			gomega.Eventually(func() serviceStatus {
+				return checkService(clientPod, cmd)
+			}, 5*time.Second, 1*time.Second).Should(gomega.Equal(rejects), "Service is not rejecting")
+
+			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
+			framework.ExpectEqual(generatesNewEvents, false, "New events are generated")
+		})
+	})
+
 })
+
+func createBackend(f *framework.Framework, serviceName, namespace, node string, labels map[string]string, port int32) *v1.Pod {
+	ginkgo.By("creating a backend pod for the service " + serviceName)
+	serverPod := e2epod.NewAgnhostPod(namespace, "pod-backend", nil, nil, []v1.ContainerPort{{ContainerPort: port}}, "netexec", "--http-port=80")
+	serverPod.Labels = labels
+	serverPod.Spec.NodeName = node
+	pod := f.PodClient().CreateSync(serverPod)
+	err := framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, 1, time.Second, wait.ForeverTestTimeout)
+	framework.ExpectNoError(err)
+	return pod
+}
+
+// hittingGeneratesNewEvents tells if by hitting a service a brand new needPods event is generated
+func hittingGeneratesNewEvents(service *v1.Service, cs clientset.Interface, clientPod *v1.Pod, cmd string) bool {
+	lastEventTime := lastIdlingEventForService(service, cs)
+	checkService(clientPod, cmd)
+	err := wait.PollImmediate(framework.Poll, 3*time.Second, func() (bool, error) {
+		newLastEvent := lastIdlingEventForService(service, cs)
+		if newLastEvent.After(lastEventTime.Time) {
+			return true, nil
+		}
+		return false, nil
+	})
+
+	if err != nil { // timed out
+		return false
+	}
+	return true
+}
+
+// checkService tries to hit a service and tells the behaviour of the connection.
+// The connection can be refused, can timeout or can work.
+func checkService(clientPod *v1.Pod, cmd string) serviceStatus {
+	refusedError := "REFUSED"
+	_, err := framework.RunHostCmd(clientPod.Namespace, clientPod.Name, cmd)
+	if err != nil && strings.Contains(err.Error(), refusedError) {
+		return rejects
+	}
+	if err != nil {
+		return failsWithNoReject
+	}
+	return works
+}
+
+// lastIdlingEventForService returns the most recent idling event for the given service
+func lastIdlingEventForService(service *v1.Service, cs clientset.Interface) metav1.Time {
+	// An event like this must be generated
+	// oc.recorder.Eventf(&serviceRef, kapi.EventTypeNormal, "NeedPods", "The service %s needs pods", serviceName.Name)
+	fieldSelector := fmt.Sprintf("reason=NeedPods")
+	events, err := cs.CoreV1().Events(service.Namespace).List(context.Background(), metav1.ListOptions{FieldSelector: fieldSelector})
+	framework.ExpectNoError(err)
+
+	mostRecent := metav1.Time{}
+	for _, e := range events.Items {
+		if strings.Contains(e.Message, service.Name) && e.LastTimestamp.After(mostRecent.Time) {
+			mostRecent = e.LastTimestamp
+		}
+	}
+	return mostRecent
+}
+
+const charset = "abcdefghijklmnopqrstuvwxyz"
+
+var seededRand *rand.Rand = rand.New(
+	rand.NewSource(time.Now().UnixNano()))
+
+func StringWithCharset(length int, charset string) string {
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[seededRand.Intn(len(charset))]
+	}
+	return string(b)
+}
+
+func randString(length int) string {
+	return StringWithCharset(length, charset)
+}
