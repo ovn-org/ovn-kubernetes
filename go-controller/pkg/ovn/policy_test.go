@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -362,7 +363,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 						tPod.populateLogicalSwitchCache(fakeOvn)
 					}
 					fakeOvn.controller.WatchNamespaces()
-					fakeOvn.controller.WatchPods()
+					fakeOvn.controller.WatchPods(&sync.WaitGroup{})
 					ns, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(
 						context.TODO(), namespace1.Name, metav1.GetOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -430,7 +431,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 						tPod.baseCmds(fExec)
 					}
 					fakeOvn.controller.WatchNamespaces()
-					fakeOvn.controller.WatchPods()
+					fakeOvn.controller.WatchPods(&sync.WaitGroup{})
 					ns, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(
 						context.TODO(), namespace1.Name, metav1.GetOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -648,7 +649,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.controller.WatchPods(&sync.WaitGroup{})
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
@@ -746,7 +747,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.controller.WatchPods(&sync.WaitGroup{})
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName1)
@@ -836,7 +837,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.controller.WatchPods(&sync.WaitGroup{})
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
@@ -923,7 +924,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.controller.WatchPods(&sync.WaitGroup{})
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
@@ -1104,7 +1105,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.controller.WatchPods(&sync.WaitGroup{})
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
@@ -1208,7 +1209,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.controller.WatchPods(&sync.WaitGroup{})
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName1)
@@ -1314,7 +1315,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.controller.WatchPods(&sync.WaitGroup{})
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName1)
@@ -1411,7 +1412,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.controller.WatchPods(&sync.WaitGroup{})
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
