@@ -384,8 +384,12 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		return nil, err
 	}
 
-	if err = waitForPodFlows(pr.ctx, ifInfo.MAC.String(), ifInfo.IPs, hostIface.Name, ifaceID, ofPort); err != nil {
-		return nil, fmt.Errorf("error while waiting on flows for pod: %v", err)
+	if err = waitForPodInterface(pr.ctx, ifInfo.MAC.String(), ifInfo.IPs, hostIface.Name, ifaceID, ofPort, ifInfo.CheckExtIDs); err != nil {
+		if ifInfo.CheckExtIDs {
+			return nil, fmt.Errorf("error while waiting on OVS.Interface.external-ids:ovn-installed for pod: %v", err)
+		} else {
+			return nil, fmt.Errorf("error while waiting on flows for pod: %v", err)
+		}
 	}
 
 	return []*current.Interface{hostIface, contIface}, nil

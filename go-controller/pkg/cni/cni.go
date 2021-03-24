@@ -63,7 +63,7 @@ func (pr *PodRequest) String() string {
 	return fmt.Sprintf("[%s/%s %s]", pr.PodNamespace, pr.PodName, pr.SandboxID)
 }
 
-func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister) ([]byte, error) {
+func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalIDs bool) ([]byte, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
@@ -90,6 +90,7 @@ func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister) ([]byte, error) 
 		MTU:           config.Default.MTU,
 		Ingress:       ingress,
 		Egress:        egress,
+		CheckExtIDs:   useOVSExternalIDs,
 	}
 	response := &Response{}
 	if !config.UnprivilegedMode {
@@ -116,7 +117,7 @@ func (pr *PodRequest) cmdDel() ([]byte, error) {
 	return []byte{}, nil
 }
 
-func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister) ([]byte, error) {
+func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternalIDs bool) ([]byte, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
@@ -155,8 +156,9 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister) ([]byte, error
 			return nil, err
 		}
 		for _, ip := range result.IPs {
-			if err = waitForPodFlows(pr.ctx, result.Interfaces[*ip.Interface].Mac, []*net.IPNet{&ip.Address}, hostIfaceName, ifaceID, ofPort); err != nil {
-				return nil, fmt.Errorf("error while checkoing on flows for pod: %s ip: %v, error: %v", ifaceID, ip, err)
+			if err = waitForPodInterface(pr.ctx, result.Interfaces[*ip.Interface].Mac, []*net.IPNet{&ip.Address},
+				hostIfaceName, ifaceID, ofPort, useOVSExternalIDs); err != nil {
+				return nil, fmt.Errorf("error while waiting on OVN pod interface: %s ip: %v, error: %v", ifaceID, ip, err)
 			}
 		}
 		ingressBPS, egressBPS, err := getPodBandwidth(hostIfaceName)
@@ -178,18 +180,18 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister) ([]byte, error
 // Argument '*PodRequest' encapsulates all the necessary information
 // kclient is passed in so that clientset can be reused from the server
 // Return value is the actual bytes to be sent back without further processing.
-func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister) ([]byte, error) {
+func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool) ([]byte, error) {
 	var result []byte
 	var err error
 
 	klog.Infof("%s %s starting CNI request %+v", request, request.Command, request)
 	switch request.Command {
 	case CNIAdd:
-		result, err = request.cmdAdd(podLister)
+		result, err = request.cmdAdd(podLister, useOVSExternalIDs)
 	case CNIDel:
 		result, err = request.cmdDel()
 	case CNICheck:
-		result, err = request.cmdCheck(podLister)
+		result, err = request.cmdCheck(podLister, useOVSExternalIDs)
 	default:
 	}
 	klog.Infof("%s %s finished CNI request %+v, result %q, err %v", request, request.Command, request, string(result), err)

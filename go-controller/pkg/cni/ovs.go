@@ -126,6 +126,17 @@ func isIfaceIDSet(ifaceName, ifaceID string) error {
 	return nil
 }
 
+func isIfaceOvnInstalledSet(ifaceName string) bool {
+	out, err := ovsGet("Interface", ifaceName, "external-ids", "ovn-installed")
+	if err == nil && out == "true" {
+		klog.V(5).Infof("Interface %s has ovn-installed=true", ifaceName)
+		return true
+	}
+
+	klog.V(5).Info("Still waiting for OVS port %s to have ovn-installed=true", ifaceName)
+	return false
+}
+
 // getIfaceOFPort returns the of port number for an interface
 func getIfaceOFPort(ifaceName string) (int, error) {
 	port, err := ovsGet("Interface", ifaceName, "ofport", "")
@@ -198,22 +209,31 @@ func doPodFlowsExist(mac string, ifAddrs []*net.IPNet, ofPort int) bool {
 	return true
 }
 
-func waitForPodFlows(ctx context.Context, mac string, ifAddrs []*net.IPNet, ifaceName, ifaceID string, ofPort int) error {
+func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet, ifaceName, ifaceID string, ofPort int, checkExternalIDs bool) error {
 	timeout := time.After(20 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("canceled waiting for OVS flows")
+			return fmt.Errorf("canceled while waiting for OVS port binding")
 		case <-timeout:
-			return fmt.Errorf("timed out waiting for OVS flows")
+			return fmt.Errorf("timed out while waiting for OVS port binding")
 		default:
 			if err := isIfaceIDSet(ifaceName, ifaceID); err != nil {
 				return err
 			}
-			if doPodFlowsExist(mac, ifAddrs, ofPort) {
-				// success
-				return nil
+
+			if checkExternalIDs {
+				if isIfaceOvnInstalledSet(ifaceName) {
+					//success
+					return nil
+				}
+			} else {
+				if doPodFlowsExist(mac, ifAddrs, ofPort) {
+					// success
+					return nil
+				}
 			}
+
 			// try again later
 			time.Sleep(200 * time.Millisecond)
 		}

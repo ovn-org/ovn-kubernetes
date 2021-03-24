@@ -22,9 +22,10 @@ const serverSocketPath string = serverRunDir + "/" + serverSocketName
 type PodInterfaceInfo struct {
 	util.PodAnnotation
 
-	MTU     int   `json:"mtu"`
-	Ingress int64 `json:"ingress"`
-	Egress  int64 `json:"egress"`
+	MTU         int   `json:"mtu"`
+	Ingress     int64 `json:"ingress"`
+	Egress      int64 `json:"egress"`
+	CheckExtIDs bool  `json:"check-external-ids"`
 }
 
 // Explicit type for CNI commands the server handles
@@ -88,15 +89,16 @@ type PodRequest struct {
 	cancel context.CancelFunc
 }
 
-type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister) ([]byte, error)
+type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool) ([]byte, error)
 
 // Server object that listens for JSON-marshaled Request objects
 // on a private root-only Unix domain socket.
 type Server struct {
 	http.Server
-	requestFunc cniRequestFunc
-	rundir      string
-	podLister   corev1listers.PodLister
+	requestFunc       cniRequestFunc
+	rundir            string
+	useOVSExternalIDs int32
+	podLister         corev1listers.PodLister
 
 	// runningSandboxAdds is a map of sandbox ID to PodRequest for any CNIAdd operation
 	runningSandboxAddsLock sync.Mutex

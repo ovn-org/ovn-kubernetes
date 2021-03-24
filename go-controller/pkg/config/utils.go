@@ -10,6 +10,12 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
+// HostPort is the object that holds the definition for a host and port tuple
+type HostPort struct {
+	Host *net.IP
+	Port int32
+}
+
 // CIDRNetworkEntry is the object that holds the definition for a single network CIDR range
 type CIDRNetworkEntry struct {
 	CIDR             *net.IPNet
@@ -72,6 +78,31 @@ func ParseClusterSubnetEntries(clusterSubnetCmd string) ([]CIDRNetworkEntry, err
 	}
 
 	return parsedClusterList, nil
+}
+
+// ParseFlowCollectors returns the parsed set of HostPorts passed by the user on the command line
+// These entries define the flow collectors OVS will send flow metadata by using NetFlow/SFlow/IPFIX.
+func ParseFlowCollectors(flowCollectors string) ([]HostPort, error) {
+	var parsedFlowsCollectors []HostPort
+
+	collectors := strings.Split(flowCollectors, ",")
+	for _, v := range collectors {
+		host, port, err := net.SplitHostPort(v)
+		if err != nil {
+			return nil, fmt.Errorf("cannot parse hostport: %v", err)
+		}
+		ip := net.ParseIP(host)
+		if ip == nil {
+			return nil, fmt.Errorf("collector IP %s is not a valid IP", host)
+		}
+		parsedPort, err := strconv.ParseInt(port, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("collector port %s is not a valid port: %v", port, err)
+		}
+		parsedFlowsCollectors = append(parsedFlowsCollectors, HostPort{Host: &ip, Port: int32(parsedPort)})
+	}
+
+	return parsedFlowsCollectors, nil
 }
 
 type configSubnetType string
