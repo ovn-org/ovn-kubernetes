@@ -102,7 +102,8 @@ const (
 	OvnSingleJoinSwitchTopoVersion = 1
 	OvnNamespacedDenyPGTopoVersion = 2
 	OvnHostToSvcOFTopoVersion      = 3
-	OvnCurrentTopologyVersion      = OvnHostToSvcOFTopoVersion
+	OvnPortBindingTopoVersion      = 4
+	OvnCurrentTopologyVersion      = OvnPortBindingTopoVersion
 
 	// OVN-K8S annotation constants
 	OvnK8sPrefix   = "k8s.ovn.org"
