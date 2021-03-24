@@ -389,7 +389,7 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 		klog.Infof("Starting unidling controller")
 		unidlingController, err := unidling.NewController(
 			oc.recorder,
-			oc.watchFactory.ServiceInformer(),
+			oc.watchFactory.ServiceInformer().Informer(),
 			oc.sbClient,
 		)
 		if err != nil {
