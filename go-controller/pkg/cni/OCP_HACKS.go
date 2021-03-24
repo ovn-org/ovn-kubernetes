@@ -39,6 +39,7 @@ func setupIPTablesBlocks(netns ns.NetNS, ifInfo *PodInterfaceInfo) error {
 		}
 
 		for _, args := range iptablesCommands {
+			args = append([]string{"-w 5"}, args...)
 			if hasIPv4 {
 				out, err := exec.Command("iptables", args...).CombinedOutput()
 				if err != nil {
@@ -54,6 +55,7 @@ func setupIPTablesBlocks(netns ns.NetNS, ifInfo *PodInterfaceInfo) error {
 		}
 		if hasIPv4 {
 			for _, args := range iptables4OnlyCommands {
+				args = append([]string{"-w 5"}, args...)
 				out, err := exec.Command("iptables", args...).CombinedOutput()
 				if err != nil {
 					return fmt.Errorf("could not set up pod iptables rules: %s", string(out))
