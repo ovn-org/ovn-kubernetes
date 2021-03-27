@@ -2046,10 +2046,13 @@ var _ = ginkgo.Describe("e2e ingress gateway traffic validation", func() {
 // This test validates OVS exports NetFlow data from br-int to an external collector
 var _ = ginkgo.Describe("e2e br-int NetFlow export validation", func() {
 	const (
+		svcname                   string = "netflow-test"
 		ovnNs                     string = "ovn-kubernetes"
 		netFlowCollectorContainer string = "netflow-collector"
 		ciNetworkName             string = "kind"
 	)
+
+	f := framework.NewDefaultFramework(svcname)
 
 	ginkgo.AfterEach(func() {
 		// tear down the NetFlow container
@@ -2083,6 +2086,13 @@ var _ = ginkgo.Describe("e2e br-int NetFlow export validation", func() {
 
 		framework.Logf("Setting OVN_NETFLOW_TARGETS environment variable value to NetFlow collector IP %s", netFlowCollectorIp)
 		framework.RunKubectlOrDie(ovnNs, "set", "env", "daemonset/ovnkube-node", "-c", "ovnkube-node", "OVN_NETFLOW_TARGETS="+netFlowCollectorIp+":2056")
+
+		// `kubectl set env` causes rollout of ovnkube-node pod, so wait for all of the ovnkube-node Pods
+		// to be ready
+		err = e2epod.WaitForPodsReady(f.ClientSet, ovnNs, "ovnkube-node", 0)
+		if err != nil {
+			framework.Failf("ovnkube-node pods are not ready: %v", err)
+		}
 
 		netFlowCollectorContainerLogsTest := func() wait.ConditionFunc {
 			return func() (bool, error) {
