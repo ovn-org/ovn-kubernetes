@@ -142,7 +142,6 @@ func setupOVNNode(node *kapi.Node) error {
 			"--id=@sflow",
 			"create",
 			"sflow",
-			"agent="+types.SFlowAgent,
 			fmt.Sprintf("targets=[%s]", collectors),
 			"--",
 			"set", "bridge", "br-int", "sflow=@sflow",

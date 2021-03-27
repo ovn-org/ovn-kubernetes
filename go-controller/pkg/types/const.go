@@ -108,7 +108,4 @@ const (
 	// OVN-K8S annotation constants
 	OvnK8sPrefix   = "k8s.ovn.org"
 	OvnK8sTopoAnno = OvnK8sPrefix + "/" + "topology-version"
-
-	// Monitoring constants
-	SFlowAgent = "ovn-k8s-mp0"
 )
