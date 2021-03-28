@@ -56,7 +56,7 @@ func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.Swi
 }
 
 // Start waits until this process is the leader before starting master functions
-func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup) error {
+func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup, ctx context.Context) error {
 	// Set up leader election process first
 	rl, err := resourcelock.New(
 		resourcelock.ConfigMapsResourceLock,
@@ -71,10 +71,11 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup) error {
 	}
 
 	lec := leaderelection.LeaderElectionConfig{
-		Lock:          rl,
-		LeaseDuration: time.Duration(config.MasterHA.ElectionLeaseDuration) * time.Second,
-		RenewDeadline: time.Duration(config.MasterHA.ElectionRenewDeadline) * time.Second,
-		RetryPeriod:   time.Duration(config.MasterHA.ElectionRetryPeriod) * time.Second,
+		Lock:            rl,
+		LeaseDuration:   time.Duration(config.MasterHA.ElectionLeaseDuration) * time.Second,
+		RenewDeadline:   time.Duration(config.MasterHA.ElectionRenewDeadline) * time.Second,
+		RetryPeriod:     time.Duration(config.MasterHA.ElectionRetryPeriod) * time.Second,
+		ReleaseOnCancel: true,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				klog.Infof("Won leader election; in active mode")
@@ -117,7 +118,12 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup) error {
 		return err
 	}
 
-	go leaderElector.Run(context.Background())
+	wg.Add(1)
+	go func() {
+		leaderElector.Run(ctx)
+		klog.Infof("Stopped leader election")
+		wg.Done()
+	}()
 
 	return nil
 }
