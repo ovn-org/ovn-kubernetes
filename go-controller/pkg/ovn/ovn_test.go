@@ -22,12 +22,15 @@ import (
 )
 
 const (
-	k8sTCPLoadBalancerIP    = "k8s_tcp_load_balancer"
-	k8sUDPLoadBalancerIP    = "k8s_udp_load_balancer"
-	k8sSCTPLoadBalancerIP   = "k8s_sctp_load_balancer"
-	fakeUUID                = "8a86f6d8-7972-4253-b0bd-ddbef66e9303"
-	fakeUUIDv6              = "8a86f6d8-7972-4253-b0bd-ddbef66e9304"
-	ovnClusterPortGroupUUID = "740515f3-7ece-4cd1-9be5-6fdb9066d198"
+	k8sTCPLoadBalancerIP        = "k8s_tcp_load_balancer"
+	k8sUDPLoadBalancerIP        = "k8s_udp_load_balancer"
+	k8sSCTPLoadBalancerIP       = "k8s_sctp_load_balancer"
+	k8sIdlingTCPLoadBalancerIP  = "k8s_tcp_idling_load_balancer"
+	k8sIdlingUDPLoadBalancerIP  = "k8s_udp_idling_load_balancer"
+	k8sIdlingSCTPLoadBalancerIP = "k8s_sctp_idling_load_balancer"
+	fakeUUID                    = "8a86f6d8-7972-4253-b0bd-ddbef66e9303"
+	fakeUUIDv6                  = "8a86f6d8-7972-4253-b0bd-ddbef66e9304"
+	ovnClusterPortGroupUUID     = "740515f3-7ece-4cd1-9be5-6fdb9066d198"
 )
 
 type FakeOVN struct {

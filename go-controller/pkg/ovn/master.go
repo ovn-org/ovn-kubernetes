@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	goovn "github.com/ebay/go-ovn"
+	"github.com/pkg/errors"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -21,20 +23,20 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	goovn "github.com/ebay/go-ovn"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 const (
-	// OvnServiceIdledAt is a constant string representing the Service annotation key
+	// IdledServiceAnnotationSuffix is a constant string representing the suffix of the Service annotation key
 	// whose value indicates the time stamp in RFC3339 format when a Service was idled
-	OvnServiceIdledAt              = "k8s.ovn.org/idled-at"
+	IdledServiceAnnotationSuffix   = "idled-at"
 	OvnNodeAnnotationRetryInterval = 100 * time.Millisecond
 	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
 )
@@ -444,44 +446,32 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		}
 	}
 
-	// Create 3 load-balancers for east-west traffic for UDP, TCP, SCTP
-	oc.TCPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes")
-	if err != nil {
-		klog.Errorf("Failed to get tcp load balancer, stderr: %q, error: %v", stderr, err)
-		return err
+	// We have 3 load-balancers per protocol to implement the East-west traffic	//
+	protocols := []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP}
+	if oc.SCTPSupport {
+		protocols = append(protocols, kapi.ProtocolSCTP)
 	}
-
-	if oc.TCPLoadBalancerUUID == "" {
-		oc.TCPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes", "protocol=tcp")
+	// Create load-balancers for east-west traffic for each protocol UDP, TCP, SCTP
+	// and for Idling services if empty-lb-backends is enabled
+	lbExternalIds := []string{types.ClusterLBPrefix}
+	// If we enable idling we have to set the option before creating the loadbalancers
+	// and create the new set of loadbalancers.
+	if config.Kubernetes.OVNEmptyLbEvents {
+		_, _, err := util.RunOVNNbctl("set", "nb_global", ".", "options:controller_event=true")
 		if err != nil {
-			klog.Errorf("Failed to create tcp load balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+			klog.Error("Unable to enable controller events. Unidling not possible")
 			return err
 		}
+		lbExternalIds = append(lbExternalIds, types.ClusterIdlingLBPrefix)
 	}
-
-	oc.UDPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-udp=yes")
-	if err != nil {
-		klog.Errorf("Failed to get udp load balancer, stderr: %q, error: %v", stderr, err)
-		return err
-	}
-	if oc.UDPLoadBalancerUUID == "" {
-		oc.UDPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-udp=yes", "protocol=udp")
-		if err != nil {
-			klog.Errorf("Failed to create udp load balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-			return err
-		}
-	}
-
-	oc.SCTPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-sctp=yes")
-	if err != nil {
-		klog.Errorf("Failed to get sctp load balancer, stderr: %q, error: %v", stderr, err)
-		return err
-	}
-	if oc.SCTPLoadBalancerUUID == "" && oc.SCTPSupport {
-		oc.SCTPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-sctp=yes", "protocol=sctp")
-		if err != nil {
-			klog.Errorf("Failed to create sctp load balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-			return err
+	// Create the LoadBalancers if they don´t exist
+	for _, lbExternalID := range lbExternalIds {
+		for _, p := range protocols {
+			uuid, err := loadbalancer.CreateLoadBalancer(p, lbExternalID)
+			if err != nil {
+				return errors.Wrapf(err, "Failed to create OVN load balancer for protocol %s", p)
+			}
+			oc.clusterLBsUUIDs = append(oc.clusterLBsUUIDs, uuid)
 		}
 	}
 
@@ -645,12 +635,8 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 
 	// Add cluster load balancers to GR for Host -> Cluster IP Service traffic
 	if config.Gateway.Mode != config.GatewayModeLocal {
-		clusterLBs := []string{oc.TCPLoadBalancerUUID, oc.UDPLoadBalancerUUID}
-		if oc.SCTPSupport {
-			clusterLBs = append(clusterLBs, oc.SCTPLoadBalancerUUID)
-		}
 		gr := util.GetGatewayRouterFromNode(node.Name)
-		for _, clusterLB := range clusterLBs {
+		for _, clusterLB := range oc.clusterLBsUUIDs {
 			_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-lb-add", gr, clusterLB)
 			if err != nil {
 				return fmt.Errorf("unable to add cluster LB: %s to %s, stderr: %q, error: %v",
@@ -835,36 +821,18 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 		klog.Errorf(err.Error())
 		return err
 	}
-
-	// Add our cluster TCP and UDP load balancers to the node switch
-	if oc.TCPLoadBalancerUUID == "" {
-		return fmt.Errorf("TCP cluster load balancer not created")
-	}
-	stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch", nodeName, "load_balancer="+oc.TCPLoadBalancerUUID)
-	if err != nil {
-		klog.Errorf("Failed to set logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
-		return err
-	}
-
-	if oc.UDPLoadBalancerUUID == "" {
-		return fmt.Errorf("UDP cluster load balancer not created")
-	}
-	stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "load_balancer", oc.UDPLoadBalancerUUID)
-	if err != nil {
-		klog.Errorf("Failed to add logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
-		return err
-	}
-
-	if oc.SCTPSupport {
-		if oc.SCTPLoadBalancerUUID == "" {
-			return fmt.Errorf("SCTP cluster load balancer not created")
+	for i, loadBalancerUUID := range oc.clusterLBsUUIDs {
+		if i == 0 {
+			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch", nodeName, "load_balancer="+loadBalancerUUID)
+		} else {
+			stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "load_balancer", loadBalancerUUID)
 		}
-		stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "load_balancer", oc.SCTPLoadBalancerUUID)
 		if err != nil {
-			klog.Errorf("Failed to add logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
+			klog.Errorf("Failed to set logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 			return err
 		}
 	}
+
 	// Add the node to the logical switch cache
 	return oc.lsManager.AddNode(nodeName, hostSubnets)
 }

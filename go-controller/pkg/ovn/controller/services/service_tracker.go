@@ -14,8 +14,9 @@ import (
 func serviceTrackerKey(name, namespace string) string { return name + "/" + namespace }
 
 // virtualIPKey returns a string used for the virtual IPs index.
-func virtualIPKey(virtualIP string, protocol v1.Protocol) string {
-	return virtualIP + "/" + string(protocol)
+// it accepts a join of ip and port and the protocol.
+func virtualIPKey(vipAndPort string, protocol v1.Protocol) string {
+	return vipAndPort + "/" + string(protocol)
 }
 
 // splitVirtualIPKey splits the VirtualIPKey from the service tracker in virtual ip and protocol
@@ -86,6 +87,15 @@ func (st *serviceTracker) deleteServiceVIP(name, namespace, virtualIP string, pr
 	}
 }
 
+// deleteServiceVIPs removes all the virtual IPs tracked for the Service.
+func (st *serviceTracker) deleteServiceVIPs(name, namespace string, virtualIPs sets.String) {
+	for vipKey := range virtualIPs {
+		// the VIP is stored with the format IP:Port/Protocol
+		vip, proto := splitVirtualIPKey(vipKey)
+		st.deleteServiceVIP(name, namespace, vip, proto)
+	}
+}
+
 // hasService return true if the service is being tracked
 func (st *serviceTracker) hasService(name, namespace string) bool {
 	st.Lock()
@@ -93,25 +103,6 @@ func (st *serviceTracker) hasService(name, namespace string) bool {
 
 	serviceNN := serviceTrackerKey(name, namespace)
 	_, ok := st.virtualIPByService[serviceNN]
-	return ok
-}
-
-// setHasEndpoints indicates that the service has had endpoints before
-func (st *serviceTracker) setHasEndpoints(name, namespace string) {
-	st.Lock()
-	defer st.Unlock()
-
-	serviceNN := serviceTrackerKey(name, namespace)
-	st.hadEndpoints[serviceNN] = true
-}
-
-// everHadEndpoints return true if the service has ever had any endpoints
-func (st *serviceTracker) everHadEndpoints(name, namespace string) bool {
-	st.Lock()
-	defer st.Unlock()
-
-	serviceNN := serviceTrackerKey(name, namespace)
-	_, ok := st.hadEndpoints[serviceNN]
 	return ok
 }
 

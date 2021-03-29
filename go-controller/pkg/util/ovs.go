@@ -771,17 +771,6 @@ func DetectSCTPSupport() (bool, error) {
 	return false, nil
 }
 
-// Finds any OVN Load Balancer based on external ID and value
-func FindOVNLoadBalancer(externalID, externalValue string) (string, string, error) {
-	out, stderr, err := RunOVNNbctl("--data=bare",
-		"--no-heading", "--columns=_uuid", "find", "load_balancer",
-		"external_ids:"+externalID+"="+externalValue)
-	if err != nil {
-		return "", stderr, err
-	}
-	return out, "", nil
-}
-
 // DetermineOVNTopoVersionFromOVN determines what OVN Topology version is being used
 // If "k8s-ovn-topo-version" key in external_ids column does not exist, it is prior to OVN topology versioning
 // and therefore set version number to OvnCurrentTopologyVersion

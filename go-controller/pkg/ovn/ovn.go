@@ -128,10 +128,9 @@ type Controller struct {
 
 	hoMaster *hocontroller.MasterController
 
-	TCPLoadBalancerUUID  string
-	UDPLoadBalancerUUID  string
-	SCTPLoadBalancerUUID string
-	SCTPSupport          bool
+	// All the uuid related to global load balancers
+	clusterLBsUUIDs []string
+	SCTPSupport     bool
 
 	// For TCP, UDP, and SCTP type traffic, cache OVN load-balancers used for the
 	// cluster's east-west traffic.
@@ -286,6 +285,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		recorder:                 recorder,
 		ovnNBClient:              ovnNBClient,
 		ovnSBClient:              ovnSBClient,
+		clusterLBsUUIDs:          make([]string, 0),
 	}
 }
 
@@ -1067,20 +1067,6 @@ func (oc *Controller) aclLoggingCanEnable(annotation string, nsInfo *namespaceIn
 	return okCnt > 0
 }
 
-// setServiceLBToACL associates an empty load balancer with its associated ACL reject rule
-func (oc *Controller) setServiceACLToLB(lb, vip, acl string) {
-	if _, ok := oc.serviceLBMap[lb]; !ok {
-		oc.serviceLBMap[lb] = make(map[string]*loadBalancerConf)
-		oc.serviceLBMap[lb][vip] = &loadBalancerConf{rejectACL: acl}
-		return
-	}
-	if _, ok := oc.serviceLBMap[lb][vip]; !ok {
-		oc.serviceLBMap[lb][vip] = &loadBalancerConf{rejectACL: acl}
-		return
-	}
-	oc.serviceLBMap[lb][vip].rejectACL = acl
-}
-
 // setServiceEndpointsToLB associates a load balancer with endpoints
 func (oc *Controller) setServiceEndpointsToLB(lb, vip string, eps []string) {
 	if _, ok := oc.serviceLBMap[lb]; !ok {
@@ -1111,15 +1097,6 @@ func (oc *Controller) removeServiceLB(lb, vip string) {
 	oc.serviceLBLock.Lock()
 	defer oc.serviceLBLock.Unlock()
 	delete(oc.serviceLBMap[lb], vip)
-}
-
-// removeServiceACL removes a specific ACL associated with a load balancer and ip:port
-func (oc *Controller) removeServiceACL(lb, vip string) {
-	oc.serviceLBLock.Lock()
-	defer oc.serviceLBLock.Unlock()
-	if _, ok := oc.serviceLBMap[lb][vip]; ok {
-		oc.serviceLBMap[lb][vip].rejectACL = ""
-	}
 }
 
 // removeServiceEndpoints removes endpoints associated with a load balancer and ip:port

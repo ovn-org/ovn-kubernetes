@@ -2,11 +2,13 @@ package ovn
 
 import (
 	"fmt"
+	"net"
+	"strings"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"net"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -64,6 +66,14 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints, addClusterLBs bool) erro
 	klog.V(5).Infof("Matching service %s found for ep: %s, with cluster IP: %s", svc.Name, ep.Name, svc.Spec.ClusterIP)
 
 	protoPortMap := ovn.getLbEndpoints(ep)
+	if svcNeedsIdling(svc.Annotations) && len(ep.Subsets) == 0 {
+		ovn.addServiceToIdlingBalancer(svc)
+		ovn.deleteServiceFromBalancers(svc)
+		return nil
+	}
+
+	ovn.deleteServiceFromIdlingBalancer(svc)
+
 	klog.V(5).Infof("Matching service %s ports: %v", svc.Name, svc.Spec.Ports)
 	for _, svcPort := range svc.Spec.Ports {
 		lbEps, isFound := protoPortMap[svcPort.Protocol][svcPort.Name]
@@ -74,6 +84,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints, addClusterLBs bool) erro
 			klog.Errorf("Rejecting endpoint creation for unsupported SCTP protocol: %s, %s", ep.Namespace, ep.Name)
 			continue
 		}
+
 		if util.ServiceTypeHasNodePort(svc) {
 			if err := ovn.createPerNodeVIPs(nil, svcPort.Protocol, svcPort.NodePort, lbEps.IPs, lbEps.Port); err != nil {
 				klog.Errorf("Error in creating Node Port for svc %s, node port: %d - %v\n", svc.Name, svcPort.NodePort, err)
@@ -170,6 +181,14 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 	if !util.IsClusterIPSet(svc) {
 		return nil
 	}
+
+	if svcNeedsIdling(svc.Annotations) {
+		ovn.addServiceToIdlingBalancer(svc)
+		ovn.deleteServiceFromBalancers(svc)
+		return nil
+	}
+	ovn.deleteServiceFromIdlingBalancer(svc)
+
 	gateways, _, err := ovn.getOvnGateways()
 	if err != nil {
 		klog.Error(err)
@@ -182,7 +201,10 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 			continue
 		}
 		// Cluster IP service
-		ovn.clearVIPsAddRejectACL(svc, clusterLB, svc.Spec.ClusterIP, svcPort.Port, svcPort.Protocol)
+		err = ovn.configureLoadBalancer(clusterLB, svc.Spec.ClusterIP, svcPort.Port, nil)
+		if err != nil {
+			klog.Errorf("Error in configuring loadbalancer for lb %s - %s - %d: %v", clusterLB, svc.Spec.ClusterIP, svcPort.Port, err)
+		}
 
 		for _, gateway := range gateways {
 			gatewayLB, err := ovn.getGatewayLoadBalancer(gateway, svcPort.Protocol)
@@ -192,7 +214,10 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 			}
 			// ClusterIP may be on gateway or worker LBs, so need to remove here as well
 			if config.Gateway.Mode == config.GatewayModeShared {
-				ovn.clearVIPsAddRejectACL(svc, gatewayLB, svc.Spec.ClusterIP, svcPort.Port, svcPort.Protocol)
+				err = ovn.configureLoadBalancer(gatewayLB, svc.Spec.ClusterIP, svcPort.Port, nil)
+				if err != nil {
+					klog.Errorf("Error in configuring loadbalancer for lb %s - %s - %d: %v", gatewayLB, svc.Spec.ClusterIP, svcPort.Port, err)
+				}
 			}
 			workerNode := util.GetWorkerFromGatewayRouter(gateway)
 			workerLB, err := loadbalancer.GetWorkerLoadBalancer(workerNode, svcPort.Protocol)
@@ -201,7 +226,10 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 				continue
 			}
 			if config.Gateway.Mode == config.GatewayModeShared {
-				ovn.clearVIPsAddRejectACL(svc, workerLB, svc.Spec.ClusterIP, svcPort.Port, svcPort.Protocol)
+				err = ovn.configureLoadBalancer(workerLB, svc.Spec.ClusterIP, svcPort.Port, nil)
+				if err != nil {
+					klog.Errorf("Error in configuring loadbalancer for lb %s - %s - %d: %v", workerLB, svc.Spec.ClusterIP, svcPort.NodePort, err)
+				}
 			}
 
 			// Cloud load balancers: directly reject traffic from pods
@@ -209,8 +237,14 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 				if ing.IP == "" {
 					continue
 				}
-				ovn.clearVIPsAddRejectACL(svc, gatewayLB, ing.IP, svcPort.Port, svcPort.Protocol)
-				ovn.clearVIPsAddRejectACL(svc, workerLB, ing.IP, svcPort.Port, svcPort.Protocol)
+				err = ovn.configureLoadBalancer(gatewayLB, ing.IP, svcPort.Port, nil)
+				if err != nil {
+					klog.Errorf("Error in configuring loadbalancer for lb %s - %s - %d: %v", gatewayLB, ing.IP, svcPort.NodePort, err)
+				}
+				err = ovn.configureLoadBalancer(workerLB, ing.IP, svcPort.Port, nil)
+				if err != nil {
+					klog.Errorf("Error in configuring loadbalancer for lb %s - %s - %d: %v", workerLB, ing.IP, svcPort.NodePort, err)
+				}
 			}
 			// Node Port services
 			if util.ServiceTypeHasNodePort(svc) {
@@ -220,35 +254,30 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 					continue
 				}
 				for _, physicalIP := range physicalIPs {
-					ovn.clearVIPsAddRejectACL(svc, gatewayLB, physicalIP, svcPort.NodePort, svcPort.Protocol)
-					ovn.clearVIPsAddRejectACL(svc, workerLB, physicalIP, svcPort.NodePort, svcPort.Protocol)
+					err = ovn.configureLoadBalancer(gatewayLB, physicalIP, svcPort.NodePort, nil)
+					if err != nil {
+						klog.Errorf("Error in configuring loadbalancer for lb %s - %s - %d: %v", gatewayLB, physicalIP, svcPort.NodePort, err)
+					}
+					err = ovn.configureLoadBalancer(workerLB, physicalIP, svcPort.NodePort, nil)
+					if err != nil {
+						klog.Errorf("Error in configuring loadbalancer for lb %s - %s - %d: %v", workerLB, physicalIP, svcPort.NodePort, err)
+					}
 				}
 			}
 			// External IP services
 			for _, extIP := range svc.Spec.ExternalIPs {
-				ovn.clearVIPsAddRejectACL(svc, gatewayLB, extIP, svcPort.Port, svcPort.Protocol)
-				ovn.clearVIPsAddRejectACL(svc, workerLB, extIP, svcPort.NodePort, svcPort.Protocol)
+				err = ovn.configureLoadBalancer(gatewayLB, extIP, svcPort.Port, nil)
+				if err != nil {
+					klog.Errorf("Error in configuring loadbalancer for lb %s - %s - %d: %v", workerLB, extIP, svcPort.NodePort, err)
+				}
+				err = ovn.configureLoadBalancer(workerLB, extIP, svcPort.NodePort, nil)
+				if err != nil {
+					klog.Errorf("Error in configuring loadbalancer for lb %s - %s - %d: %v", workerLB, extIP, svcPort.NodePort, err)
+				}
 			}
 		}
 	}
 	return nil
-}
-
-func (ovn *Controller) clearVIPsAddRejectACL(svc *kapi.Service, lb, ip string, port int32, proto kapi.Protocol) {
-	aclLogging := ovn.GetNetworkPolicyACLLogging(svc.Namespace).Deny
-	if svcQualifiesForReject(svc) {
-		aclUUID, err := ovn.createLoadBalancerRejectACL(lb, ip, port, proto, aclLogging)
-		if err != nil {
-			klog.Errorf("Failed to create reject ACL for VIP: %s:%d, load balancer: %s, error: %v",
-				ip, port, lb, err)
-		} else {
-			klog.Infof("Reject ACL created for VIP: %s:%d, load balancer: %s, %s", ip, port, lb, aclUUID)
-		}
-	}
-	err := ovn.configureLoadBalancer(lb, ip, port, nil)
-	if err != nil {
-		klog.Errorf("Error in clearing endpoints for lb %s: %v", lb, err)
-	}
 }
 
 // hasHostEndpoints determines if a slice of endpoints contains a host networked pod
@@ -262,6 +291,20 @@ func hasHostEndpoints(endpointIPs []string) bool {
 			}
 		}
 		if !found {
+			return true
+		}
+	}
+	return false
+}
+
+// When idling or empty LB events are enabled, we want to ensure we receive these packets and not reject them.
+func svcNeedsIdling(annotations map[string]string) bool {
+	if !config.Kubernetes.OVNEmptyLbEvents {
+		return false
+	}
+
+	for annotationKey := range annotations {
+		if strings.HasSuffix(annotationKey, IdledServiceAnnotationSuffix) {
 			return true
 		}
 	}

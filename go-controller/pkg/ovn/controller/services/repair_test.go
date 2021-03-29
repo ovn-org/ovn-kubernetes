@@ -63,6 +63,10 @@ func TestRepair_Empty(t *testing.T) {
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading get load_balancer " + grUdpLBUUID + " vips",
 		Output: "",
 	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --columns=_uuid --format=csv --data=bare --no-headings find acl action=reject",
+		Output: "",
+	})
 
 	err := util.SetExec(fexec)
 	if err != nil {
@@ -120,6 +124,11 @@ func TestRepair_OVNStaleData(t *testing.T) {
 		Cmd:    "ovn-nbctl --timeout=15 --if-exists remove load_balancer " + udpLBUUID + " vips \"10.96.0.1:443\"",
 		Output: "",
 	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --columns=_uuid --format=csv --data=bare --no-headings find acl action=reject",
+		Output: "",
+	})
+
 	// The repair loop must delete them
 	err := util.SetExec(fexec)
 	if err != nil {
@@ -171,6 +180,10 @@ func TestRepair_OVNSynced(t *testing.T) {
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading get load_balancer " + grUdpLBUUID + " vips",
 		Output: "",
 	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --columns=_uuid --format=csv --data=bare --no-headings find acl action=reject",
+		Output: "",
+	})
 
 	err := util.SetExec(fexec)
 	if err != nil {
@@ -219,6 +232,10 @@ func TestRepair_OVNMissingService(t *testing.T) {
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading get load_balancer " + grUdpLBUUID + " vips",
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --columns=_uuid --format=csv --data=bare --no-headings find acl action=reject",
 		Output: "",
 	})
 
