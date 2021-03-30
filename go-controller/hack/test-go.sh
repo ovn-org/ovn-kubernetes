@@ -11,14 +11,14 @@ cd "${OVN_KUBE_ROOT}"
 PKGS=$(go list -mod vendor -f '{{if len .TestGoFiles}} {{.ImportPath}} {{end}}' ${PKGS:-./cmd/... ./pkg/... ./hybrid-overlay/...} | xargs)
 
 if [[ "$1" == "focus" && "$2" != "" ]]; then
-    gingko_focus="-ginkgo.focus=\"$2\""
+    gingko_focus="-ginkgo.focus="${2}""
 fi
 
 TEST_REPORT_DIR=${TEST_REPORT_DIR:="./_artifacts"}
 function testrun {
     local idx="${1}"
     local pkg="${2}"
-    local go_test="go test"
+    local go_test="go test -mod=vendor"
     local otherargs="${@:3} "
     local args=""
     local ginkgoargs=
@@ -31,9 +31,9 @@ function testrun {
         testfile=$(mktemp --tmpdir ovn-test.XXXXXXXX)
         echo "sudo required for ${pkg}, compiling test to ${testfile}"
         if [[ ! -z "${RACE:-}" && "${pkg}" != "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller" ]]; then
-            go test -race -covermode atomic -c "${pkg}" -o "${testfile}"
+            go test -mod=vendor -race -covermode atomic -c "${pkg}" -o "${testfile}"
         else
-            go test -covermode set -c "${pkg}" -o "${testfile}"
+            go test -mod=vendor -covermode set -c "${pkg}" -o "${testfile}"
         fi
         args=""
         go_test="sudo ${testfile}"
@@ -59,11 +59,11 @@ function testrun {
         fi
     fi
     args="${args}${otherargs}"
-    if [ "$go_test" == "go test" ]; then
+    if [ "$go_test" == "go test -mod=vendor" ]; then
         args=${args}${pkg}
     fi
-    echo "${go_test} -mod=vendor -test.v ${args} ${ginkgoargs}"
-    ${go_test} -mod=vendor -test.v ${args} ${ginkgoargs} 2>&1
+    echo "${go_test} -test.v ${args} ${ginkgoargs}"
+    ${go_test} -test.v ${args} ${ginkgoargs} 2>&1
 }
 
 # These packages requires root for network namespace maniuplation in unit tests

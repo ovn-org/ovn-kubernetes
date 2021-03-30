@@ -1217,9 +1217,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				addressset.NewFakeAddressSetFactory(), ovntest.NewMockOVNClient(goovn.DBNB),
 				ovntest.NewMockOVNClient(goovn.DBSB), record.NewFakeRecorder(0))
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			clusterController.TCPLoadBalancerUUID = tcpLBUUID
-			clusterController.UDPLoadBalancerUUID = udpLBUUID
-			clusterController.SCTPLoadBalancerUUID = sctpLBUUID
+
+			clusterController.clusterLBsUUIDs = []string{tcpLBUUID, udpLBUUID, sctpLBUUID}
 			clusterController.SCTPSupport = true
 			clusterController.joinSwIPManager, _ = initJoinLogicalSwitchIPManager()
 			_, _ = clusterController.joinSwIPManager.ensureJoinLRPIPs(types.OVNClusterRouter)
@@ -1231,9 +1230,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			subnet := ovntest.MustParseIPNet(nodeSubnet)
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
 			gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			return nil
 		}
 

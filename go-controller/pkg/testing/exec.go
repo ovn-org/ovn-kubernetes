@@ -3,6 +3,7 @@ package testing
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"sync"
 
@@ -20,10 +21,12 @@ type FakeExec struct {
 	// We will in such a case ignore order when comparing all executed commands during the run of a test case.
 	// This is important when defining test cases with multiple resources (or multiple resource watchers) of
 	// the same type and not being able to rely on a deterministic order of incomming watch events.
-	looseCompare     bool
-	expectedCommands []*ExpectedCmd
-	executedCommands []string
-	mu               sync.Mutex
+	looseCompare       bool
+	expectedCommands   []*ExpectedCmd
+	executedCommands   []string
+	mu                 sync.Mutex
+	receivedUnexpected bool
+	unexpectedCommand  string
 }
 
 var _ kexec.Interface = &FakeExec{}
@@ -69,6 +72,10 @@ func (f *FakeExec) ErrorDesc() string {
 
 func (f *FakeExec) internalErrorDesc() string {
 	desc := "Executed commands do not match expected commands!\n"
+	if f.receivedUnexpected {
+		desc += fmt.Sprintf("Executed unexpected command %s\n\n", f.unexpectedCommand)
+	}
+
 	if f.looseCompare {
 		// For loose compare, mark expected commands that were not
 		// executed with a !
@@ -114,6 +121,9 @@ func (f *FakeExec) internalErrorDesc() string {
 func (f *FakeExec) CalledMatchesExpected() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.receivedUnexpected {
+		return false
+	}
 	return len(f.executedCommands) == len(f.expectedCommands)
 }
 
@@ -139,6 +149,25 @@ func getExecutedCommandline(cmd string, args ...string) string {
 }
 
 func (f *FakeExec) Command(cmd string, args ...string) kexec.Cmd {
+	dummyCommand := &fakeexec.FakeCmd{
+		Argv: []string{},
+		CombinedOutputScript: []fakeexec.FakeAction{
+			func() ([]byte, []byte, error) {
+				return []byte{}, []byte{}, fmt.Errorf("fake exec error")
+			},
+		},
+		RunScript: []fakeexec.FakeAction{
+			func() ([]byte, []byte, error) {
+				return []byte{}, []byte{}, fmt.Errorf("fake exec error")
+			},
+		},
+	}
+	if f.receivedUnexpected {
+		// If receivedUnexpected we return a fake error. It doesn't matter
+		// because we'll check the first error anyway
+		return dummyCommand
+	}
+
 	executed := getExecutedCommandline(cmd, args...)
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -156,7 +185,11 @@ func (f *FakeExec) Command(cmd string, args ...string) kexec.Cmd {
 				// Fail if the first unused expected command doesn't
 				// match the one that is being executed
 				if executed != candidate.Cmd {
-					klog.Fatal(f.internalErrorDesc())
+					f.receivedUnexpected = true
+					f.unexpectedCommand = executed
+					klog.Warning(f.internalErrorDesc())
+					debug.PrintStack()
+					break
 				}
 			}
 		}
@@ -165,7 +198,12 @@ func (f *FakeExec) Command(cmd string, args ...string) kexec.Cmd {
 	// expected command list, or if the expected command list has been
 	// completely used and we are executing more commands
 	if expected == nil {
-		klog.Fatalf("Unexpected command: %s\n\n%s", executed, f.internalErrorDesc())
+		f.receivedUnexpected = true
+		f.unexpectedCommand = executed
+		klog.Warningf("Unexpected command: %s\n\n%s", executed, f.internalErrorDesc())
+		debug.PrintStack()
+		// there's not point in returning the fake cmd as expected is nil
+		return dummyCommand
 	}
 
 	return &fakeexec.FakeCmd{

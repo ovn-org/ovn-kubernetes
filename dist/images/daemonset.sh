@@ -20,7 +20,6 @@ OVN_GATEWAY_OPTS=""
 OVN_DB_REPLICAS=""
 OVN_MTU=""
 OVN_SSL_ENABLE=""
-KIND=""
 OVN_UNPRIVILEGED_MODE=""
 MASTER_LOGLEVEL=""
 NODE_LOGLEVEL=""
@@ -78,9 +77,6 @@ while [ "$1" != "" ]; do
     ;;
   --mtu)
     OVN_MTU=$VALUE
-    ;;
-  --kind)
-    KIND=true
     ;;
   --ovn-unprivileged-mode)
     OVN_UNPRIVILEGED_MODE=$VALUE
@@ -271,7 +267,6 @@ echo "ovn_ipfix_targets: ${ovn_ipfix_targets}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
-  kind=${KIND} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_gateway_opts=${ovn_gateway_opts} \

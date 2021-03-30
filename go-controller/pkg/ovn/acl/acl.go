@@ -127,3 +127,37 @@ func AddRejectACLToLogicalSwitch(logicalSwitch, aclName, sourceIP string, source
 	}
 	return aclUUID, nil
 }
+
+func PurgeRejectRules(clusterPortGroupUUID string) error {
+	data, stderr, err := util.RunOVNNbctl("--columns=_uuid", "--format=csv", "--data=bare", "--no-headings", "find", "acl", "action=reject")
+	if err != nil {
+		return errors.Wrapf(err, "Error while querying ACLs with reject action: %s", stderr)
+	}
+	if strings.TrimSpace(data) == "" {
+		klog.Info("No reject ACLs to remove")
+		return nil
+	}
+
+	for _, uuid := range strings.Split(data, "\n") {
+		err = RemoveACLFromPortGroup(uuid, clusterPortGroupUUID)
+		if err != nil {
+			klog.Errorf("Error trying to remove ACL for clusterPortGroupUUID %s/%s: %v", uuid, clusterPortGroupUUID, err)
+		}
+
+		data, stderr, err := util.RunOVNNbctl("--format=csv", "--data=bare", "--no-headings", "--columns=_uuid", "find", "logical_switch", fmt.Sprintf("acls{>=}%s", uuid))
+		if err != nil {
+			return errors.Wrapf(err, "Error while querying ACLs uuid:%s with reject action: %s", uuid, stderr)
+		}
+		ls := strings.Split(data, "\n")
+		err = RemoveACLFromNodeSwitches(ls, uuid)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to remove reject acl from logical switches")
+		}
+		_, stderr, err = util.RunOVNNbctl("--if-exists", "destroy", "acl", uuid)
+		if err != nil {
+			klog.Errorf("Failed to destroy ACL %s, stderr: %q, (%v)",
+				uuid, stderr, err)
+		}
+	}
+	return nil
+}
