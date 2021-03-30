@@ -8,6 +8,7 @@ import (
 	"net"
 	"reflect"
 	"testing"
+	"time"
 
 	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
@@ -299,4 +300,23 @@ func TestUpdateIPsSlice(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRunPeriodicallyUntilStop(t *testing.T) {
+	called := make(chan struct{})
+	stopChan := make(chan struct{})
+	f := func() {
+		called <- struct{}{}
+	}
+	go RunPeriodicallyUntilStop(f, time.Millisecond*10, stopChan)
+	select {
+	case <-called:
+		stopChan <- struct{}{}
+		break
+	case <-time.After(time.Millisecond * 20):
+		stopChan <- struct{}{}
+		t.Errorf("RunPeriodicallyUntilStop did not call callable at the given time")
+	}
+	close(called)
+	close(stopChan)
 }
