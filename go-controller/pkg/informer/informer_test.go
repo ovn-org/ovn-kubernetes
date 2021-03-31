@@ -2,6 +2,7 @@ package informer
 
 import (
 	"context"
+	"k8s.io/klog"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -371,10 +372,12 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			"test",
 			f.Core().V1().Pods().Informer(),
 			func(obj interface{}) error {
+				klog.Info("Called to increment adds")
 				atomic.AddInt32(&adds, 1)
 				return nil
 			},
 			func(obj interface{}) error {
+				klog.Info("Called to increment delete")
 				atomic.AddInt32(&deletes, 1)
 				return nil
 			},
@@ -408,7 +411,11 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// initial add from the cache
-		Consistently(func() int32 { return atomic.LoadInt32(&adds) }).Should(Equal(int32(1)), "adds")
+		Consistently(func() int32 {
+			value := atomic.LoadInt32(&adds)
+			klog.Infof("Consistently the value of adds is: %d", value)
+			return value
+		}).Should(Equal(int32(1)), "adds")
 		// one delete event
 		Eventually(func() int32 { return atomic.LoadInt32(&deletes) }).Should(Equal(int32(1)), "deletes")
 	})
