@@ -18,7 +18,7 @@ var callbacks = map[string]readinessFunc{
 	"ovnnb-db":       ovnNBDBReadiness,
 	"ovnsb-db":       ovnSBDBReadiness,
 	"ovn-northd":     ovnNorthdReadiness,
-	"ovn-nbctld":     ovnNbCtldReadiness,
+	"ovn-nbctl":      ovnNbCtlReadiness,
 	"ovs-daemons":    ovsDaemonsReadiness,
 	"ovnkube-node":   ovnNodeReadiness,
 	"ovnnb-db-raft":  ovnNBDBRaftReadiness,
@@ -103,6 +103,8 @@ func ovnSBDBReadiness(target string) error {
 }
 
 func ovnNorthdReadiness(target string) error {
+	// checking version works as it connects to northd and returns the version
+	// if northd isn't ready, version may fail to return
 	_, _, err := util.RunOVNAppctlWithTimeout(5, "-t", target, "version")
 	if err != nil {
 		return fmt.Errorf("failed to get version from %s: (%v)", target, err)
@@ -110,8 +112,12 @@ func ovnNorthdReadiness(target string) error {
 	return nil
 }
 
-func ovnNbCtldReadiness(target string) error {
-	_, _, err := util.RunOVNAppctlWithTimeout(5, "-t", "ovn-nbctl", "version")
+func ovnNbCtlReadiness(target string) error {
+	// checking version works as it connects to the ovn-nbctl daemon and returns the version
+	// if nbctl isn't ready, version may fail to return
+	// NOTE: There is no nbctld process, but nbctl provides a daemon mode,
+	// which is invoked by using --detach option to start an ovn-nbctl in a daemon mode.
+	_, _, err := util.RunOVNAppctlWithTimeout(5, "-t", target, "version")
 	if err != nil {
 		return fmt.Errorf("failed to get version from %s: (%v)", target, err)
 	}
