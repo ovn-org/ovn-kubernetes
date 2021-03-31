@@ -459,7 +459,7 @@ func getSvcVips(service *kapi.Service) []net.IP {
 		for _, ing := range service.Status.LoadBalancer.Ingress {
 			ip := net.ParseIP(ing.IP)
 			if ip == nil {
-				klog.Errorf("Failed to parse pod IP %q", ing)
+				klog.Errorf("Failed to parse ingress IP %q", ing)
 				continue
 			}
 			klog.V(5).Infof("Adding ingress IPs from Service: %s to VIP set", service.Name)
