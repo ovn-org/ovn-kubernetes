@@ -338,6 +338,9 @@ func collectServiceVIPs(service *v1.Service) sets.String {
 		}
 		// LoadBalancer
 		for _, ingress := range service.Status.LoadBalancer.Ingress {
+			if ingress.IP == "" {
+				continue
+			}
 			vip := util.JoinHostPortInt32(ingress.IP, svcPort.Port)
 			key := virtualIPKey(vip, svcPort.Protocol)
 			res.Insert(key)
