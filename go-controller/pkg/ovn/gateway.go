@@ -134,6 +134,24 @@ func (ovn *Controller) deleteNodeVIPs(svcIPs []string, protocol kapi.Protocol, s
 	}
 }
 
+func (ovn *Controller) getNodeportIPs() ([]string, error) {
+	gatewayRouters, _, err := ovn.getOvnGateways()
+	if err != nil {
+		klog.Errorf("Error while searching for gateways: %v", err)
+		return nil, err
+	}
+	res := make([]string, 0)
+
+	for _, gatewayRouter := range gatewayRouters {
+		physicalIPs, err := ovn.getGatewayPhysicalIPs(gatewayRouter)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, physicalIPs...)
+	}
+	return res, nil
+}
+
 func (ovn *Controller) deleteExternalVIPs(service *kapi.Service, svcPort kapi.ServicePort) error {
 	if len(service.Spec.ExternalIPs) == 0 {
 		return nil

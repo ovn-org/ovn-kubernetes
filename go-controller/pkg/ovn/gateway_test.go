@@ -430,4 +430,90 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
 	})
+
+	ginkgo.It("removes leftover SNAT entries during init", func() {
+		clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
+		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23")
+		joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16")
+		defLRPIPs := ovntest.MustParseIPNets("100.64.0.1/16")
+		nodeName := "test-node"
+		l3GatewayConfig := &util.L3GatewayConfig{
+			Mode:           config.GatewayModeLocal,
+			ChassisID:      "SYSTEM-ID",
+			InterfaceID:    "INTERFACE-ID",
+			MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
+			IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
+			NextHops:       ovntest.MustParseIPs("169.254.33.1"),
+			NodePortEnable: true,
+		}
+		sctpSupport := false
+		config.Gateway.DisableSNATMultipleGWs = true
+
+		fexec := ovntest.NewFakeExec()
+		err := util.SetExec(fexec)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovn-nbctl --timeout=15 -- --may-exist lr-add GR_test-node -- set logical_router GR_test-node options:chassis=SYSTEM-ID external_ids:physical_ip=169.254.33.2 external_ids:physical_ips=169.254.33.2",
+			"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + types.OVNJoinSwitch + " jtor-GR_test-node -- set logical_switch_port jtor-GR_test-node type=router options:router-port=rtoj-GR_test-node addresses=router",
+			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoj-GR_test-node -- lrp-add GR_test-node rtoj-GR_test-node 0a:58:64:40:00:03 100.64.0.3/16",
+			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:lb_force_snat_ip=router_ip",
+			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:snat-ct-zone=0",
+			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:always_learn_from_arp_request=false",
+			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:dynamic_neigh_routers=true",
+			"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node 10.128.0.0/14 100.64.0.1",
+		})
+
+		const (
+			tcpLBUUID string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
+			udpLBUUID string = "6d3142fc-53e8-4ac1-88e6-46094a5a9957"
+		)
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:" + types.GatewayLBTCP + "=GR_test-node",
+			Output: tcpLBUUID,
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:" + types.GatewayLBUDP + "=GR_test-node",
+			"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:" + types.GatewayLBSCTP + "=GR_test-node",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:" + types.WorkerLBTCP + "=test-node",
+			Output: tcpLBUUID,
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:" + types.WorkerLBUDP + "=test-node",
+			"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:" + types.WorkerLBSCTP + "=test-node",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:" + types.GatewayLBUDP + "=GR_test-node protocol=udp",
+			Output: udpLBUUID,
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovn-nbctl --timeout=15 set logical_router GR_test-node load_balancer=" + tcpLBUUID + "," + udpLBUUID,
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:" + types.WorkerLBUDP + "=test-node protocol=udp",
+			Output: udpLBUUID,
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovn-nbctl --timeout=15 get logical_switch test-node load_balancer",
+			"ovn-nbctl --timeout=15 ls-lb-add test-node " + tcpLBUUID,
+			"ovn-nbctl --timeout=15 ls-lb-add test-node " + udpLBUUID,
+		})
+
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovn-nbctl --timeout=15 --may-exist ls-add ext_test-node",
+			"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_test-node INTERFACE-ID -- lsp-set-addresses INTERFACE-ID unknown -- lsp-set-type INTERFACE-ID localnet -- lsp-set-options INTERFACE-ID network_name=physnet",
+			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoe-GR_test-node -- lrp-add GR_test-node rtoe-GR_test-node 11:22:33:44:55:66 169.254.33.2/24 -- set logical_router_port rtoe-GR_test-node external-ids:gateway-physical-ip=yes",
+			"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_test-node etor-GR_test-node -- set logical_switch_port etor-GR_test-node type=router options:router-port=rtoe-GR_test-node addresses=\"11:22:33:44:55:66\"",
+			"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node 0.0.0.0/0 169.254.33.1 rtoe-GR_test-node",
+			"ovn-nbctl --timeout=15 --may-exist lr-route-add ovn_cluster_router 100.64.0.3 100.64.0.3",
+			"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add ovn_cluster_router 10.130.0.0/23 100.64.0.3",
+			"ovn-nbctl --timeout=15 --if-exists lr-nat-del GR_test-node snat 10.128.0.0/14",
+		})
+
+		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
+	})
 })

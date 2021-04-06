@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -19,7 +18,6 @@ import (
 
 	goovn "github.com/ebay/go-ovn"
 	"github.com/urfave/cli/v2"
-	"gopkg.in/fsnotify/fsnotify.v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -180,7 +178,7 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 
 	exec := kexec.New()
-	configFile, err := config.InitConfig(ctx, exec, nil)
+	_, err := config.InitConfig(ctx, exec, nil)
 	if err != nil {
 		return err
 	}
@@ -213,12 +211,6 @@ func runOvnKube(ctx *cli.Context) error {
 		return fmt.Errorf("need to run ovnkube in either master and/or node mode")
 	}
 
-	// Set up a watch on our config file; if it changes, we exit -
-	// (we don't have the ability to dynamically reload config changes).
-	if err := watchForChanges(configFile); err != nil {
-		return fmt.Errorf("unable to setup configuration watch: %v", err)
-	}
-
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
 
@@ -248,7 +240,7 @@ func runOvnKube(ctx *cli.Context) error {
 		metrics.RegisterMasterMetrics(ovnNBClient, ovnSBClient)
 
 		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil, ovnNBClient, ovnSBClient, util.EventRecorder(ovnClientset.KubeClient))
-		if err := ovnController.Start(master, wg); err != nil {
+		if err := ovnController.Start(master, wg, ctx.Context); err != nil {
 			return err
 		}
 	}
@@ -297,70 +289,5 @@ func runOvnKube(ctx *cli.Context) error {
 	close(stopChan)
 	watchFactory.Shutdown()
 	wg.Wait()
-	return nil
-}
-
-// watchForChanges exits if the configuration file changed.
-func watchForChanges(configPath string) error {
-	if configPath == "" {
-		return nil
-	}
-	configPath, err := filepath.Abs(configPath)
-	if err != nil {
-		return err
-	}
-
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return err
-	}
-	defer watcher.Close()
-
-	go func() {
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
-				if event.Op&fsnotify.Write == fsnotify.Write {
-					klog.Infof("Configuration file %s changed, exiting...", event.Name)
-					os.Exit(0)
-					return
-				}
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-				klog.Errorf("Error watching for changes to configmap: %s, err: %v", configPath, err)
-			}
-		}
-	}()
-
-	// Watch all symlinks for changes
-	p := configPath
-	maxdepth := 100
-	for depth := 0; depth < maxdepth; depth++ {
-		if err := watcher.Add(p); err != nil {
-			return err
-		}
-		klog.Infof("Watching config file %s for changes", p)
-
-		stat, err := os.Lstat(p)
-		if err != nil {
-			return err
-		}
-
-		// configmaps are usually symlinks
-		if stat.Mode()&os.ModeSymlink > 0 {
-			p, err = filepath.EvalSymlinks(p)
-			if err != nil {
-				return err
-			}
-		} else {
-			break
-		}
-	}
-
 	return nil
 }

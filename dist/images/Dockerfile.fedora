@@ -21,7 +21,7 @@ ARG ovnver=ovn-20.12.0-25.fc33
 RUN INSTALL_PKGS=" \
 	python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
 	libpcap hostname kubernetes-client \
-        ovn ovn-central ovn-host python3-openvswitch python3-pyOpenSSL \
+        ovn ovn-central ovn-host python3-openvswitch tcpdump openvswitch-test python3-pyOpenSSL \
 	iptables iproute iputils strace socat koji \
         " && \
 	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \

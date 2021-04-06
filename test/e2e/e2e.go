@@ -13,10 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
-
 	"github.com/onsi/ginkgo"
-
+	"github.com/onsi/ginkgo/extensions/table"
+	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -343,6 +342,20 @@ func getPodAddress(podName, namespace string) string {
 	return podIP
 }
 
+// Get the IP address of the API server
+func getApiAddress() string {
+	apiServerIP, err := framework.RunKubectl("default", "get", "svc", "kubernetes", "-o", "jsonpath='{.spec.clusterIP}'")
+	apiServerIP = strings.Trim(apiServerIP, "'")
+	if err != nil {
+		framework.Failf("Error: unable to get API-server IP address, err:  %v", err)
+	}
+	apiServer := net.ParseIP(apiServerIP)
+	if apiServer == nil {
+		framework.Failf("Error: unable to parse API-server IP address:  %s", apiServerIP)
+	}
+	return apiServer.String()
+}
+
 // runCommand runs the cmd and returns the combined stdout and stderr
 func runCommand(cmd ...string) (string, error) {
 	output, err := exec.Command(cmd[0], cmd[1:]...).CombinedOutput()
@@ -539,7 +552,6 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 
 	var (
 		egress1Node, egress2Node, pod1Node, pod2Node, targetNode, deniedTargetNode node
-		apiServer                                                                  net.IP
 		pod1Name                                                                   = "e2e-egressip-pod-1"
 		pod2Name                                                                   = "e2e-egressip-pod-2"
 	)
@@ -558,7 +570,7 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 	targetAPIServiceAndTest := func(namespace string, podNames []string) wait.ConditionFunc {
 		return func() (bool, error) {
 			for _, podName := range podNames {
-				_, err := framework.RunKubectl(namespace, "exec", podName, "--", "curl", "--connect-timeout", "2", "-k", fmt.Sprintf("https://%s/version", net.JoinHostPort(apiServer.String(), "443")))
+				_, err := framework.RunKubectl(namespace, "exec", podName, "--", "curl", "--connect-timeout", "2", "-k", fmt.Sprintf("https://%s/version", net.JoinHostPort(getApiAddress(), "443")))
 				if err != nil {
 					framework.Logf("Error: attempted connection to API server found err:  %v", err)
 					return false, nil
@@ -687,15 +699,6 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		} else {
 			targetNode.nodeIP, _ = createClusterExternalContainer(targetNode.name, "docker.io/httpd", []string{"--network", ciNetworkName, "-P"}, []string{})
 			deniedTargetNode.nodeIP, _ = createClusterExternalContainer(deniedTargetNode.name, "docker.io/httpd", []string{"--network", ciNetworkName, "-P"}, []string{})
-		}
-		apiServerIP, err := framework.RunKubectl("default", "get", "svc", "kubernetes", "-o", "jsonpath='{.spec.clusterIP}'")
-		apiServerIP = strings.Trim(apiServerIP, "'")
-		if err != nil {
-			framework.Failf("Error: unable to get API-server IP address, err:  %v", err)
-		}
-		apiServer = net.ParseIP(apiServerIP)
-		if apiServer == nil {
-			framework.Failf("Error: unable to parse API-server IP address:  %s", apiServerIP)
 		}
 	})
 
@@ -1350,6 +1353,384 @@ spec:
 	})
 })
 
+// Validate pods can reach a network running in a container's looback address via
+// an external gateway running on eth0 of the container without any tunnel encap.
+// The traffic will get proxied through an annotated pod in the default namespace.
+var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", func() {
+	const (
+		svcname          string = "externalgw-pod-novxlan"
+		dummyMac         string = "01:23:45:67:89:10"
+		exGWRemoteIp     string = "10.249.3.1"
+		gwContainerName  string = "ex-gw-container"
+		ciNetworkFlag    string = "{{ .NetworkSettings.Networks.kind.IPAddress }}"
+		ciNetworkName    string = "kind"
+		defaultNamespace string = "default"
+		routingNetwork   string = "foo"
+		srcPingPodName   string = "e2e-exgw-src-ping-pod"
+		gatewayPodName   string = "e2e-gateway-pod"
+	)
+
+	f := framework.NewDefaultFramework(svcname)
+
+	type nodeInfo struct {
+		name   string
+		nodeIP string
+	}
+
+	var (
+		worker1NodeInfo nodeInfo
+		worker2NodeInfo nodeInfo
+	)
+
+	ginkgo.BeforeEach(func() {
+
+		// retrieve worker node names
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+		framework.ExpectNoError(err)
+		if len(nodes.Items) < 3 {
+			framework.Failf(
+				"Test requires >= 3 Ready nodes, but there are only %v nodes",
+				len(nodes.Items))
+		}
+		ips := e2enode.CollectAddresses(nodes, v1.NodeInternalIP)
+		worker1NodeInfo = nodeInfo{
+			name:   nodes.Items[1].Name,
+			nodeIP: ips[1],
+		}
+		worker2NodeInfo = nodeInfo{
+			name:   nodes.Items[2].Name,
+			nodeIP: ips[2],
+		}
+	})
+
+	ginkgo.AfterEach(func() {
+		// tear down the containers simulating the gateways
+		if cid, _ := runCommand("docker", "ps", "-qaf", fmt.Sprintf("name=%s", gwContainerName)); cid != "" {
+			if _, err := runCommand("docker", "rm", "-f", gwContainerName); err != nil {
+				framework.Logf("failed to delete the gateway test container %s %v", gwContainerName, err)
+			}
+		}
+	})
+
+	ginkgo.It("Should validate connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled", func() {
+
+		var (
+			pingSrc           string
+			exGWRemoteCidr    = fmt.Sprintf("%s/32", exGWRemoteIp)
+			command           = []string{"bash", "-c", "sleep 20000"}
+			testContainer     = fmt.Sprintf("%s-container", srcPingPodName)
+			testContainerFlag = fmt.Sprintf("--container=%s", testContainer)
+		)
+
+		// start the container that will act as an external gateway
+		_, err := runCommand("docker", "run", "-itd", "--privileged", "--network", ciNetworkName, "--name", gwContainerName, "centos")
+		if err != nil {
+			framework.Failf("failed to start external gateway test container %s: %v", gwContainerName, err)
+		}
+		// retrieve the container ip of the external gateway container
+		exGWIp, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, gwContainerName)
+		if err != nil {
+			framework.Failf("failed to start external gateway test container: %v", err)
+		}
+		// trim newline from the inspect output
+		exGWIp = strings.TrimSuffix(exGWIp, "\n")
+		if ip := net.ParseIP(exGWIp); ip == nil {
+			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", gwContainerName, exGWIp)
+		}
+
+		// create the pod that acts as a proxy for egress traffic to the external gateway
+		createGenericPod(f, gatewayPodName, worker1NodeInfo.name, defaultNamespace, command)
+		// wait for pod setup to return a valid address
+		// note: this is polling the default namespace, not the framework naespace
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			kubectlOut := getPodAddress(gatewayPodName, defaultNamespace)
+			validIP := net.ParseIP(kubectlOut)
+			if validIP == nil {
+				return false, nil
+			}
+			return true, nil
+		})
+		// Fail the test if no address is ever retrieved
+		if err != nil {
+			framework.Failf("Error trying to get the pod IP address")
+		}
+
+		// add the annotations to the pod to enable the gateway forwarding.
+		// this fakes out the multus annotation so that the pod IP is
+		// actually an IP of an external container for testing purposes
+		annotateArgs := []string{
+			"annotate",
+			"pods",
+			gatewayPodName,
+			fmt.Sprintf("k8s.v1.cni.cncf.io/network-status=[{\"name\":\"%s\",\"interface\":"+
+				"\"net1\",\"ips\":[\"%s\"],\"mac\":\"%s\"}]", routingNetwork, exGWIp, dummyMac),
+			fmt.Sprintf("k8s.ovn.org/routing-namespaces=%s", f.Namespace.Name),
+			fmt.Sprintf("k8s.ovn.org/routing-network=%s", routingNetwork),
+		}
+		framework.Logf("Annotating the external gateway pod with annotation %s", annotateArgs)
+		framework.RunKubectlOrDie(defaultNamespace, annotateArgs...)
+
+		// create the pod that will source the connectivity test to the external gateway
+		createGenericPod(f, srcPingPodName, worker2NodeInfo.name, f.Namespace.Name, command)
+		// wait for the pod setup to return a valid address
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			pingSrc = getPodAddress(srcPingPodName, f.Namespace.Name)
+			validIP := net.ParseIP(pingSrc)
+			if validIP == nil {
+				return false, nil
+			}
+			return true, nil
+		})
+		// Fail the test if no address is ever retrieved
+		if err != nil {
+			framework.Failf("Error trying to get the pod IP address")
+		}
+
+		// add loopback interface used to validate all traffic is getting drained through the gateway
+		_, err = runCommand("docker", "exec", gwContainerName, "ip", "address", "add", exGWRemoteCidr, "dev", "lo")
+		if err != nil {
+			framework.Failf("failed to add the loopback ip to dev lo on the test container: %v", err)
+		}
+		// add a host route on the mock gateway for return traffic to the proxy pod
+		_, err = runCommand("docker", "exec", gwContainerName, "ip", "route", "add", pingSrc, "via", worker1NodeInfo.nodeIP)
+		if err != nil {
+			framework.Failf("failed to add the pod host route on the test container: %v", err)
+		}
+		// Verify the external gateway loopback address running on the external container is reachable and
+		// that traffic from the source ping pod is proxied through the pod in the default namespace
+		ginkgo.By(fmt.Sprintf("Verifying connectivity via the gateway namespace to the gateway %s and remote address %s", exGWIp, exGWRemoteIp))
+		_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, testContainerFlag, "--", "ping", "-w", "40", exGWRemoteIp)
+		if err != nil {
+			framework.Failf("Failed to ping the remote gateway network %s from pod %s: %v", exGWRemoteIp, srcPingPodName, err)
+		}
+		err = f.ClientSet.CoreV1().Pods(defaultNamespace).Delete(context.Background(), gatewayPodName, metav1.DeleteOptions{})
+		if err != nil {
+			framework.Logf("Failed to get delete the pod %s in the namespace %s: %v", gatewayPodName, defaultNamespace, err)
+		}
+	})
+})
+
+// Validate pods can reach a network running in multiple container's loopback
+// addresses via two external gateways running on eth0 of the container without
+// any tunnel encap. This test defines two external gateways and validates ECMP
+// functionality to the container loopbacks. To verify traffic reaches the
+// gateways, tcpdump is running on the external gateways and will exit successfully
+// once an ICMP packet is received from the annotated pod in the k8s cluster.
+var _ = ginkgo.Describe("e2e multiple ecmp external gateway validation", func() {
+	const (
+		svcname            string = "novxlan-externalgw-ecmp"
+		exGWRemoteIpPrefix string = "10.249.10."
+		gwContainer1       string = "gw-ecmp-test-container1"
+		gwContainer2       string = "gw-ecmp-test-container2"
+		ciNetworkName      string = "kind"
+		testTimeout        string = "20"
+		ecmpRetry          int    = 20
+	)
+
+	f := framework.NewDefaultFramework(svcname)
+
+	type nodeInfo struct {
+		name   string
+		nodeIP string
+	}
+
+	var (
+		workerNodeInfo nodeInfo
+	)
+
+	ginkgo.BeforeEach(func() {
+
+		// retrieve worker node names
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+		framework.ExpectNoError(err)
+		if len(nodes.Items) < 3 {
+			framework.Failf(
+				"Test requires >= 3 Ready nodes, but there are only %v nodes",
+				len(nodes.Items))
+		}
+		ips := e2enode.CollectAddresses(nodes, v1.NodeInternalIP)
+		workerNodeInfo = nodeInfo{
+			name:   nodes.Items[1].Name,
+			nodeIP: ips[1],
+		}
+	})
+
+	ginkgo.AfterEach(func() {
+		// tear down the containers simulating the gateways
+		if cid, _ := runCommand("docker", "ps", "-qaf", fmt.Sprintf("name=%s", gwContainer1)); cid != "" {
+			if _, err := runCommand("docker", "rm", "-f", gwContainer1); err != nil {
+				framework.Logf("failed to delete the gateway test container %s %v", gwContainer1, err)
+			}
+		}
+		if cid, _ := runCommand("docker", "ps", "-qaf", fmt.Sprintf("name=%s", gwContainer2)); cid != "" {
+			if _, err := runCommand("docker", "rm", "-f", gwContainer2); err != nil {
+				framework.Logf("failed to delete the gateway test container %s %v", gwContainer2, err)
+			}
+		}
+	})
+
+	ginkgo.It("Should validate connectivity to multiple external gateways for an ECMP scenario", func() {
+
+		var (
+			pingSrc           string
+			ciNetworkFlag     = "{{ .NetworkSettings.Networks.kind.IPAddress }}"
+			srcPingPodName    = "e2e-exgw-ecmp-src-ping-pod"
+			command           = []string{"bash", "-c", "sleep 20000"}
+			testContainer     = fmt.Sprintf("%s-container", srcPingPodName)
+			testContainerFlag = fmt.Sprintf("--container=%s", testContainer)
+		)
+
+		// start the first container that will act as an external gateway
+		_, err := runCommand("docker", "run", "-itd", "--privileged", "--network", ciNetworkName, "--name", gwContainer1, "centos/tools")
+		if err != nil {
+			framework.Failf("failed to start external gateway test container %s: %v", gwContainer1, err)
+		}
+		// retrieve the container ip of the external gateway container
+		exGWIp1, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, gwContainer1)
+		if err != nil {
+			framework.Failf("failed to start external gateway test container: %v", err)
+		}
+		// trim newline from the inspect output
+		exGWIp1 = strings.TrimSuffix(exGWIp1, "\n")
+		if ip := net.ParseIP(exGWIp1); ip == nil {
+			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", gwContainer1, exGWIp1)
+		}
+
+		// start the second container that will act as an external gateway
+		_, err = runCommand("docker", "run", "-itd", "--privileged", "--network", ciNetworkName, "--name", gwContainer2, "centos/tools")
+		if err != nil {
+			framework.Failf("failed to start external gateway test container %s: %v", gwContainer2, err)
+		}
+		// retrieve the container ip of the external gateway container
+		exGWIp2, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, gwContainer2)
+		if err != nil {
+			framework.Failf("failed to start external gateway test container: %v", err)
+		}
+		// trim newline from the inspect output
+		exGWIp2 = strings.TrimSuffix(exGWIp2, "\n")
+		if ip := net.ParseIP(exGWIp2); ip == nil {
+			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", gwContainer2, exGWIp2)
+		}
+
+		// annotate the test namespace with multiple gateways defined
+		annotateArgs := []string{
+			"annotate",
+			"namespace",
+			f.Namespace.Name,
+			fmt.Sprintf("k8s.ovn.org/routing-external-gws=%s,%s", exGWIp1, exGWIp2),
+		}
+		framework.Logf("Annotating the external gateway test namespace to container gateways: %s, %s", exGWIp1, exGWIp2)
+		framework.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
+
+		nodeIP, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, workerNodeInfo.name)
+		if err != nil {
+			framework.Failf("failed to get the node ip address from node %s %v", workerNodeInfo.name, err)
+		}
+		nodeIP = strings.TrimSuffix(nodeIP, "\n")
+		if ip := net.ParseIP(nodeIP); ip == nil {
+			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", workerNodeInfo.name, nodeIP)
+		}
+		framework.Logf("the pod side node is %s and the source node ip is %s", workerNodeInfo.name, nodeIP)
+		podCIDR, err := getNodePodCIDR(workerNodeInfo.name)
+		if err != nil {
+			framework.Failf("Error retrieving the pod cidr from %s %v", workerNodeInfo.name, err)
+		}
+		framework.Logf("the pod cidr for node %s is %s", workerNodeInfo.name, podCIDR)
+
+		// Add loopback addresses used to validate all traffic is getting drained
+		// through the gateway. OVN will choose an ECMP route based on a 5-tuple hash,
+		// so we need to cycle through multiple dest IPs to be able to hit both gateways
+		for _, containerName := range []string{gwContainer1, gwContainer2} {
+			for lastOctet := 1; lastOctet <= ecmpRetry; lastOctet++ {
+				gwLoPrefix := fmt.Sprintf("%s%d/32", exGWRemoteIpPrefix, lastOctet)
+				// add the loopback addresses to the gateway container
+				_, err = runCommand("docker", "exec", containerName, "ip", "address", "add", gwLoPrefix, "dev", "lo")
+				if err != nil {
+					framework.Failf("failed to add the loopback ip to dev lo on the test container %s: %v", containerName, err)
+				}
+			}
+		}
+
+		// Create the pod that will be used as the source for the connectivity test
+		createGenericPod(f, srcPingPodName, workerNodeInfo.name, f.Namespace.Name, command)
+		// wait for the pod setup to return a valid address
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			pingSrc = getPodAddress(srcPingPodName, f.Namespace.Name)
+			validIP := net.ParseIP(pingSrc)
+			if validIP == nil {
+				return false, nil
+			}
+			return true, nil
+		})
+		// Fail the test if no address is ever retrieved
+		if err != nil {
+			framework.Failf("Error trying to get the pod IP address")
+		}
+		// add a host route on the gateways for return traffic to the pod
+		_, err = runCommand("docker", "exec", gwContainer1, "ip", "route", "add", pingSrc, "via", nodeIP)
+		if err != nil {
+			framework.Failf("failed to add the pod host route on the test container %s: %v", gwContainer1, err)
+		}
+		_, err = runCommand("docker", "exec", gwContainer2, "ip", "route", "add", pingSrc, "via", nodeIP)
+		if err != nil {
+			framework.Failf("failed to add the pod host route on the test container %s: %v", gwContainer2, err)
+		}
+
+		// Verify the gateways and remote loopback addresses are reachable from the pod.
+		// Iterate checking connectivity to the loopbacks on the gateways until tcpdump see
+		// the traffic or 20 attempts fail. Odds of a false negative here is ~ (1/2)^20
+		ginkgo.By(fmt.Sprintf("Verifying ecmp connectivity to the external gateways by iterating through the prefix %s", exGWRemoteIpPrefix))
+
+		// create a buffered channel that will handle error reporting from the goroutines
+		icmpChan := make(chan error, 2)
+
+		// Check for egress traffic to both gateway loopback addresses using tcpdump, since
+		// /proc/net/dev counters only record the ingress interface traffic is received on.
+		// The test will waits until an ICMP packet is matched on the gateways or fail the
+		// test if a packet to the loopback is not received within the timer interval.
+		// If an ICMP packet is never detected, return the error via the specified chanel.
+		go func() {
+			_, err = runCommand("docker", "exec", gwContainer1, "timeout", testTimeout, "tcpdump", "-c", "1", "icmp")
+			if err == nil {
+				framework.Logf("ICMP packet successfully detected on gateway %s", gwContainer1)
+				icmpChan <- err
+			}
+			icmpChan <- err
+		}()
+		go func() {
+			_, err = runCommand("docker", "exec", gwContainer2, "timeout", testTimeout, "tcpdump", "-c", "1", "icmp")
+			if err == nil {
+				framework.Logf("ICMP packet successfully detected on gateway %s", gwContainer2)
+				icmpChan <- err
+			}
+			icmpChan <- err
+		}()
+
+		// spawn a goroutine to asynchronously (to speed up the test)
+		// to ping the gateway loopbacks on both containers via ECMP.
+		for lastOctet := 1; lastOctet <= ecmpRetry; lastOctet++ {
+			gwLo := fmt.Sprintf("%s%d", exGWRemoteIpPrefix, lastOctet)
+			go func() {
+				_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, testContainerFlag, "--", "ping", "-c", testTimeout, gwLo)
+				if err != nil {
+					framework.Logf("error generating a ping from the test pod %s: %v", srcPingPodName, err)
+				}
+			}()
+		}
+
+		// collect any errors and report them in a failure report
+		errs := []error{}
+		for i := 0; i < 2; i++ {
+			if err := <-icmpChan; err != nil {
+				errs = append(errs, err)
+			}
+		}
+		if len(errs) > 0 {
+			framework.Failf("failed to reach the mock gateway(s):\n%v", errs)
+		}
+	})
+})
+
 var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 	const (
 		endpointHTTPPort    = 80
@@ -1665,10 +2046,13 @@ var _ = ginkgo.Describe("e2e ingress gateway traffic validation", func() {
 // This test validates OVS exports NetFlow data from br-int to an external collector
 var _ = ginkgo.Describe("e2e br-int NetFlow export validation", func() {
 	const (
+		svcname                   string = "netflow-test"
 		ovnNs                     string = "ovn-kubernetes"
 		netFlowCollectorContainer string = "netflow-collector"
 		ciNetworkName             string = "kind"
 	)
+
+	f := framework.NewDefaultFramework(svcname)
 
 	ginkgo.AfterEach(func() {
 		// tear down the NetFlow container
@@ -1702,6 +2086,13 @@ var _ = ginkgo.Describe("e2e br-int NetFlow export validation", func() {
 
 		framework.Logf("Setting OVN_NETFLOW_TARGETS environment variable value to NetFlow collector IP %s", netFlowCollectorIp)
 		framework.RunKubectlOrDie(ovnNs, "set", "env", "daemonset/ovnkube-node", "-c", "ovnkube-node", "OVN_NETFLOW_TARGETS="+netFlowCollectorIp+":2056")
+
+		// `kubectl set env` causes rollout of ovnkube-node pod, so wait for all of the ovnkube-node Pods
+		// to be ready
+		err = e2epod.WaitForPodsReady(f.ClientSet, ovnNs, "ovnkube-node", 0)
+		if err != nil {
+			framework.Failf("ovnkube-node pods are not ready: %v", err)
+		}
 
 		netFlowCollectorContainerLogsTest := func() wait.ConditionFunc {
 			return func() (bool, error) {
@@ -1747,3 +2138,183 @@ func getNodePodCIDR(nodeName string) (string, error) {
 	}
 	return "", fmt.Errorf("could not parse annotation %q", annotation)
 }
+
+var _ = ginkgo.Describe("e2e delete databases", func() {
+	const (
+		svcname                   string        = "delete-db"
+		ovnNs                     string        = "ovn-kubernetes"
+		databasePodPrefix         string        = "ovnkube-db"
+		databasePodNorthContainer string        = "nb-ovsdb"
+		northDBFileName           string        = "ovnnb_db.db"
+		southDBFileName           string        = "ovnsb_db.db"
+		dirDB                     string        = "/etc/ovn/"
+		waitingPeriod             time.Duration = 90 * time.Second // polling timeout
+		ovnWorkerNode             string        = "ovn-worker"
+		ovnWorkerNode2            string        = "ovn-worker2"
+		haModeMinDb               int           = 0
+		haModeMaxDb               int           = 2
+	)
+	var (
+		containerToDeleteFrom = databasePodNorthContainer
+	)
+	f := framework.NewDefaultFramework(svcname)
+
+	deletePod := func(f *framework.Framework, namespace string, podName string) {
+		podClient := f.ClientSet.CoreV1().Pods(namespace)
+		err := podClient.Delete(context.Background(), podName, metav1.DeleteOptions{})
+		framework.ExpectNoError(err, "should delete ovnkube-node pod")
+	}
+
+	deleteAndRestartDB := func(db_pod_num int, DBFileNamesToDelete []string, containerToDeleteFrom string) {
+		var (
+			containerFlag = fmt.Sprintf("-c=%s", containerToDeleteFrom)
+			db_pod_name   = fmt.Sprintf("%s-%d", databasePodPrefix, db_pod_num)
+			errStr        string
+		)
+		checkDbFilesExistence := func(db_pod_num int) {
+			out, _ := framework.RunKubectl(ovnNs, "exec", db_pod_name, containerFlag, "--", "ls", dirDB)
+			out = strings.TrimSuffix(strings.ReplaceAll(out, "\n", ","), ",")
+			framework.Logf("current db files:%s", out)
+			ginkgo.By("current db files:" + out)
+			errStr = ""
+			if !strings.Contains(out, northDBFileName) {
+				errStr += " " + northDBFileName
+			}
+			if !strings.Contains(out, southDBFileName) {
+				errStr += " " + southDBFileName
+			}
+			if errStr != "" {
+				errStr = "missing db:" + errStr
+				framework.Failf(errStr)
+			}
+		}
+		checkDbFilesExistence(db_pod_num)
+		//delete db file(s)
+		for _, DBFileNameToDelete := range DBFileNamesToDelete {
+			framework.Logf("deleting db file %s", DBFileNameToDelete)
+			framework.RunKubectl(ovnNs, "exec", db_pod_name, containerFlag, "--", "rm", dirDB+DBFileNameToDelete)
+			//check db files- make sure its deleted
+			out, _ := framework.RunKubectl(ovnNs, "exec", db_pod_name, containerFlag, "--", "ls", dirDB)
+			out = strings.TrimSuffix(strings.ReplaceAll(out, "\n", ","), ",")
+			if out == "" {
+				framework.Logf("all db files deleted")
+			} else {
+				framework.Logf("cur db files:%s", out)
+			}
+			if strings.Contains(out, DBFileNameToDelete) {
+				errStr = "db not deleted:" + DBFileNameToDelete
+				framework.Failf(errStr)
+			}
+		}
+
+		//delete the db-pod in order to emulate the cluster/pod restart
+		framework.Logf("deleting db pod:%s", db_pod_name)
+		deletePod(f, ovnNs, db_pod_name)
+
+		//wait (let the new db pod to be ready)
+		framework.Logf("wait %v", waitingPeriod)
+		time.Sleep(waitingPeriod)
+
+		//check db files existence
+		checkDbFilesExistence(db_pod_num)
+	}
+	singlePodConnectivityTest := func(f *framework.Framework, podName string) {
+		framework.Logf("Running container which tries to connect to API server in a loop")
+		podChan, errChan := make(chan *v1.Pod), make(chan error)
+
+		go checkContinuousConnectivity(f, "", podName, getApiAddress(), 443, 30, podChan, errChan)
+		testPod := <-podChan
+
+		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
+		framework.ExpectNoError(<-errChan)
+	}
+	twoPodsContinuousConnectivityTest := func(f *framework.Framework,
+		node1Name string, node2Name string,
+		syncChan chan string, errChan chan error) {
+		const (
+			pod1Name                  string        = "connectivity-test-pod1"
+			pod2Name                  string        = "connectivity-test-pod2"
+			port                      string        = "8080"
+			timeIntervalBetweenChecks time.Duration = 2 * time.Second
+		)
+
+		var (
+			command = []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=" + port)}
+		)
+		createGenericPod(f, pod1Name, node1Name, f.Namespace.Name, command)
+		createGenericPod(f, pod2Name, node2Name, f.Namespace.Name, command)
+
+		pod2IP := getPodAddress(pod2Name, f.Namespace.Name)
+
+		ginkgo.By("Checking initial connectivity from one pod to the other and verifying that the connection is achieved")
+
+		stdout, err := framework.RunKubectl(f.Namespace.Name, "exec", pod1Name, "--", "curl", fmt.Sprintf("%s/hostname", net.JoinHostPort(pod2IP, port)))
+
+		if err != nil || stdout != pod2Name {
+			framework.Failf("Error: attempted connection to pod %s found err:  %v", pod2Name, err)
+		}
+
+		syncChan <- "connectivity test pods are ready"
+
+	L:
+		for {
+			select {
+			case msg := <-syncChan:
+				framework.Logf(msg + "finish connectivity test.")
+				break L
+			default:
+				stdout, err := framework.RunKubectl(f.Namespace.Name, "exec", pod1Name, "--", "curl", fmt.Sprintf("%s/hostname", net.JoinHostPort(pod2IP, port)))
+				if err != nil || stdout != pod2Name {
+					errChan <- err
+					framework.Failf("Error: attempted connection to pod %s found err:  %v", pod2Name, err)
+				}
+				time.Sleep(timeIntervalBetweenChecks)
+			}
+		}
+
+		errChan <- nil
+	}
+
+	table.DescribeTable("recovering from deleting db files while maintain connectivity",
+		func(db_pod_num int, DBFileNamesToDelete []string) {
+			if db_pod_num < haModeMinDb || db_pod_num > haModeMaxDb {
+				framework.Failf("invalid db_pod_num.")
+				return
+			}
+
+			framework.Logf("connectivity test before deleting db files")
+			framework.Logf("test simple connectivity from new pod to API server,before deleting db files")
+			singlePodConnectivityTest(f, "before-delete-db-files")
+			framework.Logf("setup two pods for continues connectivity test ")
+			syncChan, errChan := make(chan string), make(chan error)
+			go twoPodsContinuousConnectivityTest(f, ovnWorkerNode, ovnWorkerNode2, syncChan, errChan)
+			//wait for the connectivity test pods to be ready
+			framework.Logf(<-syncChan + "delete and restart db pods.")
+			//start the db disruption - delete the db files and delete the db-pod in order to emulate the cluster/pod restart
+			deleteAndRestartDB(db_pod_num, DBFileNamesToDelete, containerToDeleteFrom)
+			time.Sleep(10 * time.Second)
+			syncChan <- "db disruption over."
+			framework.ExpectNoError(<-errChan)
+
+			framework.Logf("test simple connectivity from new pod to API server,after recovery")
+			singlePodConnectivityTest(f, "after-delete-db-files")
+		},
+
+		//one can choose to delete only specific db file (uncomment the requested lines)
+
+		//db pod 0
+		table.Entry("when delete both db files on ovnkube-db-0", 0, []string{northDBFileName, southDBFileName}),
+		//table.Entry("when delete north db on ovnkube-db-0", 0, []string{northDBFileName}),
+		//table.Entry("when delete south db on ovnkube-db-0", 0, []string{southDBFileName}),
+
+		//db pod 1
+		table.Entry("when delete both db files on ovnkube-db-1", 1, []string{northDBFileName, southDBFileName}),
+		//table.Entry("when delete north db on ovnkube-db-1", 1, []string{northDBFileName}),
+		//table.Entry("when delete south db on ovnkube-db-1", 1, []string{southDBFileName}),
+
+		//db pod 2
+		table.Entry("when delete both db files on ovnkube-db-2", 2, []string{northDBFileName, southDBFileName}),
+		//table.Entry("when delete north db on ovnkube-db-2", 2, []string{northDBFileName}),
+		//table.Entry("when delete south db on ovnkube-db-2", 2, []string{southDBFileName}),
+	)
+})
