@@ -671,10 +671,11 @@ func (oc *Controller) WatchCRD() {
 				}
 
 				oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.stopChan)
-				oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
 				if err != nil {
 					klog.Errorf("Error Creating EgressFirewallDNS: %v", err)
+					return
 				}
+				oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
 				oc.egressFirewallHandler = oc.WatchEgressFirewall()
 			}
 		},
