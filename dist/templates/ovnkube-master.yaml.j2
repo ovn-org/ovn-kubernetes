@@ -163,7 +163,7 @@ spec:
 
         readinessProbe:
           exec:
-            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-nbctld"]
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-nbctl"]
           initialDelaySeconds: 30
           timeoutSeconds: 30
           periodSeconds: 60
