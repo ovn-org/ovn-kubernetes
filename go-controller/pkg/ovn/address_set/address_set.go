@@ -83,11 +83,7 @@ func (asf *ovnAddressSetFactory) ForEachAddressSet(iteratorFn AddressSetIterFunc
 
 	processedAddressSets := sets.String{}
 	for _, line := range strings.Split(output, "\n") {
-		parts := strings.Split(line, ",")
-		if len(parts) != 2 {
-			continue
-		}
-		for _, externalID := range strings.Fields(parts[1]) {
+		for _, externalID := range strings.Split(line, ",") {
 			if !strings.HasPrefix(externalID, "name=") {
 				continue
 			}
