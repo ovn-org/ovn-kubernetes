@@ -111,23 +111,3 @@ func (mock *MockOVNClient) LRPDel(lr string, lrp string) (*goovn.OvnCommand, err
 func (mock *MockOVNClient) LRPList(lr string) ([]*goovn.LogicalRouterPort, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
-
-// Add LRSR with given ip_prefix on given lr
-func (mock *MockOVNClient) LRSRAdd(lr string, ip_prefix string, nexthop string, output_port *string, policy *string, external_ids map[string]string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Delete LRSR with given ip_prefix, nexthop, outputPort and policy on given lr
-func (mock *MockOVNClient) LRSRDel(lr string, prefix string, nexthop, outputPort, policy *string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Delete LRSR by uuid given lr
-func (mock *MockOVNClient) LRSRDelByUUID(lr, uuid string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Get all LRSRs by lr
-func (mock *MockOVNClient) LRSRList(lr string) ([]*goovn.LogicalRouterStaticRoute, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
