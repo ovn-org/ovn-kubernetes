@@ -1006,7 +1006,7 @@ func (oc *Controller) WatchNodes() {
 			oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
 
 			_, failed = gatewaysFailed.Load(node.Name)
-			if failed || gatewayChanged(oldNode, node) {
+			if failed || gatewayChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
 				err := oc.syncNodeGateway(node, nil)
 				if err != nil {
 					if !util.IsAnnotationNotSetError(err) {
@@ -1119,11 +1119,6 @@ func (oc *Controller) removeServiceEndpoints(lb, vip string) {
 func gatewayChanged(oldNode, newNode *kapi.Node) bool {
 	oldL3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(oldNode)
 	l3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(newNode)
-
-	if oldL3GatewayConfig == nil && l3GatewayConfig == nil {
-		return false
-	}
-
 	return !reflect.DeepEqual(oldL3GatewayConfig, l3GatewayConfig)
 }
 

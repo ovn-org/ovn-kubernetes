@@ -779,7 +779,8 @@ subnet=%s
 func addPBRandNATRules(fexec *ovntest.FakeExec, nodeName, nodeSubnet, nodeIP, mgmtPortIP, mgmtPortMAC string) {
 	matchStr1 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == %s /* %s */`, nodeName, nodeIP, nodeName)
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 lr-policy-add " + types.OVNClusterRouter + " " + types.NodeSubnetPolicyPriority + " " + matchStr1 + " reroute " + mgmtPortIP,
+		"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,match,nexthops find logical_router_policy priority=" + types.NodeSubnetPolicyPriority,
+		"ovn-nbctl --timeout=15 --may-exist lr-policy-add " + types.OVNClusterRouter + " " + types.NodeSubnetPolicyPriority + " " + matchStr1 + " reroute " + mgmtPortIP,
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=match find logical_router_policy",
 	})
 }
