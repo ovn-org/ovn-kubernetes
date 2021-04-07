@@ -425,15 +425,15 @@ func TestSetupInterface(t *testing.T) {
 func TestSetupSriovInterface(t *testing.T) {
 	mockNetLinkOps := new(util_mocks.NetLinkOps)
 	mockCNIPlugin := new(mocks.CNIPluginLibOps)
-	mockSriovNetLibOps := new(mocks.SriovNetLibOps)
+	mockSriovnetOps := new(util_mocks.SriovnetOps)
 	mockNS := new(cni_ns_mocks.NetNS)
 	mockLink := new(netlink_mocks.Link)
 	// below sets the `netLinkOps` in util/net_linux.go to a mock instance for purpose of unit tests execution
 	util.SetNetLinkOpMockInst(mockNetLinkOps)
 	// `cniPluginLibOps` is defined in helper_linux.go
 	cniPluginLibOps = mockCNIPlugin
-	// `sriovLibOps` is defined in helper_linux.go
-	sriovLibOps = mockSriovNetLibOps
+	// set `sriovnetOps` in util/sriovnet_linux.go to a mock instance for unit tests execution
+	util.SetSriovnetOpsInst(mockSriovnetOps)
 
 	res, err := sriovnet.GetUplinkRepresentor("0000:01:00.0")
 	t.Log(res, err)
@@ -699,13 +699,41 @@ func TestSetupSriovInterface(t *testing.T) {
 				{OnCallMethodName: "Do", OnCallMethodArgType: []string{"func(ns.NetNS) error"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
 		},
+		{
+			desc:         "test code path when IsSmartNIC set to true",
+			inpNetNS:     mockNS,
+			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
+			inpIfaceName: "eth0",
+			inpPodIfaceInfo: &PodInterfaceInfo{
+				PodAnnotation: util.PodAnnotation{},
+				MTU:           1500,
+				IsSmartNic:    true,
+			},
+			inpPCIAddrs: "0000:03:00.1",
+			errExp:      false,
+			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "GetNetDevicesFromPci", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{[]string{"en01"}, nil}},
+			},
+			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
+				// The below two mock calls are needed for the moveIfToNetns() call that internally invokes them
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
+				{OnCallMethodName: "LinkSetNsFd", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{nil}},
+			},
+			linkMockHelper: []ovntest.TestifyMockHelper{},
+			nsMockHelper: []ovntest.TestifyMockHelper{
+				// The below mock call is needed when moveIfToNetns() is called
+				{OnCallMethodName: "Fd", OnCallMethodArgType: []string{}, RetArgList: []interface{}{uintptr(123456)}},
+				// The below mock call is for the netns.Do() invocation
+				{OnCallMethodName: "Do", OnCallMethodArgType: []string{"func(ns.NetNS) error"}, RetArgList: []interface{}{nil}},
+			},
+		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.netLinkOpsMockHelper)
 			ovntest.ProcessMockFnList(&mockCNIPlugin.Mock, tc.cniPluginMockHelper)
 			ovntest.ProcessMockFnList(&mockNS.Mock, tc.nsMockHelper)
-			ovntest.ProcessMockFnList(&mockSriovNetLibOps.Mock, tc.sriovOpsMockHelper)
+			ovntest.ProcessMockFnList(&mockSriovnetOps.Mock, tc.sriovOpsMockHelper)
 			ovntest.ProcessMockFnList(&mockLink.Mock, tc.linkMockHelper)
 
 			hostIface, contIface, err := setupSriovInterface(tc.inpNetNS, tc.inpContID, tc.inpIfaceName, tc.inpPodIfaceInfo, tc.inpPCIAddrs)
@@ -720,7 +748,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			mockNetLinkOps.AssertExpectations(t)
 			mockCNIPlugin.AssertExpectations(t)
 			mockNS.AssertExpectations(t)
-			mockSriovNetLibOps.AssertExpectations(t)
+			mockSriovnetOps.AssertExpectations(t)
 			mockLink.AssertExpectations(t)
 		})
 	}

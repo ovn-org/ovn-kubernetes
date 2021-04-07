@@ -113,4 +113,9 @@ const (
 
 	// Monitoring constants
 	SFlowAgent = "ovn-k8s-mp0"
+
+	// OVNKube-Node Node types
+	NodeModeFull         = "full"
+	NodeModeSmartNIC     = "smart-nic"
+	NodeModeSmartNICHost = "smart-nic-host"
 )

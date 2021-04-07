@@ -14,7 +14,7 @@ var _ = Describe("CNI OVS tests", func() {
 
 	BeforeEach(func() {
 		fexec = ovntest.NewFakeExec()
-		setExec(fexec)
+		SetExec(fexec)
 	})
 
 	It("returns non-empty elements from ovsFind", func() {

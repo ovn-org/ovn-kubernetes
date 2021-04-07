@@ -299,6 +299,11 @@ func GetExec() kexec.Interface {
 	return runner.exec
 }
 
+// ResetRunner used by unit-tests to reset runner to its initial (un-initialized) value
+func ResetRunner() {
+	runner = nil
+}
+
 var runCounter uint64
 
 func runCmd(cmd kexec.Cmd, cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {

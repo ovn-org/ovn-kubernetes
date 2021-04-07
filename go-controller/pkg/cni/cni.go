@@ -1,21 +1,19 @@
 package cni
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net"
-	"time"
-
-	corev1listers "k8s.io/client-go/listers/core/v1"
-	"k8s.io/klog/v2"
 
 	"github.com/containernetworking/cni/pkg/types/current"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/client-go/kubernetes"
+	corev1listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 )
 
 var minRsrc = resource.MustParse("1k")
@@ -63,35 +61,36 @@ func (pr *PodRequest) String() string {
 	return fmt.Sprintf("[%s/%s %s]", pr.PodNamespace, pr.PodName, pr.SandboxID)
 }
 
-func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalIDs bool) ([]byte, error) {
+func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) ([]byte, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
 		return nil, fmt.Errorf("required CNI variable missing")
 	}
 
+	kubecli := &kube.Kube{KClient: kclient}
+	annotCondFn := isOvnReady
+
+	if pr.IsSmartNIC {
+		// Add Smart-NIC connection-details annotation so ovnkube-node running on smart-NIC
+		// performs the needed network plumbing.
+		if err := pr.addSmartNICConnectionDetailsAnnot(kubecli); err != nil {
+			return nil, err
+		}
+		annotCondFn = isSmartNICReady
+	}
 	// Get the IP address and MAC address of the pod
-	annotations, err := getPodAnnotations(pr.ctx, podLister, pr.PodNamespace, pr.PodName)
+	// for Smart-Nic, ensure connection-details is present
+	annotations, err := GetPodAnnotations(pr.ctx, podLister, namespace, podName, annotCondFn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
+	}
+
+	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.IsSmartNIC)
 	if err != nil {
 		return nil, err
 	}
 
-	podInfo, err := util.UnmarshalPodAnnotation(annotations)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal ovn annotation: %v", err)
-	}
-
-	ingress, egress, err := extractPodBandwidthResources(annotations)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse bandwidth request: %v", err)
-	}
-	podInterfaceInfo := &PodInterfaceInfo{
-		PodAnnotation: *podInfo,
-		MTU:           config.Default.MTU,
-		Ingress:       ingress,
-		Egress:        egress,
-		CheckExtIDs:   useOVSExternalIDs,
-	}
 	response := &Response{}
 	if !config.UnprivilegedMode {
 		response.Result, err = pr.getCNIResult(podInterfaceInfo)
@@ -111,6 +110,11 @@ func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalID
 }
 
 func (pr *PodRequest) cmdDel() ([]byte, error) {
+	if pr.IsSmartNIC {
+		// nothing to do
+		return []byte{}, nil
+	}
+
 	if err := pr.PlatformSpecificCleanup(); err != nil {
 		return nil, err
 	}
@@ -125,7 +129,11 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternal
 	}
 
 	// Get the IP address and MAC address of the pod
-	annotations, err := getPodAnnotations(pr.ctx, podLister, pr.PodNamespace, pr.PodName)
+	annotCondFn := isOvnReady
+	if pr.IsSmartNIC {
+		annotCondFn = isSmartNICReady
+	}
+	annotations, err := GetPodAnnotations(pr.ctx, podLister, pr.PodNamespace, pr.PodName, annotCondFn)
 	if err != nil {
 		return nil, err
 	}
@@ -180,14 +188,14 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternal
 // Argument '*PodRequest' encapsulates all the necessary information
 // kclient is passed in so that clientset can be reused from the server
 // Return value is the actual bytes to be sent back without further processing.
-func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool) ([]byte, error) {
+func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) ([]byte, error) {
 	var result []byte
 	var err error
 
 	klog.Infof("%s %s starting CNI request %+v", request, request.Command, request)
 	switch request.Command {
 	case CNIAdd:
-		result, err = request.cmdAdd(podLister, useOVSExternalIDs)
+		result, err = request.cmdAdd(podLister, useOVSExternalIDs, kclient)
 	case CNIDel:
 		result, err = request.cmdDel()
 	case CNICheck:
@@ -239,28 +247,4 @@ func (pr *PodRequest) getCNIResult(podInterfaceInfo *PodInterfaceInfo) (*current
 		Interfaces: interfacesArray,
 		IPs:        ips,
 	}, nil
-}
-
-// getPodAnnotations obtains the pod annotation from the cache
-func getPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, namespace, name string) (map[string]string, error) {
-	timeout := time.After(30 * time.Second)
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("canceled waiting for annotations")
-		case <-timeout:
-			return nil, fmt.Errorf("timed out waiting for annotations")
-		default:
-			pod, err := podLister.Pods(namespace).Get(name)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get annotations: %v", err)
-			}
-			annotations := pod.ObjectMeta.Annotations
-			if _, ok := annotations[util.OvnPodAnnotationName]; ok {
-				return annotations, nil
-			}
-			// try again later
-			time.Sleep(200 * time.Millisecond)
-		}
-	}
 }

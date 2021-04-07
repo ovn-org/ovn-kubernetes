@@ -427,10 +427,6 @@ func (oc *Controller) syncPeriodic() {
 	}()
 }
 
-func podScheduled(pod *kapi.Pod) bool {
-	return pod.Spec.NodeName != ""
-}
-
 func (oc *Controller) recordPodEvent(addErr error, pod *kapi.Pod) {
 	podRef, err := ref.GetReference(scheme.Scheme, pod)
 	if err != nil {
@@ -498,7 +494,7 @@ func networkStatusAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
 // indicates the pod should be retried later.
 func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 	// Try unscheduled pods later
-	if !podScheduled(pod) {
+	if !util.PodScheduled(pod) {
 		return false
 	}
 

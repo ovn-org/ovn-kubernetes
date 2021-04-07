@@ -15,21 +15,27 @@ func TestSetExec(t *testing.T) {
 	tests := []struct {
 		desc        string
 		expectedErr error
-		onRetArgs   *ovntest.TestifyMockHelper
+		onRetArgs   []*ovntest.TestifyMockHelper
 	}{
 		{
 			desc:        "positive, ovs-vsctl found",
 			expectedErr: nil,
-			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", nil}},
+			onRetArgs: []*ovntest.TestifyMockHelper{
+				// mock ovs-vsctl path lookup
+				{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", nil}},
+				// mock ovs-ofctl path lookup
+				{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", nil}},
+			},
 		},
 	}
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			for _, mockHelper := range tc.onRetArgs {
+				ovntest.ProcessMockFn(&mockKexecIface.Mock, *mockHelper)
+			}
 
-			ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgs)
-
-			e := setExec(mockKexecIface)
+			e := SetExec(mockKexecIface)
 			assert.Equal(t, e, tc.expectedErr)
 			mockKexecIface.AssertExpectations(t)
 		})
