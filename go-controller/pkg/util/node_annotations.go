@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -57,6 +58,9 @@ const (
 
 	// OvnNodeEgressLabel is a user assigned node label indicating to ovn-kubernetes that the node is to be used for egress IP assignment
 	ovnNodeEgressLabel = "k8s.ovn.org/egress-assignable"
+
+	// ovnNodeHostAddresses is used to track the different host IP addresses on the node
+	ovnNodeHostAddresses = "k8s.ovn.org/host-addresses"
 )
 
 type L3GatewayConfig struct {
@@ -284,4 +288,8 @@ func ParseNodePrimaryIfAddr(node *kapi.Node) (string, string, error) {
 // GetNodeEgressLabel returns label annotation needed for marking nodes as egress assignable
 func GetNodeEgressLabel() string {
 	return ovnNodeEgressLabel
+}
+
+func SetNodeHostAddresses(nodeAnnotator kube.Annotator, addresses sets.String) error {
+	return nodeAnnotator.Set(ovnNodeHostAddresses, addresses.List())
 }

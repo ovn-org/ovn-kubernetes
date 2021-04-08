@@ -37,6 +37,7 @@ type gateway struct {
 	// localPortWatcher is used in Local GW mode to handle iptables rules and routes for services
 	localPortWatcher informer.ServiceEventHandler
 	openflowManager  *openflowManager
+	nodeIPManager    *addressManager
 	initFunc         func() error
 	readyFunc        func() (bool, error)
 }
@@ -159,6 +160,10 @@ func (g *gateway) Init(wf factory.NodeWatchFactory) error {
 }
 
 func (g *gateway) Run(stopChan <-chan struct{}, wg *sync.WaitGroup) {
+	if g.nodeIPManager != nil {
+		g.nodeIPManager.Run(stopChan)
+	}
+
 	if g.openflowManager != nil {
 		klog.Info("Spawning Conntrack Rule Check Thread")
 		wg.Add(1)
