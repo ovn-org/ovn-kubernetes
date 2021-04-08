@@ -443,6 +443,33 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 	})
 })
 
+// Test pod connectivity to other host IP addresses
+var _ = ginkgo.Describe("test e2e pod connectivity to host addresses", func() {
+	const (
+		ovnWorkerNode    string = "ovn-worker"
+		targetIP         string = "123.123.123.123"
+		svcname          string = "node-e2e-to-host"
+	)
+
+	f := framework.NewDefaultFramework(svcname)
+
+	ginkgo.AfterEach(func() {
+		_, _ = runCommand("docker", "exec", ovnWorkerNode, "ip", "a", "del",
+			fmt.Sprintf("%s/32", targetIP), "dev", "breth0")
+	})
+
+	ginkgo.It("Should validate connectivity from a pod to a non-node host address on same node", func() {
+		// Add another IP address to the worker
+		_, err := runCommand("docker", "exec", ovnWorkerNode, "ip", "a", "add",
+			fmt.Sprintf("%s/32", targetIP), "dev", "breth0")
+		framework.ExpectNoError(err, "failed to add IP to %s", ovnWorkerNode)
+
+		// Spin up another pod that attempts to reach the previously started pod on separate nodes
+		framework.ExpectNoError(
+			checkConnectivityPingToHost(f, ovnWorkerNode, "e2e-src-ping-pod", targetIP, ipv4PingCommand, 30, false))
+	})
+})
+
 // Test e2e inter-node connectivity over br-int
 var _ = ginkgo.Describe("test e2e inter-node connectivity between worker nodes", func() {
 	const (
