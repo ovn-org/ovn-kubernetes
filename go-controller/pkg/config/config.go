@@ -93,9 +93,10 @@ var (
 
 	// Kubernetes holds Kubernetes-related parsed config file parameters and command-line overrides
 	Kubernetes = KubernetesConfig{
-		APIServer:          DefaultAPIServer,
-		RawServiceCIDRs:    "172.16.1.0/24",
-		OVNConfigNamespace: "ovn-kubernetes",
+		APIServer:            DefaultAPIServer,
+		RawServiceCIDRs:      "172.16.1.0/24",
+		OVNConfigNamespace:   "ovn-kubernetes",
+		HostNetworkNamespace: "ovn-host-network",
 	}
 
 	// OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
@@ -243,6 +244,7 @@ type KubernetesConfig struct {
 	PodIP                 string `gcfg:"pod-ip"` // UNUSED
 	RawNoHostSubnetNodes  string `gcfg:"no-hostsubnet-nodes"`
 	NoHostSubnetNodes     *metav1.LabelSelector
+	HostNetworkNamespace  string `gcfg:"host-network-namespace"`
 }
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
@@ -773,6 +775,12 @@ var K8sFlags = []cli.Flag{
 		Usage:       "Specify a label for nodes that will manage their own hostsubnets",
 		Destination: &cliConfig.Kubernetes.RawNoHostSubnetNodes,
 	},
+	&cli.StringFlag{
+		Name:        "host-network-namespace",
+		Usage:       "specify a namespace which will be used to classify host network traffic for network policy",
+		Destination: &cliConfig.Kubernetes.HostNetworkNamespace,
+		Value:       Kubernetes.HostNetworkNamespace,
+	},
 }
 
 // OvnNBFlags capture OVN northbound database options
@@ -1080,10 +1088,11 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 
 	envConfig := savedKubernetes
 	envVarsMap := map[string]string{
-		"Kubeconfig": "KUBECONFIG",
-		"CACert":     "K8S_CACERT",
-		"APIServer":  "K8S_APISERVER",
-		"Token":      "K8S_TOKEN",
+		"Kubeconfig":           "KUBECONFIG",
+		"CACert":               "K8S_CACERT",
+		"APIServer":            "K8S_APISERVER",
+		"Token":                "K8S_TOKEN",
+		"HostNetworkNamespace": "OVN_HOST_NETWORK_NAMESPACE",
 	}
 	for k, v := range envVarsMap {
 		if x, exists := os.LookupEnv(v); exists && len(x) > 0 {

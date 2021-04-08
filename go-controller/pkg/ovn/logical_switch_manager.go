@@ -315,7 +315,14 @@ func initJoinLogicalSwitchIPManager() (*joinSwitchIPManager, error) {
 		lrpIPCache: make(map[string][]*net.IPNet),
 	}
 	var joinSubnets []*net.IPNet
-	for _, joinSubnetString := range []string{config.Gateway.V4JoinSubnet, config.Gateway.V6JoinSubnet} {
+	joinSubnetsConfig := []string{}
+	if config.IPv4Mode {
+		joinSubnetsConfig = append(joinSubnetsConfig, config.Gateway.V4JoinSubnet)
+	}
+	if config.IPv6Mode {
+		joinSubnetsConfig = append(joinSubnetsConfig, config.Gateway.V6JoinSubnet)
+	}
+	for _, joinSubnetString := range joinSubnetsConfig {
 		_, joinSubnet, err := net.ParseCIDR(joinSubnetString)
 		if err != nil {
 			return nil, fmt.Errorf("error parsing join subnet string %s: %v", joinSubnetString, err)

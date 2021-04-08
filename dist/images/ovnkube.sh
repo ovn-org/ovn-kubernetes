@@ -71,6 +71,7 @@ fi
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, smart-nic, smart-nic-host (default: full)
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="smart-nic"
+# OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -158,6 +159,8 @@ mtu=${OVN_MTU:-1400}
 metrics_endpoint_ip=${K8S_NODE_IP:-0.0.0.0}
 metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
+# namespace used for classifying host network traffic
+ovn_host_network_namespace=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
 
 # host on which ovnkube-db POD is running and this POD contains both
 # OVN NB and SB DB running in their own container.
@@ -497,6 +500,7 @@ display_env() {
   echo OVNKUBE_NODE_MODE ${ovnkube_node_mode}
   echo OVN_ENCAP_IP ${ovn_encap_ip}
   echo ovnkube.sh version ${ovnkube_version}
+  echo OVN_HOST_NETWORK_NAMESPACE ${ovn_host_network_namespace}
 }
 
 ovn_debug() {
@@ -914,7 +918,9 @@ ovn-master() {
     ${multicast_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
     ${egressip_enabled_flag} \
-    --metrics-bind-address ${ovnkube_master_metrics_bind_address} &
+    --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
+    --host-network-namespace ${ovn_host_network_namespace} &
+
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
 
@@ -1098,7 +1104,8 @@ ovn-node() {
     ${ipfix_targets} \
     --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
     --metrics-bind-address ${ovnkube_node_metrics_bind_address} \
-     ${ovnkube_node_mode_flag} &
+     ${ovnkube_node_mode_flag} \
+    --host-network-namespace ${ovn_host_network_namespace} &
 
   wait_for_event attempts=3 process_ready ovnkube
   if [[ ${ovnkube_node_mode} != "smart-nic" ]]; then
