@@ -293,3 +293,19 @@ func GetNodeEgressLabel() string {
 func SetNodeHostAddresses(nodeAnnotator kube.Annotator, addresses sets.String) error {
 	return nodeAnnotator.Set(ovnNodeHostAddresses, addresses.List())
 }
+
+// ParseNodeHostAddresses returns the parsed host addresses living on a node
+func ParseNodeHostAddresses(node *kapi.Node) (sets.String, error) {
+	addrAnnotation, ok := node.Annotations[ovnNodeHostAddresses]
+	if !ok {
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeHostAddresses, node.Name)
+	}
+
+	var cfg []string
+	if err := json.Unmarshal([]byte(addrAnnotation), &cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal host addresses annotation %s for node %q: %v",
+			addrAnnotation, node.Name, err)
+	}
+
+	return sets.NewString(cfg...), nil
+}

@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"context"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"net"
 
 	"github.com/urfave/cli/v2"
@@ -75,7 +76,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		fakeOvn = NewFakeOVN(ovntest.NewFakeExec())
+		fakeOvn = NewFakeOVN(ovntest.NewLooseCompareFakeExec())
 	})
 
 	ginkgo.AfterEach(func() {
@@ -232,6 +233,8 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = util.SetNodeLocalNatAnnotation(nodeAnnotator, []net.IP{ovntest.MustParseIP(node1.DnatSnatIP)})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString("9.9.9.9"))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = nodeAnnotator.Run()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())

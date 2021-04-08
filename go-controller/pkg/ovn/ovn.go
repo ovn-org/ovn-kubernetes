@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+
 	"net"
 	"reflect"
 	"strconv"
@@ -36,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
@@ -911,7 +913,14 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 			return err
 		}
 	} else if hostSubnets != nil {
-		if err := oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets); err != nil {
+		var hostAddrs sets.String
+		if config.Gateway.Mode == config.GatewayModeShared {
+			hostAddrs, err = util.ParseNodeHostAddresses(node)
+			if err != nil {
+				return fmt.Errorf("failed to get host addresses for node: %s: %v", node.Name, err)
+			}
+		}
+		if err := oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs); err != nil {
 			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
 		}
 	}
@@ -1007,7 +1016,7 @@ func (oc *Controller) WatchNodes() {
 			oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
 
 			_, failed = gatewaysFailed.Load(node.Name)
-			if failed || gatewayChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
+			if failed || gatewayChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) || hostAddressesChanged(oldNode, node) {
 				err := oc.syncNodeGateway(node, nil)
 				if err != nil {
 					if !util.IsAnnotationNotSetError(err) {
@@ -1121,6 +1130,13 @@ func gatewayChanged(oldNode, newNode *kapi.Node) bool {
 	oldL3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(oldNode)
 	l3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(newNode)
 	return !reflect.DeepEqual(oldL3GatewayConfig, l3GatewayConfig)
+}
+
+// hostAddressesChanged compares old annotations to new and returns true if the something has changed.
+func hostAddressesChanged(oldNode, newNode *kapi.Node) bool {
+	oldAddrs, _ := util.ParseNodeHostAddresses(oldNode)
+	Addrs, _ := util.ParseNodeHostAddresses(newNode)
+	return !oldAddrs.Equal(Addrs)
 }
 
 // macAddressChanged() compares old annotations to new and returns true if something has changed.

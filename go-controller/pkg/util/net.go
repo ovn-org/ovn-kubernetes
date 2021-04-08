@@ -2,6 +2,7 @@ package util
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
@@ -11,6 +12,8 @@ import (
 	goovn "github.com/ebay/go-ovn"
 	utilnet "k8s.io/utils/net"
 )
+
+var NoIPError = errors.New("no IP available")
 
 // NextIP returns IP incremented by 1
 func NextIP(ip net.IP) net.IP {
@@ -284,5 +287,5 @@ func MatchAllIPStringFamily(isIPv6 bool, ipStrings []string) ([]string, error) {
 	if len(ipAddrs) > 0 {
 		return ipAddrs, nil
 	}
-	return nil, fmt.Errorf("no %s IPs available", IPFamilyName(isIPv6))
+	return nil, NoIPError
 }
