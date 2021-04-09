@@ -175,6 +175,11 @@ spec:
         - name: OVNKUBE_NODE_MODE
           value: "smart-nic-host"
         {% endif -%}
+        - name: OVN_HOST_NETWORK_NAMESPACE
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: host_network_namespace
 
         readinessProbe:
           exec:

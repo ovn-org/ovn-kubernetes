@@ -45,6 +45,7 @@ OVN_V6_JOIN_SUBNET=""
 OVN_NETFLOW_TARGETS=""
 OVN_SFLOW_TARGETS=""
 OVN_IPFIX_TARGETS=""
+OVN_HOST_NETWORK_NAMESPACE=""
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -170,6 +171,9 @@ while [ "$1" != "" ]; do
     ;;
   --ipfix-targets)
     OVN_IPFIX_TARGETS=$VALUE
+    ;;
+  --host-network-namespace)
+    OVN_HOST_NETWORK_NAMESPACE=$VALUE
     ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
@@ -376,14 +380,16 @@ net_cidr=${OVN_NET_CIDR:-"10.128.0.0/14/23"}
 svc_cidr=${OVN_SVC_CIDR:-"172.30.0.0/16"}
 k8s_apiserver=${OVN_K8S_APISERVER:-"10.0.2.16:6443"}
 mtu=${OVN_MTU:-1400}
-
+host_network_namespace=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
 echo "net_cidr: ${net_cidr}"
 echo "svc_cidr: ${svc_cidr}"
 echo "k8s_apiserver: ${k8s_apiserver}"
 echo "mtu: ${mtu}"
+echo "host_network_namespace: ${host_network_namespace}"
 
 net_cidr=${net_cidr} svc_cidr=${svc_cidr} \
   mtu_value=${mtu} k8s_apiserver=${k8s_apiserver} \
+  host_network_namespace=${host_network_namespace}	\
   j2 ../templates/ovn-setup.yaml.j2 -o ../yaml/ovn-setup.yaml
 
 cp ../templates/ovnkube-monitor.yaml.j2 ../yaml/ovnkube-monitor.yaml
