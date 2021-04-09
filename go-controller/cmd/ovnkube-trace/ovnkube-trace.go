@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -58,6 +59,20 @@ type PodInfo struct {
 	StorPort                string
 	StorMAC                 string
 	HostNetwork             bool
+}
+
+func (si SvcInfo) getL3Ver() string {
+	if net.ParseIP(si.IP).To4() != nil {
+		return "ip4"
+	}
+	return "ip6"
+}
+
+func (si PodInfo) getL3Ver() string {
+	if net.ParseIP(si.IP).To4() != nil {
+		return "ip4"
+	}
+	return "ip6"
 }
 
 func execInPod(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, namespace string, podName string, containerName string, cmd string, in string) (string, string, error) {
@@ -696,8 +711,8 @@ func main() {
 		}
 		fromSrc += " && eth.dst==" + srcPodInfo.StorMAC
 		fromSrc += " && eth.src==" + srcPodInfo.MAC
-		fromSrc += " && ip4.dst==" + dstSvcInfo.IP
-		fromSrc += " && ip4.src==" + srcPodInfo.IP
+		fromSrc += fmt.Sprintf(" && %s.dst==%s", dstSvcInfo.getL3Ver(), dstSvcInfo.IP)
+		fromSrc += fmt.Sprintf(" && %s.src==%s", srcPodInfo.getL3Ver(), srcPodInfo.IP)
 		fromSrc += " && ip.ttl==64"
 		fromSrc += " && " + protocol + ".dst==" + *dstPort + " && " + protocol + ".src==52888'"
 		fromSrc += " --lb-dst " + dstSvcInfo.PodIP + ":" + dstSvcInfo.PodPort
@@ -759,8 +774,8 @@ func main() {
 	}
 	fromSrc += " && eth.dst==" + srcPodInfo.StorMAC
 	fromSrc += " && eth.src==" + srcPodInfo.MAC
-	fromSrc += " && ip4.dst==" + dstPodInfo.IP
-	fromSrc += " && ip4.src==" + srcPodInfo.IP
+	fromSrc += fmt.Sprintf(" && %s.dst==%s", dstPodInfo.getL3Ver(), dstPodInfo.IP)
+	fromSrc += fmt.Sprintf(" && %s.src==%s", srcPodInfo.getL3Ver(), srcPodInfo.IP)
 	fromSrc += " && ip.ttl==64"
 	fromSrc += " && " + protocol + ".dst==" + *dstPort + " && " + protocol + ".src==52888'"
 
@@ -802,8 +817,8 @@ func main() {
 	}
 	fromDst += " && eth.dst==" + dstPodInfo.StorMAC
 	fromDst += " && eth.src==" + dstPodInfo.MAC
-	fromDst += " && ip4.dst==" + srcPodInfo.IP
-	fromDst += " && ip4.src==" + dstPodInfo.IP
+	fromDst += fmt.Sprintf(" && %s.dst==%s", srcPodInfo.getL3Ver(), srcPodInfo.IP)
+	fromDst += fmt.Sprintf(" && %s.src==%s", dstPodInfo.getL3Ver(), dstPodInfo.IP)
 	fromDst += " && ip.ttl==64"
 	fromDst += " && " + protocol + ".src==" + *dstPort + " && " + protocol + ".dst==52888'"
 
