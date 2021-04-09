@@ -35,7 +35,7 @@ func generateBlockMCSRules(rules *[]iptRule, protocol iptables.Protocol) {
 		}
 	}
 
-	delIptRules(delRules)
+	_ = delIptRules(delRules)
 }
 
 // initSharedGatewayNoBridge is used in order to run local gateway mode without moving the NIC to an ovs bridge
