@@ -96,7 +96,7 @@ var (
 		APIServer:            DefaultAPIServer,
 		RawServiceCIDRs:      "172.16.1.0/24",
 		OVNConfigNamespace:   "ovn-kubernetes",
-		HostNetworkNamespace: "ovn-host-network",
+		HostNetworkNamespace: "",
 	}
 
 	// OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
