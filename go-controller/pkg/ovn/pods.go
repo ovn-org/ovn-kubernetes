@@ -290,12 +290,30 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	if lsp == nil {
 		cmd, err = oc.ovnNBClient.LSPAdd(logicalSwitch, portName)
 		if err != nil {
-			return fmt.Errorf("unable to create the LSPAdd command for port: %s from the nbdb", portName)
+			return fmt.Errorf("unable to create the LSPAdd command for port: %s from the nbdb: %v", portName, err)
 		}
 		cmds = append(cmds, cmd)
 	} else {
 		klog.Infof("LSP already exists for port: %s", portName)
 	}
+
+	// Bind the port to the node's chassis; prevents ping-ponging between
+	// chassis if ovnkube-node isn't running correctly and hasn't cleared
+	// out iface-id for an old instance of this pod, and the pod got
+	// rescheduled.
+	opts, err := oc.ovnNBClient.LSPGetOptions(portName)
+	if err != nil {
+		klog.Warningf("Failed to get options for port: %s", portName)
+	}
+	if opts == nil {
+		opts = make(map[string]string)
+	}
+	opts["requested-chassis"] = pod.Spec.NodeName
+	cmd, err = oc.ovnNBClient.LSPSetOptions(portName, opts)
+	if err != nil {
+		return fmt.Errorf("unable to create the LSPSetOptions command for port: %s from the nbdb: %v", portName, err)
+	}
+	cmds = append(cmds, cmd)
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 
