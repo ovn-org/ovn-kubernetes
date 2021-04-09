@@ -12,6 +12,7 @@ import (
 	kexec "k8s.io/utils/exec"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	. "github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -256,6 +257,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(IPv4Mode).To(gomega.Equal(true))
 			gomega.Expect(IPv6Mode).To(gomega.Equal(false))
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.Equal(false))
+			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeFull))
 
 			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
 				gomega.Expect(a.Scheme).To(gomega.Equal(OvnDBSchemeUnix))
@@ -1384,6 +1386,61 @@ mode=shared
 						"cert-common-name=foobar",
 					}
 				})
+		})
+	})
+
+	Describe("OVN Kube Node config", func() {
+		It("Overrides value from Config file", func() {
+			// NOTE: We test this here as the test that overrides values also sets hybridOverlay to true
+			// which yields an invalid configuration.
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode: types.NodeModeFull,
+				},
+			}
+			file := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode: types.NodeModeSmartNIC,
+				},
+			}
+			err := buildOvnKubeNodeConfig(nil, &cliConfig, &file)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeSmartNIC))
+		})
+		It("Overrides value from CLI", func() {
+			// NOTE: We test this here as the test that overrides values also sets hybridOverlay to true
+			// which yields an invalid configuration.
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode: types.NodeModeSmartNIC,
+				},
+			}
+			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeSmartNIC))
+		})
+		It("Fails with unsupported mode", func() {
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode: "invalid",
+				},
+			}
+			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("unexpected ovnkube-node-mode"))
+		})
+
+		It("Fails if hybrid overlay is enabled and ovnkube node mode is not full", func() {
+			HybridOverlay.Enabled = true
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode: types.NodeModeSmartNIC,
+				},
+			}
+			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring(
+				"hybrid overlay is not supported with ovnkube-node mode"))
 		})
 	})
 })

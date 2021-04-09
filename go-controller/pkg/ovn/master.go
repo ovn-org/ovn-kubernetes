@@ -712,9 +712,10 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	return err
 }
 
-func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*net.IPNet) error {
+func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
 	var nodeLRPMAC net.HardwareAddr
+	nodeName := node.Name
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		nodeLRPMAC = util.IPAddrToHWAddr(gwIfAddr.IP)
@@ -736,6 +737,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 	}
 
 	var v4Gateway, v6Gateway net.IP
+	var hostNetworkPolicyIPs []net.IP
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		lrpArgs = append(lrpArgs, gwIfAddr.String())
@@ -748,8 +750,8 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 			)
 		} else {
 			v4Gateway = gwIfAddr.IP
-
 			mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
+			hostNetworkPolicyIPs = append(hostNetworkPolicyIPs, mgmtIfAddr.IP)
 			excludeIPs := mgmtIfAddr.IP.String()
 			if config.HybridOverlay.Enabled {
 				hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(hostSubnet)
@@ -773,6 +775,43 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 	stdout, stderr, err := util.RunOVNNbctl(lsArgs...)
 	if err != nil {
 		klog.Errorf("Failed to create a logical switch %v, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
+		return err
+	}
+
+	// also add the join switch IPs for this node - needed in shared gateway mode
+	lrpIPs, err := oc.joinSwIPManager.ensureJoinLRPIPs(nodeName)
+	if err != nil {
+		return fmt.Errorf("failed to get join switch port IP address for node %s: %v", nodeName, err)
+	}
+
+	for _, lrpIP := range lrpIPs {
+		hostNetworkPolicyIPs = append(hostNetworkPolicyIPs, lrpIP.IP)
+	}
+
+	// add the host network IPs for this node to host network namespace's address set
+	if err = func() error {
+		hostNetworkNamespace := config.Kubernetes.HostNetworkNamespace
+		if hostNetworkNamespace != "" {
+			nsInfo, err := oc.waitForNamespaceLocked(hostNetworkNamespace)
+			if err != nil {
+				klog.Errorf("Failed to get namespace %s (%v)",
+					hostNetworkNamespace, err)
+				return err
+			}
+			defer nsInfo.Unlock()
+			if nsInfo.addressSet == nil {
+				nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(hostNetworkNamespace)
+				if err != nil {
+					return fmt.Errorf("cannot create address set for namespace: %s,"+
+						"error: %v", hostNetworkNamespace, err)
+				}
+			}
+			if err = nsInfo.addressSet.AddIPs(hostNetworkPolicyIPs); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
 		return err
 	}
 
@@ -981,8 +1020,7 @@ func (oc *Controller) allocateNodeSubnets(node *kapi.Node) ([]*net.IPNet, []*net
 	// so it will require a reconfiguration and restart.
 	wantedSubnets := expectedHostSubnets - currentHostSubnets
 	if wantedSubnets > 0 && len(allocatedSubnets) != wantedSubnets {
-		return nil, nil, fmt.Errorf("error allocating networks for node %s: %d subnets expected only new %d subnets allocated",
-			node.Name, expectedHostSubnets, len(allocatedSubnets))
+		return nil, nil, fmt.Errorf("error allocating networks for node %s: %d subnets expected only new %d subnets allocated", node.Name, expectedHostSubnets, len(allocatedSubnets))
 	}
 	hostSubnets = append(hostSubnets, allocatedSubnets...)
 	klog.Infof("Allocated Subnets %v on Node %s", hostSubnets, node.Name)
@@ -1008,7 +1046,7 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 		}
 	}()
 	// Ensure that the node's logical network has been created
-	err = oc.ensureNodeLogicalNetwork(node.Name, hostSubnets)
+	err = oc.ensureNodeLogicalNetwork(node, hostSubnets)
 	if err != nil {
 		return nil, err
 	}
@@ -1021,6 +1059,9 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 		return nil, err
 	}
 
+	// delete stale chassis in SBDB if any
+	oc.deleteStaleNodeChassis(node)
+
 	// If node annotation succeeds, update the used subnet count
 	for _, hostSubnet := range hostSubnets {
 		util.UpdateUsedHostSubnetsCount(hostSubnet,
@@ -1030,6 +1071,45 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
 
 	return hostSubnets, nil
+}
+
+// check if any existing chassis entries in the SBDB mismatches with node's chassisID annotation
+func (oc *Controller) checkNodeChassisMismatch(node *kapi.Node) (bool, error) {
+	chassisID, err := util.ParseNodeChassisIDAnnotation(node)
+	if err != nil {
+		return false, nil
+	}
+
+	chassisList, err := oc.ovnSBClient.ChassisGet(node.Name)
+	if err != nil {
+		return false, fmt.Errorf("failed to get chassis list for node %s: error: %v", node.Name, err)
+	}
+
+	if len(chassisList) == 0 {
+		return false, nil
+	}
+
+	for _, chassis := range chassisList {
+		if chassis.Name == chassisID {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// delete stale chassis in SBDB if system-id of the specific node has changed.
+func (oc *Controller) deleteStaleNodeChassis(node *kapi.Node) {
+	mismatch, err := oc.checkNodeChassisMismatch(node)
+	if err != nil {
+		klog.Errorf("Failed to check if there is any stale chassis for node %s in SBDB: %v", node.Name, err)
+	} else if mismatch {
+		klog.V(5).Infof("Node %s is now with a new chassis ID, delete its stale chassis in SBDB", node.Name)
+		if err = oc.deleteNodeChassis(node.Name); err != nil {
+			oc.recorder.Eventf(node, kapi.EventTypeWarning, "ErrorMismatchChassis",
+				"Node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB",
+				node.Name)
+		}
+	}
 }
 
 func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) error {
@@ -1339,7 +1419,7 @@ func (oc *Controller) deleteNodeChassis(nodeName string) error {
 	}
 
 	if len(cmds) == 0 {
-		return fmt.Errorf("failed to find chassis for node %s", nodeName)
+		return nil
 	}
 
 	if err = oc.ovnSBClient.Execute(cmds...); err != nil {

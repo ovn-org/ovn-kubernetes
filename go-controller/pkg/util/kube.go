@@ -212,6 +212,11 @@ func PodWantsNetwork(pod *kapi.Pod) bool {
 	return !pod.Spec.HostNetwork
 }
 
+// PodScheduled returns if the given pod is scheduled
+func PodScheduled(pod *kapi.Pod) bool {
+	return pod.Spec.NodeName != ""
+}
+
 const (
 	// DefNetworkAnnotation is the pod annotation for the cluster-wide default network
 	DefNetworkAnnotation = "v1.multus-cni.io/default-network"

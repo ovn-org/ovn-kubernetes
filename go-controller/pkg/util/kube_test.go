@@ -636,3 +636,29 @@ func Test_getLbEndpoints(t *testing.T) {
 func protoPtr(proto v1.Protocol) *v1.Protocol {
 	return &proto
 }
+
+func TestPodScheduled(t *testing.T) {
+	tests := []struct {
+		desc      string
+		inpPod    v1.Pod
+		expResult bool
+	}{
+		{
+			desc:      "Pod is scheduled to a node",
+			inpPod:    v1.Pod{Spec: v1.PodSpec{NodeName: "node-1"}},
+			expResult: true,
+		},
+		{
+			desc:      "Pod is not scheduled to a node",
+			inpPod:    v1.Pod{},
+			expResult: false,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			res := PodScheduled(&tc.inpPod)
+			t.Log(res)
+			assert.Equal(t, tc.expResult, res)
+		})
+	}
+}

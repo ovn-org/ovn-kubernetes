@@ -534,32 +534,22 @@ func addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet) er
 		l3Prefix = "ip4"
 		natSubnetNextHop = types.V4NodeLocalNATSubnetNextHop
 	}
+
 	// embed nodeName as comment so that it is easier to delete these rules later on.
 	// logical router policy doesn't support external_ids to stash metadata
 	matchStr := fmt.Sprintf(`inport == "%s%s" && %s.dst == %s /* %s */`,
 		types.RouterToSwitchPrefix, nodeName, l3Prefix, hostIfAddr.IP.String(), nodeName)
-	_, stderr, err := util.RunOVNNbctl("lr-policy-add", types.OVNClusterRouter, types.NodeSubnetPolicyPriority, matchStr, "reroute",
-		mgmtPortIP)
-	if err != nil {
-		// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
-		// Have raised an issue against ovn repository (https://github.com/ovn-org/ovn/issues/49)
-		if !strings.Contains(stderr, "already existed") {
-			return fmt.Errorf("failed to add policy route '%s' for host %q on %s "+
-				"stderr: %s, error: %v", matchStr, nodeName, types.OVNClusterRouter, stderr, err)
-		}
+	if err := syncPolicyBasedRoutes(nodeName, mgmtPortIP, matchStr, types.NodeSubnetPolicyPriority, mgmtPortIP, "match,nexthops"); err != nil {
+		return fmt.Errorf("unable to sync node subnet policies, err: %v", err)
 	}
 
 	if config.Gateway.Mode == config.GatewayModeLocal {
+
 		// policy to allow host -> service -> hairpin back to host
 		matchStr = fmt.Sprintf("%s.src == %s && %s.dst == %s /* %s */",
 			l3Prefix, mgmtPortIP, l3Prefix, hostIfAddr.IP.String(), nodeName)
-		_, stderr, err = util.RunOVNNbctl("lr-policy-add", types.OVNClusterRouter, types.MGMTPortPolicyPriority, matchStr,
-			"reroute", natSubnetNextHop)
-		if err != nil {
-			if !strings.Contains(stderr, "already existed") {
-				return fmt.Errorf("failed to add policy route '%s' for host %q on %s "+
-					"stderr: %s, error: %v", matchStr, nodeName, types.OVNClusterRouter, stderr, err)
-			}
+		if err := syncPolicyBasedRoutes(nodeName, mgmtPortIP, matchStr, types.MGMTPortPolicyPriority, natSubnetNextHop, "match"); err != nil {
+			return fmt.Errorf("unable to sync management port policies, err: %v", err)
 		}
 
 		var matchDst string
@@ -578,19 +568,109 @@ func addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet) er
 		}
 		matchStr = fmt.Sprintf("%s.src == %s %s /* inter-%s */",
 			l3Prefix, mgmtPortIP, matchDst, nodeName)
-		_, stderr, err = util.RunOVNNbctl("lr-policy-add", types.OVNClusterRouter, types.InterNodePolicyPriority, matchStr,
-			"reroute", natSubnetNextHop)
-		if err != nil {
-			if !strings.Contains(stderr, "already existed") {
-				return fmt.Errorf("failed to add policy route '%s' for host %q on %s "+
-					"stderr: %s, error: %v", matchStr, nodeName, types.OVNClusterRouter, stderr, err)
-			}
+		if err := syncPolicyBasedRoutes(nodeName, mgmtPortIP, matchStr, types.InterNodePolicyPriority, natSubnetNextHop, "match"); err != nil {
+			return fmt.Errorf("unable to sync inter-node policies, err: %v", err)
 		}
 	} else if config.Gateway.Mode == config.GatewayModeShared {
 		// if we are upgrading from Local to Shared gateway mode, we need to ensure the inter-node LRP is removed
 		removeLRPolicies(nodeName, []string{types.InterNodePolicyPriority})
 	}
 
+	return nil
+}
+
+// This function sync logical router policies which concern the management port.
+// This function compares the following ovn-nbctl output:
+
+// 		72db5e49-0949-4d00-93e3-fe94442dd861,ip4.src == 10.244.0.2 && ip4.dst == 172.18.0.2 /* ovn-worker2 */,169.254.0.1
+// 		c20ac671-704a-428a-a32b-44da2eec8456,"inport == ""rtos-ovn-worker2"" && ip4.dst == 172.18.0.2 /* ovn-worker2 */",10.244.0.2
+// 		822ab242-cce5-47b2-9c6f-f025f47e766a,ip4.src == 10.244.2.2  && ip4.dst != 10.244.0.0/16 /* inter-ovn-worker */,169.254.0.1
+// 		6465e223-053c-4c74-a5f0-5f058c9f7a3e,ip4.src == 10.244.2.2 && ip4.dst == 172.18.0.3 /* ovn-worker */,169.254.0.1
+// 		be7c8b53-f8ac-4051-b8f1-bfdb007d0956,"inport == ""rtos-ovn-worker"" && ip4.dst == 172.18.0.3 /* ovn-worker */",10.244.2.2
+// 		fa8cf55d-a96c-4a53-9bf2-1c1fb1bc7a42,"inport == ""rtos-ovn-control-plane"" && ip4.dst == 172.18.0.4 /* ovn-control-plane */",10.244.1.2
+// 		7debdcc6-ad5e-4825-9978-74bfbf8b7c27,ip4.src == 10.244.1.2 && ip4.dst == 172.18.0.4 /* ovn-control-plane */,169.254.0.1
+// 		a1b876f6-5ed4-4f88-b09c-7b4beed3b75f,ip4.src == 10.244.1.2  && ip4.dst != 10.244.0.0/16 /* inter-ovn-control-plane */,169.254.0.1
+// 		0f5af297-74c8-4551-b10e-afe3b74bb000,ip4.src == 10.244.0.2  && ip4.dst != 10.244.0.0/16 /* inter-ovn-worker2 */,169.254.0.1
+
+// To check if the management port IP has changed for the node that concerns it,
+// and updates that route in case it found a matching one.
+// This is ugly (since the node is encoded as a comment in the match),
+// but a necessary evil as any change to this would break upgrades and
+// possible downgrades. We could make sure any upgrade encodes the node in
+// the external_id, but since ovn-kubernetes isn't versioned, we won't ever
+// know which version someone is running of this and when the switch to version
+// N+2 is fully made.
+func syncPolicyBasedRoutes(nodeName, mgmtPortIP, match, priority, nexthops, compareTo string) error {
+	found := false
+	policiesCompare, err := findPolicyBasedRoutes(priority, compareTo)
+	if err != nil {
+		return fmt.Errorf("unable to list policies, err: %v", err)
+	}
+	for _, policyCompare := range policiesCompare {
+		if strings.Contains(policyCompare, fmt.Sprintf("%s\"", nodeName)) {
+			if !strings.Contains(policyCompare, mgmtPortIP) {
+				uuid := strings.Split(policyCompare, ",")[0]
+				if err := deletePolicyBasedRoutes(uuid, priority); err != nil {
+					return fmt.Errorf("failed to delete policy route '%s' for host %q on %s "+
+						"error: %v", match, nodeName, types.OVNClusterRouter, err)
+				}
+			}
+			found = true
+		}
+	}
+	if !found {
+		if err := createPolicyBasedRoutes(match, priority, nexthops); err != nil {
+			return fmt.Errorf("failed to add policy route '%s' for host %q on %s "+
+				"error: %v", match, nodeName, types.OVNClusterRouter, err)
+		}
+	}
+	return nil
+}
+
+func findPolicyBasedRoutes(priority, compareTo string) ([]string, error) {
+	policyIDs, stderr, err := util.RunOVNNbctl(
+		"--format=csv",
+		"--data=bare",
+		"--no-heading",
+		fmt.Sprintf("--columns=_uuid,%s", compareTo),
+		"find",
+		"logical_router_policy",
+		fmt.Sprintf("priority=%s", priority),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("unable to find logical router policy, stderr: %s, err: %v", stderr, err)
+	}
+	if policyIDs == "" {
+		return nil, nil
+	}
+	return strings.Split(policyIDs, "\n"), nil
+}
+
+func createPolicyBasedRoutes(match, priority, nexthops string) error {
+	_, stderr, err := util.RunOVNNbctl(
+		"--may-exist",
+		"lr-policy-add",
+		types.OVNClusterRouter,
+		priority,
+		match,
+		"reroute",
+		nexthops,
+	)
+	if err != nil {
+		return fmt.Errorf("unable to create policy based routes, stderr: %s, err: %v", stderr, err)
+	}
+	return nil
+}
+
+func deletePolicyBasedRoutes(policyID, priority string) error {
+	_, stderr, err := util.RunOVNNbctl(
+		"lr-policy-del",
+		types.OVNClusterRouter,
+		policyID,
+	)
+	if err != nil {
+		return fmt.Errorf("unable to delete logical router policy, stderr: %s, err: %v", stderr, err)
+	}
 	return nil
 }
 

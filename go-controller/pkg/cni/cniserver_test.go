@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"k8s.io/client-go/kubernetes"
 	"net"
 	"net/http"
 	"os"
@@ -51,7 +52,7 @@ func clientDoCNI(t *testing.T, client *http.Client, req *Request) ([]byte, int) 
 
 var expectedResult cnitypes.Result
 
-func serverHandleCNI(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool) ([]byte, error) {
+func serverHandleCNI(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) ([]byte, error) {
 	if request.Command == CNIAdd {
 		return json.Marshal(&expectedResult)
 	} else if request.Command == CNIDel || request.Command == CNIUpdate || request.Command == CNICheck {
@@ -88,7 +89,10 @@ func TestCNIServer(t *testing.T) {
 		t.Fatalf("failed to create watch factory: %v", err)
 	}
 
-	s := NewCNIServer(tmpDir, false, wf)
+	s, err := NewCNIServer(tmpDir, false, wf, fakeClient)
+	if err != nil {
+		t.Fatalf("error creating CNI server: %v", err)
+	}
 	if err := s.Start(serverHandleCNI); err != nil {
 		t.Fatalf("error starting CNI server: %v", err)
 	}
@@ -283,8 +287,12 @@ func TestCNIServerCancelAdd(t *testing.T) {
 
 	started := make(chan bool)
 
-	s := NewCNIServer(tmpDir, false, wf)
-	if err := s.Start(func(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool) ([]byte, error) {
+	s, err := NewCNIServer(tmpDir, false, wf, fakeClient)
+	if err != nil {
+		t.Fatalf("error Creating CNI server: %v", err)
+	}
+	if err := s.Start(func(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool,
+		kclient kubernetes.Interface) ([]byte, error) {
 		// Let the testcase know it can now delete the pod
 		close(started)
 		// Wait for the testcase to cancel us

@@ -74,9 +74,13 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				}
 
 				var namespacesRes string
-				for _, n := range namespaces {
+				for i, n := range namespaces {
 					name := n.makeName()
-					namespacesRes += fmt.Sprintf("%s,name=%s\n", hashedAddressSet(name), name)
+					if i%2 == 0 {
+						namespacesRes += fmt.Sprintf("keyA=valA,name=%s\n", name)
+					} else {
+						namespacesRes += fmt.Sprintf("name=%s,keyB=valB\n", name)
+					}
 				}
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=external_ids find address_set",

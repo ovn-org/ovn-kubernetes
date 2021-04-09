@@ -427,10 +427,6 @@ func (oc *Controller) syncPeriodic() {
 	}()
 }
 
-func podScheduled(pod *kapi.Pod) bool {
-	return pod.Spec.NodeName != ""
-}
-
 func (oc *Controller) recordPodEvent(addErr error, pod *kapi.Pod) {
 	podRef, err := ref.GetReference(scheme.Scheme, pod)
 	if err != nil {
@@ -498,7 +494,7 @@ func networkStatusAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
 // indicates the pod should be retried later.
 func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 	// Try unscheduled pods later
-	if !podScheduled(pod) {
+	if !util.PodScheduled(pod) {
 		return false
 	}
 
@@ -671,10 +667,11 @@ func (oc *Controller) WatchCRD() {
 				}
 
 				oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.stopChan)
-				oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
 				if err != nil {
 					klog.Errorf("Error Creating EgressFirewallDNS: %v", err)
+					return
 				}
+				oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
 				oc.egressFirewallHandler = oc.WatchEgressFirewall()
 			}
 		},
@@ -751,12 +748,16 @@ func (oc *Controller) WatchEgressNodes() {
 				klog.Error(err)
 			}
 			nodeLabels := node.GetLabels()
-			if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel && oc.isEgressNodeReady(node) && oc.isEgressNodeReachable(node) {
+			if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel {
 				oc.setNodeEgressAssignable(node.Name, true)
-				oc.setNodeEgressReady(node.Name, true)
-				oc.setNodeEgressReachable(node.Name, true)
-				if err := oc.addEgressNode(node); err != nil {
-					klog.Error(err)
+				if oc.isEgressNodeReady(node) {
+					oc.setNodeEgressReady(node.Name, true)
+					if oc.isEgressNodeReachable(node) {
+						oc.setNodeEgressReachable(node.Name, true)
+						if err := oc.addEgressNode(node); err != nil {
+							klog.Error(err)
+						}
+					}
 				}
 			}
 		},
@@ -998,10 +999,15 @@ func (oc *Controller) WatchNodes() {
 				}
 			}
 
+			if nodeChassisChanged(oldNode, node) {
+				// delete stale chassis in SBDB if any
+				oc.deleteStaleNodeChassis(node)
+			}
+
 			oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
 
 			_, failed = gatewaysFailed.Load(node.Name)
-			if failed || gatewayChanged(oldNode, node) {
+			if failed || gatewayChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
 				err := oc.syncNodeGateway(node, nil)
 				if err != nil {
 					if !util.IsAnnotationNotSetError(err) {
@@ -1114,11 +1120,6 @@ func (oc *Controller) removeServiceEndpoints(lb, vip string) {
 func gatewayChanged(oldNode, newNode *kapi.Node) bool {
 	oldL3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(oldNode)
 	l3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(newNode)
-
-	if oldL3GatewayConfig == nil && l3GatewayConfig == nil {
-		return false
-	}
-
 	return !reflect.DeepEqual(oldL3GatewayConfig, l3GatewayConfig)
 }
 
@@ -1133,6 +1134,12 @@ func nodeSubnetChanged(oldNode, node *kapi.Node) bool {
 	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode)
 	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
 	return !reflect.DeepEqual(oldSubnets, newSubnets)
+}
+
+func nodeChassisChanged(oldNode, node *kapi.Node) bool {
+	oldChassis, _ := util.ParseNodeChassisIDAnnotation(oldNode)
+	newChassis, _ := util.ParseNodeChassisIDAnnotation(node)
+	return oldChassis != newChassis
 }
 
 // noHostSubnet() compares the no-hostsubenet-nodes flag with node labels to see if the node is manageing its
