@@ -8,6 +8,8 @@ import (
 // NetConf is CNI NetConf with DeviceID
 type NetConf struct {
 	types.NetConf
+	// NodeName is the node's Kubernetes API node name
+	NodeName string `json:"nodeName,omitempty"`
 	// PciAddrs in case of using sriov
 	DeviceID string `json:"deviceID,omitempty"`
 	// LogFile to log all the messages from cni shim binary to

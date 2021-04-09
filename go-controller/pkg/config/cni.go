@@ -14,13 +14,14 @@ import (
 )
 
 // WriteCNIConfig writes a CNI JSON config file to directory given by global config
-func WriteCNIConfig() error {
+func WriteCNIConfig(nodeName string) error {
 	netConf := &ovntypes.NetConf{
 		NetConf: types.NetConf{
 			CNIVersion: "0.4.0",
 			Name:       "ovn-kubernetes",
 			Type:       CNI.Plugin,
 		},
+		NodeName:          nodeName,
 		LogFile:           Logging.CNIFile,
 		LogLevel:          fmt.Sprintf("%d", Logging.Level),
 		LogFileMaxSize:    Logging.LogFileMaxSize,

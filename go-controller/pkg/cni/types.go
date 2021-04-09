@@ -76,6 +76,8 @@ type PodRequest struct {
 	PodNamespace string
 	// kubernetes pod name
 	PodName string
+	// node name
+	NodeName string
 	// kubernetes container ID
 	SandboxID string
 	// kernel network namespace path
@@ -105,6 +107,7 @@ type Server struct {
 	useOVSExternalIDs int32
 	kclient           kubernetes.Interface
 	podLister         corev1listers.PodLister
+	nodeName          string
 
 	// runningSandboxAdds is a map of sandbox ID to PodRequest for any CNIAdd operation
 	runningSandboxAddsLock sync.Mutex

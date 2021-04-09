@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"net"
 	"os"
@@ -156,11 +155,6 @@ func (n *NodeController) DeletePod(pod *kapi.Pod) error {
 // Sync is not needed but must be implemented to fulfill the interface
 func (n *NodeController) Sync(objs []*kapi.Node) {}
 
-func nameToCookie(nodeName string) string {
-	hash := sha256.Sum256([]byte(nodeName))
-	return fmt.Sprintf("%02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3])
-}
-
 // hybridOverlayNodeUpdate sets up or tears down VXLAN tunnels to hybrid overlay
 // nodes in the cluster
 func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
@@ -177,7 +171,7 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 	klog.Infof("Setting up hybrid overlay tunnel to node %s", node.Name)
 
 	// (re)add flows for the node
-	cookie := nameToCookie(node.Name)
+	cookie := util.NodeNameToCookie(node.Name)
 	drMACRaw := strings.Replace(drMAC.String(), ":", "", -1)
 
 	var flows []string
@@ -237,7 +231,7 @@ func (n *NodeController) DeleteNode(node *kapi.Node) error {
 		return nil
 	}
 
-	n.deleteFlowsByCookie(nameToCookie(node.Name))
+	n.deleteFlowsByCookie(util.NodeNameToCookie(node.Name))
 	return nil
 }
 

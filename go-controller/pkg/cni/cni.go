@@ -14,6 +14,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 var minRsrc = resource.MustParse("1k")
@@ -158,7 +159,10 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternal
 		if len(hostIfaceName) == 0 {
 			return nil, fmt.Errorf("could not find host interface in the prevResult: %v", result)
 		}
-		ifaceID := fmt.Sprintf("%s_%s", namespace, podName)
+
+		nodeCookie := util.NodeNameToCookie(pr.NodeName)
+		ifaceID := fmt.Sprintf("%s_%s_%s", namespace, podName, nodeCookie)
+
 		ofPort, err := getIfaceOFPort(hostIfaceName)
 		if err != nil {
 			return nil, err
@@ -213,7 +217,7 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, us
 
 // getCNIResult get result from pod interface info.
 func (pr *PodRequest) getCNIResult(podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
-	interfacesArray, err := pr.ConfigureInterface(pr.PodNamespace, pr.PodName, podInterfaceInfo)
+	interfacesArray, err := pr.ConfigureInterface(pr.PodNamespace, pr.PodName, pr.NodeName, podInterfaceInfo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure pod interface: %v", err)
 	}

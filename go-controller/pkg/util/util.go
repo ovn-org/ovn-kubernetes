@@ -1,6 +1,7 @@
 package util
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"hash/fnv"
 	"net"
@@ -224,4 +225,12 @@ func UpdateIPsSlice(s, oldIPs, newIPs []string) []string {
 		}
 	}
 	return n
+}
+
+// NodeNameToCookie converts a node name into the first 4 hex characters of
+// the SHA256 hash of it's name. Should not be used for security or cryptographically
+// important purposes.
+func NodeNameToCookie(nodeName string) string {
+	hash := sha256.Sum256([]byte(nodeName))
+	return fmt.Sprintf("%02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3])
 }

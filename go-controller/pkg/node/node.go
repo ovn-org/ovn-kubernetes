@@ -307,7 +307,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer("", isOvnUpEnabled, n.watchFactory, kclient.KClient)
+		cniServer, err = cni.NewCNIServer("", n.name, isOvnUpEnabled, n.watchFactory, kclient.KClient)
 		if err != nil {
 			return err
 		}
@@ -461,7 +461,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
 		_, err = os.Stat(confFile)
 		if os.IsNotExist(err) {
-			err = config.WriteCNIConfig()
+			err = config.WriteCNIConfig(n.name)
 			if err != nil {
 				return err
 			}

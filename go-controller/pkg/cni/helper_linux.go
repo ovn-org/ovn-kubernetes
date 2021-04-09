@@ -251,10 +251,12 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 }
 
 // ConfigureOVS performs OVS configurations in order to set up Pod networking
-func ConfigureOVS(ctx context.Context, namespace string, podName string, hostIfaceName string,
+func ConfigureOVS(ctx context.Context, namespace, podName, nodeName, hostIfaceName string,
 	ifInfo *PodInterfaceInfo, sandboxID string) error {
 	klog.Infof("ConfigureOVS: namespace: %s, podName: %s", namespace, podName)
-	ifaceID := fmt.Sprintf("%s_%s", namespace, podName)
+
+	nodeCookie := util.NodeNameToCookie(nodeName)
+	ifaceID := fmt.Sprintf("%s_%s_%s", namespace, podName, nodeCookie)
 
 	// Find and remove any existing OVS port with this iface-id. Pods can
 	// have multiple sandboxes if some are waiting for garbage collection,
@@ -318,7 +320,7 @@ func ConfigureOVS(ctx context.Context, namespace string, podName string, hostIfa
 }
 
 // ConfigureInterface sets up the container interface
-func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
+func (pr *PodRequest) ConfigureInterface(namespace, podName, nodeName string, ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
 	netns, err := ns.GetNS(pr.Netns)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open netns %q: %v", pr.Netns, err)
@@ -344,7 +346,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	}
 
 	if !ifInfo.IsSmartNic {
-		err = ConfigureOVS(pr.ctx, namespace, podName, hostIface.Name, ifInfo, pr.SandboxID)
+		err = ConfigureOVS(pr.ctx, namespace, podName, nodeName, hostIface.Name, ifInfo, pr.SandboxID)
 		if err != nil {
 			return nil, err
 		}

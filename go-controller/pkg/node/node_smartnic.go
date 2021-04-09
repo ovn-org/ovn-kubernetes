@@ -128,7 +128,7 @@ func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInt
 		return fmt.Errorf("failed to get smart-nic annotation. %v", err)
 	}
 
-	err := cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, smartNicCD.SandboxId)
+	err := cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, n.name, vfRepName, ifInfo, smartNicCD.SandboxId)
 	if err != nil {
 		return err
 	}

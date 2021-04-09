@@ -20,7 +20,7 @@ import (
 
 // Builds the logical switch port name for a given pod.
 func podLogicalPortName(pod *kapi.Pod) string {
-	return pod.Namespace + "_" + pod.Name
+	return fmt.Sprintf("%s_%s_%s", pod.Namespace, pod.Name, util.NodeNameToCookie(pod.Spec.NodeName))
 }
 
 func (oc *Controller) syncPods(pods []interface{}) {

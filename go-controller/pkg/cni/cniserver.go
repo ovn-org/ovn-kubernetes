@@ -49,7 +49,7 @@ import (
 // started.
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
-func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWatchFactory, kclient kubernetes.Interface) (*Server, error) {
+func NewCNIServer(rundir, nodeName string, useOVSExternalIDs bool, factory factory.NodeWatchFactory, kclient kubernetes.Interface) (*Server, error) {
 	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
 		return nil, fmt.Errorf("unsupported ovnkube-node mode for CNI server: %s", config.OvnKubeNode.Mode)
 	}
@@ -75,6 +75,7 @@ func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWat
 		kclient:            kclient,
 		runningSandboxAdds: make(map[string]*PodRequest),
 		mode:               config.OvnKubeNode.Mode,
+		nodeName:           nodeName,
 	}
 	router.NotFoundHandler = http.HandlerFunc(http.NotFound)
 	router.HandleFunc("/metrics", s.handleCNIMetrics).Methods("POST")
@@ -150,14 +151,15 @@ func gatherCNIArgs(env map[string]string) (map[string]string, error) {
 	return mapArgs, nil
 }
 
-func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
+func cniRequestToPodRequest(cr *Request, nodeName string) (*PodRequest, error) {
 	cmd, ok := cr.Env["CNI_COMMAND"]
 	if !ok {
 		return nil, fmt.Errorf("unexpected or missing CNI_COMMAND")
 	}
 
 	req := &PodRequest{
-		Command: command(cmd),
+		Command:  command(cmd),
+		NodeName: nodeName,
 	}
 
 	req.SandboxID, ok = cr.Env["CNI_CONTAINERID"]
@@ -234,7 +236,7 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 	if err := json.Unmarshal(b, &cr); err != nil {
 		return nil, err
 	}
-	req, err := cniRequestToPodRequest(&cr)
+	req, err := cniRequestToPodRequest(&cr, s.nodeName)
 	if err != nil {
 		return nil, err
 	}
