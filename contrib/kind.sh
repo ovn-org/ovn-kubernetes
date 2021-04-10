@@ -175,9 +175,11 @@ parse_args() {
             -dl  | --ovn-loglevel-nbctld )      shift
                                                 OVN_LOG_LEVEL_NBCTLD=$1
                                                 ;;
-            --delete )                    	    delete
-                                          	    exit
-                                          	    ;;
+            -hns | --host-network-namespace )   OVN_HOST_NETWORK_NAMESPACE=$1
+                                                ;;
+            --delete )                          delete
+                                                exit
+                                                ;;
             -h | --help )                       usage
                                                 exit
                                                 ;;
@@ -216,6 +218,7 @@ print_params() {
      echo "OVN_LOG_LEVEL_SB = $OVN_LOG_LEVEL_SB"
      echo "OVN_LOG_LEVEL_CONTROLLER = $OVN_LOG_LEVEL_CONTROLLER"
      echo "OVN_LOG_LEVEL_NBCTLD = $OVN_LOG_LEVEL_NBCTLD"
+     echo "OVN_HOST_NETWORK_NAMESPACE = $OVN_HOST_NETWORK_NAMESPACE"
      echo ""
 }
 
@@ -270,6 +273,8 @@ set_default_params() {
   else
     KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
   fi
+  OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
+
 }
 
 detect_apiserver_ip() {

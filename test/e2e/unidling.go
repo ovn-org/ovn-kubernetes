@@ -145,13 +145,13 @@ var _ = ginkgo.Describe("Unidling", func() {
 			})
 			serviceAddress := net.JoinHostPort(serviceName, strconv.Itoa(port))
 			framework.Logf("waiting up to %v to connect to %v", e2eservice.KubeProxyEndpointLagTimeout, serviceAddress)
-			cmd = fmt.Sprintf("/agnhost connect --timeout=3s %s", serviceAddress)
+			cmd = fmt.Sprintf("/agnhost connect --timeout=1s %s", serviceAddress)
 		})
 
 		ginkgo.It("Should generate a NeedPods event for traffic destined to idled services", func() {
 			gomega.Eventually(func() serviceStatus {
 				return checkService(clientPod, cmd)
-			}, 5*time.Second, 1*time.Second).Should(gomega.Equal(failsWithNoReject), "Service is rejecting")
+			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(failsWithNoReject), "Service is rejecting")
 
 			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
 			framework.ExpectEqual(generatesNewEvents, true, "New events are not generated")
@@ -165,7 +165,7 @@ var _ = ginkgo.Describe("Unidling", func() {
 
 			gomega.Eventually(func() serviceStatus {
 				return checkService(clientPod, cmd)
-			}, 5*time.Second, 1*time.Second).Should(gomega.Equal(rejects), "Service is not rejecting")
+			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(rejects), "Service is not rejecting")
 
 			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
 			framework.ExpectEqual(generatesNewEvents, false, "New events are generated")
@@ -175,7 +175,7 @@ var _ = ginkgo.Describe("Unidling", func() {
 			createBackend(f, serviceName, namespace, node, jig.Labels, port)
 			gomega.Eventually(func() serviceStatus {
 				return checkService(clientPod, cmd)
-			}, 5*time.Second, 1*time.Second).Should(gomega.Equal(works), "Service is failing")
+			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(works), "Service is failing")
 
 			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
 			framework.ExpectEqual(generatesNewEvents, false, "New events are generated")
@@ -189,7 +189,7 @@ var _ = ginkgo.Describe("Unidling", func() {
 
 			gomega.Eventually(func() serviceStatus {
 				return checkService(clientPod, cmd)
-			}, 5*time.Second, 1*time.Second).Should(gomega.Equal(failsWithNoReject), "Service is not timing out")
+			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(failsWithNoReject), "Service is not timing out")
 
 			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
 			framework.ExpectEqual(generatesNewEvents, true, "New events are not generated")
@@ -230,13 +230,13 @@ var _ = ginkgo.Describe("Unidling", func() {
 			})
 			serviceAddress := net.JoinHostPort(serviceName, strconv.Itoa(port))
 			framework.Logf("waiting up to %v to connect to %v", e2eservice.KubeProxyEndpointLagTimeout, serviceAddress)
-			cmd = fmt.Sprintf("/agnhost connect --timeout=3s %s", serviceAddress)
+			cmd = fmt.Sprintf("/agnhost connect --timeout=1s %s", serviceAddress)
 		})
 
 		ginkgo.It("Should not generate a NeedPods event for traffic destined to idled services", func() {
 			gomega.Eventually(func() serviceStatus {
 				return checkService(clientPod, cmd)
-			}, 5*time.Second, 1*time.Second).Should(gomega.Equal(rejects), "Service is not rejecting")
+			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(rejects), "Service is not rejecting")
 
 			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
 			framework.ExpectEqual(generatesNewEvents, false, "New events are generated")
@@ -250,7 +250,7 @@ var _ = ginkgo.Describe("Unidling", func() {
 
 			gomega.Eventually(func() serviceStatus {
 				return checkService(clientPod, cmd)
-			}, 5*time.Second, 1*time.Second).Should(gomega.Equal(failsWithNoReject), "Service is not timing out")
+			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(failsWithNoReject), "Service is not timing out")
 
 			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
 			framework.ExpectEqual(generatesNewEvents, true, "New events are not generated")
@@ -260,7 +260,7 @@ var _ = ginkgo.Describe("Unidling", func() {
 			createBackend(f, serviceName, namespace, node, jig.Labels, port)
 			gomega.Eventually(func() serviceStatus {
 				return checkService(clientPod, cmd)
-			}, 5*time.Second, 1*time.Second).Should(gomega.Equal(works), "Service is failing")
+			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(works), "Service is failing")
 
 			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
 			framework.ExpectEqual(generatesNewEvents, false, "New events are generated")
@@ -274,7 +274,7 @@ var _ = ginkgo.Describe("Unidling", func() {
 
 			gomega.Eventually(func() serviceStatus {
 				return checkService(clientPod, cmd)
-			}, 5*time.Second, 1*time.Second).Should(gomega.Equal(rejects), "Service is not rejecting")
+			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(rejects), "Service is not rejecting")
 
 			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
 			framework.ExpectEqual(generatesNewEvents, false, "New events are generated")
@@ -297,6 +297,9 @@ func createBackend(f *framework.Framework, serviceName, namespace, node string, 
 // hittingGeneratesNewEvents tells if by hitting a service a brand new needPods event is generated
 func hittingGeneratesNewEvents(service *v1.Service, cs clientset.Interface, clientPod *v1.Pod, cmd string) bool {
 	lastEventTime := lastIdlingEventForService(service, cs)
+	// the event time resolution is one second, which is what we use to check if there are new events
+	// we need to sleep 1 second to ensure two events are generated with different timestamps.
+	time.Sleep(1 * time.Second)
 	checkService(clientPod, cmd)
 	err := wait.PollImmediate(framework.Poll, 3*time.Second, func() (bool, error) {
 		newLastEvent := lastIdlingEventForService(service, cs)

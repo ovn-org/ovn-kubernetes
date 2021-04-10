@@ -45,6 +45,7 @@ OVN_V6_JOIN_SUBNET=""
 OVN_NETFLOW_TARGETS=""
 OVN_SFLOW_TARGETS=""
 OVN_IPFIX_TARGETS=""
+OVN_HOST_NETWORK_NAMESPACE=""
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -171,6 +172,9 @@ while [ "$1" != "" ]; do
   --ipfix-targets)
     OVN_IPFIX_TARGETS=$VALUE
     ;;
+  --host-network-namespace)
+    OVN_HOST_NETWORK_NAMESPACE=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -287,7 +291,35 @@ ovn_image=${image} \
   ovn_netflow_targets=${ovn_netflow_targets} \
   ovn_sflow_targets=${ovn_netflow_targets} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
+  ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
+
+# ovnkube node for smart-nic-host nic daemonset
+# TODO: we probably dont need all of these when running on smart-nic host
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  kind=${KIND} \
+  ovn_unprivileged_mode=${ovn_unprivileged_mode} \
+  ovn_gateway_mode=${ovn_gateway_mode} \
+  ovn_gateway_opts=${ovn_gateway_opts} \
+  ovnkube_node_loglevel=${node_loglevel} \
+  ovn_loglevel_controller=${ovn_loglevel_controller} \
+  ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
+  ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
+  ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_v4_join_subnet=${ovn_v4_join_subnet} \
+  ovn_v6_join_subnet=${ovn_v6_join_subnet} \
+  ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_remote_probe_interval=${ovn_remote_probe_interval} \
+  ovn_netflow_targets=${ovn_netflow_targets} \
+  ovn_sflow_targets=${ovn_netflow_targets} \
+  ovn_ipfix_targets=${ovn_ipfix_targets} \
+  ovnkube_app_name=ovnkube-node-smart-nic-host \
+  j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node-smart-nic-host.yaml
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -348,14 +380,16 @@ net_cidr=${OVN_NET_CIDR:-"10.128.0.0/14/23"}
 svc_cidr=${OVN_SVC_CIDR:-"172.30.0.0/16"}
 k8s_apiserver=${OVN_K8S_APISERVER:-"10.0.2.16:6443"}
 mtu=${OVN_MTU:-1400}
-
+host_network_namespace=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
 echo "net_cidr: ${net_cidr}"
 echo "svc_cidr: ${svc_cidr}"
 echo "k8s_apiserver: ${k8s_apiserver}"
 echo "mtu: ${mtu}"
+echo "host_network_namespace: ${host_network_namespace}"
 
 net_cidr=${net_cidr} svc_cidr=${svc_cidr} \
   mtu_value=${mtu} k8s_apiserver=${k8s_apiserver} \
+  host_network_namespace=${host_network_namespace}	\
   j2 ../templates/ovn-setup.yaml.j2 -o ../yaml/ovn-setup.yaml
 
 cp ../templates/ovnkube-monitor.yaml.j2 ../yaml/ovnkube-monitor.yaml

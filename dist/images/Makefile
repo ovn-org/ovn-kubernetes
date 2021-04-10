@@ -34,7 +34,7 @@ endif
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest
 
 centos: bld
-	docker build -t ovn-daemonset .
+	docker build --build-arg rpmArch=$(shell uname -m) -t ovn-daemonset .
 	docker tag ovn-daemonset docker.io/ovnkube/ovn-daemonset:latest
 	# docker login -u ovnkube docker.io/ovnkube
 	# docker push docker.io/ovnkube/ovn-daemonset:latest
