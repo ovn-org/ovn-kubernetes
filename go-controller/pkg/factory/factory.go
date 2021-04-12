@@ -201,7 +201,6 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*WatchFactory, error) {
 	wf := &WatchFactory{
 		iFactory:    informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		eipFactory:  egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
 		efClientset: ovnClientset.EgressFirewallClient,
 		crdFactory:  apiextensionsinformerfactory.NewSharedInformerFactory(ovnClientset.APIExtensionsClient, resyncInterval),
 		informers:   make(map[reflect.Type]*informer),
