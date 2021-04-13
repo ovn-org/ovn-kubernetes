@@ -13,19 +13,14 @@ import (
 // Implementations should enforce thread safety on the declared methods
 type Annotator interface {
 	Set(key string, value interface{}) error
-	SetWithFailureHandler(key string, value interface{}, failFn FailureHandlerFn) error
 	Delete(key string)
 	Run() error
 }
-
-// FailureHandlerFn is a function called when adding an annotation fails
-type FailureHandlerFn func(obj interface{}, key string, val interface{})
 
 type action struct {
 	key     string
 	val     string
 	origVal interface{}
-	failFn  FailureHandlerFn
 }
 
 type nodeAnnotator struct {
@@ -46,14 +41,9 @@ func NewNodeAnnotator(kube Interface, node *kapi.Node) Annotator {
 }
 
 func (na *nodeAnnotator) Set(key string, val interface{}) error {
-	return na.SetWithFailureHandler(key, val, nil)
-}
-
-func (na *nodeAnnotator) SetWithFailureHandler(key string, val interface{}, failFn FailureHandlerFn) error {
 	act := &action{
 		key:     key,
 		origVal: val,
-		failFn:  failFn,
 	}
 	if val != nil {
 		// Annotations must be either a valid string value or nil; coerce
@@ -100,16 +90,7 @@ func (na *nodeAnnotator) Run() error {
 		return nil
 	}
 
-	err := na.kube.SetAnnotationsOnNode(na.node, annotations)
-	if err != nil {
-		// Let failure handlers clean up
-		for _, act := range na.changes {
-			if act.failFn != nil {
-				act.failFn(na.node, act.key, act.origVal)
-			}
-		}
-	}
-	return err
+	return na.kube.SetAnnotationsOnNode(na.node, annotations)
 }
 
 // NewPodAnnotator returns a new annotator for Pod objects
@@ -130,14 +111,9 @@ type podAnnotator struct {
 }
 
 func (pa *podAnnotator) Set(key string, val interface{}) error {
-	return pa.SetWithFailureHandler(key, val, nil)
-}
-
-func (pa *podAnnotator) SetWithFailureHandler(key string, val interface{}, failFn FailureHandlerFn) error {
 	act := &action{
 		key:     key,
 		origVal: val,
-		failFn:  failFn,
 	}
 	if val != nil {
 		// Annotations must be either a valid string value or nil; coerce
@@ -184,16 +160,7 @@ func (pa *podAnnotator) Run() error {
 		return nil
 	}
 
-	err := pa.kube.SetAnnotationsOnPod(pa.pod.Namespace, pa.pod.Name, annotations)
-	if err != nil {
-		// Let failure handlers clean up
-		for _, act := range pa.changes {
-			if act.failFn != nil {
-				act.failFn(pa.pod, act.key, act.origVal)
-			}
-		}
-	}
-	return err
+	return pa.kube.SetAnnotationsOnPod(pa.pod.Namespace, pa.pod.Name, annotations)
 }
 
 // NewNamespaceAnnotator returns a new annotator for Namespace objects
@@ -214,14 +181,9 @@ type namespaceAnnotator struct {
 }
 
 func (na *namespaceAnnotator) Set(key string, val interface{}) error {
-	return na.SetWithFailureHandler(key, val, nil)
-}
-
-func (na *namespaceAnnotator) SetWithFailureHandler(key string, val interface{}, failFn FailureHandlerFn) error {
 	act := &action{
 		key:     key,
 		origVal: val,
-		failFn:  failFn,
 	}
 	if val != nil {
 		// Annotations must be either a valid string value or nil; coerce
@@ -268,14 +230,5 @@ func (na *namespaceAnnotator) Run() error {
 		return nil
 	}
 
-	err := na.kube.SetAnnotationsOnNamespace(na.namespace, annotations)
-	if err != nil {
-		// Let failure handlers clean up
-		for _, act := range na.changes {
-			if act.failFn != nil {
-				act.failFn(na.namespace, act.key, act.origVal)
-			}
-		}
-	}
-	return err
+	return na.kube.SetAnnotationsOnNamespace(na.namespace, annotations)
 }
