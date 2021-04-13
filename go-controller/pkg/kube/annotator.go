@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sync"
 
 	kapi "k8s.io/api/core/v1"
 )
 
 // Annotator represents the exported methods for handling node annotations
+// Implementations should enforce thread safety on the declared methods
 type Annotator interface {
 	Set(key string, value interface{}) error
 	SetWithFailureHandler(key string, value interface{}, failFn FailureHandlerFn) error
@@ -31,6 +33,7 @@ type nodeAnnotator struct {
 	node *kapi.Node
 
 	changes map[string]*action
+	sync.Mutex
 }
 
 // NewNodeAnnotator returns a new annotator for Node objects
@@ -65,16 +68,22 @@ func (na *nodeAnnotator) SetWithFailureHandler(key string, val interface{}, fail
 			act.val = string(bytes)
 		}
 	}
+	na.Lock()
+	defer na.Unlock()
 	na.changes[key] = act
 	return nil
 }
 
 func (na *nodeAnnotator) Delete(key string) {
+	na.Lock()
+	defer na.Unlock()
 	na.changes[key] = &action{key: key}
 }
 
 func (na *nodeAnnotator) Run() error {
 	annotations := make(map[string]interface{})
+	na.Lock()
+	defer na.Unlock()
 	for k, act := range na.changes {
 		// Ignore annotations that already exist with the same value
 		if existing, ok := na.node.Annotations[k]; existing != act.val || !ok {
@@ -117,6 +126,7 @@ type podAnnotator struct {
 	pod  *kapi.Pod
 
 	changes map[string]*action
+	sync.Mutex
 }
 
 func (pa *podAnnotator) Set(key string, val interface{}) error {
@@ -142,16 +152,22 @@ func (pa *podAnnotator) SetWithFailureHandler(key string, val interface{}, failF
 			act.val = string(bytes)
 		}
 	}
+	pa.Lock()
+	defer pa.Unlock()
 	pa.changes[key] = act
 	return nil
 }
 
 func (pa *podAnnotator) Delete(key string) {
+	pa.Lock()
+	defer pa.Unlock()
 	pa.changes[key] = &action{key: key}
 }
 
 func (pa *podAnnotator) Run() error {
 	annotations := make(map[string]string)
+	pa.Lock()
+	defer pa.Unlock()
 	for k, act := range pa.changes {
 		// Ignore annotations that already exist with the same value
 		if existing, ok := pa.pod.Annotations[k]; existing != act.val || !ok {
@@ -194,6 +210,7 @@ type namespaceAnnotator struct {
 	namespace *kapi.Namespace
 
 	changes map[string]*action
+	sync.Mutex
 }
 
 func (na *namespaceAnnotator) Set(key string, val interface{}) error {
@@ -219,16 +236,22 @@ func (na *namespaceAnnotator) SetWithFailureHandler(key string, val interface{},
 			act.val = string(bytes)
 		}
 	}
+	na.Lock()
+	defer na.Unlock()
 	na.changes[key] = act
 	return nil
 }
 
 func (na *namespaceAnnotator) Delete(key string) {
+	na.Lock()
+	defer na.Unlock()
 	na.changes[key] = &action{key: key}
 }
 
 func (na *namespaceAnnotator) Run() error {
 	annotations := make(map[string]string)
+	na.Lock()
+	defer na.Unlock()
 	for k, act := range na.changes {
 		// Ignore annotations that already exist with the same value
 		if existing, ok := na.namespace.Annotations[k]; existing != act.val || !ok {
