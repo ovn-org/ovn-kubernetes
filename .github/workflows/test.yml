@@ -8,7 +8,7 @@ on:
     - cron: '0 */12 * * *'
 
 env:
-  GO_VERSION: 1.15.5
+  GO_VERSION: 1.16.3
   K8S_VERSION: v1.20.2
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
@@ -31,80 +31,33 @@ jobs:
     - name: Check out code into the Go module directory
       uses: actions/checkout@v2
 
-    - name: Set up environment
-      run: |
-        export GOPATH=$(go env GOPATH)
-        echo "GOPATH=$GOPATH" >> $GITHUB_ENV
-        echo "$GOPATH/bin" >> $GITHUB_PATH
-
-    - name: Verify
-      run: |
-        pushd go-controller
-          make gofmt
-          make install.tools
-          make lint
-        popd
-
-    - name: Test
+    - name: Build and Unit test
       run: |
         set -x
         pushd go-controller
-        make check
+           COVERALLS=1 PKGS=./pkg/cni make check
         popd
-
-    - name: Build
-      run: |
-        set -x
-        go get golang.org/x/tools/cmd/cover
-        pushd go-controller
-           make
-           make windows
-           COVERALLS=1 make check
-        popd
-
-        # Combine separate code coverage profiles into one
-        go get github.com/modocache/gover
-        gover go-controller/ gover.coverprofile
-
-        # Convert coverage profile to LCOV format for coveralls github action
-        go get github.com/jandelgado/gcov2lcov
-        mkdir -p src/github.com/ovn-org
-        ln -sf $(pwd) src/github.com/ovn-org/ovn-kubernetes
-        GOPATH=$(pwd) gcov2lcov -infile gover.coverprofile -outfile coverage.lcov
-
-    - name: Build docker image
-      run: |
-        pushd dist/images
-          sudo cp -f ../../go-controller/_output/go/bin/ovn* .
-          echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-          docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
-          mkdir _output
-          docker save ovn-daemonset-f:dev > _output/image.tar
-        popd
-
-    - uses: actions/upload-artifact@v2
-      with:
-        name: test-image
-        path: dist/images/_output/image.tar
-
-    - name: Upload Junit Reports
-      if: always()
-      uses: actions/upload-artifact@v2
-      with:
-        name: junit-${{ github.run_id }}
-        path: '**/_artifacts/**.xml'
 
     - name: Submit code coverage to Coveralls
-      uses: coverallsapp/github-action@master
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        path-to-lcov: coverage.lcov
+      env:
+          COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GO111MODULE: off
+      run: |
+          set -x
+          go get github.com/mattn/goveralls
+          go get github.com/modocache/gover
+          PATH=$PATH:$(go env GOPATH)/bin
 
+          mkdir -p $(go env GOPATH)/src/github.com/ovn-org
+          ln -sf $(pwd) $(go env GOPATH)/src/github.com/ovn-org/ovn-kubernetes
+
+          gover
+          goveralls -coverprofile=gover.coverprofile -service=github
   e2e:
     name: e2e
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    if: false
     strategy:
       fail-fast: false
       matrix:
