@@ -441,6 +441,19 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 
 		framework.ExpectNoError(<-errChan)
 	})
+	ginkgo.It("should provide connection to external host by DNS name from a pod", func() {
+		ginkgo.By("Running container which tries to connect to www.google.com. in a loop")
+
+		podChan, errChan := make(chan *v1.Pod), make(chan error)
+		go checkContinuousConnectivity(f, "", "connectivity-test-continuous", "www.google.com.", 443, 30, podChan, errChan)
+
+		testPod := <-podChan
+		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
+
+		time.Sleep(10 * time.Second)
+
+		framework.ExpectNoError(<-errChan)
+	})
 })
 
 // Test pod connectivity to other host IP addresses
