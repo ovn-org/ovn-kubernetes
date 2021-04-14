@@ -453,7 +453,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 					}
 
 					gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-					gomega.Eventually(ovntest.GetNumMockExecutions, 2).Should(gomega.BeNumerically("==", 6), fExec.ErrorDesc)
+					gomega.Eventually(ovntest.GetNumMockExecutions, 2).Should(gomega.BeNumerically("==", 7), fExec.ErrorDesc)
 					fakeOvn.asf.ExpectAddressSetWithIPs(namespace1.Name, tPodIPs)
 
 					for _, tPod := range tPods {
@@ -464,7 +464,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 					}
 
 					gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-					gomega.Eventually(ovntest.GetNumMockExecutions, 2).Should(gomega.BeNumerically("==", 8), fExec.ErrorDesc)
+					gomega.Eventually(ovntest.GetNumMockExecutions, 2).Should(gomega.BeNumerically("==", 9), fExec.ErrorDesc)
 					fakeOvn.asf.ExpectEmptyAddressSet(namespace1.Name)
 					return nil
 				}

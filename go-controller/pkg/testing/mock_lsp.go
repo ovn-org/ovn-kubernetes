@@ -122,12 +122,39 @@ func (mock *MockOVNClient) LSPGetDHCPv6Options(lsp string) (*goovn.DHCPOptions, 
 
 // Set options in LSP
 func (mock *MockOVNClient) LSPSetOptions(lsp string, options map[string]string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+	return &goovn.OvnCommand{
+		Exe: &MockExecution{
+			handler: mock,
+			op:      OpUpdate,
+			table:   LogicalSwitchPortType,
+			objName: lsp,
+			objUpdate: UpdateCache{
+				FieldType:  LogicalSwitchPortOptions,
+				FieldValue: options,
+			},
+		},
+	}, nil
 }
 
 // Get Options for LSP
 func (mock *MockOVNClient) LSPGetOptions(lsp string) (map[string]string, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+	lspRet, err := mock.LSPGet(lsp)
+	if err != nil {
+		return nil, err
+	}
+	if lspRet != nil {
+		return nil, fmt.Errorf("no lsp found with name: %s", lsp)
+	}
+	opts := make(map[string]string)
+	for k, v := range lspRet.Options {
+		key, keyOk := k.(string)
+		value, valueOk := v.(string)
+		if !keyOk || !valueOk {
+			continue
+		}
+		opts[key] = value
+	}
+	return opts, nil
 }
 
 // Set dynamic addresses in LSP
@@ -240,6 +267,17 @@ func (mock *MockOVNClient) updateLSPCache(lspName string, update UpdateCache, mo
 				extMap[k] = v
 			}
 			lsp.ExternalID = extMap
+		} else {
+			return fmt.Errorf("type assertion failed for LSP field: %s", update.FieldType)
+		}
+	case LogicalSwitchPortOptions:
+		klog.V(5).Infof("Setting options for LSP %s", lspName)
+		if opts, ok := update.FieldValue.(map[string]string); ok {
+			optMap := make(map[interface{}]interface{})
+			for k, v := range opts {
+				optMap[k] = v
+			}
+			lsp.Options = optMap
 		} else {
 			return fmt.Errorf("type assertion failed for LSP field: %s", update.FieldType)
 		}
