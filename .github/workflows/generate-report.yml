@@ -1,0 +1,25 @@
+name: 'Generate Junit Report'
+# this needs to be a separate workflow, as it needs
+# permissons to create annotations on the PR, so
+# needs to run in the "upstream" context.
+on:
+  workflow_run:
+    workflows: ['ovn-ci']                     # runs after CI workflow
+    types:
+      - completed
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: dawidd6/action-download-artifact@v2
+      with:
+        workflow: ${{ github.event.workflow_run.workflow_id }}
+        workflow_conclusion: completed
+        name: junit-unit
+
+    - name: Publish Test Report 2
+      uses: mikepenz/action-junit-report@v2
+      with:
+        report_paths: '**/*.xml'
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        commit: ${{ github.event.workflow_run.head_commit.id }}
