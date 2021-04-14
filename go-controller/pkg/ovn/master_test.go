@@ -26,6 +26,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
 )
@@ -933,9 +934,11 @@ subnet=%s
 
 func addPBRandNATRules(fexec *ovntest.FakeExec, nodeName, nodeSubnet, nodeIP, mgmtPortIP, mgmtPortMAC string) {
 	matchStr1 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == %s /* %s */`, nodeName, nodeIP, nodeName)
+	matchStr2 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == 9.9.9.9 /* %s */`, nodeName, nodeName)
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,match,nexthops find logical_router_policy priority=" + types.NodeSubnetPolicyPriority,
 		"ovn-nbctl --timeout=15 --may-exist lr-policy-add " + types.OVNClusterRouter + " " + types.NodeSubnetPolicyPriority + " " + matchStr1 + " reroute " + mgmtPortIP,
+		"ovn-nbctl --timeout=15 --may-exist lr-policy-add " + types.OVNClusterRouter + " " + types.NodeSubnetPolicyPriority + " " + matchStr2 + " reroute " + mgmtPortIP,
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=match find logical_router_policy",
 	})
 }
@@ -1214,7 +1217,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				APIExtensionsClient:  crdFakeClient,
 			}
 
-			fexec := ovntest.NewFakeExec()
+			fexec := ovntest.NewLooseCompareFakeExec()
 			err := util.SetExec(fexec)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1240,12 +1243,16 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeLocalNatAnnotation(nodeAnnotator, []net.IP{ovntest.MustParseIP(node1.DnatSnatIP)})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString("9.9.9.9"))
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(updatedNode)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			hostAddrs, err := util.ParseNodeHostAddresses(updatedNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			addNodeLogicalFlows(fexec, &node1, clusterCIDR, config.IPv6Mode, true)
@@ -1280,7 +1287,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			clusterController.WatchNodes()
 
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
-			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet})
+			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
 			gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			return nil

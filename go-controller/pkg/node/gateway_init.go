@@ -220,6 +220,11 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	// value is nil. so, you cannot directly set the value to an interface and later check if
 	// value was nil by comparing the interface to nil. this is because if the value is `nil`,
 	// then the interface will still hold the type of the value being set.
+
+	if config.Gateway.Mode == config.GatewayModeShared {
+		gw.nodeIPManager = newAddressManager(nodeAnnotator, managementPortConfig)
+	}
+
 	if loadBalancerHealthChecker != nil {
 		gw.loadBalancerHealthChecker = loadBalancerHealthChecker
 	}
