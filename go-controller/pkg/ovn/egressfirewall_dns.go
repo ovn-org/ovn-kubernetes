@@ -24,7 +24,7 @@ type EgressDNS struct {
 	addressSetFactory addressset.AddressSetFactory
 
 	// Report change when Add operation is done
-	added          chan string
+	added          chan struct{}
 	stopChan       chan struct{}
 	controllerStop <-chan struct{}
 }
@@ -50,7 +50,7 @@ func NewEgressDNS(addressSetFactory addressset.AddressSetFactory, controllerStop
 		dnsEntries:        make(map[string]*dnsEntry),
 		addressSetFactory: addressSetFactory,
 
-		added:          make(chan string, 1),
+		added:          make(chan struct{}),
 		stopChan:       make(chan struct{}),
 		controllerStop: controllerStop,
 	}
@@ -75,7 +75,7 @@ func (e *EgressDNS) Add(namespace, dnsName string) (addressset.AddressSet, error
 			return nil, fmt.Errorf("cannot create addressSet for %s: %v", dnsName, err)
 		}
 		e.dnsEntries[dnsName] = &dnsEntry
-		e.signalAdded(dnsName)
+		go e.addToDNS(dnsName)
 	}
 	e.dnsEntries[dnsName].namespaces[namespace] = struct{}{}
 	return e.dnsEntries[dnsName].dnsAddressSet, nil
@@ -124,12 +124,31 @@ func (e *EgressDNS) updateEntryForName(dnsName string) error {
 	return nil
 }
 
+// addToDNS takes the dnsName adds it to the underlying dns resolver and
+// performs the first update. After completing that signals the
+// thread performing periodic updates that a new DNS name has been added and
+// so that it can updates GetNextQueryTime() if needed
+func (e *EgressDNS) addToDNS(dnsName string) {
+	if err := e.dns.Add(dnsName); err != nil {
+		utilruntime.HandleError(err)
+	}
+	if err := e.updateEntryForName(dnsName); err != nil {
+		utilruntime.HandleError(err)
+	}
+	// No need to block waiting to signal the add.
+	select {
+	case e.added <- struct{}{}:
+		klog.V(5).Infof("Recalculation of next query time requested")
+	default:
+		klog.V(5).Infof("Recalculation of next query time already requested")
+	}
+}
+
 // Run spawns a goroutine that handles updates to the dns entries for dnsNames used in
 // EgressFirewalls. The loop runs after receiving one of two signals
-// 1. a new dnsName has been added and a signal is sent to add the new DNS name, if an
-//    EgressFirewall uses a DNS name already added by another egressFirewall the previous
-//    entry is used
-// 2. If the defaultInterval has run (30 min) without updating the DNS server is manually queried
+// 1. time.After(durationTillNextQuery) times out and the dnsName with the lowest ttl is checked
+//    and the durationTillNextQuery is updated
+// 2. e.added is recived and durationTillNextQuery is recomputed
 func (e *EgressDNS) Run(defaultInterval time.Duration) {
 	var dnsName string
 	var ttl time.Time
@@ -138,15 +157,12 @@ func (e *EgressDNS) Run(defaultInterval time.Duration) {
 	durationTillNextQuery := defaultInterval
 	go func() {
 		for {
-			// Wait for the given duration or until something gets added
+			// perform periodic updates on dnsNames as each ttl runs out, checking for updates at
+			// least every defaultInterval. Update durationTillNextQuery everytime a new DNS name gets
+			// added
 			select {
-			case dnsName := <-e.added:
-				if err := e.dns.Add(dnsName); err != nil {
-					utilruntime.HandleError(err)
-				}
-				if err := e.updateEntryForName(dnsName); err != nil {
-					utilruntime.HandleError(err)
-				}
+			case <-e.added:
+				//on update need to check if the GetNextQueryTime has changed
 			case <-time.After(durationTillNextQuery):
 				if len(dnsName) > 0 {
 					if _, err := e.Update(dnsName); err != nil {
@@ -176,8 +192,4 @@ func (e *EgressDNS) Run(defaultInterval time.Duration) {
 
 func (e *EgressDNS) Shutdown() {
 	close(e.stopChan)
-}
-
-func (e *EgressDNS) signalAdded(dnsName string) {
-	e.added <- dnsName
 }
