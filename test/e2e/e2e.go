@@ -15,6 +15,7 @@ import (
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/extensions/table"
+	"github.com/onsi/gomega"
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -1350,6 +1351,91 @@ spec:
 		if err == nil {
 			framework.Failf("Failed to curl the remote host %s from container %s on node %s: %v", exFWPermitTcpWwwDest, ovnContainer, serverNodeInfo.name, err)
 		}
+	})
+	ginkgo.It("Should validate the egress firewall DNS does not deadlock when adding many dnsNames", func() {
+		frameworkNsFlag := fmt.Sprintf("--namespace=%s", f.Namespace.Name)
+		var egressFirewallConfig = fmt.Sprintf(`kind: EgressFirewall
+apiVersion: k8s.ovn.org/v1
+metadata:
+  name: default
+  namespace: %s
+spec:
+  egress:
+  - type: Allow
+    to:
+      cidrSelector: 8.8.8.8/32
+  - type: Allow
+    to:
+      dnsName: www.test1.com
+  - type: Allow
+    to:
+      dnsName: www.test2.com
+  - type: Allow
+    to:
+      dnsName: www.test3.com
+  - type: Allow
+    to:
+      dnsName: www.test4.com
+  - type: Allow
+    to:
+      dnsName: www.test5.com
+  - type: Allow
+    to:
+      dnsName: www.test6.com
+  - type: Allow
+    to:
+      dnsName: www.test7.com
+  - type: Allow
+    to:
+      dnsName: www.test8.com
+  - type: Allow
+    to:
+      dnsName: www.test9.com
+  - type: Allow
+    to:
+      dnsName: www.test10.com
+  - type: Allow
+    to:
+      dnsName: www.test11.com
+  - type: Allow
+    to:
+      dnsName: www.test12.com
+  - type: Allow
+    to:
+      cidrSelector: 1.1.1.0/24
+    ports:
+      - protocol: TCP
+        port: 80
+  - type: Deny
+    to:
+      cidrSelector: 0.0.0.0/0
+`, f.Namespace.Name)
+		// write the config to a file for application and defer the removal
+		if err := ioutil.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
+			framework.Failf("Unable to write CRD config to disk: %v", err)
+		}
+		defer func() {
+			if err := os.Remove(egressFirewallYamlFile); err != nil {
+				framework.Logf("Unable to remove the CRD config from disk: %v", err)
+			}
+		}()
+		// create the CRD config parameters
+		applyArgs := []string{
+			"apply",
+			frameworkNsFlag,
+			"-f",
+			egressFirewallYamlFile,
+		}
+		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
+		// apply the egress firewall configuration
+		framework.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
+		gomega.Eventually(func() bool {
+			output, err := framework.RunKubectl(f.Namespace.Name, "get", "egressfirewall", "default")
+			if err != nil {
+				framework.Failf("could not get the egressfirewall default in namespace: %s", f.Namespace.Name)
+			}
+			return strings.Contains(output, "EgressFirewall Rules applied")
+		}, 30*time.Second).Should(gomega.BeTrue())
 	})
 })
 
