@@ -409,9 +409,36 @@ func (oc *Controller) deleteNamespaceLocked(ns string) *namespaceInfo {
 		return nil
 	}
 	if nsInfo.addressSet != nil {
-		if err := nsInfo.addressSet.Destroy(); err != nil {
-			klog.Errorf(err.Error())
+		// Empty the address set, then delete it after an interval.
+		if err := nsInfo.addressSet.SetIPs(nil); err != nil {
+			klog.Errorf("Warning: failed to empty address set for deleted NS %s: %v", ns, err)
 		}
+
+		// Delete the address set after a short delay.
+		// This is so NetworkPolicy handlers can converge and stop referencing it.
+		addressSet := nsInfo.addressSet
+		go func() {
+			select {
+			case <-oc.stopChan:
+				return
+			case <-time.After(20 * time.Second):
+				// Check to see if the NS was re-added in the meanwhile. If so,
+				// only delete if the new NS's AddressSet shouldn't exist.
+				nsInfo := oc.getNamespaceLocked(ns)
+				if nsInfo != nil {
+					defer nsInfo.Unlock()
+					if nsInfo.addressSet != nil {
+						klog.V(5).Infof("Skipping deferred deletion of AddressSet for NS %s: re-created", ns)
+						return
+					}
+				}
+
+				klog.V(5).Infof("Finishing deferred deletion of AddressSet for NS %s", ns)
+				if err := addressSet.Destroy(); err != nil {
+					klog.Errorf("Failed to delete AddressSet for NS %s: %v", ns, err.Error())
+				}
+			}
+		}()
 	}
 	delete(oc.namespaces, ns)
 

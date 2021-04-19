@@ -121,6 +121,7 @@ func truncateSuffixFromAddressSet(asName string) string {
 	return asName
 }
 
+// DestroyAddressSetInBackingStore ensures an address set is deleted
 func (asf *ovnAddressSetFactory) DestroyAddressSetInBackingStore(name string) error {
 	// We need to handle both legacy and new address sets in this method. Legacy names
 	// will not have v4 and v6 suffix as they were same as namespace name. Hence we will always try to destroy
