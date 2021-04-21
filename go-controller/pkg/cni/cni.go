@@ -6,6 +6,7 @@ import (
 	"net"
 
 	"github.com/containernetworking/cni/pkg/types/current"
+	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -16,8 +17,31 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 )
 
-var minRsrc = resource.MustParse("1k")
-var maxRsrc = resource.MustParse("1P")
+var (
+	minRsrc           = resource.MustParse("1k")
+	maxRsrc           = resource.MustParse("1P")
+	BandwidthNotFound = &notFoundError{}
+)
+
+type direction int
+
+func (d direction) String() string {
+	if d == Egress {
+		return "egress"
+	}
+	return "ingress"
+}
+
+const (
+	Egress direction = iota
+	Ingress
+)
+
+type notFoundError struct{}
+
+func (*notFoundError) Error() string {
+	return "not found"
+}
 
 func validateBandwidthIsReasonable(rsrc *resource.Quantity) error {
 	if rsrc.Value() < minRsrc.Value() {
@@ -29,32 +53,24 @@ func validateBandwidthIsReasonable(rsrc *resource.Quantity) error {
 	return nil
 }
 
-func extractPodBandwidthResources(podAnnotations map[string]string) (int64, int64, error) {
-	ingress := int64(-1)
-	egress := int64(-1)
-	str, found := podAnnotations["kubernetes.io/ingress-bandwidth"]
-	if found {
-		ingressVal, err := resource.ParseQuantity(str)
-		if err != nil {
-			return -1, -1, err
-		}
-		if err := validateBandwidthIsReasonable(&ingressVal); err != nil {
-			return -1, -1, err
-		}
-		ingress = ingressVal.Value()
+func extractPodBandwidth(podAnnotations map[string]string, dir direction) (int64, error) {
+	annotation := "kubernetes.io/ingress-bandwidth"
+	if dir == Egress {
+		annotation = "kubernetes.io/egress-bandwidth"
 	}
-	str, found = podAnnotations["kubernetes.io/egress-bandwidth"]
-	if found {
-		egressVal, err := resource.ParseQuantity(str)
-		if err != nil {
-			return -1, -1, err
-		}
-		if err := validateBandwidthIsReasonable(&egressVal); err != nil {
-			return -1, -1, err
-		}
-		egress = egressVal.Value()
+
+	str, found := podAnnotations[annotation]
+	if !found {
+		return 0, BandwidthNotFound
 	}
-	return ingress, egress, nil
+	bwVal, err := resource.ParseQuantity(str)
+	if err != nil {
+		return 0, err
+	}
+	if err := validateBandwidthIsReasonable(&bwVal); err != nil {
+		return 0, err
+	}
+	return bwVal.Value(), nil
 }
 
 func (pr *PodRequest) String() string {
@@ -138,11 +154,6 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternal
 		return nil, err
 	}
 
-	ingress, egress, err := extractPodBandwidthResources(annotations)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse bandwidth request: %v", err)
-	}
-
 	if pr.CNIConf.PrevResult != nil {
 		result, err := current.NewResultFromResult(pr.CNIConf.PrevResult)
 		if err != nil {
@@ -169,15 +180,22 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternal
 				return nil, fmt.Errorf("error while waiting on OVN pod interface: %s ip: %v, error: %v", ifaceID, ip, err)
 			}
 		}
-		ingressBPS, egressBPS, err := getPodBandwidth(hostIfaceName)
-		if err != nil {
-			return nil, err
-		}
-		if ingress != ingressBPS {
-			return nil, fmt.Errorf("defined ingress bandwidth restriction %d is not equals to the set one %d", ingress, ingressBPS)
-		}
-		if egress != egressBPS {
-			return nil, fmt.Errorf("defined egress bandwidth restriction %d is not equals to the set one %d", egress, egressBPS)
+
+		for _, direction := range []direction{Ingress, Egress} {
+			annotationBandwith, annotationErr := extractPodBandwidth(annotations, direction)
+			ovnBandwith, ovnErr := getOvsPortBandwidth(hostIfaceName, direction)
+			if errors.Is(annotationErr, BandwidthNotFound) && errors.Is(ovnErr, BandwidthNotFound) {
+				continue
+			}
+			if annotationErr != nil {
+				return nil, errors.Wrapf(err, "Failed to get bandwith from annotations of pod %s %s", podName, direction)
+			}
+			if ovnErr != nil {
+				return nil, errors.Wrapf(err, "Failed to get pod %s %s bandwith from ovn", direction, podName)
+			}
+			if annotationBandwith != ovnBandwith {
+				return nil, fmt.Errorf("defined %s bandwith restriction %d is not equal to the set one %d", direction, annotationBandwith, ovnBandwith)
+			}
 		}
 	}
 	return []byte{}, nil

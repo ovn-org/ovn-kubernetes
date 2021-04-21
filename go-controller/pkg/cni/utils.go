@@ -2,6 +2,7 @@ package cni
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -67,10 +68,15 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, is
 	if err != nil {
 		return nil, err
 	}
-	ingress, egress, err := extractPodBandwidthResources(podAnnotation)
-	if err != nil {
+	ingress, err := extractPodBandwidth(podAnnotation, Ingress)
+	if err != nil && !errors.Is(err, BandwidthNotFound) {
 		return nil, err
 	}
+	egress, err := extractPodBandwidth(podAnnotation, Egress)
+	if err != nil && !errors.Is(err, BandwidthNotFound) {
+		return nil, err
+	}
+
 	podInterfaceInfo := &PodInterfaceInfo{
 		PodAnnotation: *podAnnotSt,
 		MTU:           config.Default.MTU,

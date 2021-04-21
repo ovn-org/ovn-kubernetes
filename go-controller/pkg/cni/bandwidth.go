@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/pkg/errors"
 )
 
 func clearPodBandwidth(sandboxID string) error {
@@ -65,33 +67,58 @@ func setPodBandwidth(sandboxID, ifname string, ingressBPS, egressBPS int64) erro
 	return nil
 }
 
-// Returns bandwidth restrictions (ingress and egress in bits/sec) that were set on the port.
-// If none restrictions were set, the function returns -1 for ingress and 0 (the OVS default value) for egress
-func getPodBandwidth(ifname string) (ingressBPS, egressBPS int64, err error) {
+func getOvsPortBandwidth(ifname string, dir direction) (int64, error) {
 	// note pod ingress == OVS egress and vice versa
-	ingressBPS = int64(-1)
-	egressBPS = int64(-1)
-	var out string
+	// so we ingress_policing_rate is egress and max-rate is ingress from the pod's
+	// perspective
 
 	// ingressBPS
+	if dir == Ingress {
+		return getInterfaceIngressBandwith(ifname)
+	}
+	// egreessBPS
+	return getInterfaceEgressBandwith(ifname)
+}
+
+func getInterfaceIngressBandwith(ifname string) (int64, error) {
 	qos_id, err := ovsGet("port", ifname, "qos", "")
-	if err == nil && len(qos_id) > 0 {
-		out, err = ovsGet("qos", qos_id, "other_config", "max-rate")
-		if err == nil && len(out) > 0 {
-			out = strings.ReplaceAll(out, "\"", "")
-			ingressBPS, err = strconv.ParseInt(out, 10, 64)
-		}
-	}
 	if err != nil {
-		return ingressBPS, egressBPS, err
+		return 0, errors.Wrapf(err, "Failed to get qos for port %s", ifname)
 	}
+	if len(qos_id) == 0 {
+		return 0, BandwidthNotFound
+	}
+	maxRate, err := ovsGet("qos", qos_id, "other_config", "max-rate")
+	if err != nil {
+		return 0, errors.Wrapf(err, "Failed to get max-rate for qos_id %s", qos_id)
+	}
+	if len(maxRate) == 0 {
+		return 0, BandwidthNotFound
+	}
+	maxRate = strings.ReplaceAll(maxRate, "\"", "")
+	ingressBPS, err := strconv.ParseInt(maxRate, 10, 64)
+	if err != nil {
+		return 0, errors.Wrapf(err, "Failed to parse qos max rate for %s", ifname)
+	}
+	return ingressBPS, nil
+}
+
+func getInterfaceEgressBandwith(ifname string) (int64, error) {
 	// egressBPS
-	out, err = ovsGet("interface", ifname, "ingress_policing_rate", "")
-	if err == nil && len(out) > 0 {
-		egressBPS, err = strconv.ParseInt(out, 10, 64)
-		if err == nil {
-			egressBPS *= 1000
-		}
+	out, err := ovsGet("interface", ifname, "ingress_policing_rate", "")
+	if err != nil {
+		return 0, errors.Wrapf(err, "failed to get ingress_policing_rate for interface %s", ifname)
 	}
-	return ingressBPS, egressBPS, err
+	if len(out) == 0 {
+		return 0, BandwidthNotFound
+	}
+	egressValue, err := strconv.ParseInt(out, 10, 64)
+	if err != nil {
+		return 0, errors.Wrapf(err, "failed to parse ingress_policing_rate for interface %s: %s", ifname, out)
+	}
+	if egressValue == 0 { // 0 is the default value so we return not found
+		return 0, BandwidthNotFound
+	}
+
+	return egressValue * 1000, nil
 }
