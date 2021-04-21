@@ -404,10 +404,13 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			return pod != nil, nil
 		}, 2).Should(BeTrue())
 
+		// initial add from the cache
+		Eventually(func() int32 { return atomic.LoadInt32(&adds) }).Should(Equal(int32(1)), "adds")
+
 		err := k.CoreV1().Pods(namespace).Delete(context.TODO(), "foo", *metav1.NewDeleteOptions(0))
 		Expect(err).NotTo(HaveOccurred())
 
-		// initial add from the cache
+		// we stay at 1
 		Consistently(func() int32 { return atomic.LoadInt32(&adds) }).Should(Equal(int32(1)), "adds")
 		// one delete event
 		Eventually(func() int32 { return atomic.LoadInt32(&deletes) }).Should(Equal(int32(1)), "deletes")
