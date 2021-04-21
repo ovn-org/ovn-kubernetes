@@ -228,11 +228,11 @@ func runOvnKube(ctx *cli.Context) error {
 		watchFactory = masterWatchFactory
 		var ovnNBClient, ovnSBClient goovn.Client
 
-		if ovnNBClient, err = util.NewOVNNBClient(); err != nil {
+		if ovnNBClient, err = waitForOVNNBServer(ctx); err != nil {
 			return fmt.Errorf("error when trying to initialize go-ovn NB client: %v", err)
 		}
 
-		if ovnSBClient, err = util.NewOVNSBClient(); err != nil {
+		if ovnSBClient, err = waitForOVNSBServer(ctx); err != nil {
 			return fmt.Errorf("error when trying to initialize go-ovn SB client: %v", err)
 		}
 
@@ -293,4 +293,44 @@ func runOvnKube(ctx *cli.Context) error {
 	watchFactory.Shutdown()
 	wg.Wait()
 	return nil
+}
+
+// wait for OVNNB server to be up and running
+func waitForOVNNBServer(ctx *cli.Context) (goovn.Client, error) {
+	timeout := time.After(10 * time.Second)
+	var client goovn.Client
+	for {
+		select {
+		case <-ctx.Done():
+			return client, fmt.Errorf("canceled waiting for OVNNB server")
+		case <-timeout:
+			return client, fmt.Errorf("timed out waiting for OVNNB server")
+		default:
+			if client, err := util.NewOVNNBClient(); err == nil {
+				return client, nil
+			}
+			// try again later
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+}
+
+// wait for OVNSB server to be up and running
+func waitForOVNSBServer(ctx *cli.Context) (goovn.Client, error) {
+	timeout := time.After(10 * time.Second)
+	var client goovn.Client
+	for {
+		select {
+		case <-ctx.Done():
+			return client, fmt.Errorf("canceled waiting for OVNSB server")
+		case <-timeout:
+			return client, fmt.Errorf("timed out waiting for OVNSB server")
+		default:
+			if client, err := util.NewOVNSBClient(); err == nil {
+				return client, nil
+			}
+			// try again later
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
 }
