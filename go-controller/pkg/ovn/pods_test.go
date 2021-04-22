@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+
 	"github.com/urfave/cli/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -729,6 +731,94 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			}
 
 			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+	})
+
+	ginkgo.Context("with hybrid overlay gw mode", func() {
+		ginkgo.It("resets the hybrid annotations on update", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespaceT := *newNamespace("namespace1")
+				namespaceT.Annotations[hotypes.HybridOverlayVTEP] = "1.1.1.1"
+				namespaceT.Annotations[hotypes.HybridOverlayExternalGw] = "2.2.2.2"
+				tP := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.3",
+					"myPod",
+					"10.128.1.4",
+					"0a:58:0a:80:01:04",
+					namespaceT.Name,
+				)
+
+				fakeOvn.start(ctx,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*newPod(namespaceT.Name, tP.podName, tP.nodeName, tP.podIP),
+						},
+					},
+				)
+				podMAC := ovntest.MustParseMAC(tP.podMAC)
+				fakeOvn.controller.logicalPortCache.add(tP.nodeName, tP.portName, fakeUUID, podMAC, []*net.IPNet{ovntest.MustParseIPNet(tP.nodeSubnet)})
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
+					Output: "\n",
+				})
+				tP.populateLogicalSwitchCache(fakeOvn)
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceT.Name, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(tP.namespace).Get(context.TODO(), tP.podName, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
+				gomega.Expect(ok).To(gomega.BeTrue())
+				gomega.Expect(podAnnotation).To(gomega.ContainSubstring(`"gateway_ip":"10.128.1.3"`))
+				// Update namespace to remove annotation
+				namespaceT.Annotations = nil
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), &namespaceT, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(func() map[string]string {
+					updatedNs, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceT.Name, metav1.GetOptions{})
+					if err != nil {
+						return map[string]string{"ns": "error"}
+					}
+					return updatedNs.Annotations
+				}).Should(gomega.BeEmpty())
+				time.Sleep(time.Second)
+				// Create new pod
+				tP = newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod2",
+					"10.128.1.5",
+					"0a:58:0a:80:01:05",
+					namespaceT.Name,
+				)
+				pod, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(tP.namespace).Create(context.TODO(), newPod(namespaceT.Name, tP.podName, tP.nodeName, tP.podIP), metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				var annotation string
+				gomega.Eventually(func() string {
+					pod, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(tP.namespace).Get(context.TODO(), tP.podName, metav1.GetOptions{})
+					annotation = pod.Annotations[util.OvnPodAnnotationName]
+					return pod.Annotations[util.OvnPodAnnotationName]
+				}).ShouldNot(gomega.BeEmpty())
+				gomega.Expect(annotation).To(gomega.ContainSubstring(`"gateway_ip":"10.128.1.1"`))
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-enable-hybrid-overlay",
+			})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 	})

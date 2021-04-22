@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -53,8 +54,12 @@ func podChanged(old, new interface{}) bool {
 
 	oldIPs, oldMAC, _ := getPodDetails(oldPod)
 	newIPs, newMAC, _ := getPodDetails(newPod)
+	oldExGw := oldPod.Annotations[hotypes.HybridOverlayExternalGw]
+	oldVTEP := oldPod.Annotations[hotypes.HybridOverlayVTEP]
+	newExGw := newPod.Annotations[hotypes.HybridOverlayExternalGw]
+	newVTEP := newPod.Annotations[hotypes.HybridOverlayVTEP]
 
-	if len(oldIPs) != len(newIPs) || !reflect.DeepEqual(oldMAC, newMAC) {
+	if len(oldIPs) != len(newIPs) || !reflect.DeepEqual(oldMAC, newMAC) || !reflect.DeepEqual(oldExGw, newExGw) || !reflect.DeepEqual(oldVTEP, newVTEP) {
 		return true
 	}
 	for i := range oldIPs {
