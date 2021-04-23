@@ -627,7 +627,12 @@ func syncPolicyBasedRoutes(nodeName string, matches sets.String, priority, nexth
 	for _, policyCompare := range policiesCompare {
 		if strings.Contains(policyCompare, fmt.Sprintf("%s\"", nodeName)) {
 			// if the policy is for this node and has the wrong mgmtPortIP as nexthop, remove it
+			// FIXME we currently assume that foundNexthops is a single ip, this may
+			// change in the future.
 			foundNexthops := strings.Split(policyCompare, ",")[2]
+			if foundNexthops != "" && utilnet.IsIPv6String(foundNexthops) != utilnet.IsIPv6String(nexthop) {
+				continue
+			}
 			if !strings.Contains(foundNexthops, nexthop) {
 				uuid := strings.Split(policyCompare, ",")[0]
 				if err := deletePolicyBasedRoutes(uuid, priority); err != nil {
@@ -642,7 +647,6 @@ func syncPolicyBasedRoutes(nodeName string, matches sets.String, priority, nexth
 					desiredMatchFound = true
 					break
 				}
-				break
 			}
 			// if the policy is for this node/priority and does not contain a valid match, remove it
 			if !desiredMatchFound {
