@@ -95,6 +95,13 @@ func (pr *PodRequest) checkOrUpdatePodUID(podUID string) error {
 
 func (pr *PodRequest) getVFNetdevName() (string, error) {
 	// Get the vf device Name
+
+	// If a vDPA device exists, it takes preference over the vendor device, steering-wize
+	vdpaDevice, err := util.GetVdpaOps().GetVdpaDeviceByPci(pr.CNIConf.DeviceID)
+	if err == nil && vdpaDevice.GetDriver() == kvdpa.VirtioVdpaDriver {
+		return vdpaDevice.GetNetDev(), nil
+	}
+
 	vfNetdevices, err := util.GetSriovnetOps().GetNetDevicesFromPci(pr.CNIConf.DeviceID)
 	if err != nil {
 		return "", err
