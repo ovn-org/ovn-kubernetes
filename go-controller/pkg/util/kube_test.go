@@ -489,7 +489,7 @@ func Test_getLbEndpoints(t *testing.T) {
 			want: LbEndpoints{[]string{"10.0.0.2"}, 80},
 		},
 		{
-			name: "slices with different ports",
+			name: "slices with different port name",
 			args: args{
 				slices: []*discovery.EndpointSlice{
 					{
@@ -500,7 +500,7 @@ func Test_getLbEndpoints(t *testing.T) {
 						},
 						Ports: []discovery.EndpointPort{
 							{
-								Name:     utilpointer.StringPtr("tcp-example"),
+								Name:     utilpointer.StringPtr("tcp-example-wrong"),
 								Protocol: protoPtr(v1.ProtocolTCP),
 								Port:     utilpointer.Int32Ptr(int32(8080)),
 							},
@@ -524,6 +524,41 @@ func Test_getLbEndpoints(t *testing.T) {
 				family: v1.IPv4Protocol,
 			},
 			want: LbEndpoints{[]string{}, 0},
+		},
+		{
+			name: "slices and service without port name",
+			args: args{
+				slices: []*discovery.EndpointSlice{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "svc-ab23",
+							Namespace: "ns",
+							Labels:    map[string]string{discovery.LabelServiceName: "svc"},
+						},
+						Ports: []discovery.EndpointPort{
+							{
+								Protocol: protoPtr(v1.ProtocolTCP),
+								Port:     utilpointer.Int32Ptr(int32(8080)),
+							},
+						},
+						AddressType: discovery.AddressTypeIPv4,
+						Endpoints: []discovery.Endpoint{
+							{
+								Conditions: discovery.EndpointConditions{
+									Ready: utilpointer.BoolPtr(true),
+								},
+								Addresses: []string{"10.0.0.2"},
+							},
+						},
+					},
+				},
+				svcPort: v1.ServicePort{
+					TargetPort: intstr.FromInt(80),
+					Protocol:   v1.ProtocolTCP,
+				},
+				family: v1.IPv4Protocol,
+			},
+			want: LbEndpoints{[]string{"10.0.0.2"}, 8080},
 		},
 		{
 			name: "slices with different IP family",
