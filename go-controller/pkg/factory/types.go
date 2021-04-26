@@ -41,6 +41,9 @@ type NodeWatchFactory interface {
 
 	NodeInformer() cache.SharedIndexInformer
 	LocalPodInformer() cache.SharedIndexInformer
+
+	GetService(namespace, name string) (*kapi.Service, error)
+	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
 }
 
 type Shutdownable interface {
