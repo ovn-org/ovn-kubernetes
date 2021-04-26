@@ -13,6 +13,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
 
@@ -93,6 +94,20 @@ func countLocalEndpoints(ep *kapi.Endpoints, nodeName string) int {
 		}
 	}
 	return num
+}
+
+func hasHostNetworkEndpoints(ep *kapi.Endpoints, nodeAddresses *sets.String) bool {
+	for i := range ep.Subsets {
+		ss := &ep.Subsets[i]
+		for i := range ss.Addresses {
+			addr := &ss.Addresses[i]
+			if nodeAddresses.Has(addr.IP) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // checkForStaleOVSInternalPorts checks for OVS internal ports without any ofport assigned,
