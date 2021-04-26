@@ -296,7 +296,7 @@ func (e LbEndpoints) LocalToNode(grName string) LbEndpoints {
 	res := LbEndpoints{Port: e.Port, EPs: make([]discovery.Endpoint, 0)}
 
 	for _, ep := range e.EPs {
-		if GetWorkerFromGatewayRouter(grName) == ep.Topology["kubernetes.io/hostname"] {
+		if GetWorkerFromGatewayRouter(grName) == *ep.NodeName {
 			res.EPs = append(res.EPs, ep)
 		}
 	}

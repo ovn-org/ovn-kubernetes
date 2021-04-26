@@ -156,6 +156,27 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Name: nodeName,
 		}}
 
+		fakeOvnNode := NewFakeOVNNode(fexec)
+
+		_, nodeNet, err := net.ParseCIDR(nodeSubnet)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Make a fake MgmtPortConfig with only the fields we care about
+		fakeMgmtPortIPFamilyConfig := managementPortIPFamilyConfig{
+			ipt:        nil,
+			allSubnets: nil,
+			ifAddr:     nodeNet,
+			gwIP:       nodeNet.IP,
+		}
+
+		fakeMgmtPortConfig := managementPortConfig{
+			ifName:    nodeName,
+			link:      nil,
+			routerMAC: nil,
+			ipv4:      &fakeMgmtPortIPFamilyConfig,
+			ipv6:      nil,
+		}
+
 		kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{existingNode},
 		})
@@ -190,7 +211,8 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			defer GinkgoRecover()
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
-			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", nodeAnnotator)
+			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", nodeAnnotator,
+				&fakeMgmtPortConfig, &fakeOvnNode.watcher)
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(wf)
 			Expect(err).NotTo(HaveOccurred())

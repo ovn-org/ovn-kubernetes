@@ -306,10 +306,9 @@ func recreateIPTRules(table, chain string, keepIPTRules []iptRule) {
 	}
 }
 
-// getGatewayIPTRules returns NodePort and ExternalIP iptables rules for service. If nodeIP is non-nil, then
-// only incoming traffic on that IP will be accepted for NodePort rules; otherwise incoming traffic on the NodePort
-// on all IPs will be accepted. If gatewayIP is "", then NodePort traffic will be DNAT'ed to the service port on
-// the service's ClusterIP. Otherwise, it will be DNAT'ed to the NodePort on the gatewayIP.
+// getGatewayIPTRules returns NodePort and ExternalIP iptables rules for service.
+// If gatewayIP is "", then NodePort traffic will be DNAT'ed to the service port on
+// the service's ClusterIP. Otherwise, it will be DNAT'ed to the targetport on the gatewayIP.
 func getGatewayIPTRules(service *kapi.Service, gatewayIPs []string) []iptRule {
 	rules := make([]iptRule, 0)
 	clusterIPs := util.GetClusterIPs(service)
@@ -331,7 +330,7 @@ func getGatewayIPTRules(service *kapi.Service, gatewayIPs []string) []iptRule {
 				}
 			} else {
 				for _, gatewayIP := range gatewayIPs {
-					rules = append(rules, getNodePortIPTRules(svcPort, gatewayIP, svcPort.Port)...)
+					rules = append(rules, getNodePortIPTRules(svcPort, gatewayIP, int32(svcPort.TargetPort.IntValue()))...)
 				}
 			}
 		}
