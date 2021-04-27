@@ -24,10 +24,10 @@ build_binaries() {
     for bin in "$@"; do
         binbase=$(basename ${bin})
         CGO_ENABLED=1
-        if [[ "$binbase" == "ovn-k8s-cni-overlay" ]]; then
+        if [ "$binbase" = "ovn-k8s-cni-overlay" ]; then
             CGO_ENABLED=0
         fi
-        go build -v \
+        env CGO_ENABLED=$CGO_ENABLED go build -v \
             -mod vendor \
             -gcflags "${GCFLAGS}" \
             -ldflags "-B ${BUILDID} \
