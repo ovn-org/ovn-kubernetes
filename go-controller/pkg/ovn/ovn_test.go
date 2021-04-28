@@ -18,7 +18,6 @@ import (
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
-	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 )
 
 const (
@@ -75,7 +74,6 @@ func (o *FakeOVN) start(ctx *cli.Context, objects ...runtime.Object) {
 		KubeClient:           fake.NewSimpleClientset(v1Objects...),
 		EgressIPClient:       egressipfake.NewSimpleClientset(egressIPObjects...),
 		EgressFirewallClient: egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
-		APIExtensionsClient:  apiextensionsfake.NewSimpleClientset(),
 	}
 	o.init()
 }

@@ -28,7 +28,6 @@ import (
 
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
-	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -157,12 +156,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Items: []v1.Node{existingNode},
 		})
 		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-		crdFakeClient := &apiextensionsfake.Clientset{}
 		egressIPFakeClient := &egressipfake.Clientset{}
 		fakeClient := &util.OVNClientset{
 			KubeClient:           kubeFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
-			APIExtensionsClient:  crdFakeClient,
 		}
 
 		stop := make(chan struct{})
