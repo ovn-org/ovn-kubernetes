@@ -87,7 +87,6 @@ func (o *FakeOVN) restart() {
 
 func (o *FakeOVN) shutdown() {
 	close(o.stopChan)
-	o.watcher.ShutdownEgressFirewallWatchFactory()
 	o.watcher.Shutdown()
 	err := o.controller.ovnNBClient.Close()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -99,7 +98,6 @@ func (o *FakeOVN) init() {
 	var err error
 	o.stopChan = make(chan struct{})
 	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
-	o.watcher.InitializeEgressFirewallWatchFactory()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.ovnNBClient = ovntest.NewMockOVNClient(goovn.DBNB)
 	o.ovnSBClient = ovntest.NewMockOVNClient(goovn.DBSB)

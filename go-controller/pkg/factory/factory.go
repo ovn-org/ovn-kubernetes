@@ -107,6 +107,10 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	if err != nil {
 		return nil, err
 	}
+	err = egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme)
+	if err != nil {
+		return nil, err
+	}
 
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
@@ -181,6 +185,13 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 				return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
 			}
 		}
+	}
+	if config.OVNKubernetesFeature.EnableEgressFirewall {
+		err = wf.InitializeEgressFirewallWatchFactory()
+		if err != nil {
+			return nil, err
+		}
+
 	}
 	return wf, nil
 }
@@ -260,10 +271,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 }
 
 func (wf *WatchFactory) InitializeEgressFirewallWatchFactory() error {
-	err := egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme)
-	if err != nil {
-		return err
-	}
+	var err error
 	wf.efFactory = egressfirewallinformerfactory.NewSharedInformerFactory(wf.efClientset, resyncInterval)
 	wf.informers[egressFirewallType], err = newInformer(egressFirewallType, wf.efFactory.K8s().V1().EgressFirewalls().Informer())
 	if err != nil {
