@@ -44,26 +44,39 @@ func (oc *Controller) syncPods(pods []interface{}) {
 		}
 	}
 
+	existingLogicalPorts := make([]string, 0)
 	// get the list of logical ports from OVN
-	output, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=name", "find", "logical_switch_port", "external_ids:pod=true")
+	nodes, err := oc.watchFactory.GetNodes()
 	if err != nil {
-		klog.Errorf("Error in obtaining list of logical ports, "+
-			"stderr: %q, err: %v",
-			stderr, err)
+		klog.Errorf("Failed to get nodes")
 		return
 	}
-	existingLogicalPorts := strings.Fields(output)
+	for _, n := range nodes {
+		nodeSwitchPorts, err := oc.ovnNBClient.LSPList(n.Name)
+		if err != nil {
+			klog.Errorf("Failed to list lsp for switch %s: error %v", n.Name, err)
+			continue
+		}
+		for _, port := range nodeSwitchPorts {
+			if port.ExternalID["pod"] == "true" {
+				existingLogicalPorts = append(existingLogicalPorts, port.Name)
+			}
+		}
+	}
+
 	for _, existingPort := range existingLogicalPorts {
 		if _, ok := expectedLogicalPorts[existingPort]; !ok {
 			// not found, delete this logical port
 			klog.Infof("Stale logical port found: %s. This logical port will be deleted.", existingPort)
-			out, stderr, err := util.RunOVNNbctl("--if-exists", "lsp-del",
-				existingPort)
+			cmd, err := oc.ovnNBClient.LSPDel(existingPort)
 			if err != nil {
-				klog.Errorf("Error in deleting pod's logical port "+
-					"stdout: %q, stderr: %q err: %v",
-					out, stderr, err)
+				klog.Errorf("Error in getting the cmd to delete pod's logical port %s %v", existingPort, err)
+				continue
+			}
+			err = oc.ovnNBClient.Execute(cmd)
+			if err != nil {
+				klog.Errorf("Error deleting pod's logical port %s %v", existingPort, err)
+				continue
 			}
 		}
 	}
