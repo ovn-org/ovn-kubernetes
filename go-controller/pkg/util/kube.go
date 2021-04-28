@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	kapi "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1beta1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -23,8 +24,6 @@ import (
 
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
-	discovery "k8s.io/api/discovery/v1beta1"
-	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -35,7 +34,6 @@ type OVNClientset struct {
 	KubeClient           kubernetes.Interface
 	EgressIPClient       egressipclientset.Interface
 	EgressFirewallClient egressfirewallclientset.Interface
-	APIExtensionsClient  apiextensionsclientset.Interface
 }
 
 func adjustCommit() string {
@@ -123,10 +121,6 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to create kubernetes rest config, err: %v", err)
 	}
-	crdClientset, err := apiextensionsclientset.NewForConfig(kconfig)
-	if err != nil {
-		return nil, err
-	}
 	egressFirewallClientset, err := egressfirewallclientset.NewForConfig(kconfig)
 	if err != nil {
 		return nil, err
@@ -139,7 +133,6 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 		KubeClient:           kclientset,
 		EgressIPClient:       egressIPClientset,
 		EgressFirewallClient: egressFirewallClientset,
-		APIExtensionsClient:  crdClientset,
 	}, nil
 }
 
