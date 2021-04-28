@@ -484,6 +484,17 @@ var _ = Describe("Watch Factory Operations", func() {
 			testExisting(egressIPType)
 		})
 	})
+	Context("when EgressFirewall is disabled", func() {
+		testExisting := func(objType reflect.Type) {
+			wf, err = NewMasterWatchFactory(ovnClientset)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(wf.informers).NotTo(HaveKey(objType))
+		}
+		It("does not contain EgressFirewall informer", func() {
+			config.OVNKubernetesFeature.EnableEgressFirewall = false
+			testExisting(egressFirewallType)
+		})
+	})
 
 	addFilteredHandler := func(wf *WatchFactory, objType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandlerFuncs) (*Handler, *handlerCalls) {
 		calls := handlerCalls{}

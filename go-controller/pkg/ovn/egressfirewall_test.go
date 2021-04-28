@@ -48,9 +48,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 	)
 
 	ginkgo.BeforeEach(func() {
-		// Restore global default values before each 99999e
+		// Restore global default values before each testcase
 		config.PrepareTestConfig()
 		config.Gateway.Mode = config.GatewayModeLocal
+		config.OVNKubernetesFeature.EnableEgressFirewall = true
 
 		app = cli.NewApp()
 		app.Name = "test"
@@ -422,9 +423,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 	)
 
 	ginkgo.BeforeEach(func() {
-		// Restore global default values before each 99999e
+		// Restore global default values before each test
 		config.PrepareTestConfig()
 		config.Gateway.Mode = config.GatewayModeShared
+		config.OVNKubernetesFeature.EnableEgressFirewall = true
 
 		app = cli.NewApp()
 		app.Name = "test"

@@ -49,7 +49,6 @@ import (
 )
 
 const (
-	egressfirewallCRD                string        = "egressfirewalls.k8s.ovn.org"
 	clusterPortGroupName             string        = "clusterPortGroup"
 	clusterRtrPortGroupName          string        = "clusterRtrPortGroup"
 	egressFirewallDNSDefaultDuration time.Duration = 30 * time.Minute
@@ -359,11 +358,21 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	}
 
 	oc.WatchNetworkPolicy()
-	oc.WatchCRD()
 
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		oc.WatchEgressNodes()
 		oc.WatchEgressIP()
+	}
+
+	if config.OVNKubernetesFeature.EnableEgressFirewall {
+		var err error
+		oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.stopChan)
+		if err != nil {
+			return err
+		}
+		oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
+		oc.egressFirewallHandler = oc.WatchEgressFirewall()
+
 	}
 
 	klog.Infof("Completing all the Watchers took %v", time.Since(start))
