@@ -447,9 +447,11 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 
 		} else {
 			for _, uuid := range strings.Split(uuids, "\n") {
-				_, stderr, err := txn.AddOrCommit([]string{"add", "logical_switch", logicalSwitch, "acls", uuid})
-				if err != nil {
-					return fmt.Errorf("failed to commit db changes for egressFirewall stderr: %q, err: %+v", stderr, err)
+				if uuid != "" {
+					_, stderr, err := txn.AddOrCommit([]string{"add", "logical_switch", logicalSwitch, "acls", uuid})
+					if err != nil {
+						return fmt.Errorf("failed to commit db changes for egressFirewall stderr: %q, err: %+v", stderr, err)
+					}
 				}
 			}
 		}
