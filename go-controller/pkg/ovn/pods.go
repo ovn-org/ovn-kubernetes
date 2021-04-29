@@ -303,7 +303,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// rescheduled.
 	opts, err := oc.ovnNBClient.LSPGetOptions(portName)
 	if err != nil {
-		klog.Warningf("Failed to get options for port: %s", portName)
+		klog.Warningf("Failed to get options for port %s: %v", portName, err)
 	}
 	if opts == nil {
 		opts = make(map[string]string)
