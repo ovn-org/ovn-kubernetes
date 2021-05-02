@@ -34,6 +34,8 @@ type gateway struct {
 	portClaimWatcher informer.ServiceEventHandler
 	// nodePortWatcher is used in Shared GW mode to handle nodePort flows in shared OVS bridge
 	nodePortWatcher informer.ServiceEventHandler
+	// nodePortWatcherIptables is used in Shared GW mode to handle nodePort IPTable rules
+	nodePortWatcherIptables informer.ServiceEventHandler
 	// localPortWatcher is used in Local GW mode to handle iptables rules and routes for services
 	localPortWatcher informer.ServiceEventHandler
 	openflowManager  *openflowManager
@@ -52,6 +54,9 @@ func (g *gateway) AddService(svc *kapi.Service) {
 	if g.nodePortWatcher != nil {
 		g.nodePortWatcher.AddService(svc)
 	}
+	if g.nodePortWatcherIptables != nil {
+		g.nodePortWatcherIptables.AddService(svc)
+	}
 	if g.localPortWatcher != nil {
 		g.localPortWatcher.AddService(svc)
 	}
@@ -66,6 +71,9 @@ func (g *gateway) UpdateService(old, new *kapi.Service) {
 	}
 	if g.nodePortWatcher != nil {
 		g.nodePortWatcher.UpdateService(old, new)
+	}
+	if g.nodePortWatcherIptables != nil {
+		g.nodePortWatcherIptables.UpdateService(old, new)
 	}
 	if g.localPortWatcher != nil {
 		g.localPortWatcher.UpdateService(old, new)
@@ -82,6 +90,9 @@ func (g *gateway) DeleteService(svc *kapi.Service) {
 	if g.nodePortWatcher != nil {
 		g.nodePortWatcher.DeleteService(svc)
 	}
+	if g.nodePortWatcherIptables != nil {
+		g.nodePortWatcherIptables.DeleteService(svc)
+	}
 	if g.localPortWatcher != nil {
 		g.localPortWatcher.DeleteService(svc)
 	}
@@ -96,6 +107,9 @@ func (g *gateway) SyncServices(objs []interface{}) {
 	}
 	if g.nodePortWatcher != nil {
 		g.nodePortWatcher.SyncServices(objs)
+	}
+	if g.nodePortWatcherIptables != nil {
+		g.nodePortWatcherIptables.SyncServices(objs)
 	}
 	if g.localPortWatcher != nil {
 		g.localPortWatcher.SyncServices(objs)
@@ -172,7 +186,7 @@ func (g *gateway) Run(stopChan <-chan struct{}, wg *sync.WaitGroup) {
 	}
 }
 
-func gatewayInitInternal(nodeName, gwIntf string, subnets []*net.IPNet, gwNextHops []net.IP, nodeAnnotator kube.Annotator) (
+func gatewayInitInternal(nodeName, gwIntf string, subnets []*net.IPNet, gwNextHops []net.IP, gwIPs []*net.IPNet, nodeAnnotator kube.Annotator) (
 	string, string, net.HardwareAddr, []*net.IPNet, error) {
 
 	var bridgeName string
@@ -240,6 +254,20 @@ func gatewayInitInternal(nodeName, gwIntf string, subnets []*net.IPNet, gwNextHo
 				"will cause incoming packets destined to OVN and larger than pod MTU: %d to the node, being dropped "+
 				"without sending fragmentation needed", config.Default.MTU)
 			config.Gateway.DisablePacketMTUCheck = true
+		}
+	}
+
+	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
+		// for smart-NIC we use the host IP/subnet provided by gwIPs
+		// as well as the host MAC address for the Gateway configuration
+		ips = gwIPs
+		hostRep, err := util.GetSmartNICHostInterface(bridgeName)
+		if err != nil {
+			return bridgeName, uplinkName, nil, nil, err
+		}
+		macAddress, err = util.GetSriovnetOps().GetRepresentorPeerMacAddress(hostRep)
+		if err != nil {
+			return bridgeName, uplinkName, nil, nil, err
 		}
 	}
 
