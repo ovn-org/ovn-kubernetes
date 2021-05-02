@@ -305,6 +305,9 @@ type GatewayConfig struct {
 	// exceeding pod MTU to be dropped by OVN. With this check enabled, ICMP needs frag/packet too big will be sent
 	// back to the original client
 	DisablePacketMTUCheck bool `gcfg:"disable-pkt-mtu-check"`
+	// RouterSubnet is the subnet to be used for the GR external port. auto-detected if not given.
+	// Must match the the kube node IP address. Currently valid for Smart-NICs only.
+	RouterSubnet string `gcfg:"router-subnet"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -973,6 +976,14 @@ var OVNGatewayFlags = []cli.Flag{
 		Name:        "disable-pkt-mtu-check",
 		Usage:       "Disable OpenFlow checks for if packet size is greater than pod MTU",
 		Destination: &cliConfig.Gateway.DisablePacketMTUCheck,
+	},
+	&cli.StringFlag{
+		Name: "gateway-router-subnet",
+		Usage: "The Subnet to be used for the gateway router external port (shared mode only). " +
+			"auto-detected if not given. Must match the the kube node IP address. " +
+			"Currently valid for Smart-NICs only",
+		Destination: &cliConfig.Gateway.RouterSubnet,
+		Value:       Gateway.RouterSubnet,
 	},
 	// Deprecated CLI options
 	&cli.BoolFlag{
