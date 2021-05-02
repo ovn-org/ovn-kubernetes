@@ -308,19 +308,10 @@ func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort,
 		// build the list of endpoints in the slice
 		for _, port := range slice.Ports {
 			// If Service port name set it must match the name field in the endpoint
+			// If Service port name is not set we just use the endpoint port
 			if svcPort.Name != "" && svcPort.Name != *port.Name {
 				klog.V(5).Infof("Slice %s with different Port name, requested: %s received: %s",
 					slice.Name, svcPort.Name, *port.Name)
-				continue
-			}
-
-			// Get the targeted port
-			tgtPort := int32(svcPort.TargetPort.IntValue())
-			// If this is a string, it will return 0
-			// it has to match the port name
-			// otherwise, it has to match the port number
-			if (tgtPort == 0 && svcPort.TargetPort.String() != *port.Name) ||
-				(tgtPort > 0 && tgtPort != *port.Port) {
 				continue
 			}
 
