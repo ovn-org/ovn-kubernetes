@@ -184,7 +184,7 @@ func SocketDiagTCPInfo(family uint8) ([]*InetDiagTCPInfoResp, error) {
 	req.AddData(&socketRequest{
 		Family:   family,
 		Protocol: unix.IPPROTO_TCP,
-		Ext:      INET_DIAG_INFO,
+		Ext:      (1 << (INET_DIAG_VEGASINFO - 1)) | (1 << (INET_DIAG_INFO - 1)),
 		States:   uint32(0xfff), // All TCP states
 	})
 	s.Send(req)
@@ -208,7 +208,6 @@ loop:
 			case unix.NLMSG_DONE:
 				break loop
 			case unix.NLMSG_ERROR:
-				native := nl.NativeEndian()
 				error := int32(native.Uint32(m.Data[0:4]))
 				return nil, syscall.Errno(-error)
 			}
@@ -220,19 +219,42 @@ loop:
 			if err != nil {
 				return nil, err
 			}
-			var tcpInfo *TCPInfo
-			for _, a := range attrs {
-				if a.Attr.Type == INET_DIAG_INFO {
-					tcpInfo = &TCPInfo{}
-					if err := tcpInfo.deserialize(a.Value); err != nil {
-						return nil, err
-					}
-					break
-				}
+
+			res, err := attrsToInetDiagTCPInfoResp(attrs, sockInfo)
+			if err != nil {
+				return nil, err
 			}
-			r := &InetDiagTCPInfoResp{InetDiagMsg: sockInfo, TCPInfo: tcpInfo}
-			result = append(result, r)
+
+			result = append(result, res)
 		}
 	}
 	return result, nil
+}
+
+func attrsToInetDiagTCPInfoResp(attrs []syscall.NetlinkRouteAttr, sockInfo *Socket) (*InetDiagTCPInfoResp, error) {
+	var tcpInfo *TCPInfo
+	var tcpBBRInfo *TCPBBRInfo
+	for _, a := range attrs {
+		if a.Attr.Type == INET_DIAG_INFO {
+			tcpInfo = &TCPInfo{}
+			if err := tcpInfo.deserialize(a.Value); err != nil {
+				return nil, err
+			}
+			continue
+		}
+
+		if a.Attr.Type == INET_DIAG_BBRINFO {
+			tcpBBRInfo = &TCPBBRInfo{}
+			if err := tcpBBRInfo.deserialize(a.Value); err != nil {
+				return nil, err
+			}
+			continue
+		}
+	}
+
+	return &InetDiagTCPInfoResp{
+		InetDiagMsg: sockInfo,
+		TCPInfo:     tcpInfo,
+		TCPBBRInfo:  tcpBBRInfo,
+	}, nil
 }
