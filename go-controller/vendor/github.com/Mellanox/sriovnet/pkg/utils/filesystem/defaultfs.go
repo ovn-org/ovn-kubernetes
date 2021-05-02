@@ -88,6 +88,11 @@ func (DefaultFs) Walk(root string, walkFn filepath.WalkFunc) error {
 	return filepath.Walk(root, walkFn)
 }
 
+// WriteFile via ioutil.Writefile
+func (DefaultFs) WriteFile(filename string, data []byte, perm os.FileMode) error {
+	return ioutil.WriteFile(filename, data, perm)
+}
+
 // defaultFile implements File using same-named functions from "os"
 type defaultFile struct {
 	file *os.File

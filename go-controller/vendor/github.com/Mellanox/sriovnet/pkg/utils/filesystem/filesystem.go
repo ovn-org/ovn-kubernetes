@@ -23,6 +23,7 @@ type Filesystem interface {
 
 	// from "io/ioutil"
 	ReadFile(filename string) ([]byte, error)
+	WriteFile(filename string, data []byte, perm os.FileMode) error
 	TempDir(dir, prefix string) (string, error)
 	TempFile(dir, prefix string) (File, error)
 	ReadDir(dirname string) ([]os.FileInfo, error)
