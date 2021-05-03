@@ -35,6 +35,19 @@ type Node struct {
 	controller       nodeController
 	nodeEventHandler informer.EventHandler
 	podEventHandler  informer.EventHandler
+	sync.Mutex
+}
+
+func (n *Node) IsReady() bool {
+	n.Lock()
+	defer n.Unlock()
+	return n.ready
+}
+
+func (n *Node) setReady(b bool) {
+	n.Lock()
+	defer n.Unlock()
+	n.ready = b
 }
 
 func nodeChanged(old, new interface{}) bool {
@@ -157,7 +170,7 @@ func (n *Node) Run(stopCh <-chan struct{}) {
 	}()
 
 	klog.Info("Started Hybrid Overlay Node workers")
-	n.ready = true
+	n.setReady(true)
 	<-stopCh
 	klog.Info("Shutting down Hybrid Overlay Node workers")
 	wg.Wait()

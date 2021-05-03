@@ -571,7 +571,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			}()
 
 			// Wait for the controller to start
-			err = wait.PollImmediate(500*time.Millisecond, 5*time.Second, func() (bool, error) { return n.ready == true, nil })
+			err = wait.PollImmediate(500*time.Millisecond, 5*time.Second, func() (bool, error) { return n.IsReady() == true, nil })
 			Expect(err).NotTo(HaveOccurred())
 
 			// FIXME
@@ -648,7 +648,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			}()
 
 			// Wait for the controller to start
-			err = wait.PollImmediate(500*time.Millisecond, 5*time.Second, func() (bool, error) { return n.ready == true, nil })
+			err = wait.PollImmediate(500*time.Millisecond, 5*time.Second, func() (bool, error) { return n.IsReady() == true, nil })
 			Expect(err).NotTo(HaveOccurred())
 
 			// FIXME
