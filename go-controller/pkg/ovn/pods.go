@@ -302,7 +302,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// out iface-id for an old instance of this pod, and the pod got
 	// rescheduled.
 	opts, err := oc.ovnNBClient.LSPGetOptions(portName)
-	if err != nil {
+	if err != nil && err != goovn.ErrorNotFound {
 		klog.Warningf("Failed to get options for port %s: %v", portName, err)
 	}
 	if opts == nil {
