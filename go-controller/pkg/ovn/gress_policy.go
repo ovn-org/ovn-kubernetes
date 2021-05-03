@@ -283,8 +283,8 @@ func (gp *gressPolicy) localPodAddACL(portGroupName, portGroupUUID string, aclLo
 		if len(gp.ipBlock) > 0 {
 			// Add ACL allow rule for IPBlock CIDR
 			cidrMatches = gp.getMatchFromIPBlock(lportMatch, l4Match)
-			for _, cidrMatch := range cidrMatches {
-				if err := gp.addACLAllow(cidrMatch, l4Match, portGroupUUID, true, aclLogging); err != nil {
+			for i, cidrMatch := range cidrMatches {
+				if err := gp.addACLAllow(cidrMatch, l4Match, portGroupUUID, i+1, aclLogging); err != nil {
 					klog.Warningf(err.Error())
 				}
 			}
@@ -292,7 +292,7 @@ func (gp *gressPolicy) localPodAddACL(portGroupName, portGroupUUID string, aclLo
 		// if there are pod/namespace selector, then allow packets from/to that address_set or
 		// if the NetworkPolicyPeer is empty, then allow from all sources or to all destinations.
 		if gp.sizeOfAddressSet() > 0 || len(gp.ipBlock) == 0 {
-			if err := gp.addACLAllow(match, l4Match, portGroupUUID, false, aclLogging); err != nil {
+			if err := gp.addACLAllow(match, l4Match, portGroupUUID, 0, aclLogging); err != nil {
 				klog.Warningf(err.Error())
 			}
 		}
@@ -306,14 +306,14 @@ func (gp *gressPolicy) localPodAddACL(portGroupName, portGroupUUID string, aclLo
 		if len(gp.ipBlock) > 0 {
 			// Add ACL allow rule for IPBlock CIDR
 			cidrMatches = gp.getMatchFromIPBlock(lportMatch, l4Match)
-			for _, cidrMatch := range cidrMatches {
-				if err := gp.addACLAllow(cidrMatch, l4Match, portGroupUUID, true, aclLogging); err != nil {
+			for i, cidrMatch := range cidrMatches {
+				if err := gp.addACLAllow(cidrMatch, l4Match, portGroupUUID, i+1, aclLogging); err != nil {
 					klog.Warningf(err.Error())
 				}
 			}
 		}
 		if gp.sizeOfAddressSet() > 0 || len(gp.ipBlock) == 0 {
-			if err := gp.addACLAllow(match, l4Match, portGroupUUID, false, aclLogging); err != nil {
+			if err := gp.addACLAllow(match, l4Match, portGroupUUID, 0, aclLogging); err != nil {
 				klog.Warningf(err.Error())
 			}
 		}
@@ -321,7 +321,7 @@ func (gp *gressPolicy) localPodAddACL(portGroupName, portGroupUUID string, aclLo
 }
 
 // addACLAllow adds an ACL with a given match to the given Port Group
-func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlockCidr bool, aclLogging string) error {
+func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlockCidr int, aclLogging string) error {
 	var direction, action string
 	direction = types.DirectionToLPort
 	action = "allow-related"
@@ -329,7 +329,7 @@ func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlock
 	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
-		fmt.Sprintf("external-ids:ipblock_cidr=%t", ipBlockCidr),
+		fmt.Sprintf("external-ids:ipblock_cidr=%d", ipBlockCidr),
 		fmt.Sprintf("external-ids:namespace=%s", gp.policyNamespace),
 		fmt.Sprintf("external-ids:policy=%s", gp.policyName),
 		fmt.Sprintf("external-ids:%s_num=%d", gp.policyType, gp.idx),
@@ -353,7 +353,7 @@ func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlock
 		fmt.Sprintf("meter=%s", types.OvnACLLoggingMeter),
 		fmt.Sprintf("name=%.63s", gp.policyName),
 		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
-		fmt.Sprintf("external-ids:ipblock_cidr=%t", ipBlockCidr),
+		fmt.Sprintf("external-ids:ipblock_cidr=%d", ipBlockCidr),
 		fmt.Sprintf("external-ids:namespace=%s", gp.policyNamespace),
 		fmt.Sprintf("external-ids:policy=%s", gp.policyName),
 		fmt.Sprintf("external-ids:%s_num=%d", gp.policyType, gp.idx),
