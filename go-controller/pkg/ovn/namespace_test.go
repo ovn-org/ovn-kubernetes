@@ -17,7 +17,6 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
-	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
@@ -202,13 +201,11 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 					},
 				)
 				egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-				crdFakeClient := &apiextensionsfake.Clientset{}
 				egressIPFakeClient := &egressipfake.Clientset{}
 				fakeClient := &util.OVNClientset{
 					KubeClient:           kubeFakeClient,
 					EgressIPClient:       egressIPFakeClient,
 					EgressFirewallClient: egressFirewallFakeClient,
-					APIExtensionsClient:  crdFakeClient,
 				}
 
 				_, err := fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &testNode, metav1.CreateOptions{})

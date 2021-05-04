@@ -28,7 +28,6 @@ import (
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 
-	apiextension "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	utilnet "k8s.io/utils/net"
 
 	kapi "k8s.io/api/core/v1"
@@ -49,7 +48,6 @@ import (
 )
 
 const (
-	egressfirewallCRD                string        = "egressfirewalls.k8s.ovn.org"
 	clusterPortGroupName             string        = "clusterPortGroup"
 	clusterRtrPortGroupName          string        = "clusterRtrPortGroup"
 	egressFirewallDNSDefaultDuration time.Duration = 30 * time.Minute
@@ -359,11 +357,21 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	}
 
 	oc.WatchNetworkPolicy()
-	oc.WatchCRD()
 
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		oc.WatchEgressNodes()
 		oc.WatchEgressIP()
+	}
+
+	if config.OVNKubernetesFeature.EnableEgressFirewall {
+		var err error
+		oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.stopChan)
+		if err != nil {
+			return err
+		}
+		oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
+		oc.egressFirewallHandler = oc.WatchEgressFirewall()
+
 	}
 
 	klog.Infof("Completing all the Watchers took %v", time.Since(start))
@@ -652,44 +660,6 @@ func (oc *Controller) WatchNetworkPolicy() {
 		},
 	}, oc.syncNetworkPolicies)
 	klog.Infof("Bootstrapping existing policies and cleaning stale policies took %v", time.Since(start))
-}
-
-// WatchCRD starts the watching of the CRD resource and calls back to the
-// appropriate handler logic
-func (oc *Controller) WatchCRD() {
-	oc.watchFactory.AddCRDHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			crd := obj.(*apiextension.CustomResourceDefinition)
-			klog.Infof("Adding CRD %s to cluster", crd.Name)
-			if crd.Name == egressfirewallCRD {
-				err := oc.watchFactory.InitializeEgressFirewallWatchFactory()
-				if err != nil {
-					klog.Errorf("Error Creating EgressFirewallWatchFactory: %v", err)
-					return
-				}
-
-				oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.stopChan)
-				if err != nil {
-					klog.Errorf("Error Creating EgressFirewallDNS: %v", err)
-					return
-				}
-				oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
-				oc.egressFirewallHandler = oc.WatchEgressFirewall()
-			}
-		},
-		UpdateFunc: func(old, newer interface{}) {
-		},
-		DeleteFunc: func(obj interface{}) {
-			crd := obj.(*apiextension.CustomResourceDefinition)
-			klog.Infof("Deleting CRD %s from cluster", crd.Name)
-			if crd.Name == egressfirewallCRD {
-				oc.egressFirewallDNS.Shutdown()
-				oc.watchFactory.RemoveEgressFirewallHandler(oc.egressFirewallHandler)
-				oc.egressFirewallHandler = nil
-				oc.watchFactory.ShutdownEgressFirewallWatchFactory()
-			}
-		},
-	}, nil)
 }
 
 // WatchEgressFirewall starts the watching of egressfirewall resource and calls

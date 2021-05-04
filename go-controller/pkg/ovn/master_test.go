@@ -24,7 +24,6 @@ import (
 	"github.com/urfave/cli/v2"
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
-	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/fake"
@@ -1208,13 +1207,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				Items: []v1.Node{testNode},
 			})
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-			crdFakeClient := &apiextensionsfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
 			fakeClient := &util.OVNClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
-				APIExtensionsClient:  crdFakeClient,
 			}
 
 			fexec := ovntest.NewLooseCompareFakeExec()
@@ -1516,13 +1513,11 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			defer close(stopChan)
 			kubeFakeClient := fake.NewSimpleClientset()
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-			crdFakeClient := &apiextensionsfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
 			fakeClient := &util.OVNClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
-				APIExtensionsClient:  crdFakeClient,
 			}
 			f, err := factory.NewMasterWatchFactory(fakeClient)
 			clusterController := NewOvnController(fakeClient, f, stopChan,
