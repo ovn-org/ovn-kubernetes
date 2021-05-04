@@ -326,7 +326,7 @@ func newSharedGatewayOpenFlowManager(patchPort, macAddress, gwBridge, gwIntf str
 		// table0, Geneve packets coming from external. Skip conntrack and go directly to host
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=55, in_port=%s, udp, udp_dst=%d"+
-				"actions=%s", defaultOpenFlowCookie, ofportPhys, config.Default.EncapPort, ovsLocalPort))
+				"actions=NORMAL", defaultOpenFlowCookie, ofportPhys, config.Default.EncapPort))
 
 		// table 0, packets coming from external. Send it through conntrack and
 		// resubmit to table 1 to know the state of the connection.
@@ -362,7 +362,7 @@ func newSharedGatewayOpenFlowManager(patchPort, macAddress, gwBridge, gwIntf str
 		// table0, Geneve packets coming from external. Skip conntrack and go directly to host
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=55, in_port=%s, udp6, udp_dst=%d"+
-				"actions=%s", defaultOpenFlowCookie, ofportPhys, config.Default.EncapPort, ovsLocalPort))
+				"actions=NORMAL", defaultOpenFlowCookie, ofportPhys, config.Default.EncapPort))
 
 		// table 0, packets coming from external. Send it through conntrack and
 		// resubmit to table 1 to know the state of the connection.

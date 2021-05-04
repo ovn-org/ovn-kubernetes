@@ -1002,10 +1002,12 @@ ovn-node() {
     wait_for_event ovs_ready
   fi
 
-  echo "=============== ovn-node - (wait for ready_to_start_node)"
-  wait_for_event ready_to_start_node
+  if [[ ${ovnkube_node_mode} != "smart-nic" ]]; then
+    echo "=============== ovn-node - (wait for ready_to_start_node)"
+    wait_for_event ready_to_start_node
 
-  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_conn ${ovn_nbdb_conn}"
+    echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_conn ${ovn_nbdb_conn}"
+  fi
 
   if [[ ${ovnkube_node_mode} != "smart-nic-host" ]]; then
     echo "=============== ovn-node - (ovn-node  wait for ovn-controller.pid)"

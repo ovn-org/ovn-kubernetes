@@ -257,13 +257,15 @@ func SetExec(exec kexec.Interface) error {
 		runner.ovnRunDir = ovnRunDir
 	}
 
-	runner.nbctlPath, err = exec.LookPath(ovnNbctlCommand)
-	if err != nil {
-		return err
-	}
-	runner.sbctlPath, err = exec.LookPath(ovnSbctlCommand)
-	if err != nil {
-		return err
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
+		runner.nbctlPath, err = exec.LookPath(ovnNbctlCommand)
+		if err != nil {
+			return err
+		}
+		runner.sbctlPath, err = exec.LookPath(ovnSbctlCommand)
+		if err != nil {
+			return err
+		}
 	}
 	runner.ovsdbClientPath, err = exec.LookPath(ovsdbClientCommand)
 	if err != nil {
