@@ -28,7 +28,7 @@ import (
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 
-	apiextension "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	apiextension "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	utilnet "k8s.io/utils/net"
 
 	kapi "k8s.io/api/core/v1"
