@@ -223,6 +223,10 @@ func (mock *MockOVNClient) LSPGetExternalIds(lsp string) (map[string]string, err
 	return extIds, nil
 }
 
+func (mock *MockOVNClient) LSPSetType(lsp string, portType string) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
 // helper function that applies field updates for a given lsp to the mock object cache
 func (mock *MockOVNClient) updateLSPCache(lspName string, update UpdateCache, mockCache MockObjectCacheByName) error {
 	var entry interface{}
