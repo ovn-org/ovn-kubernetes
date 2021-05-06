@@ -149,6 +149,20 @@ func (odbi *ovndb) lspSetPortSecurityImp(lsp string, security ...string) (*OvnCo
 	return &OvnCommand{operations, odbi, make([][]map[string]interface{}, len(operations))}, nil
 }
 
+func (odbi *ovndb) lspSetTypeImp(lsp string, portType string) (*OvnCommand, error) {
+	row := make(OVNRow)
+	row["type"] = portType
+	condition := libovsdb.NewCondition("name", "==", lsp)
+	updateOp := libovsdb.Operation{
+		Op:    opUpdate,
+		Table: TableLogicalSwitchPort,
+		Row:   row,
+		Where: []interface{}{condition},
+	}
+	operations := []libovsdb.Operation{updateOp}
+	return &OvnCommand{operations, odbi, make([][]map[string]interface{}, len(operations))}, nil
+}
+
 func (odbi *ovndb) lspSetDHCPv4OptionsImp(lsp string, uuid string) (*OvnCommand, error) {
 	row := make(OVNRow)
 	row["dhcpv4_options"] = stringToGoUUID(uuid)
