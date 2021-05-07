@@ -8,6 +8,7 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"sync"
 
 	"github.com/urfave/cli/v2"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -44,6 +45,7 @@ type FakeOVN struct {
 	fakeRecorder *record.FakeRecorder
 	ovnNBClient  goovn.Client
 	ovnSBClient  goovn.Client
+	wg           *sync.WaitGroup
 }
 
 func NewFakeOVN(fexec *ovntest.FakeExec) *FakeOVN {
@@ -53,6 +55,7 @@ func NewFakeOVN(fexec *ovntest.FakeExec) *FakeOVN {
 		fakeExec:     fexec,
 		asf:          addressset.NewFakeAddressSetFactory(),
 		fakeRecorder: record.NewFakeRecorder(10),
+		wg:           &sync.WaitGroup{},
 	}
 }
 
@@ -93,6 +96,7 @@ func (o *FakeOVN) shutdown() {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	err = o.controller.ovnSBClient.Close()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	o.wg.Wait()
 }
 
 func (o *FakeOVN) init() {
