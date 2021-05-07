@@ -61,6 +61,18 @@ const (
 	PG_TEST_ID_2         = "169.254.1.1"
 	PG_TEST_KEY_3        = "foo1"
 	PG_TEST_ID_3         = "bar1"
+	ACL_NAME_1           = "aclName1"
+	ACL_NAME_2           = "aclName2"
+	ACL_NAME_3           = "aclName3"
+	ACL_NAME_4           = "aclName4"
+	ACL_NAME_5           = "aclName5"
+	SEVERITY_INFO        = "info"
+	SEVERITY_ALERT       = "alert"
+	SEVERITY_WARNING     = "warning"
+	METER1               = "testMeter1"
+	METER2               = "testMeter2"
+	METER3               = "testMeter3"
+	NONEXISTENT_UUID     = "53be5050-87b2-49d4-9c74-bf645653a524"
 )
 
 var (

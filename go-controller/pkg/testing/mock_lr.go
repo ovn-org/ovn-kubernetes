@@ -97,6 +97,10 @@ func (mock *MockOVNClient) LRLBList(ls string) ([]*goovn.LoadBalancer, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
+func (mock *MockOVNClient) LBList() ([]*goovn.LoadBalancer, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
 // Add LRP with given name on given lr
 func (mock *MockOVNClient) LRPAdd(lr string, lrp string, mac string, network []string, peer string, external_ids map[string]string) (*goovn.OvnCommand, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
