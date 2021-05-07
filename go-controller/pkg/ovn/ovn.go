@@ -183,6 +183,9 @@ type Controller struct {
 	// Controller used for programming OVN for egress IP
 	eIPC egressIPController
 
+	// Controller used to handle services
+	svcController *svccontroller.Controller
+
 	egressFirewallDNS *EgressDNS
 
 	// Is ACL logging enabled while configuring meters?
@@ -317,7 +320,7 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	// has endpoint slices enabled.
 	if util.UseEndpointSlices(oc.client) {
 		klog.Infof("Starting OVN Service Controller: Using Endpoint Slices")
-		// Create our own informers to start compartamentalizing the code
+		// Create our own informers to start compartmentalizing the code
 		// filter server side the things we don't care about
 		noProxyName, err := labels.NewRequirement("service.kubernetes.io/service-proxy-name", selection.DoesNotExist, nil)
 		if err != nil {
@@ -337,7 +340,7 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 				options.LabelSelector = labelSelector.String()
 			}))
 
-		servicesController := svccontroller.NewController(
+		oc.svcController = svccontroller.NewController(
 			oc.client,
 			informerFactory.Core().V1().Services(),
 			informerFactory.Discovery().V1beta1().EndpointSlices(),
@@ -349,12 +352,11 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 			defer wg.Done()
 			// use 5 workers like most of the kubernetes controllers in the
 			// kubernetes controller-manager
-			err := servicesController.Run(5, oc.stopChan)
+			err := oc.svcController.Run(5, oc.stopChan)
 			if err != nil {
 				klog.Errorf("Error running OVN Kubernetes Services controller: %v", err)
 			}
 		}()
-
 	} else {
 		klog.Infof("OVN Controller using Endpoints instead of EndpointSlices")
 		oc.WatchServices()
