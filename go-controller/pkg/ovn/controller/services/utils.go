@@ -134,8 +134,14 @@ func createPerNodeVIPs(svcIPs []string, protocol v1.Protocol, sourcePort int32, 
 			continue
 		}
 
-		// If self ip is in target list, we need to use special IP to allow hairpin back to host
-		newTargets := util.UpdateIPsSlice(targetIPs, physicalIPs, []string{types.V4HostMasqueradeIP, types.V6HostMasqueradeIP})
+		var newTargets []string
+
+		if config.Gateway.Mode == config.GatewayModeShared {
+			// If self ip is in target list, we need to use special IP to allow hairpin back to host
+			newTargets = util.UpdateIPsSlice(targetIPs, physicalIPs, []string{types.V4HostMasqueradeIP, types.V6HostMasqueradeIP})
+		} else {
+			newTargets = targetIPs
+		}
 
 		err = loadbalancer.CreateLoadBalancerVIPs(gatewayLB, svcIPs, sourcePort, newTargets, targetPort)
 		if err != nil {
@@ -188,8 +194,14 @@ func createPerNodePhysicalVIPs(isIPv6 bool, protocol v1.Protocol, sourcePort int
 			return err
 		}
 
-		// If self ip is in target list, we need to use special IP to allow hairpin back to host
-		newTargets := util.UpdateIPsSlice(targetIPs, physicalIPs, []string{types.V4HostMasqueradeIP, types.V6HostMasqueradeIP})
+		var newTargets []string
+
+		if config.Gateway.Mode == config.GatewayModeShared {
+			// If self ip is in target list, we need to use special IP to allow hairpin back to host
+			newTargets = util.UpdateIPsSlice(targetIPs, physicalIPs, []string{types.V4HostMasqueradeIP, types.V6HostMasqueradeIP})
+		} else {
+			newTargets = targetIPs
+		}
 
 		err = loadbalancer.CreateLoadBalancerVIPs(gatewayLB, physicalIPs, sourcePort, newTargets, targetPort)
 		if err != nil {
