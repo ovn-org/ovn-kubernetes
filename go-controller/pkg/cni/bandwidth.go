@@ -12,7 +12,7 @@ func clearPodBandwidth(sandboxID string) error {
 	// interfaces will have the same name as ports
 	portList, err := ovsFind("interface", "name", "external-ids:sandbox="+sandboxID)
 	if err != nil {
-		return err
+		     return err
 	}
 
 	// Clear the QoS for any ports of this sandbox
