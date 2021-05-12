@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/pkg/errors"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -48,6 +50,7 @@ const (
 	rhel               = "RHEL"
 	ubuntu             = "Ubuntu"
 	windowsOS          = "windows"
+	defaultOSMaxArgs   = 262144
 )
 
 const (
@@ -71,6 +74,8 @@ var (
 var ovnCmdRetryCount = 200
 var AppFs = afero.NewOsFs()
 
+var MaxArgsError = errors.New("requested transaction exceeds maximum arguments")
+
 // PrepareTestConfig restores default config values. Used by testcases to
 // provide a pristine environment between tests.
 func PrepareTestConfig() {
@@ -81,6 +86,22 @@ func PrepareTestConfig() {
 // this metric is set only for the ovnkube in master mode since 99.9% of
 // all the ovn-nbctl/ovn-sbctl calls occur on the master
 var MetricOvnCliLatency *prometheus.HistogramVec
+
+var maxArgs int
+
+func init() {
+	out, err := exec.Command("getconf", "ARG_MAX").Output()
+	if err != nil {
+		v, err := strconv.Atoi(strings.TrimSuffix(string(out), "\n"))
+		if err == nil {
+			maxArgs = v
+		}
+	}
+	if maxArgs == 0 {
+		klog.Warningf("Unable to detect OS MAX_ARGS, defaulting to: %d", defaultOSMaxArgs)
+		maxArgs = defaultOSMaxArgs
+	}
+}
 
 func runningPlatform() (string, error) {
 	if runtime.GOOS == windowsOS {
@@ -827,7 +848,7 @@ func NewNBTxn() *NBTxn {
 }
 
 // Add adds a new request to the transaction
-func (t *NBTxn) Add(args ...string) {
+func (t *NBTxn) add(args ...string) {
 	if len(t.txnArgs) > 0 {
 		t.txnArgs = append(t.txnArgs, "--")
 	}
@@ -842,4 +863,39 @@ func (t *NBTxn) Commit() (string, string, error) {
 	allArgs := append(t.args, t.txnArgs...)
 	stdout, stderr, err := runOVNretry(runner.nbctlPath, t.env, allArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// AddOrCommit adds a slice of requests to a transaction
+// If the incoming slice to be added would be greater than the maximum
+// number of arguments for a transaction; the transaction is committed
+// and the current transactions arguments are reset to the slice
+// Note: This method should be called once with a slice of dependent args
+// For example, using create --id=@acl with dependent add to switch cmds
+// should all be added in a single AddOrCommit call
+// The caller should take care not to overload the call with a too large
+// slice exceeding max args, or the command can never be committed
+func (t *NBTxn) AddOrCommit(args []string) (string, string, error) {
+	if len(args) > maxArgs {
+		return "", "", MaxArgsError
+	}
+	// assume a 10 argument buffer for other arguments by default added to the nbctl call
+	buffer := 10
+	incomingLength := len(args)
+	if len(t.txnArgs) > 0 {
+		// increment for --
+		incomingLength += 1
+	}
+
+	// case where we are going to exceed max arguments
+	if len(t.args)+len(t.txnArgs)+incomingLength+buffer > maxArgs {
+		klog.Info("Requested transaction add is too large, committing...")
+		if stdout, stderr, err := t.Commit(); err != nil {
+			return stdout, stderr, err
+		}
+		// reset txnArgs
+		t.txnArgs = []string{}
+	}
+
+	t.add(args...)
+	return "", "", nil
 }
