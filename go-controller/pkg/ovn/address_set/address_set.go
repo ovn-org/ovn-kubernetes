@@ -67,7 +67,11 @@ var _ AddressSetFactory = &ovnAddressSetFactory{}
 
 // NewAddressSet returns a new address set object
 func (asf *ovnAddressSetFactory) NewAddressSet(name string, ips []net.IP) (AddressSet, error) {
-	return newOvnAddressSets(name, ips)
+	res, err := newOvnAddressSets(name, ips)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 // ForEachAddressSet will pass the unhashed address set name, namespace name
