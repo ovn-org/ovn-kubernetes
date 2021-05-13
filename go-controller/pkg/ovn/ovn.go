@@ -668,13 +668,19 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 	return oc.watchFactory.AddEgressFirewallHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
-			addErrors := oc.addEgressFirewall(egressFirewall)
+			txn := util.NewNBTxn()
+			addErrors := oc.addEgressFirewall(egressFirewall, txn)
 			if addErrors != nil {
 				klog.Error(addErrors)
 				egressFirewall.Status.Status = egressFirewallAddError
 			} else {
-
-				egressFirewall.Status.Status = egressFirewallAppliedCorrectly
+				_, stderr, err := txn.Commit()
+				if err != nil {
+					klog.Errorf("failed to commit db changes for egressFirewall in namespace %s stderr: %q, err: %+v", egressFirewall.Namespace, stderr, err)
+					egressFirewall.Status.Status = egressFirewallAddError
+				} else {
+					egressFirewall.Status.Status = egressFirewallAppliedCorrectly
+				}
 			}
 
 			err := oc.updateEgressFirewallWithRetry(egressFirewall)
@@ -686,12 +692,20 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 			newEgressFirewall := newer.(*egressfirewall.EgressFirewall).DeepCopy()
 			oldEgressFirewall := old.(*egressfirewall.EgressFirewall)
 			if !reflect.DeepEqual(oldEgressFirewall.Spec, newEgressFirewall.Spec) {
-				errList := oc.updateEgressFirewall(oldEgressFirewall, newEgressFirewall)
+				txn := util.NewNBTxn()
+				errList := oc.updateEgressFirewall(oldEgressFirewall, newEgressFirewall, txn)
 				if errList != nil {
 					newEgressFirewall.Status.Status = egressFirewallUpdateError
 					klog.Error(errList)
 				} else {
-					newEgressFirewall.Status.Status = egressFirewallAppliedCorrectly
+					_, stderr, err := txn.Commit()
+					if err != nil {
+						klog.Errorf("failed to commit db changes for egressFirewall in namespace %s stderr: %q, err: %+v", newEgressFirewall.Namespace, stderr, err)
+						newEgressFirewall.Status.Status = egressFirewallUpdateError
+
+					} else {
+						newEgressFirewall.Status.Status = egressFirewallAppliedCorrectly
+					}
 				}
 				err := oc.updateEgressFirewallWithRetry(newEgressFirewall)
 				if err != nil {
@@ -701,9 +715,15 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 		},
 		DeleteFunc: func(obj interface{}) {
 			egressFirewall := obj.(*egressfirewall.EgressFirewall)
-			deleteErrors := oc.deleteEgressFirewall(egressFirewall)
+			txn := util.NewNBTxn()
+			deleteErrors := oc.deleteEgressFirewall(egressFirewall, txn)
 			if deleteErrors != nil {
 				klog.Error(deleteErrors)
+				return
+			}
+			stdout, stderr, err := txn.Commit()
+			if err != nil {
+				klog.Errorf("failed to commit db changes for egressFirewall in namespace %s stdout: %q, stderr: %q, err: %+v", egressFirewall.Namespace, stdout, stderr, err)
 			}
 		},
 	}, oc.syncEgressFirewall)
