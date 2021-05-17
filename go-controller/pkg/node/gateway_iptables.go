@@ -79,6 +79,12 @@ func getSharedGatewayInitRules(chain string, proto iptables.Protocol) []iptRule 
 	return []iptRule{
 		{
 			table:    "nat",
+			chain:    "PREROUTING",
+			args:     []string{"-j", chain},
+			protocol: proto,
+		},
+		{
+			table:    "nat",
 			chain:    "OUTPUT",
 			args:     []string{"-j", chain},
 			protocol: proto,
@@ -116,12 +122,6 @@ func getLegacyLocalGatewayInitRules(chain string, proto iptables.Protocol) []ipt
 
 func getLegacySharedGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
 	return []iptRule{
-		{
-			table:    "nat",
-			chain:    "PREROUTING",
-			args:     []string{"-j", chain},
-			protocol: proto,
-		},
 		{
 			table:    "filter",
 			chain:    "OUTPUT",

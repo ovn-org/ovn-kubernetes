@@ -255,3 +255,8 @@ func gatewayReady(patchPort string) (bool, error) {
 func (g *gateway) GetGatewayBridgeIface() string {
 	return g.openflowManager.gwBridge
 }
+
+// getMaxFrameLength returns the maximum frame size (ignoring VLAN header) that a gateway can handle
+func getMaxFrameLength() int {
+	return config.Default.MTU + 14
+}
