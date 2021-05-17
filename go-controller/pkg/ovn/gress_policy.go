@@ -485,7 +485,7 @@ func getSvcVips(service *v1.Service) []net.IP {
 			for _, physicalIP := range physicalIPs {
 				ip := net.ParseIP(physicalIP)
 				if ip == nil {
-					klog.Errorf("Failed to parse pod IP %q", physicalIP)
+					klog.Errorf("Failed to parse physical IP %q", physicalIP)
 					continue
 				}
 				ips = append(ips, ip)
@@ -496,29 +496,27 @@ func getSvcVips(service *v1.Service) []net.IP {
 		if util.IsClusterIPSet(service) {
 			ip := net.ParseIP(service.Spec.ClusterIP)
 			if ip == nil {
-				klog.Errorf("Failed to parse pod IP %q", service.Spec.ClusterIP)
+				klog.Errorf("Failed to parse cluster IP %q", service.Spec.ClusterIP)
 			}
 			ips = append(ips, ip)
 		}
 
 		for _, ing := range service.Status.LoadBalancer.Ingress {
-			ip := net.ParseIP(ing.IP)
-			if ip == nil {
-				klog.Errorf("Failed to parse pod IP %q", ing)
-				continue
+			if ing.IP != "" {
+				klog.V(5).Infof("Adding ingress IPs: %s from Service: %s to VIP set", ing.IP, service.Name)
+				ips = append(ips, net.ParseIP(ing.IP))
 			}
-			klog.V(5).Infof("Adding ingress IPs from Service: %s to VIP set", service.Name)
-			ips = append(ips, ip)
 		}
 
 		if len(service.Spec.ExternalIPs) > 0 {
 			for _, extIP := range service.Spec.ExternalIPs {
 				ip := net.ParseIP(extIP)
 				if ip == nil {
-					klog.Errorf("Failed to parse pod IP %q", extIP)
+					klog.Errorf("Failed to parse external IP %q", extIP)
 					continue
 				}
-				klog.V(5).Infof("Adding external IPs from Service: %s to VIP set", service.Name)
+				klog.V(5).Infof("Adding external IP: %s, from Service: %s to VIP set",
+					ip, service.Name)
 				ips = append(ips, ip)
 			}
 		}
@@ -527,5 +525,6 @@ func getSvcVips(service *v1.Service) []net.IP {
 		klog.V(5).Infof("Service has no VIPs")
 		return nil
 	}
+
 	return ips
 }
