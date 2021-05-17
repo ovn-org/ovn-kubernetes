@@ -221,6 +221,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 
 		expectedTables := map[string]util.FakeTable{
 			"nat": {
+				"PREROUTING": []string{
+					"-j OVN-KUBE-EXTERNALIP",
+					"-j OVN-KUBE-NODEPORT",
+				},
 				"OUTPUT": []string{
 					"-j OVN-KUBE-EXTERNALIP",
 					"-j OVN-KUBE-NODEPORT",

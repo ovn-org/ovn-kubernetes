@@ -175,7 +175,7 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 			// we need to warn so that it can be debugged as to why routes are disappearing
 			warnings = append(warnings, fmt.Sprintf("missing route entry for subnet %s via gateway %s on link %v",
 				subnet, cfg.gwIP, mpcfg.ifName))
-			err = util.LinkRoutesAdd(mpcfg.link, cfg.gwIP, []*net.IPNet{subnet})
+			err = util.LinkRoutesAdd(mpcfg.link, cfg.gwIP, []*net.IPNet{subnet}, 0)
 			if err != nil {
 				if os.IsExist(err) {
 					klog.V(5).Infof("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
