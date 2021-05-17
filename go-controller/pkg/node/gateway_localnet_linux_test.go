@@ -11,6 +11,8 @@ import (
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	util_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
+	mock "github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
@@ -24,14 +26,16 @@ const (
 	v6localnetGatewayIP = "fd00:96:1::1"
 )
 
-func getFakeLocalAddrs() map[string]net.IPNet {
-	localAddrSet := make(map[string]net.IPNet)
+func getFakeIpNet() []net.Addr {
+	var nets []net.Addr
 	for _, network := range []string{"127.0.0.1/32", "10.10.10.1/24", "fd00:96:1::1/64"} {
 		ip, ipNet, err := net.ParseCIDR(network)
+		// We need to simulate the IP here not the NET
+		ipNet.IP = ip
 		Expect(err).NotTo(HaveOccurred())
-		localAddrSet[ip.String()] = *ipNet
+		nets = append(nets, ipNet)
 	}
-	return localAddrSet
+	return nets
 }
 
 func initFakeNodePortWatcher(fakeOvnNode *FakeOVNNode, iptV4, iptV6 util.IPTablesHelper) *localPortWatcher {
@@ -48,9 +52,8 @@ func initFakeNodePortWatcher(fakeOvnNode *FakeOVNNode, iptV4, iptV6 util.IPTable
 	Expect(err).NotTo(HaveOccurred())
 
 	fNPW := localPortWatcher{
-		recorder:     fakeOvnNode.recorder,
-		gatewayIPv4:  v4localnetGatewayIP,
-		localAddrSet: getFakeLocalAddrs(),
+		recorder:    fakeOvnNode.recorder,
+		gatewayIPv4: v4localnetGatewayIP,
 	}
 	return &fNPW
 }
@@ -110,6 +113,9 @@ var _ = Describe("Node Operations", func() {
 		fExec        *ovntest.FakeExec
 		iptV4, iptV6 util.IPTablesHelper
 		fNPW         *localPortWatcher
+		mockNetOps   *util_mocks.NETOps
+		fakeIPNet    []net.Addr
+		fakeNetCall  *mock.Call
 	)
 
 	BeforeEach(func() {
@@ -124,6 +130,14 @@ var _ = Describe("Node Operations", func() {
 		fakeOvnNode = NewFakeOVNNode(fExec)
 		iptV4, iptV6 = util.SetFakeIPTablesHelpers()
 		fNPW = initFakeNodePortWatcher(fakeOvnNode, iptV4, iptV6)
+		mockNetOps = new(util_mocks.NETOps)
+		util.SetNETLibOpsMockInst(mockNetOps)
+		fakeIPNet = getFakeIpNet()
+		netOpsMockHelper := ovntest.TestifyMockHelper{"InterfaceAddrs", nil, []interface{}{fakeIPNet, nil}, 0, 1}
+		fakeNetCall = mockNetOps.On(netOpsMockHelper.OnCallMethodName)
+		for _, ret := range netOpsMockHelper.RetArgList {
+			fakeNetCall.ReturnArguments = append(fakeNetCall.ReturnArguments, ret)
+		}
 	})
 
 	Context("on startup", func() {
@@ -236,6 +250,8 @@ var _ = Describe("Node Operations", func() {
 				err := f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
+				fakeNetCall.Once()
+
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
 						Items: []v1.Service{
@@ -295,6 +311,7 @@ var _ = Describe("Node Operations", func() {
 					fmt.Sprintf("ip route replace %s via %s dev %s table %s", externalIP, v4localnetGatewayIP, types.K8sMgmtIntfName, localnetGatewayExternalIDTable),
 				})
 
+				fakeNetCall.Once()
 				fNPW.addService(&service)
 
 				expectedTables := map[string]util.FakeTable{
@@ -330,6 +347,7 @@ var _ = Describe("Node Operations", func() {
 					[]string{externalIP},
 				)
 
+				fakeNetCall.Once()
 				fNPW.addService(&service)
 
 				expectedTables := map[string]util.FakeTable{
@@ -352,8 +370,10 @@ var _ = Describe("Node Operations", func() {
 
 		It("inits iptables rules when ExternalIP attached to network interface", func() {
 			app.Action = func(ctx *cli.Context) error {
-				externalIP := "10.10.10.1"
 
+				netOpsMockHelper := ovntest.TestifyMockHelper{"InterfaceAddrs", nil, []interface{}{fakeIPNet, nil}, 0, 1}
+
+				externalIP := "10.10.10.1"
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -364,6 +384,12 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceTypeClusterIP,
 					[]string{externalIP},
 				)
+				call := mockNetOps.On(netOpsMockHelper.OnCallMethodName)
+				for _, ret := range netOpsMockHelper.RetArgList {
+					call.ReturnArguments = append(call.ReturnArguments, ret)
+				}
+
+				call.Once()
 
 				fNPW.addService(&service)
 
@@ -388,6 +414,7 @@ var _ = Describe("Node Operations", func() {
 		It("inits iptables rules with NodePort", func() {
 			app.Action = func(ctx *cli.Context) error {
 				nodePort := int32(31111)
+				netOpsMockHelper := ovntest.TestifyMockHelper{"InterfaceAddrs", nil, []interface{}{fakeIPNet, nil}, 0, 1}
 
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
@@ -399,6 +426,12 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceTypeNodePort,
 					nil,
 				)
+				call := mockNetOps.On(netOpsMockHelper.OnCallMethodName)
+				for _, ret := range netOpsMockHelper.RetArgList {
+					call.ReturnArguments = append(call.ReturnArguments, ret)
+				}
+
+				call.Once()
 
 				fNPW.addService(&service)
 
@@ -437,6 +470,8 @@ var _ = Describe("Node Operations", func() {
 					nil,
 				)
 				service.Spec.ClusterIPs = []string{"10.129.0.2", "fd00:10:96::10"}
+
+				fakeNetCall.Times(len(service.Spec.ClusterIPs))
 				fNPW.addService(&service)
 
 				expectedTables4 := map[string]util.FakeTable{
@@ -469,6 +504,8 @@ var _ = Describe("Node Operations", func() {
 		})
 
 		It("inits iptables rules for ExternalIP with DualStack", func() {
+			netOpsMockHelper := ovntest.TestifyMockHelper{"InterfaceAddrs", nil, []interface{}{fakeIPNet, nil}, 0, 1}
+
 			app.Action = func(ctx *cli.Context) error {
 
 				externalIPv4 := "10.10.10.1"
@@ -488,6 +525,14 @@ var _ = Describe("Node Operations", func() {
 					[]string{externalIPv4, externalIPv6},
 				)
 				service.Spec.ClusterIPs = []string{clusterIPv4, clusterIPv6}
+
+				call := mockNetOps.On(netOpsMockHelper.OnCallMethodName)
+				for _, ret := range netOpsMockHelper.RetArgList {
+					call.ReturnArguments = append(call.ReturnArguments, ret)
+				}
+
+				call.Times(len(service.Spec.ClusterIPs))
+
 				fNPW.addService(&service)
 
 				expectedTables4 := map[string]util.FakeTable{
@@ -540,7 +585,7 @@ var _ = Describe("Node Operations", func() {
 				fakeOvnNode.fakeExec.AddFakeCmdsNoOutputNoError([]string{
 					fmt.Sprintf("ip route del %s via %s dev %s table %s", externalIP, v4localnetGatewayIP, types.K8sMgmtIntfName, localnetGatewayExternalIDTable),
 				})
-
+				fakeNetCall.Once()
 				fNPW.deleteService(&service)
 
 				expectedTables := map[string]util.FakeTable{
@@ -575,7 +620,7 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceTypeClusterIP,
 					[]string{externalIP},
 				)
-
+				fakeNetCall.Once()
 				fNPW.deleteService(&service)
 
 				expectedTables := map[string]util.FakeTable{
@@ -610,7 +655,7 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceTypeClusterIP,
 					[]string{externalIP},
 				)
-
+				fakeNetCall.Once()
 				fNPW.deleteService(&service)
 
 				expectedTables := map[string]util.FakeTable{
@@ -645,7 +690,7 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceTypeNodePort,
 					nil,
 				)
-
+				fakeNetCall.Once()
 				fNPW.deleteService(&service)
 
 				expectedTables := map[string]util.FakeTable{
@@ -683,7 +728,7 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceTypeClusterIP,
 					[]string{externalIP},
 				)
-
+				fakeNetCall.Once()
 				fNPW.addService(&service)
 
 				expectedTables := map[string]util.FakeTable{
@@ -697,7 +742,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err := f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-
+				fakeNetCall.Once()
 				fNPW.deleteService(&service)
 
 				expectedTables = map[string]util.FakeTable{
@@ -730,7 +775,7 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceTypeNodePort,
 					nil,
 				)
-
+				fakeNetCall.Once()
 				fNPW.addService(&service)
 
 				expectedTables := map[string]util.FakeTable{
@@ -744,7 +789,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err := f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-
+				fakeNetCall.Once()
 				fNPW.deleteService(&service)
 
 				expectedTables = map[string]util.FakeTable{
