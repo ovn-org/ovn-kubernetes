@@ -44,9 +44,6 @@ service.kubernetes.io/headless
 # TO BE FIXED BY https://github.com/kubernetes/kubernetes/pull/95351
 should resolve connection reset issue #74839
 
-# Broken in shared gw mode
-service endpoints using hostNetwork
-
 # api flakes
 sig-api-machinery
 
