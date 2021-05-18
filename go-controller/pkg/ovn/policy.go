@@ -595,7 +595,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 			oc.lspIngressDenyCache[portInfo.name]--
 			if oc.lspIngressDenyCache[portInfo.name] == 0 {
 				deleteFromIngress = true
-
+				delete(oc.lspIngressDenyCache, portInfo.name)
 			}
 		}
 	}
@@ -607,6 +607,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 			oc.lspEgressDenyCache[portInfo.name]--
 			if oc.lspEgressDenyCache[portInfo.name] == 0 {
 				deleteFromEgress = true
+				delete(oc.lspEgressDenyCache, portInfo.name)
 			}
 		}
 	}
@@ -699,11 +700,6 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 	}
 
 	oc.localPodDelDefaultDeny(np, nsInfo, portInfo)
-
-	oc.lspMutex.Lock()
-	delete(oc.lspIngressDenyCache, logicalPort)
-	delete(oc.lspEgressDenyCache, logicalPort)
-	oc.lspMutex.Unlock()
 
 	if np.portGroupUUID == "" {
 		return
