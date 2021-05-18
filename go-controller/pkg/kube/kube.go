@@ -30,6 +30,7 @@ type Interface interface {
 	GetNodes() (*kapi.NodeList, error)
 	GetEgressIP(name string) (*egressipv1.EgressIP, error)
 	GetEgressIPs() (*egressipv1.EgressIPList, error)
+	GetEgressFirewalls() (*egressfirewall.EgressFirewallList, error)
 	GetNamespaces(labelSelector metav1.LabelSelector) (*kapi.NamespaceList, error)
 	GetPods(namespace string, labelSelector metav1.LabelSelector) (*kapi.PodList, error)
 	GetNode(name string) (*kapi.Node, error)
@@ -189,6 +190,11 @@ func (k *Kube) GetEgressIP(name string) (*egressipv1.EgressIP, error) {
 // GetEgressIPs returns the list of all EgressIP objects from kubernetes
 func (k *Kube) GetEgressIPs() (*egressipv1.EgressIPList, error) {
 	return k.EIPClient.K8sV1().EgressIPs().List(context.TODO(), metav1.ListOptions{})
+}
+
+// GetEgressFirewalls returns the list of all EgressFirewall objects from kubernetes
+func (k *Kube) GetEgressFirewalls() (*egressfirewall.EgressFirewallList, error) {
+	return k.EgressFirewallClient.K8sV1().EgressFirewalls(metav1.NamespaceAll).List(context.TODO(), metav1.ListOptions{})
 }
 
 // GetEndpoint returns the Endpoints resource

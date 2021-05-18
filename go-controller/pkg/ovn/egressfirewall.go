@@ -174,6 +174,51 @@ func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
 			}
 		}
 	}
+
+	// sync the ovn and k8s egressFirewall states
+	ovnEgressFirewallExternalIDs, stderr, err := util.RunOVNNbctl(
+		"--data=bare",
+		"--no-heading",
+		"--columns=external_id",
+		"--format=table",
+		"find",
+		"acl",
+		fmt.Sprintf("priority<=%s", types.EgressFirewallStartPriority),
+		fmt.Sprintf("priority>=%s", types.MinimumReservedEgressFirewallPriority),
+	)
+	if err != nil {
+		klog.Errorf("Cannot reconcile the state of egressfirewalls in ovn database and k8s. stderr: %s, err: %v", stderr, err)
+	}
+	splitOVNEgressFirewallExternalIDs := strings.Split(ovnEgressFirewallExternalIDs, "\n")
+
+	// represents the namespaces that have firewalls according to  ovn
+	ovnEgressFirewalls := make(map[string]struct{})
+
+	for _, externalID := range splitOVNEgressFirewallExternalIDs {
+		if strings.Contains(externalID, "egressFirewall=") {
+			// Most egressFirewalls will have more then one ACL but we only need to know if there is one for the namespace
+			// so a map is fine and we will add an entry every iteration but because it is a map will overwrite the previous
+			// entry if it already existed
+			ovnEgressFirewalls[strings.Split(externalID, "egressFirewall=")[1]] = struct{}{}
+		}
+	}
+
+	// get all the k8s EgressFirewall Objects
+	egressFirewallList, err := oc.kube.GetEgressFirewalls()
+	if err != nil {
+		klog.Errorf("Cannot reconcile the state of egressfirewalls in ovn database and k8s. err: %v", err)
+	}
+	// delete entries from the map that exist in k8s and ovn
+	for _, egressFirewall := range egressFirewallList.Items {
+		delete(ovnEgressFirewalls, egressFirewall.Namespace)
+	}
+	// any that are left are spurious and should be cleaned up
+	for spuriousEF := range ovnEgressFirewalls {
+		err := oc.deleteEgressFirewallRules(spuriousEF)
+		if err != nil {
+			klog.Errorf("Cannot fully reconcile the state of egressfirewalls ACLs for namespace %s still exist in ovn db: %v", spuriousEF, err)
+		}
+	}
 }
 
 func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall) error {

@@ -67,12 +67,63 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 	})
 
 	ginkgo.Context("on startup", func() {
+		ginkgo.It("reconciles existing and non-existing egressfirewalls", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const (
+					node1Name string = "node1"
+				)
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
+				})
+
+				// the sync function will find two egressFirewalls in the ovn-databse
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_id --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
+					Output: fmt.Sprintf("%s\n%s\n", "egressFirewall=default", "egressFirewall=none"),
+				})
+				// since there is no egressfirewall in the namespace "none" add the commands to delete it
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:egressFirewall=none",
+					Output: fmt.Sprintf("%s", fakeUUID),
+				})
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 remove logical_switch " + node1Name + " acls " + fmt.Sprintf("%s", fakeUUID),
+				})
+
+				fakeOVN.start(ctx,
+					&v1.NodeList{
+						Items: []v1.Node{
+							{
+								Status: v1.NodeStatus{
+									Phase: v1.NodeRunning,
+								},
+								ObjectMeta: newObjectMeta(node1Name, ""),
+							},
+						},
+					})
+
+				// only create one egressFirewall
+				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls("default").Create(context.TODO(), &egressfirewallapi.EgressFirewall{}, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				fakeOVN.controller.WatchEgressFirewall()
+
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		})
 		ginkgo.It("reconciles an existing egressFirewall with IPv4 CIDR", func() {
 			app.Action = func(ctx *cli.Context) error {
 				const (
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_id --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1",
 					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch " + node1Name + " acls @acl",
@@ -131,6 +182,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_id --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1",
 					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch " + node1Name + " acls @acl",
@@ -190,6 +242,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_id --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1",
 					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1 -- add logical_switch " + node1Name + " acls @acl",
@@ -250,6 +303,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_id --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.5/23) && " +
 						"ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1",
@@ -330,6 +384,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_id --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1",
 					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch " + node1Name + " acls @acl",
@@ -442,12 +497,64 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 	})
 
 	ginkgo.Context("on startup", func() {
+		ginkgo.It("reconciles existing and non-existing egressfirewalls", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const (
+					node1Name string = "node1"
+				)
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
+				})
+
+				// the sync function will find two egressFirewalls in the ovn-databse
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_id --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
+					Output: fmt.Sprintf("%s\n%s\n", "egressFirewall=default", "egressFirewall=none"),
+				})
+				// since there is no egressfirewall in the namespace "none" add the commands to delete it
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:egressFirewall=none",
+					Output: fmt.Sprintf("%s", fakeUUID),
+				})
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 remove logical_switch join acls " + fmt.Sprintf("%s", fakeUUID),
+				})
+
+				fakeOVN.start(ctx,
+					&v1.NodeList{
+						Items: []v1.Node{
+							{
+								Status: v1.NodeStatus{
+									Phase: v1.NodeRunning,
+								},
+								ObjectMeta: newObjectMeta(node1Name, ""),
+							},
+						},
+					})
+
+				// only create one egressFirewall
+				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls("default").Create(context.TODO(), &egressfirewallapi.EgressFirewall{}, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				fakeOVN.controller.WatchEgressFirewall()
+
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		})
 		ginkgo.It("reconciles an existing egressFirewall with IPv4 CIDR", func() {
 			app.Action = func(ctx *cli.Context) error {
 				const (
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_id --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1",
@@ -507,6 +614,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_id --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1",
@@ -567,6 +675,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_id --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=drop external-ids:egressFirewall=namespace1",
@@ -628,6 +737,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_id --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.5/23) && " +
@@ -700,6 +810,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_id --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find logical_router_policy priority<=%s priority>=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1",
