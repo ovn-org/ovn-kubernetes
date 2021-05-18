@@ -23,6 +23,7 @@ import (
 // ACL ovnnb item
 type ACL struct {
 	UUID       string
+	Name       string
 	Action     string
 	Direction  string
 	Match      string
@@ -145,7 +146,7 @@ func (odbi *ovndb) getACLUUIDByRow(entityType EntityType, entity string, row OVN
 	return "", ErrorNotFound
 }
 
-func (odbi *ovndb) aclAddImp(entityType EntityType, entity, direct, match, action string, priority int, external_ids map[string]string, logflag bool, meter, severity string) (*OvnCommand, error) {
+func (odbi *ovndb) aclAddImp(entityType EntityType, entityName, aclName, direct, match, action string, priority int, external_ids map[string]string, logflag bool, meter, severity string) (*OvnCommand, error) {
 	var table string
 
 	switch entityType {
@@ -166,7 +167,7 @@ func (odbi *ovndb) aclAddImp(entityType EntityType, entity, direct, match, actio
 	row["match"] = match
 	row["priority"] = priority
 
-	_, err = odbi.getACLUUIDByRow(entityType, entity, row)
+	_, err = odbi.getACLUUIDByRow(entityType, entityName, row)
 	switch err {
 	case ErrorNotFound:
 		break
@@ -184,6 +185,7 @@ func (odbi *ovndb) aclAddImp(entityType EntityType, entity, direct, match, actio
 		row["external_ids"] = oMap
 	}
 
+	row["name"] = aclName
 	row["action"] = action
 	row["log"] = logflag
 	if logflag {
@@ -213,7 +215,7 @@ func (odbi *ovndb) aclAddImp(entityType EntityType, entity, direct, match, actio
 		return nil, err
 	}
 	mutation := libovsdb.NewMutation("acls", opInsert, mutateSet)
-	condition := libovsdb.NewCondition("name", "==", entity)
+	condition := libovsdb.NewCondition("name", "==", entityName)
 
 	// simple mutate operation
 	mutateOp := libovsdb.Operation{
@@ -226,21 +228,80 @@ func (odbi *ovndb) aclAddImp(entityType EntityType, entity, direct, match, actio
 	return &OvnCommand{operations, odbi, make([][]map[string]interface{}, len(operations))}, nil
 }
 
-func (odbi *ovndb) aclDelImp(entityType EntityType, entity, direct, match string, priority int, external_ids map[string]string) (*OvnCommand, error) {
-	var table string
-
-	switch entityType {
-	case LOGICAL_SWITCH:
-		table = TableLogicalSwitch
-	case PORT_GROUP:
-		table = TablePortGroup
-	default:
-		return nil, ErrorOption
+func (odbi *ovndb) aclSetNameImp(aclUUID, aclName string) (*OvnCommand, error) {
+	if _, ok := odbi.cache[TableACL][aclUUID]; !ok {
+		return nil, ErrorNotFound
 	}
 
 	row := make(OVNRow)
+	row["name"] = aclName
 
-	wherecondition := []interface{}{}
+	condition := libovsdb.NewCondition("_uuid", "==", stringToGoUUID(aclUUID))
+	updateOp := libovsdb.Operation{
+		Op:    opUpdate,
+		Table: TableACL,
+		Row:   row,
+		Where: []interface{}{condition},
+	}
+	operations := []libovsdb.Operation{updateOp}
+	return &OvnCommand{operations, odbi, make([][]map[string]interface{}, len(operations))}, nil
+}
+
+func (odbi *ovndb) aclSetMatchImp(aclUUID, newMatch string) (*OvnCommand, error) {
+	if _, ok := odbi.cache[TableACL][aclUUID]; !ok {
+		return nil, ErrorNotFound
+	}
+
+	row := make(OVNRow)
+	row["match"] = newMatch
+
+	condition := libovsdb.NewCondition("_uuid", "==", stringToGoUUID(aclUUID))
+	updateOp := libovsdb.Operation{
+		Op:    opUpdate,
+		Table: TableACL,
+		Row:   row,
+		Where: []interface{}{condition},
+	}
+	operations := []libovsdb.Operation{updateOp}
+	return &OvnCommand{operations, odbi, make([][]map[string]interface{}, len(operations))}, nil
+}
+
+func (odbi *ovndb) aCLSetLoggingImp(aclUUID string, newLogflag bool, newMeter, newSeverity string) (*OvnCommand, error) {
+	if _, ok := odbi.cache[TableACL][aclUUID]; !ok {
+		return nil, ErrorNotFound
+	}
+
+	row := make(OVNRow)
+	row["log"] = newLogflag
+	if newLogflag {
+		ok := odbi.meterFind(newMeter)
+		if ok {
+			row["meter"] = newMeter
+		}
+		switch newSeverity {
+		case "alert", "debug", "info", "notice", "warning":
+			row["severity"] = newSeverity
+		case "":
+			row["severity"] = "info"
+		default:
+			return nil, ErrorOption
+		}
+	}
+
+	condition := libovsdb.NewCondition("_uuid", "==", stringToGoUUID(aclUUID))
+	updateOp := libovsdb.Operation{
+		Op:    opUpdate,
+		Table: TableACL,
+		Row:   row,
+		Where: []interface{}{condition},
+	}
+	operations := []libovsdb.Operation{updateOp}
+	return &OvnCommand{operations, odbi, make([][]map[string]interface{}, len(operations))}, nil
+}
+
+func (odbi *ovndb) aclDelImp(entityType EntityType, entityName, direct, match string, priority int, external_ids map[string]string) (*OvnCommand, error) {
+	row := make(OVNRow)
+
 	if direct != "" {
 		row["direction"] = direct
 	}
@@ -261,11 +322,36 @@ func (odbi *ovndb) aclDelImp(entityType EntityType, entity, direct, match string
 		row["external_ids"] = oMap
 	}
 
-	aclUUID, err := odbi.getACLUUIDByRow(entityType, entity, row)
+	aclUUID, err := odbi.getACLUUIDByRow(entityType, entityName, row)
 	if err != nil {
 		return nil, err
 	}
 
+	return odbi.aclDelUUIDImp(entityType, entityName, aclUUID)
+}
+
+func (odbi *ovndb) aclDelUUIDImp(entityType EntityType, entityName, aclUUID string) (*OvnCommand, error) {
+	if _, ok := odbi.cache[TableACL][aclUUID]; !ok {
+		return nil, ErrorNotFound
+	}
+
+	var table string
+	switch entityType {
+	case LOGICAL_SWITCH:
+		if _, err := odbi.LSGet(entityName); err != nil {
+			return nil, ErrorNotFound
+		}
+		table = TableLogicalSwitch
+	case PORT_GROUP:
+		if _, err := odbi.PortGroupGet(entityName); err != nil {
+			return nil, ErrorNotFound
+		}
+		table = TablePortGroup
+	default:
+		return nil, ErrorOption
+	}
+
+	wherecondition := []interface{}{}
 	uuidcondition := libovsdb.NewCondition("_uuid", "==", stringToGoUUID(aclUUID))
 	wherecondition = append(wherecondition, uuidcondition)
 	deleteOp := libovsdb.Operation{
@@ -275,7 +361,7 @@ func (odbi *ovndb) aclDelImp(entityType EntityType, entity, direct, match string
 	}
 
 	mutation := libovsdb.NewMutation("acls", opDelete, stringToGoUUID(aclUUID))
-	condition := libovsdb.NewCondition("name", "==", entity)
+	condition := libovsdb.NewCondition("name", "==", entityName)
 
 	// Simple mutate operation
 	mutateOp := libovsdb.Operation{
@@ -318,6 +404,7 @@ func (odbi *ovndb) rowToACL(uuid string) *ACL {
 
 	acl := &ACL{
 		UUID:       uuid,
+		Name:       cacheACL.Fields["name"].(string),
 		Action:     cacheACL.Fields["action"].(string),
 		Direction:  cacheACL.Fields["direction"].(string),
 		Match:      cacheACL.Fields["match"].(string),
@@ -331,7 +418,7 @@ func (odbi *ovndb) rowToACL(uuid string) *ACL {
 	return acl
 }
 
-// Get all acl by lswitch
+// Get all acl by entity
 func (odbi *ovndb) aclListImp(entityType EntityType, entity string) ([]*ACL, error) {
 	odbi.cachemutex.RLock()
 	defer odbi.cachemutex.RUnlock()

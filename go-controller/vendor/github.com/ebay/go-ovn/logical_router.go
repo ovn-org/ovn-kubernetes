@@ -32,6 +32,7 @@ type LogicalRouter struct {
 	StaticRoutes []string
 	NAT          []string
 	LoadBalancer []string
+	Policies     []string
 
 	Options    map[interface{}]interface{}
 	ExternalID map[interface{}]interface{}
@@ -156,6 +157,15 @@ func (odbi *ovndb) rowToLogicalRouter(uuid string) *LogicalRouter {
 			lr.NAT = []string{nats.(libovsdb.UUID).GoUUID}
 		case libovsdb.OvsSet:
 			lr.NAT = odbi.ConvertGoSetToStringArray(nats.(libovsdb.OvsSet))
+		}
+	}
+
+	if policies, ok := cacheLogicalRouter.Fields["policies"]; ok {
+		switch policies.(type) {
+		case libovsdb.UUID:
+			lr.Policies = []string{policies.(libovsdb.UUID).GoUUID}
+		case libovsdb.OvsSet:
+			lr.Policies = odbi.ConvertGoSetToStringArray(policies.(libovsdb.OvsSet))
 		}
 	}
 

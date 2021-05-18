@@ -43,6 +43,7 @@ const (
 	TableMeterBand                string = "Meter_Band"
 	TableLogicalRouterPort        string = "Logical_Router_Port"
 	TableLogicalRouterStaticRoute string = "Logical_Router_Static_Route"
+	TableLogicalRouterPolicy      string = "Logical_Router_Policy"
 	TableNAT                      string = "NAT"
 	TableDHCPOptions              string = "DHCP_Options"
 	TableConnection               string = "Connection"
@@ -66,6 +67,7 @@ var NBTablesOrder = []string{
 	TableMeterBand,
 	TableLogicalRouterPort,
 	TableLogicalRouterStaticRoute,
+	TableLogicalRouterPolicy,
 	TableLogicalSwitchPort,
 	TableNAT,
 	TableConnection,

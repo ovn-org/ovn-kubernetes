@@ -26,9 +26,9 @@ import (
 type LoadBalancer struct {
 	UUID            string
 	Name            string
-	vips            map[interface{}]interface{}
-	protocol        string
-	selectionFields string
+	VIPs            map[interface{}]interface{}
+	Protocol        string
+	SelectionFields string
 	ExternalID      map[interface{}]interface{}
 }
 
@@ -159,6 +159,27 @@ func (odbi *ovndb) lbGetImp(name string) ([]*LoadBalancer, error) {
 	return listLB, nil
 }
 
+func (odbi *ovndb) lbListImp() ([]*LoadBalancer, error) {
+	odbi.cachemutex.RLock()
+	defer odbi.cachemutex.RUnlock()
+
+	cacheLoadBalancer, ok := odbi.cache[TableLoadBalancer]
+	if !ok {
+		return nil, ErrorSchema
+	}
+
+	listLB := make([]*LoadBalancer, 0, len(cacheLoadBalancer))
+	for uuid := range cacheLoadBalancer {
+		lb, err := odbi.rowToLB(uuid)
+		if err != nil {
+			return nil, err
+		}
+		listLB = append(listLB, lb)
+	}
+
+	return listLB, nil
+}
+
 func (odbi *ovndb) lbSetSelectionFieldsImp(name string, selectionFields string) (*OvnCommand, error) {
 	row := make(OVNRow)
 	row["selection_fields"] = selectionFields
@@ -183,14 +204,14 @@ func (odbi *ovndb) rowToLB(uuid string) (*LoadBalancer, error) {
 
 	lb := &LoadBalancer{
 		UUID:       uuid,
-		protocol:   cacheLoadBalancer.Fields["protocol"].(string),
+		Protocol:   cacheLoadBalancer.Fields["protocol"].(string),
 		Name:       cacheLoadBalancer.Fields["name"].(string),
-		vips:       cacheLoadBalancer.Fields["vips"].(libovsdb.OvsMap).GoMap,
+		VIPs:       cacheLoadBalancer.Fields["vips"].(libovsdb.OvsMap).GoMap,
 		ExternalID: cacheLoadBalancer.Fields["external_ids"].(libovsdb.OvsMap).GoMap,
 	}
 
 	if fields, ok := cacheLoadBalancer.Fields["selection_fields"].(string); ok {
-		lb.selectionFields = fields
+		lb.SelectionFields = fields
 	}
 	return lb, nil
 }

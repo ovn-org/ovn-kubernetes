@@ -62,6 +62,8 @@ type Client interface {
 	LSPSetAddress(lsp string, addresses ...string) (*OvnCommand, error)
 	// Set port security per lport
 	LSPSetPortSecurity(lsp string, security ...string) (*OvnCommand, error)
+	// Set logical switch port type
+	LSPSetType(lsp string, portType string) (*OvnCommand, error)
 	// Get all lport by lswitch
 	LSPList(ls string) ([]*LogicalSwitchPort, error)
 
@@ -73,15 +75,21 @@ type Client interface {
 	LSLBList(ls string) ([]*LoadBalancer, error)
 
 	// Add ACL to entity (PORT_GROUP or LOGICAL_SWITCH)
-	ACLAddEntity(entityType EntityType, entity, direct, match, action string, priority int, external_ids map[string]string, logflag bool, meter string, severity string) (*OvnCommand, error)
+	ACLAddEntity(entityType EntityType, entityName, aclName, direct, match, action string, priority int, external_ids map[string]string, logflag bool, meter, severity string) (*OvnCommand, error)
 	// Deprecated in favor of ACLAddEntity(). Add ACL to logical switch.
 	ACLAdd(ls, direct, match, action string, priority int, external_ids map[string]string, logflag bool, meter string, severity string) (*OvnCommand, error)
+	// Set name for ACL
+	ACLSetName(aclUUID, aclName string) (*OvnCommand, error)
+	// Set match criteria for ACL
+	ACLSetMatch(aclUUID, newMatch string) (*OvnCommand, error)
+	// Set logging for ACL
+	ACLSetLogging(aclUUID string, newLogflag bool, newMeter, newSeverity string) (*OvnCommand, error)
 	// Delete acl from entity (PORT_GROUP or LOGICAL_SWITCH)
-	ACLDelEntity(entityType EntityType, entity, direct, match string, priority int, external_ids map[string]string) (*OvnCommand, error)
+	ACLDelEntity(entityType EntityType, entityName, aclUUID string) (*OvnCommand, error)
 	// Deprecated in favor of ACLDelEntity(). Delete acl from logical switch
 	ACLDel(ls, direct, match string, priority int, external_ids map[string]string) (*OvnCommand, error)
 	// Get all acl by entity
-	ACLListEntity(entityType EntityType, entity string) ([]*ACL, error)
+	ACLListEntity(entityType EntityType, entityName string) ([]*ACL, error)
 	// Deprecated in favor of ACLListEntity(). Get all acl by logical switch
 	ACLList(ls string) ([]*ACL, error)
 
@@ -121,6 +129,17 @@ type Client interface {
 	// Get all LRSRs by lr
 	LRSRList(lr string) ([]*LogicalRouterStaticRoute, error)
 
+	// Add LRPolicy
+	LRPolicyAdd(lr string, priority int, match string, action string, nexthop *string, nexthops []string, options map[string]string, external_ids map[string]string) (*OvnCommand, error)
+	// Delete a LR policy by priority and optionally match
+	LRPolicyDel(lr string, priority int, match *string) (*OvnCommand, error)
+	// Delete a LR policy by UUID
+	LRPolicyDelByUUID(lr string, uuid string) (*OvnCommand, error)
+	// Delete all LRPolicies
+	LRPolicyDelAll(lr string) (*OvnCommand, error)
+	// Get all LRPolicies by LR
+	LRPolicyList(lr string) ([]*LogicalRouterPolicy, error)
+
 	// Add LB to LR
 	LRLBAdd(lr string, lb string) (*OvnCommand, error)
 	// Delete LB from LR
@@ -138,6 +157,8 @@ type Client interface {
 	LBUpdate(name string, vipPort string, protocol string, addrs []string) (*OvnCommand, error)
 	// Set selection fields for LB session affinity
 	LBSetSelectionFields(name string, selectionFields string) (*OvnCommand, error)
+	// Get LBs
+	LBList() ([]*LoadBalancer, error)
 
 	// Set dhcp4_options uuid on lsp
 	LSPSetDHCPv4Options(lsp string, options string) (*OvnCommand, error)
@@ -193,6 +214,8 @@ type Client interface {
 	MeterBandsList() ([]*MeterBand, error)
 	// Exec command, support mul-commands in one transaction.
 	Execute(cmds ...*OvnCommand) error
+	// Same as Execute, but returns a UUID for each object created.
+	ExecuteR(cmds ...*OvnCommand) ([]string, error)
 
 	// Add chassis with given name
 	ChassisAdd(name string, hostname string, etype []string, ip string, external_ids map[string]string,
@@ -244,6 +267,12 @@ type Client interface {
 
 	// GetSchema() returns ovn-db schema
 	GetSchema() libovsdb.DatabaseSchema
+
+	// AuxKeyValSet() sets keys/values for a column of OvsMap type, e.g., 'external_ids', 'other_config'.
+	AuxKeyValSet(table string, rowName string, auxCol string, kv map[string]string) (*OvnCommand, error)
+	// AuxKeyValDel() removes keys/values for a column of OvsMap type, e.g., 'external_ids', 'other_config'.
+	// special value of 'nil' removes the given key regardless of its value
+	AuxKeyValDel(table string, rowName string, auxCol string, kv map[string]*string) (*OvnCommand, error)
 }
 
 var _ Client = &ovndb{}
@@ -274,13 +303,27 @@ func connect(c *ovndb) (err error) {
 			c.client = nil
 		}
 	}()
+
+	// Locking the cache mutex to ensure the cache is filled before
+	// events from the notifier are handled.
+	c.cachemutex.Lock()
+	defer c.cachemutex.Unlock()
+
+	// We register the notifier, events start coming in but the
+	// mutex is locked
+	notifier := ovnNotifier{c}
+	ovsdb.Register(notifier)
+
+	// When we connect we initialize the cache, so any deletions
+	// happened while reconnecting are handled correctly.
+	c.cache = make(map[string]map[string]libovsdb.Row)
 	initial, err := c.MonitorTables("")
 	if err != nil {
 		return err
 	}
+
+	// We do the initial dump and populate the cache, we have the mutex
 	c.populateCache(*initial)
-	notifier := ovnNotifier{c}
-	ovsdb.Register(notifier)
 	return nil
 }
 
@@ -297,7 +340,6 @@ func NewClient(cfg *Config) (Client, error) {
 	}
 
 	ovndb := &ovndb{
-		cache:        make(map[string]map[string]libovsdb.Row),
 		signalCB:     cfg.SignalCB,
 		disconnectCB: cfg.DisconnectCB,
 		db:           db,
@@ -492,6 +534,10 @@ func (c *ovndb) LSPSetPortSecurity(lsp string, security ...string) (*OvnCommand,
 	return c.lspSetPortSecurityImp(lsp, security...)
 }
 
+func (c *ovndb) LSPSetType(lsp string, portType string) (*OvnCommand, error) {
+	return c.lspSetTypeImp(lsp, portType)
+}
+
 func (c *ovndb) LSPSetDHCPv4Options(lsp string, options string) (*OvnCommand, error) {
 	return c.lspSetDHCPv4OptionsImp(lsp, options)
 }
@@ -588,6 +634,26 @@ func (c *ovndb) LRLBAdd(lr string, lb string) (*OvnCommand, error) {
 	return c.lrlbAddImp(lr, lb)
 }
 
+func (c *ovndb) LRPolicyAdd(lr string, priority int, match string, action string, nexthop *string, nexthops []string, options map[string]string, external_ids map[string]string) (*OvnCommand, error) {
+	return c.lrpolicyAddImp(lr, priority, match, action, nexthop, nexthops, options, external_ids)
+}
+
+func (c *ovndb) LRPolicyDel(lr string, priority int, match *string) (*OvnCommand, error) {
+	return c.lrpolicyDelImp(lr, priority, match)
+}
+
+func (c *ovndb) LRPolicyDelByUUID(lr string, uuid string) (*OvnCommand, error) {
+	return c.lrpolicyDelByUUIDImp(lr, uuid)
+}
+
+func (c *ovndb) LRPolicyDelAll(lr string) (*OvnCommand, error) {
+	return c.lrpolicyDelAllImp(lr)
+}
+
+func (c *ovndb) LRPolicyList(lr string) ([]*LogicalRouterPolicy, error) {
+	return c.lrPolicyListImp(lr)
+}
+
 func (c *ovndb) LRLBDel(lr string, lb string) (*OvnCommand, error) {
 	return c.lrlbDelImp(lr, lb)
 }
@@ -612,16 +678,32 @@ func (c *ovndb) LBSetSelectionFields(name string, selectionFields string) (*OvnC
 	return c.lbSetSelectionFieldsImp(name, selectionFields)
 }
 
-func (c *ovndb) ACLAddEntity(entityType EntityType, entity, direct, match, action string, priority int, external_ids map[string]string, logflag bool, meter string, severity string) (*OvnCommand, error) {
-	return c.aclAddImp(entityType, entity, direct, match, action, priority, external_ids, logflag, meter, severity)
+func (c *ovndb) LBList() ([]*LoadBalancer, error) {
+	return c.lbListImp()
+}
+
+func (c *ovndb) ACLAddEntity(entityType EntityType, entityName, aclName, direct, match, action string, priority int, external_ids map[string]string, logflag bool, meter, severity string) (*OvnCommand, error) {
+	return c.aclAddImp(entityType, entityName, aclName, direct, match, action, priority, external_ids, logflag, meter, severity)
 }
 
 func (c *ovndb) ACLAdd(ls, direct, match, action string, priority int, external_ids map[string]string, logflag bool, meter string, severity string) (*OvnCommand, error) {
-	return c.aclAddImp(LOGICAL_SWITCH, ls, direct, match, action, priority, external_ids, logflag, meter, severity)
+	return c.aclAddImp(LOGICAL_SWITCH, ls, "", direct, match, action, priority, external_ids, logflag, meter, severity)
 }
 
-func (c *ovndb) ACLDelEntity(entityType EntityType, entity, direct, match string, priority int, external_ids map[string]string) (*OvnCommand, error) {
-	return c.aclDelImp(entityType, entity, direct, match, priority, external_ids)
+func (c *ovndb) ACLSetName(aclUUID, aclName string) (*OvnCommand, error) {
+	return c.aclSetNameImp(aclUUID, aclName)
+}
+
+func (c *ovndb) ACLSetMatch(aclUUID, newMatch string) (*OvnCommand, error) {
+	return c.aclSetMatchImp(aclUUID, newMatch)
+}
+
+func (c *ovndb) ACLSetLogging(aclUUID string, newLogflag bool, newMeter, newSeverity string) (*OvnCommand, error) {
+	return c.aCLSetLoggingImp(aclUUID, newLogflag, newMeter, newSeverity)
+}
+
+func (c *ovndb) ACLDelEntity(entityType EntityType, entityName, aclUUID string) (*OvnCommand, error) {
+	return c.aclDelUUIDImp(entityType, entityName, aclUUID)
 }
 
 func (c *ovndb) ACLDel(ls, direct, match string, priority int, external_ids map[string]string) (*OvnCommand, error) {
@@ -654,6 +736,10 @@ func (c *ovndb) QoSList(ls string) ([]*QoS, error) {
 
 func (c *ovndb) Execute(cmds ...*OvnCommand) error {
 	return c.execute(cmds...)
+}
+
+func (c *ovndb) ExecuteR(cmds ...*OvnCommand) ([]string, error) {
+	return c.executeR(cmds...)
 }
 
 func (c *ovndb) LSGet(ls string) ([]*LogicalSwitch, error) {
@@ -792,4 +878,12 @@ func (c *ovndb) sbGlobalAdd(options map[string]string) (*OvnCommand, error) {
 
 func (c *ovndb) sbGlobalDel() (*OvnCommand, error) {
 	return c.sbGlobalDelImp()
+}
+
+func (c *ovndb) AuxKeyValSet(table string, rowName string, auxCol string, kv map[string]string) (*OvnCommand, error) {
+	return c.auxKeyValSet(table, rowName, auxCol, kv)
+}
+
+func (c *ovndb) AuxKeyValDel(table string, rowName string, auxCol string, kv map[string]*string) (*OvnCommand, error) {
+	return c.auxKeyValDel(table, rowName, auxCol, kv)
 }

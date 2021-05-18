@@ -25,6 +25,8 @@ type ovnNotifier struct {
 }
 
 func (notify ovnNotifier) Update(context interface{}, tableUpdates libovsdb.TableUpdates) {
+	notify.odbi.cachemutex.Lock()
+	defer notify.odbi.cachemutex.Unlock()
 	notify.odbi.populateCache(tableUpdates)
 }
 func (notify ovnNotifier) Locked([]interface{}) {
