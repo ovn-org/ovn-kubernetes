@@ -130,7 +130,13 @@ func DeleteLoadBalancerVIPs(loadBalancers, vips []string) error {
 	for _, loadBalancer := range loadBalancers {
 		for _, vip := range vips {
 			vipQuotes := fmt.Sprintf("\"%s\"", vip)
-			txn.Add("--if-exists", "remove", "load_balancer", loadBalancer, "vips", vipQuotes)
+			request := []string{"--if-exists", "remove", "load_balancer", loadBalancer, "vips", vipQuotes}
+			stdout, stderr, err := txn.AddOrCommit(request)
+			if err != nil {
+				return fmt.Errorf("error in deleting load balancer vip %v for %v"+
+					"stdout: %q, stderr: %q, error: %v",
+					vips, loadBalancers, stdout, stderr, err)
+			}
 		}
 	}
 	stdout, stderr, err := txn.Commit()
@@ -284,7 +290,11 @@ func CreateLoadBalancerVIPs(lb string,
 		}
 		vip := util.JoinHostPortInt32(sourceIP, sourcePort)
 		lbTarget := fmt.Sprintf(`vips:"%s"="%s"`, vip, strings.Join(targets, ","))
-		txn.Add("set", "load_balancer", lb, lbTarget)
+		request := []string{"set", "load_balancer", lb, lbTarget}
+		_, stderr, err := txn.AddOrCommit(request)
+		if err != nil {
+			return fmt.Errorf("unable to create load balancer: stderr: %s, err: %v", stderr, err)
+		}
 	}
 	_, stderr, err := txn.Commit()
 	if err != nil {
@@ -319,7 +329,11 @@ func BundleCreateLoadBalancerVIPs(lbEntries []Entry) error {
 			}
 			vip := util.JoinHostPortInt32(sourceIP, entry.SourcePort)
 			lbTarget := fmt.Sprintf(`vips:"%s"="%s"`, vip, strings.Join(targets, ","))
-			txn.Add("set", "load_balancer", entry.LoadBalancer, lbTarget)
+			request := []string{"set", "load_balancer", entry.LoadBalancer, lbTarget}
+			_, stderr, err := txn.AddOrCommit(request)
+			if err != nil {
+				return fmt.Errorf("unable to create load balancer bundle: stderr: %s, err: %v", stderr, err)
+			}
 		}
 	}
 	_, stderr, err := txn.Commit()
