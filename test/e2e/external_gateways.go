@@ -311,6 +311,12 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 		_, err = runCommand("docker", "exec", gwContainer2, "ping", "-c", testTimeout, addresses.srcPodIP)
 		framework.ExpectNoError(err, "Failed to ping ", addresses.srcPodIP, gwContainer2)
 
+		ginkgo.By("Verifying connectivity to the pod from external gateways with large packets > pod MTU")
+		_, err = runCommand("docker", "exec", gwContainer1, "ping", "-s", "1420", "-c", testTimeout, addresses.srcPodIP)
+		framework.ExpectNoError(err, "Failed to ping ", addresses.srcPodIP, gwContainer1)
+		_, err = runCommand("docker", "exec", gwContainer2, "ping", "-s", "1420", "-c", testTimeout, addresses.srcPodIP)
+		framework.ExpectNoError(err, "Failed to ping ", addresses.srcPodIP, gwContainer2)
+
 	}, ginkgotable.Entry("IPV4", &addressesv4, "icmp"),
 		ginkgotable.Entry("IPV6", &addressesv6, "icmp6"))
 
