@@ -10,8 +10,10 @@ import (
 	goovn "github.com/ebay/go-ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -660,6 +662,9 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	}
 
 	np.localPods[logicalPort] = portInfo
+
+	// Update the policy count metric
+	metrics.MetricPodCountInNetworkPolicy.WithLabelValues(np.namespace, np.name).Inc()
 }
 
 func (oc *Controller) handleLocalPodSelectorDelFunc(
@@ -705,6 +710,9 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 	if err != nil {
 		klog.Errorf("Failed to delete logicalPort %s from portGroup %s (%v)", portInfo.name, np.name, err)
 	}
+
+	// Update the policy count metric
+	metrics.MetricPodCountInNetworkPolicy.WithLabelValues(np.namespace, np.name).Dec()
 }
 
 func (oc *Controller) handleLocalPodSelector(
@@ -919,8 +927,10 @@ func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy) {
 		return
 	}
 
-	delete(nsInfo.networkPolicies, policy.Name)
+	// Delete the podcount metric label
+	metrics.MetricPodCountInNetworkPolicy.DeleteLabelValues(policy.Namespace, policy.Name)
 
+	delete(nsInfo.networkPolicies, policy.Name)
 	oc.destroyNetworkPolicy(np, nsInfo)
 }
 
