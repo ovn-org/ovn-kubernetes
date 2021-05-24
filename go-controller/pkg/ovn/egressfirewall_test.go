@@ -145,11 +145,6 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 							*egressFirewall,
 						},
 					},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespace1,
-						},
-					},
 					&v1.NodeList{
 						Items: []v1.Node{
 							{
@@ -161,7 +156,6 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 						},
 					})
 
-				fakeOVN.controller.WatchNamespaces()
 				fakeOVN.controller.WatchEgressFirewall()
 
 				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
@@ -338,11 +332,6 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 							*egressFirewall,
 						},
 					},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespace1,
-						},
-					},
 					&v1.NodeList{
 						Items: []v1.Node{
 							{
@@ -360,7 +349,6 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 						},
 					})
 
-				fakeOVN.controller.WatchNamespaces()
 				fakeOVN.controller.WatchEgressFirewall()
 
 				err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Delete(context.TODO(), egressFirewall.Name, *metav1.NewDeleteOptions(0))
@@ -563,11 +551,6 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 							*egressFirewall,
 						},
 					},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespace1,
-						},
-					},
 					&v1.NodeList{
 						Items: []v1.Node{
 							{
@@ -579,7 +562,6 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 						},
 					})
 
-				fakeOVN.controller.WatchNamespaces()
 				fakeOVN.controller.WatchEgressFirewall()
 
 				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
@@ -759,11 +741,6 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 							*egressFirewall,
 						},
 					},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespace1,
-						},
-					},
 					&v1.NodeList{
 						Items: []v1.Node{
 							{
@@ -775,7 +752,6 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 						},
 					})
 
-				fakeOVN.controller.WatchNamespaces()
 				fakeOVN.controller.WatchEgressFirewall()
 
 				err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Delete(context.TODO(), egressFirewall.Name, *metav1.NewDeleteOptions(0))
@@ -834,11 +810,6 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 							*egressFirewall,
 						},
 					},
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespace1,
-						},
-					},
 					&v1.NodeList{
 						Items: []v1.Node{
 							{
@@ -850,7 +821,6 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 						},
 					})
 
-				fakeOVN.controller.WatchNamespaces()
 				fakeOVN.controller.WatchEgressFirewall()
 
 				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
@@ -933,6 +903,8 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 			internalCIDR string
 			ipv4source   string
 			ipv6source   string
+			ipv4Mode     bool
+			ipv6Mode     bool
 			destinations []matchTarget
 			ports        []egressfirewallapi.EgressFirewallPort
 			output       string
@@ -942,6 +914,8 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				internalCIDR: "10.128.0.0/14",
 				ipv4source:   "testv4",
 				ipv6source:   "",
+				ipv4Mode:     true,
+				ipv6Mode:     false,
 				destinations: []matchTarget{{matchKindV4CIDR, "1.2.3.4/32"}},
 				ports:        nil,
 				output:       `match="(ip4.dst == 1.2.3.4/32) && ip4.src == $testv4 && inport == \"` + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + `\""`,
@@ -950,6 +924,8 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				internalCIDR: "10.128.0.0/14",
 				ipv4source:   "testv4",
 				ipv6source:   "testv6",
+				ipv4Mode:     true,
+				ipv6Mode:     true,
 				destinations: []matchTarget{{matchKindV4CIDR, "1.2.3.4/32"}},
 				ports:        nil,
 				output:       `match="(ip4.dst == 1.2.3.4/32) && (ip4.src == $testv4 || ip6.src == $testv6) && inport == \"` + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + `\""`,
@@ -958,6 +934,8 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				internalCIDR: "10.128.0.0/14",
 				ipv4source:   "testv4",
 				ipv6source:   "testv6",
+				ipv4Mode:     true,
+				ipv6Mode:     true,
 				destinations: []matchTarget{{matchKindV4AddressSet, "destv4"}, {matchKindV6AddressSet, "destv6"}},
 				ports:        nil,
 				output:       `match="(ip4.dst == $destv4 || ip6.dst == $destv6) && (ip4.src == $testv4 || ip6.src == $testv6) && inport == \"` + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + `\""`,
@@ -966,6 +944,8 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				internalCIDR: "10.128.0.0/14",
 				ipv4source:   "testv4",
 				ipv6source:   "",
+				ipv4Mode:     true,
+				ipv6Mode:     false,
 				destinations: []matchTarget{{matchKindV4AddressSet, "destv4"}, {matchKindV6AddressSet, ""}},
 				ports:        nil,
 				output:       `match="(ip4.dst == $destv4) && ip4.src == $testv4 && inport == \"` + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + `\""`,
@@ -974,6 +954,8 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				internalCIDR: "10.128.0.0/14",
 				ipv4source:   "testv4",
 				ipv6source:   "testv6",
+				ipv4Mode:     true,
+				ipv6Mode:     true,
 				destinations: []matchTarget{{matchKindV6CIDR, "2001::/64"}},
 				ports:        nil,
 				output:       `match="(ip6.dst == 2001::/64) && (ip4.src == $testv4 || ip6.src == $testv6) && inport == \"` + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + `\""`,
@@ -982,6 +964,8 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 				internalCIDR: "2002:0:0:1234::/64",
 				ipv4source:   "",
 				ipv6source:   "testv6",
+				ipv4Mode:     false,
+				ipv6Mode:     true,
 				destinations: []matchTarget{{matchKindV6AddressSet, "destv6"}},
 				ports:        nil,
 				output:       `match="(ip6.dst == $destv6) && ip6.src == $testv6 && inport == \"` + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + `\""`,
@@ -989,6 +973,8 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 		}
 
 		for _, tc := range testcases {
+			config.IPv4Mode = tc.ipv4Mode
+			config.IPv6Mode = tc.ipv6Mode
 			_, cidr, _ := net.ParseCIDR(tc.internalCIDR)
 			config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{CIDR: cidr}}
 			config.Gateway.Mode = config.GatewayModeShared

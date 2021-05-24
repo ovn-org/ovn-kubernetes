@@ -76,9 +76,6 @@ type namespaceInfo struct {
 	// the policy itself.
 	networkPolicies map[string]*networkPolicy
 
-	// defines the namespaces egressFirewall
-	egressFirewall *egressFirewall
-
 	// routingExternalGWs is a slice of net.IP containing the values parsed from
 	// annotation k8s.ovn.org/routing-external-gws
 	routingExternalGWs gatewayInfo
@@ -142,6 +139,9 @@ type Controller struct {
 	// from inside those functions.
 	namespaces      map[string]*namespaceInfo
 	namespacesMutex sync.Mutex
+
+	// egressFirewalls is a map of namespaces and the egressFirewall attached to it
+	egressFirewalls sync.Map
 
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
