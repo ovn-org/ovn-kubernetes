@@ -29,7 +29,7 @@ const (
 	localnetGatewayExternalIDTable = "6"
 )
 
-func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net.IP, gwIntf string, nodeAnnotator kube.Annotator, recorder record.EventRecorder, cfg *managementPortConfig) (*gateway, error) {
+func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net.IP, gwIntf string, nodeAnnotator kube.Annotator, recorder record.EventRecorder, cfg *managementPortConfig, getLocalAddrs func() (map[string]net.IPNet, error)) (*gateway, error) {
 	gw := &gateway{}
 	var gatewayIfAddrs []*net.IPNet
 	for _, hostSubnet := range hostSubnets {
@@ -63,18 +63,13 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 	patchPort := "patch-" + bridgeName + "_" + nodeName + "-to-br-int"
 
 	if config.Gateway.NodeportEnable {
-		localAddrSet, err := getLocalAddrs()
-		if err != nil {
-			return nil, err
-		}
-
 		if err := initLocalGatewayIPTables(); err != nil {
 			return nil, err
 		}
 		if err := initRoutingRules(); err != nil {
 			return nil, err
 		}
-		gw.localPortWatcher = newLocalPortWatcher(gatewayIfAddrs, recorder, localAddrSet)
+		gw.localPortWatcher = newLocalPortWatcher(gatewayIfAddrs, recorder, getLocalAddrs)
 	}
 
 	gw.readyFunc = func() (bool, error) {
@@ -107,16 +102,16 @@ type localPortWatcher struct {
 	recorder     record.EventRecorder
 	gatewayIPv4  string
 	gatewayIPv6  string
-	localAddrSet map[string]net.IPNet
+	localAddrSet func() (map[string]net.IPNet, error)
 }
 
-func newLocalPortWatcher(gatewayIfAddrs []*net.IPNet, recorder record.EventRecorder, localAddrSet map[string]net.IPNet) *localPortWatcher {
+func newLocalPortWatcher(gatewayIfAddrs []*net.IPNet, recorder record.EventRecorder, localAddrFunc func() (map[string]net.IPNet, error)) *localPortWatcher {
 	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(gatewayIfAddrs)
 	return &localPortWatcher{
 		recorder:     recorder,
 		gatewayIPv4:  gatewayIPv4,
 		gatewayIPv6:  gatewayIPv6,
-		localAddrSet: localAddrSet,
+		localAddrSet: localAddrFunc,
 	}
 }
 
@@ -155,25 +150,8 @@ func (l *localPortWatcher) DeleteService(svc *kapi.Service) {
 	}
 }
 
-func getLocalAddrs() (map[string]net.IPNet, error) {
-	localAddrSet := make(map[string]net.IPNet)
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return nil, err
-	}
-	for _, addr := range addrs {
-		ip, ipNet, err := net.ParseCIDR(addr.String())
-		if err != nil {
-			return nil, err
-		}
-		localAddrSet[ip.String()] = *ipNet
-	}
-	klog.V(5).Infof("Node local addresses initialized to: %v", localAddrSet)
-	return localAddrSet, nil
-}
-
-func (l *localPortWatcher) networkHasAddress(ip net.IP) bool {
-	for _, net := range l.localAddrSet {
+func (l *localPortWatcher) networkHasAddress(localAddrSet map[string]net.IPNet, ip net.IP) bool {
+	for _, net := range localAddrSet {
 		if net.Contains(ip) {
 			return true
 		}
@@ -185,6 +163,11 @@ func (l *localPortWatcher) addService(svc *kapi.Service) error {
 	// don't process headless service or services that doesn't have NodePorts or ExternalIPs
 	if !util.ServiceTypeHasClusterIP(svc) || !util.IsClusterIPSet(svc) {
 		return nil
+	}
+
+	localAddrSet, err := l.localAddrSet()
+	if err != nil {
+		klog.Errorf("Eror Getting node addresses: %v", err)
 	}
 
 	for _, ip := range util.GetClusterIPs(svc) {
@@ -215,10 +198,10 @@ func (l *localPortWatcher) addService(svc *kapi.Service) error {
 				if utilnet.IsIPv6String(externalIP) != isIPv6Service {
 					continue
 				}
-				if _, exists := l.localAddrSet[externalIP]; exists {
+				if _, exists := localAddrSet[externalIP]; exists {
 					iptRules = append(iptRules, getExternalIPTRules(port, externalIP, ip)...)
 					klog.V(5).Infof("Will add iptables rule for ExternalIP: %s", externalIP)
-				} else if l.networkHasAddress(net.ParseIP(externalIP)) {
+				} else if l.networkHasAddress(localAddrSet, net.ParseIP(externalIP)) {
 					klog.V(5).Infof("ExternalIP: %s is reachable through one of the interfaces on this node, will skip setup", externalIP)
 				} else {
 					if gatewayIP != "" {
@@ -251,6 +234,11 @@ func (l *localPortWatcher) deleteService(svc *kapi.Service) error {
 		return nil
 	}
 
+	localAddrSet, err := l.localAddrSet()
+	if err != nil {
+		klog.Errorf("Error Getting node addresses: %v", err)
+	}
+
 	for _, ip := range util.GetClusterIPs(svc) {
 		iptRules := []iptRule{}
 		isIPv6Service := utilnet.IsIPv6String(ip)
@@ -276,10 +264,10 @@ func (l *localPortWatcher) deleteService(svc *kapi.Service) error {
 				if utilnet.IsIPv6String(externalIP) != isIPv6Service {
 					continue
 				}
-				if _, exists := l.localAddrSet[externalIP]; exists {
+				if _, exists := localAddrSet[externalIP]; exists {
 					iptRules = append(iptRules, getExternalIPTRules(port, externalIP, ip)...)
 					klog.V(5).Infof("Will delete iptables rule for ExternalIP: %s", externalIP)
-				} else if l.networkHasAddress(net.ParseIP(externalIP)) {
+				} else if l.networkHasAddress(localAddrSet, net.ParseIP(externalIP)) {
 					klog.V(5).Infof("ExternalIP: %s is reachable through one of the interfaces on this node, will skip cleanup", externalIP)
 				} else {
 					if gatewayIP != "" {
@@ -329,6 +317,11 @@ func (l *localPortWatcher) SyncServices(serviceInterface []interface{}) {
 			}
 		}
 	}
+	localAddrSet, err := l.localAddrSet()
+	if err != nil {
+		klog.Errorf("Error Getting node addresses: %v", err)
+	}
+
 	keepIPTRules := []iptRule{}
 	keepRoutes := []string{}
 	for _, service := range serviceInterface {
@@ -337,13 +330,43 @@ func (l *localPortWatcher) SyncServices(serviceInterface []interface{}) {
 			klog.Errorf("Spurious object in syncServices: %v", serviceInterface)
 			continue
 		}
-		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, []string{l.gatewayIPv4, l.gatewayIPv6})...)
+		keepIPTRules = append(keepIPTRules, getLocalGatewayIPTRules(svc, []string{l.gatewayIPv4, l.gatewayIPv6}, localAddrSet)...)
 		keepRoutes = append(keepRoutes, svc.Spec.ExternalIPs...)
 	}
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
 		recreateIPTRules("nat", chain, keepIPTRules)
 	}
 	removeStaleRoutes(keepRoutes)
+}
+
+// getLocalGatewayIPTRules returns NodePort and ExternalIP iptables rules for service.
+// ExternalIP iptables rules are only added if the IP exist on the node.
+func getLocalGatewayIPTRules(service *kapi.Service, gatewayIPs []string, localAddrSet map[string]net.IPNet) []iptRule {
+	rules := make([]iptRule, 0)
+	clusterIPs := util.GetClusterIPs(service)
+	for _, svcPort := range service.Spec.Ports {
+		if util.ServiceTypeHasNodePort(service) {
+			if gatewayIPs == nil {
+				for _, clusterIP := range clusterIPs {
+					rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.Port)...)
+				}
+			} else {
+				for _, gatewayIP := range gatewayIPs {
+					rules = append(rules, getNodePortIPTRules(svcPort, gatewayIP, svcPort.Port)...)
+				}
+			}
+		}
+		for _, externalIP := range service.Spec.ExternalIPs {
+			// skip IPs that are not present in the node
+			if _, ok := localAddrSet[externalIP]; !ok {
+				continue
+			}
+			if clusterIP, err := util.MatchIPStringFamily(utilnet.IsIPv6String(externalIP), clusterIPs); err == nil {
+				rules = append(rules, getExternalIPTRules(svcPort, externalIP, clusterIP)...)
+			}
+		}
+	}
+	return rules
 }
 
 func initRoutingRules() error {

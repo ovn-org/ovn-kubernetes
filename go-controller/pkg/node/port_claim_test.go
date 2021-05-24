@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"net"
 	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -564,16 +565,22 @@ var _ = Describe("Node Operations", func() {
 	Context("open/close check operations", func() {
 		It("should open and close ports", func() {
 			app.Action = func(ctx *cli.Context) error {
-				localAddrSet, err := getLocalAddrs()
-				Expect(err).ShouldNot(HaveOccurred())
+				fakeLocalAddrSet := func() (map[string]net.IPNet, error) {
+					localAddrSet := make(map[string]net.IPNet)
+					for _, network := range []string{"127.0.0.1/32", "10.10.10.1/24", "fd00:96:1::1/64"} {
+						ip, ipNet, err := net.ParseCIDR(network)
+						Expect(err).NotTo(HaveOccurred())
+						localAddrSet[ip.String()] = *ipNet
+					}
+					return localAddrSet, nil
+				}
 				lpm := localPortManager{
 					recorder:          record.NewFakeRecorder(10),
 					activeSocketsLock: sync.Mutex{},
-					localAddrSet:      localAddrSet,
+					localAddrSet:      fakeLocalAddrSet,
 					portsMap:          make(map[utilnet.LocalPort]utilnet.Closeable),
 					portOpener:        &fakePortOpener{},
 				}
-				Expect(err).NotTo(HaveOccurred())
 				service := newService("service13", "namespace1", "10.129.0.2",
 					[]kapi.ServicePort{
 						{

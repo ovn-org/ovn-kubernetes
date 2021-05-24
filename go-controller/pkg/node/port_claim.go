@@ -31,7 +31,7 @@ type portManager interface {
 type localPortManager struct {
 	recorder          record.EventRecorder
 	activeSocketsLock sync.Mutex
-	localAddrSet      map[string]net.IPNet
+	localAddrSet      func() (map[string]net.IPNet, error)
 	portsMap          map[utilnet.LocalPort]utilnet.Closeable
 	portOpener        utilnet.PortOpener
 }
@@ -39,8 +39,13 @@ type localPortManager struct {
 func (p *localPortManager) open(desc string, ip string, port int32, protocol kapi.Protocol, svc *kapi.Service) error {
 	klog.V(5).Infof("Opening socket for service: %s/%s, port: %v and protocol %s", svc.Namespace, svc.Name, port, protocol)
 
+	localAddrSet, err := p.localAddrSet()
+	if err != nil {
+		klog.Errorf("Eror Getting node addresses: %v", err)
+	}
+
 	if ip != "" {
-		if _, exists := p.localAddrSet[ip]; !exists {
+		if _, exists := localAddrSet[ip]; !exists {
 			klog.V(5).Infof("The IP %s is not one of the node local ports", ip)
 			return nil
 		}
@@ -80,11 +85,16 @@ func (p *localPortManager) open(desc string, ip string, port int32, protocol kap
 func (p *localPortManager) close(desc string, ip string, port int32, protocol kapi.Protocol, svc *kapi.Service) error {
 	klog.V(5).Infof("Closing socket claimed for service: %s/%s and port: %v", svc.Namespace, svc.Name, port)
 
+	localAddrSet, err := p.localAddrSet()
+	if err != nil {
+		klog.Errorf("Eror Getting node addresses: %v", err)
+	}
+
 	if protocol != kapi.ProtocolTCP && protocol != kapi.ProtocolUDP {
 		return nil
 	}
 	if ip != "" {
-		if _, exists := p.localAddrSet[ip]; !exists {
+		if _, exists := localAddrSet[ip]; !exists {
 			klog.V(5).Infof("The IP %s is not one of the node local ports", ip)
 			return nil
 		}
@@ -123,17 +133,13 @@ type portClaimWatcher struct {
 	port portManager
 }
 
-func newPortClaimWatcher(recorder record.EventRecorder) (*portClaimWatcher, error) {
-	localAddrSet, err := getLocalAddrs()
-	if err != nil {
-		return nil, err
-	}
+func newPortClaimWatcher(recorder record.EventRecorder, getLocalAddrs func() (map[string]net.IPNet, error)) (*portClaimWatcher, error) {
 	return &portClaimWatcher{
 		port: &localPortManager{
 			recorder:          recorder,
 			activeSocketsLock: sync.Mutex{},
 			portsMap:          make(map[utilnet.LocalPort]utilnet.Closeable),
-			localAddrSet:      localAddrSet,
+			localAddrSet:      getLocalAddrs,
 			portOpener:        &utilnet.ListenPortOpener,
 		},
 	}, nil

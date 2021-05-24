@@ -165,9 +165,26 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	var loadBalancerHealthChecker *loadBalancerHealthChecker
 	var portClaimWatcher *portClaimWatcher
 
+	// GetLocalAddrs returns the ip and attatched network for each node interface
+	getLocalAddrs := func() (map[string]net.IPNet, error) {
+		localAddrSet := make(map[string]net.IPNet)
+		addrs, err := net.InterfaceAddrs()
+		if err != nil {
+			return nil, err
+		}
+		for _, addr := range addrs {
+			ip, ipNet, err := net.ParseCIDR(addr.String())
+			if err != nil {
+				return nil, err
+			}
+			localAddrSet[ip.String()] = *ipNet
+		}
+		return localAddrSet, nil
+	}
+
 	if config.Gateway.NodeportEnable {
 		loadBalancerHealthChecker = newLoadBalancerHealthChecker(n.name)
-		portClaimWatcher, err = newPortClaimWatcher(n.recorder)
+		portClaimWatcher, err = newPortClaimWatcher(n.recorder, getLocalAddrs)
 		if err != nil {
 			return err
 		}
@@ -193,7 +210,7 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
 		klog.Info("Preparing Local Gateway")
-		gw, err = newLocalGateway(n.name, subnets, gatewayNextHops, gatewayIntf, nodeAnnotator, n.recorder, managementPortConfig)
+		gw, err = newLocalGateway(n.name, subnets, gatewayNextHops, gatewayIntf, nodeAnnotator, n.recorder, managementPortConfig, getLocalAddrs)
 	case config.GatewayModeShared:
 		klog.Info("Preparing Shared Gateway")
 		gw, err = newSharedGateway(n.name, subnets, gatewayNextHops, gatewayIntf, nodeAnnotator)
