@@ -24,16 +24,6 @@ const (
 	v6localnetGatewayIP = "fd00:96:1::1"
 )
 
-func getFakeLocalAddrs() map[string]net.IPNet {
-	localAddrSet := make(map[string]net.IPNet)
-	for _, network := range []string{"127.0.0.1/32", "10.10.10.1/24", "fd00:96:1::1/64"} {
-		ip, ipNet, err := net.ParseCIDR(network)
-		Expect(err).NotTo(HaveOccurred())
-		localAddrSet[ip.String()] = *ipNet
-	}
-	return localAddrSet
-}
-
 func initFakeNodePortWatcher(fakeOvnNode *FakeOVNNode, iptV4, iptV6 util.IPTablesHelper) *localPortWatcher {
 	initIPTable := map[string]util.FakeTable{
 		"nat": {},
@@ -47,10 +37,20 @@ func initFakeNodePortWatcher(fakeOvnNode *FakeOVNNode, iptV4, iptV6 util.IPTable
 	err = f6.MatchState(initIPTable)
 	Expect(err).NotTo(HaveOccurred())
 
+	fakeLocalAddrSet := func() (map[string]net.IPNet, error) {
+		localAddrSet := make(map[string]net.IPNet)
+		for _, network := range []string{"127.0.0.1/32", "10.10.10.1/24", "fd00:96:1::1/64"} {
+			ip, ipNet, err := net.ParseCIDR(network)
+			Expect(err).NotTo(HaveOccurred())
+			localAddrSet[ip.String()] = *ipNet
+		}
+		return localAddrSet, nil
+	}
+
 	fNPW := localPortWatcher{
 		recorder:     fakeOvnNode.recorder,
 		gatewayIPv4:  v4localnetGatewayIP,
-		localAddrSet: getFakeLocalAddrs(),
+		localAddrSet: fakeLocalAddrSet,
 	}
 	return &fNPW
 }
