@@ -15,16 +15,6 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-// GetACLByName returns the ACL UUID
-func GetACLByName(aclName string) (string, error) {
-	aclUUID, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "acl",
-		fmt.Sprintf("name=%s", aclName))
-	if err != nil {
-		return "", errors.Wrapf(err, "Error while querying ACLs by name: %s", stderr)
-	}
-	return aclUUID, nil
-}
-
 // GetRejectACLs returns a map with the ACLs with a reject action
 // the map uses the name of the ACL as key and the uuid as value
 func GetRejectACLs() (map[string]string, error) {
