@@ -610,7 +610,7 @@ func (n *NodeController) syncFlows() {
 			// and we accidentally pick up the old vtep flow and cache it. This should only ever happen on a pod update
 			// with an NS annotation VTEP change. We only need to ignore it for one iteration of sync.
 			if cacheEntry.ignoreLearn {
-				klog.V(5).Infof("Ignoring learned flow to add to hybrid cache for this iteration: %s", line)
+				klog.Infof("Ignoring learned flow to add to hybrid cache for this iteration: %s", line)
 				cacheEntry.ignoreLearn = false
 				cacheEntry.learnedFlow = ""
 				continue
@@ -635,6 +635,13 @@ func (n *NodeController) syncFlows() {
 	_, _, err = util.ReplaceOFFlows(extBridgeName, flows)
 	if err != nil {
 		klog.Errorf("Failed to add flows, error: %v, flows: %s", err, flows)
+		return
+	}
+
+	// handle resetting ignore learn as we may not have encountered some pods while
+	// iterating through the flows in OVS
+	for _, entry := range n.flowCache {
+		entry.ignoreLearn = false
 	}
 }
 
