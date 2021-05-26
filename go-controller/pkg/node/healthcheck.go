@@ -185,7 +185,7 @@ func (c *openflowManager) Run(stopChan <-chan struct{}) {
 				continue
 			}
 			if c.ofportPatch != curOfportPatch {
-				klog.Errorf("Fatal error: ofport of %s has changed from %s to %s",
+				klog.Errorf("Fatal error: patch port %s ofport changed from %s to %s",
 					c.patchIntf, c.ofportPatch, curOfportPatch)
 				os.Exit(1)
 			}
@@ -198,7 +198,7 @@ func (c *openflowManager) Run(stopChan <-chan struct{}) {
 				continue
 			}
 			if c.ofportPhys != curOfportPhys {
-				klog.Errorf("Fatal error: ofport of %s has changed from %s to %s",
+				klog.Errorf("Fatal error: phys port %s ofport changed from %s to %s",
 					c.physIntf, c.ofportPhys, curOfportPhys)
 				os.Exit(1)
 			}
