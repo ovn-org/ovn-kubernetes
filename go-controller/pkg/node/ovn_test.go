@@ -12,9 +12,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
-
-	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
-	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 )
 
 var fakeNodeName = "node"
@@ -49,9 +46,7 @@ func (o *FakeOVNNode) start(ctx *cli.Context, objects ...runtime.Object) {
 	Expect(err).NotTo(HaveOccurred())
 
 	o.fakeClient = &util.OVNClientset{
-		KubeClient:          fake.NewSimpleClientset(v1Objects...),
-		EgressIPClient:      egressipfake.NewSimpleClientset(),
-		APIExtensionsClient: apiextensionsfake.NewSimpleClientset(),
+		KubeClient: fake.NewSimpleClientset(v1Objects...),
 	}
 	o.init()
 }

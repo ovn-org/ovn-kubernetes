@@ -68,6 +68,7 @@ fi
 # OVN_SSL_ENABLE - use SSL transport to NB/SB db and northd (default: no)
 # OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 # OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
+# OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, smart-nic, smart-nic-host (default: full)
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="smart-nic"
@@ -194,6 +195,8 @@ ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
 ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 #OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
+#OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
+ovn_egressfirewall_enable=${OVN_EGRESSFIREWALL_ENABLE:-false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 ovn_netflow_targets=${OVN_NETFLOW_TARGETS:-}
 ovn_sflow_targets=${OVN_SFLOW_TARGETS:-}
@@ -893,6 +896,11 @@ ovn-master() {
   if [[ ${ovn_egressip_enable} == "true" ]]; then
       egressip_enabled_flag="--enable-egress-ip"
   fi
+  egressfirewall_enabled_flag=
+  if [[ ${ovn_egressfirewall_enable} == "true" ]]; then
+	  egressfirewall_enabled_flag="--enable-egress-firewall"
+  fi
+  echo "egressfirewall_enabled_flag=${egressfirewall_enabled_flag}"
 
   ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
 
@@ -918,6 +926,7 @@ ovn-master() {
     ${multicast_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
     ${egressip_enabled_flag} \
+    ${egressfirewall_enabled_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --host-network-namespace ${ovn_host_network_namespace} &
 

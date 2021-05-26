@@ -478,6 +478,7 @@ create_ovn_kube_manifests() {
     --ovn-loglevel-controller="${OVN_LOG_LEVEL_CONTROLLER}" \
     --ovn-loglevel-nbctld="${OVN_LOG_LEVEL_NBCTLD}" \
     --egress-ip-enable=true \
+    --egress-firewall-enable=true \
     --v4-join-subnet="${JOIN_SUBNET_IPV4}" \
     --v6-join-subnet="${JOIN_SUBNET_IPV6}"
   popd
