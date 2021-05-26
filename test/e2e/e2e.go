@@ -1892,6 +1892,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 	var nodesHostnames sets.String
 	maxTries := 0
 	var nodes *v1.NodeList
+	var newNodeAddresses []string 
 
 	ginkgo.Context("Validating ingress traffic", func() {
 		ginkgo.BeforeEach(func() {
@@ -2024,6 +2025,129 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 
 			for _, protocol := range []string{"http", "udp"} {
 				for _, externalAddress := range addresses {
+					responses := sets.NewString()
+					valid := false
+					externalPort := int32(clusterHTTPPort)
+					if protocol == "udp" {
+						externalPort = int32(clusterUDPPort)
+					}
+
+					ginkgo.By("Hitting the external service on " + externalAddress + " and reaching all the endpoints " + protocol)
+					for i := 0; i < maxTries; i++ {
+						epHostname := pokeEndpointHostname(clientContainerName, protocol, externalAddress, externalPort)
+						responses.Insert(epHostname)
+
+						// each endpoint returns its hostname. By doing this, we validate that each ep was reached at least once.
+						if responses.Equal(nodesHostnames) {
+							framework.Logf("Validated external address %s after %d tries", externalAddress, i)
+							valid = true
+							break
+						}
+					}
+					framework.ExpectEqual(valid, true, "Validation failed for external address", externalAddress)
+				}
+			}
+		})
+	})
+	ginkgo.Context("Validating ExternalIP ingress traffic with added node IPs", func() {
+		ginkgo.BeforeEach(func() {
+			endPoints = make([]*v1.Pod, 0)
+			nodesHostnames = sets.NewString()
+
+			var err error
+			nodes, err = e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+			framework.ExpectNoError(err)
+
+			if len(nodes.Items) < 3 {
+				framework.Failf(
+					"Test requires >= 3 Ready nodes, but there are only %v nodes",
+					len(nodes.Items))
+			}
+
+			ginkgo.By("Creating the endpoints pod, one for each worker")
+			for _, node := range nodes.Items {
+				// this create a udp / http netexec listener which is able to receive the "hostname"
+				// command. We use this to validate that each endpoint is received at least once
+				args := []string{
+					"netexec",
+					fmt.Sprintf("--http-port=%d", endpointHTTPPort),
+					fmt.Sprintf("--udp-port=%d", endpointUDPPort),
+				}
+				pod, err := createPod(f, node.Name+"-ep", node.Name, f.Namespace.Name, []string{}, endpointsSelector, func(p *v1.Pod) {
+					p.Spec.Containers[0].Args = args
+				})
+				framework.ExpectNoError(err)
+				endPoints = append(endPoints, pod)
+				nodesHostnames.Insert(pod.Name)
+
+				// this is arbitrary and mutuated from k8s network e2e tests. We aim to hit all the endpoints at least once
+				maxTries = len(endPoints)*len(endPoints) + 30
+			}
+
+			ginkgo.By("Creating an external container to send the traffic from")
+			// the client uses the netexec command from the agnhost image, which is able to receive commands for poking other
+			// addresses.
+			createClusterExternalContainer(clientContainerName, agnhostImage, []string{"--network", "kind", "-P"}, []string{"netexec", "--http-port=80"})
+
+			ginkgo.By("Adding ip addresses to each node")
+			//Add new "special" IP from node subnet to all nodes
+			for i, node := range nodes.Items {
+
+				newIP := "172.18.1."+strconv.Itoa(i)
+				// start the first container that will act as an external gateway
+				_, err := runCommand("docker","exec", node.Name, "ip", "addr", "add", newIP, "dev", "breth0")
+				if err != nil {
+					framework.Failf("failed to add new Addresses to node %s: %v", node.Name, err)
+				}
+
+				newNodeAddresses = append(newNodeAddresses, newIP)
+			} 
+		})
+
+		ginkgo.AfterEach(func() {
+			deleteClusterExternalContainer(clientContainerName)
+
+			for i, node := range nodes.Items {
+				// start the first container that will act as an external gateway
+				_, err := runCommand("docker","exec", node.Name, "ip", "addr", "delete", newNodeAddresses[i], "dev", "breth0")
+				if err != nil {
+					framework.Failf("failed to delete new Addresses to node %s: %v", node.Name, err)
+				}
+			} 
+		})
+		// This test validates ingress traffic to externalservices after a new node Ip is added.
+		// It creates a service on both udp and tcp and assignes all the first node's Addresses as
+		// external Addresses. Then, creates a backend pod on each node.
+		// The backend pods are using the agnhost - netexec command which replies to commands
+		// with different protocols. We use the "hostname" command to have each backend pod to reply
+		// with its hostname.
+		// We use an external container to poke the service exposed on the node and we iterate until
+		// all the hostnames are returned.
+		// In case of dual stack enabled cluster, we iterate over all the node's Addresses and try to hit the
+		// endpoints from both each node's ips.
+		ginkgo.It("Should be allowed by externalip services to a new node ip", func() {
+			serviceName := "externalipsvc"
+			
+			// collecting all the first node's Addresses
+			Addresses := []string{}
+		  
+			for _, a := range nodes.Items[0].Status.Addresses {
+				if addressIsIP(a) {
+					Addresses = append(Addresses, a.Address)
+				}
+			}
+
+			ginkgo.By("Creating the externalip service")
+			externalIPsvcSpec := externalIPServiceSpecFrom(serviceName, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, newNodeAddresses)
+			_, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), externalIPsvcSpec, metav1.CreateOptions{})
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Waiting for the endpoints to pop up")
+			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
+
+			for _, protocol := range []string{"http", "udp"} {
+				for _, externalAddress := range newNodeAddresses {
 					responses := sets.NewString()
 					valid := false
 					externalPort := int32(clusterHTTPPort)
