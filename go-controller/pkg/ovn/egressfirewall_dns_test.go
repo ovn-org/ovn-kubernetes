@@ -182,7 +182,7 @@ func TestAdd(t *testing.T) {
 
 				{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{&dns.Msg{}}, 0, 1},
 				// return a very low ttl so that the update based on ttl timeout occurs
-				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv4, "2")}}, 1 * time.Second, nil}, 0, 1},
+				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv4, "4")}}, 1 * time.Second, nil}, 0, 1},
 				{"Fqdn", []string{"string"}, []interface{}{test1DNSName}, 0, 1},
 
 				{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{&dns.Msg{}}, 0, 1},
@@ -257,7 +257,7 @@ func TestAdd(t *testing.T) {
 				}
 			}
 			if tc.testingUpdateOnQueryTime {
-				for stay, timeout := true, time.After(10*time.Second); stay; {
+				for stay, timeout := true, time.After(15*time.Second); stay; {
 					_, dnsResolves, _ := res.getDNSEntry(tc.dnsName)
 					if dnsResolves != nil {
 						if len(dnsResolves) == 1 && dnsResolves[0].String() == test1IPv4Update {
