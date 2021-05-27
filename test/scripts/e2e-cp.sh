@@ -14,7 +14,7 @@ fi
 
 
 if [ "$OVN_HA" == false ]; then
-  if [ SKIPPED_TESTS != "" ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
   	SKIPPED_TESTS+="|"
   fi
   # No support for these features in no-ha mode yet
