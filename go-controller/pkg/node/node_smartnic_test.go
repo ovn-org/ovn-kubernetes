@@ -144,6 +144,12 @@ var _ = Describe("Node Smart NIC tests", func() {
 				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931"),
 				Err: fmt.Errorf("failed to run ovs command"),
 			})
+			// Mock netlink/ovs calls for cleanup
+			netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
+			netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
+			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: genOVSDelPortCmd("pf0vf9"),
+			})
 
 			// call addRepPort()
 			err := node.addRepPort(&pod, vfRep, ifInfo)
