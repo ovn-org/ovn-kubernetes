@@ -152,7 +152,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair bool) er
 		// and handles removal of stale data on upgrades
 		klog.Info("Remove stale OVN services")
 		if err := c.repair.runOnce(); err != nil {
-			klog.Errorf("Error repairing services: %v")
+			klog.Errorf("Error repairing services: %v", err)
 		}
 	}
 	// Start the workers after the repair loop to avoid races
