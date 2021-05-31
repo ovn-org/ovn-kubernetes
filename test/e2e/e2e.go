@@ -2221,7 +2221,7 @@ var _ = ginkgo.Describe("e2e br-int NetFlow export validation", func() {
 
 		// `kubectl set env` causes rollout of ovnkube-node pod, so wait for all of the ovnkube-node Pods
 		// to be ready
-		err = e2epod.WaitForPodsReady(f.ClientSet, ovnNs, "ovnkube-node", 0)
+		err = e2epod.WaitForPodsReady(f.ClientSet, ovnNs, "ovnkube-node", 60)
 		if err != nil {
 			framework.Failf("ovnkube-node pods are not ready: %v", err)
 		}
