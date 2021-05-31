@@ -343,6 +343,13 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 		}()
 	}
 
+	// Final step to cleanup after resource handlers have synced
+	err := oc.ovnTopologyCleanup()
+	if err != nil {
+		klog.Errorf("Failed to cleanup OVN topology to version %d: %v", ovntypes.OvnCurrentTopologyVersion, err)
+		return err
+	}
+
 	// Master is fully running and resource handlers have synced, update Topology version in OVN
 	stdout, stderr, err := util.RunOVNNbctl("set", "logical_router", ovntypes.OVNClusterRouter,
 		fmt.Sprintf("external_ids:k8s-ovn-topo-version=%d", ovntypes.OvnCurrentTopologyVersion))
@@ -363,6 +370,19 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	}
 
 	return nil
+}
+
+func (oc *Controller) ovnTopologyCleanup() error {
+	ver, err := util.DetermineOVNTopoVersionFromOVN()
+	if err != nil {
+		return err
+	}
+
+	// Cleanup address sets in non dual stack formats in all versions known to possibly exist.
+	if ver <= ovntypes.OvnPortBindingTopoVersion {
+		err = addressset.NonDualStackAddressSetCleanup()
+	}
+	return err
 }
 
 // syncPeriodic adds a goroutine that periodically does some work
