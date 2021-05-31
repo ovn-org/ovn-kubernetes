@@ -465,9 +465,9 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 // Test pod connectivity to other host IP addresses
 var _ = ginkgo.Describe("test e2e pod connectivity to host addresses", func() {
 	const (
-		ovnWorkerNode    string = "ovn-worker"
-		targetIP         string = "123.123.123.123"
-		svcname          string = "node-e2e-to-host"
+		ovnWorkerNode string = "ovn-worker"
+		targetIP      string = "123.123.123.123"
+		svcname       string = "node-e2e-to-host"
 	)
 
 	f := framework.NewDefaultFramework(svcname)
@@ -1878,7 +1878,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 	var nodesHostnames sets.String
 	maxTries := 0
 	var nodes *v1.NodeList
-	var newNodeAddresses []string 
+	var newNodeAddresses []string
 
 	ginkgo.Context("Validating ingress traffic", func() {
 		ginkgo.BeforeEach(func() {
@@ -2079,15 +2079,15 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			//Add new "special" IP from node subnet to all nodes
 			for i, node := range nodes.Items {
 
-				newIP := "172.18.1."+strconv.Itoa(i)
+				newIP := "172.18.1." + strconv.Itoa(i)
 				// start the first container that will act as an external gateway
-				_, err := runCommand("docker","exec", node.Name, "ip", "addr", "add", newIP, "dev", "breth0")
+				_, err := runCommand("docker", "exec", node.Name, "ip", "addr", "add", newIP, "dev", "breth0")
 				if err != nil {
 					framework.Failf("failed to add new Addresses to node %s: %v", node.Name, err)
 				}
 
 				newNodeAddresses = append(newNodeAddresses, newIP)
-			} 
+			}
 		})
 
 		ginkgo.AfterEach(func() {
@@ -2095,11 +2095,11 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 
 			for i, node := range nodes.Items {
 				// start the first container that will act as an external gateway
-				_, err := runCommand("docker","exec", node.Name, "ip", "addr", "delete", newNodeAddresses[i], "dev", "breth0")
+				_, err := runCommand("docker", "exec", node.Name, "ip", "addr", "delete", newNodeAddresses[i], "dev", "breth0")
 				if err != nil {
 					framework.Failf("failed to delete new Addresses to node %s: %v", node.Name, err)
 				}
-			} 
+			}
 		})
 		// This test validates ingress traffic to externalservices after a new node Ip is added.
 		// It creates a service on both udp and tcp and assignes all the first node's Addresses as
@@ -2113,10 +2113,10 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 		// endpoints from both each node's ips.
 		ginkgo.It("Should be allowed by externalip services to a new node ip", func() {
 			serviceName := "externalipsvc"
-			
+
 			// collecting all the first node's Addresses
 			Addresses := []string{}
-		  
+
 			for _, a := range nodes.Items[0].Status.Addresses {
 				if addressIsIP(a) {
 					Addresses = append(Addresses, a.Address)
@@ -2344,7 +2344,7 @@ var _ = ginkgo.Describe("e2e br-int NetFlow export validation", func() {
 
 		// `kubectl set env` causes rollout of ovnkube-node pod, so wait for all of the ovnkube-node Pods
 		// to be ready
-		err = e2epod.WaitForPodsReady(f.ClientSet, ovnNs, "ovnkube-node", 0)
+		err = e2epod.WaitForPodsReady(f.ClientSet, ovnNs, "ovnkube-node", 60)
 		if err != nil {
 			framework.Failf("ovnkube-node pods are not ready: %v", err)
 		}
