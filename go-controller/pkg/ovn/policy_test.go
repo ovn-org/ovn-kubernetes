@@ -767,7 +767,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 	ginkgo.Context("during execution", func() {
 
-		ginkgo.It("correctly creates a networkpolicy allowing a port to a local pod", func() {
+		ginkgo.It("correctly creates and deletes a networkpolicy allowing a port to a local pod", func() {
 			app.Action = func(ctx *cli.Context) error {
 				npTest := kNetworkPolicy{}
 
@@ -812,6 +812,27 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					}},
 				)
 
+				// This is not yet going to be created
+				networkPolicy2 := newNetworkPolicy("networkpolicy2", namespace1.Name,
+					metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							labelName: labelVal,
+						},
+					},
+					[]knet.NetworkPolicyIngressRule{{
+						Ports: []knet.NetworkPolicyPort{{
+							Port:     &intstr.IntOrString{IntVal: portNum + 1},
+							Protocol: &tcpProtocol,
+						}},
+					}},
+					[]knet.NetworkPolicyEgressRule{{
+						Ports: []knet.NetworkPolicyPort{{
+							Port:     &intstr.IntOrString{IntVal: portNum + 1},
+							Protocol: &tcpProtocol,
+						}},
+					}},
+				)
+
 				nPodTest.baseCmds(fExec)
 				npTest.baseCmds(fExec, networkPolicy)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
@@ -821,6 +842,11 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority="+types.DefaultAllowPriority+" direction="+types.DirectionToLPort+" match=\"ip4 && tcp && tcp.dst==%d && outport == @a14195333570786048679\" action=allow-related log=false severity=info meter=acl-logging name=%s_%s_0 external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=0 external-ids:namespace=%s external-ids:policy=%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group %s acls @acl", portNum, networkPolicy.Namespace, networkPolicy.Name, portNum, networkPolicy.Namespace, networkPolicy.Name, fakePgUUID),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=0 external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=0 external-ids:policy_type=Egress", portNum, networkPolicy.Namespace, networkPolicy.Name),
 					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority="+types.DefaultAllowPriority+" direction="+types.DirectionToLPort+" match=\"ip4 && tcp && tcp.dst==%d && inport == @a14195333570786048679\" action=allow-related log=false severity=info meter=acl-logging name=%s_%s_0 external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=0 external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group %s acls @acl", portNum, networkPolicy.Namespace, networkPolicy.Name, portNum, networkPolicy.Namespace, networkPolicy.Name, fakePgUUID),
+
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=0 external-ids:namespace=%s external-ids:policy=%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress", portNum+1, networkPolicy2.Namespace, networkPolicy2.Name),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority="+types.DefaultAllowPriority+" direction="+types.DirectionToLPort+" match=\"ip4 && tcp && tcp.dst==%d && outport == @a14195334670297676890\" action=allow-related log=false severity=info meter=acl-logging name=%s_%s_0 external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=0 external-ids:namespace=%s external-ids:policy=%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group %s acls @acl", portNum+1, networkPolicy2.Namespace, networkPolicy2.Name, portNum+1, networkPolicy2.Namespace, networkPolicy2.Name, fakePgUUID),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=0 external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=0 external-ids:policy_type=Egress", portNum+1, networkPolicy2.Namespace, networkPolicy2.Name),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl priority="+types.DefaultAllowPriority+" direction="+types.DirectionToLPort+" match=\"ip4 && tcp && tcp.dst==%d && inport == @a14195334670297676890\" action=allow-related log=false severity=info meter=acl-logging name=%s_%s_0 external-ids:l4Match=\"tcp && tcp.dst==%d\" external-ids:ipblock_cidr=0 external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group %s acls @acl", portNum+1, networkPolicy2.Namespace, networkPolicy2.Name, portNum+1, networkPolicy2.Namespace, networkPolicy2.Name, fakePgUUID),
 				})
 
 				fakeOvn.start(ctx,
@@ -839,10 +865,63 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
 
+				ginkgo.By("Creating a network policy that applies to a pod")
+
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
+
+				// assert that pod is in the default-deny portgroup
+
+				// this helper function returns a function, because it's called behind
+				// an
+				getPGPorts := func(name string) func() ([]string, error) {
+					return func() ([]string, error) {
+						pg, err := fakeOvn.ovnNBClient.PortGroupGet(name)
+						if err != nil {
+							return nil, err
+						}
+						return pg.Ports, nil
+					}
+				}
+
+				pgDefaultDenyName := defaultDenyPortGroup(namespace1.Name, "ingressDefaultDeny")
+				gomega.Eventually(getPGPorts(pgDefaultDenyName)).Should(gomega.ConsistOf(fakeUUID))
+
+				// assert that pod is in the NP's portgroup
+				np1PG := hashedPortGroup(fmt.Sprintf("%s_%s", networkPolicy.Namespace, networkPolicy.Name))
+				gomega.Eventually(getPGPorts(np1PG)).Should(gomega.ConsistOf(fakeUUID))
+				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
+
+				// Create a second NP
+				ginkgo.By("Creating and deleting another policy that references that pod")
+
+				_, err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Create(context.TODO(), networkPolicy2, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Check that portgroups look sane
+				np2PG := hashedPortGroup(fmt.Sprintf("%s_%s", networkPolicy2.Namespace, networkPolicy2.Name))
+				gomega.Eventually(getPGPorts(pgDefaultDenyName)).Should(gomega.ConsistOf(fakeUUID))
+				gomega.Eventually(getPGPorts(np2PG)).Should(gomega.ConsistOf(fakeUUID))
+
+				// Delete the second network policy
+				err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy2.Namespace).Delete(context.TODO(), networkPolicy2.Name, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Ensure the pod still has default deny
+				gomega.Eventually(getPGPorts(pgDefaultDenyName)).Should(gomega.ConsistOf(fakeUUID))
+
+				// Delete the first network policy
+				ginkgo.By("Deleting that network policy")
+				err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Delete(context.TODO(), networkPolicy.Name, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Check that the default-deny portgroup is now deleted
+				gomega.Eventually(func() error { _, err := getPGPorts(pgDefaultDenyName)(); return err }).Should(gomega.MatchError("object not found"))
+
+				// fake exec checkup
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 
 				return nil
 			}
