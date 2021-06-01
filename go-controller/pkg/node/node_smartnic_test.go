@@ -114,7 +114,6 @@ var _ = Describe("Node Smart NIC tests", func() {
 			vfLink = &linkMock.Link{}
 			ifInfo = &cni.PodInterfaceInfo{
 				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
 				Ingress:       -1,
 				Egress:        -1,
 				IsSmartNic:    true,

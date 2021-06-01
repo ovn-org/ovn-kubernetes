@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strconv"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 
 	"k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -58,6 +61,8 @@ type PodAnnotation struct {
 	Gateways []net.IP
 	// Routes are additional routes to add to the pod's network namespace
 	Routes []PodRoute
+	// MTU to be used on the pod network
+	MTU int
 }
 
 // PodRoute describes any routes to be added to the pod's network namespace
@@ -74,6 +79,7 @@ type podAnnotation struct {
 	MAC      string     `json:"mac_address"`
 	Gateways []string   `json:"gateway_ips,omitempty"`
 	Routes   []podRoute `json:"routes,omitempty"`
+	MTU      string     `json:"mtu,omitempty"`
 
 	IP      string `json:"ip_address,omitempty"`
 	Gateway string `json:"gateway_ip,omitempty"`
@@ -90,6 +96,7 @@ type podRoute struct {
 func MarshalPodAnnotation(podInfo *PodAnnotation) (map[string]string, error) {
 	pa := podAnnotation{
 		MAC: podInfo.MAC.String(),
+		MTU: fmt.Sprintf("%d", podInfo.MTU),
 	}
 
 	if len(podInfo.IPs) == 1 {
@@ -155,6 +162,15 @@ func UnmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, erro
 	podAnnotation.MAC, err = net.ParseMAC(a.MAC)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse pod MAC %q: %v", a.MAC, err)
+	}
+
+	if len(a.MTU) == 0 {
+		podAnnotation.MTU = config.Default.MTU
+	} else {
+		podAnnotation.MTU, err = strconv.Atoi(a.MTU)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse pod network MTU %q: %v", a.MTU, err)
+		}
 	}
 
 	if len(a.IPs) == 0 {

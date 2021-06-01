@@ -420,6 +420,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		podAnnotation := util.PodAnnotation{
 			IPs: podIfAddrs,
 			MAC: podMac,
+			MTU: config.Default.MTU,
 		}
 		var nodeSubnets []*net.IPNet
 		if nodeSubnets = oc.lsManager.GetSwitchSubnets(logicalSwitch); nodeSubnets == nil {

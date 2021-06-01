@@ -212,7 +212,8 @@ var _ = Describe("CNI Utils tests", func() {
 "mac_address":"0a:58:c0:a8:02:03",
 "gateway_ips":["192.168.2.1"],
 "ip_address":"192.168.2.3/24",
-"gateway_ip":"192.168.2.1"}}`,
+"gateway_ip":"192.168.2.1",
+"mtu": "1500"}}`,
 		}
 		It("Creates PodInterfaceInfo with IsSmartNIC false", func() {
 			pif, err := PodAnnotation2PodInfo(podAnnot, false, false)
