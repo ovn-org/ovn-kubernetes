@@ -238,13 +238,16 @@ func LinkRoutesDel(link netlink.Link, subnets []*net.IPNet) error {
 }
 
 // LinkRoutesAdd adds a new route for given subnets through the gwIPstr
-func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet) error {
+func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int) error {
 	for _, subnet := range subnets {
 		route := &netlink.Route{
 			Dst:       subnet,
 			LinkIndex: link.Attrs().Index,
 			Scope:     netlink.SCOPE_UNIVERSE,
 			Gw:        gwIP,
+		}
+		if mtu != 0 {
+			route.MTU = mtu
 		}
 		err := netLinkOps.RouteAdd(route)
 		if err != nil {

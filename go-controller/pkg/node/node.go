@@ -395,7 +395,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 					} else {
 						gwIP = mgmtPortConfig.ipv6.gwIP
 					}
-					err := util.LinkRoutesAdd(link, gwIP, []*net.IPNet{subnet})
+					err := util.LinkRoutesAdd(link, gwIP, []*net.IPNet{subnet}, 0)
 					if err != nil && !os.IsExist(err) {
 						return fmt.Errorf("unable to add legacy route for services via mp0, error: %v", err)
 					}
@@ -546,7 +546,7 @@ func configureSvcRouteViaBridge(bridge string) error {
 		if err != nil {
 			return fmt.Errorf("unable to find gateway IP for subnet: %v, found IPs: %v", subnet, gwIPs)
 		}
-		err = util.LinkRoutesAdd(link, gwIP[0], []*net.IPNet{subnet})
+		err = util.LinkRoutesAdd(link, gwIP[0], []*net.IPNet{subnet}, config.Default.MTU)
 		if err != nil && !os.IsExist(err) {
 			return fmt.Errorf("unable to add route for service via shared gw bridge, error: %v", err)
 		}

@@ -151,6 +151,8 @@ spec:
           value: "{{ ovn_hybrid_overlay_net_cidr }}"
         - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
           value: "{{ ovn_disable_snat_multiple_gws }}"
+        - name: OVN_DISABLE_PKT_MTU_CHECK
+          value: "{{ ovn_disable_pkt_mtu_check }}"
         - name: OVN_NETFLOW_TARGETS
           value: "{{ ovn_netflow_targets }}"
         - name: OVN_SFLOW_TARGETS
