@@ -19,6 +19,7 @@ import (
 	"github.com/onsi/ginkgo/extensions/table"
 	"github.com/onsi/gomega"
 	"github.com/pkg/errors"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -27,6 +28,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	e2edeployment "k8s.io/kubernetes/test/e2e/framework/deployment"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	testutils "k8s.io/kubernetes/test/utils"
@@ -2335,6 +2337,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		}
 		return
 	}
+
 	deletePod := func(f *framework.Framework, namespace string, podName string) {
 		podClient := f.ClientSet.CoreV1().Pods(namespace)
 		err := podClient.Delete(context.Background(), podName, metav1.DeleteOptions{})
@@ -2345,13 +2348,21 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		containerFlag := fmt.Sprintf("-c=%s", pod.Spec.Containers[0].Name)
 		_, err := framework.RunKubectl(ovnNs, "exec", pod.Name, containerFlag, "--", "ls", file)
 		if err == nil {
-				return true
+			return true
 		}
-		if strings.Contains(err.Error(), fmt.Sprintf("ls: cannot access '%s': No such file or directory",file)) {
+		if strings.Contains(err.Error(), fmt.Sprintf("ls: cannot access '%s': No such file or directory", file)) {
 			return false
 		}
 		framework.Failf("failed to check if file %s exists on pod: %s, err: %v", file, pod.Name, err)
 		return false
+	}
+
+	getDeployment := func(f *framework.Framework, namespace string, deploymentName string) *appsv1.Deployment {
+		deploymentClient := f.ClientSet.AppsV1().Deployments(namespace)
+		deployment, err := deploymentClient.Get(context.TODO(), deploymentName, metav1.GetOptions{})
+		framework.ExpectNoError(err, "should get %s deployment", deploymentName)
+
+		return deployment
 	}
 
 	allFilesExistsOnPod := func(f *framework.Framework, namespace string, pod *v1.Pod, files []string) bool {
@@ -2387,6 +2398,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
 		framework.ExpectNoError(<-errChan)
 	}
+
 	twoPodsContinuousConnectivityTest := func(f *framework.Framework,
 		node1Name string, node2Name string,
 		syncChan chan string, errChan chan error) {
@@ -2517,7 +2529,40 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		// table.Entry("when delete south db on ovnkube-db-2", 2, []string{southDBFileName}),
 	)
 
-	ginkgo.It("Should validate connectivity before and after deleting all the db-pods at once", func() {
+	ginkgo.It("Should validate connectivity before and after deleting all the db-pods at once in Non-HA mode", func() {
+		dbDeployment := getDeployment(f, ovnNs, "ovnkube-db")
+		dbPods, err := e2edeployment.GetPodsForDeployment(f.ClientSet, dbDeployment)
+		if err != nil {
+			framework.Failf("Error: Failed to get pods, err: %v", err)
+		}
+		if dbPods.Size() == 0 {
+			framework.Failf("Error: db pods not found")
+		}
+
+		framework.Logf("test simple connectivity from new pod to API server,before deleting db pods")
+		singlePodConnectivityTest(f, "before-delete-db-pods")
+
+		framework.Logf("deleting all the db pods")
+
+		for _, dbPod := range dbPods.Items {
+			dbPodName := dbPod.Name
+			framework.Logf("deleting db pod: %v", dbPodName)
+			// Delete the db-pod in order to emulate the pod restart
+			dbPod.Status.Message = "check"
+			deletePod(f, ovnNs, dbPodName)
+			e2epod.WaitForPodTerminatedInNamespace(f.ClientSet, dbPodName, "", ovnNs)
+		}
+
+		framework.Logf("wait for all the Deployment to become ready again after pod deletion")
+		e2edeployment.WaitForDeploymentComplete(f.ClientSet, dbDeployment)
+
+		framework.Logf("all the pods finish full restart")
+
+		framework.Logf("test simple connectivity from new pod to API server,after recovery")
+		singlePodConnectivityTest(f, "after-delete-db-pods")
+	})
+
+	ginkgo.It("Should validate connectivity before and after deleting all the db-pods at once in HA mode", func() {
 		dbPods, err := e2epod.GetPods(f.ClientSet, ovnNs, map[string]string{"name": databasePodPrefix})
 		if err != nil {
 			framework.Failf("Error: Failed to get pods, err: %v", err)
@@ -2543,7 +2588,6 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		for _, pod := range dbPods {
 			wg.Add(1)
 			go func(pod v1.Pod) {
-				defer ginkgo.GinkgoRecover()
 				defer wg.Done()
 				waitForPodToFinishFullRestart(f, &pod)
 			}(pod)
