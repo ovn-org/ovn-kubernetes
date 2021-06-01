@@ -395,7 +395,10 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		ginkgo.By("Running container which tries to connect to 8.8.8.8 in a loop")
 
 		podChan, errChan := make(chan *v1.Pod), make(chan error)
-		go checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, podChan, errChan)
+		go func() {
+			defer ginkgo.GinkgoRecover()
+			checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, podChan, errChan)
+		}()
 
 		testPod := <-podChan
 		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
@@ -424,8 +427,10 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		ginkgo.By("Running container which tries to connect to 8.8.8.8 in a loop")
 
 		podChan, errChan := make(chan *v1.Pod), make(chan error)
-		go checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, podChan, errChan)
-
+		go func() {
+			defer ginkgo.GinkgoRecover()
+			checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, podChan, errChan)
+		}()
 		testPod := <-podChan
 		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
 
@@ -452,7 +457,10 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		ginkgo.By("Running container which tries to connect to www.google.com. in a loop")
 
 		podChan, errChan := make(chan *v1.Pod), make(chan error)
-		go checkContinuousConnectivity(f, "", "connectivity-test-continuous", "www.google.com.", 443, 30, podChan, errChan)
+		go func() {
+			defer ginkgo.GinkgoRecover()
+			checkContinuousConnectivity(f, "", "connectivity-test-continuous", "www.google.com.", 443, 30, podChan, errChan)
+		}()
 
 		testPod := <-podChan
 		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
@@ -1822,6 +1830,7 @@ var _ = ginkgo.Describe("e2e multiple ecmp external gateway validation", func() 
 		// test if a packet to the loopback is not received within the timer interval.
 		// If an ICMP packet is never detected, return the error via the specified chanel.
 		go func() {
+			defer ginkgo.GinkgoRecover()
 			_, err = runCommand("docker", "exec", gwContainer1, "timeout", testTimeout, "tcpdump", "-c", "1", "icmp")
 			if err == nil {
 				framework.Logf("ICMP packet successfully detected on gateway %s", gwContainer1)
@@ -1830,6 +1839,7 @@ var _ = ginkgo.Describe("e2e multiple ecmp external gateway validation", func() 
 			icmpChan <- err
 		}()
 		go func() {
+			defer ginkgo.GinkgoRecover()
 			_, err = runCommand("docker", "exec", gwContainer2, "timeout", testTimeout, "tcpdump", "-c", "1", "icmp")
 			if err == nil {
 				framework.Logf("ICMP packet successfully detected on gateway %s", gwContainer2)
@@ -1843,6 +1853,7 @@ var _ = ginkgo.Describe("e2e multiple ecmp external gateway validation", func() 
 		for lastOctet := 1; lastOctet <= ecmpRetry; lastOctet++ {
 			gwLo := fmt.Sprintf("%s%d", exGWRemoteIpPrefix, lastOctet)
 			go func() {
+				defer ginkgo.GinkgoRecover()
 				_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, testContainerFlag, "--", "ping", "-c", testTimeout, gwLo)
 				if err != nil {
 					framework.Logf("error generating a ping from the test pod %s: %v", srcPingPodName, err)
@@ -2367,7 +2378,10 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		framework.Logf("Running container which tries to connect to API server in a loop")
 		podChan, errChan := make(chan *v1.Pod), make(chan error)
 
-		go checkContinuousConnectivity(f, "", podName, getApiAddress(), 443, 30, podChan, errChan)
+		go func() {
+			defer ginkgo.GinkgoRecover()
+			checkContinuousConnectivity(f, "", podName, getApiAddress(), 443, 30, podChan, errChan)
+		}()
 		testPod := <-podChan
 
 		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
@@ -2440,8 +2454,11 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 			singlePodConnectivityTest(f, "before-delete-db-files")
 			framework.Logf("setup two pods for continues connectivity test ")
 			syncChan, errChan := make(chan string), make(chan error)
-			go twoPodsContinuousConnectivityTest(f, ovnWorkerNode, ovnWorkerNode2, syncChan, errChan)
-			// Wait for the connectivity test pods to be ready
+			go func() {
+				defer ginkgo.GinkgoRecover()
+				twoPodsContinuousConnectivityTest(f, ovnWorkerNode, ovnWorkerNode2, syncChan, errChan)
+			}()
+			//wait for the connectivity test pods to be ready
 			framework.Logf(<-syncChan + "delete and restart db pods.")
 
 			// Start the db disruption - delete the db files and delete the db-pod in order to emulate the cluster/pod restart
@@ -2526,6 +2543,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		for _, pod := range dbPods {
 			wg.Add(1)
 			go func(pod v1.Pod) {
+				defer ginkgo.GinkgoRecover()
 				defer wg.Done()
 				waitForPodToFinishFullRestart(f, &pod)
 			}(pod)
