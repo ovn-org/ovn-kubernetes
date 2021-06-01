@@ -130,13 +130,14 @@ func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInt
 
 	err := cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, smartNicCD.SandboxId)
 	if err != nil {
+		// Note(adrianc): we are lenient with cleanup in this method as pod is going to be retried anyway.
+		_ = n.delRepPort(vfRepName)
 		return err
 	}
 	klog.Infof("Port %s added to bridge br-int", vfRepName)
 
 	link, err := util.GetNetLinkOps().LinkByName(vfRepName)
 	if err != nil {
-		// Note(adrianc): we are lenient with cleanup in this method as pod is going to be retried anyway.
 		_ = n.delRepPort(vfRepName)
 		return fmt.Errorf("failed to get link device for interface %s", vfRepName)
 	}
