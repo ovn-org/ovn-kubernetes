@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	goovn "github.com/ebay/go-ovn"
+	"github.com/mitchellh/copystructure"
 	"k8s.io/klog/v2"
 )
 
@@ -29,6 +30,10 @@ func (mock *MockOVNClient) LSPGet(lsp string) (*goovn.LogicalSwitchPort, error) 
 	var port interface{}
 	if port, ok = lspCache[lsp]; !ok {
 		return nil, goovn.ErrorNotFound
+	}
+	port, err := copystructure.Copy(port)
+	if err != nil {
+		panic(err) // should never happen
 	}
 	if lspRet, ok := port.(*goovn.LogicalSwitchPort); ok {
 		return lspRet, nil

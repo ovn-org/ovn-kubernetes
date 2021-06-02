@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	goovn "github.com/ebay/go-ovn"
+	"github.com/mitchellh/copystructure"
 	"k8s.io/klog/v2"
 )
 
@@ -22,6 +23,11 @@ func (mock *MockOVNClient) LRGet(lr string) ([]*goovn.LogicalRouter, error) {
 	if lrouter, ok = lrCache[lr]; !ok {
 		return nil, goovn.ErrorNotFound
 	}
+	lrouter, err := copystructure.Copy(lrouter)
+	if err != nil {
+		panic(err) // should never happen
+	}
+
 	if lrRet, ok := lrouter.(*goovn.LogicalRouter); ok {
 		return []*goovn.LogicalRouter{lrRet}, nil
 	}
@@ -73,6 +79,10 @@ func (mock *MockOVNClient) LRList() ([]*goovn.LogicalRouter, error) {
 	}
 	var lrEntry interface{}
 	for _, lrEntry = range lrCache {
+		lrEntry, err := copystructure.Copy(lrEntry)
+		if err != nil {
+			panic(err) // should never happen
+		}
 		lr, ok := lrEntry.(*goovn.LogicalRouter)
 		if !ok {
 			return nil, fmt.Errorf("invalid object type assertion for %s", LogicalRouterType)

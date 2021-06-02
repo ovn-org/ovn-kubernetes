@@ -3,7 +3,9 @@ package testing
 import (
 	"encoding/base64"
 	"fmt"
+
 	goovn "github.com/ebay/go-ovn"
+	"github.com/mitchellh/copystructure"
 	"k8s.io/klog/v2"
 )
 
@@ -74,6 +76,11 @@ func (mock *MockOVNClient) LRSRList(lr string) ([]*goovn.LogicalRouterStaticRout
 	}
 	var lrsrEntry interface{}
 	for _, lrsrEntry = range lrsrCache {
+		lrsrEntry, err := copystructure.Copy(lrsrEntry)
+		if err != nil {
+			panic(err) // should never happen
+		}
+
 		lrsr, ok := lrsrEntry.(*goovn.LogicalRouterStaticRoute)
 		if !ok {
 			return nil, fmt.Errorf("invalid object type assertion for %s", LogicalRouterStaticRouteType)
