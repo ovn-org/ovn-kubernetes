@@ -2,6 +2,9 @@ package testing
 
 import (
 	"fmt"
+
+	"github.com/mitchellh/copystructure"
+
 	goovn "github.com/ebay/go-ovn"
 	"k8s.io/klog/v2"
 )
@@ -133,6 +136,10 @@ func (mock *MockOVNClient) PortGroupGet(group string) (*goovn.PortGroup, error) 
 	var port interface{}
 	if port, ok = pgCache[group]; !ok {
 		return nil, goovn.ErrorNotFound
+	}
+	port, err := copystructure.Copy(port) // deep-copy to prevent data races
+	if err != nil {
+		panic(err) // should never happen
 	}
 	if pgRet, ok := port.(*goovn.PortGroup); ok {
 		return pgRet, nil
