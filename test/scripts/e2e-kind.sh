@@ -10,7 +10,7 @@ groomTestList() {
 
 SKIPPED_TESTS="
 # PERFORMANCE, DISRUPTIVE, OR UNRELATED TESTS: NOT WANTED FOR CI
-Networking IPerf IPv[46]
+Networking IPerf
 \[Feature:PerformanceDNS\]
 Disruptive
 DisruptionController
@@ -21,6 +21,7 @@ DisruptionController
 \[Feature:Federation\]
 should have ipv4 and ipv6 internal node ip
 should have ipv4 and ipv6 node podCIDRs
+LoadBalancers
 
 # TESTS THAT ASSUME KUBE-PROXY
 kube-proxy
@@ -46,6 +47,9 @@ should resolve connection reset issue #74839
 
 # api flakes
 sig-api-machinery
+
+# broken in CRI-O
+HostPort validates that there is no conflict between pods with same hostPort but different hostIP and protocol
 
 # ???
 \[Feature:NoSNAT\]
@@ -110,12 +114,26 @@ if [ "${PARALLEL:-false}" = "true" ]; then
   SKIPPED_TESTS="${SKIPPED_TESTS}|\\[Serial\\]"
 fi
 
+export FLAKE_ATTEMPTS=5
+export NUM_NODES=20
+
+skip_netpol=1
+
 case "$SHARD" in
 	shard-network)
 		FOCUS="\\[sig-network\\]"
 		;;
 	shard-conformance)
 		FOCUS="\\[Conformance\\]|\\[sig-network\\]"
+		;;
+    # the v1.21 network policy tests are thorough but slow
+	# so they get their own shard
+    shard-netpol)
+	    FOCUS='\sNetpol\s'
+		skip_netpol=0
+		# these tests are very difficult to debug when parallel
+		export FLAKE_ATTEMPTS=1
+		export NUM_NODES=1
 		;;
 	shard-test)
 		FOCUS=$(echo ${@:2} | sed 's/ /\\s/g')
@@ -126,6 +144,10 @@ case "$SHARD" in
 	;;
 esac
 
+if [ "$skip_netpol" -eq 1 ]; then
+	SKIPPED_TESTS="${SKIPPED_TESTS}|\sNetpol\s"
+fi
+
 # setting this env prevents ginkgo e2e from trying to run provider setup
 export KUBERNETES_CONFORMANCE_TEST='y'
 # setting these is required to make RuntimeClass tests work ... :/
@@ -135,8 +157,7 @@ export KUBE_CONTAINER_RUNTIME_NAME=containerd
 # FIXME we should not tolerate flakes
 # but until then, we retry the test in the same job
 # to stop PR retriggers for totally broken code
-export FLAKE_ATTEMPTS=5
-export NUM_NODES=20
+
 # Kind clusters are three node clusters
 export NUM_WORKER_NODES=3
 ginkgo --nodes=${NUM_NODES} \

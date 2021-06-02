@@ -158,6 +158,10 @@ jobs:
          # in agnhost images. Disable them for now.
          - {"ipfamily": {"ip": dualstack}, "target": {"shard": {"multicast-enable": "true"}}}
          - {"ipfamily": {"ip": ipv6}, "target": {"shard": {"multicast-enable": "true"}}}
+        # Run the v1.21 network policy tests in a separate shard, since they're slow
+        include:
+        - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "true"}, "gateway-mode": "shared", "target": {"shard": shard-netpol }}
+        - {"ipfamily": {"ip": dualstack}, "ha": {"enabled": "true"}, "gateway-mode": "shared", "target": {"shard": shard-netpol }}
     needs: [build]
     env:
       JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}"
@@ -193,6 +197,10 @@ jobs:
       # Not needed for KIND deployments, so just disable all the time.
       run: |
         sudo ufw disable
+
+    - name: Enable SCTP
+      run: |
+        sudo modprobe sctp
 
     - uses: actions/download-artifact@v2
       with:
@@ -285,6 +293,10 @@ jobs:
       # Not needed for KIND deployments, so just disable all the time.
       run: |
         sudo ufw disable
+
+    - name: Enable SCTP
+      run: |
+        sudo modprobe sctp
 
     - uses: actions/download-artifact@v2
       with:
@@ -408,6 +420,10 @@ jobs:
         # Not needed for KIND deployments, so just disable all the time.
         run: |
           sudo ufw disable
+
+      - name: Enable SCTP
+        run: |
+          sudo modprobe sctp
 
       - uses: actions/download-artifact@v2
         with:
