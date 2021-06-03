@@ -283,6 +283,11 @@ type GatewayConfig struct {
 	V4JoinSubnet string `gcfg:"v4-join-subnet"`
 	// V6JoinSubnet to be used in the cluster
 	V6JoinSubnet string `gcfg:"v6-join-subnet"`
+	// DisablePacketMTUCheck disables adding openflow flows to check packets too large to be
+	// delivered to OVN due to pod MTU being lower than NIC MTU. Disabling this check will result in southbound packets
+	// exceeding pod MTU to be dropped by OVN. With this check enabled, ICMP needs frag/packet too big will be sent
+	// back to the original client
+	DisablePacketMTUCheck bool `gcfg:"disable-pkt-mtu-check"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -915,6 +920,11 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage:       "The v6 join subnet used for assigning join switch IPv6 addresses",
 		Destination: &cliConfig.Gateway.V6JoinSubnet,
 		Value:       Gateway.V6JoinSubnet,
+	},
+	&cli.BoolFlag{
+		Name:        "disable-pkt-mtu-check",
+		Usage:       "Disable OpenFlow checks for if packet size is greater than pod MTU",
+		Destination: &cliConfig.Gateway.DisablePacketMTUCheck,
 	},
 	// Deprecated CLI options
 	&cli.BoolFlag{

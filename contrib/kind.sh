@@ -34,6 +34,7 @@ usage() {
     echo "usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]"
     echo "                 [-ho |--hybrid-enabled] [-ii|--install-ingress] [-n4|--no-ipv4]"
     echo "                 [-i6 |--ipv6] [-wk|--num-workers <num>] [-ds|--disable-snat-multiple-gws]"
+    echo "                 [-dp |--disable-pkt-mtu-check]"
     echo "                 [-nf |--netflow-targets <targets>] [sf|--sflow-targets <targets>] [-if|--ipfix-targets]"
     echo "                 [-sw |--allow-system-writes] [-gm|--gateway-mode <mode>]"
     echo "                 [-nl |--node-loglevel <num>] [-ml|--master-loglevel <num>]"
@@ -49,6 +50,7 @@ usage() {
     echo "-ha  | --ha-enabled                Enable high availability. DEFAULT: HA Disabled."
     echo "-ho  | --hybrid-enabled            Enable hybrid overlay. DEFAULT: Disabled."
     echo "-ds  | --disable-snat-multiple-gws Disable SNAT for multiple gws. DEFAULT: Disabled."
+    echo "-dp  | --disable-pkt-mtu-check     Disable checking packet size greater than MTU. Default: Disabled"
     echo "-nf  | --netflow-targets           Comma delimited list of ip:port netflow collectors. DEFAULT: Disabled."
     echo "-sf  | --sflow-targets             Comma delimited list of ip:port sflow collectors. DEFAULT: Disabled."
     echo "-if  | --ipfix-targets             Comma delimited list of ip:port ipfix collectors. DEFAULT: Disabled."
@@ -97,6 +99,8 @@ parse_args() {
             -ho | --hybrid-enabled )            OVN_HYBRID_OVERLAY_ENABLE=true
                                                 ;;
             -ds | --disable-snat-multiple-gws ) OVN_DISABLE_SNAT_MULTIPLE_GWS=true
+                                                ;;
+            -dp | --disable-pkt-mtu-check )     OVN_DISABLE_PKT_MTU_CHECK=true
                                                 ;;
             -nf | --netflow-targets )           shift
                                                 OVN_NETFLOW_TARGETS=$1
@@ -204,6 +208,7 @@ print_params() {
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
      echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
      echo "OVN_DISABLE_SNAT_MULTIPLE_GWS = $OVN_DISABLE_SNAT_MULTIPLE_GWS"
+     echo "OVN_DISABLE_PKT_MTU_CHECK = $OVN_DISABLE_PKT_MTU_CHECK"
      echo "OVN_NETFLOW_TARGETS = $OVN_NETFLOW_TARGETS"
      echo "OVN_SFLOW_TARGETS = $OVN_SFLOW_TARGETS"
      echo "OVN_IPFIX_TARGETS = $OVN_IPFIX_TARGETS"
@@ -242,6 +247,7 @@ set_default_params() {
   KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
   OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
   OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-false}
+  OVN_DISABLE_PKT_MTU_CHECK=${OVN_DISABLE_PKT_MTU_CHECK:-false}
   OVN_EMPTY_LB_EVENTS=${OVN_EMPTY_LB_EVENTS:-false}
   OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
   KIND_ALLOW_SYSTEM_WRITES=${KIND_ALLOW_SYSTEM_WRITES:-false}
@@ -464,6 +470,7 @@ create_ovn_kube_manifests() {
     --gateway-mode="${OVN_GATEWAY_MODE}" \
     --hybrid-enabled="${OVN_HYBRID_OVERLAY_ENABLE}" \
     --disable-snat-multiple-gws="${OVN_DISABLE_SNAT_MULTIPLE_GWS}" \
+    --disable-pkt-mtu-check="${OVN_DISABLE_PKT_MTU_CHECK}" \
     --ovn-empty-lb-events="${OVN_EMPTY_LB_EVENTS}" \
     --multicast-enabled="${OVN_MULTICAST_ENABLE}" \
     --k8s-apiserver="${API_URL}" \

@@ -419,6 +419,9 @@ func getLoadBalancerIPTRules(svc *kapi.Service, svcPort kapi.ServicePort, gatewa
 //    the return traffic can be steered back to OVN logical topology
 // -- to also handle unDNAT return traffic back out of the host
 func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf string) (*openflowManager, error) {
+	// 14 bytes of overhead for ethernet header (does not include VLAN)
+	maxPktLength := getMaxFrameLength()
+
 	// Get ofport of patchPort, but before that make sure ovn-controller created
 	// one for us (waits for about ovsCommandTimeout seconds)
 	ofportPatch, stderr, err := util.RunOVSVsctl("get", "Interface", patchPort, "ofport")
@@ -440,6 +443,15 @@ func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf stri
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, dl_dst=%s, actions=output:%s,output:LOCAL",
 			defaultOpenFlowCookie, ofportPhys, macAddress, ofportPatch))
+
+	var actions string
+	if config.Gateway.DisablePacketMTUCheck {
+		actions = fmt.Sprintf("output:%s", ofportPatch)
+	} else {
+		// check packet length larger than MTU + eth header - vlan overhead
+		// send to table 11 to check if it needs to go to kernel for ICMP needs frag
+		actions = fmt.Sprintf("check_pkt_larger(%d)->reg0[0],resubmit(,11)", maxPktLength)
+	}
 
 	if config.IPv4Mode {
 		// table 0, packets coming from pods headed externally. Commit connections
@@ -483,7 +495,8 @@ func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf stri
 	// table 1, known connections with ct_label 1 go to pod
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, priority=100, table=1, ct_label=0x1, "+
-			"actions=output:%s", defaultOpenFlowCookie, ofportPatch))
+			"actions=%s",
+			defaultOpenFlowCookie, actions))
 
 	// table 1, traffic to pod subnet go directly to OVN
 	for _, clusterEntry := range config.Default.ClusterSubnets {
@@ -496,8 +509,21 @@ func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf stri
 		}
 		mask, _ := cidr.Mask.Size()
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=15, table=1, %s, %s_dst=%s/%d, actions=output:%s",
-				defaultOpenFlowCookie, ipPrefix, ipPrefix, cidr.IP, mask, ofportPatch))
+			fmt.Sprintf("cookie=%s, priority=15, table=1, %s, %s_dst=%s/%d, "+
+				"actions=%s",
+				defaultOpenFlowCookie, ipPrefix, ipPrefix, cidr.IP, mask, actions))
+	}
+
+	// New dispatch table 11
+	// packets larger than known acceptable MTU need to go to kernel to create ICMP frag needed
+	if !config.Gateway.DisablePacketMTUCheck {
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=10, table=11, reg0=0x1, "+
+				"actions=LOCAL", defaultOpenFlowCookie))
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=1, table=11, "+
+				"actions=output:%s", defaultOpenFlowCookie, ofportPatch))
+
 	}
 
 	if config.IPv6Mode {
