@@ -9,13 +9,6 @@ import (
 	"strings"
 )
 
-// isGatewayInterfaceNone is used to determine if this is a local gateway mode with a "none" gateway interface
-// this indicates if we are in an upgrade mode from 4.5->4.6 where the GR would not exist.
-// See https://github.com/openshift/ovn-kubernetes/pull/281
-func isGatewayInterfaceNone() bool {
-	return config.Gateway.Interface == "none"
-}
-
 // createNodePortLoadBalancers is just a copy of the current node balancer code that will not be invoked during
 // local gateway mode + gateway-interface of "none". So we need to still create them ourselves on for the node
 // switches (since they will not be created on the GR)
