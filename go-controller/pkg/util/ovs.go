@@ -51,6 +51,7 @@ const (
 	ubuntu             = "Ubuntu"
 	windowsOS          = "windows"
 	defaultOSMaxArgs   = 262144
+	minOSArgs          = 1000
 )
 
 const (
@@ -90,17 +91,25 @@ var MetricOvnCliLatency *prometheus.HistogramVec
 var maxArgs int
 
 func init() {
-	out, err := exec.Command("getconf", "ARG_MAX").Output()
-	if err != nil {
-		v, err := strconv.Atoi(strings.TrimSuffix(string(out), "\n"))
-		if err == nil {
-			maxArgs = v
-		}
+	maxArgs = findMaxArgsUsable(defaultOSMaxArgs)
+	klog.Infof("Maximum command line arguments set to: %d", maxArgs)
+}
+
+// findMaxArgsUsable finds the maximum amount of usable args on the system, which may be
+// different than what the kernel returns for ARG_MAX
+func findMaxArgsUsable(estimatedMax int) int {
+	backoff := .9
+	args := make([]string, estimatedMax)
+	for i := range args {
+		args[i] = "a"
 	}
-	if maxArgs == 0 {
-		klog.Warningf("Unable to detect OS MAX_ARGS, defaulting to: %d", defaultOSMaxArgs)
-		maxArgs = defaultOSMaxArgs
+	if estimatedMax <= minOSArgs {
+		return minOSArgs
 	}
+	if _, err := exec.Command("/bin/true", args...).Output(); err != nil {
+		return findMaxArgsUsable(int(float64(estimatedMax) * backoff))
+	}
+	return estimatedMax
 }
 
 func runningPlatform() (string, error) {
@@ -885,6 +894,9 @@ func (t *NBTxn) AddOrCommit(args []string) (string, string, error) {
 		// increment for --
 		incomingLength += 1
 	}
+
+	klog.V(5).Infof("Number of args: %d, txnArgs: %d, incomingLen: %d, buffer: %d", len(t.args),
+		len(t.txnArgs), incomingLength, buffer)
 
 	// case where we are going to exceed max arguments
 	if len(t.args)+len(t.txnArgs)+incomingLength+buffer > maxArgs {
