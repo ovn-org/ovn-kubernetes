@@ -225,13 +225,16 @@ func TestAddToPortGroup(t *testing.T) {
 			},
 		},
 		{
-			desc:     "port exists",
+			desc:     "positive idempotency",
 			name:     pgName,
 			portInfo: &lpInfo{name: lspName, uuid: lspUUID},
 			errMatch: nil,
 			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
 				{
-					OnCallMethodName: "PortGroupAddPort", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, goovn.ErrorExist},
+					OnCallMethodName: "PortGroupAddPort", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, nil},
+				},
+				{
+					OnCallMethodName: "Execute", OnCallMethodArgType: []string{"*goovn.OvnCommand"}, RetArgList: []interface{}{nil},
 				},
 			},
 		},
@@ -239,7 +242,7 @@ func TestAddToPortGroup(t *testing.T) {
 			desc:     "port group not found",
 			name:     pgName,
 			portInfo: &lpInfo{name: lspName, uuid: lspUUID},
-			errMatch: fmt.Errorf("error adding port %s to port group %s (%v)", lspName, pgName, goovn.ErrorNotFound),
+			errMatch: fmt.Errorf("error preparing adding port %s to port group %s (%v)", lspName, pgName, goovn.ErrorNotFound),
 			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
 				{
 					OnCallMethodName: "PortGroupAddPort", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, goovn.ErrorNotFound},
@@ -250,7 +253,7 @@ func TestAddToPortGroup(t *testing.T) {
 			desc:     "other PortGroupAddPort error",
 			name:     pgName,
 			portInfo: &lpInfo{name: lspName, uuid: lspUUID},
-			errMatch: fmt.Errorf("error adding port %s to port group %s (%v)", lspName, pgName, otherError),
+			errMatch: fmt.Errorf("error preparing adding port %s to port group %s (%v)", lspName, pgName, otherError),
 			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
 				{
 					OnCallMethodName: "PortGroupAddPort", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, otherError},
@@ -261,7 +264,7 @@ func TestAddToPortGroup(t *testing.T) {
 			desc:     "execute error",
 			name:     pgName,
 			portInfo: &lpInfo{name: lspName, uuid: lspUUID},
-			errMatch: fmt.Errorf("execute error adding port %s to port group %s (%v)", lspName, pgName, execError),
+			errMatch: fmt.Errorf("error committing adding ports (%s) to port group %s (%v)", lspName, pgName, execError),
 			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
 				{
 					OnCallMethodName: "PortGroupAddPort", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, nil},
@@ -328,7 +331,7 @@ func TestDeleteFromPortGroup(t *testing.T) {
 			desc:     "other PortGroupAddPort error",
 			name:     pgName,
 			portInfo: &lpInfo{name: lspName, uuid: lspUUID},
-			errMatch: fmt.Errorf("error removing port %s from port group %s (%v)", lspName, pgName, otherError),
+			errMatch: fmt.Errorf("error preparing removing port %s from port group %s (%v)", lspName, pgName, otherError),
 			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
 				{
 					OnCallMethodName: "PortGroupRemovePort", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, otherError},
@@ -339,7 +342,7 @@ func TestDeleteFromPortGroup(t *testing.T) {
 			desc:     "execute error",
 			name:     pgName,
 			portInfo: &lpInfo{name: lspName, uuid: lspUUID},
-			errMatch: fmt.Errorf("execute error removing port %s from port group %s (%v)", lspName, pgName, execError),
+			errMatch: fmt.Errorf("error committing removing ports (%s) from port group %s (%v)", lspName, pgName, execError),
 			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
 				{
 					OnCallMethodName: "PortGroupRemovePort", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, nil},

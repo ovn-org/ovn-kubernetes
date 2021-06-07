@@ -5,6 +5,7 @@ import (
 	"net"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 
 	goovn "github.com/ebay/go-ovn"
@@ -222,31 +223,65 @@ func deleteACLPortGroup(portGroupName, direction, priority, match, action string
 	return nil
 }
 
-func addToPortGroup(ovnNBClient goovn.Client, portGroupName string, portInfo *lpInfo) error {
-	cmd, err := ovnNBClient.PortGroupAddPort(portGroupName, portInfo.uuid)
-	if err == nil {
-		if err = ovnNBClient.Execute(cmd); err != nil {
-			return fmt.Errorf("execute error adding port %s to port group %s (%v)", portInfo.name, portGroupName, err)
+func addToPortGroup(ovnNBClient goovn.Client, portGroupName string, ports ...*lpInfo) error {
+	cmds := make([]*goovn.OvnCommand, 0, len(ports))
+	for _, portInfo := range ports {
+		cmd, err := ovnNBClient.PortGroupAddPort(portGroupName, portInfo.uuid)
+		if err != nil {
+			return fmt.Errorf("error preparing adding port %v to port group %s (%v)", portInfo.name, portGroupName, err)
 		}
-	} else if err != goovn.ErrorExist {
-		// Ignore goovn.ErrorExist to implement port "--may-exist" behavior
-		// i.e., if the port is already there, it's okay.
-		return fmt.Errorf("error adding port %s to port group %s (%v)", portInfo.name, portGroupName, err)
+		cmds = append(cmds, cmd)
+	}
+
+	if err := ovnNBClient.Execute(cmds...); err != nil {
+		names := []string{}
+		for _, portInfo := range ports {
+			names = append(names, portInfo.name)
+		}
+		return fmt.Errorf("error committing adding ports (%v) to port group %s (%v)", strings.Join(names, ","), portGroupName, err)
 	}
 	return nil
 }
 
-func deleteFromPortGroup(ovnNBClient goovn.Client, portGroupName string, portInfo *lpInfo) error {
-	cmd, err := ovnNBClient.PortGroupRemovePort(portGroupName, portInfo.uuid)
-	if err == nil {
-		if err = ovnNBClient.Execute(cmd); err != nil {
-			return fmt.Errorf("execute error removing port %s from port group %s (%v)", portInfo.name, portGroupName, err)
+func deleteFromPortGroup(ovnNBClient goovn.Client, portGroupName string, ports ...*lpInfo) error {
+	cmds := make([]*goovn.OvnCommand, 0, len(ports))
+	for _, portInfo := range ports {
+		cmd, err := ovnNBClient.PortGroupRemovePort(portGroupName, portInfo.uuid)
+		if err != nil {
+			// PortGroup already deleted...
+			if err == goovn.ErrorNotFound {
+				return nil
+			} else {
+				return fmt.Errorf("error preparing removing port %v from port group %s (%v)", portInfo.name, portGroupName, err)
+			}
 		}
-	} else if err != goovn.ErrorNotFound {
-		// Ignore goovn.ErrorNotFound to implement "--if-exists" behavior
-		return fmt.Errorf("error removing port %s from port group %s (%v)", portInfo.name, portGroupName, err)
+		cmds = append(cmds, cmd)
+	}
+
+	if err := ovnNBClient.Execute(cmds...); err != nil {
+		names := []string{}
+		for _, portInfo := range ports {
+			names = append(names, portInfo.name)
+		}
+		return fmt.Errorf("error committing removing ports (%v) from port group %s (%v)", strings.Join(names, ","), portGroupName, err)
 	}
 	return nil
+}
+
+// setPortGroup declaratively sets a port group to have a specific set of ports.
+func setPortGroup(ovnNBClient goovn.Client, portGroupName string, ports ...*lpInfo) error {
+
+	uuids := make([]string, 0, len(ports))
+	for _, port := range ports {
+		uuids = append(uuids, port.uuid)
+	}
+
+	cmd, err := ovnNBClient.PortGroupUpdate(portGroupName, uuids, nil)
+	if err != nil {
+		return err
+	}
+
+	return ovnNBClient.Execute(cmd)
 }
 
 func defaultDenyPortGroup(namespace, gressSuffix string) string {
