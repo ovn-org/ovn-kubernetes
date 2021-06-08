@@ -92,6 +92,8 @@ type PodRequest struct {
 	cancel context.CancelFunc
 	// Interface to pod is a Smart-NIC interface
 	IsSmartNIC bool
+	// MAC address
+	MAC string
 }
 
 type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) ([]byte, error)

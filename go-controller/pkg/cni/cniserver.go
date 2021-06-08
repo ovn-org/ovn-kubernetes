@@ -21,6 +21,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // *** The Server is PRIVATE API between OVN components and may be
@@ -93,6 +94,13 @@ func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWat
 	}).Methods("POST")
 
 	factory.AddPodHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			newPod := newObj.(*kapi.Pod)
+			annot, err := util.UnmarshalPodAnnotation(newPod.Annotations)
+			if err == nil {
+				s.cancelPodAddsForOldMACs(newPod, annot.MAC.String())
+			}
+		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			s.cancelOldestPodAdd(pod)
@@ -100,6 +108,22 @@ func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWat
 	}, nil)
 
 	return s, nil
+}
+
+// cancelPodAddsForOldMACs cancels and pod add requests that do not match
+// the given MAC address.
+func (s *Server) cancelPodAddsForOldMACs(pod *kapi.Pod, podMAC string) {
+	s.runningSandboxAddsLock.Lock()
+	defer s.runningSandboxAddsLock.Unlock()
+
+	for _, req := range s.runningSandboxAdds {
+		// Cancel sandbox requests for this pod that have a MAC set
+		// which doesn't match the expected MAC
+		if req.PodNamespace == pod.Namespace && req.PodName == pod.Name && req.MAC != "" && req.MAC != podMAC {
+			req.cancel()
+			klog.Infof("%s canceled sandbox ADD request; expected MAC %s", req, podMAC)
+		}
+	}
 }
 
 // cancelOldestPodAdd requests that the earliest outstanding add operation for a given

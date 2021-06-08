@@ -15,6 +15,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 var (
@@ -106,6 +107,7 @@ func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalID
 	if err != nil {
 		return nil, err
 	}
+	pr.MAC = podInterfaceInfo.MAC.String()
 
 	response := &Response{}
 	if !config.UnprivilegedMode {
@@ -149,10 +151,15 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternal
 	if pr.IsSmartNIC {
 		annotCondFn = isSmartNICReady
 	}
-	annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, pr.PodNamespace, pr.PodName, annotCondFn)
+	rawAnnotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, pr.PodNamespace, pr.PodName, annotCondFn)
 	if err != nil {
 		return nil, err
 	}
+	annotations, err := util.UnmarshalPodAnnotation(rawAnnotations)
+	if err != nil {
+		return nil, err
+	}
+	pr.MAC = annotations.MAC.String()
 
 	if pr.CNIConf.PrevResult != nil {
 		result, err := current.NewResultFromResult(pr.CNIConf.PrevResult)
@@ -182,7 +189,7 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternal
 		}
 
 		for _, direction := range []direction{Ingress, Egress} {
-			annotationBandwith, annotationErr := extractPodBandwidth(annotations, direction)
+			annotationBandwith, annotationErr := extractPodBandwidth(rawAnnotations, direction)
 			ovnBandwith, ovnErr := getOvsPortBandwidth(hostIfaceName, direction)
 			if errors.Is(annotationErr, BandwidthNotFound) && errors.Is(ovnErr, BandwidthNotFound) {
 				continue
