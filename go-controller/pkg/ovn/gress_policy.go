@@ -323,16 +323,28 @@ func (gp *gressPolicy) localPodAddACL(portGroupName, portGroupUUID string, aclLo
 }
 
 // addACLAllow adds an ACL with a given match to the given Port Group
-func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlockCidr int, aclLogging string) error {
-	var direction, action, aclName string
+func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlockCIDR int, aclLogging string) error {
+	var direction, action, aclName, ipBlockCIDRString string
 	direction = types.DirectionToLPort
 	action = "allow-related"
 	aclName = fmt.Sprintf("%s_%s_%v", gp.policyNamespace, gp.policyName, gp.idx)
 
+	// For backward compatibility with existing ACLs, we use "ipblock_cidr=false" for
+	// non-ipblock ACLs and "ipblock_cidr=true" for the first ipblock ACL in a policy,
+	// but then number them after that.
+	switch ipBlockCIDR {
+	case 0:
+		ipBlockCIDRString = "false"
+	case 1:
+		ipBlockCIDRString = "true"
+	default:
+		ipBlockCIDRString = fmt.Sprintf("%d", ipBlockCIDR)
+	}
+
 	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
-		fmt.Sprintf("external-ids:ipblock_cidr=%d", ipBlockCidr),
+		fmt.Sprintf("external-ids:ipblock_cidr=%s", ipBlockCIDRString),
 		fmt.Sprintf("external-ids:namespace=%s", gp.policyNamespace),
 		fmt.Sprintf("external-ids:policy=%s", gp.policyName),
 		fmt.Sprintf("external-ids:%s_num=%d", gp.policyType, gp.idx),
@@ -356,7 +368,7 @@ func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlock
 		fmt.Sprintf("meter=%s", types.OvnACLLoggingMeter),
 		fmt.Sprintf("name=%.63s", aclName),
 		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
-		fmt.Sprintf("external-ids:ipblock_cidr=%d", ipBlockCidr),
+		fmt.Sprintf("external-ids:ipblock_cidr=%s", ipBlockCIDRString),
 		fmt.Sprintf("external-ids:namespace=%s", gp.policyNamespace),
 		fmt.Sprintf("external-ids:policy=%s", gp.policyName),
 		fmt.Sprintf("external-ids:%s_num=%d", gp.policyType, gp.idx),
