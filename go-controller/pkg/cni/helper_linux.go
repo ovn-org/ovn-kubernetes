@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 
+	"k8s.io/client-go/kubernetes"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -251,8 +253,9 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 }
 
 // ConfigureOVS performs OVS configurations in order to set up Pod networking
-func ConfigureOVS(ctx context.Context, namespace string, podName string, hostIfaceName string,
-	ifInfo *PodInterfaceInfo, sandboxID string) error {
+func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
+	ifInfo *PodInterfaceInfo, sandboxID string, podLister corev1listers.PodLister,
+	kclient kubernetes.Interface, initialPodUID string) error {
 	klog.Infof("ConfigureOVS: namespace: %s, podName: %s", namespace, podName)
 	ifaceID := fmt.Sprintf("%s_%s", namespace, podName)
 
@@ -307,18 +310,19 @@ func ConfigureOVS(ctx context.Context, namespace string, podName string, hostIfa
 		return err
 	}
 
-	if err = waitForPodInterface(ctx, ifInfo.MAC.String(), ifInfo.IPs, hostIfaceName, ifaceID, ofPort, ifInfo.CheckExtIDs); err != nil {
-		if ifInfo.CheckExtIDs {
-			return fmt.Errorf("error while waiting on OVS.Interface.external-ids:ovn-installed for pod: %v", err)
-		} else {
-			return fmt.Errorf("error while waiting on flows for pod: %v", err)
-		}
+	if err = waitForPodInterface(ctx, ifInfo.MAC.String(), ifInfo.IPs, hostIfaceName,
+		ifaceID, ofPort, ifInfo.CheckExtIDs, podLister, kclient, namespace, podName,
+		initialPodUID); err != nil {
+		// Ensure the error shows up in node logs, rather than just
+		// being reported back to the runtime.
+		klog.Warningf("[%s/%s %s] pod uid %s: %v", namespace, podName, sandboxID, initialPodUID, err)
+		return err
 	}
 	return nil
 }
 
 // ConfigureInterface sets up the container interface
-func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
+func (pr *PodRequest) ConfigureInterface(ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
 	netns, err := ns.GetNS(pr.Netns)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open netns %q: %v", pr.Netns, err)
@@ -344,7 +348,8 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	}
 
 	if !ifInfo.IsSmartNic {
-		err = ConfigureOVS(pr.ctx, namespace, podName, hostIface.Name, ifInfo, pr.SandboxID)
+		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID,
+			pr.podLister, pr.kclient, pr.PodUID)
 		if err != nil {
 			return nil, err
 		}

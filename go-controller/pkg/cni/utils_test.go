@@ -113,9 +113,10 @@ var _ = Describe("CNI Utils tests", func() {
 
 			fakeClient := newFakeKubeClientWithPod(pod)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
-			annot, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
+			uid, annot, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(annot).To(Equal(podAnnot))
+			Expect(uid).To(Equal(string(pod.UID)))
 		})
 
 		It("Returns with Error if context is canceled", func() {
@@ -132,7 +133,7 @@ var _ = Describe("CNI Utils tests", func() {
 
 			fakeClient := newFakeKubeClientWithPod(pod)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
-			_, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
+			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -151,7 +152,7 @@ var _ = Describe("CNI Utils tests", func() {
 
 			fakeClient := newFakeKubeClientWithPod(pod)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
-			_, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
+			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -165,7 +166,7 @@ var _ = Describe("CNI Utils tests", func() {
 
 			fakeClient := newFakeKubeClientWithPod(pod)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(nil, fmt.Errorf("failed to list pods"))
-			_, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
+			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to list pods"))
 		})
@@ -185,7 +186,7 @@ var _ = Describe("CNI Utils tests", func() {
 
 			fakeClient := newFakeKubeClientWithPod(pod)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(nil, errors.NewNotFound(v1.Resource("pod"), name))
-			_, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
+			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -199,7 +200,7 @@ var _ = Describe("CNI Utils tests", func() {
 
 			fakeClient := fake.NewSimpleClientset(&v1.PodList{Items: []v1.Pod{}})
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(nil, errors.NewNotFound(v1.Resource("pod"), name))
-			_, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
+			_, _, err := GetPodAnnotations(ctx, &podLister, fakeClient, "some-ns", "some-pod", cond)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("timed out waiting for pod after 1s"))
 		})
