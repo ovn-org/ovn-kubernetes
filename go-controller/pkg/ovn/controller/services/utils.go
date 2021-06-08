@@ -338,8 +338,8 @@ func getNodeIPs(isIPv6 bool) ([]string, error) {
 		}
 		physicalIPs, err = util.MatchAllIPStringFamily(isIPv6, physicalIPs)
 		if err != nil {
-			klog.Errorf("Failed to find node ips for gateway: %s that match IP family, error: %v",
-				gatewayRouter, err)
+			klog.Errorf("Failed to find node ips for gateway: %s that match IP family, IPv6: %t, error: %v",
+				gatewayRouter, isIPv6, err)
 			continue
 		}
 		nodeIPs = append(nodeIPs, physicalIPs...)
@@ -350,6 +350,7 @@ func getNodeIPs(isIPv6 bool) ([]string, error) {
 // collectServiceVIPs collects all the vips associated to a given service
 // and returns them as a set.
 func collectServiceVIPs(service *v1.Service) sets.String {
+	isV6Families := getIPFamiliesEnabled()
 	res := sets.NewString()
 	for _, ip := range util.GetClusterIPs(service) {
 		for _, svcPort := range service.Spec.Ports {
@@ -361,10 +362,11 @@ func collectServiceVIPs(service *v1.Service) sets.String {
 	for _, svcPort := range service.Spec.Ports {
 		// Node Port
 		if svcPort.NodePort != 0 {
-			for _, isIPv6 := range []bool{false, true} {
+			for _, isIPv6 := range isV6Families {
 				nodeIPs, err := getNodeIPs(isIPv6)
 				if err != nil {
 					klog.Error(err)
+					continue
 				}
 				for _, ip := range nodeIPs {
 					vip := util.JoinHostPortInt32(ip, svcPort.NodePort)
@@ -406,4 +408,17 @@ func svcNeedsIdling(annotations map[string]string) bool {
 		}
 	}
 	return false
+}
+
+// get IPFamiliesEnabled returns a slice representing which ip families
+// are enabled, with false representing ipv4, and true for ipv6
+func getIPFamiliesEnabled() []bool {
+	isV6Families := make([]bool, 0, 2)
+	if config.IPv4Mode {
+		isV6Families = append(isV6Families, false)
+	}
+	if config.IPv6Mode {
+		isV6Families = append(isV6Families, true)
+	}
+	return isV6Families
 }
