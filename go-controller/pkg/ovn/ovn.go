@@ -301,6 +301,7 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 
 	oc.WatchPods()
 
+	// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
 	oc.WatchNetworkPolicy()
 
 	if config.OVNKubernetesFeature.EnableEgressIP {

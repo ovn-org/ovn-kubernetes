@@ -126,15 +126,19 @@ func (gp *gressPolicy) deletePeerSvcVip(service *v1.Service) error {
 	return gp.peerAddressSet.DeleteIPs(ips)
 }
 
-func (gp *gressPolicy) addPeerPod(pod *v1.Pod) error {
+func (gp *gressPolicy) addPeerPods(pods ...*v1.Pod) error {
 	if gp.peerAddressSet == nil {
-		return fmt.Errorf("peer AddressSet is nil, cannot add peer pod: %s for gressPolicy: %s",
-			pod.ObjectMeta.Name, gp.policyName)
+		return fmt.Errorf("peer AddressSet is nil, cannot add peer pod(s): for gressPolicy: %s",
+			gp.policyName)
 	}
 
-	ips, err := util.GetAllPodIPs(pod)
-	if err != nil {
-		return err
+	ips := []net.IP{}
+	for _, pod := range pods {
+		podIPs, err := util.GetAllPodIPs(pod)
+		if err != nil {
+			return err
+		}
+		ips = append(ips, podIPs...)
 	}
 
 	return gp.peerAddressSet.AddIPs(ips)
