@@ -554,7 +554,7 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 			} else {
 				_, stderr, err := txn.Commit()
 				if err != nil {
-					klog.Errorf("failed to commit db changes for egressFirewall in namespace %s stderr: %q, err: %+v", egressFirewall.Namespace, stderr, err)
+					klog.Errorf("Failed to commit db changes for egressFirewall in namespace %s stderr: %q, err: %+v", egressFirewall.Namespace, stderr, err)
 					egressFirewall.Status.Status = egressFirewallAddError
 				} else {
 					egressFirewall.Status.Status = egressFirewallAppliedCorrectly
@@ -578,7 +578,7 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 				} else {
 					_, stderr, err := txn.Commit()
 					if err != nil {
-						klog.Errorf("failed to commit db changes for egressFirewall in namespace %s stderr: %q, err: %+v", newEgressFirewall.Namespace, stderr, err)
+						klog.Errorf("Failed to commit db changes for egressFirewall in namespace %s stderr: %q, err: %+v", newEgressFirewall.Namespace, stderr, err)
 						newEgressFirewall.Status.Status = egressFirewallUpdateError
 
 					} else {
@@ -601,7 +601,7 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 			}
 			stdout, stderr, err := txn.Commit()
 			if err != nil {
-				klog.Errorf("failed to commit db changes for egressFirewall in namespace %s stdout: %q, stderr: %q, err: %+v", egressFirewall.Namespace, stdout, stderr, err)
+				klog.Errorf("Failed to commit db changes for egressFirewall in namespace %s stdout: %q, stderr: %q, err: %+v", egressFirewall.Namespace, stdout, stderr, err)
 			}
 		},
 	}, oc.syncEgressFirewall)
