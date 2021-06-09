@@ -103,11 +103,17 @@ func findMaxArgsUsable(estimatedMax int) int {
 	for i := range args {
 		args[i] = "a"
 	}
-	if estimatedMax <= minOSArgs {
-		return minOSArgs
+
+	for estimatedMax > minOSArgs {
+		if _, err := exec.Command("/bin/true", args...).Output(); err == nil {
+			break
+		}
+		estimatedMax = int(float64(estimatedMax) * backoff)
+		args = args[:estimatedMax]
 	}
-	if _, err := exec.Command("/bin/true", args...).Output(); err != nil {
-		return findMaxArgsUsable(int(float64(estimatedMax) * backoff))
+
+	if estimatedMax < minOSArgs {
+		estimatedMax = minOSArgs
 	}
 	return estimatedMax
 }
