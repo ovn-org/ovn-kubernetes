@@ -58,8 +58,10 @@ func TestSyncServices(t *testing.T) {
 	ns := "testns"
 	serviceName := "foo"
 	config.Kubernetes.OVNEmptyLbEvents = true
+	config.IPv4Mode = true
 	defer func() {
 		config.Kubernetes.OVNEmptyLbEvents = false
+		config.IPv4Mode = false
 	}()
 
 	tests := []struct {
@@ -217,14 +219,6 @@ func TestSyncServices(t *testing.T) {
 				{
 					Cmd:    "ovn-nbctl --timeout=15 set load_balancer load_balancer_1 vips:\"5.5.5.5:32766\"=\"\"",
 					Output: "",
-				},
-				{
-					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null",
-					Output: gatewayRouter1,
-				},
-				{
-					Cmd:    `ovn-nbctl --timeout=15 get logical_router 2e290f10-3652-11eb-839b-a8a1590cda29 external_ids:physical_ips`,
-					Output: "5.5.5.5",
 				},
 			},
 		},
