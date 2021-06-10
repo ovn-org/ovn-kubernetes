@@ -310,10 +310,19 @@ func newSharedGatewayOpenFlowManager(patchPort, macAddress, gwBridge, gwIntf str
 	OVNMasqCTZone := HostMasqCTZone + 1
 	var dftFlows []string
 
+	strip_vlan := ""
+	mod_vlan_id := ""
+	match_vlan := ""
+	if config.Gateway.VLANID != 0 {
+		strip_vlan = "strip_vlan,"
+		match_vlan = fmt.Sprintf("dl_vlan=%d,", config.Gateway.VLANID)
+		mod_vlan_id = fmt.Sprintf("mod_vlan_vid:%d,", config.Gateway.VLANID)
+	}
+
 	// table 0, we check to see if this dest mac is the shared mac, if so flood to both ports
 	dftFlows = append(dftFlows,
-		fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, dl_dst=%s, actions=output:%s,output:%s",
-			defaultOpenFlowCookie, ofportPhys, macAddress, ofportPatch, ofportHost))
+		fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, %s dl_dst=%s, actions=output:%s,%soutput:%s",
+			defaultOpenFlowCookie, ofportPhys, match_vlan, macAddress, ofportPatch, strip_vlan, ofportHost))
 
 	if config.IPv4Mode {
 		// table 0, packets coming from pods headed externally. Commit connections
@@ -471,8 +480,8 @@ func newSharedGatewayOpenFlowManager(patchPort, macAddress, gwBridge, gwIntf str
 
 	// table 1, we check to see if this dest mac is the shared mac, if so send to host
 	dftFlows = append(dftFlows,
-		fmt.Sprintf("cookie=%s, priority=10, table=1, dl_dst=%s, actions=output:%s",
-			defaultOpenFlowCookie, macAddress, ofportHost))
+		fmt.Sprintf("cookie=%s, priority=10, table=1, %s dl_dst=%s, actions=%soutput:%s",
+			defaultOpenFlowCookie, match_vlan, macAddress, strip_vlan, ofportHost))
 
 	if config.IPv6Mode {
 		// REMOVEME(trozet) when https://bugzilla.kernel.org/show_bug.cgi?id=11797 is resolved
@@ -514,13 +523,13 @@ func newSharedGatewayOpenFlowManager(patchPort, macAddress, gwBridge, gwIntf str
 	// table 2, dispatch from Host -> OVN
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, table=2, "+
-			"actions=mod_dl_dst=%s,output:%s", defaultOpenFlowCookie, macAddress, ofportPatch))
+			"actions=mod_dl_dst=%s,%soutput:%s", defaultOpenFlowCookie, macAddress, mod_vlan_id, ofportPatch))
 
 	// table 3, dispatch from OVN -> Host
 	dftFlows = append(dftFlows,
-		fmt.Sprintf("cookie=%s, table=3, "+
-			"actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],mod_dl_dst=%s,output:%s",
-			defaultOpenFlowCookie, macAddress, ofportHost))
+		fmt.Sprintf("cookie=%s, table=3, %s "+
+			"actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],mod_dl_dst=%s,%soutput:%s",
+			defaultOpenFlowCookie, match_vlan, macAddress, strip_vlan, ofportHost))
 
 	// table 4, hairpinned pkts that need to go from OVN -> Host
 	// We need to SNAT and masquerade OVN GR IP, send to table 3 for dispatch to Host
