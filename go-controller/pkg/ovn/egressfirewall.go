@@ -26,6 +26,11 @@ const (
 	egressFirewallUpdateError      = "EgressFirewall Rules not correctly updated"
 )
 
+var (
+	allIPv4Destination = "0.0.0.0/0"
+	allIPv6Destination = "::/0"
+)
+
 type egressFirewall struct {
 	name        string
 	namespace   string
@@ -77,69 +82,64 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 	return efr, nil
 }
 
-// This function is used to sync egress firewall setup. It does three "cleanups"
+// This function is used to sync egress firewall setup. It does two cleanups
 
-// - 	Cleanup the old implementation (using LRP) in local GW mode -> new implementation (using ACLs) local GW mode
+// - 	Cleanup the old local GW mode implementation (using LRP)
 //  	For this it just deletes all LRP setup done for egress firewall
 
-// -	Cleanup the new local GW mode implementation (using ACLs on the node switch) -> shared GW mode implementation (using ACLs on the join switch)
-//  	For this it just deletes all ACL setup done for egress firewall on the node switches
-
-// -	Cleanup the old implementation (using LRP) in local GW mode -> shared GW mode implementation (using ACLs on the join switch)
-//  	For this it just deletes all LRP setup done for egress firewall
+// -	Cleanup the old shared GW mode implementation (using ACLs on the all switches with direction=from-lport)
+//  	For this it just deletes all the ACL setup done for egress firewall on all switches with direction=from-lport
 
 // NOTE: Utilize the fact that we know that all egress firewall related setup must have a priority: types.MinimumReservedEgressFirewallPriority <= priority <= types.EgressFirewallStartPriority
 func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
-	if config.Gateway.Mode == config.GatewayModeShared {
-		// Mode is shared gateway mode, make sure to delete all ACLs on the node switches
-		egressFirewallACLIDs, stderr, err := util.RunOVNNbctl(
-			"--data=bare",
-			"--no-heading",
-			"--columns=_uuid",
-			"--format=table",
-			"find",
-			"acl",
-			fmt.Sprintf("priority<=%s", types.EgressFirewallStartPriority),
-			fmt.Sprintf("priority>=%s", types.MinimumReservedEgressFirewallPriority),
-		)
+	egressFirewallACLIDs, stderr, err := util.RunOVNNbctl(
+		"--data=bare",
+		"--no-heading",
+		"--columns=_uuid",
+		"--format=table",
+		"find",
+		"acl",
+		fmt.Sprintf("priority<=%s", types.EgressFirewallStartPriority),
+		fmt.Sprintf("priority>=%s", types.MinimumReservedEgressFirewallPriority),
+		fmt.Sprintf("direction=%s", types.DirectionFromLPort),
+	)
+	if err != nil {
+		klog.Errorf("Unable to list egress firewall logical router policies, cannot cleanup old stale data, stderr: %s, err: %v", stderr, err)
+		return
+	}
+	if egressFirewallACLIDs != "" {
+		nodes, err := oc.watchFactory.GetNodes()
 		if err != nil {
-			klog.Errorf("Unable to list egress firewall logical router policies, cannot cleanup old stale data, stderr: %s, err: %v", stderr, err)
+			klog.Errorf("Unable to cleanup egress firewall ACLs remaining from local gateway mode, cannot list nodes, err: %v", err)
 			return
 		}
-		if egressFirewallACLIDs != "" {
-			nodes, err := oc.watchFactory.GetNodes()
+		logicalSwitches := []string{types.OVNJoinSwitch}
+		for _, node := range nodes {
+			logicalSwitches = append(logicalSwitches, node.Name)
+		}
+		for _, logicalSwitch := range logicalSwitches {
+			switchACLs, stderr, err := util.RunOVNNbctl(
+				"--data=bare",
+				"--no-heading",
+				"--columns=acls",
+				"list",
+				"logical_switch",
+				logicalSwitch,
+			)
 			if err != nil {
-				klog.Errorf("Unable to cleanup egress firewall ACLs remaining from local gateway mode, cannot list nodes, err: %v", err)
-				return
+				klog.Errorf("Unable to remove egress firewall acl, cannot list ACLs on switch: %s, stderr: %s, err: %v", logicalSwitch, stderr, err)
 			}
-			logicalSwitches := []string{}
-			for _, node := range nodes {
-				logicalSwitches = append(logicalSwitches, node.Name)
-			}
-			for _, logicalSwitch := range logicalSwitches {
-				switchACLs, stderr, err := util.RunOVNNbctl(
-					"--data=bare",
-					"--no-heading",
-					"--columns=acls",
-					"list",
-					"logical_switch",
-					logicalSwitch,
-				)
-				if err != nil {
-					klog.Errorf("Unable to remove egress firewall acl, cannot list ACLs on switch: %s, stderr: %s, err: %v", logicalSwitch, stderr, err)
-				}
-				for _, egressFirewallACLID := range strings.Split(egressFirewallACLIDs, "\n") {
-					if strings.Contains(switchACLs, egressFirewallACLID) {
-						_, stderr, err := util.RunOVNNbctl(
-							"remove",
-							"logical_switch",
-							logicalSwitch,
-							"acls",
-							egressFirewallACLID,
-						)
-						if err != nil {
-							klog.Errorf("Unable to remove egress firewall acl: %s on %s, cannot cleanup old stale data, stderr: %s, err: %v", egressFirewallACLID, logicalSwitch, stderr, err)
-						}
+			for _, egressFirewallACLID := range strings.Split(egressFirewallACLIDs, "\n") {
+				if strings.Contains(switchACLs, egressFirewallACLID) {
+					_, stderr, err := util.RunOVNNbctl(
+						"remove",
+						"logical_switch",
+						logicalSwitch,
+						"acls",
+						egressFirewallACLID,
+					)
+					if err != nil {
+						klog.Errorf("Unable to remove egress firewall acl: %s on %s, cannot cleanup old stale data, stderr: %s, err: %v", egressFirewallACLID, logicalSwitch, stderr, err)
 					}
 				}
 			}
@@ -335,7 +335,7 @@ func (oc *Controller) addEgressFirewallRules(hashedAddressSetNameIPv4, hashedAdd
 	ef := oc.namespaces[namespace].egressFirewall
 	for _, rule := range ef.egressRules {
 		var action string
-		var matchTargets []matchTarget
+		var matchTargets matchTarget
 		if rule.access == egressfirewallapi.EgressFirewallRuleAllow {
 			action = "allow"
 		} else {
@@ -343,9 +343,9 @@ func (oc *Controller) addEgressFirewallRules(hashedAddressSetNameIPv4, hashedAdd
 		}
 		if rule.to.cidrSelector != "" {
 			if utilnet.IsIPv6CIDRString(rule.to.cidrSelector) {
-				matchTargets = []matchTarget{{matchKindV6CIDR, rule.to.cidrSelector}}
+				matchTargets = matchTarget{matchKindV6CIDR, rule.to.cidrSelector}
 			} else {
-				matchTargets = []matchTarget{{matchKindV4CIDR, rule.to.cidrSelector}}
+				matchTargets = matchTarget{matchKindV4CIDR, rule.to.cidrSelector}
 			}
 		} else {
 			// rule based on DNS NAME
@@ -355,14 +355,17 @@ func (oc *Controller) addEgressFirewallRules(hashedAddressSetNameIPv4, hashedAdd
 			}
 			dnsNameIPv4ASHashName, dnsNameIPv6ASHashName := dnsNameAddressSets.GetASHashNames()
 			if dnsNameIPv4ASHashName != "" {
-				matchTargets = append(matchTargets, matchTarget{matchKindV4AddressSet, dnsNameIPv4ASHashName})
+				matchTargets = matchTarget{matchKindV4AddressSet, dnsNameIPv4ASHashName}
 			}
 			if dnsNameIPv6ASHashName != "" {
-				matchTargets = append(matchTargets, matchTarget{matchKindV6AddressSet, dnsNameIPv6ASHashName})
+				matchTargets = matchTarget{matchKindV6AddressSet, dnsNameIPv6ASHashName}
 			}
 		}
-		match := generateMatch(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6, matchTargets, rule.ports)
-		err := oc.createEgressFirewallRules(efStartPriority-rule.id, match, action, ef.namespace, txn)
+		match, err := generateMatch(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6, matchTargets, rule.ports)
+		if err != nil {
+			return err
+		}
+		err = oc.createEgressFirewallRules(efStartPriority-rule.id, match, action, ef.namespace, txn)
 		if err != nil {
 			return err
 		}
@@ -397,7 +400,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 			id := fmt.Sprintf("%s-%d", logicalSwitch, priority)
 			_, stderr, err := txn.AddOrCommit([]string{"--id=@" + id, "create", "acl",
 				fmt.Sprintf("priority=%d", priority),
-				fmt.Sprintf("direction=%s", types.DirectionFromLPort), match, "action=" + action,
+				fmt.Sprintf("direction=%s", types.DirectionToLPort), match, "action=" + action,
 				fmt.Sprintf("external-ids:egressFirewall=%s", externalID),
 				"--", "add", "logical_switch", logicalSwitch,
 				"acls", "@" + id})
@@ -408,9 +411,11 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 
 		} else {
 			for _, uuid := range strings.Split(uuids, "\n") {
-				_, stderr, err := txn.AddOrCommit([]string{"add", "logical_switch", logicalSwitch, "acls", uuid})
-				if err != nil {
-					return fmt.Errorf("failed to commit db changes for egressFirewall stderr: %q, err: %+v", stderr, err)
+				if uuid != "" {
+					_, stderr, err := txn.AddOrCommit([]string{"add", "logical_switch", logicalSwitch, "acls", uuid})
+					if err != nil {
+						return fmt.Errorf("failed to commit db changes for egressFirewall stderr: %q, err: %+v", stderr, err)
+					}
 				}
 			}
 		}
@@ -488,10 +493,12 @@ func (m *matchTarget) toExpr() (string, error) {
 // generateMatch generates the "match" section of ACL generation for egressFirewallRules.
 // It is referentially transparent as all the elements have been validated before this function is called
 // sample output:
-// match=\"(ip4.dst == 1.2.3.4/32) && ip4.src == $testv4 && ip4.dst != 10.128.0.0/14\
-func generateMatch(ipv4Source, ipv6Source string, destinations []matchTarget, dstPorts []egressfirewallapi.EgressFirewallPort) string {
+// match=\"(ip4.dst == 1.2.3.4/32) && ip4.src == $testv4\"
+// or
+// match=\"(ip4.dst == 8.0.0.0/6) && ip4.src == $testv4 && ip4.dst != 10.128.0.0/14\"
+// if a destination CIDR is specified which overlaps with any defined cluster subnet.
+func generateMatch(ipv4Source, ipv6Source string, destination matchTarget, dstPorts []egressfirewallapi.EgressFirewallPort) (string, error) {
 	var src string
-	var dst string
 	var extraMatch string
 	switch {
 	case len(ipv4Source) > 0 && len(ipv6Source) > 0:
@@ -502,33 +509,25 @@ func generateMatch(ipv4Source, ipv6Source string, destinations []matchTarget, ds
 		src = fmt.Sprintf("ip6.src == $%s", ipv6Source)
 	}
 
-	for _, entry := range destinations {
-		if entry.value == "" {
-			continue
-		}
-		ipDst, err := entry.toExpr()
-		if err != nil {
-			klog.Error(err)
-			continue
-		}
-		if dst == "" {
-			dst = ipDst
-		} else {
-			dst = strings.Join([]string{dst, ipDst}, " || ")
-		}
+	ipDst, err := destination.toExpr()
+	if err != nil {
+		return "", err
 	}
 
-	match := fmt.Sprintf("match=\"(%s) && %s", dst, src)
+	match := fmt.Sprintf("match=\"(%s) && %s", ipDst, src)
 	if len(dstPorts) > 0 {
 		match = fmt.Sprintf("%s && %s", match, egressGetL4Match(dstPorts))
 	}
 
 	if config.Gateway.Mode == config.GatewayModeLocal {
-		extraMatch = getClusterSubnetsExclusion()
+		extraMatch = getClusterSubnetsExclusion(destination)
 	} else {
 		extraMatch = fmt.Sprintf("inport == \\\"%s%s\\\"", types.JoinSwitchToGWRouterPrefix, types.OVNClusterRouter)
 	}
-	return fmt.Sprintf("%s && %s\"", match, extraMatch)
+	if extraMatch != "" {
+		return fmt.Sprintf("%s && %s\"", match, extraMatch), nil
+	}
+	return fmt.Sprintf("%s\"", match), nil
 }
 
 // egressGetL4Match generates the rules for when ports are specified in an egressFirewall Rule
@@ -598,16 +597,29 @@ func egressGetL4Match(ports []egressfirewallapi.EgressFirewallPort) string {
 	return fmt.Sprintf("(%s)", l4Match)
 }
 
-func getClusterSubnetsExclusion() string {
+func getClusterSubnetsExclusion(destination matchTarget) string {
+	if destination.kind == matchKindV4AddressSet || destination.kind == matchKindV6AddressSet {
+		return ""
+	}
 	var exclusion string
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
-		if exclusion != "" {
-			exclusion += " && "
+		if destination.value != allIPv4Destination && destination.value != allIPv6Destination {
+			_, destinationNet, _ := net.ParseCIDR(destination.value)
+			if !destinationNet.Contains(clusterSubnet.CIDR.IP) && !clusterSubnet.CIDR.Contains(destinationNet.IP) {
+				continue
+			}
 		}
-		if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-			exclusion += fmt.Sprintf("%s.dst != %s", "ip6", clusterSubnet.CIDR)
-		} else {
-			exclusion += fmt.Sprintf("%s.dst != %s", "ip4", clusterSubnet.CIDR)
+		isSubnetIPv6 := utilnet.IsIPv6CIDR(clusterSubnet.CIDR)
+		isDestinationIPv6 := utilnet.IsIPv6CIDRString(destination.value)
+		if isSubnetIPv6 == isDestinationIPv6 {
+			if exclusion != "" {
+				exclusion += " && "
+			}
+			if isSubnetIPv6 && isDestinationIPv6 {
+				exclusion += fmt.Sprintf("%s.dst != %s", "ip6", clusterSubnet.CIDR)
+			} else if !isSubnetIPv6 && !isDestinationIPv6 {
+				exclusion += fmt.Sprintf("%s.dst != %s", "ip4", clusterSubnet.CIDR)
+			}
 		}
 	}
 	return exclusion
