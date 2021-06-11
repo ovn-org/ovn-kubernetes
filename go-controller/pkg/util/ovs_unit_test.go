@@ -1993,3 +1993,42 @@ func TestDetectSCTPSupport(t *testing.T) {
 		})
 	}
 }
+
+func TestFindMaxArgsUsable(t *testing.T) {
+	tests := []struct {
+		desc            string
+		initialMaxWorks bool
+		maxArgs         int
+	}{
+		{
+			desc:            "positive test: small value should be usable",
+			initialMaxWorks: true,
+			maxArgs:         minOSArgs + 10,
+		},
+		{
+			desc:            "negative test: value smaller than minimum should result in minimum",
+			initialMaxWorks: false,
+			maxArgs:         minOSArgs - 10,
+		},
+		{
+			desc:            "negative test: giant initial value should not be usable and return a smaller int",
+			initialMaxWorks: false,
+			maxArgs:         10000000,
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+
+			val := findMaxArgsUsable(tc.maxArgs)
+
+			if tc.initialMaxWorks {
+				assert.EqualValues(t, val, tc.maxArgs, "max args should equal found value")
+			} else if tc.maxArgs < minOSArgs {
+				assert.EqualValues(t, val, minOSArgs)
+			} else {
+				assert.Less(t, val, tc.maxArgs, "value should be less than max args")
+			}
+		})
+	}
+}
