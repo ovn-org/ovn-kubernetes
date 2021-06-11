@@ -81,6 +81,7 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 
 // - 	Cleanup the old implementation (using LRP) in local GW mode -> new implementation (using ACLs) local GW mode
 //  	For this it just deletes all LRP setup done for egress firewall
+//  	And also convert all old ACLs which specifed from-lport to specifying to-lport
 
 // -	Cleanup the new local GW mode implementation (using ACLs on the node switch) -> shared GW mode implementation (using ACLs on the join switch)
 //  	For this it just deletes all ACL setup done for egress firewall on the node switches
@@ -142,6 +143,34 @@ func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
 						}
 					}
 				}
+			}
+		}
+	}
+	egressFirewallACLIDs, stderr, err := util.RunOVNNbctl(
+		"--data=bare",
+		"--no-heading",
+		"--columns=_uuid",
+		"--format=table",
+		"find",
+		"acl",
+		fmt.Sprintf("priority<=%s", types.EgressFirewallStartPriority),
+		fmt.Sprintf("priority>=%s", types.MinimumReservedEgressFirewallPriority),
+		fmt.Sprintf("direction=%s", types.DirectionFromLPort),
+	)
+	if err != nil {
+		klog.Errorf("Unable to list egress firewall logical router policies, cannot convert old ACL data, stderr: %s, err: %v", stderr, err)
+		return
+	}
+	if egressFirewallACLIDs != "" {
+		for _, egressFirewallACLID := range strings.Split(egressFirewallACLIDs, "\n") {
+			_, stderr, err := util.RunOVNNbctl(
+				"set",
+				"acl",
+				egressFirewallACLID,
+				fmt.Sprintf("direction=%s", types.DirectionToLPort),
+			)
+			if err != nil {
+				klog.Errorf("Unable to set ACL direction on egress firewall acl: %s, cannot convert old ACL data, stderr: %s, err: %v", egressFirewallACLID, stderr, err)
 			}
 		}
 	}
@@ -397,7 +426,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 			id := fmt.Sprintf("%s-%d", logicalSwitch, priority)
 			_, stderr, err := txn.AddOrCommit([]string{"--id=@" + id, "create", "acl",
 				fmt.Sprintf("priority=%d", priority),
-				fmt.Sprintf("direction=%s", types.DirectionFromLPort), match, "action=" + action,
+				fmt.Sprintf("direction=%s", types.DirectionToLPort), match, "action=" + action,
 				fmt.Sprintf("external-ids:egressFirewall=%s", externalID),
 				"--", "add", "logical_switch", logicalSwitch,
 				"acls", "@" + id})

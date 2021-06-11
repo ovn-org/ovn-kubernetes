@@ -21,6 +21,7 @@ import (
 	"github.com/pkg/errors"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -246,6 +247,39 @@ func createGenericPod(f *framework.Framework, podName, nodeSelector, namespace s
 // Create a pod on the specified node using the agnostic host image
 func createGenericPodWithLabel(f *framework.Framework, podName, nodeSelector, namespace string, command []string, labels map[string]string) (*v1.Pod, error) {
 	return createPod(f, podName, nodeSelector, namespace, command, labels)
+}
+
+func createServiceForPodsWithLabel(f *framework.Framework, namespace string, servicePort int32, targetPort string, serviceType string, labels map[string]string) (string, error) {
+	service := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "service-for-pods",
+			Namespace: namespace,
+		},
+		Spec: v1.ServiceSpec{
+			Ports: []v1.ServicePort{
+				v1.ServicePort{
+					Protocol:   v1.ProtocolTCP,
+					TargetPort: intstr.Parse(targetPort),
+					Port:       servicePort,
+				},
+			},
+			Type:     v1.ServiceType(serviceType),
+			Selector: labels,
+		},
+	}
+	serviceClient := f.ClientSet.CoreV1().Services(namespace)
+	res, err := serviceClient.Create(context.Background(), service, metav1.CreateOptions{})
+	if err != nil {
+		return "", errors.Wrapf(err, "Failed to create service %s %s", service.Name, namespace)
+	}
+	err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+		res, err = serviceClient.Get(context.Background(), service.Name, metav1.GetOptions{})
+		return res.Spec.ClusterIP != "", err
+	})
+	if err != nil {
+		return "", errors.Wrapf(err, "Failed to get service %s %s", service.Name, namespace)
+	}
+	return res.Spec.ClusterIP, nil
 }
 
 func createClusterExternalContainer(containerName string, containerImage string, dockerArgs []string, entrypointArgs []string) (string, string) {
@@ -589,6 +623,7 @@ var _ = ginkgo.Describe("test e2e inter-node connectivity between worker nodes",
 
 var _ = ginkgo.Describe("e2e egress IP validation", func() {
 	const (
+		servicePort          int32  = 9999
 		podHTTPPort          string = "8080"
 		svcname              string = "egressip"
 		targetNodeName       string = "egressTargetNode-allowed"
@@ -624,10 +659,10 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		}
 	}
 
-	targetAPIServiceAndTest := func(namespace string, podNames []string) wait.ConditionFunc {
+	targetDestinationAndTest := func(namespace, destination string, podNames []string) wait.ConditionFunc {
 		return func() (bool, error) {
 			for _, podName := range podNames {
-				_, err := framework.RunKubectl(namespace, "exec", podName, "--", "curl", "--connect-timeout", "2", "-k", fmt.Sprintf("https://%s/version", net.JoinHostPort(getApiAddress(), "443")))
+				_, err := framework.RunKubectl(namespace, "exec", podName, "--", "curl", "--connect-timeout", "2", "-k", destination)
 				if err != nil {
 					framework.Logf("Error: attempted connection to API server found err:  %v", err)
 					return false, nil
@@ -883,7 +918,7 @@ spec:
 		framework.ExpectNoError(err, "Step 5. Check connectivity from one pod to the other and verify that the connection is achieved, failed, err: %v", err)
 
 		ginkgo.By("6. Check connectivity from both pods to the api-server (running hostNetwork:true) and verifying that the connection is achieved")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetAPIServiceAndTest(podNamespace.Name, []string{pod1Name, pod2Name}))
+		err = wait.PollImmediate(retryInterval, retryTimeout, targetDestinationAndTest(podNamespace.Name, fmt.Sprintf("https://%s/version", net.JoinHostPort(getApiAddress(), "443")), []string{pod1Name, pod2Name}))
 		framework.ExpectNoError(err, "Step 6. Check connectivity from both pods to the api-server (running hostNetwork:true) and verifying that the connection is achieved, failed, err: %v", err)
 
 		ginkgo.By("7. Update one of the pods, unmatching the EgressIP")
@@ -942,8 +977,9 @@ spec:
 	   3. Create two pods matching both egress firewall and egress IP
 	   4. Check connectivity to the blocked IP and verify that it fails
 	   5. Check connectivity to the allowed IP and verify it has the egress IP
-	   6. Check connectivity to the kubernetes API IP and verify that it works
+	   6. Check connectivity to the kubernetes API IP and verify that it works [currently skipped]
 	   7. Check connectivity to the other pod IP and verify that it works
+	   8. Check connectivity to the service IP and verify that it works
 	*/
 	ginkgo.It("Should validate the egress IP functionality against remote hosts with egress firewall applied", func() {
 
@@ -1036,11 +1072,13 @@ spec:
 
 		framework.RunKubectlOrDie(f.Namespace.Name, "create", "-f", egressFirewallYaml)
 
-		ginkgo.By("3. Create two pods matching both egress firewall and egress IP")
+		ginkgo.By("3. Create two pods, and matching service, matching both egress firewall and egress IP")
 		createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
 		createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
+		serviceIP, err := createServiceForPodsWithLabel(f, f.Namespace.Name, servicePort, podHTTPPort, "ClusterIP", podEgressLabel)
+		framework.ExpectNoError(err, "Step 3. Create two pods, and matching service, matching both egress firewall and egress IP, failed creating service, err: %v", err)
 
-		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 			for _, podName := range []string{pod1Name, pod2Name} {
 				kubectlOut := getPodAddress(podName, f.Namespace.Name)
 				srcIP := net.ParseIP(kubectlOut)
@@ -1076,6 +1114,11 @@ spec:
 		ginkgo.By("7. Check connectivity to the other pod IP and verify that it works")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetPodAndTest(f.Namespace.Name, pod1Name, pod2Name, pod2IP))
 		framework.ExpectNoError(err, "Step 7. Check connectivity to the other pod IP and verify that it works, err: %v", err)
+
+		ginkgo.By("8. Check connectivity to the service IP and verify that it works")
+		servicePortAsString := strconv.Itoa(int(servicePort))
+		err = wait.PollImmediate(retryInterval, retryTimeout, targetDestinationAndTest(podNamespace.Name, fmt.Sprintf("http://%s/hostname", net.JoinHostPort(serviceIP, servicePortAsString)), []string{pod1Name, pod2Name}))
+		framework.ExpectNoError(err, "8. Check connectivity to the service IP and verify that it works, failed, err %v", err)
 	})
 })
 
