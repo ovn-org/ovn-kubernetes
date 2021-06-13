@@ -7,7 +7,8 @@ if [[ "${OVNKUBE_SH_VERBOSE:-}" == "true" ]]; then
 fi
 
 # source the functions in ovndb-raft-functions.sh
-. /root/ovndb-raft-functions.sh
+BASEDIR=$(dirname $0)
+. ${BASEDIR}/ovndb-raft-functions.sh
 
 # This script is the entrypoint to the image.
 # Supports version 3 daemonsets
