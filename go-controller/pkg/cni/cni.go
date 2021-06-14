@@ -1,9 +1,11 @@
 package cni
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"net"
+	"sync/atomic"
 
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/pkg/errors"
@@ -78,6 +80,22 @@ func (pr *PodRequest) String() string {
 	return fmt.Sprintf("[%s/%s %s]", pr.PodNamespace, pr.PodName, pr.SandboxID)
 }
 
+func setMACUint64(mac string, dst *uint64) (uint64, error) {
+	array, err := net.ParseMAC(mac)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse MAC %q: %v", mac, err)
+	}
+	if len(array) != 6 {
+		return 0, fmt.Errorf("unsupportd MAC address length: %s", mac)
+	}
+
+	// Pad to 8 bytes
+	array = append([]byte{0, 0}, array...)
+	macUint := binary.BigEndian.Uint64(array)
+	atomic.StoreUint64(dst, macUint)
+	return macUint, nil
+}
+
 func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) ([]byte, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
@@ -107,7 +125,10 @@ func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalID
 	if err != nil {
 		return nil, err
 	}
-	pr.MAC = podInterfaceInfo.MAC.String()
+
+	if _, err := setMACUint64(podInterfaceInfo.MAC.String(), &pr.InitialMAC); err != nil {
+		return nil, err
+	}
 
 	response := &Response{}
 	if !config.UnprivilegedMode {
@@ -159,7 +180,10 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternal
 	if err != nil {
 		return nil, err
 	}
-	pr.MAC = annotations.MAC.String()
+
+	if _, err := setMACUint64(annotations.MAC.String(), &pr.InitialMAC); err != nil {
+		return nil, err
+	}
 
 	if pr.CNIConf.PrevResult != nil {
 		result, err := current.NewResultFromResult(pr.CNIConf.PrevResult)
