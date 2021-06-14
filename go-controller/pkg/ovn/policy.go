@@ -3,9 +3,12 @@ package ovn
 import (
 	"fmt"
 	"net"
+<<<<<<< HEAD
 	"reflect"
 	"strconv"
 	"strings"
+=======
+>>>>>>> parent of 82094e2b... Add Possible SVC IPs to ingress AS
 	"sync"
 
 	goovn "github.com/ebay/go-ovn"
@@ -32,7 +35,6 @@ type networkPolicy struct {
 	ingressPolicies []*gressPolicy
 	egressPolicies  []*gressPolicy
 	podHandlerList  []*factory.Handler
-	svcHandlerList  []*factory.Handler
 	nsHandlerList   []*factory.Handler
 
 	// localPods is a list of pods affected by ths policy
@@ -53,7 +55,6 @@ func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
 		ingressPolicies: make([]*gressPolicy, 0),
 		egressPolicies:  make([]*gressPolicy, 0),
 		podHandlerList:  make([]*factory.Handler, 0),
-		svcHandlerList:  make([]*factory.Handler, 0),
 		nsHandlerList:   make([]*factory.Handler, 0),
 		localPods:       sync.Map{},
 	}
@@ -976,13 +977,10 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		}
 
 		if hasAnyLabelSelector(ingressJSON.From) {
-			klog.V(5).Infof("Network policy %s with ingress rule %s has a selector", policy.Name, ingress.policyName)
 			if err := ingress.ensurePeerAddressSet(oc.addressSetFactory); err != nil {
 				klog.Errorf(err.Error())
 				continue
 			}
-			// Start service handlers ONLY if there's an ingress Address Set
-			oc.handlePeerService(policy, ingress, np)
 		}
 
 		for _, fromJSON := range ingressJSON.From {
@@ -1013,7 +1011,6 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		}
 
 		if hasAnyLabelSelector(egressJSON.To) {
-			klog.V(5).Infof("Network policy %s with egress rule %s has a selector", policy.Name, egress.policyName)
 			if err := egress.ensurePeerAddressSet(oc.addressSetFactory); err != nil {
 				klog.Errorf(err.Error())
 				continue
@@ -1375,8 +1372,5 @@ func (oc *Controller) shutdownHandlers(np *networkPolicy) {
 	}
 	for _, handler := range np.nsHandlerList {
 		oc.watchFactory.RemoveNamespaceHandler(handler)
-	}
-	for _, handler := range np.svcHandlerList {
-		oc.watchFactory.RemoveServiceHandler(handler)
 	}
 }
