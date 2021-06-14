@@ -387,11 +387,6 @@ func (wf *WatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHandle
 	return wf.addHandler(serviceType, "", nil, handlerFuncs, processExisting)
 }
 
-// AddFilteredServiceHandler adds a handler function that will be executed on all Service object changes for a specific namespace
-func (wf *WatchFactory) AddFilteredServiceHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(serviceType, namespace, nil, handlerFuncs, processExisting)
-}
-
 // RemoveServiceHandler removes a Service object event handler function
 func (wf *WatchFactory) RemoveServiceHandler(handler *Handler) {
 	wf.removeHandler(serviceType, handler)
