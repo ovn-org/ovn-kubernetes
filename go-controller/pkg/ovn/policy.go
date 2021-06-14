@@ -3,12 +3,8 @@ package ovn
 import (
 	"fmt"
 	"net"
-<<<<<<< HEAD
-	"reflect"
 	"strconv"
 	"strings"
-=======
->>>>>>> parent of 82094e2b... Add Possible SVC IPs to ingress AS
 	"sync"
 
 	goovn "github.com/ebay/go-ovn"
@@ -154,6 +150,8 @@ func getACLMatch(portGroupName, match string, policyType knet.PolicyType) string
 
 	if match != "" {
 		aclMatch += " && " + match
+	}else { 
+		aclMatch += " && ip4.src != 169.254.169.3"
 	}
 
 	return "match=\"" + aclMatch + "\""
@@ -1170,61 +1168,6 @@ func (oc *Controller) handlePeerPodSelectorDelete(gp *gressPolicy, obj interface
 	if err := gp.deletePeerPod(pod); err != nil {
 		klog.Errorf(err.Error())
 	}
-}
-
-// handlePeerServiceSelectorAddUpdate adds the VIP of a service that selects
-// pods that are selected by the Network Policy
-func (oc *Controller) handlePeerServiceAdd(gp *gressPolicy, obj interface{}) {
-	service := obj.(*kapi.Service)
-	klog.V(5).Infof("A Service: %s matches the namespace as the gress policy: %s", service.Name, gp.policyName)
-	if err := gp.addPeerSvcVip(service); err != nil {
-		klog.Errorf(err.Error())
-	}
-}
-
-// handlePeerServiceDelete removes the VIP of a service that selects
-// pods that are selected by the Network Policy
-func (oc *Controller) handlePeerServiceDelete(gp *gressPolicy, obj interface{}) {
-	service := obj.(*kapi.Service)
-	if err := gp.deletePeerSvcVip(service); err != nil {
-		klog.Errorf(err.Error())
-	}
-}
-
-// Watch Services that are in the same Namespace as the NP
-// To account for hairpined traffic
-func (oc *Controller) handlePeerService(
-	policy *knet.NetworkPolicy, gp *gressPolicy, np *networkPolicy) {
-
-	h := oc.watchFactory.AddFilteredServiceHandler(policy.Namespace,
-		cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				// Service is matched so add VIP to addressSet
-				oc.handlePeerServiceAdd(gp, obj)
-			},
-			DeleteFunc: func(obj interface{}) {
-				// If Service that has matched pods are deleted remove VIP
-				oc.handlePeerServiceDelete(gp, obj)
-			},
-			UpdateFunc: func(oldObj, newObj interface{}) {
-				// If Service Is updated make sure same pods are still matched
-				oldSvc := oldObj.(*kapi.Service)
-				newSvc := newObj.(*kapi.Service)
-				if reflect.DeepEqual(newSvc.Spec.ExternalIPs, oldSvc.Spec.ExternalIPs) &&
-					reflect.DeepEqual(newSvc.Spec.ClusterIP, oldSvc.Spec.ClusterIP) &&
-					reflect.DeepEqual(newSvc.Spec.Type, oldSvc.Spec.Type) &&
-					reflect.DeepEqual(newSvc.Status.LoadBalancer.Ingress, oldSvc.Status.LoadBalancer.Ingress) {
-
-					klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, "+
-						".Spec.ExternalIP, .Spec.ClusterIP, .Spec.Type, .Status.LoadBalancer.Ingress", newSvc.Name)
-					return
-				}
-
-				oc.handlePeerServiceDelete(gp, oldObj)
-				oc.handlePeerServiceAdd(gp, newObj)
-			},
-		}, nil)
-	np.svcHandlerList = append(np.svcHandlerList, h)
 }
 
 func (oc *Controller) handlePeerPodSelector(
