@@ -96,9 +96,11 @@ func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWat
 	factory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			newPod := newObj.(*kapi.Pod)
-			annot, err := util.UnmarshalPodAnnotation(newPod.Annotations)
-			if err == nil {
-				s.cancelPodAddsForOldMACs(newPod, annot.MAC.String())
+			newAnnot, newErr := util.UnmarshalPodAnnotation(newPod.Annotations)
+			oldPod := oldObj.(*kapi.Pod)
+			oldAnnot, oldErr := util.UnmarshalPodAnnotation(oldPod.Annotations)
+			if newErr == nil && oldErr == nil && oldAnnot.MAC.String() != newAnnot.MAC.String() {
+				s.cancelPodAddsUnlessMatchMAC(newPod, newAnnot.MAC.String())
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -112,16 +114,28 @@ func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWat
 
 // cancelPodAddsForOldMACs cancels and pod add requests that do not match
 // the given MAC address.
-func (s *Server) cancelPodAddsForOldMACs(pod *kapi.Pod, podMAC string) {
+func (s *Server) cancelPodAddsUnlessMatchMAC(pod *kapi.Pod, podMAC string) {
 	s.runningSandboxAddsLock.Lock()
 	defer s.runningSandboxAddsLock.Unlock()
 
 	for _, req := range s.runningSandboxAdds {
 		// Cancel sandbox requests for this pod that have a MAC set
 		// which doesn't match the expected MAC
-		if req.PodNamespace == pod.Namespace && req.PodName == pod.Name && req.MAC != "" && req.MAC != podMAC {
+		if req.PodNamespace != pod.Namespace || req.PodName != pod.Name {
+			continue
+		}
+
+		updatedMAC, err := setMACUint64(podMAC, &req.UpdatedMAC)
+		if err != nil {
+			klog.Warningf(err.Error())
+			continue
+		}
+
+		initialMAC := atomic.LoadUint64(&req.InitialMAC)
+		// Ignore requests that haven't read their MAC yet
+		if initialMAC != 0 && initialMAC != updatedMAC {
 			req.cancel()
-			klog.Infof("%s canceled sandbox ADD request; expected MAC %s", req, podMAC)
+			klog.Infof("%s canceled outdated sandbox ADD request; expected MAC %s", req, podMAC)
 		}
 	}
 }
