@@ -132,7 +132,11 @@ func (gp *gressPolicy) addPeerPods(pods ...*v1.Pod) error {
 			gp.policyName)
 	}
 
-	ips := []net.IP{}
+	podIPFactor := 1
+	if config.IPv4Mode && config.IPv6Mode {
+		podIPFactor = 2
+	}
+	ips := make([]net.IP, 0, len(pods)*podIPFactor)
 	for _, pod := range pods {
 		podIPs, err := util.GetAllPodIPs(pod)
 		if err != nil {
