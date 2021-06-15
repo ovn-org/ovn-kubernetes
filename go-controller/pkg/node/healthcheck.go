@@ -179,7 +179,7 @@ func (c *openflowManager) Run(stopChan <-chan struct{}) {
 		case <-time.After(15 * time.Second):
 			// it could be that the ovn-controller recreated the patch between the host OVS bridge and
 			// the integration bridge, as a result the ofport number changed for that patch interface
-			curOfportPatch, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Interface", c.patchIntf, "ofport")
+			curOfportPatch, stderr, err := util.GetOVSOfPort("--if-exists", "get", "Interface", c.patchIntf, "ofport")
 			if err != nil {
 				klog.Errorf("Failed to get ofport of %s, stderr: %q, error: %v", c.patchIntf, stderr, err)
 				continue
@@ -192,7 +192,7 @@ func (c *openflowManager) Run(stopChan <-chan struct{}) {
 
 			// it could be that someone removed the physical interface and added it back on the OVS host
 			// bridge, as a result the ofport number changed for that physical interface
-			curOfportPhys, stderr, err := util.RunOVSVsctl("--if-exists", "get", "interface", c.physIntf, "ofport")
+			curOfportPhys, stderr, err := util.GetOVSOfPort("--if-exists", "get", "interface", c.physIntf, "ofport")
 			if err != nil {
 				klog.Errorf("Failed to get ofport of %s, stderr: %q, error: %v", c.physIntf, stderr, err)
 				continue
