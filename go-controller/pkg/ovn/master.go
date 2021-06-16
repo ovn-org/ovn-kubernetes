@@ -474,7 +474,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	// Create the LoadBalancers if they don´t exist
 	for _, lbExternalID := range lbExternalIds {
 		for _, p := range protocols {
-			uuid, err := loadbalancer.CreateLoadBalancer(p, lbExternalID)
+			uuid, err := loadbalancer.CreateK8sClusterLoadBalancer(p, lbExternalID)
 			if err != nil {
 				return errors.Wrapf(err, "Failed to create OVN load balancer for protocol %s", p)
 			}
