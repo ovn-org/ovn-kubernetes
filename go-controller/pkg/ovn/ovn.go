@@ -618,16 +618,21 @@ func (oc *Controller) WatchEgressNodes() {
 				klog.Error(err)
 			}
 			nodeLabels := node.GetLabels()
-			if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel {
+			_, hasEgressLabel := nodeLabels[nodeEgressLabel]
+			if hasEgressLabel {
 				oc.setNodeEgressAssignable(node.Name, true)
-				if oc.isEgressNodeReady(node) {
-					oc.setNodeEgressReady(node.Name, true)
-					if oc.isEgressNodeReachable(node) {
-						oc.setNodeEgressReachable(node.Name, true)
-						if err := oc.addEgressNode(node); err != nil {
-							klog.Error(err)
-						}
-					}
+			}
+			isReady := oc.isEgressNodeReady(node)
+			if isReady {
+				oc.setNodeEgressReady(node.Name, true)
+			}
+			isReachable := oc.isEgressNodeReachable(node)
+			if isReachable {
+				oc.setNodeEgressReachable(node.Name, true)
+			}
+			if hasEgressLabel && isReachable && isReady {
+				if err := oc.addEgressNode(node); err != nil {
+					klog.Error(err)
 				}
 			}
 		},
