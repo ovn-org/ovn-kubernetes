@@ -477,7 +477,6 @@ func (gp *gressPolicy) destroy() error {
 		if err := gp.peerAddressSet.Destroy(); err != nil {
 			return err
 		}
-		gp.peerAddressSet = nil
 	}
 	return nil
 }

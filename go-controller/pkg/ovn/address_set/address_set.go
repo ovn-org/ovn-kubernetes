@@ -322,12 +322,12 @@ func (as *ovnAddressSets) DeleteIPs(ips []net.IP) error {
 	v4ips, v6ips := splitIPsByFamily(ips)
 	if as.ipv6 != nil {
 		if err := as.ipv6.deleteIPs(v6ips); err != nil {
-			return fmt.Errorf("failed to AddIPs to the v6 set: %w", err)
+			return fmt.Errorf("failed to DeleteIPs to the v6 set: %w", err)
 		}
 	}
 	if as.ipv4 != nil {
 		if err := as.ipv4.deleteIPs(v4ips); err != nil {
-			return fmt.Errorf("failed to AddIPs to the v4 set: %w", err)
+			return fmt.Errorf("failed to DeleteIPs to the v4 set: %w", err)
 		}
 	}
 	return nil
@@ -342,12 +342,14 @@ func (as *ovnAddressSets) Destroy() error {
 		if err != nil {
 			return err
 		}
+		as.ipv4 = nil
 	}
 	if as.ipv6 != nil {
 		err := as.ipv6.destroy()
 		if err != nil {
 			return err
 		}
+		as.ipv6 = nil
 	}
 	return nil
 }
