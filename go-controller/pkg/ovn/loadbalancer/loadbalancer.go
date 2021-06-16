@@ -54,34 +54,73 @@ func getLoadBalancerByProtocolType(protocol kapi.Protocol, idkey string) (string
 	return res, nil
 }
 
-// CreateLoadBalancer creates the loadbalancer if it doesn´t exist to avoid
+// Createk8sClusterLoadBalancer creates the k8s-cluster-lb if it doesn´t exist to avoid
 // consumers to create duplicate loadbalancers with the same name and externalID
-func CreateLoadBalancer(protocol kapi.Protocol, idkey string) (string, error) {
+// If it exists it ensures the correct options are set
+func CreateK8sClusterLoadBalancer(protocol kapi.Protocol, idkey string) (string, error) {
+	// check if the reject option should be true for k8's cluster lb
+	reject := true
+	if idkey == types.ClusterIdlingLBPrefix {
+		reject = false
+	}
+	optionsReject := fmt.Sprintf("options:reject=%t", reject)
+
 	lbUUID, err := getLoadBalancerByProtocolType(protocol, idkey)
 	if err != nil && !errors.Is(err, LBNotFound) {
 		return "", errors.Wrapf(err, "Failed to get OVN load balancer for protocol %s", protocol)
 	}
 	// create the load balancer if it doesn't exist yet
 	if lbUUID == "" {
-		lbUUID, err = createLoadBalancer(protocol, idkey)
+		// Create the external ID for the K8's cluster Lbs
+		externalId := fmt.Sprintf("external_ids:%s-%s=yes", idkey, strings.ToLower(string(protocol)))
+		lbUUID, err = createLoadBalancer(protocol, externalId, optionsReject, types.OptionsHairpin)
 		if err != nil {
 			return "", errors.Wrapf(err, "Failed to create OVN load balancer for protocol %s", protocol)
 		}
+	} else {
+		// Generate expected options for LB
+		err = UpdateLoadBalancerOptions(lbUUID, optionsReject, types.OptionsHairpin)
+		if err != nil {
+			return "", errors.Wrapf(err, "Failed to update OVN load balancer for protocol %s", protocol)
+		}
 	}
+
+	return lbUUID, nil
+}
+
+// CreatePerNodeLoadBalancer creates the per node GWR OR Worker loadbalancers
+// (if nodeName is "" we make the GWR Lbs). Unlike CreateK8sClusterLoadBalancer
+// by the time we call this func we are sure the lbs do no exist, so just wrap
+// the createLoadBalancer func.
+func CreatePerNodeLoadBalancer(protocol kapi.Protocol, gatewayRouter string, nodeName string) (string, error) {
+	// Create the external ID for the per node cluster Lbs
+	var externalId string
+
+	if nodeName == "" {
+		externalId = fmt.Sprintf("external_ids:%s_lb_gateway_router=%s", protocol, gatewayRouter)
+	} else {
+		externalId = fmt.Sprintf("external_ids:%s-%s=%s", types.WorkerLBPrefix, strings.ToLower(string(protocol)), nodeName)
+	}
+
+	lbUUID, err := createLoadBalancer(protocol, externalId, types.OptionsHairpin)
+	if err != nil {
+		if err != nil {
+			return "", errors.Wrapf(err, "Failed to create Per node load balancer for protocol %s", protocol)
+		}
+	}
+
 	return lbUUID, nil
 }
 
 // createLoadBalancer creates a loadbalancer for the specified protocol
 // all loadbalancers but idling ones reject packets for vips without endpoints by default
-func createLoadBalancer(protocol kapi.Protocol, idkey string) (string, error) {
-	id := fmt.Sprintf("external_ids:%s-%s=yes", idkey, strings.ToLower(string(protocol)))
+func createLoadBalancer(protocol kapi.Protocol, externalId string, options ...string) (string, error) {
 	proto := fmt.Sprintf("protocol=%s", strings.ToLower(string(protocol)))
-	reject := true
-	if idkey == types.ClusterIdlingLBPrefix {
-		reject = false
-	}
-	options := fmt.Sprintf("options:reject=%t", reject)
-	lbID, stderr, err := util.RunOVNNbctl("create", "load_balancer", id, proto, options)
+
+	cmd := []string{"create", "load_balancer", externalId, proto}
+	cmd = append(cmd, options...)
+
+	lbID, stderr, err := util.RunOVNNbctl(cmd...)
 	if err != nil {
 		klog.Errorf("Failed to create %s load balancer, stderr: %q, error: %v", protocol, stderr, err)
 		return "", err
@@ -157,6 +196,19 @@ func UpdateLoadBalancer(lb, vip string, targets []string) error {
 	out, stderr, err := util.RunOVNNbctl("set", "load_balancer", lb, lbTarget)
 	if err != nil {
 		return fmt.Errorf("error in configuring load balancer: %s "+
+			"stdout: %q, stderr: %q, error: %v", lb, out, stderr, err)
+	}
+
+	return nil
+}
+
+func UpdateLoadBalancerOptions(lb string, options ...string) error {
+	cmd := []string{"set", "load_balancer", lb}
+	cmd = append(cmd, options...)
+
+	out, stderr, err := util.RunOVNNbctl(cmd...)
+	if err != nil {
+		return fmt.Errorf("error in configuring options for load balancer: %s "+
 			"stdout: %q, stderr: %q, error: %v", lb, out, stderr, err)
 	}
 
