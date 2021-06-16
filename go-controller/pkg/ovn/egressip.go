@@ -516,7 +516,8 @@ func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
 		var v4Subnet, v6Subnet *net.IPNet
 		v4IfAddr, v6IfAddr, err := util.ParseNodePrimaryIfAddr(node)
 		if err != nil {
-			return fmt.Errorf("unable to use node for egress assignment, err: %v", err)
+			klog.V(5).Infof("Unable to use node for egress assignment, err: %v", err)
+			return nil
 		}
 		if v4IfAddr != "" {
 			v4IP, v4Subnet, err = net.ParseCIDR(v4IfAddr)
