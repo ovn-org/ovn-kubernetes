@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	goovn "github.com/ebay/go-ovn"
+	"github.com/mitchellh/copystructure"
 	"k8s.io/klog/v2"
 )
 
@@ -22,6 +23,11 @@ func (mock *MockOVNClient) LRGet(lr string) ([]*goovn.LogicalRouter, error) {
 	if lrouter, ok = lrCache[lr]; !ok {
 		return nil, goovn.ErrorNotFound
 	}
+	lrouter, err := copystructure.Copy(lrouter)
+	if err != nil {
+		panic(err) // should never happen
+	}
+
 	if lrRet, ok := lrouter.(*goovn.LogicalRouter); ok {
 		return []*goovn.LogicalRouter{lrRet}, nil
 	}
@@ -73,6 +79,10 @@ func (mock *MockOVNClient) LRList() ([]*goovn.LogicalRouter, error) {
 	}
 	var lrEntry interface{}
 	for _, lrEntry = range lrCache {
+		lrEntry, err := copystructure.Copy(lrEntry)
+		if err != nil {
+			panic(err) // should never happen
+		}
 		lr, ok := lrEntry.(*goovn.LogicalRouter)
 		if !ok {
 			return nil, fmt.Errorf("invalid object type assertion for %s", LogicalRouterType)
@@ -113,25 +123,5 @@ func (mock *MockOVNClient) LRPDel(lr string, lrp string) (*goovn.OvnCommand, err
 
 // Get all lrp by lr
 func (mock *MockOVNClient) LRPList(lr string) ([]*goovn.LogicalRouterPort, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Add LRSR with given ip_prefix on given lr
-func (mock *MockOVNClient) LRSRAdd(lr string, ip_prefix string, nexthop string, output_port *string, policy *string, external_ids map[string]string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Delete LRSR with given ip_prefix, nexthop, outputPort and policy on given lr
-func (mock *MockOVNClient) LRSRDel(lr string, prefix string, nexthop, outputPort, policy *string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Delete LRSR by uuid given lr
-func (mock *MockOVNClient) LRSRDelByUUID(lr, uuid string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Get all LRSRs by lr
-func (mock *MockOVNClient) LRSRList(lr string) ([]*goovn.LogicalRouterStaticRoute, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }

@@ -97,7 +97,7 @@ func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalID
 	}
 	// Get the IP address and MAC address of the pod
 	// for Smart-Nic, ensure connection-details is present
-	annotations, err := GetPodAnnotations(pr.ctx, podLister, namespace, podName, annotCondFn)
+	annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, namespace, podName, annotCondFn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
@@ -137,7 +137,7 @@ func (pr *PodRequest) cmdDel() ([]byte, error) {
 	return []byte{}, nil
 }
 
-func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternalIDs bool) ([]byte, error) {
+func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) ([]byte, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
@@ -149,7 +149,7 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternal
 	if pr.IsSmartNIC {
 		annotCondFn = isSmartNICReady
 	}
-	annotations, err := GetPodAnnotations(pr.ctx, podLister, pr.PodNamespace, pr.PodName, annotCondFn)
+	annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, pr.PodNamespace, pr.PodName, annotCondFn)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +217,7 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, us
 	case CNIDel:
 		result, err = request.cmdDel()
 	case CNICheck:
-		result, err = request.cmdCheck(podLister, useOVSExternalIDs)
+		result, err = request.cmdCheck(podLister, useOVSExternalIDs, kclient)
 	default:
 	}
 	klog.Infof("%s %s finished CNI request %+v, result %q, err %v", request, request.Command, request, string(result), err)

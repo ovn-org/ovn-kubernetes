@@ -2,7 +2,9 @@ package testing
 
 import (
 	"fmt"
+
 	goovn "github.com/ebay/go-ovn"
+	"github.com/mitchellh/copystructure"
 	"k8s.io/klog/v2"
 )
 
@@ -41,7 +43,29 @@ func (mock *MockOVNClient) PortGroupAdd(group string, ports []string, external_i
 
 // Sets "ports" and/or "external_ids" on the port group named "group". It is an error if group does not exist.
 func (mock *MockOVNClient) PortGroupUpdate(group string, ports []string, external_ids map[string]string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+	var pg *goovn.PortGroup
+	if pg, _ = mock.PortGroupGet(group); pg == nil {
+		return nil, goovn.ErrorNotFound
+	}
+
+	// We don't yet support updating external-ids
+	if external_ids != nil {
+		return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+	}
+
+	return &goovn.OvnCommand{
+		Exe: &MockExecution{
+			handler: mock,
+			op:      OpUpdate,
+			table:   PortGroupType,
+			objName: group,
+			objUpdate: UpdateCache{
+				FieldType:  PgLSPs,
+				FieldValue: ports,
+				UpdateOp:   OpUpdate,
+			},
+		},
+	}, nil
 }
 
 // Add port to port group.
@@ -134,6 +158,10 @@ func (mock *MockOVNClient) PortGroupGet(group string) (*goovn.PortGroup, error) 
 	if port, ok = pgCache[group]; !ok {
 		return nil, goovn.ErrorNotFound
 	}
+	port, err := copystructure.Copy(port) // deep-copy to prevent data races
+	if err != nil {
+		panic(err) // should never happen
+	}
 	if pgRet, ok := port.(*goovn.PortGroup); ok {
 		return pgRet, nil
 	}
@@ -180,6 +208,12 @@ func (mock *MockOVNClient) updatePortGroupCache(pgName string, update UpdateCach
 			pg.Ports = append(pg.Ports, fmt.Sprintf("%v", update.FieldValue))
 		case OpDelete:
 			pg.Ports = removeElement(pg.Ports, fmt.Sprintf("%v", update.FieldValue))
+		case OpUpdate:
+			ports, ok := update.FieldValue.([]string)
+			if !ok {
+				panic("invalid port group update...")
+			}
+			pg.Ports = ports
 		default:
 			return fmt.Errorf("unrecognized update op: %s", update.UpdateOp)
 		}

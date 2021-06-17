@@ -226,7 +226,7 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 			gatewayIP = gatewayIPnet.IP
 		}
 
-		if len(config.HybridOverlay.ClusterSubnets) > 0 && !hasRoutingExternalGWs && !hasPodRoutingGWs {
+		if len(config.HybridOverlay.ClusterSubnets) > 0 {
 			// Add a route for each hybrid overlay subnet via the hybrid
 			// overlay port on the pod's logical switch.
 			nextHop := util.GetNodeHybridOverlayIfAddr(nodeSubnet).IP
@@ -343,8 +343,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// out iface-id for an old instance of this pod, and the pod got
 	// rescheduled.
 	opts, err := oc.ovnNBClient.LSPGetOptions(portName)
-	if err != nil {
-		klog.Warningf("Failed to get options for port: %s", portName)
+	if err != nil && err != goovn.ErrorNotFound {
+		klog.Warningf("Failed to get options for port %s: %v", portName, err)
 	}
 	if opts == nil {
 		opts = make(map[string]string)

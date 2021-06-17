@@ -126,15 +126,23 @@ func (gp *gressPolicy) deletePeerSvcVip(service *v1.Service) error {
 	return gp.peerAddressSet.DeleteIPs(ips)
 }
 
-func (gp *gressPolicy) addPeerPod(pod *v1.Pod) error {
+func (gp *gressPolicy) addPeerPods(pods ...*v1.Pod) error {
 	if gp.peerAddressSet == nil {
-		return fmt.Errorf("peer AddressSet is nil, cannot add peer pod: %s for gressPolicy: %s",
-			pod.ObjectMeta.Name, gp.policyName)
+		return fmt.Errorf("peer AddressSet is nil, cannot add peer pod(s): for gressPolicy: %s",
+			gp.policyName)
 	}
 
-	ips, err := util.GetAllPodIPs(pod)
-	if err != nil {
-		return err
+	podIPFactor := 1
+	if config.IPv4Mode && config.IPv6Mode {
+		podIPFactor = 2
+	}
+	ips := make([]net.IP, 0, len(pods)*podIPFactor)
+	for _, pod := range pods {
+		podIPs, err := util.GetAllPodIPs(pod)
+		if err != nil {
+			return err
+		}
+		ips = append(ips, podIPs...)
 	}
 
 	return gp.peerAddressSet.AddIPs(ips)
@@ -323,16 +331,28 @@ func (gp *gressPolicy) localPodAddACL(portGroupName, portGroupUUID string, aclLo
 }
 
 // addACLAllow adds an ACL with a given match to the given Port Group
-func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlockCidr int, aclLogging string) error {
-	var direction, action, aclName string
+func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlockCIDR int, aclLogging string) error {
+	var direction, action, aclName, ipBlockCIDRString string
 	direction = types.DirectionToLPort
 	action = "allow-related"
 	aclName = fmt.Sprintf("%s_%s_%v", gp.policyNamespace, gp.policyName, gp.idx)
 
+	// For backward compatibility with existing ACLs, we use "ipblock_cidr=false" for
+	// non-ipblock ACLs and "ipblock_cidr=true" for the first ipblock ACL in a policy,
+	// but then number them after that.
+	switch ipBlockCIDR {
+	case 0:
+		ipBlockCIDRString = "false"
+	case 1:
+		ipBlockCIDRString = "true"
+	default:
+		ipBlockCIDRString = fmt.Sprintf("%d", ipBlockCIDR)
+	}
+
 	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
-		fmt.Sprintf("external-ids:ipblock_cidr=%d", ipBlockCidr),
+		fmt.Sprintf("external-ids:ipblock_cidr=%s", ipBlockCIDRString),
 		fmt.Sprintf("external-ids:namespace=%s", gp.policyNamespace),
 		fmt.Sprintf("external-ids:policy=%s", gp.policyName),
 		fmt.Sprintf("external-ids:%s_num=%d", gp.policyType, gp.idx),
@@ -356,7 +376,7 @@ func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlock
 		fmt.Sprintf("meter=%s", types.OvnACLLoggingMeter),
 		fmt.Sprintf("name=%.63s", aclName),
 		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
-		fmt.Sprintf("external-ids:ipblock_cidr=%d", ipBlockCidr),
+		fmt.Sprintf("external-ids:ipblock_cidr=%s", ipBlockCIDRString),
 		fmt.Sprintf("external-ids:namespace=%s", gp.policyNamespace),
 		fmt.Sprintf("external-ids:policy=%s", gp.policyName),
 		fmt.Sprintf("external-ids:%s_num=%d", gp.policyType, gp.idx),
@@ -485,7 +505,7 @@ func getSvcVips(service *v1.Service) []net.IP {
 			for _, physicalIP := range physicalIPs {
 				ip := net.ParseIP(physicalIP)
 				if ip == nil {
-					klog.Errorf("Failed to parse pod IP %q", physicalIP)
+					klog.Errorf("Failed to parse physical IP %q", physicalIP)
 					continue
 				}
 				ips = append(ips, ip)
@@ -496,29 +516,27 @@ func getSvcVips(service *v1.Service) []net.IP {
 		if util.IsClusterIPSet(service) {
 			ip := net.ParseIP(service.Spec.ClusterIP)
 			if ip == nil {
-				klog.Errorf("Failed to parse pod IP %q", service.Spec.ClusterIP)
+				klog.Errorf("Failed to parse cluster IP %q", service.Spec.ClusterIP)
 			}
 			ips = append(ips, ip)
 		}
 
 		for _, ing := range service.Status.LoadBalancer.Ingress {
-			ip := net.ParseIP(ing.IP)
-			if ip == nil {
-				klog.Errorf("Failed to parse pod IP %q", ing)
-				continue
+			if ing.IP != "" {
+				klog.V(5).Infof("Adding ingress IPs: %s from Service: %s to VIP set", ing.IP, service.Name)
+				ips = append(ips, net.ParseIP(ing.IP))
 			}
-			klog.V(5).Infof("Adding ingress IPs from Service: %s to VIP set", service.Name)
-			ips = append(ips, ip)
 		}
 
 		if len(service.Spec.ExternalIPs) > 0 {
 			for _, extIP := range service.Spec.ExternalIPs {
 				ip := net.ParseIP(extIP)
 				if ip == nil {
-					klog.Errorf("Failed to parse pod IP %q", extIP)
+					klog.Errorf("Failed to parse external IP %q", extIP)
 					continue
 				}
-				klog.V(5).Infof("Adding external IPs from Service: %s to VIP set", service.Name)
+				klog.V(5).Infof("Adding external IP: %s, from Service: %s to VIP set",
+					ip, service.Name)
 				ips = append(ips, ip)
 			}
 		}
@@ -527,5 +545,6 @@ func getSvcVips(service *v1.Service) []net.IP {
 		klog.V(5).Infof("Service has no VIPs")
 		return nil
 	}
+
 	return ips
 }

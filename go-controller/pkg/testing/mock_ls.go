@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	goovn "github.com/ebay/go-ovn"
+	"github.com/mitchellh/copystructure"
 	"k8s.io/klog/v2"
 )
 
@@ -26,6 +27,11 @@ func (mock *MockOVNClient) LSGet(ls string) ([]*goovn.LogicalSwitch, error) {
 	if lswitch, ok = lsCache[ls]; !ok {
 		return nil, goovn.ErrorNotFound
 	}
+	lswitch, err := copystructure.Copy(lswitch)
+	if err != nil {
+		panic(err) // should never happen
+	}
+
 	if lsRet, ok := lswitch.(*goovn.LogicalSwitch); ok {
 		return []*goovn.LogicalSwitch{lsRet}, nil
 	}
@@ -73,6 +79,10 @@ func (mock *MockOVNClient) LSList() ([]*goovn.LogicalSwitch, error) {
 	}
 	var lsEntry interface{}
 	for _, lsEntry = range lsCache {
+		lsEntry, err := copystructure.Copy(lsEntry)
+		if err != nil {
+			panic(err) // should never happen
+		}
 		ls, ok := lsEntry.(*goovn.LogicalSwitch)
 		if !ok {
 			return nil, fmt.Errorf("invalid object type assertion for %s", LogicalSwitchType)

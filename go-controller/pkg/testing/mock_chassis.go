@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	goovn "github.com/ebay/go-ovn"
+	"github.com/mitchellh/copystructure"
 	"k8s.io/klog/v2"
 )
 
@@ -19,6 +20,10 @@ func (mock *MockOVNClient) ChassisList() ([]*goovn.Chassis, error) {
 	}
 	var ch interface{}
 	for _, ch = range chassisCache {
+		ch, err := copystructure.Copy(ch)
+		if err != nil {
+			panic(err) // should never happen
+		}
 		chassis, ok := ch.(*goovn.Chassis)
 		if !ok {
 			return nil, fmt.Errorf("invalid object type assertion for %s", ChassisType)
@@ -53,6 +58,10 @@ func (mock *MockOVNClient) ChassisGet(name string) ([]*goovn.Chassis, error) {
 	var ch interface{}
 	chArray := make([]*goovn.Chassis, 0, len(chassisCache))
 	for _, ch = range chassisCache {
+		ch, err := copystructure.Copy(ch)
+		if err != nil {
+			panic(err) // should never happen
+		}
 		chassis, ok := ch.(*goovn.Chassis)
 		if !ok {
 			return nil, fmt.Errorf("invalid object type assertion for %s", ChassisType)

@@ -51,9 +51,10 @@ var MetricResourceUpdateCount = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "resource_update_total",
-	Help:      "A metric that captures the number of times a particular resource's UpdateFunc has been called"},
+	Help:      "The number of times a given resource event (add, update, or delete) has been handled"},
 	[]string{
 		"name",
+		"event",
 	},
 )
 
@@ -63,9 +64,12 @@ var MetricResourceUpdateLatency = prometheus.NewHistogramVec(prometheus.Histogra
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "resource_update_latency_seconds",
-	Help:      "The latency of various update handlers for a given resource",
+	Help:      "The duration to process all handlers for a given resource event (add, update, or delete)",
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
-	[]string{"name"},
+	[]string{
+		"name",
+		"event",
+	},
 )
 
 // MetricRequeueServiceCount is the number of times a particular service has been requeued.

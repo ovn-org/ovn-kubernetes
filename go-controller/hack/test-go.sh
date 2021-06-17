@@ -38,25 +38,16 @@ function testrun {
         args=""
         go_test="sudo ${testfile}"
     fi
-    # set gomaxprocs to 1 in CI, because actions are run in containers and we don't know what cpu
-    # limits are being imposed
-    if [ -n "${CI}" ]; then
-        args="${args}-test.cpu 1 "
-    fi
     if [[ -n "$gingko_focus" ]]; then
         local ginkgoargs=${ginkgo_focus:-}
     fi
     local path=${pkg#github.com/ovn-org/ovn-kubernetes/go-controller}
-    # coverage is incompatible with the race detector
     if [ ! -z "${COVERALLS:-}" ]; then
-        args="-test.coverprofile=${idx}.coverprofile "
+        args="${args} -test.coverprofile=${idx}.coverprofile "
     fi
     if grep -q -r "ginkgo" ."${path}"; then
 	    prefix=$(echo "${path}" | cut -c 2- | sed 's,/,_,g')
-        ginkgoargs="-ginkgo.v -ginkgo.reportFile ${TEST_REPORT_DIR}/junit-${prefix}.xml"
-        if [[ -n "$gingko_focus" ]]; then
-            ginkgoargs="-ginkgo.v ${gingko_focus} -ginkgo.reportFile ${TEST_REPORT_DIR}/junit-${prefix}.xml"
-        fi
+        ginkgoargs="-ginkgo.v ${ginkgo_focus} -ginkgo.reportFile ${TEST_REPORT_DIR}/junit-${prefix}.xml"
     fi
     args="${args}${otherargs}"
     if [ "$go_test" == "go test -mod=vendor" ]; then

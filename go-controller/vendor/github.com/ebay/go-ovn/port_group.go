@@ -117,14 +117,8 @@ func (odbi *ovndb) pgUpdateImp(group string, ports []string, external_ids map[st
 	return &OvnCommand{operations, odbi, make([][]map[string]interface{}, len(operations))}, nil
 }
 
-func (odbi *ovndb) pgAddPortImp(group, port string)  (*OvnCommand, error) {
-	if pg, err := odbi.pgGetImp(group); err == nil {
-		for _, p := range pg.Ports {
-			if p == port {
-				return nil, ErrorExist
-			}
-		}
-	} else {
+func (odbi *ovndb) pgAddPortImp(group, port string) (*OvnCommand, error) {
+	if _, err := odbi.pgGetImp(group); err != nil {
 		return nil, err
 	}
 
@@ -148,18 +142,7 @@ func (odbi *ovndb) pgAddPortImp(group, port string)  (*OvnCommand, error) {
 }
 
 func (odbi *ovndb) pgRemovePortImp(group string, port string) (*OvnCommand, error) {
-	if pg, err := odbi.pgGetImp(group); err == nil {
-		portFound := false
-		for _, p := range pg.Ports {
-			if p == port {
-				portFound = true
-				break
-			}
-		}
-		if portFound != true {
-			return nil, ErrorNotFound
-		}
-	} else {
+	if _, err := odbi.pgGetImp(group); err != nil {
 		return nil, err
 	}
 

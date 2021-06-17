@@ -416,8 +416,13 @@ docker_disable_ipv6() {
   done
 }
 
-coredns_patch_for_github_ci() {
-  # Patch CoreDNS to work in Github CI
+coredns_patch() {
+  dns_server="8.8.8.8"
+  if [ "$KIND_IPV6_SUPPORT" == true ]; then
+    dns_server="2001:4860:4860::8888"
+  fi
+
+  # Patch CoreDNS to work
   # 1. Github CI doesn´t offer IPv6 connectivity, so CoreDNS should be configured
   # to work in an offline environment:
   # https://github.com/coredns/coredns/issues/2494#issuecomment-457215452
@@ -435,7 +440,7 @@ coredns_patch_for_github_ci() {
       -e 's/^.*kubernetes cluster\.local/& net/' \
       -e '/^.*upstream$/d' \
       -e '/^.*fallthrough.*$/d' \
-      -e '/^.*forward . \/etc\/resolv.conf$/d' \
+      -e 's/^\(.*forward \.\).*$/\1 '"$dns_server"' {/' \
       -e '/^.*loop$/d' \
   )
   echo "Patched CoreDNS config:"
@@ -578,9 +583,7 @@ check_ipv6
 set_cluster_cidr_ip_families
 create_kind_cluster
 docker_disable_ipv6
-if [ "${GITHUB_ACTIONS:-false}" == "true" ]; then
-  coredns_patch_for_github_ci
-fi
+coredns_patch
 build_ovn_image
 detect_apiserver_url
 create_ovn_kube_manifests
