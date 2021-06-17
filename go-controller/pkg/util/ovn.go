@@ -28,18 +28,12 @@ import (
 // TODO(trozet) use go-bindings
 func UpdateRouterSNAT(router string, externalIP net.IP, logicalSubnet *net.IPNet) error {
 	natType := "snat"
-	logicalIPVal := logicalSubnet.String()
-	logicalIPMask, _ := logicalSubnet.Mask.Size()
-	// OVN Values with full prefix mask wont print the /mask
-	if logicalIPMask == 32 || logicalIPMask == 128 {
-		logicalIPVal = logicalSubnet.IP.String()
-	}
 
 	// Search for exact match to see if entry already exists
 	uuids, stderr, err := RunOVNNbctl("--columns", "_uuid", "--format=csv", "--no-headings", "find", "nat",
 		fmt.Sprintf("external_ip=\"%s\"", externalIP.String()),
 		"type="+natType,
-		fmt.Sprintf("logical_ip=\"%s\"", logicalIPVal),
+		fmt.Sprintf("logical_ip=\"%s\"", logicalSubnet.String()),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to search NAT rules for external_ip %s, logicalSubnet: %s, "+

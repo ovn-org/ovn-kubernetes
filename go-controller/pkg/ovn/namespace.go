@@ -244,23 +244,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 
 	if gwAnnotation != oldGWAnnotation || newBFDEnabled != oldBFDEnabled {
 		// if old gw annotation was empty, new one must not be empty, so we should remove any per pod SNAT
-		if oldGWAnnotation == "" {
-			if config.Gateway.DisableSNATMultipleGWs && (len(nsInfo.routingExternalGWs.gws) != 0 || len(nsInfo.routingExternalPodGWs) != 0) {
-				existingPods, err := oc.watchFactory.GetPods(old.Name)
-				if err != nil {
-					klog.Errorf("Failed to get all the pods (%v)", err)
-				}
-				for _, pod := range existingPods {
-					logicalPort := podLogicalPortName(pod)
-					portInfo, err := oc.logicalPortCache.get(logicalPort)
-					if err != nil {
-						klog.Warningf("Unable to get port %s in cache for SNAT rule removal", logicalPort)
-					} else {
-						oc.deletePerPodGRSNAT(pod.Spec.NodeName, portInfo.ips)
-					}
-				}
-			}
-		} else {
+		if oldGWAnnotation != "" {
 			oc.deleteGWRoutesForNamespace(nsInfo)
 		}
 		exGateways, err := parseRoutingExternalGWAnnotation(gwAnnotation)
@@ -270,24 +254,6 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 			err = oc.addExternalGWsForNamespace(gatewayInfo{gws: exGateways, bfdEnabled: newBFDEnabled}, nsInfo, old.Name)
 			if err != nil {
 				klog.Error(err.Error())
-			}
-		}
-		// if new annotation is empty, exgws were removed, may need to add SNAT per pod
-		// check if there are any pod gateways serving this namespace as well
-		if gwAnnotation == "" && len(nsInfo.routingExternalPodGWs) == 0 && config.Gateway.DisableSNATMultipleGWs {
-			existingPods, err := oc.watchFactory.GetPods(old.Name)
-			if err != nil {
-				klog.Errorf("Failed to get all the pods (%v)", err)
-			}
-			for _, pod := range existingPods {
-				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
-				if err != nil {
-					klog.Error(err.Error())
-				} else {
-					if err = oc.addPerPodGRSNAT(pod, podAnnotation.IPs); err != nil {
-						klog.Error(err.Error())
-					}
-				}
 			}
 		}
 	}

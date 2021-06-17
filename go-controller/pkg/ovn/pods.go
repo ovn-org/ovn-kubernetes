@@ -129,9 +129,6 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		klog.Errorf(err.Error())
 	}
 
-	if config.Gateway.DisableSNATMultipleGWs {
-		oc.deletePerPodGRSNAT(pod.Spec.NodeName, portInfo.ips)
-	}
 	oc.deleteGWRoutesForPod(pod.Namespace, portInfo.ips)
 	oc.deletePodExternalGW(pod)
 	oc.logicalPortCache.remove(logicalPort)
@@ -506,12 +503,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	if len(gateways) > 0 {
 		err = oc.addGWRoutesForPod(gateways, podIfAddrs, pod.Namespace, pod.Spec.NodeName)
 		if err != nil {
-			return err
-		}
-	} else if config.Gateway.DisableSNATMultipleGWs {
-		// Add NAT rules to pods if disable SNAT is set and does not have
-		// namespace annotations to go through external egress router
-		if err = oc.addPerPodGRSNAT(pod, podIfAddrs); err != nil {
 			return err
 		}
 	}

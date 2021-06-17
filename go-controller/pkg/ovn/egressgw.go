@@ -332,52 +332,6 @@ func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*ne
 	return nil
 }
 
-// deletePerPodGRSNAT removes per pod SNAT rules that are applied to the GR where the pod resides if
-// there are no gateways
-func (oc *Controller) deletePerPodGRSNAT(node string, podIPNets []*net.IPNet) {
-	gr := util.GetGatewayRouterFromNode(node)
-	for _, podIPNet := range podIPNets {
-		podIP := podIPNet.IP.String()
-		stdout, stderr, err := util.RunOVNNbctl("--if-exists", "lr-nat-del",
-			gr, "snat", podIP)
-		if err != nil {
-			klog.Errorf("Failed to delete SNAT rule for pod on gateway router %s, "+
-				"stdout: %q, stderr: %q, error: %v", gr, stdout, stderr, err)
-		}
-	}
-}
-
-func (oc *Controller) addPerPodGRSNAT(pod *kapi.Pod, podIfAddrs []*net.IPNet) error {
-	nodeName := pod.Spec.NodeName
-	node, err := oc.watchFactory.GetNode(nodeName)
-	if err != nil {
-		return fmt.Errorf("failed to get node %s: %v", nodeName, err)
-	}
-	l3GWConfig, err := util.ParseNodeL3GatewayAnnotation(node)
-	if err != nil {
-		return fmt.Errorf("unable to parse node L3 gw annotation: %v", err)
-	}
-	gr := types.GWRouterPrefix + nodeName
-	for _, gwIPNet := range l3GWConfig.IPAddresses {
-		gwIP := gwIPNet.IP.String()
-		for _, podIPNet := range podIfAddrs {
-			podIP := podIPNet.IP.String()
-			if utilnet.IsIPv6String(gwIP) != utilnet.IsIPv6String(podIP) {
-				continue
-			}
-			mask := GetIPFullMask(podIP)
-			_, fullMaskPodNet, err := net.ParseCIDR(podIP + mask)
-			if err != nil {
-				return fmt.Errorf("invalid IP: %s and mask: %s combination, error: %v", podIP, mask, err)
-			}
-			if err := util.UpdateRouterSNAT(gr, gwIPNet.IP, fullMaskPodNet); err != nil {
-				return fmt.Errorf("failed to update NAT for pod: %s, error: %v", pod.Name, err)
-			}
-		}
-	}
-	return nil
-}
-
 // addHybridRoutePolicyForPod handles adding a higher priority allow policy to allow traffic to be routed normally
 // by ecmp routes
 func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) error {
