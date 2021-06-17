@@ -849,10 +849,6 @@ ovn-master() {
       hybrid_overlay_flags="${hybrid_overlay_flags} --hybrid-overlay-cluster-subnets=${ovn_hybrid_overlay_net_cidr}"
     fi
   fi
-  disable_snat_multiple_gws_flag=
-  if [[ ${ovn_disable_snat_multiple_gws} == "true" ]]; then
-      disable_snat_multiple_gws_flag="--disable-snat-multiple-gws"
-  fi
 
   disable_pkt_mtu_check_flag=
   if [[ ${ovn_disable_pkt_mtu_check} == "true" ]]; then
@@ -1012,11 +1008,6 @@ ovn-node() {
     if [[ -n "${ovn_hybrid_overlay_net_cidr}" ]]; then
       hybrid_overlay_flags="${hybrid_overlay_flags} --hybrid-overlay-cluster-subnets=${ovn_hybrid_overlay_net_cidr}"
     fi
-  fi
-
-  disable_snat_multiple_gws_flag=
-  if [[ ${ovn_disable_snat_multiple_gws} == "true" ]]; then
-      disable_snat_multiple_gws_flag="--disable-snat-multiple-gws"
   fi
 
   disable_pkt_mtu_check_flag=

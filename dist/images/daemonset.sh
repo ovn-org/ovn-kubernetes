@@ -147,9 +147,6 @@ while [ "$1" != "" ]; do
   --hybrid-enabled)
     OVN_HYBRID_OVERLAY_ENABLE=$VALUE
     ;;
-  --disable-snat-multiple-gws)
-    OVN_DISABLE_SNAT_MULTIPLE_GWS=$VALUE
-    ;;
   --disable-pkt-mtu-check)
     OVN_DISABLE_PKT_MTU_CHECK=$VALUE
     ;;

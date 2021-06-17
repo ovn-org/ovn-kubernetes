@@ -447,7 +447,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			NodePortEnable: true,
 		}
 		sctpSupport := false
-		config.Gateway.DisableSNATMultipleGWs = true
 
 		fexec := ovntest.NewFakeExec()
 		err := util.SetExec(fexec)

@@ -33,7 +33,7 @@ delete() {
 usage() {
     echo "usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]"
     echo "                 [-ho |--hybrid-enabled] [-ii|--install-ingress] [-n4|--no-ipv4]"
-    echo "                 [-i6 |--ipv6] [-wk|--num-workers <num>] [-ds|--disable-snat-multiple-gws]"
+    echo "                 [-i6 |--ipv6] [-wk|--num-workers <num>]"
     echo "                 [-dp |--disable-pkt-mtu-check]"
     echo "                 [-nf |--netflow-targets <targets>] [sf|--sflow-targets <targets>] [-if|--ipfix-targets]"
     echo "                 [-sw |--allow-system-writes] [-gm|--gateway-mode <mode>]"
@@ -49,7 +49,6 @@ usage() {
     echo "                                   DEFAULT: Remove taint components."
     echo "-ha  | --ha-enabled                Enable high availability. DEFAULT: HA Disabled."
     echo "-ho  | --hybrid-enabled            Enable hybrid overlay. DEFAULT: Disabled."
-    echo "-ds  | --disable-snat-multiple-gws Disable SNAT for multiple gws. DEFAULT: Disabled."
     echo "-dp  | --disable-pkt-mtu-check     Disable checking packet size greater than MTU. Default: Disabled"
     echo "-nf  | --netflow-targets           Comma delimited list of ip:port netflow collectors. DEFAULT: Disabled."
     echo "-sf  | --sflow-targets             Comma delimited list of ip:port sflow collectors. DEFAULT: Disabled."
@@ -97,8 +96,6 @@ parse_args() {
             -me | --multicast-enabled)          OVN_MULTICAST_ENABLE=true
                                                 ;;
             -ho | --hybrid-enabled )            OVN_HYBRID_OVERLAY_ENABLE=true
-                                                ;;
-            -ds | --disable-snat-multiple-gws ) OVN_DISABLE_SNAT_MULTIPLE_GWS=true
                                                 ;;
             -dp | --disable-pkt-mtu-check )     OVN_DISABLE_PKT_MTU_CHECK=true
                                                 ;;
@@ -474,7 +471,6 @@ create_ovn_kube_manifests() {
     --svc-cidr="${SVC_CIDR}" \
     --gateway-mode="${OVN_GATEWAY_MODE}" \
     --hybrid-enabled="${OVN_HYBRID_OVERLAY_ENABLE}" \
-    --disable-snat-multiple-gws="${OVN_DISABLE_SNAT_MULTIPLE_GWS}" \
     --disable-pkt-mtu-check="${OVN_DISABLE_PKT_MTU_CHECK}" \
     --ovn-empty-lb-events="${OVN_EMPTY_LB_EVENTS}" \
     --multicast-enabled="${OVN_MULTICAST_ENABLE}" \

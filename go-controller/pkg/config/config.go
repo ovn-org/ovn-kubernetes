@@ -277,8 +277,6 @@ type GatewayConfig struct {
 	VLANID uint `gcfg:"vlan-id"`
 	// NodeportEnable sets whether to provide Kubernetes NodePort service or not
 	NodeportEnable bool `gcfg:"nodeport"`
-	// DisableSNATMultipleGws sets whether to disable SNAT of egress traffic in namespaces annotated with routing-external-gws
-	DisableSNATMultipleGWs bool `gcfg:"disable-snat-multiple-gws"`
 	// V4JoinSubnet to be used in the cluster
 	V4JoinSubnet string `gcfg:"v4-join-subnet"`
 	// V6JoinSubnet to be used in the cluster
@@ -903,11 +901,6 @@ var OVNGatewayFlags = []cli.Flag{
 		Name:        "nodeport",
 		Usage:       "Setup nodeport based ingress on gateways.",
 		Destination: &cliConfig.Gateway.NodeportEnable,
-	},
-	&cli.BoolFlag{
-		Name:        "disable-snat-multiple-gws",
-		Usage:       "Disable SNAT for egress traffic with multiple gateways.",
-		Destination: &cliConfig.Gateway.DisableSNATMultipleGWs,
 	},
 	&cli.StringFlag{
 		Name:        "gateway-v4-join-subnet",
