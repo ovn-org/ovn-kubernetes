@@ -373,23 +373,21 @@ func newSharedGatewayOpenFlowManager(patchPort, macAddress, gwBridge, gwIntf str
 				defaultOpenFlowCookie, actions))
 	}
 
-	if config.Gateway.DisableSNATMultipleGWs {
-		// table 1, traffic to pod subnet go directly to OVN
-		// check packet length larger than MTU + eth header - vlan overhead
-		// send to table 11 to check if it needs to go to kernel for ICMP needs frag/packet too big
-		for _, clusterEntry := range config.Default.ClusterSubnets {
-			cidr := clusterEntry.CIDR
-			var ipPrefix string
-			if utilnet.IsIPv6CIDR(cidr) {
-				ipPrefix = "ipv6"
-			} else {
-				ipPrefix = "ip"
-			}
-			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=15, table=1, %s, %s_dst=%s, "+
-					"actions=%s",
-					defaultOpenFlowCookie, ipPrefix, ipPrefix, cidr, actions))
+	// table 1, traffic to pod subnet go directly to OVN
+	// check packet length larger than MTU + eth header - vlan overhead
+	// send to table 11 to check if it needs to go to kernel for ICMP needs frag/packet too big
+	for _, clusterEntry := range config.Default.ClusterSubnets {
+		cidr := clusterEntry.CIDR
+		var ipPrefix string
+		if utilnet.IsIPv6CIDR(cidr) {
+			ipPrefix = "ipv6"
+		} else {
+			ipPrefix = "ip"
 		}
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=15, table=1, %s, %s_dst=%s, "+
+				"actions=%s",
+				defaultOpenFlowCookie, ipPrefix, ipPrefix, cidr, actions))
 	}
 
 	// table 1, we check to see if this dest mac is the shared mac, if so send to host
