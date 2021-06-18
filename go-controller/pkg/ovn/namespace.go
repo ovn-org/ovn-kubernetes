@@ -297,7 +297,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 	if aclAnnotation != oldACLAnnotation && (oc.aclLoggingCanEnable(aclAnnotation, nsInfo) || aclAnnotation == "") &&
 		len(nsInfo.networkPolicies) > 0 {
 		// deny rules are all one per namespace
-		if err := oc.setACLDenyLogging(old.Name, nsInfo, nsInfo.aclLogging.Deny); err != nil {
+		if err := oc.setDefaultACLsLogging(old.Name, nsInfo, &nsInfo.aclLogging); err != nil {
 			klog.Warningf(err.Error())
 		} else {
 			klog.Infof("Namespace %s: ACL logging setting updated to deny=%s allow=%s",

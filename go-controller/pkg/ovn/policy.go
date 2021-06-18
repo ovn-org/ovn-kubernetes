@@ -140,6 +140,10 @@ func addAllowACLFromNode(logicalSwitch string, mgmtPortIP net.IP, ovnNBClient go
 	return nil
 }
 
+// Creates Match section for the default per Namespace ACLs to/from ports in a given port group
+// If input match is "" then the returned match string only contains "inport"/"outport" matching
+// If input match is "hairpin" then a specical match for LB hairpin traffic is returned
+// Otherwise the input match is appened to the "inport"/"outport" matching
 func getACLMatch(portGroupName, match string, policyType knet.PolicyType) string {
 	var aclMatch string
 	if policyType == knet.PolicyTypeIngress {
@@ -148,10 +152,12 @@ func getACLMatch(portGroupName, match string, policyType knet.PolicyType) string
 		aclMatch = "inport == @" + portGroupName
 	}
 
-	if match != "" {
+	if match == "hairpin" {
+		aclMatch += fmt.Sprintf(" && (ip4.src == %s || ip6.src ==  %s)", types.V4LBHairpinMasquradeIP, types.V6LBHairpinMasquradeIP)
+	}
+
+	if match != "" && match != "hairpin" {
 		aclMatch += " && " + match
-	}else { 
-		aclMatch += " && ip4.src != 169.254.169.3"
 	}
 
 	return "match=\"" + aclMatch + "\""
@@ -312,6 +318,15 @@ func (oc *Controller) createDefaultDenyPortGroup(ns string, nsInfo *namespaceInf
 	if err != nil {
 		return fmt.Errorf("failed to create default allow ARP ACL for port group %v", err)
 	}
+	// Add acl to default allow ingress hairpin traffic
+	if policyType == knet.PolicyTypeIngress {
+		match = getACLMatch(portGroupName, "hairpin", policyType)
+		err = addACLPortGroup(ns, portGroupUUID, types.DirectionToLPort,
+			types.DefaultAllowPriority, match, "allow", policyType, "", "HairpinAllowPolicy")
+		if err != nil {
+			return fmt.Errorf("failed to create default Hairpin allow ACL for port group %v", err)
+		}
+	}
 
 	if policyType == knet.PolicyTypeIngress {
 		nsInfo.portGroupIngressDenyUUID = portGroupUUID
@@ -324,10 +339,12 @@ func (oc *Controller) createDefaultDenyPortGroup(ns string, nsInfo *namespaceInf
 }
 
 // modify ACL logging
-func (oc *Controller) setACLDenyLogging(ns string, nsInfo *namespaceInfo, aclLogging string) error {
+func (oc *Controller) setDefaultACLsLogging(ns string, nsInfo *namespaceInfo, aclLogging *ACLLoggingLevels) error {
 
-	aclLoggingSev := getACLLoggingSeverity(aclLogging)
+	aclLoggingSevDeny := getACLLoggingSeverity(aclLogging.Deny)
+	aclLoggingSevAllow := getACLLoggingSeverity(aclLogging.Allow)
 
+	// Set logging for the per namespace default ingress ACL
 	match := getACLMatch(defaultDenyPortGroup(ns, "ingressDefaultDeny"), "", knet.PolicyTypeIngress)
 	uuid, err := getACLPortGroupUUID(match, "drop", knet.PolicyTypeIngress)
 	if err != nil {
@@ -338,10 +355,26 @@ func (oc *Controller) setACLDenyLogging(ns string, nsInfo *namespaceInfo, aclLog
 		return fmt.Errorf("failed to find the ACL for pg=%s: %v", nsInfo.portGroupIngressDenyUUID, err)
 	}
 	if _, stderr, err := util.RunOVNNbctl("set", "acl", uuid,
-		fmt.Sprintf("log=%t", aclLogging != ""), fmt.Sprintf("severity=%s", aclLoggingSev)); err != nil {
-		return fmt.Errorf("failed to modify the pg=%s, stderr: %q (%v)", nsInfo.portGroupIngressDenyUUID, stderr, err)
+		fmt.Sprintf("log=%t", aclLogging.Deny != ""), fmt.Sprintf("severity=%s", aclLoggingSevDeny)); err != nil {
+		return fmt.Errorf("failed to modify the logging for acl=%s on pg=%s, stderr: %q (%v)", uuid, nsInfo.portGroupIngressDenyUUID, stderr, err)
 	}
 
+	// Set logging for the per namespace default hairpin ingress ACL
+	match = getACLMatch(defaultDenyPortGroup(ns, "ingressDefaultDeny"), "hairpin", knet.PolicyTypeIngress)
+	uuid, err = getACLPortGroupUUID(match, "allow", knet.PolicyTypeIngress)
+	if err != nil {
+		return err
+	}
+	if uuid == "" {
+		// not suppose to happen
+		return fmt.Errorf("failed to find the ACL for pg=%s: %v", nsInfo.portGroupEgressDenyUUID, err)
+	}
+	if _, stderr, err := util.RunOVNNbctl("set", "acl", uuid,
+		fmt.Sprintf("log=%t", aclLogging.Allow != ""), fmt.Sprintf("severity=%s", aclLoggingSevAllow)); err != nil {
+		return fmt.Errorf("failed to modify the logging for acl=%s on pg=%s, stderr: %q (%v)", uuid, nsInfo.portGroupEgressDenyUUID, stderr, err)
+	}
+
+	// Set logging for the per namespace default egress ACL
 	match = getACLMatch(defaultDenyPortGroup(ns, "egressDefaultDeny"), "", knet.PolicyTypeEgress)
 	uuid, err = getACLPortGroupUUID(match, "drop", knet.PolicyTypeEgress)
 	if err != nil {
@@ -352,8 +385,8 @@ func (oc *Controller) setACLDenyLogging(ns string, nsInfo *namespaceInfo, aclLog
 		return fmt.Errorf("failed to find the ACL for pg=%s: %v", nsInfo.portGroupEgressDenyUUID, err)
 	}
 	if _, stderr, err := util.RunOVNNbctl("set", "acl", uuid,
-		fmt.Sprintf("log=%t", aclLogging != ""), fmt.Sprintf("severity=%s", aclLoggingSev)); err != nil {
-		return fmt.Errorf("failed to modify the pg=%s, stderr: %q (%v)", nsInfo.portGroupEgressDenyUUID, stderr, err)
+		fmt.Sprintf("log=%t", aclLogging.Deny != ""), fmt.Sprintf("severity=%s", aclLoggingSevDeny)); err != nil {
+		return fmt.Errorf("failed to modify the logging for acl=%s on pg=%s, stderr: %q (%v)", uuid, nsInfo.portGroupEgressDenyUUID, stderr, err)
 	}
 
 	return nil
