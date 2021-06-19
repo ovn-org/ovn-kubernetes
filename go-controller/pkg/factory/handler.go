@@ -205,20 +205,26 @@ func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface
 }
 
 func (i *informer) newFederatedQueuedHandler() cache.ResourceEventHandlerFuncs {
+	name := i.oType.Elem().Name()
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			i.enqueueEvent(nil, obj, func(e *event) {
+				metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
+				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
 					h.OnAdd(e.obj)
 				})
+				metrics.MetricResourceUpdateLatency.WithLabelValues(name, "add").Observe(time.Since(start).Seconds())
 			})
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-			metrics.MetricResourceUpdateCount.WithLabelValues(i.oType.Elem().Name()).Inc()
 			i.enqueueEvent(oldObj, newObj, func(e *event) {
+				metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
+				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
 					h.OnUpdate(e.oldObj, e.obj)
 				})
+				metrics.MetricResourceUpdateLatency.WithLabelValues(name, "update").Observe(time.Since(start).Seconds())
 			})
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -228,29 +234,35 @@ func (i *informer) newFederatedQueuedHandler() cache.ResourceEventHandlerFuncs {
 				return
 			}
 			i.enqueueEvent(nil, realObj, func(e *event) {
+				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
+				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
 					h.OnDelete(e.obj)
 				})
+				metrics.MetricResourceUpdateLatency.WithLabelValues(name, "delete").Observe(time.Since(start).Seconds())
 			})
 		},
 	}
 }
 
 func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
+	name := i.oType.Elem().Name()
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
+			metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
+			start := time.Now()
 			i.forEachHandler(obj, func(h *Handler) {
 				h.OnAdd(obj)
 			})
+			metrics.MetricResourceUpdateLatency.WithLabelValues(name, "add").Observe(time.Since(start).Seconds())
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-			name := i.oType.Elem().Name()
-			metrics.MetricResourceUpdateCount.WithLabelValues(name).Inc()
+			metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
+			start := time.Now()
 			i.forEachHandler(newObj, func(h *Handler) {
-				start := time.Now()
 				h.OnUpdate(oldObj, newObj)
-				metrics.MetricResourceUpdateLatency.WithLabelValues(name).Observe(time.Since(start).Seconds())
 			})
+			metrics.MetricResourceUpdateLatency.WithLabelValues(name, "update").Observe(time.Since(start).Seconds())
 		},
 		DeleteFunc: func(obj interface{}) {
 			realObj, err := ensureObjectOnDelete(obj, i.oType)
@@ -258,9 +270,12 @@ func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
 				klog.Errorf(err.Error())
 				return
 			}
+			metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
+			start := time.Now()
 			i.forEachHandler(realObj, func(h *Handler) {
 				h.OnDelete(realObj)
 			})
+			metrics.MetricResourceUpdateLatency.WithLabelValues(name, "delete").Observe(time.Since(start).Seconds())
 		},
 	}
 }

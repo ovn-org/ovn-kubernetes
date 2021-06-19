@@ -11,56 +11,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
-func TestGetACLByName(t *testing.T) {
-	tests := []struct {
-		name    string
-		aclName string
-		ovnCmd  ovntest.ExpectedCmd
-		want    string
-		wantErr bool
-	}{
-		{
-			name:    "existing acl",
-			aclName: "my-acl",
-			ovnCmd: ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=my-acl",
-				Output: "a08ea426-2288-11eb-a30b-a8a1590cda29",
-			},
-			want:    "a08ea426-2288-11eb-a30b-a8a1590cda29",
-			wantErr: false,
-		},
-		{
-			name:    "non existing acl",
-			aclName: "my-acl",
-			ovnCmd: ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=my-acl",
-				Output: "",
-			},
-			want:    "",
-			wantErr: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			fexec := ovntest.NewLooseCompareFakeExec()
-			fexec.AddFakeCmd(&tt.ovnCmd)
-			err := util.SetExec(fexec)
-			if err != nil {
-				t.Errorf("fexec error: %v", err)
-			}
-
-			got, err := GetACLByName(tt.aclName)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("GetACLByName() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if got != tt.want {
-				t.Errorf("GetACLByName() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestRemoveACLFromNodeSwitches(t *testing.T) {
 	tests := []struct {
 		name     string

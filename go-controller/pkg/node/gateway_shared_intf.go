@@ -74,9 +74,12 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 					npw.ofm.deleteFlowsByKey(key)
 				} else {
 					npw.ofm.updateFlowCacheEntry(key, []string{
-						fmt.Sprintf("cookie=%s, priority=100, in_port=%s, %s, tp_dst=%d, "+
+						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, tp_dst=%d, "+
 							"actions=%s",
-							cookie, npw.ofportPhys, flowProtocol, svcPort.NodePort, actions)})
+							cookie, npw.ofportPhys, flowProtocol, svcPort.NodePort, actions),
+						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, tp_src=%d, "+
+							"actions=output:%s",
+							cookie, npw.ofportPatch, flowProtocol, svcPort.NodePort, npw.ofportPhys)})
 				}
 			}
 		}
@@ -101,27 +104,34 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 			}
 			flowProtocol := protocol
 			nwDst := "nw_dst"
+			nwSrc := "nw_src"
 			if utilnet.IsIPv6String(ing.IP) {
 				flowProtocol = protocol + "6"
 				nwDst = "ipv6_dst"
+				nwSrc = "ipv6_src"
 			}
 			key = strings.Join([]string{"Ingress", service.Namespace, service.Name, ingIP.String(), fmt.Sprintf("%d", svcPort.Port)}, "_")
 			if !add {
 				npw.ofm.deleteFlowsByKey(key)
 			} else {
 				npw.ofm.updateFlowCacheEntry(key, []string{
-					fmt.Sprintf("cookie=%s, priority=100, in_port=%s, %s, %s=%s, tp_dst=%d, "+
+					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_dst=%d, "+
 						"actions=%s",
-						cookie, npw.ofportPhys, flowProtocol, nwDst, ing.IP, svcPort.Port, actions)})
+						cookie, npw.ofportPhys, flowProtocol, nwDst, ing.IP, svcPort.Port, actions),
+					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_src=%d, "+
+						"actions=output:%s",
+						cookie, npw.ofportPatch, flowProtocol, nwSrc, ing.IP, svcPort.Port, npw.ofportPhys)})
 			}
 		}
 
 		for _, externalIP := range service.Spec.ExternalIPs {
 			flowProtocol := protocol
 			nwDst := "nw_dst"
+			nwSrc := "nw_src"
 			if utilnet.IsIPv6String(externalIP) {
 				flowProtocol = protocol + "6"
 				nwDst = "ipv6_dst"
+				nwSrc = "ipv6_src"
 			}
 			cookie, err = svcToCookie(service.Namespace, service.Name, externalIP, svcPort.Port)
 			if err != nil {
@@ -134,9 +144,12 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 				npw.ofm.deleteFlowsByKey(key)
 			} else {
 				npw.ofm.updateFlowCacheEntry(key, []string{
-					fmt.Sprintf("cookie=%s, priority=100, in_port=%s, %s, %s=%s, tp_dst=%d, "+
+					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_dst=%d, "+
 						"actions=%s",
-						cookie, npw.ofportPhys, flowProtocol, nwDst, externalIP, svcPort.Port, actions)})
+						cookie, npw.ofportPhys, flowProtocol, nwDst, externalIP, svcPort.Port, actions),
+					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_src=%d, "+
+						"actions=output:%s",
+						cookie, npw.ofportPatch, flowProtocol, nwSrc, externalIP, svcPort.Port, npw.ofportPhys)})
 			}
 		}
 	}

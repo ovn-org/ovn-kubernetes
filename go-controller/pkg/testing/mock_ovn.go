@@ -12,13 +12,14 @@ import (
 )
 
 const (
-	LogicalSwitchType     string = "Logical_Switch"
-	LogicalRouterType     string = "Logical_Router"
-	LogicalSwitchPortType string = "Logical_Switch_Port"
-	ChassisType           string = "Chassis"
-	ACLType               string = "ACL"
-	ChassisPrivateType    string = "Chassis_Private"
-	PortGroupType         string = "Port_Group"
+	LogicalSwitchType            string = "Logical_Switch"
+	LogicalRouterType            string = "Logical_Router"
+	LogicalSwitchPortType        string = "Logical_Switch_Port"
+	LogicalRouterStaticRouteType string = "Logical_Router_Static_Route"
+	ChassisType                  string = "Chassis"
+	ACLType                      string = "ACL"
+	ChassisPrivateType           string = "Chassis_Private"
+	PortGroupType                string = "Port_Group"
 )
 
 const (
@@ -82,6 +83,7 @@ func NewMockOVNClient(db string) *MockOVNClient {
 	mock.cache[LogicalSwitchType] = make(MockObjectCacheByName)
 	mock.cache[ChassisPrivateType] = make(MockObjectCacheByName)
 	mock.cache[LogicalRouterType] = make(MockObjectCacheByName)
+	mock.cache[LogicalRouterStaticRouteType] = make(MockObjectCacheByName)
 	mock.cache[ACLType] = make(MockObjectCacheByName)
 	mock.cache[PortGroupType] = make(MockObjectCacheByName)
 	return mock
