@@ -121,6 +121,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: systemID,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-appctl --timeout=15 dpif/show-dp-features breth0",
+			Output: "Check pkt length action: Yes",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 get Interface patch-breth0_node1-to-br-int ofport",
 			Output: "5",
 		})

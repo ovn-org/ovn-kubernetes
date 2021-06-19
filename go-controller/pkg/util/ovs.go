@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -916,4 +917,24 @@ func (t *NBTxn) AddOrCommit(args []string) (string, string, error) {
 
 	t.add(args...)
 	return "", "", nil
+}
+
+// DetectCheckPktLengthSupport checks if OVN supports check packet length action in OVS kernel datapath
+func DetectCheckPktLengthSupport(bridge string) (bool, error) {
+	stdout, stderr, err := RunOVSAppctl("dpif/show-dp-features", bridge)
+	if err != nil {
+		klog.Errorf("Failed to query OVS for check packet length support, "+
+			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return false, err
+	}
+
+	re := regexp.MustCompile(`(?i)yes|(?i)true`)
+
+	for _, line := range strings.Split(strings.TrimSuffix(stdout, "\n"), "\n") {
+		if strings.Contains(line, "Check pkt length action") && re.MatchString(line) {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
