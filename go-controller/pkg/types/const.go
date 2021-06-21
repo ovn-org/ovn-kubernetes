@@ -7,7 +7,8 @@ const (
 
 	// PhysicalNetworkName is the name that maps to an OVS bridge that provides
 	// access to physical/external network
-	PhysicalNetworkName = "physnet"
+	PhysicalNetworkName         = "physnet"
+	PhysicalNetworkEgressGWName = "egphysnet"
 
 	// LocalNetworkName is the name that maps to an OVS bridge that provides
 	// access to local service
@@ -33,6 +34,7 @@ const (
 	JoinSwitchToDistRouterPrefix = "jtod-"
 	EXTSwitchToGWRouterPrefix    = "etor-"
 	GWRouterToExtSwitchPrefix    = "rtoe-"
+	EgressGWSwitchPrefix         = "eg-"
 
 	NodeLocalSwitch = "node_local_switch"
 

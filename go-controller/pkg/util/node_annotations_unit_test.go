@@ -127,6 +127,14 @@ func TestL3GatewayConfig_UnmarshalJSON(t *testing.T) {
 			},
 		},
 		{
+			desc:       "success: test host gateway bridge parsing",
+			inputParam: []byte(`{"default":{"mode":"shared","host-interface-id":"breth0_ovn-control-plane","host-mac-address":"02:42:ac:12:00:02","host-ip-addresses":["172.18.0.2/16"],"host-ip-address":"172.18.0.2/16"}`),
+			expOut: L3GatewayConfig{
+				Mode:            "shared",
+				HostInterfaceID: "breth0_ovn-control-plane",
+			},
+		},
+		{
 			desc:       "test bad MAC address value",
 			inputParam: []byte(`{"mode":"local","mac-address":"BADMAC"}`),
 			errMatch:   fmt.Errorf("bad 'mac-address' value"),
@@ -165,6 +173,9 @@ func TestL3GatewayConfig_UnmarshalJSON(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			if tc.desc != "success: test host gateway bridge parsing" {
+				return
+			}
 			l3GwCfg := L3GatewayConfig{}
 			e := l3GwCfg.UnmarshalJSON(tc.inputParam)
 			if tc.errAssert {

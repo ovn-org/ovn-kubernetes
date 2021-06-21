@@ -118,6 +118,8 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 	// TODO (trozet): use the go bindings here and batch commands
 	for _, pod := range existingPods {
 		gr := util.GetGatewayRouterFromNode(pod.Spec.NodeName)
+
+		port := oc.extSwitchPrefix() + types.GWRouterToExtSwitchPrefix + gr
 		for _, gw := range egress.gws {
 			for _, podIP := range pod.Status.PodIPs {
 				if utilnet.IsIPv6(gw) != utilnet.IsIPv6String(podIP.IP) {
@@ -126,10 +128,10 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 
 				mask := GetIPFullMask(podIP.IP)
 				nbctlArgs := []string{"--may-exist", "--policy=src-ip", "--ecmp-symmetric-reply",
-					"lr-route-add", gr, podIP.IP + mask, gw.String()}
+					"lr-route-add", gr, podIP.IP + mask, gw.String(), port}
 				if egress.bfdEnabled {
 					nbctlArgs = []string{"--may-exist", "--bfd", "--policy=src-ip", "--ecmp-symmetric-reply",
-						"lr-route-add", gr, podIP.IP + mask, gw.String(), types.GWRouterToExtSwitchPrefix + gr}
+						"lr-route-add", gr, podIP.IP + mask, gw.String(), port}
 				}
 
 				_, stderr, err := util.RunOVNNbctl(nbctlArgs...)
@@ -178,6 +180,7 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
 			pod, namespace)
 		return
 	}
+	portPrefix := oc.extSwitchPrefix()
 
 	for _, gwIP := range foundGws.gws {
 		// check for previously configured pod routes
@@ -211,7 +214,7 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
 					}
 				}
 			}
-			cleanUpBFDEntry(gwIP.String(), gr)
+			cleanUpBFDEntry(gwIP.String(), gr, portPrefix)
 		}
 	}
 	delete(nsInfo.routingExternalPodGWs, pod)
@@ -223,6 +226,8 @@ func (oc *Controller) deleteGWRoutesForNamespace(nsInfo *namespaceInfo) {
 	if nsInfo == nil {
 		return
 	}
+	portPrefix := oc.extSwitchPrefix()
+
 	// TODO(trozet): batch all of these with ebay bindings
 	for podIP, gwToGr := range nsInfo.podExternalRoutes {
 		for gw, gr := range gwToGr {
@@ -241,7 +246,7 @@ func (oc *Controller) deleteGWRoutesForNamespace(nsInfo *namespaceInfo) {
 			} else {
 				delete(nsInfo.podExternalRoutes, podIP)
 			}
-			cleanUpBFDEntry(gw, gr)
+			cleanUpBFDEntry(gw, gr, portPrefix)
 		}
 	}
 	nsInfo.routingExternalGWs = gatewayInfo{}
@@ -255,6 +260,8 @@ func (oc *Controller) deleteGWRoutesForPod(namespace string, podIPNets []*net.IP
 		return
 	}
 	defer nsInfo.Unlock()
+	portPrefix := oc.extSwitchPrefix()
+
 	for _, podIPNet := range podIPNets {
 		pod := podIPNet.IP.String()
 		if gwToGr, ok := nsInfo.podExternalRoutes[pod]; ok {
@@ -275,7 +282,7 @@ func (oc *Controller) deleteGWRoutesForPod(namespace string, podIPNets []*net.IP
 				} else {
 					delete(nsInfo.podExternalRoutes, pod)
 				}
-				cleanUpBFDEntry(gw, gr)
+				cleanUpBFDEntry(gw, gr, portPrefix)
 			}
 		}
 	}
@@ -289,6 +296,8 @@ func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*ne
 	}
 	defer nsInfo.Unlock()
 	gr := util.GetGatewayRouterFromNode(node)
+	port := oc.extSwitchPrefix() + types.GWRouterToExtSwitchPrefix + gr
+
 	for _, podIPNet := range podIfAddrs {
 		for _, gateway := range gateways {
 			routesAdded := 0
@@ -301,10 +310,10 @@ func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*ne
 					gwStr := gw.String()
 					mask := GetIPFullMask(podIP)
 					nbctlArgs := []string{"--may-exist", "--policy=src-ip", "--ecmp-symmetric-reply",
-						"lr-route-add", gr, podIP + mask, gw.String()}
+						"lr-route-add", gr, podIP + mask, gw.String(), port}
 					if gateway.bfdEnabled {
 						nbctlArgs = []string{"--may-exist", "--bfd", "--policy=src-ip", "--ecmp-symmetric-reply",
-							"lr-route-add", gr, podIP + mask, gw.String(), types.GWRouterToExtSwitchPrefix + gr}
+							"lr-route-add", gr, podIP + mask, gw.String(), port}
 					}
 					_, stderr, err := util.RunOVNNbctl(nbctlArgs...)
 					if err != nil && !strings.Contains(err.Error(), DuplicateECMPError) {
@@ -470,8 +479,8 @@ func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string) erro
 // not removes the entry to avoid having dangling BFD entries.
 // This is temporary and can be safely removed when we consume an ovn version
 // that includes http://patchwork.ozlabs.org/project/ovn/patch/3c39dc96a36a3445cfa8485a67de79f9f3d5651b.1614602770.git.lorenzo.bianconi@redhat.com/
-func cleanUpBFDEntry(gatewayIP, gatewayRouter string) {
-	portName := types.GWRouterToExtSwitchPrefix + gatewayRouter
+func cleanUpBFDEntry(gatewayIP, gatewayRouter, prefix string) {
+	portName := prefix + types.GWRouterToExtSwitchPrefix + gatewayRouter
 
 	output, stderr, err := util.RunOVNNbctl(
 		"--format=csv", "--data=bare", "--no-heading", "--columns=bfd", "find", "Logical_Router_Static_Route", "output_port="+portName, "nexthop="+gatewayIP, "bfd!=[]")
@@ -504,4 +513,11 @@ func cleanUpBFDEntry(gatewayIP, gatewayRouter string) {
 				uuid, stderr, err)
 		}
 	}
+}
+
+func (oc *Controller) extSwitchPrefix() string {
+	if oc.exGatewayInterface != "" {
+		return types.EgressGWSwitchPrefix
+	}
+	return ""
 }

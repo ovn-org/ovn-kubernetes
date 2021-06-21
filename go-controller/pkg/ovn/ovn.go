@@ -199,6 +199,9 @@ type Controller struct {
 	// Map of pods that need to be retried, and the timestamp of when they last failed
 	retryPods     map[types.UID]retryEntry
 	retryPodsLock sync.Mutex
+
+	// The interface to be used for external gateway traffic
+	exGatewayInterface string
 }
 
 type retryEntry struct {
@@ -234,7 +237,9 @@ func GetIPFullMask(ip string) string {
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
 func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
-	stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client, recorder record.EventRecorder) *Controller {
+	stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client,
+	recorder record.EventRecorder, gwInterface string) *Controller {
+
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory()
 	}
@@ -277,6 +282,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		ovnNBClient:              ovnNBClient,
 		ovnSBClient:              ovnSBClient,
 		clusterLBsUUIDs:          make([]string, 0),
+		exGatewayInterface:       gwInterface,
 	}
 }
 

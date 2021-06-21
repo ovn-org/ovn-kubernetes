@@ -208,6 +208,7 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 			cookie, cidr.String(), hotypes.HybridOverlayVNI, nodeIP.String(), drMAC.String()))
 
 	n.updateFlowCacheEntry(cookie, flows, false)
+	// TODO FEDE Do we need this on exgw bridge?
 	n.requestFlowSync()
 	return nil
 }

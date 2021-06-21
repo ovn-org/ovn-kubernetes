@@ -178,6 +178,14 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 		return err
 	}
 
+	egressGWInterface := ""
+	if config.Gateway.EgressGWInterface != "" {
+		egressGWInterface, err = gatewayInterfaceFromExt(config.Gateway.EgressGWInterface)
+		if err != nil {
+			return err
+		}
+	}
+
 	ifAddrs, err := getNetworkInterfaceIPAddresses(gatewayIntf)
 	if err != nil {
 		return err
@@ -196,7 +204,7 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 		gw, err = newLocalGateway(n.name, subnets, gatewayNextHops, gatewayIntf, nodeAnnotator, n.recorder, managementPortConfig)
 	case config.GatewayModeShared:
 		klog.Info("Preparing Shared Gateway")
-		gw, err = newSharedGateway(n.name, subnets, gatewayNextHops, gatewayIntf, nodeAnnotator)
+		gw, err = newSharedGateway(n.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, nodeAnnotator)
 	case config.GatewayModeDisabled:
 		var chassisID string
 		klog.Info("Gateway Mode is disabled")
@@ -238,6 +246,20 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	waiter.AddWait(gw.readyFunc, initGw)
 	n.gateway = gw
 	return err
+}
+
+func gatewayInterfaceFromExt(intfName string) (string, error) {
+	if _, _, err := util.RunOVSVsctl("br-exists", intfName); err == nil {
+		// It's a bridge
+		return intfName, nil
+	}
+
+	bridge := util.GetBridgeName(intfName)
+	if _, _, err := util.RunOVSVsctl("br-exists", bridge); err == nil {
+		// not a bridge, but the corresponding bridge was already created
+		return bridge, nil
+	}
+	return intfName, nil
 }
 
 // CleanupClusterNode cleans up OVS resources on the k8s node on ovnkube-node daemonset deletion.

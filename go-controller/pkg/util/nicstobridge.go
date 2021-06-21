@@ -18,7 +18,7 @@ const (
 	rhelDefaultFile   = "/etc/default/openvswitch"
 )
 
-func getBridgeName(iface string) string {
+func GetBridgeName(iface string) string {
 	return fmt.Sprintf("br%s", iface)
 }
 
@@ -204,7 +204,7 @@ func NicToBridge(iface string) (string, error) {
 		return "", err
 	}
 
-	bridge := getBridgeName(iface)
+	bridge := GetBridgeName(iface)
 	stdout, stderr, err := RunOVSVsctl(
 		"--", "--may-exist", "add-br", bridge,
 		"--", "br-set-external-id", bridge, "bridge-id", bridge,
