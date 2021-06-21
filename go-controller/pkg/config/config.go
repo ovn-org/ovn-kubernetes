@@ -64,6 +64,7 @@ var (
 		EncapPort:         DefaultEncapPort,
 		InactivityProbe:   100000, // in Milliseconds
 		OpenFlowProbe:     180,    // in Seconds
+		LFlowCacheEnable:  true,
 		RawClusterSubnets: "10.128.0.0/14/23",
 	}
 
@@ -176,6 +177,19 @@ type DefaultConfig struct {
 	// Maximum number of seconds of idle time on the OpenFlow connection
 	// that ovn-controller will wait before it sends a connection health probe
 	OpenFlowProbe int `gcfg:"openflow-probe"`
+	// The  boolean  flag  indicates  if  ovn-controller  should
+	// enable/disable the logical flow in-memory cache  it  uses
+	// when processing Southbound database logical flow changes.
+	// By default caching is enabled.
+	LFlowCacheEnable bool `gcfg:"enable-lflow-cache"`
+	// Maximum  number  of logical flow cache entries ovn-controller
+	// may create when the logical flow  cache  is  enabled.  By
+	// default the size of the cache is unlimited.
+	LFlowCacheLimit uint `gcfg:"lflow-cache-limit"`
+	// Maximum  number  of logical flow cache entries ovn-controller
+	// may create when the logical flow  cache  is  enabled.  By
+	// default the size of the cache is unlimited.
+	LFlowCacheLimitKb uint `gcfg:"lflow-cache-limit-kb"`
 	// RawClusterSubnets holds the unparsed cluster subnets. Should only be
 	// used inside config module.
 	RawClusterSubnets string `gcfg:"cluster-subnets"`
@@ -568,6 +582,30 @@ var CommonFlags = []cli.Flag{
 			"connection for ovn-controller before it sends a inactivity probe",
 		Destination: &cliConfig.Default.OpenFlowProbe,
 		Value:       Default.OpenFlowProbe,
+	},
+	&cli.BoolFlag{
+		Name: "enable-lflow-cache",
+		Usage: "Enable the logical flow in-memory cache it uses " +
+			"when processing Southbound database logical flow changes. " +
+			"By default caching is enabled.",
+		Destination: &cliConfig.Default.LFlowCacheEnable,
+		Value:       Default.LFlowCacheEnable,
+	},
+	&cli.UintFlag{
+		Name: "lflow-cache-limit",
+		Usage: "Maximum number of logical flow cache entries ovn-controller " +
+			"may create when the logical flow cache is enabled. By " +
+			"default the size of the cache is unlimited.",
+		Destination: &cliConfig.Default.LFlowCacheLimit,
+		Value:       Default.LFlowCacheLimit,
+	},
+	&cli.UintFlag{
+		Name: "lflow-cache-limit-kb",
+		Usage: "Maximum size of the logical flow cache ovn-controller " +
+			"may create when the logical flow cache is enabled. By " +
+			"default the size of the cache is unlimited.",
+		Destination: &cliConfig.Default.LFlowCacheLimitKb,
+		Value:       Default.LFlowCacheLimitKb,
 	},
 	&cli.StringFlag{
 		Name:        "cluster-subnet",
