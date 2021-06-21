@@ -906,7 +906,11 @@ func (t *NBTxn) AddOrCommit(args []string) (string, string, error) {
 		len(t.txnArgs), incomingLength, buffer)
 
 	// case where we are going to exceed max arguments
-	if len(t.args)+len(t.txnArgs)+incomingLength+buffer > maxArgs {
+	// also check entire line length is going be over 100k
+	// maximum bash command seems to be a combination of max args and length of each argument
+	// maximum length is PAGE_SIZE * 32 which we can assume to be 4k page, and equals 131072
+	if len(t.args)+len(t.txnArgs)+incomingLength+buffer > maxArgs || len(strings.Join(t.args, " "))+
+		len(strings.Join(t.txnArgs, " "))+len(strings.Join(args, " ")) > 100000 {
 		klog.Info("Requested transaction add is too large, committing...")
 		if stdout, stderr, err := t.Commit(); err != nil {
 			return stdout, stderr, err
