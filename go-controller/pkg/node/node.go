@@ -73,7 +73,8 @@ func setupOVNNode(node *kapi.Node) error {
 		}
 	}
 
-	_, stderr, err := util.RunOVSVsctl("set",
+	setExternalIdsCmd := []string{
+		"set",
 		"Open_vSwitch",
 		".",
 		fmt.Sprintf("external_ids:ovn-encap-type=%s", config.Default.EncapType),
@@ -84,7 +85,22 @@ func setupOVNNode(node *kapi.Node) error {
 			config.Default.OpenFlowProbe),
 		fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name),
 		"external_ids:ovn-monitor-all=true",
-	)
+		fmt.Sprintf("external_ids:ovn-enable-lflow-cache=%t", config.Default.LFlowCacheEnable),
+	}
+
+	if config.Default.LFlowCacheLimit > 0 {
+		setExternalIdsCmd = append(setExternalIdsCmd,
+			fmt.Sprintf("external_ids:ovn-limit-lflow-cache=%d", config.Default.LFlowCacheLimit),
+		)
+	}
+
+	if config.Default.LFlowCacheLimitKb > 0 {
+		setExternalIdsCmd = append(setExternalIdsCmd,
+			fmt.Sprintf("external_ids:ovn-limit-lflow-cache-kb=%d", config.Default.LFlowCacheLimitKb),
+		)
+	}
+
+	_, stderr, err := util.RunOVSVsctl(setExternalIdsCmd...)
 	if err != nil {
 		return fmt.Errorf("error setting OVS external IDs: %v\n  %q", err, stderr)
 	}
