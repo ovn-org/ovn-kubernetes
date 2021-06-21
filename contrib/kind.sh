@@ -27,7 +27,7 @@ run_kubectl() {
 delete() {
   timeout 5 kubectl --kubeconfig "${KUBECONFIG}" delete namespace ovn-kubernetes || true
   sleep 5
-  kind delete cluster --name "${KIND_CLUSTER_NAME:-ovn}"
+  $kind delete cluster --name "${KIND_CLUSTER_NAME:-ovn}"
 }
 
 usage() {
@@ -224,6 +224,7 @@ print_params() {
      echo "OVN_LOG_LEVEL_CONTROLLER = $OVN_LOG_LEVEL_CONTROLLER"
      echo "OVN_LOG_LEVEL_NBCTLD = $OVN_LOG_LEVEL_NBCTLD"
      echo "OVN_HOST_NETWORK_NAMESPACE = $OVN_HOST_NETWORK_NAMESPACE"
+     echo "USING_PODMAN = $USING_PODMAN"
      echo ""
 }
 
@@ -281,6 +282,23 @@ set_default_params() {
   fi
   OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
 
+  USING_PODMAN=0
+
+  if docker help | grep -q podman; then
+    echo "docker is aliased to podman"
+    USING_PODMAN=1
+  fi
+
+  # if we're not root, and we're using podman,
+  # then we need to sudo
+  if [[ $USING_PODMAN -eq 1 && $UID -ne 0 ]]; then
+    kind="${KIND:-sudo kind}"
+    docker="${DOCKER:-sudo docker}"
+  else
+    kind="kind"
+    docker="docker"
+  fi
+
 }
 
 detect_apiserver_ip() {
@@ -311,7 +329,7 @@ detect_apiserver_url() {
   # it can not be bootstrapped
   #
   # This is the address of the node with the control-plane
-  API_URL=$(kind get kubeconfig --internal --name "${KIND_CLUSTER_NAME}" | grep server | awk '{ print $2 }')
+  API_URL=$($kind get kubeconfig --internal --name "${KIND_CLUSTER_NAME}" | grep server | awk '{ print $2 }')
 }
 
 check_ipv6() {
@@ -387,18 +405,19 @@ create_kind_cluster() {
     j2 "${KIND_CONFIG}" -o "${KIND_CONFIG_LCL}"
 
   # Create KIND cluster. For additional debug, add '--verbosity <int>': 0 None .. 3 Debug
-  if kind get clusters | grep ovn; then
+  if $kind get clusters | grep ovn; then
     delete
   fi
-  kind create cluster --name "${KIND_CLUSTER_NAME}" --kubeconfig "${KUBECONFIG}" --image kindest/node:"${K8S_VERSION}" --config=${KIND_CONFIG_LCL}
+  touch "${KUBECONFIG}"
+  $kind create cluster --name "${KIND_CLUSTER_NAME}" --kubeconfig "${KUBECONFIG}" --image kindest/node:"${K8S_VERSION}" --config=${KIND_CONFIG_LCL}
   cat "${KUBECONFIG}"
 }
 
 delete_kube_proxy() {
   run_kubectl -n kube-system delete ds kube-proxy
-  kind get clusters
-  kind get nodes --name "${KIND_CLUSTER_NAME}"
-  kind export kubeconfig --name "${KIND_CLUSTER_NAME}"
+  $kind get clusters
+  $kind get nodes --name "${KIND_CLUSTER_NAME}"
+  $kind export kubeconfig --name "${KIND_CLUSTER_NAME}"
 }
 
 docker_disable_ipv6() {
@@ -409,10 +428,10 @@ docker_disable_ipv6() {
   # internal bridge has IPv6 disable and can't move the IPv6 from the eth0 interface.
   # We can enable IPv6 always in the container, since the docker setup with IPv4 only
   # is not very common.
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  KIND_NODES=$($kind get nodes --name "${KIND_CLUSTER_NAME}")
   for n in $KIND_NODES; do
-    docker exec "$n" sysctl net.ipv6.conf.all.disable_ipv6=0
-    docker exec "$n" sysctl net.ipv6.conf.all.forwarding=1
+    $docker exec "$n" sysctl net.ipv6.conf.all.disable_ipv6=0
+    $docker exec "$n" sysctl net.ipv6.conf.all.forwarding=1
   done
 }
 
@@ -460,9 +479,14 @@ build_ovn_image() {
     # Find all built executables, but ignore the 'windows' directory if it exists
     find ../../go-controller/_output/go/bin/ -maxdepth 1 -type f -exec cp -f {} . \;
     echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-    docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
     OVN_IMAGE=ovn-daemonset-f:dev
+    $docker build -t $OVN_IMAGE -f Dockerfile.fedora .
     popd
+  fi
+
+  if [[ $USING_PODMAN -eq 1 ]]; then
+  # podman references images slightly differently
+    OVN_IMAGE="localhost/${OVN_IMAGE}"
   fi
 }
 
@@ -497,7 +521,7 @@ create_ovn_kube_manifests() {
 }
 
 install_ovn_image() {
-  kind load docker-image "${OVN_IMAGE}" --name "${KIND_CLUSTER_NAME}"
+  $kind load docker-image "${OVN_IMAGE}" --name "${KIND_CLUSTER_NAME}"
 }
 
 install_ovn() {
@@ -505,7 +529,7 @@ install_ovn() {
   run_kubectl apply -f k8s.ovn.org_egressfirewalls.yaml
   run_kubectl apply -f k8s.ovn.org_egressips.yaml
   run_kubectl apply -f ovn-setup.yaml
-  MASTER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
+  MASTER_NODES=$($kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
   # We want OVN HA not Kubernetes HA
   # leverage the kubeadm well-known label node-role.kubernetes.io/master=
   # to choose the nodes where ovn master components will be placed
@@ -553,15 +577,15 @@ kubectl_wait_pods() {
 
 cleanup_kube_proxy_iptables() {
   # Clean up any leftover kube-proxy iptables rules that handle services
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  KIND_NODES=$($kind get nodes --name "${KIND_CLUSTER_NAME}")
   for n in $KIND_NODES; do
     if [ "$KIND_IPV4_SUPPORT" == true ]; then
-      docker exec "$n" iptables -F KUBE-SERVICES
-      docker exec "$n" iptables -F KUBE-SERVICES -t nat
+      $docker exec "$n" iptables -F KUBE-SERVICES
+      $docker exec "$n" iptables -F KUBE-SERVICES -t nat
     fi
     if [ "$KIND_IPV6_SUPPORT" == true ]; then
-      docker exec "$n" ip6tables -F KUBE-SERVICES
-      docker exec "$n" ip6tables -F KUBE-SERVICES -t nat
+      $docker exec "$n" ip6tables -F KUBE-SERVICES
+      $docker exec "$n" ip6tables -F KUBE-SERVICES -t nat
     fi
   done
 }
