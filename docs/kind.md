@@ -45,7 +45,7 @@ Launch the KIND Deployment.
 
 ```
 $ pushd contrib
-$ KUBECONFIG=${HOME}/admin.conf
+$ export KUBECONFIG=${HOME}/admin.conf
 $ ./kind.sh
 $ popd
 ```
