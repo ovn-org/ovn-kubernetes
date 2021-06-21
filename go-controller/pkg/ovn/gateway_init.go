@@ -245,71 +245,28 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			}
 		}
 	}
-
-	// Create the external switch for the physical interface to connect to.
-	externalSwitch := types.ExternalSwitchPrefix + nodeName
-	stdout, stderr, err = util.RunOVNNbctl("--may-exist", "ls-add",
-		externalSwitch)
-	if err != nil {
-		return fmt.Errorf("failed to create logical switch %s, stdout: %q, "+
-			"stderr: %q, error: %v", externalSwitch, stdout, stderr, err)
-	}
-
-	// Add external interface as a logical port to external_switch.
-	// This is a learning switch port with "unknown" address. The external
-	// world is accessed via this port.
-	cmdArgs := []string{
-		"--", "--may-exist", "lsp-add", externalSwitch, l3GatewayConfig.InterfaceID,
-		"--", "lsp-set-addresses", l3GatewayConfig.InterfaceID, "unknown",
-		"--", "lsp-set-type", l3GatewayConfig.InterfaceID, "localnet",
-		"--", "lsp-set-options", l3GatewayConfig.InterfaceID, "network_name=" + types.PhysicalNetworkName}
-
-	if l3GatewayConfig.VLANID != nil {
-		lspArgs := []string{
-			"--", "set", "logical_switch_port", l3GatewayConfig.InterfaceID,
-			fmt.Sprintf("tag_request=%d", *l3GatewayConfig.VLANID),
-		}
-		cmdArgs = append(cmdArgs, lspArgs...)
-	}
-
-	stdout, stderr, err = util.RunOVNNbctl(cmdArgs...)
-	if err != nil {
-		return fmt.Errorf("failed to add logical port to switch %s, stdout: %q, "+
-			"stderr: %q, error: %v", externalSwitch, stdout, stderr, err)
-	}
-
-	// Connect GR to external_switch with mac address of external interface
-	// and that IP address. In the case of `local` gateway mode, whenever ovnkube-node container
-	// restarts a new br-local bridge will be created with a new `nicMacAddress`. As a result,
-	// direct addition of logical_router_port with --may-exists will not work since the MAC
-	// has changed. So, we need to delete that port, if it exists, and it back.
-	cmdArgs = []string{
-		"--", "--if-exists", "lrp-del", types.GWRouterToExtSwitchPrefix + gatewayRouter,
-		"--", "lrp-add", gatewayRouter, types.GWRouterToExtSwitchPrefix + gatewayRouter,
+	if err := addExternalSwitch("",
+		l3GatewayConfig.InterfaceID,
+		nodeName,
+		gatewayRouter,
 		l3GatewayConfig.MACAddress.String(),
-	}
-	for _, ip := range l3GatewayConfig.IPAddresses {
-		cmdArgs = append(cmdArgs, ip.String())
-	}
-	cmdArgs = append(cmdArgs,
-		"--", "set", "logical_router_port", types.GWRouterToExtSwitchPrefix+gatewayRouter,
-		"external-ids:gateway-physical-ip=yes")
-
-	stdout, stderr, err = util.RunOVNNbctl(cmdArgs...)
-	if err != nil {
-		return fmt.Errorf("failed to add logical port to router %s, stdout: %q, "+
-			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+		types.PhysicalNetworkName,
+		l3GatewayConfig.IPAddresses,
+		l3GatewayConfig.VLANID); err != nil {
+		return err
 	}
 
-	// Connect the external_switch to the router.
-	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add",
-		externalSwitch, types.EXTSwitchToGWRouterPrefix+gatewayRouter, "--", "set",
-		"logical_switch_port", types.EXTSwitchToGWRouterPrefix+gatewayRouter, "type=router",
-		"options:router-port="+types.GWRouterToExtSwitchPrefix+gatewayRouter,
-		"addresses="+"\""+l3GatewayConfig.MACAddress.String()+"\"")
-	if err != nil {
-		return fmt.Errorf("failed to add logical port to router %s, stdout: %q, "+
-			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+	if l3GatewayConfig.EgressGWInterfaceID != "" {
+		if err := addExternalSwitch(types.EgressGWSwitchPrefix,
+			l3GatewayConfig.EgressGWInterfaceID,
+			nodeName,
+			gatewayRouter,
+			l3GatewayConfig.EgressGWMACAddress.String(),
+			types.PhysicalNetworkExGwName,
+			l3GatewayConfig.EgressGWIPAddresses,
+			nil); err != nil {
+			return err
+		}
 	}
 
 	// Add static routes in GR with gateway router as the default next hop.
@@ -522,6 +479,79 @@ func addDistributedGWPort() error {
 		}
 	}
 
+	return nil
+}
+
+// addExternalSwitch creates a switch connected to the external bridge and connects it to
+// the gateway router
+func addExternalSwitch(prefix, interfaceID, nodeName, gatewayRouter, macAddress, physNetworkName string, ipAddresses []*net.IPNet, vlanID *uint) error {
+	// Create the external switch for the physical interface to connect to.
+	externalSwitch := fmt.Sprintf("%s%s%s", prefix, types.ExternalSwitchPrefix, nodeName)
+	stdout, stderr, err := util.RunOVNNbctl("--may-exist", "ls-add",
+		externalSwitch)
+	if err != nil {
+		return fmt.Errorf("failed to create logical switch %s, stdout: %q, "+
+			"stderr: %q, error: %v", externalSwitch, stdout, stderr, err)
+	}
+
+	// Add external interface as a logical port to external_switch.
+	// This is a learning switch port with "unknown" address. The external
+	// world is accessed via this port.
+	cmdArgs := []string{
+		"--", "--may-exist", "lsp-add", externalSwitch, interfaceID,
+		"--", "lsp-set-addresses", interfaceID, "unknown",
+		"--", "lsp-set-type", interfaceID, "localnet",
+		"--", "lsp-set-options", interfaceID, "network_name=" + physNetworkName}
+
+	if vlanID != nil {
+		lspArgs := []string{
+			"--", "set", "logical_switch_port", interfaceID,
+			fmt.Sprintf("tag_request=%d", *vlanID),
+		}
+		cmdArgs = append(cmdArgs, lspArgs...)
+	}
+
+	stdout, stderr, err = util.RunOVNNbctl(cmdArgs...)
+	if err != nil {
+		return fmt.Errorf("failed to add logical port to switch %s, stdout: %q, "+
+			"stderr: %q, error: %v", externalSwitch, stdout, stderr, err)
+	}
+
+	routerToSwitchPort := prefix + types.GWRouterToExtSwitchPrefix + gatewayRouter
+	switchToRouterPort := prefix + types.EXTSwitchToGWRouterPrefix + gatewayRouter
+	// Connect GR to external_switch with mac address of external interface
+	// and that IP address. In the case of `local` gateway mode, whenever ovnkube-node container
+	// restarts a new br-local bridge will be created with a new `nicMacAddress`. As a result,
+	// direct addition of logical_router_port with --may-exists will not work since the MAC
+	// has changed. So, we need to delete that port, if it exists, and it back.
+	cmdArgs = []string{
+		"--", "--if-exists", "lrp-del", routerToSwitchPort,
+		"--", "lrp-add", gatewayRouter, routerToSwitchPort,
+		macAddress,
+	}
+	for _, ip := range ipAddresses {
+		cmdArgs = append(cmdArgs, ip.String())
+	}
+	cmdArgs = append(cmdArgs,
+		"--", "set", "logical_router_port", routerToSwitchPort,
+		"external-ids:gateway-physical-ip=yes")
+
+	stdout, stderr, err = util.RunOVNNbctl(cmdArgs...)
+	if err != nil {
+		return fmt.Errorf("failed to add logical port to router %s, stdout: %q, "+
+			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+	}
+
+	// Connect the external_switch to the router.
+	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add",
+		externalSwitch, switchToRouterPort, "--", "set",
+		"logical_switch_port", switchToRouterPort, "type=router",
+		"options:router-port="+routerToSwitchPort,
+		"addresses="+"\""+macAddress+"\"")
+	if err != nil {
+		return fmt.Errorf("failed to add logical port to router %s, stdout: %q, "+
+			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+	}
 	return nil
 }
 
