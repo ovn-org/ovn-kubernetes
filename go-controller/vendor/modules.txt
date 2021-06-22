@@ -27,9 +27,9 @@ github.com/beorn7/perks/quantile
 github.com/bhendo/go-powershell
 github.com/bhendo/go-powershell/backend
 github.com/bhendo/go-powershell/utils
-# github.com/cenkalti/hub v1.0.1-0.20160527103212-11382a9960d3
+# github.com/cenkalti/hub v1.0.1
 github.com/cenkalti/hub
-# github.com/cenkalti/rpc2 v0.0.0-20170726070524-c51a77e5f664
+# github.com/cenkalti/rpc2 v0.0.0-20210220005819-4a29bc83afe1
 github.com/cenkalti/rpc2
 github.com/cenkalti/rpc2/jsonrpc
 # github.com/cespare/xxhash/v2 v2.1.1
@@ -90,7 +90,7 @@ github.com/google/go-cmp/cmp/internal/function
 github.com/google/go-cmp/cmp/internal/value
 # github.com/google/gofuzz v1.1.0
 github.com/google/gofuzz
-# github.com/google/uuid v1.1.2
+# github.com/google/uuid v1.2.0
 github.com/google/uuid
 # github.com/googleapis/gnostic v0.4.1
 github.com/googleapis/gnostic/compiler
@@ -164,6 +164,12 @@ github.com/onsi/gomega/matchers/support/goraph/edge
 github.com/onsi/gomega/matchers/support/goraph/node
 github.com/onsi/gomega/matchers/support/goraph/util
 github.com/onsi/gomega/types
+# github.com/ovn-org/libovsdb v0.5.0
+github.com/ovn-org/libovsdb/cache
+github.com/ovn-org/libovsdb/client
+github.com/ovn-org/libovsdb/mapper
+github.com/ovn-org/libovsdb/model
+github.com/ovn-org/libovsdb/ovsdb
 # github.com/pkg/errors v0.9.1
 github.com/pkg/errors
 # github.com/pmezard/go-difflib v1.0.0
