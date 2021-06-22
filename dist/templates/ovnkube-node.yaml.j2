@@ -90,6 +90,10 @@ spec:
         - mountPath: /etc/ovn/
           name: host-var-lib-ovs
           readOnly: true
+        - mountPath: /var/run/crio/
+          name: host-var-run-crio
+        - mountPath: /var/run/containerd/
+          name: host-var-run-containerd
         {%- elif ovnkube_app_name=="ovnkube-node-smart-nic-host" %}
         # ovnkube-node smart-nic-host mounts
         - mountPath: /var/run/ovn
@@ -340,6 +344,12 @@ spec:
       - name: host-var-lib-ovs
         hostPath:
           path: /var/lib/openvswitch
+      - name: host-var-run-crio
+        hostPath:
+          path: /var/run/crio
+      - name: host-var-run-containerd
+        hostPath:
+          path: /var/run/containerd
       {%- elif ovnkube_app_name=="ovnkube-node-smart-nic-host" %}
       - name: var-run-ovn
         emptyDir: {}
