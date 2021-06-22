@@ -411,14 +411,14 @@ func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf stri
 
 	// Get ofport of patchPort, but before that make sure ovn-controller created
 	// one for us (waits for about ovsCommandTimeout seconds)
-	ofportPatch, stderr, err := util.RunOVSVsctl("get", "Interface", patchPort, "ofport")
+	ofportPatch, stderr, err := util.GetOVSOfPort("get", "Interface", patchPort, "ofport")
 	if err != nil {
 		return nil, fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
 			"while getting ofport. stderr: %q, error: %v", patchPort, stderr, err)
 	}
 
 	// Get ofport of physical interface
-	ofportPhys, stderr, err := util.RunOVSVsctl("get", "interface", gwIntf, "ofport")
+	ofportPhys, stderr, err := util.GetOVSOfPort("get", "interface", gwIntf, "ofport")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
 			gwIntf, stderr, err)
