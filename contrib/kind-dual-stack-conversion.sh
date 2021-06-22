@@ -65,9 +65,29 @@ convert_k8s_control_plane(){
     # NOTE: if there was not feature-gate enabled we must use    
     # docker exec $n sed -i '/service-cluster-ip-range/i\    - --feature-gates=IPv6DualStack=true' ${CM_CONFIG_FILE}
     docker exec $n sed -i -e "s#.*feature-gates.*#&\,IPv6DualStack=true#" ${CM_CONFIG_FILE}
-    echo "Finished converting control plane on node $n"
-  done
+    echo "Finished converting control plane on node, waiting for restart... $n"
 
+    local retries=0
+    while true; do
+      (( retries += 1 ))
+      if [[ "${retries}" -gt 20 ]]; then
+        echo "control plane never came back up"
+        exit 1
+      fi
+
+      if kubectl get -n kube-system pod kube-apiserver-"${n}" -o yaml | grep -F "${SECONDARY_SERVICE_SUBNET}"> /dev/null ; then
+        break
+      fi
+
+      sleep 5
+    done
+  done # on to the next node
+
+  if ! kubectl -n kube-system wait --for=condition=ready pods --all --timeout=100s ; then
+    echo "control-plane is degraded..."
+    kubectl -n kube-system get pods -o wide -A || true
+    exit 1
+  fi
 }
 
 usage()

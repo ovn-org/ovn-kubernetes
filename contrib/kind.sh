@@ -237,7 +237,7 @@ install_j2_renderer() {
 set_default_params() {
   # Set default values
   KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
-  K8S_VERSION=${K8S_VERSION:-v1.20.0}
+  K8S_VERSION=${K8S_VERSION:-v1.21.1}
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-local}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   OVN_HA=${OVN_HA:-false}
@@ -362,7 +362,7 @@ set_cluster_cidr_ip_families() {
     SVC_CIDR=$SVC_CIDR_IPV6
     echo "IPv6 Only Support: API_IP=$API_IP --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
   elif [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
-    IP_FAMILY="DualStack"
+    IP_FAMILY="dual"
     NET_CIDR=$NET_CIDR_IPV4,$NET_CIDR_IPV6
     SVC_CIDR=$SVC_CIDR_IPV4,$SVC_CIDR_IPV6
     echo "Dual Stack Support: API_IP=$API_IP --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
