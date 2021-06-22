@@ -25,7 +25,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // *** The Server is PRIVATE API between OVN components and may be
@@ -106,21 +105,45 @@ func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWat
 	factory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			newPod := newObj.(*kapi.Pod)
-			newAnnot, newErr := util.UnmarshalPodAnnotation(newPod.Annotations)
 			oldPod := oldObj.(*kapi.Pod)
-			oldAnnot, oldErr := util.UnmarshalPodAnnotation(oldPod.Annotations)
-			if newErr == nil && oldErr == nil && oldAnnot.MAC.String() != newAnnot.MAC.String() {
-				s.cancelPodAddsForOldMACs(newPod, newAnnot.MAC.String())
+			if oldPod.UID != newPod.UID {
+				s.cancelPodAdds(newPod, func(uid string) bool {
+					// Cancel adds that don't match latest pod UID
+					return uid != string(newPod.UID)
+				})
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			s.cancelOldestPodAdd(pod)
+			s.cancelPodAdds(pod, func(uid string) bool {
+				// Cancel adds that match deleted pod UID
+				return uid == string(pod.UID)
+			})
 		},
 	}, nil)
 
 	return s, nil
 }
+
+// cancelPodAdds cancels and pod add requests that match the given filter function
+func (s *Server) cancelPodAdds(pod *kapi.Pod, filterFn func(string) bool) {
+	s.runningSandboxAddsLock.Lock()
+	defer s.runningSandboxAddsLock.Unlock()
+
+	for _, req := range s.runningSandboxAdds {
+		// Cancel sandbox requests for this pod that have a MAC set
+		// which doesn't match the expected MAC
+		if req.PodNamespace != pod.Namespace || req.PodName != pod.Name {
+			continue
+		}
+
+		if filterFn(req.PodUID) {
+			req.cancel()
+			klog.Infof("%v canceled outdated sandbox ADD request")
+		}
+	}
+}
+
 
 // RuntimeEndpoints is a constant array of default CRI runtime socket paths
 var RuntimeEndpoints = []string{
@@ -183,69 +206,7 @@ func (s *Server) getSandboxPodUID(sandboxID string) (string, error) {
 	if len(podSandboxList) == 0 {
 		return "", fmt.Errorf("pod sandbox not found for ID %q", sandboxID)
 	}
-
-	for _, sb := range podSandboxList {
-		klog.Warningf("sb %q metadata %+v", sandboxID, sb.Metadata)
-		klog.Warningf("sb %q labels %+v", sandboxID, sb.Labels)
-		klog.Warningf("sb %q annotations %+v", sandboxID, sb.Annotations)
-	}
-
 	return podSandboxList[0].Metadata.Uid, nil
-}
-
-// cancelPodAddsForOldMACs cancels and pod add requests that do not match
-// the given MAC address.
-func (s *Server) cancelPodAddsForOldMACs(pod *kapi.Pod, podMAC string) {
-	s.runningSandboxAddsLock.Lock()
-	defer s.runningSandboxAddsLock.Unlock()
-
-	for _, req := range s.runningSandboxAdds {
-		// Cancel sandbox requests for this pod that have a MAC set
-		// which doesn't match the expected MAC
-		if req.PodNamespace != pod.Namespace || req.PodName != pod.Name {
-			continue
-		}
-
-		updatedMAC, err := setMACUint64(podMAC, &req.UpdatedMAC)
-		if err != nil {
-			klog.Warningf(err.Error())
-			continue
-		}
-
-		initialMAC := atomic.LoadUint64(&req.InitialMAC)
-		// Ignore requests that haven't read their MAC yet
-		if initialMAC != 0 && initialMAC != updatedMAC {
-			req.cancel()
-			klog.Infof("%s canceled outdated sandbox ADD request; expected MAC %s", req, podMAC)
-		}
-	}
-}
-
-// cancelOldestPodAdd requests that the earliest outstanding add operation for a given
-// pod should be canceled.
-func (s *Server) cancelOldestPodAdd(pod *kapi.Pod) {
-	s.runningSandboxAddsLock.Lock()
-	defer s.runningSandboxAddsLock.Unlock()
-
-	oldest := time.Now()
-	var found *PodRequest
-
-	// There may be >= 0 sandboxes for a Pod Namespace+Name. Kubelet defers
-	// sandbox deletion to GC, and if a pod is deleted and re-created kubelet
-	// will start a second sandbox for the "new" Pod which has a different UID.
-	// We only want to cancel the oldest sandbox because it's either the
-	// only sandbox or has been superceded by a newer request.
-	for _, req := range s.runningSandboxAdds {
-		if req.PodNamespace == pod.Namespace && req.PodName == pod.Name && req.timestamp.Before(oldest) {
-			found = req
-			oldest = req.timestamp
-		}
-	}
-
-	if found != nil {
-		found.cancel()
-		klog.Infof("%s canceled sandbox ADD request", found)
-	}
 }
 
 // Split the "CNI_ARGS" environment variable's value into a map.  CNI_ARGS

@@ -1,11 +1,9 @@
 package cni
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"net"
-	"sync/atomic"
 
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/pkg/errors"
@@ -17,7 +15,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 var (
@@ -80,22 +77,6 @@ func (pr *PodRequest) String() string {
 	return fmt.Sprintf("[%s/%s %s]", pr.PodNamespace, pr.PodName, pr.SandboxID)
 }
 
-func setMACUint64(mac string, dst *uint64) (uint64, error) {
-	array, err := net.ParseMAC(mac)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse MAC %q: %v", mac, err)
-	}
-	if len(array) != 6 {
-		return 0, fmt.Errorf("unsupported MAC address length: %s", mac)
-	}
-
-	// Pad to 8 bytes
-	array = append([]byte{0, 0}, array...)
-	macUint := binary.BigEndian.Uint64(array)
-	atomic.StoreUint64(dst, macUint)
-	return macUint, nil
-}
-
 func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) ([]byte, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
@@ -116,17 +97,16 @@ func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalID
 	}
 	// Get the IP address and MAC address of the pod
 	// for Smart-Nic, ensure connection-details is present
-	annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, namespace, podName, annotCondFn)
+	podUID, annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, namespace, podName, annotCondFn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
+	}
+	if pr.PodUID != podUID {
+		return nil, fmt.Errorf("canceling sandbox %s add for old pod UID %s; latest is %s", pr.SandboxID, pr.PodUID, podUID)
 	}
 
 	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.IsSmartNIC)
 	if err != nil {
-		return nil, err
-	}
-
-	if _, err := setMACUint64(podInterfaceInfo.MAC.String(), &pr.InitialMAC); err != nil {
 		return nil, err
 	}
 
@@ -172,17 +152,12 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternal
 	if pr.IsSmartNIC {
 		annotCondFn = isSmartNICReady
 	}
-	rawAnnotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, pr.PodNamespace, pr.PodName, annotCondFn)
+	podUID, annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, pr.PodNamespace, pr.PodName, annotCondFn)
 	if err != nil {
 		return nil, err
 	}
-	annotations, err := util.UnmarshalPodAnnotation(rawAnnotations)
-	if err != nil {
-		return nil, err
-	}
-
-	if _, err := setMACUint64(annotations.MAC.String(), &pr.InitialMAC); err != nil {
-		return nil, err
+	if pr.PodUID != podUID {
+		return nil, fmt.Errorf("sandbox %s check for old pod UID %s; latest is %s", pr.SandboxID, pr.PodUID, podUID)
 	}
 
 	if pr.CNIConf.PrevResult != nil {
@@ -213,7 +188,7 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternal
 		}
 
 		for _, direction := range []direction{Ingress, Egress} {
-			annotationBandwith, annotationErr := extractPodBandwidth(rawAnnotations, direction)
+			annotationBandwith, annotationErr := extractPodBandwidth(annotations, direction)
 			ovnBandwith, ovnErr := getOvsPortBandwidth(hostIfaceName, direction)
 			if errors.Is(annotationErr, BandwidthNotFound) && errors.Is(ovnErr, BandwidthNotFound) {
 				continue
