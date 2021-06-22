@@ -144,7 +144,6 @@ func (s *Server) cancelPodAdds(pod *kapi.Pod, filterFn func(string) bool) {
 	}
 }
 
-
 // RuntimeEndpoints is a constant array of default CRI runtime socket paths
 var RuntimeEndpoints = []string{
 	"unix:///var/run/crio/crio.sock",

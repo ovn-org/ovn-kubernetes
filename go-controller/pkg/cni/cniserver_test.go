@@ -25,8 +25,8 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	utiltesting "k8s.io/client-go/util/testing"
-	critesting "k8s.io/cri-api/pkg/apis/testing"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	critesting "k8s.io/cri-api/pkg/apis/testing"
 	fakecri "k8s.io/kubernetes/pkg/kubelet/cri/remote/fake"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -83,13 +83,13 @@ func newFakeRuntime(tmpDir, sandboxID, namespace, name string) (*fakecri.RemoteR
 	fakeRuntime.RuntimeService.SetFakeSandboxes([]*critesting.FakePodSandbox{
 		{
 			PodSandboxStatus: runtimeapi.PodSandboxStatus{
-				Id:        sandboxID,
-				Metadata:  &runtimeapi.PodSandboxMetadata{
-					Name: name,
+				Id: sandboxID,
+				Metadata: &runtimeapi.PodSandboxMetadata{
+					Name:      name,
 					Namespace: namespace,
-					Uid: name,
+					Uid:       name,
 				},
-				State:     runtimeapi.PodSandboxState_SANDBOX_READY,
+				State: runtimeapi.PodSandboxState_SANDBOX_READY,
 			},
 		},
 	})
