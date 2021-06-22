@@ -49,6 +49,11 @@ func (f *FakeAddressSetFactory) NewAddressSet(name string, ips []net.IP) (Addres
 	return set, nil
 }
 
+// EnsureAddressSet returns nil
+func (f *FakeAddressSetFactory) EnsureAddressSet(name string) error {
+	return nil
+}
+
 func (f *FakeAddressSetFactory) ForEachAddressSet(iteratorFn AddressSetIterFunc) error {
 	asNames := sets.String{}
 	for _, set := range f.sets {

@@ -31,6 +31,9 @@ type AddressSetFactory interface {
 	// and contains the given IPs, or an error. Internally it creates
 	// an address set for IPv4 and IPv6 each.
 	NewAddressSet(name string, ips []net.IP) (AddressSet, error)
+	// EnsureAddressSet makes sure that an address set object exists in ovn
+	// with the given name
+	EnsureAddressSet(name string) error
 	// ForEachAddressSet calls the given function for each address set
 	// known to the factory
 	ForEachAddressSet(iteratorFn AddressSetIterFunc) error
@@ -72,6 +75,49 @@ func (asf *ovnAddressSetFactory) NewAddressSet(name string, ips []net.IP) (Addre
 		return nil, err
 	}
 	return res, nil
+}
+
+// EnsureAddressSet ensures the address_set with the given name exists and if it does not creates an empty addressSet
+func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) error {
+	hashedAddressSetNames := []string{}
+	ip4ASName, ip6ASName := MakeAddressSetName(name)
+	if config.IPv4Mode {
+		hashedAddressSetNames = append(hashedAddressSetNames, ip4ASName)
+	}
+	if config.IPv6Mode {
+		hashedAddressSetNames = append(hashedAddressSetNames, ip6ASName)
+	}
+	for _, hashedAddressSetName := range hashedAddressSetNames {
+		uuid, stderr, err := util.RunOVNNbctl(
+			"--data=bare",
+			"--no-heading",
+			"--columns=_uuid",
+			"find",
+			"address_set",
+			"name="+hashedAddressSetName)
+		if err != nil {
+			return fmt.Errorf("find failed to get address set %q, stderr: %q (%v)",
+				name, stderr, err)
+		}
+		if uuid != "" {
+			// address_set already exists
+			continue
+		}
+		// create the address_set with no IPs
+		_, stderr, err = util.RunOVNNbctl(
+			"create",
+			"address_set",
+			"name="+hashedAddressSetName,
+			"external-ids:name="+name,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create address set %q, stderr: %q (%v)",
+				name, stderr, err)
+		}
+
+	}
+
+	return nil
 }
 
 // ForEachAddressSet will pass the unhashed address set name, namespace name
