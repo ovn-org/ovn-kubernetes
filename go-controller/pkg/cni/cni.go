@@ -86,7 +86,7 @@ func setMACUint64(mac string, dst *uint64) (uint64, error) {
 		return 0, fmt.Errorf("failed to parse MAC %q: %v", mac, err)
 	}
 	if len(array) != 6 {
-		return 0, fmt.Errorf("unsupportd MAC address length: %s", mac)
+		return 0, fmt.Errorf("unsupported MAC address length: %s", mac)
 	}
 
 	// Pad to 8 bytes

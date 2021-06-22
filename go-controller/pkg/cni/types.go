@@ -9,6 +9,7 @@ import (
 	"github.com/containernetworking/cni/pkg/types/current"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
+	criapi "k8s.io/cri-api/pkg/apis"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -78,6 +79,8 @@ type PodRequest struct {
 	PodName string
 	// kubernetes container ID
 	SandboxID string
+	// kubernetes pod UID
+	PodUID string
 	// kernel network namespace path
 	Netns string
 	// Interface name to be configured
@@ -111,6 +114,8 @@ type Server struct {
 	useOVSExternalIDs int32
 	kclient           kubernetes.Interface
 	podLister         corev1listers.PodLister
+
+	runtimeService criapi.RuntimeService
 
 	// runningSandboxAdds is a map of sandbox ID to PodRequest for any CNIAdd operation
 	runningSandboxAddsLock sync.Mutex

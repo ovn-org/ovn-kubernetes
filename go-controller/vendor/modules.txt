@@ -236,8 +236,10 @@ golang.org/x/net/http2/hpack
 golang.org/x/net/idna
 golang.org/x/net/internal/iana
 golang.org/x/net/internal/socket
+golang.org/x/net/internal/timeseries
 golang.org/x/net/ipv4
 golang.org/x/net/ipv6
+golang.org/x/net/trace
 # golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d
 golang.org/x/oauth2
 golang.org/x/oauth2/internal
@@ -281,6 +283,45 @@ google.golang.org/appengine/internal/log
 google.golang.org/appengine/internal/remote_api
 google.golang.org/appengine/internal/urlfetch
 google.golang.org/appengine/urlfetch
+# google.golang.org/genproto v0.0.0-20201110150050-8816d57aaa9a
+google.golang.org/genproto/googleapis/rpc/status
+# google.golang.org/grpc v1.27.1
+google.golang.org/grpc
+google.golang.org/grpc/attributes
+google.golang.org/grpc/backoff
+google.golang.org/grpc/balancer
+google.golang.org/grpc/balancer/base
+google.golang.org/grpc/balancer/roundrobin
+google.golang.org/grpc/binarylog/grpc_binarylog_v1
+google.golang.org/grpc/codes
+google.golang.org/grpc/connectivity
+google.golang.org/grpc/credentials
+google.golang.org/grpc/credentials/internal
+google.golang.org/grpc/encoding
+google.golang.org/grpc/encoding/proto
+google.golang.org/grpc/grpclog
+google.golang.org/grpc/internal
+google.golang.org/grpc/internal/backoff
+google.golang.org/grpc/internal/balancerload
+google.golang.org/grpc/internal/binarylog
+google.golang.org/grpc/internal/buffer
+google.golang.org/grpc/internal/channelz
+google.golang.org/grpc/internal/envconfig
+google.golang.org/grpc/internal/grpcrand
+google.golang.org/grpc/internal/grpcsync
+google.golang.org/grpc/internal/resolver/dns
+google.golang.org/grpc/internal/resolver/passthrough
+google.golang.org/grpc/internal/syscall
+google.golang.org/grpc/internal/transport
+google.golang.org/grpc/keepalive
+google.golang.org/grpc/metadata
+google.golang.org/grpc/naming
+google.golang.org/grpc/peer
+google.golang.org/grpc/resolver
+google.golang.org/grpc/serviceconfig
+google.golang.org/grpc/stats
+google.golang.org/grpc/status
+google.golang.org/grpc/tap
 # google.golang.org/protobuf v1.25.0
 google.golang.org/protobuf/encoding/prototext
 google.golang.org/protobuf/encoding/protowire
@@ -421,6 +462,9 @@ k8s.io/apimachinery/pkg/watch
 k8s.io/apimachinery/third_party/forked/golang/json
 k8s.io/apimachinery/third_party/forked/golang/netutil
 k8s.io/apimachinery/third_party/forked/golang/reflect
+# k8s.io/apiserver v0.20.0 => k8s.io/apiserver v0.20.0
+k8s.io/apiserver/pkg/features
+k8s.io/apiserver/pkg/util/feature
 # k8s.io/client-go v0.20.0 => k8s.io/client-go v0.20.0
 k8s.io/client-go/discovery
 k8s.io/client-go/discovery/fake
@@ -645,12 +689,27 @@ k8s.io/client-go/util/keyutil
 k8s.io/client-go/util/retry
 k8s.io/client-go/util/testing
 k8s.io/client-go/util/workqueue
+# k8s.io/component-base v0.20.0 => k8s.io/component-base v0.20.0
+k8s.io/component-base/featuregate
+k8s.io/component-base/logs/logreduction
+# k8s.io/cri-api v0.21.2 => k8s.io/cri-api v0.20.0
+k8s.io/cri-api/pkg/apis
+k8s.io/cri-api/pkg/apis/runtime/v1alpha2
+k8s.io/cri-api/pkg/apis/testing
 # k8s.io/klog v0.0.0-20181102134211-b9b56d5dfc92
 k8s.io/klog
 # k8s.io/klog/v2 v2.4.0
 k8s.io/klog/v2
 # k8s.io/kube-openapi v0.0.0-20201113171705-d219536bb9fd
 k8s.io/kube-openapi/pkg/util/proto
+# k8s.io/kubernetes v1.21.2 => k8s.io/kubernetes v1.20.0-beta.2
+k8s.io/kubernetes/pkg/features
+k8s.io/kubernetes/pkg/kubelet/cri/remote
+k8s.io/kubernetes/pkg/kubelet/cri/remote/fake
+k8s.io/kubernetes/pkg/kubelet/cri/remote/util
+k8s.io/kubernetes/pkg/kubelet/util/ioutils
+k8s.io/kubernetes/pkg/probe
+k8s.io/kubernetes/pkg/probe/exec
 # k8s.io/utils v0.0.0-20201110183641-67b214c5f920
 k8s.io/utils/buffer
 k8s.io/utils/exec

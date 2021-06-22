@@ -12,10 +12,14 @@ import (
 
 	"github.com/gorilla/mux"
 	kapi "k8s.io/api/core/v1"
+	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	criapi "k8s.io/cri-api/pkg/apis"
+	kruntimeapi "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 	"k8s.io/klog/v2"
+	kubeletremote "k8s.io/kubernetes/pkg/kubelet/cri/remote"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -50,7 +54,7 @@ import (
 // started.
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
-func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWatchFactory, kclient kubernetes.Interface) (*Server, error) {
+func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWatchFactory, kclient kubernetes.Interface, runtimeSockets []string) (*Server, error) {
 	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
 		return nil, fmt.Errorf("unsupported ovnkube-node mode for CNI server: %s", config.OvnKubeNode.Mode)
 	}
@@ -93,6 +97,12 @@ func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWat
 		}
 	}).Methods("POST")
 
+	var err error
+	s.runtimeService, err = getRuntimeService(runtimeSockets)
+	if err != nil {
+		return nil, err
+	}
+
 	factory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			newPod := newObj.(*kapi.Pod)
@@ -110,6 +120,77 @@ func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWat
 	}, nil)
 
 	return s, nil
+}
+
+// RuntimeEndpoints is a constant array of default CRI runtime socket paths
+var RuntimeEndpoints = []string{
+	"unix:///var/run/crio/crio.sock",
+	"unix:///var/run/containerd/containerd.sock",
+	"unix:///var/run/dockershim.sock",
+}
+
+func getOneRuntimeService(socket string) (criapi.RuntimeService, error) {
+	// 2 minutes is the current default value used in kubelet
+	const runtimeRequestTimeout = 2 * time.Minute
+
+	runtimeService, err := kubeletremote.NewRemoteRuntimeService(socket, runtimeRequestTimeout)
+	if err != nil {
+		return nil, err
+	}
+
+	// Ensure the runtime is actually alive; gRPC may create the client but
+	// it may not be responding to requests yet
+	if _, err := runtimeService.ListPodSandbox(&kruntimeapi.PodSandboxFilter{}); err != nil {
+		return nil, err
+	}
+
+	return runtimeService, nil
+}
+
+func getRuntimeService(runtimeSockets []string) (criapi.RuntimeService, error) {
+	var runtime criapi.RuntimeService
+
+	err := utilwait.ExponentialBackoff(
+		utilwait.Backoff{
+			Duration: 100 * time.Millisecond,
+			Factor:   1.2,
+			Steps:    24,
+		},
+		func() (bool, error) {
+			for _, sock := range runtimeSockets {
+				runtimeService, err := getOneRuntimeService(sock)
+				if err == nil {
+					runtime = runtimeService
+					return true, nil
+				}
+			}
+			// Wait longer
+			return false, nil
+		})
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch runtime service: %v", err)
+	}
+	return runtime, nil
+}
+
+func (s *Server) getSandboxPodUID(sandboxID string) (string, error) {
+	podSandboxList, err := s.runtimeService.ListPodSandbox(&kruntimeapi.PodSandboxFilter{
+		Id: sandboxID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to list pod sandboxes for ID %q: %v", sandboxID, err)
+	}
+	if len(podSandboxList) == 0 {
+		return "", fmt.Errorf("pod sandbox not found for ID %q", sandboxID)
+	}
+
+	for _, sb := range podSandboxList {
+		klog.Warningf("sb %q metadata %+v", sandboxID, sb.Metadata)
+		klog.Warningf("sb %q labels %+v", sandboxID, sb.Labels)
+		klog.Warningf("sb %q annotations %+v", sandboxID, sb.Annotations)
+	}
+
+	return podSandboxList[0].Metadata.Uid, nil
 }
 
 // cancelPodAddsForOldMACs cancels and pod add requests that do not match
@@ -279,6 +360,12 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 	if s.mode == types.NodeModeSmartNICHost {
 		req.IsSmartNIC = true
 	}
+
+	req.PodUID, err = s.getSandboxPodUID(req.SandboxID)
+	if err != nil {
+		return nil, err
+	}
+	klog.Warningf("[%s/%s %s] pod UID %s", req.PodNamespace, req.PodName, req.SandboxID, req.PodUID)
 
 	if err := s.startSandboxRequest(req); err != nil {
 		return nil, err

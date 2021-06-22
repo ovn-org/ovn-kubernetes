@@ -25,6 +25,9 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	utiltesting "k8s.io/client-go/util/testing"
+	critesting "k8s.io/cri-api/pkg/apis/testing"
+	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	fakecri "k8s.io/kubernetes/pkg/kubelet/cri/remote/fake"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -74,6 +77,28 @@ const (
 	nodeName     string = "mynode"
 )
 
+func newFakeRuntime(tmpDir, sandboxID, namespace, name string) (*fakecri.RemoteRuntime, string, error) {
+	runtimeSocket := "unix://" + filepath.Join(tmpDir, "runtime.sock")
+	fakeRuntime := fakecri.NewFakeRemoteRuntime()
+	fakeRuntime.RuntimeService.SetFakeSandboxes([]*critesting.FakePodSandbox{
+		{
+			PodSandboxStatus: runtimeapi.PodSandboxStatus{
+				Id:        sandboxID,
+				Metadata:  &runtimeapi.PodSandboxMetadata{
+					Name: name,
+					Namespace: namespace,
+					Uid: name,
+				},
+				State:     runtimeapi.PodSandboxState_SANDBOX_READY,
+			},
+		},
+	})
+	if err := fakeRuntime.Start(runtimeSocket); err != nil {
+		return nil, "", err
+	}
+	return fakeRuntime, runtimeSocket, nil
+}
+
 func TestCNIServer(t *testing.T) {
 	tmpDir, err := utiltesting.MkTmpdir("cniserver")
 	if err != nil {
@@ -89,7 +114,13 @@ func TestCNIServer(t *testing.T) {
 		t.Fatalf("failed to create watch factory: %v", err)
 	}
 
-	s, err := NewCNIServer(tmpDir, false, wf, fakeClient)
+	fakeRuntime, runtimeSocket, err := newFakeRuntime(tmpDir, sandboxID, namespace, name)
+	if err != nil {
+		t.Fatalf("failed to create fake runtime: %v", err)
+	}
+	defer fakeRuntime.Stop()
+
+	s, err := NewCNIServer(tmpDir, false, wf, fakeClient, []string{runtimeSocket})
 	if err != nil {
 		t.Fatalf("error creating CNI server: %v", err)
 	}
@@ -227,7 +258,7 @@ func TestCNIServer(t *testing.T) {
 		body, code := clientDoCNI(t, client, tc.request)
 		if tc.errorPrefix == "" {
 			if code != http.StatusOK {
-				t.Fatalf("[%s] expected status %v but got %v", tc.name, http.StatusOK, code)
+				t.Fatalf("[%s] expected status %v but got %v: %q", tc.name, http.StatusOK, code, string(body))
 			}
 			if tc.result != nil {
 				result := &cni020.Result{}
@@ -287,7 +318,13 @@ func TestCNIServerCancelAdd(t *testing.T) {
 
 	started := make(chan bool)
 
-	s, err := NewCNIServer(tmpDir, false, wf, fakeClient)
+	fakeRuntime, runtimeSocket, err := newFakeRuntime(tmpDir, sandboxID, namespace, name)
+	if err != nil {
+		t.Fatalf("failed to create fake runtime: %v", err)
+	}
+	defer fakeRuntime.Stop()
+
+	s, err := NewCNIServer(tmpDir, false, wf, fakeClient, []string{runtimeSocket})
 	if err != nil {
 		t.Fatalf("error Creating CNI server: %v", err)
 	}
