@@ -57,7 +57,8 @@ var _ = Describe("Node Operations", func() {
 					"external_ids:ovn-remote-probe-interval=%d "+
 					"external_ids:ovn-openflow-probe-interval=%d "+
 					"external_ids:hostname=\"%s\" "+
-					"external_ids:ovn-monitor-all=true",
+					"external_ids:ovn-monitor-all=true "+
+					"external_ids:ovn-enable-lflow-cache=true",
 					nodeIP, interval, ofintval, nodeName),
 			})
 
@@ -110,7 +111,8 @@ var _ = Describe("Node Operations", func() {
 					"external_ids:ovn-remote-probe-interval=%d "+
 					"external_ids:ovn-openflow-probe-interval=%d "+
 					"external_ids:hostname=\"%s\" "+
-					"external_ids:ovn-monitor-all=true",
+					"external_ids:ovn-monitor-all=true "+
+					"external_ids:ovn-enable-lflow-cache=true",
 					nodeIP, interval, ofintval, nodeName),
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -135,6 +137,62 @@ var _ = Describe("Node Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			config.Default.EncapPort = encapPort
 
+			err = setupOVNNode(&node)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+			return nil
+		}
+
+		err := app.Run([]string{app.Name})
+		Expect(err).NotTo(HaveOccurred())
+	})
+	It("sets non-default logical flow cache limits", func() {
+		app.Action = func(ctx *cli.Context) error {
+			const (
+				nodeIP   string = "1.2.5.6"
+				nodeName string = "cannot.be.resolv.ed"
+				interval int    = 100000
+				ofintval int    = 180
+			)
+			node := kapi.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+				Status: kapi.NodeStatus{
+					Addresses: []kapi.NodeAddress{
+						{
+							Type:    kapi.NodeExternalIP,
+							Address: nodeIP,
+						},
+					},
+				},
+			}
+
+			fexec := ovntest.NewFakeExec()
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
+					"external_ids:ovn-encap-type=geneve "+
+					"external_ids:ovn-encap-ip=%s "+
+					"external_ids:ovn-remote-probe-interval=%d "+
+					"external_ids:ovn-openflow-probe-interval=%d "+
+					"external_ids:hostname=\"%s\" "+
+					"external_ids:ovn-monitor-all=true "+
+					"external_ids:ovn-enable-lflow-cache=false "+
+					"external_ids:ovn-limit-lflow-cache=1000 "+
+					"external_ids:ovn-limit-lflow-cache-kb=100000",
+					nodeIP, interval, ofintval, nodeName),
+			})
+
+			err := util.SetExec(fexec)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = config.InitConfig(ctx, fexec, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			config.Default.LFlowCacheEnable = false
+			config.Default.LFlowCacheLimit = 1000
+			config.Default.LFlowCacheLimitKb = 100000
 			err = setupOVNNode(&node)
 			Expect(err).NotTo(HaveOccurred())
 
