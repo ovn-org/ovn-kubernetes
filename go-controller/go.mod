@@ -6,16 +6,17 @@ require (
 	github.com/Mellanox/sriovnet v1.0.2
 	github.com/Microsoft/go-winio v0.4.15 // indirect
 	github.com/Microsoft/hcsshim v0.8.10-0.20200715222032-5eafd1556990
+	github.com/alexflint/go-filemutex v0.0.0-20171022225611-72bdc8eae2ae
 	github.com/bhendo/go-powershell v0.0.0-20190719160123-219e7fb4e41e
+	github.com/cenkalti/backoff/v4 v4.1.1
 	github.com/containernetworking/cni v0.8.0
 	github.com/containernetworking/plugins v0.8.7
 	github.com/coreos/go-iptables v0.4.5
 	github.com/ebay/go-ovn v0.1.1-0.20210603173524-8db200d06216
 	github.com/ebay/libovsdb v0.2.1-0.20200719163122-3332afaeb27c
-	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/google/uuid v1.2.0
 	github.com/gorilla/mux v1.8.0
 	github.com/hashicorp/golang-lru v0.5.3 // indirect
-	github.com/imdario/mergo v0.3.8 // indirect
 	github.com/juju/errors v0.0.0-20200330140219-3fe23663418f // indirect
 	github.com/juju/testing v0.0.0-20200706033705-4c23f9c453cd // indirect
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v0.0.0-20200626054723-37f83d1996bc
@@ -24,7 +25,7 @@ require (
 	github.com/mitchellh/copystructure v1.2.0
 	github.com/onsi/ginkgo v1.15.0
 	github.com/onsi/gomega v1.10.1
-	github.com/ovn-org/libovsdb v0.5.0
+	github.com/ovn-org/libovsdb v0.5.1-0.20210708171313-d17ab7f31fc4
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.7.1
 	github.com/prometheus/procfs v0.2.0 // indirect

@@ -7,28 +7,28 @@ import (
 	"fmt"
 	"io/ioutil"
 	"reflect"
+	"strings"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"gopkg.in/fsnotify/fsnotify.v1"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 )
 
-// ReconnectFunc is run on a libovsdb client after it has been reconnected
-// A function of this type should re-establish it's monitors and any cache listeners
-type ReconnectFunc func(client.Client) error
-
 // newClient creates a new client object given the provided config
-// the stopCh is required to ensure the two goroutines for ssl cert
-// update and reconnect are not leaked
-func newClient(cfg config.OvnAuthConfig, dbModel *model.DBModel, onReconnectFn ReconnectFunc, stopCh <-chan struct{}) (client.Client, error) {
+// the stopCh is required to ensure the goroutine for ssl cert
+// update is not leaked
+func newClient(cfg config.OvnAuthConfig, dbModel *model.DBModel, stopCh <-chan struct{}) (client.Client, error) {
 	options := []client.Option{
-		client.WithEndpoint(cfg.GetURL()),
+		client.WithReconnect(500*time.Millisecond, &backoff.ZeroBackOff{}),
+	}
+	for _, endpoint := range strings.Split(cfg.GetURL(), ",") {
+		options = append(options, client.WithEndpoint(endpoint))
 	}
 	var updateFn func(client.Client, <-chan struct{})
 	if cfg.Scheme == config.OvnDBSchemeSSL {
@@ -55,13 +55,6 @@ func newClient(cfg config.OvnAuthConfig, dbModel *model.DBModel, onReconnectFn R
 		return nil, err
 	}
 
-	err = onReconnectFn(client)
-	if err != nil {
-		return nil, err
-	}
-
-	go reconnect(client, onReconnectFn, stopCh)
-
 	if updateFn != nil {
 		go updateFn(client, stopCh)
 	}
@@ -70,21 +63,44 @@ func newClient(cfg config.OvnAuthConfig, dbModel *model.DBModel, onReconnectFn R
 }
 
 // NewSBClient creates a new OVN Southbound Database client
-func NewSBClient(onReconnectFn ReconnectFunc, stopCh <-chan struct{}) (client.Client, error) {
+func NewSBClient(stopCh <-chan struct{}) (client.Client, error) {
+	return NewSBClientWithConfig(config.OvnSouth, stopCh)
+}
+
+// NewSBClient creates a new OVN Southbound Database client with the provided configuration
+func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (client.Client, error) {
 	dbModel, err := sbdb.FullDatabaseModel()
 	if err != nil {
 		return nil, err
 	}
-	return newClient(config.OvnSouth, dbModel, onReconnectFn, stopCh)
+
+	return newClient(cfg, dbModel, stopCh)
 }
 
 // NewNBClient creates a new OVN Northbound Database client
-func NewNBClient(onReconnectFn ReconnectFunc, stopCh <-chan struct{}) (client.Client, error) {
+func NewNBClient(stopCh <-chan struct{}) (client.Client, error) {
+	return NewNBClientWithConfig(config.OvnNorth, stopCh)
+}
+
+// NewNBClient creates a new OVN Northbound Database client with the provided configuration
+func NewNBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (client.Client, error) {
 	dbModel, err := nbdb.FullDatabaseModel()
 	if err != nil {
 		return nil, err
 	}
-	return newClient(config.OvnNorth, dbModel, onReconnectFn, stopCh)
+
+	c, err := newClient(cfg, dbModel, stopCh)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = c.MonitorAll()
+	if err != nil {
+		c.Close()
+		return nil, err
+	}
+
+	return c, nil
 }
 
 func createTLSConfig(certFile, privKeyFile, caCertFile, serverName string) (*tls.Config, error) {
@@ -153,36 +169,4 @@ func newSSLKeyPairWatcherFunc(certFile, privKeyFile string, tlsConfig *tls.Confi
 		}
 	}
 	return fn, nil
-}
-
-func reconnect(client client.Client, onReconnectFn ReconnectFunc, stopCh <-chan struct{}) {
-	disconnected := client.DisconnectNotify()
-	for {
-		select {
-		case <-disconnected:
-			err := wait.PollUntil(
-				500*time.Millisecond,
-				func() (bool, error) {
-					ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-					defer cancel()
-					err := client.Connect(ctx)
-					if err != nil {
-						klog.Error("Error connecting to server: %v", err)
-						return false, nil
-					}
-					err = onReconnectFn(client)
-					if err != nil {
-						klog.Errorf("Error re-initializing monitors/cache listeners: %v", err)
-					}
-					return true, nil
-				},
-				stopCh,
-			)
-			if err != nil {
-				klog.Error(err)
-			}
-		case <-stopCh:
-			return
-		}
-	}
 }

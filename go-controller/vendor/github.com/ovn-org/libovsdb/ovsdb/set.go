@@ -20,7 +20,7 @@ type OvsSet struct {
 // NewOvsSet creates a new OVSDB style set from a Go interface (object)
 func NewOvsSet(obj interface{}) (OvsSet, error) {
 	v := reflect.ValueOf(obj)
-	var ovsSet []interface{}
+	ovsSet := make([]interface{}, 0)
 	switch v.Kind() {
 	case reflect.Slice, reflect.Array:
 		for i := 0; i < v.Len(); i++ {
@@ -55,6 +55,7 @@ func (o OvsSet) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON will unmarshal a JSON byte array to an OVSDB style Set
 func (o *OvsSet) UnmarshalJSON(b []byte) (err error) {
+	o.GoSet = make([]interface{}, 0)
 	addToSet := func(o *OvsSet, v interface{}) error {
 		goVal, err := ovsSliceToGoNotation(v)
 		if err == nil {
