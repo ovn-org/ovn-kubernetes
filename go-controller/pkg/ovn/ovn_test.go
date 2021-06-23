@@ -1,6 +1,8 @@
 package ovn
 
 import (
+	"sync"
+
 	goovn "github.com/ebay/go-ovn"
 	"github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -8,7 +10,6 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"sync"
 
 	"github.com/urfave/cli/v2"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -105,7 +106,7 @@ func (o *FakeOVN) init() {
 	o.ovnSBClient = ovntest.NewMockOVNClient(goovn.DBSB)
 	o.controller = NewOvnController(o.fakeClient, o.watcher,
 		o.stopChan, o.asf, o.ovnNBClient,
-		o.ovnSBClient, o.fakeRecorder)
+		o.ovnSBClient, o.fakeRecorder, "")
 	o.controller.multicastSupport = true
 }
 

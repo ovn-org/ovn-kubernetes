@@ -1270,7 +1270,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			clusterController := NewOvnController(fakeClient, f, stopChan,
 				addressset.NewFakeAddressSetFactory(), ovntest.NewMockOVNClient(goovn.DBNB),
-				ovntest.NewMockOVNClient(goovn.DBSB), record.NewFakeRecorder(0))
+				ovntest.NewMockOVNClient(goovn.DBSB), record.NewFakeRecorder(0), "")
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 
 			clusterController.clusterLBsUUIDs = []string{node1.TCPLBUUID, node1.UDPLBUUID, node1.SCTPLBUUID}
@@ -1527,7 +1527,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			f, err := factory.NewMasterWatchFactory(fakeClient)
 			clusterController := NewOvnController(fakeClient, f, stopChan,
 				addressset.NewFakeAddressSetFactory(), ovntest.NewMockOVNClient(goovn.DBNB),
-				ovntest.NewMockOVNClient(goovn.DBSB), record.NewFakeRecorder(0))
+				ovntest.NewMockOVNClient(goovn.DBSB), record.NewFakeRecorder(0), "")
 
 			// configure the cluster allocators
 			for _, subnetString := range tt.networkRanges {

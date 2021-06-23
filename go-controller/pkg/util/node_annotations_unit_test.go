@@ -128,10 +128,10 @@ func TestL3GatewayConfig_UnmarshalJSON(t *testing.T) {
 		},
 		{
 			desc:       "success: test host gateway bridge parsing",
-			inputParam: []byte(`{"default":{"mode":"shared","host-interface-id":"breth0_ovn-control-plane","host-mac-address":"02:42:ac:12:00:02","host-ip-addresses":["172.18.0.2/16"],"host-ip-address":"172.18.0.2/16"}`),
+			inputParam: []byte(`{"mode":"shared","egw-interface-id":"breth0_ovn-control-plane"}`),
 			expOut: L3GatewayConfig{
-				Mode:            "shared",
-				HostInterfaceID: "breth0_ovn-control-plane",
+				Mode:                "shared",
+				EgressGWInterfaceID: "breth0_ovn-control-plane",
 			},
 		},
 		{
