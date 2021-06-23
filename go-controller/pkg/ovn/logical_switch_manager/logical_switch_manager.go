@@ -508,3 +508,25 @@ func (jsIPManager *JoinSwitchIPManager) ReleaseJoinLRPIPs(nodeName string) (err 
 	}
 	return err
 }
+
+// Initializes a new logical switch manager
+func NewLocalnetSwitchManager() *LogicalSwitchManager {
+	return &LogicalSwitchManager{
+		cache:    make(map[string]logicalSwitchInfo),
+		RWMutex:  sync.RWMutex{},
+		ipamFunc: NewLocalnetIPAMAllocator,
+	}
+}
+
+// NewJoinIPAMAllocator provides an ipam interface which can be used for join switch IPAM
+// allocations for the specified cidr using a contiguous allocation strategy.
+func NewLocalnetIPAMAllocator(cidr *net.IPNet) (ipam.Interface, error) {
+	subnetRange, err := ipam.NewAllocatorCIDRRange(cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
+		return allocator.NewRoundRobinAllocationMap(max, rangeSpec), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	// TBD exclude all the IPs in excludedCidr
+	return subnetRange, nil
+}

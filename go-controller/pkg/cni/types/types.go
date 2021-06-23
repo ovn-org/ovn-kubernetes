@@ -13,10 +13,19 @@ type NetConf struct {
 	NetCidr string `json:"netCidr,omitempty"`
 	// Network MTU
 	MTU int `json:"mtu,omitempty"`
+	// set to localnet if it needs public interface
+	TopoType string `json:"topology,omitempty"`
 	// captures net-attach-def name in the form of namespace/name
 	NadName string `json:"netAttachDefName,omitempty"`
-	// set true if it is not the default net-attach-def
+	// set to true if it is a secondary networkattachmentdefintion
 	IsSecondary bool `json:"isSecondary,omitempty"`
+
+	// VlanID, valid in localnet topology network
+	VlanId int `json:"vlanId,omitempty"`
+	// list of IPs, expressed with prefix length, to be excluded from being allocated for Pod
+	// valid for localnet network topology (L2 networks)
+	ExcludeCIDRs []string `json:"excludeCidrs,omitempty"`
+
 	// LogFile to log all the messages from cni shim binary to
 	LogFile string `json:"logFile,omitempty"`
 	// Level is the logging verbosity level

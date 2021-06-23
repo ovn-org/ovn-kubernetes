@@ -599,8 +599,6 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		}
 		nc.added = true
 
-		// Today, watchNetworkAttachmentDefinitions only handles DPU in the DPUMode for non-primary neworks, but later
-		// on it would also update bridgeMappings for the non-primary neworks (TBD)
 		if config.OVNKubernetesFeature.EnableMultiNetwork {
 			n.watchNetworkAttachmentDefinitions()
 		}
@@ -723,12 +721,105 @@ func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttac
 
 	nc.added = true
 
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		if nc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
+			// for dpu mode and full mode
+			err = nc.updateLocalnetOvnBridgeMapping(true)
+			if err != nil {
+				klog.Errorf(err.Error())
+			}
+		}
+	}
+
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		nc.watchPodsDPU(n.ovnUpEnabled)
 	}
 }
 
+func (nc *ovnNodeController) updateLocalnetOvnBridgeMapping(toAdd bool) error {
+	if nc.nadInfo.TopoType != types.LocalnetAttachDefTopoType || config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+		return nil
+	}
+
+	// ovn-localnet-bridge-mappings exernal_ids is in the form of "<network_prefix1>:<br1>,<network_prefix2>:<br2>...".
+	// It sets all the possible localnet networks and associated bridge names on this node.
+	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
+		"external_ids:ovn-localnet-bridge-mappings")
+	if err != nil {
+		klog.Warningf("Failed to get ngn-localnet-bridge-mappings from Open_vSwitch table stderr:%s (%v)", stderr, err)
+		return nil
+	}
+
+	bridgeName := ""
+	bridgeMapConfs := strings.Split(stdout, ",")
+	for _, bridgeMapConf := range bridgeMapConfs {
+		maps := strings.Split(bridgeMapConf, ":")
+		if len(maps) == 2 && strings.HasPrefix(nc.nadInfo.NetName, maps[0]) {
+			bridgeName = maps[1]
+			break
+		}
+	}
+
+	if bridgeName == "" {
+		klog.V(5).Infof("Localnet network %s is not needed on this node %s", nc.nadInfo.NetName, nc.node.name)
+		return nil
+	}
+
+	// ovn-bridge-mappings maps a physical network name to a local ovs bridge
+	// that provides connectivity to that network. It is in the form of physnet1:br1,physnet2:br2.
+	// Note that there may be multiple ovs bridge mappings, be sure not to override
+	// the mappings for the other physical network
+	networkName := nc.nadInfo.Prefix + types.LocalNetBridgeName
+	stdout, stderr, err = util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
+		"external_ids:ovn-bridge-mappings")
+	if err != nil {
+		return fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
+	}
+
+	bridgeMap := map[string]string{}
+	bridgeMappings := strings.Split(stdout, ",")
+	for _, bridgeMapping := range bridgeMappings {
+		m := strings.Split(bridgeMapping, ":")
+		if len(m) == 2 {
+			bridgeMap[m[0]] = m[1]
+		}
+	}
+
+	bridge, ok := bridgeMap[networkName]
+	if toAdd {
+		if ok && bridge == bridgeName {
+			return nil
+		}
+		bridgeMap[networkName] = bridgeName
+	} else {
+		if !ok {
+			return nil
+		}
+		delete(bridgeMap, networkName)
+	}
+
+	if len(bridgeMap) == 0 {
+		return nil
+	}
+
+	mapString := ""
+	for networkName, bridge = range bridgeMap {
+		if len(mapString) != 0 {
+			mapString += ","
+		}
+		mapString = mapString + networkName + ":" + bridge
+	}
+
+	_, stderr, err = util.RunOVSVsctl("set", "Open_vSwitch", ".",
+		fmt.Sprintf("external_ids:ovn-bridge-mappings=%s", mapString))
+	if err != nil {
+		return fmt.Errorf("failed to set ovn-bridge-mappings %s, stderr:%s (%v)", mapString, stderr, err)
+	}
+	return nil
+}
+
 func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
+
 	netconf := &cnitypes.NetConf{}
 
 	// looking for network attachment definition that use OVN K8S CNI only
@@ -785,6 +876,13 @@ func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAt
 
 	if netAttachDefLeft {
 		return
+	}
+
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && nc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
+		err = nc.updateLocalnetOvnBridgeMapping(false)
+		if err != nil {
+			klog.Errorf(err.Error())
+		}
 	}
 
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {

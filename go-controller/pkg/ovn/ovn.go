@@ -343,7 +343,7 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 		return nil, fmt.Errorf("netcidr: %s is not specified for network %s", nadInfo.NetCidr, nadInfo.NetName)
 	}
 
-	clusterIPNet, err := config.ParseClusterSubnetEntries(nadInfo.NetCidr)
+	clusterIPNet, err := config.ParseClusterSubnetEntries(nadInfo.NetCidr, nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType)
 	if err != nil {
 		return nil, fmt.Errorf("cluster subnet %s for network %s is invalid: %v", nadInfo.NetCidr, nadInfo.NetName, err)
 	}
@@ -352,13 +352,19 @@ func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
 	if nadInfo.IsSecondary {
 		stopChan = make(chan struct{})
 	}
+	var lsManager *lsm.LogicalSwitchManager
+	if nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType {
+		lsManager = lsm.NewLogicalSwitchManager()
+	} else {
+		lsManager = lsm.NewLocalnetSwitchManager()
+	}
 	oc := &Controller{
 		mc:                    mc,
 		stopChan:              stopChan,
 		nadInfo:               nadInfo,
 		clusterSubnets:        clusterIPNet,
 		masterSubnetAllocator: subnetallocator.NewSubnetAllocator(),
-		lsManager:             lsm.NewLogicalSwitchManager(),
+		lsManager:             lsManager,
 		logicalPortCache:      newPortCache(stopChan),
 		namespaces:            make(map[string]*namespaceInfo),
 		namespacesMutex:       sync.Mutex{},
@@ -514,28 +520,54 @@ func (oc *Controller) Run(nodeName string) error {
 	// Master is fully running and resource handlers have synced, update Topology version in OVN
 	currentTopologyVersion := strconv.Itoa(ovntypes.OvnCurrentTopologyVersion)
 	logicalRouterRes := []nbdb.LogicalRouter{}
+	logicalSwitchRes := []nbdb.LogicalSwitch{}
 	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
 	defer cancel()
-	clusterRouterName := oc.nadInfo.Prefix + ovntypes.OVNClusterRouter
-	if err := oc.mc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
-		return lr.Name == clusterRouterName
-	}).List(ctx, &logicalRouterRes); err != nil {
-		return fmt.Errorf("failed in retrieving %s, error: %v", clusterRouterName, err)
-	}
-	// Update topology version on distributed cluster router
-	logicalRouterRes[0].ExternalIDs["k8s-ovn-topo-version"] = currentTopologyVersion
-	logicalRouter := nbdb.LogicalRouter{
-		Name:        clusterRouterName,
-		ExternalIDs: logicalRouterRes[0].ExternalIDs,
-	}
-	opModel := libovsdbops.OperationModel{
-		Name:           logicalRouter.Name,
-		Model:          &logicalRouter,
-		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == clusterRouterName },
-		OnModelUpdates: []interface{}{
-			&logicalRouter.ExternalIDs,
-		},
-		ErrNotFound: true,
+	var opModel libovsdbops.OperationModel
+	if oc.nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType {
+		clusterRouterName := oc.nadInfo.Prefix + ovntypes.OVNClusterRouter
+		if err := oc.mc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
+			return lr.Name == clusterRouterName
+		}).List(ctx, &logicalRouterRes); err != nil {
+			return fmt.Errorf("failed in retrieving %s, error: %v", clusterRouterName, err)
+		}
+		// Update topology version on distributed cluster router
+		logicalRouterRes[0].ExternalIDs["k8s-ovn-topo-version"] = currentTopologyVersion
+		logicalRouter := nbdb.LogicalRouter{
+			Name:        clusterRouterName,
+			ExternalIDs: logicalRouterRes[0].ExternalIDs,
+		}
+		opModel = libovsdbops.OperationModel{
+			Name:           logicalRouter.Name,
+			Model:          &logicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == clusterRouterName },
+			OnModelUpdates: []interface{}{
+				&logicalRouter.ExternalIDs,
+			},
+			ErrNotFound: true,
+		}
+	} else {
+		ovnLocalnetSwitch := oc.nadInfo.Prefix + ovntypes.OVNLocalnetSwitch
+		if err := oc.mc.nbClient.WhereCache(func(ls *nbdb.LogicalSwitch) bool {
+			return ls.Name == ovnLocalnetSwitch
+		}).List(ctx, &logicalSwitchRes); err != nil {
+			return fmt.Errorf("failed in retrieving %s, error: %v", ovnLocalnetSwitch, err)
+		}
+		// Update topology version on distributed cluster router
+		logicalSwitchRes[0].ExternalIDs["k8s-ovn-topo-version"] = currentTopologyVersion
+		logicalSwitch := nbdb.LogicalSwitch{
+			Name:        ovnLocalnetSwitch,
+			ExternalIDs: logicalSwitchRes[0].ExternalIDs,
+		}
+		opModel = libovsdbops.OperationModel{
+			Name:           logicalSwitch.Name,
+			Model:          &logicalSwitch,
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == ovnLocalnetSwitch },
+			OnModelUpdates: []interface{}{
+				&logicalSwitch.ExternalIDs,
+			},
+			ErrNotFound: true,
+		}
 	}
 	if _, err := oc.mc.modelClient.CreateOrUpdate(opModel); err != nil {
 		return fmt.Errorf("failed to generate set topology version in OVN for network %s, err: %v", oc.nadInfo.NetName, err)
@@ -575,19 +607,37 @@ func (oc *Controller) ovnTopologyCleanup() error {
 func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
 	ver := 0
 	logicalRouterRes := []nbdb.LogicalRouter{}
+	logicalSwitchRes := []nbdb.LogicalSwitch{}
 	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
 	defer cancel()
-	if err := oc.mc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
-		return lr.Name == oc.nadInfo.Prefix+ovntypes.OVNClusterRouter
-	}).List(ctx, &logicalRouterRes); err != nil {
-		return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
-			"error: %v", oc.nadInfo.Prefix+ovntypes.OVNClusterRouter, err)
+	var v string
+	var exists bool
+
+	if oc.nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType {
+		if err := oc.mc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
+			return lr.Name == oc.nadInfo.Prefix+ovntypes.OVNClusterRouter
+		}).List(ctx, &logicalRouterRes); err != nil {
+			return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
+				"error: %v", oc.nadInfo.Prefix+ovntypes.OVNClusterRouter, err)
+		}
+		if len(logicalRouterRes) == 0 {
+			// no OVNClusterRouter exists, DB is empty, nothing to upgrade
+			return math.MaxInt32, nil
+		}
+		v, exists = logicalRouterRes[0].ExternalIDs["k8s-ovn-topo-version"]
+	} else {
+		if err := oc.mc.nbClient.WhereCache(func(ls *nbdb.LogicalSwitch) bool {
+			return ls.Name == oc.nadInfo.Prefix+ovntypes.OVNLocalnetSwitch
+		}).List(ctx, &logicalSwitchRes); err != nil {
+			return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
+				"error: %v", oc.nadInfo.Prefix+ovntypes.OVNLocalnetSwitch, err)
+		}
+		if len(logicalSwitchRes) == 0 {
+			// no OVNLocalnetSwitch exists, DB is empty, nothing to upgrade
+			return math.MaxInt32, nil
+		}
+		v, exists = logicalSwitchRes[0].ExternalIDs["k8s-ovn-topo-version"]
 	}
-	if len(logicalRouterRes) == 0 {
-		// no OVNClusterRouter exists, DB is empty, nothing to upgrade
-		return math.MaxInt32, nil
-	}
-	v, exists := logicalRouterRes[0].ExternalIDs["k8s-ovn-topo-version"]
 	if !exists {
 		klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
 		return ver, nil
@@ -972,7 +1022,7 @@ func (oc *Controller) WatchNetworkPolicy() {
 			oc.deletePolicyHandler(policy)
 		},
 	}, oc.syncNetworkPolicies)
-	klog.Infof("Bootstrapping existing policies and cleaning stale policies took %v", time.Since(start))
+	klog.Infof("Bootstrapping existing policies and cleaning stale policies on network %s took %v", oc.nadInfo.NetName, time.Since(start))
 }
 
 func (oc *Controller) addPolicyHandler(policy *kapisnetworking.NetworkPolicy) {
@@ -1390,6 +1440,9 @@ func (oc *Controller) WatchNodes() {
 	var addNodeFailed sync.Map
 	var nodeClusterRouterPortFailed sync.Map
 
+	if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
+		return
+	}
 	start := time.Now()
 	oc.nodeHandler = oc.mc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
@@ -1624,7 +1677,8 @@ func (mc *OvnMHController) initOvnController(netattachdef *nettypes.NetworkAttac
 	v, ok := mc.nonDefaultOvnControllers.Load(nadInfo.NetName)
 	if ok {
 		oc := v.(*Controller)
-		if oc.nadInfo.NetCidr != nadInfo.NetCidr || oc.nadInfo.MTU != nadInfo.MTU {
+		if oc.nadInfo.NetCidr != nadInfo.NetCidr || oc.nadInfo.MTU != nadInfo.MTU || oc.nadInfo.TopoType != nadInfo.TopoType ||
+			oc.nadInfo.VlanId != nadInfo.VlanId {
 			return nil, fmt.Errorf("network attachment definition %s/%s does not share the same CNI config of name %s",
 				netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
 		} else {
@@ -1744,20 +1798,22 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 
 	oc.deleteMaster()
 
-	existingNodes, err := oc.mc.kube.GetNodes()
-	if err != nil {
-		klog.Errorf("Error in initializing/fetching subnets: %v", err)
-		return
-	}
-
-	// remove hostsubnet annoation for this network
-	for _, node := range existingNodes.Items {
-		err := oc.deleteNodeLogicalNetwork(node.Name)
+	if oc.nadInfo.TopoType != ovntypes.LocalnetAttachDefTopoType {
+		existingNodes, err := oc.mc.kube.GetNodes()
 		if err != nil {
-			klog.Error("Failed to delete node %s for network %s: %v", node.Name, oc.nadInfo.NetName, err)
+			klog.Errorf("Error in initializing/fetching subnets: %v", err)
+			return
 		}
-		_ = oc.updateNodeAnnotationWithRetry(node.Name, []*net.IPNet{})
-		oc.lsManager.DeleteNode(nadInfo.Prefix + node.Name)
+
+		// remove hostsubnet annoation for this network
+		for _, node := range existingNodes.Items {
+			err := oc.deleteNodeLogicalNetwork(node.Name)
+			if err != nil {
+				klog.Error("Failed to delete node %s for network %s: %v", node.Name, oc.nadInfo.NetName, err)
+			}
+			_ = oc.updateNodeAnnotationWithRetry(node.Name, []*net.IPNet{})
+			oc.lsManager.DeleteNode(nadInfo.Prefix + node.Name)
+		}
 	}
 
 	mc.nonDefaultOvnControllers.Delete(nadInfo.NetName)
@@ -1816,10 +1872,15 @@ func (mc *OvnMHController) syncNetworkAttachDefinition(netattachdefs []interface
 
 		nodeName := strings.TrimPrefix(nodeSwitch.Name, netPrefix)
 		oc := &Controller{mc: mc, nadInfo: &util.NetAttachDefInfo{NetNameInfo: util.NetNameInfo{NetName: netName, Prefix: netPrefix, IsSecondary: true}}}
-		if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
-			klog.Errorf("Error deleting node %s logical network: %v", nodeName, err)
+		if nodeName == ovntypes.OVNLocalnetSwitch {
+			oc.nadInfo.TopoType = ovntypes.LocalnetAttachDefTopoType
+			oc.deleteMaster()
+		} else {
+			if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
+				klog.Errorf("Error deleting node %s logical network: %v", nodeName, err)
+			}
+			_ = oc.updateNodeAnnotationWithRetry(nodeName, []*net.IPNet{})
 		}
-		_ = oc.updateNodeAnnotationWithRetry(nodeName, []*net.IPNet{})
 	}
 	clusterRouters, err := libovsdbops.FindRoutersWitherExternalIds(mc.nbClient, map[string]string{"k8s-cluster-router": "yes"})
 	if err != nil {

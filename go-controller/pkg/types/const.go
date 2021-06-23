@@ -8,6 +8,9 @@ const (
 	K8sPrefix           = "k8s-"
 	HybridOverlayPrefix = "int-"
 
+	// topology type defined in CNI netconf for localnet faced interface
+	LocalnetAttachDefTopoType = "localnet"
+
 	// K8sMgmtIntfName name to be used as an OVS internal port on the node
 	K8sMgmtIntfName = "ovn-k8s-mp0"
 
@@ -23,6 +26,13 @@ const (
 	// Local Bridge used for DGP access
 	LocalBridgeName            = "br-local"
 	LocalnetGatewayNextHopPort = "ovn-k8s-gw0"
+
+	// Local Bridge used for localnet topology network access
+	LocalNetBridgeName = "br-localnet"
+
+	// types.OvnLocalnetSwitch is the name of localnet topology switch
+	OVNLocalnetSwitch = "ovn_localnet_switch"
+	OVNLocalnetPort   = "ovn_localnet_port"
 
 	// types.OVNClusterRouter is the name of the distributed router
 	OVNClusterRouter = "ovn_cluster_router"

@@ -256,6 +256,10 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		oc.mc.metricsRecorder.Run(oc.mc.sbClient)
 	}
 
+	if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
+		return oc.SetupLocalnetMaster()
+	}
+
 	existingNodes, err := oc.mc.kube.GetNodes()
 	if err != nil {
 		klog.Errorf("Error in fetching nodes: %v", err)
@@ -578,6 +582,11 @@ func (oc *Controller) SetupMaster(existingNodeNames []string) error {
 // deleteMaster delete the central router and switch for the network
 func (oc *Controller) deleteMaster() {
 	if !oc.nadInfo.IsSecondary {
+		return
+	}
+
+	if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
+		oc.deleteLocalnetMaster()
 		return
 	}
 

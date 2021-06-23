@@ -46,7 +46,11 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 		if err != nil || !on {
 			continue
 		}
-		switchName := oc.nadInfo.Prefix + pod.Spec.NodeName
+		nodeName := pod.Spec.NodeName
+		if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
+			nodeName = ovntypes.OVNLocalnetSwitch
+		}
+		switchName := oc.nadInfo.Prefix + nodeName
 		for nadName := range networkMap {
 			annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 			if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && err == nil {
@@ -84,13 +88,25 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 	for _, lsp := range lspList {
 		portCache[lsp.UUID] = lsp
 	}
-	// get all the nodes from the watchFactory
-	nodes, err := oc.mc.watchFactory.GetNodes()
-	if err != nil {
-		return fmt.Errorf("failed to get nodes: %v", err)
+	var switches []string
+	if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
+		switches = []string{oc.nadInfo.Prefix + ovntypes.OVNLocalnetSwitch}
+	} else {
+		// get all the nodes from the watchFactory
+		nodes, err := oc.mc.watchFactory.GetNodes()
+		if err != nil {
+			return fmt.Errorf("failed to get nodes: %v", err)
+		}
+		switches = make([]string, 0, len(nodes))
+		for _, n := range nodes {
+			if noHostSubnet(n) {
+				// skip those nodes that's not OVN managed
+				continue
+			}
+			switches = append(switches, oc.nadInfo.Prefix+n.Name)
+		}
 	}
-	for _, n := range nodes {
-		switchName := oc.nadInfo.Prefix + n.Name
+	for _, switchName := range switches {
 		stalePorts := []string{}
 		// find the logical switch for the node
 		ls := &nbdb.LogicalSwitch{}
@@ -100,7 +116,7 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 
 			// Not in cache: Try getting the logical switch from ovn database (slower method)
 			if ls, err = libovsdbops.FindSwitchByName(oc.mc.nbClient, switchName); err != nil {
-				return fmt.Errorf("can't find switch %s: %v", switchName, err)
+				return fmt.Errorf("can't find logical switch %s: %v", switchName, err)
 			}
 		} else {
 			ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
@@ -166,8 +182,13 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
+	nodeName := pod.Spec.NodeName
+	if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
+		nodeName = ovntypes.OVNLocalnetSwitch
+	}
+
 	for nadName, network := range networkMap {
-		oc.delLogicalPort4Nad(pod, nadName, pod.Spec.NodeName, network)
+		oc.delLogicalPort4Nad(pod, nadName, nodeName, network)
 	}
 }
 
@@ -280,10 +301,21 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 		podAnnotation.Gateways = append(podAnnotation.Gateways, network.GatewayRequest...)
 		for _, podIfAddr := range podAnnotation.IPs {
 			isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
+			// TBD localnet type does need this only for a temp workaround, to be removed.
 			nodeSubnet, err := util.MatchIPNetFamily(isIPv6, nodeSubnets)
 			if err != nil {
 				return err
 			}
+
+			//var gwIP net.IP
+			//// TBD CATHY gateway nexthop is different for localnet topotype network
+			//if oc.nadInfo.TopoType == types.LocalnetAttachDefTopoType {
+			//	gwIPs, err := util.MatchIPFamily(isIPv6, oc.nadInfo.GatewayNextHops)
+			//	if err != nil {
+			//		return err
+			//	}
+			//	gwIP = gwIPs[0]
+			//}
 			gatewayIPnet := util.GetNodeGatewayIfAddr(nodeSubnet)
 
 			for _, clusterSubnet := range oc.clusterSubnets {
@@ -398,6 +430,9 @@ func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *u
 
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	nodeName := pod.Spec.NodeName
+	if oc.nadInfo.TopoType == ovntypes.LocalnetAttachDefTopoType {
+		nodeName = ovntypes.OVNLocalnetSwitch
+	}
 
 	// If a node does node have an assigned hostsubnet don't wait for the logical switch to appear
 	if oc.lsManager.IsNonHostSubnetSwitch(oc.nadInfo.Prefix + nodeName) {
@@ -488,7 +523,7 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 	// chassis if ovnkube-node isn't running correctly and hasn't cleared
 	// out iface-id for an old instance of this pod, and the pod got
 	// rescheduled.
-	lsp.Options["requested-chassis"] = nodeName
+	lsp.Options["requested-chassis"] = pod.Spec.NodeName
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 
@@ -542,7 +577,6 @@ func (oc *Controller) addLogicalPort4Nad(pod *kapi.Pod, nadName, nodeName string
 		} else if err = oc.lsManager.AllocateIPs(logicalSwitch, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
 			klog.Warningf("Unable to allocate IPs found on existing OVN port: %s, for pod %s on switch: %s"+
 				" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), portName, logicalSwitch, err)
-
 			needsNewAllocation = true
 		}
 		if needsNewAllocation {

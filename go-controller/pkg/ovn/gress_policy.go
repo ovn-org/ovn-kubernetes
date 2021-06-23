@@ -364,15 +364,19 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName, aclLogging string) []*nb
 
 // buildACLAllow builds an allow-related ACL for a given given match
 func (gp *gressPolicy) buildACLAllow(match, l4Match string, ipBlockCIDR int, aclLogging string) *nbdb.ACL {
+	var direction, ipBlockCIDRString string
 	priority := types.DefaultAllowPriority
-	direction := nbdb.ACLDirectionToLport
+	if gp.policyType == knet.PolicyTypeEgress && gp.netAttachInfo.TopoType == types.LocalnetAttachDefTopoType {
+		direction = nbdb.ACLDirectionFromLport
+	} else {
+		direction = nbdb.ACLDirectionToLport
+	}
 	action := nbdb.ACLActionAllowRelated
 	aclName := fmt.Sprintf("%s_%s_%v", gp.policyNamespace, gp.policyName, gp.idx)
 
 	// For backward compatibility with existing ACLs, we use "ipblock_cidr=false" for
 	// non-ipblock ACLs and "ipblock_cidr=true" for the first ipblock ACL in a policy,
 	// but then number them after that.
-	var ipBlockCIDRString string
 	switch ipBlockCIDR {
 	case 0:
 		ipBlockCIDRString = "false"
