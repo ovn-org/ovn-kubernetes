@@ -126,6 +126,15 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 	}
 	// TODO (trozet): use the go bindings here and batch commands
 	for _, pod := range existingPods {
+		if config.Gateway.DisableSNATMultipleGWs {
+			logicalPort := podLogicalPortName(pod)
+			portInfo, err := oc.logicalPortCache.get(logicalPort)
+			if err != nil {
+				klog.Warningf("Unable to get port %s in cache for SNAT rule removal", logicalPort)
+			} else {
+				oc.deletePerPodGRSNAT(pod.Spec.NodeName, portInfo.ips)
+			}
+		}
 		gr := util.GetGatewayRouterFromNode(pod.Spec.NodeName)
 		for _, gw := range egress.gws {
 			for _, podIP := range pod.Status.PodIPs {
