@@ -248,6 +248,10 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 	return wf, nil
 }
 
+func (wf *WatchFactory) GetEFClientset() egressfirewallclientset.Interface {
+	return wf.efClientset
+}
+
 func (wf *WatchFactory) InitializeEgressFirewallWatchFactory() error {
 	var err error
 	wf.efFactory = egressfirewallinformerfactory.NewSharedInformerFactory(wf.efClientset, resyncInterval)
@@ -546,6 +550,10 @@ func (wf *WatchFactory) NamespaceInformer() cache.SharedIndexInformer {
 
 func (wf *WatchFactory) ServiceInformer() cache.SharedIndexInformer {
 	return wf.informers[serviceType].inf
+}
+
+func (wf *WatchFactory) EgressfirewallInformer() cache.SharedIndexInformer {
+	return wf.informers[egressFirewallType].inf
 }
 
 // noHeadlessServiceSelector is a LabelSelector added to the watch for

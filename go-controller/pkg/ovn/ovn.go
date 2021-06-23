@@ -15,10 +15,12 @@ import (
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	efinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	efcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressfirewall"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
@@ -167,6 +169,9 @@ type Controller struct {
 	// Controller used to handle services
 	svcController *svccontroller.Controller
 
+	// Controller used to handle egressfirewalls
+	efController *efcontroller.Controller
+
 	// Is ACL logging enabled while configuring meters?
 	aclLoggingEnabled bool
 
@@ -302,7 +307,9 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressFirewall {
-		klog.Infof("Starting egressfirewall controller")
+		if err := oc.StartEgressfirewallController(wg, true); err != nil {
+			return err
+		}
 	}
 
 	klog.Infof("Completing all the Watchers took %v", time.Since(start))
@@ -1018,4 +1025,32 @@ func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool)
 		}
 	}()
 	return nil
+}
+
+func (oc *Controller) StartEgressfirewallController(wg *sync.WaitGroup, runRepair bool) error {
+	klog.Infof("Starting egressfirewall controller")
+
+	efFactory := efinformerfactory.NewSharedInformerFactory(oc.watchFactory.GetEFClientset(), 0)
+	oc.efController = efcontroller.NewController(
+		oc.client,
+		oc.kube,
+		oc.watchFactory.GetEFClientset(),
+		efFactory.K8s().V1().EgressFirewalls(),
+		oc.addressSetFactory,
+		oc.watchFactory,
+	)
+	efFactory.Start(oc.stopChan)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// use 5 workers like most of the kubernetes controller in the
+		// kubernetes controller-manager
+		err := oc.efController.Run(5, oc.stopChan, runRepair)
+		if err != nil {
+			klog.Errorf("Error running OVN Kubernetes EgressFirewall controller: %v", err)
+		}
+	}()
+
+	return nil
+
 }

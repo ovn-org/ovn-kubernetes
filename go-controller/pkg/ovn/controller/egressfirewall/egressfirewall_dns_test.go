@@ -1,4 +1,4 @@
-package ovn
+package egressfirewall
 
 import (
 	"fmt"
@@ -21,7 +21,6 @@ import (
 )
 
 func TestNewEgressDNS(t *testing.T) {
-	testCh := make(chan struct{})
 	testOvnAddFtry := addressset.NewOvnAddressSetFactory()
 	mockDnsOps := new(util_mocks.DNSOps)
 	util.SetDNSLibOpsMockInst(mockDnsOps)
@@ -56,7 +55,7 @@ func TestNewEgressDNS(t *testing.T) {
 				}
 				call.Once()
 			}
-			_, err := NewEgressDNS(testOvnAddFtry, testCh)
+			_, err := NewEgressDNS(testOvnAddFtry)
 			//t.Log(res, err)
 			if tc.errExp {
 				assert.Error(t, err)
@@ -233,14 +232,14 @@ func TestAdd(t *testing.T) {
 				}
 				call.Once()
 			}
-			res, err := NewEgressDNS(mockAddressSetFactoryOps, testCh)
+			res, err := NewEgressDNS(mockAddressSetFactoryOps)
 
 			t.Log(res, err)
 			addResult, err := res.Add("addNamespace", test1DNSName)
 			if tc.errExp {
 				assert.Error(t, err)
 			} else {
-				res.Run(tc.syncTime)
+				res.Run(tc.syncTime, testCh)
 				assert.Nil(t, err)
 				for stay, timeout := true, time.After(10*time.Second); stay; {
 					_, dnsResolves, _ := res.getDNSEntry(tc.dnsName)
@@ -369,14 +368,14 @@ func TestDelete(t *testing.T) {
 				}
 				call.Once()
 			}
-			res, err := NewEgressDNS(mockAddressSetFactoryOps, testCh)
+			res, err := NewEgressDNS(mockAddressSetFactoryOps)
 
 			t.Log(res, err)
 			addResult, err := res.Add("addNamespace", test1DNSName)
 			if tc.errExp {
 				assert.Error(t, err)
 			} else {
-				res.Run(tc.syncTime)
+				res.Run(tc.syncTime, testCh)
 				assert.Nil(t, err)
 				for stay, timeout := true, time.After(10*time.Second); stay; {
 					_, dnsResolves, _ := res.getDNSEntry(tc.dnsName)

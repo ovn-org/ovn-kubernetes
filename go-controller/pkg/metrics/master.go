@@ -104,6 +104,38 @@ var MetricSyncServiceLatency = prometheus.NewHistogramVec(prometheus.HistogramOp
 	[]string{"name"},
 )
 
+// MetricRequeueEgressFirewallCount is the number of times a particular egressFirewall has been requeued.
+var MetricRequeueEgressFirewallCount = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "requeue_egressFirewall_total",
+	Help:      "A metric that captures the number of times an egressFirewall is requeued after failing to sync with OVN"},
+	[]string{
+		"name",
+	},
+)
+
+// MetricSyncEgressFirewallCount is the number of times a particular egressFirewall has been synced
+var MetricSyncEgressFirewallCount = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "sync_egressFirewall_total",
+	Help:      "A metric that captures the number of times an egressFirewall is synced with OVN load balancers"},
+	[]string{
+		"name",
+	},
+)
+
+// MetricSyncEgressFirewallLatency is the time taken to sync an egressFirewall with the OVN load balancers
+var MetricSyncEgressFirewallLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "sync_egressFirewall_latency_seconds",
+	Help:      "The latency of syncing an egressFirewall with the OVN load balancers",
+	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
+	[]string{"name"},
+)
+
 var MetricMasterReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
