@@ -69,6 +69,8 @@ fi
 # OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 # OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 # OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
+# OVN_TUNNELED_HOST_TRAFFIC_ENABLE - configure OVN with policy based routes to route pod network to
+#                                    host traffic through management port(ovn-k8s-mp0).
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, smart-nic, smart-nic-host (default: full)
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="smart-nic"
@@ -198,6 +200,8 @@ ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
 #OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 ovn_egressfirewall_enable=${OVN_EGRESSFIREWALL_ENABLE:-false}
+# OVN_TUNNELED_HOST_TRAFFIC_ENABLE - configure OVN with PBRs to route pod network to host traffic through management port.
+ovn_tunneled_host_traffic_enable=${OVN_TUNNELED_HOST_TRAFFIC_ENABLE:-false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 ovn_netflow_targets=${OVN_NETFLOW_TARGETS:-}
 ovn_sflow_targets=${OVN_SFLOW_TARGETS:-}
@@ -908,6 +912,11 @@ ovn-master() {
   fi
   echo "egressfirewall_enabled_flag=${egressfirewall_enabled_flag}"
 
+  tunneled_host_traffic_enable_flag=
+  if [[ ${ovn_tunneled_host_traffic_enable} == "true" ]]; then
+    tunneled_host_traffic_enable_flag="--enable-tunneled-host-traffic"
+  fi
+
   ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
 
   echo "=============== ovn-master ========== MASTER ONLY"
@@ -933,6 +942,7 @@ ovn-master() {
     ${ovn_acl_logging_rate_limit_flag} \
     ${egressip_enabled_flag} \
     ${egressfirewall_enabled_flag} \
+    ${tunneled_host_traffic_enable_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --host-network-namespace ${ovn_host_network_namespace} &
 

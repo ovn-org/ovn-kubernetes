@@ -540,8 +540,13 @@ func addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet, ot
 	for _, hostIP := range append(otherHostAddrs, hostIfAddr.IP.String()) {
 		// embed nodeName as comment so that it is easier to delete these rules later on.
 		// logical router policy doesn't support external_ids to stash metadata
-		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.dst == %s /* %s */`,
-			types.RouterToSwitchPrefix, nodeName, l3Prefix, hostIP, nodeName)
+		var matchStr string
+		if config.OVNKubernetesFeature.EnableTunneledHostTraffic {
+			matchStr = fmt.Sprintf(`%s.dst == %s /* %s */`, l3Prefix, hostIP, nodeName)
+		} else {
+			matchStr = fmt.Sprintf(`inport == "%s%s" && %s.dst == %s /* %s */`,
+				types.RouterToSwitchPrefix, nodeName, l3Prefix, hostIP, nodeName)
+		}
 		matches = matches.Insert(matchStr)
 	}
 	if err := syncPolicyBasedRoutes(nodeName, matches, types.NodeSubnetPolicyPriority, mgmtPortIP); err != nil {
@@ -598,6 +603,12 @@ func addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet, ot
 // 		c20ac671-704a-428a-a32b-44da2eec8456,"inport == ""rtos-ovn-worker2"" && ip4.dst == 172.18.0.2 /* ovn-worker2 */",10.244.0.2
 // 		be7c8b53-f8ac-4051-b8f1-bfdb007d0956,"inport == ""rtos-ovn-worker"" && ip4.dst == 172.18.0.3 /* ovn-worker */",10.244.2.2
 // 		fa8cf55d-a96c-4a53-9bf2-1c1fb1bc7a42,"inport == ""rtos-ovn-control-plane"" && ip4.dst == 172.18.0.4 /* ovn-control-plane */",10.244.1.2
+
+// or
+
+//		c44c4654-aaa4-482b-a4c1-a393662ebbca,ip4.dst == 172.18.0.2 /* ovn-worker2 */,10.244.0.2
+//		9930a22b-fcd2-4e94-91c0-fcffab047a8a,ip4.dst == 172.18.0.3 /* ovn-worker */,10.244.2.2
+//		937d2905-d84b-4b67-8e52-c66ceb8518bf,ip4.dst == 172.18.0.4 /* ovn-control-plane */,10.244.1.2
 
 // or
 

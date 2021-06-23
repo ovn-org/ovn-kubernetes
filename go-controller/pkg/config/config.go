@@ -263,8 +263,9 @@ type KubernetesConfig struct {
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
 type OVNKubernetesFeatureConfig struct {
-	EnableEgressIP       bool `gcfg:"enable-egress-ip"`
-	EnableEgressFirewall bool `gcfg:"enable-egress-firewall"`
+	EnableEgressIP            bool `gcfg:"enable-egress-ip"`
+	EnableEgressFirewall      bool `gcfg:"enable-egress-firewall"`
+	EnableTunneledHostTraffic bool `gcfg:"enable-tunneled-host-traffic"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -742,6 +743,13 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use EgressFirewall CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressFirewall,
 		Value:       OVNKubernetesFeature.EnableEgressFirewall,
+	},
+	&cli.BoolFlag{
+		Name: "enable-tunneled-host-traffic",
+		Usage: "Configure OVN with policy based routes to route pod network to host traffic through " +
+			"management port(ovn-k8s-mp0).",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableTunneledHostTraffic,
+		Value:       OVNKubernetesFeature.EnableTunneledHostTraffic,
 	},
 }
 
