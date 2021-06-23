@@ -1,6 +1,8 @@
 package ovn
 
 import (
+	"sync"
+
 	goovn "github.com/ebay/go-ovn"
 	"github.com/onsi/gomega"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -10,7 +12,6 @@ import (
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"sync"
 
 	"github.com/urfave/cli/v2"
 	"k8s.io/apimachinery/pkg/runtime"
