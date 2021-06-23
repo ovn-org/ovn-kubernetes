@@ -26,8 +26,6 @@ import (
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
-
 	utilnet "k8s.io/utils/net"
 
 	kapi "k8s.io/api/core/v1"
@@ -49,9 +47,8 @@ import (
 )
 
 const (
-	clusterPortGroupName             string        = "clusterPortGroup"
-	clusterRtrPortGroupName          string        = "clusterRtrPortGroup"
-	egressFirewallDNSDefaultDuration time.Duration = 30 * time.Minute
+	clusterPortGroupName    string = "clusterPortGroup"
+	clusterRtrPortGroupName string = "clusterRtrPortGroup"
 )
 
 // ACL logging severity levels
@@ -107,11 +104,10 @@ type namespaceInfo struct {
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
-	client                clientset.Interface
-	kube                  kube.Interface
-	watchFactory          *factory.WatchFactory
-	egressFirewallHandler *factory.Handler
-	stopChan              <-chan struct{}
+	client       clientset.Interface
+	kube         kube.Interface
+	watchFactory *factory.WatchFactory
+	stopChan     <-chan struct{}
 
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
 	masterSubnetAllocator     *subnetallocator.SubnetAllocator
@@ -140,9 +136,6 @@ type Controller struct {
 	// from inside those functions.
 	namespaces      map[string]*namespaceInfo
 	namespacesMutex sync.Mutex
-
-	// egressFirewalls is a map of namespaces and the egressFirewall attached to it
-	egressFirewalls sync.Map
 
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
@@ -173,8 +166,6 @@ type Controller struct {
 
 	// Controller used to handle services
 	svcController *svccontroller.Controller
-
-	egressFirewallDNS *EgressDNS
 
 	// Is ACL logging enabled while configuring meters?
 	aclLoggingEnabled bool
@@ -311,14 +302,7 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressFirewall {
-		var err error
-		oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.stopChan)
-		if err != nil {
-			return err
-		}
-		oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
-		oc.egressFirewallHandler = oc.WatchEgressFirewall()
-
+		klog.Infof("Starting egressfirewall controller")
 	}
 
 	klog.Infof("Completing all the Watchers took %v", time.Since(start))
@@ -559,73 +543,6 @@ func (oc *Controller) WatchNetworkPolicy() {
 		},
 	}, oc.syncNetworkPolicies)
 	klog.Infof("Bootstrapping existing policies and cleaning stale policies took %v", time.Since(start))
-}
-
-// WatchEgressFirewall starts the watching of egressfirewall resource and calls
-// back the appropriate handler logic
-func (oc *Controller) WatchEgressFirewall() *factory.Handler {
-	return oc.watchFactory.AddEgressFirewallHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
-			txn := util.NewNBTxn()
-			addErrors := oc.addEgressFirewall(egressFirewall, txn)
-			if addErrors != nil {
-				klog.Error(addErrors)
-				egressFirewall.Status.Status = egressFirewallAddError
-			} else {
-				_, stderr, err := txn.Commit()
-				if err != nil {
-					klog.Errorf("Failed to commit db changes for egressFirewall in namespace %s stderr: %q, err: %+v", egressFirewall.Namespace, stderr, err)
-					egressFirewall.Status.Status = egressFirewallAddError
-				} else {
-					egressFirewall.Status.Status = egressFirewallAppliedCorrectly
-				}
-			}
-
-			err := oc.updateEgressFirewallWithRetry(egressFirewall)
-			if err != nil {
-				klog.Error(err)
-			}
-		},
-		UpdateFunc: func(old, newer interface{}) {
-			newEgressFirewall := newer.(*egressfirewall.EgressFirewall).DeepCopy()
-			oldEgressFirewall := old.(*egressfirewall.EgressFirewall)
-			if !reflect.DeepEqual(oldEgressFirewall.Spec, newEgressFirewall.Spec) {
-				txn := util.NewNBTxn()
-				errList := oc.updateEgressFirewall(oldEgressFirewall, newEgressFirewall, txn)
-				if errList != nil {
-					newEgressFirewall.Status.Status = egressFirewallUpdateError
-					klog.Error(errList)
-				} else {
-					_, stderr, err := txn.Commit()
-					if err != nil {
-						klog.Errorf("Failed to commit db changes for egressFirewall in namespace %s stderr: %q, err: %+v", newEgressFirewall.Namespace, stderr, err)
-						newEgressFirewall.Status.Status = egressFirewallUpdateError
-
-					} else {
-						newEgressFirewall.Status.Status = egressFirewallAppliedCorrectly
-					}
-				}
-				err := oc.updateEgressFirewallWithRetry(newEgressFirewall)
-				if err != nil {
-					klog.Error(err)
-				}
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			egressFirewall := obj.(*egressfirewall.EgressFirewall)
-			txn := util.NewNBTxn()
-			deleteErrors := oc.deleteEgressFirewall(egressFirewall, txn)
-			if deleteErrors != nil {
-				klog.Error(deleteErrors)
-				return
-			}
-			stdout, stderr, err := txn.Commit()
-			if err != nil {
-				klog.Errorf("Failed to commit db changes for egressFirewall in namespace %s stdout: %q, stderr: %q, err: %+v", egressFirewall.Namespace, stdout, stderr, err)
-			}
-		},
-	}, oc.syncEgressFirewall)
 }
 
 // WatchEgressNodes starts the watching of egress assignable nodes and calls
