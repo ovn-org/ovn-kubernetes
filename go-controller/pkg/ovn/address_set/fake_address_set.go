@@ -54,7 +54,7 @@ func (f *FakeAddressSetFactory) EnsureAddressSet(name string) error {
 	return nil
 }
 
-func (f *FakeAddressSetFactory) ForEachAddressSet(iteratorFn AddressSetIterFunc) error {
+func (f *FakeAddressSetFactory) ProcessEachAddressSet(iteratorFn AddressSetIterFunc) error {
 	asNames := sets.String{}
 	for _, set := range f.sets {
 		asName := truncateSuffixFromAddressSet(set.getName())
