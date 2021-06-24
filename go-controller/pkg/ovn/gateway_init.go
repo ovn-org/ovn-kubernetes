@@ -625,40 +625,45 @@ func syncPolicyBasedRoutes(nodeName string, matches sets.String, priority, nexth
 	// sync and remove unknown policies for this node/priority
 	// also flag if desired policies are already found
 	for _, policyCompare := range policiesCompare {
-		if strings.Contains(policyCompare, fmt.Sprintf("%s\"", nodeName)) {
+		if strings.Contains(policyCompare, nodeName) {
 			// if the policy is for this node and has the wrong mgmtPortIP as nexthop, remove it
 			// FIXME we currently assume that foundNexthops is a single ip, this may
 			// change in the future.
-			foundNexthops := strings.Split(policyCompare, ",")[2]
+			policyCompareSplit := strings.Split(policyCompare, ",")
+			if len(policyCompareSplit) != 3 {
+				return fmt.Errorf("Unexpected policy format: %s. expected exactly 3 columns", policyCompare)
+			}
+			policyUUID := strings.TrimSpace(policyCompareSplit[0])
+			policyMatch := strings.Trim(policyCompareSplit[1], " \"")
+			foundNexthops := strings.TrimSpace(policyCompareSplit[2])
+
 			if foundNexthops != "" && utilnet.IsIPv6String(foundNexthops) != utilnet.IsIPv6String(nexthop) {
 				continue
 			}
 			if !strings.Contains(foundNexthops, nexthop) {
-				uuid := strings.Split(policyCompare, ",")[0]
-				if err := deletePolicyBasedRoutes(uuid, priority); err != nil {
+				if err := deletePolicyBasedRoutes(policyUUID, priority); err != nil {
 					return fmt.Errorf("failed to delete policy route '%s' for host %q on %s "+
-						"error: %v", uuid, nodeName, types.OVNClusterRouter, err)
+						"error: %v", policyUUID, nodeName, types.OVNClusterRouter, err)
 				}
 				continue
 			}
 			desiredMatchFound := false
 			for match := range matchTracker {
-				if strings.Contains(policyCompare, match) {
+				if policyMatch == match {
 					desiredMatchFound = true
 					break
 				}
 			}
 			// if the policy is for this node/priority and does not contain a valid match, remove it
 			if !desiredMatchFound {
-				uuid := strings.Split(policyCompare, ",")[0]
-				if err := deletePolicyBasedRoutes(uuid, priority); err != nil {
+				if err := deletePolicyBasedRoutes(policyUUID, priority); err != nil {
 					return fmt.Errorf("failed to delete policy route '%s' for host %q on %s "+
-						"error: %v", uuid, nodeName, types.OVNClusterRouter, err)
+						"error: %v", policyUUID, nodeName, types.OVNClusterRouter, err)
 				}
 				continue
 			}
 			// now check if the existing policy matches, remove it
-			matchTracker.Delete(strings.Split(policyCompare, ",")[1])
+			matchTracker.Delete(policyMatch)
 		}
 	}
 	// cycle through all of the not found match criteria and create new policies
