@@ -154,6 +154,15 @@ func cniRequestToPodRequest(cr *Request, podLister corev1listers.PodLister, kcli
 		return nil, fmt.Errorf("missing K8S_POD_NAME")
 	}
 
+	// UID may not be passed by all runtimes yet. Will be passed
+	// by CRIO 1.20+ and containerd 1.5+ soon.
+	// CRIO 1.20: https://github.com/cri-o/cri-o/pull/5029
+	// CRIO 1.21: https://github.com/cri-o/cri-o/pull/5028
+	// CRIO 1.22: https://github.com/cri-o/cri-o/pull/5026
+	// containerd 1.6: https://github.com/containerd/containerd/pull/5640
+	// containerd 1.5: https://github.com/containerd/containerd/pull/5643
+	req.PodUID = cniArgs["K8S_POD_UID"]
+
 	conf, err := config.ReadCNIConfig(cr.Config)
 	if err != nil {
 		return nil, fmt.Errorf("broken stdin args")
