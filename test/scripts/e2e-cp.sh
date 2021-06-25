@@ -28,6 +28,13 @@ else
   SKIPPED_TESTS+="Should validate connectivity before and after deleting all the db-pods at once in Non-HA mode"
 fi
 
+if [ "$OVN_DISABLE_SNAT_MULTIPLE_GWS" == true ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+  	SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+="Should validate the egress IP functionality against remote hosts"
+fi
+
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote
 export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock

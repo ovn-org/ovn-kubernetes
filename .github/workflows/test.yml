@@ -264,6 +264,7 @@ jobs:
            name: "HA"
          - enabled: "false"
            name: "noHA"
+        disable-snat-multiple-gws: [true, false]
         gateway-mode: [local, shared]
         ipfamily:
          - ip: ipv4
@@ -307,6 +308,8 @@ jobs:
          # in agnhost images. Disable them for now.
          - {"ipfamily": {"ip": dualstack}, "target": {"shard": {"multicast-enable": "true"}}}
          - {"ipfamily": {"ip": ipv6}, "target": {"shard": {"multicast-enable": "true"}}}
+         # No need to run disable-snat-multiple-gws with local GW mode
+         - {"disable-snat-multiple-gws": true, "gateway-mode": local}
     needs: [ build-pr ]
     env:
       JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}"
@@ -317,6 +320,7 @@ jobs:
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
       OVN_MULTICAST_ENABLE:  "${{ matrix.target.multicast-enable }}"
       OVN_EMPTY_LB_EVENTS: "${{ matrix.target.emptylb-enable }}"
+      OVN_DISABLE_SNAT_MULTIPLE_GWS: "${{ matrix.disable-snat-multiple-gws }}"
     steps:
 
     - name: Free up disk space
