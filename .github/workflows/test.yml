@@ -263,10 +263,15 @@ jobs:
            name: "noHA"
         disable-snat-multiple-gws:
          - enabled: "true"
-           name: "disableSnatGW"
+           name: "noSnatGW"
          - enabled: "false"
-           name: "enableSnatGW"
+           name: "snatGW"
         gateway-mode: [local, shared]
+        second-bridge:
+         - enabled: "true"
+           name: "2br"
+         - enabled: "false"
+           name: "1br"
         ipfamily:
          - ip: ipv4
            name: "IPv4"
@@ -310,9 +315,12 @@ jobs:
          - {"ipfamily": {"ip": ipv6}, "target": {"shard": {"multicast-enable": "true"}}}
          # No need to run disable-snat-multiple-gws with local GW mode
          - {"disable-snat-multiple-gws": {"enabled": "true"}, "gateway-mode": local}
+         - {"second-bridge": {"enabled": "true"}, "gateway-mode": local}
+         - {"second-bridge": {"enabled": "true"}, "disable-snat-multiple-gws": {"enabled": "false"}}
+         - {"second-bridge": {"enabled": "true"}, "ha": {"enabled": "false"}}
     needs: [ build-pr ]
     env:
-      JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}"
+      JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}-${{ matrix.disable-snat-multiple-gws.name }}-${{ matrix.second-bridge.name }}"
       OVN_HA: "${{ matrix.ha.enabled }}"
       KIND_IPV4_SUPPORT: "${{ matrix.ipfamily.ipv4 }}"
       KIND_IPV6_SUPPORT: "${{ matrix.ipfamily.ipv6 }}"
@@ -321,6 +329,7 @@ jobs:
       OVN_MULTICAST_ENABLE:  "${{ matrix.target.multicast-enable }}"
       OVN_EMPTY_LB_EVENTS: "${{ matrix.target.emptylb-enable }}"
       OVN_DISABLE_SNAT_MULTIPLE_GWS: "${{ matrix.disable-snat-multiple-gws.enabled }}"
+      OVN_SECOND_BRIDGE: "${{ matrix.second-bridge.enabled }}"
     steps:
 
     - name: Free up disk space
@@ -340,6 +349,10 @@ jobs:
         export GOPATH=$(go env GOPATH)
         echo "GOPATH=$GOPATH" >> $GITHUB_ENV
         echo "$GOPATH/bin" >> $GITHUB_PATH
+        if [ $OVN_SECOND_BRIDGE == "true" ]; then
+          echo OVN_TEST_EX_GW_NETWORK=kind-exgw >> $GITHUB_ENV
+          echo OVN_ENABLE_EX_GW_NETWORK_BRIDGE=true >> $GITHUB_ENV
+        fi
     - name: Disable ufw
       # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
       # Not needed for KIND deployments, so just disable all the time.
