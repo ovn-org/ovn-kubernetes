@@ -113,11 +113,11 @@ var _ = Describe("Healthcheck tests", func() {
 			It("removes stale VF rep ports from bridge", func() {
 				// mock call to find OVS interfaces with non-empty external_ids:sandbox
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    genFindInterfaceWithSandboxCmd(),
-					Output:	"pod-a-ifc,sandbox=123abcfaa iface-id=a-ns_a-pod\n" +
-							"pod-b-ifc,sandbox=123abcfaa iface-id=b-ns_b-pod\n" +
-							"stale-pod-ifc,sandbox=123abcfaa iface-id=stale-ns_stale-pod\n",
-					Err:    nil,
+					Cmd: genFindInterfaceWithSandboxCmd(),
+					Output: "pod-a-ifc,sandbox=123abcfaa iface-id=a-ns_a-pod\n" +
+						"pod-b-ifc,sandbox=123abcfaa iface-id=b-ns_b-pod\n" +
+						"stale-pod-ifc,sandbox=123abcfaa iface-id=stale-ns_stale-pod\n",
+					Err: nil,
 				})
 
 				// mock calls to remove only stale-port
@@ -135,10 +135,10 @@ var _ = Describe("Healthcheck tests", func() {
 			It("does not remove any port from bridge", func() {
 				// ports in br-int
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    genFindInterfaceWithSandboxCmd(),
+					Cmd: genFindInterfaceWithSandboxCmd(),
 					Output: "pod-a-ifc,sandbox=123abcfaa iface-id=a-ns_a-pod\n" +
-							"pod-b-ifc,sandbox=123abcfaa iface-id=b-ns_b-pod\n",
-					Err:    nil,
+						"pod-b-ifc,sandbox=123abcfaa iface-id=b-ns_b-pod\n",
+					Err: nil,
 				})
 				checkForStaleOVSRepresentorInterfaces(nodeName, factoryMock)
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
