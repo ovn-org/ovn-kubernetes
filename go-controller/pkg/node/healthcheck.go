@@ -126,7 +126,7 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 	out, stderr, err := util.RunOVSVsctl("--columns=name,external_ids", "--data=bare", "--no-headings",
 		"--format=csv", "find", "Interface", "external_ids:sandbox!=\"\"")
 	if err != nil {
-		klog.Errorf("failed to list ovn-k8s OVS interfaces:, stderr: %q, error: %v", stderr, err)
+		klog.Errorf("Failed to list ovn-k8s OVS interfaces:, stderr: %q, error: %v", stderr, err)
 		return
 	}
 
@@ -192,10 +192,10 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 		if _, ok := expectedIfaceIds[ifaceId]; !ok {
 			// TODO(adrianc): To make this more strict we can check if the interface is a VF representor
 			// interface via sriovnet.
-			klog.Warningf("found stale OVS Interface, deleting OVS Port with interface %s", ifaceInfo.Name)
+			klog.Warningf("Found stale OVS Interface, deleting OVS Port with interface %s", ifaceInfo.Name)
 			_, stderr, err := util.RunOVSVsctl("--if-exists", "--with-iface", "del-port", ifaceInfo.Name)
 			if err != nil {
-				klog.Errorf("failed to delete interface %q . stderr: %q, error: %v",
+				klog.Errorf("Failed to delete interface %q . stderr: %q, error: %v",
 					ifaceInfo.Name, stderr, err)
 				continue
 			}
