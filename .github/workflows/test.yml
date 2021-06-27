@@ -88,6 +88,8 @@ jobs:
       run: |
         set -x
         pushd go-controller
+           # exit early if there are gofmt issues
+           make gofmt
            make
            make windows
            COVERALLS=1 CONTAINER_RUNNABLE=1 make check
