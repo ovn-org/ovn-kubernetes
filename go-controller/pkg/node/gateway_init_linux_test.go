@@ -449,6 +449,7 @@ var _ = Describe("Gateway Init Operations", func() {
 
 	AfterEach(func() {
 		Expect(testNS.Close()).To(Succeed())
+		Expect(testutils.UnmountNS(testNS)).To(Succeed())
 	})
 	/* FIXME for updated local gw mode
 	Context("for localnet operations", func() {
