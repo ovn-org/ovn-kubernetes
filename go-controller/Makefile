@@ -58,8 +58,8 @@ install:
 clean:
 	rm -rf ${OUT_DIR}
 	rm -rf ${TEST_REPORT_DIR}
-	rm ./pkg/nbdb/ovn-nb.ovsschema
-	rm ./pkg/sbdb/ovn-sb.ovsschema
+	rm -f ./pkg/nbdb/ovn-nb.ovsschema
+	rm -f ./pkg/sbdb/ovn-sb.ovsschema
 
 .PHONY: install.tools lint gofmt
 
