@@ -12,7 +12,6 @@ import (
 	"time"
 
 	goovn "github.com/ebay/go-ovn"
-	"github.com/pkg/errors"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -29,7 +28,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -442,46 +440,6 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		}
 	}
 
-	// Create load balancers
-
-	// If we enable idling we have to set the option before creating the loadbalancers
-	if config.Kubernetes.OVNEmptyLbEvents {
-		_, _, err := util.RunOVNNbctl("set", "nb_global", ".", "options:controller_event=true")
-		if err != nil {
-			klog.Error("Unable to enable controller events. Unidling not possible")
-			return err
-		}
-	}
-
-	// We have 3 load-balancers per protocol to implement the East-west traffic	//
-	protocols := []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP}
-	if oc.SCTPSupport {
-		protocols = append(protocols, kapi.ProtocolSCTP)
-	}
-	// Create load-balancers for east-west traffic for each protocol UDP, TCP, SCTP
-	// and for Idling services if empty-lb-backends is enabled
-	lbExternalIds := []string{types.ClusterLBPrefix}
-	// If we enable idling we have to set the option before creating the loadbalancers
-	// and create the new set of loadbalancers.
-	if config.Kubernetes.OVNEmptyLbEvents {
-		_, _, err := util.RunOVNNbctl("set", "nb_global", ".", "options:controller_event=true")
-		if err != nil {
-			klog.Error("Unable to enable controller events. Unidling not possible")
-			return err
-		}
-		lbExternalIds = append(lbExternalIds, types.ClusterIdlingLBPrefix)
-	}
-	// Create the LoadBalancers if they don´t exist
-	for _, lbExternalID := range lbExternalIds {
-		for _, p := range protocols {
-			uuid, err := loadbalancer.CreateLoadBalancer(p, lbExternalID)
-			if err != nil {
-				return errors.Wrapf(err, "Failed to create OVN load balancer for protocol %s", p)
-			}
-			oc.clusterLBsUUIDs = append(oc.clusterLBsUUIDs, uuid)
-		}
-	}
-
 	// Initialize the OVNJoinSwitch switch IP manager
 	// The OVNJoinSwitch will be allocated IP addresses in the range 100.64.0.0/16 or fd98::/64.
 	oc.joinSwIPManager, err = initJoinLogicalSwitchIPManager()
@@ -640,18 +598,6 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
 
-	// Add cluster load balancers to GR for Host -> Cluster IP Service traffic
-	if config.Gateway.Mode != config.GatewayModeLocal {
-		gr := util.GetGatewayRouterFromNode(node.Name)
-		for _, clusterLB := range oc.clusterLBsUUIDs {
-			_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-lb-add", gr, clusterLB)
-			if err != nil {
-				return fmt.Errorf("unable to add cluster LB: %s to %s, stderr: %q, error: %v",
-					clusterLB, gr, stderr, err)
-			}
-		}
-	}
-
 	// in the case of shared gateway mode, we need to setup
 	// 1. two policy based routes to steer traffic to the k8s node IP
 	// 	  - from the management port via the node_local_switch's localnet port
@@ -682,30 +628,6 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		if config.Gateway.Mode == config.GatewayModeLocal {
 			if err := oc.addNodeLocalNatEntries(node, mpMAC.String(), hostIfAddr); err != nil {
 				return err
-			}
-		}
-	}
-
-	if l3GatewayConfig.NodePortEnable {
-		gatewayRouter := types.GWRouterPrefix + node.Name
-		if physicalIPs, _ := oc.getGatewayPhysicalIPs(gatewayRouter); physicalIPs == nil {
-			return fmt.Errorf("gateway physical IP for node %q does not yet exist", node.Name)
-		}
-		// if new services controller run a full sync on all services
-		// services that have host network endpoints, are nodeport, external IP or ingress all have unique
-		// per-node load balancers. Since we cannot determine which services those are without significant parsing
-		// just sync all services
-		err = oc.svcController.RequestFullSync()
-	} else {
-		// nodePort disabled, delete gateway load balancers for this node.
-		gatewayRouter := util.GetGatewayRouterFromNode(node.Name)
-		for _, proto := range []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP, kapi.ProtocolSCTP} {
-			lbUUID, _ := oc.getGatewayLoadBalancer(gatewayRouter, proto)
-			if lbUUID != "" {
-				_, _, err := util.RunOVNNbctl("--if-exists", "destroy", "load_balancer", lbUUID)
-				if err != nil {
-					klog.Errorf("Failed to destroy %s load balancer for gateway %s: %v", proto, gatewayRouter, err)
-				}
 			}
 		}
 	}
@@ -878,17 +800,6 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	}); err != nil {
 		klog.Errorf(err.Error())
 		return err
-	}
-	for i, loadBalancerUUID := range oc.clusterLBsUUIDs {
-		if i == 0 {
-			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch", nodeName, "load_balancer="+loadBalancerUUID)
-		} else {
-			stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "load_balancer", loadBalancerUUID)
-		}
-		if err != nil {
-			klog.Errorf("Failed to set logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
-			return err
-		}
 	}
 
 	// Add the node to the logical switch cache

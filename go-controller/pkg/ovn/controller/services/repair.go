@@ -1,19 +1,22 @@
 package services
 
 import (
+	"fmt"
+	"sync/atomic"
 	"time"
 
-	"github.com/pkg/errors"
-
+	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/acl"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
+	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
+	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	corelisters "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 )
 
@@ -23,125 +26,153 @@ import (
 // Based on:
 // https://raw.githubusercontent.com/kubernetes/kubernetes/release-1.19/pkg/registry/core/service/ipallocator/controller/repair.go
 type Repair struct {
-	interval time.Duration
-	// serviceTracker tracks services and maps them to OVN LoadBalancers
-	serviceLister        corelisters.ServiceLister
-	clusterPortGroupUUID string
+	interval      time.Duration
+	serviceLister corelisters.ServiceLister
+
+	// We want to run some functions after every service is successfully synced
+	unsyncedServices sets.String
+
+	syncedServices chan string
+
+	semLegacyLBsDeleted int32 // for atomic writes
 }
 
 // NewRepair creates a controller that periodically ensures that there is no stale data in OVN
-func NewRepair(interval time.Duration, serviceLister corelisters.ServiceLister, clusterPortGroupUUID string) *Repair {
+func newRepair(interval time.Duration, serviceLister corelisters.ServiceLister) *Repair {
 	return &Repair{
-		interval:             interval,
-		serviceLister:        serviceLister,
-		clusterPortGroupUUID: clusterPortGroupUUID,
+		interval:         interval,
+		serviceLister:    serviceLister,
+		unsyncedServices: sets.String{},
+		syncedServices:   make(chan string, 5),
 	}
 }
 
 // runOnce verifies the state of the cluster OVN LB VIP allocations and returns an error if an unrecoverable problem occurs.
-func (r *Repair) runOnce() error {
+func (r *Repair) runBeforeSync(clusterPortGroupUUID string) error {
 	startTime := time.Now()
 	klog.V(4).Infof("Starting repairing loop for services")
 	defer func() {
 		klog.V(4).Infof("Finished repairing loop for services: %v", time.Since(startTime))
 	}()
 
-	// Obtain all the load balancers UUID
-	ovnLBCache := make(map[v1.Protocol][]string)
-	// We have different loadbalancers per protocol
-	protocols := []v1.Protocol{v1.ProtocolSCTP, v1.ProtocolTCP, v1.ProtocolUDP}
-	// ClusterIP OVN load balancers
-	for _, p := range protocols {
-		lbUUID, err := loadbalancer.GetOVNKubeLoadBalancer(p)
+	// Ensure unidling is enabled
+	if globalconfig.Kubernetes.OVNEmptyLbEvents {
+		_, _, err := util.RunOVNNbctl("set", "nb_global", ".", "options:controller_event=true")
 		if err != nil {
-			return errors.Wrapf(err, "Failed to get Cluster IP OVN load balancer for protocol %s", p)
+			klog.Error("Unable to enable controller events. Unidling not possible")
+			return err
 		}
-		ovnLBCache[p] = append(ovnLBCache[p], lbUUID)
 	}
-	// NodePort, ExternalIPs, Ingress OVN load balancers as well as worker load balancers
-	gatewayRouters, _, err := gateway.GetOvnGateways()
+
+	// Build a list of every service existing
+	// After every service has been synced, then we'll execute runAfterSync
+	services, _ := r.serviceLister.List(labels.Everything())
+	for _, service := range services {
+		key, _ := cache.MetaNamespaceKeyFunc(service)
+		r.unsyncedServices.Insert(key)
+	}
+
+	// Find all load-balancers associated with Services
+	existingLBs, err := ovnlb.FindLBs(map[string]string{"k8s.ovn.org/kind": "Service"})
 	if err != nil {
-		klog.V(4).Infof("Failed to get gateway routers due to (%v). Skipping repairing OVN GR Load balancers", err)
-	} else {
-		for _, p := range protocols {
-			for _, gatewayRouter := range gatewayRouters {
-				lbUUID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, p)
-				if err != nil {
-					if err != gateway.OVNGatewayLBIsEmpty {
-						klog.V(5).Infof("Failed to get OVN GR: %s load balancer for protocol %s, err: %v",
-							gatewayRouter, p, err)
-					}
-				} else {
-					ovnLBCache[p] = append(ovnLBCache[p], lbUUID)
-				}
-				workerNode := util.GetWorkerFromGatewayRouter(gatewayRouter)
-				workerLB, err := loadbalancer.GetWorkerLoadBalancer(workerNode, p)
-				if err != nil {
-					if err != gateway.OVNGatewayLBIsEmpty {
-						klog.V(5).Infof("Failed to get OVN Worker: %s load balancer for protocol %s, err: %v",
-							workerNode, p, err)
-					}
-					continue
-				}
-				ovnLBCache[p] = append(ovnLBCache[p], workerLB)
-			}
+		klog.Errorf("Failed to list existing load balancers: %v", err)
+		return err
+	}
+
+	staleLBs := []string{}
+	for _, lb := range existingLBs {
+		// Extract namespace + name, look to see if it exists
+		owner := lb.ExternalIDs["k8s.ovn.org/owner"]
+		namespace, name, err := cache.SplitMetaNamespaceKey(owner)
+		if err != nil || namespace == "" {
+			klog.Warningf("Service LB %#v has unreadable owner, deleting", lb)
+			staleLBs = append(staleLBs, lb.UUID)
+		}
+
+		_, err = r.serviceLister.Services(namespace).Get(name)
+		if apierrors.IsNotFound(err) {
+			klog.V(5).Infof("Found stale service LB %#v", lb)
+			staleLBs = append(staleLBs, lb.UUID)
 		}
 	}
 
-	// Idling load balancers
-	for _, p := range protocols {
-		lb, err := loadbalancer.GetOVNKubeIdlingLoadBalancer(p)
-		if err != nil {
-			return errors.Wrapf(err, "Failed to get Idling OVN load balancer for protocol %s", p)
-		}
-		ovnLBCache[p] = append(ovnLBCache[p], lb)
+	if err := ovnlb.DeleteLBs(staleLBs); err != nil {
+		klog.Errorf("Failed to delete stale LBs: %v", err)
+		return fmt.Errorf("failed to delete stale LBs: %w", err)
 	}
-
-	// Get Kubernetes Service state
-	svcVIPsProtocolMap := sets.NewString()
-	services, err := r.serviceLister.List(labels.Everything())
-	if err != nil {
-		return errors.Wrapf(err, "Failed to list Services from the cache")
-	}
-	for _, svc := range services {
-		for _, ip := range util.GetClusterIPs(svc) {
-			for _, svcPort := range svc.Spec.Ports {
-				vip := util.JoinHostPortInt32(ip, svcPort.Port)
-				key := virtualIPKey(vip, svcPort.Protocol)
-				svcVIPsProtocolMap.Insert(key)
-			}
-		}
-	}
-
-	// Reconcile with OVN state
-	// Obtain all the VIPs present in the OVN LoadBalancers
-	// and delete the ones that are not present in Kubernetes
-	for _, p := range protocols {
-		for _, lb := range ovnLBCache[p] {
-			vips, err := loadbalancer.GetLoadBalancerVIPs(lb)
-			if err != nil {
-				klog.V(4).Infof("Failed to get vips for %s load balancer %s, err: %v", p, lb, err)
-				continue
-			}
-			for vip := range vips {
-				key := virtualIPKey(vip, p)
-				// Virtual IP and protocol doesn't belong to a Kubernetes service
-				if !svcVIPsProtocolMap.Has(key) {
-					klog.Infof("Deleting non-existing Kubernetes vip %s from OVN %s load balancer %s", vip, p, lb)
-					if err := loadbalancer.DeleteLoadBalancerVIP(lb, vip); err != nil {
-						klog.V(4).Infof("Failed to delete %s load balancer vips %s for %s, err: %v", p, vip, lb, err)
-					}
-				}
-			}
-		}
-	}
+	klog.V(2).Infof("Deleted %d stale service LBs", len(staleLBs))
 
 	// Remove existing reject rules. They are not used anymore
 	// given the introduction of idling loadbalancers
-	err = acl.PurgeRejectRules(r.clusterPortGroupUUID)
+	err = acl.PurgeRejectRules(clusterPortGroupUUID)
 	if err != nil {
 		klog.Errorf("Failed to purge existing reject rules: %v", err)
 		return err
 	}
+	return nil
+}
+
+func (r *Repair) legacyLBsDeleted() bool {
+	return atomic.LoadInt32(&r.semLegacyLBsDeleted) > 0
+}
+
+func (r *Repair) serviceSynced(key string) {
+	if r.legacyLBsDeleted() {
+		return
+	}
+	r.syncedServices <- key
+}
+
+// runAterSync waits until all services have been synced, then
+// executes the afterSync function. It should be run in a goroutine.
+func (r *Repair) runAfterSync() {
+	if len(r.unsyncedServices) == 0 {
+		go r.afterSync()
+	}
+
+	for {
+		key := <-r.syncedServices
+
+		// If we reach 0 unynced services...
+		if len(r.unsyncedServices) != 0 {
+			r.unsyncedServices.Delete(key)
+			if len(r.unsyncedServices) == 0 {
+				go r.afterSync() // so we don't block
+			}
+		}
+	}
+}
+
+// afterSync is called sometime after every existing service is successfully synced at least once
+// It deletes all legacy load balancers.
+func (r *Repair) afterSync() {
+	_ = utilwait.ExponentialBackoff(retry.DefaultBackoff, func() (bool, error) {
+		klog.Infof("Running Service post-sync cleanup")
+		err := r.deleteLegacyLBs()
+		if err != nil {
+			klog.Warningf("Failed to delete legacy LBs: %v", err)
+			return false, nil
+		}
+		return true, nil
+	})
+}
+
+func (r *Repair) deleteLegacyLBs() error {
+	// Find all load-balancers associated with Services
+	legacyLBs, err := findLegacyLBs()
+	if err != nil {
+		klog.Errorf("Failed to list existing load balancers: %v", err)
+		return err
+	}
+
+	klog.V(2).Infof("Deleting %d legacy LBs", len(legacyLBs))
+	toDelete := make([]string, 0, len(legacyLBs))
+	for _, lb := range legacyLBs {
+		toDelete = append(toDelete, lb.UUID)
+	}
+	if err := ovnlb.DeleteLBs(toDelete); err != nil {
+		return fmt.Errorf("failed to delete LBs: %w", err)
+	}
+	atomic.StoreInt32(&r.semLegacyLBsDeleted, 1)
 	return nil
 }

@@ -121,9 +121,7 @@ type Controller struct {
 
 	hoMaster *hocontroller.MasterController
 
-	// All the uuid related to global load balancers
-	clusterLBsUUIDs []string
-	SCTPSupport     bool
+	SCTPSupport bool
 
 	// For TCP, UDP, and SCTP type traffic, cache OVN load-balancers used for the
 	// cluster's east-west traffic.
@@ -287,7 +285,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		ovnSBClient:              ovnSBClient,
 		nbClient:                 libovsdbOvnNBClient,
 		sbClient:                 libovsdbOvnSBClient,
-		clusterLBsUUIDs:          make([]string, 0),
+		svcController:            newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient, stopChan),
 	}
 }
 
@@ -301,15 +299,15 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	// dependencies, and WatchNodes() depends on it
 	oc.WatchNamespaces()
 
-	// Services must be started before nodes for handling new node's service sync
-	if err := oc.StartServiceController(wg, true); err != nil {
-		return err
-	}
-
 	// WatchNodes must be started next because it creates the node switch
 	// which most other watches depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
 	oc.WatchNodes()
+
+	// Services should be started after nodes to prevent LB churn
+	if err := oc.StartServiceController(wg, true); err != nil {
+		return err
+	}
 
 	oc.WatchPods()
 
@@ -803,6 +801,7 @@ func (oc *Controller) WatchNamespaces() {
 	klog.Infof("Bootstrapping existing namespaces and cleaning stale namespaces took %v", time.Since(start))
 }
 
+// syncNodeGateway ensures a node's gateway router is configured
 func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
@@ -1067,49 +1066,48 @@ func shouldUpdate(node, oldNode *kapi.Node) (bool, error) {
 	return true, nil
 }
 
-func (oc *Controller) newServiceFactory() (informers.SharedInformerFactory, error) {
+func newServiceController(client clientset.Interface, nbClient libovsdbclient.Client, stopChan <-chan struct{}) *svccontroller.Controller {
 	// Create our own informers to start compartmentalizing the code
 	// filter server side the things we don't care about
 	noProxyName, err := labels.NewRequirement("service.kubernetes.io/service-proxy-name", selection.DoesNotExist, nil)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 
 	noHeadlessEndpoints, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 
 	labelSelector := labels.NewSelector()
 	labelSelector = labelSelector.Add(*noProxyName, *noHeadlessEndpoints)
 
-	return informers.NewSharedInformerFactoryWithOptions(oc.client, 0,
+	svcFactory := informers.NewSharedInformerFactoryWithOptions(client, 0,
 		informers.WithTweakListOptions(func(options *metav1.ListOptions) {
 			options.LabelSelector = labelSelector.String()
-		})), nil
+		}))
+
+	controller := svccontroller.NewController(
+		client,
+		nbClient,
+		svcFactory.Core().V1().Services(),
+		svcFactory.Discovery().V1beta1().EndpointSlices(),
+		svcFactory.Core().V1().Nodes(),
+	)
+
+	svcFactory.Start(stopChan)
+
+	return controller
 }
 
 func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
 	klog.Infof("Starting OVN Service Controller: Using Endpoint Slices")
-	svcFactory, err := oc.newServiceFactory()
-	if err != nil {
-		return err
-	}
-
-	oc.svcController = svccontroller.NewController(
-		oc.client,
-		oc.nbClient,
-		svcFactory.Core().V1().Services(),
-		svcFactory.Discovery().V1beta1().EndpointSlices(),
-		oc.clusterPortGroupUUID,
-	)
-	svcFactory.Start(oc.stopChan)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		// use 5 workers like most of the kubernetes controllers in the
 		// kubernetes controller-manager
-		err := oc.svcController.Run(5, oc.stopChan, runRepair)
+		err := oc.svcController.Run(5, oc.stopChan, runRepair, oc.clusterPortGroupUUID)
 		if err != nil {
 			klog.Errorf("Error running OVN Kubernetes Services controller: %v", err)
 		}

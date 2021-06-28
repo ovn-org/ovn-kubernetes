@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -124,125 +123,6 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			return fmt.Errorf("failed to add a static route in GR %s with distributed "+
 				"router as the nexthop, stdout: %q, stderr: %q, error: %v",
 				gatewayRouter, stdout, stderr, err)
-		}
-	}
-
-	var k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP string
-	k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP, err = getGatewayLoadBalancers(gatewayRouter)
-	if err != nil {
-		return err
-	}
-	gatewayProtoLBMap := map[kapi.Protocol]string{
-		kapi.ProtocolTCP:  k8sNSLbTCP,
-		kapi.ProtocolUDP:  k8sNSLbUDP,
-		kapi.ProtocolSCTP: k8sNSLbSCTP,
-	}
-	workerK8sNSLbTCP, workerK8sNSLbUDP, workerK8sNSLbSCTP, err := loadbalancer.GetWorkerLoadBalancers(nodeName)
-	if err != nil {
-		return err
-	}
-	workerProtoLBMap := map[kapi.Protocol]string{
-		kapi.ProtocolTCP:  workerK8sNSLbTCP,
-		kapi.ProtocolUDP:  workerK8sNSLbUDP,
-		kapi.ProtocolSCTP: workerK8sNSLbSCTP,
-	}
-	enabledProtos := []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP}
-	if sctpSupport {
-		enabledProtos = append(enabledProtos, kapi.ProtocolSCTP)
-	}
-
-	if l3GatewayConfig.NodePortEnable {
-		// Create 3 load-balancers for north-south traffic for each gateway
-		// router: UDP, TCP, SCTP
-		for _, proto := range enabledProtos {
-			if gatewayProtoLBMap[proto] == "" {
-				gatewayProtoLBMap[proto], stderr, err = util.RunOVNNbctl("--", "create",
-					"load_balancer",
-					fmt.Sprintf("external_ids:%s_lb_gateway_router=%s", proto, gatewayRouter),
-					fmt.Sprintf("protocol=%s", strings.ToLower(string(proto))))
-				if err != nil {
-					return fmt.Errorf("failed to create load balancer for gateway router %s for protocol %s: "+
-						"stderr: %q, error: %v", gatewayRouter, proto, stderr, err)
-				}
-			}
-		}
-
-		// Local gateway mode does not use GR for ingress node port traffic, it uses mp0 instead
-		if config.Gateway.Mode != config.GatewayModeLocal {
-			// Add north-south load-balancers to the gateway router.
-			lbString := fmt.Sprintf("%s,%s", gatewayProtoLBMap[kapi.ProtocolTCP], gatewayProtoLBMap[kapi.ProtocolUDP])
-			if sctpSupport {
-				lbString = lbString + "," + gatewayProtoLBMap[kapi.ProtocolSCTP]
-			}
-			stdout, stderr, err = util.RunOVNNbctl("set", "logical_router", gatewayRouter, "load_balancer="+lbString)
-			if err != nil {
-				return fmt.Errorf("failed to set north-south load-balancers to the "+
-					"gateway router %s, stdout: %q, stderr: %q, error: %v",
-					gatewayRouter, stdout, stderr, err)
-			}
-		} else {
-			// Also add north-south load-balancers to local switches for pod -> nodePort traffic
-			stdout, stderr, err = util.RunOVNNbctl("get", "logical_switch", nodeName, "load_balancer")
-			if err != nil {
-				return fmt.Errorf("failed to get load-balancers on the node switch %s, stdout: %q, "+
-					"stderr: %q, error: %v", nodeName, stdout, stderr, err)
-			}
-			for _, proto := range enabledProtos {
-				if !strings.Contains(stdout, gatewayProtoLBMap[proto]) {
-					stdout, stderr, err = util.RunOVNNbctl("ls-lb-add", nodeName, gatewayProtoLBMap[proto])
-					if err != nil {
-						return fmt.Errorf("failed to add north-south load-balancer %s to the "+
-							"node switch %s, stdout: %q, stderr: %q, error: %v",
-							gatewayProtoLBMap[proto], nodeName, stdout, stderr, err)
-					}
-				}
-			}
-		}
-	}
-
-	// Create load balancers for workers (to be applied to GR and node switch)
-	for _, proto := range enabledProtos {
-		if workerProtoLBMap[proto] == "" {
-			workerProtoLBMap[proto], stderr, err = util.RunOVNNbctl("--", "create",
-				"load_balancer",
-				fmt.Sprintf("external_ids:%s-%s=%s", types.WorkerLBPrefix, strings.ToLower(string(proto)), nodeName),
-				fmt.Sprintf("protocol=%s", strings.ToLower(string(proto))))
-			if err != nil {
-				return fmt.Errorf("failed to create load balancer for worker node %s for protocol %s: "+
-					"stderr: %q, error: %v", nodeName, proto, stderr, err)
-			}
-		}
-	}
-
-	if config.Gateway.Mode != config.GatewayModeLocal {
-		// Ensure north-south load-balancers are not on local switches for pod -> nodePort traffic
-		// For upgrade path REMOVEME later
-		stdout, stderr, err = util.RunOVNNbctl("get", "logical_switch", nodeName, "load_balancer")
-		if err != nil {
-			return fmt.Errorf("failed to get load-balancers on the node switch %s, stdout: %q, "+
-				"stderr: %q, error: %v", nodeName, stdout, stderr, err)
-		}
-		for _, proto := range enabledProtos {
-			if strings.Contains(stdout, gatewayProtoLBMap[proto]) {
-				_, stderr, err = util.RunOVNNbctl("ls-lb-del", nodeName, gatewayProtoLBMap[proto])
-				if err != nil {
-					return fmt.Errorf("failed to remove north-south load-balancer %s to the "+
-						"node switch %s, stderr: %q, error: %v",
-						gatewayProtoLBMap[proto], nodeName, stderr, err)
-				}
-			}
-		}
-
-		// Add per worker switch specific load-balancers
-		for _, proto := range enabledProtos {
-			if !strings.Contains(stdout, workerProtoLBMap[proto]) {
-				_, stderr, err = util.RunOVNNbctl("ls-lb-add", nodeName, workerProtoLBMap[proto])
-				if err != nil {
-					return fmt.Errorf("failed to add worker load-balancer %s to the "+
-						"node switch %s, stderr: %q, error: %v",
-						workerProtoLBMap[proto], nodeName, stderr, err)
-				}
-			}
 		}
 	}
 

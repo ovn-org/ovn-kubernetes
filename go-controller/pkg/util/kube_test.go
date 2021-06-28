@@ -3,7 +3,6 @@ package util
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"testing"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
@@ -431,7 +430,6 @@ func Test_getLbEndpoints(t *testing.T) {
 	type args struct {
 		slices  []*discovery.EndpointSlice
 		svcPort v1.ServicePort
-		family  v1.IPFamily
 	}
 	tests := []struct {
 		name string
@@ -447,9 +445,8 @@ func Test_getLbEndpoints(t *testing.T) {
 					TargetPort: intstr.FromInt(80),
 					Protocol:   v1.ProtocolTCP,
 				},
-				family: v1.IPv4Protocol,
 			},
-			want: LbEndpoints{[]string{}, 0},
+			want: LbEndpoints{},
 		},
 		{
 			name: "slices with endpoints",
@@ -484,9 +481,8 @@ func Test_getLbEndpoints(t *testing.T) {
 					TargetPort: intstr.FromInt(80),
 					Protocol:   v1.ProtocolTCP,
 				},
-				family: v1.IPv4Protocol,
 			},
-			want: LbEndpoints{[]string{"10.0.0.2"}, 80},
+			want: LbEndpoints{[]string{"10.0.0.2"}, []string{}, 80},
 		},
 		{
 			name: "slices with different port name",
@@ -521,9 +517,8 @@ func Test_getLbEndpoints(t *testing.T) {
 					TargetPort: intstr.FromInt(80),
 					Protocol:   v1.ProtocolTCP,
 				},
-				family: v1.IPv4Protocol,
 			},
-			want: LbEndpoints{[]string{}, 0},
+			want: LbEndpoints{[]string{}, []string{}, 0},
 		},
 		{
 			name: "slices and service without port name",
@@ -556,9 +551,8 @@ func Test_getLbEndpoints(t *testing.T) {
 					TargetPort: intstr.FromInt(80),
 					Protocol:   v1.ProtocolTCP,
 				},
-				family: v1.IPv4Protocol,
 			},
-			want: LbEndpoints{[]string{"10.0.0.2"}, 8080},
+			want: LbEndpoints{[]string{"10.0.0.2"}, []string{}, 8080},
 		},
 		{
 			name: "slices with different IP family",
@@ -593,9 +587,8 @@ func Test_getLbEndpoints(t *testing.T) {
 					TargetPort: intstr.FromInt(80),
 					Protocol:   v1.ProtocolTCP,
 				},
-				family: v1.IPv4Protocol,
 			},
-			want: LbEndpoints{[]string{}, 0},
+			want: LbEndpoints{[]string{}, []string{"2001:db2::2"}, 80},
 		},
 		{
 			name: "multiples slices with duplicate endpoints",
@@ -653,16 +646,14 @@ func Test_getLbEndpoints(t *testing.T) {
 					TargetPort: intstr.FromInt(80),
 					Protocol:   v1.ProtocolTCP,
 				},
-				family: v1.IPv4Protocol,
 			},
-			want: LbEndpoints{[]string{"10.0.0.2", "10.1.1.2", "10.2.2.2"}, 80},
+			want: LbEndpoints{[]string{"10.0.0.2", "10.1.1.2", "10.2.2.2"}, []string{}, 80},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := GetLbEndpoints(tt.args.slices, tt.args.svcPort, tt.args.family); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("getLbEndpoints() = %v, want %v", got, tt.want)
-			}
+			got := GetLbEndpoints(tt.args.slices, tt.args.svcPort)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -696,4 +687,37 @@ func TestPodScheduled(t *testing.T) {
 			assert.Equal(t, tc.expResult, res)
 		})
 	}
+}
+
+func TestExternalIDsForObject(t *testing.T) {
+	assert.Equal(t,
+		ExternalIDsForObject(&v1.Service{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "Service",
+				APIVersion: "v1",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "svc-ab23",
+				Namespace: "ns",
+				Labels:    map[string]string{discovery.LabelServiceName: "svc"},
+			},
+		}),
+		map[string]string{
+			"k8s.ovn.org/kind":  "Service",
+			"k8s.ovn.org/owner": "ns/svc-ab23",
+		})
+
+	assert.Equal(t,
+		ExternalIDsForObject(&v1.Service{
+			// also handle no TypeMeta, which can happen.
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "svc-ab23",
+				Namespace: "ns",
+				Labels:    map[string]string{discovery.LabelServiceName: "svc"},
+			},
+		}),
+		map[string]string{
+			"k8s.ovn.org/kind":  "Service",
+			"k8s.ovn.org/owner": "ns/svc-ab23",
+		})
 }

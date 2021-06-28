@@ -53,26 +53,6 @@ func gatewayCleanup(nodeName string) error {
 			"error: %v", externalSwitch, stderr, err)
 	}
 
-	// If exists, remove the TCP, UDP load-balancers created for north-south traffic for gateway router.
-	k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP, err := getGatewayLoadBalancers(gatewayRouter)
-	if err != nil {
-		return err
-	}
-	protoLBMap := map[kapi.Protocol]string{
-		kapi.ProtocolTCP:  k8sNSLbTCP,
-		kapi.ProtocolUDP:  k8sNSLbUDP,
-		kapi.ProtocolSCTP: k8sNSLbSCTP,
-	}
-	for proto, uuid := range protoLBMap {
-		if uuid != "" {
-			_, stderr, err = util.RunOVNNbctl("lb-del", uuid)
-			if err != nil {
-				return fmt.Errorf("failed to delete Gateway router %s's %s load balancer %s, stderr: %q, "+
-					"error: %v", gatewayRouter, proto, uuid, stderr, err)
-			}
-		}
-	}
-
 	// We don't know the gateway mode as this is running in the master, try to delete the additional local
 	// gateway for the shared gateway mode. it will be no op if this is done for other gateway modes.
 	delPbrAndNatRules(nodeName, nil)
@@ -215,26 +195,6 @@ func multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly bool) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete external switch %s, stderr: %q, "+
 			"error: %v", externalSwitch, stderr, err)
-	}
-
-	// If exists, remove the TCP, UDP load-balancers created for north-south traffic for gateway router.
-	k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP, err := getGatewayLoadBalancers(gatewayRouter)
-	if err != nil {
-		return err
-	}
-	protoLBMap := map[kapi.Protocol]string{
-		kapi.ProtocolTCP:  k8sNSLbTCP,
-		kapi.ProtocolUDP:  k8sNSLbUDP,
-		kapi.ProtocolSCTP: k8sNSLbSCTP,
-	}
-	for proto, uuid := range protoLBMap {
-		if uuid != "" {
-			_, stderr, err = util.RunOVNNbctl("lb-del", uuid)
-			if err != nil {
-				return fmt.Errorf("failed to delete Gateway router %s's %s load balancer %s, stderr: %q, "+
-					"error: %v", gatewayRouter, proto, uuid, stderr, err)
-			}
-		}
 	}
 
 	// We don't know the gateway mode as this is running in the master, try to delete the additional local
