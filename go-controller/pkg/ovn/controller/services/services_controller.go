@@ -2,21 +2,22 @@ package services
 
 import (
 	"fmt"
+	"reflect"
+	"sync"
 	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
+	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/pkg/errors"
+	"golang.org/x/time/rate"
 
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	coreinformers "k8s.io/client-go/informers/core/v1"
@@ -31,7 +32,6 @@ import (
 	"k8s.io/client-go/util/workqueue"
 
 	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
 )
 
 const (
@@ -50,7 +50,7 @@ func NewController(client clientset.Interface,
 	nbClient libovsdbclient.Client,
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
-	clusterPortGroupUUID string,
+	nodeInformer coreinformers.NodeInformer,
 ) *Controller {
 	klog.V(4).Info("Creating event broadcaster")
 	broadcaster := record.NewBroadcaster()
@@ -58,14 +58,12 @@ func NewController(client clientset.Interface,
 	broadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: client.CoreV1().Events("")})
 	recorder := broadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: controllerName})
 
-	st := newServiceTracker()
-
 	c := &Controller{
 		client:           client,
 		nbClient:         nbClient,
-		serviceTracker:   st,
-		queue:            workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), controllerName),
+		queue:            workqueue.NewNamedRateLimitingQueue(newRatelimiter(100), controllerName),
 		workerLoopPeriod: time.Second,
+		alreadyApplied:   map[string][]ovnlb.LB{},
 	}
 
 	// services
@@ -93,7 +91,13 @@ func NewController(client clientset.Interface,
 	c.eventRecorder = recorder
 
 	// repair controller
-	c.repair = NewRepair(0, serviceInformer.Lister(), clusterPortGroupUUID)
+	c.repair = newRepair(serviceInformer.Lister())
+
+	// load balancers need to be applied to nodes, so
+	// we need to watch Node objects for changes.
+	c.nodeTracker = newNodeTracker(nodeInformer)
+	c.nodeTracker.resyncFn = c.RequestFullSync
+	c.nodesSynced = nodeInformer.Informer().HasSynced
 
 	return c
 }
@@ -108,9 +112,6 @@ type Controller struct {
 	eventBroadcaster record.EventBroadcaster
 	eventRecorder    record.EventRecorder
 
-	// serviceTrack tracks services and map them to OVN LoadBalancers
-	serviceTracker *serviceTracker
-
 	// serviceLister is able to list/get services and is populated by the shared informer passed to
 	serviceLister corelisters.ServiceLister
 	// servicesSynced returns true if the service shared informer has been synced at least once.
@@ -124,6 +125,8 @@ type Controller struct {
 	// injection for testing.
 	endpointSlicesSynced cache.InformerSynced
 
+	nodesSynced cache.InformerSynced
+
 	// Services that need to be updated. A channel is inappropriate here,
 	// because it allows services with lots of pods to be serviced much
 	// more often than services with few pods; it also would cause a
@@ -135,12 +138,20 @@ type Controller struct {
 	workerLoopPeriod time.Duration
 
 	// repair contains a controller that keeps in sync OVN and Kubernetes services
-	repair *Repair
+	repair *repair
+
+	// nodeTracker
+	nodeTracker *nodeTracker
+
+	// alreadyApplied is a map of service key -> already applied configuration, so we can short-circuit
+	// if a service's config hasn't changed
+	alreadyApplied     map[string][]ovnlb.LB
+	alreadyAppliedLock sync.Mutex
 }
 
 // Run will not return until stopCh is closed. workers determines how many
 // endpoints will be handled in parallel.
-func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair bool) error {
+func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair bool, clusterPortGroupUUID string) error {
 	defer utilruntime.HandleCrash()
 	defer c.queue.ShutDown()
 
@@ -149,7 +160,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair bool) er
 
 	// Wait for the caches to be synced
 	klog.Info("Waiting for informer caches to sync")
-	if !cache.WaitForNamedCacheSync(controllerName, stopCh, c.servicesSynced, c.endpointSlicesSynced) {
+	if !cache.WaitForNamedCacheSync(controllerName, stopCh, c.servicesSynced, c.endpointSlicesSynced, c.nodesSynced) {
 		return fmt.Errorf("error syncing cache")
 	}
 
@@ -158,7 +169,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair bool) er
 		// it keeps in sync Kubernetes and OVN
 		// and handles removal of stale data on upgrades
 		klog.Info("Remove stale OVN services")
-		if err := c.repair.runOnce(); err != nil {
+		if err := c.repair.runBeforeSync(clusterPortGroupUUID); err != nil {
 			klog.Errorf("Error repairing services: %v", err)
 		}
 	}
@@ -188,7 +199,7 @@ func (c *Controller) processNextWorkItem() bool {
 	}
 	defer c.queue.Done(eKey)
 
-	err := c.syncServices(eKey.(string))
+	err := c.syncService(eKey.(string))
 	c.handleErr(err, eKey)
 
 	return true
@@ -217,13 +228,19 @@ func (c *Controller) handleErr(err error, key interface{}) {
 	utilruntime.HandleError(err)
 }
 
-func (c *Controller) syncServices(key string) error {
+// syncService ensures a given Service is correctly reflected in OVN. It does this by
+// 1. Generating a high-level desired configuration
+// 2. Converting the high-level configuration in to a list of exact OVN Load_Balancer objects
+// 3. Reconciling those desired objects against the database.
+//
+// All Load_Balancer objects are tagged with their owner, so it's easy to find stale objects.
+func (c *Controller) syncService(key string) error {
 	startTime := time.Now()
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return err
 	}
-	klog.Infof("Processing sync for service %s on namespace %s ", name, namespace)
+	klog.Infof("Processing sync for service %s/%s", namespace, name)
 	metrics.MetricSyncServiceCount.Inc()
 
 	defer func() {
@@ -238,32 +255,29 @@ func (c *Controller) syncServices(key string) error {
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
-	// Get current state of the Service from the Service tracker
-	// These are the VIPs (ClusterIP:Port) that we have seen so far
-	// If the Service has updated the VIPs (has changed the Ports)
-	// and some were removed we have to delete those
-	// We need to create a map to not mutate the service tracker VIPs
-	vipsTracked := sets.NewString().Union(c.serviceTracker.getService(name, namespace))
+
 	// Delete the Service VIPs from OVN if:
 	// - the Service was deleted from the cache (doesn't exist in Kubernetes anymore)
 	// - the Service mutated to a new service Type that we don't handle (ExternalName, Headless)
-	if err != nil || !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
-		err = deleteVIPsFromAllOVNBalancers(vipsTracked, name, namespace)
-		if err != nil {
-			// If the service wasn't found, don't panic sending an
-			// an event after cleaning it up
-			if service != nil {
-				c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToDeleteOVNLoadBalancer",
-					"Error trying to delete the OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
-			}
-			return err
+	if err != nil || service == nil || !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
+		service = &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: namespace,
+				Name:      name,
+			},
 		}
-		// Delete the Service form the Service Tracker
-		c.serviceTracker.deleteService(name, namespace)
+
+		if err := ovnlb.EnsureLBs(util.ExternalIDsForObject(service), nil); err != nil {
+			return fmt.Errorf("failed to delete load balancers for service %s/%s: %w",
+				namespace, name, err)
+		}
+
+		c.repair.serviceSynced(key)
 		return nil
 	}
-	klog.Infof("Creating service %s on namespace %s on OVN", name, namespace)
+
 	// The Service exists in the cache: update it in OVN
+
 	// Get the endpoint slices associated to the Service
 	esLabelSelector := labels.Set(map[string]string{
 		discovery.LabelServiceName: name,
@@ -276,223 +290,62 @@ func (c *Controller) syncServices(key string) error {
 		return err
 	}
 
-	// If idling enabled and there are no endpoints, we need to move the VIP from the main loadbalancer
-	// ,that has the reject option for backends without endpoints, to the idling loadbalancer, that
-	// generates a needPods event.
-	// if not, we delete the vips from the idling lb and move them to their right place.
+	// Build the abstract LB configs for this service
+	perNodeConfigs, clusterConfigs := buildServiceLBConfigs(service, endpointSlices)
+	klog.V(5).Infof("Built service %s LB cluster-wide configs %#v", key, clusterConfigs)
+	klog.V(5).Infof("Built service %s LB per-node configs %#v", key, perNodeConfigs)
 
-	vipProtocols := collectServiceVIPs(service)
-	if svcNeedsIdling(service.Annotations) && !util.HasValidEndpoint(service, endpointSlices) {
-		toRemoveFromNonIdling := sets.NewString()
-		for vipProtocol := range vipProtocols {
-			if c.serviceTracker.getLoadBalancer(name, namespace, vipProtocol) != loadbalancer.IdlingLoadBalancer {
-				toRemoveFromNonIdling.Insert(vipProtocol)
-			}
-			vipsTracked.Delete(vipProtocol)
+	// Convert the LB configs in to load-balancer objects
+	nodeInfos := c.nodeTracker.allNodes()
+	clusterLBs := buildClusterLBs(service, clusterConfigs, nodeInfos)
+	perNodeLBs := buildPerNodeLBs(service, perNodeConfigs, nodeInfos)
+	klog.V(3).Infof("Service %s has %d cluster-wide and %d per-node configs, making %d and %d load balancers",
+		key, len(clusterConfigs), len(perNodeConfigs), len(clusterLBs), len(perNodeLBs))
+	lbs := append(clusterLBs, perNodeLBs...)
+
+	// Short-circuit if nothing has changed
+	c.alreadyAppliedLock.Lock()
+	existingLBs, ok := c.alreadyApplied[key]
+	c.alreadyAppliedLock.Unlock()
+	if ok && reflect.DeepEqual(lbs, existingLBs) {
+		klog.V(3).Infof("Skipping no-op change for service %s", key)
+	} else {
+		// Actually apply load-balancers to OVN.
+		//
+		// Note: this may fail if a node was deleted between listing nodes and applying.
+		// If so, this will fail and we will resync.
+		if err := ovnlb.EnsureLBs(util.ExternalIDsForObject(service), lbs); err != nil {
+			return fmt.Errorf("failed to ensure service %s load balancers: %w", key, err)
 		}
-		// addServiceToIdlingBalancer adds the vips to service tracker
-		err = c.addServiceToIdlingBalancer(vipProtocols, service)
-		if err != nil {
-			c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToAddToIdlingBalancer",
-				"Error trying to add to Idling LoadBalancer for Service %s/%s: %v", name, namespace, err)
-			return err
-		}
-		err = deleteVIPsFromNonIdlingOVNBalancers(toRemoveFromNonIdling, name, namespace)
-		if err != nil {
-			c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToDeleteOVNLoadBalancer",
-				"Error trying to delete the OVN LoadBalancer while setting up Idling for Service %s/%s: %v", name, namespace, err)
-			return err
-		}
-		// at this point we have processed all vips we've found in the service
-		// so the remaining ones that we had in the vipsTracked variable should be deleted
-		// We remove them from OVN and from the tracker
-		err = deleteVIPsFromAllOVNBalancers(vipsTracked, name, namespace)
-		if err != nil {
-			c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToDeleteOVNLoadBalancer",
-				"Error trying to delete the OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
-			return err
-		}
-		// Delete the Service VIP from the Service Tracker
-		c.serviceTracker.deleteServiceVIPs(name, namespace, vipsTracked)
-		return nil
+
+		c.alreadyAppliedLock.Lock()
+		c.alreadyApplied[key] = lbs
+		c.alreadyAppliedLock.Unlock()
 	}
 
-	toRemoveFromIdling := sets.NewString()
-	for vipProtocol := range vipProtocols {
-		foundLb := c.serviceTracker.getLoadBalancer(name, namespace, vipProtocol)
-		// if vip was on an idling load balancer and we get here, we know we need to clean up
-		// if the value is empty (unknown what load balancer the vip may have existed on) also need to clean up
-		if len(foundLb) == 0 || foundLb == loadbalancer.IdlingLoadBalancer {
-			toRemoveFromIdling.Insert(vipProtocol)
-		}
-	}
-	err = deleteVIPsFromIdlingBalancer(toRemoveFromIdling, name, namespace)
-	if err != nil {
-		c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToDeleteOVNLoadBalancer",
-			"Error trying to delete the idling OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
-		return err
-	}
-
-	// Iterate over the ClusterIPs and Ports fields to create the corresponding OVN loadbalancers
-	for _, ip := range util.GetClusterIPs(service) {
-		family := v1.IPv4Protocol
-		if utilnet.IsIPv6String(ip) {
-			family = v1.IPv6Protocol
-		}
-		for _, svcPort := range service.Spec.Ports {
-			// ClusterIP
-			clusterLB, err := loadbalancer.GetOVNKubeLoadBalancer(svcPort.Protocol)
-			if err != nil {
-				c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToGetOVNLoadBalancer",
-					"Error trying to obtain the OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
-				return err
-			}
-			// create the vip = ClusterIP:Port
-			vip := util.JoinHostPortInt32(ip, svcPort.Port)
-			klog.V(4).Infof("Updating service %s/%s with VIP %s %s", name, namespace, vip, svcPort.Protocol)
-			// get the endpoints associated to the vip
-			eps := util.GetLbEndpoints(endpointSlices, svcPort, family)
-			// Reconcile OVN, update the load balancer with current endpoints
-
-			var currentLB string
-			// If any of the lbEps contain a host IP we add to worker/GR LB separately, and not to cluster LB
-			if hasHostEndpoints(eps.IPs) && config.Gateway.Mode == config.GatewayModeShared {
-				currentLB = loadbalancer.NodeLoadBalancer
-				if err := createPerNodeVIPs([]string{ip}, svcPort.Protocol, svcPort.Port, eps.IPs, eps.Port); err != nil {
-					c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
-						"Error trying to update OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
-					return err
-				}
-				if c.serviceTracker.getLoadBalancer(name, namespace, vip) != currentLB {
-					txn := util.NewNBTxn()
-					// Need to ensure that if vip exists on cluster LB we remove it
-					// This can happen if endpoints originally had cluster only ips but now have host ips
-					if err := loadbalancer.DeleteLoadBalancerVIP(txn, clusterLB, vip); err != nil {
-						return err
-					}
-					if stdout, stderr, err := txn.Commit(); err != nil {
-						klog.Errorf("Error deleting VIP %s on OVN LoadBalancer %s", vip, clusterLB)
-						return fmt.Errorf("error deleting load balancer vip %v for %v"+
-							"stdout: %q, stderr: %q, error: %v",
-							vip, clusterLB, stdout, stderr, err)
-					}
-				}
-			} else {
-				currentLB = clusterLB
-				if err = loadbalancer.CreateLoadBalancerVIPs(clusterLB, []string{ip}, svcPort.Port, eps.IPs, eps.Port); err != nil {
-					c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
-						"Error trying to update OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
-					return err
-				}
-				if c.serviceTracker.getLoadBalancer(name, namespace, virtualIPKey(vip, svcPort.Protocol)) != currentLB {
-					// Need to ensure if this vip exists in the worker LBs that we remove it
-					// This can happen if the endpoints originally had host eps but now have cluster only ips
-					if err := deleteNodeVIPs([]string{ip}, svcPort.Protocol, svcPort.Port); err != nil {
-						klog.Errorf("Error deleting VIP %s on per node load balancers, error: %v", vip, err)
-						return err
-					}
-				}
-			}
-			// update the tracker with the VIP
-			c.serviceTracker.updateService(name, namespace, vip, svcPort.Protocol, currentLB)
-			// mark the vip as processed
-			vipsTracked.Delete(virtualIPKey(vip, svcPort.Protocol))
-
-			// Node Port
-			if svcPort.NodePort != 0 {
-				if err := createPerNodePhysicalVIPs(utilnet.IsIPv6String(ip), svcPort.Protocol, svcPort.NodePort,
-					eps.IPs, eps.Port); err != nil {
-					c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
-						"Error trying to update OVN LoadBalancer for Service %s/%s: %v",
-						name, namespace, err)
-					return err
-				}
-				nodeIPs, err := getNodeIPs(utilnet.IsIPv6String(ip))
-				if err != nil {
-					return err
-				}
-				for _, nodeIP := range nodeIPs {
-					vip := util.JoinHostPortInt32(nodeIP, svcPort.NodePort)
-					c.serviceTracker.updateService(name, namespace, vip, svcPort.Protocol, loadbalancer.NodeLoadBalancer)
-					// mark the vip as processed
-					vipsTracked.Delete(virtualIPKey(vip, svcPort.Protocol))
-				}
-			}
-
-			// Services ExternalIPs and LoadBalancer.IngressIPs have the same behavior in OVN
-			// so they are aggregated in a slice and processed together.
-			var externalIPs []string
-			// ExternalIP
-			for _, extIP := range service.Spec.ExternalIPs {
-				// only use the IPs of the same ClusterIP family
-				if utilnet.IsIPv6String(extIP) == utilnet.IsIPv6String(ip) {
-					externalIPs = append(externalIPs, extIP)
-				}
-			}
-			// LoadBalancer
-			for _, ingress := range service.Status.LoadBalancer.Ingress {
-				// only use the IPs of the same ClusterIP family
-				if ingress.IP != "" && utilnet.IsIPv6String(ingress.IP) == utilnet.IsIPv6String(ip) {
-					externalIPs = append(externalIPs, ingress.IP)
-				}
-			}
-
-			// reconcile external IPs
-			if len(externalIPs) > 0 {
-				if err := createPerNodeVIPs(externalIPs, svcPort.Protocol, svcPort.Port, eps.IPs, eps.Port); err != nil {
-					klog.Errorf("Error in creating ExternalIP/IngressIP for svc %s, target port: %d - %v\n", name, eps.Port, err)
-				}
-				for _, extIP := range externalIPs {
-					vip := util.JoinHostPortInt32(extIP, svcPort.Port)
-					c.serviceTracker.updateService(name, namespace, vip, svcPort.Protocol, loadbalancer.NodeLoadBalancer)
-					// mark the vip as processed
-					vipsTracked.Delete(virtualIPKey(vip, svcPort.Protocol))
-				}
-			}
+	if !c.repair.legacyLBsDeleted() {
+		if err := deleteServiceFromLegacyLBs(service); err != nil {
+			klog.Warningf("Failed to delete legacy vips for service %s: %v", key)
+			// Continue anyways, because once all services are synced, we'll delete
+			// the legacy load balancers
 		}
 	}
 
-	// at this point we have processed all vips we've found in the service
-	// so the remaining ones that we had in the vipsTracked variable should be deleted
-	// We remove them from OVN and from the tracker
-	err = deleteVIPsFromAllOVNBalancers(vipsTracked, name, namespace)
-	if err != nil {
-		c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToDeleteOVNLoadBalancer",
-			"Error trying to delete the OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
-		return err
-	}
-	c.serviceTracker.deleteServiceVIPs(name, namespace, vipsTracked)
-	return nil
-}
-
-func (c *Controller) addServiceToIdlingBalancer(vips sets.String, service *v1.Service) error {
-	for _, vipProtocol := range vips.List() {
-		vip, protocol := splitVirtualIPKey(vipProtocol)
-		lb, err := loadbalancer.GetOVNKubeIdlingLoadBalancer(protocol)
-		if err != nil {
-			return errors.Wrapf(err, "Error getting OVN idling LoadBalancer for protocol %s", protocol)
-		}
-		err = loadbalancer.UpdateLoadBalancer(lb, vip, []string{})
-		if err != nil {
-			return errors.Wrapf(err, "Failed to update idling loadbalancer")
-		}
-		// update the tracker with the VIP
-		c.serviceTracker.updateService(service.Name, service.Namespace, vip, protocol, loadbalancer.IdlingLoadBalancer)
-	}
+	c.repair.serviceSynced(key)
 	return nil
 }
 
 // RequestFullSync re-syncs every service that currently exists
-func (c *Controller) RequestFullSync() error {
+func (c *Controller) RequestFullSync() {
 	klog.Info("Full service sync requested")
 	services, err := c.serviceLister.List(labels.Everything())
 	if err != nil {
-		return err
+		klog.Errorf("Cached lister failed!? %v", err)
+		return
 	}
 	for _, service := range services {
 		c.onServiceAdd(service)
 	}
-	return nil
 }
 
 // handlers
@@ -605,4 +458,14 @@ func serviceControllerKey(endpointSlice *discovery.EndpointSlice) (string, error
 		return "", fmt.Errorf("endpointSlice missing %s label", discovery.LabelServiceName)
 	}
 	return fmt.Sprintf("%s/%s", endpointSlice.Namespace, serviceName), nil
+}
+
+// newRateLimiter makes a queue rate limiter. This limits
+// re-queues somewhat more significantly than base qps.
+// by default the base qps is 10, but this is low for our level of scale.
+func newRatelimiter(qps float64) workqueue.RateLimiter {
+	return workqueue.NewMaxOfRateLimiter(
+		workqueue.NewItemExponentialFailureRateLimiter(5*time.Millisecond, 1000*time.Second),
+		&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(qps), 500)},
+	)
 }
