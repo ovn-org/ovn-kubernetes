@@ -289,9 +289,10 @@ func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*ne
 	}
 	defer nsInfo.Unlock()
 	gr := util.GetGatewayRouterFromNode(node)
+
+	routesAdded := 0
 	for _, podIPNet := range podIfAddrs {
 		for _, gateway := range gateways {
-			routesAdded := 0
 			// TODO (trozet): use the go bindings here and batch commands
 			// validate the ip and gateway belong to the same address family
 			gws, err := util.MatchIPFamily(utilnet.IsIPv6(podIPNet.IP), gateway.gws)
@@ -322,12 +323,13 @@ func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*ne
 			} else {
 				klog.Warningf("Address families for the pod address %s and gateway %s did not match", podIPNet.IP.String(), gateway.gws)
 			}
-			// if no routes are added return an error
-			if routesAdded < 1 {
-				return fmt.Errorf("gateway specified for namespace %s with gateway addresses %v but no valid routes exist for pod: %s",
-					namespace, podIfAddrs, node)
-			}
+
 		}
+	}
+	// if no routes are added return an error
+	if routesAdded < 1 {
+		return fmt.Errorf("gateway specified for namespace %s with gateway addresses %v but no valid routes exist for pod: %s",
+			namespace, podIfAddrs, node)
 	}
 	return nil
 }
