@@ -1287,8 +1287,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			clusterController.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(ovntest.MustParseIPNet(types.V4NodeLocalNATSubnet))
 
 			// clusterController.WatchNodes() needs to following two port groups to have been created.
-			clusterController.clusterRtrPortGroupUUID, err = createPortGroup(clusterController.ovnNBClient, clusterRtrPortGroupName, clusterRtrPortGroupName)
-			clusterController.clusterPortGroupUUID, err = createPortGroup(clusterController.ovnNBClient, clusterPortGroupName, clusterPortGroupName)
+			clusterController.clusterRtrPortGroupUUID, err = createPortGroup(clusterController.nbClient, clusterRtrPortGroupName, clusterRtrPortGroupName)
+			clusterController.clusterPortGroupUUID, err = createPortGroup(clusterController.nbClient, clusterPortGroupName, clusterPortGroupName)
 
 			clusterController.StartServiceController(wg, false)
 			// Let the real code run and ensure OVN database sync

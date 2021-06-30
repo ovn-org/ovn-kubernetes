@@ -11,6 +11,7 @@ import (
 	"github.com/onsi/gomega"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -976,7 +977,8 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				// an
 				getPGPorts := func(name string) func() ([]string, error) {
 					return func() ([]string, error) {
-						pg, err := fakeOvn.ovnNBClient.PortGroupGet(name)
+						pg := &nbdb.PortGroup{Name: name}
+						err := fakeOvn.nbClient.Get(pg)
 						if err != nil {
 							return nil, err
 						}
