@@ -800,7 +800,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 				return err
 			}
 			defer nsInfo.Unlock()
-			if nsInfo.addressSet == nil {
+			if reflect.ValueOf(nsInfo.addressSet).IsNil() {
 				nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(hostNetworkNamespace)
 				if err != nil {
 					return fmt.Errorf("cannot create address set for namespace: %s,"+

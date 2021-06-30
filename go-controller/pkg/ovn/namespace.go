@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"reflect"
 	"strings"
 	"time"
 
@@ -57,7 +58,7 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 	}
 	defer nsInfo.Unlock()
 
-	if nsInfo.addressSet == nil {
+	if reflect.ValueOf(nsInfo.addressSet).IsNil() {
 		nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns)
 		if err != nil {
 			return fmt.Errorf("unable to add pod to namespace. Cannot create address set for namespace: %s,"+
@@ -87,7 +88,7 @@ func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error 
 	}
 	defer nsInfo.Unlock()
 
-	if nsInfo.addressSet != nil {
+	if !reflect.ValueOf(nsInfo.addressSet).IsNil() {
 		if err := nsInfo.addressSet.DeleteIPs(createIPAddressSlice(portInfo.ips)); err != nil {
 			return err
 		}
@@ -408,7 +409,7 @@ func (oc *Controller) deleteNamespaceLocked(ns string) *namespaceInfo {
 		nsInfo.Unlock()
 		return nil
 	}
-	if nsInfo.addressSet != nil {
+	if !reflect.ValueOf(nsInfo.addressSet).IsNil() {
 		// Empty the address set, then delete it after an interval.
 		if err := nsInfo.addressSet.SetIPs(nil); err != nil {
 			klog.Errorf("Warning: failed to empty address set for deleted NS %s: %v", ns, err)
@@ -427,7 +428,7 @@ func (oc *Controller) deleteNamespaceLocked(ns string) *namespaceInfo {
 				nsInfo := oc.getNamespaceLocked(ns)
 				if nsInfo != nil {
 					defer nsInfo.Unlock()
-					if nsInfo.addressSet != nil {
+					if !reflect.ValueOf(nsInfo.addressSet).IsNil() {
 						klog.V(5).Infof("Skipping deferred deletion of AddressSet for NS %s: re-created", ns)
 						return
 					}
