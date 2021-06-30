@@ -556,12 +556,12 @@ cleanup_kube_proxy_iptables() {
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
   for n in $KIND_NODES; do
     if [ "$KIND_IPV4_SUPPORT" == true ]; then
-      docker exec "$n" iptables -F KUBE-SERVICES
-      docker exec "$n" iptables -F KUBE-SERVICES -t nat
+      docker exec "$n" iptables -F KUBE-SERVICES || true
+      docker exec "$n" iptables -F KUBE-SERVICES -t nat || true
     fi
     if [ "$KIND_IPV6_SUPPORT" == true ]; then
-      docker exec "$n" ip6tables -F KUBE-SERVICES
-      docker exec "$n" ip6tables -F KUBE-SERVICES -t nat
+      docker exec "$n" ip6tables -F KUBE-SERVICES || true
+      docker exec "$n" ip6tables -F KUBE-SERVICES -t nat || true
     fi
   done
 }
