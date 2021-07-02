@@ -89,6 +89,15 @@ func (oc *Controller) addPodExternalGW(pod *kapi.Pod) error {
 
 // addPodExternalGWForNamespace handles adding routes to all pods in that namespace for a pod GW
 func (oc *Controller) addPodExternalGWForNamespace(namespace string, pod *kapi.Pod, egress gatewayInfo) error {
+	var gws string
+	for _, ip := range egress.gws {
+		if len(gws) != 0 {
+			gws += ","
+		}
+		gws += ip.String()
+	}
+	klog.Infof("Adding routes for external gateway pod: %s, next hops: %q, namespace: %s, bfd-enabled: %t",
+		pod.Name, gws, namespace, egress.bfdEnabled)
 	nsInfo, err := oc.waitForNamespaceLocked(namespace)
 	if err != nil {
 		return err
