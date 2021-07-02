@@ -475,6 +475,13 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 		return false
 	}
 
+	if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
+		// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
+		// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
+		// care of updating the exgw updates
+		oc.deletePodExternalGW(oldPod)
+	}
+
 	if util.PodWantsNetwork(pod) && addPort {
 		if err := oc.addLogicalPort(pod); err != nil {
 			klog.Errorf(err.Error())
@@ -482,12 +489,6 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 			return false
 		}
 	} else {
-		if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
-			// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
-			// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
-			// care of updating the exgw updates
-			oc.deletePodExternalGW(oldPod)
-		}
 		if err := oc.addPodExternalGW(pod); err != nil {
 			klog.Errorf(err.Error())
 			oc.recordPodEvent(err, pod)
