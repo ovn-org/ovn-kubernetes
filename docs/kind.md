@@ -75,27 +75,60 @@ ovn-kubernetes       ovnkube-node-hhsmk                          3/3     Running
 ovn-kubernetes       ovnkube-node-xvqh4                          3/3     Running   0          5h11m
 ```
 
-The `kind.sh` script defaults the cluster to HA. There are numerous
-configuration when deploying. Use `./kind.sh -h` to see the latest options.
+The `kind.sh` script defaults the cluster to HA disabled. There are numerous
+configuration options when deploying. Use `./kind.sh -h` to see the latest options.
 
 ```
-./kind.sh --help
+[root@ovnkubernetes contrib]# ./kind.sh --help
+usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
+                 [-ho |--hybrid-enabled] [-ii|--install-ingress] [-n4|--no-ipv4]
+                 [-i6 |--ipv6] [-wk|--num-workers <num>] [-ds|--disable-snat-multiple-gws]
+                 [-dp |--disable-pkt-mtu-check]
+                 [-nf |--netflow-targets <targets>] [sf|--sflow-targets <targets>] [-if|--ipfix-targets]
+                 [-sw |--allow-system-writes] [-gm|--gateway-mode <mode>]
+                 [-nl |--node-loglevel <num>] [-ml|--master-loglevel <num>]
+                 [-dbl|--dbchecker-loglevel <num>] [-ndl|--ovn-loglevel-northd <loglevel>]
+                 [-nbl|--ovn-loglevel-nb <loglevel>] [-sbl|--ovn-loglevel-sb <loglevel>]
+                 [-cl |--ovn-loglevel-controller <loglevel>] [-dl|--ovn-loglevel-nbctld <loglevel>] |
+                 [-h]]
 
-usage: kind.sh [[[-cf|--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
-                 [-ii|--install-ingress] [-n4|--no-ipv4] [-i6|--ipv6]] | [-h]]
-
--cf | --config-file          Name of the KIND J2 configuration file.
-                             DEFAULT: ./kind.yaml.j2
--kt | --keep-taint           Do not remove taint components.
-                             DEFAULT: Remove taint components.
--ha | --ha-enabled           Enable high availability. DEFAULT: HA Disabled.
--ii | --install-ingress      Flag to install Ingress Components.
-                             DEFAULT: Don't install ingress components.
--n4 | --no-ipv4              Disable IPv4. DEFAULT: IPv4 Enabled.
--i6 | --ipv6                 Enable IPv6. DEFAULT: IPv6 Disabled.
+-cf  | --config-file               Name of the KIND J2 configuration file.
+                                   DEFAULT: ./kind.yaml.j2
+-kt  | --keep-taint                Do not remove taint components.
+                                   DEFAULT: Remove taint components.
+-ha  | --ha-enabled                Enable high availability. DEFAULT: HA Disabled.
+-ho  | --hybrid-enabled            Enable hybrid overlay. DEFAULT: Disabled.
+-ds  | --disable-snat-multiple-gws Disable SNAT for multiple gws. DEFAULT: Disabled.
+-dp  | --disable-pkt-mtu-check     Disable checking packet size greater than MTU. Default: Disabled
+-nf  | --netflow-targets           Comma delimited list of ip:port netflow collectors. DEFAULT: Disabled.
+-sf  | --sflow-targets             Comma delimited list of ip:port sflow collectors. DEFAULT: Disabled.
+-if  | --ipfix-targets             Comma delimited list of ip:port ipfix collectors. DEFAULT: Disabled.
+-el  | --ovn-empty-lb-events       Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled
+-ii  | --install-ingress           Flag to install Ingress Components.
+                                   DEFAULT: Don't install ingress components.
+-n4  | --no-ipv4                   Disable IPv4. DEFAULT: IPv4 Enabled.
+-i6  | --ipv6                      Enable IPv6. DEFAULT: IPv6 Disabled.
+-wk  | --num-workers               Number of worker nodes. DEFAULT: HA - 2 worker
+                                   nodes and no HA - 0 worker nodes.
+-sw  | --allow-system-writes       Allow script to update system. Intended to allow
+                                   github CI to be updated with IPv6 settings.
+                                   DEFAULT: Don't allow.
+-gm  | --gateway-mode              Enable 'shared' or 'local' gateway mode.
+                                   DEFAULT: local.
+-ov  | --ovn-image            	   Use the specified docker image instead of building locally. DEFAULT: local build.
+-ml  | --master-loglevel           Log level for ovnkube (master), DEFAULT: 5.
+-nl  | --node-loglevel             Log level for ovnkube (node), DEFAULT: 5
+-dbl | --dbchecker-loglevel        Log level for ovn-dbchecker (ovnkube-db), DEFAULT: 5.
+-ndl | --ovn-loglevel-northd       Log config for ovn northd, DEFAULT: '-vconsole:info -vfile:info'.
+-nbl | --ovn-loglevel-nb           Log config for northbound DB DEFAULT: '-vconsole:info -vfile:info'.
+-sbl | --ovn-loglevel-sb           Log config for southboudn DB DEFAULT: '-vconsole:info -vfile:info'.
+-cl  | --ovn-loglevel-controller   Log config for ovn-controller DEFAULT: '-vconsole:info'.
+-dl  | --ovn-loglevel-nbctld       Log config for nbctl daemon DEFAULT: '-vconsole:info'.
+--delete                      	   Delete current cluster
 
 ```
-As seen above if you do not specify any options script will assume the default values.
+
+As seen above, if you do not specify any options the script will assume the default values.
 
 ### Usage Notes 
 
