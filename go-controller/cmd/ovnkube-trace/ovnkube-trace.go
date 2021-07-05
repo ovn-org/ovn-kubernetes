@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -490,6 +491,61 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 	return podInfo, err
 }
 
+func getDatabaseURIs(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, ovnNamespace string) (string, string, bool, error) {
+	labels := []string{"app=ovnkube-master", "name=ovnkube-master"}
+	var err error
+	var pods *kapi.PodList
+	found := false
+
+	for _, l := range labels {
+		klog.V(5).Infof("Trying with label %s", l)
+		listOptions := metav1.ListOptions{
+			LabelSelector: l,
+		}
+		pods, err = coreclient.Pods(ovnNamespace).List(context.TODO(), listOptions)
+		if err == nil && len(pods.Items) > 0 {
+			found = true
+			break
+		}
+		klog.V(5).Infof("Cannot find ovnkube pods by label %s", l)
+	}
+	if !found {
+		return "", "", false, fmt.Errorf("Cannot find ovnkube pods by labels: %s", strings.Join(labels, ","))
+	}
+
+	masterPodName := pods.Items[0].Name
+	klog.V(5).Infof("Found master pod %s", masterPodName)
+
+	psCmd := "ps -eo args | grep '/usr/bin/[o]vnkube'"
+	hostOutput, hostError, err := execInPod(coreclient, restconfig, ovnNamespace, masterPodName, "ovnkube-master", psCmd, "")
+	if err != nil {
+		fmt.Printf("execInPod() failed with %s stderr %s stdout %s \n", err, hostError, hostOutput)
+		klog.V(5).Infof("execInPod() failed err %s - Pod Name %s", err, masterPodName)
+		return "", "", false, err
+	}
+
+	re := regexp.MustCompile(`--nb-address(=| )[^\s]+`)
+	nbAddress := strings.Replace(
+		re.FindString(hostOutput)[13:],
+		"://",
+		":",
+		-1)
+	re = regexp.MustCompile(`--sb-address(=| )[^\s]+`)
+	sbAddress := strings.Replace(
+		re.FindString(hostOutput)[13:],
+		"://",
+		":",
+		-1)
+	re = regexp.MustCompile(`(ssl|tcp)`)
+	protocol := re.FindString(nbAddress)
+
+	klog.V(5).Infof("nb address for OVN database communication is %s", nbAddress)
+	klog.V(5).Infof("sb address for OVN database communication is %s", sbAddress)
+	klog.V(5).Infof("Protocol for OVN database communication is %s", protocol)
+
+	return nbAddress, sbAddress, protocol == "ssl", nil
+}
+
 var (
 	level klog.Level
 )
@@ -515,8 +571,6 @@ func main() {
 	tcp := flag.Bool("tcp", false, "use tcp transport protocol")
 	udp := flag.Bool("udp", false, "use udp transport protocol")
 	loglevel := flag.String("loglevel", "0", "loglevel: klog level")
-
-	noSSL := flag.Bool("noSSL", false, "do not use SSL with OVN/OVS")
 
 	flag.Parse()
 
@@ -646,46 +700,21 @@ func main() {
 
 	// Common ssl parameters
 	var sslCertKeys string
-	if *noSSL {
-		sslCertKeys = " "
-	} else {
-		sslCertKeys = "-p /ovn-cert/tls.key -c /ovn-cert/tls.crt -C /ovn-ca/ca-bundle.crt "
+	nbUri, sbUri, useSSL, err := getDatabaseURIs(coreclient, restconfig, ovnNamespace)
+	if err != nil {
+		fmt.Printf("Failed to get database URIs: %v\n", err)
+		os.Exit(-1)
 	}
 
-	nbUri := ""
-	nbCount := 1
-	for k, v := range masters {
-		klog.V(5).Infof("Master name: %s has IP %s", k, v)
-		if *noSSL {
-			nbUri += "tcp:" + v + ":6641"
-		} else {
-			nbUri += "ssl:" + v + ":9641"
-		}
-		if nbCount == len(masters) {
-			nbUri += " "
-		} else {
-			nbUri += ","
-		}
-		nbCount++
+	if useSSL {
+		sslCertKeys = "-p /ovn-cert/tls.key -c /ovn-cert/tls.crt -C /ovn-ca/ca-bundle.crt "
+	} else {
+		sslCertKeys = " "
 	}
+
 	nbcmd := sslCertKeys + "--db " + nbUri
 	klog.V(5).Infof("The nbcmd is %s", nbcmd)
 
-	sbUri := ""
-	sbCount := 1
-	for _, v := range masters {
-		if *noSSL {
-			sbUri += "tcp:" + v + ":6642"
-		} else {
-			sbUri += "ssl:" + v + ":9642"
-		}
-		if sbCount == len(masters) {
-			sbUri += " "
-		} else {
-			sbUri += ","
-		}
-		sbCount++
-	}
 	sbcmd := sslCertKeys + "--db " + sbUri
 	klog.V(5).Infof("The sbcmd is %s", sbcmd)
 
