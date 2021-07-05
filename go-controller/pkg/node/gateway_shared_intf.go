@@ -23,6 +23,10 @@ const (
 	// defaultOpenFlowCookie identifies default open flow rules added to the host OVS bridge.
 	// The hex number 0xdeff105, aka defflos, is meant to sound like default flows.
 	defaultOpenFlowCookie = "0xdeff105"
+	// ctMarkOVN is the conntrack mark value for OVN traffic
+	ctMarkOVN = "0x1"
+	// ctMarkHost is the conntrack mark value for host traffic
+	ctMarkHost = "0x2"
 )
 
 // nodePortWatcher manages OpenfLow and iptables rules
@@ -252,25 +256,37 @@ func newSharedGatewayOpenFlowManager(patchPort, macAddress, gwBridge, gwIntf str
 			defaultOpenFlowCookie, ofportPhys, macAddress, ofportPatch))
 
 	if config.IPv4Mode {
-		// table 0, packets coming from pods headed externally. Commit connections
-		// so that reverse direction goes back to the pods.
-		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=100, in_port=%s, ip, "+
-				"actions=ct(commit, zone=%d), output:%s",
-				defaultOpenFlowCookie, ofportPatch, config.Default.ConntrackZone, ofportPhys))
-
 		// table0, Geneve packets coming from external. Skip conntrack and go directly to host
 		// if dest mac is the shared mac send directly to host.
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=60, in_port=%s, dl_dst=%s, udp, udp_dst=%d, "+
+			fmt.Sprintf("cookie=%s, priority=205, in_port=%s, dl_dst=%s, udp, udp_dst=%d, "+
 				"actions=output:LOCAL", defaultOpenFlowCookie, ofportPhys, macAddress, config.Default.EncapPort))
 		// perform NORMAL action otherwise.
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=55, in_port=%s, udp, udp_dst=%d, "+
+			fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp, udp_dst=%d, "+
 				"actions=NORMAL", defaultOpenFlowCookie, ofportPhys, config.Default.EncapPort))
 
+		// table0, Geneve packets coming from host. Skip conntrack and go directly to external
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=200, in_port=LOCAL, udp, udp_dst=%d, "+
+				"actions=output:%s", defaultOpenFlowCookie, config.Default.EncapPort, ofportPhys))
+
+		// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
+		// so that reverse direction goes back to the pods.
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=100, in_port=%s, ip, "+
+				"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
+				defaultOpenFlowCookie, ofportPatch, config.Default.ConntrackZone, ctMarkOVN, ofportPhys))
+
+		// table 0, packets coming from host(LOCAL) Commit connections with ct_mark ctMarkHost
+		// so that reverse direction goes back to the host.
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=100, in_port=LOCAL, ip, "+
+				"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
+				defaultOpenFlowCookie, config.Default.ConntrackZone, ctMarkHost, ofportPhys))
+
 		// table 0, packets coming from external. Send it through conntrack and
-		// resubmit to table 1 to know the state of the connection.
+		// resubmit to table 1 to know the state and label of the connection.
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=50, in_port=%s, ip, "+
 				"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, ofportPhys, config.Default.ConntrackZone))
@@ -293,22 +309,34 @@ func newSharedGatewayOpenFlowManager(patchPort, macAddress, gwBridge, gwIntf str
 				defaultOpenFlowCookie, types.V4OVNMasqueradeIP, OVNMasqCTZone))
 	}
 	if config.IPv6Mode {
-		// table 0, packets coming from pods headed externally. Commit connections
-		// so that reverse direction goes back to the pods.
-		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=100, in_port=%s, ipv6, "+
-				"actions=ct(commit, zone=%d), output:%s",
-				defaultOpenFlowCookie, ofportPatch, config.Default.ConntrackZone, ofportPhys))
-
 		// table0, Geneve packets coming from external. Skip conntrack and go directly to host
 		// if dest mac is the shared mac send directly to host.
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=60, in_port=%s, dl_dst=%s, udp6, udp_dst=%d, "+
+			fmt.Sprintf("cookie=%s, priority=205, in_port=%s, dl_dst=%s, udp6, udp_dst=%d, "+
 				"actions=output:LOCAL", defaultOpenFlowCookie, ofportPhys, macAddress, config.Default.EncapPort))
 		// perform NORMAL action otherwise.
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=55, in_port=%s, udp6, udp_dst=%d, "+
+			fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp6, udp_dst=%d, "+
 				"actions=NORMAL", defaultOpenFlowCookie, ofportPhys, config.Default.EncapPort))
+
+		// table0, Geneve packets coming from host. Skip conntrack and send to external
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=200, in_port=LOCAL, udp6, udp_dst=%d, "+
+				"actions=output:%s", defaultOpenFlowCookie, config.Default.EncapPort, ofportPhys))
+
+		// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
+		// so that reverse direction goes back to the pods.
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=100, in_port=%s, ipv6, "+
+				"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
+				defaultOpenFlowCookie, ofportPatch, config.Default.ConntrackZone, ctMarkOVN, ofportPhys))
+
+		// table 0, packets coming from host(LOCAL). Commit connections with ct_mark ctMarkHost
+		// so that reverse direction goes back to the host.
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=100, in_port=LOCAL, ipv6, "+
+				"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
+				defaultOpenFlowCookie, config.Default.ConntrackZone, ctMarkHost, ofportPhys))
 
 		// table 0, packets coming from external. Send it through conntrack and
 		// resubmit to table 1 to know the state of the connection.
@@ -371,29 +399,51 @@ func newSharedGatewayOpenFlowManager(patchPort, macAddress, gwBridge, gwIntf str
 	}
 
 	if config.IPv4Mode {
-		// table 1, established and related connections in zone 64000 go to OVN
+		// table 1, established and related connections in zone 64000 with ct_mark ctMarkOVN go to OVN
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=100, table=1, ip, ct_state=+trk+est, "+
+			fmt.Sprintf("cookie=%s, priority=100, table=1, ip, ct_state=+trk+est, ct_mark=%s, "+
 				"actions=%s",
-				defaultOpenFlowCookie, actions))
+				defaultOpenFlowCookie, ctMarkOVN, actions))
 
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=100, table=1, ip, ct_state=+trk+rel, "+
+			fmt.Sprintf("cookie=%s, priority=100, table=1, ip, ct_state=+trk+rel, ct_mark=%s, "+
 				"actions=%s",
-				defaultOpenFlowCookie, actions))
+				defaultOpenFlowCookie, ctMarkOVN, actions))
+
+		// table 1, established and related connections in zone 64000 with ct_mark ctMarkHost go to host
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=100, table=1, ip, ct_state=+trk+est, ct_mark=%s, "+
+				"actions=output:LOCAL",
+				defaultOpenFlowCookie, ctMarkHost))
+
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=100, table=1, ip, ct_state=+trk+rel, ct_mark=%s, "+
+				"actions=output:LOCAL",
+				defaultOpenFlowCookie, ctMarkHost))
 	}
 
 	if config.IPv6Mode {
-		// table 1, established and related connections in zone 64000 go to OVN
+		// table 1, established and related connections in zone 64000 with ct_mark ctMarkOVN go to OVN
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=100, table=1, ipv6, ct_state=+trk+est, "+
+			fmt.Sprintf("cookie=%s, priority=100, table=1, ipv6, ct_state=+trk+est, ct_mark=%s, "+
 				"actions=%s",
-				defaultOpenFlowCookie, actions))
+				defaultOpenFlowCookie, ctMarkOVN, actions))
 
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=100, table=1, ipv6, ct_state=+trk+rel, "+
+			fmt.Sprintf("cookie=%s, priority=100, table=1, ipv6, ct_state=+trk+rel, ct_mark=%s, "+
 				"actions=%s",
-				defaultOpenFlowCookie, actions))
+				defaultOpenFlowCookie, ctMarkOVN, actions))
+
+		// table 1, established and related connections in zone 64000 with ct_mark ctMarkHost go to host
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=100, table=1, ip6, ct_state=+trk+est, ct_mark=%s, "+
+				"actions=output:LOCAL",
+				defaultOpenFlowCookie, ctMarkHost))
+
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=100, table=1, ip6, ct_state=+trk+rel, ct_mark=%s, "+
+				"actions=output:LOCAL",
+				defaultOpenFlowCookie, ctMarkHost))
 	}
 
 	if config.Gateway.DisableSNATMultipleGWs {
