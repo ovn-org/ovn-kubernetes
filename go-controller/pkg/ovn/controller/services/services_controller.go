@@ -197,7 +197,7 @@ func (c *Controller) handleErr(err error, key interface{}) {
 	if keyErr != nil {
 		klog.ErrorS(err, "Failed to split meta namespace cache key", "key", key)
 	}
-	metrics.MetricRequeueServiceCount.WithLabelValues(key.(string)).Inc()
+	metrics.MetricRequeueServiceCount.Inc()
 
 	if c.queue.NumRequeues(key) < maxRetries {
 		klog.V(2).InfoS("Error syncing service, retrying", "service", klog.KRef(ns, name), "err", err)
@@ -217,11 +217,11 @@ func (c *Controller) syncServices(key string) error {
 		return err
 	}
 	klog.Infof("Processing sync for service %s on namespace %s ", name, namespace)
-	metrics.MetricSyncServiceCount.WithLabelValues(key).Inc()
+	metrics.MetricSyncServiceCount.Inc()
 
 	defer func() {
 		klog.V(4).Infof("Finished syncing service %s on namespace %s : %v", name, namespace, time.Since(startTime))
-		metrics.MetricSyncServiceLatency.WithLabelValues(key).Observe(time.Since(startTime).Seconds())
+		metrics.MetricSyncServiceLatency.Observe(time.Since(startTime).Seconds())
 	}()
 
 	// Get current Service from the cache

@@ -73,35 +73,28 @@ var MetricResourceUpdateLatency = prometheus.NewHistogramVec(prometheus.Histogra
 )
 
 // MetricRequeueServiceCount is the number of times a particular service has been requeued.
-var MetricRequeueServiceCount = prometheus.NewCounterVec(prometheus.CounterOpts{
+var MetricRequeueServiceCount = prometheus.NewCounter(prometheus.CounterOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "requeue_service_total",
 	Help:      "A metric that captures the number of times a service is requeued after failing to sync with OVN"},
-	[]string{
-		"name",
-	},
 )
 
 // MetricSyncServiceCount is the number of times a particular service has been synced.
-var MetricSyncServiceCount = prometheus.NewCounterVec(prometheus.CounterOpts{
+var MetricSyncServiceCount = prometheus.NewCounter(prometheus.CounterOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "sync_service_total",
 	Help:      "A metric that captures the number of times a service is synced with OVN load balancers"},
-	[]string{
-		"name",
-	},
 )
 
 // MetricSyncServiceLatency is the time taken to sync a service with the OVN load balancers.
-var MetricSyncServiceLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+var MetricSyncServiceLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "sync_service_latency_seconds",
 	Help:      "The latency of syncing a service with the OVN load balancers",
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
-	[]string{"name"},
 )
 
 var MetricMasterReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
