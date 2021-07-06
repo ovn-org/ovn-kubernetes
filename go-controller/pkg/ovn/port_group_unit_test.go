@@ -1,15 +1,14 @@
 package ovn
 
 import (
-	"errors"
 	"fmt"
 	"testing"
 
-	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	goovn_mock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/ebay/go-ovn"
+	. "github.com/onsi/gomega"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
-	goovn "github.com/ebay/go-ovn"
-	"github.com/stretchr/testify/assert"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	. "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 )
 
 const (
@@ -20,352 +19,262 @@ const (
 	lspName    = "TestLSPName"
 )
 
-var (
-	execError  = errors.New("transaction Failed due to an error")
-	otherError = errors.New("other error")
-)
-
 func TestCreatePortGroup(t *testing.T) {
-	mockGoOvnNBClient := new(goovn_mock.Client)
-
 	tests := []struct {
-		desc                      string
-		name                      string
-		hashName                  string
-		errMatch                  error
-		onRetArgMockGoOvnNBClient []ovntest.TestifyMockHelper
+		desc        string
+		name        string
+		hashName    string
+		errMatch    error
+		initialData []TestData
 	}{
 		{
 			desc:     "positive test case",
 			name:     pgName,
 			hashName: pgHashName,
 			errMatch: nil,
-			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
-				{
-					OnCallMethodName: "PortGroupAdd", OnCallMethodArgType: []string{"string", "[]string", "map[string]string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, nil},
-				},
-				{
-					OnCallMethodName: "Execute", OnCallMethodArgType: []string{"*goovn.OvnCommand"}, RetArgList: []interface{}{nil},
-				},
-				{
-					OnCallMethodName: "PortGroupGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.PortGroup{UUID: pgUUUID, Name: pgName}, nil},
-				},
-			},
-		},
+		}, /* TODO: there seems to be a bug with already exists in libovsdb client
 		{
 			desc:     "port group already exists",
 			name:     pgName,
 			hashName: pgHashName,
 			errMatch: nil,
-			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
-				{
-					OnCallMethodName: "PortGroupAdd", OnCallMethodArgType: []string{"string", "[]string", "map[string]string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, goovn.ErrorExist},
-				},
-				{
-					OnCallMethodName: "PortGroupGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.PortGroup{UUID: pgUUUID, Name: pgName}, nil},
-				},
-			},
-		},
-		{
-			desc:     "other PortGroupAdd Error",
-			name:     pgName,
-			hashName: pgHashName,
-			errMatch: fmt.Errorf("add error for port group: %s, %v", pgName, otherError),
-			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
-				{
-					OnCallMethodName: "PortGroupAdd", OnCallMethodArgType: []string{"string", "[]string", "map[string]string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, otherError},
+			initialData: []TestData{
+				&nbdb.PortGroup{
+					Name: pgHashName,
+					ExternalIDs: map[string]string{
+						"name": pgName,
+					},
 				},
 			},
-		},
-		{
-			desc:     "execute error",
-			name:     pgName,
-			hashName: pgHashName,
-			errMatch: fmt.Errorf("execute error for add port group: %s, %v", pgName, execError),
-			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
-				{
-					OnCallMethodName: "PortGroupAdd", OnCallMethodArgType: []string{"string", "[]string", "map[string]string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, nil},
-				},
-				{
-					OnCallMethodName: "Execute", OnCallMethodArgType: []string{"*goovn.OvnCommand"}, RetArgList: []interface{}{execError},
-				},
-			},
-		},
-		{
-			desc:     "PortGroupGet error",
-			name:     pgName,
-			hashName: pgHashName,
-			errMatch: fmt.Errorf("failed to get port group UUID: %s, %v", pgName, otherError),
-			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
-				{
-					OnCallMethodName: "PortGroupAdd", OnCallMethodArgType: []string{"string", "[]string", "map[string]string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, nil},
-				},
-				{
-					OnCallMethodName: "Execute", OnCallMethodArgType: []string{"*goovn.OvnCommand"}, RetArgList: []interface{}{nil},
-				},
-				{
-					OnCallMethodName: "PortGroupGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.PortGroup{UUID: pgUUUID, Name: pgName}, otherError},
-				},
-			},
-		},
+		}, */
 	}
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			ovntest.ProcessMockFnList(&mockGoOvnNBClient.Mock, tc.onRetArgMockGoOvnNBClient)
+			g := NewGomegaWithT(t)
+			stopChan := make(chan struct{})
+			defer close(stopChan)
 
-			uuid, err := createPortGroup(mockGoOvnNBClient, tc.name, tc.hashName)
+			nbClient, err := NewNBTestHarness(TestSetup{NBData: tc.initialData}, stopChan)
+			if err != nil {
+				t.Fatalf("Error creating northbound ovsdb test harness: %v", err)
+			}
+
+			uuid, err := createPortGroup(nbClient, tc.name, tc.hashName)
 
 			if tc.errMatch != nil {
-				assert.Contains(t, err.Error(), tc.errMatch.Error())
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error()).To(ContainSubstring(tc.errMatch.Error()))
 			} else {
-				assert.Nil(t, err)
-				assert.Equal(t, pgUUUID, uuid)
+				g.Expect(err).ToNot(HaveOccurred())
+				expected := &nbdb.PortGroup{
+					UUID: uuid,
+					Name: tc.hashName,
+					ExternalIDs: map[string]string{
+						"name": tc.name,
+					},
+				}
+
+				g.Eventually(nbClient).Should(HaveTestData(expected))
 			}
-			mockGoOvnNBClient.AssertExpectations(t)
 		})
 	}
 }
 
 func TestDeletePortGroup(t *testing.T) {
-	mockGoOvnNBClient := new(goovn_mock.Client)
-
 	tests := []struct {
-		desc                      string
-		hashName                  string
-		errMatch                  error
-		onRetArgMockGoOvnNBClient []ovntest.TestifyMockHelper
+		desc        string
+		hashName    string
+		errMatch    error
+		initialData []TestData
 	}{
 		{
 			desc:     "positive test case",
 			hashName: pgHashName,
 			errMatch: nil,
-			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
-				{
-					OnCallMethodName: "PortGroupDel", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, nil},
-				},
-				{
-					OnCallMethodName: "Execute", OnCallMethodArgType: []string{"*goovn.OvnCommand"}, RetArgList: []interface{}{nil},
-				},
-			},
-		},
-		{
-			desc:     "port group not found",
-			hashName: pgHashName,
-			errMatch: nil,
-			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
-				{
-					OnCallMethodName: "PortGroupDel", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, goovn.ErrorNotFound},
+			initialData: []TestData{
+				&nbdb.PortGroup{
+					Name: pgHashName,
+					ExternalIDs: map[string]string{
+						"name": pgName,
+					},
 				},
 			},
 		},
 		{
-			desc:     "other PortGroupDel Error",
-			hashName: pgHashName,
-			errMatch: fmt.Errorf("delete error for port group: %s, %v", pgHashName, otherError),
-			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
-				{
-					OnCallMethodName: "PortGroupDel", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, otherError},
-				},
-			},
-		},
-		{
-			desc:     "execute error",
-			hashName: pgHashName,
-			errMatch: fmt.Errorf("execute error for delete port group: %s, %v", pgHashName, execError),
-			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
-				{
-					OnCallMethodName: "PortGroupDel", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, nil},
-				},
-				{
-					OnCallMethodName: "Execute", OnCallMethodArgType: []string{"*goovn.OvnCommand"}, RetArgList: []interface{}{execError},
-				},
-			},
+			desc:        "port group not found",
+			hashName:    pgHashName,
+			errMatch:    nil,
+			initialData: nil,
 		},
 	}
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			ovntest.ProcessMockFnList(&mockGoOvnNBClient.Mock, tc.onRetArgMockGoOvnNBClient)
+			g := NewGomegaWithT(t)
+			stopChan := make(chan struct{})
+			defer close(stopChan)
 
-			err := deletePortGroup(mockGoOvnNBClient, tc.hashName)
+			nbClient, err := NewNBTestHarness(TestSetup{NBData: tc.initialData}, stopChan)
+			if err != nil {
+				t.Fatalf("Error creating northbound ovsdb test harness: %v", err)
+			}
+
+			err = deletePortGroup(nbClient, tc.hashName)
 
 			if tc.errMatch != nil {
-				assert.Contains(t, err.Error(), tc.errMatch.Error())
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error()).To(ContainSubstring(tc.errMatch.Error()))
 			} else {
-				assert.Nil(t, err)
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Eventually(nbClient).Should(HaveEmptyTestData())
 			}
-			mockGoOvnNBClient.AssertExpectations(t)
 		})
 	}
 }
 
 func TestAddToPortGroup(t *testing.T) {
-	mockGoOvnNBClient := new(goovn_mock.Client)
-
 	tests := []struct {
-		desc                      string
-		name                      string
-		portInfo                  *lpInfo
-		errMatch                  error
-		onRetArgMockGoOvnNBClient []ovntest.TestifyMockHelper
+		desc         string
+		name         string
+		portInfo     *lpInfo
+		errMatch     error
+		initialData  []TestData
+		expectedData []TestData
 	}{
 		{
 			desc:     "positive test case",
-			name:     pgName,
+			name:     pgHashName,
 			portInfo: &lpInfo{name: lspName, uuid: lspUUID},
 			errMatch: nil,
-			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
-				{
-					OnCallMethodName: "PortGroupAddPort", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, nil},
+			initialData: []TestData{
+				&nbdb.PortGroup{
+					Name: pgHashName,
 				},
-				{
-					OnCallMethodName: "Execute", OnCallMethodArgType: []string{"*goovn.OvnCommand"}, RetArgList: []interface{}{nil},
+			},
+			expectedData: []TestData{
+				&nbdb.PortGroup{
+					Name: pgHashName,
+					Ports: []string{
+						lspUUID,
+					},
 				},
 			},
 		},
 		{
 			desc:     "positive idempotency",
-			name:     pgName,
+			name:     pgHashName,
 			portInfo: &lpInfo{name: lspName, uuid: lspUUID},
 			errMatch: nil,
-			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
-				{
-					OnCallMethodName: "PortGroupAddPort", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, nil},
+			initialData: []TestData{
+				&nbdb.PortGroup{
+					Name: pgHashName,
+					Ports: []string{
+						lspUUID,
+					},
 				},
-				{
-					OnCallMethodName: "Execute", OnCallMethodArgType: []string{"*goovn.OvnCommand"}, RetArgList: []interface{}{nil},
+			},
+			expectedData: []TestData{
+				&nbdb.PortGroup{
+					Name: pgHashName,
+					Ports: []string{
+						lspUUID,
+					},
 				},
 			},
 		},
 		{
-			desc:     "port group not found",
-			name:     pgName,
-			portInfo: &lpInfo{name: lspName, uuid: lspUUID},
-			errMatch: fmt.Errorf("error preparing adding port %s to port group %s (%v)", lspName, pgName, goovn.ErrorNotFound),
-			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
-				{
-					OnCallMethodName: "PortGroupAddPort", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, goovn.ErrorNotFound},
-				},
-			},
-		},
-		{
-			desc:     "other PortGroupAddPort error",
-			name:     pgName,
-			portInfo: &lpInfo{name: lspName, uuid: lspUUID},
-			errMatch: fmt.Errorf("error preparing adding port %s to port group %s (%v)", lspName, pgName, otherError),
-			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
-				{
-					OnCallMethodName: "PortGroupAddPort", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, otherError},
-				},
-			},
-		},
-		{
-			desc:     "execute error",
-			name:     pgName,
-			portInfo: &lpInfo{name: lspName, uuid: lspUUID},
-			errMatch: fmt.Errorf("error committing adding ports (%s) to port group %s (%v)", lspName, pgName, execError),
-			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
-				{
-					OnCallMethodName: "PortGroupAddPort", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, nil},
-				},
-				{
-					OnCallMethodName: "Execute", OnCallMethodArgType: []string{"*goovn.OvnCommand"}, RetArgList: []interface{}{execError},
-				},
-			},
+			desc:         "port group not found",
+			name:         pgHashName,
+			portInfo:     &lpInfo{name: lspName, uuid: lspUUID},
+			errMatch:     fmt.Errorf("Error getting port group %s for mutate: %s", pgHashName, libovsdbclient.ErrNotFound.Error()),
+			initialData:  nil,
+			expectedData: nil,
 		},
 	}
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			ovntest.ProcessMockFnList(&mockGoOvnNBClient.Mock, tc.onRetArgMockGoOvnNBClient)
+			g := NewGomegaWithT(t)
+			stopChan := make(chan struct{})
+			defer close(stopChan)
 
-			err := addToPortGroup(mockGoOvnNBClient, tc.name, tc.portInfo)
+			nbClient, err := NewNBTestHarness(TestSetup{NBData: tc.initialData}, stopChan)
+			if err != nil {
+				t.Fatalf("Error creating northbound ovsdb test harness: %v", err)
+			}
+
+			err = addToPortGroup(nbClient, tc.name, tc.portInfo)
 
 			if tc.errMatch != nil {
-				assert.Contains(t, err.Error(), tc.errMatch.Error())
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error()).To(ContainSubstring(tc.errMatch.Error()))
 			} else {
-				assert.Nil(t, err)
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Eventually(nbClient).Should(HaveTestDataIgnoringUUIDs(tc.expectedData...))
 			}
-			mockGoOvnNBClient.AssertExpectations(t)
 		})
 	}
 }
 
 func TestDeleteFromPortGroup(t *testing.T) {
-	mockGoOvnNBClient := new(goovn_mock.Client)
-
 	tests := []struct {
-		desc                      string
-		name                      string
-		portInfo                  *lpInfo
-		errMatch                  error
-		onRetArgMockGoOvnNBClient []ovntest.TestifyMockHelper
+		desc         string
+		name         string
+		portInfo     *lpInfo
+		errMatch     error
+		initialData  []TestData
+		expectedData []TestData
 	}{
 		{
 			desc:     "positive test case",
-			name:     pgName,
+			name:     pgHashName,
 			portInfo: &lpInfo{name: lspName, uuid: lspUUID},
 			errMatch: nil,
-			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
-				{
-					OnCallMethodName: "PortGroupRemovePort", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, nil},
+			initialData: []TestData{
+				&nbdb.PortGroup{
+					Name: pgHashName,
+					Ports: []string{
+						lspUUID,
+					},
 				},
-				{
-					OnCallMethodName: "Execute", OnCallMethodArgType: []string{"*goovn.OvnCommand"}, RetArgList: []interface{}{nil},
+			},
+			expectedData: []TestData{
+				&nbdb.PortGroup{
+					Name: pgHashName,
 				},
 			},
 		},
 		{
-			desc:     "port group or port not found",
-			name:     pgName,
-			portInfo: &lpInfo{name: lspName, uuid: lspUUID},
-			errMatch: nil,
-			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
-				{
-					OnCallMethodName: "PortGroupRemovePort", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, goovn.ErrorNotFound},
-				},
-			},
-		},
-		{
-			desc:     "other PortGroupAddPort error",
-			name:     pgName,
-			portInfo: &lpInfo{name: lspName, uuid: lspUUID},
-			errMatch: fmt.Errorf("error preparing removing port %s from port group %s (%v)", lspName, pgName, otherError),
-			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
-				{
-					OnCallMethodName: "PortGroupRemovePort", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, otherError},
-				},
-			},
-		},
-		{
-			desc:     "execute error",
-			name:     pgName,
-			portInfo: &lpInfo{name: lspName, uuid: lspUUID},
-			errMatch: fmt.Errorf("error committing removing ports (%s) from port group %s (%v)", lspName, pgName, execError),
-			onRetArgMockGoOvnNBClient: []ovntest.TestifyMockHelper{
-				{
-					OnCallMethodName: "PortGroupRemovePort", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{&goovn.OvnCommand{}, nil},
-				},
-				{
-					OnCallMethodName: "Execute", OnCallMethodArgType: []string{"*goovn.OvnCommand"}, RetArgList: []interface{}{execError},
-				},
-			},
+			desc:         "port group not found",
+			name:         pgHashName,
+			portInfo:     &lpInfo{name: lspName, uuid: lspUUID},
+			errMatch:     fmt.Errorf("Error getting port group %s for mutate: %s", pgHashName, libovsdbclient.ErrNotFound.Error()),
+			initialData:  nil,
+			expectedData: nil,
 		},
 	}
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			ovntest.ProcessMockFnList(&mockGoOvnNBClient.Mock, tc.onRetArgMockGoOvnNBClient)
+			g := NewGomegaWithT(t)
+			stopChan := make(chan struct{})
+			defer close(stopChan)
 
-			err := deleteFromPortGroup(mockGoOvnNBClient, tc.name, tc.portInfo)
+			nbClient, err := NewNBTestHarness(TestSetup{NBData: tc.initialData}, stopChan)
+			if err != nil {
+				t.Fatalf("Error creating northbound ovsdb test harness: %v", err)
+			}
+
+			err = deleteFromPortGroup(nbClient, tc.name, tc.portInfo)
 
 			if tc.errMatch != nil {
-				assert.Contains(t, err.Error(), tc.errMatch.Error())
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error()).To(ContainSubstring(tc.errMatch.Error()))
 			} else {
-				assert.Nil(t, err)
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Eventually(nbClient).Should(HaveTestDataIgnoringUUIDs(tc.expectedData...))
 			}
-			mockGoOvnNBClient.AssertExpectations(t)
 		})
 	}
 }

@@ -20,6 +20,7 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
@@ -1268,9 +1269,14 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			f, err = factory.NewMasterWatchFactory(fakeClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			clusterController := NewOvnController(fakeClient, f, stopChan,
-				addressset.NewFakeAddressSetFactory(), ovntest.NewMockOVNClient(goovn.DBNB),
-				ovntest.NewMockOVNClient(goovn.DBSB), record.NewFakeRecorder(0))
+			dbSetup := libovsdbtest.TestSetup{}
+			libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
+				ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
+				libovsdbOvnNBClient, libovsdbOvnSBClient,
+				record.NewFakeRecorder(0))
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 
 			clusterController.clusterLBsUUIDs = []string{node1.TCPLBUUID, node1.UDPLBUUID, node1.SCTPLBUUID}
@@ -1281,8 +1287,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			clusterController.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(ovntest.MustParseIPNet(types.V4NodeLocalNATSubnet))
 
 			// clusterController.WatchNodes() needs to following two port groups to have been created.
-			clusterController.clusterRtrPortGroupUUID, err = createPortGroup(clusterController.ovnNBClient, clusterRtrPortGroupName, clusterRtrPortGroupName)
-			clusterController.clusterPortGroupUUID, err = createPortGroup(clusterController.ovnNBClient, clusterPortGroupName, clusterPortGroupName)
+			clusterController.clusterRtrPortGroupUUID, err = createPortGroup(clusterController.nbClient, clusterRtrPortGroupName, clusterRtrPortGroupName)
+			clusterController.clusterPortGroupUUID, err = createPortGroup(clusterController.nbClient, clusterPortGroupName, clusterPortGroupName)
 
 			clusterController.StartServiceController(wg, false)
 			// Let the real code run and ensure OVN database sync
@@ -1525,9 +1531,17 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 				EgressFirewallClient: egressFirewallFakeClient,
 			}
 			f, err := factory.NewMasterWatchFactory(fakeClient)
-			clusterController := NewOvnController(fakeClient, f, stopChan,
-				addressset.NewFakeAddressSetFactory(), ovntest.NewMockOVNClient(goovn.DBNB),
-				ovntest.NewMockOVNClient(goovn.DBSB), record.NewFakeRecorder(0))
+
+			dbSetup := libovsdbtest.TestSetup{}
+			libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
+			if err != nil {
+				t.Fatalf("Error creating libovsdb test harness %v", err)
+			}
+
+			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
+				ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
+				libovsdbOvnNBClient, libovsdbOvnSBClient,
+				record.NewFakeRecorder(0))
 
 			// configure the cluster allocators
 			for _, subnetString := range tt.networkRanges {
