@@ -89,6 +89,15 @@ func (oc *Controller) addPodExternalGW(pod *kapi.Pod) error {
 
 // addPodExternalGWForNamespace handles adding routes to all pods in that namespace for a pod GW
 func (oc *Controller) addPodExternalGWForNamespace(namespace string, pod *kapi.Pod, egress gatewayInfo) error {
+	var gws string
+	for _, ip := range egress.gws {
+		if len(gws) != 0 {
+			gws += ","
+		}
+		gws += ip.String()
+	}
+	klog.Infof("Adding routes for external gateway pod: %s, next hops: %q, namespace: %s, bfd-enabled: %t",
+		pod.Name, gws, namespace, egress.bfdEnabled)
 	nsInfo, err := oc.waitForNamespaceLocked(namespace)
 	if err != nil {
 		return err
@@ -134,7 +143,7 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 
 				_, stderr, err := util.RunOVNNbctl(nbctlArgs...)
 
-				if err != nil && !strings.Contains(err.Error(), DuplicateECMPError) {
+				if err != nil && !strings.Contains(stderr, DuplicateECMPError) {
 					return fmt.Errorf("unable to add src-ip route to GR router, stderr:%q, err:%v", stderr, err)
 				}
 				if err := oc.addHybridRoutePolicyForPod(net.ParseIP(podIP.IP), pod.Spec.NodeName); err != nil {
@@ -173,7 +182,7 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
 	defer nsInfo.Unlock()
 	// check if any gateways were stored for this pod
 	foundGws, ok := nsInfo.routingExternalPodGWs[pod]
-	if !ok {
+	if !ok || len(foundGws.gws) == 0 {
 		klog.Infof("No gateways found to remove for annotated gateway pod: %s on namespace: %s",
 			pod, namespace)
 		return
@@ -307,7 +316,7 @@ func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*ne
 							"lr-route-add", gr, podIP + mask, gw.String(), types.GWRouterToExtSwitchPrefix + gr}
 					}
 					_, stderr, err := util.RunOVNNbctl(nbctlArgs...)
-					if err != nil && !strings.Contains(err.Error(), DuplicateECMPError) {
+					if err != nil && !strings.Contains(stderr, DuplicateECMPError) {
 						return fmt.Errorf("unable to add external gwStr src-ip route to GR router, stderr:%q, err:%gw", stderr, err)
 					}
 					if err := oc.addHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
