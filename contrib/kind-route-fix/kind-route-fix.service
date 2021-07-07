@@ -1,0 +1,12 @@
+[Unit]
+Description=Fix routes for kind cluster after container restart
+After=kubelet.service
+
+[Service]
+ExecStart=/usr/local/bin/kind-route-fix.sh
+Restart=always
+StartLimitInterval=0
+RestartSec=1s
+
+[Install]
+WantedBy=multi-user.target

@@ -411,7 +411,7 @@ create_kind_cluster() {
   cat "${KUBECONFIG}"
 }
 
-docker_disable_ipv6() {
+docker_enable_ipv6() {
   # Docker disables IPv6 globally inside containers except in the eth0 interface.
   # Kind enables IPv6 globally the containers ONLY for dual-stack and IPv6 deployments.
   # Ovnkube-node tries to move all global addresses from the gateway interface to the
@@ -423,6 +423,7 @@ docker_disable_ipv6() {
   for n in $KIND_NODES; do
     $OCI_BIN exec "$n" sysctl net.ipv6.conf.all.disable_ipv6=0
     $OCI_BIN exec "$n" sysctl net.ipv6.conf.all.forwarding=1
+    $OCI_BIN exec "$n" bash -c "echo -e 'net.ipv6.conf.all.disable_ipv6=0\nnet.ipv6.conf.all.forwarding=1' > /etc/sysctl.d/50-enable-ipv6.conf"
   done
 }
 
@@ -550,6 +551,17 @@ install_ingress() {
   run_kubectl apply -f ingress/service-nodeport.yaml
 }
 
+kind_route_fix() {
+  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  for n in $KIND_NODES; do
+    $OCI_BIN cp kind-route-fix/kind-route-fix.sh "$n":/usr/local/bin/kind-route-fix.sh
+    $OCI_BIN cp kind-route-fix/kind-route-fix.service "$n":/etc/systemd/system/kind-route-fix.service
+    $OCI_BIN exec "$n" chmod +x /usr/local/bin/kind-route-fix.sh
+    $OCI_BIN exec "$n" systemctl daemon-reload
+    $OCI_BIN exec "$n" systemctl enable kind-route-fix.service
+  done
+}
+
 kubectl_wait_pods() {
   echo "Waiting for k8s to create ovn-kubernetes pod resources..."
   local PODS_CREATED=false
@@ -615,7 +627,7 @@ detect_apiserver_ip
 check_ipv6
 set_cluster_cidr_ip_families
 create_kind_cluster
-docker_disable_ipv6
+docker_enable_ipv6
 if [ $OVN_ENABLE_EX_GW_NETWORK_BRIDGE == true ]; then
   docker_create_second_interface
 fi
@@ -628,5 +640,6 @@ install_ovn
 if [ "$KIND_INSTALL_INGRESS" == true ]; then
   install_ingress
 fi
+kind_route_fix
 kubectl_wait_pods
 sleep_until_pods_settle
