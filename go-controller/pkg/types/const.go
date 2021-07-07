@@ -100,6 +100,9 @@ const (
 	GatewayLBUDP          = "UDP_lb_gateway_router"
 	GatewayLBSCTP         = "SCTP_lb_gateway_router"
 
+	// Loadbalancer options
+	OptionsHairpin = "options:hairpin_snat_ip=" + V4LBHairpinMasquradeIP + " " + V6LBHairpinMasquradeIP
+
 	// OVN-K8S Topology Versions
 	OvnSingleJoinSwitchTopoVersion = 1
 	OvnNamespacedDenyPGTopoVersion = 2
