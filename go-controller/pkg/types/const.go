@@ -74,11 +74,13 @@ const (
 	V4NodeLocalNATSubnetNextHop    = "169.254.0.1"
 	V4NodeLocalDistributedGWPortIP = "169.254.0.2"
 
-	V4MasqueradeSubnet = "169.254.169.0/30"
-	V4HostMasqueradeIP = "169.254.169.2"
-	V6HostMasqueradeIP = "fd69::2"
-	V4OVNMasqueradeIP  = "169.254.169.1"
-	V6OVNMasqueradeIP  = "fd69::1"
+	V4MasqueradeSubnet      = "169.254.169.0/30"
+	V4LBHairpinMasqueradeIP = "169.254.169.3"
+	V6LBHairpinMasqueradeIP = "fd69::3"
+	V4HostMasqueradeIP      = "169.254.169.2"
+	V6HostMasqueradeIP      = "fd69::2"
+	V4OVNMasqueradeIP       = "169.254.169.1"
+	V6OVNMasqueradeIP       = "fd69::1"
 
 	// OpenFlow and Networking constants
 	RouteAdvertisementICMPType    = 134
@@ -96,9 +98,15 @@ const (
 	WorkerLBTCP           = WorkerLBPrefix + "-tcp"
 	WorkerLBUDP           = WorkerLBPrefix + "-udp"
 	WorkerLBSCTP          = WorkerLBPrefix + "-sctp"
+	GatewayLBPostfix      = "lb_gateway_router"
 	GatewayLBTCP          = "TCP_lb_gateway_router"
 	GatewayLBUDP          = "UDP_lb_gateway_router"
 	GatewayLBSCTP         = "SCTP_lb_gateway_router"
+
+	// This option forces an OVN LB's SNAT IP to be ip4.src == 169.254.169.3 ||
+	// ip6.src == fd69::3 in the hairpin case which allows for network policy to
+	// accurately handle the case for pod -> svc -> pod traffic flows.
+	LBHairpinOptions = "options:hairpin_snat_ip=" + V4LBHairpinMasqueradeIP + " " + V6LBHairpinMasqueradeIP
 
 	// OVN-K8S Topology Versions
 	OvnSingleJoinSwitchTopoVersion = 1
