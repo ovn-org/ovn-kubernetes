@@ -42,6 +42,8 @@ const (
 	retryTimeout         = 40 * time.Second // polling timeout
 	ciNetworkName        = "kind"
 	agnhostImage         = "k8s.gcr.io/e2e-test-images/agnhost:2.26"
+	ovnWorkerNode        = "ovn-worker"
+	ovnWorkerNode2       = "ovn-worker2"
 )
 
 type podCondition = func(pod *v1.Pod) (bool, error)
@@ -510,7 +512,6 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 // Test pod connectivity to other host IP addresses
 var _ = ginkgo.Describe("test e2e pod connectivity to host addresses", func() {
 	const (
-		ovnWorkerNode string = "ovn-worker"
 		targetIP      string = "123.123.123.123"
 		svcname       string = "node-e2e-to-host"
 	)
@@ -539,8 +540,6 @@ var _ = ginkgo.Describe("test e2e inter-node connectivity between worker nodes",
 	const (
 		svcname          string = "inter-node-e2e"
 		ovnNs            string = "ovn-kubernetes"
-		ovnWorkerNode    string = "ovn-worker"
-		ovnWorkerNode2   string = "ovn-worker2"
 		ovnHaWorkerNode2 string = "ovn-control-plane2"
 		ovnHaWorkerNode3 string = "ovn-control-plane3"
 		ovnContainer     string = "ovnkube-node"
@@ -1132,7 +1131,6 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway and update validation", 
 		exGWRemoteIpAlt1    string = "10.249.3.1"
 		exGWRemoteIpAlt2    string = "10.249.4.1"
 		ovnNs               string = "ovn-kubernetes"
-		ovnWorkerNode       string = "ovn-worker"
 		ovnHaWorkerNode     string = "ovn-control-plane2"
 		ovnContainer        string = "ovnkube-node"
 		gwContainerNameAlt1 string = "gw-novxlan-test-container-alt1"
@@ -2336,8 +2334,6 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		northDBFileName           string = "ovnnb_db.db"
 		southDBFileName           string = "ovnsb_db.db"
 		dirDB                     string = "/etc/ovn"
-		ovnWorkerNode             string = "ovn-worker"
-		ovnWorkerNode2            string = "ovn-worker2"
 		haModeMinDb               int    = 0
 		haModeMaxDb               int    = 2
 	)
@@ -2641,4 +2637,59 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		framework.Logf("test simple connectivity from new pod to API server,after recovery")
 		singlePodConnectivityTest(f, "after-delete-db-pods")
 	})
+})
+// This test ensures that when a pod that's a backend for a service curls the 
+// service ip that traffic is SNATed to the special masqurade IP 169.254.169.3
+// or "fd69::3"
+var _ = ginkgo.Describe("Service Hairpin SNAT", func() { 
+	const (
+		svcName                = "service-hairpin-test"          
+		backendName            = "hairpin-backend-pod"
+		endpointHTTPPort       = 80
+		clusterHTTPPort        = 81
+		V4LBHairpinMasquradeIP = "169.254.169.3"
+		V6LBHairpinMasquradeIP = "fd69::3"
+	)
+
+	var ( 
+		svcIP string 
+		isIpv6 bool
+		ns string
+	)
+
+	f := framework.NewDefaultFramework(svcName)
+
+	ginkgo.BeforeEach(func() {
+		ns = f.Namespace.Name
+		hairpinPodSel :=  map[string]string{"hairpinbackend": "true"}
+
+		_ , err := createGenericPodWithLabel(f, backendName, ovnWorkerNode, ns, []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%v", endpointHTTPPort)}, hairpinPodSel)
+		framework.ExpectNoError(err, fmt.Sprintf("unable to make pod: %s, err: %v",backendName , err))
+		
+		ginkgo.By("creating a TCP service service-for-pods with type=ClusterIP in namespace " + ns)
+		
+		svcIP, err = createServiceForPodsWithLabel(f, ns, clusterHTTPPort, strconv.Itoa(endpointHTTPPort), "ClusterIP", hairpinPodSel)	
+		framework.ExpectNoError(err, fmt.Sprintf("unable to make service: service-for-pods, err: %v", err))
+
+		err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, "service-for-pods", 1, time.Second, wait.ForeverTestTimeout)
+		framework.ExpectNoError(err, fmt.Sprintf("service: service-for-pods never had an enpoint, err: %v", err))
+	})
+
+	ginkgo.It("Should ensure service hairpin traffic is SNATed", func() { 
+		ginkgo.By("by sending a TCP packet to service service-for-pods with type=ClusterIP in namespace " + ns + " from backend pod " + backendName)
+
+		if utilnet.IsIPv6String(svcIP) { 
+			framework.Logf("service: service-for-pods is ipv6")
+			isIpv6 = true 
+		}
+
+		clientIp := dialInPod(ns, backendName, "http", svcIP, clusterHTTPPort, "clientip")
+
+		if isIpv6 { 
+			framework.ExpectEqual(clientIp, V6LBHairpinMasquradeIP, fmt.Sprintf("returned client ipv6: %v was not correct", clientIp))
+		} else {
+			framework.ExpectEqual(clientIp, V4LBHairpinMasquradeIP, fmt.Sprintf("returned client ipv4: %v was not correct", clientIp))
+		}
+	})
+
 })
