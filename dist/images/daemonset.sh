@@ -302,7 +302,7 @@ ovn_image=${image} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_netflow_targets=${ovn_netflow_targets} \
-  ovn_sflow_targets=${ovn_netflow_targets} \
+  ovn_sflow_targets=${ovn_sflow_targets} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
@@ -330,7 +330,7 @@ ovn_image=${image} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_netflow_targets=${ovn_netflow_targets} \
-  ovn_sflow_targets=${ovn_netflow_targets} \
+  ovn_sflow_targets=${ovn_sflow_targets} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
   ovnkube_app_name=ovnkube-node-smart-nic-host \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node-smart-nic-host.yaml

@@ -88,6 +88,8 @@ jobs:
       run: |
         set -x
         pushd go-controller
+           # exit early if there are gofmt issues
+           make gofmt
            make
            make windows
            COVERALLS=1 CONTAINER_RUNNABLE=1 make check
@@ -181,10 +183,8 @@ jobs:
       run: |
         docker load --input image-master.tar
 
-    - name: Check out code into the Go module directory - from master
+    - name: Check out code into the Go module directory - from PR branch
       uses: actions/checkout@v2
-      with:
-        ref: master
 
     - name: kind setup
       run: |
@@ -216,9 +216,6 @@ jobs:
     - name: Load docker image
       run: |
         docker load --input image-pr.tar
-
-    - name: Check out code into the Go module directory - from PR branch
-      uses: actions/checkout@v2
 
     - name: ovn upgrade
       run: |
@@ -283,7 +280,6 @@ jobs:
         exclude:
          # Not currently supported but needs to be.
          - {"ipfamily": {"ip": dualstack}, "target": {"shard": control-plane}}
-         - {"ipfamily": {"ip": ipv6}, "target": {"shard": control-plane}}
          # Limit matrix combinations for CI. DISABLED items added to exclude list:
          #   DISABLED  v4  ha     local
          #   ENABLED   v4  ha     shared

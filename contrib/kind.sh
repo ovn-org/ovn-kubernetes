@@ -362,7 +362,7 @@ set_cluster_cidr_ip_families() {
     SVC_CIDR=$SVC_CIDR_IPV6
     echo "IPv6 Only Support: API_IP=$API_IP --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
   elif [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
-    IP_FAMILY="DualStack"
+    IP_FAMILY="dual"
     NET_CIDR=$NET_CIDR_IPV4,$NET_CIDR_IPV6
     SVC_CIDR=$SVC_CIDR_IPV4,$SVC_CIDR_IPV6
     echo "Dual Stack Support: API_IP=$API_IP --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
@@ -392,13 +392,6 @@ create_kind_cluster() {
   fi
   kind create cluster --name "${KIND_CLUSTER_NAME}" --kubeconfig "${KUBECONFIG}" --image kindest/node:"${K8S_VERSION}" --config=${KIND_CONFIG_LCL}
   cat "${KUBECONFIG}"
-}
-
-delete_kube_proxy() {
-  run_kubectl -n kube-system delete ds kube-proxy
-  kind get clusters
-  kind get nodes --name "${KIND_CLUSTER_NAME}"
-  kind export kubeconfig --name "${KIND_CLUSTER_NAME}"
 }
 
 docker_disable_ipv6() {
@@ -551,21 +544,6 @@ kubectl_wait_pods() {
   fi
 }
 
-cleanup_kube_proxy_iptables() {
-  # Clean up any leftover kube-proxy iptables rules that handle services
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
-  for n in $KIND_NODES; do
-    if [ "$KIND_IPV4_SUPPORT" == true ]; then
-      docker exec "$n" iptables -F KUBE-SERVICES
-      docker exec "$n" iptables -F KUBE-SERVICES -t nat
-    fi
-    if [ "$KIND_IPV6_SUPPORT" == true ]; then
-      docker exec "$n" ip6tables -F KUBE-SERVICES
-      docker exec "$n" ip6tables -F KUBE-SERVICES -t nat
-    fi
-  done
-}
-
 sleep_until_pods_settle() {
   echo "Pods are all up, allowing things settle for 30 seconds..."
   sleep 30
@@ -592,7 +570,5 @@ install_ovn
 if [ "$KIND_INSTALL_INGRESS" == true ]; then
   install_ingress
 fi
-delete_kube_proxy
 kubectl_wait_pods
-cleanup_kube_proxy_iptables
 sleep_until_pods_settle

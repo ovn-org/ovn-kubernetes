@@ -422,10 +422,6 @@ var _ = Describe("Gateway Init Operations", func() {
 	)
 
 	BeforeEach(func() {
-		var err error
-		testNS, err = testutils.NewNS()
-		Expect(err).NotTo(HaveOccurred())
-
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
 
@@ -434,6 +430,7 @@ var _ = Describe("Gateway Init Operations", func() {
 		app.Flags = config.Flags
 
 		// Set up a fake br-local & LocalnetGatewayNextHopPort
+		var err error
 		testNS, err = testutils.NewNS()
 		Expect(err).NotTo(HaveOccurred())
 		err = testNS.Do(func(ns.NetNS) error {
@@ -449,6 +446,7 @@ var _ = Describe("Gateway Init Operations", func() {
 
 	AfterEach(func() {
 		Expect(testNS.Close()).To(Succeed())
+		Expect(testutils.UnmountNS(testNS)).To(Succeed())
 	})
 	/* FIXME for updated local gw mode
 	Context("for localnet operations", func() {

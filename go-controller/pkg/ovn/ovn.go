@@ -2,9 +2,9 @@ package ovn
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
-
 	"net"
 	"reflect"
 	"strconv"
@@ -33,6 +33,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
@@ -474,6 +475,13 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 		return false
 	}
 
+	if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
+		// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
+		// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
+		// care of updating the exgw updates
+		oc.deletePodExternalGW(oldPod)
+	}
+
 	if util.PodWantsNetwork(pod) && addPort {
 		if err := oc.addLogicalPort(pod); err != nil {
 			klog.Errorf(err.Error())
@@ -481,12 +489,6 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 			return false
 		}
 	} else {
-		if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
-			// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
-			// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
-			// care of updating the exgw updates
-			oc.deletePodExternalGW(oldPod)
-		}
 		if err := oc.addPodExternalGW(pod); err != nil {
 			klog.Errorf(err.Error())
 			oc.recordPodEvent(err, pod)
@@ -863,6 +865,20 @@ func (oc *Controller) WatchNodes() {
 				}
 				gatewaysFailed.Store(node.Name, true)
 			}
+
+			// ensure pods that already exist on this node have their logical ports created
+			options := metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String()}
+			pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
+			if err != nil {
+				klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
+			} else {
+				for _, pod := range pods.Items {
+					if !oc.ensurePod(nil, &pod, true) {
+						oc.addRetryPod(&pod)
+					}
+				}
+			}
+
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
