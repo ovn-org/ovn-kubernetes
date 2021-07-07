@@ -277,8 +277,92 @@ policies            : [1ace3e52-8be3-49fa-86ae-e910ffbe4dd3, 1afd7fa9-c32d-4240-
 ports               : [28be35a4-26cf-4daf-b922-c6aa5cecf58b, 3f5b669e-6c6c-46b0-a029-c6198d47706d, 6bcbca4e-572f-4109-a71e-862292f463b2, e3e21af2-0ec5-4993-bb0c-e052b3f3eeb7, f39f5210-8ec6-4d0b-89ef-8397599cc8cf]
 static_routes       : [3d9a8a37-368a-43ca-9c62-80cdae843b77, 53cfa8f0-a10e-45aa-9a9f-8e9b4910315b, 6f992b50-5c52-4caf-a146-ba5ca45d7d6a, ae5f8b78-3253-47b1-818d-13f07f42dd48, b65fcc82-1015-40dd-99f4-5b98e7514fe0, de705ce6-3a28-42ac-b3bb-fdba55b020a5]
 ```
+## IPv6 considerations
+There are some changes when the cluster is configured to also assign IPv6
+addresses to the pods, starting with the `allow` ACLs, which now also account
+for the IPv6 addresses:
+
+```
+_uuid               : 67ed1d4d-c81e-4553-a232-f0448798462e
+action              : allow
+direction           : to-lport
+external_ids        : {default-deny-policy-type=Ingress}
+log                 : false
+match               : "outport == @a16982411286042166782 && ((igmp || (ip4.src == $a5154718082306775057 && ip4.mcast)) || (mldv1 || mldv2 || (ip6.src == $a5154715883283518635 && (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))))"
+meter               : acl-logging
+name                : default_MulticastAllowIngress
+priority            : 1012
+severity            : info
+
+_uuid               : bda7c475-613e-4dcf-8e88-024ef70b030d
+action              : allow
+direction           : from-lport
+external_ids        : {default-deny-policy-type=Egress}
+log                 : false
+match               : "inport == @a16982411286042166782 && (ip4.mcast || (mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1)))"
+meter               : acl-logging
+name                : default_MulticastAllowEgress
+priority            : 1012
+severity            : info
+```
+
+Please note that in fact there is an address set **per IP family per namespace**
+; this means the `default`  namespaces has two distinct address sets: one for
+IPv4, another for IPv6:
+
+```
+_uuid               : 2b48e408-5058-470b-8c0f-59d839d6a80f
+addresses           : ["10.244.2.9"]
+external_ids        : {name=default_v4}
+name                : a5154718082306775057
+
+_uuid               : 37076cff-9560-47c2-bbaa-312ff5e1a114
+addresses           : ["fd00:10:244:3::9"]
+external_ids        : {name=default_v6}
+name                : a5154715883283518635
+```
+
+Finally, it is also important to refer we need to specify the `mcast_ip6_src`
+option on each node's logical switch, also using the IP address of each node's
+logical router port:
+
+```
+_uuid               : e1fd9e60-831a-4ca9-ad4c-6a5bdfc018f8
+acls                : [0403fbb5-6633-46f1-8481-b329c1ccd916, f49c2de7-5f9d-42bf-a2dc-5f10b53a8347]
+dns_records         : []
+external_ids        : {}
+forwarding_groups   : []
+load_balancer       : [142ed4bf-1422-4e9a-a69f-9d07aa67abb8, 6df77979-f829-465f-9617-abc479945261, a9395376-9e96-4b1e-ac2d-8b03947db6cc, bd8a8f3a-4872-49d2-8d14-cd83c48ca265, f05994f7-3f21-457e-aa2b-896a86da319e, fa55f0a8-e3af-4467-8444-a54acfffef6d]
+name                : ovn-control-plane
+other_config        : {ipv6_prefix="fd00:10:244:1::", mcast_eth_src="0a:58:0a:f4:00:01", mcast_ip4_src="10.244.0.1", mcast_ip6_src="fe80::858:aff:fef4:1", mcast_querier="true", mcast_snoop="true", subnet="10.244.0.0/24"}
+ports               : [abea774f-d989-402a-a2af-07c066b130db, c6c6468f-6459-4072-8c98-e02bf08fb377, ecceb049-8afd-40ea-bd6d-77eab32c3302]
+qos_rules           : []
+
+_uuid               : 6b7de40a-618a-4d5a-b8b8-58e1f964ee71
+acls                : [42018b5b-31e2-4733-bcde-c6ea470836f2, d980fb54-3178-468a-981b-b43e5efa1d48]
+dns_records         : []
+external_ids        : {}
+forwarding_groups   : []
+load_balancer       : [109b7d66-2a59-4945-b067-1e51548a6f30, 6727e44b-6256-47b7-8146-0dc9561ce270, 6df77979-f829-465f-9617-abc479945261, 7e59e9b1-a2db-4005-97f3-c1b99131126f, a9395376-9e96-4b1e-ac2d-8b03947db6cc, bd8a8f3a-4872-49d2-8d14-cd83c48ca265]
+name                : ovn-worker
+other_config        : {ipv6_prefix="fd00:10:244:2::", mcast_eth_src="0a:58:0a:f4:01:01", mcast_ip4_src="10.244.1.1", mcast_ip6_src="fe80::858:aff:fef4:101", mcast_querier="true", mcast_snoop="true", subnet="10.244.1.0/24"}
+ports               : [0a9f14e7-94f0-49f2-b5df-acb123ace867, 53251da6-1c21-4e81-97f6-a9b41c64d71a, 6b5deecb-7536-4eeb-a865-2b8ca17be1fc, 8d56ad80-e45c-43b7-9f20-91d15bfc8836, a3252b54-7c2d-48e0-b2b2-36d121ca7292, cc0c791d-c6ee-4381-b8a4-91462039bfd1, f261f485-b974-4448-9751-62e883d677f2, fe77f44c-51ee-45f7-a7a2-4e03862803de]
+qos_rules           : []
+
+_uuid               : 3b4e3a69-8439-4124-a028-cb2851d80da6
+acls                : [607abd66-a12a-4387-8b3f-66c4ba4cb9a8, 9963f94c-cde0-41a1-b0cc-c3e6f5800e67]
+dns_records         : []
+external_ids        : {}
+forwarding_groups   : []
+load_balancer       : [26a7f6a7-9a5c-4023-ac55-10a860237a6d, 2fa35fce-a63a-4185-ae49-b9c09709fdea, 6df77979-f829-465f-9617-abc479945261, a9395376-9e96-4b1e-ac2d-8b03947db6cc, bd8a8f3a-4872-49d2-8d14-cd83c48ca265, c3de2c11-8cd3-4d6f-9373-7a1b54e1366a]
+name                : ovn-worker2
+other_config        : {ipv6_prefix="fd00:10:244:3::", mcast_eth_src="0a:58:0a:f4:02:01", mcast_ip4_src="10.244.2.1", mcast_ip6_src="fe80::858:aff:fef4:201", mcast_querier="true", mcast_snoop="true", subnet="10.244.2.0/24"}
+ports               : [1b40d04a-26d2-4881-ac55-6c2a5fa679a9, 35316f83-79c3-4a23-9fdd-04cefd963f54, 39c240ef-3303-4fa4-8b5c-b860d69d7c11, 44ddb1ab-56c3-4665-8f1e-02505553a950, 728221da-fe1f-41cc-90ff-9e2a8eb8fb6d, ac22f113-7e40-4657-ad7e-4444a39bfd45, bd115b86-bdc1-4427-9cc7-0ece2d9269c6, f2a89d6a-b6c8-491c-b2b1-398d37c5aa4c]
+qos_rules           : []
+```
 
 ## Sources
 - [PR introducing multicast into OVN-K](https://github.com/ovn-org/ovn-kubernetes/pull/885)
+- [PR introducing IPv6 multicast support into OVN-K](https://github.com/ovn-org/ovn-kubernetes/pull/1705)
 - [Dumitru Ceara's presentation about IGMP snooping / relay](https://www.youtube.com/watch?v=1BdLzyGHgTY)
 
