@@ -235,48 +235,65 @@ func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) []string 
 	return ipBlockMatches
 }
 
-// addNamespaceAddressSet adds a new namespace address set to the gress policy
-func (gp *gressPolicy) addNamespaceAddressSet(name, portGroupName string) {
+// addNamespaceAddressSet adds a namespace address set to the gress policy
+// if it does not exist and returns `false` if it does.
+func (gp *gressPolicy) addNamespaceAddressSet(name string) bool {
 	v4HashName, v6HashName := addressset.MakeAddressSetHashNames(name)
 	v4HashName = "$" + v4HashName
 	v6HashName = "$" + v6HashName
 
 	if gp.peerV4AddressSets.Has(v4HashName) || gp.peerV6AddressSets.Has(v6HashName) {
-		return
+		return false
 	}
-	oldL3Match := gp.getL3MatchFromAddressSet()
 	if config.IPv4Mode {
 		gp.peerV4AddressSets.Insert(v4HashName)
 	}
 	if config.IPv6Mode {
 		gp.peerV6AddressSets.Insert(v6HashName)
 	}
-	gp.localPodUpdateACL(oldL3Match, gp.getL3MatchFromAddressSet(), portGroupName)
+
+	return true
+}
+
+// addNamespaceAddressSets adds namespace address sets to the gress policy.
+func (gp *gressPolicy) addNamespaceAddressSets(namespaces []interface{}) {
+	if len(namespaces) <= 0 {
+		return
+	}
+	for _, nsInterface := range namespaces {
+		namespace, ok := nsInterface.(*v1.Namespace)
+		if !ok {
+			klog.Errorf("Spurious object in addNamespaceAddressSets: %v", nsInterface)
+			continue
+		}
+		gp.addNamespaceAddressSet(namespace.Name)
+	}
 }
 
 // delNamespaceAddressSet removes a namespace address set from the gress policy
-func (gp *gressPolicy) delNamespaceAddressSet(name, portGroupName string) {
+// and returns whether the address set was in the policy or not.
+func (gp *gressPolicy) delNamespaceAddressSet(name string) bool {
 	v4HashName, v6HashName := addressset.MakeAddressSetHashNames(name)
 	v4HashName = "$" + v4HashName
 	v6HashName = "$" + v6HashName
 
 	if !gp.peerV4AddressSets.Has(v4HashName) && !gp.peerV6AddressSets.Has(v6HashName) {
-		return
+		return false
 	}
-	oldL3Match := gp.getL3MatchFromAddressSet()
 	if config.IPv4Mode {
 		gp.peerV4AddressSets.Delete(v4HashName)
 	}
 	if config.IPv6Mode {
 		gp.peerV6AddressSets.Delete(v6HashName)
 	}
-	gp.localPodUpdateACL(oldL3Match, gp.getL3MatchFromAddressSet(), portGroupName)
+
+	return true
 }
 
-// localPodAddACL adds an ACL that implements the gress policy's rules to the
+// localPodSetACL adds or updates an ACL that implements the gress policy's rules to the
 // given Port Group (which should contain all pod logical switch ports selected
 // by the parent NetworkPolicy)
-func (gp *gressPolicy) localPodAddACL(portGroupName, portGroupUUID string, aclLogging string) {
+func (gp *gressPolicy) localPodSetACL(portGroupName, portGroupUUID string, aclLogging string) {
 	l3Match := gp.getL3MatchFromAddressSet()
 	var lportMatch string
 	var cidrMatches []string
@@ -294,7 +311,7 @@ func (gp *gressPolicy) localPodAddACL(portGroupName, portGroupUUID string, aclLo
 			// Add ACL allow rule for IPBlock CIDR
 			cidrMatches = gp.getMatchFromIPBlock(lportMatch, l4Match)
 			for i, cidrMatch := range cidrMatches {
-				if err := gp.addACLAllow(cidrMatch, l4Match, portGroupUUID, i+1, aclLogging); err != nil {
+				if err := gp.addOrModifyACLAllow(cidrMatch, l4Match, portGroupUUID, i+1, aclLogging); err != nil {
 					klog.Warningf(err.Error())
 				}
 			}
@@ -302,7 +319,7 @@ func (gp *gressPolicy) localPodAddACL(portGroupName, portGroupUUID string, aclLo
 		// if there are pod/namespace selector, then allow packets from/to that address_set or
 		// if the NetworkPolicyPeer is empty, then allow from all sources or to all destinations.
 		if gp.sizeOfAddressSet() > 0 || len(gp.ipBlock) == 0 {
-			if err := gp.addACLAllow(match, l4Match, portGroupUUID, 0, aclLogging); err != nil {
+			if err := gp.addOrModifyACLAllow(match, l4Match, portGroupUUID, 0, aclLogging); err != nil {
 				klog.Warningf(err.Error())
 			}
 		}
@@ -317,21 +334,21 @@ func (gp *gressPolicy) localPodAddACL(portGroupName, portGroupUUID string, aclLo
 			// Add ACL allow rule for IPBlock CIDR
 			cidrMatches = gp.getMatchFromIPBlock(lportMatch, l4Match)
 			for i, cidrMatch := range cidrMatches {
-				if err := gp.addACLAllow(cidrMatch, l4Match, portGroupUUID, i+1, aclLogging); err != nil {
+				if err := gp.addOrModifyACLAllow(cidrMatch, l4Match, portGroupUUID, i+1, aclLogging); err != nil {
 					klog.Warningf(err.Error())
 				}
 			}
 		}
 		if gp.sizeOfAddressSet() > 0 || len(gp.ipBlock) == 0 {
-			if err := gp.addACLAllow(match, l4Match, portGroupUUID, 0, aclLogging); err != nil {
+			if err := gp.addOrModifyACLAllow(match, l4Match, portGroupUUID, 0, aclLogging); err != nil {
 				klog.Warningf(err.Error())
 			}
 		}
 	}
 }
 
-// addACLAllow adds an ACL with a given match to the given Port Group
-func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlockCIDR int, aclLogging string) error {
+// addOrModifyACLAllow adds or modifies an ACL with a given match to the given Port Group
+func (gp *gressPolicy) addOrModifyACLAllow(match, l4Match, portGroupUUID string, ipBlockCIDR int, aclLogging string) error {
 	var direction, action, aclName, ipBlockCIDRString string
 	direction = types.DirectionToLPort
 	action = "allow-related"
@@ -364,12 +381,29 @@ func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlock
 	}
 
 	if uuid != "" {
+		// We already have an ACL. We will update it.
+		_, stderr, err = util.RunOVNNbctl("set", "acl", uuid,
+			match,
+			fmt.Sprintf("priority=%s", types.DefaultAllowPriority),
+			fmt.Sprintf("direction=%s", direction),
+			fmt.Sprintf("action=%s", action),
+			fmt.Sprintf("log=%t", aclLogging != ""),
+			fmt.Sprintf("severity=%s", getACLLoggingSeverity(aclLogging)),
+			fmt.Sprintf("meter=%s", types.OvnACLLoggingMeter),
+			fmt.Sprintf("name=%.63s", aclName),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to modify the allow-from rule for "+
+				"namespace=%s, policy=%s, stderr: %q (%v)",
+				gp.policyNamespace, gp.policyName, stderr, err)
+		}
 		return nil
 	}
 
 	_, stderr, err = util.RunOVNNbctl("--id=@acl", "create",
 		"acl", fmt.Sprintf("priority=%s", types.DefaultAllowPriority),
-		fmt.Sprintf("direction=%s", direction), match,
+		fmt.Sprintf("direction=%s", direction),
+		match,
 		fmt.Sprintf("action=%s", action),
 		fmt.Sprintf("log=%t", aclLogging != ""),
 		fmt.Sprintf("severity=%s", getACLLoggingSeverity(aclLogging)),
@@ -386,33 +420,6 @@ func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlock
 		return fmt.Errorf("failed to create the acl allow rule for "+
 			"namespace=%s, policy=%s, stderr: %q (%v)", gp.policyNamespace,
 			gp.policyName, stderr, err)
-	}
-
-	return nil
-}
-
-// modifyACLAllow updates an ACL with a new match
-func (gp *gressPolicy) modifyACLAllow(oldMatch, newMatch string) error {
-	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "ACL", oldMatch,
-		fmt.Sprintf("external-ids:namespace=%s", gp.policyNamespace),
-		fmt.Sprintf("external-ids:policy=%s", gp.policyName),
-		fmt.Sprintf("external-ids:%s_num=%d", gp.policyType, gp.idx),
-		fmt.Sprintf("external-ids:policy_type=%s", gp.policyType))
-	if err != nil {
-		return fmt.Errorf("find failed to get the allow rule for "+
-			"namespace=%s, policy=%s, stderr: %q (%v)",
-			gp.policyNamespace, gp.policyName, stderr, err)
-	}
-	if uuid == "" {
-		return nil
-	}
-
-	// We already have an ACL. We will update it.
-	if _, stderr, err = util.RunOVNNbctl("set", "acl", uuid, newMatch); err != nil {
-		return fmt.Errorf("failed to modify the allow-from rule for "+
-			"namespace=%s, policy=%s, stderr: %q (%v)",
-			gp.policyNamespace, gp.policyName, stderr, err)
 	}
 
 	return nil
@@ -444,40 +451,11 @@ func constructIPBlockStringsForACL(direction string, ipBlocks []*knet.IPBlock, l
 	return matchStrings
 }
 
-// localPodUpdateACL updates an existing ACL that implements the gress policy's rules
-func (gp *gressPolicy) localPodUpdateACL(oldl3Match, newl3Match, portGroupName string) {
-	var lportMatch string
-	if gp.policyType == knet.PolicyTypeIngress {
-		lportMatch = fmt.Sprintf("outport == @%s", portGroupName)
-	} else {
-		lportMatch = fmt.Sprintf("inport == @%s", portGroupName)
-	}
-	if len(gp.portPolicies) == 0 {
-		oldMatch := fmt.Sprintf("match=\"%s && %s\"", oldl3Match, lportMatch)
-		newMatch := fmt.Sprintf("match=\"%s && %s\"", newl3Match, lportMatch)
-		if err := gp.modifyACLAllow(oldMatch, newMatch); err != nil {
-			klog.Warningf(err.Error())
-		}
-	}
-	for _, port := range gp.portPolicies {
-		l4Match, err := port.getL4Match()
-		if err != nil {
-			continue
-		}
-		oldMatch := fmt.Sprintf("match=\"%s && %s && %s\"", oldl3Match, l4Match, lportMatch)
-		newMatch := fmt.Sprintf("match=\"%s && %s && %s\"", newl3Match, l4Match, lportMatch)
-		if err := gp.modifyACLAllow(oldMatch, newMatch); err != nil {
-			klog.Warningf(err.Error())
-		}
-	}
-}
-
 func (gp *gressPolicy) destroy() error {
 	if gp.peerAddressSet != nil {
 		if err := gp.peerAddressSet.Destroy(); err != nil {
 			return err
 		}
-		gp.peerAddressSet = nil
 	}
 	return nil
 }

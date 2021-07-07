@@ -258,8 +258,8 @@ func gatewayInitInternal(nodeName, gwIntf string, subnets []*net.IPNet, gwNextHo
 
 func gatewayReady(patchPort string) (bool, error) {
 	// Get ofport of patchPort
-	ofportPatch, _, err := util.RunOVSVsctl("--if-exists", "get", "interface", patchPort, "ofport")
-	if err != nil || len(ofportPatch) == 0 {
+	_, _, err := util.GetOVSOfPort("--if-exists", "get", "interface", patchPort, "ofport")
+	if err != nil {
 		return false, nil
 	}
 	klog.Info("Gateway is ready")

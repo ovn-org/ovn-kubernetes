@@ -33,8 +33,8 @@ jobs:
         working-directory: go-controller
         args: --modules-download-mode=vendor --timeout=15m0s --verbose
 
-  build:
-    name: Build
+  build-master:
+    name: Build-master
     runs-on: ubuntu-latest
     steps:
     - name: Set up Go
@@ -43,32 +43,72 @@ jobs:
         go-version: ${{ env.GO_VERSION }}
       id: go
 
-    - name: Check out code into the Go module directory
+    - name: Check out code into the Go module directory - from master branch
       uses: actions/checkout@v2
+      with:
+        ref: master
 
-    - name: Build and Test
+    - name: Build - from master branch
       run: |
         set -x
         pushd go-controller
            make
            make windows
-           COVERALLS=1 CONTAINER_RUNNABLE=1 make check
         popd
 
-    - name: Build docker image
+    - name: Build docker image - from master branch
       run: |
         pushd dist/images
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
           docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
           mkdir _output
-          docker save ovn-daemonset-f:dev > _output/image.tar
+          docker save ovn-daemonset-f:dev > _output/image-master.tar
         popd
 
     - uses: actions/upload-artifact@v2
       with:
-        name: test-image
-        path: dist/images/_output/image.tar
+        name: test-image-master
+        path: dist/images/_output/image-master.tar
+
+  build-pr:
+    name: Build-PR
+    runs-on: ubuntu-latest
+    steps:
+    - name: Set up Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: ${{ env.GO_VERSION }}
+      id: go
+
+    - name: Check out code into the Go module directory - from current pr branch
+      uses: actions/checkout@v2
+
+    - name: Build and Test - from current pr branch
+      run: |
+        set -x
+        pushd go-controller
+           # exit early if there are gofmt issues
+           make gofmt
+           make
+           make windows
+           COVERALLS=1 CONTAINER_RUNNABLE=1 make check
+        popd
+
+    - name: Build docker image - from current pr branch
+      run: |
+        pushd dist/images
+          sudo cp -f ../../go-controller/_output/go/bin/ovn* .
+          echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
+          docker build -t ovn-daemonset-f:pr -f Dockerfile.fedora .
+          mkdir _output
+          docker save ovn-daemonset-f:pr > _output/image-pr.tar
+        popd
+
+    - uses: actions/upload-artifact@v2
+      with:
+        name: test-image-pr
+        path: dist/images/_output/image-pr.tar
 
     - name: Upload Junit Reports
       if: always()
@@ -92,6 +132,112 @@ jobs:
 
         gover
         goveralls -coverprofile=gover.coverprofile -service=github
+
+  ovn-upgrade-e2e:
+    name: Upgrade OVN from Master to PR branch based image
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    needs:
+      - build-master
+      - build-pr
+    strategy:
+      fail-fast: false
+      matrix:
+        gateway-mode: [local, shared]
+    env:
+      JOB_NAME: "Upgrade-Tests-${{ matrix.gateway-mode }}"
+      OVN_HA: "false"
+      KIND_IPV4_SUPPORT: "true"
+      KIND_IPV6_SUPPORT: "false"
+      OVN_HYBRID_OVERLAY_ENABLE: "false"
+      OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
+      OVN_MULTICAST_ENABLE:  "false"
+    steps:
+    - name: Set up Go
+      uses: actions/setup-go@v1
+      with:
+        go-version: ${{ env.GO_VERSION }}
+      id: go
+
+    - name: Set up environment
+      run: |
+        export GOPATH=$(go env GOPATH)
+        echo "GOPATH=$GOPATH" >> $GITHUB_ENV
+        echo "$GOPATH/bin" >> $GITHUB_PATH
+
+    - name: Free up disk space
+      run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
+
+    - uses: actions/download-artifact@v2
+      with:
+        name: test-image-master
+
+    - name: Disable ufw
+      # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
+      # Not needed for KIND deployments, so just disable all the time.
+      run: |
+        sudo ufw disable
+
+    - name: Load docker image
+      run: |
+        docker load --input image-master.tar
+
+    - name: Check out code into the Go module directory - from PR branch
+      uses: actions/checkout@v2
+
+    - name: kind setup
+      run: |
+        export OVN_IMAGE="ovn-daemonset-f:dev"
+        make -C test install-kind
+
+    - name: Export logs
+      if: always()
+      run: |
+        mkdir -p /tmp/kind/logs
+        kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
+        set -x
+        docker ps -a
+        docker exec ovn-control-plane crictl images 
+        docker exec ovn-worker crictl images
+        docker exec ovn-worker2 crictl images 
+
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v2
+      with:
+        name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
+        path: /tmp/kind/logs
+
+    - uses: actions/download-artifact@v2
+      with:
+        name: test-image-pr
+
+    - name: Load docker image
+      run: |
+        docker load --input image-pr.tar
+
+    - name: ovn upgrade
+      run: |
+        export OVN_IMAGE="ovn-daemonset-f:pr"
+        make -C test upgrade-ovn
+
+    - name: Run Single-Stack Tests
+      run: |
+        make -C test shard-test WHAT="Networking Granular Checks"
+
+    - name: Export logs
+      if: always()
+      run: |
+        mkdir -p /tmp/kind/logs-kind-pr-branch
+        kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs-kind-pr-branch
+
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v2
+      with:
+        name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}-after-upgrade
+        path: /tmp/kind/logs-kind-pr-branch
 
   e2e:
     name: e2e
@@ -134,7 +280,6 @@ jobs:
         exclude:
          # Not currently supported but needs to be.
          - {"ipfamily": {"ip": dualstack}, "target": {"shard": control-plane}}
-         - {"ipfamily": {"ip": ipv6}, "target": {"shard": control-plane}}
          # Limit matrix combinations for CI. DISABLED items added to exclude list:
          #   DISABLED  v4  ha     local
          #   ENABLED   v4  ha     shared
@@ -158,7 +303,7 @@ jobs:
          # in agnhost images. Disable them for now.
          - {"ipfamily": {"ip": dualstack}, "target": {"shard": {"multicast-enable": "true"}}}
          - {"ipfamily": {"ip": ipv6}, "target": {"shard": {"multicast-enable": "true"}}}
-    needs: [build]
+    needs: [ build-pr ]
     env:
       JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}"
       OVN_HA: "${{ matrix.ha.enabled }}"
@@ -187,30 +332,25 @@ jobs:
         export GOPATH=$(go env GOPATH)
         echo "GOPATH=$GOPATH" >> $GITHUB_ENV
         echo "$GOPATH/bin" >> $GITHUB_PATH
-
     - name: Disable ufw
       # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
       # Not needed for KIND deployments, so just disable all the time.
       run: |
         sudo ufw disable
-
     - uses: actions/download-artifact@v2
       with:
-        name: test-image
+        name: test-image-pr
 
     - name: Load docker image
       run: |
-        docker load --input image.tar
-
+        docker load --input image-pr.tar
     - name: kind setup
       run: |
-        export OVN_IMAGE="ovn-daemonset-f:dev"
+        export OVN_IMAGE="ovn-daemonset-f:pr"
         make -C test install-kind
-
     - name: Run Tests
       run: |
         make -C test ${{ matrix.target.shard }}
-
     - name: Upload Junit Reports
       if: always()
       uses: actions/upload-artifact@v2
@@ -237,7 +377,6 @@ jobs:
       run: |
         mkdir -p /tmp/kind/logs
         kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
-
     - name: Upload logs
       if: always()
       uses: actions/upload-artifact@v2
@@ -254,7 +393,7 @@ jobs:
       fail-fast: false
       matrix:
         gateway-mode: [local, shared]
-    needs: [build]
+    needs: [ build-pr ]
     env:
       JOB_NAME: "DualStack-conversion-${{ matrix.gateway-mode }}"
       OVN_HA: "true"
@@ -279,40 +418,33 @@ jobs:
         export GOPATH=$(go env GOPATH)
         echo "GOPATH=$GOPATH" >> $GITHUB_ENV
         echo "$GOPATH/bin" >> $GITHUB_PATH
-
     - name: Disable ufw
       # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
       # Not needed for KIND deployments, so just disable all the time.
       run: |
         sudo ufw disable
-
     - uses: actions/download-artifact@v2
       with:
-        name: test-image
+        name: test-image-pr
 
     - name: Load docker image
       run: |
-        docker load --input image.tar
-
+        docker load --input image-pr.tar
     - name: kind IPv4 setup
       run: |
-        export OVN_IMAGE="ovn-daemonset-f:dev"
+        export OVN_IMAGE="ovn-daemonset-f:pr"
         make -C test install-kind
-
     - name: Run Single-Stack Tests
       run: |
         make -C test shard-test WHAT="Networking Granular Checks"
-
     - name: Convert IPv4 cluster to Dual Stack
       run: |
         ./contrib/kind-dual-stack-conversion.sh
-
     - name: Run Dual-Stack Tests
       run: |
         KIND_IPV4_SUPPORT="true"
         KIND_IPV6_SUPPORT="true"
         make -C test shard-test WHAT="Networking Granular Checks\|DualStack"
-
     - name: Upload Junit Reports
       if: always()
       uses: actions/upload-artifact@v2
@@ -339,7 +471,6 @@ jobs:
       run: |
         mkdir -p /tmp/kind/logs
         kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
-
     - name: Upload logs
       if: always()
       uses: actions/upload-artifact@v2
@@ -375,7 +506,7 @@ jobs:
             name: "Dualstack"
             ipv4: true
             ipv6: true
-    needs: [ build ]
+    needs: [ build-pr ]
     env:
       JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}"
       OVN_HA: "${{ matrix.ha.enabled }}"
@@ -402,29 +533,24 @@ jobs:
           export GOPATH=$(go env GOPATH)
           echo "GOPATH=$GOPATH" >> $GITHUB_ENV
           echo "$GOPATH/bin" >> $GITHUB_PATH
-
       - name: Disable ufw
         # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
         # Not needed for KIND deployments, so just disable all the time.
         run: |
           sudo ufw disable
-
       - uses: actions/download-artifact@v2
         with:
-          name: test-image
+          name: test-image-pr
       - name: Load docker image
         run: |
-          docker load --input image.tar
-
+          docker load --input image-pr.tar
       - name: kind setup
         run: |
-          export OVN_IMAGE="ovn-daemonset-f:dev"
+          export OVN_IMAGE="ovn-daemonset-f:pr"
           make -C test install-kind
-
       - name: Run Tests
         run: |
           make -C test ${{ matrix.target.shard }}
-
       - name: Upload Junit Reports
         if: always()
         uses: actions/upload-artifact@v2
@@ -451,7 +577,6 @@ jobs:
         run: |
           mkdir -p /tmp/kind/logs
           kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
-
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v2

@@ -83,6 +83,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 }
 
 func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
+	oc.deletePodExternalGW(pod)
 	if pod.Spec.HostNetwork {
 		return
 	}
@@ -133,7 +134,6 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		oc.deletePerPodGRSNAT(pod.Spec.NodeName, portInfo.ips)
 	}
 	oc.deleteGWRoutesForPod(pod.Namespace, portInfo.ips)
-	oc.deletePodExternalGW(pod)
 	oc.logicalPortCache.remove(logicalPort)
 }
 

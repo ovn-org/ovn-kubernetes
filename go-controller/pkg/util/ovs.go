@@ -377,6 +377,15 @@ func RunOVSVsctl(args ...string) (string, string, error) {
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
+// GetOVSOfPort runs get ofport via ovs-vsctl and handle special return strings.
+func GetOVSOfPort(args ...string) (string, string, error) {
+	stdout, stderr, err := RunOVSVsctl(args...)
+	if stdout == "[]" || stdout == "-1" {
+		err = fmt.Errorf("%s return invalid result %s err %s", args, stdout, err)
+	}
+	return stdout, stderr, err
+}
+
 // RunOVSAppctlWithTimeout runs a command via ovs-appctl.
 func RunOVSAppctlWithTimeout(timeout int, args ...string) (string, string, error) {
 	cmdArgs := []string{fmt.Sprintf("--timeout=%d", timeout)}

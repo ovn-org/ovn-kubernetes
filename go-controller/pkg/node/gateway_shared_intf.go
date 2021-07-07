@@ -230,14 +230,14 @@ func newSharedGatewayOpenFlowManager(patchPort, macAddress, gwBridge, gwIntf str
 	maxPktLength := getMaxFrameLength()
 
 	// Get ofport of patchPort
-	ofportPatch, stderr, err := util.RunOVSVsctl("get", "Interface", patchPort, "ofport")
+	ofportPatch, stderr, err := util.GetOVSOfPort("get", "Interface", patchPort, "ofport")
 	if err != nil {
 		return nil, fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
 			"while getting ofport. stderr: %q, error: %v", patchPort, stderr, err)
 	}
 
 	// Get ofport of physical interface
-	ofportPhys, stderr, err := util.RunOVSVsctl("get", "interface", gwIntf, "ofport")
+	ofportPhys, stderr, err := util.GetOVSOfPort("get", "interface", gwIntf, "ofport")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
 			gwIntf, stderr, err)
@@ -593,7 +593,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 
 func newNodePortWatcher(patchPort, gwBridge, gwIntf string, ofm *openflowManager) (*nodePortWatcher, error) {
 	// Get ofport of patchPort
-	ofportPatch, stderr, err := util.RunOVSVsctl("--if-exists", "get",
+	ofportPatch, stderr, err := util.GetOVSOfPort("--if-exists", "get",
 		"interface", patchPort, "ofport")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
@@ -601,7 +601,7 @@ func newNodePortWatcher(patchPort, gwBridge, gwIntf string, ofm *openflowManager
 	}
 
 	// Get ofport of physical interface
-	ofportPhys, stderr, err := util.RunOVSVsctl("--if-exists", "get",
+	ofportPhys, stderr, err := util.GetOVSOfPort("--if-exists", "get",
 		"interface", gwIntf, "ofport")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",

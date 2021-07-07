@@ -45,10 +45,13 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 		app.Flags = config.Flags
 
 		fexec = ovntest.NewFakeExec()
-		err := util.SetExec(fexec)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		asFactory = NewOvnAddressSetFactory()
+	})
+
+	ginkgo.JustBeforeEach(func() {
+		err := util.SetExec(fexec)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
 	ginkgo.Context("when iterating address sets", func() {
@@ -87,7 +90,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 					Output: namespacesRes,
 				})
 
-				err = asFactory.ForEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) {
+				err = asFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) {
 					found := false
 					for _, n := range namespaces {
 						name := n.makeName()
@@ -569,6 +572,90 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				err = as.DeleteIPs([]net.IP{net.ParseIP(addr1)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+	})
+
+	ginkgo.Context("Dual Stack : when cleaning up old address sets", func() {
+		ginkgo.BeforeEach(func() {
+			fexec = ovntest.NewLooseCompareFakeExec()
+		})
+
+		ginkgo.It("destroys address sets in old non dual stack format", func() {
+			app.Action = func(ctx *cli.Context) error {
+				_, err := config.InitConfig(ctx, fexec, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				namespaces := []testAddressSetName{
+					{
+						// to be removed as v4 address exists
+						namespace: "as1",
+					},
+					{
+						// to be removed as v6 address exists
+						namespace: "as2",
+					},
+					{
+						// to be removed as both v4 & v6 address exists
+						namespace: "as3",
+					},
+					{
+						// not to be removed, no v4 or v6 address exists
+						namespace: "as4",
+					},
+					{
+						// not to be removed, address in new dual stack format
+						namespace: "as1",
+						suffix2:   ipv4AddressSetSuffix,
+					},
+					{
+						// not to be removed, address in new dual stack format
+						namespace: "as2",
+						suffix2:   ipv6AddressSetSuffix,
+					},
+					{
+						// not to be removed, address in new dual stack format
+						namespace: "as3",
+						suffix2:   ipv4AddressSetSuffix,
+					},
+					{
+						// not to be removed, address in new dual stack format
+						namespace: "as3",
+						suffix2:   ipv6AddressSetSuffix,
+					},
+					{
+						// not to be removed, address in new dual stack format
+						namespace: "as5",
+						suffix2:   ipv4AddressSetSuffix,
+					},
+					{
+						// not to be removed, address in new dual stack format
+						namespace: "as5",
+						suffix2:   ipv6AddressSetSuffix,
+					},
+				}
+
+				var namespacesRes string
+				for _, n := range namespaces {
+					namespacesRes += fmt.Sprintf("name=%s\n", n.makeName())
+				}
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=external_ids find address_set",
+					Output: namespacesRes,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + hashedAddressSet(namespaces[0].makeName()),
+					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + hashedAddressSet(namespaces[1].makeName()),
+					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + hashedAddressSet(namespaces[2].makeName()),
+				})
+
+				err = NonDualStackAddressSetCleanup()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}

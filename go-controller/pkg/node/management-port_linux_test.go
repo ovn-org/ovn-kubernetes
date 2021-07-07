@@ -268,6 +268,7 @@ var _ = Describe("Management Port Operations", func() {
 
 	AfterEach(func() {
 		Expect(testNS.Close()).To(Succeed())
+		Expect(testutils.UnmountNS(testNS)).To(Succeed())
 	})
 
 	const (

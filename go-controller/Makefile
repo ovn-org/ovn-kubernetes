@@ -20,6 +20,7 @@ else
 CONTAINER_RUNTIME=docker
 endif
 CONTAINER_RUNNABLE ?= $(shell $(CONTAINER_RUNTIME) -v > /dev/null 2>&1; echo $$?)
+OVN_VERSION ?= v20.12.0
 
 .PHONY: all build check test
 
@@ -45,7 +46,7 @@ else
 	RACE=1 hack/test-go.sh
 endif
 
-codegen:
+codegen: pkg/nbdb/ovn-nb.ovsschema pkg/sbdb/ovn-sb.ovsschema
 	hack/update-codegen.sh
 
 install:
@@ -57,6 +58,8 @@ install:
 clean:
 	rm -rf ${OUT_DIR}
 	rm -rf ${TEST_REPORT_DIR}
+	rm -f ./pkg/nbdb/ovn-nb.ovsschema
+	rm -f ./pkg/sbdb/ovn-sb.ovsschema
 
 .PHONY: install.tools lint gofmt
 
@@ -76,3 +79,9 @@ ifeq ($(CONTAINER_RUNNABLE), 0)
 else
 	@./hack/verify-gofmt.sh
 endif
+
+pkg/nbdb/ovn-nb.ovsschema:
+	curl -sSL https://raw.githubusercontent.com/ovn-org/ovn/$(OVN_VERSION)/ovn-nb.ovsschema -o $@
+
+pkg/sbdb/ovn-sb.ovsschema:
+	curl -sSL https://raw.githubusercontent.com/ovn-org/ovn/$(OVN_VERSION)/ovn-sb.ovsschema -o $@
