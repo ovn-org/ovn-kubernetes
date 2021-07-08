@@ -243,7 +243,8 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 
 	waiter.AddWait(gw.readyFunc, initGw)
 	n.gateway = gw
-	return err
+
+	return n.validateGatewayMTU(gatewayIntf)
 }
 
 // CleanupClusterNode cleans up OVS resources on the k8s node on ovnkube-node daemonset deletion.

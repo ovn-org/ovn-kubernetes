@@ -21,6 +21,7 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -519,6 +520,47 @@ func (n *OvnNode) WatchEndpoints() {
 			}
 		},
 	}, nil)
+}
+
+// validateGatewayMTU checks if the MTU of the given network interface is big
+// enough to carry the `config.Default.MTU` and the Geneve header. If the MTU
+// is not big enough, it will taint the node with the value of
+// `types.OvnK8sSmallMTUTaintKey`
+func (n *OvnNode) validateGatewayMTU(gatewayInterfaceName string) error {
+	// TODO: find a better place for these constants
+	const geneveHeaderLengthIPv4 = 58 // https://github.com/openshift/cluster-network-operator/pull/720#issuecomment-664020823
+	const geneveHeaderLengthIPv6 = geneveHeaderLengthIPv4 + 20
+	tooSmallMTUTaint := &kapi.Taint{Key: types.OvnK8sSmallMTUTaintKey, Effect: kapi.TaintEffectNoSchedule}
+
+	mtu, err := util.GetNetworkInterfaceMTU(gatewayInterfaceName)
+	if err != nil {
+		return fmt.Errorf("could not get MTU from gateway network interface %s: %w", gatewayInterfaceName, err)
+	}
+
+	// calc required MTU
+	var requiredMTU int
+	if config.IPv4Mode && !config.IPv6Mode {
+		// we run in single-stack IPv4 only
+		requiredMTU = config.Default.MTU + geneveHeaderLengthIPv4
+	} else {
+		// we run in single-stack IPv6 or dual-stack mode
+		requiredMTU = config.Default.MTU + geneveHeaderLengthIPv6
+	}
+
+	// check if node needs to be tainted
+	if mtu < requiredMTU {
+		klog.V(2).Infof("MTU (%d) of gateway network interface %s is not big enough to deal with Geneve header overhead (sum %d). Tainting node with %v...", mtu, gatewayInterfaceName, requiredMTU, tooSmallMTUTaint)
+
+		return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			return n.Kube.SetTaintOnNode(n.name, tooSmallMTUTaint)
+		})
+	} else {
+		klog.V(2).Infof("MTU (%d) of gateway network interface %s is big enough to deal with Geneve header overhead (sum %d). Making sure node is not tainted with %v...", mtu, gatewayInterfaceName, requiredMTU, tooSmallMTUTaint)
+
+		return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			return n.Kube.RemoveTaintFromNode(n.name, tooSmallMTUTaint)
+		})
+	}
 }
 
 type epAddressItem struct {
