@@ -151,7 +151,12 @@ func TestDeleteLoadBalancerVIP(t *testing.T) {
 			if err != nil {
 				t.Errorf("fexec error: %v", err)
 			}
-			err = DeleteLoadBalancerVIP(tt.loadBalancer, tt.vip)
+			txn := util.NewNBTxn()
+			err = DeleteLoadBalancerVIP(txn, tt.loadBalancer, tt.vip)
+			if err != nil {
+				t.Errorf("DeleteLoadBalancerVIP error: %v", err)
+			}
+			_, _, err = txn.Commit()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("DeleteLoadBalancerVIP() error = %v, wantErr %v", err, tt.wantErr)
 				return
