@@ -243,8 +243,12 @@ func (c *Controller) syncServices(key string) error {
 	if err != nil || !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
 		err = deleteVIPsFromAllOVNBalancers(vipsTracked, name, namespace)
 		if err != nil {
-			c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToDeleteOVNLoadBalancer",
-				"Error trying to delete the OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
+			// If the service wasn't found, don't panic sending an
+			// an event after cleaning it up
+			if service != nil {
+				c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToDeleteOVNLoadBalancer",
+					"Error trying to delete the OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
+			}
 			return err
 		}
 		// Delete the Service form the Service Tracker

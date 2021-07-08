@@ -90,7 +90,7 @@ func deleteVIPsFromNonIdlingOVNBalancers(vips sets.String, name, namespace strin
 
 	for proto := range foundProtocols {
 		if err := loadbalancer.DeleteLoadBalancerVIPs(lbsPerProtocol[proto].List(), vipsPerProtocol[proto].List()); err != nil {
-			klog.Errorf("Error deleting VIP %v on OVN LoadBalancer %v", vipsPerProtocol[proto].List(), lbsPerProtocol[proto].List())
+			klog.Errorf("Error deleting VIP %v on OVN LoadBalancer %v: %v", vipsPerProtocol[proto].List(), lbsPerProtocol[proto].List(), err)
 			return err
 		}
 	}
