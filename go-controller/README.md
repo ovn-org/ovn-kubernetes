@@ -4,7 +4,7 @@ The golang based ovn controller is a reliable way to deploy the OVN SDN using ku
 
 ### Build
 
-Ensure go version >= 1.8
+Ensure go version >= 1.15
 
 ```
 cd go-controller
