@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
@@ -46,6 +47,7 @@ const (
 
 // NewController returns a new *Controller.
 func NewController(client clientset.Interface,
+	nbClient libovsdbclient.Client,
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
 	clusterPortGroupUUID string,
@@ -60,6 +62,7 @@ func NewController(client clientset.Interface,
 
 	c := &Controller{
 		client:           client,
+		nbClient:         nbClient,
 		serviceTracker:   st,
 		queue:            workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), controllerName),
 		workerLoopPeriod: time.Second,
@@ -97,7 +100,11 @@ func NewController(client clientset.Interface,
 
 // Controller manages selector-based service endpoints.
 type Controller struct {
-	client           clientset.Interface
+	client clientset.Interface
+
+	// libovsdb northbound client interface
+	nbClient libovsdbclient.Client
+
 	eventBroadcaster record.EventBroadcaster
 	eventRecorder    record.EventRecorder
 

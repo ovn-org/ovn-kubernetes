@@ -2,8 +2,6 @@ package ovsdb
 
 import (
 	"encoding/json"
-	"fmt"
-	"reflect"
 )
 
 const (
@@ -126,75 +124,4 @@ func ovsSliceToGoNotation(val interface{}) (interface{}, error) {
 		return val, nil
 	}
 	return val, nil
-}
-
-// interfaceToSetMapOrUUIDInterface takes a reflect.Value and converts it to
-// the correct OVSDB Notation (Set, Map, UUID) using reflection
-func interfaceToOVSDBNotationInterface(v reflect.Value) (interface{}, error) {
-	// if value is a scalar value, it will be an interface that can
-	// be type asserted back to string, float64, int etc...
-	if v.Kind() != reflect.Slice && v.Kind() != reflect.Array {
-		return v.Interface(), nil
-	}
-	// if its a set, map or uuid here we need to convert it to the correct type, not []interface{}
-	s := v.Slice(0, v.Len())
-	first := s.Index(0)
-	// assert that our first element is a string value
-	if first.Elem().Kind() != reflect.String {
-		return nil, fmt.Errorf("first element of array/slice is not a string: %v %s", first, first.Kind().String())
-	}
-	switch first.Elem().String() {
-	case "uuid", "named-uuid":
-		uuid := s.Index(1).Elem().String()
-		return UUID{GoUUID: uuid}, nil
-	case "set":
-		// second is the second element of the slice
-		second := s.Index(1).Elem()
-		// in a set, it must be a slice
-		if second.Kind() != reflect.Slice && second.Kind() != reflect.Array {
-			return nil, fmt.Errorf("second element of set is not a slice")
-		}
-		ss := second.Slice(0, second.Len())
-
-		// check first index of second element
-		// if it's not a slice or array this is a set of scalar values
-		if ss.Index(0).Elem().Kind() != reflect.Slice && ss.Index(0).Elem().Kind() != reflect.Array {
-			si := second.Interface()
-			set := OvsSet{GoSet: si.([]interface{})}
-			return set, nil
-		}
-		innerSet := []interface{}{}
-		// iterate over the slice and extract the uuid, adding a UUID object to our innerSet
-		for i := 0; i < ss.Len(); i++ {
-			uuid := ss.Index(i).Elem().Index(1).Elem().String()
-			innerSet = append(innerSet, UUID{GoUUID: uuid})
-		}
-		return OvsSet{GoSet: innerSet}, nil
-	case "map":
-		ovsMap := OvsMap{GoMap: make(map[interface{}]interface{})}
-		second := s.Index(1).Elem()
-		for i := 0; i < second.Len(); i++ {
-			pair := second.Index(i).Elem().Slice(0, 2)
-			var key interface{}
-			// check if key is slice or array, in which case we can infer that it's a UUUID
-			if pair.Index(0).Elem().Kind() == reflect.Slice || pair.Index(0).Elem().Kind() == reflect.Array {
-				uuid := pair.Index(0).Elem().Index(1).Elem().String()
-				key = UUID{GoUUID: uuid}
-			} else {
-				key = pair.Index(0).Interface()
-			}
-			// check if value is slice or array, in which case we can infer that it's a UUUID
-			var value interface{}
-			if pair.Index(1).Elem().Kind() == reflect.Slice || pair.Index(1).Elem().Kind() == reflect.Array {
-				uuid := pair.Index(1).Elem().Index(1).Elem().String()
-				value = UUID{GoUUID: uuid}
-			} else {
-				value = pair.Index(1).Elem().Interface()
-			}
-			ovsMap.GoMap[key] = value
-		}
-		return ovsMap, nil
-	default:
-		return nil, fmt.Errorf("unsupported notation. expected <uuid>,<named-uuid>,<set> or <map>. got %v", v)
-	}
 }
