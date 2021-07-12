@@ -213,9 +213,11 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 
 	// we need to setup a reroute policy for hybrid overlay subnet
 	// this is so hybrid pod -> service -> hybrid endpoint will reroute to the DR IP
-	if err := setupHybridLRPolicySharedGw(subnets, node.Name, portMAC); err != nil {
-		return fmt.Errorf("unable to setup Hybrid Subnet Logical Route Policy for node: %s, error: %v",
-			node.Name, err)
+	if len(config.HybridOverlay.ClusterSubnets) > 0 {
+		if err := setupHybridLRPolicySharedGw(subnets, node.Name, portMAC); err != nil {
+			return fmt.Errorf("unable to setup Hybrid Subnet Logical Route Policy for node: %s, error: %v",
+				node.Name, err)
+		}
 	}
 
 	if !lspOK {
