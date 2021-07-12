@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
 	utilnet "k8s.io/utils/net"
 
@@ -408,6 +409,32 @@ func runCommand(cmd ...string) (string, error) {
 	return string(output), nil
 }
 
+// restartOVNKubeNodePod restarts the ovnkube-node pod from namespace, running on nodeName
+func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nodeName string) error {
+	ovnKubeNodePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
+		LabelSelector: "name=ovnkube-node",
+		FieldSelector: "spec.nodeName=" + nodeName,
+	})
+	if err != nil {
+		return fmt.Errorf("could not get ovnkube-node pods: %w", err)
+	}
+
+	if len(ovnKubeNodePods.Items) <= 0 {
+		return fmt.Errorf("could not find ovnkube-node pod running on node %s", nodeName)
+	}
+	for _, pod := range ovnKubeNodePods.Items {
+		if err := e2epod.DeletePodWithWait(clientset, &pod); err != nil {
+			return fmt.Errorf("could not delete ovnkube-node pod on node %s: %w", nodeName, err)
+		}
+	}
+
+	if err := e2epod.WaitForPodsReady(clientset, namespace, "ovnkube-node", 15); err != nil {
+		return fmt.Errorf("could not wait for ovnkube-node pod be be ready again: %w", err)
+	}
+
+	return nil
+}
+
 var _ = ginkgo.Describe("e2e control plane", func() {
 	var svcname = "nettest"
 
@@ -504,6 +531,106 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		time.Sleep(10 * time.Second)
 
 		framework.ExpectNoError(<-errChan)
+	})
+
+	ginkgo.Describe("test tainting a node according to its defaults interface MTU size", func() {
+		const testNodeName = "ovn-worker"
+		var tooSmallMTUTaint = v1.Taint{Key: "k8s.ovn.org/mtu-too-small", Effect: v1.TaintEffectNoSchedule}
+		var originalMTU int
+
+		ginkgo.BeforeEach(func() {
+			// get the interface current mtu and store it as original value to be able to reset it after the test
+			res, err := runCommand("docker", "exec", testNodeName, "cat", "/sys/class/net/breth0/mtu")
+			if err != nil {
+				framework.Failf("could not get MTU of interface: %s", err)
+			}
+
+			res = strings.ReplaceAll(res, "\n", "")
+			originalMTU, err = strconv.Atoi(res)
+			if err != nil {
+				framework.Failf("could not convert MTU to integer: %s", err)
+			}
+
+			// make sure node is not already tainted
+			e2enode.RemoveTaintOffNode(f.ClientSet, testNodeName, tooSmallMTUTaint)
+		})
+
+		ginkgo.AfterEach(func() {
+			// reset MTU to original value
+			_, err := runCommand("docker", "exec", testNodeName, "ip", "link", "set", "breth0", "mtu", fmt.Sprintf("%d", originalMTU))
+			if err != nil {
+				framework.Failf("could not reset MTU of interface: %s", err)
+			}
+
+			// restart ovnkube-node pod
+			if err := restartOVNKubeNodePod(f.ClientSet, ovnNamespace, testNodeName); err != nil {
+				framework.Failf("could not restart ovnkube-node pod: %s", err)
+			}
+		})
+
+		ginkgo.It("should taint the node with a too small MTU", func() {
+			// set the defaults interface MTU very low
+			_, err := runCommand("docker", "exec", testNodeName, "ip", "link", "set", "breth0", "mtu", "1000")
+			if err != nil {
+				framework.Failf("could not set MTU of interface: %s", err)
+			}
+
+			// restart ovnkube-node pod to trigger mtu validation
+			if err := restartOVNKubeNodePod(f.ClientSet, ovnNamespace, testNodeName); err != nil {
+				framework.Failf("could not restart ovnkube-node pod: %s", err)
+			}
+
+			framework.ExpectNodeHasTaint(f.ClientSet, testNodeName, &tooSmallMTUTaint)
+		})
+
+		ginkgo.It("should not taint the node with a big enough MTU", func() {
+			// set the defaults interface MTU big enough
+			_, err := runCommand("docker", "exec", testNodeName, "ip", "link", "set", "breth0", "mtu", "2000")
+			if err != nil {
+				framework.Failf("could not set MTU of interface: %s", err)
+			}
+
+			// restart ovnkube-node pod to trigger mtu validation
+			if err := restartOVNKubeNodePod(f.ClientSet, ovnNamespace, testNodeName); err != nil {
+				framework.Failf("could not restart ovnkube-node pod: %s", err)
+			}
+
+			// validate that node does not have taint
+			nodeHasTaint, err := framework.NodeHasTaint(f.ClientSet, testNodeName, &tooSmallMTUTaint)
+			if err != nil {
+				framework.Failf("could not check if node has taint: %s", err)
+			}
+
+			if nodeHasTaint {
+				framework.Failf("node should not have %v taint", &tooSmallMTUTaint)
+			}
+		})
+
+		ginkgo.It("should untain a node if it has taint but MTU of interface is big enough", func() {
+			//taint node
+			e2enode.AddOrUpdateTaintOnNode(f.ClientSet, testNodeName, tooSmallMTUTaint)
+
+			// set the defaults interface MTU big enough
+			_, err := runCommand("docker", "exec", testNodeName, "ip", "link", "set", "breth0", "mtu", "2000")
+			if err != nil {
+				framework.Failf("could not set MTU of interface: %s", err)
+			}
+
+			// restart ovnkube-node pod to trigger mtu validation
+			if err := restartOVNKubeNodePod(f.ClientSet, ovnNamespace, testNodeName); err != nil {
+				framework.Failf("could not restart ovnkube-node pod: %s", err)
+			}
+
+			// validate that node does not have taint
+			nodeHasTaint, err := framework.NodeHasTaint(f.ClientSet, testNodeName, &tooSmallMTUTaint)
+			if err != nil {
+				framework.Failf("could not check if node has taint: %s", err)
+			}
+
+			if nodeHasTaint {
+				framework.Failf("node should not have %v taint", &tooSmallMTUTaint)
+			}
+		})
 	})
 })
 
