@@ -386,6 +386,17 @@ func (jsIPManager *joinSwitchIPManager) ensureJoinLRPIPs(nodeName string) (gwLRP
 	if ok {
 		return gwLRPIPs, nil
 	}
+	// second check the running DB
+	gwLRPIPs = jsIPManager.getJoinLRPAddresses(nodeName)
+	if len(gwLRPIPs) > 0 {
+		// Saving the hit in the cache
+		err = jsIPManager.reserveJoinLRPIPs(nodeName, gwLRPIPs)
+		if err != nil {
+			klog.Errorf("Failed to add reserve IPs to the join switch IP cache: %s", err.Error())
+			return nil, err
+		}
+		return gwLRPIPs, nil
+	}
 	gwLRPIPs, err = jsIPManager.lsm.AllocateNextIPs(types.OVNJoinSwitch)
 	if err != nil {
 		return nil, err
@@ -406,6 +417,38 @@ func (jsIPManager *joinSwitchIPManager) ensureJoinLRPIPs(nodeName string) (gwLRP
 	}
 
 	return gwLRPIPs, nil
+}
+
+// getJoinLRPAddresses check if IPs of gateway logical router port are within the join switch IP range, and return them if true.
+func (jsIPManager *joinSwitchIPManager) getJoinLRPAddresses(nodeName string) []*net.IPNet {
+	// try to get the IPs from the logical router port
+	gwLRPIPs := []*net.IPNet{}
+	gwLrpName := types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName
+	joinSubnets := jsIPManager.lsm.GetSwitchSubnets(nodeName)
+	ifAddrs, err := util.GetLRPAddrs(gwLrpName)
+	if err == nil {
+		for _, ifAddr := range ifAddrs {
+			for _, subnet := range joinSubnets {
+				if subnet.Contains(ifAddr.IP) {
+					gwLRPIPs = append(gwLRPIPs, &net.IPNet{IP: ifAddr.IP, Mask: subnet.Mask})
+					break
+				}
+			}
+		}
+	}
+
+	if len(gwLRPIPs) != len(joinSubnets) {
+		var errStr string
+		if len(gwLRPIPs) == 0 {
+			errStr = fmt.Sprintf("Failed to get IPs for logical router port %s", gwLrpName)
+		} else {
+			errStr = fmt.Sprintf("Invalid IPs %s (possibly not in the range of subnet %s)",
+				util.JoinIPNetIPs(gwLRPIPs, " "), util.JoinIPNetIPs(joinSubnets, " "))
+		}
+		klog.Warningf("%s for logical router port %s", errStr, gwLrpName)
+		return []*net.IPNet{}
+	}
+	return gwLRPIPs
 }
 
 func (jsIPManager *joinSwitchIPManager) releaseJoinLRPIPs(nodeName string) error {
