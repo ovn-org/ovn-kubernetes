@@ -70,6 +70,12 @@ jobs:
       with:
         name: test-image-master
         path: dist/images/_output/image-master.tar
+    
+    - name: Setup tmate session
+      if: ${{ cancelled() }}
+      uses: mxschmitt/action-tmate@v3
+      timeout-minutes: 30
+
 
   build-pr:
     name: Build-PR
@@ -132,6 +138,11 @@ jobs:
 
         gover
         goveralls -coverprofile=gover.coverprofile -service=github
+    
+    - name: Setup tmate session
+      if: ${{ cancelled() }}
+      uses: mxschmitt/action-tmate@v3
+      timeout-minutes: 30
 
   ovn-upgrade-e2e:
     name: Upgrade OVN from Master to PR branch based image
@@ -383,6 +394,10 @@ jobs:
       with:
         name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/logs
+    - name: Setup tmate session
+      if: ${{ cancelled() }}
+      uses: mxschmitt/action-tmate@v3
+      timeout-minutes: 30
 
   e2e-dual-conversion:
     name: e2e-dual-conversion
