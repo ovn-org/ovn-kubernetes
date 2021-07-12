@@ -466,6 +466,10 @@ func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (addressset.Addre
 					mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 					ips = append(ips, mgmtIfAddr.IP)
 				}
+				// Because createNamespaceAddrSetAllPods is called before syncNode, we need to
+				// reserve its joinSwitch LRP IPs if they already exist.
+				gwLRPIPs := oc.getJoinLRPAddresses(node.Name)
+				_ = oc.joinSwIPManager.reserveJoinLRPIPs(node.Name, gwLRPIPs)
 				// for shared gateway mode we will use LRP IPs to SNAT host network traffic
 				// so add these to the address set.
 				lrpIPs, err := oc.joinSwIPManager.ensureJoinLRPIPs(node.Name)

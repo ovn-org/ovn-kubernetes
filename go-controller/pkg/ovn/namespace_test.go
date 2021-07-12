@@ -2,9 +2,11 @@ package ovn
 
 import (
 	"context"
+	"fmt"
+	"net"
+
 	"github.com/urfave/cli/v2"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
@@ -254,6 +256,11 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.SCTPSupport = true
 
 				fexec := fakeOvn.fakeExec
+				fexec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_%s networks", node1.Name),
+					},
+				)
 				addNodeLogicalFlows(fexec, &node1, clusterCIDR, config.IPv6Mode, false)
 				fakeOvn.controller.joinSwIPManager, _ = initJoinLogicalSwitchIPManager()
 				_, err = fakeOvn.controller.joinSwIPManager.ensureJoinLRPIPs(ovntypes.OVNClusterRouter)
