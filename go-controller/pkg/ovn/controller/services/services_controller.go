@@ -341,7 +341,7 @@ func (c *Controller) syncServices(key string) error {
 		}
 		for _, svcPort := range service.Spec.Ports {
 			// ClusterIP
-			clusterLB, err := loadbalancer.GetOVNKubeLoadBalancer(svcPort.Protocol)
+			clusterLB, err := loadbalancer.GetClusterLoadBalancer(svcPort.Protocol)
 			if err != nil {
 				c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToGetOVNLoadBalancer",
 					"Error trying to obtain the OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
@@ -468,7 +468,7 @@ func (c *Controller) syncServices(key string) error {
 func (c *Controller) addServiceToIdlingBalancer(vips sets.String, service *v1.Service) error {
 	for _, vipProtocol := range vips.List() {
 		vip, protocol := splitVirtualIPKey(vipProtocol)
-		lb, err := loadbalancer.GetOVNKubeIdlingLoadBalancer(protocol)
+		lb, err := loadbalancer.GetIdlingLoadBalancer(protocol)
 		if err != nil {
 			return errors.Wrapf(err, "Error getting OVN idling LoadBalancer for protocol %s", protocol)
 		}

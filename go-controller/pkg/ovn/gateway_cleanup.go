@@ -5,6 +5,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -54,16 +55,15 @@ func gatewayCleanup(nodeName string) error {
 	}
 
 	// If exists, remove the TCP, UDP load-balancers created for north-south traffic for gateway router.
-	k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP, err := getGatewayLoadBalancers(gatewayRouter)
-	if err != nil {
-		return err
-	}
-	protoLBMap := map[kapi.Protocol]string{
-		kapi.ProtocolTCP:  k8sNSLbTCP,
-		kapi.ProtocolUDP:  k8sNSLbUDP,
-		kapi.ProtocolSCTP: k8sNSLbSCTP,
-	}
-	for proto, uuid := range protoLBMap {
+	for _, proto := range []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP, kapi.ProtocolSCTP} {
+		uuid, err := loadbalancer.GetGatewayLoadBalancer(gatewayRouter, proto)
+		if err != nil {
+			if err != loadbalancer.LBNotFound {
+				klog.V(5).Infof("Failed to get OVN GR: %s load balancer for protocol %s, err: %v",
+					gatewayRouter, proto, err)
+			}
+		}
+
 		if uuid != "" {
 			_, stderr, err = util.RunOVNNbctl("lb-del", uuid)
 			if err != nil {
@@ -218,16 +218,15 @@ func multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly bool) error {
 	}
 
 	// If exists, remove the TCP, UDP load-balancers created for north-south traffic for gateway router.
-	k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP, err := getGatewayLoadBalancers(gatewayRouter)
-	if err != nil {
-		return err
-	}
-	protoLBMap := map[kapi.Protocol]string{
-		kapi.ProtocolTCP:  k8sNSLbTCP,
-		kapi.ProtocolUDP:  k8sNSLbUDP,
-		kapi.ProtocolSCTP: k8sNSLbSCTP,
-	}
-	for proto, uuid := range protoLBMap {
+	for _, proto := range []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP, kapi.ProtocolSCTP} {
+		uuid, err := loadbalancer.GetGatewayLoadBalancer(gatewayRouter, proto)
+		if err != nil {
+			if err != loadbalancer.LBNotFound {
+				klog.V(5).Infof("Failed to get OVN GR: %s load balancer for protocol %s, err: %v",
+					gatewayRouter, proto, err)
+			}
+		}
+
 		if uuid != "" {
 			_, stderr, err = util.RunOVNNbctl("lb-del", uuid)
 			if err != nil {

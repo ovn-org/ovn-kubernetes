@@ -474,7 +474,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	// Create the LoadBalancers if they don´t exist
 	for _, lbExternalID := range lbExternalIds {
 		for _, p := range protocols {
-			uuid, err := loadbalancer.CreateLoadBalancer(p, lbExternalID)
+			uuid, err := loadbalancer.CreateK8sClusterLoadBalancer(p, lbExternalID)
 			if err != nil {
 				return errors.Wrapf(err, "Failed to create OVN load balancer for protocol %s", p)
 			}
@@ -700,7 +700,13 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		// nodePort disabled, delete gateway load balancers for this node.
 		gatewayRouter := util.GetGatewayRouterFromNode(node.Name)
 		for _, proto := range []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP, kapi.ProtocolSCTP} {
-			lbUUID, _ := oc.getGatewayLoadBalancer(gatewayRouter, proto)
+			lbUUID, err := loadbalancer.GetGatewayLoadBalancer(gatewayRouter, proto)
+			if err != nil {
+				if err != loadbalancer.LBNotFound {
+					klog.V(5).Infof("Failed to get OVN GR: %s load balancer for protocol %s, err: %v",
+						gatewayRouter, proto, err)
+				}
+			}
 			if lbUUID != "" {
 				_, _, err := util.RunOVNNbctl("--if-exists", "destroy", "load_balancer", lbUUID)
 				if err != nil {

@@ -7,58 +7,7 @@ import (
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	kapi "k8s.io/api/core/v1"
 )
-
-func TestGetOVNKubeLoadBalancer(t *testing.T) {
-	tests := []struct {
-		name     string
-		protocol kapi.Protocol
-		ovnCmd   ovntest.ExpectedCmd
-		want     string
-		wantErr  bool
-	}{
-		{
-			name:     "existing loadbalancer TCP",
-			protocol: kapi.ProtocolTCP,
-			ovnCmd: ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-tcp=yes",
-				Output: "a08ea426-2288-11eb-a30b-a8a1590cda29",
-			},
-			want:    "a08ea426-2288-11eb-a30b-a8a1590cda29",
-			wantErr: false,
-		},
-		{
-			name:     "non existing loadbalancer UDP",
-			protocol: kapi.ProtocolUDP,
-			ovnCmd: ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-udp=yes",
-				Output: "",
-			},
-			want:    "",
-			wantErr: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			fexec := ovntest.NewLooseCompareFakeExec()
-			fexec.AddFakeCmd(&tt.ovnCmd)
-			err := util.SetExec(fexec)
-			if err != nil {
-				t.Errorf("fexec error: %v", err)
-			}
-
-			got, err := GetOVNKubeLoadBalancer(tt.protocol)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("GetOVNKubeLoadBalancer() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if got != tt.want {
-				t.Errorf("GetOVNKubeLoadBalancer() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
 
 func TestGetLoadBalancerVIPs(t *testing.T) {
 	tests := []struct {
@@ -189,6 +138,39 @@ func TestUpdateLoadBalancer(t *testing.T) {
 			}
 			if err := UpdateLoadBalancer(tt.args.lb, tt.args.vip, tt.args.targets); (err != nil) != tt.wantErr {
 				t.Errorf("UpdateLoadBalancer() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestUpdateLoadBalancerOptions(t *testing.T) {
+	tests := []struct {
+		name         string
+		loadBalancer string
+		options      string
+		ovnCmd       ovntest.ExpectedCmd
+		wantErr      bool
+	}{
+		{
+			name:         "Set Existing Loadbalancer",
+			loadBalancer: "my-lb",
+			options:      "external_ids:k8s-cluster-lb-tcp=yes",
+			ovnCmd: ovntest.ExpectedCmd{
+				Cmd: "ovn-nbctl --timeout=15 set load_balancer my-lb external_ids:k8s-cluster-lb-tcp=yes",
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fexec := ovntest.NewLooseCompareFakeExec()
+			fexec.AddFakeCmd(&tt.ovnCmd)
+			err := util.SetExec(fexec)
+			if err != nil {
+				t.Errorf("fexec error: %v", err)
+			}
+			if err := UpdateLoadBalancerOptions(tt.loadBalancer, tt.options); (err != nil) != tt.wantErr {
+				t.Errorf("UpdateLoadBalancerOptions() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
