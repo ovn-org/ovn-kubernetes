@@ -1,6 +1,7 @@
 package services
 
 import (
+	"net"
 	"reflect"
 	"sort"
 	"sync"
@@ -30,8 +31,31 @@ type nodeTracker struct {
 type nodeInfo struct {
 	name              string
 	nodeIPs           []string
+	podSubnets        []net.IPNet
 	gatewayRouterName string
 	switchName        string
+}
+
+// returns a list of all ip blocks "assigned" to this node
+// includes node IPs, still as a mask-1 net
+func (ni *nodeInfo) nodeSubnets() []net.IPNet {
+	out := append([]net.IPNet{}, ni.podSubnets...)
+	for _, ipStr := range ni.nodeIPs {
+		ip := net.ParseIP(ipStr)
+		if ip := ip.To4(); ip != nil {
+			out = append(out, net.IPNet{
+				IP:   ip,
+				Mask: net.CIDRMask(32, 32),
+			})
+		} else {
+			out = append(out, net.IPNet{
+				IP:   ip,
+				Mask: net.CIDRMask(128, 128),
+			})
+		}
+	}
+
+	return out
 }
 
 func newNodeTracker(nodeInformer coreinformers.NodeInformer) *nodeTracker {
@@ -85,7 +109,7 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer) *nodeTracker {
 
 }
 
-func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName string, nodeIPs []string) {
+func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName string, nodeIPs []string, hostSubnets []*net.IPNet) {
 	nt.Lock()
 	defer nt.Unlock()
 
@@ -94,6 +118,9 @@ func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName string, n
 		nodeIPs:           nodeIPs,
 		gatewayRouterName: routerName,
 		switchName:        switchName,
+	}
+	for _, hsn := range hostSubnets { //de-pointer
+		ni.podSubnets = append(ni.podSubnets, *hsn)
 	}
 	if existing, ok := nt.nodes[nodeName]; ok {
 		if reflect.DeepEqual(existing, ni) {
@@ -151,6 +178,7 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 		switchName,
 		grName,
 		ips,
+		hsn,
 	)
 }
 

@@ -419,6 +419,56 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 			}},
 		},
 		{
+			name: "dual-stack clusterip, one port, endpoints, external ips + lb status, ExternalTrafficPolicy",
+			args: args{
+				slices: makeSlices([]string{"10.128.0.2"}, []string{"fe00::1:1"}, v1.ProtocolTCP),
+				service: &v1.Service{
+					ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
+					Spec: v1.ServiceSpec{
+						Type:       v1.ServiceTypeClusterIP,
+						ClusterIP:  "192.168.1.1",
+						ClusterIPs: []string{"192.168.1.1", "2002::1"},
+						Ports: []v1.ServicePort{{
+							Port:       inport,
+							Protocol:   v1.ProtocolTCP,
+							TargetPort: outportstr,
+						}},
+						ExternalIPs:           []string{"4.2.2.2", "42::42"},
+						ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal,
+					},
+					Status: v1.ServiceStatus{
+						LoadBalancer: v1.LoadBalancerStatus{
+							Ingress: []v1.LoadBalancerIngress{{
+								IP: "5.5.5.5",
+							}},
+						},
+					},
+				},
+			},
+			resultsSame: true,
+			resultSharedGatewayCluster: []lbConfig{{
+				vips:     []string{"192.168.1.1", "2002::1"},
+				protocol: v1.ProtocolTCP,
+				inport:   inport,
+				eps: util.LbEndpoints{
+					V4IPs: []string{"10.128.0.2"},
+					V6IPs: []string{"fe00::1:1"},
+					Port:  outport,
+				},
+			}},
+			resultSharedGatewayNode: []lbConfig{{
+				vips:     []string{"4.2.2.2", "42::42", "5.5.5.5"},
+				protocol: v1.ProtocolTCP,
+				inport:   inport,
+				eps: util.LbEndpoints{
+					V4IPs: []string{"10.128.0.2"},
+					V6IPs: []string{"fe00::1:1"},
+					Port:  outport,
+				},
+				routerLocalEndpointsOnly: true,
+			}},
+		},
+		{
 			name: "dual-stack clusterip, one port, endpoints, nodePort",
 			args: args{
 				slices: makeSlices([]string{"10.128.0.2"}, []string{"fe00::1:1"}, v1.ProtocolTCP),
@@ -573,6 +623,78 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "dual-stack clusterip, one port, endpoints, nodePort, hostNetwork, externalTraffic",
+			args: args{
+				// These slices are outside of the config, and thus are host network
+				slices: makeSlices([]string{"192.168.0.1"}, []string{"2001::1"}, v1.ProtocolTCP),
+				service: &v1.Service{
+					ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
+					Spec: v1.ServiceSpec{
+						Type:       v1.ServiceTypeClusterIP,
+						ClusterIP:  "192.168.1.1",
+						ClusterIPs: []string{"192.168.1.1", "2002::1"},
+						Ports: []v1.ServicePort{{
+							Port:       inport,
+							Protocol:   v1.ProtocolTCP,
+							TargetPort: outportstr,
+							NodePort:   5,
+						}},
+						ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal,
+					},
+				},
+			},
+			// In shared gateway mode, nodeport and host-network-pods must be per-node
+			resultSharedGatewayNode: []lbConfig{
+				{
+					vips:     []string{"node"},
+					protocol: v1.ProtocolTCP,
+					inport:   5,
+					eps: util.LbEndpoints{
+						V4IPs: []string{"192.168.0.1"},
+						V6IPs: []string{"2001::1"},
+						Port:  outport,
+					},
+					routerLocalEndpointsOnly: true,
+				},
+				{
+					vips:     []string{"192.168.1.1", "2002::1"},
+					protocol: v1.ProtocolTCP,
+					inport:   inport,
+					eps: util.LbEndpoints{
+						V4IPs: []string{"192.168.0.1"},
+						V6IPs: []string{"2001::1"},
+						Port:  outport,
+					},
+				},
+			},
+			// in local gateway mode, only nodePort is per-node
+			resultLocalGatewayNode: []lbConfig{
+				{
+					vips:     []string{"node"},
+					protocol: v1.ProtocolTCP,
+					inport:   5,
+					eps: util.LbEndpoints{
+						V4IPs: []string{"192.168.0.1"},
+						V6IPs: []string{"2001::1"},
+						Port:  outport,
+					},
+					routerLocalEndpointsOnly: true,
+				},
+			},
+			resultLocalGatewayCluster: []lbConfig{
+				{
+					vips:     []string{"192.168.1.1", "2002::1"},
+					protocol: v1.ProtocolTCP,
+					inport:   inport,
+					eps: util.LbEndpoints{
+						V4IPs: []string{"192.168.0.1"},
+						V6IPs: []string{"2001::1"},
+						Port:  outport,
+					},
+				},
+			},
+		},
 	}
 
 	for i, tt := range tests {
@@ -600,10 +722,15 @@ func Test_buildClusterLBs(t *testing.T) {
 	namespace := "testns"
 
 	oldGwMode := globalconfig.Gateway.Mode
+	oldClusterSubnets := globalconfig.Default.ClusterSubnets
 	defer func() {
 		globalconfig.Gateway.Mode = oldGwMode
+		globalconfig.Default.ClusterSubnets = oldClusterSubnets
 	}()
 	globalconfig.Gateway.Mode = globalconfig.GatewayModeShared
+	_, cidr4, _ := net.ParseCIDR("10.128.0.0/16")
+	_, cidr6, _ := net.ParseCIDR("fe00::/64")
+	globalconfig.Default.ClusterSubnets = []globalconfig.CIDRNetworkEntry{{cidr4, 26}, {cidr6, 26}}
 
 	defaultService := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
@@ -618,12 +745,14 @@ func Test_buildClusterLBs(t *testing.T) {
 			nodeIPs:           []string{"10.0.0.1"},
 			gatewayRouterName: "gr-node-a",
 			switchName:        "switch-node-a",
+			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.0.0"), Mask: net.CIDRMask(24, 32)}},
 		},
 		{
 			name:              "node-b",
 			nodeIPs:           []string{"10.0.0.2"},
 			gatewayRouterName: "gr-node-b",
 			switchName:        "switch-node-b",
+			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.1.0"), Mask: net.CIDRMask(24, 32)}},
 		},
 	}
 
@@ -834,12 +963,14 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			nodeIPs:           []string{"10.0.0.1"},
 			gatewayRouterName: "gr-node-a",
 			switchName:        "switch-node-a",
+			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.0.0"), Mask: net.CIDRMask(24, 32)}},
 		},
 		{
 			name:              "node-b",
 			nodeIPs:           []string{"10.0.0.2"},
 			gatewayRouterName: "gr-node-b",
 			switchName:        "switch-node-b",
+			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.1.0"), Mask: net.CIDRMask(24, 32)}},
 		},
 	}
 
@@ -1049,6 +1180,128 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:    "nodeport service, standard pod, local traffic policy",
+			service: defaultService,
+			configs: []lbConfig{
+				{
+					vips:     []string{"node"},
+					protocol: v1.ProtocolTCP,
+					inport:   80,
+					eps: util.LbEndpoints{
+						V4IPs: []string{"10.128.0.2"},
+						Port:  8080,
+					},
+					routerLocalEndpointsOnly: true,
+				},
+			},
+			expectedShared: []ovnlb.LB{
+				{
+					Name:        "Service_testns/foo_TCP_node_switch_node-a",
+					ExternalIDs: defaultExternalIDs,
+					Switches:    []string{"switch-node-a"},
+					Protocol:    "TCP",
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"10.0.0.1", 80},
+							Targets: []ovnlb.Addr{{"10.128.0.2", 8080}},
+						},
+					},
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_router_local_node-a",
+					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-a"},
+					Protocol:    "TCP",
+					Opts:        ovnlb.LBOpts{SkipSNAT: true},
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"10.0.0.1", 80},
+							Targets: []ovnlb.Addr{{"10.128.0.2", 8080}},
+						},
+					},
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_switch_node-b",
+					ExternalIDs: defaultExternalIDs,
+					Switches:    []string{"switch-node-b"},
+					Protocol:    "TCP",
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"10.0.0.2", 80},
+							Targets: []ovnlb.Addr{{"10.128.0.2", 8080}},
+						},
+					},
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_router_local_node-b",
+					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-b"},
+					Protocol:    "TCP",
+					Opts:        ovnlb.LBOpts{SkipSNAT: true},
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"10.0.0.2", 80},
+							Targets: []ovnlb.Addr{},
+							// empty targets
+						},
+					},
+				},
+			},
+			expectedLocal: []ovnlb.LB{
+				{
+					Name:        "Service_testns/foo_TCP_node_switch_node-a",
+					ExternalIDs: defaultExternalIDs,
+					Switches:    []string{"switch-node-a"},
+					Protocol:    "TCP",
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"10.0.0.1", 80},
+							Targets: []ovnlb.Addr{{"10.128.0.2", 8080}},
+						},
+					},
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_router_local_node-a",
+					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-a"},
+					Protocol:    "TCP",
+					Opts:        ovnlb.LBOpts{SkipSNAT: true},
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"10.0.0.1", 80},
+							Targets: []ovnlb.Addr{{"10.128.0.2", 8080}},
+						},
+					},
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_switch_node-b",
+					ExternalIDs: defaultExternalIDs,
+					Switches:    []string{"switch-node-b"},
+					Protocol:    "TCP",
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"10.0.0.2", 80},
+							Targets: []ovnlb.Addr{{"10.128.0.2", 8080}},
+						},
+					},
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_router_local_node-b",
+					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-b"},
+					Protocol:    "TCP",
+					Opts:        ovnlb.LBOpts{SkipSNAT: true},
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"10.0.0.2", 80},
+							Targets: []ovnlb.Addr{},
+							// empty targets
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for i, tt := range tc {
@@ -1057,13 +1310,13 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			if tt.expectedShared != nil {
 				globalconfig.Gateway.Mode = globalconfig.GatewayModeShared
 				actual := buildPerNodeLBs(tt.service, tt.configs, defaultNodes)
-				assert.Equal(t, tt.expectedShared, actual)
+				assert.Equal(t, tt.expectedShared, actual, "shared gateway test")
 			}
 
 			if tt.expectedLocal != nil {
 				globalconfig.Gateway.Mode = globalconfig.GatewayModeLocal
 				actual := buildPerNodeLBs(tt.service, tt.configs, defaultNodes)
-				assert.Equal(t, tt.expectedLocal, actual)
+				assert.Equal(t, tt.expectedLocal, actual, "local gateway test")
 			}
 
 		})

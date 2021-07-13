@@ -138,7 +138,7 @@ func TestSyncServices(t *testing.T) {
 					Cmd: `ovn-nbctl --timeout=15 --no-heading --format=csv --data=json --columns=_uuid,name,external_ids,vips,protocol find load_balancer external_ids:k8s.ovn.org/kind=Service external_ids:k8s.ovn.org/owner=testns/foo`,
 				},
 				{
-					Cmd:    `ovn-nbctl --timeout=15 create load_balancer external_ids:k8s.ovn.org/kind=Service external_ids:k8s.ovn.org/owner=testns/foo name=Service_testns/foo_TCP_cluster options:event=false options:reject=true protocol=tcp selection_fields=[] vips={"192.168.1.1:80"=""}`,
+					Cmd:    `ovn-nbctl --timeout=15 create load_balancer external_ids:k8s.ovn.org/kind=Service external_ids:k8s.ovn.org/owner=testns/foo name=Service_testns/foo_TCP_cluster options:event=false options:reject=true options:skip_snat=false protocol=tcp selection_fields=[] vips={"192.168.1.1:80"=""}`,
 					Output: "uuid-1",
 				},
 				{
@@ -181,7 +181,7 @@ func TestSyncServices(t *testing.T) {
 					Output: `"[""uuid"",""uuid-1""]","""Service_testns/foo_TCP_cluster""","[""map"",[[""k8s.ovn.org/kind"",""Service""],[""k8s.ovn.org/owner"",""foo/testns""]]]","[""map"",[[""10.96.0.1:443"",""10.89.0.137:6443""]]]","""tcp"""`,
 				},
 				{
-					Cmd: `ovn-nbctl --timeout=15 set load_balancer uuid-1 external_ids:k8s.ovn.org/kind=Service external_ids:k8s.ovn.org/owner=testns/foo name=Service_testns/foo_TCP_cluster options:event=false options:reject=true protocol=tcp selection_fields=[] vips={"192.168.1.1:80"=""}`,
+					Cmd: `ovn-nbctl --timeout=15 set load_balancer uuid-1 external_ids:k8s.ovn.org/kind=Service external_ids:k8s.ovn.org/owner=testns/foo name=Service_testns/foo_TCP_cluster options:event=false options:reject=true options:skip_snat=false protocol=tcp selection_fields=[] vips={"192.168.1.1:80"=""}`,
 				},
 				{
 					Cmd:    `ovn-nbctl --timeout=15 --no-heading --format=csv --data=bare --columns=name find logical_router load_balancer{>=}uuid-1`,
@@ -232,7 +232,7 @@ func TestSyncServices(t *testing.T) {
 					Output: `"[""uuid"",""uuid-1""]","""Service_testns/foo_TCP_cluster""","[""map"",[[""k8s.ovn.org/kind"",""Service""],[""k8s.ovn.org/owner"",""foo/testns""]]]","[""map"",[[""10.96.0.1:443"",""10.89.0.137:6443""]]]","""tcp"""`,
 				},
 				{
-					Cmd: `ovn-nbctl --timeout=15 set load_balancer uuid-1 external_ids:k8s.ovn.org/kind=Service external_ids:k8s.ovn.org/owner=testns/foo name=Service_testns/foo_TCP_cluster options:event=false options:reject=true protocol=tcp selection_fields=[] vips={"192.168.1.1:80"=""}`,
+					Cmd: `ovn-nbctl --timeout=15 set load_balancer uuid-1 external_ids:k8s.ovn.org/kind=Service external_ids:k8s.ovn.org/owner=testns/foo name=Service_testns/foo_TCP_cluster options:event=false options:reject=true options:skip_snat=false protocol=tcp selection_fields=[] vips={"192.168.1.1:80"=""}`,
 				},
 				{
 					Cmd:    `ovn-nbctl --timeout=15 --no-heading --format=csv --data=bare --columns=name find logical_router load_balancer{>=}uuid-1`,
@@ -296,7 +296,7 @@ func TestSyncServices(t *testing.T) {
 					Output: `"[""uuid"",""uuid-1""]","""Service_testns/foo_TCP_cluster""","[""map"",[[""k8s.ovn.org/kind"",""Service""],[""k8s.ovn.org/owner"",""foo/testns""]]]","[""map"",[[""10.96.0.1:443"",""10.89.0.137:6443""]]]","""tcp"""`,
 				},
 				{
-					Cmd: `ovn-nbctl --timeout=15 set load_balancer uuid-1 external_ids:k8s.ovn.org/kind=Service external_ids:k8s.ovn.org/owner=testns/foo name=Service_testns/foo_TCP_cluster options:event=false options:reject=true protocol=tcp selection_fields=[] vips={"192.168.1.1:80"="10.128.0.2:3456,10.128.1.2:3456"}`,
+					Cmd: `ovn-nbctl --timeout=15 set load_balancer uuid-1 external_ids:k8s.ovn.org/kind=Service external_ids:k8s.ovn.org/owner=testns/foo name=Service_testns/foo_TCP_cluster options:event=false options:reject=true options:skip_snat=false protocol=tcp selection_fields=[] vips={"192.168.1.1:80"="10.128.0.2:3456,10.128.1.2:3456"}`,
 				},
 				{
 					Cmd:    `ovn-nbctl --timeout=15 --no-heading --format=csv --data=bare --columns=name find logical_router load_balancer{>=}uuid-1`,
@@ -308,7 +308,7 @@ func TestSyncServices(t *testing.T) {
 				},
 
 				{
-					Cmd:    `ovn-nbctl --timeout=15 create load_balancer external_ids:k8s.ovn.org/kind=Service external_ids:k8s.ovn.org/owner=testns/foo name=Service_testns/foo_TCP_node_router+switch_node-a options:event=false options:reject=true protocol=tcp selection_fields=[] vips={"10.0.0.1:8989"="10.128.0.2:3456,10.128.1.2:3456"}`,
+					Cmd:    `ovn-nbctl --timeout=15 create load_balancer external_ids:k8s.ovn.org/kind=Service external_ids:k8s.ovn.org/owner=testns/foo name=Service_testns/foo_TCP_node_router+switch_node-a options:event=false options:reject=true options:skip_snat=false protocol=tcp selection_fields=[] vips={"10.0.0.1:8989"="10.128.0.2:3456,10.128.1.2:3456"}`,
 					Output: "uuid-rs-nodea",
 				},
 				{
@@ -316,7 +316,7 @@ func TestSyncServices(t *testing.T) {
 				},
 
 				{
-					Cmd:    `ovn-nbctl --timeout=15 create load_balancer external_ids:k8s.ovn.org/kind=Service external_ids:k8s.ovn.org/owner=testns/foo name=Service_testns/foo_TCP_node_router+switch_node-b options:event=false options:reject=true protocol=tcp selection_fields=[] vips={"10.0.0.2:8989"="10.128.0.2:3456,10.128.1.2:3456"}`,
+					Cmd:    `ovn-nbctl --timeout=15 create load_balancer external_ids:k8s.ovn.org/kind=Service external_ids:k8s.ovn.org/owner=testns/foo name=Service_testns/foo_TCP_node_router+switch_node-b options:event=false options:reject=true options:skip_snat=false protocol=tcp selection_fields=[] vips={"10.0.0.2:8989"="10.128.0.2:3456,10.128.1.2:3456"}`,
 					Output: "uuid-rs-nodeb",
 				},
 				{

@@ -59,6 +59,10 @@ type LBOpts struct {
 
 	// If true, then enable per-client-IP affinity.
 	Affinity bool
+
+	// If true, then always disable SNAT
+	// (used for ExternalTrafficPolicy=Local)
+	SkipSNAT bool
 }
 
 type Addr struct {
@@ -258,10 +262,15 @@ func ensureLB(lb LB, existingUUID string) (string, error) {
 func lbToColumns(lb LB) []string {
 	reject := "true"
 	event := "false"
+	skipSNAT := "false"
 
 	if lb.Opts.Unidling {
 		reject = "false"
 		event = "true"
+	}
+
+	if lb.Opts.SkipSNAT {
+		skipSNAT = "true"
 	}
 
 	// Session affinity
@@ -284,6 +293,7 @@ func lbToColumns(lb LB) []string {
 		"selection_fields=" + selectionFields,
 		"options:reject=" + reject,
 		"options:event=" + event,
+		"options:skip_snat=" + skipSNAT,
 		fmt.Sprintf(`vips={%s}`, strings.Join(vipSet, ",")),
 	}
 
