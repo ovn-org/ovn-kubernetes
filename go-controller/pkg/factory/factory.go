@@ -139,7 +139,8 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[namespaceType], err = newInformer(namespaceType, wf.iFactory.Core().V1().Namespaces().Informer())
+	wf.informers[namespaceType], err = newQueuedInformer(namespaceType, wf.iFactory.Core().V1().Namespaces().Informer(),
+		wf.stopChan)
 	if err != nil {
 		return nil, err
 	}
