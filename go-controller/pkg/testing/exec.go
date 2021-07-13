@@ -101,7 +101,7 @@ func (f *FakeExec) internalErrorDesc() string {
 			min = executedLen
 		}
 		for i := 0; i < max; i++ {
-			if i < min && f.expectedCommands[i].Cmd == f.executedCommands[i] {
+			if i < min && f.expectedCommands[i].compare(f.executedCommands[i]) {
 				desc += fmt.Sprintf("[%02d]   %v\n", i, f.expectedCommands[i].Cmd)
 				continue
 			}
@@ -132,6 +132,9 @@ func (f *FakeExec) CalledMatchesExpected() bool {
 type ExpectedCmd struct {
 	// Cmd should be the command-line string of the executable name and all arguments it is expected to be called with
 	Cmd string
+	// LooseBatchCompare should be set if the command-line string is a batched
+	// ovn-nbctl where the ordering does not matter
+	LooseBatchCompare bool
 	// Output is any stdout output which Cmd should produce
 	Output string
 	// Stderr is any stderr output which Cmd should produce
@@ -142,6 +145,65 @@ type ExpectedCmd struct {
 	Action func() error
 	// called is set to true when the command is called
 	called bool
+}
+
+// compare compares an executed command and an ExpectedCommand, optionally
+// breaking batched commands into individual pieces to loosely compare batches
+// that have no internal ordering constraints
+func (e *ExpectedCmd) compare(executed string) bool {
+	if !e.LooseBatchCompare {
+		return executed == e.Cmd
+	}
+
+	// Order of the batch doesn't matter; break apart the commands and
+	// make sure all executed commands are present in the candidate
+	eSplit := strings.SplitN(executed, " ", 2)
+	cSplit := strings.SplitN(e.Cmd, " ", 2)
+	if eSplit[0] != cSplit[0] {
+		return false
+	}
+	if len(eSplit) != len(cSplit) {
+		return false
+	}
+	if len(eSplit) < 2 {
+		// Already compared [0]
+		return true
+	}
+
+	// Check for --timeout before we compare the actual args
+	eAllArgs := eSplit[1]
+	cAllArgs := cSplit[1]
+	if strings.HasPrefix(eSplit[1], "--timeout=") {
+		etSplit := strings.SplitN(eSplit[1], " ", 2)
+		ctSplit := strings.SplitN(cSplit[1], " ", 2)
+		if etSplit[0] != ctSplit[0] {
+			return false
+		}
+		eAllArgs = etSplit[1]
+		cAllArgs = ctSplit[1]
+	}
+
+	// Now compare each element of the command batch
+	eSplitArgs := strings.Split(eAllArgs, " -- ")
+	cSplitArgs := strings.Split(cAllArgs, " -- ")
+	if len(eSplitArgs) != len(cSplitArgs) {
+		return false
+	}
+
+	for _, eArg := range eSplitArgs {
+		found := false
+		for _, cArg := range cSplitArgs {
+			if cArg == eArg {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+
+	return true
 }
 
 func getExecutedCommandline(cmd string, args ...string) string {
@@ -176,7 +238,7 @@ func (f *FakeExec) Command(cmd string, args ...string) kexec.Cmd {
 	var expected *ExpectedCmd
 	for _, candidate := range f.expectedCommands {
 		if !candidate.called {
-			if executed == candidate.Cmd {
+			if candidate.compare(executed) {
 				expected = candidate
 				expected.called = true
 				break
@@ -184,7 +246,7 @@ func (f *FakeExec) Command(cmd string, args ...string) kexec.Cmd {
 			if !f.looseCompare {
 				// Fail if the first unused expected command doesn't
 				// match the one that is being executed
-				if executed != candidate.Cmd {
+				if !candidate.compare(executed) {
 					f.receivedUnexpected = true
 					f.unexpectedCommand = executed
 					klog.Warning(f.internalErrorDesc())

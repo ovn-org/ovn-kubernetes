@@ -364,11 +364,17 @@ func (c *Controller) syncServices(key string) error {
 					return err
 				}
 				if c.serviceTracker.getLoadBalancer(name, namespace, vip) != currentLB {
+					txn := util.NewNBTxn()
 					// Need to ensure that if vip exists on cluster LB we remove it
 					// This can happen if endpoints originally had cluster only ips but now have host ips
-					if err := loadbalancer.DeleteLoadBalancerVIP(clusterLB, vip); err != nil {
-						klog.Errorf("Error deleting VIP %s on OVN LoadBalancer %s", vip, clusterLB)
+					if err := loadbalancer.DeleteLoadBalancerVIP(txn, clusterLB, vip); err != nil {
 						return err
+					}
+					if stdout, stderr, err := txn.Commit(); err != nil {
+						klog.Errorf("Error deleting VIP %s on OVN LoadBalancer %s", vip, clusterLB)
+						return fmt.Errorf("error deleting load balancer vip %v for %v"+
+							"stdout: %q, stderr: %q, error: %v",
+							vip, clusterLB, stdout, stderr, err)
 					}
 				}
 			} else {
