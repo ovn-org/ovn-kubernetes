@@ -2875,6 +2875,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		for _, pod := range dbPods {
 			wg.Add(1)
 			go func(pod v1.Pod) {
+				defer ginkgo.GinkgoRecover()
 				defer wg.Done()
 				waitForPodToFinishFullRestart(f, &pod)
 			}(pod)
