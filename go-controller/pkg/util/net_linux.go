@@ -378,3 +378,36 @@ func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
 	}
 	return ips, nil
 }
+
+// GetIPv6OnSubnet when given an IPv6 address with a 128 prefix for an interface,
+// looks for possible broadest subnet on-link routes and returns the same address
+// with the found subnet prefix. Otherwise it returns the provided address unchanged.
+func GetIPv6OnSubnet(iface string, ip *net.IPNet) (*net.IPNet, error) {
+	if s, _ := ip.Mask.Size(); s != 128 {
+		return ip, nil
+	}
+
+	link, err := netLinkOps.LinkByName(iface)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup link %s: %v", iface, err)
+	}
+
+	routeFilter := &netlink.Route{
+		LinkIndex: link.Attrs().Index,
+		Gw:        nil,
+	}
+	filterMask := netlink.RT_FILTER_GW | netlink.RT_FILTER_OIF
+	routes, err := netLinkOps.RouteListFiltered(netlink.FAMILY_V6, routeFilter, filterMask)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get on-link routes for ip %s and iface %s", ip.String(), iface)
+	}
+
+	dst := *ip
+	for _, route := range routes {
+		if route.Dst.Contains(dst.IP) && !dst.Contains(route.Dst.IP) {
+			dst.Mask = route.Dst.Mask
+		}
+	}
+
+	return &dst, nil
+}
