@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/Mellanox/sriovnet"
 	"github.com/vishvananda/netlink"
 	"k8s.io/klog/v2"
 )
@@ -22,26 +23,40 @@ func getBridgeName(iface string) string {
 	return fmt.Sprintf("br%s", iface)
 }
 
-// GetNicName returns the physical NIC name, given an OVS bridge name
-// configured by NicToBridge()
-func GetNicName(brName string) (string, error) {
-	// Check for system type port (required to be set if using NetworkManager)
+// getBridgePortsInterfaces returns a mapping of bridge brName ports to its interfaces
+func getBridgePortsInterfaces(brName string) (map[string][]string, error) {
 	stdout, stderr, err := RunOVSVsctl("list-ports", brName)
 	if err != nil {
-		return "", fmt.Errorf("failed to get list of ports on bridge %q:, stderr: %q, error: %v",
+		return nil, fmt.Errorf("failed to get list of ports on bridge %q:, stderr: %q, error: %v",
 			brName, stderr, err)
 	}
 
+	portsToInterfaces := make(map[string][]string)
 	for _, port := range strings.Split(stdout, "\n") {
 		stdout, stderr, err = RunOVSVsctl("get", "Port", port, "Interfaces")
 		if err != nil {
-			return "", fmt.Errorf("failed to get port %q on bridge %q:, stderr: %q, error: %v",
+			return nil, fmt.Errorf("failed to get port %q on bridge %q:, stderr: %q, error: %v",
 				port, brName, stderr, err)
 
 		}
 		// remove brackets on list of interfaces
 		ifaces := strings.TrimPrefix(strings.TrimSuffix(stdout, "]"), "[")
-		for _, iface := range strings.Split(ifaces, ",") {
+		portsToInterfaces[port] = strings.Split(ifaces, ",")
+	}
+	return portsToInterfaces, nil
+}
+
+// GetNicName returns the physical NIC name, given an OVS bridge name
+// configured by NicToBridge()
+func GetNicName(brName string) (string, error) {
+	// Check for system type port (required to be set if using NetworkManager)
+	var stdout, stderr string
+	portsToInterfaces, err := getBridgePortsInterfaces(brName)
+	if err != nil {
+		return "", err
+	}
+	for port, ifaces := range portsToInterfaces {
+		for _, iface := range ifaces {
 			stdout, stderr, err = RunOVSVsctl("get", "Interface", strings.TrimSpace(iface), "Type")
 			if err != nil {
 				return "", fmt.Errorf("failed to get Interface %q Type on bridge %q:, stderr: %q, error: %v",
@@ -330,4 +345,31 @@ func BridgeToNic(bridge string) error {
 	}
 	klog.Infof("Successfully deleted OVS bridge %q", bridge)
 	return nil
+}
+
+// GetSmartNICHostInterface returns the host representor interface attached to bridge
+func GetSmartNICHostInterface(bridgeName string) (string, error) {
+	portsToInterfaces, err := getBridgePortsInterfaces(bridgeName)
+	if err != nil {
+		return "", err
+	}
+
+	for _, ifaces := range portsToInterfaces {
+		for _, iface := range ifaces {
+			stdout, stderr, err := RunOVSVsctl("get", "Interface", strings.TrimSpace(iface), "Name")
+			if err != nil {
+				return "", fmt.Errorf("failed to get Interface %q Name on bridge %q:, stderr: %q, error: %v",
+					iface, bridgeName, stderr, err)
+
+			}
+			flavor, err := GetSriovnetOps().GetRepresentorPortFlavour(stdout)
+			if err == nil && flavor == sriovnet.PORT_FLAVOUR_PCI_PF {
+				// host representor interface found
+				return stdout, nil
+			}
+			continue
+		}
+	}
+	// No host interface found in provided bridge
+	return "", fmt.Errorf("smart-nic host interface was not found for bridge %q", bridgeName)
 }

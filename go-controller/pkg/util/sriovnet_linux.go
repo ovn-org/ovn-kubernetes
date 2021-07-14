@@ -3,6 +3,8 @@
 package util
 
 import (
+	"net"
+
 	"github.com/Mellanox/sriovnet"
 )
 
@@ -13,6 +15,8 @@ type SriovnetOps interface {
 	GetVfRepresentor(uplink string, vfIndex int) (string, error)
 	GetPfPciFromVfPci(vfPciAddress string) (string, error)
 	GetVfRepresentorSmartNIC(pfID, vfIndex string) (string, error)
+	GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error)
+	GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error)
 }
 
 type defaultSriovnetOps struct {
@@ -52,4 +56,12 @@ func (defaultSriovnetOps) GetPfPciFromVfPci(vfPciAddress string) (string, error)
 
 func (defaultSriovnetOps) GetVfRepresentorSmartNIC(pfID, vfIndex string) (string, error) {
 	return sriovnet.GetVfRepresentorSmartNIC(pfID, vfIndex)
+}
+
+func (defaultSriovnetOps) GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error) {
+	return sriovnet.GetRepresentorPeerMacAddress(netdev)
+}
+
+func (defaultSriovnetOps) GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error) {
+	return sriovnet.GetRepresentorPortFlavour(netdev)
 }
