@@ -105,12 +105,6 @@ func (f *FakeAddressSetFactory) removeAddressSet(name string) {
 	delete(f.sets, name)
 }
 
-// ExpectNoAddressSet ensures the named address set does not exist
-func (f *FakeAddressSetFactory) ExpectNoAddressSet(name string) {
-	_, ok := f.sets[name]
-	gomega.Expect(ok).To(gomega.BeFalse())
-}
-
 // ExpectAddressSetWithIPs ensures the named address set exists with the given set of IPs
 func (f *FakeAddressSetFactory) ExpectAddressSetWithIPs(name string, ips []string) {
 	var lenAddressSet int
