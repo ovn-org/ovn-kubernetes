@@ -77,6 +77,22 @@ func (pr *PodRequest) String() string {
 	return fmt.Sprintf("[%s/%s %s]", pr.PodNamespace, pr.PodName, pr.SandboxID)
 }
 
+// checkOrUpdatePodUID validates the given pod UID against the request's existing
+// pod UID. If the existing UID is empty the runtime did not support passing UIDs
+// and the best we can do is use the given UID for the duration of the request.
+// But if the existing UID is valid and does not match the given UID then the
+// sandbox request is for a different pod instance and should be terminated.
+func (pr *PodRequest) checkOrUpdatePodUID(podUID string) error {
+	if pr.PodUID == "" {
+		// Runtime didn't pass UID, use the one we got from the pod object
+		pr.PodUID = podUID
+	} else if podUID != pr.PodUID {
+		// Exit early if the pod was deleted and recreated already
+		return fmt.Errorf("pod deleted before sandbox %v operation began", pr.Command)
+	}
+	return nil
+}
+
 func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) ([]byte, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
@@ -97,9 +113,12 @@ func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalID
 	}
 	// Get the IP address and MAC address of the pod
 	// for Smart-Nic, ensure connection-details is present
-	annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, namespace, podName, annotCondFn)
+	podUID, annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, namespace, podName, annotCondFn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
+	}
+	if err := pr.checkOrUpdatePodUID(podUID); err != nil {
+		return nil, err
 	}
 
 	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.IsSmartNIC)
@@ -149,8 +168,11 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternal
 	if pr.IsSmartNIC {
 		annotCondFn = isSmartNICReady
 	}
-	annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, pr.PodNamespace, pr.PodName, annotCondFn)
+	podUID, annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, pr.PodNamespace, pr.PodName, annotCondFn)
 	if err != nil {
+		return nil, err
+	}
+	if err := pr.checkOrUpdatePodUID(podUID); err != nil {
 		return nil, err
 	}
 
@@ -176,7 +198,8 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternal
 		}
 		for _, ip := range result.IPs {
 			if err = waitForPodInterface(pr.ctx, result.Interfaces[*ip.Interface].Mac, []*net.IPNet{&ip.Address},
-				hostIfaceName, ifaceID, ofPort, useOVSExternalIDs); err != nil {
+				hostIfaceName, ifaceID, ofPort, useOVSExternalIDs, podLister, kclient, pr.PodNamespace, pr.PodName,
+				pr.PodUID); err != nil {
 				return nil, fmt.Errorf("error while waiting on OVN pod interface: %s ip: %v, error: %v", ifaceID, ip, err)
 			}
 		}
@@ -231,7 +254,7 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, us
 
 // getCNIResult get result from pod interface info.
 func (pr *PodRequest) getCNIResult(podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
-	interfacesArray, err := pr.ConfigureInterface(pr.PodNamespace, pr.PodName, podInterfaceInfo)
+	interfacesArray, err := pr.ConfigureInterface(podInterfaceInfo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure pod interface: %v", err)
 	}

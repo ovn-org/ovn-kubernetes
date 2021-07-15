@@ -23,6 +23,15 @@ type NetConf struct {
 	// LogFileMaxAge represents the maximum number
 	// of days to retain old log files
 	LogFileMaxAge int `json:"logfile-maxage"`
+
+	// Kubeconfig is the path to a kubeconfig
+	Kubeconfig string `json:"kubeconfig,omitempty"`
+	// KubeAPIServer is the URL of a Kubernetes API server (not required if kubeconfig is given)
+	KubeAPIServer string `json:"kube-api-server,omitempty"`
+	// KubeAPIToken is a Kubernetes API token (not required if kubeconfig is given)
+	KubeAPIToken string `json:"kube-api-token,omitempty"`
+	// KubeCACert is the absolute path to a Kubernetes API CA certificate (not required if kubeconfig is given)
+	KubeCACert string `json:"kube-ca-cert,omitempty"`
 }
 
 // NetworkSelectionElement represents one element of the JSON format

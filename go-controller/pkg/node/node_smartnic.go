@@ -8,6 +8,8 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
@@ -21,6 +23,9 @@ func (n *OvnNode) watchSmartNicPods(isOvnUpEnabled bool) {
 	var retryPods sync.Map
 	// servedPods tracks the pods that got a VF
 	var servedPods sync.Map
+
+	podLister := corev1listers.NewPodLister(n.watchFactory.LocalPodInformer().GetIndexer())
+	kclient := n.Kube.(*kube.Kube)
 
 	_ = n.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
@@ -46,7 +51,7 @@ func (n *OvnNode) watchSmartNicPods(isOvnUpEnabled bool) {
 					retryPods.Store(pod.UID, true)
 					return
 				}
-				err = n.addRepPort(pod, vfRepName, podInterfaceInfo)
+				err = n.addRepPort(pod, vfRepName, podInterfaceInfo, podLister, kclient.KClient)
 				if err != nil {
 					klog.Infof("Failed to add rep port, %s. retrying", err)
 					retryPods.Store(pod.UID, true)
@@ -81,7 +86,7 @@ func (n *OvnNode) watchSmartNicPods(isOvnUpEnabled bool) {
 				if err != nil {
 					return
 				}
-				err = n.addRepPort(pod, vfRepName, podInterfaceInfo)
+				err = n.addRepPort(pod, vfRepName, podInterfaceInfo, podLister, kclient.KClient)
 				if err != nil {
 					klog.Infof("Failed to add rep port, %s. retrying", err)
 				} else {
@@ -121,14 +126,14 @@ func (n *OvnNode) getVfRepName(pod *kapi.Pod) (string, error) {
 }
 
 // addRepPort adds the representor of the VF to the ovs bridge
-func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInterfaceInfo) error {
+func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInterfaceInfo, podLister corev1listers.PodLister, kclient kubernetes.Interface) error {
 	klog.Infof("Adding VF representor %s", vfRepName)
 	smartNicCD := util.SmartNICConnectionDetails{}
 	if err := smartNicCD.FromPodAnnotation(pod.Annotations); err != nil {
 		return fmt.Errorf("failed to get smart-nic annotation. %v", err)
 	}
 
-	err := cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, smartNicCD.SandboxId)
+	err := cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, smartNicCD.SandboxId, podLister, kclient, string(pod.UID))
 	if err != nil {
 		// Note(adrianc): we are lenient with cleanup in this method as pod is going to be retried anyway.
 		_ = n.delRepPort(vfRepName)

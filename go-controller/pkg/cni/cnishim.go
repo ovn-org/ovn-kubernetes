@@ -24,10 +24,12 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/vishvananda/netlink"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // Plugin is the structure to hold the endpoint information and the corresponding
@@ -133,6 +135,19 @@ func (p *Plugin) postMetrics(startTime time.Time, cmd command, err error) {
 	})
 }
 
+func kubeClientsetFromConfig(conf *ovntypes.NetConf) (*kubernetes.Clientset, error) {
+	if conf.Kubeconfig == "" && conf.KubeAPIServer == "" {
+		return nil, nil
+	}
+
+	return util.NewKubernetesClientset(&config.KubernetesConfig{
+		Kubeconfig: conf.Kubeconfig,
+		CACert:     conf.KubeCACert,
+		APIServer:  conf.KubeAPIServer,
+		Token:      conf.KubeAPIToken,
+	})
+}
+
 // CmdAdd is the callback for 'add' cni calls from skel
 func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 	var err error
@@ -149,6 +164,12 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 	setupLogging(conf)
+
+	kclient, errK := kubeClientsetFromConfig(conf)
+	if errK != nil {
+		err = errK
+		return err
+	}
 
 	req := newCNIRequest(args)
 
@@ -170,7 +191,7 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 	if response.Result != nil {
 		result = response.Result
 	} else {
-		pr, _ := cniRequestToPodRequest(req)
+		pr, _ := cniRequestToPodRequest(req, nil, kclient)
 		result, err = pr.getCNIResult(response.PodIFInfo)
 		if err != nil {
 			err = fmt.Errorf("failed to get CNI Result from pod interface info %v: %v", response.PodIFInfo, err)
