@@ -6,11 +6,13 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/pkg/errors"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -27,6 +29,7 @@ const (
 )
 
 type egressFirewall struct {
+	sync.Mutex
 	name        string
 	namespace   string
 	egressRules []*egressFirewallRule
@@ -260,20 +263,16 @@ func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
 
 func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall, txn *util.NBTxn) error {
 	klog.Infof("Adding egressFirewall %s in namespace %s", egressFirewall.Name, egressFirewall.Namespace)
-	nsInfo, err := oc.waitForNamespaceLocked(egressFirewall.Namespace)
-	if err != nil {
-		return fmt.Errorf("failed to wait for namespace %s event (%v)",
-			egressFirewall.Namespace, err)
-	}
-	defer nsInfo.Unlock()
 
-	if nsInfo.egressFirewall != nil {
+	ef := cloneEgressFirewall(egressFirewall)
+	ef.Lock()
+	defer ef.Unlock()
+	// there should not be an item already in egressFirewall map for the given Namespace
+	if _, loaded := oc.egressFirewalls.LoadOrStore(egressFirewall.Namespace, ef); loaded {
 		return fmt.Errorf("error attempting to add egressFirewall %s to namespace %s when it already has an egressFirewall",
 			egressFirewall.Name, egressFirewall.Namespace)
 	}
 
-	ef := cloneEgressFirewall(egressFirewall)
-	nsInfo.egressFirewall = ef
 	var addErrors error
 	egressFirewallStartPriorityInt, err := strconv.Atoi(types.EgressFirewallStartPriority)
 	if err != nil {
@@ -303,13 +302,15 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 		return addErrors
 	}
 
-	if nsInfo.addressSet == nil {
-		// TODO(trozet): remove dependency on nsInfo object and just determine hash names to create Egress FW with
-		return fmt.Errorf("unable to add egress firewall, namespace: %s has no address set", egressFirewall.Namespace)
+	// EgressFirewall needs to make sure that the address_set for the namespace exists independently of the namespace object
+	// so that OVN doesn't get unresolved references to the address_set.
+	// TODO: This should go away once we do something like refcounting for address_sets.
+	err = oc.addressSetFactory.EnsureAddressSet(egressFirewall.Namespace)
+	if err != nil {
+		return fmt.Errorf("cannot Ensure that addressSet for namespace %s exists %v", egressFirewall.Namespace, err)
 	}
-
-	ipv4HashedAS, ipv6HashedAS := nsInfo.addressSet.GetASHashNames()
-	err = oc.addEgressFirewallRules(ipv4HashedAS, ipv6HashedAS, egressFirewall.Namespace, egressFirewallStartPriorityInt, txn)
+	ipv4HashedAS, ipv6HashedAS := addressset.MakeAddressSetHashNames(egressFirewall.Namespace)
+	err = oc.addEgressFirewallRules(ef, ipv4HashedAS, ipv6HashedAS, egressFirewallStartPriorityInt, txn)
 	if err != nil {
 		return err
 	}
@@ -326,27 +327,29 @@ func (oc *Controller) updateEgressFirewall(oldEgressFirewall, newEgressFirewall 
 	return updateErrors
 }
 
-func (oc *Controller) deleteEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall, txn *util.NBTxn) error {
-	klog.Infof("Deleting egress Firewall %s in namespace %s", egressFirewall.Name, egressFirewall.Namespace)
+func (oc *Controller) deleteEgressFirewall(egressFirewallObj *egressfirewallapi.EgressFirewall, txn *util.NBTxn) error {
+	klog.Infof("Deleting egress Firewall %s in namespace %s", egressFirewallObj.Name, egressFirewallObj.Namespace)
 	deleteDNS := false
+	obj, loaded := oc.egressFirewalls.LoadAndDelete(egressFirewallObj.Namespace)
+	if !loaded {
+		return fmt.Errorf("there is no egressFirewall found in namespace %s", egressFirewallObj.Namespace)
+	}
 
-	nsInfo := oc.getNamespaceLocked(egressFirewall.Namespace)
-	if nsInfo != nil {
-		// clear it so an error does not prevent future egressFirewalls
-		for _, rule := range nsInfo.egressFirewall.egressRules {
-			if len(rule.to.dnsName) > 0 {
-				deleteDNS = true
-				break
-			}
+	ef, _ := obj.(egressFirewall)
+
+	ef.Lock()
+	defer ef.Unlock()
+	for _, rule := range ef.egressRules {
+		if len(rule.to.dnsName) > 0 {
+			deleteDNS = true
+			break
 		}
-		nsInfo.egressFirewall = nil
-		nsInfo.Unlock()
 	}
 	if deleteDNS {
-		oc.egressFirewallDNS.Delete(egressFirewall.Namespace)
+		oc.egressFirewallDNS.Delete(egressFirewallObj.Namespace)
 	}
 
-	return oc.deleteEgressFirewallRules(egressFirewall.Namespace, txn)
+	return oc.deleteEgressFirewallRules(egressFirewallObj.Namespace, txn)
 }
 
 func (oc *Controller) updateEgressFirewallWithRetry(egressfirewall *egressfirewallapi.EgressFirewall) error {
@@ -360,8 +363,7 @@ func (oc *Controller) updateEgressFirewallWithRetry(egressfirewall *egressfirewa
 	return nil
 }
 
-func (oc *Controller) addEgressFirewallRules(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6, namespace string, efStartPriority int, txn *util.NBTxn) error {
-	ef := oc.namespaces[namespace].egressFirewall
+func (oc *Controller) addEgressFirewallRules(ef *egressFirewall, hashedAddressSetNameIPv4, hashedAddressSetNameIPv6 string, efStartPriority int, txn *util.NBTxn) error {
 	for _, rule := range ef.egressRules {
 		var action string
 		var matchTargets []matchTarget
@@ -523,11 +525,11 @@ func generateMatch(ipv4Source, ipv6Source string, destinations []matchTarget, ds
 	var dst string
 	var extraMatch string
 	switch {
-	case len(ipv4Source) > 0 && len(ipv6Source) > 0:
+	case config.IPv4Mode && config.IPv6Mode:
 		src = fmt.Sprintf("(ip4.src == $%s || ip6.src == $%s)", ipv4Source, ipv6Source)
-	case len(ipv4Source) > 0:
+	case config.IPv4Mode:
 		src = fmt.Sprintf("ip4.src == $%s", ipv4Source)
-	case len(ipv6Source) > 0:
+	case config.IPv6Mode:
 		src = fmt.Sprintf("ip6.src == $%s", ipv6Source)
 	}
 

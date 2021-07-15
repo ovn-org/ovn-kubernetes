@@ -149,7 +149,7 @@ func isIfaceOvnInstalledSet(ifaceName string) bool {
 		return true
 	}
 
-	klog.V(5).Info("Still waiting for OVS port %s to have ovn-installed=true", ifaceName)
+	klog.V(5).Infof("Still waiting for OVS port %s to have ovn-installed=true", ifaceName)
 	return false
 }
 

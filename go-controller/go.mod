@@ -7,7 +7,6 @@ require (
 	github.com/Microsoft/go-winio v0.4.15 // indirect
 	github.com/Microsoft/hcsshim v0.8.10-0.20200715222032-5eafd1556990
 	github.com/bhendo/go-powershell v0.0.0-20190719160123-219e7fb4e41e
-	github.com/cenk/hub v1.0.1 // indirect
 	github.com/containernetworking/cni v0.8.0
 	github.com/containernetworking/plugins v0.8.7
 	github.com/coreos/go-iptables v0.4.5
@@ -25,6 +24,7 @@ require (
 	github.com/mitchellh/copystructure v1.2.0
 	github.com/onsi/ginkgo v1.15.0
 	github.com/onsi/gomega v1.10.1
+	github.com/ovn-org/libovsdb v0.5.0
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.7.1
 	github.com/prometheus/procfs v0.2.0 // indirect
@@ -73,5 +73,4 @@ replace (
 	k8s.io/metrics => k8s.io/metrics v0.20.0
 	k8s.io/mount-utils => k8s.io/mount-utils v0.20.0
 	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.20.0
-
 )

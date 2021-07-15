@@ -5,7 +5,6 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/acl"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
@@ -45,7 +44,6 @@ func (r *Repair) runOnce() error {
 	klog.V(4).Infof("Starting repairing loop for services")
 	defer func() {
 		klog.V(4).Infof("Finished repairing loop for services: %v", time.Since(startTime))
-		metrics.MetricSyncServiceLatency.WithLabelValues("repair-loop").Observe(time.Since(startTime).Seconds())
 	}()
 
 	// Obtain all the load balancers UUID

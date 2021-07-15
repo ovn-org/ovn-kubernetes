@@ -31,9 +31,12 @@ type AddressSetFactory interface {
 	// and contains the given IPs, or an error. Internally it creates
 	// an address set for IPv4 and IPv6 each.
 	NewAddressSet(name string, ips []net.IP) (AddressSet, error)
-	// ForEachAddressSet calls the given function for each address set
+	// EnsureAddressSet makes sure that an address set object exists in ovn
+	// with the given name
+	EnsureAddressSet(name string) error
+	// ProcessEachAddressSet calls the given function for each address set
 	// known to the factory
-	ForEachAddressSet(iteratorFn AddressSetIterFunc) error
+	ProcessEachAddressSet(iteratorFn AddressSetIterFunc) error
 	// DestroyAddressSetInBackingStore deletes the named address set from the
 	// factory's backing store. SHOULD NOT BE CALLED for any address set
 	// for which an AddressSet object has been created.
@@ -74,10 +77,50 @@ func (asf *ovnAddressSetFactory) NewAddressSet(name string, ips []net.IP) (Addre
 	return res, nil
 }
 
-// ForEachAddressSet will pass the unhashed address set name, namespace name
-// and the first suffix in the name to the 'iteratorFn' for every address_set in
-// OVN. (Unhashed address set names are of the form namespaceName[.suffix1.suffix2. .suffixN])
-func (asf *ovnAddressSetFactory) ForEachAddressSet(iteratorFn AddressSetIterFunc) error {
+// EnsureAddressSet ensures the address_set with the given name exists and if it does not creates an empty addressSet
+func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) error {
+	hashedAddressSetNames := []string{}
+	ip4ASName, ip6ASName := MakeAddressSetName(name)
+	if config.IPv4Mode {
+		hashedAddressSetNames = append(hashedAddressSetNames, ip4ASName)
+	}
+	if config.IPv6Mode {
+		hashedAddressSetNames = append(hashedAddressSetNames, ip6ASName)
+	}
+	for _, hashedAddressSetName := range hashedAddressSetNames {
+		uuid, stderr, err := util.RunOVNNbctl(
+			"--data=bare",
+			"--no-heading",
+			"--columns=_uuid",
+			"find",
+			"address_set",
+			"name="+hashedAddressSetName)
+		if err != nil {
+			return fmt.Errorf("find failed to get address set %q, stderr: %q (%v)",
+				name, stderr, err)
+		}
+		if uuid != "" {
+			// address_set already exists
+			continue
+		}
+		// create the address_set with no IPs
+		_, stderr, err = util.RunOVNNbctl(
+			"create",
+			"address_set",
+			"name="+hashedAddressSetName,
+			"external-ids:name="+name,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create address set %q, stderr: %q (%v)",
+				name, stderr, err)
+		}
+
+	}
+
+	return nil
+}
+
+func forEachAddressSet(do func(string)) error {
 	output, stderr, err := util.RunOVNNbctl("--format=csv", "--data=bare", "--no-heading",
 		"--columns=external_ids", "find", "address_set")
 	if err != nil {
@@ -85,32 +128,44 @@ func (asf *ovnAddressSetFactory) ForEachAddressSet(iteratorFn AddressSetIterFunc
 			"stdout: %q, stderr: %q err: %v", output, stderr, err)
 	}
 
-	processedAddressSets := sets.String{}
 	for _, line := range strings.Split(output, "\n") {
 		for _, externalID := range strings.Split(line, ",") {
 			if !strings.HasPrefix(externalID, "name=") {
 				continue
 			}
-			// Remove the suffix from the address set name and normalize
-			addrSetName := truncateSuffixFromAddressSet(externalID[5:])
-			if processedAddressSets.Has(addrSetName) {
-				// We have already processed the address set. In case of dual stack we will have _v4 and _v6
-				// suffixes for address sets. Since we are normalizing these two address sets through this API
-				// we will process only one normalized address set name.
-				break
-			}
-			processedAddressSets.Insert(addrSetName)
-			names := strings.Split(addrSetName, ".")
-			addrSetNamespace := names[0]
-			nameSuffix := ""
-			if len(names) >= 2 {
-				nameSuffix = names[1]
-			}
-			iteratorFn(addrSetName, addrSetNamespace, nameSuffix)
+			name := externalID[5:]
+			do(name)
 			break
 		}
 	}
 	return nil
+}
+
+// ProcessEachAddressSet will pass the unhashed address set name, namespace name
+// and the first suffix in the name to the 'iteratorFn' for every address_set in
+// OVN. (Unhashed address set names are of the form namespaceName[.suffix1.suffix2. .suffixN])
+func (asf *ovnAddressSetFactory) ProcessEachAddressSet(iteratorFn AddressSetIterFunc) error {
+	processedAddressSets := sets.String{}
+	err := forEachAddressSet(func(name string) {
+		// Remove the suffix from the address set name and normalize
+		addrSetName := truncateSuffixFromAddressSet(name)
+		if processedAddressSets.Has(addrSetName) {
+			// We have already processed the address set. In case of dual stack we will have _v4 and _v6
+			// suffixes for address sets. Since we are normalizing these two address sets through this API
+			// we will process only one normalized address set name.
+			return
+		}
+		processedAddressSets.Insert(addrSetName)
+		names := strings.Split(addrSetName, ".")
+		addrSetNamespace := names[0]
+		nameSuffix := ""
+		if len(names) >= 2 {
+			nameSuffix = names[1]
+		}
+		iteratorFn(addrSetName, addrSetNamespace, nameSuffix)
+	})
+
+	return err
 }
 
 func truncateSuffixFromAddressSet(asName string) string {
@@ -322,12 +377,12 @@ func (as *ovnAddressSets) DeleteIPs(ips []net.IP) error {
 	v4ips, v6ips := splitIPsByFamily(ips)
 	if as.ipv6 != nil {
 		if err := as.ipv6.deleteIPs(v6ips); err != nil {
-			return fmt.Errorf("failed to AddIPs to the v6 set: %w", err)
+			return fmt.Errorf("failed to DeleteIPs to the v6 set: %w", err)
 		}
 	}
 	if as.ipv4 != nil {
 		if err := as.ipv4.deleteIPs(v4ips); err != nil {
-			return fmt.Errorf("failed to AddIPs to the v4 set: %w", err)
+			return fmt.Errorf("failed to DeleteIPs to the v4 set: %w", err)
 		}
 	}
 	return nil
@@ -342,12 +397,14 @@ func (as *ovnAddressSets) Destroy() error {
 		if err != nil {
 			return err
 		}
+		as.ipv4 = nil
 	}
 	if as.ipv6 != nil {
 		err := as.ipv6.destroy()
 		if err != nil {
 			return err
 		}
+		as.ipv6 = nil
 	}
 	return nil
 }

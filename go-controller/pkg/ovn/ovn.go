@@ -2,9 +2,9 @@ package ovn
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
-
 	"net"
 	"reflect"
 	"strconv"
@@ -33,6 +33,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
@@ -75,9 +76,6 @@ type namespaceInfo struct {
 	// networkPolicy's mutex (and not necessarily the namespaceInfo's) to work with
 	// the policy itself.
 	networkPolicies map[string]*networkPolicy
-
-	// defines the namespaces egressFirewall
-	egressFirewall *egressFirewall
 
 	hybridOverlayExternalGW net.IP
 	hybridOverlayVTEP       net.IP
@@ -145,6 +143,9 @@ type Controller struct {
 	// from inside those functions.
 	namespaces      map[string]*namespaceInfo
 	namespacesMutex sync.Mutex
+
+	// egressFirewalls is a map of namespaces and the egressFirewall attached to it
+	egressFirewalls sync.Map
 
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
@@ -346,6 +347,13 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 		}()
 	}
 
+	// Final step to cleanup after resource handlers have synced
+	err := oc.ovnTopologyCleanup()
+	if err != nil {
+		klog.Errorf("Failed to cleanup OVN topology to version %d: %v", ovntypes.OvnCurrentTopologyVersion, err)
+		return err
+	}
+
 	// Master is fully running and resource handlers have synced, update Topology version in OVN
 	stdout, stderr, err := util.RunOVNNbctl("set", "logical_router", ovntypes.OVNClusterRouter,
 		fmt.Sprintf("external_ids:k8s-ovn-topo-version=%d", ovntypes.OvnCurrentTopologyVersion))
@@ -366,6 +374,19 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	}
 
 	return nil
+}
+
+func (oc *Controller) ovnTopologyCleanup() error {
+	ver, err := util.DetermineOVNTopoVersionFromOVN()
+	if err != nil {
+		return err
+	}
+
+	// Cleanup address sets in non dual stack formats in all versions known to possibly exist.
+	if ver <= ovntypes.OvnPortBindingTopoVersion {
+		err = addressset.NonDualStackAddressSetCleanup()
+	}
+	return err
 }
 
 // syncPeriodic adds a goroutine that periodically does some work
@@ -457,6 +478,13 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 		return false
 	}
 
+	if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
+		// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
+		// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
+		// care of updating the exgw updates
+		oc.deletePodExternalGW(oldPod)
+	}
+
 	if util.PodWantsNetwork(pod) && addPort {
 		if err := oc.addLogicalPort(pod); err != nil {
 			klog.Errorf(err.Error())
@@ -464,12 +492,6 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 			return false
 		}
 	} else {
-		if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
-			// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
-			// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
-			// care of updating the exgw updates
-			oc.deletePodExternalGW(oldPod)
-		}
 		if err := oc.addPodExternalGW(pod); err != nil {
 			klog.Errorf(err.Error())
 			oc.recordPodEvent(err, pod)
@@ -846,6 +868,20 @@ func (oc *Controller) WatchNodes() {
 				}
 				gatewaysFailed.Store(node.Name, true)
 			}
+
+			// ensure pods that already exist on this node have their logical ports created
+			options := metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String()}
+			pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
+			if err != nil {
+				klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
+			} else {
+				for _, pod := range pods.Items {
+					if !oc.ensurePod(nil, &pod, true) {
+						oc.addRetryPod(&pod)
+					}
+				}
+			}
+
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)

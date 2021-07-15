@@ -1,6 +1,8 @@
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 networking:
+  # kube proxy will be disabled
+  kubeProxyMode: "none"
   # the default CNI will not be installed
   disableDefaultCNI: true
   apiServerAddress: {{ ovn_apiServerAddress | default('0.0.0.0') }}
@@ -16,6 +18,9 @@ networking:
 {%- endif %}
 featureGates:
   SCTPSupport: true
+{%- if ovn_ip_family == "dual" %}
+  IPv6DualStack: true
+{%- endif %}
 kubeadmConfigPatches:
 - |
   kind: ClusterConfiguration

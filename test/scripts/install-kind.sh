@@ -14,15 +14,9 @@ sudo mv ./e2e.test /usr/local/bin/e2e.test
 sudo mv ./ginkgo /usr/local/bin/ginkgo
 rm kubernetes-test-linux-amd64.tar.gz
 
-# Install kind (dual-stack is not released upstream so we have to use our own version)
-if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
-  sudo curl -Lo /usr/local/bin/kind https://github.com/aojea/kind/releases/download/dualstack/kind
-  sudo chmod +x /usr/local/bin/kind
-else
-  curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.10.0/kind-linux-amd64
-  chmod +x ./kind
-  sudo mv ./kind /usr/local/bin/
-fi
+curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.11.1/kind-linux-amd64
+chmod +x ./kind
+sudo mv ./kind /usr/local/bin/
 
 pushd ../contrib
 ./kind.sh
