@@ -283,19 +283,19 @@ func (c *Controller) syncServices(key string) error {
 
 	vipProtocols := collectServiceVIPs(service)
 	if svcNeedsIdling(service.Annotations) && !util.HasValidEndpoint(service, endpointSlices) {
-		// addServiceToIdlingBalancer adds the vips to service tracker
-		err = c.addServiceToIdlingBalancer(vipProtocols, service)
-		if err != nil {
-			c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToAddToIdlingBalancer",
-				"Error trying to add to Idling LoadBalancer for Service %s/%s: %v", name, namespace, err)
-			return err
-		}
 		toRemoveFromNonIdling := sets.NewString()
 		for vipProtocol := range vipProtocols {
 			if c.serviceTracker.getLoadBalancer(name, namespace, vipProtocol) != loadbalancer.IdlingLoadBalancer {
 				toRemoveFromNonIdling.Insert(vipProtocol)
 			}
 			vipsTracked.Delete(vipProtocol)
+		}
+		// addServiceToIdlingBalancer adds the vips to service tracker
+		err = c.addServiceToIdlingBalancer(vipProtocols, service)
+		if err != nil {
+			c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToAddToIdlingBalancer",
+				"Error trying to add to Idling LoadBalancer for Service %s/%s: %v", name, namespace, err)
+			return err
 		}
 		err = deleteVIPsFromNonIdlingOVNBalancers(toRemoveFromNonIdling, name, namespace)
 		if err != nil {
