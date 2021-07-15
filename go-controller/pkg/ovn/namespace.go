@@ -251,7 +251,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 	if gwAnnotation != oldGWAnnotation || newBFDEnabled != oldBFDEnabled {
 		// if old gw annotation was empty, new one must not be empty, so we should remove any per pod SNAT
 		if oldGWAnnotation == "" {
-			if config.Gateway.DisableSNATMultipleGWs && (len(nsInfo.routingExternalGWs.gws) != 0 || len(nsInfo.routingExternalPodGWs) != 0) {
+			if config.Gateway.DisableSNATMultipleGWs {
 				existingPods, err := oc.watchFactory.GetPods(old.Name)
 				if err != nil {
 					klog.Errorf("Failed to get all the pods (%v)", err)
