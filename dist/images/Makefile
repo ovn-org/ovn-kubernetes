@@ -20,42 +20,43 @@ endif
 KERNEL_VERSION ?= `uname -r`
 OVS_BRANCH ?= master
 OVN_BRANCH ?= master
+OCI_BIN ?= docker
 
 # The image of ovnkube/ovn-daemonset-u should be multi-arched before using it on arm64
 ubuntu: bld
-	docker build -t ovn-kube-u$(IMAGE_ARCH) -f Dockerfile.ubuntu$(DOCKERFILE_ARCH) .
+	${OCI_BIN} build -t ovn-kube-u$(IMAGE_ARCH) -f Dockerfile.ubuntu$(DOCKERFILE_ARCH) .
 ifeq ($(ARCH),amd64)
-	docker tag "ovn-kube-u$(IMAGE_ARCH):latest" \
+	${OCI_BIN} tag "ovn-kube-u$(IMAGE_ARCH):latest" \
               "ovn-kube-u:latest"
 endif
 	# This is the default in the ovnkube*.yaml files
-	# docker login -u ovnkube docker.io/ovnkube
-	# docker push docker.io/ovnkube/ovn-daemonset-u:latest
+	# ${OCI_BIN} login -u ovnkube docker.io/ovnkube
+	# ${OCI_BIN} push docker.io/ovnkube/ovn-daemonset-u:latest
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest
 
 centos: bld
-	docker build --build-arg rpmArch=$(shell uname -m) -t ovn-daemonset .
-	docker tag ovn-daemonset docker.io/ovnkube/ovn-daemonset:latest
-	# docker login -u ovnkube docker.io/ovnkube
-	# docker push docker.io/ovnkube/ovn-daemonset:latest
+	${OCI_BIN} build --build-arg rpmArch=$(shell uname -m) -t ovn-daemonset .
+	${OCI_BIN} tag ovn-daemonset docker.io/ovnkube/ovn-daemonset:latest
+	# ${OCI_BIN} login -u ovnkube docker.io/ovnkube
+	# ${OCI_BIN} push docker.io/ovnkube/ovn-daemonset:latest
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset:latest
 
 fedora: bld
-	docker build -t ovn-kube-f -f Dockerfile.fedora .
-	# docker login -u ovnkube docker.io/ovnkube
-	# docker push docker.io/ovnkube/ovn-daemonset-f:latest
+	${OCI_BIN} build -t ovn-kube-f -f Dockerfile.fedora .
+	# ${OCI_BIN} login -u ovnkube docker.io/ovnkube
+	# ${OCI_BIN} push docker.io/ovnkube/ovn-daemonset-f:latest
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-f:latest
 
 fedora-dev: bld
 	# To build (OVN Datapath)  with specific kernel version, please override KERNEL_VERSION.
 	# By default it will build with the host machine's kernel version.
 
-	docker build --build-arg KERNEL_VERSION=$(KERNEL_VERSION) \
+	${OCI_BIN} build --build-arg KERNEL_VERSION=$(KERNEL_VERSION) \
 		     --build-arg OVS_BRANCH=$(OVS_BRANCH) \
 		     --build-arg OVN_BRANCH=$(OVN_BRANCH) \
 		     -t ovn-kube-f-dev -f Dockerfile.fedora.dev .
-	# docker login -u ovnkube docker.io/ovnkube
-	# docker push docker.io/ovnkube/ovn-daemonset-f:latest
+	# ${OCI_BIN} login -u ovnkube docker.io/ovnkube
+	# ${OCI_BIN} push docker.io/ovnkube/ovn-daemonset-f:latest
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-f:latest \
                     --net-cidr=10.244.0.0/16 \
                     --svc-cidr=10.96.0.0/12 \

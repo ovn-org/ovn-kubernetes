@@ -40,7 +40,8 @@ usage() {
     echo "                 [-nl |--node-loglevel <num>] [-ml|--master-loglevel <num>]"
     echo "                 [-dbl|--dbchecker-loglevel <num>] [-ndl|--ovn-loglevel-northd <loglevel>]"
     echo "                 [-nbl|--ovn-loglevel-nb <loglevel>] [-sbl|--ovn-loglevel-sb <loglevel>]"
-    echo "                 [-cl |--ovn-loglevel-controller <loglevel>] [-dl|--ovn-loglevel-nbctld <loglevel>] |"
+    echo "                 [-cl |--ovn-loglevel-controller <loglevel>] [-dl|--ovn-loglevel-nbctld <loglevel>]"
+    echo "                 [-ep |--experimental-provider <name>] |"
     echo "                 [-h]]"
     echo ""
     echo "-cf  | --config-file               Name of the KIND J2 configuration file."
@@ -75,6 +76,7 @@ usage() {
     echo "-sbl | --ovn-loglevel-sb           Log config for southboudn DB DEFAULT: '-vconsole:info -vfile:info'."
     echo "-cl  | --ovn-loglevel-controller   Log config for ovn-controller DEFAULT: '-vconsole:info'."
     echo "-dl  | --ovn-loglevel-nbctld       Log config for nbctl daemon DEFAULT: '-vconsole:info'."
+    echo "-ep  | --experimental-provider     Use an experimental OCI provider such as podman, instead of docker. DEFAULT: Disabled."
     echo "--delete                      	   Delete current cluster"
     echo ""
 }
@@ -101,6 +103,9 @@ parse_args() {
             -ds | --disable-snat-multiple-gws ) OVN_DISABLE_SNAT_MULTIPLE_GWS=true
                                                 ;;
             -dp | --disable-pkt-mtu-check )     OVN_DISABLE_PKT_MTU_CHECK=true
+                                                ;;
+            -ep | --experimental-provider )     shift
+                                                export KIND_EXPERIMENTAL_PROVIDER=$1
                                                 ;;
             -nf | --netflow-targets )           shift
                                                 OVN_NETFLOW_TARGETS=$1
@@ -205,6 +210,7 @@ print_params() {
      echo "KIND_IPV6_SUPPORT = $KIND_IPV6_SUPPORT"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
      echo "KIND_ALLOW_SYSTEM_WRITES = $KIND_ALLOW_SYSTEM_WRITES"
+     echo "KIND_EXPERIMENTAL_PROVIDER = $KIND_EXPERIMENTAL_PROVIDER"
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
      echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
      echo "OVN_DISABLE_SNAT_MULTIPLE_GWS = $OVN_DISABLE_SNAT_MULTIPLE_GWS"
@@ -280,7 +286,7 @@ set_default_params() {
     KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
   fi
   OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
-
+  OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
 }
 
 detect_apiserver_ip() {
@@ -404,8 +410,8 @@ docker_disable_ipv6() {
   # is not very common.
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
   for n in $KIND_NODES; do
-    docker exec "$n" sysctl net.ipv6.conf.all.disable_ipv6=0
-    docker exec "$n" sysctl net.ipv6.conf.all.forwarding=1
+    $OCI_BIN exec "$n" sysctl net.ipv6.conf.all.disable_ipv6=0
+    $OCI_BIN exec "$n" sysctl net.ipv6.conf.all.forwarding=1
   done
 }
 
@@ -453,8 +459,8 @@ build_ovn_image() {
     # Find all built executables, but ignore the 'windows' directory if it exists
     find ../../go-controller/_output/go/bin/ -maxdepth 1 -type f -exec cp -f {} . \;
     echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-    docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
-    OVN_IMAGE=ovn-daemonset-f:dev
+    $OCI_BIN build -t localhost/ovn-daemonset-f:dev -f Dockerfile.fedora .
+    OVN_IMAGE=localhost/ovn-daemonset-f:dev
     popd
   fi
 }
@@ -490,7 +496,14 @@ create_ovn_kube_manifests() {
 }
 
 install_ovn_image() {
-  kind load docker-image "${OVN_IMAGE}" --name "${KIND_CLUSTER_NAME}"
+  if [ "$OCI_BIN" == "podman" ]; then
+    # podman: cf https://github.com/kubernetes-sigs/kind/issues/2027
+    rm -f /tmp/ovn-kube-f.tar
+    podman save -o /tmp/ovn-kube-f.tar "${OVN_IMAGE}"
+    kind load image-archive /tmp/ovn-kube-f.tar --name "${KIND_CLUSTER_NAME}"
+  else
+    kind load docker-image "${OVN_IMAGE}" --name "${KIND_CLUSTER_NAME}"
+  fi
 }
 
 install_ovn() {
