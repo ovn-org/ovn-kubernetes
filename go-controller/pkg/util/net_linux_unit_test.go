@@ -858,3 +858,115 @@ func TestDeleteConntrack(t *testing.T) {
 		})
 	}
 }
+
+func TestGetIPv6OnSubnet(t *testing.T) {
+	mockNetLinkOps := new(mocks.NetLinkOps)
+	mockLink := new(netlink_mocks.Link)
+	// below is defined in net_linux.go
+	netLinkOps = mockNetLinkOps
+
+	tests := []struct {
+		desc                     string
+		errExp                   bool
+		inputIface               string
+		inputIP                  *net.IPNet
+		expectedIP               *net.IPNet
+		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
+		onRetArgsLinkIfaceOpers  []ovntest.TestifyMockHelper
+	}{
+		{
+			desc:       "tests code path when LinkByName() returns error",
+			inputIface: "testIfaceName",
+			inputIP:    ovntest.MustParseIPNet("2620:52:0:11c::20/128"),
+			expectedIP: nil,
+			errExp:     true,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
+			},
+		},
+		{
+			desc:       "tests code path when RouteListFiltered() returns error",
+			inputIface: "testIfaceName",
+			inputIP:    ovntest.MustParseIPNet("2620:52:0:11c::20/128"),
+			expectedIP: nil,
+			errExp:     true,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
+		},
+		{
+			desc:                     "provided address does not have 128 prefix",
+			inputIface:               "testIfaceName",
+			inputIP:                  ovntest.MustParseIPNet("2620:52:0:11c::20/64"),
+			expectedIP:               ovntest.MustParseIPNet("2620:52:0:11c::20/64"),
+			errExp:                   false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{},
+		},
+		{
+			desc:                     "provided address is not ipv6",
+			inputIface:               "testIfaceName",
+			inputIP:                  ovntest.MustParseIPNet("192.169.1.12/32"),
+			expectedIP:               ovntest.MustParseIPNet("192.169.1.12/32"),
+			errExp:                   false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{},
+		},
+		{
+			desc:       "returns address on broadest subnet found",
+			inputIface: "testIfaceName",
+			inputIP:    ovntest.MustParseIPNet("2620:52:0:11c::20/128"),
+			expectedIP: ovntest.MustParseIPNet("2620:52:0:11c::20/32"),
+			errExp:     false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
+					{Dst: ovntest.MustParseIPNet("2620:52:0:11c::/64")},
+					{Dst: ovntest.MustParseIPNet("2620:52::/32")},
+				}, nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
+		},
+		{
+			desc:       "returns address on broadest subnet found irrespective of order",
+			inputIface: "testIfaceName",
+			inputIP:    ovntest.MustParseIPNet("2620:52:0:11c::20/128"),
+			expectedIP: ovntest.MustParseIPNet("2620:52:0:11c::20/32"),
+			errExp:     false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
+					{Dst: ovntest.MustParseIPNet("2620:52::/32")},
+					{Dst: ovntest.MustParseIPNet("2620:52:0:11c::/64")},
+				}, nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+
+			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
+			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
+
+			ip, err := GetIPv6OnSubnet(tc.inputIface, tc.inputIP)
+			t.Log(ip, err)
+			if tc.errExp {
+				assert.Error(t, err)
+			} else {
+				assert.Nil(t, err)
+			}
+			if tc.expectedIP != nil {
+				assert.Equal(t, ip, tc.expectedIP)
+			}
+			mockNetLinkOps.AssertExpectations(t)
+			mockLink.AssertExpectations(t)
+		})
+	}
+}
