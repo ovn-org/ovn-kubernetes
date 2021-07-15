@@ -1116,3 +1116,9 @@ func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool)
 	}()
 	return nil
 }
+
+func (oc *Controller) VisitNsInfo(ns string, visitor DoWithNsInfo) error {
+	nsInfo := oc.ensureNamespaceLocked(ns)
+	defer nsInfo.Unlock()
+	return visitor(nsInfo)
+}
