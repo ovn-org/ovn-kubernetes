@@ -319,6 +319,7 @@ func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*ne
 					gwStr := gw.String()
 					// if route was already programmed, skip it
 					if foundGR, ok := nsInfo.podExternalRoutes[podIP][gwStr]; ok && foundGR == gr {
+						routesAdded++
 						continue
 					}
 					mask := GetIPFullMask(podIP)
