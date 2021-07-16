@@ -401,7 +401,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("retries a failed pod Add when namespace doesn't yet exist", func() {
+		ginkgo.It("pod Add should succeed even when namespace doesn't yet exist", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				namespaceT := newNamespace("namespace1")
@@ -429,13 +429,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(podJSON))
 
-				fakeOvn.asf.ExpectNoAddressSet(t.namespace)
-
-				// Now add the namespace
-				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Create(context.TODO(), namespaceT, metav1.CreateOptions{})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				// Pod creation should be retried on Update event
+				// Add Pod logical port should succeed even without namespace
 				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				gomega.Expect(getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)).Should(gomega.MatchJSON(podJSON))
 

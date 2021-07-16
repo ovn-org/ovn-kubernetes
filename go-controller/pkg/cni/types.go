@@ -3,7 +3,6 @@ package cni
 import (
 	"context"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types/current"
@@ -76,6 +75,8 @@ type PodRequest struct {
 	PodNamespace string
 	// kubernetes pod name
 	PodName string
+	// kubernetes pod UID
+	PodUID string
 	// kubernetes container ID
 	SandboxID string
 	// kernel network namespace path
@@ -92,6 +93,9 @@ type PodRequest struct {
 	cancel context.CancelFunc
 	// Interface to pod is a Smart-NIC interface
 	IsSmartNIC bool
+
+	podLister corev1listers.PodLister
+	kclient   kubernetes.Interface
 }
 
 type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) ([]byte, error)
@@ -105,10 +109,6 @@ type Server struct {
 	useOVSExternalIDs int32
 	kclient           kubernetes.Interface
 	podLister         corev1listers.PodLister
-
-	// runningSandboxAdds is a map of sandbox ID to PodRequest for any CNIAdd operation
-	runningSandboxAddsLock sync.Mutex
-	runningSandboxAdds     map[string]*PodRequest
 
 	// CNI Server mode
 	mode string

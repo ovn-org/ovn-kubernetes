@@ -510,7 +510,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// Add the pod's logical switch port to the port cache
 	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
 
-	// Wait for namespace to exist, no calls after this should ever use waitForNamespaceLocked
+	// Ensure the namespace/nsInfo exists
 	if err = oc.addPodToNamespace(pod.Namespace, portInfo); err != nil {
 		return err
 	}

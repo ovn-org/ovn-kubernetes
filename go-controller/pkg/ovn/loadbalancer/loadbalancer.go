@@ -112,9 +112,10 @@ func GetLoadBalancerVIPs(loadBalancer string) (map[string]string, error) {
 }
 
 // DeleteLoadBalancerVIP removes the VIP as well as any reject ACLs associated to the LB
-func DeleteLoadBalancerVIP(loadBalancer, vip string) error {
+func DeleteLoadBalancerVIP(txn *util.NBTxn, loadBalancer, vip string) error {
 	vipQuotes := fmt.Sprintf("\"%s\"", vip)
-	stdout, stderr, err := util.RunOVNNbctl("--if-exists", "remove", "load_balancer", loadBalancer, "vips", vipQuotes)
+	request := []string{"--if-exists", "remove", "load_balancer", loadBalancer, "vips", vipQuotes}
+	stdout, stderr, err := txn.AddOrCommit(request)
 	if err != nil {
 		// if we hit an error and fail to remove load balancer, we skip removing the rejectACL
 		return fmt.Errorf("error in deleting load balancer vip %s for %s"+
@@ -125,26 +126,13 @@ func DeleteLoadBalancerVIP(loadBalancer, vip string) error {
 }
 
 // DeleteLoadBalancerVIPs removes the VIPs across lbs in a single shot
-func DeleteLoadBalancerVIPs(loadBalancers, vips []string) error {
-	txn := util.NewNBTxn()
+func DeleteLoadBalancerVIPs(txn *util.NBTxn, loadBalancers, vips []string) error {
 	for _, loadBalancer := range loadBalancers {
 		for _, vip := range vips {
-			vipQuotes := fmt.Sprintf("\"%s\"", vip)
-			request := []string{"--if-exists", "remove", "load_balancer", loadBalancer, "vips", vipQuotes}
-			stdout, stderr, err := txn.AddOrCommit(request)
-			if err != nil {
-				return fmt.Errorf("error in deleting load balancer vip %v for %v"+
-					"stdout: %q, stderr: %q, error: %v",
-					vips, loadBalancers, stdout, stderr, err)
+			if err := DeleteLoadBalancerVIP(txn, loadBalancer, vip); err != nil {
+				return err
 			}
 		}
-	}
-	stdout, stderr, err := txn.Commit()
-	if err != nil {
-		// if we hit an error and fail to remove load balancer, we skip removing the rejectACL
-		return fmt.Errorf("error in deleting load balancer vip %v for %v"+
-			"stdout: %q, stderr: %q, error: %v",
-			vips, loadBalancers, stdout, stderr, err)
 	}
 	return nil
 }

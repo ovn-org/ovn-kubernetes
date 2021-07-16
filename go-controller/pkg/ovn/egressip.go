@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -618,6 +619,9 @@ type egressIPController struct {
 
 	// A mutex for allocator
 	allocatorMutex *sync.Mutex
+
+	// libovsdb northbound client interface
+	nbClient libovsdbclient.Client
 }
 
 func (e *egressIPController) addPodEgressIP(eIP *egressipv1.EgressIP, pod *kapi.Pod) error {

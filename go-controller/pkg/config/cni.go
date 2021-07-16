@@ -15,6 +15,47 @@ import (
 
 // WriteCNIConfig writes a CNI JSON config file to directory given by global config
 func WriteCNIConfig() error {
+	var err error
+	var f *os.File
+	var bytes []byte
+
+	// Install the CNI config file after all initialization is done
+	// MkdirAll() returns no error if the path already exists
+	err = os.MkdirAll(CNI.ConfDir, os.ModeDir)
+	if err != nil {
+		return err
+	}
+
+	// CACert might be a secret valid only in the container; copy into
+	// the CNI directory
+	caFile := Kubernetes.CACert
+	if caFile != "" {
+		bytes, err = ioutil.ReadFile(caFile)
+		if err != nil {
+			return err
+		}
+		f, err = ioutil.TempFile(CNI.ConfDir, "ovnkube-ca-*.cert")
+		if err != nil {
+			return err
+		}
+
+		caFile = f.Name()
+		defer func() {
+			if err != nil {
+				os.Remove(caFile)
+			}
+		}()
+
+		_, err = f.Write(bytes)
+		if err != nil {
+			return err
+		}
+		err = f.Close()
+		if err != nil {
+			return err
+		}
+	}
+
 	netConf := &ovntypes.NetConf{
 		NetConf: types.NetConf{
 			CNIVersion: "0.4.0",
@@ -26,29 +67,24 @@ func WriteCNIConfig() error {
 		LogFileMaxSize:    Logging.LogFileMaxSize,
 		LogFileMaxBackups: Logging.LogFileMaxBackups,
 		LogFileMaxAge:     Logging.LogFileMaxAge,
+		Kubeconfig:        Kubernetes.Kubeconfig,
+		KubeCACert:        caFile,
+		KubeAPIServer:     Kubernetes.APIServer,
+		KubeAPIToken:      Kubernetes.Token,
 	}
 
-	bytes, err := json.Marshal(netConf)
+	bytes, err = json.Marshal(netConf)
 	if err != nil {
 		return fmt.Errorf("failed to marshal CNI config JSON: %v", err)
-	}
-
-	// Install the CNI config file after all initialization is done
-	// MkdirAll() returns no error if the path already exists
-	err = os.MkdirAll(CNI.ConfDir, os.ModeDir)
-	if err != nil {
-		return err
 	}
 
 	// Always create the CNI config for consistency.
 	confFile := filepath.Join(CNI.ConfDir, CNIConfFileName)
 
-	var f *os.File
 	f, err = ioutil.TempFile(CNI.ConfDir, "ovnkube-")
 	if err != nil {
 		return err
 	}
-
 	_, err = f.Write(bytes)
 	if err != nil {
 		return err

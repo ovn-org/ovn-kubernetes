@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
@@ -46,6 +47,7 @@ const (
 
 // NewController returns a new *Controller.
 func NewController(client clientset.Interface,
+	nbClient libovsdbclient.Client,
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
 	clusterPortGroupUUID string,
@@ -60,6 +62,7 @@ func NewController(client clientset.Interface,
 
 	c := &Controller{
 		client:           client,
+		nbClient:         nbClient,
 		serviceTracker:   st,
 		queue:            workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), controllerName),
 		workerLoopPeriod: time.Second,
@@ -97,7 +100,11 @@ func NewController(client clientset.Interface,
 
 // Controller manages selector-based service endpoints.
 type Controller struct {
-	client           clientset.Interface
+	client clientset.Interface
+
+	// libovsdb northbound client interface
+	nbClient libovsdbclient.Client
+
 	eventBroadcaster record.EventBroadcaster
 	eventRecorder    record.EventRecorder
 
@@ -243,8 +250,12 @@ func (c *Controller) syncServices(key string) error {
 	if err != nil || !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
 		err = deleteVIPsFromAllOVNBalancers(vipsTracked, name, namespace)
 		if err != nil {
-			c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToDeleteOVNLoadBalancer",
-				"Error trying to delete the OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
+			// If the service wasn't found, don't panic sending an
+			// an event after cleaning it up
+			if service != nil {
+				c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToDeleteOVNLoadBalancer",
+					"Error trying to delete the OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
+			}
 			return err
 		}
 		// Delete the Service form the Service Tracker
@@ -272,19 +283,19 @@ func (c *Controller) syncServices(key string) error {
 
 	vipProtocols := collectServiceVIPs(service)
 	if svcNeedsIdling(service.Annotations) && !util.HasValidEndpoint(service, endpointSlices) {
-		// addServiceToIdlingBalancer adds the vips to service tracker
-		err = c.addServiceToIdlingBalancer(vipProtocols, service)
-		if err != nil {
-			c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToAddToIdlingBalancer",
-				"Error trying to add to Idling LoadBalancer for Service %s/%s: %v", name, namespace, err)
-			return err
-		}
 		toRemoveFromNonIdling := sets.NewString()
 		for vipProtocol := range vipProtocols {
 			if c.serviceTracker.getLoadBalancer(name, namespace, vipProtocol) != loadbalancer.IdlingLoadBalancer {
 				toRemoveFromNonIdling.Insert(vipProtocol)
 			}
 			vipsTracked.Delete(vipProtocol)
+		}
+		// addServiceToIdlingBalancer adds the vips to service tracker
+		err = c.addServiceToIdlingBalancer(vipProtocols, service)
+		if err != nil {
+			c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToAddToIdlingBalancer",
+				"Error trying to add to Idling LoadBalancer for Service %s/%s: %v", name, namespace, err)
+			return err
 		}
 		err = deleteVIPsFromNonIdlingOVNBalancers(toRemoveFromNonIdling, name, namespace)
 		if err != nil {
@@ -353,11 +364,17 @@ func (c *Controller) syncServices(key string) error {
 					return err
 				}
 				if c.serviceTracker.getLoadBalancer(name, namespace, vip) != currentLB {
+					txn := util.NewNBTxn()
 					// Need to ensure that if vip exists on cluster LB we remove it
 					// This can happen if endpoints originally had cluster only ips but now have host ips
-					if err := loadbalancer.DeleteLoadBalancerVIP(clusterLB, vip); err != nil {
-						klog.Errorf("Error deleting VIP %s on OVN LoadBalancer %s", vip, clusterLB)
+					if err := loadbalancer.DeleteLoadBalancerVIP(txn, clusterLB, vip); err != nil {
 						return err
+					}
+					if stdout, stderr, err := txn.Commit(); err != nil {
+						klog.Errorf("Error deleting VIP %s on OVN LoadBalancer %s", vip, clusterLB)
+						return fmt.Errorf("error deleting load balancer vip %v for %v"+
+							"stdout: %q, stderr: %q, error: %v",
+							vip, clusterLB, stdout, stderr, err)
 					}
 				}
 			} else {

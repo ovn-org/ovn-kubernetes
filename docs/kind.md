@@ -1,11 +1,11 @@
 # OVN kubernetes KIND Setup
 
-KIND (Kubernetes in Docker) deployment of OVN kubernetes is a fast and easy means to quickly install and test kubernetes with OVN kubernetes CNI.  The value proposition is really for developers who want to reproduce an issue or test a fix in an environment that can be brought up locally and within a few minutes.
+KIND (Kubernetes in Docker) deployment of OVN kubernetes is a fast and easy means to quickly install and test kubernetes with OVN kubernetes CNI. The value proposition is really for developers who want to reproduce an issue or test a fix in an environment that can be brought up locally and within a few minutes.
 
 ### Prerequisites 
 
 - 20 GB of free space in root file system
-- Docker run time
+- Docker run time or podman
 - [KIND]( https://kubernetes.io/docs/setup/learning-environment/kind/ )
    - Installation instructions can be found at https://github.com/kubernetes-sigs/kind#installation-and-usage. 
    - NOTE: The OVN-Kubernetes [ovn-kubernetes/contrib/kind.sh](https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.sh) and [ovn-kubernetes/contrib/kind.yaml](https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.yaml) files provision port 11337. If firewalld is enabled, this port will need to be unblocked:
@@ -18,7 +18,7 @@ KIND (Kubernetes in Docker) deployment of OVN kubernetes is a fast and easy mean
 
 **NOTE :**  In certain operating systems such as CentOS 8.x, pip2 and pip3 binaries are installed instead of pip. In such situations create a softlink for "pip" that points to "pip2".
 
-### Run the KIND deployment 
+### Run the KIND deployment with docker
 
 For OVN kubernetes KIND deployment, use the `kind.sh` script.
 
@@ -129,6 +129,42 @@ usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
 ```
 
 As seen above, if you do not specify any options the script will assume the default values.
+
+### Run the KIND deployment with podman
+
+To verify local changes, the steps are mostly the same as with docker, except the `fedora` make target:
+
+```
+$ OCI_BIN=podman make fedora
+```
+
+To deploy KIND however, you need to start it as root and then copy root's kube config to use it as non-root:
+
+```
+$ pushd contrib
+$ sudo ./kind.sh -ep podman
+$ sudo cp /root/admin.conf ~/.kube/kind-config
+$ sudo chown $(id -u):$(id -g) ~/.kube/kind-config
+$ export KUBECONFIG=~/.kube/kind-config
+$ popd
+```
+
+**Notes / troubleshooting:**
+
+- Issue with /dev/dma_heap: if you get the error `kind "Error: open /dev/dma_heap: permission denied"`, there's a [known issue](https://bugzilla.redhat.com/show_bug.cgi?id=1966158) about it (directory mislabelled with selinux).
+Workaround:
+
+```bash
+sudo setenforce 0
+sudo chcon system\_u:object\_r:device\_t:s0 /dev/dma\_heap/
+sudo setenforce 1
+```
+
+- If you see errors related to go, you may not have go configured as root. Make sure your `$GOPATH` / `$PATH` are configured as root, or define them while running `kind.sh`:
+
+```bash
+sudo GOPATH=/path/to/go PATH=$PATH:/usr/local/go/bin:$GOPATH/bin ./kind.sh -ep podman
+```
 
 ### Usage Notes 
 

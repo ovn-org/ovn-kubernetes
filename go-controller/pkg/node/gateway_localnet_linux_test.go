@@ -2,7 +2,6 @@ package node
 
 import (
 	"fmt"
-	"net"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -24,16 +23,6 @@ const (
 	v6localnetGatewayIP = "fd00:96:1::1"
 )
 
-func getFakeLocalAddrs() map[string]net.IPNet {
-	localAddrSet := make(map[string]net.IPNet)
-	for _, network := range []string{"127.0.0.1/32", "10.10.10.1/24", "fd00:96:1::1/64"} {
-		ip, ipNet, err := net.ParseCIDR(network)
-		Expect(err).NotTo(HaveOccurred())
-		localAddrSet[ip.String()] = *ipNet
-	}
-	return localAddrSet
-}
-
 func initFakeNodePortWatcher(fakeOvnNode *FakeOVNNode, iptV4, iptV6 util.IPTablesHelper) *localPortWatcher {
 	initIPTable := map[string]util.FakeTable{
 		"nat": {},
@@ -48,9 +37,8 @@ func initFakeNodePortWatcher(fakeOvnNode *FakeOVNNode, iptV4, iptV6 util.IPTable
 	Expect(err).NotTo(HaveOccurred())
 
 	fNPW := localPortWatcher{
-		recorder:     fakeOvnNode.recorder,
-		gatewayIPv4:  v4localnetGatewayIP,
-		localAddrSet: getFakeLocalAddrs(),
+		recorder:    fakeOvnNode.recorder,
+		gatewayIPv4: v4localnetGatewayIP,
 	}
 	return &fNPW
 }
@@ -59,9 +47,7 @@ func startLocalPortWatcher(l *localPortWatcher, wf factory.NodeWatchFactory) err
 	if err := initLocalGatewayIPTables(); err != nil {
 		return err
 	}
-	if err := initRoutingRules(); err != nil {
-		return err
-	}
+
 	wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			svc := obj.(*kapi.Service)
@@ -127,76 +113,13 @@ var _ = Describe("Node Operations", func() {
 	})
 
 	Context("on startup", func() {
-		It("inits physical routing rules", func() {
-			app.Action = func(ctx *cli.Context) error {
-				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ip rule",
-					Output: "0:	from all lookup local\n32766:	from all lookup main\n32767:	from all lookup default\n",
-				})
-				fakeOvnNode.fakeExec.AddFakeCmdsNoOutputNoError([]string{
-					"ip rule add from all table " + localnetGatewayExternalIDTable,
-				})
-				fakeOvnNode.fakeExec.AddFakeCmdsNoOutputNoError([]string{
-					"ip route list table " + localnetGatewayExternalIDTable,
-				})
-
-				fakeOvnNode.start(ctx)
-				startLocalPortWatcher(fNPW, fakeOvnNode.watcher)
-
-				expectedTables := map[string]util.FakeTable{
-					"nat": {
-						"PREROUTING": []string{
-							"-j OVN-KUBE-EXTERNALIP",
-							"-j OVN-KUBE-NODEPORT",
-						},
-						"OUTPUT": []string{
-							"-j OVN-KUBE-EXTERNALIP",
-							"-j OVN-KUBE-NODEPORT",
-						},
-						"OVN-KUBE-NODEPORT":   []string{},
-						"OVN-KUBE-EXTERNALIP": []string{},
-					},
-				}
-				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
-				Expect(err).NotTo(HaveOccurred())
-
-				expectedTables = map[string]util.FakeTable{
-					"nat": {},
-				}
-				f6 := iptV6.(*util.FakeIPTables)
-				err = f6.MatchState(expectedTables)
-				Expect(err).NotTo(HaveOccurred())
-
-				fakeOvnNode.shutdown()
-				return nil
-			}
-			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
-		})
-
-		It("removes stale physical routing rules while keeping remaining intact", func() {
+		It("removes stale iptables rules while keeping remaining intact", func() {
 			app.Action = func(ctx *cli.Context) error {
 				externalIP := "1.1.1.1"
 				externalIPPort := int32(8032)
-
-				// Create some fake routing and iptable rules
-				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ip rule",
-					Output: "0:	from all lookup local\n32766:	from all lookup main\n32767:	from all lookup default\n",
-				})
+				// create fake ip route commands
 				fakeOvnNode.fakeExec.AddFakeCmdsNoOutputNoError([]string{
-					"ip rule add from all table " + localnetGatewayExternalIDTable,
-				})
-				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ip route list table " + localnetGatewayExternalIDTable,
-					Output: fmt.Sprintf("%s via %s dev %s\n9.9.9.9 via %s dev %s\n", externalIP, v4localnetGatewayIP, types.K8sMgmtIntfName, v4localnetGatewayIP, types.K8sMgmtIntfName),
-				})
-				fakeOvnNode.fakeExec.AddFakeCmdsNoOutputNoError([]string{
-					fmt.Sprintf("ip route del 9.9.9.9 via %s dev %s table %s", v4localnetGatewayIP, types.K8sMgmtIntfName, localnetGatewayExternalIDTable),
-				})
-				fakeOvnNode.fakeExec.AddFakeCmdsNoOutputNoError([]string{
-					fmt.Sprintf("ip route replace %s via %s dev %s table %s", externalIP, v4localnetGatewayIP, types.K8sMgmtIntfName, localnetGatewayExternalIDTable),
+					fmt.Sprintf("ip route flush table %s", localnetGatewayExternalIDTable),
 				})
 
 				service := *newService("service1", "namespace1", "10.129.0.2",
@@ -276,7 +199,7 @@ var _ = Describe("Node Operations", func() {
 	})
 
 	Context("on add", func() {
-		It("inits physical routing rules with ExternalIP outside any local network", func() {
+		It("inits iptables rules with ExternalIP outside any local network", func() {
 			app.Action = func(ctx *cli.Context) error {
 				externalIP := "1.1.1.1"
 
@@ -298,15 +221,15 @@ var _ = Describe("Node Operations", func() {
 				fNPW.addService(&service)
 
 				expectedTables := map[string]util.FakeTable{
-					"nat": {},
+					"nat": {
+						"OVN-KUBE-EXTERNALIP": []string{
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+						},
+					},
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
 				err := f4.MatchState(expectedTables)
-				Expect(err).NotTo(HaveOccurred())
-
-				f6 := iptV6.(*util.FakeIPTables)
-				err = f6.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
 				return nil
@@ -315,7 +238,7 @@ var _ = Describe("Node Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("does nothing when ExternalIP on shared network", func() {
+		It("inits iptables rules with ExternalIP on shared network", func() {
 			app.Action = func(ctx *cli.Context) error {
 				externalIP := "10.10.10.2"
 
@@ -333,15 +256,15 @@ var _ = Describe("Node Operations", func() {
 				fNPW.addService(&service)
 
 				expectedTables := map[string]util.FakeTable{
-					"nat": {},
+					"nat": {
+						"OVN-KUBE-EXTERNALIP": []string{
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+						},
+					},
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
 				err := f4.MatchState(expectedTables)
-				Expect(err).NotTo(HaveOccurred())
-
-				f6 := iptV6.(*util.FakeIPTables)
-				err = f6.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
 				return nil

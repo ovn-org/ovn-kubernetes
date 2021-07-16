@@ -17,6 +17,7 @@ import (
 	"k8s.io/klog/v2"
 
 	goovn "github.com/ebay/go-ovn"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -227,6 +228,7 @@ func runOvnKube(ctx *cli.Context) error {
 		}
 		watchFactory = masterWatchFactory
 		var ovnNBClient, ovnSBClient goovn.Client
+		var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
 
 		if ovnNBClient, err = util.NewOVNNBClient(); err != nil {
 			return fmt.Errorf("error when trying to initialize go-ovn NB client: %v", err)
@@ -236,12 +238,21 @@ func runOvnKube(ctx *cli.Context) error {
 			return fmt.Errorf("error when trying to initialize go-ovn SB client: %v", err)
 		}
 
+		if libovsdbOvnNBClient, err = util.NewNBClient(stopChan); err != nil {
+			return fmt.Errorf("error when trying to initialize libovsdb NB client: %v", err)
+		}
+
+		if libovsdbOvnSBClient, err = util.NewSBClient(stopChan); err != nil {
+			return fmt.Errorf("error when trying to initialize libovsdb SB client: %v", err)
+		}
+
 		// register prometheus metrics exported by the master
 		// this must be done prior to calling controller start
 		// since we capture some metrics in Start()
 		metrics.RegisterMasterMetrics(ovnNBClient, ovnSBClient)
 
-		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil, ovnNBClient, ovnSBClient, util.EventRecorder(ovnClientset.KubeClient))
+		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil,
+			ovnNBClient, ovnSBClient, libovsdbOvnNBClient, libovsdbOvnSBClient, util.EventRecorder(ovnClientset.KubeClient))
 		if err := ovnController.Start(master, wg, ctx.Context); err != nil {
 			return err
 		}
