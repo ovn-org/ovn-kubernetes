@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"reflect"
 	"strconv"
 	"sync"
@@ -34,6 +35,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
@@ -456,6 +458,16 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 		podTimer := podEntry.timeStamp.Add(time.Minute)
 		if updateAll || now.After(podTimer) {
 			podDesc := fmt.Sprintf("[%s/%s/%s]", pod.UID, pod.Namespace, pod.Name)
+			// it could be that the Pod got deleted, but Pod's DeleteFunc has not been called yet, so don't retry
+			_, err := oc.watchFactory.GetPod(pod.Namespace, pod.Name)
+			if err != nil {
+				if e, ok := err.(*errors.StatusError); ok && e.ErrStatus.Code == http.StatusNotFound {
+					klog.Infof("%s pod not found in the informers cache, not going to retry pod setup", podDesc)
+					delete(oc.retryPods, uid)
+					continue
+				}
+			}
+
 			klog.Infof("%s retry pod setup", podDesc)
 
 			if oc.ensurePod(nil, pod, true) {
