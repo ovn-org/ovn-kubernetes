@@ -8,6 +8,7 @@ import (
 	gomegaformat "github.com/onsi/gomega/format"
 	gomegatypes "github.com/onsi/gomega/types"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
 
 // If x and y are structs, interfaces that contain struct or pointers to struct,
@@ -47,9 +48,15 @@ func testDataDeepValueEqualIgnoringUUID(v1, v2 reflect.Value, ignoreUUID bool) b
 		}
 		return reflect.DeepEqual(v1.Elem().Interface(), v2.Elem().Interface())
 	case reflect.Struct:
+		objectType := v1.Type()
 		for i, n := 0, v1.NumField(); i < n; i++ {
-			if tag := v1.Type().Field(i).Tag.Get("ovsdb"); tag == "_uuid" {
+			if tag := objectType.Field(i).Tag.Get("ovsdb"); tag == "_uuid" {
 				continue
+			}
+			if objectType == reflect.TypeOf(nbdb.LogicalRouter{}) {
+				if tag := objectType.Field(i).Tag.Get("ovsdb"); tag == "ports" || tag == "static_routes" {
+					return reflect.ValueOf(v1.Field(i).Interface()).Len() == reflect.ValueOf(v2.Field(i).Interface()).Len()
+				}
 			}
 			if !reflect.DeepEqual(v1.Field(i).Interface(), v2.Field(i).Interface()) {
 				return false

@@ -384,16 +384,17 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	}
 
 	if config.Gateway.Mode == config.GatewayModeLocal {
-		if err := addDistributedGWPort(); err != nil {
+		if err := oc.addDistributedGWPort(); err != nil {
 			return err
 		}
 	}
+	oc.SCTPSupport = true
 
 	// Determine SCTP support
-	oc.SCTPSupport, err = util.DetectSCTPSupport()
-	if err != nil {
-		return err
-	}
+	// oc.SCTPSupport, err = util.DetectSCTPSupport()
+	// if err != nil {
+	// 	return err
+	// }
 	if !oc.SCTPSupport {
 		klog.Warningf("SCTP unsupported by this version of OVN. Kubernetes service creation with SCTP will not work ")
 	} else {
@@ -635,7 +636,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	}
 
 	drLRPIPs, _ := oc.joinSwIPManager.getJoinLRPCacheIPs(types.OVNClusterRouter)
-	err = gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, drLRPIPs)
+	err = oc.gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, drLRPIPs)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}

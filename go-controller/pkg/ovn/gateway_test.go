@@ -3,10 +3,19 @@ package ovn
 import (
 	"net"
 
+	goovn "github.com/ebay/go-ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
+	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/tools/record"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -49,6 +58,28 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 	})
 
 	ginkgo.It("creates an IPv4 gateway in OVN", func() {
+
+		stopChan := make(chan struct{})
+		defer close(stopChan)
+		kubeFakeClient := fake.NewSimpleClientset()
+		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
+		egressIPFakeClient := &egressipfake.Clientset{}
+		fakeClient := &util.OVNClientset{
+			KubeClient:           kubeFakeClient,
+			EgressIPClient:       egressIPFakeClient,
+			EgressFirewallClient: egressFirewallFakeClient,
+		}
+		f, err := factory.NewMasterWatchFactory(fakeClient)
+
+		dbSetup := libovsdbtest.TestSetup{}
+		libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
+			ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
+			libovsdbOvnNBClient, libovsdbOvnSBClient,
+			record.NewFakeRecorder(0))
+
 		clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
 		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23")
 		joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16")
@@ -66,19 +97,19 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		sctpSupport := false
 
 		fexec := ovntest.NewFakeExec()
-		err := util.SetExec(fexec)
+		err = util.SetExec(fexec)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 -- --may-exist lr-add GR_test-node -- set logical_router GR_test-node options:chassis=SYSTEM-ID external_ids:physical_ip=169.254.33.2 external_ids:physical_ips=169.254.33.2",
-			"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + types.OVNJoinSwitch + " jtor-GR_test-node -- set logical_switch_port jtor-GR_test-node type=router options:router-port=rtoj-GR_test-node addresses=router",
-			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoj-GR_test-node -- lrp-add GR_test-node rtoj-GR_test-node 0a:58:64:40:00:03 100.64.0.3/16",
-			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:lb_force_snat_ip=router_ip",
-			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:snat-ct-zone=0",
-			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:always_learn_from_arp_request=false",
-			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:dynamic_neigh_routers=true",
-			"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node 10.128.0.0/14 100.64.0.1",
-		})
+		// fexec.AddFakeCmdsNoOutputNoError([]string{
+		// 	"ovn-nbctl --timeout=15 -- --may-exist lr-add GR_test-node -- set logical_router GR_test-node options:chassis=SYSTEM-ID external_ids:physical_ip=169.254.33.2 external_ids:physical_ips=169.254.33.2",
+		// 	"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + types.OVNJoinSwitch + " jtor-GR_test-node -- set logical_switch_port jtor-GR_test-node type=router options:router-port=rtoj-GR_test-node addresses=router",
+		// 	"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoj-GR_test-node -- lrp-add GR_test-node rtoj-GR_test-node 0a:58:64:40:00:03 100.64.0.3/16",
+		// 	"ovn-nbctl --timeout=15 set logical_router GR_test-node options:lb_force_snat_ip=router_ip",
+		// 	"ovn-nbctl --timeout=15 set logical_router GR_test-node options:snat-ct-zone=0",
+		// 	"ovn-nbctl --timeout=15 set logical_router GR_test-node options:always_learn_from_arp_request=false",
+		// 	"ovn-nbctl --timeout=15 set logical_router GR_test-node options:dynamic_neigh_routers=true",
+		// 	"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node 10.128.0.0/14 100.64.0.1",
+		// })
 
 		const (
 			tcpLBUUID string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
@@ -104,38 +135,81 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:" + types.GatewayLBUDP + "=GR_test-node protocol=udp",
 			Output: udpLBUUID,
 		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 set logical_router GR_test-node load_balancer=" + tcpLBUUID + "," + udpLBUUID,
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:" + types.WorkerLBUDP + "=test-node protocol=udp",
-			Output: udpLBUUID,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 get logical_switch test-node load_balancer",
-			"ovn-nbctl --timeout=15 ls-lb-add test-node " + tcpLBUUID,
-			"ovn-nbctl --timeout=15 ls-lb-add test-node " + udpLBUUID,
-		})
+		// fexec.AddFakeCmdsNoOutputNoError([]string{
+		// 	"ovn-nbctl --timeout=15 set logical_router GR_test-node load_balancer=" + tcpLBUUID + "," + udpLBUUID,
+		// })
+		// fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		// 	Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:" + types.WorkerLBUDP + "=test-node protocol=udp",
+		// 	Output: udpLBUUID,
+		// })
+		// fexec.AddFakeCmdsNoOutputNoError([]string{
+		// 	"ovn-nbctl --timeout=15 get logical_switch test-node load_balancer",
+		// 	"ovn-nbctl --timeout=15 ls-lb-add test-node " + tcpLBUUID,
+		// 	"ovn-nbctl --timeout=15 ls-lb-add test-node " + udpLBUUID,
+		// })
 
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --may-exist ls-add ext_test-node",
-			"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_test-node INTERFACE-ID -- lsp-set-addresses INTERFACE-ID unknown -- lsp-set-type INTERFACE-ID localnet -- lsp-set-options INTERFACE-ID network_name=physnet",
-			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoe-GR_test-node -- lrp-add GR_test-node rtoe-GR_test-node 11:22:33:44:55:66 169.254.33.2/24 -- set logical_router_port rtoe-GR_test-node external-ids:gateway-physical-ip=yes",
-			"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_test-node etor-GR_test-node -- set logical_switch_port etor-GR_test-node type=router options:router-port=rtoe-GR_test-node addresses=\"11:22:33:44:55:66\"",
-			"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node 0.0.0.0/0 169.254.33.1 rtoe-GR_test-node",
-			"ovn-nbctl --timeout=15 --may-exist lr-route-add ovn_cluster_router 100.64.0.3 100.64.0.3",
-			"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add ovn_cluster_router 10.130.0.0/23 100.64.0.3",
-			"ovn-nbctl --timeout=15 --columns _uuid --format=csv --no-headings find nat external_ip=\"169.254.33.2\" type=snat logical_ip=\"10.128.0.0/14\"",
-			"ovn-nbctl --timeout=15 --if-exists lr-nat-del GR_test-node snat 10.128.0.0/14",
-			"ovn-nbctl --timeout=15 lr-nat-add GR_test-node snat 169.254.33.2 10.128.0.0/14",
-		})
+		// fexec.AddFakeCmdsNoOutputNoError([]string{
+		// 	"ovn-nbctl --timeout=15 --may-exist ls-add ext_test-node",
+		// 	"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_test-node INTERFACE-ID -- lsp-set-addresses INTERFACE-ID unknown -- lsp-set-type INTERFACE-ID localnet -- lsp-set-options INTERFACE-ID network_name=physnet",
+		// 	"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoe-GR_test-node -- lrp-add GR_test-node rtoe-GR_test-node 11:22:33:44:55:66 169.254.33.2/24 -- set logical_router_port rtoe-GR_test-node external-ids:gateway-physical-ip=yes",
+		// 	"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_test-node etor-GR_test-node -- set logical_switch_port etor-GR_test-node type=router options:router-port=rtoe-GR_test-node addresses=\"11:22:33:44:55:66\"",
+		// 	"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node 0.0.0.0/0 169.254.33.1 rtoe-GR_test-node",
+		// 	"ovn-nbctl --timeout=15 --may-exist lr-route-add ovn_cluster_router 100.64.0.3 100.64.0.3",
+		// 	"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add ovn_cluster_router 10.130.0.0/23 100.64.0.3",
+		// 	"ovn-nbctl --timeout=15 --columns _uuid --format=csv --no-headings find nat external_ip=\"169.254.33.2\" type=snat logical_ip=\"10.128.0.0/14\"",
+		// 	"ovn-nbctl --timeout=15 --if-exists lr-nat-del GR_test-node snat 10.128.0.0/14",
+		// 	"ovn-nbctl --timeout=15 lr-nat-add GR_test-node snat 169.254.33.2 10.128.0.0/14",
+		// })
 
-		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+		err = clusterController.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+		// gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		expectedDatabaseState := &nbdb.LogicalRouter{
+			Name: "GR_test-node",
+			Options: map[string]string{
+				"lb_force_snat_ip":              "router_ip",
+				"snat-ct-zone":                  "0",
+				"always_learn_from_arp_request": "false",
+				"dynamic_neigh_routers":         "true",
+				"chassis":                       "SYSTEM-ID",
+			},
+			ExternalIDs: map[string]string{
+				"physical_ip":  "169.254.33.2",
+				"physical_ips": "169.254.33.2",
+			},
+			Ports:        []string{"item1"},
+			StaticRoutes: []string{"item1"},
+		}
+
+		gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveTestDataIgnoringUUIDs(expectedDatabaseState))
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
 	})
 
 	ginkgo.It("creates an IPv6 gateway in OVN", func() {
+
+		stopChan := make(chan struct{})
+		defer close(stopChan)
+		kubeFakeClient := fake.NewSimpleClientset()
+		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
+		egressIPFakeClient := &egressipfake.Clientset{}
+		fakeClient := &util.OVNClientset{
+			KubeClient:           kubeFakeClient,
+			EgressIPClient:       egressIPFakeClient,
+			EgressFirewallClient: egressFirewallFakeClient,
+		}
+		f, err := factory.NewMasterWatchFactory(fakeClient)
+
+		dbSetup := libovsdbtest.TestSetup{}
+		libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
+			ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
+			libovsdbOvnNBClient, libovsdbOvnSBClient,
+			record.NewFakeRecorder(0))
+
 		clusterIPSubnets := ovntest.MustParseIPNets("fd01::/48")
 		hostSubnets := ovntest.MustParseIPNets("fd01:0:0:2::/64")
 		joinLRPIPs := ovntest.MustParseIPNets("fd98::3/64")
@@ -153,7 +227,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		sctpSupport := false
 
 		fexec := ovntest.NewFakeExec()
-		err := util.SetExec(fexec)
+		err = util.SetExec(fexec)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		// 0a:58:ee:33:fc:1a generated from util.IPAddrToHWAddr(net.ParseIP("fd98::1")).String()
@@ -219,12 +293,34 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 lr-nat-add GR_test-node snat fd99::2 fd01::/48",
 		})
 
-		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+		err = clusterController.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
 	})
 
 	ginkgo.It("creates a dual-stack gateway in OVN", func() {
+
+		stopChan := make(chan struct{})
+		defer close(stopChan)
+		kubeFakeClient := fake.NewSimpleClientset()
+		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
+		egressIPFakeClient := &egressipfake.Clientset{}
+		fakeClient := &util.OVNClientset{
+			KubeClient:           kubeFakeClient,
+			EgressIPClient:       egressIPFakeClient,
+			EgressFirewallClient: egressFirewallFakeClient,
+		}
+		f, err := factory.NewMasterWatchFactory(fakeClient)
+
+		dbSetup := libovsdbtest.TestSetup{}
+		libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
+			ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
+			libovsdbOvnNBClient, libovsdbOvnSBClient,
+			record.NewFakeRecorder(0))
+
 		clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14", "fd01::/48")
 		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23", "fd01:0:0:2::/64")
 		joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16", "fd98::3/64")
@@ -242,7 +338,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		sctpSupport := false
 
 		fexec := ovntest.NewFakeExec()
-		err := util.SetExec(fexec)
+		err = util.SetExec(fexec)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -313,7 +409,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 lr-nat-add GR_test-node snat fd99::2 fd01::/48",
 		})
 
-		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+		err = clusterController.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
 	})
@@ -432,6 +528,28 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 	})
 
 	ginkgo.It("removes leftover SNAT entries during init", func() {
+
+		stopChan := make(chan struct{})
+		defer close(stopChan)
+		kubeFakeClient := fake.NewSimpleClientset()
+		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
+		egressIPFakeClient := &egressipfake.Clientset{}
+		fakeClient := &util.OVNClientset{
+			KubeClient:           kubeFakeClient,
+			EgressIPClient:       egressIPFakeClient,
+			EgressFirewallClient: egressFirewallFakeClient,
+		}
+		f, err := factory.NewMasterWatchFactory(fakeClient)
+
+		dbSetup := libovsdbtest.TestSetup{}
+		libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
+			ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
+			libovsdbOvnNBClient, libovsdbOvnSBClient,
+			record.NewFakeRecorder(0))
+
 		clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
 		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23")
 		joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16")
@@ -450,7 +568,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		config.Gateway.DisableSNATMultipleGWs = true
 
 		fexec := ovntest.NewFakeExec()
-		err := util.SetExec(fexec)
+		err = util.SetExec(fexec)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -512,7 +630,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 --if-exists lr-nat-del GR_test-node snat 10.128.0.0/14",
 		})
 
-		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+		err = clusterController.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
 	})
