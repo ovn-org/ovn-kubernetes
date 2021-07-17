@@ -48,6 +48,7 @@ OVN_NETFLOW_TARGETS=""
 OVN_SFLOW_TARGETS=""
 OVN_IPFIX_TARGETS=""
 OVN_HOST_NETWORK_NAMESPACE=""
+OVN_WEBHOOK_CA_PEM_B64=
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -180,6 +181,9 @@ while [ "$1" != "" ]; do
   --ipfix-targets)
     OVN_IPFIX_TARGETS=$VALUE
     ;;
+  --admission-ca-pem-b64)
+    OVN_WEBHOOK_CA_PEM_B64=$VALUE
+    ;;
   --host-network-namespace)
     OVN_HOST_NETWORK_NAMESPACE=$VALUE
     ;;
@@ -280,6 +284,8 @@ ovn_sflow_targets=${OVN_SFLOW_TARGETS}
 echo "ovn_sflow_targets: ${ovn_sflow_targets}"
 ovn_ipfix_targets=${OVN_IPFIX_TARGETS}
 echo "ovn_ipfix_targets: ${ovn_ipfix_targets}"
+ovn_admission_ca_pem_b64=${OVN_WEBHOOK_CA_PEM_B64}
+echo "ovn_admission_ca_pem_b64: ${ovn_admission_ca_pem_b64}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -390,6 +396,11 @@ ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   j2 ../templates/ovs-node.yaml.j2 -o ../yaml/ovs-node.yaml
+
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ca_pem_64=${ovn_admission_ca_pem_b64} \
+  j2 ../templates/ovnkube-admission.yaml.j2 -o ../yaml/ovnkube-admission.yaml
 
 # ovn-setup.yaml
 net_cidr=${OVN_NET_CIDR:-"10.128.0.0/14/23"}
