@@ -2,6 +2,7 @@ package cni
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -72,7 +73,17 @@ func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWat
 		podLister:         corev1listers.NewPodLister(factory.LocalPodInformer().GetIndexer()),
 		kclient:           kclient,
 		mode:              config.OvnKubeNode.Mode,
+		kubeAuth: &KubeAPIAuth{
+			Kubeconfig:    config.Kubernetes.Kubeconfig,
+			KubeAPIServer: config.Kubernetes.APIServer,
+			KubeAPIToken:  config.Kubernetes.Token,
+		},
 	}
+
+	if len(config.Kubernetes.CAData) > 0 {
+		s.kubeAuth.KubeCAData = base64.StdEncoding.EncodeToString(config.Kubernetes.CAData)
+	}
+
 	router.NotFoundHandler = http.HandlerFunc(http.NotFound)
 	router.HandleFunc("/metrics", s.handleCNIMetrics).Methods("POST")
 	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -120,9 +131,7 @@ func cniRequestToPodRequest(cr *Request, podLister corev1listers.PodLister, kcli
 	}
 
 	req := &PodRequest{
-		Command:   command(cmd),
-		podLister: podLister,
-		kclient:   kclient,
+		Command: command(cmd),
 	}
 
 	req.SandboxID, ok = cr.Env["CNI_CONTAINERID"]
@@ -194,7 +203,7 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 	if atomic.LoadInt32(&s.useOVSExternalIDs) > 0 {
 		useOVSExternalIDs = true
 	}
-	result, err := s.requestFunc(req, s.podLister, useOVSExternalIDs, s.kclient)
+	result, err := s.requestFunc(req, s.podLister, useOVSExternalIDs, s.kclient, s.kubeAuth)
 	if err != nil {
 		// Prefix error with request information for easier debugging
 		return nil, fmt.Errorf("%s %v", req, err)
