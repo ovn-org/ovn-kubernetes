@@ -77,4 +77,59 @@ var _ = Describe("Kube", func() {
 			})
 		})
 	})
+
+	Describe("NodeTainting", func() {
+		var kube Kube
+		var nodeName string
+		var taint v1.Taint
+		var node *v1.Node
+
+		fakeClient := fake.NewSimpleClientset()
+		kube = Kube{
+			KClient: fakeClient,
+		}
+		newNode := &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "my-node",
+			},
+			Spec: v1.NodeSpec{
+				Taints: []v1.Taint{},
+			},
+		}
+		var err error
+		node, err = kube.KClient.CoreV1().Nodes().Create(context.TODO(), newNode, metav1.CreateOptions{})
+		Expect(err).ToNot(HaveOccurred())
+		Expect(node).NotTo(BeZero())
+		nodeName = node.Name
+		taint = v1.Taint{Key: "GlobalWarming", Value: "OnRise", Effect: "NoSchedule"}
+
+		Context("SetAndRemoveTaintOnNode", func() {
+			It("Add a new taint", func() {
+				err := kube.SetTaintOnNode(nodeName, &taint)
+				Expect(err).ToNot(HaveOccurred())
+				node, err = kube.GetNode(nodeName)
+				Expect(node.Spec.Taints).To(Equal([]v1.Taint{taint}))
+			})
+			It("Taint already exists, no-op", func() {
+				err = kube.SetTaintOnNode(nodeName, &taint)
+				Expect(err).ToNot(HaveOccurred())
+				node, err = kube.GetNode(nodeName)
+				Expect(node.Spec.Taints).To(Equal([]v1.Taint{taint}))
+			})
+			It("Remove a taint", func() {
+				// remove the added taint
+				err = kube.RemoveTaintFromNode(nodeName, &taint)
+				Expect(err).ToNot(HaveOccurred())
+				node, err = kube.GetNode(nodeName)
+				Expect(node.Spec.Taints).To(BeNil())
+			})
+			It("Node doesn't exist", func() {
+				nodeName = "targaryen"
+				err := kube.SetTaintOnNode(nodeName, &taint)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(Equal("nodes \"targaryen\" not found"))
+			})
+		})
+	})
+
 })
