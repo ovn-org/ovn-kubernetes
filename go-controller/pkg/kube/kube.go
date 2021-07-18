@@ -3,6 +3,7 @@ package kube
 import (
 	"context"
 	"encoding/json"
+
 	"k8s.io/klog/v2"
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
@@ -13,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/kubernetes"
 	kv1core "k8s.io/client-go/kubernetes/typed/core/v1"
 )
@@ -23,6 +25,9 @@ type Interface interface {
 	SetAnnotationsOnPod(namespace, podName string, annotations map[string]string) error
 	SetAnnotationsOnNode(node *kapi.Node, annotations map[string]interface{}) error
 	SetAnnotationsOnNamespace(namespace *kapi.Namespace, annotations map[string]string) error
+	SetTaintOnNode(nodeName string, taint *kapi.Taint) error
+	RemoveTaintFromNode(nodeName string, taint *kapi.Taint) error
+	PatchNode(old, new *kapi.Node) error
 	UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewall) error
 	UpdateEgressIP(eIP *egressipv1.EgressIP) error
 	UpdateNodeStatus(node *kapi.Node) error
@@ -123,6 +128,96 @@ func (k *Kube) SetAnnotationsOnNamespace(namespace *kapi.Namespace, annotations 
 		klog.Errorf("Error in setting annotation on namespace %s: %v", namespace.Name, err)
 	}
 	return err
+}
+
+// SetTaintOnNode tries to add a new taint to the node. If the taint already exists, it doesn't do anything.
+func (k *Kube) SetTaintOnNode(nodeName string, taint *kapi.Taint) error {
+	node, err := k.GetNode(nodeName)
+	if err != nil {
+		klog.Errorf("Unable to retrieve node %s for tainting %s: %v", nodeName, taint.ToString(), err)
+		return err
+	}
+	newNode := node.DeepCopy()
+	nodeTaints := newNode.Spec.Taints
+
+	var newTaints []kapi.Taint
+	for i := range nodeTaints {
+		if taint.MatchTaint(&nodeTaints[i]) {
+			klog.Infof("Taint %s already exists on Node %s", taint.ToString(), node.Name)
+			return nil
+		}
+		newTaints = append(newTaints, nodeTaints[i])
+	}
+
+	klog.Infof("Setting taint %s on Node %s", taint.ToString(), node.Name)
+	newTaints = append(newTaints, *taint)
+	newNode.Spec.Taints = newTaints
+	err = k.PatchNode(node, newNode)
+	if err != nil {
+		klog.Errorf("Unable to add taint %s on node %s: %v", taint.ToString(), node.Name, err)
+		return err
+	}
+
+	klog.Infof("Added taint %s on node %s", taint.ToString(), node.Name)
+	return nil
+}
+
+// RemoveTaintFromNode removes all the taints that have the same key and effect from the node.
+// If the taint doesn't exist, it doesn't do anything.
+func (k *Kube) RemoveTaintFromNode(nodeName string, taint *kapi.Taint) error {
+	node, err := k.GetNode(nodeName)
+	if err != nil {
+		klog.Errorf("Unable to retrieve node %s for tainting %s: %v", nodeName, taint.ToString(), err)
+		return err
+	}
+	newNode := node.DeepCopy()
+	nodeTaints := newNode.Spec.Taints
+
+	var newTaints []kapi.Taint
+	for i := range nodeTaints {
+		if taint.MatchTaint(&nodeTaints[i]) {
+			klog.Infof("Removing taint %s from Node %s", taint.ToString(), node.Name)
+			continue
+		}
+		newTaints = append(newTaints, nodeTaints[i])
+	}
+
+	newNode.Spec.Taints = newTaints
+	err = k.PatchNode(node, newNode)
+	if err != nil {
+		klog.Errorf("Unable to remove taint %s on node %s: %v", taint.ToString(), node.Name, err)
+		return err
+	}
+	klog.Infof("Removed taint %s on node %s", taint.ToString(), node.Name)
+	return nil
+}
+
+// PatchNode patches the old node object with the changes provided in the new node object.
+func (k *Kube) PatchNode(old, new *kapi.Node) error {
+	oldNodeObjectJson, err := json.Marshal(old)
+	if err != nil {
+		klog.Errorf("Unable to marshal node %s: %v", old.Name, err)
+		return err
+	}
+
+	newNodeObjectJson, err := json.Marshal(new)
+	if err != nil {
+		klog.Errorf("Unable to marshal node %s: %v", new.Name, err)
+		return err
+	}
+
+	patchBytes, err := strategicpatch.CreateTwoWayMergePatch(oldNodeObjectJson, newNodeObjectJson, kapi.Node{})
+	if err != nil {
+		klog.Errorf("Unable to patch node %s: %v", old.Name, err)
+		return err
+	}
+
+	if _, err = k.KClient.CoreV1().Nodes().Patch(context.TODO(), old.Name, types.StrategicMergePatchType, patchBytes, metav1.PatchOptions{}); err != nil {
+		klog.Errorf("Unable to patch node %s: %v", old.Name, err)
+		return err
+	}
+
+	return nil
 }
 
 // UpdateEgressFirewall updates the EgressFirewall with the provided EgressFirewall data
