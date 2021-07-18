@@ -244,7 +244,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 	ovnNBClient goovn.Client, ovnSBClient goovn.Client, libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
 	recorder record.EventRecorder) *Controller {
 	if addressSetFactory == nil {
-		addressSetFactory = addressset.NewOvnAddressSetFactory()
+		addressSetFactory = addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
 	}
 	return &Controller{
 		client: ovnClient.KubeClient,
@@ -393,7 +393,7 @@ func (oc *Controller) ovnTopologyCleanup() error {
 
 	// Cleanup address sets in non dual stack formats in all versions known to possibly exist.
 	if ver <= ovntypes.OvnPortBindingTopoVersion {
-		err = addressset.NonDualStackAddressSetCleanup()
+		err = addressset.NonDualStackAddressSetCleanup(oc.nbClient)
 	}
 	return err
 }
