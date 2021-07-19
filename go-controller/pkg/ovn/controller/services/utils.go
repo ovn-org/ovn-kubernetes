@@ -88,12 +88,20 @@ func deleteVIPsFromNonIdlingOVNBalancers(vips sets.String, name, namespace strin
 		}
 	}
 
+	txn := util.NewNBTxn()
 	for proto := range foundProtocols {
-		if err := loadbalancer.DeleteLoadBalancerVIPs(lbsPerProtocol[proto].List(), vipsPerProtocol[proto].List()); err != nil {
-			klog.Errorf("Error deleting VIP %v on OVN LoadBalancer %v", vipsPerProtocol[proto].List(), lbsPerProtocol[proto].List())
+		if err := loadbalancer.DeleteLoadBalancerVIPs(txn, lbsPerProtocol[proto].List(), vipsPerProtocol[proto].List()); err != nil {
+			klog.Errorf("Error deleting VIP %v on OVN LoadBalancer %v: %v", vipsPerProtocol[proto].List(), lbsPerProtocol[proto].List(), err)
 			return err
 		}
 	}
+	if stdout, stderr, err := txn.Commit(); err != nil {
+		klog.Errorf("Error deleting VIPs %v on OVN LoadBalancers %v", vips.List(), lbsPerProtocol)
+		return fmt.Errorf("error deleting load balancer %v VIPs %v"+
+			"stdout: %q, stderr: %q, error: %v",
+			lbsPerProtocol, vips.List(), stdout, stderr, err)
+	}
+
 	return nil
 }
 
@@ -130,13 +138,22 @@ func deleteVIPsFromIdlingBalancer(vipProtocols sets.String, name, namespace stri
 		}
 		lbsPerProtocol[proto] = sets.NewString(lbID)
 	}
+
+	txn := util.NewNBTxn()
 	for proto := range foundProtocols {
-		if err := loadbalancer.DeleteLoadBalancerVIPs(lbsPerProtocol[proto].List(), vipsPerProtocol[proto].List()); err != nil {
+		if err := loadbalancer.DeleteLoadBalancerVIPs(txn, lbsPerProtocol[proto].List(), vipsPerProtocol[proto].List()); err != nil {
 			klog.Errorf("Error deleting VIPs %v on idling OVN LoadBalancer %s %v",
 				vipsPerProtocol[proto].List(), lbsPerProtocol[proto].List(), err)
 			return err
 		}
 	}
+	if stdout, stderr, err := txn.Commit(); err != nil {
+		klog.Errorf("Error deleting VIPs %v on idling OVN LoadBalancers %v", vipProtocols.List(), lbsPerProtocol)
+		return fmt.Errorf("error deleting idling load balancer %v VIPs %v"+
+			"stdout: %q, stderr: %q, error: %v",
+			lbsPerProtocol, vipProtocols.List(), stdout, stderr, err)
+	}
+
 	return nil
 }
 
@@ -300,9 +317,16 @@ func deleteNodeVIPs(svcIPs []string, protocol v1.Protocol, sourcePort int32) err
 	}
 
 	klog.V(5).Infof("Removing gateway VIPs: %v from load balancers: %v", vips, loadBalancers)
-	if err := loadbalancer.DeleteLoadBalancerVIPs(loadBalancers, vips); err != nil {
+	txn := util.NewNBTxn()
+	if err := loadbalancer.DeleteLoadBalancerVIPs(txn, loadBalancers, vips); err != nil {
 		return err
 	}
+	if stdout, stderr, err := txn.Commit(); err != nil {
+		return fmt.Errorf("error deleting node load balancer %v VIPs %v"+
+			"stdout: %q, stderr: %q, error: %v",
+			loadBalancers, vips, stdout, stderr, err)
+	}
+
 	return nil
 }
 

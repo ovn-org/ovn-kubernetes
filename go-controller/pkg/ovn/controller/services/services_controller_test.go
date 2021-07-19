@@ -7,6 +7,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
@@ -35,12 +36,23 @@ type serviceController struct {
 	*Controller
 	serviceStore       cache.Store
 	endpointSliceStore cache.Store
+	stopChan           chan struct{}
 }
 
-func newController() *serviceController {
+func newController() (*serviceController, error) {
+	return newControllerWithDBSetup(libovsdbtest.TestSetup{})
+}
+
+func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceController, error) {
+	stopChan := make(chan struct{})
 	client := fake.NewSimpleClientset()
+	nbClient, err := libovsdbtest.NewNBTestHarness(dbSetup, stopChan)
+	if err != nil {
+		return nil, err
+	}
 	informerFactory := informers.NewSharedInformerFactory(client, 0)
 	controller := NewController(client,
+		nbClient,
 		informerFactory.Core().V1().Services(),
 		informerFactory.Discovery().V1beta1().EndpointSlices(),
 		clusterPortGroupUUID,
@@ -51,7 +63,12 @@ func newController() *serviceController {
 		controller,
 		informerFactory.Core().V1().Services().Informer().GetStore(),
 		informerFactory.Discovery().V1beta1().EndpointSlices().Informer().GetStore(),
-	}
+		stopChan,
+	}, nil
+}
+
+func (c *serviceController) close() {
+	close(c.stopChan)
 }
 
 func TestSyncServices(t *testing.T) {
@@ -378,7 +395,11 @@ func TestSyncServices(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller := newController()
+			controller, err := newController()
+			if err != nil {
+				t.Fatalf("Error creating controller: %v", err)
+			}
+			defer controller.close()
 			// Add objects to the Store
 			controller.endpointSliceStore.Add(tt.slice)
 			controller.serviceStore.Add(tt.service)
@@ -392,7 +413,7 @@ func TestSyncServices(t *testing.T) {
 				cmd := cmd
 				fexec.AddFakeCmd(&cmd)
 			}
-			err := util.SetExec(fexec)
+			err = util.SetExec(fexec)
 			if err != nil {
 				t.Errorf("fexec error: %v", err)
 			}
@@ -561,7 +582,11 @@ func TestUpdateServicePorts(t *testing.T) {
 			}},
 		},
 	}
-	controller := newController()
+	controller, err := newController()
+	if err != nil {
+		t.Fatalf("Error creating controller: %v", err)
+	}
+	defer controller.close()
 	// Process the first service
 	controller.endpointSliceStore.Add(slice)
 	controller.serviceStore.Add(service)
@@ -742,7 +767,11 @@ func TestUpdateServiceEndpointsToHost(t *testing.T) {
 	_, cidr, _ := net.ParseCIDR("10.128.0.0/24")
 	config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{cidr, 26}}
 	config.Gateway.Mode = config.GatewayModeShared
-	controller := newController()
+	controller, err := newController()
+	if err != nil {
+		t.Fatalf("Error creating controller: %v", err)
+	}
+	defer controller.close()
 	// Process the first service
 	controller.endpointSliceStore.Add(slice)
 	controller.serviceStore.Add(service)
@@ -886,7 +915,11 @@ func TestUpdateServiceEndpointsLessRemoveOps(t *testing.T) {
 	_, cidr, _ := net.ParseCIDR("10.128.0.0/24")
 	config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{cidr, 26}}
 	config.Gateway.Mode = config.GatewayModeShared
-	controller := newController()
+	controller, err := newController()
+	if err != nil {
+		t.Fatalf("Error creating controller: %v", err)
+	}
+	defer controller.close()
 	// Process the first service
 	controller.endpointSliceStore.Add(slice)
 	controller.serviceStore.Add(service)

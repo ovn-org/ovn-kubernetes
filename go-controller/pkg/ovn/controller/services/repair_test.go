@@ -167,16 +167,9 @@ func TestRepair_OVNStaleData(t *testing.T) {
 	})
 	// The repair loop must delete the remaining entries in OVN
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --if-exists remove load_balancer " + udpLBUUID + " vips \"10.96.0.10:53\"",
-		Output: "",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --if-exists remove load_balancer " + udpLBUUID + " vips \"10.96.0.10:9153\"",
-		Output: "",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --if-exists remove load_balancer " + udpLBUUID + " vips \"10.96.0.1:443\"",
-		Output: "",
+		Cmd:               "ovn-nbctl --timeout=15 --if-exists remove load_balancer " + udpLBUUID + " vips \"10.96.0.10:53\" -- --if-exists remove load_balancer " + udpLBUUID + " vips \"10.96.0.10:9153\" -- --if-exists remove load_balancer " + udpLBUUID + " vips \"10.96.0.1:443\"",
+		LooseBatchCompare: true,
+		Output:            "",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 --columns=_uuid --format=csv --data=bare --no-headings find acl action=reject",

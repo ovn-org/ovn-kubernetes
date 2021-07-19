@@ -84,7 +84,7 @@ func saveIPAddress(oldLink, newLink netlink.Link, addrs []netlink.Addr) error {
 			// Add to newLink
 			addr.Label = newLink.Attrs().Name
 			if err := netLinkOps.AddrAdd(newLink, &addr); err != nil {
-				klog.Errorf("Add addr to newLink %q failed: %v", addr.Label, err)
+				klog.Errorf("Add addr %q to newLink %q failed: %v", addr.String(), addr.Label, err)
 				return err
 			}
 			klog.Infof("Successfully saved addr %q to newLink %q", addr.String(), addr.Label)

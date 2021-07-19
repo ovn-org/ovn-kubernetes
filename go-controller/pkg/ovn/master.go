@@ -805,12 +805,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	if err = func() error {
 		hostNetworkNamespace := config.Kubernetes.HostNetworkNamespace
 		if hostNetworkNamespace != "" {
-			nsInfo, err := oc.waitForNamespaceLocked(hostNetworkNamespace)
-			if err != nil {
-				klog.Errorf("Failed to get namespace %s (%v)",
-					hostNetworkNamespace, err)
-				return err
-			}
+			nsInfo := oc.ensureNamespaceLocked(hostNetworkNamespace)
 			defer nsInfo.Unlock()
 			if nsInfo.addressSet == nil {
 				nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(hostNetworkNamespace)
@@ -1075,14 +1070,15 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 	// delete stale chassis in SBDB if any
 	oc.deleteStaleNodeChassis(node)
 
-	// If node annotation succeeds, update the used subnet count
-	for _, hostSubnet := range hostSubnets {
-		util.UpdateUsedHostSubnetsCount(hostSubnet,
-			&oc.v4HostSubnetsUsed,
-			&oc.v6HostSubnetsUsed, true)
+	// If node annotation succeeds and subnets were allocated, update the used subnet count
+	if len(allocatedSubnets) > 0 {
+		for _, hostSubnet := range hostSubnets {
+			util.UpdateUsedHostSubnetsCount(hostSubnet,
+				&oc.v4HostSubnetsUsed,
+				&oc.v6HostSubnetsUsed, true)
+		}
+		metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
 	}
-	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
-
 	return hostSubnets, nil
 }
 

@@ -113,12 +113,13 @@ var _ = AfterSuite(func() {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 })
 
-func createTempFile(name string) (string, error) {
+func createTempFile(name string) (string, []byte, error) {
+	fileData := []byte{0x20}
 	fname := filepath.Join(tmpDir, name)
-	if err := ioutil.WriteFile(fname, []byte{0x20}, 0644); err != nil {
-		return "", err
+	if err := ioutil.WriteFile(fname, fileData, 0644); err != nil {
+		return "", nil, err
 	}
-	return fname, nil
+	return fname, fileData, nil
 }
 
 func createTempFileContent(name, value string) (string, error) {
@@ -252,6 +253,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("ovn-k8s-cni-overlay"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(""))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(""))
+			gomega.Expect(Kubernetes.CAData).To(gomega.Equal([]byte{}))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal(""))
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal(DefaultAPIServer))
 			gomega.Expect(Kubernetes.RawServiceCIDRs).To(gomega.Equal("172.16.1.0/24"))
@@ -294,7 +296,7 @@ var _ = Describe("Config Operations", func() {
 				Output: "asadfasdfasrw3atr3r3rf33fasdaa3233",
 			})
 			// k8s-ca-certificate
-			fname, err := createTempFile("ca.crt")
+			fname, fdata, err := createTempFile("ca.crt")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-ca-certificate",
@@ -318,6 +320,7 @@ var _ = Describe("Config Operations", func() {
 
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal("https://somewhere.com:8081"))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(fname))
+			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(fdata))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("asadfasdfasrw3atr3r3rf33fasdaa3233"))
 
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeTCP))
@@ -356,7 +359,7 @@ var _ = Describe("Config Operations", func() {
 				Output: "asadfasdfasrw3atr3r3rf33fasdaa3233",
 			})
 			// k8s-ca-certificate
-			fname, err := createTempFile("kube-cacert.pem")
+			fname, fdata, err := createTempFile("kube-cacert.pem")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-ca-certificate",
@@ -384,6 +387,7 @@ var _ = Describe("Config Operations", func() {
 
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal("https://somewhere.com:8081"))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(fname))
+			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(fdata))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("asadfasdfasrw3atr3r3rf33fasdaa3233"))
 
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeTCP))
@@ -408,9 +412,9 @@ var _ = Describe("Config Operations", func() {
 	})
 
 	It("uses serviceaccount files", func() {
-		kubeCAcertFile, err := createTempFile("ca.crt")
+		caFile, caData, err := createTempFile("ca.crt")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		defer os.Remove(kubeCAcertFile)
+		defer os.Remove(caFile)
 
 		tokenFile, err1 := createTempFileContent("token", "TG9yZW0gaXBzdW0gZ")
 		gomega.Expect(err1).NotTo(gomega.HaveOccurred())
@@ -420,7 +424,8 @@ var _ = Describe("Config Operations", func() {
 			_, err := InitConfigSa(ctx, kexec.New(), tmpDir, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAcertFile))
+			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(caFile))
+			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(caData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("TG9yZW0gaXBzdW0gZ"))
 
 			return nil
@@ -431,7 +436,7 @@ var _ = Describe("Config Operations", func() {
 	})
 
 	It("uses environment variables", func() {
-		kubeconfigEnvFile, err := createTempFile("kubeconfig.env")
+		kubeconfigEnvFile, _, err := createTempFile("kubeconfig.env")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeconfigEnvFile)
 		os.Setenv("KUBECONFIG", kubeconfigEnvFile)
@@ -443,7 +448,7 @@ var _ = Describe("Config Operations", func() {
 		os.Setenv("K8S_APISERVER", "https://9.2.3.4:6443")
 		defer os.Setenv("K8S_APISERVER", "")
 
-		kubeCAFile, err1 := createTempFile("kube-ca.crt")
+		kubeCAFile, kubeCAData, err1 := createTempFile("kube-ca.crt")
 		gomega.Expect(err1).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeCAFile)
 		os.Setenv("K8S_CACERT", kubeCAFile)
@@ -457,6 +462,7 @@ var _ = Describe("Config Operations", func() {
 
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigEnvFile))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
+			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("this is the  token test"))
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal("https://9.2.3.4:6443"))
 
@@ -468,11 +474,11 @@ var _ = Describe("Config Operations", func() {
 	})
 
 	It("overrides defaults with config file options", func() {
-		kubeconfigFile, err := createTempFile("kubeconfig")
+		kubeconfigFile, _, err := createTempFile("kubeconfig")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeconfigFile)
 
-		kubeCAFile, err := createTempFile("kube-ca.crt")
+		kubeCAFile, kubeCAData, err := createTempFile("kube-ca.crt")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeCAFile)
 
@@ -500,6 +506,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("ovn-k8s-cni-overlay22"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
+			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("TG9yZW0gaXBzdW0gZ"))
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal("https://1.2.3.4:6443"))
 			gomega.Expect(Kubernetes.RawServiceCIDRs).To(gomega.Equal("172.18.0.0/24"))
@@ -541,11 +548,11 @@ var _ = Describe("Config Operations", func() {
 	})
 
 	It("overrides config file and defaults with CLI options", func() {
-		kubeconfigFile, err := createTempFile("kubeconfig")
+		kubeconfigFile, _, err := createTempFile("kubeconfig")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeconfigFile)
 
-		kubeCAFile, err := createTempFile("kube-ca.crt")
+		kubeCAFile, kubeCAData, err := createTempFile("kube-ca.crt")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeCAFile)
 
@@ -570,6 +577,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("a-plugin"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
+			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("asdfasdfasdfasfd"))
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal("https://4.4.3.2:8080"))
 			gomega.Expect(Kubernetes.RawServiceCIDRs).To(gomega.Equal("172.15.0.0/24"))
@@ -860,11 +868,11 @@ mode=shared
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 	It("overrides config file and defaults with CLI options (multi-master)", func() {
-		kubeconfigFile, err := createTempFile("kubeconfig")
+		kubeconfigFile, _, err := createTempFile("kubeconfig")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeconfigFile)
 
-		kubeCAFile, err := createTempFile("kube-ca.crt")
+		kubeCAFile, kubeCAData, err := createTempFile("kube-ca.crt")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeCAFile)
 
@@ -891,6 +899,7 @@ mode=shared
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("a-plugin"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
+			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("asdfasdfasdfasfd"))
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal("https://4.4.3.2:8080"))
 			gomega.Expect(Kubernetes.RawNoHostSubnetNodes).To(gomega.Equal("label=another-test-label"))
@@ -949,11 +958,11 @@ mode=shared
 	})
 
 	It("does not override config file settings with default cli options", func() {
-		kubeconfigFile, err := createTempFile("kubeconfig")
+		kubeconfigFile, _, err := createTempFile("kubeconfig")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeconfigFile)
 
-		kubeCAFile, err := createTempFile("kube-ca.crt")
+		kubeCAFile, kubeCAData, err := createTempFile("kube-ca.crt")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeCAFile)
 
@@ -981,6 +990,7 @@ mode=shared
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("ovn-k8s-cni-overlay22"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
 			gomega.Expect(Kubernetes.CACert).To(gomega.Equal(kubeCAFile))
+			gomega.Expect(Kubernetes.CAData).To(gomega.Equal(kubeCAData))
 			gomega.Expect(Kubernetes.Token).To(gomega.Equal("TG9yZW0gaXBzdW0gZ"))
 			gomega.Expect(Kubernetes.RawServiceCIDRs).To(gomega.Equal("172.18.0.0/24"))
 
@@ -1145,9 +1155,9 @@ mode=shared
 
 		BeforeEach(func() {
 			var err error
-			certFile, err = createTempFile("cert.crt")
+			certFile, _, err = createTempFile("cert.crt")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			keyFile, err = createTempFile("priv.key")
+			keyFile, _, err = createTempFile("priv.key")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			caFile = filepath.Join(tmpDir, "ca.crt")
 		})
@@ -1303,7 +1313,7 @@ mode=shared
 	Describe("Kubernetes config options", func() {
 		Context("returns an error when the", func() {
 			generateTestsSimple("CA cert does not exist",
-				"kubernetes CA certificate file \"/foo/bar/baz.cert\" not found",
+				"open /foo/bar/baz.cert: no such file or directory",
 				"-k8s-apiserver=https://localhost:8443", "-k8s-cacert=/foo/bar/baz.cert")
 
 			generateTestsSimple("apiserver URL scheme is invalid",
@@ -1325,11 +1335,11 @@ mode=shared
 
 		BeforeEach(func() {
 			var err error
-			certFile, err = createTempFile("cert.crt")
+			certFile, _, err = createTempFile("cert.crt")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			keyFile, err = createTempFile("priv.key")
+			keyFile, _, err = createTempFile("priv.key")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			caFile, err = createTempFile("ca.crt")
+			caFile, _, err = createTempFile("ca.crt")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 

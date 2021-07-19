@@ -86,7 +86,13 @@ func getNetworkInterfaceIPAddresses(iface string) ([]*net.IPNet, error) {
 	for _, ip := range allIPs {
 		if utilnet.IsIPv6CIDR(ip) {
 			if config.IPv6Mode && !foundIPv6 {
-				ips = append(ips, ip)
+				// For IPv6 addresses with 128 prefix, let's try to find an appropriate subnet
+				// in the routing table
+				subnetIP, err := util.GetIPv6OnSubnet(iface, ip)
+				if err != nil {
+					return nil, fmt.Errorf("could not find IPv6 address on subnet: %v", err)
+				}
+				ips = append(ips, subnetIP)
 				foundIPv6 = true
 			}
 		} else if config.IPv4Mode && !foundIPv4 {

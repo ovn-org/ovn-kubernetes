@@ -42,43 +42,55 @@ func isSmartNICReady(podAnnotation map[string]string) bool {
 	return false
 }
 
-// getPod returns a pod from the informer cache or (if that fails) the apiserver
+// getPod tries to read a Pod object from the informer cache, or if the pod
+// doesn't exist there, the apiserver. If neither a list or a kube client is
+// given, returns no pod and no error
 func getPod(podLister corev1listers.PodLister, kclient kubernetes.Interface, namespace, name string) (*kapi.Pod, error) {
-	pod, err := podLister.Pods(namespace).Get(name)
-	if apierrors.IsNotFound(err) {
+	var pod *kapi.Pod
+	var err error
+
+	if podLister != nil {
+		pod, err = podLister.Pods(namespace).Get(name)
+		if err != nil && !apierrors.IsNotFound(err) {
+			return nil, err
+		}
+		// drop through
+	}
+
+	if kclient != nil {
 		// If the pod wasn't in our local cache, ask for it directly
 		pod, err = kclient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	}
+
 	return pod, err
 }
 
-// GetPodAnnotations obtains the pod annotation from the cache
-func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, kclient kubernetes.Interface, namespace, name string, annotCond podAnnotWaitCond) (map[string]string, error) {
+// GetPodAnnotations obtains the pod UID and annotation from the cache or apiserver
+func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, kclient kubernetes.Interface, namespace, name string, annotCond podAnnotWaitCond) (string, map[string]string, error) {
 	var notFoundCount uint
 
 	timeout := time.After(30 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("canceled waiting for annotations")
+			return "", nil, fmt.Errorf("canceled waiting for annotations")
 		case <-timeout:
-			return nil, fmt.Errorf("timed out waiting for annotations")
+			return "", nil, fmt.Errorf("timed out waiting for annotations")
 		default:
 			pod, err := getPod(podLister, kclient, namespace, name)
 			if err != nil {
 				if !apierrors.IsNotFound(err) {
-					return nil, fmt.Errorf("failed to get pod for annotations: %v", err)
+					return "", nil, fmt.Errorf("failed to get pod for annotations: %v", err)
 				}
 				// Allow up to 1 second for pod to be found
 				notFoundCount++
 				if notFoundCount >= 5 {
-					return nil, fmt.Errorf("timed out waiting for pod after 1s: %v", err)
+					return "", nil, fmt.Errorf("timed out waiting for pod after 1s: %v", err)
 				}
 				// drop through to try again
 			} else if pod != nil {
-				annotations := pod.ObjectMeta.Annotations
-				if annotCond(annotations) {
-					return annotations, nil
+				if annotCond(pod.Annotations) {
+					return string(pod.UID), pod.Annotations, nil
 				}
 			}
 

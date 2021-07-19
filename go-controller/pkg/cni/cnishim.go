@@ -6,6 +6,7 @@ package cni
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -24,10 +25,12 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/vishvananda/netlink"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // Plugin is the structure to hold the endpoint information and the corresponding
@@ -133,6 +136,28 @@ func (p *Plugin) postMetrics(startTime time.Time, cmd command, err error) {
 	})
 }
 
+func kubeClientsetFromConfig(auth *KubeAPIAuth) (*kubernetes.Clientset, error) {
+	if auth.Kubeconfig == "" && auth.KubeAPIServer == "" {
+		return nil, nil
+	}
+
+	var caData []byte
+	var err error
+	if auth.KubeCAData != "" {
+		caData, err = base64.StdEncoding.DecodeString(auth.KubeCAData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode Kube API CA data: %v", err)
+		}
+	}
+
+	return util.NewKubernetesClientset(&config.KubernetesConfig{
+		Kubeconfig: auth.Kubeconfig,
+		APIServer:  auth.KubeAPIServer,
+		Token:      auth.KubeAPIToken,
+		CAData:     caData,
+	})
+}
+
 // CmdAdd is the callback for 'add' cni calls from skel
 func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 	var err error
@@ -166,12 +191,20 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
+	kclient, errK := kubeClientsetFromConfig(response.KubeAuth)
+	if errK != nil {
+		err = errK
+		return err
+	}
+
 	var result *current.Result
 	if response.Result != nil {
+		// Return the full CNI result from ovnkube-node if it configured the pod interface
 		result = response.Result
 	} else {
-		pr, _ := cniRequestToPodRequest(req)
-		result, err = pr.getCNIResult(response.PodIFInfo)
+		// Use the IPAM details from ovnkube-node to configure the pod interface
+		pr, _ := cniRequestToPodRequest(req, nil, kclient)
+		result, err = pr.getCNIResult(nil, kclient, response.PodIFInfo)
 		if err != nil {
 			err = fmt.Errorf("failed to get CNI Result from pod interface info %v: %v", response.PodIFInfo, err)
 			klog.Error(err.Error())

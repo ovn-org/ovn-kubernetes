@@ -12,8 +12,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	linkMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
+	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
+
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func genOVSFindCmd(table, column, condition string) string {
@@ -46,6 +49,10 @@ func genIfaceID(podNamespace, podName string) string {
 	return fmt.Sprintf("%s_%s", podNamespace, podName)
 }
 
+func newFakeKubeClientWithPod(pod *v1.Pod) *fake.Clientset {
+	return fake.NewSimpleClientset(&v1.PodList{Items: []v1.Pod{*pod}})
+}
+
 var _ = Describe("Node Smart NIC tests", func() {
 	var sriovnetOpsMock utilMocks.SriovnetOps
 	var netlinkOpsMock utilMocks.NetLinkOps
@@ -53,6 +60,8 @@ var _ = Describe("Node Smart NIC tests", func() {
 	var kubeMock mocks.KubeInterface
 	var pod v1.Pod
 	var node OvnNode
+	var podLister v1mocks.PodLister
+	var podNamespaceLister v1mocks.PodNamespaceLister
 
 	origSriovnetOps := util.GetSriovnetOps()
 	origNetlinkOps := util.GetNetLinkOps()
@@ -72,9 +81,14 @@ var _ = Describe("Node Smart NIC tests", func() {
 		kubeMock = mocks.KubeInterface{}
 		node = OvnNode{Kube: &kubeMock}
 
+		podNamespaceLister = v1mocks.PodNamespaceLister{}
+		podLister = v1mocks.PodLister{}
+		podLister.On("Pods", mock.AnythingOfType("string")).Return(&podNamespaceLister)
+
 		pod = v1.Pod{ObjectMeta: metav1.ObjectMeta{
 			Name:        "a-pod",
 			Namespace:   "foo-ns",
+			UID:         "a-pod",
 			Annotations: map[string]string{},
 		}}
 	})
@@ -129,7 +143,9 @@ var _ = Describe("Node Smart NIC tests", func() {
 
 		It("Fails if smartnic.connection-details Pod annotation is not present", func() {
 			pod.Annotations = map[string]string{}
-			err := node.addRepPort(&pod, vfRep, ifInfo)
+			fakeClient := newFakeKubeClientWithPod(&pod)
+			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
+			err := node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to get smart-nic annotation"))
 		})
@@ -151,8 +167,11 @@ var _ = Describe("Node Smart NIC tests", func() {
 				Cmd: genOVSDelPortCmd("pf0vf9"),
 			})
 
+			fakeClient := newFakeKubeClientWithPod(&pod)
+			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
+
 			// call addRepPort()
-			err := node.addRepPort(&pod, vfRep, ifInfo)
+			err := node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to run ovs command"))
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
@@ -205,7 +224,10 @@ var _ = Describe("Node Smart NIC tests", func() {
 						Cmd: genOVSDelPortCmd("pf0vf9"),
 					})
 
-					err := node.addRepPort(&pod, vfRep, ifInfo)
+					fakeClient := newFakeKubeClientWithPod(&pod)
+					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
+
+					err := node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
 					Expect(err).To(HaveOccurred())
 					Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 				})
@@ -219,7 +241,10 @@ var _ = Describe("Node Smart NIC tests", func() {
 						Cmd: genOVSDelPortCmd("pf0vf9"),
 					})
 
-					err := node.addRepPort(&pod, vfRep, ifInfo)
+					fakeClient := newFakeKubeClientWithPod(&pod)
+					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
+
+					err := node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
 					Expect(err).To(HaveOccurred())
 					Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 				})
@@ -234,7 +259,10 @@ var _ = Describe("Node Smart NIC tests", func() {
 						Cmd: genOVSDelPortCmd("pf0vf9"),
 					})
 
-					err := node.addRepPort(&pod, vfRep, ifInfo)
+					fakeClient := newFakeKubeClientWithPod(&pod)
+					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
+
+					err := node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
 					Expect(err).To(HaveOccurred())
 					Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 				})
@@ -247,7 +275,10 @@ var _ = Describe("Node Smart NIC tests", func() {
 				netlinkOpsMock.On("LinkSetUp", vfLink).Return(nil)
 				kubeMock.On("SetAnnotationsOnPod", pod.Namespace, pod.Name, expectedAnnot).Return(nil)
 
-				err := node.addRepPort(&pod, vfRep, ifInfo)
+				fakeClient := newFakeKubeClientWithPod(&pod)
+				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
+
+				err := node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 			})
@@ -264,7 +295,10 @@ var _ = Describe("Node Smart NIC tests", func() {
 					Cmd: genOVSDelPortCmd("pf0vf9"),
 				})
 
-				err := node.addRepPort(&pod, vfRep, ifInfo)
+				fakeClient := newFakeKubeClientWithPod(&pod)
+				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
+
+				err := node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
 				Expect(err).To(HaveOccurred())
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 			})

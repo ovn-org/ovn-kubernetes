@@ -210,7 +210,7 @@ func (a api) conditionFromModel(any bool, model model.Model, cond ...model.Condi
 // a instance of any row in the cache.
 // 'result' must be a pointer to an Model that exists in the DBModel
 //
-// The way the cache is search depends on the fields already populated in 'result'
+// The way the cache is searched depends on the fields already populated in 'result'
 // Any table index (including _uuid) will be used for comparison
 func (a api) Get(m model.Model) error {
 	table, err := a.getTableFromModel(m)
@@ -223,33 +223,12 @@ func (a api) Get(m model.Model) error {
 		return ErrNotFound
 	}
 
-	// If model contains _uuid value, we can access it via cache index
-	mapperInfo, err := mapper.NewInfo(a.cache.Mapper().Schema.Table(table), m)
-	if err != nil {
-		return err
+	found := tableCache.RowByModel(m)
+	if found == nil {
+		return ErrNotFound
 	}
-	if uuid, err := mapperInfo.FieldByColumn("_uuid"); err != nil && uuid != nil {
-		found := tableCache.Row(uuid.(string))
-		if found == nil {
-			return ErrNotFound
-		}
-		reflect.ValueOf(m).Elem().Set(reflect.Indirect(reflect.ValueOf(found)))
-		return nil
-	}
-
-	// Look across the entire cache for table index equality
-	for _, row := range tableCache.Rows() {
-		elem := tableCache.Row(row)
-		equal, err := a.cache.Mapper().EqualFields(table, m, elem.(model.Model))
-		if err != nil {
-			return err
-		}
-		if equal {
-			reflect.ValueOf(m).Elem().Set(reflect.Indirect(reflect.ValueOf(elem)))
-			return nil
-		}
-	}
-	return ErrNotFound
+	reflect.ValueOf(m).Elem().Set(reflect.Indirect(reflect.ValueOf(found)))
+	return nil
 }
 
 // Create is a generic function capable of creating any row in the DB

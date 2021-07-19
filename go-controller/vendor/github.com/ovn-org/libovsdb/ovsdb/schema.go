@@ -64,33 +64,38 @@ func SchemaFromFile(f *os.File) (*DatabaseSchema, error) {
 // ValidateOperations performs basic validation for operations against a DatabaseSchema
 func (schema DatabaseSchema) ValidateOperations(operations ...Operation) bool {
 	for _, op := range operations {
-		table, ok := schema.Tables[op.Table]
-		if ok {
-			for column := range op.Row {
-				if _, ok := table.Columns[column]; !ok {
-					if column != "_uuid" && column != "_version" {
-						return false
-					}
-				}
-			}
-			for _, row := range op.Rows {
-				for column := range row {
+		switch op.Op {
+		case OperationAbort, OperationAssert, OperationComment, OperationCommit, OperationWait:
+			continue
+		case OperationInsert, OperationSelect, OperationUpdate, OperationMutate, OperationDelete:
+			table, ok := schema.Tables[op.Table]
+			if ok {
+				for column := range op.Row {
 					if _, ok := table.Columns[column]; !ok {
 						if column != "_uuid" && column != "_version" {
 							return false
 						}
 					}
 				}
-			}
-			for _, column := range op.Columns {
-				if _, ok := table.Columns[column]; !ok {
-					if column != "_uuid" && column != "_version" {
-						return false
+				for _, row := range op.Rows {
+					for column := range row {
+						if _, ok := table.Columns[column]; !ok {
+							if column != "_uuid" && column != "_version" {
+								return false
+							}
+						}
 					}
 				}
+				for _, column := range op.Columns {
+					if _, ok := table.Columns[column]; !ok {
+						if column != "_uuid" && column != "_version" {
+							return false
+						}
+					}
+				}
+			} else {
+				return false
 			}
-		} else {
-			return false
 		}
 	}
 	return true
