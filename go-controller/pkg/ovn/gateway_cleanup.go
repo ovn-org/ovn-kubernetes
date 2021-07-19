@@ -13,13 +13,13 @@ import (
 )
 
 // gatewayCleanup removes all the NB DB objects created for a node's gateway
-func gatewayCleanup(nodeName string) error {
+func (oc *Controller) gatewayCleanup(nodeName string) error {
 	gatewayRouter := types.GWRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
 	var nextHops []net.IP
 
-	gwIPAddrs, err := util.GetLRPAddrs(types.GWRouterToJoinSwitchPrefix + gatewayRouter)
+	gwIPAddrs, err := util.GetLRPAddrs(oc.nbClient, types.GWRouterToJoinSwitchPrefix+gatewayRouter)
 	if err != nil {
 		return err
 	}
@@ -150,13 +150,13 @@ func staticRouteCleanup(nextHops []net.IP) {
 // the single join switch versions; this is to cleanup the logical entities for the
 // specified node if the node was deleted when the ovnkube-master pod was brought down
 // to do the version upgrade.
-func multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly bool) error {
+func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly bool) error {
 	gatewayRouter := types.GWRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
 	var nextHops []net.IP
 
-	gwIPAddrs, err := util.GetLRPAddrs(types.GWRouterToJoinSwitchPrefix + gatewayRouter)
+	gwIPAddrs, err := util.GetLRPAddrs(oc.nbClient, types.GWRouterToJoinSwitchPrefix+gatewayRouter)
 	if err != nil {
 		return err
 	}

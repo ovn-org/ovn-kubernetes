@@ -31,6 +31,7 @@ func (oc *Controller) getJoinLRPAddresses(nodeName string) []*net.IPNet {
 	gwLRPIPs := []*net.IPNet{}
 	gwLrpName := types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName
 	joinSubnets := oc.joinSwIPManager.lsm.GetSwitchSubnets(types.OVNJoinSwitch)
+	ifAddrs, err := util.GetLRPAddrs(oc.nbClient, gwLrpName)
 	if err == nil {
 		for _, ifAddr := range ifAddrs {
 			for _, subnet := range joinSubnets {

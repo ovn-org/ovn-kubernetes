@@ -280,7 +280,6 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID, sct
 
 func addNodeLogicalFlows(fexec *ovntest.FakeExec, node *tNode, clusterCIDR string, enableIPv6 bool) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_" + node.Name + " networks",
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --format=csv --columns=name,other-config find logical_switch",
 	})
 

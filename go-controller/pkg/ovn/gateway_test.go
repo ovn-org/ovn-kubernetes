@@ -486,8 +486,36 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 	})
 
 	ginkgo.It("cleans up a single-stack gateway in OVN", func() {
+		stopChan := make(chan struct{})
+		defer close(stopChan)
+		kubeFakeClient := fake.NewSimpleClientset()
+		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
+		egressIPFakeClient := &egressipfake.Clientset{}
+		fakeClient := &util.OVNClientset{
+			KubeClient:           kubeFakeClient,
+			EgressIPClient:       egressIPFakeClient,
+			EgressFirewallClient: egressFirewallFakeClient,
+		}
+		f, err := factory.NewMasterWatchFactory(fakeClient)
 
 		nodeName := "test-node"
+
+		dbSetup := libovsdbtest.TestSetup{
+			NBData: []libovsdbtest.TestData{
+				&nbdb.LogicalRouterPort{
+					Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName,
+					Networks: []string{"100.64.0.1/16"},
+				},
+			},
+		}
+		libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
+			ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
+			libovsdbOvnNBClient, libovsdbOvnSBClient,
+			record.NewFakeRecorder(0))
+
 		hostSubnet := ovntest.MustParseIPNet("10.130.0.0/23")
 		const (
 			nodeRouteUUID string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
@@ -495,13 +523,9 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		)
 
 		fexec := ovntest.NewFakeExec()
-		err := util.SetExec(fexec)
+		err = util.SetExec(fexec)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_test-node networks",
-			Output: "[\"100.64.0.1/16\"]",
-		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"100.64.0.1\"",
 			Output: nodeRouteUUID,
@@ -533,14 +557,42 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		})
 		cleanupPBRandNATRules(fexec, nodeName, []*net.IPNet{hostSubnet})
 
-		err = gatewayCleanup(nodeName)
+		err = clusterController.gatewayCleanup(nodeName)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
 	})
 
 	ginkgo.It("cleans up a dual-stack gateway in OVN", func() {
+		stopChan := make(chan struct{})
+		defer close(stopChan)
+		kubeFakeClient := fake.NewSimpleClientset()
+		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
+		egressIPFakeClient := &egressipfake.Clientset{}
+		fakeClient := &util.OVNClientset{
+			KubeClient:           kubeFakeClient,
+			EgressIPClient:       egressIPFakeClient,
+			EgressFirewallClient: egressFirewallFakeClient,
+		}
+		f, err := factory.NewMasterWatchFactory(fakeClient)
 
 		nodeName := "test-node"
+
+		dbSetup := libovsdbtest.TestSetup{
+			NBData: []libovsdbtest.TestData{
+				&nbdb.LogicalRouterPort{
+					Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName,
+					Networks: []string{"100.64.0.1/16", "fd98::1/64"},
+				},
+			},
+		}
+		libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
+			ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
+			libovsdbOvnNBClient, libovsdbOvnSBClient,
+			record.NewFakeRecorder(0))
+
 		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23", "fd01:0:0:2::/64")
 		const (
 			v4RouteUUID    string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
@@ -551,13 +603,9 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		)
 
 		fexec := ovntest.NewFakeExec()
-		err := util.SetExec(fexec)
+		err = util.SetExec(fexec)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_test-node networks",
-			Output: "[\"100.64.0.1/16\", \"fd98::1/64\"]",
-		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"100.64.0.1\"",
 			Output: v4RouteUUID,
@@ -597,7 +645,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		})
 		cleanupPBRandNATRules(fexec, nodeName, hostSubnets)
 
-		err = gatewayCleanup(nodeName)
+		err = clusterController.gatewayCleanup(nodeName)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
 	})
