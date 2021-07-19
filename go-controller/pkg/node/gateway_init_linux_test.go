@@ -74,11 +74,11 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 
 		fexec := ovntest.NewLooseCompareFakeExec()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd: "ovs-vsctl --timeout=15 -- port-to-br eth0",
+			Cmd: "ovs-vsctl --timeout=15 port-to-br eth0",
 			Err: fmt.Errorf(""),
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd: "ovs-vsctl --timeout=15 -- br-exists eth0",
+			Cmd: "ovs-vsctl --timeout=15 br-exists eth0",
 			Err: fmt.Errorf(""),
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -190,7 +190,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			defer GinkgoRecover()
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
-			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, nodeAnnotator)
+			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", nodeAnnotator)
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(wf)
 			Expect(err).NotTo(HaveOccurred())

@@ -80,6 +80,8 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			}
 		}
 	}
+	// Remove legacy ecmp routes when moving to external bridge
+	oc.cleanECMPRoutes()
 }
 
 func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {

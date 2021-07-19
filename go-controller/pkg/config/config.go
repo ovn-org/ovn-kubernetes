@@ -286,6 +286,8 @@ type GatewayConfig struct {
 	Mode GatewayMode `gcfg:"mode"`
 	// Interface is the network interface to use for the gateway in "shared" mode
 	Interface string `gcfg:"interface"`
+	// Exgress gateway interface is the optional network interface to use for external gw pods traffic.
+	EgressGWInterface string `gcfg:"egw-interface"`
 	// NextHop is the gateway IP address of Interface; will be autodetected if not given
 	NextHop string `gcfg:"next-hop"`
 	// VLANID is the option VLAN tag to apply to gateway traffic for "shared" mode
@@ -922,6 +924,12 @@ var OVNGatewayFlags = []cli.Flag{
 			"default gateway is configured will be used as the gateway " +
 			"interface. Only useful with \"init-gateways\"",
 		Destination: &cliConfig.Gateway.Interface,
+	},
+	&cli.StringFlag{
+		Name: "exgw-interface",
+		Usage: "The interface on nodes that will be used for external gw network traffic. " +
+			"If none specified, ovnk will use the default interface",
+		Destination: &cliConfig.Gateway.EgressGWInterface,
 	},
 	&cli.StringFlag{
 		Name: "gateway-nexthop",
