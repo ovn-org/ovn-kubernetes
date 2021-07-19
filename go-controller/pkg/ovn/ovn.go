@@ -305,6 +305,10 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	klog.Infof("Starting all the Watchers...")
 	start := time.Now()
 
+	// Sync external gateway routes. External gateway may be set in namespaces
+	// or via pods. So execute an individual sync method at startup
+	oc.cleanExGwECMPRoutes()
+
 	// WatchNamespaces() should be started first because it has no other
 	// dependencies, and WatchNodes() depends on it
 	oc.WatchNamespaces()
