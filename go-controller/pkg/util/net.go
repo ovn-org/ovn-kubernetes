@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	goovn "github.com/ebay/go-ovn"
+	"github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -75,28 +77,24 @@ func GetPortAddresses(portName string, ovnNBClient goovn.Client) (net.HardwareAd
 }
 
 // GetLRPAddrs returns the addresses for the given logical router port
-func GetLRPAddrs(portName string) ([]*net.IPNet, error) {
-	networks := []*net.IPNet{}
-	output, stderr, err := RunOVNNbctl("--if-exist", "get", "logical_router_port", portName, "networks")
+func GetLRPAddrs(nbClient client.Client, portName string) ([]*net.IPNet, error) {
+	lrp := nbdb.LogicalRouterPort{Name: portName}
+	err := nbClient.Get(&lrp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get logical router port %s, "+
-			"stderr: %q, error: %v", portName, stderr, err)
+		return nil, fmt.Errorf("unable to find router port: %s, err: %v", portName, err)
 	}
-
-	// eg: `["100.64.0.3/16", "fd98::3/64"]`
-	output = strings.Trim(output, "[]")
-	if output != "" {
-		for _, ipNetStr := range strings.Split(output, ", ") {
-			ipNetStr = strings.Trim(ipNetStr, "\"")
-			ip, cidr, err := net.ParseCIDR(ipNetStr)
-			if err != nil {
-				return nil, fmt.Errorf("could not parse logical router port %q: %v",
-					ipNetStr, err)
-			}
-			networks = append(networks, &net.IPNet{IP: ip, Mask: cidr.Mask})
+	gwLRPIPs := []*net.IPNet{}
+	for _, network := range lrp.Networks {
+		ip, network, err := net.ParseCIDR(network)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse network CIDR: %s for router port: %s, err: %v ", network, portName, err)
 		}
+		gwLRPIPs = append(gwLRPIPs, &net.IPNet{
+			IP:   ip,
+			Mask: network.Mask,
+		})
 	}
-	return networks, nil
+	return gwLRPIPs, nil
 }
 
 // GetOVSPortMACAddress returns the MAC address of a given OVS port

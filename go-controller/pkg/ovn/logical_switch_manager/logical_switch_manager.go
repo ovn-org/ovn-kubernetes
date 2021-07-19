@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"sync"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator/allocator"
@@ -288,6 +289,7 @@ func (manager *LogicalSwitchManager) ReleaseIPs(nodeName string, ipnets []*net.I
 // IP allocator manager for join switch's IPv4 and IPv6 subnets.
 type JoinSwitchIPManager struct {
 	lsm            *LogicalSwitchManager
+	nbClient       libovsdbclient.Client
 	lrpIPCache     map[string][]*net.IPNet
 	lrpIPCacheLock sync.Mutex
 }
@@ -306,12 +308,13 @@ func NewJoinIPAMAllocator(cidr *net.IPNet) (ipam.Interface, error) {
 
 // Initializes a new join switch logical switch manager.
 // This IPmanager guaranteed to always have both IPv4 and IPv6 regardless of dual-stack
-func NewJoinLogicalSwitchIPManager(existingNodeNames []string) (*JoinSwitchIPManager, error) {
+func NewJoinLogicalSwitchIPManager(nbClient libovsdbclient.Client, existingNodeNames []string) (*JoinSwitchIPManager, error) {
 	j := JoinSwitchIPManager{
 		lsm: &LogicalSwitchManager{
 			cache:    make(map[string]logicalSwitchInfo),
 			ipamFunc: NewJoinIPAMAllocator,
 		},
+		nbClient:   nbClient,
 		lrpIPCache: make(map[string][]*net.IPNet),
 	}
 	var joinSubnets []*net.IPNet
@@ -448,7 +451,7 @@ func (jsIPManager *JoinSwitchIPManager) getJoinLRPAddresses(nodeName string) []*
 	gwLRPIPs := []*net.IPNet{}
 	gwLrpName := types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName
 	joinSubnets := jsIPManager.lsm.GetSwitchSubnets(types.OVNJoinSwitch)
-	ifAddrs, err := util.GetLRPAddrs(gwLrpName)
+	ifAddrs, err := util.GetLRPAddrs(jsIPManager.nbClient, gwLrpName)
 	if err == nil {
 		for _, ifAddr := range ifAddrs {
 			for _, subnet := range joinSubnets {

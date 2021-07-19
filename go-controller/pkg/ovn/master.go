@@ -185,7 +185,7 @@ func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.No
 
 		// for all nodes include the ones that were deleted, delete its gateway entities.
 		// See comments above the multiJoinSwitchGatewayCleanup() function for details.
-		err = multiJoinSwitchGatewayCleanup(oc.nbClient, nodeName, upgradeOnly)
+		err = oc.multiJoinSwitchGatewayCleanup(nodeName, upgradeOnly)
 		if err != nil {
 			return err
 		}
@@ -464,7 +464,7 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 
 	// Initialize the OVNJoinSwitch switch IP manager
 	// The OVNJoinSwitch will be allocated IP addresses in the range 100.64.0.0/16 or fd98::/64.
-	oc.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(existingNodeNames)
+	oc.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(oc.nbClient, existingNodeNames)
 	if err != nil {
 		return err
 	}
@@ -1130,7 +1130,7 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet, node
 		klog.Errorf("Error deleting node %s logical network: %v", nodeName, err)
 	}
 
-	if err := gatewayCleanup(oc.nbClient, nodeName); err != nil {
+	if err := oc.gatewayCleanup(nodeName); err != nil {
 		klog.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
 	}
 
