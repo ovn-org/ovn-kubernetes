@@ -23,7 +23,8 @@ Should validate TCP/UDP connectivity to an external gateway\'s loopback address 
 Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario|\
 Should validate the egress firewall policy functionality against remote hosts|\
 Should validate the egress IP functionality against remote hosts|\
-recovering from deleting db files while maintain connectivity"
+recovering from deleting db files while maintain connectivity|\
+test tainting a node according to its defaults interface MTU size"
 
 SKIPPED_TESTS=""
 if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
