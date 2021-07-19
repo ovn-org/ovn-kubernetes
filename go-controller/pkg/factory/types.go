@@ -10,6 +10,7 @@ import (
 // kubernetes resources from the informer cache
 type ObjectCacheInterface interface {
 	GetPod(namespace, name string) (*kapi.Pod, error)
+	GetAllPods() ([]*kapi.Pod, error)
 	GetPods(namespace string) ([]*kapi.Pod, error)
 	GetNodes() ([]*kapi.Node, error)
 	GetNode(name string) (*kapi.Node, error)
