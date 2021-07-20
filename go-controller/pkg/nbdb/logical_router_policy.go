@@ -20,6 +20,7 @@ type LogicalRouterPolicy struct {
 	ExternalIDs map[string]string         `ovsdb:"external_ids"`
 	Match       string                    `ovsdb:"match"`
 	Nexthop     []string                  `ovsdb:"nexthop"`
+	Nexthops    []string                  `ovsdb:"nexthops"`
 	Options     map[string]string         `ovsdb:"options"`
 	Priority    int                       `ovsdb:"priority"`
 }
