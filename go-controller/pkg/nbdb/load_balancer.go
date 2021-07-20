@@ -27,6 +27,7 @@ type LoadBalancer struct {
 	HealthCheck     []string                      `ovsdb:"health_check"`
 	IPPortMappings  map[string]string             `ovsdb:"ip_port_mappings"`
 	Name            string                        `ovsdb:"name"`
+	Options         map[string]string             `ovsdb:"options"`
 	Protocol        []LoadBalancerProtocol        `ovsdb:"protocol"`
 	SelectionFields []LoadBalancerSelectionFields `ovsdb:"selection_fields"`
 	Vips            map[string]string             `ovsdb:"vips"`

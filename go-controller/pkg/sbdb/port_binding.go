@@ -20,5 +20,6 @@ type PortBinding struct {
 	Tag            []int             `ovsdb:"tag"`
 	TunnelKey      int               `ovsdb:"tunnel_key"`
 	Type           string            `ovsdb:"type"`
+	Up             []bool            `ovsdb:"up"`
 	VirtualParent  []string          `ovsdb:"virtual_parent"`
 }

@@ -14,6 +14,7 @@ import (
 func FullDatabaseModel() (*model.DBModel, error) {
 	return model.NewDBModel("OVN_Southbound", map[string]model.Model{
 		"Address_Set":      &AddressSet{},
+		"BFD":              &BFD{},
 		"Chassis":          &Chassis{},
 		"Chassis_Private":  &ChassisPrivate{},
 		"Connection":       &Connection{},
@@ -23,6 +24,7 @@ func FullDatabaseModel() (*model.DBModel, error) {
 		"DNS":              &DNS{},
 		"Datapath_Binding": &DatapathBinding{},
 		"Encap":            &Encap{},
+		"FDB":              &FDB{},
 		"Gateway_Chassis":  &GatewayChassis{},
 		"HA_Chassis":       &HAChassis{},
 		"HA_Chassis_Group": &HAChassisGroup{},
@@ -47,7 +49,7 @@ func FullDatabaseModel() (*model.DBModel, error) {
 
 var schema = `{
   "name": "OVN_Southbound",
-  "version": "20.12.0",
+  "version": "20.17.0",
   "tables": {
     "Address_Set": {
       "columns": {
@@ -67,6 +69,85 @@ var schema = `{
       "indexes": [
         [
           "name"
+        ]
+      ]
+    },
+    "BFD": {
+      "columns": {
+        "detect_mult": {
+          "type": "integer"
+        },
+        "disc": {
+          "type": "integer"
+        },
+        "dst_ip": {
+          "type": "string"
+        },
+        "external_ids": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
+        "logical_port": {
+          "type": "string"
+        },
+        "min_rx": {
+          "type": "integer"
+        },
+        "min_tx": {
+          "type": "integer"
+        },
+        "options": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
+        "src_port": {
+          "type": {
+            "key": {
+              "type": "integer",
+              "minInteger": 49152,
+              "maxInteger": 65535
+            }
+          }
+        },
+        "status": {
+          "type": {
+            "key": {
+              "type": "string",
+              "enum": [
+                "set",
+                [
+                  "down",
+                  "init",
+                  "up",
+                  "admin_down"
+                ]
+              ]
+            }
+          }
+        }
+      },
+      "indexes": [
+        [
+          "logical_port",
+          "dst_ip",
+          "src_port",
+          "disc"
         ]
       ]
     },
@@ -487,6 +568,37 @@ var schema = `{
         ]
       ]
     },
+    "FDB": {
+      "columns": {
+        "dp_key": {
+          "type": {
+            "key": {
+              "type": "integer",
+              "minInteger": 1,
+              "maxInteger": 16777215
+            }
+          }
+        },
+        "mac": {
+          "type": "string"
+        },
+        "port_key": {
+          "type": {
+            "key": {
+              "type": "integer",
+              "minInteger": 1,
+              "maxInteger": 16777215
+            }
+          }
+        }
+      },
+      "indexes": [
+        [
+          "mac",
+          "dp_key"
+        ]
+      ]
+    },
     "Gateway_Chassis": {
       "columns": {
         "chassis": {
@@ -783,6 +895,18 @@ var schema = `{
         "name": {
           "type": "string"
         },
+        "options": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
         "protocol": {
           "type": {
             "key": {
@@ -897,7 +1021,7 @@ var schema = `{
             "key": {
               "type": "integer",
               "minInteger": 0,
-              "maxInteger": 23
+              "maxInteger": 32
             }
           }
         }
@@ -1017,7 +1141,7 @@ var schema = `{
               "refTable": "Port_Binding",
               "refType": "weak"
             },
-            "min": 1,
+            "min": 0,
             "max": "unlimited"
           }
         },
@@ -1172,6 +1296,15 @@ var schema = `{
         },
         "type": {
           "type": "string"
+        },
+        "up": {
+          "type": {
+            "key": {
+              "type": "boolean"
+            },
+            "min": 0,
+            "max": 1
+          }
         },
         "virtual_parent": {
           "type": {

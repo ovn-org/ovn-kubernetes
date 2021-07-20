@@ -15,6 +15,7 @@ func FullDatabaseModel() (*model.DBModel, error) {
 	return model.NewDBModel("OVN_Northbound", map[string]model.Model{
 		"ACL":                         &ACL{},
 		"Address_Set":                 &AddressSet{},
+		"BFD":                         &BFD{},
 		"Connection":                  &Connection{},
 		"DHCP_Options":                &DHCPOptions{},
 		"DNS":                         &DNS{},
@@ -42,7 +43,7 @@ func FullDatabaseModel() (*model.DBModel, error) {
 
 var schema = `{
   "name": "OVN_Northbound",
-  "version": "5.28.0",
+  "version": "5.32.0",
   "tables": {
     "ACL": {
       "columns": {
@@ -55,6 +56,7 @@ var schema = `{
                 [
                   "allow",
                   "allow-related",
+                  "allow-stateless",
                   "drop",
                   "reject"
                 ]
@@ -174,6 +176,93 @@ var schema = `{
       "indexes": [
         [
           "name"
+        ]
+      ]
+    },
+    "BFD": {
+      "columns": {
+        "detect_mult": {
+          "type": {
+            "key": {
+              "type": "integer",
+              "minInteger": 1
+            },
+            "min": 0,
+            "max": 1
+          }
+        },
+        "dst_ip": {
+          "type": "string"
+        },
+        "external_ids": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
+        "logical_port": {
+          "type": "string"
+        },
+        "min_rx": {
+          "type": {
+            "key": {
+              "type": "integer"
+            },
+            "min": 0,
+            "max": 1
+          }
+        },
+        "min_tx": {
+          "type": {
+            "key": {
+              "type": "integer",
+              "minInteger": 1
+            },
+            "min": 0,
+            "max": 1
+          }
+        },
+        "options": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
+        "status": {
+          "type": {
+            "key": {
+              "type": "string",
+              "enum": [
+                "set",
+                [
+                  "down",
+                  "init",
+                  "up",
+                  "admin_down"
+                ]
+              ]
+            },
+            "min": 0,
+            "max": 1
+          }
+        }
+      },
+      "indexes": [
+        [
+          "logical_port",
+          "dst_ip"
         ]
       ]
     },
@@ -496,6 +585,18 @@ var schema = `{
         "name": {
           "type": "string"
         },
+        "options": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
         "protocol": {
           "type": {
             "key": {
@@ -714,6 +815,15 @@ var schema = `{
             "max": 1
           }
         },
+        "nexthops": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
         "options": {
           "type": {
             "key": {
@@ -848,6 +958,17 @@ var schema = `{
     },
     "Logical_Router_Static_Route": {
       "columns": {
+        "bfd": {
+          "type": {
+            "key": {
+              "type": "uuid",
+              "refTable": "BFD",
+              "refType": "weak"
+            },
+            "min": 0,
+            "max": 1
+          }
+        },
         "external_ids": {
           "type": {
             "key": {
