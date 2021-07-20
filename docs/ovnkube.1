@@ -138,6 +138,9 @@ The Common Name of the certificate used for TLS server certificate verification.
 \fB\--ovnkube-node-mode\fR string
 ovnkube-node operating mode full(default), smart-nic, smart-nic-host (default: "full")
 .TP
+\fB\--enable-tunneled-host-traffic\fR string
+Configure OVN with policy based routes to route pod network to host traffic through management port(ovn-k8s-mp0).
+.TP
 \fB\--help\fR, \fB\-h\fR
 Show help.
 .TP
