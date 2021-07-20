@@ -150,9 +150,9 @@ jobs:
       OVN_HA: "false"
       KIND_IPV4_SUPPORT: "true"
       KIND_IPV6_SUPPORT: "false"
-      OVN_HYBRID_OVERLAY_ENABLE: "false"
+      OVN_HYBRID_OVERLAY_ENABLE: "true"
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
-      OVN_MULTICAST_ENABLE:  "false"
+      OVN_MULTICAST_ENABLE:  "true"
     steps:
     - name: Set up Go
       uses: actions/setup-go@v1
@@ -225,7 +225,11 @@ jobs:
     - name: Run Single-Stack Tests
       run: |
         make -C test shard-test WHAT="Networking Granular Checks"
-
+    
+    - name: Run Single-Stack Non-HA Control Plane Tests
+      run: |
+        make -C test control-plane
+            
     - name: Export logs
       if: always()
       run: |
