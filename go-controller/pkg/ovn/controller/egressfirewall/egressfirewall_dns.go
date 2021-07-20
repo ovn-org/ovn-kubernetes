@@ -1,4 +1,4 @@
-package ovn
+package egressfirewall
 
 import (
 	"fmt"
@@ -24,11 +24,11 @@ type EgressDNS struct {
 	addressSetFactory addressset.AddressSetFactory
 
 	// Report change when Add operation is done
-	added          chan struct{}
-	stopChan       chan struct{}
-	controllerStop <-chan struct{}
+	added    chan struct{}
+	stopChan chan struct{}
 }
 
+// dnsEntry holds the information required for each dns entry in egressFirewalls
 type dnsEntry struct {
 	// this map holds all the namespaces that a dnsName appears in
 	namespaces map[string]struct{}
@@ -39,7 +39,8 @@ type dnsEntry struct {
 	dnsAddressSet addressset.AddressSet
 }
 
-func NewEgressDNS(addressSetFactory addressset.AddressSetFactory, controllerStop <-chan struct{}) (*EgressDNS, error) {
+// NewEgressDNS creates a new DNS controller that manages dns entries for egressFirewalls
+func NewEgressDNS(addressSetFactory addressset.AddressSetFactory) (*EgressDNS, error) {
 	dnsInfo, err := util.NewDNS("/etc/resolv.conf")
 	if err != nil {
 		return nil, err
@@ -50,9 +51,8 @@ func NewEgressDNS(addressSetFactory addressset.AddressSetFactory, controllerStop
 		dnsEntries:        make(map[string]*dnsEntry),
 		addressSetFactory: addressSetFactory,
 
-		added:          make(chan struct{}),
-		stopChan:       make(chan struct{}),
-		controllerStop: controllerStop,
+		added:    make(chan struct{}),
+		stopChan: make(chan struct{}),
 	}
 
 	return egressDNS, nil
@@ -149,7 +149,7 @@ func (e *EgressDNS) addToDNS(dnsName string) {
 // 1. time.After(durationTillNextQuery) times out and the dnsName with the lowest ttl is checked
 //    and the durationTillNextQuery is updated
 // 2. e.added is recived and durationTillNextQuery is recomputed
-func (e *EgressDNS) Run(defaultInterval time.Duration) {
+func (e *EgressDNS) Run(defaultInterval time.Duration, stopChan <-chan struct{}) {
 	var dnsName string
 	var ttl time.Time
 	var timeSet bool
@@ -172,9 +172,7 @@ func (e *EgressDNS) Run(defaultInterval time.Duration) {
 						utilruntime.HandleError(err)
 					}
 				}
-			case <-e.stopChan:
-				return
-			case <-e.controllerStop:
+			case <-stopChan:
 				return
 			}
 
