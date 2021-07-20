@@ -73,7 +73,6 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 	if err != nil {
 		return nil, err
 	}
-
 	return newClient(cfg, dbModel, stopCh)
 }
 

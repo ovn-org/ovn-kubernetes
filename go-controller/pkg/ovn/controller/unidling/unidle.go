@@ -3,16 +3,18 @@ package unidling
 import (
 	"fmt"
 	"sync"
-	"time"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	libovsdbCache "github.com/ovn-org/libovsdb/cache"
+	libovsdbClient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/libovsdb/model"
+	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	v1 "k8s.io/api/core/v1"
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
-
 	"k8s.io/klog/v2"
 )
 
@@ -20,19 +22,43 @@ import (
 // and generates a Kubernetes NeedPods events with the Service
 // associated to the VIP
 type unidlingController struct {
+	eventQueue    chan *sbdb.ControllerEvent
 	eventRecorder record.EventRecorder
 	// Map of load balancers to service namespace
 	serviceVIPToName     map[ServiceVIPKey]types.NamespacedName
 	serviceVIPToNameLock sync.Mutex
-	sbClient             libovsdbclient.Client
+	sbClient             libovsdbClient.Client
 }
 
 // NewController creates a new unidling controller
-func NewController(recorder record.EventRecorder, serviceInformer cache.SharedIndexInformer, sbClient libovsdbclient.Client) *unidlingController {
+func NewController(recorder record.EventRecorder, serviceInformer cache.SharedIndexInformer, sbClient libovsdbClient.Client) (*unidlingController, error) {
 	uc := &unidlingController{
+		eventQueue:       make(chan *sbdb.ControllerEvent),
 		eventRecorder:    recorder,
 		serviceVIPToName: map[ServiceVIPKey]types.NamespacedName{},
 		sbClient:         sbClient,
+	}
+
+	klog.Info("Setting OVN SB event handlers")
+	// add all empty lb backends events to a channel
+	sbClient.Cache().AddEventHandler(
+		&libovsdbCache.EventHandlerFuncs{
+			AddFunc: func(table string, m model.Model) {
+				if event, ok := m.(*sbdb.ControllerEvent); ok {
+					if event.EventType == sbdb.ControllerEventEventTypeEmptyLbBackends {
+						uc.eventQueue <- event
+					}
+				}
+			},
+		},
+	)
+
+	controllerEvent := sbdb.ControllerEvent{}
+	_, err := uc.sbClient.Monitor(
+		uc.sbClient.NewTableMonitor(&controllerEvent),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("error monitoring controller events table: %v", err)
 	}
 
 	// we only process events on unidling, there is no reconcilation
@@ -45,11 +71,11 @@ func NewController(recorder record.EventRecorder, serviceInformer cache.SharedIn
 		},
 		DeleteFunc: uc.onServiceDelete,
 	})
-	return uc
+	return uc, nil
 }
 
 func (uc *unidlingController) onServiceAdd(obj interface{}) {
-	svc := obj.(*v1.Service)
+	svc := obj.(*kapi.Service)
 	if util.ServiceTypeHasClusterIP(svc) && util.IsClusterIPSet(svc) {
 		for _, ip := range util.GetClusterIPs(svc) {
 			for _, svcPort := range svc.Spec.Ports {
@@ -61,14 +87,14 @@ func (uc *unidlingController) onServiceAdd(obj interface{}) {
 }
 
 func (uc *unidlingController) onServiceDelete(obj interface{}) {
-	svc, ok := obj.(*v1.Service)
+	svc, ok := obj.(*kapi.Service)
 	if !ok {
 		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
 		if !ok {
 			utilruntime.HandleError(fmt.Errorf("couldn't get object from tombstone %#v", obj))
 			return
 		}
-		svc, ok = tombstone.Obj.(*v1.Service)
+		svc, ok = tombstone.Obj.(*kapi.Service)
 		if !ok {
 			utilruntime.HandleError(fmt.Errorf("tombstone contained object that is not a Service: %#v", obj))
 			return
@@ -91,18 +117,18 @@ type ServiceVIPKey struct {
 	// Load balancer VIP in the form "ip:port"
 	vip string
 	// Protocol used by the load balancer
-	protocol v1.Protocol
+	protocol kapi.Protocol
 }
 
 // AddServiceVIPToName associates a k8s service name with a load balancer VIP
-func (uc *unidlingController) AddServiceVIPToName(vip string, protocol v1.Protocol, namespace, name string) {
+func (uc *unidlingController) AddServiceVIPToName(vip string, protocol kapi.Protocol, namespace, name string) {
 	uc.serviceVIPToNameLock.Lock()
 	defer uc.serviceVIPToNameLock.Unlock()
 	uc.serviceVIPToName[ServiceVIPKey{vip, protocol}] = types.NamespacedName{Namespace: namespace, Name: name}
 }
 
 // GetServiceVIPToName retrieves the associated k8s service name for a load balancer VIP
-func (uc *unidlingController) GetServiceVIPToName(vip string, protocol v1.Protocol) (types.NamespacedName, bool) {
+func (uc *unidlingController) GetServiceVIPToName(vip string, protocol kapi.Protocol) (types.NamespacedName, bool) {
 	uc.serviceVIPToNameLock.Lock()
 	defer uc.serviceVIPToNameLock.Unlock()
 	namespace, ok := uc.serviceVIPToName[ServiceVIPKey{vip, protocol}]
@@ -110,47 +136,61 @@ func (uc *unidlingController) GetServiceVIPToName(vip string, protocol v1.Protoc
 }
 
 // DeleteServiceVIPToName retrieves the associated k8s service name for a load balancer VIP
-func (uc *unidlingController) DeleteServiceVIPToName(vip string, protocol v1.Protocol) {
+func (uc *unidlingController) DeleteServiceVIPToName(vip string, protocol kapi.Protocol) {
 	uc.serviceVIPToNameLock.Lock()
 	defer uc.serviceVIPToNameLock.Unlock()
 	delete(uc.serviceVIPToName, ServiceVIPKey{vip, protocol})
 }
 
 func (uc *unidlingController) Run(stopCh <-chan struct{}) {
-	ticker := time.NewTicker(5 * time.Second)
-
 	for {
 		select {
-		case <-ticker.C:
-			out, _, err := util.RunOVNSbctl("--format=json", "list", "controller_event")
-			if err != nil {
-				continue
-			}
-
-			events, err := extractEmptyLBBackendsEvents([]byte(out))
-			if err != nil || len(events) == 0 {
-				continue
-			}
-
-			for _, event := range events {
-				_, _, err := util.RunOVNSbctl("destroy", "controller_event", event.uuid)
-				if err != nil {
-					// Don't unidle until we are able to remove the controller event
-					klog.Errorf("Unable to remove controller event %s", event.uuid)
-					continue
-				}
-				if serviceName, ok := uc.GetServiceVIPToName(event.vip, event.protocol); ok {
-					serviceRef := v1.ObjectReference{
-						Kind:      "Service",
-						Namespace: serviceName.Namespace,
-						Name:      serviceName.Name,
-					}
-					klog.V(5).Infof("Sending a NeedPods event for service %s in namespace %s.", serviceName.Name, serviceName.Namespace)
-					uc.eventRecorder.Eventf(&serviceRef, v1.EventTypeNormal, "NeedPods", "The service %s needs pods", serviceName.Name)
-				}
+		case event := <-uc.eventQueue:
+			if err := uc.handleLbEmptyBackendsEvent(event); err != nil {
+				klog.Error(err)
 			}
 		case <-stopCh:
 			return
 		}
 	}
+}
+
+func (uc *unidlingController) handleLbEmptyBackendsEvent(event *sbdb.ControllerEvent) error {
+	op, err := uc.sbClient.Where(
+		event,
+	).Delete()
+	if err != nil {
+		return err
+	}
+	result, err := uc.sbClient.Transact(op...)
+	if err != nil {
+		return err
+	}
+	_, err = ovsdb.CheckOperationResults(result, op)
+	if err != nil {
+		return err
+	}
+	vip, ok := event.EventInfo["vip"]
+	if !ok {
+		return err
+	}
+	proto := event.EventInfo["protocol"]
+	var protocol kapi.Protocol
+	if proto == "udp" {
+		protocol = kapi.ProtocolUDP
+	} else if proto == "sctp" {
+		protocol = kapi.ProtocolSCTP
+	} else {
+		protocol = kapi.ProtocolTCP
+	}
+	if serviceName, ok := uc.GetServiceVIPToName(vip, protocol); ok {
+		serviceRef := kapi.ObjectReference{
+			Kind:      "Service",
+			Namespace: serviceName.Namespace,
+			Name:      serviceName.Name,
+		}
+		klog.V(5).Infof("Sending a NeedPods event for service %s in namespace %s.", serviceName.Name, serviceName.Namespace)
+		uc.eventRecorder.Eventf(&serviceRef, kapi.EventTypeNormal, "NeedPods", "The service %s needs pods", serviceName.Name)
+	}
+	return nil
 }
