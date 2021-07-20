@@ -67,7 +67,7 @@ usage() {
     echo "                                   github CI to be updated with IPv6 settings."
     echo "                                   DEFAULT: Don't allow."
     echo "-gm  | --gateway-mode              Enable 'shared' or 'local' gateway mode."
-    echo "                                   DEFAULT: local."
+    echo "                                   DEFAULT: shared."
     echo "-ov  | --ovn-image            	   Use the specified docker image instead of building locally. DEFAULT: local build."
     echo "-ml  | --master-loglevel           Log level for ovnkube (master), DEFAULT: 5."
     echo "-nl  | --node-loglevel             Log level for ovnkube (node), DEFAULT: 5"
@@ -250,7 +250,7 @@ set_default_params() {
   # Set default values
   KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
   K8S_VERSION=${K8S_VERSION:-v1.20.0}
-  OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-local}
+  OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   OVN_HA=${OVN_HA:-false}
   KIND_CONFIG=${KIND_CONFIG:-./kind.yaml.j2}
