@@ -350,7 +350,7 @@ jobs:
         echo "GOPATH=$GOPATH" >> $GITHUB_ENV
         echo "$GOPATH/bin" >> $GITHUB_PATH
         if [ $OVN_SECOND_BRIDGE == "true" ]; then
-          echo OVN_TEST_EX_GW_NETWORK=kind-exgw >> $GITHUB_ENV
+          echo OVN_TEST_EX_GW_NETWORK=kindexgw >> $GITHUB_ENV
           echo OVN_ENABLE_EX_GW_NETWORK_BRIDGE=true >> $GITHUB_ENV
         fi
     - name: Disable ufw
