@@ -133,21 +133,34 @@ func deleteLocalNodeAccessBridge() error {
 	return nil
 }
 
-func addSharedGatewayIptRules(service *kapi.Service) {
-	rules := getGatewayIPTRules(service, nil)
+// If A Service External Traffic Policy==Local and backend is a host-networked pod
+// we must steer traffic from host -> svc straight to the host instead of into OVN
+// via the cluster IP of the service
+func addSharedGatewayIptRules(service *kapi.Service, hasLocalHostEndpoint bool, nodeIPs []string) {
+	var rules []iptRule
+	if hasLocalHostEndpoint {
+		rules = getGatewayIPTRules(service, nodeIPs)
+	} else {
+		rules = getGatewayIPTRules(service, nil)
+	}
 	if err := addIptRules(rules); err != nil {
 		klog.Errorf("Failed to add iptables rules for service %s/%s: %v", service.Namespace, service.Name, err)
 	}
 }
 
-func delSharedGatewayIptRules(service *kapi.Service) {
-	rules := getGatewayIPTRules(service, nil)
+func delSharedGatewayIptRules(service *kapi.Service, hasLocalHostEndpoint bool, nodeIPs []string) {
+	var rules []iptRule
+	if hasLocalHostEndpoint {
+		rules = getGatewayIPTRules(service, nodeIPs)
+	} else {
+		rules = getGatewayIPTRules(service, nil)
+	}
 	if err := delIptRules(rules); err != nil {
 		klog.Errorf("Failed to delete iptables rules for service %s/%s: %v", service.Namespace, service.Name, err)
 	}
 }
 
-func syncSharedGatewayIptRules(services []interface{}) {
+func syncSharedGatewayIptRules(services []interface{}, hasLocalHostEndpoint bool, nodeIPs []string) {
 	keepIPTRules := []iptRule{}
 	for _, service := range services {
 		svc, ok := service.(*kapi.Service)
@@ -155,7 +168,11 @@ func syncSharedGatewayIptRules(services []interface{}) {
 			klog.Errorf("Spurious object in syncSharedGatewayIptRules: %v", service)
 			continue
 		}
-		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, nil)...)
+		if hasLocalHostEndpoint {
+			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, nodeIPs)...)
+		} else {
+			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, nil)...)
+		}
 	}
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
 		recreateIPTRules("nat", chain, keepIPTRules)
