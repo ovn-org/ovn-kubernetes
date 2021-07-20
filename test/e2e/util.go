@@ -247,6 +247,28 @@ func pokeEndpointHostname(clientContainer, protocol, targetHost string, targetPo
 	return hostName
 }
 
+func dialInPod(ns, clientContainer, protocol, targetHost string, targetPort int32, endpoint string) string { 
+	ipPort := net.JoinHostPort("localhost", "80")
+	cmd := []string{"exec", clientContainer, "--"}
+
+	// we leverage the dial command from netexec, that is already supporting multiple protocols
+	curlCommand := strings.Split(fmt.Sprintf("curl -g -q -s http://%s/dial?request=%s&protocol=%s&host=%s&port=%d&tries=1",
+	ipPort,
+	endpoint,
+	protocol,
+	targetHost,
+	targetPort), " ")
+
+	cmd = append(cmd, curlCommand...)
+	stdout, err := framework.RunKubectl(ns, cmd...)
+	framework.ExpectNoError(err, "failed to run command on external container")
+	clientIP, err := parseNetexecResponse(stdout)
+	framework.ExpectNoError(err)
+	ip, _, err := net.SplitHostPort(clientIP)
+	framework.ExpectNoError(err, "failed to parse client ip:port")
+	return ip
+}
+
 func parseNetexecResponse(response string) (string, error) {
 	res := struct {
 		Responses []string `json:"responses"`

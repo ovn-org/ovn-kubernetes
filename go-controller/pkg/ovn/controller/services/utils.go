@@ -63,14 +63,14 @@ func deleteVIPsFromNonIdlingOVNBalancers(vips sets.String, name, namespace strin
 			// already got the load balancers for this protocol, don't do it again
 			continue
 		}
-		lbID, err := loadbalancer.GetOVNKubeLoadBalancer(proto)
+		lbID, err := loadbalancer.GetClusterLoadBalancer(proto)
 		if err != nil {
 			klog.Errorf("Error getting OVN LoadBalancer for protocol %s", proto)
 			return err
 		}
 		lbsPerProtocol[proto] = sets.NewString(lbID)
 		for _, gatewayRouter := range gatewayRouters {
-			gatewayLB, err := gateway.GetGatewayLoadBalancer(gatewayRouter, proto)
+			gatewayLB, err := loadbalancer.GetGatewayLoadBalancer(gatewayRouter, proto)
 			if err != nil {
 				klog.Warningf("Service Sync: Gateway router %s does not have load balancer (%v)",
 					gatewayRouter, err)
@@ -131,7 +131,7 @@ func deleteVIPsFromIdlingBalancer(vipProtocols sets.String, name, namespace stri
 			// lb already found for this protocol, don't do it again
 			continue
 		}
-		lbID, err := loadbalancer.GetOVNKubeIdlingLoadBalancer(proto)
+		lbID, err := loadbalancer.GetIdlingLoadBalancer(proto)
 		if err != nil {
 			klog.Errorf("Error getting OVN idling LoadBalancer for protocol %s %v", proto, err)
 			return err
@@ -172,7 +172,7 @@ func createPerNodeVIPs(svcIPs []string, protocol v1.Protocol, sourcePort int32, 
 	lbConfig := make([]loadbalancer.Entry, 0, len(gatewayRouters))
 
 	for _, gatewayRouter := range gatewayRouters {
-		gatewayLB, err := gateway.GetGatewayLoadBalancer(gatewayRouter, protocol)
+		gatewayLB, err := loadbalancer.GetGatewayLoadBalancer(gatewayRouter, protocol)
 		if err != nil {
 			klog.Errorf("Gateway router %s does not have load balancer (%v)",
 				gatewayRouter, err)
@@ -231,7 +231,7 @@ func createPerNodePhysicalVIPs(isIPv6 bool, protocol v1.Protocol, sourcePort int
 	lbConfig := make([]loadbalancer.Entry, 0, len(gatewayRouters))
 
 	for _, gatewayRouter := range gatewayRouters {
-		gatewayLB, err := gateway.GetGatewayLoadBalancer(gatewayRouter, protocol)
+		gatewayLB, err := loadbalancer.GetGatewayLoadBalancer(gatewayRouter, protocol)
 		if err != nil {
 			klog.Errorf("Gateway router %s does not have load balancer (%v)",
 				gatewayRouter, err)
@@ -295,7 +295,7 @@ func deleteNodeVIPs(svcIPs []string, protocol v1.Protocol, sourcePort int32) err
 	}
 	var loadBalancers []string
 	for _, gatewayRouter := range gatewayRouters {
-		gatewayLB, err := gateway.GetGatewayLoadBalancer(gatewayRouter, protocol)
+		gatewayLB, err := loadbalancer.GetGatewayLoadBalancer(gatewayRouter, protocol)
 		if err != nil {
 			klog.Errorf("Gateway router %s does not have load balancer (%v)", gatewayRouter, err)
 			continue

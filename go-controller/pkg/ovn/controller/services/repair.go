@@ -53,7 +53,7 @@ func (r *Repair) runOnce() error {
 	protocols := []v1.Protocol{v1.ProtocolSCTP, v1.ProtocolTCP, v1.ProtocolUDP}
 	// ClusterIP OVN load balancers
 	for _, p := range protocols {
-		lbUUID, err := loadbalancer.GetOVNKubeLoadBalancer(p)
+		lbUUID, err := loadbalancer.GetClusterLoadBalancer(p)
 		if err != nil {
 			return errors.Wrapf(err, "Failed to get Cluster IP OVN load balancer for protocol %s", p)
 		}
@@ -66,9 +66,9 @@ func (r *Repair) runOnce() error {
 	} else {
 		for _, p := range protocols {
 			for _, gatewayRouter := range gatewayRouters {
-				lbUUID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, p)
+				lbUUID, err := loadbalancer.GetGatewayLoadBalancer(gatewayRouter, p)
 				if err != nil {
-					if err != gateway.OVNGatewayLBIsEmpty {
+					if err != loadbalancer.LBNotFound {
 						klog.V(5).Infof("Failed to get OVN GR: %s load balancer for protocol %s, err: %v",
 							gatewayRouter, p, err)
 					}
@@ -78,7 +78,7 @@ func (r *Repair) runOnce() error {
 				workerNode := util.GetWorkerFromGatewayRouter(gatewayRouter)
 				workerLB, err := loadbalancer.GetWorkerLoadBalancer(workerNode, p)
 				if err != nil {
-					if err != gateway.OVNGatewayLBIsEmpty {
+					if err != loadbalancer.LBNotFound {
 						klog.V(5).Infof("Failed to get OVN Worker: %s load balancer for protocol %s, err: %v",
 							workerNode, p, err)
 					}
@@ -91,7 +91,7 @@ func (r *Repair) runOnce() error {
 
 	// Idling load balancers
 	for _, p := range protocols {
-		lb, err := loadbalancer.GetOVNKubeIdlingLoadBalancer(p)
+		lb, err := loadbalancer.GetIdlingLoadBalancer(p)
 		if err != nil {
 			return errors.Wrapf(err, "Failed to get Idling OVN load balancer for protocol %s", p)
 		}

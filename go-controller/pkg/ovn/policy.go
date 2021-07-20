@@ -3,7 +3,6 @@ package ovn
 import (
 	"fmt"
 	"net"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,7 +31,6 @@ type networkPolicy struct {
 	ingressPolicies []*gressPolicy
 	egressPolicies  []*gressPolicy
 	podHandlerList  []*factory.Handler
-	svcHandlerList  []*factory.Handler
 	nsHandlerList   []*factory.Handler
 
 	// localPods is a list of pods affected by ths policy
@@ -53,7 +51,6 @@ func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
 		ingressPolicies: make([]*gressPolicy, 0),
 		egressPolicies:  make([]*gressPolicy, 0),
 		podHandlerList:  make([]*factory.Handler, 0),
-		svcHandlerList:  make([]*factory.Handler, 0),
 		nsHandlerList:   make([]*factory.Handler, 0),
 		localPods:       sync.Map{},
 	}
@@ -143,6 +140,10 @@ func addAllowACLFromNode(logicalSwitch string, mgmtPortIP net.IP, ovnNBClient go
 	return nil
 }
 
+// Creates Match section for the default per Namespace ACLs to/from ports in a given port group
+// If input match is "" then the returned match string only contains "inport"/"outport" matching
+// If input match is "hairpin" then a specical match for LB hairpin traffic is returned
+// Otherwise the input match is appened to the "inport"/"outport" matching
 func getACLMatch(portGroupName, match string, policyType knet.PolicyType) string {
 	var aclMatch string
 	if policyType == knet.PolicyTypeIngress {
@@ -151,7 +152,11 @@ func getACLMatch(portGroupName, match string, policyType knet.PolicyType) string
 		aclMatch = "inport == @" + portGroupName
 	}
 
-	if match != "" {
+	if match == "hairpin" {
+		aclMatch += fmt.Sprintf(" && (ip4.src == %s || ip6.src ==  %s)", types.V4LBHairpinMasqueradeIP, types.V6LBHairpinMasqueradeIP)
+	}
+
+	if match != "" && match != "hairpin" {
 		aclMatch += " && " + match
 	}
 
@@ -313,6 +318,15 @@ func (oc *Controller) createDefaultDenyPortGroup(ns string, nsInfo *namespaceInf
 	if err != nil {
 		return fmt.Errorf("failed to create default allow ARP ACL for port group %v", err)
 	}
+	// Add acl to default allow ingress hairpin traffic
+	if policyType == knet.PolicyTypeIngress {
+		match = getACLMatch(portGroupName, "hairpin", policyType)
+		err = addACLPortGroup(ns, portGroupUUID, types.DirectionToLPort,
+			types.DefaultAllowPriority, match, "allow", policyType, "", "HairpinAllowPolicy")
+		if err != nil {
+			return fmt.Errorf("failed to create default Hairpin allow ACL for port group %v", err)
+		}
+	}
 
 	if policyType == knet.PolicyTypeIngress {
 		nsInfo.portGroupIngressDenyUUID = portGroupUUID
@@ -325,10 +339,12 @@ func (oc *Controller) createDefaultDenyPortGroup(ns string, nsInfo *namespaceInf
 }
 
 // modify ACL logging
-func (oc *Controller) setACLDenyLogging(ns string, nsInfo *namespaceInfo, aclLogging string) error {
+func (oc *Controller) setDefaultACLsLogging(ns string, nsInfo *namespaceInfo, aclLogging *ACLLoggingLevels) error {
 
-	aclLoggingSev := getACLLoggingSeverity(aclLogging)
+	aclLoggingSevDeny := getACLLoggingSeverity(aclLogging.Deny)
+	aclLoggingSevAllow := getACLLoggingSeverity(aclLogging.Allow)
 
+	// Set logging for the per namespace default ingress ACL
 	match := getACLMatch(defaultDenyPortGroup(ns, "ingressDefaultDeny"), "", knet.PolicyTypeIngress)
 	uuid, err := getACLPortGroupUUID(match, "drop", knet.PolicyTypeIngress)
 	if err != nil {
@@ -339,10 +355,26 @@ func (oc *Controller) setACLDenyLogging(ns string, nsInfo *namespaceInfo, aclLog
 		return fmt.Errorf("failed to find the ACL for pg=%s: %v", nsInfo.portGroupIngressDenyUUID, err)
 	}
 	if _, stderr, err := util.RunOVNNbctl("set", "acl", uuid,
-		fmt.Sprintf("log=%t", aclLogging != ""), fmt.Sprintf("severity=%s", aclLoggingSev)); err != nil {
-		return fmt.Errorf("failed to modify the pg=%s, stderr: %q (%v)", nsInfo.portGroupIngressDenyUUID, stderr, err)
+		fmt.Sprintf("log=%t", aclLogging.Deny != ""), fmt.Sprintf("severity=%s", aclLoggingSevDeny)); err != nil {
+		return fmt.Errorf("failed to modify the logging for acl=%s on pg=%s, stderr: %q (%v)", uuid, nsInfo.portGroupIngressDenyUUID, stderr, err)
 	}
 
+	// Set logging for the per namespace default hairpin ingress ACL
+	match = getACLMatch(defaultDenyPortGroup(ns, "ingressDefaultDeny"), "hairpin", knet.PolicyTypeIngress)
+	uuid, err = getACLPortGroupUUID(match, "allow", knet.PolicyTypeIngress)
+	if err != nil {
+		return err
+	}
+	if uuid == "" {
+		// not suppose to happen
+		return fmt.Errorf("failed to find the ACL for pg=%s: %v", nsInfo.portGroupEgressDenyUUID, err)
+	}
+	if _, stderr, err := util.RunOVNNbctl("set", "acl", uuid,
+		fmt.Sprintf("log=%t", aclLogging.Allow != ""), fmt.Sprintf("severity=%s", aclLoggingSevAllow)); err != nil {
+		return fmt.Errorf("failed to modify the logging for acl=%s on pg=%s, stderr: %q (%v)", uuid, nsInfo.portGroupEgressDenyUUID, stderr, err)
+	}
+
+	// Set logging for the per namespace default egress ACL
 	match = getACLMatch(defaultDenyPortGroup(ns, "egressDefaultDeny"), "", knet.PolicyTypeEgress)
 	uuid, err = getACLPortGroupUUID(match, "drop", knet.PolicyTypeEgress)
 	if err != nil {
@@ -353,8 +385,8 @@ func (oc *Controller) setACLDenyLogging(ns string, nsInfo *namespaceInfo, aclLog
 		return fmt.Errorf("failed to find the ACL for pg=%s: %v", nsInfo.portGroupEgressDenyUUID, err)
 	}
 	if _, stderr, err := util.RunOVNNbctl("set", "acl", uuid,
-		fmt.Sprintf("log=%t", aclLogging != ""), fmt.Sprintf("severity=%s", aclLoggingSev)); err != nil {
-		return fmt.Errorf("failed to modify the pg=%s, stderr: %q (%v)", nsInfo.portGroupEgressDenyUUID, stderr, err)
+		fmt.Sprintf("log=%t", aclLogging.Deny != ""), fmt.Sprintf("severity=%s", aclLoggingSevDeny)); err != nil {
+		return fmt.Errorf("failed to modify the logging for acl=%s on pg=%s, stderr: %q (%v)", uuid, nsInfo.portGroupEgressDenyUUID, stderr, err)
 	}
 
 	return nil
@@ -976,13 +1008,10 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		}
 
 		if hasAnyLabelSelector(ingressJSON.From) {
-			klog.V(5).Infof("Network policy %s with ingress rule %s has a selector", policy.Name, ingress.policyName)
 			if err := ingress.ensurePeerAddressSet(oc.addressSetFactory); err != nil {
 				klog.Errorf(err.Error())
 				continue
 			}
-			// Start service handlers ONLY if there's an ingress Address Set
-			oc.handlePeerService(policy, ingress, np)
 		}
 
 		for _, fromJSON := range ingressJSON.From {
@@ -1013,7 +1042,6 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		}
 
 		if hasAnyLabelSelector(egressJSON.To) {
-			klog.V(5).Infof("Network policy %s with egress rule %s has a selector", policy.Name, egress.policyName)
 			if err := egress.ensurePeerAddressSet(oc.addressSetFactory); err != nil {
 				klog.Errorf(err.Error())
 				continue
@@ -1175,61 +1203,6 @@ func (oc *Controller) handlePeerPodSelectorDelete(gp *gressPolicy, obj interface
 	}
 }
 
-// handlePeerServiceSelectorAddUpdate adds the VIP of a service that selects
-// pods that are selected by the Network Policy
-func (oc *Controller) handlePeerServiceAdd(gp *gressPolicy, obj interface{}) {
-	service := obj.(*kapi.Service)
-	klog.V(5).Infof("A Service: %s matches the namespace as the gress policy: %s", service.Name, gp.policyName)
-	if err := gp.addPeerSvcVip(service); err != nil {
-		klog.Errorf(err.Error())
-	}
-}
-
-// handlePeerServiceDelete removes the VIP of a service that selects
-// pods that are selected by the Network Policy
-func (oc *Controller) handlePeerServiceDelete(gp *gressPolicy, obj interface{}) {
-	service := obj.(*kapi.Service)
-	if err := gp.deletePeerSvcVip(service); err != nil {
-		klog.Errorf(err.Error())
-	}
-}
-
-// Watch Services that are in the same Namespace as the NP
-// To account for hairpined traffic
-func (oc *Controller) handlePeerService(
-	policy *knet.NetworkPolicy, gp *gressPolicy, np *networkPolicy) {
-
-	h := oc.watchFactory.AddFilteredServiceHandler(policy.Namespace,
-		cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				// Service is matched so add VIP to addressSet
-				oc.handlePeerServiceAdd(gp, obj)
-			},
-			DeleteFunc: func(obj interface{}) {
-				// If Service that has matched pods are deleted remove VIP
-				oc.handlePeerServiceDelete(gp, obj)
-			},
-			UpdateFunc: func(oldObj, newObj interface{}) {
-				// If Service Is updated make sure same pods are still matched
-				oldSvc := oldObj.(*kapi.Service)
-				newSvc := newObj.(*kapi.Service)
-				if reflect.DeepEqual(newSvc.Spec.ExternalIPs, oldSvc.Spec.ExternalIPs) &&
-					reflect.DeepEqual(newSvc.Spec.ClusterIP, oldSvc.Spec.ClusterIP) &&
-					reflect.DeepEqual(newSvc.Spec.Type, oldSvc.Spec.Type) &&
-					reflect.DeepEqual(newSvc.Status.LoadBalancer.Ingress, oldSvc.Status.LoadBalancer.Ingress) {
-
-					klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, "+
-						".Spec.ExternalIP, .Spec.ClusterIP, .Spec.Type, .Status.LoadBalancer.Ingress", newSvc.Name)
-					return
-				}
-
-				oc.handlePeerServiceDelete(gp, oldObj)
-				oc.handlePeerServiceAdd(gp, newObj)
-			},
-		}, nil)
-	np.svcHandlerList = append(np.svcHandlerList, h)
-}
-
 func (oc *Controller) handlePeerPodSelector(
 	policy *knet.NetworkPolicy, podSelector *metav1.LabelSelector,
 	gp *gressPolicy, np *networkPolicy) {
@@ -1375,8 +1348,5 @@ func (oc *Controller) shutdownHandlers(np *networkPolicy) {
 	}
 	for _, handler := range np.nsHandlerList {
 		oc.watchFactory.RemoveNamespaceHandler(handler)
-	}
-	for _, handler := range np.svcHandlerList {
-		oc.watchFactory.RemoveServiceHandler(handler)
 	}
 }

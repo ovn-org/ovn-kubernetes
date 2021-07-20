@@ -94,6 +94,10 @@ func (n kNetworkPolicy) addDefaultDenyPGCmds(fexec *ovntest.FakeExec, networkPol
 		Output: fakeUUID,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == @" + pg_hash + "_" + ingressDenyPG + " && (ip4.src == 169.254.169.3 || ip6.src ==  fd69::3)\" action=allow external-ids:default-deny-policy-type=Ingress",
+		Output: fakeUUID,
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"inport == @" + pg_hash + "_" + egressDenyPG + "\" action=drop external-ids:default-deny-policy-type=Egress",
 		Output: fakeUUID,
 	})
