@@ -52,7 +52,8 @@ func adjustNodeName() string {
 }
 
 // newKubernetesRestConfig create a Kubernetes rest config from either a kubeconfig,
-// TLS properties, or an apiserver URL
+// TLS properties, or an apiserver URL. If the CA certificate data is passed in the
+// CAData in the KubernetesConfig, the CACert path is ignored.
 func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error) {
 	var kconfig *rest.Config
 	var err error
@@ -61,19 +62,16 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 		// uses the current context in kubeconfig
 		kconfig, err = clientcmd.BuildConfigFromFlags("", conf.Kubeconfig)
 	} else if strings.HasPrefix(conf.APIServer, "https") {
-		// TODO: Looks like the check conf.APIServer is redundant and can be removed
-		if conf.APIServer == "" || conf.Token == "" {
+		if conf.Token == "" || len(conf.CAData) == 0 {
 			return nil, fmt.Errorf("TLS-secured apiservers require token and CA certificate")
 		}
-		kconfig = &rest.Config{
-			Host:        conf.APIServer,
-			BearerToken: conf.Token,
+		if _, err := cert.NewPoolFromBytes(conf.CAData); err != nil {
+			return nil, err
 		}
-		if conf.CACert != "" {
-			if _, err := cert.NewPool(conf.CACert); err != nil {
-				return nil, err
-			}
-			kconfig.TLSClientConfig = rest.TLSClientConfig{CAFile: conf.CACert}
+		kconfig = &rest.Config{
+			Host:            conf.APIServer,
+			BearerToken:     conf.Token,
+			TLSClientConfig: rest.TLSClientConfig{CAData: conf.CAData},
 		}
 	} else if strings.HasPrefix(conf.APIServer, "http") {
 		kconfig, err = clientcmd.BuildConfigFromFlags(conf.APIServer, "")

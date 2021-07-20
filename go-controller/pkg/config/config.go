@@ -245,6 +245,7 @@ type CNIConfig struct {
 type KubernetesConfig struct {
 	Kubeconfig            string `gcfg:"kubeconfig"`
 	CACert                string `gcfg:"cacert"`
+	CAData                []byte
 	APIServer             string `gcfg:"apiserver"`
 	Token                 string `gcfg:"token"`
 	CompatServiceCIDR     string `gcfg:"service-cidr"`
@@ -1183,8 +1184,13 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	if Kubernetes.Kubeconfig != "" && !pathExists(Kubernetes.Kubeconfig) {
 		return fmt.Errorf("kubernetes kubeconfig file %q not found", Kubernetes.Kubeconfig)
 	}
-	if Kubernetes.CACert != "" && !pathExists(Kubernetes.CACert) {
-		return fmt.Errorf("kubernetes CA certificate file %q not found", Kubernetes.CACert)
+
+	if Kubernetes.CACert != "" {
+		bytes, err := ioutil.ReadFile(Kubernetes.CACert)
+		if err != nil {
+			return err
+		}
+		Kubernetes.CAData = bytes
 	}
 
 	url, err := url.Parse(Kubernetes.APIServer)

@@ -322,7 +322,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 }
 
 // ConfigureInterface sets up the container interface
-func (pr *PodRequest) ConfigureInterface(ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
+func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kclient kubernetes.Interface, ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
 	netns, err := ns.GetNS(pr.Netns)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open netns %q: %v", pr.Netns, err)
@@ -349,7 +349,7 @@ func (pr *PodRequest) ConfigureInterface(ifInfo *PodInterfaceInfo) ([]*current.I
 
 	if !ifInfo.IsSmartNic {
 		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID,
-			pr.podLister, pr.kclient, pr.PodUID)
+			podLister, kclient, pr.PodUID)
 		if err != nil {
 			return nil, err
 		}

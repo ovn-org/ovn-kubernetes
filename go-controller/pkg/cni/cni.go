@@ -93,7 +93,7 @@ func (pr *PodRequest) checkOrUpdatePodUID(podUID string) error {
 	return nil
 }
 
-func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) ([]byte, error) {
+func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) ([]byte, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
@@ -126,9 +126,9 @@ func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalID
 		return nil, err
 	}
 
-	response := &Response{}
+	response := &Response{KubeAuth: kubeAuth}
 	if !config.UnprivilegedMode {
-		response.Result, err = pr.getCNIResult(podInterfaceInfo)
+		response.Result, err = pr.getCNIResult(podLister, kclient, podInterfaceInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -229,14 +229,14 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternal
 // Argument '*PodRequest' encapsulates all the necessary information
 // kclient is passed in so that clientset can be reused from the server
 // Return value is the actual bytes to be sent back without further processing.
-func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) ([]byte, error) {
+func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface, kubeAuth *KubeAPIAuth) ([]byte, error) {
 	var result []byte
 	var err error
 
 	klog.Infof("%s %s starting CNI request %+v", request, request.Command, request)
 	switch request.Command {
 	case CNIAdd:
-		result, err = request.cmdAdd(podLister, useOVSExternalIDs, kclient)
+		result, err = request.cmdAdd(kubeAuth, podLister, useOVSExternalIDs, kclient)
 	case CNIDel:
 		result, err = request.cmdDel()
 	case CNICheck:
@@ -253,8 +253,8 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, us
 }
 
 // getCNIResult get result from pod interface info.
-func (pr *PodRequest) getCNIResult(podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
-	interfacesArray, err := pr.ConfigureInterface(podInterfaceInfo)
+func (pr *PodRequest) getCNIResult(podLister corev1listers.PodLister, kclient kubernetes.Interface, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
+	interfacesArray, err := pr.ConfigureInterface(podLister, kclient, podInterfaceInfo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure pod interface: %v", err)
 	}

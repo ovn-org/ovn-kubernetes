@@ -490,6 +490,23 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 	return podInfo, err
 }
 
+func getOvnNamespace(coreclient *corev1client.CoreV1Client, override string) (string, error) {
+	if override != "" {
+		return override, nil
+	}
+
+	listOptions := metav1.ListOptions{
+		LabelSelector: "app=ovnkube-node",
+	}
+	pods, err := coreclient.Pods("").List(context.TODO(), listOptions)
+	if err != nil || len(pods.Items) == 0 {
+		klog.V(0).Infof("Cannot find ovnkube pods in any namespace")
+		return "", err
+	}
+
+	return pods.Items[0].Namespace, nil
+}
+
 var (
 	level klog.Level
 )
@@ -502,7 +519,7 @@ func main() {
 	var ovnNamespace string
 	var err error
 
-	pcfgNamespace = flag.String("ovn-config-namespace", "openshift-ovn-kubernetes", "namespace used by ovn-config itself")
+	pcfgNamespace = flag.String("ovn-config-namespace", "", "namespace used by ovn-config itself")
 	psrcNamespace = flag.String("src-namespace", "default", "k8s namespace of source pod")
 	pdstNamespace = flag.String("dst-namespace", "default", "k8s namespace of dest pod")
 
@@ -531,8 +548,6 @@ func main() {
 
 	srcNamespace := *psrcNamespace
 	dstNamespace := *pdstNamespace
-
-	ovnNamespace = *pcfgNamespace
 
 	if *srcPodName == "" {
 		fmt.Printf("Usage: source pod must be specified\n")
@@ -604,6 +619,14 @@ func main() {
 		klog.V(1).Infof(" Unexpected error: %v", err)
 		os.Exit(-1)
 	}
+
+	// Get OVN Namespace
+	ovnNamespace, err = getOvnNamespace(coreclient, *pcfgNamespace)
+	if err != nil {
+		klog.V(1).Infof(" Unexpected error: %v", err)
+		os.Exit(-1)
+	}
+	klog.V(5).Infof("OVN Kubernetes namespace is %s", ovnNamespace)
 
 	// List all Nodes.
 	nodes, err := coreclient.Nodes().List(context.TODO(), metav1.ListOptions{})

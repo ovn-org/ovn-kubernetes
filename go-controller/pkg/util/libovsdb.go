@@ -13,12 +13,160 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"gopkg.in/fsnotify/fsnotify.v1"
 	"k8s.io/klog/v2"
 )
+
+type ModelClient struct {
+	nbclient client.Client
+}
+
+func NewModelClient(nbclient client.Client) ModelClient {
+	return ModelClient{nbclient: nbclient}
+}
+
+// OperationModel is a struct which uses reflection to determine and
+// perform idempotent operations against NB DB
+type OperationModel struct {
+	// Model specifies the model to be created/updated/deleted. NOTE: when
+	// specifying a named UUID (for the purpose of creating and referencing the
+	// model against a ReferentialModel), DO NOT specify a named UUID with
+	// special characters, this is not permitted...and difficult to debug.
+	Model interface{}
+	// ModelPredicate specifies the predicate at which the lookup for the model
+	// is made. This is what defines if the object exists or not. Required
+	// field.
+	ModelPredicate interface{}
+	// OnModelMutations specifies the mutations to be performed on the model if an
+	// item exists. This is an optional field, and not specifying it means that
+	// a create/update operation is to be performed.
+	OnModelMutations []model.Mutation
+	// OnModelUpdates specifies the model fields to be updated if an item exists.
+	// This is an optional field, and not specifying it means that a
+	// create/mutation operation is to be performed. If specified: ModelCreate
+	// needs to be specified too, as that is used to demark which values each
+	// field to be update will have.
+	OnModelUpdates []interface{}
+	// ExistingResult specifies the existing results used to determine the
+	// existance/non-existance of the model.
+	ExistingResult interface{}
+}
+
+// CreateOrUpdate performs a lookup of the Model given the ModelPredicate
+// provided. If a model exists it's either mutated or updated (depending on what
+// the caller defines should be done). If the model does not exist it is
+// created. The model can be created with a referential model (if the model
+// create is dependent upon such) or without, an example of this is creating:
+// LogicalRouterPolicies which might be attached to LogicalRouter, or just a
+// LogicalRouter which has no referential model at all. The predicate assumes
+// that only one object is retrieved for that predicate (since
+// create/update/mutate is usually logically performed against one entity).
+func (c *ModelClient) CreateOrUpdate(opModels ...OperationModel) ([]ovsdb.OperationResult, error) {
+	ops := []ovsdb.Operation{}
+	for _, opModel := range opModels {
+		if err := c.nbclient.WhereCache(opModel.ModelPredicate).List(opModel.ExistingResult); err != nil {
+			return nil, fmt.Errorf("unable to list items for model, err: %v", err)
+		}
+		if reflect.ValueOf(opModel.ExistingResult).Elem().Len() == 0 {
+			if opModel.Model != nil {
+				o, err := c.nbclient.Create(reflect.ValueOf(opModel.Model).Interface())
+				if err != nil {
+					return nil, fmt.Errorf("unable to create model, err: %v", err)
+				}
+				ops = append(ops, o...)
+			}
+		} else if reflect.ValueOf(opModel.ExistingResult).Elem().Len() == 1 {
+			if len(opModel.OnModelMutations) > 0 {
+				o, err := c.nbclient.Where(reflect.ValueOf(opModel.ExistingResult).Elem().Index(0).Addr().Interface()).Mutate(reflect.ValueOf(opModel.Model).Interface(), opModel.OnModelMutations...)
+				if err != nil {
+					return nil, fmt.Errorf("unable to update model, err: %v", err)
+				}
+				ops = append(ops, o...)
+			}
+			if len(opModel.OnModelUpdates) > 0 {
+				o, err := c.nbclient.Where(reflect.ValueOf(opModel.ExistingResult).Elem().Index(0).Addr().Interface()).Update(reflect.ValueOf(opModel.Model).Interface(), opModel.OnModelUpdates...)
+				if err != nil {
+					return nil, fmt.Errorf("unable to update model, err: %v", err)
+				}
+				ops = append(ops, o...)
+			}
+		} else {
+			return nil, fmt.Errorf("multiple results found for model by given predicate")
+		}
+	}
+	if len(ops) > 0 {
+		return c.transact(ops)
+	}
+	return nil, nil
+}
+
+// Delete deletes the Model found by the provided ModelPredicate. If a model is
+// not found it does not do anything, if more than one are found it returns an
+// error. It deletes the model by either destroying the reference to the model
+// (if the Model provided depends on a reference to another) or by deleting the
+// model directly, the logic is left up to the caller.
+func (c *ModelClient) Delete(opModels ...OperationModel) error {
+	ops := []ovsdb.Operation{}
+	for _, opModel := range opModels {
+		if err := c.nbclient.WhereCache(opModel.ModelPredicate).List(opModel.ExistingResult); err != nil {
+			return fmt.Errorf("unable to list items for model, err: %v", err)
+		}
+		if reflect.ValueOf(opModel.ExistingResult).Elem().Len() == 1 {
+			if opModel.OnModelMutations != nil {
+				o, err := c.nbclient.WhereCache(opModel.ModelPredicate).Mutate(reflect.ValueOf(opModel.Model).Interface(), opModel.OnModelMutations...)
+				if err != nil {
+					return fmt.Errorf("unable to add model to parent model, err: %v", err)
+				}
+				ops = append(ops, o...)
+			} else if opModel.Model != nil {
+				o, err := c.nbclient.Where(reflect.ValueOf(opModel.Model).Interface()).Delete()
+				if err != nil {
+					return fmt.Errorf("unable to add model to parent model, err: %v", err)
+				}
+				ops = append(ops, o...)
+			}
+		} else if reflect.ValueOf(opModel.ExistingResult).Elem().Len() == 0 {
+			return nil
+		} else {
+			return fmt.Errorf("multiple results found for model by given predicate")
+		}
+	}
+	if len(ops) > 0 {
+		_, err := c.transact(ops)
+		return err
+	}
+	return nil
+}
+
+func (c *ModelClient) transact(ops []ovsdb.Operation) ([]ovsdb.OperationResult, error) {
+	res, err := c.nbclient.Transact(ops...)
+	if err != nil {
+		return nil, fmt.Errorf("unable to transact operations, err: %v", err)
+	}
+	if opErrors, err := ovsdb.CheckOperationResults(res, ops); err != nil {
+		return nil, fmt.Errorf("unable to validate operations, ops: %+v, opErrors: %+v, err: %v", ops, opErrors, err)
+	}
+	return res, nil
+}
+
+func SliceHasStringItem(slice []string, item string) bool {
+	for _, i := range slice {
+		if i == item {
+			return true
+		}
+	}
+	return false
+}
+
+// GenerateNamedUUID generated a valid named UUID for OVS DB server. Valid UUIDs
+// (it seems) cannot contain the char: '-'.
+func GenerateNamedUUID(s string) string {
+	return strings.Replace(s, "-", "", -1)
+}
 
 // newClient creates a new client object given the provided config
 // the stopCh is required to ensure the goroutine for ssl cert

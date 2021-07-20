@@ -11,13 +11,6 @@ import (
 	"github.com/ovn-org/libovsdb/ovsdb"
 )
 
-const (
-	opInsert string = "insert"
-	opMutate string = "mutate"
-	opUpdate string = "insert"
-	opDelete string = "delete"
-)
-
 // API defines basic operations to interact with the database
 type API interface {
 	// List populates a slice of Models objects based on their type
@@ -264,7 +257,7 @@ func (a api) Create(models ...model.Model) ([]ovsdb.Operation, error) {
 		}
 
 		operations = append(operations, ovsdb.Operation{
-			Op:       opInsert,
+			Op:       ovsdb.OperationInsert,
 			Table:    tableName,
 			Row:      row,
 			UUIDName: namedUUID,
@@ -316,7 +309,7 @@ func (a api) Mutate(model model.Model, mutationObjs ...model.Mutation) ([]ovsdb.
 	for _, condition := range conditions {
 		operations = append(operations,
 			ovsdb.Operation{
-				Op:        opMutate,
+				Op:        ovsdb.OperationMutate,
 				Table:     tableName,
 				Mutations: mutations,
 				Where:     condition,
@@ -349,7 +342,7 @@ func (a api) Update(model model.Model, fields ...interface{}) ([]ovsdb.Operation
 	for _, condition := range conditions {
 		operations = append(operations,
 			ovsdb.Operation{
-				Op:    opUpdate,
+				Op:    ovsdb.OperationUpdate,
 				Table: table,
 				Row:   row,
 				Where: condition,
@@ -370,7 +363,7 @@ func (a api) Delete() ([]ovsdb.Operation, error) {
 	for _, condition := range conditions {
 		operations = append(operations,
 			ovsdb.Operation{
-				Op:    opDelete,
+				Op:    ovsdb.OperationDelete,
 				Table: a.cond.Table(),
 				Where: condition,
 			},

@@ -185,7 +185,7 @@ func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.No
 
 		// for all nodes include the ones that were deleted, delete its gateway entities.
 		// See comments above the multiJoinSwitchGatewayCleanup() function for details.
-		err = multiJoinSwitchGatewayCleanup(nodeName, upgradeOnly)
+		err = oc.multiJoinSwitchGatewayCleanup(nodeName, upgradeOnly)
 		if err != nil {
 			return err
 		}
@@ -384,16 +384,17 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	}
 
 	if config.Gateway.Mode == config.GatewayModeLocal {
-		if err := addDistributedGWPort(); err != nil {
+		if err := oc.addDistributedGWPort(); err != nil {
 			return err
 		}
 	}
+	oc.SCTPSupport = true
 
 	// Determine SCTP support
-	oc.SCTPSupport, err = util.DetectSCTPSupport()
-	if err != nil {
-		return err
-	}
+	// oc.SCTPSupport, err = util.DetectSCTPSupport()
+	// if err != nil {
+	// 	return err
+	// }
 	if !oc.SCTPSupport {
 		klog.Warningf("SCTP unsupported by this version of OVN. Kubernetes service creation with SCTP will not work ")
 	} else {
@@ -635,7 +636,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	}
 
 	drLRPIPs, _ := oc.joinSwIPManager.getJoinLRPCacheIPs(types.OVNClusterRouter)
-	err = gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, drLRPIPs)
+	err = oc.gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, drLRPIPs)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
@@ -1164,7 +1165,7 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet, node
 		klog.Errorf("Error deleting node %s logical network: %v", nodeName, err)
 	}
 
-	if err := gatewayCleanup(nodeName); err != nil {
+	if err := oc.gatewayCleanup(nodeName); err != nil {
 		klog.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
 	}
 
