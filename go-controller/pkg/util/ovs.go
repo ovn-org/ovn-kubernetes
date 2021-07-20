@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/pkg/errors"
 	"math"
 	"os"
 	"os/exec"
@@ -16,6 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode"
+
+	"github.com/pkg/errors"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -525,13 +526,19 @@ func RunOVNNbctlUnix(args ...string) (string, string, error) {
 
 // RunOVNNbctlWithTimeout runs command via ovn-nbctl with a specific timeout
 func RunOVNNbctlWithTimeout(timeout int, args ...string) (string, string, error) {
+	stdout, stderr, err := RunOVNNbctlRawOutput(timeout, args...)
+	return strings.Trim(strings.TrimSpace(stdout), "\""), stderr, err
+}
+
+// RunOVNNbctlRawOutput returns the output with no trimming or other string manipulation
+func RunOVNNbctlRawOutput(timeout int, args ...string) (string, string, error) {
 	cmdArgs, envVars := getNbctlArgsAndEnv(timeout, args...)
 	start := time.Now()
 	stdout, stderr, err := runOVNretry(runner.nbctlPath, envVars, cmdArgs...)
 	if MetricOvnCliLatency != nil {
 		MetricOvnCliLatency.WithLabelValues("ovn-nbctl").Observe(time.Since(start).Seconds())
 	}
-	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+	return stdout.String(), stderr.String(), err
 }
 
 // RunOVNNbctl runs a command via ovn-nbctl.
