@@ -438,6 +438,9 @@ func (oc *Controller) iterateRetryPods() {
 	now := time.Now()
 	for uid, podEntry := range oc.retryPods {
 		pod := podEntry.pod
+		if !util.PodScheduled(pod) {
+			return
+		}
 		podTimer := podEntry.timeStamp.Add(time.Minute)
 		if now.After(podTimer) {
 			podDesc := fmt.Sprintf("[%s/%s/%s]", pod.UID, pod.Namespace, pod.Name)

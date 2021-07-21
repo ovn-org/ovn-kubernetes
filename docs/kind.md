@@ -160,10 +160,10 @@ sudo chcon system\_u:object\_r:device\_t:s0 /dev/dma\_heap/
 sudo setenforce 1
 ```
 
-- If you see errors related to go, you may not have go configured as root. Make sure your `$GOPATH` / `$PATH` are configured as root, or define them while running `kind.sh`:
+- If you see errors related to go, you may not have go `$PATH` configured as root. Make sure it is configured, or define it while running `kind.sh`:
 
 ```bash
-sudo GOPATH=/path/to/go PATH=$PATH:/usr/local/go/bin:$GOPATH/bin ./kind.sh -ep podman
+sudo PATH=$PATH:/usr/local/go/bin ./kind.sh -ep podman
 ```
 
 ### Usage Notes 

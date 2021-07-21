@@ -265,6 +265,34 @@ func (_m *KubeInterface) GetPods(namespace string, labelSelector metav1.LabelSel
 	return r0, r1
 }
 
+// PatchNode provides a mock function with given fields: old, new
+func (_m *KubeInterface) PatchNode(old *v1.Node, new *v1.Node) error {
+	ret := _m.Called(old, new)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.Node, *v1.Node) error); ok {
+		r0 = rf(old, new)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RemoveTaintFromNode provides a mock function with given fields: nodeName, taint
+func (_m *KubeInterface) RemoveTaintFromNode(nodeName string, taint *v1.Taint) error {
+	ret := _m.Called(nodeName, taint)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, *v1.Taint) error); ok {
+		r0 = rf(nodeName, taint)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // SetAnnotationsOnNamespace provides a mock function with given fields: namespace, annotations
 func (_m *KubeInterface) SetAnnotationsOnNamespace(namespace *v1.Namespace, annotations map[string]string) error {
 	ret := _m.Called(namespace, annotations)
@@ -300,6 +328,20 @@ func (_m *KubeInterface) SetAnnotationsOnPod(namespace string, podName string, a
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, string, map[string]string) error); ok {
 		r0 = rf(namespace, podName, annotations)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// SetTaintOnNode provides a mock function with given fields: nodeName, taint
+func (_m *KubeInterface) SetTaintOnNode(nodeName string, taint *v1.Taint) error {
+	ret := _m.Called(nodeName, taint)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, *v1.Taint) error); ok {
+		r0 = rf(nodeName, taint)
 	} else {
 		r0 = ret.Error(0)
 	}

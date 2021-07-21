@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/pkg/errors"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
@@ -133,6 +134,13 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 			}
 		}
 		gr := util.GetGatewayRouterFromNode(pod.Spec.NodeName)
+		prefix, err := oc.extSwitchPrefix(pod.Spec.NodeName)
+		if err != nil {
+			klog.Infof("Failed to find ext switch prefix for %s %v", pod.Spec.NodeName, err)
+			continue
+		}
+
+		port := prefix + types.GWRouterToExtSwitchPrefix + gr
 		for _, gw := range egress.gws {
 			for _, podIP := range pod.Status.PodIPs {
 				if utilnet.IsIPv6(gw) != utilnet.IsIPv6String(podIP.IP) {
@@ -146,10 +154,10 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 
 				mask := GetIPFullMask(podIP.IP)
 				nbctlArgs := []string{"--may-exist", "--policy=src-ip", "--ecmp-symmetric-reply",
-					"lr-route-add", gr, podIP.IP + mask, gw.String()}
+					"lr-route-add", gr, podIP.IP + mask, gw.String(), port}
 				if egress.bfdEnabled {
 					nbctlArgs = []string{"--may-exist", "--bfd", "--policy=src-ip", "--ecmp-symmetric-reply",
-						"lr-route-add", gr, podIP.IP + mask, gw.String(), types.GWRouterToExtSwitchPrefix + gr}
+						"lr-route-add", gr, podIP.IP + mask, gw.String(), port}
 				}
 
 				_, stderr, err := util.RunOVNNbctl(nbctlArgs...)
@@ -211,6 +219,12 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
 			}
 			mask := GetIPFullMask(podIP)
 			node := util.GetWorkerFromGatewayRouter(gr)
+			portPrefix, err := oc.extSwitchPrefix(node)
+			if err != nil {
+				klog.Infof("Failed to find ext switch prefix for %s %v", node, err)
+				continue
+			}
+
 			_, stderr, err := util.RunOVNNbctl("--if-exists", "--policy=src-ip",
 				"lr-route-del", gr, podIP+mask, gwIP.String())
 			if err != nil {
@@ -231,7 +245,7 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
 					}
 				}
 			}
-			cleanUpBFDEntry(gwIP.String(), gr)
+			cleanUpBFDEntry(gwIP.String(), gr, portPrefix)
 		}
 	}
 	delete(nsInfo.routingExternalPodGWs, pod)
@@ -243,6 +257,7 @@ func (oc *Controller) deleteGWRoutesForNamespace(nsInfo *namespaceInfo) {
 	if nsInfo == nil {
 		return
 	}
+
 	// TODO(trozet): batch all of these with ebay bindings
 	for podIP, gwToGr := range nsInfo.podExternalRoutes {
 		for gw, gr := range gwToGr {
@@ -261,7 +276,13 @@ func (oc *Controller) deleteGWRoutesForNamespace(nsInfo *namespaceInfo) {
 			} else {
 				delete(nsInfo.podExternalRoutes, podIP)
 			}
-			cleanUpBFDEntry(gw, gr)
+
+			portPrefix, err := oc.extSwitchPrefix(node)
+			if err != nil {
+				klog.Infof("Failed to find ext switch prefix for %s %v", node, err)
+				continue
+			}
+			cleanUpBFDEntry(gw, gr, portPrefix)
 		}
 	}
 	nsInfo.routingExternalGWs = gatewayInfo{}
@@ -275,6 +296,7 @@ func (oc *Controller) deleteGWRoutesForPod(namespace string, podIPNets []*net.IP
 		return
 	}
 	defer nsInfo.Unlock()
+
 	for _, podIPNet := range podIPNets {
 		pod := podIPNet.IP.String()
 		if gwToGr, ok := nsInfo.podExternalRoutes[pod]; ok {
@@ -285,6 +307,12 @@ func (oc *Controller) deleteGWRoutesForPod(namespace string, podIPNets []*net.IP
 			mask := GetIPFullMask(pod)
 			for gw, gr := range gwToGr {
 				node := util.GetWorkerFromGatewayRouter(gr)
+				portPrefix, err := oc.extSwitchPrefix(node)
+				if err != nil {
+					klog.Infof("Failed to find ext switch prefix for %s %v", node, err)
+					continue
+				}
+
 				if err := oc.delHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
 					klog.Error(err)
 				}
@@ -295,7 +323,7 @@ func (oc *Controller) deleteGWRoutesForPod(namespace string, podIPNets []*net.IP
 				} else {
 					delete(nsInfo.podExternalRoutes, pod)
 				}
-				cleanUpBFDEntry(gw, gr)
+				cleanUpBFDEntry(gw, gr, portPrefix)
 			}
 		}
 	}
@@ -308,6 +336,14 @@ func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*ne
 	gr := util.GetGatewayRouterFromNode(node)
 
 	routesAdded := 0
+	portPrefix, err := oc.extSwitchPrefix(node)
+	if err != nil {
+		klog.Infof("Failed to find ext switch prefix for %s %v", node, err)
+		return err
+	}
+
+	port := portPrefix + types.GWRouterToExtSwitchPrefix + gr
+
 	for _, podIPNet := range podIfAddrs {
 		for _, gateway := range gateways {
 			// TODO (trozet): use the go bindings here and batch commands
@@ -324,10 +360,10 @@ func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*ne
 					}
 					mask := GetIPFullMask(podIP)
 					nbctlArgs := []string{"--may-exist", "--policy=src-ip", "--ecmp-symmetric-reply",
-						"lr-route-add", gr, podIP + mask, gw.String()}
+						"lr-route-add", gr, podIP + mask, gw.String(), port}
 					if gateway.bfdEnabled {
 						nbctlArgs = []string{"--may-exist", "--bfd", "--policy=src-ip", "--ecmp-symmetric-reply",
-							"lr-route-add", gr, podIP + mask, gw.String(), types.GWRouterToExtSwitchPrefix + gr}
+							"lr-route-add", gr, podIP + mask, gw.String(), port}
 					}
 					_, stderr, err := util.RunOVNNbctl(nbctlArgs...)
 					if err != nil && !strings.Contains(stderr, DuplicateECMPError) {
@@ -494,8 +530,8 @@ func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string) erro
 // not removes the entry to avoid having dangling BFD entries.
 // This is temporary and can be safely removed when we consume an ovn version
 // that includes http://patchwork.ozlabs.org/project/ovn/patch/3c39dc96a36a3445cfa8485a67de79f9f3d5651b.1614602770.git.lorenzo.bianconi@redhat.com/
-func cleanUpBFDEntry(gatewayIP, gatewayRouter string) {
-	portName := types.GWRouterToExtSwitchPrefix + gatewayRouter
+func cleanUpBFDEntry(gatewayIP, gatewayRouter, prefix string) {
+	portName := prefix + types.GWRouterToExtSwitchPrefix + gatewayRouter
 
 	output, stderr, err := util.RunOVNNbctl(
 		"--format=csv", "--data=bare", "--no-heading", "--columns=bfd", "find", "Logical_Router_Static_Route", "output_port="+portName, "nexthop="+gatewayIP, "bfd!=[]")
@@ -526,6 +562,71 @@ func cleanUpBFDEntry(gatewayIP, gatewayRouter string) {
 		if err != nil {
 			klog.Errorf("Failed to destroy BFD %s, stderr: %q, (%v)",
 				uuid, stderr, err)
+		}
+	}
+}
+
+// extSwitchPrefix returns the prefix of the external switch to use for
+// external gateway routes. In case no second bridge is configured, we
+// use the default one and the prefix is empty.
+func (oc *Controller) extSwitchPrefix(nodeName string) (string, error) {
+	node, err := oc.watchFactory.GetNode(nodeName)
+	if err != nil {
+		return "", errors.Wrapf(err, "extSwitchPrefix: failed to find node %s", nodeName)
+	}
+	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
+	if err != nil {
+		return "", errors.Wrapf(err, "extSwitchPrefix: failed to parse l3 gateway annotation for node %s", nodeName)
+	}
+
+	if l3GatewayConfig.EgressGWInterfaceID != "" {
+		return types.EgressGWSwitchPrefix, nil
+	}
+	return "", nil
+}
+
+// cleanECMPRoutes clean legacy ecmp routes when switching from
+// single bridge to default bridge plus second bridge used for external
+// gateway routes.
+func (oc *Controller) cleanECMPRoutes() {
+	out, stderr, err := util.RunOVNNbctl(
+		"--format=csv", "--data=bare", "--no-heading", "--columns=_uuid,output_port", "find", "Logical_Router_Static_Route", "options={ecmp_symmetric_reply=\"true\"}")
+	if err != nil {
+		klog.Errorf("cleanECMPRoutes: failed to list ecmp routes %v %s", err, stderr)
+		return
+	}
+	if strings.TrimSpace(out) == "" {
+		klog.Infof("Did not find ecmp routes to clean")
+		return
+	}
+	for _, line := range strings.Split(out, "\n") {
+		values := strings.Split(line, ",")
+		uuid := values[0]
+		port := values[1]
+
+		out, stderr, err := util.RunOVNNbctl(
+			"--format=csv", "--data=bare", "--no-heading", "--columns=_uuid,name", "find", "Logical_Router", fmt.Sprintf("static_routes{>=}[%s]", uuid))
+		if err != nil || out == "" {
+			klog.Errorf("cleanECMPRoutes: failed to find logical router for %s", uuid, err, stderr)
+			continue
+		}
+		values = strings.Split(out, ",")
+		lruuid := values[0]
+		gr := values[1]
+		node := util.GetWorkerFromGatewayRouter(gr)
+		prefix, err := oc.extSwitchPrefix(node)
+		if err != nil {
+			klog.Errorf("cleanECMPRoutes: failed to find logical router for %s", uuid, err, stderr)
+			continue
+		}
+		if (prefix != "" && !strings.Contains(port, prefix)) ||
+			(prefix == "" && strings.Contains(port, prefix)) {
+			klog.Infof("Found legacy ecmp route, output_port=%s, extSwitchPrefix=%s", port, prefix)
+			_, stderr, err = util.RunOVNNbctl("--if-exists", "remove", "Logical_Router", strings.TrimSuffix(lruuid, "\n"), "static_routes", uuid)
+			if err != nil {
+				klog.Errorf("Failed to destroy Logical_Router_Static_Route %s, stderr: %q, (%v)",
+					uuid, stderr, err)
+			}
 		}
 	}
 }

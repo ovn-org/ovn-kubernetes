@@ -345,6 +345,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_test-node",
 			"ovn-nbctl --timeout=15 --if-exist lr-del GR_test-node",
 			"ovn-nbctl --timeout=15 --if-exist ls-del ext_test-node",
+			"ovn-nbctl --timeout=15 --if-exist ls-del ext_ext_test-node",
 		})
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -407,6 +408,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_test-node",
 			"ovn-nbctl --timeout=15 --if-exist lr-del GR_test-node",
 			"ovn-nbctl --timeout=15 --if-exist ls-del ext_test-node",
+			"ovn-nbctl --timeout=15 --if-exist ls-del ext_ext_test-node",
 		})
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{

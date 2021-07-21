@@ -64,24 +64,23 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		}
 		// END OCP HACK
 	} else {
-		bridgeName, uplinkName, macAddress, _, err := gatewayInitInternal(
-			nodeName, gwIntf, hostSubnets, gwNextHops, nodeAnnotator)
+		gwBridge, _, err := gatewayInitInternal(
+			nodeName, gwIntf, "", hostSubnets, gwNextHops, nodeAnnotator)
 		if err != nil {
 			return nil, err
 		}
 
-		// the name of the patch port created by ovn-controller is of the form
-		// patch-<logical_port_name_of_localnet_port>-to-br-int
-		patchPort := "patch-" + bridgeName + "_" + nodeName + "-to-br-int"
-
 		gw.readyFunc = func() (bool, error) {
-			return gatewayReady(patchPort)
+			return gatewayReady(gwBridge.patchPort)
 		}
 
 		gw.initFunc = func() error {
 			klog.Info("Creating Local Gateway Openflow Manager")
-			var err error
-			gw.openflowManager, err = newLocalGatewayOpenflowManager(patchPort, macAddress.String(), bridgeName, uplinkName)
+			err := setBridgeOfPorts(gwBridge)
+			if err != nil {
+				return err
+			}
+			gw.openflowManager, err = newLocalGatewayOpenflowManager(gwBridge)
 			return err
 		}
 	}
@@ -333,35 +332,20 @@ func getLoadBalancerIPTRules(svc *kapi.Service, svcPort kapi.ServicePort, gatewa
 // -- to also connection track the outbound north-south traffic through l3 gateway so that
 //    the return traffic can be steered back to OVN logical topology
 // -- to also handle unDNAT return traffic back out of the host
-func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf string) (*openflowManager, error) {
+func newLocalGatewayOpenflowManager(gwBridge *bridgeConfiguration) (*openflowManager, error) {
 	// 14 bytes of overhead for ethernet header (does not include VLAN)
 	maxPktLength := getMaxFrameLength()
-
-	// Get ofport of patchPort, but before that make sure ovn-controller created
-	// one for us (waits for about ovsCommandTimeout seconds)
-	ofportPatch, stderr, err := util.GetOVSOfPort("get", "Interface", patchPort, "ofport")
-	if err != nil {
-		return nil, fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
-			"while getting ofport. stderr: %q, error: %v", patchPort, stderr, err)
-	}
-
-	// Get ofport of physical interface
-	ofportPhys, stderr, err := util.GetOVSOfPort("get", "interface", gwIntf, "ofport")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
-			gwIntf, stderr, err)
-	}
 
 	var dftFlows []string
 
 	// table 0, we check to see if this dest mac is the shared mac, if so flood to both ports (non-IP traffic)
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, dl_dst=%s, actions=output:%s,output:LOCAL",
-			defaultOpenFlowCookie, ofportPhys, macAddress, ofportPatch))
+			defaultOpenFlowCookie, gwBridge.ofPortPhys, gwBridge.macAddress, gwBridge.ofPortPatch))
 
 	var actions string
 	if config.Gateway.DisablePacketMTUCheck {
-		actions = fmt.Sprintf("output:%s", ofportPatch)
+		actions = fmt.Sprintf("output:%s", gwBridge.ofPortPatch)
 	} else {
 		// check packet length larger than MTU + eth header - vlan overhead
 		// send to table 11 to check if it needs to go to kernel for ICMP needs frag
@@ -374,13 +358,13 @@ func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf stri
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=100, table=0, in_port=%s, ip, "+
 				"actions=ct(commit, exec(load:0x1->NXM_NX_CT_LABEL), zone=%d), output:%s",
-				defaultOpenFlowCookie, ofportPatch, config.Default.ConntrackZone, ofportPhys))
+				defaultOpenFlowCookie, gwBridge.ofPortPatch, config.Default.ConntrackZone, gwBridge.ofPortPhys))
 
 		// table 0, packets coming from external. Send it through conntrack and
 		// resubmit to table 1 to know the state of the connection.
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=50, table=0, in_port=%s, ip, "+
-				"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, ofportPhys, config.Default.ConntrackZone))
+				"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, gwBridge.ofPortPhys, config.Default.ConntrackZone))
 	}
 	if config.IPv6Mode {
 		// table 0, packets coming from pods headed externally. Commit connections
@@ -388,24 +372,24 @@ func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf stri
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=100, table=0, in_port=%s, ipv6, "+
 				"actions=ct(commit, exec(load:0x1->NXM_NX_CT_LABEL), zone=%d), output:%s",
-				defaultOpenFlowCookie, ofportPatch, config.Default.ConntrackZone, ofportPhys))
+				defaultOpenFlowCookie, gwBridge.ofPortPatch, config.Default.ConntrackZone, gwBridge.ofPortPhys))
 
 		// table 0, packets coming from external. Send it through conntrack and
 		// resubmit to table 1 to know the state of the connection.
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=50, table=0, in_port=%s, ipv6, "+
-				"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, ofportPhys, config.Default.ConntrackZone))
+				"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, gwBridge.ofPortPhys, config.Default.ConntrackZone))
 	}
 
 	// table 0, packets coming from host should go out physical port
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, priority=100, table=0, in_port=LOCAL, actions=output:%s",
-			defaultOpenFlowCookie, ofportPhys))
+			defaultOpenFlowCookie, gwBridge.ofPortPhys))
 
 	// table 0, packets coming from OVN that are not IP should go out of the host
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, priority=99, table=0, in_port=%s, actions=output:%s",
-			defaultOpenFlowCookie, ofportPatch, ofportPhys))
+			defaultOpenFlowCookie, gwBridge.ofPortPatch, gwBridge.ofPortPhys))
 
 	// table 1, known connections with ct_label 1 go to pod
 	dftFlows = append(dftFlows,
@@ -437,7 +421,7 @@ func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf stri
 				"actions=LOCAL", defaultOpenFlowCookie))
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=1, table=11, "+
-				"actions=output:%s", defaultOpenFlowCookie, ofportPatch))
+				"actions=output:%s", defaultOpenFlowCookie, gwBridge.ofPortPatch))
 
 	}
 
@@ -453,20 +437,20 @@ func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf stri
 		// We send BFD traffic both on the host and in ovn
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=13, table=1, in_port=%s, udp6, tp_dst=3784, actions=output:%s,output:LOCAL",
-				defaultOpenFlowCookie, ofportPhys, ofportPatch))
+				defaultOpenFlowCookie, gwBridge.ofPortPhys, gwBridge.ofPortPatch))
 	}
 
 	if config.IPv4Mode {
 		// We send BFD traffic both on the host and in ovn
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=13, table=1, in_port=%s, udp, tp_dst=3784, actions=output:%s,output:LOCAL",
-				defaultOpenFlowCookie, ofportPhys, ofportPatch))
+				defaultOpenFlowCookie, gwBridge.ofPortPhys, gwBridge.ofPortPatch))
 	}
 
 	// table 1, we check to see if this dest mac is the shared mac, if so send to host
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, priority=10, table=1, dl_dst=%s, actions=output:LOCAL",
-			defaultOpenFlowCookie, macAddress))
+			defaultOpenFlowCookie, gwBridge.macAddress))
 
 	// table 1, all other connections do normal processing
 	dftFlows = append(dftFlows,
@@ -474,14 +458,10 @@ func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf stri
 
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
 	ofm := &openflowManager{
-		gwBridge:    gwBridge,
-		physIntf:    gwIntf,
-		patchIntf:   patchPort,
-		ofportPhys:  ofportPhys,
-		ofportPatch: ofportPatch,
-		flowCache:   make(map[string][]string),
-		flowMutex:   sync.Mutex{},
-		flowChan:    make(chan struct{}, 1),
+		defaultBridge: gwBridge,
+		flowCache:     make(map[string][]string),
+		flowMutex:     sync.Mutex{},
+		flowChan:      make(chan struct{}, 1),
 	}
 	ofm.updateFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
 	ofm.updateFlowCacheEntry("DEFAULT", dftFlows)
