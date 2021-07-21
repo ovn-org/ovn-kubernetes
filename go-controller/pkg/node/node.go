@@ -527,9 +527,6 @@ func (n *OvnNode) WatchEndpoints() {
 // is not big enough, it will taint the node with the value of
 // `types.OvnK8sSmallMTUTaintKey`
 func (n *OvnNode) validateGatewayMTU(gatewayInterfaceName string) error {
-	// TODO: find a better place for these constants
-	const geneveHeaderLengthIPv4 = 58 // https://github.com/openshift/cluster-network-operator/pull/720#issuecomment-664020823
-	const geneveHeaderLengthIPv6 = geneveHeaderLengthIPv4 + 20
 	tooSmallMTUTaint := &kapi.Taint{Key: types.OvnK8sSmallMTUTaintKey, Effect: kapi.TaintEffectNoSchedule}
 
 	mtu, err := util.GetNetworkInterfaceMTU(gatewayInterfaceName)
@@ -541,10 +538,10 @@ func (n *OvnNode) validateGatewayMTU(gatewayInterfaceName string) error {
 	var requiredMTU int
 	if config.IPv4Mode && !config.IPv6Mode {
 		// we run in single-stack IPv4 only
-		requiredMTU = config.Default.MTU + geneveHeaderLengthIPv4
+		requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv4
 	} else {
 		// we run in single-stack IPv6 or dual-stack mode
-		requiredMTU = config.Default.MTU + geneveHeaderLengthIPv6
+		requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv6
 	}
 
 	// check if node needs to be tainted

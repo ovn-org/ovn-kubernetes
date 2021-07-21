@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	netlink_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	kapi "k8s.io/api/core/v1"
@@ -35,14 +36,10 @@ var _ = Describe("Node", func() {
 			nodeName = "my-node"
 			linkName = "breth0"
 
-			// TODO take constants from node.go
-			geneveHeaderLengthIPv4 = 58
-			geneveHeaderLengthIPv6 = geneveHeaderLengthIPv4 + 20
-
 			configDefaultMTU               = 1500 //value for config.Default.MTU
-			mtuTooSmallForIPv4AndIPv6      = configDefaultMTU + geneveHeaderLengthIPv4 - 1
-			mtuOkForIPv4ButTooSmallForIPv6 = configDefaultMTU + geneveHeaderLengthIPv4
-			mtuOkForIPv4AndIPv6            = configDefaultMTU + geneveHeaderLengthIPv6
+			mtuTooSmallForIPv4AndIPv6      = configDefaultMTU + types.GeneveHeaderLengthIPv4 - 1
+			mtuOkForIPv4ButTooSmallForIPv6 = configDefaultMTU + types.GeneveHeaderLengthIPv4
+			mtuOkForIPv4AndIPv6            = configDefaultMTU + types.GeneveHeaderLengthIPv6
 		)
 
 		BeforeEach(func() {

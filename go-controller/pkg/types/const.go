@@ -121,4 +121,9 @@ const (
 	NodeModeFull         = "full"
 	NodeModeSmartNIC     = "smart-nic"
 	NodeModeSmartNICHost = "smart-nic-host"
+
+	// Geneve header length for IPv4 (https://github.com/openshift/cluster-network-operator/pull/720#issuecomment-664020823)
+	GeneveHeaderLengthIPv4 = 58
+	// Geneve header length for IPv6 (https://github.com/openshift/cluster-network-operator/pull/720#issuecomment-664020823)
+	GeneveHeaderLengthIPv6 = GeneveHeaderLengthIPv4 + 20
 )
