@@ -24,6 +24,7 @@ const (
 	JoinSwitchPrefix             = "join_"
 	ExternalSwitchPrefix         = "ext_"
 	GWRouterPrefix               = "GR_"
+	GWRouterLocalLBPostfix       = "_local"
 	RouterToSwitchPrefix         = "rtos-"
 	InterPrefix                  = "inter-"
 	HybridSubnetPrefix           = "hybrid-subnet-"
