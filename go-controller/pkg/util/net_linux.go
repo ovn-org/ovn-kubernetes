@@ -48,6 +48,11 @@ func SetNetLinkOpMockInst(mockInst NetLinkOps) {
 	netLinkOps = mockInst
 }
 
+// ResetNetLinkOpMockInst resets the mock instance for netlink to the defaultNetLinkOps
+func ResetNetLinkOpMockInst() {
+	netLinkOps = &defaultNetLinkOps{}
+}
+
 // GetNetLinkOps will be invoked by functions in other packages that would need access to the netlink library methods.
 func GetNetLinkOps() NetLinkOps {
 	return netLinkOps
@@ -410,4 +415,14 @@ func GetIPv6OnSubnet(iface string, ip *net.IPNet) (*net.IPNet, error) {
 	}
 
 	return &dst, nil
+}
+
+// GetNetworkInterfaceMTU returns the MTU for the given network interface
+func GetNetworkInterfaceMTU(iface string) (int, error) {
+	link, err := netLinkOps.LinkByName(iface)
+	if err != nil {
+		return 0, fmt.Errorf("failed to lookup link %s: %v", iface, err)
+	}
+
+	return link.Attrs().MTU, nil
 }

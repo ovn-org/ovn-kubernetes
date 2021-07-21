@@ -970,3 +970,49 @@ func TestGetIPv6OnSubnet(t *testing.T) {
 		})
 	}
 }
+
+func TestGetNetworkInterfaceMTU(t *testing.T) {
+	mockNetLinkOps := new(mocks.NetLinkOps)
+	netLinkOps = mockNetLinkOps
+
+	existingInterfaceName := "breth0"
+	existingInterfaceMTU := 1500
+	existingLinkMock := new(netlink_mocks.Link)
+	existingLinkMock.On("Attrs").Return(&netlink.LinkAttrs{MTU: existingInterfaceMTU})
+
+	nonExistingInterfaceName := "non-existing-interface"
+	mockNetLinkOps.On("LinkByName", existingInterfaceName).Return(existingLinkMock, nil)
+	mockNetLinkOps.On("LinkByName", nonExistingInterfaceName).Return(nil, fmt.Errorf("interface does not exist"))
+
+	tests := []struct {
+		desc          string
+		interfaceName string
+		wantMTU       int
+		wantError     bool
+	}{
+		{
+			desc:          "Should return MTU of existing interface",
+			interfaceName: existingInterfaceName,
+			wantMTU:       existingInterfaceMTU,
+			wantError:     false,
+		},
+		{
+			desc:          "Should return error if interface not found",
+			interfaceName: nonExistingInterfaceName,
+			wantError:     true,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			mtu, err := GetNetworkInterfaceMTU(tc.interfaceName)
+			if (err != nil) != tc.wantError {
+				t.Errorf("GetNetworkInterfaceMTU() error = %v, wantErr %v", err, tc.wantError)
+				return
+			}
+
+			if mtu != tc.wantMTU {
+				t.Errorf("GetNetworkInterfaceMTU() = %v, want %v", mtu, tc.wantMTU)
+			}
+		})
+	}
+}
