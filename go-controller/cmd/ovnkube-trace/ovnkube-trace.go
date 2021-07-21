@@ -252,7 +252,6 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 	podInfo.MAC = podMAC
 	podInfo.ContainerName = pod.Spec.Containers[0].Name
 
-	var tryJSON bool = true
 	var linkIndex int
 
 	// The interface name used depends on what network namespasce the pod uses
@@ -265,77 +264,24 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 		podInfo.HostNetwork = false
 
 		// Find index used for pod interface
+		klog.V(5).Infof("Reading interface index from /sys/class/net/...")
 
-		ipJaddrCmd := "ip -j addr show " + ethName
+		sysCmd := "cat /sys/class/net/" + ethName + "/iflink"
+		klog.V(5).Infof("The command is %s", sysCmd)
 
-		klog.V(5).Infof("Ip -j command is %s", ipJaddrCmd)
-		ipOutput, ipError, err := execInPod(coreclient, restconfig, namespace, podName, podInfo.ContainerName, ipJaddrCmd, "")
+		linkOutput, linkError, err := execInPod(coreclient, restconfig, namespace, podName, podInfo.ContainerName, sysCmd, "")
 		if err != nil {
-			klog.V(1).Infof("Ip -j command error %v stdOut: %s\n stdErr: %s", err, ipOutput, ipError)
-			tryJSON = false
+			klog.V(1).Infof("The command error %v stdOut: %s\n stdErr: %s", err, linkOutput, linkError)
+			// Give up, unknown error
+			return nil, err
 		}
 
-		if tryJSON {
-			klog.V(5).Infof("==>pod %s: ip addr show: %q", pod.Name, ipOutput)
-
-			var data []IpAddrReq
-			ipOutput = strings.Replace(ipOutput, "\n", "", -1)
-			klog.V(5).Infof("==> pod %s NOW: %s ", pod.Name, ipOutput)
-			err = json.Unmarshal([]byte(ipOutput), &data)
-			if err != nil {
-				fmt.Printf("JSON ERR: couldn't get stuff from data %v; json parse error: %v\n", data, err)
-				return nil, err
-			}
-			klog.V(5).Infof("Size of IpAddrReq array: %v\n", len(data))
-			klog.V(5).Infof("IpAddrReq: %v\n", data)
-
-			for _, addr := range data {
-				if addr.IfName == ethName {
-					linkIndex = addr.LinkIndex
-					klog.V(5).Infof("IfName: %v", addr.IfName)
-					break
-				}
-			}
-			klog.V(5).Infof("linkIndex is %d", linkIndex)
-		} else {
-			var linkOutput string
-			awkString := " | awk '{print $2}'"
-			iplinkCmd := "ip -o link show dev " + ethName + awkString
-
-			klog.V(5).Infof("The ip -o command is %s", iplinkCmd)
-			linkOutput, linkError, err := execInPod(coreclient, restconfig, namespace, podName, podInfo.ContainerName, iplinkCmd, "")
-			if err != nil || linkError != "" {
-				klog.V(1).Infof("The ip -o command error %v stdOut: %s\n stdErr: %s", err, linkOutput, linkError)
-				// Pod image doesn't have iproute installed, try using sysfs
-				ifindexCatCmd := "cat /sys/class/net/" + ethName + "/ifindex"
-				klog.V(5).Infof("The cat command is %s", ifindexCatCmd)
-				catError := ""
-				linkOutput, catError, err = execInPod(coreclient, restconfig, namespace, podName, podInfo.ContainerName, ifindexCatCmd, "")
-				klog.V(1).Info(linkOutput)
-				if err != nil || catError != "" || linkOutput == "" {
-					// Okay, we're really done, time to give up
-					klog.V(1).Infof("The cat /sys/class/net... command error %v stdOut: %s\n stdErr: %s", err, linkOutput, catError)
-					return nil, err
-				}
-			}
-
-			klog.V(5).Infof("AWK string is %s", awkString)
-			klog.V(5).Infof("==>pod Old Way %s: ip -o link show: %q", pod.Name, linkOutput)
-
-			linkOutput = strings.Replace(linkOutput, "\n", "", -1)
-			klog.V(5).Infof("==> pod Old Way %s NOW: %s ", pod.Name, linkOutput)
-			linkOutput = strings.Replace(linkOutput, "eth0@if", "", -1)
-			klog.V(5).Infof("==> pod Old Way %s NOW: %s ", pod.Name, linkOutput)
-			linkOutput = strings.Replace(linkOutput, ":", "", -1)
-			klog.V(5).Infof("==> pod Old Way %s NOW: %s ", pod.Name, linkOutput)
-
-			linkIndex, err = strconv.Atoi(linkOutput)
-			if err != nil {
-				klog.Error("Error converting string to int", err)
-				return nil, err
-			}
-			klog.V(5).Infof("Using ip -o link show - linkIndex is %d", linkIndex)
+		linkIndex, err = strconv.Atoi(strings.TrimSuffix(linkOutput, "\n"))
+		if err != nil {
+			klog.Error("Error converting string to int", err)
+			return nil, err
 		}
+		klog.V(5).Infof("Using '%s' - linkIndex is %d", sysCmd, linkIndex)
 	}
 	klog.V(5).Infof("Using interface name of %s with MAC of %s", ethName, podMAC)
 
@@ -399,7 +345,6 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 
 		// obnkube-node-xxx uses host network.  Find host end of veth matching pod eth0 index
 
-		tryJSON = true
 		var hostInterface string
 
 		ipCmd := "ip -j addr show"
@@ -412,53 +357,24 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 			return nil, err
 		}
 
-		if tryJSON {
-			klog.V(5).Infof("==>ovnkubePod %s: ip addr show: %q", ovnkubePod.Name, hostOutput)
+		klog.V(5).Infof("==>ovnkubePod %s: ip addr show: %q", ovnkubePod.Name, hostOutput)
 
-			var data []IpAddrReq
-			hostOutput = strings.Replace(hostOutput, "\n", "", -1)
-			klog.V(5).Infof("==> host %s NOW: %s", ovnkubePod.Name, hostOutput)
-			err = json.Unmarshal([]byte(hostOutput), &data)
-			if err != nil {
-				klog.V(1).Infof("JSON ERR: couldn't get stuff from data %v; json parse error: %v", data, err)
-				return nil, err
-			}
-			klog.V(5).Infof("Size of IpAddrReq array: %v", len(data))
-			klog.V(5).Infof("IpAddrReq: %v", data)
+		var data []IpAddrReq
+		hostOutput = strings.Replace(hostOutput, "\n", "", -1)
+		klog.V(5).Infof("==> host %s NOW: %s", ovnkubePod.Name, hostOutput)
+		err = json.Unmarshal([]byte(hostOutput), &data)
+		if err != nil {
+			klog.V(1).Infof("JSON ERR: couldn't get stuff from data %v; json parse error: %v", data, err)
+			return nil, err
+		}
+		klog.V(5).Infof("Size of IpAddrReq array: %v", len(data))
+		klog.V(5).Infof("IpAddrReq: %v", data)
 
-			for _, addr := range data {
-				if addr.IfIndex == linkIndex {
-					hostInterface = addr.IfName
-					klog.V(5).Infof("ifName: %v\n", addr.IfName)
-					break
-				}
-			}
-			klog.V(5).Infof("hostInterface is %s", hostInterface)
-		} else {
-
-			ipoCmd := "ip -o addr show"
-			klog.V(5).Infof("Command is: %s", ipoCmd)
-
-			hostOutput, hostError, err := execInPod(coreclient, restconfig, ovnNamespace, ovnkubePod.Name, "ovnkube-node", ipoCmd, "")
-			if err != nil {
-				fmt.Printf("execInPod() failed with %s stderr %s stdout %s \n", err, hostError, hostOutput)
-				klog.V(5).Infof("execInPod() failed err %s - podInfo %v - ovnkubePod Name %s", err, podInfo, ovnkubePod.Name)
-				return nil, err
-			}
-
-			hostOutput = strings.Replace(hostOutput, "\n", "", -1)
-			klog.V(5).Infof("==>node %s: ip addr show: %q", node.Name, hostOutput)
-
-			idx := strconv.Itoa(linkIndex) + ": "
-			result := strings.Split(hostOutput, idx)
-			klog.V(5).Infof("result[0]: %s", result[0])
-			klog.V(5).Infof("result[1]: %s", result[1])
-			words := strings.Fields(result[1])
-			for i, word := range words {
-				if i == 0 {
-					hostInterface = word
-					break
-				}
+		for _, addr := range data {
+			if addr.IfIndex == linkIndex {
+				hostInterface = addr.IfName
+				klog.V(5).Infof("ifName: %v\n", addr.IfName)
+				break
 			}
 		}
 		klog.V(5).Infof("hostInterface name is %s\n", hostInterface)
