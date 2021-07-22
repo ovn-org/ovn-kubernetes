@@ -39,7 +39,6 @@ import (
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -209,6 +208,9 @@ type Controller struct {
 	// Map of pods that need to be retried, and the timestamp of when they last failed
 	retryPods     map[types.UID]retryEntry
 	retryPodsLock sync.Mutex
+
+	// channel to indicate we need to retry pods immediately
+	retryPodsChan chan struct{}
 }
 
 type retryEntry struct {
@@ -285,6 +287,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		aclLoggingEnabled:        true,
 		joinSwIPManager:          nil,
 		retryPods:                make(map[types.UID]retryEntry),
+		retryPodsChan:            make(chan struct{}, 1),
 		recorder:                 recorder,
 		ovnNBClient:              ovnNBClient,
 		ovnSBClient:              ovnSBClient,
@@ -432,7 +435,8 @@ func (oc *Controller) recordPodEvent(addErr error, pod *kapi.Pod) {
 
 // iterateRetryPods checks if any outstanding pods have been waiting for 60 seconds of last known failure
 // then tries to re-add them if so
-func (oc *Controller) iterateRetryPods() {
+// updateAll forces all pods to be attempted to be retried regardless of the 1 minute delay
+func (oc *Controller) iterateRetryPods(updateAll bool) {
 	oc.retryPodsLock.Lock()
 	defer oc.retryPodsLock.Unlock()
 	now := time.Now()
@@ -442,7 +446,7 @@ func (oc *Controller) iterateRetryPods() {
 			return
 		}
 		podTimer := podEntry.timeStamp.Add(time.Minute)
-		if now.After(podTimer) {
+		if updateAll || now.After(podTimer) {
 			podDesc := fmt.Sprintf("[%s/%s/%s]", pod.UID, pod.Namespace, pod.Name)
 			klog.Infof("%s retry pod setup", podDesc)
 
@@ -473,6 +477,15 @@ func (oc *Controller) addRetryPod(pod *kapi.Pod) {
 	oc.retryPodsLock.Lock()
 	defer oc.retryPodsLock.Unlock()
 	oc.retryPods[pod.UID] = retryEntry{pod, time.Now()}
+}
+
+// addRetryPods adds multiple pods to retry later
+func (oc *Controller) addRetryPods(pods []kapi.Pod) {
+	oc.retryPodsLock.Lock()
+	defer oc.retryPodsLock.Unlock()
+	for _, pod := range pods {
+		oc.retryPods[pod.UID] = retryEntry{&pod, time.Now()}
+	}
 }
 
 func exGatewayAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
@@ -517,11 +530,29 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 	return true
 }
 
+func (oc *Controller) requestRetryPods() {
+	select {
+	case oc.retryPodsChan <- struct{}{}:
+		klog.V(5).Infof("Iterate retry pods requested")
+	default:
+		klog.V(5).Infof("Iterate retry pods already requested")
+	}
+}
+
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() {
 	go func() {
 		// track the retryPods map and every 30 seconds check if any pods need to be retried
-		utilwait.Until(oc.iterateRetryPods, 30*time.Second, oc.stopChan)
+		for {
+			select {
+			case <-time.After(30 * time.Second):
+				oc.iterateRetryPods(false)
+			case <-oc.retryPodsChan:
+				oc.iterateRetryPods(true)
+			case <-oc.stopChan:
+				return
+			}
+		}
 	}()
 
 	start := time.Now()
@@ -890,11 +921,8 @@ func (oc *Controller) WatchNodes() {
 			if err != nil {
 				klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
 			} else {
-				for _, pod := range pods.Items {
-					if !oc.ensurePod(nil, &pod, true) {
-						oc.addRetryPod(&pod)
-					}
-				}
+				oc.addRetryPods(pods.Items)
+				oc.requestRetryPods()
 			}
 
 		},
