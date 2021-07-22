@@ -551,6 +551,24 @@ install_ingress() {
 }
 
 kubectl_wait_pods() {
+  echo "Waiting for k8s to create ovn-kubernetes pod resources..."
+  local PODS_CREATED=false
+  for i in {1..10}; do
+    local NUM_PODS=$(kubectl -n ovn-kubernetes get pods -o json 2> /dev/null | jq '.items | length')
+    if [[ "${NUM_PODS}" -ne 0 ]]; then
+      echo "ovn-kubernetes pods created."
+      PODS_CREATED=true
+      break
+    fi
+    sleep 1
+  done
+
+  if [[ "${PODS_CREATED}" == false ]]; then
+    echo "ovn-kubernetes pods were not created."
+    exit 1
+  fi
+  echo "ovn-kubernetes pods created."
+
   # Check that everything is fine and running. IPv6 cluster seems to take a little
   # longer to come up, so extend the wait time.
   OVN_TIMEOUT=300s
