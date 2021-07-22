@@ -553,9 +553,9 @@ install_ingress() {
 kubectl_wait_pods() {
   # Check that everything is fine and running. IPv6 cluster seems to take a little
   # longer to come up, so extend the wait time.
-  OVN_TIMEOUT=300s
+  OVN_TIMEOUT=400s
   if [ "$KIND_IPV6_SUPPORT" == true ]; then
-    OVN_TIMEOUT=480s
+    OVN_TIMEOUT=580s
   fi
   if ! kubectl wait -n ovn-kubernetes --for=condition=ready pods --all --timeout=${OVN_TIMEOUT} ; then
     echo "some pods in OVN Kubernetes are not running"
