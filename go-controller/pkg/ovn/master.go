@@ -636,13 +636,36 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 		}
 
 		if config.Gateway.Mode == config.GatewayModeLocal {
-			stdout, stderr, err := util.RunOVNNbctl("--may-exist",
-				"--policy=src-ip", "lr-route-add", types.OVNClusterRouter,
-				hostSubnet.String(), mgmtIfAddr.IP.String())
-			if err != nil {
+			logicalRouter := nbdb.LogicalRouter{}
+			logicalRouterStaticRoutes := nbdb.LogicalRouterStaticRoute{
+				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+				IPPrefix: hostSubnet.String(),
+				Nexthop:  mgmtIfAddr.IP.String(),
+			}
+			opModels := []libovsdbops.OperationModel{
+				{
+					Model: &logicalRouterStaticRoutes,
+					ModelPredicate: func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
+						return lrsr.IPPrefix == hostSubnet.String() && lrsr.Nexthop == mgmtIfAddr.IP.String()
+					},
+					OnModelUpdates: []interface{}{
+						&logicalRouterStaticRoutes.Nexthop,
+						&logicalRouterStaticRoutes.IPPrefix,
+					},
+					ExistingResult: &[]nbdb.LogicalRouterStaticRoute{},
+				},
+				{
+					Model:          &logicalRouter,
+					ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+					OnModelMutations: func() []model.Mutation {
+						return libovsdbops.OnReferentialModelMutation(&logicalRouter.StaticRoutes, ovsdb.MutateOperationInsert, logicalRouterStaticRoutes)
+					},
+					ExistingResult: &[]nbdb.LogicalRouter{},
+				},
+			}
+			if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
 				return fmt.Errorf("failed to add source IP address based "+
-					"routes in distributed router %s, stdout: %q, "+
-					"stderr: %q, error: %v", types.OVNClusterRouter, stdout, stderr, err)
+					"routes in distributed router %s, error: %v", types.OVNClusterRouter, err)
 			}
 		}
 	}
