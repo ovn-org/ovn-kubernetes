@@ -1149,6 +1149,7 @@ ovn-node() {
     --host-network-namespace ${ovn_host_network_namespace} \
      ${ovnkube_node_mgmt_port_netdev_flag} &
 
+  wait_for_event attempts=3 process_ready ovnkube
   if [[ ${ovnkube_node_mode} != "smart-nic" ]]; then
     setup_cni
   fi
