@@ -10,9 +10,13 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/ovn-org/libovsdb/model"
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -180,33 +184,28 @@ func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
 	}
 	// In any gateway mode, make sure to delete all LRPs on ovn_cluster_router.
 	// This covers old local GW mode -> shared GW and old local GW mode -> new local GW mode
-	egressFirewallPolicyIDs, stderr, err := util.RunOVNNbctl(
-		"--data=bare",
-		"--no-heading",
-		"--columns=_uuid",
-		"--format=table",
-		"find",
-		"logical_router_policy",
-		fmt.Sprintf("priority<=%s", types.EgressFirewallStartPriority),
-		fmt.Sprintf("priority>=%s", types.MinimumReservedEgressFirewallPriority),
-	)
-	if err != nil {
-		klog.Errorf("Unable to list egress firewall logical router policies, cannot cleanup old stale data, stderr: %s, err: %v", stderr, err)
-		return
+	intStartPriority, _ := strconv.Atoi(types.EgressFirewallStartPriority)
+	intEndPriority, _ := strconv.Atoi(types.MinimumReservedEgressFirewallPriority)
+	logicalRouter := nbdb.LogicalRouter{}
+	logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
+	opModels := []libovsdbops.OperationModel{
+		{
+			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
+				return lrp.Priority <= intStartPriority && lrp.Priority >= intEndPriority
+			},
+			ExistingResult: &logicalRouterPolicyRes,
+		},
+		{
+			Model:          &logicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+			OnModelMutations: func() []model.Mutation {
+				return libovsdbops.OnReferentialModelMutation(&logicalRouter.Policies, ovsdb.MutateOperationDelete, logicalRouterPolicyRes)
+			},
+			ExistingResult: &[]nbdb.LogicalRouter{},
+		},
 	}
-	if egressFirewallPolicyIDs != "" {
-		for _, egressFirewallPolicyID := range strings.Fields(egressFirewallPolicyIDs) {
-			_, stderr, err := util.RunOVNNbctl(
-				"remove",
-				"logical_router",
-				types.OVNClusterRouter,
-				"policies",
-				egressFirewallPolicyID,
-			)
-			if err != nil {
-				klog.Errorf("Unable to remove egress firewall policy: %s on %s, cannot cleanup old stale data, stderr: %s, err: %v", egressFirewallPolicyID, types.OVNClusterRouter, stderr, err)
-			}
-		}
+	if err := oc.modelClient.Delete(opModels...); err != nil {
+		klog.Errorf("Unable to remove egress firewall policy, cannot cleanup old stale data, err: %v", err)
 	}
 
 	// sync the ovn and k8s egressFirewall states
