@@ -110,9 +110,10 @@ const (
 	OvnCurrentTopologyVersion      = OvnPortBindingTopoVersion
 
 	// OVN-K8S annotation & taint constants
-	OvnK8sPrefix           = "k8s.ovn.org"
-	OvnK8sTopoAnno         = OvnK8sPrefix + "/" + "topology-version"
-	OvnK8sSmallMTUTaintKey = OvnK8sPrefix + "/" + "mtu-too-small"
+	OvnK8sPrefix             = "k8s.ovn.org"
+	OvnK8sTopoAnno           = OvnK8sPrefix + "/" + "topology-version"
+	OvnK8sSmallMTUTaintKey   = OvnK8sPrefix + "/" + "mtu-too-small"
+	OvnK8sNetworkUnavailable = OvnK8sPrefix + "/" + "network-unavailable"
 
 	// Monitoring constants
 	SFlowAgent = "ovn-k8s-mp0"
