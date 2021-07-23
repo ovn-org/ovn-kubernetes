@@ -1131,7 +1131,7 @@ func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool)
 		oc.client,
 		oc.nbClient,
 		svcFactory.Core().V1().Services(),
-		svcFactory.Discovery().V1beta1().EndpointSlices(),
+		svcFactory.Discovery().V1().EndpointSlices(),
 		oc.clusterPortGroupUUID,
 	)
 	svcFactory.Start(oc.stopChan)

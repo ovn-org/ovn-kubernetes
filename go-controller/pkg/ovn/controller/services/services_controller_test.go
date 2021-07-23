@@ -11,7 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1beta1"
+	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/informers"
@@ -54,7 +54,7 @@ func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceControlle
 	controller := NewController(client,
 		nbClient,
 		informerFactory.Core().V1().Services(),
-		informerFactory.Discovery().V1beta1().EndpointSlices(),
+		informerFactory.Discovery().V1().EndpointSlices(),
 		clusterPortGroupUUID,
 	)
 	controller.servicesSynced = alwaysReady
@@ -62,7 +62,7 @@ func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceControlle
 	return &serviceController{
 		controller,
 		informerFactory.Core().V1().Services().Informer().GetStore(),
-		informerFactory.Discovery().V1beta1().EndpointSlices().Informer().GetStore(),
+		informerFactory.Discovery().V1().EndpointSlices().Informer().GetStore(),
 		stopChan,
 	}, nil
 }
@@ -261,7 +261,6 @@ func TestSyncServices(t *testing.T) {
 							Ready: utilpointer.BoolPtr(true),
 						},
 						Addresses: []string{"10.0.0.2"},
-						Topology:  map[string]string{"kubernetes.io/hostname": "node-1"},
 					},
 				},
 			},
@@ -337,7 +336,6 @@ func TestSyncServices(t *testing.T) {
 							Ready: utilpointer.BoolPtr(true),
 						},
 						Addresses: []string{"10.0.0.2"},
-						Topology:  map[string]string{"kubernetes.io/hostname": "node-1"},
 					},
 				},
 			},
@@ -564,7 +562,6 @@ func TestUpdateServicePorts(t *testing.T) {
 					Ready: utilpointer.BoolPtr(true),
 				},
 				Addresses: []string{"10.0.0.2"},
-				Topology:  map[string]string{"kubernetes.io/hostname": "node-1"},
 			},
 		},
 	}
@@ -740,7 +737,6 @@ func TestUpdateServiceEndpointsToHost(t *testing.T) {
 					Ready: utilpointer.BoolPtr(true),
 				},
 				Addresses: []string{"10.128.0.2"},
-				Topology:  map[string]string{"kubernetes.io/hostname": "node-1"},
 			},
 		},
 	}
@@ -785,7 +781,6 @@ func TestUpdateServiceEndpointsToHost(t *testing.T) {
 				Ready: utilpointer.BoolPtr(true),
 			},
 			Addresses: []string{"2.2.2.2"},
-			Topology:  map[string]string{"kubernetes.io/hostname": "node-1"},
 		}}
 	controller.endpointSliceStore.Delete(slice)
 	controller.endpointSliceStore.Add(epsNew)
@@ -888,7 +883,6 @@ func TestUpdateServiceEndpointsLessRemoveOps(t *testing.T) {
 					Ready: utilpointer.BoolPtr(true),
 				},
 				Addresses: []string{"10.128.0.2"},
-				Topology:  map[string]string{"kubernetes.io/hostname": "node-1"},
 			},
 		},
 	}
@@ -933,7 +927,6 @@ func TestUpdateServiceEndpointsLessRemoveOps(t *testing.T) {
 				Ready: utilpointer.BoolPtr(true),
 			},
 			Addresses: []string{"10.128.0.6"},
-			Topology:  map[string]string{"kubernetes.io/hostname": "node-1"},
 		}}
 	controller.endpointSliceStore.Delete(slice)
 	controller.endpointSliceStore.Add(epsNew)
