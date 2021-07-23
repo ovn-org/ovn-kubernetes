@@ -384,7 +384,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	}
 
 	if config.Gateway.Mode == config.GatewayModeLocal {
-		if err := addDistributedGWPort(); err != nil {
+		if err := oc.addDistributedGWPort(); err != nil {
 			return err
 		}
 	}
