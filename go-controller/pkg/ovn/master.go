@@ -852,12 +852,6 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		}
 	}
 
-	lrpArgs := []string{
-		"--if-exists", "lrp-del", types.RouterToSwitchPrefix + nodeName,
-		"--", "lrp-add", types.OVNClusterRouter, types.RouterToSwitchPrefix + nodeName,
-		nodeLRPMAC.String(),
-	}
-
 	lsArgs := []string{
 		"--may-exist",
 		"ls-add", nodeName,
@@ -866,10 +860,11 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 
 	var v4Gateway, v6Gateway net.IP
 	var hostNetworkPolicyIPs []net.IP
+	logicalRouterPortNetwork := []string{}
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
-		lrpArgs = append(lrpArgs, gwIfAddr.String())
+		logicalRouterPortNetwork = append(logicalRouterPortNetwork, gwIfAddr.String())
 		hostNetworkPolicyIPs = append(hostNetworkPolicyIPs, mgmtIfAddr.IP)
 		if utilnet.IsIPv6CIDR(hostSubnet) {
 			v6Gateway = gwIfAddr.IP
@@ -891,11 +886,49 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		}
 	}
 
-	// Create a router port and provide it the first address on the node's host subnet
-	_, stderr, err := util.RunOVNNbctl(lrpArgs...)
-	if err != nil {
-		klog.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
-		return err
+	logicalRouterPortName := types.RouterToSwitchPrefix + nodeName
+	logicalRouterPortNamedUUID := util.GenerateNamedUUID(logicalRouterPortName)
+	logicalRouterPort := nbdb.LogicalRouterPort{
+		Name:     logicalRouterPortName,
+		UUID:     logicalRouterPortNamedUUID,
+		MAC:      nodeLRPMAC.String(),
+		Networks: logicalRouterPortNetwork,
+	}
+	logicalRouterPortRes := []nbdb.LogicalRouterPort{}
+	logicalRouter := nbdb.LogicalRouter{}
+	opModels := []util.OperationModel{
+		{
+			Model: &logicalRouterPort,
+			ModelPredicate: func(lrp *nbdb.LogicalRouterPort) bool {
+				return lrp.Name == logicalRouterPortName
+			},
+			OnModelUpdates: []interface{}{
+				&logicalRouterPort.Networks,
+				&logicalRouterPort.MAC,
+			},
+			ExistingResult: &logicalRouterPortRes,
+		},
+		{
+			Model:          &logicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+			OnModelMutations: func() []model.Mutation {
+				if len(logicalRouterPortRes) > 0 {
+					return nil
+				}
+				return []model.Mutation{
+					{
+
+						Field:   &logicalRouter.Ports,
+						Mutator: ovsdb.MutateOperationInsert,
+						Value:   []string{logicalRouterPortNamedUUID},
+					},
+				}
+			},
+			ExistingResult: &[]nbdb.LogicalRouter{},
+		},
+	}
+	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		return fmt.Errorf("Failed to add logical port to router, error: %v", err)
 	}
 
 	// Create a logical switch and set its subnet.
