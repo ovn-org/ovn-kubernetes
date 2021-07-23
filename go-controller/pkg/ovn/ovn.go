@@ -206,7 +206,7 @@ type Controller struct {
 	v6HostSubnetsUsed float64
 
 	// Map of pods that need to be retried, and the timestamp of when they last failed
-	retryPods     map[types.UID]retryEntry
+	retryPods     map[types.UID]*retryEntry
 	retryPodsLock sync.Mutex
 
 	// channel to indicate we need to retry pods immediately
@@ -216,6 +216,8 @@ type Controller struct {
 type retryEntry struct {
 	pod       *kapi.Pod
 	timeStamp time.Time
+	// whether to include this pod in retry iterations
+	ignore bool
 }
 
 const (
@@ -286,7 +288,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		multicastSupport:         config.EnableMulticast,
 		aclLoggingEnabled:        true,
 		joinSwIPManager:          nil,
-		retryPods:                make(map[types.UID]retryEntry),
+		retryPods:                make(map[types.UID]*retryEntry),
 		retryPodsChan:            make(chan struct{}, 1),
 		recorder:                 recorder,
 		ovnNBClient:              ovnNBClient,
@@ -441,6 +443,9 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 	defer oc.retryPodsLock.Unlock()
 	now := time.Now()
 	for uid, podEntry := range oc.retryPods {
+		if podEntry.ignore {
+			continue
+		}
 		pod := podEntry.pod
 		if !util.PodScheduled(pod) {
 			return
@@ -455,7 +460,7 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 				delete(oc.retryPods, uid)
 			} else {
 				klog.Infof("%s setup retry failed; will try again later", podDesc)
-				oc.retryPods[uid] = retryEntry{pod, time.Now()}
+				oc.retryPods[uid] = &retryEntry{pod, time.Now(), false}
 			}
 		}
 	}
@@ -472,11 +477,37 @@ func (oc *Controller) checkAndDeleteRetryPod(uid types.UID) bool {
 	return false
 }
 
-// addRetryPod tracks a failed pod to retry later
-func (oc *Controller) addRetryPod(pod *kapi.Pod) {
+// checkAndSkipRetryPod sets a specific entry from the map to be ignored for subsequent retries
+// if it existed, returns true
+func (oc *Controller) checkAndSkipRetryPod(uid types.UID) bool {
 	oc.retryPodsLock.Lock()
 	defer oc.retryPodsLock.Unlock()
-	oc.retryPods[pod.UID] = retryEntry{pod, time.Now()}
+	if entry, ok := oc.retryPods[uid]; ok {
+		entry.ignore = true
+		return true
+	}
+	return false
+}
+
+// unSkipRetryPod ensures a pod is no longer ignored for retry loop
+func (oc *Controller) unSkipRetryPod(pod *kapi.Pod) {
+	oc.retryPodsLock.Lock()
+	defer oc.retryPodsLock.Unlock()
+	if entry, ok := oc.retryPods[pod.UID]; ok {
+		entry.ignore = false
+	}
+}
+
+// initRetryPod tracks a failed pod to potentially retry later
+// initially it is marked as skipped for retry loop (ignore = true)
+func (oc *Controller) initRetryPod(pod *kapi.Pod) {
+	oc.retryPodsLock.Lock()
+	defer oc.retryPodsLock.Unlock()
+	if entry, ok := oc.retryPods[pod.UID]; ok {
+		entry.timeStamp = time.Now()
+	} else {
+		oc.retryPods[pod.UID] = &retryEntry{pod, time.Now(), true}
+	}
 }
 
 // addRetryPods adds multiple pods to retry later
@@ -484,7 +515,11 @@ func (oc *Controller) addRetryPods(pods []kapi.Pod) {
 	oc.retryPodsLock.Lock()
 	defer oc.retryPodsLock.Unlock()
 	for _, pod := range pods {
-		oc.retryPods[pod.UID] = retryEntry{&pod, time.Now()}
+		if entry, ok := oc.retryPods[pod.UID]; ok {
+			entry.timeStamp = time.Now()
+		} else {
+			oc.retryPods[pod.UID] = &retryEntry{&pod, time.Now(), false}
+		}
 	}
 }
 
@@ -559,18 +594,22 @@ func (oc *Controller) WatchPods() {
 	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
+			oc.initRetryPod(pod)
 			if !oc.ensurePod(nil, pod, true) {
-				oc.addRetryPod(pod)
+				oc.unSkipRetryPod(pod)
+				return
 			}
+			oc.checkAndDeleteRetryPod(pod.UID)
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			oldPod := old.(*kapi.Pod)
 			pod := newer.(*kapi.Pod)
-			if !oc.ensurePod(oldPod, pod, oc.checkAndDeleteRetryPod(pod.UID)) {
-				// add back the failed pod
-				oc.addRetryPod(pod)
+			if !oc.ensurePod(oldPod, pod, oc.checkAndSkipRetryPod(pod.UID)) {
+				// unskip failed pod for next retry iteration
+				oc.unSkipRetryPod(pod)
 				return
 			}
+			oc.checkAndDeleteRetryPod(pod.UID)
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
