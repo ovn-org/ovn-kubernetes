@@ -252,6 +252,10 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 					UUID: ovntypes.OVNClusterRouter + "-UUID",
 					Name: ovntypes.OVNClusterRouter,
 				}
+				expectedNodeSwitch := &nbdb.LogicalSwitch{
+					UUID: node1.Name + "-UUID",
+					Name: node1.Name,
+				}
 				fakeOvn.dbSetup = libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						&nbdb.LogicalSwitch{
@@ -259,10 +263,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 							Name: ovntypes.OVNJoinSwitch,
 						},
 						expectedOVNClusterRouter,
-						&nbdb.LogicalSwitch{
-							UUID: node1.Name + "-UUID",
-							Name: node1.Name,
-						},
+						expectedNodeSwitch,
 					},
 				}
 				fakeOvn.init()
@@ -278,7 +279,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				fexec := fakeOvn.fakeExec
 
 				expectedDatabaseState := []libovsdb.TestData{}
-				expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, fexec, &node1, clusterCIDR, config.IPv6Mode)
+				expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, fexec, &node1, clusterCIDR, config.IPv6Mode)
 
 				fakeOvn.controller.joinSwIPManager, _ = initJoinLogicalSwitchIPManager()
 				_, err = fakeOvn.controller.joinSwIPManager.ensureJoinLRPIPs(ovntypes.OVNClusterRouter)
@@ -315,7 +316,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				}
 				enabledProtocols := []string{"tcp", "udp", "sctp"}
 
-				expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, node1.Name, clusterSubnets, []*net.IPNet{nodeSubnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs}, enabledProtocols)
+				expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{nodeSubnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs}, enabledProtocols)
 
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				gomega.Eventually(fexec.CalledMatchesExpected()).Should(gomega.BeTrue(), fexec.ErrorDesc)
