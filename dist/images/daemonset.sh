@@ -48,6 +48,7 @@ OVN_NETFLOW_TARGETS=""
 OVN_SFLOW_TARGETS=""
 OVN_IPFIX_TARGETS=""
 OVN_HOST_NETWORK_NAMESPACE=""
+OVN_EX_GW_NETWORK_INTERFACE=""
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -183,6 +184,9 @@ while [ "$1" != "" ]; do
   --host-network-namespace)
     OVN_HOST_NETWORK_NAMESPACE=$VALUE
     ;;
+  --ex-gw-network-interface)
+    OVN_EX_GW_NETWORK_INTERFACE=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -280,6 +284,8 @@ ovn_sflow_targets=${OVN_SFLOW_TARGETS}
 echo "ovn_sflow_targets: ${ovn_sflow_targets}"
 ovn_ipfix_targets=${OVN_IPFIX_TARGETS}
 echo "ovn_ipfix_targets: ${ovn_ipfix_targets}"
+ovn_ex_gw_networking_interface=${OVN_EX_GW_NETWORK_INTERFACE}
+echo "ovn_ex_gw_networking_interface: ${ovn_ex_gw_networking_interface}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -304,6 +310,7 @@ ovn_image=${image} \
   ovn_netflow_targets=${ovn_netflow_targets} \
   ovn_sflow_targets=${ovn_sflow_targets} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
+  ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
 
@@ -332,6 +339,7 @@ ovn_image=${image} \
   ovn_netflow_targets=${ovn_netflow_targets} \
   ovn_sflow_targets=${ovn_sflow_targets} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
+  ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovnkube_app_name=ovnkube-node-smart-nic-host \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node-smart-nic-host.yaml
 
@@ -357,6 +365,7 @@ ovn_image=${image} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
+  ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ../yaml/ovnkube-master.yaml
 
 ovn_image=${image} \

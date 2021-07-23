@@ -64,26 +64,33 @@ const (
 )
 
 type L3GatewayConfig struct {
-	Mode           config.GatewayMode
-	ChassisID      string
-	InterfaceID    string
-	MACAddress     net.HardwareAddr
-	IPAddresses    []*net.IPNet
-	NextHops       []net.IP
-	NodePortEnable bool
-	VLANID         *uint
+	Mode                config.GatewayMode
+	ChassisID           string
+	InterfaceID         string
+	MACAddress          net.HardwareAddr
+	IPAddresses         []*net.IPNet
+	EgressGWInterfaceID string
+	EgressGWMACAddress  net.HardwareAddr
+	EgressGWIPAddresses []*net.IPNet
+	NextHops            []net.IP
+	NodePortEnable      bool
+	VLANID              *uint
 }
 
 type l3GatewayConfigJSON struct {
-	Mode           config.GatewayMode `json:"mode"`
-	InterfaceID    string             `json:"interface-id,omitempty"`
-	MACAddress     string             `json:"mac-address,omitempty"`
-	IPAddresses    []string           `json:"ip-addresses,omitempty"`
-	IPAddress      string             `json:"ip-address,omitempty"`
-	NextHops       []string           `json:"next-hops,omitempty"`
-	NextHop        string             `json:"next-hop,omitempty"`
-	NodePortEnable string             `json:"node-port-enable,omitempty"`
-	VLANID         string             `json:"vlan-id,omitempty"`
+	Mode                config.GatewayMode `json:"mode"`
+	InterfaceID         string             `json:"interface-id,omitempty"`
+	MACAddress          string             `json:"mac-address,omitempty"`
+	IPAddresses         []string           `json:"ip-addresses,omitempty"`
+	IPAddress           string             `json:"ip-address,omitempty"`
+	EgressGWInterfaceID string             `json:"exgw-interface-id,omitempty"`
+	EgressGWMACAddress  string             `json:"exgw-mac-address,omitempty"`
+	EgressGWIPAddresses []string           `json:"exgw-ip-addresses,omitempty"`
+	EgressGWIPAddress   string             `json:"exgw-ip-address,omitempty"`
+	NextHops            []string           `json:"next-hops,omitempty"`
+	NextHop             string             `json:"next-hop,omitempty"`
+	NodePortEnable      string             `json:"node-port-enable,omitempty"`
+	VLANID              string             `json:"vlan-id,omitempty"`
 }
 
 func (cfg *L3GatewayConfig) MarshalJSON() ([]byte, error) {
@@ -96,6 +103,8 @@ func (cfg *L3GatewayConfig) MarshalJSON() ([]byte, error) {
 
 	cfgjson.InterfaceID = cfg.InterfaceID
 	cfgjson.MACAddress = cfg.MACAddress.String()
+	cfgjson.EgressGWInterfaceID = cfg.EgressGWInterfaceID
+	cfgjson.EgressGWMACAddress = cfg.EgressGWMACAddress.String()
 	cfgjson.NodePortEnable = fmt.Sprintf("%t", cfg.NodePortEnable)
 	if cfg.VLANID != nil {
 		cfgjson.VLANID = fmt.Sprintf("%d", *cfg.VLANID)
@@ -107,6 +116,13 @@ func (cfg *L3GatewayConfig) MarshalJSON() ([]byte, error) {
 	}
 	if len(cfgjson.IPAddresses) == 1 {
 		cfgjson.IPAddress = cfgjson.IPAddresses[0]
+	}
+	cfgjson.EgressGWIPAddresses = make([]string, len(cfg.EgressGWIPAddresses))
+	for i, ip := range cfg.EgressGWIPAddresses {
+		cfgjson.EgressGWIPAddresses[i] = ip.String()
+	}
+	if len(cfgjson.EgressGWIPAddresses) == 1 {
+		cfgjson.EgressGWIPAddress = cfgjson.EgressGWIPAddresses[0]
 	}
 	cfgjson.NextHops = make([]string, len(cfg.NextHops))
 	for i, nh := range cfg.NextHops {
@@ -133,6 +149,8 @@ func (cfg *L3GatewayConfig) UnmarshalJSON(bytes []byte) error {
 	}
 
 	cfg.InterfaceID = cfgjson.InterfaceID
+	cfg.EgressGWInterfaceID = cfgjson.EgressGWInterfaceID
+
 	cfg.NodePortEnable = cfgjson.NodePortEnable == "true"
 	if cfgjson.VLANID != "" {
 		vlanID64, err := strconv.ParseUint(cfgjson.VLANID, 10, 0)
@@ -150,6 +168,30 @@ func (cfg *L3GatewayConfig) UnmarshalJSON(bytes []byte) error {
 	cfg.MACAddress, err = net.ParseMAC(cfgjson.MACAddress)
 	if err != nil {
 		return fmt.Errorf("bad 'mac-address' value %q: %v", cfgjson.MACAddress, err)
+	}
+
+	if cfg.EgressGWInterfaceID != "" {
+		cfg.EgressGWMACAddress, err = net.ParseMAC(cfgjson.EgressGWMACAddress)
+		if err != nil {
+			return fmt.Errorf("bad 'egress mac-address' value %q: %v", cfgjson.EgressGWMACAddress, err)
+		}
+		if len(cfgjson.EgressGWIPAddresses) == 0 {
+			cfg.EgressGWIPAddresses = make([]*net.IPNet, 1)
+			ip, ipnet, err := net.ParseCIDR(cfgjson.EgressGWIPAddress)
+			if err != nil {
+				return fmt.Errorf("bad 'ip-address' value %q: %v", cfgjson.EgressGWIPAddress, err)
+			}
+			cfg.EgressGWIPAddresses[0] = &net.IPNet{IP: ip, Mask: ipnet.Mask}
+		} else {
+			cfg.EgressGWIPAddresses = make([]*net.IPNet, len(cfgjson.EgressGWIPAddresses))
+			for i, ipStr := range cfgjson.EgressGWIPAddresses {
+				ip, ipnet, err := net.ParseCIDR(ipStr)
+				if err != nil {
+					return fmt.Errorf("bad 'ip-addresses' value %q: %v", ipStr, err)
+				}
+				cfg.EgressGWIPAddresses[i] = &net.IPNet{IP: ip, Mask: ipnet.Mask}
+			}
+		}
 	}
 
 	if len(cfgjson.IPAddresses) == 0 {
@@ -225,7 +267,6 @@ func ParseNodeL3GatewayAnnotation(node *kapi.Node) (*L3GatewayConfig, error) {
 			return nil, fmt.Errorf("%s annotation not found", ovnNodeChassisID)
 		}
 	}
-
 	return cfg, nil
 }
 

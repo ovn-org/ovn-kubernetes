@@ -53,6 +53,14 @@ func gatewayCleanup(nodeName string) error {
 			"error: %v", externalSwitch, stderr, err)
 	}
 
+	exGWexternalSwitch := types.ExternalSwitchPrefix + types.ExternalSwitchPrefix + nodeName
+	_, stderr, err = util.RunOVNNbctl("--if-exist", "ls-del",
+		exGWexternalSwitch)
+	if err != nil {
+		return fmt.Errorf("failed to delete external switch %s, stderr: %q, "+
+			"error: %v", exGWexternalSwitch, stderr, err)
+	}
+
 	// If exists, remove the TCP, UDP load-balancers created for north-south traffic for gateway router.
 	k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP, err := getGatewayLoadBalancers(gatewayRouter)
 	if err != nil {
