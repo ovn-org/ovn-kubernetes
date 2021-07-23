@@ -10,6 +10,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -380,11 +381,12 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 			}
 		}
 	}
+
 	return nil
 }
 
 // This DistributedGWPort guarantees to always have both IPv4 and IPv6 regardless of dual-stack
-func addDistributedGWPort() error {
+func (oc *Controller) addDistributedGWPort() error {
 	masterChassisID, err := util.GetNodeChassisID()
 	if err != nil {
 		return fmt.Errorf("failed to get master's chassis ID error: %v", err)
@@ -392,89 +394,149 @@ func addDistributedGWPort() error {
 
 	// the distributed gateway port is always dual-stack and uses the IPv4 address to generate its mac
 	dgpName := types.RouterToSwitchPrefix + types.NodeLocalSwitch
+
 	dgpMac := util.IPAddrToHWAddr(net.ParseIP(types.V4NodeLocalDistributedGWPortIP)).String()
 	dgpNetworkV4 := fmt.Sprintf("%s/%d", types.V4NodeLocalDistributedGWPortIP, types.V4NodeLocalNATSubnetPrefix)
 	dgpNetworkV6 := fmt.Sprintf("%s/%d", types.V6NodeLocalDistributedGWPortIP, types.V6NodeLocalNATSubnetPrefix)
 
-	// check if there is already a distributed gateway port
-	dgpUUID, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "logical_router_port", "name="+dgpName)
+	logicalRouter := nbdb.LogicalRouter{}
+	logicalRouterPort := nbdb.LogicalRouterPort{
+		Name:     dgpName,
+		MAC:      dgpMac,
+		Networks: []string{dgpNetworkV4, dgpNetworkV6},
+	}
+	opModels := []libovsdbops.OperationModel{
+		{
+			Model: &logicalRouterPort,
+			OnModelUpdates: []interface{}{
+				&logicalRouterPort.MAC,
+				&logicalRouterPort.Networks,
+			},
+			ExistingResult: &[]nbdb.LogicalRouterPort{},
+		},
+		{
+			Model:          &logicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+			OnModelMutations: func() []model.Mutation {
+				return libovsdbops.OnReferentialModelMutation(&logicalRouter.Ports, ovsdb.MutateOperationInsert, logicalRouterPort)
+			},
+			ExistingResult: &[]nbdb.LogicalRouter{},
+		},
+	}
+	res, err := oc.modelClient.CreateOrUpdate(opModels...)
 	if err != nil {
-		return fmt.Errorf("error executing find logical_router_port for distributed GW port, stderr: %q, %+v", stderr, err)
+		return fmt.Errorf("unable to add distributed GW port: %s to logical router: %s, err: %v", dgpName, types.OVNClusterRouter, err)
+	}
+	// The DPG port will be used to create the gateway chassis below. It can't
+	// have a named UUID, because it won't be found, hence: swap out the named
+	// UUID to the real one if we are performing a create operation.
+	if libovsdbops.IsNamedUUID(logicalRouterPort.UUID) {
+		logicalRouterPort.UUID = res[0].UUID.GoUUID
 	}
 
-	// if the port exists convert it to dual-stack if needed
-	// otherwise create a new dual-stack port
-	var nbctlArgs []string
-	if len(dgpUUID) > 0 {
-		klog.V(5).Infof("Distributed GW port already exists with uuid %s", dgpUUID)
-		// update the mac address if necessary
-		currentMac, _, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-			"get", "logical_router_port", dgpUUID, "mac")
-		if err != nil {
-			return err
-		}
-		if currentMac != dgpMac {
-			_, _, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-				"set", "logical_router_port", dgpUUID, "mac=\""+dgpMac+"\"")
-			if err != nil {
-				return err
-			}
-			klog.V(5).Infof("Updated mac address of distributed GW port from %s to %s", currentMac, dgpMac)
-		}
-		// update the port networks if necessary
-		currentNetworks, _, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-			"get", "logical_router_port", dgpUUID, "networks")
-		if err != nil {
-			return err
-		}
-		// only consider converting from single to dual-stack
-		if len(strings.Split(currentNetworks, ",")) != 2 {
-			_, _, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-				"set", "logical_router_port", dgpUUID, "networks=\""+dgpNetworkV4+"\",\""+dgpNetworkV6+"\"")
-			if err != nil {
-				return err
-			}
-			klog.V(5).Infof("Updated network addresses of distributed GW port from %s to %s,%s",
-				currentNetworks, dgpNetworkV4, dgpNetworkV6)
-		}
-	} else {
-		nbctlArgs = append(nbctlArgs, "lrp-add",
-			types.OVNClusterRouter, dgpName, dgpMac, dgpNetworkV4, dgpNetworkV6,
-		)
+	gatewayChassis := nbdb.GatewayChassis{
+		ChassisName: masterChassisID,
+		ExternalIDs: map[string]string{
+			"dpg_name": dgpName,
+		},
+		Name:     fmt.Sprintf("%s_%s", dgpName, masterChassisID),
+		Priority: 100,
 	}
-	// set gateway chassis (the current master node) for distributed gateway port)
-	nbctlArgs = append(nbctlArgs,
-		"--", "--id=@gw", "create", "gateway_chassis", "chassis_name="+masterChassisID, "external_ids:dgp_name="+dgpName,
-		fmt.Sprintf("name=%s_%s", dgpName, masterChassisID), "priority=100",
-		"--", "set", "logical_router_port", dgpName, "gateway_chassis=@gw")
-	stdout, stderr, err := util.RunOVNNbctl(nbctlArgs...)
-	if err != nil {
-		return fmt.Errorf("failed to set gateway chassis %s for distributed gateway port %s: "+
-			"stdout: %q, stderr: %q, error: %v", masterChassisID, dgpName, stdout, stderr, err)
+	opModels = []libovsdbops.OperationModel{
+		{
+			Model: &gatewayChassis,
+			OnModelUpdates: []interface{}{
+				&gatewayChassis.ChassisName,
+				&gatewayChassis.Name,
+			},
+			ExistingResult: &[]nbdb.GatewayChassis{},
+		},
+		{
+			Model: &logicalRouterPort,
+			OnModelMutations: func() []model.Mutation {
+				return libovsdbops.OnReferentialModelMutation(&logicalRouterPort.GatewayChassis, ovsdb.MutateOperationInsert, gatewayChassis)
+			},
+			ExistingResult: &[]nbdb.LogicalRouterPort{},
+		},
+	}
+	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		return fmt.Errorf("unable to add gateway chassis: %s to logical router port: %s, err: %v", masterChassisID, dgpName, err)
 	}
 
 	// connect the distributed gateway port to logical switch configured with localnet port
-	nbctlArgs = []string{
-		"--may-exist", "ls-add", types.NodeLocalSwitch,
+	logicalSwitch := nbdb.LogicalSwitch{
+		Name: types.NodeLocalSwitch,
 	}
+	opModels = []libovsdbops.OperationModel{
+		{
+			Model:          &logicalSwitch,
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.NodeLocalSwitch },
+			ExistingResult: &[]nbdb.LogicalSwitch{},
+		},
+	}
+	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		return fmt.Errorf("unable to create the logical switch for the localnet port, err: %v", err)
+	}
+
 	// add localnet port to the logical switch
 	lclNetPortname := "lnet-" + types.NodeLocalSwitch
-	nbctlArgs = append(nbctlArgs,
-		"--", "--may-exist", "lsp-add", types.NodeLocalSwitch, lclNetPortname,
-		"--", "set", "logical_switch_port", lclNetPortname, "addresses=unknown", "type=localnet",
-		"options:network_name="+types.LocalNetworkName)
+
+	logicalSwitchPort := nbdb.LogicalSwitchPort{
+		Name:      lclNetPortname,
+		Addresses: []string{"unknown"},
+		Type:      "localnet",
+		Options: map[string]string{
+			"network_name": types.LocalNetworkName,
+		},
+	}
+	opModels = []libovsdbops.OperationModel{
+		{
+			Model:          &logicalSwitchPort,
+			ExistingResult: &[]nbdb.LogicalSwitchPort{},
+		},
+		{
+			Model:          &logicalSwitch,
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.NodeLocalSwitch },
+			OnModelMutations: func() []model.Mutation {
+				return libovsdbops.OnReferentialModelMutation(&logicalSwitch.Ports, ovsdb.MutateOperationInsert, logicalSwitchPort)
+			},
+			ExistingResult: &[]nbdb.LogicalSwitch{},
+		},
+	}
+	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		return fmt.Errorf("unable to add the localnet port to the logical switch, err: %v", err)
+	}
+
 	// connect the switch to the distributed router
 	lspName := types.SwitchToRouterPrefix + types.NodeLocalSwitch
-	nbctlArgs = append(nbctlArgs,
-		"--", "--may-exist", "lsp-add", types.NodeLocalSwitch, lspName,
-		"--", "set", "logical_switch_port", lspName, "type=router", "addresses=router",
-		"options:nat-addresses=router", "options:router-port="+dgpName)
-	stdout, stderr, err = util.RunOVNNbctl(nbctlArgs...)
-	if err != nil {
-		return fmt.Errorf("failed creating logical switch %s and its ports (%s, %s) "+
-			"stdout: %q, stderr: %q, error: %v", types.NodeLocalSwitch, lclNetPortname, lspName, stdout, stderr, err)
+
+	logicalSwitchPort = nbdb.LogicalSwitchPort{
+		Name:      lspName,
+		Addresses: []string{"router"},
+		Type:      "router",
+		Options: map[string]string{
+			"nat-addresses": "router",
+			"router-port":   dgpName,
+		},
 	}
+	opModels = []libovsdbops.OperationModel{
+		{
+			Model:          &logicalSwitchPort,
+			ExistingResult: &[]nbdb.LogicalSwitchPort{},
+		},
+		{
+			Model:          &logicalSwitch,
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.NodeLocalSwitch },
+			OnModelMutations: func() []model.Mutation {
+				return libovsdbops.OnReferentialModelMutation(&logicalSwitch.Ports, ovsdb.MutateOperationInsert, logicalSwitchPort)
+			},
+			ExistingResult: &[]nbdb.LogicalSwitch{},
+		},
+	}
+	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		return fmt.Errorf("unable to add the localnet port to the logical switch, err: %v", err)
+	}
+
 	// finally add an entry to the OVN SB MAC_Binding table, if not present, to capture the
 	// MAC-IP binding of types.V4NodeLocalNATSubnetNextHop address or
 	// types.V6NodeLocalNATSubnetNextHop address to its MAC. Normally, this will
@@ -485,15 +547,17 @@ func addDistributedGWPort() error {
 	var nodeLocalNatSubnetNextHop string
 	dnatSnatNextHopMac := util.IPAddrToHWAddr(net.ParseIP(types.V4NodeLocalNATSubnetNextHop))
 	nodeLocalNatSubnetNextHop = types.V4NodeLocalNATSubnetNextHop + " " + types.V6NodeLocalNATSubnetNextHop
-	stdout, stderr, err = util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "MAC_Binding",
-		"logical_port="+dgpName, fmt.Sprintf(`mac="%s"`, dnatSnatNextHopMac))
-	if err != nil {
+
+	macResult := []sbdb.MACBinding{}
+	if err := oc.sbClient.WhereCache(func(mb *sbdb.MACBinding) bool {
+		return mb.LogicalPort == dgpName && mb.MAC == dnatSnatNextHopMac.String()
+	}).List(&macResult); err != nil {
 		return fmt.Errorf("failed to check existence of MAC_Binding entry of (%s, %s) for distributed router port %s "+
-			"stderr: %q, error: %v", nodeLocalNatSubnetNextHop, dnatSnatNextHopMac, dgpName, stderr, err)
+			"error: %v", nodeLocalNatSubnetNextHop, dnatSnatNextHopMac, dgpName, err)
 	}
-	if stdout != "" {
-		klog.Infof("The MAC_Binding entry of (%s, %s) exists on distributed router port %s with uuid %s",
-			nodeLocalNatSubnetNextHop, dnatSnatNextHopMac, dgpName, stdout)
+
+	if len(macResult) > 0 {
+		klog.Infof("The MAC_Binding entry of (%s, %s) exists on distributed router port %s", nodeLocalNatSubnetNextHop, dnatSnatNextHopMac, dgpName)
 		return nil
 	}
 
