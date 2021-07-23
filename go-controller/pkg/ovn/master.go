@@ -1277,19 +1277,22 @@ func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) e
 	return nil
 }
 
+// deleteNodeLogicalNetwork removes the logical switch and router associated with the node
 func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
-	// Remove the logical switch associated with the node
-	if _, stderr, err := util.RunOVNNbctl("--if-exist", "ls-del", nodeName); err != nil {
-		return fmt.Errorf("failed to delete logical switch %s, "+
-			"stderr: %q, error: %v", nodeName, stderr, err)
+	logicalRouterName := types.RouterToSwitchPrefix + nodeName
+	opModels := []util.OperationModel{
+		{
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == nodeName },
+			ExistingResult: &[]nbdb.LogicalSwitch{},
+		},
+		{
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == logicalRouterName },
+			ExistingResult: &[]nbdb.LogicalRouter{},
+		},
 	}
-
-	// Remove the patch port that connects distributed router to node's logical switch
-	if _, stderr, err := util.RunOVNNbctl("--if-exist", "lrp-del", types.RouterToSwitchPrefix+nodeName); err != nil {
-		return fmt.Errorf("failed to delete logical router port %s%s, "+
-			"stderr: %q, error: %v", types.RouterToSwitchPrefix, nodeName, stderr, err)
+	if err := oc.modelClient.Delete(opModels...); err != nil {
+		return fmt.Errorf("failed to delete logical switch and router associated with node: %s, error: %v", nodeName, err)
 	}
-
 	return nil
 }
 
