@@ -771,10 +771,27 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	if config.Gateway.Mode != config.GatewayModeLocal {
 		gr := util.GetGatewayRouterFromNode(node.Name)
 		for _, clusterLB := range oc.clusterLBsUUIDs {
-			_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-lb-add", gr, clusterLB)
-			if err != nil {
-				return fmt.Errorf("unable to add cluster LB: %s to %s, stderr: %q, error: %v",
-					clusterLB, gr, stderr, err)
+			logicalRouter := nbdb.LogicalRouter{}
+			opModels := []util.OperationModel{
+				{
+					Model: &logicalRouter,
+					ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
+						return lr.Name == gr
+					},
+					OnModelMutations: func() []model.Mutation {
+						return []model.Mutation{
+							{
+								Field:   &logicalRouter.LoadBalancer,
+								Mutator: ovsdb.MutateOperationInsert,
+								Value:   []string{clusterLB},
+							},
+						}
+					},
+					ExistingResult: &[]nbdb.LogicalRouter{},
+				},
+			}
+			if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+				return fmt.Errorf("unable to add cluster LB: %s to %s, error: %v", clusterLB, gr, err)
 			}
 		}
 	}
