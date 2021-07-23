@@ -445,7 +445,7 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 		}
 		pod := podEntry.pod
 		if !util.PodScheduled(pod) {
-			return
+			continue
 		}
 		podTimer := podEntry.timeStamp.Add(time.Minute)
 		if updateAll || now.After(podTimer) {
