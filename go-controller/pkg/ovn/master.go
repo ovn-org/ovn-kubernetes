@@ -24,10 +24,13 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	"github.com/ovn-org/libovsdb/model"
+	"github.com/ovn-org/libovsdb/ovsdb"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -375,12 +378,26 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 // SetupMaster creates the central router and load-balancers for the network
 func (oc *Controller) SetupMaster(masterNodeName string) error {
 	// Create a single common distributed router for the cluster.
-	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", types.OVNClusterRouter,
-		"--", "set", "logical_router", types.OVNClusterRouter, "external_ids:k8s-cluster-router=yes")
-	if err != nil {
-		klog.Errorf("Failed to create a single common distributed router for the cluster, "+
-			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-		return err
+	logicalRouter := nbdb.LogicalRouter{
+		Name: types.OVNClusterRouter,
+		ExternalIDs: map[string]string{
+			"k8s-cluster-router": "yes",
+		},
+	}
+	if oc.multicastSupport {
+		logicalRouter.Options = map[string]string{
+			"mcast_relay": "true",
+		}
+	}
+	opModels := []util.OperationModel{
+		{
+			Model:          &logicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+			ExistingResult: &[]nbdb.LogicalRouter{},
+		},
+	}
+	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		return fmt.Errorf("Failed to create a single common distributed router for the cluster, error: %v", err)
 	}
 
 	if config.Gateway.Mode == config.GatewayModeLocal {
@@ -390,10 +407,11 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	}
 
 	// Determine SCTP support
-	oc.SCTPSupport, err = util.DetectSCTPSupport()
+	hasSCTPSupport, err := util.DetectSCTPSupport()
 	if err != nil {
 		return err
 	}
+	oc.SCTPSupport = hasSCTPSupport
 	if !oc.SCTPSupport {
 		klog.Warningf("SCTP unsupported by this version of OVN. Kubernetes service creation with SCTP will not work ")
 	} else {
@@ -419,14 +437,6 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	// If supported, enable IGMP relay on the router to forward multicast
 	// traffic between nodes.
 	if oc.multicastSupport {
-		stdout, stderr, err = util.RunOVNNbctl("--", "set", "logical_router",
-			types.OVNClusterRouter, "options:mcast_relay=\"true\"")
-		if err != nil {
-			klog.Errorf("Failed to enable IGMP relay on the cluster router, "+
-				"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-			return err
-		}
-
 		// Drop IP multicast globally. Multicast is allowed only if explicitly
 		// enabled in a namespace.
 		if err := oc.createDefaultDenyMulticastPolicy(); err != nil {
@@ -443,16 +453,6 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	}
 
 	// Create load balancers
-
-	// If we enable idling we have to set the option before creating the loadbalancers
-	if config.Kubernetes.OVNEmptyLbEvents {
-		_, _, err := util.RunOVNNbctl("set", "nb_global", ".", "options:controller_event=true")
-		if err != nil {
-			klog.Error("Unable to enable controller events. Unidling not possible")
-			return err
-		}
-	}
-
 	// We have 3 load-balancers per protocol to implement the East-west traffic	//
 	protocols := []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP}
 	if oc.SCTPSupport {
@@ -497,39 +497,110 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	}
 
 	// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
-	_, stderr, err = util.RunOVNNbctl("--may-exist", "ls-add", types.OVNJoinSwitch)
-	if err != nil {
-		klog.Errorf("Failed to create logical switch %s, stderr: %q, error: %v", types.OVNJoinSwitch, stderr, err)
-		return err
+	logicalSwitch := nbdb.LogicalSwitch{
+		Name: types.OVNJoinSwitch,
+	}
+	opModels = []util.OperationModel{
+		{
+			Model:          &logicalSwitch,
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.OVNJoinSwitch },
+			ExistingResult: &[]nbdb.LogicalSwitch{},
+		},
+	}
+	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		return fmt.Errorf("Failed to create logical switch %s, error: %v", types.OVNJoinSwitch, err)
+
 	}
 
 	// Connect the distributed router to OVNJoinSwitch.
 	drSwitchPort := types.JoinSwitchToGWRouterPrefix + types.OVNClusterRouter
 	drRouterPort := types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter
+	drSwitchPortNamedUUID := util.GenerateNamedUUID(drSwitchPort)
+	drRouterPortNamedUUID := util.GenerateNamedUUID(drRouterPort)
+
 	gwLRPMAC := util.IPAddrToHWAddr(gwLRPIfAddrs[0].IP)
-	args := []string{
-		"--", "--if-exists", "lrp-del", drRouterPort,
-		"--", "lrp-add", types.OVNClusterRouter, drRouterPort, gwLRPMAC.String(),
-	}
+	gwLRPNetworks := []string{}
 	for _, gwLRPIfAddr := range gwLRPIfAddrs {
-		args = append(args, gwLRPIfAddr.String())
+		gwLRPNetworks = append(gwLRPNetworks, gwLRPIfAddr.String())
 	}
-	_, stderr, err = util.RunOVNNbctl(args...)
-	if err != nil {
-		klog.Errorf("Failed to add logical router port %s, stderr: %q, error: %v", drRouterPort, stderr, err)
-		return err
+	logicalRouterPort := nbdb.LogicalRouterPort{
+		Name:     drRouterPort,
+		UUID:     drRouterPortNamedUUID,
+		MAC:      gwLRPMAC.String(),
+		Networks: gwLRPNetworks,
+	}
+	logicalRouterPortRes := []nbdb.LogicalRouterPort{}
+	opModels = []util.OperationModel{
+		{
+			Model:          &logicalRouterPort,
+			ModelPredicate: func(lrp *nbdb.LogicalRouterPort) bool { return lrp.Name == drRouterPort },
+			OnModelUpdates: []interface{}{
+				&logicalRouterPort.MAC,
+				&logicalRouterPort.Networks,
+			},
+			ExistingResult: &logicalRouterPortRes,
+		},
+		{
+			Model:          &logicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+			OnModelMutations: func() []model.Mutation {
+				if len(logicalRouterPortRes) > 0 {
+					return nil
+				}
+				return []model.Mutation{
+					{
+						Field:   &logicalRouter.Ports,
+						Mutator: ovsdb.MutateOperationInsert,
+						Value:   []string{drRouterPortNamedUUID},
+					},
+				}
+			},
+			ExistingResult: &[]nbdb.LogicalRouter{},
+		},
+	}
+	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		return fmt.Errorf("Failed to add logical router port %s, error: %v", drRouterPort, err)
 	}
 
 	// Connect the switch OVNJoinSwitch to the router.
-	_, stderr, err = util.RunOVNNbctl("--may-exist", "lsp-add", types.OVNJoinSwitch,
-		drSwitchPort, "--", "set", "logical_switch_port", drSwitchPort, "type=router",
-		"options:router-port="+drRouterPort, "addresses=router")
-	if err != nil {
-		klog.Errorf("Failed to add router-type logical switch port %s to %s, stderr: %q, error: %v",
-			drSwitchPort, types.OVNJoinSwitch, stderr, err)
-		return err
+	logicalSwitchPort := nbdb.LogicalSwitchPort{
+		Name: drSwitchPort,
+		UUID: drSwitchPortNamedUUID,
+		Type: "router",
+		Options: map[string]string{
+			"router-port": drRouterPort,
+		},
+		Addresses: []string{"router"},
 	}
-
+	logicalSwitchPortRes := []nbdb.LogicalSwitchPort{}
+	opModels = []util.OperationModel{
+		{
+			Model:          &logicalSwitchPort,
+			ModelPredicate: func(lsp *nbdb.LogicalSwitchPort) bool { return lsp.Name == drSwitchPort },
+			ExistingResult: &logicalSwitchPortRes,
+		},
+		{
+			Model:          &logicalSwitch,
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.OVNJoinSwitch },
+			OnModelMutations: func() []model.Mutation {
+				if len(logicalSwitchPortRes) > 0 {
+					return nil
+				}
+				return []model.Mutation{
+					{
+						Field:   &logicalSwitch.Ports,
+						Mutator: ovsdb.MutateOperationInsert,
+						Value:   []string{drSwitchPortNamedUUID},
+					},
+				}
+			},
+			ExistingResult: &[]nbdb.LogicalSwitch{},
+		},
+	}
+	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		return fmt.Errorf("Failed to add router-type logical switch port %s to %s, error: %v",
+			drSwitchPort, types.OVNJoinSwitch, err)
+	}
 	return nil
 }
 
