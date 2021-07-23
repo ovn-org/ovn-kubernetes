@@ -678,13 +678,48 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 		}
 
 		if config.Gateway.Mode == config.GatewayModeLocal {
-			stdout, stderr, err := util.RunOVNNbctl("--may-exist",
-				"--policy=src-ip", "lr-route-add", types.OVNClusterRouter,
-				hostSubnet.String(), mgmtIfAddr.IP.String())
-			if err != nil {
+			logicalRouter := nbdb.LogicalRouter{}
+			namedUUID := "lrsr"
+			logicalRouterStaticRoutes := nbdb.LogicalRouterStaticRoute{
+				Policy:   []string{"src-ip"},
+				UUID:     namedUUID,
+				IPPrefix: hostSubnet.String(),
+				Nexthop:  mgmtIfAddr.IP.String(),
+			}
+			logicalRouterStaticRoutesRes := []nbdb.LogicalRouterStaticRoute{}
+			opModels := []util.OperationModel{
+				{
+					Model: &logicalRouterStaticRoutes,
+					ModelPredicate: func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
+						return lrsr.IPPrefix == hostSubnet.String() && lrsr.Nexthop == mgmtIfAddr.IP.String()
+					},
+					OnModelUpdates: []interface{}{
+						&logicalRouterStaticRoutes.Nexthop,
+						&logicalRouterStaticRoutes.IPPrefix,
+					},
+					ExistingResult: &logicalRouterStaticRoutesRes,
+				},
+				{
+					Model:          &logicalRouter,
+					ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+					OnModelMutations: func() []model.Mutation {
+						if len(logicalRouterStaticRoutesRes) > 0 {
+							return nil
+						}
+						return []model.Mutation{
+							{
+								Field:   &logicalRouter.StaticRoutes,
+								Mutator: ovsdb.MutateOperationInsert,
+								Value:   []string{namedUUID},
+							},
+						}
+					},
+					ExistingResult: &[]nbdb.LogicalRouter{},
+				},
+			}
+			if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
 				return fmt.Errorf("failed to add source IP address based "+
-					"routes in distributed router %s, stdout: %q, "+
-					"stderr: %q, error: %v", types.OVNClusterRouter, stdout, stderr, err)
+					"routes in distributed router %s, error: %v", types.OVNClusterRouter, err)
 			}
 		}
 	}
