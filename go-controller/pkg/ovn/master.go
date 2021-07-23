@@ -817,9 +817,11 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 
 	var v4Gateway, v6Gateway net.IP
 	var hostNetworkPolicyIPs []net.IP
+	logicalRouterPortNetwork := []string{}
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
+		logicalRouterPortNetwork = append(logicalRouterPortNetwork, gwIfAddr.String())
 		hostNetworkPolicyIPs = append(hostNetworkPolicyIPs, mgmtIfAddr.IP)
 
 		if utilnet.IsIPv6CIDR(hostSubnet) {
@@ -840,6 +842,35 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 				"other-config:exclude_ips="+excludeIPs,
 			)
 		}
+	}
+
+	logicalRouterPortName := types.RouterToSwitchPrefix + nodeName
+	logicalRouterPort := nbdb.LogicalRouterPort{
+		Name:     logicalRouterPortName,
+		MAC:      nodeLRPMAC.String(),
+		Networks: logicalRouterPortNetwork,
+	}
+	logicalRouter := nbdb.LogicalRouter{}
+	opModels := []libovsdbops.OperationModel{
+		{
+			Model: &logicalRouterPort,
+			OnModelUpdates: []interface{}{
+				&logicalRouterPort.Networks,
+				&logicalRouterPort.MAC,
+			},
+			ExistingResult: &[]nbdb.LogicalRouterPort{},
+		},
+		{
+			Model:          &logicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+			OnModelMutations: func() []model.Mutation {
+				return libovsdbops.OnReferentialModelMutation(&logicalRouter.Ports, ovsdb.MutateOperationInsert, logicalRouterPort)
+			},
+			ExistingResult: &[]nbdb.LogicalRouter{},
+		},
+	}
+	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		return fmt.Errorf("failed to add logical port to router, error: %v", err)
 	}
 
 	// Create a logical switch and set its subnet.

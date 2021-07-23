@@ -291,6 +291,15 @@ func addNodeLogicalFlows(testData []libovsdb.TestData, expectedOVNClusterRouter 
 		"ovn-nbctl --timeout=15 --may-exist ls-add " + node.Name + " -- set logical_switch " + node.Name + " other-config:subnet=" + node.NodeSubnet + " other-config:exclude_ips=" + node.NodeMgmtPortIP,
 	})
 
+	testData = append(testData, &nbdb.LogicalRouterPort{
+		Name:     types.RouterToSwitchPrefix + node.Name,
+		UUID:     types.RouterToSwitchPrefix + node.Name + "-UUID",
+		MAC:      node.NodeLRPMAC,
+		Networks: []string{node.NodeGWIP},
+	})
+
+	expectedOVNClusterRouter.Ports = append(expectedOVNClusterRouter.Ports, types.RouterToSwitchPrefix+node.Name+"-UUID")
+
 	testData = append(testData, &nbdb.LogicalSwitchPort{
 		Name: types.SwitchToRouterPrefix + node.Name,
 		UUID: types.SwitchToRouterPrefix + node.Name + "-UUID",
