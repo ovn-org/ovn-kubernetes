@@ -21,7 +21,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -283,29 +282,37 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID, sct
 }
 */
 
-func addNodeLogicalFlows(testData []libovsdb.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter, fexec *ovntest.FakeExec, node *tNode, clusterCIDR string, enableIPv6 bool) []libovsdb.TestData {
+func addNodeLogicalFlows(testData []libovsdb.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter, expectedNodeSwitch *nbdb.LogicalSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup *nbdb.PortGroup, fexec *ovntest.FakeExec, node *tNode, clusterCIDR string, enableIPv6 bool) []libovsdb.TestData {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --format=csv --columns=name,other-config find logical_switch",
 	})
 
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --may-exist ls-add " + node.Name + " -- set logical_switch " + node.Name + " other-config:subnet=" + node.NodeSubnet + " other-config:exclude_ips=" + node.NodeMgmtPortIP,
-		"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + node.Name + " " + types.SwitchToRouterPrefix + node.Name + " -- lsp-set-type " + types.SwitchToRouterPrefix + node.Name + " router -- lsp-set-options " + types.SwitchToRouterPrefix + node.Name + " router-port=" + types.RouterToSwitchPrefix + node.Name + " -- lsp-set-addresses " + types.SwitchToRouterPrefix + node.Name + " router",
 	})
 
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port " + types.SwitchToRouterPrefix + node.Name + " _uuid",
-		Output: fakeUUID + "\n",
+	testData = append(testData, &nbdb.LogicalSwitchPort{
+		Name: types.SwitchToRouterPrefix + node.Name,
+		UUID: types.SwitchToRouterPrefix + node.Name + "-UUID",
+		Type: "router",
+		Options: map[string]string{
+			"router-port": types.RouterToSwitchPrefix + node.Name,
+		},
+		Addresses: []string{"router"},
 	})
+	expectedNodeSwitch.Ports = append(expectedNodeSwitch.Ports, types.SwitchToRouterPrefix+node.Name+"-UUID")
+	expectedClusterRouterPortGroup.Ports = []string{types.SwitchToRouterPrefix + node.Name + "-UUID"}
 
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + node.Name + " " + types.K8sPrefix + node.Name + " -- lsp-set-type " + types.K8sPrefix + node.Name + "  -- lsp-set-options " + types.K8sPrefix + node.Name + "  -- lsp-set-addresses " + types.K8sPrefix + node.Name + " " + node.NodeMgmtPortMAC + " " + node.NodeMgmtPortIP,
+	testData = append(testData, &nbdb.LogicalSwitchPort{
+		Name:      types.K8sPrefix + node.Name,
+		UUID:      types.K8sPrefix + node.Name + "-UUID",
+		Type:      "",
+		Options:   nil,
+		Addresses: []string{node.NodeMgmtPortMAC + " " + node.NodeMgmtPortIP},
 	})
+	expectedNodeSwitch.Ports = append(expectedNodeSwitch.Ports, types.K8sPrefix+node.Name+"-UUID")
+	expectedClusterPortGroup.Ports = []string{types.K8sPrefix + node.Name + "-UUID"}
 
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port " + types.K8sPrefix + node.Name + " _uuid",
-		Output: fakeUUID + "\n",
-	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 lsp-list " + node.Name,
 		Output: "29df5ce5-2802-4ee5-891f-4fb27ca776e9 (" + types.K8sPrefix + node.Name + ")",
@@ -335,6 +342,8 @@ func addNodeLogicalFlows(testData []libovsdb.TestData, expectedOVNClusterRouter 
 		Priority: intPriority,
 	})
 	expectedOVNClusterRouter.Policies = append(expectedOVNClusterRouter.Policies, []string{"policy-based-route-1-UUID", "policy-based-route-2-UUID"}...)
+	testData = append(testData, expectedClusterPortGroup)
+	testData = append(testData, expectedClusterRouterPortGroup)
 	return testData
 }
 
@@ -1173,6 +1182,24 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: types.OVNClusterRouter + "-UUID",
 				Name: types.OVNClusterRouter,
 			}
+			expectedNodeSwitch := &nbdb.LogicalSwitch{
+				UUID: node1.Name + "-UUID",
+				Name: node1.Name,
+			}
+			expectedClusterRouterPortGroup := &nbdb.PortGroup{
+				UUID: types.ClusterRtrPortGroupName + "-UUID",
+				Name: types.ClusterRtrPortGroupName,
+				ExternalIDs: map[string]string{
+					"name": types.ClusterRtrPortGroupName,
+				},
+			}
+			expectedClusterPortGroup := &nbdb.PortGroup{
+				UUID: types.ClusterPortGroupName + "-UUID",
+				Name: types.ClusterPortGroupName,
+				ExternalIDs: map[string]string{
+					"name": types.ClusterPortGroupName,
+				},
+			}
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
@@ -1180,17 +1207,16 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						Name: types.OVNJoinSwitch,
 					},
 					expectedOVNClusterRouter,
-					&nbdb.LogicalSwitch{
-						UUID: node1.Name + "-UUID",
-						Name: node1.Name,
-					},
+					expectedNodeSwitch,
+					expectedClusterRouterPortGroup,
+					expectedClusterPortGroup,
 				},
 			}
 			libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedDatabaseState := []libovsdb.TestData{}
-			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, fexec, &node1, clusterCIDR, config.IPv6Mode)
+			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, fexec, &node1, clusterCIDR, config.IPv6Mode)
 			addPBRandNATRules(fexec, &node1, clusterCIDR)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
@@ -1204,14 +1230,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
 			clusterController.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(ovntest.MustParseIPNet(types.V4NodeLocalNATSubnet))
-
-			// clusterController.WatchNodes() needs to following two port groups to have been created.
-			clusterPG := libovsdbops.BuildPortGroup(types.ClusterPortGroupName, types.ClusterPortGroupName, nil, nil)
-			err = libovsdbops.CreateOrUpdatePortGroups(clusterController.nbClient, clusterPG)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			clusterRouterPG := libovsdbops.BuildPortGroup(types.ClusterRtrPortGroupName, types.ClusterRtrPortGroupName, nil, nil)
-			err = libovsdbops.CreateOrUpdatePortGroups(clusterController.nbClient, clusterRouterPG)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// Let the real code run and ensure OVN database sync
 			clusterController.WatchNodes()
@@ -1237,15 +1255,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				IP:   dLRPIP,
 				Mask: dLRPNetwork.Mask,
 			}
-			clusterRouterPG.UUID = types.ClusterRtrPortGroupName + "-UUID"
-			clusterRouterPG.Ports = []string{fakeUUID}
-			clusterPG.UUID = types.ClusterPortGroupName + "-UUID"
-			clusterPG.Ports = []string{fakeUUID}
-			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs})
-			expectedDatabaseState = append(expectedDatabaseState, clusterRouterPG)
-			expectedDatabaseState = append(expectedDatabaseState, clusterPG)
+
+			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs})
 			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-			gomega.Eventually(fexec.CalledMatchesExpected()).Should(gomega.BeTrue(), fexec.ErrorDesc)
+
 			return nil
 		}
 

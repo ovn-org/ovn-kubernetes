@@ -12,7 +12,6 @@ import (
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -251,6 +250,24 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 					UUID: ovntypes.OVNClusterRouter + "-UUID",
 					Name: ovntypes.OVNClusterRouter,
 				}
+				expectedNodeSwitch := &nbdb.LogicalSwitch{
+					UUID: node1.Name + "-UUID",
+					Name: node1.Name,
+				}
+				expectedClusterRouterPortGroup := &nbdb.PortGroup{
+					UUID: ovntypes.ClusterRtrPortGroupName + "-UUID",
+					Name: ovntypes.ClusterRtrPortGroupName,
+					ExternalIDs: map[string]string{
+						"name": ovntypes.ClusterRtrPortGroupName,
+					},
+				}
+				expectedClusterPortGroup := &nbdb.PortGroup{
+					UUID: ovntypes.ClusterPortGroupName + "-UUID",
+					Name: ovntypes.ClusterPortGroupName,
+					ExternalIDs: map[string]string{
+						"name": ovntypes.ClusterPortGroupName,
+					},
+				}
 				fakeOvn.dbSetup = libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						&nbdb.LogicalSwitch{
@@ -258,10 +275,9 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 							Name: ovntypes.OVNJoinSwitch,
 						},
 						expectedOVNClusterRouter,
-						&nbdb.LogicalSwitch{
-							UUID: node1.Name + "-UUID",
-							Name: node1.Name,
-						},
+						expectedNodeSwitch,
+						expectedClusterRouterPortGroup,
+						expectedClusterPortGroup,
 					},
 				}
 				fakeOvn.init()
@@ -276,21 +292,13 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				fexec := fakeOvn.fakeExec
 
 				expectedDatabaseState := []libovsdb.TestData{}
-				expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, fexec, &node1, clusterCIDR, config.IPv6Mode)
+				expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, fexec, &node1, clusterCIDR, config.IPv6Mode)
 
 				fakeOvn.controller.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(fakeOvn.nbClient, []string{node1.Name})
 				_, err = fakeOvn.controller.joinSwIPManager.EnsureJoinLRPIPs(ovntypes.OVNClusterRouter)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gwLRPIPs, err := fakeOvn.controller.joinSwIPManager.EnsureJoinLRPIPs(node1.Name)
 				gomega.Expect(len(gwLRPIPs) != 0).To(gomega.BeTrue())
-
-				// clusterController.WatchNodes() needs to following two port groups to have been created.
-				clusterPG := libovsdbops.BuildPortGroup(ovntypes.ClusterPortGroupName, ovntypes.ClusterPortGroupName, nil, nil)
-				err = libovsdbops.CreateOrUpdatePortGroups(fakeOvn.controller.nbClient, clusterPG)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				clusterRouterPG := libovsdbops.BuildPortGroup(ovntypes.ClusterRtrPortGroupName, ovntypes.ClusterRtrPortGroupName, nil, nil)
-				err = libovsdbops.CreateOrUpdatePortGroups(fakeOvn.controller.nbClient, clusterRouterPG)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.asf.EventuallyExpectEmptyAddressSetExist(hostNetworkNamespace)
@@ -317,13 +325,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 					Mask: dLRPNetwork.Mask,
 				}
 
-				clusterRouterPG.UUID = ovntypes.ClusterRtrPortGroupName + "-UUID"
-				clusterRouterPG.Ports = []string{fakeUUID}
-				clusterPG.UUID = ovntypes.ClusterPortGroupName + "-UUID"
-				clusterPG.Ports = []string{fakeUUID}
-				expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, node1.Name, clusterSubnets, []*net.IPNet{nodeSubnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs})
-				expectedDatabaseState = append(expectedDatabaseState, clusterRouterPG)
-				expectedDatabaseState = append(expectedDatabaseState, clusterPG)
+				expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{nodeSubnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs})
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				gomega.Eventually(fexec.CalledMatchesExpected()).Should(gomega.BeTrue(), fexec.ErrorDesc)
 
