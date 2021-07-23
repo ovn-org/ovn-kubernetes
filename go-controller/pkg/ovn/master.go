@@ -570,29 +570,42 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 	return nil
 }
 
-func addNodeLogicalSwitchPort(logicalSwitch, portName, portType, addresses, options string) (string, error) {
-	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lsp-add", logicalSwitch, portName,
-		"--", "lsp-set-type", portName, portType,
-		"--", "lsp-set-options", portName, options,
-		"--", "lsp-set-addresses", portName, addresses)
+func (oc *Controller) addNodeLogicalSwitchPort(logicalSwitchName, portName, portType string, addresses []string, options map[string]string) (string, error) {
+	logicalSwitch := nbdb.LogicalSwitch{}
+	logicalSwitchPort := nbdb.LogicalSwitchPort{
+		Name:      portName,
+		Type:      portType,
+		Options:   options,
+		Addresses: addresses,
+	}
+	logicalSwitchPortRes := []nbdb.LogicalSwitchPort{}
+	opModels := []libovsdbops.OperationModel{
+		{
+			Model: &logicalSwitchPort,
+			OnModelUpdates: []interface{}{
+				&logicalSwitchPort.Addresses,
+			},
+			ExistingResult: &logicalSwitchPortRes,
+		},
+		{
+			Model:          &logicalSwitch,
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == logicalSwitchName },
+			OnModelMutations: func() []model.Mutation {
+				return libovsdbops.OnReferentialModelMutation(&logicalSwitch.Ports, ovsdb.MutateOperationInsert, logicalSwitchPort)
+			},
+			ExistingResult: &[]nbdb.LogicalSwitch{},
+		},
+	}
+	res, err := oc.modelClient.CreateOrUpdate(opModels...)
 	if err != nil {
-		klog.Errorf("Failed to add logical port %s to switch %s, stdout: %q, stderr: %q, error: %v", portName, logicalSwitch, stdout, stderr, err)
-		return "", err
+		return "", fmt.Errorf("failed to add logical port %s to switch %s, error: %v", portName, logicalSwitch, err)
+	}
+	// If we're creating, just return the resulting ID, else: the retrieved UUID
+	if len(logicalSwitchPortRes) == 0 {
+		return res[0].UUID.GoUUID, nil
 	}
 
-	// UUID must be retrieved separately from the lsp-add transaction since
-	// (as of OVN 2.12) a bogus UUID is returned if they are part of the same
-	// transaction.
-	uuid, stderr, err := util.RunOVNNbctl("get", "logical_switch_port", portName, "_uuid")
-	if err != nil {
-		klog.Errorf("Error getting UUID for logical port %s "+
-			"stdout: %q, stderr: %q (%v)", portName, uuid, stderr, err)
-		return "", err
-	}
-	if uuid == "" {
-		return uuid, fmt.Errorf("invalid logical port %s uuid", portName)
-	}
-	return uuid, nil
+	return logicalSwitchPortRes[0].UUID, nil
 }
 
 func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
@@ -636,7 +649,7 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 
 	// Create this node's management logical port on the node switch
 	portName := types.K8sPrefix + node.Name
-	uuid, err := addNodeLogicalSwitchPort(node.Name, portName, "", addresses, "")
+	uuid, err := oc.addNodeLogicalSwitchPort(node.Name, portName, "", []string{addresses}, nil)
 	if err != nil {
 		return err
 	}
@@ -890,8 +903,8 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	}
 
 	// Connect the switch to the router.
-	nodeSwToRtrUUID, err := addNodeLogicalSwitchPort(nodeName, types.SwitchToRouterPrefix+nodeName,
-		"router", "router", "router-port="+types.RouterToSwitchPrefix+nodeName)
+	nodeSwToRtrUUID, err := oc.addNodeLogicalSwitchPort(nodeName, types.SwitchToRouterPrefix+nodeName,
+		"router", []string{"router"}, map[string]string{"router-port": types.RouterToSwitchPrefix + nodeName})
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
