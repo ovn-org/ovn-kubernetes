@@ -5,6 +5,7 @@ import (
 	"net"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -178,7 +179,7 @@ func (mp *managementPortSmartNICHost) Create(nodeAnnotator kube.Annotator, waite
 }
 
 func (mp *managementPortSmartNICHost) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
-	go util.RunPeriodicallyUntilStop(
+	go wait.Until(
 		func() {
 			checkManagementPortHealth(cfg)
 		},

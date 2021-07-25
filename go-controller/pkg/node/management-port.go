@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"net"
 	"strings"
 	"time"
@@ -100,7 +101,7 @@ func (mp *managementPort) Create(nodeAnnotator kube.Annotator, waiter *startupWa
 }
 
 func (mpc *managementPort) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
-	go util.RunPeriodicallyUntilStop(
+	go wait.Until(
 		func() {
 			checkManagementPortHealth(cfg)
 		},
