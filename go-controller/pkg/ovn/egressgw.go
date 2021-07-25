@@ -9,6 +9,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
@@ -430,7 +431,7 @@ func (oc *Controller) addPerPodGRSNAT(pod *kapi.Pod, podIfAddrs []*net.IPNet) er
 			if err != nil {
 				return fmt.Errorf("invalid IP: %s and mask: %s combination, error: %v", podIP, mask, err)
 			}
-			if err := util.UpdateRouterSNAT(gr, gwIPNet.IP, fullMaskPodNet); err != nil {
+			if err := libovsdbops.CreateOrUpdateRouterSNAT(oc.nbClient, gr, gwIPNet.IP, fullMaskPodNet); err != nil {
 				return fmt.Errorf("failed to update NAT for pod: %s, error: %v", pod.Name, err)
 			}
 		}

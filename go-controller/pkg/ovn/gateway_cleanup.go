@@ -5,6 +5,8 @@ import (
 	"net"
 	"strings"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -13,7 +15,7 @@ import (
 )
 
 // gatewayCleanup removes all the NB DB objects created for a node's gateway
-func gatewayCleanup(nodeName string) error {
+func gatewayCleanup(nbClient libovsdbclient.Client, nodeName string) error {
 	gatewayRouter := types.GWRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
@@ -83,28 +85,19 @@ func gatewayCleanup(nodeName string) error {
 
 	// We don't know the gateway mode as this is running in the master, try to delete the additional local
 	// gateway for the shared gateway mode. it will be no op if this is done for other gateway modes.
-	delPbrAndNatRules(nodeName, nil)
+	delPbrAndNatRules(nbClient, nodeName, nil)
 	return nil
 }
 
-func delPbrAndNatRules(nodeName string, lrpTypes []string) {
+func delPbrAndNatRules(nbClient libovsdbclient.Client, nodeName string, lrpTypes []string) {
 	// delete the dnat_and_snat entry that we added for the management port IP
 	// Note: we don't need to delete any MAC bindings that are dynamically learned from OVN SB DB
 	// because there will be none since this NAT is only for outbound traffic and not for inbound
 	mgmtPortName := types.K8sPrefix + nodeName
-	externalIP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=external_ip", "find", "nat", fmt.Sprintf("logical_port=%s", mgmtPortName))
+	err := libovsdbops.DeleteRouterDNATAndSNATFromLogicalPort(nbClient, types.OVNClusterRouter, mgmtPortName)
 	if err != nil {
-		klog.Errorf("Failed to fetch the dnat_and_snat entry for the management port %s "+
-			"stderr: %s, error: %v", mgmtPortName, stderr, err)
-		externalIP = ""
-	}
-	if externalIP != "" {
-		_, stderr, err = util.RunOVNNbctl("--if-exists", "lr-nat-del", types.OVNClusterRouter, "dnat_and_snat", externalIP)
-		if err != nil {
-			klog.Errorf("Failed to delete the dnat_and_snat ip %s associated with the management "+
-				"port %s: stderr: %s, error: %v", externalIP, mgmtPortName, stderr, err)
-		}
+		klog.Errorf("Failed to delete the dnat_and_snat associated with the management "+
+			"port %s: error: %v", mgmtPortName, err)
 	}
 
 	// delete all logical router policies on ovn_cluster_router
@@ -150,7 +143,7 @@ func staticRouteCleanup(nextHops []net.IP) {
 // the single join switch versions; this is to cleanup the logical entities for the
 // specified node if the node was deleted when the ovnkube-master pod was brought down
 // to do the version upgrade.
-func multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly bool) error {
+func multiJoinSwitchGatewayCleanup(nbClient libovsdbclient.Client, nodeName string, upgradeOnly bool) error {
 	gatewayRouter := types.GWRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
@@ -247,7 +240,7 @@ func multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly bool) error {
 
 	// We don't know the gateway mode as this is running in the master, try to delete the additional local
 	// gateway for the shared gateway mode. it will be no op if this is done for other gateway modes.
-	delPbrAndNatRules(nodeName, nil)
+	delPbrAndNatRules(nbClient, nodeName, nil)
 	return nil
 }
 
@@ -300,10 +293,10 @@ func removeLRPolicies(nodeName string, priorities []string) {
 }
 
 // removes DGP, snat_and_dnat entries, and LRPs
-func cleanupDGP(nodes *kapi.NodeList) error {
+func cleanupDGP(nbClient libovsdbclient.Client, nodes *kapi.NodeList) error {
 	// remove dnat_snat entries as well as LRPs
 	for _, node := range nodes.Items {
-		delPbrAndNatRules(node.Name, []string{types.InterNodePolicyPriority, types.MGMTPortPolicyPriority})
+		delPbrAndNatRules(nbClient, node.Name, []string{types.InterNodePolicyPriority, types.MGMTPortPolicyPriority})
 	}
 	// remove SBDB MAC bindings for DGP
 	for _, ip := range []string{types.V4NodeLocalNATSubnetNextHop, types.V6NodeLocalNATSubnetNextHop} {
