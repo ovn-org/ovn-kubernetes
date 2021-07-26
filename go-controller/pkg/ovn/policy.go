@@ -256,27 +256,44 @@ func (oc *Controller) createDefaultDenyPGAndACLs(namespace, policy string, nsInf
 	return nil
 }
 
-// modify ACL logging
-func (oc *Controller) setACLDenyLogging(ns string, nsInfo *namespaceInfo, aclLogging string) error {
-	ingressDenyACL, _ := buildDenyACLs(ns, "", nsInfo.portGroupIngressDenyName, aclLogging, knet.PolicyTypeIngress)
-	egressDenyACL, _ := buildDenyACLs(ns, "", nsInfo.portGroupEgressDenyName, aclLogging, knet.PolicyTypeEgress)
-
-	ops, err := libovsdbops.UpdateACLLoggingOps(oc.nbClient, nil, ingressDenyACL)
-	if err != nil {
-		return err
+func (oc *Controller) setACLLoggingForNamespace(ns string, nsInfo *namespaceInfo, logSeverityConfig ACLLoggingLevels) error {
+	var ovsDBOps []ovsdb.Operation
+	for _, policyType := range []knet.PolicyType{knet.PolicyTypeIngress, knet.PolicyTypeEgress} {
+		denyACL, _ := buildDenyACLs(ns, "", targetPortGroupName(nsInfo, policyType), logSeverityConfig.Deny, policyType)
+		ops, err := libovsdbops.UpdateACLsLoggingOps(oc.nbClient, ovsDBOps, denyACL)
+		if err != nil {
+			return err
+		}
+		ovsDBOps = append(ovsDBOps, ops...)
 	}
 
-	ops, err = libovsdbops.UpdateACLLoggingOps(oc.nbClient, ops, egressDenyACL)
-	if err != nil {
-		return err
+	klog.V(5).Infof("Getting network policy ACLs for ns: %s", ns)
+	for _, policy := range nsInfo.networkPolicies {
+		acls := oc.buildNetworkPolicyACLs(policy, logSeverityConfig.Allow)
+		ops, err := libovsdbops.UpdateACLsLoggingOps(oc.nbClient, ovsDBOps, acls...)
+		if err != nil {
+			return err
+		}
+		ovsDBOps = append(ovsDBOps, ops...)
 	}
 
-	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+	_, err := libovsdbops.TransactAndCheck(oc.nbClient, ovsDBOps)
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func targetPortGroupName(nsInfo *namespaceInfo, policyType knet.PolicyType) string {
+	switch policyType {
+	case knet.PolicyTypeIngress:
+		return nsInfo.portGroupIngressDenyName
+	case knet.PolicyTypeEgress:
+		return nsInfo.portGroupEgressDenyName
+	default:
+		return ""
+	}
 }
 
 func getACLMatchAF(ipv4Match, ipv6Match string) string {
