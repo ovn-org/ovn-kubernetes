@@ -158,7 +158,7 @@ func getACLMatch(portGroupName, match string, policyType knet.PolicyType) string
 	return "match=\"" + aclMatch + "\""
 }
 
-func getACLPortGroupUUID(match, action string, policyType knet.PolicyType) (string, error) {
+func getACLPortGroupUUIDWithMatch(match, action string, policyType knet.PolicyType) (string, error) {
 	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", match, "action="+action,
 		fmt.Sprintf("external-ids:default-deny-policy-type=%s", policyType))
@@ -171,7 +171,7 @@ func getACLPortGroupUUID(match, action string, policyType knet.PolicyType) (stri
 }
 
 func addACLPortGroup(policyNamespace, portGroupUUID, direction, priority, match, action string, policyType knet.PolicyType, aclLogging string, policyName string) error {
-	uuid, err := getACLPortGroupUUID(match, action, policyType)
+	uuid, err := getACLPortGroupUUIDWithMatch(match, action, policyType)
 	if err != nil {
 		return err
 	}
@@ -204,7 +204,7 @@ func addACLPortGroup(policyNamespace, portGroupUUID, direction, priority, match,
 
 func deleteACLPortGroup(portGroupName, direction, priority, match, action string, policyType knet.PolicyType) error {
 	match = getACLMatch(portGroupName, match, policyType)
-	uuid, err := getACLPortGroupUUID(match, action, policyType)
+	uuid, err := getACLPortGroupUUIDWithMatch(match, action, policyType)
 	if err != nil {
 		return err
 	}
@@ -325,39 +325,92 @@ func (oc *Controller) createDefaultDenyPortGroup(ns string, nsInfo *namespaceInf
 }
 
 // modify ACL logging
-func (oc *Controller) setACLDenyLogging(ns string, nsInfo *namespaceInfo, aclLogging string) error {
+func (oc *Controller) setACLLoggingForNamespace(ns string, nsInfo *namespaceInfo, logSeverityConfig ACLLoggingLevels) error {
+	for _, policyType := range []knet.PolicyType{knet.PolicyTypeIngress, knet.PolicyTypeEgress} {
+		portGroupUUID, portGroupSuffix := getTargetPortGroupUUIDAndSuffix(policyType, nsInfo)
+		match := getACLMatch(defaultDenyPortGroup(ns, portGroupSuffix), "", policyType)
+		uuid, err := getACLPortGroupUUIDWithMatch(match, "drop", policyType)
+		if err != nil {
+			return err
+		}
+		if uuid == "" {
+			// not suppose to happen
+			return fmt.Errorf("failed to find the ACL for pg=%s: %v", portGroupUUID, err)
+		}
+		if err := updateACLLoggingLevel(uuid, logSeverityConfig.Deny); err != nil {
+			return fmt.Errorf("failed to modify the pg=%s, %v", portGroupUUID, err)
+		}
+	}
 
-	aclLoggingSev := getACLLoggingSeverity(aclLogging)
-
-	match := getACLMatch(defaultDenyPortGroup(ns, "ingressDefaultDeny"), "", knet.PolicyTypeIngress)
-	uuid, err := getACLPortGroupUUID(match, "drop", knet.PolicyTypeIngress)
-	if err != nil {
-		return err
+	var failedACLs []string
+	for _, aclUUID := range oc.getNamespaceACLs(ns, nsInfo) {
+		if err := updateACLLoggingLevel(aclUUID, logSeverityConfig.Allow); err != nil {
+			failedACLs = append(failedACLs, fmt.Sprintf("%s: %v", aclUUID, err))
+		}
 	}
-	if uuid == "" {
-		// not suppose to happen
-		return fmt.Errorf("failed to find the ACL for pg=%s: %v", nsInfo.portGroupIngressDenyUUID, err)
-	}
-	if _, stderr, err := util.RunOVNNbctl("set", "acl", uuid,
-		fmt.Sprintf("log=%t", aclLogging != ""), fmt.Sprintf("severity=%s", aclLoggingSev)); err != nil {
-		return fmt.Errorf("failed to modify the pg=%s, stderr: %q (%v)", nsInfo.portGroupIngressDenyUUID, stderr, err)
-	}
-
-	match = getACLMatch(defaultDenyPortGroup(ns, "egressDefaultDeny"), "", knet.PolicyTypeEgress)
-	uuid, err = getACLPortGroupUUID(match, "drop", knet.PolicyTypeEgress)
-	if err != nil {
-		return err
-	}
-	if uuid == "" {
-		// not suppose to happen
-		return fmt.Errorf("failed to find the ACL for pg=%s: %v", nsInfo.portGroupEgressDenyUUID, err)
-	}
-	if _, stderr, err := util.RunOVNNbctl("set", "acl", uuid,
-		fmt.Sprintf("log=%t", aclLogging != ""), fmt.Sprintf("severity=%s", aclLoggingSev)); err != nil {
-		return fmt.Errorf("failed to modify the pg=%s, stderr: %q (%v)", nsInfo.portGroupEgressDenyUUID, stderr, err)
+	if len(failedACLs) > 0 {
+		return fmt.Errorf("failed to update allACLs: %+v", failedACLs)
 	}
 
 	return nil
+}
+
+func updateACLLoggingLevel(uuid string, aclLogging string) error {
+	_, stderr, err := util.RunOVNNbctl("set", "acl", uuid,
+		fmt.Sprintf("log=%t", aclLogging != ""), fmt.Sprintf("severity=%s", getACLLoggingSeverity(aclLogging)))
+	if err != nil {
+		return fmt.Errorf("stderr: %q, (%v)", stderr, err)
+	}
+	return nil
+}
+
+func (oc *Controller) getNamespaceACLs(ns string, nsInfo *namespaceInfo) []string {
+	klog.V(5).Infof("Getting ACLs in ns: %s: %s", ns)
+	var allGressRules []*gressPolicy
+	for _, policy := range nsInfo.networkPolicies {
+		allGressRules = append(allGressRules, policy.ingressPolicies...)
+		allGressRules = append(allGressRules, policy.egressPolicies...)
+	}
+
+	var aclNames []string
+	for _, policy := range allGressRules {
+		aclNames = append(aclNames, composeACLName(ns, policy.policyName, policy.idx))
+	}
+
+	klog.V(5).Infof("The composed ACL names: %v", aclNames)
+	var aclUUIDs []string
+	for _, aclName := range aclNames {
+		findACLUUIDCmd := []string{
+			"--format=csv",
+			"--data=bare",
+			"--no-heading",
+			"--columns=_uuid",
+			"find", "ACL", fmt.Sprintf("name=%s", aclName)}
+		aclUUID, stderr, err := util.RunOVNNbctl(findACLUUIDCmd...)
+		if err != nil {
+			klog.Errorf("Could not find the impacted ACLs. StdErr: %s", stderr)
+			return nil
+		}
+		aclUUIDs = append(aclUUIDs, aclUUID)
+	}
+
+	return aclUUIDs
+}
+
+func composeACLName(ns string, policyName string, idx int) string {
+	return fmt.Sprintf("%s_%s_%d", ns, policyName, idx)
+}
+
+func getTargetPortGroupUUIDAndSuffix(policyType knet.PolicyType, nsInfo *namespaceInfo) (string, string) {
+	var targetPortGroup, suffix string
+	if policyType == knet.PolicyTypeIngress {
+		targetPortGroup = nsInfo.portGroupIngressDenyUUID
+		suffix = "ingressDefaultDeny"
+	} else {
+		targetPortGroup = nsInfo.portGroupEgressDenyUUID
+		suffix = "egressDefaultDeny"
+	}
+	return targetPortGroup, suffix
 }
 
 func getACLMatchAF(ipv4Match, ipv6Match string) string {
