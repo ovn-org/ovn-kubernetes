@@ -326,9 +326,6 @@ func (oc *Controller) createDefaultDenyPortGroup(ns string, nsInfo *namespaceInf
 
 // modify ACL logging
 func (oc *Controller) setACLDenyLogging(ns string, nsInfo *namespaceInfo, aclLogging string) error {
-
-	aclLoggingSev := getACLLoggingSeverity(aclLogging)
-
 	for _, policyType := range []knet.PolicyType{knet.PolicyTypeIngress, knet.PolicyTypeEgress} {
 		portGroupUUID, portGroupSuffix := getTargetPortGroupUUIDAndSuffix(policyType, nsInfo)
 		match := getACLMatch(defaultDenyPortGroup(ns, portGroupSuffix), "", policyType)
@@ -340,28 +337,32 @@ func (oc *Controller) setACLDenyLogging(ns string, nsInfo *namespaceInfo, aclLog
 			// not suppose to happen
 			return fmt.Errorf("failed to find the ACL for pg=%s: %v", portGroupUUID, err)
 		}
-		if _, stderr, err := util.RunOVNNbctl("set", "acl", uuid,
-			fmt.Sprintf("log=%t", aclLogging != ""), fmt.Sprintf("severity=%s", aclLoggingSev)); err != nil {
-			return fmt.Errorf("failed to modify the pg=%s, stderr: %q (%v)", portGroupUUID, stderr, err)
+		if err := updateACLLoggingLevel(uuid, aclLogging); err != nil {
+			return fmt.Errorf("failed to modify the pg=%s, %v", portGroupUUID, err)
 		}
 	}
 
 	return nil
 }
 
-func (oc *Controller) setNamespaceACLLogging(ns string, nsInfo *namespaceInfo, aclLogging string) error {
-	aclLoggingSev := getACLLoggingSeverity(aclLogging)
+func updateACLLoggingLevel(uuid string, aclLogging string) error {
+	_, stderr, err := util.RunOVNNbctl("set", "acl", uuid,
+		fmt.Sprintf("log=%t", aclLogging != ""), fmt.Sprintf("severity=%s", getACLLoggingSeverity(aclLogging)))
+	if err != nil {
+		return fmt.Errorf("stderr: %q, (%v)", stderr, err)
+	}
+	return nil
+}
 
+func (oc *Controller) setNamespaceACLLogging(ns string, nsInfo *namespaceInfo, aclLogging string) error {
 	var failedACLs []string
 	for _, aclUUID := range oc.getNamespaceACLs(ns, nsInfo) {
-		if _ , stderr, err := util.RunOVNNbctl("set", "acl", aclUUID,
-			fmt.Sprintf("log=%t", aclLogging != ""), fmt.Sprintf("severity=%s", aclLoggingSev)); err != nil {
-			klog.Errorf("Error updating ACL %s; reason: %s", aclUUID, stderr)
-			failedACLs = append(failedACLs, fmt.Sprintf("%s: %s", aclUUID, stderr))
+		if err := updateACLLoggingLevel(aclUUID, aclLogging); err != nil {
+			failedACLs = append(failedACLs, fmt.Sprintf("%s: %v", aclUUID, err))
 		}
 	}
 	if len(failedACLs) > 0 {
-		return fmt.Errorf("Failed to updated ACLs: %v", failedACLs)
+		return fmt.Errorf("failed to updated ACLs: %+v", failedACLs)
 	}
 	return nil
 }
