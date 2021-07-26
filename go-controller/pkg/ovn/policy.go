@@ -329,35 +329,36 @@ func (oc *Controller) setACLDenyLogging(ns string, nsInfo *namespaceInfo, aclLog
 
 	aclLoggingSev := getACLLoggingSeverity(aclLogging)
 
-	match := getACLMatch(defaultDenyPortGroup(ns, "ingressDefaultDeny"), "", knet.PolicyTypeIngress)
-	uuid, err := getACLPortGroupUUID(match, "drop", knet.PolicyTypeIngress)
-	if err != nil {
-		return err
-	}
-	if uuid == "" {
-		// not suppose to happen
-		return fmt.Errorf("failed to find the ACL for pg=%s: %v", nsInfo.portGroupIngressDenyUUID, err)
-	}
-	if _, stderr, err := util.RunOVNNbctl("set", "acl", uuid,
-		fmt.Sprintf("log=%t", aclLogging != ""), fmt.Sprintf("severity=%s", aclLoggingSev)); err != nil {
-		return fmt.Errorf("failed to modify the pg=%s, stderr: %q (%v)", nsInfo.portGroupIngressDenyUUID, stderr, err)
-	}
-
-	match = getACLMatch(defaultDenyPortGroup(ns, "egressDefaultDeny"), "", knet.PolicyTypeEgress)
-	uuid, err = getACLPortGroupUUID(match, "drop", knet.PolicyTypeEgress)
-	if err != nil {
-		return err
-	}
-	if uuid == "" {
-		// not suppose to happen
-		return fmt.Errorf("failed to find the ACL for pg=%s: %v", nsInfo.portGroupEgressDenyUUID, err)
-	}
-	if _, stderr, err := util.RunOVNNbctl("set", "acl", uuid,
-		fmt.Sprintf("log=%t", aclLogging != ""), fmt.Sprintf("severity=%s", aclLoggingSev)); err != nil {
-		return fmt.Errorf("failed to modify the pg=%s, stderr: %q (%v)", nsInfo.portGroupEgressDenyUUID, stderr, err)
+	for _, policyType := range []knet.PolicyType{knet.PolicyTypeIngress, knet.PolicyTypeEgress} {
+		portGroupUUID, portGroupSuffix := getTargetPortGroupUUIDAndSuffix(policyType, nsInfo)
+		match := getACLMatch(defaultDenyPortGroup(ns, portGroupSuffix), "", policyType)
+		uuid, err := getACLPortGroupUUID(match, "drop", policyType)
+		if err != nil {
+			return err
+		}
+		if uuid == "" {
+			// not suppose to happen
+			return fmt.Errorf("failed to find the ACL for pg=%s: %v", portGroupUUID, err)
+		}
+		if _, stderr, err := util.RunOVNNbctl("set", "acl", uuid,
+			fmt.Sprintf("log=%t", aclLogging != ""), fmt.Sprintf("severity=%s", aclLoggingSev)); err != nil {
+			return fmt.Errorf("failed to modify the pg=%s, stderr: %q (%v)", portGroupUUID, stderr, err)
+		}
 	}
 
 	return nil
+}
+
+func getTargetPortGroupUUIDAndSuffix(policyType knet.PolicyType, nsInfo *namespaceInfo) (string, string) {
+	var targetPortGroup, suffix string
+	if policyType == knet.PolicyTypeIngress {
+		targetPortGroup = nsInfo.portGroupIngressDenyUUID
+		suffix = "ingressDefaultDeny"
+	} else {
+		targetPortGroup = nsInfo.portGroupEgressDenyUUID
+		suffix = "egressDefaultDeny"
+	}
+	return targetPortGroup, suffix
 }
 
 func getACLMatchAF(ipv4Match, ipv6Match string) string {
