@@ -315,7 +315,7 @@ func (m *MasterController) DeleteNode(node *kapi.Node) error {
 func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet, nodeName string, portMac net.HardwareAddr) error {
 	klog.Infof("Setting up logical route policy for hybrid subnet on node: %s", nodeName)
 	var L3Prefix string
-	for i, nodeSubnet := range nodeSubnets {
+	for _, nodeSubnet := range nodeSubnets {
 		if utilnet.IsIPv6CIDR(nodeSubnet) {
 			L3Prefix = "ip6"
 		} else {
@@ -334,7 +334,7 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 			ovntypes.RouterToSwitchPrefix, nodeName, L3Prefix, hybridCIDR)
 
 		intPriority, _ := strconv.Atoi(ovntypes.HybridOverlaySubnetPriority)
-		namedUUID := util.GenerateNamedUUID(fmt.Sprintf("%s-%v", "hybrid", i))
+		namedUUID := util.GenerateNamedUUID()
 
 		logicalRouter := nbdb.LogicalRouter{}
 		logicalRouterPolicy := nbdb.LogicalRouterPolicy{

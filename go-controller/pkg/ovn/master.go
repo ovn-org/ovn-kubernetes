@@ -516,8 +516,8 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	// Connect the distributed router to OVNJoinSwitch.
 	drSwitchPort := types.JoinSwitchToGWRouterPrefix + types.OVNClusterRouter
 	drRouterPort := types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter
-	drSwitchPortNamedUUID := util.GenerateNamedUUID(drSwitchPort)
-	drRouterPortNamedUUID := util.GenerateNamedUUID(drRouterPort)
+	drSwitchPortNamedUUID := util.GenerateNamedUUID()
+	drRouterPortNamedUUID := util.GenerateNamedUUID()
 
 	gwLRPMAC := util.IPAddrToHWAddr(gwLRPIfAddrs[0].IP)
 	gwLRPNetworks := []string{}
@@ -606,7 +606,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 }
 
 func (oc *Controller) addNodeLogicalSwitchPort(logicalSwitchName, portName, portType string, addresses []string, options map[string]string) (string, error) {
-	namedUUID := util.GenerateNamedUUID(portName)
+	namedUUID := util.GenerateNamedUUID()
 	logicalSwitch := nbdb.LogicalSwitch{}
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
 		Name:      portName,
@@ -905,7 +905,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	}
 
 	logicalRouterPortName := types.RouterToSwitchPrefix + nodeName
-	logicalRouterPortNamedUUID := util.GenerateNamedUUID(logicalRouterPortName)
+	logicalRouterPortNamedUUID := util.GenerateNamedUUID()
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name:     logicalRouterPortName,
 		UUID:     logicalRouterPortNamedUUID,

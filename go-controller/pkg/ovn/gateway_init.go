@@ -78,9 +78,9 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 	}
 
 	gwSwitchPort := types.JoinSwitchToGWRouterPrefix + gatewayRouter
-	gwSwitchPortUUID := util.GenerateNamedUUID(gwSwitchPort)
+	gwSwitchPortUUID := util.GenerateNamedUUID()
 	gwRouterPort := types.GWRouterToJoinSwitchPrefix + gatewayRouter
-	gwRouterPortUUID := util.GenerateNamedUUID(gwRouterPort)
+	gwRouterPortUUID := util.GenerateNamedUUID()
 
 	logicalSwitch := nbdb.LogicalSwitch{}
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
@@ -655,7 +655,7 @@ func (oc *Controller) addDistributedGWPort() error {
 
 	// the distributed gateway port is always dual-stack and uses the IPv4 address to generate its mac
 	dgpName := types.RouterToSwitchPrefix + types.NodeLocalSwitch
-	namedUUID := util.GenerateNamedUUID(dgpName)
+	namedUUID := util.GenerateNamedUUID()
 	dgpMac := util.IPAddrToHWAddr(net.ParseIP(types.V4NodeLocalDistributedGWPortIP)).String()
 	dgpNetworkV4 := fmt.Sprintf("%s/%d", types.V4NodeLocalDistributedGWPortIP, types.V4NodeLocalNATSubnetPrefix)
 	dgpNetworkV6 := fmt.Sprintf("%s/%d", types.V6NodeLocalDistributedGWPortIP, types.V6NodeLocalNATSubnetPrefix)
@@ -762,7 +762,7 @@ func (oc *Controller) addDistributedGWPort() error {
 
 	// add localnet port to the logical switch
 	lclNetPortname := "lnet-" + types.NodeLocalSwitch
-	namedUUID = util.GenerateNamedUUID(lclNetPortname)
+	namedUUID = util.GenerateNamedUUID()
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
 		Name:      lclNetPortname,
 		UUID:      namedUUID,
@@ -803,7 +803,7 @@ func (oc *Controller) addDistributedGWPort() error {
 
 	// connect the switch to the distributed router
 	lspName := types.SwitchToRouterPrefix + types.NodeLocalSwitch
-	namedUUID = util.GenerateNamedUUID(lspName)
+	namedUUID = util.GenerateNamedUUID()
 	logicalSwitchPort = nbdb.LogicalSwitchPort{
 		Name:      lspName,
 		UUID:      namedUUID,
@@ -897,7 +897,7 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 		return fmt.Errorf("failed to create logical switch %s, err: %v", externalSwitch, err)
 	}
 
-	externalSwitchPortUUID := util.GenerateNamedUUID(interfaceID)
+	externalSwitchPortUUID := util.GenerateNamedUUID()
 	// Add external interface as a logical port to external_switch.
 	// This is a learning switch port with "unknown" address. The external
 	// world is accessed via this port.
@@ -953,7 +953,7 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 	// and that IP address. In the case of `local` gateway mode, whenever ovnkube-node container
 	// restarts a new br-local bridge will be created with a new `nicMacAddress`.
 	externalRouterPort := types.GWRouterToExtSwitchPrefix + gatewayRouter
-	externalRouterPortUUID := util.GenerateNamedUUID(externalRouterPort)
+	externalRouterPortUUID := util.GenerateNamedUUID()
 
 	externalRouterPortNetworks := []string{}
 	for _, ip := range ipAddresses {
@@ -1005,7 +1005,7 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 
 	// Connect the external_switch to the router.
 	externalSwitchPortToRouter := types.EXTSwitchToGWRouterPrefix + gatewayRouter
-	externalSwitchPortToRouterUUID := util.GenerateNamedUUID(externalSwitchPortToRouter)
+	externalSwitchPortToRouterUUID := util.GenerateNamedUUID()
 
 	externalLogicalSwitchPortToRouter := nbdb.LogicalSwitchPort{
 		Name: externalSwitchPortToRouter,
@@ -1142,7 +1142,7 @@ func (oc *Controller) addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAd
 // obfuscated way of just doing "create if exists or update".
 func (oc *Controller) syncPolicyBasedRoutes(nodeName string, match, priority, nexthop string) error {
 	intPriority, _ := strconv.Atoi(priority)
-	namedUUID := util.GenerateNamedUUID(nodeName + priority)
+	namedUUID := util.GenerateNamedUUID()
 
 	logicalRouter := nbdb.LogicalRouter{}
 	logicalRouterPolicy := nbdb.LogicalRouterPolicy{

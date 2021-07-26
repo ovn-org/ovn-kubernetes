@@ -483,7 +483,7 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 		matchStr += matchDst
 
 		intPriority, _ := strconv.Atoi(types.HybridOverlayReroutePriority)
-		namedUUID := util.GenerateNamedUUID("lrpolicy")
+		namedUUID := util.GenerateNamedUUID()
 
 		logicalRouter := nbdb.LogicalRouter{}
 		logicalRouterPolicy := nbdb.LogicalRouterPolicy{

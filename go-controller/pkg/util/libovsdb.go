@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"reflect"
 	"strings"
 	"time"
@@ -218,10 +219,36 @@ func SliceHasStringItem(slice []string, item string) bool {
 	return false
 }
 
-// GenerateNamedUUID generated a valid named UUID for OVS DB server. Valid UUIDs
-// (it seems) cannot contain the char: '-'.
-func GenerateNamedUUID(s string) string {
-	return strings.Replace(s, "-", "", -1)
+const (
+	letterBytes   = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	letterIdxBits = 6                    // 6 bits to represent a letter index
+	letterIdxMask = 1<<letterIdxBits - 1 // All 1-bits, as many as letterIdxBits
+	letterIdxMax  = 63 / letterIdxBits   // # of letter indices fitting in 63 bits
+)
+
+var (
+	n   = 5
+	src = rand.NewSource(time.Now().UnixNano())
+)
+
+// GenerateNamedUUID generated a random named UUID for OVS DB server. The
+// strings length if defined by `n`. The body of this function is copied from:
+// https://stackoverflow.com/a/31832326
+func GenerateNamedUUID() string {
+	sb := strings.Builder{}
+	sb.Grow(n)
+	for i, cache, remain := n-1, src.Int63(), letterIdxMax; i >= 0; {
+		if remain == 0 {
+			cache, remain = src.Int63(), letterIdxMax
+		}
+		if idx := int(cache & letterIdxMask); idx < len(letterBytes) {
+			sb.WriteByte(letterBytes[idx])
+			i--
+		}
+		cache >>= letterIdxBits
+		remain--
+	}
+	return sb.String()
 }
 
 // newClient creates a new client object given the provided config

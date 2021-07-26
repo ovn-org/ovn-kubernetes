@@ -765,7 +765,7 @@ func (e *egressIPController) handleEgressReroutePolicy(podIps []net.IP, statuses
 }
 
 func (e *egressIPController) createEgressReroutePolicy(filterOption, egressIPName string, gatewayRouterIPs []string) error {
-	namedUUID := util.GenerateNamedUUID("lr-policy")
+	namedUUID := util.GenerateNamedUUID()
 	logicalRouter := nbdb.LogicalRouter{}
 	logicalRouterPolicy := nbdb.LogicalRouterPolicy{
 		UUID:     namedUUID,
