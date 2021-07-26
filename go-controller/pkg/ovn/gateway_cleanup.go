@@ -33,7 +33,7 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 	for _, gwIPAddr := range gwIPAddrs {
 		nextHops = append(nextHops, gwIPAddr.IP)
 	}
-	staticRouteCleanup(nextHops)
+	oc.staticRouteCleanup(nextHops)
 
 	// Remove the patch port that connects join switch to gateway router
 	_, stderr, err := util.RunOVNNbctl("--if-exist", "lsp-del", types.JoinSwitchToGWRouterPrefix+gatewayRouter)
@@ -104,29 +104,42 @@ func (oc *Controller) delPbrAndNatRules(nodeName string, lrpTypes []string) {
 	oc.removeLRPolicies(nodeName, lrpTypes)
 }
 
-func staticRouteCleanup(nextHops []net.IP) {
+func (oc *Controller) staticRouteCleanup(nextHops []net.IP) {
 	for _, nextHop := range nextHops {
-		// Get a list of all the routes in cluster router with the next hop IP.
-		var uuids string
-		uuids, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-			"--columns=_uuid", "find", "logical_router_static_route",
-			"nexthop=\""+nextHop.String()+"\"")
-		if err != nil {
-			klog.Errorf("Failed to fetch all routes with "+
-				"IP %s as nexthop, stderr: %q, "+
-				"error: %v", nextHop.String(), stderr, err)
-			continue
+		logicalRouter := nbdb.LogicalRouter{}
+		logicalRouterStaticRouteRes := []nbdb.LogicalRouterStaticRoute{}
+		opModels := []libovsdbops.OperationModel{
+			{
+				Model: &nbdb.LogicalRouterStaticRoute{},
+				ModelPredicate: func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
+					return lrsr.Nexthop == nextHop.String()
+				},
+				ExistingResult: &logicalRouterStaticRouteRes,
+			},
+			{
+				Model:          &logicalRouter,
+				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+				OnModelMutations: func() []model.Mutation {
+					if len(logicalRouterStaticRouteRes) == 0 {
+						return nil
+					}
+					uuids := []string{}
+					for _, lrsr := range logicalRouterStaticRouteRes {
+						uuids = append(uuids, lrsr.UUID)
+					}
+					return []model.Mutation{
+						{
+							Field:   &logicalRouter.StaticRoutes,
+							Mutator: ovsdb.MutateOperationDelete,
+							Value:   uuids,
+						},
+					}
+				},
+				ExistingResult: &[]nbdb.LogicalRouter{},
+			},
 		}
-
-		// Remove all the routes in cluster router with this IP as the nexthop.
-		routes := strings.Fields(uuids)
-		for _, route := range routes {
-			_, stderr, err = util.RunOVNNbctl("--if-exists", "remove",
-				"logical_router", types.OVNClusterRouter, "static_routes", route)
-			if err != nil {
-				klog.Errorf("Failed to delete static route %s"+
-					", stderr: %q, err = %v", route, stderr, err)
-			}
+		if err := oc.modelClient.Delete(opModels...); err != nil {
+			klog.Errorf("Failed to delete static route for nexthop: %s, err: %v", nextHop.String(), err)
 		}
 	}
 }
@@ -179,7 +192,7 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 		}
 		nextHops = append(nextHops, gwIPAddr.IP)
 	}
-	staticRouteCleanup(nextHops)
+	oc.staticRouteCleanup(nextHops)
 
 	// Remove the join switch that connects ovn_cluster_router to gateway router
 	_, stderr, err := util.RunOVNNbctl("--if-exist", "ls-del", "join_"+nodeName)
