@@ -147,30 +147,32 @@ func CreateOrUpdateACLs(nbClient libovsdbclient.Client, acls ...*nbdb.ACL) error
 	return err
 }
 
-func UpdateACLLoggingOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, acl *nbdb.ACL) ([]libovsdb.Operation, error) {
+func UpdateACLsLoggingOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, acls ...*nbdb.ACL) ([]libovsdb.Operation, error) {
 	if ops == nil {
 		ops = []libovsdb.Operation{}
 	}
 
-	err := findACL(nbClient, acl)
-	if err != nil {
-		return nil, err
-	}
+	for _, acl := range acls {
+		err := findACL(nbClient, acl)
+		if err != nil {
+			return nil, err
+		}
 
-	uuid := acl.UUID
-	acl.UUID = ""
-	op, err := nbClient.Where(&nbdb.ACL{UUID: uuid}).Update(acl, &acl.Severity, &acl.Log)
-	if err != nil {
-		return nil, err
+		uuid := acl.UUID
+		acl.UUID = ""
+		op, err := nbClient.Where(&nbdb.ACL{UUID: uuid}).Update(acl, &acl.Severity, &acl.Log)
+		if err != nil {
+			return nil, err
+		}
+		ops = append(ops, op...)
+		acl.UUID = uuid
 	}
-	ops = append(ops, op...)
-	acl.UUID = uuid
 
 	return ops, nil
 }
 
 func UpdateACLLogging(nbClient libovsdbclient.Client, acl *nbdb.ACL) error {
-	ops, err := UpdateACLLoggingOps(nbClient, nil, acl)
+	ops, err := UpdateACLsLoggingOps(nbClient, nil, acl)
 	if err != nil {
 		return err
 	}
