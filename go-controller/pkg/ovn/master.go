@@ -213,7 +213,7 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 	}
 	// If version is less than Host -> Service with OpenFlow, we need to remove and cleanup DGP
 	if err == nil && ver < types.OvnHostToSvcOFTopoVersion && config.Gateway.Mode == config.GatewayModeShared {
-		err = cleanupDGP(existingNodes)
+		err = oc.cleanupDGP(existingNodes)
 	}
 	return err
 }
