@@ -349,6 +349,53 @@ func (oc *Controller) setACLDenyLogging(ns string, nsInfo *namespaceInfo, aclLog
 	return nil
 }
 
+func (oc *Controller) setNamespaceACLLogging(ns string, nsInfo *namespaceInfo, aclLogging string) error {
+	aclLoggingSev := getACLLoggingSeverity(aclLogging)
+
+	var failedACLs []string
+	for _, aclUUID := range oc.getNamespaceACLs(ns, nsInfo) {
+		if _ , stderr, err := util.RunOVNNbctl("set", "acl", aclUUID,
+			fmt.Sprintf("log=%t", aclLogging != ""), fmt.Sprintf("severity=%s", aclLoggingSev)); err != nil {
+			klog.Errorf("Error updating ACL %s; reason: %s", aclUUID, stderr)
+			failedACLs = append(failedACLs, fmt.Sprintf("%s: %s", aclUUID, stderr))
+		}
+	}
+	if len(failedACLs) > 0 {
+		return fmt.Errorf("Failed to updated ACLs: %v", failedACLs)
+	}
+	return nil
+}
+
+func (oc *Controller) getNamespaceACLs(ns string, nsInfo *namespaceInfo) []string {
+	klog.V(5).Infof("Looking for acls on ns: %s", ns)
+	var allPolicies []*gressPolicy
+	for _, policy := range nsInfo.networkPolicies {
+		allPolicies = append(allPolicies, policy.ingressPolicies...)
+		allPolicies = append(allPolicies, policy.egressPolicies...)
+	}
+
+	var aclNames []string
+	for _, policy := range allPolicies {
+		aclNames = append(aclNames, composeACLName(ns, policy.policyName, policy.idx))
+	}
+
+	klog.V(5).Infof("The composed ACL names: %v", aclNames)
+	getACLsUUIDCmd := append(
+		[]string{"--format=csv", "--data=bare", "--no-heading", "--columns=_uuid", "list", "ACL"},
+		aclNames...)
+	aclUUIDs, stderr, err := util.RunOVNNbctl(getACLsUUIDCmd...)
+	if err != nil {
+		klog.Errorf("Could not find the impacted ACLs. StdErr: %s", stderr)
+		return nil
+	}
+
+	return strings.Split(aclUUIDs, "\n")
+}
+
+func composeACLName(ns string, policyName string, idx int) string {
+	return fmt.Sprintf("%s_%s_%d", ns, policyName, idx)
+}
+
 func getTargetPortGroupUUIDAndSuffix(policyType knet.PolicyType, nsInfo *namespaceInfo) (string, string) {
 	var targetPortGroup, suffix string
 	if policyType == knet.PolicyTypeIngress {

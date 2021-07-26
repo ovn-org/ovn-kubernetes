@@ -314,6 +314,8 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		// deny rules are all one per namespace
 		if err := oc.setACLDenyLogging(old.Name, nsInfo, nsInfo.aclLogging.Deny); err != nil {
 			klog.Warningf(err.Error())
+		} else if err := oc.setNamespaceACLLogging(old.Name, nsInfo, nsInfo.aclLogging.Allow); err != nil {
+			klog.Warningf(err.Error())
 		} else {
 			klog.Infof("Namespace %s: ACL logging setting updated to deny=%s allow=%s",
 				old.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
