@@ -4,12 +4,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 
 	utilnet "k8s.io/utils/net"
 
+	"github.com/ovn-org/libovsdb/model"
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 
@@ -476,15 +481,51 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 		// traffic destined outside of cluster subnet go to GR
 		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == %s`, types.RouterToSwitchPrefix, node, l3Prefix, podIP)
 		matchStr += matchDst
-		_, stderr, err := util.RunOVNNbctl("lr-policy-add", types.OVNClusterRouter, types.HybridOverlayReroutePriority, matchStr, "reroute",
-			grJoinIfAddr.IP.String())
-		if err != nil {
-			// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
-			// Have raised an issue against ovn repository (https://github.com/ovn-org/ovn/issues/49)
-			if !strings.Contains(stderr, "already existed") {
-				return fmt.Errorf("failed to add policy route '%s' to %s "+
-					"stderr: %s, error: %v", matchStr, types.OVNClusterRouter, stderr, err)
-			}
+
+		intPriority, _ := strconv.Atoi(types.HybridOverlayReroutePriority)
+		namedUUID := util.GenerateNamedUUID("lrpolicy")
+
+		logicalRouter := nbdb.LogicalRouter{}
+		logicalRouterPolicy := nbdb.LogicalRouterPolicy{
+			UUID:     namedUUID,
+			Priority: intPriority,
+			Action:   nbdb.LogicalRouterPolicyActionReroute,
+			Nexthops: []string{grJoinIfAddr.IP.String()},
+			Match:    matchStr,
+		}
+		logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
+		opModels := []util.OperationModel{
+			{
+				Model: &logicalRouterPolicy,
+				ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
+					return lrp.Priority == intPriority && strings.Contains(lrp.Match, podIP.String())
+				},
+				OnModelUpdates: []interface{}{
+					&logicalRouterPolicy.Nexthops,
+					&logicalRouterPolicy.Match,
+				},
+				ExistingResult: &logicalRouterPolicyRes,
+			},
+			{
+				Model:          &logicalRouter,
+				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+				OnModelMutations: func() []model.Mutation {
+					if len(logicalRouterPolicyRes) > 0 {
+						return nil
+					}
+					return []model.Mutation{
+						{
+							Field:   &logicalRouter.Policies,
+							Mutator: ovsdb.MutateOperationInsert,
+							Value:   []string{namedUUID},
+						},
+					}
+				},
+				ExistingResult: &[]nbdb.LogicalRouter{},
+			},
+		}
+		if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+			return fmt.Errorf("failed to add policy route '%s' to %s, error: %v", matchStr, types.OVNClusterRouter, err)
 		}
 	}
 	return nil
@@ -516,10 +557,42 @@ func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string) erro
 		}
 		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == %s`, types.RouterToSwitchPrefix, node, l3Prefix, podIP)
 		matchStr += matchDst
-		_, stderr, err := util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, types.HybridOverlayReroutePriority, matchStr)
-		if err != nil {
-			klog.Errorf("Failed to remove policy: %s, on: %s, stderr: %s, err: %v",
-				matchStr, types.OVNClusterRouter, stderr, err)
+
+		intPriority, _ := strconv.Atoi(types.HybridOverlayReroutePriority)
+
+		logicalRouter := nbdb.LogicalRouter{}
+		logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
+		opModels := []util.OperationModel{
+			{
+				ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
+					return lrp.Priority == intPriority && lrp.Match == matchStr
+				},
+				ExistingResult: &logicalRouterPolicyRes,
+			},
+			{
+				Model:          &logicalRouter,
+				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
+				OnModelMutations: func() []model.Mutation {
+					if len(logicalRouterPolicyRes) == 0 {
+						return nil
+					}
+					uuids := []string{}
+					for _, lrp := range logicalRouterPolicyRes {
+						uuids = append(uuids, lrp.UUID)
+					}
+					return []model.Mutation{
+						{
+							Field:   &logicalRouter.Policies,
+							Mutator: ovsdb.MutateOperationDelete,
+							Value:   uuids,
+						},
+					}
+				},
+				ExistingResult: &[]nbdb.LogicalRouter{},
+			},
+		}
+		if err := oc.modelClient.Delete(opModels...); err != nil {
+			klog.Errorf("Failed to remove policy: %s, on: %s, err: %v", matchStr, types.OVNClusterRouter, err)
 		}
 	}
 	return nil
