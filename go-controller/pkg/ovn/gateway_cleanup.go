@@ -156,21 +156,26 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 
 	for _, gwIPAddr := range gwIPAddrs {
 		// Delete logical router policy whose nexthop is the old rtoj- gateway port address
-		stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid",
-			"find", "logical_router_policy", fmt.Sprintf("nexthop=%s", gwIPAddr.IP))
-		if err != nil {
-			klog.Errorf("Unable to find LR policy of nexthop: %s for node %s, stderr: %s, err: %v",
-				gwIPAddr.IP, nodeName, stderr, err)
-			continue
+		logicalRouter := nbdb.LogicalRouter{}
+		logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
+		opModels := []libovsdbops.OperationModel{
+			{
+				ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
+					return lrp.Nexthop != nil && *lrp.Nexthop == gwIPAddr.IP.String()
+				},
+				ExistingResult: &logicalRouterPolicyRes,
+			},
+			{
+				Model:          &logicalRouter,
+				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+				OnModelMutations: func() []model.Mutation {
+					return libovsdbops.OnReferentialModelMutation(&logicalRouter.Policies, ovsdb.MutateOperationDelete, logicalRouterPolicyRes)
+				},
+				ExistingResult: &[]nbdb.LogicalRouter{},
+			},
 		}
-		if stdout != "" {
-			policyIDs := strings.Fields(stdout)
-			for _, policyID := range policyIDs {
-				_, stderr, err = util.RunOVNNbctl("remove", "logical_router", types.OVNClusterRouter, "policies", policyID)
-				if err != nil {
-					klog.Errorf("Unable to remove LR policy: %s, stderr: %s, err: %v", policyID, stderr, err)
-				}
-			}
+		if err := oc.modelClient.Delete(opModels...); err != nil {
+			klog.Errorf("Unable to remove LR policy : %s, err: %v", err)
 		}
 		nextHops = append(nextHops, gwIPAddr.IP)
 	}
