@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -370,7 +371,7 @@ func (oc *Controller) setNamespaceACLLogging(ns string, nsInfo *namespaceInfo, a
 func (oc *Controller) getNamespaceACLs(ns string, nsInfo *namespaceInfo) []string {
 	klog.V(5).Infof("Looking for acls on ns: %s", ns)
 	var allPolicies []*gressPolicy
-	for _, policy := range nsInfo.networkPolicies {
+	for _, policy := range getPoliciesInDeterministicOrder(nsInfo.networkPolicies) {
 		allPolicies = append(allPolicies, policy.ingressPolicies...)
 		allPolicies = append(allPolicies, policy.egressPolicies...)
 	}
@@ -391,6 +392,24 @@ func (oc *Controller) getNamespaceACLs(ns string, nsInfo *namespaceInfo) []strin
 	}
 
 	return strings.Split(aclUUIDs, "\n")
+}
+
+func getPoliciesInDeterministicOrder(policies map[string]*networkPolicy) []*networkPolicy {
+	keys := getSortedPolicyNames(policies)
+	var sortedPolicies []*networkPolicy
+	for _, key := range keys {
+		sortedPolicies = append(sortedPolicies, policies[key])
+	}
+	return sortedPolicies
+}
+
+func getSortedPolicyNames(policies map[string]*networkPolicy) []string {
+	keys := make([]string, 0, len(policies))
+	for k := range policies {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func composeACLName(ns string, policyName string, idx int) string {
