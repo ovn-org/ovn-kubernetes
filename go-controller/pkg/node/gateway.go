@@ -35,6 +35,8 @@ type gateway struct {
 	portClaimWatcher informer.ServiceEventHandler
 	// nodePortWatcher is used in Shared GW mode to handle nodePort flows in shared OVS bridge
 	nodePortWatcher informer.ServiceEventHandler
+	// nodePortWatcherIptables is used in Shared GW mode to handle nodePort IPTable rules
+	nodePortWatcherIptables informer.ServiceEventHandler
 	// localPortWatcher is used in Local GW mode to handle iptables rules and routes for services
 	localPortWatcher informer.ServiceEventHandler
 	openflowManager  *openflowManager
@@ -53,6 +55,9 @@ func (g *gateway) AddService(svc *kapi.Service) {
 	if g.nodePortWatcher != nil {
 		g.nodePortWatcher.AddService(svc)
 	}
+	if g.nodePortWatcherIptables != nil {
+		g.nodePortWatcherIptables.AddService(svc)
+	}
 	if g.localPortWatcher != nil {
 		g.localPortWatcher.AddService(svc)
 	}
@@ -67,6 +72,9 @@ func (g *gateway) UpdateService(old, new *kapi.Service) {
 	}
 	if g.nodePortWatcher != nil {
 		g.nodePortWatcher.UpdateService(old, new)
+	}
+	if g.nodePortWatcherIptables != nil {
+		g.nodePortWatcherIptables.UpdateService(old, new)
 	}
 	if g.localPortWatcher != nil {
 		g.localPortWatcher.UpdateService(old, new)
@@ -83,6 +91,9 @@ func (g *gateway) DeleteService(svc *kapi.Service) {
 	if g.nodePortWatcher != nil {
 		g.nodePortWatcher.DeleteService(svc)
 	}
+	if g.nodePortWatcherIptables != nil {
+		g.nodePortWatcherIptables.DeleteService(svc)
+	}
 	if g.localPortWatcher != nil {
 		g.localPortWatcher.DeleteService(svc)
 	}
@@ -97,6 +108,9 @@ func (g *gateway) SyncServices(objs []interface{}) {
 	}
 	if g.nodePortWatcher != nil {
 		g.nodePortWatcher.SyncServices(objs)
+	}
+	if g.nodePortWatcherIptables != nil {
+		g.nodePortWatcherIptables.SyncServices(objs)
 	}
 	if g.localPortWatcher != nil {
 		g.localPortWatcher.SyncServices(objs)
@@ -173,16 +187,15 @@ func (g *gateway) Run(stopChan <-chan struct{}, wg *sync.WaitGroup) {
 	}
 }
 
-func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, subnets []*net.IPNet, gwNextHops []net.IP, nodeAnnotator kube.Annotator) (
+func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, subnets []*net.IPNet, gwNextHops []net.IP, gwIPs []*net.IPNet, nodeAnnotator kube.Annotator) (
 	*bridgeConfiguration, *bridgeConfiguration, error) {
-
-	gatewayBridge, err := bridgeForInterface(gwIntf, nodeName, types.PhysicalNetworkName)
+	gatewayBridge, err := bridgeForInterface(gwIntf, nodeName, types.PhysicalNetworkName, gwIPs)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "Bridge for interface failed for %s", gwIntf)
 	}
 	var egressGWBridge *bridgeConfiguration
 	if egressGatewayIntf != "" {
-		egressGWBridge, err = bridgeForInterface(egressGatewayIntf, nodeName, types.PhysicalNetworkExGwName)
+		egressGWBridge, err = bridgeForInterface(egressGatewayIntf, nodeName, types.PhysicalNetworkExGwName, nil)
 		if err != nil {
 			return nil, nil, errors.Wrapf(err, "Bridge for interface failed for %s", egressGatewayIntf)
 		}
@@ -213,7 +226,7 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, subnets []*
 		}
 	}
 
-	config := util.L3GatewayConfig{
+	l3GwConfig := util.L3GatewayConfig{
 		Mode:           config.GatewayModeShared,
 		ChassisID:      chassisID,
 		InterfaceID:    gatewayBridge.interfaceID,
@@ -224,19 +237,19 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, subnets []*
 		VLANID:         &config.Gateway.VLANID,
 	}
 	if egressGWBridge != nil {
-		config.EgressGWInterfaceID = egressGWBridge.interfaceID
-		config.EgressGWMACAddress = egressGWBridge.macAddress
-		config.EgressGWIPAddresses = egressGWBridge.ips
+		l3GwConfig.EgressGWInterfaceID = egressGWBridge.interfaceID
+		l3GwConfig.EgressGWMACAddress = egressGWBridge.macAddress
+		l3GwConfig.EgressGWIPAddresses = egressGWBridge.ips
 	}
 
-	err = util.SetL3GatewayConfig(nodeAnnotator, &config)
+	err = util.SetL3GatewayConfig(nodeAnnotator, &l3GwConfig)
 	return gatewayBridge, egressGWBridge, err
 }
 
 func gatewayReady(patchPort string) (bool, error) {
 	// Get ofport of patchPort
-	_, _, err := util.GetOVSOfPort("--if-exists", "get", "interface", patchPort, "ofport")
-	if err != nil {
+	ofport, _, err := util.GetOVSOfPort("--if-exists", "get", "interface", patchPort, "ofport")
+	if err != nil || len(ofport) == 0 {
 		return false, nil
 	}
 	klog.Info("Gateway is ready")
@@ -261,9 +274,10 @@ type bridgeConfiguration struct {
 	patchPort   string
 	ofPortPatch string
 	ofPortPhys  string
+	ofPortHost  string
 }
 
-func bridgeForInterface(intfName, nodeName, physicalNetworkName string) (*bridgeConfiguration, error) {
+func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet) (*bridgeConfiguration, error) {
 	res := bridgeConfiguration{}
 	gwIntf := intfName
 	bridgeCreated := false
@@ -297,11 +311,17 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string) (*bridge
 		res.uplinkName = uplinkName
 	}
 	var err error
-	// Now, we get IP addresses from OVS bridge. If IP does not exist,
-	// error out.
-	res.ips, err = getNetworkInterfaceIPAddresses(gwIntf)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get interface details for %s", gwIntf)
+	// Now, we get IP addresses for the bridge
+	if len(gwIPs) > 0 {
+		// use gwIPs if provided
+		res.ips = gwIPs
+	} else {
+		// get IP addresses from OVS bridge. If IP does not exist,
+		// error out.
+		res.ips, err = getNetworkInterfaceIPAddresses(gwIntf)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to get interface details for %s", gwIntf)
+		}
 	}
 
 	res.interfaceID, res.macAddress, err = bridgedGatewayNodeSetup(nodeName, res.bridgeName, gwIntf,
@@ -313,5 +333,18 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string) (*bridge
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
 	res.patchPort = "patch-" + res.bridgeName + "_" + nodeName + "-to-br-int"
+
+	// for smart-NIC we use the host MAC address for the Gateway configuration
+	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
+		hostRep, err := util.GetSmartNICHostInterface(res.bridgeName)
+		if err != nil {
+			return nil, err
+		}
+		res.macAddress, err = util.GetSriovnetOps().GetRepresentorPeerMacAddress(hostRep)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return &res, nil
 }

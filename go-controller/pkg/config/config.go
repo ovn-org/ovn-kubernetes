@@ -305,6 +305,9 @@ type GatewayConfig struct {
 	// exceeding pod MTU to be dropped by OVN. With this check enabled, ICMP needs frag/packet too big will be sent
 	// back to the original client
 	DisablePacketMTUCheck bool `gcfg:"disable-pkt-mtu-check"`
+	// RouterSubnet is the subnet to be used for the GR external port. auto-detected if not given.
+	// Must match the the kube node IP address. Currently valid for Smart-NICs only.
+	RouterSubnet string `gcfg:"router-subnet"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -348,7 +351,8 @@ type HybridOverlayConfig struct {
 
 // OvnKubeNodeConfig holds ovnkube-node configurations
 type OvnKubeNodeConfig struct {
-	Mode string `gcfg:"mode"`
+	Mode           string `gcfg:"mode"`
+	MgmtPortNetdev string `gcfg:"mgmt-port-netdev"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -973,6 +977,14 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage:       "Disable OpenFlow checks for if packet size is greater than pod MTU",
 		Destination: &cliConfig.Gateway.DisablePacketMTUCheck,
 	},
+	&cli.StringFlag{
+		Name: "gateway-router-subnet",
+		Usage: "The Subnet to be used for the gateway router external port (shared mode only). " +
+			"auto-detected if not given. Must match the the kube node IP address. " +
+			"Currently valid for Smart-NICs only",
+		Destination: &cliConfig.Gateway.RouterSubnet,
+		Value:       Gateway.RouterSubnet,
+	},
 	// Deprecated CLI options
 	&cli.BoolFlag{
 		Name:        "init-gateways",
@@ -1041,6 +1053,14 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Usage:       "ovnkube-node operating mode full(default), smart-nic, smart-nic-host",
 		Value:       OvnKubeNode.Mode,
 		Destination: &cliConfig.OvnKubeNode.Mode,
+	},
+	&cli.StringFlag{
+		Name: "ovnkube-node-mgmt-port-netdev",
+		Usage: "valid only when ovnkube-node-mode is either smart-nic or smart-nic-host. " +
+			"when provided, use this netdev as management port. it will be renamed to ovn-k8s-mp0 " +
+			"and used to allow host network services and pods to access k8s pod and service networks. ",
+		Value:       OvnKubeNode.MgmtPortNetdev,
+		Destination: &cliConfig.OvnKubeNode.MgmtPortNetdev,
 	},
 }
 
@@ -1877,6 +1897,17 @@ func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
 	// ovnkube-node-mode smart-nic/smart-nic-host does not support hybrid overlay
 	if OvnKubeNode.Mode != types.NodeModeFull && HybridOverlay.Enabled {
 		return fmt.Errorf("hybrid overlay is not supported with ovnkube-node mode %s", OvnKubeNode.Mode)
+	}
+	// when Smart-NIC are used, management port is backed by a VF. get management port VF information
+	if OvnKubeNode.Mode == types.NodeModeSmartNIC || OvnKubeNode.Mode == types.NodeModeSmartNICHost {
+		if OvnKubeNode.MgmtPortNetdev == "" {
+			return fmt.Errorf("ovnkube-node-mgmt-port-netdev must be provided")
+		}
+	} else {
+		if OvnKubeNode.MgmtPortNetdev != "" {
+			return fmt.Errorf("ovnkube-node-mgmt-port-netdev is not supported with ovnkube-node mode %s",
+				OvnKubeNode.Mode)
+		}
 	}
 	return nil
 }

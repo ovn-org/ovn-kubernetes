@@ -196,7 +196,6 @@ func HashForOVN(s string) string {
 	}
 	hashString := strconv.FormatUint(h.Sum64(), 10)
 	return fmt.Sprintf("a%s", hashString)
-
 }
 
 // UpdateIPsSlice will search for values of oldIPs in the slice "s" and update it with newIPs values of same IP family
