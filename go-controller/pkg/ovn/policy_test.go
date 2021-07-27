@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/extensions/table"
 	"github.com/onsi/gomega"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -107,24 +108,32 @@ func (n kNetworkPolicy) addLocalPodCmds(fexec *ovntest.FakeExec, networkPolicy *
 	n.addDefaultDenyPGCmds(fexec, networkPolicy)
 }
 
-func (n kNetworkPolicy) addNamespaceSelectorCmds(fexec *ovntest.FakeExec, networkPolicy *knet.NetworkPolicy, namespace string) {
+func (n kNetworkPolicy) addNamespaceSelectorCmds(fexec *ovntest.FakeExec, networkPolicy *knet.NetworkPolicy, namespace string, logSeverity ...string) {
 	as := []string{}
 	if namespace != "" {
 		as = append(as, namespace)
 	}
 
+	logSev := "info"
+	isLogEnabled := "false"
+	if len(logSeverity) > 0 {
+		logSev = logSeverity[0]
+		isLogEnabled = "true"
+	}
+
+	portGroup := hashedPortGroup(fmt.Sprintf("%s_%s", networkPolicy.Namespace, networkPolicy.Name))
 	for i := range networkPolicy.Spec.Ingress {
 		ingressAsMatch := asMatch(append(as, getAddressSetName(networkPolicy.Namespace, networkPolicy.Name, knet.PolicyTypeIngress, i)))
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Ingress_num=%v external-ids:policy_type=Ingress", networkPolicy.Namespace, networkPolicy.Name, i),
-			"ovn-nbctl --timeout=15 --id=@acl create acl priority=" + types.DefaultAllowPriority + " direction=" + types.DirectionToLPort + " match=\"ip4.src == {" + ingressAsMatch + "} && outport == @a14195333570786048679\" action=allow-related log=false severity=info meter=acl-logging name=" + networkPolicy.Namespace + "_" + networkPolicy.Name + "_" + strconv.Itoa(i) + " external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group " + fakePgUUID + " acls @acl",
+			"ovn-nbctl --timeout=15 --id=@acl create acl priority=" + types.DefaultAllowPriority + " direction=" + types.DirectionToLPort + " match=\"ip4.src == {" + ingressAsMatch + "} && outport == @" + portGroup + "\" action=allow-related log=" + isLogEnabled + " severity=" + logSev + " meter=acl-logging name=" + networkPolicy.Namespace + "_" + networkPolicy.Name + "_" + strconv.Itoa(i) + " external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=" + networkPolicy.GetName() + fmt.Sprintf(" external-ids:Ingress_num=%d", i) + " external-ids:policy_type=Ingress -- add port_group " + fakePgUUID + " acls @acl",
 		})
 	}
 	for i := range networkPolicy.Spec.Egress {
 		egressAsMatch := asMatch(append(as, getAddressSetName(networkPolicy.Namespace, networkPolicy.Name, knet.PolicyTypeEgress, i)))
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=%v external-ids:policy_type=Egress", networkPolicy.Namespace, networkPolicy.Name, i),
-			"ovn-nbctl --timeout=15 --id=@acl create acl priority=" + types.DefaultAllowPriority + " direction=" + types.DirectionToLPort + " match=\"ip4.dst == {" + egressAsMatch + "} && inport == @a14195333570786048679\" action=allow-related log=false severity=info meter=acl-logging name=" + networkPolicy.Namespace + "_" + networkPolicy.Name + "_" + strconv.Itoa(i) + " external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group " + fakePgUUID + " acls @acl",
+			"ovn-nbctl --timeout=15 --id=@acl create acl priority=" + types.DefaultAllowPriority + " direction=" + types.DirectionToLPort + " match=\"ip4.dst == {" + egressAsMatch + "} && inport == @" + portGroup + "\" action=allow-related log=" + isLogEnabled + " severity=" + logSev + " meter=acl-logging name=" + networkPolicy.Namespace + "_" + networkPolicy.Name + "_" + strconv.Itoa(i) + " external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=" + networkPolicy.GetName() + fmt.Sprintf(" external-ids:Egress_num=%d", i) + " external-ids:policy_type=Egress -- add port_group " + fakePgUUID + " acls @acl",
 		})
 	}
 }
@@ -1596,6 +1605,158 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
+
+		ginkgo.Context("ACL logging for network policies", func() {
+			const (
+				desiredLogSeverity      = "debug"
+				firstNetworkPolicyName  = "networkpolicy1"
+				initialAllowSeverity    = "notice"
+				initialDenySeverity     = "alert"
+				logSeverityAnnotation   = "k8s.ovn.org/acl-logging"
+				namespaceName           = "namespace1"
+				secondNetworkPolicyName = "networkpolicy2"
+				targetNamespaceName     = "target-namespace"
+				thirdNetworkPolicyName  = "networkpolicy3"
+			)
+			var npTest kNetworkPolicy
+			var originalNamespace v1.Namespace
+
+			newAnnotatedNamespace := func(name string, annotations map[string]string) *v1.Namespace {
+				createdNamespace := newNamespace(namespaceName)
+				createdNamespace.Annotations = annotations
+				return createdNamespace
+			}
+
+			generateIngressPolicyWithSingleRule := func() knet.NetworkPolicy {
+				return *newNetworkPolicy(
+					firstNetworkPolicyName,
+					namespaceName,
+					metav1.LabelSelector{},
+					[]knet.NetworkPolicyIngressRule{
+						{
+							From: []knet.NetworkPolicyPeer{
+								{
+									NamespaceSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": targetNamespaceName,
+										},
+									},
+								},
+							},
+						},
+					}, nil)
+			}
+
+			generateIngressPolicyWithMultipleRules := func() knet.NetworkPolicy {
+				return *newNetworkPolicy(
+					thirdNetworkPolicyName,
+					namespaceName,
+					metav1.LabelSelector{},
+					[]knet.NetworkPolicyIngressRule{
+						{
+							From: []knet.NetworkPolicyPeer{
+								{
+									NamespaceSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": targetNamespaceName,
+										},
+									},
+								},
+							},
+						},
+						{
+							From: []knet.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": "tiny-winy-pod",
+										},
+									},
+								},
+							},
+						},
+					}, nil)
+			}
+
+			generateEgressPolicyWithSingleRule := func() knet.NetworkPolicy {
+				return *newNetworkPolicy(
+					secondNetworkPolicyName,
+					namespaceName,
+					metav1.LabelSelector{},
+					nil,
+					[]knet.NetworkPolicyEgressRule{
+						{
+							To: []knet.NetworkPolicyPeer{
+								{
+									NamespaceSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": targetNamespaceName,
+										},
+									},
+								},
+							},
+						},
+					})
+			}
+
+			updateNamespaceACLLogSeverity := func(namespaceToUpdate *v1.Namespace, desiredDenyLogLevel string, desiredAllowLogLevel string) error {
+				ginkgo.By("updating the namespace's ACL logging severity")
+				updatedLogSeverity := fmt.Sprintf(`{ "deny": "%s", "allow": "%s" }`, desiredDenyLogLevel, desiredAllowLogLevel)
+				namespaceToUpdate.Annotations[logSeverityAnnotation] = updatedLogSeverity
+
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), namespaceToUpdate, metav1.UpdateOptions{})
+				return err
+			}
+
+			ginkgo.BeforeEach(func() {
+				originalACLLogSeverity := fmt.Sprintf(`{ "deny": "%s", "allow": "%s" }`, initialDenySeverity, initialAllowSeverity)
+				originalNamespace = *newAnnotatedNamespace(
+					namespaceName,
+					map[string]string{logSeverityAnnotation: originalACLLogSeverity})
+			})
+
+			table.DescribeTable("ACL logging for network policies reacts to severity updates", func(networkPolicies ...knet.NetworkPolicy) {
+				npTest.addDefaultDenyPGCmds(fExec, &networkPolicies[0])
+				for _, netPolicy := range networkPolicies {
+					npTest.addNamespaceSelectorCmds(fExec, &netPolicy, "", initialAllowSeverity)
+				}
+
+				app.Action = func(ctx *cli.Context) error {
+					fakeOvn.start(ctx,
+						&v1.NamespaceList{
+							Items: []v1.Namespace{
+								originalNamespace,
+							},
+						},
+						&v1.PodList{},
+						&knet.NetworkPolicyList{
+							Items: networkPolicies,
+						},
+					)
+					fakeOvn.controller.WatchNamespaces()
+					fakeOvn.controller.WatchNetworkPolicy()
+					gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+
+					gomega.Expect(
+						updateNamespaceACLLogSeverity(&originalNamespace, desiredLogSeverity, desiredLogSeverity)).NotTo(gomega.HaveOccurred(),
+						"should have managed to update the ACL logging severity within the namespace")
+
+					addExpectedUpdateDefaultDenyACLs(fExec, desiredLogSeverity)
+					addExpectedUpdateNetworkPolicyACLLoggingSeverity(fExec, desiredLogSeverity, networkPolicies...)
+
+					gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+					return nil
+				}
+				gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+			},
+				table.Entry("when the namespace features a network policy with a single rule",
+					generateIngressPolicyWithSingleRule()),
+				table.Entry("when the namespace features *multiple* network policies with a single rule",
+					generateIngressPolicyWithSingleRule(),
+					generateEgressPolicyWithSingleRule()),
+				table.Entry("when the namespace features a network policy with *multiple* rules",
+					generateIngressPolicyWithMultipleRules()))
+		})
 	})
 })
 
@@ -1616,7 +1777,7 @@ func asMatch(addressSets []string) string {
 	return match
 }
 
-func addExpectedGressCmds(fExec *ovntest.FakeExec, gp *gressPolicy, pgName string, oldAS, newAS []string) []string {
+func addExpectedGressCmds(fExec *ovntest.FakeExec, gp *gressPolicy, pgName string, oldAS, newAS []string, logSeverity ...string) []string {
 	const uuid string = "94407fe0-2c15-4a63-baea-ab4af0ea5bb8"
 
 	newMatch := asMatch(newAS)
@@ -1757,3 +1918,62 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		gomega.Expect(gp.delNamespaceAddressSet(four)).To(gomega.BeFalse())
 	})
 })
+
+func addExpectedUpdateDefaultDenyACLs(fExec *ovntest.FakeExec, logSeverity string) {
+	const (
+		fakeIngressACLUUID = "8a86f6d8-7972-4253-b0bd-ddbef66e9606"
+		fakeEgressACLUUID  = "8a86f6d8-7972-4253-b0bd-ddbef66e9707"
+	)
+	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == @a6953372168492035427_ingressDefaultDeny\" action=drop external-ids:default-deny-policy-type=Ingress"),
+		Output: fakeIngressACLUUID,
+	})
+	fExec.AddFakeCmdsNoOutputNoError([]string{
+		fmt.Sprintf("ovn-nbctl --timeout=15 set acl %s log=true severity=debug", fakeIngressACLUUID),
+	})
+	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"inport == @a6953372168492035427_egressDefaultDeny\" action=drop external-ids:default-deny-policy-type=Egress"),
+		Output: fakeEgressACLUUID,
+	})
+	fExec.AddFakeCmdsNoOutputNoError([]string{
+		fmt.Sprintf("ovn-nbctl --timeout=15 set acl %s log=true severity=%s", fakeEgressACLUUID, logSeverity),
+	})
+}
+
+func addExpectedUpdateNetworkPolicyACLLoggingSeverity(fExec *ovntest.FakeExec, logSeverity string, policies ...knet.NetworkPolicy) {
+	aclNames := composeACLNameFromMultiplePolicies(policies...)
+	aclUUIDs := generateACLUUIDs(aclNames...)
+	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid list ACL %s", strings.Join(aclNames, " ")),
+		Output: strings.Join(aclUUIDs, "\n"),
+	})
+
+	for i := range aclNames {
+		fExec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf("ovn-nbctl --timeout=15 set acl %s log=true severity=%s", aclUUIDs[i], logSeverity),
+		})
+	}
+}
+
+func composeACLNameFromMultiplePolicies(policies ...knet.NetworkPolicy) []string {
+	var policyNames []string
+	for _, policy := range policies {
+		for i := range policy.Spec.Ingress {
+			policyNames = append(policyNames, composeACLName(policy.GetNamespace(), policy.GetName(), i))
+		}
+		for i := range policy.Spec.Egress {
+			policyNames = append(policyNames, composeACLName(policy.GetNamespace(), policy.GetName(), i))
+		}
+	}
+	return policyNames
+}
+
+func generateACLUUIDs(ruleNames ...string) []string {
+	const policyACLUUIDTemplate = "8a86f6d8-7972-4253-b0bd-ddbef66e900%d"
+
+	var aclUUIDs []string
+	for i := range ruleNames {
+		aclUUIDs = append(aclUUIDs, fmt.Sprintf(policyACLUUIDTemplate, i))
+	}
+	return aclUUIDs
+}
