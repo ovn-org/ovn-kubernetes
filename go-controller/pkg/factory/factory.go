@@ -59,10 +59,12 @@ const (
 	// ovnkube master (currently, it is just a 'get' loop)
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
-	resyncInterval        = 0
-	handlerAlive   uint32 = 0
-	handlerDead    uint32 = 1
-	numEventQueues int    = 15
+	resyncInterval               = 0
+	handlerAlive          uint32 = 0
+	handlerDead           uint32 = 1
+	defaultNumEventQueues int    = 15
+	medNumEventQueues     int    = 75
+	maxNumEventQueues     int    = 150
 )
 
 var (
@@ -123,7 +125,8 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	})
 
 	// Create our informer-wrapper informer (and underlying shared informer) for types we need
-	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan)
+	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
+		maxNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
@@ -140,11 +143,12 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		return nil, err
 	}
 	wf.informers[namespaceType], err = newQueuedInformer(namespaceType, wf.iFactory.Core().V1().Namespaces().Informer(),
-		wf.stopChan)
+		wf.stopChan, medNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[nodeType], err = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan)
+	wf.informers[nodeType], err = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan,
+		defaultNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +223,8 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 	})
 
 	var err error
-	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan)
+	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
+		defaultNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
