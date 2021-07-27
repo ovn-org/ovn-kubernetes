@@ -160,7 +160,7 @@ func (i *informer) processEvents(events chan *event, stopChan <-chan struct{}) {
 	}
 }
 
-func getQueueNum(oType reflect.Type, obj interface{}) uint32 {
+func getQueueNum(oType reflect.Type, obj interface{}, numEventQueues int) uint32 {
 	meta, err := getObjectMeta(oType, obj)
 	if err != nil {
 		klog.Errorf("Object has no meta: %v", err)
@@ -180,8 +180,8 @@ func getQueueNum(oType reflect.Type, obj interface{}) uint32 {
 }
 
 // enqueueEvent adds an event to the appropriate queue for the object
-func (i *informer) enqueueEvent(oldObj, obj interface{}, processFunc func(*event)) {
-	i.events[getQueueNum(i.oType, obj)] <- &event{
+func (i *informer) enqueueEvent(oldObj, obj interface{}, numEventQueues int, processFunc func(*event)) {
+	i.events[getQueueNum(i.oType, obj, numEventQueues)] <- &event{
 		obj:     obj,
 		oldObj:  oldObj,
 		process: processFunc,
@@ -204,11 +204,11 @@ func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface
 	return obj, nil
 }
 
-func (i *informer) newFederatedQueuedHandler() cache.ResourceEventHandlerFuncs {
+func (i *informer) newFederatedQueuedHandler(numEventQueues int) cache.ResourceEventHandlerFuncs {
 	name := i.oType.Elem().Name()
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			i.enqueueEvent(nil, obj, func(e *event) {
+			i.enqueueEvent(nil, obj, numEventQueues, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
@@ -218,7 +218,7 @@ func (i *informer) newFederatedQueuedHandler() cache.ResourceEventHandlerFuncs {
 			})
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-			i.enqueueEvent(oldObj, newObj, func(e *event) {
+			i.enqueueEvent(oldObj, newObj, numEventQueues, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
@@ -233,7 +233,7 @@ func (i *informer) newFederatedQueuedHandler() cache.ResourceEventHandlerFuncs {
 				klog.Errorf(err.Error())
 				return
 			}
-			i.enqueueEvent(nil, realObj, func(e *event) {
+			i.enqueueEvent(nil, realObj, numEventQueues, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
@@ -348,7 +348,8 @@ func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (
 	return i, nil
 }
 
-func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer, stopChan chan struct{}) (*informer, error) {
+func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer,
+	stopChan chan struct{}, numEventQueues int) (*informer, error) {
 	i, err := newBaseInformer(oType, sharedInformer)
 	if err != nil {
 		return nil, err
@@ -383,7 +384,7 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		// Distribute the existing items into the handler-specific
 		// channel array.
 		for _, obj := range items {
-			queueIdx := getQueueNum(i.oType, obj)
+			queueIdx := getQueueNum(i.oType, obj, numEventQueues)
 			adds[queueIdx] <- obj
 		}
 		// Close all the channels
@@ -393,6 +394,6 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		// Wait until all the object additions have been processed
 		queueWg.Wait()
 	}
-	i.inf.AddEventHandler(i.newFederatedQueuedHandler())
+	i.inf.AddEventHandler(i.newFederatedQueuedHandler(numEventQueues))
 	return i, nil
 }
