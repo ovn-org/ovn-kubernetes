@@ -54,12 +54,42 @@ func (ovnkubeMasterLeaderMetrics) Off(string) {
 
 type ovnkubeMasterLeaderMetricsProvider struct{}
 
-func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.SwitchMetric {
+func (ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.SwitchMetric {
 	return ovnkubeMasterLeaderMetrics{}
 }
 
-// Start waits until this process is the leader before starting master functions
-func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup, ctx context.Context) error {
+// Start the master
+func (oc *Controller) Start(ctx context.Context, nodeName string, wg *sync.WaitGroup) error {
+	if config.MasterHA.DisableLeaderElection {
+		klog.V(5).Info("Start without leader election")
+		return oc.startAsLeader(nodeName, wg)
+	} else {
+		klog.V(5).Info("Start in leader election mode")
+		return oc.startWithLeaderElection(ctx, nodeName, wg)
+	}
+}
+
+// startAsLeader starts master functions
+func (oc *Controller) startAsLeader(nodeName string, wg *sync.WaitGroup) error {
+	// run the cluster controller to init the master
+	start := time.Now()
+	defer func() {
+		end := time.Since(start)
+		metrics.MetricMasterReadyDuration.Set(end.Seconds())
+	}()
+
+	// run the End-to-end timestamp metric updater only on the
+	// active master node.
+	metrics.StartE2ETimeStampMetricUpdater(oc.stopChan, oc.ovnNBClient)
+	if err := oc.StartClusterMaster(nodeName); err != nil {
+		return err
+	}
+
+	return oc.Run(wg, nodeName)
+}
+
+// startWithLeaderElection waits until this process is the leader before starting master functions
+func (oc *Controller) startWithLeaderElection(ctx context.Context, nodeName string, wg *sync.WaitGroup) error {
 	// Set up leader election process first
 	rl, err := resourcelock.New(
 		resourcelock.ConfigMapsResourceLock,
@@ -82,19 +112,8 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup, ctx context.Con
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				klog.Infof("Won leader election; in active mode")
-				// run the cluster controller to init the master
-				start := time.Now()
-				defer func() {
-					end := time.Since(start)
-					metrics.MetricMasterReadyDuration.Set(end.Seconds())
-				}()
-				// run the End-to-end timestamp metric updater only on the
-				// active master node.
-				metrics.StartE2ETimeStampMetricUpdater(oc.stopChan, oc.ovnNBClient)
-				if err := oc.StartClusterMaster(nodeName); err != nil {
-					panic(err.Error())
-				}
-				if err := oc.Run(wg, nodeName); err != nil {
+
+				if err := oc.startAsLeader(nodeName, wg); err != nil {
 					panic(err.Error())
 				}
 			},

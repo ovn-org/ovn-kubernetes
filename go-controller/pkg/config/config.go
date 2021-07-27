@@ -120,6 +120,7 @@ var (
 		ElectionLeaseDuration: 60,
 		ElectionRenewDeadline: 30,
 		ElectionRetryPeriod:   20,
+		DisableLeaderElection: false,
 	}
 
 	// HybridOverlay holds hybrid overlay feature config options.
@@ -329,9 +330,10 @@ type OvnAuthConfig struct {
 // MasterHAConfig holds configuration for master HA
 // configuration.
 type MasterHAConfig struct {
-	ElectionLeaseDuration int `gcfg:"election-lease-duration"`
-	ElectionRenewDeadline int `gcfg:"election-renew-deadline"`
-	ElectionRetryPeriod   int `gcfg:"election-retry-period"`
+	ElectionLeaseDuration int  `gcfg:"election-lease-duration"`
+	ElectionRenewDeadline int  `gcfg:"election-renew-deadline"`
+	ElectionRetryPeriod   int  `gcfg:"election-retry-period"`
+	DisableLeaderElection bool `gcfg:"disable-leader-election"`
 }
 
 // HybridOverlayConfig holds configuration for hybrid overlay
@@ -1018,6 +1020,12 @@ var MasterHAFlags = []cli.Flag{
 		Destination: &cliConfig.MasterHA.ElectionRetryPeriod,
 		Value:       MasterHA.ElectionRetryPeriod,
 	},
+	&cli.BoolFlag{
+		Name:        "ha-disable-leader-election",
+		Usage:       "Disable leader election (default: false). Must only be used in case of a single master.",
+		Destination: &cliConfig.MasterHA.DisableLeaderElection,
+		Value:       MasterHA.DisableLeaderElection,
+	},
 }
 
 // HybridOverlayFlats capture hybrid overlay feature options
@@ -1633,6 +1641,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	klog.V(5).Infof("OVN South config: %+v", OvnSouth)
 	klog.V(5).Infof("Hybrid Overlay config: %+v", HybridOverlay)
 	klog.V(5).Infof("Ovnkube Node config: %+v", OvnKubeNode)
+	klog.V(5).Infof("MasterHA config: %+v", MasterHA)
 
 	return retConfigFile, nil
 }

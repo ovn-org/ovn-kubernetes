@@ -253,7 +253,7 @@ func runOvnKube(ctx *cli.Context) error {
 
 		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil,
 			ovnNBClient, ovnSBClient, libovsdbOvnNBClient, libovsdbOvnSBClient, util.EventRecorder(ovnClientset.KubeClient))
-		if err := ovnController.Start(master, wg, ctx.Context); err != nil {
+		if err := ovnController.Start(ctx.Context, master, wg); err != nil {
 			return err
 		}
 	}
