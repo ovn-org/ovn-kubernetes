@@ -84,8 +84,8 @@ const (
 	egressDenyPG  string = "egressDefaultDeny"
 )
 
-func (n kNetworkPolicy) addDefaultDenyPGCmds(fexec *ovntest.FakeExec, networkPolicy *knet.NetworkPolicy) {
-	pg_hash := hashedPortGroup(networkPolicy.Namespace)
+func (n kNetworkPolicy) addDefaultDenyPGCmds(fexec *ovntest.FakeExec, namespaceName string) {
+	pg_hash := hashedPortGroup(namespaceName)
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == @" + pg_hash + "_" + ingressDenyPG + "\" action=drop external-ids:default-deny-policy-type=Ingress",
 		Output: fakeUUID,
@@ -105,7 +105,7 @@ func (n kNetworkPolicy) addDefaultDenyPGCmds(fexec *ovntest.FakeExec, networkPol
 }
 
 func (n kNetworkPolicy) addLocalPodCmds(fexec *ovntest.FakeExec, networkPolicy *knet.NetworkPolicy) {
-	n.addDefaultDenyPGCmds(fexec, networkPolicy)
+	n.addDefaultDenyPGCmds(fexec, networkPolicy.Namespace)
 }
 
 func (n kNetworkPolicy) addNamespaceSelectorCmds(fexec *ovntest.FakeExec, networkPolicy *knet.NetworkPolicy, namespace string, logSeverity ...string) {
@@ -586,7 +586,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, namespace2.Name)
-				npTest.addDefaultDenyPGCmds(fExec, networkPolicy)
+				npTest.addDefaultDenyPGCmds(fExec, networkPolicy.Namespace)
 
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
@@ -658,7 +658,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				npTest.addNamespaceSelectorCmdsExistingAcl(fExec, networkPolicy, namespace2.Name)
-				npTest.addDefaultDenyPGCmds(fExec, networkPolicy)
+				npTest.addDefaultDenyPGCmds(fExec, networkPolicy.Namespace)
 
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
@@ -838,7 +838,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				nPodTest.baseCmds(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, "")
-				npTest.addDefaultDenyPGCmds(fExec, networkPolicy)
+				npTest.addDefaultDenyPGCmds(fExec, networkPolicy.Namespace)
 
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
@@ -1175,7 +1175,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, namespace2.Name)
-				npTest.addDefaultDenyPGCmds(fExec, networkPolicy)
+				npTest.addDefaultDenyPGCmds(fExec, networkPolicy.Namespace)
 
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
@@ -1361,7 +1361,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				nPodTest.baseCmds(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, "")
-				npTest.addDefaultDenyPGCmds(fExec, networkPolicy)
+				npTest.addDefaultDenyPGCmds(fExec, networkPolicy.Namespace)
 
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
@@ -1467,7 +1467,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				nPodTest.baseCmds(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, "")
-				npTest.addDefaultDenyPGCmds(fExec, networkPolicy)
+				npTest.addDefaultDenyPGCmds(fExec, networkPolicy.Namespace)
 
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
@@ -1716,7 +1716,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 			})
 
 			table.DescribeTable("ACL logging for network policies reacts to severity updates", func(networkPolicies ...knet.NetworkPolicy) {
-				npTest.addDefaultDenyPGCmds(fExec, &networkPolicies[0])
+				npTest.addDefaultDenyPGCmds(fExec, namespaceName)
 				for _, netPolicy := range networkPolicies {
 					npTest.addNamespaceSelectorCmds(fExec, &netPolicy, "", initialAllowSeverity)
 				}
