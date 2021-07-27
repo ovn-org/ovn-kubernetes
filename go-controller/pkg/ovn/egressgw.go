@@ -339,7 +339,7 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
 							}
 						}
 					}
-					cleanUpBFDEntry(gwIP.String(), gr, portPrefix)
+					oc.cleanUpBFDEntry(gwIP.String(), gr, portPrefix)
 				}
 			}
 			routeInfo.Unlock()
@@ -378,7 +378,7 @@ func (oc *Controller) deleteGWRoutesForNamespace(namespace string) {
 					klog.Infof("Failed to find ext switch prefix for %s %v", node, err)
 					continue
 				}
-				cleanUpBFDEntry(gw, gr, portPrefix)
+				oc.cleanUpBFDEntry(gw, gr, portPrefix)
 			}
 		}
 		routeInfo.Unlock()
@@ -424,7 +424,7 @@ func (oc *Controller) deleteGWRoutesForPod(name ktypes.NamespacedName, podIPNets
 						klog.Error(err)
 					}
 				}
-				cleanUpBFDEntry(gw, gr, portPrefix)
+				oc.cleanUpBFDEntry(gw, gr, portPrefix)
 			}
 		}
 	}
@@ -676,41 +676,32 @@ func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string, forc
 // cleanUpBFDEntry checks if the BFD table entry related to the associated
 // gw router / port / gateway ip is referenced by other routing rules, and if
 // not removes the entry to avoid having dangling BFD entries.
-// This is temporary and can be safely removed when we consume an ovn version
-// that includes http://patchwork.ozlabs.org/project/ovn/patch/3c39dc96a36a3445cfa8485a67de79f9f3d5651b.1614602770.git.lorenzo.bianconi@redhat.com/
-func cleanUpBFDEntry(gatewayIP, gatewayRouter, prefix string) {
+func (oc *Controller) cleanUpBFDEntry(gatewayIP, gatewayRouter, prefix string) {
 	portName := prefix + types.GWRouterToExtSwitchPrefix + gatewayRouter
 
-	output, stderr, err := util.RunOVNNbctl(
-		"--format=csv", "--data=bare", "--no-heading", "--columns=bfd", "find", "Logical_Router_Static_Route", "output_port="+portName, "nexthop=\""+gatewayIP+"\"", "bfd!=[]")
-
+	logicalRouterStaticRouteRes := []nbdb.LogicalRouterStaticRoute{}
+	err := oc.nbClient.WhereCache(func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
+		return lrsr.OutputPort != nil && *lrsr.OutputPort == portName && lrsr.Nexthop == gatewayIP && lrsr.BFD != nil && *lrsr.BFD != ""
+	}).List(&logicalRouterStaticRouteRes)
 	if err != nil {
-		klog.Errorf("cleanUpBFDEntry: failed to list routes for %s, stderr: %q, (%v)", portName, gatewayIP, err, stderr)
-		return
-	}
-	// the bfd entry is still referenced, meaning there's another route on the router
-	// referencing it.
-	if strings.TrimSpace(output) != "" {
-		return
-	}
-	uuids, stderr, err := util.RunOVNNbctl(
-		"--format=csv", "--data=bare", "--no-heading", "--columns=_uuid", "find", "BFD", "logical_port="+portName, "dst_ip=\""+gatewayIP+"\"")
-	if err != nil {
-		klog.Errorf("Failed to list routes for %s, stderr: %q, (%v)", gatewayRouter, err, stderr)
+		klog.Errorf("cleanUpBFDEntry: failed to list routes for %s, err: %v", portName, err)
 		return
 	}
 
-	if strings.TrimSpace(uuids) == "" {
-		klog.Infof("Did not find bfd entry for %s %s", portName, gatewayIP)
+	if len(logicalRouterStaticRouteRes) > 0 {
 		return
 	}
 
-	for _, uuid := range strings.Split(uuids, "\n") {
-		_, stderr, err = util.RunOVNNbctl("--if-exists", "destroy", "BFD", uuid)
-		if err != nil {
-			klog.Errorf("Failed to destroy BFD %s, stderr: %q, (%v)",
-				uuid, stderr, err)
-		}
+	opModels := []libovsdbops.OperationModel{
+		{
+			ModelPredicate: func(bfd *nbdb.BFD) bool {
+				return bfd.LogicalPort == portName && bfd.DstIP == gatewayIP
+			},
+			ExistingResult: &[]nbdb.BFD{},
+		},
+	}
+	if err := oc.modelClient.Delete(opModels...); err != nil {
+		klog.Errorf("Failed to delete BFD, err: %v", err)
 	}
 }
 
@@ -823,7 +814,7 @@ func (oc *Controller) cleanExGwECMPRoutes() {
 					klog.Errorf("Cannot sync exgw bfd: %+v, unable to determine exgw switch prefix: %v",
 						ovnRoute, err)
 				} else {
-					cleanUpBFDEntry(ovnRoute.nextHop, ovnRoute.router, prefix)
+					oc.cleanUpBFDEntry(ovnRoute.nextHop, ovnRoute.router, prefix)
 				}
 
 			} else {
