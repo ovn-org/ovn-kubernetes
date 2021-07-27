@@ -293,8 +293,10 @@ set_default_params() {
   if [ "$OVN_HA" == true ]; then
     KIND_NUM_MASTER=3
     KIND_NUM_WORKER=${KIND_NUM_WORKER:-0}
+    OVN_DISABLE_LEADER_ELECTION=false
   else
     KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
+    OVN_DISABLE_LEADER_ELECTION=true
   fi
   OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
   OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
@@ -490,6 +492,7 @@ create_ovn_kube_manifests() {
     --multicast-enabled="${OVN_MULTICAST_ENABLE}" \
     --k8s-apiserver="${API_URL}" \
     --ovn-master-count="${KIND_NUM_MASTER}" \
+    --ovn-disable-leader-election="${OVN_DISABLE_LEADER_ELECTION}" \
     --ovn-unprivileged-mode=no \
     --master-loglevel="${MASTER_LOG_LEVEL}" \
     --node-loglevel="${NODE_LOG_LEVEL}" \

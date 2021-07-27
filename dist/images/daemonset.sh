@@ -50,6 +50,7 @@ OVN_IPFIX_TARGETS=""
 OVN_HOST_NETWORK_NAMESPACE=""
 OVN_EX_GW_NETWORK_INTERFACE=""
 OVNKUBE_NODE_MGMT_PORT_NETDEV=""
+OVN_DISABLE_LEADER_ELECTION=""
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -133,6 +134,9 @@ while [ "$1" != "" ]; do
     ;;
   --ovn-master-count)
     OVN_MASTER_COUNT=$VALUE
+    ;;
+  --ovn-disable-leader-election)
+    OVN_DISABLE_LEADER_ELECTION=$VALUE
     ;;
   --ovn-nb-port)
     OVN_NB_PORT=$VALUE
@@ -373,6 +377,7 @@ ovn_image=${image} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovn_disable_leader_election=${OVN_DISABLE_LEADER_ELECTION} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ../yaml/ovnkube-master.yaml
 
 ovn_image=${image} \

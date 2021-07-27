@@ -75,6 +75,7 @@ fi
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev. valid when ovnkube node mode is: smart-nic, smart-nic-host
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="smart-nic"
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
+# OVN_DISABLE_LEADER_ELECTION - disable leader election of ovnkube-master (default: false)
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -214,6 +215,8 @@ ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV:-}
 ovn_encap_ip=${OVN_ENCAP_IP:-}
 
 ovn_ex_gw_network_interface=${OVN_EX_GW_NETWORK_INTERFACE:-}
+
+ovn_disable_leader_election=${OVN_DISABLE_LEADER_ELECTION:-false}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -916,6 +919,12 @@ ovn-master() {
   fi
   echo "egressfirewall_enabled_flag=${egressfirewall_enabled_flag}"
 
+  ovn_disable_leader_election_flag=
+  if [[ ${ovn_disable_leader_election} == "true" ]]; then
+	  ovn_disable_leader_election_flag="--ha-disable-leader-election"
+  fi
+  echo "ovn_disable_leader_election_flag=${ovn_disable_leader_election_flag}"
+
   ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
 
   echo "=============== ovn-master ========== MASTER ONLY"
@@ -942,7 +951,8 @@ ovn-master() {
     ${egressip_enabled_flag} \
     ${egressfirewall_enabled_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
-    --host-network-namespace ${ovn_host_network_namespace} &
+    --host-network-namespace ${ovn_host_network_namespace} \
+    ${ovn_disable_leader_election_flag} &
 
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master

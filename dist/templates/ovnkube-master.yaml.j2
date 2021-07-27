@@ -265,6 +265,8 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: host_network_namespace
+        - name: OVN_DISABLE_LEADER_ELECTION
+          value: "{{ ovn_disable_leader_election }}"
       # end of container
 
       volumes:
