@@ -513,3 +513,31 @@ func waitForDaemonSetUpdate(c clientset.Interface, ns string, dsName string, all
 		return false, nil
 	})
 }
+
+func pokePod(fr *framework.Framework, srcPodName string, dstPodIP string) error {
+	stdout, stderr, err := fr.ExecShellInPodWithFullOutput(
+		srcPodName,
+		fmt.Sprintf("curl --output /dev/stdout -m 1 -I %s:8000 | head -n1", dstPodIP))
+	if err == nil && stdout == "HTTP/1.1 200 OK" {
+		return nil
+	}
+	return fmt.Errorf("http request failed; stdout: %s, err: %v", stdout+stderr, err)
+}
+
+func assertDenyLogs(targetNodeName string, namespace string, policyName string, expectedAclSeverity string) (bool, error) {
+	framework.Logf("collecting the ovn-controller logs for node: %s", targetNodeName)
+	targetNodeLog, err := runCommand([]string{"docker", "exec", targetNodeName, "grep", "acl_log", ovnControllerLogPath}...)
+	if err != nil {
+		return false, fmt.Errorf("error accessing logs in node %s: %v", targetNodeName, err)
+	}
+
+	composedPolicyName := fmt.Sprintf("%s_%s", namespace, policyName)
+	framework.Logf("Ensuring the *deny* audit log contains: '%s\", verdict=drop' AND 'severity=%s'", composedPolicyName, expectedAclSeverity)
+	for _, logLine := range strings.Split(targetNodeLog, "\n") {
+		if strings.Contains(logLine, fmt.Sprintf("%s\", verdict=drop", composedPolicyName)) &&
+			strings.Contains(logLine, fmt.Sprintf("severity=%s", expectedAclSeverity)) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
