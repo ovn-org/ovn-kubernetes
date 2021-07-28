@@ -436,7 +436,7 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 
 var _ = ginkgo.Describe("e2e control plane", func() {
 	var svcname = "nettest"
-
+	numNodes := 0
 	f := framework.NewDefaultFramework(svcname)
 
 	ginkgo.BeforeEach(func() {
@@ -451,6 +451,17 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		if resp.StatusCode != http.StatusOK {
 			framework.Failf("Unexpected error code, expected 200, got, %v (%v)", resp.StatusCode, resp)
 		}
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+		framework.ExpectNoError(err)
+		numNodes = len(nodes.Items)
+	})
+
+	ginkgo.AfterEach(func() {
+		gomega.Eventually(func() int {
+			nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+			framework.ExpectNoError(err)
+			return len(nodes.Items)
+		}, 5*time.Minute, 1*time.Second).Should(gomega.Equal(numNodes), "One or more nodes are not ready")
 	})
 
 	ginkgo.It("should provide Internet connection continuously when ovn-k8s pod is killed", func() {
