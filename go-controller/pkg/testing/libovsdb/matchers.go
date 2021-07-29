@@ -70,21 +70,27 @@ func matchAndReplaceNamedUUIDs(actual, expected []TestData) {
 	uuids := map[string]string{}
 	expectedToActual := map[int]int{}
 	actualFieldsReplaced := map[[2]int]bool{}
-	for i, x := range actual {
-		for j, y := range expected {
+	for i, x := range expected {
+		for j, y := range actual {
+			name, _ := getUUID(x)
+			uuid, _ := getUUID(y)
+			if name == "" || uuid == "" {
+				continue
+			}
 			if !testDataEqual(x, y, true) {
 				continue
 			}
-			uuid := getUUID(x)
-			name := getUUID(y)
 			fname := names[uuid]
 			if fname != "" {
-				panic(fmt.Sprintf("Can't infer named UUIDs, found multiple matches: [%s -> %s, %s]", uuid, name, fname))
+				panic(fmt.Sprintf("Can't infer named UUIDs, multiple expected models match (ignoring uuids) an actual model: [%s -> %s, %s]", uuid, name, fname))
+			}
+			fuuid := uuids[name]
+			if fuuid != "" {
+				panic(fmt.Sprintf("Can't infer named UUIDs, multiple actual models match (ignoring uuids) an expected model: [%s -> %s, %s]", name, uuid, fuuid))
 			}
 			names[uuid] = name
 			uuids[name] = uuid
-			expectedToActual[j] = i
-			break
+			expectedToActual[i] = j
 		}
 	}
 	for i, x := range actual {
@@ -119,8 +125,9 @@ func matchAndReplaceNamedUUIDs(actual, expected []TestData) {
 
 // testDataEqual tests for equality assuming input libovsdb models, as follows:
 // - Expects input to be pointers to struct
-// - If ignoreUUIDs, UUIDs are ignored from string, slice or map members of the struct
-// - Members of the struct that are string slices are compared as an unordered set
+// - If ignoreUUIDs, strings, slices or maps that contain UUIDs are ignored. Slices
+//   and maps lengths are still checked to match.
+// - String slices are compared as an unordered set
 // - Otherwise reflect.DeepEqual is used.
 func testDataEqual(x, y TestData, ignoreUUIDs bool) bool {
 	if x == nil || y == nil {
