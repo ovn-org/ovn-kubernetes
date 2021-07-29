@@ -99,8 +99,11 @@ func (oc *Controller) addPodExternalGWForNamespace(namespace string, pod *kapi.P
 	}
 	klog.Infof("Adding routes for external gateway pod: %s, next hops: %q, namespace: %s, bfd-enabled: %t",
 		pod.Name, gws, namespace, egress.bfdEnabled)
-	nsInfo := oc.ensureNamespaceLocked(namespace)
-	defer nsInfo.Unlock()
+	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(namespace, false)
+	if err != nil {
+		return fmt.Errorf("failed to ensure namespace locked: %v", err)
+	}
+	defer nsUnlock()
 	nsInfo.routingExternalPodGWs[pod.Name] = egress
 	return oc.addGWRoutesForNamespace(namespace, egress, nsInfo)
 }
@@ -194,11 +197,11 @@ func (oc *Controller) deletePodExternalGW(pod *kapi.Pod) {
 
 // deletePodGwRoutesForNamespace handles deleting all routes in a namespace for a specific pod GW
 func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
-	nsInfo := oc.getNamespaceLocked(namespace)
+	nsInfo, nsUnlock := oc.getNamespaceLocked(namespace, false)
 	if nsInfo == nil {
 		return
 	}
-	defer nsInfo.Unlock()
+	defer nsUnlock()
 	// check if any gateways were stored for this pod
 	foundGws, ok := nsInfo.routingExternalPodGWs[pod]
 	if !ok || len(foundGws.gws) == 0 {
@@ -291,11 +294,11 @@ func (oc *Controller) deleteGWRoutesForNamespace(nsInfo *namespaceInfo) {
 // deleteGwRoutesForPod handles deleting all routes to gateways for a pod IP on a specific GR
 func (oc *Controller) deleteGWRoutesForPod(namespace string, podIPNets []*net.IPNet) {
 	// delete src-ip cached route to GR
-	nsInfo := oc.getNamespaceLocked(namespace)
+	nsInfo, nsUnlock := oc.getNamespaceLocked(namespace, false)
 	if nsInfo == nil {
 		return
 	}
-	defer nsInfo.Unlock()
+	defer nsUnlock()
 
 	for _, podIPNet := range podIPNets {
 		pod := podIPNet.IP.String()
@@ -331,8 +334,11 @@ func (oc *Controller) deleteGWRoutesForPod(namespace string, podIPNets []*net.IP
 
 // addEgressGwRoutesForPod handles adding all routes to gateways for a pod on a specific GR
 func (oc *Controller) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddrs []*net.IPNet, namespace, node string) error {
-	nsInfo := oc.getNamespaceLocked(namespace)
-	defer nsInfo.Unlock()
+	nsInfo, nsUnlock := oc.getNamespaceLocked(namespace, false)
+	if nsInfo == nil {
+		return fmt.Errorf("unable to get namespace: %s", namespace)
+	}
+	defer nsUnlock()
 	gr := util.GetGatewayRouterFromNode(node)
 
 	routesAdded := 0
