@@ -10,17 +10,18 @@ type (
 )
 
 const (
-	ACLActionAllow        ACLAction    = "allow"
-	ACLActionAllowRelated ACLAction    = "allow-related"
-	ACLActionDrop         ACLAction    = "drop"
-	ACLActionReject       ACLAction    = "reject"
-	ACLDirectionFromLport ACLDirection = "from-lport"
-	ACLDirectionToLport   ACLDirection = "to-lport"
-	ACLSeverityAlert      ACLSeverity  = "alert"
-	ACLSeverityWarning    ACLSeverity  = "warning"
-	ACLSeverityNotice     ACLSeverity  = "notice"
-	ACLSeverityInfo       ACLSeverity  = "info"
-	ACLSeverityDebug      ACLSeverity  = "debug"
+	ACLActionAllow          ACLAction    = "allow"
+	ACLActionAllowRelated   ACLAction    = "allow-related"
+	ACLActionAllowStateless ACLAction    = "allow-stateless"
+	ACLActionDrop           ACLAction    = "drop"
+	ACLActionReject         ACLAction    = "reject"
+	ACLDirectionFromLport   ACLDirection = "from-lport"
+	ACLDirectionToLport     ACLDirection = "to-lport"
+	ACLSeverityAlert        ACLSeverity  = "alert"
+	ACLSeverityWarning      ACLSeverity  = "warning"
+	ACLSeverityNotice       ACLSeverity  = "notice"
+	ACLSeverityInfo         ACLSeverity  = "info"
+	ACLSeverityDebug        ACLSeverity  = "debug"
 )
 
 // ACL defines an object in ACL table
