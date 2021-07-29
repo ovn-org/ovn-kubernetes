@@ -317,8 +317,8 @@ github.com/opencontainers/runc v0.0.0-20190115041553-12f6a991201f/go.mod h1:qT5X
 github.com/opencontainers/runc v1.0.0-rc9/go.mod h1:qT5XzbpPznkRYVz/mWwUaVBUv2rmF59PVA73FjuZG0U=
 github.com/opencontainers/runtime-spec v1.0.2/go.mod h1:jwyrGlmzljRJv/Fgzds9SsS/C5hL+LL3ko9hs6T5lQ0=
 github.com/ory/dockertest/v3 v3.7.0/go.mod h1:PvCCgnP7AfBZeVrzwiUTjZx/IUXlGLC1zQlUQrLIlUE=
-github.com/ovn-org/libovsdb v0.5.1-0.20210708171313-d17ab7f31fc4 h1:Z8PehReAsSzP2/CzLcjki2FDILrJgSKhoRSK5EUQVis=
-github.com/ovn-org/libovsdb v0.5.1-0.20210708171313-d17ab7f31fc4/go.mod h1:5Ld4X+oWvMlbPAGvbJyE/wp8TAWdydI67jatQ3qbsVc=
+github.com/ovn-org/libovsdb v0.6.1-0.20210728143211-5f41f6da59f7 h1:DwufVXaK6fowTYe/S8lFSx8w7T+dLkNDeEV/tceZDJo=
+github.com/ovn-org/libovsdb v0.6.1-0.20210728143211-5f41f6da59f7/go.mod h1:5Ld4X+oWvMlbPAGvbJyE/wp8TAWdydI67jatQ3qbsVc=
 github.com/peterbourgon/diskv v2.0.1+incompatible/go.mod h1:uqqh8zWWbv1HBMNONnaR/tNboyR3/BZd58JJSHlUSCU=
 github.com/pkg/errors v0.8.0/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/pkg/errors v0.8.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=

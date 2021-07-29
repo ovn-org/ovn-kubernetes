@@ -25,7 +25,7 @@ require (
 	github.com/mitchellh/copystructure v1.2.0
 	github.com/onsi/ginkgo v1.15.0
 	github.com/onsi/gomega v1.10.1
-	github.com/ovn-org/libovsdb v0.5.1-0.20210708171313-d17ab7f31fc4
+	github.com/ovn-org/libovsdb v0.6.1-0.20210728143211-5f41f6da59f7
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.7.1
 	github.com/prometheus/procfs v0.2.0 // indirect
