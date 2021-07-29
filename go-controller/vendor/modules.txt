@@ -169,7 +169,7 @@ github.com/onsi/gomega/matchers/support/goraph/edge
 github.com/onsi/gomega/matchers/support/goraph/node
 github.com/onsi/gomega/matchers/support/goraph/util
 github.com/onsi/gomega/types
-# github.com/ovn-org/libovsdb v0.5.1-0.20210708171313-d17ab7f31fc4
+# github.com/ovn-org/libovsdb v0.6.1-0.20210728143211-5f41f6da59f7
 github.com/ovn-org/libovsdb/cache
 github.com/ovn-org/libovsdb/client
 github.com/ovn-org/libovsdb/mapper
