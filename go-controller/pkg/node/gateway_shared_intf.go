@@ -182,10 +182,14 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 			flowProtocol := protocol
 			nwDst := "nw_dst"
 			nwSrc := "nw_src"
+			addrResDst := nwDst
+			addrResProto := "arp"
 			if utilnet.IsIPv6String(ing.IP) {
 				flowProtocol = protocol + "6"
 				nwDst = "ipv6_dst"
 				nwSrc = "ipv6_src"
+				addrResDst = "nd_target"
+				addrResProto = "icmp6, icmp_type=135, icmp_code=0"
 			}
 			key = strings.Join([]string{"Ingress", service.Namespace, service.Name, ingIP.String(), fmt.Sprintf("%d", svcPort.Port)}, "_")
 			// Delete if needed and skip to next protocol
@@ -232,7 +236,10 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 						cookie, npw.ofportPhys, flowProtocol, nwDst, ing.IP, svcPort.Port, actions),
 					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_src=%d, "+
 						"actions=output:%s",
-						cookie, npw.ofportPatch, flowProtocol, nwSrc, ing.IP, svcPort.Port, npw.ofportPhys)})
+						cookie, npw.ofportPatch, flowProtocol, nwSrc, ing.IP, svcPort.Port, npw.ofportPhys),
+					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, "+
+						"actions=output:%s",
+						cookie, npw.ofportPhys, addrResProto, addrResDst, ing.IP, ovsLocalPort)})
 			}
 		}
 
@@ -240,10 +247,14 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 			flowProtocol := protocol
 			nwDst := "nw_dst"
 			nwSrc := "nw_src"
+			addrResDst := nwDst
+			addrResProto := "arp"
 			if utilnet.IsIPv6String(externalIP) {
 				flowProtocol = protocol + "6"
 				nwDst = "ipv6_dst"
 				nwSrc = "ipv6_src"
+				addrResDst = "nd_target"
+				addrResProto = "icmp6, icmp_type=135, icmp_code=0"
 			}
 			cookie, err = svcToCookie(service.Namespace, service.Name, externalIP, svcPort.Port)
 			if err != nil {
@@ -295,7 +306,10 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 						cookie, npw.ofportPhys, flowProtocol, nwDst, externalIP, svcPort.Port, actions),
 					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_src=%d, "+
 						"actions=output:%s",
-						cookie, npw.ofportPatch, flowProtocol, nwSrc, externalIP, svcPort.Port, npw.ofportPhys)})
+						cookie, npw.ofportPatch, flowProtocol, nwSrc, externalIP, svcPort.Port, npw.ofportPhys),
+					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, "+
+						"actions=output:%s",
+						cookie, npw.ofportPhys, addrResProto, addrResDst, externalIP, ovsLocalPort)})
 			}
 		}
 	}
