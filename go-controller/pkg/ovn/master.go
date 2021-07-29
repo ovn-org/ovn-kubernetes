@@ -29,6 +29,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -133,11 +134,7 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup, ctx context.Con
 
 // cleanup obsolete *gressDefaultDeny port groups
 func (oc *Controller) upgradeToNamespacedDenyPGOVNTopology(existingNodeList *kapi.NodeList) error {
-	err := deletePortGroup(oc.ovnNBClient, "ingressDefaultDeny")
-	if err != nil {
-		klog.Errorf("%v", err)
-	}
-	err = deletePortGroup(oc.ovnNBClient, "egressDefaultDeny")
+	err := libovsdbops.DeletePortGroups(oc.nbClient, "ingressDefaultDeny", "egressDefaultDeny")
 	if err != nil {
 		klog.Errorf("%v", err)
 	}
@@ -401,7 +398,8 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	}
 
 	// Create a cluster-wide port group that all logical switch ports are part of
-	oc.clusterPortGroupUUID, err = createPortGroup(oc.ovnNBClient, clusterPortGroupName, clusterPortGroupName)
+	pg := libovsdbops.BuildPortGroup(types.ClusterPortGroupName, types.ClusterPortGroupName, nil, nil)
+	err = libovsdbops.CreateOrUpdatePortGroup(oc.nbClient, pg)
 	if err != nil {
 		klog.Errorf("Failed to create cluster port group: %v", err)
 		return err
@@ -410,7 +408,8 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	// Create a cluster-wide port group with all node-to-cluster router
 	// logical switch ports.  Currently the only user is multicast but it might
 	// be used for other features in the future.
-	oc.clusterRtrPortGroupUUID, err = createPortGroup(oc.ovnNBClient, clusterRtrPortGroupName, clusterRtrPortGroupName)
+	pg = libovsdbops.BuildPortGroup(types.ClusterRtrPortGroupName, types.ClusterRtrPortGroupName, nil, nil)
+	err = libovsdbops.CreateOrUpdatePortGroup(oc.nbClient, pg)
 	if err != nil {
 		klog.Errorf("Failed to create cluster port group: %v", err)
 		return err
@@ -577,7 +576,7 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 		addresses += " " + mgmtIfAddr.IP.String()
 
-		if err := addAllowACLFromNode(node.Name, mgmtIfAddr.IP, oc.ovnNBClient); err != nil {
+		if err := addAllowACLFromNode(oc.nbClient, node.Name, mgmtIfAddr.IP); err != nil {
 			return err
 		}
 
@@ -604,10 +603,8 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 		return err
 	}
 
-	if err := addToPortGroup(oc.ovnNBClient, clusterPortGroupName, &lpInfo{
-		uuid: uuid,
-		name: portName,
-	}); err != nil {
+	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, types.ClusterPortGroupName, uuid)
+	if err != nil {
 		klog.Errorf(err.Error())
 		return err
 	}
@@ -867,10 +864,8 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		return err
 	}
 
-	if err = addToPortGroup(oc.ovnNBClient, clusterRtrPortGroupName, &lpInfo{
-		uuid: nodeSwToRtrUUID,
-		name: types.SwitchToRouterPrefix + nodeName,
-	}); err != nil {
+	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, types.ClusterRtrPortGroupName, nodeSwToRtrUUID)
+	if err != nil {
 		klog.Errorf(err.Error())
 		return err
 	}

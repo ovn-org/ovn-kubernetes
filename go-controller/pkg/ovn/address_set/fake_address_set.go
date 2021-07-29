@@ -133,32 +133,44 @@ func (f *FakeAddressSetFactory) ExpectAddressSetWithIPs(name string, ips []strin
 	gomega.Expect(lenAddressSet).To(gomega.Equal(len(ips)))
 }
 
+func (f *FakeAddressSetFactory) EventuallyExpectAddressSetWithIPs(name string, ips []string) {
+	gomega.Eventually(func() {
+		f.ExpectAddressSetWithIPs(name, ips)
+	}).Should(gomega.Succeed())
+}
+
 // ExpectEmptyAddressSet ensures the named address set exists with no IPs
 func (f *FakeAddressSetFactory) ExpectEmptyAddressSet(name string) {
 	f.ExpectAddressSetWithIPs(name, nil)
 }
 
-// EventuallyExpectEmptyAddressSet ensures the named address set eventually exists with no IPs
-func (f *FakeAddressSetFactory) EventuallyExpectEmptyAddressSet(name string) {
-	name4, _ := MakeAddressSetName(name)
-	gomega.Eventually(func() bool {
-		as := f.getAddressSet(name4)
-		if as == nil {
-			return false
-		}
-		defer as.Unlock()
-		return len(as.ips) == 0
-	}).Should(gomega.BeTrue())
+// EventuallyExpectEmptyAddressSetExist ensures the named address set eventually exists with no IPs
+func (f *FakeAddressSetFactory) EventuallyExpectEmptyAddressSetExist(name string) {
+	f.EventuallyExpectAddressSetWithIPs(name, nil)
 }
 
 // EventuallyExpectNoAddressSet ensures the named address set eventually does not exist
-func (f *FakeAddressSetFactory) EventuallyExpectNoAddressSet(name string) {
+func (f *FakeAddressSetFactory) ExpectAddressSetExist(name string) {
 	gomega.Eventually(func() bool {
 		f.Lock()
 		defer f.Unlock()
 		_, ok := f.sets[name]
 		return ok
-	}).Should(gomega.BeFalse())
+	}).Should(gomega.BeTrue())
+}
+
+// EventuallyExpectNoAddressSet ensures the named address set eventually does not exist
+func (f *FakeAddressSetFactory) EventuallyExpectAddressSetExist(name string) {
+	gomega.Eventually(func() {
+		f.ExpectAddressSetExist(name)
+	}).Should(gomega.Succeed())
+}
+
+// EventuallyExpectNoAddressSet ensures the named address set eventually does not exist
+func (f *FakeAddressSetFactory) EventuallyExpectNoAddressSet(name string) {
+	gomega.Eventually(func() {
+		f.ExpectAddressSetExist(name)
+	}).ShouldNot(gomega.Succeed())
 }
 
 type removeFunc func(string)

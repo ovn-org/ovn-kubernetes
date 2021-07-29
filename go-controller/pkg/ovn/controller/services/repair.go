@@ -6,6 +6,7 @@ import (
 
 	"github.com/pkg/errors"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/acl"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
@@ -26,16 +27,16 @@ import (
 type Repair struct {
 	interval time.Duration
 	// serviceTracker tracks services and maps them to OVN LoadBalancers
-	serviceLister        corelisters.ServiceLister
-	clusterPortGroupUUID string
+	serviceLister corelisters.ServiceLister
+	nbClient      libovsdbclient.Client
 }
 
 // NewRepair creates a controller that periodically ensures that there is no stale data in OVN
-func NewRepair(interval time.Duration, serviceLister corelisters.ServiceLister, clusterPortGroupUUID string) *Repair {
+func NewRepair(interval time.Duration, serviceLister corelisters.ServiceLister, nbClient libovsdbclient.Client) *Repair {
 	return &Repair{
-		interval:             interval,
-		serviceLister:        serviceLister,
-		clusterPortGroupUUID: clusterPortGroupUUID,
+		interval:      interval,
+		serviceLister: serviceLister,
+		nbClient:      nbClient,
 	}
 }
 
@@ -146,7 +147,7 @@ func (r *Repair) runOnce() error {
 
 	// Remove existing reject rules. They are not used anymore
 	// given the introduction of idling loadbalancers
-	err = acl.PurgeRejectRules(r.clusterPortGroupUUID)
+	err = acl.PurgeRejectRules(r.nbClient)
 	if err != nil {
 		klog.Errorf("Failed to purge existing reject rules: %v", err)
 		return err

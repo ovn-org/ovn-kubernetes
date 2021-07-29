@@ -19,6 +19,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -1287,8 +1288,12 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			clusterController.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(ovntest.MustParseIPNet(types.V4NodeLocalNATSubnet))
 
 			// clusterController.WatchNodes() needs to following two port groups to have been created.
-			clusterController.clusterRtrPortGroupUUID, err = createPortGroup(clusterController.ovnNBClient, clusterRtrPortGroupName, clusterRtrPortGroupName)
-			clusterController.clusterPortGroupUUID, err = createPortGroup(clusterController.ovnNBClient, clusterPortGroupName, clusterPortGroupName)
+			pg := libovsdbops.BuildPortGroup(types.ClusterPortGroupName, types.ClusterPortGroupName, nil, nil)
+			err = libovsdbops.CreateOrUpdatePortGroup(clusterController.nbClient, pg)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			pg = libovsdbops.BuildPortGroup(types.ClusterRtrPortGroupName, types.ClusterRtrPortGroupName, nil, nil)
+			err = libovsdbops.CreateOrUpdatePortGroup(clusterController.nbClient, pg)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController.StartServiceController(wg, false)
 			// Let the real code run and ensure OVN database sync

@@ -1,58 +1,19 @@
 package acl
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/pkg/errors"
 
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
 )
-
-// GetRejectACLs returns a map with the ACLs with a reject action
-// the map uses the name of the ACL as key and the uuid as value
-func GetRejectACLs() (map[string]string, error) {
-	// Get OVN's current reject ACLs. Note, currently only services use reject ACLs.
-	result := make(map[string]string)
-	type ovnACLData struct {
-		Data [][]interface{}
-	}
-	data, stderr, err := util.RunOVNNbctl("--columns=name,_uuid", "--format=json", "find", "acl", "action=reject")
-	if err != nil {
-		return result, errors.Wrapf(err, "Error while querying ACLs with reject action: %s", stderr)
-	}
-	// Process the output
-	x := ovnACLData{}
-	if err := json.Unmarshal([]byte(data), &x); err != nil {
-		return result, errors.Wrapf(err, "Unable to get current OVN reject ACLs. Unable to sync reject ACLs")
-	}
-	for _, entry := range x.Data {
-		// ACL entry format is a slice: [<aclName>, ["_uuid", <uuid>]]
-		if len(entry) != 2 {
-			continue
-		}
-		name, ok := entry[0].(string)
-		if !ok {
-			continue
-		}
-		uuidData, ok := entry[1].([]interface{})
-		if !ok || len(uuidData) != 2 {
-			continue
-		}
-		uuid, ok := uuidData[1].(string)
-		if !ok {
-			continue
-		}
-		result[name] = uuid
-	}
-	return result, nil
-}
 
 // RemoveACLFromNodeSwitches removes the ACL uuid entry from Logical Switch acl's list.
 func RemoveACLFromNodeSwitches(switches []string, aclUUID string) error {
@@ -71,83 +32,41 @@ func RemoveACLFromNodeSwitches(switches []string, aclUUID string) error {
 	return nil
 }
 
-// RemoveACLFromPortGroup removes the ACL from the port-group
-func RemoveACLFromPortGroup(aclUUID, clusterPortGroupUUID string) error {
-	_, stderr, err := util.RunOVNNbctl("--", "--if-exists", "remove", "port_group", clusterPortGroupUUID, "acls", aclUUID)
-	if err != nil {
-		return errors.Wrapf(err, "Failed to remove reject ACL %s from port group %s: stderr: %q", aclUUID, clusterPortGroupUUID, stderr)
-	}
-	klog.Infof("ACL: %s, removed from the port group : %s", aclUUID, clusterPortGroupUUID)
-	return nil
-}
-
-// AddRejectACLToPortGroup adds a reject ACL to a PortGroup
-func AddRejectACLToPortGroup(clusterPortGroupUUID, aclName, sourceIP string, sourcePort int, proto v1.Protocol) (string, error) {
-	l3Prefix := "ip4"
-	if utilnet.IsIPv6String(sourceIP) {
-		l3Prefix = "ip6"
+func PurgeRejectRules(nbClient libovsdbclient.Client) error {
+	// TODO
+	// - Removing blindly reject ACLs might be problematic if in the future we add this types of ACLs for other purposes
+	// - Do ACLs need to be removed or only references to them, which is what we seem to be doing elsewhere?
+	acls := []nbdb.ACL{}
+	err := nbClient.WhereCache(func(acl *nbdb.ACL) bool {
+		return acl.Action == nbdb.ACLActionReject
+	}).List(&acls)
+	if err != nil && err != libovsdbclient.ErrNotFound {
+		return errors.Wrapf(err, "Error while querying ACLs with reject action: %v", err)
 	}
 
-	aclMatch := fmt.Sprintf("match=\"%s.dst==%s && %s && %s.dst==%d\"", l3Prefix, sourceIP,
-		strings.ToLower(string(proto)), strings.ToLower(string(proto)), sourcePort)
-	cmd := []string{"--id=@reject-acl", "create", "acl", "direction=" + types.DirectionFromLPort, "priority=" + types.DefaultDenyPriority, aclMatch, "action=reject",
-		fmt.Sprintf("name=%s", aclName), "--", "add", "port_group", clusterPortGroupUUID, "acls", "@reject-acl"}
-	aclUUID, stderr, err := util.RunOVNNbctl(cmd...)
-	if err != nil {
-		return "", errors.Wrapf(err, "Failed to add ACL: %s, %q, to cluster port group %s, stderr: %q", aclUUID, aclName, clusterPortGroupUUID, stderr)
-	}
-	return aclUUID, nil
-}
-
-// AddRejectACLToLogicalSwitch adds a reject ACL to a logical switch
-func AddRejectACLToLogicalSwitch(logicalSwitch, aclName, sourceIP string, sourcePort int, proto v1.Protocol) (string, error) {
-	l3Prefix := "ip4"
-	if utilnet.IsIPv6String(sourceIP) {
-		l3Prefix = "ip6"
-	}
-
-	aclMatch := fmt.Sprintf("match=\"%s.dst==%s && %s && %s.dst==%d\"", l3Prefix, sourceIP,
-		strings.ToLower(string(proto)), strings.ToLower(string(proto)), sourcePort)
-	cmd := []string{"--id=@reject-acl", "create", "acl", "direction=" + types.DirectionFromLPort, "priority=" + types.DefaultDenyPriority, aclMatch, "action=reject",
-		fmt.Sprintf("name=%s", aclName), "--", "add", "logical_switch", logicalSwitch, "acls", "@reject-acl"}
-
-	aclUUID, stderr, err := util.RunOVNNbctl(cmd...)
-	if err != nil {
-		return "", errors.Wrapf(err, "Failed to add ACL: %s, %q, to cluster switch %s, stderr: %q", aclUUID, aclName, logicalSwitch, stderr)
-	}
-	return aclUUID, nil
-}
-
-func PurgeRejectRules(clusterPortGroupUUID string) error {
-	data, stderr, err := util.RunOVNNbctl("--columns=_uuid", "--format=csv", "--data=bare", "--no-headings", "find", "acl", "action=reject")
-	if err != nil {
-		return errors.Wrapf(err, "Error while querying ACLs with reject action: %s", stderr)
-	}
-	if strings.TrimSpace(data) == "" {
+	if len(acls) == 0 {
 		klog.Info("No reject ACLs to remove")
 		return nil
 	}
 
-	for _, uuid := range strings.Split(data, "\n") {
-		err = RemoveACLFromPortGroup(uuid, clusterPortGroupUUID)
+	aclPtrs := []*nbdb.ACL{}
+	for _, acl := range acls {
+		aclPtrs = append(aclPtrs, &acl)
+		data, stderr, err := util.RunOVNNbctl("--format=csv", "--data=bare", "--no-headings", "--columns=_uuid", "find", "logical_switch", fmt.Sprintf("acls{>=}%s", acl.UUID))
 		if err != nil {
-			klog.Errorf("Error trying to remove ACL for clusterPortGroupUUID %s/%s: %v", uuid, clusterPortGroupUUID, err)
-		}
-
-		data, stderr, err := util.RunOVNNbctl("--format=csv", "--data=bare", "--no-headings", "--columns=_uuid", "find", "logical_switch", fmt.Sprintf("acls{>=}%s", uuid))
-		if err != nil {
-			return errors.Wrapf(err, "Error while querying ACLs uuid:%s with reject action: %s", uuid, stderr)
+			return errors.Wrapf(err, "Error while querying ACLs uuid:%s with reject action: %s", acl.UUID, stderr)
 		}
 		ls := strings.Split(data, "\n")
-		err = RemoveACLFromNodeSwitches(ls, uuid)
+		err = RemoveACLFromNodeSwitches(ls, acl.UUID)
 		if err != nil {
 			return errors.Wrapf(err, "Failed to remove reject acl from logical switches")
 		}
-		_, stderr, err = util.RunOVNNbctl("--if-exists", "destroy", "acl", uuid)
-		if err != nil {
-			klog.Errorf("Failed to destroy ACL %s, stderr: %q, (%v)",
-				uuid, stderr, err)
-		}
 	}
+
+	err = libovsdbops.DeleteACLsFromPortGroup(nbClient, types.ClusterPortGroupName, aclPtrs...)
+	if err != nil {
+		klog.Errorf("Error trying to remove ACLs %+v from port group %s: %v", acls, types.ClusterPortGroupName, err)
+	}
+
 	return nil
 }

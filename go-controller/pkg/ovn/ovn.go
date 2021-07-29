@@ -49,8 +49,6 @@ import (
 )
 
 const (
-	clusterPortGroupName             string        = "clusterPortGroup"
-	clusterRtrPortGroupName          string        = "clusterRtrPortGroup"
 	egressFirewallDNSDefaultDuration time.Duration = 30 * time.Minute
 )
 
@@ -89,18 +87,13 @@ type namespaceInfo struct {
 	// exgw IPs
 	routingExternalPodGWs map[string]gatewayInfo
 
-	// The UUID of the namespace-wide port group that contains all the pods in the namespace.
-	portGroupUUID string
-
 	multicastEnabled bool
 
 	// If not empty, then it has to be set to a logging a severity level, e.g. "notice", "alert", etc
 	aclLogging ACLLoggingLevels
 
 	// Per-namespace port group default deny UUIDs
-	portGroupIngressDenyUUID string // Port group UUID for ingress deny rule
 	portGroupIngressDenyName string // Port group Name for ingress deny rule
-	portGroupEgressDenyUUID  string // Port group UUID for egress deny rule
 	portGroupEgressDenyName  string // Port group Name for egress deny rule
 }
 
@@ -146,13 +139,6 @@ type Controller struct {
 
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
-
-	// Port group for all cluster logical switch ports
-	clusterPortGroupUUID string
-
-	// Port group for all node logical switch ports connected to the cluster
-	// logical router
-	clusterRtrPortGroupUUID string
 
 	// For each logical port, the number of network policies that want
 	// to add a ingress deny rule.
@@ -1132,7 +1118,6 @@ func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool)
 		oc.nbClient,
 		svcFactory.Core().V1().Services(),
 		svcFactory.Discovery().V1beta1().EndpointSlices(),
-		oc.clusterPortGroupUUID,
 	)
 	svcFactory.Start(oc.stopChan)
 	wg.Add(1)

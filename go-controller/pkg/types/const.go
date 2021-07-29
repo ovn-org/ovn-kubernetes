@@ -127,4 +127,7 @@ const (
 	GeneveHeaderLengthIPv4 = 58
 	// Geneve header length for IPv6 (https://github.com/openshift/cluster-network-operator/pull/720#issuecomment-664020823)
 	GeneveHeaderLengthIPv6 = GeneveHeaderLengthIPv4 + 20
+
+	ClusterPortGroupName    = "clusterPortGroup"
+	ClusterRtrPortGroupName = "clusterRtrPortGroup"
 )
