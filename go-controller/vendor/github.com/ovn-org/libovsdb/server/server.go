@@ -168,12 +168,31 @@ func (o *OvsdbServer) Transact(client *rpc2.Client, args []json.RawMessage, repl
 		for i, mutation := range op.Mutations {
 			op.Mutations[i].Value = expandNamedUUID(mutation.Value, namedUUID)
 		}
+		for _, row := range op.Rows {
+			for k, v := range row {
+				row[k] = expandNamedUUID(v, namedUUID)
+			}
+		}
+		for k, v := range op.Row {
+			op.Row[k] = expandNamedUUID(v, namedUUID)
+		}
 		ops = append(ops, op)
 	}
-	response, update := o.db.Transact(db, ops)
+	response, updates := o.transact(db, ops)
 	*reply = response
-	o.dbUpdates <- update
-	return nil
+	dbUpdates, _ := deepCopy(updates)
+	o.dbUpdates <- updates
+	return o.db.Commit(db, dbUpdates)
+}
+
+func deepCopy(a ovsdb.TableUpdates) (ovsdb.TableUpdates, error) {
+	var b ovsdb.TableUpdates
+	raw, err := json.Marshal(a)
+	if err != nil {
+		return b, err
+	}
+	err = json.Unmarshal(raw, &b)
+	return b, err
 }
 
 // Cancel cancels the last transaction
@@ -210,7 +229,7 @@ func (o *OvsdbServer) Monitor(client *rpc2.Client, args []json.RawMessage, reply
 	}
 	tableUpdates := make(ovsdb.TableUpdates)
 	for t, request := range request {
-		rows := o.db.Select(db, t, nil, request.Columns)
+		rows := o.Select(db, t, nil, request.Columns)
 		for i := range rows.Rows {
 			tu := make(ovsdb.TableUpdate)
 			uuid := rows.Rows[i]["_uuid"].(ovsdb.UUID).GoUUID

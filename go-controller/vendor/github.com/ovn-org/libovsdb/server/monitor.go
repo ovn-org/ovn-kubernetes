@@ -102,7 +102,8 @@ func (m *monitor) filter(update ovsdb.TableUpdates) {
 									delete(new, k)
 								}
 							}
-							update[table][uuid].New = &new
+							row.New = &new
+							update[table][uuid] = row
 						}
 						if row.Old != nil {
 							old := *row.Old
@@ -111,7 +112,8 @@ func (m *monitor) filter(update ovsdb.TableUpdates) {
 									delete(old, k)
 								}
 							}
-							update[table][uuid].Old = &old
+							row.Old = &old
+							update[table][uuid] = row
 						}
 					}
 				default:

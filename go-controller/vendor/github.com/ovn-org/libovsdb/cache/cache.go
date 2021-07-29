@@ -25,26 +25,21 @@ const (
 	columnDelimiter = ","
 )
 
-type IndexExistsError struct {
-	table    string
-	value    interface{}
-	index    index
-	new      string
-	existing string
+// ErrIndexExists is returned when an item in the database cannot be inserted due to existing indexes
+type ErrIndexExists struct {
+	Table    string
+	Value    interface{}
+	Index    string
+	New      string
+	Existing string
 }
 
-func (i *IndexExistsError) Error() string {
-	return fmt.Sprintf("operation would cause rows in the \"%s\" table to have identical values (%v) for index on column \"%s\". First row, with UUID %s, was inserted by this transaction. Second row, with UUID %s, existed in the database before this operation and was not modified",
-		i.table,
-		i.value,
-		i.index,
-		i.new,
-		i.existing,
-	)
+func (e *ErrIndexExists) Error() string {
+	return fmt.Sprintf("cannot insert %s in the %s table. item %s has identical indexes. index: %s, value: %v", e.New, e.Table, e.Existing, e.Index, e.Value)
 }
 
-func NewIndexExistsError(table string, value interface{}, index index, new, existing string) *IndexExistsError {
-	return &IndexExistsError{
+func NewIndexExistsError(table string, value interface{}, index string, new, existing string) *ErrIndexExists {
+	return &ErrIndexExists{
 		table, value, index, new, existing,
 	}
 }
@@ -90,6 +85,8 @@ func (r *RowCache) Row(uuid string) model.Model {
 
 // RowByModel searches the cache using a the indexes for a provided model
 func (r *RowCache) RowByModel(m model.Model) model.Model {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
 	if reflect.TypeOf(m) != r.dataType {
 		return nil
 	}
@@ -135,7 +132,7 @@ func (r *RowCache) Create(uuid string, m model.Model, checkIndexes bool) error {
 		}
 
 		if existing, ok := r.indexes[index][val]; ok && checkIndexes {
-			return NewIndexExistsError(r.name, val, index, uuid, existing)
+			return NewIndexExistsError(r.name, val, string(index), uuid, existing)
 		}
 
 		newIndexes[index][val] = uuid
@@ -188,12 +185,11 @@ func (r *RowCache) Update(uuid string, m model.Model, checkIndexes bool) error {
 		// old and new values are NOT the same
 
 		// check that there are no conflicts
-
 		if conflict, ok := r.indexes[index][newVal]; ok && checkIndexes && conflict != uuid {
 			errs = append(errs, NewIndexExistsError(
 				r.name,
 				newVal,
-				index,
+				string(index),
 				uuid,
 				conflict,
 			))
@@ -218,6 +214,33 @@ func (r *RowCache) Update(uuid string, m model.Model, checkIndexes bool) error {
 		}
 	}
 	r.cache[uuid] = m
+	return nil
+}
+
+func (r *RowCache) IndexExists(row model.Model) error {
+	info, err := mapper.NewInfo(&r.schema, row)
+	if err != nil {
+		return err
+	}
+	uuid, err := info.FieldByColumn("_uuid")
+	if err != nil {
+		return nil
+	}
+	for index := range r.indexes {
+		val, err := valueFromIndex(info, index)
+		if err != nil {
+			continue
+		}
+		if existing, ok := r.indexes[index][val]; ok && existing != uuid.(string) {
+			return NewIndexExistsError(
+				r.name,
+				val,
+				string(index),
+				uuid.(string),
+				existing,
+			)
+		}
+	}
 	return nil
 }
 
@@ -253,6 +276,74 @@ func (r *RowCache) Rows() []string {
 		result = append(result, k)
 	}
 	return result
+}
+
+func (r *RowCache) RowsByCondition(conditions []ovsdb.Condition) ([]model.Model, error) {
+	var results []model.Model
+	if len(conditions) == 0 {
+		uuids := r.Rows()
+		for _, uuid := range uuids {
+			row := r.Row(uuid)
+			results = append(results, row)
+		}
+		return results, nil
+	}
+
+	for _, condition := range conditions {
+		if condition.Column == "_uuid" {
+			ovsdbUUID, ok := condition.Value.(ovsdb.UUID)
+			if !ok {
+				panic(fmt.Sprintf("%+v is not an ovsdb uuid", ovsdbUUID))
+			}
+			uuid := ovsdbUUID.GoUUID
+			for _, k := range r.Rows() {
+				ok, err := condition.Function.Evaluate(k, uuid)
+				if err != nil {
+					return nil, err
+				}
+				if ok {
+					row := r.Row(k)
+					results = append(results, row)
+				}
+			}
+		} else if index, err := r.Index(condition.Column); err != nil {
+			for k, v := range index {
+				tSchema := r.schema.Columns[condition.Column]
+				nativeValue, err := ovsdb.OvsToNative(tSchema, condition.Value)
+				if err != nil {
+					return nil, err
+				}
+				ok, err := condition.Function.Evaluate(k, nativeValue)
+				if err != nil {
+					return nil, err
+				}
+				if ok {
+					row := r.Row(v)
+					results = append(results, row)
+				}
+			}
+		} else {
+			for _, uuid := range r.Rows() {
+				row := r.Row(uuid)
+				info, err := mapper.NewInfo(&r.schema, row)
+				if err != nil {
+					return nil, err
+				}
+				value, err := info.FieldByColumn(condition.Column)
+				if err != nil {
+					return nil, err
+				}
+				ok, err := condition.Function.Evaluate(value, condition.Value)
+				if err != nil {
+					return nil, err
+				}
+				if ok {
+					results = append(results, row)
+				}
+			}
+		}
+	}
+	return results, nil
 }
 
 // Len returns the length of the cache
