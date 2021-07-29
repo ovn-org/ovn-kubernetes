@@ -281,7 +281,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	portName := podLogicalPortName(pod)
-	klog.V(5).Infof("Creating logical port for %s on switch %s", portName, logicalSwitch)
+	klog.Infof("[%s/%s] creating logical port for pod on switch %s", pod.Namespace, pod.Name, logicalSwitch)
 
 	var podMac net.HardwareAddr
 	var podIfAddrs []*net.IPNet
