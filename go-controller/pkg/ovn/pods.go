@@ -476,44 +476,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		releaseIPs = false
 	}
 
-	// set addresses on the port
-	addresses = make([]string, len(podIfAddrs)+1)
-	addresses[0] = podMac.String()
-	for idx, podIfAddr := range podIfAddrs {
-		addresses[idx+1] = podIfAddr.IP.String()
-	}
-	// LSP addresses in OVN are a single space-separated value
-	cmd, err = oc.ovnNBClient.LSPSetAddress(portName, strings.Join(addresses, " "))
-	if err != nil {
-		return fmt.Errorf("unable to create LSPSetAddress command for port: %s", portName)
-	}
-	cmds = append(cmds, cmd)
-
-	// add external ids
-	extIds := map[string]string{"namespace": pod.Namespace, "pod": "true"}
-	cmd, err = oc.ovnNBClient.LSPSetExternalIds(portName, extIds)
-	if err != nil {
-		return fmt.Errorf("unable to create LSPSetExternalIds command for port: %s", portName)
-	}
-	cmds = append(cmds, cmd)
-
-	// execute all the commands together.
-	err = oc.ovnNBClient.Execute(cmds...)
-	if err != nil {
-		return fmt.Errorf("error while creating logical port %s error: %v",
-			portName, err)
-	}
-
-	lsp, err = oc.ovnNBClient.LSPGet(portName)
-	if err != nil || lsp == nil {
-		return fmt.Errorf("failed to get the logical switch port: %s from the ovn client, error: %s", portName, err)
-	}
-
-	// Add the pod's logical switch port to the port cache
-	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
-
 	// Ensure the namespace/nsInfo exists
-	if err = oc.addPodToNamespace(pod.Namespace, portInfo); err != nil {
+	if err := oc.addPodToNamespace(pod.Namespace, podIfAddrs); err != nil {
 		return err
 	}
 
@@ -554,18 +518,63 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("failed to handle external GW check: %v", err)
 	}
 
+	// set addresses on the port
+	addresses = make([]string, len(podIfAddrs)+1)
+	addresses[0] = podMac.String()
+	for idx, podIfAddr := range podIfAddrs {
+		addresses[idx+1] = podIfAddr.IP.String()
+	}
+
+	// LSP addresses in OVN are a single space-separated value
+	cmd, err = oc.ovnNBClient.LSPSetAddress(portName, strings.Join(addresses, " "))
+	if err != nil {
+		return fmt.Errorf("unable to create LSPSetAddress command for port: %s", portName)
+	}
+	cmds = append(cmds, cmd)
+
+	// add external ids
+	extIds := map[string]string{"namespace": pod.Namespace, "pod": "true"}
+	cmd, err = oc.ovnNBClient.LSPSetExternalIds(portName, extIds)
+	if err != nil {
+		return fmt.Errorf("unable to create LSPSetExternalIds command for port: %s", portName)
+	}
+	cmds = append(cmds, cmd)
+
 	// CNI depends on the flows from port security, delay setting it until end
 	cmd, err = oc.ovnNBClient.LSPSetPortSecurity(portName, strings.Join(addresses, " "))
 	if err != nil {
 		return fmt.Errorf("unable to create LSPSetPortSecurity command for port: %s", portName)
 	}
 
-	err = oc.ovnNBClient.Execute(cmd)
+	cmds = append(cmds, cmd)
+
+	// execute all the commands together.
+	err = oc.ovnNBClient.Execute(cmds...)
 	if err != nil {
-		return fmt.Errorf("error while setting port security on port: %s error: %v",
+		return fmt.Errorf("error while creating logical port %s error: %v",
 			portName, err)
 	}
 
+	lsp, err = oc.ovnNBClient.LSPGet(portName)
+	if err != nil || lsp == nil {
+		return fmt.Errorf("failed to get the logical switch port: %s from the ovn client, error: %s", portName, err)
+	}
+
+	// Add the pod's logical switch port to the port cache
+	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
+
+	// If multicast is allowed and enabled for the namespace, add the port to the allow policy.
+	// FIXME: there's a race here with the Namespace multicastUpdateNamespace() handler, but
+	// it's rare and easily worked around for now.
+	ns, err := oc.watchFactory.GetNamespace(pod.Namespace)
+	if err != nil {
+		return err
+	}
+	if oc.multicastSupport && isNamespaceMulticastEnabled(ns.Annotations) {
+		if err := podAddAllowMulticastPolicy(oc.ovnNBClient, pod.Namespace, portInfo); err != nil {
+			return err
+		}
+	}
 	// observe the pod creation latency metric.
 	metrics.RecordPodCreated(pod)
 	return nil
