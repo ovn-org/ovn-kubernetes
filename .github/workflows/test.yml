@@ -317,7 +317,9 @@ jobs:
          - {"disable-snat-multiple-gws": {"enabled": "true"}, "gateway-mode": local}
          - {"second-bridge": {"enabled": "true"}, "gateway-mode": local}
          - {"second-bridge": {"enabled": "true"}, "disable-snat-multiple-gws": {"enabled": "false"}}
-         - {"second-bridge": {"enabled": "true"}, "ha": {"enabled": "false"}}
+         - {"second-bridge": {"enabled": "true"}, "ha": {"enabled": "true"}}
+         - {"second-bridge": {"enabled": "true"}, "target": {"shard": {"multicast-enable": "true"}}}
+         - {"second-bridge": {"enabled": "false"}, "disable-snat-multiple-gws": {"enabled": "true"}}
     needs: [ build-pr ]
     env:
       JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}-${{ matrix.disable-snat-multiple-gws.name }}-${{ matrix.second-bridge.name }}"
