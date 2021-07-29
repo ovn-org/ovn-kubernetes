@@ -285,3 +285,26 @@ func getUUID(x TestData) string {
 	}
 	return ""
 }
+
+func getUUIDMapping(x, y TestData) map[string]string {
+	v := reflect.ValueOf(x).Elem()
+	w := reflect.ValueOf(y).Elem()
+	result := map[string]string{}
+	for i, n := 0, v.NumField(); i < n; i++ {
+		f := v.Field(i).Interface()
+		switch f := f.(type) {
+		case string:
+			if validUUID.MatchString(f) {
+				result[f] = w.Field(i).Interface().(string)
+			}
+		case []string:
+			p := w.Field(i).Interface().([]string)
+			for si, sv := range f {
+				if validUUID.MatchString(sv) {
+					result[sv] = p[si]
+				}
+			}
+		}
+	}
+	return result
+}

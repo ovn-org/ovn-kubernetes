@@ -75,14 +75,15 @@ func matchAndReplaceNamedUUIDs(actual, expected []TestData) {
 			if !testDataEqual(x, y, true) {
 				continue
 			}
-			uuid := getUUID(x)
-			name := getUUID(y)
-			fname := names[uuid]
-			if fname != "" {
-				panic(fmt.Sprintf("Can't infer named UUIDs, found multiple matches: [%s -> %s, %s]", uuid, name, fname))
+			for uuid, name := range getUUIDMapping(x, y) {
+				fname := names[uuid]
+				if fname != "" {
+					panic(fmt.Sprintf("Can't infer named UUIDs, found multiple matches: [%s -> %s, %s]", uuid, name, fname))
+				}
+				names[uuid] = name
+				uuids[name] = uuid
+
 			}
-			names[uuid] = name
-			uuids[name] = uuid
 			expectedToActual[j] = i
 			break
 		}
