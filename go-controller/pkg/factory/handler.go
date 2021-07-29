@@ -2,7 +2,6 @@ package factory
 
 import (
 	"fmt"
-	"hash/fnv"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -75,6 +74,8 @@ type informer struct {
 	// when a handler is added
 	initialAddFunc initialAddFn
 	shutdownWg     sync.WaitGroup
+	queueMap       sync.Map
+	queueIndex     uint32
 }
 
 func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
@@ -160,28 +161,35 @@ func (i *informer) processEvents(events chan *event, stopChan <-chan struct{}) {
 	}
 }
 
-func getQueueNum(oType reflect.Type, obj interface{}, numEventQueues int) uint32 {
+func (i *informer) getQueueNum(oType reflect.Type, obj interface{}, numEventQueues uint32, del bool) uint32 {
+
 	meta, err := getObjectMeta(oType, obj)
 	if err != nil {
 		klog.Errorf("Object has no meta: %v", err)
 		return 0
 	}
 
-	// Distribute the object to an event queue based on a hash of its
-	// namespaced name, so that all events for a given object are
-	// serialized in one queue.
-	h := fnv.New32()
-	if meta.Namespace != "" {
-		_, _ = h.Write([]byte(meta.Namespace))
-		_, _ = h.Write([]byte("/"))
+	if del {
+		if queue, exists := i.queueMap.LoadAndDelete(meta.UID); exists {
+			// entry exists, just return it
+			return queue.(uint32)
+		}
+	} else {
+		if queue, loaded := i.queueMap.Load(meta.UID); loaded {
+			// new entry loaded, means it existed, return it
+			return queue.(uint32)
+		}
 	}
-	_, _ = h.Write([]byte(meta.Name))
-	return h.Sum32() % uint32(numEventQueues)
+
+	// no entry found, assign new queue
+	queue := atomic.AddUint32(&i.queueIndex, 1) % numEventQueues
+	i.queueMap.Store(meta.UID, queue)
+	return queue
 }
 
 // enqueueEvent adds an event to the appropriate queue for the object
-func (i *informer) enqueueEvent(oldObj, obj interface{}, numEventQueues int, processFunc func(*event)) {
-	i.events[getQueueNum(i.oType, obj, numEventQueues)] <- &event{
+func (i *informer) enqueueEvent(oldObj, obj interface{}, numEventQueues uint32, del bool, processFunc func(*event)) {
+	i.events[i.getQueueNum(i.oType, obj, numEventQueues, del)] <- &event{
 		obj:     obj,
 		oldObj:  oldObj,
 		process: processFunc,
@@ -204,11 +212,11 @@ func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface
 	return obj, nil
 }
 
-func (i *informer) newFederatedQueuedHandler(numEventQueues int) cache.ResourceEventHandlerFuncs {
+func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.ResourceEventHandlerFuncs {
 	name := i.oType.Elem().Name()
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			i.enqueueEvent(nil, obj, numEventQueues, func(e *event) {
+			i.enqueueEvent(nil, obj, numEventQueues, false, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "add").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
@@ -218,7 +226,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues int) cache.ResourceE
 			})
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-			i.enqueueEvent(oldObj, newObj, numEventQueues, func(e *event) {
+			i.enqueueEvent(oldObj, newObj, numEventQueues, false, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
@@ -233,7 +241,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues int) cache.ResourceE
 				klog.Errorf(err.Error())
 				return
 			}
-			i.enqueueEvent(nil, realObj, numEventQueues, func(e *event) {
+			i.enqueueEvent(nil, realObj, numEventQueues, true, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
@@ -331,6 +339,7 @@ func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInforme
 		lister:     lister,
 		handlers:   make(map[uint64]*Handler),
 		shutdownWg: sync.WaitGroup{},
+		queueMap:   sync.Map{},
 	}, nil
 }
 
@@ -349,7 +358,7 @@ func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (
 }
 
 func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer,
-	stopChan chan struct{}, numEventQueues int) (*informer, error) {
+	stopChan chan struct{}, numEventQueues uint32) (*informer, error) {
 	i, err := newBaseInformer(oType, sharedInformer)
 	if err != nil {
 		return nil, err
@@ -384,7 +393,7 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		// Distribute the existing items into the handler-specific
 		// channel array.
 		for _, obj := range items {
-			queueIdx := getQueueNum(i.oType, obj, numEventQueues)
+			queueIdx := i.getQueueNum(i.oType, obj, numEventQueues, false)
 			adds[queueIdx] <- obj
 		}
 		// Close all the channels
