@@ -3,7 +3,6 @@ package libovsdb
 import (
 	"fmt"
 	"reflect"
-	"sort"
 
 	"github.com/mitchellh/copystructure"
 	"github.com/onsi/gomega"
@@ -12,26 +11,14 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 )
 
-// isStringSetEqual compares a string slice as an unordered set
-func isStringSetEqual(x, y interface{}) bool {
-	xs, ok := x.([]string)
-	if !ok {
-		return false
+// isSetEqual compares a slice as an unordered set
+func isSetEqual(x, y interface{}) bool {
+	// used gomega for now
+	match, err := gomega.ConsistOf(x).Match(y)
+	if err != nil {
+		panic(err)
 	}
-	ys, ok := y.([]string)
-	if !ok {
-		return false
-	}
-	if len(xs) != len(ys) {
-		return false
-	}
-	xsc := make([]string, len(xs))
-	ysc := make([]string, len(ys))
-	copy(xsc, xs)
-	copy(ysc, ys)
-	sort.Strings(xsc)
-	sort.Strings(ysc)
-	return reflect.DeepEqual(xsc, ysc)
+	return match
 }
 
 // isUUIDSlice checks whether all values of the slice are uuids
@@ -119,8 +106,9 @@ func matchAndReplaceNamedUUIDs(actual, expected []TestData) {
 
 // testDataEqual tests for equality assuming input libovsdb models, as follows:
 // - Expects input to be pointers to struct
-// - If ignoreUUIDs, UUIDs are ignored from string, slice or map members of the struct
-// - Members of the struct that are string slices are compared as an unordered set
+// - If ignoreUUIDs, strings, slices or maps that contain UUIDs are ignored. Slices
+//   and maps lengths are still checked to match.
+// - Slices are compared as an unordered set
 // - Otherwise reflect.DeepEqual is used.
 func testDataEqual(x, y TestData, ignoreUUIDs bool) bool {
 	if x == nil || y == nil {
@@ -168,7 +156,7 @@ func testDataEqual(x, y TestData, ignoreUUIDs bool) bool {
 					continue
 				}
 			}
-			if !isStringSetEqual(f1.Interface(), f2.Interface()) {
+			if !isSetEqual(f1.Interface(), f2.Interface()) {
 				return false
 			}
 			continue
