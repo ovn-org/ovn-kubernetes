@@ -144,19 +144,42 @@ func getNodePortIPTRules(svcPort kapi.ServicePort, targetIP string, targetPort i
 	} else {
 		protocol = iptables.ProtocolIPv4
 	}
-	natArgs := []string{
-		"-p", string(svcPort.Protocol),
-		"-m", "addrtype",
-		"--dst-type", "LOCAL",
-		"--dport", fmt.Sprintf("%d", svcPort.NodePort),
-		"-j", "DNAT",
-		"--to-destination", util.JoinHostPortInt32(targetIP, targetPort),
+	return []iptRule{
+		{
+			table: "nat",
+			chain: iptableNodePortChain,
+			args: []string{
+				"-p", string(svcPort.Protocol),
+				"-m", "addrtype",
+				"--dst-type", "LOCAL",
+				"--dport", fmt.Sprintf("%d", svcPort.NodePort),
+				"-j", "DNAT",
+				"--to-destination", util.JoinHostPortInt32(targetIP, targetPort),
+			},
+			protocol: protocol,
+		},
+	}
+}
+
+func getNodePortLocalIPTRules(svcPort kapi.ServicePort, targetIP string, targetPort int32) []iptRule {
+	var protocol iptables.Protocol
+	if utilnet.IsIPv6String(targetIP) {
+		protocol = iptables.ProtocolIPv6
+	} else {
+		protocol = iptables.ProtocolIPv4
 	}
 	return []iptRule{
 		{
-			table:    "nat",
-			chain:    iptableNodePortChain,
-			args:     natArgs,
+			table: "nat",
+			chain: iptableNodePortChain,
+			args: []string{
+				"-p", string(svcPort.Protocol),
+				"-m", "addrtype",
+				"--dst-type", "LOCAL",
+				"--dport", fmt.Sprintf("%d", svcPort.NodePort),
+				"-j", "REDIRECT",
+				"--to-port", fmt.Sprintf("%d", targetPort),
+			},
 			protocol: protocol,
 		},
 	}
@@ -179,6 +202,29 @@ func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string) []i
 				"--dport", fmt.Sprintf("%v", svcPort.Port),
 				"-j", "DNAT",
 				"--to-destination", util.JoinHostPortInt32(dstIP, svcPort.Port),
+			},
+			protocol: protocol,
+		},
+	}
+}
+
+func getExternalLocalIPTRules(svcPort kapi.ServicePort, externalIP string, targetPort int32) []iptRule {
+	var protocol iptables.Protocol
+	if utilnet.IsIPv6String(externalIP) {
+		protocol = iptables.ProtocolIPv6
+	} else {
+		protocol = iptables.ProtocolIPv4
+	}
+	return []iptRule{
+		{
+			table: "nat",
+			chain: iptableExternalIPChain,
+			args: []string{
+				"-p", string(svcPort.Protocol),
+				"-d", externalIP,
+				"--dport", fmt.Sprintf("%v", svcPort.Port),
+				"-j", "REDIRECT",
+				"--to-port", fmt.Sprintf("%v", targetPort),
 			},
 			protocol: protocol,
 		},
@@ -310,7 +356,7 @@ func recreateIPTRules(table, chain string, keepIPTRules []iptRule) {
 // only incoming traffic on that IP will be accepted for NodePort rules; otherwise incoming traffic on the NodePort
 // on all IPs will be accepted. If gatewayIP is "", then NodePort traffic will be DNAT'ed to the service port on
 // the service's ClusterIP. Otherwise, it will be DNAT'ed to the NodePort on the gatewayIP.
-func getGatewayIPTRules(service *kapi.Service, gatewayIPs []string) []iptRule {
+func getGatewayIPTRules(service *kapi.Service, gatewayIPs []string, hasLocalHostEndpoint bool) []iptRule {
 	rules := make([]iptRule, 0)
 	clusterIPs := util.GetClusterIPs(service)
 	for _, svcPort := range service.Spec.Ports {
@@ -326,9 +372,17 @@ func getGatewayIPTRules(service *kapi.Service, gatewayIPs []string) []iptRule {
 				continue
 			}
 			if gatewayIPs == nil {
-				for _, clusterIP := range clusterIPs {
-					rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.Port)...)
+				if !hasLocalHostEndpoint {
+					for _, clusterIP := range clusterIPs {
+						rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.Port)...)
+					}
+				} else {
+					// Port redirect host -> Nodeport -> host traffic directly to endpoint
+					for _, clusterIP := range clusterIPs {
+						rules = append(rules, getNodePortLocalIPTRules(svcPort, clusterIP, int32(svcPort.TargetPort.IntValue()))...)
+					}
 				}
+				// (astoycos) TODO remove me with LGW fix
 			} else {
 				for _, gatewayIP := range gatewayIPs {
 					rules = append(rules, getNodePortIPTRules(svcPort, gatewayIP, svcPort.Port)...)
@@ -342,7 +396,12 @@ func getGatewayIPTRules(service *kapi.Service, gatewayIPs []string) []iptRule {
 				continue
 			}
 			if clusterIP, err := util.MatchIPStringFamily(utilnet.IsIPv6String(externalIP), clusterIPs); err == nil {
-				rules = append(rules, getExternalIPTRules(svcPort, externalIP, clusterIP)...)
+				if hasLocalHostEndpoint {
+					// Port redirect host -> ExternalIP -> host
+					rules = append(rules, getExternalLocalIPTRules(svcPort, externalIP, int32(svcPort.TargetPort.IntValue()))...)
+				} else {
+					rules = append(rules, getExternalIPTRules(svcPort, externalIP, clusterIP)...)
+				}
 			}
 		}
 	}
