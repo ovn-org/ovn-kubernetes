@@ -153,15 +153,26 @@ func newOVSDBServer(cfg config.OvnAuthConfig, dbModel *model.DBModel, schema ovs
 				return nil, fmt.Errorf("object of type %s is not part of the DBModel", reflect.TypeOf(d))
 			}
 
-			replaceUUIDs(d, func(s string, i int) string {
-				uuid, ok := namedUUIDs[s]
+			var dupNamedUUID string
+			uuid, uuidf := getUUID(d)
+			replaceUUIDs(d, func(name string, field int) string {
+				uuid, ok := namedUUIDs[name]
 				if !ok {
-					return s
+					return name
+				}
+				if field == uuidf {
+					// if we are replacing a model uuid, it's a dupe
+					dupNamedUUID = name
+					return name
 				}
 				return uuid
 			})
-			uuid := getUUID(d)
-			if !validUUID.MatchString(uuid) {
+			if dupNamedUUID != "" {
+				return nil, fmt.Errorf("initial data contains duplicated named UUIDs %s", dupNamedUUID)
+			}
+			if uuid == "" {
+				uuid = guuid.NewString()
+			} else if !validUUID.MatchString(uuid) {
 				namedUUID := uuid
 				uuid = guuid.NewString()
 				namedUUIDs[namedUUID] = uuid
@@ -269,19 +280,19 @@ func replaceUUIDs(data TestData, mapFrom func(string, int) string) {
 }
 
 // getUUID gets the value of the field with ovsdb tag `uuid`
-func getUUID(x TestData) string {
+func getUUID(x TestData) (string, int) {
 	v := reflect.ValueOf(x)
 	if v.Kind() != reflect.Ptr {
-		return ""
+		return "", -1
 	}
 	v = v.Elem()
 	if v.Kind() != reflect.Struct {
-		return ""
+		return "", -1
 	}
 	for i, n := 0, v.NumField(); i < n; i++ {
 		if tag := v.Type().Field(i).Tag.Get("ovsdb"); tag == "_uuid" {
-			return v.Field(i).String()
+			return v.Field(i).String(), i
 		}
 	}
-	return ""
+	return "", -1
 }
