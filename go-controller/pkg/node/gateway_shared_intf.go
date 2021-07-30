@@ -517,7 +517,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 		npw.updateServiceFlowCache(service, false, hasHostNet)
 		npw.updateServiceFlowCache(service, true, hasHostNet)
 		// Add correct iptables rules
-		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, nil, hasHostNet)...)
+		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, hasHostNet)...)
 	}
 	// sync OF rules once
 	npw.ofm.requestFlowSync()
@@ -647,7 +647,7 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) {
 			continue
 		}
 		// Add correct iptables rules
-		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, nil, false)...)
+		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, false)...)
 	}
 
 	// sync IPtables rules once
