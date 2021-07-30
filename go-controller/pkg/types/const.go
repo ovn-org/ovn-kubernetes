@@ -89,6 +89,9 @@ const (
 
 	OvnACLLoggingMeter = "acl-logging"
 
+	// OVN-K8S Address Sets Names
+	HybridRoutePolicyPrefix = "hybrid-route-pods-"
+
 	// OVN-K8S Topology Versions
 	OvnSingleJoinSwitchTopoVersion = 1
 	OvnNamespacedDenyPGTopoVersion = 2
