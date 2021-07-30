@@ -33,7 +33,7 @@ type AddressSetFactory interface {
 	NewAddressSet(name string, ips []net.IP) (AddressSet, error)
 	// EnsureAddressSet makes sure that an address set object exists in ovn
 	// with the given name
-	EnsureAddressSet(name string) error
+	EnsureAddressSet(name string) (AddressSet, error)
 	// ProcessEachAddressSet calls the given function for each address set
 	// known to the factory
 	ProcessEachAddressSet(iteratorFn AddressSetIterFunc) error
@@ -51,6 +51,8 @@ type AddressSet interface {
 	GetName() string
 	// AddIPs adds the array of IPs to the address set
 	AddIPs(ip []net.IP) error
+	// GetIPs gets the list of v4 & v6 IPs from the address set
+	GetIPs() ([]net.IP, []net.IP)
 	// SetIPs sets the address set to the given array of addresses
 	SetIPs(ip []net.IP) error
 	DeleteIPs(ip []net.IP) error
@@ -77,47 +79,77 @@ func (asf *ovnAddressSetFactory) NewAddressSet(name string, ips []net.IP) (Addre
 	return res, nil
 }
 
-// EnsureAddressSet ensures the address_set with the given name exists and if it does not creates an empty addressSet
-func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) error {
-	hashedAddressSetNames := []string{}
-	ip4ASName, ip6ASName := MakeAddressSetName(name)
-	if config.IPv4Mode {
-		hashedAddressSetNames = append(hashedAddressSetNames, ip4ASName)
+// ensureOvnAddressSet checks if the address set with the given name exists.
+// If it does, it returns the set object, else creates an empty object.
+func ensureOvnAddressSet(name string) (*ovnAddressSet, error) {
+	as := &ovnAddressSet{
+		name:     name,
+		hashName: hashedAddressSet(name),
+		ips:      make(map[string]net.IP),
 	}
-	if config.IPv6Mode {
-		hashedAddressSetNames = append(hashedAddressSetNames, ip6ASName)
+	stdout, stderr, err := util.RunOVNNbctl(
+		"--data=bare",
+		"--no-heading",
+		"--columns=_uuid,addresses",
+		"find",
+		"address_set",
+		"name="+as.hashName)
+	if err != nil {
+		return nil, fmt.Errorf("find failed to get address set %q, stderr: %q (%v)",
+			name, stderr, err)
 	}
-	for _, hashedAddressSetName := range hashedAddressSetNames {
-		uuid, stderr, err := util.RunOVNNbctl(
-			"--data=bare",
-			"--no-heading",
-			"--columns=_uuid",
-			"find",
-			"address_set",
-			"name="+hashedAddressSetName)
-		if err != nil {
-			return fmt.Errorf("find failed to get address set %q, stderr: %q (%v)",
-				name, stderr, err)
-		}
-		if uuid != "" {
-			// address_set already exists
-			continue
-		}
+
+	var uuid string
+	if stdout == "" {
 		// create the address_set with no IPs
-		_, stderr, err = util.RunOVNNbctl(
+		uuid, stderr, err = util.RunOVNNbctl(
 			"create",
 			"address_set",
-			"name="+hashedAddressSetName,
+			"name="+as.hashName,
 			"external-ids:name="+name,
 		)
 		if err != nil {
-			return fmt.Errorf("failed to create address set %q, stderr: %q (%v)",
+			return nil, fmt.Errorf("failed to create address set %q, stderr: %q (%v)",
 				name, stderr, err)
 		}
+	} else {
+		// address set exists, update uuid & ips
+		asValuePair := strings.Split(stdout, "\n")
+		uuid = asValuePair[0]
+		if len(asValuePair) > 1 {
+			// its not an empty address set, let's assign ips
+			ips := asValuePair[1]
+			for _, ip := range strings.Split(ips, " ") {
+				as.ips[ip] = net.ParseIP(ip)
+			}
+		}
+	}
+	as.uuid = uuid
+	return as, nil
+}
 
+// EnsureAddressSet ensures the address_set with the given name exists. If it exists it returns the set
+// and if it does not exist, creates an empty addressSet and returns it.
+func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) (AddressSet, error) {
+	var (
+		v4set, v6set *ovnAddressSet
+		err          error
+	)
+	ip4ASName, ip6ASName := MakeAddressSetName(name)
+	if config.IPv4Mode {
+		v4set, err = ensureOvnAddressSet(ip4ASName)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if config.IPv6Mode {
+		v6set, err = ensureOvnAddressSet(ip6ASName)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	return nil
+	return &ovnAddressSets{name: name, ipv4: v4set, ipv6: v6set}, nil
 }
 
 func forEachAddressSet(do func(string)) error {
@@ -341,6 +373,23 @@ func (as *ovnAddressSets) SetIPs(ips []net.IP) error {
 	}
 
 	return err
+}
+
+func (as *ovnAddressSets) GetIPs() ([]net.IP, []net.IP) {
+	as.Lock()
+	defer as.Unlock()
+
+	var v4ips []net.IP
+	var v6ips []net.IP
+
+	if as.ipv6 != nil {
+		v6ips = as.ipv6.allIPs()
+	}
+	if as.ipv4 != nil {
+		v4ips = as.ipv4.allIPs()
+	}
+
+	return v4ips, v6ips
 }
 
 func (as *ovnAddressSets) AddIPs(ips []net.IP) error {

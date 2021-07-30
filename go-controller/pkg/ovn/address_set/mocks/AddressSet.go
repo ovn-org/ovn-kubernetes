@@ -76,6 +76,31 @@ func (_m *AddressSet) GetASHashNames() (string, string) {
 	return r0, r1
 }
 
+// GetIPs provides a mock function with given fields:
+func (_m *AddressSet) GetIPs() ([]net.IP, []net.IP) {
+	ret := _m.Called()
+
+	var r0 []net.IP
+	if rf, ok := ret.Get(0).(func() []net.IP); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]net.IP)
+		}
+	}
+
+	var r1 []net.IP
+	if rf, ok := ret.Get(1).(func() []net.IP); ok {
+		r1 = rf()
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).([]net.IP)
+		}
+	}
+
+	return r0, r1
+}
+
 // GetName provides a mock function with given fields:
 func (_m *AddressSet) GetName() string {
 	ret := _m.Called()

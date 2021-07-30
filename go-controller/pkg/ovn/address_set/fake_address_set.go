@@ -49,9 +49,24 @@ func (f *FakeAddressSetFactory) NewAddressSet(name string, ips []net.IP) (Addres
 	return set, nil
 }
 
-// EnsureAddressSet returns nil
-func (f *FakeAddressSetFactory) EnsureAddressSet(name string) error {
-	return nil
+// EnsureAddressSet returns set object
+func (f *FakeAddressSetFactory) EnsureAddressSet(name string) (AddressSet, error) {
+	f.Lock()
+	defer f.Unlock()
+	_, ok := f.sets[name]
+	gomega.Expect(ok).To(gomega.BeFalse())
+	set, err := newFakeAddressSets(name, []net.IP{}, f.removeAddressSet)
+	if err != nil {
+		return nil, err
+	}
+	ip4ASName, ip6ASName := MakeAddressSetName(name)
+	if set.ipv4 != nil {
+		f.sets[ip4ASName] = set.ipv4
+	}
+	if set.ipv6 != nil {
+		f.sets[ip6ASName] = set.ipv6
+	}
+	return set, nil
 }
 
 func (f *FakeAddressSetFactory) ProcessEachAddressSet(iteratorFn AddressSetIterFunc) error {
@@ -250,6 +265,23 @@ func (as *fakeAddressSets) AddIPs(ips []net.IP) error {
 	return nil
 }
 
+func (as *fakeAddressSets) GetIPs() ([]net.IP, []net.IP) {
+	as.Lock()
+	defer as.Unlock()
+
+	var v4ips []net.IP
+	var v6ips []net.IP
+
+	if as.ipv6 != nil {
+		v6ips = as.ipv6.allIPs()
+	}
+	if as.ipv4 != nil {
+		v4ips = as.ipv4.allIPs()
+	}
+
+	return v4ips, v6ips
+}
+
 func (as *fakeAddressSets) SetIPs(ips []net.IP) error {
 	// NOOP
 	return nil
@@ -323,4 +355,13 @@ func (as *fakeAddressSet) destroy() error {
 	atomic.StoreUint32(&as.destroyed, 1)
 	as.removeFn(as.name)
 	return nil
+}
+
+func (as *fakeAddressSet) allIPs() []net.IP {
+	// my kingdom for a ".values()" function
+	out := make([]net.IP, 0, len(as.ips))
+	for _, ip := range as.ips {
+		out = append(out, ip)
+	}
+	return out
 }
