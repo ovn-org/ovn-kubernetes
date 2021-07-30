@@ -34,8 +34,6 @@ var _ = Describe("cnismartnic tests", func() {
 				DeviceID: "",
 			},
 			timestamp:  time.Time{},
-			ctx:        nil,
-			cancel:     nil,
 			IsSmartNIC: true,
 		}
 	})

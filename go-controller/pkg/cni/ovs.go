@@ -294,13 +294,15 @@ func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 	} else {
 		queries = getLegacyFlowQueries(mac, ifAddrs, ofPort)
 	}
-	timeout := time.After(20 * time.Second)
+
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("canceled waiting for OVS port binding for %s %v", mac, ifAddrs)
-		case <-timeout:
-			return fmt.Errorf("timed out waiting for OVS port binding%s for %s %v", detail, mac, ifAddrs)
+			errDetail := "timed out"
+			if ctx.Err() == context.Canceled {
+				errDetail = "canceled while"
+			}
+			return fmt.Errorf("%s waiting for OVS port binding%s for %s %v", errDetail, detail, mac, ifAddrs)
 		default:
 			if err := isIfaceIDSet(ifaceName, ifaceID); err != nil {
 				return err
