@@ -69,13 +69,14 @@ func getPod(podLister corev1listers.PodLister, kclient kubernetes.Interface, nam
 func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, kclient kubernetes.Interface, namespace, name string, annotCond podAnnotWaitCond) (string, map[string]string, error) {
 	var notFoundCount uint
 
-	timeout := time.After(30 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
-			return "", nil, fmt.Errorf("canceled waiting for annotations")
-		case <-timeout:
-			return "", nil, fmt.Errorf("timed out waiting for annotations")
+			detail := "timed out"
+			if ctx.Err() == context.Canceled {
+				detail = "canceled while"
+			}
+			return "", nil, fmt.Errorf("%s waiting for annotations: %w", detail, ctx.Err())
 		default:
 			pod, err := getPod(podLister, kclient, namespace, name)
 			if err != nil {
