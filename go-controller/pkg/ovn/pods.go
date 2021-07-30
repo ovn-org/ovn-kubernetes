@@ -248,13 +248,17 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 	return nil
 }
 
-func (oc *Controller) getRoutingExternalGWs(ns string) gatewayInfo {
-	res := gatewayInfo{}
+func (oc *Controller) getRoutingGWs(ns string) (gatewayInfo, map[string]gatewayInfo) {
 	nsInfo := oc.getNamespaceLocked(ns)
 	if nsInfo == nil {
-		return res
+		return gatewayInfo{}, nil
 	}
 	defer nsInfo.Unlock()
+	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo)
+}
+
+func (oc *Controller) getRoutingExternalGWs(nsInfo *namespaceInfo) gatewayInfo {
+	res := gatewayInfo{}
 	// return a copy of the object so it can be handled without the
 	// namespace locked
 	res.bfdEnabled = nsInfo.routingExternalGWs.bfdEnabled
@@ -263,12 +267,7 @@ func (oc *Controller) getRoutingExternalGWs(ns string) gatewayInfo {
 	return res
 }
 
-func (oc *Controller) getRoutingPodGWs(ns string) map[string]gatewayInfo {
-	nsInfo := oc.getNamespaceLocked(ns)
-	if nsInfo == nil {
-		return nil
-	}
-	defer nsInfo.Unlock()
+func (oc *Controller) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]gatewayInfo {
 	// return a copy of the object so it can be handled without the
 	// namespace locked
 	res := make(map[string]gatewayInfo)
@@ -482,8 +481,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// add src-ip routes to GR if external gw annotation is set
-	routingExternalGWs := oc.getRoutingExternalGWs(pod.Namespace)
-	routingPodGWs := oc.getRoutingPodGWs(pod.Namespace)
+	routingExternalGWs, routingPodGWs := oc.getRoutingGWs(pod.Namespace)
 
 	// if we have any external or pod Gateways, add routes
 	gateways := make([]gatewayInfo, 0)
