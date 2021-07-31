@@ -55,6 +55,8 @@ func (f *FakeAddressSetFactory) EnsureAddressSet(name string) error {
 }
 
 func (f *FakeAddressSetFactory) ProcessEachAddressSet(iteratorFn AddressSetIterFunc) error {
+	f.Lock()
+	defer f.Unlock()
 	asNames := sets.String{}
 	for _, set := range f.sets {
 		asName := truncateSuffixFromAddressSet(set.getName())
@@ -131,6 +133,42 @@ func (f *FakeAddressSetFactory) ExpectAddressSetWithIPs(name string, ips []strin
 	}
 
 	gomega.Expect(lenAddressSet).To(gomega.Equal(len(ips)))
+}
+
+// EventuallyExpectAddressSetWithIPs ensures the named address set exists with the given set of IPs
+func (f *FakeAddressSetFactory) EventuallyExpectAddressSetWithIPs(name string, ips []string) {
+	gomega.Eventually(func() bool {
+		var lenAddressSet int
+		name4, name6 := MakeAddressSetName(name)
+		as4 := f.getAddressSet(name4)
+		if as4 != nil {
+			defer as4.Unlock()
+			lenAddressSet = lenAddressSet + len(as4.ips)
+		}
+		as6 := f.getAddressSet(name6)
+		if as6 != nil {
+			defer as6.Unlock()
+			lenAddressSet = lenAddressSet + len(as6.ips)
+		}
+		for _, ip := range ips {
+			if utilnet.IsIPv6(net.ParseIP(ip)) {
+				if as6 == nil {
+					return false
+				}
+				if _, ok := as6.ips[ip]; !ok {
+					return false
+				}
+			} else {
+				if as4 == nil {
+					return false
+				}
+				if _, ok := as4.ips[ip]; !ok {
+					return false
+				}
+			}
+		}
+		return lenAddressSet == len(ips)
+	}).Should(gomega.BeTrue())
 }
 
 // ExpectEmptyAddressSet ensures the named address set exists with no IPs

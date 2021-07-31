@@ -792,7 +792,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	if err = func() error {
 		hostNetworkNamespace := config.Kubernetes.HostNetworkNamespace
 		if hostNetworkNamespace != "" {
-			nsInfo := oc.ensureNamespaceLocked(hostNetworkNamespace)
+			nsInfo := oc.ensureNamespaceLocked(hostNetworkNamespace, nil)
 			defer nsInfo.Unlock()
 			if nsInfo.addressSet == nil {
 				nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(hostNetworkNamespace)

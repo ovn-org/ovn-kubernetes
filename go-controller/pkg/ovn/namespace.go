@@ -12,7 +12,6 @@ import (
 
 	goovn "github.com/ebay/go-ovn"
 	kapi "k8s.io/api/core/v1"
-	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 )
 
@@ -51,7 +50,7 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 }
 
 func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
-	nsInfo := oc.ensureNamespaceLocked(ns)
+	nsInfo := oc.ensureNamespaceLocked(ns, nil)
 	defer nsInfo.Unlock()
 
 	if nsInfo.addressSet == nil {
@@ -187,18 +186,9 @@ func parseRoutingExternalGWAnnotation(annotation string) ([]net.IP, error) {
 	return routingExternalGWs, nil
 }
 
-// AddNamespace creates corresponding addressset in ovn db
-func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
-	klog.Infof("[%s] adding namespace", ns.Name)
-	// Keep track of how long syncs take.
-	start := time.Now()
-	defer func() {
-		klog.Infof("[%s] adding namespace took %v", ns.Name, time.Since(start))
-	}()
-
-	nsInfo := oc.ensureNamespaceLocked(ns.Name)
-	defer nsInfo.Unlock()
-
+// configureNamespace ensures internal structures are updated based on namespace
+// must be called with nsInfo lock
+func (oc *Controller) configureNamespace(nsInfo *namespaceInfo, ns *kapi.Namespace) {
 	if annotation, ok := ns.Annotations[routingExternalGWsAnnotation]; ok {
 		exGateways, err := parseRoutingExternalGWAnnotation(annotation)
 		if err != nil {
@@ -240,6 +230,20 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 
 	// If multicast enabled, adds all current pods in the namespace to the allow policy
 	oc.multicastUpdateNamespace(ns, nsInfo)
+
+}
+
+// AddNamespace creates corresponding addressset in ovn db
+func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
+	klog.Infof("[%s] adding namespace", ns.Name)
+	// Keep track of how long syncs take.
+	start := time.Now()
+	defer func() {
+		klog.Infof("[%s] adding namespace took %v", ns.Name, time.Since(start))
+	}()
+
+	nsInfo := oc.ensureNamespaceLocked(ns.Name, ns)
+	defer nsInfo.Unlock()
 }
 
 func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
@@ -342,25 +346,6 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 	oc.multicastDeleteNamespace(ns, nsInfo)
 }
 
-// waitForNamespaceLocked waits up to 10 seconds for a Namespace to be known; use this
-// rather than getNamespaceLocked when calling from a thread where you might be processing
-// an event in a namespace before the Namespace factory thread has processed the Namespace
-// addition.
-func (oc *Controller) waitForNamespaceLocked(namespace string) (*namespaceInfo, error) {
-	var nsInfo *namespaceInfo
-
-	err := utilwait.PollImmediate(100*time.Millisecond, 10*time.Second,
-		func() (bool, error) {
-			nsInfo = oc.getNamespaceLocked(namespace)
-			return nsInfo != nil, nil
-		},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("timeout waiting for namespace event")
-	}
-	return nsInfo, nil
-}
-
 // getNamespaceLocked locks namespacesMutex, looks up ns, and (if found), returns it with
 // its mutex locked. If ns is not known, nil will be returned
 func (oc *Controller) getNamespaceLocked(ns string) *namespaceInfo {
@@ -387,9 +372,11 @@ func (oc *Controller) getNamespaceLocked(ns string) *namespaceInfo {
 	return nsInfo
 }
 
-// ensureNamespaceLocked locks namespacesMutex, gets/creates an entry for ns, and returns it
+// ensureNamespaceLocked locks namespacesMutex, gets/creates an entry for ns, configures OVN nsInfo, and returns it
 // with its mutex locked.
-func (oc *Controller) ensureNamespaceLocked(ns string) *namespaceInfo {
+// ns is the name of the namespace, while namespace is the optional k8s namespace object
+// if no k8s namespace object is provided, this function will attempt to find it via informer cache
+func (oc *Controller) ensureNamespaceLocked(ns string, namespace *kapi.Namespace) *namespaceInfo {
 	oc.namespacesMutex.Lock()
 	nsInfo := oc.namespaces[ns]
 	nsInfoExisted := false
@@ -421,6 +408,16 @@ func (oc *Controller) ensureNamespaceLocked(ns string) *namespaceInfo {
 			nsInfo.Unlock()
 			return nil
 		}
+	}
+
+	// nsInfo and namespace didn't exist, get it from lister
+	if namespace == nil {
+		namespace, _ = oc.watchFactory.GetNamespace(ns)
+	}
+
+	if namespace != nil {
+		// if we have the namespace, attempt to configure nsInfo with it
+		oc.configureNamespace(nsInfo, namespace)
 	}
 
 	return nsInfo
