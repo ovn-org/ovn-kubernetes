@@ -209,7 +209,7 @@ func (oc *Controller) addPodExternalGWForNamespace(namespace string, pod *kapi.P
 		}
 		gws += ip.String()
 	}
-	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(namespace, false)
+	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(namespace, false, nil)
 	if err != nil {
 		return fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
