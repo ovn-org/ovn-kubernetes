@@ -239,6 +239,25 @@ print_params() {
      echo ""
 }
 
+command_exists() {
+  cmd="$1"
+  which ${cmd} >/dev/null 2>&1
+}
+
+check_dependencies() {
+  for cmd in pip jq kind ; do
+    if ! command_exists ${cmd} ; then
+  	  echo "Dependency not met: Command not found '${cmd}'"
+  	  exit 1
+    fi
+  done
+
+  if ! command_exists docker && ! command_exists podman; then
+  	  echo "Dependency not met: Neither docker nor podman found"
+  	  exit 1
+  fi
+}
+
 install_j2_renderer() {
   # ensure j2 renderer installed
   pip install wheel --user
@@ -604,6 +623,7 @@ sleep_until_pods_settle() {
   sleep 30
 }
 
+check_dependencies
 install_j2_renderer
 # In order to allow providing arguments with spaces, e.g. "-vconsole:info -vfile:info" 
 # the original command <parse_args $*> was replaced by <parse_args "$@">

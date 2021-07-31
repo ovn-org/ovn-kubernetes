@@ -15,6 +15,7 @@ KIND (Kubernetes in Docker) deployment of OVN kubernetes is a fast and easy mean
       ```
 - [kubectl]( https://kubernetes.io/docs/tasks/tools/install-kubectl/ )
 - Python and pip
+- jq
 
 **NOTE :**  In certain operating systems such as CentOS 8.x, pip2 and pip3 binaries are installed instead of pip. In such situations create a softlink for "pip" that points to "pip2".
 
