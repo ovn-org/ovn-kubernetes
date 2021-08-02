@@ -384,7 +384,7 @@ func addServiceRules(service *kapi.Service, hasHostNet bool, npw *nodePortWatche
 			npw.updateServiceFlowCache(service, true, false)
 			npw.ofm.requestFlowSync()
 			if !npw.smartNICMode {
-				addSharedGatewayIptRules(service, true)
+				addSharedGatewayIptRules(service, false)
 			}
 			return
 		}
