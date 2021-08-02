@@ -582,7 +582,7 @@ func addExternalSwitch(prefix, interfaceID, nodeName, gatewayRouter, macAddress,
 	return nil
 }
 
-func addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet, otherHostAddrs []string) error {
+func (oc *Controller) addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet, otherHostAddrs []string) error {
 	var l3Prefix string
 	var natSubnetNextHop string
 	if utilnet.IsIPv6(hostIfAddr.IP) {
@@ -606,13 +606,15 @@ func addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet, ot
 	}
 
 	if config.Gateway.Mode == config.GatewayModeLocal {
-
 		// policy to allow host -> service -> hairpin back to host
 		matchStr := fmt.Sprintf("%s.src == %s && %s.dst == %s /* %s */",
 			l3Prefix, mgmtPortIP, l3Prefix, hostIfAddr.IP.String(), nodeName)
 		if err := syncPolicyBasedRoutes(nodeName, sets.NewString(matchStr), types.MGMTPortPolicyPriority, natSubnetNextHop); err != nil {
 			return fmt.Errorf("unable to sync management port policies, err: %v", err)
 		}
+
+		// Remove the legacy inter-node policy, and add (only for LGW) the new one below.
+		removeLegacyInterNodeTrafficLRPolicy(nodeName)
 
 		var matchDst string
 		// Local gw mode needs to use DGP to do hostA -> service -> hostB
@@ -628,14 +630,18 @@ func addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet, ot
 			}
 			matchDst += fmt.Sprintf(" && %s.dst != %s", clusterL3Prefix, clusterSubnet.CIDR)
 		}
-		matchStr = fmt.Sprintf("%s.src == %s %s /* inter-%s */",
-			l3Prefix, mgmtPortIP, matchDst, nodeName)
+		matchAS, err := oc.addMgmtPortIPToAddressSet(net.ParseIP(mgmtPortIP))
+		if err != nil {
+			return fmt.Errorf("unable to add management port IP %s to addressset, err: %v", mgmtPortIP, err)
+		}
+		matchStr = fmt.Sprintf("%s.src == $%s%s /* %s */",
+			l3Prefix, matchAS, matchDst, types.InterNodeTraffic)
 		if err := syncPolicyBasedRoutes(nodeName, sets.NewString(matchStr), types.InterNodePolicyPriority, natSubnetNextHop); err != nil {
 			return fmt.Errorf("unable to sync inter-node policies, err: %v", err)
 		}
 	} else if config.Gateway.Mode == config.GatewayModeShared {
-		// if we are upgrading from Local to Shared gateway mode, we need to ensure the inter-node LRP is removed
-		removeLRPolicies(nodeName, []string{types.InterNodePolicyPriority})
+		// If we are upgrading from Local to Shared gateway mode, we need to ensure the inter-node LRP is removed
+		oc.removeLRPolicies(nodeName, []string{types.InterNodePolicyPriority})
 	}
 
 	return nil
@@ -658,9 +664,7 @@ func addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet, ot
 
 // or
 
-// 		822ab242-cce5-47b2-9c6f-f025f47e766a,ip4.src == 10.244.2.2  && ip4.dst != 10.244.0.0/16 /* inter-ovn-worker */,169.254.0.1
-// 		a1b876f6-5ed4-4f88-b09c-7b4beed3b75f,ip4.src == 10.244.1.2  && ip4.dst != 10.244.0.0/16 /* inter-ovn-control-plane */,169.254.0.1
-// 		0f5af297-74c8-4551-b10e-afe3b74bb000,ip4.src == 10.244.0.2  && ip4.dst != 10.244.0.0/16 /* inter-ovn-worker2 */,169.254.0.1
+// 		822ab242-cce5-47b2-9c6f-f025f47e766a,ip4.src == $a16990491322166530807  && ip4.dst != 10.244.0.0/16 /* inter-node-traffic */,169.254.0.1
 
 // The function checks to see if the mgmtPort IP has changed, or if match criteria has changed
 // and removes stale policies for a node. It also adds new policies for a node at a specific priority.
@@ -683,6 +687,7 @@ func syncPolicyBasedRoutes(nodeName string, matches sets.String, priority, nexth
 	// also flag if desired policies are already found
 	for _, policyCompare := range policiesCompare {
 		if strings.Contains(policyCompare, fmt.Sprintf("%s\"", nodeName)) {
+			// This condition is met only for NodeSubnetPolicy.
 			// if the policy is for this node and has the wrong mgmtPortIP as nexthop, remove it
 			// FIXME we currently assume that foundNexthops is a single ip, this may
 			// change in the future.
@@ -842,4 +847,24 @@ func (oc *Controller) addNodeLocalNatEntries(node *kapi.Node, mgmtPortMAC string
 			node.Name, err)
 	}
 	return nil
+}
+
+func (oc *Controller) addMgmtPortIPToAddressSet(mgmtPortIP net.IP) (string, error) {
+	var matchAS string
+	// Add node's mgmtPortIP to the address_set.
+	as, err := oc.addressSetFactory.EnsureAddressSet(types.K8sMgmtIntfName + "-ips")
+	if err != nil {
+		return matchAS, fmt.Errorf("cannot ensure that addressSet for management IPs exists %v", err)
+	}
+	ipv4HashedAS, ipv6HashedAS := as.GetASHashNames()
+	err = as.AddIPs([]net.IP{(mgmtPortIP)})
+	if err != nil {
+		return matchAS, fmt.Errorf("unable to add mgmtPortIP %s: to the address set %s, err: %v", mgmtPortIP, as.GetName(), err)
+	}
+	if utilnet.IsIPv6(mgmtPortIP) {
+		matchAS = ipv6HashedAS
+	} else {
+		matchAS = ipv4HashedAS
+	}
+	return matchAS, nil
 }

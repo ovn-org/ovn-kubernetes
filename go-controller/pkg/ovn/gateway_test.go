@@ -7,12 +7,17 @@ import (
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/urfave/cli/v2"
+	v1 "k8s.io/api/core/v1"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 )
 
 var _ = ginkgo.Describe("Gateway Init Operations", func() {
+	var (
+		app *cli.App
+	)
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
@@ -357,118 +362,155 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 	})
 
 	ginkgo.It("cleans up a single-stack gateway in OVN", func() {
-		nodeName := "test-node"
-		hostSubnet := ovntest.MustParseIPNet("10.130.0.0/23")
-		const (
-			nodeRouteUUID string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
-			tcpLBUUID     string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
-		)
+		app.Action = func(ctx *cli.Context) error {
+			nodeName := "test-node"
+			hostSubnet := ovntest.MustParseIPNet("10.130.0.0/23")
+			const (
+				nodeRouteUUID string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
+				tcpLBUUID     string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
+			)
 
-		fexec := ovntest.NewFakeExec()
-		err := util.SetExec(fexec)
+			fexec := ovntest.NewFakeExec()
+			err := util.SetExec(fexec)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			fakeOVN := NewFakeOVN(fexec)
+			fakeOVN.start(ctx,
+				&v1.NodeList{
+					Items: []v1.Node{
+						{
+							Status: v1.NodeStatus{
+								Phase: v1.NodeRunning,
+							},
+							ObjectMeta: newObjectMeta(nodeName, ""),
+						},
+					},
+				})
+
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_test-node networks",
+				Output: "[\"100.64.0.1/16\"]",
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"100.64.0.1\"",
+				Output: nodeRouteUUID,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + nodeRouteUUID,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_test-node",
+				"ovn-nbctl --timeout=15 --if-exist lr-del GR_test-node",
+				"ovn-nbctl --timeout=15 --if-exist ls-del ext_test-node",
+				"ovn-nbctl --timeout=15 --if-exist ls-del ext_ext_test-node",
+			})
+
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_test-node",
+				Output: tcpLBUUID,
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:UDP_lb_gateway_router=GR_test-node",
+				Output: "",
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:SCTP_lb_gateway_router=GR_test-node",
+				Output: "",
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 lb-del " + tcpLBUUID,
+			})
+			cleanupPBRandNATRules(fexec, nodeName, []*net.IPNet{hostSubnet})
+
+			err = fakeOVN.controller.gatewayCleanup(nodeName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
+
+			return nil
+		}
+
+		err := app.Run([]string{app.Name})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_test-node networks",
-			Output: "[\"100.64.0.1/16\"]",
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"100.64.0.1\"",
-			Output: nodeRouteUUID,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + nodeRouteUUID,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_test-node",
-			"ovn-nbctl --timeout=15 --if-exist lr-del GR_test-node",
-			"ovn-nbctl --timeout=15 --if-exist ls-del ext_test-node",
-			"ovn-nbctl --timeout=15 --if-exist ls-del ext_ext_test-node",
-		})
-
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_test-node",
-			Output: tcpLBUUID,
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:UDP_lb_gateway_router=GR_test-node",
-			Output: "",
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:SCTP_lb_gateway_router=GR_test-node",
-			Output: "",
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 lb-del " + tcpLBUUID,
-		})
-		cleanupPBRandNATRules(fexec, nodeName, []*net.IPNet{hostSubnet})
-
-		err = gatewayCleanup(nodeName)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
 	})
 
 	ginkgo.It("cleans up a dual-stack gateway in OVN", func() {
-		nodeName := "test-node"
-		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23", "fd01:0:0:2::/64")
-		const (
-			v4RouteUUID    string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
-			v6RouteUUID    string = "0cac12cf-4682-3e0f-b028-5ea2e0001962"
-			v4mgtRouteUUID string = "0cac12cf-3e0f-4682-b028-5ea2e0001963"
-			v6mgtRouteUUID string = "0cac12cf-4682-3e0f-b028-5ea2e0001963"
-			tcpLBUUID      string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
-		)
+		app.Action = func(ctx *cli.Context) error {
+			nodeName := "test-node"
+			hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23", "fd01:0:0:2::/64")
+			const (
+				v4RouteUUID    string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
+				v6RouteUUID    string = "0cac12cf-4682-3e0f-b028-5ea2e0001962"
+				v4mgtRouteUUID string = "0cac12cf-3e0f-4682-b028-5ea2e0001963"
+				v6mgtRouteUUID string = "0cac12cf-4682-3e0f-b028-5ea2e0001963"
+				tcpLBUUID      string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
+			)
 
-		fexec := ovntest.NewFakeExec()
-		err := util.SetExec(fexec)
+			fexec := ovntest.NewFakeExec()
+			err := util.SetExec(fexec)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			fakeOVN := NewFakeOVN(fexec)
+			fakeOVN.start(ctx,
+				&v1.NodeList{
+					Items: []v1.Node{
+						{
+							Status: v1.NodeStatus{
+								Phase: v1.NodeRunning,
+							},
+							ObjectMeta: newObjectMeta(nodeName, ""),
+						},
+					},
+				})
+
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_test-node networks",
+				Output: "[\"100.64.0.1/16\", \"fd98::1/64\"]",
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"100.64.0.1\"",
+				Output: v4RouteUUID,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + v4RouteUUID,
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"fd98::1\"",
+				Output: v6RouteUUID,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + v6RouteUUID,
+			})
+
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_test-node",
+				"ovn-nbctl --timeout=15 --if-exist lr-del GR_test-node",
+				"ovn-nbctl --timeout=15 --if-exist ls-del ext_test-node",
+				"ovn-nbctl --timeout=15 --if-exist ls-del ext_ext_test-node",
+			})
+
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_test-node",
+				Output: tcpLBUUID,
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:UDP_lb_gateway_router=GR_test-node",
+				Output: "",
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:SCTP_lb_gateway_router=GR_test-node",
+				Output: "",
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 lb-del " + tcpLBUUID,
+			})
+			cleanupPBRandNATRules(fexec, nodeName, hostSubnets)
+
+			err = fakeOVN.controller.gatewayCleanup(nodeName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
+			return nil
+		}
+
+		err := app.Run([]string{app.Name})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_test-node networks",
-			Output: "[\"100.64.0.1/16\", \"fd98::1/64\"]",
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"100.64.0.1\"",
-			Output: v4RouteUUID,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + v4RouteUUID,
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"fd98::1\"",
-			Output: v6RouteUUID,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + v6RouteUUID,
-		})
-
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_test-node",
-			"ovn-nbctl --timeout=15 --if-exist lr-del GR_test-node",
-			"ovn-nbctl --timeout=15 --if-exist ls-del ext_test-node",
-			"ovn-nbctl --timeout=15 --if-exist ls-del ext_ext_test-node",
-		})
-
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_test-node",
-			Output: tcpLBUUID,
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:UDP_lb_gateway_router=GR_test-node",
-			Output: "",
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:SCTP_lb_gateway_router=GR_test-node",
-			Output: "",
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 lb-del " + tcpLBUUID,
-		})
-		cleanupPBRandNATRules(fexec, nodeName, hostSubnets)
-
-		err = gatewayCleanup(nodeName)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
 	})
 
 	ginkgo.It("removes leftover SNAT entries during init", func() {

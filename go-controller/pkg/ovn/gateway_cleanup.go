@@ -13,7 +13,7 @@ import (
 )
 
 // gatewayCleanup removes all the NB DB objects created for a node's gateway
-func gatewayCleanup(nodeName string) error {
+func (oc *Controller) gatewayCleanup(nodeName string) error {
 	gatewayRouter := types.GWRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
@@ -83,11 +83,11 @@ func gatewayCleanup(nodeName string) error {
 
 	// We don't know the gateway mode as this is running in the master, try to delete the additional local
 	// gateway for the shared gateway mode. it will be no op if this is done for other gateway modes.
-	delPbrAndNatRules(nodeName, nil)
+	oc.delPbrAndNatRules(nodeName, nil)
 	return nil
 }
 
-func delPbrAndNatRules(nodeName string, lrpTypes []string) {
+func (oc *Controller) delPbrAndNatRules(nodeName string, lrpTypes []string) {
 	// delete the dnat_and_snat entry that we added for the management port IP
 	// Note: we don't need to delete any MAC bindings that are dynamically learned from OVN SB DB
 	// because there will be none since this NAT is only for outbound traffic and not for inbound
@@ -108,7 +108,7 @@ func delPbrAndNatRules(nodeName string, lrpTypes []string) {
 	}
 
 	// delete all logical router policies on ovn_cluster_router
-	removeLRPolicies(nodeName, lrpTypes)
+	oc.removeLRPolicies(nodeName, lrpTypes)
 }
 
 func staticRouteCleanup(nextHops []net.IP) {
@@ -150,7 +150,7 @@ func staticRouteCleanup(nextHops []net.IP) {
 // the single join switch versions; this is to cleanup the logical entities for the
 // specified node if the node was deleted when the ovnkube-master pod was brought down
 // to do the version upgrade.
-func multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly bool) error {
+func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly bool) error {
 	gatewayRouter := types.GWRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
@@ -247,13 +247,13 @@ func multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly bool) error {
 
 	// We don't know the gateway mode as this is running in the master, try to delete the additional local
 	// gateway for the shared gateway mode. it will be no op if this is done for other gateway modes.
-	delPbrAndNatRules(nodeName, nil)
+	oc.delPbrAndNatRules(nodeName, nil)
 	return nil
 }
 
 // remove Logical Router Policy on ovn_cluster_router for a specific node.
 // Specify priorities to only delete specific types
-func removeLRPolicies(nodeName string, priorities []string) {
+func (oc *Controller) removeLRPolicies(nodeName string, priorities []string) {
 	if len(priorities) == 0 {
 		priorities = []string{types.InterNodePolicyPriority, types.NodeSubnetPolicyPriority, types.MGMTPortPolicyPriority}
 	}
@@ -270,15 +270,15 @@ func removeLRPolicies(nodeName string, priorities []string) {
 	// matches inport for a policy, must use ending quote to substring match to avoid matching other nodes accidentally
 	// i.e. rtos-ovn-worker would match rtos-ovn-worker2
 	nodeSubnetMatchSubStr := fmt.Sprintf("%s%s\"", types.RouterToSwitchPrefix, nodeName)
-	// for inter node, match the comment in the policy, and include extra space to avoid accidental submatch
-	interNodeMatchSubStr := fmt.Sprintf("%s%s ", types.InterPrefix, nodeName)
+	// for legacy inter node, match the comment in the policy, and include extra space to avoid accidental submatch
+	legacyInterNodeMatchSubStr := fmt.Sprintf("%s%s ", types.InterPrefix, nodeName)
 	// mgmt port policy matches node name in comment, use extra spaces to avoid accidental match of other nodes
 	mgmtPortPolicyMatchSubStr := fmt.Sprintf(" %s ", nodeName)
 	for _, match := range strings.Split(matches, "\n\n") {
 		var priority string
 		if strings.Contains(match, nodeSubnetMatchSubStr) {
 			priority = types.NodeSubnetPolicyPriority
-		} else if strings.Contains(match, interNodeMatchSubStr) {
+		} else if strings.Contains(match, legacyInterNodeMatchSubStr) || strings.Contains(match, types.InterNodeTraffic) {
 			priority = types.InterNodePolicyPriority
 		} else if strings.Contains(match, mgmtPortPolicyMatchSubStr) {
 			priority = types.MGMTPortPolicyPriority
@@ -288,7 +288,13 @@ func removeLRPolicies(nodeName string, priorities []string) {
 
 		for _, pri := range priorities {
 			if pri == priority {
-				_, stderr, err = util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, priority, match)
+				if strings.Contains(match, types.InterNodeTraffic) {
+					// newer version of inter node traffic policy uses address-sets, so we handle it differently.
+					// since the policy is shared by all nodes, it can be deleted only if all nodes are gone.
+					oc.removeMgmtPortIPFromAddressSet(nodeName)
+					break
+				}
+				_, stderr, err = util.RunOVNNbctl("--if-exists", "lr-policy-del", types.OVNClusterRouter, priority, match)
 				if err != nil {
 					klog.Errorf("Failed to remove the policy routes (%s, %s) associated with the node %s: stderr: %s, error: %v",
 						priority, match, nodeName, stderr, err)
@@ -299,11 +305,83 @@ func removeLRPolicies(nodeName string, priorities []string) {
 	}
 }
 
+func (oc *Controller) removeMgmtPortIPFromAddressSet(nodeName string) {
+	// Remove node's mgmtPortIP from the address_set.
+	// we might need to add the logic where we decipher the node's mgmt IPs.
+	node, err := oc.kube.GetNode(nodeName)
+	if err != nil {
+		klog.Errorf("failed to get node %s: %v", nodeName, err)
+	}
+	mgmPortIPs := util.GetMgmtPortIPsFromNode(node)
+	as, err := oc.addressSetFactory.EnsureAddressSet(types.K8sMgmtIntfName + "-ips")
+	if err != nil {
+		klog.Errorf("cannot ensure that addressSet for management IPs exists %v", err)
+	}
+	err = as.DeleteIPs(mgmPortIPs)
+	if err != nil {
+		klog.Errorf("unable to remove mgmtPortIPs for node %s from the address set %s, err: %v", nodeName, as.GetName(), err)
+	}
+
+	// remove policy if the address-sets turn out empty
+	ipv4PodIPs, ipv6PodIPs := as.GetIPs()
+	ipv4HashedAS, ipv6HashedAS := as.GetASHashNames()
+	if len(ipv6PodIPs) == 0 {
+		removeInterNodeTrafficLRPolicy(ipv6HashedAS)
+	}
+	if len(ipv4PodIPs) == 0 {
+		removeInterNodeTrafficLRPolicy(ipv4HashedAS)
+	}
+	if len(ipv4PodIPs) == 0 && len(ipv6PodIPs) == 0 {
+		// delete address set.
+		err := as.Destroy()
+		if err != nil {
+			klog.Errorf("Failed to remove address set: %s, on: %s, err: %v",
+				as.GetName(), node, err)
+		}
+	}
+}
+
+func removeInterNodeTrafficLRPolicy(as string) {
+	// find the pbr rules for inter node traffic
+	matches, err := findPolicyBasedRoutes(types.InterNodePolicyPriority, "match")
+	if err != nil {
+		klog.Errorf("Failed to fetch the policy route for the inter-node traffic, error: %v", err)
+	}
+	for _, match := range matches {
+		matchStr := strings.Split(match, ",")[1]
+		if strings.Contains(matchStr, as) {
+			_, stderr, err := util.RunOVNNbctl("--if-exists", "lr-policy-del", types.OVNClusterRouter, types.InterNodePolicyPriority, matchStr)
+			if err != nil {
+				klog.Errorf("Failed to remove policy route for inter-node traffic: stderr: %s, %v:", stderr, err)
+			}
+		}
+	}
+}
+
+func removeLegacyInterNodeTrafficLRPolicy(nodeName string) {
+	// NOTE: This is only used by LGW
+	// find the legacy pbr rules for inter node traffic
+	matches, err := findPolicyBasedRoutes(types.InterNodePolicyPriority, "match")
+	if err != nil {
+		klog.Errorf("Failed to fetch the policy route for the inter-node traffic, error: %v", err)
+	}
+	legacyInterNodeMatchSubStr := fmt.Sprintf("%s%s ", types.InterPrefix, nodeName)
+	for _, match := range matches {
+		matchStr := strings.Split(match, ",")[1]
+		if strings.Contains(matchStr, legacyInterNodeMatchSubStr) {
+			_, stderr, err := util.RunOVNNbctl("--if-exists", "lr-policy-del", types.OVNClusterRouter, types.InterNodePolicyPriority, matchStr)
+			if err != nil {
+				klog.Errorf("Failed to remove legacy policy route for inter-node traffic: stderr: %s, %v:", stderr, err)
+			}
+		}
+	}
+}
+
 // removes DGP, snat_and_dnat entries, and LRPs
-func cleanupDGP(nodes *kapi.NodeList) error {
+func (oc *Controller) cleanupDGP(nodes *kapi.NodeList) error {
 	// remove dnat_snat entries as well as LRPs
 	for _, node := range nodes.Items {
-		delPbrAndNatRules(node.Name, []string{types.InterNodePolicyPriority, types.MGMTPortPolicyPriority})
+		oc.delPbrAndNatRules(node.Name, []string{types.InterNodePolicyPriority, types.MGMTPortPolicyPriority})
 	}
 	// remove SBDB MAC bindings for DGP
 	for _, ip := range []string{types.V4NodeLocalNATSubnetNextHop, types.V6NodeLocalNATSubnetNextHop} {

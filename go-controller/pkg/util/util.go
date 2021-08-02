@@ -13,6 +13,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -42,6 +43,19 @@ func GetWorkerFromGatewayRouter(gr string) string {
 // GetGatewayRouterFromNode determines a node's corresponding gateway router name
 func GetGatewayRouterFromNode(node string) string {
 	return types.GWRouterPrefix + node
+}
+
+func GetMgmtPortIPsFromNode(node *kapi.Node) []net.IP {
+	subnets, err := ParseNodeHostSubnetAnnotation(node)
+	if err != nil {
+		klog.Errorf("failed to get host subnets for %s: %v", node.Name, err)
+	}
+	var mgmtPortIPs []net.IP
+	for _, subnet := range subnets {
+		mgmtPortIP := GetNodeManagementIfAddr(subnet)
+		mgmtPortIPs = append(mgmtPortIPs, mgmtPortIP.IP)
+	}
+	return mgmtPortIPs
 }
 
 // GetNodeChassisID returns the machine's OVN chassis ID

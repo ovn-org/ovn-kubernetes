@@ -37,6 +37,8 @@ const (
 	GWRouterToExtSwitchPrefix    = "rtoe-"
 	EgressGWSwitchPrefix         = "exgw-"
 
+	InterNodeTraffic = "inter-node-traffic"
+
 	NodeLocalSwitch = "node_local_switch"
 
 	// ACL directions
