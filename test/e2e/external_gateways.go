@@ -118,16 +118,16 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 
 			ginkgo.By(fmt.Sprintf("Verifying connectivity to the pod [%s] from external gateways", addresses.srcPodIP))
 			_, err := runCommand("docker", "exec", gwContainer1, "ping", "-c", testTimeout, addresses.srcPodIP)
-			framework.ExpectNoError(err, "Failed to ping ", addresses.srcPodIP, gwContainer1)
+			framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer1)
 			_, err = runCommand("docker", "exec", gwContainer2, "ping", "-c", testTimeout, addresses.srcPodIP)
-			framework.ExpectNoError(err, "Failed to ping ", addresses.srcPodIP, gwContainer2)
+			framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer2)
 
 			tcpDumpSync := sync.WaitGroup{}
 			checkPingOnContainer := func(container string) error {
 				defer ginkgo.GinkgoRecover()
 				defer tcpDumpSync.Done()
 				_, err := runCommand("docker", "exec", container, "timeout", "60", "tcpdump", "-c", "1", icmpCommand)
-				framework.ExpectNoError(err, "Failed to detect icmp messages on ", container, srcPingPodName)
+				framework.ExpectNoError(err, "Failed to detect icmp messages from %s on gateway %s", srcPingPodName, container)
 				framework.Logf("ICMP packet successfully detected on gateway %s", container)
 				return nil
 			}
@@ -146,7 +146,7 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 					defer ginkgo.GinkgoRecover()
 					defer pingSync.Done()
 					_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
-					framework.ExpectNoError(err, "Failed to ping the remote gateway network from pod", target, srcPingPodName)
+					framework.ExpectNoError(err, "Failed to ping remote gateway %s from pod %s", target, srcPingPodName)
 				}(t)
 			}
 			pingSync.Wait()
@@ -168,7 +168,7 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 			expectedHostNames := make(map[string]struct{})
 			for _, c := range []string{gwContainer1, gwContainer2} {
 				res, err := runCommand("docker", "exec", c, "hostname")
-				framework.ExpectNoError(err, "failed to run hostname on", c)
+				framework.ExpectNoError(err, "failed to run hostname in %s", c)
 				hostname := strings.TrimSuffix(res, "\n")
 				framework.Logf("Hostname for %s is %s", c, hostname)
 				expectedHostNames[hostname] = struct{}{}
@@ -187,7 +187,7 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 					args = append(args, "bash", "-c", fmt.Sprintf("echo | nc -w 1 -u %s %d", target, destPort))
 				}
 				res, err := framework.RunKubectl(f.Namespace.Name, args...)
-				framework.ExpectNoError(err, "failed to reach ", target, protocol)
+				framework.ExpectNoError(err, "failed to reach %s (%s)", target, protocol)
 				hostname := strings.TrimSuffix(res, "\n")
 				if hostname != "" {
 					returnedHostNames[hostname] = struct{}{}
@@ -273,15 +273,15 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 
 		ginkgo.By("Verifying connectivity to the pod from external gateways")
 		_, err := runCommand("docker", "exec", gwContainer1, "ping", "-c", testTimeout, addresses.srcPodIP)
-		framework.ExpectNoError(err, "Failed to ping ", addresses.srcPodIP, gwContainer1)
+		framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer1)
 		_, err = runCommand("docker", "exec", gwContainer2, "ping", "-c", testTimeout, addresses.srcPodIP)
-		framework.ExpectNoError(err, "Failed to ping ", addresses.srcPodIP, gwContainer2)
+		framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer2)
 
 		ginkgo.By("Verifying connectivity to the pod from external gateways with large packets > pod MTU")
 		_, err = runCommand("docker", "exec", gwContainer1, "ping", "-s", "1420", "-c", testTimeout, addresses.srcPodIP)
-		framework.ExpectNoError(err, "Failed to ping ", addresses.srcPodIP, gwContainer1)
+		framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer1)
 		_, err = runCommand("docker", "exec", gwContainer2, "ping", "-s", "1420", "-c", testTimeout, addresses.srcPodIP)
-		framework.ExpectNoError(err, "Failed to ping ", addresses.srcPodIP, gwContainer2)
+		framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer2)
 
 		// Verify the gateways and remote loopback addresses are reachable from the pod.
 		// Iterate checking connectivity to the loopbacks on the gateways until tcpdump see
@@ -300,7 +300,7 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 			defer ginkgo.GinkgoRecover()
 			defer tcpDumpSync.Done()
 			_, err := runCommand("docker", "exec", container, "timeout", "60", "tcpdump", "-c", "1", icmpToDump)
-			framework.ExpectNoError(err, "Failed to detect icmp messages on ", container, srcPodName)
+			framework.ExpectNoError(err, "Failed to detect icmp messages from %s on gateway %s", srcPodName, container)
 			framework.Logf("ICMP packet successfully detected on gateway %s", container)
 			return nil
 		}
@@ -447,9 +447,9 @@ var _ = ginkgo.Context("BFD", func() {
 
 				ginkgo.By("Verifying connectivity to the pod from external gateways")
 				_, err := runCommand("docker", "exec", gwContainer1, "ping", "-c", testTimeout, addresses.srcPodIP)
-				framework.ExpectNoError(err, "Failed to ping ", addresses.srcPodIP, gwContainer1)
+				framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer1)
 				_, err = runCommand("docker", "exec", gwContainer2, "ping", "-c", testTimeout, addresses.srcPodIP)
-				framework.ExpectNoError(err, "Failed to ping ", addresses.srcPodIP, gwContainer2)
+				framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer2)
 
 				// This is needed for bfd to sync up
 				time.Sleep(3 * time.Second)
@@ -462,7 +462,7 @@ var _ = ginkgo.Context("BFD", func() {
 					defer ginkgo.GinkgoRecover()
 					defer tcpDumpSync.Done()
 					_, err := runCommand("docker", "exec", container, "timeout", "60", "tcpdump", "-c", "1", icmpCommand)
-					framework.ExpectNoError(err, "Failed to detect icmp messages on ", container, srcPingPodName)
+					framework.ExpectNoError(err, "Failed to detect icmp messages from %s on gateway %s", srcPingPodName, container)
 					framework.Logf("ICMP packet successfully detected on gateway %s", container)
 					return nil
 				}
@@ -512,7 +512,7 @@ var _ = ginkgo.Context("BFD", func() {
 						defer ginkgo.GinkgoRecover()
 						defer pingSync.Done()
 						_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, "--", "ping", "-c", testTimeout, target)
-						framework.ExpectNoError(err, "Failed to ping the remote gateway network from pod", target, srcPingPodName)
+						framework.ExpectNoError(err, "Failed to ping remote gateway %s from pod %s", target, srcPingPodName)
 					}(t)
 				}
 				pingSync.Wait()
@@ -528,9 +528,9 @@ var _ = ginkgo.Context("BFD", func() {
 				}
 
 				_, err := runCommand("docker", "exec", gwContainer1, "ping", "-c", testTimeout, addresses.srcPodIP)
-				framework.ExpectNoError(err, "Failed to ping ", addresses.srcPodIP, gwContainer1)
+				framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer1)
 				_, err = runCommand("docker", "exec", gwContainer2, "ping", "-c", testTimeout, addresses.srcPodIP)
-				framework.ExpectNoError(err, "Failed to ping ", addresses.srcPodIP, gwContainer2)
+				framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer2)
 
 				framework.ExpectEqual(isBFDPaired(gwContainer1, addresses.nodeIP), true, "Bfd not paired")
 				framework.ExpectEqual(isBFDPaired(gwContainer2, addresses.nodeIP), true, "Bfd not paired")
@@ -643,9 +643,9 @@ var _ = ginkgo.Context("BFD", func() {
 
 			annotateNamespaceForGateway(f.Namespace.Name, true, addresses.gatewayIPs[0], addresses.gatewayIPs[1])
 			_, err := runCommand("docker", "exec", gwContainer1, "ping", "-c", testTimeout, addresses.srcPodIP)
-			framework.ExpectNoError(err, "Failed to ping ", addresses.srcPodIP, gwContainer1)
+			framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer1)
 			_, err = runCommand("docker", "exec", gwContainer2, "ping", "-c", testTimeout, addresses.srcPodIP)
-			framework.ExpectNoError(err, "Failed to ping ", addresses.srcPodIP, gwContainer2)
+			framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer2)
 
 			// This is needed for bfd to sync up
 			time.Sleep(3 * time.Second)
@@ -669,7 +669,7 @@ var _ = ginkgo.Context("BFD", func() {
 				defer ginkgo.GinkgoRecover()
 				defer tcpDumpSync.Done()
 				_, err := runCommand("docker", "exec", container, "timeout", "60", "tcpdump", "-c", "1", icmpToDump)
-				framework.ExpectNoError(err, "Failed to detect icmp messages on ", container, srcPodName)
+				framework.ExpectNoError(err, "Failed to detect icmp messages from %s on gateway %s", srcPodName, container)
 				framework.Logf("ICMP packet successfully detected on gateway %s", container)
 				return nil
 			}
@@ -739,9 +739,9 @@ var _ = ginkgo.Context("BFD", func() {
 			annotateNamespaceForGateway(f.Namespace.Name, true, addresses.gatewayIPs[0], addresses.gatewayIPs[1])
 
 			_, err := runCommand("docker", "exec", gwContainer1, "ping", "-c", testTimeout, addresses.srcPodIP)
-			framework.ExpectNoError(err, "Failed to ping ", addresses.srcPodIP, gwContainer1)
+			framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer1)
 			_, err = runCommand("docker", "exec", gwContainer2, "ping", "-c", testTimeout, addresses.srcPodIP)
-			framework.ExpectNoError(err, "Failed to ping ", addresses.srcPodIP, gwContainer2)
+			framework.ExpectNoError(err, "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer2)
 
 			// This is needed for bfd to sync up
 			time.Sleep(3 * time.Second)
@@ -855,11 +855,11 @@ func setupGatewayContainers(f *framework.Framework, nodes *v1.NodeList, gwContai
 	setupListenersOrDie := func(container, address string) {
 		cmd := []string{"docker", "exec", container, "bash", "-c", fmt.Sprintf("while true; do echo $(hostname) | nc -l -u %s %d; done &", address, updPort)}
 		_, err = runCommand(cmd...)
-		framework.ExpectNoError(err, "failed to setup listener on ", address, container)
+		framework.ExpectNoError(err, "failed to setup UDP listener for %s on %s", address, container)
 
 		cmd = []string{"docker", "exec", container, "bash", "-c", fmt.Sprintf("while true; do echo $(hostname) | nc -l %s %d; done &", address, tcpPort)}
 		_, err = runCommand(cmd...)
-		framework.ExpectNoError(err, "failed to setup listener on ", address, container)
+		framework.ExpectNoError(err, "failed to setup TCP listener for %s on %s", address, container)
 	}
 
 	// The target ips are addresses added to the lo of each container.
@@ -914,7 +914,7 @@ func reachPodFromContainer(targetAddress, targetPort, targetPodName, srcContaine
 	}
 
 	res, err := runCommand(dockerCmd...)
-	framework.ExpectNoError(err, "Failed to reach pod from external container ", targetAddress, srcContainer, protocol)
+	framework.ExpectNoError(err, "Failed to reach pod %s (%s) from external container %s", targetAddress, protocol, srcContainer)
 	framework.ExpectEqual(strings.Trim(res, "\n"), targetPodName)
 }
 
@@ -966,7 +966,7 @@ func hostNamesForContainers(containers []string) map[string]struct{} {
 
 func hostNameForContainer(container string) string {
 	res, err := runCommand("docker", "exec", container, "hostname")
-	framework.ExpectNoError(err, "failed to run hostname on", container)
+	framework.ExpectNoError(err, "failed to run hostname in %s", container)
 	framework.Logf("Hostname for %s is %s", container, res)
 	return strings.TrimSuffix(res, "\n")
 }
@@ -979,7 +979,7 @@ func pokeHostnameViaNC(podName, namespace, protocol, target string, port int) st
 		args = append(args, "bash", "-c", fmt.Sprintf("echo | nc -w 1 -u %s %d", target, port))
 	}
 	res, err := framework.RunKubectl(namespace, args...)
-	framework.ExpectNoError(err, "failed to reach ", target, protocol)
+	framework.ExpectNoError(err, "failed to reach %s (%s)", target, protocol)
 	hostname := strings.TrimSuffix(res, "\n")
 	return hostname
 }
@@ -1005,18 +1005,18 @@ bfd
 EOF
 `, a)}
 				_, err := runCommand(cmd...)
-				framework.ExpectNoError(err, "failed to setup listener on ", "", containerName)
+				framework.ExpectNoError(err, "failed to setup FRR peer %s in %s", a, containerName)
 			}
 		}
 		cmd := []string{"docker", "exec", containerName, "/usr/lib/frr/frrinit.sh", "start"}
 		_, err := runCommand(cmd...)
-		framework.ExpectNoError(err, "failed to start frr on", containerName)
+		framework.ExpectNoError(err, "failed to start frr in %s", containerName)
 	}
 }
 
 func isBFDPaired(container, peer string) bool {
 	res, err := runCommand("docker", "exec", container, "bash", "-c", fmt.Sprintf("vtysh -c \"show bfd peer %s\"", peer))
-	framework.ExpectNoError(err, "failed to check bfd status on", container)
+	framework.ExpectNoError(err, "failed to check bfd status in %s", container)
 	if strings.Contains(res, "Status: up") {
 		return true
 	}

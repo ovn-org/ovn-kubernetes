@@ -397,7 +397,7 @@ func getContainerAddressesForNetwork(container, network string) (string, string)
 // accept the namespace as a parameter.
 func deletePodSyncNS(clientSet kubernetes.Interface, namespace, podName string) {
 	err := clientSet.CoreV1().Pods(namespace).Delete(context.Background(), podName, metav1.DeleteOptions{})
-	framework.ExpectNoError(err, "Failed to get delete the pod in the default namespace", podName)
+	framework.ExpectNoError(err, "Failed to delete pod %s in the default namespace", podName)
 
 	gomega.Eventually(func() bool {
 		_, err := clientSet.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
