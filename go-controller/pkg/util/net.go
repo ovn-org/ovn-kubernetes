@@ -59,9 +59,6 @@ func GetPortAddresses(portName string, ovnNBClient goovn.Client) (net.HardwareAd
 		return nil, nil, nil
 	}
 
-	if len(addresses) < 2 {
-		return nil, nil, fmt.Errorf("error while obtaining addresses for %s: %v", portName, addresses)
-	}
 	mac, err := net.ParseMAC(addresses[0])
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse logical switch port %q MAC %q: %v", portName, addresses[0], err)
