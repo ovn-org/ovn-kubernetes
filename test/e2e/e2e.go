@@ -1429,7 +1429,7 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway and update validation", 
 			framework.Failf("failed to add the pod host route on the test container: %v", err)
 		}
 		_, err = runCommand("docker", "exec", gwContainerNameAlt1, "ping", "-c", "5", pingSrc)
-		framework.ExpectNoError(err, "Failed to ping ", pingSrc, gwContainerNameAlt1)
+		framework.ExpectNoError(err, "Failed to ping %s from container %s", pingSrc, gwContainerNameAlt1)
 
 		time.Sleep(time.Second * 15)
 		// Verify the gateway and remote address is reachable from the initial pod
@@ -1471,7 +1471,7 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway and update validation", 
 		}
 
 		_, err = runCommand("docker", "exec", gwContainerNameAlt2, "ping", "-c", "5", pingSrc)
-		framework.ExpectNoError(err, "Failed to ping ", pingSrc, gwContainerNameAlt1)
+		framework.ExpectNoError(err, "Failed to ping %s from container %s", pingSrc, gwContainerNameAlt1)
 
 		// Verify the updated gateway and remote address is reachable from the initial pod
 		ginkgo.By(fmt.Sprintf("Verifying connectivity without vxlan to the updated annotation and new external gateway %s and remote IP %s", exGWRemoteIpAlt2, exGWIpAlt2))
