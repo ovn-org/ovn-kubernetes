@@ -214,7 +214,9 @@ func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 		// this is to not to create circular import between metrics and util package
 		util.MetricOvnCliLatency = metricOvnCliLatency
 		prometheus.MustRegister(MetricResourceUpdateCount)
+		prometheus.MustRegister(MetricResourceAddLatency)
 		prometheus.MustRegister(MetricResourceUpdateLatency)
+		prometheus.MustRegister(MetricResourceDeleteLatency)
 		prometheus.MustRegister(MetricRequeueServiceCount)
 		prometheus.MustRegister(MetricSyncServiceCount)
 		prometheus.MustRegister(MetricSyncServiceLatency)
