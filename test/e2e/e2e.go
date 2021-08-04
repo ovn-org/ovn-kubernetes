@@ -46,12 +46,13 @@ const (
 
 type podCondition = func(pod *v1.Pod) (bool, error)
 
-func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host string, port, timeout int, podChan chan *v1.Pod, errChan chan error) {
+func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host string, port, tries, timeout int, podChan chan *v1.Pod, errChan chan error) {
 	contName := fmt.Sprintf("%s-container", podName)
 
 	command := []string{
 		"bash", "-c",
-		"set -xe; for i in {1..10}; do nc -vz -w " + strconv.Itoa(timeout) + " " + host + " " + strconv.Itoa(port) + "; sleep 2; done",
+		fmt.Sprintf("set -xe; for i in {1..%d}; do nc -vz -w %d %s %d ; sleep 2; done",
+			tries, timeout, host, port),
 	}
 
 	pod := &v1.Pod{
@@ -427,9 +428,28 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 		}
 	}
 
-	if err := e2epod.WaitForPodsReady(clientset, namespace, "ovnkube-node", 15); err != nil {
-		return fmt.Errorf("could not wait for ovnkube-node pod be be ready again: %w", err)
-	}
+	framework.Logf("waiting for node %s to have running ovnkube-node pod", nodeName)
+	wait.Poll(2*time.Second, 5*time.Minute, func() (bool, error) {
+		ovnKubeNodePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
+			LabelSelector: "name=ovnkube-node",
+			FieldSelector: "spec.nodeName=" + nodeName,
+		})
+		if err != nil {
+			return false, fmt.Errorf("could not get ovnkube-node pods: %w", err)
+		}
+
+		if len(ovnKubeNodePods.Items) <= 0 {
+			framework.Logf("Node %s has no ovnkube-node pod yet", nodeName)
+			return false, nil
+		}
+		for _, pod := range ovnKubeNodePods.Items {
+			if ready, err := testutils.PodRunningReady(&pod); !ready {
+				framework.Logf("%v", err)
+				return false, nil
+			}
+		}
+		return true, nil
+	})
 
 	return nil
 }
@@ -438,6 +458,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 	var svcname = "nettest"
 
 	f := framework.NewDefaultFramework(svcname)
+	var numMasters int
 
 	ginkgo.BeforeEach(func() {
 		// Assert basic external connectivity.
@@ -451,6 +472,12 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		if resp.StatusCode != http.StatusOK {
 			framework.Failf("Unexpected error code, expected 200, got, %v (%v)", resp.StatusCode, resp)
 		}
+
+		masterPods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.Background(), metav1.ListOptions{
+			LabelSelector: "name=ovnkube-master",
+		})
+		framework.ExpectNoError(err)
+		numMasters = len(masterPods.Items)
 	})
 
 	ginkgo.It("should provide Internet connection continuously when ovn-k8s pod is killed", func() {
@@ -459,30 +486,22 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		podChan, errChan := make(chan *v1.Pod), make(chan error)
 		go func() {
 			defer ginkgo.GinkgoRecover()
-			checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, podChan, errChan)
+			checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, 30, podChan, errChan)
 		}()
 
 		testPod := <-podChan
-		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
+		nodeName := testPod.Spec.NodeName
+		framework.Logf("Test pod running on %q", nodeName)
 
-		time.Sleep(5 * time.Second)
+		ginkgo.By("Deleting ovn-kube pod on node " + nodeName)
+		err := restartOVNKubeNodePod(f.ClientSet, "ovn-kubernetes", nodeName)
+		framework.ExpectNoError(err)
 
-		podClient := f.ClientSet.CoreV1().Pods("ovn-kubernetes")
-
-		podList, _ := podClient.List(context.Background(), metav1.ListOptions{})
-		podName := ""
-		for _, pod := range podList.Items {
-			if strings.HasPrefix(pod.Name, "ovnkube-node") && pod.Spec.NodeName == testPod.Spec.NodeName {
-				podName = pod.Name
-				break
-			}
-		}
-
-		err := podClient.Delete(context.Background(), podName, metav1.DeleteOptions{})
-		framework.ExpectNoError(err, "should delete ovnkube-node pod")
-		framework.Logf("Deleted ovnkube-node %q", podName)
-
+		ginkgo.By("Ensuring there were no connectivity errors")
 		framework.ExpectNoError(<-errChan)
+
+		err = waitClusterHealthy(f, numMasters)
+		framework.ExpectNoError(err, "one or more nodes failed to go back ready, schedulable, and untainted")
 	})
 
 	ginkgo.It("should provide Internet connection continuously when master is killed", func() {
@@ -491,7 +510,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		podChan, errChan := make(chan *v1.Pod), make(chan error)
 		go func() {
 			defer ginkgo.GinkgoRecover()
-			checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, podChan, errChan)
+			checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, 30, podChan, errChan)
 		}()
 		testPod := <-podChan
 		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
@@ -500,7 +519,11 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 
 		podClient := f.ClientSet.CoreV1().Pods("ovn-kubernetes")
 
-		podList, _ := podClient.List(context.Background(), metav1.ListOptions{})
+		podList, err := podClient.List(context.Background(), metav1.ListOptions{
+			LabelSelector: "name=ovnkube-master",
+		})
+		framework.ExpectNoError(err)
+
 		podName := ""
 		for _, pod := range podList.Items {
 			if strings.HasPrefix(pod.Name, "ovnkube-master") {
@@ -509,19 +532,24 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			}
 		}
 
-		err := podClient.Delete(context.Background(), podName, metav1.DeleteOptions{})
-		framework.ExpectNoError(err, "should delete ovnkube-master pod")
+		ginkgo.By("Deleting ovn-kube master pod " + podName)
+		e2epod.DeletePodWithWaitByName(f.ClientSet, podName, "ovn-kubernetes")
 		framework.Logf("Deleted ovnkube-master %q", podName)
 
+		ginkgo.By("Ensring there were no connectivity errors")
 		framework.ExpectNoError(<-errChan)
+
+		err = waitClusterHealthy(f, numMasters)
+		framework.ExpectNoError(err, "one or more nodes failed to go back ready, schedulable, and untainted")
 	})
+
 	ginkgo.It("should provide connection to external host by DNS name from a pod", func() {
 		ginkgo.By("Running container which tries to connect to www.google.com. in a loop")
 
 		podChan, errChan := make(chan *v1.Pod), make(chan error)
 		go func() {
 			defer ginkgo.GinkgoRecover()
-			checkContinuousConnectivity(f, "", "connectivity-test-continuous", "www.google.com.", 443, 30, podChan, errChan)
+			checkContinuousConnectivity(f, "", "connectivity-test-continuous", "www.google.com.", 443, 10, 30, podChan, errChan)
 		}()
 
 		testPod := <-podChan
@@ -552,6 +580,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 
 			// make sure node is not already tainted
 			e2enode.RemoveTaintOffNode(f.ClientSet, testNodeName, tooSmallMTUTaint)
+
 		})
 
 		ginkgo.AfterEach(func() {
@@ -565,6 +594,9 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			if err := restartOVNKubeNodePod(f.ClientSet, ovnNamespace, testNodeName); err != nil {
 				framework.Failf("could not restart ovnkube-node pod: %s", err)
 			}
+
+			err = waitClusterHealthy(f, numMasters)
+			framework.ExpectNoError(err, "one or more nodes failed to go back ready, schedulable, and untainted")
 		})
 
 		ginkgo.It("should taint the node with a too small MTU", func() {
@@ -2541,10 +2573,20 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 
 	// waitForPodToFinishFullRestart waits for a the pod to finish it's reset cycle and returns.
 	waitForPodToFinishFullRestart := func(f *framework.Framework, pod *v1.Pod) {
-		err := e2epod.WaitForPodCondition(f.ClientSet, pod.Namespace, pod.Name, "not ready", 5*time.Minute, testutils.PodNotReady)
-		if err != nil {
-			framework.Failf("pod %v is not arrived to not-ready state: %v", pod.Name, err)
-		}
+		podClient := f.ClientSet.CoreV1().Pods(pod.Namespace)
+		// loop until pod with new UID exists
+		err := wait.PollImmediate(retryInterval, 5*time.Minute, func() (bool, error) {
+			newPod, err := podClient.Get(context.Background(), pod.Name, metav1.GetOptions{})
+			if apierrors.IsNotFound(err) {
+				return true, nil
+			} else if err != nil {
+				return false, err
+			}
+
+			return pod.UID != newPod.UID, nil
+		})
+		framework.ExpectNoError(err)
+
 		// during this stage on the restarting process we can encounter "pod not found" errors.
 		// these types of errors are valid because the pod is restarting so there will be a period of time it is unavailable
 		// so we will use "WaitForPodConditionAllowNotFoundErrors" in order to handle properly those errors.
@@ -2552,13 +2594,17 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		if err != nil {
 			framework.Failf("pod %v is not arrived to running and ready state: %v", pod.Name, err)
 		}
-		return
 	}
 
 	deletePod := func(f *framework.Framework, namespace string, podName string) {
 		podClient := f.ClientSet.CoreV1().Pods(namespace)
-		err := podClient.Delete(context.Background(), podName, metav1.DeleteOptions{})
-		framework.ExpectNoError(err, "failed to delete ovnkube-node pod")
+		_, err := podClient.Get(context.Background(), podName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return
+		}
+
+		err = podClient.Delete(context.Background(), podName, metav1.DeleteOptions{})
+		framework.ExpectNoError(err, "failed to delete pod "+podName)
 	}
 
 	fileExistsOnPod := func(f *framework.Framework, namespace string, pod *v1.Pod, file string) bool {
@@ -2608,7 +2654,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 
 		go func() {
 			defer ginkgo.GinkgoRecover()
-			checkContinuousConnectivity(f, "", podName, getApiAddress(), 443, 30, podChan, errChan)
+			checkContinuousConnectivity(f, "", podName, getApiAddress(), 443, 10, 30, podChan, errChan)
 		}()
 		testPod := <-podChan
 
@@ -2767,7 +2813,6 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 			// Delete the db-pod in order to emulate the pod restart
 			dbPod.Status.Message = "check"
 			deletePod(f, ovnNs, dbPodName)
-			e2epod.WaitForPodTerminatedInNamespace(f.ClientSet, dbPodName, "", ovnNs)
 		}
 
 		framework.Logf("wait for all the Deployment to become ready again after pod deletion")
