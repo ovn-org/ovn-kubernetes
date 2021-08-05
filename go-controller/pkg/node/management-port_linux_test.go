@@ -261,7 +261,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 }
 
-func testManagementPortSmartNIC(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.NetNS,
+func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.NetNS,
 	configs []managementPortTestConfig) {
 	const (
 		nodeName   string = "node1"
@@ -338,7 +338,7 @@ func testManagementPortSmartNIC(ctx *cli.Context, fexec *ovntest.FakeExec, testN
 	Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 }
 
-func testManagementPortSmartNICHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.NetNS,
+func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.NetNS,
 	configs []managementPortTestConfig, expectedLRPMAC string) {
 	const (
 		nodeName   string = "node1"
@@ -537,7 +537,7 @@ var _ = Describe("Management Port Operations", func() {
 		})
 	})
 
-	Context("Management Port, ovnkube node mode smart-nic", func() {
+	Context("Management Port, ovnkube node mode dpu", func() {
 
 		BeforeEach(func() {
 			var err error
@@ -550,9 +550,9 @@ var _ = Describe("Management Port Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("sets up the management port for IPv4 smart-nic clusters", func() {
+		It("sets up the management port for IPv4 dpu clusters", func() {
 			app.Action = func(ctx *cli.Context) error {
-				testManagementPortSmartNIC(ctx, fexec, testNS,
+				testManagementPortDPU(ctx, fexec, testNS,
 					[]managementPortTestConfig{
 						{
 							family:   netlink.FAMILY_V4,
@@ -572,14 +572,14 @@ var _ = Describe("Management Port Operations", func() {
 				app.Name,
 				"--cluster-subnets=" + v4clusterCIDR,
 				"--k8s-service-cidr=" + v4serviceCIDR,
-				"--ovnkube-node-mode=" + types.NodeModeSmartNIC,
+				"--ovnkube-node-mode=" + types.NodeModeDPU,
 				"--ovnkube-node-mgmt-port-netdev=" + mgmtPortNetdev,
 			})
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 
-	Context("Management Port, ovnkube node mode smart-nic-host", func() {
+	Context("Management Port, ovnkube node mode dpu-host", func() {
 		BeforeEach(func() {
 			var err error
 			// Set up a fake k8sMgmt interface
@@ -591,9 +591,9 @@ var _ = Describe("Management Port Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("sets up the management port for IPv4 smart-nic-host clusters", func() {
+		It("sets up the management port for IPv4 dpu-host clusters", func() {
 			app.Action = func(ctx *cli.Context) error {
-				testManagementPortSmartNICHost(ctx, fexec, testNS,
+				testManagementPortDPUHost(ctx, fexec, testNS,
 					[]managementPortTestConfig{
 						{
 							family:   netlink.FAMILY_V4,
@@ -613,7 +613,7 @@ var _ = Describe("Management Port Operations", func() {
 				app.Name,
 				"--cluster-subnets=" + v4clusterCIDR,
 				"--k8s-service-cidr=" + v4serviceCIDR,
-				"--ovnkube-node-mode=" + types.NodeModeSmartNICHost,
+				"--ovnkube-node-mode=" + types.NodeModeDPUHost,
 				"--ovnkube-node-mgmt-port-netdev=" + mgmtPortNetdev,
 			})
 			Expect(err).NotTo(HaveOccurred())

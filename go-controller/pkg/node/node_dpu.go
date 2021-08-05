@@ -18,8 +18,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-//watchSmartNicPods watch updates for pod smart nic annotations
-func (n *OvnNode) watchSmartNicPods(isOvnUpEnabled bool) {
+//watchPodsDPU watch updates for pod dpu annotations
+func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) {
 	var retryPods sync.Map
 	// servedPods tracks the pods that got a VF
 	var servedPods sync.Map
@@ -35,7 +35,7 @@ func (n *OvnNode) watchSmartNicPods(isOvnUpEnabled bool) {
 				return
 			}
 			if util.PodScheduled(pod) {
-				// Is this pod created on same node where the smart NIC
+				// Is this pod created on same node as the DPU
 				if n.name != pod.Spec.NodeName {
 					return
 				}
@@ -118,22 +118,22 @@ func (n *OvnNode) watchSmartNicPods(isOvnUpEnabled bool) {
 
 // getVfRepName returns the VF's representor of the VF assigned to the pod
 func (n *OvnNode) getVfRepName(pod *kapi.Pod) (string, error) {
-	smartNicCD := util.SmartNICConnectionDetails{}
-	if err := smartNicCD.FromPodAnnotation(pod.Annotations); err != nil {
-		return "", fmt.Errorf("failed to get smart-nic annotation. %v", err)
+	dpuConnDetails := util.DPUConnectionDetails{}
+	if err := dpuConnDetails.FromPodAnnotation(pod.Annotations); err != nil {
+		return "", fmt.Errorf("failed to get dpu annotation. %v", err)
 	}
-	return util.GetSriovnetOps().GetVfRepresentorSmartNIC(smartNicCD.PfId, smartNicCD.VfId)
+	return util.GetSriovnetOps().GetVfRepresentorDPU(dpuConnDetails.PfId, dpuConnDetails.VfId)
 }
 
 // addRepPort adds the representor of the VF to the ovs bridge
 func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInterfaceInfo, podLister corev1listers.PodLister, kclient kubernetes.Interface) error {
 	klog.Infof("Adding VF representor %s", vfRepName)
-	smartNicCD := util.SmartNICConnectionDetails{}
-	if err := smartNicCD.FromPodAnnotation(pod.Annotations); err != nil {
-		return fmt.Errorf("failed to get smart-nic annotation. %v", err)
+	dpuConnDetails := util.DPUConnectionDetails{}
+	if err := dpuConnDetails.FromPodAnnotation(pod.Annotations); err != nil {
+		return fmt.Errorf("failed to get dpu annotation. %v", err)
 	}
 
-	err := cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, smartNicCD.SandboxId, podLister, kclient)
+	err := cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, dpuConnDetails.SandboxId, podLister, kclient)
 	if err != nil {
 		// Note(adrianc): we are lenient with cleanup in this method as pod is going to be retried anyway.
 		_ = n.delRepPort(vfRepName)
@@ -159,7 +159,7 @@ func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInt
 
 	// Update connection-status annotation
 	// TODO(adrianc): we should update Status in case of error as well
-	connStatus := util.SmartNICConnectionStatus{Status: util.SmartNicConnectionStatusReady, Reason: ""}
+	connStatus := util.DPUConnectionStatus{Status: util.DPUConnectionStatusReady, Reason: ""}
 	podAnnotator := kube.NewPodAnnotator(n.Kube, pod.Name, pod.Namespace)
 	err = connStatus.SetPodAnnotation(podAnnotator)
 	if err != nil {

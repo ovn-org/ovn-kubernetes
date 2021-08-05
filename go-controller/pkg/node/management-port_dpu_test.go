@@ -21,7 +21,7 @@ func genOVSAddMgmtPortCmd(nodeName string) string {
 		types.K8sMgmtIntfName, types.K8sMgmtIntfName, types.K8sPrefix+nodeName)
 }
 
-var _ = Describe("Mananagement port smart-nic tests", func() {
+var _ = Describe("Mananagement port DPU tests", func() {
 	origNetlinkOps := util.GetNetLinkOps()
 	var netlinkOpsMock *utilMocks.NetLinkOps
 	var execMock *ovntest.FakeExec
@@ -47,9 +47,9 @@ var _ = Describe("Mananagement port smart-nic tests", func() {
 		util.ResetRunner()
 	})
 
-	Context("Create Management port Smart-NIC", func() {
+	Context("Create Management port DPU", func() {
 		It("Fails if representor and ovn-k8s-mp0 netdev is not found", func() {
-			mgmtPortSnic := managementPortSmartNIC{
+			mgmtPortDpu := managementPortDPU{
 				vfRepName: "non-existent-netdev",
 			}
 			netlinkOpsMock.On("LinkByName", "non-existent-netdev").Return(
@@ -57,12 +57,12 @@ var _ = Describe("Mananagement port smart-nic tests", func() {
 			netlinkOpsMock.On("LinkByName", types.K8sMgmtIntfName).Return(
 				nil, fmt.Errorf("failed to get interface"))
 
-			_, err := mgmtPortSnic.Create(nodeAnnotatorMock, waiter)
+			_, err := mgmtPortDpu.Create(nodeAnnotatorMock, waiter)
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("Fails if set Name to ovn-k8s-mp0 fails", func() {
-			mgmtPortSnic := managementPortSmartNIC{
+			mgmtPortDpu := managementPortDPU{
 				vfRepName: "enp3s0f0v0",
 			}
 			linkMock := &mocks.Link{}
@@ -73,7 +73,7 @@ var _ = Describe("Mananagement port smart-nic tests", func() {
 			netlinkOpsMock.On("LinkSetDown", linkMock).Return(nil)
 			netlinkOpsMock.On("LinkSetName", linkMock, types.K8sMgmtIntfName).Return(fmt.Errorf("failed to set name"))
 
-			_, err := mgmtPortSnic.Create(nodeAnnotatorMock, waiter)
+			_, err := mgmtPortDpu.Create(nodeAnnotatorMock, waiter)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -82,7 +82,7 @@ var _ = Describe("Mananagement port smart-nic tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 			expectedMgmtPortMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipnet).IP)
 			config.Default.MTU = 1400
-			mgmtPortSnic := managementPortSmartNIC{
+			mgmtPortDpu := managementPortDPU{
 				nodeName:    "k8s-worker0",
 				hostSubnets: []*net.IPNet{ipnet},
 				vfRepName:   "enp3s0f0v0",
@@ -98,10 +98,10 @@ var _ = Describe("Mananagement port smart-nic tests", func() {
 			netlinkOpsMock.On("LinkSetMTU", linkMock, config.Default.MTU).Return(nil)
 			netlinkOpsMock.On("LinkSetUp", linkMock).Return(nil)
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSAddMgmtPortCmd(mgmtPortSnic.nodeName),
+				Cmd: genOVSAddMgmtPortCmd(mgmtPortDpu.nodeName),
 			})
 
-			mpcfg, err := mgmtPortSnic.Create(nodeAnnotatorMock, waiter)
+			mpcfg, err := mgmtPortDpu.Create(nodeAnnotatorMock, waiter)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(mpcfg.ifName).To(Equal(types.K8sMgmtIntfName))
@@ -113,7 +113,7 @@ var _ = Describe("Mananagement port smart-nic tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 			expectedMgmtPortMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipnet).IP)
 			config.Default.MTU = 1400
-			mgmtPortSnic := managementPortSmartNIC{
+			mgmtPortDpu := managementPortDPU{
 				nodeName:    "k8s-worker0",
 				hostSubnets: []*net.IPNet{ipnet},
 				vfRepName:   "enp3s0f0v0",
@@ -128,10 +128,10 @@ var _ = Describe("Mananagement port smart-nic tests", func() {
 				linkMock, nil)
 			netlinkOpsMock.On("LinkSetUp", linkMock).Return(nil)
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSAddMgmtPortCmd(mgmtPortSnic.nodeName),
+				Cmd: genOVSAddMgmtPortCmd(mgmtPortDpu.nodeName),
 			})
 
-			mpcfg, err := mgmtPortSnic.Create(nodeAnnotatorMock, waiter)
+			mpcfg, err := mgmtPortDpu.Create(nodeAnnotatorMock, waiter)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(mpcfg.ifName).To(Equal(types.K8sMgmtIntfName))
@@ -139,9 +139,9 @@ var _ = Describe("Mananagement port smart-nic tests", func() {
 		})
 	})
 
-	Context("Create Management port Smart-NIC host", func() {
+	Context("Create Management port DPU host", func() {
 		It("Fails if netdev does not exist", func() {
-			mgmtPortSnicHost := managementPortSmartNICHost{
+			mgmtPortDpuHost := managementPortDPUHost{
 				netdevName: "non-existent-netdev",
 			}
 			netlinkOpsMock.On("LinkByName", "non-existent-netdev").Return(
@@ -149,7 +149,7 @@ var _ = Describe("Mananagement port smart-nic tests", func() {
 			netlinkOpsMock.On("LinkByName", types.K8sMgmtIntfName).Return(
 				nil, fmt.Errorf("failed to get interface"))
 
-			_, err := mgmtPortSnicHost.Create(nil, waiter)
+			_, err := mgmtPortDpuHost.Create(nil, waiter)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -160,7 +160,7 @@ var _ = Describe("Mananagement port smart-nic tests", func() {
 			currentMgmtPortMac, err := net.ParseMAC("00:bb:cc:dd:ee:11")
 			Expect(err).ToNot(HaveOccurred())
 			config.Default.MTU = 1400
-			mgmtPortSnicHost := managementPortSmartNICHost{
+			mgmtPortDpuHost := managementPortDPUHost{
 				hostSubnets: []*net.IPNet{ipnet},
 				netdevName:  "enp3s0f0v0",
 			}
@@ -181,7 +181,7 @@ var _ = Describe("Mananagement port smart-nic tests", func() {
 			netlinkOpsMock.On("LinkByName", mock.Anything).Return(nil, fmt.Errorf(
 				"createPlatformManagementPort error"))
 
-			_, err = mgmtPortSnicHost.Create(nil, nil)
+			_, err = mgmtPortDpuHost.Create(nil, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("createPlatformManagementPort error"))
 		})
@@ -194,7 +194,7 @@ var _ = Describe("Mananagement port smart-nic tests", func() {
 			expectedMgmtPortMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipnet).IP)
 			config.Default.MTU = 1400
 			config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{CIDR: clusterCidr, HostSubnetLength: 8}}
-			mgmtPortSnicHost := managementPortSmartNICHost{
+			mgmtPortDpuHost := managementPortDPUHost{
 				hostSubnets: []*net.IPNet{ipnet},
 				netdevName:  "enp3s0f0v0",
 			}
@@ -213,7 +213,7 @@ var _ = Describe("Mananagement port smart-nic tests", func() {
 			netlinkOpsMock.On("LinkByName", mock.Anything).Return(nil, fmt.Errorf(
 				"createPlatformManagementPort error")).Once()
 
-			_, err = mgmtPortSnicHost.Create(nil, nil)
+			_, err = mgmtPortDpuHost.Create(nil, nil)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring(
 				"createPlatformManagementPort error"))

@@ -166,8 +166,8 @@ func (_m *SriovnetOps) GetVfRepresentor(uplink string, vfIndex int) (string, err
 	return r0, r1
 }
 
-// GetVfRepresentorSmartNIC provides a mock function with given fields: pfID, vfIndex
-func (_m *SriovnetOps) GetVfRepresentorSmartNIC(pfID string, vfIndex string) (string, error) {
+// GetVfRepresentorDPU provides a mock function with given fields: pfID, vfIndex
+func (_m *SriovnetOps) GetVfRepresentorDPU(pfID string, vfIndex string) (string, error) {
 	ret := _m.Called(pfID, vfIndex)
 
 	var r0 string

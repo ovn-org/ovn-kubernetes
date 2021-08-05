@@ -163,9 +163,9 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 	return gatewayNextHops, gatewayIntf, nil
 }
 
-// getSmartNICHostPrimaryIPAddresses returns the smart-nic host IP/Network based on K8s Node IP
-// and Smart-NIC IP subnet overriden by config config.Gateway.RouterSubnet
-func getSmartNICHostPrimaryIPAddresses(k8sNodeIP net.IP, ifAddrs []*net.IPNet) ([]*net.IPNet, error) {
+// getDPUHostPrimaryIPAddresses returns the DPU host IP/Network based on K8s Node IP
+// and DPU IP subnet overriden by config config.Gateway.RouterSubnet
+func getDPUHostPrimaryIPAddresses(k8sNodeIP net.IP, ifAddrs []*net.IPNet) ([]*net.IPNet, error) {
 	// Note(adrianc): No Dual-Stack support at this point as we rely on k8s node IP to derive gateway information
 	// for each node.
 	var gwIps []*net.IPNet
@@ -188,7 +188,7 @@ func getSmartNICHostPrimaryIPAddresses(k8sNodeIP net.IP, ifAddrs []*net.IPNet) (
 		addr.IP = k8sNodeIP
 		gwIps = append(gwIps, addr)
 	} else {
-		// Assume Host and Smart-NIC share the same subnet
+		// Assume Host and DPU share the same subnet
 		// in this case just update the matching IPNet with the Host's IP address
 		for _, addr := range ifAddrs {
 			if utilnet.IsIPv4CIDR(addr) != isIPv4 {
@@ -203,7 +203,7 @@ func getSmartNICHostPrimaryIPAddresses(k8sNodeIP net.IP, ifAddrs []*net.IPNet) (
 			gwIps = append(gwIps, &newAddr)
 		}
 		if len(gwIps) == 0 {
-			return nil, fmt.Errorf("could not find subnet on Smart-NIC matching node IP %s", k8sNodeIP)
+			return nil, fmt.Errorf("could not find subnet on DPU matching node IP %s", k8sNodeIP)
 		}
 	}
 	return gwIps, nil
@@ -290,10 +290,10 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 		return err
 	}
 
-	// For smart-NIC need to use the host IP addr which currently is assumed to be K8s Node cluster
+	// For DPU need to use the host IP addr which currently is assumed to be K8s Node cluster
 	// internal IP address.
-	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
-		ifAddrs, err = getSmartNICHostPrimaryIPAddresses(kubeNodeIP, ifAddrs)
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		ifAddrs, err = getDPUHostPrimaryIPAddresses(kubeNodeIP, ifAddrs)
 		if err != nil {
 			return err
 		}
@@ -383,12 +383,12 @@ func interfaceForEXGW(intfName string) string {
 	return intfName
 }
 
-func (n *OvnNode) initGatewaySmartNicHost(kubeNodeIP net.IP) error {
-	// A smart NIC host gateway is complementary to the shared gateway running
-	// on the Smart-NIC embedded CPU. it performs some initializations and
+func (n *OvnNode) initGatewayDPUHost(kubeNodeIP net.IP) error {
+	// A DPU host gateway is complementary to the shared gateway running
+	// on the DPU embedded CPU. it performs some initializations and
 	// watch on services for iptable rule updates and run a loadBalancerHealth checker
-	// Note: all K8s Node related annotations are handled from Smart-NIC.
-	klog.Info("Initializing Shared Gateway Functionality on Smart-NIC host")
+	// Note: all K8s Node related annotations are handled from DPU.
+	klog.Info("Initializing Shared Gateway Functionality on DPU host")
 	var err error
 
 	// Force gateway interface to be the interface associated with kubeNodeIP

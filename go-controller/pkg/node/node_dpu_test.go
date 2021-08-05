@@ -53,7 +53,7 @@ func newFakeKubeClientWithPod(pod *v1.Pod) *fake.Clientset {
 	return fake.NewSimpleClientset(&v1.PodList{Items: []v1.Pod{*pod}})
 }
 
-var _ = Describe("Node Smart NIC tests", func() {
+var _ = Describe("Node DPU tests", func() {
 	var sriovnetOpsMock utilMocks.SriovnetOps
 	var netlinkOpsMock utilMocks.NetLinkOps
 	var execMock *ovntest.FakeExec
@@ -102,17 +102,17 @@ var _ = Describe("Node Smart NIC tests", func() {
 	})
 
 	Context("getVfRepName", func() {
-		It("gets VF representor based on smartnic.connection-details Pod annotation", func() {
+		It("gets VF representor based on dpu.connection-details Pod annotation", func() {
 			podAnnot := map[string]string{
-				util.SmartNicConnectionDetailsAnnot: `{"pfId":"0","vfId":"9","sandboxId":"a8d09931"}`,
+				util.DPUConnectionDetailsAnnot: `{"pfId":"0","vfId":"9","sandboxId":"a8d09931"}`,
 			}
 			pod.Annotations = podAnnot
-			sriovnetOpsMock.On("GetVfRepresentorSmartNIC", "0", "9").Return("pf0vf9", nil)
+			sriovnetOpsMock.On("GetVfRepresentorDPU", "0", "9").Return("pf0vf9", nil)
 			rep, err := node.getVfRepName(&pod)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(rep).To(Equal("pf0vf9"))
 		})
-		It("Fails if smartnic.connection-details annotation is missing from Pod", func() {
+		It("Fails if dpu.connection-details annotation is missing from Pod", func() {
 			_, err := node.getVfRepName(&pod)
 			Expect(err).To(HaveOccurred())
 		})
@@ -131,24 +131,24 @@ var _ = Describe("Node Smart NIC tests", func() {
 				MTU:           1500,
 				Ingress:       -1,
 				Egress:        -1,
-				IsSmartNic:    true,
+				IsDPU:         true,
 				PodUID:        "a-pod",
 			}
 
 			// set pod annotations
 			podAnnot := map[string]string{
-				util.SmartNicConnectionDetailsAnnot: `{"pfId":"0","vfId":"9","sandboxId":"a8d09931"}`,
+				util.DPUConnectionDetailsAnnot: `{"pfId":"0","vfId":"9","sandboxId":"a8d09931"}`,
 			}
 			pod.Annotations = podAnnot
 		})
 
-		It("Fails if smartnic.connection-details Pod annotation is not present", func() {
+		It("Fails if dpu.connection-details Pod annotation is not present", func() {
 			pod.Annotations = map[string]string{}
 			fakeClient := newFakeKubeClientWithPod(&pod)
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
 			err := node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("failed to get smart-nic annotation"))
+			Expect(err.Error()).To(ContainSubstring("failed to get dpu annotation"))
 		})
 
 		It("Fails if configure OVS fails", func() {
@@ -269,8 +269,8 @@ var _ = Describe("Node Smart NIC tests", func() {
 				})
 			})
 
-			It("Sets smartnic-connection-status pod annotation on success", func() {
-				expectedAnnot := map[string]interface{}{util.SmartNicConnetionStatusAnnot: `{"Status":"Ready"}`}
+			It("Sets dpu.connection-status pod annotation on success", func() {
+				expectedAnnot := map[string]interface{}{util.DPUConnetionStatusAnnot: `{"Status":"Ready"}`}
 				netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
 				netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(nil)
 				netlinkOpsMock.On("LinkSetUp", vfLink).Return(nil)

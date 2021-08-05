@@ -38,10 +38,10 @@ func NewManagementPort(nodeName string, hostSubnets []*net.IPNet) ManagementPort
 	nodeName = strings.ToLower(nodeName)
 
 	switch config.OvnKubeNode.Mode {
-	case types.NodeModeSmartNIC:
-		return newManagementPortSmartNIC(nodeName, hostSubnets)
-	case types.NodeModeSmartNICHost:
-		return newManagementPortSmartNICHost(hostSubnets)
+	case types.NodeModeDPU:
+		return newManagementPortDPU(nodeName, hostSubnets)
+	case types.NodeModeDPUHost:
+		return newManagementPortDPUHost(hostSubnets)
 	default:
 		return newManagementPort(nodeName, hostSubnets)
 	}
