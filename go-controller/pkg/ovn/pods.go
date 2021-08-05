@@ -135,7 +135,9 @@ func (oc *Controller) runPodController(threadiness int, stopCh <-chan struct{}) 
 		// then rekick the worker after one second
 		go func() {
 			defer wg.Done()
-			wait.Until(oc.runPodWorker, time.Second, stopCh)
+			wait.Until(func() {
+				oc.runPodWorker(wg)
+			}, time.Second, stopCh)
 		}()
 	}
 
@@ -149,17 +151,19 @@ func (oc *Controller) runPodController(threadiness int, stopCh <-chan struct{}) 
 	wg.Wait()
 }
 
-func (oc *Controller) runPodWorker() {
+func (oc *Controller) runPodWorker(wg *sync.WaitGroup) {
 	// hot loop until we're told to stop.  processNextWorkItem will
 	// automatically wait until there's work available, so we don't worry
 	// about secondary waits
-	for oc.processNextPodWorkItem() {
+	for oc.processNextPodWorkItem(wg) {
 	}
 }
 
 // processNextPodWorkItem deals with one key off the queue.  It returns false
 // when it's time to quit.
-func (oc *Controller) processNextPodWorkItem() bool {
+func (oc *Controller) processNextPodWorkItem(wg *sync.WaitGroup) bool {
+	wg.Add(1)
+	defer wg.Done()
 	// pull the next work item from queue.  It should be a key we use to lookup
 	// something in a cache
 	key, quit := oc.podsQueue.Get()

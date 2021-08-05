@@ -114,6 +114,8 @@ func functionName() string {
 
 // Close connection to OVN
 func (mock *MockOVNClient) Close() error {
+	mock.mutex.Lock()
+	defer mock.mutex.Unlock()
 	mock.connected = false
 	return nil
 }
@@ -146,6 +148,11 @@ func incNumMockExecutions() {
 func (mock *MockOVNClient) ExecuteMockCommand(e *MockExecution) error {
 	mock.mutex.Lock()
 	defer mock.mutex.Unlock()
+
+	if !mock.connected {
+		return syscall.ENOTCONN
+	}
+
 	var (
 		cache MockObjectCacheByName
 		ok    bool
@@ -182,10 +189,6 @@ func (mock *MockOVNClient) ExecuteMockCommand(e *MockExecution) error {
 // Exec command, support multiple commands in one transaction.
 // executes commands ensuring their temporal consistency
 func (mock *MockOVNClient) Execute(cmds ...*goovn.OvnCommand) error {
-	if !mock.connected {
-		return syscall.ENOTCONN
-	}
-
 	errors := make([]error, 0, len(cmds))
 	for _, cmd := range cmds {
 		// go over each mock command and apply the
