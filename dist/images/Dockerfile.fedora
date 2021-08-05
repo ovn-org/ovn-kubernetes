@@ -56,7 +56,7 @@ COPY ./iptables-scripts/ip6tables-restore /usr/sbin/
 
 LABEL io.k8s.display-name="ovn-kubernetes" \
       io.k8s.description="This is a Kubernetes network plugin that provides an overlay network using OVN." \
-      maintainer="Phil Cameron <pcameron@redhat.com>"
+      maintainer="Tim Rozet <trozet@redhat.com>"
 
 WORKDIR /root
 ENTRYPOINT /root/ovnkube.sh
