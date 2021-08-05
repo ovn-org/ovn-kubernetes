@@ -12,6 +12,7 @@ import (
 	goovn "github.com/ebay/go-ovn"
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
+	"github.com/onsi/gomega/format"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
@@ -280,7 +281,16 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID, sct
 	})
 }
 
-func addNodeLogicalFlows(testData []libovsdb.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter, expectedNodeSwitch *nbdb.LogicalSwitch, fexec *ovntest.FakeExec, node *tNode, clusterCIDR string, enableIPv6 bool) []libovsdb.TestData {
+func addNodeLogicalFlows(
+	testData []libovsdb.TestData,
+	expectedOVNClusterRouter *nbdb.LogicalRouter,
+	expectedNodeSwitch *nbdb.LogicalSwitch,
+	expectedNodeGatewayRouter *nbdb.LogicalRouter,
+	fexec *ovntest.FakeExec,
+	node *tNode,
+	clusterCIDR string,
+	enableIPv6 bool,
+) []libovsdb.TestData {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --format=csv --columns=name,other-config find logical_switch",
 	})
@@ -339,10 +349,9 @@ func addNodeLogicalFlows(testData []libovsdb.TestData, expectedOVNClusterRouter 
 		fmt.Sprintf("ovn-nbctl --timeout=15 --columns _uuid --format=csv --no-headings find nat external_ip=\"%s\" type=snat logical_ip=\"%s\"", node.GatewayRouterIP, clusterCIDR),
 		"ovn-nbctl --timeout=15 --if-exists lr-nat-del " + node.GWRouter + " snat " + clusterCIDR,
 		"ovn-nbctl --timeout=15 lr-nat-add " + node.GWRouter + " snat " + node.GatewayRouterIP + " " + clusterCIDR,
-		"ovn-nbctl --timeout=15 --may-exist lr-lb-add " + node.GWRouter + " " + node.TCPLBUUID,
-		"ovn-nbctl --timeout=15 --may-exist lr-lb-add " + node.GWRouter + " " + node.UDPLBUUID,
-		"ovn-nbctl --timeout=15 --may-exist lr-lb-add " + node.GWRouter + " " + node.SCTPLBUUID,
 	})
+
+	expectedNodeGatewayRouter.LoadBalancer = append(expectedNodeGatewayRouter.LoadBalancer, []string{node.TCPLBUUID, node.UDPLBUUID, node.SCTPLBUUID}...)
 
 	testData = addPBRandNATRules(testData, expectedOVNClusterRouter, fexec, node.Name, node.GatewayRouterIP, node.NodeMgmtPortIP)
 
@@ -1182,6 +1191,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			f, err = factory.NewMasterWatchFactory(fakeClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+			GRName := types.GWRouterPrefix + node1.Name
+
 			expectedOVNClusterRouter := &nbdb.LogicalRouter{
 				UUID: types.OVNClusterRouter + "-UUID",
 				Name: types.OVNClusterRouter,
@@ -1189,6 +1200,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			expectedNodeSwitch := &nbdb.LogicalSwitch{
 				UUID: node1.Name + "-UUID",
 				Name: node1.Name,
+			}
+			expectedNodeGatewayRouter := &nbdb.LogicalRouter{
+				UUID: GRName + "-UUID",
+				Name: GRName,
 			}
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
@@ -1204,7 +1219,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedDatabaseState := []libovsdb.TestData{}
-			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, fexec, &node1, clusterCIDR, config.IPv6Mode)
+			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedNodeGatewayRouter, fexec, &node1, clusterCIDR, config.IPv6Mode)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
@@ -1245,8 +1260,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			}
 			enabledProtocols := []string{"tcp", "udp", "sctp"}
 
+			format.MaxLength = 1000000
+
 			gomega.Eventually(fexec.CalledMatchesExpected()).Should(gomega.BeTrue(), fexec.ErrorDesc)
-			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{nodeSubnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs}, enabledProtocols)
+			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedNodeGatewayRouter, node1.Name, clusterSubnets, []*net.IPNet{nodeSubnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs}, enabledProtocols)
 
 			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 

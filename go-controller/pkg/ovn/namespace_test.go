@@ -248,6 +248,9 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				_, err = config.InitConfig(ctx, fakeOvn.fakeExec, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				fakeOvn.fakeClient = fakeClient
+
+				GRName := ovntypes.GWRouterPrefix + node1.Name
+
 				expectedOVNClusterRouter := &nbdb.LogicalRouter{
 					UUID: ovntypes.OVNClusterRouter + "-UUID",
 					Name: ovntypes.OVNClusterRouter,
@@ -255,6 +258,10 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				expectedNodeSwitch := &nbdb.LogicalSwitch{
 					UUID: node1.Name + "-UUID",
 					Name: node1.Name,
+				}
+				expectedNodeGatewayRouter := &nbdb.LogicalRouter{
+					UUID: GRName + "-UUID",
+					Name: GRName,
 				}
 				fakeOvn.dbSetup = libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
@@ -279,7 +286,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				fexec := fakeOvn.fakeExec
 
 				expectedDatabaseState := []libovsdb.TestData{}
-				expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, fexec, &node1, clusterCIDR, config.IPv6Mode)
+				expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedNodeGatewayRouter, fexec, &node1, clusterCIDR, config.IPv6Mode)
 
 				fakeOvn.controller.joinSwIPManager, _ = initJoinLogicalSwitchIPManager()
 				_, err = fakeOvn.controller.joinSwIPManager.ensureJoinLRPIPs(ovntypes.OVNClusterRouter)
@@ -316,7 +323,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				}
 				enabledProtocols := []string{"tcp", "udp", "sctp"}
 
-				expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{nodeSubnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs}, enabledProtocols)
+				expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedNodeGatewayRouter, node1.Name, clusterSubnets, []*net.IPNet{nodeSubnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs}, enabledProtocols)
 
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				gomega.Eventually(fexec.CalledMatchesExpected()).Should(gomega.BeTrue(), fexec.ErrorDesc)

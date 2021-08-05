@@ -29,17 +29,25 @@ var (
 	enabledProtocols = []string{"tcp", "udp"}
 )
 
-func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter, expectedNodeSwitch *nbdb.LogicalSwitch, nodeName string, clusterIPSubnets []*net.IPNet, hostSubnets []*net.IPNet,
-	l3GatewayConfig *util.L3GatewayConfig, joinLRPIPs, defLRPIPs []*net.IPNet, enabledProtocols []string) []libovsdb.TestData {
+func generateGatewayInitExpectedNB(
+	testData []libovsdb.TestData,
+	expectedOVNClusterRouter *nbdb.LogicalRouter,
+	expectedNodeSwitch *nbdb.LogicalSwitch,
+	expectedNodeGatewayRouter *nbdb.LogicalRouter,
+	nodeName string,
+	clusterIPSubnets []*net.IPNet,
+	hostSubnets []*net.IPNet,
+	l3GatewayConfig *util.L3GatewayConfig,
+	joinLRPIPs, defLRPIPs []*net.IPNet,
+	enabledProtocols []string,
+) []libovsdb.TestData {
 
-	GRName := "GR_" + nodeName
+	GRName := types.GWRouterPrefix + nodeName
 	gwSwitchPort := types.JoinSwitchToGWRouterPrefix + GRName
 	gwRouterPort := types.GWRouterToJoinSwitchPrefix + GRName
-	externalSwitch := fmt.Sprintf("%s%s", types.ExternalSwitchPrefix, nodeName)
+	externalSwitch := types.ExternalSwitchPrefix + nodeName
 	externalRouterPort := types.GWRouterToExtSwitchPrefix + GRName
 	externalSwitchPortToRouter := types.EXTSwitchToGWRouterPrefix + GRName
-
-	grLoadBalancers := []string{}
 
 	for _, protocol := range enabledProtocols {
 		workerID := fmt.Sprintf("%s-%s", types.WorkerLBPrefix, strings.ToLower(protocol))
@@ -62,7 +70,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 			},
 			Protocol: []string{strings.ToLower(protocol)},
 		})
-		grLoadBalancers = append(grLoadBalancers, lbNamedUUID)
+		expectedNodeGatewayRouter.LoadBalancer = append(expectedNodeGatewayRouter.LoadBalancer, lbNamedUUID)
 	}
 
 	networks := []string{}
@@ -83,11 +91,12 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		MAC:      util.IPAddrToHWAddr(joinLRPIPs[0].IP).String(),
 		Networks: networks,
 	})
-	grStaticRoutes := []string{}
+
 	for i, subnet := range clusterIPSubnets {
 		nexthop, _ := util.MatchIPNetFamily(utilnet.IsIPv6CIDR(subnet), defLRPIPs)
 		grStaticRouteNamedUUID := fmt.Sprintf("static-subnet-route-%v-UUID", i)
-		grStaticRoutes = append(grStaticRoutes, grStaticRouteNamedUUID)
+		expectedNodeGatewayRouter.StaticRoutes = append(expectedNodeGatewayRouter.StaticRoutes, grStaticRouteNamedUUID)
+
 		testData = append(testData, &nbdb.LogicalRouterStaticRoute{
 			UUID:     grStaticRouteNamedUUID,
 			IPPrefix: subnet.String(),
@@ -115,7 +124,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		}
 
 		nexthopStaticRouteNamedUUID := fmt.Sprintf("static-nexthop-route-%v-UUID", i)
-		grStaticRoutes = append(grStaticRoutes, nexthopStaticRouteNamedUUID)
+		expectedNodeGatewayRouter.StaticRoutes = append(expectedNodeGatewayRouter.StaticRoutes, nexthopStaticRouteNamedUUID)
 
 		testData = append(testData, &nbdb.LogicalRouterStaticRoute{
 			UUID:       nexthopStaticRouteNamedUUID,
@@ -139,25 +148,20 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		},
 		Networks: networks,
 	})
-	testData = append(testData, &nbdb.LogicalRouter{
-		UUID:         GRName + "-UUID",
-		Name:         GRName,
-		LoadBalancer: grLoadBalancers,
-		Options: map[string]string{
-			"lb_force_snat_ip":              "router_ip",
-			"snat-ct-zone":                  "0",
-			"always_learn_from_arp_request": "false",
-			"dynamic_neigh_routers":         "true",
-			"chassis":                       l3GatewayConfig.ChassisID,
-		},
-		ExternalIDs: map[string]string{
-			"physical_ip":  physicalIPs[0],
-			"physical_ips": strings.Join(physicalIPs, ","),
-		},
-		Ports:        []string{gwRouterPort + "-UUID", externalRouterPort + "-UUID"},
-		StaticRoutes: grStaticRoutes,
-	})
+	expectedNodeGatewayRouter.Options = map[string]string{
+		"lb_force_snat_ip":              "router_ip",
+		"snat-ct-zone":                  "0",
+		"always_learn_from_arp_request": "false",
+		"dynamic_neigh_routers":         "true",
+		"chassis":                       l3GatewayConfig.ChassisID,
+	}
+	expectedNodeGatewayRouter.ExternalIDs = map[string]string{
+		"physical_ip":  physicalIPs[0],
+		"physical_ips": strings.Join(physicalIPs, ","),
+	}
+	expectedNodeGatewayRouter.Ports = []string{gwRouterPort + "-UUID", externalRouterPort + "-UUID"}
 
+	testData = append(testData, expectedNodeGatewayRouter)
 	testData = append(testData, expectedOVNClusterRouter)
 	testData = append(testData, expectedNodeSwitch)
 
@@ -256,6 +260,8 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		}
 		f, err := factory.NewMasterWatchFactory(fakeClient)
 
+		GRName := types.GWRouterPrefix + nodeName
+
 		expectedOVNClusterRouter := &nbdb.LogicalRouter{
 			UUID: types.OVNClusterRouter + "-UUID",
 			Name: types.OVNClusterRouter,
@@ -263,6 +269,10 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		expectedNodeSwitch := &nbdb.LogicalSwitch{
 			UUID: nodeName + "-UUID",
 			Name: nodeName,
+		}
+		expectedNodeGatewayRouter := &nbdb.LogicalRouter{
+			UUID: GRName + "-UUID",
+			Name: GRName,
 		}
 		dbSetup := libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
@@ -317,7 +327,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		testData := []libovsdb.TestData{}
-		expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, enabledProtocols)
+		expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, expectedNodeGatewayRouter, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, enabledProtocols)
 		gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
 	})
@@ -336,6 +346,8 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		}
 		f, err := factory.NewMasterWatchFactory(fakeClient)
 
+		GRName := types.GWRouterPrefix + nodeName
+
 		expectedOVNClusterRouter := &nbdb.LogicalRouter{
 			UUID: types.OVNClusterRouter + "-UUID",
 			Name: types.OVNClusterRouter,
@@ -343,6 +355,10 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		expectedNodeSwitch := &nbdb.LogicalSwitch{
 			UUID: nodeName + "-UUID",
 			Name: nodeName,
+		}
+		expectedNodeGatewayRouter := &nbdb.LogicalRouter{
+			UUID: GRName + "-UUID",
+			Name: GRName,
 		}
 		dbSetup := libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
@@ -398,7 +414,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		testData := []libovsdb.TestData{}
-		expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, enabledProtocols)
+		expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, expectedNodeGatewayRouter, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, enabledProtocols)
 		gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
 	})
@@ -417,6 +433,8 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		}
 		f, err := factory.NewMasterWatchFactory(fakeClient)
 
+		GRName := types.GWRouterPrefix + nodeName
+
 		expectedOVNClusterRouter := &nbdb.LogicalRouter{
 			UUID: types.OVNClusterRouter + "-UUID",
 			Name: types.OVNClusterRouter,
@@ -424,6 +442,10 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		expectedNodeSwitch := &nbdb.LogicalSwitch{
 			UUID: nodeName + "-UUID",
 			Name: nodeName,
+		}
+		expectedNodeGatewayRouter := &nbdb.LogicalRouter{
+			UUID: GRName + "-UUID",
+			Name: GRName,
 		}
 		dbSetup := libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
@@ -482,7 +504,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		testData := []libovsdb.TestData{}
-		expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, enabledProtocols)
+		expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, expectedNodeGatewayRouter, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, enabledProtocols)
 		gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
 	})
@@ -666,6 +688,8 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		}
 		f, err := factory.NewMasterWatchFactory(fakeClient)
 
+		GRName := types.GWRouterPrefix + nodeName
+
 		expectedOVNClusterRouter := &nbdb.LogicalRouter{
 			UUID: types.OVNClusterRouter + "-UUID",
 			Name: types.OVNClusterRouter,
@@ -673,6 +697,10 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		expectedNodeSwitch := &nbdb.LogicalSwitch{
 			UUID: nodeName + "-UUID",
 			Name: nodeName,
+		}
+		expectedNodeGatewayRouter := &nbdb.LogicalRouter{
+			UUID: GRName + "-UUID",
+			Name: GRName,
 		}
 		dbSetup := libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
@@ -726,7 +754,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		testData := []libovsdb.TestData{}
-		expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, enabledProtocols)
+		expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, expectedNodeGatewayRouter, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, enabledProtocols)
 		gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
 
