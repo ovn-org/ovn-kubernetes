@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +21,7 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -278,7 +280,7 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID, sct
 	})
 }
 
-func addNodeLogicalFlows(fexec *ovntest.FakeExec, node *tNode, clusterCIDR string, enableIPv6 bool) {
+func addNodeLogicalFlows(testData []libovsdb.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter, fexec *ovntest.FakeExec, node *tNode, clusterCIDR string, enableIPv6 bool) []libovsdb.TestData {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --format=csv --columns=name,other-config find logical_switch",
 	})
@@ -324,12 +326,13 @@ func addNodeLogicalFlows(fexec *ovntest.FakeExec, node *tNode, clusterCIDR strin
 		"ovn-nbctl --timeout=15 --may-exist lr-lb-add " + node.GWRouter + " " + node.SCTPLBUUID,
 	})
 
-	addPBRandNATRules(fexec, node.Name, node.NodeSubnet, node.GatewayRouterIP, node.NodeMgmtPortIP, node.NodeMgmtPortMAC)
+	testData = addPBRandNATRules(testData, expectedOVNClusterRouter, fexec, node.Name, node.GatewayRouterIP, node.NodeMgmtPortIP)
 
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 get logical_router " + types.GWRouterPrefix + node.Name + " external_ids:physical_ips",
 		Output: "169.254.33.2",
 	})
+	return testData
 }
 
 func populatePortAddresses(nodeName, lsp, mac, ips string, ovnClient goovn.Client) {
@@ -825,15 +828,29 @@ subnet=%s
 })
 */
 
-func addPBRandNATRules(fexec *ovntest.FakeExec, nodeName, nodeSubnet, nodeIP, mgmtPortIP, mgmtPortMAC string) {
+func addPBRandNATRules(testData []libovsdb.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter, fexec *ovntest.FakeExec, nodeName, nodeIP, mgmtPortIP string) []libovsdb.TestData {
 	matchStr1 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == %s /* %s */`, nodeName, nodeIP, nodeName)
 	matchStr2 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == 9.9.9.9 /* %s */`, nodeName, nodeName)
+	intPriority, _ := strconv.Atoi(types.NodeSubnetPolicyPriority)
+	testData = append(testData, &nbdb.LogicalRouterPolicy{
+		UUID:     "policy-based-route-1-UUID",
+		Action:   nbdb.LogicalRouterPolicyActionReroute,
+		Match:    matchStr1,
+		Nexthops: []string{mgmtPortIP},
+		Priority: intPriority,
+	})
+	testData = append(testData, &nbdb.LogicalRouterPolicy{
+		UUID:     "policy-based-route-2-UUID",
+		Action:   nbdb.LogicalRouterPolicyActionReroute,
+		Match:    matchStr2,
+		Nexthops: []string{mgmtPortIP},
+		Priority: intPriority,
+	})
+	expectedOVNClusterRouter.Policies = append(expectedOVNClusterRouter.Policies, []string{"policy-based-route-1-UUID", "policy-based-route-2-UUID"}...)
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,match,nexthops find logical_router_policy priority=" + types.NodeSubnetPolicyPriority,
-		"ovn-nbctl --timeout=15 --may-exist lr-policy-add " + types.OVNClusterRouter + " " + types.NodeSubnetPolicyPriority + " " + matchStr1 + " reroute " + mgmtPortIP,
-		"ovn-nbctl --timeout=15 --may-exist lr-policy-add " + types.OVNClusterRouter + " " + types.NodeSubnetPolicyPriority + " " + matchStr2 + " reroute " + mgmtPortIP,
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=match find logical_router_policy",
 	})
+	return testData
 }
 
 var _ = ginkgo.Describe("Gateway Init Operations", func() {
@@ -1144,21 +1161,20 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			addNodeLogicalFlows(fexec, &node1, clusterCIDR, config.IPv6Mode)
-
 			f, err = factory.NewMasterWatchFactory(fakeClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+			expectedOVNClusterRouter := &nbdb.LogicalRouter{
+				UUID: types.OVNClusterRouter + "-UUID",
+				Name: types.OVNClusterRouter,
+			}
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
 						UUID: types.OVNJoinSwitch + "-UUID",
 						Name: types.OVNJoinSwitch,
 					},
-					&nbdb.LogicalRouter{
-						UUID: types.OVNClusterRouter + "-UUID",
-						Name: types.OVNClusterRouter,
-					},
+					expectedOVNClusterRouter,
 					&nbdb.LogicalSwitch{
 						UUID: node1.Name + "-UUID",
 						Name: node1.Name,
@@ -1167,6 +1183,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			}
 			libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			expectedDatabaseState := []libovsdb.TestData{}
+			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, fexec, &node1, clusterCIDR, config.IPv6Mode)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
@@ -1207,7 +1226,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			}
 			enabledProtocols := []string{"tcp", "udp", "sctp"}
 
-			expectedDatabaseState := generateGatewayInitExpectedNB(node1.Name, clusterSubnets, []*net.IPNet{nodeSubnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs}, enabledProtocols)
+			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, node1.Name, clusterSubnets, []*net.IPNet{nodeSubnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs}, enabledProtocols)
+
 			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 			gomega.Eventually(fexec.CalledMatchesExpected()).Should(gomega.BeTrue(), fexec.ErrorDesc)
 			return nil

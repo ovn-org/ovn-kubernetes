@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -276,7 +277,9 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 				fexec := fakeOvn.fakeExec
 
-				addNodeLogicalFlows(fexec, &node1, clusterCIDR, config.IPv6Mode)
+				expectedDatabaseState := []libovsdb.TestData{}
+				expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, fexec, &node1, clusterCIDR, config.IPv6Mode)
+
 				fakeOvn.controller.joinSwIPManager, _ = initJoinLogicalSwitchIPManager()
 				_, err = fakeOvn.controller.joinSwIPManager.ensureJoinLRPIPs(ovntypes.OVNClusterRouter)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -312,7 +315,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				}
 				enabledProtocols := []string{"tcp", "udp", "sctp"}
 
-				expectedDatabaseState := generateGatewayInitExpectedNB(node1.Name, clusterSubnets, []*net.IPNet{nodeSubnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs}, enabledProtocols)
+				expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, node1.Name, clusterSubnets, []*net.IPNet{nodeSubnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs}, enabledProtocols)
 
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				gomega.Eventually(fexec.CalledMatchesExpected()).Should(gomega.BeTrue(), fexec.ErrorDesc)
