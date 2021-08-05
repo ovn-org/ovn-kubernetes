@@ -320,8 +320,8 @@ type OvnAuthConfig struct {
 	CACert         string `gcfg:"client-cacert"`
 	CertCommonName string `gcfg:"cert-common-name"`
 	Scheme         OvnDBScheme
-
-	northbound bool
+	ElectionTimer  uint `gcfg:"election-timer"`
+	northbound     bool
 
 	exec kexec.Interface
 }
@@ -875,6 +875,11 @@ var OvnNBFlags = []cli.Flag{
 			"SAN extension, this parameter should match one of the SAN fields.",
 		Destination: &cliConfig.OvnNorth.CertCommonName,
 	},
+	&cli.UintFlag{
+		Name:        "nb-raft-election-timer",
+		Usage:       "The desired northbound database election timer.",
+		Destination: &cliConfig.OvnNorth.ElectionTimer,
+	},
 }
 
 //OvnSBFlags capture OVN southbound database options
@@ -911,6 +916,11 @@ var OvnSBFlags = []cli.Flag{
 			"should match the DNS(hostname) of the server. In case the certificate has a " +
 			"SAN extension, this parameter should match one of the SAN fields.",
 		Destination: &cliConfig.OvnSouth.CertCommonName,
+	},
+	&cli.UintFlag{
+		Name:        "sb-raft-election-timer",
+		Usage:       "The desired southbound database election timer.",
+		Destination: &cliConfig.OvnSouth.ElectionTimer,
 	},
 }
 
