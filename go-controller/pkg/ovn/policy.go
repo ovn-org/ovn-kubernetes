@@ -1309,11 +1309,14 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 				// when the namespace labels no longer apply
 				// remove the namespaces pods from the address_set
 				namespace := obj.(*kapi.Namespace)
+				klog.Infof("###### [%s] no longer matches", namespace.Name)
 				pods, _ := oc.watchFactory.GetPods(namespace.Name)
+				klog.Infof("###### [%s] got pods %v", namespace.Name, pods)
 
 				for _, pod := range pods {
 					oc.handlePeerPodSelectorDelete(gp, pod)
 				}
+				klog.Infof("###### [%s] pods %v deleted", namespace.Name, pods)
 
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {

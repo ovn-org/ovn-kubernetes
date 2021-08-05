@@ -153,6 +153,7 @@ func (gp *gressPolicy) deletePeerPod(pod *v1.Pod) error {
 	if err != nil {
 		return err
 	}
+	klog.Infof("####### [%s/%s] deleting pod %s/%s ips %v", gp.peerAddressSet.GetName(), pod.Namespace, pod.Name, ips)
 	return gp.peerAddressSet.DeleteIPs(ips)
 }
 

@@ -1492,10 +1492,14 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.InitAndRunPodController(&wg)
 				fakeOvn.controller.WatchNetworkPolicy()
 
+				ginkgo.GinkgoT().Logf("####### 1")
 				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName1)
+				ginkgo.GinkgoT().Logf("####### 2")
 				eventuallyExpectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
+				ginkgo.GinkgoT().Logf("####### 3")
 				fakeOvn.asf.EventuallyExpectAddressSetWithIPs(namespaceName2, []string{nPodTest.podIP})
 
+				ginkgo.GinkgoT().Logf("####### 4")
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
@@ -1505,10 +1509,13 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 
+				ginkgo.GinkgoT().Logf("####### 5")
 				// After updating the namespace all address sets should be empty
 				eventuallyExpectEmptyAddressSets(fakeOvn, networkPolicy)
 
+				ginkgo.GinkgoT().Logf("####### 6")
 				fakeOvn.asf.EventuallyExpectEmptyAddressSet(namespaceName1)
+				ginkgo.GinkgoT().Logf("####### 7")
 
 				return nil
 			}
