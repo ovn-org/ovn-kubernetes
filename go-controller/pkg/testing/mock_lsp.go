@@ -15,6 +15,7 @@ const (
 	LogicalSwitchPortExternalId       string = "LSPExternalIdsField"
 	LogicalSwitchPortPortSecurity     string = "LSPPortSecurityField"
 	FakeUUID                                 = "8a86f6d8-7972-4253-b0bd-ddbef66e9303"
+	mockLSKey                         string = "mock-ls"
 )
 
 // Get logical switch port by name
@@ -44,13 +45,14 @@ func (mock *MockOVNClient) LSPGet(lsp string) (*goovn.LogicalSwitchPort, error) 
 // Add logical port PORT on SWITCH
 func (mock *MockOVNClient) LSPAdd(ls string, lsp string) (*goovn.OvnCommand, error) {
 	klog.V(5).Infof("Adding lsp %s to switch %s", lsp, ls)
+	options := map[interface{}]interface{}{mockLSKey: ls}
 	return &goovn.OvnCommand{
 		Exe: &MockExecution{
 			handler: mock,
 			op:      OpAdd,
 			table:   LogicalSwitchPortType,
 			objName: lsp,
-			obj:     &goovn.LogicalSwitchPort{Name: lsp, UUID: FakeUUID},
+			obj:     &goovn.LogicalSwitchPort{Name: lsp, UUID: FakeUUID, Options: options},
 		},
 	}, nil
 }
@@ -102,7 +104,42 @@ func (mock *MockOVNClient) LSPSetPortSecurity(lsp string, security ...string) (*
 
 // Get all lport by lswitch
 func (mock *MockOVNClient) LSPList(ls string) ([]*goovn.LogicalSwitchPort, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+	mock.mutex.Lock()
+	defer mock.mutex.Unlock()
+	var lspCache MockObjectCacheByName
+	var ok bool
+
+	if _, err := mock.lsGetInternal(ls); err != nil {
+		return nil, err
+	}
+
+	if lspCache, ok = mock.cache[LogicalSwitchPortType]; !ok {
+		klog.V(5).Infof("Cache doesn't have any object of type %s", LogicalSwitchPortType)
+		return nil, goovn.ErrorSchema
+	}
+	var ports []*goovn.LogicalSwitchPort
+	for _, lsp := range lspCache {
+		port, err := copystructure.Copy(lsp)
+		if err != nil {
+			panic(err) // should never happen
+		}
+		lspRet, ok := port.(*goovn.LogicalSwitchPort)
+		if !ok {
+			return nil, fmt.Errorf("invalid object type assertion for %s", LogicalSwitchPortType)
+		}
+		portLS, ok := lspRet.Options[mockLSKey]
+		if !ok {
+			continue
+		}
+		if portLSRet, ok := portLS.(string); !ok {
+			continue
+		} else if ls != portLSRet {
+			continue
+		}
+		ports = append(ports, lspRet)
+	}
+
+	return ports, nil
 }
 
 // Set dhcp4_options uuid on lsp

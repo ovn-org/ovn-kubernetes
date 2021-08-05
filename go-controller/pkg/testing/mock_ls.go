@@ -13,10 +13,9 @@ const (
 )
 
 // TODO: implement mock methods as we keep adding unit-tests
-// Get logical switch by name
-func (mock *MockOVNClient) LSGet(ls string) ([]*goovn.LogicalSwitch, error) {
-	mock.mutex.Lock()
-	defer mock.mutex.Unlock()
+
+// Get logical switch by name without locking (internal)
+func (mock *MockOVNClient) lsGetInternal(ls string) ([]*goovn.LogicalSwitch, error) {
 	var lsCache MockObjectCacheByName
 	var ok bool
 	if lsCache, ok = mock.cache[LogicalSwitchType]; !ok {
@@ -37,6 +36,14 @@ func (mock *MockOVNClient) LSGet(ls string) ([]*goovn.LogicalSwitch, error) {
 	}
 	return nil, fmt.Errorf("invalid object type assertion for %s", LogicalSwitchType)
 
+}
+
+// Get logical switch by name with locking
+func (mock *MockOVNClient) LSGet(ls string) ([]*goovn.LogicalSwitch, error) {
+	mock.mutex.Lock()
+	defer mock.mutex.Unlock()
+
+	return mock.lsGetInternal(ls)
 }
 
 // Create ls named SWITCH
