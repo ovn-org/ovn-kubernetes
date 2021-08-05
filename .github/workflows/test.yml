@@ -333,7 +333,7 @@ jobs:
         make -C test install-kind
     - name: Run Tests
       run: |
-        make -C test ${{ matrix.target.shard }}
+        make -C test ${{ matrix.target }}
     - name: Upload Junit Reports
       if: always()
       uses: actions/upload-artifact@v2
