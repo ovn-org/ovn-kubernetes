@@ -469,33 +469,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - shard: shard-conformance
-            hybrid-overlay: false
-        ha:
-          - enabled: "true"
-            name: "HA"
-        gateway-mode: [local]
-        ipfamily:
-          - ip: ipv4
-            name: "IPv4"
-            ipv4: true
-            ipv6: false
-          - ip: ipv6
-            name: "IPv6"
-            ipv4: false
-            ipv6: true
-          - ip: dualstack
-            name: "Dualstack"
-            ipv4: true
-            ipv6: true
+        target: ["shard-conformance"]
+        ha: ["HA"]
+        gateway-mode: ["local"]
+        ipfamily: ["ipv4", "ipv6", "dualstack"]
     needs: [ build-pr ]
     env:
-      JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}"
-      OVN_HA: "${{ matrix.ha.enabled }}"
-      KIND_IPV4_SUPPORT: "${{ matrix.ipfamily.ipv4 }}"
-      KIND_IPV6_SUPPORT: "${{ matrix.ipfamily.ipv6 }}"
-      OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target.hybrid-overlay }}"
+      JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}"
+      OVN_HA: "${{ matrix.ha == 'HA' }}"
+      KIND_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
+      KIND_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
+      OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target == 'control-plane' }}"
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
     steps:
 
@@ -533,7 +517,7 @@ jobs:
           make -C test install-kind
       - name: Run Tests
         run: |
-          make -C test ${{ matrix.target.shard }}
+          make -C test ${{ matrix.target }}
       - name: Upload Junit Reports
         if: always()
         uses: actions/upload-artifact@v2
