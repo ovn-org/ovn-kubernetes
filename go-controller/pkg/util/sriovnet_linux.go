@@ -55,7 +55,7 @@ func (defaultSriovnetOps) GetPfPciFromVfPci(vfPciAddress string) (string, error)
 }
 
 func (defaultSriovnetOps) GetVfRepresentorDPU(pfID, vfIndex string) (string, error) {
-	return sriovnet.GetVfRepresentorSmartNIC(pfID, vfIndex)
+	return sriovnet.GetVfRepresentorDPU(pfID, vfIndex)
 }
 
 func (defaultSriovnetOps) GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error) {

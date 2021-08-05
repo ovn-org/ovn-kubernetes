@@ -1,4 +1,4 @@
-# github.com/Mellanox/sriovnet v1.0.3-0.20210630121212-0453bd4b7fbc
+# github.com/Mellanox/sriovnet v1.0.3
 github.com/Mellanox/sriovnet
 github.com/Mellanox/sriovnet/pkg/utils/filesystem
 github.com/Mellanox/sriovnet/pkg/utils/netlinkops
