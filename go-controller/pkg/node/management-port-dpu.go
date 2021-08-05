@@ -14,22 +14,22 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-type managementPortSmartNIC struct {
+type managementPortDPU struct {
 	nodeName    string
 	hostSubnets []*net.IPNet
 	vfRepName   string
 }
 
-// newManagementPortSmartNIC creates a new managementPortSmartNIC
-func newManagementPortSmartNIC(nodeName string, hostSubnets []*net.IPNet) ManagementPort {
-	return &managementPortSmartNIC{
+// newManagementPortDPU creates a new managementPortDPU
+func newManagementPortDPU(nodeName string, hostSubnets []*net.IPNet) ManagementPort {
+	return &managementPortDPU{
 		nodeName:    nodeName,
 		hostSubnets: hostSubnets,
 		vfRepName:   config.OvnKubeNode.MgmtPortNetdev,
 	}
 }
 
-func (mp *managementPortSmartNIC) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
+func (mp *managementPortDPU) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
 	// Get management port representor name
 	link, err := util.GetNetLinkOps().LinkByName(mp.vfRepName)
 	if err != nil {
@@ -41,7 +41,7 @@ func (mp *managementPortSmartNIC) Create(nodeAnnotator kube.Annotator, waiter *s
 	}
 
 	// configure management port: rename, set MTU and set link up and connect representor port to br-int
-	klog.Infof("Create management port smart-nic: %s", link.Attrs().Name)
+	klog.Infof("Create management port dpu: %s", link.Attrs().Name)
 	setName := link.Attrs().Name != types.K8sMgmtIntfName
 	setMTU := link.Attrs().MTU != config.Default.MTU
 
@@ -95,24 +95,24 @@ func (mp *managementPortSmartNIC) Create(nodeAnnotator kube.Annotator, waiter *s
 	return mpcfg, nil
 }
 
-func (mpo *managementPortSmartNIC) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
+func (mpo *managementPortDPU) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
 	// Note(adrianc): For now, no checks are needed. This can be revisited in the future.
 }
 
-type managementPortSmartNICHost struct {
+type managementPortDPUHost struct {
 	hostSubnets []*net.IPNet
 	netdevName  string
 }
 
-// newManagementPortSmartNICHost creates a new managementPortSmartNICHost
-func newManagementPortSmartNICHost(hostSubnets []*net.IPNet) ManagementPort {
-	return &managementPortSmartNICHost{
+// newManagementPortDPUHost creates a new managementPortDPUHost
+func newManagementPortDPUHost(hostSubnets []*net.IPNet) ManagementPort {
+	return &managementPortDPUHost{
 		hostSubnets: hostSubnets,
 		netdevName:  config.OvnKubeNode.MgmtPortNetdev,
 	}
 }
 
-func (mp *managementPortSmartNICHost) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
+func (mp *managementPortDPUHost) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
 	// get Netdev that is used for management port.
 	link, err := util.GetNetLinkOps().LinkByName(mp.netdevName)
 	if err != nil {
@@ -126,7 +126,7 @@ func (mp *managementPortSmartNICHost) Create(nodeAnnotator kube.Annotator, waite
 
 	// configure management port: name, mac, MTU, iptables
 	// mac addr, derived from the first entry in host subnets using the .2 address as mac with a fixed prefix.
-	klog.Infof("Setup management port smart-nic host: %s", link.Attrs().Name)
+	klog.Infof("Setup management port dpu host: %s", link.Attrs().Name)
 	mgmtPortMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(mp.hostSubnets[0]).IP)
 	setMac := link.Attrs().HardwareAddr.String() != mgmtPortMac.String()
 	setName := link.Attrs().Name != types.K8sMgmtIntfName
@@ -178,7 +178,7 @@ func (mp *managementPortSmartNICHost) Create(nodeAnnotator kube.Annotator, waite
 	return cfg, nil
 }
 
-func (mp *managementPortSmartNICHost) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
+func (mp *managementPortDPUHost) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
 	go wait.Until(
 		func() {
 			checkManagementPortHealth(cfg)

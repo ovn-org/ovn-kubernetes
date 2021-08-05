@@ -355,8 +355,8 @@ func BridgeToNic(bridge string) error {
 	return nil
 }
 
-// GetSmartNICHostInterface returns the host representor interface attached to bridge
-func GetSmartNICHostInterface(bridgeName string) (string, error) {
+// GetDPUHostInterface returns the host representor interface attached to bridge
+func GetDPUHostInterface(bridgeName string) (string, error) {
 	portsToInterfaces, err := getBridgePortsInterfaces(bridgeName)
 	if err != nil {
 		return "", err
@@ -379,5 +379,5 @@ func GetSmartNICHostInterface(bridgeName string) (string, error) {
 		}
 	}
 	// No host interface found in provided bridge
-	return "", fmt.Errorf("smart-nic host interface was not found for bridge %q", bridgeName)
+	return "", fmt.Errorf("dpu host interface was not found for bridge %q", bridgeName)
 }

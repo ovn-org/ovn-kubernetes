@@ -111,9 +111,9 @@ const (
 	SFlowAgent = "ovn-k8s-mp0"
 
 	// OVNKube-Node Node types
-	NodeModeFull         = "full"
-	NodeModeSmartNIC     = "smart-nic"
-	NodeModeSmartNICHost = "smart-nic-host"
+	NodeModeFull    = "full"
+	NodeModeDPU     = "dpu"
+	NodeModeDPUHost = "dpu-host"
 
 	// Geneve header length for IPv4 (https://github.com/openshift/cluster-network-operator/pull/720#issuecomment-664020823)
 	GeneveHeaderLengthIPv4 = 58

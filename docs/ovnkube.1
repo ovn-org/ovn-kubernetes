@@ -68,7 +68,7 @@ The v6 join subnet to use for assigning join switch IPv6 addresses\fR.
 .TP
 \fB\--gateway-router-subnet\fR string
 The Subnet to be used for the gateway router external port (shared mode only). auto-detected if not given.
-Must match the the kube node IP address. Currently valid for Smart-NICs only.\fR.
+Must match the the kube node IP address. Currently valid for DPUs only.\fR.
 .TP
 \fB\--config-file\fR string
 Configuration file path.
@@ -140,7 +140,7 @@ CA certificate that the client should use for talking to the OVN database.  Leav
 The Common Name of the certificate used for TLS server certificate verification.
 .TP
 \fB\--ovnkube-node-mode\fR string
-ovnkube-node operating mode full(default), smart-nic, smart-nic-host (default: "full")
+ovnkube-node operating mode full(default), dpu, dpu-host (default: "full")
 .TP
 \fB\--help\fR, \fB\-h\fR
 Show help.

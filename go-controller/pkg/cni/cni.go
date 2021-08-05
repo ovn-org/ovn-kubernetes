@@ -101,16 +101,16 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 	kubecli := &kube.Kube{KClient: kclient}
 	annotCondFn := isOvnReady
 
-	if pr.IsSmartNIC {
-		// Add Smart-NIC connection-details annotation so ovnkube-node running on smart-NIC
+	if pr.IsDPU {
+		// Add DPU connection-details annotation so ovnkube-node running on DPU
 		// performs the needed network plumbing.
-		if err := pr.addSmartNICConnectionDetailsAnnot(kubecli); err != nil {
+		if err := pr.addDPUConnectionDetailsAnnot(kubecli); err != nil {
 			return nil, err
 		}
-		annotCondFn = isSmartNICReady
+		annotCondFn = isDPUReady
 	}
 	// Get the IP address and MAC address of the pod
-	// for Smart-Nic, ensure connection-details is present
+	// for DPU, ensure connection-details is present
 	podUID, annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, namespace, podName, annotCondFn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
@@ -119,7 +119,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 		return nil, err
 	}
 
-	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.IsSmartNIC, pr.PodUID)
+	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.IsDPU, pr.PodUID)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 }
 
 func (pr *PodRequest) cmdDel() error {
-	if pr.IsSmartNIC {
+	if pr.IsDPU {
 		// nothing to do
 		return nil
 	}

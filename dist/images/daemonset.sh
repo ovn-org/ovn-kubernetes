@@ -355,8 +355,8 @@ ovn_image=${image} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
 
-# ovnkube node for smart-nic host daemonset
-# TODO: We probably dont need all of these when running on smart-nic host
+# ovnkube node for dpu-host daemonset
+# TODO: we probably dont need all of these when running on dpu host
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
   kind=${KIND} \
@@ -381,8 +381,8 @@ ovn_image=${image} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
-  ovnkube_app_name=ovnkube-node-smart-nic-host \
-  j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node-smart-nic-host.yaml
+  ovnkube_app_name=ovnkube-node-dpu-host \
+  j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node-dpu-host.yaml
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \

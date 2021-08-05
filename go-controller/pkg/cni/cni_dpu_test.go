@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-var _ = Describe("cnismartnic tests", func() {
+var _ = Describe("cni_dpu tests", func() {
 	var fakeKubeInterface kubeMocks.KubeInterface
 	var fakeSriovnetOps utilMocks.SriovnetOps
 	var pr PodRequest
@@ -33,34 +33,34 @@ var _ = Describe("cnismartnic tests", func() {
 				NetConf:  cnitypes.NetConf{},
 				DeviceID: "",
 			},
-			timestamp:  time.Time{},
-			IsSmartNIC: true,
+			timestamp: time.Time{},
+			IsDPU:     true,
 		}
 	})
-	Context("addSmartNICConnectionDetailsAnnot", func() {
-		It("Sets smartnic.connection-details pod annotation", func() {
+	Context("addDPUConnectionDetailsAnnot", func() {
+		It("Sets dpu.connection-details pod annotation", func() {
 			pr.CNIConf.DeviceID = "0000:05:00.4"
 			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("0000:05:00.0", nil)
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(2, nil)
-			smartNicCd := util.SmartNICConnectionDetails{
+			dpuCd := util.DPUConnectionDetails{
 				PfId:      "0",
 				VfId:      "2",
 				SandboxId: pr.SandboxID,
 			}
-			expectedAnnot, err := smartNicCd.AsAnnotation()
+			expectedAnnot, err := dpuCd.AsAnnotation()
 			annnot := make(map[string]interface{}, len(expectedAnnot))
 			for key, val := range expectedAnnot {
 				annnot[key] = val
 			}
 			Expect(err).ToNot(HaveOccurred())
 			fakeKubeInterface.On("SetAnnotationsOnPod", pr.PodNamespace, pr.PodName, annnot).Return(nil)
-			err = pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface)
+			err = pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface)
 			Expect(err).ToNot(HaveOccurred())
 
 		})
 
 		It("Fails if DeviceID is not present in CNI config", func() {
-			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface)
+			err := pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -68,7 +68,7 @@ var _ = Describe("cnismartnic tests", func() {
 			pr.CNIConf.DeviceID = "0000:05:00.4"
 			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return(
 				"", fmt.Errorf("failed to get PF address"))
-			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface)
+			err := pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -77,7 +77,7 @@ var _ = Describe("cnismartnic tests", func() {
 			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("0000:05:00.0", nil)
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(
 				-1, fmt.Errorf("failed to get VF index"))
-			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface)
+			err := pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -85,7 +85,7 @@ var _ = Describe("cnismartnic tests", func() {
 			pr.CNIConf.DeviceID = "0000:05:00.4"
 			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("05:00.0", nil)
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(2, nil)
-			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface)
+			err := pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -94,7 +94,7 @@ var _ = Describe("cnismartnic tests", func() {
 			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("0000:05:00.0", nil)
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(2, nil)
 			fakeKubeInterface.On("SetAnnotationsOnPod", mock.Anything, mock.Anything, mock.Anything).Return(fmt.Errorf("failed to set annotation"))
-			err := pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface)
+			err := pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to set annotation"))
 		})

@@ -14,7 +14,7 @@ type SriovnetOps interface {
 	GetVfIndexByPciAddress(vfPciAddress string) (int, error)
 	GetVfRepresentor(uplink string, vfIndex int) (string, error)
 	GetPfPciFromVfPci(vfPciAddress string) (string, error)
-	GetVfRepresentorSmartNIC(pfID, vfIndex string) (string, error)
+	GetVfRepresentorDPU(pfID, vfIndex string) (string, error)
 	GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error)
 	GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error)
 }
@@ -54,7 +54,7 @@ func (defaultSriovnetOps) GetPfPciFromVfPci(vfPciAddress string) (string, error)
 	return sriovnet.GetPfPciFromVfPci(vfPciAddress)
 }
 
-func (defaultSriovnetOps) GetVfRepresentorSmartNIC(pfID, vfIndex string) (string, error) {
+func (defaultSriovnetOps) GetVfRepresentorDPU(pfID, vfIndex string) (string, error) {
 	return sriovnet.GetVfRepresentorSmartNIC(pfID, vfIndex)
 }
 

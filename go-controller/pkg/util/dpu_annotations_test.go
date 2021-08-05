@@ -10,20 +10,20 @@ import (
 	"github.com/onsi/gomega"
 )
 
-var _ = Describe("Smart-NIC Annotations test", func() {
-	Describe("SmartNICConnectionDetails", func() {
-		var cd SmartNICConnectionDetails
+var _ = Describe("DPU Annotations test", func() {
+	Describe("DPUConnectionDetails", func() {
+		var cd DPUConnectionDetails
 		var annot map[string]string
 		t := GinkgoT()
 
 		BeforeEach(func() {
-			cd = SmartNICConnectionDetails{}
+			cd = DPUConnectionDetails{}
 			annot = make(map[string]string)
 		})
 
 		Context("FromPodAnnotation()", func() {
 			It("Is populated correctly from annotations", func() {
-				annot[SmartNicConnectionDetailsAnnot] = `{"pfId": "0", "vfId": "3", "sandboxId": "35b82dbe2c3976"}`
+				annot[DPUConnectionDetailsAnnot] = `{"pfId": "0", "vfId": "3", "sandboxId": "35b82dbe2c3976"}`
 				err := cd.FromPodAnnotation(annot)
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Expect(cd.PfId).To(gomega.Equal("0"))
@@ -51,7 +51,7 @@ var _ = Describe("Smart-NIC Annotations test", func() {
 				cd.SandboxId = "35b82dbe2c3976"
 				expected, err := json.Marshal(cd)
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				fakeAnnotator.On("Set", SmartNicConnectionDetailsAnnot, string(expected)).Return(nil)
+				fakeAnnotator.On("Set", DPUConnectionDetailsAnnot, string(expected)).Return(nil)
 				err = cd.SetPodAnnotation(fakeAnnotator)
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				fakeAnnotator.AssertExpectations(t)
@@ -61,39 +61,39 @@ var _ = Describe("Smart-NIC Annotations test", func() {
 				cd.PfId = "1"
 				cd.VfId = "4"
 				cd.SandboxId = "35b82dbe2c3976"
-				fakeAnnotator.On("Set", SmartNicConnectionDetailsAnnot, mock.Anything).Return(fmt.Errorf("error"))
+				fakeAnnotator.On("Set", DPUConnectionDetailsAnnot, mock.Anything).Return(fmt.Errorf("error"))
 				err := cd.SetPodAnnotation(fakeAnnotator)
 				gomega.Expect(err).To(gomega.HaveOccurred())
 			})
 		})
 
 		Context("AsAnnotation()", func() {
-			It("Should return annotation which allows to create a correct SmartNICConnectionDetails object", func() {
+			It("Should return annotation which allows to create a correct DPUConnectionDetails object", func() {
 				cd.PfId = "1"
 				cd.VfId = "4"
 				cd.SandboxId = "35b82dbe2c3976"
 				podAnnot, err := cd.AsAnnotation()
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				newCd := SmartNICConnectionDetails{}
+				newCd := DPUConnectionDetails{}
 				err = newCd.FromPodAnnotation(podAnnot)
 				gomega.Expect(cd).To(gomega.Equal(newCd))
 			})
 		})
 	})
 
-	Describe("SmartNICConnectionStatus", func() {
-		var cs SmartNICConnectionStatus
+	Describe("DPUConnectionStatus", func() {
+		var cs DPUConnectionStatus
 		var annot map[string]string
 		t := GinkgoT()
 
 		BeforeEach(func() {
-			cs = SmartNICConnectionStatus{}
+			cs = DPUConnectionStatus{}
 			annot = make(map[string]string)
 		})
 
 		Context("FromPodAnnotation()", func() {
 			It("Is populated correctly from annotations", func() {
-				annot[SmartNicConnetionStatusAnnot] = `{"status": "Ready"}`
+				annot[DPUConnetionStatusAnnot] = `{"status": "Ready"}`
 				err := cs.FromPodAnnotation(annot)
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Expect(cs.Status).To(gomega.Equal("Ready"))
@@ -101,7 +101,7 @@ var _ = Describe("Smart-NIC Annotations test", func() {
 			})
 
 			It("Is populated with optional Reason from annotations", func() {
-				annot[SmartNicConnetionStatusAnnot] = `{"status": "Error", "reason": "bad-things-happened"}`
+				annot[DPUConnetionStatusAnnot] = `{"status": "Error", "reason": "bad-things-happened"}`
 				err := cs.FromPodAnnotation(annot)
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Expect(cs.Status).To(gomega.Equal("Error"))
@@ -125,7 +125,7 @@ var _ = Describe("Smart-NIC Annotations test", func() {
 				cs.Status = "Ready"
 				expected, err := json.Marshal(cs)
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				fakeAnnotator.On("Set", SmartNicConnetionStatusAnnot, string(expected)).Return(nil)
+				fakeAnnotator.On("Set", DPUConnetionStatusAnnot, string(expected)).Return(nil)
 				err = cs.SetPodAnnotation(fakeAnnotator)
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				fakeAnnotator.AssertExpectations(t)
@@ -133,18 +133,18 @@ var _ = Describe("Smart-NIC Annotations test", func() {
 
 			It("Fails if pod annotator fails", func() {
 				cs.Status = "Ready"
-				fakeAnnotator.On("Set", SmartNicConnetionStatusAnnot, mock.Anything).Return(fmt.Errorf("error"))
+				fakeAnnotator.On("Set", DPUConnetionStatusAnnot, mock.Anything).Return(fmt.Errorf("error"))
 				err := cs.SetPodAnnotation(fakeAnnotator)
 				gomega.Expect(err).To(gomega.HaveOccurred())
 			})
 		})
 
 		Context("AsAnnotation()", func() {
-			It("Should return annotation which allows to create a correct SmartNICConnectionDetails object", func() {
+			It("Should return annotation which allows to create a correct DPUConnectionDetails object", func() {
 				cs.Status = "Ready"
 				podAnnot, err := cs.AsAnnotation()
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				newCs := SmartNICConnectionStatus{}
+				newCs := DPUConnectionStatus{}
 				err = newCs.FromPodAnnotation(podAnnot)
 				gomega.Expect(cs).To(gomega.Equal(newCs))
 			})
