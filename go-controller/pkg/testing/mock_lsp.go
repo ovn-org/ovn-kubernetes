@@ -184,7 +184,7 @@ func (mock *MockOVNClient) LSPGetOptions(lsp string) (map[string]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	if lspRet != nil {
+	if lspRet == nil {
 		return nil, fmt.Errorf("no lsp found with name: %s", lsp)
 	}
 	opts := make(map[string]string)
@@ -222,7 +222,7 @@ func (mock *MockOVNClient) LSPGetDynamicAddresses(lsp string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if lspRet != nil {
+	if lspRet == nil {
 		return "", fmt.Errorf("no lsp found with name: %s", lsp)
 	}
 	return lspRet.DynamicAddresses, nil
@@ -250,7 +250,7 @@ func (mock *MockOVNClient) LSPGetExternalIds(lsp string) (map[string]string, err
 	if err != nil {
 		return nil, err
 	}
-	if lspRet != nil {
+	if lspRet == nil {
 		return nil, fmt.Errorf("no lsp found with name: %s", lsp)
 	}
 	extIds := make(map[string]string)
