@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -216,7 +219,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				nbctlOnDelCommands []struct {
 					command string
 					res     string
-				}) {
+				},
+				libovsdbInput []libovsdb.TestData,
+				libovsdbOutput []libovsdb.TestData,
+			) {
 				app.Action = func(ctx *cli.Context) error {
 
 					namespaceT := *newNamespace("namespace1")
@@ -236,7 +242,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					)
 
 					t.baseCmds(fExec)
-					fakeOvn.start(ctx,
+
+					fakeOvn.startWithDBSetup(ctx,
+						libovsdbtest.TestSetup{
+							NBData: libovsdbInput,
+						},
 						&v1.NamespaceList{
 							Items: []v1.Namespace{
 								namespaceT,
@@ -272,6 +282,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Delete(context.TODO(), t.podName, *metav1.NewDeleteOptions(0))
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(libovsdbOutput))
 					return nil
 				}
 				err := app.Run([]string{app.Name})
@@ -287,11 +298,9 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				}{
 					{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1", "\n"},
 					{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.2", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.1 bfd!=[]", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.2 bfd!=[]", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=9.0.0.1", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=9.0.0.2", "\n"},
 				},
+				[]libovsdb.TestData{},
+				[]libovsdb.TestData{},
 			),
 			table.Entry("BFD", true, []string{
 				"ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
@@ -303,11 +312,39 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				}{
 					{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1", "\n"},
 					{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.2", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.1 bfd!=[]", "foouid\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.2 bfd!=[]", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=9.0.0.2", "bfduuid\n"},
-					{"ovn-nbctl --timeout=15 --if-exists destroy BFD bfduuid", ""},
-				}),
+				},
+				[]libovsdb.TestData{
+					&nbdb.LogicalRouterStaticRoute{
+						UUID:       "static-route-UUID",
+						BFD:        []string{"foo-UUID"},
+						OutputPort: []string{"rtoe-GR_node1"},
+						Nexthop:    "9.0.0.1",
+					},
+					&nbdb.BFD{
+						UUID:        "bfd-UUID",
+						DstIP:       "9.0.0.2",
+						LogicalPort: "rtoe-GR_node1",
+					},
+					&nbdb.BFD{
+						UUID:        "foo-UUID",
+						DstIP:       "9.0.0.1",
+						LogicalPort: "rtoe-GR_node1",
+					},
+				},
+				[]libovsdb.TestData{
+					&nbdb.LogicalRouterStaticRoute{
+						UUID:       "static-route-UUID",
+						BFD:        []string{"foo-UUID"},
+						OutputPort: []string{"rtoe-GR_node1"},
+						Nexthop:    "9.0.0.1",
+					},
+					&nbdb.BFD{
+						UUID:        "foo-UUID",
+						DstIP:       "9.0.0.1",
+						LogicalPort: "rtoe-GR_node1",
+					},
+				},
+			),
 		)
 
 		table.DescribeTable("reconciles deleting a exgw namespace with active pod",
@@ -316,7 +353,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				nbctlOnDelCommands []struct {
 					command string
 					res     string
-				}) {
+				},
+				libovsdbInput []libovsdb.TestData,
+				libovsdbOutput []libovsdb.TestData,
+			) {
 				app.Action = func(ctx *cli.Context) error {
 
 					namespaceT := *newNamespace("namespace1")
@@ -336,7 +376,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					)
 
 					t.baseCmds(fExec)
-					fakeOvn.start(ctx,
+					fakeOvn.startWithDBSetup(ctx,
+						libovsdbtest.TestSetup{
+							NBData: libovsdbInput,
+						},
 						&v1.NamespaceList{
 							Items: []v1.Namespace{
 								namespaceT,
@@ -373,6 +416,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), t.namespace, *metav1.NewDeleteOptions(0))
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+					gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(libovsdbOutput))
 					return nil
 				}
 
@@ -388,11 +432,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			}{
 				{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1", "\n"},
 				{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.2", "\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.1 bfd!=[]", "\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.2 bfd!=[]", "\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=9.0.0.1", "\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=9.0.0.2", "\n"},
-			}),
+			},
+				[]libovsdb.TestData{},
+				[]libovsdb.TestData{},
+			),
 			table.Entry("BFD", true, []string{
 				"ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
 				"ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2 rtoe-GR_node1",
@@ -402,11 +445,39 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			}{
 				{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1", "\n"},
 				{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.2", "\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.1 bfd!=[]", "foouid\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.2 bfd!=[]", "\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=9.0.0.2", "bfduuid\n"},
-				{"ovn-nbctl --timeout=15 --if-exists destroy BFD bfduuid", ""},
-			}))
+			},
+				[]libovsdb.TestData{
+					&nbdb.LogicalRouterStaticRoute{
+						UUID:       "static-route-UUID",
+						BFD:        []string{"foo-UUID"},
+						OutputPort: []string{"rtoe-GR_node1"},
+						Nexthop:    "9.0.0.1",
+					},
+					&nbdb.BFD{
+						UUID:        "bfd-UUID",
+						DstIP:       "9.0.0.2",
+						LogicalPort: "rtoe-GR_node1",
+					},
+					&nbdb.BFD{
+						UUID:        "foo-UUID",
+						DstIP:       "9.0.0.1",
+						LogicalPort: "rtoe-GR_node1",
+					},
+				},
+				[]libovsdb.TestData{
+					&nbdb.LogicalRouterStaticRoute{
+						UUID:       "static-route-UUID",
+						BFD:        []string{"foo-UUID"},
+						OutputPort: []string{"rtoe-GR_node1"},
+						Nexthop:    "9.0.0.1",
+					},
+					&nbdb.BFD{
+						UUID:        "foo-UUID",
+						DstIP:       "9.0.0.1",
+						LogicalPort: "rtoe-GR_node1",
+					},
+				},
+			))
 	})
 
 	ginkgo.Context("on setting pod gateway annotations", func() {
@@ -659,8 +730,6 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					res     string
 				}{
 					{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.1 bfd!=[]", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=9.0.0.1", "\n"},
 				}),
 			table.Entry("BFD", true, "ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
 				[]struct {
@@ -668,8 +737,6 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					res     string
 				}{
 					{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.1 bfd!=[]", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=9.0.0.1", "\n"},
 				}))
 	})
 	ginkgo.Context("on using bfd", func() {
@@ -803,7 +870,16 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				)
 
 				t.baseCmds(fExec)
-				fakeOvn.start(ctx,
+				fakeOvn.startWithDBSetup(ctx,
+					libovsdbtest.TestSetup{
+						NBData: []libovsdbtest.TestData{
+							&nbdb.BFD{
+								UUID:        "bfd-UUID",
+								LogicalPort: "rtoe-GR_node1",
+								DstIP:       "9.0.0.1",
+							},
+						},
+					},
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
@@ -824,22 +900,6 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					Cmd:    "ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1",
 					Output: "\n",
 				})
-
-				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.1 bfd!=[]",
-					Output: "\n",
-				})
-
-				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=9.0.0.1",
-					Output: "bfduid\n",
-				})
-
-				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --if-exists destroy BFD bfduid",
-					Output: "bfduid\n",
-				})
-
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
 					Output: "\n",
@@ -852,6 +912,9 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+
+				expectedDatabaseState := []libovsdb.TestData{}
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
 			}
 
