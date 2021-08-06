@@ -575,9 +575,14 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 					Match:    matchstr6,
 					Priority: nodeSubnetPriority,
 				},
+				&nbdb.LogicalRouterStaticRoute{
+					Nexthop: "100.64.0.1",
+					UUID:    "static-route-UUID",
+				},
 				&nbdb.LogicalRouter{
-					Name:     types.OVNClusterRouter,
-					Policies: []string{"match1-UUID", "match2-UUID", "match3-UUID", "match4-UUID", "match5-UUID", "match6-UUID"},
+					Name:         types.OVNClusterRouter,
+					Policies:     []string{"match1-UUID", "match2-UUID", "match3-UUID", "match4-UUID", "match5-UUID", "match6-UUID"},
+					StaticRoutes: []string{"static-route-UUID"},
 				},
 			},
 		}
@@ -590,21 +595,13 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			record.NewFakeRecorder(0))
 
 		const (
-			nodeRouteUUID string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
-			tcpLBUUID     string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
+			tcpLBUUID string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
 		)
 
 		fexec := ovntest.NewFakeExec()
 		err = util.SetExec(fexec)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"100.64.0.1\"",
-			Output: nodeRouteUUID,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + nodeRouteUUID,
-		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_test-node",
 			"ovn-nbctl --timeout=15 --if-exist lr-del GR_test-node",
@@ -727,9 +724,18 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 					Match:    matchstr6,
 					Priority: nodeSubnetPriority,
 				},
+				&nbdb.LogicalRouterStaticRoute{
+					Nexthop: "100.64.0.1",
+					UUID:    "static-route-1-UUID",
+				},
+				&nbdb.LogicalRouterStaticRoute{
+					Nexthop: "fd98::1",
+					UUID:    "static-route-2-UUID",
+				},
 				&nbdb.LogicalRouter{
-					Name:     types.OVNClusterRouter,
-					Policies: []string{"match1-UUID", "match2-UUID", "match3-UUID", "match4-UUID", "match5-UUID", "match6-UUID"},
+					Name:         types.OVNClusterRouter,
+					Policies:     []string{"match1-UUID", "match2-UUID", "match3-UUID", "match4-UUID", "match5-UUID", "match6-UUID"},
+					StaticRoutes: []string{"static-route-1-UUID", "static-route-2-UUID"},
 				},
 			},
 		}
@@ -742,8 +748,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			record.NewFakeRecorder(0))
 
 		const (
-			v4RouteUUID    string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
-			v6RouteUUID    string = "0cac12cf-4682-3e0f-b028-5ea2e0001962"
 			v4mgtRouteUUID string = "0cac12cf-3e0f-4682-b028-5ea2e0001963"
 			v6mgtRouteUUID string = "0cac12cf-4682-3e0f-b028-5ea2e0001963"
 			tcpLBUUID      string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
@@ -752,21 +756,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		fexec := ovntest.NewFakeExec()
 		err = util.SetExec(fexec)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"100.64.0.1\"",
-			Output: v4RouteUUID,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + v4RouteUUID,
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"fd98::1\"",
-			Output: v6RouteUUID,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + v6RouteUUID,
-		})
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_test-node",
