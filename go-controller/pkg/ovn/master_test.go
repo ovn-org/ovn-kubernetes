@@ -68,41 +68,13 @@ type tNode struct {
 	DnatSnatIP           string
 }
 
-func cleanupPBRandNATRules(fexec *ovntest.FakeExec, nodeName string, nodeSubnet []*net.IPNet) {
-	mgmtPortIP := util.GetNodeManagementIfAddr(nodeSubnet[0]).IP.String()
+func cleanupPBRandNATRules(fexec *ovntest.FakeExec, nodeName string) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_ip find nat logical_port=" + types.K8sPrefix + nodeName,
 		Output: "External_IP",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --if-exists lr-nat-del " + types.OVNClusterRouter + " dnat_and_snat External_IP",
-	})
-	matchstr1 := fmt.Sprintf("ip4.src == %s && ip4.dst == nodePhysicalIP /* %s */", mgmtPortIP, nodeName)
-	matchstr2 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == nodePhysicalIP /* %s */`, nodeName, nodeName)
-	matchstr3 := fmt.Sprintf("ip4.src == source && ip4.dst == nodePhysicalIP")
-	matchstr4 := fmt.Sprintf(`ip4.src == NO DELETE  && ip4.dst != 10.244.0.0/16 /* inter-%s-no */`, nodeName)
-	matchstr5 := fmt.Sprintf(`ip4.src == 10.244.0.2  && ip4.dst != 10.244.0.0/16 /* inter-%s */`, nodeName)
-	matchstr6 := fmt.Sprintf("ip4.src == NO DELETE && ip4.dst == nodePhysicalIP /* %s-no */", nodeName)
-
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=match find logical_router_policy",
-		Output: fmt.Sprintf(`%s
-
-%s
-
-%s
-
-%s
-
-%s
-
-%s
-`, matchstr1, matchstr2, matchstr3, matchstr4, matchstr5, matchstr6),
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 lr-policy-del " + types.OVNClusterRouter + " " + types.MGMTPortPolicyPriority + " " + matchstr1,
-		"ovn-nbctl --timeout=15 lr-policy-del " + types.OVNClusterRouter + " " + types.NodeSubnetPolicyPriority + " " + matchstr2,
-		"ovn-nbctl --timeout=15 lr-policy-del " + types.OVNClusterRouter + " " + types.InterNodePolicyPriority + " " + matchstr5,
 	})
 }
 
@@ -141,7 +113,7 @@ func cleanupGateway(fexec *ovntest.FakeExec, nodeName string, nodeSubnet string,
 		Output: "",
 	})
 
-	cleanupPBRandNATRules(fexec, nodeName, []*net.IPNet{ovntest.MustParseIPNet(nodeSubnet)})
+	cleanupPBRandNATRules(fexec, nodeName)
 }
 
 func defaultFakeExec(nodeSubnet, nodeName string, sctpSupport bool) (*ovntest.FakeExec, string, string, string) {
@@ -874,9 +846,6 @@ func addPBRandNATRules(testData []libovsdb.TestData, expectedOVNClusterRouter *n
 		Priority: intPriority,
 	})
 	expectedOVNClusterRouter.Policies = append(expectedOVNClusterRouter.Policies, []string{"policy-based-route-1-UUID", "policy-based-route-2-UUID"}...)
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=match find logical_router_policy",
-	})
 	return testData
 }
 
