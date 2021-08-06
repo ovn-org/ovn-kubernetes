@@ -243,27 +243,18 @@ func addToPortGroup(ovnNBClient goovn.Client, portGroupName string, ports ...*lp
 	return nil
 }
 
-func deleteFromPortGroup(ovnNBClient goovn.Client, portGroupName string, ports ...*lpInfo) error {
-	cmds := make([]*goovn.OvnCommand, 0, len(ports))
-	for _, portInfo := range ports {
-		cmd, err := ovnNBClient.PortGroupRemovePort(portGroupName, portInfo.uuid)
-		if err != nil {
-			// PortGroup already deleted...
-			if err == goovn.ErrorNotFound {
-				return nil
-			} else {
-				return fmt.Errorf("error preparing removing port %v from port group %s (%v)", portInfo.name, portGroupName, err)
-			}
+func deleteFromPortGroup(ovnNBClient goovn.Client, portGroupName, portName, portUUID string) error {
+	cmd, err := ovnNBClient.PortGroupRemovePort(portGroupName, portUUID)
+	if err != nil {
+		// PortGroup already deleted...
+		if err == goovn.ErrorNotFound {
+			return nil
+		} else {
+			return fmt.Errorf("error preparing removing port %v from port group %s (%v)", portName, portGroupName, err)
 		}
-		cmds = append(cmds, cmd)
 	}
-
-	if err := ovnNBClient.Execute(cmds...); err != nil {
-		names := []string{}
-		for _, portInfo := range ports {
-			names = append(names, portInfo.name)
-		}
-		return fmt.Errorf("error committing removing ports (%v) from port group %s (%v)", strings.Join(names, ","), portGroupName, err)
+	if err := ovnNBClient.Execute(cmd); err != nil {
+		return fmt.Errorf("error committing removing ports (%v) from port group %s (%v)", portName, portGroupName, err)
 	}
 	return nil
 }
@@ -560,8 +551,8 @@ func podAddAllowMulticastPolicy(ovnNBClient goovn.Client, ns string, portInfo *l
 // podDeleteAllowMulticastPolicy removes the pod's logical switch port from the
 // namespace's multicast port group. Caller must hold the namespace's
 // namespaceInfo object lock.
-func podDeleteAllowMulticastPolicy(ovnNBClient goovn.Client, ns string, portInfo *lpInfo) error {
-	return deleteFromPortGroup(ovnNBClient, hashedPortGroup(ns), portInfo)
+func podDeleteAllowMulticastPolicy(ovnNBClient goovn.Client, ns, name, uuid string) error {
+	return deleteFromPortGroup(ovnNBClient, hashedPortGroup(ns), name, uuid)
 }
 
 // localPodAddDefaultDeny ensures ports (i.e. pods) are in the correct
@@ -861,7 +852,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 		return
 	}
 
-	err = deleteFromPortGroup(oc.ovnNBClient, np.portGroupName, portInfo)
+	err = deleteFromPortGroup(oc.ovnNBClient, np.portGroupName, portInfo.name, portInfo.uuid)
 	if err != nil {
 		klog.Errorf("Failed to delete logicalPort %s from portGroup %s (%v)", portInfo.name, np.name, err)
 	}
