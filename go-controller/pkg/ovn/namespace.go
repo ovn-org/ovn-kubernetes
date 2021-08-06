@@ -50,8 +50,33 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 	}
 }
 
+func (oc *Controller) getRoutingExternalGWs(nsInfo *namespaceInfo) *gatewayInfo {
+	res := gatewayInfo{}
+	// return a copy of the object so it can be handled without the
+	// namespace locked
+	res.bfdEnabled = nsInfo.routingExternalGWs.bfdEnabled
+	res.gws = make([]net.IP, len(nsInfo.routingExternalGWs.gws))
+	copy(res.gws, nsInfo.routingExternalGWs.gws)
+	return &res
+}
+
+func (oc *Controller) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]*gatewayInfo {
+	// return a copy of the object so it can be handled without the
+	// namespace locked
+	res := make(map[string]*gatewayInfo)
+	for k, v := range nsInfo.routingExternalPodGWs {
+		item := &gatewayInfo{
+			bfdEnabled: v.bfdEnabled,
+			gws:        make([]net.IP, len(v.gws)),
+		}
+		copy(item.gws, v.gws)
+		res[k] = item
+	}
+	return res
+}
+
 // adds pod to addr set and returns true if namespace supports multicast
-func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (bool, error) {
+func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (bool, *gatewayInfo, map[string]*gatewayInfo, error) {
 	nsInfo := oc.ensureNamespaceLocked(ns)
 	defer nsInfo.Unlock()
 
@@ -59,17 +84,17 @@ func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (bool, erro
 		var err error
 		nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns)
 		if err != nil {
-			return nsInfo.multicastEnabled,
+			return false, nil, nil,
 				fmt.Errorf("unable to add pod to namespace. Cannot create address set for namespace: %s,"+
 					"error: %v", ns, err)
 		}
 	}
 
 	if err := nsInfo.addressSet.AddIPs(createIPAddressSlice(ips)); err != nil {
-		return nsInfo.multicastEnabled, err
+		return false, nil, nil, err
 	}
 
-	return nsInfo.multicastEnabled, nil
+	return nsInfo.multicastEnabled, oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nil
 }
 
 func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error {

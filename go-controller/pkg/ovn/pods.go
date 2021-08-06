@@ -227,40 +227,6 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 	return nil
 }
 
-func (oc *Controller) getRoutingGWs(ns string) (gatewayInfo, map[string]gatewayInfo) {
-	nsInfo := oc.getNamespaceLocked(ns)
-	if nsInfo == nil {
-		return gatewayInfo{}, nil
-	}
-	defer nsInfo.Unlock()
-	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo)
-}
-
-func (oc *Controller) getRoutingExternalGWs(nsInfo *namespaceInfo) gatewayInfo {
-	res := gatewayInfo{}
-	// return a copy of the object so it can be handled without the
-	// namespace locked
-	res.bfdEnabled = nsInfo.routingExternalGWs.bfdEnabled
-	res.gws = make([]net.IP, len(nsInfo.routingExternalGWs.gws))
-	copy(res.gws, nsInfo.routingExternalGWs.gws)
-	return res
-}
-
-func (oc *Controller) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]gatewayInfo {
-	// return a copy of the object so it can be handled without the
-	// namespace locked
-	res := make(map[string]gatewayInfo)
-	for k, v := range nsInfo.routingExternalPodGWs {
-		item := gatewayInfo{
-			bfdEnabled: v.bfdEnabled,
-			gws:        make([]net.IP, len(v.gws)),
-		}
-		copy(item.gws, v.gws)
-		res[k] = item
-	}
-	return res
-}
-
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// If a node does node have an assigned hostsubnet don't wait for the logical switch to appear
 	if oc.lsManager.IsNonHostSubnetSwitch(pod.Spec.NodeName) {
@@ -446,16 +412,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// Ensure the namespace/nsInfo exists
-	multicastEnabled, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
+	multicastEnabled, routingExternalGWs, routingPodGWs, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
 	if err != nil {
 		return err
 	}
 
-	// add src-ip routes to GR if external gw annotation is set
-	routingExternalGWs, routingPodGWs := oc.getRoutingGWs(pod.Namespace)
-
 	// if we have any external or pod Gateways, add routes
-	gateways := make([]gatewayInfo, 0)
+	gateways := make([]*gatewayInfo, 0)
 
 	if len(routingExternalGWs.gws) > 0 {
 		gateways = append(gateways, routingExternalGWs)
