@@ -439,7 +439,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				gomega.Expect(getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)).Should(gomega.MatchJSON(podJSON))
 
-				lsp, err := fakeOvn.ovnNBClient.LSPGet(t.namespace + "_" + t.podName)
+				lsp, err := fakeOvn.ovnNBClients[0].LSPGet(t.namespace + "_" + t.podName)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(lsp.Addresses).To(gomega.HaveLen(1))
 				gomega.Expect(lsp.Addresses[0]).To(gomega.ContainSubstring(t.podIP))

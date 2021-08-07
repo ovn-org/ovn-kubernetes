@@ -46,6 +46,7 @@ type FakeOVN struct {
 	asf          *addressset.FakeAddressSetFactory
 	fakeRecorder *record.FakeRecorder
 	ovnNBClient  goovn.Client
+	ovnNBClients []*OVNNBClient
 	ovnSBClient  goovn.Client
 	nbClient     libovsdbclient.Client
 	sbClient     libovsdbclient.Client
@@ -100,6 +101,10 @@ func (o *FakeOVN) restart() {
 func (o *FakeOVN) shutdown() {
 	close(o.stopChan)
 	o.watcher.Shutdown()
+	for i := range o.controller.ovnNBClients {
+		err := o.controller.ovnNBClients[i].Close()
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	}
 	err := o.controller.ovnNBClient.Close()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	err = o.controller.ovnSBClient.Close()
@@ -112,13 +117,14 @@ func (o *FakeOVN) init() {
 	o.stopChan = make(chan struct{})
 	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	o.ovnNBClient = ovntest.NewMockOVNClient(goovn.DBNB)
 	o.ovnSBClient = ovntest.NewMockOVNClient(goovn.DBSB)
+	o.ovnNBClient = ovntest.NewMockOVNClient(goovn.DBNB)
 	o.nbClient, o.sbClient, err = libovsdbtest.NewNBSBTestHarness(o.dbSetup, o.stopChan)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	o.ovnNBClients = []*OVNNBClient{{Client: ovntest.NewMockOVNClient(goovn.DBNB)}}
 	o.controller = NewOvnController(o.fakeClient, o.watcher,
 		o.stopChan, o.asf,
-		o.ovnNBClient, o.ovnSBClient,
+		o.ovnNBClients, o.ovnNBClient, o.ovnSBClient,
 		o.nbClient, o.sbClient,
 		o.fakeRecorder)
 	o.controller.multicastSupport = true

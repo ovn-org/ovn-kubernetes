@@ -227,8 +227,19 @@ func runOvnKube(ctx *cli.Context) error {
 			return err
 		}
 		watchFactory = masterWatchFactory
-		var ovnNBClient, ovnSBClient goovn.Client
+		var ovnSBClient goovn.Client
+		var ovnNBClient goovn.Client
+		ovnNBClients := make([]*ovn.OVNNBClient, 10)
 		var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+
+		// create 10 NB Clients
+		for i := range ovnNBClients {
+			var client goovn.Client
+			if client, err = util.NewOVNNBClient(); err != nil {
+				return fmt.Errorf("error when trying to initialize go-ovn NB client: %v", err)
+			}
+			ovnNBClients[i] = &ovn.OVNNBClient{Client: client}
+		}
 
 		if ovnNBClient, err = util.NewOVNNBClient(); err != nil {
 			return fmt.Errorf("error when trying to initialize go-ovn NB client: %v", err)
@@ -252,7 +263,7 @@ func runOvnKube(ctx *cli.Context) error {
 		metrics.RegisterMasterMetrics(ovnNBClient, ovnSBClient)
 
 		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil,
-			ovnNBClient, ovnSBClient, libovsdbOvnNBClient, libovsdbOvnSBClient, util.EventRecorder(ovnClientset.KubeClient))
+			ovnNBClients, ovnNBClient, ovnSBClient, libovsdbOvnNBClient, libovsdbOvnSBClient, util.EventRecorder(ovnClientset.KubeClient))
 		if err := ovnController.Start(master, wg, ctx.Context); err != nil {
 			return err
 		}
