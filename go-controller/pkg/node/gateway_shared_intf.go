@@ -16,6 +16,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1beta1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -306,14 +307,6 @@ func (npw *nodePortWatcher) getAndDeleteServiceInfo(index ktypes.NamespacedName)
 	return out, exists
 }
 
-// getServiceInfo returns the serviceConfig for a service and if it exists
-func (npw *nodePortWatcher) getServiceInfo(index ktypes.NamespacedName) (out *serviceConfig, exists bool) {
-	npw.serviceInfoLock.Lock()
-	defer npw.serviceInfoLock.Unlock()
-	out, exists = npw.serviceInfo[index]
-	return out, exists
-}
-
 // getAndSetServiceInfo creates and sets the serviceConfig, returns if it existed and whatever was there
 func (npw *nodePortWatcher) getAndSetServiceInfo(index ktypes.NamespacedName, service *kapi.Service, etpHostRules bool) (old *serviceConfig, exists bool) {
 	npw.serviceInfoLock.Lock()
@@ -430,13 +423,13 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) {
 
 	klog.V(5).Infof("Adding service %s in namespace %s", service.Name, service.Namespace)
 	name := ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}
-	ep, err := npw.watchFactory.GetEndpoint(service.Namespace, service.Name)
+	epSlices, err := npw.watchFactory.GetServiceEndpointSlices(service.Namespace, service.Name)
 	if err != nil {
 		klog.V(5).Infof("No endpoint found for service %s in namespace %s during service Add", service.Name, service.Namespace)
 		// No endpoints exist yet so default to false
 		etpHostRules = false
 	} else {
-		etpHostRules = hasHostNetworkEndpoints(ep, &npw.nodeIPManager.addresses)
+		etpHostRules = hasHostNetworkEndpoints(epSlices, &npw.nodeIPManager.addresses)
 	}
 
 	// If something didn't already do it add correct Service rules
@@ -505,13 +498,13 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 			continue
 		}
 
-		ep, err := npw.watchFactory.GetEndpoint(service.Namespace, service.Name)
+		epSlices, err := npw.watchFactory.GetServiceEndpointSlices(service.Namespace, service.Name)
 		if err != nil {
 			klog.V(5).Infof("No endpoint found for service %s in namespace %s during sync", service.Name, service.Namespace)
 			continue
 		}
 
-		hasHostNet := hasHostNetworkEndpoints(ep, &npw.nodeIPManager.addresses)
+		hasHostNet := hasHostNetworkEndpoints(epSlices, &npw.nodeIPManager.addresses)
 		npw.getAndSetServiceInfo(name, service, hasHostNet)
 		// Delete OF rules for service if they exist
 		npw.updateServiceFlowCache(service, false, hasHostNet)
@@ -527,15 +520,21 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 	}
 }
 
-func (npw *nodePortWatcher) AddEndpoints(ep *kapi.Endpoints) {
+func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
 	var etpHostRules bool
-	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
+	svcName, ok := epSlice.Labels[discovery.LabelServiceName]
+	if !ok || svcName == "" {
+		klog.Errorf("Service name not found for endpointSlice %s in namespace %s during add", epSlice.Name, epSlice.Namespace)
+		return
+	}
 
-	svc, err := npw.watchFactory.GetService(ep.Namespace, ep.Name)
+	name := ktypes.NamespacedName{Namespace: epSlice.Namespace, Name: svcName}
+
+	svc, err := npw.watchFactory.GetService(epSlice.Namespace, svcName)
 	if err != nil {
 		// This is not necessarily an error. For e.g when there are endpoints
 		// without a corresponding service.
-		klog.V(5).Infof("No service found for endpoint %s in namespace %s during add", ep.Name, ep.Namespace)
+		klog.V(5).Infof("No service found for endpoint %s in namespace %s during add", epSlice.Name, epSlice.Namespace)
 		return
 	}
 
@@ -543,33 +542,40 @@ func (npw *nodePortWatcher) AddEndpoints(ep *kapi.Endpoints) {
 		return
 	}
 
-	klog.V(5).Infof("Adding endpoints %s in namespace %s", ep.Name, ep.Namespace)
-	etpHostRules = hasHostNetworkEndpoints(ep, &npw.nodeIPManager.addresses)
+	klog.V(5).Infof("Adding endpointslice %s in namespace %s", epSlice.Name, epSlice.Namespace)
+	epSlices := []*discovery.EndpointSlice{epSlice}
+	etpHostRules = hasHostNetworkEndpoints(epSlices, &npw.nodeIPManager.addresses)
 
-	// Here we make sure the correct rules are programmed whenever an AddEndpoint
+	// Here we make sure the correct rules are programmed whenever an AddEndpointSlice
 	// event is received, only alter flows if we need to, i.e if cache wasn't
 	// set or if it was and etpHostRules state changed, to prevent flow churn
 	out, exists := npw.getAndSetServiceInfo(name, svc, etpHostRules)
 	if !exists {
-		klog.V(5).Infof("Endpoint %s ADD event in namespace %s is creating rules", ep.Name, ep.Namespace)
+		klog.V(5).Infof("EndpointSlice %s ADD event in namespace %s is creating rules", epSlice.Name, epSlice.Namespace)
 		addServiceRules(svc, etpHostRules, npw)
 		return
 	}
 
 	if out.etpHostRules != etpHostRules {
-		klog.V(5).Infof("Endpoint %s ADD event in namespace %s is updating rules", ep.Name, ep.Namespace)
+		klog.V(5).Infof("EndpointSlice %s ADD event in namespace %s is updating rules", epSlice.Name, epSlice.Namespace)
 		delServiceRules(svc, npw)
 		addServiceRules(svc, etpHostRules, npw)
 	}
 
 }
 
-func (npw *nodePortWatcher) DeleteEndpoints(ep *kapi.Endpoints) {
+func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
 	var etpHostRules = false
 
-	klog.V(5).Infof("Deleting endpoints %s in namespace %s", ep.Name, ep.Namespace)
+	klog.V(5).Infof("Deleting endpoints %s in namespace %s", epSlice.Name, epSlice.Namespace)
 	// remove rules for endpoints and add back normal ones
-	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
+	svcName, ok := epSlice.Labels[discovery.LabelServiceName]
+	if !ok || svcName == "" {
+		klog.Errorf("Service name not found for endpointSlice %s in namespace %s during delete", epSlice.Name, epSlice.Namespace)
+		return
+	}
+
+	name := ktypes.NamespacedName{Namespace: epSlice.Namespace, Name: svcName}
 	if svcConfig, exists := npw.updateServiceInfo(name, nil, &etpHostRules); exists {
 		// Lock the cache mutex here so we don't miss a service delete during an endpoint delete
 		// we have to do this because deleting and adding iptables rules is slow.
@@ -581,27 +587,31 @@ func (npw *nodePortWatcher) DeleteEndpoints(ep *kapi.Endpoints) {
 	}
 }
 
-func (npw *nodePortWatcher) UpdateEndpoints(old *kapi.Endpoints, new *kapi.Endpoints) {
-	name := ktypes.NamespacedName{Namespace: old.Namespace, Name: old.Name}
+func getEndpointAddresses(endpointSlice *discovery.EndpointSlice) []string {
+	endpointsAddress := make([]string, 0)
+	for _, endpoint := range endpointSlice.Endpoints {
+		endpointsAddress = append(endpointsAddress, endpoint.Addresses...)
+	}
+	return endpointsAddress
+}
 
-	if reflect.DeepEqual(new.Subsets, old.Subsets) {
+func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) {
+	oldEpAddr := getEndpointAddresses(oldEpSlice)
+	newEpAddr := getEndpointAddresses(newEpSlice)
+	if reflect.DeepEqual(oldEpSlice.Ports, newEpSlice.Ports) &&
+		reflect.DeepEqual(oldEpAddr, newEpAddr) {
 		return
 	}
 
-	klog.V(5).Infof("Updating endpoints %s in namespace %s", old.Name, old.Namespace)
-
-	// Delete old endpoint rules and add normal ones back
-	if len(new.Subsets) == 0 {
-		if _, exists := npw.getServiceInfo(name); exists {
-			npw.DeleteEndpoints(old)
-		}
-	}
+	klog.V(5).Infof("Updating endpoints %s in namespace %s", oldEpSlice.Name, oldEpSlice.Namespace)
 
 	// Update rules if hasHostNetworkEndpoints status changed
-	etpHostRulesNew := hasHostNetworkEndpoints(new, &npw.nodeIPManager.addresses)
-	if hasHostNetworkEndpoints(old, &npw.nodeIPManager.addresses) != etpHostRulesNew {
-		npw.DeleteEndpoints(old)
-		npw.AddEndpoints(new)
+	newEpSlices := []*discovery.EndpointSlice{newEpSlice}
+	oldEpSlices := []*discovery.EndpointSlice{oldEpSlice}
+	etpHostRulesNew := hasHostNetworkEndpoints(newEpSlices, &npw.nodeIPManager.addresses)
+	if hasHostNetworkEndpoints(oldEpSlices, &npw.nodeIPManager.addresses) != etpHostRulesNew {
+		npw.DeleteEndpointSlice(oldEpSlice)
+		npw.AddEndpointSlice(newEpSlice)
 	}
 }
 

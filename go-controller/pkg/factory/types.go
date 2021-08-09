@@ -2,7 +2,7 @@ package factory
 
 import (
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
+	discovery "k8s.io/api/discovery/v1beta1"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -14,8 +14,7 @@ type ObjectCacheInterface interface {
 	GetNodes() ([]*kapi.Node, error)
 	GetNode(name string) (*kapi.Node, error)
 	GetService(namespace, name string) (*kapi.Service, error)
-	GetEndpoints(namespace string) ([]*kapi.Endpoints, error)
-	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
+	GetServiceEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error)
 	GetNamespace(name string) (*kapi.Namespace, error)
 	GetNamespaces() ([]*kapi.Namespace, error)
 }
@@ -32,9 +31,7 @@ type NodeWatchFactory interface {
 	AddFilteredServiceHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
 	RemoveServiceHandler(handler *Handler)
 
-	AddEndpointsHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
-	AddFilteredEndpointsHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
-	RemoveEndpointsHandler(handler *Handler)
+	AddEndpointSliceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
 
 	AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
 	RemovePodHandler(handler *Handler)
@@ -43,7 +40,7 @@ type NodeWatchFactory interface {
 	LocalPodInformer() cache.SharedIndexInformer
 
 	GetService(namespace, name string) (*kapi.Service, error)
-	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
+	GetServiceEndpointSlices(namespace, svcName string) ([]*discovery.EndpointSlice, error)
 }
 
 type Shutdownable interface {

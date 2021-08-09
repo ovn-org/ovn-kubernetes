@@ -12,6 +12,7 @@ import (
 	"github.com/pkg/errors"
 
 	kapi "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1beta1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
@@ -59,54 +60,58 @@ func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) {
 
 func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) {}
 
-func (l *loadBalancerHealthChecker) AddEndpoints(ep *kapi.Endpoints) {
-	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
-	if _, exists := l.services[name]; exists {
-		l.endpoints[name] = countLocalEndpoints(ep, l.nodeName)
-		_ = l.server.SyncEndpoints(l.endpoints)
-	}
-}
-
-func (l *loadBalancerHealthChecker) UpdateEndpoints(old, new *kapi.Endpoints) {
-	name := ktypes.NamespacedName{Namespace: new.Namespace, Name: new.Name}
-	if _, exists := l.services[name]; exists {
-		l.endpoints[name] = countLocalEndpoints(new, l.nodeName)
-		_ = l.server.SyncEndpoints(l.endpoints)
-	}
-
-}
-
-func (l *loadBalancerHealthChecker) DeleteEndpoints(ep *kapi.Endpoints) {
-	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
-	delete(l.endpoints, name)
-	_ = l.server.SyncEndpoints(l.endpoints)
-}
-
-func countLocalEndpoints(ep *kapi.Endpoints, nodeName string) int {
-	num := 0
-	for i := range ep.Subsets {
-		ss := &ep.Subsets[i]
-		for i := range ss.Addresses {
-			addr := &ss.Addresses[i]
-			if addr.NodeName != nil && *addr.NodeName == nodeName {
-				num++
-			}
+func (l *loadBalancerHealthChecker) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
+	svcName, ok := epSlice.Labels[discovery.LabelServiceName]
+	if ok && svcName != "" {
+		name := ktypes.NamespacedName{Namespace: epSlice.Namespace, Name: svcName}
+		if _, exists := l.services[name]; exists {
+			l.endpoints[name] = countReadyEndpoints(epSlice)
+			_ = l.server.SyncEndpoints(l.endpoints)
 		}
+	}
+}
+
+func (l *loadBalancerHealthChecker) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) {
+	svcName, ok := newEpSlice.Labels[discovery.LabelServiceName]
+	if ok && svcName != "" {
+		name := ktypes.NamespacedName{Namespace: newEpSlice.Namespace, Name: svcName}
+		if _, exists := l.services[name]; exists {
+			l.endpoints[name] = countReadyEndpoints(newEpSlice)
+			_ = l.server.SyncEndpoints(l.endpoints)
+		}
+	}
+}
+
+func (l *loadBalancerHealthChecker) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
+	svcName, ok := epSlice.Labels[discovery.LabelServiceName]
+	if ok && svcName != "" {
+		name := ktypes.NamespacedName{Namespace: epSlice.Namespace, Name: svcName}
+		delete(l.endpoints, name)
+		_ = l.server.SyncEndpoints(l.endpoints)
+	}
+}
+
+func countReadyEndpoints(epSlice *discovery.EndpointSlice) int {
+	var num int
+	for _, endpoint := range epSlice.Endpoints {
+		if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
+			continue
+		}
+		num++
 	}
 	return num
 }
 
-func hasHostNetworkEndpoints(ep *kapi.Endpoints, nodeAddresses *sets.String) bool {
-	for i := range ep.Subsets {
-		ss := &ep.Subsets[i]
-		for i := range ss.Addresses {
-			addr := &ss.Addresses[i]
-			if nodeAddresses.Has(addr.IP) {
-				return true
+func hasHostNetworkEndpoints(epSlices []*discovery.EndpointSlice, nodeAddresses *sets.String) bool {
+	for _, epSlice := range epSlices {
+		for _, endpoint := range epSlice.Endpoints {
+			for _, ip := range endpoint.Addresses {
+				if nodeAddresses.Has(ip) {
+					return true
+				}
 			}
 		}
 	}
-
 	return false
 }
 
