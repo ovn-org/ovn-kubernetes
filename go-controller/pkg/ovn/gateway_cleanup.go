@@ -34,35 +34,71 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 	oc.staticRouteCleanup(nextHops)
 
 	// Remove the patch port that connects join switch to gateway router
-	_, stderr, err := util.RunOVNNbctl("--if-exist", "lsp-del", types.JoinSwitchToGWRouterPrefix+gatewayRouter)
-	if err != nil {
-		return fmt.Errorf("failed to delete logical switch port %s%s: "+
-			"stderr: %q, error: %v", types.JoinSwitchToGWRouterPrefix, gatewayRouter, stderr, err)
+	logicalSwitch := nbdb.LogicalSwitch{}
+	logicalSwitchPort := nbdb.LogicalSwitchPort{}
+	logicalSwitchPortRes := []nbdb.LogicalSwitchPort{}
+	opModels := []util.OperationModel{
+		{
+			Model: &logicalSwitchPort,
+			ModelPredicate: func(lsp *nbdb.LogicalSwitchPort) bool {
+				return lsp.Name == types.JoinSwitchToGWRouterPrefix+gatewayRouter
+			},
+			ExistingResult: &logicalSwitchPortRes,
+		},
+		{
+			Model:          &logicalSwitch,
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.OVNJoinSwitch },
+			OnModelMutations: func() []model.Mutation {
+				if len(logicalSwitchPortRes) == 0 {
+					return nil
+				}
+				uuids := []string{}
+				for _, item := range logicalSwitchPortRes {
+					uuids = append(uuids, item.UUID)
+				}
+				return []model.Mutation{
+					{
+						Field:   &logicalSwitch.Ports,
+						Mutator: ovsdb.MutateOperationDelete,
+						Value:   uuids,
+					},
+				}
+			},
+			ExistingResult: &[]nbdb.LogicalSwitch{},
+		},
+	}
+	if err := oc.modelClient.Delete(opModels...); err != nil {
+		return fmt.Errorf("failed to delete logical switch port %s%s:, error: %v", types.JoinSwitchToGWRouterPrefix, gatewayRouter, err)
 	}
 
 	// Remove the gateway router associated with nodeName
-	_, stderr, err = util.RunOVNNbctl("--if-exist", "lr-del",
-		gatewayRouter)
-	if err != nil {
-		return fmt.Errorf("failed to delete gateway router %s, stderr: %q, "+
-			"error: %v", gatewayRouter, stderr, err)
+	opModel := util.OperationModel{
+		Model:          &nbdb.LogicalRouter{},
+		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
+		ExistingResult: &[]nbdb.LogicalRouter{},
+	}
+	if err := oc.modelClient.Delete(opModel); err != nil {
+		return fmt.Errorf("failed to delete gateway router %s, error: %v", gatewayRouter, err)
 	}
 
 	// Remove external switch
-	externalSwitch := types.ExternalSwitchPrefix + nodeName
-	_, stderr, err = util.RunOVNNbctl("--if-exist", "ls-del",
-		externalSwitch)
-	if err != nil {
-		return fmt.Errorf("failed to delete external switch %s, stderr: %q, "+
-			"error: %v", externalSwitch, stderr, err)
+	opModel = util.OperationModel{
+		Model:          &nbdb.LogicalSwitch{},
+		ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.ExternalSwitchPrefix+nodeName },
+		ExistingResult: &[]nbdb.LogicalSwitch{},
+	}
+	if err := oc.modelClient.Delete(opModel); err != nil {
+		return fmt.Errorf("failed to delete external switch %s, error: %v", types.ExternalSwitchPrefix+nodeName, err)
 	}
 
 	exGWexternalSwitch := types.ExternalSwitchPrefix + types.ExternalSwitchPrefix + nodeName
-	_, stderr, err = util.RunOVNNbctl("--if-exist", "ls-del",
-		exGWexternalSwitch)
-	if err != nil {
-		return fmt.Errorf("failed to delete external switch %s, stderr: %q, "+
-			"error: %v", exGWexternalSwitch, stderr, err)
+	opModel = util.OperationModel{
+		Model:          &nbdb.LogicalSwitch{},
+		ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == exGWexternalSwitch },
+		ExistingResult: &[]nbdb.LogicalSwitch{},
+	}
+	if err := oc.modelClient.Delete(opModel); err != nil {
+		return fmt.Errorf("failed to delete external switch %s, error: %v", exGWexternalSwitch, err)
 	}
 
 	// If exists, remove the TCP, UDP load-balancers created for north-south traffic for gateway router.
@@ -77,7 +113,7 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 	}
 	for proto, uuid := range protoLBMap {
 		if uuid != "" {
-			_, stderr, err = util.RunOVNNbctl("lb-del", uuid)
+			_, stderr, err := util.RunOVNNbctl("lb-del", uuid)
 			if err != nil {
 				return fmt.Errorf("failed to delete Gateway router %s's %s load balancer %s, stderr: %q, "+
 					"error: %v", gatewayRouter, proto, uuid, stderr, err)
@@ -219,24 +255,82 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 	oc.staticRouteCleanup(nextHops)
 
 	// Remove the join switch that connects ovn_cluster_router to gateway router
-	_, stderr, err := util.RunOVNNbctl("--if-exist", "ls-del", "join_"+nodeName)
-	if err != nil {
-		return fmt.Errorf("failed to delete the join logical switch %s, "+
-			"stderr: %q, error: %v", "join_"+nodeName, stderr, err)
+	opModel := util.OperationModel{
+		ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.JoinSwitchPrefix+nodeName },
+		ExistingResult: &[]nbdb.LogicalSwitch{},
+	}
+	if err := oc.modelClient.Delete(opModel); err != nil {
+		return fmt.Errorf("failed to delete the join logical switch %s, error: %v", types.JoinSwitchPrefix+nodeName, err)
 	}
 
 	// Remove the logical router port on the distributed router that connects to the join switch
-	_, stderr, err = util.RunOVNNbctl("--if-exist", "lrp-del", "dtoj-"+nodeName)
-	if err != nil {
-		return fmt.Errorf("failed to delete the patch port dtoj-%s on distributed router "+
-			"stderr: %q, error: %v", nodeName, stderr, err)
+	logicalRouter := nbdb.LogicalRouter{}
+	logicalRouterPortRes := []nbdb.LogicalRouterPort{}
+	opModels := []util.OperationModel{
+		{
+			ModelPredicate: func(lrp *nbdb.LogicalRouterPort) bool { return lrp.Name == types.DistRouterToJoinSwitchPrefix+nodeName },
+			ExistingResult: &logicalRouterPortRes,
+		},
+		{
+			Model:          &logicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+			OnModelMutations: func() []model.Mutation {
+				if len(logicalRouterPortRes) == 0 {
+					return nil
+				}
+				uuids := []string{}
+				for _, item := range logicalRouterPortRes {
+					uuids = append(uuids, item.UUID)
+				}
+				return []model.Mutation{
+					{
+						Field:   &logicalRouter.Ports,
+						Mutator: ovsdb.MutateOperationDelete,
+						Value:   uuids,
+					},
+				}
+			},
+			ExistingResult: &[]nbdb.LogicalRouter{},
+		},
+	}
+	if err := oc.modelClient.Delete(opModels...); err != nil {
+		return fmt.Errorf("failed to delete the patch port %s-%s on distributed router, error: %v", types.DistRouterToJoinSwitchPrefix, nodeName, err)
 	}
 
 	// Remove the logical router port on the gateway router that connects to the join switch
-	_, stderr, err = util.RunOVNNbctl("--if-exist", "lrp-del", types.GWRouterToJoinSwitchPrefix+gatewayRouter)
-	if err != nil {
-		return fmt.Errorf("failed to delete the port %s%s on gateway router "+
-			"stderr: %q, error: %v", types.GWRouterToJoinSwitchPrefix, gatewayRouter, stderr, err)
+	logicalRouter = nbdb.LogicalRouter{}
+	logicalRouterPortRes = []nbdb.LogicalRouterPort{}
+	opModels = []util.OperationModel{
+		{
+			ModelPredicate: func(lrp *nbdb.LogicalRouterPort) bool {
+				return lrp.Name == types.GWRouterToJoinSwitchPrefix+gatewayRouter
+			},
+			ExistingResult: &logicalRouterPortRes,
+		},
+		{
+			Model:          &logicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
+			OnModelMutations: func() []model.Mutation {
+				if len(logicalRouterPortRes) == 0 {
+					return nil
+				}
+				uuids := []string{}
+				for _, item := range logicalRouterPortRes {
+					uuids = append(uuids, item.UUID)
+				}
+				return []model.Mutation{
+					{
+						Field:   &logicalRouter.Ports,
+						Mutator: ovsdb.MutateOperationDelete,
+						Value:   uuids,
+					},
+				}
+			},
+			ExistingResult: &[]nbdb.LogicalRouter{},
+		},
+	}
+	if err := oc.modelClient.Delete(opModels...); err != nil {
+		return fmt.Errorf("failed to delete the port %s%s on gateway router, error: %v", types.GWRouterToJoinSwitchPrefix, gatewayRouter, err)
 	}
 
 	if upgradeOnly {
@@ -244,20 +338,22 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 	}
 
 	// Remove the gateway router associated with nodeName
-	_, stderr, err = util.RunOVNNbctl("--if-exist", "lr-del",
-		gatewayRouter)
-	if err != nil {
-		return fmt.Errorf("failed to delete gateway router %s, stderr: %q, "+
-			"error: %v", gatewayRouter, stderr, err)
+	opModel = util.OperationModel{
+		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
+		ExistingResult: &[]nbdb.LogicalRouter{},
+	}
+	if err := oc.modelClient.Delete(opModel); err != nil {
+		return fmt.Errorf("failed to delete gateway router %s, error: %v", gatewayRouter, err)
 	}
 
 	// Remove external switch
-	externalSwitch := types.ExternalSwitchPrefix + nodeName
-	_, stderr, err = util.RunOVNNbctl("--if-exist", "ls-del",
-		externalSwitch)
-	if err != nil {
-		return fmt.Errorf("failed to delete external switch %s, stderr: %q, "+
-			"error: %v", externalSwitch, stderr, err)
+
+	opModel = util.OperationModel{
+		ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.ExternalSwitchPrefix+nodeName },
+		ExistingResult: &[]nbdb.LogicalSwitch{},
+	}
+	if err := oc.modelClient.Delete(opModel); err != nil {
+		return fmt.Errorf("failed to delete external switch %s, error: %v", types.ExternalSwitchPrefix+nodeName, err)
 	}
 
 	// If exists, remove the TCP, UDP load-balancers created for north-south traffic for gateway router.
@@ -272,7 +368,7 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 	}
 	for proto, uuid := range protoLBMap {
 		if uuid != "" {
-			_, stderr, err = util.RunOVNNbctl("lb-del", uuid)
+			_, stderr, err := util.RunOVNNbctl("lb-del", uuid)
 			if err != nil {
 				return fmt.Errorf("failed to delete Gateway router %s's %s load balancer %s, stderr: %q, "+
 					"error: %v", gatewayRouter, proto, uuid, stderr, err)
