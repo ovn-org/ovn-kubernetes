@@ -607,7 +607,7 @@ func (oc *Controller) cleanECMPRoutes() {
 		out, stderr, err := util.RunOVNNbctl(
 			"--format=csv", "--data=bare", "--no-heading", "--columns=_uuid,name", "find", "Logical_Router", fmt.Sprintf("static_routes{>=}[%s]", uuid))
 		if err != nil || out == "" {
-			klog.Errorf("cleanECMPRoutes: failed to find logical router for %s", uuid, err, stderr)
+			klog.Errorf("cleanECMPRoutes: failed to find logical router for %s, err: %v, stderr: %s", uuid, err, stderr)
 			continue
 		}
 		values = strings.Split(out, ",")
@@ -616,11 +616,10 @@ func (oc *Controller) cleanECMPRoutes() {
 		node := util.GetWorkerFromGatewayRouter(gr)
 		prefix, err := oc.extSwitchPrefix(node)
 		if err != nil {
-			klog.Errorf("cleanECMPRoutes: failed to find logical router for %s", uuid, err, stderr)
+			klog.Errorf("cleanECMPRoutes: failed to find logical router for %s, err: %v", uuid, err)
 			continue
 		}
-		if (prefix != "" && !strings.Contains(port, prefix)) ||
-			(prefix == "" && strings.Contains(port, prefix)) {
+		if prefix != "" && !strings.Contains(port, prefix) {
 			klog.Infof("Found legacy ecmp route, output_port=%s, extSwitchPrefix=%s", port, prefix)
 			_, stderr, err = util.RunOVNNbctl("--if-exists", "remove", "Logical_Router", strings.TrimSuffix(lruuid, "\n"), "static_routes", uuid)
 			if err != nil {

@@ -148,7 +148,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		}, table.Entry("No BFD", false, "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1"),
 			table.Entry("BFD Enabled", true, "ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1"))
 
-		table.DescribeTable("reconciles an new pod with namespace double exgw annotation already set", func(bfd bool, expectedNbctl []string) {
+		table.DescribeTable("reconciles an new pod with namespace double exgw annotation already set", func(bfd bool, baseCmds []*ovntest.ExpectedCmd, node *v1.Node) {
 
 			app.Action = func(ctx *cli.Context) error {
 
@@ -168,7 +168,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					namespaceT.Name,
 				)
 
-				t.baseCmds(fExec)
+				for _, baseCmd := range baseCmds {
+					fExec.AddFakeCmd(baseCmd)
+				}
+
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
@@ -182,13 +185,13 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
-				for _, cmd := range expectedNbctl {
-					fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd:    cmd,
-						Output: "\n",
-					})
+
+				if node != nil {
+					fakeOvn.controller.watchFactory.NodeInformer().GetStore().Add(node)
+				} else {
+					injectNode(fakeOvn)
 				}
-				injectNode(fakeOvn)
+
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 
@@ -200,14 +203,97 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		},
-			table.Entry("No BFD", false, []string{
-				"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
-				"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2 rtoe-GR_node1",
-			}),
-			table.Entry("BFD Enabled", true, []string{
-				"ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
-				"ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2 rtoe-GR_node1",
-			}),
+			table.Entry("No BFD", false, []*ovntest.ExpectedCmd{
+				&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
+					Output: "",
+				},
+				&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2 rtoe-GR_node1",
+					Output: "",
+				},
+				&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,output_port find Logical_Router_Static_Route options={ecmp_symmetric_reply=\"true\"}",
+					Output: "uuid1,rtoe-GR_node1\nuuid2,rtoe-GR_node1",
+				},
+				&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,name find Logical_Router static_routes{>=}[uuid1]",
+					Output: "lr-uuid1,GR_node1",
+				},
+				&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,name find Logical_Router static_routes{>=}[uuid2]",
+					Output: "lr-uuid1,GR_node1",
+				},
+			}, nil),
+			table.Entry("BFD Enabled", true, []*ovntest.ExpectedCmd{
+				&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
+					Output: "",
+				},
+				&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2 rtoe-GR_node1",
+					Output: "",
+				},
+				&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,output_port find Logical_Router_Static_Route options={ecmp_symmetric_reply=\"true\"}",
+					Output: "uuid1,rtoe-GR_node1\nuuid2,rtoe-GR_node1",
+				},
+				&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,name find Logical_Router static_routes{>=}[uuid1]",
+					Output: "lr-uuid1,GR_node1",
+				},
+				&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,name find Logical_Router static_routes{>=}[uuid2]",
+					Output: "lr-uuid1,GR_node1",
+				},
+			}, nil),
+			table.Entry("Dedicated external gateway", true, []*ovntest.ExpectedCmd{
+				&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 exgw-rtoe-GR_node1",
+					Output: "",
+				},
+				&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2 exgw-rtoe-GR_node1",
+					Output: "",
+				},
+				&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,output_port find Logical_Router_Static_Route options={ecmp_symmetric_reply=\"true\"}",
+					Output: "uuid1,rtoe-GR_node1\nuuid2,rtoe-GR_node1\nexgw-uuid1,exgw-rtoe-GR_node1\nexgw-uuid2,exgw-rtoe-GR_node1",
+				},
+				&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,name find Logical_Router static_routes{>=}[uuid1]",
+					Output: "lr-uuid1,GR_node1",
+				},
+				&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --if-exists remove Logical_Router lr-uuid1 static_routes uuid1",
+					Output: "",
+				},
+				&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,name find Logical_Router static_routes{>=}[uuid2]",
+					Output: "lr-uuid1,GR_node1",
+				},
+				&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --if-exists remove Logical_Router lr-uuid1 static_routes uuid2",
+					Output: "",
+				},
+				&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,name find Logical_Router static_routes{>=}[exgw-uuid1]",
+					Output: "lr-uuid1,GR_node1",
+				},
+				&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,name find Logical_Router static_routes{>=}[exgw-uuid2]",
+					Output: "lr-uuid1,GR_node1",
+				},
+			},
+				&v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+						Annotations: map[string]string{"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.254.33.2/24", "exgw-interface-id": "my-external-gw-id", "exgw-mac-address": "7e:57:f8:f0:3c:50", "exgw-ip-addresses": ["169.254.35.2/24"], "next-hop":"169.254.33.1"}}`,
+							"k8s.ovn.org/node-chassis-id": "79fdcfc4-6fe6-4cd3-8242-c0f85a4668ec",
+						},
+					},
+				},
+			),
 		)
 
 		table.DescribeTable("reconciles deleting a pod with namespace double exgw annotation already set",
