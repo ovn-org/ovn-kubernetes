@@ -496,8 +496,8 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 					},
 				},
 				&nbdb.LogicalRouter{
-					UUID: "GR_test-node",
-					Name: "GR_test-node",
+					Name: types.GWRouterPrefix + nodeName,
+					UUID: types.GWRouterPrefix + nodeName + "-UUID",
 					LoadBalancer: []string{
 						"Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 					},
@@ -542,6 +542,18 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 					Policies:     []string{"match1-UUID", "match2-UUID", "match3-UUID", "match4-UUID", "match5-UUID", "match6-UUID"},
 					StaticRoutes: []string{"static-route-UUID"},
 				},
+				&nbdb.LogicalSwitchPort{
+					Name: types.JoinSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName,
+					UUID: types.JoinSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName + "-UUID",
+				},
+				&nbdb.LogicalSwitch{
+					Name: types.ExternalSwitchPrefix + nodeName,
+					UUID: types.ExternalSwitchPrefix + nodeName + "-UUID ",
+				},
+				&nbdb.LogicalSwitch{
+					Name: types.ExternalSwitchPrefix + types.ExternalSwitchPrefix + nodeName,
+					UUID: types.ExternalSwitchPrefix + types.ExternalSwitchPrefix + nodeName + "-UUID",
+				},
 			},
 		}
 		libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
@@ -552,22 +564,9 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			libovsdbOvnNBClient, libovsdbOvnSBClient,
 			record.NewFakeRecorder(0))
 
-		const (
-			nodeRouteUUID string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
-		)
-
 		fexec := ovntest.NewFakeExec()
 		err = util.SetExec(fexec)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_test-node",
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exist lr-del GR_test-node",
-			"ovn-nbctl --timeout=15 --if-exist ls-del ext_test-node",
-			"ovn-nbctl --timeout=15 --if-exist ls-del ext_ext_test-node",
-		})
 
 		cleanupPBRandNATRules(fexec, nodeName)
 
@@ -592,13 +591,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 				Vips: map[string]string{
 					"192.168.0.1:6443": "1.1.1.1:1,2.2.2.2:2",
 					"[fe::1]:1":        "[fe::2]:1,[fe::2]:2",
-				},
-			},
-			&nbdb.LogicalRouter{
-				UUID: "GR_test-node",
-				Name: "GR_test-node",
-				LoadBalancer: []string{
-					"Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 				},
 			},
 			&nbdb.LogicalRouterPolicy{
@@ -677,8 +669,8 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 					},
 				},
 				&nbdb.LogicalRouter{
-					UUID: "GR_test-node",
-					Name: "GR_test-node",
+					Name: types.GWRouterPrefix + nodeName,
+					UUID: types.GWRouterPrefix + nodeName + "-UUID",
 					LoadBalancer: []string{
 						"Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 					},
@@ -727,6 +719,18 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 					Policies:     []string{"match1-UUID", "match2-UUID", "match3-UUID", "match4-UUID", "match5-UUID", "match6-UUID"},
 					StaticRoutes: []string{"static-route-1-UUID", "static-route-2-UUID"},
 				},
+				&nbdb.LogicalSwitchPort{
+					Name: types.JoinSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName,
+					UUID: types.JoinSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName + "-UUID",
+				},
+				&nbdb.LogicalSwitch{
+					Name: types.ExternalSwitchPrefix + nodeName,
+					UUID: types.ExternalSwitchPrefix + nodeName + "-UUID ",
+				},
+				&nbdb.LogicalSwitch{
+					Name: types.ExternalSwitchPrefix + types.ExternalSwitchPrefix + nodeName,
+					UUID: types.ExternalSwitchPrefix + types.ExternalSwitchPrefix + nodeName + "-UUID",
+				},
 			},
 		}
 		libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
@@ -737,24 +741,9 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			libovsdbOvnNBClient, libovsdbOvnSBClient,
 			record.NewFakeRecorder(0))
 
-		const (
-			v4mgtRouteUUID string = "0cac12cf-3e0f-4682-b028-5ea2e0001963"
-			v6mgtRouteUUID string = "0cac12cf-4682-3e0f-b028-5ea2e0001963"
-		)
-
 		fexec := ovntest.NewFakeExec()
 		err = util.SetExec(fexec)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_test-node",
-		})
-
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exist lr-del GR_test-node",
-			"ovn-nbctl --timeout=15 --if-exist ls-del ext_test-node",
-			"ovn-nbctl --timeout=15 --if-exist ls-del ext_ext_test-node",
-		})
 
 		cleanupPBRandNATRules(fexec, nodeName)
 
@@ -779,13 +768,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 				Vips: map[string]string{
 					"192.168.0.1:6443": "1.1.1.1:1,2.2.2.2:2",
 					"[fe::1]:1":        "[fe::2]:1,[fe::2]:2",
-				},
-			},
-			&nbdb.LogicalRouter{
-				UUID: "GR_test-node",
-				Name: "GR_test-node",
-				LoadBalancer: []string{
-					"Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 				},
 			},
 			&nbdb.LogicalRouterPolicy{
