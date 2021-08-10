@@ -583,6 +583,23 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 					Name:         types.OVNClusterRouter,
 					Policies:     []string{"match1-UUID", "match2-UUID", "match3-UUID", "match4-UUID", "match5-UUID", "match6-UUID"},
 					StaticRoutes: []string{"static-route-UUID"},
+					UUID:         types.OVNClusterRouter + "-UUID",
+				},
+				&nbdb.LogicalRouter{
+					Name: types.GWRouterPrefix + nodeName,
+					UUID: types.GWRouterPrefix + nodeName + "-UUID",
+				},
+				&nbdb.LogicalSwitchPort{
+					Name: types.JoinSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName,
+					UUID: types.JoinSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName + "-UUID",
+				},
+				&nbdb.LogicalSwitch{
+					Name: types.ExternalSwitchPrefix + nodeName,
+					UUID: types.ExternalSwitchPrefix + nodeName + "-UUID ",
+				},
+				&nbdb.LogicalSwitch{
+					Name: types.ExternalSwitchPrefix + types.ExternalSwitchPrefix + nodeName,
+					UUID: types.ExternalSwitchPrefix + types.ExternalSwitchPrefix + nodeName + "-UUID",
 				},
 			},
 		}
@@ -601,13 +618,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		fexec := ovntest.NewFakeExec()
 		err = util.SetExec(fexec)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_test-node",
-			"ovn-nbctl --timeout=15 --if-exist lr-del GR_test-node",
-			"ovn-nbctl --timeout=15 --if-exist ls-del ext_test-node",
-			"ovn-nbctl --timeout=15 --if-exist ls-del ext_ext_test-node",
-		})
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_test-node",
@@ -653,6 +663,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			&nbdb.LogicalRouter{
 				Name:     types.OVNClusterRouter,
 				Policies: []string{"match3-UUID", "match4-UUID", "match6-UUID"},
+				UUID:     types.OVNClusterRouter + "-UUID",
 			},
 		}
 		gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -736,6 +747,23 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 					Name:         types.OVNClusterRouter,
 					Policies:     []string{"match1-UUID", "match2-UUID", "match3-UUID", "match4-UUID", "match5-UUID", "match6-UUID"},
 					StaticRoutes: []string{"static-route-1-UUID", "static-route-2-UUID"},
+					UUID:         types.OVNClusterRouter + "-UUID",
+				},
+				&nbdb.LogicalRouter{
+					Name: types.GWRouterPrefix + nodeName,
+					UUID: types.GWRouterPrefix + nodeName + "-UUID",
+				},
+				&nbdb.LogicalSwitchPort{
+					Name: types.JoinSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName,
+					UUID: types.JoinSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName + "-UUID",
+				},
+				&nbdb.LogicalSwitch{
+					Name: types.ExternalSwitchPrefix + nodeName,
+					UUID: types.ExternalSwitchPrefix + nodeName + "-UUID ",
+				},
+				&nbdb.LogicalSwitch{
+					Name: types.ExternalSwitchPrefix + types.ExternalSwitchPrefix + nodeName,
+					UUID: types.ExternalSwitchPrefix + types.ExternalSwitchPrefix + nodeName + "-UUID",
 				},
 			},
 		}
@@ -756,13 +784,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		fexec := ovntest.NewFakeExec()
 		err = util.SetExec(fexec)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_test-node",
-			"ovn-nbctl --timeout=15 --if-exist lr-del GR_test-node",
-			"ovn-nbctl --timeout=15 --if-exist ls-del ext_test-node",
-			"ovn-nbctl --timeout=15 --if-exist ls-del ext_ext_test-node",
-		})
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_test-node",
@@ -808,6 +829,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			&nbdb.LogicalRouter{
 				Name:     types.OVNClusterRouter,
 				Policies: []string{"match3-UUID", "match4-UUID", "match6-UUID"},
+				UUID:     types.OVNClusterRouter + "-UUID",
 			},
 		}
 		gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
