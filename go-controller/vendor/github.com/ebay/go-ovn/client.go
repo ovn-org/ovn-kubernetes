@@ -281,7 +281,6 @@ type ovndb struct {
 	client       *libovsdb.OvsdbClient
 	cache        map[string]map[string]libovsdb.Row
 	cachemutex   sync.RWMutex
-	tranmutex    sync.Mutex
 	signalCB     OVNSignal
 	disconnectCB OVNDisconnectedCallback
 	db           string
