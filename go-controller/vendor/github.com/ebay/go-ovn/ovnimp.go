@@ -146,9 +146,6 @@ func (odbi *ovndb) getRowsMatchingUUID(table, field, uuid string) ([]string, err
 }
 
 func (odbi *ovndb) transact(db string, ops ...libovsdb.Operation) ([]libovsdb.OperationResult, error) {
-	// Only support one trans at same time now.
-	odbi.tranmutex.Lock()
-	defer odbi.tranmutex.Unlock()
 	reply, err := odbi.client.Transact(db, ops...)
 
 	if err != nil {
