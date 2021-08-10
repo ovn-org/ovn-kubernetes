@@ -46,11 +46,11 @@ type Client interface {
 	SetOption(Option) error
 	Connected() bool
 	DisconnectNotify() chan struct{}
-	Echo() error
-	Transact(...ovsdb.Operation) ([]ovsdb.OperationResult, error)
-	Monitor(...TableMonitor) (string, error)
-	MonitorAll() (string, error)
-	MonitorCancel(id string) error
+	Echo(context.Context) error
+	Transact(context.Context, ...ovsdb.Operation) ([]ovsdb.OperationResult, error)
+	Monitor(context.Context, ...TableMonitor) (string, error)
+	MonitorAll(context.Context) (string, error)
+	MonitorCancel(ctx context.Context, id string) error
 	NewTableMonitor(m model.Model, fields ...interface{}) TableMonitor
 	API
 }
@@ -149,7 +149,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 		return err
 	}
 
-	dbs, err := o.listDbs()
+	dbs, err := o.listDbs(ctx)
 	if err != nil {
 		o.rpcClient.Close()
 		return err
@@ -167,7 +167,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 		return fmt.Errorf("target database not found")
 	}
 
-	schema, err := o.getSchema(o.dbModel.Name())
+	schema, err := o.getSchema(ctx, o.dbModel.Name())
 	errors := o.dbModel.Validate(schema)
 	if len(errors) > 0 {
 		var combined []string
@@ -205,7 +205,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 		o.monitorsMutex.Lock()
 		defer o.monitorsMutex.Unlock()
 		for id, request := range o.monitors {
-			err = o.monitor(id, reconnect, request...)
+			err = o.monitor(ctx, id, reconnect, request...)
 			if err != nil {
 				o.rpcClient.Close()
 				return err
@@ -312,10 +312,10 @@ func (o *ovsdbClient) update(args []json.RawMessage, reply *[]interface{}) error
 // getSchema returns the schema in use for the provided database name
 // RFC 7047 : get_schema
 // Should only be called when mutex is held
-func (o *ovsdbClient) getSchema(dbName string) (*ovsdb.DatabaseSchema, error) {
+func (o *ovsdbClient) getSchema(ctx context.Context, dbName string) (*ovsdb.DatabaseSchema, error) {
 	args := ovsdb.NewGetSchemaArgs(dbName)
 	var reply ovsdb.DatabaseSchema
-	err := o.rpcClient.Call("get_schema", args, &reply)
+	err := o.rpcClient.CallWithContext(ctx, "get_schema", args, &reply)
 	if err != nil {
 		if err == rpc2.ErrShutdown {
 			return nil, ErrNotConnected
@@ -328,9 +328,9 @@ func (o *ovsdbClient) getSchema(dbName string) (*ovsdb.DatabaseSchema, error) {
 // listDbs returns the list of databases on the server
 // RFC 7047 : list_dbs
 // Should only be called when mutex is held
-func (o *ovsdbClient) listDbs() ([]string, error) {
+func (o *ovsdbClient) listDbs(ctx context.Context) ([]string, error) {
 	var dbs []string
-	err := o.rpcClient.Call("list_dbs", nil, &dbs)
+	err := o.rpcClient.CallWithContext(ctx, "list_dbs", nil, &dbs)
 	if err != nil {
 		if err == rpc2.ErrShutdown {
 			return nil, ErrNotConnected
@@ -342,7 +342,7 @@ func (o *ovsdbClient) listDbs() ([]string, error) {
 
 // Transact performs the provided Operations on the database
 // RFC 7047 : transact
-func (o *ovsdbClient) Transact(operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
+func (o *ovsdbClient) Transact(ctx context.Context, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
 	var reply []ovsdb.OperationResult
 	if ok := o.Schema().ValidateOperations(operation...); !ok {
 		return nil, fmt.Errorf("validation failed for the operation")
@@ -354,7 +354,7 @@ func (o *ovsdbClient) Transact(operation ...ovsdb.Operation) ([]ovsdb.OperationR
 		o.rpcMutex.Unlock()
 		return nil, ErrNotConnected
 	}
-	err := o.rpcClient.Call("transact", args, &reply)
+	err := o.rpcClient.CallWithContext(ctx, "transact", args, &reply)
 	o.rpcMutex.Unlock()
 	if err != nil {
 		if err == rpc2.ErrShutdown {
@@ -366,17 +366,17 @@ func (o *ovsdbClient) Transact(operation ...ovsdb.Operation) ([]ovsdb.OperationR
 }
 
 // MonitorAll is a convenience method to monitor every table/column
-func (o *ovsdbClient) MonitorAll() (string, error) {
+func (o *ovsdbClient) MonitorAll(ctx context.Context) (string, error) {
 	var options []TableMonitor
 	for name := range o.dbModel.Types() {
 		options = append(options, TableMonitor{Table: name})
 	}
-	return o.Monitor(options...)
+	return o.Monitor(ctx, options...)
 }
 
 // MonitorCancel will request cancel a previously issued monitor request
 // RFC 7047 : monitor_cancel
-func (o *ovsdbClient) MonitorCancel(id string) error {
+func (o *ovsdbClient) MonitorCancel(ctx context.Context, id string) error {
 	var reply ovsdb.OperationResult
 	args := ovsdb.NewMonitorCancelArgs(id)
 	o.rpcMutex.Lock()
@@ -384,7 +384,7 @@ func (o *ovsdbClient) MonitorCancel(id string) error {
 	if o.rpcClient == nil {
 		return ErrNotConnected
 	}
-	err := o.rpcClient.Call("monitor_cancel", args, &reply)
+	err := o.rpcClient.CallWithContext(ctx, "monitor_cancel", args, &reply)
 	if err != nil {
 		if err == rpc2.ErrShutdown {
 			return ErrNotConnected
@@ -428,12 +428,12 @@ func (o *ovsdbClient) NewTableMonitor(m model.Model, fields ...interface{}) Tabl
 // and populate the cache with them. Subsequent updates will be processed
 // by the Update Notifications
 // RFC 7047 : monitor
-func (o *ovsdbClient) Monitor(options ...TableMonitor) (string, error) {
+func (o *ovsdbClient) Monitor(ctx context.Context, options ...TableMonitor) (string, error) {
 	id := uuid.NewString()
-	return id, o.monitor(id, false, options...)
+	return id, o.monitor(ctx, id, false, options...)
 }
 
-func (o *ovsdbClient) monitor(id string, reconnect bool, options ...TableMonitor) error {
+func (o *ovsdbClient) monitor(ctx context.Context, id string, reconnect bool, options ...TableMonitor) error {
 	if len(options) == 0 {
 		return fmt.Errorf("no monitor options provided")
 	}
@@ -463,7 +463,7 @@ func (o *ovsdbClient) monitor(id string, reconnect bool, options ...TableMonitor
 	if o.rpcClient == nil {
 		return ErrNotConnected
 	}
-	err := o.rpcClient.Call("monitor", args, &reply)
+	err := o.rpcClient.CallWithContext(ctx, "monitor", args, &reply)
 	if err != nil {
 		if err == rpc2.ErrShutdown {
 			return ErrNotConnected
@@ -480,7 +480,7 @@ func (o *ovsdbClient) monitor(id string, reconnect bool, options ...TableMonitor
 }
 
 // Echo tests the liveness of the OVSDB connetion
-func (o *ovsdbClient) Echo() error {
+func (o *ovsdbClient) Echo(ctx context.Context) error {
 	args := ovsdb.NewEchoArgs()
 	var reply []interface{}
 	o.rpcMutex.RLock()
@@ -488,7 +488,7 @@ func (o *ovsdbClient) Echo() error {
 	if o.rpcClient == nil {
 		return ErrNotConnected
 	}
-	err := o.rpcClient.Call("echo", args, &reply)
+	err := o.rpcClient.CallWithContext(ctx, "echo", args, &reply)
 	if err != nil {
 		if err == rpc2.ErrShutdown {
 			return ErrNotConnected

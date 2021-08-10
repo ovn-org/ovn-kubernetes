@@ -19,7 +19,12 @@ type OvsSet struct {
 
 // NewOvsSet creates a new OVSDB style set from a Go interface (object)
 func NewOvsSet(obj interface{}) (OvsSet, error) {
-	v := reflect.ValueOf(obj)
+	var v reflect.Value
+	if reflect.TypeOf(obj).Kind() == reflect.Ptr {
+		v = reflect.ValueOf(obj).Elem()
+	} else {
+		v = reflect.ValueOf(obj)
+	}
 	ovsSet := make([]interface{}, 0)
 	switch v.Kind() {
 	case reflect.Slice, reflect.Array:
@@ -31,10 +36,14 @@ func NewOvsSet(obj interface{}) (OvsSet, error) {
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
 		reflect.Float32, reflect.Float64, reflect.Bool:
 		ovsSet = append(ovsSet, v.Interface())
-	case reflect.ValueOf(UUID{}).Kind():
-		ovsSet = append(ovsSet, v.Interface())
+	case reflect.Struct:
+		if v.Type() == reflect.TypeOf(UUID{}) {
+			ovsSet = append(ovsSet, v.Interface())
+		} else {
+			return OvsSet{}, fmt.Errorf("ovsset supports only go slice/string/numbers/uuid or pointers to those types")
+		}
 	default:
-		return OvsSet{}, fmt.Errorf("ovsset supports only go slice/string/numbers/uuid types")
+		return OvsSet{}, fmt.Errorf("ovsset supports only go slice/string/numbers/uuid or pointers to those types")
 	}
 	return OvsSet{ovsSet}, nil
 }

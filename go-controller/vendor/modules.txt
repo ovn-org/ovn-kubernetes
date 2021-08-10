@@ -34,7 +34,7 @@ github.com/bhendo/go-powershell/utils
 github.com/cenkalti/backoff/v4
 # github.com/cenkalti/hub v1.0.1
 github.com/cenkalti/hub
-# github.com/cenkalti/rpc2 v0.0.0-20210220005819-4a29bc83afe1
+# github.com/cenkalti/rpc2 v0.0.0-20210604223624-c1acbc6ec984
 github.com/cenkalti/rpc2
 github.com/cenkalti/rpc2/jsonrpc
 # github.com/cespare/xxhash/v2 v2.1.1
@@ -171,7 +171,7 @@ github.com/onsi/gomega/matchers/support/goraph/edge
 github.com/onsi/gomega/matchers/support/goraph/node
 github.com/onsi/gomega/matchers/support/goraph/util
 github.com/onsi/gomega/types
-# github.com/ovn-org/libovsdb v0.6.1-0.20210728143211-5f41f6da59f7
+# github.com/ovn-org/libovsdb v0.6.1-0.20210803142447-94fe2cdc514e
 github.com/ovn-org/libovsdb/cache
 github.com/ovn-org/libovsdb/client
 github.com/ovn-org/libovsdb/mapper
