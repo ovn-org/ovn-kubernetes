@@ -3,11 +3,13 @@ package util
 import (
 	"bytes"
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"net"
 	"reflect"
+	"strconv"
 	"testing"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 
 	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
@@ -297,6 +299,74 @@ func TestUpdateIPsSlice(t *testing.T) {
 			if !reflect.DeepEqual(ans, tt.want) {
 				t.Errorf("got %v, want %v", ans, tt.want)
 			}
+		})
+	}
+}
+
+func TestFilterIPsSlice(t *testing.T) {
+
+	var tests = []struct {
+		s, cidrs []string
+		keep     bool
+		want     []string
+	}{
+		{
+			s:     []string{"1.0.0.1", "2.0.0.1", "2001::1", "2002::1"},
+			cidrs: []string{"1.0.0.0/24"},
+			keep:  true,
+			want:  []string{"1.0.0.1"},
+		},
+		{
+			s:     []string{"1.0.0.1", "2.0.0.1", "2001::1", "2002::1"},
+			cidrs: []string{"1.0.0.0/24"},
+			keep:  false,
+			want:  []string{"2.0.0.1", "2001::1", "2002::1"},
+		},
+		{
+			s:     []string{"1.0.0.1", "2.0.0.1", "2001::1", "2002::1"},
+			cidrs: []string{"2001::/64"},
+			keep:  true,
+			want:  []string{"2001::1"},
+		},
+		{
+			s:     []string{"1.0.0.1", "2.0.0.1", "2001::1", "2002::1"},
+			cidrs: []string{"2001::/64"},
+			keep:  false,
+			want:  []string{"1.0.0.1", "2.0.0.1", "2002::1"},
+		},
+		{
+			s:     []string{"1.0.0.1", "2.0.0.1", "2001::1", "2002::1"},
+			cidrs: []string{"1.0.0.0/24", "2001::/64", "3.0.0.0/24"},
+			keep:  false,
+			want:  []string{"2.0.0.1", "2002::1"},
+		},
+		{
+			s:     []string{"1.0.0.1", "2.0.0.1", "2001::1", "2002::1"},
+			cidrs: []string{"1.0.0.0/24", "2001::/64", "3.0.0.0/24"},
+			keep:  true,
+			want:  []string{"1.0.0.1", "2001::1"},
+		},
+		{
+			s:     []string{"1.0.0.1", "2.0.0.1", "2001::1", "2002::1"},
+			cidrs: []string{"1.0.0.0/24", "0.0.0.0/0"},
+			keep:  true,
+			want:  []string{"1.0.0.1", "2.0.0.1"},
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			cidrs := []net.IPNet{}
+			for _, cidr := range tc.cidrs {
+				_, n, err := net.ParseCIDR(cidr)
+				if err != nil {
+					t.Fatal(err)
+				}
+				cidrs = append(cidrs, *n)
+			}
+
+			actual := FilterIPsSlice(tc.s, cidrs, tc.keep)
+			assert.Equal(t, tc.want, actual)
 		})
 	}
 }

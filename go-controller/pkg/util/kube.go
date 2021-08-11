@@ -10,6 +10,9 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -20,12 +23,12 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/cert"
 	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
 
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	cnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
@@ -228,9 +231,9 @@ const (
 //
 // Note that the changes below is based on following assumptions, which is true today.
 // - a pod's default network is OVN managed
-func GetPodNetSelAnnotation(pod *kapi.Pod, netAttachAnnot string) ([]*types.NetworkSelectionElement, error) {
+func GetPodNetSelAnnotation(pod *kapi.Pod, netAttachAnnot string) ([]*cnitypes.NetworkSelectionElement, error) {
 	var networkAnnotation string
-	var networks []*types.NetworkSelectionElement
+	var networks []*cnitypes.NetworkSelectionElement
 
 	networkAnnotation = pod.Annotations[netAttachAnnot]
 	if networkAnnotation == "" {
@@ -278,56 +281,24 @@ func UseEndpointSlices(kubeClient kubernetes.Interface) bool {
 }
 
 type LbEndpoints struct {
-	EPs  []discovery.Endpoint
-	Port int32
-}
-
-func (e LbEndpoints) IPs() []string {
-	ipsSet := sets.NewString()
-	for _, endpoint := range e.EPs {
-		for _, ip := range endpoint.Addresses {
-			ipsSet.Insert(ip)
-		}
-	}
-	return ipsSet.List()
-}
-
-// LocalToNode returns a LbEndpoint object containing only the endpoints that
-// are located on the specified node
-func (e LbEndpoints) LocalToNode(nodeName string) LbEndpoints {
-	res := LbEndpoints{Port: e.Port, EPs: make([]discovery.Endpoint, 0)}
-
-	for _, ep := range e.EPs {
-		// (astoycos) TODO remove this when fully moved to EndpointSlices in Node Code
-		if ep.NodeName == nil {
-			if GetWorkerFromGatewayRouter(nodeName) == ep.Topology["kubernetes.io/hostname"] {
-				res.EPs = append(res.EPs, ep)
-			}
-		} else {
-			if GetWorkerFromGatewayRouter(nodeName) == *ep.NodeName {
-				res.EPs = append(res.EPs, ep)
-			}
-		}
-	}
-	return res
+	V4IPs []string
+	V6IPs []string
+	Port  int32
 }
 
 // GetLbEndpoints return the endpoints that belong to the IPFamily as a slice of IPs
-func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort, family kapi.IPFamily) LbEndpoints {
-	lbEps := LbEndpoints{[]discovery.Endpoint{}, 0}
+func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort) LbEndpoints {
+	v4ips := sets.NewString()
+	v6ips := sets.NewString()
+
+	out := LbEndpoints{}
 	// return an empty object so the caller don't have to check for nil and can use it as an iterator
 	if len(slices) == 0 {
-		return lbEps
+		return out
 	}
 
 	for _, slice := range slices {
-		klog.V(4).Infof("Getting endpoints for slice %s", slice.Name)
-		// Only return addresses that belong to the requested IP family
-		if slice.AddressType != discovery.AddressType(family) {
-			klog.V(4).Infof("Slice %s with different IP Family endpoints, requested: %s received: %s",
-				slice.Name, slice.AddressType, family)
-			continue
-		}
+		klog.V(4).Infof("Getting endpoints for slice %s/%s", slice.Namespace, slice.Name)
 
 		// build the list of endpoints in the slice
 		for _, port := range slice.Ports {
@@ -346,43 +317,58 @@ func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort,
 				continue
 			}
 
-			lbEps.Port = *port.Port
+			out.Port = *port.Port
 			for _, endpoint := range slice.Endpoints {
 				// Skip endpoints that are not ready
 				if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
 					klog.V(4).Infof("Slice endpoints Not Ready")
 					continue
 				}
-				lbEps.EPs = append(lbEps.EPs, endpoint)
+				for _, ip := range endpoint.Addresses {
+					klog.V(4).Infof("Adding slice %s endpoints: %v, port: %d", slice.Name, endpoint.Addresses, *port.Port)
+					switch slice.AddressType {
+					case discovery.AddressTypeIPv4:
+						v4ips.Insert(ip)
+					case discovery.AddressTypeIPv6:
+						v6ips.Insert(ip)
+					default:
+						klog.V(5).Infof("Skipping FQDN slice %s/%s", slice.Namespace, slice.Name)
+					}
+				}
 			}
 		}
 	}
 
-	klog.V(4).Infof("LB Endpoints for %s are: %v on port: %d", slices[0].Labels[discovery.LabelServiceName],
-		lbEps.IPs(), lbEps.Port)
-	return lbEps
+	out.V4IPs = v4ips.List()
+	out.V6IPs = v6ips.List()
+	klog.V(4).Infof("LB Endpoints for %s/%s are: %v / %v on port: %d",
+		slices[0].Namespace, slices[0].Labels[discovery.LabelServiceName],
+		out.V4IPs, out.V6IPs, out.Port)
+	return out
 }
 
-// HasValidEndpoint returns true if at least one valid endpoint is contained in the given
-// slices
-func HasValidEndpoint(service *kapi.Service, slices []*discovery.EndpointSlice) bool {
-	if slices == nil {
-		return false
+type K8sObject interface {
+	metav1.Object
+	k8sruntime.Object
+}
+
+func ExternalIDsForObject(obj K8sObject) map[string]string {
+	gk := obj.GetObjectKind().GroupVersionKind().GroupKind()
+	nsn := k8stypes.NamespacedName{
+		Namespace: obj.GetNamespace(),
+		Name:      obj.GetName(),
 	}
-	if len(slices) == 0 {
-		return false
-	}
-	for _, ip := range GetClusterIPs(service) {
-		family := kapi.IPv4Protocol
-		if utilnet.IsIPv6String(ip) {
-			family = kapi.IPv6Protocol
+
+	if gk.String() == "" {
+		kinds, _, err := scheme.Scheme.ObjectKinds(obj)
+		if err != nil || len(kinds) == 0 || len(kinds) > 1 {
+			klog.Warningf("BUG: object has no / ambiguous GVK: %#v, err", obj, err)
 		}
-		for _, svcPort := range service.Spec.Ports {
-			eps := GetLbEndpoints(slices, svcPort, family)
-			if len(eps.IPs()) > 0 {
-				return true
-			}
-		}
+		gk = kinds[0].GroupKind()
 	}
-	return false
+
+	return map[string]string{
+		types.OvnK8sPrefix + "/owner": nsn.String(),
+		types.OvnK8sPrefix + "/kind":  gk.String(),
+	}
 }
