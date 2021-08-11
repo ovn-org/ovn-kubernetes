@@ -120,10 +120,6 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, 
 }
 
 func (p pod) baseCmds(fexec *ovntest.FakeExec) {
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,output_port find Logical_Router_Static_Route options={ecmp_symmetric_reply=\"true\"}",
-		Output: "",
-	})
 }
 
 func (p pod) populateLogicalSwitchCache(fakeOvn *FakeOVN) {
