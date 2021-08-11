@@ -225,3 +225,40 @@ func UpdateIPsSlice(s, oldIPs, newIPs []string) []string {
 	}
 	return n
 }
+
+// FilterIPsSlice will filter a list of IPs by a list of CIDRs. By default,
+// it will *remove* all IPs that match filter, unless keep is true.
+//
+// It is dual-stack aware.
+func FilterIPsSlice(s []string, filter []net.IPNet, keep bool) []string {
+	out := make([]string, 0, len(s))
+ipLoop:
+	for _, ipStr := range s {
+		ip := net.ParseIP(ipStr)
+		is4 := ip.To4() != nil
+
+		for _, cidr := range filter {
+			if is4 && cidr.IP.To4() != nil && cidr.Contains(ip) {
+				if keep {
+					out = append(out, ipStr)
+					continue ipLoop
+				} else {
+					continue ipLoop
+				}
+			}
+			if !is4 && cidr.IP.To4() == nil && cidr.Contains(ip) {
+				if keep {
+					out = append(out, ipStr)
+					continue ipLoop
+				} else {
+					continue ipLoop
+				}
+			}
+		}
+		if !keep { // discard mode, and nothing matched.
+			out = append(out, ipStr)
+		}
+	}
+
+	return out
+}
