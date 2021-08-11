@@ -11,6 +11,12 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 )
 
+func init() {
+	// libovsdb matcher might produce a lengthy output that will be cropped by
+	// default gomega output limit, set to 0 to unlimit.
+	gomegaformat.MaxLength = 0
+}
+
 // isSetEqual compares a slice as an unordered set
 func isSetEqual(x, y interface{}) bool {
 	// used gomega for now
@@ -61,8 +67,11 @@ func matchAndReplaceNamedUUIDs(actual, expected []TestData) {
 		for j, y := range actual {
 			name, _ := getUUID(x)
 			uuid, _ := getUUID(y)
-			if name == "" || uuid == "" {
-				continue
+			if uuid == "" {
+				panic(fmt.Sprintf("Actual model does not have a UUID:\n%s", gomegaformat.Object(y, 1)))
+			}
+			if name == "" {
+				panic(fmt.Sprintf("Expected model does not have a (named) UUID:\n%s", gomegaformat.Object(x, 1)))
 			}
 			if !testDataEqual(x, y, true) {
 				continue
@@ -111,7 +120,7 @@ func matchAndReplaceNamedUUIDs(actual, expected []TestData) {
 }
 
 // testDataEqual tests for equality assuming input libovsdb models, as follows:
-// - Expects input to be pointers to struct
+// - Expects input to be pointers to struct and only its ovsdb fields are tested.
 // - If ignoreUUIDs, strings, slices or maps that contain UUIDs are ignored. Slices
 //   and maps lengths are still checked to match.
 // - Slices are compared as an unordered set
@@ -250,6 +259,10 @@ func matchTestData(ignoreUUID bool, expected TestData) *testDataMatcher {
 		expected:   expected,
 		ignoreUUID: ignoreUUID,
 	}
+}
+
+func EqualIgnoringUUIDs(expected TestData) gomegatypes.GomegaMatcher {
+	return matchTestData(true, expected)
 }
 
 type testDataMatcher struct {

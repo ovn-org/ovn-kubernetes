@@ -46,15 +46,15 @@ const (
 	// ACL Priorities
 
 	// Default routed multicast allow acl rule priority
-	DefaultRoutedMcastAllowPriority = "1013"
+	DefaultRoutedMcastAllowPriority = 1013
 	// Default multicast allow acl rule priority
-	DefaultMcastAllowPriority = "1012"
+	DefaultMcastAllowPriority = 1012
 	// Default multicast deny acl rule priority
-	DefaultMcastDenyPriority = "1011"
+	DefaultMcastDenyPriority = 1011
 	// Default allow acl rule priority
-	DefaultAllowPriority = "1001"
+	DefaultAllowPriority = 1001
 	// Default deny acl rule priority
-	DefaultDenyPriority = "1000"
+	DefaultDenyPriority = 1000
 
 	// priority of logical router policies on the OVNClusterRouter
 	EgressFirewallStartPriority           = "10000"
@@ -113,4 +113,7 @@ const (
 	GeneveHeaderLengthIPv4 = 58
 	// Geneve header length for IPv6 (https://github.com/openshift/cluster-network-operator/pull/720#issuecomment-664020823)
 	GeneveHeaderLengthIPv6 = GeneveHeaderLengthIPv4 + 20
+
+	ClusterPortGroupName    = "clusterPortGroup"
+	ClusterRtrPortGroupName = "clusterRtrPortGroup"
 )

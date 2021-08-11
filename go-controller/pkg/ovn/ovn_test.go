@@ -98,12 +98,14 @@ func (o *FakeOVN) restart() {
 }
 
 func (o *FakeOVN) shutdown() {
-	close(o.stopChan)
 	o.watcher.Shutdown()
+	o.controller.nbClient.Close()
+	o.controller.sbClient.Close()
 	err := o.controller.ovnNBClient.Close()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	err = o.controller.ovnSBClient.Close()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	close(o.stopChan)
 	o.wg.Wait()
 }
 

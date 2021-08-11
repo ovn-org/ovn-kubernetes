@@ -11,6 +11,7 @@ import (
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -268,11 +269,15 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				gomega.Expect(len(gwLRPIPs) != 0).To(gomega.BeTrue())
 
 				// clusterController.WatchNodes() needs to following two port groups to have been created.
-				fakeOvn.controller.clusterRtrPortGroupUUID, err = createPortGroup(fakeOvn.controller.ovnNBClient, clusterRtrPortGroupName, clusterRtrPortGroupName)
-				fakeOvn.controller.clusterPortGroupUUID, err = createPortGroup(fakeOvn.controller.ovnNBClient, clusterPortGroupName, clusterPortGroupName)
+				pg := libovsdbops.BuildPortGroup(ovntypes.ClusterPortGroupName, ovntypes.ClusterPortGroupName, nil, nil)
+				err = libovsdbops.CreateOrUpdatePortGroups(fakeOvn.controller.nbClient, pg)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				pg = libovsdbops.BuildPortGroup(ovntypes.ClusterRtrPortGroupName, ovntypes.ClusterRtrPortGroupName, nil, nil)
+				err = libovsdbops.CreateOrUpdatePortGroups(fakeOvn.controller.nbClient, pg)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.asf.EventuallyExpectEmptyAddressSet(hostNetworkNamespace)
+				fakeOvn.asf.EventuallyExpectEmptyAddressSetExist(hostNetworkNamespace)
 
 				fakeOvn.controller.WatchNodes()
 
