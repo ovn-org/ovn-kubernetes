@@ -10,31 +10,29 @@ backends and the original client IP address is lost due to SNAT. If set to `loca
 source IP is propagated through the service and to the destination, while service traffic arriving at nodes without 
 local endpoints is dropped. 
 
+Setting an `ExternalTrafficPolicy` to `Local` is only allowed for Services of type `NodePort` or `LoadBalancer`. The
+APIServer enforces this requirement.
+
 ## Implementing `externalTrafficPolicy` In OVN-Kubernetes 
 
 To properly implement this feature for all relevant traffic flows, required changing how OVN, Iptables rules, and 
 Physical OVS flows are updated and managed in OVN-Kubernetes
 
-## New OVN Loabalancer 
+## OVN Load_Balancer configuration
 
-For services with `externalTrafficPolicy:local` traffic destined for a cluster networked pods will hit the new OVN 
-loadbalancer which resembles the following 
+Normally, each service in Kubernetes has a corresponding single Load_Balancer row created in OVN. This LB is attached
+to all node switches and gateway routers (GWRs). ExternalTrafficPolicy creates multiple LBs, however.
 
-```
-_uuid               : 8d317d7f-6818-4374-8dfa-fcf8685504b5
-external_ids        : {TCP_lb_gateway_router=GR_ovn-control-plane_local}
-health_check        : []
-ip_port_mappings    : {}
-name                : ""
-options             : {skip_snat="true"}
-protocol            : tcp
-selection_fields    : []
-vips                : {}
-```
+Specifically, different load balancers are attached to switches versus routers. The node switch LBs handle traffic from pods, 
+whereas the gateway router LBs handle external traffic.
 
-This new loabalancer contains the `_local` postfix along with the `skip_snat="true"` option and is applied to the
-GatewayRouters and Worker switches. It is needed to override the `lb_force_snat_ip=router_ip` option that is on all the Gateway Routers, which allows ingress traffic to arrive at OVN managed endpoints with the original client IP. All Vips 
-for services with `externalTrafficPolicy:local` will reside on this loadbalancer. 
+Thus, an additional LB is created with the `skip_snat="true"` option and is applied to the GatewayRouters 
+and Worker switches. It is needed to override the `lb_force_snat_ip=router_ip` option that is on all the Gateway Routers, 
+which allows ingress traffic to arrive at OVN managed endpoints with the original client IP.
+
+All externally-accessible vips (NodePort, ExternalIPs, LoadBalancer Status IPs) for services with `externalTrafficPolicy:local` 
+will reside on this loadbalancer. The loadbalancer backends may be empty, depending on whether there are pods local
+to that node.
 
 ## Handling Flows between the overlay and underlay
 
