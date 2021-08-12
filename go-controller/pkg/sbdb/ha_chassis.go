@@ -6,7 +6,7 @@ package sbdb
 // HAChassis defines an object in HA_Chassis table
 type HAChassis struct {
 	UUID        string            `ovsdb:"_uuid"`
-	Chassis     []string          `ovsdb:"chassis"`
+	Chassis     *string           `ovsdb:"chassis"`
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
 	Priority    int               `ovsdb:"priority"`
 }

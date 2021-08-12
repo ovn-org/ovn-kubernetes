@@ -17,5 +17,5 @@ type NBGlobal struct {
 	Options        map[string]string `ovsdb:"options"`
 	SbCfg          int               `ovsdb:"sb_cfg"`
 	SbCfgTimestamp int               `ovsdb:"sb_cfg_timestamp"`
-	SSL            []string          `ovsdb:"ssl"`
+	SSL            *string           `ovsdb:"ssl"`
 }

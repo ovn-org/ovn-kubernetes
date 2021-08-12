@@ -7,16 +7,16 @@ type (
 	DHCPOptionsType = string
 )
 
-const (
+var (
 	DHCPOptionsTypeBool         DHCPOptionsType = "bool"
-	DHCPOptionsTypeUint8        DHCPOptionsType = "uint8"
-	DHCPOptionsTypeUint16       DHCPOptionsType = "uint16"
-	DHCPOptionsTypeUint32       DHCPOptionsType = "uint32"
+	DHCPOptionsTypeDomains      DHCPOptionsType = "domains"
+	DHCPOptionsTypeHostID       DHCPOptionsType = "host_id"
 	DHCPOptionsTypeIpv4         DHCPOptionsType = "ipv4"
 	DHCPOptionsTypeStaticRoutes DHCPOptionsType = "static_routes"
 	DHCPOptionsTypeStr          DHCPOptionsType = "str"
-	DHCPOptionsTypeHostID       DHCPOptionsType = "host_id"
-	DHCPOptionsTypeDomains      DHCPOptionsType = "domains"
+	DHCPOptionsTypeUint16       DHCPOptionsType = "uint16"
+	DHCPOptionsTypeUint32       DHCPOptionsType = "uint32"
+	DHCPOptionsTypeUint8        DHCPOptionsType = "uint8"
 )
 
 // DHCPOptions defines an object in DHCP_Options table

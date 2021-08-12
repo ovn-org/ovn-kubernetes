@@ -9,7 +9,7 @@ type (
 	ACLSeverity  = string
 )
 
-const (
+var (
 	ACLActionAllow          ACLAction    = "allow"
 	ACLActionAllowRelated   ACLAction    = "allow-related"
 	ACLActionAllowStateless ACLAction    = "allow-stateless"
@@ -18,10 +18,10 @@ const (
 	ACLDirectionFromLport   ACLDirection = "from-lport"
 	ACLDirectionToLport     ACLDirection = "to-lport"
 	ACLSeverityAlert        ACLSeverity  = "alert"
-	ACLSeverityWarning      ACLSeverity  = "warning"
-	ACLSeverityNotice       ACLSeverity  = "notice"
-	ACLSeverityInfo         ACLSeverity  = "info"
 	ACLSeverityDebug        ACLSeverity  = "debug"
+	ACLSeverityInfo         ACLSeverity  = "info"
+	ACLSeverityNotice       ACLSeverity  = "notice"
+	ACLSeverityWarning      ACLSeverity  = "warning"
 )
 
 // ACL defines an object in ACL table
@@ -32,8 +32,8 @@ type ACL struct {
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
 	Log         bool              `ovsdb:"log"`
 	Match       string            `ovsdb:"match"`
-	Meter       []string          `ovsdb:"meter"`
-	Name        []string          `ovsdb:"name"`
+	Meter       *string           `ovsdb:"meter"`
+	Name        *string           `ovsdb:"name"`
 	Priority    int               `ovsdb:"priority"`
-	Severity    []ACLSeverity     `ovsdb:"severity"`
+	Severity    *ACLSeverity      `ovsdb:"severity"`
 }
