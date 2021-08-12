@@ -94,7 +94,15 @@ func NewNBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 		return nil, err
 	}
 
-	_, err = c.MonitorAll()
+	// TODO(flaviof): whenever we get around to passing a context down from the caller, we will
+	// replace the TODO with that one.
+	ctx, cancel := context.WithCancel(context.TODO())
+	go func() {
+		<-stopCh
+		cancel()
+	}()
+
+	_, err = c.MonitorAll(ctx)
 	if err != nil {
 		c.Close()
 		return nil, err

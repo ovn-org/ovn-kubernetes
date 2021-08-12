@@ -1,6 +1,7 @@
 package libovsdbops
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/ovn-org/libovsdb/client"
@@ -12,7 +13,7 @@ func TransactAndCheck(client client.Client, ops []ovsdb.Operation) ([]ovsdb.Oper
 		return []ovsdb.OperationResult{{}}, nil
 	}
 
-	results, err := client.Transact(ops...)
+	results, err := client.Transact(context.TODO(), ops...)
 	if err != nil {
 		return nil, fmt.Errorf("error in transact with ops %+v: %v", ops, err)
 	}
