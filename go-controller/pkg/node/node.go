@@ -505,7 +505,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	mgmtPort.CheckManagementPortHealth(mgmtPortConfig, n.stopChan)
 
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
-		// start health check to ensure there are no stale OVS internal ports
+		// start health check to ensure there are no stale OVS internal or transient ports
 		go wait.Until(func() {
 			checkForStaleOVSInterfaces(n.name, n.watchFactory.(*factory.WatchFactory))
 		}, time.Minute, n.stopChan)

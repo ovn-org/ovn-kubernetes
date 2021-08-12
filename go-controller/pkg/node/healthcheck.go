@@ -133,6 +133,28 @@ func checkForStaleOVSInternalPorts() {
 	}
 }
 
+// checkForStaleOVSTransientPorts checks for OVS transient ports and delete them
+func checkForStaleOVSTransientPorts() {
+	stdout, _, err := util.RunOVSVsctl("--data=bare", "--no-headings", "--columns=name", "find",
+		"port", "other_config:transient=true")
+	if err != nil {
+		klog.Errorf("Failed to list OVS transient interfaces")
+		return
+	}
+	if len(stdout) == 0 {
+		return
+	}
+	values := strings.Split(stdout, "\n\n")
+	for _, val := range values {
+		klog.Warningf("Found transient interface %s, so deleting it", val)
+		_, stderr, err := util.RunOVSVsctl("--if-exists", "--with-iface", "del-port", val)
+		if err != nil {
+			klog.Errorf("Failed to delete OVS port/interface %s: stderr: %s (%v)",
+				val, stderr, err)
+		}
+	}
+}
+
 // checkForStaleOVSRepresentorInterfaces checks for stale OVS ports backed by Repreresentor interfaces,
 // derive iface-id from pod name and namespace then remove any interfaces assoicated with a sandbox that are
 // not scheduled to the node.
@@ -221,6 +243,7 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 // checkForStaleOVSInterfaces periodically checks for stale OVS interfaces
 func checkForStaleOVSInterfaces(nodeName string, wf factory.ObjectCacheInterface) {
 	checkForStaleOVSInternalPorts()
+	checkForStaleOVSTransientPorts()
 	checkForStaleOVSRepresentorInterfaces(nodeName, wf)
 }
 
