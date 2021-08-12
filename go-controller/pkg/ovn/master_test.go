@@ -17,6 +17,7 @@ import (
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
@@ -280,7 +281,7 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID, sct
 }
 */
 
-func addNodeLogicalFlows(fexec *ovntest.FakeExec, node *tNode, clusterCIDR string, enableIPv6, sync bool) {
+func addNodeLogicalFlows(fexec *ovntest.FakeExec, node *tNode, clusterCIDR string, enableIPv6 bool) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --format=csv --columns=name,other-config find logical_switch",
 	})
@@ -308,88 +309,12 @@ func addNodeLogicalFlows(fexec *ovntest.FakeExec, node *tNode, clusterCIDR strin
 		Output: "29df5ce5-2802-4ee5-891f-4fb27ca776e9 (" + types.K8sPrefix + node.Name + ")",
 	})
 
-	addLRPForV6 := ""
-	if enableIPv6 {
-		addLRPForV6 = " " + node.LrpIPv6 + "/64"
-	}
-
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 -- --if-exists remove logical_switch " + node.Name + " other-config exclude_ips",
 		"ovn-nbctl --timeout=15 --if-exists lrp-del " + types.RouterToSwitchPrefix + node.Name + " -- lrp-add ovn_cluster_router " + types.RouterToSwitchPrefix + node.Name + " " + node.NodeLRPMAC + " " + node.NodeGWIP + " -- lrp-set-gateway-chassis " + types.RouterToSwitchPrefix + node.Name + " " + node.SystemID + " 1",
-		"ovn-nbctl --timeout=15 -- --may-exist lr-add " + node.GWRouter + " -- set logical_router " + node.GWRouter + " options:chassis=" + node.SystemID + " external_ids:physical_ip=" + node.GatewayRouterIP + " external_ids:physical_ips=" + node.GatewayRouterIP,
-		"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + types.OVNJoinSwitch + " " + types.JoinSwitchToGWRouterPrefix + node.GWRouter + " -- set logical_switch_port " + types.JoinSwitchToGWRouterPrefix + node.GWRouter + " type=router options:router-port=" + types.GWRouterToJoinSwitchPrefix + node.GWRouter + " addresses=router",
-		"ovn-nbctl --timeout=15 -- --if-exists lrp-del " + types.GWRouterToJoinSwitchPrefix + node.GWRouter + " -- lrp-add " + node.GWRouter + " " + types.GWRouterToJoinSwitchPrefix + node.GWRouter + " " + node.LrpMAC + " " + node.LrpIP + "/16" + addLRPForV6,
 	})
 
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 set logical_router " + node.GWRouter + " options:lb_force_snat_ip=router_ip",
-		"ovn-nbctl --timeout=15 set logical_router " + node.GWRouter + " options:snat-ct-zone=0",
-		"ovn-nbctl --timeout=15 set logical_router " + node.GWRouter + " options:always_learn_from_arp_request=false",
-		"ovn-nbctl --timeout=15 set logical_router " + node.GWRouter + " options:dynamic_neigh_routers=true",
-		"ovn-nbctl --timeout=15 --may-exist lr-route-add " + node.GWRouter + " " + clusterCIDR + " " + node.DrLrpIP,
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --may-exist ls-add " + types.ExternalSwitchPrefix + node.Name,
-	})
-
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + types.ExternalSwitchPrefix + node.Name + " br-eth0_" + node.Name + " -- lsp-set-addresses br-eth0_" + node.Name + " unknown -- lsp-set-type br-eth0_" + node.Name + " localnet -- lsp-set-options br-eth0_" + node.Name + " network_name=" + types.PhysicalNetworkName + " -- set logical_switch_port br-eth0_" + node.Name + " tag_request=" + "1024",
-		"ovn-nbctl --timeout=15 -- --if-exists lrp-del " + types.GWRouterToExtSwitchPrefix + node.GWRouter + " -- lrp-add " + node.GWRouter + " " + types.GWRouterToExtSwitchPrefix + node.GWRouter + " " + node.PhysicalBridgeMAC + " " + node.GatewayRouterIPMask + " -- set logical_router_port " + types.GWRouterToExtSwitchPrefix + node.GWRouter + " external-ids:gateway-physical-ip=yes",
-		"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + types.ExternalSwitchPrefix + node.Name + " " + types.EXTSwitchToGWRouterPrefix + node.GWRouter + " -- set logical_switch_port " + types.EXTSwitchToGWRouterPrefix + node.GWRouter + " type=router options:router-port=" + types.GWRouterToExtSwitchPrefix + node.GWRouter + " addresses=\"" + node.PhysicalBridgeMAC + "\"",
-		"ovn-nbctl --timeout=15 --may-exist lr-route-add " + node.GWRouter + " 0.0.0.0/0 " + node.GatewayRouterNextHop + " " + types.GWRouterToExtSwitchPrefix + node.GWRouter,
-		"ovn-nbctl --timeout=15 --may-exist lr-route-add " + types.OVNClusterRouter + " " + node.LrpIP + " " + node.LrpIP,
-	})
-	if enableIPv6 {
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --may-exist lr-route-add " + types.OVNClusterRouter + " " + node.LrpIPv6 + " " + node.LrpIPv6,
-		})
-	}
-	fexec.AddFakeCmdsNoOutputNoError([]string{"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add " + types.OVNClusterRouter + " " + node.NodeSubnet + " " + node.LrpIP,
-		fmt.Sprintf("ovn-nbctl --timeout=15 --columns _uuid --format=csv --no-headings find nat external_ip=\"%s\" type=snat logical_ip=\"%s\"", node.GatewayRouterIP, clusterCIDR),
-		"ovn-nbctl --timeout=15 --if-exists lr-nat-del " + node.GWRouter + " snat " + clusterCIDR,
-		"ovn-nbctl --timeout=15 lr-nat-add " + node.GWRouter + " snat " + node.GatewayRouterIP + " " + clusterCIDR,
-	})
-
-	addPBRandNATRules(fexec, node.Name, node.NodeSubnet, node.GatewayRouterIP, node.NodeMgmtPortIP, node.NodeMgmtPortMAC)
-
-	if sync {
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 -- --may-exist lr-add " + node.GWRouter + " -- set logical_router " + node.GWRouter + " options:chassis=" + node.SystemID + " external_ids:physical_ip=" + node.GatewayRouterIP + " external_ids:physical_ips=" + node.GatewayRouterIP,
-			"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + types.OVNJoinSwitch + " " + types.JoinSwitchToGWRouterPrefix + node.GWRouter + " -- set logical_switch_port " + types.JoinSwitchToGWRouterPrefix + node.GWRouter + " type=router options:router-port=" + types.GWRouterToJoinSwitchPrefix + node.GWRouter + " addresses=router",
-			"ovn-nbctl --timeout=15 -- --if-exists lrp-del " + types.GWRouterToJoinSwitchPrefix + node.GWRouter + " -- lrp-add " + node.GWRouter + " " + types.GWRouterToJoinSwitchPrefix + node.GWRouter + " " + node.LrpMAC + " " + node.LrpIP + "/16" + addLRPForV6,
-		})
-
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 set logical_router " + node.GWRouter + " options:lb_force_snat_ip=router_ip",
-			"ovn-nbctl --timeout=15 set logical_router " + node.GWRouter + " options:snat-ct-zone=0",
-			"ovn-nbctl --timeout=15 set logical_router " + node.GWRouter + " options:always_learn_from_arp_request=false",
-			"ovn-nbctl --timeout=15 set logical_router " + node.GWRouter + " options:dynamic_neigh_routers=true",
-			"ovn-nbctl --timeout=15 --may-exist lr-route-add " + node.GWRouter + " " + clusterCIDR + " " + node.DrLrpIP,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --may-exist ls-add " + types.ExternalSwitchPrefix + node.Name,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + types.ExternalSwitchPrefix + node.Name + " br-eth0_" + node.Name + " -- lsp-set-addresses br-eth0_" + node.Name + " unknown -- lsp-set-type br-eth0_" + node.Name + " localnet -- lsp-set-options br-eth0_" + node.Name + " network_name=" + types.PhysicalNetworkName + " -- set logical_switch_port br-eth0_" + node.Name + " tag_request=" + "1024",
-			"ovn-nbctl --timeout=15 -- --if-exists lrp-del " + types.GWRouterToExtSwitchPrefix + node.GWRouter + " -- lrp-add " + node.GWRouter + " " + types.GWRouterToExtSwitchPrefix + node.GWRouter + " " + node.PhysicalBridgeMAC + " " + node.GatewayRouterIPMask + " -- set logical_router_port " + types.GWRouterToExtSwitchPrefix + node.GWRouter + " external-ids:gateway-physical-ip=yes",
-			"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + types.ExternalSwitchPrefix + node.Name + " " + types.EXTSwitchToGWRouterPrefix + node.GWRouter + " -- set logical_switch_port " + types.EXTSwitchToGWRouterPrefix + node.GWRouter + " type=router options:router-port=" + types.GWRouterToExtSwitchPrefix + node.GWRouter + " addresses=\"" + node.PhysicalBridgeMAC + "\"",
-			"ovn-nbctl --timeout=15 --may-exist lr-route-add " + node.GWRouter + " 0.0.0.0/0 " + node.GatewayRouterNextHop + " " + types.GWRouterToExtSwitchPrefix + node.GWRouter,
-			"ovn-nbctl --timeout=15 --may-exist lr-route-add " + types.OVNClusterRouter + " " + node.LrpIP + " " + node.LrpIP,
-		})
-
-		if enableIPv6 {
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + types.OVNClusterRouter + " " + node.LrpIPv6 + " " + node.LrpIPv6,
-			})
-		}
-
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add " + types.OVNClusterRouter + " " + node.NodeSubnet + " " + node.LrpIP,
-			fmt.Sprintf("ovn-nbctl --timeout=15 --columns _uuid --format=csv --no-headings find nat external_ip=\"%s\" type=snat logical_ip=\"%s\"", node.GatewayRouterIP, clusterCIDR),
-			"ovn-nbctl --timeout=15 --if-exists lr-nat-del " + node.GWRouter + " snat " + clusterCIDR,
-			"ovn-nbctl --timeout=15 lr-nat-add " + node.GWRouter + " snat " + node.GatewayRouterIP + " " + clusterCIDR,
-		})
-	}
+	addPBRandNATRules(fexec, node, clusterCIDR)
 
 }
 
@@ -894,13 +819,18 @@ subnet=%s
 })
 */
 
-func addPBRandNATRules(fexec *ovntest.FakeExec, nodeName, nodeSubnet, nodeIP, mgmtPortIP, mgmtPortMAC string) {
-	matchStr1 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == %s /* %s */`, nodeName, nodeIP, nodeName)
-	matchStr2 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == 9.9.9.9 /* %s */`, nodeName, nodeName)
+func addPBRandNATRules(fexec *ovntest.FakeExec, node *tNode, clusterCIDR string) {
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		fmt.Sprintf("ovn-nbctl --timeout=15 --columns _uuid --format=csv --no-headings find nat external_ip=\"%s\" type=snat logical_ip=\"%s\"", node.GatewayRouterIP, clusterCIDR),
+		"ovn-nbctl --timeout=15 --if-exists lr-nat-del " + node.GWRouter + " snat " + clusterCIDR,
+		"ovn-nbctl --timeout=15 lr-nat-add " + node.GWRouter + " snat " + node.GatewayRouterIP + " " + clusterCIDR,
+	})
+	matchStr1 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == %s /* %s */`, node.Name, node.GatewayRouterIP, node.Name)
+	matchStr2 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == 9.9.9.9 /* %s */`, node.Name, node.Name)
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,match,nexthops find logical_router_policy priority=" + types.NodeSubnetPolicyPriority,
-		"ovn-nbctl --timeout=15 --may-exist lr-policy-add " + types.OVNClusterRouter + " " + types.NodeSubnetPolicyPriority + " " + matchStr1 + " reroute " + mgmtPortIP,
-		"ovn-nbctl --timeout=15 --may-exist lr-policy-add " + types.OVNClusterRouter + " " + types.NodeSubnetPolicyPriority + " " + matchStr2 + " reroute " + mgmtPortIP,
+		"ovn-nbctl --timeout=15 --may-exist lr-policy-add " + types.OVNClusterRouter + " " + types.NodeSubnetPolicyPriority + " " + matchStr1 + " reroute " + node.NodeMgmtPortIP,
+		"ovn-nbctl --timeout=15 --may-exist lr-policy-add " + types.OVNClusterRouter + " " + types.NodeSubnetPolicyPriority + " " + matchStr2 + " reroute " + node.NodeMgmtPortIP,
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=match find logical_router_policy",
 	})
 }
@@ -1131,6 +1061,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	*/
 
 	ginkgo.It("sets up a shared gateway", func() {
+
 		app.Action = func(ctx *cli.Context) error {
 			node1 := tNode{
 				Name:                 "node1",
@@ -1189,7 +1120,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient}, testNode.Name)
 			ifaceID := node1.PhysicalBridgeName + "_" + node1.Name
 			vlanID := uint(1024)
-			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
+			l3Config := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeShared,
 				ChassisID:      node1.SystemID,
 				InterfaceID:    ifaceID,
@@ -1198,7 +1129,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				NextHops:       ovntest.MustParseIPs(node1.GatewayRouterNextHop),
 				NodePortEnable: true,
 				VLANID:         &vlanID,
-			})
+			}
+			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
@@ -1216,7 +1148,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			hostAddrs, err := util.ParseNodeHostAddresses(updatedNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_" + types.OVNClusterRouter + " networks",
 			})
@@ -1224,16 +1155,30 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_" + node1.Name + " networks",
 				Output: "[\"100.64.0.2/16\"]",
 			})
-			addNodeLogicalFlows(fexec, &node1, clusterCIDR, config.IPv6Mode, true)
-
-			addPBRandNATRules(fexec, node1.Name, node1.NodeSubnet, node1.GatewayRouterIP, node1.NodeMgmtPortIP, node1.NodeMgmtPortMAC)
+			addNodeLogicalFlows(fexec, &node1, clusterCIDR, config.IPv6Mode)
+			addPBRandNATRules(fexec, &node1, clusterCIDR)
 
 			f, err = factory.NewMasterWatchFactory(fakeClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			dbSetup := libovsdbtest.TestSetup{}
+			dbSetup := libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					&nbdb.LogicalSwitch{
+						UUID: types.OVNJoinSwitch + "-UUID",
+						Name: types.OVNJoinSwitch,
+					},
+					&nbdb.LogicalRouter{
+						UUID: types.OVNClusterRouter + "-UUID",
+						Name: types.OVNClusterRouter,
+					},
+					&nbdb.LogicalSwitch{
+						UUID: node1.Name + "-UUID",
+						Name: node1.Name,
+					},
+				},
+			}
 			libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1250,11 +1195,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			clusterController.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(ovntest.MustParseIPNet(types.V4NodeLocalNATSubnet))
 
 			// clusterController.WatchNodes() needs to following two port groups to have been created.
-			pg := libovsdbops.BuildPortGroup(types.ClusterPortGroupName, types.ClusterPortGroupName, nil, nil)
-			err = libovsdbops.CreateOrUpdatePortGroups(clusterController.nbClient, pg)
+			clusterPG := libovsdbops.BuildPortGroup(types.ClusterPortGroupName, types.ClusterPortGroupName, nil, nil)
+			err = libovsdbops.CreateOrUpdatePortGroups(clusterController.nbClient, clusterPG)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			pg = libovsdbops.BuildPortGroup(types.ClusterRtrPortGroupName, types.ClusterRtrPortGroupName, nil, nil)
-			err = libovsdbops.CreateOrUpdatePortGroups(clusterController.nbClient, pg)
+			clusterRouterPG := libovsdbops.BuildPortGroup(types.ClusterRtrPortGroupName, types.ClusterRtrPortGroupName, nil, nil)
+			err = libovsdbops.CreateOrUpdatePortGroups(clusterController.nbClient, clusterRouterPG)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// Let the real code run and ensure OVN database sync
@@ -1264,8 +1209,32 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
-			gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			var clusterSubnets []*net.IPNet
+			for _, clusterSubnet := range config.Default.ClusterSubnets {
+				clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
+			}
+			joinLRPIP, joinLRNetwork, _ := net.ParseCIDR(node1.LrpIP + "/16")
+			dLRPIP, dLRPNetwork, _ := net.ParseCIDR(node1.DrLrpIP + "/16")
+
+			joinLRPIPs := &net.IPNet{
+				IP:   joinLRPIP,
+				Mask: joinLRNetwork.Mask,
+			}
+			dLRPIPs := &net.IPNet{
+				IP:   dLRPIP,
+				Mask: dLRPNetwork.Mask,
+			}
+			clusterRouterPG.UUID = types.ClusterRtrPortGroupName + "-UUID"
+			clusterRouterPG.Ports = []string{fakeUUID}
+			clusterPG.UUID = types.ClusterPortGroupName + "-UUID"
+			clusterPG.Ports = []string{fakeUUID}
+			expectedDatabaseState := generateGatewayInitExpectedNB(node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs})
+			expectedDatabaseState = append(expectedDatabaseState, clusterRouterPG)
+			expectedDatabaseState = append(expectedDatabaseState, clusterPG)
+			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+			gomega.Eventually(fexec.CalledMatchesExpected()).Should(gomega.BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 
