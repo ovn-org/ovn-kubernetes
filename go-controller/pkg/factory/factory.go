@@ -485,6 +485,12 @@ func (wf *WatchFactory) GetPods(namespace string) ([]*kapi.Pod, error) {
 	return podLister.Pods(namespace).List(labels.Everything())
 }
 
+// GetPods returns all the pods in a given namespace by the label selector
+func (wf *WatchFactory) GetPodsBySelector(namespace string, selector metav1.LabelSelector) ([]*kapi.Pod, error) {
+	podLister := wf.informers[podType].lister.(listers.PodLister)
+	return podLister.Pods(namespace).List(labels.Set(selector.MatchLabels).AsSelector())
+}
+
 // GetNodes returns the node specs of all the nodes
 func (wf *WatchFactory) GetNodes() ([]*kapi.Node, error) {
 	nodeLister := wf.informers[nodeType].lister.(listers.NodeLister)
@@ -525,6 +531,12 @@ func (wf *WatchFactory) GetNamespace(name string) (*kapi.Namespace, error) {
 func (wf *WatchFactory) GetNamespaces() ([]*kapi.Namespace, error) {
 	namespaceLister := wf.informers[namespaceType].lister.(listers.NamespaceLister)
 	return namespaceLister.List(labels.Everything())
+}
+
+// GetNamespaces returns a list of namespaces in the cluster by the label selector
+func (wf *WatchFactory) GetNamespacesBySelector(selector metav1.LabelSelector) ([]*kapi.Namespace, error) {
+	namespaceLister := wf.informers[namespaceType].lister.(listers.NamespaceLister)
+	return namespaceLister.List(labels.Set(selector.MatchLabels).AsSelector())
 }
 
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {
