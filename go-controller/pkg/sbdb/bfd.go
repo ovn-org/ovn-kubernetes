@@ -7,11 +7,11 @@ type (
 	BFDStatus = string
 )
 
-const (
+var (
+	BFDStatusAdminDown BFDStatus = "admin_down"
 	BFDStatusDown      BFDStatus = "down"
 	BFDStatusInit      BFDStatus = "init"
 	BFDStatusUp        BFDStatus = "up"
-	BFDStatusAdminDown BFDStatus = "admin_down"
 )
 
 // BFD defines an object in BFD table

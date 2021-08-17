@@ -2,6 +2,7 @@
 package rpc2
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log"
@@ -266,10 +267,22 @@ func (c *Client) Go(method string, args interface{}, reply interface{}, done cha
 	return call
 }
 
+// CallWithContext invokes the named function, waits for it to complete, and
+// returns its error status, or an error from Context timeout.
+func (c *Client) CallWithContext(ctx context.Context, method string, args interface{}, reply interface{}) error {
+	call := c.Go(method, args, reply, make(chan *Call, 1))
+	select {
+	case <-call.Done:
+		return call.Error
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return nil
+}
+
 // Call invokes the named function, waits for it to complete, and returns its error status.
 func (c *Client) Call(method string, args interface{}, reply interface{}) error {
-	call := <-c.Go(method, args, reply, make(chan *Call, 1)).Done
-	return call.Error
+	return c.CallWithContext(context.Background(), method, args, reply)
 }
 
 func (call *Call) done() {

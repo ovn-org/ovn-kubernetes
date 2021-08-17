@@ -9,10 +9,10 @@ type (
 	QoSDirection = string
 )
 
-const (
+var (
 	QoSActionDSCP         QoSAction    = "dscp"
-	QoSBandwidthRate      QoSBandwidth = "rate"
 	QoSBandwidthBurst     QoSBandwidth = "burst"
+	QoSBandwidthRate      QoSBandwidth = "rate"
 	QoSDirectionFromLport QoSDirection = "from-lport"
 	QoSDirectionToLport   QoSDirection = "to-lport"
 )
