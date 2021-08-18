@@ -5,7 +5,6 @@ import (
 	"net"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/pkg/errors"
 
@@ -224,11 +223,9 @@ type ovnAddressSet struct {
 	name     string
 	hashName string
 	uuid     string
-	ips      map[string]net.IP
 }
 
 type ovnAddressSets struct {
-	sync.RWMutex
 	name string
 	ipv4 *ovnAddressSet
 	ipv6 *ovnAddressSet
@@ -274,12 +271,8 @@ func newOvnAddressSet(nbClient libovsdbclient.Client, name string, ips []net.IP)
 		nbClient: nbClient,
 		name:     name,
 		hashName: hashedAddressSet(name),
-		ips:      make(map[string]net.IP),
 	}
-	for _, ip := range ips {
-		as.ips[ip.String()] = ip
-	}
-
+	uniqIPs := ipToStringSort(ips)
 	addrSet := &nbdb.AddressSet{Name: hashedAddressSet(name)}
 	err := as.nbClient.Get(addrSet)
 	if err != nil && err != libovsdbclient.ErrNotFound {
@@ -291,13 +284,9 @@ func newOvnAddressSet(nbClient libovsdbclient.Client, name string, ips []net.IP)
 		as.uuid = addrSet.UUID
 		klog.V(5).Infof("New(%s) already exists; updating IPs", asDetail(as))
 
-		var ipStrings []string
-		for _, ip := range ips {
-			ipStrings = append(ipStrings, ip.String())
-		}
 		addrset := &nbdb.AddressSet{
 			UUID:        as.uuid,
-			Addresses:   ipStrings,
+			Addresses:   uniqIPs,
 			ExternalIDs: map[string]string{"name": as.name},
 		}
 		ops, err := as.nbClient.Where(addrset).Update(addrset, &addrset.Addresses)
@@ -313,7 +302,7 @@ func newOvnAddressSet(nbClient libovsdbclient.Client, name string, ips []net.IP)
 		//create a new addressSet
 		ops, err := nbClient.Create(&nbdb.AddressSet{
 			Name:        as.hashName,
-			Addresses:   as.allIPs(),
+			Addresses:   uniqIPs,
 			ExternalIDs: map[string]string{"name": as.name},
 		})
 		if err != nil {
@@ -354,10 +343,11 @@ func (as *ovnAddressSets) GetName() string {
 	return as.name
 }
 
+// SetIPs replaces the address set's IP addresses with the given slice.
+// NOTE: this function is not thread-safe when when run concurrently with other
+// IP add/delete operations.
 func (as *ovnAddressSets) SetIPs(ips []net.IP) error {
 	var err error
-	as.Lock()
-	defer as.Unlock()
 
 	v4ips, v6ips := splitIPsByFamily(ips)
 
@@ -375,9 +365,6 @@ func (as *ovnAddressSets) AddIPs(ips []net.IP) error {
 	if len(ips) == 0 {
 		return nil
 	}
-
-	as.Lock()
-	defer as.Unlock()
 
 	v4ips, v6ips := splitIPsByFamily(ips)
 	if as.ipv6 != nil {
@@ -399,9 +386,6 @@ func (as *ovnAddressSets) DeleteIPs(ips []net.IP) error {
 		return nil
 	}
 
-	as.Lock()
-	defer as.Unlock()
-
 	v4ips, v6ips := splitIPsByFamily(ips)
 	if as.ipv6 != nil {
 		if err := as.ipv6.deleteIPs(v6ips); err != nil {
@@ -417,22 +401,17 @@ func (as *ovnAddressSets) DeleteIPs(ips []net.IP) error {
 }
 
 func (as *ovnAddressSets) Destroy() error {
-	as.Lock()
-	defer as.Unlock()
-
 	if as.ipv4 != nil {
 		err := as.ipv4.destroy()
 		if err != nil {
 			return err
 		}
-		as.ipv4 = nil
 	}
 	if as.ipv6 != nil {
 		err := as.ipv6.destroy()
 		if err != nil {
 			return err
 		}
-		as.ipv6 = nil
 	}
 	return nil
 }
@@ -457,25 +436,18 @@ func (as *ovnAddressSet) setIPs(ips []net.IP) error {
 			as.name, err)
 	}
 
-	as.ips = make(map[string]net.IP, len(ips))
-	for _, ip := range ips {
-		as.ips[ip.String()] = ip
-	}
 	return nil
 }
 
 // addIPs appends the set of IPs to the existing address_set.
 func (as *ovnAddressSet) addIPs(ips []net.IP) error {
-	// dedup
+
 	uniqIPs := make([]string, 0, len(ips))
 	for _, ip := range ips {
-		if _, ok := as.ips[ip.String()]; ok {
-			continue
-		}
 		uniqIPs = append(uniqIPs, ip.String())
 	}
 
-	if len(uniqIPs) == 0 {
+	if len(ips) == 0 {
 		return nil
 	}
 
@@ -487,7 +459,7 @@ func (as *ovnAddressSet) addIPs(ips []net.IP) error {
 		Value:   uniqIPs,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to add IPs toaddress set %q (%v)",
+		return fmt.Errorf("failed to add IPs to address set %q (%v)",
 			asDetail(as), err)
 	}
 	_, err = libovsdbops.TransactAndCheck(as.nbClient, ops)
@@ -496,9 +468,6 @@ func (as *ovnAddressSet) addIPs(ips []net.IP) error {
 			as.name, err)
 	}
 
-	for _, ip := range ips {
-		as.ips[ip.String()] = ip
-	}
 	return nil
 }
 
@@ -507,9 +476,6 @@ func (as *ovnAddressSet) deleteIPs(ips []net.IP) error {
 	// dedup
 	uniqIPs := make([]string, 0, len(ips))
 	for _, ip := range ips {
-		if _, ok := as.ips[ip.String()]; !ok {
-			continue
-		}
 		uniqIPs = append(uniqIPs, ip.String())
 	}
 
@@ -535,9 +501,6 @@ func (as *ovnAddressSet) deleteIPs(ips []net.IP) error {
 			as.name, err)
 	}
 
-	for _, ip := range uniqIPs {
-		delete(as.ips, ip)
-	}
 	return nil
 }
 
@@ -555,7 +518,6 @@ func (as *ovnAddressSet) destroy() error {
 			as.name, err)
 	}
 
-	as.ips = nil
 	return nil
 }
 
@@ -581,10 +543,10 @@ func splitIPsByFamily(ips []net.IP) (v4 []net.IP, v6 []net.IP) {
 	return
 }
 
-func (as *ovnAddressSet) allIPs() []string {
+func ipToStringSort(ips []net.IP) []string {
 	// my kingdom for a ".values()" function
-	out := make([]string, 0, len(as.ips))
-	for _, ip := range as.ips {
+	out := make([]string, 0, len(ips))
+	for _, ip := range ips {
 		out = append(out, ip.String())
 	}
 	// so the tests are predictable
