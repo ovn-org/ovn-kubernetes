@@ -315,7 +315,7 @@ func (oc *Controller) deleteGWRoutesForPod(namespace string, podIPNets []*net.IP
 }
 
 // addEgressGwRoutesForPod handles adding all routes to gateways for a pod on a specific GR
-func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*net.IPNet, namespace, node string) error {
+func (oc *Controller) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddrs []*net.IPNet, namespace, node string) error {
 	nsInfo := oc.getNamespaceLocked(namespace)
 	defer nsInfo.Unlock()
 	gr := util.GetGatewayRouterFromNode(node)

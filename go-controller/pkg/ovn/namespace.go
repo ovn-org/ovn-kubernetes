@@ -50,7 +50,34 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 	}
 }
 
-func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
+func (oc *Controller) getRoutingExternalGWs(nsInfo *namespaceInfo) *gatewayInfo {
+	res := gatewayInfo{}
+	// return a copy of the object so it can be handled without the
+	// namespace locked
+	res.bfdEnabled = nsInfo.routingExternalGWs.bfdEnabled
+	res.gws = make([]net.IP, len(nsInfo.routingExternalGWs.gws))
+	copy(res.gws, nsInfo.routingExternalGWs.gws)
+	return &res
+}
+
+func (oc *Controller) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]*gatewayInfo {
+	// return a copy of the object so it can be handled without the
+	// namespace locked
+	res := make(map[string]*gatewayInfo)
+	for k, v := range nsInfo.routingExternalPodGWs {
+		item := &gatewayInfo{
+			bfdEnabled: v.bfdEnabled,
+			gws:        make([]net.IP, len(v.gws)),
+		}
+		copy(item.gws, v.gws)
+		res[k] = item
+	}
+	return res
+}
+
+// addPodToNamespace adds the pod's IP to the namespace's address set and returns
+// pod's routing gateway info
+func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]*gatewayInfo, error) {
 	nsInfo := oc.ensureNamespaceLocked(ns)
 	defer nsInfo.Unlock()
 
@@ -58,24 +85,15 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 		var err error
 		nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns)
 		if err != nil {
-			return fmt.Errorf("unable to add pod to namespace. Cannot create address set for namespace: %s,"+
-				"error: %v", ns, err)
+			return nil, nil, fmt.Errorf("unable to add pod to namespace %s; failed to create namespace address set: %v", ns, err)
 		}
 	}
 
-	if err := nsInfo.addressSet.AddIPs(createIPAddressSlice(portInfo.ips)); err != nil {
-		return err
+	if err := nsInfo.addressSet.AddIPs(createIPAddressSlice(ips)); err != nil {
+		return nil, nil, err
 	}
 
-	// If multicast is allowed and enabled for the namespace, add the port
-	// to the allow policy.
-	if oc.multicastSupport && nsInfo.multicastEnabled {
-		if err := podAddAllowMulticastPolicy(oc.ovnNBClient, ns, portInfo); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nil
 }
 
 func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error {
@@ -109,6 +127,10 @@ func createIPAddressSlice(ips []*net.IPNet) []net.IP {
 	return ipAddrs
 }
 
+func isNamespaceMulticastEnabled(annotations map[string]string) bool {
+	return annotations[nsMulticastAnnotation] == "true"
+}
+
 // Creates an explicit "allow" policy for multicast traffic within the
 // namespace if multicast is enabled. Otherwise, removes the "allow" policy.
 // Traffic will be dropped by the default multicast deny ACL.
@@ -117,9 +139,8 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 		return
 	}
 
-	enabled := (ns.Annotations[nsMulticastAnnotation] == "true")
+	enabled := isNamespaceMulticastEnabled(ns.Annotations)
 	enabledOld := nsInfo.multicastEnabled
-
 	if enabledOld == enabled {
 		return
 	}
