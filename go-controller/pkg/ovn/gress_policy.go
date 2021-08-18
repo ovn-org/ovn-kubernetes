@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -105,27 +106,27 @@ func (gp *gressPolicy) ensurePeerAddressSet(factory addressset.AddressSetFactory
 	return nil
 }
 
-func (gp *gressPolicy) addPeerSvcVip(service *v1.Service) error {
+func (gp *gressPolicy) addPeerSvcVip(nbClient client.Client, service *v1.Service) error {
 	if gp.peerAddressSet == nil {
 		return fmt.Errorf("peer AddressSet is nil, cannot add peer Service: %s for gressPolicy: %s",
 			service.ObjectMeta.Name, gp.policyName)
 	}
 
 	klog.V(5).Infof("Service %s is applied to same namespace as network Policy, finding Service VIPs", service.Name)
-	ips := getSvcVips(service)
+	ips := getSvcVips(nbClient, service)
 
 	klog.V(5).Infof("Adding SVC clusterIP to gressPolicy's Address Set: %v", ips)
 	return gp.peerAddressSet.AddIPs(ips)
 }
 
-func (gp *gressPolicy) deletePeerSvcVip(service *v1.Service) error {
+func (gp *gressPolicy) deletePeerSvcVip(nbClient client.Client, service *v1.Service) error {
 	if gp.peerAddressSet == nil {
 		return fmt.Errorf("peer AddressSet is nil, cannot add peer Service: %s for gressPolicy: %s",
 			service.ObjectMeta.Name, gp.policyName)
 	}
 
 	klog.V(5).Infof("Service %s is applied to same namespace as network Policy, finding cluster IPs", service.Name)
-	ips := getSvcVips(service)
+	ips := getSvcVips(nbClient, service)
 
 	klog.Infof("Deleting service %s, possible VIPs: %v from gressPolicy's %s Address Set", service.Name, ips, gp.policyName)
 	return gp.peerAddressSet.DeleteIPs(ips)
@@ -430,17 +431,17 @@ func (gp *gressPolicy) destroy() error {
 // or 4.ExternalIP
 // TODO adjust for upstream patch when it lands:
 // https://bugzilla.redhat.com/show_bug.cgi?id=1908540
-func getSvcVips(service *v1.Service) []net.IP {
+func getSvcVips(nbClient client.Client, service *v1.Service) []net.IP {
 	ips := make([]net.IP, 0)
 
 	if util.ServiceTypeHasNodePort(service) {
-		gatewayRouters, _, err := gateway.GetOvnGateways()
+		gatewayRouters, err := gateway.GetOvnGateways(nbClient)
 		if err != nil {
 			klog.Errorf("Cannot get gateways: %s", err)
 		}
 		for _, gatewayRouter := range gatewayRouters {
 			// VIPs would be the physical IPS of the GRs(IPs of the node) in this case
-			physicalIPs, err := gateway.GetGatewayPhysicalIPs(gatewayRouter)
+			physicalIPs, err := gateway.GetGatewayPhysicalIPs(nbClient, gatewayRouter)
 			if err != nil {
 				klog.Errorf("Unable to get gateway router %s physical ip, error: %v", gatewayRouter, err)
 				continue
