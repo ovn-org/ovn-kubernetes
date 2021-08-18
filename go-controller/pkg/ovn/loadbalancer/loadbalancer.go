@@ -173,9 +173,11 @@ func lbToColumns(lb *LB) []string {
 	}
 
 	skipSNAT := "false"
-	if lb.Opts.SkipSNAT {
-		skipSNAT = "true"
-	}
+	// HACK(cdc)
+	// re-enable when BZ 1995326 is fixed
+	//if lb.Opts.SkipSNAT {
+	//	skipSNAT = "true"
+	//}
 
 	// Session affinity
 	// If enabled, then bucket flows by 3-tuple (proto, srcip, dstip)
