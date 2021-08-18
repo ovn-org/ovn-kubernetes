@@ -807,7 +807,7 @@ func (oc *Controller) cleanExGwECMPRoutes() {
 	}()
 
 	// Get all ECMP routes in OVN and build cache
-	ovnRouteCache := buildOVNECMPCache()
+	ovnRouteCache := oc.buildOVNECMPCache()
 
 	if len(ovnRouteCache) == 0 {
 		// nothing in OVN, so no reason to search for stale routes
@@ -872,11 +872,26 @@ func (oc *Controller) cleanExGwECMPRoutes() {
 			if !ovnRoute.shouldExist {
 				klog.Infof("Found stale exgw ecmp route, podIP: %s, nexthop: %s, router: %s",
 					podIP, ovnRoute.nextHop, ovnRoute.router)
-				_, stderr, err := util.RunOVNNbctl("--if-exists", "remove", "Logical_Router",
-					strings.TrimSuffix(ovnRoute.router, "\n"), "static_routes", ovnRoute.uuid)
-				if err != nil {
-					klog.Errorf("Failed to destroy Logical_Router_Static_Route %s, stderr: %q, (%v)",
-						ovnRoute.uuid, stderr, err)
+				logicalRouter := nbdb.LogicalRouter{}
+				opModels := []libovsdbops.OperationModel{
+					{
+						ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
+							return lr.Name == ovnRoute.router
+						},
+						OnModelMutations: func() []model.Mutation {
+							return []model.Mutation{
+								{
+									Field:   &logicalRouter.StaticRoutes,
+									Mutator: ovsdb.MutateOperationDelete,
+									Value:   []string{ovnRoute.uuid},
+								},
+							}
+						},
+						ExistingResult: &[]nbdb.LogicalRouter{},
+					},
+				}
+				if err := oc.modelClient.Delete(opModels...); err != nil {
+					klog.Errorf("Failed to destroy Logical_Router_Static_Route %s, err: %v", ovnRoute.uuid, err)
 				}
 
 				// check to see if we should also clean up bfd
@@ -1036,41 +1051,33 @@ func (oc *Controller) buildClusterECMPCacheFromPods(clusterRouteCache map[string
 	}
 }
 
-func buildOVNECMPCache() map[string][]*ovnRoute {
+func (oc *Controller) buildOVNECMPCache() map[string][]*ovnRoute {
 	ovnRouteCache := make(map[string][]*ovnRoute)
-	out, stderr, err := util.RunOVNNbctl(
-		"--format=csv", "--data=bare", "--no-heading", "--columns=_uuid,ip_prefix,nexthop,output_port", "find", "Logical_Router_Static_Route", "options={ecmp_symmetric_reply=\"true\"}")
-	if err != nil {
-		klog.Errorf("CleanECMPRoutes: failed to list ecmp routes %v %s", err, stderr)
+	logicalRouterStaticRouteRes := []nbdb.LogicalRouterStaticRoute{}
+	if err := oc.nbClient.WhereCache(func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
+		return lrsr.Options["ecmp_symmetric_reply"] == "true"
+	}).List(&logicalRouterStaticRouteRes); err != nil {
+		klog.Errorf("CleanECMPRoutes: failed to list ecmp routes %v", err)
 		return nil
 	}
-	if strings.TrimSpace(out) == "" {
-		klog.Infof("Did not find ecmp routes to clean")
-		return nil
-	}
-
-	for _, line := range strings.Split(out, "\n") {
-		values := strings.Split(line, ",")
-		uuid := values[0]
-		podIP := values[1]
-		nexthop := values[2]
-		outport := values[3]
-		gr, stderr, err := util.RunOVNNbctl(
-			"--format=csv", "--data=bare", "--no-heading", "--columns=name", "find", "Logical_Router", fmt.Sprintf("static_routes{>=}[%s]", uuid))
-		if err != nil || gr == "" {
-			klog.Errorf("CleanECMPRoutes: failed to find logical router for %s", uuid, err, stderr)
+	for _, logicalRouterStaticRoute := range logicalRouterStaticRouteRes {
+		logicalRouterRes := []nbdb.LogicalRouter{}
+		if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
+			return libovsdbops.SliceHasStringItem(lr.StaticRoutes, logicalRouterStaticRoute.UUID)
+		}).List(&logicalRouterRes); err != nil {
+			klog.Errorf("CleanECMPRoutes: failed to find logical router for %s, err: %v", logicalRouterStaticRoute.UUID, err)
 			continue
 		}
 		route := &ovnRoute{
-			nextHop: nexthop,
-			uuid:    uuid,
-			router:  gr,
-			outport: outport,
+			nextHop: logicalRouterStaticRoute.Nexthop,
+			uuid:    logicalRouterStaticRoute.UUID,
+			router:  logicalRouterRes[0].Name,
+			outport: *logicalRouterStaticRoute.OutputPort,
 		}
-		if _, ok := ovnRouteCache[podIP]; !ok {
-			ovnRouteCache[podIP] = []*ovnRoute{route}
+		if _, ok := ovnRouteCache[logicalRouterStaticRoute.IPPrefix]; !ok {
+			ovnRouteCache[logicalRouterStaticRoute.IPPrefix] = []*ovnRoute{route}
 		} else {
-			ovnRouteCache[podIP] = append(ovnRouteCache[podIP], route)
+			ovnRouteCache[logicalRouterStaticRoute.IPPrefix] = append(ovnRouteCache[logicalRouterStaticRoute.IPPrefix], route)
 		}
 	}
 	return ovnRouteCache
