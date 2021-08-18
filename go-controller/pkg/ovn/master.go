@@ -592,22 +592,10 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		return fmt.Errorf("failed to allocate join switch port IP address for node %s: %v", node.Name, err)
 	}
 
-	// OCP HACK
-	// GatewayModeLocal is only used if Local mode is specified and None shared gateway bridge is specified
-	// This is to allow local gateway mode without having to configure/use the shared gateway bridge
-	// See https://github.com/openshift/ovn-kubernetes/pull/281
 	drLRPIPs, _ := oc.joinSwIPManager.getJoinLRPCacheIPs(types.OVNClusterRouter)
-	if l3GatewayConfig.Mode == config.GatewayModeLocal {
-		err = gatewayInitMinimal(node.Name, l3GatewayConfig, oc.SCTPSupport)
-		if err != nil {
-			return fmt.Errorf("failed to init local gateway with no OVS bridge: %v", err)
-		}
-		// END OCP HACK
-	} else {
-		err = gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, drLRPIPs)
-		if err != nil {
-			return fmt.Errorf("failed to init shared interface gateway: %v", err)
-		}
+	err = gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, drLRPIPs)
+	if err != nil {
+		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
 
 	// in the case of shared gateway mode, we need to setup
