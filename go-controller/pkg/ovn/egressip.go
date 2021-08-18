@@ -226,53 +226,45 @@ func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 }
 
 func (oc *Controller) syncStaleEgressReroutePolicy(egressIPToPodIPCache map[string]sets.String) {
-	policyItems, stderr, err := util.RunOVNNbctl(
-		"--format=csv",
-		"--data=bare",
-		"--no-heading",
-		"--columns=_uuid,external_ids,match",
-		"find",
-		"logical_router_policy",
-		fmt.Sprintf("priority=%v", types.EgressIPReroutePriority),
-	)
-	if err != nil {
-		klog.Errorf("Unable to sync egress IPs, unable to find logical router policies, stderr: %s, err: %v", stderr, err)
-		return
+	logicalRouter := nbdb.LogicalRouter{}
+	logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
+	if err := oc.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
+		return lrp.Priority == types.EgressIPReroutePriority
+	}).List(&logicalRouterPolicyRes); err != nil {
+		klog.Errorf("Unable to remove stale logical router policies, could not list existing items, err: %v", err)
 	}
-	for _, policyItem := range strings.Split(policyItems, "\n") {
-		if policyItem == "" {
-			continue
-		}
-		policyFields := strings.Split(policyItem, ",")
-
-		UUID := policyFields[0]
-		externalID := policyFields[1]
-		match := policyFields[2]
-
-		// A match condition for egress IPs will look like:
-		// ip4.src == 10.244.2.5
-		splitMatch := strings.Split(match, " ")
-		logicalIP := splitMatch[len(splitMatch)-1]
-		parsedLogicalIP := net.ParseIP(logicalIP)
-		if parsedLogicalIP == nil {
-			klog.Errorf("Unable to parse logical_ip: %s from match condition: %s", logicalIP, match)
-			continue
-		}
-		egressIPName := strings.Split(externalID, "=")[1]
-
-		podIPCache, exists := egressIPToPodIPCache[egressIPName]
-		if !exists || !podIPCache.Has(parsedLogicalIP.String()) {
-			_, stderr, err := util.RunOVNNbctl(
-				"remove",
-				"logical_router",
-				types.OVNClusterRouter,
-				"policies",
-				UUID,
-			)
-			if err != nil {
-				klog.Errorf("Unable to remove stale logical router policy for EgressIP: %s, stderr: %s, err: %v", egressIPName, stderr, err)
-			}
-		}
+	opModels := []libovsdbops.OperationModel{
+		{
+			Model:          &logicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+			OnModelMutations: func() []model.Mutation {
+				uuidsToRemove := []string{}
+				for _, item := range logicalRouterPolicyRes {
+					egressIPName := item.ExternalIDs["name"]
+					podIPCache, exists := egressIPToPodIPCache[egressIPName]
+					splitMatch := strings.Split(item.Match, " ")
+					logicalIP := splitMatch[len(splitMatch)-1]
+					parsedLogicalIP := net.ParseIP(logicalIP)
+					if !exists || !podIPCache.Has(parsedLogicalIP.String()) {
+						uuidsToRemove = append(uuidsToRemove, item.UUID)
+					}
+				}
+				if len(uuidsToRemove) == 0 {
+					return nil
+				}
+				return []model.Mutation{
+					{
+						Field:   &logicalRouter.Policies,
+						Mutator: ovsdb.MutateOperationDelete,
+						Value:   uuidsToRemove,
+					},
+				}
+			},
+			ExistingResult: &[]nbdb.LogicalRouter{},
+		},
+	}
+	if err := oc.modelClient.Delete(opModels...); err != nil {
+		klog.Errorf("Unable to remove stale logical router policies, err: %v", err)
 	}
 }
 
