@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -336,29 +337,53 @@ func (oc *Controller) cleanupDGP(nodes *kapi.NodeList) error {
 	}
 	// remove SBDB MAC bindings for DGP
 	for _, ip := range []string{types.V4NodeLocalNATSubnetNextHop, types.V6NodeLocalNATSubnetNextHop} {
-		uuid, stderr, err := util.RunOVNSbctl("--columns=_uuid", "--no-headings", "find", "mac_binding",
-			fmt.Sprintf(`ip="%s"`, ip))
-		if err != nil {
-			return fmt.Errorf("unable to get DGP MAC binding, err: %v, stderr: %s", err, stderr)
+		opModels := []libovsdbops.OperationModel{
+			{
+				Model: &sbdb.MACBinding{
+					IP: ip,
+				},
+			},
 		}
-		if len(uuid) > 0 {
-			_, stderr, err = util.RunOVNSbctl("destroy", "mac_binding", uuid)
-			if err != nil {
-				return fmt.Errorf("unable to remove mac_binding for DGP, err: %v, stderr: %s", err, stderr)
-			}
+		if err := oc.modelClient.WithClient(oc.sbClient).Delete(opModels...); err != nil {
+			return fmt.Errorf("unable to remove mac_binding for DGP, err: %v", err)
 		}
 	}
 	// remove node local switch
-	_, stderr, err := util.RunOVNNbctl("--if-exists", "ls-del", types.NodeLocalSwitch)
-	if err != nil {
-		return fmt.Errorf("unable to remove node local switch, err: %v, stderr: %s", err, stderr)
+	opModels := []libovsdbops.OperationModel{
+		{
+			Model:          &nbdb.LogicalSwitch{},
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.NodeLocalSwitch },
+			ExistingResult: &[]nbdb.LogicalSwitch{},
+		},
 	}
-	dgpName := types.RouterToSwitchPrefix + types.NodeLocalSwitch
+	if err := oc.modelClient.Delete(opModels...); err != nil {
+		return fmt.Errorf("unable to remove node local switch, err: %v", err)
+	}
 
 	// remove lrp on ovn_cluster_router. Will also remove gateway chassis.
-	_, stderr, err = util.RunOVNNbctl("--if-exists", "lrp-del", dgpName)
-	if err != nil {
-		return fmt.Errorf("unable to delete DGP LRP, error: %v, stderr: %s", err, stderr)
+	dgpName := types.RouterToSwitchPrefix + types.NodeLocalSwitch
+	logicalRouter := nbdb.LogicalRouter{}
+	logicalRouterPortRes := []nbdb.LogicalRouterPort{}
+	opModels = []libovsdbops.OperationModel{
+		{
+			Model: &nbdb.LogicalRouterPort{
+				Name: dgpName,
+			},
+			ExistingResult: &logicalRouterPortRes,
+		},
+		{
+			Model: &logicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
+				return lr.Name == types.OVNClusterRouter
+			},
+			OnModelMutations: func() []model.Mutation {
+				return libovsdbops.OnReferentialModelMutation(&logicalRouter.Ports, ovsdb.MutateOperationDelete, logicalRouterPortRes)
+			},
+			ExistingResult: &[]nbdb.LogicalRouter{},
+		},
+	}
+	if err := oc.modelClient.Delete(opModels...); err != nil {
+		return fmt.Errorf("unable to delete DGP LRP, error: %v", err)
 	}
 	return nil
 }
