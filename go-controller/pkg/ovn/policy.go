@@ -1103,7 +1103,7 @@ func (oc *Controller) handlePeerPodSelectorDelete(gp *gressPolicy, obj interface
 func (oc *Controller) handlePeerServiceAdd(gp *gressPolicy, obj interface{}) {
 	service := obj.(*kapi.Service)
 	klog.V(5).Infof("A Service: %s matches the namespace as the gress policy: %s", service.Name, gp.policyName)
-	if err := gp.addPeerSvcVip(service); err != nil {
+	if err := gp.addPeerSvcVip(oc.nbClient, service); err != nil {
 		klog.Errorf(err.Error())
 	}
 }
@@ -1112,7 +1112,7 @@ func (oc *Controller) handlePeerServiceAdd(gp *gressPolicy, obj interface{}) {
 // pods that are selected by the Network Policy
 func (oc *Controller) handlePeerServiceDelete(gp *gressPolicy, obj interface{}) {
 	service := obj.(*kapi.Service)
-	if err := gp.deletePeerSvcVip(service); err != nil {
+	if err := gp.deletePeerSvcVip(oc.nbClient, service); err != nil {
 		klog.Errorf(err.Error())
 	}
 }
