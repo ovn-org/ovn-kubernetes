@@ -10,7 +10,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
-	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressfirewallscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
 	egressfirewallinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions"
 
@@ -39,14 +38,12 @@ type WatchFactory struct {
 	// requirements with atomic accesses
 	handlerCounter uint64
 
-	iFactory    informerfactory.SharedInformerFactory
-	eipFactory  egressipinformerfactory.SharedInformerFactory
-	efFactory   egressfirewallinformerfactory.SharedInformerFactory
-	efClientset egressfirewallclientset.Interface
-	informers   map[reflect.Type]*informer
+	iFactory   informerfactory.SharedInformerFactory
+	eipFactory egressipinformerfactory.SharedInformerFactory
+	efFactory  egressfirewallinformerfactory.SharedInformerFactory
+	informers  map[reflect.Type]*informer
 
-	stopChan               chan struct{}
-	egressFirewallStopChan chan struct{}
+	stopChan chan struct{}
 }
 
 // WatchFactory implements the ObjectCacheInterface interface.
@@ -87,20 +84,17 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	wf := &WatchFactory{
-		iFactory:    informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		eipFactory:  egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
-		efClientset: ovnClientset.EgressFirewallClient,
-		informers:   make(map[reflect.Type]*informer),
-		stopChan:    make(chan struct{}),
+		iFactory:   informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		eipFactory: egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
+		efFactory:  egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
+		informers:  make(map[reflect.Type]*informer),
+		stopChan:   make(chan struct{}),
 	}
-	var err error
 
-	err = egressipapi.AddToScheme(egressipscheme.Scheme)
-	if err != nil {
+	if err := egressipapi.AddToScheme(egressipscheme.Scheme); err != nil {
 		return nil, err
 	}
-	err = egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme)
-	if err != nil {
+	if err := egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -123,6 +117,8 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 			noHeadlessServiceSelector())
 	})
+
+	var err error
 
 	// Create our informer-wrapper informer (and underlying shared informer) for types we need
 	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
@@ -153,42 +149,57 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		return nil, err
 	}
 
-	wf.iFactory.Start(wf.stopChan)
-	for oType, synced := range wf.iFactory.WaitForCacheSync(wf.stopChan) {
-		if !synced {
-			return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
-		}
-	}
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		wf.informers[egressIPType], err = newInformer(egressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer())
 		if err != nil {
 			return nil, err
 		}
-		wf.eipFactory.Start(wf.stopChan)
-		for oType, synced := range wf.eipFactory.WaitForCacheSync(wf.stopChan) {
-			if !synced {
-				return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
-			}
-		}
 	}
 	if config.OVNKubernetesFeature.EnableEgressFirewall {
-		err = wf.InitializeEgressFirewallWatchFactory()
+		wf.informers[egressFirewallType], err = newInformer(egressFirewallType, wf.efFactory.K8s().V1().EgressFirewalls().Informer())
 		if err != nil {
 			return nil, err
 		}
-
 	}
+
 	return wf, nil
+}
+
+// Start starts the factory and begins processing events
+func (wf *WatchFactory) Start() error {
+	wf.iFactory.Start(wf.stopChan)
+	for oType, synced := range wf.iFactory.WaitForCacheSync(wf.stopChan) {
+		if !synced {
+			return fmt.Errorf("error in syncing cache for %v informer", oType)
+		}
+	}
+	if config.OVNKubernetesFeature.EnableEgressIP && wf.eipFactory != nil {
+		wf.eipFactory.Start(wf.stopChan)
+		for oType, synced := range wf.eipFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+	if config.OVNKubernetesFeature.EnableEgressFirewall && wf.efFactory != nil {
+		wf.efFactory.Start(wf.stopChan)
+		for oType, synced := range wf.efFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+
+	return nil
 }
 
 // NewNodeWatchFactory initializes a watch factory with significantly fewer
 // informers to save memory + bandwidth. It is to be used by the node-only process.
 func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*WatchFactory, error) {
 	wf := &WatchFactory{
-		iFactory:    informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		efClientset: ovnClientset.EgressFirewallClient,
-		informers:   make(map[reflect.Type]*informer),
-		stopChan:    make(chan struct{}),
+		iFactory:  informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		informers: make(map[reflect.Type]*informer),
+		stopChan:  make(chan struct{}),
 	}
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
@@ -244,36 +255,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 		}
 	}
 
-	wf.iFactory.Start(wf.stopChan)
-	for oType, synced := range wf.iFactory.WaitForCacheSync(wf.stopChan) {
-		if !synced {
-			return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
-		}
-	}
-
 	return wf, nil
-}
-
-func (wf *WatchFactory) InitializeEgressFirewallWatchFactory() error {
-	var err error
-	wf.efFactory = egressfirewallinformerfactory.NewSharedInformerFactory(wf.efClientset, resyncInterval)
-	wf.informers[egressFirewallType], err = newInformer(egressFirewallType, wf.efFactory.K8s().V1().EgressFirewalls().Informer())
-	if err != nil {
-		return err
-	}
-	wf.egressFirewallStopChan = make(chan struct{})
-	wf.efFactory.Start(wf.egressFirewallStopChan)
-	for oType, synced := range wf.efFactory.WaitForCacheSync(wf.egressFirewallStopChan) {
-		if !synced {
-			return fmt.Errorf("error in syncing cache for %v informer", oType)
-		}
-	}
-	return nil
-}
-
-func (wf *WatchFactory) ShutdownEgressFirewallWatchFactory() {
-	close(wf.egressFirewallStopChan)
-	wf.informers[egressFirewallType].shutdown()
 }
 
 func (wf *WatchFactory) Shutdown() {

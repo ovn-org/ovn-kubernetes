@@ -298,6 +298,11 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 
 // Run starts the actual watching.
 func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
+	// Start and sync the watch factory to begin listening for events
+	if err := oc.watchFactory.Start(); err != nil {
+		return err
+	}
+
 	oc.syncPeriodic()
 	klog.Infof("Starting all the Watchers...")
 	start := time.Now()
