@@ -33,6 +33,12 @@ func ovnControllerReadiness(target string) error {
 	} else if output != "connected" {
 		return fmt.Errorf("%q is not connected to OVN SB database, status: (%s)", target, output)
 	}
+	result, _, err := util.RunOVSAppctlWithTimeout(5, "-t", target, "coverage/read-counter", "lflow_run")
+	if err != nil {
+		return fmt.Errorf("failed getting coverage/show of %q: (%v)", target, err)
+	} else if result == "0" {
+		return fmt.Errorf("%q has not completed logical flows processing yet", target)
+	}
 
 	// Ensure that the ovs-vswitchd and ovsdb-server processes that ovn-controller
 	// dependent on are running and you need to use ovs-appctl via the unix control path
