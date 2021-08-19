@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+	goovn "github.com/ebay/go-ovn"
 	"net"
 	"testing"
 	"time"
@@ -22,7 +23,9 @@ import (
 
 func TestNewEgressDNS(t *testing.T) {
 	testCh := make(chan struct{})
-	testOvnAddFtry := addressset.NewOvnAddressSetFactory()
+	ovnNbClient := ovntest.NewMockOVNClient(goovn.DBNB)
+	defer ovnNbClient.Close()
+	testOvnAddFtry := addressset.NewOvnAddressSetFactory(ovnNbClient)
 	mockDnsOps := new(util_mocks.DNSOps)
 	util.SetDNSLibOpsMockInst(mockDnsOps)
 	tests := []struct {

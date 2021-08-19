@@ -24,7 +24,7 @@ func NewOvsSet(goSlice interface{}) (*OvsSet, error) {
 		return nil, errors.New("OvsSet supports only Go Slice types")
 	}
 
-	var ovsSet []interface{}
+	ovsSet := make([]interface{}, 0, v.Len())
 	for i := 0; i < v.Len(); i++ {
 		ovsSet = append(ovsSet, v.Index(i).Interface())
 	}
