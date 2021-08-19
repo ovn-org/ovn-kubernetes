@@ -19,7 +19,6 @@ import (
 	egressipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions"
 
 	kapi "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -572,7 +571,7 @@ func (wf *WatchFactory) ServiceInformer() cache.SharedIndexInformer {
 // This matches the behavior of kube-proxy
 func noHeadlessServiceSelector() func(options *metav1.ListOptions) {
 	// if the service is headless, skip it
-	noHeadlessEndpoints, err := labels.NewRequirement(v1.IsHeadlessService, selection.DoesNotExist, nil)
+	noHeadlessEndpoints, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
 	if err != nil {
 		// cannot occur
 		panic(err)
