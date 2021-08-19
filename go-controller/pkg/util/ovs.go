@@ -519,8 +519,9 @@ func getNbOVSDBArgs(command string, args ...string) []string {
 // RunOVNNbctlUnix runs command via ovn-nbctl, with ovn-nbctl using the unix
 // domain sockets to connect to the ovsdb-server backing the OVN NB database.
 func RunOVNNbctlUnix(args ...string) (string, string, error) {
-	cmdArgs, envVars := getNbctlArgsAndEnv(ovsCommandTimeout, args...)
-	stdout, stderr, err := runOVNretry(runner.nbctlPath, envVars, cmdArgs...)
+	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
+	cmdArgs = append(cmdArgs, args...)
+	stdout, stderr, err := runOVNretry(runner.nbctlPath, nil, cmdArgs...)
 	return strings.Trim(strings.TrimFunc(stdout.String(), unicode.IsSpace), "\""),
 		stderr.String(), err
 }
