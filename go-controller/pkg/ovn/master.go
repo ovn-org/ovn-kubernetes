@@ -714,15 +714,11 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	if err = func() error {
 		hostNetworkNamespace := config.Kubernetes.HostNetworkNamespace
 		if hostNetworkNamespace != "" {
-			nsInfo := oc.ensureNamespaceLocked(hostNetworkNamespace)
-			defer nsInfo.Unlock()
-			if nsInfo.addressSet == nil {
-				nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(hostNetworkNamespace)
-				if err != nil {
-					return fmt.Errorf("cannot create address set for namespace: %s,"+
-						"error: %v", hostNetworkNamespace, err)
-				}
+			nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(hostNetworkNamespace, true)
+			if err != nil {
+				return fmt.Errorf("failed to ensure namespace locked: %v", err)
 			}
+			defer nsUnlock()
 			if err = nsInfo.addressSet.AddIPs(hostNetworkPolicyIPs); err != nil {
 				return err
 			}
