@@ -424,7 +424,7 @@ func (jsIPManager *joinSwitchIPManager) getJoinLRPAddresses(nodeName string) []*
 	// try to get the IPs from the logical router port
 	gwLRPIPs := []*net.IPNet{}
 	gwLrpName := types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName
-	joinSubnets := jsIPManager.lsm.GetSwitchSubnets(nodeName)
+	joinSubnets := jsIPManager.lsm.GetSwitchSubnets(types.OVNJoinSwitch)
 	ifAddrs, err := util.GetLRPAddrs(gwLrpName)
 	if err == nil {
 		for _, ifAddr := range ifAddrs {
