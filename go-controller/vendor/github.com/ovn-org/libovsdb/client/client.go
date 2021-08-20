@@ -145,6 +145,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 		// FIXME: This only emits the error from the last attempted connection
 		return fmt.Errorf("failed to connect to endpoints %q: %v", o.options.endpoints, err)
 	}
+
 	if err := o.createRPC2Client(c); err != nil {
 		return err
 	}
@@ -152,6 +153,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 	dbs, err := o.listDbs(ctx)
 	if err != nil {
 		o.rpcClient.Close()
+		o.rpcClient = nil
 		return err
 	}
 
@@ -164,6 +166,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 	}
 	if !found {
 		o.rpcClient.Close()
+		o.rpcClient = nil
 		return fmt.Errorf("target database not found")
 	}
 
@@ -180,8 +183,10 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 
 	if err != nil {
 		o.rpcClient.Close()
+		o.rpcClient = nil
 		return err
 	}
+
 	o.schemaMutex.Lock()
 	o.schema = schema
 	o.schemaMutex.Unlock()
@@ -192,6 +197,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 			o.api = newAPI(o.cache)
 		} else {
 			o.rpcClient.Close()
+			o.rpcClient = nil
 			return err
 		}
 		o.cacheMutex.Unlock()
@@ -208,6 +214,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 			err = o.monitor(ctx, id, reconnect, request...)
 			if err != nil {
 				o.rpcClient.Close()
+				o.rpcClient = nil
 				return err
 			}
 		}
