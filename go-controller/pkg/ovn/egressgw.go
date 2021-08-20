@@ -520,7 +520,7 @@ func cleanUpBFDEntry(gatewayIP, gatewayRouter, prefix string) {
 	portName := prefix + types.GWRouterToExtSwitchPrefix + gatewayRouter
 
 	output, stderr, err := util.RunOVNNbctl(
-		"--format=csv", "--data=bare", "--no-heading", "--columns=bfd", "find", "Logical_Router_Static_Route", "output_port="+portName, "nexthop="+gatewayIP, "bfd!=[]")
+		"--format=csv", "--data=bare", "--no-heading", "--columns=bfd", "find", "Logical_Router_Static_Route", "output_port="+portName, "nexthop=\""+gatewayIP+"\"", "bfd!=[]")
 
 	if err != nil {
 		klog.Errorf("cleanUpBFDEntry: failed to list routes for %s, stderr: %q, (%v)", portName, gatewayIP, err, stderr)
@@ -532,7 +532,7 @@ func cleanUpBFDEntry(gatewayIP, gatewayRouter, prefix string) {
 		return
 	}
 	uuids, stderr, err := util.RunOVNNbctl(
-		"--format=csv", "--data=bare", "--no-heading", "--columns=_uuid", "find", "BFD", "logical_port="+portName, "dst_ip="+gatewayIP)
+		"--format=csv", "--data=bare", "--no-heading", "--columns=_uuid", "find", "BFD", "logical_port="+portName, "dst_ip=\""+gatewayIP+"\"")
 	if err != nil {
 		klog.Errorf("Failed to list routes for %s, stderr: %q, (%v)", gatewayRouter, err, stderr)
 		return
