@@ -117,7 +117,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 
 	// FIXME: if any of these steps fails we need to stop and try again later...
 
-	if err := oc.deletePodFromNamespace(pod.Namespace, portInfo); err != nil {
+	if err := oc.deletePodFromNamespace(pod.Namespace, portInfo.name, portInfo.uuid, portInfo.ips); err != nil {
 		klog.Errorf(err.Error())
 	}
 
@@ -149,7 +149,8 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
 	return nil
 }
 
-func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet) error {
+func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet,
+	routingExternalGWs *gatewayInfo, routingPodGWs map[string]*gatewayInfo, hybridOverlayExternalGW net.IP) error {
 	// if there are other network attachments for the pod, then check if those network-attachment's
 	// annotation has default-route key. If present, then we need to skip adding default route for
 	// OVN interface
@@ -167,14 +168,6 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 			} else {
 				otherDefaultRouteV4 = true
 			}
-		}
-	}
-	// DUALSTACK FIXME: hybridOverlayExternalGW is not Dualstack
-	var hybridOverlayExternalGW net.IP
-	if config.HybridOverlay.Enabled {
-		hybridOverlayExternalGW, err = oc.getHybridOverlayExternalGwAnnotation(pod.Namespace)
-		if err != nil {
-			return err
 		}
 	}
 
@@ -200,8 +193,8 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 			otherDefaultRoute = otherDefaultRouteV6
 		}
 		var gatewayIP net.IP
-		hasRoutingExternalGWs := len(oc.getRoutingExternalGWs(pod.Namespace).gws) > 0
-		hasPodRoutingGWs := len(oc.getRoutingPodGWs(pod.Namespace)) > 0
+		hasRoutingExternalGWs := len(routingExternalGWs.gws) > 0
+		hasPodRoutingGWs := len(routingPodGWs) > 0
 		if otherDefaultRoute || (hybridOverlayExternalGW != nil && !hasRoutingExternalGWs && !hasPodRoutingGWs) {
 			for _, clusterSubnet := range config.Default.ClusterSubnets {
 				if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
@@ -244,50 +237,6 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 		}
 	}
 	return nil
-}
-
-func (oc *Controller) getRoutingExternalGWs(ns string) gatewayInfo {
-	res := gatewayInfo{}
-	nsInfo := oc.getNamespaceLocked(ns)
-	if nsInfo == nil {
-		return res
-	}
-	defer nsInfo.Unlock()
-	// return a copy of the object so it can be handled without the
-	// namespace locked
-	res.bfdEnabled = nsInfo.routingExternalGWs.bfdEnabled
-	res.gws = make([]net.IP, len(nsInfo.routingExternalGWs.gws))
-	copy(res.gws, nsInfo.routingExternalGWs.gws)
-	return res
-}
-
-func (oc *Controller) getRoutingPodGWs(ns string) map[string]gatewayInfo {
-	nsInfo := oc.getNamespaceLocked(ns)
-	if nsInfo == nil {
-		return nil
-	}
-	defer nsInfo.Unlock()
-	// return a copy of the object so it can be handled without the
-	// namespace locked
-	res := make(map[string]gatewayInfo)
-	for k, v := range nsInfo.routingExternalPodGWs {
-		item := gatewayInfo{
-			bfdEnabled: v.bfdEnabled,
-			gws:        make([]net.IP, len(v.gws)),
-		}
-		copy(item.gws, v.gws)
-		res[k] = item
-	}
-	return res
-}
-
-func (oc *Controller) getHybridOverlayExternalGwAnnotation(ns string) (net.IP, error) {
-	nsInfo, err := oc.waitForNamespaceLocked(ns)
-	if err != nil {
-		return nil, err
-	}
-	defer nsInfo.Unlock()
-	return nsInfo.hybridOverlayExternalGW, nil
 }
 
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
@@ -374,6 +323,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			} else {
 				klog.Infof("Released IPs: %s for node: %s", util.JoinIPNetIPs(podIfAddrs, " "), logicalSwitch)
 			}
+			if nsErr := oc.deletePodFromNamespace(pod.Namespace, portName, "", podIfAddrs); nsErr != nil {
+				klog.Errorf("Error when deleting pod: %s from namespace: %v", pod.Name, err)
+			}
 		}
 	}()
 
@@ -425,6 +377,15 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 
 		releaseIPs = true
+	}
+
+	// Ensure the namespace/nsInfo exists
+	routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
+	if err != nil {
+		return err
+	}
+
+	if needsIP {
 		var networks []*types.NetworkSelectionElement
 
 		networks, err = util.GetPodNetSelAnnotation(pod, util.DefNetworkAnnotation)
@@ -456,7 +417,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			return fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, node: %s",
 				pod.Name, logicalSwitch)
 		}
-		err = oc.addRoutesGatewayIP(pod, &podAnnotation, nodeSubnets)
+		err = oc.addRoutesGatewayIP(pod, &podAnnotation, nodeSubnets, routingExternalGWs, routingPodGWs, hybridOverlayExternalGW)
 		if err != nil {
 			return err
 		}
@@ -474,53 +435,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		releaseIPs = false
 	}
 
-	// set addresses on the port
-	addresses = make([]string, len(podIfAddrs)+1)
-	addresses[0] = podMac.String()
-	for idx, podIfAddr := range podIfAddrs {
-		addresses[idx+1] = podIfAddr.IP.String()
-	}
-	// LSP addresses in OVN are a single space-separated value
-	cmd, err = oc.ovnNBClient.LSPSetAddress(portName, strings.Join(addresses, " "))
-	if err != nil {
-		return fmt.Errorf("unable to create LSPSetAddress command for port: %s", portName)
-	}
-	cmds = append(cmds, cmd)
-
-	// add external ids
-	extIds := map[string]string{"namespace": pod.Namespace, "pod": "true"}
-	cmd, err = oc.ovnNBClient.LSPSetExternalIds(portName, extIds)
-	if err != nil {
-		return fmt.Errorf("unable to create LSPSetExternalIds command for port: %s", portName)
-	}
-	cmds = append(cmds, cmd)
-
-	// execute all the commands together.
-	err = oc.ovnNBClient.Execute(cmds...)
-	if err != nil {
-		return fmt.Errorf("error while creating logical port %s error: %v",
-			portName, err)
-	}
-
-	lsp, err = oc.ovnNBClient.LSPGet(portName)
-	if err != nil || lsp == nil {
-		return fmt.Errorf("failed to get the logical switch port: %s from the ovn client, error: %s", portName, err)
-	}
-
-	// Add the pod's logical switch port to the port cache
-	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
-
-	// Ensure the namespace/nsInfo exists
-	if err = oc.addPodToNamespace(pod.Namespace, portInfo); err != nil {
-		return err
-	}
-
-	// add src-ip routes to GR if external gw annotation is set
-	routingExternalGWs := oc.getRoutingExternalGWs(pod.Namespace)
-	routingPodGWs := oc.getRoutingPodGWs(pod.Namespace)
-
 	// if we have any external or pod Gateways, add routes
-	gateways := make([]gatewayInfo, 0)
+	gateways := make([]*gatewayInfo, 0)
 
 	if len(routingExternalGWs.gws) > 0 {
 		gateways = append(gateways, routingExternalGWs)
@@ -552,18 +468,63 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("failed to handle external GW check: %v", err)
 	}
 
+	// set addresses on the port
+	addresses = make([]string, len(podIfAddrs)+1)
+	addresses[0] = podMac.String()
+	for idx, podIfAddr := range podIfAddrs {
+		addresses[idx+1] = podIfAddr.IP.String()
+	}
+
+	// LSP addresses in OVN are a single space-separated value
+	cmd, err = oc.ovnNBClient.LSPSetAddress(portName, strings.Join(addresses, " "))
+	if err != nil {
+		return fmt.Errorf("unable to create LSPSetAddress command for port: %s", portName)
+	}
+	cmds = append(cmds, cmd)
+
+	// add external ids
+	extIds := map[string]string{"namespace": pod.Namespace, "pod": "true"}
+	cmd, err = oc.ovnNBClient.LSPSetExternalIds(portName, extIds)
+	if err != nil {
+		return fmt.Errorf("unable to create LSPSetExternalIds command for port: %s", portName)
+	}
+	cmds = append(cmds, cmd)
+
 	// CNI depends on the flows from port security, delay setting it until end
 	cmd, err = oc.ovnNBClient.LSPSetPortSecurity(portName, strings.Join(addresses, " "))
 	if err != nil {
 		return fmt.Errorf("unable to create LSPSetPortSecurity command for port: %s", portName)
 	}
 
-	err = oc.ovnNBClient.Execute(cmd)
+	cmds = append(cmds, cmd)
+
+	// execute all the commands together.
+	err = oc.ovnNBClient.Execute(cmds...)
 	if err != nil {
-		return fmt.Errorf("error while setting port security on port: %s error: %v",
+		return fmt.Errorf("error while creating logical port %s error: %v",
 			portName, err)
 	}
 
+	lsp, err = oc.ovnNBClient.LSPGet(portName)
+	if err != nil || lsp == nil {
+		return fmt.Errorf("failed to get the logical switch port: %s from the ovn client, error: %s", portName, err)
+	}
+
+	// Add the pod's logical switch port to the port cache
+	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
+
+	// If multicast is allowed and enabled for the namespace, add the port to the allow policy.
+	// FIXME: there's a race here with the Namespace multicastUpdateNamespace() handler, but
+	// it's rare and easily worked around for now.
+	ns, err := oc.watchFactory.GetNamespace(pod.Namespace)
+	if err != nil {
+		return err
+	}
+	if oc.multicastSupport && isNamespaceMulticastEnabled(ns.Annotations) {
+		if err := podAddAllowMulticastPolicy(oc.ovnNBClient, pod.Namespace, portInfo); err != nil {
+			return err
+		}
+	}
 	// observe the pod creation latency metric.
 	metrics.RecordPodCreated(pod)
 	return nil

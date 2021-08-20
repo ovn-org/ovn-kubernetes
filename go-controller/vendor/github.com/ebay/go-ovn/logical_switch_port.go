@@ -85,12 +85,6 @@ func (odbi *ovndb) lspDelImp(lsp string) (*OvnCommand, error) {
 	}
 
 	mutateUUID := []libovsdb.UUID{stringToGoUUID(lspUUID)}
-	condition := libovsdb.NewCondition("name", "==", lsp)
-	deleteOp := libovsdb.Operation{
-		Op:    opDelete,
-		Table: TableLogicalSwitchPort,
-		Where: []interface{}{condition},
-	}
 	mutateSet, err := libovsdb.NewOvsSet(mutateUUID)
 	if err != nil {
 		return nil, err
@@ -109,7 +103,7 @@ func (odbi *ovndb) lspDelImp(lsp string) (*OvnCommand, error) {
 		Mutations: []interface{}{mutation},
 		Where:     []interface{}{mucondition},
 	}
-	operations := []libovsdb.Operation{deleteOp, mutateOp}
+	operations := []libovsdb.Operation{mutateOp}
 	return &OvnCommand{operations, odbi, make([][]map[string]interface{}, len(operations))}, nil
 }
 

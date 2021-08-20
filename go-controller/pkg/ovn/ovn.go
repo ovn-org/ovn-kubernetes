@@ -65,7 +65,7 @@ type ACLLoggingLevels struct {
 // nsInfo.Unlock() on it when you are done with it. (No code outside of the code that
 // manages the oc.namespaces map is ever allowed to hold an unlocked namespaceInfo.)
 type namespaceInfo struct {
-	sync.Mutex
+	sync.RWMutex
 
 	// addressSet is an address set object that holds the IP addresses
 	// of all pods in the namespace.
@@ -1045,14 +1045,14 @@ func (oc *Controller) WatchNodes() {
 
 // GetNetworkPolicyACLLogging retrieves ACL deny policy logging setting for the Namespace
 func (oc *Controller) GetNetworkPolicyACLLogging(ns string) *ACLLoggingLevels {
-	nsInfo := oc.getNamespaceLocked(ns)
+	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
 	if nsInfo == nil {
 		return &ACLLoggingLevels{
 			Allow: "",
 			Deny:  "",
 		}
 	}
-	defer nsInfo.Unlock()
+	defer nsUnlock()
 	return &nsInfo.aclLogging
 }
 

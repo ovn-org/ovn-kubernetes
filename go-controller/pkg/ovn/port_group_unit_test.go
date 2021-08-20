@@ -358,7 +358,7 @@ func TestDeleteFromPortGroup(t *testing.T) {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockGoOvnNBClient.Mock, tc.onRetArgMockGoOvnNBClient)
 
-			err := deleteFromPortGroup(mockGoOvnNBClient, tc.name, tc.portInfo)
+			err := deleteFromPortGroup(mockGoOvnNBClient, tc.name, tc.portInfo.name, tc.portInfo.uuid)
 
 			if tc.errMatch != nil {
 				assert.Contains(t, err.Error(), tc.errMatch.Error())

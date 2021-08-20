@@ -179,7 +179,7 @@ func cniRequestToPodRequest(cr *Request, podLister corev1listers.PodLister, kcli
 
 	req.CNIConf = conf
 	req.timestamp = time.Now()
-	req.ctx, req.cancel = context.WithCancel(context.Background())
+	req.ctx, req.cancel = context.WithTimeout(context.Background(), time.Minute)
 	return req, nil
 }
 
@@ -195,6 +195,8 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer req.cancel()
+
 	if s.mode == types.NodeModeSmartNICHost {
 		req.IsSmartNIC = true
 	}

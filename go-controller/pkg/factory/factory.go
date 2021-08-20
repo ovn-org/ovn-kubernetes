@@ -19,7 +19,6 @@ import (
 	egressipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions"
 
 	kapi "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -62,7 +61,9 @@ const (
 	resyncInterval        = 0
 	handlerAlive   uint32 = 0
 	handlerDead    uint32 = 1
-	numEventQueues int    = 15
+
+	// namespace, node, and pod handlers
+	defaultNumEventQueues uint32 = 15
 )
 
 var (
@@ -123,7 +124,8 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	})
 
 	// Create our informer-wrapper informer (and underlying shared informer) for types we need
-	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan)
+	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
+		defaultNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
@@ -140,11 +142,12 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		return nil, err
 	}
 	wf.informers[namespaceType], err = newQueuedInformer(namespaceType, wf.iFactory.Core().V1().Namespaces().Informer(),
-		wf.stopChan)
+		wf.stopChan, defaultNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[nodeType], err = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan)
+	wf.informers[nodeType], err = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan,
+		defaultNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +222,8 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 	})
 
 	var err error
-	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan)
+	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
+		defaultNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
@@ -573,7 +577,7 @@ func (wf *WatchFactory) ServiceInformer() cache.SharedIndexInformer {
 // This matches the behavior of kube-proxy
 func noHeadlessServiceSelector() func(options *metav1.ListOptions) {
 	// if the service is headless, skip it
-	noHeadlessEndpoints, err := labels.NewRequirement(v1.IsHeadlessService, selection.DoesNotExist, nil)
+	noHeadlessEndpoints, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
 	if err != nil {
 		// cannot occur
 		panic(err)

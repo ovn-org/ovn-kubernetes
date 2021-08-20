@@ -82,11 +82,11 @@ func (odbi *ovndb) pgUpdateImp(group string, ports []string, external_ids map[st
 		return nil, ErrorNotFound
 	}
 
-	if ports == nil && external_ids == nil {
+	if len(ports) == 0 && external_ids == nil {
 		return nil, ErrorNoChanges
 	}
 
-	if ports != nil {
+	if len(ports) > 0 {
 		portUUIDs := make([]libovsdb.UUID, 0, len(ports))
 		for _, u := range ports {
 			portUUIDs = append(portUUIDs, stringToGoUUID(u))
