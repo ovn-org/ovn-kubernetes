@@ -479,6 +479,12 @@ func (wf *WatchFactory) GetPod(namespace, name string) (*kapi.Pod, error) {
 	return podLister.Pods(namespace).Get(name)
 }
 
+// GetAllPods returns all the pods in the cluster
+func (wf *WatchFactory) GetAllPods() ([]*kapi.Pod, error) {
+	podLister := wf.informers[podType].lister.(listers.PodLister)
+	return podLister.List(labels.Everything())
+}
+
 // GetPods returns all the pods in a given namespace
 func (wf *WatchFactory) GetPods(namespace string) ([]*kapi.Pod, error) {
 	podLister := wf.informers[podType].lister.(listers.PodLister)
