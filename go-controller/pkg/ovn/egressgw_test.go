@@ -287,10 +287,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				}{
 					{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1", "\n"},
 					{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.2", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.1 bfd!=[]", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.2 bfd!=[]", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=9.0.0.1", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=9.0.0.2", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.1\" bfd!=[]", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.2\" bfd!=[]", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.1\"", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.2\"", "\n"},
 				},
 			),
 			table.Entry("BFD", true, []string{
@@ -303,9 +303,93 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				}{
 					{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1", "\n"},
 					{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.2", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.1 bfd!=[]", "foouid\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.2 bfd!=[]", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=9.0.0.2", "bfduuid\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.1\" bfd!=[]", "foouid\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.2\" bfd!=[]", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.2\"", "bfduuid\n"},
+					{"ovn-nbctl --timeout=15 --if-exists destroy BFD bfduuid", ""},
+				}),
+		)
+
+		table.DescribeTable("reconciles deleting a pod with namespace double exgw annotation already set IPV6",
+			func(bfd bool,
+				nbctlOnAddCommands []string,
+				nbctlOnDelCommands []struct {
+					command string
+					res     string
+				}) {
+				app.Action = func(ctx *cli.Context) error {
+					namespaceT := *newNamespace("namespace1")
+					namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "fd2e:6f44:5dd8::89,fd2e:6f44:5dd8::76"}
+					if bfd {
+						namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
+					}
+					t := newTPod(
+						"node1",
+						"fd00:10:244:2::0/64",
+						"fd00:10:244:2::2",
+						"fd00:10:244:2::1",
+						"myPod",
+						"fd00:10:244:2::3",
+						"0a:58:49:a1:93:cb",
+						namespaceT.Name,
+					)
+
+					t.baseCmds(fExec)
+					fakeOvn.start(ctx,
+						&v1.NamespaceList{
+							Items: []v1.Namespace{
+								namespaceT,
+							},
+						},
+						&v1.PodList{
+							Items: []v1.Pod{
+								*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
+							},
+						},
+					)
+					config.IPv6Mode = true
+					t.populateLogicalSwitchCache(fakeOvn)
+					for _, cmd := range nbctlOnAddCommands {
+						fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+							Cmd:    cmd,
+							Output: "\n",
+						})
+					}
+					injectNode(fakeOvn)
+					fakeOvn.controller.WatchNamespaces()
+					fakeOvn.controller.WatchPods()
+
+					gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/64"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/64", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+					gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+
+					for _, cmd := range nbctlOnDelCommands {
+						fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+							Cmd:    cmd.command,
+							Output: cmd.res,
+						})
+					}
+
+					err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Delete(context.TODO(), t.podName, *metav1.NewDeleteOptions(0))
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+					return nil
+				}
+				err := app.Run([]string{app.Name})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			},
+			table.Entry("BFD IPV6", true, []string{
+				"ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 fd00:10:244:2::3/128 fd2e:6f44:5dd8::89 rtoe-GR_node1",
+				"ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 fd00:10:244:2::3/128 fd2e:6f44:5dd8::76 rtoe-GR_node1",
+			},
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 fd00:10:244:2::3/128 fd2e:6f44:5dd8::89", "\n"},
+					{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 fd00:10:244:2::3/128 fd2e:6f44:5dd8::76", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"fd2e:6f44:5dd8::89\" bfd!=[]", "foouid\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"fd2e:6f44:5dd8::76\" bfd!=[]", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"fd2e:6f44:5dd8::76\"", "bfduuid\n"},
 					{"ovn-nbctl --timeout=15 --if-exists destroy BFD bfduuid", ""},
 				}),
 		)
@@ -388,10 +472,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			}{
 				{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1", "\n"},
 				{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.2", "\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.1 bfd!=[]", "\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.2 bfd!=[]", "\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=9.0.0.1", "\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=9.0.0.2", "\n"},
+				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.1\" bfd!=[]", "\n"},
+				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.2\" bfd!=[]", "\n"},
+				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.1\"", "\n"},
+				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.2\"", "\n"},
 			}),
 			table.Entry("BFD", true, []string{
 				"ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
@@ -402,9 +486,9 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			}{
 				{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1", "\n"},
 				{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.2", "\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.1 bfd!=[]", "foouid\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.2 bfd!=[]", "\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=9.0.0.2", "bfduuid\n"},
+				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.1\" bfd!=[]", "foouid\n"},
+				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.2\" bfd!=[]", "\n"},
+				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.2\"", "bfduuid\n"},
 				{"ovn-nbctl --timeout=15 --if-exists destroy BFD bfduuid", ""},
 			}))
 	})
@@ -659,8 +743,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					res     string
 				}{
 					{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.1 bfd!=[]", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=9.0.0.1", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.1\" bfd!=[]", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.1\"", "\n"},
 				}),
 			table.Entry("BFD", true, "ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
 				[]struct {
@@ -668,8 +752,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					res     string
 				}{
 					{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.1 bfd!=[]", "\n"},
-					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=9.0.0.1", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.1\" bfd!=[]", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.1\"", "\n"},
 				}))
 	})
 	ginkgo.Context("on using bfd", func() {
@@ -786,7 +870,6 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		})
 		ginkgo.It("should disable bfd when removing the annotation from the namespace", func() {
 			app.Action = func(ctx *cli.Context) error {
-
 				namespaceT := *newNamespace("namespace1")
 				namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1"}
 				namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
@@ -826,12 +909,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				})
 
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=9.0.0.1 bfd!=[]",
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.1\" bfd!=[]",
 					Output: "\n",
 				})
 
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=9.0.0.1",
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.1\"",
 					Output: "bfduid\n",
 				})
 
