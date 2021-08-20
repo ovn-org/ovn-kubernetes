@@ -79,20 +79,20 @@ func (oc *Controller) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]*gatewa
 // addPodToNamespace adds the pod's IP to the namespace's address set and returns
 // pod's routing gateway info
 func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]*gatewayInfo, net.IP,
-	[]*goovn.OvnCommand, addressset.AddressSet, error) {
+	[]*goovn.OvnCommand, error) {
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns, true)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("failed to ensure namespace locked: %v", err)
+		return nil, nil, nil, nil, fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
 
 	defer nsUnlock()
 
 	cmds, err := nsInfo.addressSet.PrepareAddIPsCmds(createIPAddressSlice(ips))
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	as := nsInfo.addressSet
-	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nsInfo.hybridOverlayExternalGW, cmds, as, nil
+
+	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nsInfo.hybridOverlayExternalGW, cmds, nil
 }
 
 func (oc *Controller) deletePodFromNamespace(ns, name, uuid string, ips []*net.IPNet) error {

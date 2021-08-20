@@ -99,6 +99,8 @@ type Client interface {
 	ASUpdate(name string, addrs []string, external_ids map[string]string) (*OvnCommand, error)
 	// Add addressset
 	ASAdd(name string, addrs []string, external_ids map[string]string) (*OvnCommand, error)
+	ASAddIPs(name string, addrs []string) (*OvnCommand, error)
+	ASDelIPs(name string, addrs []string) (*OvnCommand, error)
 	// Delete addressset
 	ASDel(name string) (*OvnCommand, error)
 	// Get all AS
@@ -726,6 +728,14 @@ func (c *ovndb) ACLDel(ls, direct, match string, priority int, external_ids map[
 
 func (c *ovndb) ASAdd(name string, addrs []string, external_ids map[string]string) (*OvnCommand, error) {
 	return c.asAddImp(name, addrs, external_ids)
+}
+
+func (c *ovndb) ASAddIPs(name string, addrs []string) (*OvnCommand, error) {
+	return c.asAddIPImp(name, addrs)
+}
+
+func (c *ovndb) ASDelIPs(name string, addrs []string) (*OvnCommand, error) {
+	return c. asDelIPImp(name, addrs)
 }
 
 func (c *ovndb) ASDel(name string) (*OvnCommand, error) {

@@ -390,11 +390,10 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// Ensure the namespace/nsInfo exists
-	routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, addrSetCmds, as, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
+	routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, addrSetCmds, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
 	if err != nil {
 		return err
 	}
-	defer as.Unlock()
 	cmds = append(cmds, addrSetCmds...)
 
 	if needsIP {
@@ -517,8 +516,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("error while creating logical port %s error: %v",
 			portName, err)
 	}
-
-	as.UpdateIPCache(createIPAddressSlice(podIfAddrs))
 
 	lsp, err = oc.ovnNBClient.LSPGet(portName)
 	if err != nil || lsp == nil {

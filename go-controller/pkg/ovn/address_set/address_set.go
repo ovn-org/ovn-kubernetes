@@ -6,7 +6,6 @@ import (
 	"net"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/pkg/errors"
 
@@ -57,8 +56,6 @@ type AddressSet interface {
 	DeleteIPs(ip []net.IP) error
 	Destroy() error
 	PrepareAddIPsCmds(ip []net.IP) ([]*goovn.OvnCommand, error)
-	UpdateIPCache(ip []net.IP)
-	Unlock()
 }
 
 type ovnAddressSetFactory struct {
@@ -199,12 +196,10 @@ func destroyAddressSet(nb goovn.Client, name string) error {
 type ovnAddressSet struct {
 	name     string
 	hashName string
-	ips      map[string]net.IP
 	nb       goovn.Client
 }
 
 type ovnAddressSets struct {
-	sync.RWMutex
 	name string
 	ipv4 *ovnAddressSet
 	ipv6 *ovnAddressSet
@@ -249,7 +244,6 @@ func newOvnAddressSet(nb goovn.Client, name string, ips []net.IP) (*ovnAddressSe
 	as := &ovnAddressSet{
 		name:     name,
 		hashName: hashedAddressSet(name),
-		ips:      make(map[string]net.IP),
 		nb:       nb,
 	}
 
@@ -265,9 +259,6 @@ func newOvnAddressSet(nb goovn.Client, name string, ips []net.IP) (*ovnAddressSe
 		}
 		if err := nb.Execute(cmd); err != nil {
 			return nil, fmt.Errorf("failed to create address set %q: %v", asDetail(as), err)
-		}
-		for _, ip := range ips {
-			as.ips[ip.String()] = ip
 		}
 	} else {
 		klog.V(5).Infof("New(%s) already exists; updating IPs", asDetail(as))
@@ -299,8 +290,6 @@ func (as *ovnAddressSets) GetName() string {
 
 func (as *ovnAddressSets) SetIPs(ips []net.IP) error {
 	var err error
-	as.Lock()
-	defer as.Unlock()
 
 	v4ips, v6ips := splitIPsByFamily(ips)
 
@@ -319,9 +308,6 @@ func (as *ovnAddressSets) AddIPs(ips []net.IP) error {
 		return nil
 	}
 
-	as.Lock()
-	defer as.Unlock()
-
 	v4ips, v6ips := splitIPsByFamily(ips)
 	if as.ipv6 != nil {
 		if err := as.ipv6.addIPs(v6ips); err != nil {
@@ -337,30 +323,15 @@ func (as *ovnAddressSets) AddIPs(ips []net.IP) error {
 	return nil
 }
 
-func (as *ovnAddressSets) UpdateIPCache(ips []net.IP) {
-	if len(ips) == 0 {
-		return
-	}
-	for _, ip := range ips {
-		if as.ipv6 != nil && utilnet.IsIPv6(ip) {
-			as.ipv6.ips[ip.String()] = ip
-		} else if as.ipv4 != nil && utilnet.IsIPv4(ip) {
-			as.ipv4.ips[ip.String()] = ip
-		}
-	}
-}
-
 func (as *ovnAddressSets) PrepareAddIPsCmds(ips []net.IP) ([]*goovn.OvnCommand, error) {
 	if len(ips) == 0 {
 		return nil, nil
 	}
 
-	as.Lock()
 	v4ips, v6ips := splitIPsByFamily(ips)
 	var cmds []*goovn.OvnCommand
 	if as.ipv6 != nil {
 		if cmd, err := as.ipv6.addIPsCmd(v6ips); err != nil {
-			as.Unlock()
 			return nil, fmt.Errorf("failed to AddIPs to the v6 set: %w", err)
 		} else {
 			cmds = append(cmds, cmd)
@@ -368,7 +339,6 @@ func (as *ovnAddressSets) PrepareAddIPsCmds(ips []net.IP) ([]*goovn.OvnCommand, 
 	}
 	if as.ipv4 != nil {
 		if cmd, err := as.ipv4.addIPsCmd(v4ips); err != nil {
-			as.Unlock()
 			return nil, fmt.Errorf("failed to AddIPs to the v4 set: %w", err)
 		} else {
 			cmds = append(cmds, cmd)
@@ -382,9 +352,6 @@ func (as *ovnAddressSets) DeleteIPs(ips []net.IP) error {
 	if len(ips) == 0 {
 		return nil
 	}
-
-	as.Lock()
-	defer as.Unlock()
 
 	v4ips, v6ips := splitIPsByFamily(ips)
 	if as.ipv6 != nil {
@@ -401,22 +368,18 @@ func (as *ovnAddressSets) DeleteIPs(ips []net.IP) error {
 }
 
 func (as *ovnAddressSets) Destroy() error {
-	as.Lock()
-	defer as.Unlock()
 
 	if as.ipv4 != nil {
 		err := as.ipv4.destroy()
 		if err != nil {
 			return err
 		}
-		as.ipv4 = nil
 	}
 	if as.ipv6 != nil {
 		err := as.ipv6.destroy()
 		if err != nil {
 			return err
 		}
-		as.ipv6 = nil
 	}
 	return nil
 }
@@ -433,39 +396,17 @@ func (as *ovnAddressSet) setIPs(ips []net.IP) error {
 		return fmt.Errorf("failed to execute update for address set %q: %v", asDetail(as), err)
 	}
 
-	as.ips = make(map[string]net.IP, len(ips))
-	for _, ip := range ips {
-		as.ips[ip.String()] = ip
-	}
 	return nil
 }
 
 // addIPs appends the set of IPs to the existing address_set.
 func (as *ovnAddressSet) addIPs(ips []net.IP) error {
-	// dedup
-	uniqIPs := make([]net.IP, 0, len(ips)+len(as.ips))
-	for _, ip := range ips {
-		if _, ok := as.ips[ip.String()]; ok {
-			continue
-		}
-		uniqIPs = append(uniqIPs, ip)
+	cmd, err := as.addIPsCmd(ips)
+	if err != nil {
+		return err
 	}
-
-	if len(uniqIPs) == 0 {
-		return nil
-	}
-
-	ipStr := joinIPs(uniqIPs)
-
-	klog.V(5).Infof("(%s) adding IPs (%s) to address set", asDetail(as), ipStr)
-	newIPs := append(uniqIPs, as.allIPs()...)
-	if err := as.setIPs(newIPs); err != nil {
-		return fmt.Errorf("failed to add IPs (%q) to address set %q: %v",
-			ipStr, asDetail(as), err)
-	}
-
-	for _, ip := range uniqIPs {
-		as.ips[ip.String()] = ip
+	if err := as.nb.Execute(cmd); err != nil {
+		return fmt.Errorf("failed to execute add ips for address set %q: %v", asDetail(as), err)
 	}
 
 	return nil
@@ -473,23 +414,17 @@ func (as *ovnAddressSet) addIPs(ips []net.IP) error {
 
 // addIPsCmd appends the set of IPs to the existing address_set. Returns the goovn command
 func (as *ovnAddressSet) addIPsCmd(ips []net.IP) (*goovn.OvnCommand, error) {
-	// dedup
-	uniqIPs := make([]net.IP, 0, len(ips)+len(as.ips))
-	for _, ip := range ips {
-		if _, ok := as.ips[ip.String()]; ok {
-			continue
-		}
-		uniqIPs = append(uniqIPs, ip)
-	}
-
-	if len(uniqIPs) == 0 {
+	if len(ips) == 0 {
 		return nil, nil
 	}
+	uniqIPs := make([]string, 0, len(ips))
+	for _, ip := range ips {
+		uniqIPs = append(uniqIPs, ip.String())
+	}
 
-	newIPs := ipsToStringArray(append(uniqIPs, as.allIPs()...))
-	cmd, err := as.nb.ASUpdate(as.hashName, newIPs, map[string]string{"name": as.name})
+	cmd, err := as.nb.ASAddIPs(as.hashName, uniqIPs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create update for address set %q: %v", asDetail(as), err)
+		return nil, fmt.Errorf("failed to create add ips cmd for address set %q: %v", asDetail(as), err)
 	}
 
 	return cmd, nil
@@ -497,31 +432,33 @@ func (as *ovnAddressSet) addIPsCmd(ips []net.IP) (*goovn.OvnCommand, error) {
 
 // deleteIPs removes selected IPs from the existing address_set
 func (as *ovnAddressSet) deleteIPs(ips []net.IP) error {
-	newMap := make(map[string]net.IP, len(as.ips))
-	for key, val := range as.ips {
-		newMap[key] = val
+	cmd, err := as.deleteIPsCmd(ips)
+	if err != nil {
+		return err
 	}
-
-	newIPs := make([]net.IP, 0, len(newMap))
-	for _, ip := range ips {
-		if _, ok := newMap[ip.String()]; ok {
-			delete(newMap, ip.String())
-		} else {
-			newIPs = append(newIPs, ip)
-		}
-	}
-	ipStr := joinIPs(newIPs)
-
-	if err := as.setIPs(newIPs); err != nil {
-		return fmt.Errorf("failed to delete IPs (%q) to address set %q: %v",
-			ipStr, asDetail(as), err)
-	}
-
-	for _, ip := range ips {
-		delete(as.ips, ip.String())
+	if err := as.nb.Execute(cmd); err != nil {
+		return fmt.Errorf("failed to execute delete ips for address set %q: %v", asDetail(as), err)
 	}
 
 	return nil
+}
+
+// deleteIPs removes selected IPs from the existing address_set
+func (as *ovnAddressSet) deleteIPsCmd(ips []net.IP) (*goovn.OvnCommand, error) {
+	if len(ips) == 0 {
+		return nil, nil
+	}
+	uniqIPs := make([]string, 0, len(ips))
+	for _, ip := range ips {
+		uniqIPs = append(uniqIPs, ip.String())
+	}
+	ipStr := joinIPs(ips)
+
+	cmd, err := as.nb.ASDelIPs(as.hashName, uniqIPs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create add ips cmd for address set %q, ips: %s: %v", asDetail(as), ipStr, err)
+	}
+	return cmd, nil
 }
 
 func (as *ovnAddressSet) destroy() error {
@@ -533,7 +470,6 @@ func (as *ovnAddressSet) destroy() error {
 	if err := as.nb.Execute(cmd); err != nil {
 		return fmt.Errorf("failed to destroy address set %q: %v", asDetail(as), err)
 	}
-	as.ips = nil
 	return nil
 }
 
@@ -575,13 +511,4 @@ func joinIPs(ips []net.IP) string {
 	// so tests are predictable
 	sort.Strings(list)
 	return strings.Join(list, " ")
-}
-
-func (as *ovnAddressSet) allIPs() []net.IP {
-	// my kingdom for a ".values()" function
-	out := make([]net.IP, 0, len(as.ips))
-	for _, ip := range as.ips {
-		out = append(out, ip)
-	}
-	return out
 }
