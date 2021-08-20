@@ -3370,6 +3370,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				}
 				fakeOvn.start(ctx)
 
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy priority=%s nexthop!=[]", types.EgressIPReroutePriority),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,external_ids,match find logical_router_policy priority=100"),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid,external_ids,logical_ip find nat"),
+					},
+				)
+
 				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
 				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 				fakeOvn.controller.WatchEgressIP()
@@ -3400,7 +3408,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(getEgressIP).Should(gomega.Equal(updateEgressIP))
 				statuses = getEgressIPStatus(egressIPName)
 				gomega.Expect(statuses[0].Node).To(gomega.Equal(node2.name))
-
+				gomega.Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(gomega.BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 				return nil
 			}
 
