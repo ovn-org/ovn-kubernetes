@@ -1,6 +1,7 @@
 package addressset
 
 import (
+	goovn "github.com/ebay/go-ovn"
 	"net"
 	"strings"
 	"sync"
@@ -248,6 +249,13 @@ func (as *fakeAddressSets) AddIPs(ips []net.IP) error {
 		}
 	}
 	return nil
+}
+
+func (as *fakeAddressSets) UpdateIPCache(ips []net.IP) {
+}
+
+func (as *fakeAddressSets) PrepareAddIPsCmds(ips []net.IP) ([]*goovn.OvnCommand, error) {
+	return nil, nil
 }
 
 func (as *fakeAddressSets) SetIPs(ips []net.IP) error {

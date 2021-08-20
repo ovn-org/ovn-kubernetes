@@ -56,6 +56,9 @@ type AddressSet interface {
 	SetIPs(ip []net.IP) error
 	DeleteIPs(ip []net.IP) error
 	Destroy() error
+	PrepareAddIPsCmds(ip []net.IP) ([]*goovn.OvnCommand, error)
+	UpdateIPCache(ip []net.IP)
+	Unlock()
 }
 
 type ovnAddressSetFactory struct {
@@ -334,6 +337,47 @@ func (as *ovnAddressSets) AddIPs(ips []net.IP) error {
 	return nil
 }
 
+func (as *ovnAddressSets) UpdateIPCache(ips []net.IP) {
+	if len(ips) == 0 {
+		return
+	}
+	for _, ip := range ips {
+		if as.ipv6 != nil && utilnet.IsIPv6(ip) {
+			as.ipv6.ips[ip.String()] = ip
+		} else if as.ipv4 != nil && utilnet.IsIPv4(ip) {
+			as.ipv4.ips[ip.String()] = ip
+		}
+	}
+}
+
+func (as *ovnAddressSets) PrepareAddIPsCmds(ips []net.IP) ([]*goovn.OvnCommand, error) {
+	if len(ips) == 0 {
+		return nil, nil
+	}
+
+	as.Lock()
+	v4ips, v6ips := splitIPsByFamily(ips)
+	var cmds []*goovn.OvnCommand
+	if as.ipv6 != nil {
+		if cmd, err := as.ipv6.addIPsCmd(v6ips); err != nil {
+			as.Unlock()
+			return nil, fmt.Errorf("failed to AddIPs to the v6 set: %w", err)
+		} else {
+			cmds = append(cmds, cmd)
+		}
+	}
+	if as.ipv4 != nil {
+		if cmd, err := as.ipv4.addIPsCmd(v4ips); err != nil {
+			as.Unlock()
+			return nil, fmt.Errorf("failed to AddIPs to the v4 set: %w", err)
+		} else {
+			cmds = append(cmds, cmd)
+		}
+	}
+
+	return cmds, nil
+}
+
 func (as *ovnAddressSets) DeleteIPs(ips []net.IP) error {
 	if len(ips) == 0 {
 		return nil
@@ -425,6 +469,30 @@ func (as *ovnAddressSet) addIPs(ips []net.IP) error {
 	}
 
 	return nil
+}
+
+// addIPsCmd appends the set of IPs to the existing address_set. Returns the goovn command
+func (as *ovnAddressSet) addIPsCmd(ips []net.IP) (*goovn.OvnCommand, error) {
+	// dedup
+	uniqIPs := make([]net.IP, 0, len(ips)+len(as.ips))
+	for _, ip := range ips {
+		if _, ok := as.ips[ip.String()]; ok {
+			continue
+		}
+		uniqIPs = append(uniqIPs, ip)
+	}
+
+	if len(uniqIPs) == 0 {
+		return nil, nil
+	}
+
+	newIPs := ipsToStringArray(append(uniqIPs, as.allIPs()...))
+	cmd, err := as.nb.ASUpdate(as.hashName, newIPs, map[string]string{"name": as.name})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create update for address set %q: %v", asDetail(as), err)
+	}
+
+	return cmd, nil
 }
 
 // deleteIPs removes selected IPs from the existing address_set
