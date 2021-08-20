@@ -293,7 +293,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				klog.Errorf(err.Error())
 				return
 			}
-			key, entry := i.refQueueEntry(i.oType, obj, numEventQueues)
+			key, entry := i.refQueueEntry(i.oType, realObj, numEventQueues)
 			i.enqueueEvent(nil, realObj, entry.queue, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 				start := time.Now()
