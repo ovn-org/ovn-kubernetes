@@ -97,9 +97,8 @@ func TestGetPortAddresses(t *testing.T) {
 			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.LogicalSwitchPort{DynamicAddresses: "06:c6:d4:fb:fb:ba 10.244.2.2"}, nil}},
 		},
 		{
-			desc:                 "test code path where addresses list count is less than 2",
+			desc:                 "test code path where port has MAC but no IPs",
 			inpPort:              "TEST_PORT",
-			errMatch:             fmt.Errorf("error while obtaining addresses for"),
 			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.LogicalSwitchPort{DynamicAddresses: "06:c6:d4:fb:fb:ba"}, nil}},
 		},
 		{
