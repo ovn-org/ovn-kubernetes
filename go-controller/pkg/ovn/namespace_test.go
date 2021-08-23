@@ -251,6 +251,10 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.SCTPSupport = true
 
 				fexec := fakeOvn.fakeExec
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_" + ovntypes.OVNClusterRouter + " networks",
+				})
+
 				addNodeLogicalFlows(fexec, &node1, clusterCIDR, config.IPv6Mode, false)
 				fakeOvn.controller.joinSwIPManager, _ = initJoinLogicalSwitchIPManager()
 				_, err = fakeOvn.controller.joinSwIPManager.ensureJoinLRPIPs(ovntypes.OVNClusterRouter)
