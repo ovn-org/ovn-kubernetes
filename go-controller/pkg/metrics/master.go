@@ -3,6 +3,7 @@ package metrics
 import (
 	"fmt"
 	"runtime"
+	"strconv"
 	"sync"
 	"time"
 
@@ -156,6 +157,25 @@ var metricV6AllocatedHostSubnetCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "The total number of v6 host subnets currently allocated",
 })
 
+// The nb_cfg metrics. Currently, nb_cfg is a random serial number that we tick up every 30 seconds.
+// northd copies this to sbdb, then ovn-controlle reads this and writes it to a chassis-specific
+// table in sbdb as well
+
+// metricNbcfgNbdb is the value of nb_cfg we write to nbdb
+// There is an equivalent metric for the value in sbdb
+var metricNbcfgNbdb = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "nb_cfg_nbdb",
+	Help:      "The current nb_cfg as written to the nbdb",
+})
+
+var metricNbcfgChassis = prometheus.NewDesc(
+	prometheus.BuildFQName(MetricOvnkubeNamespace, MetricOvnkubeSubsystemMaster, "chassis_nb_cfg"),
+	"The value of nb_cfg as reported by each ovn-controller",
+	[]string{"node"}, nil,
+)
+
 var registerMasterMetricsOnce sync.Once
 var startE2ETimeStampUpdaterOnce sync.Once
 
@@ -167,27 +187,27 @@ func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 		// the updater for this metric is activated
 		// after leader election
 		prometheus.MustRegister(metricE2ETimestamp)
+		prometheus.MustRegister(metricNbcfgNbdb)
 		prometheus.MustRegister(MetricMasterLeader)
 		prometheus.MustRegister(metricPodCreationLatency)
-
-		scrapeOvnTimestamp := func() float64 {
-			options, err := sbClient.SBGlobalGetOptions()
-			if err != nil {
-				klog.Errorf("Failed to get global options for the SB_Global table")
-				return 0
-			}
-			if val, ok := options["e2e_timestamp"]; ok {
-				return parseMetricToFloat(MetricOvnkubeSubsystemMaster, "sb_e2e_timestamp", val)
-			}
-			return 0
-		}
 		prometheus.MustRegister(prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
 				Namespace: MetricOvnkubeNamespace,
 				Subsystem: MetricOvnkubeSubsystemMaster,
 				Name:      "sb_e2e_timestamp",
-				Help:      "The current e2e-timestamp value as observed in the southbound database",
-			}, scrapeOvnTimestamp))
+				Help:      "The current e2e-timestamp as reported in the southbound database",
+			}, func() float64 { return scrapeE2ETimestampSbdb(sbClient) }))
+
+		prometheus.MustRegister(prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: MetricOvnkubeNamespace,
+				Subsystem: MetricOvnkubeSubsystemMaster,
+				Name:      "nb_cfg_sbdb",
+				Help:      "The current nb_cfg as written to the sbdb",
+			},
+			scrapeNbcfgSbdb,
+		))
+
 		prometheus.MustRegister(prometheus.NewCounterFunc(
 			prometheus.CounterOpts{
 				Namespace: MetricOvnkubeNamespace,
@@ -197,6 +217,8 @@ func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 			}, func() float64 {
 				return float64(util.SkippedNbctlDaemonCounter)
 			}))
+
+		prometheus.MustRegister(&chassisE2EScraper{sbClient: sbClient})
 		prometheus.MustRegister(MetricMasterReadyDuration)
 		prometheus.MustRegister(metricOvnCliLatency)
 		// this is to not to create circular import between metrics and util package
@@ -234,33 +256,79 @@ func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 	})
 }
 
-// StartE2ETimeStampMetricUpdater adds a goroutine that updates a "timestamp" value in the
-// nbdb every 30 seconds. This is so we can determine freshness of the database
+func scrapeNbcfgSbdb() float64 {
+	ts, _, err := util.RunOVNSbctl("get", "SB_Global", ".", "nb_cfg")
+	if err != nil {
+		klog.Errorf("Failed to get SB_global nb_cfg: %v", err)
+		return 0
+	}
+	return parseMetricToFloat(MetricOvnkubeSubsystemMaster, "sb_e2e_timestamp", ts)
+}
+
+func scrapeE2ETimestampSbdb(sbClient goovn.Client) float64 {
+	options, err := sbClient.SBGlobalGetOptions()
+	if err != nil {
+		klog.Errorf("Failed to get global options for the SB_Global table")
+		return 0
+	}
+	if val, ok := options["e2e_timestamp"]; ok {
+		return parseMetricToFloat(MetricOvnkubeSubsystemMaster, "sb_e2e_timestamp", val)
+	}
+	return 0
+}
+
+var nbCfgValue int
+
+// StartE2ETimeStampMetricUpdater adds a goroutine that updates the nb_cfg "timestamp" value in the
+// nbdb every 30 seconds. This is so we can determine freshness of the database as well as
+// ovn-controller's status.
+// northd will propagate this down in to the sbdb. ovn-controller will update this value
+// in the sbdb when it synchronizes.
 func StartE2ETimeStampMetricUpdater(stopChan <-chan struct{}, ovnNBClient goovn.Client) {
 	startE2ETimeStampUpdaterOnce.Do(func() {
 		go func() {
+			klog.Infof("Starting periodic nb_cfg updater...")
 			tsUpdateTicker := time.NewTicker(30 * time.Second)
+			defer tsUpdateTicker.Stop()
+
+			tick := func() {
+				// set unix timestamp to e2e_timestamp in NB_Global Options
+				options, err := ovnNBClient.NBGlobalGetOptions()
+				if err != nil {
+					klog.Errorf("Can't get existing NB Global Options for updating timestamps")
+					return
+				}
+				t := time.Now().Unix()
+				options["e2e_timestamp"] = fmt.Sprintf("%d", t)
+				cmd, err := ovnNBClient.NBGlobalSetOptions(options)
+				if err != nil {
+					klog.Errorf("Failed to bump timestamp: %v", err)
+				} else {
+					err = cmd.Execute()
+					if err != nil {
+						klog.Errorf("Failed to set timestamp: %v", err)
+					} else {
+						metricE2ETimestamp.Set(float64(t))
+					}
+				}
+
+				// Separately, set nb_cfg to arbitrary serial number
+				nbCfgValue += 1
+				_, _, err = util.RunOVNNbctl("set", "NB_Global", ".", "nb_cfg="+strconv.Itoa(nbCfgValue))
+				if err != nil {
+					klog.Errorf("Failed to bump NB_Global nb_cfg value: %v", err)
+				} else {
+					klog.V(7).Infof("Set nb_cfg to %d", nbCfgValue)
+					metricNbcfgNbdb.Set(float64(nbCfgValue))
+				}
+			}
+
+			tick() // set the timestamp immediately at first
+
 			for {
 				select {
 				case <-tsUpdateTicker.C:
-					options, err := ovnNBClient.NBGlobalGetOptions()
-					if err != nil {
-						klog.Errorf("Can't get existing NB Global Options for updating timestamps")
-						continue
-					}
-					t := time.Now().Unix()
-					options["e2e_timestamp"] = fmt.Sprintf("%d", t)
-					cmd, err := ovnNBClient.NBGlobalSetOptions(options)
-					if err != nil {
-						klog.Errorf("Failed to bump timestamp: %v", err)
-					} else {
-						err = cmd.Execute()
-						if err != nil {
-							klog.Errorf("Failed to set timestamp: %v", err)
-						} else {
-							metricE2ETimestamp.Set(float64(t))
-						}
-					}
+					tick()
 				case <-stopChan:
 					return
 				}
@@ -299,4 +367,48 @@ func RecordSubnetUsage(v4SubnetsAllocated, v6SubnetsAllocated float64) {
 func RecordSubnetCount(v4SubnetCount, v6SubnetCount float64) {
 	metricV4HostSubnetCount.Set(v4SubnetCount)
 	metricV6HostSubnetCount.Set(v6SubnetCount)
+}
+
+// chassisE2EScraper implements the Collector interface so we can
+// generate chassis metrics on-the-fly per scrape
+type chassisE2EScraper struct {
+	sbClient goovn.Client
+}
+
+func (c *chassisE2EScraper) Describe(ch chan<- *prometheus.Desc) {
+	prometheus.DescribeByCollect(c, ch)
+}
+
+// Collect scrapes the Chassis and Chassis_Priv tables to determine the
+func (c *chassisE2EScraper) Collect(ch chan<- prometheus.Metric) {
+	// the nb_cfg value is in Chassis_Private, but the
+	// hostname is in Chassis. So we need to list both and join
+	allChassis, err := c.sbClient.ChassisList()
+	if err != nil {
+		klog.Errorf("Failed to list sbdb Chassis table: %v", err)
+		return
+	}
+
+	// map of chassis name to hostname
+	hostnames := make(map[string]string, len(allChassis))
+	for _, chassis := range allChassis {
+		hostnames[chassis.Name] = chassis.Hostname
+	}
+
+	allChassisPriv, err := c.sbClient.ChassisPrivateList()
+	if err != nil {
+		klog.Errorf("Failed to list sbdb Chassis_Private table: %v", err)
+	}
+	for _, chassis := range allChassisPriv {
+		hostname := hostnames[chassis.Name]
+		if hostname == "" {
+			continue
+		}
+		ch <- prometheus.MustNewConstMetric(
+			metricNbcfgChassis,
+			prometheus.GaugeValue,
+			float64(chassis.NbCfg),
+			hostname,
+		)
+	}
 }
