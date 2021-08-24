@@ -143,6 +143,19 @@ func testDataEqual(x, y TestData, ignoreUUIDs bool) bool {
 		f1 := v1.Field(i)
 		f2 := v2.Field(i)
 		switch f1.Kind() {
+		case reflect.Ptr:
+			uv1 := reflect.Indirect(f1)
+			uv2 := reflect.Indirect(f2)
+			switch uv1.Kind() {
+			case reflect.String:
+				if ignoreUUIDs {
+					isF1UUID := validUUID.MatchString(uv1.String())
+					isF2UUID := validUUID.MatchString(uv2.String())
+					if isF1UUID || isF2UUID {
+						continue
+					}
+				}
+			}
 		case reflect.String:
 			if ignoreUUIDs {
 				isF1UUID := validUUID.MatchString(f1.String())
