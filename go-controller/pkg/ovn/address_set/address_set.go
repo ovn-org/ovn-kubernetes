@@ -89,7 +89,7 @@ func (asf *ovnAddressSetFactory) NewAddressSet(name string, ips []net.IP) (Addre
 // EnsureAddressSet ensures the address_set with the given name exists and if it does not creates an empty addressSet
 func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) error {
 	hashedAddressSetNames := []string{}
-	ip4ASName, ip6ASName := MakeAddressSetName(name)
+	ip4ASName, ip6ASName := MakeAddressSetHashNames(name)
 	if config.IPv4Mode {
 		hashedAddressSetNames = append(hashedAddressSetNames, ip4ASName)
 	}
@@ -103,7 +103,7 @@ func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) error {
 			return fmt.Errorf("ensuring address set %s failed: %+v", name, err)
 		}
 		if len(addrset.UUID) == 0 {
-			//create the address_set with no IPs
+			// create the address_set with no IPs
 			ops, err := asf.nbClient.Create(&nbdb.AddressSet{
 				Name:        hashedAddressSetName,
 				ExternalIDs: map[string]string{"name": name},
@@ -117,9 +117,6 @@ func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) error {
 				return fmt.Errorf("failed to ensure address set %s (%v)",
 					name, err)
 			}
-		} else {
-			//should never happen, the name ExternalID should be unique
-			return fmt.Errorf("ensure addressSet failed, too many address set with name %s", name)
 		}
 	}
 
