@@ -229,7 +229,7 @@ func haveData(ignoreUUIDs, nameUUIDs bool, expected []TestData) gomegatypes.Gome
 		}
 		return actual
 	}
-	return gomega.WithTransform(transform, gomega.ContainElements(matchers))
+	return gomega.WithTransform(transform, gomega.ConsistOf(matchers))
 }
 
 func matchTestData(ignoreUUID bool, expected TestData) *testDataMatcher {
