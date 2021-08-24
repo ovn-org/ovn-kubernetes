@@ -262,6 +262,11 @@ func replaceUUIDs(data TestData, mapFrom func(string, int) string) {
 		switch f := f.(type) {
 		case string:
 			v.Field(i).Set(reflect.ValueOf(mapFrom(f, i)))
+		case *string:
+			if f != nil {
+				tmp := mapFrom(*f, i)
+				v.Field(i).Set(reflect.ValueOf(&tmp))
+			}
 		case []string:
 			for si, sv := range f {
 				f[si] = mapFrom(sv, i)
