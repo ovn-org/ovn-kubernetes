@@ -80,7 +80,7 @@ func (asf *ovnAddressSetFactory) NewAddressSet(name string, ips []net.IP) (Addre
 // EnsureAddressSet ensures the address_set with the given name exists and if it does not creates an empty addressSet
 func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) error {
 	hashedAddressSetNames := []string{}
-	ip4ASName, ip6ASName := MakeAddressSetName(name)
+	ip4ASName, ip6ASName := MakeAddressSetHashNames(name)
 	if config.IPv4Mode {
 		hashedAddressSetNames = append(hashedAddressSetNames, ip4ASName)
 	}
