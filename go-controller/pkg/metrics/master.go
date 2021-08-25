@@ -58,18 +58,34 @@ var MetricResourceUpdateCount = prometheus.NewCounterVec(prometheus.CounterOpts{
 	},
 )
 
+// MetricResourceAddLatency is the time taken to complete resource update by an handler.
+// This measures the latency for all of the handlers for a given resource.
+var MetricResourceAddLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "resource_add_latency_seconds",
+	Help:      "The duration to process all handlers for a given resource event - add.",
+	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
+)
+
 // MetricResourceUpdateLatency is the time taken to complete resource update by an handler.
 // This measures the latency for all of the handlers for a given resource.
-var MetricResourceUpdateLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+var MetricResourceUpdateLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "resource_update_latency_seconds",
-	Help:      "The duration to process all handlers for a given resource event (add, update, or delete)",
+	Help:      "The duration to process all handlers for a given resource event - update.",
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
-	[]string{
-		"name",
-		"event",
-	},
+)
+
+// MetricResourceDeleteLatency is the time taken to complete resource update by an handler.
+// This measures the latency for all of the handlers for a given resource.
+var MetricResourceDeleteLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "resource_delete_latency_seconds",
+	Help:      "The duration to process all handlers for a given resource event - delete.",
+	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
 )
 
 // MetricRequeueServiceCount is the number of times a particular service has been requeued.
@@ -186,7 +202,9 @@ func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 		// this is to not to create circular import between metrics and util package
 		util.MetricOvnCliLatency = metricOvnCliLatency
 		prometheus.MustRegister(MetricResourceUpdateCount)
+		prometheus.MustRegister(MetricResourceAddLatency)
 		prometheus.MustRegister(MetricResourceUpdateLatency)
+		prometheus.MustRegister(MetricResourceDeleteLatency)
 		prometheus.MustRegister(MetricRequeueServiceCount)
 		prometheus.MustRegister(MetricSyncServiceCount)
 		prometheus.MustRegister(MetricSyncServiceLatency)
