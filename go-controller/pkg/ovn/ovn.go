@@ -891,6 +891,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 	if hostSubnets == nil {
 		hostSubnets, _ = util.ParseNodeHostSubnetAnnotation(node)
 	}
+
 	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
 		if err := gatewayCleanup(node.Name); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
@@ -919,6 +920,7 @@ func (oc *Controller) WatchNodes() {
 	var gatewaysFailed sync.Map
 	var mgmtPortFailed sync.Map
 	var addNodeFailed sync.Map
+	var nodeClusterRouterPortFailed sync.Map
 
 	start := time.Now()
 	oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
@@ -940,6 +942,13 @@ func (oc *Controller) WatchNodes() {
 				mgmtPortFailed.Store(node.Name, true)
 				gatewaysFailed.Store(node.Name, true)
 				return
+			}
+
+			if err = oc.syncNodeClusterRouterPort(node, hostSubnets); err != nil {
+				if !util.IsAnnotationNotSetError(err) {
+					klog.Warningf(err.Error())
+				}
+				nodeClusterRouterPortFailed.Store(node.Name, true)
 			}
 
 			err = oc.syncNodeManagementPort(node, hostSubnets)
@@ -992,6 +1001,18 @@ func (oc *Controller) WatchNodes() {
 				addNodeFailed.Delete(node.Name)
 			}
 
+			_, failed = nodeClusterRouterPortFailed.Load(node.Name)
+			if failed || nodeChassisChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
+				if err = oc.syncNodeClusterRouterPort(node, nil); err != nil {
+					if !util.IsAnnotationNotSetError(err) {
+						klog.Warningf(err.Error())
+					}
+					nodeClusterRouterPortFailed.Store(node.Name, true)
+				} else {
+					nodeClusterRouterPortFailed.Delete(node.Name)
+				}
+			}
+
 			_, failed = mgmtPortFailed.Load(node.Name)
 			if failed || macAddressChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
 				err := oc.syncNodeManagementPort(node, hostSubnets)
@@ -1037,6 +1058,7 @@ func (oc *Controller) WatchNodes() {
 			addNodeFailed.Delete(node.Name)
 			mgmtPortFailed.Delete(node.Name)
 			gatewaysFailed.Delete(node.Name)
+			nodeClusterRouterPortFailed.Delete(node.Name)
 		},
 	}, oc.syncNodes)
 	klog.Infof("Bootstrapping existing nodes and cleaning stale nodes took %v", time.Since(start))
