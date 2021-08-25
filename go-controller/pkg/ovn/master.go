@@ -635,6 +635,59 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	return err
 }
 
+// syncNodeClusterRouterPort ensures a node's LS to the cluster router's LRP is created.
+// NOTE: We could have created the router port in ensureNodeLogicalNetwork() instead of here,
+// but chassis ID is not available at that moment. We need the chassis ID to set the
+// gateway-chassis, which in effect pins the logical switch to the current node in OVN.
+// Otherwise, ovn-controller will flood-fill unrelated datapaths unnecessarily, causing scale
+// problems.
+func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
+	chassisID, err := util.ParseNodeChassisIDAnnotation(node)
+	if err != nil {
+		return err
+	}
+
+	if hostSubnets == nil {
+		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node)
+		if err != nil {
+			return err
+		}
+	}
+
+	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
+	var nodeLRPMAC net.HardwareAddr
+	for _, hostSubnet := range hostSubnets {
+		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
+		nodeLRPMAC = util.IPAddrToHWAddr(gwIfAddr.IP)
+		if !utilnet.IsIPv6CIDR(hostSubnet) {
+			break
+		}
+	}
+
+	lrpName := types.RouterToSwitchPrefix + node.Name
+	lrpArgs := []string{
+		"--if-exists", "lrp-del", lrpName,
+		"--", "lrp-add", types.OVNClusterRouter, lrpName, nodeLRPMAC.String(),
+	}
+	for _, hostSubnet := range hostSubnets {
+		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
+		lrpArgs = append(lrpArgs, gwIfAddr.String())
+	}
+	if config.Gateway.Mode != config.GatewayModeLocal {
+		// "local" mode requires NAT on the cluster router, which is not yet supported yet when
+		// multiple DGPs are on the same router, so we can't set the gateway-chassis here.
+		lrpArgs = append(lrpArgs, "--", "lrp-set-gateway-chassis", lrpName, chassisID, "1")
+	}
+
+	_, stderr, err := util.RunOVNNbctl(lrpArgs...)
+	if err != nil {
+		klog.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
+		return err
+	}
+
+	return nil
+}
+
 func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
 	var nodeLRPMAC net.HardwareAddr
@@ -645,12 +698,6 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		if !utilnet.IsIPv6CIDR(hostSubnet) {
 			break
 		}
-	}
-
-	lrpArgs := []string{
-		"--if-exists", "lrp-del", types.RouterToSwitchPrefix + nodeName,
-		"--", "lrp-add", types.OVNClusterRouter, types.RouterToSwitchPrefix + nodeName,
-		nodeLRPMAC.String(),
 	}
 
 	lsArgs := []string{
@@ -664,8 +711,8 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
-		lrpArgs = append(lrpArgs, gwIfAddr.String())
 		hostNetworkPolicyIPs = append(hostNetworkPolicyIPs, mgmtIfAddr.IP)
+
 		if utilnet.IsIPv6CIDR(hostSubnet) {
 			v6Gateway = gwIfAddr.IP
 
@@ -684,13 +731,6 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 				"other-config:exclude_ips="+excludeIPs,
 			)
 		}
-	}
-
-	// Create a router port and provide it the first address on the node's host subnet
-	_, stderr, err := util.RunOVNNbctl(lrpArgs...)
-	if err != nil {
-		klog.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
-		return err
 	}
 
 	// Create a logical switch and set its subnet.
