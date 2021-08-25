@@ -358,7 +358,7 @@ func EnableDBMemTrimming() error {
 }
 
 func propertiesForDB(db string) *dbProperties {
-	if strings.Contains(db, "ovnsb") {
+	if strings.Contains(db, "ovnnb") {
 		return &dbProperties{
 			electionTimer:         int(config.OvnNorth.ElectionTimer) * 1000,
 			appCtl:                util.RunOVNNBAppCtl,
