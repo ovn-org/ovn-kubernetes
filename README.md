@@ -31,6 +31,8 @@ cd $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/images
     --k8s-apiserver=https://$MASTER_IP:6443
 ```
 
+Take note that the image `docker.io/ovnkube/ovn-daemonset-u:latest` is horribly outdated. You should [build your own image](#building-the-daemonset-container) and use that instead.
+
 To set specific logging level for OVN components, pass the related parameter from the below mentioned
 list to the above command. Set values are the default values.
 ```
@@ -73,3 +75,38 @@ kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovn
 
 NOTE: You don't need kube-proxy for OVN to work. You can delete that from your
 cluster.
+
+## Building the Daemonset container
+
+Install build dependencies. If needed, create a softlink for `pip` to `pip3`:
+~~~
+ln -s $(which pip3) /usr/local/bin/pip
+~~~
+
+Now, clone the OVN Kubernetes repository, build the binaries, and build and push your image to your registry:
+~~~
+mkdir -p $HOME/work/src/github.com/ovn-org
+cd $HOME/work/src/github.com/ovn-org
+git clone https://github.com/ovn-org/ovn-kubernetes
+cd $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/images
+
+# Build ovn docker image
+pushd ../../go-controller
+make
+popd
+
+# Build ovn kube image
+# Find all built executables, but ignore the 'windows' directory if it exists
+find ../../go-controller/_output/go/bin/ -maxdepth 1 -type f -exec cp -f {} . \;
+echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
+~~~
+
+Now, build the image with:
+~~~
+OVN_IMAGE=<registry>/ovn-daemonset-f:latest
+docker build -t $OVN_IMAGE -f Dockerfile.fedora . 
+docker push $OVN_IMAGE
+# or for buildah/podman:
+# buildah bud -t $OVN_IMAGE -f Dockerfile.fedora .
+# podman push $OVN_IMAGE
+~~~
