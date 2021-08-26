@@ -747,7 +747,7 @@ func flowsForDefaultBridge(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=205, in_port=%s, dl_dst=%s, udp6, udp_dst=%d, "+
 				"actions=output:%s", defaultOpenFlowCookie, ofPortPhys, bridgeMacAddress, config.Default.EncapPort,
-				ofPortPhys))
+				ofPortHost))
 		// perform NORMAL action otherwise.
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp6, udp_dst=%d, "+
