@@ -132,6 +132,11 @@ The environment variables and their values depend on the actual test scenario th
 
 Look at the `e2e` action (search for `name: e2e`) in [ovn-kubernetes/.github/workflows/test.yml](https://github.com/ovn-org/ovn-kubernetes/blob/master/.github/workflows/test.yml). Prior to installing kind, set the following environment variables according to your needs:
 ```
+export KIND_CLUSTER_NAME=ovn
+export KIND_INSTALL_INGRESS=[true|false]
+export KIND_ALLOW_SYSTEM_WRITES=[true|false]
+export PARALLEL=[true|false]
+export JOB_NAME=(... job name ...)
 export OVN_HYBRID_OVERLAY_ENABLE=[true|false]
 export OVN_MULTICAST_ENABLE=[true|false]
 export OVN_EMPTY_LB_EVENTS=[true|false]
@@ -148,6 +153,11 @@ You can refer to a recent CI run from any pull request in [https://github.com/ov
 
 As an example for the `control-plane-noHA-local-ipv4-snatGW-1br` job, the settings are at time of this writing:
 ```
+export KIND_CLUSTER_NAME=ovn
+export KIND_INSTALL_INGRESS=true
+export KIND_ALLOW_SYSTEM_WRITES=true
+export PARALLEL=true
+export JOB_NAME=control-plane-noHA-local-ipv4-snatGW-1br
 export OVN_HYBRID_OVERLAY_ENABLE=true
 export OVN_MULTICAST_ENABLE=true
 export OVN_EMPTY_LB_EVENTS=true
