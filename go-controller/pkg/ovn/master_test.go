@@ -422,6 +422,8 @@ var _ = ginkgo.Describe("Master Operations", func() {
 
 			f, err = factory.NewMasterWatchFactory(fakeClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = f.Start()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController := NewOvnController(fakeClient, f, stopChan,
 				newFakeAddressSetFactory(),
@@ -526,6 +528,8 @@ var _ = ginkgo.Describe("Master Operations", func() {
 
 			f, err = factory.NewMasterWatchFactory(fakeClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = f.Start()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController := NewOvnController(fakeClient, f, stopChan,
 				newFakeAddressSetFactory(), mockOVNNBClient,
@@ -628,6 +632,8 @@ var _ = ginkgo.Describe("Master Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			f, err = factory.NewMasterWatchFactory(fakeClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController := NewOvnController(fakeClient, f, stopChan,
@@ -787,6 +793,8 @@ subnet=%s
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			f, err = factory.NewMasterWatchFactory(fakeClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController := NewOvnController(fakeClient, f, stopChan,
@@ -1019,6 +1027,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			f, err = factory.NewMasterWatchFactory(fakeClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = f.Start()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, newFakeAddressSetFactory(),
 				ovntest.NewMockOVNClient(goovn.DBNB),
@@ -1148,6 +1158,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			addPBRandNATRules(fexec, node1.Name, node1.NodeSubnet, node1.GatewayRouterIP, node1.NodeMgmtPortIP, node1.NodeMgmtPortMAC)
 
 			f, err = factory.NewMasterWatchFactory(fakeClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			dbSetup := libovsdbtest.TestSetup{}
@@ -1412,6 +1424,12 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 				EgressFirewallClient: egressFirewallFakeClient,
 			}
 			f, err := factory.NewMasterWatchFactory(fakeClient)
+			if err != nil {
+				t.Fatalf("Error creating master watch factory: %v", err)
+			}
+			if err := f.Start(); err != nil {
+				t.Fatalf("Error starting master watch factory: %v", err)
+			}
 
 			dbSetup := libovsdbtest.TestSetup{}
 			libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)

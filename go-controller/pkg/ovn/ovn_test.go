@@ -112,6 +112,8 @@ func (o *FakeOVN) init() {
 	o.stopChan = make(chan struct{})
 	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	err = o.watcher.Start()
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.ovnNBClient = ovntest.NewMockOVNClient(goovn.DBNB)
 	o.ovnSBClient = ovntest.NewMockOVNClient(goovn.DBSB)
 	o.nbClient, o.sbClient, err = libovsdbtest.NewNBSBTestHarness(o.dbSetup, o.stopChan)

@@ -297,6 +297,11 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
 
+	// Start and sync the watch factory to begin listening for events
+	if err := n.watchFactory.Start(); err != nil {
+		return err
+	}
+
 	if node, err = n.Kube.GetNode(n.name); err != nil {
 		return fmt.Errorf("error retrieving node %s: %v", n.name, err)
 	}
