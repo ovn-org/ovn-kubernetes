@@ -29,4 +29,5 @@ type Config struct {
 	DisconnectCB OVNDisconnectedCallback // Callback that is called when disconnected, if "Reconnect" is false.
 	Reconnect    bool                    // Automatically reconnect when disconnected
 	TableCols    map[string][]string     // List of tables and their cols to be monitored
+	LeaderOnly   bool
 }

@@ -23,6 +23,8 @@ import (
 	"strings"
 
 	"github.com/ebay/libovsdb"
+
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -148,8 +150,12 @@ func (odbi *ovndb) getRowsMatchingUUID(table, field, uuid string) ([]string, err
 func (odbi *ovndb) transact(db string, ops ...libovsdb.Operation) ([]libovsdb.OperationResult, error) {
 	odbi.tranmutex.RLock()
 	defer odbi.tranmutex.RUnlock()
-	reply, err := odbi.client.Transact(db, ops...)
+	client, err := odbi.getClient()
+	if err != nil {
+		return nil, err
+	}
 
+	reply, err := client.Transact(db, ops...)
 	if err != nil {
 		return reply, err
 	}
@@ -224,17 +230,131 @@ func (odbi *ovndb) float64_to_int(row libovsdb.Row) {
 	}
 }
 
-func (odbi *ovndb) populateCache(updates libovsdb.TableUpdates) {
+func (odbi *ovndb) signalCreate(table, uuid string) {
+	switch table {
+	case TableLogicalRouter:
+		lr := odbi.rowToLogicalRouter(uuid)
+		odbi.signalCB.OnLogicalRouterCreate(lr)
+	case TableLogicalRouterPort:
+		lrp := odbi.rowToLogicalRouterPort(uuid)
+		odbi.signalCB.OnLogicalRouterPortCreate(lrp)
+	case TableLogicalRouterStaticRoute:
+		lrsr := odbi.rowToLogicalRouterStaticRoute(uuid)
+		odbi.signalCB.OnLogicalRouterStaticRouteCreate(lrsr)
+	case TableLogicalSwitch:
+		ls := odbi.rowToLogicalSwitch(uuid)
+		odbi.signalCB.OnLogicalSwitchCreate(ls)
+	case TableLogicalSwitchPort:
+		lp, err := odbi.rowToLogicalPort(uuid)
+		if err == nil {
+			odbi.signalCB.OnLogicalPortCreate(lp)
+		}
+	case TableACL:
+		acl := odbi.rowToACL(uuid)
+		odbi.signalCB.OnACLCreate(acl)
+	case TableDHCPOptions:
+		dhcp := odbi.rowToDHCPOptions(uuid)
+		odbi.signalCB.OnDHCPOptionsCreate(dhcp)
+	case TableQoS:
+		qos := odbi.rowToQoS(uuid)
+		odbi.signalCB.OnQoSCreate(qos)
+	case TableLoadBalancer:
+		lb, _ := odbi.rowToLB(uuid)
+		odbi.signalCB.OnLoadBalancerCreate(lb)
+	case TableMeter:
+		meter := odbi.rowToMeter(uuid)
+		odbi.signalCB.OnMeterCreate(meter)
+	case TableMeterBand:
+		band, _ := odbi.rowToMeterBand(uuid)
+		odbi.signalCB.OnMeterBandCreate(band)
+	case TableChassis:
+		chassis, _ := odbi.rowToChassis(uuid)
+		odbi.signalCB.OnChassisCreate(chassis)
+	case TableEncap:
+		encap, _ := odbi.rowToEncap(uuid)
+		odbi.signalCB.OnEncapCreate(encap)
+	}
+}
+
+func (odbi *ovndb) signalDelete(table, uuid string) {
+	switch table {
+	case TableLogicalRouter:
+		lr := odbi.rowToLogicalRouter(uuid)
+		odbi.signalCB.OnLogicalRouterDelete(lr)
+	case TableLogicalRouterPort:
+		lrp := odbi.rowToLogicalRouterPort(uuid)
+		odbi.signalCB.OnLogicalRouterPortDelete(lrp)
+	case TableLogicalRouterStaticRoute:
+		lrsr := odbi.rowToLogicalRouterStaticRoute(uuid)
+		odbi.signalCB.OnLogicalRouterStaticRouteDelete(lrsr)
+	case TableLogicalSwitch:
+		ls := odbi.rowToLogicalSwitch(uuid)
+		odbi.signalCB.OnLogicalSwitchDelete(ls)
+	case TableLogicalSwitchPort:
+		lp, err := odbi.rowToLogicalPort(uuid)
+		if err == nil {
+			odbi.signalCB.OnLogicalPortDelete(lp)
+		}
+	case TableACL:
+		acl := odbi.rowToACL(uuid)
+		odbi.signalCB.OnACLDelete(acl)
+	case TableDHCPOptions:
+		dhcp := odbi.rowToDHCPOptions(uuid)
+		odbi.signalCB.OnDHCPOptionsDelete(dhcp)
+	case TableQoS:
+		qos := odbi.rowToQoS(uuid)
+		odbi.signalCB.OnQoSDelete(qos)
+	case TableLoadBalancer:
+		lb, _ := odbi.rowToLB(uuid)
+		odbi.signalCB.OnLoadBalancerDelete(lb)
+	case TableMeter:
+		meter := odbi.rowToMeter(uuid)
+		odbi.signalCB.OnMeterDelete(meter)
+	case TableMeterBand:
+		band, _ := odbi.rowToMeterBand(uuid)
+		odbi.signalCB.OnMeterBandDelete(band)
+	case TableChassis:
+		chassis, _ := odbi.rowToChassis(uuid)
+		odbi.signalCB.OnChassisDelete(chassis)
+	case TableEncap:
+		encap, _ := odbi.rowToEncap(uuid)
+		odbi.signalCB.OnEncapDelete(encap)
+	}
+}
+
+func (odbi *ovndb) disconnectIfFollower(table, uuid string) {
+	if table == TableDatabase && odbi.leaderOnly && !odbi.serverIsLeader() {
+		klog.Infof("Leader-only requested; disconnecting from follower %s...", odbi.endpoints[odbi.curEndpoint])
+		// Disconnect client and let the disconnect notification
+		// from libovsdb trigger our reconnect handler
+		odbi.nextEndpoint()
+		odbi.disconnect()
+	}
+}
+
+func (odbi *ovndb) getContext(dbName string) (*map[string][]string, *map[string]map[string]libovsdb.Row, func(string, string), func(string, string)) {
+	if dbName == DBServer {
+		return &odbi.serverTableCols, &odbi.serverCache, odbi.disconnectIfFollower, odbi.disconnectIfFollower
+	}
+	if odbi.signalCB == nil {
+		return &odbi.tableCols, &odbi.cache, nil, nil
+	}
+	return &odbi.tableCols, &odbi.cache, odbi.signalCreate, odbi.signalDelete
+}
+
+func (odbi *ovndb) populateCache(dbName string, updates libovsdb.TableUpdates, signal bool) {
+	tableCols, cache, signalCreate, signalDelete := odbi.getContext(dbName)
+
 	empty := libovsdb.Row{}
 
-	for table := range odbi.tableCols {
+	for table := range *tableCols {
 		tableUpdate, ok := updates.Updates[table]
 		if !ok {
 			continue
 		}
 
-		if _, ok := odbi.cache[table]; !ok {
-			odbi.cache[table] = make(map[string]libovsdb.Row)
+		if _, ok := (*cache)[table]; !ok {
+			(*cache)[table] = make(map[string]libovsdb.Row)
 		}
 		for uuid, row := range tableUpdate.Rows {
 			// TODO: this is a workaround for the problem of
@@ -242,106 +362,196 @@ func (odbi *ovndb) populateCache(updates libovsdb.TableUpdates) {
 			odbi.float64_to_int(row.New)
 
 			if !reflect.DeepEqual(row.New, empty) {
-				if reflect.DeepEqual(row.New, odbi.cache[table][uuid]) {
+				if reflect.DeepEqual(row.New, (*cache)[table][uuid]) {
 					// Already existed and unchanged, ignore (this can happen when auto-reconnect)
 					continue
 				}
-				odbi.cache[table][uuid] = row.New
-
-				if odbi.signalCB != nil {
-					switch table {
-					case TableLogicalRouter:
-						lr := odbi.rowToLogicalRouter(uuid)
-						odbi.signalCB.OnLogicalRouterCreate(lr)
-					case TableLogicalRouterPort:
-						lrp := odbi.rowToLogicalRouterPort(uuid)
-						odbi.signalCB.OnLogicalRouterPortCreate(lrp)
-					case TableLogicalRouterStaticRoute:
-						lrsr := odbi.rowToLogicalRouterStaticRoute(uuid)
-						odbi.signalCB.OnLogicalRouterStaticRouteCreate(lrsr)
-					case TableLogicalSwitch:
-						ls := odbi.rowToLogicalSwitch(uuid)
-						odbi.signalCB.OnLogicalSwitchCreate(ls)
-					case TableLogicalSwitchPort:
-						lp, err := odbi.rowToLogicalPort(uuid)
-						if err == nil {
-							odbi.signalCB.OnLogicalPortCreate(lp)
-						}
-					case TableACL:
-						acl := odbi.rowToACL(uuid)
-						odbi.signalCB.OnACLCreate(acl)
-					case TableDHCPOptions:
-						dhcp := odbi.rowToDHCPOptions(uuid)
-						odbi.signalCB.OnDHCPOptionsCreate(dhcp)
-					case TableQoS:
-						qos := odbi.rowToQoS(uuid)
-						odbi.signalCB.OnQoSCreate(qos)
-					case TableLoadBalancer:
-						lb, _ := odbi.rowToLB(uuid)
-						odbi.signalCB.OnLoadBalancerCreate(lb)
-					case TableMeter:
-						meter := odbi.rowToMeter(uuid)
-						odbi.signalCB.OnMeterCreate(meter)
-					case TableMeterBand:
-						band, _ := odbi.rowToMeterBand(uuid)
-						odbi.signalCB.OnMeterBandCreate(band)
-					case TableChassis:
-						chassis, _ := odbi.rowToChassis(uuid)
-						odbi.signalCB.OnChassisCreate(chassis)
-					case TableEncap:
-						encap, _ := odbi.rowToEncap(uuid)
-						odbi.signalCB.OnEncapCreate(encap)
-					}
+				(*cache)[table][uuid] = row.New
+				if signal && signalCreate != nil {
+					signalCreate(table, uuid)
 				}
 			} else {
-				defer delete(odbi.cache[table], uuid)
+				defer delete((*cache)[table], uuid)
+				if signal && signalDelete != nil {
+					defer signalDelete(table, uuid)
+				}
+			}
+		}
+	}
+}
 
-				if odbi.signalCB != nil {
-					defer func(table, uuid string) {
-						switch table {
-						case TableLogicalRouter:
-							lr := odbi.rowToLogicalRouter(uuid)
-							odbi.signalCB.OnLogicalRouterDelete(lr)
-						case TableLogicalRouterPort:
-							lrp := odbi.rowToLogicalRouterPort(uuid)
-							odbi.signalCB.OnLogicalRouterPortDelete(lrp)
-						case TableLogicalRouterStaticRoute:
-							lrsr := odbi.rowToLogicalRouterStaticRoute(uuid)
-							odbi.signalCB.OnLogicalRouterStaticRouteDelete(lrsr)
-						case TableLogicalSwitch:
-							ls := odbi.rowToLogicalSwitch(uuid)
-							odbi.signalCB.OnLogicalSwitchDelete(ls)
-						case TableLogicalSwitchPort:
-							lp, err := odbi.rowToLogicalPort(uuid)
-							if err == nil {
-								odbi.signalCB.OnLogicalPortDelete(lp)
-							}
-						case TableACL:
-							acl := odbi.rowToACL(uuid)
-							odbi.signalCB.OnACLDelete(acl)
-						case TableDHCPOptions:
-							dhcp := odbi.rowToDHCPOptions(uuid)
-							odbi.signalCB.OnDHCPOptionsDelete(dhcp)
-						case TableQoS:
-							qos := odbi.rowToQoS(uuid)
-							odbi.signalCB.OnQoSDelete(qos)
-						case TableLoadBalancer:
-							lb, _ := odbi.rowToLB(uuid)
-							odbi.signalCB.OnLoadBalancerDelete(lb)
-						case TableMeter:
-							meter := odbi.rowToMeter(uuid)
-							odbi.signalCB.OnMeterDelete(meter)
-						case TableMeterBand:
-							band, _ := odbi.rowToMeterBand(uuid)
-							odbi.signalCB.OnMeterBandDelete(band)
-						case TableChassis:
-							chassis, _ := odbi.rowToChassis(uuid)
-							odbi.signalCB.OnChassisDelete(chassis)
-						case TableEncap:
-							encap, _ := odbi.rowToEncap(uuid)
-							odbi.signalCB.OnEncapDelete(encap)
-						}
-					}(table, uuid)
+func (odbi *ovndb) initMissingColumnsWithDefaults(db, table string, row *libovsdb.Row) {
+	schema := odbi.getSchema(db)
+	tableSchema := schema.Tables[table]
+
+	for column, columnSchema := range tableSchema.Columns {
+		_, ok := row.Fields[column]
+		if !ok {
+			switch columnSchema.Type {
+			case "integer", "real":
+				row.Fields[column] = columnSchema.TypeObj.Min()
+			case "boolean":
+				if (columnSchema.TypeObj.Min() == 0) && (columnSchema.TypeObj.Max() == 1) {
+					row.Fields[column] = interface{}(nil)
+				} else {
+					row.Fields[column] = false
+				}
+			case "map":
+				row.Fields[column] = libovsdb.OvsMap{GoMap: make(map[interface{}]interface{})}
+			case "set":
+				row.Fields[column] = libovsdb.OvsSet{GoSet: make([]interface{}, 0)}
+			case "string":
+				row.Fields[column] = ""
+			default:
+				row.Fields[column] = interface{}(nil)
+			}
+		}
+	}
+}
+
+func updateSetWithElem(ovsSet *libovsdb.OvsSet, elem interface{}) {
+	bv := reflect.ValueOf(ovsSet.GoSet)
+	nv := reflect.ValueOf(elem)
+	var found bool
+	for i := 0; i < bv.Len(); i++ {
+		if bv.Index(i).Interface() == nv.Interface() {
+			// found a match, delete from slice
+			found = true
+			ovsSet.GoSet[i] = ovsSet.GoSet[bv.Len()-1]
+			ovsSet.GoSet = ovsSet.GoSet[0 : bv.Len()-1]
+			break
+		}
+	}
+
+	if !found {
+		ovsSet.GoSet = append(ovsSet.GoSet, elem)
+	}
+}
+
+func (odbi *ovndb) modifySet(orig interface{}, elem interface{}) *libovsdb.OvsSet {
+	var cv *libovsdb.OvsSet
+	o := reflect.ValueOf(orig)
+	switch o.Elem().Interface().(type) {
+	case libovsdb.OvsSet:
+		t := o.Elem().Interface().(libovsdb.OvsSet)
+		cv = &t
+	default:
+		temp := o.Elem().Interface()
+		origC := make([]interface{}, 1)
+		origC[0] = temp
+		cv, _ = libovsdb.NewOvsSet(origC)
+	}
+
+	switch elem.(type) {
+	case libovsdb.OvsSet:
+		t := elem.(libovsdb.OvsSet)
+		tv := reflect.ValueOf(t.GoSet)
+		for i := 0; i < tv.Len(); i++ {
+			updateSetWithElem(cv, tv.Index(i).Interface())
+		}
+	default:
+		updateSetWithElem(cv, elem)
+	}
+
+	return cv
+}
+
+func (odbi *ovndb) applyUpdatesToRow(db, table string, uuid string, rowdiff *libovsdb.Row, cache *map[string]map[string]libovsdb.Row) {
+	row := (*cache)[table][uuid]
+
+	for column, value := range rowdiff.Fields {
+		columnSchema, ok := odbi.getSchema(db).Tables[table].Columns[column]
+		if !ok {
+			continue
+		}
+
+		switch columnSchema.Type {
+		case "map":
+			for k, v := range value.(libovsdb.OvsMap).GoMap {
+				pv, ok := row.Fields[column].(libovsdb.OvsMap).GoMap[k]
+				if !ok {
+					/* New key */
+					row.Fields[column].(libovsdb.OvsMap).GoMap[k] = v
+				} else {
+					if pv != v {
+						/* Value changed.  Update it. */
+						row.Fields[column].(libovsdb.OvsMap).GoMap[k] = v
+					} else {
+						/* Delete the key. */
+						delete(row.Fields[column].(libovsdb.OvsMap).GoMap, k)
+					}
+				}
+			}
+		case "set":
+			if columnSchema.TypeObj.Max() == 1 {
+				row.Fields[column] = value
+			} else {
+				cv := row.Fields[column]
+				nv := odbi.modifySet(&cv, value)
+				bv := reflect.ValueOf(nv.GoSet)
+				if bv.Len() == 1 {
+					row.Fields[column] = bv.Index(0).Interface()
+				} else {
+					row.Fields[column] = *nv
+				}
+			}
+		default:
+			row.Fields[column] = value
+		}
+	}
+
+	(*cache)[table][uuid] = row
+}
+
+func (odbi *ovndb) populateCache2(dbName string, updates libovsdb.TableUpdates2, signal bool) {
+	tableCols, cache, signalCreate, signalDelete := odbi.getContext(dbName)
+
+	for table := range *tableCols {
+		tableUpdate, ok := updates.Updates[table]
+		if !ok {
+			continue
+		}
+
+		if _, ok := (*cache)[table]; !ok {
+			(*cache)[table] = make(map[string]libovsdb.Row)
+		}
+
+		for uuid, row := range tableUpdate.Rows {
+			switch {
+			case row.Initial.Fields != nil:
+				// TODO: this is a workaround for the problem of
+				// missing json number conversion in libovsdb
+				odbi.float64_to_int(row.Initial)
+				if reflect.DeepEqual(row.Initial, (*cache)[table][uuid]) {
+					// Already existed and unchanged, ignore (this can happen when auto-reconnect)
+					continue
+				}
+				odbi.initMissingColumnsWithDefaults(dbName, table, &row.Initial)
+				(*cache)[table][uuid] = row.Initial
+				if signal && signalCreate != nil {
+					signalCreate(table, uuid)
+				}
+			case row.Insert.Fields != nil:
+				odbi.initMissingColumnsWithDefaults(dbName, table, &row.Insert)
+				// TODO: this is a workaround for the problem of
+				// missing json number conversion in libovsdb
+				odbi.float64_to_int(row.Insert)
+				(*cache)[table][uuid] = row.Insert
+				if signal && signalCreate != nil {
+					signalCreate(table, uuid)
+				}
+			case row.Modify.Fields != nil:
+				// TODO: this is a workaround for the problem of
+				// missing json number conversion in libovsdb
+				odbi.float64_to_int(row.Modify)
+				odbi.applyUpdatesToRow(dbName, table, uuid, &row.Modify, cache)
+				if signal && signalCreate != nil {
+					signalCreate(table, uuid)
+				}
+			case row.Delete.Fields != nil:
+				defer delete((*cache)[table], uuid)
+				if signal && signalDelete != nil {
+					signalDelete(table, uuid)
 				}
 			}
 		}
