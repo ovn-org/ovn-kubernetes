@@ -28,6 +28,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
+	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -1065,6 +1066,12 @@ func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) e
 }
 
 func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
+	// Remove switch to lb associations from the LBCache before removing the switch
+	lbCache, err := ovnlb.GetLBCache()
+	if err != nil {
+		return fmt.Errorf("failed to get load_balancer cache for node %s: %v", nodeName, err)
+	}
+	lbCache.RemoveSwitch(nodeName)
 	// Remove the logical switch associated with the node
 	if _, stderr, err := util.RunOVNNbctl("--if-exist", "ls-del", nodeName); err != nil {
 		return fmt.Errorf("failed to delete logical switch %s, "+

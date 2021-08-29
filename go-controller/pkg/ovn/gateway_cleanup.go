@@ -5,6 +5,7 @@ import (
 	"net"
 	"strings"
 
+	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -35,6 +36,13 @@ func gatewayCleanup(nodeName string) error {
 		return fmt.Errorf("failed to delete logical switch port %s%s: "+
 			"stderr: %q, error: %v", types.JoinSwitchToGWRouterPrefix, gatewayRouter, stderr, err)
 	}
+
+	// Remove router to lb associations from the LBCache before removing the router
+	lbCache, err := ovnlb.GetLBCache()
+	if err != nil {
+		return fmt.Errorf("failed to get load_balancer cache for router %s: %v", gatewayRouter, err)
+	}
+	lbCache.RemoveRouter(gatewayRouter)
 
 	// Remove the gateway router associated with nodeName
 	_, stderr, err = util.RunOVNNbctl("--if-exist", "lr-del",
@@ -187,6 +195,13 @@ func multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly bool) error {
 	if upgradeOnly {
 		return nil
 	}
+
+	// Remove router to lb associations from the LBCache before removing the router
+	lbCache, err := ovnlb.GetLBCache()
+	if err != nil {
+		return fmt.Errorf("failed to get load_balancer cache for router %s: %v", gatewayRouter, err)
+	}
+	lbCache.RemoveRouter(gatewayRouter)
 
 	// Remove the gateway router associated with nodeName
 	_, stderr, err = util.RunOVNNbctl("--if-exist", "lr-del",
