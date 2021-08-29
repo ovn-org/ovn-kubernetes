@@ -157,4 +157,22 @@ GR_ovn-control-plane,31bb6bff-93b9-4080-a1b9-9a1fa898b1f0 cb6ebcb0-c12d-4404-ada
 		"GR_ovn-control-plane": {"31bb6bff-93b9-4080-a1b9-9a1fa898b1f0", "cb6ebcb0-c12d-4404-ada7-5aa2b898f06b", "f0747ebb-71c2-4249-bdca-f33670ae544f"},
 	})
 
+	globalCache := &LBCache{}
+	globalCache.existing = make(map[string]*CachedLB, len(lbs))
+	for i := range lbs {
+		globalCache.existing[lbs[i].UUID] = &lbs[i]
+	}
+
+	globalCache.existing["7dc190c4-c615-467f-af83-9856d832c9a0"].Routers.Insert("GR_ovn-worker2", "GR_ovn-worker", "ovn_cluster_router", "GR_ovn-control-plane")
+	globalCache.RemoveRouter("GR_ovn-worker")
+	assert.Equal(t, globalCache.existing["7dc190c4-c615-467f-af83-9856d832c9a0"].Routers, sets.String{
+		"GR_ovn-control-plane": {}, "GR_ovn-worker2": {}, "ovn_cluster_router": {},
+	})
+
+	globalCache.existing["7dc190c4-c615-467f-af83-9856d832c9a0"].Switches.Insert("ovn-worker2", "ovn-worker", "ovn-control-plane")
+	globalCache.RemoveSwitch("ovn-worker")
+	assert.Equal(t, globalCache.existing["7dc190c4-c615-467f-af83-9856d832c9a0"].Switches, sets.String{
+		"ovn-control-plane": {}, "ovn-worker2": {},
+	})
+	assert.Equal(t, globalCache.existing["cb6ebcb0-c12d-4404-ada7-5aa2b898f06b"].Switches, sets.String{}) // nothing changed
 }

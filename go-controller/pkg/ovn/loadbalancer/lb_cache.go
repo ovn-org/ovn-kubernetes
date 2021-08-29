@@ -93,6 +93,24 @@ func (c *LBCache) removeVips(toRemove []DeleteVIPEntry) {
 	}
 }
 
+// RemoveSwitch removes the provided switchname from all the lb.Switches in the LBCache.
+func (c *LBCache) RemoveSwitch(switchname string) {
+	c.Lock()
+	defer c.Unlock()
+	for _, lbCache := range c.existing {
+		lbCache.Switches.Delete(switchname)
+	}
+}
+
+// RemoveRouter removes the provided routername from all the lb.Routers in the LBCache.
+func (c *LBCache) RemoveRouter(routername string) {
+	c.Lock()
+	defer c.Unlock()
+	for _, lbCache := range c.existing {
+		lbCache.Routers.Delete(routername)
+	}
+}
+
 // addNewLB is a shortcut when creating a load balancer; we know it won't have any switches or routers
 func (c *LBCache) addNewLB(lb *LB) {
 	c.Lock()
