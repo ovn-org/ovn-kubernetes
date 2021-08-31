@@ -337,8 +337,6 @@ func initJoinLogicalSwitchIPManager() (*joinSwitchIPManager, error) {
 }
 
 func (jsIPManager *joinSwitchIPManager) getJoinLRPCacheIPs(nodeName string) ([]*net.IPNet, bool) {
-	jsIPManager.lrpIPCacheLock.Lock()
-	defer jsIPManager.lrpIPCacheLock.Unlock()
 	gwLRPIPs, ok := jsIPManager.lrpIPCache[nodeName]
 	return gwLRPIPs, ok
 }
@@ -363,8 +361,6 @@ func sameIPs(a, b []*net.IPNet) bool {
 }
 
 func (jsIPManager *joinSwitchIPManager) setJoinLRPCacheIPs(nodeName string, gwLRPIPs []*net.IPNet) error {
-	jsIPManager.lrpIPCacheLock.Lock()
-	defer jsIPManager.lrpIPCacheLock.Unlock()
 	if oldIPs, ok := jsIPManager.lrpIPCache[nodeName]; ok && !sameIPs(oldIPs, gwLRPIPs) {
 		return fmt.Errorf("join switch IPs %v already cached", oldIPs)
 	}
@@ -373,8 +369,6 @@ func (jsIPManager *joinSwitchIPManager) setJoinLRPCacheIPs(nodeName string, gwLR
 }
 
 func (jsIPManager *joinSwitchIPManager) delJoinLRPCacheIPs(nodeName string) {
-	jsIPManager.lrpIPCacheLock.Lock()
-	defer jsIPManager.lrpIPCacheLock.Unlock()
 	delete(jsIPManager.lrpIPCache, nodeName)
 }
 
@@ -399,9 +393,10 @@ func (jsIPManager *joinSwitchIPManager) reserveJoinLRPIPs(nodeName string, gwLRP
 
 // ensureJoinLRPIPs tries to allocate the LRP IPs if it is not yet allocated, then they will be stored in the cache
 func (jsIPManager *joinSwitchIPManager) ensureJoinLRPIPs(nodeName string) (gwLRPIPs []*net.IPNet, err error) {
-	var ok bool
+	jsIPManager.lrpIPCacheLock.Lock()
+	defer jsIPManager.lrpIPCacheLock.Unlock()
 	// first check the IP cache, return if an entry already exists
-	gwLRPIPs, ok = jsIPManager.getJoinLRPCacheIPs(nodeName)
+	gwLRPIPs, ok := jsIPManager.getJoinLRPCacheIPs(nodeName)
 	if ok {
 		return gwLRPIPs, nil
 	}
@@ -470,9 +465,9 @@ func (jsIPManager *joinSwitchIPManager) getJoinLRPAddresses(nodeName string) []*
 	return gwLRPIPs
 }
 
-func (jsIPManager *joinSwitchIPManager) releaseJoinLRPIPs(nodeName string) error {
-	var err error
-
+func (jsIPManager *joinSwitchIPManager) releaseJoinLRPIPs(nodeName string) (err error) {
+	jsIPManager.lrpIPCacheLock.Lock()
+	defer jsIPManager.lrpIPCacheLock.Unlock()
 	gwLRPIPs, ok := jsIPManager.getJoinLRPCacheIPs(nodeName)
 	if ok {
 		err = jsIPManager.lsm.ReleaseIPs(types.OVNJoinSwitch, gwLRPIPs)
