@@ -1,4 +1,4 @@
-package ovn
+package logicalswitchmanager
 
 import (
 	"fmt"
@@ -25,10 +25,10 @@ type logicalSwitchInfo struct {
 
 type ipamFactoryFunc func(*net.IPNet) (ipam.Interface, error)
 
-// logicalSwitchManager provides switch info management APIs including IPAM for the host subnets
-type logicalSwitchManager struct {
+// LogicalSwitchManager provides switch info management APIs including IPAM for the host subnets
+type LogicalSwitchManager struct {
 	cache map[string]logicalSwitchInfo
-	// A RW mutex for logicalSwitchManager which holds logicalSwitch information
+	// A RW mutex for LogicalSwitchManager which holds logicalSwitch information
 	sync.RWMutex
 	ipamFunc ipamFactoryFunc
 }
@@ -80,8 +80,8 @@ func reserveIPs(subnet *net.IPNet, ipam ipam.Interface) error {
 }
 
 // Initializes a new logical switch manager
-func newLogicalSwitchManager() *logicalSwitchManager {
-	return &logicalSwitchManager{
+func NewLogicalSwitchManager() *LogicalSwitchManager {
+	return &LogicalSwitchManager{
 		cache:    make(map[string]logicalSwitchInfo),
 		RWMutex:  sync.RWMutex{},
 		ipamFunc: NewIPAMAllocator,
@@ -90,7 +90,7 @@ func newLogicalSwitchManager() *logicalSwitchManager {
 
 // AddNode adds/updates a node to the logical switch manager for subnet
 // and IPAM management.
-func (manager *logicalSwitchManager) AddNode(nodeName string, hostSubnets []*net.IPNet) error {
+func (manager *LogicalSwitchManager) AddNode(nodeName string, hostSubnets []*net.IPNet) error {
 	manager.Lock()
 	defer manager.Unlock()
 	if lsi, ok := manager.cache[nodeName]; ok && !reflect.DeepEqual(lsi.hostSubnets, hostSubnets) {
@@ -117,7 +117,7 @@ func (manager *logicalSwitchManager) AddNode(nodeName string, hostSubnets []*net
 
 // AddNoHostSubnetNode adds/updates a node without any host subnets
 // to the logical switch manager
-func (manager *logicalSwitchManager) AddNoHostSubnetNode(nodeName string) error {
+func (manager *LogicalSwitchManager) AddNoHostSubnetNode(nodeName string) error {
 	// setting the hostSubnets slice argument to nil in the cache means an object
 	// exists for the switch but it was not assigned a hostSubnet by ovn-kubernetes
 	// this will be true for nodes that are marked as host-subnet only.
@@ -125,14 +125,14 @@ func (manager *logicalSwitchManager) AddNoHostSubnetNode(nodeName string) error 
 }
 
 // Remove a switch/node from the the logical switch manager
-func (manager *logicalSwitchManager) DeleteNode(nodeName string) {
+func (manager *LogicalSwitchManager) DeleteNode(nodeName string) {
 	manager.Lock()
 	defer manager.Unlock()
 	delete(manager.cache, nodeName)
 }
 
 // Given a switch name, checks if the switch is a noHostSubnet switch
-func (manager *logicalSwitchManager) IsNonHostSubnetSwitch(nodeName string) bool {
+func (manager *LogicalSwitchManager) IsNonHostSubnetSwitch(nodeName string) bool {
 	manager.RLock()
 	defer manager.RUnlock()
 	lsi, ok := manager.cache[nodeName]
@@ -140,7 +140,7 @@ func (manager *logicalSwitchManager) IsNonHostSubnetSwitch(nodeName string) bool
 }
 
 // Given a switch name, get all its host-subnets
-func (manager *logicalSwitchManager) GetSwitchSubnets(nodeName string) []*net.IPNet {
+func (manager *LogicalSwitchManager) GetSwitchSubnets(nodeName string) []*net.IPNet {
 	manager.RLock()
 	defer manager.RUnlock()
 	lsi, ok := manager.cache[nodeName]
@@ -159,7 +159,7 @@ func (manager *logicalSwitchManager) GetSwitchSubnets(nodeName string) []*net.IP
 
 // AllocateIPs will block off IPs in the ipnets slice as already allocated
 // for a given switch
-func (manager *logicalSwitchManager) AllocateIPs(nodeName string, ipnets []*net.IPNet) error {
+func (manager *LogicalSwitchManager) AllocateIPs(nodeName string, ipnets []*net.IPNet) error {
 	manager.RLock()
 	defer manager.RUnlock()
 	lsi, ok := manager.cache[nodeName]
@@ -206,7 +206,7 @@ func (manager *logicalSwitchManager) AllocateIPs(nodeName string, ipnets []*net.
 
 // AllocateNextIPs allocates IP addresses from each of the host subnets
 // for a given switch
-func (manager *logicalSwitchManager) AllocateNextIPs(nodeName string) ([]*net.IPNet, error) {
+func (manager *LogicalSwitchManager) AllocateNextIPs(nodeName string) ([]*net.IPNet, error) {
 	manager.RLock()
 	defer manager.RUnlock()
 	var ipnets []*net.IPNet
@@ -256,7 +256,7 @@ func (manager *logicalSwitchManager) AllocateNextIPs(nodeName string) ([]*net.IP
 
 // Mark the IPs in ipnets slice as available for allocation
 // by releasing them from the IPAM pool of allocated IPs.
-func (manager *logicalSwitchManager) ReleaseIPs(nodeName string, ipnets []*net.IPNet) error {
+func (manager *LogicalSwitchManager) ReleaseIPs(nodeName string, ipnets []*net.IPNet) error {
 	manager.RLock()
 	defer manager.RUnlock()
 	if ipnets == nil || nodeName == "" {
@@ -286,8 +286,8 @@ func (manager *logicalSwitchManager) ReleaseIPs(nodeName string, ipnets []*net.I
 }
 
 // IP allocator manager for join switch's IPv4 and IPv6 subnets.
-type joinSwitchIPManager struct {
-	lsm            *logicalSwitchManager
+type JoinSwitchIPManager struct {
+	lsm            *LogicalSwitchManager
 	lrpIPCache     map[string][]*net.IPNet
 	lrpIPCacheLock sync.Mutex
 }
@@ -306,9 +306,9 @@ func NewJoinIPAMAllocator(cidr *net.IPNet) (ipam.Interface, error) {
 
 // Initializes a new join switch logical switch manager.
 // This IPmanager guaranteed to always have both IPv4 and IPv6 regardless of dual-stack
-func newJoinLogicalSwitchIPManager(existingNodeNames []string) (*joinSwitchIPManager, error) {
-	j := joinSwitchIPManager{
-		lsm: &logicalSwitchManager{
+func NewJoinLogicalSwitchIPManager(existingNodeNames []string) (*JoinSwitchIPManager, error) {
+	j := JoinSwitchIPManager{
+		lsm: &LogicalSwitchManager{
 			cache:    make(map[string]logicalSwitchInfo),
 			ipamFunc: NewJoinIPAMAllocator,
 		},
@@ -345,7 +345,7 @@ func newJoinLogicalSwitchIPManager(existingNodeNames []string) (*joinSwitchIPMan
 	return &j, nil
 }
 
-func (jsIPManager *joinSwitchIPManager) getJoinLRPCacheIPs(nodeName string) ([]*net.IPNet, bool) {
+func (jsIPManager *JoinSwitchIPManager) getJoinLRPCacheIPs(nodeName string) ([]*net.IPNet, bool) {
 	gwLRPIPs, ok := jsIPManager.lrpIPCache[nodeName]
 	return gwLRPIPs, ok
 }
@@ -369,7 +369,7 @@ func sameIPs(a, b []*net.IPNet) bool {
 	return true
 }
 
-func (jsIPManager *joinSwitchIPManager) setJoinLRPCacheIPs(nodeName string, gwLRPIPs []*net.IPNet) error {
+func (jsIPManager *JoinSwitchIPManager) setJoinLRPCacheIPs(nodeName string, gwLRPIPs []*net.IPNet) error {
 	if oldIPs, ok := jsIPManager.lrpIPCache[nodeName]; ok && !sameIPs(oldIPs, gwLRPIPs) {
 		return fmt.Errorf("join switch IPs %v already cached", oldIPs)
 	}
@@ -377,12 +377,12 @@ func (jsIPManager *joinSwitchIPManager) setJoinLRPCacheIPs(nodeName string, gwLR
 	return nil
 }
 
-func (jsIPManager *joinSwitchIPManager) delJoinLRPCacheIPs(nodeName string) {
+func (jsIPManager *JoinSwitchIPManager) delJoinLRPCacheIPs(nodeName string) {
 	delete(jsIPManager.lrpIPCache, nodeName)
 }
 
-// reserveJoinLRPIPs tries to add the LRP IPs to the joinSwitchIPManager, then they will be stored in the cache;
-func (jsIPManager *joinSwitchIPManager) reserveJoinLRPIPs(nodeName string, gwLRPIPs []*net.IPNet) (err error) {
+// reserveJoinLRPIPs tries to add the LRP IPs to the JoinSwitchIPManager, then they will be stored in the cache;
+func (jsIPManager *JoinSwitchIPManager) reserveJoinLRPIPs(nodeName string, gwLRPIPs []*net.IPNet) (err error) {
 	// reserve the given IP in the allocator
 	if err = jsIPManager.lsm.AllocateIPs(types.OVNJoinSwitch, gwLRPIPs); err == nil {
 		defer func() {
@@ -401,7 +401,7 @@ func (jsIPManager *joinSwitchIPManager) reserveJoinLRPIPs(nodeName string, gwLRP
 }
 
 // ensureJoinLRPIPs tries to allocate the LRP IPs if it is not yet allocated, then they will be stored in the cache
-func (jsIPManager *joinSwitchIPManager) ensureJoinLRPIPs(nodeName string) (gwLRPIPs []*net.IPNet, err error) {
+func (jsIPManager *JoinSwitchIPManager) EnsureJoinLRPIPs(nodeName string) (gwLRPIPs []*net.IPNet, err error) {
 	jsIPManager.lrpIPCacheLock.Lock()
 	defer jsIPManager.lrpIPCacheLock.Unlock()
 	// first check the IP cache, return if an entry already exists
@@ -443,7 +443,7 @@ func (jsIPManager *joinSwitchIPManager) ensureJoinLRPIPs(nodeName string) (gwLRP
 }
 
 // getJoinLRPAddresses check if IPs of gateway logical router port are within the join switch IP range, and return them if true.
-func (jsIPManager *joinSwitchIPManager) getJoinLRPAddresses(nodeName string) []*net.IPNet {
+func (jsIPManager *JoinSwitchIPManager) getJoinLRPAddresses(nodeName string) []*net.IPNet {
 	// try to get the IPs from the logical router port
 	gwLRPIPs := []*net.IPNet{}
 	gwLrpName := types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName
@@ -474,7 +474,7 @@ func (jsIPManager *joinSwitchIPManager) getJoinLRPAddresses(nodeName string) []*
 	return gwLRPIPs
 }
 
-func (jsIPManager *joinSwitchIPManager) releaseJoinLRPIPs(nodeName string) (err error) {
+func (jsIPManager *JoinSwitchIPManager) ReleaseJoinLRPIPs(nodeName string) (err error) {
 	jsIPManager.lrpIPCacheLock.Lock()
 	defer jsIPManager.lrpIPCacheLock.Unlock()
 	gwLRPIPs, ok := jsIPManager.getJoinLRPCacheIPs(nodeName)
