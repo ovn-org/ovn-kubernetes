@@ -59,6 +59,88 @@ func NewNode(kubeClient kubernetes.Interface, wf factory.NodeWatchFactory, name 
 	}
 }
 
+func clearOVSFlowTargets() error {
+	_, _, err := util.RunOVSVsctl(
+		"--",
+		"clear", "bridge", "br-int", "netflow",
+		"--",
+		"clear", "bridge", "br-int", "sflow",
+		"--",
+		"clear", "bridge", "br-int", "ipfix",
+	)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func setOVSFlowTargets() error {
+	if config.Monitoring.NetFlowTargets != nil {
+		collectors := ""
+		for _, v := range config.Monitoring.NetFlowTargets {
+			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
+		}
+		collectors = strings.TrimSuffix(collectors, ",")
+
+		_, stderr, err := util.RunOVSVsctl(
+			"--",
+			"--id=@netflow",
+			"create",
+			"netflow",
+			fmt.Sprintf("targets=[%s]", collectors),
+			"active_timeout=60",
+			"--",
+			"set", "bridge", "br-int", "netflow=@netflow",
+		)
+		if err != nil {
+			return fmt.Errorf("error setting NetFlow: %v\n  %q", err, stderr)
+		}
+	}
+	if config.Monitoring.SFlowTargets != nil {
+		collectors := ""
+		for _, v := range config.Monitoring.SFlowTargets {
+			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
+		}
+		collectors = strings.TrimSuffix(collectors, ",")
+
+		_, stderr, err := util.RunOVSVsctl(
+			"--",
+			"--id=@sflow",
+			"create",
+			"sflow",
+			"agent="+types.SFlowAgent,
+			fmt.Sprintf("targets=[%s]", collectors),
+			"--",
+			"set", "bridge", "br-int", "sflow=@sflow",
+		)
+		if err != nil {
+			return fmt.Errorf("error setting SFlow: %v\n  %q", err, stderr)
+		}
+	}
+	if config.Monitoring.IPFIXTargets != nil {
+		collectors := ""
+		for _, v := range config.Monitoring.IPFIXTargets {
+			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
+		}
+		collectors = strings.TrimSuffix(collectors, ",")
+
+		_, stderr, err := util.RunOVSVsctl(
+			"--",
+			"--id=@ipfix",
+			"create",
+			"ipfix",
+			fmt.Sprintf("targets=[%s]", collectors),
+			"cache_active_timeout=60",
+			"--",
+			"set", "bridge", "br-int", "ipfix=@ipfix",
+		)
+		if err != nil {
+			return fmt.Errorf("error setting IPFIX: %v\n  %q", err, stderr)
+		}
+	}
+	return nil
+}
+
 func setupOVNNode(node *kapi.Node) error {
 	var err error
 
@@ -126,69 +208,18 @@ func setupOVNNode(node *kapi.Node) error {
 			return fmt.Errorf("error setting OVS encap-port: %v\n  %q", errSet, stderr)
 		}
 	}
-	if config.Monitoring.NetFlowTargets != nil {
-		collectors := ""
-		for _, v := range config.Monitoring.NetFlowTargets {
-			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
-		}
-		collectors = strings.TrimSuffix(collectors, ",")
 
-		_, stderr, err := util.RunOVSVsctl(
-			"--",
-			"--id=@netflow",
-			"create",
-			"netflow",
-			fmt.Sprintf("targets=[%s]", collectors),
-			"active_timeout=60",
-			"--",
-			"set", "bridge", "br-int", "netflow=@netflow",
-		)
-		if err != nil {
-			return fmt.Errorf("error setting NetFlow: %v\n  %q", err, stderr)
-		}
+	// clear stale ovs flow targets if needed
+	err = clearOVSFlowTargets()
+	if err != nil {
+		return fmt.Errorf("error clearing stale ovs flow targets: %q", err)
 	}
-	if config.Monitoring.SFlowTargets != nil {
-		collectors := ""
-		for _, v := range config.Monitoring.SFlowTargets {
-			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
-		}
-		collectors = strings.TrimSuffix(collectors, ",")
+	// set new ovs flow targets if needed
+	err = setOVSFlowTargets()
+	if err != nil {
+		return fmt.Errorf("error setting ovs flow targets: %q", err)
+	}
 
-		_, stderr, err := util.RunOVSVsctl(
-			"--",
-			"--id=@sflow",
-			"create",
-			"sflow",
-			"agent="+types.SFlowAgent,
-			fmt.Sprintf("targets=[%s]", collectors),
-			"--",
-			"set", "bridge", "br-int", "sflow=@sflow",
-		)
-		if err != nil {
-			return fmt.Errorf("error setting SFlow: %v\n  %q", err, stderr)
-		}
-	}
-	if config.Monitoring.IPFIXTargets != nil {
-		collectors := ""
-		for _, v := range config.Monitoring.IPFIXTargets {
-			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
-		}
-		collectors = strings.TrimSuffix(collectors, ",")
-
-		_, stderr, err := util.RunOVSVsctl(
-			"--",
-			"--id=@ipfix",
-			"create",
-			"ipfix",
-			fmt.Sprintf("targets=[%s]", collectors),
-			"cache_active_timeout=60",
-			"--",
-			"set", "bridge", "br-int", "ipfix=@ipfix",
-		)
-		if err != nil {
-			return fmt.Errorf("error setting IPFIX: %v\n  %q", err, stderr)
-		}
-	}
 	return nil
 }
 
