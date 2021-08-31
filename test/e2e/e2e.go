@@ -41,6 +41,7 @@ const (
 	podNetworkAnnotation = "k8s.ovn.org/pod-networks"
 	retryInterval        = 1 * time.Second  // polling interval timer
 	retryTimeout         = 40 * time.Second // polling timeout
+	dsRestartTimeout     = 10 * time.Minute // ds restart timeout
 	agnhostImage         = "k8s.gcr.io/e2e-test-images/agnhost:2.26"
 )
 
@@ -2457,11 +2458,11 @@ var _ = ginkgo.Describe("e2e br-int NetFlow export validation", func() {
 		}
 	})
 
-	ginkgo.It("Should validate NetFlow data of br-int is sent to an external gateway", func() {
+	ginkgo.It("Should validate NetFlow data of br-int is sent to an external gateway and unset NetFlow Targets", func() {
 		var (
 			ciNetworkFlag = "{{ .NetworkSettings.Networks.kind.IPAddress }}"
 		)
-
+		ginkgo.By("Starting a netflow collector container")
 		// start the NetFlow collector container that will receive data
 		_, err := runCommand("docker", "run", "-itd", "--privileged", "--network", ciNetworkName, "--name", netFlowCollectorContainer, "cloudflare/goflow", "-kafka=false")
 		if err != nil {
@@ -2478,16 +2479,16 @@ var _ = ginkgo.Describe("e2e br-int NetFlow export validation", func() {
 			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", netFlowCollectorContainer, netFlowCollectorIp)
 		}
 
+		ginkgo.By("Configuring ovnkube-node to use the new netflow collector target")
 		framework.Logf("Setting OVN_NETFLOW_TARGETS environment variable value to NetFlow collector IP %s", netFlowCollectorIp)
 		framework.RunKubectlOrDie(ovnNs, "set", "env", "daemonset/ovnkube-node", "-c", "ovnkube-node", "OVN_NETFLOW_TARGETS="+netFlowCollectorIp+":2056")
 
-		// `kubectl set env` causes rollout of ovnkube-node pod, so wait for all of the ovnkube-node Pods
-		// to be ready
-		err = e2epod.WaitForPodsReady(f.ClientSet, ovnNs, "ovnkube-node", 60)
-		if err != nil {
-			framework.Failf("ovnkube-node pods are not ready: %v", err)
-		}
+		// Make sure the updated daemonset has rolled out, verify it's completion 10 times
+		// TODO (Change this to use the exported upstream function)
+		err = waitForDaemonSetUpdate(f.ClientSet, ovnNs, "ovnkube-node", 0, dsRestartTimeout)
+		framework.ExpectNoError(err)
 
+		ginkgo.By("Checking that the collector container received netflow")
 		netFlowCollectorContainerLogsTest := func() wait.ConditionFunc {
 			return func() (bool, error) {
 				netFlowCollectorContainerLogs, err := runCommand("docker", "logs", netFlowCollectorContainer)
@@ -2500,7 +2501,7 @@ var _ = ginkgo.Describe("e2e br-int NetFlow export validation", func() {
 				lastLine := logLines[len(logLines)-1]
 				// check that NetFlow traffic has been logged.
 				if strings.Contains(lastLine, "NETFLOW_V5") {
-					framework.Logf("the NetFlow collector did not receive NetFlow data, last logs: %s", logLines[len(logLines)-1])
+					framework.Logf("the NetFlow collector received NetFlow data, last logs: %s", logLines[len(logLines)-1])
 					return true, nil
 				}
 				return false, nil
@@ -2509,6 +2510,41 @@ var _ = ginkgo.Describe("e2e br-int NetFlow export validation", func() {
 
 		err = wait.PollImmediate(retryInterval, retryTimeout, netFlowCollectorContainerLogsTest())
 		framework.ExpectNoError(err, "failed to verify that NetFlow collector container received NetFlow data from br-int")
+
+		ginkgo.By("Unsetting the OVN_NETFLOW_TARGETS variable in the ovnkube-node daemonset")
+		framework.RunKubectlOrDie(ovnNs, "set", "env", "daemonset/ovnkube-node", "-c", "ovnkube-node", "OVN_NETFLOW_TARGETS-")
+
+		// Make sure the updated daemonset has rolled out, verify it's completion 10 times
+		// TODO (Change this to use the exported upstream function)
+		err = waitForDaemonSetUpdate(f.ClientSet, ovnNs, "ovnkube-node", 0, dsRestartTimeout)
+		framework.ExpectNoError(err)
+
+		ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNs).List(context.TODO(), metav1.ListOptions{
+			LabelSelector: "name=ovnkube-node",
+		})
+		if err != nil {
+			framework.Failf("could not get ovnkube-node pods: %v", err)
+		}
+
+		for _, ovnKubeNodePod := range ovnKubeNodePods.Items {
+
+			execOptions := framework.ExecOptions{
+				Command:       []string{"ovs-vsctl", "find", "netflow"},
+				Namespace:     ovnNs,
+				PodName:       ovnKubeNodePod.Name,
+				ContainerName: "ovnkube-node",
+				CaptureStdout: true,
+				CaptureStderr: true,
+			}
+
+			targets, stderr, _ := f.ExecWithOptions(execOptions)
+			framework.Logf("execOptions are %v", execOptions)
+			if err != nil {
+				framework.Failf("could not lookup ovs netflow targets: %v", stderr)
+			}
+			framework.ExpectEmpty(targets)
+		}
+
 	})
 })
 
