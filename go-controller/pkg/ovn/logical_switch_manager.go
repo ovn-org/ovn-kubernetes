@@ -343,11 +343,30 @@ func (jsIPManager *joinSwitchIPManager) getJoinLRPCacheIPs(nodeName string) ([]*
 	return gwLRPIPs, ok
 }
 
+func sameIPs(a, b []*net.IPNet) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for _, aip := range a {
+		found := false
+		for _, bip := range b {
+			if aip.String() == bip.String() {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
 func (jsIPManager *joinSwitchIPManager) setJoinLRPCacheIPs(nodeName string, gwLRPIPs []*net.IPNet) error {
 	jsIPManager.lrpIPCacheLock.Lock()
 	defer jsIPManager.lrpIPCacheLock.Unlock()
-	if _, ok := jsIPManager.lrpIPCache[nodeName]; ok {
-		return fmt.Errorf("join switch IPs already allocated for node %s", nodeName)
+	if oldIPs, ok := jsIPManager.lrpIPCache[nodeName]; ok && !sameIPs(oldIPs, gwLRPIPs) {
+		return fmt.Errorf("join switch IPs %v already cached", oldIPs)
 	}
 	jsIPManager.lrpIPCache[nodeName] = gwLRPIPs
 	return nil
@@ -372,7 +391,7 @@ func (jsIPManager *joinSwitchIPManager) reserveJoinLRPIPs(nodeName string, gwLRP
 			}
 		}()
 		if err = jsIPManager.setJoinLRPCacheIPs(nodeName, gwLRPIPs); err != nil {
-			klog.Errorf("Failed to add reserved IPs to the join switch IP cache: %s", err.Error())
+			klog.Errorf("Failed to add node %s reserved IPs %v to the join switch IP cache: %s", nodeName, gwLRPIPs, err.Error())
 		}
 	}
 	return err
@@ -412,7 +431,7 @@ func (jsIPManager *joinSwitchIPManager) ensureJoinLRPIPs(nodeName string) (gwLRP
 	}()
 
 	if err = jsIPManager.setJoinLRPCacheIPs(nodeName, gwLRPIPs); err != nil {
-		klog.Errorf("Failed to add allocated IPs to the join switch IP cache: %s", err.Error())
+		klog.Errorf("Failed to add node %s reserved IPs %v to the join switch IP cache: %s", nodeName, gwLRPIPs, err.Error())
 		return nil, err
 	}
 
