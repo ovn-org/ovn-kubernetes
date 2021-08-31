@@ -271,24 +271,8 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	var mgmtPortConfig *managementPortConfig
 	var cniServer *cni.Server
 	var isOvnUpEnabled bool
-	networkUnavailableTaint := &kapi.Taint{
-		Key:    types.OvnK8sNetworkUnavailable,
-		Effect: kapi.TaintEffectNoSchedule,
-	}
 
 	klog.Infof("OVN Kube Node initialization, Mode: %s", config.OvnKubeNode.Mode)
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		<-n.stopChan
-		klog.Infof("Received node's stop channel signal. Adding taint %s.", networkUnavailableTaint.ToString())
-		// Add the NoSchedule Taint on the node, before ovnkube pod gets deleted. Ignore errors.
-		err := n.Kube.SetTaintOnNode(n.name, networkUnavailableTaint)
-		if err != nil {
-			klog.Infof("Unable to add taint %s on node %s: %v", networkUnavailableTaint.ToString(), n.name, err)
-		}
-	}()
 
 	// Setting debug log level during node bring up to expose bring up process.
 	// Log level is returned to configured value when bring up is complete.
@@ -527,12 +511,6 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 				return err
 			}
 		}
-	}
-
-	// Remove the NoSchedule Taint from the node, now that networking setup is done. Ignore errors.
-	err = n.Kube.RemoveTaintFromNode(n.name, networkUnavailableTaint)
-	if err != nil {
-		klog.Infof("Unable to remove taint %s on node %s: %v", networkUnavailableTaint.ToString(), n.name, err)
 	}
 
 	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
