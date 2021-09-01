@@ -306,7 +306,7 @@ func NewJoinIPAMAllocator(cidr *net.IPNet) (ipam.Interface, error) {
 
 // Initializes a new join switch logical switch manager.
 // This IPmanager guaranteed to always have both IPv4 and IPv6 regardless of dual-stack
-func initJoinLogicalSwitchIPManager() (*joinSwitchIPManager, error) {
+func newJoinLogicalSwitchIPManager(existingNodeNames []string) (*joinSwitchIPManager, error) {
 	j := joinSwitchIPManager{
 		lsm: &logicalSwitchManager{
 			cache:    make(map[string]logicalSwitchInfo),
@@ -332,6 +332,15 @@ func initJoinLogicalSwitchIPManager() (*joinSwitchIPManager, error) {
 	err := j.lsm.AddNode(types.OVNJoinSwitch, joinSubnets)
 	if err != nil {
 		return nil, err
+	}
+	for _, nodeName := range existingNodeNames {
+		gwLRPIPs := j.getJoinLRPAddresses(nodeName)
+		if len(gwLRPIPs) > 0 {
+			klog.Infof("Initializing and reserving the join switch IP for node: %s to: %v", nodeName, gwLRPIPs)
+			if err := j.reserveJoinLRPIPs(nodeName, gwLRPIPs); err != nil {
+				return nil, fmt.Errorf("error initiliazing and reserving the join switch IP for node: %s, err: %v", nodeName, err)
+			}
+		}
 	}
 	return &j, nil
 }
