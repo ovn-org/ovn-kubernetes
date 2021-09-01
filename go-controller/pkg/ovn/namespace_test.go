@@ -254,9 +254,13 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				fexec.AddFakeCmdsNoOutputNoError([]string{
 					"ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_" + ovntypes.OVNClusterRouter + " networks",
 				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_" + node1.Name + " networks",
+					Output: "[\"100.64.0.2/16\"]",
+				})
 
 				addNodeLogicalFlows(fexec, &node1, clusterCIDR, config.IPv6Mode, false)
-				fakeOvn.controller.joinSwIPManager, _ = initJoinLogicalSwitchIPManager()
+				fakeOvn.controller.joinSwIPManager, _ = newJoinLogicalSwitchIPManager([]string{node1.Name})
 				_, err = fakeOvn.controller.joinSwIPManager.ensureJoinLRPIPs(ovntypes.OVNClusterRouter)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gwLRPIPs, err := fakeOvn.controller.joinSwIPManager.ensureJoinLRPIPs(node1.Name)

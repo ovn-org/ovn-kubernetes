@@ -297,7 +297,9 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		klog.V(5).Infof("Added network range %s to the allocator", clusterEntry.CIDR)
 		util.CalculateHostSubnetsForClusterEntry(clusterEntry, &v4HostSubnetCount, &v6HostSubnetCount)
 	}
+	nodeNames := []string{}
 	for _, node := range existingNodes.Items {
+		nodeNames = append(nodeNames, node.Name)
 		hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(&node)
 		klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnets)
 		for _, hostSubnet := range hostSubnets {
@@ -348,7 +350,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		}
 	}
 
-	if err := oc.SetupMaster(masterNodeName); err != nil {
+	if err := oc.SetupMaster(masterNodeName, nodeNames); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
 	}
@@ -372,7 +374,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 }
 
 // SetupMaster creates the central router and load-balancers for the network
-func (oc *Controller) SetupMaster(masterNodeName string) error {
+func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []string) error {
 	// Create a single common distributed router for the cluster.
 	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", types.OVNClusterRouter,
 		"--", "set", "logical_router", types.OVNClusterRouter, "external_ids:k8s-cluster-router=yes")
@@ -443,7 +445,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 
 	// Initialize the OVNJoinSwitch switch IP manager
 	// The OVNJoinSwitch will be allocated IP addresses in the range 100.64.0.0/16 or fd98::/64.
-	oc.joinSwIPManager, err = initJoinLogicalSwitchIPManager()
+	oc.joinSwIPManager, err = newJoinLogicalSwitchIPManager(existingNodeNames)
 	if err != nil {
 		return err
 	}
