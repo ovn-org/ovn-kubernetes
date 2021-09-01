@@ -26,6 +26,7 @@ import (
 func newClient(cfg config.OvnAuthConfig, dbModel *model.DBModel, stopCh <-chan struct{}) (client.Client, error) {
 	options := []client.Option{
 		client.WithReconnect(500*time.Millisecond, &backoff.ZeroBackOff{}),
+		client.WithLeaderOnly(true),
 	}
 	for _, endpoint := range strings.Split(cfg.GetURL(), ",") {
 		options = append(options, client.WithEndpoint(endpoint))
