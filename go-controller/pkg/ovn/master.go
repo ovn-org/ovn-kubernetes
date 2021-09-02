@@ -67,7 +67,10 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup, ctx context.Con
 		"ovn-kubernetes-master",
 		oc.client.CoreV1(),
 		nil,
-		resourcelock.ResourceLockConfig{Identity: nodeName},
+		resourcelock.ResourceLockConfig{
+			Identity:      nodeName,
+			EventRecorder: oc.recorder,
+		},
 	)
 	if err != nil {
 		return err
