@@ -29,6 +29,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
+	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -297,7 +298,9 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		klog.V(5).Infof("Added network range %s to the allocator", clusterEntry.CIDR)
 		util.CalculateHostSubnetsForClusterEntry(clusterEntry, &v4HostSubnetCount, &v6HostSubnetCount)
 	}
+	nodeNames := []string{}
 	for _, node := range existingNodes.Items {
+		nodeNames = append(nodeNames, node.Name)
 		hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(&node)
 		klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnets)
 		for _, hostSubnet := range hostSubnets {
@@ -348,7 +351,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		}
 	}
 
-	if err := oc.SetupMaster(masterNodeName); err != nil {
+	if err := oc.SetupMaster(masterNodeName, nodeNames); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
 	}
@@ -372,7 +375,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 }
 
 // SetupMaster creates the central router and load-balancers for the network
-func (oc *Controller) SetupMaster(masterNodeName string) error {
+func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []string) error {
 	// Create a single common distributed router for the cluster.
 	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", types.OVNClusterRouter,
 		"--", "set", "logical_router", types.OVNClusterRouter, "external_ids:k8s-cluster-router=yes")
@@ -443,14 +446,14 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 
 	// Initialize the OVNJoinSwitch switch IP manager
 	// The OVNJoinSwitch will be allocated IP addresses in the range 100.64.0.0/16 or fd98::/64.
-	oc.joinSwIPManager, err = initJoinLogicalSwitchIPManager()
+	oc.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(existingNodeNames)
 	if err != nil {
 		return err
 	}
 
 	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
 	// allocate the first IPs in the join switch subnets
-	gwLRPIfAddrs, err := oc.joinSwIPManager.ensureJoinLRPIPs(types.OVNClusterRouter)
+	gwLRPIfAddrs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 	if err != nil {
 		return fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", types.OVNClusterRouter, err)
 	}
@@ -588,12 +591,12 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
 	}
 
-	gwLRPIPs, err = oc.joinSwIPManager.ensureJoinLRPIPs(node.Name)
+	gwLRPIPs, err = oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
 	if err != nil {
 		return fmt.Errorf("failed to allocate join switch port IP address for node %s: %v", node.Name, err)
 	}
 
-	drLRPIPs, _ := oc.joinSwIPManager.getJoinLRPCacheIPs(types.OVNClusterRouter)
+	drLRPIPs, _ := oc.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 	err = gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, drLRPIPs)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
@@ -742,7 +745,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	}
 
 	// also add the join switch IPs for this node - needed in shared gateway mode
-	lrpIPs, err := oc.joinSwIPManager.ensureJoinLRPIPs(nodeName)
+	lrpIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(nodeName)
 	if err != nil {
 		return fmt.Errorf("failed to get join switch port IP address for node %s: %v", nodeName, err)
 	}
@@ -1121,7 +1124,7 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet, node
 		klog.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
 	}
 
-	if err := oc.joinSwIPManager.releaseJoinLRPIPs(nodeName); err != nil {
+	if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(nodeName); err != nil {
 		klog.Errorf("Failed to clean up GR LRP IPs for node %s: %v", nodeName, err)
 	}
 
@@ -1262,7 +1265,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		}
 		foundNodes[node.Name] = node
 		// For each existing node, reserve its joinSwitch LRP IPs if they already exist.
-		_, err := oc.joinSwIPManager.ensureJoinLRPIPs(node.Name)
+		_, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
 		if err != nil {
 			klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
 		}
