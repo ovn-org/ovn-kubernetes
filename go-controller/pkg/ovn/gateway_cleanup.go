@@ -5,6 +5,7 @@ import (
 	"net"
 	"strings"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -14,7 +15,7 @@ import (
 )
 
 // gatewayCleanup removes all the NB DB objects created for a node's gateway
-func gatewayCleanup(nodeName string) error {
+func gatewayCleanup(nbClient libovsdbclient.Client, nodeName string) error {
 	gatewayRouter := types.GWRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
@@ -38,7 +39,7 @@ func gatewayCleanup(nodeName string) error {
 	}
 
 	// Remove router to lb associations from the LBCache before removing the router
-	lbCache, err := ovnlb.GetLBCache()
+	lbCache, err := ovnlb.GetLBCache(nbClient)
 	if err != nil {
 		return fmt.Errorf("failed to get load_balancer cache for router %s: %v", gatewayRouter, err)
 	}
@@ -138,7 +139,7 @@ func staticRouteCleanup(nextHops []net.IP) {
 // the single join switch versions; this is to cleanup the logical entities for the
 // specified node if the node was deleted when the ovnkube-master pod was brought down
 // to do the version upgrade.
-func multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly bool) error {
+func multiJoinSwitchGatewayCleanup(nbClient libovsdbclient.Client, nodeName string, upgradeOnly bool) error {
 	gatewayRouter := types.GWRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
@@ -197,7 +198,7 @@ func multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly bool) error {
 	}
 
 	// Remove router to lb associations from the LBCache before removing the router
-	lbCache, err := ovnlb.GetLBCache()
+	lbCache, err := ovnlb.GetLBCache(nbClient)
 	if err != nil {
 		return fmt.Errorf("failed to get load_balancer cache for router %s: %v", gatewayRouter, err)
 	}

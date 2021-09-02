@@ -4,8 +4,10 @@ import (
 	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -216,52 +218,29 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		const (
 			nodeRouteUUID string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
 		)
-		fakeLBCache := `
-{
-  "data": [
-    [
-      "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
-      [
-        "uuid",
-        "cb6ebcb0-c12d-4404-ada7-5aa2b898f06b"
-      ],
-      "tcp",
-      [
-        "map",
-        [
-          [
-            "k8s.ovn.org/kind",
-            "Service"
-          ],
-          [
-            "k8s.ovn.org/owner",
-            "default/kubernetes"
-          ]
-        ]
-      ],
-      [
-        "map",
-        [
-          [
-            "192.168.0.1:6443",
-            "1.1.1.1:1,2.2.2.2:2"
-          ],
-          [
-            "[fe::1]:1",
-            "[fe::2]:1,[fe::2]:2"
-          ]
-        ]
-      ]
-    ]
-  ],
-  "headings": [
-    "name",
-    "_uuid",
-    "external_ids",
-	"protocol"
-  ]
-}
-`
+
+		initialDB := []libovsdb.TestData{
+			&nbdb.LoadBalancer{
+				UUID:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
+				Name:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
+				Protocol: &nbdb.LoadBalancerProtocolTCP,
+				ExternalIDs: map[string]string{
+					"k8s.ovn.org/kind":  "Service",
+					"k8s.ovn.org/owner": "default/kubernetes",
+				},
+				Vips: map[string]string{
+					"192.168.0.1:6443": "1.1.1.1:1,2.2.2.2:2",
+					"[fe::1]:1":        "[fe::2]:1,[fe::2]:2",
+				},
+			},
+			&nbdb.LogicalRouter{
+				UUID: "GR_test-node",
+				Name: "GR_test-node",
+				LoadBalancer: []string{
+					"Service_default/kubernetes_TCP_node_router_ovn-control-plane",
+				},
+			},
+		}
 
 		fexec := ovntest.NewFakeExec()
 		err := util.SetExec(fexec)
@@ -281,17 +260,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_test-node",
 		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --format=json --data=json --columns=name,_uuid,protocol,external_ids,vips find load_balancer",
-			Output: fakeLBCache,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --no-heading --format=csv --data=bare --columns=name,load_balancer find logical_switch",
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    `ovn-nbctl --timeout=15 --no-heading --format=csv --data=bare --columns=name,load_balancer find logical_router`,
-			Output: "GR_test-node,cb6ebcb0-c12d-4404-ada7-5aa2b898f06b",
-		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 --if-exist lr-del GR_test-node",
 			"ovn-nbctl --timeout=15 --if-exist ls-del ext_test-node",
@@ -300,9 +268,16 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 
 		cleanupPBRandNATRules(fexec, nodeName, []*net.IPNet{hostSubnet})
 
-		err = gatewayCleanup(nodeName)
+		stopChan := make(chan struct{})
+		nbClient, err := libovsdb.NewNBTestHarness(libovsdb.TestSetup{NBData: initialDB}, stopChan)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		err = gatewayCleanup(nbClient, nodeName)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
+
+		nbClient.Close()
+		close(stopChan)
 	})
 
 	ginkgo.It("cleans up a dual-stack gateway in OVN", func() {
@@ -314,52 +289,29 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			v4mgtRouteUUID string = "0cac12cf-3e0f-4682-b028-5ea2e0001963"
 			v6mgtRouteUUID string = "0cac12cf-4682-3e0f-b028-5ea2e0001963"
 		)
-		fakeLBCache := `
-{
-  "data": [
-    [
-      "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
-      [
-        "uuid",
-        "cb6ebcb0-c12d-4404-ada7-5aa2b898f06b"
-      ],
-      "tcp",
-      [
-        "map",
-        [
-          [
-            "k8s.ovn.org/kind",
-            "Service"
-          ],
-          [
-            "k8s.ovn.org/owner",
-            "default/kubernetes"
-          ]
-        ]
-      ],
-      [
-        "map",
-        [
-          [
-            "192.168.0.1:6443",
-            "1.1.1.1:1,2.2.2.2:2"
-          ],
-          [
-            "[fe::1]:1",
-            "[fe::2]:1,[fe::2]:2"
-          ]
-        ]
-      ]
-    ]
-  ],
-  "headings": [
-    "name",
-    "_uuid",
-    "external_ids",
-	"protocol"
-  ]
-}
-`
+
+		initialDB := []libovsdb.TestData{
+			&nbdb.LoadBalancer{
+				UUID:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
+				Name:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
+				Protocol: &nbdb.LoadBalancerProtocolTCP,
+				ExternalIDs: map[string]string{
+					"k8s.ovn.org/kind":  "Service",
+					"k8s.ovn.org/owner": "default/kubernetes",
+				},
+				Vips: map[string]string{
+					"192.168.0.1:6443": "1.1.1.1:1,2.2.2.2:2",
+					"[fe::1]:1":        "[fe::2]:1,[fe::2]:2",
+				},
+			},
+			&nbdb.LogicalRouter{
+				UUID: "GR_test-node",
+				Name: "GR_test-node",
+				LoadBalancer: []string{
+					"Service_default/kubernetes_TCP_node_router_ovn-control-plane",
+				},
+			},
+		}
 
 		fexec := ovntest.NewFakeExec()
 		err := util.SetExec(fexec)
@@ -386,17 +338,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_test-node",
 		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --format=json --data=json --columns=name,_uuid,protocol,external_ids,vips find load_balancer",
-			Output: fakeLBCache,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --no-heading --format=csv --data=bare --columns=name,load_balancer find logical_switch",
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    `ovn-nbctl --timeout=15 --no-heading --format=csv --data=bare --columns=name,load_balancer find logical_router`,
-			Output: "GR_test-node,cb6ebcb0-c12d-4404-ada7-5aa2b898f06b",
-		})
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 --if-exist lr-del GR_test-node",
@@ -406,9 +347,16 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 
 		cleanupPBRandNATRules(fexec, nodeName, hostSubnets)
 
-		err = gatewayCleanup(nodeName)
+		stopChan := make(chan struct{})
+		nbClient, err := libovsdb.NewNBTestHarness(libovsdb.TestSetup{NBData: initialDB}, stopChan)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		err = gatewayCleanup(nbClient, nodeName)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
+
+		nbClient.Close()
+		close(stopChan)
 	})
 
 	ginkgo.It("removes leftover SNAT entries during init", func() {
