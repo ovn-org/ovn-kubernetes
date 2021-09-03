@@ -32,7 +32,7 @@ RUN yum install -y  \
 	selinux-policy && \
 	yum clean all
 
-ARG ovsver=2.15.0-28.el8fdp
+ARG ovsver=2.16.0-6.el8fdp
 ARG ovnver=21.09.0-18.el8fdp
 
 RUN INSTALL_PKGS=" \
@@ -44,7 +44,7 @@ RUN INSTALL_PKGS=" \
 	ethtool conntrack-tools \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.15 = $ovsver" "openvswitch2.15-devel = $ovsver" "python3-openvswitch2.15 = $ovsver" "openvswitch2.15-ipsec = $ovsver" && \
+	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.16 = $ovsver" "openvswitch2.16-devel = $ovsver" "python3-openvswitch2.16 = $ovsver" "openvswitch2.16-ipsec = $ovsver" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn21.09 = $ovnver" "ovn21.09-central = $ovnver" "ovn21.09-host = $ovnver" "ovn21.09-vtep = $ovnver" && \
 	yum clean all && rm -rf /var/cache/*
 
