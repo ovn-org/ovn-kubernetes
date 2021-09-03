@@ -466,7 +466,7 @@ func (jsIPManager *JoinSwitchIPManager) getJoinLRPAddresses(nodeName string) []*
 			errStr = "Failed to get IPs"
 		} else {
 			errStr = fmt.Sprintf("Invalid IPs %s (possibly not in the range of subnet %s)",
-				util.JoinIPNetIPs(gwLRPIPs, " "), util.JoinIPNetIPs(joinSubnets, " "))
+				util.JoinIPNets(gwLRPIPs, " "), util.JoinIPNets(joinSubnets, " "))
 		}
 		klog.Warningf("%s for logical router port %s", errStr, gwLrpName)
 		return []*net.IPNet{}
