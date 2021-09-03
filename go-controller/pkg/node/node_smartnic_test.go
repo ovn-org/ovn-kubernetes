@@ -24,10 +24,10 @@ func genOVSFindCmd(table, column, condition string) string {
 		column, table, condition)
 }
 
-func genOVSAddPortCmd(hostIfaceName, ifaceID, mac, ip, sandboxID string) string {
+func genOVSAddPortCmd(hostIfaceName, ifaceID, mac, ip, sandboxID, podUID string) string {
 	return fmt.Sprintf("ovs-vsctl --timeout=30 add-port br-int %s -- set interface %s external_ids:attached_mac=%s "+
-		"external_ids:iface-id=%s external_ids:ip_addresses=%s external_ids:sandbox=%s",
-		hostIfaceName, hostIfaceName, mac, ifaceID, ip, sandboxID)
+		"external_ids:iface-id=%s external_ids:iface-id-ver=%s external_ids:ip_addresses=%s external_ids:sandbox=%s",
+		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ip, sandboxID)
 }
 
 func genOVSDelPortCmd(portName string) string {
@@ -157,7 +157,7 @@ var _ = Describe("Node Smart NIC tests", func() {
 					"external-ids:iface-id="+genIfaceID(pod.Namespace, pod.Name)),
 			})
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931"),
+				Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
 				Err: fmt.Errorf("failed to run ovs command"),
 			})
 			// Mock netlink/ovs calls for cleanup
@@ -185,7 +185,7 @@ var _ = Describe("Node Smart NIC tests", func() {
 						"external-ids:iface-id="+genIfaceID(pod.Namespace, pod.Name)),
 				})
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931"),
+					Cmd: genOVSAddPortCmd(vfRep, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
 				})
 				// clearPodBandwidth
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
