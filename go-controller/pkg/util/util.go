@@ -261,3 +261,21 @@ ipLoop:
 
 	return out
 }
+
+func GetLogicalPortName(podNamespace, podName string) string {
+	return composePortName(podNamespace, podName)
+}
+
+func GetIfaceId(podNamespace, podName string) string {
+	return composePortName(podNamespace, podName)
+}
+
+// composePortName should be called both for LogicalPortName and iface-id
+// because ovn-nb man says:
+// Logical_Switch_Port.name must match external_ids:iface-id
+// in the Open_vSwitch database’s Interface table,
+// because hypervisors use external_ids:iface-id as a lookup key to
+// identify the network interface of that entity.
+func composePortName(podNamespace, podName string) string {
+	return podNamespace + "_" + podName
+}

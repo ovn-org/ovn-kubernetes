@@ -18,11 +18,6 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-// Builds the logical switch port name for a given pod.
-func podLogicalPortName(pod *kapi.Pod) string {
-	return pod.Namespace + "_" + pod.Name
-}
-
 func (oc *Controller) syncPods(pods []interface{}) {
 	// get the list of logical switch ports (equivalent to pods)
 	expectedLogicalPorts := make(map[string]bool)
@@ -34,7 +29,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 		}
 		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations)
 		if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && err == nil {
-			logicalPort := podLogicalPortName(pod)
+			logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 			expectedLogicalPorts[logicalPort] = true
 			if err = oc.lsManager.AllocateIPs(pod.Spec.NodeName, annotations.IPs); err != nil {
 				klog.Errorf("Couldn't allocate IPs: %s for pod: %s on node: %s"+
@@ -91,7 +86,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	podDesc := pod.Namespace + "/" + pod.Name
 	klog.Infof("Deleting pod: %s", podDesc)
 
-	logicalPort := podLogicalPortName(pod)
+	logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 	portInfo, err := oc.logicalPortCache.get(logicalPort)
 	if err != nil {
 		klog.Errorf(err.Error())
@@ -243,7 +238,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return err
 	}
 
-	portName := podLogicalPortName(pod)
+	portName := util.GetLogicalPortName(pod.Namespace, pod.Name)
 	klog.Infof("[%s/%s] creating logical port for pod on switch %s", pod.Namespace, pod.Name, logicalSwitch)
 
 	var podMac net.HardwareAddr
