@@ -336,7 +336,10 @@ func (oc *Controller) deleteEgressFirewall(egressFirewallObj *egressfirewallapi.
 		return fmt.Errorf("there is no egressFirewall found in namespace %s", egressFirewallObj.Namespace)
 	}
 
-	ef, _ := obj.(egressFirewall)
+	ef, ok := obj.(*egressFirewall)
+	if !ok {
+		return fmt.Errorf("DeleteEgressFirewall failed: type assertion failed")
+	}
 
 	ef.Lock()
 	defer ef.Unlock()
