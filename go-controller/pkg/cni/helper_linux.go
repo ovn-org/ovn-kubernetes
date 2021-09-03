@@ -278,6 +278,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		"interface", hostIfaceName,
 		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
 		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
+		fmt.Sprintf("external_ids:iface-id-ver=%s", initialPodUID),
 		fmt.Sprintf("external_ids:ip_addresses=%s", strings.Join(ipStrs, ",")),
 		fmt.Sprintf("external_ids:sandbox=%s", sandboxID),
 	}

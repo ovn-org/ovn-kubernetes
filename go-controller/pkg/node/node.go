@@ -248,7 +248,13 @@ func isOVNControllerReady(name string) (bool, error) {
 // Starting with v21.03.0 OVN sets OVS.Interface.external-id:ovn-installed
 // and OVNSB.Port_Binding.up when all OVS flows associated to a
 // logical port have been successfully programmed.
+// OVS.Interface.external-id:ovn-installed can only be used correctly
+// in a combination with OVS.Interface.external-id:iface-id-ver
 func getOVNIfUpCheckMode() (bool, error) {
+	if config.OvnKubeNode.DisableOVNIfaceIdVer {
+		klog.Infof("'iface-id-ver' is manually disabled, ovn-installed feature can't be used")
+		return false, nil
+	}
 	if _, stderr, err := util.RunOVNSbctl("--columns=up", "list", "Port_Binding"); err != nil {
 		if strings.Contains(stderr, "does not contain a column") {
 			klog.Infof("Falling back to using legacy CNI OVS flow readiness checks")
@@ -470,8 +476,14 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 					}
 				}
 				// ensure CNI support for port binding built into OVN, as masters have been upgraded
-				if initialTopoVersion < types.OvnPortBindingTopoVersion && cniServer != nil {
-					cniServer.EnableOVNPortUpSupport()
+				if initialTopoVersion < types.OvnPortBindingTopoVersion && cniServer != nil && !isOvnUpEnabled {
+					isOvnUpEnabled, err = getOVNIfUpCheckMode()
+					if err != nil {
+						klog.Errorf("%v", err)
+					}
+					if isOvnUpEnabled {
+						cniServer.EnableOVNPortUpSupport()
+					}
 				}
 			}()
 		}

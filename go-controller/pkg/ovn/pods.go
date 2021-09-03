@@ -263,16 +263,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("unable to get the lsp: %s from the nbdb: %s", portName, err)
 	}
 
-	if lsp == nil {
-		cmd, err = oc.ovnNBClient.LSPAdd(logicalSwitch, portName)
-		if err != nil {
-			return fmt.Errorf("unable to create the LSPAdd command for port: %s from the nbdb: %v", portName, err)
-		}
-		cmds = append(cmds, cmd)
-	} else {
-		klog.Infof("LSP already exists for port: %s", portName)
-	}
-
 	// Bind the port to the node's chassis; prevents ping-ponging between
 	// chassis if ovnkube-node isn't running correctly and hasn't cleared
 	// out iface-id for an old instance of this pod, and the pod got
@@ -285,6 +275,26 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		opts = make(map[string]string)
 	}
 	opts["requested-chassis"] = pod.Spec.NodeName
+
+	if lsp == nil {
+		cmd, err = oc.ovnNBClient.LSPAdd(logicalSwitch, portName)
+		if err != nil {
+			return fmt.Errorf("unable to create the LSPAdd command for port: %s from the nbdb: %v", portName, err)
+		}
+		cmds = append(cmds, cmd)
+		// Unique identifier to distinguish interfaces for recreated pods, also set by ovnkube-node
+		// ovn-controller will claim the OVS interface only if external_ids:iface-id
+		// matches with the Port_Binding.logical_port and external_ids:iface-id-ver matches
+		// with the Port_Binding.options:iface-id-ver. This is not mandatory.
+		// If Port_binding.options:iface-id-ver is not set, then OVS
+		// Interface.external_ids:iface-id-ver if set is ignored.
+		// Only set for new LSP for correct ovn-kube upgrade, because for old OVS Interfaces
+		// iface-id-ver is not set => ovn-controller won't bind OVS Interface
+		opts["iface-id-ver"] = string(pod.UID)
+	} else {
+		klog.Infof("LSP already exists for port: %s", portName)
+	}
+
 	cmd, err = oc.ovnNBClient.LSPSetOptions(portName, opts)
 	if err != nil {
 		return fmt.Errorf("unable to create the LSPSetOptions command for port: %s from the nbdb: %v", portName, err)
@@ -478,7 +488,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	cmds = append(cmds, cmd)
 
-	// execute all the commands together.
+	// execute all the commands together. If a single operation fails, all commands will roll back =>
+	// for new Pod no LSP will be created
 	err = oc.ovnNBClient.Execute(cmds...)
 	if err != nil {
 		return fmt.Errorf("error while creating logical port %s error: %v",
