@@ -43,26 +43,28 @@ type gressPolicy struct {
 type portPolicy struct {
 	protocol string
 	port     int32
+	endPort  int32
 }
 
 func (pp *portPolicy) getL4Match() (string, error) {
-	if pp.protocol == TCP {
-		if pp.port != 0 {
-			return fmt.Sprintf("tcp && tcp.dst==%d", pp.port), nil
+	var supportedProtocols = []string{TCP, UDP, SCTP}
+	var foundProtocol string
+	for _, protocol := range supportedProtocols {
+		if protocol == pp.protocol {
+			foundProtocol = strings.ToLower(pp.protocol)
+			break
 		}
-		return "tcp", nil
-	} else if pp.protocol == UDP {
-		if pp.port != 0 {
-			return fmt.Sprintf("udp && udp.dst==%d", pp.port), nil
-		}
-		return "udp", nil
-	} else if pp.protocol == SCTP {
-		if pp.port != 0 {
-			return fmt.Sprintf("sctp && sctp.dst==%d", pp.port), nil
-		}
-		return "sctp", nil
 	}
-	return "", fmt.Errorf("unknown port protocol %v", pp.protocol)
+	if len(foundProtocol) == 0 {
+		return "", fmt.Errorf("unknown port protocol %v", pp.protocol)
+	}
+	if pp.endPort != 0 && pp.endPort != pp.port {
+		return fmt.Sprintf("%s && %d<=%s.dst<=%d", foundProtocol, pp.port, foundProtocol, pp.endPort), nil
+
+	} else if pp.port != 0 {
+		return fmt.Sprintf("%s && %s.dst==%d", foundProtocol, foundProtocol, pp.port), nil
+	}
+	return foundProtocol, nil
 }
 
 func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string) *gressPolicy {
@@ -159,10 +161,14 @@ func (gp *gressPolicy) deletePeerPod(pod *v1.Pod) error {
 // If the port is not specified, it implies all ports for that protocol
 func (gp *gressPolicy) addPortPolicy(portJSON *knet.NetworkPolicyPort) {
 	pp := &portPolicy{protocol: string(*portJSON.Protocol),
-		port: 0,
+		port:    0,
+		endPort: 0,
 	}
 	if portJSON.Port != nil {
 		pp.port = portJSON.Port.IntVal
+	}
+	if portJSON.EndPort != nil {
+		pp.endPort = *portJSON.EndPort
 	}
 	gp.portPolicies = append(gp.portPolicies, pp)
 }

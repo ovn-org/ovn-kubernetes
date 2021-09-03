@@ -117,3 +117,52 @@ func TestGetMatchFromIPBlock(t *testing.T) {
 		assert.Equal(t, tc.expected, output)
 	}
 }
+
+func TestGetL4Match(t *testing.T) {
+	testcases := []struct {
+		desc     string
+		protocol string
+		port     int32
+		endPort  int32
+		expected string
+	}{
+		{
+			"unsupported protocol",
+			"kube",
+			0,
+			0,
+			"",
+		},
+		{
+			"valid protocol with no endport specified",
+			"TCP",
+			300,
+			0,
+			"tcp && tcp.dst==300",
+		},
+		{
+			"valid protocol with endport specified",
+			"TCP",
+			300,
+			310,
+			"tcp && 300<=tcp.dst<=310",
+		},
+		{
+			"valid protocol with no ports specified",
+			"TCP",
+			0,
+			0,
+			"tcp",
+		},
+	}
+
+	for _, tc := range testcases {
+		pp := &portPolicy{
+			protocol: tc.protocol,
+			port:     tc.port,
+			endPort:  tc.endPort,
+		}
+		l4Match, _ := pp.getL4Match()
+		assert.Equal(t, tc.expected, l4Match)
+	}
+}
