@@ -78,13 +78,16 @@ func (odbi *ovndb) asAddIPImp(name, uuid string, addrs []string) (*OvnCommand, e
 	return &OvnCommand{operations, odbi, make([][]map[string]interface{}, len(operations))}, nil
 }
 
-func (odbi *ovndb) asDelIPImp(name string, addrs []string) (*OvnCommand, error) {
+func (odbi *ovndb) asDelIPImp(name, uuid string, addrs []string) (*OvnCommand, error) {
 	addresses, err := libovsdb.NewOvsSet(addrs)
 	if err != nil {
 		return nil, err
 	}
 	mutation := libovsdb.NewMutation("addresses", "delete", addresses)
 	condition := libovsdb.NewCondition("name", "==", name)
+	if uuid != "" {
+		condition = libovsdb.NewCondition("_uuid", "==", stringToGoUUID(uuid))
+	}
 	updateOp := libovsdb.Operation{
 		Op:    opMutate,
 		Table: TableAddressSet,

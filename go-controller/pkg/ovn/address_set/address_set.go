@@ -56,6 +56,7 @@ type AddressSet interface {
 	DeleteIPs(ip []net.IP) error
 	Destroy() error
 	PrepareAddIPsCmds(ip []net.IP) ([]*goovn.OvnCommand, error)
+	PrepareDeleteIPsCmds(ip []net.IP) ([]*goovn.OvnCommand, error)
 }
 
 type ovnAddressSetFactory struct {
@@ -374,6 +375,31 @@ func (as *ovnAddressSets) DeleteIPs(ips []net.IP) error {
 	return nil
 }
 
+func (as *ovnAddressSets) PrepareDeleteIPsCmds(ips []net.IP) ([]*goovn.OvnCommand, error) {
+	if len(ips) == 0 {
+		return nil, nil
+	}
+
+	v4ips, v6ips := splitIPsByFamily(ips)
+	var cmds []*goovn.OvnCommand
+	if as.ipv6 != nil {
+		if cmd, err := as.ipv6.deleteIPsCmd(v6ips); err != nil {
+			return nil, fmt.Errorf("failed to DeleteIPs to the v6 set: %w", err)
+		} else {
+			cmds = append(cmds, cmd)
+		}
+	}
+	if as.ipv4 != nil {
+		if cmd, err := as.ipv4.deleteIPsCmd(v4ips); err != nil {
+			return nil, fmt.Errorf("failed to DeleteIPs to the v4 set: %w", err)
+		} else {
+			cmds = append(cmds, cmd)
+		}
+	}
+
+	return cmds, nil
+}
+
 func (as *ovnAddressSets) Destroy() error {
 
 	if as.ipv4 != nil {
@@ -461,7 +487,7 @@ func (as *ovnAddressSet) deleteIPsCmd(ips []net.IP) (*goovn.OvnCommand, error) {
 	}
 	ipStr := joinIPs(ips)
 
-	cmd, err := as.nb.ASDelIPs(as.hashName, uniqIPs)
+	cmd, err := as.nb.ASDelIPs(as.hashName, as.uuid, uniqIPs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create add ips cmd for address set %q, ips: %s: %v", asDetail(as), ipStr, err)
 	}

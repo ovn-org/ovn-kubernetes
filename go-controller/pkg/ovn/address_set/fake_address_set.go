@@ -263,6 +263,10 @@ func (as *fakeAddressSets) SetIPs(ips []net.IP) error {
 	return nil
 }
 
+func (as *fakeAddressSets) PrepareDeleteIPsCmds(ips []net.IP) ([]*goovn.OvnCommand, error) {
+	return nil, nil
+}
+
 func (as *fakeAddressSets) DeleteIPs(ips []net.IP) error {
 	var err error
 	as.Lock()

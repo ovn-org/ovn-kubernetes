@@ -103,7 +103,7 @@ type Client interface {
 	// Add addressset
 	ASAdd(name string, addrs []string, external_ids map[string]string) (*OvnCommand, error)
 	ASAddIPs(name, uuid string, addrs []string) (*OvnCommand, error)
-	ASDelIPs(name string, addrs []string) (*OvnCommand, error)
+	ASDelIPs(name, uuid string, addrs []string) (*OvnCommand, error)
 	// Delete addressset
 	ASDel(name string) (*OvnCommand, error)
 	// Get all AS
@@ -878,8 +878,8 @@ func (c *ovndb) ASAddIPs(name, uuid string, addrs []string) (*OvnCommand, error)
 	return c.asAddIPImp(name, uuid, addrs)
 }
 
-func (c *ovndb) ASDelIPs(name string, addrs []string) (*OvnCommand, error) {
-	return c. asDelIPImp(name, addrs)
+func (c *ovndb) ASDelIPs(name, uuid string, addrs []string) (*OvnCommand, error) {
+	return c.asDelIPImp(name, uuid, addrs)
 }
 
 func (c *ovndb) ASDel(name string) (*OvnCommand, error) {
