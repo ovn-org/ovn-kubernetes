@@ -463,7 +463,7 @@ func (jsIPManager *JoinSwitchIPManager) getJoinLRPAddresses(nodeName string) []*
 	if len(gwLRPIPs) != len(joinSubnets) {
 		var errStr string
 		if len(gwLRPIPs) == 0 {
-			errStr = fmt.Sprintf("Failed to get IPs for logical router port %s", gwLrpName)
+			errStr = "Failed to get IPs"
 		} else {
 			errStr = fmt.Sprintf("Invalid IPs %s (possibly not in the range of subnet %s)",
 				util.JoinIPNetIPs(gwLRPIPs, " "), util.JoinIPNetIPs(joinSubnets, " "))
