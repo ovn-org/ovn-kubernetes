@@ -333,10 +333,16 @@ func (oc *Controller) deleteEgressFirewall(egressFirewallObj *egressfirewallapi.
 	deleteDNS := false
 	obj, loaded := oc.egressFirewalls.LoadAndDelete(egressFirewallObj.Namespace)
 	if !loaded {
-		return fmt.Errorf("there is no egressFirewall found in namespace %s", egressFirewallObj.Namespace)
+		return fmt.Errorf("there is no egressFirewall found in namespace %s",
+			egressFirewallObj.Namespace)
 	}
 
-	ef, _ := obj.(egressFirewall)
+	ef, ok := obj.(*egressFirewall)
+	if !ok {
+		return fmt.Errorf("deleteEgressFirewall failed: type assertion to *egressFirewall"+
+			" failed for EgressFirewall %s of type %T in namespace %s.",
+			egressFirewallObj.Name, obj, egressFirewallObj.Namespace)
+	}
 
 	ef.Lock()
 	defer ef.Unlock()
