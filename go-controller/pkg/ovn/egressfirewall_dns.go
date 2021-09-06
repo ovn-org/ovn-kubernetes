@@ -25,6 +25,7 @@ type EgressDNS struct {
 
 	// Report change when Add operation is done
 	added          chan struct{}
+	deleted        chan string
 	stopChan       chan struct{}
 	controllerStop <-chan struct{}
 }
@@ -51,6 +52,7 @@ func NewEgressDNS(addressSetFactory addressset.AddressSetFactory, controllerStop
 		addressSetFactory: addressSetFactory,
 
 		added:          make(chan struct{}),
+		deleted:        make(chan string, 1),
 		stopChan:       make(chan struct{}),
 		controllerStop: controllerStop,
 	}
@@ -91,12 +93,12 @@ func (e *EgressDNS) Delete(namespace string) bool {
 		// delete the dnsEntry
 		delete(dnsEntry.namespaces, namespace)
 		if len(dnsEntry.namespaces) == 0 {
-			// the dnsEntry appears in no other namespace so delete the address_set
+			// the dnsEntry appears in no other namespace, so delete the address_set
 			err := dnsEntry.dnsAddressSet.Destroy()
 			if err != nil {
-				klog.Errorf("Error deleteing EgressFirewall AddressSet for dnsName: %s %v", dnsName, err)
+				klog.Errorf("Error deleting EgressFirewall AddressSet for dnsName: %s %v", dnsName, err)
 			}
-			// the dnsEntry is no longer needed because nothing references it delete it
+			// the dnsEntry is no longer needed because nothing references it, so delete it
 			delete(e.dnsEntries, dnsName)
 			dnsNamesToDelete = append(dnsNamesToDelete, dnsName)
 		}
@@ -104,6 +106,10 @@ func (e *EgressDNS) Delete(namespace string) bool {
 	e.lock.Unlock()
 	for _, name := range dnsNamesToDelete {
 		e.dns.Delete(name)
+		// send a message to the "deleted" buffered channel so that Run() stops using
+		// the deleted domain name. (channel is buffered so that sending values to it
+		// blocks only if Run() is busy updating its internal values)
+		e.deleted <- name
 	}
 	return len(e.dnsEntries) == 0
 }
@@ -116,6 +122,10 @@ func (e *EgressDNS) updateEntryForName(dnsName string) error {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	ips := e.dns.GetIPs(dnsName)
+	if _, ok := e.dnsEntries[dnsName]; !ok {
+		return fmt.Errorf("cannot update DNS record for %s: no entry found. "+
+			"Was the EgressFirewall deleted?", dnsName)
+	}
 	e.dnsEntries[dnsName].dnsResolves = ips
 
 	if err := e.dnsEntries[dnsName].dnsAddressSet.SetIPs(ips); err != nil {
@@ -145,12 +155,13 @@ func (e *EgressDNS) addToDNS(dnsName string) {
 }
 
 // Run spawns a goroutine that handles updates to the dns entries for dnsNames used in
-// EgressFirewalls. The loop runs after receiving one of two signals
+// EgressFirewalls. The loop runs after receiving one of three signals:
 // 1. time.After(durationTillNextQuery) times out and the dnsName with the lowest ttl is checked
 //    and the durationTillNextQuery is updated
-// 2. e.added is recived and durationTillNextQuery is recomputed
+// 2. e.added is received and durationTillNextQuery is recomputed
+// 3. e.deleted is received and coincides with dnsName
 func (e *EgressDNS) Run(defaultInterval time.Duration) {
-	var dnsName string
+	var dnsName, dnsNameDeleted string
 	var ttl time.Time
 	var timeSet bool
 	// initially the next DNS Query happens at the default interval
@@ -171,6 +182,12 @@ func (e *EgressDNS) Run(defaultInterval time.Duration) {
 					if err := e.updateEntryForName(dnsName); err != nil {
 						utilruntime.HandleError(err)
 					}
+				}
+			case dnsNameDeleted = <-e.deleted:
+				// Break from the select and update dnsName only if dnsName
+				// appears in an EgressFirewall that has just been deleted.
+				if dnsName != dnsNameDeleted {
+					continue
 				}
 			case <-e.stopChan:
 				return
