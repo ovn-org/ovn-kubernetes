@@ -257,7 +257,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	ifInfo *PodInterfaceInfo, sandboxID string, podLister corev1listers.PodLister,
 	kclient kubernetes.Interface, initialPodUID string) error {
 	klog.Infof("ConfigureOVS: namespace: %s, podName: %s", namespace, podName)
-	ifaceID := fmt.Sprintf("%s_%s", namespace, podName)
+	ifaceID := util.GetIfaceId(namespace, podName)
 
 	// Find and remove any existing OVS port with this iface-id. Pods can
 	// have multiple sandboxes if some are waiting for garbage collection,
@@ -278,6 +278,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		"interface", hostIfaceName,
 		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
 		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
+		fmt.Sprintf("external_ids:iface-id-ver=%s", initialPodUID),
 		fmt.Sprintf("external_ids:ip_addresses=%s", strings.Join(ipStrs, ",")),
 		fmt.Sprintf("external_ids:sandbox=%s", sandboxID),
 	}

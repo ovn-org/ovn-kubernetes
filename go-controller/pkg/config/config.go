@@ -351,8 +351,9 @@ type HybridOverlayConfig struct {
 
 // OvnKubeNodeConfig holds ovnkube-node configurations
 type OvnKubeNodeConfig struct {
-	Mode           string `gcfg:"mode"`
-	MgmtPortNetdev string `gcfg:"mgmt-port-netdev"`
+	Mode                 string `gcfg:"mode"`
+	MgmtPortNetdev       string `gcfg:"mgmt-port-netdev"`
+	DisableOVNIfaceIdVer bool   `gcfg:"disable-ovn-iface-id-ver"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -1071,6 +1072,13 @@ var OvnKubeNodeFlags = []cli.Flag{
 			"and used to allow host network services and pods to access k8s pod and service networks. ",
 		Value:       OvnKubeNode.MgmtPortNetdev,
 		Destination: &cliConfig.OvnKubeNode.MgmtPortNetdev,
+	},
+	&cli.BoolFlag{
+		Name: "disable-ovn-iface-id-ver",
+		Usage: "if iface-id-ver option is not enabled in ovn, set this flag to True " +
+			"(depends on ovn version, minimal required is 21.09)",
+		Value:       OvnKubeNode.DisableOVNIfaceIdVer,
+		Destination: &cliConfig.OvnKubeNode.DisableOVNIfaceIdVer,
 	},
 }
 
