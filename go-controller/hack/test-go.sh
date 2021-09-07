@@ -11,7 +11,7 @@ cd "${OVN_KUBE_ROOT}"
 PKGS=$(go list -mod vendor -f '{{if len .TestGoFiles}} {{.ImportPath}} {{end}}' ${PKGS:-./cmd/... ./pkg/... ./hybrid-overlay/...} | xargs)
 
 if [[ "$1" == "focus" && "$2" != "" ]]; then
-    ginkgo_focus="-ginkgo.focus="${2}""
+    ginkgo_focus="-ginkgo.focus="$(echo ${2} | sed 's/ /\\s/g')""
 fi
 
 TEST_REPORT_DIR=${TEST_REPORT_DIR:="./_artifacts"}
