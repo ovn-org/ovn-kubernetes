@@ -11,12 +11,6 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 )
 
-func init() {
-	// libovsdb matcher might produce a lengthy output that will be cropped by
-	// default gomega output limit, set to 0 to unlimit.
-	gomegaformat.MaxLength = 0
-}
-
 // isSetEqual compares a slice as an unordered set
 func isSetEqual(x, y interface{}) bool {
 	// used gomega for now
