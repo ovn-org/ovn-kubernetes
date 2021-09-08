@@ -61,10 +61,7 @@ clean:
 	rm -f ./pkg/nbdb/ovn-nb.ovsschema
 	rm -f ./pkg/sbdb/ovn-sb.ovsschema
 
-.PHONY: install.tools lint gofmt
-
-install.tools:
-	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | bash -s -- -b ${GOPATH}/bin
+.PHONY: lint gofmt
 
 lint:
 ifeq ($(CONTAINER_RUNNABLE), 0)
