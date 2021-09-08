@@ -42,21 +42,6 @@ func (o *OvsMap) UnmarshalJSON(b []byte) (err error) {
 		innerSlice := oMap[1].([]interface{})
 		for _, val := range innerSlice {
 			f := val.([]interface{})
-			var k interface{}
-			switch f[0].(type) {
-			case []interface{}:
-				vSet := f[0].([]interface{})
-				if len(vSet) != 2 || vSet[0] == "map" {
-					return &json.UnmarshalTypeError{Value: reflect.ValueOf(oMap).String(), Type: reflect.TypeOf(*o)}
-				}
-				goSlice, err := ovsSliceToGoNotation(vSet)
-				if err != nil {
-					return err
-				}
-				k = goSlice
-			default:
-				k = f[0]
-			}
 			switch f[1].(type) {
 			case []interface{}:
 				vSet := f[1].([]interface{})
@@ -67,9 +52,9 @@ func (o *OvsMap) UnmarshalJSON(b []byte) (err error) {
 				if err != nil {
 					return err
 				}
-				o.GoMap[k] = goSlice
+				o.GoMap[f[0]] = goSlice
 			default:
-				o.GoMap[k] = f[1]
+				o.GoMap[f[0]] = f[1]
 			}
 		}
 	}

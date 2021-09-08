@@ -3,6 +3,7 @@ package ovsdb
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 )
 
 type Mutator string
@@ -78,7 +79,7 @@ func (m *Mutation) UnmarshalJSON(b []byte) error {
 	default:
 		return fmt.Errorf("%s is not a valid mutator", mutator)
 	}
-	vv, err := ovsSliceToGoNotation(v[2])
+	vv, err := interfaceToOVSDBNotationInterface(reflect.ValueOf(v[2]))
 	if err != nil {
 		return err
 	}

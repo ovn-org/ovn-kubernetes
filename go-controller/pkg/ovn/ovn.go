@@ -13,7 +13,6 @@ import (
 
 	goovn "github.com/ebay/go-ovn"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -193,12 +192,6 @@ type Controller struct {
 	// go-ovn southbound client interface
 	ovnSBClient goovn.Client
 
-	// libovsdb northbound client interface
-	nbClient libovsdbclient.Client
-
-	// libovsdb southbound client interface
-	sbClient libovsdbclient.Client
-
 	// v4HostSubnetsUsed keeps track of number of v4 subnets currently assigned to nodes
 	v4HostSubnetsUsed float64
 
@@ -247,9 +240,8 @@ func GetIPFullMask(ip string) string {
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory,
-	ovnNBClient goovn.Client, ovnSBClient goovn.Client, libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
-	recorder record.EventRecorder) *Controller {
+func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
+	stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client, recorder record.EventRecorder) *Controller {
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(ovnNBClient)
 	}
@@ -282,7 +274,6 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			podHandlerCache:       make(map[string]factory.Handler),
 			allocatorMutex:        &sync.Mutex{},
 			allocator:             make(map[string]*egressNode),
-			nbClient:              libovsdbOvnNBClient,
 		},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
@@ -293,9 +284,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		recorder:                 recorder,
 		ovnNBClient:              ovnNBClient,
 		ovnSBClient:              ovnSBClient,
-		nbClient:                 libovsdbOvnNBClient,
-		sbClient:                 libovsdbOvnSBClient,
-		svcController:            newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient, stopChan),
+		svcController:            newServiceController(ovnClient.KubeClient, stopChan),
 	}
 }
 
@@ -351,7 +340,6 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 		unidlingController := unidling.NewController(
 			oc.recorder,
 			oc.watchFactory.ServiceInformer(),
-			oc.sbClient,
 		)
 		wg.Add(1)
 		go func() {
@@ -1197,7 +1185,7 @@ func shouldUpdate(node, oldNode *kapi.Node) (bool, error) {
 	return true, nil
 }
 
-func newServiceController(client clientset.Interface, nbClient libovsdbclient.Client, stopChan <-chan struct{}) *svccontroller.Controller {
+func newServiceController(client clientset.Interface, stopChan <-chan struct{}) *svccontroller.Controller {
 	// Create our own informers to start compartmentalizing the code
 	// filter server side the things we don't care about
 	noProxyName, err := labels.NewRequirement("service.kubernetes.io/service-proxy-name", selection.DoesNotExist, nil)
@@ -1220,7 +1208,6 @@ func newServiceController(client clientset.Interface, nbClient libovsdbclient.Cl
 
 	controller := svccontroller.NewController(
 		client,
-		nbClient,
 		svcFactory.Core().V1().Services(),
 		svcFactory.Discovery().V1beta1().EndpointSlices(),
 		svcFactory.Core().V1().Nodes(),

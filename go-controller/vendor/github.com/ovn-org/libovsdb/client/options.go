@@ -3,9 +3,6 @@ package client
 import (
 	"crypto/tls"
 	"net/url"
-	"time"
-
-	"github.com/cenkalti/backoff/v4"
 )
 
 const (
@@ -17,9 +14,6 @@ const (
 type options struct {
 	endpoints []string
 	tlsConfig *tls.Config
-	reconnect bool
-	timeout   time.Duration
-	backoff   backoff.BackOff
 }
 
 type Option func(o *options) error
@@ -75,19 +69,6 @@ func WithEndpoint(endpoint string) Option {
 			}
 		}
 		o.endpoints = append(o.endpoints, endpoint)
-		return nil
-	}
-}
-
-// WithReconnect tells the client to automatically reconnect when
-// disconnected. The timeout is used to construct the context on
-// each call to Connect, while backoff dicates the backoff
-// algorithm to use
-func WithReconnect(timeout time.Duration, backoff backoff.BackOff) Option {
-	return func(o *options) error {
-		o.reconnect = true
-		o.timeout = timeout
-		o.backoff = backoff
 		return nil
 	}
 }

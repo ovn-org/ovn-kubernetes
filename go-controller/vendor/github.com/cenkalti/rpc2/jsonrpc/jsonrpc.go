@@ -151,20 +151,7 @@ func (c *jsonCodec) ReadRequestBody(x interface{}) error {
 		return errMissingParams
 	}
 
-	var err error
-
-	// Check if x points to a slice of any kind
-	rt := reflect.TypeOf(x)
-	if rt.Kind() == reflect.Ptr && rt.Elem().Kind() == reflect.Slice {
-		// If it's a slice, unmarshal as is
-		err = json.Unmarshal(*c.serverRequest.Params, x)
-	} else {
-		// Anything else unmarshal into a slice containing x
-		params := &[]interface{}{x}
-		err = json.Unmarshal(*c.serverRequest.Params, params)
-	}
-
-	return err
+	return json.Unmarshal(*c.serverRequest.Params, x)
 }
 
 func (c *jsonCodec) ReadResponseBody(x interface{}) error {
