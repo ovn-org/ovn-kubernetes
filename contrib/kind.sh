@@ -268,6 +268,7 @@ install_j2_renderer() {
 set_default_params() {
   # Set default values
   KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
+  KIND_IMAGE=${KIND_IMAGE:-kindest/node}
   K8S_VERSION=${K8S_VERSION:-v1.20.0}
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
@@ -426,7 +427,7 @@ create_kind_cluster() {
   if kind get clusters | grep ovn; then
     delete
   fi
-  kind create cluster --name "${KIND_CLUSTER_NAME}" --kubeconfig "${KUBECONFIG}" --image kindest/node:"${K8S_VERSION}" --config=${KIND_CONFIG_LCL}
+  kind create cluster --name "${KIND_CLUSTER_NAME}" --kubeconfig "${KUBECONFIG}" --image "${KIND_IMAGE}":"${K8S_VERSION}" --config=${KIND_CONFIG_LCL}
   cat "${KUBECONFIG}"
 }
 

@@ -418,6 +418,18 @@ Once testing is complete, to tear down the KIND deployment:
 $ kind delete cluster --name ovn
 ```
 
+### Using specific Kind container image and tag
+
+:warning: Use with caution, as kind expects this image to have all it needs.
+
+In order to use an image/tag other than the default hardcoded in kind.sh, specify
+one (or both of) the following variables:
+
+```
+$ cd ../../contrib/
+$ KIND_IMAGE=example.com/kindest/node K8S_VERSION=v1.20.0 ./kind.sh
+```
+
 ### Current Status
 
 This is subject to change because code is being updated constantly. But this is
