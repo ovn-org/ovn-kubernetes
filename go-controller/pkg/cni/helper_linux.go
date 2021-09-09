@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
@@ -413,10 +412,7 @@ func (pr *PodRequest) deletePodConntrack() {
 // PlatformSpecificCleanup deletes the OVS port
 func (pr *PodRequest) PlatformSpecificCleanup() error {
 	ifaceName := pr.SandboxID[:15]
-	ovsArgs := []string{
-		"del-port", "br-int", ifaceName,
-	}
-	out, err := exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
+	out, err := ovsExec("del-port", "br-int", ifaceName)
 	if err != nil && !strings.Contains(string(out), "no port named") {
 		// DEL should be idempotent; don't return an error just log it
 		klog.Warningf("Failed to delete OVS port %s: %v\n  %q", ifaceName, err, string(out))
