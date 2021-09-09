@@ -225,7 +225,7 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternal
 }
 
 // HandleCNIRequest is the callback for all the requests
-// coming to the cniserver after being procesed into PodRequest objects
+// coming to the cniserver after being processed into PodRequest objects
 // Argument '*PodRequest' encapsulates all the necessary information
 // kclient is passed in so that clientset can be reused from the server
 // Return value is the actual bytes to be sent back without further processing.
@@ -243,7 +243,8 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, us
 		result, err = request.cmdCheck(podLister, useOVSExternalIDs, kclient)
 	default:
 	}
-	klog.Infof("%s %s finished CNI request %+v, result %q, err %v", request, request.Command, request, string(result), err)
+	klog.Infof("%s %s finished CNI request %+v, result %q, err %v",
+		request, request.Command, request, string(formatResponseForLogging(result, request)), err)
 
 	if err != nil {
 		// Prefix errors with request info for easier failure debugging
@@ -288,4 +289,35 @@ func (pr *PodRequest) getCNIResult(podLister corev1listers.PodLister, kclient ku
 		Interfaces: interfacesArray,
 		IPs:        ips,
 	}, nil
+}
+
+// Filter out kubeAuth from response, since it might contain sensitive information.
+func formatResponseForLogging(response []byte, request *PodRequest) []byte {
+	var noAuthJSON []byte
+	var err error
+
+	if response == nil {
+		return nil
+	}
+	if len(response) == 0 {
+		return []byte{}
+	}
+
+	noAuth := struct {
+		Result    *current.Result
+		PodIFInfo *PodInterfaceInfo
+	}{}
+	if err = json.Unmarshal(response, &noAuth); err != nil {
+		klog.Errorf("Could not extract Response from %s %s CNI request %+v, : %v",
+			request, request.Command, request, err)
+		return nil
+	}
+
+	if noAuthJSON, err = json.Marshal(noAuth); err != nil {
+		klog.Errorf("Could not JSON-encode the extracted Response from %s %s "+
+			"CNI request %+v: %v", request, request.Command, request, err)
+		return nil
+	}
+
+	return noAuthJSON
 }
