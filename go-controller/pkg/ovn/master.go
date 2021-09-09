@@ -825,7 +825,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 
 	// Connect the switch to the router.
 	nodeSwToRtrUUID, err := addNodeLogicalSwitchPort(nodeName, types.SwitchToRouterPrefix+nodeName,
-		"router", nodeLRPMAC.String(), "router-port="+types.RouterToSwitchPrefix+nodeName)
+		"router", "router", "router-port="+types.RouterToSwitchPrefix+nodeName)
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
