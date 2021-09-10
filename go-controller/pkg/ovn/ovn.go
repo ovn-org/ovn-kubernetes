@@ -624,6 +624,21 @@ func (oc *Controller) WatchPods() {
 		UpdateFunc: func(old, newer interface{}) {
 			oldPod := old.(*kapi.Pod)
 			pod := newer.(*kapi.Pod)
+			// there may be a situation where this update event is not the latest
+			// and we rely on annotations to determine the pod mac/ifaddr
+			// this would create a situation where
+			// 1. addLogicalPort is executing with an older pod annotation, skips setting a new annotation
+			// 2. creates OVN logical port with old pod annotation value
+			// 3. CNI flows check fails and pod annotation does not match what is in OVN
+			// Therefore we need to get the latest version of this pod to attempt to addLogicalPort with
+			podName := pod.Name
+			podNs := pod.Namespace
+			pod, err := oc.watchFactory.GetPod(podNs, podName)
+			if err != nil {
+				klog.Warningf("Unable to get pod %s/%s for pod update, most likely it was already deleted",
+					podNs, podName)
+				return
+			}
 			if !oc.ensurePod(oldPod, pod, oc.checkAndSkipRetryPod(pod.UID)) {
 				// unskip failed pod for next retry iteration
 				oc.unSkipRetryPod(pod)
