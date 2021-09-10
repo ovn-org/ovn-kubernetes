@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
@@ -352,6 +351,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID,
 			podLister, kclient, pr.PodUID)
 		if err != nil {
+			pr.deletePorts()
 			return nil, err
 		}
 	}
@@ -410,18 +410,19 @@ func (pr *PodRequest) deletePodConntrack() {
 	}
 }
 
-// PlatformSpecificCleanup deletes the OVS port
-func (pr *PodRequest) PlatformSpecificCleanup() error {
+func (pr *PodRequest) deletePorts() {
 	ifaceName := pr.SandboxID[:15]
-	ovsArgs := []string{
-		"del-port", "br-int", ifaceName,
-	}
-	out, err := exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
-	if err != nil && !strings.Contains(string(out), "no port named") {
+	out, err := ovsExec("del-port", "br-int", ifaceName)
+	_ = util.LinkDelete(ifaceName)
+	if err != nil && !strings.Contains(out, "no port named") {
 		// DEL should be idempotent; don't return an error just log it
 		klog.Warningf("Failed to delete OVS port %s: %v\n  %q", ifaceName, err, string(out))
 	}
+}
 
+// PlatformSpecificCleanup deletes the OVS port
+func (pr *PodRequest) PlatformSpecificCleanup() error {
+	pr.deletePorts()
 	_ = clearPodBandwidth(pr.SandboxID)
 	pr.deletePodConntrack()
 
