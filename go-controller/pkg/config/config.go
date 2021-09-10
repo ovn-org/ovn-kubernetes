@@ -348,7 +348,8 @@ type HybridOverlayConfig struct {
 
 // OvnKubeNodeConfig holds ovnkube-node configurations
 type OvnKubeNodeConfig struct {
-	Mode string `gcfg:"mode"`
+	Mode                 string `gcfg:"mode"`
+	DisableOVNIfaceIdVer bool   `gcfg:"disable-ovn-iface-id-ver"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -1051,6 +1052,13 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Usage:       "ovnkube-node operating mode full(default), smart-nic, smart-nic-host",
 		Value:       OvnKubeNode.Mode,
 		Destination: &cliConfig.OvnKubeNode.Mode,
+	},
+	&cli.BoolFlag{
+		Name: "disable-ovn-iface-id-ver",
+		Usage: "if iface-id-ver option is not enabled in ovn, set this flag to True " +
+			"(depends on ovn version, minimal required is 21.09)",
+		Value:       OvnKubeNode.DisableOVNIfaceIdVer,
+		Destination: &cliConfig.OvnKubeNode.DisableOVNIfaceIdVer,
 	},
 }
 
