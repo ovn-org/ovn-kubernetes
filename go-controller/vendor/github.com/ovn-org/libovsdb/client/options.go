@@ -15,11 +15,12 @@ const (
 )
 
 type options struct {
-	endpoints []string
-	tlsConfig *tls.Config
-	reconnect bool
-	timeout   time.Duration
-	backoff   backoff.BackOff
+	endpoints  []string
+	tlsConfig  *tls.Config
+	reconnect  bool
+	leaderOnly bool
+	timeout    time.Duration
+	backoff    backoff.BackOff
 }
 
 type Option func(o *options) error
@@ -75,6 +76,15 @@ func WithEndpoint(endpoint string) Option {
 			}
 		}
 		o.endpoints = append(o.endpoints, endpoint)
+		return nil
+	}
+}
+
+// WithLeaderOnly tells the client to treat endpoints that are clustered
+// and not the leader as down.
+func WithLeaderOnly(leaderOnly bool) Option {
+	return func(o *options) error {
+		o.leaderOnly = leaderOnly
 		return nil
 	}
 }

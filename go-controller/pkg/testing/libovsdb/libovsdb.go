@@ -19,6 +19,7 @@ import (
 	"github.com/ovn-org/libovsdb/mapper"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/libovsdb/ovsdb/serverdb"
 	"github.com/ovn-org/libovsdb/server"
 	"k8s.io/apimachinery/pkg/util/wait"
 
@@ -130,69 +131,105 @@ func newNBServer(cfg config.OvnAuthConfig, data []TestData) (*server.OvsdbServer
 	return newOVSDBServer(cfg, dbModel, schema, data)
 }
 
+func updateData(db server.Database, dbModel *model.DBModel, schema ovsdb.DatabaseSchema, data []TestData) error {
+	dbName := dbModel.Name()
+	m := mapper.NewMapper(&schema)
+	updates := ovsdb.TableUpdates{}
+	namedUUIDs := map[string]string{}
+	newData := copystructure.Must(copystructure.Copy(data)).([]TestData)
+	for _, d := range newData {
+		tableName := dbModel.FindTable(reflect.TypeOf(d))
+		if tableName == "" {
+			return fmt.Errorf("object of type %s is not part of the DBModel", reflect.TypeOf(d))
+		}
+
+		var dupNamedUUID string
+		uuid, uuidf := getUUID(d)
+		replaceUUIDs(d, func(name string, field int) string {
+			uuid, ok := namedUUIDs[name]
+			if !ok {
+				return name
+			}
+			if field == uuidf {
+				// if we are replacing a model uuid, it's a dupe
+				dupNamedUUID = name
+				return name
+			}
+			return uuid
+		})
+		if dupNamedUUID != "" {
+			return fmt.Errorf("initial data contains duplicated named UUIDs %s", dupNamedUUID)
+		}
+		if uuid == "" {
+			uuid = guuid.NewString()
+		} else if !validUUID.MatchString(uuid) {
+			namedUUID := uuid
+			uuid = guuid.NewString()
+			namedUUIDs[namedUUID] = uuid
+		}
+
+		row, err := m.NewRow(tableName, d)
+		if err != nil {
+			return err
+		}
+
+		if _, ok := updates[tableName]; !ok {
+			updates[tableName] = ovsdb.TableUpdate{}
+		}
+
+		updates[tableName][uuid] = &ovsdb.RowUpdate{New: &row}
+	}
+
+	err := db.Commit(dbName, updates)
+	if err != nil {
+		return fmt.Errorf("error populating server with initial data: %v", err)
+	}
+
+	return nil
+}
+
 func newOVSDBServer(cfg config.OvnAuthConfig, dbModel *model.DBModel, schema ovsdb.DatabaseSchema, data []TestData) (*server.OvsdbServer, error) {
-	db := server.NewInMemoryDatabase(map[string]*model.DBModel{
-		schema.Name: dbModel,
-	})
-	s, err := server.NewOvsdbServer(db, server.DatabaseModel{
-		Model:  dbModel,
-		Schema: &schema,
-	})
+	serverDBModel, err := serverdb.FullDatabaseModel()
 	if err != nil {
 		return nil, err
 	}
+	serverSchema := serverdb.Schema()
+
+	db := server.NewInMemoryDatabase(map[string]*model.DBModel{
+		schema.Name:       dbModel,
+		serverSchema.Name: serverDBModel,
+	})
+	s, err := server.NewOvsdbServer(db,
+		server.DatabaseModel{
+			Model:  dbModel,
+			Schema: &schema,
+		},
+		server.DatabaseModel{
+			Model:  serverDBModel,
+			Schema: &serverSchema,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Populate the _Server database table
+	serverData := []TestData{
+		&serverdb.Database{
+			Name:      dbModel.Name(),
+			Connected: true,
+			Leader:    true,
+			Model:     serverdb.DatabaseModelClustered,
+		},
+	}
+	if err := updateData(db, serverDBModel, serverSchema, serverData); err != nil {
+		return nil, err
+	}
+
+	// Populate with testcase data
 	if len(data) > 0 {
-		dbName := dbModel.Name()
-		m := mapper.NewMapper(&schema)
-		updates := ovsdb.TableUpdates{}
-		namedUUIDs := map[string]string{}
-		data := copystructure.Must(copystructure.Copy(data)).([]TestData)
-		for _, d := range data {
-			tableName := dbModel.FindTable(reflect.TypeOf(d))
-			if tableName == "" {
-				return nil, fmt.Errorf("object of type %s is not part of the DBModel", reflect.TypeOf(d))
-			}
-
-			var dupNamedUUID string
-			uuid, uuidf := getUUID(d)
-			replaceUUIDs(d, func(name string, field int) string {
-				uuid, ok := namedUUIDs[name]
-				if !ok {
-					return name
-				}
-				if field == uuidf {
-					// if we are replacing a model uuid, it's a dupe
-					dupNamedUUID = name
-					return name
-				}
-				return uuid
-			})
-			if dupNamedUUID != "" {
-				return nil, fmt.Errorf("initial data contains duplicated named UUIDs %s", dupNamedUUID)
-			}
-			if uuid == "" {
-				uuid = guuid.NewString()
-			} else if !validUUID.MatchString(uuid) {
-				namedUUID := uuid
-				uuid = guuid.NewString()
-				namedUUIDs[namedUUID] = uuid
-			}
-
-			row, err := m.NewRow(tableName, d)
-			if err != nil {
-				return nil, err
-			}
-
-			if _, ok := updates[tableName]; !ok {
-				updates[tableName] = ovsdb.TableUpdate{}
-			}
-
-			updates[tableName][uuid] = &ovsdb.RowUpdate{New: &row}
-		}
-
-		err := db.Commit(dbName, updates)
-		if err != nil {
-			return nil, fmt.Errorf("error populating server with initial data: %v", err)
+		if err := updateData(db, dbModel, schema, data); err != nil {
+			return nil, err
 		}
 	}
 

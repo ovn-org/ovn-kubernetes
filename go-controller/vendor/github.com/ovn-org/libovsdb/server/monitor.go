@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -50,7 +51,7 @@ func (m *monitor) Send(update ovsdb.TableUpdates) {
 	if len(update) == 0 {
 		return
 	}
-	args := []interface{}{m.id, update}
+	args := []interface{}{json.RawMessage([]byte(m.id)), update}
 	var reply interface{}
 	err := m.client.Call("update", args, &reply)
 	if err != nil {
