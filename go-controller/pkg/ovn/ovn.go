@@ -922,7 +922,10 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 	}
 
 	if hostSubnets == nil {
-		hostSubnets, _ = util.ParseNodeHostSubnetAnnotation(node)
+		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node)
+		if err != nil {
+			return err
+		}
 	}
 
 	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
