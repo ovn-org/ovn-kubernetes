@@ -346,11 +346,26 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		}
 	}
 
-	if uuid, _, err := util.RunOVNNbctl("--data=bare", "--columns=_uuid", "find", "meter", "name="+types.OvnACLLoggingMeter); err == nil && uuid == "" {
-		dropRate := strconv.Itoa(config.Logging.ACLLoggingRateLimit)
-		if _, _, err := util.RunOVNNbctl("meter-add", types.OvnACLLoggingMeter, "drop", dropRate, "pktps"); err != nil {
-			klog.Warningf("ACL logging support enabled, however acl-logging meter could not be created. Disabling ACL logging support")
-			oc.aclLoggingEnabled = false
+	if stdout, _, err := util.RunOVNNbctl("--data=bare", "--format=csv", "--no-headings", "--columns=_uuid,fair",
+		"find", "meter", "name="+types.OvnACLLoggingMeter); err == nil {
+		if stdout != "" {
+			columns := strings.Split(stdout, ",")
+			uuid := columns[0]
+			fair := columns[1]
+			if fair == "false" {
+				// fair metering ensures that instead of sharing one meter across several entities
+				// each entity will be rate-limited on its own
+				if _, _, err := util.RunOVNNbctl("set", "meter", uuid, "fair=true"); err != nil {
+					klog.Warningf("Failed to enable 'fair' metering for %s meter: %v", types.OvnACLLoggingMeter, err)
+				}
+			}
+		} else {
+			dropRate := strconv.Itoa(config.Logging.ACLLoggingRateLimit)
+			if _, _, err := util.RunOVNNbctl("--fair", "meter-add", types.OvnACLLoggingMeter, "drop", dropRate, "pktps"); err != nil {
+				klog.Warningf("ACL logging support enabled, however acl-logging meter could not be created: %v. "+
+					"Disabling ACL logging support", err)
+				oc.aclLoggingEnabled = false
+			}
 		}
 	}
 
