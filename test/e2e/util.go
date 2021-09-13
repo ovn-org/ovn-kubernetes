@@ -473,3 +473,43 @@ func waitClusterHealthy(f *framework.Framework, numMasters int) error {
 		return true, nil
 	})
 }
+
+// waitForDaemonSetUpdate waits for the daemon set in a given namespace to be
+// successfully rolled out following an update.
+//
+// If allowedNotReadyNodes is -1, this method returns immediately without waiting.
+func waitForDaemonSetUpdate(c clientset.Interface, ns string, dsName string, allowedNotReadyNodes int32, timeout time.Duration) error {
+	if allowedNotReadyNodes == -1 {
+		return nil
+	}
+
+	start := time.Now()
+	framework.Logf("Waiting up to %v for daemonset %s in namespace %s to update",
+		timeout, dsName, ns)
+
+	return wait.Poll(framework.Poll, timeout, func() (bool, error) {
+		ds, err := c.AppsV1().DaemonSets(ns).Get(context.TODO(), dsName, metav1.GetOptions{})
+		if err != nil {
+			framework.Logf("Error getting daemonset: %s in namespace: %s: %v", dsName, ns, err)
+			return false, err
+		}
+
+		if ds.Generation <= ds.Status.ObservedGeneration {
+			if ds.Status.UpdatedNumberScheduled < ds.Status.DesiredNumberScheduled {
+				framework.Logf("Waiting for daemon set %q rollout to finish: %d out of %d new pods have been updated (%d seconds elapsed)", ds.Name,
+					ds.Status.UpdatedNumberScheduled, ds.Status.DesiredNumberScheduled, int(time.Since(start).Seconds()))
+				return false, nil
+			}
+			if ds.Status.NumberAvailable < ds.Status.DesiredNumberScheduled {
+				framework.Logf("Waiting for daemon set %q rollout to finish: %d of %d updated pods are available (%d seconds elapsed)", ds.Name,
+					ds.Status.NumberAvailable, ds.Status.DesiredNumberScheduled, int(time.Since(start).Seconds()))
+				return false, nil
+			}
+			framework.Logf("daemon set %q successfully rolled out", ds.Name)
+			return true, nil
+		}
+
+		framework.Logf("Waiting for daemon set: %s spec update to be observed...", dsName)
+		return false, nil
+	})
+}
