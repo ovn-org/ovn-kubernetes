@@ -1132,16 +1132,6 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			if err != nil {
 				return err
 			}
-			// In the shared gateway mode, the NodePort service is handled by the OpenFlow flows configured
-			// on the OVS bridge in the host. These flows act only on the packets coming in from outside
-			// of the node. If someone on the node is trying to access the NodePort service, those packets
-			// will not be processed by the OpenFlow flows, so we need to add iptable rules that DNATs the
-			// NodePortIP:NodePort to ClusterServiceIP:Port.
-			if config.OvnKubeNode.Mode == types.NodeModeFull {
-				if err := initSharedGatewayIPTables(); err != nil {
-					return err
-				}
-			}
 		} else {
 			// no service OpenFlows, request to sync flows now.
 			gw.openflowManager.requestFlowSync()
@@ -1175,9 +1165,12 @@ func newNodePortWatcher(patchPort, gwBridge, gwIntf string, ips []*net.IPNet, of
 	// on the OVS bridge in the host. These flows act only on the packets coming in from outside
 	// of the node. If someone on the node is trying to access the NodePort service, those packets
 	// will not be processed by the OpenFlow flows, so we need to add iptable rules that DNATs the
-	// NodePortIP:NodePort to ClusterServiceIP:Port.
-	if err := initSharedGatewayIPTables(); err != nil {
-		return nil, err
+	// NodePortIP:NodePort to ClusterServiceIP:Port. We don't need to do this while
+	// running on Smart-NIC or on Smart-NIC-Host.
+	if config.OvnKubeNode.Mode == types.NodeModeFull {
+		if err := initSharedGatewayIPTables(); err != nil {
+			return nil, err
+		}
 	}
 
 	// used to tell addServiceRules which rules to add
