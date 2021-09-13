@@ -625,15 +625,11 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	// 	  - from the management port via the node_local_switch's localnet port
 	//    - from the hostsubnet via management port
 	// 2. a dnat_and_snat nat entry to SNAT the traffic from the management port
-	subnets, err := util.ParseNodeHostSubnetAnnotation(node)
-	if err != nil {
-		return fmt.Errorf("failed to get host subnets for %s: %v", node.Name, err)
-	}
 	mpMAC, err := util.ParseNodeManagementPortMACAddress(node)
 	if err != nil {
 		return err
 	}
-	for _, subnet := range subnets {
+	for _, subnet := range hostSubnets {
 		hostIfAddr := util.GetNodeManagementIfAddr(subnet)
 		l3GatewayConfigIP, err := util.MatchIPNetFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
 		if err != nil {
