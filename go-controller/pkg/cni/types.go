@@ -2,12 +2,14 @@ package cni
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"time"
 
 	"github.com/containernetworking/cni/pkg/types/current"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -77,6 +79,35 @@ type Response struct {
 	Result    *current.Result
 	PodIFInfo *PodInterfaceInfo
 	KubeAuth  *KubeAPIAuth
+}
+
+func (response *Response) Marshal() ([]byte, error) {
+	return json.Marshal(response)
+}
+
+// Filter out kubeAuth, since it might contain sensitive information.
+func (response *Response) MarshalForLogging() ([]byte, error) {
+	var noAuthJSON []byte
+	var err error
+	var noAuth interface{}
+
+	if response == nil {
+		return nil, nil
+	}
+
+	// Only one of Result and PodIFInfo is ever set by cmdAdd
+	if response.Result != nil {
+		noAuth = response.Result
+	} else {
+		noAuth = response.PodIFInfo
+	}
+
+	if noAuthJSON, err = json.Marshal(noAuth); err != nil {
+		klog.Errorf("Could not JSON-encode the extracted response: %v", err)
+		return nil, err
+	}
+
+	return noAuthJSON, nil
 }
 
 // PodRequest structure built from Request which is passed to the
