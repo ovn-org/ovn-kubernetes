@@ -32,6 +32,8 @@ type nodeAnnotator struct {
 }
 
 // NewNodeAnnotator returns a new annotator for Node objects
+// Node annotator compares current annotations found in the node(*kapi.Node) and only updates them if there is a change.
+// It does not sync the node(*kapi.Node) with the API server which means that in most cases it should be Run() once and discarded.
 func NewNodeAnnotator(kube Interface, node *kapi.Node) Annotator {
 	return &nodeAnnotator{
 		kube:    kube,

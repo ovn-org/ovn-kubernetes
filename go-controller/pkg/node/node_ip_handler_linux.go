@@ -3,6 +3,7 @@
 package node
 
 import (
+	"fmt"
 	"net"
 	"sync"
 
@@ -17,16 +18,18 @@ import (
 
 type addressManager struct {
 	addresses      sets.String
-	nodeAnnotator  kube.Annotator
+	kube           kube.Interface
+	nodeName       string
 	mgmtPortConfig *managementPortConfig
 	sync.Mutex
 }
 
 // initializes a new address manager which will hold all the IPs on a node
-func newAddressManager(nodeAnnotator kube.Annotator, config *managementPortConfig) *addressManager {
+func newAddressManager(nodeName string, kube kube.Interface, config *managementPortConfig) *addressManager {
 	mgr := &addressManager{
 		addresses:      sets.NewString(),
-		nodeAnnotator:  nodeAnnotator,
+		nodeName:       nodeName,
+		kube:           kube,
 		mgmtPortConfig: config,
 	}
 	mgr.sync()
@@ -75,23 +78,18 @@ func (c *addressManager) Run(stopChan <-chan struct{}) {
 		for {
 			select {
 			case a := <-addrChan:
-				if a.NewAddr {
-					if c.addAddr(a.LinkAddress.IP) {
-						if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
-							klog.Errorf("Failed to set node annotations: %v", err)
-							continue
-						}
+				addrChanged := func() bool {
+					if a.NewAddr {
+						return c.addAddr(a.LinkAddress.IP)
 					}
-				} else {
-					if c.delAddr(a.LinkAddress.IP) {
-						if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
-							klog.Errorf("Failed to set node annotations: %v", err)
-							continue
-						}
+					return c.delAddr(a.LinkAddress.IP)
+				}()
+
+				if addrChanged {
+					if err := c.setAnnotations(); err != nil {
+						klog.Errorf("Failed to set node annotations: %v", err)
+						continue
 					}
-				}
-				if err := c.nodeAnnotator.Run(); err != nil {
-					klog.Errorf("Failed to set node annotations: %v", err)
 				}
 			case <-stopChan:
 				return
@@ -128,6 +126,21 @@ func (c *addressManager) isValidNodeIP(addr net.IP) bool {
 	return true
 }
 
+// sets address annotations on the node
+func (c *addressManager) setAnnotations() error {
+	node, err := c.kube.GetNode(c.nodeName)
+	if err != nil {
+		return fmt.Errorf("unable to retrieve node %s: %v", c.nodeName, err)
+	}
+	nodeAnnotator := kube.NewNodeAnnotator(c.kube, node)
+
+	if err := util.SetNodeHostAddresses(nodeAnnotator, c.addresses); err != nil {
+		return fmt.Errorf("failed to add node annotations: %v", err)
+	}
+
+	return nodeAnnotator.Run()
+}
+
 func (c *addressManager) sync() {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
@@ -142,10 +155,8 @@ func (c *addressManager) sync() {
 		}
 		_ = c.addAddr(ip)
 	}
-	if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
-		klog.Errorf("Failed to set node annotations: %v", err)
-	}
-	if err := c.nodeAnnotator.Run(); err != nil {
+
+	if err := c.setAnnotations(); err != nil {
 		klog.Errorf("Failed to set node annotations: %v", err)
 	}
 }
