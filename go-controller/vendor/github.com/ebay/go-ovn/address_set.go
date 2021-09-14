@@ -28,7 +28,7 @@ type AddressSet struct {
 	ExternalID map[interface{}]interface{}
 }
 
-func (odbi *ovndb) asUpdateImp(name string, addrs []string, external_ids map[string]string) (*OvnCommand, error) {
+func (odbi *ovndb) asUpdateImp(name, uuid string, addrs []string, external_ids map[string]string) (*OvnCommand, error) {
 	row := make(OVNRow)
 	row["name"] = name
 	addresses, err := libovsdb.NewOvsSet(addrs)
@@ -45,6 +45,9 @@ func (odbi *ovndb) asUpdateImp(name string, addrs []string, external_ids map[str
 		row["external_ids"] = oMap
 	}
 	condition := libovsdb.NewCondition("name", "==", name)
+	if uuid != "" {
+		condition = libovsdb.NewCondition("_uuid", "==", stringToGoUUID(uuid))
+	}
 	updateOp := libovsdb.Operation{
 		Op:    opUpdate,
 		Table: TableAddressSet,
@@ -54,13 +57,17 @@ func (odbi *ovndb) asUpdateImp(name string, addrs []string, external_ids map[str
 	operations := []libovsdb.Operation{updateOp}
 	return &OvnCommand{operations, odbi, make([][]map[string]interface{}, len(operations))}, nil
 }
-func (odbi *ovndb) asAddIPImp(name string, addrs []string) (*OvnCommand, error) {
+
+func (odbi *ovndb) asAddIPImp(name, uuid string, addrs []string) (*OvnCommand, error) {
 	addresses, err := libovsdb.NewOvsSet(addrs)
 	if err != nil {
 		return nil, err
 	}
 	mutation := libovsdb.NewMutation("addresses", "insert", addresses)
 	condition := libovsdb.NewCondition("name", "==", name)
+	if uuid != "" {
+		condition = libovsdb.NewCondition("_uuid", "==", stringToGoUUID(uuid))
+	}
 	updateOp := libovsdb.Operation{
 		Op:    opMutate,
 		Table: TableAddressSet,

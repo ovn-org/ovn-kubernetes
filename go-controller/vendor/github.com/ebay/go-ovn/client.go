@@ -99,10 +99,10 @@ type Client interface {
 	// Get AS
 	ASGet(name string) (*AddressSet, error)
 	// Update address set
-	ASUpdate(name string, addrs []string, external_ids map[string]string) (*OvnCommand, error)
+	ASUpdate(name, uuid string, addrs []string, external_ids map[string]string) (*OvnCommand, error)
 	// Add addressset
 	ASAdd(name string, addrs []string, external_ids map[string]string) (*OvnCommand, error)
-	ASAddIPs(name string, addrs []string) (*OvnCommand, error)
+	ASAddIPs(name, uuid string, addrs []string) (*OvnCommand, error)
 	ASDelIPs(name string, addrs []string) (*OvnCommand, error)
 	// Delete addressset
 	ASDel(name string) (*OvnCommand, error)
@@ -874,8 +874,8 @@ func (c *ovndb) ASAdd(name string, addrs []string, external_ids map[string]strin
 	return c.asAddImp(name, addrs, external_ids)
 }
 
-func (c *ovndb) ASAddIPs(name string, addrs []string) (*OvnCommand, error) {
-	return c.asAddIPImp(name, addrs)
+func (c *ovndb) ASAddIPs(name, uuid string, addrs []string) (*OvnCommand, error) {
+	return c.asAddIPImp(name, uuid, addrs)
 }
 
 func (c *ovndb) ASDelIPs(name string, addrs []string) (*OvnCommand, error) {
@@ -886,8 +886,8 @@ func (c *ovndb) ASDel(name string) (*OvnCommand, error) {
 	return c.asDelImp(name)
 }
 
-func (c *ovndb) ASUpdate(name string, addrs []string, external_ids map[string]string) (*OvnCommand, error) {
-	return c.asUpdateImp(name, addrs, external_ids)
+func (c *ovndb) ASUpdate(name, uuid string, addrs []string, external_ids map[string]string) (*OvnCommand, error) {
+	return c.asUpdateImp(name, uuid, addrs, external_ids)
 }
 
 func (c *ovndb) QoSAdd(ls string, direction string, priority int, match string, action map[string]int, bandwidth map[string]int, external_ids map[string]string) (*OvnCommand, error) {

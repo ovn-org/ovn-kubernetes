@@ -194,6 +194,7 @@ func destroyAddressSet(nb goovn.Client, name string) error {
 }
 
 type ovnAddressSet struct {
+	uuid     string
 	name     string
 	hashName string
 	nb       goovn.Client
@@ -247,7 +248,7 @@ func newOvnAddressSet(nb goovn.Client, name string, ips []net.IP) (*ovnAddressSe
 		nb:       nb,
 	}
 
-	_, err := nb.ASGet(as.hashName)
+	ovnAs, err := nb.ASGet(as.hashName)
 	if err != nil {
 		if err != goovn.ErrorNotFound && err != goovn.ErrorSchema {
 			return nil, fmt.Errorf("failed to get address set %q: %v", name, err)
@@ -257,10 +258,16 @@ func newOvnAddressSet(nb goovn.Client, name string, ips []net.IP) (*ovnAddressSe
 		if err != nil {
 			return nil, fmt.Errorf("failed to create address set cmd: %q: %v", name, err)
 		}
-		if err := nb.Execute(cmd); err != nil {
+		uuids, err := nb.ExecuteR(cmd)
+		if err != nil {
 			return nil, fmt.Errorf("failed to create address set %q: %v", asDetail(as), err)
 		}
+		if len(uuids) != 1 {
+			return nil, fmt.Errorf("failed to create address set %q: no UUIDs returned", asDetail(as))
+		}
+		as.uuid = uuids[0]
 	} else {
+		as.uuid = ovnAs.UUID
 		klog.V(5).Infof("New(%s) already exists; updating IPs", asDetail(as))
 		if err := as.setIPs(ips); err != nil {
 			return nil, err
@@ -388,7 +395,7 @@ func (as *ovnAddressSets) Destroy() error {
 // existing state.
 func (as *ovnAddressSet) setIPs(ips []net.IP) error {
 	newIPs := ipsToStringArray(ips)
-	cmd, err := as.nb.ASUpdate(as.hashName, newIPs, map[string]string{"name": as.name})
+	cmd, err := as.nb.ASUpdate(as.hashName, as.uuid, newIPs, map[string]string{"name": as.name})
 	if err != nil {
 		return fmt.Errorf("failed to create update for address set %q: %v", asDetail(as), err)
 	}
@@ -422,7 +429,7 @@ func (as *ovnAddressSet) addIPsCmd(ips []net.IP) (*goovn.OvnCommand, error) {
 		uniqIPs = append(uniqIPs, ip.String())
 	}
 
-	cmd, err := as.nb.ASAddIPs(as.hashName, uniqIPs)
+	cmd, err := as.nb.ASAddIPs(as.hashName, as.uuid, uniqIPs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create add ips cmd for address set %q: %v", asDetail(as), err)
 	}
