@@ -914,6 +914,7 @@ var _ = Describe("Gateway Operations Smart-NIC", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
+		_, _ = util.SetFakeIPTablesHelpers()
 	})
 
 	AfterEach(func() {
