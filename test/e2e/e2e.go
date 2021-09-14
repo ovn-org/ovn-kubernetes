@@ -2604,7 +2604,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 			}
 			return nil
 		}
-		return fmt.Errorf("Gave up after waiting %v for pod %q to be %q: pod is not found", timeout, podName, desc)
+		return fmt.Errorf("gave up after waiting %v for pod %q to be %q: pod is not found", timeout, podName, desc)
 	}
 
 	// waitForPodToFinishFullRestart waits for a the pod to finish it's reset cycle and returns.
