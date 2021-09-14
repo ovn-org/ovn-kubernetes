@@ -221,20 +221,6 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, subnets []*
 		return nil, nil, err
 	}
 
-	if !config.Gateway.DisablePacketMTUCheck {
-		chkPktLengthSupported, err := util.DetectCheckPktLengthSupport(gatewayBridge.bridgeName)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		if !chkPktLengthSupported {
-			klog.Warningf("OVS on this node does not support check packet length action in kernel datapath. This "+
-				"will cause incoming packets destined to OVN and larger than pod MTU: %d to the node, being dropped "+
-				"without sending fragmentation needed", config.Default.MTU)
-			config.Gateway.DisablePacketMTUCheck = true
-		}
-	}
-
 	l3GwConfig := util.L3GatewayConfig{
 		Mode:           config.GatewayModeShared,
 		ChassisID:      chassisID,
