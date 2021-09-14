@@ -115,6 +115,32 @@ func OvsToNativeAtomic(basicType string, ovsElem interface{}) (interface{}, erro
 	}
 }
 
+func OvsToNativeSlice(baseType string, ovsElem interface{}) (interface{}, error) {
+	naType := NativeTypeFromAtomic(baseType)
+	var nativeSet reflect.Value
+	switch ovsSet := ovsElem.(type) {
+	case OvsSet:
+		nativeSet = reflect.MakeSlice(reflect.SliceOf(naType), 0, len(ovsSet.GoSet))
+		for _, v := range ovsSet.GoSet {
+			nv, err := OvsToNativeAtomic(baseType, v)
+			if err != nil {
+				return nil, err
+			}
+			nativeSet = reflect.Append(nativeSet, reflect.ValueOf(nv))
+		}
+
+	default:
+		nativeSet = reflect.MakeSlice(reflect.SliceOf(naType), 0, 1)
+		nv, err := OvsToNativeAtomic(baseType, ovsElem)
+		if err != nil {
+			return nil, err
+		}
+
+		nativeSet = reflect.Append(nativeSet, reflect.ValueOf(nv))
+	}
+	return nativeSet.Interface(), nil
+}
+
 // OvsToNative transforms an ovs type to native one based on the column type information
 func OvsToNative(column *ColumnSchema, ovsElem interface{}) (interface{}, error) {
 	switch column.Type {
@@ -172,28 +198,7 @@ func OvsToNative(column *ColumnSchema, ovsElem interface{}) (interface{}, error)
 			}
 			return array.Interface(), nil
 		case reflect.Slice:
-			var nativeSet reflect.Value
-			switch ovsSet := ovsElem.(type) {
-			case OvsSet:
-				nativeSet = reflect.MakeSlice(naType, 0, len(ovsSet.GoSet))
-				for _, v := range ovsSet.GoSet {
-					nv, err := OvsToNativeAtomic(column.TypeObj.Key.Type, v)
-					if err != nil {
-						return nil, err
-					}
-					nativeSet = reflect.Append(nativeSet, reflect.ValueOf(nv))
-				}
-
-			default:
-				nativeSet = reflect.MakeSlice(naType, 0, 1)
-				nv, err := OvsToNativeAtomic(column.TypeObj.Key.Type, ovsElem)
-				if err != nil {
-					return nil, err
-				}
-
-				nativeSet = reflect.Append(nativeSet, reflect.ValueOf(nv))
-			}
-			return nativeSet.Interface(), nil
+			return OvsToNativeSlice(column.TypeObj.Key.Type, ovsElem)
 		default:
 			return nil, fmt.Errorf("native type was not slice, array or pointer. got %d", naType.Kind())
 		}

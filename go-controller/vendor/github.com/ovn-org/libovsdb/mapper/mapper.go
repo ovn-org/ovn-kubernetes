@@ -315,7 +315,10 @@ func (m Mapper) NewMutation(tableName string, data interface{}, column string, m
 	}
 
 	var ovsValue interface{}
-	if mutator == "delete" && columnSchema.Type == ovsdb.TypeMap {
+	// Usually a mutation value is of the same type of the value being mutated
+	// except for delete mutation of maps where it can also be a list of same type of
+	// keys (rfc7047 5.1). Handle this special case here.
+	if mutator == "delete" && columnSchema.Type == ovsdb.TypeMap && reflect.TypeOf(value).Kind() != reflect.Map {
 		// It's OK to cast the value to a list of elements because validation has passed
 		ovsSet, err := ovsdb.NewOvsSet(value)
 		if err != nil {

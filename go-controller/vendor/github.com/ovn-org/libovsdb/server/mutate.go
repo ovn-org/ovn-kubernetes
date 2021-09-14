@@ -67,6 +67,15 @@ func mutateInsert(current, value interface{}) interface{} {
 		}
 		return v.Interface()
 	}
+	if vc.Kind() == reflect.Map && vv.Kind() == reflect.Map {
+		iter := vv.MapRange()
+		for iter.Next() {
+			k := iter.Key()
+			if !vc.MapIndex(k).IsValid() {
+				vc.SetMapIndex(k, iter.Value())
+			}
+		}
+	}
 	return current
 }
 
@@ -87,6 +96,22 @@ func mutateDelete(current, value interface{}) interface{} {
 			v = removeFromSlice(v, vv.Index(i))
 		}
 		return v.Interface()
+	}
+	if vc.Kind() == reflect.Map && vv.Type() == reflect.SliceOf(vc.Type().Key()) {
+		for i := 0; i < vv.Len(); i++ {
+			vc.SetMapIndex(vv.Index(i), reflect.Value{})
+		}
+	}
+	if vc.Kind() == reflect.Map && vv.Kind() == reflect.Map {
+		iter := vv.MapRange()
+		for iter.Next() {
+			vvk := iter.Key()
+			vvv := iter.Value()
+			vcv := vc.MapIndex(vvk)
+			if reflect.DeepEqual(vcv.Interface(), vvv.Interface()) {
+				vc.SetMapIndex(vvk, reflect.Value{})
+			}
+		}
 	}
 	return current
 }
