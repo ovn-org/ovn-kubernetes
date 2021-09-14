@@ -441,8 +441,8 @@ docker_disable_ipv6() {
   # is not very common.
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
   for n in $KIND_NODES; do
-    $OCI_BIN exec "$n" sysctl net.ipv6.conf.all.disable_ipv6=0
-    $OCI_BIN exec "$n" sysctl net.ipv6.conf.all.forwarding=1
+    $OCI_BIN exec "$n" sysctl --ignore net.ipv6.conf.all.disable_ipv6=0
+    $OCI_BIN exec "$n" sysctl --ignore net.ipv6.conf.all.forwarding=1
   done
 }
 
