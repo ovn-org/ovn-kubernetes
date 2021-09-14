@@ -271,11 +271,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	opts["requested-chassis"] = pod.Spec.NodeName
 
+	var lspAddCmd *goovn.OvnCommand
 	if lsp == nil {
 		cmd, err = oc.ovnNBClient.LSPAdd(logicalSwitch, portName)
 		if err != nil {
 			return fmt.Errorf("unable to create the LSPAdd command for port: %s from the nbdb: %v", portName, err)
 		}
+		lspAddCmd = cmd
 		cmds = append(cmds, cmd)
 		// Unique identifier to distinguish interfaces for recreated pods, also set by ovnkube-node
 		// ovn-controller will claim the OVS interface only if external_ids:iface-id
@@ -294,7 +296,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	if err != nil {
 		return fmt.Errorf("unable to create the LSPSetOptions command for port: %s from the nbdb: %v", portName, err)
 	}
-	cmds = append(cmds, cmd)
+	if lspAddCmd != nil {
+		optimizeNBCommand("options", lspAddCmd, cmd)
+	} else {
+		cmds = append(cmds, cmd)
+	}
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 
@@ -465,7 +471,12 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	if err != nil {
 		return fmt.Errorf("unable to create LSPSetAddress command for port: %s", portName)
 	}
-	cmds = append(cmds, cmd)
+	if lspAddCmd != nil {
+		optimizeNBCommand("addresses", lspAddCmd, cmd)
+
+	} else {
+		cmds = append(cmds, cmd)
+	}
 
 	// add external ids
 	extIds := map[string]string{"namespace": pod.Namespace, "pod": "true"}
@@ -473,7 +484,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	if err != nil {
 		return fmt.Errorf("unable to create LSPSetExternalIds command for port: %s", portName)
 	}
-	cmds = append(cmds, cmd)
+	if lspAddCmd != nil {
+		optimizeNBCommand("external_ids", lspAddCmd, cmd)
+	} else {
+		cmds = append(cmds, cmd)
+	}
 
 	// CNI depends on the flows from port security, delay setting it until end
 	cmd, err = oc.ovnNBClient.LSPSetPortSecurity(portName, strings.Join(addresses, " "))
@@ -481,7 +496,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("unable to create LSPSetPortSecurity command for port: %s", portName)
 	}
 
-	cmds = append(cmds, cmd)
+	if lspAddCmd != nil {
+		optimizeNBCommand("port_security", lspAddCmd, cmd)
+	} else {
+		cmds = append(cmds, cmd)
+	}
 
 	// execute all the commands together. If a single operation fails, all commands will roll back =>
 	// for new Pod no LSP will be created
@@ -563,4 +582,13 @@ func (oc *Controller) getPortAddresses(nodeName, portName string) (net.HardwareA
 		}
 	}
 	return podMac, podIPNets, nil
+}
+
+// optimize the ovn nb commands that are run when creating a new logical
+// switch port. Will fold all the commands for creation into one command as
+// opposed to creating the switch and modifying it with all the options
+func optimizeNBCommand(row string, lspAddCmd, cmd *goovn.OvnCommand) {
+	if len(lspAddCmd.Operations) > 0 {
+		lspAddCmd.Operations[0].Row[row] = cmd.Operations[0].Row[row]
+	}
 }
