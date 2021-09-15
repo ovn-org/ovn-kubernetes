@@ -74,8 +74,7 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 	if err != nil {
 		return nil, err
 	}
-
-	return newClient(cfg, dbModel, stopCh)
+	return newClientWithMonitor(cfg, stopCh, dbModel)
 }
 
 // NewNBClient creates a new OVN Northbound Database client
@@ -89,7 +88,10 @@ func NewNBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 	if err != nil {
 		return nil, err
 	}
+	return newClientWithMonitor(cfg, stopCh, dbModel)
+}
 
+func newClientWithMonitor(cfg config.OvnAuthConfig, stopCh <-chan struct{}, dbModel *model.DBModel) (client.Client, error) {
 	c, err := newClient(cfg, dbModel, stopCh)
 	if err != nil {
 		return nil, err
