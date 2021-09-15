@@ -89,7 +89,7 @@ var _ = ginkgo.Describe("Unidling", func() {
 		if pollErr := wait.PollImmediate(framework.Poll, e2eservice.KubeProxyEndpointLagTimeout, func() (bool, error) {
 			_, err := framework.RunHostCmd(execPod.Namespace, execPod.Name, cmd)
 			if err != nil && strings.Contains(err.Error(), nonExpectedErr) {
-				return false, fmt.Errorf("Service is rejecting packets")
+				return false, fmt.Errorf("service is rejecting packets")
 			}
 			// An event like this must be generated
 			// oc.recorder.Eventf(&serviceRef, kapi.EventTypeNormal, "NeedPods", "The service %s needs pods", serviceName.Name)
