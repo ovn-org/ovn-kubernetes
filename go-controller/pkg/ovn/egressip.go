@@ -720,12 +720,23 @@ func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
 				return err
 			}
 		}
+
+		nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(node)
+		if err != nil {
+			return fmt.Errorf("failed to parse node %s subnets annotation %v", node.Name, err)
+		}
+		mgmtIPs := make([]net.IP, len(nodeSubnets))
+		for i, subnet := range nodeSubnets {
+			mgmtIPs[i] = util.GetNodeManagementIfAddr(subnet).IP
+		}
+
 		oc.eIPC.allocator[node.Name] = &egressNode{
 			name:        node.Name,
 			v4IP:        v4IP,
 			v6IP:        v6IP,
 			v4Subnet:    v4Subnet,
 			v6Subnet:    v6Subnet,
+			mgmtIPs:     mgmtIPs,
 			allocations: make(map[string]bool),
 		}
 	}
@@ -768,6 +779,7 @@ type egressNode struct {
 	v6IP               net.IP
 	v4Subnet           *net.IPNet
 	v6Subnet           *net.IPNet
+	mgmtIPs            []net.IP
 	allocations        map[string]bool
 	isReady            bool
 	isReachable        bool
@@ -1071,17 +1083,12 @@ func (oc *Controller) checkEgressNodesReachability() {
 }
 
 func (oc *Controller) isReachable(node *egressNode) bool {
-	reachable := false
-	// check IPv6 only if IPv4 fails
-	if node.v4IP != nil {
-		if reachable = dialer.dial(node.v4IP); reachable {
-			return reachable
+	for _, ip := range node.mgmtIPs {
+		if dialer.dial(ip) {
+			return true
 		}
 	}
-	if node.v6IP != nil {
-		reachable = dialer.dial(node.v6IP)
-	}
-	return reachable
+	return false
 }
 
 type egressIPDial struct{}
