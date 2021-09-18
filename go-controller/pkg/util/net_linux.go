@@ -19,6 +19,7 @@ import (
 type NetLinkOps interface {
 	LinkList() ([]netlink.Link, error)
 	LinkByName(ifaceName string) (netlink.Link, error)
+	LinkByIndex(index int) (netlink.Link, error)
 	LinkSetDown(link netlink.Link) error
 	LinkDelete(link netlink.Link) error
 	LinkSetName(link netlink.Link, newName string) error
@@ -65,6 +66,10 @@ func (defaultNetLinkOps) LinkList() ([]netlink.Link, error) {
 
 func (defaultNetLinkOps) LinkByName(ifaceName string) (netlink.Link, error) {
 	return netlink.LinkByName(ifaceName)
+}
+
+func (defaultNetLinkOps) LinkByIndex(index int) (netlink.Link, error) {
+	return netlink.LinkByIndex(index)
 }
 
 func (defaultNetLinkOps) LinkSetDown(link netlink.Link) error {
@@ -422,12 +427,24 @@ func GetIPv6OnSubnet(iface string, ip *net.IPNet) (*net.IPNet, error) {
 	return &dst, nil
 }
 
-// GetNetworkInterfaceMTU returns the MTU for the given network interface
-func GetNetworkInterfaceMTU(iface string) (int, error) {
-	link, err := netLinkOps.LinkByName(iface)
+// GetIFNameAndMTUForAddress returns the interfaceName and MTU for the given network address
+func GetIFNameAndMTUForAddress(addr net.IP) (string, int, error) {
+	// from the IP address arrive at the link
+	routeFilter := &netlink.Route{Src: addr, Scope: unix.RT_SCOPE_LINK}
+	filterMask := netlink.RT_FILTER_SRC | netlink.RT_FILTER_SCOPE
+	routes, err := netLinkOps.RouteListFiltered(getFamily(addr), routeFilter, filterMask)
 	if err != nil {
-		return 0, fmt.Errorf("failed to lookup link %s: %v", iface, err)
+		return "", 0, fmt.Errorf("failed to get routes associated with OVN Encap IP (%s): %v", addr, err)
+	} else if len(routes) != 1 {
+		return "", 0, fmt.Errorf("expecting one source route for OVN Encap IP (%s), but returned %v routes", addr, routes)
 	}
 
-	return link.Attrs().MTU, nil
+	index := routes[0].LinkIndex
+	link, err := netLinkOps.LinkByIndex(index)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to lookup link with address(%s) and index(%d) : %v",
+			addr, routes[0].LinkIndex, err)
+	}
+
+	return link.Attrs().Name, link.Attrs().MTU, nil
 }

@@ -971,47 +971,87 @@ func TestGetIPv6OnSubnet(t *testing.T) {
 	}
 }
 
-func TestGetNetworkInterfaceMTU(t *testing.T) {
+func TestGetMTUOfInterfaceWithAddress(t *testing.T) {
 	mockNetLinkOps := new(mocks.NetLinkOps)
+	mockLink := new(netlink_mocks.Link)
 	netLinkOps = mockNetLinkOps
 
-	existingInterfaceName := "breth0"
+	existingInterfaceIndex := 3
+	nonExistingInterfaceIndex := 4
 	existingInterfaceMTU := 1500
 	existingLinkMock := new(netlink_mocks.Link)
 	existingLinkMock.On("Attrs").Return(&netlink.LinkAttrs{MTU: existingInterfaceMTU})
 
-	nonExistingInterfaceName := "non-existing-interface"
-	mockNetLinkOps.On("LinkByName", existingInterfaceName).Return(existingLinkMock, nil)
-	mockNetLinkOps.On("LinkByName", nonExistingInterfaceName).Return(nil, fmt.Errorf("interface does not exist"))
-
 	tests := []struct {
-		desc          string
-		interfaceName string
-		wantMTU       int
-		wantError     bool
+		desc                     string
+		interfaceAddress         net.IP
+		wantMTU                  int
+		wantError                bool
+		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
+		onRetArgsLinkIfaceOpers  []ovntest.TestifyMockHelper
 	}{
 		{
-			desc:          "Should return MTU of existing interface",
-			interfaceName: existingInterfaceName,
-			wantMTU:       existingInterfaceMTU,
-			wantError:     false,
+			desc:             "Should return error on non existent address",
+			interfaceAddress: ovntest.MustParseIP("10.1.0.40"),
+			wantMTU:          0,
+			wantError:        true,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
+			},
 		},
 		{
-			desc:          "Should return error if interface not found",
-			interfaceName: nonExistingInterfaceName,
-			wantError:     true,
+			desc:             "Should return error if the address has two routes ",
+			interfaceAddress: ovntest.MustParseIP("10.1.0.40"),
+			wantMTU:          0,
+			wantError:        true,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
+					{Src: ovntest.MustParseIP("10.1.0.40")},
+					{Src: ovntest.MustParseIP("10.1.0.40")},
+				}, nil}},
+			},
+		},
+		{
+			desc:             "Should return error if the address has one route and index is not found ",
+			interfaceAddress: ovntest.MustParseIP("10.1.0.40"),
+			wantMTU:          0,
+			wantError:        true,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
+					{Src: ovntest.MustParseIP("10.1.0.40"), LinkIndex: nonExistingInterfaceIndex},
+				}, nil}},
+				{OnCallMethodName: "LinkByIndex", OnCallMethodArgType: []string{"int"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
+			},
+		},
+		{
+			desc:             "Should return MTU if the address has one route and index is found ",
+			interfaceAddress: ovntest.MustParseIP("10.1.0.40"),
+			wantMTU:          existingInterfaceMTU,
+			wantError:        false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
+					{Src: ovntest.MustParseIP("10.0.1.40"), LinkIndex: existingInterfaceIndex},
+				}, nil}},
+				{OnCallMethodName: "LinkByIndex", OnCallMethodArgType: []string{"int"}, RetArgList: []interface{}{existingLinkMock, nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{MTU: existingInterfaceMTU}}},
+			},
 		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			mtu, err := GetNetworkInterfaceMTU(tc.interfaceName)
+			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
+			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
+
+			_, mtu, err := GetIFNameAndMTUForAddress(tc.interfaceAddress)
 			if (err != nil) != tc.wantError {
-				t.Errorf("GetNetworkInterfaceMTU() error = %v, wantErr %v", err, tc.wantError)
+				t.Errorf("GetIFNameAndMTUForAddress() error = %v, wantErr %v", err, tc.wantError)
 				return
 			}
 
 			if mtu != tc.wantMTU {
-				t.Errorf("GetNetworkInterfaceMTU() = %v, want %v", mtu, tc.wantMTU)
+				t.Errorf("GetIFNameAndMTUForAddress() = %v, want %v", mtu, tc.wantMTU)
 			}
 		})
 	}

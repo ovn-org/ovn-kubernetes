@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"golang.org/x/sys/unix"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
@@ -33,8 +34,10 @@ var _ = Describe("Node", func() {
 		)
 
 		const (
-			nodeName = "my-node"
-			linkName = "breth0"
+			nodeName      = "my-node"
+			linkName      = "breth0"
+			linkIPaddress = "10.1.0.40"
+			linkIndex     = 4
 
 			configDefaultMTU               = 1500 //value for config.Default.MTU
 			mtuTooSmallForIPv4AndIPv6      = configDefaultMTU + types.GeneveHeaderLengthIPv4 - 1
@@ -48,7 +51,18 @@ var _ = Describe("Node", func() {
 			netlinkLinkMock = new(netlink_mocks.Link)
 
 			util.SetNetLinkOpMockInst(netlinkOpsMock)
-			netlinkOpsMock.On("LinkByName", linkName).Return(netlinkLinkMock, nil)
+			routeFilter := &netlink.Route{Src: ovntest.MustParseIP(linkIPaddress), Scope: unix.RT_SCOPE_LINK}
+			filterMask := netlink.RT_FILTER_SRC | netlink.RT_FILTER_SCOPE
+			netlinkOpsMock.On("RouteListFiltered", netlink.FAMILY_V4, routeFilter, filterMask).Return([]netlink.Route{{LinkIndex: linkIndex}}, nil)
+			netlinkOpsMock.On("LinkByIndex", 4).Return(netlinkLinkMock, nil)
+
+			fexec := ovntest.NewFakeExec()
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    fmt.Sprintf("ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:ovn-encap-ip"),
+				Output: linkIPaddress,
+			})
+			err := util.SetExec(fexec)
+			Expect(err).NotTo(HaveOccurred())
 
 			ovnNode = &OvnNode{
 				name: nodeName,
@@ -76,10 +90,11 @@ var _ = Describe("Node", func() {
 
 				It("should taint the node", func() {
 					netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
-						MTU: mtuTooSmallForIPv4AndIPv6,
+						MTU:  mtuTooSmallForIPv4AndIPv6,
+						Name: linkName,
 					})
 
-					err := ovnNode.validateGatewayMTU(linkName)
+					err := ovnNode.validateVTEPInterfaceMTU()
 					Expect(err).NotTo(HaveOccurred())
 					kubeMock.AssertNumberOfCalls(GinkgoT(), "SetTaintOnNode", 1)
 					kubeMock.AssertNumberOfCalls(GinkgoT(), "RemoveTaintFromNode", 0)
@@ -90,10 +105,11 @@ var _ = Describe("Node", func() {
 
 				It("should untaint the node", func() {
 					netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
-						MTU: mtuOkForIPv4ButTooSmallForIPv6,
+						MTU:  mtuOkForIPv4ButTooSmallForIPv6,
+						Name: linkName,
 					})
 
-					err := ovnNode.validateGatewayMTU(linkName)
+					err := ovnNode.validateVTEPInterfaceMTU()
 					Expect(err).NotTo(HaveOccurred())
 					kubeMock.AssertNumberOfCalls(GinkgoT(), "SetTaintOnNode", 0)
 					kubeMock.AssertNumberOfCalls(GinkgoT(), "RemoveTaintFromNode", 1)
@@ -111,10 +127,11 @@ var _ = Describe("Node", func() {
 
 				It("should taint the node", func() {
 					netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
-						MTU: mtuTooSmallForIPv4AndIPv6,
+						MTU:  mtuTooSmallForIPv4AndIPv6,
+						Name: linkName,
 					})
 
-					err := ovnNode.validateGatewayMTU(linkName)
+					err := ovnNode.validateVTEPInterfaceMTU()
 					Expect(err).NotTo(HaveOccurred())
 					kubeMock.AssertNumberOfCalls(GinkgoT(), "SetTaintOnNode", 1)
 					kubeMock.AssertNumberOfCalls(GinkgoT(), "RemoveTaintFromNode", 0)
@@ -125,10 +142,11 @@ var _ = Describe("Node", func() {
 
 				It("should untaint the node", func() {
 					netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
-						MTU: mtuOkForIPv4AndIPv6,
+						MTU:  mtuOkForIPv4AndIPv6,
+						Name: linkName,
 					})
 
-					err := ovnNode.validateGatewayMTU(linkName)
+					err := ovnNode.validateVTEPInterfaceMTU()
 					Expect(err).NotTo(HaveOccurred())
 					kubeMock.AssertNumberOfCalls(GinkgoT(), "SetTaintOnNode", 0)
 					kubeMock.AssertNumberOfCalls(GinkgoT(), "RemoveTaintFromNode", 1)
@@ -146,10 +164,11 @@ var _ = Describe("Node", func() {
 
 				It("should taint the node", func() {
 					netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
-						MTU: mtuOkForIPv4ButTooSmallForIPv6,
+						MTU:  mtuOkForIPv4ButTooSmallForIPv6,
+						Name: linkName,
 					})
 
-					err := ovnNode.validateGatewayMTU(linkName)
+					err := ovnNode.validateVTEPInterfaceMTU()
 					Expect(err).NotTo(HaveOccurred())
 					kubeMock.AssertNumberOfCalls(GinkgoT(), "SetTaintOnNode", 1)
 					kubeMock.AssertNumberOfCalls(GinkgoT(), "RemoveTaintFromNode", 0)
@@ -160,10 +179,11 @@ var _ = Describe("Node", func() {
 
 				It("should untaint the node", func() {
 					netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
-						MTU: mtuOkForIPv4AndIPv6,
+						MTU:  mtuOkForIPv4AndIPv6,
+						Name: linkName,
 					})
 
-					err := ovnNode.validateGatewayMTU(linkName)
+					err := ovnNode.validateVTEPInterfaceMTU()
 					Expect(err).NotTo(HaveOccurred())
 					kubeMock.AssertNumberOfCalls(GinkgoT(), "SetTaintOnNode", 0)
 					kubeMock.AssertNumberOfCalls(GinkgoT(), "RemoveTaintFromNode", 1)
