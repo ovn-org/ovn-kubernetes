@@ -132,6 +132,7 @@ var _ = Describe("Node Smart NIC tests", func() {
 				Ingress:       -1,
 				Egress:        -1,
 				IsSmartNic:    true,
+				PodUID:        "a-pod",
 			}
 
 			// set pod annotations
