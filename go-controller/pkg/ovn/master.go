@@ -744,6 +744,16 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		return err
 	}
 
+	findArgs := []string{
+		"--data=bare", "--no-heading", "--columns=_uuid", "find", "logical_switch", fmt.Sprintf("name=%s", nodeName),
+	}
+	stdout, stderr, err = util.RunOVNNbctl(findArgs...)
+	if err != nil {
+		klog.Errorf("Failed to get logical switch %v UUID, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
+		return err
+	}
+	lsUUID := stdout
+
 	// also add the join switch IPs for this node - needed in shared gateway mode
 	lrpIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(nodeName)
 	if err != nil {
@@ -837,7 +847,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	}
 
 	// Add the node to the logical switch cache
-	return oc.lsManager.AddNode(nodeName, hostSubnets)
+	return oc.lsManager.AddNode(nodeName, lsUUID, hostSubnets)
 }
 
 func (oc *Controller) addNodeAnnotations(node *kapi.Node, hostSubnets []*net.IPNet) error {

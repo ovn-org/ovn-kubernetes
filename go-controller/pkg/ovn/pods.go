@@ -145,16 +145,19 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	oc.logicalPortCache.remove(logicalPort)
 }
 
-func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
+func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (string, error) {
 	// Wait for the node logical switch to be created by the ClusterController.
 	// The node switch will be created when the node's logical network infrastructure
 	// is created by the node watch.
+	var uuid string
+	var subnets []*net.IPNet
 	if err := wait.PollImmediate(30*time.Millisecond, 30*time.Second, func() (bool, error) {
-		return oc.lsManager.GetSwitchSubnets(nodeName) != nil, nil
+		subnets, uuid = oc.lsManager.GetSwitchSubnetsAndUUID(nodeName)
+		return subnets != nil, nil
 	}); err != nil {
-		return fmt.Errorf("timed out waiting for logical switch %q subnet: %v", nodeName, err)
+		return "", fmt.Errorf("timed out waiting for logical switch %q subnet: %v", nodeName, err)
 	}
-	return nil
+	return uuid, nil
 }
 
 func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet,
@@ -263,13 +266,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}()
 
 	logicalSwitch := pod.Spec.NodeName
-	err = oc.waitForNodeLogicalSwitch(logicalSwitch)
+	lsUUID, err := oc.waitForNodeLogicalSwitch(logicalSwitch)
 	if err != nil {
 		return err
 	}
 
 	portName := podLogicalPortName(pod)
-	klog.V(5).Infof("Creating logical port for %s on switch %s", portName, logicalSwitch)
+	klog.V(5).Infof("Creating logical port for %s on switch %s [%s]", portName, logicalSwitch, lsUUID)
 
 	var podMac net.HardwareAddr
 	var podIfAddrs []*net.IPNet
@@ -303,7 +306,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	opts["requested-chassis"] = pod.Spec.NodeName
 
 	if lsp == nil {
-		podCmd, err = oc.ovnNBClient.LSPAdd(logicalSwitch, portName)
+		podCmd, err = oc.ovnNBClient.LSPAdd(logicalSwitch, lsUUID, portName)
 		if err != nil {
 			return fmt.Errorf("unable to create the LSPAdd command for port: %s from the nbdb: %v", portName, err)
 		}
@@ -436,7 +439,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			MAC: podMac,
 		}
 		var nodeSubnets []*net.IPNet
-		if nodeSubnets = oc.lsManager.GetSwitchSubnets(logicalSwitch); nodeSubnets == nil {
+		if nodeSubnets, _ = oc.lsManager.GetSwitchSubnetsAndUUID(logicalSwitch); nodeSubnets == nil {
 			return fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, node: %s",
 				pod.Name, logicalSwitch)
 		}
@@ -592,7 +595,7 @@ func (oc *Controller) getPortAddresses(nodeName, portName string) (net.HardwareA
 
 	var podIPNets []*net.IPNet
 
-	nodeSubnets := oc.lsManager.GetSwitchSubnets(nodeName)
+	nodeSubnets, _ := oc.lsManager.GetSwitchSubnetsAndUUID(nodeName)
 
 	for _, ip := range podIPs {
 		for _, subnet := range nodeSubnets {

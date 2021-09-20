@@ -21,6 +21,7 @@ type logicalSwitchInfo struct {
 	hostSubnets  []*net.IPNet
 	ipams        []ipam.Interface
 	noHostSubnet bool
+	uuid         string
 }
 
 type ipamFactoryFunc func(*net.IPNet) (ipam.Interface, error)
@@ -90,7 +91,7 @@ func NewLogicalSwitchManager() *LogicalSwitchManager {
 
 // AddNode adds/updates a node to the logical switch manager for subnet
 // and IPAM management.
-func (manager *LogicalSwitchManager) AddNode(nodeName string, hostSubnets []*net.IPNet) error {
+func (manager *LogicalSwitchManager) AddNode(nodeName, uuid string, hostSubnets []*net.IPNet) error {
 	manager.Lock()
 	defer manager.Unlock()
 	if lsi, ok := manager.cache[nodeName]; ok && !reflect.DeepEqual(lsi.hostSubnets, hostSubnets) {
@@ -110,6 +111,7 @@ func (manager *LogicalSwitchManager) AddNode(nodeName string, hostSubnets []*net
 		hostSubnets:  hostSubnets,
 		ipams:        ipams,
 		noHostSubnet: len(hostSubnets) == 0,
+		uuid:         uuid,
 	}
 
 	return nil
@@ -121,7 +123,7 @@ func (manager *LogicalSwitchManager) AddNoHostSubnetNode(nodeName string) error 
 	// setting the hostSubnets slice argument to nil in the cache means an object
 	// exists for the switch but it was not assigned a hostSubnet by ovn-kubernetes
 	// this will be true for nodes that are marked as host-subnet only.
-	return manager.AddNode(nodeName, nil)
+	return manager.AddNode(nodeName, "", nil)
 }
 
 // Remove a switch/node from the the logical switch manager
@@ -139,8 +141,8 @@ func (manager *LogicalSwitchManager) IsNonHostSubnetSwitch(nodeName string) bool
 	return ok && lsi.noHostSubnet
 }
 
-// Given a switch name, get all its host-subnets
-func (manager *LogicalSwitchManager) GetSwitchSubnets(nodeName string) []*net.IPNet {
+// Given a switch name and UUID, get all its host-subnets
+func (manager *LogicalSwitchManager) GetSwitchSubnetsAndUUID(nodeName string) ([]*net.IPNet, string) {
 	manager.RLock()
 	defer manager.RUnlock()
 	lsi, ok := manager.cache[nodeName]
@@ -152,9 +154,9 @@ func (manager *LogicalSwitchManager) GetSwitchSubnets(nodeName string) []*net.IP
 			subnet := *hsn
 			subnets[i] = &subnet
 		}
-		return subnets
+		return subnets, lsi.uuid
 	}
-	return nil
+	return nil, ""
 }
 
 // AllocateIPs will block off IPs in the ipnets slice as already allocated
@@ -329,7 +331,7 @@ func NewJoinLogicalSwitchIPManager(existingNodeNames []string) (*JoinSwitchIPMan
 		}
 		joinSubnets = append(joinSubnets, joinSubnet)
 	}
-	err := j.lsm.AddNode(types.OVNJoinSwitch, joinSubnets)
+	err := j.lsm.AddNode(types.OVNJoinSwitch, "", joinSubnets)
 	if err != nil {
 		return nil, err
 	}
@@ -447,7 +449,7 @@ func (jsIPManager *JoinSwitchIPManager) getJoinLRPAddresses(nodeName string) []*
 	// try to get the IPs from the logical router port
 	gwLRPIPs := []*net.IPNet{}
 	gwLrpName := types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName
-	joinSubnets := jsIPManager.lsm.GetSwitchSubnets(types.OVNJoinSwitch)
+	joinSubnets, _ := jsIPManager.lsm.GetSwitchSubnetsAndUUID(types.OVNJoinSwitch)
 	ifAddrs, err := util.GetLRPAddrs(gwLrpName)
 	if err == nil {
 		for _, ifAddr := range ifAddrs {
