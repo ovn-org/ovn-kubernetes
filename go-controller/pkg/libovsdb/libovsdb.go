@@ -21,6 +21,13 @@ import (
 	"k8s.io/klog/v2/klogr"
 )
 
+var (
+	sbDBTableMonitors = []model.Model{
+		&sbdb.MACBinding{},
+		&sbdb.Chassis{},
+	}
+)
+
 // newClient creates a new client object given the provided config
 // the stopCh is required to ensure the goroutine for ssl cert
 // update is not leaked
@@ -77,7 +84,7 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 	if err != nil {
 		return nil, err
 	}
-	return newClientWithMonitor(cfg, stopCh, dbModel)
+	return newClientWithMonitor(cfg, stopCh, dbModel, sbDBTableMonitors)
 }
 
 // NewNBClient creates a new OVN Northbound Database client
@@ -91,10 +98,10 @@ func NewNBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 	if err != nil {
 		return nil, err
 	}
-	return newClientWithMonitor(cfg, stopCh, dbModel)
+	return newClientWithMonitor(cfg, stopCh, dbModel, nil)
 }
 
-func newClientWithMonitor(cfg config.OvnAuthConfig, stopCh <-chan struct{}, dbModel *model.ClientDBModel) (client.Client, error) {
+func newClientWithMonitor(cfg config.OvnAuthConfig, stopCh <-chan struct{}, dbModel *model.ClientDBModel, tables []model.Model) (client.Client, error) {
 	c, err := newClient(cfg, dbModel, stopCh)
 	if err != nil {
 		return nil, err
@@ -108,10 +115,22 @@ func newClientWithMonitor(cfg config.OvnAuthConfig, stopCh <-chan struct{}, dbMo
 		cancel()
 	}()
 
-	_, err = c.MonitorAll(ctx)
-	if err != nil {
-		c.Close()
-		return nil, err
+	defer func() {
+		if err != nil {
+			c.Close()
+		}
+	}()
+
+	if len(tables) == 0 {
+		if _, err = c.MonitorAll(ctx); err != nil {
+			return nil, err
+		}
+	} else {
+		for _, table := range tables {
+			if _, err = c.Monitor(ctx, c.NewMonitor(client.WithTable(table))); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	return c, nil
