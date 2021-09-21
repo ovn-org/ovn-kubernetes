@@ -1303,7 +1303,7 @@ spec:
 		// and re-enable this check
 
 		// ginkgo.By("6. Check connectivity to the kubernetes API IP and verify that it works")
-		// err = wait.PollImmediate(retryInterval, retryTimeout, targetAPIServiceAndTest(podNamespace.Name, []string{pod1Name, pod2Name}))
+		// err = wait.PollImmediate(retryInterval, retryTimeout, targetDestinationAndTest(podNamespace.Name, fmt.Sprintf("https://%s/version", net.JoinHostPort(getApiAddress(), "443")), []string{pod1Name, pod2Name}))
 		// framework.ExpectNoError(err, "Step 6. Check connectivity to the kubernetes API IP and verify that it works, failed, err %v", err)
 
 		ginkgo.By("7. Check connectivity to the other pod IP and verify that it works")

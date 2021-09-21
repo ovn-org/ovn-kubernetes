@@ -702,6 +702,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 	ginkgo.Context("on startup", func() {
 		ginkgo.It("reconciles existing and non-existing egressfirewalls", func() {
 			app.Action = func(ctx *cli.Context) error {
+				const (
+					node1Name     string = "node1"
+					nodeV4Address string = "192.168.178.21"
+				)
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist acl-add join to-lport 10001 ip4.dst == %v/32 allow", nodeV4Address),
+				})
+
 				purgeACL := libovsdbops.BuildACL(
 					"",
 					t.DirectionFromLPort,
@@ -769,6 +777,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 							{
 								Status: v1.NodeStatus{
 									Phase: v1.NodeRunning,
+									Addresses: []v1.NodeAddress{
+										{
+											Type:    v1.NodeInternalIP,
+											Address: nodeV4Address,
+										},
+									},
 								},
 								ObjectMeta: newObjectMeta(node1Name, ""),
 							},
@@ -780,6 +794,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				fakeOVN.controller.WatchEgressFirewall()
+				fakeOVN.controller.WatchEgressFirewallNodes()
 
 				// Both ACLS will be removed from the node switch
 				finalNodeSwitch := &nbdb.LogicalSwitch{
@@ -804,6 +819,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					finalJoinSwitch,
 				}
 
+				gomega.Eventually(fakeOVN.fakeExec.CalledMatchesExpected).Should(gomega.BeTrue(), fakeOVN.fakeExec.ErrorDesc)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				return nil

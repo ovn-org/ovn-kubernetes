@@ -15,8 +15,10 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -78,6 +80,66 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 	efr.ports = rawEgressFirewallRule.Ports
 
 	return efr, nil
+}
+
+func (oc *Controller) addNodeForEgressFirewall(node *v1.Node) error {
+	v4Addr, v6Addr := getNodeInternalAddrs(node)
+	if v4Addr != nil {
+		if _, _, err := util.RunOVNNbctl(
+			"--may-exist",
+			"acl-add",
+			types.OVNJoinSwitch,
+			types.DirectionToLPort,
+			types.DefaultEgressFirewallAllowPriority,
+			fmt.Sprintf("ip4.dst == %v/32", v4Addr),
+			"allow",
+		); err != nil {
+			return fmt.Errorf("could not create default IPv4 allow ACL for egress firewall, err: %v", err)
+		}
+	}
+	if v6Addr != nil {
+		if _, _, err := util.RunOVNNbctl(
+			"--may-exist",
+			"acl-add",
+			types.OVNJoinSwitch,
+			types.DirectionToLPort,
+			types.DefaultEgressFirewallAllowPriority,
+			fmt.Sprintf("ip6.dst == %v/128", v4Addr),
+			"allow",
+		); err != nil {
+			return fmt.Errorf("could not create default IPv6 allow ACL for egress firewall, err: %v", err)
+		}
+	}
+	return nil
+}
+
+func (oc *Controller) deleteNodeForEgressFirewall(node *v1.Node) error {
+	v4Addr, v6Addr := getNodeInternalAddrs(node)
+	if v4Addr != nil {
+		if _, _, err := util.RunOVNNbctl(
+			"--if-exist",
+			"acl-del",
+			types.OVNJoinSwitch,
+			types.DirectionToLPort,
+			types.DefaultEgressFirewallAllowPriority,
+			fmt.Sprintf("ip4.dst == %v/32", v4Addr),
+		); err != nil {
+			return fmt.Errorf("could not delete default IPv4 allow ACL for egress firewall, err: %v", err)
+		}
+	}
+	if v6Addr != nil {
+		if _, _, err := util.RunOVNNbctl(
+			"--if-exist",
+			"acl-add",
+			types.OVNJoinSwitch,
+			types.DirectionToLPort,
+			types.DefaultEgressFirewallAllowPriority,
+			fmt.Sprintf("ip6.dst == %v/128", v4Addr),
+		); err != nil {
+			return fmt.Errorf("could not delete default IPv6 allow ACL for egress firewall, err: %v", err)
+		}
+	}
+	return nil
 }
 
 // This function is used to sync egress firewall setup. It does three "cleanups"
