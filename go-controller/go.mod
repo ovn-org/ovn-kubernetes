@@ -7,6 +7,7 @@ require (
 	github.com/Microsoft/go-winio v0.4.15 // indirect
 	github.com/Microsoft/hcsshim v0.8.10-0.20200715222032-5eafd1556990
 	github.com/bhendo/go-powershell v0.0.0-20190719160123-219e7fb4e41e
+	github.com/cenkalti/rpc2 v0.0.0-20210604223624-c1acbc6ec984 // indirect
 	github.com/containernetworking/cni v0.8.0
 	github.com/containernetworking/plugins v0.8.7
 	github.com/coreos/go-iptables v0.4.5
