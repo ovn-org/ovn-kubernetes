@@ -61,7 +61,22 @@ const (
 	DefaultDenyPriority = 1000
 
 	// priority of logical router policies on the OVNClusterRouter
-	EgressFirewallStartPriority           = 10000
+
+	// DefaultEgressFirewallAllowPriority is the ACL priority for the default
+	// allow ACL rules, enabling access to all cluster nodes from egress
+	// firewall matching pods. This is done as to make sure egress firewall
+	// matching pods can still connect to the host network on all cluster nodes,
+	// even though a "deny 0.0.0.0/0" rule is specified.
+	DefaultEgressFirewallAllowPriority = "10001"
+	// EgressFirewallStartPriority is the priority from which the ACL priority
+	// will be decremented on a per rule basis. This means that the first rule
+	// defined for a namespace will have this priority, and the second one will
+	// have this priority minus one, etc.
+	EgressFirewallStartPriority = 10000
+	// MinimumReservedEgressFirewallPriority is the minimum priority for which
+	// the ACL priority for egress firewall rules can be decremented to. This
+	// means that an EgressFirewall object can have 8000 rules defined and no
+	// rule will have a priority lower than this.
 	MinimumReservedEgressFirewallPriority = 2000
 	MGMTPortPolicyPriority                = "1005"
 	NodeSubnetPolicyPriority              = "1004"
