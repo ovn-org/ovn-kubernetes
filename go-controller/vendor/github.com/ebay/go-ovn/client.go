@@ -299,6 +299,7 @@ type ovndb struct {
 	reconn       bool
 	currentTxn   string
 	leaderOnly   bool
+	timeout      time.Duration
 
 	serverCache      map[string]map[string]libovsdb.Row
 	serverTableCols  map[string][]string
@@ -352,8 +353,8 @@ func (c *ovndb) connect() error {
 	var err error
 	for i := 0; i < len(c.endpoints); i++ {
 		addr := c.endpoints[c.curEndpoint]
-		klog.Infof("[%s] connecting to %s...", c.db, addr)
-		c.client, err = libovsdb.Connect(addr, c.tlsConfig)
+		klog.Infof("[%s %s] connecting...", addr, c.db)
+		c.client, err = libovsdb.Connect(c.timeout, addr, c.tlsConfig)
 		if err == nil {
 			if err = c.connectEndpoint(); err == nil {
 				// success
@@ -442,6 +443,11 @@ func NewClient(cfg *Config) (Client, error) {
 		reconn:       cfg.Reconnect,
 		currentTxn:   ZERO_TRANSACTION,
 		leaderOnly:   cfg.LeaderOnly,
+		timeout:         cfg.Timeout,
+	}
+
+	if cfg.Timeout == 0 {
+		cfg.Timeout = time.Minute
 	}
 
 	err := ovndb.connect()

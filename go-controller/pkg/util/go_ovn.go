@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"reflect"
+	"time"
 
 	"io/ioutil"
 
@@ -93,6 +94,7 @@ func initGoOvnSslClient(certFile, privKeyFile, caCertFile, address, db, serverNa
 		TLSConfig:  tlsConfig,
 		Reconnect:  true,
 		LeaderOnly: true,
+		Timeout:    time.Minute,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error creating SSL OVNDBClient for database %s at address %s: %s", db, address, err)
@@ -160,6 +162,7 @@ func initGoOvnTcpClient(address, db string) (goovn.Client, error) {
 		Addr:       address,
 		Reconnect:  true,
 		LeaderOnly: true,
+		Timeout:    time.Minute,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error creating TCP OVNDBClient for address %s: %s", address, err)
@@ -174,6 +177,7 @@ func initGoOvnUnixClient(address, db string) (goovn.Client, error) {
 		Addr:       address,
 		Reconnect:  true,
 		LeaderOnly: true,
+		Timeout:    time.Minute,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error creating UNIX OVNDBClient for address %s: %s", address, err)

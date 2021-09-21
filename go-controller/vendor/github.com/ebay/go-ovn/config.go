@@ -18,6 +18,7 @@ package goovn
 
 import (
 	"crypto/tls"
+	"time"
 )
 
 // Config ovn nb and sb db client config
@@ -30,4 +31,5 @@ type Config struct {
 	Reconnect    bool                    // Automatically reconnect when disconnected
 	TableCols    map[string][]string     // List of tables and their cols to be monitored
 	LeaderOnly   bool
+	Timeout      time.Duration
 }
