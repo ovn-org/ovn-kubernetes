@@ -7,7 +7,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-func (pr *PodRequest) addSmartNICConnectionDetailsAnnot(kube kube.Interface) error {
+func (pr *PodRequest) addSmartNICConnectionDetailsAnnot(k kube.Interface) error {
 	// 1. Verify there is a device id
 	if pr.CNIConf.DeviceID == "" {
 		return fmt.Errorf("DeviceID must be set for Pod request with SmartNIC")
@@ -40,18 +40,12 @@ func (pr *PodRequest) addSmartNICConnectionDetailsAnnot(kube kube.Interface) err
 		SandboxId: pr.SandboxID,
 	}
 
-	smartNicAnnotation, err := smartNicConnDetails.AsAnnotation()
-	if err != nil {
+	podAnnot := kube.NewPodAnnotator(k, pr.PodName, pr.PodNamespace)
+	if err := podAnnot.Set(util.SmartNicConnectionDetailsAnnot, smartNicConnDetails); err != nil {
 		// we should not get here
 		return fmt.Errorf("failed to generate %s annotation for pod. %v", util.SmartNicConnectionDetailsAnnot, err)
 	}
-
-	annot := make(map[string]interface{}, len(smartNicAnnotation))
-	for key, val := range smartNicAnnotation {
-		annot[key] = val
-	}
-	err = kube.SetAnnotationsOnPod(pr.PodNamespace, pr.PodName, annot)
-	if err != nil {
+	if err := podAnnot.Run(); err != nil {
 		return err
 	}
 

@@ -81,73 +81,63 @@ func (na *nodeAnnotator) Run() error {
 }
 
 // NewPodAnnotator returns a new annotator for Pod objects
-func NewPodAnnotator(kube Interface, pod *kapi.Pod) Annotator {
+func NewPodAnnotator(kube Interface, podName string, namespace string) Annotator {
 	return &podAnnotator{
-		kube:    kube,
-		pod:     pod,
-		changes: make(map[string]*action),
+		kube:      kube,
+		podName:   podName,
+		namespace: namespace,
+		changes:   make(map[string]interface{}),
 	}
 }
 
 type podAnnotator struct {
-	kube Interface
-	pod  *kapi.Pod
+	kube      Interface
+	podName   string
+	namespace string
 
-	changes map[string]*action
+	changes map[string]interface{}
 	sync.Mutex
 }
 
 func (pa *podAnnotator) Set(key string, val interface{}) error {
-	act := &action{
-		key:     key,
-		origVal: val,
-	}
-	if val != nil {
-		// Annotations must be either a valid string value or nil; coerce
-		// any non-empty values to string
-		if reflect.TypeOf(val).Kind() == reflect.String {
-			act.val = val.(string)
-		} else {
-			bytes, err := json.Marshal(val)
-			if err != nil {
-				return fmt.Errorf("failed to marshal %q value %v to string: %v", key, val, err)
-			}
-			act.val = string(bytes)
-		}
-	}
 	pa.Lock()
 	defer pa.Unlock()
-	pa.changes[key] = act
+
+	if val == nil {
+		pa.changes[key] = nil
+		return nil
+	}
+
+	// Annotations must be either a valid string value or nil; coerce
+	// any non-empty values to string
+	if reflect.TypeOf(val).Kind() == reflect.String {
+		pa.changes[key] = val.(string)
+	} else {
+		bytes, err := json.Marshal(val)
+		if err != nil {
+			return fmt.Errorf("failed to marshal %q value %v to string: %v", key, val, err)
+		}
+		pa.changes[key] = string(bytes)
+	}
+
 	return nil
 }
 
 func (pa *podAnnotator) Delete(key string) {
 	pa.Lock()
 	defer pa.Unlock()
-	pa.changes[key] = &action{key: key}
+	pa.changes[key] = nil
 }
 
 func (pa *podAnnotator) Run() error {
-	annotations := make(map[string]interface{})
 	pa.Lock()
 	defer pa.Unlock()
-	for k, act := range pa.changes {
-		// Ignore annotations that already exist with the same value
-		if existing, ok := pa.pod.Annotations[k]; existing != act.val || !ok {
-			if act.origVal != nil {
-				// Annotation should be updated to new value
-				annotations[k] = act.val
-			} else {
-				// Annotation should be deleted
-				annotations[k] = ""
-			}
-		}
-	}
-	if len(annotations) == 0 {
+
+	if len(pa.changes) == 0 {
 		return nil
 	}
 
-	return pa.kube.SetAnnotationsOnPod(pa.pod.Namespace, pa.pod.Name, annotations)
+	return pa.kube.SetAnnotationsOnPod(pa.namespace, pa.podName, pa.changes)
 }
 
 // NewNamespaceAnnotator returns a new annotator for Namespace objects
