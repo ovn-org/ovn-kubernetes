@@ -391,7 +391,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	}
 
 	mgmtPort = NewManagementPort(n.name, subnets)
-	nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node)
+	nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node.Name)
 	waiter := newStartupWaiter()
 
 	mgmtPortConfig, err = mgmtPort.Create(nodeAnnotator, waiter)

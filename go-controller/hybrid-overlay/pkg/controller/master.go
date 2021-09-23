@@ -257,7 +257,7 @@ func (m *MasterController) deleteOverlayPort(node *kapi.Node) {
 // AddNode handles node additions
 func (m *MasterController) AddNode(node *kapi.Node) error {
 	klog.V(5).Infof("Processing add event for node %s", node.Name)
-	annotator := kube.NewNodeAnnotator(m.kube, node)
+	annotator := kube.NewNodeAnnotator(m.kube, node.Name)
 
 	var allocatedSubnet *net.IPNet
 	if houtil.IsHybridOverlayNode(node) {
