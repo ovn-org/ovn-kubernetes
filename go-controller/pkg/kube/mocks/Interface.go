@@ -293,13 +293,13 @@ func (_m *KubeInterface) RemoveTaintFromNode(nodeName string, taint *v1.Taint) e
 	return r0
 }
 
-// SetAnnotationsOnNamespace provides a mock function with given fields: namespace, annotations
-func (_m *KubeInterface) SetAnnotationsOnNamespace(namespace *v1.Namespace, annotations map[string]string) error {
-	ret := _m.Called(namespace, annotations)
+// SetAnnotationsOnNamespace provides a mock function with given fields: namespaceName, annotations
+func (_m *KubeInterface) SetAnnotationsOnNamespace(namespaceName string, annotations map[string]interface{}) error {
+	ret := _m.Called(namespaceName, annotations)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*v1.Namespace, map[string]string) error); ok {
-		r0 = rf(namespace, annotations)
+	if rf, ok := ret.Get(0).(func(string, map[string]interface{}) error); ok {
+		r0 = rf(namespaceName, annotations)
 	} else {
 		r0 = ret.Error(0)
 	}

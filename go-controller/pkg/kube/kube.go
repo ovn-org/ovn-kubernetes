@@ -24,7 +24,7 @@ import (
 type Interface interface {
 	SetAnnotationsOnPod(namespace, podName string, annotations map[string]string) error
 	SetAnnotationsOnNode(nodeName string, annotations map[string]interface{}) error
-	SetAnnotationsOnNamespace(namespace *kapi.Namespace, annotations map[string]string) error
+	SetAnnotationsOnNamespace(namespaceName string, annotations map[string]interface{}) error
 	SetTaintOnNode(nodeName string, taint *kapi.Taint) error
 	RemoveTaintFromNode(nodeName string, taint *kapi.Taint) error
 	PatchNode(old, new *kapi.Node) error
@@ -104,8 +104,8 @@ func (k *Kube) SetAnnotationsOnNode(nodeName string, annotations map[string]inte
 	return err
 }
 
-// SetAnnotationsOnNamespace takes the namespace object and map of key/value string pairs to set as annotations
-func (k *Kube) SetAnnotationsOnNamespace(namespace *kapi.Namespace, annotations map[string]string) error {
+// SetAnnotationsOnNamespace takes the namespace name and map of key/value string pairs to set as annotations
+func (k *Kube) SetAnnotationsOnNamespace(namespaceName string, annotations map[string]interface{}) error {
 	var err error
 	var patchData []byte
 	patch := struct {
@@ -116,16 +116,16 @@ func (k *Kube) SetAnnotationsOnNamespace(namespace *kapi.Namespace, annotations 
 		},
 	}
 
-	klog.Infof("Setting annotations %v on namespace %s", annotations, namespace.Name)
+	klog.Infof("Setting annotations %v on namespace %s", annotations, namespaceName)
 	patchData, err = json.Marshal(&patch)
 	if err != nil {
-		klog.Errorf("Error in setting annotations on namespace %s: %v", namespace.Name, err)
+		klog.Errorf("Error in setting annotations on namespace %s: %v", namespaceName, err)
 		return err
 	}
 
-	_, err = k.KClient.CoreV1().Namespaces().Patch(context.TODO(), namespace.Name, types.MergePatchType, patchData, metav1.PatchOptions{})
+	_, err = k.KClient.CoreV1().Namespaces().Patch(context.TODO(), namespaceName, types.MergePatchType, patchData, metav1.PatchOptions{})
 	if err != nil {
-		klog.Errorf("Error in setting annotation on namespace %s: %v", namespace.Name, err)
+		klog.Errorf("Error in setting annotation on namespace %s: %v", namespaceName, err)
 	}
 	return err
 }
