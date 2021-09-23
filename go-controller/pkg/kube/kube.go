@@ -22,7 +22,7 @@ import (
 // Interface represents the exported methods for dealing with getting/setting
 // kubernetes resources
 type Interface interface {
-	SetAnnotationsOnPod(namespace, podName string, annotations map[string]string) error
+	SetAnnotationsOnPod(namespace, podName string, annotations map[string]interface{}) error
 	SetAnnotationsOnNode(nodeName string, annotations map[string]interface{}) error
 	SetAnnotationsOnNamespace(namespaceName string, annotations map[string]interface{}) error
 	SetTaintOnNode(nodeName string, taint *kapi.Taint) error
@@ -52,7 +52,7 @@ type Kube struct {
 }
 
 // SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
-func (k *Kube) SetAnnotationsOnPod(namespace, podName string, annotations map[string]string) error {
+func (k *Kube) SetAnnotationsOnPod(namespace, podName string, annotations map[string]interface{}) error {
 	var err error
 	var patchData []byte
 	patch := struct {

@@ -269,7 +269,7 @@ var _ = Describe("Node Smart NIC tests", func() {
 			})
 
 			It("Sets smartnic-connection-status pod annotation on success", func() {
-				expectedAnnot := map[string]string{util.SmartNicConnetionStatusAnnot: `{"Status":"Ready"}`}
+				expectedAnnot := map[string]interface{}{util.SmartNicConnetionStatusAnnot: `{"Status":"Ready"}`}
 				netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
 				netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(nil)
 				netlinkOpsMock.On("LinkSetUp", vfLink).Return(nil)

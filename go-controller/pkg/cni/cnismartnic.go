@@ -46,7 +46,11 @@ func (pr *PodRequest) addSmartNICConnectionDetailsAnnot(kube kube.Interface) err
 		return fmt.Errorf("failed to generate %s annotation for pod. %v", util.SmartNicConnectionDetailsAnnot, err)
 	}
 
-	err = kube.SetAnnotationsOnPod(pr.PodNamespace, pr.PodName, smartNicAnnotation)
+	annot := make(map[string]interface{}, len(smartNicAnnotation))
+	for key, val := range smartNicAnnotation {
+		annot[key] = val
+	}
+	err = kube.SetAnnotationsOnPod(pr.PodNamespace, pr.PodName, annot)
 	if err != nil {
 		return err
 	}

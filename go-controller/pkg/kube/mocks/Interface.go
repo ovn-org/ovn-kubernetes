@@ -322,11 +322,11 @@ func (_m *KubeInterface) SetAnnotationsOnNode(nodeName string, annotations map[s
 }
 
 // SetAnnotationsOnPod provides a mock function with given fields: namespace, podName, annotations
-func (_m *KubeInterface) SetAnnotationsOnPod(namespace string, podName string, annotations map[string]string) error {
+func (_m *KubeInterface) SetAnnotationsOnPod(namespace string, podName string, annotations map[string]interface{}) error {
 	ret := _m.Called(namespace, podName, annotations)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, string, map[string]string) error); ok {
+	if rf, ok := ret.Get(0).(func(string, string, map[string]interface{}) error); ok {
 		r0 = rf(namespace, podName, annotations)
 	} else {
 		r0 = ret.Error(0)

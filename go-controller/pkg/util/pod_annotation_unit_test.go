@@ -19,19 +19,19 @@ func TestMarshalPodAnnotation(t *testing.T) {
 		inpPodAnnot    PodAnnotation
 		errAssert      bool  // used when an error string CANNOT be matched or sub-matched
 		errMatch       error //used when an error string CAN be matched or sub-matched
-		expectedOutput map[string]string
+		expectedOutput map[string]interface{}
 	}{
 		{
 			desc:           "PodAnnotation instance with no fields set",
 			inpPodAnnot:    PodAnnotation{},
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":""}}`},
+			expectedOutput: map[string]interface{}{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":""}}`},
 		},
 		{
 			desc: "single IP assigned to pod with MAC, Gateway, Routes NOT SPECIFIED",
 			inpPodAnnot: PodAnnotation{
 				IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/24")},
 			},
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"","ip_address":"192.168.0.5/24"}}`},
+			expectedOutput: map[string]interface{}{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"","ip_address":"192.168.0.5/24"}}`},
 		},
 		{
 			desc: "multiple IPs assigned to pod with MAC, Gateway, Routes NOT SPECIFIED",
@@ -41,7 +41,7 @@ func TestMarshalPodAnnotation(t *testing.T) {
 					ovntest.MustParseIPNet("fd01::1234/64"),
 				},
 			},
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24","fd01::1234/64"],"mac_address":""}}`},
+			expectedOutput: map[string]interface{}{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24","fd01::1234/64"],"mac_address":""}}`},
 		},
 		{
 			desc: "test code path when podInfo.Gateways count is equal to ONE",
@@ -51,7 +51,7 @@ func TestMarshalPodAnnotation(t *testing.T) {
 					net.ParseIP("192.168.0.1"),
 				},
 			},
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"","gateway_ips":["192.168.0.1"],"ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1"}}`},
+			expectedOutput: map[string]interface{}{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"","gateway_ips":["192.168.0.1"],"ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1"}}`},
 		},
 		{
 			desc:     "verify error thrown when number of gateways greater than one for a single-stack network",
@@ -86,7 +86,7 @@ func TestMarshalPodAnnotation(t *testing.T) {
 					},
 				},
 			},
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}]}}`},
+			expectedOutput: map[string]interface{}{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}]}}`},
 		},
 		{
 			desc: "next hop not set for route",
@@ -97,7 +97,7 @@ func TestMarshalPodAnnotation(t *testing.T) {
 					},
 				},
 			},
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","routes":[{"dest":"192.168.1.0/24","nextHop":""}]}}`},
+			expectedOutput: map[string]interface{}{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","routes":[{"dest":"192.168.1.0/24","nextHop":""}]}}`},
 		},
 	}
 

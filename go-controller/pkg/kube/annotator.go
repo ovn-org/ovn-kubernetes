@@ -141,7 +141,7 @@ func (pa *podAnnotator) Delete(key string) {
 }
 
 func (pa *podAnnotator) Run() error {
-	annotations := make(map[string]string)
+	annotations := make(map[string]interface{})
 	pa.Lock()
 	defer pa.Unlock()
 	for k, act := range pa.changes {
