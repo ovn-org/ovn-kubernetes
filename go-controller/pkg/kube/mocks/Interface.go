@@ -307,13 +307,13 @@ func (_m *KubeInterface) SetAnnotationsOnNamespace(namespace *v1.Namespace, anno
 	return r0
 }
 
-// SetAnnotationsOnNode provides a mock function with given fields: node, annotations
-func (_m *KubeInterface) SetAnnotationsOnNode(node *v1.Node, annotations map[string]interface{}) error {
-	ret := _m.Called(node, annotations)
+// SetAnnotationsOnNode provides a mock function with given fields: nodeName, annotations
+func (_m *KubeInterface) SetAnnotationsOnNode(nodeName string, annotations map[string]interface{}) error {
+	ret := _m.Called(nodeName, annotations)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*v1.Node, map[string]interface{}) error); ok {
-		r0 = rf(node, annotations)
+	if rf, ok := ret.Get(0).(func(string, map[string]interface{}) error); ok {
+		r0 = rf(nodeName, annotations)
 	} else {
 		r0 = ret.Error(0)
 	}

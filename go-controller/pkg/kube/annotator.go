@@ -90,7 +90,7 @@ func (na *nodeAnnotator) Run() error {
 		return nil
 	}
 
-	return na.kube.SetAnnotationsOnNode(na.node, annotations)
+	return na.kube.SetAnnotationsOnNode(na.node.Name, annotations)
 }
 
 // NewPodAnnotator returns a new annotator for Pod objects

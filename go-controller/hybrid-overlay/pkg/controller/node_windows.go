@@ -318,7 +318,7 @@ func (n *NodeController) initSelf(node *kapi.Node, nodeSubnet *net.IPNet) error 
 			if len(policySettings.Address) == 0 {
 				return fmt.Errorf("error creating the network: no DRMAC address")
 			}
-			if err := n.kube.SetAnnotationsOnNode(node, map[string]interface{}{
+			if err := n.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{
 				types.HybridOverlayDRMAC: policySettings.Address,
 			}); err != nil {
 				klog.Errorf("Failed to set DRMAC annotation on node: %v", err)

@@ -23,7 +23,7 @@ import (
 // kubernetes resources
 type Interface interface {
 	SetAnnotationsOnPod(namespace, podName string, annotations map[string]string) error
-	SetAnnotationsOnNode(node *kapi.Node, annotations map[string]interface{}) error
+	SetAnnotationsOnNode(nodeName string, annotations map[string]interface{}) error
 	SetAnnotationsOnNamespace(namespace *kapi.Namespace, annotations map[string]string) error
 	SetTaintOnNode(nodeName string, taint *kapi.Taint) error
 	RemoveTaintFromNode(nodeName string, taint *kapi.Taint) error
@@ -78,8 +78,8 @@ func (k *Kube) SetAnnotationsOnPod(namespace, podName string, annotations map[st
 	return err
 }
 
-// SetAnnotationsOnNode takes the node object and map of key/value string pairs to set as annotations
-func (k *Kube) SetAnnotationsOnNode(node *kapi.Node, annotations map[string]interface{}) error {
+// SetAnnotationsOnNode takes the node name and map of key/value string pairs to set as annotations
+func (k *Kube) SetAnnotationsOnNode(nodeName string, annotations map[string]interface{}) error {
 	var err error
 	var patchData []byte
 	patch := struct {
@@ -90,16 +90,16 @@ func (k *Kube) SetAnnotationsOnNode(node *kapi.Node, annotations map[string]inte
 		},
 	}
 
-	klog.Infof("Setting annotations %v on node %s", annotations, node.Name)
+	klog.Infof("Setting annotations %v on node %s", annotations, nodeName)
 	patchData, err = json.Marshal(&patch)
 	if err != nil {
-		klog.Errorf("Error in setting annotations on node %s: %v", node.Name, err)
+		klog.Errorf("Error in setting annotations on node %s: %v", nodeName, err)
 		return err
 	}
 
-	_, err = k.KClient.CoreV1().Nodes().Patch(context.TODO(), node.Name, types.MergePatchType, patchData, metav1.PatchOptions{})
+	_, err = k.KClient.CoreV1().Nodes().Patch(context.TODO(), nodeName, types.MergePatchType, patchData, metav1.PatchOptions{})
 	if err != nil {
-		klog.Errorf("Error in setting annotation on node %s: %v", node.Name, err)
+		klog.Errorf("Error in setting annotation on node %s: %v", nodeName, err)
 	}
 	return err
 }
