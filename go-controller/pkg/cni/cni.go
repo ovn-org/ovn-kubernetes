@@ -5,7 +5,6 @@ import (
 	"net"
 
 	"github.com/containernetworking/cni/pkg/types/current"
-	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -151,70 +150,9 @@ func (pr *PodRequest) cmdDel() error {
 }
 
 func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) error {
-	namespace := pr.PodNamespace
-	podName := pr.PodName
-	if namespace == "" || podName == "" {
-		return fmt.Errorf("required CNI variable missing")
-	}
-
-	// Get the IP address and MAC address of the pod
-	annotCondFn := isOvnReady
-	if pr.IsSmartNIC {
-		annotCondFn = isSmartNICReady
-	}
-	podUID, annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, pr.PodNamespace, pr.PodName, annotCondFn)
-	if err != nil {
-		return err
-	}
-	if err := pr.checkOrUpdatePodUID(podUID); err != nil {
-		return err
-	}
-
-	if pr.CNIConf.PrevResult != nil {
-		result, err := current.NewResultFromResult(pr.CNIConf.PrevResult)
-		if err != nil {
-			return fmt.Errorf("could not convert result to current version: %v", err)
-		}
-		hostIfaceName := ""
-		for _, interf := range result.Interfaces {
-			if len(interf.Sandbox) == 0 {
-				hostIfaceName = interf.Name
-				break
-			}
-		}
-		if len(hostIfaceName) == 0 {
-			return fmt.Errorf("could not find host interface in the prevResult: %v", result)
-		}
-		ifaceID := fmt.Sprintf("%s_%s", namespace, podName)
-		ofPort, err := getIfaceOFPort(hostIfaceName)
-		if err != nil {
-			return err
-		}
-		for _, ip := range result.IPs {
-			if err = waitForPodInterface(pr.ctx, result.Interfaces[*ip.Interface].Mac, []*net.IPNet{&ip.Address},
-				hostIfaceName, ifaceID, ofPort, useOVSExternalIDs, podLister, kclient, pr.PodNamespace, pr.PodName,
-				pr.PodUID); err != nil {
-				return fmt.Errorf("error while waiting on OVN pod interface: %s ip: %v, error: %v", ifaceID, ip, err)
-			}
-		}
-
-		for _, direction := range []direction{Ingress, Egress} {
-			annotationBandwith, annotationErr := extractPodBandwidth(annotations, direction)
-			ovnBandwith, ovnErr := getOvsPortBandwidth(hostIfaceName, direction)
-			if errors.Is(annotationErr, BandwidthNotFound) && errors.Is(ovnErr, BandwidthNotFound) {
-				continue
-			}
-			if annotationErr != nil {
-				return errors.Wrapf(err, "Failed to get bandwith from annotations of pod %s %s", podName, direction)
-			}
-			if ovnErr != nil {
-				return errors.Wrapf(err, "Failed to get pod %s %s bandwith from ovn", direction, podName)
-			}
-			if annotationBandwith != ovnBandwith {
-				return fmt.Errorf("defined %s bandwith restriction %d is not equal to the set one %d", direction, annotationBandwith, ovnBandwith)
-			}
-		}
-	}
+	// noop...CMD check is not considered useful, and has a considerable performance impact
+	// to pod bring up times with CRIO. This is due to the fact that CRIO currently calls check
+	// after CNI ADD before it finishes bringing the container up
 	return nil
 }
 

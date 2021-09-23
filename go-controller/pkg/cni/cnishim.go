@@ -20,10 +20,6 @@ import (
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/types/current"
-	"github.com/containernetworking/cni/pkg/version"
-	"github.com/containernetworking/plugins/pkg/ip"
-	"github.com/containernetworking/plugins/pkg/ns"
-	"github.com/vishvananda/netlink"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
@@ -241,117 +237,8 @@ func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 
 // CmdCheck is the callback for 'checking' container's networking is as expected.
 func (p *Plugin) CmdCheck(args *skel.CmdArgs) error {
-	var err error
-
-	startTime := time.Now()
-	defer func() {
-		p.postMetrics(startTime, CNICheck, err)
-	}()
-
-	// read the config stdin args
-	// Note: in order to validate that RawPrevResult is not nil, we don't use config.ReadCNIConfig(args.StdinData)
-	conf := &ovntypes.NetConf{}
-	if err = json.Unmarshal(args.StdinData, conf); err != nil {
-		return err
-	}
-	// Parse previous result.
-	if conf.RawPrevResult == nil {
-		return fmt.Errorf("required prevResult missing")
-	}
-	if err = version.ParsePrevResult(&conf.NetConf); err != nil {
-		return err
-	}
-	setupLogging(conf)
-	defer func() {
-		if err != nil {
-			klog.Errorf(err.Error())
-		}
-	}()
-
-	gtet := false
-	if gtet, err = version.GreaterThanOrEqualTo(conf.CNIVersion, "0.4.0"); err != nil {
-		return types.NewError(types.ErrDecodingFailure, err.Error(), "")
-	} else if !gtet {
-		err = types.NewError(types.ErrIncompatibleCNIVersion, "config version does not allow CHECK", "")
-		return err
-	}
-
-	result, errR := current.NewResultFromResult(conf.PrevResult)
-	if errR != nil {
-		err = errR
-		return err
-	}
-	klog.Infof("PrevResult is %+v", result)
-
-	var intf current.Interface
-	for _, inf := range result.Interfaces {
-		if args.IfName == inf.Name {
-			if args.Netns == inf.Sandbox {
-				intf = *inf
-				break
-			}
-		}
-	}
-	// The namespace must be the same as what was configured
-	if args.Netns != intf.Sandbox {
-		err = fmt.Errorf("sandbox in prevResult %s doesn't match configured netns: %s",
-			intf.Sandbox, args.Netns)
-		return err
-	}
-
-	netns, errNs := ns.GetNS(args.Netns)
-	if errNs != nil {
-		err = fmt.Errorf("failed to open netns %q: %v", args.Netns, errNs)
-		return err
-	}
-	defer netns.Close()
-
-	// Check prevResults for ips, routes and dns against values found in the container
-	if err = netns.Do(func(_ ns.NetNS) error {
-
-		// Check interface against values found in the container
-		err = validateCniContainerInterface(intf)
-		if err != nil {
-			return err
-		}
-
-		err = ip.ValidateExpectedInterfaceIPs(args.IfName, result.IPs)
-		if err != nil {
-			return err
-		}
-
-		err = ip.ValidateExpectedRoute(result.Routes)
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	_, err = p.doCNI("http://dummy/", newCNIRequest(args))
-	return err
-}
-
-func validateCniContainerInterface(intf current.Interface) error {
-	var link netlink.Link
-	var err error
-
-	if intf.Name == "" {
-		return fmt.Errorf("container interface name missing in prevResult: %v", intf.Name)
-	}
-	link, err = netlink.LinkByName(intf.Name)
-	if err != nil {
-		return fmt.Errorf("container Interface name in prevResult: %s not found", intf.Name)
-	}
-	if intf.Sandbox == "" {
-		return fmt.Errorf("Error: Container interface %s should not be in host namespace", link.Attrs().Name)
-	}
-
-	if intf.Mac != "" {
-		if intf.Mac != link.Attrs().HardwareAddr.String() {
-			return fmt.Errorf("interface %s Mac %s doesn't match container Mac: %s", intf.Name, intf.Mac, link.Attrs().HardwareAddr)
-		}
-	}
+	// noop...CMD check is not considered useful, and has a considerable performance impact
+	// to pod bring up times with CRIO. This is due to the fact that CRIO currently calls check
+	// after CNI ADD before it finishes bringing the container up
 	return nil
 }
