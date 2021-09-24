@@ -47,172 +47,231 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 
 	ginkgo.Context("on setting namespace gateway annotations", func() {
 
-		table.DescribeTable("reconciles an new pod with namespace single exgw annotation already set", func(bfd bool, expectedNbctl string) {
-			app.Action = func(ctx *cli.Context) error {
+		table.DescribeTable("reconciles an new pod with namespace single exgw annotation already set",
+			func(bfd bool, expectedNbctl []struct {
+				command string
+				res     string
+			}) {
+				app.Action = func(ctx *cli.Context) error {
 
-				namespaceT := *newNamespace("namespace1")
-				namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1"}
-				if bfd {
-					namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
+					namespaceT := *newNamespace("namespace1")
+					namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1"}
+					if bfd {
+						namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
+					}
+					t := newTPod(
+						"node1",
+						"10.128.1.0/24",
+						"10.128.1.2",
+						"10.128.1.1",
+						"myPod",
+						"10.128.1.3",
+						"0a:58:0a:80:01:03",
+						namespaceT.Name,
+					)
+
+					t.baseCmds(fExec)
+					fakeOvn.start(ctx,
+						&v1.NamespaceList{
+							Items: []v1.Namespace{
+								namespaceT,
+							},
+						},
+						&v1.PodList{
+							Items: []v1.Pod{
+								*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
+							},
+						},
+					)
+
+					t.populateLogicalSwitchCache(fakeOvn)
+					for _, cmd := range expectedNbctl {
+						fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+							Cmd:    cmd.command,
+							Output: cmd.res,
+						})
+					}
+					injectNode(fakeOvn)
+					fakeOvn.controller.WatchNamespaces()
+					fakeOvn.controller.WatchPods()
+
+					gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+					gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+					return nil
 				}
-				t := newTPod(
-					"node1",
-					"10.128.1.0/24",
-					"10.128.1.2",
-					"10.128.1.1",
-					"myPod",
-					"10.128.1.3",
-					"0a:58:0a:80:01:03",
-					namespaceT.Name,
-				)
 
-				t.baseCmds(fExec)
-				fakeOvn.start(ctx,
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespaceT,
-						},
-					},
-					&v1.PodList{
-						Items: []v1.Pod{
-							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
-						},
-					},
-				)
-
-				t.populateLogicalSwitchCache(fakeOvn)
-				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    expectedNbctl,
-					Output: "\n",
-				})
-				injectNode(fakeOvn)
-				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
-
-				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-				return nil
-			}
-
-			err := app.Run([]string{app.Name})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("No BFD", false, "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1"),
-			table.Entry("BFD Enabled", true, "ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1"))
-
-		table.DescribeTable("reconciles an new pod with namespace single exgw annotation already set with pod event first", func(bfd bool, expectedNbctl string) {
-			app.Action = func(ctx *cli.Context) error {
-
-				namespaceT := *newNamespace("namespace1")
-				namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1"}
-				if bfd {
-					namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
-				}
-				t := newTPod(
-					"node1",
-					"10.128.1.0/24",
-					"10.128.1.2",
-					"10.128.1.1",
-					"myPod",
-					"10.128.1.3",
-					"0a:58:0a:80:01:03",
-					namespaceT.Name,
-				)
-
-				t.baseCmds(fExec)
-				fakeOvn.start(ctx,
-					&v1.PodList{
-						Items: []v1.Pod{
-							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
-						},
-					},
-				)
-				t.populateLogicalSwitchCache(fakeOvn)
-				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    expectedNbctl,
-					Output: "\n",
-				})
-				injectNode(fakeOvn)
-				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
-
-				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Create(context.TODO(), &namespaceT, metav1.CreateOptions{})
+				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			},
+			table.Entry("No BFD", false,
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1", "\n"},
+				},
+			),
+			table.Entry("BFD Enabled", true,
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.1\"", "bfduuid\n"},
+					{"ovn-nbctl --timeout=15 --may-exist --bfd=bfduuid --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1", "\n"},
+				},
+			),
+		)
 
-				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-				return nil
-			}
+		table.DescribeTable("reconciles an new pod with namespace single exgw annotation already set with pod event first",
+			func(bfd bool, expectedNbctl []struct {
+				command string
+				res     string
+			}) {
+				app.Action = func(ctx *cli.Context) error {
 
-			err := app.Run([]string{app.Name})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("No BFD", false, "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1"),
-			table.Entry("BFD Enabled", true, "ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1"))
+					namespaceT := *newNamespace("namespace1")
+					namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1"}
+					if bfd {
+						namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
+					}
+					t := newTPod(
+						"node1",
+						"10.128.1.0/24",
+						"10.128.1.2",
+						"10.128.1.1",
+						"myPod",
+						"10.128.1.3",
+						"0a:58:0a:80:01:03",
+						namespaceT.Name,
+					)
 
-		table.DescribeTable("reconciles an new pod with namespace double exgw annotation already set", func(bfd bool, expectedNbctl []string) {
-
-			app.Action = func(ctx *cli.Context) error {
-
-				namespaceT := *newNamespace("namespace1")
-				namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1,9.0.0.2"}
-				if bfd {
-					namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
-				}
-				t := newTPod(
-					"node1",
-					"10.128.1.0/24",
-					"10.128.1.2",
-					"10.128.1.1",
-					"myPod",
-					"10.128.1.3",
-					"0a:58:0a:80:01:03",
-					namespaceT.Name,
-				)
-
-				t.baseCmds(fExec)
-				fakeOvn.start(ctx,
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespaceT,
+					t.baseCmds(fExec)
+					fakeOvn.start(ctx,
+						&v1.PodList{
+							Items: []v1.Pod{
+								*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
+							},
 						},
-					},
-					&v1.PodList{
-						Items: []v1.Pod{
-							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
-						},
-					},
-				)
-				t.populateLogicalSwitchCache(fakeOvn)
-				for _, cmd := range expectedNbctl {
-					fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd:    cmd,
-						Output: "\n",
-					})
+					)
+					t.populateLogicalSwitchCache(fakeOvn)
+					for _, cmd := range expectedNbctl {
+						fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+							Cmd:    cmd.command,
+							Output: cmd.res,
+						})
+					}
+					injectNode(fakeOvn)
+					fakeOvn.controller.WatchNamespaces()
+					fakeOvn.controller.WatchPods()
+
+					_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Create(context.TODO(), &namespaceT, metav1.CreateOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+					gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+					return nil
 				}
-				injectNode(fakeOvn)
-				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
 
-				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-				return nil
-			}
+				err := app.Run([]string{app.Name})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			}, table.Entry("No BFD", false,
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1", "\n"},
+				},
+			),
+			table.Entry("BFD Enabled", true,
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.1\"", "bfduuid\n"},
+					{"ovn-nbctl --timeout=15 --may-exist --bfd=bfduuid --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1", "\n"},
+				},
+			),
+		)
 
-			err := app.Run([]string{app.Name})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		},
-			table.Entry("No BFD", false, []string{
-				"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
-				"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2 rtoe-GR_node1",
+		table.DescribeTable("reconciles an new pod with namespace double exgw annotation already set",
+			func(bfd bool, expectedNbctl []struct {
+				command string
+				res     string
+			}) {
+
+				app.Action = func(ctx *cli.Context) error {
+
+					namespaceT := *newNamespace("namespace1")
+					namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1,9.0.0.2"}
+					if bfd {
+						namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
+					}
+					t := newTPod(
+						"node1",
+						"10.128.1.0/24",
+						"10.128.1.2",
+						"10.128.1.1",
+						"myPod",
+						"10.128.1.3",
+						"0a:58:0a:80:01:03",
+						namespaceT.Name,
+					)
+
+					t.baseCmds(fExec)
+					fakeOvn.start(ctx,
+						&v1.NamespaceList{
+							Items: []v1.Namespace{
+								namespaceT,
+							},
+						},
+						&v1.PodList{
+							Items: []v1.Pod{
+								*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
+							},
+						},
+					)
+					t.populateLogicalSwitchCache(fakeOvn)
+					for _, cmd := range expectedNbctl {
+						fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+							Cmd:    cmd.command,
+							Output: cmd.res,
+						})
+					}
+					injectNode(fakeOvn)
+					fakeOvn.controller.WatchNamespaces()
+					fakeOvn.controller.WatchPods()
+
+					gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+					gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+					return nil
+				}
+
+				err := app.Run([]string{app.Name})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			}, table.Entry("No BFD", false, []struct {
+				command string
+				res     string
+			}{
+				{"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1", "\n"},
+				{"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2 rtoe-GR_node1", "\n"},
 			}),
-			table.Entry("BFD Enabled", true, []string{
-				"ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
-				"ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2 rtoe-GR_node1",
+			table.Entry("BFD Enabled", true, []struct {
+				command string
+				res     string
+			}{
+				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.1\"", "bfduuid1\n"},
+				{"ovn-nbctl --timeout=15 --may-exist --bfd=bfduuid1 --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1", "\n"},
+				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.2\"", "bfduuid2\n"},
+				{"ovn-nbctl --timeout=15 --may-exist --bfd=bfduuid2 --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2 rtoe-GR_node1", "\n"},
 			}),
 		)
 
 		table.DescribeTable("reconciles deleting a pod with namespace double exgw annotation already set",
 			func(bfd bool,
-				nbctlOnAddCommands []string,
+				nbctlOnAddCommands []struct {
+					command string
+					res     string
+				},
 				nbctlOnDelCommands []struct {
 					command string
 					res     string
@@ -251,8 +310,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					t.populateLogicalSwitchCache(fakeOvn)
 					for _, cmd := range nbctlOnAddCommands {
 						fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-							Cmd:    cmd,
-							Output: "\n",
+							Cmd:    cmd.command,
+							Output: cmd.res,
 						})
 					}
 					injectNode(fakeOvn)
@@ -276,11 +335,14 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				}
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			},
-			table.Entry("No BFD", false, []string{
-				"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
-				"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2 rtoe-GR_node1",
-			},
+			}, table.Entry("No BFD", false,
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1", "\n"},
+					{"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2 rtoe-GR_node1", "\n"},
+				},
 				[]struct {
 					command string
 					res     string
@@ -293,10 +355,16 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.2\"", "\n"},
 				},
 			),
-			table.Entry("BFD", true, []string{
-				"ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
-				"ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2 rtoe-GR_node1",
-			},
+			table.Entry("BFD", true,
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.1\"", "bfduuid1\n"},
+					{"ovn-nbctl --timeout=15 --may-exist --bfd=bfduuid1 --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.2\"", "bfduuid2\n"},
+					{"ovn-nbctl --timeout=15 --may-exist --bfd=bfduuid2 --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2 rtoe-GR_node1", "\n"},
+				},
 				[]struct {
 					command string
 					res     string
@@ -312,7 +380,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 
 		table.DescribeTable("reconciles deleting a pod with namespace double exgw annotation already set IPV6",
 			func(bfd bool,
-				nbctlOnAddCommands []string,
+				nbctlOnAddCommands []struct {
+					command string
+					res     string
+				},
 				nbctlOnDelCommands []struct {
 					command string
 					res     string
@@ -351,8 +422,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					t.populateLogicalSwitchCache(fakeOvn)
 					for _, cmd := range nbctlOnAddCommands {
 						fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-							Cmd:    cmd,
-							Output: "\n",
+							Cmd:    cmd.command,
+							Output: cmd.res,
 						})
 					}
 					injectNode(fakeOvn)
@@ -376,11 +447,16 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				}
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			},
-			table.Entry("BFD IPV6", true, []string{
-				"ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 fd00:10:244:2::3/128 fd2e:6f44:5dd8::89 rtoe-GR_node1",
-				"ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 fd00:10:244:2::3/128 fd2e:6f44:5dd8::76 rtoe-GR_node1",
-			},
+			}, table.Entry("BFD IPV6", true,
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"fd2e:6f44:5dd8::89\"", "bfduuid1\n"},
+					{"ovn-nbctl --timeout=15 --may-exist --bfd=bfduuid1 --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 fd00:10:244:2::3/128 fd2e:6f44:5dd8::89 rtoe-GR_node1", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"fd2e:6f44:5dd8::76\"", "bfduuid2\n"},
+					{"ovn-nbctl --timeout=15 --may-exist --bfd=bfduuid2 --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 fd00:10:244:2::3/128 fd2e:6f44:5dd8::76 rtoe-GR_node1", "\n"},
+				},
 				[]struct {
 					command string
 					res     string
@@ -391,12 +467,16 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"fd2e:6f44:5dd8::76\" bfd!=[]", "\n"},
 					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"fd2e:6f44:5dd8::76\"", "bfduuid\n"},
 					{"ovn-nbctl --timeout=15 --if-exists destroy BFD bfduuid", ""},
-				}),
+				},
+			),
 		)
 
 		table.DescribeTable("reconciles deleting a exgw namespace with active pod",
 			func(bfd bool,
-				nbctlCommands []string,
+				nbctlOnAddCommands []struct {
+					command string
+					res     string
+				},
 				nbctlOnDelCommands []struct {
 					command string
 					res     string
@@ -433,10 +513,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 					)
 					t.populateLogicalSwitchCache(fakeOvn)
-					for _, cmd := range nbctlCommands {
+					for _, cmd := range nbctlOnAddCommands {
 						fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-							Cmd:    cmd,
-							Output: "\n",
+							Cmd:    cmd.command,
+							Output: cmd.res,
 						})
 					}
 
@@ -463,213 +543,293 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				err := app.Run([]string{app.Name})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
-			table.Entry("No BFD", false, []string{
-				"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
-				"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2 rtoe-GR_node1",
-			}, []struct {
-				command string
-				res     string
-			}{
-				{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1", "\n"},
-				{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.2", "\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.1\" bfd!=[]", "\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.2\" bfd!=[]", "\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.1\"", "\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.2\"", "\n"},
-			}),
-			table.Entry("BFD", true, []string{
-				"ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
-				"ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2 rtoe-GR_node1",
-			}, []struct {
-				command string
-				res     string
-			}{
-				{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1", "\n"},
-				{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.2", "\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.1\" bfd!=[]", "foouid\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.2\" bfd!=[]", "\n"},
-				{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.2\"", "bfduuid\n"},
-				{"ovn-nbctl --timeout=15 --if-exists destroy BFD bfduuid", ""},
-			}))
+			table.Entry("No BFD", false,
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1", "\n"},
+					{"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2 rtoe-GR_node1", "\n"},
+				},
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1", "\n"},
+					{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.2", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.1\" bfd!=[]", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.2\" bfd!=[]", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.1\"", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.2\"", "\n"},
+				},
+			),
+			table.Entry("BFD", true,
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.1\"", "bfduuid1\n"},
+					{"ovn-nbctl --timeout=15 --may-exist --bfd=bfduuid1 --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.2\"", "bfduuid2\n"},
+					{"ovn-nbctl --timeout=15 --may-exist --bfd=bfduuid2 --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2 rtoe-GR_node1", "\n"},
+				},
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1", "\n"},
+					{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.2", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.1\" bfd!=[]", "foouid\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.2\" bfd!=[]", "\n"},
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.2\"", "bfduuid\n"},
+					{"ovn-nbctl --timeout=15 --if-exists destroy BFD bfduuid", ""},
+				},
+			))
 	})
 
 	ginkgo.Context("on setting pod gateway annotations", func() {
-		table.DescribeTable("reconciles a host networked pod acting as a exgw for another namespace for new pod", func(bfd bool, nbctlCommand string) {
-			app.Action = func(ctx *cli.Context) error {
+		table.DescribeTable("reconciles a host networked pod acting as a exgw for another namespace for new pod",
+			func(bfd bool, expectedNbctl []struct {
+				command string
+				res     string
+			}) {
+				app.Action = func(ctx *cli.Context) error {
 
-				namespaceT := *newNamespace("namespace1")
-				namespaceX := *newNamespace("namespace2")
-				t := newTPod(
-					"node1",
-					"10.128.1.0/24",
-					"10.128.1.2",
-					"10.128.1.1",
-					"myPod",
-					"10.128.1.3",
-					"0a:58:0a:80:01:03",
-					namespaceT.Name,
-				)
-				gwPod := *newPod(namespaceX.Name, "gwPod", "node2", "9.0.0.1")
-				gwPod.Annotations = map[string]string{"k8s.ovn.org/routing-namespaces": namespaceT.Name}
-				if bfd {
-					gwPod.Annotations["k8s.ovn.org/bfd-enabled"] = ""
+					namespaceT := *newNamespace("namespace1")
+					namespaceX := *newNamespace("namespace2")
+					t := newTPod(
+						"node1",
+						"10.128.1.0/24",
+						"10.128.1.2",
+						"10.128.1.1",
+						"myPod",
+						"10.128.1.3",
+						"0a:58:0a:80:01:03",
+						namespaceT.Name,
+					)
+					gwPod := *newPod(namespaceX.Name, "gwPod", "node2", "9.0.0.1")
+					gwPod.Annotations = map[string]string{"k8s.ovn.org/routing-namespaces": namespaceT.Name}
+					if bfd {
+						gwPod.Annotations["k8s.ovn.org/bfd-enabled"] = ""
+					}
+					gwPod.Spec.HostNetwork = true
+					t.baseCmds(fExec)
+					fakeOvn.start(ctx,
+						&v1.NamespaceList{
+							Items: []v1.Namespace{
+								namespaceT, namespaceX,
+							},
+						},
+						&v1.PodList{
+							Items: []v1.Pod{
+								gwPod,
+							},
+						},
+					)
+					t.populateLogicalSwitchCache(fakeOvn)
+					injectNode(fakeOvn)
+					fakeOvn.controller.WatchNamespaces()
+					fakeOvn.controller.WatchPods()
+					for _, cmd := range expectedNbctl {
+						fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+							Cmd:    cmd.command,
+							Output: cmd.res,
+						})
+					}
+					_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.CreateOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+					gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+					return nil
 				}
-				gwPod.Spec.HostNetwork = true
-				t.baseCmds(fExec)
-				fakeOvn.start(ctx,
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespaceT, namespaceX,
-						},
-					},
-					&v1.PodList{
-						Items: []v1.Pod{
-							gwPod,
-						},
-					},
-				)
-				t.populateLogicalSwitchCache(fakeOvn)
-				injectNode(fakeOvn)
-				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
-				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    nbctlCommand,
-					Output: "\n",
-				})
-				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.CreateOptions{})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-				return nil
-			}
 
-			err := app.Run([]string{app.Name})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("No BFD", false, "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1"),
-			table.Entry("BFD", true, "ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1"),
+				err := app.Run([]string{app.Name})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			}, table.Entry("No BFD", false,
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1", "\n"},
+				},
+			),
+			table.Entry("BFD Enabled", true,
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.1\"", "bfduuid\n"},
+					{"ovn-nbctl --timeout=15 --may-exist --bfd=bfduuid --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1", "\n"},
+				},
+			),
 		)
 
-		table.DescribeTable("reconciles a host networked pod acting as a exgw for another namespace for existing pod", func(bfd bool, nbctlCommand string) {
-			app.Action = func(ctx *cli.Context) error {
+		table.DescribeTable("reconciles a host networked pod acting as a exgw for another namespace for existing pod",
+			func(bfd bool, expectedNbctl []struct {
+				command string
+				res     string
+			}) {
+				app.Action = func(ctx *cli.Context) error {
 
-				namespaceT := *newNamespace("namespace1")
-				namespaceX := *newNamespace("namespace2")
-				t := newTPod(
-					"node1",
-					"10.128.1.0/24",
-					"10.128.1.2",
-					"10.128.1.1",
-					"myPod",
-					"10.128.1.3",
-					"0a:58:0a:80:01:03",
-					namespaceT.Name,
-				)
-				gwPod := *newPod(namespaceX.Name, "gwPod", "node2", "9.0.0.1")
-				gwPod.Annotations = map[string]string{"k8s.ovn.org/routing-namespaces": namespaceT.Name}
-				if bfd {
-					gwPod.Annotations["k8s.ovn.org/bfd-enabled"] = ""
+					namespaceT := *newNamespace("namespace1")
+					namespaceX := *newNamespace("namespace2")
+					t := newTPod(
+						"node1",
+						"10.128.1.0/24",
+						"10.128.1.2",
+						"10.128.1.1",
+						"myPod",
+						"10.128.1.3",
+						"0a:58:0a:80:01:03",
+						namespaceT.Name,
+					)
+					gwPod := *newPod(namespaceX.Name, "gwPod", "node2", "9.0.0.1")
+					gwPod.Annotations = map[string]string{"k8s.ovn.org/routing-namespaces": namespaceT.Name}
+					if bfd {
+						gwPod.Annotations["k8s.ovn.org/bfd-enabled"] = ""
+					}
+					gwPod.Spec.HostNetwork = true
+					t.baseCmds(fExec)
+					fakeOvn.start(ctx,
+						&v1.NamespaceList{
+							Items: []v1.Namespace{
+								namespaceT, namespaceX,
+							},
+						},
+						&v1.PodList{
+							Items: []v1.Pod{
+								*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
+							},
+						},
+					)
+					t.populateLogicalSwitchCache(fakeOvn)
+					injectNode(fakeOvn)
+					fakeOvn.controller.WatchNamespaces()
+					fakeOvn.controller.WatchPods()
+					gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+					for _, cmd := range expectedNbctl {
+						fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+							Cmd:    cmd.command,
+							Output: cmd.res,
+						})
+					}
+					_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+					return nil
 				}
-				gwPod.Spec.HostNetwork = true
-				t.baseCmds(fExec)
-				fakeOvn.start(ctx,
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespaceT, namespaceX,
-						},
-					},
-					&v1.PodList{
-						Items: []v1.Pod{
-							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
-						},
-					},
-				)
-				t.populateLogicalSwitchCache(fakeOvn)
-				injectNode(fakeOvn)
-				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    nbctlCommand,
-					Output: "\n",
-				})
-				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-				return nil
-			}
 
-			err := app.Run([]string{app.Name})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("No BFD", false, "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1"),
-			table.Entry("BFD", true, "ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1"),
+				err := app.Run([]string{app.Name})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			}, table.Entry("No BFD", false,
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1", "\n"},
+				},
+			),
+			table.Entry("BFD Enabled", true,
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.1\"", "bfduuid\n"},
+					{"ovn-nbctl --timeout=15 --may-exist --bfd=bfduuid --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1", "\n"},
+				},
+			),
 		)
 
-		table.DescribeTable("reconciles a multus networked pod acting as a exgw for another namespace for new pod", func(bfd bool, nbctlCommand string) {
-			app.Action = func(ctx *cli.Context) error {
-				ns := nettypes.NetworkStatus{Name: "dummy", IPs: []string{"11.0.0.1"}}
-				networkStatuses := []nettypes.NetworkStatus{ns}
-				nsEncoded, err := json.Marshal(networkStatuses)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		table.DescribeTable("reconciles a multus networked pod acting as a exgw for another namespace for new pod",
+			func(bfd bool, expectedNbctl []struct {
+				command string
+				res     string
+			}) {
+				app.Action = func(ctx *cli.Context) error {
+					ns := nettypes.NetworkStatus{Name: "dummy", IPs: []string{"11.0.0.1"}}
+					networkStatuses := []nettypes.NetworkStatus{ns}
+					nsEncoded, err := json.Marshal(networkStatuses)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				namespaceT := *newNamespace("namespace1")
-				namespaceX := *newNamespace("namespace2")
-				t := newTPod(
-					"node1",
-					"10.128.1.0/24",
-					"10.128.1.2",
-					"10.128.1.1",
-					"myPod",
-					"10.128.1.3",
-					"0a:58:0a:80:01:03",
-					namespaceT.Name,
-				)
-				gwPod := *newPod(namespaceX.Name, "gwPod", "node2", "9.0.0.1")
-				gwPod.Annotations = map[string]string{
-					"k8s.ovn.org/routing-namespaces":    namespaceT.Name,
-					"k8s.ovn.org/routing-network":       "dummy",
-					"k8s.v1.cni.cncf.io/network-status": string(nsEncoded),
-				}
-				if bfd {
-					gwPod.Annotations["k8s.ovn.org/bfd-enabled"] = ""
-				}
-				gwPod.Spec.HostNetwork = true
-				t.baseCmds(fExec)
-				fakeOvn.start(ctx,
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespaceT, namespaceX,
+					namespaceT := *newNamespace("namespace1")
+					namespaceX := *newNamespace("namespace2")
+					t := newTPod(
+						"node1",
+						"10.128.1.0/24",
+						"10.128.1.2",
+						"10.128.1.1",
+						"myPod",
+						"10.128.1.3",
+						"0a:58:0a:80:01:03",
+						namespaceT.Name,
+					)
+					gwPod := *newPod(namespaceX.Name, "gwPod", "node2", "9.0.0.1")
+					gwPod.Annotations = map[string]string{
+						"k8s.ovn.org/routing-namespaces":    namespaceT.Name,
+						"k8s.ovn.org/routing-network":       "dummy",
+						"k8s.v1.cni.cncf.io/network-status": string(nsEncoded),
+					}
+					if bfd {
+						gwPod.Annotations["k8s.ovn.org/bfd-enabled"] = ""
+					}
+					gwPod.Spec.HostNetwork = true
+					t.baseCmds(fExec)
+					fakeOvn.start(ctx,
+						&v1.NamespaceList{
+							Items: []v1.Namespace{
+								namespaceT, namespaceX,
+							},
 						},
-					},
-					&v1.PodList{
-						Items: []v1.Pod{
-							gwPod,
+						&v1.PodList{
+							Items: []v1.Pod{
+								gwPod,
+							},
 						},
-					},
-				)
-				t.populateLogicalSwitchCache(fakeOvn)
-				injectNode(fakeOvn)
-				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
-				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    nbctlCommand,
-					Output: "\n",
-				})
-				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.CreateOptions{})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
-				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-				return nil
-			}
+					)
+					t.populateLogicalSwitchCache(fakeOvn)
+					injectNode(fakeOvn)
+					fakeOvn.controller.WatchNamespaces()
+					fakeOvn.controller.WatchPods()
+					for _, cmd := range expectedNbctl {
+						fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+							Cmd:    cmd.command,
+							Output: cmd.res,
+						})
+					}
+					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.CreateOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+					gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+					return nil
+				}
 
-			err := app.Run([]string{app.Name})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		}, table.Entry("No BFD", false, "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 11.0.0.1 rtoe-GR_node1"),
-			table.Entry("BFD", true, "ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 11.0.0.1 rtoe-GR_node1"),
+				err := app.Run([]string{app.Name})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			}, table.Entry("No BFD", false,
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 11.0.0.1 rtoe-GR_node1", "\n"},
+				},
+			),
+			table.Entry("BFD Enabled", true,
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"11.0.0.1\"", "bfduuid\n"},
+					{"ovn-nbctl --timeout=15 --may-exist --bfd=bfduuid --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 11.0.0.1 rtoe-GR_node1", "\n"},
+				},
+			),
 		)
 
 		table.DescribeTable("reconciles deleting a host networked pod acting as a exgw for another namespace for existing pod",
 			func(bfd bool,
-				nbctlCommand string,
+				nbctlOnAddCommands []struct {
+					command string
+					res     string
+				},
 				nbctlOnDelCommands []struct {
 					command string
 					res     string
@@ -712,10 +872,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					fakeOvn.controller.WatchNamespaces()
 					fakeOvn.controller.WatchPods()
 					gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-					fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd:    nbctlCommand,
-						Output: "\n",
-					})
+					for _, c := range nbctlOnAddCommands {
+						fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+							Cmd:    c.command,
+							Output: c.res,
+						})
+					}
 					_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
@@ -737,7 +899,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
 			table.Entry("No BFD", false,
-				"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1", "\n"},
+				},
 				[]struct {
 					command string
 					res     string
@@ -746,7 +913,14 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.1\" bfd!=[]", "\n"},
 					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.1\"", "\n"},
 				}),
-			table.Entry("BFD", true, "ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
+			table.Entry("BFD Enabled", true,
+				[]struct {
+					command string
+					res     string
+				}{
+					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.1\"", "bfduuid\n"},
+					{"ovn-nbctl --timeout=15 --may-exist --bfd=bfduuid --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1", "\n"},
+				},
 				[]struct {
 					command string
 					res     string
@@ -754,7 +928,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					{"ovn-nbctl --timeout=15 --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1", "\n"},
 					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=bfd find Logical_Router_Static_Route output_port=rtoe-GR_node1 nexthop=\"9.0.0.1\" bfd!=[]", "\n"},
 					{"ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.1\"", "\n"},
-				}))
+				}),
+		)
 	})
 	ginkgo.Context("on using bfd", func() {
 		ginkgo.It("should enable bfd only on the namespace gw when set", func() {
@@ -793,7 +968,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.1\"",
+					Output: "bfduuid\n",
+				})
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --may-exist --bfd=bfduuid --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
 					Output: "\n",
 				})
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -853,7 +1032,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					Output: "\n",
 				})
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 10.0.0.1 rtoe-GR_node1",
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"10.0.0.1\"",
+					Output: "bfduuid\n",
+				})
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --may-exist --bfd=bfduuid --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 10.0.0.1 rtoe-GR_node1",
 					Output: "\n",
 				})
 				injectNode(fakeOvn)
@@ -900,7 +1083,11 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --may-exist --bfd --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find BFD logical_port=rtoe-GR_node1 dst_ip=\"9.0.0.1\"",
+					Output: "bfduuid\n",
+				})
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --may-exist --bfd=bfduuid --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1 rtoe-GR_node1",
 					Output: "\n",
 				})
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{

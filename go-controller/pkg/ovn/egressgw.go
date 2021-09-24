@@ -144,7 +144,17 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 				nbctlArgs := []string{"--may-exist", "--policy=src-ip", "--ecmp-symmetric-reply",
 					"lr-route-add", gr, podIP.IP + mask, gw.String(), port}
 				if egress.bfdEnabled {
-					nbctlArgs = []string{"--may-exist", "--bfd", "--policy=src-ip", "--ecmp-symmetric-reply",
+					uuid, stderr, err := util.RunOVNNbctl(
+						"--format=csv", "--data=bare", "--no-heading", "--columns=_uuid", "find", "BFD", "logical_port="+port, "dst_ip=\""+gw.String()+"\"")
+					if err != nil {
+						return fmt.Errorf("failed to list bfd for %s, stderr: %q, (%v)", gr, err, stderr)
+					} else if uuid == "" {
+						uuid, stderr, err = util.RunOVNNbctl("create", "BFD", "logical_port="+port, "dst_ip=\""+gw.String()+"\"")
+						if err != nil {
+							return fmt.Errorf("failed to create BFD for %s, stderr: %q, (%v)", gr, err, stderr)
+						}
+					}
+					nbctlArgs = []string{"--may-exist", "--bfd=" + uuid, "--policy=src-ip", "--ecmp-symmetric-reply",
 						"lr-route-add", gr, podIP.IP + mask, gw.String(), port}
 				}
 
@@ -353,7 +363,17 @@ func (oc *Controller) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddrs []*n
 					nbctlArgs := []string{"--may-exist", "--policy=src-ip", "--ecmp-symmetric-reply",
 						"lr-route-add", gr, podIP + mask, gw.String(), port}
 					if gateway.bfdEnabled {
-						nbctlArgs = []string{"--may-exist", "--bfd", "--policy=src-ip", "--ecmp-symmetric-reply",
+						uuid, stderr, err := util.RunOVNNbctl(
+							"--format=csv", "--data=bare", "--no-heading", "--columns=_uuid", "find", "BFD", "logical_port="+port, "dst_ip=\""+gw.String()+"\"")
+						if err != nil {
+							return fmt.Errorf("failed to list bfd for %s, stderr: %q, (%v)", gr, err, stderr)
+						} else if uuid == "" {
+							uuid, stderr, err = util.RunOVNNbctl("create", "BFD", "logical_port="+port, "dst_ip=\""+gw.String()+"\"")
+							if err != nil {
+								return fmt.Errorf("failed to create BFD for %s, stderr: %q, (%v)", gr, err, stderr)
+							}
+						}
+						nbctlArgs = []string{"--may-exist", "--bfd=" + uuid, "--policy=src-ip", "--ecmp-symmetric-reply",
 							"lr-route-add", gr, podIP + mask, gw.String(), port}
 					}
 					_, stderr, err := util.RunOVNNbctl(nbctlArgs...)
