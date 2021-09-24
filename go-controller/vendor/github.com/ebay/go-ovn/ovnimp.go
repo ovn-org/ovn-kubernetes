@@ -322,13 +322,22 @@ func (odbi *ovndb) signalDelete(table, uuid string) {
 	}
 }
 
+func (odbi *ovndb) requestDisconnect() {
+	select {
+	case odbi.disconnSig <- struct{}{}:
+		klog.V(5).Infof("Requested disconnect from follower")
+	default:
+		klog.V(5).Infof("Disconnect from follower already requested")
+	}
+}
+
 func (odbi *ovndb) disconnectIfFollower(table, uuid string) {
 	if table == TableDatabase && odbi.leaderOnly && !odbi.serverIsLeader() {
 		klog.Infof("Leader-only requested; disconnecting from follower %s...", odbi.endpoints[odbi.curEndpoint])
 		// Disconnect client and let the disconnect notification
 		// from libovsdb trigger our reconnect handler
 		odbi.nextEndpoint()
-		odbi.disconnect()
+		odbi.requestDisconnect()
 	}
 }
 

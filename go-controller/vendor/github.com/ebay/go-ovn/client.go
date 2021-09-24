@@ -285,6 +285,7 @@ var _ Client = &ovndb{}
 type ovndb struct {
 	client       *libovsdb.OvsdbClient
 	clientLock   sync.RWMutex
+	disconnSig   chan struct{}
 	cache        map[string]map[string]libovsdb.Row
 	cachemutex   sync.RWMutex
 	tranmutex    sync.RWMutex
@@ -434,6 +435,7 @@ func NewClient(cfg *Config) (Client, error) {
 	ovndb := &ovndb{
 		signalCB:     cfg.SignalCB,
 		disconnectCB: cfg.DisconnectCB,
+		disconnSig:   make(chan struct{}, 1),
 		db:           db,
 		tableCols:    cfg.TableCols,
 		cfgTableCols: cfg.TableCols,
@@ -443,12 +445,22 @@ func NewClient(cfg *Config) (Client, error) {
 		reconn:       cfg.Reconnect,
 		currentTxn:   ZERO_TRANSACTION,
 		leaderOnly:   cfg.LeaderOnly,
-		timeout:         cfg.Timeout,
+		timeout:      cfg.Timeout,
 	}
 
 	if cfg.Timeout == 0 {
 		cfg.Timeout = time.Minute
 	}
+
+	// handle disconnect for incoming messages when not leader
+	go func(){
+		for {
+			select {
+			case <-ovndb.disconnSig:
+				ovndb.disconnect()
+			}
+		}
+	}()
 
 	err := ovndb.connect()
 	if err != nil {
