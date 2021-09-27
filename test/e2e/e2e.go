@@ -459,7 +459,10 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 	var svcname = "nettest"
 
 	f := framework.NewDefaultFramework(svcname)
-	var numMasters int
+	var (
+		extDNSIP   string
+		numMasters int
+	)
 
 	ginkgo.BeforeEach(func() {
 		// Assert basic external connectivity.
@@ -479,15 +482,19 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		})
 		framework.ExpectNoError(err)
 		numMasters = len(masterPods.Items)
+		extDNSIP = "8.8.8.8"
+		if IsIPv6Cluster(f.ClientSet) {
+			extDNSIP = "2001:4860:4860::8888"
+		}
 	})
 
 	ginkgo.It("should provide Internet connection continuously when ovn-k8s pod is killed", func() {
-		ginkgo.By("Running container which tries to connect to 8.8.8.8 in a loop")
+		ginkgo.By(fmt.Sprintf("Running container which tries to connect to %s in a loop", extDNSIP))
 
 		podChan, errChan := make(chan *v1.Pod), make(chan error)
 		go func() {
 			defer ginkgo.GinkgoRecover()
-			checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, 30, podChan, errChan)
+			checkContinuousConnectivity(f, "", "connectivity-test-continuous", extDNSIP, 53, 30, 30, podChan, errChan)
 		}()
 
 		testPod := <-podChan
@@ -506,12 +513,12 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 	})
 
 	ginkgo.It("should provide Internet connection continuously when master is killed", func() {
-		ginkgo.By("Running container which tries to connect to 8.8.8.8 in a loop")
+		ginkgo.By(fmt.Sprintf("Running container which tries to connect to %s in a loop", extDNSIP))
 
 		podChan, errChan := make(chan *v1.Pod), make(chan error)
 		go func() {
 			defer ginkgo.GinkgoRecover()
-			checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, 30, podChan, errChan)
+			checkContinuousConnectivity(f, "", "connectivity-test-continuous", extDNSIP, 53, 30, 30, podChan, errChan)
 		}()
 		testPod := <-podChan
 		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
@@ -1488,10 +1495,8 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway and update validation", 
 // is properly handled as defined in the crd configuration in the test.
 var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 	const (
-		svcname                string = "egress-firewall-policy"
-		exFWPermitTcpDnsDest   string = "8.8.8.8"
-		exFWDenyTcpDnsDest     string = "8.8.4.4"
-		exFWPermitTcpWwwDest   string = "1.1.1.1"
+		svcname string = "egress-firewall-policy"
+
 		ovnContainer           string = "ovnkube-node"
 		egressFirewallYamlFile string = "egress-fw.yml"
 		testTimeout            string = "5"
@@ -1505,7 +1510,13 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 	}
 
 	var (
-		serverNodeInfo nodeInfo
+		serverNodeInfo       nodeInfo
+		exFWPermitTcpDnsDest string
+		singleIPMask         string
+		exFWDenyTcpDnsDest   string
+		exFWPermitTcpWwwDest string
+		exFWPermitCIDR       string
+		exFWDenyCIDR         string
 	)
 
 	f := framework.NewDefaultFramework(svcname)
@@ -1525,6 +1536,21 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 		serverNodeInfo = nodeInfo{
 			name:   nodes.Items[1].Name,
 			nodeIP: ips[1],
+		}
+
+		exFWPermitTcpDnsDest = "8.8.8.8"
+		exFWDenyTcpDnsDest = "8.8.4.4"
+		exFWPermitTcpWwwDest = "1.1.1.1"
+		exFWPermitCIDR = "1.1.1.0/24"
+		exFWDenyCIDR = "0.0.0.0/0"
+		singleIPMask = "32"
+		if IsIPv6Cluster(f.ClientSet) {
+			exFWPermitTcpDnsDest = "2001:4860:4860::8888"
+			exFWDenyTcpDnsDest = "2001:4860:4860::8844"
+			exFWPermitTcpWwwDest = "2606:4700:4700::1111"
+			exFWPermitCIDR = "2606:4700:4700::/64"
+			exFWDenyCIDR = "::/0"
+			singleIPMask = "128"
 		}
 	})
 
@@ -1546,17 +1572,17 @@ spec:
   egress:
   - type: Allow
     to:
-      cidrSelector: 8.8.8.8/32
+      cidrSelector: %s/%s
   - type: Allow
     to:
-      cidrSelector: 1.1.1.0/24
+      cidrSelector: %s
     ports:
       - protocol: TCP
         port: 80
   - type: Deny
     to:
-      cidrSelector: 0.0.0.0/0
-`, f.Namespace.Name)
+      cidrSelector: %s
+`, f.Namespace.Name, exFWPermitTcpDnsDest, singleIPMask, exFWPermitCIDR, exFWDenyCIDR)
 		// write the config to a file for application and defer the removal
 		if err := ioutil.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
@@ -1628,7 +1654,7 @@ spec:
   egress:
   - type: Allow
     to:
-      cidrSelector: 8.8.8.8/32
+      cidrSelector: %s/%s
   - type: Allow
     to:
       dnsName: www.test1.com
@@ -1667,14 +1693,14 @@ spec:
       dnsName: www.test12.com
   - type: Allow
     to:
-      cidrSelector: 1.1.1.0/24
+      cidrSelector: %s
     ports:
       - protocol: TCP
         port: 80
   - type: Deny
     to:
-      cidrSelector: 0.0.0.0/0
-`, f.Namespace.Name)
+      cidrSelector: %s
+`, f.Namespace.Name, exFWPermitTcpDnsDest, singleIPMask, exFWPermitCIDR, exFWDenyCIDR)
 		// write the config to a file for application and defer the removal
 		if err := ioutil.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
 			framework.Failf("Unable to write CRD config to disk: %v", err)
