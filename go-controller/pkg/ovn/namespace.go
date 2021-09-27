@@ -289,7 +289,8 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 				}
 			}
 		} else {
-			oc.deleteGWRoutesForNamespace(nsInfo)
+			oc.deleteGWRoutesForNamespace(old.Name)
+			nsInfo.routingExternalGWs = gatewayInfo{}
 		}
 		exGateways, err := parseRoutingExternalGWAnnotation(gwAnnotation)
 		if err != nil {
@@ -349,7 +350,7 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 		delete(nsInfo.networkPolicies, np.name)
 		oc.destroyNetworkPolicy(np, nsInfo)
 	}
-	oc.deleteGWRoutesForNamespace(nsInfo)
+	oc.deleteGWRoutesForNamespace(ns.Name)
 	oc.multicastDeleteNamespace(ns, nsInfo)
 }
 
@@ -414,7 +415,6 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool) (*namespac
 	if nsInfo == nil {
 		nsInfo = &namespaceInfo{
 			networkPolicies:       make(map[string]*networkPolicy),
-			podExternalRoutes:     make(map[string]map[string]string),
 			multicastEnabled:      false,
 			routingExternalPodGWs: make(map[string]gatewayInfo),
 		}
