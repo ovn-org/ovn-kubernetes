@@ -306,7 +306,7 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 		gw, err = newLocalGateway(n.name, subnets, gatewayNextHops, gatewayIntf, nodeAnnotator, n.recorder, managementPortConfig)
 	case config.GatewayModeShared:
 		klog.Info("Preparing Shared Gateway")
-		gw, err = newSharedGateway(n.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
+		gw, err = newSharedGateway(n.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator, n.Kube,
 			managementPortConfig, n.watchFactory)
 	case config.GatewayModeDisabled:
 		var chassisID string
@@ -331,10 +331,6 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	// value is nil. so, you cannot directly set the value to an interface and later check if
 	// value was nil by comparing the interface to nil. this is because if the value is `nil`,
 	// then the interface will still hold the type of the value being set.
-
-	if config.Gateway.Mode == config.GatewayModeShared && config.OvnKubeNode.Mode == types.NodeModeFull {
-		gw.nodeIPManager = newAddressManager(nodeAnnotator, managementPortConfig)
-	}
 
 	if loadBalancerHealthChecker != nil {
 		gw.loadBalancerHealthChecker = loadBalancerHealthChecker
