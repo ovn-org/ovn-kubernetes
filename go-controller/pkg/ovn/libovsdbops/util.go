@@ -11,6 +11,7 @@ import (
 	libovsdbmodel "github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 const (
@@ -38,7 +39,10 @@ func TransactAndCheck(client client.Client, ops []ovsdb.Operation) ([]ovsdb.Oper
 		return []ovsdb.OperationResult{{}}, nil
 	}
 
-	results, err := client.Transact(context.TODO(), ops...)
+	ctx, cancel := context.WithTimeout(context.TODO(), util.OVSDBTimeout)
+	defer cancel()
+
+	results, err := client.Transact(ctx, ops...)
 	if err != nil {
 		return nil, fmt.Errorf("error in transact with ops %+v: %v", ops, err)
 	}
