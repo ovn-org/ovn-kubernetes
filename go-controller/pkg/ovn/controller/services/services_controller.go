@@ -91,7 +91,7 @@ func NewController(client clientset.Interface,
 	c.eventRecorder = recorder
 
 	// repair controller
-	c.repair = newRepair(serviceInformer.Lister())
+	c.repair = newRepair(serviceInformer.Lister(), nbClient)
 
 	// load balancers need to be applied to nodes, so
 	// we need to watch Node objects for changes.
@@ -151,7 +151,7 @@ type Controller struct {
 
 // Run will not return until stopCh is closed. workers determines how many
 // endpoints will be handled in parallel.
-func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair bool, clusterPortGroupUUID string) error {
+func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair bool) error {
 	defer utilruntime.HandleCrash()
 	defer c.queue.ShutDown()
 
@@ -168,7 +168,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair bool, cl
 		// Run the repair controller only once
 		// it keeps in sync Kubernetes and OVN
 		// and handles removal of stale data on upgrades
-		c.repair.runBeforeSync(clusterPortGroupUUID)
+		c.repair.runBeforeSync()
 	}
 	// Start the workers after the repair loop to avoid races
 	klog.Info("Starting workers")

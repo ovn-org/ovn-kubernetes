@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/acl"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
@@ -42,18 +43,21 @@ type repair struct {
 
 	// Really a boolean, but an int32 for atomicity purposes
 	semLegacyLBsDeleted uint32
+
+	nbClient libovsdbclient.Client
 }
 
 // NewRepair creates a controller that periodically ensures that there is no stale data in OVN
-func newRepair(serviceLister corelisters.ServiceLister) *repair {
+func newRepair(serviceLister corelisters.ServiceLister, nbClient libovsdbclient.Client) *repair {
 	return &repair{
 		serviceLister:    serviceLister,
 		unsyncedServices: sets.String{},
+		nbClient:         nbClient,
 	}
 }
 
 // runBeforeSync performs some cleanup of stale LBs and other miscellaneous setup.
-func (r *repair) runBeforeSync(clusterPortGroupUUID string) {
+func (r *repair) runBeforeSync() {
 	// no need to lock, single-threaded.
 
 	startTime := time.Now()
@@ -111,7 +115,7 @@ func (r *repair) runBeforeSync(clusterPortGroupUUID string) {
 
 	// Remove existing reject rules. They are not used anymore
 	// given the introduction of idling loadbalancers
-	err = acl.PurgeRejectRules(clusterPortGroupUUID)
+	err = acl.PurgeRejectRules(r.nbClient)
 	if err != nil {
 		klog.Errorf("Failed to purge existing reject rules: %v", err)
 	}
