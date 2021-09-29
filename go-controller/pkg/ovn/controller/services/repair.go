@@ -83,7 +83,7 @@ func (r *repair) runBeforeSync() {
 	}
 
 	// Find all load-balancers associated with Services
-	lbCache, err := ovnlb.GetLBCache()
+	lbCache, err := ovnlb.GetLBCache(r.nbClient)
 	if err != nil {
 		klog.Errorf("Failed to get load_balancer cache: %v", err)
 	}
@@ -108,7 +108,7 @@ func (r *repair) runBeforeSync() {
 	}
 
 	// Delete those stale load balancers
-	if err := ovnlb.DeleteLBs(nil, staleLBs); err != nil {
+	if err := ovnlb.DeleteLBs(r.nbClient, staleLBs); err != nil {
 		klog.Errorf("Failed to delete stale LBs: %v", err)
 	}
 	klog.V(2).Infof("Deleted %d stale service LBs", len(staleLBs))
@@ -153,7 +153,7 @@ func (r *repair) runAfterSync() {
 
 func (r *repair) deleteLegacyLBs() error {
 	// Find all load-balancers associated with Services
-	legacyLBs, err := findLegacyLBs()
+	legacyLBs, err := findLegacyLBs(r.nbClient)
 	if err != nil {
 		klog.Errorf("Failed to list existing load balancers: %v", err)
 		return err

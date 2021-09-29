@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/google/uuid"
 	"github.com/ovn-org/libovsdb/cache"
@@ -322,9 +323,20 @@ func (o *OvsdbServer) Mutate(database, table string, where []ovsdb.Condition, mu
 		}
 		for _, mutation := range mutations {
 			column := schema.Column(mutation.Column)
-			nativeValue, err := ovsdb.OvsToNative(column, mutation.Value)
-			if err != nil {
-				panic(err)
+			var nativeValue interface{}
+			// Usually a mutation value is of the same type of the value being mutated
+			// except for delete mutation of maps where it can also be a list of same type of
+			// keys (rfc7047 5.1). Handle this special case here.
+			if mutation.Mutator == "delete" && column.Type == ovsdb.TypeMap && reflect.TypeOf(mutation.Value) != reflect.TypeOf(ovsdb.OvsMap{}) {
+				nativeValue, err = ovsdb.OvsToNativeSlice(column.TypeObj.Key.Type, mutation.Value)
+				if err != nil {
+					panic(err)
+				}
+			} else {
+				nativeValue, err = ovsdb.OvsToNative(column, mutation.Value)
+				if err != nil {
+					panic(err)
+				}
 			}
 			if err := ovsdb.ValidateMutation(column, mutation.Mutator, nativeValue); err != nil {
 				panic(err)

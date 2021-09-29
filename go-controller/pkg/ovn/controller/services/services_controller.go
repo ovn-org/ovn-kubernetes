@@ -264,7 +264,7 @@ func (c *Controller) syncService(key string) error {
 			},
 		}
 
-		if err := ovnlb.EnsureLBs(util.ExternalIDsForObject(service), nil); err != nil {
+		if err := ovnlb.EnsureLBs(c.nbClient, util.ExternalIDsForObject(service), nil); err != nil {
 			return fmt.Errorf("failed to delete load balancers for service %s/%s: %w",
 				namespace, name, err)
 		}
@@ -297,6 +297,8 @@ func (c *Controller) syncService(key string) error {
 	nodeInfos := c.nodeTracker.allNodes()
 	clusterLBs := buildClusterLBs(service, clusterConfigs, nodeInfos)
 	perNodeLBs := buildPerNodeLBs(service, perNodeConfigs, nodeInfos)
+	klog.V(5).Infof("Built service %s cluster-wide LB %#v", key, clusterLBs)
+	klog.V(5).Infof("Built service %s per-node LB %#v", key, perNodeLBs)
 	klog.V(3).Infof("Service %s has %d cluster-wide and %d per-node configs, making %d and %d load balancers",
 		key, len(clusterConfigs), len(perNodeConfigs), len(clusterLBs), len(perNodeLBs))
 	lbs := append(clusterLBs, perNodeLBs...)
@@ -312,7 +314,7 @@ func (c *Controller) syncService(key string) error {
 		//
 		// Note: this may fail if a node was deleted between listing nodes and applying.
 		// If so, this will fail and we will resync.
-		if err := ovnlb.EnsureLBs(util.ExternalIDsForObject(service), lbs); err != nil {
+		if err := ovnlb.EnsureLBs(c.nbClient, util.ExternalIDsForObject(service), lbs); err != nil {
 			return fmt.Errorf("failed to ensure service %s load balancers: %w", key, err)
 		}
 
@@ -322,7 +324,7 @@ func (c *Controller) syncService(key string) error {
 	}
 
 	if !c.repair.legacyLBsDeleted() {
-		if err := deleteServiceFromLegacyLBs(service); err != nil {
+		if err := deleteServiceFromLegacyLBs(c.nbClient, service); err != nil {
 			klog.Warningf("Failed to delete legacy vips for service %s: %v", key)
 			// Continue anyways, because once all services are synced, we'll delete
 			// the legacy load balancers
