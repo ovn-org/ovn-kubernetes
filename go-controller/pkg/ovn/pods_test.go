@@ -12,7 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
-	ovstypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -167,7 +167,7 @@ func setPodAnnotations(podObj *v1.Pod, testPod testPod) {
 }
 
 func getLogicalSwitchUUID(client libovsdbclient.Client, name string) string {
-	ctext, cancel := context.WithTimeout(context.Background(), ovstypes.OVSDBTimeout)
+	ctext, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
 	defer cancel()
 	lsl := []nbdb.LogicalSwitch{}
 	err := client.WhereCache(
@@ -294,7 +294,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					},
 				)
 
-				ctext, cancel := context.WithTimeout(context.Background(), ovstypes.OVSDBTimeout)
+				ctext, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
 				defer cancel()
 				lsl := []nbdb.LogicalSwitch{}
 				err := fakeOvn.controller.nbClient.WhereCache(
@@ -613,7 +613,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				// sleep a small amount to ensure the event was processed
 				time.Sleep(time.Second)
 				// try to allocate the IP and it should not work
-				annotation, err := util.UnmarshalPodAnnotation(myPod2.Annotations)
+				annotation, err := util.UnmarshalPodAnnotation(myPod2.Annotations, ovntypes.DefaultNetworkName)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.lsManager.AllocateIPs(t.nodeName, annotation.IPs)
 				gomega.Expect(err).To(gomega.Equal(ipallocator.ErrAllocated))
@@ -809,11 +809,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				fakeOvn.controller.WatchPods()
 
 				// sleep long enough for TransactWithRetry to fail, causing pod add to fail
-				time.Sleep(ovstypes.OVSDBTimeout + time.Second)
+				time.Sleep(ovntypes.OVSDBTimeout + time.Second)
 
 				// check to see if the pod retry cache has an entry for this policy
 				checkRetryObjectEventually(key, true, fakeOvn.controller.retryPods)
-				connCtx, cancel := context.WithTimeout(context.Background(), ovstypes.OVSDBTimeout)
+				connCtx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
 
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
@@ -883,11 +883,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// sleep long enough for TransactWithRetry to fail, causing pod delete to fail
-				time.Sleep(ovstypes.OVSDBTimeout + time.Second)
+				time.Sleep(ovntypes.OVSDBTimeout + time.Second)
 
 				// check to see if the pod retry cache has an entry for this pod
 				checkRetryObjectEventually(key, true, fakeOvn.controller.retryPods)
-				connCtx, cancel := context.WithTimeout(context.Background(), ovstypes.OVSDBTimeout)
+				connCtx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
 
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
@@ -951,7 +951,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				// trigger pod add, which will fail with "context deadline exceeded: while awaiting reconnection"
 				fakeOvn.controller.WatchPods()
 				// sleep long enough for TransactWithRetry to fail, causing pod add to fail
-				time.Sleep(ovstypes.OVSDBTimeout + time.Second)
+				time.Sleep(ovntypes.OVSDBTimeout + time.Second)
 
 				// wait until retry entry appears
 				checkRetryObjectEventually(key, true, fakeOvn.controller.retryPods)
@@ -976,7 +976,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				// restore nbdb, trigger a retry and verify that the retry entry gets deleted
 				// because it reached maxFailedAttempts and the corresponding pod has NOT been added to OVN
-				connCtx, cancel := context.WithTimeout(context.Background(), ovstypes.OVSDBTimeout)
+				connCtx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
 
@@ -1055,7 +1055,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// sleep long enough for TransactWithRetry to fail, causing pod delete to fail
-				time.Sleep(ovstypes.OVSDBTimeout + time.Second)
+				time.Sleep(ovntypes.OVSDBTimeout + time.Second)
 
 				// wait until retry entry appears
 				checkRetryObjectEventually(key, true, fakeOvn.controller.retryPods)
@@ -1079,7 +1079,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				// restore nbdb and verify that the retry entry gets deleted because it reached
 				// maxFailedAttempts and the corresponding pod has NOT been deleted from OVN
-				connCtx, cancel := context.WithTimeout(context.Background(), ovstypes.OVSDBTimeout)
+				connCtx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
 
