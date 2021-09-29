@@ -288,7 +288,7 @@ func getOVNIfUpCheckMode() (bool, error) {
 	}
 	if _, stderr, err := util.RunOVNSbctl("--columns=up", "list", "Port_Binding"); err != nil {
 		if strings.Contains(stderr, "does not contain a column") {
-			klog.Infof("Falling back to using legacy CNI OVS flow readiness checks")
+			klog.Infof("Falling back to using legacy OVS flow readiness checks")
 			return false, nil
 		}
 		return false, fmt.Errorf("failed to check if port_binding is supported in OVN, stderr: %q, error: %v",
@@ -367,12 +367,18 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	}
 	klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, util.JoinIPNets(subnets, ","))
 
-	// Create CNI Server
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+		if _, err = isOVNControllerReady(n.name); err != nil {
+			return err
+		}
 		isOvnUpEnabled, err = getOVNIfUpCheckMode()
 		if err != nil {
 			return err
 		}
+	}
+
+	// Create CNI Server
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
 		kclient, ok := n.Kube.(*kube.Kube)
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
@@ -384,12 +390,6 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	}
 
 	// Setup Management port and gateway
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
-		if _, err = isOVNControllerReady(n.name); err != nil {
-			return err
-		}
-	}
-
 	mgmtPort = NewManagementPort(n.name, subnets)
 	nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node)
 	waiter := newStartupWaiter()
