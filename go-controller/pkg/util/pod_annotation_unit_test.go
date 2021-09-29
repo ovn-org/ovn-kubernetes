@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 )
@@ -20,19 +21,19 @@ func TestMarshalPodAnnotation(t *testing.T) {
 		inpPodAnnot    PodAnnotation
 		errAssert      bool  // used when an error string CANNOT be matched or sub-matched
 		errMatch       error //used when an error string CAN be matched or sub-matched
-		expectedOutput map[string]interface{}
+		expectedOutput map[string]string
 	}{
 		{
 			desc:           "PodAnnotation instance with no fields set",
 			inpPodAnnot:    PodAnnotation{},
-			expectedOutput: map[string]interface{}{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":""}}`},
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":""}}`},
 		},
 		{
 			desc: "single IP assigned to pod with MAC, Gateway, Routes NOT SPECIFIED",
 			inpPodAnnot: PodAnnotation{
 				IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/24")},
 			},
-			expectedOutput: map[string]interface{}{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"","ip_address":"192.168.0.5/24"}}`},
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"","ip_address":"192.168.0.5/24"}}`},
 		},
 		{
 			desc: "multiple IPs assigned to pod with MAC, Gateway, Routes NOT SPECIFIED",
@@ -42,7 +43,7 @@ func TestMarshalPodAnnotation(t *testing.T) {
 					ovntest.MustParseIPNet("fd01::1234/64"),
 				},
 			},
-			expectedOutput: map[string]interface{}{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24","fd01::1234/64"],"mac_address":""}}`},
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24","fd01::1234/64"],"mac_address":""}}`},
 		},
 		{
 			desc: "test code path when podInfo.Gateways count is equal to ONE",
@@ -52,7 +53,7 @@ func TestMarshalPodAnnotation(t *testing.T) {
 					net.ParseIP("192.168.0.1"),
 				},
 			},
-			expectedOutput: map[string]interface{}{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"","gateway_ips":["192.168.0.1"],"ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1"}}`},
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"","gateway_ips":["192.168.0.1"],"ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1"}}`},
 		},
 		{
 			desc:     "verify error thrown when number of gateways greater than one for a single-stack network",
@@ -87,7 +88,7 @@ func TestMarshalPodAnnotation(t *testing.T) {
 					},
 				},
 			},
-			expectedOutput: map[string]interface{}{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}]}}`},
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}]}}`},
 		},
 		{
 			desc: "next hop not set for route",
@@ -98,13 +99,14 @@ func TestMarshalPodAnnotation(t *testing.T) {
 					},
 				},
 			},
-			expectedOutput: map[string]interface{}{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","routes":[{"dest":"192.168.1.0/24","nextHop":""}]}}`},
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","routes":[{"dest":"192.168.1.0/24","nextHop":""}]}}`},
 		},
 	}
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, e := MarshalPodAnnotation(&tc.inpPodAnnot)
+			res := map[string]string{}
+			e := MarshalPodAnnotation(&res, &tc.inpPodAnnot, types.DefaultNetworkName)
 			t.Log(res, e)
 			if tc.errAssert {
 				assert.Error(t, e)
@@ -199,7 +201,7 @@ func TestUnmarshalPodAnnotation(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, e := UnmarshalPodAnnotation(tc.inpAnnotMap)
+			res, e := UnmarshalPodAnnotation(tc.inpAnnotMap, types.DefaultNetworkName)
 			t.Log(res, e)
 			if tc.errAssert {
 				assert.Error(t, e)

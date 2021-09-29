@@ -6,15 +6,15 @@ import (
 	"net"
 	"time"
 
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -40,7 +40,7 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 		if !ok {
 			return fmt.Errorf("spurious object in syncPods: %v", podInterface)
 		}
-		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations)
+		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
 		if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && err == nil {
 			logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 			expectedLogicalPorts[logicalPort] = true
@@ -156,7 +156,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 
 		// Even if the port is not in the cache, IPs annotated in the Pod annotation may already be allocated,
 		// need to release them to avoid leakage.
-		annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
+		annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
 		if err == nil {
 			podIfAddrs := annotation.IPs
 			_ = oc.lsManager.ReleaseIPs(pod.Spec.NodeName, podIfAddrs)
@@ -379,7 +379,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// rescheduled.
 	lsp.Options["requested-chassis"] = pod.Spec.NodeName
 
-	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
+	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
 
 	// the IPs we allocate in this function need to be released back to the
 	// IPAM pool if there is some error in any step of addLogicalPort past
@@ -473,19 +473,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		if err != nil {
 			return err
 		}
-		var marshalledAnnotation map[string]interface{}
-		marshalledAnnotation, err = util.MarshalPodAnnotation(&podAnnotation)
-		if err != nil {
-			return fmt.Errorf("error creating pod network annotation: %v", err)
-		}
 
-		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s\nAnnotation=%s",
-			podIfAddrs, podMac, podAnnotation.Gateways, marshalledAnnotation)
+		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s",
+			podIfAddrs, podMac, podAnnotation.Gateways)
 		annoStart := time.Now()
-		err = oc.kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, marshalledAnnotation)
+		err = oc.updatePodAnnotationWithRetry(pod, &podAnnotation)
 		podAnnoTime = time.Since(annoStart)
 		if err != nil {
-			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
+			return err
 		}
 		releaseIPs = false
 	}
@@ -621,6 +616,27 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	// observe the pod creation latency metric.
 	metrics.RecordPodCreated(pod)
+	return nil
+}
+
+func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *util.PodAnnotation) error {
+	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		// Informer cache should not be mutated, so get a copy of the object
+		pod, err := oc.kube.GetPod(origPod.Namespace, origPod.Name)
+		if err != nil {
+			return err
+		}
+
+		cpod := pod.DeepCopy()
+		err = util.MarshalPodAnnotation(&cpod.Annotations, podInfo, ovntypes.DefaultNetworkName)
+		if err != nil {
+			return err
+		}
+		return oc.kube.UpdatePod(cpod)
+	})
+	if resultErr != nil {
+		return fmt.Errorf("failed to update annotation on pod %s/%s: %v", origPod.Namespace, origPod.Name, resultErr)
+	}
 	return nil
 }
 

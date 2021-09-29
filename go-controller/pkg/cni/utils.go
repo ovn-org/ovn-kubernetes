@@ -105,7 +105,7 @@ func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, k
 // PodAnnotation2PodInfo creates PodInterfaceInfo from Pod annotations and additional attributes
 func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, podUID, vfNetdevname string) (
 	*PodInterfaceInfo, error) {
-	podAnnotSt, err := util.UnmarshalPodAnnotation(podAnnotation)
+	podAnnotSt, err := util.UnmarshalPodAnnotation(podAnnotation, types.DefaultNetworkName)
 	if err != nil {
 		return nil, err
 	}
