@@ -8,6 +8,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -281,7 +282,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 				klog.Errorf("Failed to get all the pods (%v)", err)
 			}
 			for _, pod := range existingPods {
-				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
+				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, types.DefaultNetworkName)
 				if err != nil {
 					klog.Error(err.Error())
 				} else {
