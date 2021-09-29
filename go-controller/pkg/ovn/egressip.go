@@ -1515,7 +1515,7 @@ func (e *egressIPController) getGatewayRouterJoinIP(node string, wantsIPv6 bool)
 }
 
 func (e *egressIPController) getPodIPs(pod *kapi.Pod) ([]*net.IPNet, error) {
-	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, types.DefaultNetworkName)
 	if err != nil {
 		return nil, err
 	}

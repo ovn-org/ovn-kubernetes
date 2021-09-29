@@ -32,6 +32,7 @@ type Interface interface {
 	UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewall) error
 	UpdateEgressIP(eIP *egressipv1.EgressIP) error
 	UpdateNodeStatus(node *kapi.Node) error
+	UpdatePod(pod *kapi.Pod) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
 	GetNodes() (*kapi.NodeList, error)
 	GetEgressIP(name string) (*egressipv1.EgressIP, error)
@@ -39,6 +40,7 @@ type Interface interface {
 	GetEgressFirewalls() (*egressfirewall.EgressFirewallList, error)
 	GetNamespaces(labelSelector metav1.LabelSelector) (*kapi.NamespaceList, error)
 	GetPods(namespace string, labelSelector metav1.LabelSelector) (*kapi.PodList, error)
+	GetPod(namespace, name string) (*kapi.Pod, error)
 	GetNode(name string) (*kapi.Node, error)
 	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
 	CreateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error)
@@ -249,6 +251,13 @@ func (k *Kube) UpdateNodeStatus(node *kapi.Node) error {
 	return err
 }
 
+// UpdatePod update pod with provided pod data
+func (k *Kube) UpdatePod(pod *kapi.Pod) error {
+	klog.Infof("Updating pod %s/%s", pod.Namespace, pod.Name)
+	_, err := k.KClient.CoreV1().Pods(pod.Namespace).Update(context.TODO(), pod, metav1.UpdateOptions{})
+	return err
+}
+
 // GetAnnotationsOnPod obtains the pod annotations from kubernetes apiserver, given the name and namespace
 func (k *Kube) GetAnnotationsOnPod(namespace, name string) (map[string]string, error) {
 	pod, err := k.KClient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
@@ -270,6 +279,11 @@ func (k *Kube) GetPods(namespace string, labelSelector metav1.LabelSelector) (*k
 	return k.KClient.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
 		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
 	})
+}
+
+// GetPod obtains the pod from kubernetes apiserver, given the name and namespace
+func (k *Kube) GetPod(namespace, name string) (*kapi.Pod, error) {
+	return k.KClient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 }
 
 // GetNodes returns the list of all Node objects from kubernetes
