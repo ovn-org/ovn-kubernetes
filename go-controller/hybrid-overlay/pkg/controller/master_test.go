@@ -362,7 +362,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			updatedNode, err := k.GetNode(nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
-			nodeAnnotator := kube.NewNodeAnnotator(k, updatedNode)
+			nodeAnnotator := kube.NewNodeAnnotator(k, updatedNode.Name)
 			util.DeleteNodeHostSubnetAnnotation(nodeAnnotator)
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())

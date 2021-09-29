@@ -160,7 +160,7 @@ func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInt
 	// Update connection-status annotation
 	// TODO(adrianc): we should update Status in case of error as well
 	connStatus := util.SmartNICConnectionStatus{Status: util.SmartNicConnectionStatusReady, Reason: ""}
-	podAnnotator := kube.NewPodAnnotator(n.Kube, pod)
+	podAnnotator := kube.NewPodAnnotator(n.Kube, pod.Name, pod.Namespace)
 	err = connStatus.SetPodAnnotation(podAnnotator)
 	if err != nil {
 		// we should not get here

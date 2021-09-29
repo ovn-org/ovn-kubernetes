@@ -152,7 +152,7 @@ func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.No
 		existingNodes[node.Name] = true
 
 		// delete the obsoleted node-join-subnets annotation
-		err := oc.kube.SetAnnotationsOnNode(&node, map[string]interface{}{"k8s.ovn.org/node-join-subnets": nil})
+		err := oc.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{"k8s.ovn.org/node-join-subnets": nil})
 		if err != nil {
 			klog.Errorf("Failed to remove node-join-subnets annotation for node %s", node.Name)
 		}
@@ -860,7 +860,7 @@ func (oc *Controller) addNodeAnnotations(node *kapi.Node, hostSubnets []*net.IPN
 	// implementation where we can add the item back to the work queue when it fails to
 	// reconcile, we can get rid of the PollImmediate.
 	err = utilwait.PollImmediate(OvnNodeAnnotationRetryInterval, OvnNodeAnnotationRetryTimeout, func() (bool, error) {
-		err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
+		err = oc.kube.SetAnnotationsOnNode(node.Name, nodeAnnotations)
 		if err != nil {
 			klog.Warningf("Failed to set node annotation, will retry for: %v",
 				OvnNodeAnnotationRetryTimeout)

@@ -210,7 +210,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				_, err := fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &testNode, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient.KubeClient, fakeClient.EgressIPClient, fakeClient.EgressFirewallClient}, &testNode)
+				nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient.KubeClient, fakeClient.EgressIPClient, fakeClient.EgressFirewallClient}, testNode.Name)
 
 				ifaceID := node1.PhysicalBridgeName + "_" + node1.Name
 				vlanID := uint(1024)
