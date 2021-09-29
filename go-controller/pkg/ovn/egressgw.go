@@ -353,15 +353,18 @@ func (oc *Controller) deleteGWRoutesForNamespace(namespace string) {
 				}
 				mask := GetIPFullMask(podIP)
 				node := util.GetWorkerFromGatewayRouter(gr)
-				if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node, false); err != nil {
-					klog.Error(err)
-				}
 				_, stderr, err := util.RunOVNNbctl("--if-exists", "--policy=src-ip",
 					"lr-route-del", gr, podIP+mask, gw)
 				if err != nil {
 					klog.Errorf("Unable to delete src-ip route to GR router, stderr:%q, err:%v", stderr, err)
 				} else {
 					delete(routeInfo.podExternalRoutes[podIP], gw)
+				}
+
+				if entry := routeInfo.podExternalRoutes[podIP]; len(entry) == 0 {
+					if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node, false); err != nil {
+						klog.Error(err)
+					}
 				}
 
 				portPrefix, err := oc.extSwitchPrefix(node)
@@ -400,9 +403,6 @@ func (oc *Controller) deleteGWRoutesForPod(name ktypes.NamespacedName, podIPNets
 					continue
 				}
 
-				if err := oc.delHybridRoutePolicyForPod(podIPNet.IP, node, false); err != nil {
-					klog.Error(err)
-				}
 				_, stderr, err := util.RunOVNNbctl("--if-exists", "--policy=src-ip",
 					"lr-route-del", gr, pod+mask, gw)
 				if err != nil {
@@ -412,6 +412,11 @@ func (oc *Controller) deleteGWRoutesForPod(name ktypes.NamespacedName, podIPNets
 					delete(routeInfo.podExternalRoutes[pod], gw)
 					klog.V(5).Infof("ECMP route deleted for pod: %s, on gr: %s, to gw: %s", name,
 						gr, gw)
+				}
+				if entry := routeInfo.podExternalRoutes[pod]; len(entry) == 0 {
+					if err := oc.delHybridRoutePolicyForPod(podIPNet.IP, node, false); err != nil {
+						klog.Error(err)
+					}
 				}
 				cleanUpBFDEntry(gw, gr, portPrefix)
 			}
@@ -461,14 +466,16 @@ func (oc *Controller) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddrs []*n
 					if err != nil && !strings.Contains(stderr, DuplicateECMPError) {
 						return fmt.Errorf("unable to add external gwStr src-ip route to GR router, stderr:%q, err:%gw", stderr, err)
 					}
-					if err := oc.addHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
-						return err
-					}
 					if routeInfo.podExternalRoutes[podIP] == nil {
 						routeInfo.podExternalRoutes[podIP] = make(map[string]string)
 					}
 					routeInfo.podExternalRoutes[podIP][gwStr] = gr
 					routesAdded++
+					if len(routeInfo.podExternalRoutes[podIP]) == 1 {
+						if err := oc.addHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
+							return err
+						}
+					}
 				}
 			} else {
 				klog.Warningf("Address families for the pod address %s and gateway %s did not match", podIPNet.IP.String(), gateway.gws)
