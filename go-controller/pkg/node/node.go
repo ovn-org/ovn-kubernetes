@@ -223,54 +223,39 @@ func setupOVNNode(node *kapi.Node) error {
 	return nil
 }
 
-func isOVNControllerReady(name string) (bool, error) {
+func isOVNControllerReady() (bool, error) {
+	// check node's connection status
 	runDir := util.GetOvnRunDir()
-
 	pid, err := ioutil.ReadFile(runDir + "ovn-controller.pid")
 	if err != nil {
 		return false, fmt.Errorf("unknown pid for ovn-controller process: %v", err)
 	}
-
-	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
-		ctlFile := runDir + fmt.Sprintf("ovn-controller.%s.ctl", strings.TrimSuffix(string(pid), "\n"))
-		ret, _, err := util.RunOVSAppctl("-t", ctlFile, "connection-status")
-		if err == nil {
-			klog.Infof("Node %s connection status = %s", name, ret)
-			return ret == "connected", nil
-		}
-		return false, err
-	})
+	ctlFile := runDir + fmt.Sprintf("ovn-controller.%s.ctl", strings.TrimSuffix(string(pid), "\n"))
+	ret, _, err := util.RunOVSAppctl("-t", ctlFile, "connection-status")
 	if err != nil {
-		return false, fmt.Errorf("timed out waiting sbdb for node %s: %v", name, err)
+		return false, fmt.Errorf("could not get connection status: %w", err)
+	}
+	klog.Infof("Node connection status = %s", ret)
+	if ret != "connected" {
+		return false, nil
 	}
 
-	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
-		_, _, err := util.RunOVSVsctl("--", "br-exists", "br-int")
-		if err != nil {
-			return false, nil
-		}
-		return true, nil
-	})
+	// check whether br-int exists on node
+	_, _, err = util.RunOVSVsctl("--", "br-exists", "br-int")
 	if err != nil {
-		return false, fmt.Errorf("timed out checking whether br-int exists or not on node %s: %v", name, err)
+		return false, nil
 	}
 
-	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
-		stdout, _, err := util.RunOVSOfctl("dump-aggregate", "br-int")
-		if err != nil {
-			klog.V(5).Infof("Error dumping aggregate flows: %v "+
-				"for node: %s", err, name)
-			return false, nil
-		}
-		ret := strings.Contains(stdout, "flow_count=0")
-		if ret {
-			klog.V(5).Infof("Got a flow count of 0 when "+
-				"dumping flows for node: %s", name)
-		}
-		return !ret, nil
-	})
+	// check by dumping br-int flow entries
+	stdout, _, err := util.RunOVSOfctl("dump-aggregate", "br-int")
 	if err != nil {
-		return false, fmt.Errorf("timed out dumping br-int flow entries for node %s: %v", name, err)
+		klog.V(5).Infof("Error dumping aggregate flows: %v", err)
+		return false, nil
+	}
+	hasFlowCountZero := strings.Contains(stdout, "flow_count=0")
+	if hasFlowCountZero {
+		klog.V(5).Info("Got a flow count of 0 when dumping flows for node")
+		return false, nil
 	}
 
 	return true, nil
@@ -368,7 +353,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, util.JoinIPNets(subnets, ","))
 
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
-		if _, err = isOVNControllerReady(n.name); err != nil {
+		if _, err = isOVNControllerReady(); err != nil {
 			return err
 		}
 		isOvnUpEnabled, err = getOVNIfUpCheckMode()
