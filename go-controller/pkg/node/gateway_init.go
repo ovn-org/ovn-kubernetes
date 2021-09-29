@@ -342,11 +342,21 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	if portClaimWatcher != nil {
 		gw.portClaimWatcher = portClaimWatcher
 	}
-	initGw := func() error {
+
+	initGwFunc := func() error {
 		return gw.Init(n.watchFactory)
 	}
 
-	waiter.AddWait(gw.readyFunc, initGw)
+	readyGwFunc := func() (bool, error) {
+		controllerReady, err := isOVNControllerReady()
+		if err != nil || !controllerReady {
+			return false, err
+		}
+
+		return gw.readyFunc()
+	}
+
+	waiter.AddWait(readyGwFunc, initGwFunc)
 	n.gateway = gw
 
 	return n.validateGatewayMTU(gatewayIntf)

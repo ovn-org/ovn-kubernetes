@@ -353,9 +353,6 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, util.JoinIPNets(subnets, ","))
 
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
-		if _, err = isOVNControllerReady(); err != nil {
-			return err
-		}
 		isOvnUpEnabled, err = getOVNIfUpCheckMode()
 		if err != nil {
 			return err
