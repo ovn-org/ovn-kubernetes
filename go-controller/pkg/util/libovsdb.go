@@ -20,12 +20,16 @@ import (
 	"k8s.io/klog/v2"
 )
 
+const (
+	OVSDBTimeout = 10 * time.Second
+)
+
 // newClient creates a new client object given the provided config
 // the stopCh is required to ensure the goroutine for ssl cert
 // update is not leaked
 func newClient(cfg config.OvnAuthConfig, dbModel *model.DBModel, stopCh <-chan struct{}) (client.Client, error) {
 	options := []client.Option{
-		client.WithReconnect(500*time.Millisecond, &backoff.ZeroBackOff{}),
+		client.WithReconnect(OVSDBTimeout, &backoff.ZeroBackOff{}),
 		client.WithLeaderOnly(true),
 	}
 	for _, endpoint := range strings.Split(cfg.GetURL(), ",") {
@@ -49,7 +53,7 @@ func newClient(cfg config.OvnAuthConfig, dbModel *model.DBModel, stopCh <-chan s
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), OVSDBTimeout)
 	defer cancel()
 	err = client.Connect(ctx)
 	if err != nil {
