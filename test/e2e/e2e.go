@@ -1244,7 +1244,7 @@ spec:
 kind: EgressFirewall
 metadata:
   name: default
-  namespace: ` + f.Namespace.Name + ` 
+  namespace: ` + f.Namespace.Name + `
 spec:
   egress:
   - type: Allow
@@ -2396,6 +2396,7 @@ var _ = ginkgo.Describe("e2e ingress gateway traffic validation", func() {
 
 	var (
 		workerNodeInfo nodeInfo
+		IsIPv6         bool
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -2413,6 +2414,7 @@ var _ = ginkgo.Describe("e2e ingress gateway traffic validation", func() {
 			name:   nodes.Items[1].Name,
 			nodeIP: ips[1],
 		}
+		IsIPv6 = IsIPv6Cluster(f.ClientSet)
 	})
 
 	ginkgo.AfterEach(func() {
@@ -2432,16 +2434,24 @@ var _ = ginkgo.Describe("e2e ingress gateway traffic validation", func() {
 			command        = []string{"bash", "-c", "sleep 20000"}
 			exGWLo         = "10.30.1.1"
 			exGWLoCidr     = fmt.Sprintf("%s/32", exGWLo)
+			pingCmd        = ipv4PingCommand
 			pingCount      = "3"
 		)
+		if IsIPv6 {
+			exGWLo = "fc00::1" // unique local ipv6 unicast addr as per rfc4193
+			exGWLoCidr = fmt.Sprintf("%s/64", exGWLo)
+			pingCmd = ipv6PingCommand
+		}
 
 		// start the first container that will act as an external gateway
 		_, err := runCommand("docker", "run", "-itd", "--privileged", "--network", externalContainerNetwork, "--name", gwContainer, "centos/tools")
 		if err != nil {
 			framework.Failf("failed to start external gateway test container %s: %v", gwContainer, err)
 		}
-		exGWIp, _ := getContainerAddressesForNetwork(gwContainer, externalContainerNetwork)
-
+		exGWIp, exGWIpv6 := getContainerAddressesForNetwork(gwContainer, externalContainerNetwork)
+		if IsIPv6 {
+			exGWIp = exGWIpv6
+		}
 		// annotate the test namespace with the external gateway address
 		annotateArgs := []string{
 			"annotate",
@@ -2452,7 +2462,10 @@ var _ = ginkgo.Describe("e2e ingress gateway traffic validation", func() {
 		framework.Logf("Annotating the external gateway test namespace to container gateway: %s", exGWIp)
 		framework.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
 
-		nodeIP, _ := getContainerAddressesForNetwork(workerNodeInfo.name, externalContainerNetwork)
+		nodeIP, nodeIPv6 := getContainerAddressesForNetwork(workerNodeInfo.name, externalContainerNetwork)
+		if IsIPv6 {
+			nodeIP = nodeIPv6
+		}
 		framework.Logf("the pod side node is %s and the source node ip is %s", workerNodeInfo.name, nodeIP)
 		podCIDR, err := getNodePodCIDR(workerNodeInfo.name)
 		if err != nil {
@@ -2475,7 +2488,7 @@ var _ = ginkgo.Describe("e2e ingress gateway traffic validation", func() {
 		if err != nil {
 			framework.Failf("Error trying to get the pod IP address")
 		}
-		// add a host route on the gateways for return traffic to the pod
+		// add a host route on the gateway for return traffic to the pod
 		_, err = runCommand("docker", "exec", gwContainer, "ip", "route", "add", pingDstPod, "via", nodeIP)
 		if err != nil {
 			framework.Failf("failed to add the pod host route on the test container %s: %v", gwContainer, err)
@@ -2489,7 +2502,7 @@ var _ = ginkgo.Describe("e2e ingress gateway traffic validation", func() {
 		// Validate connectivity from the external gateway loopback to the pod in the test namespace
 		ginkgo.By(fmt.Sprintf("Validate ingress traffic from the external gateway %s can reach the pod in the exgw annotated namespace", gwContainer))
 		// generate traffic that will verify connectivity from the mock external gateway loopback
-		_, err = runCommand("docker", "exec", gwContainer, "ping", "-c", pingCount, "-S", exGWLo, "-I", "eth0", pingDstPod)
+		_, err = runCommand("docker", "exec", gwContainer, string(pingCmd), "-c", pingCount, "-I", "eth0", pingDstPod)
 		if err != nil {
 			framework.Failf("failed to ping the pod address %s from mock container %s: %v", pingDstPod, gwContainer, err)
 		}

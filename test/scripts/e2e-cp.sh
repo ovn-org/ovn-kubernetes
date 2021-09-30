@@ -9,7 +9,6 @@ export KUBECONFIG=${HOME}/admin.conf
 # Skip tests which are not IPv6 ready yet (see description of https://github.com/ovn-org/ovn-kubernetes/pull/2276)
 IPV6_SKIPPED_TESTS="Should be allowed by externalip services|\
 should provide connection to external host by DNS name from a pod|\
-Should validate ingress connectivity from an external gateway|\
 Should validate NetFlow data of br-int is sent to an external gateway|\
 recovering from deleting db files while maintain connectivity|\
 test tainting a node according to its defaults interface MTU size"
