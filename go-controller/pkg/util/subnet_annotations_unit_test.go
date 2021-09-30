@@ -8,6 +8,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -54,7 +55,8 @@ func TestCreateSubnetAnnotation(t *testing.T) {
 				}
 				defSubList = append(defSubList, ipnet)
 			}
-			mapRes, e := createSubnetAnnotation(tc.inpAnnotName, defSubList)
+			mapRes := map[string]string{}
+			e := updateSubnetAnnotation(mapRes, tc.inpAnnotName, types.DefaultNetworkName, defSubList)
 			if tc.expectedErr {
 				assert.Error(t, e)
 			}
@@ -165,11 +167,12 @@ func TestParseSubnetAnnotation(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			ipList, e := parseSubnetAnnotation(&tc.inpNode, tc.annName)
+			ipListMap, e := parseSubnetAnnotation(tc.inpNode.Annotations, tc.annName)
 			if tc.errExpected {
 				t.Log(e)
 				assert.Error(t, e)
 			} else {
+				ipList := ipListMap[types.DefaultNetworkName]
 				t.Log(ipList)
 				assert.Greater(t, len(ipList), 0)
 			}
@@ -181,26 +184,25 @@ func TestCreateNodeHostSubnetAnnotation(t *testing.T) {
 	tests := []struct {
 		desc            string
 		inpDefSubnetIps []*net.IPNet
-		outExp          map[string]interface{}
+		outExp          map[string]string
 		errExp          bool
 	}{
 		{
 			desc:            "success path, valid default subnets",
 			inpDefSubnetIps: ovntest.MustParseIPNets("192.168.1.12/24"),
-			outExp: map[string]interface{}{
-				"k8s.ovn.org/node-subnets": "{\"default\":\"192.168.1.12/24\"}",
+			outExp: map[string]string{
+				"k8s.ovn.org/node-subnets": "{\"default\":[\"192.168.1.12/24\"]}",
 			},
 		},
 		{
-			desc: "success path, inpDefSubnetIps is nil",
-			outExp: map[string]interface{}{
-				"k8s.ovn.org/node-subnets": "{\"default\":[]}",
-			},
+			desc:   "success path, inpDefSubnetIps is nil",
+			outExp: map[string]string{},
 		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, err := CreateNodeHostSubnetAnnotation(tc.inpDefSubnetIps)
+			res := map[string]string{}
+			err := UpdateNodeHostSubnetAnnotation(res, tc.inpDefSubnetIps, types.DefaultNetworkName)
 			t.Log(res, err)
 			if tc.errExp {
 				assert.NotNil(t, err)
@@ -280,7 +282,7 @@ func TestParseNodeHostSubnetAnnotation(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, err := ParseNodeHostSubnetAnnotation(&tc.inpNode)
+			res, err := ParseNodeHostSubnetAnnotation(&tc.inpNode, types.DefaultNetworkName)
 			t.Log(res, err)
 			if tc.errExp {
 				assert.NotNil(t, err)

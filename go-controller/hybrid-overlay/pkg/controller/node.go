@@ -184,7 +184,7 @@ func getNodeSubnetAndIP(node *kapi.Node) (*net.IPNet, net.IP) {
 	var cidr *net.IPNet
 
 	// Parse Linux node OVN hostsubnet annotation first
-	cidrs, _ := util.ParseNodeHostSubnetAnnotation(node)
+	cidrs, _ := util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
 	if cidrs != nil {
 		// FIXME DUAL-STACK
 		cidr = cidrs[0]

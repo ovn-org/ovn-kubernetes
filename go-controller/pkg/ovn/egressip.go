@@ -721,7 +721,7 @@ func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
 			}
 		}
 
-		nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(node)
+		nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 		if err != nil {
 			return fmt.Errorf("failed to parse node %s subnets annotation %v", node.Name, err)
 		}
