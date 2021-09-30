@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
+	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -128,7 +129,9 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	if config.Gateway.DisableSNATMultipleGWs {
 		oc.deletePerPodGRSNAT(pod.Spec.NodeName, portInfo.ips)
 	}
-	oc.deleteGWRoutesForPod(pod.Namespace, portInfo.ips)
+	podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
+	oc.deleteGWRoutesForPod(podNsName, portInfo.ips)
+
 	oc.logicalPortCache.remove(logicalPort)
 }
 
@@ -435,7 +438,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	if len(gateways) > 0 {
-		err = oc.addGWRoutesForPod(gateways, podIfAddrs, pod.Namespace, pod.Spec.NodeName)
+		podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
+		err = oc.addGWRoutesForPod(gateways, podIfAddrs, podNsName, pod.Spec.NodeName)
 		if err != nil {
 			return err
 		}
