@@ -420,6 +420,20 @@ func (_m *KubeInterface) UpdateEgressIP(eIP *egressipv1.EgressIP) error {
 	return r0
 }
 
+// UpdateNode provides a mock function with given fields: node
+func (_m *KubeInterface) UpdateNode(node *v1.Node) error {
+	ret := _m.Called(node)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.Node) error); ok {
+		r0 = rf(node)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // UpdateNodeStatus provides a mock function with given fields: node
 func (_m *KubeInterface) UpdateNodeStatus(node *v1.Node) error {
 	ret := _m.Called(node)
