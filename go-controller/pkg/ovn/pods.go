@@ -75,12 +75,7 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 			// the length will be different
 			if len(annotations.Routes) != len(newRoutes) {
 				annotations.Routes = newRoutes
-				var marshalledAnnotation map[string]interface{}
-				marshalledAnnotation, err = util.MarshalPodAnnotation(annotations)
-				if err != nil {
-					return fmt.Errorf("error updating pod %s annotations: %v", pod.Name, err)
-				}
-				err = oc.kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, marshalledAnnotation)
+				err = oc.updatePodAnnotationWithRetry(pod, annotations)
 				if err != nil {
 					return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 				}

@@ -371,7 +371,7 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 			klog.Infof("Waiting to retrieve node %s: %v", n.name, err)
 			return false, nil
 		}
-		subnets, err = util.ParseNodeHostSubnetAnnotation(node)
+		subnets, err = util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 		if err != nil {
 			klog.Infof("Waiting for node %s to start, no annotation found on node for subnet: %v", n.name, err)
 			return false, nil

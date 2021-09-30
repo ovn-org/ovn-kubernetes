@@ -278,7 +278,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 			updatedNode, err := fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1.Name, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			nodeHostSubnetAnnotations, err := util.ParseNodeHostSubnetAnnotation(updatedNode)
+			nodeHostSubnetAnnotations, err := util.ParseNodeHostSubnetAnnotation(updatedNode, ovntypes.DefaultNetworkName)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Eventually(nodeHostSubnetAnnotations[0].String()).Should(gomega.Equal(node1.NodeSubnet))
 

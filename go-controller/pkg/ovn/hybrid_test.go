@@ -2,7 +2,6 @@ package ovn
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"sync"
 
@@ -39,13 +38,11 @@ import (
 )
 
 func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Node {
+	var err error
 	annotations := make(map[string]string)
 	if ovnHostSubnet != "" {
-		subnetAnnotations, err := util.CreateNodeHostSubnetAnnotation(ovntest.MustParseIPNets(ovnHostSubnet))
+		annotations, err = util.UpdateNodeHostSubnetAnnotation(annotations, ovntest.MustParseIPNets(ovnHostSubnet), types.DefaultNetworkName)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		for k, v := range subnetAnnotations {
-			annotations[k] = fmt.Sprintf("%s", v)
-		}
 	}
 	if hybridHostSubnet != "" {
 		annotations[hotypes.HybridOverlayNodeSubnet] = hybridHostSubnet
@@ -63,13 +60,11 @@ func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Nod
 }
 
 func newTestWinNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Node {
+	var err error
 	annotations := make(map[string]string)
 	if ovnHostSubnet != "" {
-		subnetAnnotations, err := util.CreateNodeHostSubnetAnnotation(ovntest.MustParseIPNets(ovnHostSubnet))
+		annotations, err = util.UpdateNodeHostSubnetAnnotation(annotations, ovntest.MustParseIPNets(ovnHostSubnet), types.DefaultNetworkName)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		for k, v := range subnetAnnotations {
-			annotations[k] = fmt.Sprintf("%s", v)
-		}
 	}
 	if hybridHostSubnet != "" {
 		annotations[hotypes.HybridOverlayNodeSubnet] = hybridHostSubnet
@@ -254,9 +249,9 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				if err != nil {
 					return err
 				}
-				_, err = util.ParseNodeHostSubnetAnnotation(updatedNode)
+				_, err = util.ParseNodeHostSubnetAnnotation(updatedNode, types.DefaultNetworkName)
 				return err
-			}, 2).Should(gomega.MatchError(fmt.Sprintf("node %q has no \"k8s.ovn.org/node-subnets\" annotation", nodeName)))
+			}, 2).Should(gomega.MatchError("could not find \"k8s.ovn.org/node-subnets\" annotation"))
 
 			gomega.Eventually(fexec.CalledMatchesExpected, 2).Should(gomega.BeTrue(), fexec.ErrorDesc)
 
