@@ -86,6 +86,29 @@ type RowUpdate struct {
 	Old  Row  `json:"old,omitempty"`
 }
 
+// TableUpdates is a collection of TableUpdate entries
+// We cannot use TableUpdates directly by json encoding by inlining the TableUpdate Map
+// structure till GoLang issue #6213 makes it.
+// The only option is to go with raw map[string]map[string]interface{} option :-( that sucks !
+// Refer to client.go : MonitorAll() function for more details
+type TableUpdates2 struct {
+	Updates map[string]TableUpdate2 `json:"updates,overflow"`
+}
+
+// TableUpdate represents a table update according to RFC7047
+type TableUpdate2 struct {
+	Rows map[string]RowUpdate2 `json:"rows,overflow"`
+}
+
+// RowUpdate represents a row update according to RFC7047
+type RowUpdate2 struct {
+	UUID    UUID `json:"-,omitempty"`
+	Initial Row  `json:"initial,omitempty"`
+	Insert  Row  `json:"insert,omitempty"`
+	Modify  Row  `json:"modify,omitempty"`
+	Delete  Row  `json:"delete,omitempty"`
+}
+
 // OvsdbError is an OVS Error Condition
 type OvsdbError struct {
 	Error   string `json:"error"`
@@ -146,3 +169,26 @@ func ovsSliceToGoNotation(val interface{}) (interface{}, error) {
 }
 
 // TODO : add Condition, Function, Mutation and Mutator notations
+
+const (
+	// OperationInsert is an insert operation
+	OperationInsert = "insert"
+	// OperationSelect is a select operation
+	OperationSelect = "select"
+	// OperationUpdate is an update operation
+	OperationUpdate = "update"
+	// OperationMutate is a mutate operation
+	OperationMutate = "mutate"
+	// OperationDelete is a delete operation
+	OperationDelete = "delete"
+	// OperationWait is a wait operation
+	OperationWait = "wait"
+	// OperationCommit is a commit operation
+	OperationCommit = "commit"
+	// OperationAbort is an abort operation
+	OperationAbort = "abort"
+	// OperationComment is a comment operation
+	OperationComment = "comment"
+	// OperationAssert is an assert operation
+	OperationAssert = "assert"
+)

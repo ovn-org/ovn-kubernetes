@@ -78,42 +78,47 @@ func (oc *Controller) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]*gatewa
 
 // addPodToNamespace adds the pod's IP to the namespace's address set and returns
 // pod's routing gateway info
-func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]*gatewayInfo, net.IP, error) {
+func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]*gatewayInfo, net.IP,
+	[]*goovn.OvnCommand, error) {
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns, true)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to ensure namespace locked: %v", err)
+		return nil, nil, nil, nil, fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
 
 	defer nsUnlock()
 
-	if err := nsInfo.addressSet.AddIPs(createIPAddressSlice(ips)); err != nil {
-		return nil, nil, nil, err
+	cmds, err := nsInfo.addressSet.PrepareAddIPsCmds(createIPAddressSlice(ips))
+	if err != nil {
+		return nil, nil, nil, nil, err
 	}
 
-	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nsInfo.hybridOverlayExternalGW, nil
+	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nsInfo.hybridOverlayExternalGW, cmds, nil
 }
 
-func (oc *Controller) deletePodFromNamespace(ns, name, uuid string, ips []*net.IPNet) error {
+func (oc *Controller) deletePodFromNamespace(ns, name, uuid string, ips []*net.IPNet) ([]*goovn.OvnCommand, error) {
 	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
 	if nsInfo == nil {
-		return nil
+		return nil, nil
 	}
 	defer nsUnlock()
 
+	var cmds []*goovn.OvnCommand
+	var err error
 	if nsInfo.addressSet != nil && len(ips) > 0 {
-		if err := nsInfo.addressSet.DeleteIPs(createIPAddressSlice(ips)); err != nil {
-			return err
+		cmds, err = nsInfo.addressSet.PrepareDeleteIPsCmds(createIPAddressSlice(ips))
+		if err != nil {
+			return nil, err
 		}
 	}
 
 	// Remove the port from the multicast allow policy.
 	if oc.multicastSupport && nsInfo.multicastEnabled && uuid != "" {
 		if err := podDeleteAllowMulticastPolicy(oc.ovnNBClient, ns, name, uuid); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	return nil
+	return cmds, nil
 }
 
 func createIPAddressSlice(ips []*net.IPNet) []net.IP {
@@ -308,7 +313,8 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 				}
 			}
 		} else {
-			oc.deleteGWRoutesForNamespace(nsInfo)
+			oc.deleteGWRoutesForNamespace(old.Name)
+			nsInfo.routingExternalGWs = gatewayInfo{}
 		}
 		exGateways, err := parseRoutingExternalGWAnnotation(gwAnnotation)
 		if err != nil {
@@ -392,7 +398,7 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 		delete(nsInfo.networkPolicies, np.name)
 		oc.destroyNetworkPolicy(np, nsInfo)
 	}
-	oc.deleteGWRoutesForNamespace(nsInfo)
+	oc.deleteGWRoutesForNamespace(ns.Name)
 	oc.multicastDeleteNamespace(ns, nsInfo)
 }
 
@@ -457,7 +463,6 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool) (*namespac
 	if nsInfo == nil {
 		nsInfo = &namespaceInfo{
 			networkPolicies:       make(map[string]*networkPolicy),
-			podExternalRoutes:     make(map[string]map[string]string),
 			multicastEnabled:      false,
 			routingExternalPodGWs: make(map[string]gatewayInfo),
 		}

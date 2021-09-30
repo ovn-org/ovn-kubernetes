@@ -27,6 +27,7 @@ const (
 const (
 	DBNB string = "OVN_Northbound"
 	DBSB string = "OVN_Southbound"
+	DBServer string = "_Server"
 )
 
 const (
@@ -54,6 +55,7 @@ const (
 	TableEncap                    string = "Encap"
 	TableSBGlobal                 string = "SB_Global"
 	TableChassisPrivate           string = "Chassis_Private"
+	TableDatabase                 string = "Database"
 )
 
 var NBTablesOrder = []string{
@@ -84,4 +86,8 @@ var SBTablesOrder = []string{
 	TableChassisPrivate,
 	TableEncap,
 	TableSBGlobal,
+}
+
+var ServerTablesOrder = []string{
+	TableDatabase,
 }

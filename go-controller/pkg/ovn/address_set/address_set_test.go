@@ -2,6 +2,7 @@ package addressset
 
 import (
 	"fmt"
+	goovn "github.com/ebay/go-ovn"
 	"net"
 
 	"github.com/urfave/cli/v2"
@@ -31,9 +32,10 @@ func (asn *testAddressSetName) makeName() string {
 
 var _ = ginkgo.Describe("OVN Address Set operations", func() {
 	var (
-		app       *cli.App
-		fexec     *ovntest.FakeExec
-		asFactory AddressSetFactory
+		app         *cli.App
+		fexec       *ovntest.FakeExec
+		asFactory   AddressSetFactory
+		ovnNbClient goovn.Client
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -45,12 +47,17 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 		app.Flags = config.Flags
 
 		fexec = ovntest.NewFakeExec()
-
-		asFactory = NewOvnAddressSetFactory()
+		ovnNbClient = ovntest.NewMockOVNClient(goovn.DBNB)
+		asFactory = NewOvnAddressSetFactory(ovnNbClient)
 	})
 
 	ginkgo.JustBeforeEach(func() {
 		err := util.SetExec(fexec)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
+	ginkgo.AfterEach(func() {
+		err := ovnNbClient.Close()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
@@ -654,7 +661,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + hashedAddressSet(namespaces[2].makeName()),
 				})
 
-				err = NonDualStackAddressSetCleanup()
+				err = NonDualStackAddressSetCleanup(ovnNbClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil

@@ -17,6 +17,10 @@
 package goovn
 
 import (
+	"sync"
+
+	"k8s.io/klog/v2"
+
 	"github.com/ebay/libovsdb"
 )
 
@@ -24,11 +28,47 @@ type ovnNotifier struct {
 	odbi *ovndb
 }
 
-func (notify ovnNotifier) Update(context interface{}, tableUpdates libovsdb.TableUpdates) {
-	notify.odbi.cachemutex.Lock()
-	defer notify.odbi.cachemutex.Unlock()
-	notify.odbi.populateCache(tableUpdates)
+func (notify ovnNotifier) getDBNameAndLock(context interface{}) (string, *sync.RWMutex) {
+	dbName, ok := context.(string)
+	if !ok {
+		klog.Warningf("Expected string-type context but got %v", context)
+		return "", nil
+	}
+
+	if dbName == DBServer {
+		return dbName, &notify.odbi.serverCacheMutex
+	}
+
+	return dbName, &notify.odbi.cachemutex
 }
+
+func (notify ovnNotifier) Update(context interface{}, tableUpdates libovsdb.TableUpdates) {
+	db, lock := notify.getDBNameAndLock(context)
+	if lock != nil {
+		lock.Lock()
+		defer lock.Unlock()
+		notify.odbi.populateCache(db, tableUpdates, true)
+	}
+}
+func (notify ovnNotifier) Update2(context interface{}, tableUpdates libovsdb.TableUpdates2) {
+	db, lock := notify.getDBNameAndLock(context)
+	if lock != nil {
+		lock.Lock()
+		defer lock.Unlock()
+		notify.odbi.populateCache2(db, tableUpdates, true)
+	}
+}
+
+func (notify ovnNotifier) Update3(context interface{}, tableUpdates libovsdb.TableUpdates2, lastTxnId string) {
+	db, lock := notify.getDBNameAndLock(context)
+	if lock != nil {
+		lock.Lock()
+		defer lock.Unlock()
+		notify.odbi.populateCache2(db, tableUpdates, true)
+		notify.odbi.currentTxn = lastTxnId
+	}
+}
+
 func (notify ovnNotifier) Locked([]interface{}) {
 }
 func (notify ovnNotifier) Stolen([]interface{}) {

@@ -13,7 +13,6 @@ import (
 
 	goovn "github.com/ebay/go-ovn"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -40,6 +39,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
+	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
@@ -85,10 +85,6 @@ type namespaceInfo struct {
 	// routingExternalGWs is a slice of net.IP containing the values parsed from
 	// annotation k8s.ovn.org/routing-external-gws
 	routingExternalGWs gatewayInfo
-	// podExternalRoutes is a cache keeping the LR routes added to the GRs when
-	// the k8s.ovn.org/routing-external-gws annotation is used. The first map key
-	// is the podIP, the second the GW and the third the GR
-	podExternalRoutes map[string]map[string]string
 
 	// routingExternalPodGWs contains a map of all pods serving as exgws as well as their
 	// exgw IPs
@@ -144,6 +140,9 @@ type Controller struct {
 	namespaces      map[string]*namespaceInfo
 	namespacesMutex sync.Mutex
 
+	externalGWCache map[ktypes.NamespacedName]*externalRouteInfo
+	exGWCacheMutex  sync.RWMutex
+
 	// egressFirewalls is a map of namespaces and the egressFirewall attached to it
 	egressFirewalls sync.Map
 
@@ -193,12 +192,6 @@ type Controller struct {
 	// go-ovn southbound client interface
 	ovnSBClient goovn.Client
 
-	// libovsdb northbound client interface
-	nbClient libovsdbclient.Client
-
-	// libovsdb southbound client interface
-	sbClient libovsdbclient.Client
-
 	// v4HostSubnetsUsed keeps track of number of v4 subnets currently assigned to nodes
 	v4HostSubnetsUsed float64
 
@@ -247,11 +240,10 @@ func GetIPFullMask(ip string) string {
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory,
-	ovnNBClient goovn.Client, ovnSBClient goovn.Client, libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
-	recorder record.EventRecorder) *Controller {
+func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
+	stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client, recorder record.EventRecorder) *Controller {
 	if addressSetFactory == nil {
-		addressSetFactory = addressset.NewOvnAddressSetFactory()
+		addressSetFactory = addressset.NewOvnAddressSetFactory(ovnNBClient)
 	}
 	return &Controller{
 		client: ovnClient.KubeClient,
@@ -269,6 +261,8 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		logicalPortCache:          newPortCache(stopChan),
 		namespaces:                make(map[string]*namespaceInfo),
 		namespacesMutex:           sync.Mutex{},
+		externalGWCache:           make(map[ktypes.NamespacedName]*externalRouteInfo),
+		exGWCacheMutex:            sync.RWMutex{},
 		addressSetFactory:         addressSetFactory,
 		lspIngressDenyCache:       make(map[string]int),
 		lspEgressDenyCache:        make(map[string]int),
@@ -282,7 +276,6 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			podHandlerCache:       make(map[string]factory.Handler),
 			allocatorMutex:        &sync.Mutex{},
 			allocator:             make(map[string]*egressNode),
-			nbClient:              libovsdbOvnNBClient,
 		},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
@@ -293,9 +286,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		recorder:                 recorder,
 		ovnNBClient:              ovnNBClient,
 		ovnSBClient:              ovnSBClient,
-		nbClient:                 libovsdbOvnNBClient,
-		sbClient:                 libovsdbOvnSBClient,
-		svcController:            newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient, stopChan),
+		svcController:            newServiceController(ovnClient.KubeClient, stopChan),
 	}
 }
 
@@ -351,7 +342,6 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 		unidlingController := unidling.NewController(
 			oc.recorder,
 			oc.watchFactory.ServiceInformer(),
-			oc.sbClient,
 		)
 		wg.Add(1)
 		go func() {
@@ -405,7 +395,7 @@ func (oc *Controller) ovnTopologyCleanup() error {
 
 	// Cleanup address sets in non dual stack formats in all versions known to possibly exist.
 	if ver <= ovntypes.OvnPortBindingTopoVersion {
-		err = addressset.NonDualStackAddressSetCleanup()
+		err = addressset.NonDualStackAddressSetCleanup(oc.ovnNBClient)
 	}
 	return err
 }
@@ -1197,7 +1187,7 @@ func shouldUpdate(node, oldNode *kapi.Node) (bool, error) {
 	return true, nil
 }
 
-func newServiceController(client clientset.Interface, nbClient libovsdbclient.Client, stopChan <-chan struct{}) *svccontroller.Controller {
+func newServiceController(client clientset.Interface, stopChan <-chan struct{}) *svccontroller.Controller {
 	// Create our own informers to start compartmentalizing the code
 	// filter server side the things we don't care about
 	noProxyName, err := labels.NewRequirement("service.kubernetes.io/service-proxy-name", selection.DoesNotExist, nil)
@@ -1220,7 +1210,6 @@ func newServiceController(client clientset.Interface, nbClient libovsdbclient.Cl
 
 	controller := svccontroller.NewController(
 		client,
-		nbClient,
 		svcFactory.Core().V1().Services(),
 		svcFactory.Discovery().V1beta1().EndpointSlices(),
 		svcFactory.Core().V1().Nodes(),

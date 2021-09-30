@@ -29,6 +29,11 @@ func NewMonitorArgs(database string, value interface{}, requests map[string]Moni
 	return []interface{}{database, value, requests}
 }
 
+// NewMonitorArgs3 creates a new set of arguments for a monitor RPC
+func NewMonitorArgs3(database string, value interface{}, requests map[string]MonitorRequest, currentTxn string) []interface{} {
+	return []interface{}{database, value, requests, currentTxn}
+}
+
 // NewMonitorCancelArgs creates a new set of arguments for a monitor_cancel RPC
 func NewMonitorCancelArgs(value interface{}) []interface{} {
 	return []interface{}{value}

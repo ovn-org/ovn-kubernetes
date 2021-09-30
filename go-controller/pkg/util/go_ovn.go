@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"reflect"
+	"time"
 
 	"io/ioutil"
 
@@ -88,10 +89,12 @@ func initGoOvnSslClient(certFile, privKeyFile, caCertFile, address, db, serverNa
 	}
 	tlsConfig.BuildNameToCertificate()
 	ovndbclient, err := goovn.NewClient(&goovn.Config{
-		Db:        db,
-		Addr:      address,
-		TLSConfig: tlsConfig,
-		Reconnect: true,
+		Db:         db,
+		Addr:       address,
+		TLSConfig:  tlsConfig,
+		Reconnect:  true,
+		LeaderOnly: true,
+		Timeout:    time.Minute,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error creating SSL OVNDBClient for database %s at address %s: %s", db, address, err)
@@ -155,9 +158,11 @@ func updateSslKeyPair(ovndb, certFile, privKeyFile string, tlsConfig *tls.Config
 
 func initGoOvnTcpClient(address, db string) (goovn.Client, error) {
 	ovndbclient, err := goovn.NewClient(&goovn.Config{
-		Db:        db,
-		Addr:      address,
-		Reconnect: true,
+		Db:         db,
+		Addr:       address,
+		Reconnect:  true,
+		LeaderOnly: true,
+		Timeout:    time.Minute,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error creating TCP OVNDBClient for address %s: %s", address, err)
@@ -168,9 +173,11 @@ func initGoOvnTcpClient(address, db string) (goovn.Client, error) {
 
 func initGoOvnUnixClient(address, db string) (goovn.Client, error) {
 	ovndbclient, err := goovn.NewClient(&goovn.Config{
-		Db:        db,
-		Addr:      address,
-		Reconnect: true,
+		Db:         db,
+		Addr:       address,
+		Reconnect:  true,
+		LeaderOnly: true,
+		Timeout:    time.Minute,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error creating UNIX OVNDBClient for address %s: %s", address, err)

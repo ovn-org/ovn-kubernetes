@@ -1,6 +1,7 @@
 package libovsdb
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cenkalti/rpc2"
 	"github.com/cenkalti/rpc2/jsonrpc"
@@ -22,13 +24,15 @@ type OvsdbClient struct {
 	Schema        map[string]DatabaseSchema
 	handlers      []NotificationHandler
 	handlersMutex *sync.Mutex
+	timeout       time.Duration
 }
 
-func newOvsdbClient(c *rpc2.Client) *OvsdbClient {
+func newOvsdbClient(timeout time.Duration, c *rpc2.Client) *OvsdbClient {
 	ovs := &OvsdbClient{
 		rpcClient:     c,
 		Schema:        make(map[string]DatabaseSchema),
 		handlersMutex: &sync.Mutex{},
+		timeout:       timeout,
 	}
 	connectionsMutex.Lock()
 	defer connectionsMutex.Unlock()
@@ -57,11 +61,16 @@ const (
 
 // Connect to ovn, using endpoint in format ovsdb Connection Methods
 // If address is empty, use default address for specified protocol
-func Connect(endpoints string, tlsConfig *tls.Config) (*OvsdbClient, error) {
+func Connect(timeout time.Duration, endpoints string, tlsConfig *tls.Config) (*OvsdbClient, error) {
 	var c net.Conn
 	var err error
 	var u *url.URL
 
+	if timeout == 0 {
+		timeout = 1 * time.Minute
+	}
+
+	var dialer net.Dialer
 	for _, endpoint := range strings.Split(endpoints, ",") {
 		if u, err = url.Parse(endpoint); err != nil {
 			return nil, err
@@ -72,23 +81,28 @@ func Connect(endpoints string, tlsConfig *tls.Config) (*OvsdbClient, error) {
 		if len(host) == 0 {
 			host = defaultTCPAddress
 		}
+		ctx, cancel := context.WithTimeout(context.TODO(), timeout)
 		switch u.Scheme {
 		case UNIX:
 			path := u.Path
 			if len(path) == 0 {
 				path = defaultUnixAddress
 			}
-			c, err = net.Dial(u.Scheme, path)
+			c, err = dialer.DialContext(ctx, u.Scheme, path)
 		case TCP:
-			c, err = net.Dial(u.Scheme, host)
+			c, err = dialer.DialContext(ctx, u.Scheme, host)
 		case SSL:
-			c, err = tls.Dial("tcp", host, tlsConfig)
+			dialer := tls.Dialer{
+				Config: tlsConfig,
+			}
+			c, err = dialer.DialContext(ctx, "tcp", host)
 		default:
 			err = fmt.Errorf("unknown network protocol %s", u.Scheme)
 		}
+		cancel()
 
 		if err == nil {
-			return newRPC2Client(c)
+			return newRPC2Client(timeout, c)
 		}
 	}
 
@@ -100,16 +114,18 @@ func handleMonitorCancel(client *rpc2.Client, params []interface{}, reply *inter
 	return client.Close()
 }
 
-func newRPC2Client(conn net.Conn) (*OvsdbClient, error) {
+func newRPC2Client(timeout time.Duration, conn net.Conn) (*OvsdbClient, error) {
 	c := rpc2.NewClientWithCodec(jsonrpc.NewJSONCodec(conn))
 	c.SetBlocking(true)
 	c.Handle("echo", echo)
 	c.Handle("update", update)
 	c.Handle("monitor_cancel", handleMonitorCancel)
+	c.Handle("update2", update2)
+	c.Handle("update3", update3)
 	go c.Run()
 	go handleDisconnectNotification(c)
 
-	ovs := newOvsdbClient(c)
+	ovs := newOvsdbClient(timeout, c)
 
 	// Process Async Notifications
 	dbs, err := ovs.ListDbs()
@@ -159,6 +175,10 @@ func (ovs *OvsdbClient) Unregister(handler NotificationHandler) error {
 type NotificationHandler interface {
 	// RFC 7047 section 4.1.6 Update Notification
 	Update(context interface{}, tableUpdates TableUpdates)
+
+	Update2(context interface{}, tableUpdates TableUpdates2)
+
+	Update3(context interface{}, tableUpdates TableUpdates2, lastTxnId string)
 
 	// RFC 7047 section 4.1.9 Locked Notification
 	Locked([]interface{})
@@ -225,12 +245,85 @@ func update(client *rpc2.Client, params []interface{}, reply *interface{}) error
 	return nil
 }
 
+func update2(client *rpc2.Client, params []interface{}, reply *interface{}) error {
+	if len(params) < 2 {
+		return errors.New("Invalid Update message")
+	}
+	// Ignore params[0] as we dont use the <json-value> currently for comparison
+
+	raw, ok := params[1].(map[string]interface{})
+	if !ok {
+		return errors.New("Invalid Update message")
+	}
+	var rowUpdates2 map[string]map[string]RowUpdate2
+
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(b, &rowUpdates2)
+	if err != nil {
+		return err
+	}
+
+	// Update the local DB cache with the tableUpdates
+	tableUpdates2 := getTableUpdates2FromRawUnmarshal(rowUpdates2)
+	connectionsMutex.RLock()
+	defer connectionsMutex.RUnlock()
+	if _, ok := connections[client]; ok {
+		connections[client].handlersMutex.Lock()
+		defer connections[client].handlersMutex.Unlock()
+		for _, handler := range connections[client].handlers {
+			handler.Update2(params[0], tableUpdates2)
+		}
+	}
+
+	return nil
+}
+
+func update3(client *rpc2.Client, params []interface{}, reply *interface{}) error {
+	if len(params) != 3 {
+		return fmt.Errorf("update3 requires exactly 3 args")
+	}
+
+	raw, ok := params[2].(map[string]interface{})
+	if !ok {
+		return errors.New("Invalid Update message")
+	}
+	var rowUpdates2 map[string]map[string]RowUpdate2
+
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(b, &rowUpdates2)
+	if err != nil {
+		return err
+	}
+
+	// Update the local DB cache with the tableUpdates
+	tableUpdates2 := getTableUpdates2FromRawUnmarshal(rowUpdates2)
+	connectionsMutex.RLock()
+	defer connectionsMutex.RUnlock()
+	if _, ok := connections[client]; ok {
+		connections[client].handlersMutex.Lock()
+		defer connections[client].handlersMutex.Unlock()
+		for _, handler := range connections[client].handlers {
+			handler.Update3(params[0], tableUpdates2, params[1].(string))
+		}
+	}
+	return nil
+}
+
 // GetSchema returns the schema in use for the provided database name
 // RFC 7047 : get_schema
 func (ovs OvsdbClient) GetSchema(dbName string) (*DatabaseSchema, error) {
+	ctx, cancel := context.WithTimeout(context.TODO(), ovs.timeout)
+	defer cancel()
+
 	args := NewGetSchemaArgs(dbName)
 	var reply DatabaseSchema
-	err := ovs.rpcClient.Call("get_schema", args, &reply)
+	err := ovs.rpcClient.CallWithContext(ctx, "get_schema", args, &reply)
 	if err != nil {
 		return nil, err
 	}
@@ -241,8 +334,11 @@ func (ovs OvsdbClient) GetSchema(dbName string) (*DatabaseSchema, error) {
 // ListDbs returns the list of databases on the server
 // RFC 7047 : list_dbs
 func (ovs OvsdbClient) ListDbs() ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.TODO(), ovs.timeout)
+	defer cancel()
+
 	var dbs []string
-	err := ovs.rpcClient.Call("list_dbs", nil, &dbs)
+	err := ovs.rpcClient.CallWithContext(ctx, "list_dbs", nil, &dbs)
 	if err != nil {
 		log.Fatal("ListDbs failure", err)
 	}
@@ -258,12 +354,15 @@ func (ovs OvsdbClient) Transact(database string, operation ...Operation) ([]Oper
 		return nil, fmt.Errorf("invalid Database %q Schema", database)
 	}
 
-	if ok := db.validateOperations(operation...); !ok {
+	if ok := db.ValidateOperations(operation...); !ok {
 		return nil, errors.New("Validation failed for the operation")
 	}
 
+	ctx, cancel := context.WithTimeout(context.TODO(), ovs.timeout)
+	defer cancel()
+
 	args := NewTransactArgs(database, operation...)
-	err := ovs.rpcClient.Call("transact", args, &reply)
+	err := ovs.rpcClient.CallWithContext(ctx, "transact", args, &reply)
 	if err != nil {
 		return nil, err
 	}
@@ -295,14 +394,41 @@ func (ovs OvsdbClient) MonitorAll(database string, jsonContext interface{}) (*Ta
 	return ovs.Monitor(database, jsonContext, requests)
 }
 
+// MonitorAll is a convenience method to monitor every table/column
+func (ovs OvsdbClient) Monitor2All(database string, jsonContext interface{}) (*TableUpdates2, error) {
+	schema, ok := ovs.Schema[database]
+	if !ok {
+		return nil, fmt.Errorf("invalid Database %q Schema", database)
+	}
+
+	requests := make(map[string]MonitorRequest)
+	for table, tableSchema := range schema.Tables {
+		var columns []string
+		for column := range tableSchema.Columns {
+			columns = append(columns, column)
+		}
+		requests[table] = MonitorRequest{
+			Columns: columns,
+			Select: MonitorSelect{
+				Initial: true,
+				Insert:  true,
+				Delete:  true,
+				Modify:  true,
+			}}
+	}
+	return ovs.Monitor2(database, jsonContext, requests)
+}
+
 // MonitorCancel will request cancel a previously issued monitor request
 // RFC 7047 : monitor_cancel
 func (ovs OvsdbClient) MonitorCancel(database string, jsonContext interface{}) error {
 	var reply OperationResult
 
-	args := NewMonitorCancelArgs(jsonContext)
+	ctx, cancel := context.WithTimeout(context.TODO(), ovs.timeout)
+	defer cancel()
 
-	err := ovs.rpcClient.Call("monitor_cancel", args, &reply)
+	args := NewMonitorCancelArgs(jsonContext)
+	err := ovs.rpcClient.CallWithContext(ctx, "monitor_cancel", args, &reply)
 	if err != nil {
 		return err
 	}
@@ -317,11 +443,14 @@ func (ovs OvsdbClient) MonitorCancel(database string, jsonContext interface{}) e
 func (ovs OvsdbClient) Monitor(database string, jsonContext interface{}, requests map[string]MonitorRequest) (*TableUpdates, error) {
 	var reply TableUpdates
 
+	ctx, cancel := context.WithTimeout(context.TODO(), ovs.timeout)
+	defer cancel()
+
 	args := NewMonitorArgs(database, jsonContext, requests)
 
 	// This totally sucks. Refer to golang JSON issue #6213
 	var response map[string]map[string]RowUpdate
-	err := ovs.rpcClient.Call("monitor", args, &response)
+	err := ovs.rpcClient.CallWithContext(ctx, "monitor", args, &response)
 	reply = getTableUpdatesFromRawUnmarshal(response)
 	if err != nil {
 		return nil, err
@@ -329,11 +458,69 @@ func (ovs OvsdbClient) Monitor(database string, jsonContext interface{}, request
 	return &reply, err
 }
 
+func (ovs OvsdbClient) Monitor2(database string, jsonContext interface{}, requests map[string]MonitorRequest) (*TableUpdates2, error) {
+	var reply TableUpdates2
+
+	ctx, cancel := context.WithTimeout(context.TODO(), ovs.timeout)
+	defer cancel()
+
+	args := NewMonitorArgs(database, jsonContext, requests)
+
+	// This totally sucks. Refer to golang JSON issue #6213
+	var response2 map[string]map[string]RowUpdate2
+	err := ovs.rpcClient.CallWithContext(ctx, "monitor_cond", args, &response2)
+	reply = getTableUpdates2FromRawUnmarshal(response2)
+	if err != nil {
+		return nil, err
+	}
+	return &reply, err
+}
+
+func (ovs OvsdbClient) Monitor3(database string, jsonContext interface{}, requests map[string]MonitorRequest, currentTxn string) (*TableUpdates2, string, error) {
+	var reply TableUpdates2
+
+	ctx, cancel := context.WithTimeout(context.TODO(), ovs.timeout)
+	defer cancel()
+
+	args := NewMonitorArgs3(database, jsonContext, requests, currentTxn)
+
+	// This totally sucks. Refer to golang JSON issue #6213
+	var response []interface{}
+	err := ovs.rpcClient.CallWithContext(ctx, "monitor_cond_since", args, &response)
+	if len(response) < 3 {
+		return nil, "", fmt.Errorf("monitor_cond_since reply has less than 3 elements: %v", response)
+	}
+	b, err := json.Marshal(response[2])
+	if err != nil {
+		return nil, "", err
+	}
+	parsedResponse := make(map[string]map[string]RowUpdate2)
+	err = json.Unmarshal(b, &parsedResponse)
+	if err != nil {
+		return nil, "", err
+	}
+	reply = getTableUpdates2FromRawUnmarshal(parsedResponse)
+	if err != nil {
+		return nil, "", err
+	}
+	return &reply, response[1].(string), err
+}
+
 func getTableUpdatesFromRawUnmarshal(raw map[string]map[string]RowUpdate) TableUpdates {
 	var tableUpdates TableUpdates
 	tableUpdates.Updates = make(map[string]TableUpdate)
 	for table, update := range raw {
 		tableUpdate := TableUpdate{update}
+		tableUpdates.Updates[table] = tableUpdate
+	}
+	return tableUpdates
+}
+
+func getTableUpdates2FromRawUnmarshal(raw map[string]map[string]RowUpdate2) TableUpdates2 {
+	var tableUpdates TableUpdates2
+	tableUpdates.Updates = make(map[string]TableUpdate2)
+	for table, update := range raw {
+		tableUpdate := TableUpdate2{update}
 		tableUpdates.Updates[table] = tableUpdate
 	}
 	return tableUpdates

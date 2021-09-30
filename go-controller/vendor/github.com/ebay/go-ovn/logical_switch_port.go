@@ -37,7 +37,7 @@ type LogicalSwitchPort struct {
 	ExternalID       map[interface{}]interface{}
 }
 
-func (odbi *ovndb) lspAddImp(lsw, lsp string) (*OvnCommand, error) {
+func (odbi *ovndb) lspAddImp(lsw, lswUUID, lsp string) (*OvnCommand, error) {
 	namedUUID, err := newRowUUID()
 	if err != nil {
 		return nil, err
@@ -64,6 +64,9 @@ func (odbi *ovndb) lspAddImp(lsw, lsp string) (*OvnCommand, error) {
 
 	mutation := libovsdb.NewMutation("ports", opInsert, mutateSet)
 	condition := libovsdb.NewCondition("name", "==", lsw)
+	if lswUUID != "" {
+		condition = libovsdb.NewCondition("_uuid", "==", stringToGoUUID(lswUUID))
+	}
 
 	mutateOp := libovsdb.Operation{
 		Op:        opMutate,
