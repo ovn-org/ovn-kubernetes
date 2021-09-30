@@ -32,7 +32,8 @@ import (
 func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Node {
 	annotations := make(map[string]string)
 	if ovnHostSubnet != "" {
-		subnetAnnotations, err := util.CreateNodeHostSubnetAnnotation(ovntest.MustParseIPNets(ovnHostSubnet))
+		subnetAnnotations := map[string]string{}
+		err := util.UpdateNodeHostSubnetAnnotation(subnetAnnotations, ovntest.MustParseIPNets(ovnHostSubnet), types.DefaultNetworkName)
 		Expect(err).NotTo(HaveOccurred())
 		for k, v := range subnetAnnotations {
 			annotations[k] = fmt.Sprintf("%s", v)
@@ -145,7 +146,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				if err != nil {
 					return err
 				}
-				_, err = util.ParseNodeHostSubnetAnnotation(updatedNode)
+				_, err = util.ParseNodeHostSubnetAnnotation(updatedNode, types.DefaultNetworkName)
 				return err
 			}, 2).Should(MatchError(fmt.Sprintf("node %q has no \"k8s.ovn.org/node-subnets\" annotation", nodeName)))
 
