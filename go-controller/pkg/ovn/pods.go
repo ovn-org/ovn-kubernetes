@@ -570,7 +570,7 @@ func (oc *Controller) assignPodAddresses(nodeName string) (net.HardwareAddr, []*
 // Given a pod and the node on which it is scheduled, get all addresses currently assigned
 // to it from the nbdb.
 func (oc *Controller) getPortAddresses(nodeName, portName string) (net.HardwareAddr, []*net.IPNet, error) {
-	podMac, podIPs, err := util.GetPortAddresses(portName, oc.ovnNBClient)
+	podMac, podIPs, err := util.GetPortAddresses(portName, oc.nbClient)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -631,7 +631,6 @@ func ovnNBLSPDel(client libovsdbclient.Client, logicalPort, logicalSwitch string
 	if err != nil {
 		return fmt.Errorf("cannot delete logical switch port %s, %v", logicalPort, err)
 	}
-
 	return nil
 }
 

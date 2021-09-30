@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"sync"
 
-	goovn "github.com/ebay/go-ovn"
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
@@ -31,8 +30,8 @@ type MasterController struct {
 	kube             kube.Interface
 	allocator        *subnetallocator.SubnetAllocator
 	nodeEventHandler informer.EventHandler
-	ovnNBClient      goovn.Client
 	modelClient      libovsdbops.ModelClient
+	nbClient         client.Client
 }
 
 // NewMaster a new master controller that listens for node events
@@ -40,7 +39,6 @@ func NewMaster(kube kube.Interface,
 	nodeInformer cache.SharedIndexInformer,
 	namespaceInformer cache.SharedIndexInformer,
 	podInformer cache.SharedIndexInformer,
-	ovnNBClient goovn.Client,
 	libovsdbNBClient client.Client,
 	eventHandlerCreateFunction informer.EventHandlerCreateFunction,
 ) (*MasterController, error) {
@@ -50,8 +48,8 @@ func NewMaster(kube kube.Interface,
 	m := &MasterController{
 		kube:        kube,
 		allocator:   subnetallocator.NewSubnetAllocator(),
-		ovnNBClient: ovnNBClient,
 		modelClient: modelClient,
+		nbClient:    libovsdbNBClient,
 	}
 
 	m.nodeEventHandler = eventHandlerCreateFunction("node", nodeInformer,
@@ -187,7 +185,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 	}
 
 	// retrieve port configuration. If port isn't set up, portMAC will be nil
-	portMAC, _, _ = util.GetPortAddresses(portName, m.ovnNBClient)
+	portMAC, _, _ = util.GetPortAddresses(portName, m.nbClient)
 
 	// compare port configuration to annotation MAC, reconcile as needed
 	lspOK := false
