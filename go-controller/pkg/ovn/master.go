@@ -302,36 +302,10 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	nodeNames := []string{}
 	for _, node := range existingNodes.Items {
 		nodeNames = append(nodeNames, node.Name)
-		hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(&node)
-		klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnets)
-		for _, hostSubnet := range hostSubnets {
-			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostSubnet)
-			if err != nil {
-				utilruntime.HandleError(err)
-			}
-			util.UpdateUsedHostSubnetsCount(hostSubnet, &oc.v4HostSubnetsUsed, &oc.v6HostSubnetsUsed, true)
-		}
-		if config.Gateway.Mode == config.GatewayModeLocal {
-			nodeLocalNatIPs, _ := util.ParseNodeLocalNatIPAnnotation(&node)
-			klog.V(5).Infof("Node %s contains local NAT IPs: %v", node.Name, nodeLocalNatIPs)
-			for _, nodeLocalNatIP := range nodeLocalNatIPs {
-				var err error
-				if utilnet.IsIPv6(nodeLocalNatIP) {
-					err = oc.nodeLocalNatIPv6Allocator.Allocate(nodeLocalNatIP)
-				} else {
-					err = oc.nodeLocalNatIPv4Allocator.Allocate(nodeLocalNatIP)
-				}
-				if err != nil {
-					utilruntime.HandleError(err)
-				}
-			}
-		}
 	}
 
 	// update metrics for host subnets
 	metrics.RecordSubnetCount(v4HostSubnetCount, v6HostSubnetCount)
-	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
-
 	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "port_group"); err != nil {
 		klog.Fatal("OVN version too old; does not support port groups")
 	}
@@ -1402,12 +1376,39 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 			continue
 		}
 		foundNodes[node.Name] = node
+
+		hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
+		klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnets)
+		for _, hostSubnet := range hostSubnets {
+			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostSubnet)
+			if err != nil {
+				utilruntime.HandleError(err)
+			}
+			util.UpdateUsedHostSubnetsCount(hostSubnet, &oc.v4HostSubnetsUsed, &oc.v6HostSubnetsUsed, true)
+		}
+		if config.Gateway.Mode == config.GatewayModeLocal {
+			nodeLocalNatIPs, _ := util.ParseNodeLocalNatIPAnnotation(node)
+			klog.V(5).Infof("Node %s contains local NAT IPs: %v", node.Name, nodeLocalNatIPs)
+			for _, nodeLocalNatIP := range nodeLocalNatIPs {
+				var err error
+				if utilnet.IsIPv6(nodeLocalNatIP) {
+					err = oc.nodeLocalNatIPv6Allocator.Allocate(nodeLocalNatIP)
+				} else {
+					err = oc.nodeLocalNatIPv4Allocator.Allocate(nodeLocalNatIP)
+				}
+				if err != nil {
+					utilruntime.HandleError(err)
+				}
+			}
+		}
+
 		// For each existing node, reserve its joinSwitch LRP IPs if they already exist.
 		_, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
 		if err != nil {
 			klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
 		}
 	}
+	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
 
 	// We only deal with cleaning up nodes that shouldn't exist here, since
 	// watchNodes() will be called for all existing nodes at startup anyway.
