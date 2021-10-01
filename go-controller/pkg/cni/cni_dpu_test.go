@@ -2,21 +2,25 @@ package cni
 
 import (
 	"fmt"
+	"time"
+
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	kubeMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
-	"github.com/stretchr/testify/mock"
-	"time"
+	"k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var _ = Describe("cni_dpu tests", func() {
 	var fakeKubeInterface kubeMocks.KubeInterface
 	var fakeSriovnetOps utilMocks.SriovnetOps
 	var pr PodRequest
+	var pod *v1.Pod
 
 	BeforeEach(func() {
 		fakeKubeInterface = kubeMocks.KubeInterface{}
@@ -35,6 +39,13 @@ var _ = Describe("cni_dpu tests", func() {
 			},
 			timestamp: time.Time{},
 		}
+		pod = &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        pr.PodName,
+				Namespace:   pr.PodNamespace,
+				Annotations: map[string]string{},
+			},
+		}
 	})
 	Context("addDPUConnectionDetailsAnnot", func() {
 		It("Sets dpu.connection-details pod annotation", func() {
@@ -46,13 +57,11 @@ var _ = Describe("cni_dpu tests", func() {
 				VfId:      "2",
 				SandboxId: pr.SandboxID,
 			}
-			expectedAnnot, err := dpuCd.AsAnnotation()
-			annnot := make(map[string]interface{}, len(expectedAnnot))
-			for key, val := range expectedAnnot {
-				annnot[key] = val
-			}
+			fakeKubeInterface.On("GetPod", pr.PodNamespace, pr.PodName).Return(pod, nil)
+			cpod := pod.DeepCopy()
+			err := util.MarshalPodDPUConnDetails(&cpod.Annotations, &dpuCd, ovntypes.DefaultNetworkName)
 			Expect(err).ToNot(HaveOccurred())
-			fakeKubeInterface.On("SetAnnotationsOnPod", pr.PodNamespace, pr.PodName, annnot).Return(nil)
+			fakeKubeInterface.On("UpdatePod", cpod).Return(nil)
 			err = pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface, "")
 			Expect(err).ToNot(HaveOccurred())
 
@@ -89,11 +98,21 @@ var _ = Describe("cni_dpu tests", func() {
 		})
 
 		It("Fails if Set annotation on Pod fails", func() {
+			pod.Annotations = map[string]string{}
 			pr.CNIConf.DeviceID = "0000:05:00.4"
 			fakeSriovnetOps.On("GetPfPciFromVfPci", pr.CNIConf.DeviceID).Return("0000:05:00.0", nil)
 			fakeSriovnetOps.On("GetVfIndexByPciAddress", pr.CNIConf.DeviceID).Return(2, nil)
-			fakeKubeInterface.On("SetAnnotationsOnPod", mock.Anything, mock.Anything, mock.Anything).Return(fmt.Errorf("failed to set annotation"))
-			err := pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface, "")
+			dpuCd := util.DPUConnectionDetails{
+				PfId:      "0",
+				VfId:      "2",
+				SandboxId: pr.SandboxID,
+			}
+			fakeKubeInterface.On("GetPod", pr.PodNamespace, pr.PodName).Return(pod, nil)
+			cpod := pod.DeepCopy()
+			err := util.MarshalPodDPUConnDetails(&cpod.Annotations, &dpuCd, ovntypes.DefaultNetworkName)
+			Expect(err).ToNot(HaveOccurred())
+			fakeKubeInterface.On("UpdatePod", cpod).Return(fmt.Errorf("failed to set annotation"))
+			err = pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface, "")
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to set annotation"))
 		})

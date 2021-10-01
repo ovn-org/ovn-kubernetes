@@ -171,9 +171,9 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 				klog.Warningf("Failed to get pod %s/%s: %v", pr.PodNamespace, pr.PodName, err)
 				return response, nil
 			}
-			dpuCD := util.DPUConnectionDetails{}
-			if err := dpuCD.FromPodAnnotation(pod.Annotations); err != nil {
-				klog.Warningf("Failed to get DPU connection details annotation for pod %s/%s: %v", pr.PodNamespace,
+			dpuCD, err := util.UnmarshalPodDPUConnDetails(pod.Annotations, types.DefaultNetworkName)
+			if err != nil {
+				klog.Warningf("Failed to get DPU connection details annotation for pod %s/%s", pr.PodNamespace,
 					pr.PodName, err)
 				return response, nil
 			}

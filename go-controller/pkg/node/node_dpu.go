@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"sync"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
@@ -118,22 +120,45 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) {
 
 // getVfRepName returns the VF's representor of the VF assigned to the pod
 func (n *OvnNode) getVfRepName(pod *kapi.Pod) (string, error) {
-	dpuConnDetails := util.DPUConnectionDetails{}
-	if err := dpuConnDetails.FromPodAnnotation(pod.Annotations); err != nil {
-		return "", fmt.Errorf("failed to get dpu annotation. %v", err)
+	dpuCD, err := util.UnmarshalPodDPUConnDetails(pod.Annotations, types.DefaultNetworkName)
+	if err != nil {
+		return "", fmt.Errorf("failed to get dpu annotation for pod %s/%s: %v", pod.Namespace, pod.Name, err)
 	}
-	return util.GetSriovnetOps().GetVfRepresentorDPU(dpuConnDetails.PfId, dpuConnDetails.VfId)
+	return util.GetSriovnetOps().GetVfRepresentorDPU(dpuCD.PfId, dpuCD.VfId)
+}
+
+// updatePodDPUConnStatusWithRetry update the pod annotion with the givin connection details
+func (n *OvnNode) updatePodDPUConnStatusWithRetry(kube kube.Interface, origPod *kapi.Pod,
+	dpuConnStatus *util.DPUConnectionStatus) error {
+	podDesc := fmt.Sprintf("pod %s/%s", origPod.Namespace, origPod.Name)
+	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		pod, err := kube.GetPod(origPod.Namespace, origPod.Name)
+		if err != nil {
+			return err
+		}
+		// Informer cache should not be mutated, so get a copy of the object
+		cpod := pod.DeepCopy()
+		err = util.MarshalPodDPUConnStatus(&cpod.Annotations, dpuConnStatus, types.DefaultNetworkName)
+		if err != nil {
+			return err
+		}
+		return kube.UpdatePod(cpod)
+	})
+	if resultErr != nil {
+		return fmt.Errorf("failed to update %s annotation for %s: %v", util.DPUConnetionStatusAnnot, podDesc, resultErr)
+	}
+	return nil
 }
 
 // addRepPort adds the representor of the VF to the ovs bridge
 func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInterfaceInfo, podLister corev1listers.PodLister, kclient kubernetes.Interface) error {
 	klog.Infof("Adding VF representor %s", vfRepName)
-	dpuConnDetails := util.DPUConnectionDetails{}
-	if err := dpuConnDetails.FromPodAnnotation(pod.Annotations); err != nil {
+	dpuCD, err := util.UnmarshalPodDPUConnDetails(pod.Annotations, types.DefaultNetworkName)
+	if err != nil {
 		return fmt.Errorf("failed to get dpu annotation. %v", err)
 	}
 
-	err := cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, dpuConnDetails.SandboxId, podLister, kclient)
+	err = cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, dpuCD.SandboxId, podLister, kclient)
 	if err != nil {
 		// Note(adrianc): we are lenient with cleanup in this method as pod is going to be retried anyway.
 		_ = n.delRepPort(vfRepName)
@@ -160,18 +185,8 @@ func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInt
 	// Update connection-status annotation
 	// TODO(adrianc): we should update Status in case of error as well
 	connStatus := util.DPUConnectionStatus{Status: util.DPUConnectionStatusReady, Reason: ""}
-	podAnnotator := kube.NewPodAnnotator(n.Kube, pod.Name, pod.Namespace)
-	err = connStatus.SetPodAnnotation(podAnnotator)
+	err = n.updatePodDPUConnStatusWithRetry(n.Kube, pod, &connStatus)
 	if err != nil {
-		// we should not get here
-		_ = util.GetNetLinkOps().LinkSetDown(link)
-		_ = n.delRepPort(vfRepName)
-		return fmt.Errorf("failed to setup representor port. failed to set pod annotations. %v", err)
-	}
-
-	err = podAnnotator.Run()
-	if err != nil {
-		// cleanup
 		_ = util.GetNetLinkOps().LinkSetDown(link)
 		_ = n.delRepPort(vfRepName)
 		return fmt.Errorf("failed to setup representor port. failed to set pod annotations. %v", err)
