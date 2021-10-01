@@ -28,7 +28,6 @@ type MasterController struct {
 	allocator        *subnetallocator.SubnetAllocator
 	nodeEventHandler informer.EventHandler
 	ovnNBClient      goovn.Client
-	ovnSBClient      goovn.Client
 }
 
 // NewMaster a new master controller that listens for node events
@@ -37,7 +36,6 @@ func NewMaster(kube kube.Interface,
 	namespaceInformer cache.SharedIndexInformer,
 	podInformer cache.SharedIndexInformer,
 	ovnNBClient goovn.Client,
-	ovnSBClient goovn.Client,
 	eventHandlerCreateFunction informer.EventHandlerCreateFunction,
 ) (*MasterController, error) {
 
@@ -45,7 +43,6 @@ func NewMaster(kube kube.Interface,
 		kube:        kube,
 		allocator:   subnetallocator.NewSubnetAllocator(),
 		ovnNBClient: ovnNBClient,
-		ovnSBClient: ovnSBClient,
 	}
 
 	m.nodeEventHandler = eventHandlerCreateFunction("node", nodeInformer,
