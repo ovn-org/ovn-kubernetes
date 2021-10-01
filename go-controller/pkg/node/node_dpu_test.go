@@ -5,6 +5,7 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/stretchr/testify/mock"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -271,16 +272,22 @@ var _ = Describe("Node DPU tests", func() {
 			})
 
 			It("Sets dpu.connection-status pod annotation on success", func() {
-				expectedAnnot := map[string]interface{}{util.DPUConnetionStatusAnnot: `{"Status":"Ready"}`}
 				netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
 				netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(nil)
 				netlinkOpsMock.On("LinkSetUp", vfLink).Return(nil)
-				kubeMock.On("SetAnnotationsOnPod", pod.Namespace, pod.Name, expectedAnnot).Return(nil)
+				dcs := util.DPUConnectionStatus{
+					Status: "Ready",
+				}
+				kubeMock.On("GetPod", pod.Namespace, pod.Name).Return(&pod, nil)
+				cpod := pod.DeepCopy()
+				err := util.MarshalPodDPUConnStatus(&cpod.Annotations, &dcs, types.DefaultNetworkName)
+				Expect(err).ToNot(HaveOccurred())
+				kubeMock.On("UpdatePod", cpod).Return(nil)
 
 				fakeClient := newFakeKubeClientWithPod(&pod)
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
 
-				err := node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
+				err = node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 			})
@@ -289,8 +296,14 @@ var _ = Describe("Node DPU tests", func() {
 				netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
 				netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(nil)
 				netlinkOpsMock.On("LinkSetUp", vfLink).Return(nil)
-				kubeMock.On("SetAnnotationsOnPod", pod.Namespace, pod.Name, mock.Anything).Return(
-					fmt.Errorf("failed to set pod annotations"))
+				dcs := util.DPUConnectionStatus{
+					Status: "Ready",
+				}
+				kubeMock.On("GetPod", pod.Namespace, pod.Name).Return(&pod, nil)
+				cpod := pod.DeepCopy()
+				err := util.MarshalPodDPUConnStatus(&cpod.Annotations, &dcs, types.DefaultNetworkName)
+				Expect(err).ToNot(HaveOccurred())
+				kubeMock.On("UpdatePod", cpod).Return(fmt.Errorf("failed to set pod annotations"))
 				// Mock netlink/ovs calls for cleanup
 				netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -300,7 +313,7 @@ var _ = Describe("Node DPU tests", func() {
 				fakeClient := newFakeKubeClientWithPod(&pod)
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
 
-				err := node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
+				err = node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
 				Expect(err).To(HaveOccurred())
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 			})
