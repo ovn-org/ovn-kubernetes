@@ -33,8 +33,7 @@ func isOvnReady(podAnnotation map[string]string) bool {
 func isSmartNICReady(podAnnotation map[string]string) bool {
 	if isOvnReady(podAnnotation) {
 		// check Smart-NIC connection status
-		status := util.SmartNICConnectionStatus{}
-		if err := status.FromPodAnnotation(podAnnotation); err == nil {
+		if status, err := util.UnmarshalPodSmartNicConnStatus(podAnnotation, types.DefaultNetworkName); err == nil {
 			if status.Status == util.SmartNicConnectionStatusReady {
 				return true
 			}

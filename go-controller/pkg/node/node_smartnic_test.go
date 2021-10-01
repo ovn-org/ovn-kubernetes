@@ -4,6 +4,7 @@ import (
 	"fmt"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/stretchr/testify/mock"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -270,16 +271,20 @@ var _ = Describe("Node Smart NIC tests", func() {
 			})
 
 			It("Sets smartnic-connection-status pod annotation on success", func() {
-				expectedAnnot := map[string]interface{}{util.SmartNicConnetionStatusAnnot: `{"Status":"Ready"}`}
 				netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
 				netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(nil)
 				netlinkOpsMock.On("LinkSetUp", vfLink).Return(nil)
-				kubeMock.On("SetAnnotationsOnPod", pod.Namespace, pod.Name, expectedAnnot).Return(nil)
+				scs := util.SmartNICConnectionStatus{
+					Status: "Ready",
+				}
+				err := util.MarshalPodSmartNicConnStatus(&pod.Annotations, &scs, types.DefaultNetworkName)
+				Expect(err).ToNot(HaveOccurred())
+				kubeMock.On("UpdatePod", &pod).Return(nil)
 
 				fakeClient := newFakeKubeClientWithPod(&pod)
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
 
-				err := node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
+				err = node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 			})
@@ -288,8 +293,12 @@ var _ = Describe("Node Smart NIC tests", func() {
 				netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
 				netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(nil)
 				netlinkOpsMock.On("LinkSetUp", vfLink).Return(nil)
-				kubeMock.On("SetAnnotationsOnPod", pod.Namespace, pod.Name, mock.Anything).Return(
-					fmt.Errorf("failed to set pod annotations"))
+				scs := util.SmartNICConnectionStatus{
+					Status: "Ready",
+				}
+				err := util.MarshalPodSmartNicConnStatus(&pod.Annotations, &scs, types.DefaultNetworkName)
+				Expect(err).ToNot(HaveOccurred())
+				kubeMock.On("UpdatePod", &pod).Return(fmt.Errorf("failed to set pod annotations"))
 				// Mock netlink/ovs calls for cleanup
 				netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -299,7 +308,7 @@ var _ = Describe("Node Smart NIC tests", func() {
 				fakeClient := newFakeKubeClientWithPod(&pod)
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
 
-				err := node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
+				err = node.addRepPort(&pod, vfRep, ifInfo, &podLister, fakeClient)
 				Expect(err).To(HaveOccurred())
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 			})

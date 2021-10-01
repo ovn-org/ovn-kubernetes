@@ -4,8 +4,34 @@ import (
 	"fmt"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
+	"k8s.io/client-go/util/retry"
 )
+
+// updatePodSmartNicConnDetailsWithRetry update the pod annotion with the givin connection details
+func (pr *PodRequest) updatePodSmartNicConnDetailsWithRetry(kube kube.Interface, smartNicConnDetails *util.SmartNICConnectionDetails) error {
+	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		// Informer cache should not be mutated, so get a copy of the object
+		pod, err := kube.GetPod(pr.PodNamespace, pr.PodName)
+		if err != nil {
+			return err
+		}
+
+		cpod := pod.DeepCopy()
+		err = util.MarshalPodSmartNicConnDetails(&cpod.Annotations, smartNicConnDetails, types.DefaultNetworkName)
+		if err != nil {
+			return err
+		}
+		return kube.UpdatePod(cpod)
+	})
+	if resultErr != nil {
+		return fmt.Errorf("failed to update %s annotation on pod %s/%s: %v",
+			util.SmartNicConnectionDetailsAnnot, pr.PodNamespace, pr.PodName, resultErr)
+	}
+	return nil
+}
 
 func (pr *PodRequest) addSmartNICConnectionDetailsAnnot(k kube.Interface) error {
 	// 1. Verify there is a device id
@@ -40,14 +66,5 @@ func (pr *PodRequest) addSmartNICConnectionDetailsAnnot(k kube.Interface) error 
 		SandboxId: pr.SandboxID,
 	}
 
-	podAnnot := kube.NewPodAnnotator(k, pr.PodName, pr.PodNamespace)
-	if err := podAnnot.Set(util.SmartNicConnectionDetailsAnnot, smartNicConnDetails); err != nil {
-		// we should not get here
-		return fmt.Errorf("failed to generate %s annotation for pod. %v", util.SmartNicConnectionDetailsAnnot, err)
-	}
-	if err := podAnnot.Run(); err != nil {
-		return err
-	}
-
-	return nil
+	return pr.updatePodSmartNicConnDetailsWithRetry(k, &smartNicConnDetails)
 }
