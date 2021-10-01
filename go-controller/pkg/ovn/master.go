@@ -378,7 +378,6 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 			oc.watchFactory.NamespaceInformer(),
 			oc.watchFactory.PodInformer(),
 			oc.ovnNBClient,
-			oc.ovnSBClient,
 			informer.NewDefaultEventHandler,
 		)
 		if err != nil {

@@ -111,7 +111,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
-			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
 
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
@@ -119,7 +118,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
 				mockOVNNBClient,
-				mockOVNSBClient,
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -182,7 +180,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
-			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 			m, err := NewMaster(
@@ -191,7 +188,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
 				mockOVNNBClient,
-				mockOVNSBClient,
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -265,7 +261,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
-			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
 
 			populatePortAddresses(nodeName, nodeHOMAC, nodeHOIP, mockOVNNBClient)
 
@@ -279,7 +274,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
 				mockOVNNBClient,
-				mockOVNSBClient,
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -332,14 +326,12 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
-			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
 				mockOVNNBClient,
-				mockOVNSBClient,
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
