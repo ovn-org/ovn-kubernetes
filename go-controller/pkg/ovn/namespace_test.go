@@ -270,10 +270,10 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 				// clusterController.WatchNodes() needs to following two port groups to have been created.
 				pg := libovsdbops.BuildPortGroup(ovntypes.ClusterPortGroupName, ovntypes.ClusterPortGroupName, nil, nil)
-				err = libovsdbops.CreateOrUpdatePortGroups(fakeOvn.controller.nbClient, pg)
+				err = libovsdbops.CreateOrUpdatePortGroups(fakeOvn.controller.mc.nbClient, pg)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				pg = libovsdbops.BuildPortGroup(ovntypes.ClusterRtrPortGroupName, ovntypes.ClusterRtrPortGroupName, nil, nil)
-				err = libovsdbops.CreateOrUpdatePortGroups(fakeOvn.controller.nbClient, pg)
+				err = libovsdbops.CreateOrUpdatePortGroups(fakeOvn.controller.mc.nbClient, pg)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				fakeOvn.controller.WatchNamespaces()

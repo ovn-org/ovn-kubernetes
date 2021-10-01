@@ -48,7 +48,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 	// in order to minimize the number of database transactions build a map of all ports keyed by UUID
 	portCache := make(map[string]nbdb.LogicalSwitchPort)
 	lspList := []nbdb.LogicalSwitchPort{}
-	err := oc.nbClient.List(&lspList)
+	err := oc.mc.nbClient.List(&lspList)
 	if err != nil {
 		klog.Errorf("Cannot sync pods, cannot retrieve list of logical switch ports (%+v)", err)
 		return
@@ -57,7 +57,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 		portCache[lsp.UUID] = lsp
 	}
 	// get all the nodes from the watchFactory
-	nodes, err := oc.watchFactory.GetNodes()
+	nodes, err := oc.mc.watchFactory.GetNodes()
 	if err != nil {
 		klog.Errorf("Failed to get nodes")
 		return
@@ -65,7 +65,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 	for _, n := range nodes {
 		stalePorts := []string{}
 		// find the logical switch for the node
-		ls, err := findLogicalSwitch(oc.nbClient, n.Name)
+		ls, err := findLogicalSwitch(oc.mc.nbClient, n.Name)
 		if err != nil {
 			klog.Errorf("Error getting logical switch for node %s: %v", n.Name, err)
 			continue
@@ -78,7 +78,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			}
 		}
 		if len(stalePorts) > 0 {
-			ops, err := oc.nbClient.Where(ls).Mutate(ls, model.Mutation{
+			ops, err := oc.mc.nbClient.Where(ls).Mutate(ls, model.Mutation{
 				Field:   &ls.Ports,
 				Mutator: ovsdb.MutateOperationDelete,
 				Value:   stalePorts,
@@ -90,7 +90,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			allOps = append(allOps, ops...)
 		}
 	}
-	_, err = libovsdbops.TransactAndCheck(oc.nbClient, allOps)
+	_, err = libovsdbops.TransactAndCheck(oc.mc.nbClient, allOps)
 	if err != nil {
 		klog.Errorf("Could not remove stale logicalPorts from switches (%+v)", err)
 	}
@@ -111,7 +111,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		klog.Errorf(err.Error())
 		// If ovnkube-master restarts, it is also possible the Pod's logical switch port
 		// is not readded into the cache. Delete logical switch port anyway.
-		err = ovnNBLSPDel(oc.nbClient, logicalPort, pod.Spec.NodeName)
+		err = ovnNBLSPDel(oc.mc.nbClient, logicalPort, pod.Spec.NodeName)
 		if err != nil {
 			klog.Errorf(err.Error())
 		}
@@ -135,7 +135,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		klog.Errorf(err.Error())
 	}
 
-	err = ovnNBLSPDel(oc.nbClient, logicalPort, pod.Spec.NodeName)
+	err = ovnNBLSPDel(oc.mc.nbClient, logicalPort, pod.Spec.NodeName)
 	if err != nil {
 		klog.Errorf(err.Error())
 	}
@@ -159,7 +159,7 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (*nbdb.LogicalSw
 	// is created by the node watch
 	ls := &nbdb.LogicalSwitch{Name: nodeName}
 	if err := wait.PollImmediate(30*time.Millisecond, 30*time.Second, func() (bool, error) {
-		logicalSwitch, err := findLogicalSwitch(oc.nbClient, nodeName)
+		logicalSwitch, err := findLogicalSwitch(oc.mc.nbClient, nodeName)
 		if err != nil && err != libovsdbclient.ErrNotFound {
 			return false, err
 		}
@@ -284,7 +284,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// UUID and and the port cache, address sets, and port groups
 	// will still have the old UUID.
 	getLSP := &nbdb.LogicalSwitchPort{Name: portName}
-	err = oc.nbClient.Get(getLSP)
+	err = oc.mc.nbClient.Get(getLSP)
 	if err != nil && err != libovsdbclient.ErrNotFound {
 
 		return fmt.Errorf("unable to get the lsp: %s from the nbdb: %s", portName, err)
@@ -427,7 +427,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s\nAnnotation=%s",
 			podIfAddrs, podMac, podAnnotation.Gateways, marshalledAnnotation)
-		if err = oc.kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, marshalledAnnotation); err != nil {
+		if err = oc.mc.kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, marshalledAnnotation); err != nil {
 			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 		}
 		releaseIPs = false
@@ -490,14 +490,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	if libovsdbops.IsNamedUUID(lsp.UUID) {
 		// create new logical switch port
-		ops, err := oc.nbClient.Create(lsp)
+		ops, err := oc.mc.nbClient.Create(lsp)
 		if err != nil {
 			return err
 		}
 		allOps = append(allOps, ops...)
 
 		//add the logical switch port to the logical switch
-		ops, err = oc.nbClient.Where(ls).Mutate(ls, model.Mutation{
+		ops, err = oc.mc.nbClient.Where(ls).Mutate(ls, model.Mutation{
 			Field:   &ls.Ports,
 			Mutator: ovsdb.MutateOperationInsert,
 			Value:   []string{lsp.UUID},
@@ -509,14 +509,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	} else {
 		//update Existing logical switch port
-		ops, err := oc.nbClient.Where(lsp).Update(lsp, &lsp.Addresses, &lsp.ExternalIDs, &lsp.Options, &lsp.PortSecurity)
+		ops, err := oc.mc.nbClient.Where(lsp).Update(lsp, &lsp.Addresses, &lsp.ExternalIDs, &lsp.Options, &lsp.PortSecurity)
 		if err != nil {
 			return fmt.Errorf("could not create commands to update logical switch port %s - %+v", portName, err)
 		}
 		allOps = append(allOps, ops...)
 	}
 
-	results, err := libovsdbops.TransactAndCheck(oc.nbClient, allOps)
+	results, err := libovsdbops.TransactAndCheck(oc.mc.nbClient, allOps)
 	if err != nil {
 
 		return fmt.Errorf("could not perform creation or update of logical switch port %s - %+v", portName, err)
@@ -535,12 +535,12 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// If multicast is allowed and enabled for the namespace, add the port to the allow policy.
 	// FIXME: there's a race here with the Namespace multicastUpdateNamespace() handler, but
 	// it's rare and easily worked around for now.
-	ns, err := oc.watchFactory.GetNamespace(pod.Namespace)
+	ns, err := oc.mc.watchFactory.GetNamespace(pod.Namespace)
 	if err != nil {
 		return err
 	}
 	if oc.multicastSupport && isNamespaceMulticastEnabled(ns.Annotations) {
-		if err := podAddAllowMulticastPolicy(oc.nbClient, pod.Namespace, portInfo); err != nil {
+		if err := podAddAllowMulticastPolicy(oc.mc.nbClient, pod.Namespace, portInfo); err != nil {
 			return err
 		}
 	}
@@ -570,7 +570,7 @@ func (oc *Controller) assignPodAddresses(nodeName string) (net.HardwareAddr, []*
 // Given a pod and the node on which it is scheduled, get all addresses currently assigned
 // to it from the nbdb.
 func (oc *Controller) getPortAddresses(nodeName, portName string) (net.HardwareAddr, []*net.IPNet, error) {
-	podMac, podIPs, err := util.GetPortAddresses(portName, oc.ovnNBClient)
+	podMac, podIPs, err := util.GetPortAddresses(portName, oc.mc.ovnNBClient)
 	if err != nil {
 		return nil, nil, err
 	}

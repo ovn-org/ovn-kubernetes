@@ -251,9 +251,14 @@ func runOvnKube(ctx *cli.Context) error {
 		// since we capture some metrics in Start()
 		metrics.RegisterMasterMetrics(ovnNBClient, ovnSBClient)
 
-		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil,
-			ovnNBClient, ovnSBClient, libovsdbOvnNBClient, libovsdbOvnSBClient, util.EventRecorder(ovnClientset.KubeClient))
-		if err := ovnController.Start(master, wg, ctx.Context); err != nil {
+		ovnMHController, err := ovn.NewOvnMHController(ovnClientset, master, masterWatchFactory,
+			stopChan, nil, ovnNBClient, ovnSBClient, libovsdbOvnNBClient, libovsdbOvnSBClient,
+			util.EventRecorder(ovnClientset.KubeClient), wg)
+		if err != nil {
+			return err
+		}
+		err = ovnMHController.Start(ctx.Context)
+		if err != nil {
 			return err
 		}
 	}

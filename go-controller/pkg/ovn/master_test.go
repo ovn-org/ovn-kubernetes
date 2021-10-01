@@ -1237,10 +1237,12 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
+			ovnMHController, err := NewOvnMHController(fakeClient, "", f,
+				stopChan, addressset.NewFakeAddressSetFactory(), ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+				record.NewFakeRecorder(0), nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			clusterController := ovnMHController.ovnController
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 
 			clusterController.SCTPSupport = true
@@ -1251,10 +1253,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			// clusterController.WatchNodes() needs to following two port groups to have been created.
 			pg := libovsdbops.BuildPortGroup(types.ClusterPortGroupName, types.ClusterPortGroupName, nil, nil)
-			err = libovsdbops.CreateOrUpdatePortGroups(clusterController.nbClient, pg)
+			err = libovsdbops.CreateOrUpdatePortGroups(clusterController.mc.nbClient, pg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			pg = libovsdbops.BuildPortGroup(types.ClusterRtrPortGroupName, types.ClusterRtrPortGroupName, nil, nil)
-			err = libovsdbops.CreateOrUpdatePortGroups(clusterController.nbClient, pg)
+			err = libovsdbops.CreateOrUpdatePortGroups(clusterController.mc.nbClient, pg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// Let the real code run and ensure OVN database sync
@@ -1512,10 +1514,14 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 				t.Fatalf("Error creating libovsdb test harness %v", err)
 			}
 
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
+			ovnMHController, err := NewOvnMHController(fakeClient, "", f,
+				stopChan, addressset.NewFakeAddressSetFactory(), ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+				record.NewFakeRecorder(0), nil)
+			if err != nil {
+				t.Fatalf("Error initializing OVN controller %v", err)
+			}
+			clusterController := ovnMHController.ovnController
 
 			// configure the cluster allocators
 			for _, subnetString := range tt.networkRanges {

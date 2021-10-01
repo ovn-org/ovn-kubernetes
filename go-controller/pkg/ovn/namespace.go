@@ -106,7 +106,7 @@ func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error 
 
 	// Remove the port from the multicast allow policy.
 	if oc.multicastSupport && nsInfo.multicastEnabled {
-		if err := podDeleteAllowMulticastPolicy(oc.nbClient, ns, portInfo); err != nil {
+		if err := podDeleteAllowMulticastPolicy(oc.mc.nbClient, ns, portInfo); err != nil {
 			return err
 		}
 	}
@@ -145,7 +145,7 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 	if enabled {
 		err = oc.createMulticastAllowPolicy(ns.Name, nsInfo)
 	} else {
-		err = deleteMulticastAllowPolicy(oc.nbClient, ns.Name, nsInfo)
+		err = deleteMulticastAllowPolicy(oc.mc.nbClient, ns.Name, nsInfo)
 	}
 	if err != nil {
 		klog.Errorf(err.Error())
@@ -158,7 +158,7 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) {
 	if nsInfo.multicastEnabled {
 		nsInfo.multicastEnabled = false
-		if err := deleteMulticastAllowPolicy(oc.nbClient, ns.Name, nsInfo); err != nil {
+		if err := deleteMulticastAllowPolicy(oc.mc.nbClient, ns.Name, nsInfo); err != nil {
 			klog.Errorf(err.Error())
 		}
 	}
@@ -246,7 +246,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		// if old gw annotation was empty, new one must not be empty, so we should remove any per pod SNAT
 		if oldGWAnnotation == "" {
 			if config.Gateway.DisableSNATMultipleGWs {
-				existingPods, err := oc.watchFactory.GetPods(old.Name)
+				existingPods, err := oc.mc.watchFactory.GetPods(old.Name)
 				if err != nil {
 					klog.Errorf("Failed to get all the pods (%v)", err)
 				}
@@ -276,7 +276,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		// if new annotation is empty, exgws were removed, may need to add SNAT per pod
 		// check if there are any pod gateways serving this namespace as well
 		if gwAnnotation == "" && len(nsInfo.routingExternalPodGWs) == 0 && config.Gateway.DisableSNATMultipleGWs {
-			existingPods, err := oc.watchFactory.GetPods(old.Name)
+			existingPods, err := oc.mc.watchFactory.GetPods(old.Name)
 			if err != nil {
 				klog.Errorf("Failed to get all the pods (%v)", err)
 			}
@@ -492,7 +492,7 @@ func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (addressset.Addre
 	if config.Kubernetes.HostNetworkNamespace != "" &&
 		ns == config.Kubernetes.HostNetworkNamespace {
 		// add the mp0 interface addresses to this namespace.
-		existingNodes, err := oc.watchFactory.GetNodes()
+		existingNodes, err := oc.mc.watchFactory.GetNodes()
 		if err != nil {
 			klog.Errorf("Failed to get all nodes (%v)", err)
 		} else {
@@ -521,7 +521,7 @@ func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (addressset.Addre
 		}
 	}
 	// Get all the pods in the namespace and append their IP to the address_set
-	existingPods, err := oc.watchFactory.GetPods(ns)
+	existingPods, err := oc.mc.watchFactory.GetPods(ns)
 	if err != nil {
 		klog.Errorf("Failed to get all the pods (%v)", err)
 	} else {
