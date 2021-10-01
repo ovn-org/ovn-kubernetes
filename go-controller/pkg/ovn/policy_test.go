@@ -404,9 +404,11 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 		namespaceName2 = "namespace2"
 	)
 	var (
-		app     *cli.App
-		fakeOvn *FakeOVN
-		fExec   *ovntest.FakeExec
+		app                   *cli.App
+		fakeOvn               *FakeOVN
+		fExec                 *ovntest.FakeExec
+		initialDB             libovsdb.TestSetup
+		gomegaFormatMaxLength int
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -422,10 +424,20 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 		fExec = ovntest.NewLooseCompareFakeExec()
 		fakeOvn = NewFakeOVN(fExec)
 		ovntest.ResetNumMockExecutions()
+		gomegaFormatMaxLength = format.MaxLength
+		format.MaxLength = 0
+		initialDB = libovsdb.TestSetup{
+			NBData: []libovsdb.TestData{
+				&nbdb.LogicalSwitch{
+					Name: "node1",
+				},
+			},
+		}
 	})
 
 	ginkgo.AfterEach(func() {
 		fakeOvn.shutdown()
+		format.MaxLength = gomegaFormatMaxLength
 	})
 
 	ginkgo.Context("during execution", func() {
@@ -435,7 +447,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 				app.Action = func(ctx *cli.Context) error {
 					namespace1 := *newNamespace(namespaceName1)
 
-					fakeOvn.start(ctx,
+					fakeOvn.startWithDBSetup(ctx, libovsdb.TestSetup{},
 						&v1.NamespaceList{
 							Items: []v1.Namespace{
 								namespace1,
@@ -494,10 +506,10 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 						"fd00:10:244::1",
 						"myPod2",
 						"fd00:10:244::3",
-						"0a:58:0a:80:02:03",
+						"0a:58:dd:33:05:d8",
 						namespace1.Name,
 					)
-					var tPods []pod
+					var tPods []testPod
 					var tPodIPs []string
 					if m.IPv4Mode {
 						tPods = append(tPods, nPodTestV4)
@@ -512,8 +524,9 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 					for _, tPod := range tPods {
 						pods = append(pods, *newPod(tPod.namespace, tPod.podName, tPod.nodeName, tPod.podIP))
 					}
+					fmt.Printf("KEYWORD: pods %+v\n", pods)
 
-					fakeOvn.start(ctx,
+					fakeOvn.startWithDBSetup(ctx, initialDB,
 						&v1.NamespaceList{
 							Items: []v1.Namespace{
 								namespace1,
@@ -526,7 +539,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 					setIpMode(m)
 
 					for _, tPod := range tPods {
-						tPod.baseCmds(fExec)
 						tPod.populateLogicalSwitchCache(fakeOvn)
 					}
 
@@ -538,7 +550,13 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 
 					// Enable multicast in the namespace
 					mcastPolicy := multicastPolicy{}
-					expectedData := mcastPolicy.getMulticastPolicyExpectedData(namespace1.Name, []string{fakeUUID})
+					ports := []string{}
+					for _, tPod := range tPods {
+						ports = append(ports, tPod.portUUID)
+					}
+
+					expectedData := mcastPolicy.getMulticastPolicyExpectedData(namespace1.Name, ports)
+					expectedData = append(expectedData, getExpectedDataPodsAndSwitches(tPods, []string{"node1"})...)
 					ns.Annotations[nsMulticastAnnotation] = "true"
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -571,24 +589,25 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 						"fd00:10:244::1",
 						"myPod2",
 						"fd00:10:244::3",
-						"0a:58:0a:80:02:03",
+						"0a:58:dd:33:05:d8",
 						namespace1.Name,
 					)
-					var tPods []pod
+					var tPods []testPod
 					var tPodIPs []string
-					var tPodUUIDs []string
+					ports := []string{}
 					if m.IPv4Mode {
 						tPods = append(tPods, nPodTestV4)
 						tPodIPs = append(tPodIPs, nPodTestV4.podIP)
-						tPodUUIDs = append(tPodUUIDs, fakeUUID)
 					}
 					if m.IPv6Mode {
 						tPods = append(tPods, nPodTestV6)
 						tPodIPs = append(tPodIPs, nPodTestV6.podIP)
-						tPodUUIDs = append(tPodUUIDs, fakeUUID)
+					}
+					for _, pod := range tPods {
+						ports = append(ports, pod.portUUID)
 					}
 
-					fakeOvn.start(ctx,
+					fakeOvn.startWithDBSetup(ctx, initialDB,
 						&v1.NamespaceList{
 							Items: []v1.Namespace{
 								namespace1,
@@ -596,8 +615,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 						},
 					)
 					setIpMode(m)
-
-					nPodTestV4.baseCmds(fExec)
 
 					fakeOvn.controller.WatchNamespaces()
 					fakeOvn.controller.WatchPods()
@@ -611,7 +628,10 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 					ns.Annotations[nsMulticastAnnotation] = "true"
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
+					gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(expectedData, &nbdb.LogicalSwitch{
+						UUID: libovsdbops.BuildNamedUUID(),
+						Name: "node1",
+					})...))
 
 					for _, tPod := range tPods {
 						tPod.populateLogicalSwitchCache(fakeOvn)
@@ -620,7 +640,8 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					}
 					fakeOvn.asf.EventuallyExpectAddressSetWithIPs(namespace1.Name, tPodIPs)
-					expectedDataWithPods := mcastPolicy.getMulticastPolicyExpectedData(namespace1.Name, tPodUUIDs)
+					expectedDataWithPods := mcastPolicy.getMulticastPolicyExpectedData(namespace1.Name, ports)
+					expectedDataWithPods = append(expectedDataWithPods, getExpectedDataPodsAndSwitches(tPods, []string{"node1"})...)
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedDataWithPods...))
 
 					for _, tPod := range tPods {
@@ -630,7 +651,10 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					}
 					fakeOvn.asf.EventuallyExpectEmptyAddressSetExist(namespace1.Name)
-					gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
+					gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(expectedData, &nbdb.LogicalSwitch{
+						UUID: libovsdbops.BuildNamedUUID(),
+						Name: "node1",
+					})...))
 
 					return nil
 				}
@@ -649,9 +673,10 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 		namespaceName2 = "namespace2"
 	)
 	var (
-		app     *cli.App
-		fakeOvn *FakeOVN
-		fExec   *ovntest.FakeExec
+		app       *cli.App
+		fakeOvn   *FakeOVN
+		fExec     *ovntest.FakeExec
+		initialDB libovsdb.TestSetup
 
 		gomegaFormatMaxLength int
 	)
@@ -669,6 +694,13 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 		gomegaFormatMaxLength = format.MaxLength
 		format.MaxLength = 0
+		initialDB = libovsdb.TestSetup{
+			NBData: []libovsdb.TestData{
+				&nbdb.LogicalSwitch{
+					Name: "node1",
+				},
+			},
+		}
 	})
 
 	ginkgo.AfterEach(func() {
@@ -719,7 +751,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				expectedData = append(expectedData, gressPolicyExpectedData...)
 				expectedData = append(expectedData, defaultDenyExpectedData...)
 
-				fakeOvn.start(ctx,
+				fakeOvn.startWithDBSetup(ctx, initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -743,7 +775,10 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(expectedData, &nbdb.LogicalSwitch{
+					UUID: libovsdbops.BuildNamedUUID(),
+					Name: "node1",
+				})...))
 
 				return nil
 			}
@@ -876,16 +911,15 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				nPodTest.baseCmds(fExec)
-
 				npTest := kNetworkPolicy{}
-				gressPolicyExpectedData := npTest.getPolicyData(networkPolicy, []string{fakeUUID}, []string{}, nil)
-				defaultDenyExpectedData := npTest.getDefaultDenyData(networkPolicy, []string{fakeUUID})
+				gressPolicyExpectedData := npTest.getPolicyData(networkPolicy, []string{nPodTest.portUUID}, []string{}, nil)
+				defaultDenyExpectedData := npTest.getDefaultDenyData(networkPolicy, []string{nPodTest.portUUID})
 				expectedData := []libovsdb.TestData{}
 				expectedData = append(expectedData, gressPolicyExpectedData...)
 				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
 
-				fakeOvn.start(ctx,
+				fakeOvn.startWithDBSetup(ctx, initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -977,8 +1011,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				nPodTest.baseCmds(fExec)
-
 				npTest := kNetworkPolicy{}
 				gressPolicyExpectedData := npTest.getPolicyData(networkPolicy, nil, []string{}, nil)
 				defaultDenyExpectedData := npTest.getDefaultDenyData(networkPolicy, nil)
@@ -986,7 +1018,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				expectedData = append(expectedData, gressPolicyExpectedData...)
 				expectedData = append(expectedData, defaultDenyExpectedData...)
 
-				fakeOvn.start(ctx,
+				fakeOvn.startWithDBSetup(ctx, initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -1016,7 +1048,10 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(expectedData, &nbdb.LogicalSwitch{
+					UUID: libovsdbops.BuildNamedUUID(),
+					Name: "node1",
+				})...))
 
 				return nil
 			}
@@ -1092,16 +1127,15 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					}},
 				)
 
-				nPodTest.baseCmds(fExec)
-
 				npTest := kNetworkPolicy{}
-				gressPolicy1ExpectedData := npTest.getPolicyData(networkPolicy, []string{fakeUUID}, nil, []int32{portNum})
-				defaultDenyExpectedData := npTest.getDefaultDenyData(networkPolicy, []string{fakeUUID})
+				gressPolicy1ExpectedData := npTest.getPolicyData(networkPolicy, []string{nPodTest.portUUID}, nil, []int32{portNum})
+				defaultDenyExpectedData := npTest.getDefaultDenyData(networkPolicy, []string{nPodTest.portUUID})
 				expectedData := []libovsdb.TestData{}
 				expectedData = append(expectedData, gressPolicy1ExpectedData...)
 				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
 
-				fakeOvn.start(ctx,
+				fakeOvn.startWithDBSetup(ctx, initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{namespace1},
 					},
@@ -1130,7 +1164,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				_, err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Create(context.TODO(), networkPolicy2, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				gressPolicy2ExpectedData := npTest.getPolicyData(networkPolicy2, []string{fakeUUID}, nil, []int32{portNum + 1})
+				gressPolicy2ExpectedData := npTest.getPolicyData(networkPolicy2, []string{nPodTest.portUUID}, nil, []int32{portNum + 1})
 				expectedDataWithPolicy2 := append(expectedData, gressPolicy2ExpectedData...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedDataWithPolicy2...))
 
@@ -1151,7 +1185,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				acls = append(acls, gressPolicy1ExpectedData[:len(gressPolicy1ExpectedData)-1]...)
 				acls = append(acls, gressPolicy2ExpectedData[:len(gressPolicy2ExpectedData)-1]...)
 				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(acls...))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)))
 
 				return nil
 			}
@@ -1205,16 +1239,15 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				nPodTest.baseCmds(fExec)
-
 				npTest := kNetworkPolicy{}
-				gressPolicyExpectedData := npTest.getPolicyData(networkPolicy, []string{fakeUUID}, []string{namespace2.Name}, nil)
-				defaultDenyExpectedData := npTest.getDefaultDenyData(networkPolicy, []string{fakeUUID})
+				gressPolicyExpectedData := npTest.getPolicyData(networkPolicy, []string{nPodTest.portUUID}, []string{namespace2.Name}, nil)
+				defaultDenyExpectedData := npTest.getDefaultDenyData(networkPolicy, []string{nPodTest.portUUID})
 				expectedData := []libovsdb.TestData{}
 				expectedData = append(expectedData, gressPolicyExpectedData...)
 				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
 
-				fakeOvn.start(ctx,
+				fakeOvn.startWithDBSetup(ctx, initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -1243,9 +1276,10 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
 				expectedData = []libovsdb.TestData{}
-				gressPolicyExpectedData = npTest.getPolicyData(networkPolicy, []string{fakeUUID}, []string{}, nil)
+				gressPolicyExpectedData = npTest.getPolicyData(networkPolicy, []string{nPodTest.portUUID}, []string{}, nil)
 				expectedData = append(expectedData, gressPolicyExpectedData...)
 				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
 
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), namespace2.Name, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1298,8 +1332,12 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				expectedData := []libovsdb.TestData{}
 				expectedData = append(expectedData, gressPolicyExpectedData...)
 				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, &nbdb.LogicalSwitch{
+					UUID: libovsdbops.BuildNamedUUID(),
+					Name: "node1",
+				})
 
-				fakeOvn.start(ctx,
+				fakeOvn.startWithDBSetup(ctx, initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -1324,6 +1362,10 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				gressPolicyExpectedData = npTest.getPolicyData(networkPolicy, nil, []string{}, nil)
 				expectedData = append(expectedData, gressPolicyExpectedData...)
 				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, &nbdb.LogicalSwitch{
+					UUID: libovsdbops.BuildNamedUUID(),
+					Name: "node1",
+				})
 
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), namespace2.Name, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1379,16 +1421,15 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				nPodTest.baseCmds(fExec)
-
 				npTest := kNetworkPolicy{}
-				gressPolicyExpectedData := npTest.getPolicyData(networkPolicy, []string{fakeUUID}, []string{}, nil)
-				defaultDenyExpectedData := npTest.getDefaultDenyData(networkPolicy, []string{fakeUUID})
+				gressPolicyExpectedData := npTest.getPolicyData(networkPolicy, []string{nPodTest.portUUID}, []string{}, nil)
+				defaultDenyExpectedData := npTest.getDefaultDenyData(networkPolicy, []string{nPodTest.portUUID})
 				expectedData := []libovsdb.TestData{}
 				expectedData = append(expectedData, gressPolicyExpectedData...)
 				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
 
-				fakeOvn.start(ctx,
+				fakeOvn.startWithDBSetup(ctx, initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -1428,6 +1469,10 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				expectedData = []libovsdb.TestData{}
 				expectedData = append(expectedData, gressPolicyExpectedData...)
 				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, &nbdb.LogicalSwitch{
+					UUID: libovsdbops.BuildNamedUUID(),
+					Name: "node1",
+				})
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
 				return nil
@@ -1491,16 +1536,15 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				nPodTest.baseCmds(fExec)
-
 				npTest := kNetworkPolicy{}
 				gressPolicyExpectedData := npTest.getPolicyData(networkPolicy, nil, []string{}, nil)
 				defaultDenyExpectedData := npTest.getDefaultDenyData(networkPolicy, nil)
 				expectedData := []libovsdb.TestData{}
 				expectedData = append(expectedData, gressPolicyExpectedData...)
 				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
 
-				fakeOvn.start(ctx,
+				fakeOvn.startWithDBSetup(ctx, initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -1599,16 +1643,15 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				nPodTest.baseCmds(fExec)
-
 				npTest := kNetworkPolicy{}
 				gressPolicyExpectedData := npTest.getPolicyData(networkPolicy, nil, []string{}, nil)
 				defaultDenyExpectedData := npTest.getDefaultDenyData(networkPolicy, nil)
 				expectedData := []libovsdb.TestData{}
 				expectedData = append(expectedData, gressPolicyExpectedData...)
 				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
 
-				fakeOvn.start(ctx,
+				fakeOvn.startWithDBSetup(ctx, initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -1699,16 +1742,15 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				nPodTest.baseCmds(fExec)
-
 				npTest := kNetworkPolicy{}
-				gressPolicyExpectedData := npTest.getPolicyData(networkPolicy, []string{fakeUUID}, []string{}, nil)
-				defaultDenyExpectedData := npTest.getDefaultDenyData(networkPolicy, []string{fakeUUID})
+				gressPolicyExpectedData := npTest.getPolicyData(networkPolicy, []string{nPodTest.portUUID}, []string{}, nil)
+				defaultDenyExpectedData := npTest.getDefaultDenyData(networkPolicy, []string{nPodTest.portUUID})
 				expectedData := []libovsdb.TestData{}
 				expectedData = append(expectedData, gressPolicyExpectedData...)
 				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
 
-				fakeOvn.start(ctx,
+				fakeOvn.startWithDBSetup(ctx, initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespace1,
@@ -1742,7 +1784,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				acls := []libovsdb.TestData{}
 				acls = append(acls, gressPolicyExpectedData[:len(gressPolicyExpectedData)-1]...)
 				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(acls))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)))
 
 				return nil
 			}
