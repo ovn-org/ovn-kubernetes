@@ -201,6 +201,8 @@ ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
 #OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 ovn_egressfirewall_enable=${OVN_EGRESSFIREWALL_ENABLE:-false}
+#OVN_DISABLE_OVN_IFACE_ID_VER - disable usage of the OVN iface-id-ver option
+ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER:-false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 ovn_netflow_targets=${OVN_NETFLOW_TARGETS:-}
 ovn_sflow_targets=${OVN_SFLOW_TARGETS:-}
@@ -1042,6 +1044,11 @@ ovn-node() {
       egressip_enabled_flag="--enable-egress-ip"
   fi
 
+  disable_ovn_iface_id_ver_flag=
+  if [[ ${ovn_disable_ovn_iface_id_ver} == "true" ]]; then
+      disable_ovn_iface_id_ver_flag="--disable-ovn-iface-id-ver"
+  fi
+
   netflow_targets=
   if [[ -n ${ovn_netflow_targets} ]]; then
       netflow_targets="--netflow-targets ${ovn_netflow_targets}"
@@ -1139,6 +1146,7 @@ ovn-node() {
     --inactivity-probe=${ovn_remote_probe_interval} \
     ${multicast_enabled_flag} \
     ${egressip_enabled_flag} \
+    ${disable_ovn_iface_id_ver_flag} \
     ${netflow_targets} \
     ${sflow_targets} \
     ${ipfix_targets} \

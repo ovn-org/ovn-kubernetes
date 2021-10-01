@@ -42,6 +42,7 @@ OVN_EMPTY_LB_EVENTS=""
 OVN_MULTICAST_ENABLE=""
 OVN_EGRESSIP_ENABLE=
 OVN_EGRESSFIREWALL_ENABLE=
+OVN_DISABLE_OVN_IFACE_ID_VER="false"
 OVN_V4_JOIN_SUBNET=""
 OVN_V6_JOIN_SUBNET=""
 OVN_NETFLOW_TARGETS=""
@@ -164,6 +165,9 @@ while [ "$1" != "" ]; do
   --egress-ip-enable)
     OVN_EGRESSIP_ENABLE=$VALUE
     ;;
+  --disabe-ovn-iface-id-ver)
+    OVN_DISABLE_OVN_IFACE_ID_VER=$VALUE
+    ;;
   --egress-firewall-enable)
     OVN_EGRESSFIREWALL_ENABLE=$VALUE
     ;;
@@ -248,6 +252,8 @@ ovn_egress_ip_enable=${OVN_EGRESSIP_ENABLE}
 echo "ovn_egress_ip_enable: ${ovn_egress_ip_enable}"
 ovn_egress_firewall_enable=${OVN_EGRESSFIREWALL_ENABLE}
 echo "ovn_egress_firewall_enable: ${ovn_egress_firewall_enable}"
+ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER}
+echo "ovn_disable_ovn_iface_id_ver: ${ovn_disable_ovn_iface_id_ver}"
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
 echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS}
@@ -317,6 +323,7 @@ ovn_image=${image} \
   ovn_sflow_targets=${ovn_sflow_targets} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
 

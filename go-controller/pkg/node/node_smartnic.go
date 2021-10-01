@@ -46,7 +46,7 @@ func (n *OvnNode) watchSmartNicPods(isOvnUpEnabled bool) {
 					retryPods.Store(pod.UID, true)
 					return
 				}
-				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, true)
+				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, true, string(pod.UID))
 				if err != nil {
 					retryPods.Store(pod.UID, true)
 					return
@@ -82,7 +82,7 @@ func (n *OvnNode) watchSmartNicPods(isOvnUpEnabled bool) {
 					klog.Infof("Failed to get rep name, %s. retrying", err)
 					return
 				}
-				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, true)
+				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, true, string(pod.UID))
 				if err != nil {
 					return
 				}
@@ -133,7 +133,7 @@ func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInt
 		return fmt.Errorf("failed to get smart-nic annotation. %v", err)
 	}
 
-	err := cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, smartNicCD.SandboxId, podLister, kclient, string(pod.UID))
+	err := cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, smartNicCD.SandboxId, podLister, kclient)
 	if err != nil {
 		// Note(adrianc): we are lenient with cleanup in this method as pod is going to be retried anyway.
 		_ = n.delRepPort(vfRepName)
