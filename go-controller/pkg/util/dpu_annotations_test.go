@@ -1,152 +1,151 @@
 package util
 
 import (
-	"encoding/json"
-	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
-	"github.com/stretchr/testify/mock"
-
 	. "github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 )
 
 var _ = Describe("DPU Annotations test", func() {
 	Describe("DPUConnectionDetails", func() {
-		var cd DPUConnectionDetails
+		var defaultCD, secondCD DPUConnectionDetails
 		var annot map[string]string
-		t := GinkgoT()
+		var legacyAnnot string
+		var err error
 
 		BeforeEach(func() {
-			cd = DPUConnectionDetails{}
+			defaultCD = DPUConnectionDetails{PfId: "1", VfId: "4", SandboxId: "35b82dbe2c3976"}
+			secondCD = DPUConnectionDetails{PfId: "0", VfId: "3", SandboxId: "35b82dbe2c3973"}
+			legacyAnnot = `{"pfId": "1", "vfId": "4", "sandboxId": "35b82dbe2c3976"}`
 			annot = make(map[string]string)
 		})
 
-		Context("FromPodAnnotation()", func() {
-			It("Is populated correctly from annotations", func() {
-				annot[DPUConnectionDetailsAnnot] = `{"pfId": "0", "vfId": "3", "sandboxId": "35b82dbe2c3976"}`
-				err := cd.FromPodAnnotation(annot)
+		Context("Default network", func() {
+			It("Get correct Pod annotation for the legacy default network pod annotation", func() {
+				annot[DPUConnectionDetailsAnnot] = legacyAnnot
+				pcd, err := UnmarshalPodDPUConnDetails(annot, "default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				gomega.Expect(cd.PfId).To(gomega.Equal("0"))
-				gomega.Expect(cd.VfId).To(gomega.Equal("3"))
-				gomega.Expect(cd.SandboxId).To(gomega.Equal(
-					"35b82dbe2c3976"))
+				gomega.Expect(pcd.PfId).To(gomega.Equal(defaultCD.PfId))
+				gomega.Expect(pcd.VfId).To(gomega.Equal(defaultCD.VfId))
+				gomega.Expect(pcd.SandboxId).To(gomega.Equal(defaultCD.SandboxId))
+			})
+
+			It("Get correct Pod annotation for default network", func() {
+				annot, err = MarshalPodDPUConnDetails(annot, &defaultCD, "default")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				pcd, err := UnmarshalPodDPUConnDetails(annot, "default")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Expect(pcd.PfId).To(gomega.Equal(defaultCD.PfId))
+				gomega.Expect(pcd.VfId).To(gomega.Equal(defaultCD.VfId))
+				gomega.Expect(pcd.SandboxId).To(gomega.Equal(defaultCD.SandboxId))
 			})
 
 			It("Fails to populate on missing annotations", func() {
-				err := cd.FromPodAnnotation(annot)
+				_, err := UnmarshalPodDPUConnDetails(annot, "default")
 				gomega.Expect(err).To(gomega.HaveOccurred())
 			})
 		})
 
-		Context("SetPodAnnotation()", func() {
-			var fakeAnnotator *mocks.Annotator
-
-			BeforeEach(func() {
-				fakeAnnotator = &mocks.Annotator{}
+		Context("Second network", func() {
+			It("Get correct Pod annotation for Second network with legacy default network annoation", func() {
+				annot[DPUConnectionDetailsAnnot] = legacyAnnot
+				annot, err = MarshalPodDPUConnDetails(annot, &secondCD, "second")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				pcd, err := UnmarshalPodDPUConnDetails(annot, "default")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Expect(pcd.PfId).To(gomega.Equal(defaultCD.PfId))
+				gomega.Expect(pcd.VfId).To(gomega.Equal(defaultCD.VfId))
+				gomega.Expect(pcd.SandboxId).To(gomega.Equal(defaultCD.SandboxId))
+				pcd, err = UnmarshalPodDPUConnDetails(annot, "second")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Expect(pcd.PfId).To(gomega.Equal(secondCD.PfId))
+				gomega.Expect(pcd.VfId).To(gomega.Equal(secondCD.VfId))
+				gomega.Expect(pcd.SandboxId).To(gomega.Equal(secondCD.SandboxId))
 			})
 
-			It("Sets correct Pod annotation", func() {
-				cd.PfId = "1"
-				cd.VfId = "4"
-				cd.SandboxId = "35b82dbe2c3976"
-				expected, err := json.Marshal(cd)
+			It("Get correct Pod annotation for second network", func() {
+				annot, err = MarshalPodDPUConnDetails(annot, &defaultCD, "default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				fakeAnnotator.On("Set", DPUConnectionDetailsAnnot, string(expected)).Return(nil)
-				err = cd.SetPodAnnotation(fakeAnnotator)
+				annot, err = MarshalPodDPUConnDetails(annot, &secondCD, "second")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				fakeAnnotator.AssertExpectations(t)
+				pcd, err := UnmarshalPodDPUConnDetails(annot, "second")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Expect(pcd.PfId).To(gomega.Equal(secondCD.PfId))
+				gomega.Expect(pcd.VfId).To(gomega.Equal(secondCD.VfId))
+				gomega.Expect(pcd.SandboxId).To(gomega.Equal(secondCD.SandboxId))
 			})
 
-			It("Fails if pod annotator fails", func() {
-				cd.PfId = "1"
-				cd.VfId = "4"
-				cd.SandboxId = "35b82dbe2c3976"
-				fakeAnnotator.On("Set", DPUConnectionDetailsAnnot, mock.Anything).Return(fmt.Errorf("error"))
-				err := cd.SetPodAnnotation(fakeAnnotator)
+			It("Fails to populate on missing annotations", func() {
+				annot, err = MarshalPodDPUConnDetails(annot, &defaultCD, "default")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				_, err = UnmarshalPodDPUConnDetails(annot, "second")
 				gomega.Expect(err).To(gomega.HaveOccurred())
-			})
-		})
-
-		Context("AsAnnotation()", func() {
-			It("Should return annotation which allows to create a correct DPUConnectionDetails object", func() {
-				cd.PfId = "1"
-				cd.VfId = "4"
-				cd.SandboxId = "35b82dbe2c3976"
-				podAnnot, err := cd.AsAnnotation()
-				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				newCd := DPUConnectionDetails{}
-				err = newCd.FromPodAnnotation(podAnnot)
-				gomega.Expect(cd).To(gomega.Equal(newCd))
 			})
 		})
 	})
 
 	Describe("DPUConnectionStatus", func() {
-		var cs DPUConnectionStatus
+		var defaultCS, secondCS DPUConnectionStatus
 		var annot map[string]string
-		t := GinkgoT()
+		var legacyAnnot string
+		var err error
 
 		BeforeEach(func() {
-			cs = DPUConnectionStatus{}
+			defaultCS = DPUConnectionStatus{Status: "Ready"}
+			secondCS = DPUConnectionStatus{Status: "NotReady"}
+			legacyAnnot = `{"Status": "Ready"}`
 			annot = make(map[string]string)
 		})
 
-		Context("FromPodAnnotation()", func() {
-			It("Is populated correctly from annotations", func() {
-				annot[DPUConnetionStatusAnnot] = `{"status": "Ready"}`
-				err := cs.FromPodAnnotation(annot)
+		Context("Default network", func() {
+			It("Get correct Pod annotation for the legacy default network pod annotation", func() {
+				annot[DPUConnetionStatusAnnot] = legacyAnnot
+				pcs, err := UnmarshalPodDPUConnStatus(annot, "default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				gomega.Expect(cs.Status).To(gomega.Equal("Ready"))
-				gomega.Expect(cs.Reason).To(gomega.Equal(""))
+				gomega.Expect(pcs.Status).To(gomega.Equal(defaultCS.Status))
 			})
 
-			It("Is populated with optional Reason from annotations", func() {
-				annot[DPUConnetionStatusAnnot] = `{"status": "Error", "reason": "bad-things-happened"}`
-				err := cs.FromPodAnnotation(annot)
+			It("Get correct Pod annotation for default network", func() {
+				annot, err = MarshalPodDPUConnStatus(annot, &defaultCS, "default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				gomega.Expect(cs.Status).To(gomega.Equal("Error"))
-				gomega.Expect(cs.Reason).To(gomega.Equal("bad-things-happened"))
+				pcs, err := UnmarshalPodDPUConnStatus(annot, "default")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Expect(pcs.Status).To(gomega.Equal(defaultCS.Status))
 			})
 
 			It("Fails to populate on missing annotations", func() {
-				err := cs.FromPodAnnotation(annot)
+				_, err := UnmarshalPodDPUConnStatus(annot, "default")
 				gomega.Expect(err).To(gomega.HaveOccurred())
 			})
 		})
 
-		Context("SetPodAnnotation()", func() {
-			var fakeAnnotator *mocks.Annotator
-
-			BeforeEach(func() {
-				fakeAnnotator = &mocks.Annotator{}
+		Context("Second network", func() {
+			It("Get correct Pod annotation for Second network with legacy default network annoation", func() {
+				annot[DPUConnetionStatusAnnot] = legacyAnnot
+				annot, err = MarshalPodDPUConnStatus(annot, &secondCS, "second")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				pcd, err := UnmarshalPodDPUConnStatus(annot, "default")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Expect(pcd.Status).To(gomega.Equal(defaultCS.Status))
+				pcd, err = UnmarshalPodDPUConnStatus(annot, "second")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Expect(pcd.Status).To(gomega.Equal(secondCS.Status))
 			})
 
-			It("Sets correct Pod annotation", func() {
-				cs.Status = "Ready"
-				expected, err := json.Marshal(cs)
+			It("Get correct Pod annotation for second network", func() {
+				annot, err = MarshalPodDPUConnStatus(annot, &defaultCS, "default")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				fakeAnnotator.On("Set", DPUConnetionStatusAnnot, string(expected)).Return(nil)
-				err = cs.SetPodAnnotation(fakeAnnotator)
+				annot, err = MarshalPodDPUConnStatus(annot, &secondCS, "second")
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				fakeAnnotator.AssertExpectations(t)
+				pcd, err := UnmarshalPodDPUConnStatus(annot, "second")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				gomega.Expect(pcd.Status).To(gomega.Equal(secondCS.Status))
 			})
 
-			It("Fails if pod annotator fails", func() {
-				cs.Status = "Ready"
-				fakeAnnotator.On("Set", DPUConnetionStatusAnnot, mock.Anything).Return(fmt.Errorf("error"))
-				err := cs.SetPodAnnotation(fakeAnnotator)
+			It("Fails to populate on missing annotations", func() {
+				annot, err = MarshalPodDPUConnStatus(annot, &defaultCS, "default")
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				_, err = UnmarshalPodDPUConnStatus(annot, "second")
 				gomega.Expect(err).To(gomega.HaveOccurred())
-			})
-		})
-
-		Context("AsAnnotation()", func() {
-			It("Should return annotation which allows to create a correct DPUConnectionDetails object", func() {
-				cs.Status = "Ready"
-				podAnnot, err := cs.AsAnnotation()
-				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				newCs := DPUConnectionStatus{}
-				err = newCs.FromPodAnnotation(podAnnot)
-				gomega.Expect(cs).To(gomega.Equal(newCs))
 			})
 		})
 	})

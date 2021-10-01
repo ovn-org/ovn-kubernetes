@@ -139,7 +139,7 @@ func NodeSubnetAnnotationChanged(oldNode, newNode *v1.Node) bool {
 	return oldNode.Annotations[ovnNodeSubnets] != newNode.Annotations[ovnNodeSubnets]
 }
 
-// UpdateNodeHostSubnetAnnotation update a "k8s.ovn.org/node-subnets" annotation for network "netName",
+// UpdateNodeHostSubnetAnnotation updates a "k8s.ovn.org/node-subnets" annotation for network "netName",
 // with the specified network, suitable for passing to kube.SetAnnotationsOnNode. If hostSubnets is empty,
 // it deleted the "k8s.ovn.org/node-subnets" annotation for network "netName"
 func UpdateNodeHostSubnetAnnotation(annotations map[string]string, hostSubnets []*net.IPNet, netName string) (map[string]string, error) {

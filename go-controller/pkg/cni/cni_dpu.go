@@ -4,10 +4,37 @@ import (
 	"fmt"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
+	corev1listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/util/retry"
 )
 
-func (pr *PodRequest) addDPUConnectionDetailsAnnot(k kube.Interface, vfNetdevName string) error {
+// updatePodDPUConnDetailsWithRetry update the pod annotion with the givin connection details
+func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, podLister corev1listers.PodLister, dpuConnDetails *util.DPUConnectionDetails) error {
+	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		// Informer cache should not be mutated, so get a copy of the object
+		pod, err := podLister.Pods(pr.PodNamespace).Get(pr.PodName)
+		if err != nil {
+			return err
+		}
+
+		cpod := pod.DeepCopy()
+		cpod.Annotations, err = util.MarshalPodDPUConnDetails(cpod.Annotations, dpuConnDetails, types.DefaultNetworkName)
+		if err != nil {
+			return err
+		}
+		return kube.UpdatePod(cpod)
+	})
+	if resultErr != nil {
+		return fmt.Errorf("failed to update %s annotation on pod %s/%s: %v",
+			util.DPUConnectionDetailsAnnot, pr.PodNamespace, pr.PodName, resultErr)
+	}
+	return nil
+}
+
+func (pr *PodRequest) addDPUConnectionDetailsAnnot(k kube.Interface, podLister corev1listers.PodLister, vfNetdevName string) error {
 	// 1. Verify there is a device id
 	if pr.CNIConf.DeviceID == "" {
 		return fmt.Errorf("DeviceID must be set for Pod request with DPU")
@@ -41,14 +68,5 @@ func (pr *PodRequest) addDPUConnectionDetailsAnnot(k kube.Interface, vfNetdevNam
 		VfNetdevName: vfNetdevName,
 	}
 
-	podAnnot := kube.NewPodAnnotator(k, pr.PodName, pr.PodNamespace)
-	if err := podAnnot.Set(util.DPUConnectionDetailsAnnot, dpuConnDetails); err != nil {
-		// we should not get here
-		return fmt.Errorf("failed to generate %s annotation for pod. %v", util.DPUConnectionDetailsAnnot, err)
-	}
-	if err := podAnnot.Run(); err != nil {
-		return err
-	}
-
-	return nil
+	return pr.updatePodDPUConnDetailsWithRetry(k, podLister, &dpuConnDetails)
 }

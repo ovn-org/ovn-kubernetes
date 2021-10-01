@@ -693,7 +693,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *util.PodAnnotation) error {
 	resultErr := retry.RetryOnConflict(util.OvnConflictBackoff, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
-		pod, err := oc.kube.GetPod(origPod.Namespace, origPod.Name)
+		pod, err := oc.watchFactory.GetPod(origPod.Namespace, origPod.Name)
 		if err != nil {
 			return err
 		}

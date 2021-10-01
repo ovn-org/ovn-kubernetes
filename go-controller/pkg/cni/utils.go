@@ -33,8 +33,7 @@ func isOvnReady(podAnnotation map[string]string) bool {
 func isDPUReady(podAnnotation map[string]string) bool {
 	if isOvnReady(podAnnotation) {
 		// check DPU connection status
-		status := util.DPUConnectionStatus{}
-		if err := status.FromPodAnnotation(podAnnotation); err == nil {
+		if status, err := util.UnmarshalPodDPUConnStatus(podAnnotation, types.DefaultNetworkName); err == nil {
 			if status.Status == util.DPUConnectionStatusReady {
 				return true
 			}
