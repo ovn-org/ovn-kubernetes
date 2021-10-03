@@ -213,7 +213,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			defer GinkgoRecover()
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
-			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", nil, nodeAnnotator,
+			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", nil, nodeAnnotator, k,
 				&fakeMgmtPortConfig, nil)
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(wf)
@@ -479,7 +479,7 @@ func shareGatewayInterfaceSmartNICTest(app *cli.App, testNS ns.NetNS,
 			// provide host IP as GR IP
 			gwIPs := []*net.IPNet{ovntest.MustParseIPNet(hostCIDR)}
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
-				gatewayIntf, "", gwIPs, nodeAnnotator, &fakeMgmtPortConfig, nil)
+				gatewayIntf, "", gwIPs, nodeAnnotator, k, &fakeMgmtPortConfig, nil)
 
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(wf)

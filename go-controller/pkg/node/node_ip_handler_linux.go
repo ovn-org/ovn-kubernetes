@@ -23,12 +23,12 @@ type addressManager struct {
 }
 
 // initializes a new address manager which will hold all the IPs on a node
-func newAddressManager(nodeAnnotator kube.Annotator, config *managementPortConfig) *addressManager {
+func newAddressManager(nodeName string, k kube.Interface, config *managementPortConfig) *addressManager {
 	mgr := &addressManager{
 		addresses:      sets.NewString(),
-		nodeAnnotator:  nodeAnnotator,
 		mgmtPortConfig: config,
 	}
+	mgr.nodeAnnotator = kube.NewNodeAnnotator(k, nodeName)
 	mgr.sync()
 	return mgr
 }
@@ -75,23 +75,21 @@ func (c *addressManager) Run(stopChan <-chan struct{}) {
 		for {
 			select {
 			case a := <-addrChan:
+				addrChanged := false
 				if a.NewAddr {
-					if c.addAddr(a.LinkAddress.IP) {
-						if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
-							klog.Errorf("Failed to set node annotations: %v", err)
-							continue
-						}
-					}
+					addrChanged = c.addAddr(a.LinkAddress.IP)
 				} else {
-					if c.delAddr(a.LinkAddress.IP) {
-						if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
-							klog.Errorf("Failed to set node annotations: %v", err)
-							continue
-						}
-					}
+					addrChanged = c.delAddr(a.LinkAddress.IP)
 				}
-				if err := c.nodeAnnotator.Run(); err != nil {
-					klog.Errorf("Failed to set node annotations: %v", err)
+
+				if addrChanged {
+					if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
+						klog.Errorf("Failed to set node annotations: %v", err)
+						continue
+					}
+					if err := c.nodeAnnotator.Run(); err != nil {
+						klog.Errorf("Failed to set node annotations: %v", err)
+					}
 				}
 			case <-stopChan:
 				return
@@ -134,18 +132,22 @@ func (c *addressManager) sync() {
 		klog.Errorf("Failed to initialize Node IP Manager: unable list all IPs on the node, error: %v", err)
 	}
 
+	addrChanged := false
 	for _, addr := range addrs {
 		ip, _, err := net.ParseCIDR(addr.String())
 		if err != nil {
 			klog.Errorf("Invalid IP address found on host: %s", addr.String())
 			continue
 		}
-		_ = c.addAddr(ip)
+		addrChanged = c.addAddr(ip) || addrChanged
 	}
-	if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
-		klog.Errorf("Failed to set node annotations: %v", err)
-	}
-	if err := c.nodeAnnotator.Run(); err != nil {
-		klog.Errorf("Failed to set node annotations: %v", err)
+
+	if addrChanged {
+		if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
+			klog.Errorf("Failed to set node annotations: %v", err)
+		}
+		if err := c.nodeAnnotator.Run(); err != nil {
+			klog.Errorf("Failed to set node annotations: %v", err)
+		}
 	}
 }
