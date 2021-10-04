@@ -2068,6 +2068,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.startWithDBSetup(ctx,
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
+							&nbdb.LogicalRouter{
+								Name: types.OVNClusterRouter,
+							},
 							&nbdb.LogicalRouterPort{
 								UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name + "-UUID",
 								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name,
@@ -2260,21 +2263,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Name:     ovntypes.OVNClusterRouter,
 						UUID:     ovntypes.OVNClusterRouter + "-UUID",
 						Policies: []string{"keep-me-UUID"},
-					},
-					// TODO: @aconstan
-					// This is wrong, the item should not exist
-					// anymore (given that it's not referenced by
-					// ovn_cluster_router) but because of
-					// https://github.com/ovn-org/libovsdb/issues/219 we need to
-					// keep it for now.
-					&nbdb.LogicalRouterPolicy{
-						UUID: "remove-me-UUID",
-						ExternalIDs: map[string]string{
-							"name": eIP.Name,
-						},
-						Match:    "ip.src == 10.128.3.8",
-						Priority: types.EgressIPReroutePriority,
-						Action:   nbdb.LogicalRouterPolicyActionReroute,
 					},
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))

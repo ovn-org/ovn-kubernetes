@@ -16,8 +16,6 @@ import (
 	goovn "github.com/ebay/go-ovn"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/model"
-	"github.com/ovn-org/libovsdb/ovsdb"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -388,18 +386,10 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	opModel := libovsdbops.OperationModel{
 		Model:          &logicalRouter,
 		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
-		OnModelMutations: func() []model.Mutation {
-			return []model.Mutation{
-				{
-					Field:   &logicalRouter.ExternalIDs,
-					Mutator: ovsdb.MutateOperationInsert,
-					Value: map[string]string{
-						"k8s-ovn-topo-version": currentTopologyVersion,
-					},
-				},
-			}
+		OnModelMutations: []interface{}{
+			&logicalRouter.ExternalIDs,
 		},
-		ExistingResult: &[]nbdb.LogicalRouter{},
+		ErrNotFound: true,
 	}
 	if _, err := oc.modelClient.CreateOrUpdate(opModel); err != nil {
 		return fmt.Errorf("failed to generate set topology version in OVN, err: %v", err)

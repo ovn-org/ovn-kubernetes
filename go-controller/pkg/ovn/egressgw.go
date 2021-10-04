@@ -11,8 +11,6 @@ import (
 
 	utilnet "k8s.io/utils/net"
 
-	"github.com/ovn-org/libovsdb/model"
-	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
@@ -275,19 +273,6 @@ func (oc *Controller) createBFDStaticRoute(bfdEnabled bool, gw net.IP, podIP, gr
 		DstIP:       gw.String(),
 		LogicalPort: port,
 	}
-	bfdRes := []nbdb.BFD{}
-	if bfdEnabled {
-		opModels = []libovsdbops.OperationModel{
-			{
-				Model:          &bfd,
-				ExistingResult: &bfdRes,
-			},
-		}
-	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("unable to add BFD for static route, err: %v", err)
-	}
-
 	logicalRouter := nbdb.LogicalRouter{}
 	logicalRouterStaticRoute := nbdb.LogicalRouterStaticRoute{
 		Policy: &nbdb.LogicalRouterStaticRoutePolicySrcIP,
@@ -298,11 +283,17 @@ func (oc *Controller) createBFDStaticRoute(bfdEnabled bool, gw net.IP, podIP, gr
 		IPPrefix:   podIP + mask,
 		OutputPort: &port,
 	}
-	bfd.UUID = ""
-	if err := oc.nbClient.Get(&bfd); err == nil {
-		logicalRouterStaticRoute.BFD = &bfd.UUID
+	if bfdEnabled {
+		opModels = []libovsdbops.OperationModel{
+			{
+				Model: &bfd,
+				DoAfter: func() {
+					logicalRouterStaticRoute.BFD = &bfd.UUID
+				},
+			},
+		}
 	}
-	opModels = []libovsdbops.OperationModel{
+	opModels = append(opModels, []libovsdbops.OperationModel{
 		{
 			Model: &logicalRouterStaticRoute,
 			ModelPredicate: func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
@@ -310,18 +301,22 @@ func (oc *Controller) createBFDStaticRoute(bfdEnabled bool, gw net.IP, podIP, gr
 					lrsr.Nexthop == gw.String() &&
 					lrsr.OutputPort != nil && *lrsr.OutputPort == port
 			},
-			ExistingResult: &[]nbdb.LogicalRouterStaticRoute{},
+			DoAfter: func() {
+				if logicalRouterStaticRoute.UUID != "" {
+					logicalRouter.StaticRoutes = []string{logicalRouterStaticRoute.UUID}
+				}
+			},
 		}, {
 			Model: &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
 				return lr.Name == gr
 			},
-			OnModelMutations: func() []model.Mutation {
-				return libovsdbops.OnReferentialModelMutation(&logicalRouter.StaticRoutes, ovsdb.MutateOperationInsert, logicalRouterStaticRoute)
+			OnModelMutations: []interface{}{
+				&logicalRouter.StaticRoutes,
 			},
-			ExistingResult: &[]nbdb.LogicalRouter{},
+			ErrNotFound: true,
 		},
-	}
+	}...)
 	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("unable to add src-ip route to GR router, err: %v", err)
 	}
@@ -339,16 +334,19 @@ func (oc *Controller) deleteLogicalRouterStaticRoute(podIP, mask, gw, gr string)
 					lrsr.Nexthop == gw
 			},
 			ExistingResult: &logicalRouterStaticRouteRes,
+			DoAfter: func() {
+				logicalRouter.StaticRoutes = libovsdbops.ExtractUUIDsFromModels(&logicalRouterStaticRouteRes)
+			},
+			BulkOp: true,
 		},
 		{
 			Model: &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
 				return lr.Name == gr
 			},
-			OnModelMutations: func() []model.Mutation {
-				return libovsdbops.OnReferentialModelMutation(&logicalRouter.StaticRoutes, ovsdb.MutateOperationDelete, logicalRouterStaticRouteRes)
+			OnModelMutations: []interface{}{
+				&logicalRouter.StaticRoutes,
 			},
-			ExistingResult: &[]nbdb.LogicalRouter{},
 		},
 	}
 	if err := oc.modelClient.Delete(opModels...); err != nil {
@@ -676,15 +674,19 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 					&logicalRouterPolicy.Nexthops,
 					&logicalRouterPolicy.Match,
 				},
-				ExistingResult: &[]nbdb.LogicalRouterPolicy{},
+				DoAfter: func() {
+					if logicalRouterPolicy.UUID != "" {
+						logicalRouter.Policies = []string{logicalRouterPolicy.UUID}
+					}
+				},
 			},
 			{
 				Model:          &logicalRouter,
 				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-				OnModelMutations: func() []model.Mutation {
-					return libovsdbops.OnReferentialModelMutation(&logicalRouter.Policies, ovsdb.MutateOperationInsert, logicalRouterPolicy)
+				OnModelMutations: []interface{}{
+					&logicalRouter.Policies,
 				},
-				ExistingResult: &[]nbdb.LogicalRouter{},
+				ErrNotFound: true,
 			},
 		}
 		if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
@@ -732,14 +734,17 @@ func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string, forc
 					return lrp.Priority == intPriority && lrp.Match == matchStr
 				},
 				ExistingResult: &logicalRouterPolicyRes,
+				DoAfter: func() {
+					logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
+				},
+				BulkOp: true,
 			},
 			{
 				Model:          &logicalRouter,
 				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
-				OnModelMutations: func() []model.Mutation {
-					return libovsdbops.OnReferentialModelMutation(&logicalRouter.Policies, ovsdb.MutateOperationDelete, logicalRouterPolicyRes)
+				OnModelMutations: []interface{}{
+					&logicalRouter.Policies,
 				},
-				ExistingResult: &[]nbdb.LogicalRouter{},
 			},
 		}
 		if err := oc.modelClient.Delete(opModels...); err != nil {
@@ -770,10 +775,10 @@ func (oc *Controller) cleanUpBFDEntry(gatewayIP, gatewayRouter, prefix string) {
 
 	opModels := []libovsdbops.OperationModel{
 		{
-			ModelPredicate: func(bfd *nbdb.BFD) bool {
-				return bfd.LogicalPort == portName && bfd.DstIP == gatewayIP
+			Model: &nbdb.BFD{
+				LogicalPort: portName,
+				DstIP:       gatewayIP,
 			},
-			ExistingResult: &[]nbdb.BFD{},
 		},
 	}
 	if err := oc.modelClient.Delete(opModels...); err != nil {
@@ -872,22 +877,18 @@ func (oc *Controller) cleanExGwECMPRoutes() {
 			if !ovnRoute.shouldExist {
 				klog.Infof("Found stale exgw ecmp route, podIP: %s, nexthop: %s, router: %s",
 					podIP, ovnRoute.nextHop, ovnRoute.router)
-				logicalRouter := nbdb.LogicalRouter{}
+				logicalRouter := nbdb.LogicalRouter{
+					StaticRoutes: []string{ovnRoute.uuid},
+				}
 				opModels := []libovsdbops.OperationModel{
 					{
+						Model: &logicalRouter,
 						ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
 							return lr.Name == ovnRoute.router
 						},
-						OnModelMutations: func() []model.Mutation {
-							return []model.Mutation{
-								{
-									Field:   &logicalRouter.StaticRoutes,
-									Mutator: ovsdb.MutateOperationDelete,
-									Value:   []string{ovnRoute.uuid},
-								},
-							}
+						OnModelMutations: []interface{}{
+							&logicalRouter.StaticRoutes,
 						},
-						ExistingResult: &[]nbdb.LogicalRouter{},
 					},
 				}
 				if err := oc.modelClient.Delete(opModels...); err != nil {
@@ -1063,7 +1064,7 @@ func (oc *Controller) buildOVNECMPCache() map[string][]*ovnRoute {
 	for _, logicalRouterStaticRoute := range logicalRouterStaticRouteRes {
 		logicalRouterRes := []nbdb.LogicalRouter{}
 		if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
-			return libovsdbops.SliceHasStringItem(lr.StaticRoutes, logicalRouterStaticRoute.UUID)
+			return util.SliceHasStringItem(lr.StaticRoutes, logicalRouterStaticRoute.UUID)
 		}).List(&logicalRouterRes); err != nil {
 			klog.Errorf("CleanECMPRoutes: failed to find logical router for %s, err: %v", logicalRouterStaticRoute.UUID, err)
 			continue

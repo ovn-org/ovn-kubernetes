@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ovn-org/libovsdb/model"
-	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
@@ -41,19 +39,21 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
 		Name: types.JoinSwitchToGWRouterPrefix + gatewayRouter,
 	}
-	logicalSwitchPortRes := []nbdb.LogicalSwitchPort{}
 	opModels := []libovsdbops.OperationModel{
 		{
-			Model:          &logicalSwitchPort,
-			ExistingResult: &logicalSwitchPortRes,
+			Model: &logicalSwitchPort,
+			DoAfter: func() {
+				if logicalSwitchPort.UUID != "" {
+					logicalSwitch.Ports = []string{logicalSwitchPort.UUID}
+				}
+			},
 		},
 		{
 			Model:          &logicalSwitch,
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.OVNJoinSwitch },
-			OnModelMutations: func() []model.Mutation {
-				return libovsdbops.OnReferentialModelMutation(&logicalSwitch.Ports, ovsdb.MutateOperationDelete, logicalSwitchPortRes)
+			OnModelMutations: []interface{}{
+				&logicalSwitch.Ports,
 			},
-			ExistingResult: &[]nbdb.LogicalSwitch{},
 		},
 	}
 	if err := oc.modelClient.Delete(opModels...); err != nil {
@@ -69,7 +69,6 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 
 	// Remove the gateway router associated with nodeName
 	opModel := libovsdbops.OperationModel{
-		Model:          &nbdb.LogicalRouter{},
 		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
 		ExistingResult: &[]nbdb.LogicalRouter{},
 	}
@@ -79,7 +78,6 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 
 	// Remove external switch
 	opModel = libovsdbops.OperationModel{
-		Model:          &nbdb.LogicalSwitch{},
 		ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.ExternalSwitchPrefix+nodeName },
 		ExistingResult: &[]nbdb.LogicalSwitch{},
 	}
@@ -89,7 +87,6 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 
 	exGWexternalSwitch := types.ExternalSwitchPrefix + types.ExternalSwitchPrefix + nodeName
 	opModel = libovsdbops.OperationModel{
-		Model:          &nbdb.LogicalSwitch{},
 		ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == exGWexternalSwitch },
 		ExistingResult: &[]nbdb.LogicalSwitch{},
 	}
@@ -138,14 +135,17 @@ func (oc *Controller) staticRouteCleanup(nextHops []net.IP) {
 					return lrsr.Nexthop == nextHop.String()
 				},
 				ExistingResult: &logicalRouterStaticRouteRes,
+				DoAfter: func() {
+					logicalRouter.StaticRoutes = libovsdbops.ExtractUUIDsFromModels(&logicalRouterStaticRouteRes)
+				},
+				BulkOp: true,
 			},
 			{
 				Model:          &logicalRouter,
 				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-				OnModelMutations: func() []model.Mutation {
-					return libovsdbops.OnReferentialModelMutation(&logicalRouter.StaticRoutes, ovsdb.MutateOperationDelete, logicalRouterStaticRouteRes)
+				OnModelMutations: []interface{}{
+					&logicalRouter.StaticRoutes,
 				},
-				ExistingResult: &[]nbdb.LogicalRouter{},
 			},
 		}
 		if err := oc.modelClient.Delete(opModels...); err != nil {
@@ -187,14 +187,17 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 					return lrp.Nexthop != nil && *lrp.Nexthop == gwIPAddr.IP.String()
 				},
 				ExistingResult: &logicalRouterPolicyRes,
+				DoAfter: func() {
+					logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
+				},
+				BulkOp: true,
 			},
 			{
 				Model:          &logicalRouter,
 				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-				OnModelMutations: func() []model.Mutation {
-					return libovsdbops.OnReferentialModelMutation(&logicalRouter.Policies, ovsdb.MutateOperationDelete, logicalRouterPolicyRes)
+				OnModelMutations: []interface{}{
+					&logicalRouter.Policies,
 				},
-				ExistingResult: &[]nbdb.LogicalRouter{},
 			},
 		}
 		if err := oc.modelClient.Delete(opModels...); err != nil {
@@ -207,7 +210,6 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 	// Remove the join switch that connects ovn_cluster_router to gateway router
 	opModel := libovsdbops.OperationModel{
 		ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.JoinSwitchPrefix+nodeName },
-		ExistingResult: &[]nbdb.LogicalSwitch{},
 	}
 	if err := oc.modelClient.Delete(opModel); err != nil {
 		return fmt.Errorf("failed to delete the join logical switch %s, error: %v", types.JoinSwitchPrefix+nodeName, err)
@@ -215,21 +217,24 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 
 	// Remove the logical router port on the distributed router that connects to the join switch
 	logicalRouter := nbdb.LogicalRouter{}
-	logicalRouterPortRes := []nbdb.LogicalRouterPort{}
+	logicalRouterPort := nbdb.LogicalRouterPort{
+		Name: types.DistRouterToJoinSwitchPrefix + nodeName,
+	}
 	opModels := []libovsdbops.OperationModel{
 		{
-			Model: &nbdb.LogicalRouterPort{
-				Name: types.DistRouterToJoinSwitchPrefix + nodeName,
+			Model: &logicalRouterPort,
+			DoAfter: func() {
+				if logicalRouterPort.UUID != "" {
+					logicalRouter.Ports = []string{logicalRouterPort.UUID}
+				}
 			},
-			ExistingResult: &logicalRouterPortRes,
 		},
 		{
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: func() []model.Mutation {
-				return libovsdbops.OnReferentialModelMutation(&logicalRouter.Ports, ovsdb.MutateOperationDelete, logicalRouterPortRes)
+			OnModelMutations: []interface{}{
+				&logicalRouter.Ports,
 			},
-			ExistingResult: &[]nbdb.LogicalRouter{},
 		},
 	}
 	if err := oc.modelClient.Delete(opModels...); err != nil {
@@ -238,21 +243,24 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 
 	// Remove the logical router port on the gateway router that connects to the join switch
 	logicalRouter = nbdb.LogicalRouter{}
-	logicalRouterPortRes = []nbdb.LogicalRouterPort{}
+	logicalRouterPort = nbdb.LogicalRouterPort{
+		Name: types.GWRouterToJoinSwitchPrefix + gatewayRouter,
+	}
 	opModels = []libovsdbops.OperationModel{
 		{
-			Model: &nbdb.LogicalRouterPort{
-				Name: types.GWRouterToJoinSwitchPrefix + gatewayRouter,
+			Model: &logicalRouterPort,
+			DoAfter: func() {
+				if logicalRouterPort.UUID != "" {
+					logicalRouter.Ports = []string{logicalRouterPort.UUID}
+				}
 			},
-			ExistingResult: &logicalRouterPortRes,
 		},
 		{
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
-			OnModelMutations: func() []model.Mutation {
-				return libovsdbops.OnReferentialModelMutation(&logicalRouter.Ports, ovsdb.MutateOperationDelete, logicalRouterPortRes)
+			OnModelMutations: []interface{}{
+				&logicalRouter.Ports,
 			},
-			ExistingResult: &[]nbdb.LogicalRouter{},
 		},
 	}
 	if err := oc.modelClient.Delete(opModels...); err != nil {
@@ -273,17 +281,14 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 	// Remove the gateway router associated with nodeName
 	opModel = libovsdbops.OperationModel{
 		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
-		ExistingResult: &[]nbdb.LogicalRouter{},
 	}
 	if err := oc.modelClient.Delete(opModel); err != nil {
 		return fmt.Errorf("failed to delete gateway router %s, error: %v", gatewayRouter, err)
 	}
 
 	// Remove external switch
-
 	opModel = libovsdbops.OperationModel{
 		ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.ExternalSwitchPrefix+nodeName },
-		ExistingResult: &[]nbdb.LogicalSwitch{},
 	}
 	if err := oc.modelClient.Delete(opModel); err != nil {
 		return fmt.Errorf("failed to delete external switch %s, error: %v", types.ExternalSwitchPrefix+nodeName, err)
@@ -308,19 +313,21 @@ func (oc *Controller) removeLRPolicies(nodeName string, priorities []string) {
 		result := []nbdb.LogicalRouterPolicy{}
 		opModels := []libovsdbops.OperationModel{
 			{
-				Model: &nbdb.LogicalRouterPolicy{},
 				ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
 					return strings.Contains(lrp.Match, fmt.Sprintf("%s ", nodeName)) && lrp.Priority == intPriority
 				},
 				ExistingResult: &result,
+				DoAfter: func() {
+					logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&result)
+				},
+				BulkOp: true,
 			},
 			{
 				Model:          &logicalRouter,
 				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-				OnModelMutations: func() []model.Mutation {
-					return libovsdbops.OnReferentialModelMutation(&logicalRouter.Policies, ovsdb.MutateOperationDelete, result)
+				OnModelMutations: []interface{}{
+					&logicalRouter.Policies,
 				},
-				ExistingResult: &[]nbdb.LogicalRouter{},
 			},
 		}
 		if err := oc.modelClient.Delete(opModels...); err != nil {
@@ -351,9 +358,7 @@ func (oc *Controller) cleanupDGP(nodes *kapi.NodeList) error {
 	// remove node local switch
 	opModels := []libovsdbops.OperationModel{
 		{
-			Model:          &nbdb.LogicalSwitch{},
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.NodeLocalSwitch },
-			ExistingResult: &[]nbdb.LogicalSwitch{},
 		},
 	}
 	if err := oc.modelClient.Delete(opModels...); err != nil {
@@ -363,23 +368,26 @@ func (oc *Controller) cleanupDGP(nodes *kapi.NodeList) error {
 	// remove lrp on ovn_cluster_router. Will also remove gateway chassis.
 	dgpName := types.RouterToSwitchPrefix + types.NodeLocalSwitch
 	logicalRouter := nbdb.LogicalRouter{}
-	logicalRouterPortRes := []nbdb.LogicalRouterPort{}
+	logicalRouterPort := nbdb.LogicalRouterPort{
+		Name: dgpName,
+	}
 	opModels = []libovsdbops.OperationModel{
 		{
-			Model: &nbdb.LogicalRouterPort{
-				Name: dgpName,
+			Model: &logicalRouterPort,
+			DoAfter: func() {
+				if logicalRouterPort.UUID != "" {
+					logicalRouter.Ports = []string{logicalRouterPort.UUID}
+				}
 			},
-			ExistingResult: &logicalRouterPortRes,
 		},
 		{
 			Model: &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
 				return lr.Name == types.OVNClusterRouter
 			},
-			OnModelMutations: func() []model.Mutation {
-				return libovsdbops.OnReferentialModelMutation(&logicalRouter.Ports, ovsdb.MutateOperationDelete, logicalRouterPortRes)
+			OnModelMutations: []interface{}{
+				&logicalRouter.Ports,
 			},
-			ExistingResult: &[]nbdb.LogicalRouter{},
 		},
 	}
 	if err := oc.modelClient.Delete(opModels...); err != nil {

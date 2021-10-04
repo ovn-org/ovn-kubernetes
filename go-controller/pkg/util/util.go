@@ -279,3 +279,12 @@ func GetIfaceId(podNamespace, podName string) string {
 func composePortName(podNamespace, podName string) string {
 	return podNamespace + "_" + podName
 }
+
+func SliceHasStringItem(slice []string, item string) bool {
+	for _, i := range slice {
+		if i == item {
+			return true
+		}
+	}
+	return false
+}

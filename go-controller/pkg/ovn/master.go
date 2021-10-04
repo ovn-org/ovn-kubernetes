@@ -23,8 +23,6 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/ovn-org/libovsdb/model"
-	"github.com/ovn-org/libovsdb/ovsdb"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
@@ -413,7 +411,6 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 		{
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			ExistingResult: &[]nbdb.LogicalRouter{},
 		},
 	}
 	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
@@ -496,7 +493,6 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 		{
 			Model:          &logicalSwitch,
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.OVNJoinSwitch },
-			ExistingResult: &[]nbdb.LogicalSwitch{},
 		},
 	}
 	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
@@ -525,15 +521,17 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 				&logicalRouterPort.MAC,
 				&logicalRouterPort.Networks,
 			},
-			ExistingResult: &[]nbdb.LogicalRouterPort{},
+			DoAfter: func() {
+				logicalRouter.Ports = []string{logicalRouterPort.UUID}
+			},
 		},
 		{
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: func() []model.Mutation {
-				return libovsdbops.OnReferentialModelMutation(&logicalRouter.Ports, ovsdb.MutateOperationInsert, logicalRouterPort)
+			OnModelMutations: []interface{}{
+				&logicalRouter.Ports,
 			},
-			ExistingResult: &[]nbdb.LogicalRouter{},
+			ErrNotFound: true,
 		},
 	}
 	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
@@ -551,16 +549,18 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 	}
 	opModels = []libovsdbops.OperationModel{
 		{
-			Model:          &logicalSwitchPort,
-			ExistingResult: &[]nbdb.LogicalSwitchPort{},
+			Model: &logicalSwitchPort,
+			DoAfter: func() {
+				logicalSwitch.Ports = []string{logicalSwitchPort.UUID}
+			},
 		},
 		{
 			Model:          &logicalSwitch,
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.OVNJoinSwitch },
-			OnModelMutations: func() []model.Mutation {
-				return libovsdbops.OnReferentialModelMutation(&logicalSwitch.Ports, ovsdb.MutateOperationInsert, logicalSwitchPort)
+			OnModelMutations: []interface{}{
+				&logicalSwitch.Ports,
 			},
-			ExistingResult: &[]nbdb.LogicalSwitch{},
+			ErrNotFound: true,
 		},
 	}
 	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
@@ -578,34 +578,31 @@ func (oc *Controller) addNodeLogicalSwitchPort(logicalSwitchName, portName, port
 		Options:   options,
 		Addresses: addresses,
 	}
-	logicalSwitchPortRes := []nbdb.LogicalSwitchPort{}
 	opModels := []libovsdbops.OperationModel{
 		{
 			Model: &logicalSwitchPort,
 			OnModelUpdates: []interface{}{
 				&logicalSwitchPort.Addresses,
 			},
-			ExistingResult: &logicalSwitchPortRes,
+			DoAfter: func() {
+				logicalSwitch.Ports = []string{logicalSwitchPort.UUID}
+			},
 		},
 		{
 			Model:          &logicalSwitch,
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == logicalSwitchName },
-			OnModelMutations: func() []model.Mutation {
-				return libovsdbops.OnReferentialModelMutation(&logicalSwitch.Ports, ovsdb.MutateOperationInsert, logicalSwitchPort)
+			OnModelMutations: []interface{}{
+				&logicalSwitch.Ports,
 			},
-			ExistingResult: &[]nbdb.LogicalSwitch{},
+			ErrNotFound: true,
 		},
 	}
-	res, err := oc.modelClient.CreateOrUpdate(opModels...)
+	_, err := oc.modelClient.CreateOrUpdate(opModels...)
 	if err != nil {
 		return "", fmt.Errorf("failed to add logical port %s to switch %s, error: %v", portName, logicalSwitch, err)
 	}
-	// If we're creating, just return the resulting ID, else: the retrieved UUID
-	if len(logicalSwitchPortRes) == 0 {
-		return res[0].UUID.GoUUID, nil
-	}
 
-	return logicalSwitchPortRes[0].UUID, nil
+	return logicalSwitchPort.UUID, nil
 }
 
 func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
@@ -652,15 +649,19 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 						&logicalRouterStaticRoutes.Nexthop,
 						&logicalRouterStaticRoutes.IPPrefix,
 					},
-					ExistingResult: &[]nbdb.LogicalRouterStaticRoute{},
+					DoAfter: func() {
+						if logicalRouterStaticRoutes.UUID != "" {
+							logicalRouter.StaticRoutes = []string{logicalRouterStaticRoutes.UUID}
+						}
+					},
 				},
 				{
 					Model:          &logicalRouter,
 					ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-					OnModelMutations: func() []model.Mutation {
-						return libovsdbops.OnReferentialModelMutation(&logicalRouter.StaticRoutes, ovsdb.MutateOperationInsert, logicalRouterStaticRoutes)
+					OnModelMutations: []interface{}{
+						&logicalRouter.StaticRoutes,
 					},
-					ExistingResult: &[]nbdb.LogicalRouter{},
+					ErrNotFound: true,
 				},
 			}
 			if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
@@ -858,15 +859,17 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 				&logicalRouterPort.Networks,
 				&logicalRouterPort.MAC,
 			},
-			ExistingResult: &[]nbdb.LogicalRouterPort{},
+			DoAfter: func() {
+				logicalRouter.Ports = []string{logicalRouterPort.UUID}
+			},
 		},
 		{
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: func() []model.Mutation {
-				return libovsdbops.OnReferentialModelMutation(&logicalRouter.Ports, ovsdb.MutateOperationInsert, logicalRouterPort)
+			OnModelMutations: []interface{}{
+				&logicalRouter.Ports,
 			},
-			ExistingResult: &[]nbdb.LogicalRouter{},
+			ErrNotFound: true,
 		},
 	}
 	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
@@ -1215,11 +1218,9 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	opModels := []libovsdbops.OperationModel{
 		{
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == nodeName },
-			ExistingResult: &[]nbdb.LogicalSwitch{},
 		},
 		{
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == logicalRouterName },
-			ExistingResult: &[]nbdb.LogicalRouter{},
 		},
 	}
 	if err := oc.modelClient.Delete(opModels...); err != nil {

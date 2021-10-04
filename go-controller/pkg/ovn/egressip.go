@@ -12,8 +12,6 @@ import (
 	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/model"
-	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -228,17 +226,11 @@ func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 func (oc *Controller) syncStaleEgressReroutePolicy(egressIPToPodIPCache map[string]sets.String) {
 	logicalRouter := nbdb.LogicalRouter{}
 	logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
-	if err := oc.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
-		return lrp.Priority == types.EgressIPReroutePriority
-	}).List(&logicalRouterPolicyRes); err != nil {
-		klog.Errorf("Unable to remove stale logical router policies, could not list existing items, err: %v", err)
-	}
 	opModels := []libovsdbops.OperationModel{
 		{
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: func() []model.Mutation {
-				uuidsToRemove := []string{}
+			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool { return lrp.Priority == types.EgressIPReroutePriority },
+			ExistingResult: &logicalRouterPolicyRes,
+			DoAfter: func() {
 				for _, item := range logicalRouterPolicyRes {
 					egressIPName := item.ExternalIDs["name"]
 					podIPCache, exists := egressIPToPodIPCache[egressIPName]
@@ -246,21 +238,18 @@ func (oc *Controller) syncStaleEgressReroutePolicy(egressIPToPodIPCache map[stri
 					logicalIP := splitMatch[len(splitMatch)-1]
 					parsedLogicalIP := net.ParseIP(logicalIP)
 					if !exists || !podIPCache.Has(parsedLogicalIP.String()) {
-						uuidsToRemove = append(uuidsToRemove, item.UUID)
+						logicalRouter.Policies = append(logicalRouter.Policies, item.UUID)
 					}
 				}
-				if len(uuidsToRemove) == 0 {
-					return nil
-				}
-				return []model.Mutation{
-					{
-						Field:   &logicalRouter.Policies,
-						Mutator: ovsdb.MutateOperationDelete,
-						Value:   uuidsToRemove,
-					},
-				}
 			},
-			ExistingResult: &[]nbdb.LogicalRouter{},
+			BulkOp: true,
+		},
+		{
+			Model:          &logicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+			OnModelMutations: []interface{}{
+				&logicalRouter.Policies,
+			},
 		},
 	}
 	if err := oc.modelClient.Delete(opModels...); err != nil {
@@ -957,15 +946,19 @@ func (e *egressIPController) createEgressReroutePolicy(filterOption, egressIPNam
 			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
 				return lrp.Match == filterOption && lrp.Priority == types.EgressIPReroutePriority && reflect.DeepEqual(lrp.Nexthops, gatewayRouterIPs) && lrp.ExternalIDs["name"] == egressIPName
 			},
-			ExistingResult: &[]nbdb.LogicalRouterPolicy{},
+			DoAfter: func() {
+				if logicalRouterPolicy.UUID != "" {
+					logicalRouter.Policies = []string{logicalRouterPolicy.UUID}
+				}
+			},
 		},
 		{
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: func() []model.Mutation {
-				return libovsdbops.OnReferentialModelMutation(&logicalRouter.Policies, ovsdb.MutateOperationInsert, logicalRouterPolicy)
+			OnModelMutations: []interface{}{
+				&logicalRouter.Policies,
 			},
-			ExistingResult: &[]nbdb.LogicalRouter{},
+			ErrNotFound: true,
 		},
 	}
 	if _, err := e.modelClient.CreateOrUpdate(opsModel...); err != nil {
@@ -983,14 +976,17 @@ func (e *egressIPController) deleteEgressReroutePolicy(filterOption, egressIPNam
 				return lrp.Match == filterOption && lrp.Priority == types.EgressIPReroutePriority && reflect.DeepEqual(lrp.Nexthops, gatewayRouterIPs) && lrp.ExternalIDs["name"] == egressIPName
 			},
 			ExistingResult: &logicalRouterPolicyRes,
+			DoAfter: func() {
+				logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
+			},
+			BulkOp: true,
 		},
 		{
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: func() []model.Mutation {
-				return libovsdbops.OnReferentialModelMutation(&logicalRouter.Policies, ovsdb.MutateOperationDelete, logicalRouterPolicyRes)
+			OnModelMutations: []interface{}{
+				&logicalRouter.Policies,
 			},
-			ExistingResult: &[]nbdb.LogicalRouter{},
 		},
 	}
 	if err := e.modelClient.Delete(opsModel...); err != nil {
@@ -1008,14 +1004,17 @@ func (e *egressIPController) deleteLegacyEgressReroutePolicies() error {
 				return lrp.Priority == types.EgressIPReroutePriority && lrp.Nexthop != nil
 			},
 			ExistingResult: &logicalRouterPolicyRes,
+			DoAfter: func() {
+				logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
+			},
+			BulkOp: true,
 		},
 		{
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: func() []model.Mutation {
-				return libovsdbops.OnReferentialModelMutation(&logicalRouter.Policies, ovsdb.MutateOperationDelete, logicalRouterPolicyRes)
+			OnModelMutations: []interface{}{
+				&logicalRouter.Policies,
 			},
-			ExistingResult: &[]nbdb.LogicalRouter{},
 		},
 	}
 	if err := e.modelClient.Delete(opsModel...); err != nil {
@@ -1171,22 +1170,25 @@ func (oc *Controller) createLogicalRouterPolicy(match string, priority int) erro
 		Action:   nbdb.LogicalRouterPolicyActionAllow,
 		Match:    match,
 	}
-	logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
 	opModels := []libovsdbops.OperationModel{
 		{
 			Model: &logicalRouterPolicy,
 			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
 				return lrp.Match == match && lrp.Priority == priority
 			},
-			ExistingResult: &logicalRouterPolicyRes,
+			DoAfter: func() {
+				if logicalRouterPolicy.UUID != "" {
+					logicalRouter.Policies = []string{logicalRouterPolicy.UUID}
+				}
+			},
 		},
 		{
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: func() []model.Mutation {
-				return libovsdbops.OnReferentialModelMutation(&logicalRouter.Policies, ovsdb.MutateOperationInsert, logicalRouterPolicy)
+			OnModelMutations: []interface{}{
+				&logicalRouter.Policies,
 			},
-			ExistingResult: &[]nbdb.LogicalRouter{},
+			ErrNotFound: true,
 		},
 	}
 	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
@@ -1204,14 +1206,17 @@ func (oc *Controller) deleteLogicalRouterPolicy(match string, priority int) erro
 				return lrp.Match == match && lrp.Priority == priority
 			},
 			ExistingResult: &logicalRouterPolicyRes,
+			DoAfter: func() {
+				logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
+			},
+			BulkOp: true,
 		},
 		{
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: func() []model.Mutation {
-				return libovsdbops.OnReferentialModelMutation(&logicalRouter.Policies, ovsdb.MutateOperationDelete, logicalRouterPolicyRes)
+			OnModelMutations: []interface{}{
+				&logicalRouter.Policies,
 			},
-			ExistingResult: &[]nbdb.LogicalRouter{},
 		},
 	}
 

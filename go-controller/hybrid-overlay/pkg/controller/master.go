@@ -8,8 +8,6 @@ import (
 
 	goovn "github.com/ebay/go-ovn"
 	"github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/model"
-	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -356,14 +354,19 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 					&logicalRouterPolicy.Match,
 				},
 				ExistingResult: &logicalRouterPolicyRes,
+				DoAfter: func() {
+					if logicalRouterPolicy.UUID != "" {
+						logicalRouter.Policies = []string{logicalRouterPolicy.UUID}
+					}
+				},
 			},
 			{
 				Model:          &logicalRouter,
 				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
-				OnModelMutations: func() []model.Mutation {
-					return libovsdbops.OnReferentialModelMutation(&logicalRouter.Policies, ovsdb.MutateOperationInsert, logicalRouterPolicy)
+				OnModelMutations: []interface{}{
+					&logicalRouter.Policies,
 				},
-				ExistingResult: &[]nbdb.LogicalRouter{},
+				ErrNotFound: true,
 			},
 		}
 		if _, err := m.modelClient.CreateOrUpdate(opModels...); err != nil {
@@ -390,15 +393,17 @@ func (m *MasterController) removeHybridLRPolicySharedGW(nodeName string) error {
 				return lrp.ExternalIDs["name"] == ovntypes.HybridSubnetPrefix+nodeName
 			},
 			ExistingResult: &logicalRouterPolicyRes,
+			DoAfter: func() {
+				logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
+			},
+			BulkOp: true,
 		},
 		{
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
-			OnModelMutations: func() []model.Mutation {
-				return libovsdbops.OnReferentialModelMutation(&logicalRouter.Policies, ovsdb.MutateOperationDelete, logicalRouterPolicyRes)
-
+			OnModelMutations: []interface{}{
+				&logicalRouter.Policies,
 			},
-			ExistingResult: &[]nbdb.LogicalRouter{},
 		},
 	}
 	if err := m.modelClient.Delete(opModels...); err != nil {

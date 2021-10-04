@@ -10,8 +10,6 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/ovn-org/libovsdb/model"
-	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -194,14 +192,17 @@ func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
 				return lrp.Priority <= intStartPriority && lrp.Priority >= intEndPriority
 			},
 			ExistingResult: &logicalRouterPolicyRes,
+			DoAfter: func() {
+				logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
+			},
+			BulkOp: true,
 		},
 		{
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: func() []model.Mutation {
-				return libovsdbops.OnReferentialModelMutation(&logicalRouter.Policies, ovsdb.MutateOperationDelete, logicalRouterPolicyRes)
+			OnModelMutations: []interface{}{
+				&logicalRouter.Policies,
 			},
-			ExistingResult: &[]nbdb.LogicalRouter{},
 		},
 	}
 	if err := oc.modelClient.Delete(opModels...); err != nil {
