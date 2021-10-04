@@ -21,6 +21,7 @@ import (
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
@@ -906,6 +907,7 @@ func (oc *Controller) WatchEgressIP() {
 			if err := oc.updateEgressIPWithRetry(eIP); err != nil {
 				klog.Error(err)
 			}
+			metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator, oc.eIPC.allocatorMutex))
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldEIP := old.(*egressipv1.EgressIP)
@@ -925,6 +927,7 @@ func (oc *Controller) WatchEgressIP() {
 				if err := oc.updateEgressIPWithRetry(newEIP); err != nil {
 					klog.Error(err)
 				}
+				metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator, oc.eIPC.allocatorMutex))
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -932,6 +935,7 @@ func (oc *Controller) WatchEgressIP() {
 			if err := oc.deleteEgressIP(eIP); err != nil {
 				klog.Error(err)
 			}
+			metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator, oc.eIPC.allocatorMutex))
 		},
 	}, oc.syncEgressIPs)
 }
