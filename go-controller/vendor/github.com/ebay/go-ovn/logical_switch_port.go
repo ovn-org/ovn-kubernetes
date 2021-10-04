@@ -406,6 +406,20 @@ func (odbi *ovndb) lspGetImp(lsp string) (*LogicalSwitchPort, error) {
 	return nil, ErrorNotFound
 }
 
+func (odbi *ovndb) lspGetByUUIDImp(uuid string) (*LogicalSwitchPort, error) {
+	odbi.cachemutex.RLock()
+	defer odbi.cachemutex.RUnlock()
+
+	cacheLogicalSwitchPort, ok := odbi.cache[TableLogicalSwitchPort]
+	if !ok {
+		return nil, ErrorSchema
+	}
+	if _, ok := cacheLogicalSwitchPort[uuid]; ok {
+		return odbi.rowToLogicalPort(uuid)
+	}
+	return nil, ErrorNotFound
+}
+
 // Get all lport by lswitch
 func (odbi *ovndb) lspListImp(lsw string) ([]*LogicalSwitchPort, error) {
 	odbi.cachemutex.RLock()
