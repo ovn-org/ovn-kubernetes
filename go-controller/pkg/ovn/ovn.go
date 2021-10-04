@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net"
 	"reflect"
 	"strconv"
@@ -197,8 +198,9 @@ type Controller struct {
 }
 
 type retryEntry struct {
-	pod       *kapi.Pod
-	timeStamp time.Time
+	pod        *kapi.Pod
+	timeStamp  time.Time
+	backoffSec time.Duration
 	// whether to include this pod in retry iterations
 	ignore bool
 }
@@ -455,7 +457,12 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 			klog.V(5).Infof("retry: %s not scheduled", podDesc)
 			continue
 		}
-		podTimer := podEntry.timeStamp.Add(time.Minute)
+		podEntry.backoffSec = (podEntry.backoffSec * 2)
+		if podEntry.backoffSec > 60 {
+			podEntry.backoffSec = 60
+		}
+		backoff := (podEntry.backoffSec * time.Second) + (time.Duration(rand.Intn(500)) * time.Millisecond)
+		podTimer := podEntry.timeStamp.Add(backoff)
 		if updateAll || now.After(podTimer) {
 			klog.Infof("%s retry pod setup", podDesc)
 
@@ -464,7 +471,7 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 				delete(oc.retryPods, uid)
 			} else {
 				klog.Infof("%s setup retry failed; will try again later", podDesc)
-				oc.retryPods[uid] = &retryEntry{pod, time.Now(), false}
+				oc.retryPods[uid] = &retryEntry{pod, time.Now(), podEntry.backoffSec, false}
 			}
 		} else {
 			klog.V(5).Infof("%s retry pod not after timer yet, time: %s", podDesc, podTimer)
@@ -512,7 +519,7 @@ func (oc *Controller) initRetryPod(pod *kapi.Pod) {
 	if entry, ok := oc.retryPods[pod.UID]; ok {
 		entry.timeStamp = time.Now()
 	} else {
-		oc.retryPods[pod.UID] = &retryEntry{pod, time.Now(), true}
+		oc.retryPods[pod.UID] = &retryEntry{pod, time.Now(), 1, true}
 	}
 }
 
@@ -524,7 +531,7 @@ func (oc *Controller) addRetryPods(pods []kapi.Pod) {
 		if entry, ok := oc.retryPods[pod.UID]; ok {
 			entry.timeStamp = time.Now()
 		} else {
-			oc.retryPods[pod.UID] = &retryEntry{&pod, time.Now(), false}
+			oc.retryPods[pod.UID] = &retryEntry{&pod, time.Now(), 1, false}
 		}
 	}
 }
