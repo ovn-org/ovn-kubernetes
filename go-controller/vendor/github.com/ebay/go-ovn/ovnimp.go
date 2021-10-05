@@ -245,7 +245,7 @@ func (odbi *ovndb) signalCreate(table, uuid string) {
 		ls := odbi.rowToLogicalSwitch(uuid)
 		odbi.signalCB.OnLogicalSwitchCreate(ls)
 	case TableLogicalSwitchPort:
-		lp, err := odbi.rowToLogicalPort(uuid)
+		lp, err := odbi.uuidToLogicalPort(uuid)
 		if err == nil {
 			odbi.signalCB.OnLogicalPortCreate(lp)
 		}
@@ -291,7 +291,7 @@ func (odbi *ovndb) signalDelete(table, uuid string) {
 		ls := odbi.rowToLogicalSwitch(uuid)
 		odbi.signalCB.OnLogicalSwitchDelete(ls)
 	case TableLogicalSwitchPort:
-		lp, err := odbi.rowToLogicalPort(uuid)
+		lp, err := odbi.uuidToLogicalPort(uuid)
 		if err == nil {
 			odbi.signalCB.OnLogicalPortDelete(lp)
 		}

@@ -252,7 +252,7 @@ func (odbi *ovndb) GetLogicalPortsByPortGroup(group string) ([]*LogicalSwitchPor
 					if ps, ok := ports.(libovsdb.OvsSet); ok {
 						for _, p := range ps.GoSet {
 							if vp, ok := p.(libovsdb.UUID); ok {
-								tp, err := odbi.rowToLogicalPort(vp.GoUUID)
+								tp, err := odbi.uuidToLogicalPort(vp.GoUUID)
 								if err != nil {
 									return nil, fmt.Errorf("Couldn't get logical port: %s", err)
 								}
@@ -264,7 +264,7 @@ func (odbi *ovndb) GetLogicalPortsByPortGroup(group string) ([]*LogicalSwitchPor
 					}
 				case libovsdb.UUID:
 					if vp, ok := ports.(libovsdb.UUID); ok {
-						tp, err := odbi.rowToLogicalPort(vp.GoUUID)
+						tp, err := odbi.uuidToLogicalPort(vp.GoUUID)
 						if err != nil {
 							return nil, fmt.Errorf("Couldn't get logical port: %s", err)
 						}
