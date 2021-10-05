@@ -57,6 +57,8 @@ type Client interface {
 
 	// Get logical switch port by name
 	LSPGet(lsp string) (*LogicalSwitchPort, error)
+	// Get logical switch port by name
+	LSPGetUUID(uuid string) (*LogicalSwitchPort, error)
 	// Add logical port PORT on SWITCH
 	LSPAdd(ls string, lsUUID string, lsp string) (*OvnCommand, error)
 	// Delete PORT from its attached switch
@@ -684,6 +686,10 @@ func (c *ovndb) LSExtIdsDel(ls string, external_ids map[string]string) (*OvnComm
 
 func (c *ovndb) LSPGet(lsp string) (*LogicalSwitchPort, error) {
 	return c.lspGetImp(lsp)
+}
+
+func (c *ovndb) LSPGetUUID(uuid string) (*LogicalSwitchPort, error) {
+	return c.lspGetByUUIDImp(uuid)
 }
 
 func (c *ovndb) LSPAdd(ls string, lsUUID string, lsp string) (*OvnCommand, error) {

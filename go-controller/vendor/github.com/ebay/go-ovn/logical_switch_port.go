@@ -323,15 +323,20 @@ func (odbi *ovndb) lspGetExternalIdsImp(lsp string) (map[string]string, error) {
 	return extIds, nil
 }
 
-func (odbi *ovndb) rowToLogicalPort(uuid string) (*LogicalSwitchPort, error) {
+func (odbi *ovndb) uuidToLogicalPort(uuid string) (*LogicalSwitchPort, error) {
+	row := odbi.cache[TableLogicalSwitchPort][uuid]
+	return odbi.rowToLogicalPort(uuid, &row)
+}
+
+func (odbi *ovndb) rowToLogicalPort(uuid string, row *libovsdb.Row) (*LogicalSwitchPort, error) {
 	lp := &LogicalSwitchPort{
 		UUID:       uuid,
-		Name:       odbi.cache[TableLogicalSwitchPort][uuid].Fields["name"].(string),
-		Type:       odbi.cache[TableLogicalSwitchPort][uuid].Fields["type"].(string),
-		ExternalID: odbi.cache[TableLogicalSwitchPort][uuid].Fields["external_ids"].(libovsdb.OvsMap).GoMap,
+		Name:       row.Fields["name"].(string),
+		Type:       row.Fields["type"].(string),
+		ExternalID: row.Fields["external_ids"].(libovsdb.OvsMap).GoMap,
 	}
 
-	if dhcpv4, ok := odbi.cache[TableLogicalSwitchPort][uuid].Fields["dhcpv4_options"]; ok {
+	if dhcpv4, ok := row.Fields["dhcpv4_options"]; ok {
 		switch dhcpv4.(type) {
 		case libovsdb.UUID:
 			lp.DHCPv4Options = dhcpv4.(libovsdb.UUID).GoUUID
@@ -339,7 +344,7 @@ func (odbi *ovndb) rowToLogicalPort(uuid string) (*LogicalSwitchPort, error) {
 		default:
 		}
 	}
-	if dhcpv6, ok := odbi.cache[TableLogicalSwitchPort][uuid].Fields["dhcpv6_options"]; ok {
+	if dhcpv6, ok := row.Fields["dhcpv6_options"]; ok {
 		switch dhcpv6.(type) {
 		case libovsdb.UUID:
 			lp.DHCPv6Options = dhcpv6.(libovsdb.UUID).GoUUID
@@ -348,7 +353,7 @@ func (odbi *ovndb) rowToLogicalPort(uuid string) (*LogicalSwitchPort, error) {
 		}
 	}
 
-	if addr, ok := odbi.cache[TableLogicalSwitchPort][uuid].Fields["addresses"]; ok {
+	if addr, ok := row.Fields["addresses"]; ok {
 		switch addr.(type) {
 		case string:
 			lp.Addresses = []string{addr.(string)}
@@ -359,7 +364,7 @@ func (odbi *ovndb) rowToLogicalPort(uuid string) (*LogicalSwitchPort, error) {
 		}
 	}
 
-	if portsecurity, ok := odbi.cache[TableLogicalSwitchPort][uuid].Fields["port_security"]; ok {
+	if portsecurity, ok := row.Fields["port_security"]; ok {
 		switch portsecurity.(type) {
 		case string:
 			lp.PortSecurity = []string{portsecurity.(string)}
@@ -370,11 +375,11 @@ func (odbi *ovndb) rowToLogicalPort(uuid string) (*LogicalSwitchPort, error) {
 		}
 	}
 
-	if options, ok := odbi.cache[TableLogicalSwitchPort][uuid].Fields["options"]; ok {
+	if options, ok := row.Fields["options"]; ok {
 		lp.Options = options.(libovsdb.OvsMap).GoMap
 	}
 
-	if dynamicAddresses, ok := odbi.cache[TableLogicalSwitchPort][uuid].Fields["dynamic_addresses"]; ok {
+	if dynamicAddresses, ok := row.Fields["dynamic_addresses"]; ok {
 		switch dynamicAddresses.(type) {
 		case string:
 			lp.DynamicAddresses = dynamicAddresses.(string)
@@ -400,8 +405,22 @@ func (odbi *ovndb) lspGetImp(lsp string) (*LogicalSwitchPort, error) {
 
 	for uuid, drows := range cacheLogicalSwitchPort {
 		if rlsp, ok := drows.Fields["name"].(string); ok && rlsp == lsp {
-			return odbi.rowToLogicalPort(uuid)
+			return odbi.rowToLogicalPort(uuid, &drows)
 		}
+	}
+	return nil, ErrorNotFound
+}
+
+func (odbi *ovndb) lspGetByUUIDImp(uuid string) (*LogicalSwitchPort, error) {
+	odbi.cachemutex.RLock()
+	defer odbi.cachemutex.RUnlock()
+
+	cacheLogicalSwitchPort, ok := odbi.cache[TableLogicalSwitchPort]
+	if !ok {
+		return nil, ErrorSchema
+	}
+	if row, ok := cacheLogicalSwitchPort[uuid]; ok {
+		return odbi.rowToLogicalPort(uuid, &row)
 	}
 	return nil, ErrorNotFound
 }
@@ -425,7 +444,7 @@ func (odbi *ovndb) lspListImp(lsw string) ([]*LogicalSwitchPort, error) {
 						listLSP := make([]*LogicalSwitchPort, 0, len(ps.GoSet))
 						for _, p := range ps.GoSet {
 							if vp, ok := p.(libovsdb.UUID); ok {
-								tp, err := odbi.rowToLogicalPort(vp.GoUUID)
+								tp, err := odbi.uuidToLogicalPort(vp.GoUUID)
 								if err != nil {
 									return nil, fmt.Errorf("Failed to get logical port: %s", err)
 								}
@@ -438,7 +457,7 @@ func (odbi *ovndb) lspListImp(lsw string) ([]*LogicalSwitchPort, error) {
 					}
 				case libovsdb.UUID:
 					if vp, ok := ports.(libovsdb.UUID); ok {
-						tp, err := odbi.rowToLogicalPort(vp.GoUUID)
+						tp, err := odbi.uuidToLogicalPort(vp.GoUUID)
 						if err != nil {
 							return nil, fmt.Errorf("Failed to get logical port: %s", err)
 						}
