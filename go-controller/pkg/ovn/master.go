@@ -93,9 +93,8 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup, ctx context.Con
 					end := time.Since(start)
 					metrics.MetricMasterReadyDuration.Set(end.Seconds())
 				}()
-				// run the End-to-end timestamp metric updater only on the
-				// active master node.
-				metrics.StartE2ETimeStampMetricUpdater(oc.stopChan, oc.ovnNBClient)
+				// run only on the active master node.
+				metrics.StartMasterMetricUpdater(oc.stopChan, oc.ovnNBClient, oc.nbClient)
 				if err := oc.StartClusterMaster(nodeName); err != nil {
 					panic(err.Error())
 				}
