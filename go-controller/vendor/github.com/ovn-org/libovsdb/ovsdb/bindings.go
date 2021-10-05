@@ -258,7 +258,7 @@ func NativeToOvs(column *ColumnSchema, rawElem interface{}) (interface{}, error)
 	case TypeSet:
 		var ovsSet OvsSet
 		if column.TypeObj.Key.Type == TypeUUID {
-			var ovsSlice []interface{}
+			ovsSlice := []interface{}{}
 			if _, ok := rawElem.([]string); ok {
 				for _, v := range rawElem.([]string) {
 					uuid := UUID{GoUUID: v}
@@ -266,8 +266,10 @@ func NativeToOvs(column *ColumnSchema, rawElem interface{}) (interface{}, error)
 				}
 			} else if _, ok := rawElem.(*string); ok {
 				v := rawElem.(*string)
-				uuid := UUID{GoUUID: *v}
-				ovsSlice = append(ovsSlice, uuid)
+				if v != nil {
+					uuid := UUID{GoUUID: *v}
+					ovsSlice = append(ovsSlice, uuid)
+				}
 			} else {
 				return nil, fmt.Errorf("uuid slice was neither []string or *string")
 			}

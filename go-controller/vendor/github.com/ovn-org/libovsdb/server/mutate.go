@@ -25,28 +25,37 @@ func insertToSlice(a, b reflect.Value) reflect.Value {
 	return reflect.Append(a, b)
 }
 
-func mutate(current interface{}, mutator ovsdb.Mutator, value interface{}) interface{} {
+func mutate(current interface{}, mutator ovsdb.Mutator, value interface{}) (interface{}, interface{}) {
 	switch current.(type) {
 	case bool, string:
-		return current
+		return current, value
 	}
 	switch mutator {
 	case ovsdb.MutateOperationInsert:
-		return mutateInsert(current, value)
+		// for insert, the delta will be the new value added
+		return mutateInsert(current, value), value
 	case ovsdb.MutateOperationDelete:
-		return mutateDelete(current, value)
+		// for delete, the delta will be the value removed
+		return mutateDelete(current, value), value
 	case ovsdb.MutateOperationAdd:
-		return mutateAdd(current, value)
+		// for add, the delta is the new value
+		new := mutateAdd(current, value)
+		return new, new
 	case ovsdb.MutateOperationSubtract:
-		return mutateSubtract(current, value)
+		// for subtract, the delta is the new value
+		new := mutateSubtract(current, value)
+		return new, new
 	case ovsdb.MutateOperationMultiply:
-		return mutateMultiply(current, value)
+		new := mutateMultiply(current, value)
+		return new, new
 	case ovsdb.MutateOperationDivide:
-		return mutateDivide(current, value)
+		new := mutateDivide(current, value)
+		return new, new
 	case ovsdb.MutateOperationModulo:
-		return mutateModulo(current, value)
+		new := mutateModulo(current, value)
+		return new, new
 	}
-	return current
+	return current, value
 }
 
 func mutateInsert(current, value interface{}) interface{} {

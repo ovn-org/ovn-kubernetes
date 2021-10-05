@@ -58,6 +58,8 @@ func NewOvsdbServer(db Database, models ...DatabaseModel) (*OvsdbServer, error) 
 	o.srv.Handle("transact", o.Transact)
 	o.srv.Handle("cancel", o.Cancel)
 	o.srv.Handle("monitor", o.Monitor)
+	o.srv.Handle("monitor_cond", o.MonitorCond)
+	o.srv.Handle("monitor_cond_since", o.MonitorCondSince)
 	o.srv.Handle("monitor_cancel", o.MonitorCancel)
 	o.srv.Handle("steal", o.Steal)
 	o.srv.Handle("unlock", o.Unlock)
@@ -177,12 +179,23 @@ func (o *OvsdbServer) Transact(client *rpc2.Client, args []json.RawMessage, repl
 	}
 	response, updates := o.transact(db, ops)
 	*reply = response
-	o.processMonitors(updates)
-	return o.db.Commit(db, updates)
+	transactionID := uuid.New()
+	o.processMonitors(transactionID, updates)
+	return o.db.Commit(db, transactionID, updates)
 }
 
 func deepCopy(a ovsdb.TableUpdates) (ovsdb.TableUpdates, error) {
 	var b ovsdb.TableUpdates
+	raw, err := json.Marshal(a)
+	if err != nil {
+		return b, err
+	}
+	err = json.Unmarshal(raw, &b)
+	return b, err
+}
+
+func deepCopy2(a ovsdb.TableUpdates2) (ovsdb.TableUpdates2, error) {
+	var b ovsdb.TableUpdates2
 	raw, err := json.Marshal(a)
 	if err != nil {
 		return b, err
@@ -237,6 +250,84 @@ func (o *OvsdbServer) Monitor(client *rpc2.Client, args []json.RawMessage, reply
 	return nil
 }
 
+// MonitorCond monitors a given database table and provides updates to the client via an RPC callback
+func (o *OvsdbServer) MonitorCond(client *rpc2.Client, args []json.RawMessage, reply *ovsdb.TableUpdates2) error {
+	var db string
+	if err := json.Unmarshal(args[0], &db); err != nil {
+		return fmt.Errorf("database %v is not a string", args[0])
+	}
+	if !o.db.Exists(db) {
+		return fmt.Errorf("db does not exist")
+	}
+	value := string(args[1])
+	var request map[string]*ovsdb.MonitorRequest
+	if err := json.Unmarshal(args[2], &request); err != nil {
+		return err
+	}
+	o.monitorMutex.Lock()
+	defer o.monitorMutex.Unlock()
+	clientMonitors, ok := o.monitors[client]
+	if !ok {
+		o.monitors[client] = newConnectionMonitors()
+	} else {
+		if _, ok := clientMonitors.monitors[value]; ok {
+			return fmt.Errorf("monitor with that value already exists")
+		}
+	}
+	tableUpdates := make(ovsdb.TableUpdates2)
+	for t, request := range request {
+		rows := o.Select(db, t, nil, request.Columns)
+		for i := range rows.Rows {
+			tu := make(ovsdb.TableUpdate2)
+			uuid := rows.Rows[i]["_uuid"].(ovsdb.UUID).GoUUID
+			tu[uuid] = &ovsdb.RowUpdate2{Initial: &rows.Rows[i]}
+			tableUpdates.AddTableUpdate(t, tu)
+		}
+	}
+	*reply = tableUpdates
+	o.monitors[client].monitors[value] = newConditionalMonitor(value, request, client)
+	return nil
+}
+
+// MonitorCondSince monitors a given database table and provides updates to the client via an RPC callback
+func (o *OvsdbServer) MonitorCondSince(client *rpc2.Client, args []json.RawMessage, reply *ovsdb.MonitorCondSinceReply) error {
+	var db string
+	if err := json.Unmarshal(args[0], &db); err != nil {
+		return fmt.Errorf("database %v is not a string", args[0])
+	}
+	if !o.db.Exists(db) {
+		return fmt.Errorf("db does not exist")
+	}
+	value := string(args[1])
+	var request map[string]*ovsdb.MonitorRequest
+	if err := json.Unmarshal(args[2], &request); err != nil {
+		return err
+	}
+	o.monitorMutex.Lock()
+	defer o.monitorMutex.Unlock()
+	clientMonitors, ok := o.monitors[client]
+	if !ok {
+		o.monitors[client] = newConnectionMonitors()
+	} else {
+		if _, ok := clientMonitors.monitors[value]; ok {
+			return fmt.Errorf("monitor with that value already exists")
+		}
+	}
+	tableUpdates := make(ovsdb.TableUpdates2)
+	for t, request := range request {
+		rows := o.Select(db, t, nil, request.Columns)
+		for i := range rows.Rows {
+			tu := make(ovsdb.TableUpdate2)
+			uuid := rows.Rows[i]["_uuid"].(ovsdb.UUID).GoUUID
+			tu[uuid] = &ovsdb.RowUpdate2{Initial: &rows.Rows[i]}
+			tableUpdates.AddTableUpdate(t, tu)
+		}
+	}
+	*reply = ovsdb.MonitorCondSinceReply{Found: false, LastTransactionID: "00000000-0000-0000-000000000000", Updates: tableUpdates}
+	o.monitors[client].monitors[value] = newConditionalSinceMonitor(value, request, client)
+	return nil
+}
+
 // MonitorCancel cancels a monitor on a given table
 func (o *OvsdbServer) MonitorCancel(client *rpc2.Client, args []interface{}, reply *[]interface{}) error {
 	return fmt.Errorf("not implemented")
@@ -265,15 +356,26 @@ func (o *OvsdbServer) Echo(client *rpc2.Client, args []interface{}, reply *[]int
 	return nil
 }
 
-func (o *OvsdbServer) processMonitors(update ovsdb.TableUpdates) {
+func (o *OvsdbServer) processMonitors(id uuid.UUID, update ovsdb.TableUpdates2) {
 	o.monitorMutex.RLock()
 	for _, c := range o.monitors {
 		for _, m := range c.monitors {
-			// Deep copy for every monitor since each one filters
-			// the update for relevant tables and removes items
-			// from the update array
-			dbUpdates, _ := deepCopy(update)
-			m.Send(dbUpdates)
+			switch m.kind {
+			case monitorKindOriginal:
+				var updates ovsdb.TableUpdates
+				updates.FromTableUpdates2(update)
+				// Deep copy for every monitor since each one filters
+				// the update for relevant tables and removes items
+				// from the update array
+				dbUpdates, _ := deepCopy(updates)
+				m.Send(dbUpdates)
+			case monitorKindConditional:
+				dbUpdates, _ := deepCopy2(update)
+				m.Send2(dbUpdates)
+			case monitorKindConditionalSince:
+				dbUpdates, _ := deepCopy2(update)
+				m.Send3(id, dbUpdates)
+			}
 		}
 	}
 	o.monitorMutex.RUnlock()
