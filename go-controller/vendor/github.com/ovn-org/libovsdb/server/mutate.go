@@ -6,114 +6,172 @@ import (
 	"github.com/ovn-org/libovsdb/ovsdb"
 )
 
-func removeFromSlice(a, b reflect.Value) reflect.Value {
+func removeFromSlice(a, b reflect.Value) (reflect.Value, bool) {
 	for i := 0; i < a.Len(); i++ {
 		if a.Index(i).Interface() == b.Interface() {
 			v := reflect.AppendSlice(a.Slice(0, i), a.Slice(i+1, a.Len()))
-			return v
+			return v, true
 		}
 	}
-	return a
+	return a, false
 }
 
-func insertToSlice(a, b reflect.Value) reflect.Value {
+func insertToSlice(a, b reflect.Value) (reflect.Value, bool) {
 	for i := 0; i < a.Len(); i++ {
 		if a.Index(i).Interface() == b.Interface() {
-			return a
+			return a, false
 		}
 	}
-	return reflect.Append(a, b)
+	return reflect.Append(a, b), true
 }
 
-func mutate(current interface{}, mutator ovsdb.Mutator, value interface{}) interface{} {
+func mutate(current interface{}, mutator ovsdb.Mutator, value interface{}) (interface{}, interface{}) {
 	switch current.(type) {
 	case bool, string:
-		return current
+		return current, value
 	}
 	switch mutator {
 	case ovsdb.MutateOperationInsert:
+		// for insert, the delta will be the new value added
 		return mutateInsert(current, value)
 	case ovsdb.MutateOperationDelete:
 		return mutateDelete(current, value)
 	case ovsdb.MutateOperationAdd:
-		return mutateAdd(current, value)
+		// for add, the delta is the new value
+		new := mutateAdd(current, value)
+		return new, new
 	case ovsdb.MutateOperationSubtract:
-		return mutateSubtract(current, value)
+		// for subtract, the delta is the new value
+		new := mutateSubtract(current, value)
+		return new, new
 	case ovsdb.MutateOperationMultiply:
-		return mutateMultiply(current, value)
+		new := mutateMultiply(current, value)
+		return new, new
 	case ovsdb.MutateOperationDivide:
-		return mutateDivide(current, value)
+		new := mutateDivide(current, value)
+		return new, new
 	case ovsdb.MutateOperationModulo:
-		return mutateModulo(current, value)
+		new := mutateModulo(current, value)
+		return new, new
 	}
-	return current
+	return current, value
 }
 
-func mutateInsert(current, value interface{}) interface{} {
+func mutateInsert(current, value interface{}) (interface{}, interface{}) {
 	switch current.(type) {
 	case int, float64:
-		return current
+		return current, current
 	}
 	vc := reflect.ValueOf(current)
 	vv := reflect.ValueOf(value)
 	if vc.Kind() == reflect.Slice && vc.Type() == reflect.SliceOf(vv.Type()) {
-		v := insertToSlice(vc, vv)
-		return v.Interface()
+		v, ok := insertToSlice(vc, vv)
+		var diff interface{}
+		if ok {
+			diff = value
+		}
+		return v.Interface(), diff
+	}
+	if !vc.IsValid() {
+		if vv.IsValid() {
+			return vv.Interface(), vv.Interface()
+		}
+		return nil, nil
 	}
 	if vc.Kind() == reflect.Slice && vv.Kind() == reflect.Slice {
 		v := vc
+		diff := reflect.Indirect(reflect.New(vv.Type()))
 		for i := 0; i < vv.Len(); i++ {
-			v = insertToSlice(v, vv.Index(i))
+			var ok bool
+			v, ok = insertToSlice(v, vv.Index(i))
+			if ok {
+				diff = reflect.Append(diff, vv.Index(i))
+			}
 		}
-		return v.Interface()
+		if diff.Len() > 0 {
+			return v.Interface(), diff.Interface()
+		}
+		return v.Interface(), nil
 	}
 	if vc.Kind() == reflect.Map && vv.Kind() == reflect.Map {
+		diff := reflect.MakeMap(vc.Type())
 		iter := vv.MapRange()
 		for iter.Next() {
 			k := iter.Key()
 			if !vc.MapIndex(k).IsValid() {
 				vc.SetMapIndex(k, iter.Value())
+				diff.SetMapIndex(k, iter.Value())
 			}
 		}
+		if diff.Len() > 0 {
+			return current, diff.Interface()
+		}
+		return current, nil
 	}
-	return current
+	return current, nil
 }
 
-func mutateDelete(current, value interface{}) interface{} {
+func mutateDelete(current, value interface{}) (interface{}, interface{}) {
 	switch current.(type) {
 	case int, float64:
-		return current
+		return current, nil
 	}
 	vc := reflect.ValueOf(current)
 	vv := reflect.ValueOf(value)
 	if vc.Kind() == reflect.Slice && vc.Type() == reflect.SliceOf(vv.Type()) {
-		v := removeFromSlice(vc, vv)
-		return v.Interface()
+		v, ok := removeFromSlice(vc, vv)
+		diff := value
+		if !ok {
+			diff = nil
+		}
+		return v.Interface(), diff
 	}
 	if vc.Kind() == reflect.Slice && vv.Kind() == reflect.Slice {
 		v := vc
+		diff := reflect.Indirect(reflect.New(vv.Type()))
 		for i := 0; i < vv.Len(); i++ {
-			v = removeFromSlice(v, vv.Index(i))
+			var ok bool
+			v, ok = removeFromSlice(v, vv.Index(i))
+			if ok {
+				diff = reflect.Append(diff, vv.Index(i))
+			}
 		}
-		return v.Interface()
+		if diff.Len() > 0 {
+			return v.Interface(), diff.Interface()
+		}
+		return v.Interface(), nil
 	}
 	if vc.Kind() == reflect.Map && vv.Type() == reflect.SliceOf(vc.Type().Key()) {
+		diff := reflect.MakeMap(vc.Type())
 		for i := 0; i < vv.Len(); i++ {
-			vc.SetMapIndex(vv.Index(i), reflect.Value{})
+			if vc.MapIndex(vv.Index(i)).IsValid() {
+				diff.SetMapIndex(vv.Index(i), vc.MapIndex(vv.Index(i)))
+				vc.SetMapIndex(vv.Index(i), reflect.Value{})
+			}
 		}
+		if diff.Len() > 0 {
+			return current, diff.Interface()
+		}
+		return current, nil
 	}
 	if vc.Kind() == reflect.Map && vv.Kind() == reflect.Map {
+		diff := reflect.MakeMap(vc.Type())
 		iter := vv.MapRange()
 		for iter.Next() {
 			vvk := iter.Key()
 			vvv := iter.Value()
 			vcv := vc.MapIndex(vvk)
 			if reflect.DeepEqual(vcv.Interface(), vvv.Interface()) {
+				diff.SetMapIndex(vvk, vcv)
 				vc.SetMapIndex(vvk, reflect.Value{})
 			}
 		}
+		if diff.Len() > 0 {
+			return current, diff.Interface()
+		}
+		return current, nil
 	}
-	return current
+	return current, nil
 }
 
 func mutateAdd(current, value interface{}) interface{} {

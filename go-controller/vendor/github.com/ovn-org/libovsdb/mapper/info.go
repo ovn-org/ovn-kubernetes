@@ -20,7 +20,7 @@ type Info struct {
 func (i *Info) FieldByColumn(column string) (interface{}, error) {
 	fieldName, ok := i.fields[column]
 	if !ok {
-		return nil, fmt.Errorf("column %s not found in orm info", column)
+		return nil, fmt.Errorf("FieldByColumn: column %s not found in orm info", column)
 	}
 	return reflect.ValueOf(i.obj).Elem().FieldByName(fieldName).Interface(), nil
 }
@@ -35,7 +35,7 @@ func (i *Info) hasColumn(column string) bool {
 func (i *Info) SetField(column string, value interface{}) error {
 	fieldName, ok := i.fields[column]
 	if !ok {
-		return fmt.Errorf("column %s not found in orm info", column)
+		return fmt.Errorf("SetField: column %s not found in orm info", column)
 	}
 	fieldValue := reflect.ValueOf(i.obj).Elem().FieldByName(fieldName)
 

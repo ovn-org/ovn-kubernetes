@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/google/uuid"
 	"github.com/ovn-org/libovsdb/cache"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
@@ -13,7 +14,7 @@ import (
 type Database interface {
 	CreateDatabase(database string, model *ovsdb.DatabaseSchema) error
 	Exists(database string) bool
-	Commit(database string, updates ovsdb.TableUpdates) error
+	Commit(database string, id uuid.UUID, updates ovsdb.TableUpdates2) error
 	CheckIndexes(database string, table string, m model.Model) error
 	List(database, table string, conditions ...ovsdb.Condition) ([]model.Model, error)
 	Get(database, table string, uuid string) (model.Model, error)
@@ -56,14 +57,14 @@ func (db *inMemoryDatabase) Exists(name string) bool {
 	return ok
 }
 
-func (db *inMemoryDatabase) Commit(database string, updates ovsdb.TableUpdates) error {
+func (db *inMemoryDatabase) Commit(database string, id uuid.UUID, updates ovsdb.TableUpdates2) error {
 	if !db.Exists(database) {
 		return fmt.Errorf("db does not exist")
 	}
 	db.mutex.RLock()
 	targetDb := db.databases[database]
 	db.mutex.RLock()
-	targetDb.Populate(updates)
+	targetDb.Populate2(updates)
 	return nil
 }
 
