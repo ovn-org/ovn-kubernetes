@@ -39,7 +39,7 @@ func (c *addressManager) addAddr(ip net.IP) bool {
 	c.Lock()
 	defer c.Unlock()
 	if !c.addresses.Has(ip.String()) && c.isValidNodeIP(ip) {
-		klog.V(5).Infof("Adding IP: %s, to node IP manager", ip)
+		klog.Infof("Adding IP: %s, to node IP manager", ip)
 		c.addresses.Insert(ip.String())
 		return true
 	}
@@ -53,7 +53,7 @@ func (c *addressManager) delAddr(ip net.IP) bool {
 	c.Lock()
 	defer c.Unlock()
 	if c.addresses.Has(ip.String()) && c.isValidNodeIP(ip) {
-		klog.V(5).Infof("Removing IP: %s, from node IP manager", ip)
+		klog.Infof("Removing IP: %s, from node IP manager", ip)
 		c.addresses.Delete(ip.String())
 		return true
 	}
@@ -62,8 +62,14 @@ func (c *addressManager) delAddr(ip net.IP) bool {
 }
 
 func (c *addressManager) Run(stopChan <-chan struct{}) {
+	errorCallback := func(err error) {
+		klog.Errorf("Failed during AddrSubscribe callback: %v", err)
+	}
+	addrSubscribeOptions := netlink.AddrSubscribeOptions{
+		ErrorCallback: errorCallback,
+	}
 	addrChan := make(chan netlink.AddrUpdate)
-	if err := netlink.AddrSubscribe(addrChan, stopChan); err != nil {
+	if err := netlink.AddrSubscribeWithOptions(addrChan, stopChan, addrSubscribeOptions); err != nil {
 		klog.Errorf("Unable to run Node IP Manager, error during netlink subscribe: %v", err)
 		return
 	}
