@@ -13,6 +13,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	clientset "k8s.io/client-go/kubernetes"
@@ -24,37 +25,9 @@ import (
 
 const ovnNamespace = "ovn-kubernetes"
 
-// newAgnhostPod returns a pod that uses the agnhost image. The image's binary supports various subcommands
-// that behave the same, no matter the underlying OS.
-func newAgnhostPod(name string, command ...string) *v1.Pod {
-	return &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
-		Spec: v1.PodSpec{
-			Containers: []v1.Container{
-				{
-					Name:    name,
-					Image:   agnhostImage,
-					Command: command,
-				},
-			},
-			RestartPolicy: v1.RestartPolicyNever,
-		},
-	}
-}
-
-// IsIPv6Cluster returns true if the kubernetes default service is IPv6
-func IsIPv6Cluster(c clientset.Interface) bool {
-	// Get the ClusterIP of the kubernetes service created in the default namespace
-	svc, err := c.CoreV1().Services(metav1.NamespaceDefault).Get(context.Background(), "kubernetes", metav1.GetOptions{})
-	if err != nil {
-		framework.Failf("Failed to get kubernetes service ClusterIP: %v", err)
-	}
-	if utilnet.IsIPv6String(svc.Spec.ClusterIP) {
-		return true
-	}
-	return false
+type IpNeighbor struct {
+	Dst    string `dst`
+	Lladdr string `lladdr`
 }
 
 // PodAnnotation describes the assigned network details for a single pod network. (The
@@ -98,6 +71,39 @@ type podRoute struct {
 
 type annotationNotSetError struct {
 	msg string
+}
+
+// newAgnhostPod returns a pod that uses the agnhost image. The image's binary supports various subcommands
+// that behave the same, no matter the underlying OS.
+func newAgnhostPod(name string, command ...string) *v1.Pod {
+	return &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name:    name,
+					Image:   agnhostImage,
+					Command: command,
+				},
+			},
+			RestartPolicy: v1.RestartPolicyNever,
+		},
+	}
+}
+
+// IsIPv6Cluster returns true if the kubernetes default service is IPv6
+func IsIPv6Cluster(c clientset.Interface) bool {
+	// Get the ClusterIP of the kubernetes service created in the default namespace
+	svc, err := c.CoreV1().Services(metav1.NamespaceDefault).Get(context.Background(), "kubernetes", metav1.GetOptions{})
+	if err != nil {
+		framework.Failf("Failed to get kubernetes service ClusterIP: %v", err)
+	}
+	if utilnet.IsIPv6String(svc.Spec.ClusterIP) {
+		return true
+	}
+	return false
 }
 
 func (anse annotationNotSetError) Error() string {
@@ -255,6 +261,112 @@ func pokeEndpointHostname(clientContainer, protocol, targetHost string, targetPo
 	framework.ExpectNoError(err)
 
 	return hostName
+}
+
+// wrapper logic around pokeEndpointHostname
+// contact the ExternalIP service until each endpoint returns its hostname and return true, or false otherwise
+func pokeExternalIpService(clientContainerName, protocol, externalAddress string, externalPort int32, maxTries int, nodesHostnames sets.String) bool {
+	responses := sets.NewString()
+
+	for i := 0; i < maxTries; i++ {
+		epHostname := pokeEndpointHostname(clientContainerName, protocol, externalAddress, externalPort)
+		responses.Insert(epHostname)
+
+		// each endpoint returns its hostname. By doing this, we validate that each ep was reached at least once.
+		if responses.Equal(nodesHostnames) {
+			framework.Logf("Validated external address %s after %d tries", externalAddress, i)
+			return true
+		}
+	}
+	return false
+}
+
+// run a few iterations to make sure that the hwaddr is stable
+// we will always run iterations + 1 in the loop to make sure that we have values
+// to compare
+func isNeighborEntryStable(clientContainer, targetHost string, iterations int) bool {
+	cmd := []string{"docker", "exec", clientContainer}
+	var hwAddrOld string
+	var hwAddrNew string
+	// used for reporting only
+	var hwAddrList []string
+
+	// delete the neighbor entry, ping the IP once, and print new neighbor entries
+	// make sure that we do not get Operation not permitted for neighbor entry deletion,
+	// ignore everything else for the delete and the ping
+	// RTNETLINK answers: Operation not permitted would indicate missing Cap NET_ADMIN
+	script := fmt.Sprintf(
+		"OUTPUT=$(ip neigh del %s dev eth0 2>&1); "+
+			"if [[ \"$OUTPUT\" =~ \"Operation not permitted\" ]]; then "+
+			"echo \"$OUTPUT\";"+
+			"else "+
+			"ping -c1 -W1 %s &>/dev/null; ip -j neigh; "+
+			"fi",
+		targetHost,
+		targetHost,
+	)
+	command := []string{
+		"/bin/bash",
+		"-c",
+		script,
+	}
+	cmd = append(cmd, command...)
+
+	// run this for time of iterations + 1 to make sure that the entry is stable
+	for i := 0; i <= iterations; i++ {
+		// run the command
+		output, err := runCommand(cmd...)
+		if err != nil {
+			framework.ExpectNoError(
+				fmt.Errorf("FAILED Command was: %s\nFAILED Response was: %v\nERROR is: %s",
+					command, output, err))
+		}
+		// unmarshal the output into an IpNeighbor object
+		var neighbors []IpNeighbor
+		err = json.Unmarshal([]byte(output), &neighbors)
+		if err != nil {
+			framework.ExpectNoError(
+				fmt.Errorf("FAILED Command was: %s\nFAILED Response was: %v\nERROR is: %s",
+					command, output, err))
+		}
+
+		// cycle through the results and find our Lladdr
+		hwAddrNew = ""
+		for _, n := range neighbors {
+			if n.Dst == targetHost {
+				hwAddrNew = n.Lladdr
+				break
+			}
+		}
+		// if we cannot find an Lladdr, report an issue
+		if hwAddrNew == "" {
+			framework.ExpectNoError(fmt.Errorf(
+				"Cannot resolve neighbor entry for %s. Full array is %v",
+				targetHost,
+				output,
+			))
+		}
+
+		// make sure that we did not flap since the last iteration
+		if hwAddrOld != "" {
+			if hwAddrOld != hwAddrNew {
+				framework.Logf("The hwAddr for IP %s flapped from %s to %s on iteration %d (%s)",
+					targetHost,
+					hwAddrOld,
+					hwAddrNew,
+					i,
+					strings.Join(hwAddrList, ","))
+				return false
+			}
+		}
+		hwAddrOld = hwAddrNew
+		// used for reporting only
+		hwAddrList = append(hwAddrList, hwAddrNew)
+	}
+
+	framework.Logf("hwAddr is stable after %d iterations: %s", iterations, strings.Join(hwAddrList, ","))
+
+	return true
 }
 
 // leverages a container running the netexec command to send a "clientip" request to a target running

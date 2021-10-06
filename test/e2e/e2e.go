@@ -686,7 +686,7 @@ var _ = ginkgo.Describe("test e2e pod connectivity to host addresses", func() {
 
 	f := framework.NewDefaultFramework(svcname)
 
-	ginkgo.BeforeEach(func(){
+	ginkgo.BeforeEach(func() {
 		targetIP = "123.123.123.123"
 		singleIPMask = "32"
 		if IsIPv6Cluster(f.ClientSet) {
@@ -1767,7 +1767,9 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 		endpointHTTPPort    = 80
 		endpointUDPPort     = 90
 		clusterHTTPPort     = 81
+		clusterHTTPPort2    = 82
 		clusterUDPPort      = 91
+		clusterUDPPort2     = 92
 		clientContainerName = "npclient"
 	)
 
@@ -1820,7 +1822,8 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			ginkgo.By("Creating an external container to send the traffic from")
 			// the client uses the netexec command from the agnhost image, which is able to receive commands for poking other
 			// addresses.
-			externalIpv4, externalIpv6 = createClusterExternalContainer(clientContainerName, agnhostImage, []string{"--network", "kind", "-P"}, []string{"netexec", "--http-port=80"})
+			// CAP NET_ADMIN is needed to remove neighbor entries for ARP/NS flap tests
+			externalIpv4, externalIpv6 = createClusterExternalContainer(clientContainerName, agnhostImage, []string{"--network", "kind", "-P", "--cap-add", "NET_ADMIN"}, []string{"netexec", "--http-port=80"})
 		})
 
 		ginkgo.AfterEach(func() {
@@ -1957,6 +1960,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 		// endpoints from both each node's ips.
 		ginkgo.It("Should be allowed by externalip services", func() {
 			serviceName := "externalipsvc"
+			serviceName2 := "externalipsvc2"
 
 			// collecting all the first node's addresses
 			addresses := []string{}
@@ -1966,36 +1970,64 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 				}
 			}
 
-			ginkgo.By("Creating the externalip service")
+			// We will create 2 services, test the first, then delete the first service
+			// Deleting the first externalip service should not affect the ARP/NS redirect rule pushed into OVS breth0 and the second service should still behave
+			// correctly after deletion of the first service
+			ginkgo.By("Creating the first externalip service")
 			externalIPsvcSpec := externalIPServiceSpecFrom(serviceName, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, addresses)
 			_, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), externalIPsvcSpec, metav1.CreateOptions{})
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Creating the second externalip service on the same VIP")
+			externalIPsvcSpec2 := externalIPServiceSpecFrom(serviceName2, endpointHTTPPort, endpointUDPPort, clusterHTTPPort2, clusterUDPPort2, endpointsSelector, addresses)
+			_, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), externalIPsvcSpec2, metav1.CreateOptions{})
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Waiting for the endpoints to pop up")
 			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
 			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
 
-			for _, protocol := range []string{"http", "udp"} {
-				for _, externalAddress := range addresses {
-					responses := sets.NewString()
-					valid := false
+			for _, externalAddress := range addresses {
+				ginkgo.By(fmt.Sprintf("Making sure that the neighbor entry is stable for endpoint IP %s", externalAddress))
+				valid := isNeighborEntryStable(clientContainerName, externalAddress, 10)
+				framework.ExpectEqual(valid, true, "Validation failed for neighbor entry of external address: %s", externalAddress)
+
+				for _, protocol := range []string{"http", "udp"} {
 					externalPort := int32(clusterHTTPPort)
 					if protocol == "udp" {
 						externalPort = int32(clusterUDPPort)
 					}
+					ginkgo.By(
+						fmt.Sprintf("Hitting the external service on IP %s, protocol %s, port %d and reaching all the endpoints",
+							externalAddress,
+							protocol,
+							externalPort))
+					valid = pokeExternalIpService(clientContainerName, protocol, externalAddress, externalPort, maxTries, nodesHostnames)
+					framework.ExpectEqual(valid, true, "Validation failed for external address", externalAddress)
+				}
+			}
 
-					ginkgo.By("Hitting the external service on " + externalAddress + " and reaching all the endpoints " + protocol)
-					for i := 0; i < maxTries; i++ {
-						epHostname := pokeEndpointHostname(clientContainerName, protocol, externalAddress, externalPort)
-						responses.Insert(epHostname)
+			// Deleting the first externalip service should not affect the ARP/NS redirect rules
+			ginkgo.By("Deleting the first externalip service")
+			err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Delete(context.Background(), serviceName, metav1.DeleteOptions{})
+			framework.ExpectNoError(err, "failed to delete the first external IP service for service %s in namespace: %s", serviceName, f.Namespace.Name)
 
-						// each endpoint returns its hostname. By doing this, we validate that each ep was reached at least once.
-						if responses.Equal(nodesHostnames) {
-							framework.Logf("Validated external address %s after %d tries", externalAddress, i)
-							valid = true
-							break
-						}
+			for _, externalAddress := range addresses {
+				ginkgo.By(fmt.Sprintf("Making sure that the neighbor entry is stable for endpoint IP %s", externalAddress))
+				valid := isNeighborEntryStable(clientContainerName, externalAddress, 10)
+				framework.ExpectEqual(valid, true, "Validation failed for neighbor entry of external address: %s", externalAddress)
+
+				for _, protocol := range []string{"http", "udp"} {
+					externalPort := int32(clusterHTTPPort2)
+					if protocol == "udp" {
+						externalPort = int32(clusterUDPPort2)
 					}
+					ginkgo.By(
+						fmt.Sprintf("Hitting the external service on IP %s, protocol %s, port %d and reaching all the endpoints",
+							externalAddress,
+							protocol,
+							externalPort))
+					valid = pokeExternalIpService(clientContainerName, protocol, externalAddress, externalPort, maxTries, nodesHostnames)
 					framework.ExpectEqual(valid, true, "Validation failed for external address", externalAddress)
 				}
 			}
@@ -2146,7 +2178,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 	// We use an external container to poke the service exposed on the node and ensure that only the
 	// nodeport on the node with the backend actually receives traffic and that the packet is not
 	// SNATed.
-	ginkgo.Context("Validating ingress traffic to Host Netwoked pods", func() {
+	ginkgo.Context("Validating ingress traffic to Host Networked pods", func() {
 		ginkgo.BeforeEach(func() {
 			endPoints = make([]*v1.Pod, 0)
 			nodesHostnames = sets.NewString()
