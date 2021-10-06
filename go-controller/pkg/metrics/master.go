@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"sync"
@@ -9,6 +10,7 @@ import (
 	"github.com/ovn-org/libovsdb/cache"
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -265,7 +267,7 @@ func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 // StartMasterMetricUpdater adds a goroutine that updates a "timestamp" value in the
 // nbdb every 30 seconds. This is so we can determine freshness of the database.
 // Also, update IPsec enabled or disable metric.
-func StartMasterMetricUpdater(stopChan <-chan struct{}, ovnNBClient goovn.Client, nbClient client.Client) {
+func StartMasterMetricUpdater(stopChan <-chan struct{}, nbClient client.Client) {
 	startMasterMetricUpdaterOnce.Do(func() {
 		addIPSecMetricHandler(nbClient)
 		go func() {
@@ -326,25 +328,36 @@ func UpdateEgressFirewallRuleCount(count float64) {
 	metricEgressFirewallRuleCount.Add(count)
 }
 
-func updateE2ETimestampMetric(ovnNBClient goovn.Client) {
-	options, err := ovnNBClient.NBGlobalGetOptions()
-	if err != nil {
-		klog.Errorf("Can't get existing NB Global Options for updating timestamps")
+func updateE2ETimestampMetric(ovnNBClient client.Client) {
+	var rows []nbdb.NBGlobal
+	if err := ovnNBClient.List(&rows); err != nil {
+		klog.Errorf("Failed to update e2e timestamp metric while attempting to list rows for NB_Global table: %s", err)
 		return
 	}
-	t := time.Now().Unix()
-	options["e2e_timestamp"] = fmt.Sprintf("%d", t)
-	cmd, err := ovnNBClient.NBGlobalSetOptions(options)
-	if err != nil {
-		klog.Errorf("Failed to bump timestamp: %v", err)
-	} else {
-		err = cmd.Execute()
-		if err != nil {
-			klog.Errorf("Failed to set timestamp: %v", err)
-		} else {
-			metricE2ETimestamp.Set(float64(t))
-		}
+	if len(rows) < 1 {
+		klog.Errorf("Failed to update e2e timestamp metric because there are no rows in NB_Global table")
+		return
 	}
+	currentTime := time.Now().Unix()
+	// assumption that only first row is relevant in NB_Global table
+	rows[0].Options["e2e_timestamp"] = fmt.Sprintf("%d", currentTime)
+	operations, err := ovnNBClient.Where(&rows[0]).Update(&rows[0], &rows[0].Options)
+	if err != nil {
+		klog.Errorf("Failed to update e2e timestamp metric because generating OVN northbound operation failed: %v", err)
+		return
+	}
+	reply, err := ovnNBClient.Transact(context.Background(), operations...)
+	if err != nil {
+		klog.Errorf("Failed to update e2e timestamp metric while updating OVN northbound database: %v", err)
+		return
+	}
+	if opErrs, err := ovsdb.CheckOperationResults(reply, operations); err != nil {
+		for _, oe := range opErrs {
+			klog.Errorf("Failed to update e2e timestamp metric in OVN northbound database: %v", oe)
+		}
+		return
+	}
+	metricE2ETimestamp.Set(float64(currentTime))
 }
 
 func addIPSecMetricHandler(ovnNBClient client.Client) {

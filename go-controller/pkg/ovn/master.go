@@ -94,7 +94,7 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup, ctx context.Con
 					metrics.MetricMasterReadyDuration.Set(end.Seconds())
 				}()
 				// run only on the active master node.
-				metrics.StartMasterMetricUpdater(oc.stopChan, oc.ovnNBClient, oc.nbClient)
+				metrics.StartMasterMetricUpdater(oc.stopChan, oc.nbClient)
 				if err := oc.StartClusterMaster(nodeName); err != nil {
 					panic(err.Error())
 				}
