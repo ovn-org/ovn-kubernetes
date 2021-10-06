@@ -24,9 +24,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 type TestSetup struct {
@@ -98,7 +98,7 @@ func newOVSDBTestHarness(serverData []TestData, stopChan chan struct{}, newServe
 }
 
 func newNBClient(cfg config.OvnAuthConfig, stopChan chan struct{}) (libovsdbclient.Client, error) {
-	libovsdbOvnNBClient, err := util.NewNBClientWithConfig(cfg, stopChan)
+	libovsdbOvnNBClient, err := libovsdb.NewNBClientWithConfig(cfg, stopChan)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +106,7 @@ func newNBClient(cfg config.OvnAuthConfig, stopChan chan struct{}) (libovsdbclie
 }
 
 func newSBClient(cfg config.OvnAuthConfig, stopChan chan struct{}) (libovsdbclient.Client, error) {
-	libovsdbOvnSBClient, err := util.NewSBClientWithConfig(cfg, stopChan)
+	libovsdbOvnSBClient, err := libovsdb.NewSBClientWithConfig(cfg, stopChan)
 	if err != nil {
 		return nil, err
 	}
