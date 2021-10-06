@@ -524,7 +524,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 					for _, tPod := range tPods {
 						pods = append(pods, *newPod(tPod.namespace, tPod.podName, tPod.nodeName, tPod.podIP))
 					}
-					fmt.Printf("KEYWORD: pods %+v\n", pods)
 
 					fakeOvn.startWithDBSetup(ctx, initialDB,
 						&v1.NamespaceList{

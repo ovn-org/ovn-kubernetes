@@ -631,7 +631,7 @@ func ovnNBLSPDel(client libovsdbclient.Client, logicalPort, logicalSwitch string
 	if err != nil {
 		return fmt.Errorf("cannot delete logical switch port %s, %v", logicalPort, err)
 	}
-	klog.Errorf("KEYWORD: POD DELETED?")
+
 	return nil
 }
 
