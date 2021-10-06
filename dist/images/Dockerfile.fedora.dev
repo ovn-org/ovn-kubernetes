@@ -23,7 +23,7 @@
 # this image in any production environment.
 #
 
-FROM fedora:33
+FROM fedora:34
 
 USER root
 
