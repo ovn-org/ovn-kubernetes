@@ -617,6 +617,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(HybridOverlay.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
+			gomega.Expect(Default.MonitorAll).To(gomega.BeFalse())
 
 			return nil
 		}
@@ -656,6 +657,7 @@ var _ = Describe("Config Operations", func() {
 			"-gateway-router-subnet=10.55.0.0/16",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=11.132.0.0/14/23",
+			"-monitor-all=false",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())

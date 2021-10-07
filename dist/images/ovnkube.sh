@@ -68,6 +68,7 @@ fi
 # OVN_SB_RAFT_ELECTION_TIMER - ovn south db election timer in ms (default 1000)
 # OVN_SSL_ENABLE - use SSL transport to NB/SB db and northd (default: no)
 # OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
+# OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB (default true)
 # OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 # OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
@@ -196,6 +197,8 @@ ovn_v4_join_subnet=${OVN_V4_JOIN_SUBNET:-}
 ovn_v6_join_subnet=${OVN_V6_JOIN_SUBNET:-}
 #OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
+#OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB (default true)
+ovn_monitor_all=${OVN_MONITOR_ALL:-true}
 ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 #OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
@@ -1144,6 +1147,7 @@ ovn-node() {
     --logfile /var/log/ovn-kubernetes/ovnkube.log \
     ${ovn_node_ssl_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
+    --monitor-all=${ovn_monitor_all} \
     ${multicast_enabled_flag} \
     ${egressip_enabled_flag} \
     ${disable_ovn_iface_id_ver_flag} \

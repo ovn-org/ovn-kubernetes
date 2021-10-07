@@ -64,6 +64,7 @@ var (
 		EncapPort:         DefaultEncapPort,
 		InactivityProbe:   100000, // in Milliseconds
 		OpenFlowProbe:     180,    // in Seconds
+		MonitorAll:        true,
 		LFlowCacheEnable:  true,
 		RawClusterSubnets: "10.128.0.0/14/23",
 	}
@@ -177,6 +178,10 @@ type DefaultConfig struct {
 	// Maximum number of seconds of idle time on the OpenFlow connection
 	// that ovn-controller will wait before it sends a connection health probe
 	OpenFlowProbe int `gcfg:"openflow-probe"`
+	// The  boolean  flag  indicates  if  ovn-controller  should monitor all data in SB DB
+	// instead of conditionally monitoring the data relevant to this node only.
+	// By default monitor-all is enabled.
+	MonitorAll bool `gcfg:"monitor-all"`
 	// The  boolean  flag  indicates  if  ovn-controller  should
 	// enable/disable the logical flow in-memory cache  it  uses
 	// when processing Southbound database logical flow changes.
@@ -590,6 +595,14 @@ var CommonFlags = []cli.Flag{
 			"connection for ovn-controller before it sends a inactivity probe",
 		Destination: &cliConfig.Default.OpenFlowProbe,
 		Value:       Default.OpenFlowProbe,
+	},
+	&cli.BoolFlag{
+		Name: "monitor-all",
+		Usage: "Enable monitoring all data from SB DB instead of conditionally " +
+			"monitoring the data relevant to this node only. " +
+			"By default it is enabled.",
+		Destination: &cliConfig.Default.MonitorAll,
+		Value:       Default.MonitorAll,
 	},
 	&cli.BoolFlag{
 		Name: "enable-lflow-cache",
