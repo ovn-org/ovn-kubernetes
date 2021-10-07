@@ -70,6 +70,9 @@ while [ "$1" != "" ]; do
   --gateway-options)
     OVN_GATEWAY_OPTS=$VALUE
     ;;
+  --ovn-monitor-all)
+    OVN_MONITOR_ALL=$VALUE
+    ;;
   --net-cidr)
     OVN_NET_CIDR=$VALUE
     ;;
