@@ -185,9 +185,23 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 					Name:     types.OVNClusterRouter,
 					Policies: []string{"reroute-policy-UUID"},
 				},
+				&nbdb.LogicalSwitchPort{
+					Name: types.HybridOverlayPrefix + nodeName,
+					UUID: types.HybridOverlayPrefix + nodeName + "-UUID",
+				},
 			}
+
+			// Pre-add the HO port until the ovn-nbctl lsp-add commands are converted to libovsdb
+			nodeSwitch := &nbdb.LogicalSwitch{
+				Name:  nodeName,
+				UUID:  nodeName + "-UUID",
+				Ports: []string{types.HybridOverlayPrefix + nodeName + "-UUID"},
+			}
+
+			initialExpectedDB := append(expectedDatabaseState, nodeSwitch)
+
 			dbSetup := libovsdbtest.TestSetup{
-				NBData: expectedDatabaseState,
+				NBData: initialExpectedDB,
 			}
 			libovsdbOvnNBClient, err := libovsdbtest.NewNBTestHarness(dbSetup, stopChan)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -204,9 +218,19 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// #1 node add
-			addLinuxNodeCommands(fexec, nodeHOMAC, nodeName, nodeHOIP)
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				// Setting the mac on the lsp
+				"ovn-nbctl --timeout=15 -- " +
+					"--may-exist lsp-add node1 int-node1 -- " +
+					"lsp-set-addresses int-node1 " + nodeHOMAC,
+			})
 			// #2 comes because we set the ho dr gw mac annotation in #1
-			addLinuxNodeCommands(fexec, nodeHOMAC, nodeName, nodeHOIP)
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				// Setting the mac on the lsp
+				"ovn-nbctl --timeout=15 -- " +
+					"--may-exist lsp-add node1 int-node1 -- " +
+					"lsp-set-addresses int-node1 " + nodeHOMAC,
+			})
 
 			f.Start(stopChan)
 			wg.Add(1)
@@ -224,6 +248,10 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				return updatedNode.Annotations, nil
 			}, 2).Should(HaveKeyWithValue(hotypes.HybridOverlayDRMAC, nodeHOMAC))
 
+			nodeSwitch.OtherConfig = map[string]string{"exclude_ips": "10.1.2.2"}
+
+			expectedDatabaseState = append(expectedDatabaseState, nodeSwitch)
+
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 
@@ -240,6 +268,12 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				&nbdb.LogicalRouter{
 					Name: types.OVNClusterRouter,
 				},
+				// This will be deleted once the nbctl commands for lsps are converted
+				&nbdb.LogicalSwitchPort{
+					Name: types.HybridOverlayPrefix + nodeName,
+					UUID: types.HybridOverlayPrefix + nodeName + "-uuid",
+				},
+				nodeSwitch,
 			}
 			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 			return nil
@@ -381,6 +415,10 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 					Addresses:        []string{nodeHOMAC, nodeHOIP},
 					DynamicAddresses: &dynAdd,
 				},
+				&nbdb.LogicalSwitch{
+					Name: nodeName,
+					UUID: nodeName + "-UUID",
+				},
 			}
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: expectedDatabaseState,
@@ -443,20 +481,3 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 })
-
-func addLinuxNodeCommands(fexec *ovntest.FakeExec, nodeHOMAC, nodeName, nodeHOIP string) {
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		// Setting the mac on the lsp
-		"ovn-nbctl --timeout=15 -- " +
-			"--may-exist lsp-add node1 int-node1 -- " +
-			"lsp-set-addresses int-node1 " + nodeHOMAC,
-	})
-
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 lsp-list " + nodeName,
-		Output: "29df5ce5-2802-4ee5-891f-4fb27ca776e9 (" + types.K8sPrefix + nodeName + ")",
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 -- --if-exists set logical_switch " + nodeName + " other-config:exclude_ips=" + nodeHOIP,
-	})
-}
