@@ -22,6 +22,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
@@ -239,11 +240,11 @@ func runOvnKube(ctx *cli.Context) error {
 			return fmt.Errorf("error when trying to initialize go-ovn SB client: %v", err)
 		}
 
-		if libovsdbOvnNBClient, err = util.NewNBClient(stopChan); err != nil {
+		if libovsdbOvnNBClient, err = libovsdb.NewNBClient(stopChan); err != nil {
 			return fmt.Errorf("error when trying to initialize libovsdb NB client: %v", err)
 		}
 
-		if libovsdbOvnSBClient, err = util.NewSBClient(stopChan); err != nil {
+		if libovsdbOvnSBClient, err = libovsdb.NewSBClient(stopChan); err != nil {
 			return fmt.Errorf("error when trying to initialize libovsdb SB client: %v", err)
 		}
 
