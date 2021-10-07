@@ -1818,6 +1818,22 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 			var originalNamespace v1.Namespace
 
+			setInitialOVNState := func(ctx *cli.Context, namespace v1.Namespace, initialNetworkPolicies ...knet.NetworkPolicy) {
+				fakeOvn.start(ctx,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace,
+						},
+					},
+					&v1.PodList{},
+					&knet.NetworkPolicyList{
+						Items: initialNetworkPolicies,
+					},
+				)
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchNetworkPolicy()
+			}
+
 			newAnnotatedNamespace := func(name string, annotations map[string]string) *v1.Namespace {
 				createdNamespace := newNamespace(namespaceName)
 				createdNamespace.Annotations = annotations
@@ -1934,19 +1950,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				initialExpectedData := npTest.generateExpectedACLDataForFirstPolicyOnNamespace(initialDenyAllPolicy, nbdb.ACLSeverityAlert)
 
 				app.Action = func(ctx *cli.Context) error {
-					fakeOvn.start(ctx,
-						&v1.NamespaceList{
-							Items: []v1.Namespace{
-								originalNamespace,
-							},
-						},
-						&v1.PodList{},
-						&knet.NetworkPolicyList{
-							Items: []knet.NetworkPolicy{initialDenyAllPolicy},
-						},
-					)
-					fakeOvn.controller.WatchNamespaces()
-					fakeOvn.controller.WatchNetworkPolicy()
+					setInitialOVNState(ctx, originalNamespace, initialDenyAllPolicy)
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(initialExpectedData...))
 
 					var provisionedPolicies []libovsdb.TestData
@@ -1983,6 +1987,28 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					generateEgressPolicyWithSingleRule()),
 				table.Entry("when the namespace features a network policy with *multiple* rules",
 					generateIngressPolicyWithMultipleRules()))
+
+			ginkgo.It("policies created after namespace logging level updates inherit updated logging level", func() {
+				app.Action = func(ctx *cli.Context) error {
+					setInitialOVNState(ctx, originalNamespace)
+					desiredLogSeverity := nbdb.ACLSeverityDebug
+					gomega.Expect(
+						updateNamespaceACLLogSeverity(&originalNamespace, desiredLogSeverity, desiredLogSeverity)).To(gomega.Succeed(),
+						"should have managed to update the ACL logging severity within the namespace")
+
+					newPolicy := generateIngressPolicyWithSingleRule()
+					gomega.Expect(provisionNetworkPolicy(namespaceName, newPolicy)).To(gomega.Succeed(), "should have managed to create a new network policy")
+
+					npTest := kNetworkPolicy{}
+					var expectedData []libovsdb.TestData
+					expectedData = append(expectedData, npTest.getPolicyData(&newPolicy, nil, []string{}, nil, desiredLogSeverity)...)
+					expectedData = append(expectedData, npTest.getDefaultDenyData(&newPolicy, nil, desiredLogSeverity)...)
+
+					gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
+					return nil
+				}
+				gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+			})
 		})
 
 	})
