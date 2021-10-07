@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"reflect"
 	"strings"
-	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/ovn-org/libovsdb/client"
@@ -16,13 +15,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"gopkg.in/fsnotify/fsnotify.v1"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
-)
-
-const (
-	OVSDBTimeout = 10 * time.Second
 )
 
 // newClient creates a new client object given the provided config
@@ -31,7 +27,7 @@ const (
 func newClient(cfg config.OvnAuthConfig, dbModel *model.ClientDBModel, stopCh <-chan struct{}) (client.Client, error) {
 	logger := klogr.New()
 	options := []client.Option{
-		client.WithReconnect(OVSDBTimeout, &backoff.ZeroBackOff{}),
+		client.WithReconnect(types.OVSDBTimeout, &backoff.ZeroBackOff{}),
 		client.WithLeaderOnly(true),
 		client.WithLogger(&logger),
 	}
@@ -56,7 +52,7 @@ func newClient(cfg config.OvnAuthConfig, dbModel *model.ClientDBModel, stopCh <-
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	defer cancel()
 	err = client.Connect(ctx)
 	if err != nil {
