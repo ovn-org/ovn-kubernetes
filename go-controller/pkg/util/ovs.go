@@ -741,7 +741,8 @@ func RunRoute(args ...string) (string, string, error) {
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
-// AddOFFlowWithSpecificAction replaces flows in the bridge with a FLOOD action flow
+// AddOFFlowWithSpecificAction replaces flows in the bridge by a single flow with a
+// specified action
 func AddOFFlowWithSpecificAction(bridgeName, action string) (string, string, error) {
 	args := []string{"-O", "OpenFlow13", "replace-flows", bridgeName, "-"}
 
