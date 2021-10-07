@@ -57,15 +57,16 @@ var (
 
 	// Default holds parsed config file parameters and command-line overrides
 	Default = DefaultConfig{
-		MTU:               1400,
-		ConntrackZone:     64000,
-		EncapType:         "geneve",
-		EncapIP:           "",
-		EncapPort:         DefaultEncapPort,
-		InactivityProbe:   100000, // in Milliseconds
-		OpenFlowProbe:     180,    // in Seconds
-		LFlowCacheEnable:  true,
-		RawClusterSubnets: "10.128.0.0/14/23",
+		MTU:                  1400,
+		ConntrackZone:        64000,
+		EncapType:            "geneve",
+		EncapIP:              "",
+		EncapPort:            DefaultEncapPort,
+		InactivityProbe:      100000, // in Milliseconds
+		OpenFlowProbe:        180,    // in Seconds
+		LFlowCacheEnable:     true,
+		RawClusterSubnets:    "10.128.0.0/14/23",
+		DisableOVNIfaceIdVer: false,
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -196,6 +197,8 @@ type DefaultConfig struct {
 	// ClusterSubnets holds parsed cluster subnet entries and may be used
 	// outside the config module.
 	ClusterSubnets []CIDRNetworkEntry
+	// Option to disable the iface-id-ver feature in OVN
+	DisableOVNIfaceIdVer bool `gcfg:"disable-ovn-iface-id-ver"`
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -351,9 +354,8 @@ type HybridOverlayConfig struct {
 
 // OvnKubeNodeConfig holds ovnkube-node configurations
 type OvnKubeNodeConfig struct {
-	Mode                 string `gcfg:"mode"`
-	MgmtPortNetdev       string `gcfg:"mgmt-port-netdev"`
-	DisableOVNIfaceIdVer bool   `gcfg:"disable-ovn-iface-id-ver"`
+	Mode           string `gcfg:"mode"`
+	MgmtPortNetdev string `gcfg:"mgmt-port-netdev"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -1077,8 +1079,8 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Name: "disable-ovn-iface-id-ver",
 		Usage: "if iface-id-ver option is not enabled in ovn, set this flag to True " +
 			"(depends on ovn version, minimal required is 21.09)",
-		Value:       OvnKubeNode.DisableOVNIfaceIdVer,
-		Destination: &cliConfig.OvnKubeNode.DisableOVNIfaceIdVer,
+		Value:       Default.DisableOVNIfaceIdVer,
+		Destination: &cliConfig.Default.DisableOVNIfaceIdVer,
 	},
 }
 

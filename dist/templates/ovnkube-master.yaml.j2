@@ -260,6 +260,8 @@ spec:
           value: "{{ ovn_multicast_enable }}"
         - name: OVN_ACL_LOGGING_RATE_LIMIT
           value: "{{ ovn_acl_logging_rate_limit }}"
+        - name: OVN_DISABLE_OVN_IFACE_ID_VER
+          value: "{{ ovn_disable_ovn_iface_id_ver }}"
         - name: OVN_HOST_NETWORK_NAMESPACE
           valueFrom:
             configMapKeyRef:

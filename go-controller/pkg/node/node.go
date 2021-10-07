@@ -282,7 +282,7 @@ func isOVNControllerReady(name string) (bool, error) {
 // OVS.Interface.external-id:ovn-installed can only be used correctly
 // in a combination with OVS.Interface.external-id:iface-id-ver
 func getOVNIfUpCheckMode() (bool, error) {
-	if config.OvnKubeNode.DisableOVNIfaceIdVer {
+	if config.Default.DisableOVNIfaceIdVer {
 		klog.Infof("'iface-id-ver' is manually disabled, ovn-installed feature can't be used")
 		return false, nil
 	}

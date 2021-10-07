@@ -276,7 +276,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	var allOps []ovsdb.Operation
 	var addresses []string
 	var releaseIPs bool
-	var ifaceID string
+	var ifaceIDVer string
 	needsIP := true
 
 	// Check if the pod's logical switch port already exists. If it
@@ -286,7 +286,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	getLSP := &nbdb.LogicalSwitchPort{Name: portName}
 	err = oc.nbClient.Get(getLSP)
 	if err != nil && err != libovsdbclient.ErrNotFound {
-
 		return fmt.Errorf("unable to get the lsp: %s from the nbdb: %s", portName, err)
 	}
 	lsp := &nbdb.LogicalSwitchPort{Name: portName}
@@ -294,13 +293,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		lsp.UUID = libovsdbops.BuildNamedUUID()
 	} else {
 		lsp.UUID = getLSP.UUID
-		ifaceID = getLSP.Options["iface-id-ver"]
+		ifaceIDVer = getLSP.Options["iface-id-ver"]
 	}
 
-	// Bind the port to the node's chassis; prevents ping-ponging between
-	// chassis if ovnkube-node isn't running correctly and hasn't cleared
-	// out iface-id for an old instance of this pod, and the pod got
-	// rescheduled.
 	lsp.Options = make(map[string]string)
 
 	// Unique identifier to distinguish interfaces for recreated pods, also set by ovnkube-node
@@ -311,11 +306,17 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// Interface.external_ids:iface-id-ver if set is ignored.
 	// Only set for new LSP for correct ovn-kube upgrade, because for old OVS Interfaces
 	// iface-id-ver is not set => ovn-controller won't bind OVS Interface
-	if len(ifaceID) == 0 {
-		lsp.Options["iface-id-ver"] = string(pod.UID)
-	} else {
-		lsp.Options["iface-id-ver"] = ifaceID
+	if !config.Default.DisableOVNIfaceIdVer {
+		if len(ifaceIDVer) == 0 {
+			lsp.Options["iface-id-ver"] = string(pod.UID)
+		} else {
+			lsp.Options["iface-id-ver"] = ifaceIDVer
+		}
 	}
+	// Bind the port to the node's chassis; prevents ping-ponging between
+	// chassis if ovnkube-node isn't running correctly and hasn't cleared
+	// out iface-id for an old instance of this pod, and the pod got
+	// rescheduled.
 	lsp.Options["requested-chassis"] = pod.Spec.NodeName
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
