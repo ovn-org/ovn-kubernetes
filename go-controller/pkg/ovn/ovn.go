@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/rand"
 	"net"
 	"reflect"
@@ -20,10 +21,12 @@ import (
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -183,6 +186,8 @@ type Controller struct {
 	// libovsdb southbound client interface
 	sbClient libovsdbclient.Client
 
+	modelClient libovsdbops.ModelClient
+
 	// v4HostSubnetsUsed keeps track of number of v4 subnets currently assigned to nodes
 	v4HostSubnetsUsed float64
 
@@ -238,6 +243,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
 	}
+	modelClient := libovsdbops.NewModelClient(libovsdbOvnNBClient)
 	return &Controller{
 		client: ovnClient.KubeClient,
 		kube: &kube.Kube{
@@ -270,6 +276,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			allocatorMutex:        &sync.Mutex{},
 			allocator:             make(map[string]*egressNode),
 			nbClient:              libovsdbOvnNBClient,
+			modelClient:           modelClient,
 		},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
@@ -283,6 +290,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		nbClient:                 libovsdbOvnNBClient,
 		sbClient:                 libovsdbOvnSBClient,
 		svcController:            newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient, stopChan),
+		modelClient:              modelClient,
 	}
 }
 
@@ -368,12 +376,23 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	}
 
 	// Master is fully running and resource handlers have synced, update Topology version in OVN
-	stdout, stderr, err := util.RunOVNNbctl("set", "logical_router", ovntypes.OVNClusterRouter,
-		fmt.Sprintf("external_ids:k8s-ovn-topo-version=%d", ovntypes.OvnCurrentTopologyVersion))
-	if err != nil {
-		klog.Errorf("Failed to set topology version in OVN, "+
-			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-		return err
+	currentTopologyVersion := strconv.Itoa(ovntypes.OvnCurrentTopologyVersion)
+	logicalRouter := nbdb.LogicalRouter{
+		Name: ovntypes.OVNClusterRouter,
+		ExternalIDs: map[string]string{
+			"k8s-ovn-topo-version": currentTopologyVersion,
+		},
+	}
+	opModel := libovsdbops.OperationModel{
+		Model:          &logicalRouter,
+		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
+		OnModelMutations: []interface{}{
+			&logicalRouter.ExternalIDs,
+		},
+		ErrNotFound: true,
+	}
+	if _, err := oc.modelClient.CreateOrUpdate(opModel); err != nil {
+		return fmt.Errorf("failed to generate set topology version in OVN, err: %v", err)
 	}
 
 	// Update topology version on node
@@ -390,7 +409,7 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 }
 
 func (oc *Controller) ovnTopologyCleanup() error {
-	ver, err := util.DetermineOVNTopoVersionFromOVN()
+	ver, err := oc.determineOVNTopoVersionFromOVN()
 	if err != nil {
 		return err
 	}
@@ -400,6 +419,34 @@ func (oc *Controller) ovnTopologyCleanup() error {
 		err = addressset.NonDualStackAddressSetCleanup(oc.nbClient)
 	}
 	return err
+}
+
+// determineOVNTopoVersionFromOVN determines what OVN Topology version is being used
+// If "k8s-ovn-topo-version" key in external_ids column does not exist, it is prior to OVN topology versioning
+// and therefore set version number to OvnCurrentTopologyVersion
+func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
+	ver := 0
+	logicalRouterRes := []nbdb.LogicalRouter{}
+	if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
+		return lr.Name == ovntypes.OVNClusterRouter
+	}).List(&logicalRouterRes); err != nil {
+		return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
+			"error: %v", ovntypes.OVNClusterRouter, err)
+	}
+	if len(logicalRouterRes) == 0 {
+		// no OVNClusterRouter exists, DB is empty, nothing to upgrade
+		return math.MaxInt32, nil
+	}
+	v, exists := logicalRouterRes[0].ExternalIDs["k8s-ovn-topo-version"]
+	if !exists {
+		klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
+		return ver, nil
+	}
+	ver, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("invalid OVN topology version string for the cluster, err: %v", err)
+	}
+	return ver, nil
 }
 
 // syncPeriodic adds a goroutine that periodically does some work
@@ -925,7 +972,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 	}
 
 	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
-		if err := gatewayCleanup(oc.nbClient, node.Name); err != nil {
+		if err := oc.gatewayCleanup(node.Name); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
 		if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(node.Name); err != nil {

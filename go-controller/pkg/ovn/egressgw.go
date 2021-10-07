@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -11,7 +12,10 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 
@@ -262,6 +266,95 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 	return nil
 }
 
+func (oc *Controller) createBFDStaticRoute(bfdEnabled bool, gw net.IP, podIP, gr, port, mask string) error {
+	opModels := []libovsdbops.OperationModel{}
+
+	bfd := nbdb.BFD{
+		DstIP:       gw.String(),
+		LogicalPort: port,
+	}
+	logicalRouter := nbdb.LogicalRouter{}
+	logicalRouterStaticRoute := nbdb.LogicalRouterStaticRoute{
+		Policy: &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+		Options: map[string]string{
+			"ecmp_symmetric_reply": "true",
+		},
+		Nexthop:    gw.String(),
+		IPPrefix:   podIP + mask,
+		OutputPort: &port,
+	}
+	if bfdEnabled {
+		opModels = []libovsdbops.OperationModel{
+			{
+				Model: &bfd,
+				DoAfter: func() {
+					logicalRouterStaticRoute.BFD = &bfd.UUID
+				},
+			},
+		}
+	}
+	opModels = append(opModels, []libovsdbops.OperationModel{
+		{
+			Model: &logicalRouterStaticRoute,
+			ModelPredicate: func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
+				return lrsr.IPPrefix == podIP+mask &&
+					lrsr.Nexthop == gw.String() &&
+					lrsr.OutputPort != nil && *lrsr.OutputPort == port
+			},
+			DoAfter: func() {
+				if logicalRouterStaticRoute.UUID != "" {
+					logicalRouter.StaticRoutes = []string{logicalRouterStaticRoute.UUID}
+				}
+			},
+		}, {
+			Model: &logicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
+				return lr.Name == gr
+			},
+			OnModelMutations: []interface{}{
+				&logicalRouter.StaticRoutes,
+			},
+			ErrNotFound: true,
+		},
+	}...)
+	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		return fmt.Errorf("unable to add src-ip route to GR router, err: %v", err)
+	}
+	return nil
+}
+
+func (oc *Controller) deleteLogicalRouterStaticRoute(podIP, mask, gw, gr string) error {
+	logicalRouter := nbdb.LogicalRouter{}
+	logicalRouterStaticRouteRes := []nbdb.LogicalRouterStaticRoute{}
+	opModels := []libovsdbops.OperationModel{
+		{
+			ModelPredicate: func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
+				return lrsr.Policy != nil && *lrsr.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP &&
+					lrsr.IPPrefix == podIP+mask &&
+					lrsr.Nexthop == gw
+			},
+			ExistingResult: &logicalRouterStaticRouteRes,
+			DoAfter: func() {
+				logicalRouter.StaticRoutes = libovsdbops.ExtractUUIDsFromModels(&logicalRouterStaticRouteRes)
+			},
+			BulkOp: true,
+		},
+		{
+			Model: &logicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
+				return lr.Name == gr
+			},
+			OnModelMutations: []interface{}{
+				&logicalRouter.StaticRoutes,
+			},
+		},
+	}
+	if err := oc.modelClient.Delete(opModels...); err != nil {
+		return fmt.Errorf("unable to delete src-ip route to GR router, err: %v", err)
+	}
+	return nil
+}
+
 // deletePodExternalGW detects if a given pod is acting as an external GW and removes all routes in all namespaces
 // associated with that pod
 func (oc *Controller) deletePodExternalGW(pod *kapi.Pod) {
@@ -313,11 +406,10 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
 						continue
 					}
 
-					_, stderr, err := util.RunOVNNbctl("--if-exists", "--policy=src-ip",
-						"lr-route-del", gr, podIP+mask, gwIP.String())
-					if err != nil {
-						klog.Errorf("Unable to delete pod %s route to GR %s, GW: %s, stderr:%q, err:%v",
-							pod, gr, gwIP.String(), stderr, err)
+					if err := oc.deleteLogicalRouterStaticRoute(podIP, mask, gwIP.String(), gr); err != nil {
+						klog.Errorf("Unable to delete pod %s route to GR %s, GW: %s, err:%v",
+							pod, gr, gwIP.String(), err)
+						klog.Error(err)
 					} else {
 						klog.V(5).Infof("ECMP route deleted for pod: %s, on gr: %s, to gw: %s", pod,
 							gr, gwIP.String())
@@ -333,7 +425,7 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
 							}
 						}
 					}
-					cleanUpBFDEntry(gwIP.String(), gr, portPrefix)
+					oc.cleanUpBFDEntry(gwIP.String(), gr, portPrefix)
 				}
 			}
 			routeInfo.Unlock()
@@ -353,14 +445,11 @@ func (oc *Controller) deleteGWRoutesForNamespace(namespace string) {
 				}
 				mask := GetIPFullMask(podIP)
 				node := util.GetWorkerFromGatewayRouter(gr)
-				_, stderr, err := util.RunOVNNbctl("--if-exists", "--policy=src-ip",
-					"lr-route-del", gr, podIP+mask, gw)
-				if err != nil {
-					klog.Errorf("Unable to delete src-ip route to GR router, stderr:%q, err:%v", stderr, err)
+				if err := oc.deleteLogicalRouterStaticRoute(podIP, mask, gw, gr); err != nil {
+					klog.Errorf("Unable to delete src-ip route to GR router, err:%v", err)
 				} else {
 					delete(routeInfo.podExternalRoutes[podIP], gw)
 				}
-
 				if entry := routeInfo.podExternalRoutes[podIP]; len(entry) == 0 {
 					if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node, false); err != nil {
 						klog.Error(err)
@@ -372,7 +461,7 @@ func (oc *Controller) deleteGWRoutesForNamespace(namespace string) {
 					klog.Infof("Failed to find ext switch prefix for %s %v", node, err)
 					continue
 				}
-				cleanUpBFDEntry(gw, gr, portPrefix)
+				oc.cleanUpBFDEntry(gw, gr, portPrefix)
 			}
 		}
 		routeInfo.Unlock()
@@ -402,12 +491,9 @@ func (oc *Controller) deleteGWRoutesForPod(name ktypes.NamespacedName, podIPNets
 					klog.Infof("Failed to find ext switch prefix for %s %v", node, err)
 					continue
 				}
-
-				_, stderr, err := util.RunOVNNbctl("--if-exists", "--policy=src-ip",
-					"lr-route-del", gr, pod+mask, gw)
-				if err != nil {
-					klog.Errorf("Unable to delete ECMP route for pod: %s to GR %s, GW: %s, stderr:%q, err:%v",
-						name, gr, gw, stderr, err)
+				if err := oc.deleteLogicalRouterStaticRoute(pod, mask, gw, gr); err != nil {
+					klog.Errorf("Unable to delete ECMP route for pod: %s to GR %s, GW: %s, err:%v",
+						name, gr, gw, err)
 				} else {
 					delete(routeInfo.podExternalRoutes[pod], gw)
 					klog.V(5).Infof("ECMP route deleted for pod: %s, on gr: %s, to gw: %s", name,
@@ -418,7 +504,7 @@ func (oc *Controller) deleteGWRoutesForPod(name ktypes.NamespacedName, podIPNets
 						klog.Error(err)
 					}
 				}
-				cleanUpBFDEntry(gw, gr, portPrefix)
+				oc.cleanUpBFDEntry(gw, gr, portPrefix)
 			}
 		}
 	}
@@ -456,15 +542,9 @@ func (oc *Controller) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddrs []*n
 						continue
 					}
 					mask := GetIPFullMask(podIP)
-					nbctlArgs := []string{"--may-exist", "--policy=src-ip", "--ecmp-symmetric-reply",
-						"lr-route-add", gr, podIP + mask, gw.String(), port}
-					if gateway.bfdEnabled {
-						nbctlArgs = []string{"--may-exist", "--bfd", "--policy=src-ip", "--ecmp-symmetric-reply",
-							"lr-route-add", gr, podIP + mask, gw.String(), port}
-					}
-					_, stderr, err := util.RunOVNNbctl(nbctlArgs...)
-					if err != nil && !strings.Contains(stderr, DuplicateECMPError) {
-						return fmt.Errorf("unable to add external gwStr src-ip route to GR router, stderr:%q, err:%gw", stderr, err)
+
+					if err := oc.createBFDStaticRoute(gateway.bfdEnabled, gw, podIP, gr, port, mask); err != nil {
+						return err
 					}
 					if routeInfo.podExternalRoutes[podIP] == nil {
 						routeInfo.podExternalRoutes[podIP] = make(map[string]string)
@@ -549,7 +629,7 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 			l3Prefix = "ip4"
 		}
 		// get the GR to join switch ip address
-		grJoinIfAddrs, err := util.GetLRPAddrs(types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + node)
+		grJoinIfAddrs, err := util.GetLRPAddrs(oc.nbClient, types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+node)
 		if err != nil {
 			return fmt.Errorf("unable to find IP address for node: %s, %s port, err: %v", node, types.GWRouterToJoinSwitchPrefix, err)
 		}
@@ -574,15 +654,43 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 		// traffic destined outside of cluster subnet go to GR
 		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == %s`, types.RouterToSwitchPrefix, node, l3Prefix, podIP)
 		matchStr += matchDst
-		_, stderr, err := util.RunOVNNbctl("lr-policy-add", types.OVNClusterRouter, types.HybridOverlayReroutePriority, matchStr, "reroute",
-			grJoinIfAddr.IP.String())
-		if err != nil {
-			// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
-			// Have raised an issue against ovn repository (https://github.com/ovn-org/ovn/issues/49)
-			if !strings.Contains(stderr, "already existed") {
-				return fmt.Errorf("failed to add policy route '%s' to %s "+
-					"stderr: %s, error: %v", matchStr, types.OVNClusterRouter, stderr, err)
-			}
+
+		intPriority, _ := strconv.Atoi(types.HybridOverlayReroutePriority)
+
+		logicalRouter := nbdb.LogicalRouter{}
+		logicalRouterPolicy := nbdb.LogicalRouterPolicy{
+			Priority: intPriority,
+			Action:   nbdb.LogicalRouterPolicyActionReroute,
+			Nexthops: []string{grJoinIfAddr.IP.String()},
+			Match:    matchStr,
+		}
+		opModels := []libovsdbops.OperationModel{
+			{
+				Model: &logicalRouterPolicy,
+				ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
+					return lrp.Priority == intPriority && strings.Contains(lrp.Match, podIP.String())
+				},
+				OnModelUpdates: []interface{}{
+					&logicalRouterPolicy.Nexthops,
+					&logicalRouterPolicy.Match,
+				},
+				DoAfter: func() {
+					if logicalRouterPolicy.UUID != "" {
+						logicalRouter.Policies = []string{logicalRouterPolicy.UUID}
+					}
+				},
+			},
+			{
+				Model:          &logicalRouter,
+				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+				OnModelMutations: []interface{}{
+					&logicalRouter.Policies,
+				},
+				ErrNotFound: true,
+			},
+		}
+		if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+			return fmt.Errorf("failed to add policy route '%s' to %s, error: %v", matchStr, types.OVNClusterRouter, err)
 		}
 	}
 	return nil
@@ -615,10 +723,32 @@ func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string, forc
 		}
 		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == %s`, types.RouterToSwitchPrefix, node, l3Prefix, podIP)
 		matchStr += matchDst
-		_, stderr, err := util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, types.HybridOverlayReroutePriority, matchStr)
-		if err != nil {
-			klog.Errorf("Failed to remove policy: %s, on: %s, stderr: %s, err: %v",
-				matchStr, types.OVNClusterRouter, stderr, err)
+
+		intPriority, _ := strconv.Atoi(types.HybridOverlayReroutePriority)
+
+		logicalRouter := nbdb.LogicalRouter{}
+		logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
+		opModels := []libovsdbops.OperationModel{
+			{
+				ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
+					return lrp.Priority == intPriority && lrp.Match == matchStr
+				},
+				ExistingResult: &logicalRouterPolicyRes,
+				DoAfter: func() {
+					logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
+				},
+				BulkOp: true,
+			},
+			{
+				Model:          &logicalRouter,
+				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
+				OnModelMutations: []interface{}{
+					&logicalRouter.Policies,
+				},
+			},
+		}
+		if err := oc.modelClient.Delete(opModels...); err != nil {
+			klog.Errorf("Failed to remove policy: %s, on: %s, err: %v", matchStr, types.OVNClusterRouter, err)
 		}
 	}
 	return nil
@@ -627,41 +757,32 @@ func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string, forc
 // cleanUpBFDEntry checks if the BFD table entry related to the associated
 // gw router / port / gateway ip is referenced by other routing rules, and if
 // not removes the entry to avoid having dangling BFD entries.
-// This is temporary and can be safely removed when we consume an ovn version
-// that includes http://patchwork.ozlabs.org/project/ovn/patch/3c39dc96a36a3445cfa8485a67de79f9f3d5651b.1614602770.git.lorenzo.bianconi@redhat.com/
-func cleanUpBFDEntry(gatewayIP, gatewayRouter, prefix string) {
+func (oc *Controller) cleanUpBFDEntry(gatewayIP, gatewayRouter, prefix string) {
 	portName := prefix + types.GWRouterToExtSwitchPrefix + gatewayRouter
 
-	output, stderr, err := util.RunOVNNbctl(
-		"--format=csv", "--data=bare", "--no-heading", "--columns=bfd", "find", "Logical_Router_Static_Route", "output_port="+portName, "nexthop=\""+gatewayIP+"\"", "bfd!=[]")
-
+	logicalRouterStaticRouteRes := []nbdb.LogicalRouterStaticRoute{}
+	err := oc.nbClient.WhereCache(func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
+		return lrsr.OutputPort != nil && *lrsr.OutputPort == portName && lrsr.Nexthop == gatewayIP && lrsr.BFD != nil && *lrsr.BFD != ""
+	}).List(&logicalRouterStaticRouteRes)
 	if err != nil {
-		klog.Errorf("cleanUpBFDEntry: failed to list routes for %s, stderr: %q, (%v)", portName, gatewayIP, err, stderr)
-		return
-	}
-	// the bfd entry is still referenced, meaning there's another route on the router
-	// referencing it.
-	if strings.TrimSpace(output) != "" {
-		return
-	}
-	uuids, stderr, err := util.RunOVNNbctl(
-		"--format=csv", "--data=bare", "--no-heading", "--columns=_uuid", "find", "BFD", "logical_port="+portName, "dst_ip=\""+gatewayIP+"\"")
-	if err != nil {
-		klog.Errorf("Failed to list routes for %s, stderr: %q, (%v)", gatewayRouter, err, stderr)
+		klog.Errorf("cleanUpBFDEntry: failed to list routes for %s, err: %v", portName, err)
 		return
 	}
 
-	if strings.TrimSpace(uuids) == "" {
-		klog.Infof("Did not find bfd entry for %s %s", portName, gatewayIP)
+	if len(logicalRouterStaticRouteRes) > 0 {
 		return
 	}
 
-	for _, uuid := range strings.Split(uuids, "\n") {
-		_, stderr, err = util.RunOVNNbctl("--if-exists", "destroy", "BFD", uuid)
-		if err != nil {
-			klog.Errorf("Failed to destroy BFD %s, stderr: %q, (%v)",
-				uuid, stderr, err)
-		}
+	opModels := []libovsdbops.OperationModel{
+		{
+			Model: &nbdb.BFD{
+				LogicalPort: portName,
+				DstIP:       gatewayIP,
+			},
+		},
+	}
+	if err := oc.modelClient.Delete(opModels...); err != nil {
+		klog.Errorf("Failed to delete BFD, err: %v", err)
 	}
 }
 
@@ -691,7 +812,7 @@ func (oc *Controller) cleanExGwECMPRoutes() {
 	}()
 
 	// Get all ECMP routes in OVN and build cache
-	ovnRouteCache := buildOVNECMPCache()
+	ovnRouteCache := oc.buildOVNECMPCache()
 
 	if len(ovnRouteCache) == 0 {
 		// nothing in OVN, so no reason to search for stale routes
@@ -756,11 +877,22 @@ func (oc *Controller) cleanExGwECMPRoutes() {
 			if !ovnRoute.shouldExist {
 				klog.Infof("Found stale exgw ecmp route, podIP: %s, nexthop: %s, router: %s",
 					podIP, ovnRoute.nextHop, ovnRoute.router)
-				_, stderr, err := util.RunOVNNbctl("--if-exists", "remove", "Logical_Router",
-					strings.TrimSuffix(ovnRoute.router, "\n"), "static_routes", ovnRoute.uuid)
-				if err != nil {
-					klog.Errorf("Failed to destroy Logical_Router_Static_Route %s, stderr: %q, (%v)",
-						ovnRoute.uuid, stderr, err)
+				logicalRouter := nbdb.LogicalRouter{
+					StaticRoutes: []string{ovnRoute.uuid},
+				}
+				opModels := []libovsdbops.OperationModel{
+					{
+						Model: &logicalRouter,
+						ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
+							return lr.Name == ovnRoute.router
+						},
+						OnModelMutations: []interface{}{
+							&logicalRouter.StaticRoutes,
+						},
+					},
+				}
+				if err := oc.modelClient.Delete(opModels...); err != nil {
+					klog.Errorf("Failed to destroy Logical_Router_Static_Route %s, err: %v", ovnRoute.uuid, err)
 				}
 
 				// check to see if we should also clean up bfd
@@ -774,7 +906,7 @@ func (oc *Controller) cleanExGwECMPRoutes() {
 					klog.Errorf("Cannot sync exgw bfd: %+v, unable to determine exgw switch prefix: %v",
 						ovnRoute, err)
 				} else {
-					cleanUpBFDEntry(ovnRoute.nextHop, ovnRoute.router, prefix)
+					oc.cleanUpBFDEntry(ovnRoute.nextHop, ovnRoute.router, prefix)
 				}
 
 			} else {
@@ -920,41 +1052,33 @@ func (oc *Controller) buildClusterECMPCacheFromPods(clusterRouteCache map[string
 	}
 }
 
-func buildOVNECMPCache() map[string][]*ovnRoute {
+func (oc *Controller) buildOVNECMPCache() map[string][]*ovnRoute {
 	ovnRouteCache := make(map[string][]*ovnRoute)
-	out, stderr, err := util.RunOVNNbctl(
-		"--format=csv", "--data=bare", "--no-heading", "--columns=_uuid,ip_prefix,nexthop,output_port", "find", "Logical_Router_Static_Route", "options={ecmp_symmetric_reply=\"true\"}")
-	if err != nil {
-		klog.Errorf("CleanECMPRoutes: failed to list ecmp routes %v %s", err, stderr)
+	logicalRouterStaticRouteRes := []nbdb.LogicalRouterStaticRoute{}
+	if err := oc.nbClient.WhereCache(func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
+		return lrsr.Options["ecmp_symmetric_reply"] == "true"
+	}).List(&logicalRouterStaticRouteRes); err != nil {
+		klog.Errorf("CleanECMPRoutes: failed to list ecmp routes %v", err)
 		return nil
 	}
-	if strings.TrimSpace(out) == "" {
-		klog.Infof("Did not find ecmp routes to clean")
-		return nil
-	}
-
-	for _, line := range strings.Split(out, "\n") {
-		values := strings.Split(line, ",")
-		uuid := values[0]
-		podIP := values[1]
-		nexthop := values[2]
-		outport := values[3]
-		gr, stderr, err := util.RunOVNNbctl(
-			"--format=csv", "--data=bare", "--no-heading", "--columns=name", "find", "Logical_Router", fmt.Sprintf("static_routes{>=}[%s]", uuid))
-		if err != nil || gr == "" {
-			klog.Errorf("CleanECMPRoutes: failed to find logical router for %s", uuid, err, stderr)
+	for _, logicalRouterStaticRoute := range logicalRouterStaticRouteRes {
+		logicalRouterRes := []nbdb.LogicalRouter{}
+		if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
+			return util.SliceHasStringItem(lr.StaticRoutes, logicalRouterStaticRoute.UUID)
+		}).List(&logicalRouterRes); err != nil {
+			klog.Errorf("CleanECMPRoutes: failed to find logical router for %s, err: %v", logicalRouterStaticRoute.UUID, err)
 			continue
 		}
 		route := &ovnRoute{
-			nextHop: nexthop,
-			uuid:    uuid,
-			router:  gr,
-			outport: outport,
+			nextHop: logicalRouterStaticRoute.Nexthop,
+			uuid:    logicalRouterStaticRoute.UUID,
+			router:  logicalRouterRes[0].Name,
+			outport: *logicalRouterStaticRoute.OutputPort,
 		}
-		if _, ok := ovnRouteCache[podIP]; !ok {
-			ovnRouteCache[podIP] = []*ovnRoute{route}
+		if _, ok := ovnRouteCache[logicalRouterStaticRoute.IPPrefix]; !ok {
+			ovnRouteCache[logicalRouterStaticRoute.IPPrefix] = []*ovnRoute{route}
 		} else {
-			ovnRouteCache[podIP] = append(ovnRouteCache[podIP], route)
+			ovnRouteCache[logicalRouterStaticRoute.IPPrefix] = append(ovnRouteCache[logicalRouterStaticRoute.IPPrefix], route)
 		}
 	}
 	return ovnRouteCache

@@ -64,8 +64,8 @@ const (
 	InterNodePolicyPriority               = "1003"
 	HybridOverlaySubnetPriority           = "1002"
 	HybridOverlayReroutePriority          = "501"
-	DefaultNoRereoutePriority             = "101"
-	EgressIPReroutePriority               = "100"
+	DefaultNoRereoutePriority             = 101
+	EgressIPReroutePriority               = 100
 
 	V6NodeLocalNATSubnet           = "fd99::/64"
 	V6NodeLocalNATSubnetPrefix     = 64

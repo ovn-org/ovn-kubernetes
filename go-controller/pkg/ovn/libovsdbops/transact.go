@@ -3,37 +3,13 @@ package libovsdbops
 import (
 	"context"
 	"fmt"
-	"math/rand"
-	"reflect"
-	"sync/atomic"
 
 	"github.com/ovn-org/libovsdb/client"
-	libovsdbmodel "github.com/ovn-org/libovsdb/model"
+	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-const (
-	namedUUIDPrefix = 'u'
-)
-
-var namedUUIDCounter = rand.Uint32()
-
-// IsNamedUUID checks if the passed id is a named-uuid built with
-// BuildNamedUUID
-func IsNamedUUID(id string) bool {
-	return id != "" && id[0] == namedUUIDPrefix
-}
-
-// BuildNamedUUID builds an id that can be used as a named-uuid
-// as per OVSDB rfc 7047 section 5.1
-func BuildNamedUUID() string {
-	return fmt.Sprintf("%c%010d", namedUUIDPrefix, atomic.AddUint32(&namedUUIDCounter, 1))
-}
-
-// TransactAndCheck transacts the given ops againts client and returns
-// results if no error ocurred or an error otherwise.
 func TransactAndCheck(client client.Client, ops []ovsdb.Operation) ([]ovsdb.OperationResult, error) {
 	if len(ops) <= 0 {
 		return []ovsdb.OperationResult{{}}, nil
@@ -65,22 +41,17 @@ func TransactAndCheckAndSetUUIDs(client client.Client, models interface{}, ops [
 		return nil, err
 	}
 
-	s := reflect.ValueOf(models)
-	if s.Kind() != reflect.Slice {
-		panic("models given a non-slice type")
-	}
-
-	if s.IsNil() {
-		return results, nil
-	}
-
-	namedModelMap := map[string]libovsdbmodel.Model{}
-	for i := 0; i < s.Len(); i++ {
-		model := s.Index(i).Interface()
+	namedModelMap := map[string]model.Model{}
+	_ = onModels(models, func(model interface{}) error {
 		uuid := getUUID(model)
 		if IsNamedUUID(uuid) {
 			namedModelMap[uuid] = model
 		}
+		return nil
+	})
+
+	if len(namedModelMap) == 0 {
+		return results, nil
 	}
 
 	for i, op := range ops {
@@ -98,22 +69,4 @@ func TransactAndCheckAndSetUUIDs(client client.Client, models interface{}, ops [
 	}
 
 	return results, nil
-}
-
-func getUUID(model libovsdbmodel.Model) string {
-	switch t := model.(type) {
-	case *nbdb.LoadBalancer:
-		return t.UUID
-	default:
-		panic("getUUID: unknown model")
-	}
-}
-
-func setUUID(model libovsdbmodel.Model, uuid string) {
-	switch t := model.(type) {
-	case *nbdb.LoadBalancer:
-		t.UUID = uuid
-	default:
-		panic("setUUID: unknown model")
-	}
 }
