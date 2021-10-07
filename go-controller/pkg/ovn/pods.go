@@ -59,7 +59,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 	// get all the nodes from the watchFactory
 	nodes, err := oc.watchFactory.GetNodes()
 	if err != nil {
-		klog.Errorf("Failed to get nodes")
+		klog.Errorf("Failed to get nodes: %v", err)
 		return
 	}
 	for _, n := range nodes {
