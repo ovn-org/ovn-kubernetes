@@ -817,14 +817,13 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	}
 
 	nsInfo.networkPolicies[policy.Name] = np
-
-	nsUnlock()
-	np.Lock()
-
 	if nsInfo.aclLogging.Deny != "" || nsInfo.aclLogging.Allow != "" {
 		klog.Infof("ACL logging for network policy %s in namespace %s set to deny=%s, allow=%s",
 			policy.Name, policy.Namespace, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
 	}
+
+	nsUnlock()
+	np.Lock()
 
 	type policyHandler struct {
 		gress             *gressPolicy
