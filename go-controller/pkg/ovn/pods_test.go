@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/urfave/cli/v2"
@@ -15,8 +16,11 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/fake"
+	testcore "k8s.io/client-go/testing"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -411,6 +415,72 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("cleans up and retries a failed pod Add due to Kube API errors on Update", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				namespaceT := *newNamespace("namespace1")
+				// Setup an unassigned pod, perform an update later on which assigns it.
+				t := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+
+				cs := fakeOvn.fakeClient.KubeClient.(*fake.Clientset)
+				returnErr := true
+				defaultReactor := testcore.ObjectReaction(cs.Tracker())
+				cs.PrependReactor("patch", "pods", func(action testcore.Action) (bool, runtime.Object, error) {
+					if returnErr {
+						return true, nil, fmt.Errorf("failed to patch pod")
+					}
+					return defaultReactor(action)
+				})
+
+				fakeOvn.startWithDBSetup(ctx, initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+				)
+
+				t.populateLogicalSwitchCache(fakeOvn)
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
+
+				pod := newPod(t.namespace, t.podName, t.nodeName, "")
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Wait for the pod failure event due to Kube API errors
+				gomega.Eventually(func() bool {
+					e := <-fakeOvn.fakeRecorder.Events
+					if !strings.Contains(e, "ErrorAddingLogicalPort") {
+						return false
+					}
+					if !strings.Contains(e, "failed to set annotation on pod") {
+						return false
+					}
+					return true
+				}, 10).Should(gomega.BeTrue())
+
+				// Now wait for the pod to succeed
+				returnErr = false
+				gomega.Eventually(func() string {
+					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
+				}, 1*time.Minute).Should(gomega.ContainSubstring(`"ip_address"`))
 				return nil
 			}
 

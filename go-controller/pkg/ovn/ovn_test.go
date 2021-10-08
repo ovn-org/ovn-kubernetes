@@ -16,6 +16,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	testcore "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/record"
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
@@ -61,29 +62,33 @@ func NewFakeOVN(fexec *ovntest.FakeExec) *FakeOVN {
 		asf:          addressset.NewFakeAddressSetFactory(),
 		fakeRecorder: record.NewFakeRecorder(10),
 		wg:           &sync.WaitGroup{},
+		fakeClient: &util.OVNClientset{
+			KubeClient:           fake.NewSimpleClientset(),
+			EgressIPClient:       egressipfake.NewSimpleClientset(),
+			EgressFirewallClient: egressfirewallfake.NewSimpleClientset(),
+		},
 	}
 }
 
 func (o *FakeOVN) start(ctx *cli.Context, objects ...runtime.Object) {
-	egressIPObjects := []runtime.Object{}
-	egressFirewallObjects := []runtime.Object{}
-	v1Objects := []runtime.Object{}
 	for _, object := range objects {
+		var tracker testcore.ObjectTracker
 		if _, isEgressIPObject := object.(*egressip.EgressIPList); isEgressIPObject {
-			egressIPObjects = append(egressIPObjects, object)
+			cs := o.fakeClient.EgressIPClient.(*egressipfake.Clientset)
+			tracker = cs.Tracker()
 		} else if _, isEgressFirewallObject := object.(*egressfirewall.EgressFirewallList); isEgressFirewallObject {
-			egressFirewallObjects = append(egressFirewallObjects, object)
+			cs := o.fakeClient.EgressFirewallClient.(*egressfirewallfake.Clientset)
+			tracker = cs.Tracker()
 		} else {
-			v1Objects = append(v1Objects, object)
+			cs := o.fakeClient.KubeClient.(*fake.Clientset)
+			tracker = cs.Tracker()
+		}
+		if err := tracker.Add(object); err != nil {
+			panic(err)
 		}
 	}
 	_, err := config.InitConfig(ctx, o.fakeExec, nil)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	o.fakeClient = &util.OVNClientset{
-		KubeClient:           fake.NewSimpleClientset(v1Objects...),
-		EgressIPClient:       egressipfake.NewSimpleClientset(egressIPObjects...),
-		EgressFirewallClient: egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
-	}
 	o.init()
 }
 
