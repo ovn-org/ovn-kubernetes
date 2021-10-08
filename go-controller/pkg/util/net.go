@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	goovn "github.com/ebay/go-ovn"
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	utilnet "k8s.io/utils/net"
@@ -35,11 +34,11 @@ func intToIP(i *big.Int) net.IP {
 }
 
 // GetPortAddresses returns the MAC and IPs of the given logical switch port
-func GetPortAddresses(portName string, ovnNBClient goovn.Client) (net.HardwareAddr, []net.IP, error) {
-	lsp, err := ovnNBClient.LSPGet(portName)
-	if err != nil || lsp == nil {
-		// --if-exists handling in goovn
-		if err == goovn.ErrorSchema || err == goovn.ErrorNotFound {
+func GetPortAddresses(portName string, nbClient client.Client) (net.HardwareAddr, []net.IP, error) {
+	lsp := &nbdb.LogicalSwitchPort{Name: portName}
+	err := nbClient.Get(lsp)
+	if err != nil {
+		if err == client.ErrNotFound {
 			return nil, nil, nil
 		}
 		return nil, nil, err
@@ -47,14 +46,14 @@ func GetPortAddresses(portName string, ovnNBClient goovn.Client) (net.HardwareAd
 
 	var addresses []string
 
-	if lsp.DynamicAddresses == "" {
+	if lsp.DynamicAddresses == nil {
 		if len(lsp.Addresses) > 0 {
-			addresses = strings.Split(lsp.Addresses[0], " ")
+			addresses = lsp.Addresses
 		}
 	} else {
 		// dynamic addresses have format "0a:00:00:00:00:01 192.168.1.3"
-		// static addresses have format ["0a:00:00:00:00:01 192.168.1.3"]
-		addresses = strings.Split(lsp.DynamicAddresses, " ")
+		// static addresses have format ["0a:00:00:00:00:01", "192.168.1.3"]
+		addresses = strings.Split(*lsp.DynamicAddresses, " ")
 	}
 
 	if len(addresses) == 0 || addresses[0] == "dynamic" {
@@ -69,7 +68,7 @@ func GetPortAddresses(portName string, ovnNBClient goovn.Client) (net.HardwareAd
 	for _, addr := range addresses[1:] {
 		ip := net.ParseIP(addr)
 		if ip == nil {
-			return nil, nil, fmt.Errorf("failed to parse logical switch port %q IP %q", portName, addr)
+			return nil, nil, fmt.Errorf("failed to parse logical switch port %q IP %q is not a valid ip address", portName, addr)
 		}
 		ips = append(ips, ip)
 	}
