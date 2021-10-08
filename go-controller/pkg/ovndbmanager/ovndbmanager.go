@@ -24,9 +24,9 @@ import (
 )
 
 // retry counters for cluster statuses
-var nbClusterStatusRetryCnt, sbClusterStatusRetryCnt int32
+var nbDbRetryCnt, sbDbRetryCnt int32
 
-const maxClusterStatusRetry = 10
+const maxDBRetry = 10
 
 type dbProperties struct {
 	appCtl                func(args ...string) (string, string, error)
@@ -92,27 +92,40 @@ func ensureOvnDBState(db string, kclient kube.Interface, stopCh <-chan struct{})
 	}
 }
 
+func updateDBRetryCounter(retryCounter *int32, db string) {
+	if atomic.LoadInt32(retryCounter) > maxDBRetry {
+		//delete the db file and start master
+		resetRaftDB(db)
+		atomic.StoreInt32(retryCounter, 0)
+	} else {
+		atomic.AddInt32(retryCounter, 1)
+		klog.Infof("Failed to get cluster status for: %s, number of retries: %d", db, *retryCounter)
+	}
+}
+
 // ensureLocalRaftServerID is used to ensure there is no stale member in the Raft cluster with our address
 func ensureLocalRaftServerID(db string) {
 	var dbName string
 	var appCtl func(args ...string) (string, string, error)
-	clusterStatusRetryCnt := &nbClusterStatusRetryCnt
+	dbRetryCnt := &nbDbRetryCnt
 	if strings.Contains(db, "ovnnb") {
 		dbName = "OVN_Northbound"
 		appCtl = util.RunOVNNBAppCtl
 	} else {
 		dbName = "OVN_Southbound"
 		appCtl = util.RunOVNSBAppCtl
-		clusterStatusRetryCnt = &sbClusterStatusRetryCnt
+		dbRetryCnt = &sbDbRetryCnt
 	}
 
-	out, stderr, err := util.RunOVSDBTool("db-sid", db)
+	out, stderr, err := appCtl("cluster/sid", dbName)
 	if err != nil {
 		klog.Warningf("Unable to get db server ID for: %s, stderr: %v, err: %v", db, stderr, err)
+		updateDBRetryCounter(dbRetryCnt, db)
 		return
 	}
 	if len(out) < 4 {
 		klog.Errorf("Invalid db id found: %s for db: %s", out, db)
+		updateDBRetryCounter(dbRetryCnt, db)
 		return
 	}
 	// server ID in raft membership is only first 4 char prefix
@@ -120,18 +133,11 @@ func ensureLocalRaftServerID(db string) {
 	out, stderr, err = appCtl("cluster/status", dbName)
 	if err != nil {
 		klog.Warningf("Unable to get cluster status for: %s, stderr: %v, err: %v", db, stderr, err)
-		if atomic.LoadInt32(clusterStatusRetryCnt) > maxClusterStatusRetry {
-			//delete the db file and start master
-			resetRaftDB(db)
-			atomic.StoreInt32(clusterStatusRetryCnt, 0)
-		} else {
-			atomic.AddInt32(clusterStatusRetryCnt, 1)
-			klog.Infof("Failed to get cluster status for: %s, number of retries: %d", db, *clusterStatusRetryCnt)
-		}
+		updateDBRetryCounter(dbRetryCnt, db)
 		return
 	}
 	// on retrieving cluster/status successfully reset the retry counter.
-	atomic.StoreInt32(clusterStatusRetryCnt, 0)
+	atomic.StoreInt32(dbRetryCnt, 0)
 
 	r := regexp.MustCompile(`Address: *((ssl|tcp):[?[a-z0-9.:]+]?)`)
 	matches := r.FindStringSubmatch(out)
@@ -171,7 +177,7 @@ func ensureClusterRaftMembership(db string, kclient kube.Interface) {
 
 	var dbName string
 	var appCtl func(args ...string) (string, string, error)
-	clusterStatusRetryCnt := &nbClusterStatusRetryCnt
+	dbRetryCnt := &nbDbRetryCnt
 
 	// IPv4 example: tcp:172.18.0.2:6641
 	// IPv6 example: tcp:[fc00:f853:ccd:e793::3]:6642
@@ -186,7 +192,7 @@ func ensureClusterRaftMembership(db string, kclient kube.Interface) {
 		dbName = "OVN_Southbound"
 		appCtl = util.RunOVNSBAppCtl
 		knownMembers = strings.Split(config.OvnSouth.Address, ",")
-		clusterStatusRetryCnt = &sbClusterStatusRetryCnt
+		dbRetryCnt = &sbDbRetryCnt
 	}
 	for _, knownMember := range knownMembers {
 		match := r.FindStringSubmatch(knownMember)
@@ -205,18 +211,11 @@ func ensureClusterRaftMembership(db string, kclient kube.Interface) {
 	out, stderr, err := appCtl("cluster/status", dbName)
 	if err != nil {
 		klog.Warningf("Unable to get cluster status for: %s, stderr: %v, err: %v", db, stderr, err)
-		if atomic.LoadInt32(clusterStatusRetryCnt) > maxClusterStatusRetry {
-			//delete the db file and start master
-			resetRaftDB(db)
-			atomic.StoreInt32(clusterStatusRetryCnt, 0)
-		} else {
-			atomic.AddInt32(clusterStatusRetryCnt, 1)
-			klog.Infof("Failed to get cluster status for: %s, number of retries: %d", db, *clusterStatusRetryCnt)
-		}
+		updateDBRetryCounter(dbRetryCnt, db)
 		return
 	}
 	// on retrieving cluster/status successfully reset the retry counter.
-	atomic.StoreInt32(clusterStatusRetryCnt, 0)
+	atomic.StoreInt32(dbRetryCnt, 0)
 
 	r = regexp.MustCompile(`([a-z0-9]{4}) at ` + dbServerRegexp)
 	members := r.FindAllStringSubmatch(out, -1)
@@ -278,7 +277,7 @@ func ensureElectionTimeout(db *dbProperties) {
 	out, stderr, err := db.appCtl("cluster/status", db.dbName)
 	if err != nil {
 		klog.Warningf("Unable to get cluster status for: %s, stderr: %v, err: %v", db, stderr, err)
-		if atomic.LoadInt32(db.clusterStatusRetryCnt) > maxClusterStatusRetry {
+		if atomic.LoadInt32(db.clusterStatusRetryCnt) > maxDBRetry {
 			//delete the db file and start master
 			atomic.StoreInt32(db.clusterStatusRetryCnt, 0)
 		} else {
@@ -381,13 +380,13 @@ func propertiesForDB(db string) *dbProperties {
 			electionTimer:         int(config.OvnNorth.ElectionTimer) * 1000,
 			appCtl:                util.RunOVNNBAppCtl,
 			dbName:                "OVN_Northbound",
-			clusterStatusRetryCnt: &nbClusterStatusRetryCnt,
+			clusterStatusRetryCnt: &nbDbRetryCnt,
 		}
 	}
 	return &dbProperties{
 		electionTimer:         int(config.OvnSouth.ElectionTimer) * 1000,
 		appCtl:                util.RunOVNSBAppCtl,
 		dbName:                "OVN_Southbound",
-		clusterStatusRetryCnt: &sbClusterStatusRetryCnt,
+		clusterStatusRetryCnt: &sbDbRetryCnt,
 	}
 }

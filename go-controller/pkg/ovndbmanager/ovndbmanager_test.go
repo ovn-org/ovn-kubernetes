@@ -52,7 +52,7 @@ func TestElectionTimer(t *testing.T) {
 	db := &dbProperties{
 		appCtl:                mock,
 		dbName:                "OVN_Northbound",
-		clusterStatusRetryCnt: &nbClusterStatusRetryCnt,
+		clusterStatusRetryCnt: &nbDbRetryCnt,
 	}
 	tests := []struct {
 		desc         string
