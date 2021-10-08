@@ -372,9 +372,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			if addrSetCmds, nsErr := oc.deletePodFromNamespace(pod.Namespace, portName, "", podIfAddrs); nsErr != nil {
 				klog.Errorf("Error when deleting pod: %s from namespace: %v", pod.Name, err)
 			} else {
-				err = oc.ovnNBClient.Execute(addrSetCmds...)
-				if err != nil {
-					klog.Errorf("Error removing pod %s IPs from namespace address set: %v", portName, err)
+				if addrErr := oc.ovnNBClient.Execute(addrSetCmds...); addrErr != nil {
+					klog.Errorf("Error removing pod %s IPs from namespace address set: %v", portName, addrErr)
 				}
 			}
 		}
