@@ -274,8 +274,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			namespaceHandlerCache: make(map[string]factory.Handler),
 			podHandlerMutex:       &sync.Mutex{},
 			podHandlerCache:       make(map[string]factory.Handler),
-			allocatorMutex:        &sync.Mutex{},
-			allocator:             make(map[string]*egressNode),
+			allocator:             allocator{&sync.Mutex{}, make(map[string]*egressNode)},
 			nbClient:              libovsdbOvnNBClient,
 			modelClient:           modelClient,
 		},
@@ -907,7 +906,7 @@ func (oc *Controller) WatchEgressIP() {
 			if err := oc.updateEgressIPWithRetry(eIP); err != nil {
 				klog.Error(err)
 			}
-			metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator, oc.eIPC.allocatorMutex))
+			metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldEIP := old.(*egressipv1.EgressIP)
@@ -927,7 +926,7 @@ func (oc *Controller) WatchEgressIP() {
 				if err := oc.updateEgressIPWithRetry(newEIP); err != nil {
 					klog.Error(err)
 				}
-				metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator, oc.eIPC.allocatorMutex))
+				metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -935,7 +934,7 @@ func (oc *Controller) WatchEgressIP() {
 			if err := oc.deleteEgressIP(eIP); err != nil {
 				klog.Error(err)
 			}
-			metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator, oc.eIPC.allocatorMutex))
+			metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 		},
 	}, oc.syncEgressIPs)
 }

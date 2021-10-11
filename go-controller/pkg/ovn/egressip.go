@@ -113,17 +113,17 @@ func (oc *Controller) isEgressNodeReady(egressNode *kapi.Node) bool {
 }
 
 func (oc *Controller) isEgressNodeReachable(egressNode *kapi.Node) bool {
-	oc.eIPC.allocatorMutex.Lock()
-	defer oc.eIPC.allocatorMutex.Unlock()
-	if eNode, exists := oc.eIPC.allocator[egressNode.Name]; exists {
+	oc.eIPC.allocator.Lock()
+	defer oc.eIPC.allocator.Unlock()
+	if eNode, exists := oc.eIPC.allocator.cache[egressNode.Name]; exists {
 		return eNode.isReachable || oc.isReachable(eNode)
 	}
 	return false
 }
 
 func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
-	oc.eIPC.allocatorMutex.Lock()
-	defer oc.eIPC.allocatorMutex.Unlock()
+	oc.eIPC.allocator.Lock()
+	defer oc.eIPC.allocator.Unlock()
 	for _, eIP := range eIPs {
 		eIP, ok := eIP.(*egressipv1.EgressIP)
 		if !ok {
@@ -133,7 +133,7 @@ func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 		var validAssignment bool
 		for _, eIPStatus := range eIP.Status.Items {
 			validAssignment = false
-			eNode, exists := oc.eIPC.allocator[eIPStatus.Node]
+			eNode, exists := oc.eIPC.allocator.cache[eIPStatus.Node]
 			if !exists {
 				klog.Errorf("Allocator error: EgressIP: %s claims to have an allocation on a node which is unassignable for egress IP: %s", eIP.Name, eIPStatus.Node)
 				break
@@ -201,7 +201,7 @@ func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 				continue
 			}
 		}
-		for _, eNode := range oc.eIPC.allocator {
+		for _, eNode := range oc.eIPC.allocator.cache {
 			eNode.tainted = false
 		}
 	}
@@ -353,7 +353,7 @@ func (oc *Controller) generatePodIPCacheForEgressIP(eIPs []interface{}) (map[str
 }
 
 func (oc *Controller) isAnyClusterNodeIP(ip net.IP) *egressNode {
-	for _, eNode := range oc.eIPC.allocator {
+	for _, eNode := range oc.eIPC.allocator.cache {
 		if ip.Equal(eNode.v6IP) || ip.Equal(eNode.v4IP) {
 			return eNode
 		}
@@ -445,11 +445,11 @@ func (oc *Controller) deleteNamespacePodsEgressIP(eIP *egressipv1.EgressIP, name
 }
 
 func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
-	oc.eIPC.allocatorMutex.Lock()
+	oc.eIPC.allocator.Lock()
 	assignments := []egressipv1.EgressIPStatusItem{}
 	defer func() {
 		eIP.Status.Items = assignments
-		oc.eIPC.allocatorMutex.Unlock()
+		oc.eIPC.allocator.Unlock()
 	}()
 	assignableNodes, existingAllocations := oc.getSortedEgressData()
 	if len(assignableNodes) == 0 {
@@ -498,7 +498,7 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 			}
 			if (assignableNodes[i].v6Subnet != nil && assignableNodes[i].v6Subnet.Contains(eIPC)) ||
 				(assignableNodes[i].v4Subnet != nil && assignableNodes[i].v4Subnet.Contains(eIPC)) {
-				assignableNodes[i].tainted, oc.eIPC.allocator[assignableNodes[i].name].allocations[eIPC.String()] = true, true
+				assignableNodes[i].tainted, oc.eIPC.allocator.cache[assignableNodes[i].name].allocations[eIPC.String()] = true, true
 				assignments = append(assignments, egressipv1.EgressIPStatusItem{
 					EgressIP: eIPC.String(),
 					Node:     assignableNodes[i].name,
@@ -529,21 +529,21 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 }
 
 func (oc *Controller) releaseEgressIPs(eIP *egressipv1.EgressIP) {
-	oc.eIPC.allocatorMutex.Lock()
-	defer oc.eIPC.allocatorMutex.Unlock()
+	oc.eIPC.allocator.Lock()
+	defer oc.eIPC.allocator.Unlock()
 	for _, status := range eIP.Status.Items {
 		klog.V(5).Infof("Releasing egress IP assignment: %s", status.EgressIP)
-		if node, exists := oc.eIPC.allocator[status.Node]; exists {
+		if node, exists := oc.eIPC.allocator.cache[status.Node]; exists {
 			delete(node.allocations, status.EgressIP)
 		}
-		klog.V(5).Infof("Remaining allocations on node are: %+v", oc.eIPC.allocator[status.Node])
+		klog.V(5).Infof("Remaining allocations on node are: %+v", oc.eIPC.allocator.cache[status.Node])
 	}
 }
 
 func (oc *Controller) getSortedEgressData() ([]egressNode, map[string]bool) {
 	assignableNodes := []egressNode{}
 	allAllocations := make(map[string]bool)
-	for _, eNode := range oc.eIPC.allocator {
+	for _, eNode := range oc.eIPC.allocator.cache {
 		if eNode.isEgressAssignable && eNode.isReady && eNode.isReachable {
 			assignableNodes = append(assignableNodes, *eNode)
 		}
@@ -558,25 +558,25 @@ func (oc *Controller) getSortedEgressData() ([]egressNode, map[string]bool) {
 }
 
 func (oc *Controller) setNodeEgressAssignable(nodeName string, isAssignable bool) {
-	oc.eIPC.allocatorMutex.Lock()
-	defer oc.eIPC.allocatorMutex.Unlock()
-	if eNode, exists := oc.eIPC.allocator[nodeName]; exists {
+	oc.eIPC.allocator.Lock()
+	defer oc.eIPC.allocator.Unlock()
+	if eNode, exists := oc.eIPC.allocator.cache[nodeName]; exists {
 		eNode.isEgressAssignable = isAssignable
 	}
 }
 
 func (oc *Controller) setNodeEgressReady(nodeName string, isReady bool) {
-	oc.eIPC.allocatorMutex.Lock()
-	defer oc.eIPC.allocatorMutex.Unlock()
-	if eNode, exists := oc.eIPC.allocator[nodeName]; exists {
+	oc.eIPC.allocator.Lock()
+	defer oc.eIPC.allocator.Unlock()
+	if eNode, exists := oc.eIPC.allocator.cache[nodeName]; exists {
 		eNode.isReady = isReady
 	}
 }
 
 func (oc *Controller) setNodeEgressReachable(nodeName string, isReachable bool) {
-	oc.eIPC.allocatorMutex.Lock()
-	defer oc.eIPC.allocatorMutex.Unlock()
-	if eNode, exists := oc.eIPC.allocator[nodeName]; exists {
+	oc.eIPC.allocator.Lock()
+	defer oc.eIPC.allocator.Unlock()
+	if eNode, exists := oc.eIPC.allocator.cache[nodeName]; exists {
 		eNode.isReachable = isReachable
 	}
 }
@@ -670,9 +670,9 @@ func (oc *Controller) reassignEgressIP(eIP *egressipv1.EgressIP) (*egressipv1.Eg
 }
 
 func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
-	oc.eIPC.allocatorMutex.Lock()
-	defer oc.eIPC.allocatorMutex.Unlock()
-	if _, exists := oc.eIPC.allocator[node.Name]; !exists {
+	oc.eIPC.allocator.Lock()
+	defer oc.eIPC.allocator.Unlock()
+	if _, exists := oc.eIPC.allocator.cache[node.Name]; !exists {
 		var v4IP, v6IP net.IP
 		var v4Subnet, v6Subnet *net.IPNet
 		v4IfAddr, v6IfAddr, err := util.ParseNodePrimaryIfAddr(node)
@@ -702,7 +702,7 @@ func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
 			mgmtIPs[i] = util.GetNodeManagementIfAddr(subnet).IP
 		}
 
-		oc.eIPC.allocator[node.Name] = &egressNode{
+		oc.eIPC.allocator.cache[node.Name] = &egressNode{
 			name:        node.Name,
 			v4IP:        v4IP,
 			v6IP:        v6IP,
@@ -733,9 +733,9 @@ func (oc *Controller) deleteNodeForEgress(node *v1.Node) error {
 	if err := oc.deleteDefaultNoRerouteNodePolicies(v4Addr, v6Addr, v4ClusterSubnet, v6ClusterSubnet); err != nil {
 		return err
 	}
-	oc.eIPC.allocatorMutex.Lock()
-	delete(oc.eIPC.allocator, node.Name)
-	oc.eIPC.allocatorMutex.Unlock()
+	oc.eIPC.allocator.Lock()
+	delete(oc.eIPC.allocator.cache, node.Name)
+	oc.eIPC.allocator.Unlock()
 	return nil
 }
 
@@ -758,6 +758,13 @@ type egressNode struct {
 	isEgressAssignable bool
 	tainted            bool
 	name               string
+}
+
+type allocator struct {
+	*sync.Mutex
+	// A cache used for egress IP assignments containing data for all cluster nodes
+	// used for egress IP assignments
+	cache map[string]*egressNode
 }
 
 type egressIPController struct {
@@ -785,12 +792,7 @@ type egressIPController struct {
 	// Cache used for keeping track of EgressIP pod handlers
 	podHandlerCache map[string]factory.Handler
 
-	// A cache used for egress IP assignments containing data for all cluster nodes
-	// used for egress IP assignments
-	allocator map[string]*egressNode
-
-	// A mutex for allocator
-	allocatorMutex *sync.Mutex
+	allocator allocator
 
 	// libovsdb northbound client interface
 	nbClient libovsdbclient.Client
@@ -1025,8 +1027,8 @@ func (e *egressIPController) deleteLegacyEgressReroutePolicies() error {
 func (oc *Controller) checkEgressNodesReachability() {
 	for {
 		reAddOrDelete := map[string]bool{}
-		oc.eIPC.allocatorMutex.Lock()
-		for _, eNode := range oc.eIPC.allocator {
+		oc.eIPC.allocator.Lock()
+		for _, eNode := range oc.eIPC.allocator.cache {
 			if eNode.isEgressAssignable && eNode.isReady {
 				wasReachable := eNode.isReachable
 				isReachable := oc.isReachable(eNode)
@@ -1038,7 +1040,7 @@ func (oc *Controller) checkEgressNodesReachability() {
 				eNode.isReachable = isReachable
 			}
 		}
-		oc.eIPC.allocatorMutex.Unlock()
+		oc.eIPC.allocator.Unlock()
 		for nodeName, shouldDelete := range reAddOrDelete {
 			node, err := oc.kube.GetNode(nodeName)
 			if err != nil {
@@ -1331,11 +1333,11 @@ func getPodKey(pod *kapi.Pod) string {
 	return fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
 }
 
-func getEgressIPAllocationTotalCount(allocator map[string]*egressNode, allocatorMutex *sync.Mutex) float64 {
+func getEgressIPAllocationTotalCount(allocator allocator) float64 {
 	count := 0
-	allocatorMutex.Lock()
-	defer allocatorMutex.Unlock()
-	for _, eNode := range allocator {
+	allocator.Lock()
+	defer allocator.Unlock()
+	for _, eNode := range allocator.cache {
 		count += len(eNode.allocations)
 	}
 	return float64(count)
