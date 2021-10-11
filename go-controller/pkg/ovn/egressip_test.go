@@ -108,9 +108,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 	dialer = fakeEgressIPDialer{}
 
 	getEgressIPAllocatorSizeSafely := func() int {
-		fakeOvn.controller.eIPC.allocatorMutex.Lock()
-		defer fakeOvn.controller.eIPC.allocatorMutex.Unlock()
-		return len(fakeOvn.controller.eIPC.allocator)
+		fakeOvn.controller.eIPC.allocator.Lock()
+		defer fakeOvn.controller.eIPC.allocator.Unlock()
+		return len(fakeOvn.controller.eIPC.allocator.cache)
 	}
 
 	getEgressIPStatusLen := func(egressIPName string) func() int {
@@ -135,9 +135,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 	isEgressAssignableNode := func(nodeName string) func() bool {
 		return func() bool {
-			fakeOvn.controller.eIPC.allocatorMutex.Lock()
-			defer fakeOvn.controller.eIPC.allocatorMutex.Unlock()
-			if item, exists := fakeOvn.controller.eIPC.allocator[nodeName]; exists {
+			fakeOvn.controller.eIPC.allocator.Lock()
+			defer fakeOvn.controller.eIPC.allocator.Unlock()
+			if item, exists := fakeOvn.controller.eIPC.allocator.cache[nodeName]; exists {
 				return item.isEgressAssignable
 			}
 			return false
@@ -270,8 +270,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.controller.WatchEgressNodes()
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).To(gomega.HaveKey(node1.Name))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).To(gomega.HaveKey(node2.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node1.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node2.Name))
 				gomega.Eventually(isEgressAssignableNode(node1.Name)).Should(gomega.BeTrue())
 				gomega.Eventually(isEgressAssignableNode(node2.Name)).Should(gomega.BeFalse())
 
@@ -449,8 +449,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				)
 				fakeOvn.controller.WatchEgressNodes()
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).To(gomega.HaveKey(node1.Name))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).To(gomega.HaveKey(node2.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node1.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node2.Name))
 				gomega.Eventually(isEgressAssignableNode(node1.Name)).Should(gomega.BeTrue())
 				gomega.Eventually(isEgressAssignableNode(node2.Name)).Should(gomega.BeFalse())
 
@@ -579,8 +579,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				)
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -721,8 +721,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				)
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -842,8 +842,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				)
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -941,8 +941,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1025,8 +1025,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				)
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1149,8 +1149,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta("egressip"),
@@ -1233,8 +1233,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				)
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1383,8 +1383,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				)
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1554,9 +1554,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &node1, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(1))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).To(gomega.HaveKey(node1.Name))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator[node1.Name].v4Subnet).To(gomega.Equal(ip1V4Sub))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator[node1.Name].v6Subnet).To(gomega.Equal(ip1V6Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node1.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node1.Name].v4Subnet).To(gomega.Equal(ip1V4Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node1.Name].v6Subnet).To(gomega.Equal(ip1V6Sub))
 
 				node2.Labels = map[string]string{
 					"k8s.ovn.org/egress-assignable": "",
@@ -1565,11 +1565,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &node2, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).To(gomega.HaveKey(node1.Name))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).To(gomega.HaveKey(node2.Name))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator[node2.Name].v4Subnet).To(gomega.Equal(ip2V4Sub))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator[node1.Name].v4Subnet).To(gomega.Equal(ip1V4Sub))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator[node1.Name].v6Subnet).To(gomega.Equal(ip1V6Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node1.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node2.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node2.Name].v4Subnet).To(gomega.Equal(ip2V4Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node1.Name].v4Subnet).To(gomega.Equal(ip1V4Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node1.Name].v6Subnet).To(gomega.Equal(ip1V6Sub))
 
 				gomega.Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(gomega.BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 				return nil
@@ -1606,7 +1606,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				})
 
 				allocatorItems := func() int {
-					return len(fakeOvn.controller.eIPC.allocator)
+					return len(fakeOvn.controller.eIPC.allocator.cache)
 				}
 
 				fakeOvn.controller.WatchEgressNodes()
@@ -1732,10 +1732,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(statuses[0].Node).To(gomega.Equal(node.Name))
 				gomega.Expect(statuses[0].EgressIP).To(gomega.Equal(egressIP))
 
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).To(gomega.HaveLen(1))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).To(gomega.HaveKey(node.Name))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator[node.Name].v4Subnet).To(gomega.Equal(ipv4Sub))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator[node.Name].v6Subnet).To(gomega.Equal(ipv6Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveLen(1))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node.Name].v4Subnet).To(gomega.Equal(ipv4Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node.Name].v6Subnet).To(gomega.Equal(ipv6Sub))
 
 				gomega.Eventually(getEgressIPReassignmentCount).Should(gomega.Equal(0))
 				gomega.Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(gomega.BeTrue(), fakeOvn.fakeExec.ErrorDesc)
@@ -1852,8 +1852,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).To(gomega.HaveKey(node1.Name))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).To(gomega.HaveKey(node2.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node1.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node2.Name))
 
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(0))
 				recordedEvent := <-fakeOvn.fakeRecorder.Events
@@ -2370,13 +2370,13 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).To(gomega.HaveKey(node1.Name))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).To(gomega.HaveKey(node2.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node1.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node2.Name))
 				gomega.Eventually(isEgressAssignableNode(node1.Name)).Should(gomega.BeFalse())
 				gomega.Eventually(isEgressAssignableNode(node2.Name)).Should(gomega.BeFalse())
-				gomega.Expect(fakeOvn.controller.eIPC.allocator[node1.Name].v4Subnet).To(gomega.Equal(ip1V4Sub))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator[node1.Name].v6Subnet).To(gomega.Equal(ip1V6Sub))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator[node2.Name].v4Subnet).To(gomega.Equal(ip2V4Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node1.Name].v4Subnet).To(gomega.Equal(ip1V4Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node1.Name].v6Subnet).To(gomega.Equal(ip1V6Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node2.Name].v4Subnet).To(gomega.Equal(ip2V4Sub))
 				gomega.Eventually(eIP.Status.Items).Should(gomega.HaveLen(0))
 
 				node1.Labels = map[string]string{
@@ -2518,8 +2518,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).To(gomega.HaveKey(node1.Name))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).To(gomega.HaveKey(node2.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node1.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node2.Name))
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(0))
 
 				node1.Labels = map[string]string{
@@ -2673,7 +2673,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(1))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).To(gomega.HaveKey(node1.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node1.Name))
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 				statuses := getEgressIPStatus(egressIPName)
 				gomega.Expect(statuses[0].Node).To(gomega.Equal(node1.Name))
@@ -2687,8 +2687,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(statuses[0].Node).To(gomega.Equal(node1.Name))
 				gomega.Expect(statuses[0].EgressIP).To(gomega.Equal(egressIP))
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).To(gomega.HaveKey(node1.Name))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).To(gomega.HaveKey(node2.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node1.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node2.Name))
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
@@ -2699,8 +2699,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), node1.Name, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(1))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).ToNot(gomega.HaveKey(node1.Name))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator).To(gomega.HaveKey(node2.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).ToNot(gomega.HaveKey(node1.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node2.Name))
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 
 				getNewNode := func() string {
@@ -2733,8 +2733,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 				node2 := setupNode(node2Name, []string{"192.168.126.51/24"}, []string{"192.168.126.68", "192.168.126.102"})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -2769,8 +2769,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"192.168.126.12/24"}, []string{"192.168.126.102", "192.168.126.111"})
 				node2 := setupNode(node2Name, []string{"192.168.126.51/24"}, []string{"192.168.126.68"})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -2803,8 +2803,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -2835,8 +2835,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -2870,8 +2870,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -2904,8 +2904,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{egressIP, "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				egressIPs := []string{egressIP}
 				eIP := egressipv1.EgressIP{
@@ -2936,8 +2936,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{egressIP + "/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -2966,8 +2966,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				egressIPs := []string{egressIP}
 
@@ -2999,8 +2999,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIPs := []string{egressIP}
 				eIP := egressipv1.EgressIP{
@@ -3031,8 +3031,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -3062,8 +3062,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 				egressIPs := []string{egressIP}
 
 				eIP := egressipv1.EgressIP{
@@ -3094,8 +3094,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -3126,8 +3126,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"192.168.126.12/24"}, []string{"192.168.126.102", "192.168.126.111"})
 				node2 := setupNode(node2Name, []string{"192.168.126.51/24"}, []string{"192.168.126.68"})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -3173,8 +3173,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -3216,8 +3216,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 				node2 := setupNode(node2Name, []string{"192.168.126.51/24"}, []string{"192.168.126.68", "192.168.126.102"})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -3287,8 +3287,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Items: []egressipv1.EgressIP{eIP},
 					})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
@@ -3345,8 +3345,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Items: []egressipv1.EgressIP{eIP},
 					})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
@@ -3398,8 +3398,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Items: []egressipv1.EgressIP{eIP},
 					})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
@@ -3458,8 +3458,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Items: []egressipv1.EgressIP{eIP},
 					})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
@@ -3512,8 +3512,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Items: []egressipv1.EgressIP{eIP},
 					})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
@@ -3564,8 +3564,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Items: []egressipv1.EgressIP{eIP},
 					})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
@@ -3615,8 +3615,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Items: []egressipv1.EgressIP{eIP},
 					})
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
@@ -3662,8 +3662,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				}
 				fakeOvn.start(ctx)
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
@@ -3720,8 +3720,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				)
 
-				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
-				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
 				fakeOvn.controller.WatchEgressIP()
 
 				_, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP1, metav1.CreateOptions{})
