@@ -278,7 +278,7 @@ ovn_master_count=${OVN_MASTER_COUNT:-"1"}
 echo "ovn_master_count: ${ovn_master_count}"
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-"100000"}
 echo "ovn_remote_probe_interval: ${ovn_remote_probe_interval}"
-ovn_monitor_all=${OVN_MONITOR_ALL:-"true"}
+ovn_monitor_all=${OVN_MONITOR_ALL}
 echo "ovn_monitor_all: ${ovn_monitor_all}"
 ovn_nb_port=${OVN_NB_PORT:-6641}
 echo "ovn_nb_port: ${ovn_nb_port}"
