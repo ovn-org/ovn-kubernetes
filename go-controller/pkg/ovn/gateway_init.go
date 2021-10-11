@@ -822,7 +822,9 @@ func (oc *Controller) addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAd
 // 		0f5af297-74c8-4551-b10e-afe3b74bb000,ip4.src == 10.244.0.2  && ip4.dst != 10.244.0.0/16 /* inter-ovn-worker2 */,169.254.0.1
 
 // The function checks to see if the mgmtPort IP has changed, or if match criteria has changed
-// and removes stale policies for a node. It also adds new policies for a node at a specific priority.
+// and removes stale policies for a node for the NodeSubnetPolicy in SGW.
+// TODO: Fix the MGMTPortPolicy's and InterNodePolicy's ip4.src fields if the mgmtPort IP has changed in LGW.
+// It also adds new policies for a node at a specific priority.
 // This is ugly (since the node is encoded as a comment in the match),
 // but a necessary evil as any change to this would break upgrades and
 // possible downgrades. We could make sure any upgrade encodes the node in
@@ -830,51 +832,54 @@ func (oc *Controller) addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAd
 // know which version someone is running of this and when the switch to version
 // N+2 is fully made.
 func (oc *Controller) syncPolicyBasedRoutes(nodeName string, matches sets.String, priority, nexthop string) error {
-	policies, err := oc.findPolicyBasedRoutes(priority)
-	if err != nil {
-		return fmt.Errorf("unable to list policies, err: %v", err)
-	}
-
 	// create a map to track matches found
 	matchTracker := sets.NewString(matches.List()...)
 
-	// sync and remove unknown policies for this node/priority
-	// also flag if desired policies are already found
-	for _, policy := range policies {
-		if strings.Contains(policy.Match, fmt.Sprintf("%s\"", nodeName)) {
-			// if the policy is for this node and has the wrong mgmtPortIP as nexthop, remove it
-			// FIXME we currently assume that foundNexthops is a single ip, this may
-			// change in the future.
+	if priority == types.NodeSubnetPolicyPriority {
+		policies, err := oc.findPolicyBasedRoutes(priority)
+		if err != nil {
+			return fmt.Errorf("unable to list policies, err: %v", err)
+		}
 
-			if policy.Nexthops != nil && utilnet.IsIPv6String(policy.Nexthops[0]) != utilnet.IsIPv6String(nexthop) {
-				continue
-			}
-			if policy.Nexthops[0] != nexthop {
-				if err := oc.deletePolicyBasedRoutes(policy.UUID, priority); err != nil {
-					return fmt.Errorf("failed to delete policy route '%s' for host %q on %s "+
-						"error: %v", policy.UUID, nodeName, types.OVNClusterRouter, err)
+		// sync and remove unknown policies for this node/priority
+		// also flag if desired policies are already found
+		for _, policy := range policies {
+			if strings.Contains(policy.Match, fmt.Sprintf("%s\"", nodeName)) {
+				// if the policy is for this node and has the wrong mgmtPortIP as nexthop, remove it
+				// FIXME we currently assume that foundNexthops is a single ip, this may
+				// change in the future.
+
+				if policy.Nexthops != nil && utilnet.IsIPv6String(policy.Nexthops[0]) != utilnet.IsIPv6String(nexthop) {
+					continue
 				}
-				continue
-			}
-			desiredMatchFound := false
-			for match := range matchTracker {
-				if strings.Contains(policy.Match, match) {
-					desiredMatchFound = true
-					break
+				if policy.Nexthops[0] != nexthop {
+					if err := oc.deletePolicyBasedRoutes(policy.UUID, priority); err != nil {
+						return fmt.Errorf("failed to delete policy route '%s' for host %q on %s "+
+							"error: %v", policy.UUID, nodeName, types.OVNClusterRouter, err)
+					}
+					continue
 				}
-			}
-			// if the policy is for this node/priority and does not contain a valid match, remove it
-			if !desiredMatchFound {
-				if err := oc.deletePolicyBasedRoutes(policy.UUID, priority); err != nil {
-					return fmt.Errorf("failed to delete policy route '%s' for host %q on %s "+
-						"error: %v", policy.UUID, nodeName, types.OVNClusterRouter, err)
+				desiredMatchFound := false
+				for match := range matchTracker {
+					if strings.Contains(policy.Match, match) {
+						desiredMatchFound = true
+						break
+					}
 				}
-				continue
+				// if the policy is for this node/priority and does not contain a valid match, remove it
+				if !desiredMatchFound {
+					if err := oc.deletePolicyBasedRoutes(policy.UUID, priority); err != nil {
+						return fmt.Errorf("failed to delete policy route '%s' for host %q on %s "+
+							"error: %v", policy.UUID, nodeName, types.OVNClusterRouter, err)
+					}
+					continue
+				}
+				// now check if the existing policy matches, remove it
+				matchTracker.Delete(policy.Match)
 			}
-			// now check if the existing policy matches, remove it
-			matchTracker.Delete(policy.Match)
 		}
 	}
+
 	// cycle through all of the not found match criteria and create new policies
 	for match := range matchTracker {
 		if err := oc.createPolicyBasedRoutes(match, priority, nexthop); err != nil {
@@ -910,8 +915,17 @@ func (oc *Controller) createPolicyBasedRoutes(match, priority, nexthops string) 
 	opModels := []libovsdbops.OperationModel{
 		{
 			Model: &logicalRouterPolicy,
+			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
+				return lrp.Priority == intPriority && lrp.Match == match
+			},
+			OnModelUpdates: []interface{}{
+				&logicalRouterPolicy.Nexthops,
+				&logicalRouterPolicy.Match,
+			},
 			DoAfter: func() {
-				logicalRouter.Policies = []string{logicalRouterPolicy.UUID}
+				if logicalRouterPolicy.UUID != "" {
+					logicalRouter.Policies = []string{logicalRouterPolicy.UUID}
+				}
 			},
 		},
 		{
