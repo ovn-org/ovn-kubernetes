@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -944,7 +943,7 @@ func (e *egressIPController) createEgressReroutePolicy(filterOption, egressIPNam
 		{
 			Model: &logicalRouterPolicy,
 			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
-				return lrp.Match == filterOption && lrp.Priority == types.EgressIPReroutePriority && reflect.DeepEqual(lrp.Nexthops, gatewayRouterIPs) && lrp.ExternalIDs["name"] == egressIPName
+				return lrp.Match == filterOption && lrp.Priority == types.EgressIPReroutePriority && isStringSetEqual(lrp.Nexthops, gatewayRouterIPs) && lrp.ExternalIDs["name"] == egressIPName
 			},
 			DoAfter: func() {
 				if logicalRouterPolicy.UUID != "" {
@@ -973,7 +972,7 @@ func (e *egressIPController) deleteEgressReroutePolicy(filterOption, egressIPNam
 	opsModel := []libovsdbops.OperationModel{
 		{
 			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
-				return lrp.Match == filterOption && lrp.Priority == types.EgressIPReroutePriority && reflect.DeepEqual(lrp.Nexthops, gatewayRouterIPs) && lrp.ExternalIDs["name"] == egressIPName
+				return lrp.Match == filterOption && lrp.Priority == types.EgressIPReroutePriority && isStringSetEqual(lrp.Nexthops, gatewayRouterIPs) && lrp.ExternalIDs["name"] == egressIPName
 			},
 			ExistingResult: &logicalRouterPolicyRes,
 			DoAfter: func() {
@@ -1340,4 +1339,14 @@ func getEgressIPAllocationTotalCount(allocator map[string]*egressNode, allocator
 		count += len(eNode.allocations)
 	}
 	return float64(count)
+}
+
+// reflect.DeepEqual considers the order of elements (plus possible duplication)
+// given that neither order nor duplication of nexthop IPs matters, simply comparing sets
+// is the better option and will avoid issues with different order within the compared
+// slices
+func isStringSetEqual(x, y []string) bool {
+	s1 := sets.NewString(x...)
+	s2 := sets.NewString(y...)
+	return s1.Equal(s2)
 }
