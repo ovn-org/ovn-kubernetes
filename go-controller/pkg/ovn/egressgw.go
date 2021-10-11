@@ -1075,10 +1075,11 @@ func (oc *Controller) buildOVNECMPCache() map[string][]*ovnRoute {
 			router:  logicalRouterRes[0].Name,
 			outport: *logicalRouterStaticRoute.OutputPort,
 		}
-		if _, ok := ovnRouteCache[logicalRouterStaticRoute.IPPrefix]; !ok {
-			ovnRouteCache[logicalRouterStaticRoute.IPPrefix] = []*ovnRoute{route}
+		podIP, _, _ := net.ParseCIDR(logicalRouterStaticRoute.IPPrefix)
+		if _, ok := ovnRouteCache[podIP.String()]; !ok {
+			ovnRouteCache[podIP.String()] = []*ovnRoute{route}
 		} else {
-			ovnRouteCache[logicalRouterStaticRoute.IPPrefix] = append(ovnRouteCache[logicalRouterStaticRoute.IPPrefix], route)
+			ovnRouteCache[podIP.String()] = append(ovnRouteCache[podIP.String()], route)
 		}
 	}
 	return ovnRouteCache
