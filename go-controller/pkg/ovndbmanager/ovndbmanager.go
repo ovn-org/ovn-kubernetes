@@ -29,7 +29,7 @@ var nbDbRetryCnt, sbDbRetryCnt int32
 const maxDBRetry = 10
 
 type dbProperties struct {
-	appCtl                func(args ...string) (string, string, error)
+	appCtl                func(timeout int, args ...string) (string, string, error)
 	dbName                string
 	electionTimer         int
 	clusterStatusRetryCnt *int32
@@ -106,18 +106,18 @@ func updateDBRetryCounter(retryCounter *int32, db string) {
 // ensureLocalRaftServerID is used to ensure there is no stale member in the Raft cluster with our address
 func ensureLocalRaftServerID(db string) {
 	var dbName string
-	var appCtl func(args ...string) (string, string, error)
+	var appCtl func(timeout int, args ...string) (string, string, error)
 	dbRetryCnt := &nbDbRetryCnt
 	if strings.Contains(db, "ovnnb") {
 		dbName = "OVN_Northbound"
-		appCtl = util.RunOVNNBAppCtl
+		appCtl = util.RunOVNNBAppCtlWithTimeout
 	} else {
 		dbName = "OVN_Southbound"
-		appCtl = util.RunOVNSBAppCtl
+		appCtl = util.RunOVNSBAppCtlWithTimeout
 		dbRetryCnt = &sbDbRetryCnt
 	}
 
-	out, stderr, err := appCtl("cluster/sid", dbName)
+	out, stderr, err := appCtl(5, "cluster/sid", dbName)
 	if err != nil {
 		klog.Warningf("Unable to get db server ID for: %s, stderr: %v, err: %v", db, stderr, err)
 		updateDBRetryCounter(dbRetryCnt, db)
@@ -130,7 +130,7 @@ func ensureLocalRaftServerID(db string) {
 	}
 	// server ID in raft membership is only first 4 char prefix
 	serverID := out[:4]
-	out, stderr, err = appCtl("cluster/status", dbName)
+	out, stderr, err = appCtl(5, "cluster/status", dbName)
 	if err != nil {
 		klog.Warningf("Unable to get cluster status for: %s, stderr: %v, err: %v", db, stderr, err)
 		updateDBRetryCounter(dbRetryCnt, db)
@@ -162,7 +162,7 @@ func ensureLocalRaftServerID(db string) {
 		if member[1] != serverID {
 			// stale entry found for this node with same address, need to kick
 			klog.Infof("Previous stale member found in %s: %s... kicking", db, member[1])
-			_, stderr, err = appCtl("cluster/kick", dbName, member[1])
+			_, stderr, err = appCtl(5, "cluster/kick", dbName, member[1])
 			if err != nil {
 				klog.Errorf("Error while kicking old Raft member: %s, for address: %s in db: %s,"+
 					"stderr: %v, error: %v", member[1], addr, db, stderr, err)
@@ -176,7 +176,7 @@ func ensureClusterRaftMembership(db string, kclient kube.Interface) {
 	var knownMembers, knownServers []string
 
 	var dbName string
-	var appCtl func(args ...string) (string, string, error)
+	var appCtl func(timeout int, args ...string) (string, string, error)
 	dbRetryCnt := &nbDbRetryCnt
 
 	// IPv4 example: tcp:172.18.0.2:6641
@@ -186,11 +186,11 @@ func ensureClusterRaftMembership(db string, kclient kube.Interface) {
 
 	if strings.Contains(db, "ovnnb") {
 		dbName = "OVN_Northbound"
-		appCtl = util.RunOVNNBAppCtl
+		appCtl = util.RunOVNNBAppCtlWithTimeout
 		knownMembers = strings.Split(config.OvnNorth.Address, ",")
 	} else {
 		dbName = "OVN_Southbound"
-		appCtl = util.RunOVNSBAppCtl
+		appCtl = util.RunOVNSBAppCtlWithTimeout
 		knownMembers = strings.Split(config.OvnSouth.Address, ",")
 		dbRetryCnt = &sbDbRetryCnt
 	}
@@ -208,7 +208,7 @@ func ensureClusterRaftMembership(db string, kclient kube.Interface) {
 		}
 		knownServers = append(knownServers, server)
 	}
-	out, stderr, err := appCtl("cluster/status", dbName)
+	out, stderr, err := appCtl(5, "cluster/status", dbName)
 	if err != nil {
 		klog.Warningf("Unable to get cluster status for: %s, stderr: %v, err: %v", db, stderr, err)
 		updateDBRetryCounter(dbRetryCnt, db)
@@ -261,7 +261,7 @@ func ensureClusterRaftMembership(db string, kclient kube.Interface) {
 		if !memberFound && (len(members)-kickedMembersCount) > 3 {
 			// unknown member and we have enough members its safe to kick the unknown address
 			klog.Infof("Unknown Raft member found in %s: %s, %s... kicking", db, member[1], member[3])
-			_, stderr, err = appCtl("cluster/kick", dbName, member[1])
+			_, stderr, err = appCtl(5, "cluster/kick", dbName, member[1])
 			if err != nil {
 				// warn only: we might fail to kick since other nodes will also be trying to kick the member
 				klog.Warningf("Error while kicking old Raft member: %s, for address: %s in db: %s,"+
@@ -274,7 +274,7 @@ func ensureClusterRaftMembership(db string, kclient kube.Interface) {
 }
 
 func ensureElectionTimeout(db *dbProperties) {
-	out, stderr, err := db.appCtl("cluster/status", db.dbName)
+	out, stderr, err := db.appCtl(5, "cluster/status", db.dbName)
 	if err != nil {
 		klog.Warningf("Unable to get cluster status for: %s, stderr: %v, err: %v", db, stderr, err)
 		if atomic.LoadInt32(db.clusterStatusRetryCnt) > maxDBRetry {
@@ -310,13 +310,13 @@ func ensureElectionTimeout(db *dbProperties) {
 
 	max_election_timer := currentElectionTimer * 2
 	if db.electionTimer <= max_election_timer {
-		_, stderr, err := db.appCtl("cluster/change-election-timer", db.dbName, fmt.Sprint(db.electionTimer))
+		_, stderr, err := db.appCtl(5, "cluster/change-election-timer", db.dbName, fmt.Sprint(db.electionTimer))
 		if err != nil {
 			klog.Infof("Failed to change election timer for %s %v %v", db.dbName, err, stderr)
 		}
 		return
 	}
-	_, stderr, err = db.appCtl("cluster/change-election-timer", db.dbName, fmt.Sprint(max_election_timer))
+	_, stderr, err = db.appCtl(5, "cluster/change-election-timer", db.dbName, fmt.Sprint(max_election_timer))
 	if err != nil {
 		klog.Infof("Failed to change election timer for %s %v %v", db.dbName, err, stderr)
 	}
@@ -334,15 +334,15 @@ func resetRaftDB(db string) {
 	} else {
 		klog.Infof("Backed up the db to backupFile: %s", backupFile)
 		var dbName string
-		var appCtl func(args ...string) (string, string, error)
+		var appCtl func(timeout int, args ...string) (string, string, error)
 		if strings.Contains(db, "ovnnb") {
 			dbName = "OVN_Northbound"
-			appCtl = util.RunOVNNBAppCtl
+			appCtl = util.RunOVNNBAppCtlWithTimeout
 		} else {
 			dbName = "OVN_Southbound"
-			appCtl = util.RunOVNSBAppCtl
+			appCtl = util.RunOVNSBAppCtlWithTimeout
 		}
-		_, stderr, err := appCtl("exit")
+		_, stderr, err := appCtl(5, "exit")
 		if err != nil {
 			klog.Warningf("Unable to restart the ovn db: %s ,"+
 				"stderr: %v, err: %v", dbName, stderr, err)
@@ -354,7 +354,7 @@ func resetRaftDB(db string) {
 // EnableDBMemTrimming enables memory trimming on DB compaction for NBDB and SBDB. Every 10 minutes the DBs are compacted
 // and excess memory on the heap is freed. By enabling memory trimming, the freed memory will be returned back to the OS
 func EnableDBMemTrimming() error {
-	out, stderr, err := util.RunOVNNBAppCtl("list-commands")
+	out, stderr, err := util.RunOVNNBAppCtlWithTimeout(5, "list-commands")
 	if err != nil {
 		return fmt.Errorf("unable to list supported commands for ovn-appctl, stderr: %s, error: %v", stderr, err)
 	}
@@ -363,11 +363,11 @@ func EnableDBMemTrimming() error {
 			"memory growth")
 		return nil
 	}
-	_, stderr, err = util.RunOVNNBAppCtl("ovsdb-server/memory-trim-on-compaction", "on")
+	_, stderr, err = util.RunOVNNBAppCtlWithTimeout(5, "ovsdb-server/memory-trim-on-compaction", "on")
 	if err != nil {
 		return fmt.Errorf("unable to turn on memory trimming for NB DB, stderr: %s, error: %v", stderr, err)
 	}
-	_, stderr, err = util.RunOVNSBAppCtl("ovsdb-server/memory-trim-on-compaction", "on")
+	_, stderr, err = util.RunOVNSBAppCtlWithTimeout(5, "ovsdb-server/memory-trim-on-compaction", "on")
 	if err != nil {
 		return fmt.Errorf("unable to turn on memory trimming for SB DB, stderr: %s, error: %v", stderr, err)
 	}
@@ -378,14 +378,14 @@ func propertiesForDB(db string) *dbProperties {
 	if strings.Contains(db, "ovnnb") {
 		return &dbProperties{
 			electionTimer:         int(config.OvnNorth.ElectionTimer) * 1000,
-			appCtl:                util.RunOVNNBAppCtl,
+			appCtl:                util.RunOVNNBAppCtlWithTimeout,
 			dbName:                "OVN_Northbound",
 			clusterStatusRetryCnt: &nbDbRetryCnt,
 		}
 	}
 	return &dbProperties{
 		electionTimer:         int(config.OvnSouth.ElectionTimer) * 1000,
-		appCtl:                util.RunOVNSBAppCtl,
+		appCtl:                util.RunOVNSBAppCtlWithTimeout,
 		dbName:                "OVN_Southbound",
 		clusterStatusRetryCnt: &sbDbRetryCnt,
 	}

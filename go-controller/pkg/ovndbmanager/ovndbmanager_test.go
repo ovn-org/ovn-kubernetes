@@ -38,7 +38,7 @@ Servers:
 func TestElectionTimer(t *testing.T) {
 	var mockCalls map[string]*mockRes
 	var unexpectedKeys []string
-	mock := func(args ...string) (string, string, error) {
+	mock := func(timeout int, args ...string) (string, string, error) {
 		key := keyForArgs(args...)
 		res, ok := mockCalls[key]
 		if !ok {
