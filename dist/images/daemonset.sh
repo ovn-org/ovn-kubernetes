@@ -355,8 +355,8 @@ ovn_image=${image} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
 
-# ovnkube node for smart-nic-host nic daemonset
-# TODO: we probably dont need all of these when running on smart-nic host
+# ovnkube node for smart-nic host daemonset
+# TODO: We probably dont need all of these when running on smart-nic host
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
   kind=${KIND} \
