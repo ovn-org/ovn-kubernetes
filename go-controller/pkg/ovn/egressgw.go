@@ -420,7 +420,7 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
 							// TODO (trozet): use the go bindings here and batch commands
 							// delete the ovn_cluster_router policy if the pod has no more exgws to revert back to normal
 							// default gw behavior
-							if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node, false); err != nil {
+							if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
 								klog.Error(err)
 							}
 						}
@@ -451,7 +451,7 @@ func (oc *Controller) deleteGWRoutesForNamespace(namespace string) {
 					delete(routeInfo.podExternalRoutes[podIP], gw)
 				}
 				if entry := routeInfo.podExternalRoutes[podIP]; len(entry) == 0 {
-					if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node, false); err != nil {
+					if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
 						klog.Error(err)
 					}
 				}
@@ -500,7 +500,7 @@ func (oc *Controller) deleteGWRoutesForPod(name ktypes.NamespacedName, podIPNets
 						gr, gw)
 				}
 				if entry := routeInfo.podExternalRoutes[pod]; len(entry) == 0 {
-					if err := oc.delHybridRoutePolicyForPod(podIPNet.IP, node, false); err != nil {
+					if err := oc.delHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
 						klog.Error(err)
 					}
 				}
@@ -620,14 +620,29 @@ func (oc *Controller) addPerPodGRSNAT(pod *kapi.Pod, podIfAddrs []*net.IPNet) er
 // by ecmp routes
 func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) error {
 	if config.Gateway.Mode == config.GatewayModeLocal {
+		// Add podIP to the node's address_set.
+		as, err := oc.addressSetFactory.EnsureAddressSet(types.HybridRoutePolicyPrefix + node)
+		if err != nil {
+			return fmt.Errorf("cannot ensure that addressSet for node %s exists %v", node, err)
+		}
+		err = as.AddIPs([]net.IP{(podIP)})
+		if err != nil {
+			return fmt.Errorf("unable to add PodIP %s: to the address set %s, err: %v", podIP.String(), node, err)
+		}
+
 		// add allow policy to bypass lr-policy in GR
+		ipv4HashedAS, ipv6HashedAS := as.GetASHashNames()
 		var l3Prefix string
+		var matchSrcAS string
 		isIPv6 := utilnet.IsIPv6(podIP)
 		if isIPv6 {
 			l3Prefix = "ip6"
+			matchSrcAS = ipv6HashedAS
 		} else {
 			l3Prefix = "ip4"
+			matchSrcAS = ipv4HashedAS
 		}
+
 		// get the GR to join switch ip address
 		grJoinIfAddrs, err := util.GetLRPAddrs(oc.nbClient, types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+node)
 		if err != nil {
@@ -651,8 +666,9 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 			}
 			matchDst += fmt.Sprintf(" && %s.dst != %s", clusterL3Prefix, clusterSubnet.CIDR)
 		}
+
 		// traffic destined outside of cluster subnet go to GR
-		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == %s`, types.RouterToSwitchPrefix, node, l3Prefix, podIP)
+		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == $%s`, types.RouterToSwitchPrefix, node, l3Prefix, matchSrcAS)
 		matchStr += matchDst
 
 		intPriority, _ := strconv.Atoi(types.HybridOverlayReroutePriority)
@@ -668,7 +684,7 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 			{
 				Model: &logicalRouterPolicy,
 				ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
-					return lrp.Priority == intPriority && strings.Contains(lrp.Match, podIP.String())
+					return lrp.Priority == intPriority && strings.Contains(lrp.Match, matchSrcAS)
 				},
 				OnModelUpdates: []interface{}{
 					&logicalRouterPolicy.Nexthops,
@@ -696,60 +712,196 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 	return nil
 }
 
-// delHybridRoutePolicyForPod handles deleting a higher priority allow policy to allow traffic to be routed normally
-// by ecmp routes
-// force is used to indicate to force remove LRPs, useful for when going from LGW->SGW
-func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string, force bool) error {
-	if config.Gateway.Mode == config.GatewayModeLocal || force {
-		// delete allow policy to bypass lr-policy in GR
+// delHybridRoutePolicyForPod handles deleting a logical route policy that
+// forces pod egress traffic to be rerouted to a gateway router for local gateway mode.
+func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string) error {
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		// Delete podIP from the node's address_set.
+		as, err := oc.addressSetFactory.EnsureAddressSet(types.HybridRoutePolicyPrefix + node)
+		if err != nil {
+			return fmt.Errorf("cannot Ensure that addressSet for node %s exists %v", node, err)
+		}
+		err = as.DeleteIPs([]net.IP{(podIP)})
+		if err != nil {
+			return fmt.Errorf("unable to remove PodIP %s: to the address set %s, err: %v", podIP.String(), node, err)
+		}
+
+		// delete hybrid policy to bypass lr-policy in GR, only if there are zero pods on this node.
+		ipv4HashedAS, ipv6HashedAS := as.GetASHashNames()
+		ipv4PodIPs, ipv6PodIPs := as.GetIPs()
+		deletePolicy := false
 		var l3Prefix string
+		var matchSrcAS string
 		if utilnet.IsIPv6(podIP) {
 			l3Prefix = "ip6"
+			if len(ipv6PodIPs) == 0 {
+				deletePolicy = true
+			}
+			matchSrcAS = ipv6HashedAS
 		} else {
 			l3Prefix = "ip4"
-		}
-		var matchDst string
-		var clusterL3Prefix string
-		for _, clusterSubnet := range config.Default.ClusterSubnets {
-			if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-				clusterL3Prefix = "ip6"
-			} else {
-				clusterL3Prefix = "ip4"
+			if len(ipv4PodIPs) == 0 {
+				deletePolicy = true
 			}
-			if l3Prefix != clusterL3Prefix {
-				continue
+			matchSrcAS = ipv4HashedAS
+		}
+		if deletePolicy {
+			var matchDst string
+			var clusterL3Prefix string
+			for _, clusterSubnet := range config.Default.ClusterSubnets {
+				if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+					clusterL3Prefix = "ip6"
+				} else {
+					clusterL3Prefix = "ip4"
+				}
+				if l3Prefix != clusterL3Prefix {
+					continue
+				}
+				matchDst += fmt.Sprintf(" && %s.dst != %s", l3Prefix, clusterSubnet.CIDR)
 			}
-			matchDst += fmt.Sprintf(" && %s.dst != %s", l3Prefix, clusterSubnet.CIDR)
-		}
-		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == %s`, types.RouterToSwitchPrefix, node, l3Prefix, podIP)
-		matchStr += matchDst
+			matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == $%s`, types.RouterToSwitchPrefix, node, l3Prefix, matchSrcAS)
+			matchStr += matchDst
 
-		intPriority, _ := strconv.Atoi(types.HybridOverlayReroutePriority)
+			intPriority, _ := strconv.Atoi(types.HybridOverlayReroutePriority)
 
-		logicalRouter := nbdb.LogicalRouter{}
-		logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
-		opModels := []libovsdbops.OperationModel{
-			{
-				ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
-					return lrp.Priority == intPriority && lrp.Match == matchStr
+			logicalRouter := nbdb.LogicalRouter{}
+			logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
+			opModels := []libovsdbops.OperationModel{
+				{
+					ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
+						return lrp.Priority == intPriority && lrp.Match == matchStr
+					},
+					ExistingResult: &logicalRouterPolicyRes,
+					DoAfter: func() {
+						logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
+					},
+					BulkOp: true,
 				},
-				ExistingResult: &logicalRouterPolicyRes,
-				DoAfter: func() {
-					logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
+				{
+					Model:          &logicalRouter,
+					ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
+					OnModelMutations: []interface{}{
+						&logicalRouter.Policies,
+					},
 				},
-				BulkOp: true,
-			},
-			{
-				Model:          &logicalRouter,
-				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
-				OnModelMutations: []interface{}{
-					&logicalRouter.Policies,
-				},
-			},
+			}
+			if err := oc.modelClient.Delete(opModels...); err != nil {
+				return fmt.Errorf("failed to remove policy: %s, on: %s, err: %v", matchStr, types.OVNClusterRouter, err)
+			}
 		}
-		if err := oc.modelClient.Delete(opModels...); err != nil {
-			klog.Errorf("Failed to remove policy: %s, on: %s, err: %v", matchStr, types.OVNClusterRouter, err)
+		if len(ipv4PodIPs) == 0 && len(ipv6PodIPs) == 0 {
+			// delete address set.
+			err := as.Destroy()
+			if err != nil {
+				return fmt.Errorf("failed to remove address set: %s, on: %s, err: %v",
+					as.GetName(), node, err)
+			}
 		}
+	}
+	return nil
+}
+
+// delAllHybridRoutePolicies deletes all the 501 hybrid-route-policies that
+// force pod egress traffic to be rerouted to a gateway router for local gateway mode.
+// Called when migrating to SGW from LGW.
+func (oc *Controller) delAllHybridRoutePolicies() error {
+	// nuke all the policies
+	intPriority, _ := strconv.Atoi(types.HybridOverlayReroutePriority)
+
+	logicalRouter := nbdb.LogicalRouter{}
+	logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
+	opModels := []libovsdbops.OperationModel{
+		{
+			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
+				return lrp.Priority == intPriority
+			},
+			ExistingResult: &logicalRouterPolicyRes,
+			DoAfter: func() {
+				logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
+			},
+			BulkOp: true,
+		},
+		{
+			Model:          &logicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
+			OnModelMutations: []interface{}{
+				&logicalRouter.Policies,
+			},
+		},
+	}
+	if err := oc.modelClient.Delete(opModels...); err != nil {
+		return fmt.Errorf("failed to remove hybrid route policies on: %s, err: %v", types.OVNClusterRouter, err)
+	}
+
+	// nuke all the address-sets.
+	// if we fail to remove LRP's above, we don't attempt to remove ASes due to dependency constraints.
+	addrSetList := []nbdb.AddressSet{}
+	addrSetOpModels := []libovsdbops.OperationModel{
+		{
+			ModelPredicate: func(as *nbdb.AddressSet) bool {
+				return strings.Contains(as.ExternalIDs["name"], types.HybridRoutePolicyPrefix)
+			},
+			ExistingResult: &addrSetList,
+			BulkOp:         true,
+		},
+	}
+	if err := oc.modelClient.Delete(addrSetOpModels...); err != nil {
+		return fmt.Errorf("failed to remove hybrid route address sets, err: %v", err)
+	}
+
+	return nil
+}
+
+// delLegacyHybridRoutePolicyForPod handles deleting a logical route policy that
+// forces pod egress traffic to be rerouted to a gateway router for local gateway mode.
+// Legacy routes included those matching on a per pod ip basis, rather than a per node address set
+func (oc *Controller) delLegacyHybridRoutePolicyForPod(podIP net.IP, node string) error {
+	var l3Prefix string
+	if utilnet.IsIPv6(podIP) {
+		l3Prefix = "ip6"
+	} else {
+		l3Prefix = "ip4"
+	}
+	var matchDst string
+	var clusterL3Prefix string
+	for _, clusterSubnet := range config.Default.ClusterSubnets {
+		if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+			clusterL3Prefix = "ip6"
+		} else {
+			clusterL3Prefix = "ip4"
+		}
+		if l3Prefix != clusterL3Prefix {
+			continue
+		}
+		matchDst += fmt.Sprintf(" && %s.dst != %s", l3Prefix, clusterSubnet.CIDR)
+	}
+	matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == %s`, types.RouterToSwitchPrefix, node, l3Prefix, podIP)
+	matchStr += matchDst
+	intPriority, _ := strconv.Atoi(types.HybridOverlayReroutePriority)
+
+	logicalRouter := nbdb.LogicalRouter{}
+	logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
+	opModels := []libovsdbops.OperationModel{
+		{
+			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
+				return lrp.Priority == intPriority && lrp.Match == matchStr
+			},
+			ExistingResult: &logicalRouterPolicyRes,
+			DoAfter: func() {
+				logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
+			},
+			BulkOp: true,
+		},
+		{
+			Model:          &logicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
+			OnModelMutations: []interface{}{
+				&logicalRouter.Policies,
+			},
+		},
+	}
+	if err := oc.modelClient.Delete(opModels...); err != nil {
+		return fmt.Errorf("failed to remove policy: %s, on: %s, err: %v", matchStr, types.OVNClusterRouter, err)
 	}
 	return nil
 }
@@ -914,16 +1066,23 @@ func (oc *Controller) cleanExGwECMPRoutes() {
 			}
 		}
 
-		// if pod had no ECMP routes we need to make sure we remove any logical route policy for local gw mode
-		// for shared gateway mode, these LRPs shouldn't exist, so delete them all
-		if !podHasAnyECMPRoutes || config.Gateway.Mode == config.GatewayModeShared {
+		// if pod had no ECMP routes we need to make sure we remove logical route policy for local gw mode
+		if !podHasAnyECMPRoutes {
 			for _, ovnRoute := range ovnRoutes {
 				gr := strings.TrimPrefix(ovnRoute.router, types.GWRouterPrefix)
-				if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), gr, true); err != nil {
+				if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), gr); err != nil {
 					klog.Errorf("Error while removing hybrid policy for pod IP: %s, on node: %s, error: %v",
 						podIP, gr, err)
 				}
 			}
+		}
+	}
+
+	// migration from LGW to SGW mode
+	// for shared gateway mode, these LRPs shouldn't exist, so delete them all
+	if config.Gateway.Mode == config.GatewayModeShared {
+		if err := oc.delAllHybridRoutePolicies(); err != nil {
+			klog.Errorf("Error while removing hybrid policies on moving to SGW mode, error: %v", err)
 		}
 	}
 }
@@ -1007,6 +1166,11 @@ func (oc *Controller) buildClusterECMPCacheFromNamespaces(clusterRouteCache map[
 					} else {
 						clusterRouteCache[podIP.IP] = []string{gwIP.String()}
 					}
+					// delete legacy hybrid route policies for all exgw enabled pods (for both LGW & SGW)
+					err := oc.delLegacyHybridRoutePolicyForPod(net.ParseIP(podIP.IP), nsPod.Spec.NodeName)
+					if err != nil {
+						klog.Errorf("Cannot remove legacy hybrid router policy for pod %s on node %s, err: %v", podIP.IP, nsPod.Spec.NodeName, err)
+					}
 				}
 			}
 		}
@@ -1046,6 +1210,11 @@ func (oc *Controller) buildClusterECMPCacheFromPods(clusterRouteCache map[string
 						continue
 					}
 					clusterRouteCache[podIP.IP] = append(clusterRouteCache[podIP.IP], gwIP.String())
+					// delete legacy hybrid route policies for all exgw enabled pods (for both LGW & SGW)
+					err := oc.delLegacyHybridRoutePolicyForPod(net.ParseIP(podIP.IP), nsPod.Spec.NodeName)
+					if err != nil {
+						klog.Errorf("Cannot remove legacy hybrid router policy for pod %s on node %s, err: %v", podIP.IP, nsPod.Spec.NodeName, err)
+					}
 				}
 			}
 		}

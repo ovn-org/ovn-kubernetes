@@ -306,7 +306,7 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	// EgressFirewall needs to make sure that the address_set for the namespace exists independently of the namespace object
 	// so that OVN doesn't get unresolved references to the address_set.
 	// TODO: This should go away once we do something like refcounting for address_sets.
-	err = oc.addressSetFactory.EnsureAddressSet(egressFirewall.Namespace)
+	_, err = oc.addressSetFactory.EnsureAddressSet(egressFirewall.Namespace)
 	if err != nil {
 		return fmt.Errorf("cannot Ensure that addressSet for namespace %s exists %v", egressFirewall.Namespace, err)
 	}
