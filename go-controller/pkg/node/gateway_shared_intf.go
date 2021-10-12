@@ -142,7 +142,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 					npw.ofm.updateFlowCacheEntry(key, nodeportFlows)
 				} else {
 					npw.ofm.updateFlowCacheEntry(key, []string{
-						fmt.Sprintf("cookie=%s, priority=100, in_port=%s, %s, tp_dst=%d, actions=%s",
+						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, tp_dst=%d, actions=%s",
 							cookie, npw.ofportPhys, flowProtocol, svcPort.NodePort, npw.ofportPatch),
 						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, tp_src=%d, actions=%s",
 							cookie, npw.ofportPatch, flowProtocol, svcPort.NodePort, npw.ofportPhys)})

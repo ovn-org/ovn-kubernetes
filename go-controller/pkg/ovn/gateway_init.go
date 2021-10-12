@@ -115,10 +115,16 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		gwLRPNetworks = append(gwLRPNetworks, gwLRPIfAddr.String())
 	}
 
+	var options map[string]string
+	if !config.Gateway.DisableGatewayMTU {
+		options = map[string]string{"gateway_mtu": fmt.Sprintf("%d", util.GetMaxFrameLength())}
+	}
+
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name:     gwRouterPort,
 		MAC:      gwLRPMAC.String(),
 		Networks: gwLRPNetworks,
+		Options:  options,
 	}
 	opModels = []libovsdbops.OperationModel{
 		{
@@ -126,6 +132,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 			OnModelUpdates: []interface{}{
 				&logicalRouterPort.MAC,
 				&logicalRouterPort.Networks,
+				&logicalRouterPort.Options,
 			},
 			DoAfter: func() {
 				logicalRouter.Ports = []string{logicalRouterPort.UUID}

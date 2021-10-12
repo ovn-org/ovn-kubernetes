@@ -17,6 +17,8 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
+const EtherHeaderLength = 14
+
 // StringArg gets the named command-line argument or returns an error if it is empty
 func StringArg(context *cli.Context, name string) (string, error) {
 	val := context.String(name)
@@ -32,6 +34,11 @@ func GetLegacyK8sMgmtIntfName(nodeName string) string {
 		return types.K8sPrefix + (nodeName[:11])
 	}
 	return types.K8sPrefix + nodeName
+}
+
+// GetMaxFrameLength returns the maximum frame size (ignoring VLAN header) that a gateway can handle
+func GetMaxFrameLength() int {
+	return config.Default.MTU + EtherHeaderLength
 }
 
 // GetWorkerFromGatewayRouter determines a node's corresponding worker switch name from a gateway router name

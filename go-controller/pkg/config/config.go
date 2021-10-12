@@ -308,6 +308,8 @@ type GatewayConfig struct {
 	// RouterSubnet is the subnet to be used for the GR external port. auto-detected if not given.
 	// Must match the the kube node IP address. Currently valid for Smart-NICs only.
 	RouterSubnet string `gcfg:"router-subnet"`
+	// DisableGatewayMTU disables setting gateway_mtu option to rtoj- gateway port
+	DisableGatewayMTU bool `gcfg:"disable-gateway-mtu"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -990,6 +992,11 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage:       "The v6 join subnet used for assigning join switch IPv6 addresses",
 		Destination: &cliConfig.Gateway.V6JoinSubnet,
 		Value:       Gateway.V6JoinSubnet,
+	},
+	&cli.BoolFlag{
+		Name:        "disable-gateway-mtu",
+		Usage:       "Disable setting gateway_mtu option for gateway port",
+		Destination: &cliConfig.Gateway.DisableGatewayMTU,
 	},
 	&cli.StringFlag{
 		Name: "gateway-router-subnet",

@@ -57,6 +57,9 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		Name:     gwRouterPort,
 		MAC:      util.IPAddrToHWAddr(joinLRPIPs[0].IP).String(),
 		Networks: networks,
+		Options: map[string]string{
+			"gateway_mtu": fmt.Sprintf("%d", util.GetMaxFrameLength()),
+		},
 	})
 	grStaticRoutes := []string{}
 	for i, subnet := range clusterIPSubnets {
