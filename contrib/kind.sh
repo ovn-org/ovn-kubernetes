@@ -42,6 +42,7 @@ usage() {
     echo "                 [-cl |--ovn-loglevel-controller <loglevel>] [-dl|--ovn-loglevel-nbctld <loglevel>]"
     echo "                 [-ep |--experimental-provider <name>] |"
     echo "                 [-eb |--egress-gw-separate-bridge]"
+    echo "                 [-dg |--disable-gateway-mtu]"
     echo "                 [-h]]"
     echo ""
     echo "-cf  | --config-file               Name of the KIND J2 configuration file."
@@ -77,6 +78,7 @@ usage() {
     echo "-dl  | --ovn-loglevel-nbctld       Log config for nbctl daemon DEFAULT: '-vconsole:info'."
     echo "-ep  | --experimental-provider     Use an experimental OCI provider such as podman, instead of docker. DEFAULT: Disabled."
     echo "-eb  | --egress-gw-separate-bridge The external gateway traffic uses a separate bridge."
+    echo "-dg  | --disable-gateway-mtu       Disable setting gateway_mtu option to rtoj gateway port. Default: Disabled"
     echo "--delete                      	   Delete current cluster"
     echo ""
 }
@@ -101,6 +103,8 @@ parse_args() {
             -ho | --hybrid-enabled )            OVN_HYBRID_OVERLAY_ENABLE=true
                                                 ;;
             -ds | --disable-snat-multiple-gws ) OVN_DISABLE_SNAT_MULTIPLE_GWS=true
+                                                ;;
+            -ds | --disable-gateway-mtu )       OVN_DISABLE_GATEWAY_MTU=true
                                                 ;;
             -ep | --experimental-provider )     shift
                                                 export KIND_EXPERIMENTAL_PROVIDER=$1
@@ -214,6 +218,7 @@ print_params() {
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
      echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
      echo "OVN_DISABLE_SNAT_MULTIPLE_GWS = $OVN_DISABLE_SNAT_MULTIPLE_GWS"
+     echo "OVN_DISABLE_GATEWAY_MTU = $OVN_DISABLE_GATEWAY_MTU"
      echo "OVN_NETFLOW_TARGETS = $OVN_NETFLOW_TARGETS"
      echo "OVN_SFLOW_TARGETS = $OVN_SFLOW_TARGETS"
      echo "OVN_IPFIX_TARGETS = $OVN_IPFIX_TARGETS"
@@ -274,6 +279,7 @@ set_default_params() {
   KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
   OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
   OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-false}
+  OVN_DISABLE_GATEWAY_MTU=${OVN_DISABLE_GATEWAY_MTU:-false}
   OVN_EMPTY_LB_EVENTS=${OVN_EMPTY_LB_EVENTS:-false}
   OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
   KIND_ALLOW_SYSTEM_WRITES=${KIND_ALLOW_SYSTEM_WRITES:-false}
@@ -499,6 +505,7 @@ create_ovn_kube_manifests() {
     --gateway-mode="${OVN_GATEWAY_MODE}" \
     --hybrid-enabled="${OVN_HYBRID_OVERLAY_ENABLE}" \
     --disable-snat-multiple-gws="${OVN_DISABLE_SNAT_MULTIPLE_GWS}" \
+    --disable-gateway-mtu="${OVN_DISABLE_GATEWAY_MTU}" \
     --ovn-empty-lb-events="${OVN_EMPTY_LB_EVENTS}" \
     --multicast-enabled="${OVN_MULTICAST_ENABLE}" \
     --k8s-apiserver="${API_URL}" \
