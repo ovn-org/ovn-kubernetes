@@ -36,6 +36,9 @@ OVN_ACL_LOGGING_RATE_LIMIT=""
 OVN_MASTER_COUNT=""
 OVN_REMOTE_PROBE_INTERVAL=""
 OVN_MONITOR_ALL=""
+OVN_ENABLE_LFLOW_CACHE=""
+OVN_LFLOW_CACHE_LIMIT=""
+OVN_LFLOW_CACHE_LIMIT_KB=""
 OVN_HYBRID_OVERLAY_ENABLE=""
 OVN_DISABLE_SNAT_MULTIPLE_GWS=""
 OVN_DISABLE_PKT_MTU_CHECK=""
@@ -72,6 +75,15 @@ while [ "$1" != "" ]; do
     ;;
   --ovn-monitor-all)
     OVN_MONITOR_ALL=$VALUE
+    ;;
+  --ovn-enable-lflow-cache)
+    OVN_ENABLE_LFLOW_CACHE=$VALUE
+    ;;
+  --ovn-lflow-cache-limit)
+    OVN_LFLOW_CACHE_LIMIT=$VALUE
+    ;;
+  --ovn-lflow-cache-limit-kb)
+    OVN_LFLOW_CACHE_LIMIT_KB=$VALUE
     ;;
   --net-cidr)
     OVN_NET_CIDR=$VALUE
@@ -280,6 +292,12 @@ ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-"100000"}
 echo "ovn_remote_probe_interval: ${ovn_remote_probe_interval}"
 ovn_monitor_all=${OVN_MONITOR_ALL}
 echo "ovn_monitor_all: ${ovn_monitor_all}"
+ovn_enable_lflow_cache=${OVN_ENABLE_LFLOW_CACHE}
+echo "ovn_enable_lflow_cache: ${ovn_enable_lflow_cache}"
+ovn_lflow_cache_limit=${OVN_LFLOW_CACHE_LIMIT}
+echo "ovn_lflow_cache_limit: ${ovn_lflow_cache_limit}"
+ovn_lflow_cache_limit_kb=${OVN_LFLOW_CACHE_LIMIT_KB}
+echo "ovn_lflow_cache_limit_kb: ${ovn_lflow_cache_limit_kb}"
 ovn_nb_port=${OVN_NB_PORT:-6641}
 echo "ovn_nb_port: ${ovn_nb_port}"
 ovn_sb_port=${OVN_SB_PORT:-6642}
@@ -326,6 +344,9 @@ ovn_image=${image} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_monitor_all=${ovn_monitor_all} \
+  ovn_enable_lflow_cache=${ovn_enable_lflow_cache} \
+  ovn_lflow_cache_limit=${ovn_lflow_cache_limit} \
+  ovn_lflow_cache_limit_kb=${ovn_lflow_cache_limit_kb} \
   ovn_netflow_targets=${ovn_netflow_targets} \
   ovn_sflow_targets=${ovn_sflow_targets} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
@@ -357,6 +378,9 @@ ovn_image=${image} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_monitor_all=${ovn_monitor_all} \
+  ovn_enable_lflow_cache=${ovn_enable_lflow_cache} \
+  ovn_lflow_cache_limit=${ovn_lflow_cache_limit} \
+  ovn_lflow_cache_limit_kb=${ovn_lflow_cache_limit_kb} \
   ovn_netflow_targets=${ovn_netflow_targets} \
   ovn_sflow_targets=${ovn_sflow_targets} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \

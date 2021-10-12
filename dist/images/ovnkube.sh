@@ -69,6 +69,9 @@ fi
 # OVN_SSL_ENABLE - use SSL transport to NB/SB db and northd (default: no)
 # OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 # OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB
+# OVN_ENABLE_LFLOW_CACHE - enable ovn-controller lflow-cache
+# OVN_LFLOW_CACHE_LIMIT - maximum number of logical flow cache entries of ovn-controller
+# OVN_LFLOW_CACHE_LIMIT_KB - maximum size of the logical flow cache of ovn-controller
 # OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 # OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
@@ -199,6 +202,9 @@ ovn_v6_join_subnet=${OVN_V6_JOIN_SUBNET:-}
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
 #OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB
 ovn_monitor_all=${OVN_MONITOR_ALL:-}
+ovn_enable_lflow_cache=${OVN_ENABLE_LFLOW_CACHE:-}
+ovn_lflow_cache_limit=${OVN_LFLOW_CACHE_LIMIT:-}
+ovn_lflow_cache_limit_kb=${OVN_LFLOW_CACHE_LIMIT_KB:-}
 ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 #OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
@@ -1072,6 +1078,21 @@ ovn-node() {
      monitor_all="--monitor-all=${ovn_monitor_all}"
   fi
 
+  enable_lflow_cache=
+  if [[ -n ${ovn_enable_lflow_cache} ]]; then
+     enable_lflow_cache="--enable-lflow-cache=${ovn_enable_lflow_cache}"
+  fi
+
+  lflow_cache_limit=
+  if [[ -n ${ovn_lflow_cache_limit} ]]; then
+     lflow_cache_limit="--lflow-cache-limit=${ovn_lflow_cache_limit}"
+  fi
+
+  lflow_cache_limit_kb=
+  if [[ -n ${ovn_lflow_cache_limit_kb} ]]; then
+     lflow_cache_limit_kb="--lflow-cache-limit-kb=${ovn_lflow_cache_limit_kb}"
+  fi
+
   egress_interface=
   if [[ -n ${ovn_ex_gw_network_interface} ]]; then
       egress_interface="--exgw-interface ${ovn_ex_gw_network_interface}"
@@ -1153,6 +1174,9 @@ ovn-node() {
     ${ovn_node_ssl_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
     ${monitor_all} \
+    ${enable_lflow_cache} \
+    ${lflow_cache_limit} \
+    ${lflow_cache_limit_kb} \
     ${multicast_enabled_flag} \
     ${egressip_enabled_flag} \
     ${disable_ovn_iface_id_ver_flag} \
