@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 package node
@@ -245,10 +246,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 
 		expectedTables := map[string]util.FakeTable{
 			"nat": {
-				"PREROUTING": []string{
-					"-j OVN-KUBE-EXTERNALIP",
-					"-j OVN-KUBE-NODEPORT",
-				},
 				"OUTPUT": []string{
 					"-j OVN-KUBE-EXTERNALIP",
 					"-j OVN-KUBE-NODEPORT",
@@ -349,11 +346,6 @@ func shareGatewayInterfaceSmartNICTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
 			Output: systemID,
-		})
-		// DetectCheckPktLengthSupport
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-appctl --timeout=15 dpif/show-dp-features " + brphys,
-			Output: "Check pkt length action: Yes",
 		})
 		// GetSmartNICHostInterface
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{

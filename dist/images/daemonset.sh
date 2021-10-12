@@ -38,7 +38,6 @@ OVN_REMOTE_PROBE_INTERVAL=""
 OVN_MONITOR_ALL=""
 OVN_HYBRID_OVERLAY_ENABLE=""
 OVN_DISABLE_SNAT_MULTIPLE_GWS=""
-OVN_DISABLE_PKT_MTU_CHECK=""
 OVN_EMPTY_LB_EVENTS=""
 OVN_MULTICAST_ENABLE=""
 OVN_EGRESSIP_ENABLE=
@@ -154,9 +153,6 @@ while [ "$1" != "" ]; do
   --disable-snat-multiple-gws)
     OVN_DISABLE_SNAT_MULTIPLE_GWS=$VALUE
     ;;
-  --disable-pkt-mtu-check)
-    OVN_DISABLE_PKT_MTU_CHECK=$VALUE
-    ;;
   --ovn-empty-lb-events)
     OVN_EMPTY_LB_EVENTS=$VALUE
     ;;
@@ -259,8 +255,6 @@ ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
 echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS}
 echo "ovn_disable_snat_multiple_gws: ${ovn_disable_snat_multiple_gws}"
-ovn_disable_pkt_mtu_check=${OVN_DISABLE_PKT_MTU_CHECK}
-echo "ovn_disable_pkt_mtu_check: ${ovn_disable_pkt_mtu_check}"
 ovn_empty_lb_events=${OVN_EMPTY_LB_EVENTS}
 echo "ovn_empty_lb_events: ${ovn_empty_lb_events}"
 ovn_ssl_en=${OVN_SSL_ENABLE:-"no"}
@@ -315,7 +309,6 @@ ovn_image=${image} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
-  ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
   ovn_v4_join_subnet=${ovn_v4_join_subnet} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
@@ -347,7 +340,6 @@ ovn_image=${image} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
-  ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
   ovn_v4_join_subnet=${ovn_v4_join_subnet} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
@@ -374,7 +366,6 @@ ovn_image=${image} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
-  ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
   ovn_empty_lb_events=${ovn_empty_lb_events} \
   ovn_v4_join_subnet=${ovn_v4_join_subnet} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \

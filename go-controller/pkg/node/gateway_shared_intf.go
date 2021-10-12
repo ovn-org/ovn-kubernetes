@@ -80,20 +80,10 @@ type serviceConfig struct {
 // epHostLocal indicates if a host networked endpoint exists for this
 // service func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bool, epHostLocal bool) {
 func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bool, epHostLocal bool) {
-	var cookie, key string
+	var cookie, key, actions string
 	var err error
 
-	// 14 bytes of overhead for ethernet header (does not include VLAN)
-	maxPktLength := getMaxFrameLength()
-
-	var actions string
-	if config.Gateway.DisablePacketMTUCheck {
-		actions = fmt.Sprintf("output:%s", npw.ofportPatch)
-	} else {
-		// check packet length larger than MTU + eth header - vlan overhead
-		// send to table 11 to check if it needs to go to kernel for ICMP needs frag
-		actions = fmt.Sprintf("check_pkt_larger(%d)->reg0[0],resubmit(,11)", maxPktLength)
-	}
+	actions = fmt.Sprintf("output:%s", npw.ofportPatch)
 
 	// cookie is only used for debugging purpose. so it is not fatal error if cookie is failed to be generated.
 	for _, svcPort := range service.Spec.Ports {
@@ -152,11 +142,9 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 					npw.ofm.updateFlowCacheEntry(key, nodeportFlows)
 				} else {
 					npw.ofm.updateFlowCacheEntry(key, []string{
-						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, tp_dst=%d, "+
-							"actions=%s",
-							cookie, npw.ofportPhys, flowProtocol, svcPort.NodePort, actions),
-						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, tp_src=%d, "+
-							"actions=output:%s",
+						fmt.Sprintf("cookie=%s, priority=100, in_port=%s, %s, tp_dst=%d, actions=%s",
+							cookie, npw.ofportPhys, flowProtocol, svcPort.NodePort, npw.ofportPatch),
+						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, tp_src=%d, actions=%s",
 							cookie, npw.ofportPatch, flowProtocol, svcPort.NodePort, npw.ofportPhys)})
 				}
 			}
@@ -701,8 +689,6 @@ func newSharedGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration) 
 
 func flowsForDefaultBridge(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost string, bridgeIPs []*net.IPNet) ([]string, error) {
 	var dftFlows []string
-	// 14 bytes of overhead for ethernet header (does not include VLAN)
-	maxPktLength := getMaxFrameLength()
 
 	if config.IPv4Mode {
 		// table0, Geneve packets coming from external. Skip conntrack and go directly to host
@@ -800,26 +786,17 @@ func flowsForDefaultBridge(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost
 				protoPrefix, masqIP, HostMasqCTZone))
 	}
 
-	var actions string
-	if config.Gateway.DisablePacketMTUCheck {
-		actions = fmt.Sprintf("output:%s", ofPortPatch)
-	} else {
-		// check packet length larger than MTU + eth header - vlan overhead
-		// send to table 11 to check if it needs to go to kernel for ICMP needs frag
-		actions = fmt.Sprintf("check_pkt_larger(%d)->reg0[0],resubmit(,11)", maxPktLength)
-	}
-
 	if config.IPv4Mode {
 		// table 1, established and related connections in zone 64000 with ct_mark ctMarkOVN go to OVN
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=100, table=1, ip, ct_state=+trk+est, ct_mark=%s, "+
-				"actions=%s",
-				defaultOpenFlowCookie, ctMarkOVN, actions))
+				"actions=output:%s",
+				defaultOpenFlowCookie, ctMarkOVN, ofPortPatch))
 
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=100, table=1, ip, ct_state=+trk+rel, ct_mark=%s, "+
-				"actions=%s",
-				defaultOpenFlowCookie, ctMarkOVN, actions))
+				"actions=output:%s",
+				defaultOpenFlowCookie, ctMarkOVN, ofPortPatch))
 
 		// table 1, established and related connections in zone 64000 with ct_mark ctMarkHost go to host
 		dftFlows = append(dftFlows,
@@ -837,13 +814,13 @@ func flowsForDefaultBridge(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost
 		// table 1, established and related connections in zone 64000 with ct_mark ctMarkOVN go to OVN
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=100, table=1, ipv6, ct_state=+trk+est, ct_mark=%s, "+
-				"actions=%s",
-				defaultOpenFlowCookie, ctMarkOVN, actions))
+				"actions=output:%s",
+				defaultOpenFlowCookie, ctMarkOVN, ofPortPatch))
 
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=100, table=1, ipv6, ct_state=+trk+rel, ct_mark=%s, "+
-				"actions=%s",
-				defaultOpenFlowCookie, ctMarkOVN, actions))
+				"actions=output:%s",
+				defaultOpenFlowCookie, ctMarkOVN, ofPortPatch))
 
 		// table 1, established and related connections in zone 64000 with ct_mark ctMarkHost go to host
 		dftFlows = append(dftFlows,
@@ -905,7 +882,6 @@ func flowsForDefaultBridge(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost
 
 func commonFlows(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost string) []string {
 	var dftFlows []string
-	maxPktLength := getMaxFrameLength()
 
 	// table 0, we check to see if this dest mac is the shared mac, if so flood to both ports
 	dftFlows = append(dftFlows,
@@ -955,15 +931,6 @@ func commonFlows(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost string) [
 				"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, ofPortPhys, config.Default.ConntrackZone))
 	}
 
-	var actions string
-	if config.Gateway.DisablePacketMTUCheck {
-		actions = fmt.Sprintf("output:%s", ofPortPatch)
-	} else {
-		// check packet length larger than MTU + eth header - vlan overhead
-		// send to table 11 to check if it needs to go to kernel for ICMP needs frag
-		actions = fmt.Sprintf("check_pkt_larger(%d)->reg0[0],resubmit(,11)", maxPktLength)
-	}
-
 	if config.Gateway.DisableSNATMultipleGWs {
 		// table 1, traffic to pod subnet go directly to OVN
 		// check packet length larger than MTU + eth header - vlan overhead
@@ -979,8 +946,8 @@ func commonFlows(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost string) [
 
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=15, table=1, %s, %s_dst=%s, "+
-					"actions=%s",
-					defaultOpenFlowCookie, ipPrefix, ipPrefix, cidr, actions))
+					"actions=output:%s",
+					defaultOpenFlowCookie, ipPrefix, ipPrefix, cidr, ofPortPatch))
 		}
 	}
 
@@ -1010,17 +977,6 @@ func commonFlows(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost string) [
 				defaultOpenFlowCookie, ofPortPhys, ofPortPatch, ofPortHost))
 	}
 
-	// New dispatch table 11
-	// packets larger than known acceptable MTU need to go to kernel to create ICMP frag needed
-	if !config.Gateway.DisablePacketMTUCheck {
-		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=10, table=11, reg0=0x1, "+
-				"actions=output:%s", defaultOpenFlowCookie, ofPortHost))
-		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=1, table=11, "+
-				"actions=output:%s", defaultOpenFlowCookie, ofPortPatch))
-
-	}
 	// table 1, all other connections do normal processing
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=output:NORMAL", defaultOpenFlowCookie))
