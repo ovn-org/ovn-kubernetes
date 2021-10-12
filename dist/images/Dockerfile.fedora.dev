@@ -31,7 +31,7 @@ ENV PYTHONDONTWRITEBYTECODE yes
 
 ARG KERNEL_VERSION
 ARG OVN_REPO=https://github.com/ovn-org/ovn.git
-ARG OVN_BRANCH=master
+ARG OVN_BRANCH=main
 ARG OVS_REPO=https://github.com/openvswitch/ovs.git
 ARG OVS_BRANCH=master
 
