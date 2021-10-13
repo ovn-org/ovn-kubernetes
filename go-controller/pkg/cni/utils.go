@@ -57,7 +57,7 @@ func getPod(podLister corev1listers.PodLister, kclient kubernetes.Interface, nam
 		// drop through
 	}
 
-	if kclient != nil {
+	if pod == nil && kclient != nil {
 		// If the pod wasn't in our local cache, ask for it directly
 		pod, err = kclient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	}
