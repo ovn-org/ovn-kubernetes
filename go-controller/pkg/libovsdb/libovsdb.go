@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"gopkg.in/fsnotify/fsnotify.v1"
 	"k8s.io/klog/v2"
+	"k8s.io/klog/v2/klogr"
 )
 
 const (
@@ -28,9 +29,11 @@ const (
 // the stopCh is required to ensure the goroutine for ssl cert
 // update is not leaked
 func newClient(cfg config.OvnAuthConfig, dbModel *model.DBModel, stopCh <-chan struct{}) (client.Client, error) {
+	logger := klogr.New()
 	options := []client.Option{
 		client.WithReconnect(OVSDBTimeout, &backoff.ZeroBackOff{}),
 		client.WithLeaderOnly(true),
+		client.WithLogger(&logger),
 	}
 	for _, endpoint := range strings.Split(cfg.GetURL(), ",") {
 		options = append(options, client.WithEndpoint(endpoint))

@@ -7,7 +7,7 @@ import (
 )
 
 // OvsMap is the JSON map structure used for OVSDB
-// RFC 7047 uses the following notation for map as JSON doesnt support non-string keys for maps.
+// RFC 7047 uses the following notation for map as JSON doesn't support non-string keys for maps.
 // A 2-element JSON array that represents a database map value.  The
 // first element of the array must be the string "map", and the
 // second element must be an array of zero or more <pair>s giving the
@@ -34,7 +34,7 @@ func (o OvsMap) MarshalJSON() ([]byte, error) {
 	return []byte("[\"map\",[]]"), nil
 }
 
-// UnmarshalJSON unmarshalls an OVSDB style Map from a byte array
+// UnmarshalJSON unmarshals an OVSDB style Map from a byte array
 func (o *OvsMap) UnmarshalJSON(b []byte) (err error) {
 	var oMap []interface{}
 	o.GoMap = make(map[interface{}]interface{})

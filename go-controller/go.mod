@@ -4,7 +4,6 @@ go 1.13
 
 require (
 	github.com/Mellanox/sriovnet v1.0.3-0.20210630121212-0453bd4b7fbc
-	github.com/Microsoft/go-winio v0.4.15 // indirect
 	github.com/Microsoft/hcsshim v0.8.10-0.20200715222032-5eafd1556990
 	github.com/alexflint/go-filemutex v0.0.0-20171022225611-72bdc8eae2ae
 	github.com/bhendo/go-powershell v0.0.0-20190719160123-219e7fb4e41e
@@ -24,11 +23,9 @@ require (
 	github.com/mitchellh/copystructure v1.2.0
 	github.com/onsi/ginkgo v1.16.4
 	github.com/onsi/gomega v1.14.0
-	github.com/ovn-org/libovsdb v0.6.1-0.20210914134040-e4215434d1ba
+	github.com/ovn-org/libovsdb v0.6.1-0.20211012194444-c6d93b9b144b
 	github.com/pkg/errors v0.9.1
-	github.com/prometheus/client_golang v1.7.1
-	github.com/prometheus/procfs v0.2.0 // indirect
-	github.com/sirupsen/logrus v1.6.0 // indirect
+	github.com/prometheus/client_golang v1.11.0
 	github.com/spf13/afero v1.4.1
 	github.com/stretchr/testify v1.7.0
 	github.com/urfave/cli/v2 v2.2.0
@@ -43,7 +40,7 @@ require (
 	k8s.io/apimachinery v0.22.0
 	k8s.io/client-go v0.22.0
 	k8s.io/klog v0.0.0-20181102134211-b9b56d5dfc92
-	k8s.io/klog/v2 v2.9.0
+	k8s.io/klog/v2 v2.20.0
 	k8s.io/utils v0.0.0-20210707171843-4b05e18ac7d9
 )
 

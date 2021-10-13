@@ -134,7 +134,7 @@ func newNBServer(cfg config.OvnAuthConfig, data []TestData) (*server.OvsdbServer
 func updateData(db server.Database, dbModel *model.DBModel, schema ovsdb.DatabaseSchema, data []TestData) error {
 	dbName := dbModel.Name()
 	m := mapper.NewMapper(&schema)
-	updates := ovsdb.TableUpdates{}
+	updates := ovsdb.TableUpdates2{}
 	namedUUIDs := map[string]string{}
 	newData := copystructure.Must(copystructure.Copy(data)).([]TestData)
 	for _, d := range newData {
@@ -174,13 +174,14 @@ func updateData(db server.Database, dbModel *model.DBModel, schema ovsdb.Databas
 		}
 
 		if _, ok := updates[tableName]; !ok {
-			updates[tableName] = ovsdb.TableUpdate{}
+			updates[tableName] = ovsdb.TableUpdate2{}
 		}
 
-		updates[tableName][uuid] = &ovsdb.RowUpdate{New: &row}
+		updates[tableName][uuid] = &ovsdb.RowUpdate2{Insert: &row}
 	}
 
-	err := db.Commit(dbName, updates)
+	uuid := guuid.New()
+	err := db.Commit(dbName, uuid, updates)
 	if err != nil {
 		return fmt.Errorf("error populating server with initial data: %v", err)
 	}
