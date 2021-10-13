@@ -26,6 +26,8 @@ const (
 	// defaultOpenFlowCookie identifies default open flow rules added to the host OVS bridge.
 	// The hex number 0xdeff105, aka defflos, is meant to sound like default flows.
 	defaultOpenFlowCookie = "0xdeff105"
+	// ovsLocalPort is the name of the OVS bridge local port
+	ovsLocalPort = "LOCAL"
 )
 
 var (
@@ -167,14 +169,10 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 			flowProtocol := protocol
 			nwDst := "nw_dst"
 			nwSrc := "nw_src"
-			addrResDst := nwDst
-			addrResProto := "arp"
 			if utilnet.IsIPv6String(ing.IP) {
 				flowProtocol = protocol + "6"
 				nwDst = "ipv6_dst"
 				nwSrc = "ipv6_src"
-				addrResDst = "nd_target"
-				addrResProto = "icmp6, icmp_type=135, icmp_code=0"
 			}
 			key = strings.Join([]string{"Ingress", service.Namespace, service.Name, ingIP.String(), fmt.Sprintf("%d", svcPort.Port)}, "_")
 			// Delete if needed and skip to next protocol
@@ -222,9 +220,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_src=%d, "+
 						"actions=output:%s",
 						cookie, npw.ofportPatch, flowProtocol, nwSrc, ing.IP, svcPort.Port, npw.ofportPhys),
-					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, "+
-						"actions=output:%s",
-						cookie, npw.ofportPhys, addrResProto, addrResDst, ing.IP, ovsLocalPort)})
+					npw.generateArpBypassFlow(protocol, ing.IP, cookie)})
 			}
 		}
 
@@ -232,14 +228,10 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 			flowProtocol := protocol
 			nwDst := "nw_dst"
 			nwSrc := "nw_src"
-			addrResDst := nwDst
-			addrResProto := "arp"
 			if utilnet.IsIPv6String(externalIP) {
 				flowProtocol = protocol + "6"
 				nwDst = "ipv6_dst"
 				nwSrc = "ipv6_src"
-				addrResDst = "nd_target"
-				addrResProto = "icmp6, icmp_type=135, icmp_code=0"
 			}
 			cookie, err = svcToCookie(service.Namespace, service.Name, externalIP, svcPort.Port)
 			if err != nil {
@@ -292,12 +284,51 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_src=%d, "+
 						"actions=output:%s",
 						cookie, npw.ofportPatch, flowProtocol, nwSrc, externalIP, svcPort.Port, npw.ofportPhys),
-					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, "+
-						"actions=output:%s",
-						cookie, npw.ofportPhys, addrResProto, addrResDst, externalIP, ovsLocalPort)})
+					npw.generateArpBypassFlow(protocol, externalIP, cookie)})
 			}
 		}
 	}
+}
+
+// generate ARP/NS bypass flow which will send the ARP/NS request everywhere *but* to OVN
+// OpenFlow will not do hairpin switching, so we can safely add the origin port to the list of ports, too
+func (npw *nodePortWatcher) generateArpBypassFlow(protocol string, ipAddr string, cookie string) string {
+	addrResDst := "arp_tpa"
+	addrResProto := "arp, arp_op=1"
+	if utilnet.IsIPv6String(ipAddr) {
+		addrResDst = "nd_target"
+		addrResProto = "icmp6, icmp_type=135, icmp_code=0"
+	}
+
+	var arpFlow string
+	var arpPortsFiltered []string
+	arpPorts, err := util.GetOpenFlowPorts(npw.gwBridge, false)
+	if err != nil {
+		// in the odd case that getting all ports from the bridge should not work,
+		// simply output to LOCAL (this should work well in the vast majority of cases, anyway)
+		klog.Warningf("Unable to get port list from bridge. Using ovsLocalPort as output only: error: %v",
+			err)
+		arpFlow = fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, "+
+			"actions=output:%s",
+			cookie, npw.ofportPhys, addrResProto, addrResDst, ipAddr, ovsLocalPort)
+	} else {
+		// cover the case where breth0 has more than 3 ports, e.g. if an admin adds a 4th port
+		// and the ExternalIP would be on that port
+		// Use all ports except for ofPortPhys and the ofportPatch
+		// Filtering ofPortPhys is for consistency / readability only, OpenFlow will not send
+		// out the in_port normally (see man 7 ovs-actions)
+		for _, port := range arpPorts {
+			if port == npw.ofportPatch || port == npw.ofportPhys {
+				continue
+			}
+			arpPortsFiltered = append(arpPortsFiltered, port)
+		}
+		arpFlow = fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, "+
+			"actions=output:%s",
+			cookie, npw.ofportPhys, addrResProto, addrResDst, ipAddr, strings.Join(arpPortsFiltered, ","))
+	}
+
+	return arpFlow
 }
 
 // getAndDeleteServiceInfo returns the serviceConfig for a service and if it exists and then deletes the entry
