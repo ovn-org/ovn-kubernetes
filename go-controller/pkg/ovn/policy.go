@@ -40,6 +40,8 @@ const (
 	policyTypeACLExtIdKey = "policy_type"
 	// policyTypeNumACLExtIdKey external ID key for policy index by type on 'gress policy ACLs
 	policyTypeNumACLExtIdKey = "%s_num"
+	// ovnStatelessACLAnnotationName is the annotaion for stateless OVN ACL'S
+	ovnStatelessACLAnnotationName = "k8s.ovn.org/acl-stateless"
 )
 
 var NetworkPolicyNotCreated error
@@ -838,6 +840,17 @@ func hasAnyLabelSelector(peers []knet.NetworkPolicyPeer) bool {
 func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.NetworkPolicy, aclLogDeny, aclLogAllow,
 	portGroupIngressDenyName, portGroupEgressDenyName string) {
 
+	// network policy will be annotated with this
+	// annotation -- [ "k8s.ovn.org/acl-stateless": "true"] for the ingress/egress
+	// policies to be added as stateless OVN ACL's.
+	// if the above annotation is not present or set to false in network policy,
+	// then corresponding egress/ingress policies will be added as stateful OVN ACL's.
+	var statelessACL bool
+	val, ok := policy.Annotations[ovnStatelessACLAnnotationName]
+	if ok && val == "true" {
+		statelessACL = true
+	}
+
 	np.Lock()
 
 	if aclLogDeny != "" || aclLogAllow != "" {
@@ -856,7 +869,7 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 	for i, ingressJSON := range policy.Spec.Ingress {
 		klog.V(5).Infof("Network policy ingress is %+v", ingressJSON)
 
-		ingress := newGressPolicy(knet.PolicyTypeIngress, i, policy.Namespace, policy.Name)
+		ingress := newGressPolicy(knet.PolicyTypeIngress, i, policy.Namespace, policy.Name, statelessACL)
 
 		// Each ingress rule can have multiple ports to which we allow traffic.
 		for _, portJSON := range ingressJSON.Ports {
@@ -893,7 +906,7 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 	for i, egressJSON := range policy.Spec.Egress {
 		klog.V(5).Infof("Network policy egress is %+v", egressJSON)
 
-		egress := newGressPolicy(knet.PolicyTypeEgress, i, policy.Namespace, policy.Name)
+		egress := newGressPolicy(knet.PolicyTypeEgress, i, policy.Namespace, policy.Name, statelessACL)
 
 		// Each egress rule can have multiple ports to which we allow traffic.
 		for _, portJSON := range egressJSON.Ports {
