@@ -995,6 +995,102 @@ func TestRunOVSOfctl(t *testing.T) {
 	}
 }
 
+func TestGetOpenFlowPorts(t *testing.T) {
+	// ovs-ofctl show breth0 mock output
+	ofctlOutput := `
+OFPT_FEATURES_REPLY (xid=0x2): dpid:00000242ac120002
+n_tables:254, n_buffers:0
+capabilities: FLOW_STATS TABLE_STATS PORT_STATS QUEUE_STATS ARP_MATCH_IP
+actions: output enqueue set_vlan_vid set_vlan_pcp strip_vlan mod_dl_src mod_dl_dst mod_nw_src mod_nw_dst mod_nw_tos mod_tp_src mod_tp_dst
+ 1(eth0): addr:02:42:ac:12:00:02
+     config:     0
+     state:      0
+     current:    10GB-FD COPPER
+     speed: 10000 Mbps now, 0 Mbps max
+ 2(patch-breth0_ov): addr:8e:8d:f4:cd:4f:76
+     config:     0
+     state:      0
+     speed: 0 Mbps now, 0 Mbps max
+ LOCAL(breth0): addr:02:42:ac:12:00:02
+     config:     0
+     state:      0
+     speed: 0 Mbps now, 0 Mbps max
+OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0
+`
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockExecRunner := new(mocks.ExecRunner)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
+	// below is defined in ovs.go
+	runCmdExecRunner = mockExecRunner
+	// note runner is defined in ovs.go file
+	runner = &execHelper{exec: mockKexecIface}
+	tests := []struct {
+		desc                    string
+		expectedErr             error
+		expectedOut             []string
+		portNumbers             bool
+		onRetArgsExecUtilsIface *ovntest.TestifyMockHelper
+		onRetArgsKexecIface     *ovntest.TestifyMockHelper
+	}{
+		{
+			desc:        "Get port numbers",
+			expectedErr: nil,
+			expectedOut: []string{"1", "2", "LOCAL"},
+			portNumbers: false,
+			// match arguments [ "mocks.Cmd", "string", "[]string{}", "show", "breth0" ] -> "string", "string", "string[]", "string", "string"
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{
+				OnCallMethodName:    "RunCmd",
+				OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"},
+				// ovs-ofctl show breth0 will return stdout=ofctlOutput, stderr="", err=nil
+				RetArgList: []interface{}{bytes.NewBuffer([]byte(ofctlOutput)), bytes.NewBuffer([]byte("")), nil},
+			},
+			// match arguments [ "", "show", "breth0" ] -> "string", "string", "string"
+			onRetArgsKexecIface: &ovntest.TestifyMockHelper{
+				OnCallMethodName:    "Command",
+				OnCallMethodArgType: []string{"string", "string", "string"},
+				RetArgList:          []interface{}{mockCmd},
+			},
+		},
+		{
+			desc:        "Get port names",
+			expectedErr: nil,
+			expectedOut: []string{"eth0", "patch-breth0_ov", "breth0"},
+			portNumbers: true,
+			// match arguments [ "mocks.Cmd", "string", "[]string{}", "show", "breth0" ] -> "string", "string", "string[]", "string", "string"
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{
+				OnCallMethodName:    "RunCmd",
+				OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"},
+				// ovs-ofctl show breth0 will return stdout=ofctlOutput, stderr="", err=nil
+				RetArgList: []interface{}{bytes.NewBuffer([]byte(ofctlOutput)), bytes.NewBuffer([]byte("")), nil},
+			},
+			// match arguments [ "", "show", "breth0" ] -> "string", "string", "string"
+			onRetArgsKexecIface: &ovntest.TestifyMockHelper{
+				OnCallMethodName:    "Command",
+				OnCallMethodArgType: []string{"string", "string", "string"},
+				RetArgList:          []interface{}{mockCmd},
+			},
+		},
+	}
+
+	// loop through all tests and make sure that there is no error and that the port list is correct
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			ovntest.ProcessMockFn(&mockExecRunner.Mock, *tc.onRetArgsExecUtilsIface)
+			ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgsKexecIface)
+
+			ports, err := GetOpenFlowPorts("breth0", tc.portNumbers)
+
+			// make sure that there's no error
+			assert.Equal(t, err, tc.expectedErr)
+			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
+
+			// make sure that we get the correct list of ports
+			assert.ElementsMatch(t, ports, tc.expectedOut)
+		})
+	}
+}
+
 func TestRunOVSDpctl(t *testing.T) {
 	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
 	mockExecRunner := new(mocks.ExecRunner)

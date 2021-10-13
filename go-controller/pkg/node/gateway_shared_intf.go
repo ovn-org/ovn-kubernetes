@@ -26,6 +26,8 @@ const (
 	// defaultOpenFlowCookie identifies default open flow rules added to the host OVS bridge.
 	// The hex number 0xdeff105, aka defflos, is meant to sound like default flows.
 	defaultOpenFlowCookie = "0xdeff105"
+	// ovsLocalPort is the name of the OVS bridge local port
+	ovsLocalPort = "LOCAL"
 )
 
 var (
@@ -146,144 +148,141 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 				}
 			}
 		}
+
 		// Flows for cloud load balancers on Azure/GCP
 		// Established traffic is handled by default conntrack rules
 		// NodePort/Ingress access in the OVS bridge will only ever come from outside of the host
 		for _, ing := range service.Status.LoadBalancer.Ingress {
-			if ing.IP == "" {
-				continue
-			}
-			ingIP := net.ParseIP(ing.IP)
-			if ingIP == nil {
-				klog.Errorf("Failed to parse ingress IP: %s", ing.IP)
-				continue
-			}
-			cookie, err = svcToCookie(service.Namespace, service.Name, ingIP.String(), svcPort.Port)
+			err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, epHostLocal, protocol, actions, ing.IP, "Ingress")
 			if err != nil {
-				klog.Warningf("Unable to generate cookie for ingress svc: %s, %s, %s, %d, error: %v",
-					service.Namespace, service.Name, ingIP.String(), svcPort.Port, err)
-				cookie = "0"
-			}
-			flowProtocol := protocol
-			nwDst := "nw_dst"
-			nwSrc := "nw_src"
-			if utilnet.IsIPv6String(ing.IP) {
-				flowProtocol = protocol + "6"
-				nwDst = "ipv6_dst"
-				nwSrc = "ipv6_src"
-			}
-			key = strings.Join([]string{"Ingress", service.Namespace, service.Name, ingIP.String(), fmt.Sprintf("%d", svcPort.Port)}, "_")
-			// Delete if needed and skip to next protocol
-			if !add {
-				npw.ofm.deleteFlowsByKey(key)
-				continue
-			}
-
-			// This allows external traffic ingress when the svc's ExternalTrafficPolicy is
-			// set to Local, and the backend pod is HostNetworked. We need to add
-			// Flows that will DNAT all external traffic destined for the lb service
-			// to the nodeIP and ensure That return traffic is UnDNATed correctly back
-			// to the ingress ip
-			if epHostLocal {
-				var nodeportFlows []string
-				klog.V(5).Infof("Adding flows on breth0 for Loadbalancer Service %s in Namespace: %s since ExternalTrafficPolicy=local", service.Name, service.Namespace)
-				// table 0, This rule matches on all traffic with dst port == LoadbalancerIP, DNAT's it to the correct NodeIP
-				// If ipv6 make sure to choose the ipv6 node address for rule
-				if strings.Contains(flowProtocol, "6") {
-					nodeportFlows = append(nodeportFlows,
-						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_dst=%d, actions=ct(commit,zone=%d,nat(dst=[%s]:%s),table=6)",
-							cookie, npw.ofportPhys, flowProtocol, nwDst, ing.IP, svcPort.Port, HostNodePortCTZone, npw.gatewayIPv6, svcPort.TargetPort.String()))
-				} else {
-					nodeportFlows = append(nodeportFlows,
-						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_dst=%d, actions=ct(commit,zone=%d,nat(dst=%s:%s),table=6)",
-							cookie, npw.ofportPhys, flowProtocol, nwDst, ing.IP, svcPort.Port, HostNodePortCTZone, npw.gatewayIPv4, svcPort.TargetPort.String()))
-				}
-				nodeportFlows = append(nodeportFlows,
-					// table 6, Sends the packet to the host
-					fmt.Sprintf("cookie=%s, priority=110, table=6, actions=output:LOCAL",
-						cookie),
-					// table 0, Matches on return traffic, i.e traffic coming from the host networked pod's port, and unDNATs
-					fmt.Sprintf("cookie=%s, priority=110, in_port=LOCAL, %s, tp_src=%s, actions=ct(commit,zone=%d nat,table=7)",
-						cookie, flowProtocol, svcPort.TargetPort.String(), HostNodePortCTZone),
-					// table 7, the packet back out eth0 to the external client
-					fmt.Sprintf("cookie=%s, priority=110, table=7, "+
-						"actions=output:%s", cookie, npw.ofportPhys))
-
-				npw.ofm.updateFlowCacheEntry(key, nodeportFlows)
-			} else {
-				npw.ofm.updateFlowCacheEntry(key, []string{
-					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_dst=%d, "+
-						"actions=%s",
-						cookie, npw.ofportPhys, flowProtocol, nwDst, ing.IP, svcPort.Port, actions),
-					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_src=%d, "+
-						"actions=output:%s",
-						cookie, npw.ofportPatch, flowProtocol, nwSrc, ing.IP, svcPort.Port, npw.ofportPhys)})
+				klog.Errorf(err.Error())
 			}
 		}
-
+		// flows for externalIPs
 		for _, externalIP := range service.Spec.ExternalIPs {
-			flowProtocol := protocol
-			nwDst := "nw_dst"
-			nwSrc := "nw_src"
-			if utilnet.IsIPv6String(externalIP) {
-				flowProtocol = protocol + "6"
-				nwDst = "ipv6_dst"
-				nwSrc = "ipv6_src"
-			}
-			cookie, err = svcToCookie(service.Namespace, service.Name, externalIP, svcPort.Port)
+			err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, epHostLocal, protocol, actions, externalIP, "External")
 			if err != nil {
-				klog.Warningf("Unable to generate cookie for external svc: %s, %s, %s, %d, error: %v",
-					service.Namespace, service.Name, externalIP, svcPort.Port, err)
-				cookie = "0"
-			}
-			key := strings.Join([]string{"External", service.Namespace, service.Name, externalIP, fmt.Sprintf("%d", svcPort.Port)}, "_")
-			// Delete if needed and skip to next protocol
-			if !add {
-				npw.ofm.deleteFlowsByKey(key)
-				continue
-			}
-			// This allows external traffic ingress when the svc's ExternalTrafficPolicy is
-			// set to Local, and the backend pod is HostNetworked. We need to add
-			// Flows that will DNAT all external traffic destined for externalIP service
-			// to the nodeIP:port of the host networked backend. And Then ensure That return
-			// traffic is UnDNATed correctly back to the external IP
-			if epHostLocal {
-				var nodeportFlows []string
-				klog.V(5).Infof("Adding flows on breth0 for ExternalIP Service %s in Namespace: %s since ExternalTrafficPolicy=local", service.Name, service.Namespace)
-				// table 0, This rule matches on all traffic with dst ip == externalIP and DNAT's it to the correct NodeIP
-				// If ipv6 make sure to choose the ipv6 node address for rule
-				if strings.Contains(flowProtocol, "6") {
-					nodeportFlows = append(nodeportFlows,
-						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_dst=%d, actions=ct(commit,zone=%d,nat(dst=[%s]:%s),table=6)",
-							cookie, npw.ofportPhys, flowProtocol, nwDst, externalIP, svcPort.Port, HostNodePortCTZone, npw.gatewayIPv6, svcPort.TargetPort.String()))
-				} else {
-					nodeportFlows = append(nodeportFlows,
-						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_dst=%d, actions=ct(commit,zone=%d,nat(dst=%s:%s),table=6)",
-							cookie, npw.ofportPhys, flowProtocol, nwDst, externalIP, svcPort.Port, HostNodePortCTZone, npw.gatewayIPv4, svcPort.TargetPort.String()))
-				}
-				nodeportFlows = append(nodeportFlows,
-					// table 6, Sends the packet to the host
-					fmt.Sprintf("cookie=%s, priority=110, table=6, actions=output:LOCAL",
-						cookie),
-					// table 0, Matches on return traffic, i.e traffic coming from the host networked pod's port, and unDNATs
-					fmt.Sprintf("cookie=%s, priority=110, in_port=LOCAL, %s, tp_src=%s, actions=ct(commit,zone=%d nat,table=7)",
-						cookie, flowProtocol, svcPort.TargetPort.String(), HostNodePortCTZone),
-					// table 7, Sends the packet back out eth0 to the external client
-					fmt.Sprintf("cookie=%s, priority=110, table=7, "+
-						"actions=output:%s", cookie, npw.ofportPhys))
-
-				npw.ofm.updateFlowCacheEntry(key, nodeportFlows)
-			} else {
-				npw.ofm.updateFlowCacheEntry(key, []string{
-					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_dst=%d, "+
-						"actions=%s",
-						cookie, npw.ofportPhys, flowProtocol, nwDst, externalIP, svcPort.Port, actions),
-					fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_src=%d, "+
-						"actions=output:%s",
-						cookie, npw.ofportPatch, flowProtocol, nwSrc, externalIP, svcPort.Port, npw.ofportPhys)})
+				klog.Errorf(err.Error())
 			}
 		}
 	}
+}
+
+// flow generation for LB and ExternalIP flow is essentially the same, so avoid code duplication with
+// this method
+func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, svcPort *kapi.ServicePort, add bool, epHostLocal bool, protocol string, actions string, ipAddress string, ipType string) error {
+	if ipAddress == "" {
+		return fmt.Errorf("failed to parse %s IP. IP is empty.", ipType)
+	}
+	if net.ParseIP(ipAddress) == nil {
+		return fmt.Errorf("failed to parse %s IP: %s", ipType, ipAddress)
+	}
+	flowProtocol := protocol
+	nwDst := "nw_dst"
+	nwSrc := "nw_src"
+	if utilnet.IsIPv6String(ipAddress) {
+		flowProtocol = protocol + "6"
+		nwDst = "ipv6_dst"
+		nwSrc = "ipv6_src"
+	}
+	cookie, err := svcToCookie(service.Namespace, service.Name, ipAddress, svcPort.Port)
+	if err != nil {
+		klog.Warningf("Unable to generate cookie for %s svc: %s, %s, %s, %d, error: %v",
+			ipType, service.Namespace, service.Name, ipAddress, svcPort.Port, err)
+		cookie = "0"
+	}
+	key := strings.Join([]string{ipType, service.Namespace, service.Name, ipAddress, fmt.Sprintf("%d", svcPort.Port)}, "_")
+	// Delete if needed and skip to next protocol
+	if !add {
+		npw.ofm.deleteFlowsByKey(key)
+		return nil
+	}
+	// This allows external traffic ingress when the svc's ExternalTrafficPolicy is
+	// set to Local, and the backend pod is HostNetworked. We need to add
+	// Flows that will DNAT all external traffic destined for the lb/externalIP service
+	// to the nodeIP / nodeIP:port of the host networked backend.
+	// And then ensure that return traffic is UnDNATed correctly back
+	// to the ingress / external IP
+	if epHostLocal {
+		var nodeportFlows []string
+		klog.V(5).Infof("Adding flows on breth0 for %s Service %s in Namespace: %s since ExternalTrafficPolicy=local", ipType, service.Name, service.Namespace)
+		// table 0, This rule matches on all traffic with dst ip == LoadbalancerIP / extenalIP, DNAT's it to the correct NodeIP
+		// If ipv6 make sure to choose the ipv6 node address for rule
+		if strings.Contains(flowProtocol, "6") {
+			nodeportFlows = append(nodeportFlows,
+				fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_dst=%d, actions=ct(commit,zone=%d,nat(dst=[%s]:%s),table=6)",
+					cookie, npw.ofportPhys, flowProtocol, nwDst, ipAddress, svcPort.Port, HostNodePortCTZone, npw.gatewayIPv6, svcPort.TargetPort.String()))
+		} else {
+			nodeportFlows = append(nodeportFlows,
+				fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_dst=%d, actions=ct(commit,zone=%d,nat(dst=%s:%s),table=6)",
+					cookie, npw.ofportPhys, flowProtocol, nwDst, ipAddress, svcPort.Port, HostNodePortCTZone, npw.gatewayIPv4, svcPort.TargetPort.String()))
+		}
+		nodeportFlows = append(nodeportFlows,
+			// table 6, Sends the packet to the host
+			fmt.Sprintf("cookie=%s, priority=110, table=6, actions=output:LOCAL",
+				cookie),
+			// table 0, Matches on return traffic, i.e traffic coming from the host networked pod's port, and unDNATs
+			fmt.Sprintf("cookie=%s, priority=110, in_port=LOCAL, %s, tp_src=%s, actions=ct(commit,zone=%d nat,table=7)",
+				cookie, flowProtocol, svcPort.TargetPort.String(), HostNodePortCTZone),
+			// table 7, the packet back out eth0 to the external client
+			fmt.Sprintf("cookie=%s, priority=110, table=7, "+
+				"actions=output:%s", cookie, npw.ofportPhys))
+
+		npw.ofm.updateFlowCacheEntry(key, nodeportFlows)
+
+	} else {
+		npw.ofm.updateFlowCacheEntry(key, []string{
+			fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_dst=%d, "+
+				"actions=%s",
+				cookie, npw.ofportPhys, flowProtocol, nwDst, ipAddress, svcPort.Port, actions),
+			fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_src=%d, "+
+				"actions=output:%s",
+				cookie, npw.ofportPatch, flowProtocol, nwSrc, ipAddress, svcPort.Port, npw.ofportPhys),
+			npw.generateArpBypassFlow(protocol, ipAddress, cookie)})
+	}
+
+	return nil
+}
+
+// generate ARP/NS bypass flow which will send the ARP/NS request everywhere *but* to OVN
+// OpenFlow will not do hairpin switching, so we can safely add the origin port to the list of ports, too
+func (npw *nodePortWatcher) generateArpBypassFlow(protocol string, ipAddr string, cookie string) string {
+	addrResDst := "arp_tpa"
+	addrResProto := "arp, arp_op=1"
+	if utilnet.IsIPv6String(ipAddr) {
+		addrResDst = "nd_target"
+		addrResProto = "icmp6, icmp_type=135, icmp_code=0"
+	}
+
+	var arpFlow string
+	var arpPortsFiltered []string
+	arpPorts, err := util.GetOpenFlowPorts(npw.gwBridge, false)
+	if err != nil {
+		// in the odd case that getting all ports from the bridge should not work,
+		// simply output to LOCAL (this should work well in the vast majority of cases, anyway)
+		klog.Warningf("Unable to get port list from bridge. Using ovsLocalPort as output only: error: %v",
+			err)
+		arpFlow = fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, "+
+			"actions=output:%s",
+			cookie, npw.ofportPhys, addrResProto, addrResDst, ipAddr, ovsLocalPort)
+	} else {
+		// cover the case where breth0 has more than 3 ports, e.g. if an admin adds a 4th port
+		// and the ExternalIP would be on that port
+		// Use all ports except for ofPortPhys and the ofportPatch
+		// Filtering ofPortPhys is for consistency / readability only, OpenFlow will not send
+		// out the in_port normally (see man 7 ovs-actions)
+		for _, port := range arpPorts {
+			if port == npw.ofportPatch || port == npw.ofportPhys {
+				continue
+			}
+			arpPortsFiltered = append(arpPortsFiltered, port)
+		}
+		arpFlow = fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, "+
+			"actions=output:%s",
+			cookie, npw.ofportPhys, addrResProto, addrResDst, ipAddr, strings.Join(arpPortsFiltered, ","))
+	}
+
+	return arpFlow
 }
 
 // getAndDeleteServiceInfo returns the serviceConfig for a service and if it exists and then deletes the entry
