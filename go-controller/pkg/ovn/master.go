@@ -870,7 +870,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	if err = func() error {
 		hostNetworkNamespace := config.Kubernetes.HostNetworkNamespace
 		if hostNetworkNamespace != "" {
-			nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(hostNetworkNamespace, true)
+			nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(hostNetworkNamespace, true, nil)
 			if err != nil {
 				return fmt.Errorf("failed to ensure namespace locked: %v", err)
 			}
