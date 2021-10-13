@@ -735,7 +735,7 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 		AddFunc: func(obj interface{}) {
 			egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
 			txn := util.NewNBTxn()
-			addErrors := oc.addEgressFirewall(egressFirewall, txn)
+			addErrors := oc.addEgressFirewall(egressFirewall)
 			if addErrors != nil {
 				klog.Error(addErrors)
 				egressFirewall.Status.Status = egressFirewallAddError
@@ -760,7 +760,7 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 			oldEgressFirewall := old.(*egressfirewall.EgressFirewall)
 			if !reflect.DeepEqual(oldEgressFirewall.Spec, newEgressFirewall.Spec) {
 				txn := util.NewNBTxn()
-				errList := oc.updateEgressFirewall(oldEgressFirewall, newEgressFirewall, txn)
+				errList := oc.updateEgressFirewall(oldEgressFirewall, newEgressFirewall)
 				if errList != nil {
 					newEgressFirewall.Status.Status = egressFirewallUpdateError
 					klog.Error(errList)
@@ -784,7 +784,7 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 		DeleteFunc: func(obj interface{}) {
 			egressFirewall := obj.(*egressfirewall.EgressFirewall)
 			txn := util.NewNBTxn()
-			deleteErrors := oc.deleteEgressFirewall(egressFirewall, txn)
+			deleteErrors := oc.deleteEgressFirewall(egressFirewall)
 			if deleteErrors != nil {
 				klog.Error(deleteErrors)
 				return
