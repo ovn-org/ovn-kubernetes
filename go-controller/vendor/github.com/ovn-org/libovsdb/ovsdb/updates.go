@@ -15,6 +15,14 @@ func (t TableUpdates) AddTableUpdate(table string, update TableUpdate) {
 	}
 }
 
+func (t TableUpdates) FromTableUpdates2(tu TableUpdates2) {
+	for k, v := range tu {
+		var u TableUpdate
+		u.FromTableUpdate2(v)
+		t[k] = u
+	}
+}
+
 func (t TableUpdates) Merge(update TableUpdates) {
 	for k, v := range update {
 		t.AddTableUpdate(k, v)
@@ -30,6 +38,12 @@ func (t TableUpdate) AddRowUpdate(uuid string, update *RowUpdate) {
 		t[uuid] = update
 	} else {
 		t[uuid].Merge(update)
+	}
+}
+
+func (t TableUpdate) FromTableUpdate2(tu TableUpdate2) {
+	for k, v := range tu {
+		t[k] = &RowUpdate{Old: v.Old, New: v.New}
 	}
 }
 

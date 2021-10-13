@@ -25,26 +25,21 @@ const (
 	columnDelimiter = ","
 )
 
-type IndexExistsError struct {
-	table    string
-	value    interface{}
-	index    index
-	new      string
-	existing string
+// ErrIndexExists is returned when an item in the database cannot be inserted due to existing indexes
+type ErrIndexExists struct {
+	Table    string
+	Value    interface{}
+	Index    string
+	New      string
+	Existing string
 }
 
-func (i *IndexExistsError) Error() string {
-	return fmt.Sprintf("operation would cause rows in the \"%s\" table to have identical values (%v) for index on column \"%s\". First row, with UUID %s, was inserted by this transaction. Second row, with UUID %s, existed in the database before this operation and was not modified",
-		i.table,
-		i.value,
-		i.index,
-		i.new,
-		i.existing,
-	)
+func (e *ErrIndexExists) Error() string {
+	return fmt.Sprintf("cannot insert %s in the %s table. item %s has identical indexes. index: %s, value: %v", e.New, e.Table, e.Existing, e.Index, e.Value)
 }
 
-func NewIndexExistsError(table string, value interface{}, index index, new, existing string) *IndexExistsError {
-	return &IndexExistsError{
+func NewIndexExistsError(table string, value interface{}, index string, new, existing string) *ErrIndexExists {
+	return &ErrIndexExists{
 		table, value, index, new, existing,
 	}
 }
@@ -82,24 +77,43 @@ type RowCache struct {
 func (r *RowCache) Row(uuid string) model.Model {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
-	return r.row(uuid)
+	if row, ok := r.cache[uuid]; ok {
+		return model.Clone(row)
+	}
+	return nil
 }
 
-func (r *RowCache) row(uuid string) model.Model {
-	if row, ok := r.cache[uuid]; ok {
-		return row.(model.Model)
+// RowByModel searches the cache using a the indexes for a provided model
+func (r *RowCache) RowByModel(m model.Model) model.Model {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+	if reflect.TypeOf(m) != r.dataType {
+		return nil
+	}
+	info, _ := mapper.NewInfo(&r.schema, m)
+	uuid, err := info.FieldByColumn("_uuid")
+	if err != nil {
+		return nil
+	}
+	if uuid.(string) != "" {
+		return r.Row(uuid.(string))
+	}
+	for index := range r.indexes {
+		val, err := valueFromIndex(info, index)
+		if err != nil {
+			continue
+		}
+		if uuid, ok := r.indexes[index][val]; ok {
+			return r.Row(uuid)
+		}
 	}
 	return nil
 }
 
 // Create writes the provided content to the cache
-func (r *RowCache) Create(uuid string, m model.Model) error {
+func (r *RowCache) Create(uuid string, m model.Model, checkIndexes bool) error {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
-	return r.create(uuid, m)
-}
-
-func (r *RowCache) create(uuid string, m model.Model) error {
 	if _, ok := r.cache[uuid]; ok {
 		return fmt.Errorf("row %s already exists", uuid)
 	}
@@ -111,45 +125,37 @@ func (r *RowCache) create(uuid string, m model.Model) error {
 		return err
 	}
 	newIndexes := newColumnToValue(r.schema.Indexes)
-	var errs []error
 	for index := range r.indexes {
-
 		val, err := valueFromIndex(info, index)
-
 		if err != nil {
 			return err
 		}
-		if existing, ok := r.indexes[index][val]; ok {
-			errs = append(errs,
-				NewIndexExistsError(r.name, val, index, uuid, existing))
+
+		if existing, ok := r.indexes[index][val]; ok && checkIndexes {
+			return NewIndexExistsError(r.name, val, string(index), uuid, existing)
 		}
+
 		newIndexes[index][val] = uuid
 	}
-	if len(errs) != 0 {
-		return fmt.Errorf("%v", errs)
-	}
+
 	// write indexes
 	for k1, v1 := range newIndexes {
 		for k2, v2 := range v1 {
 			r.indexes[k1][k2] = v2
 		}
 	}
-	r.cache[uuid] = m
+	r.cache[uuid] = model.Clone(m)
 	return nil
 }
 
 // Update updates the content in the cache
-func (r *RowCache) Update(uuid string, m model.Model) error {
+func (r *RowCache) Update(uuid string, m model.Model, checkIndexes bool) error {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
-	return r.update(uuid, m)
-}
-
-func (r *RowCache) update(uuid string, m model.Model) error {
 	if _, ok := r.cache[uuid]; !ok {
 		return fmt.Errorf("row %s does not exist", uuid)
 	}
-	oldRow := r.cache[uuid]
+	oldRow := model.Clone(r.cache[uuid])
 	oldInfo, err := mapper.NewInfo(&r.schema, oldRow)
 	if err != nil {
 		return err
@@ -179,15 +185,16 @@ func (r *RowCache) update(uuid string, m model.Model) error {
 		// old and new values are NOT the same
 
 		// check that there are no conflicts
-		if conflict, ok := r.indexes[index][newVal]; ok && conflict != uuid {
+		if conflict, ok := r.indexes[index][newVal]; ok && checkIndexes && conflict != uuid {
 			errs = append(errs, NewIndexExistsError(
 				r.name,
 				newVal,
-				index,
+				string(index),
 				uuid,
 				conflict,
 			))
 		}
+
 		newIndexes[index][newVal] = uuid
 		oldIndexes[index][oldVal] = ""
 	}
@@ -206,7 +213,34 @@ func (r *RowCache) update(uuid string, m model.Model) error {
 			delete(r.indexes[k1], k2)
 		}
 	}
-	r.cache[uuid] = m
+	r.cache[uuid] = model.Clone(m)
+	return nil
+}
+
+func (r *RowCache) IndexExists(row model.Model) error {
+	info, err := mapper.NewInfo(&r.schema, row)
+	if err != nil {
+		return err
+	}
+	uuid, err := info.FieldByColumn("_uuid")
+	if err != nil {
+		return nil
+	}
+	for index := range r.indexes {
+		val, err := valueFromIndex(info, index)
+		if err != nil {
+			continue
+		}
+		if existing, ok := r.indexes[index][val]; ok && existing != uuid.(string) {
+			return NewIndexExistsError(
+				r.name,
+				val,
+				string(index),
+				uuid.(string),
+				existing,
+			)
+		}
+	}
 	return nil
 }
 
@@ -214,10 +248,6 @@ func (r *RowCache) update(uuid string, m model.Model) error {
 func (r *RowCache) Delete(uuid string) error {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
-	return r.delete(uuid)
-}
-
-func (r *RowCache) delete(uuid string) error {
 	if _, ok := r.cache[uuid]; !ok {
 		return fmt.Errorf("row %s does not exist", uuid)
 	}
@@ -248,10 +278,78 @@ func (r *RowCache) Rows() []string {
 	return result
 }
 
+func (r *RowCache) RowsByCondition(conditions []ovsdb.Condition) ([]model.Model, error) {
+	var results []model.Model
+	if len(conditions) == 0 {
+		uuids := r.Rows()
+		for _, uuid := range uuids {
+			row := r.Row(uuid)
+			results = append(results, row)
+		}
+		return results, nil
+	}
+
+	for _, condition := range conditions {
+		if condition.Column == "_uuid" {
+			ovsdbUUID, ok := condition.Value.(ovsdb.UUID)
+			if !ok {
+				panic(fmt.Sprintf("%+v is not an ovsdb uuid", ovsdbUUID))
+			}
+			uuid := ovsdbUUID.GoUUID
+			for _, k := range r.Rows() {
+				ok, err := condition.Function.Evaluate(k, uuid)
+				if err != nil {
+					return nil, err
+				}
+				if ok {
+					row := r.Row(k)
+					results = append(results, row)
+				}
+			}
+		} else if index, err := r.Index(condition.Column); err != nil {
+			for k, v := range index {
+				tSchema := r.schema.Columns[condition.Column]
+				nativeValue, err := ovsdb.OvsToNative(tSchema, condition.Value)
+				if err != nil {
+					return nil, err
+				}
+				ok, err := condition.Function.Evaluate(k, nativeValue)
+				if err != nil {
+					return nil, err
+				}
+				if ok {
+					row := r.Row(v)
+					results = append(results, row)
+				}
+			}
+		} else {
+			for _, uuid := range r.Rows() {
+				row := r.Row(uuid)
+				info, err := mapper.NewInfo(&r.schema, row)
+				if err != nil {
+					return nil, err
+				}
+				value, err := info.FieldByColumn(condition.Column)
+				if err != nil {
+					return nil, err
+				}
+				ok, err := condition.Function.Evaluate(value, condition.Value)
+				if err != nil {
+					return nil, err
+				}
+				if ok {
+					results = append(results, row)
+				}
+			}
+		}
+	}
+	return results, nil
+}
+
 // Len returns the length of the cache
 func (r *RowCache) Len() int {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
 	return len(r.cache)
 }
 
@@ -303,17 +401,19 @@ func (e *EventHandlerFuncs) OnDelete(table string, row model.Model) {
 
 // TableCache contains a collection of RowCaches, hashed by name,
 // and an array of EventHandlers that respond to cache updates
-// It implements the ovsdb.NotifcationHandler interface so it may
+// It implements the ovsdb.NotificationHandler interface so it may
 // handle update notifications
 type TableCache struct {
 	cache          map[string]*RowCache
 	eventProcessor *eventProcessor
 	mapper         *mapper.Mapper
 	dbModel        *model.DBModel
+	schema         *ovsdb.DatabaseSchema
 	ovsdb.NotificationHandler
+	mutex sync.RWMutex
 }
 
-// Data is the type for data that can be prepoulated in the cache
+// Data is the type for data that can be prepopulated in the cache
 type Data map[string]map[string]model.Model
 
 // NewTableCache creates a new TableCache
@@ -332,16 +432,18 @@ func NewTableCache(schema *ovsdb.DatabaseSchema, dbModel *model.DBModel, data Da
 			return nil, fmt.Errorf("table %s is not in schema", table)
 		}
 		for uuid, row := range rowData {
-			if err := cache[table].Create(uuid, row); err != nil {
+			if err := cache[table].Create(uuid, row, true); err != nil {
 				return nil, err
 			}
 		}
 	}
 	return &TableCache{
 		cache:          cache,
+		schema:         schema,
 		eventProcessor: eventProcessor,
 		mapper:         mapper.NewMapper(schema),
 		dbModel:        dbModel,
+		mutex:          sync.RWMutex{},
 	}, nil
 }
 
@@ -357,6 +459,8 @@ func (t *TableCache) DBModel() *model.DBModel {
 
 // Table returns the a Table from the cache with a given name
 func (t *TableCache) Table(name string) *RowCache {
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
 	if table, ok := t.cache[name]; ok {
 		return table
 	}
@@ -365,6 +469,8 @@ func (t *TableCache) Table(name string) *RowCache {
 
 // Tables returns a list of table names that are in the cache
 func (t *TableCache) Tables() []string {
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
 	var result []string
 	for k := range t.cache {
 		result = append(result, k)
@@ -379,6 +485,15 @@ func (t *TableCache) Update(context interface{}, tableUpdates ovsdb.TableUpdates
 		return
 	}
 	t.Populate(tableUpdates)
+}
+
+// Update2 implements the update method of the NotificationHandler interface
+// this populates the cache with new updates
+func (t *TableCache) Update2(context interface{}, tableUpdates ovsdb.TableUpdates2) {
+	if len(tableUpdates) == 0 {
+		return
+	}
+	t.Populate2(tableUpdates)
 }
 
 // Locked implements the locked method of the NotificationHandler interface
@@ -397,24 +512,11 @@ func (t *TableCache) Echo([]interface{}) {
 func (t *TableCache) Disconnected() {
 }
 
-// lock acquires a lock on all tables in the cache
-func (t *TableCache) lock() {
-	for _, r := range t.cache {
-		r.mutex.Lock()
-	}
-}
-
-// unlock releases a lock on all tables in the cache
-func (t *TableCache) unlock() {
-	for _, r := range t.cache {
-		r.mutex.Unlock()
-	}
-}
-
 // Populate adds data to the cache and places an event on the channel
 func (t *TableCache) Populate(tableUpdates ovsdb.TableUpdates) {
-	t.lock()
-	defer t.unlock()
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
 	for table := range t.dbModel.Types() {
 		updates, ok := tableUpdates[table]
 		if !ok {
@@ -427,9 +529,9 @@ func (t *TableCache) Populate(tableUpdates ovsdb.TableUpdates) {
 				if err != nil {
 					panic(err)
 				}
-				if existing := tCache.row(uuid); existing != nil {
+				if existing := tCache.Row(uuid); existing != nil {
 					if !reflect.DeepEqual(newModel, existing) {
-						if err := tCache.update(uuid, newModel); err != nil {
+						if err := tCache.Update(uuid, newModel, false); err != nil {
 							panic(err)
 						}
 						t.eventProcessor.AddEvent(updateEvent, table, existing, newModel)
@@ -437,7 +539,7 @@ func (t *TableCache) Populate(tableUpdates ovsdb.TableUpdates) {
 					// no diff
 					continue
 				}
-				if err := tCache.create(uuid, newModel); err != nil {
+				if err := tCache.Create(uuid, newModel, false); err != nil {
 					panic(err)
 				}
 				t.eventProcessor.AddEvent(addEvent, table, nil, newModel)
@@ -447,13 +549,85 @@ func (t *TableCache) Populate(tableUpdates ovsdb.TableUpdates) {
 				if err != nil {
 					panic(err)
 				}
-				if err := tCache.delete(uuid); err != nil {
+				if err := tCache.Delete(uuid); err != nil {
 					panic(err)
 				}
 				t.eventProcessor.AddEvent(deleteEvent, table, oldModel, nil)
 				continue
 			}
 		}
+	}
+}
+
+// Populate2 adds data to the cache and places an event on the channel
+func (t *TableCache) Populate2(tableUpdates ovsdb.TableUpdates2) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	for table := range t.dbModel.Types() {
+		updates, ok := tableUpdates[table]
+		if !ok {
+			continue
+		}
+		tCache := t.cache[table]
+		for uuid, row := range updates {
+			switch {
+			case row.Initial != nil:
+				m, err := t.CreateModel(table, row.Initial, uuid)
+				if err != nil {
+					panic(err)
+				}
+				if err := tCache.Create(uuid, m, false); err != nil {
+					panic(err)
+				}
+				t.eventProcessor.AddEvent(addEvent, table, nil, m)
+			case row.Insert != nil:
+				m, err := t.CreateModel(table, row.Insert, uuid)
+				if err != nil {
+					panic(err)
+				}
+				if err := tCache.Create(uuid, m, false); err != nil {
+					panic(err)
+				}
+				t.eventProcessor.AddEvent(addEvent, table, nil, m)
+			case row.Modify != nil:
+				existing := tCache.Row(uuid)
+				if existing == nil {
+					panic(fmt.Errorf("row with uuid %s does not exist", uuid))
+				}
+				modified := tCache.Row(uuid)
+				err := t.ApplyModifications(table, modified, *row.Modify)
+				if err != nil {
+					panic(err)
+				}
+				if !reflect.DeepEqual(modified, existing) {
+					if err := tCache.Update(uuid, modified, false); err != nil {
+						panic(err)
+					}
+					t.eventProcessor.AddEvent(updateEvent, table, existing, modified)
+				}
+			case row.Delete != nil:
+				fallthrough
+			default:
+				// If everything else is nil (including Delete because it's a key with
+				// no value on the wire), then process a delete
+				m := tCache.Row(uuid)
+				if err := tCache.Delete(uuid); err != nil {
+					panic(err)
+				}
+				t.eventProcessor.AddEvent(deleteEvent, table, m, nil)
+			}
+		}
+	}
+}
+
+// Purge drops all data in the cache and reinitializes it using the
+// provided schema
+func (t *TableCache) Purge(schema *ovsdb.DatabaseSchema) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	tableTypes := t.dbModel.Types()
+	for name, tableSchema := range t.schema.Tables {
+		t.cache[name] = newRowCache(name, tableSchema, tableTypes[name])
 	}
 }
 
@@ -485,7 +659,7 @@ func newColumnToValue(schemaIndexes [][]string) columnToValue {
 	// RFC 7047 says that Indexes is a [<column-set>] and "Each <column-set> is a set of
 	// columns whose values, taken together within any given row, must be
 	// unique within the table". We'll store the column names, separated by comma
-	// as we'll assuume (RFC is not clear), that comma isn't valid in a <id>
+	// as we'll assume (RFC is not clear), that comma isn't valid in a <id>
 	var indexes []index
 	for i := range schemaIndexes {
 		indexes = append(indexes, newIndex(schemaIndexes[i]...))
@@ -547,7 +721,7 @@ func (e *eventProcessor) AddEvent(eventType string, table string, old model.Mode
 		// noop
 		return
 	default:
-		log.Print("dropping event because event buffer is full")
+		log.Print("libovsdb: dropping event because event buffer is full")
 	}
 }
 
@@ -604,6 +778,151 @@ func (t *TableCache) CreateModel(tableName string, row *ovsdb.Row, uuid string) 
 	}
 
 	return model, nil
+}
+
+// ApplyModifications applies the contents of a RowUpdate2.Modify to a model
+// nolint: gocyclo
+func (t *TableCache) ApplyModifications(tableName string, base model.Model, update ovsdb.Row) error {
+	table := t.mapper.Schema.Table(tableName)
+	if table == nil {
+		return fmt.Errorf("table %s not found", tableName)
+	}
+	schema := t.schema.Table(tableName)
+	if schema == nil {
+		return fmt.Errorf("no schema for table %s", tableName)
+	}
+	info, err := mapper.NewInfo(schema, base)
+	if err != nil {
+		return err
+	}
+	for k, v := range update {
+		if k == "_uuid" {
+			continue
+		}
+
+		current, err := info.FieldByColumn(k)
+		if err != nil {
+			return err
+		}
+
+		var value interface{}
+		value, err = ovsdb.OvsToNative(schema.Column(k), v)
+		// we can overflow the max of a set with min: 0, max: 1 here because of the update2/update3 notation
+		// which to replace "foo" with "bar" would send a set with ["foo", "bar"]
+		if err != nil && schema.Column(k).Type == ovsdb.TypeSet && schema.Column(k).TypeObj.Max() == 1 {
+			value, err = ovsdb.OvsToNativeSlice(schema.Column(k).TypeObj.Key.Type, v)
+		}
+		if err != nil {
+			return err
+		}
+		nv := reflect.ValueOf(value)
+
+		switch reflect.ValueOf(current).Kind() {
+		case reflect.Slice, reflect.Array:
+			// The difference between two sets are all elements that only belong to one of the sets.
+			// Iterate new values
+			for i := 0; i < nv.Len(); i++ {
+				// search for match in base values
+				baseValue, err := info.FieldByColumn(k)
+				if err != nil {
+					return err
+				}
+				bv := reflect.ValueOf(baseValue)
+				var found bool
+				for j := 0; j < bv.Len(); j++ {
+					if bv.Index(j).Interface() == nv.Index(i).Interface() {
+						// found a match, delete from slice
+						found = true
+						newValue := reflect.AppendSlice(bv.Slice(0, j), bv.Slice(j+1, bv.Len()))
+						err = info.SetField(k, newValue.Interface())
+						if err != nil {
+							return err
+						}
+						break
+					}
+				}
+				if !found {
+					newValue := reflect.Append(bv, nv.Index(i))
+					err = info.SetField(k, newValue.Interface())
+					if err != nil {
+						return err
+					}
+				}
+			}
+		case reflect.Ptr:
+			// if NativeToOVS was successful, then simply assign
+			if nv.Type() == reflect.ValueOf(current).Type() {
+				err = info.SetField(k, nv.Interface())
+				return err
+			}
+			// With a pointer type, an update value could be a set with 2 elements [old, new]
+			if nv.Len() != 2 {
+				panic("expected a slice with 2 elements")
+			}
+			// the new value is the value in the slice which isn't equal to the existing string
+			for i := 0; i < nv.Len(); i++ {
+				baseValue, err := info.FieldByColumn(k)
+				if err != nil {
+					return err
+				}
+				bv := reflect.ValueOf(baseValue)
+				if nv.Index(i) != bv {
+					err = info.SetField(k, nv.Index(i).Addr().Interface())
+					if err != nil {
+						return err
+					}
+				}
+			}
+		case reflect.Map:
+			// The difference between two maps are all key-value pairs whose keys appears in only one of the maps,
+			// plus the key-value pairs whose keys appear in both maps but with different values.
+			// For the latter elements, <row> includes the value from the new column.
+			iter := nv.MapRange()
+
+			baseValue, err := info.FieldByColumn(k)
+			if err != nil {
+				return err
+			}
+
+			bv := reflect.ValueOf(baseValue)
+			if bv.IsNil() {
+				bv = reflect.MakeMap(nv.Type())
+			}
+
+			for iter.Next() {
+				mk := iter.Key()
+				mv := iter.Value()
+
+				existingValue := bv.MapIndex(mk)
+
+				// key does not exist, add it
+				if !existingValue.IsValid() {
+					bv.SetMapIndex(mk, mv)
+				} else if reflect.DeepEqual(mv.Interface(), existingValue.Interface()) {
+					// delete it
+					bv.SetMapIndex(mk, reflect.Value{})
+				} else {
+					// set new value
+					bv.SetMapIndex(mk, mv)
+				}
+			}
+			if len(bv.MapKeys()) == 0 {
+				bv = reflect.Zero(nv.Type())
+			}
+			err = info.SetField(k, bv.Interface())
+			if err != nil {
+				return err
+			}
+
+		default:
+			// For columns with single value, the difference is the value of the new column.
+			err = info.SetField(k, value)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func valueFromIndex(info *mapper.Info, index index) (interface{}, error) {

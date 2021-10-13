@@ -131,21 +131,21 @@ func (*testLogicalSwitch) Table() string {
 //LogicalSwitchPort struct defines an object in Logical_Switch_Port table
 type testLogicalSwitchPort struct {
 	UUID             string            `ovsdb:"_uuid"`
-	Up               []bool            `ovsdb:"up"`
-	Dhcpv4Options    []string          `ovsdb:"dhcpv4_options"`
+	Up               *bool             `ovsdb:"up"`
+	Dhcpv4Options    *string           `ovsdb:"dhcpv4_options"`
 	Name             string            `ovsdb:"name"`
-	DynamicAddresses []string          `ovsdb:"dynamic_addresses"`
-	HaChassisGroup   []string          `ovsdb:"ha_chassis_group"`
+	DynamicAddresses *string           `ovsdb:"dynamic_addresses"`
+	HaChassisGroup   *string           `ovsdb:"ha_chassis_group"`
 	Options          map[string]string `ovsdb:"options"`
-	Enabled          []bool            `ovsdb:"enabled"`
+	Enabled          *bool             `ovsdb:"enabled"`
 	Addresses        []string          `ovsdb:"addresses"`
-	Dhcpv6Options    []string          `ovsdb:"dhcpv6_options"`
-	TagRequest       []int             `ovsdb:"tag_request"`
-	Tag              []int             `ovsdb:"tag"`
+	Dhcpv6Options    *string           `ovsdb:"dhcpv6_options"`
+	TagRequest       *int              `ovsdb:"tag_request"`
+	Tag              *int              `ovsdb:"tag"`
 	PortSecurity     []string          `ovsdb:"port_security"`
 	ExternalIds      map[string]string `ovsdb:"external_ids"`
 	Type             string            `ovsdb:"type"`
-	ParentName       []string          `ovsdb:"parent_name"`
+	ParentName       *string           `ovsdb:"parent_name"`
 }
 
 // Table returns the table name. It's part of the Model interface

@@ -19,7 +19,7 @@ ifeq ($(ARCH),arm64)
 endif
 KERNEL_VERSION ?= `uname -r`
 OVS_BRANCH ?= master
-OVN_BRANCH ?= master
+OVN_BRANCH ?= main
 OCI_BIN ?= docker
 
 # The image of ovnkube/ovn-daemonset-u should be multi-arched before using it on arm64

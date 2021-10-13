@@ -1,21 +1,16 @@
 package client
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"reflect"
 
 	"github.com/ovn-org/libovsdb/cache"
 	"github.com/ovn-org/libovsdb/mapper"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
-)
-
-const (
-	opInsert string = "insert"
-	opMutate string = "mutate"
-	opUpdate string = "insert"
-	opDelete string = "delete"
 )
 
 // API defines basic operations to interact with the database
@@ -210,7 +205,7 @@ func (a api) conditionFromModel(any bool, model model.Model, cond ...model.Condi
 // a instance of any row in the cache.
 // 'result' must be a pointer to an Model that exists in the DBModel
 //
-// The way the cache is search depends on the fields already populated in 'result'
+// The way the cache is searched depends on the fields already populated in 'result'
 // Any table index (including _uuid) will be used for comparison
 func (a api) Get(m model.Model) error {
 	table, err := a.getTableFromModel(m)
@@ -223,33 +218,15 @@ func (a api) Get(m model.Model) error {
 		return ErrNotFound
 	}
 
-	// If model contains _uuid value, we can access it via cache index
-	mapperInfo, err := mapper.NewInfo(a.cache.Mapper().Schema.Table(table), m)
-	if err != nil {
-		return err
-	}
-	if uuid, err := mapperInfo.FieldByColumn("_uuid"); err != nil && uuid != nil {
-		found := tableCache.Row(uuid.(string))
-		if found == nil {
-			return ErrNotFound
-		}
-		reflect.ValueOf(m).Elem().Set(reflect.Indirect(reflect.ValueOf(found)))
-		return nil
+	found := tableCache.RowByModel(m)
+	if found == nil {
+		return ErrNotFound
 	}
 
-	// Look across the entire cache for table index equality
-	for _, row := range tableCache.Rows() {
-		elem := tableCache.Row(row)
-		equal, err := a.cache.Mapper().EqualFields(table, m, elem.(model.Model))
-		if err != nil {
-			return err
-		}
-		if equal {
-			reflect.ValueOf(m).Elem().Set(reflect.Indirect(reflect.ValueOf(elem)))
-			return nil
-		}
-	}
-	return ErrNotFound
+	foundBytes, _ := json.Marshal(found)
+	_ = json.Unmarshal(foundBytes, m)
+
+	return nil
 }
 
 // Create is a generic function capable of creating any row in the DB
@@ -285,7 +262,7 @@ func (a api) Create(models ...model.Model) ([]ovsdb.Operation, error) {
 		}
 
 		operations = append(operations, ovsdb.Operation{
-			Op:       opInsert,
+			Op:       ovsdb.OperationInsert,
 			Table:    tableName,
 			Row:      row,
 			UUIDName: namedUUID,
@@ -337,7 +314,7 @@ func (a api) Mutate(model model.Model, mutationObjs ...model.Mutation) ([]ovsdb.
 	for _, condition := range conditions {
 		operations = append(operations,
 			ovsdb.Operation{
-				Op:        opMutate,
+				Op:        ovsdb.OperationMutate,
 				Table:     tableName,
 				Mutations: mutations,
 				Where:     condition,
@@ -348,13 +325,31 @@ func (a api) Mutate(model model.Model, mutationObjs ...model.Mutation) ([]ovsdb.
 	return operations, nil
 }
 
-// Update is a generic function capable of updating any field in any row in the database
+// Update is a generic function capable of updating any mutable field in any row in the database
 // Additional fields can be passed (variadic opts) to indicate fields to be updated
+// All immutable fields will be ignored
 func (a api) Update(model model.Model, fields ...interface{}) ([]ovsdb.Operation, error) {
 	var operations []ovsdb.Operation
 	table, err := a.getTableFromModel(model)
 	if err != nil {
 		return nil, err
+	}
+	tableSchema := a.cache.Mapper().Schema.Table(table)
+
+	if len(fields) > 0 {
+		info, err := mapper.NewInfo(tableSchema, model)
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range fields {
+			colName, err := info.ColumnByPtr(f)
+			if err != nil {
+				return nil, err
+			}
+			if !tableSchema.Columns[colName].Mutable() {
+				return nil, fmt.Errorf("unable to update field %s of table %s as it is not mutable", colName, table)
+			}
+		}
 	}
 
 	conditions, err := a.cond.Generate()
@@ -367,10 +362,22 @@ func (a api) Update(model model.Model, fields ...interface{}) ([]ovsdb.Operation
 		return nil, err
 	}
 
+	for colName, column := range tableSchema.Columns {
+		if !column.Mutable() {
+			log.Printf("libovsdb: removing immutable field %s", colName)
+			delete(row, colName)
+		}
+	}
+	delete(row, "_uuid")
+
+	if len(row) == 0 {
+		return nil, fmt.Errorf("attempted to update using an empty row. please check that all fields you wish to update are mutable")
+	}
+
 	for _, condition := range conditions {
 		operations = append(operations,
 			ovsdb.Operation{
-				Op:    opUpdate,
+				Op:    ovsdb.OperationUpdate,
 				Table: table,
 				Row:   row,
 				Where: condition,
@@ -391,7 +398,7 @@ func (a api) Delete() ([]ovsdb.Operation, error) {
 	for _, condition := range conditions {
 		operations = append(operations,
 			ovsdb.Operation{
-				Op:    opDelete,
+				Op:    ovsdb.OperationDelete,
 				Table: a.cond.Table(),
 				Where: condition,
 			},

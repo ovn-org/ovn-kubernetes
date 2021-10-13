@@ -7,14 +7,14 @@ package sbdb
 type IPMulticast struct {
 	UUID          string `ovsdb:"_uuid"`
 	Datapath      string `ovsdb:"datapath"`
-	Enabled       []bool `ovsdb:"enabled"`
+	Enabled       *bool  `ovsdb:"enabled"`
 	EthSrc        string `ovsdb:"eth_src"`
-	IdleTimeout   []int  `ovsdb:"idle_timeout"`
+	IdleTimeout   *int   `ovsdb:"idle_timeout"`
 	Ip4Src        string `ovsdb:"ip4_src"`
 	Ip6Src        string `ovsdb:"ip6_src"`
-	Querier       []bool `ovsdb:"querier"`
-	QueryInterval []int  `ovsdb:"query_interval"`
-	QueryMaxResp  []int  `ovsdb:"query_max_resp"`
+	Querier       *bool  `ovsdb:"querier"`
+	QueryInterval *int   `ovsdb:"query_interval"`
+	QueryMaxResp  *int   `ovsdb:"query_max_resp"`
 	SeqNo         int    `ovsdb:"seq_no"`
-	TableSize     []int  `ovsdb:"table_size"`
+	TableSize     *int   `ovsdb:"table_size"`
 }

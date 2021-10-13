@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -11,9 +12,8 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	goovn "github.com/ebay/go-ovn"
 	kapi "k8s.io/api/core/v1"
-	utilwait "k8s.io/apimachinery/pkg/util/wait"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -78,47 +78,42 @@ func (oc *Controller) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]*gatewa
 
 // addPodToNamespace adds the pod's IP to the namespace's address set and returns
 // pod's routing gateway info
-func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]*gatewayInfo, net.IP,
-	[]*goovn.OvnCommand, error) {
-	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns, true)
+func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]*gatewayInfo, net.IP, error) {
+	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns, true, nil)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("failed to ensure namespace locked: %v", err)
+		return nil, nil, nil, fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
 
 	defer nsUnlock()
 
-	cmds, err := nsInfo.addressSet.PrepareAddIPsCmds(createIPAddressSlice(ips))
-	if err != nil {
-		return nil, nil, nil, nil, err
+	if err := nsInfo.addressSet.AddIPs(createIPAddressSlice(ips)); err != nil {
+		return nil, nil, nil, err
 	}
 
-	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nsInfo.hybridOverlayExternalGW, cmds, nil
+	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nsInfo.hybridOverlayExternalGW, nil
 }
 
-func (oc *Controller) deletePodFromNamespace(ns, name, uuid string, ips []*net.IPNet) ([]*goovn.OvnCommand, error) {
+func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error {
 	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
 	if nsInfo == nil {
-		return nil, nil
+		return nil
 	}
 	defer nsUnlock()
 
-	var cmds []*goovn.OvnCommand
-	var err error
-	if nsInfo.addressSet != nil && len(ips) > 0 {
-		cmds, err = nsInfo.addressSet.PrepareDeleteIPsCmds(createIPAddressSlice(ips))
-		if err != nil {
-			return nil, err
+	if nsInfo.addressSet != nil {
+		if err := nsInfo.addressSet.DeleteIPs(createIPAddressSlice(portInfo.ips)); err != nil {
+			return err
 		}
 	}
 
 	// Remove the port from the multicast allow policy.
-	if oc.multicastSupport && nsInfo.multicastEnabled && uuid != "" {
-		if err := podDeleteAllowMulticastPolicy(oc.ovnNBClient, ns, name, uuid); err != nil {
-			return nil, err
+	if oc.multicastSupport && nsInfo.multicastEnabled {
+		if err := podDeleteAllowMulticastPolicy(oc.nbClient, ns, portInfo); err != nil {
+			return err
 		}
 	}
 
-	return cmds, nil
+	return nil
 }
 
 func createIPAddressSlice(ips []*net.IPNet) []net.IP {
@@ -152,7 +147,7 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 	if enabled {
 		err = oc.createMulticastAllowPolicy(ns.Name, nsInfo)
 	} else {
-		err = deleteMulticastAllowPolicy(oc.ovnNBClient, ns.Name, nsInfo)
+		err = deleteMulticastAllowPolicy(oc.nbClient, ns.Name, nsInfo)
 	}
 	if err != nil {
 		klog.Errorf(err.Error())
@@ -165,37 +160,10 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) {
 	if nsInfo.multicastEnabled {
 		nsInfo.multicastEnabled = false
-		if err := deleteMulticastAllowPolicy(oc.ovnNBClient, ns.Name, nsInfo); err != nil {
+		if err := deleteMulticastAllowPolicy(oc.nbClient, ns.Name, nsInfo); err != nil {
 			klog.Errorf(err.Error())
 		}
 	}
-}
-
-// updateNamepacePortGroup updates the port_group applied to the namespace. Multiple objects
-// that apply network configuration to all pods in a namespace will use the same port group.
-// This function ensures that the namespace wide port group will only be created once and
-// cleaned up when no object that relies on it exists.
-func (nsInfo *namespaceInfo) updateNamespacePortGroup(ovnNBClient goovn.Client, ns string) error {
-	if nsInfo.multicastEnabled {
-		if nsInfo.portGroupUUID != "" {
-			// Multicast is enabled and the port group exists so there is nothing to do.
-			return nil
-		}
-
-		// The port group should exist but doesn't so create it
-		portGroupUUID, err := createPortGroup(ovnNBClient, ns, hashedPortGroup(ns))
-		if err != nil {
-			return fmt.Errorf("failed to create port_group for %s (%v)", ns, err)
-		}
-		nsInfo.portGroupUUID = portGroupUUID
-	} else {
-		err := deletePortGroup(ovnNBClient, hashedPortGroup(ns))
-		if err != nil {
-			klog.Errorf("%v", err)
-		}
-		nsInfo.portGroupUUID = ""
-	}
-	return nil
 }
 
 func parseRoutingExternalGWAnnotation(annotation string) ([]net.IP, error) {
@@ -219,7 +187,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 		klog.Infof("[%s] adding namespace took %v", ns.Name, time.Since(start))
 	}()
 
-	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns.Name, false)
+	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns.Name, false, ns)
 	if err != nil {
 		klog.Errorf("Failed to ensure namespace locked: %v", err)
 		return
@@ -245,6 +213,11 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 			nsInfo.hybridOverlayVTEP = parsedAnnotation
 		}
 	}
+}
+
+// configureNamespace ensures internal structures are updated based on namespace
+// must be called with nsInfo lock
+func (oc *Controller) configureNamespace(nsInfo *namespaceInfo, ns *kapi.Namespace) {
 	if annotation, ok := ns.Annotations[routingExternalGWsAnnotation]; ok {
 		exGateways, err := parseRoutingExternalGWAnnotation(annotation)
 		if err != nil {
@@ -261,7 +234,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 		}
 	}
 
-	annotation = ns.Annotations[aclLoggingAnnotation]
+	annotation := ns.Annotations[aclLoggingAnnotation]
 	if annotation != "" {
 		if oc.aclLoggingCanEnable(annotation, nsInfo) {
 			klog.Infof("Namespace %s: ACL logging is set to deny=%s allow=%s", ns.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
@@ -303,7 +276,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 					klog.Errorf("Failed to get all the pods (%v)", err)
 				}
 				for _, pod := range existingPods {
-					logicalPort := podLogicalPortName(pod)
+					logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 					portInfo, err := oc.logicalPortCache.get(logicalPort)
 					if err != nil {
 						klog.Warningf("Unable to get port %s in cache for SNAT rule removal", logicalPort)
@@ -351,7 +324,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 	if aclAnnotation != oldACLAnnotation && (oc.aclLoggingCanEnable(aclAnnotation, nsInfo) || aclAnnotation == "") &&
 		len(nsInfo.networkPolicies) > 0 {
 		// deny rules are all one per namespace
-		if err := oc.setACLDenyLogging(old.Name, nsInfo, nsInfo.aclLogging.Deny); err != nil {
+		if err := oc.setACLLoggingForNamespace(old.Name, nsInfo.networkPolicies, nsInfo.portGroupIngressDenyName, nsInfo.portGroupEgressDenyName, nsInfo.aclLogging); err != nil {
 			klog.Warningf(err.Error())
 		} else {
 			klog.Infof("Namespace %s: ACL logging setting updated to deny=%s allow=%s",
@@ -402,26 +375,6 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 	oc.multicastDeleteNamespace(ns, nsInfo)
 }
 
-// waitForNamespaceLocked waits up to 10 seconds for a Namespace to be known; use this
-// rather than getNamespaceLocked when calling from a thread where you might be processing
-// an event in a namespace before the Namespace factory thread has processed the Namespace
-// addition.
-func (oc *Controller) waitForNamespaceLocked(namespace string, readOnly bool) (*namespaceInfo, func(), error) {
-	var nsInfo *namespaceInfo
-	var nsUnlock func()
-
-	err := utilwait.PollImmediate(100*time.Millisecond, 10*time.Second,
-		func() (bool, error) {
-			nsInfo, nsUnlock = oc.getNamespaceLocked(namespace, readOnly)
-			return nsInfo != nil, nil
-		},
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("timeout waiting for namespace event")
-	}
-	return nsInfo, nsUnlock, nil
-}
-
 // getNamespaceLocked locks namespacesMutex, looks up ns, and (if found), returns it with
 // its mutex locked. If ns is not known, nil will be returned
 func (oc *Controller) getNamespaceLocked(ns string, readOnly bool) (*namespaceInfo, func()) {
@@ -454,9 +407,11 @@ func (oc *Controller) getNamespaceLocked(ns string, readOnly bool) (*namespaceIn
 	return nsInfo, unlockFunc
 }
 
-// ensureNamespaceLocked locks namespacesMutex, gets/creates an entry for ns, and returns it
-// with its mutex locked. Also returns an unlock function and error.
-func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool) (*namespaceInfo, func(), error) {
+// ensureNamespaceLocked locks namespacesMutex, gets/creates an entry for ns, configures OVN nsInfo, and returns it
+// with its mutex locked.
+// ns is the name of the namespace, while namespace is the optional k8s namespace object
+// if no k8s namespace object is provided, this function will attempt to find it via informer cache
+func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool, namespace *kapi.Namespace) (*namespaceInfo, func(), error) {
 	oc.namespacesMutex.Lock()
 	nsInfo := oc.namespaces[ns]
 	nsInfoExisted := false
@@ -500,6 +455,24 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool) (*namespac
 			unlockFunc()
 			return nil, nil, fmt.Errorf("namespace %s, was removed during ensure", ns)
 		}
+	}
+
+	// nsInfo and namespace didn't exist, get it from lister
+	if namespace == nil {
+		var err error
+		namespace, err = oc.watchFactory.GetNamespace(ns)
+		if err != nil {
+			namespace, err = oc.client.CoreV1().Namespaces().Get(context.TODO(), ns, metav1.GetOptions{})
+			if err != nil {
+				klog.Warningf("Unable to find namespace during ensure in informer cache or kube api server. " +
+					"Will defer configuring namespace.")
+			}
+		}
+	}
+
+	if namespace != nil {
+		// if we have the namespace, attempt to configure nsInfo with it
+		oc.configureNamespace(nsInfo, namespace)
 	}
 
 	return nsInfo, unlockFunc, nil

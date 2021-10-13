@@ -183,10 +183,14 @@ vlan-id=10
 nodeport=false
 v4-join-subnet=100.65.0.0/16
 v6-join-subnet=fd90::/64
+router-subnet=10.50.0.0/16
 
 [hybridoverlay]
 enabled=true
 cluster-subnets=11.132.0.0/14/23
+
+[ovnkubenode]
+mode=full
 `
 
 	var newData string
@@ -265,6 +269,8 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(IPv6Mode).To(gomega.Equal(false))
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.Equal(false))
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeFull))
+			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal(""))
+			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal(""))
 
 			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
 				gomega.Expect(a.Scheme).To(gomega.Equal(OvnDBSchemeUnix))
@@ -535,6 +541,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Gateway.NodeportEnable).To(gomega.BeFalse())
 			gomega.Expect(Gateway.V4JoinSubnet).To(gomega.Equal("100.65.0.0/16"))
 			gomega.Expect(Gateway.V6JoinSubnet).To(gomega.Equal("fd90::/64"))
+			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal("10.50.0.0/16"))
 
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.BeTrue())
 			gomega.Expect(HybridOverlay.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
@@ -604,11 +611,14 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Gateway.NodeportEnable).To(gomega.BeTrue())
 			gomega.Expect(Gateway.V4JoinSubnet).To(gomega.Equal("100.63.0.0/16"))
 			gomega.Expect(Gateway.V6JoinSubnet).To(gomega.Equal("fd99::/48"))
+			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal("10.55.0.0/16"))
 
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.BeTrue())
 			gomega.Expect(HybridOverlay.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
+			gomega.Expect(Default.MonitorAll).To(gomega.BeFalse())
+
 			return nil
 		}
 		cliArgs := []string{
@@ -644,8 +654,10 @@ var _ = Describe("Config Operations", func() {
 			"-nodeport",
 			"-gateway-v4-join-subnet=100.63.0.0/16",
 			"-gateway-v6-join-subnet=fd99::/48",
+			"-gateway-router-subnet=10.55.0.0/16",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=11.132.0.0/14/23",
+			"-monitor-all=false",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1421,9 +1433,9 @@ mode=shared
 	})
 
 	Describe("OVN Kube Node config", func() {
+		// NOTE: We test this here as the test that overrides values also sets hybridOverlay to true
+		// which yields an invalid configuration.
 		It("Overrides value from Config file", func() {
-			// NOTE: We test this here as the test that overrides values also sets hybridOverlay to true
-			// which yields an invalid configuration.
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
 					Mode: types.NodeModeFull,
@@ -1431,25 +1443,29 @@ mode=shared
 			}
 			file := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode: types.NodeModeSmartNIC,
+					Mode:           types.NodeModeSmartNIC,
+					MgmtPortNetdev: "enp1s0f0v0",
 				},
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &file)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeSmartNIC))
+			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal("enp1s0f0v0"))
 		})
+
 		It("Overrides value from CLI", func() {
-			// NOTE: We test this here as the test that overrides values also sets hybridOverlay to true
-			// which yields an invalid configuration.
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode: types.NodeModeSmartNIC,
+					Mode:           types.NodeModeSmartNIC,
+					MgmtPortNetdev: "enp1s0f0v0",
 				},
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeSmartNIC))
+			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal("enp1s0f0v0"))
 		})
+
 		It("Fails with unsupported mode", func() {
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
@@ -1472,6 +1488,45 @@ mode=shared
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring(
 				"hybrid overlay is not supported with ovnkube-node mode"))
+		})
+
+		It("Fails if management port is not provided and ovnkube node mode is smart-nic", func() {
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode: types.NodeModeSmartNIC,
+				},
+			}
+			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev must be provided"))
+		})
+
+		It("Fails if management port is not provided and ovnkube node mode is smart-nic-host", func() {
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode: types.NodeModeSmartNICHost,
+				},
+			}
+			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev must be provided"))
+		})
+
+		It("Fails if management port is provided but ovnkube node mode is full", func() {
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode:           types.NodeModeFull,
+					MgmtPortNetdev: "ens1f0v0",
+				},
+			}
+			file := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode: types.NodeModeFull,
+				},
+			}
+			err := buildOvnKubeNodeConfig(nil, &cliConfig, &file)
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev is not supported"))
 		})
 	})
 })
