@@ -19,6 +19,7 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
+// IGNORE
 // gatewayInit creates a gateway router for the local chassis.
 func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*net.IPNet,
 	l3GatewayConfig *util.L3GatewayConfig, sctpSupport bool, gwLRPIfAddrs, drLRPIfAddrs []*net.IPNet) error {
