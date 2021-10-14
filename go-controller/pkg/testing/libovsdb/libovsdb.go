@@ -276,8 +276,7 @@ func getTestDataFromClientCache(client libovsdbclient.Client) []TestData {
 	data := []TestData{}
 	for _, tname := range cache.Tables() {
 		table := cache.Table(tname)
-		for _, uuid := range table.Rows() {
-			row := table.Row(uuid)
+		for _, row := range table.Rows() {
 			data = append(data, row)
 		}
 	}
