@@ -1191,9 +1191,6 @@ mode=shared
 
 		It("configures client northbound SSL correctly", func() {
 			fexec := ovntest.NewFakeExec()
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --db=" + nbURL + " --timeout=5 --private-key=" + keyFile + " --certificate=" + certFile + " --bootstrap-ca-cert=" + caFile + " list nb_global",
-			})
 
 			cliConfig := &OvnAuthConfig{
 				Address:        nbURL,
@@ -1221,7 +1218,6 @@ mode=shared
 		It("configures client southbound SSL correctly", func() {
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --db=" + sbURL + " --timeout=5 --private-key=" + keyFile + " --certificate=" + certFile + " --bootstrap-ca-cert=" + caFile + " list nb_global",
 				"ovs-vsctl --timeout=15 del-ssl",
 				"ovs-vsctl --timeout=15 set-ssl " + keyFile + " " + certFile + " " + caFile,
 				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-remote=\"" + sbURL + "\"",

@@ -1798,22 +1798,6 @@ func (a *OvnAuthConfig) ensureCACert() error {
 		return nil
 	}
 
-	// Client can bootstrap the CA from the OVN API.  Use nbctl for both
-	// SB and NB since ovn-sbctl only supports --bootstrap-ca-cert from
-	// 2.9.90+.
-	// FIXME: change back to a.ctlCmd when sbctl supports --bootstrap-ca-cert
-	// https://github.com/openvswitch/ovs/pull/226
-	args := []string{
-		"--db=" + a.GetURL(),
-		"--timeout=5",
-	}
-	if a.Scheme == OvnDBSchemeSSL {
-		args = append(args, "--private-key="+a.PrivKey)
-		args = append(args, "--certificate="+a.Cert)
-		args = append(args, "--bootstrap-ca-cert="+a.CACert)
-	}
-	args = append(args, "list", "nb_global")
-	_, _ = rawExec(a.exec, "ovn-nbctl", args...)
 	if _, err := os.Stat(a.CACert); os.IsNotExist(err) {
 		klog.Warningf("Bootstrapping %s CA certificate failed", a.CACert)
 	}
