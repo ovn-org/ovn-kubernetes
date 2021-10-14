@@ -104,7 +104,7 @@ func (m *monitor) Send2(update ovsdb.TableUpdates2) {
 	var reply interface{}
 	err := m.client.Call("update2", args, &reply)
 	if err != nil {
-		log.Printf("client error handling update rpc: %v", err)
+		log.Printf("client error handling update2 rpc: %v", err)
 	}
 }
 
@@ -123,7 +123,7 @@ func (m *monitor) Send3(id uuid.UUID, update ovsdb.TableUpdates2) {
 	var reply interface{}
 	err := m.client.Call("update2", args, &reply)
 	if err != nil {
-		log.Printf("client error handling update rpc: %v", err)
+		log.Printf("client error handling update3 rpc: %v", err)
 	}
 }
 

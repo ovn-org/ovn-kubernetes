@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/url"
 	"reflect"
@@ -146,10 +145,6 @@ func newOVSDBClient(databaseModel *model.DBModel, opts ...Option) (*ovsdbClient,
 // The connection can be configured using one or more Option(s), like WithTLSConfig
 // If no WithEndpoint option is supplied, the default of unix:/var/run/openvswitch/ovsdb.sock is used
 func (o *ovsdbClient) Connect(ctx context.Context) error {
-	// add the "model" value to the structured logger
-	// to make it easier to tell between different DBs (e.g. ovn nbdb vs. sbdb)
-	l := o.options.logger.WithValues("model", o.primaryDB().model.Name())
-	o.options.logger = &l
 	o.registerMetrics()
 
 	if err := o.connect(ctx, false); err != nil {
@@ -222,6 +217,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 
 	go o.handleDisconnectNotification()
 	for _, db := range o.databases {
+		go o.handleCacheErrors(o.stopCh, db.cache.Errors())
 		go db.cache.Run(o.stopCh)
 	}
 
@@ -229,7 +225,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 }
 
 func (o *ovsdbClient) tryEndpoint(ctx context.Context, u *url.URL) error {
-	o.options.logger.V(5).Info("trying to connect", "endpoint", u)
+	o.options.logger.V(5).Info("trying to connect", "endpoint", fmt.Sprintf("%v", u))
 	var dialer net.Dialer
 	var err error
 	var c net.Conn
@@ -306,14 +302,14 @@ func (o *ovsdbClient) tryEndpoint(ctx context.Context, u *url.URL) error {
 
 		db.cacheMutex.Lock()
 		if db.cache == nil {
-			db.cache, err = cache.NewTableCache(schema, db.model, nil)
+			db.cache, err = cache.NewTableCache(schema, db.model, nil, o.options.logger)
 			if err != nil {
 				db.cacheMutex.Unlock()
 				o.rpcClient.Close()
 				o.rpcClient = nil
 				return err
 			}
-			db.api = newAPI(db.cache)
+			db.api = newAPI(db.cache, o.options.logger)
 		} else {
 			db.cache.Purge(db.schema)
 		}
@@ -632,6 +628,7 @@ func (o *ovsdbClient) transact(ctx context.Context, dbName string, operation ...
 	if o.rpcClient == nil {
 		return nil, ErrNotConnected
 	}
+	o.options.logger.V(5).Info("transacting operations", "database", dbName, "operations", fmt.Sprintf("%+v", operation))
 	err := o.rpcClient.CallWithContext(ctx, "transact", args, &reply)
 	if err != nil {
 		if err == rpc2.ErrShutdown {
@@ -684,11 +681,7 @@ func (o *ovsdbClient) MonitorCancel(ctx context.Context, cookie MonitorCookie) e
 // RFC 7047 : monitor
 func (o *ovsdbClient) Monitor(ctx context.Context, monitor *Monitor) (MonitorCookie, error) {
 	cookie := newMonitorCookie(o.primaryDBName)
-	err := o.monitor(ctx, cookie, false, monitor)
-	if err != nil && err == ErrUnsupportedRPC {
-		return cookie, o.monitor(ctx, cookie, false, monitor)
-	}
-	return cookie, err
+	return cookie, o.monitor(ctx, cookie, false, monitor)
 }
 
 func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconnecting bool, monitor *Monitor) error {
@@ -769,17 +762,17 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 		if err == rpc2.ErrShutdown {
 			return ErrNotConnected
 		}
-		// TODO: Match unsupported RPC method error
-		if monitor.Method == ovsdb.ConditionalMonitorSinceRPC {
-			log.Printf("libovsdb: method monitor_cond_since not supported, falling back to monitor_cond: %v", err.Error())
-			monitor.Method = ovsdb.ConditionalMonitorRPC
-			// return to ensure that we release any held mutexes, retry must happen from a calling function
-			return ErrUnsupportedRPC
-		} else if monitor.Method == ovsdb.ConditionalMonitorRPC {
-			log.Printf("libovsdb: method monitor_cond not supported, falling back to monitor: %v", err.Error())
-			monitor.Method = ovsdb.MonitorRPC
-			// return to ensure that we release any held mutexes, retry must happen from a calling function
-			return ErrUnsupportedRPC
+		if err.Error() == "unknown method" {
+			if monitor.Method == ovsdb.ConditionalMonitorSinceRPC {
+				o.options.logger.V(3).Error(err, "method monitor_cond_since not supported, falling back to monitor_cond")
+				monitor.Method = ovsdb.ConditionalMonitorRPC
+				return o.monitor(ctx, cookie, reconnecting, monitor)
+			}
+			if monitor.Method == ovsdb.ConditionalMonitorRPC {
+				o.options.logger.V(3).Error(err, "method monitor_cond not supported, falling back to monitor")
+				monitor.Method = ovsdb.MonitorRPC
+				return o.monitor(ctx, cookie, reconnecting, monitor)
+			}
 		}
 		return err
 	}
@@ -795,14 +788,14 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 		u := tableUpdates.(ovsdb.TableUpdates)
 		db.cacheMutex.Lock()
 		defer db.cacheMutex.Unlock()
-		db.cache.Update(nil, u)
+		err = db.cache.Populate(u)
 	} else {
 		u := tableUpdates.(ovsdb.TableUpdates2)
 		db.cacheMutex.Lock()
 		defer db.cacheMutex.Unlock()
-		db.cache.Update2(nil, u)
+		err = db.cache.Populate2(u)
 	}
-	return nil
+	return err
 }
 
 // Echo tests the liveness of the OVSDB connetion
@@ -868,9 +861,27 @@ func (o *ovsdbClient) watchForLeaderChange() error {
 	return nil
 }
 
+func (o *ovsdbClient) handleCacheErrors(stopCh <-chan struct{}, errorChan <-chan error) {
+	for {
+		select {
+		case <-stopCh:
+			return
+		case err := <-errorChan:
+			if errors.Is(err, &cache.ErrCacheInconsistent{}) || errors.Is(err, &cache.ErrIndexExists{}) {
+				// trigger a reconnect, which will purge the cache
+				// hopefully a rebuild will fix any inconsistency
+				o.options.logger.V(3).Error(err, "triggering reconnect to rebuild cache")
+				o.Disconnect()
+			} else {
+				o.options.logger.V(3).Error(err, "error updating cache")
+			}
+		}
+	}
+}
+
 func (o *ovsdbClient) handleDisconnectNotification() {
 	<-o.rpcClient.DisconnectNotify()
-	// close the stopCh, which will stop the cache event processor
+	// close the stopCh, which will stop the cache event processor and update processing
 	close(o.stopCh)
 	o.metrics.numDisconnects.Inc()
 	o.rpcMutex.Lock()

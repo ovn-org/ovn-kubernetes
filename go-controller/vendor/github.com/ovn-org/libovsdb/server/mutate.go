@@ -94,6 +94,9 @@ func mutateInsert(current, value interface{}) (interface{}, interface{}) {
 		return v.Interface(), nil
 	}
 	if vc.Kind() == reflect.Map && vv.Kind() == reflect.Map {
+		if vc.IsNil() && vv.Len() > 0 {
+			return value, value
+		}
 		diff := reflect.MakeMap(vc.Type())
 		iter := vv.MapRange()
 		for iter.Next() {
