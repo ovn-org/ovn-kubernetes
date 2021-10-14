@@ -993,12 +993,12 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 		}
 	} else if hostSubnets != nil {
 		var hostAddrs sets.String
-		if config.Gateway.Mode == config.GatewayModeShared {
-			hostAddrs, err = util.ParseNodeHostAddresses(node)
-			if err != nil && !util.IsAnnotationNotSetError(err) {
-				return fmt.Errorf("failed to get host addresses for node: %s: %v", node.Name, err)
-			}
+		//if config.Gateway.Mode == config.GatewayModeShared {
+		hostAddrs, err = util.ParseNodeHostAddresses(node)
+		if err != nil && !util.IsAnnotationNotSetError(err) {
+			return fmt.Errorf("failed to get host addresses for node: %s: %v", node.Name, err)
 		}
+		//}
 		if err := oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets, hostAddrs); err != nil {
 			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
 		}

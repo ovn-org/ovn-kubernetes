@@ -179,7 +179,7 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 		klog.Infof("Node %s has invalid / no gateway config: %v", node.Name, err)
 	} else if gwConf.Mode != globalconfig.GatewayModeDisabled {
 		grName = util.GetGatewayRouterFromNode(node.Name)
-		if gwConf.NodePortEnable || gwConf.Mode == globalconfig.GatewayModeShared {
+		if gwConf.NodePortEnable {
 			for _, ip := range gwConf.IPAddresses {
 				ips = append(ips, ip.IP.String())
 			}

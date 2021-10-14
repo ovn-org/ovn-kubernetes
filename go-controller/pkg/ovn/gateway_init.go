@@ -46,14 +46,14 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 	}
 	// Local gateway mode does not need SNAT or routes on GR because GR is only used for multiple external gws
 	// without SNAT. For normal N/S traffic, ingress/egress is mp0 on node switches
-	if config.Gateway.Mode != config.GatewayModeLocal {
-		// When there are multiple gateway routers (which would be the likely
-		// default for any sane deployment), we need to SNAT traffic
-		// heading to the logical space with the Gateway router's IP so that
-		// return traffic comes back to the same gateway router.
-		logicalRouterOptions["lb_force_snat_ip"] = "router_ip"
-		logicalRouterOptions["snat-ct-zone"] = "0"
-	}
+	//if config.Gateway.Mode != config.GatewayModeLocal {
+	// When there are multiple gateway routers (which would be the likely
+	// default for any sane deployment), we need to SNAT traffic
+	// heading to the logical space with the Gateway router's IP so that
+	// return traffic comes back to the same gateway router.
+	logicalRouterOptions["lb_force_snat_ip"] = "router_ip"
+	logicalRouterOptions["snat-ct-zone"] = "0"
+	//}
 
 	logicalRouter := nbdb.LogicalRouter{
 		Name:        gatewayRouter,
@@ -359,7 +359,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 	// gws or pod CNFs will be added within pods.go addLogicalPort
 	nats := make([]*nbdb.NAT, 0, len(clusterIPSubnet))
 	var nat *nbdb.NAT
-	if !config.Gateway.DisableSNATMultipleGWs && config.Gateway.Mode != config.GatewayModeLocal {
+	if !config.Gateway.DisableSNATMultipleGWs {
 		// Default SNAT rules.
 		externalIPs := make([]net.IP, len(l3GatewayConfig.IPAddresses))
 		for i, ip := range l3GatewayConfig.IPAddresses {
