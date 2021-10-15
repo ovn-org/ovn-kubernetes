@@ -1122,17 +1122,15 @@ func getNodeInternalAddrs(node *v1.Node) (net.IP, net.IP) {
 // host network to any service backed by egress IP matching pods
 func (oc *Controller) createDefaultNoRerouteServicePolicies(v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) {
 	for _, v4Subnet := range v4ClusterSubnet {
-		_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-policy-add", types.OVNClusterRouter, fmt.Sprintf("%v", types.DefaultNoRereoutePriority),
-			fmt.Sprintf("ip4.src == %s && ip4.dst == %s", v4Subnet.String(), config.Gateway.V4JoinSubnet), "allow")
-		if err != nil {
-			klog.Errorf("Unable to create IPv4 default no-reroute service policy, stderr: %s, err: %v", stderr, err)
+		match := fmt.Sprintf("ip4.src == %s && ip4.dst == %s", v4Subnet.String(), config.Gateway.V4JoinSubnet)
+		if err := oc.createLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
+			klog.Errorf("Unable to create IPv4 no-reroute service policies, err: %v", err)
 		}
 	}
 	for _, v6Subnet := range v6ClusterSubnet {
-		_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-policy-add", types.OVNClusterRouter, fmt.Sprintf("%v", types.DefaultNoRereoutePriority),
-			fmt.Sprintf("ip6.src == %s && ip6.dst == %s", v6Subnet.String(), config.Gateway.V6JoinSubnet), "allow")
-		if err != nil {
-			klog.Errorf("Unable to create IPv6 default no-reroute service policy, stderr: %s, err: %v", stderr, err)
+		match := fmt.Sprintf("ip6.src == %s && ip6.dst == %s", v6Subnet.String(), config.Gateway.V6JoinSubnet)
+		if err := oc.createLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
+			klog.Errorf("Unable to create IPv6 no-reroute service policies, err: %v", err)
 		}
 	}
 }
