@@ -726,6 +726,7 @@ func (oc *Controller) deleteNodeForEgress(node *v1.Node) error {
 func (oc *Controller) initClusterEgressPolicies(nodes []interface{}) {
 	v4ClusterSubnet, v6ClusterSubnet := getClusterSubnets()
 	oc.createDefaultNoReroutePodPolicies(v4ClusterSubnet, v6ClusterSubnet)
+	oc.createDefaultNoRerouteServicePolicies(v4ClusterSubnet, v6ClusterSubnet)
 	go oc.checkEgressNodesReachability()
 }
 
@@ -1115,6 +1116,25 @@ func getNodeInternalAddrs(node *v1.Node) (net.IP, net.IP) {
 		}
 	}
 	return v4Addr, v6Addr
+}
+
+// createDefaultNoRerouteServicePolicies ensures service reachability from the
+// host network to any service backed by egress IP matching pods
+func (oc *Controller) createDefaultNoRerouteServicePolicies(v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) {
+	for _, v4Subnet := range v4ClusterSubnet {
+		_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-policy-add", types.OVNClusterRouter, fmt.Sprintf("%v", types.DefaultNoRereoutePriority),
+			fmt.Sprintf("ip4.src == %s && ip4.dst == %s", v4Subnet.String(), config.Gateway.V4JoinSubnet), "allow")
+		if err != nil {
+			klog.Errorf("Unable to create IPv4 default no-reroute service policy, stderr: %s, err: %v", stderr, err)
+		}
+	}
+	for _, v6Subnet := range v6ClusterSubnet {
+		_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-policy-add", types.OVNClusterRouter, fmt.Sprintf("%v", types.DefaultNoRereoutePriority),
+			fmt.Sprintf("ip6.src == %s && ip6.dst == %s", v6Subnet.String(), config.Gateway.V6JoinSubnet), "allow")
+		if err != nil {
+			klog.Errorf("Unable to create IPv6 default no-reroute service policy, stderr: %s, err: %v", stderr, err)
+		}
+	}
 }
 
 // createDefaultNoReroutePodPolicies ensures egress pods east<->west traffic with regular pods,

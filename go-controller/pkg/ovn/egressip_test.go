@@ -281,6 +281,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				)
 
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add %s %v ip4.src == 10.128.0.0/14 && ip4.dst == %s allow", types.OVNClusterRouter, types.DefaultNoRereoutePriority, config.Gateway.V4JoinSubnet),
+					},
+				)
+
 				fakeOvn.controller.WatchEgressNodes()
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
 				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node1.Name))
@@ -485,6 +491,13 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						fmt.Sprintf("ovn-nbctl --timeout=15 set logical_switch_port etor-GR_node1 options:nat-addresses=router"),
 					},
 				)
+
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add %s %v ip4.src == 10.128.0.0/14 && ip4.dst == %s allow", types.OVNClusterRouter, types.DefaultNoRereoutePriority, config.Gateway.V4JoinSubnet),
+					},
+				)
+
 				fakeOvn.controller.WatchEgressNodes()
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
 				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node1.Name))
@@ -1675,6 +1688,13 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						fmt.Sprintf("ovn-nbctl --timeout=15 set logical_switch_port etor-GR_node2 options:nat-addresses=router"),
 					},
 				)
+
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add %s %v ip4.src == 10.128.0.0/14 && ip4.dst == %s allow", types.OVNClusterRouter, types.DefaultNoRereoutePriority, config.Gateway.V4JoinSubnet),
+					},
+				)
+
 				fakeOvn.controller.WatchEgressNodes()
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(0))
 
@@ -1743,6 +1763,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				allocatorItems := func() int {
 					return len(fakeOvn.controller.eIPC.allocator.cache)
 				}
+
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add %s %v ip4.src == 10.128.0.0/14 && ip4.dst == %s allow", types.OVNClusterRouter, types.DefaultNoRereoutePriority, config.Gateway.V4JoinSubnet),
+					},
+				)
 
 				fakeOvn.controller.WatchEgressNodes()
 				gomega.Eventually(allocatorItems).Should(gomega.Equal(0))
@@ -1821,6 +1847,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					&v1.NodeList{
 						Items: []v1.Node{node},
 					})
+
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add %s %v ip4.src == 10.128.0.0/14 && ip4.dst == %s allow", types.OVNClusterRouter, types.DefaultNoRereoutePriority, config.Gateway.V4JoinSubnet),
+					},
+				)
 
 				fakeOvn.controller.WatchEgressNodes()
 				fakeOvn.controller.WatchEgressIP()
@@ -1974,6 +2006,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				)
 
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add %s %v ip4.src == 10.128.0.0/14 && ip4.dst == %s allow", types.OVNClusterRouter, types.DefaultNoRereoutePriority, config.Gateway.V4JoinSubnet),
+					},
+				)
+
 				fakeOvn.controller.WatchEgressNodes()
 				fakeOvn.controller.WatchEgressIP()
 
@@ -2098,6 +2136,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 set logical_switch_port etor-GR_node1 options:nat-addresses=router"),
+					},
+				)
+
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add %s %v ip4.src == 10.128.0.0/14 && ip4.dst == %s allow", types.OVNClusterRouter, types.DefaultNoRereoutePriority, config.Gateway.V4JoinSubnet),
 					},
 				)
 
@@ -2263,6 +2307,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				)
 
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add %s %v ip4.src == 10.128.0.0/14 && ip4.dst == %s allow", types.OVNClusterRouter, types.DefaultNoRereoutePriority, config.Gateway.V4JoinSubnet),
+					},
+				)
+
 				fakeOvn.controller.WatchEgressNodes()
 				fakeOvn.controller.WatchEgressIP()
 
@@ -2389,6 +2439,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				)
 
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add %s %v ip4.src == 10.128.0.0/14 && ip4.dst == %s allow", types.OVNClusterRouter, types.DefaultNoRereoutePriority, config.Gateway.V4JoinSubnet),
+					},
+				)
+
 				fakeOvn.controller.WatchEgressNodes()
 				fakeOvn.controller.WatchEgressIP()
 
@@ -2510,6 +2566,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					&v1.NodeList{
 						Items: []v1.Node{node1, node2},
 					})
+
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add %s %v ip4.src == 10.128.0.0/14 && ip4.dst == %s allow", types.OVNClusterRouter, types.DefaultNoRereoutePriority, config.Gateway.V4JoinSubnet),
+					},
+				)
 
 				fakeOvn.controller.WatchEgressNodes()
 				fakeOvn.controller.WatchEgressIP()
@@ -2673,6 +2735,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Items: []v1.Node{node1, node2},
 					})
 
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add %s %v ip4.src == 10.128.0.0/14 && ip4.dst == %s allow", types.OVNClusterRouter, types.DefaultNoRereoutePriority, config.Gateway.V4JoinSubnet),
+					},
+				)
+
 				fakeOvn.controller.WatchEgressNodes()
 				fakeOvn.controller.WatchEgressIP()
 
@@ -2835,6 +2903,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 set logical_switch_port etor-GR_node1 options:nat-addresses=router"),
 						fmt.Sprintf("ovn-nbctl --timeout=15 set logical_switch_port etor-GR_node2 options:nat-addresses=router"),
+					},
+				)
+
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lr-policy-add %s %v ip4.src == 10.128.0.0/14 && ip4.dst == %s allow", types.OVNClusterRouter, types.DefaultNoRereoutePriority, config.Gateway.V4JoinSubnet),
 					},
 				)
 
