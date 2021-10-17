@@ -28,7 +28,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
@@ -242,7 +241,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	klog.Infof("Starting cluster master")
 	// The gateway router need to be connected to the distributed router via a per-node join switch.
 	// We need a subnet allocator that allocates subnet for this per-node join switch.
-	if config.Gateway.Mode == config.GatewayModeLocal {
+	/*if config.Gateway.Mode == config.GatewayModeLocal {
 		if config.IPv4Mode {
 			// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
 			_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(types.V4NodeLocalNATSubnet)
@@ -259,7 +258,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 			_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalNATSubnetNextHop))
 			_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalDistributedGWPortIP))
 		}
-	}
+	}*/
 
 	// Enable logical datapath groups for OVN 20.12 and later
 	if err := oc.enableOVNLogicalDatapathGroups(); err != nil {
@@ -379,11 +378,11 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 		return fmt.Errorf("failed to create a single common distributed router for the cluster, error: %v", err)
 	}
 
-	if config.Gateway.Mode == config.GatewayModeLocal {
+	/*if config.Gateway.Mode == config.GatewayModeLocal {
 		if err := oc.addDistributedGWPort(); err != nil {
 			return err
 		}
-	}
+	}*/
 
 	// Determine SCTP support
 	hasSCTPSupport, err := util.DetectSCTPSupport()
@@ -595,6 +594,13 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 		}
 
 		if config.Gateway.Mode == config.GatewayModeLocal {
+			// 10.244.0.0/24                10.244.0.2 src-ip
+			// 10.244.1.0/24                10.244.1.2 src-ip
+			// 10.244.2.0/24                10.244.2.2 src-ip
+			// versus for SGW:
+			// 10.244.0.0/24                100.64.0.2 src-ip
+			// 10.244.1.0/24                100.64.0.3 src-ip
+			// 10.244.2.0/24                100.64.0.4 src-ip
 			logicalRouter := nbdb.LogicalRouter{}
 			logicalRouterStaticRoutes := nbdb.LogicalRouterStaticRoute{
 				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
@@ -679,10 +685,10 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	// 	  - from the management port via the node_local_switch's localnet port
 	//    - from the hostsubnet via management port
 	// 2. a dnat_and_snat nat entry to SNAT the traffic from the management port
-	mpMAC, err := util.ParseNodeManagementPortMACAddress(node)
+	/*mpMAC, err := util.ParseNodeManagementPortMACAddress(node)
 	if err != nil {
 		return err
-	}
+	}*/
 	for _, subnet := range hostSubnets {
 		hostIfAddr := util.GetNodeManagementIfAddr(subnet)
 		l3GatewayConfigIP, err := util.MatchIPNetFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
@@ -697,11 +703,11 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 			return err
 		}
 
-		if config.Gateway.Mode == config.GatewayModeLocal {
+		/*if config.Gateway.Mode == config.GatewayModeLocal {
 			if err := oc.addNodeLocalNatEntries(node, mpMAC.String(), hostIfAddr); err != nil {
 				return err
 			}
-		}
+		}*/
 	}
 
 	return err
@@ -714,11 +720,11 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 // Otherwise, ovn-controller will flood-fill unrelated datapaths unnecessarily, causing scale
 // problems.
 func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
-	chassisID, err := util.ParseNodeChassisIDAnnotation(node)
+	/*chassisID, err := util.ParseNodeChassisIDAnnotation(node)
 	if err != nil {
 		return err
-	}
-
+	}*/
+	var err error
 	if hostSubnets == nil {
 		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node)
 		if err != nil {
@@ -745,11 +751,11 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		lrpArgs = append(lrpArgs, gwIfAddr.String())
 	}
-	if config.Gateway.Mode != config.GatewayModeLocal {
+	/*if config.Gateway.Mode != config.GatewayModeLocal {
 		// "local" mode requires NAT on the cluster router, which is not yet supported yet when
 		// multiple DGPs are on the same router, so we can't set the gateway-chassis here.
 		lrpArgs = append(lrpArgs, "--", "lrp-set-gateway-chassis", lrpName, chassisID, "1")
-	}
+	}*/
 
 	_, stderr, err := util.RunOVNNbctl(lrpArgs...)
 	if err != nil {
@@ -1188,7 +1194,7 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet, node
 	// update metrics
 	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
 
-	if config.Gateway.Mode == config.GatewayModeLocal {
+	/*if config.Gateway.Mode == config.GatewayModeLocal {
 		for _, nodeLocalNatIP := range nodeLocalNatIPs {
 			var err error
 			if utilnet.IsIPv6(nodeLocalNatIP) {
@@ -1200,7 +1206,7 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet, node
 				klog.Errorf("Error deleting node %s's node local NAT IP %s from %v: %v", nodeName, nodeLocalNatIP, nodeLocalNatIPs, err)
 			}
 		}
-	}
+	}*/
 
 	if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
 		klog.Errorf("Error deleting node %s logical network: %v", nodeName, err)
@@ -1360,7 +1366,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 			}
 			util.UpdateUsedHostSubnetsCount(hostSubnet, &oc.v4HostSubnetsUsed, &oc.v6HostSubnetsUsed, true)
 		}
-		if config.Gateway.Mode == config.GatewayModeLocal {
+		/*if config.Gateway.Mode == config.GatewayModeLocal {
 			nodeLocalNatIPs, _ := util.ParseNodeLocalNatIPAnnotation(node)
 			klog.V(5).Infof("Node %s contains local NAT IPs: %v", node.Name, nodeLocalNatIPs)
 			for _, nodeLocalNatIP := range nodeLocalNatIPs {
@@ -1374,7 +1380,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 					utilruntime.HandleError(err)
 				}
 			}
-		}
+		}*/
 
 		// For each existing node, reserve its joinSwitch LRP IPs if they already exist.
 		_, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)

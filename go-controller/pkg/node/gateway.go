@@ -210,12 +210,12 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, subnets []*
 		}
 	}
 
-	if config.Gateway.Mode == config.GatewayModeLocal {
+	/*if config.Gateway.Mode == config.GatewayModeLocal {
 		err = setupLocalNodeAccessBridge(nodeName, subnets)
 		if err != nil {
 			return nil, nil, err
 		}
-	}
+	}*/
 	chassisID, err := util.GetNodeChassisID()
 	if err != nil {
 		return nil, nil, err

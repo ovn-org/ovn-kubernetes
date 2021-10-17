@@ -317,6 +317,13 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		}
 
 		if config.Gateway.Mode != config.GatewayModeLocal {
+			// 10.244.0.0/24                10.244.0.2 src-ip
+			// 10.244.1.0/24                10.244.1.2 src-ip
+			// 10.244.2.0/24                10.244.2.2 src-ip
+			// versus for SGW:
+			// 10.244.0.0/24                100.64.0.2 src-ip
+			// 10.244.1.0/24                100.64.0.3 src-ip
+			// 10.244.2.0/24                100.64.0.4 src-ip
 
 			logicalRouterStaticRoute := nbdb.LogicalRouterStaticRoute{
 				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
@@ -730,13 +737,13 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 
 func (oc *Controller) addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet, otherHostAddrs []string) error {
 	var l3Prefix string
-	var natSubnetNextHop string
+	//var natSubnetNextHop string
 	if utilnet.IsIPv6(hostIfAddr.IP) {
 		l3Prefix = "ip6"
-		natSubnetNextHop = types.V6NodeLocalNATSubnetNextHop
+		//natSubnetNextHop = types.V6NodeLocalNATSubnetNextHop
 	} else {
 		l3Prefix = "ip4"
-		natSubnetNextHop = types.V4NodeLocalNATSubnetNextHop
+		//natSubnetNextHop = types.V4NodeLocalNATSubnetNextHop
 	}
 
 	matches := sets.NewString()
@@ -751,10 +758,10 @@ func (oc *Controller) addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAd
 		return fmt.Errorf("unable to sync node subnet policies, err: %v", err)
 	}
 
-	if config.Gateway.Mode == config.GatewayModeLocal {
+	/*if config.Gateway.Mode == config.GatewayModeLocal {
 
 		// policy to allow host -> service -> hairpin back to host
-		matchStr := fmt.Sprintf("%s.src == %s && %s.dst == %s /* %s */",
+		matchStr := fmt.Sprintf("%s.src == %s && %s.dst == %s /* %s ",
 			l3Prefix, mgmtPortIP, l3Prefix, hostIfAddr.IP.String(), nodeName)
 		if err := oc.syncPolicyBasedRoutes(nodeName, sets.NewString(matchStr), types.MGMTPortPolicyPriority, natSubnetNextHop); err != nil {
 			return fmt.Errorf("unable to sync management port policies, err: %v", err)
@@ -774,7 +781,7 @@ func (oc *Controller) addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAd
 			}
 			matchDst += fmt.Sprintf(" && %s.dst != %s", clusterL3Prefix, clusterSubnet.CIDR)
 		}
-		matchStr = fmt.Sprintf("%s.src == %s %s /* inter-%s */",
+		matchStr = fmt.Sprintf("%s.src == %s %s /* inter-%s ",
 			l3Prefix, mgmtPortIP, matchDst, nodeName)
 		if err := oc.syncPolicyBasedRoutes(nodeName, sets.NewString(matchStr), types.InterNodePolicyPriority, natSubnetNextHop); err != nil {
 			return fmt.Errorf("unable to sync inter-node policies, err: %v", err)
@@ -782,7 +789,7 @@ func (oc *Controller) addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAd
 	} else if config.Gateway.Mode == config.GatewayModeShared {
 		// if we are upgrading from Local to Shared gateway mode, we need to ensure the inter-node LRP is removed
 		oc.removeLRPolicies(nodeName, []string{types.InterNodePolicyPriority})
-	}
+	}*/
 
 	return nil
 }

@@ -80,7 +80,7 @@ func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
 		gatewayIfAddrs = append(gatewayIfAddrs, gatewayNextHopCIDR)
 	}
 
-	if config.Gateway.Mode == config.GatewayModeLocal {
+	/*if config.Gateway.Mode == config.GatewayModeLocal {
 		// need to add masquerading for ovn-k8s-gw0 port for hostA -> service -> hostB via DGP
 		for _, ifaddr := range gatewayIfAddrs {
 			err = initLocalGatewayNATRules(localnetGatewayNextHopPort, ifaddr)
@@ -88,7 +88,7 @@ func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
 				return fmt.Errorf("failed to add NAT rules for localnet gateway (%v)", err)
 			}
 		}
-	}
+	}*/
 
 	return nil
 }
