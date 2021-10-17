@@ -664,6 +664,7 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) {
 // -- to handle host -> service access, via masquerading from the host to OVN GR
 // -- to handle external -> service(ExternalTrafficPolicy: Local) -> host access without SNAT
 func newSharedGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration) (*openflowManager, error) {
+	klog.Infof("SURYA %v", gwBridge)
 	dftFlows, err := flowsForDefaultBridge(gwBridge.ofPortPhys, gwBridge.macAddress.String(), gwBridge.ofPortPatch,
 		gwBridge.ofPortHost, gwBridge.ips)
 	if err != nil {
@@ -672,6 +673,35 @@ func newSharedGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration) 
 	dftCommonFlows := commonFlows(gwBridge.ofPortPhys, gwBridge.macAddress.String(), gwBridge.ofPortPatch,
 		gwBridge.ofPortHost)
 	dftFlows = append(dftFlows, dftCommonFlows...)
+	//===========bits from LGW============//
+	if config.IPv4Mode {
+		// table 0, packets coming from pods headed externally. Commit connections
+		// so that reverse direction goes back to the pods.
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=100, table=0, in_port=%s, ip, "+
+				"actions=ct(commit, exec(load:0x1->NXM_NX_CT_LABEL), zone=%d), output:%s",
+				defaultOpenFlowCookie, gwBridge.ofPortPatch, config.Default.ConntrackZone, gwBridge.ofPortPhys))
+
+		// table 0, packets coming from external. Send it through conntrack and
+		// resubmit to table 1 to know the state of the connection.
+		//dftFlows = append(dftFlows,
+		//	fmt.Sprintf("cookie=%s, priority=50, table=0, in_port=%s, ip, "+
+		//		"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, gwBridge.ofPortPhys, config.Default.ConntrackZone))
+	}
+	if config.IPv6Mode {
+		// table 0, packets coming from pods headed externally. Commit connections
+		// so that reverse direction goes back to the pods.
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=100, table=0, in_port=%s, ipv6, "+
+				"actions=ct(commit, exec(load:0x1->NXM_NX_CT_LABEL), zone=%d), output:%s",
+				defaultOpenFlowCookie, gwBridge.ofPortPatch, config.Default.ConntrackZone, gwBridge.ofPortPhys))
+
+		// table 0, packets coming from external. Send it through conntrack and
+		// resubmit to table 1 to know the state of the connection.
+		//dftFlows = append(dftFlows,
+		//	fmt.Sprintf("cookie=%s, priority=50, table=0, in_port=%s, ipv6, "+
+		//		"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, gwBridge.ofPortPhys, config.Default.ConntrackZone))
+	} // done
 
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
 	ofm := &openflowManager{
@@ -915,10 +945,10 @@ func commonFlows(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost string) [
 	if config.IPv4Mode {
 		// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
 		// so that reverse direction goes back to the pods.
-		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=100, in_port=%s, ip, "+
-				"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
-				defaultOpenFlowCookie, ofPortPatch, config.Default.ConntrackZone, ctMarkOVN, ofPortPhys))
+		//dftFlows = append(dftFlows,
+		//	fmt.Sprintf("cookie=%s, priority=100, in_port=%s, ip, "+
+		//		"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
+		//		defaultOpenFlowCookie, ofPortPatch, config.Default.ConntrackZone, ctMarkOVN, ofPortPhys))
 
 		// table 0, packets coming from host Commit connections with ct_mark ctMarkHost
 		// so that reverse direction goes back to the host.
@@ -936,10 +966,10 @@ func commonFlows(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost string) [
 	if config.IPv6Mode {
 		// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
 		// so that reverse direction goes back to the pods.
-		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=100, in_port=%s, ipv6, "+
-				"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
-				defaultOpenFlowCookie, ofPortPatch, config.Default.ConntrackZone, ctMarkOVN, ofPortPhys))
+		//dftFlows = append(dftFlows,
+		//	fmt.Sprintf("cookie=%s, priority=100, in_port=%s, ipv6, "+
+		//		"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
+		//		defaultOpenFlowCookie, ofPortPatch, config.Default.ConntrackZone, ctMarkOVN, ofPortPhys))
 
 		// table 0, packets coming from host. Commit connections with ct_mark ctMarkHost
 		// so that reverse direction goes back to the host.
