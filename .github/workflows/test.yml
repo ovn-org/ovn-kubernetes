@@ -6,6 +6,7 @@ on:
     branches: [ master ]
   schedule:
     - cron: '0 */12 * * *'
+  workflow_dispatch:
 
 env:
   GO_VERSION: "1.16.3"
