@@ -517,14 +517,18 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 		// Delete OF rules for service if they exist
 		npw.updateServiceFlowCache(service, false, hasHostNet)
 		npw.updateServiceFlowCache(service, true, hasHostNet)
-		// Add correct iptables rules
-		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, hasHostNet)...)
+		// Add correct iptables rules only for Full mode
+		if !npw.smartNICMode {
+			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, hasHostNet)...)
+		}
 	}
 	// sync OF rules once
 	npw.ofm.requestFlowSync()
-	// sync IPtables rules once
-	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
-		recreateIPTRules("nat", chain, keepIPTRules)
+	// sync IPtables rules once only for Full mode
+	if !npw.smartNICMode {
+		for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
+			recreateIPTRules("nat", chain, keepIPTRules)
+		}
 	}
 }
 
