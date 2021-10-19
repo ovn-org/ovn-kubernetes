@@ -1,10 +1,12 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
 	"sync"
+	"time"
 
 	goovn "github.com/ebay/go-ovn"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -40,6 +42,8 @@ const (
 	policyTypeNumACLExtIdKey = "%s_num"
 )
 
+var NetworkPolicyNotCreated error
+
 type networkPolicy struct {
 	// RWMutex synchronizes operations on the policy.
 	// Operations that change local and peer pods take a RLock,
@@ -61,6 +65,7 @@ type networkPolicy struct {
 
 	portGroupName string
 	deleted       bool //deleted policy
+	created       bool
 }
 
 func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
@@ -257,30 +262,64 @@ func (oc *Controller) createDefaultDenyPGAndACLs(namespace, policy string, nsInf
 	return nil
 }
 
-func (oc *Controller) setACLLoggingForNamespace(ns string, namespacePolicies map[string]*networkPolicy, portGroupIngressDenyName string, portGroupEgressDenyName string, logSeverityConfig ACLLoggingLevels) error {
-	var ovsDBOps []ovsdb.Operation
-	for _, policyType := range []knet.PolicyType{knet.PolicyTypeIngress, knet.PolicyTypeEgress} {
-		denyACL, _ := buildDenyACLs(ns, "", targetPortGroupName(portGroupIngressDenyName, portGroupEgressDenyName, policyType), logSeverityConfig.Deny, policyType)
-		ops, err := libovsdbops.UpdateACLsLoggingOps(oc.nbClient, ovsDBOps, denyACL)
-		if err != nil {
-			return err
-		}
-		ovsDBOps = append(ovsDBOps, ops...)
+func (oc *Controller) updateACLLoggingForPolicy(np *networkPolicy, logLevel string) error {
+	np.Lock()
+	defer np.Unlock()
+
+	if np.deleted {
+		return nil
 	}
 
-	klog.V(5).Infof("Getting network policy ACLs for ns: %s", ns)
-	for _, policy := range namespacePolicies {
-		acls := oc.buildNetworkPolicyACLs(policy, logSeverityConfig.Allow)
-		ops, err := libovsdbops.UpdateACLsLoggingOps(oc.nbClient, ovsDBOps, acls...)
-		if err != nil {
-			return err
-		}
-		ovsDBOps = append(ovsDBOps, ops...)
+	if !np.created {
+		return NetworkPolicyNotCreated
 	}
 
-	_, err := libovsdbops.TransactAndCheck(oc.nbClient, ovsDBOps)
+	acls := oc.buildNetworkPolicyACLs(np, logLevel)
+	ops, err := libovsdbops.UpdateACLsLoggingOps(oc.nbClient, nil, acls...)
 	if err != nil {
 		return err
+	}
+	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+	return err
+}
+
+func (oc *Controller) setACLLoggingForNamespace(ns string, nsInfo *namespaceInfo) error {
+	var ovsDBOps []ovsdb.Operation
+	for _, policyType := range []knet.PolicyType{knet.PolicyTypeIngress, knet.PolicyTypeEgress} {
+		denyACL, _ := buildDenyACLs(ns, "", targetPortGroupName(nsInfo.portGroupIngressDenyName, nsInfo.portGroupEgressDenyName, policyType), nsInfo.aclLogging.Deny, policyType)
+		var err error
+		ovsDBOps, err = libovsdbops.UpdateACLsLoggingOps(oc.nbClient, ovsDBOps, denyACL)
+		if err != nil {
+			return err
+		}
+	}
+
+	if _, err := libovsdbops.TransactAndCheck(oc.nbClient, ovsDBOps); err != nil {
+		return fmt.Errorf("unable to update deny ACL for namespace %s: %w", ns, err)
+	}
+
+	klog.V(5).Infof("Setting network policy ACLs for ns: %s", ns)
+	for name, policy := range nsInfo.networkPolicies {
+		policyUpdated := false
+		// REMOVEME(trozet): once we can hold the np lock for the duration of the np create
+		// there is no reason to do this loop
+		for i := 0; i < 5; i++ {
+			if err := oc.updateACLLoggingForPolicy(policy, nsInfo.aclLogging.Allow); err == nil {
+				policyUpdated = true
+				break
+			} else if errors.Is(err, NetworkPolicyNotCreated) {
+				// 24 is chosen because gomega.Eventually default timeout is 50ms
+				// goovn transactions take less than 50ms usually as well so np create
+				// should be done within a couple iterations
+				time.Sleep(24 * time.Millisecond)
+			} else {
+				return fmt.Errorf("unable to update ACL for network policy: %v", err)
+			}
+		}
+		if !policyUpdated {
+			return fmt.Errorf("unable to update ACL for network policy: %s", name)
+		}
+		klog.Infof("ACL for network policy: %s, updated to new log level: %s", name, nsInfo.aclLogging.Allow)
 	}
 
 	return nil
@@ -960,6 +999,7 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 		klog.Errorf(err.Error())
 		return
 	}
+	np.created = true
 }
 
 // addNetworkPolicy creates and applies OVN ACLs to pod logical switch
