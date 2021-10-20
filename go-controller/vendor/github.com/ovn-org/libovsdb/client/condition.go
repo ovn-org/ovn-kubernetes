@@ -147,13 +147,12 @@ func (c *predicateConditional) Generate() ([][]ovsdb.Condition, error) {
 		return nil, ErrNotFound
 	}
 	for _, row := range tableCache.Rows() {
-		elem := tableCache.Row(row)
-		match, err := c.Matches(elem)
+		match, err := c.Matches(row)
 		if err != nil {
 			return nil, err
 		}
 		if match {
-			elemCond, err := c.cache.Mapper().NewEqualityCondition(c.tableName, elem)
+			elemCond, err := c.cache.Mapper().NewEqualityCondition(c.tableName, row)
 			if err != nil {
 				return nil, err
 			}

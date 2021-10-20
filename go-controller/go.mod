@@ -23,7 +23,7 @@ require (
 	github.com/mitchellh/copystructure v1.2.0
 	github.com/onsi/ginkgo v1.16.4
 	github.com/onsi/gomega v1.14.0
-	github.com/ovn-org/libovsdb v0.6.1-0.20211012194444-c6d93b9b144b
+	github.com/ovn-org/libovsdb v0.6.1-0.20211014201246-28345b9aeccf
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.11.0
 	github.com/spf13/afero v1.4.1
