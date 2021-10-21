@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"reflect"
 
+	"github.com/go-logr/logr"
 	"github.com/ovn-org/libovsdb/cache"
 	"github.com/ovn-org/libovsdb/mapper"
 	"github.com/ovn-org/libovsdb/model"
@@ -88,8 +88,9 @@ var ErrNotFound = errors.New("object not found")
 // api struct implements both API and ConditionalAPI
 // Where() can be used to create a ConditionalAPI api
 type api struct {
-	cache *cache.TableCache
-	cond  Conditional
+	cache  *cache.TableCache
+	cond   Conditional
+	logger *logr.Logger
 }
 
 // List populates a slice of Models given as parameter based on the configured Condition
@@ -127,20 +128,19 @@ func (a api) List(result interface{}) error {
 	i := resultVal.Len()
 
 	for _, row := range tableCache.Rows() {
-		elem := tableCache.Row(row)
 		if i >= resultVal.Cap() {
 			break
 		}
 
 		if a.cond != nil {
-			if matches, err := a.cond.Matches(elem); err != nil {
+			if matches, err := a.cond.Matches(row); err != nil {
 				return err
 			} else if !matches {
 				continue
 			}
 		}
 
-		resultVal.Set(reflect.Append(resultVal, reflect.Indirect(reflect.ValueOf(elem))))
+		resultVal.Set(reflect.Append(resultVal, reflect.Indirect(reflect.ValueOf(row))))
 		i++
 	}
 	return nil
@@ -148,17 +148,17 @@ func (a api) List(result interface{}) error {
 
 // Where returns a conditionalAPI based on a Condition list
 func (a api) Where(model model.Model, cond ...model.Condition) ConditionalAPI {
-	return newConditionalAPI(a.cache, a.conditionFromModel(false, model, cond...))
+	return newConditionalAPI(a.cache, a.conditionFromModel(false, model, cond...), a.logger)
 }
 
 // Where returns a conditionalAPI based on a Condition list
 func (a api) WhereAll(model model.Model, cond ...model.Condition) ConditionalAPI {
-	return newConditionalAPI(a.cache, a.conditionFromModel(true, model, cond...))
+	return newConditionalAPI(a.cache, a.conditionFromModel(true, model, cond...), a.logger)
 }
 
 // Where returns a conditionalAPI based a Predicate
 func (a api) WhereCache(predicate interface{}) ConditionalAPI {
-	return newConditionalAPI(a.cache, a.conditionFromFunc(predicate))
+	return newConditionalAPI(a.cache, a.conditionFromFunc(predicate), a.logger)
 }
 
 // Conditional interface implementation
@@ -364,7 +364,7 @@ func (a api) Update(model model.Model, fields ...interface{}) ([]ovsdb.Operation
 
 	for colName, column := range tableSchema.Columns {
 		if !column.Mutable() {
-			log.Printf("libovsdb: removing immutable field %s", colName)
+			a.logger.V(2).Info("removing immutable field", "name", colName)
 			delete(row, colName)
 		}
 	}
@@ -448,16 +448,18 @@ func (a api) getTableFromFunc(predicate interface{}) (string, error) {
 }
 
 // newAPI returns a new API to interact with the database
-func newAPI(cache *cache.TableCache) API {
+func newAPI(cache *cache.TableCache, logger *logr.Logger) API {
 	return api{
-		cache: cache,
+		cache:  cache,
+		logger: logger,
 	}
 }
 
 // newConditionalAPI returns a new ConditionalAPI to interact with the database
-func newConditionalAPI(cache *cache.TableCache, cond Conditional) ConditionalAPI {
+func newConditionalAPI(cache *cache.TableCache, cond Conditional, logger *logr.Logger) ConditionalAPI {
 	return api{
-		cache: cache,
-		cond:  cond,
+		cache:  cache,
+		cond:   cond,
+		logger: logger,
 	}
 }

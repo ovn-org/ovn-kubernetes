@@ -290,7 +290,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	var allOps []ovsdb.Operation
 	var addresses []string
 	var releaseIPs bool
-	var ifaceIDVer string
 	needsIP := true
 
 	// Check if the pod's logical switch port already exists. If it
@@ -305,24 +304,24 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	lsp := &nbdb.LogicalSwitchPort{Name: portName}
 	if len(getLSP.UUID) == 0 {
 		lsp.UUID = libovsdbops.BuildNamedUUID()
-		// Only set ifaceIDVer for new LSP for correct ovn-kube upgrade, because for old OVS Interfaces
-		// iface-id-ver is not set => ovn-controller won't bind OVS Interface
-		ifaceIDVer = string(pod.UID)
 	} else {
 		lsp.UUID = getLSP.UUID
-		ifaceIDVer = getLSP.Options["iface-id-ver"]
 	}
 
 	lsp.Options = make(map[string]string)
-
 	// Unique identifier to distinguish interfaces for recreated pods, also set by ovnkube-node
 	// ovn-controller will claim the OVS interface only if external_ids:iface-id
 	// matches with the Port_Binding.logical_port and external_ids:iface-id-ver matches
 	// with the Port_Binding.options:iface-id-ver. This is not mandatory.
 	// If Port_binding.options:iface-id-ver is not set, then OVS
 	// Interface.external_ids:iface-id-ver if set is ignored.
-	if len(ifaceIDVer) != 0 {
-		lsp.Options["iface-id-ver"] = ifaceIDVer
+	// Don't set iface-id-ver for already existing LSP if it wasn't set before,
+	// because the corresponding OVS port may not have it set
+	// (then ovn-controller won't bind the interface).
+	// May happen on upgrade, because ovnkube-node doesn't update
+	// existing OVS interfaces with new iface-id-ver option.
+	if len(getLSP.UUID) == 0 || len(getLSP.Options["iface-id-ver"]) != 0 {
+		lsp.Options["iface-id-ver"] = string(pod.UID)
 	}
 	// Bind the port to the node's chassis; prevents ping-ponging between
 	// chassis if ovnkube-node isn't running correctly and hasn't cleared

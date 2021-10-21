@@ -48,6 +48,7 @@ func newOptions(opts ...Option) (*options, error) {
 
 	if o.logger == nil {
 		l := stdr.NewWithOptions(stdlog.New(os.Stderr, "", stdlog.LstdFlags), stdr.Options{LogCaller: stdr.All}).WithName("libovsdb")
+		stdr.SetVerbosity(5)
 		o.logger = &l
 	}
 	return o, nil
