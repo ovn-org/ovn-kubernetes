@@ -67,7 +67,7 @@ const (
 	// firewall matching pods. This is done as to make sure egress firewall
 	// matching pods can still connect to the host network on all cluster nodes,
 	// even though a "deny 0.0.0.0/0" rule is specified.
-	DefaultEgressFirewallAllowPriority = "10001"
+	DefaultEgressFirewallAllowPriority = 10001
 	// EgressFirewallStartPriority is the priority from which the ACL priority
 	// will be decremented on a per rule basis. This means that the first rule
 	// defined for a namespace will have this priority, and the second one will

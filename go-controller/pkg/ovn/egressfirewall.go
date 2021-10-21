@@ -15,7 +15,6 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
@@ -82,31 +81,91 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 	return efr, nil
 }
 
+func (oc *Controller) createNodeAllowACLs(match string) error {
+	acl := nbdb.ACL{
+		Direction: nbdb.ACLDirectionToLport,
+		Priority:  types.DefaultEgressFirewallAllowPriority,
+		Match:     match,
+		Action:    nbdb.ACLActionAllow,
+	}
+	logicalSwitch := nbdb.LogicalSwitch{
+		Name: types.OVNJoinSwitch,
+	}
+	opModels := []libovsdbops.OperationModel{
+		{
+			Model: &acl,
+			ModelPredicate: func(acl *nbdb.ACL) bool {
+				return acl.Direction == nbdb.ACLDirectionToLport &&
+					acl.Priority == types.DefaultEgressFirewallAllowPriority &&
+					acl.Action == nbdb.ACLActionAllow &&
+					acl.Match == match
+			},
+			DoAfter: func() {
+				if acl.UUID != "" {
+					logicalSwitch.ACLs = []string{acl.UUID}
+				}
+			},
+		},
+		{
+			Model:          &logicalSwitch,
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.OVNJoinSwitch },
+			OnModelMutations: []interface{}{
+				&logicalSwitch.ACLs,
+			},
+			ErrNotFound: true,
+		},
+	}
+	_, err := oc.modelClient.CreateOrUpdate(opModels...)
+	return err
+}
+
+func (oc *Controller) deleteNodeAllowACLs(match string) error {
+	acl := nbdb.ACL{
+		Direction: nbdb.ACLDirectionToLport,
+		Priority:  types.DefaultEgressFirewallAllowPriority,
+		Match:     match,
+		Action:    nbdb.ACLActionAllow,
+	}
+	logicalSwitch := nbdb.LogicalSwitch{
+		Name: types.OVNJoinSwitch,
+	}
+	aclRes := []nbdb.ACL{}
+	opModel := []libovsdbops.OperationModel{
+		{
+			Model: &acl,
+			ModelPredicate: func(acl *nbdb.ACL) bool {
+				return acl.Direction == nbdb.ACLDirectionToLport &&
+					acl.Priority == types.DefaultEgressFirewallAllowPriority &&
+					acl.Action == nbdb.ACLActionAllow &&
+					acl.Match == match
+			},
+			ExistingResult: &aclRes,
+			DoAfter: func() {
+				logicalSwitch.ACLs = libovsdbops.ExtractUUIDsFromModels(&aclRes)
+			},
+		},
+		{
+			Model:          &logicalSwitch,
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.OVNJoinSwitch },
+			OnModelMutations: []interface{}{
+				&logicalSwitch.ACLs,
+			},
+		},
+	}
+	return oc.modelClient.Delete(opModel...)
+}
+
 func (oc *Controller) addNodeForEgressFirewall(node *v1.Node) error {
 	v4Addr, v6Addr := getNodeInternalAddrs(node)
 	if v4Addr != nil {
-		if _, _, err := util.RunOVNNbctl(
-			"--may-exist",
-			"acl-add",
-			types.OVNJoinSwitch,
-			types.DirectionToLPort,
-			types.DefaultEgressFirewallAllowPriority,
-			fmt.Sprintf("ip4.dst == %v/32", v4Addr),
-			"allow",
-		); err != nil {
+		match := fmt.Sprintf("ip4.dst == %v/32", v4Addr)
+		if err := oc.createNodeAllowACLs(match); err != nil {
 			return fmt.Errorf("could not create default IPv4 allow ACL for egress firewall, err: %v", err)
 		}
 	}
 	if v6Addr != nil {
-		if _, _, err := util.RunOVNNbctl(
-			"--may-exist",
-			"acl-add",
-			types.OVNJoinSwitch,
-			types.DirectionToLPort,
-			types.DefaultEgressFirewallAllowPriority,
-			fmt.Sprintf("ip6.dst == %v/128", v4Addr),
-			"allow",
-		); err != nil {
+		match := fmt.Sprintf("ip6.dst == %v/128", v4Addr)
+		if err := oc.createNodeAllowACLs(match); err != nil {
 			return fmt.Errorf("could not create default IPv6 allow ACL for egress firewall, err: %v", err)
 		}
 	}
@@ -116,26 +175,14 @@ func (oc *Controller) addNodeForEgressFirewall(node *v1.Node) error {
 func (oc *Controller) deleteNodeForEgressFirewall(node *v1.Node) error {
 	v4Addr, v6Addr := getNodeInternalAddrs(node)
 	if v4Addr != nil {
-		if _, _, err := util.RunOVNNbctl(
-			"--if-exist",
-			"acl-del",
-			types.OVNJoinSwitch,
-			types.DirectionToLPort,
-			types.DefaultEgressFirewallAllowPriority,
-			fmt.Sprintf("ip4.dst == %v/32", v4Addr),
-		); err != nil {
+		match := fmt.Sprintf("ip4.dst == %v/32", v4Addr)
+		if err := oc.deleteNodeAllowACLs(match); err != nil {
 			return fmt.Errorf("could not delete default IPv4 allow ACL for egress firewall, err: %v", err)
 		}
 	}
 	if v6Addr != nil {
-		if _, _, err := util.RunOVNNbctl(
-			"--if-exist",
-			"acl-add",
-			types.OVNJoinSwitch,
-			types.DirectionToLPort,
-			types.DefaultEgressFirewallAllowPriority,
-			fmt.Sprintf("ip6.dst == %v/128", v4Addr),
-		); err != nil {
+		match := fmt.Sprintf("ip6.dst == %v/128", v4Addr)
+		if err := oc.deleteNodeAllowACLs(match); err != nil {
 			return fmt.Errorf("could not delete default IPv6 allow ACL for egress firewall, err: %v", err)
 		}
 	}

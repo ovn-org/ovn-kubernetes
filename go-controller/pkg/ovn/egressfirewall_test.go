@@ -17,6 +17,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	t "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/urfave/cli/v2"
 
@@ -703,12 +704,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 		ginkgo.It("reconciles existing and non-existing egressfirewalls", func() {
 			app.Action = func(ctx *cli.Context) error {
 				const (
-					node1Name     string = "node1"
-					nodeV4Address string = "192.168.178.21"
+					node1Name                       string = "node1"
+					nodeV4Address                   string = "192.168.178.21"
+					allowNodesEgressFirewallACLUUID string = "acl-allow-uuid"
 				)
-				fExec.AddFakeCmdsNoOutputNoError([]string{
-					fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist acl-add join to-lport 10001 ip4.dst == %v/32 allow", nodeV4Address),
-				})
 
 				purgeACL := libovsdbops.BuildACL(
 					"",
@@ -806,22 +805,26 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				finalJoinSwitch := &nbdb.LogicalSwitch{
 					UUID: libovsdbops.BuildNamedUUID(),
 					Name: "join",
-					ACLs: []string{keepACL.UUID},
+					ACLs: []string{keepACL.UUID, allowNodesEgressFirewallACLUUID},
 				}
 
 				// Direction of both ACLs will be converted to
 				keepACL.Direction = t.DirectionToLPort
 
-				expectedDatabaseState := []libovsdb.TestData{
+				expectedDatabaseState := []libovsdbtest.TestData{
 					otherACL,
 					keepACL,
 					finalNodeSwitch,
+					&nbdb.ACL{
+						Priority:  ovntypes.DefaultEgressFirewallAllowPriority,
+						Match:     fmt.Sprintf("ip4.dst == %v/32", nodeV4Address),
+						Action:    nbdb.ACLActionAllow,
+						Direction: nbdb.ACLDirectionToLport,
+						UUID:      allowNodesEgressFirewallACLUUID,
+					},
 					finalJoinSwitch,
 				}
-
-				gomega.Eventually(fakeOVN.fakeExec.CalledMatchesExpected).Should(gomega.BeTrue(), fakeOVN.fakeExec.ErrorDesc)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-
 				return nil
 			}
 
