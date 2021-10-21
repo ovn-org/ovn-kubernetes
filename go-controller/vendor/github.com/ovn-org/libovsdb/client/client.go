@@ -83,6 +83,11 @@ type ovsdbClient struct {
 	shutdownMutex sync.Mutex
 }
 
+type bufferedUpdate struct {
+	updates2  *ovsdb.TableUpdates2
+	lastTxnId string
+}
+
 // database is everything needed to map between go types and an ovsdb Database
 type database struct {
 	model       *model.DBModel
@@ -96,6 +101,10 @@ type database struct {
 	// any ongoing monitors, so we can re-create them if we disconnect
 	monitors      map[string]*Monitor
 	monitorsMutex sync.Mutex
+
+	deferUpdates    bool
+	deferredUpdates []*ovsdb.TableUpdates
+	deferredUpdates2 []*bufferedUpdate
 }
 
 // NewOVSDBClient creates a new OVSDB Client with the provided
@@ -114,6 +123,9 @@ func newOVSDBClient(databaseModel *model.DBModel, opts ...Option) (*ovsdbClient,
 			databaseModel.Name(): {
 				model:    databaseModel,
 				monitors: make(map[string]*Monitor),
+				deferUpdates:    true,
+				deferredUpdates: make([]*ovsdb.TableUpdates, 0),
+				deferredUpdates2: make([]*bufferedUpdate, 0),
 			},
 		},
 		disconnect: make(chan struct{}),
@@ -501,6 +513,10 @@ func (o *ovsdbClient) update(params []json.RawMessage, reply *[]interface{}) err
 	}
 	// Update the local DB cache with the tableUpdates
 	db.cacheMutex.RLock()
+	if db.deferUpdates {
+		db.deferredUpdates = append(db.deferredUpdates, &updates)
+		return nil
+	}
 	db.cache.Update(cookie.ID, updates)
 	db.cacheMutex.RUnlock()
 	*reply = []interface{}{}
@@ -528,8 +544,12 @@ func (o *ovsdbClient) update2(params []json.RawMessage, reply *[]interface{}) er
 	}
 	// Update the local DB cache with the tableUpdates
 	db.cacheMutex.RLock()
+	defer db.cacheMutex.RUnlock()
+	if db.deferUpdates {
+		db.deferredUpdates2 = append(db.deferredUpdates2, &bufferedUpdate{&updates, ""})
+		return nil
+	}
 	db.cache.Update2(cookie, updates)
-	db.cacheMutex.RUnlock()
 	*reply = []interface{}{}
 	return nil
 }
@@ -559,16 +579,21 @@ func (o *ovsdbClient) update3(params []json.RawMessage, reply *[]interface{}) er
 	if db == nil {
 		return fmt.Errorf("update: invalid database name: %s unknown", cookie.DatabaseName)
 	}
+
+	// Update the local DB cache with the tableUpdates
+	db.cacheMutex.RLock()
+	defer db.cacheMutex.RUnlock()
+	if db.deferUpdates {
+		db.deferredUpdates2 = append(db.deferredUpdates2, &bufferedUpdate{&updates, lastTransactionID})
+		return nil
+	}
+	db.cache.Update2(cookie, updates)
+	*reply = []interface{}{}
+
 	db.monitorsMutex.Lock()
 	mon := db.monitors[cookie.ID]
 	mon.LastTransactionID = lastTransactionID
 	db.monitorsMutex.Unlock()
-
-	// Update the local DB cache with the tableUpdates
-	db.cacheMutex.RLock()
-	db.cache.Update2(cookie, updates)
-	db.cacheMutex.RUnlock()
-	*reply = []interface{}{}
 	return nil
 }
 
@@ -784,17 +809,40 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 		o.metrics.numMonitors.Inc()
 	}
 
+	db.cacheMutex.Lock()
+	defer db.cacheMutex.Unlock()
 	if monitor.Method == ovsdb.MonitorRPC {
 		u := tableUpdates.(ovsdb.TableUpdates)
-		db.cacheMutex.Lock()
-		defer db.cacheMutex.Unlock()
 		err = db.cache.Populate(u)
 	} else {
 		u := tableUpdates.(ovsdb.TableUpdates2)
-		db.cacheMutex.Lock()
-		defer db.cacheMutex.Unlock()
 		err = db.cache.Populate2(u)
 	}
+
+	if err != nil {
+		return err
+	}
+
+	// populate any deferred upodates
+	db.deferUpdates = false
+	for _, update := range db.deferredUpdates {
+		if err = db.cache.Populate(*update); err != nil {
+			return err
+		}
+	}
+
+	for _, update2 := range db.deferredUpdates2 {
+		if err = db.cache.Populate2(*update2.updates2); err != nil {
+			return err
+		}
+
+		if len(update2.lastTxnId) > 0 {
+			db.monitorsMutex.Lock()
+			db.monitors[cookie.ID].LastTransactionID = update2.lastTxnId
+			db.monitorsMutex.Unlock()
+		}
+	}
+
 	return err
 }
 

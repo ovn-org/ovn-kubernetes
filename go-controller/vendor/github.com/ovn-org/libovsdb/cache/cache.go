@@ -519,7 +519,7 @@ func (t *TableCache) Update(context interface{}, tableUpdates ovsdb.TableUpdates
 	if len(tableUpdates) == 0 {
 		return
 	}
-	t.updates <- tableUpdates
+	t.Populate(tableUpdates)
 }
 
 // Update2 implements the update method of the NotificationHandler interface
@@ -529,7 +529,7 @@ func (t *TableCache) Update2(context interface{}, tableUpdates ovsdb.TableUpdate
 	if len(tableUpdates) == 0 {
 		return
 	}
-	t.updates2 <- tableUpdates
+	t.Populate2(tableUpdates)
 }
 
 // Locked implements the locked method of the NotificationHandler interface
