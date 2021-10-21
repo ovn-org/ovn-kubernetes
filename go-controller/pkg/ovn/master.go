@@ -1190,9 +1190,11 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	logicalRouterName := types.RouterToSwitchPrefix + nodeName
 	opModels := []libovsdbops.OperationModel{
 		{
+			Model:          &nbdb.LogicalSwitch{},
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == nodeName },
 		},
 		{
+			Model:          &nbdb.LogicalRouter{},
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == logicalRouterName },
 		},
 	}
