@@ -17,6 +17,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	t "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/urfave/cli/v2"
 
@@ -238,11 +239,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				v4HashAS, v6HashAS := addressset.MakeAddressSetHashNames("nodeAddressSet")
 				ipv4ACL := libovsdbops.BuildACL(
 					"",
 					t.DirectionToLPort,
 					t.EgressFirewallStartPriority,
-					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14",
+					fmt.Sprintf("(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && (ip4.dst != 10.128.0.0/14 || ip4.dst != $%s || ip6.dst != $%s)", v4HashAS, v6HashAS),
 					nbdb.ACLActionAllow,
 					"",
 					"",
@@ -326,11 +328,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				v4HashAS, v6HashAS := addressset.MakeAddressSetHashNames("nodeAddressSet")
 				ipv6ACL := libovsdbops.BuildACL(
 					"",
 					t.DirectionToLPort,
 					t.EgressFirewallStartPriority,
-					"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && ip4.dst != 10.128.0.0/14",
+					fmt.Sprintf("(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && (ip4.dst != 10.128.0.0/14 || ip4.dst != $%s || ip6.dst != $%s)", v4HashAS, v6HashAS),
 					nbdb.ACLActionAllow,
 					"",
 					"",
@@ -422,11 +425,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				fakeOVN.controller.WatchEgressFirewall()
 
+				v4HashAS, v6HashAS := addressset.MakeAddressSetHashNames("nodeAddressSet")
 				udpACL := libovsdbops.BuildACL(
 					"",
 					t.DirectionToLPort,
 					t.EgressFirewallStartPriority,
-					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && ip4.dst != 10.128.0.0/14",
+					fmt.Sprintf("(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && (ip4.dst != 10.128.0.0/14 || ip4.dst != $%s || ip6.dst != $%s)", v4HashAS, v6HashAS),
 					nbdb.ACLActionDrop,
 					"",
 					"",
@@ -519,11 +523,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				fakeOVN.controller.WatchEgressFirewall()
 
+				v4HashAS, v6HashAS := addressset.MakeAddressSetHashNames("nodeAddressSet")
 				ipv4ACL := libovsdbops.BuildACL(
 					"",
 					t.DirectionToLPort,
 					t.EgressFirewallStartPriority,
-					"(ip4.dst == 1.2.3.5/23) && ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && ip4.dst != 10.128.0.0/14",
+					fmt.Sprintf("(ip4.dst == 1.2.3.5/23) && ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && (ip4.dst != 10.128.0.0/14 || ip4.dst != $%s || ip6.dst != $%s)", v4HashAS, v6HashAS),
 					nbdb.ACLActionAllow,
 					"",
 					"",
@@ -623,11 +628,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				fakeOVN.controller.WatchNamespaces()
 				fakeOVN.controller.WatchEgressFirewall()
 
+				v4HashAS, v6HashAS := addressset.MakeAddressSetHashNames("nodeAddressSet")
 				ipv4ACL := libovsdbops.BuildACL(
 					"",
 					t.DirectionToLPort,
 					t.EgressFirewallStartPriority,
-					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14",
+					fmt.Sprintf("(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && (ip4.dst != 10.128.0.0/14 || ip4.dst != $%s || ip6.dst != $%s)", v4HashAS, v6HashAS),
 					nbdb.ACLActionAllow,
 					"",
 					"",
@@ -703,12 +709,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 		ginkgo.It("reconciles existing and non-existing egressfirewalls", func() {
 			app.Action = func(ctx *cli.Context) error {
 				const (
-					node1Name     string = "node1"
-					nodeV4Address string = "192.168.178.21"
+					node1Name                       string = "node1"
+					nodeV4Address                   string = "192.168.178.21"
+					allowNodesEgressFirewallACLUUID string = "acl-allow-uuid"
 				)
-				fExec.AddFakeCmdsNoOutputNoError([]string{
-					fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist acl-add join to-lport 10001 ip4.dst == %v/32 allow", nodeV4Address),
-				})
 
 				purgeACL := libovsdbops.BuildACL(
 					"",
@@ -806,22 +810,27 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				finalJoinSwitch := &nbdb.LogicalSwitch{
 					UUID: libovsdbops.BuildNamedUUID(),
 					Name: "join",
-					ACLs: []string{keepACL.UUID},
+					ACLs: []string{keepACL.UUID, allowNodesEgressFirewallACLUUID},
 				}
 
 				// Direction of both ACLs will be converted to
 				keepACL.Direction = t.DirectionToLPort
+				v4HashAS, v6HashAS := addressset.MakeAddressSetHashNames("nodeAddressSet")
 
-				expectedDatabaseState := []libovsdb.TestData{
+				expectedDatabaseState := []libovsdbtest.TestData{
 					otherACL,
 					keepACL,
 					finalNodeSwitch,
+					&nbdb.ACL{
+						Priority:  ovntypes.DefaultEgressFirewallAllowPriority,
+						Match:     fmt.Sprintf("ip4.dst == $%s || ip6.dst == $%s", v4HashAS, v6HashAS),
+						Action:    nbdb.ACLActionAllow,
+						Direction: nbdb.ACLDirectionToLport,
+						UUID:      allowNodesEgressFirewallACLUUID,
+					},
 					finalJoinSwitch,
 				}
-
-				gomega.Eventually(fakeOVN.fakeExec.CalledMatchesExpected).Should(gomega.BeTrue(), fakeOVN.fakeExec.ErrorDesc)
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-
 				return nil
 			}
 

@@ -15,7 +15,6 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
@@ -83,32 +82,77 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 }
 
 func (oc *Controller) createNodeAllowACLs(match string) error {
-	if _, _, err := util.RunOVNNbctl(
-		"--may-exist",
-		"acl-add",
-		types.OVNJoinSwitch,
-		types.DirectionToLPort,
-		types.DefaultEgressFirewallAllowPriority,
-		match,
-		"allow",
-	); err != nil {
-		return fmt.Errorf("could not create default IPv4 allow ACL for egress firewall, err: %v", err)
+	acl := nbdb.ACL{
+		Direction: nbdb.ACLDirectionToLport,
+		Priority:  types.DefaultEgressFirewallAllowPriority,
+		Match:     match,
+		Action:    nbdb.ACLActionAllow,
 	}
-	return nil
+	logicalSwitch := nbdb.LogicalSwitch{
+		Name: types.OVNJoinSwitch,
+	}
+	opModels := []libovsdbops.OperationModel{
+		{
+			Model: &acl,
+			ModelPredicate: func(acl *nbdb.ACL) bool {
+				return acl.Direction == nbdb.ACLDirectionToLport &&
+					acl.Priority == types.DefaultEgressFirewallAllowPriority &&
+					acl.Action == nbdb.ACLActionAllow &&
+					acl.Match == match
+			},
+			DoAfter: func() {
+				if acl.UUID != "" {
+					logicalSwitch.ACLs = []string{acl.UUID}
+				}
+			},
+		},
+		{
+			Model:          &logicalSwitch,
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.OVNJoinSwitch },
+			OnModelMutations: []interface{}{
+				&logicalSwitch.ACLs,
+			},
+			ErrNotFound: true,
+		},
+	}
+	_, err := oc.modelClient.CreateOrUpdate(opModels...)
+	return err
 }
 
 func (oc *Controller) deleteNodeAllowACLs(match string) error {
-	if _, _, err := util.RunOVNNbctl(
-		"--if-exist",
-		"acl-del",
-		types.OVNJoinSwitch,
-		types.DirectionToLPort,
-		types.DefaultEgressFirewallAllowPriority,
-		match,
-	); err != nil {
-		return fmt.Errorf("could not delete default IPv6 allow ACL for egress firewall, err: %v", err)
+	acl := nbdb.ACL{
+		Direction: nbdb.ACLDirectionToLport,
+		Priority:  types.DefaultEgressFirewallAllowPriority,
+		Match:     match,
+		Action:    nbdb.ACLActionAllow,
 	}
-	return nil
+	logicalSwitch := nbdb.LogicalSwitch{
+		Name: types.OVNJoinSwitch,
+	}
+	aclRes := []nbdb.ACL{}
+	opModel := []libovsdbops.OperationModel{
+		{
+			Model: &acl,
+			ModelPredicate: func(acl *nbdb.ACL) bool {
+				return acl.Direction == nbdb.ACLDirectionToLport &&
+					acl.Priority == types.DefaultEgressFirewallAllowPriority &&
+					acl.Action == nbdb.ACLActionAllow &&
+					acl.Match == match
+			},
+			ExistingResult: &aclRes,
+			DoAfter: func() {
+				logicalSwitch.ACLs = libovsdbops.ExtractUUIDsFromModels(&aclRes)
+			},
+		},
+		{
+			Model:          &logicalSwitch,
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.OVNJoinSwitch },
+			OnModelMutations: []interface{}{
+				&logicalSwitch.ACLs,
+			},
+		},
+	}
+	return oc.modelClient.Delete(opModel...)
 }
 
 func (oc *Controller) addNodeForEgressFirewall(node *v1.Node) error {
@@ -418,6 +462,7 @@ func (oc *Controller) addEgressFirewallRules(ef *egressFirewall, hashedAddressSe
 				matchTargets = append(matchTargets, matchTarget{matchKindV6AddressSet, dnsNameIPv6ASHashName})
 			}
 		}
+
 		match := generateMatch(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6, matchTargets, rule.ports)
 		err := oc.createEgressFirewallRules(efStartPriority-rule.id, match, action, ef.namespace)
 		if err != nil {
@@ -599,7 +644,8 @@ func generateMatch(ipv4Source, ipv6Source string, destinations []matchTarget, ds
 	}
 
 	if config.Gateway.Mode == config.GatewayModeLocal {
-		extraMatch = getClusterSubnetsExclusion()
+		ipv4HashedAS, ipv6HashedAS := addressset.MakeAddressSetHashNames("nodeAddressSet")
+		extraMatch = fmt.Sprintf("(%s || ip4.dst != $%s || ip6.dst != $%s)", getClusterSubnetsExclusion(), ipv4HashedAS, ipv6HashedAS)
 	} else {
 		extraMatch = fmt.Sprintf("inport == \"%s%s\"", types.JoinSwitchToGWRouterPrefix, types.OVNClusterRouter)
 	}
