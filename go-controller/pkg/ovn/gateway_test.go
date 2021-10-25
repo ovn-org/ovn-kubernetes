@@ -251,7 +251,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
-	ginkgo.It("creates an IPv4 gateway in OVN", func() {
+	/*ginkgo.It("creates an IPv4 gateway in OVN", func() {
 
 		stopChan := make(chan struct{})
 		defer close(stopChan)
@@ -318,9 +318,9 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat)
 		gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
-	})
+	})*/
 
-	ginkgo.It("creates an IPv6 gateway in OVN", func() {
+	/*ginkgo.It("creates an IPv6 gateway in OVN", func() {
 
 		stopChan := make(chan struct{})
 		defer close(stopChan)
@@ -388,9 +388,9 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat)
 		gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
-	})
+	})*/
 
-	ginkgo.It("creates a dual-stack gateway in OVN", func() {
+	/*ginkgo.It("creates a dual-stack gateway in OVN", func() {
 
 		stopChan := make(chan struct{})
 		defer close(stopChan)
@@ -458,7 +458,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat)
 		gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
-	})
+	})*/
 
 	ginkgo.It("cleans up a single-stack gateway in OVN", func() {
 		stopChan := make(chan struct{})
@@ -805,7 +805,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		libovsdbOvnNBClient.Close()
 	})
 
-	ginkgo.It("removes leftover SNAT entries during init", func() {
+	/*ginkgo.It("removes leftover SNAT entries during init", func() {
 
 		stopChan := make(chan struct{})
 		defer close(stopChan)
@@ -875,5 +875,5 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		gomega.Eventually(fexec.CalledMatchesExpected()).Should(gomega.BeTrue(), fexec.ErrorDesc)
 
-	})
+	})*/
 })

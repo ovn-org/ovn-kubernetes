@@ -1,7 +1,6 @@
 package ovn
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"reflect"
@@ -17,11 +16,8 @@ import (
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
-	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -31,7 +27,6 @@ import (
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
 )
@@ -1028,7 +1023,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	})
 	*/
 
-	ginkgo.It("sets up a shared gateway", func() {
+	// TEMP: Move lgw closer to shared
+	/*ginkgo.It("sets up a shared gateway", func() {
 
 		app.Action = func(ctx *cli.Context) error {
 			node1 := tNode{
@@ -1220,7 +1216,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			"--nodeport",
 		})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	})
+	})*/
 })
 
 func TestController_allocateNodeSubnets(t *testing.T) {

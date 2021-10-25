@@ -342,25 +342,6 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 	} else {
 		logicalSwitches = append(logicalSwitches, types.OVNJoinSwitch)
 	}
-	logicalSwitches = append(logicalSwitches, types.OVNJoinSwitch)
-	uuids, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "--format=table", "find", "ACL", match, "action="+action,
-		fmt.Sprintf("external-ids:egressFirewall=%s", externalID))
-	if err != nil {
-		return fmt.Errorf("error executing find ACL command, stderr: %q, %+v", stderr, err)
-	}
-	sort.Strings(logicalSwitches)
-	for _, logicalSwitch := range logicalSwitches {
-		if uuids == "" {
-			id := fmt.Sprintf("%s-%d", logicalSwitch, priority)
-			_, stderr, err := txn.AddOrCommit([]string{"--id=@" + id, "create", "acl",
-				fmt.Sprintf("priority=%d", priority),
-				fmt.Sprintf("direction=%s", types.DirectionToLPort), match, "action=" + action,
-				fmt.Sprintf("external-ids:egressFirewall=%s", externalID),
-				"--", "add", "logical_switch", logicalSwitch,
-				"acls", "@" + id})
-			if err != nil {
-				return fmt.Errorf("failed to commit db changes for egressFirewall  stderr: %q, err: %+v", stderr, err)
 
 	egressFirewallACL := &nbdb.ACL{
 		Priority:    priority,
@@ -419,22 +400,20 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 }
 
 // deleteEgressFirewallRules delete the specific logical router policy/join switch Acls
-func (oc *Controller) deleteEgressFirewallRules(externalID string, txn *util.NBTxn) error {
-	logicalSwitches := []string{}
-	if config.Gateway.Mode == config.GatewayModeLocal {
-		nodes, err := oc.watchFactory.GetNodes()
-		if err != nil {
-			return fmt.Errorf("unable to setup egress firewall ACLs on cluster nodes, err: %v", err)
-		}
-		for _, node := range nodes {
-			logicalSwitches = append(logicalSwitches, node.Name)
-		}
-	} else {
-		logicalSwitches = []string{types.OVNJoinSwitch}
+func (oc *Controller) deleteEgressFirewallRules(externalID string) error {
+	// Find ACLs for a given egressFirewall
+	egressFirewallACLs, err := libovsdbops.FindACLsByExernalID(oc.nbClient, map[string]string{"egressFirewall": externalID})
+	if err != nil {
+		return fmt.Errorf("unable to list egress firewall ACLs, cannot cleanup old stale data, err: %v", err)
 	}
-	sort.Strings(logicalSwitches)
-	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "--format=table", "find", "ACL",
-		fmt.Sprintf("external-ids:egressFirewall=%s", externalID))
+
+	if len(egressFirewallACLs) == 0 {
+		klog.Warningf("No egressFirewall ACLs to delete in ns: %s", externalID)
+		return nil
+	}
+
+	// delete egress firewall acls off any logical switch which has it
+	err = libovsdbops.RemoveACLsFromAllSwitches(oc.nbClient, egressFirewallACLs)
 	if err != nil {
 		return fmt.Errorf("failed to remove reject acl from logical switches: %v", err)
 	}
@@ -523,9 +502,9 @@ func generateMatch(ipv4Source, ipv6Source string, destinations []matchTarget, ds
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		extraMatch = getClusterSubnetsExclusion()
 	} else {
-		extraMatch = fmt.Sprintf("inport == \\\"%s%s\\\"", types.JoinSwitchToGWRouterPrefix, types.OVNClusterRouter)
+		extraMatch = fmt.Sprintf("inport == \"%s%s\"", types.JoinSwitchToGWRouterPrefix, types.OVNClusterRouter)
 	}
-	return fmt.Sprintf("%s && %s\"", match, extraMatch)
+	return fmt.Sprintf("%s && %s", match, extraMatch)
 }
 
 // egressGetL4Match generates the rules for when ports are specified in an egressFirewall Rule
@@ -595,7 +574,7 @@ func egressGetL4Match(ports []egressfirewallapi.EgressFirewallPort) string {
 	return fmt.Sprintf("(%s)", l4Match)
 }
 
-/*func getClusterSubnetsExclusion() string {
+func getClusterSubnetsExclusion() string {
 	var exclusion string
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
 		if exclusion != "" {
@@ -608,4 +587,4 @@ func egressGetL4Match(ports []egressfirewallapi.EgressFirewallPort) string {
 		}
 	}
 	return exclusion
-}*/
+}
