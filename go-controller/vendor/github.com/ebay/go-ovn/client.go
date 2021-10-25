@@ -34,7 +34,7 @@ type EntityType string
 const (
 	PORT_GROUP       EntityType = "PORT_GROUP"
 	LOGICAL_SWITCH   EntityType = "LOGICAL_SWITCH"
-	ZERO_TRANSACTION string = "00000000-0000-0000-0000-000000000000"
+	ZERO_TRANSACTION string     = "00000000-0000-0000-0000-000000000000"
 )
 
 // Client ovnnb/sb client
@@ -366,18 +366,8 @@ func (c *ovndb) connect() error {
 			}
 		}
 		klog.Infof("[%s] failed to connect to %s (trying next endpoint): %v", c.db, addr, err)
-
+		c.client = nil
 		c.nextEndpoint()
-
-		if c.client != nil {
-			// Unregister notifier to suppress the Disconnect notifier
-			// from triggering reconnect attempts
-			if err := c.client.Unregister(ovnNotifier{c}); err != nil {
-				klog.Warningf("failed to unregister event handler before disconnect: %v", err)
-			}
-			c.client.Disconnect()
-			c.client = nil
-		}
 	}
 	return fmt.Errorf("failed to connect to all %s DB endpoints %v", c.db, c.endpoints)
 }
@@ -392,7 +382,7 @@ func (c *ovndb) connectEndpoint() error {
 
 	// We register the notifier, events start coming in but the
 	// mutex is locked
-	notifier := ovnNotifier{c}
+	notifier := newOVNNotifier(c)
 	c.client.Register(notifier)
 
 	if c.currentTxn == ZERO_TRANSACTION {
@@ -405,18 +395,33 @@ func (c *ovndb) connectEndpoint() error {
 	c.tableCols = c.cfgTableCols
 	c.serverCache = make(map[string]map[string]libovsdb.Row)
 
-	for _, db := range []string{c.db, DBServer} {
-		initial, err := c.monitorTables(db, db)
-		if err != nil {
-			return fmt.Errorf("failed to monitor db %s tables: %v", db, err)
+	if err := func() error {
+		for _, db := range []string{c.db, DBServer} {
+			initial, err := c.monitorTables(db, db)
+			if err != nil {
+				return fmt.Errorf("failed to monitor db %s tables: %v", db, err)
+			}
+
+			// We do the initial dump and populate the cache, we have the mutex
+			c.populateCache2(db, initial, false)
 		}
 
-		// We do the initial dump and populate the cache, we have the mutex
-		c.populateCache2(db, *initial, false)
-	}
+		if c.leaderOnly && !c.serverIsLeader() {
+			return fmt.Errorf("leader-only requested; disconnecting from follower")
+		}
 
-	if c.leaderOnly && !c.serverIsLeader() {
-		return fmt.Errorf("leader-only requested; disconnecting from follower")
+		// consume any updates that came in while getting the initial dump
+		notifier.processDeferredUpdates()
+
+		return nil
+	}(); err != nil {
+		// Unregister notifier to suppress the Disconnect notifier
+		// from triggering reconnect attempts
+		if err2 := c.client.Unregister(notifier); err2 != nil {
+			klog.Warningf("failed to unregister event handler before disconnect: %v", err2)
+		}
+		c.client.Disconnect()
+		return err
 	}
 
 	return nil
@@ -455,7 +460,7 @@ func NewClient(cfg *Config) (Client, error) {
 	}
 
 	// handle disconnect for incoming messages when not leader
-	go func(){
+	go func() {
 		for {
 			select {
 			case <-ovndb.disconnSig:
