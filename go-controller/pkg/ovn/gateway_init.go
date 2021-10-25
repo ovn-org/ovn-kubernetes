@@ -9,13 +9,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -401,7 +398,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 }
 
 // This DistributedGWPort guarantees to always have both IPv4 and IPv6 regardless of dual-stack
-func (oc *Controller) addDistributedGWPort() error {
+/*func (oc *Controller) addDistributedGWPort() error {
 	masterChassisID, err := util.GetNodeChassisID()
 	if err != nil {
 		return fmt.Errorf("failed to get master's chassis ID error: %v", err)
@@ -591,7 +588,7 @@ func (oc *Controller) addDistributedGWPort() error {
 	}
 
 	return nil
-}
+}*/
 
 // addExternalSwitch creates a switch connected to the external bridge and connects it to
 // the gateway router
@@ -962,7 +959,7 @@ func (oc *Controller) deletePolicyBasedRoutes(policyID, priority string) error {
 	return nil
 }
 
-func (oc *Controller) addNodeLocalNatEntries(node *kapi.Node, mgmtPortMAC string, mgmtPortIfAddr *net.IPNet) error {
+/*func (oc *Controller) addNodeLocalNatEntries(node *kapi.Node, mgmtPortMAC string, mgmtPortIfAddr *net.IPNet) error {
 	var externalIP net.IP
 
 	isIPv6 := utilnet.IsIPv6CIDR(mgmtPortIfAddr)
@@ -1023,4 +1020,4 @@ func (oc *Controller) addNodeLocalNatEntries(node *kapi.Node, mgmtPortMAC string
 			node.Name, err)
 	}
 	return nil
-}
+}*/

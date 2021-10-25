@@ -664,7 +664,6 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) {
 // -- to handle host -> service access, via masquerading from the host to OVN GR
 // -- to handle external -> service(ExternalTrafficPolicy: Local) -> host access without SNAT
 func newSharedGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration) (*openflowManager, error) {
-	klog.Infof("SURYA %v", gwBridge)
 	dftFlows, err := flowsForDefaultBridge(gwBridge.ofPortPhys, gwBridge.macAddress.String(), gwBridge.ofPortPatch,
 		gwBridge.ofPortHost, gwBridge.ips)
 	if err != nil {

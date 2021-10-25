@@ -4,23 +4,20 @@ package node
 
 import (
 	"fmt"
-	"net"
 	"strings"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
 )
 
 // Creates br-local OVS bridge on the node and adds ovn-k8s-gw0 port to it with the
 // appropriate IP and MAC address on it. All the traffic from this node's hostNetwork
 // Pod towards cluster service ip whose backend is the node itself is forwarded to the
 // ovn-k8s-gw0 port after SNATing by the OVN's distributed gateway port.
-func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
+/*func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
 	localBridgeName := types.LocalBridgeName
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br", localBridgeName)
 	if err != nil {
@@ -80,7 +77,7 @@ func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
 		gatewayIfAddrs = append(gatewayIfAddrs, gatewayNextHopCIDR)
 	}
 
-	/*if config.Gateway.Mode == config.GatewayModeLocal {
+	if config.Gateway.Mode == config.GatewayModeLocal {
 		// need to add masquerading for ovn-k8s-gw0 port for hostA -> service -> hostB via DGP
 		for _, ifaddr := range gatewayIfAddrs {
 			err = initLocalGatewayNATRules(localnetGatewayNextHopPort, ifaddr)
@@ -88,10 +85,10 @@ func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
 				return fmt.Errorf("failed to add NAT rules for localnet gateway (%v)", err)
 			}
 		}
-	}*/
+	}
 
 	return nil
-}
+}*/
 
 // deletes the local bridge used for DGP and removes the corresponding iface, as well as OVS bridge mappings
 func deleteLocalNodeAccessBridge() error {

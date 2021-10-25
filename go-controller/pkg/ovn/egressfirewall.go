@@ -432,7 +432,6 @@ func (oc *Controller) deleteEgressFirewallRules(externalID string, txn *util.NBT
 	} else {
 		logicalSwitches = []string{types.OVNJoinSwitch}
 	}
-	logicalSwitches = []string{types.OVNJoinSwitch}
 	sort.Strings(logicalSwitches)
 	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "--format=table", "find", "ACL",
 		fmt.Sprintf("external-ids:egressFirewall=%s", externalID))
@@ -596,7 +595,7 @@ func egressGetL4Match(ports []egressfirewallapi.EgressFirewallPort) string {
 	return fmt.Sprintf("(%s)", l4Match)
 }
 
-func getClusterSubnetsExclusion() string {
+/*func getClusterSubnetsExclusion() string {
 	var exclusion string
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
 		if exclusion != "" {
@@ -609,4 +608,4 @@ func getClusterSubnetsExclusion() string {
 		}
 	}
 	return exclusion
-}
+}*/
