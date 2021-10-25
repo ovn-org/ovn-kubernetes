@@ -22,34 +22,29 @@ type OvsdbServer struct {
 	db           Database
 	ready        bool
 	readyMutex   sync.RWMutex
-	models       map[string]DatabaseModel
+	models       map[string]*model.DatabaseModel
 	modelsMutex  sync.RWMutex
 	monitors     map[*rpc2.Client]*connectionMonitors
 	monitorMutex sync.RWMutex
 }
 
-type DatabaseModel struct {
-	Model  *model.DBModel
-	Schema *ovsdb.DatabaseSchema
-}
-
 // NewOvsdbServer returns a new OvsdbServer
-func NewOvsdbServer(db Database, models ...DatabaseModel) (*OvsdbServer, error) {
+func NewOvsdbServer(db Database, models ...*model.DatabaseModel) (*OvsdbServer, error) {
 	o := &OvsdbServer{
 		done:         make(chan struct{}, 1),
 		db:           db,
-		models:       make(map[string]DatabaseModel),
+		models:       make(map[string]*model.DatabaseModel),
 		modelsMutex:  sync.RWMutex{},
 		monitors:     make(map[*rpc2.Client]*connectionMonitors),
 		monitorMutex: sync.RWMutex{},
 	}
 	o.modelsMutex.Lock()
 	for _, model := range models {
-		o.models[model.Schema.Name] = model
+		o.models[model.Schema().Name] = model
 	}
 	o.modelsMutex.Unlock()
 	for database, model := range o.models {
-		if err := o.db.CreateDatabase(database, model.Schema); err != nil {
+		if err := o.db.CreateDatabase(database, model.Schema()); err != nil {
 			return nil, err
 		}
 	}
@@ -113,7 +108,7 @@ func (o *OvsdbServer) ListDatabases(client *rpc2.Client, args []interface{}, rep
 	dbs := []string{}
 	o.modelsMutex.RLock()
 	for _, db := range o.models {
-		dbs = append(dbs, db.Schema.Name)
+		dbs = append(dbs, db.Schema().Name)
 	}
 	o.modelsMutex.RUnlock()
 	*reply = dbs
@@ -132,7 +127,7 @@ func (o *OvsdbServer) GetSchema(client *rpc2.Client, args []interface{}, reply *
 		return fmt.Errorf("database %s does not exist", db)
 	}
 	o.modelsMutex.RUnlock()
-	*reply = *model.Schema
+	*reply = *model.Schema()
 	return nil
 }
 
@@ -141,8 +136,8 @@ type Transaction struct {
 	Cache *cache.TableCache
 }
 
-func NewTransaction(schema *ovsdb.DatabaseSchema, model *model.DBModel) Transaction {
-	cache, err := cache.NewTableCache(schema, model, nil, nil)
+func NewTransaction(model *model.DatabaseModel) Transaction {
+	cache, err := cache.NewTableCache(model, nil, nil)
 	if err != nil {
 		panic(err)
 	}

@@ -11,8 +11,8 @@ import (
 )
 
 // FullDatabaseModel returns the DatabaseModel object to be used in libovsdb
-func FullDatabaseModel() (*model.DBModel, error) {
-	return model.NewDBModel("_Server", map[string]model.Model{
+func FullDatabaseModel() (*model.ClientDBModel, error) {
+	return model.NewClientDBModel("_Server", map[string]model.Model{
 		"Database": &Database{},
 	})
 }

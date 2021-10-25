@@ -72,7 +72,7 @@ func WithTable(m model.Model, fields ...interface{}) MonitorOption {
 	return func(o *ovsdbClient, monitor *Monitor) error {
 		tableName := o.primaryDB().model.FindTable(reflect.TypeOf(m))
 		if tableName == "" {
-			return fmt.Errorf("object of type %s is not part of the DBModel", reflect.TypeOf(m))
+			return fmt.Errorf("object of type %s is not part of the ClientDBModel", reflect.TypeOf(m))
 		}
 		tableMonitor := TableMonitor{
 			Table:  tableName,
@@ -87,7 +87,7 @@ func WithConditionalTable(m model.Model, condition model.Condition, fields ...in
 	return func(o *ovsdbClient, monitor *Monitor) error {
 		tableName := o.primaryDB().model.FindTable(reflect.TypeOf(m))
 		if tableName == "" {
-			return fmt.Errorf("object of type %s is not part of the DBModel", reflect.TypeOf(m))
+			return fmt.Errorf("object of type %s is not part of the ClientDBModel", reflect.TypeOf(m))
 		}
 		tableMonitor := TableMonitor{
 			Table:     tableName,

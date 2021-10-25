@@ -131,14 +131,20 @@ func newNBServer(cfg config.OvnAuthConfig, data []TestData) (*server.OvsdbServer
 	return newOVSDBServer(cfg, dbModel, schema, data)
 }
 
-func updateData(db server.Database, dbModel *model.DBModel, schema ovsdb.DatabaseSchema, data []TestData) error {
+func updateData(db server.Database, dbModel *model.ClientDBModel, schema ovsdb.DatabaseSchema, data []TestData) error {
 	dbName := dbModel.Name()
 	m := mapper.NewMapper(&schema)
 	updates := ovsdb.TableUpdates2{}
 	namedUUIDs := map[string]string{}
 	newData := copystructure.Must(copystructure.Copy(data)).([]TestData)
+
+	dbMod, errs := model.NewDatabaseModel(&schema, dbModel)
+	if len(errs) > 0 {
+		return errs[0]
+	}
+
 	for _, d := range newData {
-		tableName := dbModel.FindTable(reflect.TypeOf(d))
+		tableName := dbMod.FindTable(reflect.TypeOf(d))
 		if tableName == "" {
 			return fmt.Errorf("object of type %s is not part of the DBModel", reflect.TypeOf(d))
 		}
@@ -168,7 +174,12 @@ func updateData(db server.Database, dbModel *model.DBModel, schema ovsdb.Databas
 			namedUUIDs[namedUUID] = uuid
 		}
 
-		row, err := m.NewRow(tableName, d)
+		info, err := mapper.NewInfo(tableName, schema.Table(tableName), d)
+		if err != nil {
+			return err
+		}
+
+		row, err := m.NewRow(info)
 		if err != nil {
 			return err
 		}
@@ -189,27 +200,29 @@ func updateData(db server.Database, dbModel *model.DBModel, schema ovsdb.Databas
 	return nil
 }
 
-func newOVSDBServer(cfg config.OvnAuthConfig, dbModel *model.DBModel, schema ovsdb.DatabaseSchema, data []TestData) (*server.OvsdbServer, error) {
+func newOVSDBServer(cfg config.OvnAuthConfig, dbModel *model.ClientDBModel, schema ovsdb.DatabaseSchema, data []TestData) (*server.OvsdbServer, error) {
 	serverDBModel, err := serverdb.FullDatabaseModel()
 	if err != nil {
 		return nil, err
 	}
 	serverSchema := serverdb.Schema()
 
-	db := server.NewInMemoryDatabase(map[string]*model.DBModel{
+	db := server.NewInMemoryDatabase(map[string]*model.ClientDBModel{
 		schema.Name:       dbModel,
 		serverSchema.Name: serverDBModel,
 	})
-	s, err := server.NewOvsdbServer(db,
-		server.DatabaseModel{
-			Model:  dbModel,
-			Schema: &schema,
-		},
-		server.DatabaseModel{
-			Model:  serverDBModel,
-			Schema: &serverSchema,
-		},
-	)
+
+	dbMod, errs := model.NewDatabaseModel(&schema, dbModel)
+	if len(errs) > 0 {
+		log.Fatal(errs)
+	}
+
+	servMod, errs := model.NewDatabaseModel(&serverSchema, serverDBModel)
+	if len(errs) > 0 {
+		log.Fatal(errs)
+	}
+
+	s, err := server.NewOvsdbServer(db, dbMod, servMod)
 	if err != nil {
 		return nil, err
 	}

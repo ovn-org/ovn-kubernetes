@@ -18,10 +18,10 @@ var (
 	ACLDirectionFromLport   ACLDirection = "from-lport"
 	ACLDirectionToLport     ACLDirection = "to-lport"
 	ACLSeverityAlert        ACLSeverity  = "alert"
-	ACLSeverityDebug        ACLSeverity  = "debug"
-	ACLSeverityInfo         ACLSeverity  = "info"
-	ACLSeverityNotice       ACLSeverity  = "notice"
 	ACLSeverityWarning      ACLSeverity  = "warning"
+	ACLSeverityNotice       ACLSeverity  = "notice"
+	ACLSeverityInfo         ACLSeverity  = "info"
+	ACLSeverityDebug        ACLSeverity  = "debug"
 )
 
 // ACL defines an object in ACL table
