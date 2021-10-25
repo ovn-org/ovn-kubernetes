@@ -3,7 +3,6 @@ package node
 import (
 	"fmt"
 	"net"
-	"os"
 	"strings"
 
 	"k8s.io/klog/v2"
@@ -243,9 +242,17 @@ func configureSvcRouteViaInterface(iface string, gwIPs []net.IP) error {
 		if err != nil {
 			return fmt.Errorf("unable to find gateway IP for subnet: %v, found IPs: %v", subnet, gwIPs)
 		}
-		err = util.LinkRoutesAdd(link, gwIP[0], []*net.IPNet{subnet}, config.Default.MTU)
-		if err != nil && !os.IsExist(err) {
-			return fmt.Errorf("unable to add route for service via %s, error: %v", iface, err)
+
+		route, err := util.LinkRouteGet(link, gwIP[0], subnet)
+		if err != nil {
+			return fmt.Errorf("unable to get route[%s via %s dev %s]: %v", subnet, gwIP[0], iface, err)
+		}
+		if route == nil || route.MTU != config.Default.MTU {
+			// Add or update the route
+			err = util.LinkRoutesReplace(link, gwIP[0], []*net.IPNet{subnet}, config.Default.MTU)
+			if err != nil {
+				return fmt.Errorf("unable to add/update route for service via %s, error: %v", iface, err)
+			}
 		}
 	}
 	return nil
