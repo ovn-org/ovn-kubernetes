@@ -16,7 +16,6 @@ import (
 	"github.com/cenkalti/rpc2"
 	"github.com/cenkalti/rpc2/jsonrpc"
 	"github.com/ovn-org/libovsdb/cache"
-	"github.com/ovn-org/libovsdb/mapper"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/libovsdb/ovsdb/serverdb"
@@ -64,6 +63,12 @@ type Client interface {
 	API
 }
 
+type bufferedUpdate struct {
+	updates   *ovsdb.TableUpdates
+	updates2  *ovsdb.TableUpdates2
+	lastTxnID string
+}
+
 // ovsdbClient is an OVSDB client
 type ovsdbClient struct {
 	options        *options
@@ -85,8 +90,7 @@ type ovsdbClient struct {
 
 // database is everything needed to map between go types and an ovsdb Database
 type database struct {
-	model       *model.DBModel
-	schema      *ovsdb.DatabaseSchema
+	model       *model.DatabaseModel
 	schemaMutex sync.RWMutex
 	cache       *cache.TableCache
 	cacheMutex  sync.RWMutex
@@ -96,24 +100,30 @@ type database struct {
 	// any ongoing monitors, so we can re-create them if we disconnect
 	monitors      map[string]*Monitor
 	monitorsMutex sync.Mutex
+
+	// tracks any outstanding updates while waiting for a monitor response
+	deferUpdates    bool
+	deferredUpdates []*bufferedUpdate
 }
 
 // NewOVSDBClient creates a new OVSDB Client with the provided
 // database model. The client can be configured using one or more Option(s),
 // like WithTLSConfig. If no WithEndpoint option is supplied, the default of
 // unix:/var/run/openvswitch/ovsdb.sock is used
-func NewOVSDBClient(databaseModel *model.DBModel, opts ...Option) (Client, error) {
-	return newOVSDBClient(databaseModel, opts...)
+func NewOVSDBClient(clientDBModel *model.ClientDBModel, opts ...Option) (Client, error) {
+	return newOVSDBClient(clientDBModel, opts...)
 }
 
 // newOVSDBClient creates a new ovsdbClient
-func newOVSDBClient(databaseModel *model.DBModel, opts ...Option) (*ovsdbClient, error) {
+func newOVSDBClient(clientDBModel *model.ClientDBModel, opts ...Option) (*ovsdbClient, error) {
 	ovs := &ovsdbClient{
-		primaryDBName: databaseModel.Name(),
+		primaryDBName: clientDBModel.Name(),
 		databases: map[string]*database{
-			databaseModel.Name(): {
-				model:    databaseModel,
-				monitors: make(map[string]*Monitor),
+			clientDBModel.Name(): {
+				model:           model.NewPartialDatabaseModel(clientDBModel),
+				monitors:        make(map[string]*Monitor),
+				deferUpdates:    true,
+				deferredUpdates: make([]*bufferedUpdate, 0),
 			},
 		},
 		disconnect: make(chan struct{}),
@@ -131,11 +141,11 @@ func newOVSDBClient(databaseModel *model.DBModel, opts ...Option) (*ovsdbClient,
 			return nil, fmt.Errorf("could not initialize model _Server: %w", err)
 		}
 		ovs.databases[serverDB] = &database{
-			model:    sm,
+			model:    model.NewPartialDatabaseModel(sm),
 			monitors: make(map[string]*Monitor),
 		}
 	}
-	ovs.metrics.init(databaseModel.Name())
+	ovs.metrics.init(clientDBModel.Name())
 
 	return ovs, nil
 }
@@ -145,6 +155,10 @@ func newOVSDBClient(databaseModel *model.DBModel, opts ...Option) (*ovsdbClient,
 // The connection can be configured using one or more Option(s), like WithTLSConfig
 // If no WithEndpoint option is supplied, the default of unix:/var/run/openvswitch/ovsdb.sock is used
 func (o *ovsdbClient) Connect(ctx context.Context) error {
+	// add the "model" value to the structured logger
+	// to make it easier to tell between different DBs (e.g. ovn nbdb vs. sbdb)
+	l := o.options.logger.WithValues("model", o.primaryDB().model.Client().Name())
+	o.options.logger = &l
 	o.registerMetrics()
 
 	if err := o.connect(ctx, false); err != nil {
@@ -283,7 +297,9 @@ func (o *ovsdbClient) tryEndpoint(ctx context.Context, u *url.URL) error {
 			return err
 		}
 
-		errors := db.model.Validate(schema)
+		db.schemaMutex.Lock()
+		errors := db.model.SetSchema(schema)
+		db.schemaMutex.Unlock()
 		if len(errors) > 0 {
 			var combined []string
 			for _, err := range errors {
@@ -296,13 +312,9 @@ func (o *ovsdbClient) tryEndpoint(ctx context.Context, u *url.URL) error {
 			return err
 		}
 
-		db.schemaMutex.Lock()
-		db.schema = schema
-		db.schemaMutex.Unlock()
-
 		db.cacheMutex.Lock()
 		if db.cache == nil {
-			db.cache, err = cache.NewTableCache(schema, db.model, nil, o.options.logger)
+			db.cache, err = cache.NewTableCache(db.model, nil, o.options.logger)
 			if err != nil {
 				db.cacheMutex.Unlock()
 				o.rpcClient.Close()
@@ -311,7 +323,7 @@ func (o *ovsdbClient) tryEndpoint(ctx context.Context, u *url.URL) error {
 			}
 			db.api = newAPI(db.cache, o.options.logger)
 		} else {
-			db.cache.Purge(db.schema)
+			db.cache.Purge(db.model)
 		}
 		db.cacheMutex.Unlock()
 	}
@@ -421,7 +433,7 @@ func (o *ovsdbClient) Schema() *ovsdb.DatabaseSchema {
 	db := o.primaryDB()
 	db.schemaMutex.RLock()
 	defer db.schemaMutex.RUnlock()
-	return db.schema
+	return db.model.Schema()
 }
 
 // Cache returns the TableCache that is populated from
@@ -479,6 +491,7 @@ func (o *ovsdbClient) echo(args []interface{}, reply *[]interface{}) error {
 // - table-updates: map of table name to table-update. Table-update is a map of uuid to (old, new) row paris
 func (o *ovsdbClient) update(params []json.RawMessage, reply *[]interface{}) error {
 	cookie := MonitorCookie{}
+	*reply = []interface{}{}
 	if len(params) > 2 {
 		return fmt.Errorf("update requires exactly 2 args")
 	}
@@ -499,17 +512,27 @@ func (o *ovsdbClient) update(params []json.RawMessage, reply *[]interface{}) err
 	for tableName := range updates {
 		o.metrics.numTableUpdates.WithLabelValues(cookie.DatabaseName, tableName).Inc()
 	}
+
+	db.cacheMutex.Lock()
+	if db.deferUpdates {
+		db.deferredUpdates = append(db.deferredUpdates, &bufferedUpdate{&updates, nil, ""})
+		db.cacheMutex.Unlock()
+		return nil
+	}
+	db.cacheMutex.Unlock()
+
 	// Update the local DB cache with the tableUpdates
 	db.cacheMutex.RLock()
-	db.cache.Update(cookie.ID, updates)
+	err = db.cache.Update(cookie.ID, updates)
 	db.cacheMutex.RUnlock()
-	*reply = []interface{}{}
-	return nil
+
+	return err
 }
 
 // update2 handling from ovsdb-server.7
 func (o *ovsdbClient) update2(params []json.RawMessage, reply *[]interface{}) error {
 	cookie := MonitorCookie{}
+	*reply = []interface{}{}
 	if len(params) > 2 {
 		return fmt.Errorf("update2 requires exactly 2 args")
 	}
@@ -526,17 +549,27 @@ func (o *ovsdbClient) update2(params []json.RawMessage, reply *[]interface{}) er
 	if db == nil {
 		return fmt.Errorf("update: invalid database name: %s unknown", cookie.DatabaseName)
 	}
+
+	db.cacheMutex.Lock()
+	if db.deferUpdates {
+		db.deferredUpdates = append(db.deferredUpdates, &bufferedUpdate{nil, &updates, ""})
+		db.cacheMutex.Unlock()
+		return nil
+	}
+	db.cacheMutex.Unlock()
+
 	// Update the local DB cache with the tableUpdates
 	db.cacheMutex.RLock()
-	db.cache.Update2(cookie, updates)
+	err = db.cache.Update2(cookie, updates)
 	db.cacheMutex.RUnlock()
-	*reply = []interface{}{}
-	return nil
+
+	return err
 }
 
 // update3 handling from ovsdb-server.7
 func (o *ovsdbClient) update3(params []json.RawMessage, reply *[]interface{}) error {
 	cookie := MonitorCookie{}
+	*reply = []interface{}{}
 	if len(params) > 3 {
 		return fmt.Errorf("update requires exactly 3 args")
 	}
@@ -559,17 +592,28 @@ func (o *ovsdbClient) update3(params []json.RawMessage, reply *[]interface{}) er
 	if db == nil {
 		return fmt.Errorf("update: invalid database name: %s unknown", cookie.DatabaseName)
 	}
-	db.monitorsMutex.Lock()
-	mon := db.monitors[cookie.ID]
-	mon.LastTransactionID = lastTransactionID
-	db.monitorsMutex.Unlock()
+
+	db.cacheMutex.Lock()
+	if db.deferUpdates {
+		db.deferredUpdates = append(db.deferredUpdates, &bufferedUpdate{nil, &updates, lastTransactionID})
+		db.cacheMutex.Unlock()
+		return nil
+	}
+	db.cacheMutex.Unlock()
 
 	// Update the local DB cache with the tableUpdates
 	db.cacheMutex.RLock()
-	db.cache.Update2(cookie, updates)
+	err = db.cache.Update2(cookie, updates)
 	db.cacheMutex.RUnlock()
-	*reply = []interface{}{}
-	return nil
+
+	if err == nil {
+		db.monitorsMutex.Lock()
+		mon := db.monitors[cookie.ID]
+		mon.LastTransactionID = lastTransactionID
+		db.monitorsMutex.Unlock()
+	}
+
+	return err
 }
 
 // getSchema returns the schema in use for the provided database name
@@ -615,7 +659,7 @@ func (o *ovsdbClient) transact(ctx context.Context, dbName string, operation ...
 	var reply []ovsdb.OperationResult
 	db := o.databases[dbName]
 	db.schemaMutex.RLock()
-	schema := o.databases[dbName].schema
+	schema := o.databases[dbName].model.Schema()
 	db.schemaMutex.RUnlock()
 	if schema == nil {
 		return nil, fmt.Errorf("cannot transact to database %s: schema unknown", dbName)
@@ -684,6 +728,7 @@ func (o *ovsdbClient) Monitor(ctx context.Context, monitor *Monitor) (MonitorCoo
 	return cookie, o.monitor(ctx, cookie, false, monitor)
 }
 
+//gocyclo:ignore
 func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconnecting bool, monitor *Monitor) error {
 	if len(monitor.Tables) == 0 {
 		return fmt.Errorf("at least one table should be monitored")
@@ -698,16 +743,24 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 	dbName := cookie.DatabaseName
 	db := o.databases[dbName]
 	db.schemaMutex.RLock()
-	mapper := mapper.NewMapper(db.schema)
+	mmapper := db.model.Mapper()
 	db.schemaMutex.RUnlock()
 	typeMap := o.databases[dbName].model.Types()
 	requests := make(map[string]ovsdb.MonitorRequest)
 	for _, o := range monitor.Tables {
-		m, ok := typeMap[o.Table]
+		_, ok := typeMap[o.Table]
 		if !ok {
 			return fmt.Errorf("type for table %s does not exist in model", o.Table)
 		}
-		request, err := mapper.NewMonitorRequest(o.Table, m, o.Fields)
+		model, err := db.model.NewModel(o.Table)
+		if err != nil {
+			return err
+		}
+		info, err := db.model.NewModelInfo(model)
+		if err != nil {
+			return err
+		}
+		request, err := mmapper.NewMonitorRequest(info, o.Fields)
 		if err != nil {
 			return err
 		}
@@ -784,17 +837,41 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 		o.metrics.numMonitors.Inc()
 	}
 
+	db.cacheMutex.Lock()
+	defer db.cacheMutex.Unlock()
 	if monitor.Method == ovsdb.MonitorRPC {
 		u := tableUpdates.(ovsdb.TableUpdates)
-		db.cacheMutex.Lock()
-		defer db.cacheMutex.Unlock()
 		err = db.cache.Populate(u)
 	} else {
 		u := tableUpdates.(ovsdb.TableUpdates2)
-		db.cacheMutex.Lock()
-		defer db.cacheMutex.Unlock()
 		err = db.cache.Populate2(u)
 	}
+
+	if err != nil {
+		return err
+	}
+
+	// populate any deferred updates
+	db.deferUpdates = false
+	for _, update := range db.deferredUpdates {
+		if update.updates != nil {
+			if err = db.cache.Populate(*update.updates); err != nil {
+				return err
+			}
+		}
+
+		if update.updates2 != nil {
+			if err = db.cache.Populate2(*update.updates2); err != nil {
+				return err
+			}
+		}
+		if len(update.lastTxnID) > 0 {
+			db.monitorsMutex.Lock()
+			db.monitors[cookie.ID].LastTransactionID = update.lastTxnID
+			db.monitorsMutex.Unlock()
+		}
+	}
+
 	return err
 }
 
@@ -871,6 +948,15 @@ func (o *ovsdbClient) handleCacheErrors(stopCh <-chan struct{}, errorChan <-chan
 				// trigger a reconnect, which will purge the cache
 				// hopefully a rebuild will fix any inconsistency
 				o.options.logger.V(3).Error(err, "triggering reconnect to rebuild cache")
+				// for rebuilding cache with mon_cond_since (not yet fully supported in libovsdb) we
+				// need to reset the last txn ID
+				for _, db := range o.databases {
+					db.monitorsMutex.Lock()
+					for _, mon := range db.monitors {
+						mon.LastTransactionID = emptyUUID
+					}
+					db.monitorsMutex.Unlock()
+				}
 				o.Disconnect()
 			} else {
 				o.options.logger.V(3).Error(err, "error updating cache")
@@ -881,7 +967,7 @@ func (o *ovsdbClient) handleCacheErrors(stopCh <-chan struct{}, errorChan <-chan
 
 func (o *ovsdbClient) handleDisconnectNotification() {
 	<-o.rpcClient.DisconnectNotify()
-	// close the stopCh, which will stop the cache event processor and update processing
+	// close the stopCh, which will stop the cache event processor
 	close(o.stopCh)
 	o.metrics.numDisconnects.Inc()
 	o.rpcMutex.Lock()
@@ -916,10 +1002,12 @@ func (o *ovsdbClient) handleDisconnectNotification() {
 		db.cacheMutex.Lock()
 		defer db.cacheMutex.Unlock()
 		db.cache = nil
+		// need to defer updates if/when we reconnect
+		db.deferUpdates = true
 
 		db.schemaMutex.Lock()
 		defer db.schemaMutex.Unlock()
-		db.schema = nil
+		db.model.ClearSchema()
 
 		db.monitorsMutex.Lock()
 		defer db.monitorsMutex.Unlock()

@@ -9,8 +9,8 @@ type (
 
 var (
 	NATTypeDNAT        NATType = "dnat"
-	NATTypeDNATAndSNAT NATType = "dnat_and_snat"
 	NATTypeSNAT        NATType = "snat"
+	NATTypeDNATAndSNAT NATType = "dnat_and_snat"
 )
 
 // NAT defines an object in NAT table

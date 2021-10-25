@@ -11,21 +11,21 @@ which column in the database. We refer to pointers to this structs as Models. Ex
    	Config map[string]string `ovsdb:"other_config"`
    }
 
-Based on these Models a Database Model (see DBModel type) is built to represent
+Based on these Models a Database Model (see ClientDBModel type) is built to represent
 the entire OVSDB:
 
-   dbModel, _ := client.NewDBModel("OVN_Northbound",
+   clientDBModel, _ := client.NewClientDBModel("OVN_Northbound",
        map[string]client.Model{
    	"Logical_Switch": &MyLogicalSwitch{},
    })
 
 
-The DBModel represents the entire Database (or the part of it we're interested in).
+The ClientDBModel represents the entire Database (or the part of it we're interested in).
 Using it, the libovsdb.client package is able to properly encode and decode OVSDB messages
 and store them in Model instances.
 A client instance is created by simply specifying the connection information and the database model:
 
-     ovs, _ := client.Connect(context.Background(), dbModel)
+     ovs, _ := client.Connect(context.Background(), clientDBModel)
 
 Main API
 
