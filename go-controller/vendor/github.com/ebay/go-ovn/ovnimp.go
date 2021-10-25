@@ -351,7 +351,7 @@ func (odbi *ovndb) getContext(dbName string) (*map[string][]string, *map[string]
 	return &odbi.tableCols, &odbi.cache, odbi.signalCreate, odbi.signalDelete
 }
 
-func (odbi *ovndb) populateCache(dbName string, updates libovsdb.TableUpdates, signal bool) {
+func (odbi *ovndb) populateCache(dbName string, updates *libovsdb.TableUpdates, signal bool) {
 	tableCols, cache, signalCreate, signalDelete := odbi.getContext(dbName)
 
 	empty := libovsdb.Row{}
@@ -512,7 +512,7 @@ func (odbi *ovndb) applyUpdatesToRow(db, table string, uuid string, rowdiff *lib
 	(*cache)[table][uuid] = row
 }
 
-func (odbi *ovndb) populateCache2(dbName string, updates libovsdb.TableUpdates2, signal bool) {
+func (odbi *ovndb) populateCache2(dbName string, updates *libovsdb.TableUpdates2, signal bool) {
 	tableCols, cache, signalCreate, signalDelete := odbi.getContext(dbName)
 
 	for table := range *tableCols {
