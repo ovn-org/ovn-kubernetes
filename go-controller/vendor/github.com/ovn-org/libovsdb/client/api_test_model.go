@@ -157,9 +157,11 @@ func apiTestCache(t *testing.T, data map[string]map[string]model.Model) *cache.T
 	var schema ovsdb.DatabaseSchema
 	err := json.Unmarshal(apiTestSchema, &schema)
 	assert.Nil(t, err)
-	db, err := model.NewDBModel("OVN_NorthBound", map[string]model.Model{"Logical_Switch": &testLogicalSwitch{}, "Logical_Switch_Port": &testLogicalSwitchPort{}})
+	db, err := model.NewClientDBModel("OVN_Northbound", map[string]model.Model{"Logical_Switch": &testLogicalSwitch{}, "Logical_Switch_Port": &testLogicalSwitchPort{}})
 	assert.Nil(t, err)
-	cache, err := cache.NewTableCache(&schema, db, data, nil)
+	dbModel, errs := model.NewDatabaseModel(&schema, db)
+	assert.Empty(t, errs)
+	cache, err := cache.NewTableCache(dbModel, data, nil)
 	assert.Nil(t, err)
 	return cache
 }

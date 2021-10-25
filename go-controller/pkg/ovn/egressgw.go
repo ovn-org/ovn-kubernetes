@@ -573,14 +573,17 @@ func (oc *Controller) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddrs []*n
 // there are no gateways
 func (oc *Controller) deletePerPodGRSNAT(node string, podIPNets []*net.IPNet) {
 	gr := util.GetGatewayRouterFromNode(node)
+	nats := make([]*nbdb.NAT, 0, len(podIPNets))
+	var nat *nbdb.NAT
+	var err error
 	for _, podIPNet := range podIPNets {
-		podIP := podIPNet.IP.String()
-		stdout, stderr, err := util.RunOVNNbctl("--if-exists", "lr-nat-del",
-			gr, "snat", podIP)
-		if err != nil {
-			klog.Errorf("Failed to delete SNAT rule for pod on gateway router %s, "+
-				"stdout: %q, stderr: %q, error: %v", gr, stdout, stderr, err)
-		}
+		nat = libovsdbops.BuildRouterSNAT(nil, podIPNet, "", nil)
+		nats = append(nats, nat)
+	}
+	err = libovsdbops.DeleteNatsFromRouter(oc.nbClient, gr, nats...)
+	if err != nil {
+		klog.Errorf("Failed to delete SNAT rule for pod on gateway router %s, "+
+			"error: %v", gr, err)
 	}
 }
 
@@ -594,6 +597,8 @@ func (oc *Controller) addPerPodGRSNAT(pod *kapi.Pod, podIfAddrs []*net.IPNet) er
 	if err != nil {
 		return fmt.Errorf("unable to parse node L3 gw annotation: %v", err)
 	}
+	nats := make([]*nbdb.NAT, 0, len(l3GWConfig.IPAddresses)*len(podIfAddrs))
+	var nat *nbdb.NAT
 	gr := types.GWRouterPrefix + nodeName
 	for _, gwIPNet := range l3GWConfig.IPAddresses {
 		gwIP := gwIPNet.IP.String()
@@ -607,10 +612,12 @@ func (oc *Controller) addPerPodGRSNAT(pod *kapi.Pod, podIfAddrs []*net.IPNet) er
 			if err != nil {
 				return fmt.Errorf("invalid IP: %s and mask: %s combination, error: %v", podIP, mask, err)
 			}
-			if err := util.UpdateRouterSNAT(gr, gwIPNet.IP, fullMaskPodNet); err != nil {
-				return fmt.Errorf("failed to update NAT for pod: %s, error: %v", pod.Name, err)
-			}
+			nat = libovsdbops.BuildRouterSNAT(&gwIPNet.IP, fullMaskPodNet, "", nil)
+			nats = append(nats, nat)
 		}
+	}
+	if err := libovsdbops.AddOrUpdateNatsToRouter(oc.nbClient, gr, nats...); err != nil {
+		return fmt.Errorf("failed to update SNAT for pods of router: %s, error: %v", gr, err)
 	}
 	return nil
 }

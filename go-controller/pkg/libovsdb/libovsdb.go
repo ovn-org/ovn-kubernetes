@@ -28,7 +28,7 @@ const (
 // newClient creates a new client object given the provided config
 // the stopCh is required to ensure the goroutine for ssl cert
 // update is not leaked
-func newClient(cfg config.OvnAuthConfig, dbModel *model.DBModel, stopCh <-chan struct{}) (client.Client, error) {
+func newClient(cfg config.OvnAuthConfig, dbModel *model.ClientDBModel, stopCh <-chan struct{}) (client.Client, error) {
 	logger := klogr.New()
 	options := []client.Option{
 		client.WithReconnect(OVSDBTimeout, &backoff.ZeroBackOff{}),
@@ -98,7 +98,7 @@ func NewNBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 	return newClientWithMonitor(cfg, stopCh, dbModel)
 }
 
-func newClientWithMonitor(cfg config.OvnAuthConfig, stopCh <-chan struct{}, dbModel *model.DBModel) (client.Client, error) {
+func newClientWithMonitor(cfg config.OvnAuthConfig, stopCh <-chan struct{}, dbModel *model.ClientDBModel) (client.Client, error) {
 	c, err := newClient(cfg, dbModel, stopCh)
 	if err != nil {
 		return nil, err

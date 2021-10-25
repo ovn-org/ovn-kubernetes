@@ -8,9 +8,9 @@ type (
 )
 
 var (
-	LoadBalancerProtocolSCTP LoadBalancerProtocol = "sctp"
 	LoadBalancerProtocolTCP  LoadBalancerProtocol = "tcp"
 	LoadBalancerProtocolUDP  LoadBalancerProtocol = "udp"
+	LoadBalancerProtocolSCTP LoadBalancerProtocol = "sctp"
 )
 
 // LoadBalancer defines an object in Load_Balancer table
