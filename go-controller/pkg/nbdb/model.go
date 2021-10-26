@@ -17,6 +17,7 @@ func FullDatabaseModel() (model.ClientDBModel, error) {
 		"Address_Set":                 &AddressSet{},
 		"BFD":                         &BFD{},
 		"Connection":                  &Connection{},
+		"Copp":                        &Copp{},
 		"DHCP_Options":                &DHCPOptions{},
 		"DNS":                         &DNS{},
 		"Forwarding_Group":            &ForwardingGroup{},
@@ -43,7 +44,7 @@ func FullDatabaseModel() (model.ClientDBModel, error) {
 
 var schema = `{
   "name": "OVN_Northbound",
-  "version": "5.32.0",
+  "version": "5.32.1",
   "tables": {
     "ACL": {
       "columns": {
@@ -88,6 +89,15 @@ var schema = `{
             },
             "min": 0,
             "max": "unlimited"
+          }
+        },
+        "label": {
+          "type": {
+            "key": {
+              "type": "integer",
+              "minInteger": 0,
+              "maxInteger": 4294967295
+            }
           }
         },
         "log": {
@@ -337,6 +347,22 @@ var schema = `{
           "target"
         ]
       ]
+    },
+    "Copp": {
+      "columns": {
+        "meters": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        }
+      }
     },
     "DHCP_Options": {
       "columns": {
@@ -681,6 +707,17 @@ var schema = `{
     },
     "Logical_Router": {
       "columns": {
+        "copp": {
+          "type": {
+            "key": {
+              "type": "uuid",
+              "refTable": "Copp",
+              "refType": "weak"
+            },
+            "min": 0,
+            "max": 1
+          }
+        },
         "enabled": {
           "type": {
             "key": {
@@ -1037,6 +1074,17 @@ var schema = `{
             },
             "min": 0,
             "max": "unlimited"
+          }
+        },
+        "copp": {
+          "type": {
+            "key": {
+              "type": "uuid",
+              "refTable": "Copp",
+              "refType": "weak"
+            },
+            "min": 0,
+            "max": 1
           }
         },
         "dns_records": {

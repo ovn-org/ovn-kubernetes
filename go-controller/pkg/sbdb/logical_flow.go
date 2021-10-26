@@ -16,6 +16,7 @@ var (
 type LogicalFlow struct {
 	UUID            string              `ovsdb:"_uuid"`
 	Actions         string              `ovsdb:"actions"`
+	ControllerMeter *string             `ovsdb:"controller_meter"`
 	ExternalIDs     map[string]string   `ovsdb:"external_ids"`
 	LogicalDatapath *string             `ovsdb:"logical_datapath"`
 	LogicalDpGroup  *string             `ovsdb:"logical_dp_group"`
@@ -23,4 +24,5 @@ type LogicalFlow struct {
 	Pipeline        LogicalFlowPipeline `ovsdb:"pipeline"`
 	Priority        int                 `ovsdb:"priority"`
 	TableID         int                 `ovsdb:"table_id"`
+	Tags            map[string]string   `ovsdb:"tags"`
 }

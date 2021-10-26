@@ -7,6 +7,7 @@ package nbdb
 type LogicalSwitch struct {
 	UUID             string            `ovsdb:"_uuid"`
 	ACLs             []string          `ovsdb:"acls"`
+	Copp             *string           `ovsdb:"copp"`
 	DNSRecords       []string          `ovsdb:"dns_records"`
 	ExternalIDs      map[string]string `ovsdb:"external_ids"`
 	ForwardingGroups []string          `ovsdb:"forwarding_groups"`
