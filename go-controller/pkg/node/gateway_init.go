@@ -345,7 +345,7 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	waiter.AddWait(gw.readyFunc, initGw)
 	n.gateway = gw
 
-	return n.validateGatewayMTU(gatewayIntf)
+	return n.validateVTEPInterfaceMTU()
 }
 
 // interfaceForEXGW takes the interface requested to act as exgw bridge

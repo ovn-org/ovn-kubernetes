@@ -150,6 +150,7 @@ func setupOVNNode(node *kapi.Node) error {
 		if err != nil {
 			return fmt.Errorf("failed to obtain local IP from node %q: %v", node.Name, err)
 		}
+		config.Default.EncapIP = encapIP
 	} else {
 		if ip := net.ParseIP(encapIP); ip == nil {
 			return fmt.Errorf("invalid encapsulation IP provided %q", encapIP)
@@ -594,16 +595,19 @@ func (n *OvnNode) WatchEndpoints() {
 	}, nil)
 }
 
-// validateGatewayMTU checks if the MTU of the given network interface is big
-// enough to carry the `config.Default.MTU` and the Geneve header. If the MTU
-// is not big enough, it will taint the node with the value of
-// `types.OvnK8sSmallMTUTaintKey`
-func (n *OvnNode) validateGatewayMTU(gatewayInterfaceName string) error {
+// validateVTEPInterfaceMTU checks if the MTU of the interface that has ovn-encap-ip is big
+// enough to carry the `config.Default.MTU` and the Geneve header. If the MTU is not big
+// enough, it will taint the node with the value of `types.OvnK8sSmallMTUTaintKey`
+func (n *OvnNode) validateVTEPInterfaceMTU() error {
 	tooSmallMTUTaint := &kapi.Taint{Key: types.OvnK8sSmallMTUTaintKey, Effect: kapi.TaintEffectNoSchedule}
 
-	mtu, err := util.GetNetworkInterfaceMTU(gatewayInterfaceName)
+	ovnEncapIP := net.ParseIP(config.Default.EncapIP)
+	if ovnEncapIP == nil {
+		return fmt.Errorf("the set OVN Encap IP is invalid: (%s)", config.Default.EncapIP)
+	}
+	interfaceName, mtu, err := util.GetIFNameAndMTUForAddress(ovnEncapIP)
 	if err != nil {
-		return fmt.Errorf("could not get MTU from gateway network interface %s: %w", gatewayInterfaceName, err)
+		return fmt.Errorf("could not get MTU for the interface with address %s: %w", ovnEncapIP, err)
 	}
 
 	// calc required MTU
@@ -618,18 +622,20 @@ func (n *OvnNode) validateGatewayMTU(gatewayInterfaceName string) error {
 
 	// check if node needs to be tainted
 	if mtu < requiredMTU {
-		klog.V(2).Infof("MTU (%d) of gateway network interface %s is not big enough to deal with Geneve header overhead (sum %d). Tainting node with %v...", mtu, gatewayInterfaceName, requiredMTU, tooSmallMTUTaint)
+		klog.V(2).Infof("MTU (%d) of network interface %s is not big enough to deal with Geneve "+
+			"header overhead (sum %d). Tainting node with %v...", mtu, interfaceName,
+			requiredMTU, tooSmallMTUTaint)
 
 		return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			return n.Kube.SetTaintOnNode(n.name, tooSmallMTUTaint)
 		})
-	} else {
-		klog.V(2).Infof("MTU (%d) of gateway network interface %s is big enough to deal with Geneve header overhead (sum %d). Making sure node is not tainted with %v...", mtu, gatewayInterfaceName, requiredMTU, tooSmallMTUTaint)
-
-		return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			return n.Kube.RemoveTaintFromNode(n.name, tooSmallMTUTaint)
-		})
 	}
+	klog.V(2).Infof("MTU (%d) of network interface %s is big enough to deal with Geneve header overhead (sum %d). "+
+		"Making sure node is not tainted with %v...", mtu, interfaceName, requiredMTU, tooSmallMTUTaint)
+
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		return n.Kube.RemoveTaintFromNode(n.name, tooSmallMTUTaint)
+	})
 }
 
 type epAddressItem struct {
