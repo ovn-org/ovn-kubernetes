@@ -10,7 +10,6 @@ export KUBECONFIG=${HOME}/admin.conf
 IPV6_SKIPPED_TESTS="Should be allowed by externalip services|\
 should provide connection to external host by DNS name from a pod|\
 Should validate NetFlow data of br-int is sent to an external gateway|\
-recovering from deleting db files while maintain connectivity|\
 test tainting a node according to its defaults interface MTU size"
 
 SKIPPED_TESTS=""
@@ -25,7 +24,7 @@ if [ "$OVN_HA" == false ]; then
   fi
   # No support for these features in no-ha mode yet
   # TODO streamline the db delete tests
-  SKIPPED_TESTS+="recovering from deleting db files while maintain connectivity|\
+  SKIPPED_TESTS+="recovering from deleting db files while maintaining connectivity|\
 Should validate connectivity before and after deleting all the db-pods at once in HA mode"
 else 
   if [ "$SKIPPED_TESTS" != "" ]; then

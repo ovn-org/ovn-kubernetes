@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -132,24 +133,29 @@ func ensureLocalRaftServerID(db string) {
 	// on retrieving cluster/status successfully reset the retry counter.
 	atomic.StoreInt32(clusterStatusRetryCnt, 0)
 
-	r, _ := regexp.Compile(`Address: *((ssl|tcp):[?[a-z0-9.:]+]?)`)
+	r := regexp.MustCompile(`Address: *((ssl|tcp):[?[a-z0-9.:]+]?)`)
 	matches := r.FindStringSubmatch(out)
 	if len(matches) < 2 {
 		klog.Warningf("Unable to parse Address for db: %s, output: %s", db, out)
 		return
 	}
 	addr := matches[1]
+
+	// make sure IPV6 addresses are correctly escaped in regexp
+	escapingBrackets := strings.NewReplacer("[", "\\[", "]", "\\]")
+	addr = escapingBrackets.Replace(addr)
+
 	// look for current servers in raft cluster with the same address
-	r, _ = regexp.Compile("([a-z0-9]{4}) at " + addr)
+	r = regexp.MustCompile("([a-z0-9]{4}) at " + addr)
 	members := r.FindAllStringSubmatch(out, -1)
 	for _, member := range members {
 		if len(member) < 2 {
-			klog.Warningf("Unable to find server id submatch in %s", member)
+			klog.Warningf("Unable to find server id submatch in %s from %s", member, db)
 			return
 		}
 		if member[1] != serverID {
-			// stale entry found for this node with same adddress, need to kick
-			klog.Infof("Previous stale member found: %s...kicking", member[1])
+			// stale entry found for this node with same address, need to kick
+			klog.Infof("Previous stale member found in %s: %s... kicking", db, member[1])
 			_, stderr, err = appCtl("cluster/kick", dbName, member[1])
 			if err != nil {
 				klog.Errorf("Error while kicking old Raft member: %s, for address: %s in db: %s,"+
@@ -167,6 +173,11 @@ func ensureClusterRaftMembership(db string, kclient kube.Interface) {
 	var appCtl func(args ...string) (string, string, error)
 	clusterStatusRetryCnt := &nbClusterStatusRetryCnt
 
+	// IPv4 example: tcp:172.18.0.2:6641
+	// IPv6 example: tcp:[fc00:f853:ccd:e793::3]:6642
+	dbServerRegexp := `(ssl|tcp):(\[?([a-z0-9.:]+)\]?:\d+)`
+	r := regexp.MustCompile(dbServerRegexp)
+
 	if strings.Contains(db, "ovnnb") {
 		dbName = "OVN_Northbound"
 		appCtl = util.RunOVNNBAppCtl
@@ -178,12 +189,18 @@ func ensureClusterRaftMembership(db string, kclient kube.Interface) {
 		clusterStatusRetryCnt = &sbClusterStatusRetryCnt
 	}
 	for _, knownMember := range knownMembers {
-		server := strings.Split(knownMember, ":")
-		if len(server) < 3 {
-			klog.Warningf("Failed to parse known member: %s", knownMember)
+		match := r.FindStringSubmatch(knownMember)
+		if len(match) < 4 {
+			klog.Warningf("Failed to parse known %s member: %s", dbName, knownMember)
 			continue
 		}
-		knownServers = append(knownServers, server[1])
+		server := match[3]
+		if !(utilnet.IsIPv4String(server) || utilnet.IsIPv6String(server)) {
+			klog.Warningf("Found invalid value for IP address of known %s member %s: %s",
+				dbName, knownMember, server)
+			continue
+		}
+		knownServers = append(knownServers, server)
 	}
 	out, stderr, err := appCtl("cluster/status", dbName)
 	if err != nil {
@@ -201,7 +218,7 @@ func ensureClusterRaftMembership(db string, kclient kube.Interface) {
 	// on retrieving cluster/status successfully reset the retry counter.
 	atomic.StoreInt32(clusterStatusRetryCnt, 0)
 
-	r, _ := regexp.Compile(`([a-z0-9]{4}) at ((ssl|tcp):\[?[a-z0-9.:]+\]?)`)
+	r = regexp.MustCompile(`([a-z0-9]{4}) at ` + dbServerRegexp)
 	members := r.FindAllStringSubmatch(out, -1)
 	kickedMembersCount := 0
 	dbAppLabel := map[string]string{"ovn-db-pod": "true"}
@@ -214,26 +231,28 @@ func ensureClusterRaftMembership(db string, kclient kube.Interface) {
 		return
 	}
 	for _, member := range members {
-		if len(member) < 3 {
-			klog.Warningf("Unable to find parse member: %s", member)
+		if len(member) < 5 {
+			klog.Warningf("Unable to parse member in %s: %s", db, member)
 			return
 		}
-		matchedServer := strings.Split(member[2], ":")
-		if len(matchedServer) < 3 {
-			klog.Warningf("Unable to parse address portion of the member entry: %s", matchedServer)
-			return
+		matchedServer := member[4]
+		if !(utilnet.IsIPv4String(matchedServer) || utilnet.IsIPv6String(matchedServer)) {
+			klog.Warningf("Unable to parse address portion of member entry in %s: %s",
+				db, matchedServer)
+			continue
 		}
 		memberFound := false
 		for _, knownServer := range knownServers {
-			if knownServer == matchedServer[1] {
+			if knownServer == matchedServer {
 				memberFound = true
 				break
 			}
 		}
+		// check if there's a db pod with the same IP address, then it's a match
 		if !memberFound {
 			for _, dbPod := range dbPods.Items {
 				for _, ip := range dbPod.Status.PodIPs {
-					if ip.IP == matchedServer[1] {
+					if ip.IP == matchedServer {
 						memberFound = true
 						break
 					}
@@ -242,12 +261,12 @@ func ensureClusterRaftMembership(db string, kclient kube.Interface) {
 		}
 		if !memberFound && (len(members)-kickedMembersCount) > 3 {
 			// unknown member and we have enough members its safe to kick the unknown address
-			klog.Infof("Unknown Raft member found: %s, %s...kicking", member[1], member[2])
+			klog.Infof("Unknown Raft member found in %s: %s, %s... kicking", db, member[1], member[3])
 			_, stderr, err = appCtl("cluster/kick", dbName, member[1])
 			if err != nil {
 				// warn only: we might fail to kick since other nodes will also be trying to kick the member
 				klog.Warningf("Error while kicking old Raft member: %s, for address: %s in db: %s,"+
-					"stderr: %v, err: %v", member[1], member[2], db, stderr, err)
+					"stderr: %v, err: %v", member[1], member[3], db, stderr, err)
 				continue
 			}
 			kickedMembersCount = kickedMembersCount + 1
@@ -255,7 +274,6 @@ func ensureClusterRaftMembership(db string, kclient kube.Interface) {
 	}
 }
 
-// ensureClusterRaftMembership ensures there are no unknown members in the current Raft cluster
 func ensureElectionTimeout(db *dbProperties) {
 	out, stderr, err := db.appCtl("cluster/status", db.dbName)
 	if err != nil {
@@ -276,7 +294,7 @@ func ensureElectionTimeout(db *dbProperties) {
 		return
 	}
 
-	r, _ := regexp.Compile(`Election timer: (\d+)`)
+	r := regexp.MustCompile(`Election timer: (\d+)`)
 	match := r.FindStringSubmatch(out)
 	if len(match) < 2 {
 		klog.Infof("Failed to get current election timer for %s from status", db.dbName)
