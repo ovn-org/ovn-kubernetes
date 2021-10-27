@@ -292,6 +292,10 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				fexec := fakeOvn.fakeExec
 
 				expectedDatabaseState := []libovsdb.TestData{}
+
+				// Add subnet to otherconfig for node
+				expectedNodeSwitch.OtherConfig = map[string]string{"subnet": node1.NodeSubnet}
+
 				expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, fexec, &node1, clusterCIDR, config.IPv6Mode)
 
 				fakeOvn.controller.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(fakeOvn.nbClient, []string{node1.Name})

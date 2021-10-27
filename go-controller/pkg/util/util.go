@@ -8,7 +8,11 @@ import (
 	"strings"
 	"sync"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/urfave/cli/v2"
@@ -58,73 +62,6 @@ func GetNodeChassisID() (string, error) {
 	}
 
 	return chassisID, nil
-}
-
-var updateNodeSwitchLock sync.Mutex
-
-// UpdateNodeSwitchExcludeIPs should be called after adding the management port
-// and after adding the hybrid overlay port, and ensures that each port's IP
-// is added to the logical switch's exclude_ips. This prevents ovn-northd log
-// spam about duplicate IP addresses.
-// See https://github.com/ovn-org/ovn-kubernetes/pull/779
-func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
-	if utilnet.IsIPv6CIDR(subnet) {
-		// We don't exclude any IPs in IPv6
-		return nil
-	}
-
-	updateNodeSwitchLock.Lock()
-	defer updateNodeSwitchLock.Unlock()
-
-	stdout, stderr, err := RunOVNNbctl("lsp-list", nodeName)
-	if err != nil {
-		return fmt.Errorf("failed to list logical switch %q ports: stderr: %q, error: %v", nodeName, stderr, err)
-	}
-
-	var haveManagementPort, haveHybridOverlayPort bool
-	lines := strings.Split(stdout, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.Contains(line, "("+types.K8sPrefix+nodeName+")") {
-			haveManagementPort = true
-		} else if strings.Contains(line, "("+GetHybridOverlayPortName(nodeName)+")") {
-			// we always need to set to false because we do not reserve the IP on the LSP for HO
-			haveHybridOverlayPort = false
-		}
-	}
-
-	mgmtIfAddr := GetNodeManagementIfAddr(subnet)
-	hybridOverlayIfAddr := GetNodeHybridOverlayIfAddr(subnet)
-	var excludeIPs string
-	if config.HybridOverlay.Enabled {
-		if haveHybridOverlayPort && haveManagementPort {
-			// no excluded IPs required
-		} else if !haveHybridOverlayPort && !haveManagementPort {
-			// exclude both
-			excludeIPs = mgmtIfAddr.IP.String() + ".." + hybridOverlayIfAddr.IP.String()
-		} else if haveHybridOverlayPort {
-			// exclude management port IP
-			excludeIPs = mgmtIfAddr.IP.String()
-		} else if haveManagementPort {
-			// exclude hybrid overlay port IP
-			excludeIPs = hybridOverlayIfAddr.IP.String()
-		}
-	} else if !haveManagementPort {
-		// exclude management port IP
-		excludeIPs = mgmtIfAddr.IP.String()
-	}
-
-	args := []string{"--", "--if-exists", "remove", "logical_switch", nodeName, "other-config", "exclude_ips"}
-	if len(excludeIPs) > 0 {
-		args = []string{"--", "--if-exists", "set", "logical_switch", nodeName, "other-config:exclude_ips=" + excludeIPs}
-	}
-
-	_, stderr, err = RunOVNNbctl(args...)
-	if err != nil {
-		return fmt.Errorf("failed to set node %q switch exclude_ips, "+
-			"stderr: %q, error: %v", nodeName, stderr, err)
-	}
-	return nil
 }
 
 // GetHybridOverlayPortName returns the name of the hybrid overlay switch port
@@ -287,4 +224,95 @@ func SliceHasStringItem(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+var updateNodeSwitchLock sync.Mutex
+
+// UpdateNodeSwitchExcludeIPs should be called after adding the management port
+// and after adding the hybrid overlay port, and ensures that each port's IP
+// is added to the logical switch's exclude_ips. This prevents ovn-northd log
+// spam about duplicate IP addresses.
+// See https://github.com/ovn-org/ovn-kubernetes/pull/779
+func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string, subnet *net.IPNet) error {
+	if utilnet.IsIPv6CIDR(subnet) {
+		// We don't exclude any IPs in IPv6
+		return nil
+	}
+
+	updateNodeSwitchLock.Lock()
+	defer updateNodeSwitchLock.Unlock()
+
+	managmentPort := &nbdb.LogicalSwitchPort{Name: types.K8sPrefix + nodeName}
+	HOPort := &nbdb.LogicalSwitchPort{Name: types.HybridOverlayPrefix + nodeName}
+	haveManagementPort := true
+	haveHybridOverlayPort := true
+	// Only Query The cache for mp0 and HO LSPs
+	if err := nbClient.Get(managmentPort); err != nil {
+		if err != libovsdbclient.ErrNotFound {
+			return fmt.Errorf("failed to get management port for node %s error: %v", nodeName, err)
+		}
+		klog.V(5).Infof("Management port does not exist for node %s", nodeName)
+		haveManagementPort = false
+	}
+
+	if err := nbClient.Get(HOPort); err != nil {
+		if err != libovsdbclient.ErrNotFound {
+			return fmt.Errorf("failed to get hybrid overlay port for node %s error: %v", nodeName, err)
+		}
+		klog.V(5).Infof("Hybridoverlay port does not exist for node %s", nodeName)
+		haveHybridOverlayPort = false
+	}
+
+	mgmtIfAddr := GetNodeManagementIfAddr(subnet)
+	hybridOverlayIfAddr := GetNodeHybridOverlayIfAddr(subnet)
+
+	klog.V(5).Infof("haveMP %v haveHO %v ManagementPortAddress %v HybridOverlayAddressOA %v", haveManagementPort, haveHybridOverlayPort, mgmtIfAddr, hybridOverlayIfAddr)
+	var excludeIPs string
+	if config.HybridOverlay.Enabled {
+		if haveHybridOverlayPort && haveManagementPort {
+			// no excluded IPs required
+		} else if !haveHybridOverlayPort && !haveManagementPort {
+			// exclude both
+			excludeIPs = mgmtIfAddr.IP.String() + ".." + hybridOverlayIfAddr.IP.String()
+		} else if haveHybridOverlayPort {
+			// exclude management port IP
+			excludeIPs = mgmtIfAddr.IP.String()
+		} else if haveManagementPort {
+			// exclude hybrid overlay port IP
+			excludeIPs = hybridOverlayIfAddr.IP.String()
+		}
+	} else if !haveManagementPort {
+		// exclude management port IP
+		excludeIPs = mgmtIfAddr.IP.String()
+	}
+
+	logicalSwitchDes := nbdb.LogicalSwitch{
+		Name:        nodeName,
+		OtherConfig: map[string]string{"exclude_ips": excludeIPs},
+	}
+
+	opModels := []libovsdbops.OperationModel{
+		{
+			Model:          &logicalSwitchDes,
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == nodeName },
+			OnModelMutations: []interface{}{
+				&logicalSwitchDes.OtherConfig,
+			},
+			ErrNotFound: true,
+		},
+	}
+
+	m := libovsdbops.NewModelClient(nbClient)
+	// If excludeIPs is empty ensure that we have no excludeIPs in the Switch's OtherConfig
+	if len(excludeIPs) == 0 {
+		if err := m.Delete(opModels...); err != nil {
+			return fmt.Errorf("failed to delete otherConfig:exclude_ips from logical switch %s, error: %v", nodeName, err)
+		}
+	} else {
+		if _, err := m.CreateOrUpdate(opModels...); err != nil {
+			return fmt.Errorf("failed to configure otherConfig:exclude_ips from logical switch %s, error: %v", nodeName, err)
+		}
+	}
+
+	return nil
 }

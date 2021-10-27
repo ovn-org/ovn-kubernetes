@@ -52,6 +52,25 @@ func BuildMutationsFromFields(fields []interface{}, mutator ovsdb.Mutator) []mod
 		if v.IsNil() || v.Elem().IsNil() {
 			continue
 		}
+
+		if m, ok := field.(*map[string]string); ok {
+			// check if all values on m are zero, if so create slice of keys of m and set that to field
+			allEmpty := true
+			keySlice := []string{}
+			for key, value := range *m {
+				keySlice = append(keySlice, key)
+				if len(value) > 0 {
+					allEmpty = false
+					break
+				}
+			}
+			if allEmpty {
+				v = reflect.ValueOf(&keySlice)
+			}
+		} else if v.Elem().Kind() == reflect.Map {
+			panic(fmt.Sprintf("map type %v is not supported", v.Elem().Kind()))
+		}
+
 		mutation := model.Mutation{
 			Field:   field,
 			Mutator: mutator,

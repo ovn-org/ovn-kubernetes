@@ -159,25 +159,14 @@ func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.No
 		}
 	}
 
-	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--format=csv",
-		"--columns=name", "find", "logical_switch")
+	legacyJoinSwitches, err := libovsdbops.FindPerNodeJoinSwitches(oc.nbClient)
 	if err != nil {
-		return fmt.Errorf("failed to get all logical switches for upgrade: stderr: %q, error: %v",
-			stderr, err)
+		klog.Errorf("Failed to remove any legacy per node join switches")
 	}
 
-	logicalNodes := make(map[string]bool)
-	for _, switchName := range strings.Split(nodeSwitches, "\n") {
-		// We are interested only in the join_* switches
-		if !strings.HasPrefix(switchName, "join_") {
-			continue
-		}
-		nodeName := strings.TrimPrefix(switchName, "join_")
-		logicalNodes[nodeName] = true
-	}
-
-	for nodeName := range logicalNodes {
+	for _, legacyJoinSwitch := range legacyJoinSwitches {
 		// if the node was deleted when ovn-master was down, delete its per-node switch
+		nodeName := strings.TrimPrefix(legacyJoinSwitch.Name, types.JoinSwitchPrefix)
 		upgradeOnly := true
 		if _, ok := existingNodes[nodeName]; !ok {
 			_ = oc.deleteNodeLogicalNetwork(nodeName)
@@ -186,7 +175,7 @@ func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.No
 
 		// for all nodes include the ones that were deleted, delete its gateway entities.
 		// See comments above the multiJoinSwitchGatewayCleanup() function for details.
-		err = oc.multiJoinSwitchGatewayCleanup(nodeName, upgradeOnly)
+		err := oc.multiJoinSwitchGatewayCleanup(nodeName, upgradeOnly)
 		if err != nil {
 			return err
 		}
@@ -658,7 +647,7 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 	}
 
 	if v4Subnet != nil {
-		if err := util.UpdateNodeSwitchExcludeIPs(node.Name, v4Subnet); err != nil {
+		if err := util.UpdateNodeSwitchExcludeIPs(oc.nbClient, node.Name, v4Subnet); err != nil {
 			return err
 		}
 	}
@@ -783,10 +772,8 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		}
 	}
 
-	lsArgs := []string{
-		"--may-exist",
-		"ls-add", nodeName,
-		"--", "set", "logical_switch", nodeName,
+	logicalSwitch := nbdb.LogicalSwitch{
+		Name: nodeName,
 	}
 
 	var v4Gateway, v6Gateway net.IP
@@ -801,9 +788,9 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		if utilnet.IsIPv6CIDR(hostSubnet) {
 			v6Gateway = gwIfAddr.IP
 
-			lsArgs = append(lsArgs,
-				"other-config:ipv6_prefix="+hostSubnet.IP.String(),
-			)
+			logicalSwitch.OtherConfig = map[string]string{
+				"ipv6_prefix": hostSubnet.IP.String(),
+			}
 		} else {
 			v4Gateway = gwIfAddr.IP
 			excludeIPs := mgmtIfAddr.IP.String()
@@ -811,10 +798,10 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 				hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(hostSubnet)
 				excludeIPs += ".." + hybridOverlayIfAddr.IP.String()
 			}
-			lsArgs = append(lsArgs,
-				"other-config:subnet="+hostSubnet.String(),
-				"other-config:exclude_ips="+excludeIPs,
-			)
+			logicalSwitch.OtherConfig = map[string]string{
+				"subnet":      hostSubnet.String(),
+				"exclude_ips": excludeIPs,
+			}
 		}
 	}
 
@@ -844,16 +831,16 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 			},
 			ErrNotFound: true,
 		},
+		{
+			Model:          &logicalSwitch,
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == nodeName },
+			OnModelUpdates: []interface{}{
+				&logicalSwitch.OtherConfig,
+			},
+		},
 	}
 	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("failed to add logical port to router, error: %v", err)
-	}
-
-	// Create a logical switch and set its subnet.
-	stdout, stderr, err := util.RunOVNNbctl(lsArgs...)
-	if err != nil {
-		klog.Errorf("Failed to create a logical switch %v, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
-		return err
 	}
 
 	// also add the join switch IPs for this node - needed in shared gateway mode
@@ -886,49 +873,36 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 
 	// If supported, enable IGMP/MLD snooping and querier on the node.
 	if oc.multicastSupport {
-		stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
-			nodeName, "other-config:mcast_snoop=\"true\"")
-		if err != nil {
-			klog.Errorf("Failed to enable IGMP on logical switch %v, stdout: %q, stderr: %q, error: %v",
-				nodeName, stdout, stderr, err)
-			return err
-		}
+		logicalSwitch.OtherConfig["mcast_snoop"] = "true"
 
 		// Configure IGMP/MLD querier if the gateway IP address is known.
 		// Otherwise disable it.
 		if v4Gateway != nil || v6Gateway != nil {
+			logicalSwitch.OtherConfig["mcast_querier"] = "true"
+			logicalSwitch.OtherConfig["mcast_eth_src"] = nodeLRPMAC.String()
 			if v4Gateway != nil {
-				stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
-					nodeName, "other-config:mcast_querier=\"true\"",
-					"other-config:mcast_eth_src=\""+nodeLRPMAC.String()+"\"",
-					"other-config:mcast_ip4_src=\""+v4Gateway.String()+"\"")
-				if err != nil {
-					klog.Errorf("Failed to enable IGMP Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
-						nodeName, stdout, stderr, err)
-					return err
-				}
+				logicalSwitch.OtherConfig["mcast_ip4_src"] = v4Gateway.String()
 			}
 			if v6Gateway != nil {
-				stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
-					nodeName, "other-config:mcast_querier=\"true\"",
-					"other-config:mcast_eth_src=\""+nodeLRPMAC.String()+"\"",
-					"other-config:mcast_ip6_src=\""+util.HWAddrToIPv6LLA(nodeLRPMAC).String()+"\"")
-				if err != nil {
-					klog.Errorf("Failed to enable MLD Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
-						nodeName, stdout, stderr, err)
-					return err
-				}
+				logicalSwitch.OtherConfig["mcast_ip6_src"] = util.HWAddrToIPv6LLA(nodeLRPMAC).String()
 			}
 		} else {
-			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
-				nodeName, "other-config:mcast_querier=\"false\"")
-			if err != nil {
-				klog.Errorf("Failed to disable IGMP/MLD Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
-					nodeName, stdout, stderr, err)
-				return err
-			}
-			klog.Infof("Disabled IGMP/MLD Querier on logical switch %v (No IPv4/IPv6 Source IP available)",
-				nodeName)
+			logicalSwitch.OtherConfig["mcast_querier"] = "false"
+		}
+
+		// Create the Node's Logical Switch and set it's subnet
+		opModels = []libovsdbops.OperationModel{
+			{
+				Model:          &logicalSwitch,
+				ModelPredicate: func(lr *nbdb.LogicalSwitch) bool { return lr.Name == nodeName },
+				OnModelMutations: []interface{}{
+					&logicalSwitch.OtherConfig,
+				},
+				ErrNotFound: true,
+			},
+		}
+		if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+			return fmt.Errorf("failed to configure Multicast on logical switch for node %s, error: %v", nodeName, err)
 		}
 	}
 
@@ -936,7 +910,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	nodeSwToRtrUUID, err := oc.addNodeLogicalSwitchPort(nodeName, types.SwitchToRouterPrefix+nodeName,
 		"router", []string{"router"}, map[string]string{"router-port": types.RouterToSwitchPrefix + nodeName})
 	if err != nil {
-		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		klog.Errorf("Failed to add logical port to switch, error: %v", err)
 		return err
 	}
 
@@ -1430,37 +1404,34 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		delete(chassisMap, nodeName)
 	}
 
-	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--format=csv", "--columns=name,other-config", "find", "logical_switch")
+	nodeSwitches, err := libovsdbops.FindSwitchesWithOtherConfig(oc.nbClient)
 	if err != nil {
-		klog.Errorf("Failed to get node logical switches: stderr: %q, error: %v",
-			stderr, err)
+		klog.Errorf("Failed to get node logical switches which have other-config set error: %v", err)
 		return
 	}
 
 	// find node logical switches which have other-config value set
-	for _, result := range strings.Split(nodeSwitches, "\n") {
-		// Split result into name and other-config
-		items := strings.Split(result, ",")
-		if len(items) != 2 || len(items[0]) == 0 {
-			continue
-		}
-		nodeName := items[0]
-		if _, ok := foundNodes[nodeName]; ok {
+	for _, nodeSwitch := range nodeSwitches {
+		if _, ok := foundNodes[nodeSwitch.Name]; ok {
 			// node still exists, no cleanup to do
 			continue
 		}
 
 		var subnets []*net.IPNet
-		attrs := strings.Fields(items[1])
-		for _, attr := range attrs {
+		for key, value := range nodeSwitch.OtherConfig {
 			var subnet *net.IPNet
-			if strings.HasPrefix(attr, "subnet=") {
-				subnetStr := strings.TrimPrefix(attr, "subnet=")
-				_, subnet, _ = net.ParseCIDR(subnetStr)
-			} else if strings.HasPrefix(attr, "ipv6_prefix=") {
-				prefixStr := strings.TrimPrefix(attr, "ipv6_prefix=")
-				_, subnet, _ = net.ParseCIDR(prefixStr + "/64")
+			if key == "subnet" {
+				_, subnet, err = net.ParseCIDR(value)
+				if err != nil {
+					klog.Warningf("Unable to parse subnet CIDR %v", value)
+					continue
+				}
+			} else if key == "ipv6_prefix" {
+				_, subnet, err = net.ParseCIDR(value + "/64")
+				if err != nil {
+					klog.Warningf("Unable to parse ipv6_prefix CIDR %v/64", value)
+					continue
+				}
 			}
 			if subnet != nil {
 				subnets = append(subnets, subnet)
@@ -1470,9 +1441,9 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 			continue
 		}
 
-		oc.deleteNode(nodeName, subnets, nil)
+		oc.deleteNode(nodeSwitch.Name, subnets, nil)
 		//remove the node from the chassis map so we don't delete it twice
-		delete(chassisMap, nodeName)
+		delete(chassisMap, nodeSwitch.Name)
 	}
 
 	deleteChassis(oc.ovnSBClient, chassisMap)

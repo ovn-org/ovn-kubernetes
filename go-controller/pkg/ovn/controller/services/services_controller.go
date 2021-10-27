@@ -107,8 +107,7 @@ type Controller struct {
 	client clientset.Interface
 
 	// libovsdb northbound client interface
-	nbClient libovsdbclient.Client
-
+	nbClient         libovsdbclient.Client
 	eventBroadcaster record.EventBroadcaster
 	eventRecorder    record.EventRecorder
 
