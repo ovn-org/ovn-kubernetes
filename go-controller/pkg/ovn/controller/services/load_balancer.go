@@ -124,8 +124,7 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 		// - Any of the endpoints are host-network
 		//
 		// In that case, we need to create per-node LBs.
-		if globalconfig.Gateway.Mode == globalconfig.GatewayModeShared &&
-			(hasHostEndpoints(eps.V4IPs) || hasHostEndpoints(eps.V6IPs)) {
+		if hasHostEndpoints(eps.V4IPs) || hasHostEndpoints(eps.V6IPs) {
 			perNodeConfigs = append(perNodeConfigs, clusterIPConfig)
 		} else {
 			clusterConfigs = append(clusterConfigs, clusterIPConfig)
@@ -157,7 +156,7 @@ func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeIn
 		// For shared gateway, add to the node's GWR as well.
 		// The node may not have a gateway router - it might be waiting initialization, or
 		// might have disabled GWR creation via the k8s.ovn.org/l3-gateway-config annotation
-		if globalconfig.Gateway.Mode == globalconfig.GatewayModeShared && node.gatewayRouterName != "" {
+		if node.gatewayRouterName != "" {
 			nodeRouters = append(nodeRouters, node.gatewayRouterName)
 		}
 	}
