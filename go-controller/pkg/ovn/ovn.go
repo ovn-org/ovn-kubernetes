@@ -164,6 +164,8 @@ type Controller struct {
 
 	// Controller used to handle services
 	svcController *svccontroller.Controller
+	// svcFactory used to handle service related events
+	svcFactory informers.SharedInformerFactory
 
 	egressFirewallDNS *EgressDNS
 
@@ -245,6 +247,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		addressSetFactory = addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
 	}
 	modelClient := libovsdbops.NewModelClient(libovsdbOvnNBClient)
+	svcController, svcFactory := newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient)
 	return &Controller{
 		client: ovnClient.KubeClient,
 		kube: &kube.Kube{
@@ -289,7 +292,8 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		ovnSBClient:              ovnSBClient,
 		nbClient:                 libovsdbOvnNBClient,
 		sbClient:                 libovsdbOvnSBClient,
-		svcController:            newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient, stopChan),
+		svcController:            svcController,
+		svcFactory:               svcFactory,
 		modelClient:              modelClient,
 	}
 }
@@ -317,6 +321,9 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	// which most other watches depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
 	oc.WatchNodes()
+
+	// Start service watch factory and sync services
+	oc.svcFactory.Start(oc.stopChan)
 
 	// Services should be started after nodes to prevent LB churn
 	if err := oc.StartServiceController(wg, true); err != nil {
@@ -1247,7 +1254,7 @@ func shouldUpdate(node, oldNode *kapi.Node) (bool, error) {
 	return true, nil
 }
 
-func newServiceController(client clientset.Interface, nbClient libovsdbclient.Client, stopChan <-chan struct{}) *svccontroller.Controller {
+func newServiceController(client clientset.Interface, nbClient libovsdbclient.Client) (*svccontroller.Controller, informers.SharedInformerFactory) {
 	// Create our own informers to start compartmentalizing the code
 	// filter server side the things we don't care about
 	noProxyName, err := labels.NewRequirement("service.kubernetes.io/service-proxy-name", selection.DoesNotExist, nil)
@@ -1276,9 +1283,7 @@ func newServiceController(client clientset.Interface, nbClient libovsdbclient.Cl
 		svcFactory.Core().V1().Nodes(),
 	)
 
-	svcFactory.Start(stopChan)
-
-	return controller
+	return controller, svcFactory
 }
 
 func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
