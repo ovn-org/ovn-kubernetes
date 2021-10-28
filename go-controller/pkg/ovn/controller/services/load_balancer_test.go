@@ -1080,8 +1080,9 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			},
 			expectedLocal: []ovnlb.LB{
 				{
-					Name:        "Service_testns/foo_TCP_node_switch_node-a",
+					Name:        "Service_testns/foo_TCP_node_router+switch_node-a",
 					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-a"},
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
 					Rules: []ovnlb.LBRule{
@@ -1092,8 +1093,9 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					},
 				},
 				{
-					Name:        "Service_testns/foo_TCP_node_switch_node-b",
+					Name:        "Service_testns/foo_TCP_node_router+switch_node-b",
 					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-b"},
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
 					Rules: []ovnlb.LBRule{
@@ -1181,6 +1183,22 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			},
 			expectedLocal: []ovnlb.LB{
 				{
+					Name:        "Service_testns/foo_TCP_node_router_node-a",
+					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-a"},
+					Protocol:    "TCP",
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"192.168.0.1", 80},
+							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}},
+						},
+						{
+							Source:  ovnlb.Addr{"10.0.0.1", 80},
+							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}},
+						},
+					},
+				},
+				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-a"},
@@ -1197,8 +1215,9 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					},
 				},
 				{
-					Name:        "Service_testns/foo_TCP_node_switch_node-b",
+					Name:        "Service_testns/foo_TCP_node_router+switch_node-b",
 					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-b"},
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
 					Rules: []ovnlb.LBRule{
