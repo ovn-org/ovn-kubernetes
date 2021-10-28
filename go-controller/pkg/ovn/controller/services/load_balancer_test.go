@@ -546,7 +546,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					},
 				},
 			},
-			// In shared gateway mode, nodeport and host-network-pods must be per-node
+			// In shared and local gateway modes, nodeport and host-network-pods must be per-node
 			resultSharedGatewayNode: []lbConfig{
 				{
 					vips:     []string{"node"},
@@ -581,8 +581,6 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 						Port:  outport,
 					},
 				},
-			},
-			resultLocalGatewayCluster: []lbConfig{
 				{
 					vips:     []string{"192.168.1.1", "2002::1"},
 					protocol: v1.ProtocolTCP,
@@ -652,8 +650,6 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 						Port:  outport,
 					},
 				},
-			},
-			resultLocalGatewayCluster: []lbConfig{
 				{
 					vips:     []string{"192.168.1.1", "2002::1"},
 					protocol: v1.ProtocolTCP,
@@ -698,7 +694,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					},
 				},
 			},
-			resultLocalGatewayCluster: []lbConfig{
+			resultLocalGatewayNode: []lbConfig{
 				{
 					vips:     []string{"192.168.1.1", "2002::1"},
 					protocol: v1.ProtocolTCP,
