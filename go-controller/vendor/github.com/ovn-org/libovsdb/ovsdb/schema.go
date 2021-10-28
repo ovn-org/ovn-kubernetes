@@ -502,7 +502,7 @@ func (c *ColumnSchema) Ephemeral() bool {
 	return false
 }
 
-// UnmarshalJSON unmarshalls a json-formatted column
+// UnmarshalJSON unmarshals a json-formatted column
 func (c *ColumnSchema) UnmarshalJSON(data []byte) error {
 	// ColumnJSON represents the known json values for a Column
 	var colJSON struct {

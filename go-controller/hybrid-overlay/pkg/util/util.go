@@ -85,7 +85,7 @@ func StartNodeWatch(h types.NodeHandler, wf *factory.WatchFactory) {
 func CopyNamespaceAnnotationsToPod(k kube.Interface, ns *kapi.Namespace, pod *kapi.Pod) error {
 	nsGw, nsGwExists := ns.Annotations[types.HybridOverlayExternalGw]
 	nsVTEP, nsVTEPExists := ns.Annotations[types.HybridOverlayVTEP]
-	annotator := kube.NewPodAnnotator(k, pod)
+	annotator := kube.NewPodAnnotator(k, pod.Name, pod.Namespace)
 	if nsGwExists {
 		if err := annotator.Set(types.HybridOverlayExternalGw, nsGw); err != nil {
 			return err

@@ -87,7 +87,7 @@ type podRoute struct {
 
 // MarshalPodAnnotation returns a JSON-formatted annotation describing the pod's
 // network details
-func MarshalPodAnnotation(podInfo *PodAnnotation) (map[string]string, error) {
+func MarshalPodAnnotation(podInfo *PodAnnotation) (map[string]interface{}, error) {
 	pa := podAnnotation{
 		MAC: podInfo.MAC.String(),
 	}
@@ -129,7 +129,7 @@ func MarshalPodAnnotation(podInfo *PodAnnotation) (map[string]string, error) {
 		klog.Errorf("Failed marshaling podNetworks map %v", podNetworks)
 		return nil, err
 	}
-	return map[string]string{
+	return map[string]interface{}{
 		OvnPodAnnotationName: string(bytes),
 	}, nil
 }

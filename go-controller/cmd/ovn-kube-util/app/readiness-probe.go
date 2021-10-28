@@ -33,6 +33,12 @@ func ovnControllerReadiness(target string) error {
 	} else if output != "connected" {
 		return fmt.Errorf("%q is not connected to OVN SB database, status: (%s)", target, output)
 	}
+	result, _, err := util.RunOVSAppctlWithTimeout(5, "-t", target, "coverage/read-counter", "lflow_run")
+	if err != nil {
+		return fmt.Errorf("failed getting coverage/show of %q: (%v)", target, err)
+	} else if result == "0" {
+		return fmt.Errorf("%q has not completed logical flows processing yet", target)
+	}
 
 	// Ensure that the ovs-vswitchd and ovsdb-server processes that ovn-controller
 	// dependent on are running and you need to use ovs-appctl via the unix control path
@@ -103,11 +109,29 @@ func ovnSBDBReadiness(target string) error {
 }
 
 func ovnNorthdReadiness(target string) error {
-	// checking version works as it connects to northd and returns the version
-	// if northd isn't ready, version may fail to return
-	_, _, err := util.RunOVNAppctlWithTimeout(5, "-t", target, "version")
+	stdout, _, err := util.RunOVNAppctlWithTimeout(5, "-t", target, "status")
 	if err != nil {
-		return fmt.Errorf("failed to get version from %s: (%v)", target, err)
+		return fmt.Errorf("failed to get status from %s: (%v)", target, err)
+	} else if strings.HasPrefix(stdout, "Status") {
+		output := strings.Split(stdout, ":")
+		status := strings.TrimSpace(output[1])
+		if status != "active" && status != "paused" && status != "standby" {
+			return fmt.Errorf("%s status is not active or passive or standby", target)
+		}
+	} else {
+		return fmt.Errorf("failed to get status from %s", target)
+	}
+	nbConnectionStatus, _, err := util.RunOVNAppctlWithTimeout(5, "-t", target, "nb-connection-status")
+	if err != nil {
+		return fmt.Errorf("failed to get nb-connection-status from %s: (%v)", target, err)
+	} else if nbConnectionStatus != "connected" {
+		return fmt.Errorf("%s nb-connection-status is %s", target, nbConnectionStatus)
+	}
+	sbConnectionStatus, _, err := util.RunOVNAppctlWithTimeout(5, "-t", target, "sb-connection-status")
+	if err != nil {
+		return fmt.Errorf("failed to get sb-connection-status from %s: (%v)", target, err)
+	} else if sbConnectionStatus != "connected" {
+		return fmt.Errorf("%s sb-connection-status is %s", target, sbConnectionStatus)
 	}
 	return nil
 }

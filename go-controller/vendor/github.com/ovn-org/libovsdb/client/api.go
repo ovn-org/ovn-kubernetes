@@ -1,21 +1,15 @@
 package client
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
 
+	"github.com/go-logr/logr"
 	"github.com/ovn-org/libovsdb/cache"
-	"github.com/ovn-org/libovsdb/mapper"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
-)
-
-const (
-	opInsert string = "insert"
-	opMutate string = "mutate"
-	opUpdate string = "insert"
-	opDelete string = "delete"
 )
 
 // API defines basic operations to interact with the database
@@ -93,8 +87,9 @@ var ErrNotFound = errors.New("object not found")
 // api struct implements both API and ConditionalAPI
 // Where() can be used to create a ConditionalAPI api
 type api struct {
-	cache *cache.TableCache
-	cond  Conditional
+	cache  *cache.TableCache
+	cond   Conditional
+	logger *logr.Logger
 }
 
 // List populates a slice of Models given as parameter based on the configured Condition
@@ -132,20 +127,19 @@ func (a api) List(result interface{}) error {
 	i := resultVal.Len()
 
 	for _, row := range tableCache.Rows() {
-		elem := tableCache.Row(row)
 		if i >= resultVal.Cap() {
 			break
 		}
 
 		if a.cond != nil {
-			if matches, err := a.cond.Matches(elem); err != nil {
+			if matches, err := a.cond.Matches(row); err != nil {
 				return err
 			} else if !matches {
 				continue
 			}
 		}
 
-		resultVal.Set(reflect.Append(resultVal, reflect.Indirect(reflect.ValueOf(elem))))
+		resultVal.Set(reflect.Append(resultVal, reflect.Indirect(reflect.ValueOf(row))))
 		i++
 	}
 	return nil
@@ -153,17 +147,17 @@ func (a api) List(result interface{}) error {
 
 // Where returns a conditionalAPI based on a Condition list
 func (a api) Where(model model.Model, cond ...model.Condition) ConditionalAPI {
-	return newConditionalAPI(a.cache, a.conditionFromModel(false, model, cond...))
+	return newConditionalAPI(a.cache, a.conditionFromModel(false, model, cond...), a.logger)
 }
 
 // Where returns a conditionalAPI based on a Condition list
 func (a api) WhereAll(model model.Model, cond ...model.Condition) ConditionalAPI {
-	return newConditionalAPI(a.cache, a.conditionFromModel(true, model, cond...))
+	return newConditionalAPI(a.cache, a.conditionFromModel(true, model, cond...), a.logger)
 }
 
 // Where returns a conditionalAPI based a Predicate
 func (a api) WhereCache(predicate interface{}) ConditionalAPI {
-	return newConditionalAPI(a.cache, a.conditionFromFunc(predicate))
+	return newConditionalAPI(a.cache, a.conditionFromFunc(predicate), a.logger)
 }
 
 // Conditional interface implementation
@@ -192,13 +186,13 @@ func (a api) conditionFromModel(any bool, model model.Model, cond ...model.Condi
 	}
 
 	if len(cond) == 0 {
-		conditional, err = newEqualityConditional(a.cache.Mapper(), tableName, any, model)
+		conditional, err = newEqualityConditional(a.cache.DatabaseModel(), tableName, any, model)
 		if err != nil {
 			conditional = newErrorConditional(err)
 		}
 
 	} else {
-		conditional, err = newExplicitConditional(a.cache.Mapper(), tableName, any, model, cond...)
+		conditional, err = newExplicitConditional(a.cache.DatabaseModel(), tableName, any, model, cond...)
 		if err != nil {
 			conditional = newErrorConditional(err)
 		}
@@ -208,9 +202,9 @@ func (a api) conditionFromModel(any bool, model model.Model, cond ...model.Condi
 
 // Get is a generic Get function capable of returning (through a provided pointer)
 // a instance of any row in the cache.
-// 'result' must be a pointer to an Model that exists in the DBModel
+// 'result' must be a pointer to an Model that exists in the ClientDBModel
 //
-// The way the cache is search depends on the fields already populated in 'result'
+// The way the cache is searched depends on the fields already populated in 'result'
 // Any table index (including _uuid) will be used for comparison
 func (a api) Get(m model.Model) error {
 	table, err := a.getTableFromModel(m)
@@ -223,33 +217,15 @@ func (a api) Get(m model.Model) error {
 		return ErrNotFound
 	}
 
-	// If model contains _uuid value, we can access it via cache index
-	mapperInfo, err := mapper.NewInfo(a.cache.Mapper().Schema.Table(table), m)
-	if err != nil {
-		return err
-	}
-	if uuid, err := mapperInfo.FieldByColumn("_uuid"); err != nil && uuid != nil {
-		found := tableCache.Row(uuid.(string))
-		if found == nil {
-			return ErrNotFound
-		}
-		reflect.ValueOf(m).Elem().Set(reflect.Indirect(reflect.ValueOf(found)))
-		return nil
+	found := tableCache.RowByModel(m)
+	if found == nil {
+		return ErrNotFound
 	}
 
-	// Look across the entire cache for table index equality
-	for _, row := range tableCache.Rows() {
-		elem := tableCache.Row(row)
-		equal, err := a.cache.Mapper().EqualFields(table, m, elem.(model.Model))
-		if err != nil {
-			return err
-		}
-		if equal {
-			reflect.ValueOf(m).Elem().Set(reflect.Indirect(reflect.ValueOf(elem)))
-			return nil
-		}
-	}
-	return ErrNotFound
+	foundBytes, _ := json.Marshal(found)
+	_ = json.Unmarshal(foundBytes, m)
+
+	return nil
 }
 
 // Create is a generic function capable of creating any row in the DB
@@ -266,10 +242,8 @@ func (a api) Create(models ...model.Model) ([]ovsdb.Operation, error) {
 			return nil, err
 		}
 
-		table := a.cache.Mapper().Schema.Table(tableName)
-
 		// Read _uuid field, and use it as named-uuid
-		info, err := mapper.NewInfo(table, model)
+		info, err := a.cache.DatabaseModel().NewModelInfo(model)
 		if err != nil {
 			return nil, err
 		}
@@ -279,13 +253,13 @@ func (a api) Create(models ...model.Model) ([]ovsdb.Operation, error) {
 			return nil, err
 		}
 
-		row, err := a.cache.Mapper().NewRow(tableName, model)
+		row, err := a.cache.Mapper().NewRow(info)
 		if err != nil {
 			return nil, err
 		}
 
 		operations = append(operations, ovsdb.Operation{
-			Op:       opInsert,
+			Op:       ovsdb.OperationInsert,
 			Table:    tableName,
 			Row:      row,
 			UUIDName: namedUUID,
@@ -303,7 +277,7 @@ func (a api) Mutate(model model.Model, mutationObjs ...model.Mutation) ([]ovsdb.
 		return nil, fmt.Errorf("at least one Mutation must be provided")
 	}
 
-	tableName := a.cache.DBModel().FindTable(reflect.ValueOf(model).Type())
+	tableName := a.cache.DatabaseModel().FindTable(reflect.ValueOf(model).Type())
 	if tableName == "" {
 		return nil, fmt.Errorf("table not found for object")
 	}
@@ -317,7 +291,7 @@ func (a api) Mutate(model model.Model, mutationObjs ...model.Mutation) ([]ovsdb.
 		return nil, err
 	}
 
-	info, err := mapper.NewInfo(table, model)
+	info, err := a.cache.DatabaseModel().NewModelInfo(model)
 	if err != nil {
 		return nil, err
 	}
@@ -328,7 +302,7 @@ func (a api) Mutate(model model.Model, mutationObjs ...model.Mutation) ([]ovsdb.
 			return nil, err
 		}
 
-		mutation, err := a.cache.Mapper().NewMutation(tableName, model, col, mobj.Mutator, mobj.Value)
+		mutation, err := a.cache.Mapper().NewMutation(info, col, mobj.Mutator, mobj.Value)
 		if err != nil {
 			return nil, err
 		}
@@ -337,7 +311,7 @@ func (a api) Mutate(model model.Model, mutationObjs ...model.Mutation) ([]ovsdb.
 	for _, condition := range conditions {
 		operations = append(operations,
 			ovsdb.Operation{
-				Op:        opMutate,
+				Op:        ovsdb.OperationMutate,
 				Table:     tableName,
 				Mutations: mutations,
 				Where:     condition,
@@ -348,13 +322,31 @@ func (a api) Mutate(model model.Model, mutationObjs ...model.Mutation) ([]ovsdb.
 	return operations, nil
 }
 
-// Update is a generic function capable of updating any field in any row in the database
+// Update is a generic function capable of updating any mutable field in any row in the database
 // Additional fields can be passed (variadic opts) to indicate fields to be updated
+// All immutable fields will be ignored
 func (a api) Update(model model.Model, fields ...interface{}) ([]ovsdb.Operation, error) {
 	var operations []ovsdb.Operation
 	table, err := a.getTableFromModel(model)
 	if err != nil {
 		return nil, err
+	}
+	tableSchema := a.cache.Mapper().Schema.Table(table)
+	info, err := a.cache.DatabaseModel().NewModelInfo(model)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(fields) > 0 {
+		for _, f := range fields {
+			colName, err := info.ColumnByPtr(f)
+			if err != nil {
+				return nil, err
+			}
+			if !tableSchema.Columns[colName].Mutable() {
+				return nil, fmt.Errorf("unable to update field %s of table %s as it is not mutable", colName, table)
+			}
+		}
 	}
 
 	conditions, err := a.cond.Generate()
@@ -362,15 +354,27 @@ func (a api) Update(model model.Model, fields ...interface{}) ([]ovsdb.Operation
 		return nil, err
 	}
 
-	row, err := a.cache.Mapper().NewRow(table, model, fields...)
+	row, err := a.cache.Mapper().NewRow(info, fields...)
 	if err != nil {
 		return nil, err
+	}
+
+	for colName, column := range tableSchema.Columns {
+		if !column.Mutable() {
+			a.logger.V(2).Info("removing immutable field", "name", colName)
+			delete(row, colName)
+		}
+	}
+	delete(row, "_uuid")
+
+	if len(row) == 0 {
+		return nil, fmt.Errorf("attempted to update using an empty row. please check that all fields you wish to update are mutable")
 	}
 
 	for _, condition := range conditions {
 		operations = append(operations,
 			ovsdb.Operation{
-				Op:    opUpdate,
+				Op:    ovsdb.OperationUpdate,
 				Table: table,
 				Row:   row,
 				Where: condition,
@@ -391,7 +395,7 @@ func (a api) Delete() ([]ovsdb.Operation, error) {
 	for _, condition := range conditions {
 		operations = append(operations,
 			ovsdb.Operation{
-				Op:    opDelete,
+				Op:    ovsdb.OperationDelete,
 				Table: a.cond.Table(),
 				Where: condition,
 			},
@@ -407,7 +411,7 @@ func (a api) getTableFromModel(m interface{}) (string, error) {
 	if _, ok := m.(model.Model); !ok {
 		return "", &ErrWrongType{reflect.TypeOf(m), "Type does not implement Model interface"}
 	}
-	table := a.cache.DBModel().FindTable(reflect.TypeOf(m))
+	table := a.cache.DatabaseModel().FindTable(reflect.TypeOf(m))
 	if table == "" {
 		return "", &ErrWrongType{reflect.TypeOf(m), "Model not found in Database Model"}
 	}
@@ -432,7 +436,7 @@ func (a api) getTableFromFunc(predicate interface{}) (string, error) {
 			fmt.Sprintf("Type %s does not implement Model interface", modelType.String())}
 	}
 
-	table := a.cache.DBModel().FindTable(modelType)
+	table := a.cache.DatabaseModel().FindTable(modelType)
 	if table == "" {
 		return "", &ErrWrongType{predType,
 			fmt.Sprintf("Model %s not found in Database Model", modelType.String())}
@@ -441,16 +445,18 @@ func (a api) getTableFromFunc(predicate interface{}) (string, error) {
 }
 
 // newAPI returns a new API to interact with the database
-func newAPI(cache *cache.TableCache) API {
+func newAPI(cache *cache.TableCache, logger *logr.Logger) API {
 	return api{
-		cache: cache,
+		cache:  cache,
+		logger: logger,
 	}
 }
 
 // newConditionalAPI returns a new ConditionalAPI to interact with the database
-func newConditionalAPI(cache *cache.TableCache, cond Conditional) ConditionalAPI {
+func newConditionalAPI(cache *cache.TableCache, cond Conditional, logger *logr.Logger) ConditionalAPI {
 	return api{
-		cache: cache,
-		cond:  cond,
+		cache:  cache,
+		cond:   cond,
+		logger: logger,
 	}
 }

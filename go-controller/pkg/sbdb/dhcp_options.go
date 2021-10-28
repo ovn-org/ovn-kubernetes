@@ -7,7 +7,7 @@ type (
 	DHCPOptionsType = string
 )
 
-const (
+var (
 	DHCPOptionsTypeBool         DHCPOptionsType = "bool"
 	DHCPOptionsTypeUint8        DHCPOptionsType = "uint8"
 	DHCPOptionsTypeUint16       DHCPOptionsType = "uint16"

@@ -20,7 +20,7 @@ else
 CONTAINER_RUNTIME=docker
 endif
 CONTAINER_RUNNABLE ?= $(shell $(CONTAINER_RUNTIME) -v > /dev/null 2>&1; echo $$?)
-OVN_VERSION ?= v20.12.0
+OVN_VERSION ?= v21.06.0
 
 .PHONY: all build check test
 
@@ -61,10 +61,7 @@ clean:
 	rm -f ./pkg/nbdb/ovn-nb.ovsschema
 	rm -f ./pkg/sbdb/ovn-sb.ovsschema
 
-.PHONY: install.tools lint gofmt
-
-install.tools:
-	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | bash -s -- -b ${GOPATH}/bin
+.PHONY: lint gofmt
 
 lint:
 ifeq ($(CONTAINER_RUNNABLE), 0)

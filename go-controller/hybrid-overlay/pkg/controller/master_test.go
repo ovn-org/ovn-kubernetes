@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"strings"
 	"sync"
 
-	goovn "github.com/ebay/go-ovn"
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,29 +18,18 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	. "github.com/onsi/ginkgo"
+	"github.com/onsi/gomega"
 	. "github.com/onsi/gomega"
 )
 
 const hoNodeCliArg string = "-no-hostsubnet-nodes=" + v1.LabelOSStable + "=windows"
-
-func populatePortAddresses(nodeName, hybMAC, hybIP string, ovnClient goovn.Client) {
-	lsp := "int-" + nodeName
-	cmd, err := ovnClient.LSPAdd(nodeName, lsp)
-	Expect(err).NotTo(HaveOccurred())
-	err = cmd.Execute()
-	Expect(err).NotTo(HaveOccurred())
-	addresses := hybMAC + " " + hybIP
-	addresses = strings.TrimSpace(addresses)
-	cmd, err = ovnClient.LSPSetDynamicAddresses(lsp, addresses)
-	Expect(err).NotTo(HaveOccurred())
-	err = cmd.Execute()
-	Expect(err).NotTo(HaveOccurred())
-}
 
 func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Node {
 	annotations := make(map[string]string)
@@ -113,16 +100,17 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
-			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
-			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
+
+			dbSetup := libovsdbtest.TestSetup{}
+			libovsdbOvnNBClient, err := libovsdbtest.NewNBTestHarness(dbSetup, stopChan)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
-				mockOVNNBClient,
-				mockOVNSBClient,
+				libovsdbOvnNBClient,
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -184,8 +172,28 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
-			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
-			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
+
+			expectedDatabaseState := []libovsdbtest.TestData{
+				&nbdb.LogicalRouterPolicy{
+					Priority: 1002,
+					ExternalIDs: map[string]string{
+						"name": "hybrid-subnet-node1",
+					},
+					Action:   nbdb.LogicalRouterPolicyActionReroute,
+					Nexthops: []string{nodeHOIP},
+					Match:    "inport == \\\"rtos-node1\\\" && ip4.dst == 11.1.0.0/16",
+					UUID:     "reroute-policy-UUID",
+				},
+				&nbdb.LogicalRouter{
+					Name:     types.OVNClusterRouter,
+					Policies: []string{"reroute-policy-UUID"},
+				},
+			}
+			dbSetup := libovsdbtest.TestSetup{
+				NBData: expectedDatabaseState,
+			}
+			libovsdbOvnNBClient, err := libovsdbtest.NewNBTestHarness(dbSetup, stopChan)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 			m, err := NewMaster(
@@ -193,8 +201,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
-				mockOVNNBClient,
-				mockOVNSBClient,
+				libovsdbOvnNBClient,
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -221,23 +228,23 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			}, 2).Should(HaveKeyWithValue(hotypes.HybridOverlayDRMAC, nodeHOMAC))
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 
 			// Test that deleting the node cleans up the OVN objects
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
-			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 --columns _uuid --no-headings find logical_router_policy external_ids=name=hybrid-subnet-node1",
-				Output: "2222",
-			})
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 lr-policy-del ovn_cluster_router 2222",
 			})
 
 			err = fakeClient.CoreV1().Nodes().Delete(context.TODO(), nodeName, *metav1.NewDeleteOptions(0))
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+			expectedDatabaseState = []libovsdbtest.TestData{
+				&nbdb.LogicalRouter{
+					Name: types.OVNClusterRouter,
+				},
+			}
+			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 			return nil
 		}
 
@@ -267,13 +274,34 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
-			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
-			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
 
-			populatePortAddresses(nodeName, nodeHOMAC, nodeHOIP, mockOVNNBClient)
-
-			updateLogicalRouterPolicy(fexec)
-			updateLogicalRouterPolicy(fexec)
+			dynAdd := nodeHOMAC + " " + nodeHOIP
+			expectedDatabaseState := []libovsdbtest.TestData{
+				&nbdb.LogicalRouterPolicy{
+					Priority: 1002,
+					ExternalIDs: map[string]string{
+						"name": "hybrid-subnet-node1",
+					},
+					Action:   nbdb.LogicalRouterPolicyActionReroute,
+					Nexthops: []string{nodeHOIP},
+					Match:    "inport == \\\"rtos-node1\\\" && ip4.dst == 11.1.0.0/16",
+					UUID:     "reroute-policy-UUID",
+				},
+				&nbdb.LogicalSwitchPort{
+					Name:             "int-" + nodeName,
+					Addresses:        []string{nodeHOMAC, nodeHOIP},
+					DynamicAddresses: &dynAdd,
+				},
+				&nbdb.LogicalRouter{
+					Name:     types.OVNClusterRouter,
+					Policies: []string{"reroute-policy-UUID"},
+				},
+			}
+			dbSetup := libovsdbtest.TestSetup{
+				NBData: expectedDatabaseState,
+			}
+			libovsdbOvnNBClient, err := libovsdbtest.NewNBTestHarness(dbSetup, stopChan)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 			m, err := NewMaster(
@@ -281,8 +309,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
-				mockOVNNBClient,
-				mockOVNSBClient,
+				libovsdbOvnNBClient,
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -302,7 +329,9 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				}
 				return updatedNode.Annotations, nil
 			}, 2).Should(HaveKeyWithValue(hotypes.HybridOverlayDRMAC, nodeHOMAC))
+
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 			return nil
 		}
 		err := app.Run([]string{
@@ -328,26 +357,49 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 					newTestNode(nodeName, "linux", nodeSubnet, "", nodeHOMAC),
 				},
 			})
-			updateLogicalRouterPolicy(fexec)
 
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
-			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
-			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
+
+			dynAdd := nodeHOMAC + " " + nodeHOIP
+			expectedDatabaseState := []libovsdbtest.TestData{
+				&nbdb.LogicalRouterPolicy{
+					Priority: 1002,
+					ExternalIDs: map[string]string{
+						"name": "hybrid-subnet-node1",
+					},
+					Action:   nbdb.LogicalRouterPolicyActionReroute,
+					Nexthops: []string{nodeHOIP},
+					Match:    "inport == \\\"rtos-node1\\\" && ip4.dst == 11.1.0.0/16",
+					UUID:     "reroute-policy-UUID",
+				},
+				&nbdb.LogicalRouter{
+					Name:     types.OVNClusterRouter,
+					Policies: []string{"reroute-policy-UUID"},
+				},
+				&nbdb.LogicalSwitchPort{
+					Name:             "int-" + nodeName,
+					Addresses:        []string{nodeHOMAC, nodeHOIP},
+					DynamicAddresses: &dynAdd,
+				},
+			}
+			dbSetup := libovsdbtest.TestSetup{
+				NBData: expectedDatabaseState,
+			}
+			libovsdbOvnNBClient, err := libovsdbtest.NewNBTestHarness(dbSetup, stopChan)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
-				mockOVNNBClient,
-				mockOVNSBClient,
+				libovsdbOvnNBClient,
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
-
-			populatePortAddresses(nodeName, nodeHOMAC, nodeHOIP, mockOVNNBClient)
 
 			f.Start(stopChan)
 			wg.Add(1)
@@ -358,6 +410,8 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			f.WaitForCacheSync(stopChan)
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
 			})
@@ -365,7 +419,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			updatedNode, err := k.GetNode(nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
-			nodeAnnotator := kube.NewNodeAnnotator(k, updatedNode)
+			nodeAnnotator := kube.NewNodeAnnotator(k, updatedNode.Name)
 			util.DeleteNodeHostSubnetAnnotation(nodeAnnotator)
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
@@ -379,6 +433,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			}, 5).ShouldNot(HaveKey(hotypes.HybridOverlayDRMAC))
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 			return nil
 		}
 
@@ -429,20 +484,19 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
-			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
-			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
+			// TODO(trozet) actually check some expected data in the DB?
+			dbSetup := libovsdbtest.TestSetup{}
+			libovsdbOvnNBClient, err := libovsdbtest.NewNBTestHarness(dbSetup, stopChan)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
-				mockOVNNBClient,
-				mockOVNSBClient,
+				libovsdbOvnNBClient,
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
-
-			populatePortAddresses(nodeName, nodeHOMAC, nodeHOIP, mockOVNNBClient)
 
 			f.Start(stopChan)
 			wg.Add(1)
@@ -519,16 +573,18 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
+			// TODO(trozet) actually check some expected data in the DB?
+			dbSetup := libovsdbtest.TestSetup{}
+			libovsdbOvnNBClient, err := libovsdbtest.NewNBTestHarness(dbSetup, stopChan)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 			k := &kube.Kube{KClient: fakeClient}
-			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
-			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
 			m, err := NewMaster(
 				k,
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
-				mockOVNNBClient,
-				mockOVNSBClient,
+				libovsdbOvnNBClient,
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -543,7 +599,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			updatedNs, err := fakeClient.CoreV1().Namespaces().Get(context.TODO(), nsName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			nsAnnotator := kube.NewNamespaceAnnotator(k, updatedNs)
+			nsAnnotator := kube.NewNamespaceAnnotator(k, updatedNs.Name)
 			nsAnnotator.Set(hotypes.HybridOverlayVTEP, nsVTEPUpdated)
 			nsAnnotator.Set(hotypes.HybridOverlayExternalGw, nsExGwUpdated)
 			err = nsAnnotator.Run()
@@ -577,8 +633,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 })
 
 func addLinuxNodeCommands(fexec *ovntest.FakeExec, nodeHOMAC, nodeName, nodeHOIP string) {
-	updateLogicalRouterPolicy(fexec)
-
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		// Setting the mac on the lsp
 		"ovn-nbctl --timeout=15 -- " +
@@ -592,15 +646,5 @@ func addLinuxNodeCommands(fexec *ovntest.FakeExec, nodeHOMAC, nodeName, nodeHOIP
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 -- --if-exists set logical_switch " + nodeName + " other-config:exclude_ips=" + nodeHOIP,
-	})
-}
-
-func updateLogicalRouterPolicy(fexec *ovntest.FakeExec) {
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		// Find if policy exists already
-		Cmd: "ovn-nbctl --timeout=15 --columns _uuid --no-headings find logical_router_policy priority=1002 " +
-			"external_ids=name=hybrid-subnet-node1 action=reroute nexthops=\"10.1.2.3\" " +
-			`match="inport == \"rtos-node1\" && ip4.dst == 11.1.0.0/16"`,
-		Output: "19df5ce5-2802-4ee5-891f-4fb27ca776e9",
 	})
 }
