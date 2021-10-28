@@ -294,9 +294,9 @@ func ovnDBMemoryMetricsUpdater(direction, database string) {
 	var err error
 
 	if direction == "sb" {
-		stdout, stderr, err = util.RunOVNSBAppCtl("--timeout=5", "memory/show")
+		stdout, stderr, err = util.RunOVNSBAppCtlWithTimeout(5, "memory/show")
 	} else {
-		stdout, stderr, err = util.RunOVNNBAppCtl("--timeout=5", "memory/show")
+		stdout, stderr, err = util.RunOVNNBAppCtlWithTimeout(5, "memory/show")
 	}
 	if err != nil {
 		klog.Errorf("Failed retrieving memory/show output for %q, stderr: %s, err: (%v)",
@@ -460,11 +460,9 @@ func getOVNDBClusterStatusInfo(timeout int, direction, database string) (cluster
 	}()
 
 	if direction == "sb" {
-		stdout, stderr, err = util.RunOVNSBAppCtl(fmt.Sprintf("--timeout=%d", timeout),
-			"cluster/status", database)
+		stdout, stderr, err = util.RunOVNSBAppCtlWithTimeout(timeout, "cluster/status", database)
 	} else {
-		stdout, stderr, err = util.RunOVNNBAppCtl(fmt.Sprintf("--timeout=%d", timeout),
-			"cluster/status", database)
+		stdout, stderr, err = util.RunOVNNBAppCtlWithTimeout(timeout, "cluster/status", database)
 	}
 	if err != nil {
 		klog.Errorf("Failed to retrieve cluster/status info for database %q, stderr: %s, err: (%v)",
