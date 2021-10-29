@@ -11,6 +11,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	current "github.com/containernetworking/cni/pkg/types/100"
+	"github.com/k8snetworkplumbingwg/govdpa/pkg/kvdpa"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
