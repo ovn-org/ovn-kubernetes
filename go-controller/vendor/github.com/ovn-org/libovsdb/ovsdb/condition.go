@@ -78,7 +78,7 @@ func (c *Condition) UnmarshalJSON(b []byte) error {
 	default:
 		return fmt.Errorf("%s is not a valid function", function)
 	}
-	vv, err := interfaceToOVSDBNotationInterface(reflect.ValueOf(v[2]))
+	vv, err := ovsSliceToGoNotation(v[2])
 	if err != nil {
 		return err
 	}
