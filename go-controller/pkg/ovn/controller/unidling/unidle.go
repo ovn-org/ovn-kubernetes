@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -23,13 +24,15 @@ type unidlingController struct {
 	// Map of load balancers to service namespace
 	serviceVIPToName     map[ServiceVIPKey]types.NamespacedName
 	serviceVIPToNameLock sync.Mutex
+	sbClient             libovsdbclient.Client
 }
 
 // NewController creates a new unidling controller
-func NewController(recorder record.EventRecorder, serviceInformer cache.SharedIndexInformer) *unidlingController {
+func NewController(recorder record.EventRecorder, serviceInformer cache.SharedIndexInformer, sbClient libovsdbclient.Client) *unidlingController {
 	uc := &unidlingController{
 		eventRecorder:    recorder,
 		serviceVIPToName: map[ServiceVIPKey]types.NamespacedName{},
+		sbClient:         sbClient,
 	}
 
 	// we only process events on unidling, there is no reconcilation
