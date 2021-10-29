@@ -5,6 +5,7 @@ package node
 import (
 	"net"
 	"sync"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -62,25 +63,43 @@ func (c *addressManager) delAddr(ip net.IP) bool {
 }
 
 func (c *addressManager) Run(stopChan <-chan struct{}) {
-	errorCallback := func(err error) {
-		klog.Errorf("Failed during AddrSubscribe callback: %v", err)
-	}
+	var addrChan chan netlink.AddrUpdate
 	addrSubscribeOptions := netlink.AddrSubscribeOptions{
-		ErrorCallback: errorCallback,
-	}
-	addrChan := make(chan netlink.AddrUpdate)
-	if err := netlink.AddrSubscribeWithOptions(addrChan, stopChan, addrSubscribeOptions); err != nil {
-		klog.Errorf("Unable to run Node IP Manager, error during netlink subscribe: %v", err)
-		return
+		ErrorCallback: func(err error) {
+			klog.Errorf("Failed during AddrSubscribe callback: %v. Calling sync() explicitly", err)
+			// sync the manager with current addresses on the node
+			c.sync()
+		},
 	}
 
-	// sync the manager with current addresses on the node before we start processing events
-	c.sync()
+	subScribeFcn := func() (bool, error) {
+		addrChan = make(chan netlink.AddrUpdate)
+		if err := netlink.AddrSubscribeWithOptions(addrChan, stopChan, addrSubscribeOptions); err != nil {
+			return false, err
+		}
+		// sync the manager with current addresses on the node
+		c.sync()
+		return true, nil
+	}
 
 	go func() {
+		addressSyncTimer := time.NewTicker(30 * time.Second)
+
+		subscribed, err := subScribeFcn()
+		if err != nil {
+			klog.Error("Error during netlink subscribe for IP Manager: %v", err)
+		}
+
 		for {
 			select {
-			case a := <-addrChan:
+			case a, ok := <-addrChan:
+				addressSyncTimer.Reset(30 * time.Second)
+				if !ok {
+					if subscribed, err = subScribeFcn(); err != nil {
+						klog.Error("Error during netlink re-subscribe due to channel closing for IP Manager: %v", err)
+					}
+					continue
+				}
 				addrChanged := false
 				if a.NewAddr {
 					addrChanged = c.addAddr(a.LinkAddress.IP)
@@ -95,6 +114,15 @@ func (c *addressManager) Run(stopChan <-chan struct{}) {
 					}
 					if err := c.nodeAnnotator.Run(); err != nil {
 						klog.Errorf("Failed to set node annotations: %v", err)
+					}
+				}
+			case <-addressSyncTimer.C:
+				if subscribed {
+					klog.V(5).Info("Node IP manager calling sync() explicitly")
+					c.sync()
+				} else {
+					if subscribed, err = subScribeFcn(); err != nil {
+						klog.Error("Error during netlink re-subscribe for IP Manager: %v", err)
 					}
 				}
 			case <-stopChan:
