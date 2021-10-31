@@ -40,20 +40,12 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		"always_learn_from_arp_request": "false",
 		"dynamic_neigh_routers":         "true",
 		"chassis":                       l3GatewayConfig.ChassisID,
+		"lb_force_snat_ip":              "router_ip",
+		"snat-ct-zone":                  "0",
 	}
 	logicalRouterExternalIDs := map[string]string{
 		"physical_ip":  physicalIPs[0],
 		"physical_ips": strings.Join(physicalIPs, ","),
-	}
-	// Local gateway mode does not need SNAT or routes on GR because GR is only used for multiple external gws
-	// without SNAT. For normal N/S traffic, ingress/egress is mp0 on node switches
-	if config.Gateway.Mode != config.GatewayModeLocal {
-		// When there are multiple gateway routers (which would be the likely
-		// default for any sane deployment), we need to SNAT traffic
-		// heading to the logical space with the Gateway router's IP so that
-		// return traffic comes back to the same gateway router.
-		logicalRouterOptions["lb_force_snat_ip"] = "router_ip"
-		logicalRouterOptions["snat-ct-zone"] = "0"
 	}
 
 	logicalRouter := nbdb.LogicalRouter{
