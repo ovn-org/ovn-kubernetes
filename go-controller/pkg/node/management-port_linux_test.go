@@ -141,7 +141,7 @@ func checkMgmtTestPortIpsAndRoutes(configs []managementPortTestConfig, mgmtPortN
 		// Check whether the routes have been added
 		j := 0
 		gatewayIP := ovntest.MustParseIP(cfg.expectedGatewayIP)
-		subnets := []string{cfg.clusterCIDR, cfg.serviceCIDR}
+		subnets := []string{cfg.clusterCIDR}
 		for _, subnet := range subnets {
 			foundRoute := false
 			dstIPnet := ovntest.MustParseIPNet(subnet)
@@ -159,7 +159,7 @@ func checkMgmtTestPortIpsAndRoutes(configs []managementPortTestConfig, mgmtPortN
 			foundRoute = false
 			j++
 		}
-		Expect(j).To(Equal(2))
+		Expect(j).To(Equal(1))
 
 		// Check whether router IP has been added in the arp entry for mgmt port
 		neighbours, err := netlink.NeighList(mgmtPortLink.Attrs().Index, cfg.family)
@@ -456,7 +456,6 @@ var _ = Describe("Management Port Operations", func() {
 							protocol: iptables.ProtocolIPv4,
 
 							clusterCIDR: v4clusterCIDR,
-							serviceCIDR: v4serviceCIDR,
 							nodeSubnet:  v4nodeSubnet,
 
 							expectedManagementPortIP: v4mgtPortIP,
@@ -468,7 +467,6 @@ var _ = Describe("Management Port Operations", func() {
 			err := app.Run([]string{
 				app.Name,
 				"--cluster-subnets=" + v4clusterCIDR,
-				"--k8s-service-cidr=" + v4serviceCIDR,
 			})
 			Expect(err).NotTo(HaveOccurred())
 		})
