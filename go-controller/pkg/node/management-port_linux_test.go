@@ -109,6 +109,7 @@ func checkMgmtPortTestIptables(configs []managementPortTestConfig, mgmtPortName 
 					"-o " + mgmtPortName + " -j SNAT --to-source " + cfg.expectedManagementPortIP + " -m comment --comment OVN SNAT to Management Port",
 				},
 			},
+			"filter": {},
 		}
 		if cfg.protocol == iptables.ProtocolIPv4 {
 			err = fakeIpv4.MatchState(expectedTables)

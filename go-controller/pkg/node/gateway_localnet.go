@@ -18,12 +18,6 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-const (
-	// localnetGatewayNextHopPort is the name of the gateway port on the host to which all
-	// the packets leaving/entering the OVN logical topology to the host will egress for shared gw mode
-	localnetGatewayNextHopPort = "ovn-k8s-gw0"
-)
-
 func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net.IP, gwIntf string,
 	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface, watchFactory factory.NodeWatchFactory) (*gateway, error) {
 	klog.Info("Creating new local gateway")
