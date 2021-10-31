@@ -35,14 +35,12 @@ type gateway struct {
 	portClaimWatcher informer.ServiceEventHandler
 	// nodePortWatcherIptables is used in Shared GW mode to handle nodePort IPTable rules
 	nodePortWatcherIptables informer.ServiceEventHandler
-	// nodePortWatcher is used in Shared GW mode to handle nodePort flows in shared OVS bridge
+	// nodePortWatcher is used in Local+Shared GW modes to handle nodePort flows in shared OVS bridge
 	nodePortWatcher informer.ServiceAndEndpointsEventHandler
-	// localPortWatcher is used in Local GW mode to handle iptables rules and routes for services
-	localPortWatcher informer.ServiceEventHandler
-	openflowManager  *openflowManager
-	nodeIPManager    *addressManager
-	initFunc         func() error
-	readyFunc        func() (bool, error)
+	openflowManager *openflowManager
+	nodeIPManager   *addressManager
+	initFunc        func() error
+	readyFunc       func() (bool, error)
 }
 
 func (g *gateway) AddService(svc *kapi.Service) {
@@ -57,9 +55,6 @@ func (g *gateway) AddService(svc *kapi.Service) {
 	}
 	if g.nodePortWatcherIptables != nil {
 		g.nodePortWatcherIptables.AddService(svc)
-	}
-	if g.localPortWatcher != nil {
-		g.localPortWatcher.AddService(svc)
 	}
 }
 
@@ -76,9 +71,6 @@ func (g *gateway) UpdateService(old, new *kapi.Service) {
 	if g.nodePortWatcherIptables != nil {
 		g.nodePortWatcherIptables.UpdateService(old, new)
 	}
-	if g.localPortWatcher != nil {
-		g.localPortWatcher.UpdateService(old, new)
-	}
 }
 
 func (g *gateway) DeleteService(svc *kapi.Service) {
@@ -94,9 +86,6 @@ func (g *gateway) DeleteService(svc *kapi.Service) {
 	if g.nodePortWatcherIptables != nil {
 		g.nodePortWatcherIptables.DeleteService(svc)
 	}
-	if g.localPortWatcher != nil {
-		g.localPortWatcher.DeleteService(svc)
-	}
 }
 
 func (g *gateway) SyncServices(objs []interface{}) {
@@ -111,9 +100,6 @@ func (g *gateway) SyncServices(objs []interface{}) {
 	}
 	if g.nodePortWatcherIptables != nil {
 		g.nodePortWatcherIptables.SyncServices(objs)
-	}
-	if g.localPortWatcher != nil {
-		g.localPortWatcher.SyncServices(objs)
 	}
 }
 
@@ -210,12 +196,6 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, subnets []*
 		}
 	}
 
-	if config.Gateway.Mode == config.GatewayModeLocal {
-		err = setupLocalNodeAccessBridge(nodeName, subnets)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
 	chassisID, err := util.GetNodeChassisID()
 	if err != nil {
 		return nil, nil, err

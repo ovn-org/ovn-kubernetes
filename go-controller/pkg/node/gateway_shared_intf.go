@@ -967,26 +967,24 @@ func commonFlows(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost string) [
 		actions = fmt.Sprintf("check_pkt_larger(%d)->reg0[0],resubmit(,11)", maxPktLength)
 	}
 
-	if config.Gateway.DisableSNATMultipleGWs {
-		// table 1, traffic to pod subnet go directly to OVN
-		// check packet length larger than MTU + eth header - vlan overhead
-		// send to table 11 to check if it needs to go to kernel for ICMP needs frag/packet too big
-		for _, clusterEntry := range config.Default.ClusterSubnets {
-			cidr := clusterEntry.CIDR
-			var ipPrefix string
-			if utilnet.IsIPv6CIDR(cidr) {
-				ipPrefix = "ipv6"
-			} else {
-				ipPrefix = "ip"
-			}
-
-			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=15, table=1, %s, %s_dst=%s, "+
-					"actions=%s",
-					defaultOpenFlowCookie, ipPrefix, ipPrefix, cidr, actions))
+	// table 1, traffic to pod subnet go directly to OVN
+	// check packet length larger than MTU + eth header - vlan overhead
+	// send to table 11 to check if it needs to go to kernel for ICMP needs frag/packet too big
+	for _, clusterEntry := range config.Default.ClusterSubnets {
+		cidr := clusterEntry.CIDR
+		var ipPrefix string
+		if utilnet.IsIPv6CIDR(cidr) {
+			ipPrefix = "ipv6"
+		} else {
+			ipPrefix = "ip"
 		}
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=15, table=1, %s, %s_dst=%s, "+
+				"actions=%s",
+				defaultOpenFlowCookie, ipPrefix, ipPrefix, cidr, actions))
 	}
 
+	// table 1, we check to see if this dest mac is the shared mac, if so send to host
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, priority=10, table=1, dl_dst=%s, actions=output:%s",
 			defaultOpenFlowCookie, bridgeMacAddress, ofPortHost))
@@ -1168,8 +1166,14 @@ func newNodePortWatcher(patchPort, gwBridge, gwIntf string, ips []*net.IPNet, of
 	// NodePortIP:NodePort to ClusterServiceIP:Port. We don't need to do this while
 	// running on Smart-NIC or on Smart-NIC-Host.
 	if config.OvnKubeNode.Mode == types.NodeModeFull {
-		if err := initSharedGatewayIPTables(); err != nil {
-			return nil, err
+		if config.Gateway.Mode == config.GatewayModeLocal {
+			if err := initLocalGatewayIPTables(); err != nil {
+				return nil, err
+			}
+		} else if config.Gateway.Mode == config.GatewayModeShared {
+			if err := initSharedGatewayIPTables(); err != nil {
+				return nil, err
+			}
 		}
 	}
 

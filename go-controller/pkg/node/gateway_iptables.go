@@ -75,24 +75,7 @@ func delIptRules(rules []iptRule) error {
 	return delErrors
 }
 
-func getSharedGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
-	return []iptRule{
-		{
-			table:    "nat",
-			chain:    "PREROUTING",
-			args:     []string{"-j", chain},
-			protocol: proto,
-		},
-		{
-			table:    "nat",
-			chain:    "OUTPUT",
-			args:     []string{"-j", chain},
-			protocol: proto,
-		},
-	}
-}
-
-func getLocalGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
+func getGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
 	return []iptRule{
 		{
 			table:    "nat",
@@ -307,7 +290,7 @@ func handleGatewayIPTables(iptCallback func(rules []iptRule) error, genGatewayCh
 }
 
 func initSharedGatewayIPTables() error {
-	if err := handleGatewayIPTables(addIptRules, getSharedGatewayInitRules); err != nil {
+	if err := handleGatewayIPTables(addIptRules, getGatewayInitRules); err != nil {
 		return err
 	}
 	if err := handleGatewayIPTables(delIptRules, getLegacySharedGatewayInitRules); err != nil {
@@ -317,7 +300,7 @@ func initSharedGatewayIPTables() error {
 }
 
 func initLocalGatewayIPTables() error {
-	if err := handleGatewayIPTables(addIptRules, getLocalGatewayInitRules); err != nil {
+	if err := handleGatewayIPTables(addIptRules, getGatewayInitRules); err != nil {
 		return err
 	}
 	if err := handleGatewayIPTables(delIptRules, getLegacyLocalGatewayInitRules); err != nil {
