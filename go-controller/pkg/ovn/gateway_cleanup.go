@@ -94,8 +94,6 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 		return fmt.Errorf("failed to delete external switch %s, error: %v", exGWexternalSwitch, err)
 	}
 
-	// We don't know the gateway mode as this is running in the master, try to delete the additional local
-	// gateway for the shared gateway mode. it will be no op if this is done for other gateway modes.
 	oc.delPbrAndNatRules(nodeName, nil)
 	return nil
 }
@@ -286,8 +284,6 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 		return fmt.Errorf("failed to delete external switch %s, error: %v", types.ExternalSwitchPrefix+nodeName, err)
 	}
 
-	// We don't know the gateway mode as this is running in the master, try to delete the additional local
-	// gateway for the shared gateway mode. it will be no op if this is done for other gateway modes.
 	oc.delPbrAndNatRules(nodeName, nil)
 	return nil
 }
@@ -296,7 +292,7 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 // Specify priorities to only delete specific types
 func (oc *Controller) removeLRPolicies(nodeName string, priorities []string) {
 	if len(priorities) == 0 {
-		priorities = []string{types.InterNodePolicyPriority, types.NodeSubnetPolicyPriority, types.MGMTPortPolicyPriority}
+		priorities = []string{types.NodeSubnetPolicyPriority}
 	}
 	for _, priority := range priorities {
 		intPriority, _ := strconv.Atoi(priority)

@@ -468,19 +468,11 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		f, err := factory.NewMasterWatchFactory(fakeClient)
 
 		nodeName := "test-node"
-		hostSubnet := ovntest.MustParseIPNets("10.130.0.0/23")
 
-		mgmtPortIP := util.GetNodeManagementIfAddr(hostSubnet[0]).IP.String()
-
-		mgmtPriority, _ := strconv.Atoi(types.MGMTPortPolicyPriority)
 		nodeSubnetPriority, _ := strconv.Atoi(types.NodeSubnetPolicyPriority)
-		interNodePriority, _ := strconv.Atoi(types.InterNodePolicyPriority)
 
-		matchstr1 := fmt.Sprintf("ip4.src == %s && ip4.dst == nodePhysicalIP /* %s */", mgmtPortIP, nodeName)
 		matchstr2 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == nodePhysicalIP /* %s */`, nodeName, nodeName)
 		matchstr3 := fmt.Sprintf("ip4.src == source && ip4.dst == nodePhysicalIP")
-		matchstr4 := fmt.Sprintf(`ip4.src == NO DELETE  && ip4.dst != 10.244.0.0/16 /* inter-%s-no */`, nodeName)
-		matchstr5 := fmt.Sprintf(`ip4.src == 10.244.0.2  && ip4.dst != 10.244.0.0/16 /* inter-%s */`, nodeName)
 		matchstr6 := fmt.Sprintf("ip4.src == NO DELETE && ip4.dst == nodePhysicalIP /* %s-no */", nodeName)
 
 		dbSetup := libovsdbtest.TestSetup{
@@ -511,11 +503,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 					},
 				},
 				&nbdb.LogicalRouterPolicy{
-					UUID:     "match1-UUID",
-					Match:    matchstr1,
-					Priority: mgmtPriority,
-				},
-				&nbdb.LogicalRouterPolicy{
 					UUID:     "match2-UUID",
 					Match:    matchstr2,
 					Priority: nodeSubnetPriority,
@@ -524,16 +511,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 					UUID:     "match3-UUID",
 					Match:    matchstr3,
 					Priority: nodeSubnetPriority,
-				},
-				&nbdb.LogicalRouterPolicy{
-					UUID:     "match4-UUID",
-					Match:    matchstr4,
-					Priority: interNodePriority,
-				},
-				&nbdb.LogicalRouterPolicy{
-					UUID:     "match5-UUID",
-					Match:    matchstr5,
-					Priority: interNodePriority,
 				},
 				&nbdb.LogicalRouterPolicy{
 					UUID:     "match6-UUID",
@@ -547,7 +524,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 				&nbdb.LogicalRouter{
 					Name:         types.OVNClusterRouter,
 					UUID:         types.OVNClusterRouter + "-UUID",
-					Policies:     []string{"match1-UUID", "match2-UUID", "match3-UUID", "match4-UUID", "match5-UUID", "match6-UUID"},
+					Policies:     []string{"match2-UUID", "match3-UUID", "match6-UUID"},
 					StaticRoutes: []string{"static-route-UUID"},
 				},
 				&nbdb.LogicalSwitchPort{
@@ -605,11 +582,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 				Priority: nodeSubnetPriority,
 			},
 			&nbdb.LogicalRouterPolicy{
-				UUID:     "match4-UUID",
-				Match:    matchstr4,
-				Priority: interNodePriority,
-			},
-			&nbdb.LogicalRouterPolicy{
 				UUID:     "match6-UUID",
 				Match:    matchstr6,
 				Priority: nodeSubnetPriority,
@@ -617,7 +589,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			&nbdb.LogicalRouter{
 				Name:     types.OVNClusterRouter,
 				UUID:     types.OVNClusterRouter + "-UUID",
-				Policies: []string{"match3-UUID", "match4-UUID", "match6-UUID"},
+				Policies: []string{"match3-UUID", "match6-UUID"},
 			},
 		}
 		gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -639,19 +611,10 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 
 		nodeName := "test-node"
 
-		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23", "fd01:0:0:2::/64")
-
-		mgmtPortIP := util.GetNodeManagementIfAddr(hostSubnets[0]).IP.String()
-
-		mgmtPriority, _ := strconv.Atoi(types.MGMTPortPolicyPriority)
 		nodeSubnetPriority, _ := strconv.Atoi(types.NodeSubnetPolicyPriority)
-		interNodePriority, _ := strconv.Atoi(types.InterNodePolicyPriority)
 
-		matchstr1 := fmt.Sprintf("ip4.src == %s && ip4.dst == nodePhysicalIP /* %s */", mgmtPortIP, nodeName)
 		matchstr2 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == nodePhysicalIP /* %s */`, nodeName, nodeName)
 		matchstr3 := fmt.Sprintf("ip4.src == source && ip4.dst == nodePhysicalIP")
-		matchstr4 := fmt.Sprintf(`ip4.src == NO DELETE  && ip4.dst != 10.244.0.0/16 /* inter-%s-no */`, nodeName)
-		matchstr5 := fmt.Sprintf(`ip4.src == 10.244.0.2  && ip4.dst != 10.244.0.0/16 /* inter-%s */`, nodeName)
 		matchstr6 := fmt.Sprintf("ip4.src == NO DELETE && ip4.dst == nodePhysicalIP /* %s-no */", nodeName)
 
 		dbSetup := libovsdbtest.TestSetup{
@@ -682,11 +645,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 					},
 				},
 				&nbdb.LogicalRouterPolicy{
-					UUID:     "match1-UUID",
-					Match:    matchstr1,
-					Priority: mgmtPriority,
-				},
-				&nbdb.LogicalRouterPolicy{
 					UUID:     "match2-UUID",
 					Match:    matchstr2,
 					Priority: nodeSubnetPriority,
@@ -695,16 +653,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 					UUID:     "match3-UUID",
 					Match:    matchstr3,
 					Priority: nodeSubnetPriority,
-				},
-				&nbdb.LogicalRouterPolicy{
-					UUID:     "match4-UUID",
-					Match:    matchstr4,
-					Priority: interNodePriority,
-				},
-				&nbdb.LogicalRouterPolicy{
-					UUID:     "match5-UUID",
-					Match:    matchstr5,
-					Priority: interNodePriority,
 				},
 				&nbdb.LogicalRouterPolicy{
 					UUID:     "match6-UUID",
@@ -722,7 +670,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 				&nbdb.LogicalRouter{
 					Name:         types.OVNClusterRouter,
 					UUID:         types.OVNClusterRouter + "-UUID",
-					Policies:     []string{"match1-UUID", "match2-UUID", "match3-UUID", "match4-UUID", "match5-UUID", "match6-UUID"},
+					Policies:     []string{"match2-UUID", "match3-UUID", "match6-UUID"},
 					StaticRoutes: []string{"static-route-1-UUID", "static-route-2-UUID"},
 				},
 				&nbdb.LogicalSwitchPort{
@@ -780,11 +728,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 				Priority: nodeSubnetPriority,
 			},
 			&nbdb.LogicalRouterPolicy{
-				UUID:     "match4-UUID",
-				Match:    matchstr4,
-				Priority: interNodePriority,
-			},
-			&nbdb.LogicalRouterPolicy{
 				UUID:     "match6-UUID",
 				Match:    matchstr6,
 				Priority: nodeSubnetPriority,
@@ -792,7 +735,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			&nbdb.LogicalRouter{
 				Name:     types.OVNClusterRouter,
 				UUID:     types.OVNClusterRouter + "-UUID",
-				Policies: []string{"match3-UUID", "match4-UUID", "match6-UUID"},
+				Policies: []string{"match3-UUID", "match6-UUID"},
 			},
 		}
 		gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))

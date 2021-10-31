@@ -728,13 +728,10 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 
 func (oc *Controller) addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet, otherHostAddrs []string) error {
 	var l3Prefix string
-	var natSubnetNextHop string
 	if utilnet.IsIPv6(hostIfAddr.IP) {
 		l3Prefix = "ip6"
-		natSubnetNextHop = types.V6NodeLocalNATSubnetNextHop
 	} else {
 		l3Prefix = "ip4"
-		natSubnetNextHop = types.V4NodeLocalNATSubnetNextHop
 	}
 
 	matches := sets.NewString()
@@ -747,36 +744,6 @@ func (oc *Controller) addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAd
 	}
 	if err := oc.syncPolicyBasedRoutes(nodeName, matches, types.NodeSubnetPolicyPriority, mgmtPortIP); err != nil {
 		return fmt.Errorf("unable to sync node subnet policies, err: %v", err)
-	}
-
-	if config.Gateway.Mode == config.GatewayModeLocal {
-
-		// policy to allow host -> service -> hairpin back to host
-		matchStr := fmt.Sprintf("%s.src == %s && %s.dst == %s /* %s */",
-			l3Prefix, mgmtPortIP, l3Prefix, hostIfAddr.IP.String(), nodeName)
-		if err := oc.syncPolicyBasedRoutes(nodeName, sets.NewString(matchStr), types.MGMTPortPolicyPriority, natSubnetNextHop); err != nil {
-			return fmt.Errorf("unable to sync management port policies, err: %v", err)
-		}
-
-		var matchDst string
-		// Local gw mode needs to use DGP to do hostA -> service -> hostB
-		var clusterL3Prefix string
-		for _, clusterSubnet := range config.Default.ClusterSubnets {
-			if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-				clusterL3Prefix = "ip6"
-			} else {
-				clusterL3Prefix = "ip4"
-			}
-			if l3Prefix != clusterL3Prefix {
-				continue
-			}
-			matchDst += fmt.Sprintf(" && %s.dst != %s", clusterL3Prefix, clusterSubnet.CIDR)
-		}
-		matchStr = fmt.Sprintf("%s.src == %s %s /* inter-%s */",
-			l3Prefix, mgmtPortIP, matchDst, nodeName)
-		if err := oc.syncPolicyBasedRoutes(nodeName, sets.NewString(matchStr), types.InterNodePolicyPriority, natSubnetNextHop); err != nil {
-			return fmt.Errorf("unable to sync inter-node policies, err: %v", err)
-		}
 	}
 
 	return nil
