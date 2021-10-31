@@ -370,19 +370,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 	ginkgo.It("cleans up a single-stack gateway in OVN", func() {
 		nodeName := "test-node"
-		hostSubnet := ovntest.MustParseIPNets("10.130.0.0/23")
 
-		mgmtPortIP := util.GetNodeManagementIfAddr(hostSubnet[0]).IP.String()
-
-		mgmtPriority, _ := strconv.Atoi(types.MGMTPortPolicyPriority)
 		nodeSubnetPriority, _ := strconv.Atoi(types.NodeSubnetPolicyPriority)
-		interNodePriority, _ := strconv.Atoi(types.InterNodePolicyPriority)
 
-		matchstr1 := fmt.Sprintf("ip4.src == %s && ip4.dst == nodePhysicalIP /* %s */", mgmtPortIP, nodeName)
 		matchstr2 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == nodePhysicalIP /* %s */`, nodeName, nodeName)
 		matchstr3 := fmt.Sprintf("ip4.src == source && ip4.dst == nodePhysicalIP")
-		matchstr4 := fmt.Sprintf(`ip4.src == NO DELETE  && ip4.dst != 10.244.0.0/16 /* inter-%s-no */`, nodeName)
-		matchstr5 := fmt.Sprintf(`ip4.src == 10.244.0.2  && ip4.dst != 10.244.0.0/16 /* inter-%s */`, nodeName)
 		matchstr6 := fmt.Sprintf("ip4.src == NO DELETE && ip4.dst == nodePhysicalIP /* %s-no */", nodeName)
 
 		fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
@@ -413,11 +405,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					},
 				},
 				&nbdb.LogicalRouterPolicy{
-					UUID:     "match1-UUID",
-					Match:    matchstr1,
-					Priority: mgmtPriority,
-				},
-				&nbdb.LogicalRouterPolicy{
 					UUID:     "match2-UUID",
 					Match:    matchstr2,
 					Priority: nodeSubnetPriority,
@@ -426,16 +413,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					UUID:     "match3-UUID",
 					Match:    matchstr3,
 					Priority: nodeSubnetPriority,
-				},
-				&nbdb.LogicalRouterPolicy{
-					UUID:     "match4-UUID",
-					Match:    matchstr4,
-					Priority: interNodePriority,
-				},
-				&nbdb.LogicalRouterPolicy{
-					UUID:     "match5-UUID",
-					Match:    matchstr5,
-					Priority: interNodePriority,
 				},
 				&nbdb.LogicalRouterPolicy{
 					UUID:     "match6-UUID",
@@ -449,7 +426,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				&nbdb.LogicalRouter{
 					Name:         types.OVNClusterRouter,
 					UUID:         types.OVNClusterRouter + "-UUID",
-					Policies:     []string{"match1-UUID", "match2-UUID", "match3-UUID", "match4-UUID", "match5-UUID", "match6-UUID"},
+					Policies:     []string{"match2-UUID", "match3-UUID", "match6-UUID"},
 					StaticRoutes: []string{"static-route-UUID"},
 				},
 				&nbdb.LogicalSwitchPort{
@@ -495,11 +472,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				Priority: nodeSubnetPriority,
 			},
 			&nbdb.LogicalRouterPolicy{
-				UUID:     "match4-UUID",
-				Match:    matchstr4,
-				Priority: interNodePriority,
-			},
-			&nbdb.LogicalRouterPolicy{
 				UUID:     "match6-UUID",
 				Match:    matchstr6,
 				Priority: nodeSubnetPriority,
@@ -507,7 +479,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			&nbdb.LogicalRouter{
 				Name:     types.OVNClusterRouter,
 				UUID:     types.OVNClusterRouter + "-UUID",
-				Policies: []string{"match3-UUID", "match4-UUID", "match6-UUID"},
+				Policies: []string{"match3-UUID", "match6-UUID"},
 			},
 		}
 		gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -516,19 +488,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	ginkgo.It("cleans up a dual-stack gateway in OVN", func() {
 		nodeName := "test-node"
 
-		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23", "fd01:0:0:2::/64")
-
-		mgmtPortIP := util.GetNodeManagementIfAddr(hostSubnets[0]).IP.String()
-
-		mgmtPriority, _ := strconv.Atoi(types.MGMTPortPolicyPriority)
 		nodeSubnetPriority, _ := strconv.Atoi(types.NodeSubnetPolicyPriority)
-		interNodePriority, _ := strconv.Atoi(types.InterNodePolicyPriority)
 
-		matchstr1 := fmt.Sprintf("ip4.src == %s && ip4.dst == nodePhysicalIP /* %s */", mgmtPortIP, nodeName)
 		matchstr2 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == nodePhysicalIP /* %s */`, nodeName, nodeName)
 		matchstr3 := fmt.Sprintf("ip4.src == source && ip4.dst == nodePhysicalIP")
-		matchstr4 := fmt.Sprintf(`ip4.src == NO DELETE  && ip4.dst != 10.244.0.0/16 /* inter-%s-no */`, nodeName)
-		matchstr5 := fmt.Sprintf(`ip4.src == 10.244.0.2  && ip4.dst != 10.244.0.0/16 /* inter-%s */`, nodeName)
 		matchstr6 := fmt.Sprintf("ip4.src == NO DELETE && ip4.dst == nodePhysicalIP /* %s-no */", nodeName)
 
 		fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
@@ -559,11 +522,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					},
 				},
 				&nbdb.LogicalRouterPolicy{
-					UUID:     "match1-UUID",
-					Match:    matchstr1,
-					Priority: mgmtPriority,
-				},
-				&nbdb.LogicalRouterPolicy{
 					UUID:     "match2-UUID",
 					Match:    matchstr2,
 					Priority: nodeSubnetPriority,
@@ -572,16 +530,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					UUID:     "match3-UUID",
 					Match:    matchstr3,
 					Priority: nodeSubnetPriority,
-				},
-				&nbdb.LogicalRouterPolicy{
-					UUID:     "match4-UUID",
-					Match:    matchstr4,
-					Priority: interNodePriority,
-				},
-				&nbdb.LogicalRouterPolicy{
-					UUID:     "match5-UUID",
-					Match:    matchstr5,
-					Priority: interNodePriority,
 				},
 				&nbdb.LogicalRouterPolicy{
 					UUID:     "match6-UUID",
@@ -599,7 +547,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				&nbdb.LogicalRouter{
 					Name:         types.OVNClusterRouter,
 					UUID:         types.OVNClusterRouter + "-UUID",
-					Policies:     []string{"match1-UUID", "match2-UUID", "match3-UUID", "match4-UUID", "match5-UUID", "match6-UUID"},
+					Policies:     []string{"match2-UUID", "match3-UUID", "match6-UUID"},
 					StaticRoutes: []string{"static-route-1-UUID", "static-route-2-UUID"},
 				},
 				&nbdb.LogicalSwitchPort{
@@ -645,11 +593,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				Priority: nodeSubnetPriority,
 			},
 			&nbdb.LogicalRouterPolicy{
-				UUID:     "match4-UUID",
-				Match:    matchstr4,
-				Priority: interNodePriority,
-			},
-			&nbdb.LogicalRouterPolicy{
 				UUID:     "match6-UUID",
 				Match:    matchstr6,
 				Priority: nodeSubnetPriority,
@@ -657,7 +600,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			&nbdb.LogicalRouter{
 				Name:     types.OVNClusterRouter,
 				UUID:     types.OVNClusterRouter + "-UUID",
-				Policies: []string{"match3-UUID", "match4-UUID", "match6-UUID"},
+				Policies: []string{"match3-UUID", "match6-UUID"},
 			},
 		}
 		gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
