@@ -1882,7 +1882,6 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 					}
 				}
 			}
-
 		})
 		// This test validates ingress traffic to nodeports with externalTrafficPolicy Set to local.
 		// It creates a nodeport service on both udp and tcp, and creates a backend pod on each node.
@@ -1949,7 +1948,6 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 				}
 			}
 		})
-
 		// This test validates ingress traffic to externalservices.
 		// It creates a service on both udp and tcp and assignes all the first node's addresses as
 		// external addresses. Then, creates a backend pod on each node.

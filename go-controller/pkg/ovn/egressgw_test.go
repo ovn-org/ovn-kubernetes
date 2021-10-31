@@ -738,7 +738,6 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					StaticRoutes: []string{"static-route-1-UUID", "static-route-2-UUID"},
 				},
 			},
-
 				[]libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
 						UUID: "node1",
@@ -2052,6 +2051,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
+
 	})
 })
 
