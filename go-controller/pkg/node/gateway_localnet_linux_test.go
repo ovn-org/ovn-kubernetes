@@ -25,7 +25,8 @@ const (
 
 func initFakeNodePortWatcher(iptV4, iptV6 util.IPTablesHelper) *nodePortWatcher {
 	initIPTable := map[string]util.FakeTable{
-		"nat": {},
+		"nat":    {},
+		"filter": {},
 	}
 
 	f4 := iptV4.(*util.FakeIPTables)
@@ -184,6 +185,7 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 					},
+					"filter": {},
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
@@ -217,6 +219,7 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 					},
+					"filter": {},
 				}
 
 				f4 = iptV4.(*util.FakeIPTables)
@@ -277,6 +280,7 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 					},
+					"filter": {},
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
@@ -335,6 +339,7 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
 					},
+					"filter": {},
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
@@ -407,6 +412,7 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 					},
+					"filter": {},
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
@@ -469,6 +475,7 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
 					},
+					"filter": {},
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
@@ -481,6 +488,7 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination [%s]:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIPs[1], service.Spec.Ports[0].Port),
 						},
 					},
+					"filter": {},
 				}
 				f6 := iptV6.(*util.FakeIPTables)
 				err = f6.MatchState(expectedTables6)
@@ -547,6 +555,7 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-NODEPORT": []string{},
 					},
+					"filter": {},
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
@@ -559,6 +568,7 @@ var _ = Describe("Node Operations", func() {
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination [%s]:%v", service.Spec.Ports[0].Protocol, externalIPv6, service.Spec.Ports[0].Port, clusterIPv6, service.Spec.Ports[0].Port),
 						},
 					},
+					"filter": {},
 				}
 
 				f6 := iptV6.(*util.FakeIPTables)
@@ -618,13 +628,15 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-NODEPORT":   []string{},
 						"OVN-KUBE-EXTERNALIP": []string{},
 					},
+					"filter": {},
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
 				err := f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 				expectedTables = map[string]util.FakeTable{
-					"nat": {},
+					"nat":    {},
+					"filter": {},
 				}
 				f6 := iptV6.(*util.FakeIPTables)
 				err = f6.MatchState(expectedTables)
@@ -678,6 +690,7 @@ var _ = Describe("Node Operations", func() {
 						"OVN-KUBE-NODEPORT":   []string{},
 						"OVN-KUBE-EXTERNALIP": []string{},
 					},
+					"filter": {},
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
@@ -685,7 +698,8 @@ var _ = Describe("Node Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
-					"nat": {},
+					"nat":    {},
+					"filter": {},
 				}
 
 				f6 := iptV6.(*util.FakeIPTables)
@@ -746,6 +760,7 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-NODEPORT": []string{},
 					},
+					"filter": {},
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
@@ -767,6 +782,7 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 						},
 					},
+					"filter": {},
 				}
 
 				f4 = iptV4.(*util.FakeIPTables)
@@ -823,6 +839,7 @@ var _ = Describe("Node Operations", func() {
 						},
 						"OVN-KUBE-EXTERNALIP": []string{},
 					},
+					"filter": {},
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
@@ -844,6 +861,7 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-NODEPORT",
 						},
 					},
+					"filter": {},
 				}
 
 				f4 = iptV4.(*util.FakeIPTables)
