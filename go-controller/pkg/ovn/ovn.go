@@ -354,7 +354,6 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 		unidlingController := unidling.NewController(
 			oc.recorder,
 			oc.watchFactory.ServiceInformer(),
-			oc.sbClient,
 		)
 		wg.Add(1)
 		go func() {

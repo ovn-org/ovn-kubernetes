@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"io"
 	"io/ioutil"
 	"os"
@@ -17,7 +18,6 @@ import (
 	"k8s.io/klog/v2"
 
 	goovn "github.com/ebay/go-ovn"
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"

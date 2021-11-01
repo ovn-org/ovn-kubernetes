@@ -317,6 +317,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 			}
 		}
 	}
+
 	aclAnnotation := newer.Annotations[aclLoggingAnnotation]
 	oldACLAnnotation := old.Annotations[aclLoggingAnnotation]
 	// support for ACL logging update, if new annotation is empty, make sure we propagate new setting

@@ -306,6 +306,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.WatchNodes()
 
 				fakeOvn.controller.StartServiceController(fakeOvn.wg, false)
+
 				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 
 				nodeSubnet := ovntest.MustParseIPNet(node1.NodeSubnet)

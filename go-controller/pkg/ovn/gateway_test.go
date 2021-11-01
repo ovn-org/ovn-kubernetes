@@ -474,6 +474,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		f, err := factory.NewMasterWatchFactory(fakeClient)
 
 		nodeName := "test-node"
+
 		hostSubnet := ovntest.MustParseIPNets("10.130.0.0/23")
 
 		mgmtPortIP := util.GetNodeManagementIfAddr(hostSubnet[0]).IP.String()

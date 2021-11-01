@@ -542,7 +542,6 @@ func (oc *Controller) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddrs []*n
 						continue
 					}
 					mask := GetIPFullMask(podIP)
-
 					if err := oc.createBFDStaticRoute(gateway.bfdEnabled, gw, podIP, gr, port, mask); err != nil {
 						return err
 					}

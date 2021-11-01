@@ -62,7 +62,7 @@ func GetPortAddresses(portName string, nbClient client.Client) (net.HardwareAddr
 
 	mac, err := net.ParseMAC(addresses[0])
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to parse logical switch port %q MAC %q: %v", portName, addresses[0], err)
+		return nil, nil, fmt.Errorf("failed to parse logical switch port %q MAC %q: %v", lsp.Name, addresses[0], err)
 	}
 	var ips []net.IP
 	for _, addr := range addresses[1:] {

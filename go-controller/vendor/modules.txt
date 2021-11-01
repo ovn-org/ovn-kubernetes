@@ -22,16 +22,12 @@ github.com/Microsoft/hcsshim/internal/schema1
 github.com/Microsoft/hcsshim/internal/schema2
 github.com/Microsoft/hcsshim/internal/timeout
 github.com/Microsoft/hcsshim/internal/vmcompute
-# github.com/alexflint/go-filemutex v0.0.0-20171022225611-72bdc8eae2ae
-github.com/alexflint/go-filemutex
 # github.com/beorn7/perks v1.0.1
 github.com/beorn7/perks/quantile
 # github.com/bhendo/go-powershell v0.0.0-20190719160123-219e7fb4e41e
 github.com/bhendo/go-powershell
 github.com/bhendo/go-powershell/backend
 github.com/bhendo/go-powershell/utils
-# github.com/cenkalti/backoff/v4 v4.1.1
-github.com/cenkalti/backoff/v4
 # github.com/cenkalti/hub v1.0.1
 github.com/cenkalti/hub
 # github.com/cenkalti/rpc2 v0.0.0-20210604223624-c1acbc6ec984
