@@ -9,8 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	goovn "github.com/ebay/go-ovn"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -33,27 +32,18 @@ func intToIP(i *big.Int) net.IP {
 	return net.IP(i.Bytes())
 }
 
-// GetPortAddresses returns the MAC and IPs of the given logical switch port
-func GetPortAddresses(portName string, nbClient client.Client) (net.HardwareAddr, []net.IP, error) {
-	lsp := &nbdb.LogicalSwitchPort{Name: portName}
-	err := nbClient.Get(lsp)
-	if err != nil {
-		if err == client.ErrNotFound {
-			return nil, nil, nil
-		}
-		return nil, nil, err
-	}
-
+// ParsePortAddresses parses the MAC and IPs of the given logical switch port
+func ParsePortAddresses(lsp *goovn.LogicalSwitchPort) (net.HardwareAddr, []net.IP, error) {
 	var addresses []string
 
-	if lsp.DynamicAddresses == nil {
+	if lsp.DynamicAddresses == "" {
 		if len(lsp.Addresses) > 0 {
-			addresses = lsp.Addresses
+			addresses = strings.Split(lsp.Addresses[0], " ")
 		}
 	} else {
 		// dynamic addresses have format "0a:00:00:00:00:01 192.168.1.3"
-		// static addresses have format ["0a:00:00:00:00:01", "192.168.1.3"]
-		addresses = strings.Split(*lsp.DynamicAddresses, " ")
+		// static addresses have format ["0a:00:00:00:00:01 192.168.1.3"]
+		addresses = strings.Split(lsp.DynamicAddresses, " ")
 	}
 
 	if len(addresses) == 0 || addresses[0] == "dynamic" {
@@ -68,32 +58,50 @@ func GetPortAddresses(portName string, nbClient client.Client) (net.HardwareAddr
 	for _, addr := range addresses[1:] {
 		ip := net.ParseIP(addr)
 		if ip == nil {
-			return nil, nil, fmt.Errorf("failed to parse logical switch port %q IP %q is not a valid ip address", portName, addr)
+			return nil, nil, fmt.Errorf("failed to parse logical switch port %q IP %q", lsp.Name, addr)
 		}
 		ips = append(ips, ip)
 	}
 	return mac, ips, nil
 }
 
-// GetLRPAddrs returns the addresses for the given logical router port
-func GetLRPAddrs(nbClient client.Client, portName string) ([]*net.IPNet, error) {
-	lrp := nbdb.LogicalRouterPort{Name: portName}
-	err := nbClient.Get(&lrp)
-	if err != nil {
-		return nil, fmt.Errorf("unable to find router port: %s, err: %v", portName, err)
-	}
-	gwLRPIPs := []*net.IPNet{}
-	for _, network := range lrp.Networks {
-		ip, network, err := net.ParseCIDR(network)
-		if err != nil {
-			return nil, fmt.Errorf("unable to parse network CIDR: %s for router port: %s, err: %v ", network, portName, err)
+// GetPortAddresses returns the MAC and IPs of the given logical switch port
+func GetPortAddresses(portName string, ovnNBClient goovn.Client) (net.HardwareAddr, []net.IP, error) {
+	lsp, err := ovnNBClient.LSPGet(portName)
+	if err != nil || lsp == nil {
+		// --if-exists handling in goovn
+		if err == goovn.ErrorSchema || err == goovn.ErrorNotFound {
+			return nil, nil, nil
 		}
-		gwLRPIPs = append(gwLRPIPs, &net.IPNet{
-			IP:   ip,
-			Mask: network.Mask,
-		})
+		return nil, nil, err
 	}
-	return gwLRPIPs, nil
+
+	return ParsePortAddresses(lsp)
+}
+
+// GetLRPAddrs returns the addresses for the given logical router port
+func GetLRPAddrs(portName string) ([]*net.IPNet, error) {
+	networks := []*net.IPNet{}
+	output, stderr, err := RunOVNNbctl("--if-exist", "get", "logical_router_port", portName, "networks")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get logical router port %s, "+
+			"stderr: %q, error: %v", portName, stderr, err)
+	}
+
+	// eg: `["100.64.0.3/16", "fd98::3/64"]`
+	output = strings.Trim(output, "[]")
+	if output != "" {
+		for _, ipNetStr := range strings.Split(output, ", ") {
+			ipNetStr = strings.Trim(ipNetStr, "\"")
+			ip, cidr, err := net.ParseCIDR(ipNetStr)
+			if err != nil {
+				return nil, fmt.Errorf("could not parse logical router port %q: %v",
+					ipNetStr, err)
+			}
+			networks = append(networks, &net.IPNet{IP: ip, Mask: cidr.Mask})
+		}
+	}
+	return networks, nil
 }
 
 // GetOVSPortMACAddress returns the MAC address of a given OVS port

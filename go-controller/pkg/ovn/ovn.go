@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
-	"math/rand"
 	"net"
 	"reflect"
 	"strconv"
@@ -15,19 +13,15 @@ import (
 
 	goovn "github.com/ebay/go-ovn"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -57,6 +51,8 @@ import (
 )
 
 const (
+	clusterPortGroupName             string        = "clusterPortGroup"
+	clusterRtrPortGroupName          string        = "clusterRtrPortGroup"
 	egressFirewallDNSDefaultDuration time.Duration = 30 * time.Minute
 )
 
@@ -94,13 +90,18 @@ type namespaceInfo struct {
 	// exgw IPs
 	routingExternalPodGWs map[string]gatewayInfo
 
+	// The UUID of the namespace-wide port group that contains all the pods in the namespace.
+	portGroupUUID string
+
 	multicastEnabled bool
 
 	// If not empty, then it has to be set to a logging a severity level, e.g. "notice", "alert", etc
 	aclLogging ACLLoggingLevels
 
 	// Per-namespace port group default deny UUIDs
+	portGroupIngressDenyUUID string // Port group UUID for ingress deny rule
 	portGroupIngressDenyName string // Port group Name for ingress deny rule
+	portGroupEgressDenyUUID  string // Port group UUID for egress deny rule
 	portGroupEgressDenyName  string // Port group Name for egress deny rule
 }
 
@@ -148,6 +149,13 @@ type Controller struct {
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
 
+	// Port group for all cluster logical switch ports
+	clusterPortGroupUUID string
+
+	// Port group for all node logical switch ports connected to the cluster
+	// logical router
+	clusterRtrPortGroupUUID string
+
 	// For each logical port, the number of network policies that want
 	// to add a ingress deny rule.
 	lspIngressDenyCache map[string]int
@@ -184,14 +192,6 @@ type Controller struct {
 	// go-ovn southbound client interface
 	ovnSBClient goovn.Client
 
-	// libovsdb northbound client interface
-	nbClient libovsdbclient.Client
-
-	// libovsdb southbound client interface
-	sbClient libovsdbclient.Client
-
-	modelClient libovsdbops.ModelClient
-
 	// v4HostSubnetsUsed keeps track of number of v4 subnets currently assigned to nodes
 	v4HostSubnetsUsed float64
 
@@ -207,9 +207,8 @@ type Controller struct {
 }
 
 type retryEntry struct {
-	pod        *kapi.Pod
-	timeStamp  time.Time
-	backoffSec time.Duration
+	pod       *kapi.Pod
+	timeStamp time.Time
 	// whether to include this pod in retry iterations
 	ignore bool
 }
@@ -241,13 +240,11 @@ func GetIPFullMask(ip string) string {
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory,
-	ovnNBClient goovn.Client, ovnSBClient goovn.Client, libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
-	recorder record.EventRecorder) *Controller {
+func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
+	stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client, recorder record.EventRecorder) *Controller {
 	if addressSetFactory == nil {
-		addressSetFactory = addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
+		addressSetFactory = addressset.NewOvnAddressSetFactory(ovnNBClient)
 	}
-	modelClient := libovsdbops.NewModelClient(libovsdbOvnNBClient)
 	return &Controller{
 		client: ovnClient.KubeClient,
 		kube: &kube.Kube{
@@ -277,9 +274,8 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			namespaceHandlerCache: make(map[string]factory.Handler),
 			podHandlerMutex:       &sync.Mutex{},
 			podHandlerCache:       make(map[string]factory.Handler),
-			allocator:             allocator{&sync.Mutex{}, make(map[string]*egressNode)},
-			nbClient:              libovsdbOvnNBClient,
-			modelClient:           modelClient,
+			allocatorMutex:        &sync.Mutex{},
+			allocator:             make(map[string]*egressNode),
 		},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
@@ -290,20 +286,12 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		recorder:                 recorder,
 		ovnNBClient:              ovnNBClient,
 		ovnSBClient:              ovnSBClient,
-		nbClient:                 libovsdbOvnNBClient,
-		sbClient:                 libovsdbOvnSBClient,
-		svcController:            newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient, stopChan),
-		modelClient:              modelClient,
+		svcController:            newServiceController(ovnClient.KubeClient, stopChan),
 	}
 }
 
 // Run starts the actual watching.
 func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
-	// Start and sync the watch factory to begin listening for events
-	if err := oc.watchFactory.Start(); err != nil {
-		return err
-	}
-
 	oc.syncPeriodic()
 	klog.Infof("Starting all the Watchers...")
 	start := time.Now()
@@ -378,23 +366,12 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	}
 
 	// Master is fully running and resource handlers have synced, update Topology version in OVN
-	currentTopologyVersion := strconv.Itoa(ovntypes.OvnCurrentTopologyVersion)
-	logicalRouter := nbdb.LogicalRouter{
-		Name: ovntypes.OVNClusterRouter,
-		ExternalIDs: map[string]string{
-			"k8s-ovn-topo-version": currentTopologyVersion,
-		},
-	}
-	opModel := libovsdbops.OperationModel{
-		Model:          &logicalRouter,
-		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
-		OnModelMutations: []interface{}{
-			&logicalRouter.ExternalIDs,
-		},
-		ErrNotFound: true,
-	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModel); err != nil {
-		return fmt.Errorf("failed to generate set topology version in OVN, err: %v", err)
+	stdout, stderr, err := util.RunOVNNbctl("set", "logical_router", ovntypes.OVNClusterRouter,
+		fmt.Sprintf("external_ids:k8s-ovn-topo-version=%d", ovntypes.OvnCurrentTopologyVersion))
+	if err != nil {
+		klog.Errorf("Failed to set topology version in OVN, "+
+			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return err
 	}
 
 	// Update topology version on node
@@ -402,7 +379,7 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	if err != nil {
 		return fmt.Errorf("unable to get node: %s", nodeName)
 	}
-	err = oc.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{ovntypes.OvnK8sTopoAnno: strconv.Itoa(ovntypes.OvnCurrentTopologyVersion)})
+	err = oc.kube.SetAnnotationsOnNode(node, map[string]interface{}{ovntypes.OvnK8sTopoAnno: strconv.Itoa(ovntypes.OvnCurrentTopologyVersion)})
 	if err != nil {
 		return fmt.Errorf("failed to set topology annotation for node %s", node.Name)
 	}
@@ -411,44 +388,16 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 }
 
 func (oc *Controller) ovnTopologyCleanup() error {
-	ver, err := oc.determineOVNTopoVersionFromOVN()
+	ver, err := util.DetermineOVNTopoVersionFromOVN()
 	if err != nil {
 		return err
 	}
 
 	// Cleanup address sets in non dual stack formats in all versions known to possibly exist.
 	if ver <= ovntypes.OvnPortBindingTopoVersion {
-		err = addressset.NonDualStackAddressSetCleanup(oc.nbClient)
+		err = addressset.NonDualStackAddressSetCleanup(oc.ovnNBClient)
 	}
 	return err
-}
-
-// determineOVNTopoVersionFromOVN determines what OVN Topology version is being used
-// If "k8s-ovn-topo-version" key in external_ids column does not exist, it is prior to OVN topology versioning
-// and therefore set version number to OvnCurrentTopologyVersion
-func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
-	ver := 0
-	logicalRouterRes := []nbdb.LogicalRouter{}
-	if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
-		return lr.Name == ovntypes.OVNClusterRouter
-	}).List(&logicalRouterRes); err != nil {
-		return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
-			"error: %v", ovntypes.OVNClusterRouter, err)
-	}
-	if len(logicalRouterRes) == 0 {
-		// no OVNClusterRouter exists, DB is empty, nothing to upgrade
-		return math.MaxInt32, nil
-	}
-	v, exists := logicalRouterRes[0].ExternalIDs["k8s-ovn-topo-version"]
-	if !exists {
-		klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
-		return ver, nil
-	}
-	ver, err := strconv.Atoi(v)
-	if err != nil {
-		return 0, fmt.Errorf("invalid OVN topology version string for the cluster, err: %v", err)
-	}
-	return ver, nil
 }
 
 // syncPeriodic adds a goroutine that periodically does some work
@@ -506,12 +455,7 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 			klog.V(5).Infof("retry: %s not scheduled", podDesc)
 			continue
 		}
-		podEntry.backoffSec = (podEntry.backoffSec * 2)
-		if podEntry.backoffSec > 60 {
-			podEntry.backoffSec = 60
-		}
-		backoff := (podEntry.backoffSec * time.Second) + (time.Duration(rand.Intn(500)) * time.Millisecond)
-		podTimer := podEntry.timeStamp.Add(backoff)
+		podTimer := podEntry.timeStamp.Add(time.Minute)
 		if updateAll || now.After(podTimer) {
 			klog.Infof("%s retry pod setup", podDesc)
 
@@ -520,7 +464,7 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 				delete(oc.retryPods, uid)
 			} else {
 				klog.Infof("%s setup retry failed; will try again later", podDesc)
-				oc.retryPods[uid] = &retryEntry{pod, time.Now(), podEntry.backoffSec, false}
+				oc.retryPods[uid] = &retryEntry{pod, time.Now(), false}
 			}
 		} else {
 			klog.V(5).Infof("%s retry pod not after timer yet, time: %s", podDesc, podTimer)
@@ -568,7 +512,7 @@ func (oc *Controller) initRetryPod(pod *kapi.Pod) {
 	if entry, ok := oc.retryPods[pod.UID]; ok {
 		entry.timeStamp = time.Now()
 	} else {
-		oc.retryPods[pod.UID] = &retryEntry{pod, time.Now(), 1, true}
+		oc.retryPods[pod.UID] = &retryEntry{pod, time.Now(), true}
 	}
 }
 
@@ -580,7 +524,7 @@ func (oc *Controller) addRetryPods(pods []kapi.Pod) {
 		if entry, ok := oc.retryPods[pod.UID]; ok {
 			entry.timeStamp = time.Now()
 		} else {
-			oc.retryPods[pod.UID] = &retryEntry{&pod, time.Now(), 1, false}
+			oc.retryPods[pod.UID] = &retryEntry{&pod, time.Now(), false}
 		}
 	}
 }
@@ -908,7 +852,6 @@ func (oc *Controller) WatchEgressIP() {
 			if err := oc.updateEgressIPWithRetry(eIP); err != nil {
 				klog.Error(err)
 			}
-			metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldEIP := old.(*egressipv1.EgressIP)
@@ -928,7 +871,6 @@ func (oc *Controller) WatchEgressIP() {
 				if err := oc.updateEgressIPWithRetry(newEIP); err != nil {
 					klog.Error(err)
 				}
-				metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -936,7 +878,6 @@ func (oc *Controller) WatchEgressIP() {
 			if err := oc.deleteEgressIP(eIP); err != nil {
 				klog.Error(err)
 			}
-			metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 		},
 	}, oc.syncEgressIPs)
 }
@@ -970,14 +911,11 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 	}
 
 	if hostSubnets == nil {
-		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node)
-		if err != nil {
-			return err
-		}
+		hostSubnets, _ = util.ParseNodeHostSubnetAnnotation(node)
 	}
 
 	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
-		if err := oc.gatewayCleanup(node.Name); err != nil {
+		if err := gatewayCleanup(node.Name); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
 		if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(node.Name); err != nil {
@@ -987,7 +925,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 		var hostAddrs sets.String
 		if config.Gateway.Mode == config.GatewayModeShared {
 			hostAddrs, err = util.ParseNodeHostAddresses(node)
-			if err != nil && !util.IsAnnotationNotSetError(err) {
+			if err != nil {
 				return fmt.Errorf("failed to get host addresses for node: %s: %v", node.Name, err)
 			}
 		}
@@ -1249,7 +1187,7 @@ func shouldUpdate(node, oldNode *kapi.Node) (bool, error) {
 	return true, nil
 }
 
-func newServiceController(client clientset.Interface, nbClient libovsdbclient.Client, stopChan <-chan struct{}) *svccontroller.Controller {
+func newServiceController(client clientset.Interface, stopChan <-chan struct{}) *svccontroller.Controller {
 	// Create our own informers to start compartmentalizing the code
 	// filter server side the things we don't care about
 	noProxyName, err := labels.NewRequirement("service.kubernetes.io/service-proxy-name", selection.DoesNotExist, nil)
@@ -1272,7 +1210,6 @@ func newServiceController(client clientset.Interface, nbClient libovsdbclient.Cl
 
 	controller := svccontroller.NewController(
 		client,
-		nbClient,
 		svcFactory.Core().V1().Services(),
 		svcFactory.Discovery().V1beta1().EndpointSlices(),
 		svcFactory.Core().V1().Nodes(),
@@ -1290,7 +1227,7 @@ func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool)
 		defer wg.Done()
 		// use 5 workers like most of the kubernetes controllers in the
 		// kubernetes controller-manager
-		err := oc.svcController.Run(5, oc.stopChan, runRepair)
+		err := oc.svcController.Run(5, oc.stopChan, runRepair, oc.clusterPortGroupUUID)
 		if err != nil {
 			klog.Errorf("Error running OVN Kubernetes Services controller: %v", err)
 		}

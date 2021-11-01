@@ -84,7 +84,6 @@ type MonitorRequests struct {
 // MonitorRequest represents a monitor request according to RFC7047
 type MonitorRequest struct {
 	Columns []string       `json:"columns,omitempty"`
-	Where   []Condition    `json:"where,omitempty"`
 	Select  *MonitorSelect `json:"select,omitempty"`
 }
 

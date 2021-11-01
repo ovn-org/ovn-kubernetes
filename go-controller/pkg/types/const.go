@@ -24,7 +24,6 @@ const (
 	JoinSwitchPrefix             = "join_"
 	ExternalSwitchPrefix         = "ext_"
 	GWRouterPrefix               = "GR_"
-	GWRouterLocalLBPostfix       = "_local"
 	RouterToSwitchPrefix         = "rtos-"
 	InterPrefix                  = "inter-"
 	HybridSubnetPrefix           = "hybrid-subnet-"
@@ -46,15 +45,15 @@ const (
 	// ACL Priorities
 
 	// Default routed multicast allow acl rule priority
-	DefaultRoutedMcastAllowPriority = 1013
+	DefaultRoutedMcastAllowPriority = "1013"
 	// Default multicast allow acl rule priority
-	DefaultMcastAllowPriority = 1012
+	DefaultMcastAllowPriority = "1012"
 	// Default multicast deny acl rule priority
-	DefaultMcastDenyPriority = 1011
+	DefaultMcastDenyPriority = "1011"
 	// Default allow acl rule priority
-	DefaultAllowPriority = 1001
+	DefaultAllowPriority = "1001"
 	// Default deny acl rule priority
-	DefaultDenyPriority = 1000
+	DefaultDenyPriority = "1000"
 
 	// priority of logical router policies on the OVNClusterRouter
 	EgressFirewallStartPriority           = "10000"
@@ -64,8 +63,8 @@ const (
 	InterNodePolicyPriority               = "1003"
 	HybridOverlaySubnetPriority           = "1002"
 	HybridOverlayReroutePriority          = "501"
-	DefaultNoRereoutePriority             = 101
-	EgressIPReroutePriority               = 100
+	DefaultNoRereoutePriority             = "101"
+	EgressIPReroutePriority               = "100"
 
 	V6NodeLocalNATSubnet           = "fd99::/64"
 	V6NodeLocalNATSubnetPrefix     = 64
@@ -88,9 +87,6 @@ const (
 	NeighborAdvertisementICMPType = 136
 
 	OvnACLLoggingMeter = "acl-logging"
-
-	// OVN-K8S Address Sets Names
-	HybridRoutePolicyPrefix = "hybrid-route-pods-"
 
 	// OVN-K8S Topology Versions
 	OvnSingleJoinSwitchTopoVersion = 1
@@ -116,7 +112,4 @@ const (
 	GeneveHeaderLengthIPv4 = 58
 	// Geneve header length for IPv6 (https://github.com/openshift/cluster-network-operator/pull/720#issuecomment-664020823)
 	GeneveHeaderLengthIPv6 = GeneveHeaderLengthIPv4 + 20
-
-	ClusterPortGroupName    = "clusterPortGroup"
-	ClusterRtrPortGroupName = "clusterRtrPortGroup"
 )

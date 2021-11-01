@@ -218,13 +218,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-enable-lflow-cache=true",
 						nodeIP, interval, ofintval, nodeName),
 				})
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
-						" -- " +
-						"clear bridge br-int sflow" +
-						" -- " +
-						"clear bridge br-int ipfix",
-				})
+
 				err := util.SetExec(fexec)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -292,13 +286,6 @@ var _ = Describe("Node", func() {
 					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 set encap "+
 						"%s options:dst_port=%d", encapUUID, encapPort),
 				})
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
-						" -- " +
-						"clear bridge br-int sflow" +
-						" -- " +
-						"clear bridge br-int ipfix",
-				})
 
 				err := util.SetExec(fexec)
 				Expect(err).NotTo(HaveOccurred())
@@ -353,13 +340,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-limit-lflow-cache-kb=100000",
 						nodeIP, interval, ofintval, nodeName),
 				})
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
-						" -- " +
-						"clear bridge br-int sflow" +
-						" -- " +
-						"clear bridge br-int ipfix",
-				})
+
 				err := util.SetExec(fexec)
 				Expect(err).NotTo(HaveOccurred())
 

@@ -6,7 +6,7 @@ package nbdb
 // LogicalRouter defines an object in Logical_Router table
 type LogicalRouter struct {
 	UUID         string            `ovsdb:"_uuid"`
-	Enabled      *bool             `ovsdb:"enabled"`
+	Enabled      []bool            `ovsdb:"enabled"`
 	ExternalIDs  map[string]string `ovsdb:"external_ids"`
 	LoadBalancer []string          `ovsdb:"load_balancer"`
 	Name         string            `ovsdb:"name"`

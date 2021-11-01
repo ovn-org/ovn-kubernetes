@@ -293,13 +293,13 @@ func (_m *KubeInterface) RemoveTaintFromNode(nodeName string, taint *v1.Taint) e
 	return r0
 }
 
-// SetAnnotationsOnNamespace provides a mock function with given fields: namespaceName, annotations
-func (_m *KubeInterface) SetAnnotationsOnNamespace(namespaceName string, annotations map[string]interface{}) error {
-	ret := _m.Called(namespaceName, annotations)
+// SetAnnotationsOnNamespace provides a mock function with given fields: namespace, annotations
+func (_m *KubeInterface) SetAnnotationsOnNamespace(namespace *v1.Namespace, annotations map[string]string) error {
+	ret := _m.Called(namespace, annotations)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, map[string]interface{}) error); ok {
-		r0 = rf(namespaceName, annotations)
+	if rf, ok := ret.Get(0).(func(*v1.Namespace, map[string]string) error); ok {
+		r0 = rf(namespace, annotations)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -307,13 +307,13 @@ func (_m *KubeInterface) SetAnnotationsOnNamespace(namespaceName string, annotat
 	return r0
 }
 
-// SetAnnotationsOnNode provides a mock function with given fields: nodeName, annotations
-func (_m *KubeInterface) SetAnnotationsOnNode(nodeName string, annotations map[string]interface{}) error {
-	ret := _m.Called(nodeName, annotations)
+// SetAnnotationsOnNode provides a mock function with given fields: node, annotations
+func (_m *KubeInterface) SetAnnotationsOnNode(node *v1.Node, annotations map[string]interface{}) error {
+	ret := _m.Called(node, annotations)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, map[string]interface{}) error); ok {
-		r0 = rf(nodeName, annotations)
+	if rf, ok := ret.Get(0).(func(*v1.Node, map[string]interface{}) error); ok {
+		r0 = rf(node, annotations)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -322,11 +322,11 @@ func (_m *KubeInterface) SetAnnotationsOnNode(nodeName string, annotations map[s
 }
 
 // SetAnnotationsOnPod provides a mock function with given fields: namespace, podName, annotations
-func (_m *KubeInterface) SetAnnotationsOnPod(namespace string, podName string, annotations map[string]interface{}) error {
+func (_m *KubeInterface) SetAnnotationsOnPod(namespace string, podName string, annotations map[string]string) error {
 	ret := _m.Called(namespace, podName, annotations)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, string, map[string]interface{}) error); ok {
+	if rf, ok := ret.Get(0).(func(string, string, map[string]string) error); ok {
 		r0 = rf(namespace, podName, annotations)
 	} else {
 		r0 = ret.Error(0)

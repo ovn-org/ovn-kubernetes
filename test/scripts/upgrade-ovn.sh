@@ -117,7 +117,6 @@ kubectl_wait_for_upgrade(){
 }
 
 ## This script is responsible to upgrade ovn daemonsets to run new pods with image built from a PR
-KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn} # Set default values
 install_ovn_image
 run_kubectl set image daemonsets.apps ovnkube-node ovnkube-node="${OVN_IMAGE}" ovs-metrics-exporter="${OVN_IMAGE}"  ovn-controller="${OVN_IMAGE}" -n ovn-kubernetes
 kubectl_wait_daemonset ovnkube-node

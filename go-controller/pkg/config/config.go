@@ -64,7 +64,6 @@ var (
 		EncapPort:         DefaultEncapPort,
 		InactivityProbe:   100000, // in Milliseconds
 		OpenFlowProbe:     180,    // in Seconds
-		MonitorAll:        true,
 		LFlowCacheEnable:  true,
 		RawClusterSubnets: "10.128.0.0/14/23",
 	}
@@ -178,10 +177,6 @@ type DefaultConfig struct {
 	// Maximum number of seconds of idle time on the OpenFlow connection
 	// that ovn-controller will wait before it sends a connection health probe
 	OpenFlowProbe int `gcfg:"openflow-probe"`
-	// The  boolean  flag  indicates  if  ovn-controller  should monitor all data in SB DB
-	// instead of conditionally monitoring the data relevant to this node only.
-	// By default monitor-all is enabled.
-	MonitorAll bool `gcfg:"monitor-all"`
 	// The  boolean  flag  indicates  if  ovn-controller  should
 	// enable/disable the logical flow in-memory cache  it  uses
 	// when processing Southbound database logical flow changes.
@@ -310,9 +305,6 @@ type GatewayConfig struct {
 	// exceeding pod MTU to be dropped by OVN. With this check enabled, ICMP needs frag/packet too big will be sent
 	// back to the original client
 	DisablePacketMTUCheck bool `gcfg:"disable-pkt-mtu-check"`
-	// RouterSubnet is the subnet to be used for the GR external port. auto-detected if not given.
-	// Must match the the kube node IP address. Currently valid for Smart-NICs only.
-	RouterSubnet string `gcfg:"router-subnet"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -357,7 +349,6 @@ type HybridOverlayConfig struct {
 // OvnKubeNodeConfig holds ovnkube-node configurations
 type OvnKubeNodeConfig struct {
 	Mode                 string `gcfg:"mode"`
-	MgmtPortNetdev       string `gcfg:"mgmt-port-netdev"`
 	DisableOVNIfaceIdVer bool   `gcfg:"disable-ovn-iface-id-ver"`
 }
 
@@ -595,14 +586,6 @@ var CommonFlags = []cli.Flag{
 			"connection for ovn-controller before it sends a inactivity probe",
 		Destination: &cliConfig.Default.OpenFlowProbe,
 		Value:       Default.OpenFlowProbe,
-	},
-	&cli.BoolFlag{
-		Name: "monitor-all",
-		Usage: "Enable monitoring all data from SB DB instead of conditionally " +
-			"monitoring the data relevant to this node only. " +
-			"By default it is enabled.",
-		Destination: &cliConfig.Default.MonitorAll,
-		Value:       Default.MonitorAll,
 	},
 	&cli.BoolFlag{
 		Name: "enable-lflow-cache",
@@ -1001,14 +984,6 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage:       "Disable OpenFlow checks for if packet size is greater than pod MTU",
 		Destination: &cliConfig.Gateway.DisablePacketMTUCheck,
 	},
-	&cli.StringFlag{
-		Name: "gateway-router-subnet",
-		Usage: "The Subnet to be used for the gateway router external port (shared mode only). " +
-			"auto-detected if not given. Must match the the kube node IP address. " +
-			"Currently valid for Smart-NICs only",
-		Destination: &cliConfig.Gateway.RouterSubnet,
-		Value:       Gateway.RouterSubnet,
-	},
 	// Deprecated CLI options
 	&cli.BoolFlag{
 		Name:        "init-gateways",
@@ -1077,14 +1052,6 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Usage:       "ovnkube-node operating mode full(default), smart-nic, smart-nic-host",
 		Value:       OvnKubeNode.Mode,
 		Destination: &cliConfig.OvnKubeNode.Mode,
-	},
-	&cli.StringFlag{
-		Name: "ovnkube-node-mgmt-port-netdev",
-		Usage: "valid only when ovnkube-node-mode is either smart-nic or smart-nic-host. " +
-			"when provided, use this netdev as management port. it will be renamed to ovn-k8s-mp0 " +
-			"and used to allow host network services and pods to access k8s pod and service networks. ",
-		Value:       OvnKubeNode.MgmtPortNetdev,
-		Destination: &cliConfig.OvnKubeNode.MgmtPortNetdev,
 	},
 	&cli.BoolFlag{
 		Name: "disable-ovn-iface-id-ver",
@@ -1928,17 +1895,6 @@ func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
 	// ovnkube-node-mode smart-nic/smart-nic-host does not support hybrid overlay
 	if OvnKubeNode.Mode != types.NodeModeFull && HybridOverlay.Enabled {
 		return fmt.Errorf("hybrid overlay is not supported with ovnkube-node mode %s", OvnKubeNode.Mode)
-	}
-	// when Smart-NIC are used, management port is backed by a VF. get management port VF information
-	if OvnKubeNode.Mode == types.NodeModeSmartNIC || OvnKubeNode.Mode == types.NodeModeSmartNICHost {
-		if OvnKubeNode.MgmtPortNetdev == "" {
-			return fmt.Errorf("ovnkube-node-mgmt-port-netdev must be provided")
-		}
-	} else {
-		if OvnKubeNode.MgmtPortNetdev != "" {
-			return fmt.Errorf("ovnkube-node-mgmt-port-netdev is not supported with ovnkube-node mode %s",
-				OvnKubeNode.Mode)
-		}
 	}
 	return nil
 }

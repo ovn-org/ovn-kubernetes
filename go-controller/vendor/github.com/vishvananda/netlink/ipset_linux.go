@@ -23,15 +23,13 @@ type IPSetEntry struct {
 
 // IPSetResult is the result of a dump request for a set
 type IPSetResult struct {
-	Nfgenmsg           *nl.Nfgenmsg
-	Protocol           uint8
-	ProtocolMinVersion uint8
-	Revision           uint8
-	Family             uint8
-	Flags              uint8
-	SetName            string
-	TypeName           string
-	Comment            string
+	Nfgenmsg *nl.Nfgenmsg
+	Protocol uint8
+	Revision uint8
+	Family   uint8
+	Flags    uint8
+	SetName  string
+	TypeName string
 
 	HashSize     uint32
 	NumEntries   uint32
@@ -40,7 +38,6 @@ type IPSetResult struct {
 	SizeInMemory uint32
 	CadtFlags    uint32
 	Timeout      *uint32
-	LineNo       uint32
 
 	Entries []IPSetEntry
 }
@@ -55,7 +52,7 @@ type IpsetCreateOptions struct {
 }
 
 // IpsetProtocol returns the ipset protocol version from the kernel
-func IpsetProtocol() (uint8, uint8, error) {
+func IpsetProtocol() (uint8, error) {
 	return pkgHandle.IpsetProtocol()
 }
 
@@ -89,20 +86,20 @@ func IpsetAdd(setname string, entry *IPSetEntry) error {
 	return pkgHandle.ipsetAddDel(nl.IPSET_CMD_ADD, setname, entry)
 }
 
-// IpsetDel deletes an entry from an existing ipset.
+// IpsetDele deletes an entry from an existing ipset.
 func IpsetDel(setname string, entry *IPSetEntry) error {
 	return pkgHandle.ipsetAddDel(nl.IPSET_CMD_DEL, setname, entry)
 }
 
-func (h *Handle) IpsetProtocol() (protocol uint8, minVersion uint8, err error) {
+func (h *Handle) IpsetProtocol() (uint8, error) {
 	req := h.newIpsetRequest(nl.IPSET_CMD_PROTOCOL)
 	msgs, err := req.Execute(unix.NETLINK_NETFILTER, 0)
 
 	if err != nil {
-		return 0, 0, err
+		return 0, err
 	}
-	response := ipsetUnserialize(msgs)
-	return response.Protocol, response.ProtocolMinVersion, nil
+
+	return ipsetUnserialize(msgs).Protocol, nil
 }
 
 func (h *Handle) IpsetCreate(setname, typename string, options IpsetCreateOptions) error {
@@ -115,7 +112,7 @@ func (h *Handle) IpsetCreate(setname, typename string, options IpsetCreateOption
 	req.AddData(nl.NewRtAttr(nl.IPSET_ATTR_SETNAME, nl.ZeroTerminated(setname)))
 	req.AddData(nl.NewRtAttr(nl.IPSET_ATTR_TYPENAME, nl.ZeroTerminated(typename)))
 	req.AddData(nl.NewRtAttr(nl.IPSET_ATTR_REVISION, nl.Uint8Attr(0)))
-	req.AddData(nl.NewRtAttr(nl.IPSET_ATTR_FAMILY, nl.Uint8Attr(2))) // 2 == inet
+	req.AddData(nl.NewRtAttr(nl.IPSET_ATTR_FAMILY, nl.Uint8Attr(0)))
 
 	data := nl.NewRtAttr(nl.IPSET_ATTR_DATA|int(nl.NLA_F_NESTED), nil)
 
@@ -190,11 +187,6 @@ func (h *Handle) IpsetListAll() ([]IPSetResult, error) {
 func (h *Handle) ipsetAddDel(nlCmd int, setname string, entry *IPSetEntry) error {
 	req := h.newIpsetRequest(nlCmd)
 	req.AddData(nl.NewRtAttr(nl.IPSET_ATTR_SETNAME, nl.ZeroTerminated(setname)))
-
-	if entry.Comment != "" {
-		req.AddData(nl.NewRtAttr(nl.IPSET_ATTR_COMMENT, nl.ZeroTerminated(entry.Comment)))
-	}
-
 	data := nl.NewRtAttr(nl.IPSET_ATTR_DATA|int(nl.NLA_F_NESTED), nil)
 
 	if !entry.Replace {
@@ -205,12 +197,7 @@ func (h *Handle) ipsetAddDel(nlCmd int, setname string, entry *IPSetEntry) error
 		data.AddChild(&nl.Uint32Attribute{Type: nl.IPSET_ATTR_TIMEOUT | nl.NLA_F_NET_BYTEORDER, Value: *entry.Timeout})
 	}
 	if entry.MAC != nil {
-		nestedData := nl.NewRtAttr(nl.IPSET_ATTR_ETHER|int(nl.NLA_F_NET_BYTEORDER), entry.MAC)
-		data.AddChild(nl.NewRtAttr(nl.IPSET_ATTR_ETHER|int(nl.NLA_F_NESTED), nestedData.Serialize()))
-	}
-	if entry.IP != nil {
-		nestedData := nl.NewRtAttr(nl.IPSET_ATTR_IP|int(nl.NLA_F_NET_BYTEORDER), entry.IP)
-		data.AddChild(nl.NewRtAttr(nl.IPSET_ATTR_IP|int(nl.NLA_F_NESTED), nestedData.Serialize()))
+		data.AddChild(nl.NewRtAttr(nl.IPSET_ATTR_ETHER, entry.MAC))
 	}
 
 	data.AddChild(&nl.Uint32Attribute{Type: nl.IPSET_ATTR_LINENO | nl.NLA_F_NET_BYTEORDER, Value: 0})
@@ -262,8 +249,6 @@ func (result *IPSetResult) unserialize(msg []byte) {
 			result.Protocol = attr.Value[0]
 		case nl.IPSET_ATTR_SETNAME:
 			result.SetName = nl.BytesToString(attr.Value)
-		case nl.IPSET_ATTR_COMMENT:
-			result.Comment = nl.BytesToString(attr.Value)
 		case nl.IPSET_ATTR_TYPENAME:
 			result.TypeName = nl.BytesToString(attr.Value)
 		case nl.IPSET_ATTR_REVISION:
@@ -276,8 +261,6 @@ func (result *IPSetResult) unserialize(msg []byte) {
 			result.parseAttrData(attr.Value)
 		case nl.IPSET_ATTR_ADT | nl.NLA_F_NESTED:
 			result.parseAttrADT(attr.Value)
-		case nl.IPSET_ATTR_PROTOCOL_MIN:
-			result.ProtocolMinVersion = attr.Value[0]
 		default:
 			log.Printf("unknown ipset attribute from kernel: %+v %v", attr, attr.Type&nl.NLA_TYPE_MASK)
 		}
@@ -302,17 +285,6 @@ func (result *IPSetResult) parseAttrData(data []byte) {
 			result.SizeInMemory = attr.Uint32()
 		case nl.IPSET_ATTR_CADT_FLAGS | nl.NLA_F_NET_BYTEORDER:
 			result.CadtFlags = attr.Uint32()
-		case nl.IPSET_ATTR_IP | nl.NLA_F_NESTED:
-			for nested := range nl.ParseAttributes(attr.Value) {
-				switch nested.Type {
-				case nl.IPSET_ATTR_IP | nl.NLA_F_NET_BYTEORDER:
-					result.Entries = append(result.Entries, IPSetEntry{IP: nested.Value})
-				}
-			}
-		case nl.IPSET_ATTR_CADT_LINENO | nl.NLA_F_NET_BYTEORDER:
-			result.LineNo = attr.Uint32()
-		case nl.IPSET_ATTR_COMMENT:
-			result.Comment = nl.BytesToString(attr.Value)
 		default:
 			log.Printf("unknown ipset data attribute from kernel: %+v %v", attr, attr.Type&nl.NLA_TYPE_MASK)
 		}
@@ -344,8 +316,6 @@ func parseIPSetEntry(data []byte) (entry IPSetEntry) {
 			entry.Packets = &val
 		case nl.IPSET_ATTR_ETHER:
 			entry.MAC = net.HardwareAddr(attr.Value)
-		case nl.IPSET_ATTR_IP:
-			entry.IP = net.IP(attr.Value)
 		case nl.IPSET_ATTR_COMMENT:
 			entry.Comment = nl.BytesToString(attr.Value)
 		case nl.IPSET_ATTR_IP | nl.NLA_F_NESTED:

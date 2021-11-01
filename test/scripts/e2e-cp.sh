@@ -9,7 +9,20 @@ export KUBECONFIG=${HOME}/admin.conf
 # Skip tests which are not IPv6 ready yet (see description of https://github.com/ovn-org/ovn-kubernetes/pull/2276)
 IPV6_SKIPPED_TESTS="Should be allowed by externalip services|\
 should provide connection to external host by DNS name from a pod|\
+should provide Internet connection continuously when master is killed|\
+should provide Internet connection continuously when ovn-k8s pod is killed|\
+Should validate connectivity from a pod to a non-node host address on same node|\
+Should validate connectivity to an external gateway\'s loopback address via a pod with external gateway annotations enabled|\
+Should validate connectivity to multiple external gateways for an ECMP scenario|\
+Should validate connectivity without vxlan before and after updating the namespace annotation to a new external gateway|\
+Should validate ICMP connectivity to an external gateway\'s loopback address via a pod with external gateway annotations enabled|\
+Should validate ICMP connectivity to multiple external gateways for an ECMP scenario|\
+Should validate ingress connectivity from an external gateway|\
 Should validate NetFlow data of br-int is sent to an external gateway|\
+Should validate TCP/UDP connectivity to an external gateway\'s loopback address via a pod with external gateway annotations enabled|\
+Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario|\
+Should validate the egress firewall policy functionality against remote hosts|\
+Should validate the egress IP functionality against remote hosts|\
 recovering from deleting db files while maintain connectivity|\
 test tainting a node according to its defaults interface MTU size"
 

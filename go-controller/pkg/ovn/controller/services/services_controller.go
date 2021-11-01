@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -47,7 +46,6 @@ const (
 
 // NewController returns a new *Controller.
 func NewController(client clientset.Interface,
-	nbClient libovsdbclient.Client,
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
 	nodeInformer coreinformers.NodeInformer,
@@ -60,8 +58,7 @@ func NewController(client clientset.Interface,
 
 	c := &Controller{
 		client:           client,
-		nbClient:         nbClient,
-		queue:            workqueue.NewNamedRateLimitingQueue(newRatelimiter(100), controllerName),
+		queue:            workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), controllerName),
 		workerLoopPeriod: time.Second,
 		alreadyApplied:   map[string][]ovnlb.LB{},
 	}
@@ -91,7 +88,7 @@ func NewController(client clientset.Interface,
 	c.eventRecorder = recorder
 
 	// repair controller
-	c.repair = newRepair(serviceInformer.Lister(), nbClient)
+	c.repair = newRepair(serviceInformer.Lister())
 
 	// load balancers need to be applied to nodes, so
 	// we need to watch Node objects for changes.
@@ -104,11 +101,7 @@ func NewController(client clientset.Interface,
 
 // Controller manages selector-based service endpoints.
 type Controller struct {
-	client clientset.Interface
-
-	// libovsdb northbound client interface
-	nbClient libovsdbclient.Client
-
+	client           clientset.Interface
 	eventBroadcaster record.EventBroadcaster
 	eventRecorder    record.EventRecorder
 
@@ -151,7 +144,7 @@ type Controller struct {
 
 // Run will not return until stopCh is closed. workers determines how many
 // endpoints will be handled in parallel.
-func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair bool) error {
+func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair bool, clusterPortGroupUUID string) error {
 	defer utilruntime.HandleCrash()
 	defer c.queue.ShutDown()
 
@@ -168,7 +161,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair bool) er
 		// Run the repair controller only once
 		// it keeps in sync Kubernetes and OVN
 		// and handles removal of stale data on upgrades
-		c.repair.runBeforeSync()
+		c.repair.runBeforeSync(clusterPortGroupUUID)
 	}
 	// Start the workers after the repair loop to avoid races
 	klog.Info("Starting workers")
@@ -264,7 +257,7 @@ func (c *Controller) syncService(key string) error {
 			},
 		}
 
-		if err := ovnlb.EnsureLBs(c.nbClient, util.ExternalIDsForObject(service), nil); err != nil {
+		if err := ovnlb.EnsureLBs(util.ExternalIDsForObject(service), nil); err != nil {
 			return fmt.Errorf("failed to delete load balancers for service %s/%s: %w",
 				namespace, name, err)
 		}
@@ -297,8 +290,6 @@ func (c *Controller) syncService(key string) error {
 	nodeInfos := c.nodeTracker.allNodes()
 	clusterLBs := buildClusterLBs(service, clusterConfigs, nodeInfos)
 	perNodeLBs := buildPerNodeLBs(service, perNodeConfigs, nodeInfos)
-	klog.V(5).Infof("Built service %s cluster-wide LB %#v", key, clusterLBs)
-	klog.V(5).Infof("Built service %s per-node LB %#v", key, perNodeLBs)
 	klog.V(3).Infof("Service %s has %d cluster-wide and %d per-node configs, making %d and %d load balancers",
 		key, len(clusterConfigs), len(perNodeConfigs), len(clusterLBs), len(perNodeLBs))
 	lbs := append(clusterLBs, perNodeLBs...)
@@ -314,7 +305,7 @@ func (c *Controller) syncService(key string) error {
 		//
 		// Note: this may fail if a node was deleted between listing nodes and applying.
 		// If so, this will fail and we will resync.
-		if err := ovnlb.EnsureLBs(c.nbClient, util.ExternalIDsForObject(service), lbs); err != nil {
+		if err := ovnlb.EnsureLBs(util.ExternalIDsForObject(service), lbs); err != nil {
 			return fmt.Errorf("failed to ensure service %s load balancers: %w", key, err)
 		}
 
@@ -324,7 +315,7 @@ func (c *Controller) syncService(key string) error {
 	}
 
 	if !c.repair.legacyLBsDeleted() {
-		if err := deleteServiceFromLegacyLBs(c.nbClient, service); err != nil {
+		if err := deleteServiceFromLegacyLBs(service); err != nil {
 			klog.Warningf("Failed to delete legacy vips for service %s: %v", key)
 			// Continue anyways, because once all services are synced, we'll delete
 			// the legacy load balancers
