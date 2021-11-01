@@ -152,10 +152,11 @@ func getExpectedDataPodsAndSwitches(pods []testPod, nodes []string) []libovsdbte
 		} else {
 			lspUUID = pod.portUUID
 		}
+		podAddr := fmt.Sprintf("%s %s", pod.podMAC, pod.podIP)
 		lsp := &nbdb.LogicalSwitchPort{
 			UUID:      lspUUID,
 			Name:      util.GetLogicalPortName(pod.namespace, pod.podName),
-			Addresses: []string{pod.podMAC, pod.podIP},
+			Addresses: []string{podAddr},
 			ExternalIDs: map[string]string{
 				"pod":       "true",
 				"namespace": pod.namespace,
@@ -164,7 +165,7 @@ func getExpectedDataPodsAndSwitches(pods []testPod, nodes []string) []libovsdbte
 				"requested-chassis": pod.nodeName,
 				"iface-id-ver":      pod.podName,
 			},
-			PortSecurity: []string{pod.podMAC, pod.podIP},
+			PortSecurity: []string{podAddr},
 		}
 		if pod.noIfaceIdVer {
 			delete(lsp.Options, "iface-id-ver")
