@@ -11,7 +11,7 @@ import (
 type Info struct {
 	// FieldName indexed by column
 	Obj      interface{}
-	Metadata *Metadata
+	Metadata Metadata
 }
 
 // Metadata represents the information needed to know how to map OVSDB columns into an objetss fields
@@ -152,7 +152,7 @@ func NewInfo(tableName string, table *ovsdb.TableSchema, obj interface{}) (*Info
 
 	return &Info{
 		Obj: obj,
-		Metadata: &Metadata{
+		Metadata: Metadata{
 			Fields:      fields,
 			TableSchema: table,
 			TableName:   tableName,

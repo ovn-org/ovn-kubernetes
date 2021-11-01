@@ -26,7 +26,7 @@ type Conditional interface {
 // The conditions are based on the equality of the first available index.
 // The priority of indexes is: uuid, {schema index}
 type equalityConditional struct {
-	dbModel   *model.DatabaseModel
+	dbModel   model.DatabaseModel
 	tableName string
 	info      *mapper.Info
 	singleOp  bool
@@ -37,7 +37,7 @@ func (c *equalityConditional) Matches(m model.Model) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return c.dbModel.Mapper().EqualFields(c.info, info)
+	return c.dbModel.Mapper.EqualFields(c.info, info)
 }
 
 func (c *equalityConditional) Table() string {
@@ -48,7 +48,7 @@ func (c *equalityConditional) Table() string {
 func (c *equalityConditional) Generate() ([][]ovsdb.Condition, error) {
 	var result [][]ovsdb.Condition
 
-	conds, err := c.dbModel.Mapper().NewEqualityCondition(c.info)
+	conds, err := c.dbModel.Mapper.NewEqualityCondition(c.info)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +63,7 @@ func (c *equalityConditional) Generate() ([][]ovsdb.Condition, error) {
 }
 
 // NewEqualityCondition creates a new equalityConditional
-func newEqualityConditional(dbModel *model.DatabaseModel, table string, all bool, model model.Model, fields ...interface{}) (Conditional, error) {
+func newEqualityConditional(dbModel model.DatabaseModel, table string, all bool, model model.Model, fields ...interface{}) (Conditional, error) {
 	info, err := dbModel.NewModelInfo(model)
 	if err != nil {
 		return nil, err
@@ -78,7 +78,7 @@ func newEqualityConditional(dbModel *model.DatabaseModel, table string, all bool
 
 // explicitConditional generates conditions based on the provided Condition list
 type explicitConditional struct {
-	dbModel    *model.DatabaseModel
+	dbModel    model.DatabaseModel
 	tableName  string
 	info       *mapper.Info
 	conditions []model.Condition
@@ -99,7 +99,7 @@ func (c *explicitConditional) Generate() ([][]ovsdb.Condition, error) {
 	var conds []ovsdb.Condition
 
 	for _, cond := range c.conditions {
-		ovsdbCond, err := c.dbModel.Mapper().NewCondition(c.info, cond.Field, cond.Function, cond.Value)
+		ovsdbCond, err := c.dbModel.Mapper.NewCondition(c.info, cond.Field, cond.Function, cond.Value)
 		if err != nil {
 			return nil, err
 		}
@@ -117,7 +117,7 @@ func (c *explicitConditional) Generate() ([][]ovsdb.Condition, error) {
 }
 
 // newIndexCondition creates a new equalityConditional
-func newExplicitConditional(dbModel *model.DatabaseModel, table string, all bool, model model.Model, cond ...model.Condition) (Conditional, error) {
+func newExplicitConditional(dbModel model.DatabaseModel, table string, all bool, model model.Model, cond ...model.Condition) (Conditional, error) {
 	info, err := dbModel.NewModelInfo(model)
 	if err != nil {
 		return nil, err

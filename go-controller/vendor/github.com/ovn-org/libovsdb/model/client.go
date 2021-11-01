@@ -31,7 +31,7 @@ func (db ClientDBModel) Name() string {
 
 // Validate validates the DatabaseModel against the input schema
 // Returns all the errors detected
-func (db ClientDBModel) validate(schema *ovsdb.DatabaseSchema) []error {
+func (db ClientDBModel) validate(schema ovsdb.DatabaseSchema) []error {
 	var errors []error
 	if db.name != schema.Name {
 		errors = append(errors, fmt.Errorf("database model name (%s) does not match schema (%s)",
@@ -57,12 +57,12 @@ func (db ClientDBModel) validate(schema *ovsdb.DatabaseSchema) []error {
 }
 
 // NewClientDBModel constructs a ClientDBModel based on a database name and dictionary of models indexed by table name
-func NewClientDBModel(name string, models map[string]Model) (*ClientDBModel, error) {
+func NewClientDBModel(name string, models map[string]Model) (ClientDBModel, error) {
 	types := make(map[string]reflect.Type, len(models))
 	for table, model := range models {
 		modelType := reflect.TypeOf(model)
 		if modelType.Kind() != reflect.Ptr || modelType.Elem().Kind() != reflect.Struct {
-			return nil, fmt.Errorf("model is expected to be a pointer to struct")
+			return ClientDBModel{}, fmt.Errorf("model is expected to be a pointer to struct")
 		}
 		hasUUID := false
 		for i := 0; i < modelType.Elem().NumField(); i++ {
@@ -72,12 +72,12 @@ func NewClientDBModel(name string, models map[string]Model) (*ClientDBModel, err
 			}
 		}
 		if !hasUUID {
-			return nil, fmt.Errorf("model is expected to have a string field called uuid")
+			return ClientDBModel{}, fmt.Errorf("model is expected to have a string field called uuid")
 		}
 
 		types[table] = reflect.TypeOf(model)
 	}
-	return &ClientDBModel{
+	return ClientDBModel{
 		types: types,
 		name:  name,
 	}, nil

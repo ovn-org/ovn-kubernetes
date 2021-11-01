@@ -73,6 +73,8 @@ func (r *RowUpdate2) Merge(new *RowUpdate2) {
 					oSet := currentRowData[k].(OvsSet)
 					newSet := v.(OvsSet)
 					oSet.GoSet = append(oSet.GoSet, newSet.GoSet...)
+					// copy new appended set back to currentRowData
+					currentRowData[k] = oSet
 				case OvsMap:
 					oMap := currentRowData[k].(OvsMap)
 					newMap := v.(OvsMap)
@@ -81,10 +83,13 @@ func (r *RowUpdate2) Merge(new *RowUpdate2) {
 							oMap.GoMap[newK] = newV
 						}
 					}
+					// note: unlike OvsSet, currentRowData for
+					// goMap does not need to be copied back.
 				}
 			}
 		}
 		r.Modify = &currentRowData
+		r.New = new.New
 		return
 	}
 	if r.Modify != nil && new.Delete != nil {
