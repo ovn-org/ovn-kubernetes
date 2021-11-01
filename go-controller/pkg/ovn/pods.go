@@ -472,10 +472,10 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// set addresses on the port
-	addresses = make([]string, len(podIfAddrs)+1)
-	addresses[0] = podMac.String()
-	for idx, podIfAddr := range podIfAddrs {
-		addresses[idx+1] = podIfAddr.IP.String()
+	// LSP addresses in OVN are a single space-separated value
+	addresses = []string{podMac.String()}
+	for _, podIfAddr := range podIfAddrs {
+		addresses[0] = addresses[0] + " " + podIfAddr.IP.String()
 	}
 
 	lsp.Addresses = addresses
