@@ -737,24 +737,82 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 	}
 
 	lrpName := types.RouterToSwitchPrefix + node.Name
-	lrpArgs := []string{
-		"--if-exists", "lrp-del", lrpName,
-		"--", "lrp-add", types.OVNClusterRouter, lrpName, nodeLRPMAC.String(),
-	}
+	lrpNetworks := []string{}
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
-		lrpArgs = append(lrpArgs, gwIfAddr.String())
+		lrpNetworks = append(lrpNetworks, gwIfAddr.String())
 	}
+	logicalRouterPort := nbdb.LogicalRouterPort{
+		Name:     lrpName,
+		MAC:      nodeLRPMAC.String(),
+		Networks: lrpNetworks,
+	}
+	logicalRouter := nbdb.LogicalRouter{}
+	opModels := []libovsdbops.OperationModel{
+		{
+			Model: &logicalRouterPort,
+			OnModelUpdates: []interface{}{
+				&logicalRouterPort.MAC,
+				&logicalRouterPort.Networks,
+			},
+			DoAfter: func() {
+				if logicalRouterPort.UUID != "" {
+					logicalRouter.Ports = []string{logicalRouterPort.UUID}
+				}
+			},
+		},
+		{
+			Model:          &logicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+			OnModelMutations: []interface{}{
+				&logicalRouter.Ports,
+			},
+			ErrNotFound: true,
+		},
+	}
+
+	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		klog.Errorf("Failed to add logical router port %s to router %s, error: %v", lrpName, types.OVNClusterRouter, err)
+		return err
+	}
+
 	if config.Gateway.Mode != config.GatewayModeLocal {
 		// "local" mode requires NAT on the cluster router, which is not yet supported yet when
 		// multiple DGPs are on the same router, so we can't set the gateway-chassis here.
-		lrpArgs = append(lrpArgs, "--", "lrp-set-gateway-chassis", lrpName, chassisID, "1")
-	}
 
-	_, stderr, err := util.RunOVNNbctl(lrpArgs...)
-	if err != nil {
-		klog.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
-		return err
+		gatewayChassisName := lrpName + "-" + chassisID
+		gatewayChassis := nbdb.GatewayChassis{
+			Name:        gatewayChassisName,
+			ChassisName: chassisID,
+			Priority:    1,
+		}
+
+		opModels := []libovsdbops.OperationModel{
+			{
+				Model: &gatewayChassis,
+				OnModelUpdates: []interface{}{
+					&gatewayChassis.ChassisName,
+					&gatewayChassis.Priority,
+				},
+				DoAfter: func() {
+					if gatewayChassis.UUID != "" {
+						logicalRouterPort.GatewayChassis = []string{gatewayChassis.UUID}
+					}
+				},
+			},
+			{
+				Model: &logicalRouterPort,
+				OnModelMutations: []interface{}{
+					&logicalRouterPort.GatewayChassis,
+				},
+				ErrNotFound: true,
+			},
+		}
+
+		if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+			klog.Errorf("Failed to add gateway chassis %s to logical router port %s, error: %v", chassisID, lrpName, err)
+			return err
+		}
 	}
 
 	return nil

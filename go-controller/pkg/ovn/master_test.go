@@ -244,11 +244,20 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID, sct
 
 func addNodeLogicalFlows(testData []libovsdb.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter, expectedNodeSwitch *nbdb.LogicalSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup *nbdb.PortGroup, fexec *ovntest.FakeExec, node *tNode, clusterCIDR string, enableIPv6 bool) []libovsdb.TestData {
 
+	lrpName := types.RouterToSwitchPrefix + node.Name
+	chassisName := node.SystemID
+	testData = append(testData, &nbdb.GatewayChassis{
+		UUID:        chassisName + "-UUID",
+		ChassisName: chassisName,
+		Name:        lrpName + "-" + chassisName,
+		Priority:    1,
+	})
 	testData = append(testData, &nbdb.LogicalRouterPort{
-		Name:     types.RouterToSwitchPrefix + node.Name,
-		UUID:     types.RouterToSwitchPrefix + node.Name + "-UUID",
-		MAC:      node.NodeLRPMAC,
-		Networks: []string{node.NodeGWIP},
+		Name:           lrpName,
+		UUID:           types.RouterToSwitchPrefix + node.Name + "-UUID",
+		MAC:            node.NodeLRPMAC,
+		Networks:       []string{node.NodeGWIP},
+		GatewayChassis: []string{chassisName + "-UUID"},
 	})
 
 	expectedOVNClusterRouter.Ports = append(expectedOVNClusterRouter.Ports, types.RouterToSwitchPrefix+node.Name+"-UUID")
@@ -274,10 +283,6 @@ func addNodeLogicalFlows(testData []libovsdb.TestData, expectedOVNClusterRouter 
 	})
 	expectedNodeSwitch.Ports = append(expectedNodeSwitch.Ports, types.K8sPrefix+node.Name+"-UUID")
 	expectedClusterPortGroup.Ports = []string{types.K8sPrefix + node.Name + "-UUID"}
-
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --if-exists lrp-del " + types.RouterToSwitchPrefix + node.Name + " -- lrp-add ovn_cluster_router " + types.RouterToSwitchPrefix + node.Name + " " + node.NodeLRPMAC + " " + node.NodeGWIP + " -- lrp-set-gateway-chassis " + types.RouterToSwitchPrefix + node.Name + " " + node.SystemID + " 1",
-	})
 
 	matchStr1 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == %s /* %s */`, node.Name, node.GatewayRouterIP, node.Name)
 	matchStr2 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == 9.9.9.9 /* %s */`, node.Name, node.Name)
