@@ -290,6 +290,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	var allOps []ovsdb.Operation
 	var addresses []string
 	var releaseIPs bool
+	lspExist := false
 	needsIP := true
 
 	// Check if the pod's logical switch port already exists. If it
@@ -306,6 +307,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		lsp.UUID = libovsdbops.BuildNamedUUID()
 	} else {
 		lsp.UUID = getLSP.UUID
+		lspExist = true
 	}
 
 	lsp.Options = make(map[string]string)
@@ -320,7 +322,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// (then ovn-controller won't bind the interface).
 	// May happen on upgrade, because ovnkube-node doesn't update
 	// existing OVS interfaces with new iface-id-ver option.
-	if len(getLSP.UUID) == 0 || len(getLSP.Options["iface-id-ver"]) != 0 {
+	if !lspExist || len(getLSP.Options["iface-id-ver"]) != 0 {
 		lsp.Options["iface-id-ver"] = string(pod.UID)
 	}
 	// Bind the port to the node's chassis; prevents ping-ponging between
@@ -489,10 +491,10 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// set addresses on the port
-	addresses = make([]string, len(podIfAddrs)+1)
-	addresses[0] = podMac.String()
-	for idx, podIfAddr := range podIfAddrs {
-		addresses[idx+1] = podIfAddr.IP.String()
+	// LSP addresses in OVN are a single space-separated value
+	addresses = []string{podMac.String()}
+	for _, podIfAddr := range podIfAddrs {
+		addresses[0] = addresses[0] + " " + podIfAddr.IP.String()
 	}
 
 	lsp.Addresses = addresses
@@ -503,7 +505,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// CNI depends on the flows from port security, delay setting it until end
 	lsp.PortSecurity = addresses
 
-	if libovsdbops.IsNamedUUID(lsp.UUID) {
+	if !lspExist {
 		// create new logical switch port
 		ops, err := oc.nbClient.Create(lsp)
 		if err != nil {
@@ -539,7 +541,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	// Add the pod's logical switch port to the port cache
 	var lspUUID string
-	if len(results) >= 1 && libovsdbops.IsNamedUUID(lsp.UUID) {
+	if len(results) >= 1 && !lspExist {
 		// the results may have mutltiple entries but should only be on one UUID
 		lspUUID = results[0].UUID.GoUUID
 	} else {

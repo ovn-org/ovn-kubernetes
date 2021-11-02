@@ -131,14 +131,14 @@ func newNBServer(cfg config.OvnAuthConfig, data []TestData) (*server.OvsdbServer
 	return newOVSDBServer(cfg, dbModel, schema, data)
 }
 
-func updateData(db server.Database, dbModel *model.ClientDBModel, schema ovsdb.DatabaseSchema, data []TestData) error {
+func updateData(db server.Database, dbModel model.ClientDBModel, schema ovsdb.DatabaseSchema, data []TestData) error {
 	dbName := dbModel.Name()
-	m := mapper.NewMapper(&schema)
+	m := mapper.NewMapper(schema)
 	updates := ovsdb.TableUpdates2{}
 	namedUUIDs := map[string]string{}
 	newData := copystructure.Must(copystructure.Copy(data)).([]TestData)
 
-	dbMod, errs := model.NewDatabaseModel(&schema, dbModel)
+	dbMod, errs := model.NewDatabaseModel(schema, dbModel)
 	if len(errs) > 0 {
 		return errs[0]
 	}
@@ -200,24 +200,24 @@ func updateData(db server.Database, dbModel *model.ClientDBModel, schema ovsdb.D
 	return nil
 }
 
-func newOVSDBServer(cfg config.OvnAuthConfig, dbModel *model.ClientDBModel, schema ovsdb.DatabaseSchema, data []TestData) (*server.OvsdbServer, error) {
+func newOVSDBServer(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, schema ovsdb.DatabaseSchema, data []TestData) (*server.OvsdbServer, error) {
 	serverDBModel, err := serverdb.FullDatabaseModel()
 	if err != nil {
 		return nil, err
 	}
 	serverSchema := serverdb.Schema()
 
-	db := server.NewInMemoryDatabase(map[string]*model.ClientDBModel{
+	db := server.NewInMemoryDatabase(map[string]model.ClientDBModel{
 		schema.Name:       dbModel,
 		serverSchema.Name: serverDBModel,
 	})
 
-	dbMod, errs := model.NewDatabaseModel(&schema, dbModel)
+	dbMod, errs := model.NewDatabaseModel(schema, dbModel)
 	if len(errs) > 0 {
 		log.Fatal(errs)
 	}
 
-	servMod, errs := model.NewDatabaseModel(&serverSchema, serverDBModel)
+	servMod, errs := model.NewDatabaseModel(serverSchema, serverDBModel)
 	if len(errs) > 0 {
 		log.Fatal(errs)
 	}

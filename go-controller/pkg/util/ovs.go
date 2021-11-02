@@ -633,7 +633,14 @@ func RunOVNCtl(args ...string) (string, string, error) {
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
-// RunOVNNBAppCtl runs an 'ovs-appctl -t nbdbCtlSockPath command'.
+// RunOVNNBAppCtlWithTimeout runs an ovn-appctl command with a timeout to nbdb
+func RunOVNNBAppCtlWithTimeout(timeout int, args ...string) (string, string, error) {
+	cmdArgs := []string{fmt.Sprintf("--timeout=%d", timeout)}
+	cmdArgs = append(cmdArgs, args...)
+	return RunOVNNBAppCtl(cmdArgs...)
+}
+
+// RunOVNNBAppCtl runs an 'ovn-appctl -t nbdbCtlSockPath command'.
 func RunOVNNBAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
 	cmdArgs = []string{
@@ -645,7 +652,14 @@ func RunOVNNBAppCtl(args ...string) (string, string, error) {
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
-// RunOVNSBAppCtl runs an 'ovs-appctl -t sbdbCtlSockPath command'.
+// RunOVNSBAppCtlWithTimeout runs an ovn-appctl command with a timeout to sbdb
+func RunOVNSBAppCtlWithTimeout(timeout int, args ...string) (string, string, error) {
+	cmdArgs := []string{fmt.Sprintf("--timeout=%d", timeout)}
+	cmdArgs = append(cmdArgs, args...)
+	return RunOVNSBAppCtl(cmdArgs...)
+}
+
+// RunOVNSBAppCtl runs an 'ovn-appctl -t sbdbCtlSockPath command'.
 func RunOVNSBAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
 	cmdArgs = []string{

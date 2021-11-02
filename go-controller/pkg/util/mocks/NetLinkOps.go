@@ -87,6 +87,29 @@ func (_m *NetLinkOps) ConntrackDeleteFilter(table netlink.ConntrackTableType, fa
 	return r0, r1
 }
 
+// LinkByIndex provides a mock function with given fields: index
+func (_m *NetLinkOps) LinkByIndex(index int) (netlink.Link, error) {
+	ret := _m.Called(index)
+
+	var r0 netlink.Link
+	if rf, ok := ret.Get(0).(func(int) netlink.Link); ok {
+		r0 = rf(index)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(netlink.Link)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(int) error); ok {
+		r1 = rf(index)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // LinkByName provides a mock function with given fields: ifaceName
 func (_m *NetLinkOps) LinkByName(ifaceName string) (netlink.Link, error) {
 	ret := _m.Called(ifaceName)

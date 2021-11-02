@@ -114,7 +114,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		}, table.Entry("No BFD", false, []libovsdbtest.TestData{
 			&nbdb.LogicalSwitchPort{
 				UUID:      "lsp1",
-				Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				ExternalIDs: map[string]string{
 					"pod":       "true",
 					"namespace": "namespace1",
@@ -124,7 +124,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					"iface-id-ver":      "myPod",
 					"requested-chassis": "node1",
 				},
-				PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 			},
 			&nbdb.LogicalSwitch{
 				UUID:  "node1",
@@ -150,7 +150,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					UUID:      "lsp1",
-					Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					ExternalIDs: map[string]string{
 						"pod":       "true",
 						"namespace": "namespace1",
@@ -160,7 +160,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						"iface-id-ver":      "myPod",
 						"requested-chassis": "node1",
 					},
-					PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
 				&nbdb.LogicalSwitch{
 					UUID:  "node1",
@@ -247,7 +247,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		}, table.Entry("No BFD", false, []libovsdbtest.TestData{
 			&nbdb.LogicalSwitchPort{
 				UUID:      "lsp1",
-				Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				ExternalIDs: map[string]string{
 					"pod":       "true",
 					"namespace": "namespace1",
@@ -257,7 +257,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					"iface-id-ver":      "myPod",
 					"requested-chassis": "node1",
 				},
-				PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 			},
 			&nbdb.LogicalSwitch{
 				UUID:  "node1",
@@ -283,7 +283,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					UUID:      "lsp1",
-					Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					ExternalIDs: map[string]string{
 						"pod":       "true",
 						"namespace": "namespace1",
@@ -293,7 +293,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						"iface-id-ver":      "myPod",
 						"requested-chassis": "node1",
 					},
-					PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
 				&nbdb.LogicalSwitch{
 					UUID:  "node1",
@@ -384,7 +384,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			table.Entry("No BFD", false, []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					UUID:      "lsp1",
-					Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					ExternalIDs: map[string]string{
 						"pod":       "true",
 						"namespace": "namespace1",
@@ -394,7 +394,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						"iface-id-ver":      "myPod",
 						"requested-chassis": "node1",
 					},
-					PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
 				&nbdb.LogicalSwitch{
 					UUID:  "node1",
@@ -430,7 +430,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					UUID:      "lsp1",
-					Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					ExternalIDs: map[string]string{
 						"pod":       "true",
 						"namespace": "namespace1",
@@ -440,7 +440,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						"iface-id-ver":      "myPod",
 						"requested-chassis": "node1",
 					},
-					PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
 				&nbdb.LogicalSwitch{
 					UUID:  "node1",
@@ -841,7 +841,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				[]libovsdbtest.TestData{
 					&nbdb.LogicalSwitchPort{
 						UUID:      "lsp1",
-						Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 						ExternalIDs: map[string]string{
 							"pod":       "true",
 							"namespace": "namespace1",
@@ -851,7 +851,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							"iface-id-ver":      "myPod",
 							"requested-chassis": "node1",
 						},
-						PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
 					&nbdb.LogicalSwitch{
 						UUID:  "node1",
@@ -912,7 +912,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				[]libovsdbtest.TestData{
 					&nbdb.LogicalSwitchPort{
 						UUID:      "lsp1",
-						Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 						ExternalIDs: map[string]string{
 							"pod":       "true",
 							"namespace": "namespace1",
@@ -922,7 +922,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							"iface-id-ver":      "myPod",
 							"requested-chassis": "node1",
 						},
-						PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
 					&nbdb.LogicalSwitch{
 						UUID:  "node1",
@@ -1001,7 +1001,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		}, table.Entry("No BFD", false, []libovsdbtest.TestData{
 			&nbdb.LogicalSwitchPort{
 				UUID:      "lsp1",
-				Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				ExternalIDs: map[string]string{
 					"pod":       "true",
 					"namespace": "namespace1",
@@ -1011,7 +1011,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					"iface-id-ver":      "myPod",
 					"requested-chassis": "node1",
 				},
-				PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 			},
 			&nbdb.LogicalSwitch{
 				UUID:  "node1",
@@ -1037,7 +1037,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					UUID:      "lsp1",
-					Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					ExternalIDs: map[string]string{
 						"pod":       "true",
 						"namespace": "namespace1",
@@ -1047,7 +1047,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						"iface-id-ver":      "myPod",
 						"requested-chassis": "node1",
 					},
-					PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
 				&nbdb.LogicalSwitch{
 					UUID:  "node1",
@@ -1138,7 +1138,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		}, table.Entry("No BFD", false, []libovsdbtest.TestData{
 			&nbdb.LogicalSwitchPort{
 				UUID:      "lsp1",
-				Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				ExternalIDs: map[string]string{
 					"pod":       "true",
 					"namespace": "namespace1",
@@ -1148,7 +1148,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					"iface-id-ver":      "myPod",
 					"requested-chassis": "node1",
 				},
-				PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 			},
 			&nbdb.LogicalSwitch{
 				UUID:  "node1",
@@ -1174,7 +1174,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					UUID:      "lsp1",
-					Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					ExternalIDs: map[string]string{
 						"pod":       "true",
 						"namespace": "namespace1",
@@ -1184,7 +1184,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						"iface-id-ver":      "myPod",
 						"requested-chassis": "node1",
 					},
-					PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
 				&nbdb.LogicalSwitch{
 					UUID:  "node1",
@@ -1284,7 +1284,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		}, table.Entry("No BFD", false, []libovsdbtest.TestData{
 			&nbdb.LogicalSwitchPort{
 				UUID:      "lsp1",
-				Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				ExternalIDs: map[string]string{
 					"pod":       "true",
 					"namespace": "namespace1",
@@ -1294,7 +1294,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					"iface-id-ver":      "myPod",
 					"requested-chassis": "node1",
 				},
-				PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+				PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 			},
 			&nbdb.LogicalSwitch{
 				UUID:  "node1",
@@ -1320,7 +1320,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					UUID:      "lsp1",
-					Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					ExternalIDs: map[string]string{
 						"pod":       "true",
 						"namespace": "namespace1",
@@ -1330,7 +1330,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						"iface-id-ver":      "myPod",
 						"requested-chassis": "node1",
 					},
-					PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
 				&nbdb.LogicalSwitch{
 					UUID:  "node1",
@@ -1430,7 +1430,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				[]libovsdbtest.TestData{
 					&nbdb.LogicalSwitchPort{
 						UUID:      "lsp1",
-						Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 						ExternalIDs: map[string]string{
 							"pod":       "true",
 							"namespace": "namespace1",
@@ -1440,7 +1440,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							"iface-id-ver":      "myPod",
 							"requested-chassis": "node1",
 						},
-						PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
 					&nbdb.LogicalSwitch{
 						UUID:  "node1",
@@ -1466,7 +1466,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				[]libovsdbtest.TestData{
 					&nbdb.LogicalSwitchPort{
 						UUID:      "lsp1",
-						Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 						ExternalIDs: map[string]string{
 							"pod":       "true",
 							"namespace": "namespace1",
@@ -1476,7 +1476,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							"iface-id-ver":      "myPod",
 							"requested-chassis": "node1",
 						},
-						PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
 					&nbdb.LogicalSwitch{
 						UUID:  "node1",
@@ -1493,7 +1493,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			table.Entry("BFD Enabled", true, []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					UUID:      "lsp1",
-					Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					ExternalIDs: map[string]string{
 						"pod":       "true",
 						"namespace": "namespace1",
@@ -1503,7 +1503,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						"iface-id-ver":      "myPod",
 						"requested-chassis": "node1",
 					},
-					PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+					PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				},
 				&nbdb.LogicalSwitch{
 					UUID:  "node1",
@@ -1535,7 +1535,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				[]libovsdbtest.TestData{
 					&nbdb.LogicalSwitchPort{
 						UUID:      "lsp1",
-						Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 						ExternalIDs: map[string]string{
 							"pod":       "true",
 							"namespace": "namespace1",
@@ -1545,7 +1545,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							"iface-id-ver":      "myPod",
 							"requested-chassis": "node1",
 						},
-						PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
 					&nbdb.LogicalSwitch{
 						UUID:  "node1",
@@ -1618,7 +1618,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				finalNB := []libovsdbtest.TestData{
 					&nbdb.LogicalSwitchPort{
 						UUID:      "lsp1",
-						Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 						ExternalIDs: map[string]string{
 							"pod":       "true",
 							"namespace": "namespace1",
@@ -1628,7 +1628,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							"iface-id-ver":      "myPod",
 							"requested-chassis": "node1",
 						},
-						PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
 					&nbdb.LogicalSwitch{
 						UUID:  "node1",
@@ -1731,7 +1731,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				finalNB := []libovsdbtest.TestData{
 					&nbdb.LogicalSwitchPort{
 						UUID:      "lsp1",
-						Addresses: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 						ExternalIDs: map[string]string{
 							"pod":       "true",
 							"namespace": "namespace1",
@@ -1741,7 +1741,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 							"iface-id-ver":      "myPod",
 							"requested-chassis": "node1",
 						},
-						PortSecurity: []string{"0a:58:0a:80:01:03", "10.128.1.3"},
+						PortSecurity: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					},
 					&nbdb.LogicalSwitch{
 						UUID:  "node1",

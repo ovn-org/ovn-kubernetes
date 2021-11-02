@@ -70,7 +70,7 @@ func ovnNBDBReadiness(target string) error {
 
 	// 1. Check if the OVN NB process is running.
 	// 2. Check if OVN NB process is listening on the port that it is supposed to
-	_, _, err = util.RunOVNNBAppCtl("--timeout=5", "ovsdb-server/list-dbs")
+	_, _, err = util.RunOVNNBAppCtlWithTimeout(5, "ovsdb-server/list-dbs")
 	if err != nil {
 		return fmt.Errorf("failed connecting to %q: (%v)", target, err)
 	}

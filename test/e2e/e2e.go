@@ -2710,7 +2710,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		return fmt.Errorf("gave up after waiting %v for pod %q to be %q: pod is not found", timeout, podName, desc)
 	}
 
-	// waitForPodToFinishFullRestart waits for a the pod to finish it's reset cycle and returns.
+	// waitForPodToFinishFullRestart waits for a the pod to finish its reset cycle and returns.
 	waitForPodToFinishFullRestart := func(f *framework.Framework, pod *v1.Pod) {
 		podClient := f.ClientSet.CoreV1().Pods(pod.Namespace)
 		// loop until pod with new UID exists
@@ -2731,7 +2731,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		// so we will use "WaitForPodConditionAllowNotFoundErrors" in order to handle properly those errors.
 		err = WaitForPodConditionAllowNotFoundErrors(f, pod.Namespace, pod.Name, "running and ready", 5*time.Minute, testutils.PodRunningReady)
 		if err != nil {
-			framework.Failf("pod %v is not arrived to running and ready state: %v", pod.Name, err)
+			framework.Failf("pod %v did not reach running and ready state: %v", pod.Name, err)
 		}
 	}
 
@@ -2767,7 +2767,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		return deployment
 	}
 
-	allFilesExistsOnPod := func(f *framework.Framework, namespace string, pod *v1.Pod, files []string) bool {
+	allFilesExistOnPod := func(f *framework.Framework, namespace string, pod *v1.Pod, files []string) bool {
 		for _, file := range files {
 			if !fileExistsOnPod(f, namespace, pod, file) {
 				framework.Logf("file %s not exists", file)
@@ -2833,7 +2833,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		for {
 			select {
 			case msg := <-syncChan:
-				framework.Logf(msg + "finish connectivity test.")
+				framework.Logf(msg + ": finish connectivity test.")
 				break L
 			default:
 				stdout, err := framework.RunKubectl(f.Namespace.Name, "exec", pod1Name, "--", "curl", fmt.Sprintf("%s/hostname", net.JoinHostPort(pod2IP, port)))
@@ -2848,7 +2848,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		errChan <- nil
 	}
 
-	table.DescribeTable("recovering from deleting db files while maintain connectivity",
+	table.DescribeTable("recovering from deleting db files while maintaining connectivity",
 		func(db_pod_num int, DBFileNamesToDelete []string) {
 			var (
 				db_pod_name = fmt.Sprintf("%s-%d", databasePodPrefix, db_pod_num)
@@ -2864,26 +2864,26 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 			}
 
 			framework.Logf("connectivity test before deleting db files")
-			framework.Logf("test simple connectivity from new pod to API server,before deleting db files")
+			framework.Logf("test simple connectivity from new pod to API server, before deleting db files")
 			singlePodConnectivityTest(f, "before-delete-db-files")
-			framework.Logf("setup two pods for continues connectivity test ")
+			framework.Logf("setup two pods for continuous connectivity test")
 			syncChan, errChan := make(chan string), make(chan error)
 			go func() {
 				defer ginkgo.GinkgoRecover()
 				twoPodsContinuousConnectivityTest(f, ovnWorkerNode, ovnWorkerNode2, syncChan, errChan)
 			}()
-			//wait for the connectivity test pods to be ready
-			framework.Logf(<-syncChan + "delete and restart db pods.")
+			// wait for the connectivity test pods to be ready
+			framework.Logf(<-syncChan + ": delete and restart db pods.")
 
 			// Start the db disruption - delete the db files and delete the db-pod in order to emulate the cluster/pod restart
 
-			// Retrive the DB pod
+			// Retrieve the DB pod
 			dbPod, err := f.ClientSet.CoreV1().Pods(ovnNs).Get(context.Background(), db_pod_name, metav1.GetOptions{})
 			framework.ExpectNoError(err, fmt.Sprintf("unable to get pod: %s, err: %v", db_pod_name, err))
 
-			// Check that all files exists on pod
-			framework.Logf("make sure that all the db files are exists on the db pod:%s", dbPod.Name)
-			if !allFilesExistsOnPod(f, ovnNs, dbPod, allDBFiles) {
+			// Check that all files are on the db pod
+			framework.Logf("make sure that all the db files are on db pod %s", dbPod.Name)
+			if !allFilesExistOnPod(f, ovnNs, dbPod, allDBFiles) {
 				framework.Failf("Error: db files not found")
 			}
 			// Delete the db files from the db-pod
@@ -2892,41 +2892,41 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 				deleteFileFromPod(f, ovnNs, dbPod, db_file)
 			}
 			// Delete the db-pod in order to emulate the cluster/pod restart
-			framework.Logf("deleting db pod:%s", dbPod.Name)
+			framework.Logf("deleting db pod %s", dbPod.Name)
 			deletePod(f, ovnNs, dbPod.Name)
 
 			framework.Logf("wait for db pod to finish full restart")
 			waitForPodToFinishFullRestart(f, dbPod)
 
 			// Check db files existence
-			// Check that all files exists on pod
-			framework.Logf("make sure that all the db files are exists on the db pod:%s", dbPod.Name)
-			if !allFilesExistsOnPod(f, ovnNs, dbPod, allDBFiles) {
+			// Check that all files are on pod
+			framework.Logf("make sure that all the db files are on db pod %s", dbPod.Name)
+			if !allFilesExistOnPod(f, ovnNs, dbPod, allDBFiles) {
 				framework.Failf("Error: db files not found")
 			}
 
 			// disruption over.
-			syncChan <- "disruption over."
+			syncChan <- "disruption over"
 			framework.ExpectNoError(<-errChan)
 
-			framework.Logf("test simple connectivity from new pod to API server,after recovery")
+			framework.Logf("test simple connectivity from new pod to API server, after recovery")
 			singlePodConnectivityTest(f, "after-delete-db-files")
 		},
 
 		// One can choose to delete only specific db file (uncomment the requested lines)
 
 		// db pod 0
-		table.Entry("when delete both db files on ovnkube-db-0", 0, []string{northDBFileName, southDBFileName}),
+		table.Entry("when deleting both db files on ovnkube-db-0", 0, []string{northDBFileName, southDBFileName}),
 		// table.Entry("when delete north db on ovnkube-db-0", 0, []string{northDBFileName}),
 		// table.Entry("when delete south db on ovnkube-db-0", 0, []string{southDBFileName}),
 
 		// db pod 1
-		table.Entry("when delete both db files on ovnkube-db-1", 1, []string{northDBFileName, southDBFileName}),
+		table.Entry("when deleting both db files on ovnkube-db-1", 1, []string{northDBFileName, southDBFileName}),
 		// table.Entry("when delete north db on ovnkube-db-1", 1, []string{northDBFileName}),
 		// table.Entry("when delete south db on ovnkube-db-1", 1, []string{southDBFileName}),
 
 		// db pod 2
-		table.Entry("when delete both db files on ovnkube-db-2", 2, []string{northDBFileName, southDBFileName}),
+		table.Entry("when deleting both db files on ovnkube-db-2", 2, []string{northDBFileName, southDBFileName}),
 		// table.Entry("when delete north db on ovnkube-db-2", 2, []string{northDBFileName}),
 		// table.Entry("when delete south db on ovnkube-db-2", 2, []string{southDBFileName}),
 	)
@@ -3000,4 +3000,77 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		framework.Logf("test simple connectivity from new pod to API server,after recovery")
 		singlePodConnectivityTest(f, "after-delete-db-pods")
 	})
+})
+
+var _ = ginkgo.Describe("e2e IGMP validation", func() {
+	const (
+		svcname              string = "igmp-test"
+		ovnNs                string = "ovn-kubernetes"
+		port                 string = "8080"
+		ovnWorkerNode        string = "ovn-worker"
+		ovnWorkerNode2       string = "ovn-worker2"
+		mcastGroup           string = "224.1.1.1"
+		multicastListenerPod string = "multicast-listener-test-pod"
+		multicastSourcePod   string = "multicast-source-test-pod"
+		tcpdumpFileName      string = "tcpdump.txt"
+		retryTimeout                = 5 * time.Minute // polling timeout
+	)
+	var (
+		tcpDumpCommand = []string{"bash", "-c",
+			fmt.Sprintf("apk update; apk add tcpdump ; tcpdump multicast > %s", tcpdumpFileName)}
+		// Multicast group (-c 224.1.1.1), UDP (-u), TTL (-T 2), during (-t 3000) seconds, report every (-i 5) seconds
+		multicastSourceCommand = []string{"bash", "-c",
+			fmt.Sprintf("iperf -c %s -u -T 2 -t 3000 -i 5", mcastGroup)}
+	)
+	f := framework.NewDefaultFramework(svcname)
+	ginkgo.It("can retrieve multicast IGMP query", func() {
+		// Enable multicast of the test namespace annotation
+		ginkgo.By(fmt.Sprintf("annotating namespace: %s to enable multicast",f.Namespace.Name))
+		annotateArgs := []string{
+			"annotate",
+			"namespace",
+			f.Namespace.Name,
+			fmt.Sprintf("k8s.ovn.org/multicast-enabled=%s", "true"),
+		}
+		framework.RunKubectlOrDie(f.Namespace.Name, annotateArgs...)
+
+		// Create a multicast source pod
+		ginkgo.By("creating a multicast source pod in node " + ovnWorkerNode)
+		createGenericPod(f, multicastSourcePod, ovnWorkerNode, f.Namespace.Name, multicastSourceCommand)
+
+		// Create a multicast listener pod
+		ginkgo.By("creating a multicast listener pod in node " + ovnWorkerNode2)
+		createGenericPod(f, multicastListenerPod, ovnWorkerNode2, f.Namespace.Name, tcpDumpCommand)
+
+		// Wait for tcpdump on listener pod to be ready
+		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			kubectlOut, err := framework.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", "ls")
+			if err != nil {
+				framework.Failf("failed to retrieve multicast IGMP query: " + err.Error())
+			}
+			if !strings.Contains(kubectlOut, tcpdumpFileName) {
+				return false, nil
+			}
+			return true, nil
+		})
+		if err != nil {
+			framework.Failf("failed to retrieve multicast IGMP query: " + err.Error())
+		}
+
+		// The multicast listener pod join multicast group (-B 224.1.1.1), UDP (-u), during (-t 30) seconds, report every (-i 5) seconds
+		ginkgo.By("multicast listener pod join multicast group")
+		framework.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", fmt.Sprintf("iperf -s -B %s -u -t 30 -i 5", mcastGroup))
+
+		ginkgo.By(fmt.Sprintf("verifying that the IGMP query has been received"))
+		kubectlOut, err := framework.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", fmt.Sprintf("cat %s | grep igmp", tcpdumpFileName))
+		if err != nil {
+			framework.Failf("failed to retrieve multicast IGMP query: " + err.Error())
+		}
+		framework.Logf("output:")
+		framework.Logf(kubectlOut)
+		if kubectlOut == "" {
+			framework.Failf("failed to retrieve multicast IGMP query: igmp messages on the tcpdump logfile not found")
+		}
+	})
+
 })

@@ -19,6 +19,7 @@ import (
 type NetLinkOps interface {
 	LinkList() ([]netlink.Link, error)
 	LinkByName(ifaceName string) (netlink.Link, error)
+	LinkByIndex(index int) (netlink.Link, error)
 	LinkSetDown(link netlink.Link) error
 	LinkDelete(link netlink.Link) error
 	LinkSetName(link netlink.Link, newName string) error
@@ -65,6 +66,10 @@ func (defaultNetLinkOps) LinkList() ([]netlink.Link, error) {
 
 func (defaultNetLinkOps) LinkByName(ifaceName string) (netlink.Link, error) {
 	return netlink.LinkByName(ifaceName)
+}
+
+func (defaultNetLinkOps) LinkByIndex(index int) (netlink.Link, error) {
+	return netlink.LinkByIndex(index)
 }
 
 func (defaultNetLinkOps) LinkSetDown(link netlink.Link) error {
@@ -422,12 +427,26 @@ func GetIPv6OnSubnet(iface string, ip *net.IPNet) (*net.IPNet, error) {
 	return &dst, nil
 }
 
-// GetNetworkInterfaceMTU returns the MTU for the given network interface
-func GetNetworkInterfaceMTU(iface string) (int, error) {
-	link, err := netLinkOps.LinkByName(iface)
+// GetIFNameAndMTUForAddress returns the interfaceName and MTU for the given network address
+func GetIFNameAndMTUForAddress(ifAddress net.IP) (string, int, error) {
+	// from the IP address arrive at the link
+	addressFamily := getFamily(ifAddress)
+	allAddresses, err := netLinkOps.AddrList(nil, addressFamily)
 	if err != nil {
-		return 0, fmt.Errorf("failed to lookup link %s: %v", iface, err)
+		return "", 0, fmt.Errorf("failed to list all the addresses for address family (%d): %v", addressFamily, err)
+
+	}
+	for _, address := range allAddresses {
+		if address.IP.Equal(ifAddress) {
+			link, err := netLinkOps.LinkByIndex(address.LinkIndex)
+			if err != nil {
+				return "", 0, fmt.Errorf("failed to lookup link with address(%s) and index(%d): %v",
+					ifAddress, address.LinkIndex, err)
+			}
+
+			return link.Attrs().Name, link.Attrs().MTU, nil
+		}
 	}
 
-	return link.Attrs().MTU, nil
+	return "", 0, fmt.Errorf("couldn't not find a link associated with the given OVN Encap IP (%s)", ifAddress)
 }

@@ -290,7 +290,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 				", stderr:%s: %v", node.Name, stderr, err)
 		}
 		for _, subnet := range subnets {
-			if err := util.UpdateNodeSwitchExcludeIPs(node.Name, subnet); err != nil {
+			if err := util.UpdateNodeSwitchExcludeIPs(m.nbClient, node.Name, subnet); err != nil {
 				return err
 			}
 		}

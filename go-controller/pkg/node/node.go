@@ -150,6 +150,7 @@ func setupOVNNode(node *kapi.Node) error {
 		if err != nil {
 			return fmt.Errorf("failed to obtain local IP from node %q: %v", node.Name, err)
 		}
+		config.Default.EncapIP = encapIP
 	} else {
 		if ip := net.ParseIP(encapIP); ip == nil {
 			return fmt.Errorf("invalid encapsulation IP provided %q", encapIP)
@@ -223,54 +224,39 @@ func setupOVNNode(node *kapi.Node) error {
 	return nil
 }
 
-func isOVNControllerReady(name string) (bool, error) {
+func isOVNControllerReady() (bool, error) {
+	// check node's connection status
 	runDir := util.GetOvnRunDir()
-
 	pid, err := ioutil.ReadFile(runDir + "ovn-controller.pid")
 	if err != nil {
 		return false, fmt.Errorf("unknown pid for ovn-controller process: %v", err)
 	}
-
-	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
-		ctlFile := runDir + fmt.Sprintf("ovn-controller.%s.ctl", strings.TrimSuffix(string(pid), "\n"))
-		ret, _, err := util.RunOVSAppctl("-t", ctlFile, "connection-status")
-		if err == nil {
-			klog.Infof("Node %s connection status = %s", name, ret)
-			return ret == "connected", nil
-		}
-		return false, err
-	})
+	ctlFile := runDir + fmt.Sprintf("ovn-controller.%s.ctl", strings.TrimSuffix(string(pid), "\n"))
+	ret, _, err := util.RunOVSAppctl("-t", ctlFile, "connection-status")
 	if err != nil {
-		return false, fmt.Errorf("timed out waiting sbdb for node %s: %v", name, err)
+		return false, fmt.Errorf("could not get connection status: %w", err)
+	}
+	klog.Infof("Node connection status = %s", ret)
+	if ret != "connected" {
+		return false, nil
 	}
 
-	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
-		_, _, err := util.RunOVSVsctl("--", "br-exists", "br-int")
-		if err != nil {
-			return false, nil
-		}
-		return true, nil
-	})
+	// check whether br-int exists on node
+	_, _, err = util.RunOVSVsctl("--", "br-exists", "br-int")
 	if err != nil {
-		return false, fmt.Errorf("timed out checking whether br-int exists or not on node %s: %v", name, err)
+		return false, nil
 	}
 
-	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
-		stdout, _, err := util.RunOVSOfctl("dump-aggregate", "br-int")
-		if err != nil {
-			klog.V(5).Infof("Error dumping aggregate flows: %v "+
-				"for node: %s", err, name)
-			return false, nil
-		}
-		ret := strings.Contains(stdout, "flow_count=0")
-		if ret {
-			klog.V(5).Infof("Got a flow count of 0 when "+
-				"dumping flows for node: %s", name)
-		}
-		return !ret, nil
-	})
+	// check by dumping br-int flow entries
+	stdout, _, err := util.RunOVSOfctl("dump-aggregate", "br-int")
 	if err != nil {
-		return false, fmt.Errorf("timed out dumping br-int flow entries for node %s: %v", name, err)
+		klog.V(5).Infof("Error dumping aggregate flows: %v", err)
+		return false, nil
+	}
+	hasFlowCountZero := strings.Contains(stdout, "flow_count=0")
+	if hasFlowCountZero {
+		klog.V(5).Info("Got a flow count of 0 when dumping flows for node")
+		return false, nil
 	}
 
 	return true, nil
@@ -368,9 +354,6 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, util.JoinIPNets(subnets, ","))
 
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
-		if _, err = isOVNControllerReady(n.name); err != nil {
-			return err
-		}
 		isOvnUpEnabled, err = getOVNIfUpCheckMode()
 		if err != nil {
 			return err
@@ -594,16 +577,19 @@ func (n *OvnNode) WatchEndpoints() {
 	}, nil)
 }
 
-// validateGatewayMTU checks if the MTU of the given network interface is big
-// enough to carry the `config.Default.MTU` and the Geneve header. If the MTU
-// is not big enough, it will taint the node with the value of
-// `types.OvnK8sSmallMTUTaintKey`
-func (n *OvnNode) validateGatewayMTU(gatewayInterfaceName string) error {
+// validateVTEPInterfaceMTU checks if the MTU of the interface that has ovn-encap-ip is big
+// enough to carry the `config.Default.MTU` and the Geneve header. If the MTU is not big
+// enough, it will taint the node with the value of `types.OvnK8sSmallMTUTaintKey`
+func (n *OvnNode) validateVTEPInterfaceMTU() error {
 	tooSmallMTUTaint := &kapi.Taint{Key: types.OvnK8sSmallMTUTaintKey, Effect: kapi.TaintEffectNoSchedule}
 
-	mtu, err := util.GetNetworkInterfaceMTU(gatewayInterfaceName)
+	ovnEncapIP := net.ParseIP(config.Default.EncapIP)
+	if ovnEncapIP == nil {
+		return fmt.Errorf("the set OVN Encap IP is invalid: (%s)", config.Default.EncapIP)
+	}
+	interfaceName, mtu, err := util.GetIFNameAndMTUForAddress(ovnEncapIP)
 	if err != nil {
-		return fmt.Errorf("could not get MTU from gateway network interface %s: %w", gatewayInterfaceName, err)
+		return fmt.Errorf("could not get MTU for the interface with address %s: %w", ovnEncapIP, err)
 	}
 
 	// calc required MTU
@@ -618,18 +604,20 @@ func (n *OvnNode) validateGatewayMTU(gatewayInterfaceName string) error {
 
 	// check if node needs to be tainted
 	if mtu < requiredMTU {
-		klog.V(2).Infof("MTU (%d) of gateway network interface %s is not big enough to deal with Geneve header overhead (sum %d). Tainting node with %v...", mtu, gatewayInterfaceName, requiredMTU, tooSmallMTUTaint)
+		klog.V(2).Infof("MTU (%d) of network interface %s is not big enough to deal with Geneve "+
+			"header overhead (sum %d). Tainting node with %v...", mtu, interfaceName,
+			requiredMTU, tooSmallMTUTaint)
 
 		return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			return n.Kube.SetTaintOnNode(n.name, tooSmallMTUTaint)
 		})
-	} else {
-		klog.V(2).Infof("MTU (%d) of gateway network interface %s is big enough to deal with Geneve header overhead (sum %d). Making sure node is not tainted with %v...", mtu, gatewayInterfaceName, requiredMTU, tooSmallMTUTaint)
-
-		return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			return n.Kube.RemoveTaintFromNode(n.name, tooSmallMTUTaint)
-		})
 	}
+	klog.V(2).Infof("MTU (%d) of network interface %s is big enough to deal with Geneve header overhead (sum %d). "+
+		"Making sure node is not tainted with %v...", mtu, interfaceName, requiredMTU, tooSmallMTUTaint)
+
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		return n.Kube.RemoveTaintFromNode(n.name, tooSmallMTUTaint)
+	})
 }
 
 type epAddressItem struct {
