@@ -1,13 +1,15 @@
 package addressset
 
 import (
+	"fmt"
+	goovn "github.com/ebay/go-ovn"
 	"net"
 
 	"github.com/urfave/cli/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -15,105 +17,104 @@ import (
 
 type testAddressSetName struct {
 	namespace string
-	//each suffix in turn
-	suffix []string
-	remove bool
+	suffix1   string
+	suffix2   string
 }
 
 const (
-	addrsetName = "foobar"
-	ipAddress1  = "1.2.3.4"
-	ipAddress2  = "5.6.7.8"
-	ipAddress3  = "fd00:10:244::"
-	ipAddress4  = "fc00:f853:ccd:e793::4"
-	fakeUUID    = "8a86f6d8-7972-4253-b0bd-ddbef66e9303"
-	fakeUUIDv6  = "8a86f6d8-7972-4253-b0bd-ddbef66e9304"
+	fakeUUID   = "8a86f6d8-7972-4253-b0bd-ddbef66e9303"
+	fakeUUIDv6 = "8a86f6d8-7972-4253-b0bd-ddbef66e9304"
 )
 
-func (asn *testAddressSetName) makeNames() string {
-	output := asn.namespace
-	for _, suffix := range asn.suffix {
-		output = output + "." + suffix
-	}
-	return output
-
+func (asn *testAddressSetName) makeName() string {
+	return fmt.Sprintf("%s.%s.%s", asn.namespace, asn.suffix1, asn.suffix2)
 }
 
 var _ = ginkgo.Describe("OVN Address Set operations", func() {
 	var (
-		app       *cli.App
-		asFactory AddressSetFactory
-		stopChan  chan struct{}
+		app         *cli.App
+		fexec       *ovntest.FakeExec
+		asFactory   AddressSetFactory
+		ovnNbClient goovn.Client
 	)
 
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
-		stopChan = make(chan struct{})
 
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
 
+		fexec = ovntest.NewFakeExec()
+		ovnNbClient = ovntest.NewMockOVNClient(goovn.DBNB)
+		asFactory = NewOvnAddressSetFactory(ovnNbClient)
+	})
+
+	ginkgo.JustBeforeEach(func() {
+		err := util.SetExec(fexec)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
 	ginkgo.AfterEach(func() {
-		close(stopChan)
+		err := ovnNbClient.Close()
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
 	ginkgo.Context("when iterating address sets", func() {
 		ginkgo.It("calls the iterator function for each address set with the given prefix", func() {
 			app.Action = func(ctx *cli.Context) error {
-				dbSetup := libovsdbtest.TestSetup{
-					NBData: []libovsdbtest.TestData{
-						&nbdb.AddressSet{
-							Name:        "1",
-							ExternalIDs: map[string]string{"name": "ns1.foo.bar"},
-						},
-						&nbdb.AddressSet{
-							Name:        "2",
-							ExternalIDs: map[string]string{"name": "ns2.test.test2"},
-						},
-
-						&nbdb.AddressSet{
-							Name:        "3",
-							ExternalIDs: map[string]string{"name": "ns3"},
-						},
-					},
-				}
-				libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
-
-				_, err = config.InitConfig(ctx, nil, nil)
+				_, err := config.InitConfig(ctx, fexec, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				namespaces := []testAddressSetName{
 					{
 						namespace: "ns1",
-						suffix:    []string{"foo", "bar"},
+						suffix1:   "foo",
+						suffix2:   "bar",
 					},
 					{
 						namespace: "ns2",
-						suffix:    []string{"test", "test2"},
+						suffix1:   "test",
+						suffix2:   "test2",
 					},
 					{
 						namespace: "ns3",
 					},
 				}
 
+				var namespacesRes string
+				for i, n := range namespaces {
+					name := n.makeName()
+					if i%2 == 0 {
+						namespacesRes += fmt.Sprintf("keyA=valA,name=%s\n", name)
+					} else {
+						namespacesRes += fmt.Sprintf("name=%s,keyB=valB\n", name)
+					}
+				}
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=external_ids find address_set",
+					Output: namespacesRes,
+				})
+
 				err = asFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) {
 					found := false
 					for _, n := range namespaces {
-						name := n.makeNames()
+						name := n.makeName()
 						if addrSetName == name {
 							found = true
 							gomega.Expect(namespaceName).To(gomega.Equal(n.namespace))
+							if n.suffix1 != "" {
+								gomega.Expect(nameSuffix).To(gomega.Equal(n.suffix1))
+							} else {
+								gomega.Expect(nameSuffix).To(gomega.Equal(""))
+							}
 						}
 					}
 					gomega.Expect(found).To(gomega.BeTrue())
 				})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -129,31 +130,21 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 					addr1 string = "1.2.3.4"
 					addr2 string = "5.6.7.8"
 				)
-				dbSetup := libovsdbtest.TestSetup{
-					NBData: []libovsdbtest.TestData{
-						&nbdb.AddressSet{
-							UUID:        "",
-							Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-							ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-							Addresses:   []string{"10.10.10.10"},
-						},
-					},
-				}
-				libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
 
-				_, err = config.InitConfig(ctx, nil, nil)
+				_, err := config.InitConfig(ctx, fexec, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+					Output: fakeUUID,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 set address_set ` + fakeUUID + ` addresses="` + addr1 + `" "` + addr2 + `"`,
+				})
 
 				_, err = asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
-				expectedDatabaseState := &nbdb.AddressSet{
-					Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-					Addresses:   []string{ipAddress1, ipAddress2},
-					ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-				}
-				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -163,29 +154,20 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 
 		ginkgo.It("clears an existing address set of IPs", func() {
 			app.Action = func(ctx *cli.Context) error {
-				dbSetup := libovsdbtest.TestSetup{
-					NBData: []libovsdbtest.TestData{
-						&nbdb.AddressSet{
-							UUID:        "",
-							Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-							ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-							Addresses:   []string{"10.10.10.10"},
-						},
-					},
-				}
-				libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-				_, err = config.InitConfig(ctx, nil, nil)
+				_, err := config.InitConfig(ctx, fexec, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+					Output: fakeUUID,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 clear address_set " + fakeUUID + " addresses",
+				})
+
 				_, err = asFactory.NewAddressSet("foobar", nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				expectedDatabaseState := &nbdb.AddressSet{
-					Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-					Addresses:   nil,
-					ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-				}
-				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -195,193 +177,25 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 
 		ginkgo.It("creates a new address set and sets IPs", func() {
 			app.Action = func(ctx *cli.Context) error {
-				dbSetup := libovsdbtest.TestSetup{}
-				libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
+				const (
+					addr1 string = "1.2.3.4"
+					addr2 string = "5.6.7.8"
+				)
 
-				_, err = config.InitConfig(ctx, nil, nil)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				expectedDatabaseState := &nbdb.AddressSet{
-					Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-					Addresses:   []string{ipAddress1, ipAddress2},
-					ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-				}
-
-				_, err = asFactory.NewAddressSet(addrsetName, []net.IP{net.ParseIP(ipAddress1), net.ParseIP(ipAddress2)})
-				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				return nil
-			}
-
-			err := app.Run([]string{app.Name})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		})
-
-		ginkgo.It("ensures an address set exists and returns it", func() {
-			app.Action = func(ctx *cli.Context) error {
-				dbSetup := libovsdbtest.TestSetup{
-					NBData: []libovsdbtest.TestData{
-						&nbdb.AddressSet{
-							UUID:        fakeUUID,
-							Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-							ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-							Addresses:   []string{ipAddress1},
-						},
-					},
-				}
-				libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
-
-				_, err = config.InitConfig(ctx, nil, nil)
+				_, err := config.InitConfig(ctx, fexec, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				as, err := asFactory.EnsureAddressSet("foobar")
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    `ovn-nbctl --timeout=15 create address_set name=a16990491322166530807 external-ids:name=foobar_v4 addresses="` + addr1 + `" "` + addr2 + `"`,
+					Output: fakeUUID,
+				})
+
+				_, err = asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				expectedDatabaseState := []libovsdbtest.TestData{
-					&nbdb.AddressSet{
-						UUID:        fakeUUID,
-						Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-						Addresses:   []string{ipAddress1},
-						ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-					},
-				}
-				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-				original_v4, original_v6 := as.GetASHashNames()
-				expected_v4, _ := MakeAddressSetHashNames("foobar")
-				gomega.Expect(original_v4).To(gomega.Equal(expected_v4))
-				gomega.Expect(original_v6).To(gomega.Equal(""))
-				return nil
-			}
-
-			err := app.Run([]string{app.Name})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		})
-
-		ginkgo.It("ensures an address set exists and returns it, both ip4 and ipv6", func() {
-			app.Action = func(ctx *cli.Context) error {
-				dbSetup := libovsdbtest.TestSetup{
-					NBData: []libovsdbtest.TestData{
-						&nbdb.AddressSet{
-							UUID:        fakeUUID,
-							Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-							ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-							Addresses:   []string{ipAddress1, ipAddress2},
-						},
-						&nbdb.AddressSet{
-							UUID:        fakeUUIDv6,
-							Name:        hashedAddressSet(addrsetName + ipv6AddressSetSuffix),
-							ExternalIDs: map[string]string{"name": addrsetName + ipv6AddressSetSuffix},
-							Addresses:   []string{ipAddress3, ipAddress4},
-						},
-					},
-				}
-				libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
-				_, err = config.InitConfig(ctx, nil, nil)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.IPv6Mode = true
-				config.IPv4Mode = true
-
-				expectedDatabaseState := []libovsdbtest.TestData{
-					&nbdb.AddressSet{
-						UUID:        fakeUUID,
-						Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-						Addresses:   []string{ipAddress1, ipAddress2},
-						ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-					},
-					&nbdb.AddressSet{
-						UUID:        fakeUUIDv6,
-						Name:        hashedAddressSet(addrsetName + ipv6AddressSetSuffix),
-						Addresses:   []string{ipAddress3, ipAddress4},
-						ExternalIDs: map[string]string{"name": addrsetName + ipv6AddressSetSuffix},
-					},
-				}
-
-				as, err := asFactory.EnsureAddressSet("foobar")
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-				original_v4, original_v6 := as.GetASHashNames()
-				expected_v4, expected_v6 := MakeAddressSetHashNames("foobar")
-				gomega.Expect(original_v4).To(gomega.Equal(expected_v4))
-				gomega.Expect(original_v6).To(gomega.Equal(expected_v6))
-				return nil
-			}
-
-			err := app.Run([]string{app.Name})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		})
-
-		ginkgo.It("ensures an empty address set exists and returns it", func() {
-			app.Action = func(ctx *cli.Context) error {
-				dbSetup := libovsdbtest.TestSetup{
-					NBData: []libovsdbtest.TestData{
-						&nbdb.AddressSet{
-							UUID:        fakeUUID,
-							Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-							ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-							Addresses:   []string{},
-						},
-					},
-				}
-				libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
-				_, err = config.InitConfig(ctx, nil, nil)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				as, err := asFactory.EnsureAddressSet("foobar")
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				expectedDatabaseState := []libovsdbtest.TestData{
-					&nbdb.AddressSet{
-						UUID:        fakeUUID,
-						Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-						Addresses:   []string{},
-						ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-					},
-				}
-
-				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-				original_v4, original_v6 := as.GetASHashNames()
-				expected_v4, _ := MakeAddressSetHashNames("foobar")
-				gomega.Expect(original_v4).To(gomega.Equal(expected_v4))
-				gomega.Expect(original_v6).To(gomega.Equal(""))
-				ipsv4, ipsv6 := as.GetIPs()
-				gomega.Expect(ipsv4).To(gomega.BeNil())
-				gomega.Expect(ipsv6).To(gomega.BeNil())
-				return nil
-			}
-
-			err := app.Run([]string{app.Name})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		})
-
-		ginkgo.It("ensures an address set exists and if not creates a new one", func() {
-			app.Action = func(ctx *cli.Context) error {
-				dbSetup := libovsdbtest.TestSetup{}
-				libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
-
-				_, err = config.InitConfig(ctx, nil, nil)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				expectedDatabaseState := &nbdb.AddressSet{
-					Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-					Addresses:   []string{},
-					ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-				}
-
-				as, err := asFactory.EnsureAddressSet("foobar")
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
-				v4ips, v6ips := as.GetIPs()
-				gomega.Expect(v4ips).To(gomega.BeNil())
-				gomega.Expect(v6ips).To(gomega.BeNil())
+				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -392,21 +206,24 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 
 	ginkgo.It("destroys an address set", func() {
 		app.Action = func(ctx *cli.Context) error {
-			dbSetup := libovsdbtest.TestSetup{}
-			libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
-
-			_, err = config.InitConfig(ctx, nil, nil)
+			_, err := config.InitConfig(ctx, fexec, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			as, err := asFactory.NewAddressSet(addrsetName, []net.IP{net.ParseIP(ipAddress1), net.ParseIP(ipAddress2)})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+				Output: fakeUUID,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 clear address_set " + fakeUUID + " addresses",
+				"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUID,
+			})
+
+			as, err := asFactory.NewAddressSet("foobar", nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			err = as.Destroy()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			expectedDatabaseState := []libovsdbtest.TestData{}
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+			gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 
@@ -419,59 +236,28 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				const addr1 string = "1.2.3.4"
 
-				dbSetup := libovsdbtest.TestSetup{}
-				libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
+				_, err := config.InitConfig(ctx, fexec, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
 
-				_, err = config.InitConfig(ctx, nil, nil)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 create address_set name=a16990491322166530807 external-ids:name=foobar_v4",
+					Output: fakeUUID,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 add address_set ` + fakeUUID + ` addresses "` + addr1 + `"`,
+				})
 
 				as, err := asFactory.NewAddressSet("foobar", nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				// Re-adding is a no-op
 				err = as.AddIPs([]net.IP{net.ParseIP(addr1)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				expectedDatabaseState := &nbdb.AddressSet{
-					Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-					Addresses:   []string{addr1},
-					ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-				}
-				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
-				return nil
-			}
-
-			err := app.Run([]string{app.Name})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		})
-
-		ginkgo.It("gets all IPs from an address set", func() {
-			app.Action = func(ctx *cli.Context) error {
-				dbSetup := libovsdbtest.TestSetup{
-					NBData: []libovsdbtest.TestData{
-						&nbdb.AddressSet{
-							UUID:        fakeUUID,
-							Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-							ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-							Addresses:   []string{ipAddress1, ipAddress2},
-						},
-					},
-				}
-				libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
-				_, err = config.InitConfig(ctx, nil, nil)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.IPv4Mode = true
-
-				as, err := asFactory.EnsureAddressSet("foobar")
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				ipsv4, ipsv6 := as.GetIPs()
-
-				gomega.Expect(ipsv4).To(gomega.Equal([]string{ipAddress1, ipAddress2}))
-				gomega.Expect(ipsv6).To(gomega.BeNil())
+				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -483,13 +269,20 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				const addr1 string = "1.2.3.4"
 
-				_, err := config.InitConfig(ctx, nil, nil)
+				_, err := config.InitConfig(ctx, fexec, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				dbSetup := libovsdbtest.TestSetup{}
-				libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    `ovn-nbctl --timeout=15 create address_set name=a16990491322166530807 external-ids:name=foobar_v4 addresses="` + addr1 + `"`,
+					Output: fakeUUID,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 remove address_set ` + fakeUUID + ` addresses "` + addr1 + `"`,
+				})
+
 				as, err := asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -499,13 +292,8 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				// Deleting a non-existent address is a no-op
 				err = as.DeleteIPs([]net.IP{net.ParseIP(addr1)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				expectedDatabaseState := &nbdb.AddressSet{
-					Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-					Addresses:   nil,
-					ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-				}
-				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 
+				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -518,28 +306,27 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				const addr2 string = "2.3.4.5"
 				const addr3 string = "7.8.9.10"
 
-				_, err := config.InitConfig(ctx, nil, nil)
+				_, err := config.InitConfig(ctx, fexec, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				dbSetup := libovsdbtest.TestSetup{}
-				libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    `ovn-nbctl --timeout=15 create address_set name=a16990491322166530807 external-ids:name=foobar_v4 addresses="` + addr1 + `"`,
+					Output: fakeUUID,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 set address_set ` + fakeUUID + ` addresses="` + addr2 + `" ` + `"` + addr3 + `"`,
+				})
+
 				as, err := asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				err = as.SetIPs([]net.IP{net.ParseIP(addr2), net.ParseIP(addr3)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				expectedDatabaseState := []libovsdbtest.TestData{
-					&nbdb.AddressSet{
-						Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-						Addresses:   []string{addr2, addr3},
-						ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-					},
-				}
-
-				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -558,31 +345,30 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 					addr4 string = "2001:db8::2"
 				)
 
-				_, err := config.InitConfig(ctx, nil, nil)
+				_, err := config.InitConfig(ctx, fexec, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				config.IPv6Mode = true
 
-				dbSetup := libovsdbtest.TestSetup{}
-				libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+					Output: fakeUUID,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 set address_set ` + fakeUUID + ` addresses="` + addr1 + `" "` + addr2 + `"`,
+				})
+
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990493521189787229",
+					Output: fakeUUIDv6,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 set address_set ` + fakeUUIDv6 + ` addresses="` + addr3 + `" "` + addr4 + `"`,
+				})
 
 				_, err = asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2),
 					net.ParseIP(addr3), net.ParseIP(addr4)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				expectedDatabaseState := []libovsdbtest.TestData{
-					&nbdb.AddressSet{
-						Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-						Addresses:   []string{addr1, addr2},
-						ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-					},
-					&nbdb.AddressSet{
-						Name:        hashedAddressSet(addrsetName + ipv6AddressSetSuffix),
-						Addresses:   []string{addr3, addr4},
-						ExternalIDs: map[string]string{"name": addrsetName + ipv6AddressSetSuffix},
-					},
-				}
-				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -592,39 +378,29 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 
 		ginkgo.It("clears an existing address set of dual stack IPs", func() {
 			app.Action = func(ctx *cli.Context) error {
-				const (
-					addr1 string = "1.2.3.4"
-					addr2 string = "5.6.7.8"
-					addr3 string = "2001:db8::1"
-					addr4 string = "2001:db8::2"
-				)
-				_, err := config.InitConfig(ctx, nil, nil)
+				_, err := config.InitConfig(ctx, fexec, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				config.IPv6Mode = true
 
-				dbSetup := libovsdbtest.TestSetup{}
-				libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+					Output: fakeUUID,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 clear address_set " + fakeUUID + " addresses",
+				})
 
-				_, err = asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2),
-					net.ParseIP(addr3), net.ParseIP(addr4)})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990493521189787229",
+					Output: fakeUUIDv6,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 clear address_set ` + fakeUUIDv6 + " addresses",
+				})
 
 				_, err = asFactory.NewAddressSet("foobar", nil)
-				expectedDatabaseState := []libovsdbtest.TestData{
-					&nbdb.AddressSet{
-						Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-						Addresses:   nil,
-						ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-					},
-					&nbdb.AddressSet{
-						Name:        hashedAddressSet(addrsetName + ipv6AddressSetSuffix),
-						Addresses:   nil,
-						ExternalIDs: map[string]string{"name": addrsetName + ipv6AddressSetSuffix},
-					},
-				}
-				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -641,31 +417,30 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 					addr4 string = "2001:db8::2"
 				)
 
-				_, err := config.InitConfig(ctx, nil, nil)
+				_, err := config.InitConfig(ctx, fexec, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				config.IPv6Mode = true
 
-				dbSetup := libovsdbtest.TestSetup{}
-				libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    `ovn-nbctl --timeout=15 create address_set name=a16990491322166530807 external-ids:name=foobar_v4 addresses="` + addr1 + `" "` + addr2 + `"`,
+					Output: fakeUUID,
+				})
+
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990493521189787229",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    `ovn-nbctl --timeout=15 create address_set name=a16990493521189787229 external-ids:name=foobar_v6 addresses="` + addr3 + `" "` + addr4 + `"`,
+					Output: fakeUUIDv6,
+				})
 
 				_, err = asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2),
 					net.ParseIP(addr3), net.ParseIP(addr4)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				expectedDatabaseState := []libovsdbtest.TestData{
-					&nbdb.AddressSet{
-						Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-						Addresses:   []string{addr1, addr2},
-						ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-					},
-					&nbdb.AddressSet{
-						Name:        hashedAddressSet(addrsetName + ipv6AddressSetSuffix),
-						Addresses:   []string{addr3, addr4},
-						ExternalIDs: map[string]string{"name": addrsetName + ipv6AddressSetSuffix},
-					},
-				}
-				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -676,42 +451,36 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 
 	ginkgo.It("destroys an dual stack address set", func() {
 		app.Action = func(ctx *cli.Context) error {
-			const (
-				addr1 string = "1.2.3.4"
-				addr2 string = "5.6.7.8"
-				addr3 string = "2001:db8::1"
-				addr4 string = "2001:db8::2"
-			)
-			_, err := config.InitConfig(ctx, nil, nil)
+			_, err := config.InitConfig(ctx, fexec, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			config.IPv6Mode = true
 
-			dbSetup := libovsdbtest.TestSetup{}
-			libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+				Output: fakeUUID,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 clear address_set " + fakeUUID + " addresses",
+			})
 
-			as, err := asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2),
-				net.ParseIP(addr3), net.ParseIP(addr4)})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990493521189787229",
+				Output: fakeUUIDv6,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 clear address_set " + fakeUUIDv6 + " addresses",
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUID,
+				"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUIDv6,
+			})
+
+			as, err := asFactory.NewAddressSet("foobar", nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			expectedDatabaseState := []libovsdbtest.TestData{
-				&nbdb.AddressSet{
-					Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-					Addresses:   []string{addr1, addr2},
-					ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-				},
-				&nbdb.AddressSet{
-					Name:        hashedAddressSet(addrsetName + ipv6AddressSetSuffix),
-					Addresses:   []string{addr3, addr4},
-					ExternalIDs: map[string]string{"name": addrsetName + ipv6AddressSetSuffix},
-				},
-			}
-			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 
 			err = as.Destroy()
-			expectedDatabaseState = []libovsdbtest.TestData{}
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+			gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 
@@ -725,51 +494,43 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				const addr1 string = "1.2.3.4"
 				const addr2 string = "2001:db8::1"
 
-				_, err := config.InitConfig(ctx, nil, nil)
+				_, err := config.InitConfig(ctx, fexec, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				config.IPv6Mode = true
 
-				dbSetup := libovsdbtest.TestSetup{}
-				libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 create address_set name=a16990491322166530807 external-ids:name=foobar_v4",
+					Output: fakeUUID,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990493521189787229",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 create address_set name=a16990493521189787229 external-ids:name=foobar_v6",
+					Output: fakeUUIDv6,
+				})
+
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 add address_set ` + fakeUUIDv6 + ` addresses "` + addr2 + `"`,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 add address_set ` + fakeUUID + ` addresses "` + addr1 + `"`,
+				})
 
 				as, err := asFactory.NewAddressSet("foobar", nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				expectedDatabaseState := []libovsdbtest.TestData{
-					&nbdb.AddressSet{
-						Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-						Addresses:   nil,
-						ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-					},
-					&nbdb.AddressSet{
-						Name:        hashedAddressSet(addrsetName + ipv6AddressSetSuffix),
-						Addresses:   nil,
-						ExternalIDs: map[string]string{"name": addrsetName + ipv6AddressSetSuffix},
-					},
-				}
-				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 
 				err = as.AddIPs([]net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
-				expectedDatabaseState = []libovsdbtest.TestData{
-					&nbdb.AddressSet{
-						Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-						Addresses:   []string{addr1},
-						ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-					},
-					&nbdb.AddressSet{
-						Name:        hashedAddressSet(addrsetName + ipv6AddressSetSuffix),
-						Addresses:   []string{addr2},
-						ExternalIDs: map[string]string{"name": addrsetName + ipv6AddressSetSuffix},
-					},
-				}
-				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// Re-adding is a no-op
 				err = as.AddIPs([]net.IP{net.ParseIP(addr1)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -782,51 +543,43 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				const addr1 string = "1.2.3.4"
 				const addr2 string = "2001:db8::1"
 
-				_, err := config.InitConfig(ctx, nil, nil)
+				_, err := config.InitConfig(ctx, fexec, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				config.IPv6Mode = true
 
-				dbSetup := libovsdbtest.TestSetup{}
-				libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    `ovn-nbctl --timeout=15 create address_set name=a16990491322166530807 external-ids:name=foobar_v4 addresses="` + addr1 + `"`,
+					Output: fakeUUID,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990493521189787229",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    `ovn-nbctl --timeout=15 create address_set name=a16990493521189787229 external-ids:name=foobar_v6 addresses="` + addr2 + `"`,
+					Output: fakeUUIDv6,
+				})
 
-				asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 remove address_set ` + fakeUUIDv6 + ` addresses "` + addr2 + `"`,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 remove address_set ` + fakeUUID + ` addresses "` + addr1 + `"`,
+				})
+
 				as, err := asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				expectedDatabaseState := []libovsdbtest.TestData{
-					&nbdb.AddressSet{
-						Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-						Addresses:   []string{addr1},
-						ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-					},
-					&nbdb.AddressSet{
-						Name:        hashedAddressSet(addrsetName + ipv6AddressSetSuffix),
-						Addresses:   []string{addr2},
-						ExternalIDs: map[string]string{"name": addrsetName + ipv6AddressSetSuffix},
-					},
-				}
-				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 
 				err = as.DeleteIPs([]net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				expectedDatabaseState = []libovsdbtest.TestData{
-					&nbdb.AddressSet{
-						Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
-						Addresses:   nil,
-						ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
-					},
-					&nbdb.AddressSet{
-						Name:        hashedAddressSet(addrsetName + ipv6AddressSetSuffix),
-						Addresses:   nil,
-						ExternalIDs: map[string]string{"name": addrsetName + ipv6AddressSetSuffix},
-					},
-				}
-				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
 
 				// Deleting a non-existent address is a no-op
 				err = as.DeleteIPs([]net.IP{net.ParseIP(addr1)})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 
@@ -837,92 +590,80 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 
 	ginkgo.Context("Dual Stack : when cleaning up old address sets", func() {
 		ginkgo.BeforeEach(func() {
+			fexec = ovntest.NewLooseCompareFakeExec()
 		})
 
 		ginkgo.It("destroys address sets in old non dual stack format", func() {
 			app.Action = func(ctx *cli.Context) error {
+				_, err := config.InitConfig(ctx, fexec, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 				namespaces := []testAddressSetName{
 					{
 						// to be removed as v4 address exists
 						namespace: "as1",
-						suffix:    []string{""},
-						remove:    true,
 					},
 					{
 						// to be removed as v6 address exists
 						namespace: "as2",
-						suffix:    []string{""},
-						remove:    true,
 					},
 					{
 						// to be removed as both v4 & v6 address exists
 						namespace: "as3",
-						suffix:    []string{""},
-						remove:    true,
 					},
 					{
 						// not to be removed, no v4 or v6 address exists
 						namespace: "as4",
-						suffix:    []string{""},
 					},
 					{
 						// not to be removed, address in new dual stack format
 						namespace: "as1",
-						suffix:    []string{ipv4AddressSetSuffix},
+						suffix2:   ipv4AddressSetSuffix,
 					},
 					{
 						// not to be removed, address in new dual stack format
 						namespace: "as2",
-						suffix:    []string{ipv6AddressSetSuffix},
+						suffix2:   ipv6AddressSetSuffix,
 					},
 					{
 						// not to be removed, address in new dual stack format
 						namespace: "as3",
-						suffix:    []string{ipv4AddressSetSuffix},
+						suffix2:   ipv4AddressSetSuffix,
 					},
 					{
 						// not to be removed, address in new dual stack format
 						namespace: "as3",
-						suffix:    []string{ipv6AddressSetSuffix},
+						suffix2:   ipv6AddressSetSuffix,
 					},
 					{
 						// not to be removed, address in new dual stack format
 						namespace: "as5",
-						suffix:    []string{ipv4AddressSetSuffix},
+						suffix2:   ipv4AddressSetSuffix,
 					},
 					{
 						// not to be removed, address in new dual stack format
 						namespace: "as5",
-						suffix:    []string{ipv6AddressSetSuffix},
+						suffix2:   ipv6AddressSetSuffix,
 					},
 				}
-				expectedDatabaseState := []libovsdbtest.TestData{}
 
-				dbSetup := libovsdbtest.TestSetup{}
+				var namespacesRes string
 				for _, n := range namespaces {
-					dbSetup.NBData = append(dbSetup.NBData, &nbdb.AddressSet{
-						Name:        hashedAddressSet(n.namespace + n.suffix[0]),
-						ExternalIDs: map[string]string{"name": n.namespace + n.suffix[0]},
-					})
-					if !n.remove {
-						expectedDatabaseState = append(expectedDatabaseState, &nbdb.AddressSet{
-							Name:        hashedAddressSet(n.namespace + n.suffix[0]),
-							ExternalIDs: map[string]string{"name": n.namespace + n.suffix[0]},
-						})
-					}
+					namespacesRes += fmt.Sprintf("name=%s\n", n.makeName())
 				}
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=external_ids find address_set",
+					Output: namespacesRes,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + hashedAddressSet(namespaces[0].makeName()),
+					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + hashedAddressSet(namespaces[1].makeName()),
+					"ovn-nbctl --timeout=15 --if-exists destroy address_set " + hashedAddressSet(namespaces[2].makeName()),
+				})
 
-				_, err := config.InitConfig(ctx, nil, nil)
+				err = NonDualStackAddressSetCleanup(ovnNbClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.IPv6Mode = true
-
-				libovsdbOvnNBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
-
-				err = NonDualStackAddressSetCleanup(libovsdbOvnNBClient)
-				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 				return nil
 			}
 

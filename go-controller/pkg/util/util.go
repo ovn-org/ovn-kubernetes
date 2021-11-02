@@ -196,6 +196,7 @@ func HashForOVN(s string) string {
 	}
 	hashString := strconv.FormatUint(h.Sum64(), 10)
 	return fmt.Sprintf("a%s", hashString)
+
 }
 
 // UpdateIPsSlice will search for values of oldIPs in the slice "s" and update it with newIPs values of same IP family
@@ -260,31 +261,4 @@ ipLoop:
 	}
 
 	return out
-}
-
-func GetLogicalPortName(podNamespace, podName string) string {
-	return composePortName(podNamespace, podName)
-}
-
-func GetIfaceId(podNamespace, podName string) string {
-	return composePortName(podNamespace, podName)
-}
-
-// composePortName should be called both for LogicalPortName and iface-id
-// because ovn-nb man says:
-// Logical_Switch_Port.name must match external_ids:iface-id
-// in the Open_vSwitch database’s Interface table,
-// because hypervisors use external_ids:iface-id as a lookup key to
-// identify the network interface of that entity.
-func composePortName(podNamespace, podName string) string {
-	return podNamespace + "_" + podName
-}
-
-func SliceHasStringItem(slice []string, item string) bool {
-	for _, i := range slice {
-		if i == item {
-			return true
-		}
-	}
-	return false
 }

@@ -37,12 +37,11 @@ type KubeAPIAuth struct {
 type PodInterfaceInfo struct {
 	util.PodAnnotation
 
-	MTU         int    `json:"mtu"`
-	Ingress     int64  `json:"ingress"`
-	Egress      int64  `json:"egress"`
-	CheckExtIDs bool   `json:"check-external-ids"`
-	IsSmartNic  bool   `json:"smartnic"`
-	PodUID      string `json:"pod-uid"`
+	MTU         int   `json:"mtu"`
+	Ingress     int64 `json:"ingress"`
+	Egress      int64 `json:"egress"`
+	CheckExtIDs bool  `json:"check-external-ids"`
+	IsSmartNic  bool  `json:"smartnic"`
 }
 
 // Explicit type for CNI commands the server handles

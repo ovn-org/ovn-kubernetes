@@ -6,81 +6,119 @@ import (
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 func TestNewCache(t *testing.T) {
 
-	initialDb := []libovsdb.TestData{
-		&nbdb.LoadBalancer{
-			UUID:     "cb6ebcb0-c12d-4404-ada7-5aa2b898f06b",
-			Name:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
-			Protocol: &nbdb.LoadBalancerProtocolTCP,
-			ExternalIDs: map[string]string{
-				"k8s.ovn.org/kind":  "Service",
-				"k8s.ovn.org/owner": "default/kubernetes",
-			},
-			Vips: map[string]string{
-				"192.168.0.1:6443": "1.1.1.1:1,2.2.2.2:2",
-				"[fe::1]:1":        "[fe::2]:1,[fe::2]:2",
-			},
-		},
-		&nbdb.LoadBalancer{
-			UUID:     "7dc190c4-c615-467f-af83-9856d832c9a0",
-			Name:     "Service_default/kubernetes_TCP_node_switch_ovn-control-plane_merged",
-			Protocol: &nbdb.LoadBalancerProtocolTCP,
-			ExternalIDs: map[string]string{
-				"k8s.ovn.org/kind":  "Service",
-				"k8s.ovn.org/owner": "default/kubernetes",
-			},
-			Vips: map[string]string{
-				"192.168.0.1:6443": "1.1.1.1:1,2.2.2.2:2",
-				"[ff::1]:1":        "[fe::2]:1,[fe::2]:2",
-			},
-		},
-		&nbdb.LogicalRouter{
-			Name:         "GR_ovn-worker2",
-			LoadBalancer: []string{"7dc190c4-c615-467f-af83-9856d832c9a0"},
-		},
-		&nbdb.LogicalRouter{
-			Name:         "GR_ovn-worker",
-			LoadBalancer: []string{"7dc190c4-c615-467f-af83-9856d832c9a0"},
-		},
-		&nbdb.LogicalRouter{
-			Name: "ovn_cluster_router",
-		},
-		&nbdb.LogicalRouter{
-			Name:         "GR_ovn-control-plane",
-			LoadBalancer: []string{"cb6ebcb0-c12d-4404-ada7-5aa2b898f06b"},
-		},
-		&nbdb.LogicalSwitch{
-			Name:         "ovn-worker",
-			LoadBalancer: []string{"7dc190c4-c615-467f-af83-9856d832c9a0"},
-		},
-		&nbdb.LogicalSwitch{
-			Name:         "ovn-worker2",
-			LoadBalancer: []string{"cb6ebcb0-c12d-4404-ada7-5aa2b898f06b"},
-		},
-		&nbdb.LogicalSwitch{
-			Name:         "ovn-control-plane",
-			LoadBalancer: []string{"7dc190c4-c615-467f-af83-9856d832c9a0"},
-		},
-	}
+	data := `
+{
+  "data": [
+    [
+      "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
+      [
+        "uuid",
+        "cb6ebcb0-c12d-4404-ada7-5aa2b898f06b"
+      ],
+      "tcp",
+      [
+        "map",
+        [
+          [
+            "k8s.ovn.org/kind",
+            "Service"
+          ],
+          [
+            "k8s.ovn.org/owner",
+            "default/kubernetes"
+          ]
+        ]
+      ],
+      [
+        "map",
+        [
+          [
+            "192.168.0.1:6443",
+            "1.1.1.1:1,2.2.2.2:2"
+          ],
+          [
+            "[fe::1]:1",
+            "[fe::2]:1,[fe::2]:2" 
+          ]
+        ]
+      ]
+    ],
+    [
+      "Service_default/kubernetes_TCP_node_switch_ovn-control-plane_merged",
+      [
+        "uuid",
+        "7dc190c4-c615-467f-af83-9856d832c9a0"
+      ],
+      "tcp",
+      [
+        "map",
+        [
+          [
+            "k8s.ovn.org/kind",
+            "Service"
+          ],
+          [
+            "k8s.ovn.org/owner",
+            "default/kubernetes"
+          ]
+        ]
+      ],
+      [
+        "map",
+        [
+          [
+            "192.168.0.1:6443",
+            "1.1.1.1:1,2.2.2.2:2"
+          ],
+          [
+            "[ff::1]:1",
+            "[fe::2]:1,[fe::2]:2" 
+          ]
+        ]
+      ]
+    ]
+  ],
+  "headings": [
+    "name",
+    "_uuid",
+    "external_ids",
+	"protocol"
+  ]
+}
+`
 
-	stopChan := make(chan struct{})
-	nbClient, err := libovsdb.NewNBTestHarness(libovsdb.TestSetup{NBData: initialDb}, stopChan)
+	fexec := ovntest.NewFakeExec()
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --format=json --data=json --columns=name,_uuid,protocol,external_ids,vips find load_balancer",
+		Output: data,
+	})
+
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd: `ovn-nbctl --timeout=15 --no-heading --format=csv --data=bare --columns=name,load_balancer find logical_router`,
+		Output: `GR_ovn-worker2,31bb6bff-93b9-4080-a1b9-9a1fa898b1f0 7dc190c4-c615-467f-af83-9856d832c9a0 f0747ebb-71c2-4249-bdca-f33670ae544f
+GR_ovn-worker,31bb6bff-93b9-4080-a1b9-9a1fa898b1f0 7dc190c4-c615-467f-af83-9856d832c9a0 f0747ebb-71c2-4249-bdca-f33670ae544f
+ovn_cluster_router,
+GR_ovn-control-plane,31bb6bff-93b9-4080-a1b9-9a1fa898b1f0 cb6ebcb0-c12d-4404-ada7-5aa2b898f06b f0747ebb-71c2-4249-bdca-f33670ae544f
+`,
+	})
+	err := util.SetExec(fexec)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	c, err := newCache(nbClient)
+	lbs, err := listLBs()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	assert.Equal(t, map[string]*CachedLB{
-		"cb6ebcb0-c12d-4404-ada7-5aa2b898f06b": {
+	assert.Equal(t, []CachedLB{
+		{
 			UUID:     "cb6ebcb0-c12d-4404-ada7-5aa2b898f06b",
 			Name:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 			Protocol: "tcp",
@@ -89,14 +127,11 @@ func TestNewCache(t *testing.T) {
 				"k8s.ovn.org/owner": "default/kubernetes",
 			},
 			VIPs: sets.NewString("192.168.0.1:6443", "[fe::1]:1"),
-			Switches: sets.String{
-				"ovn-worker2": {},
-			},
-			Routers: sets.String{
-				"GR_ovn-control-plane": {},
-			},
+
+			Switches: sets.String{},
+			Routers:  sets.String{},
 		},
-		"7dc190c4-c615-467f-af83-9856d832c9a0": {
+		{
 			UUID:     "7dc190c4-c615-467f-af83-9856d832c9a0",
 			Name:     "Service_default/kubernetes_TCP_node_switch_ovn-control-plane_merged",
 			Protocol: "tcp",
@@ -105,31 +140,39 @@ func TestNewCache(t *testing.T) {
 				"k8s.ovn.org/owner": "default/kubernetes",
 			},
 			VIPs: sets.NewString("192.168.0.1:6443", "[ff::1]:1"),
-			Switches: sets.String{
-				"ovn-worker":        {},
-				"ovn-control-plane": {},
-			},
-			Routers: sets.String{
-				"GR_ovn-worker":  {},
-				"GR_ovn-worker2": {},
-			},
+
+			Switches: sets.String{},
+			Routers:  sets.String{},
 		},
-	}, c.existing)
+	}, lbs)
 
-	c.RemoveRouter("GR_ovn-worker")
-	assert.Equal(t, c.existing["7dc190c4-c615-467f-af83-9856d832c9a0"].Routers, sets.String{
-		"GR_ovn-worker2": {},
+	routerLBs, err := findTableLBs("logical_router")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, routerLBs, map[string][]string{
+		"GR_ovn-worker2":       {"31bb6bff-93b9-4080-a1b9-9a1fa898b1f0", "7dc190c4-c615-467f-af83-9856d832c9a0", "f0747ebb-71c2-4249-bdca-f33670ae544f"},
+		"GR_ovn-worker":        {"31bb6bff-93b9-4080-a1b9-9a1fa898b1f0", "7dc190c4-c615-467f-af83-9856d832c9a0", "f0747ebb-71c2-4249-bdca-f33670ae544f"},
+		"ovn_cluster_router":   {},
+		"GR_ovn-control-plane": {"31bb6bff-93b9-4080-a1b9-9a1fa898b1f0", "cb6ebcb0-c12d-4404-ada7-5aa2b898f06b", "f0747ebb-71c2-4249-bdca-f33670ae544f"},
 	})
 
-	c.RemoveSwitch("ovn-worker")
-	assert.Equal(t, c.existing["7dc190c4-c615-467f-af83-9856d832c9a0"].Switches, sets.String{
-		"ovn-control-plane": {},
-	})
-	// nothing changed
-	assert.Equal(t, c.existing["cb6ebcb0-c12d-4404-ada7-5aa2b898f06b"].Switches, sets.String{
-		"ovn-worker2": {},
+	globalCache := &LBCache{}
+	globalCache.existing = make(map[string]*CachedLB, len(lbs))
+	for i := range lbs {
+		globalCache.existing[lbs[i].UUID] = &lbs[i]
+	}
+
+	globalCache.existing["7dc190c4-c615-467f-af83-9856d832c9a0"].Routers.Insert("GR_ovn-worker2", "GR_ovn-worker", "ovn_cluster_router", "GR_ovn-control-plane")
+	globalCache.RemoveRouter("GR_ovn-worker")
+	assert.Equal(t, globalCache.existing["7dc190c4-c615-467f-af83-9856d832c9a0"].Routers, sets.String{
+		"GR_ovn-control-plane": {}, "GR_ovn-worker2": {}, "ovn_cluster_router": {},
 	})
 
-	nbClient.Close()
-	close(stopChan)
+	globalCache.existing["7dc190c4-c615-467f-af83-9856d832c9a0"].Switches.Insert("ovn-worker2", "ovn-worker", "ovn-control-plane")
+	globalCache.RemoveSwitch("ovn-worker")
+	assert.Equal(t, globalCache.existing["7dc190c4-c615-467f-af83-9856d832c9a0"].Switches, sets.String{
+		"ovn-control-plane": {}, "ovn-worker2": {},
+	})
+	assert.Equal(t, globalCache.existing["cb6ebcb0-c12d-4404-ada7-5aa2b898f06b"].Switches, sets.String{}) // nothing changed
 }

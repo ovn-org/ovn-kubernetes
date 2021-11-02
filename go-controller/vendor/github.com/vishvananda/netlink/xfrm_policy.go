@@ -58,13 +58,12 @@ func (a PolicyAction) String() string {
 // policy. These rules are matched with XfrmState to determine encryption
 // and authentication algorithms.
 type XfrmPolicyTmpl struct {
-	Dst      net.IP
-	Src      net.IP
-	Proto    Proto
-	Mode     Mode
-	Spi      int
-	Reqid    int
-	Optional int
+	Dst   net.IP
+	Src   net.IP
+	Proto Proto
+	Mode  Mode
+	Spi   int
+	Reqid int
 }
 
 func (t XfrmPolicyTmpl) String() string {

@@ -52,8 +52,7 @@ func (c *portCache) add(logicalSwitch, logicalPort, uuid string, mac net.Hardwar
 		ips:           ips,
 		mac:           mac,
 	}
-	klog.V(5).Infof("port-cache(%s): added port %+v with IP: %s and MAC: %s",
-		logicalPort, portInfo, portInfo.ips, portInfo.mac)
+	klog.V(5).Infof("port-cache(%s): added port %+v", logicalPort, portInfo)
 	c.cache[logicalPort] = portInfo
 	return portInfo
 }

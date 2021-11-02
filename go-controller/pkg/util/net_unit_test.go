@@ -6,9 +6,9 @@ import (
 	"net"
 	"testing"
 
-	nbdb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	goovn "github.com/ebay/go-ovn"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	goovn_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/ebay/go-ovn"
 	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/stretchr/testify/assert"
@@ -61,125 +61,75 @@ func TestNextIP(t *testing.T) {
 	}
 }
 
-func stringPtr(str string) *string {
-	return &str
-}
-
-const (
-	hwAddr    string = "06:c6:d4:fb:fb:ba"
-	badHWAddr string = "NotMAC"
-	badIPAddr string = "NOTIP"
-	ipAddr    string = "10.244.2.2"
-	portName  string = "test-pod"
-)
-
 func TestGetPortAddresses(t *testing.T) {
+	mockOvnNBClient := new(goovn_mocks.Client)
 	tests := []struct {
-		desc       string
-		dbSetup    libovsdbtest.TestSetup
-		errMatch   error
-		isNotFound bool
-		hasNoIP    bool
+		desc                 string
+		inpPort              string
+		errAssert            bool
+		errMatch             error
+		onRetArgsOvnNBClient *ovntest.TestifyMockHelper
 	}{
 		{
-			desc:       "test path where client.Get(lsp) returns ErrNotFound",
-			dbSetup:    libovsdbtest.TestSetup{},
-			isNotFound: true,
+			desc:                 "test path where LSPGet() returns goovn.ErrorSchema/goovn.ErrorNotFound",
+			inpPort:              "TEST_PORT",
+			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{nil, goovn.ErrorSchema}},
 		},
 		{
-			desc: "test path where lsp.DynamicAddresses is a zero length string and len(addresses)==0",
-			dbSetup: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						Name:             "test-pod",
-						DynamicAddresses: stringPtr(hwAddr + " " + ipAddr),
-					},
-				},
-			},
+			desc:                 "test path where LSPGet() returns an error other than goovn.ErrorSchema/goovn.ErrorNotFound",
+			inpPort:              "TEST_PORT",
+			errAssert:            true,
+			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{nil, goovn.ErrorOption}},
 		},
 		{
-			desc: "test path where lsp.DynamicAddresses is non-zero length string and value of first address in addresses list is set to dynamic",
-			dbSetup: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						Name:             portName,
-						DynamicAddresses: stringPtr(hwAddr + " " + ipAddr),
-						Addresses:        []string{"dynamic"},
-					},
-				},
-			},
+			desc:                 "test path where LSPGet() returns nil",
+			inpPort:              "TEST_PORT",
+			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{nil, nil}},
 		},
 		{
-			desc: "test code path where port has MAC but no IPs",
-			dbSetup: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						Name:             "test-pod",
-						DynamicAddresses: stringPtr(hwAddr),
-					},
-				},
-			},
-			hasNoIP: true,
+			desc:                 "test path where lsp.DynamicAddresses is a zero length string and len(addresses)==0",
+			inpPort:              "TEST_PORT",
+			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.LogicalSwitchPort{DynamicAddresses: ""}, nil}},
 		},
 		{
-			desc: "test the code path where ParseMAC fails",
-			dbSetup: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						Name:             portName,
-						DynamicAddresses: stringPtr(badHWAddr),
-					},
-				},
-			},
-			errMatch: fmt.Errorf("failed to parse logical switch port \"%s\" MAC \"%s\": address %s: invalid MAC address", portName, badHWAddr, badHWAddr),
+			desc:                 "test path where lsp.DynamicAddresses is non-zero length string and value of first address in addresses list is set to dynamic",
+			inpPort:              "TEST_PORT",
+			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.LogicalSwitchPort{DynamicAddresses: "06:c6:d4:fb:fb:ba 10.244.2.2"}, nil}},
 		},
 		{
-			desc: "test code path where IP address parsing fails",
-			dbSetup: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						Name:      portName,
-						Addresses: []string{hwAddr, badIPAddr},
-					},
-				},
-			},
-			errMatch: fmt.Errorf("failed to parse logical switch port \"%s\" IP \"%s\" is not a valid ip address", portName, badIPAddr),
+			desc:                 "test code path where port has MAC but no IPs",
+			inpPort:              "TEST_PORT",
+			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.LogicalSwitchPort{DynamicAddresses: "06:c6:d4:fb:fb:ba"}, nil}},
 		},
 		{
-			desc: "test success path with len(lsp.Addresses) > 0 and lsp.DynamicAddresses = nil",
-			dbSetup: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						Name:      portName,
-						Addresses: []string{hwAddr, ipAddr},
-					},
-				},
-			},
+			desc:                 "test the code path where ParseMAC fails",
+			inpPort:              "TEST_PORT",
+			errMatch:             fmt.Errorf("failed to parse logical switch port"),
+			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.LogicalSwitchPort{Addresses: []string{"192.168.1.3 0a:00:00:00:00:01"}}, nil}},
+		},
+		{
+			desc:                 "test code path where IP address parsing fails",
+			inpPort:              "TEST_PORT",
+			errMatch:             fmt.Errorf("failed to parse logical switch port"),
+			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.LogicalSwitchPort{Addresses: []string{"192.168.1.3 0a:00:00:00:00:01"}}, nil}},
+		},
+		{
+			desc:                 "test success path where MAC, IPs are returned",
+			inpPort:              "TEST_PORT",
+			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.LogicalSwitchPort{Addresses: []string{"0a:00:00:00:00:01 192.168.1.3"}}, nil}},
 		},
 	}
-
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			stopChan := make(chan struct{})
-			nbClient, _, _ := libovsdbtest.NewNBSBTestHarness(tc.dbSetup, stopChan)
-			hardwareAddr, ips, err := GetPortAddresses(portName, nbClient)
-			if tc.isNotFound {
-				assert.Nil(t, hardwareAddr)
-				assert.Nil(t, ips)
-				assert.Nil(t, err)
+			ovntest.ProcessMockFn(&mockOvnNBClient.Mock, *tc.onRetArgsOvnNBClient)
 
-			} else if tc.hasNoIP {
-				assert.Equal(t, hardwareAddr.String(), hwAddr)
-				assert.Nil(t, ips)
+			hwAddr, ipList, err := GetPortAddresses(tc.inpPort, mockOvnNBClient)
+			t.Log(hwAddr.String(), ipList, err)
+			if tc.errAssert {
+				assert.Error(t, err)
 			} else if tc.errMatch != nil {
-				assert.Equal(t, err, tc.errMatch)
-			} else {
-				assert.Equal(t, hardwareAddr.String(), hwAddr)
-				assert.Equal(t, len(ips), 1)
-				assert.Equal(t, ips[0].String(), ipAddr)
+				assert.Contains(t, err.Error(), tc.errMatch.Error())
 			}
-
-			close(stopChan)
 		})
 	}
 }

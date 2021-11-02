@@ -163,10 +163,10 @@ var _ = Describe("Kube", func() {
 			})
 
 			Context("With adding additional annotations", func() {
-				var newAnnotations map[string]interface{}
+				var newAnnotations map[string]string
 
 				BeforeEach(func() {
-					newAnnotations = map[string]interface{}{"foobar": "foobarfoobar", "foobarbaz": "foobarbazfoobarbaz"}
+					newAnnotations = map[string]string{"foobar": "foobarfoobar", "foobarbaz": "foobarbazfoobarbaz"}
 
 					// update the annotations
 					err := kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, newAnnotations)

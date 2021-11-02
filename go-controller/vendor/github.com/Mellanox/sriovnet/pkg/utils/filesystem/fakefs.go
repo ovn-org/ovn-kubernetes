@@ -10,8 +10,8 @@ import (
 	"github.com/spf13/afero"
 )
 
-// FakeFs is implemented in terms of afero
-type FakeFs struct {
+// fakeFs is implemented in terms of afero
+type fakeFs struct {
 	a afero.Afero
 }
 
@@ -35,7 +35,7 @@ func NewFakeFs(fakeFsRoot string) (Filesystem, func(), error) {
 		return nil, nil, fmt.Errorf("failed to create fake root dir: %s. %s", fakeFsRoot, err)
 	}
 
-	return &FakeFs{a: afero.Afero{Fs: afero.NewBasePathFs(afero.NewOsFs(), fakeFsRoot)}},
+	return &fakeFs{a: afero.Afero{Fs: afero.NewBasePathFs(afero.NewOsFs(), fakeFsRoot)}},
 		func() {
 			os.RemoveAll(fakeFsRoot)
 		},
@@ -43,12 +43,12 @@ func NewFakeFs(fakeFsRoot string) (Filesystem, func(), error) {
 }
 
 // Stat via afero.Fs.Stat
-func (fs *FakeFs) Stat(name string) (os.FileInfo, error) {
+func (fs *fakeFs) Stat(name string) (os.FileInfo, error) {
 	return fs.a.Fs.Stat(name)
 }
 
 // Create via afero.Fs.Create
-func (fs *FakeFs) Create(name string) (File, error) {
+func (fs *fakeFs) Create(name string) (File, error) {
 	file, err := fs.a.Fs.Create(name)
 	if err != nil {
 		return nil, err
@@ -57,37 +57,32 @@ func (fs *FakeFs) Create(name string) (File, error) {
 }
 
 // Rename via afero.Fs.Rename
-func (fs *FakeFs) Rename(oldpath, newpath string) error {
+func (fs *fakeFs) Rename(oldpath, newpath string) error {
 	return fs.a.Fs.Rename(oldpath, newpath)
 }
 
 // MkdirAll via afero.Fs.MkdirAll
-func (fs *FakeFs) MkdirAll(path string, perm os.FileMode) error {
+func (fs *fakeFs) MkdirAll(path string, perm os.FileMode) error {
 	return fs.a.Fs.MkdirAll(path, perm)
 }
 
 // Chtimes via afero.Fs.Chtimes
-func (fs *FakeFs) Chtimes(name string, atime, mtime time.Time) error {
+func (fs *fakeFs) Chtimes(name string, atime, mtime time.Time) error {
 	return fs.a.Fs.Chtimes(name, atime, mtime)
 }
 
 // ReadFile via afero.ReadFile
-func (fs *FakeFs) ReadFile(filename string) ([]byte, error) {
+func (fs *fakeFs) ReadFile(filename string) ([]byte, error) {
 	return fs.a.ReadFile(filename)
 }
 
-// WriteFile via afero.WriteFile
-func (fs *FakeFs) WriteFile(filename string, data []byte, perm os.FileMode) error {
-	return fs.a.WriteFile(filename, data, perm)
-}
-
 // TempDir via afero.TempDir
-func (fs *FakeFs) TempDir(dir, prefix string) (string, error) {
+func (fs *fakeFs) TempDir(dir, prefix string) (string, error) {
 	return fs.a.TempDir(dir, prefix)
 }
 
 // TempFile via afero.TempFile
-func (fs *FakeFs) TempFile(dir, prefix string) (File, error) {
+func (fs *fakeFs) TempFile(dir, prefix string) (File, error) {
 	file, err := fs.a.TempFile(dir, prefix)
 	if err != nil {
 		return nil, err
@@ -96,36 +91,36 @@ func (fs *FakeFs) TempFile(dir, prefix string) (File, error) {
 }
 
 // ReadDir via afero.ReadDir
-func (fs *FakeFs) ReadDir(dirname string) ([]os.FileInfo, error) {
+func (fs *fakeFs) ReadDir(dirname string) ([]os.FileInfo, error) {
 	return fs.a.ReadDir(dirname)
 }
 
 // Walk via afero.Walk
-func (fs *FakeFs) Walk(root string, walkFn filepath.WalkFunc) error {
+func (fs *fakeFs) Walk(root string, walkFn filepath.WalkFunc) error {
 	return fs.a.Walk(root, walkFn)
 }
 
 // RemoveAll via afero.RemoveAll
-func (fs *FakeFs) RemoveAll(path string) error {
+func (fs *fakeFs) RemoveAll(path string) error {
 	return fs.a.RemoveAll(path)
 }
 
 // Remove via afero.Remove
-func (fs *FakeFs) Remove(name string) error {
+func (fs *fakeFs) Remove(name string) error {
 	return fs.a.Remove(name)
 }
 
 // Readlink via afero.ReadlinkIfPossible
-func (fs *FakeFs) Readlink(name string) (string, error) {
+func (fs *fakeFs) Readlink(name string) (string, error) {
 	return fs.a.Fs.(afero.Symlinker).ReadlinkIfPossible(name)
 }
 
 // Symlink via afero.FS.(Symlinker).SymlinkIfPossible
-func (fs *FakeFs) Symlink(oldname, newname string) error {
+func (fs *fakeFs) Symlink(oldname, newname string) error {
 	return fs.a.Fs.(afero.Symlinker).SymlinkIfPossible(oldname, newname)
 }
 
-// fakeFile implements File; for use with FakeFs
+// fakeFile implements File; for use with fakeFs
 type fakeFile struct {
 	file afero.File
 }

@@ -7,7 +7,7 @@ package sbdb
 type IGMPGroup struct {
 	UUID     string   `ovsdb:"_uuid"`
 	Address  string   `ovsdb:"address"`
-	Chassis  *string  `ovsdb:"chassis"`
-	Datapath *string  `ovsdb:"datapath"`
+	Chassis  []string `ovsdb:"chassis"`
+	Datapath []string `ovsdb:"datapath"`
 	Ports    []string `ovsdb:"ports"`
 }

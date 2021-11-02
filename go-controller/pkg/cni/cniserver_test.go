@@ -84,9 +84,6 @@ func TestCNIServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create watch factory: %v", err)
 	}
-	if err := wf.Start(); err != nil {
-		t.Fatalf("failed to start watch factory: %v", err)
-	}
 
 	s, err := NewCNIServer(tmpDir, false, wf, fakeClient)
 	if err != nil {

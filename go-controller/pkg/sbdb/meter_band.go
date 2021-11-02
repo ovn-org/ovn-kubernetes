@@ -7,7 +7,7 @@ type (
 	MeterBandAction = string
 )
 
-var (
+const (
 	MeterBandActionDrop MeterBandAction = "drop"
 )
 

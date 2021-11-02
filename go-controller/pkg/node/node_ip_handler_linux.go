@@ -23,12 +23,12 @@ type addressManager struct {
 }
 
 // initializes a new address manager which will hold all the IPs on a node
-func newAddressManager(nodeName string, k kube.Interface, config *managementPortConfig) *addressManager {
+func newAddressManager(nodeAnnotator kube.Annotator, config *managementPortConfig) *addressManager {
 	mgr := &addressManager{
 		addresses:      sets.NewString(),
+		nodeAnnotator:  nodeAnnotator,
 		mgmtPortConfig: config,
 	}
-	mgr.nodeAnnotator = kube.NewNodeAnnotator(k, nodeName)
 	mgr.sync()
 	return mgr
 }
@@ -39,7 +39,7 @@ func (c *addressManager) addAddr(ip net.IP) bool {
 	c.Lock()
 	defer c.Unlock()
 	if !c.addresses.Has(ip.String()) && c.isValidNodeIP(ip) {
-		klog.Infof("Adding IP: %s, to node IP manager", ip)
+		klog.V(5).Infof("Adding IP: %s, to node IP manager", ip)
 		c.addresses.Insert(ip.String())
 		return true
 	}
@@ -53,7 +53,7 @@ func (c *addressManager) delAddr(ip net.IP) bool {
 	c.Lock()
 	defer c.Unlock()
 	if c.addresses.Has(ip.String()) && c.isValidNodeIP(ip) {
-		klog.Infof("Removing IP: %s, from node IP manager", ip)
+		klog.V(5).Infof("Removing IP: %s, from node IP manager", ip)
 		c.addresses.Delete(ip.String())
 		return true
 	}
@@ -62,14 +62,8 @@ func (c *addressManager) delAddr(ip net.IP) bool {
 }
 
 func (c *addressManager) Run(stopChan <-chan struct{}) {
-	errorCallback := func(err error) {
-		klog.Errorf("Failed during AddrSubscribe callback: %v", err)
-	}
-	addrSubscribeOptions := netlink.AddrSubscribeOptions{
-		ErrorCallback: errorCallback,
-	}
 	addrChan := make(chan netlink.AddrUpdate)
-	if err := netlink.AddrSubscribeWithOptions(addrChan, stopChan, addrSubscribeOptions); err != nil {
+	if err := netlink.AddrSubscribe(addrChan, stopChan); err != nil {
 		klog.Errorf("Unable to run Node IP Manager, error during netlink subscribe: %v", err)
 		return
 	}
@@ -81,21 +75,23 @@ func (c *addressManager) Run(stopChan <-chan struct{}) {
 		for {
 			select {
 			case a := <-addrChan:
-				addrChanged := false
 				if a.NewAddr {
-					addrChanged = c.addAddr(a.LinkAddress.IP)
+					if c.addAddr(a.LinkAddress.IP) {
+						if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
+							klog.Errorf("Failed to set node annotations: %v", err)
+							continue
+						}
+					}
 				} else {
-					addrChanged = c.delAddr(a.LinkAddress.IP)
+					if c.delAddr(a.LinkAddress.IP) {
+						if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
+							klog.Errorf("Failed to set node annotations: %v", err)
+							continue
+						}
+					}
 				}
-
-				if addrChanged {
-					if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
-						klog.Errorf("Failed to set node annotations: %v", err)
-						continue
-					}
-					if err := c.nodeAnnotator.Run(); err != nil {
-						klog.Errorf("Failed to set node annotations: %v", err)
-					}
+				if err := c.nodeAnnotator.Run(); err != nil {
+					klog.Errorf("Failed to set node annotations: %v", err)
 				}
 			case <-stopChan:
 				return
@@ -138,22 +134,18 @@ func (c *addressManager) sync() {
 		klog.Errorf("Failed to initialize Node IP Manager: unable list all IPs on the node, error: %v", err)
 	}
 
-	addrChanged := false
 	for _, addr := range addrs {
 		ip, _, err := net.ParseCIDR(addr.String())
 		if err != nil {
 			klog.Errorf("Invalid IP address found on host: %s", addr.String())
 			continue
 		}
-		addrChanged = c.addAddr(ip) || addrChanged
+		_ = c.addAddr(ip)
 	}
-
-	if addrChanged {
-		if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
-			klog.Errorf("Failed to set node annotations: %v", err)
-		}
-		if err := c.nodeAnnotator.Run(); err != nil {
-			klog.Errorf("Failed to set node annotations: %v", err)
-		}
+	if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
+		klog.Errorf("Failed to set node annotations: %v", err)
+	}
+	if err := c.nodeAnnotator.Run(); err != nil {
+		klog.Errorf("Failed to set node annotations: %v", err)
 	}
 }

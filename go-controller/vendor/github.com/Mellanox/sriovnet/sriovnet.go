@@ -15,7 +15,6 @@ import (
 	"github.com/vishvananda/netlink"
 
 	utilfs "github.com/Mellanox/sriovnet/pkg/utils/filesystem"
-	"github.com/Mellanox/sriovnet/pkg/utils/netlinkops"
 )
 
 const (
@@ -41,22 +40,12 @@ type PfNetdevHandle struct {
 }
 
 func SetPFLinkUp(pfNetdevName string) error {
-	handle, err := netlinkops.GetNetlinkOps().LinkByName(pfNetdevName)
+	handle, err := netlink.LinkByName(pfNetdevName)
 	if err != nil {
 		return err
 	}
 
-	return netlinkops.GetNetlinkOps().LinkSetUp(handle)
-}
-
-func IsVfPciVfioBound(pciAddr string) bool {
-	driverLink := filepath.Join(PciSysDir, pciAddr, "driver")
-	driverPath, err := utilfs.Fs.Readlink(driverLink)
-	if err != nil {
-		return false
-	}
-	driverName := filepath.Base(driverPath)
-	return driverName == "vfio-pci"
+	return netlink.LinkSetUp(handle)
 }
 
 func IsSriovSupported(netdevName string) bool {
@@ -119,7 +108,7 @@ func DisableSriov(pfNetdevName string) error {
 }
 
 func GetPfNetdevHandle(pfNetdevName string) (*PfNetdevHandle, error) {
-	pfLinkHandle, err := netlinkops.GetNetlinkOps().LinkByName(pfNetdevName)
+	pfLinkHandle, err := netlink.LinkByName(pfNetdevName)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +173,7 @@ func BindVf(handle *PfNetdevHandle, vf *VfObj) error {
 }
 
 func GetVfDefaultMacAddr(vfNetdevName string) (string, error) {
-	ethHandle, err1 := netlinkops.GetNetlinkOps().LinkByName(vfNetdevName)
+	ethHandle, err1 := netlink.LinkByName(vfNetdevName)
 	if err1 != nil {
 		return "", err1
 	}
@@ -195,16 +184,16 @@ func GetVfDefaultMacAddr(vfNetdevName string) (string, error) {
 
 func SetVfDefaultMacAddress(handle *PfNetdevHandle, vf *VfObj) error {
 	netdevName := vfNetdevNameFromParent(handle.PfNetdevName, vf.Index)
-	ethHandle, err1 := netlinkops.GetNetlinkOps().LinkByName(netdevName)
+	ethHandle, err1 := netlink.LinkByName(netdevName)
 	if err1 != nil {
 		return err1
 	}
 	ethAttr := ethHandle.Attrs()
-	return netlinkops.GetNetlinkOps().LinkSetVfHardwareAddr(handle.pfLinkHandle, vf.Index, ethAttr.HardwareAddr)
+	return netlink.LinkSetVfHardwareAddr(handle.pfLinkHandle, vf.Index, ethAttr.HardwareAddr)
 }
 
 func SetVfVlan(handle *PfNetdevHandle, vf *VfObj, vlan int) error {
-	return netlinkops.GetNetlinkOps().LinkSetVfVlan(handle.pfLinkHandle, vf.Index, vlan)
+	return netlink.LinkSetVfVlan(handle.pfLinkHandle, vf.Index, vlan)
 }
 
 func setVfNodeGUID(handle *PfNetdevHandle, vf *VfObj, guid []byte) error {
@@ -216,7 +205,7 @@ func setVfNodeGUID(handle *PfNetdevHandle, vf *VfObj, guid []byte) error {
 	if err == nil {
 		return nil
 	}
-	err = netlinkops.GetNetlinkOps().LinkSetVfNodeGUID(handle.pfLinkHandle, vf.Index, guid)
+	err = netlink.LinkSetVfNodeGUID(handle.pfLinkHandle, vf.Index, guid)
 	return err
 }
 
@@ -229,7 +218,7 @@ func setVfPortGUID(handle *PfNetdevHandle, vf *VfObj, guid []byte) error {
 	if err == nil {
 		return nil
 	}
-	err = netlinkops.GetNetlinkOps().LinkSetVfPortGUID(handle.pfLinkHandle, vf.Index, guid)
+	err = netlink.LinkSetVfPortGUID(handle.pfLinkHandle, vf.Index, guid)
 	return err
 }
 
@@ -272,8 +261,8 @@ func SetVfPrivileged(handle *PfNetdevHandle, vf *VfObj, privileged bool) error {
 	 * golangci-lint complains on missing error check. ignore it
 	 * with nolint comment until we update the code to ignore ENOTSUP error
 	 */
-	netlinkops.GetNetlinkOps().LinkSetVfTrust(handle.pfLinkHandle, vf.Index, trusted)     //nolint
-	netlinkops.GetNetlinkOps().LinkSetVfSpoofchk(handle.pfLinkHandle, vf.Index, spoofChk) //nolint
+	netlink.LinkSetVfTrust(handle.pfLinkHandle, vf.Index, trusted)     //nolint
+	netlink.LinkSetVfSpoofchk(handle.pfLinkHandle, vf.Index, spoofChk) //nolint
 	return nil
 }
 
@@ -319,7 +308,7 @@ func ConfigVfs(handle *PfNetdevHandle, privileged bool) error {
 		}
 		// skip VFs in another namespace
 		netdevName := vfNetdevNameFromParent(handle.PfNetdevName, vf.Index)
-		if _, err = netlinkops.GetNetlinkOps().LinkByName(netdevName); err != nil {
+		if _, err = netlink.LinkByName(netdevName); err != nil {
 			continue
 		}
 		err = setDefaultHwAddr(handle, vf)
@@ -407,7 +396,7 @@ func GetVfNetdevName(handle *PfNetdevHandle, vf *VfObj) string {
 // GetVfIndexByPciAddress gets a VF PCI address (e.g '0000:03:00.4') and
 // returns the correlate VF index.
 func GetVfIndexByPciAddress(vfPciAddress string) (int, error) {
-	vfPath := filepath.Join(PciSysDir, vfPciAddress, "physfn", "virtfn*")
+	vfPath := filepath.Join(PciSysDir, vfPciAddress, "physfn/virtfn*")
 	matches, err := filepath.Glob(vfPath)
 	if err != nil {
 		return -1, err

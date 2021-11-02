@@ -29,8 +29,6 @@ type ObjectCacheInterface interface {
 type NodeWatchFactory interface {
 	Shutdownable
 
-	Start() error
-
 	AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
 	AddFilteredServiceHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
 	RemoveServiceHandler(handler *Handler)
