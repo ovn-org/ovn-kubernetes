@@ -53,25 +53,29 @@ func (oc *Controller) addEgressIP(eIP *egressipv1.EgressIP) error {
 	if err != nil {
 		return fmt.Errorf("invalid namespaceSelector on EgressIP %s: %v", eIP.Name, err)
 	}
-	h := oc.watchFactory.AddFilteredNamespaceHandler("", sel,
-		cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				namespace := obj.(*kapi.Namespace)
-				klog.V(5).Infof("EgressIP: %s has matched on namespace: %s", eIP.Name, namespace.Name)
-				if err := oc.addNamespaceEgressIP(eIP, namespace); err != nil {
-					klog.Errorf("error: unable to add namespace handler for EgressIP: %s, err: %v", eIP.Name, err)
-				}
-			},
-			UpdateFunc: func(oldObj, newObj interface{}) {},
-			DeleteFunc: func(obj interface{}) {
-				namespace := obj.(*kapi.Namespace)
-				klog.V(5).Infof("EgressIP: %s stopped matching on namespace: %s", eIP.Name, namespace.Name)
-				if err := oc.deleteNamespaceEgressIP(eIP, namespace); err != nil {
-					klog.Errorf("error: unable to delete namespace handler for EgressIP: %s, err: %v", eIP.Name, err)
-				}
-			},
-		}, nil)
-	oc.eIPC.namespaceHandlerCache[getEgressIPKey(eIP)] = *h
+	if _, exists := oc.eIPC.namespaceHandlerCache[getEgressIPKey(eIP)]; !exists {
+		h := oc.watchFactory.AddFilteredNamespaceHandler("", sel,
+			cache.ResourceEventHandlerFuncs{
+				AddFunc: func(obj interface{}) {
+					namespace := obj.(*kapi.Namespace)
+					klog.V(5).Infof("EgressIP: %s has matched on namespace: %s", eIP.Name, namespace.Name)
+					if err := oc.addNamespaceEgressIP(eIP, namespace); err != nil {
+						klog.Errorf("error: unable to add namespace handler for EgressIP: %s, err: %v", eIP.Name, err)
+					}
+				},
+				UpdateFunc: func(oldObj, newObj interface{}) {},
+				DeleteFunc: func(obj interface{}) {
+					namespace := obj.(*kapi.Namespace)
+					klog.V(5).Infof("EgressIP: %s stopped matching on namespace: %s", eIP.Name, namespace.Name)
+					if err := oc.deleteNamespaceEgressIP(eIP, namespace); err != nil {
+						klog.Errorf("error: unable to delete namespace handler for EgressIP: %s, err: %v", eIP.Name, err)
+					}
+				},
+			}, nil)
+		oc.eIPC.namespaceHandlerCache[getEgressIPKey(eIP)] = h
+	} else {
+		klog.Error("The namespace handler cache for egress IPs is de-synchronized: a namespace handler already exists for egress IP: %s", getEgressIPKey(eIP))
+	}
 	return nil
 }
 
@@ -81,22 +85,21 @@ func (oc *Controller) deleteEgressIP(eIP *egressipv1.EgressIP) error {
 	oc.eIPC.namespaceHandlerMutex.Lock()
 	defer oc.eIPC.namespaceHandlerMutex.Unlock()
 	if nH, exists := oc.eIPC.namespaceHandlerCache[getEgressIPKey(eIP)]; exists {
-		oc.watchFactory.RemoveNamespaceHandler(&nH)
+		oc.watchFactory.RemoveNamespaceHandler(nH)
 		delete(oc.eIPC.namespaceHandlerCache, getEgressIPKey(eIP))
 	}
 
 	oc.eIPC.podHandlerMutex.Lock()
 	defer oc.eIPC.podHandlerMutex.Unlock()
-	if pH, exists := oc.eIPC.podHandlerCache[getEgressIPKey(eIP)]; exists {
-		oc.watchFactory.RemovePodHandler(&pH)
-		delete(oc.eIPC.podHandlerCache, getEgressIPKey(eIP))
-	}
-
 	namespaces, err := oc.kube.GetNamespaces(eIP.Spec.NamespaceSelector)
 	if err != nil {
 		return err
 	}
 	for _, namespace := range namespaces.Items {
+		if pH, exists := oc.eIPC.podHandlerCache[getNamespaceKey(&namespace)]; exists {
+			oc.watchFactory.RemovePodHandler(pH)
+			delete(oc.eIPC.podHandlerCache, getNamespaceKey(&namespace))
+		}
 		if err := oc.deleteNamespacePodsEgressIP(eIP, &namespace); err != nil {
 			return err
 		}
@@ -362,50 +365,54 @@ func (oc *Controller) addNamespaceEgressIP(eIP *egressipv1.EgressIP, namespace *
 	if err != nil {
 		return fmt.Errorf("invalid podSelector on EgressIP %s: %v", eIP.Name, err)
 	}
-	h := oc.watchFactory.AddFilteredPodHandler(namespace.Name, sel,
-		cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				pod := obj.(*kapi.Pod)
-				klog.V(5).Infof("EgressIP: %s has matched on pod: %s in namespace: %s", eIP.Name, pod.Name, namespace.Name)
-				if err := oc.eIPC.addPodEgressIP(eIP, pod); err != nil {
-					klog.Errorf("Unable to add pod: %s/%s to EgressIP: %s, err: %v", pod.Namespace, pod.Name, eIP.Name, err)
-				}
-			},
-			UpdateFunc: func(oldObj, newObj interface{}) {
-				newPod := newObj.(*kapi.Pod)
-				// FYI: the only pod update we care about here is the pod being assigned an IP, which
-				// it didn't have when we received the ADD. If the label is changed and it stops matching:
-				// this watcher receives a delete.
-				if oc.eIPC.needsRetry(newPod) {
-					klog.V(5).Infof("EgressIP: %s update for pod: %s in namespace: %s", eIP.Name, newPod.Name, namespace.Name)
-					if err := oc.eIPC.addPodEgressIP(eIP, newPod); err != nil {
-						klog.Errorf("Unable to add pod: %s/%s to EgressIP: %s, err: %v", newPod.Namespace, newPod.Name, eIP.Name, err)
+	if _, exists := oc.eIPC.podHandlerCache[getNamespaceKey(namespace)]; !exists {
+		h := oc.watchFactory.AddFilteredPodHandler(namespace.Name, sel,
+			cache.ResourceEventHandlerFuncs{
+				AddFunc: func(obj interface{}) {
+					pod := obj.(*kapi.Pod)
+					klog.V(5).Infof("EgressIP: %s has matched on pod: %s in namespace: %s", eIP.Name, pod.Name, namespace.Name)
+					if err := oc.eIPC.addPodEgressIP(eIP, pod); err != nil {
+						klog.Errorf("Unable to add pod: %s/%s to EgressIP: %s, err: %v", pod.Namespace, pod.Name, eIP.Name, err)
 					}
-				}
-			},
-			DeleteFunc: func(obj interface{}) {
-				pod := obj.(*kapi.Pod)
-				// FYI: we can be in a situation where we processed a pod ADD for which there was no IP
-				// address assigned. If the pod is deleted before the IP address is assigned,
-				// we should not process that delete (as nothing exists in OVN for it)
-				klog.V(5).Infof("EgressIP: %s has stopped matching on pod: %s in namespace: %s, needs delete: %v", eIP.Name, pod.Name, namespace.Name, !oc.eIPC.needsRetry(pod))
-				if !oc.eIPC.needsRetry(pod) {
-					if err := oc.eIPC.deletePodEgressIP(eIP, pod); err != nil {
-						klog.Errorf("Unable to delete pod: %s/%s to EgressIP: %s, err: %v", pod.Namespace, pod.Name, eIP.Name, err)
+				},
+				UpdateFunc: func(oldObj, newObj interface{}) {
+					newPod := newObj.(*kapi.Pod)
+					// FYI: the only pod update we care about here is the pod being assigned an IP, which
+					// it didn't have when we received the ADD. If the label is changed and it stops matching:
+					// this watcher receives a delete.
+					if oc.eIPC.needsRetry(newPod) {
+						klog.V(5).Infof("EgressIP: %s update for pod: %s in namespace: %s", eIP.Name, newPod.Name, namespace.Name)
+						if err := oc.eIPC.addPodEgressIP(eIP, newPod); err != nil {
+							klog.Errorf("Unable to add pod: %s/%s to EgressIP: %s, err: %v", newPod.Namespace, newPod.Name, eIP.Name, err)
+						}
 					}
-				}
-			},
-		}, nil)
-	oc.eIPC.podHandlerCache[getEgressIPKey(eIP)] = *h
+				},
+				DeleteFunc: func(obj interface{}) {
+					pod := obj.(*kapi.Pod)
+					// FYI: we can be in a situation where we processed a pod ADD for which there was no IP
+					// address assigned. If the pod is deleted before the IP address is assigned,
+					// we should not process that delete (as nothing exists in OVN for it)
+					klog.V(5).Infof("EgressIP: %s has stopped matching on pod: %s in namespace: %s, needs delete: %v", eIP.Name, pod.Name, namespace.Name, !oc.eIPC.needsRetry(pod))
+					if !oc.eIPC.needsRetry(pod) {
+						if err := oc.eIPC.deletePodEgressIP(eIP, pod); err != nil {
+							klog.Errorf("Unable to delete pod: %s/%s to EgressIP: %s, err: %v", pod.Namespace, pod.Name, eIP.Name, err)
+						}
+					}
+				},
+			}, nil)
+		oc.eIPC.podHandlerCache[getNamespaceKey(namespace)] = h
+	} else {
+		klog.Errorf("The pod handler cache for egress IPs is de-synchronized: a pod handler already exists for namespace: %s", getNamespaceKey(namespace))
+	}
 	return nil
 }
 
 func (oc *Controller) deleteNamespaceEgressIP(eIP *egressipv1.EgressIP, namespace *kapi.Namespace) error {
 	oc.eIPC.podHandlerMutex.Lock()
 	defer oc.eIPC.podHandlerMutex.Unlock()
-	if pH, exists := oc.eIPC.podHandlerCache[getEgressIPKey(eIP)]; exists {
-		oc.watchFactory.RemovePodHandler(&pH)
-		delete(oc.eIPC.podHandlerCache, getEgressIPKey(eIP))
+	if pH, exists := oc.eIPC.podHandlerCache[getNamespaceKey(namespace)]; exists {
+		oc.watchFactory.RemovePodHandler(pH)
+		delete(oc.eIPC.podHandlerCache, getNamespaceKey(namespace))
 	}
 	if err := oc.deleteNamespacePodsEgressIP(eIP, namespace); err != nil {
 		return err
@@ -768,13 +775,13 @@ type egressIPController struct {
 	namespaceHandlerMutex *sync.Mutex
 
 	// Cache used for keeping track of EgressIP namespace handlers
-	namespaceHandlerCache map[string]factory.Handler
+	namespaceHandlerCache map[string]*factory.Handler
 
 	// Mutex used for syncing the egressIP pod handlers
 	podHandlerMutex *sync.Mutex
 
 	// Cache used for keeping track of EgressIP pod handlers
-	podHandlerCache map[string]factory.Handler
+	podHandlerCache map[string]*factory.Handler
 
 	allocator allocator
 
@@ -789,8 +796,8 @@ func (e *egressIPController) addPodEgressIP(eIP *egressipv1.EgressIP, pod *kapi.
 	if pod.Spec.HostNetwork {
 		return nil
 	}
-	podIPs := e.getPodIPs(pod)
-	if podIPs == nil {
+	podIPs, err := e.getPodIPs(pod)
+	if err != nil || len(podIPs) == 0 {
 		e.podRetry.Store(getPodKey(pod), true)
 		return nil
 	}
@@ -802,7 +809,6 @@ func (e *egressIPController) addPodEgressIP(eIP *egressipv1.EgressIP, pod *kapi.
 	}
 
 	var ops []ovsdb.Operation
-	var err error
 	for _, status := range eIP.Status.Items {
 		if ops, err = createNATRuleOps(e.nbClient, ops, podIPs, status, eIP.Name); err != nil {
 			return fmt.Errorf("unable to create NAT rule for status: %v, err: %v", status, err)
@@ -816,16 +822,18 @@ func (e *egressIPController) deletePodEgressIP(eIP *egressipv1.EgressIP, pod *ka
 	if pod.Spec.HostNetwork {
 		return nil
 	}
-	podIPs := e.getPodIPs(pod)
-	if podIPs == nil {
-		return nil
+	podIPs, err := e.getPodIPs(pod)
+	if err != nil {
+		return fmt.Errorf("unable to retrieve pod IPs, err: %v", err)
+	}
+	if len(podIPs) == 0 {
+		return fmt.Errorf("unable to retrieve pod IPs, err: no pod IPs defined")
 	}
 	if err := e.handleEgressReroutePolicy(podIPs, eIP.Status.Items, eIP.Name, e.deleteEgressReroutePolicy); err != nil {
 		return fmt.Errorf("unable to delete logical router policy, err: %v", err)
 	}
 
 	var ops []ovsdb.Operation
-	var err error
 	for _, status := range eIP.Status.Items {
 		if ops, err = deleteNATRuleOps(e.nbClient, ops, podIPs, status, eIP.Name); err != nil {
 			return fmt.Errorf("unable to delete NAT rule for status: %v, err: %v", status, err)
@@ -864,15 +872,16 @@ func (e *egressIPController) getGatewayRouterJoinIP(node string, wantsIPv6 bool)
 	}
 }
 
-func (e *egressIPController) getPodIPs(pod *kapi.Pod) []net.IP {
-	if len(pod.Status.PodIPs) == 0 {
-		return nil
+func (e *egressIPController) getPodIPs(pod *kapi.Pod) ([]net.IP, error) {
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
+	if err != nil {
+		return nil, err
 	}
-	podIPs := []net.IP{}
-	for _, podIP := range pod.Status.PodIPs {
-		podIPs = append(podIPs, net.ParseIP(podIP.IP))
+	podIPs := make([]net.IP, len(podAnnotation.IPs))
+	for ipIdx, ip := range podAnnotation.IPs {
+		podIPs[ipIdx] = ip.IP
 	}
-	return podIPs
+	return podIPs, nil
 }
 
 func (e *egressIPController) needsRetry(pod *kapi.Pod) bool {
@@ -1301,6 +1310,10 @@ func deleteNATRuleOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, pod
 
 func getEgressIPKey(eIP *egressipv1.EgressIP) string {
 	return eIP.Name
+}
+
+func getNamespaceKey(namespace *kapi.Namespace) string {
+	return namespace.Name
 }
 
 func getPodKey(pod *kapi.Pod) string {
