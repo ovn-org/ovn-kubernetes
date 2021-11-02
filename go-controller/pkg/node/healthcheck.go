@@ -122,7 +122,6 @@ func checkForStaleOVSInternalPorts() {
 	if len(stdout) == 0 {
 		return
 	}
-
 	values := strings.Split(stdout, "\n\n")
 	for _, val := range values {
 		klog.Warningf("Found stale interface %s, so deleting it", val)
@@ -193,7 +192,7 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 			// Note: wf (WatchFactory) *usually* returns pods assigned to this node, however we dont rely on it
 			// and add this check to filter out pods assigned to other nodes. (e.g when ovnkube master and node
 			// share the same process)
-			expectedIfaceIds[strings.Join([]string{pod.Namespace, pod.Name}, "_")] = true
+			expectedIfaceIds[util.GetIfaceId(pod.Namespace, pod.Name)] = true
 		}
 	}
 
@@ -220,16 +219,9 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 }
 
 // checkForStaleOVSInterfaces periodically checks for stale OVS interfaces
-func checkForStaleOVSInterfaces(stopChan chan struct{}, nodeName string, wf factory.ObjectCacheInterface) {
-	for {
-		select {
-		case <-time.After(60 * time.Second):
-			checkForStaleOVSInternalPorts()
-			checkForStaleOVSRepresentorInterfaces(nodeName, wf)
-		case <-stopChan:
-			return
-		}
-	}
+func checkForStaleOVSInterfaces(nodeName string, wf factory.ObjectCacheInterface) {
+	checkForStaleOVSInternalPorts()
+	checkForStaleOVSRepresentorInterfaces(nodeName, wf)
 }
 
 type openflowManager struct {

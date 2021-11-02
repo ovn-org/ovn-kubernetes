@@ -9,13 +9,13 @@
 # are built locally and included in the image (instead of the rpm)
 #
 
-FROM fedora:33
+FROM fedora:34
 
 USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
-ARG ovnver=ovn-21.03.0-32.fc33
+ARG ovnver=ovn-21.09.0-3.fc33
 
 # install needed rpms - openvswitch must be 2.10.4 or higher
 RUN INSTALL_PKGS=" \
@@ -56,7 +56,7 @@ COPY ./iptables-scripts/ip6tables-restore /usr/sbin/
 
 LABEL io.k8s.display-name="ovn-kubernetes" \
       io.k8s.description="This is a Kubernetes network plugin that provides an overlay network using OVN." \
-      maintainer="Phil Cameron <pcameron@redhat.com>"
+      maintainer="Tim Rozet <trozet@redhat.com>"
 
 WORKDIR /root
 ENTRYPOINT /root/ovnkube.sh

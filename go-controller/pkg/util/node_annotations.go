@@ -160,6 +160,13 @@ func (cfg *L3GatewayConfig) UnmarshalJSON(bytes []byte) error {
 		if cfg.Mode != config.GatewayModeShared && uint(vlanID64) != 0 {
 			return fmt.Errorf("vlan-id is supported only in shared gateway mode")
 		}
+		// VLANID is used for specifying TagRequest on the logical switch port
+		// connected to the external logical switch, NB DB specifies a maximum
+		// value on the TagRequest to 4095, hence validate this:
+		//https://github.com/ovn-org/ovn/blob/4b97d6fa88e36206213b9fdc8e1e1a9016cfc736/ovn-nb.ovsschema#L94-L98
+		if vlanID64 > 4095 {
+			return fmt.Errorf("vlan-id surpasses maximum supported value")
+		}
 		vlanID := uint(vlanID64)
 		cfg.VLANID = &vlanID
 	}

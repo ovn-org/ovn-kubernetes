@@ -156,6 +156,13 @@ var metricV6AllocatedHostSubnetCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "The total number of v6 host subnets currently allocated",
 })
 
+var metricEgressIPCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "num_egress_ips",
+	Help:      "The number of defined egress IP addresses",
+})
+
 var registerMasterMetricsOnce sync.Once
 var startE2ETimeStampUpdaterOnce sync.Once
 
@@ -230,6 +237,7 @@ func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 		prometheus.MustRegister(metricV6HostSubnetCount)
 		prometheus.MustRegister(metricV4AllocatedHostSubnetCount)
 		prometheus.MustRegister(metricV6AllocatedHostSubnetCount)
+		prometheus.MustRegister(metricEgressIPCount)
 		registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemMaster)
 	})
 }
@@ -299,4 +307,10 @@ func RecordSubnetUsage(v4SubnetsAllocated, v6SubnetsAllocated float64) {
 func RecordSubnetCount(v4SubnetCount, v6SubnetCount float64) {
 	metricV4HostSubnetCount.Set(v4SubnetCount)
 	metricV6HostSubnetCount.Set(v6SubnetCount)
+}
+
+// RecordEgressIPCount records the total number of Egress IPs.
+// This total may include multiple Egress IPs per EgressIP CR.
+func RecordEgressIPCount(count float64) {
+	metricEgressIPCount.Set(count)
 }

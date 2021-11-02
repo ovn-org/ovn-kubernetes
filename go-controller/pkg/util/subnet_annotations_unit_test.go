@@ -66,7 +66,7 @@ func TestCreateSubnetAnnotation(t *testing.T) {
 func TestSetSubnetAnnotation(t *testing.T) {
 	fakeClient := fake.NewSimpleClientset(&v1.NodeList{})
 	k := &kube.Kube{KClient: fakeClient}
-	testAnnotator := kube.NewNodeAnnotator(k, &v1.Node{})
+	testAnnotator := kube.NewNodeAnnotator(k, "")
 	tests := []struct {
 		desc             string
 		inpNodeAnnotator kube.Annotator
@@ -214,7 +214,7 @@ func TestCreateNodeHostSubnetAnnotation(t *testing.T) {
 func TestSetNodeHostSubnetAnnotation(t *testing.T) {
 	fakeClient := fake.NewSimpleClientset(&v1.NodeList{})
 	k := &kube.Kube{KClient: fakeClient}
-	testAnnotator := kube.NewNodeAnnotator(k, &v1.Node{})
+	testAnnotator := kube.NewNodeAnnotator(k, "")
 
 	tests := []struct {
 		desc             string
@@ -242,7 +242,7 @@ func TestSetNodeHostSubnetAnnotation(t *testing.T) {
 func TestDeleteNodeHostSubnetAnnotation(t *testing.T) {
 	fakeClient := fake.NewSimpleClientset(&v1.NodeList{})
 	k := &kube.Kube{KClient: fakeClient}
-	testAnnotator := kube.NewNodeAnnotator(k, &v1.Node{})
+	testAnnotator := kube.NewNodeAnnotator(k, "")
 
 	tests := []struct {
 		desc             string
@@ -324,7 +324,7 @@ func TestCreateNodeLocalNatAnnotation(t *testing.T) {
 func TestSetNodeLocalNatAnnotation(t *testing.T) {
 	fakeClient := fake.NewSimpleClientset(&v1.NodeList{})
 	k := &kube.Kube{KClient: fakeClient}
-	testAnnotator := kube.NewNodeAnnotator(k, &v1.Node{})
+	testAnnotator := kube.NewNodeAnnotator(k, "")
 	tests := []struct {
 		desc             string
 		inpNodeAnnotator kube.Annotator
