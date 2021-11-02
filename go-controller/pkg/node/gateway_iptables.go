@@ -168,7 +168,6 @@ func getNodePortLocalIPTRules(svcPort kapi.ServicePort, targetIP string, targetP
 	} else {
 		protocol = iptables.ProtocolIPv4
 	}
-
 	return []iptRule{
 		{
 			table: "nat",
@@ -380,7 +379,6 @@ func getGatewayIPTRules(service *kapi.Service, hasLocalHostEndpoint bool) []iptR
 				for _, clusterIP := range clusterIPs {
 					rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.Port)...)
 				}
-				// (astoycos) TODO remove me with LGW fix
 			} else {
 				// Port redirect host -> Nodeport -> host traffic directly to endpoint
 				for _, clusterIP := range clusterIPs {
