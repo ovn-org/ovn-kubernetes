@@ -3,11 +3,15 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
+	"os"
 	"sync"
 
 	"github.com/cenkalti/rpc2"
 	"github.com/cenkalti/rpc2/jsonrpc"
+	"github.com/go-logr/logr"
+	"github.com/go-logr/stdr"
 	"github.com/google/uuid"
 	"github.com/ovn-org/libovsdb/cache"
 	"github.com/ovn-org/libovsdb/model"
@@ -22,29 +26,33 @@ type OvsdbServer struct {
 	db           Database
 	ready        bool
 	readyMutex   sync.RWMutex
-	models       map[string]*model.DatabaseModel
+	models       map[string]model.DatabaseModel
 	modelsMutex  sync.RWMutex
 	monitors     map[*rpc2.Client]*connectionMonitors
 	monitorMutex sync.RWMutex
+	logger       logr.Logger
 }
 
 // NewOvsdbServer returns a new OvsdbServer
-func NewOvsdbServer(db Database, models ...*model.DatabaseModel) (*OvsdbServer, error) {
+func NewOvsdbServer(db Database, models ...model.DatabaseModel) (*OvsdbServer, error) {
+	l := stdr.NewWithOptions(log.New(os.Stderr, "", log.LstdFlags), stdr.Options{LogCaller: stdr.All}).WithName("server")
+	stdr.SetVerbosity(5)
 	o := &OvsdbServer{
 		done:         make(chan struct{}, 1),
 		db:           db,
-		models:       make(map[string]*model.DatabaseModel),
+		models:       make(map[string]model.DatabaseModel),
 		modelsMutex:  sync.RWMutex{},
 		monitors:     make(map[*rpc2.Client]*connectionMonitors),
 		monitorMutex: sync.RWMutex{},
+		logger:       l,
 	}
 	o.modelsMutex.Lock()
 	for _, model := range models {
-		o.models[model.Schema().Name] = model
+		o.models[model.Schema.Name] = model
 	}
 	o.modelsMutex.Unlock()
 	for database, model := range o.models {
-		if err := o.db.CreateDatabase(database, model.Schema()); err != nil {
+		if err := o.db.CreateDatabase(database, model.Schema); err != nil {
 			return nil, err
 		}
 	}
@@ -108,7 +116,7 @@ func (o *OvsdbServer) ListDatabases(client *rpc2.Client, args []interface{}, rep
 	dbs := []string{}
 	o.modelsMutex.RLock()
 	for _, db := range o.models {
-		dbs = append(dbs, db.Schema().Name)
+		dbs = append(dbs, db.Schema.Name)
 	}
 	o.modelsMutex.RUnlock()
 	*reply = dbs
@@ -127,23 +135,31 @@ func (o *OvsdbServer) GetSchema(client *rpc2.Client, args []interface{}, reply *
 		return fmt.Errorf("database %s does not exist", db)
 	}
 	o.modelsMutex.RUnlock()
-	*reply = *model.Schema()
+	*reply = model.Schema
 	return nil
 }
 
 type Transaction struct {
-	ID    uuid.UUID
-	Cache *cache.TableCache
+	ID          uuid.UUID
+	Cache       *cache.TableCache
+	DeletedRows map[string]struct{}
+	Model       model.DatabaseModel
+	DbName      string
+	Database    Database
 }
 
-func NewTransaction(model *model.DatabaseModel) Transaction {
-	cache, err := cache.NewTableCache(model, nil, nil)
+func (o *OvsdbServer) NewTransaction(model model.DatabaseModel, dbName string, database Database) Transaction {
+	cache, err := cache.NewTableCache(model, nil, &o.logger)
 	if err != nil {
 		panic(err)
 	}
 	return Transaction{
-		ID:    uuid.New(),
-		Cache: cache,
+		ID:          uuid.New(),
+		Cache:       cache,
+		DeletedRows: make(map[string]struct{}),
+		Model:       model,
+		DbName:      dbName,
+		Database:    database,
 	}
 }
 
@@ -245,9 +261,15 @@ func (o *OvsdbServer) Monitor(client *rpc2.Client, args []json.RawMessage, reply
 			return fmt.Errorf("monitor with that value already exists")
 		}
 	}
+
+	o.modelsMutex.Lock()
+	dbModel := o.models[db]
+	o.modelsMutex.Unlock()
+	transaction := o.NewTransaction(dbModel, db, o.db)
+
 	tableUpdates := make(ovsdb.TableUpdates)
 	for t, request := range request {
-		rows := o.Select(db, t, nil, request.Columns)
+		rows := transaction.Select(t, nil, request.Columns)
 		for i := range rows.Rows {
 			tu := make(ovsdb.TableUpdate)
 			uuid := rows.Rows[i]["_uuid"].(ovsdb.UUID).GoUUID
@@ -286,9 +308,15 @@ func (o *OvsdbServer) MonitorCond(client *rpc2.Client, args []json.RawMessage, r
 			return fmt.Errorf("monitor with that value already exists")
 		}
 	}
+
+	o.modelsMutex.Lock()
+	dbModel := o.models[db]
+	o.modelsMutex.Unlock()
+	transaction := o.NewTransaction(dbModel, db, o.db)
+
 	tableUpdates := make(ovsdb.TableUpdates2)
 	for t, request := range request {
-		rows := o.Select(db, t, nil, request.Columns)
+		rows := transaction.Select(t, nil, request.Columns)
 		for i := range rows.Rows {
 			tu := make(ovsdb.TableUpdate2)
 			uuid := rows.Rows[i]["_uuid"].(ovsdb.UUID).GoUUID
@@ -325,9 +353,15 @@ func (o *OvsdbServer) MonitorCondSince(client *rpc2.Client, args []json.RawMessa
 			return fmt.Errorf("monitor with that value already exists")
 		}
 	}
+
+	o.modelsMutex.Lock()
+	dbModel := o.models[db]
+	o.modelsMutex.Unlock()
+	transaction := o.NewTransaction(dbModel, db, o.db)
+
 	tableUpdates := make(ovsdb.TableUpdates2)
 	for t, request := range request {
-		rows := o.Select(db, t, nil, request.Columns)
+		rows := transaction.Select(t, nil, request.Columns)
 		for i := range rows.Rows {
 			tu := make(ovsdb.TableUpdate2)
 			uuid := rows.Rows[i]["_uuid"].(ovsdb.UUID).GoUUID

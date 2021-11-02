@@ -19,7 +19,7 @@ import (
 //  	Name string `ovsdb:"name"`
 //  }
 type Mapper struct {
-	Schema *ovsdb.DatabaseSchema
+	Schema ovsdb.DatabaseSchema
 }
 
 // ErrMapper describes an error in an Mapper type
@@ -37,8 +37,8 @@ func (e *ErrMapper) Error() string {
 }
 
 // NewMapper returns a new mapper
-func NewMapper(schema *ovsdb.DatabaseSchema) *Mapper {
-	return &Mapper{
+func NewMapper(schema ovsdb.DatabaseSchema) Mapper {
+	return Mapper{
 		Schema: schema,
 	}
 }

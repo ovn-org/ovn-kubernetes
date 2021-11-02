@@ -2,14 +2,11 @@ package client
 
 import (
 	"crypto/tls"
-	stdlog "log"
 	"net/url"
-	"os"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/go-logr/logr"
-	"github.com/go-logr/stdr"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -43,12 +40,6 @@ func newOptions(opts ...Option) (*options, error) {
 	// if no endpoints are supplied, use the default unix socket
 	if len(o.endpoints) == 0 {
 		o.endpoints = []string{defaultUnixEndpoint}
-	}
-
-	if o.logger == nil {
-		l := stdr.NewWithOptions(stdlog.New(os.Stderr, "", stdlog.LstdFlags), stdr.Options{LogCaller: stdr.All}).WithName("libovsdb")
-		stdr.SetVerbosity(5)
-		o.logger = &l
 	}
 	return o, nil
 }

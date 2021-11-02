@@ -137,12 +137,6 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 				Type:       nbdb.NATTypeSNAT,
 			})
 		}
-		// FIXME(flaviof): Remove this once libovsdb issue 232 is fixed.
-		// https://github.com/ovn-org/libovsdb/issues/232
-		if len(natUUIDs) > 1 {
-			// natUUIDs = natUUIDs[len(natUUIDs)-1:]
-			natUUIDs = natUUIDs[:1]
-		}
 	}
 
 	testData = append(testData, &nbdb.LogicalRouter{

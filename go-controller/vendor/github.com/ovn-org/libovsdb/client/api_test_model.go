@@ -159,7 +159,7 @@ func apiTestCache(t *testing.T, data map[string]map[string]model.Model) *cache.T
 	assert.Nil(t, err)
 	db, err := model.NewClientDBModel("OVN_Northbound", map[string]model.Model{"Logical_Switch": &testLogicalSwitch{}, "Logical_Switch_Port": &testLogicalSwitchPort{}})
 	assert.Nil(t, err)
-	dbModel, errs := model.NewDatabaseModel(&schema, db)
+	dbModel, errs := model.NewDatabaseModel(schema, db)
 	assert.Empty(t, errs)
 	cache, err := cache.NewTableCache(dbModel, data, nil)
 	assert.Nil(t, err)

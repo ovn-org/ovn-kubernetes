@@ -6,56 +6,86 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ovn-org/libovsdb/cache"
+	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
 )
 
 func (o *OvsdbServer) transact(name string, operations []ovsdb.Operation) ([]ovsdb.OperationResult, ovsdb.TableUpdates2) {
+	o.modelsMutex.Lock()
+	dbModel := o.models[name]
+	o.modelsMutex.Unlock()
+	transaction := o.NewTransaction(dbModel, name, o.db)
+
 	results := []ovsdb.OperationResult{}
 	updates := make(ovsdb.TableUpdates2)
+
+	// simple case: database name does not exist
+	if !o.db.Exists(name) {
+		r := ovsdb.OperationResult{
+			Error: "database does not exist",
+		}
+		for range operations {
+			results = append(results, r)
+		}
+		return results, updates
+	}
+
 	for _, op := range operations {
 		switch op.Op {
 		case ovsdb.OperationInsert:
-			r, tu := o.Insert(name, op.Table, op.UUIDName, op.Row)
+			r, tu := transaction.Insert(op.Table, op.UUIDName, op.Row)
 			results = append(results, r)
 			if tu != nil {
 				updates.Merge(tu)
+				if err := transaction.Cache.Populate2(tu); err != nil {
+					panic(err)
+				}
 			}
 		case ovsdb.OperationSelect:
-			r := o.Select(name, op.Table, op.Where, op.Columns)
+			r := transaction.Select(op.Table, op.Where, op.Columns)
 			results = append(results, r)
 		case ovsdb.OperationUpdate:
-			r, tu := o.Update(name, op.Table, op.Where, op.Row)
+			r, tu := transaction.Update(name, op.Table, op.Where, op.Row)
 			results = append(results, r)
 			if tu != nil {
 				updates.Merge(tu)
+				if err := transaction.Cache.Populate2(tu); err != nil {
+					panic(err)
+				}
 			}
 		case ovsdb.OperationMutate:
-			r, tu := o.Mutate(name, op.Table, op.Where, op.Mutations)
+			r, tu := transaction.Mutate(name, op.Table, op.Where, op.Mutations)
 			results = append(results, r)
 			if tu != nil {
 				updates.Merge(tu)
+				if err := transaction.Cache.Populate2(tu); err != nil {
+					panic(err)
+				}
 			}
 		case ovsdb.OperationDelete:
-			r, tu := o.Delete(name, op.Table, op.Where)
+			r, tu := transaction.Delete(name, op.Table, op.Where)
 			results = append(results, r)
 			if tu != nil {
 				updates.Merge(tu)
+				if err := transaction.Cache.Populate2(tu); err != nil {
+					panic(err)
+				}
 			}
 		case ovsdb.OperationWait:
-			r := o.Wait(name, op.Table, op.Timeout, op.Where, op.Columns, op.Until, op.Rows)
+			r := transaction.Wait(name, op.Table, op.Timeout, op.Where, op.Columns, op.Until, op.Rows)
 			results = append(results, r)
 		case ovsdb.OperationCommit:
 			durable := op.Durable
-			r := o.Commit(name, op.Table, *durable)
+			r := transaction.Commit(name, op.Table, *durable)
 			results = append(results, r)
 		case ovsdb.OperationAbort:
-			r := o.Abort(name, op.Table)
+			r := transaction.Abort(name, op.Table)
 			results = append(results, r)
 		case ovsdb.OperationComment:
-			r := o.Comment(name, op.Table, *op.Comment)
+			r := transaction.Comment(name, op.Table, *op.Comment)
 			results = append(results, r)
 		case ovsdb.OperationAssert:
-			r := o.Assert(name, op.Table, *op.Lock)
+			r := transaction.Assert(name, op.Table, *op.Lock)
 			results = append(results, r)
 		default:
 			return nil, updates
@@ -64,17 +94,50 @@ func (o *OvsdbServer) transact(name string, operations []ovsdb.Operation) ([]ovs
 	return results, updates
 }
 
-func (o *OvsdbServer) Insert(database string, table string, rowUUID string, row ovsdb.Row) (ovsdb.OperationResult, ovsdb.TableUpdates2) {
-	if !o.db.Exists(database) {
-		return ovsdb.OperationResult{
-			Error: "database does not exist",
-		}, nil
+func (t *Transaction) rowsFromTransactionCacheAndDatabase(table string, where []ovsdb.Condition) (map[string]model.Model, error) {
+	txnRows, err := t.Cache.Table(table).RowsByCondition(where)
+	if err != nil {
+		return nil, fmt.Errorf("failed getting rows for table %s from transaction cache", table)
 	}
-	o.modelsMutex.Lock()
-	dbModel := o.models[database]
-	o.modelsMutex.Unlock()
+	rows, err := t.Database.List(t.DbName, table, where...)
+	if err != nil {
+		return nil, fmt.Errorf("failed getting rows for table %s from database", table)
+	}
 
-	m := dbModel.Mapper()
+	// prefer rows from transaction cache while copying into cache
+	// rows that are in the db.
+	for rowUUID, row := range rows {
+		if txnRow, found := txnRows[rowUUID]; found {
+			rows[rowUUID] = txnRow
+		} else {
+			// warm the transaction cache with the current contents of the row
+			if err := t.Cache.Table(table).Create(rowUUID, row, false); err != nil {
+				return nil, fmt.Errorf("failed warming transaction cache row %s %v for table %s: %v", rowUUID, row, table, err)
+			}
+			txnRows[rowUUID] = row
+		}
+	}
+	// exclude deleted rows
+	for rowUUID := range t.DeletedRows {
+		delete(rows, rowUUID)
+	}
+	return rows, nil
+}
+
+func (t *Transaction) checkIndexes(table string, model model.Model) error {
+	// check for index conflicts. First check on transaction cache, followed by
+	// the database's
+	targetTable := t.Cache.Table(table)
+	err := targetTable.IndexExists(model)
+	if err == nil {
+		err = t.Database.CheckIndexes(t.DbName, table, model)
+	}
+	return err
+}
+
+func (t *Transaction) Insert(table string, rowUUID string, row ovsdb.Row) (ovsdb.OperationResult, ovsdb.TableUpdates2) {
+	dbModel := t.Model
+	m := dbModel.Mapper
 
 	if rowUUID == "" {
 		rowUUID = uuid.NewString()
@@ -116,7 +179,7 @@ func (o *OvsdbServer) Insert(database string, table string, rowUUID string, row 
 	}
 
 	// check for index conflicts
-	if err := o.db.CheckIndexes(database, table, model); err != nil {
+	if err := t.checkIndexes(table, model); err != nil {
 		if indexExists, ok := err.(*cache.ErrIndexExists); ok {
 			e := ovsdb.ConstraintViolation{}
 			return ovsdb.OperationResult{
@@ -143,23 +206,16 @@ func (o *OvsdbServer) Insert(database string, table string, rowUUID string, row 
 	}
 }
 
-func (o *OvsdbServer) Select(database string, table string, where []ovsdb.Condition, columns []string) ovsdb.OperationResult {
-	if !o.db.Exists(database) {
-		return ovsdb.OperationResult{
-			Error: "database does not exist",
-		}
-	}
-	o.modelsMutex.Lock()
-	dbModel := o.models[database]
-	o.modelsMutex.Unlock()
-
-	m := dbModel.Mapper()
-
+func (t *Transaction) Select(table string, where []ovsdb.Condition, columns []string) ovsdb.OperationResult {
 	var results []ovsdb.Row
-	rows, err := o.db.List(database, table, where...)
+	dbModel := t.Model
+
+	rows, err := t.rowsFromTransactionCacheAndDatabase(table, where)
 	if err != nil {
 		panic(err)
 	}
+
+	m := dbModel.Mapper
 	for _, row := range rows {
 		info, err := dbModel.NewModelInfo(row)
 		if err != nil {
@@ -176,28 +232,21 @@ func (o *OvsdbServer) Select(database string, table string, where []ovsdb.Condit
 	}
 }
 
-func (o *OvsdbServer) Update(database, table string, where []ovsdb.Condition, row ovsdb.Row) (ovsdb.OperationResult, ovsdb.TableUpdates2) {
-	if !o.db.Exists(database) {
-		return ovsdb.OperationResult{
-			Error: "database does not exist",
-		}, nil
-	}
-	o.modelsMutex.Lock()
-	dbModel := o.models[database]
-	o.modelsMutex.Unlock()
-
-	m := dbModel.Mapper()
-	schema := dbModel.Schema().Table(table)
+func (t *Transaction) Update(database, table string, where []ovsdb.Condition, row ovsdb.Row) (ovsdb.OperationResult, ovsdb.TableUpdates2) {
+	dbModel := t.Model
+	m := dbModel.Mapper
+	schema := dbModel.Schema.Table(table)
 	tableUpdate := make(ovsdb.TableUpdate2)
-	rows, err := o.db.List(database, table, where...)
+
+	rows, err := t.rowsFromTransactionCacheAndDatabase(table, where)
 	if err != nil {
 		return ovsdb.OperationResult{
 			Error: err.Error(),
 		}, nil
 	}
-	for _, old := range rows {
+
+	for uuid, old := range rows {
 		oldInfo, _ := dbModel.NewModelInfo(old)
-		uuid, _ := oldInfo.FieldByColumn("_uuid")
 
 		oldRow, err := m.NewRow(oldInfo)
 		if err != nil {
@@ -278,7 +327,7 @@ func (o *OvsdbServer) Update(database, table string, where []ovsdb.Condition, ro
 		}
 
 		// check for index conflicts
-		if err := o.db.CheckIndexes(database, table, new); err != nil {
+		if err := t.checkIndexes(table, new); err != nil {
 			if indexExists, ok := err.(*cache.ErrIndexExists); ok {
 				e := ovsdb.ConstraintViolation{}
 				return ovsdb.OperationResult{
@@ -291,7 +340,7 @@ func (o *OvsdbServer) Update(database, table string, where []ovsdb.Condition, ro
 			}, nil
 		}
 
-		tableUpdate.AddRowUpdate(uuid.(string), &ovsdb.RowUpdate2{
+		tableUpdate.AddRowUpdate(uuid, &ovsdb.RowUpdate2{
 			Modify: &rowDelta,
 			Old:    &oldRow,
 			New:    &newRow,
@@ -305,32 +354,22 @@ func (o *OvsdbServer) Update(database, table string, where []ovsdb.Condition, ro
 		}
 }
 
-func (o *OvsdbServer) Mutate(database, table string, where []ovsdb.Condition, mutations []ovsdb.Mutation) (ovsdb.OperationResult, ovsdb.TableUpdates2) {
-	if !o.db.Exists(database) {
-		return ovsdb.OperationResult{
-			Error: "database does not exist",
-		}, nil
-	}
-	o.modelsMutex.Lock()
-	dbModel := o.models[database]
-	o.modelsMutex.Unlock()
-
-	m := dbModel.Mapper()
-	schema := dbModel.Schema().Table(table)
-
+func (t *Transaction) Mutate(database, table string, where []ovsdb.Condition, mutations []ovsdb.Mutation) (ovsdb.OperationResult, ovsdb.TableUpdates2) {
+	dbModel := t.Model
+	m := dbModel.Mapper
+	schema := dbModel.Schema.Table(table)
 	tableUpdate := make(ovsdb.TableUpdate2)
 
-	rows, err := o.db.List(database, table, where...)
+	rows, err := t.rowsFromTransactionCacheAndDatabase(table, where)
 	if err != nil {
 		panic(err)
 	}
 
-	for _, old := range rows {
+	for uuid, old := range rows {
 		oldInfo, err := dbModel.NewModelInfo(old)
 		if err != nil {
 			panic(err)
 		}
-		uuid, _ := oldInfo.FieldByColumn("_uuid")
 		oldRow, err := m.NewRow(oldInfo)
 		if err != nil {
 			panic(err)
@@ -413,7 +452,7 @@ func (o *OvsdbServer) Mutate(database, table string, where []ovsdb.Condition, mu
 		}
 
 		// check indexes
-		if err := o.db.CheckIndexes(database, table, new); err != nil {
+		if err := t.checkIndexes(table, new); err != nil {
 			if indexExists, ok := err.(*cache.ErrIndexExists); ok {
 				e := ovsdb.ConstraintViolation{}
 				return ovsdb.OperationResult{
@@ -431,7 +470,7 @@ func (o *OvsdbServer) Mutate(database, table string, where []ovsdb.Condition, mu
 			panic(err)
 		}
 
-		tableUpdate.AddRowUpdate(uuid.(string), &ovsdb.RowUpdate2{
+		tableUpdate.AddRowUpdate(uuid, &ovsdb.RowUpdate2{
 			Modify: &rowDelta,
 			Old:    &oldRow,
 			New:    &newRow,
@@ -445,33 +484,28 @@ func (o *OvsdbServer) Mutate(database, table string, where []ovsdb.Condition, mu
 		}
 }
 
-func (o *OvsdbServer) Delete(database, table string, where []ovsdb.Condition) (ovsdb.OperationResult, ovsdb.TableUpdates2) {
-	if !o.db.Exists(database) {
-		return ovsdb.OperationResult{
-			Error: "database does not exist",
-		}, nil
-	}
-	o.modelsMutex.Lock()
-	dbModel := o.models[database]
-	o.modelsMutex.Unlock()
-	m := dbModel.Mapper()
-
+func (t *Transaction) Delete(database, table string, where []ovsdb.Condition) (ovsdb.OperationResult, ovsdb.TableUpdates2) {
+	dbModel := t.Model
+	m := dbModel.Mapper
 	tableUpdate := make(ovsdb.TableUpdate2)
-	rows, err := o.db.List(database, table, where...)
+
+	rows, err := t.rowsFromTransactionCacheAndDatabase(table, where)
 	if err != nil {
 		panic(err)
 	}
-	for _, row := range rows {
+
+	for uuid, row := range rows {
 		info, _ := dbModel.NewModelInfo(row)
-		uuid, _ := info.FieldByColumn("_uuid")
 		oldRow, err := m.NewRow(info)
 		if err != nil {
 			panic(err)
 		}
-		tableUpdate.AddRowUpdate(uuid.(string), &ovsdb.RowUpdate2{
+		tableUpdate.AddRowUpdate(uuid, &ovsdb.RowUpdate2{
 			Delete: &ovsdb.Row{},
 			Old:    &oldRow,
 		})
+		// track delete operation in transaction to complement cache
+		t.DeletedRows[uuid] = struct{}{}
 	}
 	return ovsdb.OperationResult{
 			Count: len(rows),
@@ -480,27 +514,27 @@ func (o *OvsdbServer) Delete(database, table string, where []ovsdb.Condition) (o
 		}
 }
 
-func (o *OvsdbServer) Wait(database, table string, timeout int, conditions []ovsdb.Condition, columns []string, until string, rows []ovsdb.Row) ovsdb.OperationResult {
+func (t *Transaction) Wait(database, table string, timeout int, conditions []ovsdb.Condition, columns []string, until string, rows []ovsdb.Row) ovsdb.OperationResult {
 	e := ovsdb.NotSupported{}
 	return ovsdb.OperationResult{Error: e.Error()}
 }
 
-func (o *OvsdbServer) Commit(database, table string, durable bool) ovsdb.OperationResult {
+func (t *Transaction) Commit(database, table string, durable bool) ovsdb.OperationResult {
 	e := ovsdb.NotSupported{}
 	return ovsdb.OperationResult{Error: e.Error()}
 }
 
-func (o *OvsdbServer) Abort(database, table string) ovsdb.OperationResult {
+func (t *Transaction) Abort(database, table string) ovsdb.OperationResult {
 	e := ovsdb.NotSupported{}
 	return ovsdb.OperationResult{Error: e.Error()}
 }
 
-func (o *OvsdbServer) Comment(database, table string, comment string) ovsdb.OperationResult {
+func (t *Transaction) Comment(database, table string, comment string) ovsdb.OperationResult {
 	e := ovsdb.NotSupported{}
 	return ovsdb.OperationResult{Error: e.Error()}
 }
 
-func (o *OvsdbServer) Assert(database, table, lock string) ovsdb.OperationResult {
+func (t *Transaction) Assert(database, table, lock string) ovsdb.OperationResult {
 	e := ovsdb.NotSupported{}
 	return ovsdb.OperationResult{Error: e.Error()}
 }
