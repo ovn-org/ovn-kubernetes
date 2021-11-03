@@ -113,17 +113,15 @@ func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
 	// update the direction of each egressFirewallACL if needed
 	if len(egressFirewallACLs) != 0 {
 		opModels := []libovsdbops.OperationModel{}
-		for i, egressFirewallACL := range egressFirewallACLs {
-			aclName := egressFirewallACLs[i].Name
+		for i := range egressFirewallACLs {
+			egressFirewallACL := egressFirewallACLs[i]
 			egressFirewallACL.Direction = types.DirectionToLPort
 			opModels = append(opModels, libovsdbops.OperationModel{
-				Model:          &egressFirewallACL,
-				ModelPredicate: func(acl *nbdb.ACL) bool { return acl.Name == aclName },
+				Model: &egressFirewallACL,
 				OnModelUpdates: []interface{}{
 					&egressFirewallACL.Direction,
 				},
 				ErrNotFound: true,
-				BulkOp:      true,
 			})
 		}
 		if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
