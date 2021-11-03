@@ -183,6 +183,13 @@ var metricIPsecEnabled = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "Specifies whether IPSec is enabled for this cluster(1) or not enabled for this cluster(0)",
 })
 
+var metricEgressFirewallCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "num_egress_firewalls",
+	Help:      "The number of egress firewall policies",
+})
+
 var registerMasterMetricsOnce sync.Once
 var startMasterMetricUpdaterOnce sync.Once
 
@@ -260,6 +267,7 @@ func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 		prometheus.MustRegister(metricEgressIPCount)
 		prometheus.MustRegister(metricEgressFirewallRuleCount)
 		prometheus.MustRegister(metricIPsecEnabled)
+		prometheus.MustRegister(metricEgressFirewallCount)
 		registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemMaster)
 	})
 }
@@ -384,4 +392,14 @@ func ipsecMetricHandler(table string, model model.Model) {
 	} else {
 		metricIPsecEnabled.Set(0)
 	}
+}
+
+// IncrementEgressFirewallCount increments the number of Egress firewalls
+func IncrementEgressFirewallCount() {
+	metricEgressFirewallCount.Inc()
+}
+
+// DecrementEgressFirewallCount decrements the number of Egress firewalls
+func DecrementEgressFirewallCount() {
+	metricEgressFirewallCount.Dec()
 }
