@@ -169,7 +169,7 @@ func (r *repair) deleteLegacyLBs() error {
 	for _, lb := range legacyLBs {
 		toDelete = append(toDelete, lb.UUID)
 	}
-	if err := ovnlb.DeleteLBs(nil, toDelete); err != nil {
+	if err := ovnlb.DeleteLBs(r.nbClient, toDelete); err != nil {
 		return fmt.Errorf("failed to delete LBs: %w", err)
 	}
 	atomic.StoreUint32(&r.semLegacyLBsDeleted, 1)
