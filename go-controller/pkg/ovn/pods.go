@@ -101,6 +101,9 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	if pod.Spec.HostNetwork {
 		return
 	}
+	if !util.PodScheduled(pod) {
+		return
+	}
 
 	podDesc := pod.Namespace + "/" + pod.Name
 	klog.Infof("Deleting pod: %s", podDesc)
@@ -110,7 +113,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	if err != nil {
 		klog.Errorf(err.Error())
 		// If ovnkube-master restarts, it is also possible the Pod's logical switch port
-		// is not readded into the cache. Delete logical switch port anyway.
+		// is not re-added into the cache. Delete logical switch port anyway.
 		err = ovnNBLSPDel(oc.nbClient, logicalPort, pod.Spec.NodeName)
 		if err != nil {
 			klog.Errorf(err.Error())
@@ -118,13 +121,10 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 
 		// Even if the port is not in the cache, IPs annotated in the Pod annotation may already be allocated,
 		// need to release them to avoid leakage.
-		logicalSwitch := pod.Spec.NodeName
-		if logicalSwitch != "" {
-			annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
-			if err == nil {
-				podIfAddrs := annotation.IPs
-				_ = oc.lsManager.ReleaseIPs(logicalSwitch, podIfAddrs)
-			}
+		annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
+		if err == nil {
+			podIfAddrs := annotation.IPs
+			_ = oc.lsManager.ReleaseIPs(pod.Spec.NodeName, podIfAddrs)
 		}
 		return
 	}
