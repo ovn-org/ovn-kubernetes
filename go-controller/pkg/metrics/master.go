@@ -163,14 +163,14 @@ var metricV6AllocatedHostSubnetCount = prometheus.NewGauge(prometheus.GaugeOpts{
 })
 
 var metricEgressIPCount = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
+	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "num_egress_ips",
 	Help:      "The number of defined egress IP addresses",
 })
 
 var metricEgressFirewallRuleCount = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
+	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "num_egress_firewall_rules",
 	Help:      "The number of egress firewall rules defined"},
