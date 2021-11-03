@@ -1578,6 +1578,8 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
+	// HACK (trozet) force debug level
+	Logging.Level = 5
 	var level klog.Level
 	if err := level.Set(strconv.Itoa(Logging.Level)); err != nil {
 		return "", fmt.Errorf("failed to set klog log level %v", err)
