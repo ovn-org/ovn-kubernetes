@@ -401,6 +401,28 @@ func TestLinkRoutesDel(t *testing.T) {
 					OnCallMethodArgType: []string{"*mocks.Link", "int"},
 					RetArgList: []interface{}{
 						[]netlink.Route{
+							{Dst: nil},
+							{Dst: ovntest.MustParseIPNet("192.168.1.0/24")},
+						},
+						nil,
+					},
+				},
+				{
+					OnCallMethodName: "RouteDel", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil},
+				},
+			},
+		},
+		{
+			desc:         "default route delete succeeds",
+			inputLink:    mockLink,
+			inputSubnets: []*net.IPNet{nil},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{
+					OnCallMethodName:    "RouteList",
+					OnCallMethodArgType: []string{"*mocks.Link", "int"},
+					RetArgList: []interface{}{
+						[]netlink.Route{
+							{Dst: nil},
 							{Dst: ovntest.MustParseIPNet("192.168.1.0/24")},
 						},
 						nil,

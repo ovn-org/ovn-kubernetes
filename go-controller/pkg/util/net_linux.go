@@ -34,6 +34,7 @@ type NetLinkOps interface {
 	RouteList(link netlink.Link, family int) ([]netlink.Route, error)
 	RouteDel(route *netlink.Route) error
 	RouteAdd(route *netlink.Route) error
+	RouteReplace(route *netlink.Route) error
 	RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error)
 	NeighAdd(neigh *netlink.Neigh) error
 	NeighList(linkIndex, family int) ([]netlink.Neigh, error)
@@ -126,6 +127,10 @@ func (defaultNetLinkOps) RouteDel(route *netlink.Route) error {
 
 func (defaultNetLinkOps) RouteAdd(route *netlink.Route) error {
 	return netlink.RouteAdd(route)
+}
+
+func (defaultNetLinkOps) RouteReplace(route *netlink.Route) error {
+	return netlink.RouteReplace(route)
 }
 
 func (defaultNetLinkOps) RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error) {
@@ -223,6 +228,7 @@ func LinkAddrAdd(link netlink.Link, address *net.IPNet) error {
 
 // LinkRoutesDel deletes all the routes for the given subnets via the link
 // if subnets is empty, then all routes will be removed for a link
+// if any item in subnets is nil the default route will be removed
 func LinkRoutesDel(link netlink.Link, subnets []*net.IPNet) error {
 	routes, err := netLinkOps.RouteList(link, netlink.FAMILY_ALL)
 	if err != nil {
@@ -239,11 +245,23 @@ func LinkRoutesDel(link netlink.Link, subnets []*net.IPNet) error {
 			continue
 		}
 		for _, subnet := range subnets {
-			if route.Dst.String() == subnet.String() {
+			deleteRoute := false
+
+			if subnet == nil {
+				deleteRoute = route.Dst == nil
+			} else if route.Dst != nil {
+				deleteRoute = route.Dst.String() == subnet.String()
+			}
+
+			if deleteRoute {
 				err = netLinkOps.RouteDel(&route)
 				if err != nil {
+					net := "default"
+					if route.Dst != nil {
+						net = route.Dst.String()
+					}
 					return fmt.Errorf("failed to delete route '%s via %s' for link %s : %v\n",
-						route.Dst.String(), route.Gw.String(), link.Attrs().Name, err)
+						net, route.Gw.String(), link.Attrs().Name, err)
 				}
 				break
 			}
@@ -276,20 +294,49 @@ func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int
 	return nil
 }
 
-// LinkRouteExists checks for existence of routes for the given subnet through gwIPStr
-func LinkRouteExists(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (bool, error) {
+// LinkRoutesReplace adds or changes a route for given subnets through the gwIPstr
+func LinkRoutesReplace(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int) error {
+	for _, subnet := range subnets {
+		route := &netlink.Route{
+			Dst:       subnet,
+			LinkIndex: link.Attrs().Index,
+			Scope:     netlink.SCOPE_UNIVERSE,
+			Gw:        gwIP,
+		}
+		if mtu != 0 {
+			route.MTU = mtu
+		}
+
+		err := netLinkOps.RouteReplace(route)
+		if err != nil {
+			return fmt.Errorf("failed to replace a route for subnet %s via gateway %s: %v",
+				subnet.String(), gwIP.String(), err)
+		}
+	}
+	return nil
+}
+
+// LinkRouteGet gets a route for the given subnet with the specified gwIPStr
+// returns nil if route is not found
+func LinkRouteGet(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (*netlink.Route, error) {
 	routeFilter := &netlink.Route{Dst: subnet, LinkIndex: link.Attrs().Index}
 	filterMask := netlink.RT_FILTER_DST | netlink.RT_FILTER_OIF
 	routes, err := netLinkOps.RouteListFiltered(getFamily(gwIP), routeFilter, filterMask)
 	if err != nil {
-		return false, fmt.Errorf("failed to get routes for subnet %s", subnet.String())
+		return nil, fmt.Errorf("failed to get routes for subnet %s", subnet.String())
 	}
 	for _, route := range routes {
 		if route.Gw.Equal(gwIP) {
-			return true, nil
+			return &route, nil
 		}
 	}
-	return false, nil
+	return nil, nil
+}
+
+// LinkRouteExists checks for existence of routes for the given subnet through gwIPStr
+func LinkRouteExists(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (bool, error) {
+	route, err := LinkRouteGet(link, gwIP, subnet)
+	return route != nil, err
 }
 
 // LinkNeighAdd adds MAC/IP bindings for the given link

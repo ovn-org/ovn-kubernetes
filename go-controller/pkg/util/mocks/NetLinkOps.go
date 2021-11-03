@@ -319,6 +319,20 @@ func (_m *NetLinkOps) RouteAdd(route *netlink.Route) error {
 	return r0
 }
 
+// RouteReplace provides a mock function with given fields: route
+func (_m *NetLinkOps) RouteReplace(route *netlink.Route) error {
+	ret := _m.Called(route)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*netlink.Route) error); ok {
+		r0 = rf(route)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // RouteDel provides a mock function with given fields: route
 func (_m *NetLinkOps) RouteDel(route *netlink.Route) error {
 	ret := _m.Called(route)
