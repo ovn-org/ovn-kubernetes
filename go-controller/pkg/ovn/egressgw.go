@@ -182,7 +182,9 @@ func (oc *Controller) addPodExternalGW(pod *kapi.Pod) error {
 
 	foundGws, err := getExGwPodIPs(pod)
 	if err != nil {
-		return err
+		klog.Errorf("Error getting exgw IPs for pod: %s, error: %v", pod.Name, err)
+		oc.recordPodEvent(err, pod)
+		return nil
 	}
 
 	// if we found any gateways then we need to update current pods routing in the relevant namespace
@@ -1121,10 +1123,9 @@ func getExGwPodIPs(gatewayPod *kapi.Pod) ([]net.IP, error) {
 			}
 		}
 	} else {
-		klog.Errorf("Ignoring pod %s as an external gateway candidate. Invalid combination "+
+		return nil, fmt.Errorf("ignoring pod %s as an external gateway candidate. Invalid combination "+
 			"of host network: %t and routing-network annotation: %s", gatewayPod.Name, gatewayPod.Spec.HostNetwork,
 			gatewayPod.Annotations[routingNetworkAnnotation])
-		return nil, nil
 	}
 	return foundGws, nil
 }
