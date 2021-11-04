@@ -77,7 +77,34 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 	if err != nil {
 		return nil, err
 	}
-	return newClientWithMonitor(cfg, stopCh, dbModel)
+	c, err := newClient(cfg, dbModel, stopCh)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	go func() {
+		<-stopCh
+		cancel()
+	}()
+
+	// Only Monitor Required SBDB tables to reduce memory overhead
+	_, err = c.Monitor(ctx,
+		c.NewMonitor(
+			// used by unidling controller
+			client.WithTable(&sbdb.ControllerEvent{}),
+			// used for gateway
+			client.WithTable(&sbdb.MACBinding{}),
+			// used by libovsdbops
+			client.WithTable(&sbdb.Chassis{}),
+		),
+	)
+	if err != nil {
+		c.Close()
+		return nil, err
+	}
+
+	return c, nil
 }
 
 // NewNBClient creates a new OVN Northbound Database client
@@ -91,10 +118,7 @@ func NewNBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 	if err != nil {
 		return nil, err
 	}
-	return newClientWithMonitor(cfg, stopCh, dbModel)
-}
 
-func newClientWithMonitor(cfg config.OvnAuthConfig, stopCh <-chan struct{}, dbModel model.ClientDBModel) (client.Client, error) {
 	c, err := newClient(cfg, dbModel, stopCh)
 	if err != nil {
 		return nil, err
