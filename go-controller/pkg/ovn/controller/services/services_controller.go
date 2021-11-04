@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"sync"
@@ -44,6 +45,8 @@ const (
 
 	controllerName = "ovn-lb-controller"
 )
+
+var NoServiceLabelError = fmt.Errorf("endpointSlice missing %s label", discovery.LabelServiceName)
 
 // NewController returns a new *Controller.
 func NewController(client clientset.Interface,
@@ -439,7 +442,14 @@ func (c *Controller) onEndpointSliceDelete(obj interface{}) {
 func (c *Controller) queueServiceForEndpointSlice(endpointSlice *discovery.EndpointSlice) {
 	key, err := serviceControllerKey(endpointSlice)
 	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("couldn't get key for EndpointSlice %+v: %v", endpointSlice, err))
+		// Do not log endpointsSlices missing service labels as errors.
+		// Once the service label is eventually added, we will get this event
+		// and re-process.
+		if errors.Is(err, NoServiceLabelError) {
+			klog.V(5).Infof(err.Error())
+		} else {
+			utilruntime.HandleError(fmt.Errorf("couldn't get key for EndpointSlice %+v: %v", endpointSlice, err))
+		}
 		return
 	}
 
@@ -454,7 +464,8 @@ func serviceControllerKey(endpointSlice *discovery.EndpointSlice) (string, error
 	}
 	serviceName, ok := endpointSlice.Labels[discovery.LabelServiceName]
 	if !ok || serviceName == "" {
-		return "", fmt.Errorf("endpointSlice missing %s label", discovery.LabelServiceName)
+		return "", fmt.Errorf("%w: endpointSlice: %s/%s", NoServiceLabelError, endpointSlice.Namespace,
+			endpointSlice.Name)
 	}
 	return fmt.Sprintf("%s/%s", endpointSlice.Namespace, serviceName), nil
 }
