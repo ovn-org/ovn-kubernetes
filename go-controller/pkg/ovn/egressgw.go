@@ -101,25 +101,22 @@ func (oc *Controller) getRouteInfosForGateway(gatewayIP, namespace string) []*ex
 	oc.exGWCacheMutex.RLock()
 	defer oc.exGWCacheMutex.RUnlock()
 
-	routes := make([]*externalRouteInfo, 0)
+	routeInfos := make([]*externalRouteInfo, 0)
 	for namespacedName, routeInfo := range oc.externalGWCache {
 		if namespacedName.Namespace != namespace {
 			continue
 		}
 
-		routeFound := false
 		for _, route := range routeInfo.podExternalRoutes {
 			if _, ok := route[gatewayIP]; ok {
-				routes = append(routes, routeInfo)
-				routeFound = true
+				routeInfo.Lock()
+				routeInfos = append(routeInfos, routeInfo)
+				break
 			}
-		}
-		if routeFound {
-			routeInfo.Lock()
 		}
 	}
 
-	return routes
+	return routeInfos
 }
 
 // getRouteInfosForNamespace returns all routeInfos locked for a specific namespace
