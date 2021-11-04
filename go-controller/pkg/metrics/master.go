@@ -1,16 +1,22 @@
 package metrics
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"sync"
 	"time"
 
-	goovn "github.com/ebay/go-ovn"
+	"github.com/ovn-org/libovsdb/cache"
+	"github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/libovsdb/model"
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/prometheus/client_golang/prometheus"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	goovn "github.com/ebay/go-ovn"
+	"github.com/prometheus/client_golang/prometheus"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
@@ -170,8 +176,15 @@ var metricEgressFirewallRuleCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "The number of egress firewall rules defined"},
 )
 
+var metricIPsecEnabled = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "ipsec_enabled",
+	Help:      "Specifies whether IPSec is enabled for this cluster(1) or not enabled for this cluster(0)",
+})
+
 var registerMasterMetricsOnce sync.Once
-var startE2ETimeStampUpdaterOnce sync.Once
+var startMasterMetricUpdaterOnce sync.Once
 
 // RegisterMasterMetrics registers some ovnkube master metrics with the Prometheus
 // registry
@@ -246,37 +259,24 @@ func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 		prometheus.MustRegister(metricV6AllocatedHostSubnetCount)
 		prometheus.MustRegister(metricEgressIPCount)
 		prometheus.MustRegister(metricEgressFirewallRuleCount)
+		prometheus.MustRegister(metricIPsecEnabled)
 		registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemMaster)
 	})
 }
 
-// StartE2ETimeStampMetricUpdater adds a goroutine that updates a "timestamp" value in the
-// nbdb every 30 seconds. This is so we can determine freshness of the database
-func StartE2ETimeStampMetricUpdater(stopChan <-chan struct{}, ovnNBClient goovn.Client) {
-	startE2ETimeStampUpdaterOnce.Do(func() {
+// StartMasterMetricUpdater adds a goroutine that updates a "timestamp" value in the
+// nbdb every 30 seconds. This is so we can determine freshness of the database.
+// Also, update IPsec enabled or disable metric.
+func StartMasterMetricUpdater(stopChan <-chan struct{}, nbClient client.Client) {
+	startMasterMetricUpdaterOnce.Do(func() {
+		addIPSecMetricHandler(nbClient)
 		go func() {
-			tsUpdateTicker := time.NewTicker(30 * time.Second)
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
 			for {
 				select {
-				case <-tsUpdateTicker.C:
-					options, err := ovnNBClient.NBGlobalGetOptions()
-					if err != nil {
-						klog.Errorf("Can't get existing NB Global Options for updating timestamps")
-						continue
-					}
-					t := time.Now().Unix()
-					options["e2e_timestamp"] = fmt.Sprintf("%d", t)
-					cmd, err := ovnNBClient.NBGlobalSetOptions(options)
-					if err != nil {
-						klog.Errorf("Failed to bump timestamp: %v", err)
-					} else {
-						err = cmd.Execute()
-						if err != nil {
-							klog.Errorf("Failed to set timestamp: %v", err)
-						} else {
-							metricE2ETimestamp.Set(float64(t))
-						}
-					}
+				case <-ticker.C:
+					updateE2ETimestampMetric(nbClient)
 				case <-stopChan:
 					return
 				}
@@ -326,4 +326,62 @@ func RecordEgressIPCount(count float64) {
 // UpdateEgressFirewallRuleCount records the number of Egress firewall rules.
 func UpdateEgressFirewallRuleCount(count float64) {
 	metricEgressFirewallRuleCount.Add(count)
+}
+
+func updateE2ETimestampMetric(ovnNBClient client.Client) {
+	var rows []nbdb.NBGlobal
+	if err := ovnNBClient.List(&rows); err != nil {
+		klog.Errorf("Failed to update e2e timestamp metric while attempting to list rows for NB_Global table: %s", err)
+		return
+	}
+	if len(rows) < 1 {
+		klog.Errorf("Failed to update e2e timestamp metric because there are no rows in NB_Global table")
+		return
+	}
+	currentTime := time.Now().Unix()
+	// assumption that only first row is relevant in NB_Global table
+	rows[0].Options["e2e_timestamp"] = fmt.Sprintf("%d", currentTime)
+	operations, err := ovnNBClient.Where(&rows[0]).Update(&rows[0], &rows[0].Options)
+	if err != nil {
+		klog.Errorf("Failed to update e2e timestamp metric because generating OVN northbound operation failed: %v", err)
+		return
+	}
+	reply, err := ovnNBClient.Transact(context.Background(), operations...)
+	if err != nil {
+		klog.Errorf("Failed to update e2e timestamp metric while updating OVN northbound database: %v", err)
+		return
+	}
+	if opErrs, err := ovsdb.CheckOperationResults(reply, operations); err != nil {
+		for _, oe := range opErrs {
+			klog.Errorf("Failed to update e2e timestamp metric in OVN northbound database: %v", oe)
+		}
+		return
+	}
+	metricE2ETimestamp.Set(float64(currentTime))
+}
+
+func addIPSecMetricHandler(ovnNBClient client.Client) {
+	ovnNBClient.Cache().AddEventHandler(&cache.EventHandlerFuncs{
+		AddFunc: func(table string, model model.Model) {
+			ipsecMetricHandler(table, model)
+		},
+		UpdateFunc: func(table string, _, new model.Model) {
+			ipsecMetricHandler(table, new)
+		},
+		DeleteFunc: func(table string, model model.Model) {
+			ipsecMetricHandler(table, model)
+		},
+	})
+}
+
+func ipsecMetricHandler(table string, model model.Model) {
+	if table != "NB_Global" {
+		return
+	}
+	entry := model.(*nbdb.NBGlobal)
+	if entry.Ipsec {
+		metricIPsecEnabled.Set(1)
+	} else {
+		metricIPsecEnabled.Set(0)
+	}
 }
