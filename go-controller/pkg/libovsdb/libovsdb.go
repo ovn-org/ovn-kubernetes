@@ -82,9 +82,7 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 		return nil, err
 	}
 
-	// TODO(flaviof): whenever we get around to passing a context down from the caller, we will
-	// replace the TODO with that one.
-	ctx, cancel := context.WithCancel(context.TODO())
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	go func() {
 		<-stopCh
 		cancel()
