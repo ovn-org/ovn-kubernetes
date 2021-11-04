@@ -177,6 +177,74 @@ func TestParseSubnetAnnotation(t *testing.T) {
 	}
 }
 
+func TestNodeSubnetAnnotationChanged(t *testing.T) {
+	tests := []struct {
+		desc    string
+		oldNode *v1.Node
+		newNode *v1.Node
+		result  bool
+	}{
+		{
+			desc: "true: annotation changed",
+			oldNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{},
+				},
+			},
+			newNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": "{\"default\":\"10.244.0.0/24\"}",
+					},
+				},
+			},
+			result: true,
+		},
+		{
+			desc: "true: annotation's value changed",
+			newNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": "{\"default\":\"10.244.0.0/24\"}",
+					},
+				},
+			},
+			oldNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": "{\"default\":\"10.244.2.0/24\"}",
+					},
+				},
+			},
+			result: true,
+		},
+		{
+			desc: "false: annotation didn't change",
+			newNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": "{\"default\":\"10.244.0.0/24\"}",
+					},
+				},
+			},
+			oldNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": "{\"default\":\"10.244.0.0/24\"}",
+					},
+				},
+			},
+			result: false,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			result := NodeSubnetAnnotationChanged(tc.oldNode, tc.newNode)
+			assert.Equal(t, tc.result, result)
+		})
+	}
+}
+
 func TestCreateNodeHostSubnetAnnotation(t *testing.T) {
 	tests := []struct {
 		desc            string
