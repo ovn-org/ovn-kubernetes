@@ -761,6 +761,7 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 				klog.Error(err)
 			}
 			metrics.UpdateEgressFirewallRuleCount(float64(len(egressFirewall.Spec.Egress)))
+			metrics.IncrementEgressFirewallCount()
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			newEgressFirewall := newer.(*egressfirewall.EgressFirewall).DeepCopy()
@@ -801,6 +802,7 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 				klog.Errorf("Failed to commit db changes for egressFirewall in namespace %s stdout: %q, stderr: %q, err: %+v", egressFirewall.Namespace, stdout, stderr, err)
 			}
 			metrics.UpdateEgressFirewallRuleCount(float64(-len(egressFirewall.Spec.Egress)))
+			metrics.DecrementEgressFirewallCount()
 		},
 	}, oc.syncEgressFirewall)
 }

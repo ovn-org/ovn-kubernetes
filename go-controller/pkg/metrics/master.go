@@ -163,14 +163,14 @@ var metricV6AllocatedHostSubnetCount = prometheus.NewGauge(prometheus.GaugeOpts{
 })
 
 var metricEgressIPCount = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
+	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "num_egress_ips",
 	Help:      "The number of defined egress IP addresses",
 })
 
 var metricEgressFirewallRuleCount = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
+	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "num_egress_firewall_rules",
 	Help:      "The number of egress firewall rules defined"},
@@ -181,6 +181,13 @@ var metricIPsecEnabled = prometheus.NewGauge(prometheus.GaugeOpts{
 	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "ipsec_enabled",
 	Help:      "Specifies whether IPSec is enabled for this cluster(1) or not enabled for this cluster(0)",
+})
+
+var metricEgressFirewallCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "num_egress_firewalls",
+	Help:      "The number of egress firewall policies",
 })
 
 var registerMasterMetricsOnce sync.Once
@@ -260,6 +267,7 @@ func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 		prometheus.MustRegister(metricEgressIPCount)
 		prometheus.MustRegister(metricEgressFirewallRuleCount)
 		prometheus.MustRegister(metricIPsecEnabled)
+		prometheus.MustRegister(metricEgressFirewallCount)
 		registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemMaster)
 	})
 }
@@ -384,4 +392,14 @@ func ipsecMetricHandler(table string, model model.Model) {
 	} else {
 		metricIPsecEnabled.Set(0)
 	}
+}
+
+// IncrementEgressFirewallCount increments the number of Egress firewalls
+func IncrementEgressFirewallCount() {
+	metricEgressFirewallCount.Inc()
+}
+
+// DecrementEgressFirewallCount decrements the number of Egress firewalls
+func DecrementEgressFirewallCount() {
+	metricEgressFirewallCount.Dec()
 }
