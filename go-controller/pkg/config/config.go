@@ -1552,7 +1552,11 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 
 		// Parse ovn-k8s config file.
 		if err = gcfg.ReadInto(&cfg, f); err != nil {
-			return "", fmt.Errorf("failed to parse config file %s: %v", f.Name(), err)
+			if gcfg.FatalOnly(err) != nil {
+				return "", fmt.Errorf("failed to parse config file %s: %v", f.Name(), err)
+			}
+			// error is only a warning -> log it but continue
+			klog.Warningf("Warning on parsing config file: %s", err)
 		}
 		klog.Infof("Parsed config file %s", f.Name())
 		klog.Infof("Parsed config: %+v", cfg)
