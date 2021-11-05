@@ -1162,6 +1162,59 @@ mode=shared
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
+	It("ignores unknown fields in config file and does not return an error", func() {
+		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
+key=value
+mtu=1234
+
+[foobar]
+foo=bar
+`), 0644)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			var cfgPath string
+			cfgPath, err = InitConfig(ctx, kexec.New(), nil)
+
+			// unknown section foobar and its keys & values should be ignored
+			// same for key=value in default section
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Expect(cfgPath).To(gomega.Equal(cfgFile.Name()))
+			gomega.Expect(Default.MTU).To(gomega.Equal(1234))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-config-file=" + cfgFile.Name(),
+		}
+		err = app.Run(cliArgs)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
+	It("rejects a config with invalid syntax", func() {
+		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
+mtu=1234
+
+[foobar
+foo=bar
+`), 0644)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			_, err = InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).To(gomega.HaveOccurred())
+
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-config-file=" + cfgFile.Name(),
+		}
+		err = app.Run(cliArgs)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
 	Describe("OvnDBAuth operations", func() {
 		var certFile, keyFile, caFile string
 
