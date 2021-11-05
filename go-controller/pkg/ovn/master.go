@@ -1185,7 +1185,7 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	return nil
 }
 
-func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet, nodeLocalNatIPs []net.IP) {
+func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet) {
 	// Clean up as much as we can but don't hard error
 	for _, hostSubnet := range hostSubnets {
 		if err := oc.deleteNodeHostSubnet(nodeName, hostSubnet); err != nil {
@@ -1421,7 +1421,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 			continue
 		}
 
-		oc.deleteNode(nodeSwitch.Name, subnets, nil)
+		oc.deleteNode(nodeSwitch.Name, subnets)
 		//remove the node from the chassis map so we don't delete it twice
 		delete(chassisMap, nodeSwitch.Name)
 	}

@@ -1151,8 +1151,7 @@ func (oc *Controller) WatchNodes() {
 				"various caches", node.Name)
 
 			nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
-			dnatSnatIPs, _ := util.ParseNodeLocalNatIPAnnotation(node)
-			oc.deleteNode(node.Name, nodeSubnets, dnatSnatIPs)
+			oc.deleteNode(node.Name, nodeSubnets)
 			oc.lsManager.DeleteNode(node.Name)
 			addNodeFailed.Delete(node.Name)
 			mgmtPortFailed.Delete(node.Name)

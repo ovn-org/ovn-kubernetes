@@ -231,8 +231,6 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = util.SetNodeLocalNatAnnotation(nodeAnnotator, []net.IP{ovntest.MustParseIP(node1.DnatSnatIP)})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString("9.9.9.9"))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = nodeAnnotator.Run()
