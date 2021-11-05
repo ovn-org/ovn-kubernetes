@@ -190,7 +190,7 @@ func getListFromModel(model model.Model) interface{} {
 	case *sbdb.Chassis:
 		return &[]sbdb.Chassis{}
 	case *sbdb.MACBinding:
-		return t.UUID
+		return &[]sbdb.MACBinding{}
 	default:
 		panic(fmt.Sprintf("getModelList: unknown model %T", t))
 	}

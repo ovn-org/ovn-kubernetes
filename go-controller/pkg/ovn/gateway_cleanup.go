@@ -326,6 +326,7 @@ func (oc *Controller) removeLRPolicies(nodeName string, priorities []string) {
 
 // removes DGP, snat_and_dnat entries, and LRPs
 func (oc *Controller) cleanupDGP(nodes *kapi.NodeList) error {
+	klog.Infof("Removing DGP %v", nodes)
 	// remove dnat_snat entries as well as LRPs
 	for _, node := range nodes.Items {
 		oc.delPbrAndNatRules(node.Name, []string{types.InterNodePolicyPriority, types.MGMTPortPolicyPriority})

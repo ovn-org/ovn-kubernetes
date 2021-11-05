@@ -433,7 +433,8 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		bridgeName := n.gateway.GetGatewayBridgeIface()
 
 		needLegacySvcRoute := true
-		if initialTopoVersion >= types.OvnHostToSvcOFTopoVersion && config.GatewayModeShared == config.Gateway.Mode {
+		if (initialTopoVersion >= types.OvnHostToSvcOFTopoVersion && config.GatewayModeShared == config.Gateway.Mode) ||
+			(initialTopoVersion >= types.OvnRoutingViaHostTopoVersion && config.GatewayModeLocal == config.Gateway.Mode) {
 			// Configure route for svc towards shared gw bridge
 			// Have to have the route to bridge for multi-NIC mode, where the default gateway may go to a non-OVS interface
 			if err := configureSvcRouteViaBridge(bridgeName); err != nil {
@@ -444,7 +445,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 
 		// Determine if we need to run upgrade checks
 		if initialTopoVersion != types.OvnCurrentTopologyVersion {
-			if needLegacySvcRoute && config.GatewayModeShared == config.Gateway.Mode {
+			if needLegacySvcRoute {
 				klog.Info("System may be upgrading, falling back to to legacy K8S Service via mp0")
 				// add back legacy route for service via mp0
 				link, err := util.LinkSetUp(types.K8sMgmtIntfName)
@@ -473,7 +474,8 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 				}
 				// upgrade complete now see what needs upgrading
 				// migrate service route from ovn-k8s-mp0 to shared gw bridge
-				if initialTopoVersion < types.OvnHostToSvcOFTopoVersion && config.GatewayModeShared == config.Gateway.Mode {
+				if (initialTopoVersion < types.OvnHostToSvcOFTopoVersion && config.GatewayModeShared == config.Gateway.Mode) ||
+					(initialTopoVersion < types.OvnRoutingViaHostTopoVersion && config.GatewayModeLocal == config.Gateway.Mode) {
 					if err := upgradeServiceRoute(bridgeName); err != nil {
 						klog.Fatalf("Failed to upgrade service route for node, error: %v", err)
 					}
@@ -672,6 +674,17 @@ func upgradeServiceRoute(bridgeName string) error {
 	// Clean up gw0 and local ovs bridge as best effort
 	if err := deleteLocalNodeAccessBridge(); err != nil {
 		klog.Warningf("Error while removing Local Node Access Bridge, error: %v", err)
+	}
+	// Clean up gw0 related IPTable rules as best effort.
+	for _, ip := range []string{types.V4NodeLocalNATSubnet, types.V6NodeLocalNATSubnet} {
+		_, IPNet, err := net.ParseCIDR(ip)
+		if err != nil {
+			klog.Errorf("Failed to LocalGatewayNATRules: %v", err)
+		}
+		rules := getLocalGatewayNATRules(types.LocalnetGatewayNextHopPort, IPNet)
+		if err := delIptRules(rules); err != nil {
+			klog.Errorf("Failed to LocalGatewayNATRules: %v", err)
+		}
 	}
 	return nil
 }
