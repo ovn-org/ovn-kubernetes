@@ -20,10 +20,6 @@ import (
 //       {
 //         "default": "10.130.0.0/23"
 //       }
-//     k8s.ovn.org/node-local-nat-ip: |
-//       {
-//         "default": ["169.254.16.21", "fd99::10:21"]
-//       }
 //
 // (This allows for specifying multiple network attachments, but currently only "default"
 // is used.)
@@ -39,9 +35,6 @@ import (
 const (
 	// ovnNodeSubnets is the constant string representing the node subnets annotation key
 	ovnNodeSubnets = "k8s.ovn.org/node-subnets"
-	// ovnNodeLocalNatIP is the constant string representing the node management port's NAT IP
-	// used in the case of the shared gateway mode
-	ovnNodeLocalNatIP = "k8s.ovn.org/node-local-nat-ip"
 )
 
 func createSubnetAnnotation(annotationName string, defaultSubnets []*net.IPNet) (map[string]interface{}, error) {
@@ -138,64 +131,4 @@ func DeleteNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator) {
 // on a node and returns the "default" host subnet.
 func ParseNodeHostSubnetAnnotation(node *kapi.Node) ([]*net.IPNet, error) {
 	return parseSubnetAnnotation(node, ovnNodeSubnets)
-}
-
-// CreateNodeLocalNatAnnotation creates a "k8s.ovn.org/node-local-nat-ip" annotation,
-// with a single "default" network, suitable for passing to kube.SetAnnotationsOnNode
-func CreateNodeLocalNatAnnotation(nodeLocalNatIPs []net.IP) (map[string]interface{}, error) {
-	nodeLocalNatIPStrs := make([]string, len(nodeLocalNatIPs))
-	for i := range nodeLocalNatIPs {
-		nodeLocalNatIPStrs[i] = nodeLocalNatIPs[i].String()
-	}
-	bytes, err := json.Marshal(map[string][]string{
-		"default": nodeLocalNatIPStrs,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return map[string]interface{}{
-		ovnNodeLocalNatIP: string(bytes),
-	}, nil
-}
-
-// SetNodeLocalNatAnnotation sets a "k8s.ovn.org/node-local-nat-ip" annotation
-// using a kube.Annotator
-func SetNodeLocalNatAnnotation(nodeAnnotator kube.Annotator, defaultNodeLocalNatIPs []net.IP) error {
-	annotation, err := CreateNodeLocalNatAnnotation(defaultNodeLocalNatIPs)
-	if err != nil {
-		return err
-	}
-	return nodeAnnotator.Set(ovnNodeLocalNatIP, annotation[ovnNodeLocalNatIP])
-}
-
-func ParseNodeLocalNatIPAnnotation(node *kapi.Node) ([]net.IP, error) {
-	annotationJson, ok := node.Annotations[ovnNodeLocalNatIP]
-	if !ok {
-		return nil, newAnnotationNotSetError("node %q has no %q annotation", node.Name, ovnNodeLocalNatIP)
-	}
-
-	annotationMap := make(map[string][]string)
-	var ips []string
-	if err := json.Unmarshal([]byte(annotationJson), &annotationMap); err == nil {
-		ips, ok = annotationMap["default"]
-	} else {
-		return nil, fmt.Errorf("could not parse %q from annotation %q for node %s",
-			ovnNodeLocalNatIP, annotationJson, node.Name)
-	}
-	if !ok {
-		return nil, fmt.Errorf("%q annotation doesn't have default network value for %s",
-			annotationJson, ovnNodeLocalNatIP)
-	}
-
-	var nodeLocalNatIPs []net.IP
-	for _, ip := range ips {
-		nodeLocalNatIP := net.ParseIP(ip)
-		if nodeLocalNatIP == nil {
-			return nil, fmt.Errorf("error parsing %s's value %s: annotation is (%s)",
-				ovnNodeLocalNatIP, ip, annotationJson)
-		}
-		nodeLocalNatIPs = append(nodeLocalNatIPs, nodeLocalNatIP)
-	}
-
-	return nodeLocalNatIPs, nil
 }
