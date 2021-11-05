@@ -779,9 +779,6 @@ func (oc *Controller) addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAd
 		if err := oc.syncPolicyBasedRoutes(nodeName, sets.NewString(matchStr), types.InterNodePolicyPriority, natSubnetNextHop); err != nil {
 			return fmt.Errorf("unable to sync inter-node policies, err: %v", err)
 		}
-	} else if config.Gateway.Mode == config.GatewayModeShared {
-		// if we are upgrading from Local to Shared gateway mode, we need to ensure the inter-node LRP is removed
-		oc.removeLRPolicies(nodeName, []string{types.InterNodePolicyPriority})
 	}
 
 	return nil
