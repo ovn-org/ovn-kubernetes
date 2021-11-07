@@ -434,9 +434,11 @@ func (oc *Controller) ovnTopologyCleanup() error {
 func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
 	ver := 0
 	logicalRouterRes := []nbdb.LogicalRouter{}
+	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+	defer cancel()
 	if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
 		return lr.Name == ovntypes.OVNClusterRouter
-	}).List(&logicalRouterRes); err != nil {
+	}).List(ctx, &logicalRouterRes); err != nil {
 		return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
 			"error: %v", ovntypes.OVNClusterRouter, err)
 	}

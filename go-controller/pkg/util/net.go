@@ -1,9 +1,11 @@
 package util
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"math/big"
 	"net"
 	"strconv"
@@ -36,7 +38,9 @@ func intToIP(i *big.Int) net.IP {
 // GetPortAddresses returns the MAC and IPs of the given logical switch port
 func GetPortAddresses(portName string, nbClient client.Client) (net.HardwareAddr, []net.IP, error) {
 	lsp := &nbdb.LogicalSwitchPort{Name: portName}
-	err := nbClient.Get(lsp)
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := nbClient.Get(ctx, lsp)
 	if err != nil {
 		if err == client.ErrNotFound {
 			return nil, nil, nil
@@ -78,7 +82,9 @@ func GetPortAddresses(portName string, nbClient client.Client) (net.HardwareAddr
 // GetLRPAddrs returns the addresses for the given logical router port
 func GetLRPAddrs(nbClient client.Client, portName string) ([]*net.IPNet, error) {
 	lrp := nbdb.LogicalRouterPort{Name: portName}
-	err := nbClient.Get(&lrp)
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := nbClient.Get(ctx, &lrp)
 	if err != nil {
 		return nil, fmt.Errorf("unable to find router port: %s, err: %v", portName, err)
 	}

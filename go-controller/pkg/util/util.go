@@ -1,6 +1,7 @@
 package util
 
 import (
+	"context"
 	"fmt"
 	"hash/fnv"
 	"net"
@@ -247,7 +248,9 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string,
 	haveManagementPort := true
 	haveHybridOverlayPort := true
 	// Only Query The cache for mp0 and HO LSPs
-	if err := nbClient.Get(managmentPort); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	if err := nbClient.Get(ctx, managmentPort); err != nil {
 		if err != libovsdbclient.ErrNotFound {
 			return fmt.Errorf("failed to get management port for node %s error: %v", nodeName, err)
 		}
@@ -255,7 +258,7 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string,
 		haveManagementPort = false
 	}
 
-	if err := nbClient.Get(HOPort); err != nil {
+	if err := nbClient.Get(ctx, HOPort); err != nil {
 		if err != libovsdbclient.ErrNotFound {
 			return fmt.Errorf("failed to get hybrid overlay port for node %s error: %v", nodeName, err)
 		}

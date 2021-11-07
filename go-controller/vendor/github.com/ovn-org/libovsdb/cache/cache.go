@@ -285,7 +285,12 @@ func (r *RowCache) Delete(uuid string) error {
 		if err != nil {
 			return err
 		}
-		delete(r.indexes[index], oldVal)
+		// only remove the index if it is pointing to this uuid
+		// otherwise we can cause a consistency issue if we've processed
+		// updates out of order
+		if r.indexes[index][oldVal] == uuid {
+			delete(r.indexes[index], oldVal)
+		}
 	}
 	delete(r.cache, uuid)
 	return nil

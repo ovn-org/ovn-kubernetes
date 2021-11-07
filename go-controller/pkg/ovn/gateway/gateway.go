@@ -1,7 +1,9 @@
 package gateway
 
 import (
+	"context"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"strings"
 
 	"github.com/ovn-org/libovsdb/client"
@@ -23,9 +25,11 @@ var (
 // GetOvnGateways return all created gateways.
 func GetOvnGateways(nbClient client.Client) ([]string, error) {
 	logicalRouterRes := []nbdb.LogicalRouter{}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
 	if err := nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
 		return lr.Options["chassis"] != "null"
-	}).List(&logicalRouterRes); err != nil {
+	}).List(ctx, &logicalRouterRes); err != nil {
 		return nil, err
 	}
 	result := []string{}
@@ -38,10 +42,12 @@ func GetOvnGateways(nbClient client.Client) ([]string, error) {
 // GetGatewayPhysicalIP return gateway physical IP
 func GetGatewayPhysicalIP(nbClient client.Client, gatewayRouter string) (string, error) {
 	logicalRouterRes := []nbdb.LogicalRouter{}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
 	if err := nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
 		physicalIP, exists := lr.ExternalIDs["physical_ip"]
 		return lr.Name == gatewayRouter && exists && physicalIP != ""
-	}).List(&logicalRouterRes); err != nil {
+	}).List(ctx, &logicalRouterRes); err != nil {
 		return "", errors.Wrapf(err, "error to obtain physical IP on router %s, err: %v", gatewayRouter, err)
 	}
 	if len(logicalRouterRes) == 0 {
@@ -53,10 +59,12 @@ func GetGatewayPhysicalIP(nbClient client.Client, gatewayRouter string) (string,
 // GetGatewayPhysicalIPs return gateway physical IPs
 func GetGatewayPhysicalIPs(nbClient client.Client, gatewayRouter string) ([]string, error) {
 	logicalRouterRes := []nbdb.LogicalRouter{}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
 	if err := nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
 		physicalIPs, exists := lr.ExternalIDs["physical_ips"]
 		return lr.Name == gatewayRouter && exists && physicalIPs != ""
-	}).List(&logicalRouterRes); err != nil {
+	}).List(ctx, &logicalRouterRes); err != nil {
 		return nil, errors.Wrapf(err, "error to obtain physical IP on router %s, err: %v", gatewayRouter, err)
 	}
 	if len(logicalRouterRes) == 1 {

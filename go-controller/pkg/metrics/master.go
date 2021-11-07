@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"runtime"
 	"sync"
 	"time"
@@ -338,7 +339,9 @@ func UpdateEgressFirewallRuleCount(count float64) {
 
 func updateE2ETimestampMetric(ovnNBClient client.Client) {
 	var rows []nbdb.NBGlobal
-	if err := ovnNBClient.List(&rows); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	if err := ovnNBClient.List(ctx, &rows); err != nil {
 		klog.Errorf("Failed to update e2e timestamp metric while attempting to list rows for NB_Global table: %s", err)
 		return
 	}
@@ -354,7 +357,7 @@ func updateE2ETimestampMetric(ovnNBClient client.Client) {
 		klog.Errorf("Failed to update e2e timestamp metric because generating OVN northbound operation failed: %v", err)
 		return
 	}
-	reply, err := ovnNBClient.Transact(context.Background(), operations...)
+	reply, err := ovnNBClient.Transact(ctx, operations...)
 	if err != nil {
 		klog.Errorf("Failed to update e2e timestamp metric while updating OVN northbound database: %v", err)
 		return

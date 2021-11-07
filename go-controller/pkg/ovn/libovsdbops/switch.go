@@ -1,6 +1,7 @@
 package libovsdbops
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -18,10 +19,12 @@ func findSwitch(nbClient libovsdbclient.Client, lswitch *nbdb.LogicalSwitch) err
 		return nil
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
 	switches := []nbdb.LogicalSwitch{}
 	err := nbClient.WhereCache(func(item *nbdb.LogicalSwitch) bool {
 		return item.Name == lswitch.Name
-	}).List(&switches)
+	}).List(ctx, &switches)
 	if err != nil {
 		return fmt.Errorf("can't find switch %+v: %v", *lswitch, err)
 	}
@@ -41,7 +44,9 @@ func findSwitch(nbClient libovsdbclient.Client, lswitch *nbdb.LogicalSwitch) err
 // findSwitches returns all the current logicalSwitches
 func findSwitches(nbClient libovsdbclient.Client) ([]nbdb.LogicalSwitch, error) {
 	switches := []nbdb.LogicalSwitch{}
-	err := nbClient.List(&switches)
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := nbClient.List(ctx, &switches)
 	if err != nil {
 		return nil, fmt.Errorf("can't find Locial Switches err: %v", err)
 	}
@@ -56,7 +61,9 @@ func findSwitches(nbClient libovsdbclient.Client) ([]nbdb.LogicalSwitch, error) 
 // findSwitchesByPredicate Looks up switches in the cache based on the lookup function
 func findSwitchesByPredicate(nbClient libovsdbclient.Client, lookupFunction func(item *nbdb.LogicalSwitch) bool) ([]nbdb.LogicalSwitch, error) {
 	switches := []nbdb.LogicalSwitch{}
-	err := nbClient.WhereCache(lookupFunction).List(&switches)
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := nbClient.WhereCache(lookupFunction).List(ctx, &switches)
 	if err != nil {
 		return nil, fmt.Errorf("can't find switches: %v", err)
 	}
@@ -160,9 +167,11 @@ func RemoveLoadBalancersFromSwitchOps(nbClient libovsdbclient.Client, ops []libo
 
 func ListSwitchesWithLoadBalancers(nbClient libovsdbclient.Client) ([]nbdb.LogicalSwitch, error) {
 	switches := &[]nbdb.LogicalSwitch{}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
 	err := nbClient.WhereCache(func(item *nbdb.LogicalSwitch) bool {
 		return item.LoadBalancer != nil
-	}).List(switches)
+	}).List(ctx, switches)
 	return *switches, err
 }
 
