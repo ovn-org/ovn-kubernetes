@@ -346,20 +346,6 @@ jobs:
         name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: './test/_artifacts/*.xml'
 
-    - name: Generate Test Report
-      id: xunit-viewer
-      if: always()
-      uses: AutoModality/action-xunit-viewer@v1
-      with:
-        results: ./test/_artifacts/
-
-    - name: Upload Test Report
-      if: always()
-      uses: actions/upload-artifact@v2
-      with:
-        name: test-report-${{ env.JOB_NAME }}-${{ github.run_id }}
-        path: './test/_artifacts/index.html'
-
     - name: Export logs
       if: always()
       run: |
@@ -440,20 +426,6 @@ jobs:
         name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: './test/_artifacts/*.xml'
 
-    - name: Generate Test Report
-      id: xunit-viewer
-      if: always()
-      uses: AutoModality/action-xunit-viewer@v1
-      with:
-        results: ./test/_artifacts/
-
-    - name: Upload Test Report
-      if: always()
-      uses: actions/upload-artifact@v2
-      with:
-        name: test-report-${{ env.JOB_NAME }}-${{ github.run_id }}
-        path: './test/_artifacts/index.html'
-
     - name: Export logs
       if: always()
       run: |
@@ -529,20 +501,6 @@ jobs:
         with:
           name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
           path: './test/_artifacts/*.xml'
-
-      - name: Generate Test Report
-        id: xunit-viewer
-        if: always()
-        uses: AutoModality/action-xunit-viewer@v1
-        with:
-          results: ./test/_artifacts/
-
-      - name: Upload Test Report
-        if: always()
-        uses: actions/upload-artifact@v2
-        with:
-          name: test-report-${{ env.JOB_NAME }}-${{ github.run_id }}
-          path: './test/_artifacts/index.html'
 
       - name: Export logs
         if: always()
