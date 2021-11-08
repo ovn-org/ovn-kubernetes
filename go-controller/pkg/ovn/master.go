@@ -70,8 +70,10 @@ func (oc *Controller) Start(identity string, wg *sync.WaitGroup, ctx context.Con
 		oc.client.CoreV1(),
 		nil,
 		resourcelock.ResourceLockConfig{
-			Identity:      identity,
-			EventRecorder: oc.recorder,
+			Identity: identity,
+			//ToDo: (martinkennelly) add back EventRecorder if EventRecorder interface is updated to events.Event
+			// from core.Event.
+			//EventRecorder: oc.recorder,
 		},
 	)
 	if err != nil {
@@ -1018,7 +1020,7 @@ func (oc *Controller) deleteStaleNodeChassis(node *kapi.Node) error {
 		}
 		if err = libovsdbops.DeleteChassisWithPredicate(oc.sbClient, p); err != nil {
 			// Send an event and Log on failure
-			oc.recorder.Eventf(node, kapi.EventTypeWarning, "ErrorMismatchChassis",
+			oc.recorder.Eventf(node, nil, kapi.EventTypeWarning, "ErrorMismatchChassis", "DeleteStaleNodeChassis",
 				"Node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB",
 				node.Name)
 			return fmt.Errorf("node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB", node.Name)

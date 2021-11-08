@@ -10,7 +10,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -29,7 +29,7 @@ type portManager interface {
 }
 
 type localPortManager struct {
-	recorder          record.EventRecorder
+	recorder          events.EventRecorder
 	activeSocketsLock sync.Mutex
 	localAddrSet      map[string]net.IPNet
 	portsMap          map[utilnet.LocalPort]utilnet.Closeable
@@ -114,8 +114,9 @@ func (p *localPortManager) emitPortClaimEvent(svc *kapi.Service, port int32, err
 		Namespace: svc.Namespace,
 		Name:      svc.Name,
 	}
-	p.recorder.Eventf(&serviceRef, kapi.EventTypeWarning,
-		"PortClaim", "Service: %s/%s requires port: %v to be opened on node, but port cannot be opened, err: %v", svc.Namespace, svc.Name, port, err)
+	p.recorder.Eventf(&serviceRef, nil, kapi.EventTypeWarning,
+		"PortClaim", "ReconcileService", "Service: %s/%s requires port: %v to be opened on node, "+
+			"but port cannot be opened, err: %v", svc.Namespace, svc.Name, port, err)
 	klog.Warningf("PortClaim for svc: %s/%s on port: %v, err: %v", svc.Namespace, svc.Name, port, err)
 }
 
@@ -123,7 +124,7 @@ type portClaimWatcher struct {
 	port portManager
 }
 
-func newPortClaimWatcher(recorder record.EventRecorder) (*portClaimWatcher, error) {
+func newPortClaimWatcher(recorder events.EventRecorder) (*portClaimWatcher, error) {
 	localAddrSet, err := getLocalAddrs()
 	if err != nil {
 		return nil, err

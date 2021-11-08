@@ -12,7 +12,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 )
 
 var fakeNodeName = "node"
@@ -21,7 +21,7 @@ type FakeOVNNode struct {
 	node       *OvnNode
 	watcher    factory.NodeWatchFactory
 	stopChan   chan struct{}
-	recorder   *record.FakeRecorder
+	recorder   *events.FakeRecorder
 	fakeClient *util.OVNClientset
 	fakeExec   *ovntest.FakeExec
 	wg         *sync.WaitGroup
@@ -33,7 +33,7 @@ func NewFakeOVNNode(fexec *ovntest.FakeExec) *FakeOVNNode {
 
 	return &FakeOVNNode{
 		fakeExec: fexec,
-		recorder: record.NewFakeRecorder(1),
+		recorder: events.NewFakeRecorder(1),
 		wg:       &sync.WaitGroup{},
 	}
 }

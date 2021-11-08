@@ -17,7 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -41,12 +41,12 @@ type OvnNode struct {
 	Kube         kube.Interface
 	watchFactory factory.NodeWatchFactory
 	stopChan     chan struct{}
-	recorder     record.EventRecorder
+	recorder     events.EventRecorder
 	gateway      Gateway
 }
 
 // NewNode creates a new controller for node management
-func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
+func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder events.EventRecorder) *OvnNode {
 	return &OvnNode{
 		name:         name,
 		client:       kubeClient,

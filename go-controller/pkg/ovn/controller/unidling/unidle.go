@@ -11,13 +11,13 @@ import (
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/klog/v2"
 )
 
@@ -26,7 +26,7 @@ import (
 // associated to the VIP
 type unidlingController struct {
 	eventQueue    chan sbdb.ControllerEvent
-	eventRecorder record.EventRecorder
+	eventRecorder events.EventRecorder
 	// Map of load balancers to service namespace
 	serviceVIPToName     map[ServiceVIPKey]types.NamespacedName
 	serviceVIPToNameLock sync.Mutex
@@ -34,7 +34,7 @@ type unidlingController struct {
 }
 
 // NewController creates a new unidling controller
-func NewController(recorder record.EventRecorder, serviceInformer cache.SharedIndexInformer, sbClient libovsdbclient.Client) (*unidlingController, error) {
+func NewController(recorder events.EventRecorder, serviceInformer cache.SharedIndexInformer, sbClient libovsdbclient.Client) (*unidlingController, error) {
 	uc := &unidlingController{
 		eventQueue:       make(chan sbdb.ControllerEvent),
 		eventRecorder:    recorder,
@@ -205,7 +205,8 @@ func (uc *unidlingController) handleLbEmptyBackendsEvent(event sbdb.ControllerEv
 			Name:      serviceName.Name,
 		}
 		klog.V(5).Infof("Sending a NeedPods event for service %s in namespace %s.", serviceName.Name, serviceName.Namespace)
-		uc.eventRecorder.Eventf(&serviceRef, kapi.EventTypeNormal, "NeedPods", "The service %s needs pods", serviceName.Name)
+		uc.eventRecorder.Eventf(&serviceRef, nil, kapi.EventTypeNormal, "NeedPods", "Unidling",
+			"The service %s needs pods", serviceName.Name)
 	}
 	return nil
 }

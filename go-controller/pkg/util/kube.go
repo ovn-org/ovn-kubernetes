@@ -15,11 +15,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
-	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/pkg/version"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/client-go/util/cert"
 	"k8s.io/klog/v2"
 
@@ -260,17 +259,11 @@ func PodScheduled(pod *kapi.Pod) bool {
 
 // EventRecorder returns an EventRecorder type that can be
 // used to post Events to different object's lifecycles.
-func EventRecorder(kubeClient kubernetes.Interface) record.EventRecorder {
-	eventBroadcaster := record.NewBroadcaster()
-	eventBroadcaster.StartLogging(klog.Infof)
-	eventBroadcaster.StartRecordingToSink(
-		&typedcorev1.EventSinkImpl{
-			Interface: kubeClient.CoreV1().Events(""),
-		})
-	recorder := eventBroadcaster.NewRecorder(
-		scheme.Scheme,
-		kapi.EventSource{Component: "controlplane"})
-	return recorder
+func EventRecorder(kubeClient kubernetes.Interface, reportingControllerName string, stopCh <-chan struct{}) events.EventRecorder {
+	eventBroadcaster := events.NewBroadcaster(&events.EventSinkImpl{Interface: kubeClient.EventsV1()})
+	eventBroadcaster.StartStructuredLogging(0)
+	eventBroadcaster.StartRecordingToSink(stopCh)
+	return eventBroadcaster.NewRecorder(scheme.Scheme, reportingControllerName)
 }
 
 // UseEndpointSlices detect if Endpoints Slices are enabled in the cluster

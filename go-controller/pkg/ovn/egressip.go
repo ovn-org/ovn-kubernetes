@@ -797,7 +797,8 @@ func (oc *Controller) executeCloudPrivateIPConfigOps(egressIPName string, ops ma
 					Kind: "EgressIP",
 					Name: egressIPName,
 				}
-				oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "CloudUpdateFailed", "egress IP: %s for object EgressIP: %s could not be updated, err: %v", egressIP, egressIPName, err)
+				oc.recorder.Eventf(&eIPRef, nil, kapi.EventTypeWarning, "CloudUpdateFailed", "ReconcileEgressIP",
+					"egress IP: %s for object EgressIP: %s could not be updated, err: %v", egressIP, egressIPName, err)
 				return fmt.Errorf("cloud update request failed for CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfigName, err)
 			}
 			// toAdd is non-empty, this indicates an ADD
@@ -827,7 +828,8 @@ func (oc *Controller) executeCloudPrivateIPConfigOps(egressIPName string, ops ma
 					Kind: "EgressIP",
 					Name: egressIPName,
 				}
-				oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "CloudAssignmentFailed", "egress IP: %s for object EgressIP: %s could not be created, err: %v", egressIP, egressIPName, err)
+				oc.recorder.Eventf(&eIPRef, nil, kapi.EventTypeWarning, "CloudAssignmentFailed", "ReconcileEgressIP",
+					"egress IP: %s for object EgressIP: %s could not be created, err: %v", egressIP, egressIPName, err)
 				return fmt.Errorf("cloud add request failed for CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfigName, err)
 			}
 			// toDelete is non-empty, this indicates an DELETE for which
@@ -841,7 +843,8 @@ func (oc *Controller) executeCloudPrivateIPConfigOps(egressIPName string, ops ma
 					Kind: "EgressIP",
 					Name: egressIPName,
 				}
-				oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "CloudDeletionFailed", "egress IP: %s for object EgressIP: %s could not be deleted, err: %v", egressIP, egressIPName, err)
+				oc.recorder.Eventf(&eIPRef, nil, kapi.EventTypeWarning, "CloudDeletionFailed", "ReconcileEgressIP",
+					"egress IP: %s for object EgressIP: %s could not be deleted, err: %v", egressIP, egressIPName, err)
 				return fmt.Errorf("cloud deletion request failed for CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfigName, err)
 			}
 		}
@@ -858,7 +861,8 @@ func (oc *Controller) validateEgressIPSpec(name string, egressIPs []string) (set
 				Kind: "EgressIP",
 				Name: name,
 			}
-			oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "InvalidEgressIP", "egress IP: %s for object EgressIP: %s is not a valid IP address", egressIP, name)
+			oc.recorder.Eventf(&eIPRef, nil, kapi.EventTypeWarning, "InvalidEgressIP", "ReconcileEgressIP",
+				"egress IP: %s for object EgressIP: %s is not a valid IP address", egressIP, name)
 			return nil, fmt.Errorf("unable to parse provided EgressIP: %s, invalid", egressIP)
 		}
 		validatedEgressIPs.Insert(ip.String())
@@ -1413,7 +1417,8 @@ func (oc *Controller) assignEgressIPs(name string, egressIPs []string) []egressi
 			Kind: "EgressIP",
 			Name: name,
 		}
-		oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "NoMatchingNodeFound", "no assignable nodes for EgressIP: %s, please tag at least one node with label: %s", name, util.GetNodeEgressLabel())
+		oc.recorder.Eventf(&eIPRef, nil, kapi.EventTypeWarning, "NoMatchingNodeFound", "ReconcileEgressIP",
+			"no assignable nodes for EgressIP: %s, please tag at least one node with label: %s", name, util.GetNodeEgressLabel())
 		klog.Errorf("No assignable nodes found for EgressIP: %s and requested IPs: %v", name, egressIPs)
 		return assignments
 	}
@@ -1451,8 +1456,10 @@ func (oc *Controller) assignEgressIPs(name string, egressIPs []string) []egressi
 			}
 			oc.recorder.Eventf(
 				&eIPRef,
+				nil,
 				kapi.EventTypeWarning,
 				"UnsupportedRequest",
+				"ReconcileEgressIP",
 				"Egress IP: %v for object EgressIP: %s is the IP address of node: %s, this is unsupported", eIPC, name, node.name,
 			)
 			klog.Errorf("Egress IP: %v is the IP address of node: %s", eIPC, node.name)
@@ -1499,7 +1506,8 @@ func (oc *Controller) assignEgressIPs(name string, egressIPs []string) []egressi
 			Kind: "EgressIP",
 			Name: name,
 		}
-		oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "NoMatchingNodeFound", "No matching nodes found, which can host any of the egress IPs: %v for object EgressIP: %s", egressIPs, name)
+		oc.recorder.Eventf(&eIPRef, nil, kapi.EventTypeWarning, "NoMatchingNodeFound", "ReconcileEgressIP",
+			"No matching nodes found, which can host any of the egress IPs: %v for object EgressIP: %s", egressIPs, name)
 		klog.Errorf("No matching host found for EgressIP: %s", name)
 		return assignments
 	}
@@ -1508,7 +1516,8 @@ func (oc *Controller) assignEgressIPs(name string, egressIPs []string) []egressi
 			Kind: "EgressIP",
 			Name: name,
 		}
-		oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "UnassignedRequest", "Not all egress IPs for EgressIP: %s could be assigned, please tag more nodes", name)
+		oc.recorder.Eventf(&eIPRef, nil, kapi.EventTypeWarning, "UnassignedRequest", "ReconcileEgressIP",
+			"Not all egress IPs for EgressIP: %s could be assigned, please tag more nodes", name)
 	}
 	return assignments
 }

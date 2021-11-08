@@ -9,9 +9,10 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/urfave/cli/v2"
+
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -594,7 +595,7 @@ var _ = Describe("Node Operations", func() {
 				localAddrSet, err := getLocalAddrs()
 				Expect(err).ShouldNot(HaveOccurred())
 				lpm := localPortManager{
-					recorder:          record.NewFakeRecorder(10),
+					recorder:          events.NewFakeRecorder(10),
 					activeSocketsLock: sync.Mutex{},
 					localAddrSet:      localAddrSet,
 					portsMap:          make(map[utilnet.LocalPort]utilnet.Closeable),

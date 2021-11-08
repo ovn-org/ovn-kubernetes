@@ -20,7 +20,7 @@ import (
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 )
 
 const (
@@ -42,7 +42,7 @@ type FakeOVN struct {
 	controller   *Controller
 	stopChan     chan struct{}
 	asf          *addressset.FakeAddressSetFactory
-	fakeRecorder *record.FakeRecorder
+	fakeRecorder *events.FakeRecorder
 	nbClient     libovsdbclient.Client
 	sbClient     libovsdbclient.Client
 	dbSetup      libovsdbtest.TestSetup
@@ -53,7 +53,7 @@ type FakeOVN struct {
 func NewFakeOVN() *FakeOVN {
 	return &FakeOVN{
 		asf:          addressset.NewFakeAddressSetFactory(),
-		fakeRecorder: record.NewFakeRecorder(10),
+		fakeRecorder: events.NewFakeRecorder(10),
 		egressQoSWg:  &sync.WaitGroup{},
 	}
 }

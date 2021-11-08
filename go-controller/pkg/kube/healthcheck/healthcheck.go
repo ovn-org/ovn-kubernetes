@@ -26,7 +26,7 @@ import (
 
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 )
 
 // Server serves HTTP endpoints for each service name, with results
@@ -70,7 +70,7 @@ type HTTPServer interface {
 
 // NewServer allocates a new healthcheck server manager.  If either
 // of the injected arguments are nil, defaults will be used.
-func NewServer(hostname string, recorder record.EventRecorder, listener Listener, httpServerFactory HTTPServerFactory) Server {
+func NewServer(hostname string, recorder events.EventRecorder, listener Listener, httpServerFactory HTTPServerFactory) Server {
 	if listener == nil {
 		listener = stdNetListener{}
 	}
@@ -109,7 +109,7 @@ var _ HTTPServerFactory = stdHTTPServerFactory{}
 
 type server struct {
 	hostname    string
-	recorder    record.EventRecorder // can be nil
+	recorder    events.EventRecorder // can be nil
 	listener    Listener
 	httpFactory HTTPServerFactory
 
@@ -155,7 +155,7 @@ func (hcs *server) SyncServices(newServices map[types.NamespacedName]uint16) err
 						Namespace: nsn.Namespace,
 						Name:      nsn.Name,
 						UID:       types.UID(nsn.String()),
-					}, v1.EventTypeWarning, "FailedToStartServiceHealthcheck", msg)
+					}, nil, v1.EventTypeWarning, "FailedToStartServiceHealthcheck", "SyncService", msg)
 			}
 			klog.Error(msg)
 			continue

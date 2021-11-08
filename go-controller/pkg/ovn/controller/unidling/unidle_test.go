@@ -13,7 +13,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -40,7 +40,7 @@ var _ = Describe("Unidling Controller", func() {
 
 	It("should respond to a controller event", func() {
 		client := fake.NewSimpleClientset()
-		recorder := record.NewFakeRecorder(10)
+		recorder := events.NewFakeRecorder(10)
 		informerFactory := informers.NewSharedInformerFactory(client, 0)
 		testSetup := libovsdbtest.TestSetup{
 			SBData: []libovsdbtest.TestData{
