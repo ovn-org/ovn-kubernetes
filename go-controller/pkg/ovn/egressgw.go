@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -918,10 +919,12 @@ func (oc *Controller) delLegacyHybridRoutePolicyForPod(podIP net.IP, node string
 func (oc *Controller) cleanUpBFDEntry(gatewayIP, gatewayRouter, prefix string) {
 	portName := prefix + types.GWRouterToExtSwitchPrefix + gatewayRouter
 
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
 	logicalRouterStaticRouteRes := []nbdb.LogicalRouterStaticRoute{}
 	err := oc.nbClient.WhereCache(func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
 		return lrsr.OutputPort != nil && *lrsr.OutputPort == portName && lrsr.Nexthop == gatewayIP && lrsr.BFD != nil && *lrsr.BFD != ""
-	}).List(&logicalRouterStaticRouteRes)
+	}).List(ctx, &logicalRouterStaticRouteRes)
 	if err != nil {
 		klog.Errorf("cleanUpBFDEntry: failed to list routes for %s, err: %v", portName, err)
 		return
@@ -1229,9 +1232,11 @@ func (oc *Controller) buildClusterECMPCacheFromPods(clusterRouteCache map[string
 func (oc *Controller) buildOVNECMPCache() map[string][]*ovnRoute {
 	ovnRouteCache := make(map[string][]*ovnRoute)
 	logicalRouterStaticRouteRes := []nbdb.LogicalRouterStaticRoute{}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
 	if err := oc.nbClient.WhereCache(func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
 		return lrsr.Options["ecmp_symmetric_reply"] == "true"
-	}).List(&logicalRouterStaticRouteRes); err != nil {
+	}).List(ctx, &logicalRouterStaticRouteRes); err != nil {
 		klog.Errorf("CleanECMPRoutes: failed to list ecmp routes %v", err)
 		return nil
 	}
@@ -1239,7 +1244,7 @@ func (oc *Controller) buildOVNECMPCache() map[string][]*ovnRoute {
 		logicalRouterRes := []nbdb.LogicalRouter{}
 		if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
 			return util.SliceHasStringItem(lr.StaticRoutes, logicalRouterStaticRoute.UUID)
-		}).List(&logicalRouterRes); err != nil {
+		}).List(ctx, &logicalRouterRes); err != nil {
 			klog.Errorf("CleanECMPRoutes: failed to find logical router for %s, err: %v", logicalRouterStaticRoute.UUID, err)
 			continue
 		}

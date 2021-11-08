@@ -1,7 +1,9 @@
 package libovsdbops
 
 import (
+	"context"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
@@ -16,10 +18,12 @@ func findLoadBalancer(nbClient libovsdbclient.Client, lb *nbdb.LoadBalancer) err
 		return nil
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
 	lbs := []nbdb.LoadBalancer{}
 	err := nbClient.WhereCache(func(item *nbdb.LoadBalancer) bool {
 		return item.Name == lb.Name
-	}).List(&lbs)
+	}).List(ctx, &lbs)
 	if err != nil {
 		return fmt.Errorf("can't find load balancer %+v: %v", *lb, err)
 	}
@@ -231,7 +235,9 @@ func DeleteLoadBalancers(nbClient libovsdbclient.Client, lbs []*nbdb.LoadBalance
 
 func ListLoadBalancers(nbClient libovsdbclient.Client) ([]nbdb.LoadBalancer, error) {
 	lbs := &[]nbdb.LoadBalancer{}
-	err := nbClient.List(lbs)
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := nbClient.List(ctx, lbs)
 	if err != nil {
 		return nil, err
 	}

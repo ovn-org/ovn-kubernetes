@@ -1,7 +1,9 @@
 package libovsdbops
 
 import (
+	"context"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -15,15 +17,17 @@ import (
 // findRouter looks up the router in the cache
 func findRouter(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) (*nbdb.LogicalRouter, error) {
 	var err error
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
 	if router.UUID != "" && !IsNamedUUID(router.UUID) {
-		err = nbClient.Get(router)
+		err = nbClient.Get(ctx, router)
 		return router, err
 	}
 
 	routers := []nbdb.LogicalRouter{}
 	err = nbClient.WhereCache(func(item *nbdb.LogicalRouter) bool {
 		return item.Name == router.Name
-	}).List(&routers)
+	}).List(ctx, &routers)
 	if err != nil {
 		return nil, fmt.Errorf("can't find router %+v: %v", *router, err)
 	}
@@ -104,9 +108,11 @@ func RemoveLoadBalancersFromRouterOps(nbClient libovsdbclient.Client, ops []libo
 
 func ListRoutersWithLoadBalancers(nbClient libovsdbclient.Client) ([]nbdb.LogicalRouter, error) {
 	routers := &[]nbdb.LogicalRouter{}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
 	err := nbClient.WhereCache(func(item *nbdb.LogicalRouter) bool {
 		return item.LoadBalancer != nil
-	}).List(routers)
+	}).List(ctx, routers)
 	return *routers, err
 }
 
@@ -224,7 +230,9 @@ func isEquivalentNAT(existing *nbdb.NAT, searched *nbdb.NAT) bool {
 
 func FindNatsUsingPredicate(nbClient libovsdbclient.Client, predicate func(item *nbdb.NAT) bool) ([]*nbdb.NAT, error) {
 	nats := []nbdb.NAT{}
-	err := nbClient.WhereCache(predicate).List(&nats)
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := nbClient.WhereCache(predicate).List(ctx, &nats)
 	if err != nil {
 		return nil, fmt.Errorf("unable to find NAT IDs, err: %v", err)
 	}
@@ -248,6 +256,8 @@ func FindRoutersUsingNat(nbClient libovsdbclient.Client, nats []*nbdb.NAT) ([]nb
 	// At this point, we have a set of NAT UUIDs that we care about.
 	// Iterate through the routers and identify which ones have these nat(s).
 	routers := []nbdb.LogicalRouter{}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
 	err := nbClient.WhereCache(func(item *nbdb.LogicalRouter) bool {
 		for _, rtrNatUUID := range item.Nat {
 			if natUUIDs.Has(rtrNatUUID) {
@@ -255,7 +265,7 @@ func FindRoutersUsingNat(nbClient libovsdbclient.Client, nats []*nbdb.NAT) ([]nb
 			}
 		}
 		return false
-	}).List(&routers)
+	}).List(ctx, &routers)
 
 	if err != nil {
 		return nil, fmt.Errorf("unable find routers, err: %v", err)
@@ -266,11 +276,13 @@ func FindRoutersUsingNat(nbClient libovsdbclient.Client, nats []*nbdb.NAT) ([]nb
 func getRouterNats(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) ([]*nbdb.NAT, error) {
 	nats := []*nbdb.NAT{}
 
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
 	var err error
 	var nat *nbdb.NAT
 	for _, rtrNatUUID := range router.Nat {
 		nat = &nbdb.NAT{UUID: rtrNatUUID}
-		err = nbClient.Get(nat)
+		err = nbClient.Get(ctx, nat)
 		if err != nil {
 			return nil, err
 		}

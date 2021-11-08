@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,7 +19,7 @@ type API interface {
 	// The function parameter must be a pointer to a slice of Models
 	// If the slice is null, the entire cache will be copied into the slice
 	// If it has a capacity != 0, only 'capacity' elements will be filled in
-	List(result interface{}) error
+	List(ctx context.Context, result interface{}) error
 
 	// Create a Conditional API from a Function that is used to filter cached data
 	// The function must accept a Model implementation and return a boolean. E.g:
@@ -40,7 +41,7 @@ type API interface {
 	// provided model and the indexes defined in the associated schema
 	// For more complex ways of searching for elements in the cache, the
 	// preferred way is Where({condition}).List()
-	Get(model.Model) error
+	Get(context.Context, model.Model) error
 
 	// Create returns the operation needed to add the model(s) to the Database
 	// Only fields with non-default values will be added to the transaction
@@ -53,7 +54,7 @@ type API interface {
 type ConditionalAPI interface {
 	// List uses the condition to search on the cache and populates
 	// the slice of Models objects based on their type
-	List(result interface{}) error
+	List(ctx context.Context, result interface{}) error
 
 	// Mutate returns the operations needed to perform the mutation specified
 	// By the model and the list of Mutation objects
@@ -93,7 +94,7 @@ type api struct {
 }
 
 // List populates a slice of Models given as parameter based on the configured Condition
-func (a api) List(result interface{}) error {
+func (a api) List(ctx context.Context, result interface{}) error {
 	resultPtr := reflect.ValueOf(result)
 	if resultPtr.Type().Kind() != reflect.Ptr {
 		return &ErrWrongType{resultPtr.Type(), "Expected pointer to slice of valid Models"}
@@ -206,7 +207,7 @@ func (a api) conditionFromModel(any bool, model model.Model, cond ...model.Condi
 //
 // The way the cache is searched depends on the fields already populated in 'result'
 // Any table index (including _uuid) will be used for comparison
-func (a api) Get(m model.Model) error {
+func (a api) Get(ctx context.Context, m model.Model) error {
 	table, err := a.getTableFromModel(m)
 	if err != nil {
 		return err
