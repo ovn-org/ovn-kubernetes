@@ -574,14 +574,21 @@ func (oc *Controller) setNodeEgressReachable(nodeName string, isReachable bool) 
 
 func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 	klog.V(5).Infof("Egress node: %s about to be initialized", egressNode.Name)
-	if stdout, stderr, err := util.RunOVNNbctl(
-		"set",
-		"logical_switch_port",
-		types.EXTSwitchToGWRouterPrefix+types.GWRouterPrefix+egressNode.Name,
-		"options:nat-addresses=router",
-	); err != nil {
+	lsp := nbdb.LogicalSwitchPort{
+		Name:    types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + egressNode.Name,
+		Options: map[string]string{"nat-addresses": "router"},
+	}
+	opModel := libovsdbops.OperationModel{
+		Model: &lsp,
+		OnModelMutations: []interface{}{
+			&lsp.Options,
+		},
+		ErrNotFound: true,
+	}
+	if _, err := oc.modelClient.CreateOrUpdate(opModel); err != nil {
 		klog.Errorf("Unable to configure GARP on external logical switch port for egress node: %s, "+
-			"this will result in packet drops during egress IP re-assignment, stdout: %s, stderr: %s, err: %v", egressNode.Name, stdout, stderr, err)
+			"this will result in packet drops during egress IP re-assignment,  err: %v", egressNode.Name, err)
+
 	}
 	oc.eIPC.assignmentRetryMutex.Lock()
 	defer oc.eIPC.assignmentRetryMutex.Unlock()
@@ -611,15 +618,21 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 
 func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 	klog.V(5).Infof("Egress node: %s about to be removed", egressNode.Name)
-	if stdout, stderr, err := util.RunOVNNbctl(
-		"remove",
-		"logical_switch_port",
-		types.EXTSwitchToGWRouterPrefix+types.GWRouterPrefix+egressNode.Name,
-		"options",
-		"nat-addresses=router",
-	); err != nil {
-		klog.Errorf("Unable to remove GARP configuration on external logical switch port for egress node: %s, stdout: %s, stderr: %s, err: %v", egressNode.Name, stdout, stderr, err)
+	lsp := nbdb.LogicalSwitchPort{
+		Name:    types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + egressNode.Name,
+		Options: map[string]string{"nat-addresses": ""},
 	}
+	opModel := libovsdbops.OperationModel{
+		Model: &lsp,
+		OnModelMutations: []interface{}{
+			&lsp.Options,
+		},
+		ErrNotFound: true,
+	}
+	if err := oc.modelClient.Delete(opModel); err != nil {
+		klog.Errorf("Unable to remove GARP configuration on external logical switch port for egress node: %s, err: %v", egressNode.Name, err)
+	}
+
 	egressIPs, err := oc.kube.GetEgressIPs()
 	if err != nil {
 		return fmt.Errorf("unable to list egressIPs, err: %v", err)
