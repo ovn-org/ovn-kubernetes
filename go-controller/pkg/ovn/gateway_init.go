@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strconv"
@@ -145,6 +146,9 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		return fmt.Errorf("failed to add logical router port %q for gateway router %s, err: %v", gwRouterPort, gatewayRouter, err)
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+
 	for _, entry := range clusterIPSubnet {
 		drLRPIfAddr, err := util.MatchIPNetFamily(utilnet.IsIPv6CIDR(entry), drLRPIfAddrs)
 		if err != nil {
@@ -159,7 +163,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		}
 
 		tmpRouters := []nbdb.LogicalRouter{}
-		if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter }).List(&tmpRouters); err != nil {
+		if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter }).List(ctx, &tmpRouters); err != nil {
 			return fmt.Errorf("unable to list logical router: %s, err: %v", gatewayRouter, err)
 		}
 		if len(tmpRouters) != 1 {
@@ -564,9 +568,11 @@ func (oc *Controller) addDistributedGWPort() error {
 	nodeLocalNatSubnetNextHop = types.V4NodeLocalNATSubnetNextHop + " " + types.V6NodeLocalNATSubnetNextHop
 
 	macResult := []sbdb.MACBinding{}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
 	if err := oc.sbClient.WhereCache(func(mb *sbdb.MACBinding) bool {
 		return mb.LogicalPort == dgpName && mb.MAC == dnatSnatNextHopMac.String()
-	}).List(&macResult); err != nil {
+	}).List(ctx, &macResult); err != nil {
 		return fmt.Errorf("failed to check existence of MAC_Binding entry of (%s, %s) for distributed router port %s "+
 			"error: %v", nodeLocalNatSubnetNextHop, dnatSnatNextHopMac, dgpName, err)
 	}
@@ -880,9 +886,11 @@ func (oc *Controller) syncPolicyBasedRoutes(nodeName string, matches sets.String
 func (oc *Controller) findPolicyBasedRoutes(priority string) ([]nbdb.LogicalRouterPolicy, error) {
 	intPriority, _ := strconv.Atoi(priority)
 	logicalRouterPolicyResult := []nbdb.LogicalRouterPolicy{}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
 	err := oc.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
 		return lrp.Priority == intPriority
-	}).List(&logicalRouterPolicyResult)
+	}).List(ctx, &logicalRouterPolicyResult)
 	if err != nil {
 		return nil, fmt.Errorf("unable to find logical router policy, err: %v", err)
 	}

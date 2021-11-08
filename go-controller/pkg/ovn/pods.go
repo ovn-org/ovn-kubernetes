@@ -1,7 +1,9 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"net"
 	"time"
 
@@ -48,7 +50,9 @@ func (oc *Controller) syncPods(pods []interface{}) {
 	// in order to minimize the number of database transactions build a map of all ports keyed by UUID
 	portCache := make(map[string]nbdb.LogicalSwitchPort)
 	lspList := []nbdb.LogicalSwitchPort{}
-	err := oc.nbClient.List(&lspList)
+	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+	defer cancel()
+	err := oc.nbClient.List(ctx, &lspList)
 	if err != nil {
 		klog.Errorf("Cannot sync pods, cannot retrieve list of logical switch ports (%+v)", err)
 		return
@@ -293,12 +297,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	lspExist := false
 	needsIP := true
 
+	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+	defer cancel()
 	// Check if the pod's logical switch port already exists. If it
 	// does don't re-add the port to OVN as this will change its
 	// UUID and and the port cache, address sets, and port groups
 	// will still have the old UUID.
 	getLSP := &nbdb.LogicalSwitchPort{Name: portName}
-	err = oc.nbClient.Get(getLSP)
+	err = oc.nbClient.Get(ctx, getLSP)
 	if err != nil && err != libovsdbclient.ErrNotFound {
 		return fmt.Errorf("unable to get the lsp: %s from the nbdb: %s", portName, err)
 	}
@@ -624,7 +630,9 @@ func ovnNBLSPDel(client libovsdbclient.Client, logicalPort, logicalSwitch string
 	}
 
 	lsp := &nbdb.LogicalSwitchPort{Name: logicalPort}
-	err = client.Get(lsp)
+	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+	defer cancel()
+	err = client.Get(ctx, lsp)
 	if err != nil {
 		return fmt.Errorf("cannot delete logical switch port %s failed retrieving the object %v", logicalPort, err)
 	}
@@ -653,10 +661,12 @@ func ovnNBLSPDel(client libovsdbclient.Client, logicalPort, logicalSwitch string
 
 func findLogicalSwitch(nbClient libovsdbclient.Client, logicalSwitchName string) (*nbdb.LogicalSwitch, error) {
 	logicalSwitches := []nbdb.LogicalSwitch{}
+	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+	defer cancel()
 	err := nbClient.WhereCache(
 		func(ls *nbdb.LogicalSwitch) bool {
 			return ls.Name == logicalSwitchName
-		}).List(&logicalSwitches)
+		}).List(ctx, &logicalSwitches)
 
 	if err != nil {
 		return nil, fmt.Errorf("error finding logical switch %s: %v", logicalSwitchName, err)

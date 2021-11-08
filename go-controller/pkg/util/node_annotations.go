@@ -277,6 +277,10 @@ func ParseNodeL3GatewayAnnotation(node *kapi.Node) (*L3GatewayConfig, error) {
 	return cfg, nil
 }
 
+func NodeL3GatewayAnnotationChanged(oldNode, newNode *kapi.Node) bool {
+	return oldNode.Annotations[ovnNodeL3GatewayConfig] != newNode.Annotations[ovnNodeL3GatewayConfig]
+}
+
 // ParseNodeChassisIDAnnotation returns the node's ovnNodeChassisID annotation
 func ParseNodeChassisIDAnnotation(node *kapi.Node) (string, error) {
 	chassisID, ok := node.Annotations[ovnNodeChassisID]

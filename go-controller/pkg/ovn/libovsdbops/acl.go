@@ -1,7 +1,9 @@
 package libovsdbops
 
 import (
+	"context"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"reflect"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -45,11 +47,12 @@ func findACL(nbClient libovsdbclient.Client, acl *nbdb.ACL) error {
 	if acl.UUID != "" && !IsNamedUUID(acl.UUID) {
 		return nil
 	}
-
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
 	acls := []nbdb.ACL{}
 	err := nbClient.WhereCache(func(item *nbdb.ACL) bool {
 		return IsEquivalentACL(item, acl)
-	}).List(&acls)
+	}).List(ctx, &acls)
 
 	if err != nil {
 		return fmt.Errorf("can't find ACL by equivalence %+v: %v", *acl, err)
@@ -215,7 +218,9 @@ func UpdateACLLogging(nbClient libovsdbclient.Client, acl *nbdb.ACL) error {
 // findACLsByPredicate looks up ACLs from the cache based on a given predicate
 func findACLsByPredicate(nbClient libovsdbclient.Client, lookupFunction func(item *nbdb.ACL) bool) ([]nbdb.ACL, error) {
 	acls := []nbdb.ACL{}
-	err := nbClient.WhereCache(lookupFunction).List(&acls)
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := nbClient.WhereCache(lookupFunction).List(ctx, &acls)
 	if err != nil {
 		return nil, err
 	}

@@ -1,9 +1,11 @@
 package libovsdbops
 
 import (
+	"context"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
@@ -17,8 +19,9 @@ func findPortGroup(nbClient libovsdbclient.Client, pg *nbdb.PortGroup) error {
 	searched := &nbdb.PortGroup{
 		Name: pg.Name,
 	}
-
-	err := nbClient.Get(searched)
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := nbClient.Get(ctx, searched)
 	if err != nil {
 		pg.UUID = searched.UUID
 	}

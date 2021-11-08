@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"runtime"
 	"sync"
 	"time"
@@ -163,14 +164,14 @@ var metricV6AllocatedHostSubnetCount = prometheus.NewGauge(prometheus.GaugeOpts{
 })
 
 var metricEgressIPCount = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
+	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "num_egress_ips",
 	Help:      "The number of defined egress IP addresses",
 })
 
 var metricEgressFirewallRuleCount = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
+	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "num_egress_firewall_rules",
 	Help:      "The number of egress firewall rules defined"},
@@ -181,6 +182,13 @@ var metricIPsecEnabled = prometheus.NewGauge(prometheus.GaugeOpts{
 	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "ipsec_enabled",
 	Help:      "Specifies whether IPSec is enabled for this cluster(1) or not enabled for this cluster(0)",
+})
+
+var metricEgressFirewallCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "num_egress_firewalls",
+	Help:      "The number of egress firewall policies",
 })
 
 var registerMasterMetricsOnce sync.Once
@@ -260,6 +268,7 @@ func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 		prometheus.MustRegister(metricEgressIPCount)
 		prometheus.MustRegister(metricEgressFirewallRuleCount)
 		prometheus.MustRegister(metricIPsecEnabled)
+		prometheus.MustRegister(metricEgressFirewallCount)
 		registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemMaster)
 	})
 }
@@ -330,7 +339,9 @@ func UpdateEgressFirewallRuleCount(count float64) {
 
 func updateE2ETimestampMetric(ovnNBClient client.Client) {
 	var rows []nbdb.NBGlobal
-	if err := ovnNBClient.List(&rows); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	if err := ovnNBClient.List(ctx, &rows); err != nil {
 		klog.Errorf("Failed to update e2e timestamp metric while attempting to list rows for NB_Global table: %s", err)
 		return
 	}
@@ -346,7 +357,7 @@ func updateE2ETimestampMetric(ovnNBClient client.Client) {
 		klog.Errorf("Failed to update e2e timestamp metric because generating OVN northbound operation failed: %v", err)
 		return
 	}
-	reply, err := ovnNBClient.Transact(context.Background(), operations...)
+	reply, err := ovnNBClient.Transact(ctx, operations...)
 	if err != nil {
 		klog.Errorf("Failed to update e2e timestamp metric while updating OVN northbound database: %v", err)
 		return
@@ -384,4 +395,14 @@ func ipsecMetricHandler(table string, model model.Model) {
 	} else {
 		metricIPsecEnabled.Set(0)
 	}
+}
+
+// IncrementEgressFirewallCount increments the number of Egress firewalls
+func IncrementEgressFirewallCount() {
+	metricEgressFirewallCount.Inc()
+}
+
+// DecrementEgressFirewallCount decrements the number of Egress firewalls
+func DecrementEgressFirewallCount() {
+	metricEgressFirewallCount.Dec()
 }

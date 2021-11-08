@@ -437,9 +437,11 @@ func (oc *Controller) ovnTopologyCleanup() error {
 func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
 	ver := 0
 	logicalRouterRes := []nbdb.LogicalRouter{}
+	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+	defer cancel()
 	if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
 		return lr.Name == ovntypes.OVNClusterRouter
-	}).List(&logicalRouterRes); err != nil {
+	}).List(ctx, &logicalRouterRes); err != nil {
 		return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
 			"error: %v", ovntypes.OVNClusterRouter, err)
 	}
@@ -764,6 +766,7 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 				klog.Error(err)
 			}
 			metrics.UpdateEgressFirewallRuleCount(float64(len(egressFirewall.Spec.Egress)))
+			metrics.IncrementEgressFirewallCount()
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			newEgressFirewall := newer.(*egressfirewall.EgressFirewall).DeepCopy()
@@ -804,6 +807,7 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 				klog.Errorf("Failed to commit db changes for egressFirewall in namespace %s stdout: %q, stderr: %q, err: %+v", egressFirewall.Namespace, stdout, stderr, err)
 			}
 			metrics.UpdateEgressFirewallRuleCount(float64(-len(egressFirewall.Spec.Egress)))
+			metrics.DecrementEgressFirewallCount()
 		},
 	}, oc.syncEgressFirewall)
 }

@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/cenkalti/rpc2"
@@ -227,7 +228,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 		if len(connectErrors) == 1 {
 			return connectErrors[0]
 		}
-		combined := []string{}
+		var combined []string
 		for _, e := range connectErrors {
 			combined = append(combined, e.Error())
 		}
@@ -674,10 +675,31 @@ func (o *ovsdbClient) listDbs(ctx context.Context) ([]string, error) {
 // RFC 7047 : transact
 func (o *ovsdbClient) Transact(ctx context.Context, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
 	o.rpcMutex.Lock()
-	defer o.rpcMutex.Unlock()
 	if o.rpcClient == nil {
-		return nil, ErrNotConnected
+		o.rpcMutex.Unlock()
+		if o.options.reconnect {
+			o.logger.V(5).Info("blocking transaction until reconnected", "operations",
+				fmt.Sprintf("%+v", operation))
+			ticker := time.NewTicker(50 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return nil, fmt.Errorf("%w: while awaiting reconnection", ctx.Err())
+				case <-ticker.C:
+					o.rpcMutex.Lock()
+					if o.rpcClient != nil {
+						break
+					}
+					o.rpcMutex.Unlock()
+				}
+			}
+		} else {
+			return nil, ErrNotConnected
+		}
 	}
+	defer o.rpcMutex.Unlock()
+
 	return o.transact(ctx, o.primaryDBName, operation...)
 }
 
@@ -1000,6 +1022,7 @@ func (o *ovsdbClient) handleDisconnectNotification() {
 	if o.options.reconnect && !o.shutdown {
 		o.rpcClient = nil
 		o.rpcMutex.Unlock()
+		suppressionCounter := 1
 		connect := func() error {
 			// need to ensure deferredUpdates is cleared on every reconnect attempt
 			for _, db := range o.databases {
@@ -1012,8 +1035,14 @@ func (o *ovsdbClient) handleDisconnectNotification() {
 			defer cancel()
 			err := o.connect(ctx, true)
 			if err != nil {
-				o.logger.V(2).Error(err, "failed to reconnect")
+				if suppressionCounter < 5 {
+					o.logger.V(2).Error(err, "failed to reconnect")
+				} else if suppressionCounter == 5 {
+					o.logger.V(2).Error(err, "reconnect has failed 5 times, suppressing logging "+
+						"for future attempts")
+				}
 			}
+			suppressionCounter++
 			return err
 		}
 		o.logger.V(3).Info("connection lost, reconnecting", "endpoint", o.activeEndpoint)
@@ -1088,13 +1117,56 @@ func (o *ovsdbClient) Close() {
 	o.rpcClient.Close()
 }
 
+// Ensures the cache is consistent by evaluating that the client is connected
+// and the monitor is fully setup, with the cache populated
+func isCacheConsistent(db *database) bool {
+	// This works because when a client is disconnected the deferUpdates variable
+	// will be set to true. deferUpdates is also protected by the db.cacheMutex.
+	// When the client reconnects and then re-establishes the monitor; the final step
+	// is to process all deferred updates, set deferUpdates back to false, and unlock cacheMutex
+	db.cacheMutex.RLock()
+	defer db.cacheMutex.RUnlock()
+	return !db.deferUpdates
+}
+
+// best effort to ensure cache is in a good state for reading
+func waitForCacheConsistent(ctx context.Context, db *database, logger *logr.Logger, dbName string) {
+	if !hasMonitors(db) {
+		return
+	}
+	ticker := time.NewTicker(50 * time.Millisecond)
+	for {
+		select {
+		case <-ctx.Done():
+			logger.V(3).Info("warning: unable to ensure cache consistency for reading",
+				"database", dbName)
+			return
+		case <-ticker.C:
+			if isCacheConsistent(db) {
+				return
+			}
+
+		}
+	}
+}
+
+func hasMonitors(db *database) bool {
+	db.monitorsMutex.Lock()
+	defer db.monitorsMutex.Unlock()
+	return len(db.monitors) > 0
+}
+
 // Client API interface wrapper functions
 // We add this wrapper to allow users to access the API directly on the
 // client object
 
 //Get implements the API interface's Get function
-func (o *ovsdbClient) Get(model model.Model) error {
-	return o.primaryDB().api.Get(model)
+func (o *ovsdbClient) Get(ctx context.Context, model model.Model) error {
+	primaryDB := o.primaryDB()
+	waitForCacheConsistent(ctx, primaryDB, o.logger, o.primaryDBName)
+	primaryDB.cacheMutex.RLock()
+	defer primaryDB.cacheMutex.RUnlock()
+	return primaryDB.api.Get(ctx, model)
 }
 
 //Create implements the API interface's Create function
@@ -1103,8 +1175,12 @@ func (o *ovsdbClient) Create(models ...model.Model) ([]ovsdb.Operation, error) {
 }
 
 //List implements the API interface's List function
-func (o *ovsdbClient) List(result interface{}) error {
-	return o.primaryDB().api.List(result)
+func (o *ovsdbClient) List(ctx context.Context, result interface{}) error {
+	primaryDB := o.primaryDB()
+	waitForCacheConsistent(ctx, primaryDB, o.logger, o.primaryDBName)
+	primaryDB.cacheMutex.RLock()
+	defer primaryDB.cacheMutex.RUnlock()
+	return primaryDB.api.List(ctx, result)
 }
 
 //Where implements the API interface's Where function

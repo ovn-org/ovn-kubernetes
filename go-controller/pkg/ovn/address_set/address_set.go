@@ -1,7 +1,9 @@
 package addressset
 
 import (
+	"context"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"net"
 	"sort"
 	"strings"
@@ -96,7 +98,9 @@ func ensureOvnAddressSet(nbClient libovsdbclient.Client, name string) (*ovnAddre
 	}
 
 	addrset := &nbdb.AddressSet{Name: as.hashName, ExternalIDs: map[string]string{"name": name}}
-	err := as.nbClient.Get(addrset)
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := as.nbClient.Get(ctx, addrset)
 	if err != nil && err != libovsdbclient.ErrNotFound {
 		return nil, fmt.Errorf("ensuring address set %s failed: %+v", name, err)
 	}
@@ -156,11 +160,13 @@ func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) (AddressSet, erro
 
 func forEachAddressSet(nbClient libovsdbclient.Client, do func(string)) error {
 	addrSetList := &[]nbdb.AddressSet{}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
 	err := nbClient.WhereCache(
 		func(addrSet *nbdb.AddressSet) bool {
 			_, exists := addrSet.ExternalIDs["name"]
 			return exists
-		}).List(addrSetList)
+		}).List(ctx, addrSetList)
 	if err != nil {
 		return fmt.Errorf("error reading address sets: %+v", err)
 	}
@@ -306,7 +312,9 @@ func newOvnAddressSet(nbClient libovsdbclient.Client, name string, ips []net.IP)
 	}
 	uniqIPs := ipToStringSort(ips)
 	addrSet := &nbdb.AddressSet{Name: hashedAddressSet(name)}
-	err := as.nbClient.Get(addrSet)
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := as.nbClient.Get(ctx, addrSet)
 	if err != nil && err != libovsdbclient.ErrNotFound {
 		return nil, err
 	}
@@ -488,7 +496,9 @@ func (as *ovnAddressSet) setIPs(ips []net.IP) error {
 // getIPs gets the IPs of a given address set in OVN from libovsdb cache
 func (as *ovnAddressSet) getIPs() ([]string, error) {
 	addrset := &nbdb.AddressSet{Name: as.hashName}
-	err := as.nbClient.Get(addrset)
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := as.nbClient.Get(ctx, addrset)
 	if err != nil {
 		return nil, err
 	}
