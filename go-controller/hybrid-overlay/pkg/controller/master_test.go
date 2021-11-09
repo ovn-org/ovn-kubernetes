@@ -178,7 +178,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 					},
 					Action:   nbdb.LogicalRouterPolicyActionReroute,
 					Nexthops: []string{nodeHOIP},
-					Match:    "inport == \\\"rtos-node1\\\" && ip4.dst == 11.1.0.0/16",
+					Match:    "inport == \"rtos-node1\" && ip4.dst == 11.1.0.0/16",
 					UUID:     "reroute-policy-UUID",
 				},
 				&nbdb.LogicalRouter{
@@ -315,7 +315,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 					},
 					Action:   nbdb.LogicalRouterPolicyActionReroute,
 					Nexthops: []string{nodeHOIP},
-					Match:    "inport == \\\"rtos-node1\\\" && ip4.dst == 11.1.0.0/16",
+					Match:    "inport == \"rtos-node1\" && ip4.dst == 11.1.0.0/16",
 					UUID:     "reroute-policy-UUID",
 				},
 				&nbdb.LogicalSwitchPort{
@@ -403,7 +403,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 					},
 					Action:   nbdb.LogicalRouterPolicyActionReroute,
 					Nexthops: []string{nodeHOIP},
-					Match:    "inport == \\\"rtos-node1\\\" && ip4.dst == 11.1.0.0/16",
+					Match:    "inport == \"rtos-node1\" && ip4.dst == 11.1.0.0/16",
 					UUID:     "reroute-policy-UUID",
 				},
 				&nbdb.LogicalRouter{
