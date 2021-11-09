@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"net"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
@@ -380,6 +381,151 @@ var _ = Describe("Node", func() {
 				config.Default.LFlowCacheEnable = false
 				config.Default.LFlowCacheLimit = 1000
 				config.Default.LFlowCacheLimitKb = 100000
+				err = setupOVNNode(&node)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+		It("sets default IPFIX configuration", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const (
+					nodeIP    string = "1.2.5.6"
+					nodeName  string = "cannot.be.resolv.ed"
+					interval  int    = 100000
+					ofintval  int    = 180
+					ipfixPort int32  = 456
+				)
+				ipfixIP := net.IP{1, 2, 3, 4}
+
+				node := kapi.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName,
+					},
+					Status: kapi.NodeStatus{
+						Addresses: []kapi.NodeAddress{
+							{
+								Type:    kapi.NodeExternalIP,
+								Address: nodeIP,
+							},
+						},
+					},
+				}
+
+				fexec := ovntest.NewFakeExec()
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
+						"external_ids:ovn-encap-type=geneve "+
+						"external_ids:ovn-encap-ip=%s "+
+						"external_ids:ovn-remote-probe-interval=%d "+
+						"external_ids:ovn-openflow-probe-interval=%d "+
+						"external_ids:hostname=\"%s\" "+
+						"external_ids:ovn-monitor-all=true "+
+						"external_ids:ovn-enable-lflow-cache=true",
+						nodeIP, interval, ofintval, nodeName),
+				})
+
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
+						" -- " +
+						"clear bridge br-int sflow" +
+						" -- " +
+						"clear bridge br-int ipfix",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15"+
+						" -- "+
+						"--id=@ipfix create ipfix "+
+						"targets=[\"%s:%d\"] cache_active_timeout=60 sampling=400"+
+						" -- "+
+						"set bridge br-int ipfix=@ipfix", ipfixIP, ipfixPort),
+				})
+				err := util.SetExec(fexec)
+				Expect(err).NotTo(HaveOccurred())
+
+				_, err = config.InitConfig(ctx, fexec, nil)
+				Expect(err).NotTo(HaveOccurred())
+				config.Monitoring.IPFIXTargets = []config.HostPort{
+					{Host: &ipfixIP, Port: ipfixPort},
+				}
+				err = setupOVNNode(&node)
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+		It("allows overriding IPFIX configuration", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const (
+					nodeIP    string = "1.2.5.6"
+					nodeName  string = "cannot.be.resolv.ed"
+					interval  int    = 100000
+					ofintval  int    = 180
+					ipfixPort int32  = 456
+				)
+				ipfixIP := net.IP{1, 2, 3, 4}
+
+				node := kapi.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName,
+					},
+					Status: kapi.NodeStatus{
+						Addresses: []kapi.NodeAddress{
+							{
+								Type:    kapi.NodeExternalIP,
+								Address: nodeIP,
+							},
+						},
+					},
+				}
+
+				fexec := ovntest.NewFakeExec()
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
+						"external_ids:ovn-encap-type=geneve "+
+						"external_ids:ovn-encap-ip=%s "+
+						"external_ids:ovn-remote-probe-interval=%d "+
+						"external_ids:ovn-openflow-probe-interval=%d "+
+						"external_ids:hostname=\"%s\" "+
+						"external_ids:ovn-monitor-all=true "+
+						"external_ids:ovn-enable-lflow-cache=true",
+						nodeIP, interval, ofintval, nodeName),
+				})
+
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
+						" -- " +
+						"clear bridge br-int sflow" +
+						" -- " +
+						"clear bridge br-int ipfix",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15"+
+						" -- "+
+						"--id=@ipfix create ipfix "+
+						"targets=[\"%s:%d\"] cache_active_timeout=123 cache_max_flows=456 sampling=789"+
+						" -- "+
+						"set bridge br-int ipfix=@ipfix", ipfixIP, ipfixPort),
+				})
+				err := util.SetExec(fexec)
+				Expect(err).NotTo(HaveOccurred())
+
+				_, err = config.InitConfig(ctx, fexec, nil)
+				Expect(err).NotTo(HaveOccurred())
+				config.Monitoring.IPFIXTargets = []config.HostPort{
+					{Host: &ipfixIP, Port: ipfixPort},
+				}
+				config.IPFIX.CacheActiveTimeout = 123
+				config.IPFIX.CacheMaxFlows = 456
+				config.IPFIX.Sampling = 789
 				err = setupOVNNode(&node)
 				Expect(err).NotTo(HaveOccurred())
 

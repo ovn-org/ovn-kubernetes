@@ -216,6 +216,9 @@ ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 ovn_netflow_targets=${OVN_NETFLOW_TARGETS:-}
 ovn_sflow_targets=${OVN_SFLOW_TARGETS:-}
 ovn_ipfix_targets=${OVN_IPFIX_TARGETS:-}
+ovn_ipfix_sampling=${OVN_IPFIX_SAMPLING:-} \
+ovn_ipfix_cache_max_flows=${OVN_IPFIX_CACHE_MAX_FLOWS:-} \
+ovn_ipfix_cache_active_timeout=${OVN_IPFIX_CACHE_ACTIVE_TIMEOUT:-} \
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
@@ -1073,6 +1076,17 @@ ovn-node() {
       ipfix_targets="--ipfix-targets ${ovn_ipfix_targets}"
   fi
 
+  ipfix_config=
+  if [[ -n ${ovn_ipfix_sampling} ]]; then
+      ipfix_config="--ipfix-sampling ${ovn_ipfix_sampling}"
+  fi
+  if [[ -n ${ovn_ipfix_cache_max_flows} ]]; then
+      ipfix_config="${ipfix_config} --ipfix-cache-max-flows ${ovn_ipfix_cache_max_flows}"
+  fi
+  if [[ -n ${ovn_ipfix_cache_active_timeout} ]]; then
+      ipfix_config="${ipfix_config} --ipfix-cache-active-timeout ${ovn_ipfix_cache_active_timeout}"
+  fi
+
   monitor_all=
   if [[ -n ${ovn_monitor_all} ]]; then
      monitor_all="--monitor-all=${ovn_monitor_all}"
@@ -1183,6 +1197,7 @@ ovn-node() {
     ${netflow_targets} \
     ${sflow_targets} \
     ${ipfix_targets} \
+    ${ipfix_config} \
     --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
     --metrics-bind-address ${ovnkube_node_metrics_bind_address} \
      ${ovnkube_node_mode_flag} \

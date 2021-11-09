@@ -124,16 +124,22 @@ func setOVSFlowTargets() error {
 		}
 		collectors = strings.TrimSuffix(collectors, ",")
 
-		_, stderr, err := util.RunOVSVsctl(
+		args := []string{
 			"--",
 			"--id=@ipfix",
 			"create",
 			"ipfix",
 			fmt.Sprintf("targets=[%s]", collectors),
-			"cache_active_timeout=60",
-			"--",
-			"set", "bridge", "br-int", "ipfix=@ipfix",
-		)
+			fmt.Sprintf("cache_active_timeout=%d", config.IPFIX.CacheActiveTimeout),
+		}
+		if config.IPFIX.CacheMaxFlows != 0 {
+			args = append(args, fmt.Sprintf("cache_max_flows=%d", config.IPFIX.CacheMaxFlows))
+		}
+		if config.IPFIX.Sampling != 0 {
+			args = append(args, fmt.Sprintf("sampling=%d", config.IPFIX.Sampling))
+		}
+		args = append(args, "--", "set", "bridge", "br-int", "ipfix=@ipfix")
+		_, stderr, err := util.RunOVSVsctl(args...)
 		if err != nil {
 			return fmt.Errorf("error setting IPFIX: %v\n  %q", err, stderr)
 		}

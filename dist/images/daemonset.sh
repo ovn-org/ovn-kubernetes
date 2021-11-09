@@ -52,6 +52,9 @@ OVN_V6_JOIN_SUBNET=""
 OVN_NETFLOW_TARGETS=""
 OVN_SFLOW_TARGETS=""
 OVN_IPFIX_TARGETS=""
+OVN_IPFIX_SAMPLING=""
+OVN_IPFIX_CACHE_MAX_FLOWS=""
+OVN_IPFIX_CACHE_ACTIVE_TIMEOUT=""
 OVN_HOST_NETWORK_NAMESPACE=""
 OVN_EX_GW_NETWORK_INTERFACE=""
 OVNKUBE_NODE_MGMT_PORT_NETDEV=""
@@ -202,6 +205,15 @@ while [ "$1" != "" ]; do
   --ipfix-targets)
     OVN_IPFIX_TARGETS=$VALUE
     ;;
+  --ipfix-sampling)
+    OVN_IPFIX_SAMPLING=$VALUE
+    ;;
+  --ipfix-cache-max-flows)
+    OVN_IPFIX_CACHE_MAX_FLOWS=$VALUE
+    ;;
+  --ipfix-cache-active-timeout)
+    OVN_IPFIX_CACHE_ACTIVE_TIMEOUT=$VALUE
+    ;;
   --host-network-namespace)
     OVN_HOST_NETWORK_NAMESPACE=$VALUE
     ;;
@@ -318,6 +330,12 @@ ovn_sflow_targets=${OVN_SFLOW_TARGETS}
 echo "ovn_sflow_targets: ${ovn_sflow_targets}"
 ovn_ipfix_targets=${OVN_IPFIX_TARGETS}
 echo "ovn_ipfix_targets: ${ovn_ipfix_targets}"
+ovn_ipfix_sampling=${OVN_IPFIX_SAMPLING}
+echo "ovn_ipfix_sampling: ${ovn_ipfix_sampling}"
+ovn_ipfix_cache_max_flows=${OVN_IPFIX_CACHE_MAX_FLOWS}
+echo "ovn_ipfix_cache_max_flows: ${ovn_ipfix_cache_max_flows}"
+ovn_ipfix_cache_active_timeout=${OVN_IPFIX_CACHE_ACTIVE_TIMEOUT}
+echo "ovn_ipfix_cache_active_timeout: ${ovn_ipfix_cache_active_timeout}"
 ovn_ex_gw_networking_interface=${OVN_EX_GW_NETWORK_INTERFACE}
 echo "ovn_ex_gw_networking_interface: ${ovn_ex_gw_networking_interface}"
 ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV}
@@ -350,6 +368,9 @@ ovn_image=${image} \
   ovn_netflow_targets=${ovn_netflow_targets} \
   ovn_sflow_targets=${ovn_sflow_targets} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
+  ovn_ipfix_sampling=${ovn_ipfix_sampling} \
+  ovn_ipfix_cache_max_flows=${ovn_ipfix_cache_max_flows} \
+  ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   ovnkube_app_name=ovnkube-node \
@@ -379,6 +400,9 @@ ovn_image=${image} \
   ovn_netflow_targets=${ovn_netflow_targets} \
   ovn_sflow_targets=${ovn_sflow_targets} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
+  ovn_ipfix_sampling=${ovn_ipfix_sampling} \
+  ovn_ipfix_cache_max_flows=${ovn_ipfix_cache_max_flows} \
+  ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
   ovnkube_app_name=ovnkube-node-smart-nic-host \
