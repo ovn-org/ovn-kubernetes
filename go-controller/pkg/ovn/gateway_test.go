@@ -160,9 +160,10 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 			"physical_ip":  physicalIPs[0],
 			"physical_ips": strings.Join(physicalIPs, ","),
 		},
-		Ports:        []string{gwRouterPort + "-UUID", externalRouterPort + "-UUID"},
-		StaticRoutes: grStaticRoutes,
-		Nat:          natUUIDs,
+		Ports:             []string{gwRouterPort + "-UUID", externalRouterPort + "-UUID"},
+		StaticRoutes:      grStaticRoutes,
+		Nat:               natUUIDs,
+		LoadBalancerGroup: []string{types.ClusterLBGroupName + "-UUID"},
 	})
 
 	testData = append(testData, expectedOVNClusterRouter)
@@ -218,6 +219,10 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 			UUID:  externalSwitch + "-UUID",
 			Name:  externalSwitch,
 			Ports: []string{l3GatewayConfig.InterfaceID + "-UUID", externalSwitchPortToRouter + "-UUID"},
+		},
+		&nbdb.LoadBalancerGroup{
+			Name: types.ClusterLBGroupName,
+			UUID: types.ClusterLBGroupName + "-UUID",
 		})
 	return testData
 }
@@ -254,6 +259,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: nodeName + "-UUID",
 				Name: nodeName,
 			}
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterLBGroupName + "-UUID",
+				Name: types.ClusterLBGroupName,
+			}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
@@ -262,6 +271,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					},
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
+					expectedClusterLBGroup,
 				},
 			})
 
@@ -300,6 +310,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: nodeName + "-UUID",
 				Name: nodeName,
 			}
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterLBGroupName + "-UUID",
+				Name: types.ClusterLBGroupName,
+			}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
@@ -308,6 +322,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					},
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
+					expectedClusterLBGroup,
 				},
 			})
 
@@ -347,6 +362,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: nodeName + "-UUID",
 				Name: nodeName,
 			}
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterLBGroupName + "-UUID",
+				Name: types.ClusterLBGroupName,
+			}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
@@ -355,6 +374,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					},
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
+					expectedClusterLBGroup,
 				},
 			})
 
@@ -394,6 +414,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: nodeName + "-UUID",
 				Name: nodeName,
 			}
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterLBGroupName + "-UUID",
+				Name: types.ClusterLBGroupName,
+			}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
@@ -402,6 +426,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					},
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
+					expectedClusterLBGroup,
 				},
 			})
 
@@ -450,6 +475,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: nodeName + "-UUID",
 				Name: nodeName,
 			}
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				Name: types.ClusterLBGroupName,
+				UUID: types.ClusterLBGroupName + "-UUID",
+			}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
@@ -458,6 +487,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					},
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
+					expectedClusterLBGroup,
 				},
 			})
 
