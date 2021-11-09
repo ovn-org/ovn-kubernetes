@@ -512,7 +512,7 @@ func (oc *Controller) addNodeLogicalSwitchPort(logicalSwitchName, portName, port
 	}
 	_, err := oc.modelClient.CreateOrUpdate(opModels...)
 	if err != nil {
-		return "", fmt.Errorf("failed to add logical port %s to switch %s, error: %v", portName, logicalSwitch, err)
+		return "", fmt.Errorf("failed to add logical port %s to switch %s, error: %v", portName, logicalSwitch.Name, err)
 	}
 
 	return logicalSwitchPort.UUID, nil
