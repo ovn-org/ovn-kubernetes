@@ -167,9 +167,11 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 		// Established traffic is handled by default conntrack rules
 		// NodePort/Ingress access in the OVS bridge will only ever come from outside of the host
 		for _, ing := range service.Status.LoadBalancer.Ingress {
-			err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, epHostLocal, protocol, actions, ing.IP, "Ingress")
-			if err != nil {
-				klog.Errorf(err.Error())
+			if len(ing.IP) > 0 {
+				err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, epHostLocal, protocol, actions, ing.IP, "Ingress")
+				if err != nil {
+					klog.Errorf(err.Error())
+				}
 			}
 		}
 		// flows for externalIPs
@@ -185,11 +187,8 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add bo
 // flow generation for LB and ExternalIP flow is essentially the same, so avoid code duplication with
 // this method
 func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, svcPort *kapi.ServicePort, add bool, epHostLocal bool, protocol string, actions string, ipAddress string, ipType string) error {
-	if ipAddress == "" {
-		return fmt.Errorf("failed to parse %s IP. IP is empty.", ipType)
-	}
 	if net.ParseIP(ipAddress) == nil {
-		return fmt.Errorf("failed to parse %s IP: %s", ipType, ipAddress)
+		return fmt.Errorf("failed to parse %s IP: %q", ipType, ipAddress)
 	}
 	flowProtocol := protocol
 	nwDst := "nw_dst"

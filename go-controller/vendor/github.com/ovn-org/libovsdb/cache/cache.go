@@ -639,7 +639,7 @@ func (t *TableCache) Populate2(tableUpdates ovsdb.TableUpdates2) error {
 				if err != nil {
 					return err
 				}
-				logger.V(5).Info("creating row", "model", fmt.Sprintf("%+v", m))
+				logger.V(5).Info("inserting row", "model", fmt.Sprintf("%+v", m))
 				if err := tCache.Create(uuid, m, false); err != nil {
 					return err
 				}

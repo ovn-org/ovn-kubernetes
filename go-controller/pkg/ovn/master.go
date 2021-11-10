@@ -294,9 +294,6 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 
 	// update metrics for host subnets
 	metrics.RecordSubnetCount(v4HostSubnetCount, v6HostSubnetCount)
-	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "port_group"); err != nil {
-		klog.Fatal("OVN version too old; does not support port groups")
-	}
 
 	if oc.multicastSupport {
 		if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err != nil {

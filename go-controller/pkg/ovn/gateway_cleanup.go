@@ -351,6 +351,7 @@ func (oc *Controller) cleanupDGP(nodes *kapi.NodeList) error {
 	opModels := []libovsdbops.OperationModel{
 		{
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.NodeLocalSwitch },
+			ExistingResult: &[]nbdb.LogicalSwitch{},
 		},
 	}
 	if err := oc.modelClient.Delete(opModels...); err != nil {

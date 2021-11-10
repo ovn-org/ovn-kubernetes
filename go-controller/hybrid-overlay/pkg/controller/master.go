@@ -378,7 +378,7 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 		}
 
 		drIP := util.GetNodeHybridOverlayIfAddr(nodeSubnet).IP
-		matchStr := fmt.Sprintf(`inport == \"%s%s\" && %s.dst == %s`,
+		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.dst == %s`,
 			ovntypes.RouterToSwitchPrefix, nodeName, L3Prefix, hybridCIDR)
 
 		intPriority, _ := strconv.Atoi(ovntypes.HybridOverlaySubnetPriority)
