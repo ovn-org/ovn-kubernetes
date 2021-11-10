@@ -384,16 +384,24 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 
 	// Master is fully running and resource handlers have synced, update Topology version in OVN
 	currentTopologyVersion := strconv.Itoa(ovntypes.OvnCurrentTopologyVersion)
+	logicalRouterRes := []nbdb.LogicalRouter{}
+	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+	defer cancel()
+	if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
+		return lr.Name == ovntypes.OVNClusterRouter
+	}).List(ctx, &logicalRouterRes); err != nil {
+		return fmt.Errorf("failed in retrieving %s, error: %v", ovntypes.OVNClusterRouter, err)
+	}
+	// Update topology version on distributed cluster router
+	logicalRouterRes[0].ExternalIDs["k8s-ovn-topo-version"] = currentTopologyVersion
 	logicalRouter := nbdb.LogicalRouter{
-		Name: ovntypes.OVNClusterRouter,
-		ExternalIDs: map[string]string{
-			"k8s-ovn-topo-version": currentTopologyVersion,
-		},
+		Name:        ovntypes.OVNClusterRouter,
+		ExternalIDs: logicalRouterRes[0].ExternalIDs,
 	}
 	opModel := libovsdbops.OperationModel{
 		Model:          &logicalRouter,
 		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
-		OnModelMutations: []interface{}{
+		OnModelUpdates: []interface{}{
 			&logicalRouter.ExternalIDs,
 		},
 		ErrNotFound: true,

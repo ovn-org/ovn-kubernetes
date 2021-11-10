@@ -200,9 +200,8 @@ func isEquivalentNAT(existing *nbdb.NAT, searched *nbdb.NAT) bool {
 		return false
 	}
 
-	// Allow externalIP to be empty if type is SNAT.
-	if (searched.ExternalIP != "" || searched.Type != nbdb.NATTypeSNAT) &&
-		searched.ExternalIP != existing.ExternalIP {
+	// Compre externalIP if its not empty.
+	if searched.ExternalIP != "" && searched.ExternalIP != existing.ExternalIP {
 		return false
 	}
 
