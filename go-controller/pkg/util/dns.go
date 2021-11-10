@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	"math/rand"
 	"net"
 	"sync"
 	"time"
@@ -76,8 +77,12 @@ func (d *DNS) GetIPs(dns string) []net.IP {
 }
 
 func (d *DNS) Add(dns string) error {
+	klog.Errorf("\t KEYWORD: attempting to aquire lock in Add for %s", dns)
 	d.lock.Lock()
-	defer d.lock.Unlock()
+	defer func() {
+		d.lock.Unlock()
+		klog.Errorf("\t KEYWORD releaseing lock in Add for %s", dns)
+	}()
 
 	d.dnsMap[dns] = dnsValue{}
 	_, err := d.updateOne(dns)
@@ -201,8 +206,14 @@ func (d *DNS) getIPsAndMinTTL(domain string) ([]net.IP, time.Duration, error) {
 }
 
 func (d *DNS) GetNextQueryTime() (time.Time, string, bool) {
+	index := rand.Intn(100)
+	klog.Errorf("\t KEYWORD: Attempting to get dns.Lock() - %d", index)
 	d.lock.Lock()
-	defer d.lock.Unlock()
+
+	defer func() {
+		d.lock.Unlock()
+		klog.Errorf("\t KEYWORD: Released dns.Lock() %d", index)
+	}()
 
 	timeSet := false
 	var minTime time.Time

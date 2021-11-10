@@ -176,6 +176,7 @@ func (e *EgressDNS) Run(defaultInterval time.Duration) {
 				//on update need to check if the GetNextQueryTime has changed
 			case <-time.After(durationTillNextQuery):
 				if len(dnsName) > 0 {
+					klog.Errorf("Updating for dnsName: %s", dnsName)
 					if _, err := e.Update(dnsName); err != nil {
 						utilruntime.HandleError(err)
 					}
@@ -197,11 +198,14 @@ func (e *EgressDNS) Run(defaultInterval time.Duration) {
 
 			// before waiting on the signals get the next time this thread needs to wake up
 			ttl, dnsName, timeSet = e.dns.GetNextQueryTime()
+
 			if time.Until(ttl) > defaultInterval || !timeSet {
 				durationTillNextQuery = defaultInterval
 			} else {
 				durationTillNextQuery = time.Until(ttl)
 			}
+			klog.Errorf("KEYWORD: dnsName to query next: %s", dnsName)
+			klog.Errorf("KEYWORD durationTillNextQuery - %s", durationTillNextQuery)
 		}
 	}()
 
