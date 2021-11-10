@@ -2,7 +2,11 @@ package libovsdbops
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/klog"
+	"time"
 
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
@@ -10,7 +14,26 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
-func TransactAndCheck(client client.Client, ops []ovsdb.Operation) ([]ovsdb.OperationResult, error) {
+// TransactWithRetry will attempt a transaction several times if it receives an error indicating that the client
+// was not connected when the transaction occurred.
+func TransactWithRetry(ctx context.Context, c client.Client, ops []ovsdb.Operation) ([]ovsdb.OperationResult, error) {
+	var results []ovsdb.OperationResult
+	resultErr := wait.PollImmediateUntilWithContext(ctx, 200*time.Millisecond, func(ctx context.Context) (bool, error) {
+		var err error
+		results, err = c.Transact(ctx, ops...)
+		if err == nil {
+			return true, nil
+		}
+		if err != nil && errors.Is(err, client.ErrNotConnected) {
+			klog.V(5).Infof("Unable to execute transaction: %+v. Client is disconnected, will retry...", ops)
+			return false, nil
+		}
+		return false, err
+	})
+	return results, resultErr
+}
+
+func TransactAndCheck(c client.Client, ops []ovsdb.Operation) ([]ovsdb.OperationResult, error) {
 	if len(ops) <= 0 {
 		return []ovsdb.OperationResult{{}}, nil
 	}
@@ -18,7 +41,7 @@ func TransactAndCheck(client client.Client, ops []ovsdb.Operation) ([]ovsdb.Oper
 	ctx, cancel := context.WithTimeout(context.TODO(), types.OVSDBTimeout)
 	defer cancel()
 
-	results, err := client.Transact(ctx, ops...)
+	results, err := TransactWithRetry(ctx, c, ops)
 	if err != nil {
 		return nil, fmt.Errorf("error in transact with ops %+v: %v", ops, err)
 	}
