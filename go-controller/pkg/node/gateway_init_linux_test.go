@@ -231,8 +231,9 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 					"-j OVN-KUBE-EXTERNALIP",
 					"-j OVN-KUBE-NODEPORT",
 				},
-				"OVN-KUBE-NODEPORT":   []string{},
-				"OVN-KUBE-EXTERNALIP": []string{},
+				"OVN-KUBE-NODEPORT":      []string{},
+				"OVN-KUBE-EXTERNALIP":    []string{},
+				"OVN-KUBE-SNAT-MGMTPORT": []string{},
 			},
 			"filter": {},
 		}
@@ -700,8 +701,9 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 			v1.ServiceTypeClusterIP,
 			[]string{externalIP},
 			v1.ServiceStatus{},
+			false,
 		)
-		endpoints := *newEndpoints("service1", "namespace1")
+		endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
 
 		_, nodeNet, err := net.ParseCIDR(nodeSubnet)
 		Expect(err).NotTo(HaveOccurred())
@@ -812,6 +814,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 				"POSTROUTING": []string{
 					"-s 10.1.1.0/24 -j MASQUERADE",
 				},
+				"OVN-KUBE-SNAT-MGMTPORT": []string{},
 			},
 			"filter": {
 				"FORWARD": []string{
