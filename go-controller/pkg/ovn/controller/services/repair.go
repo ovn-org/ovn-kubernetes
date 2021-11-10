@@ -117,12 +117,14 @@ func (r *repair) runBeforeSync() {
 	// given the introduction of idling loadbalancers
 	acls, err := libovsdbops.FindRejectACLs(r.nbClient)
 	if err != nil {
-		klog.Errorf("Error while finding rejct ACLs error: %v", err)
+		klog.Errorf("Error while finding reject ACLs error: %v", err)
 	}
 
-	err = libovsdbops.RemoveACLsFromAllSwitches(r.nbClient, acls)
-	if err != nil {
-		klog.Errorf("Failed to purge existing reject rules: %v", err)
+	if len(acls) > 0 {
+		err = libovsdbops.RemoveACLsFromAllSwitches(r.nbClient, acls)
+		if err != nil {
+			klog.Errorf("Failed to purge existing reject rules: %v", err)
+		}
 	}
 }
 
