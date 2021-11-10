@@ -139,19 +139,6 @@ func CreateOrUpdateLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovs
 	return ops, nil
 }
 
-func CreateOrUpdateLoadBalancers(nbClient libovsdbclient.Client, lbs ...*nbdb.LoadBalancer) error {
-	ops, err := CreateOrUpdateLoadBalancersOps(nbClient, nil, lbs...)
-	if err != nil {
-		return err
-	}
-
-	_, err = TransactAndCheck(nbClient, ops)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 func RemoveLoadBalancerVipsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lb *nbdb.LoadBalancer, vips ...string) ([]libovsdb.Operation, error) {
 	if ops == nil {
 		ops = []libovsdb.Operation{}
@@ -173,16 +160,6 @@ func RemoveLoadBalancerVipsOps(nbClient libovsdbclient.Client, ops []libovsdb.Op
 	ops = append(ops, op...)
 
 	return ops, nil
-}
-
-func RemoveLoadBalancerVips(nbClient libovsdbclient.Client, lb *nbdb.LoadBalancer, vips ...string) error {
-	ops, err := RemoveLoadBalancerVipsOps(nbClient, nil, lb, vips...)
-	if err != nil {
-		return err
-	}
-
-	_, err = TransactAndCheck(nbClient, ops)
-	return err
 }
 
 func deleteLoadBalancerOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lb *nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
