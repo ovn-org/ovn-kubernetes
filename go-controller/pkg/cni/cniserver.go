@@ -179,7 +179,8 @@ func cniRequestToPodRequest(cr *Request, podLister corev1listers.PodLister, kcli
 
 	req.CNIConf = conf
 	req.timestamp = time.Now()
-	req.ctx, req.cancel = context.WithTimeout(context.Background(), time.Minute)
+	// Match the Kubelet default CRI operation timeout of 2m
+	req.ctx, req.cancel = context.WithTimeout(context.Background(), 2*time.Minute)
 	return req, nil
 }
 
