@@ -19,7 +19,7 @@ import (
 //  	Name string `ovsdb:"name"`
 //  }
 type Mapper struct {
-	Schema ovsdb.DatabaseSchema
+	Schema *ovsdb.DatabaseSchema
 }
 
 // ErrMapper describes an error in an Mapper type
@@ -36,28 +36,53 @@ func (e *ErrMapper) Error() string {
 		e.objType, e.field, e.fieldType, e.fieldTag, e.reason)
 }
 
+// ErrNoTable describes a error in the provided table information
+type ErrNoTable struct {
+	table string
+}
+
+func (e *ErrNoTable) Error() string {
+	return fmt.Sprintf("Table not found: %s", e.table)
+}
+
+func newErrNoTable(table string) error {
+	return &ErrNoTable{
+		table: table,
+	}
+}
+
 // NewMapper returns a new mapper
-func NewMapper(schema ovsdb.DatabaseSchema) Mapper {
-	return Mapper{
+func NewMapper(schema *ovsdb.DatabaseSchema) *Mapper {
+	return &Mapper{
 		Schema: schema,
 	}
 }
 
 // GetRowData transforms a Row to a struct based on its tags
 // The result object must be given as pointer to an object with the right tags
-func (m Mapper) GetRowData(row *ovsdb.Row, result *Info) error {
+func (m Mapper) GetRowData(tableName string, row *ovsdb.Row, result interface{}) error {
 	if row == nil {
 		return nil
 	}
-	return m.getData(*row, result)
+	return m.getData(tableName, *row, result)
 }
 
 // getData transforms a map[string]interface{} containing OvS types (e.g: a ResultRow
 // has this format) to orm struct
 // The result object must be given as pointer to an object with the right tags
-func (m Mapper) getData(ovsData ovsdb.Row, result *Info) error {
-	for name, column := range result.Metadata.TableSchema.Columns {
-		if !result.hasColumn(name) {
+func (m Mapper) getData(tableName string, ovsData ovsdb.Row, result interface{}) error {
+	table := m.Schema.Table(tableName)
+	if table == nil {
+		return newErrNoTable(tableName)
+	}
+
+	mapperInfo, err := NewInfo(table, result)
+	if err != nil {
+		return err
+	}
+
+	for name, column := range table.Columns {
+		if !mapperInfo.hasColumn(name) {
 			// If provided struct does not have a field to hold this value, skip it
 			continue
 		}
@@ -71,10 +96,10 @@ func (m Mapper) getData(ovsData ovsdb.Row, result *Info) error {
 		nativeElem, err := ovsdb.OvsToNative(column, ovsElem)
 		if err != nil {
 			return fmt.Errorf("table %s, column %s: failed to extract native element: %s",
-				result.Metadata.TableName, name, err.Error())
+				tableName, name, err.Error())
 		}
 
-		if err := result.SetField(name, nativeElem); err != nil {
+		if err := mapperInfo.SetField(name, nativeElem); err != nil {
 			return err
 		}
 	}
@@ -84,15 +109,24 @@ func (m Mapper) getData(ovsData ovsdb.Row, result *Info) error {
 // NewRow transforms an orm struct to a map[string] interface{} that can be used as libovsdb.Row
 // By default, default or null values are skipped. This behavior can be modified by specifying
 // a list of fields (pointers to fields in the struct) to be added to the row
-func (m Mapper) NewRow(data *Info, fields ...interface{}) (ovsdb.Row, error) {
+func (m Mapper) NewRow(tableName string, data interface{}, fields ...interface{}) (ovsdb.Row, error) {
+	table := m.Schema.Table(tableName)
+	if table == nil {
+		return nil, newErrNoTable(tableName)
+	}
+	mapperInfo, err := NewInfo(table, data)
+	if err != nil {
+		return nil, err
+	}
+
 	columns := make(map[string]*ovsdb.ColumnSchema)
-	for k, v := range data.Metadata.TableSchema.Columns {
+	for k, v := range table.Columns {
 		columns[k] = v
 	}
 	columns["_uuid"] = &ovsdb.UUIDColumn
 	ovsRow := make(map[string]interface{}, len(columns))
 	for name, column := range columns {
-		nativeElem, err := data.FieldByColumn(name)
+		nativeElem, err := mapperInfo.FieldByColumn(name)
 		if err != nil {
 			// If provided struct does not have a field to hold this value, skip it
 			continue
@@ -102,7 +136,7 @@ func (m Mapper) NewRow(data *Info, fields ...interface{}) (ovsdb.Row, error) {
 		if len(fields) > 0 {
 			found := false
 			for _, f := range fields {
-				col, err := data.ColumnByPtr(f)
+				col, err := mapperInfo.ColumnByPtr(f)
 				if err != nil {
 					return nil, err
 				}
@@ -120,7 +154,7 @@ func (m Mapper) NewRow(data *Info, fields ...interface{}) (ovsdb.Row, error) {
 		}
 		ovsElem, err := ovsdb.NativeToOvs(column, nativeElem)
 		if err != nil {
-			return nil, fmt.Errorf("table %s, column %s: failed to generate ovs element. %s", data.Metadata.TableName, name, err.Error())
+			return nil, fmt.Errorf("table %s, column %s: failed to generate ovs element. %s", tableName, name, err.Error())
 		}
 		ovsRow[name] = ovsElem
 	}
@@ -135,15 +169,25 @@ func (m Mapper) NewRow(data *Info, fields ...interface{}) (ovsdb.Row, error) {
 // object has valid data. The order in which they are traversed matches the order defined
 // in the schema.
 // By `valid data` we mean non-default data.
-func (m Mapper) NewEqualityCondition(data *Info, fields ...interface{}) ([]ovsdb.Condition, error) {
+func (m Mapper) NewEqualityCondition(tableName string, data interface{}, fields ...interface{}) ([]ovsdb.Condition, error) {
 	var conditions []ovsdb.Condition
 	var condIndex [][]string
+
+	table := m.Schema.Table(tableName)
+	if table == nil {
+		return nil, newErrNoTable(tableName)
+	}
+
+	mapperInfo, err := NewInfo(table, data)
+	if err != nil {
+		return nil, err
+	}
 
 	// If index is provided, use it. If not, obtain the valid indexes from the mapper info
 	if len(fields) > 0 {
 		providedIndex := []string{}
 		for i := range fields {
-			if col, err := data.ColumnByPtr(fields[i]); err == nil {
+			if col, err := mapperInfo.ColumnByPtr(fields[i]); err == nil {
 				providedIndex = append(providedIndex, col)
 			} else {
 				return nil, err
@@ -152,7 +196,7 @@ func (m Mapper) NewEqualityCondition(data *Info, fields ...interface{}) ([]ovsdb
 		condIndex = append(condIndex, providedIndex)
 	} else {
 		var err error
-		condIndex, err = data.getValidIndexes()
+		condIndex, err = mapperInfo.getValidIndexes()
 		if err != nil {
 			return nil, err
 		}
@@ -164,12 +208,12 @@ func (m Mapper) NewEqualityCondition(data *Info, fields ...interface{}) ([]ovsdb
 
 	// Pick the first valid index
 	for _, col := range condIndex[0] {
-		field, err := data.FieldByColumn(col)
+		field, err := mapperInfo.FieldByColumn(col)
 		if err != nil {
 			return nil, err
 		}
 
-		column := data.Metadata.TableSchema.Column(col)
+		column := table.Column(col)
 		if column == nil {
 			return nil, fmt.Errorf("column %s not found", col)
 		}
@@ -185,27 +229,47 @@ func (m Mapper) NewEqualityCondition(data *Info, fields ...interface{}) ([]ovsdb
 // EqualFields compares two mapped objects.
 // The indexes to use for comparison are, the _uuid, the table indexes and the columns that correspond
 // to the mapped fields pointed to by 'fields'. They must be pointers to fields on the first mapped element (i.e: one)
-func (m Mapper) EqualFields(one, other *Info, fields ...interface{}) (bool, error) {
+func (m Mapper) EqualFields(tableName string, one, other interface{}, fields ...interface{}) (bool, error) {
 	indexes := []string{}
+
+	table := m.Schema.Table(tableName)
+	if table == nil {
+		return false, newErrNoTable(tableName)
+	}
+
+	info, err := NewInfo(table, one)
+	if err != nil {
+		return false, err
+	}
 	for _, f := range fields {
-		col, err := one.ColumnByPtr(f)
+		col, err := info.ColumnByPtr(f)
 		if err != nil {
 			return false, err
 		}
 		indexes = append(indexes, col)
 	}
-	return m.equalIndexes(one, other, indexes...)
+	return m.equalIndexes(table, one, other, indexes...)
 }
 
 // NewCondition returns a ovsdb.Condition based on the model
-func (m Mapper) NewCondition(data *Info, field interface{}, function ovsdb.ConditionFunction, value interface{}) (*ovsdb.Condition, error) {
-	column, err := data.ColumnByPtr(field)
+func (m Mapper) NewCondition(tableName string, data interface{}, field interface{}, function ovsdb.ConditionFunction, value interface{}) (*ovsdb.Condition, error) {
+	table := m.Schema.Table(tableName)
+	if table == nil {
+		return nil, newErrNoTable(tableName)
+	}
+
+	info, err := NewInfo(table, data)
+	if err != nil {
+		return nil, err
+	}
+
+	column, err := info.ColumnByPtr(field)
 	if err != nil {
 		return nil, err
 	}
 
 	// Check that the condition is valid
-	columnSchema := data.Metadata.TableSchema.Column(column)
+	columnSchema := table.Column(column)
 	if columnSchema == nil {
 		return nil, fmt.Errorf("column %s not found", column)
 	}
@@ -226,13 +290,23 @@ func (m Mapper) NewCondition(data *Info, field interface{}, function ovsdb.Condi
 
 // NewMutation creates a RFC7047 mutation object based on an ORM object and the mutation fields (in native format)
 // It takes care of field validation against the column type
-func (m Mapper) NewMutation(data *Info, column string, mutator ovsdb.Mutator, value interface{}) (*ovsdb.Mutation, error) {
+func (m Mapper) NewMutation(tableName string, data interface{}, column string, mutator ovsdb.Mutator, value interface{}) (*ovsdb.Mutation, error) {
+	table := m.Schema.Table(tableName)
+	if table == nil {
+		return nil, newErrNoTable(tableName)
+	}
+
+	mapperInfo, err := NewInfo(table, data)
+	if err != nil {
+		return nil, err
+	}
+
 	// Check the column exists in the object
-	if !data.hasColumn(column) {
+	if !mapperInfo.hasColumn(column) {
 		return nil, fmt.Errorf("mutation contains column %s that does not exist in object %v", column, data)
 	}
 	// Check that the mutation is valid
-	columnSchema := data.Metadata.TableSchema.Column(column)
+	columnSchema := table.Column(column)
 	if columnSchema == nil {
 		return nil, fmt.Errorf("column %s not found", column)
 	}
@@ -241,11 +315,7 @@ func (m Mapper) NewMutation(data *Info, column string, mutator ovsdb.Mutator, va
 	}
 
 	var ovsValue interface{}
-	var err error
-	// Usually a mutation value is of the same type of the value being mutated
-	// except for delete mutation of maps where it can also be a list of same type of
-	// keys (rfc7047 5.1). Handle this special case here.
-	if mutator == "delete" && columnSchema.Type == ovsdb.TypeMap && reflect.TypeOf(value).Kind() != reflect.Map {
+	if mutator == "delete" && columnSchema.Type == ovsdb.TypeMap {
 		// It's OK to cast the value to a list of elements because validation has passed
 		ovsSet, err := ovsdb.NewOvsSet(value)
 		if err != nil {
@@ -268,15 +338,24 @@ func (m Mapper) NewMutation(data *Info, column string, mutator ovsdb.Mutator, va
 // For any of the indexes defined in the Table Schema, the values all of its columns are simultaneously equal
 // (as per RFC7047)
 // The values of all of the optional indexes passed as variadic parameter to this function are equal.
-func (m Mapper) equalIndexes(one, other *Info, indexes ...string) (bool, error) {
+func (m Mapper) equalIndexes(table *ovsdb.TableSchema, one, other interface{}, indexes ...string) (bool, error) {
 	match := false
 
-	oneIndexes, err := one.getValidIndexes()
+	oneMapperInfo, err := NewInfo(table, one)
+	if err != nil {
+		return false, err
+	}
+	otherMapperInfo, err := NewInfo(table, other)
 	if err != nil {
 		return false, err
 	}
 
-	otherIndexes, err := other.getValidIndexes()
+	oneIndexes, err := oneMapperInfo.getValidIndexes()
+	if err != nil {
+		return false, err
+	}
+
+	otherIndexes, err := otherMapperInfo.getValidIndexes()
 	if err != nil {
 		return false, err
 	}
@@ -289,14 +368,14 @@ func (m Mapper) equalIndexes(one, other *Info, indexes ...string) (bool, error) 
 			if reflect.DeepEqual(ridx, lidx) {
 				// All columns in an index must be simultaneously equal
 				for _, col := range lidx {
-					if !one.hasColumn(col) || !other.hasColumn(col) {
+					if !oneMapperInfo.hasColumn(col) || !otherMapperInfo.hasColumn(col) {
 						break
 					}
-					lfield, err := one.FieldByColumn(col)
+					lfield, err := oneMapperInfo.FieldByColumn(col)
 					if err != nil {
 						return false, err
 					}
-					rfield, err := other.FieldByColumn(col)
+					rfield, err := otherMapperInfo.FieldByColumn(col)
 					if err != nil {
 						return false, err
 					}
@@ -319,18 +398,23 @@ func (m Mapper) equalIndexes(one, other *Info, indexes ...string) (bool, error) 
 // NewMonitorRequest returns a monitor request for the provided tableName
 // If fields is provided, the request will be constrained to the provided columns
 // If no fields are provided, all columns will be used
-func (m *Mapper) NewMonitorRequest(data *Info, fields []interface{}) (*ovsdb.MonitorRequest, error) {
+func (m *Mapper) NewMonitorRequest(tableName string, data interface{}, fields []interface{}) (*ovsdb.MonitorRequest, error) {
 	var columns []string
+	schema := m.Schema.Tables[tableName]
+	info, err := NewInfo(&schema, data)
+	if err != nil {
+		return nil, err
+	}
 	if len(fields) > 0 {
 		for _, f := range fields {
-			column, err := data.ColumnByPtr(f)
+			column, err := info.ColumnByPtr(f)
 			if err != nil {
 				return nil, err
 			}
 			columns = append(columns, column)
 		}
 	} else {
-		for c := range data.Metadata.TableSchema.Columns {
+		for c := range info.table.Columns {
 			columns = append(columns, c)
 		}
 	}

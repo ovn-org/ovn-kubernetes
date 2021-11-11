@@ -79,7 +79,7 @@ COPY ./iptables-scripts/ip6tables-restore /usr/sbin/
 LABEL io.k8s.display-name="ovn kubernetes" \
       io.k8s.description="This is a component of OpenShift Container Platform that provides an overlay network using ovn." \
       io.openshift.tags="openshift" \
-      maintainer="Tim Rozet <trozet@redhat.com>"
+      maintainer="Phil Cameron <pcameron@redhat.com>"
 
 WORKDIR /root
 ENTRYPOINT /root/ovnkube.sh

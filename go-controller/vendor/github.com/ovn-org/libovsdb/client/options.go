@@ -3,11 +3,6 @@ package client
 import (
 	"crypto/tls"
 	"net/url"
-	"time"
-
-	"github.com/cenkalti/backoff/v4"
-	"github.com/go-logr/logr"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -17,15 +12,8 @@ const (
 )
 
 type options struct {
-	endpoints             []string
-	tlsConfig             *tls.Config
-	reconnect             bool
-	leaderOnly            bool
-	timeout               time.Duration
-	backoff               backoff.BackOff
-	logger                *logr.Logger
-	registry              prometheus.Registerer
-	shouldRegisterMetrics bool // in case metrics are changed after-the-fact
+	endpoints []string
+	tlsConfig *tls.Config
 }
 
 type Option func(o *options) error
@@ -81,49 +69,6 @@ func WithEndpoint(endpoint string) Option {
 			}
 		}
 		o.endpoints = append(o.endpoints, endpoint)
-		return nil
-	}
-}
-
-// WithLeaderOnly tells the client to treat endpoints that are clustered
-// and not the leader as down.
-func WithLeaderOnly(leaderOnly bool) Option {
-	return func(o *options) error {
-		o.leaderOnly = leaderOnly
-		return nil
-	}
-}
-
-// WithReconnect tells the client to automatically reconnect when
-// disconnected. The timeout is used to construct the context on
-// each call to Connect, while backoff dictates the backoff
-// algorithm to use. Using WithReconnect implies that
-// requested transactions will block until the client has fully reconnected,
-// rather than immediately returning an error if there is no connection.
-func WithReconnect(timeout time.Duration, backoff backoff.BackOff) Option {
-	return func(o *options) error {
-		o.reconnect = true
-		o.timeout = timeout
-		o.backoff = backoff
-		return nil
-	}
-}
-
-// WithLogger allows setting a specific log sink. Otherwise, the default
-// go log package is used.
-func WithLogger(l *logr.Logger) Option {
-	return func(o *options) error {
-		o.logger = l
-		return nil
-	}
-}
-
-// WithMetricsRegistry allows the user to specify a Prometheus metrics registry.
-// If supplied, the metrics as defined in metrics.go will be registered.
-func WithMetricsRegistry(r prometheus.Registerer) Option {
-	return func(o *options) error {
-		o.registry = r
-		o.shouldRegisterMetrics = (r != nil)
 		return nil
 	}
 }

@@ -61,120 +61,6 @@ type managementPortTestConfig struct {
 	expectedGatewayIP        string
 }
 
-func (mptc *managementPortTestConfig) GetNodeSubnetCIDR() *net.IPNet {
-	return ovntest.MustParseIPNet(mptc.nodeSubnet)
-}
-
-func (mptc *managementPortTestConfig) GetMgtPortAddr() *netlink.Addr {
-	mpCIDR := &net.IPNet{
-		IP:   ovntest.MustParseIP(mptc.expectedManagementPortIP),
-		Mask: mptc.GetNodeSubnetCIDR().Mask,
-	}
-	mgtPortAddrs, err := netlink.ParseAddr(mpCIDR.String())
-	Expect(err).NotTo(HaveOccurred())
-	return mgtPortAddrs
-}
-
-// setMgmtPortTestIptables sets up fake IPV4 and IPV6 IPTables helpers with needed chains for management port
-func setMgmtPortTestIptables(configs []managementPortTestConfig) (util.IPTablesHelper, util.IPTablesHelper) {
-	var err error
-	iptV4, iptV6 := util.SetFakeIPTablesHelpers()
-	for _, cfg := range configs {
-		if cfg.protocol == iptables.ProtocolIPv4 {
-			err = iptV4.NewChain("nat", "POSTROUTING")
-			Expect(err).NotTo(HaveOccurred())
-			err = iptV4.NewChain("nat", "OVN-KUBE-SNAT-MGMTPORT")
-			Expect(err).NotTo(HaveOccurred())
-		} else {
-			err = iptV6.NewChain("nat", "POSTROUTING")
-			Expect(err).NotTo(HaveOccurred())
-			err = iptV6.NewChain("nat", "OVN-KUBE-SNAT-MGMTPORT")
-			Expect(err).NotTo(HaveOccurred())
-		}
-	}
-	return iptV4, iptV6
-}
-
-// checkMgmtPortTestIptables validates Iptables rules for management port
-func checkMgmtPortTestIptables(configs []managementPortTestConfig, mgmtPortName string,
-	fakeIpv4, fakeIpv6 *util.FakeIPTables) {
-	var err error
-	for _, cfg := range configs {
-		expectedTables := map[string]util.FakeTable{
-			"nat": {
-				"POSTROUTING": []string{
-					"-o " + mgmtPortName + " -j OVN-KUBE-SNAT-MGMTPORT",
-				},
-				"OVN-KUBE-SNAT-MGMTPORT": []string{
-					"-o " + mgmtPortName + " -j SNAT --to-source " + cfg.expectedManagementPortIP + " -m comment --comment OVN SNAT to Management Port",
-				},
-			},
-		}
-		if cfg.protocol == iptables.ProtocolIPv4 {
-			err = fakeIpv4.MatchState(expectedTables)
-			Expect(err).NotTo(HaveOccurred())
-		} else {
-			err = fakeIpv6.MatchState(expectedTables)
-			Expect(err).NotTo(HaveOccurred())
-		}
-	}
-}
-
-// checkMgmtTestPortIpsAndRoutes checks IPs and Routes of the management port
-func checkMgmtTestPortIpsAndRoutes(configs []managementPortTestConfig, mgmtPortName string,
-	mgtPortAddrs []*netlink.Addr, expectedLRPMAC string) {
-	mgmtPortLink, err := netlink.LinkByName(mgmtPortName)
-	Expect(err).NotTo(HaveOccurred())
-	for i, cfg := range configs {
-		// Check whether IP has been added
-		addrs, err := netlink.AddrList(mgmtPortLink, cfg.family)
-		Expect(err).NotTo(HaveOccurred())
-		var foundAddr bool
-		for _, a := range addrs {
-			if a.IP.Equal(mgtPortAddrs[i].IP) && bytes.Equal(a.Mask, mgtPortAddrs[i].Mask) {
-				foundAddr = true
-				break
-			}
-		}
-		Expect(foundAddr).To(BeTrue(), "did not find expected management port IP %s", mgtPortAddrs[i].String())
-
-		// Check whether the routes have been added
-		j := 0
-		gatewayIP := ovntest.MustParseIP(cfg.expectedGatewayIP)
-		subnets := []string{cfg.clusterCIDR, cfg.serviceCIDR}
-		for _, subnet := range subnets {
-			foundRoute := false
-			dstIPnet := ovntest.MustParseIPNet(subnet)
-			route := &netlink.Route{Dst: dstIPnet}
-			filterMask := netlink.RT_FILTER_DST
-			routes, err := netlink.RouteListFiltered(cfg.family, route, filterMask)
-			Expect(err).NotTo(HaveOccurred())
-			for _, r := range routes {
-				if r.Gw.Equal(gatewayIP) && r.LinkIndex == mgmtPortLink.Attrs().Index {
-					foundRoute = true
-					break
-				}
-			}
-			Expect(foundRoute).To(BeTrue(), "did not find expected route to %s", subnet)
-			foundRoute = false
-			j++
-		}
-		Expect(j).To(Equal(2))
-
-		// Check whether router IP has been added in the arp entry for mgmt port
-		neighbours, err := netlink.NeighList(mgmtPortLink.Attrs().Index, cfg.family)
-		Expect(err).NotTo(HaveOccurred())
-		var foundNeighbour bool
-		for _, neighbour := range neighbours {
-			if neighbour.IP.Equal(gatewayIP) && (neighbour.HardwareAddr.String() == expectedLRPMAC) {
-				foundNeighbour = true
-				break
-			}
-		}
-		Expect(foundNeighbour).To(BeTrue())
-	}
-}
-
 func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.NetNS,
 	configs []managementPortTestConfig, expectedLRPMAC string) {
 	const (
@@ -212,86 +98,27 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	nodeSubnetCIDRs := make([]*net.IPNet, len(configs))
 	mgtPortAddrs := make([]*netlink.Addr, len(configs))
 
+	iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 	for i, cfg := range configs {
-		nodeSubnetCIDRs[i] = cfg.GetNodeSubnetCIDR()
-		mgtPortAddrs[i] = cfg.GetMgtPortAddr()
-	}
-
-	iptV4, iptV6 := setMgmtPortTestIptables(configs)
-
-	existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
-		Name: nodeName,
-	}}
-
-	fakeClient := fake.NewSimpleClientset(&v1.NodeList{
-		Items: []v1.Node{existingNode},
-	})
-
-	_, err = config.InitConfig(ctx, fexec, nil)
-	Expect(err).NotTo(HaveOccurred())
-
-	nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressipv1fake.NewSimpleClientset(), &egressfirewallfake.Clientset{}}, existingNode.Name)
-	waiter := newStartupWaiter()
-
-	err = testNS.Do(func(ns.NetNS) error {
-		defer GinkgoRecover()
-
-		mgmtPort := NewManagementPort(nodeName, nodeSubnetCIDRs)
-		_, err = mgmtPort.Create(nodeAnnotator, waiter)
+		nodeSubnetCIDRs[i] = ovntest.MustParseIPNet(cfg.nodeSubnet)
+		mpCIDR := &net.IPNet{
+			IP:   ovntest.MustParseIP(cfg.expectedManagementPortIP),
+			Mask: nodeSubnetCIDRs[i].Mask,
+		}
+		mgtPortAddrs[i], err = netlink.ParseAddr(mpCIDR.String())
 		Expect(err).NotTo(HaveOccurred())
-		checkMgmtTestPortIpsAndRoutes(configs, mgtPort, mgtPortAddrs, expectedLRPMAC)
-		return nil
-	})
-	Expect(err).NotTo(HaveOccurred())
 
-	err = nodeAnnotator.Run()
-	Expect(err).NotTo(HaveOccurred())
-	err = waiter.Wait()
-	Expect(err).NotTo(HaveOccurred())
-
-	checkMgmtPortTestIptables(configs, mgtPort, iptV4.(*util.FakeIPTables), iptV6.(*util.FakeIPTables))
-
-	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
-	Expect(err).NotTo(HaveOccurred())
-
-	macFromAnnotation, err := util.ParseNodeManagementPortMACAddress(updatedNode)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(macFromAnnotation.String()).To(Equal(mgtPortMAC))
-
-	Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
-}
-
-func testManagementPortSmartNIC(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.NetNS,
-	configs []managementPortTestConfig) {
-	const (
-		nodeName   string = "node1"
-		mgtPortMAC string = "0a:58:0a:01:01:02"
-		mgtPort    string = types.K8sMgmtIntfName
-		mtu        int    = 1400
-	)
-
-	// OVS cmd setup
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    fmt.Sprintf("ovs-vsctl --timeout=15 -- --may-exist add-port br-int %s -- set interface %s external-ids:iface-id=%s", mgtPort, mgtPort, "k8s-"+nodeName),
-		Output: "",
-	})
-
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface " + mgtPort + " ofport",
-		Output: "1",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-ofctl --no-stats --no-names dump-flows br-int table=65,out_port=1",
-		Output: " table=65, priority=100,reg15=0x2,metadata=0x2 actions=output:1",
-	})
-
-	err := util.SetExec(fexec)
-	Expect(err).NotTo(HaveOccurred())
-
-	nodeSubnetCIDRs := make([]*net.IPNet, len(configs))
-
-	for i, cfg := range configs {
-		nodeSubnetCIDRs[i] = cfg.GetNodeSubnetCIDR()
+		if cfg.protocol == iptables.ProtocolIPv4 {
+			err = iptV4.NewChain("nat", "POSTROUTING")
+			Expect(err).NotTo(HaveOccurred())
+			err = iptV4.NewChain("nat", "OVN-KUBE-SNAT-MGMTPORT")
+			Expect(err).NotTo(HaveOccurred())
+		} else {
+			err = iptV6.NewChain("nat", "POSTROUTING")
+			Expect(err).NotTo(HaveOccurred())
+			err = iptV6.NewChain("nat", "OVN-KUBE-SNAT-MGMTPORT")
+			Expect(err).NotTo(HaveOccurred())
+		}
 	}
 
 	existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
@@ -305,20 +132,66 @@ func testManagementPortSmartNIC(ctx *cli.Context, fexec *ovntest.FakeExec, testN
 	_, err = config.InitConfig(ctx, fexec, nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressipv1fake.NewSimpleClientset(), &egressfirewallfake.Clientset{}}, existingNode.Name)
+	nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressipv1fake.NewSimpleClientset(), &egressfirewallfake.Clientset{}}, &existingNode)
 	waiter := newStartupWaiter()
 
 	err = testNS.Do(func(ns.NetNS) error {
 		defer GinkgoRecover()
 
-		mgmtPort := NewManagementPort(nodeName, nodeSubnetCIDRs)
-		_, err = mgmtPort.Create(nodeAnnotator, waiter)
+		_, err = createManagementPort(nodeName, nodeSubnetCIDRs, nodeAnnotator, waiter)
 		Expect(err).NotTo(HaveOccurred())
-		// make sure interface was renamed and mtu was set
 		l, err := netlink.LinkByName(mgtPort)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(l.Attrs().MTU).To(Equal(mtu))
-		Expect(l.Attrs().Flags & net.FlagUp).To(Equal(net.FlagUp))
+
+		for i, cfg := range configs {
+			// Check whether IP has been added
+			addrs, err := netlink.AddrList(l, cfg.family)
+			Expect(err).NotTo(HaveOccurred())
+			var foundAddr bool
+			for _, a := range addrs {
+				if a.IP.Equal(mgtPortAddrs[i].IP) && bytes.Equal(a.Mask, mgtPortAddrs[i].Mask) {
+					foundAddr = true
+					break
+				}
+			}
+			Expect(foundAddr).To(BeTrue(), "did not find expected management port IP %s", mgtPortAddrs[i].String())
+
+			// Check whether the routes have been added
+			j := 0
+			gatewayIP := ovntest.MustParseIP(cfg.expectedGatewayIP)
+			subnets := []string{cfg.clusterCIDR, cfg.serviceCIDR}
+			for _, subnet := range subnets {
+				foundRoute := false
+				dstIPnet := ovntest.MustParseIPNet(subnet)
+				route := &netlink.Route{Dst: dstIPnet}
+				filterMask := netlink.RT_FILTER_DST
+				routes, err := netlink.RouteListFiltered(cfg.family, route, filterMask)
+				Expect(err).NotTo(HaveOccurred())
+				for _, r := range routes {
+					if r.Gw.Equal(gatewayIP) && r.LinkIndex == l.Attrs().Index {
+						foundRoute = true
+						break
+					}
+				}
+				Expect(foundRoute).To(BeTrue(), "did not find expected route to %s", subnet)
+				foundRoute = false
+				j++
+			}
+			Expect(j).To(Equal(2))
+
+			// Check whether router IP has been added in the arp entry for mgmt port
+			neighbours, err := netlink.NeighList(l.Attrs().Index, cfg.family)
+			Expect(err).NotTo(HaveOccurred())
+			var foundNeighbour bool
+			for _, neighbour := range neighbours {
+				if neighbour.IP.Equal(gatewayIP) && (neighbour.HardwareAddr.String() == expectedLRPMAC) {
+					foundNeighbour = true
+					break
+				}
+			}
+			Expect(foundNeighbour).To(BeTrue())
+		}
+
 		return nil
 	})
 	Expect(err).NotTo(HaveOccurred())
@@ -328,59 +201,34 @@ func testManagementPortSmartNIC(ctx *cli.Context, fexec *ovntest.FakeExec, testN
 	err = waiter.Wait()
 	Expect(err).NotTo(HaveOccurred())
 
+	for _, cfg := range configs {
+		expectedTables := map[string]util.FakeTable{
+			"nat": {
+				"POSTROUTING": []string{
+					"-o " + mgtPort + " -j OVN-KUBE-SNAT-MGMTPORT",
+				},
+				"OVN-KUBE-SNAT-MGMTPORT": []string{
+					"-o " + mgtPort + " -j SNAT --to-source " + cfg.expectedManagementPortIP + " -m comment --comment OVN SNAT to Management Port",
+				},
+			},
+		}
+		if cfg.protocol == iptables.ProtocolIPv4 {
+			f := iptV4.(*util.FakeIPTables)
+			err = f.MatchState(expectedTables)
+			Expect(err).NotTo(HaveOccurred())
+		} else {
+			f := iptV6.(*util.FakeIPTables)
+			err = f.MatchState(expectedTables)
+			Expect(err).NotTo(HaveOccurred())
+		}
+	}
+
 	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred())
 
 	macFromAnnotation, err := util.ParseNodeManagementPortMACAddress(updatedNode)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(macFromAnnotation.String()).To(Equal(mgtPortMAC))
-
-	Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
-}
-
-func testManagementPortSmartNICHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.NetNS,
-	configs []managementPortTestConfig, expectedLRPMAC string) {
-	const (
-		nodeName   string = "node1"
-		mgtPortMAC string = "0a:58:0a:01:01:02"
-		mgtPort    string = types.K8sMgmtIntfName
-		mtu        int    = 1400
-	)
-
-	err := util.SetExec(fexec)
-	Expect(err).NotTo(HaveOccurred())
-
-	nodeSubnetCIDRs := make([]*net.IPNet, len(configs))
-	mgtPortAddrs := make([]*netlink.Addr, len(configs))
-
-	for i, cfg := range configs {
-		nodeSubnetCIDRs[i] = cfg.GetNodeSubnetCIDR()
-		mgtPortAddrs[i] = cfg.GetMgtPortAddr()
-	}
-
-	iptV4, iptV6 := setMgmtPortTestIptables(configs)
-
-	_, err = config.InitConfig(ctx, fexec, nil)
-	Expect(err).NotTo(HaveOccurred())
-
-	err = testNS.Do(func(ns.NetNS) error {
-		defer GinkgoRecover()
-
-		mgmtPort := NewManagementPort(nodeName, nodeSubnetCIDRs)
-		_, err = mgmtPort.Create(nil, nil)
-		Expect(err).NotTo(HaveOccurred())
-		checkMgmtTestPortIpsAndRoutes(configs, mgtPort, mgtPortAddrs, expectedLRPMAC)
-		// check mgmt port MAC, mtu and link state
-		l, err := netlink.LinkByName(mgtPort)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(l.Attrs().HardwareAddr.String()).To(Equal(mgtPortMAC))
-		Expect(l.Attrs().MTU).To(Equal(mtu))
-		Expect(l.Attrs().Flags & net.FlagUp).To(Equal(net.FlagUp))
-		return nil
-	})
-	Expect(err).NotTo(HaveOccurred())
-
-	checkMgmtPortTestIptables(configs, mgtPort, iptV4.(*util.FakeIPTables), iptV6.(*util.FakeIPTables))
 
 	Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 }
@@ -405,8 +253,16 @@ var _ = Describe("Management Port Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
+		// Set up a fake k8sMgmt interface
 		testNS, err = testutils.NewNS()
 		Expect(err).NotTo(HaveOccurred())
+		err = testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+			ovntest.AddLink(types.K8sMgmtIntfName)
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
 		fexec = ovntest.NewFakeExec()
 	})
 
@@ -430,193 +286,94 @@ var _ = Describe("Management Port Operations", func() {
 		v6serviceCIDR string = "fc95::/64"
 		// generated from util.IPAddrToHWAddr(net.ParseIP("fda6:0:0:1::1")).String()
 		v6lrpMAC string = "0a:58:23:5a:40:f1"
-
-		mgmtPortNetdev string = "pf0vf0"
 	)
 
-	Context("Management Port, ovnkube node mode full", func() {
+	It("sets up the management port for IPv4 clusters", func() {
+		app.Action = func(ctx *cli.Context) error {
+			testManagementPort(ctx, fexec, testNS,
+				[]managementPortTestConfig{
+					{
+						family:   netlink.FAMILY_V4,
+						protocol: iptables.ProtocolIPv4,
 
-		BeforeEach(func() {
-			var err error
-			// Set up a fake k8sMgmt interface
-			err = testNS.Do(func(ns.NetNS) error {
-				defer GinkgoRecover()
-				ovntest.AddLink(types.K8sMgmtIntfName)
-				return nil
-			})
-			Expect(err).NotTo(HaveOccurred())
+						clusterCIDR: v4clusterCIDR,
+						serviceCIDR: v4serviceCIDR,
+						nodeSubnet:  v4nodeSubnet,
+
+						expectedManagementPortIP: v4mgtPortIP,
+						expectedGatewayIP:        v4gwIP,
+					},
+				}, v4lrpMAC)
+			return nil
+		}
+		err := app.Run([]string{
+			app.Name,
+			"--cluster-subnets=" + v4clusterCIDR,
+			"--k8s-service-cidr=" + v4serviceCIDR,
 		})
-
-		It("sets up the management port for IPv4 clusters", func() {
-			app.Action = func(ctx *cli.Context) error {
-				testManagementPort(ctx, fexec, testNS,
-					[]managementPortTestConfig{
-						{
-							family:   netlink.FAMILY_V4,
-							protocol: iptables.ProtocolIPv4,
-
-							clusterCIDR: v4clusterCIDR,
-							serviceCIDR: v4serviceCIDR,
-							nodeSubnet:  v4nodeSubnet,
-
-							expectedManagementPortIP: v4mgtPortIP,
-							expectedGatewayIP:        v4gwIP,
-						},
-					}, v4lrpMAC)
-				return nil
-			}
-			err := app.Run([]string{
-				app.Name,
-				"--cluster-subnets=" + v4clusterCIDR,
-				"--k8s-service-cidr=" + v4serviceCIDR,
-			})
-			Expect(err).NotTo(HaveOccurred())
-		})
-
-		It("sets up the management port for IPv6 clusters", func() {
-			app.Action = func(ctx *cli.Context) error {
-				testManagementPort(ctx, fexec, testNS,
-					[]managementPortTestConfig{
-						{
-							family:   netlink.FAMILY_V6,
-							protocol: iptables.ProtocolIPv6,
-
-							clusterCIDR: v6clusterCIDR,
-							serviceCIDR: v6serviceCIDR,
-							nodeSubnet:  v6nodeSubnet,
-
-							expectedManagementPortIP: v6mgtPortIP,
-							expectedGatewayIP:        v6gwIP,
-						},
-					}, v6lrpMAC)
-				return nil
-			}
-			err := app.Run([]string{
-				app.Name,
-				"--cluster-subnets=" + v6clusterCIDR,
-				"--k8s-service-cidr=" + v6serviceCIDR,
-			})
-			Expect(err).NotTo(HaveOccurred())
-		})
-
-		It("sets up the management port for dual-stack clusters", func() {
-			app.Action = func(ctx *cli.Context) error {
-				testManagementPort(ctx, fexec, testNS,
-					[]managementPortTestConfig{
-						{
-							family:   netlink.FAMILY_V4,
-							protocol: iptables.ProtocolIPv4,
-
-							clusterCIDR: v4clusterCIDR,
-							serviceCIDR: v4serviceCIDR,
-							nodeSubnet:  v4nodeSubnet,
-
-							expectedManagementPortIP: v4mgtPortIP,
-							expectedGatewayIP:        v4gwIP,
-						},
-						{
-							family:   netlink.FAMILY_V6,
-							protocol: iptables.ProtocolIPv6,
-
-							clusterCIDR: v6clusterCIDR,
-							serviceCIDR: v6serviceCIDR,
-							nodeSubnet:  v6nodeSubnet,
-
-							expectedManagementPortIP: v6mgtPortIP,
-							expectedGatewayIP:        v6gwIP,
-						},
-					}, v4lrpMAC)
-				return nil
-			}
-			err := app.Run([]string{
-				app.Name,
-				"--cluster-subnets=" + v4clusterCIDR + "," + v6clusterCIDR,
-				"--k8s-service-cidr=" + v4serviceCIDR + "," + v6serviceCIDR,
-			})
-			Expect(err).NotTo(HaveOccurred())
-		})
+		Expect(err).NotTo(HaveOccurred())
 	})
 
-	Context("Management Port, ovnkube node mode smart-nic", func() {
+	It("sets up the management port for IPv6 clusters", func() {
+		app.Action = func(ctx *cli.Context) error {
+			testManagementPort(ctx, fexec, testNS,
+				[]managementPortTestConfig{
+					{
+						family:   netlink.FAMILY_V6,
+						protocol: iptables.ProtocolIPv6,
 
-		BeforeEach(func() {
-			var err error
-			// Set up a fake k8sMgmt interface
-			err = testNS.Do(func(ns.NetNS) error {
-				defer GinkgoRecover()
-				ovntest.AddLink(mgmtPortNetdev)
-				return nil
-			})
-			Expect(err).NotTo(HaveOccurred())
+						clusterCIDR: v6clusterCIDR,
+						serviceCIDR: v6serviceCIDR,
+						nodeSubnet:  v6nodeSubnet,
+
+						expectedManagementPortIP: v6mgtPortIP,
+						expectedGatewayIP:        v6gwIP,
+					},
+				}, v6lrpMAC)
+			return nil
+		}
+		err := app.Run([]string{
+			app.Name,
+			"--cluster-subnets=" + v6clusterCIDR,
+			"--k8s-service-cidr=" + v6serviceCIDR,
 		})
-
-		It("sets up the management port for IPv4 smart-nic clusters", func() {
-			app.Action = func(ctx *cli.Context) error {
-				testManagementPortSmartNIC(ctx, fexec, testNS,
-					[]managementPortTestConfig{
-						{
-							family:   netlink.FAMILY_V4,
-							protocol: iptables.ProtocolIPv4,
-
-							clusterCIDR: v4clusterCIDR,
-							serviceCIDR: v4serviceCIDR,
-							nodeSubnet:  v4nodeSubnet,
-
-							expectedManagementPortIP: v4mgtPortIP,
-							expectedGatewayIP:        v4gwIP,
-						},
-					})
-				return nil
-			}
-			err := app.Run([]string{
-				app.Name,
-				"--cluster-subnets=" + v4clusterCIDR,
-				"--k8s-service-cidr=" + v4serviceCIDR,
-				"--ovnkube-node-mode=" + types.NodeModeSmartNIC,
-				"--ovnkube-node-mgmt-port-netdev=" + mgmtPortNetdev,
-			})
-			Expect(err).NotTo(HaveOccurred())
-		})
+		Expect(err).NotTo(HaveOccurred())
 	})
 
-	Context("Management Port, ovnkube node mode smart-nic-host", func() {
-		BeforeEach(func() {
-			var err error
-			// Set up a fake k8sMgmt interface
-			err = testNS.Do(func(ns.NetNS) error {
-				defer GinkgoRecover()
-				ovntest.AddLink(mgmtPortNetdev)
-				return nil
-			})
-			Expect(err).NotTo(HaveOccurred())
+	It("sets up the management port for dual-stack clusters", func() {
+		app.Action = func(ctx *cli.Context) error {
+			testManagementPort(ctx, fexec, testNS,
+				[]managementPortTestConfig{
+					{
+						family:   netlink.FAMILY_V4,
+						protocol: iptables.ProtocolIPv4,
+
+						clusterCIDR: v4clusterCIDR,
+						serviceCIDR: v4serviceCIDR,
+						nodeSubnet:  v4nodeSubnet,
+
+						expectedManagementPortIP: v4mgtPortIP,
+						expectedGatewayIP:        v4gwIP,
+					},
+					{
+						family:   netlink.FAMILY_V6,
+						protocol: iptables.ProtocolIPv6,
+
+						clusterCIDR: v6clusterCIDR,
+						serviceCIDR: v6serviceCIDR,
+						nodeSubnet:  v6nodeSubnet,
+
+						expectedManagementPortIP: v6mgtPortIP,
+						expectedGatewayIP:        v6gwIP,
+					},
+				}, v4lrpMAC)
+			return nil
+		}
+		err := app.Run([]string{
+			app.Name,
+			"--cluster-subnets=" + v4clusterCIDR + "," + v6clusterCIDR,
+			"--k8s-service-cidr=" + v4serviceCIDR + "," + v6serviceCIDR,
 		})
-
-		It("sets up the management port for IPv4 smart-nic-host clusters", func() {
-			app.Action = func(ctx *cli.Context) error {
-				testManagementPortSmartNICHost(ctx, fexec, testNS,
-					[]managementPortTestConfig{
-						{
-							family:   netlink.FAMILY_V4,
-							protocol: iptables.ProtocolIPv4,
-
-							clusterCIDR: v4clusterCIDR,
-							serviceCIDR: v4serviceCIDR,
-							nodeSubnet:  v4nodeSubnet,
-
-							expectedManagementPortIP: v4mgtPortIP,
-							expectedGatewayIP:        v4gwIP,
-						},
-					}, v4lrpMAC)
-				return nil
-			}
-			err := app.Run([]string{
-				app.Name,
-				"--cluster-subnets=" + v4clusterCIDR,
-				"--k8s-service-cidr=" + v4serviceCIDR,
-				"--ovnkube-node-mode=" + types.NodeModeSmartNICHost,
-				"--ovnkube-node-mgmt-port-netdev=" + mgmtPortNetdev,
-			})
-			Expect(err).NotTo(HaveOccurred())
-		})
+		Expect(err).NotTo(HaveOccurred())
 	})
 })

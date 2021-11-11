@@ -401,28 +401,6 @@ func TestLinkRoutesDel(t *testing.T) {
 					OnCallMethodArgType: []string{"*mocks.Link", "int"},
 					RetArgList: []interface{}{
 						[]netlink.Route{
-							{Dst: nil},
-							{Dst: ovntest.MustParseIPNet("192.168.1.0/24")},
-						},
-						nil,
-					},
-				},
-				{
-					OnCallMethodName: "RouteDel", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil},
-				},
-			},
-		},
-		{
-			desc:         "default route delete succeeds",
-			inputLink:    mockLink,
-			inputSubnets: []*net.IPNet{nil},
-			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
-				{
-					OnCallMethodName:    "RouteList",
-					OnCallMethodArgType: []string{"*mocks.Link", "int"},
-					RetArgList: []interface{}{
-						[]netlink.Route{
-							{Dst: nil},
 							{Dst: ovntest.MustParseIPNet("192.168.1.0/24")},
 						},
 						nil,
@@ -993,84 +971,48 @@ func TestGetIPv6OnSubnet(t *testing.T) {
 	}
 }
 
-func TestGetMTUOfInterfaceWithAddress(t *testing.T) {
-	var mockNetLinkOps *mocks.NetLinkOps
+func TestGetNetworkInterfaceMTU(t *testing.T) {
+	mockNetLinkOps := new(mocks.NetLinkOps)
+	netLinkOps = mockNetLinkOps
 
-	existingInterfaceIndex := 3
-	nonExistingInterfaceIndex := 4
+	existingInterfaceName := "breth0"
 	existingInterfaceMTU := 1500
-	existingInterfaceName := "vtep0"
-	exisitngMockLink := new(netlink_mocks.Link)
+	existingLinkMock := new(netlink_mocks.Link)
+	existingLinkMock.On("Attrs").Return(&netlink.LinkAttrs{MTU: existingInterfaceMTU})
+
+	nonExistingInterfaceName := "non-existing-interface"
+	mockNetLinkOps.On("LinkByName", existingInterfaceName).Return(existingLinkMock, nil)
+	mockNetLinkOps.On("LinkByName", nonExistingInterfaceName).Return(nil, fmt.Errorf("interface does not exist"))
 
 	tests := []struct {
-		desc                    string
-		interfaceAddress        net.IP
-		wantMTU                 int
-		wantError               bool
-		netlinkOpsCallbackFunc  func()
-		onRetArgsLinkIfaceOpers []ovntest.TestifyMockHelper
+		desc          string
+		interfaceName string
+		wantMTU       int
+		wantError     bool
 	}{
 		{
-			desc:             "Should return error on AddrList failure",
-			interfaceAddress: ovntest.MustParseIP("10.1.0.40"),
-			wantMTU:          0,
-			wantError:        true,
-			netlinkOpsCallbackFunc: func() {
-				mockNetLinkOps.On("AddrList", nil, netlink.FAMILY_V4).Return([]netlink.Addr{}, fmt.Errorf("mock error"))
-			},
+			desc:          "Should return MTU of existing interface",
+			interfaceName: existingInterfaceName,
+			wantMTU:       existingInterfaceMTU,
+			wantError:     false,
 		},
 		{
-			desc:             "Should return error on no address on the system",
-			interfaceAddress: ovntest.MustParseIP("10.1.0.40"),
-			wantMTU:          0,
-			wantError:        true,
-			netlinkOpsCallbackFunc: func() {
-				mockNetLinkOps.On("AddrList", nil, netlink.FAMILY_V4).Return(nil, nil)
-			},
-		},
-		{
-			desc:             "Should return error if the address is found but index is not found ",
-			interfaceAddress: ovntest.MustParseIP("10.1.0.40"),
-			wantMTU:          0,
-			wantError:        true,
-			netlinkOpsCallbackFunc: func() {
-				mockNetLinkOps.On("AddrList", nil, netlink.FAMILY_V4).Return([]netlink.Addr{
-					{IPNet: ovntest.MustParseIPNet("10.1.0.40/32"), LinkIndex: nonExistingInterfaceIndex},
-				}, nil)
-				mockNetLinkOps.On("LinkByIndex", nonExistingInterfaceIndex).Return(nil, fmt.Errorf("mock error"))
-			},
-		},
-		{
-			desc:             "Should return MTU if the address and link index is found ",
-			interfaceAddress: ovntest.MustParseIP("10.1.0.40"),
-			wantMTU:          existingInterfaceMTU,
-			wantError:        false,
-			netlinkOpsCallbackFunc: func() {
-				mockNetLinkOps.On("AddrList", nil, netlink.FAMILY_V4).Return([]netlink.Addr{
-					{IPNet: ovntest.MustParseIPNet("10.1.0.40/32"), LinkIndex: existingInterfaceIndex},
-				}, nil)
-				mockNetLinkOps.On("LinkByIndex", existingInterfaceIndex).Return(exisitngMockLink, nil)
-			},
-			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: existingInterfaceName}}},
-				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{MTU: existingInterfaceMTU}}},
-			},
+			desc:          "Should return error if interface not found",
+			interfaceName: nonExistingInterfaceName,
+			wantError:     true,
 		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			mockNetLinkOps = new(mocks.NetLinkOps)
-			SetNetLinkOpMockInst(mockNetLinkOps)
-			if tc.netlinkOpsCallbackFunc != nil {
-				tc.netlinkOpsCallbackFunc()
+			mtu, err := GetNetworkInterfaceMTU(tc.interfaceName)
+			if (err != nil) != tc.wantError {
+				t.Errorf("GetNetworkInterfaceMTU() error = %v, wantErr %v", err, tc.wantError)
+				return
 			}
-			ovntest.ProcessMockFnList(&exisitngMockLink.Mock, tc.onRetArgsLinkIfaceOpers)
 
-			_, mtu, err := GetIFNameAndMTUForAddress(tc.interfaceAddress)
-			assert.Equal(t, err != nil, tc.wantError)
-			assert.Equal(t, mtu, tc.wantMTU)
-			mockNetLinkOps.AssertExpectations(t)
-			exisitngMockLink.AssertExpectations(t)
+			if mtu != tc.wantMTU {
+				t.Errorf("GetNetworkInterfaceMTU() = %v, want %v", mtu, tc.wantMTU)
+			}
 		})
 	}
 }

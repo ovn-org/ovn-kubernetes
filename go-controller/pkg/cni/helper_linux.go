@@ -254,10 +254,9 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 // ConfigureOVS performs OVS configurations in order to set up Pod networking
 func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	ifInfo *PodInterfaceInfo, sandboxID string, podLister corev1listers.PodLister,
-	kclient kubernetes.Interface) error {
+	kclient kubernetes.Interface, initialPodUID string) error {
 	klog.Infof("ConfigureOVS: namespace: %s, podName: %s", namespace, podName)
-	ifaceID := util.GetIfaceId(namespace, podName)
-	initialPodUID := ifInfo.PodUID
+	ifaceID := fmt.Sprintf("%s_%s", namespace, podName)
 
 	// Find and remove any existing OVS port with this iface-id. Pods can
 	// have multiple sandboxes if some are waiting for garbage collection,
@@ -350,7 +349,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 
 	if !ifInfo.IsSmartNic {
 		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID,
-			podLister, kclient)
+			podLister, kclient, pr.PodUID)
 		if err != nil {
 			pr.deletePorts()
 			return nil, err

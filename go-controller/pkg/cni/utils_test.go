@@ -215,27 +215,26 @@ var _ = Describe("CNI Utils tests", func() {
 "ip_address":"192.168.2.3/24",
 "gateway_ip":"192.168.2.1"}}`,
 		}
-		podUID := "4d06bae8-9c38-41f6-945c-f92320e782e4"
 		It("Creates PodInterfaceInfo with IsSmartNIC false", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, false, podUID)
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, false)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.IsSmartNic).To(BeFalse())
 		})
 
 		It("Creates PodInterfaceInfo with IsSmartNIC true", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, true, podUID)
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, true)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.IsSmartNic).To(BeTrue())
 		})
 
 		It("Creates PodInterfaceInfo with checkExtIDs false", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, false, podUID)
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, false)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.CheckExtIDs).To(BeFalse())
 		})
 
 		It("Creates PodInterfaceInfo with checkExtIDs true", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, true, false, podUID)
+			pif, err := PodAnnotation2PodInfo(podAnnot, true, false)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.CheckExtIDs).To(BeTrue())
 		})

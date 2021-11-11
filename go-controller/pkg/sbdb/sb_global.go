@@ -11,5 +11,5 @@ type SBGlobal struct {
 	Ipsec       bool              `ovsdb:"ipsec"`
 	NbCfg       int               `ovsdb:"nb_cfg"`
 	Options     map[string]string `ovsdb:"options"`
-	SSL         *string           `ovsdb:"ssl"`
+	SSL         []string          `ovsdb:"ssl"`
 }

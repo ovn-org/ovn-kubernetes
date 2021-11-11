@@ -17,7 +17,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"reflect"
 	"strings"
 	"time"
 
@@ -32,8 +31,6 @@ import (
 	colorable "github.com/onsi/ginkgo/reporters/stenographer/support/go-colorable"
 	"github.com/onsi/ginkgo/types"
 )
-
-var deprecationTracker = types.NewDeprecationTracker()
 
 const GINKGO_VERSION = config.VERSION
 const GINKGO_PANIC = `
@@ -208,27 +205,21 @@ func RunSpecs(t GinkgoTestingT, description string) bool {
 	if config.DefaultReporterConfig.ReportFile != "" {
 		reportFile := config.DefaultReporterConfig.ReportFile
 		specReporters[0] = reporters.NewJUnitReporter(reportFile)
-		specReporters = append(specReporters, buildDefaultReporter())
+		return RunSpecsWithDefaultAndCustomReporters(t, description, specReporters)
 	}
-	return runSpecsWithCustomReporters(t, description, specReporters)
+	return RunSpecsWithCustomReporters(t, description, specReporters)
 }
 
 //To run your tests with Ginkgo's default reporter and your custom reporter(s), replace
 //RunSpecs() with this method.
 func RunSpecsWithDefaultAndCustomReporters(t GinkgoTestingT, description string, specReporters []Reporter) bool {
-	deprecationTracker.TrackDeprecation(types.Deprecations.CustomReporter())
 	specReporters = append(specReporters, buildDefaultReporter())
-	return runSpecsWithCustomReporters(t, description, specReporters)
+	return RunSpecsWithCustomReporters(t, description, specReporters)
 }
 
 //To run your tests with your custom reporter(s) (and *not* Ginkgo's default reporter), replace
 //RunSpecs() with this method.  Note that parallel tests will not work correctly without the default reporter
 func RunSpecsWithCustomReporters(t GinkgoTestingT, description string, specReporters []Reporter) bool {
-	deprecationTracker.TrackDeprecation(types.Deprecations.CustomReporter())
-	return runSpecsWithCustomReporters(t, description, specReporters)
-}
-
-func runSpecsWithCustomReporters(t GinkgoTestingT, description string, specReporters []Reporter) bool {
 	writer := GinkgoWriter.(*writer.Writer)
 	writer.SetStream(config.DefaultReporterConfig.Verbose)
 	reporters := make([]reporters.Reporter, len(specReporters))
@@ -236,11 +227,6 @@ func runSpecsWithCustomReporters(t GinkgoTestingT, description string, specRepor
 		reporters[i] = reporter
 	}
 	passed, hasFocusedTests := global.Suite.Run(t, description, reporters, writer, config.GinkgoConfig)
-
-	if deprecationTracker.DidTrackDeprecations() {
-		fmt.Fprintln(colorable.NewColorableStderr(), deprecationTracker.DeprecationsReport())
-	}
-
 	if passed && hasFocusedTests && strings.TrimSpace(os.Getenv("GINKGO_EDITOR_INTEGRATION")) == "" {
 		fmt.Println("PASS | FOCUSED")
 		os.Exit(types.GINKGO_FOCUS_EXIT_CODE)
@@ -394,14 +380,12 @@ func XWhen(text string, body func()) bool {
 //Ginkgo will normally run It blocks synchronously.  To perform asynchronous tests, pass a
 //function that accepts a Done channel.  When you do this, you can also provide an optional timeout.
 func It(text string, body interface{}, timeout ...float64) bool {
-	validateBodyFunc(body, codelocation.New(1))
 	global.Suite.PushItNode(text, body, types.FlagTypeNone, codelocation.New(1), parseTimeout(timeout...))
 	return true
 }
 
 //You can focus individual Its using FIt
 func FIt(text string, body interface{}, timeout ...float64) bool {
-	validateBodyFunc(body, codelocation.New(1))
 	global.Suite.PushItNode(text, body, types.FlagTypeFocused, codelocation.New(1), parseTimeout(timeout...))
 	return true
 }
@@ -422,14 +406,12 @@ func XIt(text string, _ ...interface{}) bool {
 //which "It" does not fit into a natural sentence flow. All the same protocols apply for Specify blocks
 //which apply to It blocks.
 func Specify(text string, body interface{}, timeout ...float64) bool {
-	validateBodyFunc(body, codelocation.New(1))
 	global.Suite.PushItNode(text, body, types.FlagTypeNone, codelocation.New(1), parseTimeout(timeout...))
 	return true
 }
 
 //You can focus individual Specifys using FSpecify
 func FSpecify(text string, body interface{}, timeout ...float64) bool {
-	validateBodyFunc(body, codelocation.New(1))
 	global.Suite.PushItNode(text, body, types.FlagTypeFocused, codelocation.New(1), parseTimeout(timeout...))
 	return true
 }
@@ -473,28 +455,24 @@ func By(text string, callbacks ...func()) {
 //The body function must have the signature:
 //	func(b Benchmarker)
 func Measure(text string, body interface{}, samples int) bool {
-	deprecationTracker.TrackDeprecation(types.Deprecations.Measure(), codelocation.New(1))
 	global.Suite.PushMeasureNode(text, body, types.FlagTypeNone, codelocation.New(1), samples)
 	return true
 }
 
 //You can focus individual Measures using FMeasure
 func FMeasure(text string, body interface{}, samples int) bool {
-	deprecationTracker.TrackDeprecation(types.Deprecations.Measure(), codelocation.New(1))
 	global.Suite.PushMeasureNode(text, body, types.FlagTypeFocused, codelocation.New(1), samples)
 	return true
 }
 
 //You can mark Measurements as pending using PMeasure
 func PMeasure(text string, _ ...interface{}) bool {
-	deprecationTracker.TrackDeprecation(types.Deprecations.Measure(), codelocation.New(1))
 	global.Suite.PushMeasureNode(text, func(b Benchmarker) {}, types.FlagTypePending, codelocation.New(1), 0)
 	return true
 }
 
 //You can mark Measurements as pending using XMeasure
 func XMeasure(text string, _ ...interface{}) bool {
-	deprecationTracker.TrackDeprecation(types.Deprecations.Measure(), codelocation.New(1))
 	global.Suite.PushMeasureNode(text, func(b Benchmarker) {}, types.FlagTypePending, codelocation.New(1), 0)
 	return true
 }
@@ -506,7 +484,6 @@ func XMeasure(text string, _ ...interface{}) bool {
 //
 //You may only register *one* BeforeSuite handler per test suite.  You typically do so in your bootstrap file at the top level.
 func BeforeSuite(body interface{}, timeout ...float64) bool {
-	validateBodyFunc(body, codelocation.New(1))
 	global.Suite.SetBeforeSuiteNode(body, codelocation.New(1), parseTimeout(timeout...))
 	return true
 }
@@ -520,7 +497,6 @@ func BeforeSuite(body interface{}, timeout ...float64) bool {
 //
 //You may only register *one* AfterSuite handler per test suite.  You typically do so in your bootstrap file at the top level.
 func AfterSuite(body interface{}, timeout ...float64) bool {
-	validateBodyFunc(body, codelocation.New(1))
 	global.Suite.SetAfterSuiteNode(body, codelocation.New(1), parseTimeout(timeout...))
 	return true
 }
@@ -608,7 +584,6 @@ func SynchronizedAfterSuite(allNodesBody interface{}, node1Body interface{}, tim
 //Like It blocks, BeforeEach blocks can be made asynchronous by providing a body function that accepts
 //a Done channel
 func BeforeEach(body interface{}, timeout ...float64) bool {
-	validateBodyFunc(body, codelocation.New(1))
 	global.Suite.PushBeforeEachNode(body, codelocation.New(1), parseTimeout(timeout...))
 	return true
 }
@@ -619,7 +594,6 @@ func BeforeEach(body interface{}, timeout ...float64) bool {
 //Like It blocks, BeforeEach blocks can be made asynchronous by providing a body function that accepts
 //a Done channel
 func JustBeforeEach(body interface{}, timeout ...float64) bool {
-	validateBodyFunc(body, codelocation.New(1))
 	global.Suite.PushJustBeforeEachNode(body, codelocation.New(1), parseTimeout(timeout...))
 	return true
 }
@@ -630,7 +604,6 @@ func JustBeforeEach(body interface{}, timeout ...float64) bool {
 //Like It blocks, JustAfterEach blocks can be made asynchronous by providing a body function that accepts
 //a Done channel
 func JustAfterEach(body interface{}, timeout ...float64) bool {
-	validateBodyFunc(body, codelocation.New(1))
 	global.Suite.PushJustAfterEachNode(body, codelocation.New(1), parseTimeout(timeout...))
 	return true
 }
@@ -641,28 +614,8 @@ func JustAfterEach(body interface{}, timeout ...float64) bool {
 //Like It blocks, AfterEach blocks can be made asynchronous by providing a body function that accepts
 //a Done channel
 func AfterEach(body interface{}, timeout ...float64) bool {
-	validateBodyFunc(body, codelocation.New(1))
 	global.Suite.PushAfterEachNode(body, codelocation.New(1), parseTimeout(timeout...))
 	return true
-}
-
-func validateBodyFunc(body interface{}, cl types.CodeLocation) {
-	t := reflect.TypeOf(body)
-	if t.Kind() != reflect.Func {
-		return
-	}
-
-	if t.NumOut() > 0 {
-		return
-	}
-
-	if t.NumIn() == 0 {
-		return
-	}
-
-	if t.In(0) == reflect.TypeOf(make(Done)) {
-		deprecationTracker.TrackDeprecation(types.Deprecations.Async(), cl)
-	}
 }
 
 func parseTimeout(timeout ...float64) time.Duration {

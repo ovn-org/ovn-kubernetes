@@ -16,7 +16,6 @@ import (
 
 	ktypes "k8s.io/apimachinery/pkg/types"
 	listers "k8s.io/client-go/listers/core/v1"
-	netlisters "k8s.io/client-go/listers/networking/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 )
@@ -371,7 +370,7 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 	case nodeType:
 		return listers.NewNodeLister(sharedInformer.GetIndexer()), nil
 	case policyType:
-		return netlisters.NewNetworkPolicyLister(sharedInformer.GetIndexer()), nil
+		return nil, nil
 	case egressFirewallType:
 		return egressfirewalllister.NewEgressFirewallLister(sharedInformer.GetIndexer()), nil
 	case egressIPType:

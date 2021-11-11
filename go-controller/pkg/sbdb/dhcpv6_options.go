@@ -7,7 +7,7 @@ type (
 	DHCPv6OptionsType = string
 )
 
-var (
+const (
 	DHCPv6OptionsTypeIpv6 DHCPv6OptionsType = "ipv6"
 	DHCPv6OptionsTypeStr  DHCPv6OptionsType = "str"
 	DHCPv6OptionsTypeMAC  DHCPv6OptionsType = "mac"

@@ -2,10 +2,9 @@ package metrics
 
 import (
 	"fmt"
+	"k8s.io/klog/v2"
 	"strings"
 	"time"
-
-	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
@@ -210,36 +209,6 @@ var ovnControllerCoverageShowMetricsMap = map[string]*metricDetails{
 	},
 }
 
-var ovnControllerStopwatchShowMetricsMap = map[string]*stopwatchMetricDetails{
-	"bfd_run": {
-		srcName: "bfd-run",
-	},
-	"flow_installation": {
-		srcName: "flow-installation",
-	},
-	"if_status_mgr_run": {
-		srcName: "if-status-mgr-run",
-	},
-	"if_status_mgr_update": {
-		srcName: "if-status-mgr-update",
-	},
-	"flow_generation": {
-		srcName: "flow-generation",
-	},
-	"pinctrl_run": {
-		srcName: "pinctrl-run",
-	},
-	"ofctrl_seqno_run": {
-		srcName: "ofctrl-seqno-run",
-	},
-	"patch_run": {
-		srcName: "patch-run",
-	},
-	"ct_zone_commit": {
-		srcName: "ct-zone-commit",
-	},
-}
-
 // setOvnControllerConfigurationMetrics updates ovn-controller configuration
 // values (ovn-openflow-probe-interval, ovn-remote-probe-interval, ovn-monitor-all,
 // ovn-encap-ip, ovn-encap-type, ovn-remote) through
@@ -407,14 +376,8 @@ func RegisterOvnControllerMetrics() {
 	componentCoverageShowMetricsMap[ovnController] = ovnControllerCoverageShowMetricsMap
 	registerCoverageShowMetrics(ovnController, MetricOvnNamespace, MetricOvnSubsystemController)
 
-	// Register the ovn-controller coverage/show metrics
-	componentStopwatchShowMetricsMap[ovnController] = ovnControllerStopwatchShowMetricsMap
-	registerStopwatchShowMetrics(ovnController, MetricOvnNamespace, MetricOvnSubsystemController)
-
 	// ovn-controller configuration metrics updater
 	go ovnControllerConfigurationMetricsUpdater()
 	// ovn-controller coverage show metrics updater
 	go coverageShowMetricsUpdater(ovnController)
-	// ovn-controller stopwatch show metrics updater
-	go stopwatchShowMetricsUpdater(ovnController)
 }

@@ -7,9 +7,9 @@ package sbdb
 type Connection struct {
 	UUID            string            `ovsdb:"_uuid"`
 	ExternalIDs     map[string]string `ovsdb:"external_ids"`
-	InactivityProbe *int              `ovsdb:"inactivity_probe"`
+	InactivityProbe []int             `ovsdb:"inactivity_probe"`
 	IsConnected     bool              `ovsdb:"is_connected"`
-	MaxBackoff      *int              `ovsdb:"max_backoff"`
+	MaxBackoff      []int             `ovsdb:"max_backoff"`
 	OtherConfig     map[string]string `ovsdb:"other_config"`
 	ReadOnly        bool              `ovsdb:"read_only"`
 	Role            string            `ovsdb:"role"`
