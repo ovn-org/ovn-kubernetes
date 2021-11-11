@@ -57,7 +57,7 @@ func getPod(podLister corev1listers.PodLister, kclient kubernetes.Interface, nam
 		// drop through
 	}
 
-	if pod == nil && kclient != nil {
+	if kclient != nil {
 		// If the pod wasn't in our local cache, ask for it directly
 		pod, err = kclient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	}
@@ -102,7 +102,7 @@ func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, k
 }
 
 // PodAnnotation2PodInfo creates PodInterfaceInfo from Pod annotations and additional attributes
-func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, isSmartNic bool, podUID string) (
+func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, isSmartNic bool) (
 	*PodInterfaceInfo, error) {
 	podAnnotSt, err := util.UnmarshalPodAnnotation(podAnnotation)
 	if err != nil {
@@ -124,7 +124,6 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, is
 		Egress:        egress,
 		CheckExtIDs:   checkExtIDs,
 		IsSmartNic:    isSmartNic,
-		PodUID:        podUID,
 	}
 	return podInterfaceInfo, nil
 }

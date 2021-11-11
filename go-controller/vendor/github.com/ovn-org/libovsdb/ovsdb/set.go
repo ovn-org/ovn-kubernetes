@@ -19,13 +19,8 @@ type OvsSet struct {
 
 // NewOvsSet creates a new OVSDB style set from a Go interface (object)
 func NewOvsSet(obj interface{}) (OvsSet, error) {
-	var v reflect.Value
-	if reflect.TypeOf(obj).Kind() == reflect.Ptr {
-		v = reflect.ValueOf(obj).Elem()
-	} else {
-		v = reflect.ValueOf(obj)
-	}
-	ovsSet := make([]interface{}, 0)
+	v := reflect.ValueOf(obj)
+	var ovsSet []interface{}
 	switch v.Kind() {
 	case reflect.Slice, reflect.Array:
 		for i := 0; i < v.Len(); i++ {
@@ -36,14 +31,10 @@ func NewOvsSet(obj interface{}) (OvsSet, error) {
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
 		reflect.Float32, reflect.Float64, reflect.Bool:
 		ovsSet = append(ovsSet, v.Interface())
-	case reflect.Struct:
-		if v.Type() == reflect.TypeOf(UUID{}) {
-			ovsSet = append(ovsSet, v.Interface())
-		} else {
-			return OvsSet{}, fmt.Errorf("ovsset supports only go slice/string/numbers/uuid or pointers to those types")
-		}
+	case reflect.ValueOf(UUID{}).Kind():
+		ovsSet = append(ovsSet, v.Interface())
 	default:
-		return OvsSet{}, fmt.Errorf("ovsset supports only go slice/string/numbers/uuid or pointers to those types")
+		return OvsSet{}, fmt.Errorf("ovsset supports only go slice/string/numbers/uuid types")
 	}
 	return OvsSet{ovsSet}, nil
 }
@@ -64,7 +55,6 @@ func (o OvsSet) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON will unmarshal a JSON byte array to an OVSDB style Set
 func (o *OvsSet) UnmarshalJSON(b []byte) (err error) {
-	o.GoSet = make([]interface{}, 0)
 	addToSet := func(o *OvsSet, v interface{}) error {
 		goVal, err := ovsSliceToGoNotation(v)
 		if err == nil {

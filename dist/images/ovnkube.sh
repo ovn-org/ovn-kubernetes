@@ -49,7 +49,6 @@ fi
 # OVN_NORTHD_OPTS - the options for the ovn northbound db
 # OVN_GATEWAY_MODE - the gateway mode (shared or local) - v3
 # OVN_GATEWAY_OPTS - the options for the ovn gateway
-# OVN_GATEWAY_ROUTER_SUBNET - the gateway router subnet (shared mode, Smart-NIC only) - v3
 # OVNKUBE_LOGLEVEL - log level for ovnkube (0..5, default 4) - v3
 # OVN_LOGLEVEL_NORTHD - log level (ovn-ctl default: -vconsole:emer -vsyslog:err -vfile:info) - v3
 # OVN_LOGLEVEL_NB - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
@@ -68,15 +67,10 @@ fi
 # OVN_SB_RAFT_ELECTION_TIMER - ovn south db election timer in ms (default 1000)
 # OVN_SSL_ENABLE - use SSL transport to NB/SB db and northd (default: no)
 # OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
-# OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB
-# OVN_ENABLE_LFLOW_CACHE - enable ovn-controller lflow-cache
-# OVN_LFLOW_CACHE_LIMIT - maximum number of logical flow cache entries of ovn-controller
-# OVN_LFLOW_CACHE_LIMIT_KB - maximum size of the logical flow cache of ovn-controller
 # OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 # OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, smart-nic, smart-nic-host (default: full)
-# OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev. valid when ovnkube node mode is: smart-nic, smart-nic-host
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="smart-nic"
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
 
@@ -157,7 +151,6 @@ ovnkube_loglevel=${OVNKUBE_LOGLEVEL:-4}
 # two gateway modes that we support using `images/daemonset.sh` tool
 ovn_gateway_mode=${OVN_GATEWAY_MODE:-"shared"}
 ovn_gateway_opts=${OVN_GATEWAY_OPTS:-""}
-ovn_gateway_router_subnet=${OVN_GATEWAY_ROUTER_SUBNET:-""}
 
 net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
 svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
@@ -200,18 +193,11 @@ ovn_v4_join_subnet=${OVN_V4_JOIN_SUBNET:-}
 ovn_v6_join_subnet=${OVN_V6_JOIN_SUBNET:-}
 #OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
-#OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB
-ovn_monitor_all=${OVN_MONITOR_ALL:-}
-ovn_enable_lflow_cache=${OVN_ENABLE_LFLOW_CACHE:-}
-ovn_lflow_cache_limit=${OVN_LFLOW_CACHE_LIMIT:-}
-ovn_lflow_cache_limit_kb=${OVN_LFLOW_CACHE_LIMIT_KB:-}
 ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 #OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
 #OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 ovn_egressfirewall_enable=${OVN_EGRESSFIREWALL_ENABLE:-false}
-#OVN_DISABLE_OVN_IFACE_ID_VER - disable usage of the OVN iface-id-ver option
-ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER:-false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 ovn_netflow_targets=${OVN_NETFLOW_TARGETS:-}
 ovn_sflow_targets=${OVN_SFLOW_TARGETS:-}
@@ -219,8 +205,6 @@ ovn_ipfix_targets=${OVN_IPFIX_TARGETS:-}
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
-# OVNKUBE_NODE_mgmt_PORT_NETDEV - is the net device to be used for management port
-ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV:-}
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node
 ovn_encap_ip=${OVN_ENCAP_IP:-}
 
@@ -512,7 +496,6 @@ display_env() {
   echo OVN_LOGLEVEL_CONTROLLER ${ovn_loglevel_controller}
   echo OVN_GATEWAY_MODE ${ovn_gateway_mode}
   echo OVN_GATEWAY_OPTS ${ovn_gateway_opts}
-  echo OVN_GATEWAY_ROUTER_SUBNET ${ovn_gateway_router_subnet}
   echo OVN_NET_CIDR ${net_cidr}
   echo OVN_SVC_CIDR ${svc_cidr}
   echo OVN_NB_PORT ${ovn_nb_port}
@@ -1053,11 +1036,6 @@ ovn-node() {
       egressip_enabled_flag="--enable-egress-ip"
   fi
 
-  disable_ovn_iface_id_ver_flag=
-  if [[ ${ovn_disable_ovn_iface_id_ver} == "true" ]]; then
-      disable_ovn_iface_id_ver_flag="--disable-ovn-iface-id-ver"
-  fi
-
   netflow_targets=
   if [[ -n ${ovn_netflow_targets} ]]; then
       netflow_targets="--netflow-targets ${ovn_netflow_targets}"
@@ -1071,26 +1049,6 @@ ovn-node() {
   ipfix_targets=
   if [[ -n ${ovn_ipfix_targets} ]]; then
       ipfix_targets="--ipfix-targets ${ovn_ipfix_targets}"
-  fi
-
-  monitor_all=
-  if [[ -n ${ovn_monitor_all} ]]; then
-     monitor_all="--monitor-all=${ovn_monitor_all}"
-  fi
-
-  enable_lflow_cache=
-  if [[ -n ${ovn_enable_lflow_cache} ]]; then
-     enable_lflow_cache="--enable-lflow-cache=${ovn_enable_lflow_cache}"
-  fi
-
-  lflow_cache_limit=
-  if [[ -n ${ovn_lflow_cache_limit} ]]; then
-     lflow_cache_limit="--lflow-cache-limit=${ovn_lflow_cache_limit}"
-  fi
-
-  lflow_cache_limit_kb=
-  if [[ -n ${ovn_lflow_cache_limit_kb} ]]; then
-     lflow_cache_limit_kb="--lflow-cache-limit-kb=${ovn_lflow_cache_limit_kb}"
   fi
 
   egress_interface=
@@ -1121,11 +1079,6 @@ ovn-node() {
         exit 1
       fi
     fi
-  fi
-
-  ovnkube_node_mgmt_port_netdev_flag=
-  if [[ ${ovnkube_node_mgmt_port_netdev} != "" ]]; then
-    ovnkube_node_mgmt_port_netdev_flag="--ovnkube-node-mgmt-port-netdev=${ovnkube_node_mgmt_port_netdev}"
   fi
 
   local ovn_node_ssl_opts=""
@@ -1168,18 +1121,12 @@ ovn-node() {
     ${disable_snat_multiple_gws_flag} \
     ${disable_pkt_mtu_check_flag} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
-    --gateway-router-subnet=${ovn_gateway_router_subnet} \
     --pidfile ${OVN_RUNDIR}/ovnkube.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube.log \
     ${ovn_node_ssl_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
-    ${monitor_all} \
-    ${enable_lflow_cache} \
-    ${lflow_cache_limit} \
-    ${lflow_cache_limit_kb} \
     ${multicast_enabled_flag} \
     ${egressip_enabled_flag} \
-    ${disable_ovn_iface_id_ver_flag} \
     ${netflow_targets} \
     ${sflow_targets} \
     ${ipfix_targets} \
@@ -1187,8 +1134,7 @@ ovn-node() {
     --metrics-bind-address ${ovnkube_node_metrics_bind_address} \
      ${ovnkube_node_mode_flag} \
     ${egress_interface} \
-    --host-network-namespace ${ovn_host_network_namespace} \
-     ${ovnkube_node_mgmt_port_netdev_flag} &
+    --host-network-namespace ${ovn_host_network_namespace} &
 
   wait_for_event attempts=3 process_ready ovnkube
   if [[ ${ovnkube_node_mode} != "smart-nic" ]]; then

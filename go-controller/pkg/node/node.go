@@ -59,22 +59,73 @@ func NewNode(kubeClient kubernetes.Interface, wf factory.NodeWatchFactory, name 
 	}
 }
 
-func clearOVSFlowTargets() error {
-	_, _, err := util.RunOVSVsctl(
-		"--",
-		"clear", "bridge", "br-int", "netflow",
-		"--",
-		"clear", "bridge", "br-int", "sflow",
-		"--",
-		"clear", "bridge", "br-int", "ipfix",
-	)
-	if err != nil {
-		return err
-	}
-	return nil
-}
+func setupOVNNode(node *kapi.Node) error {
+	var err error
 
-func setOVSFlowTargets() error {
+	encapIP := config.Default.EncapIP
+	if encapIP == "" {
+		encapIP, err = util.GetNodePrimaryIP(node)
+		if err != nil {
+			return fmt.Errorf("failed to obtain local IP from node %q: %v", node.Name, err)
+		}
+	} else {
+		if ip := net.ParseIP(encapIP); ip == nil {
+			return fmt.Errorf("invalid encapsulation IP provided %q", encapIP)
+		}
+	}
+
+	setExternalIdsCmd := []string{
+		"set",
+		"Open_vSwitch",
+		".",
+		fmt.Sprintf("external_ids:ovn-encap-type=%s", config.Default.EncapType),
+		fmt.Sprintf("external_ids:ovn-encap-ip=%s", encapIP),
+		fmt.Sprintf("external_ids:ovn-remote-probe-interval=%d",
+			config.Default.InactivityProbe),
+		fmt.Sprintf("external_ids:ovn-openflow-probe-interval=%d",
+			config.Default.OpenFlowProbe),
+		fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name),
+		"external_ids:ovn-monitor-all=true",
+		fmt.Sprintf("external_ids:ovn-enable-lflow-cache=%t", config.Default.LFlowCacheEnable),
+	}
+
+	if config.Default.LFlowCacheLimit > 0 {
+		setExternalIdsCmd = append(setExternalIdsCmd,
+			fmt.Sprintf("external_ids:ovn-limit-lflow-cache=%d", config.Default.LFlowCacheLimit),
+		)
+	}
+
+	if config.Default.LFlowCacheLimitKb > 0 {
+		setExternalIdsCmd = append(setExternalIdsCmd,
+			fmt.Sprintf("external_ids:ovn-limit-lflow-cache-kb=%d", config.Default.LFlowCacheLimitKb),
+		)
+	}
+
+	_, stderr, err := util.RunOVSVsctl(setExternalIdsCmd...)
+	if err != nil {
+		return fmt.Errorf("error setting OVS external IDs: %v\n  %q", err, stderr)
+	}
+	// If EncapPort is not the default tell sbdb to use specified port.
+	if config.Default.EncapPort != config.DefaultEncapPort {
+		systemID, err := util.GetNodeChassisID()
+		if err != nil {
+			return err
+		}
+		uuid, _, err := util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "Encap",
+			fmt.Sprintf("chassis_name=%s", systemID))
+		if err != nil {
+			return err
+		}
+		if len(uuid) == 0 {
+			return fmt.Errorf("unable to find encap uuid to set geneve port for chassis %s", systemID)
+		}
+		_, stderr, errSet := util.RunOVNSbctl("set", "encap", uuid,
+			fmt.Sprintf("options:dst_port=%d", config.Default.EncapPort),
+		)
+		if errSet != nil {
+			return fmt.Errorf("error setting OVS encap-port: %v\n  %q", errSet, stderr)
+		}
+	}
 	if config.Monitoring.NetFlowTargets != nil {
 		collectors := ""
 		for _, v := range config.Monitoring.NetFlowTargets {
@@ -141,122 +192,54 @@ func setOVSFlowTargets() error {
 	return nil
 }
 
-func setupOVNNode(node *kapi.Node) error {
-	var err error
-
-	encapIP := config.Default.EncapIP
-	if encapIP == "" {
-		encapIP, err = util.GetNodePrimaryIP(node)
-		if err != nil {
-			return fmt.Errorf("failed to obtain local IP from node %q: %v", node.Name, err)
-		}
-		config.Default.EncapIP = encapIP
-	} else {
-		if ip := net.ParseIP(encapIP); ip == nil {
-			return fmt.Errorf("invalid encapsulation IP provided %q", encapIP)
-		}
-	}
-
-	setExternalIdsCmd := []string{
-		"set",
-		"Open_vSwitch",
-		".",
-		fmt.Sprintf("external_ids:ovn-encap-type=%s", config.Default.EncapType),
-		fmt.Sprintf("external_ids:ovn-encap-ip=%s", encapIP),
-		fmt.Sprintf("external_ids:ovn-remote-probe-interval=%d",
-			config.Default.InactivityProbe),
-		fmt.Sprintf("external_ids:ovn-openflow-probe-interval=%d",
-			config.Default.OpenFlowProbe),
-		fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name),
-		fmt.Sprintf("external_ids:ovn-monitor-all=%t", config.Default.MonitorAll),
-		fmt.Sprintf("external_ids:ovn-enable-lflow-cache=%t", config.Default.LFlowCacheEnable),
-	}
-
-	if config.Default.LFlowCacheLimit > 0 {
-		setExternalIdsCmd = append(setExternalIdsCmd,
-			fmt.Sprintf("external_ids:ovn-limit-lflow-cache=%d", config.Default.LFlowCacheLimit),
-		)
-	}
-
-	if config.Default.LFlowCacheLimitKb > 0 {
-		setExternalIdsCmd = append(setExternalIdsCmd,
-			fmt.Sprintf("external_ids:ovn-limit-lflow-cache-kb=%d", config.Default.LFlowCacheLimitKb),
-		)
-	}
-
-	_, stderr, err := util.RunOVSVsctl(setExternalIdsCmd...)
-	if err != nil {
-		return fmt.Errorf("error setting OVS external IDs: %v\n  %q", err, stderr)
-	}
-	// If EncapPort is not the default tell sbdb to use specified port.
-	if config.Default.EncapPort != config.DefaultEncapPort {
-		systemID, err := util.GetNodeChassisID()
-		if err != nil {
-			return err
-		}
-		uuid, _, err := util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "Encap",
-			fmt.Sprintf("chassis_name=%s", systemID))
-		if err != nil {
-			return err
-		}
-		if len(uuid) == 0 {
-			return fmt.Errorf("unable to find encap uuid to set geneve port for chassis %s", systemID)
-		}
-		_, stderr, errSet := util.RunOVNSbctl("set", "encap", uuid,
-			fmt.Sprintf("options:dst_port=%d", config.Default.EncapPort),
-		)
-		if errSet != nil {
-			return fmt.Errorf("error setting OVS encap-port: %v\n  %q", errSet, stderr)
-		}
-	}
-
-	// clear stale ovs flow targets if needed
-	err = clearOVSFlowTargets()
-	if err != nil {
-		return fmt.Errorf("error clearing stale ovs flow targets: %q", err)
-	}
-	// set new ovs flow targets if needed
-	err = setOVSFlowTargets()
-	if err != nil {
-		return fmt.Errorf("error setting ovs flow targets: %q", err)
-	}
-
-	return nil
-}
-
-func isOVNControllerReady() (bool, error) {
-	// check node's connection status
+func isOVNControllerReady(name string) (bool, error) {
 	runDir := util.GetOvnRunDir()
+
 	pid, err := ioutil.ReadFile(runDir + "ovn-controller.pid")
 	if err != nil {
 		return false, fmt.Errorf("unknown pid for ovn-controller process: %v", err)
 	}
-	ctlFile := runDir + fmt.Sprintf("ovn-controller.%s.ctl", strings.TrimSuffix(string(pid), "\n"))
-	ret, _, err := util.RunOVSAppctl("-t", ctlFile, "connection-status")
+
+	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
+		ctlFile := runDir + fmt.Sprintf("ovn-controller.%s.ctl", strings.TrimSuffix(string(pid), "\n"))
+		ret, _, err := util.RunOVSAppctl("-t", ctlFile, "connection-status")
+		if err == nil {
+			klog.Infof("Node %s connection status = %s", name, ret)
+			return ret == "connected", nil
+		}
+		return false, err
+	})
 	if err != nil {
-		return false, fmt.Errorf("could not get connection status: %w", err)
-	}
-	klog.Infof("Node connection status = %s", ret)
-	if ret != "connected" {
-		return false, nil
+		return false, fmt.Errorf("timed out waiting sbdb for node %s: %v", name, err)
 	}
 
-	// check whether br-int exists on node
-	_, _, err = util.RunOVSVsctl("--", "br-exists", "br-int")
+	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
+		_, _, err := util.RunOVSVsctl("--", "br-exists", "br-int")
+		if err != nil {
+			return false, nil
+		}
+		return true, nil
+	})
 	if err != nil {
-		return false, nil
+		return false, fmt.Errorf("timed out checking whether br-int exists or not on node %s: %v", name, err)
 	}
 
-	// check by dumping br-int flow entries
-	stdout, _, err := util.RunOVSOfctl("dump-aggregate", "br-int")
+	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
+		stdout, _, err := util.RunOVSOfctl("dump-aggregate", "br-int")
+		if err != nil {
+			klog.V(5).Infof("Error dumping aggregate flows: %v "+
+				"for node: %s", err, name)
+			return false, nil
+		}
+		ret := strings.Contains(stdout, "flow_count=0")
+		if ret {
+			klog.V(5).Infof("Got a flow count of 0 when "+
+				"dumping flows for node: %s", name)
+		}
+		return !ret, nil
+	})
 	if err != nil {
-		klog.V(5).Infof("Error dumping aggregate flows: %v", err)
-		return false, nil
-	}
-	hasFlowCountZero := strings.Contains(stdout, "flow_count=0")
-	if hasFlowCountZero {
-		klog.V(5).Info("Got a flow count of 0 when dumping flows for node")
-		return false, nil
+		return false, fmt.Errorf("timed out dumping br-int flow entries for node %s: %v", name, err)
 	}
 
 	return true, nil
@@ -274,7 +257,7 @@ func getOVNIfUpCheckMode() (bool, error) {
 	}
 	if _, stderr, err := util.RunOVNSbctl("--columns=up", "list", "Port_Binding"); err != nil {
 		if strings.Contains(stderr, "does not contain a column") {
-			klog.Infof("Falling back to using legacy OVS flow readiness checks")
+			klog.Infof("Falling back to using legacy CNI OVS flow readiness checks")
 			return false, nil
 		}
 		return false, fmt.Errorf("failed to check if port_binding is supported in OVN, stderr: %q, error: %v",
@@ -290,7 +273,6 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	var err error
 	var node *kapi.Node
 	var subnets []*net.IPNet
-	var mgmtPort ManagementPort
 	var mgmtPortConfig *managementPortConfig
 	var cniServer *cni.Server
 	var isOvnUpEnabled bool
@@ -304,22 +286,8 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
 
-	// Start and sync the watch factory to begin listening for events
-	if err := n.watchFactory.Start(); err != nil {
-		return err
-	}
-
 	if node, err = n.Kube.GetNode(n.name); err != nil {
 		return fmt.Errorf("error retrieving node %s: %v", n.name, err)
-	}
-
-	nodeAddrStr, err := util.GetNodePrimaryIP(node)
-	if err != nil {
-		return err
-	}
-	nodeAddr := net.ParseIP(nodeAddrStr)
-	if nodeAddr == nil {
-		return fmt.Errorf("failed to parse kubernetes node IP address. %v", err)
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
@@ -351,17 +319,13 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	if err != nil {
 		return fmt.Errorf("timed out waiting for node's: %q logical switch: %v", n.name, err)
 	}
-	klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, util.JoinIPNets(subnets, ","))
 
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+	// Create CNI Server
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
 		isOvnUpEnabled, err = getOVNIfUpCheckMode()
 		if err != nil {
 			return err
 		}
-	}
-
-	// Create CNI Server
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
 		kclient, ok := n.Kube.(*kube.Kube)
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
@@ -372,44 +336,40 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		}
 	}
 
-	// Setup Management port and gateway
-	mgmtPort = NewManagementPort(n.name, subnets)
-	nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node.Name)
-	waiter := newStartupWaiter()
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+		klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, util.JoinIPNets(subnets, ","))
 
-	mgmtPortConfig, err = mgmtPort.Create(nodeAnnotator, waiter)
-	if err != nil {
-		return err
-	}
+		if _, err = isOVNControllerReady(n.name); err != nil {
+			return err
+		}
 
-	// Initialize gateway
-	if config.OvnKubeNode.Mode == types.NodeModeSmartNICHost {
-		err = n.initGatewaySmartNicHost(nodeAddr)
+		nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node)
+		waiter := newStartupWaiter()
+
+		// Initialize management port resources on the node
+		mgmtPortConfig, err = createManagementPort(n.name, subnets, nodeAnnotator, waiter)
 		if err != nil {
 			return err
 		}
-	} else {
-		if err := n.initGateway(subnets, nodeAnnotator, waiter, mgmtPortConfig, nodeAddr); err != nil {
+
+		// Initialize gateway resources on the node
+		if err := n.initGateway(subnets, nodeAnnotator, waiter, mgmtPortConfig); err != nil {
 			return err
 		}
-	}
 
-	if err := nodeAnnotator.Run(); err != nil {
-		return fmt.Errorf("failed to set node %s annotations: %v", n.name, err)
-	}
+		if err := nodeAnnotator.Run(); err != nil {
+			return fmt.Errorf("failed to set node %s annotations: %v", n.name, err)
+		}
 
-	// Wait for management port and gateway resources to be created by the master
-	klog.Infof("Waiting for gateway and management port readiness...")
-	start := time.Now()
-	if err := waiter.Wait(); err != nil {
-		return err
-	}
-	go n.gateway.Run(n.stopChan, wg)
-	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
+		// Wait for management port and gateway resources to be created by the master
+		klog.Infof("Waiting for gateway and management port readiness...")
+		start := time.Now()
+		if err := waiter.Wait(); err != nil {
+			return err
+		}
+		go n.gateway.Run(n.stopChan, wg)
+		klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
-	// Note(adrianc): Smart-NIC deployments are expected to support the new shared gateway changes, upgrade flow
-	// is not needed. Future upgrade flows will need to take Smart-NICs into account.
-	if config.OvnKubeNode.Mode == types.NodeModeFull {
 		// Upgrade for Node. If we upgrade workers before masters, then we need to keep service routing via
 		// mgmt port until masters have been updated and modified OVN config. Run a goroutine to handle this case
 
@@ -516,19 +476,16 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		klog.Errorf("Reset of initial klog \"loglevel\" failed, err: %v", err)
 	}
 
-	// start management port health check
-	mgmtPort.CheckManagementPortHealth(mgmtPortConfig, n.stopChan)
-
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
 		// start health check to ensure there are no stale OVS internal ports
-		go wait.Until(func() {
-			checkForStaleOVSInterfaces(n.name, n.watchFactory.(*factory.WatchFactory))
-		}, time.Minute, n.stopChan)
+		go checkForStaleOVSInterfaces(n.stopChan, n.name, n.watchFactory.(*factory.WatchFactory))
+
+		// start management port health check
+		go checkManagementPortHealth(mgmtPortConfig, n.stopChan)
 		n.WatchEndpoints()
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
-		// conditionally write cni config file
 		confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
 		_, err = os.Stat(confFile)
 		if os.IsNotExist(err) {
@@ -577,19 +534,16 @@ func (n *OvnNode) WatchEndpoints() {
 	}, nil)
 }
 
-// validateVTEPInterfaceMTU checks if the MTU of the interface that has ovn-encap-ip is big
-// enough to carry the `config.Default.MTU` and the Geneve header. If the MTU is not big
-// enough, it will taint the node with the value of `types.OvnK8sSmallMTUTaintKey`
-func (n *OvnNode) validateVTEPInterfaceMTU() error {
+// validateGatewayMTU checks if the MTU of the given network interface is big
+// enough to carry the `config.Default.MTU` and the Geneve header. If the MTU
+// is not big enough, it will taint the node with the value of
+// `types.OvnK8sSmallMTUTaintKey`
+func (n *OvnNode) validateGatewayMTU(gatewayInterfaceName string) error {
 	tooSmallMTUTaint := &kapi.Taint{Key: types.OvnK8sSmallMTUTaintKey, Effect: kapi.TaintEffectNoSchedule}
 
-	ovnEncapIP := net.ParseIP(config.Default.EncapIP)
-	if ovnEncapIP == nil {
-		return fmt.Errorf("the set OVN Encap IP is invalid: (%s)", config.Default.EncapIP)
-	}
-	interfaceName, mtu, err := util.GetIFNameAndMTUForAddress(ovnEncapIP)
+	mtu, err := util.GetNetworkInterfaceMTU(gatewayInterfaceName)
 	if err != nil {
-		return fmt.Errorf("could not get MTU for the interface with address %s: %w", ovnEncapIP, err)
+		return fmt.Errorf("could not get MTU from gateway network interface %s: %w", gatewayInterfaceName, err)
 	}
 
 	// calc required MTU
@@ -604,20 +558,18 @@ func (n *OvnNode) validateVTEPInterfaceMTU() error {
 
 	// check if node needs to be tainted
 	if mtu < requiredMTU {
-		klog.V(2).Infof("MTU (%d) of network interface %s is not big enough to deal with Geneve "+
-			"header overhead (sum %d). Tainting node with %v...", mtu, interfaceName,
-			requiredMTU, tooSmallMTUTaint)
+		klog.V(2).Infof("MTU (%d) of gateway network interface %s is not big enough to deal with Geneve header overhead (sum %d). Tainting node with %v...", mtu, gatewayInterfaceName, requiredMTU, tooSmallMTUTaint)
 
 		return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			return n.Kube.SetTaintOnNode(n.name, tooSmallMTUTaint)
 		})
-	}
-	klog.V(2).Infof("MTU (%d) of network interface %s is big enough to deal with Geneve header overhead (sum %d). "+
-		"Making sure node is not tainted with %v...", mtu, interfaceName, requiredMTU, tooSmallMTUTaint)
+	} else {
+		klog.V(2).Infof("MTU (%d) of gateway network interface %s is big enough to deal with Geneve header overhead (sum %d). Making sure node is not tainted with %v...", mtu, gatewayInterfaceName, requiredMTU, tooSmallMTUTaint)
 
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return n.Kube.RemoveTaintFromNode(n.name, tooSmallMTUTaint)
-	})
+		return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			return n.Kube.RemoveTaintFromNode(n.name, tooSmallMTUTaint)
+		})
+	}
 }
 
 type epAddressItem struct {
@@ -651,7 +603,21 @@ func configureSvcRouteViaBridge(bridge string) error {
 	if err != nil {
 		return fmt.Errorf("unable to get the gateway next hops, error: %v", err)
 	}
-	return configureSvcRouteViaInterface(bridge, gwIPs)
+	link, err := util.LinkSetUp(bridge)
+	if err != nil {
+		return fmt.Errorf("unable to get link for %s, error: %v", bridge, err)
+	}
+	for _, subnet := range config.Kubernetes.ServiceCIDRs {
+		gwIP, err := util.MatchIPFamily(utilnet.IsIPv6CIDR(subnet), gwIPs)
+		if err != nil {
+			return fmt.Errorf("unable to find gateway IP for subnet: %v, found IPs: %v", subnet, gwIPs)
+		}
+		err = util.LinkRoutesAdd(link, gwIP[0], []*net.IPNet{subnet}, config.Default.MTU)
+		if err != nil && !os.IsExist(err) {
+			return fmt.Errorf("unable to add route for service via shared gw bridge, error: %v", err)
+		}
+	}
+	return nil
 }
 
 func upgradeServiceRoute(bridgeName string) error {

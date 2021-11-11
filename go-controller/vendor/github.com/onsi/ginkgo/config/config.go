@@ -20,7 +20,7 @@ import (
 	"fmt"
 )
 
-const VERSION = "1.16.4"
+const VERSION = "1.15.0"
 
 type GinkgoConfigType struct {
 	RandomSeed         int64
@@ -219,14 +219,10 @@ func BuildFlagArgs(prefix string, ginkgo GinkgoConfigType, reporter DefaultRepor
 
 // flagFocus implements the -focus flag.
 func flagFocus(arg string) {
-	if arg != "" {
-		GinkgoConfig.FocusStrings = append(GinkgoConfig.FocusStrings, arg)
-	}
+	GinkgoConfig.FocusStrings = append(GinkgoConfig.FocusStrings, arg)
 }
 
 // flagSkip implements the -skip flag.
 func flagSkip(arg string) {
-	if arg != "" {
-		GinkgoConfig.SkipStrings = append(GinkgoConfig.SkipStrings, arg)
-	}
+	GinkgoConfig.SkipStrings = append(GinkgoConfig.SkipStrings, arg)
 }

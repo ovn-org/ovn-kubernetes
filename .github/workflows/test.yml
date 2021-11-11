@@ -243,56 +243,84 @@ jobs:
     name: e2e
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    # 30 mins for kind, 150 mins for control-plane tests, 10 minutes for all other steps
-    timeout-minutes: 190
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
         target:
-            # hybrid-overlay = multicast-enable = emptylb-enable = false
-          - "shard-conformance"
-            # hybrid-overlay = multicast-enable = emptylb-enable = true
-          - "control-plane"
-        ha: ["HA", "noHA"]
-        disable-snat-multiple-gws: ["noSnatGW", "snatGW"]
-        gateway-mode: ["local", "shared"]
-        second-bridge: ["2br", "1br"]
-        ipfamily: ["ipv4", "ipv6", "dualstack"]
+          - shard: shard-conformance
+            hybrid-overlay: false
+            multicast-enable: false
+            emptylb-enable: false
+          - shard: control-plane
+            hybrid-overlay: true
+            multicast-enable: true
+            emptylb-enable: true
+        ha:
+         - enabled: "true"
+           name: "HA"
+         - enabled: "false"
+           name: "noHA"
+        disable-snat-multiple-gws:
+         - enabled: "true"
+           name: "disableSnatGW"
+         - enabled: "false"
+           name: "enableSnatGW"
+        gateway-mode: [local, shared]
+        ipfamily:
+         - ip: ipv4
+           name: "IPv4"
+           ipv4: true
+           ipv6: false
+         - ip: ipv6
+           name: "IPv6"
+           ipv4: false
+           ipv6: true
+         - ip: dualstack
+           name: "Dualstack"
+           ipv4: true
+           ipv6: true
         # Example of how to exclude a fully qualified test:
-        # - {"ipfamily": "ipv4"}, "ha": "HA", "gateway-mode": "shared", "target": "control-plane"}
+        # - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "false"}, "gateway-mode": shared, "target": {"shard": shard-n-other}}
         exclude:
          # Not currently supported but needs to be.
-         - {"ipfamily": "dualstack", "target": "control-plane"}
+         - {"ipfamily": {"ip": dualstack}, "target": {"shard": control-plane}}
          # Limit matrix combinations for CI. DISABLED items added to exclude list:
-         - {"ipfamily": "ipv4", "ha": "HA", "gateway-mode": "local"}
-         - {"ipfamily": "ipv4", "ha": "noHA", "gateway-mode": "shared"}
-         - {"ipfamily": "ipv6", "ha": "noHA", "gateway-mode": "local"}
-         - {"ipfamily": "ipv6", "ha": "noHA", "gateway-mode": "shared"}
-         - {"ipfamily": "dualstack", "ha": "HA", "gateway-mode": "shared"}
-         - {"ipfamily": "dualstack", "ha": "noHA"}
+         #   DISABLED  v4  ha     local
+         #   ENABLED   v4  ha     shared
+         #   ENABLED   v4  noha   local
+         #   DISABLED  v4  noha   shared
+         #   ENABLED   v6  ha     local
+         #   ENABLED   v6  ha     shared
+         #   DISABLED  v6  noha   local
+         #   DISABLED  v6  noha   shared
+         #   ENABLED   ds  ha     local
+         #   DISABLED  ds  ha     shared
+         #   DISABLED  ds  noha   local
+         #   DISABLED  ds  noha   shared
+         - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "true"}, "gateway-mode": local}
+         - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "false"}, "gateway-mode": shared}
+         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "false"}, "gateway-mode": local}
+         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "false"}, "gateway-mode": shared}
+         - {"ipfamily": {"ip": dualstack}, "ha": {"enabled": "true"}, "gateway-mode": shared}
+         - {"ipfamily": {"ip": dualstack}, "ha": {"enabled": "false"}}
          # IPv6 multicast is supported but tests fail due to old iperf version
          # in agnhost images. Disable them for now.
-         - {"ipfamily": "dualstack", "target": "control-plane"}
-         - {"ipfamily": "ipv6", "target": "control-plane"}
+         - {"ipfamily": {"ip": dualstack}, "target": {"shard": {"multicast-enable": "true"}}}
+         - {"ipfamily": {"ip": ipv6}, "target": {"shard": {"multicast-enable": "true"}}}
          # No need to run disable-snat-multiple-gws with local GW mode
-         - {"disable-snat-multiple-gws": "noSnatGW", "gateway-mode": "local"}
-         - {"second-bridge": "2br", "gateway-mode": "local"}
-         - {"second-bridge": "2br", "disable-snat-multiple-gws": "snatGW"}
-         - {"second-bridge": "2br", "ha": "HA"}
-         - {"second-bridge": "2br", "target": "control-plane"}
-         - {"second-bridge": "1br", "disable-snat-multiple-gws": "noSnatGW"}
+         - {"disable-snat-multiple-gws": {"enabled": "true"}, "gateway-mode": local}
     needs: [ build-pr ]
     env:
-      JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}"
-      OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target == 'control-plane' }}"
-      OVN_MULTICAST_ENABLE:  "${{ matrix.target == 'control-plane' }}"
-      OVN_EMPTY_LB_EVENTS: "${{ matrix.target == 'control-plane' }}"
-      OVN_HA: "${{ matrix.ha == 'HA' }}"
-      OVN_DISABLE_SNAT_MULTIPLE_GWS: "${{ matrix.disable-snat-multiple-gws == 'noSnatGW' }}"
+      JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}"
+      OVN_HA: "${{ matrix.ha.enabled }}"
+      KIND_IPV4_SUPPORT: "${{ matrix.ipfamily.ipv4 }}"
+      KIND_IPV6_SUPPORT: "${{ matrix.ipfamily.ipv6 }}"
+      OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target.hybrid-overlay }}"
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
-      OVN_SECOND_BRIDGE: "${{ matrix.second-bridge == '2br' }}"
-      KIND_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
-      KIND_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
+      OVN_MULTICAST_ENABLE:  "${{ matrix.target.multicast-enable }}"
+      OVN_EMPTY_LB_EVENTS: "${{ matrix.target.emptylb-enable }}"
+      OVN_DISABLE_SNAT_MULTIPLE_GWS: "${{ matrix.disable-snat-multiple-gws.enabled }}"
     steps:
 
     - name: Free up disk space
@@ -312,10 +340,6 @@ jobs:
         export GOPATH=$(go env GOPATH)
         echo "GOPATH=$GOPATH" >> $GITHUB_ENV
         echo "$GOPATH/bin" >> $GITHUB_PATH
-        if [ $OVN_SECOND_BRIDGE == "true" ]; then
-          echo OVN_TEST_EX_GW_NETWORK=kindexgw >> $GITHUB_ENV
-          echo OVN_ENABLE_EX_GW_NETWORK_BRIDGE=true >> $GITHUB_ENV
-        fi
     - name: Disable ufw
       # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
       # Not needed for KIND deployments, so just disable all the time.
@@ -329,22 +353,32 @@ jobs:
       run: |
         docker load --input image-pr.tar
     - name: kind setup
-      timeout-minutes: 30
       run: |
         export OVN_IMAGE="ovn-daemonset-f:pr"
         make -C test install-kind
     - name: Run Tests
-      # e2e tests take less than 30 minutes normally, 60 should be more than enough
-      # set 2 1/2 hours for control-plane tests as these might take a while
-      timeout-minutes: ${{ matrix.target == 'control-plane' && 150 || 60 }}
       run: |
-        make -C test ${{ matrix.target }}
+        make -C test ${{ matrix.target.shard }}
     - name: Upload Junit Reports
       if: always()
       uses: actions/upload-artifact@v2
       with:
         name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: './test/_artifacts/*.xml'
+
+    - name: Generate Test Report
+      id: xunit-viewer
+      if: always()
+      uses: AutoModality/action-xunit-viewer@v1
+      with:
+        results: ./test/_artifacts/
+
+    - name: Upload Test Report
+      if: always()
+      uses: actions/upload-artifact@v2
+      with:
+        name: test-report-${{ env.JOB_NAME }}-${{ github.run_id }}
+        path: './test/_artifacts/index.html'
 
     - name: Export logs
       if: always()
@@ -426,6 +460,20 @@ jobs:
         name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: './test/_artifacts/*.xml'
 
+    - name: Generate Test Report
+      id: xunit-viewer
+      if: always()
+      uses: AutoModality/action-xunit-viewer@v1
+      with:
+        results: ./test/_artifacts/
+
+    - name: Upload Test Report
+      if: always()
+      uses: actions/upload-artifact@v2
+      with:
+        name: test-report-${{ env.JOB_NAME }}-${{ github.run_id }}
+        path: './test/_artifacts/index.html'
+
     - name: Export logs
       if: always()
       run: |
@@ -446,17 +494,33 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: ["shard-conformance"]
-        ha: ["HA"]
-        gateway-mode: ["local"]
-        ipfamily: ["ipv4", "ipv6", "dualstack"]
+        target:
+          - shard: shard-conformance
+            hybrid-overlay: false
+        ha:
+          - enabled: "true"
+            name: "HA"
+        gateway-mode: [local]
+        ipfamily:
+          - ip: ipv4
+            name: "IPv4"
+            ipv4: true
+            ipv6: false
+          - ip: ipv6
+            name: "IPv6"
+            ipv4: false
+            ipv6: true
+          - ip: dualstack
+            name: "Dualstack"
+            ipv4: true
+            ipv6: true
     needs: [ build-pr ]
     env:
-      JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}"
-      OVN_HA: "${{ matrix.ha == 'HA' }}"
-      KIND_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
-      KIND_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
-      OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target == 'control-plane' }}"
+      JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}"
+      OVN_HA: "${{ matrix.ha.enabled }}"
+      KIND_IPV4_SUPPORT: "${{ matrix.ipfamily.ipv4 }}"
+      KIND_IPV6_SUPPORT: "${{ matrix.ipfamily.ipv6 }}"
+      OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target.hybrid-overlay }}"
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
     steps:
 
@@ -494,13 +558,27 @@ jobs:
           make -C test install-kind
       - name: Run Tests
         run: |
-          make -C test ${{ matrix.target }}
+          make -C test ${{ matrix.target.shard }}
       - name: Upload Junit Reports
         if: always()
         uses: actions/upload-artifact@v2
         with:
           name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
           path: './test/_artifacts/*.xml'
+
+      - name: Generate Test Report
+        id: xunit-viewer
+        if: always()
+        uses: AutoModality/action-xunit-viewer@v1
+        with:
+          results: ./test/_artifacts/
+
+      - name: Upload Test Report
+        if: always()
+        uses: actions/upload-artifact@v2
+        with:
+          name: test-report-${{ env.JOB_NAME }}-${{ github.run_id }}
+          path: './test/_artifacts/index.html'
 
       - name: Export logs
         if: always()

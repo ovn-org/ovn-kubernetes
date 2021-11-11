@@ -159,7 +159,7 @@ spec:
       targetPort: 80
 EOF
 
-if ! kubectl rollout status deployment server-deployment -w --timeout=100s ; then
+if ! kubectl wait --for=condition=ready pods --all --timeout=100s ; then
   echo "deployment is not running"
   kubectl get pods -o wide -A || true
   exit 1

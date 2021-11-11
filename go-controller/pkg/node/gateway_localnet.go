@@ -52,10 +52,37 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		}
 	}
 
-	gwBridge, _, err := gatewayInitInternal(
-		nodeName, gwIntf, "", hostSubnets, gwNextHops, nil, nodeAnnotator)
-	if err != nil {
-		return nil, err
+	// OCP HACK
+	// Do not configure OVS bridge for local gateway mode with a gateway iface of none
+	// For SDN->OVN migration, see https://github.com/openshift/ovn-kubernetes/pull/281
+	if gwIntf == "none" {
+		var err error
+		gw.readyFunc = func() (bool, error) { return true, nil }
+		gw.initFunc, err = initSharedGatewayNoBridge(nodeName, hostSubnets, gwNextHops, nodeAnnotator)
+		if err != nil {
+			return nil, err
+		}
+		// END OCP HACK
+	} else {
+		gwBridge, _, err := gatewayInitInternal(
+			nodeName, gwIntf, "", hostSubnets, gwNextHops, nodeAnnotator)
+		if err != nil {
+			return nil, err
+		}
+
+		gw.readyFunc = func() (bool, error) {
+			return gatewayReady(gwBridge.patchPort)
+		}
+
+		gw.initFunc = func() error {
+			klog.Info("Creating Local Gateway Openflow Manager")
+			err := setBridgeOfPorts(gwBridge)
+			if err != nil {
+				return err
+			}
+			gw.openflowManager, err = newLocalGatewayOpenflowManager(gwBridge)
+			return err
+		}
 	}
 
 	if config.Gateway.NodeportEnable {
@@ -63,20 +90,6 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 			return nil, err
 		}
 		gw.localPortWatcher = newLocalPortWatcher(gatewayIfAddrs, recorder)
-	}
-
-	gw.readyFunc = func() (bool, error) {
-		return gatewayReady(gwBridge.patchPort)
-	}
-
-	gw.initFunc = func() error {
-		klog.Info("Creating Local Gateway Openflow Manager")
-		err := setBridgeOfPorts(gwBridge)
-		if err != nil {
-			return err
-		}
-		gw.openflowManager, err = newLocalGatewayOpenflowManager(gwBridge)
-		return err
 	}
 
 	return gw, nil
@@ -259,7 +272,7 @@ func (l *localPortWatcher) SyncServices(serviceInterface []interface{}) {
 			klog.Errorf("Spurious object in syncServices: %v", serviceInterface)
 			continue
 		}
-		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, false)...)
+		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, []string{l.gatewayIPv4, l.gatewayIPv6}, false)...)
 	}
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
 		recreateIPTRules("nat", chain, keepIPTRules)
