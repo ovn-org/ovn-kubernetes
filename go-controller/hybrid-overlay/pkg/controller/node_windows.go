@@ -99,7 +99,7 @@ func ensureBaseNetwork() error {
 	_, fakeSubnetCIDR, _ := net.ParseCIDR("100.64.0.0/30")
 	fakeSubnetGateway := net.ParseIP("100.64.0.2")
 
-	baseNetwork := GetExistingNetwork(baseNetworkName, fakeSubnetCIDR.String(), fakeSubnetGateway.String())
+	baseNetwork := EnsureExistingNetworkIsValid(baseNetworkName, fakeSubnetCIDR.String(), fakeSubnetGateway.String())
 	if baseNetwork != nil {
 		// nothing to do
 		return nil
@@ -256,7 +256,7 @@ func (n *NodeController) initSelf(node *kapi.Node, nodeSubnet *net.IPNet) error 
 		return fmt.Errorf("the hybrid overlay VXLAN port cannot be greater than 65535. Current value: %v", config.HybridOverlay.VXLANPort)
 	}
 
-	network := GetExistingNetwork(networkName, nodeSubnet.String(), gatewayAddress.String())
+	network := EnsureExistingNetworkIsValid(networkName, nodeSubnet.String(), gatewayAddress.String())
 	if network == nil {
 		// Create the overlay network
 		networkInfo := NetworkInfo{
@@ -318,7 +318,7 @@ func (n *NodeController) initSelf(node *kapi.Node, nodeSubnet *net.IPNet) error 
 			if len(policySettings.Address) == 0 {
 				return fmt.Errorf("error creating the network: no DRMAC address")
 			}
-			if err := n.kube.SetAnnotationsOnNode(node, map[string]interface{}{
+			if err := n.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{
 				types.HybridOverlayDRMAC: policySettings.Address,
 			}); err != nil {
 				klog.Errorf("Failed to set DRMAC annotation on node: %v", err)

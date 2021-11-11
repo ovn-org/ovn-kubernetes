@@ -7,7 +7,7 @@ import (
 )
 
 // OvsMap is the JSON map structure used for OVSDB
-// RFC 7047 uses the following notation for map as JSON doesnt support non-string keys for maps.
+// RFC 7047 uses the following notation for map as JSON doesn't support non-string keys for maps.
 // A 2-element JSON array that represents a database map value.  The
 // first element of the array must be the string "map", and the
 // second element must be an array of zero or more <pair>s giving the
@@ -34,7 +34,7 @@ func (o OvsMap) MarshalJSON() ([]byte, error) {
 	return []byte("[\"map\",[]]"), nil
 }
 
-// UnmarshalJSON unmarshalls an OVSDB style Map from a byte array
+// UnmarshalJSON unmarshals an OVSDB style Map from a byte array
 func (o *OvsMap) UnmarshalJSON(b []byte) (err error) {
 	var oMap []interface{}
 	o.GoMap = make(map[interface{}]interface{})
@@ -42,6 +42,21 @@ func (o *OvsMap) UnmarshalJSON(b []byte) (err error) {
 		innerSlice := oMap[1].([]interface{})
 		for _, val := range innerSlice {
 			f := val.([]interface{})
+			var k interface{}
+			switch f[0].(type) {
+			case []interface{}:
+				vSet := f[0].([]interface{})
+				if len(vSet) != 2 || vSet[0] == "map" {
+					return &json.UnmarshalTypeError{Value: reflect.ValueOf(oMap).String(), Type: reflect.TypeOf(*o)}
+				}
+				goSlice, err := ovsSliceToGoNotation(vSet)
+				if err != nil {
+					return err
+				}
+				k = goSlice
+			default:
+				k = f[0]
+			}
 			switch f[1].(type) {
 			case []interface{}:
 				vSet := f[1].([]interface{})
@@ -52,9 +67,9 @@ func (o *OvsMap) UnmarshalJSON(b []byte) (err error) {
 				if err != nil {
 					return err
 				}
-				o.GoMap[f[0]] = goSlice
+				o.GoMap[k] = goSlice
 			default:
-				o.GoMap[f[0]] = f[1]
+				o.GoMap[k] = f[1]
 			}
 		}
 	}

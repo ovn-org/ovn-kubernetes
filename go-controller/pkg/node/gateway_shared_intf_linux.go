@@ -136,7 +136,7 @@ func deleteLocalNodeAccessBridge() error {
 // If A Service External Traffic Policy==Local and backend is a host-networked pod
 // we must steer traffic from host -> svc straight to the host instead of into OVN
 func addSharedGatewayIptRules(service *kapi.Service, hasLocalHostEndpoint bool) {
-	rules := getGatewayIPTRules(service, nil, hasLocalHostEndpoint)
+	rules := getGatewayIPTRules(service, hasLocalHostEndpoint)
 
 	if err := addIptRules(rules); err != nil {
 		klog.Errorf("Failed to add iptables rules for service %s/%s: %v", service.Namespace, service.Name, err)
@@ -144,7 +144,7 @@ func addSharedGatewayIptRules(service *kapi.Service, hasLocalHostEndpoint bool) 
 }
 
 func delSharedGatewayIptRules(service *kapi.Service, hasLocalHostEndpoint bool) {
-	rules := getGatewayIPTRules(service, nil, hasLocalHostEndpoint)
+	rules := getGatewayIPTRules(service, hasLocalHostEndpoint)
 
 	if err := delIptRules(rules); err != nil {
 		klog.Errorf("Failed to delete iptables rules for service %s/%s: %v", service.Namespace, service.Name, err)

@@ -48,8 +48,12 @@ var _ = Describe("cnismartnic tests", func() {
 				SandboxId: pr.SandboxID,
 			}
 			expectedAnnot, err := smartNicCd.AsAnnotation()
+			annnot := make(map[string]interface{}, len(expectedAnnot))
+			for key, val := range expectedAnnot {
+				annnot[key] = val
+			}
 			Expect(err).ToNot(HaveOccurred())
-			fakeKubeInterface.On("SetAnnotationsOnPod", pr.PodNamespace, pr.PodName, expectedAnnot).Return(nil)
+			fakeKubeInterface.On("SetAnnotationsOnPod", pr.PodNamespace, pr.PodName, annnot).Return(nil)
 			err = pr.addSmartNICConnectionDetailsAnnot(&fakeKubeInterface)
 			Expect(err).ToNot(HaveOccurred())
 

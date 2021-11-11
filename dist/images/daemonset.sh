@@ -35,6 +35,10 @@ OVNKUBE_LOGFILE_MAXAGE=""
 OVN_ACL_LOGGING_RATE_LIMIT=""
 OVN_MASTER_COUNT=""
 OVN_REMOTE_PROBE_INTERVAL=""
+OVN_MONITOR_ALL=""
+OVN_ENABLE_LFLOW_CACHE=""
+OVN_LFLOW_CACHE_LIMIT=""
+OVN_LFLOW_CACHE_LIMIT_KB=""
 OVN_HYBRID_OVERLAY_ENABLE=""
 OVN_DISABLE_SNAT_MULTIPLE_GWS=""
 OVN_DISABLE_PKT_MTU_CHECK=""
@@ -42,6 +46,7 @@ OVN_EMPTY_LB_EVENTS=""
 OVN_MULTICAST_ENABLE=""
 OVN_EGRESSIP_ENABLE=
 OVN_EGRESSFIREWALL_ENABLE=
+OVN_DISABLE_OVN_IFACE_ID_VER="false"
 OVN_V4_JOIN_SUBNET=""
 OVN_V6_JOIN_SUBNET=""
 OVN_NETFLOW_TARGETS=""
@@ -49,6 +54,7 @@ OVN_SFLOW_TARGETS=""
 OVN_IPFIX_TARGETS=""
 OVN_HOST_NETWORK_NAMESPACE=""
 OVN_EX_GW_NETWORK_INTERFACE=""
+OVNKUBE_NODE_MGMT_PORT_NETDEV=""
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -66,6 +72,18 @@ while [ "$1" != "" ]; do
     ;;
   --gateway-options)
     OVN_GATEWAY_OPTS=$VALUE
+    ;;
+  --ovn-monitor-all)
+    OVN_MONITOR_ALL=$VALUE
+    ;;
+  --ovn-enable-lflow-cache)
+    OVN_ENABLE_LFLOW_CACHE=$VALUE
+    ;;
+  --ovn-lflow-cache-limit)
+    OVN_LFLOW_CACHE_LIMIT=$VALUE
+    ;;
+  --ovn-lflow-cache-limit-kb)
+    OVN_LFLOW_CACHE_LIMIT_KB=$VALUE
     ;;
   --net-cidr)
     OVN_NET_CIDR=$VALUE
@@ -163,6 +181,9 @@ while [ "$1" != "" ]; do
   --egress-ip-enable)
     OVN_EGRESSIP_ENABLE=$VALUE
     ;;
+  --disabe-ovn-iface-id-ver)
+    OVN_DISABLE_OVN_IFACE_ID_VER=$VALUE
+    ;;
   --egress-firewall-enable)
     OVN_EGRESSFIREWALL_ENABLE=$VALUE
     ;;
@@ -186,6 +207,9 @@ while [ "$1" != "" ]; do
     ;;
   --ex-gw-network-interface)
     OVN_EX_GW_NETWORK_INTERFACE=$VALUE
+    ;;
+  --ovnkube-node-mgmt-port-netdev)
+    OVNKUBE_NODE_MGMT_PORT_NETDEV=$VALUE
     ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
@@ -244,6 +268,8 @@ ovn_egress_ip_enable=${OVN_EGRESSIP_ENABLE}
 echo "ovn_egress_ip_enable: ${ovn_egress_ip_enable}"
 ovn_egress_firewall_enable=${OVN_EGRESSFIREWALL_ENABLE}
 echo "ovn_egress_firewall_enable: ${ovn_egress_firewall_enable}"
+ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER}
+echo "ovn_disable_ovn_iface_id_ver: ${ovn_disable_ovn_iface_id_ver}"
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
 echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS}
@@ -264,6 +290,14 @@ ovn_master_count=${OVN_MASTER_COUNT:-"1"}
 echo "ovn_master_count: ${ovn_master_count}"
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-"100000"}
 echo "ovn_remote_probe_interval: ${ovn_remote_probe_interval}"
+ovn_monitor_all=${OVN_MONITOR_ALL}
+echo "ovn_monitor_all: ${ovn_monitor_all}"
+ovn_enable_lflow_cache=${OVN_ENABLE_LFLOW_CACHE}
+echo "ovn_enable_lflow_cache: ${ovn_enable_lflow_cache}"
+ovn_lflow_cache_limit=${OVN_LFLOW_CACHE_LIMIT}
+echo "ovn_lflow_cache_limit: ${ovn_lflow_cache_limit}"
+ovn_lflow_cache_limit_kb=${OVN_LFLOW_CACHE_LIMIT_KB}
+echo "ovn_lflow_cache_limit_kb: ${ovn_lflow_cache_limit_kb}"
 ovn_nb_port=${OVN_NB_PORT:-6641}
 echo "ovn_nb_port: ${ovn_nb_port}"
 ovn_sb_port=${OVN_SB_PORT:-6642}
@@ -286,6 +320,8 @@ ovn_ipfix_targets=${OVN_IPFIX_TARGETS}
 echo "ovn_ipfix_targets: ${ovn_ipfix_targets}"
 ovn_ex_gw_networking_interface=${OVN_EX_GW_NETWORK_INTERFACE}
 echo "ovn_ex_gw_networking_interface: ${ovn_ex_gw_networking_interface}"
+ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV}
+echo "ovnkube_node_mgmt_port_netdev: ${ovnkube_node_mgmt_port_netdev}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -307,15 +343,20 @@ ovn_image=${image} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
+  ovn_monitor_all=${ovn_monitor_all} \
+  ovn_enable_lflow_cache=${ovn_enable_lflow_cache} \
+  ovn_lflow_cache_limit=${ovn_lflow_cache_limit} \
+  ovn_lflow_cache_limit_kb=${ovn_lflow_cache_limit_kb} \
   ovn_netflow_targets=${ovn_netflow_targets} \
   ovn_sflow_targets=${ovn_sflow_targets} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   ovnkube_app_name=ovnkube-node \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
 
-# ovnkube node for smart-nic-host nic daemonset
-# TODO: we probably dont need all of these when running on smart-nic host
+# ovnkube node for smart-nic host daemonset
+# TODO: We probably dont need all of these when running on smart-nic host
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
   kind=${KIND} \
@@ -335,11 +376,11 @@ ovn_image=${image} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
-  ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_netflow_targets=${ovn_netflow_targets} \
   ovn_sflow_targets=${ovn_sflow_targets} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
   ovnkube_app_name=ovnkube-node-smart-nic-host \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node-smart-nic-host.yaml
 

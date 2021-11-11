@@ -1,7 +1,6 @@
 package addressset
 
 import (
-	goovn "github.com/ebay/go-ovn"
 	"net"
 	"strings"
 	"sync"
@@ -50,12 +49,29 @@ func (f *FakeAddressSetFactory) NewAddressSet(name string, ips []net.IP) (Addres
 	return set, nil
 }
 
-// EnsureAddressSet returns nil
-func (f *FakeAddressSetFactory) EnsureAddressSet(name string) error {
-	return nil
+// EnsureAddressSet returns set object
+func (f *FakeAddressSetFactory) EnsureAddressSet(name string) (AddressSet, error) {
+	f.Lock()
+	defer f.Unlock()
+	_, ok := f.sets[name]
+	gomega.Expect(ok).To(gomega.BeFalse())
+	set, err := newFakeAddressSets(name, []net.IP{}, f.removeAddressSet)
+	if err != nil {
+		return nil, err
+	}
+	ip4ASName, ip6ASName := MakeAddressSetName(name)
+	if set.ipv4 != nil {
+		f.sets[ip4ASName] = set.ipv4
+	}
+	if set.ipv6 != nil {
+		f.sets[ip6ASName] = set.ipv6
+	}
+	return set, nil
 }
 
 func (f *FakeAddressSetFactory) ProcessEachAddressSet(iteratorFn AddressSetIterFunc) error {
+	f.Lock()
+	defer f.Unlock()
 	asNames := sets.String{}
 	for _, set := range f.sets {
 		asName := truncateSuffixFromAddressSet(set.getName())
@@ -134,32 +150,37 @@ func (f *FakeAddressSetFactory) ExpectAddressSetWithIPs(name string, ips []strin
 	gomega.Expect(lenAddressSet).To(gomega.Equal(len(ips)))
 }
 
+func (f *FakeAddressSetFactory) EventuallyExpectAddressSetWithIPs(name string, ips []string) {
+	gomega.Eventually(func() {
+		f.ExpectAddressSetWithIPs(name, ips)
+	}).Should(gomega.Succeed())
+}
+
 // ExpectEmptyAddressSet ensures the named address set exists with no IPs
 func (f *FakeAddressSetFactory) ExpectEmptyAddressSet(name string) {
 	f.ExpectAddressSetWithIPs(name, nil)
 }
 
-// EventuallyExpectEmptyAddressSet ensures the named address set eventually exists with no IPs
-func (f *FakeAddressSetFactory) EventuallyExpectEmptyAddressSet(name string) {
-	name4, _ := MakeAddressSetName(name)
-	gomega.Eventually(func() bool {
-		as := f.getAddressSet(name4)
-		if as == nil {
-			return false
-		}
-		defer as.Unlock()
-		return len(as.ips) == 0
-	}).Should(gomega.BeTrue())
+// EventuallyExpectEmptyAddressSetExist ensures the named address set eventually exists with no IPs
+func (f *FakeAddressSetFactory) EventuallyExpectEmptyAddressSetExist(name string) {
+	f.EventuallyExpectAddressSetWithIPs(name, nil)
 }
 
-// EventuallyExpectNoAddressSet ensures the named address set eventually does not exist
-func (f *FakeAddressSetFactory) EventuallyExpectNoAddressSet(name string) {
+// ExpectAddressSetExist ensures the named address set eventually exiss
+func (f *FakeAddressSetFactory) ExpectAddressSetExist(name string) {
 	gomega.Eventually(func() bool {
 		f.Lock()
 		defer f.Unlock()
 		_, ok := f.sets[name]
 		return ok
-	}).Should(gomega.BeFalse())
+	}).Should(gomega.BeTrue())
+}
+
+// EventuallyExpectNoAddressSet ensures the named address set eventually does not exist
+func (f *FakeAddressSetFactory) EventuallyExpectNoAddressSet(name string) {
+	gomega.Eventually(func() {
+		f.ExpectAddressSetExist(name)
+	}).ShouldNot(gomega.Succeed())
 }
 
 type removeFunc func(string)
@@ -251,20 +272,26 @@ func (as *fakeAddressSets) AddIPs(ips []net.IP) error {
 	return nil
 }
 
-func (as *fakeAddressSets) UpdateIPCache(ips []net.IP) {
-}
+func (as *fakeAddressSets) GetIPs() ([]string, []string) {
+	as.Lock()
+	defer as.Unlock()
 
-func (as *fakeAddressSets) PrepareAddIPsCmds(ips []net.IP) ([]*goovn.OvnCommand, error) {
-	return nil, nil
+	var v4ips []string
+	var v6ips []string
+
+	if as.ipv6 != nil {
+		v6ips, _ = as.ipv6.getIPs()
+	}
+	if as.ipv4 != nil {
+		v4ips, _ = as.ipv4.getIPs()
+	}
+
+	return v4ips, v6ips
 }
 
 func (as *fakeAddressSets) SetIPs(ips []net.IP) error {
 	// NOOP
 	return nil
-}
-
-func (as *fakeAddressSets) PrepareDeleteIPsCmds(ips []net.IP) ([]*goovn.OvnCommand, error) {
-	return nil, nil
 }
 
 func (as *fakeAddressSets) DeleteIPs(ips []net.IP) error {
@@ -320,6 +347,17 @@ func (as *fakeAddressSet) addIP(ip net.IP) error {
 		as.ips[ip.String()] = ip
 	}
 	return nil
+}
+
+func (as *fakeAddressSet) getIPs() ([]string, error) {
+	as.Lock()
+	defer as.Unlock()
+	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
+	uniqIPs := make([]string, 0, len(as.ips))
+	for _, ip := range as.ips {
+		uniqIPs = append(uniqIPs, ip.String())
+	}
+	return uniqIPs, nil
 }
 
 func (as *fakeAddressSet) deleteIP(ip net.IP) error {

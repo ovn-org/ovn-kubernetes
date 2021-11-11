@@ -3,6 +3,7 @@
 package mocks
 
 import (
+	"errors"
 	goovn "github.com/ebay/go-ovn"
 	libovsdb "github.com/ebay/libovsdb"
 
@@ -221,6 +222,18 @@ func (_m *Client) ACLSetName(aclUUID string, aclName string) (*goovn.OvnCommand,
 	return r0, r1
 }
 
+func (_m *Client) LSPGetUUID(uuid string) (*goovn.LogicalSwitchPort, error) {
+	return nil, errors.New("ASAddIPs method is not implemented yet")
+}
+
+func (_m *Client) ASAddIPs(name, uuid string, addrs []string) (*goovn.OvnCommand, error) {
+	return nil, errors.New("ASAddIPs method is not implemented yet")
+}
+
+func (_m *Client) ASDelIPs(name, uuid string, addrs []string) (*goovn.OvnCommand, error) {
+	return nil, errors.New("ASDelIPs method is not implemented yet")
+}
+
 // ASAdd provides a mock function with given fields: name, addrs, external_ids
 func (_m *Client) ASAdd(name string, addrs []string, external_ids map[string]string) (*goovn.OvnCommand, error) {
 	ret := _m.Called(name, addrs, external_ids)
@@ -314,7 +327,7 @@ func (_m *Client) ASList() ([]*goovn.AddressSet, error) {
 }
 
 // ASUpdate provides a mock function with given fields: name, addrs, external_ids
-func (_m *Client) ASUpdate(name string, addrs []string, external_ids map[string]string) (*goovn.OvnCommand, error) {
+func (_m *Client) ASUpdate(name string, uuid string, addrs []string, external_ids map[string]string) (*goovn.OvnCommand, error) {
 	ret := _m.Called(name, addrs, external_ids)
 
 	var r0 *goovn.OvnCommand
@@ -1624,7 +1637,7 @@ func (_m *Client) LSList() ([]*goovn.LogicalSwitch, error) {
 }
 
 // LSPAdd provides a mock function with given fields: ls, lsp
-func (_m *Client) LSPAdd(ls string, lsp string) (*goovn.OvnCommand, error) {
+func (_m *Client) LSPAdd(ls string, uuid string, lsp string) (*goovn.OvnCommand, error) {
 	ret := _m.Called(ls, lsp)
 
 	var r0 *goovn.OvnCommand

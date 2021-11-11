@@ -10,28 +10,26 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-// retry counters for cluster statuses
-var nbClusterStatusRetryCnt, sbClusterStatusRetryCnt int32
+var DBError = errors.New("error interacting with OVN database")
 
-const maxClusterStatusRetry = 10
+const maxDBRetry = 10
 
 type dbProperties struct {
-	appCtl                func(args ...string) (string, string, error)
-	dbName                string
-	electionTimer         int
-	clusterStatusRetryCnt *int32
+	appCtl        func(timeout int, args ...string) (string, string, error)
+	dbName        string
+	electionTimer int
 }
 
 func RunDBChecker(kclient kube.Interface, stopCh <-chan struct{}) {
@@ -75,14 +73,37 @@ func ensureOvnDBState(db string, kclient kube.Interface, stopCh <-chan struct{})
 	}
 	properties := propertiesForDB(db)
 
+	var dbRetry int32
+
 	for {
 		select {
 		case <-ticker.C:
 			klog.V(5).Infof("Ensure routines for Raft db: %s kicked off by ticker", db)
-			ensureLocalRaftServerID(db)
-			ensureClusterRaftMembership(db, kclient)
+			if err := ensureLocalRaftServerID(db); err != nil {
+				klog.Error(err)
+				if errors.Is(err, DBError) {
+					updateDBRetryCounter(&dbRetry, db)
+				}
+			} else {
+				dbRetry = 0
+			}
+			if err := ensureClusterRaftMembership(db, kclient); err != nil {
+				klog.Error(err)
+				if errors.Is(err, DBError) {
+					updateDBRetryCounter(&dbRetry, db)
+				}
+			} else {
+				dbRetry = 0
+			}
 			if properties.electionTimer != 0 {
-				ensureElectionTimeout(properties)
+				if err := ensureElectionTimeout(properties); err != nil {
+					klog.Error(err)
+					if errors.Is(err, DBError) {
+						updateDBRetryCounter(&dbRetry, db)
+					}
+				} else {
+					dbRetry = 0
+				}
 			}
 		case <-stopCh:
 			ticker.Stop()
@@ -91,117 +112,115 @@ func ensureOvnDBState(db string, kclient kube.Interface, stopCh <-chan struct{})
 	}
 }
 
+func updateDBRetryCounter(retryCounter *int32, db string) {
+	if *retryCounter > maxDBRetry {
+		//delete the db file and start master
+		resetRaftDB(db)
+		*retryCounter = 0
+	} else {
+		*retryCounter += 1
+		klog.Infof("Failed to get cluster status for: %s, number of retries: %d", db, *retryCounter)
+	}
+}
+
 // ensureLocalRaftServerID is used to ensure there is no stale member in the Raft cluster with our address
-func ensureLocalRaftServerID(db string) {
+func ensureLocalRaftServerID(db string) error {
 	var dbName string
-	var appCtl func(args ...string) (string, string, error)
-	clusterStatusRetryCnt := &nbClusterStatusRetryCnt
+	var appCtl func(timeout int, args ...string) (string, string, error)
 	if strings.Contains(db, "ovnnb") {
 		dbName = "OVN_Northbound"
-		appCtl = util.RunOVNNBAppCtl
+		appCtl = util.RunOVNNBAppCtlWithTimeout
 	} else {
 		dbName = "OVN_Southbound"
-		appCtl = util.RunOVNSBAppCtl
-		clusterStatusRetryCnt = &sbClusterStatusRetryCnt
+		appCtl = util.RunOVNSBAppCtlWithTimeout
 	}
 
-	out, stderr, err := util.RunOVSDBTool("db-sid", db)
+	out, stderr, err := appCtl(5, "cluster/sid", dbName)
 	if err != nil {
-		klog.Warningf("Unable to get db server ID for: %s, stderr: %v, err: %v", db, stderr, err)
-		return
+		return fmt.Errorf("%w: unable to get db server ID for: %s, stderr: %v, err: %v", DBError, db, stderr, err)
 	}
 	if len(out) < 4 {
-		klog.Errorf("Invalid db id found: %s for db: %s", out, db)
-		return
+		return fmt.Errorf("%w: invalid db id found: %s for db: %s", DBError, out, db)
 	}
 	// server ID in raft membership is only first 4 char prefix
 	serverID := out[:4]
-	out, stderr, err = appCtl("cluster/status", dbName)
+	out, stderr, err = appCtl(5, "cluster/status", dbName)
 	if err != nil {
-		klog.Warningf("Unable to get cluster status for: %s, stderr: %v, err: %v", db, stderr, err)
-		if atomic.LoadInt32(clusterStatusRetryCnt) > maxClusterStatusRetry {
-			//delete the db file and start master
-			resetRaftDB(db)
-			atomic.StoreInt32(clusterStatusRetryCnt, 0)
-		} else {
-			atomic.AddInt32(clusterStatusRetryCnt, 1)
-			klog.Infof("Failed to get cluster status for: %s, number of retries: %d", db, *clusterStatusRetryCnt)
-		}
-		return
+		return fmt.Errorf("%w: unable to get cluster status for: %s, stderr: %v, err: %v", DBError, db, stderr, err)
 	}
-	// on retrieving cluster/status successfully reset the retry counter.
-	atomic.StoreInt32(clusterStatusRetryCnt, 0)
 
-	r, _ := regexp.Compile(`Address: *((ssl|tcp):[?[a-z0-9.:]+]?)`)
+	r := regexp.MustCompile(`Address: *((ssl|tcp):[?[a-z0-9.:]+]?)`)
 	matches := r.FindStringSubmatch(out)
 	if len(matches) < 2 {
-		klog.Warningf("Unable to parse Address for db: %s, output: %s", db, out)
-		return
+		return fmt.Errorf("unable to parse Address for db: %s, output: %s", db, out)
 	}
 	addr := matches[1]
+
+	// make sure IPV6 addresses are correctly escaped in regexp
+	escapingBrackets := strings.NewReplacer("[", "\\[", "]", "\\]")
+	addr = escapingBrackets.Replace(addr)
+
 	// look for current servers in raft cluster with the same address
-	r, _ = regexp.Compile("([a-z0-9]{4}) at " + addr)
+	r = regexp.MustCompile("([a-z0-9]{4}) at " + addr)
 	members := r.FindAllStringSubmatch(out, -1)
 	for _, member := range members {
 		if len(member) < 2 {
-			klog.Warningf("Unable to find server id submatch in %s", member)
-			return
+			return fmt.Errorf("unable to find server id submatch in %s from %s", member, db)
 		}
 		if member[1] != serverID {
-			// stale entry found for this node with same adddress, need to kick
-			klog.Infof("Previous stale member found: %s...kicking", member[1])
-			_, stderr, err = appCtl("cluster/kick", dbName, member[1])
+			// stale entry found for this node with same address, need to kick
+			klog.Infof("Previous stale member found in %s: %s... kicking", db, member[1])
+			_, stderr, err = appCtl(5, "cluster/kick", dbName, member[1])
 			if err != nil {
 				klog.Errorf("Error while kicking old Raft member: %s, for address: %s in db: %s,"+
 					"stderr: %v, error: %v", member[1], addr, db, stderr, err)
 			}
 		}
 	}
+	return nil
 }
 
 // ensureClusterRaftMembership ensures there are no unknown members in the current Raft cluster
-func ensureClusterRaftMembership(db string, kclient kube.Interface) {
+func ensureClusterRaftMembership(db string, kclient kube.Interface) error {
 	var knownMembers, knownServers []string
 
 	var dbName string
-	var appCtl func(args ...string) (string, string, error)
-	clusterStatusRetryCnt := &nbClusterStatusRetryCnt
+	var appCtl func(timeout int, args ...string) (string, string, error)
+
+	// IPv4 example: tcp:172.18.0.2:6641
+	// IPv6 example: tcp:[fc00:f853:ccd:e793::3]:6642
+	dbServerRegexp := `(ssl|tcp):(\[?([a-z0-9.:]+)\]?:\d+)`
+	r := regexp.MustCompile(dbServerRegexp)
 
 	if strings.Contains(db, "ovnnb") {
 		dbName = "OVN_Northbound"
-		appCtl = util.RunOVNNBAppCtl
+		appCtl = util.RunOVNNBAppCtlWithTimeout
 		knownMembers = strings.Split(config.OvnNorth.Address, ",")
 	} else {
 		dbName = "OVN_Southbound"
-		appCtl = util.RunOVNSBAppCtl
+		appCtl = util.RunOVNSBAppCtlWithTimeout
 		knownMembers = strings.Split(config.OvnSouth.Address, ",")
-		clusterStatusRetryCnt = &sbClusterStatusRetryCnt
 	}
 	for _, knownMember := range knownMembers {
-		server := strings.Split(knownMember, ":")
-		if len(server) < 3 {
-			klog.Warningf("Failed to parse known member: %s", knownMember)
+		match := r.FindStringSubmatch(knownMember)
+		if len(match) < 4 {
+			klog.Warningf("Failed to parse known %s member: %s", dbName, knownMember)
 			continue
 		}
-		knownServers = append(knownServers, server[1])
-	}
-	out, stderr, err := appCtl("cluster/status", dbName)
-	if err != nil {
-		klog.Warningf("Unable to get cluster status for: %s, stderr: %v, err: %v", db, stderr, err)
-		if atomic.LoadInt32(clusterStatusRetryCnt) > maxClusterStatusRetry {
-			//delete the db file and start master
-			resetRaftDB(db)
-			atomic.StoreInt32(clusterStatusRetryCnt, 0)
-		} else {
-			atomic.AddInt32(clusterStatusRetryCnt, 1)
-			klog.Infof("Failed to get cluster status for: %s, number of retries: %d", db, *clusterStatusRetryCnt)
+		server := match[3]
+		if !(utilnet.IsIPv4String(server) || utilnet.IsIPv6String(server)) {
+			klog.Warningf("Found invalid value for IP address of known %s member %s: %s",
+				dbName, knownMember, server)
+			continue
 		}
-		return
+		knownServers = append(knownServers, server)
 	}
-	// on retrieving cluster/status successfully reset the retry counter.
-	atomic.StoreInt32(clusterStatusRetryCnt, 0)
+	out, stderr, err := appCtl(5, "cluster/status", dbName)
+	if err != nil {
+		return fmt.Errorf("%w: Unable to get cluster status for: %s, stderr: %s, err: %v", DBError, db, stderr, err)
+	}
 
-	r, _ := regexp.Compile(`([a-z0-9]{4}) at ((ssl|tcp):\[?[a-z0-9.:]+\]?)`)
+	r = regexp.MustCompile(`([a-z0-9]{4}) at ` + dbServerRegexp)
 	members := r.FindAllStringSubmatch(out, -1)
 	kickedMembersCount := 0
 	dbAppLabel := map[string]string{"ovn-db-pod": "true"}
@@ -210,30 +229,30 @@ func ensureClusterRaftMembership(db string, kclient kube.Interface) {
 			MatchLabels: dbAppLabel,
 		})
 	if err != nil {
-		klog.Warningf("Unable to get db pod list from kubeclient: %v", err)
-		return
+		return fmt.Errorf("unable to get db pod list from kubeclient: %v", err)
 	}
 	for _, member := range members {
-		if len(member) < 3 {
-			klog.Warningf("Unable to find parse member: %s", member)
-			return
+		if len(member) < 5 {
+			return fmt.Errorf("unable to parse member in %s: %s", db, member)
 		}
-		matchedServer := strings.Split(member[2], ":")
-		if len(matchedServer) < 3 {
-			klog.Warningf("Unable to parse address portion of the member entry: %s", matchedServer)
-			return
+		matchedServer := member[4]
+		if !(utilnet.IsIPv4String(matchedServer) || utilnet.IsIPv6String(matchedServer)) {
+			klog.Warningf("Unable to parse address portion of member entry in %s: %s",
+				db, matchedServer)
+			continue
 		}
 		memberFound := false
 		for _, knownServer := range knownServers {
-			if knownServer == matchedServer[1] {
+			if knownServer == matchedServer {
 				memberFound = true
 				break
 			}
 		}
+		// check if there's a db pod with the same IP address, then it's a match
 		if !memberFound {
 			for _, dbPod := range dbPods.Items {
 				for _, ip := range dbPod.Status.PodIPs {
-					if ip.IP == matchedServer[1] {
+					if ip.IP == matchedServer {
 						memberFound = true
 						break
 					}
@@ -242,67 +261,58 @@ func ensureClusterRaftMembership(db string, kclient kube.Interface) {
 		}
 		if !memberFound && (len(members)-kickedMembersCount) > 3 {
 			// unknown member and we have enough members its safe to kick the unknown address
-			klog.Infof("Unknown Raft member found: %s, %s...kicking", member[1], member[2])
-			_, stderr, err = appCtl("cluster/kick", dbName, member[1])
+			klog.Infof("Unknown Raft member found in %s: %s, %s... kicking", db, member[1], member[3])
+			_, stderr, err = appCtl(5, "cluster/kick", dbName, member[1])
 			if err != nil {
 				// warn only: we might fail to kick since other nodes will also be trying to kick the member
 				klog.Warningf("Error while kicking old Raft member: %s, for address: %s in db: %s,"+
-					"stderr: %v, err: %v", member[1], member[2], db, stderr, err)
+					"stderr: %v, err: %v", member[1], member[3], db, stderr, err)
 				continue
 			}
 			kickedMembersCount = kickedMembersCount + 1
 		}
 	}
+	return nil
 }
 
-// ensureClusterRaftMembership ensures there are no unknown members in the current Raft cluster
-func ensureElectionTimeout(db *dbProperties) {
-	out, stderr, err := db.appCtl("cluster/status", db.dbName)
+// ensureElectionTimeout ensures that the election timer is increased on the leader only
+// the election timer can be raised to max 2 times the current election timer per call of this function
+func ensureElectionTimeout(db *dbProperties) error {
+	out, stderr, err := db.appCtl(5, "cluster/status", db.dbName)
 	if err != nil {
-		klog.Warningf("Unable to get cluster status for: %s, stderr: %v, err: %v", db, stderr, err)
-		if atomic.LoadInt32(db.clusterStatusRetryCnt) > maxClusterStatusRetry {
-			//delete the db file and start master
-			atomic.StoreInt32(db.clusterStatusRetryCnt, 0)
-		} else {
-			atomic.AddInt32(db.clusterStatusRetryCnt, 1)
-			klog.Infof("Failed to get cluster status for: %s, number of retries: %d", db, *db.clusterStatusRetryCnt)
-		}
-		return
+		return fmt.Errorf("%w: unable to get cluster status for: %s, stderr: %v, err: %v", DBError, db.dbName, stderr, err)
 	}
-	// on retrieving cluster/status successfully reset the retry counter.
-	atomic.StoreInt32(db.clusterStatusRetryCnt, 0)
 
 	if !strings.Contains(out, "Role: leader") { // we only update on the leader
-		return
+		return nil
 	}
 
-	r, _ := regexp.Compile(`Election timer: (\d+)`)
+	r := regexp.MustCompile(`Election timer: (\d+)`)
 	match := r.FindStringSubmatch(out)
 	if len(match) < 2 {
-		klog.Infof("Failed to get current election timer for %s from status", db.dbName)
-		return
+		return fmt.Errorf("failed to get current election timer for %s from status", db.dbName)
 	}
 	currentElectionTimer, err := strconv.Atoi(match[1])
 	if err != nil {
-		klog.Infof("Failed to convert election timer %v for %s", match[2], db.dbName)
-		return
+		return fmt.Errorf("failed to convert election timer %v for %s", match[2], db.dbName)
 	}
 	if currentElectionTimer == db.electionTimer {
-		return
+		return nil
 	}
 
-	max_election_timer := currentElectionTimer * 2
-	if db.electionTimer <= max_election_timer {
-		_, stderr, err := db.appCtl("cluster/change-election-timer", db.dbName, fmt.Sprint(db.electionTimer))
+	maxElectionTimer := currentElectionTimer * 2
+	if db.electionTimer <= maxElectionTimer {
+		_, stderr, err := db.appCtl(5, "cluster/change-election-timer", db.dbName, fmt.Sprint(db.electionTimer))
 		if err != nil {
-			klog.Infof("Failed to change election timer for %s %v %v", db.dbName, err, stderr)
+			return fmt.Errorf("failed to change election timer for %s %v %v", db.dbName, err, stderr)
 		}
-		return
+	} else {
+		_, stderr, err = db.appCtl(5, "cluster/change-election-timer", db.dbName, fmt.Sprint(maxElectionTimer))
+		if err != nil {
+			return fmt.Errorf("failed to change election timer for %s %v %v", db.dbName, err, stderr)
+		}
 	}
-	_, stderr, err = db.appCtl("cluster/change-election-timer", db.dbName, fmt.Sprint(max_election_timer))
-	if err != nil {
-		klog.Infof("Failed to change election timer for %s %v %v", db.dbName, err, stderr)
-	}
+	return nil
 }
 
 func resetRaftDB(db string) {
@@ -317,15 +327,15 @@ func resetRaftDB(db string) {
 	} else {
 		klog.Infof("Backed up the db to backupFile: %s", backupFile)
 		var dbName string
-		var appCtl func(args ...string) (string, string, error)
+		var appCtl func(timeout int, args ...string) (string, string, error)
 		if strings.Contains(db, "ovnnb") {
 			dbName = "OVN_Northbound"
-			appCtl = util.RunOVNNBAppCtl
+			appCtl = util.RunOVNNBAppCtlWithTimeout
 		} else {
 			dbName = "OVN_Southbound"
-			appCtl = util.RunOVNSBAppCtl
+			appCtl = util.RunOVNSBAppCtlWithTimeout
 		}
-		_, stderr, err := appCtl("exit")
+		_, stderr, err := appCtl(5, "exit")
 		if err != nil {
 			klog.Warningf("Unable to restart the ovn db: %s ,"+
 				"stderr: %v, err: %v", dbName, stderr, err)
@@ -337,7 +347,7 @@ func resetRaftDB(db string) {
 // EnableDBMemTrimming enables memory trimming on DB compaction for NBDB and SBDB. Every 10 minutes the DBs are compacted
 // and excess memory on the heap is freed. By enabling memory trimming, the freed memory will be returned back to the OS
 func EnableDBMemTrimming() error {
-	out, stderr, err := util.RunOVNNBAppCtl("list-commands")
+	out, stderr, err := util.RunOVNNBAppCtlWithTimeout(5, "list-commands")
 	if err != nil {
 		return fmt.Errorf("unable to list supported commands for ovn-appctl, stderr: %s, error: %v", stderr, err)
 	}
@@ -346,11 +356,11 @@ func EnableDBMemTrimming() error {
 			"memory growth")
 		return nil
 	}
-	_, stderr, err = util.RunOVNNBAppCtl("ovsdb-server/memory-trim-on-compaction", "on")
+	_, stderr, err = util.RunOVNNBAppCtlWithTimeout(5, "ovsdb-server/memory-trim-on-compaction", "on")
 	if err != nil {
 		return fmt.Errorf("unable to turn on memory trimming for NB DB, stderr: %s, error: %v", stderr, err)
 	}
-	_, stderr, err = util.RunOVNSBAppCtl("ovsdb-server/memory-trim-on-compaction", "on")
+	_, stderr, err = util.RunOVNSBAppCtlWithTimeout(5, "ovsdb-server/memory-trim-on-compaction", "on")
 	if err != nil {
 		return fmt.Errorf("unable to turn on memory trimming for SB DB, stderr: %s, error: %v", stderr, err)
 	}
@@ -360,16 +370,14 @@ func EnableDBMemTrimming() error {
 func propertiesForDB(db string) *dbProperties {
 	if strings.Contains(db, "ovnnb") {
 		return &dbProperties{
-			electionTimer:         int(config.OvnNorth.ElectionTimer) * 1000,
-			appCtl:                util.RunOVNNBAppCtl,
-			dbName:                "OVN_Northbound",
-			clusterStatusRetryCnt: &nbClusterStatusRetryCnt,
+			electionTimer: int(config.OvnNorth.ElectionTimer) * 1000,
+			appCtl:        util.RunOVNNBAppCtlWithTimeout,
+			dbName:        "OVN_Northbound",
 		}
 	}
 	return &dbProperties{
-		electionTimer:         int(config.OvnSouth.ElectionTimer) * 1000,
-		appCtl:                util.RunOVNSBAppCtl,
-		dbName:                "OVN_Southbound",
-		clusterStatusRetryCnt: &sbClusterStatusRetryCnt,
+		electionTimer: int(config.OvnSouth.ElectionTimer) * 1000,
+		appCtl:        util.RunOVNSBAppCtlWithTimeout,
+		dbName:        "OVN_Southbound",
 	}
 }
