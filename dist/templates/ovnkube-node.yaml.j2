@@ -163,8 +163,6 @@ spec:
           value: "{{ ovn_v4_join_subnet }}"
         - name: OVN_V6_JOIN_SUBNET
           value: "{{ ovn_v6_join_subnet }}"
-        - name: OVN_REMOTE_PROBE_INTERVAL
-          value: "{{ ovn_remote_probe_interval }}"
         - name: OVN_MULTICAST_ENABLE
           value: "{{ ovn_multicast_enable }}"
         - name: OVN_UNPRIVILEGED_MODE
@@ -174,10 +172,24 @@ spec:
         {% if ovnkube_app_name=="ovnkube-node" -%}
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
+        - name: OVN_DISABLE_OVN_IFACE_ID_VER
+          value: "{{ ovn_disable_ovn_iface_id_ver }}"
+        - name: OVN_REMOTE_PROBE_INTERVAL
+          value: "{{ ovn_remote_probe_interval }}"
+        - name: OVN_MONITOR_ALL
+          value: "{{ ovn_monitor_all }}"
+        - name: OVN_ENABLE_LFLOW_CACHE
+          value: "{{ ovn_enable_lflow_cache }}"
+        - name: OVN_LFLOW_CACHE_LIMIT
+          value: "{{ ovn_lflow_cache_limit }}"
+        - name: OVN_LFLOW_CACHE_LIMIT_KB
+          value: "{{ ovn_lflow_cache_limit_kb }}"
         {% endif -%}
         {% if ovnkube_app_name=="ovnkube-node-smart-nic-host" -%}
         - name: OVNKUBE_NODE_MODE
           value: "smart-nic-host"
+        - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
+          value: "{{ ovnkube_node_mgmt_port_netdev }}"
         {% endif -%}
         - name: OVN_HOST_NETWORK_NAMESPACE
           valueFrom:

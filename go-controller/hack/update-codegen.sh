@@ -10,7 +10,7 @@ if  ! ( command -v modelgen > /dev/null ); then
   olddir="${PWD}"
   builddir="$(mktemp -d)"
   cd "${builddir}"
-  GO111MODULE=on go install github.com/ovn-org/libovsdb/cmd/modelgen@v0.5.0
+  GO111MODULE=on go install github.com/ovn-org/libovsdb/cmd/modelgen@8b93f8d269af
   cd "${olddir}"
   if [[ "${builddir}" == /tmp/* ]]; then #paranoia
       rm -rf "${builddir}"

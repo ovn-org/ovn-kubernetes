@@ -42,7 +42,7 @@ func (mock *MockOVNClient) LSPGet(lsp string) (*goovn.LogicalSwitchPort, error) 
 }
 
 // Add logical port PORT on SWITCH
-func (mock *MockOVNClient) LSPAdd(ls string, lsp string) (*goovn.OvnCommand, error) {
+func (mock *MockOVNClient) LSPAdd(ls string, lsUUID string, lsp string) (*goovn.OvnCommand, error) {
 	klog.V(5).Infof("Adding lsp %s to switch %s", lsp, ls)
 	return &goovn.OvnCommand{
 		Exe: &MockExecution{
