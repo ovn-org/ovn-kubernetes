@@ -96,7 +96,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				keepACL := libovsdbops.BuildACL(
 					"",
 					t.DirectionFromLPort,
-					t.EgressFirewallStartPriority+1,
+					t.EgressFirewallStartPriority-1,
 					"",
 					nbdb.ACLActionDrop,
 					"",
@@ -106,6 +106,20 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				)
 				keepACL.UUID = libovsdbops.BuildNamedUUID()
 
+				// this ACL is not in the egress firewall priority range and should be untouched
+				otherACL := libovsdbops.BuildACL(
+					"",
+					t.DirectionFromLPort,
+					t.MinimumReservedEgressFirewallPriority-1,
+					"",
+					nbdb.ACLActionDrop,
+					"",
+					"",
+					false,
+					map[string]string{"egressFirewall": "default"},
+				)
+				otherACL.UUID = libovsdbops.BuildNamedUUID()
+
 				InitialNodeSwitch := &nbdb.LogicalSwitch{
 					UUID: libovsdbops.BuildNamedUUID(),
 					Name: node1Name,
@@ -114,6 +128,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				fakeOVN.dbSetup = libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
+						otherACL,
 						purgeACL,
 						keepACL,
 						InitialNodeSwitch,
@@ -146,10 +161,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				}
 
 				// Direction of both ACLs will be converted to
-				purgeACL.Direction = t.DirectionToLPort
 				keepACL.Direction = t.DirectionToLPort
 
 				expectedDatabaseState := []libovsdb.TestData{
+					otherACL,
 					keepACL,
 					finalNodeSwitch,
 				}
@@ -717,7 +732,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				keepACL := libovsdbops.BuildACL(
 					"",
 					t.DirectionFromLPort,
-					t.EgressFirewallStartPriority+1,
+					t.EgressFirewallStartPriority-1,
 					"",
 					nbdb.ACLActionDrop,
 					"",
@@ -726,6 +741,20 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					map[string]string{"egressFirewall": "default"},
 				)
 				keepACL.UUID = libovsdbops.BuildNamedUUID()
+
+				// this ACL is not in the egress firewall priority range and should be untouched
+				otherACL := libovsdbops.BuildACL(
+					"",
+					t.DirectionFromLPort,
+					t.MinimumReservedEgressFirewallPriority-1,
+					"",
+					nbdb.ACLActionDrop,
+					"",
+					"",
+					false,
+					map[string]string{"egressFirewall": "default"},
+				)
+				otherACL.UUID = libovsdbops.BuildNamedUUID()
 
 				InitialNodeSwitch := &nbdb.LogicalSwitch{
 					UUID: libovsdbops.BuildNamedUUID(),
@@ -743,6 +772,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					NBData: []libovsdbtest.TestData{
 						purgeACL,
 						keepACL,
+						otherACL,
 						InitialNodeSwitch,
 						InitialJoinSwitch,
 					},
@@ -780,10 +810,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				}
 
 				// Direction of both ACLs will be converted to
-				purgeACL.Direction = t.DirectionToLPort
 				keepACL.Direction = t.DirectionToLPort
 
 				expectedDatabaseState := []libovsdb.TestData{
+					otherACL,
 					keepACL,
 					finalNodeSwitch,
 					finalJoinSwitch,

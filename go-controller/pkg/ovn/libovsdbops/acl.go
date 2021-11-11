@@ -90,12 +90,11 @@ func FindRejectACLs(nbClient libovsdbclient.Client) ([]nbdb.ACL, error) {
 	return findACLsByPredicate(nbClient, rejectACLLookupFcn)
 }
 
-// FindACLsByPriorityRange looks up the acls with priorities within to a given inclusive range
-func FindACLsByPriorityRange(nbClient libovsdbclient.Client, startPriority, endPriority int) ([]nbdb.ACL, error) {
+// FindACLsByPriorityRange looks up the acls with priorities within a given inclusive range
+func FindACLsByPriorityRange(nbClient libovsdbclient.Client, minPriority, maxPriority int) ([]nbdb.ACL, error) {
 	// Lookup all ACLs in the specified priority range
 	priorityRangeLookupFcn := func(item *nbdb.ACL) bool {
-		return (item.Priority <= startPriority ||
-			item.Priority >= endPriority)
+		return (item.Priority >= minPriority) && (item.Priority <= maxPriority)
 	}
 
 	return findACLsByPredicate(nbClient, priorityRangeLookupFcn)
