@@ -160,8 +160,12 @@ func TestGetPortAddresses(t *testing.T) {
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			stopChan := make(chan struct{})
-			nbClient, _, _ := libovsdbtest.NewNBSBTestHarness(tc.dbSetup, stopChan)
+			nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(tc.dbSetup, nil)
+			if err != nil {
+				t.Fatal(fmt.Errorf("test: \"%s\" failed to create test harness: %v", tc.desc, err))
+			}
+			t.Cleanup(cleanup.Cleanup)
+
 			hardwareAddr, ips, err := GetPortAddresses(portName, nbClient)
 			if tc.isNotFound {
 				assert.Nil(t, hardwareAddr)
@@ -178,8 +182,6 @@ func TestGetPortAddresses(t *testing.T) {
 				assert.Equal(t, len(ips), 1)
 				assert.Equal(t, ips[0].String(), ipAddr)
 			}
-
-			close(stopChan)
 		})
 	}
 }

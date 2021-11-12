@@ -11,6 +11,7 @@ import (
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
@@ -809,10 +810,11 @@ subnet=%s
 
 var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	var (
-		app      *cli.App
-		f        *factory.WatchFactory
-		stopChan chan struct{}
-		wg       *sync.WaitGroup
+		app             *cli.App
+		f               *factory.WatchFactory
+		stopChan        chan struct{}
+		wg              *sync.WaitGroup
+		libovsdbCleanup *libovsdbtest.Cleanup
 	)
 
 	const (
@@ -829,9 +831,12 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		app.Flags = config.Flags
 		stopChan = make(chan struct{})
 		wg = &sync.WaitGroup{}
+
+		libovsdbCleanup = nil
 	})
 
 	ginkgo.AfterEach(func() {
+		libovsdbCleanup.Cleanup()
 		close(stopChan)
 		f.Shutdown()
 		wg.Wait()
@@ -1164,7 +1169,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedClusterPortGroup,
 				},
 			}
-			libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
+			var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedDatabaseState := []libovsdb.TestData{}
@@ -1430,6 +1436,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			wantErr:   true,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// create cluster config
@@ -1455,10 +1462,11 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			}
 
 			dbSetup := libovsdbtest.TestSetup{}
-			libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
+			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err := libovsdbtest.NewNBSBTestHarness(dbSetup)
 			if err != nil {
 				t.Fatalf("Error creating libovsdb test harness %v", err)
 			}
+			t.Cleanup(libovsdbCleanup.Cleanup)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,

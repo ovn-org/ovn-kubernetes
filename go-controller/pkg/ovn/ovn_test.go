@@ -48,6 +48,7 @@ type FakeOVN struct {
 	sbClient     libovsdbclient.Client
 	dbSetup      libovsdbtest.TestSetup
 	wg           *sync.WaitGroup
+	nbsbCleanup  *libovsdbtest.Cleanup
 }
 
 func NewFakeOVN(fexec *ovntest.FakeExec) *FakeOVN {
@@ -89,28 +90,23 @@ func (o *FakeOVN) startWithDBSetup(ctx *cli.Context, dbSetup libovsdbtest.TestSe
 	o.start(ctx, objects...)
 }
 
-func (o *FakeOVN) restart() {
-	o.shutdown()
-	o.init()
-}
-
 func (o *FakeOVN) shutdown() {
 	o.watcher.Shutdown()
-	o.controller.nbClient.Close()
-	o.controller.sbClient.Close()
 	close(o.stopChan)
+	o.nbsbCleanup.Cleanup()
 	o.wg.Wait()
 }
 
 func (o *FakeOVN) init() {
 	var err error
-	o.stopChan = make(chan struct{})
 	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	err = o.watcher.Start()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	o.nbClient, o.sbClient, err = libovsdbtest.NewNBSBTestHarness(o.dbSetup, o.stopChan)
+	o.nbClient, o.sbClient, o.nbsbCleanup, err = libovsdbtest.NewNBSBTestHarness(o.dbSetup)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+	o.stopChan = make(chan struct{})
 	o.controller = NewOvnController(o.fakeClient, o.watcher,
 		o.stopChan, o.asf,
 		o.nbClient, o.sbClient,

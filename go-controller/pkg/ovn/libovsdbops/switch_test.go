@@ -83,9 +83,11 @@ func TestRemoveACLsFromSwitches(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {
-			stopChan := make(chan struct{})
-
-			nbClient, _ := libovsdbtest.NewNBTestHarness(tt.initialNbdb, stopChan)
+			nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(tt.initialNbdb, nil)
+			if err != nil {
+				t.Fatalf("test: \"%s\" failed to set up test harness: %v", tt.desc, err)
+			}
+			t.Cleanup(cleanup.Cleanup)
 
 			fakeSwitches := []nbdb.LogicalSwitch{
 				*fakeSwitch1,
@@ -98,7 +100,7 @@ func TestRemoveACLsFromSwitches(t *testing.T) {
 				*fakeACL2,
 			}
 
-			err := removeACLsFromSwitches(nbClient, fakeSwitches, ACLs)
+			err = removeACLsFromSwitches(nbClient, fakeSwitches, ACLs)
 			if err != nil && !tt.expectErr {
 				t.Fatal(fmt.Errorf("RemoveACLFromNodeSwitches() error = %v", err))
 			}
@@ -112,8 +114,6 @@ func TestRemoveACLsFromSwitches(t *testing.T) {
 			if err != nil {
 				t.Fatal(fmt.Errorf("test: \"%s\" encountered error: %v", tt.desc, err))
 			}
-
-			close(stopChan)
 		})
 	}
 }
