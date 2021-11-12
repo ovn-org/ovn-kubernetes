@@ -14,7 +14,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
-	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	t "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -46,10 +45,12 @@ func newEgressFirewallObject(name, namespace string, egressRules []egressfirewal
 
 var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", func() {
 	var (
-		app      *cli.App
-		fakeOVN  *FakeOVN
-		fExec    *ovntest.FakeExec
-		stopChan chan struct{}
+		app     *cli.App
+		fakeOVN *FakeOVN
+	)
+	const (
+		node1Name string = "node1"
+		node2Name string = "node2"
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -62,14 +63,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		fExec = ovntest.NewLooseCompareFakeExec()
-		fakeOVN = NewFakeOVN(fExec)
-		stopChan = make(chan struct{})
-
+		fakeOVN = NewFakeOVN()
 	})
 
 	ginkgo.AfterEach(func() {
-		close(stopChan)
 		fakeOVN.shutdown()
 	})
 
@@ -126,7 +123,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					ACLs: []string{purgeACL.UUID, keepACL.UUID},
 				}
 
-				fakeOVN.dbSetup = libovsdbtest.TestSetup{
+				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						otherACL,
 						purgeACL,
@@ -135,7 +132,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					},
 				}
 
-				fakeOVN.start(ctx,
+				fakeOVN.startWithDBSetup(dbSetup,
 					&v1.NodeList{
 						Items: []v1.Node{
 							{
@@ -189,7 +186,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					Name: node1Name,
 				}
 
-				fakeOVN.dbSetup = libovsdbtest.TestSetup{
+				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						InitialNodeSwitch,
 					},
@@ -205,7 +202,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					},
 				})
 
-				fakeOVN.start(ctx,
+				fakeOVN.startWithDBSetup(dbSetup,
 					&egressfirewallapi.EgressFirewallList{
 						Items: []egressfirewallapi.EgressFirewall{
 							*egressFirewall,
@@ -272,7 +269,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					Name: node1Name,
 				}
 
-				fakeOVN.dbSetup = libovsdbtest.TestSetup{
+				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						InitialNodeSwitch,
 					},
@@ -288,7 +285,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					},
 				})
 
-				fakeOVN.start(ctx,
+				fakeOVN.startWithDBSetup(dbSetup,
 					&egressfirewallapi.EgressFirewallList{
 						Items: []egressfirewallapi.EgressFirewall{
 							*egressFirewall,
@@ -362,7 +359,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					Name: node1Name,
 				}
 
-				fakeOVN.dbSetup = libovsdbtest.TestSetup{
+				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						InitialNodeSwitch,
 					},
@@ -390,7 +387,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 						},
 					},
 				})
-				fakeOVN.start(ctx,
+				fakeOVN.startWithDBSetup(dbSetup,
 					&egressfirewallapi.EgressFirewallList{
 						Items: []egressfirewallapi.EgressFirewall{
 							*egressFirewall,
@@ -467,7 +464,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					Name: node2Name,
 				}
 
-				fakeOVN.dbSetup = libovsdbtest.TestSetup{
+				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						nodeSwitch1,
 						nodeSwitch2,
@@ -490,7 +487,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					},
 				})
 
-				fakeOVN.start(ctx,
+				fakeOVN.startWithDBSetup(dbSetup,
 					&egressfirewallapi.EgressFirewallList{
 						Items: []egressfirewallapi.EgressFirewall{
 							*egressFirewall,
@@ -570,26 +567,11 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					Name: node1Name,
 				}
 
-				fakeOVN.dbSetup = libovsdbtest.TestSetup{
+				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						InitialNodeSwitch,
 					},
 				}
-
-				fExec.AddFakeCmdsNoOutputNoError([]string{
-					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_id --format=table find acl priority<=%d priority>=%d", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
-					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%d priority>=%d direction=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority, t.DirectionFromLPort),
-					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1",
-					"ovn-nbctl --timeout=15 --id=@node1-10000 create acl priority=10000 direction=" + t.DirectionToLPort + " match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch node1 acls @node1-10000",
-				})
-				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find ACL external-ids:egressFirewall=namespace1",
-					Output: fmt.Sprintf("%s", fakeUUID),
-				})
-				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1",
-					"ovn-nbctl --timeout=15 remove logical_switch node1 acls " + fmt.Sprintf("%s", fakeUUID) + " -- --id=@node1-10000 create acl priority=10000 direction=" + t.DirectionToLPort + " match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1 -- add logical_switch node1 acls @node1-10000",
-				})
 
 				namespace1 := *newNamespace("namespace1")
 				egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
@@ -609,7 +591,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					},
 				})
 
-				fakeOVN.start(ctx,
+				fakeOVN.startWithDBSetup(dbSetup,
 					&egressfirewallapi.EgressFirewallList{
 						Items: []egressfirewallapi.EgressFirewall{
 							*egressFirewall,
@@ -687,7 +669,10 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 	var (
 		app     *cli.App
 		fakeOVN *FakeOVN
-		fExec   *ovntest.FakeExec
+	)
+	const (
+		node1Name string = "node1"
+		node2Name string = "node2"
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -700,9 +685,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		fExec = ovntest.NewLooseCompareFakeExec()
-		fakeOVN = NewFakeOVN(fExec)
-
+		fakeOVN = NewFakeOVN()
 	})
 
 	ginkgo.AfterEach(func() {
@@ -712,10 +695,6 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 	ginkgo.Context("on startup", func() {
 		ginkgo.It("reconciles existing and non-existing egressfirewalls", func() {
 			app.Action = func(ctx *cli.Context) error {
-				const (
-					node1Name string = "node1"
-				)
-
 				purgeACL := libovsdbops.BuildACL(
 					"",
 					t.DirectionFromLPort,
@@ -768,7 +747,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					ACLs: []string{purgeACL.UUID, keepACL.UUID},
 				}
 
-				fakeOVN.dbSetup = libovsdbtest.TestSetup{
+				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						purgeACL,
 						keepACL,
@@ -777,8 +756,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 						InitialJoinSwitch,
 					},
 				}
-
-				fakeOVN.start(ctx,
+				fakeOVN.startWithDBSetup(dbSetup,
 					&v1.NodeList{
 						Items: []v1.Node{
 							{
@@ -830,19 +808,9 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 		})
 		ginkgo.It("reconciles an existing egressFirewall with IPv4 CIDR", func() {
 			app.Action = func(ctx *cli.Context) error {
-				const (
-					node1Name string = "node1"
-				)
-
 				InitialJoinSwitch := &nbdb.LogicalSwitch{
 					UUID: libovsdbops.BuildNamedUUID(),
 					Name: "join",
-				}
-
-				fakeOVN.dbSetup = libovsdbtest.TestSetup{
-					NBData: []libovsdbtest.TestData{
-						InitialJoinSwitch,
-					},
 				}
 
 				namespace1 := *newNamespace("namespace1")
@@ -855,7 +823,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					},
 				})
 
-				fakeOVN.start(ctx,
+				dbSetup := libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						InitialJoinSwitch,
+					},
+				}
+				fakeOVN.startWithDBSetup(dbSetup,
 					&egressfirewallapi.EgressFirewallList{
 						Items: []egressfirewallapi.EgressFirewall{
 							*egressFirewall,
@@ -913,19 +886,9 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 		})
 		ginkgo.It("reconciles an existing egressFirewall with IPv6 CIDR", func() {
 			app.Action = func(ctx *cli.Context) error {
-				const (
-					node1Name string = "node1"
-				)
-
 				InitialJoinSwitch := &nbdb.LogicalSwitch{
 					UUID: libovsdbops.BuildNamedUUID(),
 					Name: "join",
-				}
-
-				fakeOVN.dbSetup = libovsdbtest.TestSetup{
-					NBData: []libovsdbtest.TestData{
-						InitialJoinSwitch,
-					},
 				}
 
 				namespace1 := *newNamespace("namespace1")
@@ -938,7 +901,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					},
 				})
 
-				fakeOVN.start(ctx,
+				dbSetup := libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						InitialJoinSwitch,
+					},
+				}
+				fakeOVN.startWithDBSetup(dbSetup,
 					&egressfirewallapi.EgressFirewallList{
 						Items: []egressfirewallapi.EgressFirewall{
 							*egressFirewall,
@@ -1003,19 +971,9 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 	ginkgo.Context("during execution", func() {
 		ginkgo.It("correctly creates an egressfirewall denying traffic udp traffic on port 100", func() {
 			app.Action = func(ctx *cli.Context) error {
-				const (
-					node1Name string = "node1"
-				)
-
 				initialJoinSwitch := &nbdb.LogicalSwitch{
 					UUID: libovsdbops.BuildNamedUUID(),
 					Name: "join",
-				}
-
-				fakeOVN.dbSetup = libovsdbtest.TestSetup{
-					NBData: []libovsdbtest.TestData{
-						initialJoinSwitch,
-					},
 				}
 
 				namespace1 := *newNamespace("namespace1")
@@ -1033,7 +991,13 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 						},
 					},
 				})
-				fakeOVN.start(ctx,
+
+				dbSetup := libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						initialJoinSwitch,
+					},
+				}
+				fakeOVN.startWithDBSetup(dbSetup,
 					&egressfirewallapi.EgressFirewallList{
 						Items: []egressfirewallapi.EgressFirewall{
 							*egressFirewall,
@@ -1097,19 +1061,9 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 		})
 		ginkgo.It("correctly deletes an egressfirewall", func() {
 			app.Action = func(ctx *cli.Context) error {
-				const (
-					node1Name string = "node1"
-				)
-
 				initialJoinSwitch := &nbdb.LogicalSwitch{
 					UUID: libovsdbops.BuildNamedUUID(),
 					Name: "join",
-				}
-
-				fakeOVN.dbSetup = libovsdbtest.TestSetup{
-					NBData: []libovsdbtest.TestData{
-						initialJoinSwitch,
-					},
 				}
 
 				namespace1 := *newNamespace("namespace1")
@@ -1128,7 +1082,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					},
 				})
 
-				fakeOVN.start(ctx,
+				dbSetup := libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						initialJoinSwitch,
+					},
+				}
+				fakeOVN.startWithDBSetup(dbSetup,
 					&egressfirewallapi.EgressFirewallList{
 						Items: []egressfirewallapi.EgressFirewall{
 							*egressFirewall,
@@ -1189,19 +1148,9 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 		})
 		ginkgo.It("correctly updates an egressfirewall", func() {
 			app.Action = func(ctx *cli.Context) error {
-				const (
-					node1Name string = "node1"
-				)
-
 				initialJoinSwitch := &nbdb.LogicalSwitch{
 					UUID: libovsdbops.BuildNamedUUID(),
 					Name: "join",
-				}
-
-				fakeOVN.dbSetup = libovsdbtest.TestSetup{
-					NBData: []libovsdbtest.TestData{
-						initialJoinSwitch,
-					},
 				}
 
 				namespace1 := *newNamespace("namespace1")
@@ -1222,7 +1171,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					},
 				})
 
-				fakeOVN.start(ctx,
+				dbSetup := libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						initialJoinSwitch,
+					},
+				}
+				fakeOVN.startWithDBSetup(dbSetup,
 					&egressfirewallapi.EgressFirewallList{
 						Items: []egressfirewallapi.EgressFirewall{
 							*egressFirewall,

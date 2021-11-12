@@ -241,7 +241,7 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID, sct
 }
 */
 
-func addNodeLogicalFlows(testData []libovsdb.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter, expectedNodeSwitch *nbdb.LogicalSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup *nbdb.PortGroup, fexec *ovntest.FakeExec, node *tNode, clusterCIDR string, enableIPv6 bool) []libovsdb.TestData {
+func addNodeLogicalFlows(testData []libovsdb.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter, expectedNodeSwitch *nbdb.LogicalSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup *nbdb.PortGroup, node *tNode, clusterCIDR string, enableIPv6 bool) []libovsdb.TestData {
 
 	lrpName := types.RouterToSwitchPrefix + node.Name
 	chassisName := node.SystemID
@@ -1174,7 +1174,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedDatabaseState := []libovsdb.TestData{}
-			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, fexec, &node1, clusterCIDR, config.IPv6Mode)
+			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, clusterCIDR, config.IPv6Mode)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
@@ -1216,9 +1216,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs}, skipSnat, node1.NodeMgmtPortIP)
 			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-
-			// Make sure remaining fexec calls are still correct
-			gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 
 			return nil
 		}

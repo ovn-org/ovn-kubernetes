@@ -9,8 +9,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
-	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
@@ -24,7 +22,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -75,13 +72,14 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
-		config.PrepareTestConfig()
+		err := config.PrepareTestConfig()
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		fakeOvn = NewFakeOVN(ovntest.NewLooseCompareFakeExec())
+		fakeOvn = NewFakeOVN()
 		wg = &sync.WaitGroup{}
 	})
 
@@ -106,7 +104,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 					namespaceT.Name,
 				)
 
-				fakeOvn.start(ctx,
+				fakeOvn.start(
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
@@ -137,7 +135,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 		ginkgo.It("creates an empty address set for the namespace without pods", func() {
 			app.Action = func(ctx *cli.Context) error {
-				fakeOvn.start(ctx, &v1.NamespaceList{
+				fakeOvn.start(&v1.NamespaceList{
 					Items: []v1.Namespace{
 						*newNamespace(namespaceName),
 					},
@@ -196,27 +194,69 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 				hostNetworkNamespace := "test-host-network-ns"
 				config.Kubernetes.HostNetworkNamespace = hostNetworkNamespace
-				hostNetworkNs := *newNamespace(hostNetworkNamespace)
 
-				kubeFakeClient := fake.NewSimpleClientset(
+				expectedOVNClusterRouter := &nbdb.LogicalRouter{
+					UUID: ovntypes.OVNClusterRouter + "-UUID",
+					Name: ovntypes.OVNClusterRouter,
+				}
+				expectedNodeSwitch := &nbdb.LogicalSwitch{
+					UUID: node1.Name + "-UUID",
+					Name: node1.Name,
+				}
+				expectedClusterRouterPortGroup := &nbdb.PortGroup{
+					UUID: ovntypes.ClusterRtrPortGroupName + "-UUID",
+					Name: ovntypes.ClusterRtrPortGroupName,
+					ExternalIDs: map[string]string{
+						"name": ovntypes.ClusterRtrPortGroupName,
+					},
+				}
+				expectedClusterPortGroup := &nbdb.PortGroup{
+					UUID: ovntypes.ClusterPortGroupName + "-UUID",
+					Name: ovntypes.ClusterPortGroupName,
+					ExternalIDs: map[string]string{
+						"name": ovntypes.ClusterPortGroupName,
+					},
+				}
+
+				fakeOvn.startWithDBSetup(
+					libovsdbtest.TestSetup{
+						NBData: []libovsdbtest.TestData{
+							&nbdb.LogicalSwitch{
+								UUID: ovntypes.OVNJoinSwitch + "-UUID",
+								Name: ovntypes.OVNJoinSwitch,
+							},
+							expectedOVNClusterRouter,
+							expectedNodeSwitch,
+							expectedClusterRouterPortGroup,
+							expectedClusterPortGroup,
+						},
+					},
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
-							hostNetworkNs,
+							*newNamespace(hostNetworkNamespace),
 						},
 					},
 				)
-				egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-				egressIPFakeClient := &egressipfake.Clientset{}
-				fakeClient := &util.OVNClientset{
-					KubeClient:           kubeFakeClient,
-					EgressIPClient:       egressIPFakeClient,
-					EgressFirewallClient: egressFirewallFakeClient,
-				}
+				fakeOvn.controller.multicastSupport = false
+				fakeOvn.controller.SCTPSupport = true
 
-				_, err := fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &testNode, metav1.CreateOptions{})
+				// Set config options after fakeOvn has initialzed
+				config.Gateway.Mode = config.GatewayModeShared
+				config.Gateway.NodeportEnable = true
+				var err error
+				config.Default.ClusterSubnets, err = config.ParseClusterSubnetEntries(clusterCIDR)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient.KubeClient, fakeClient.EgressIPClient, fakeClient.EgressFirewallClient}, testNode.Name)
+				_, clusterNetwork, err := net.ParseCIDR(clusterCIDR)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fakeOvn.controller.masterSubnetAllocator.AddNetworkRange(clusterNetwork, 24)
+
+				expectedDatabaseState := []libovsdb.TestData{}
+
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &testNode, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeOvn.fakeClient.KubeClient, fakeOvn.fakeClient.EgressIPClient, fakeOvn.fakeClient.EgressFirewallClient}, testNode.Name)
 
 				ifaceID := node1.PhysicalBridgeName + "_" + node1.Name
 				vlanID := uint(1024)
@@ -242,65 +282,16 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				err = nodeAnnotator.Run()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1.Name, metav1.GetOptions{})
+				updatedNode, err := fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				nodeHostSubnetAnnotations, err := util.ParseNodeHostSubnetAnnotation(updatedNode)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(nodeHostSubnetAnnotations[0].String()).Should(gomega.Equal(node1.NodeSubnet))
-				_, err = config.InitConfig(ctx, fakeOvn.fakeExec, nil)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				fakeOvn.fakeClient = fakeClient
-				expectedOVNClusterRouter := &nbdb.LogicalRouter{
-					UUID: ovntypes.OVNClusterRouter + "-UUID",
-					Name: ovntypes.OVNClusterRouter,
-				}
-				expectedNodeSwitch := &nbdb.LogicalSwitch{
-					UUID: node1.Name + "-UUID",
-					Name: node1.Name,
-				}
-				expectedClusterRouterPortGroup := &nbdb.PortGroup{
-					UUID: ovntypes.ClusterRtrPortGroupName + "-UUID",
-					Name: ovntypes.ClusterRtrPortGroupName,
-					ExternalIDs: map[string]string{
-						"name": ovntypes.ClusterRtrPortGroupName,
-					},
-				}
-				expectedClusterPortGroup := &nbdb.PortGroup{
-					UUID: ovntypes.ClusterPortGroupName + "-UUID",
-					Name: ovntypes.ClusterPortGroupName,
-					ExternalIDs: map[string]string{
-						"name": ovntypes.ClusterPortGroupName,
-					},
-				}
-				fakeOvn.dbSetup = libovsdbtest.TestSetup{
-					NBData: []libovsdbtest.TestData{
-						&nbdb.LogicalSwitch{
-							UUID: ovntypes.OVNJoinSwitch + "-UUID",
-							Name: ovntypes.OVNJoinSwitch,
-						},
-						expectedOVNClusterRouter,
-						expectedNodeSwitch,
-						expectedClusterRouterPortGroup,
-						expectedClusterPortGroup,
-					},
-				}
-				fakeOvn.init()
-				fakeOvn.controller.multicastSupport = false
-				_, clusterNetwork, err := net.ParseCIDR(clusterCIDR)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				fakeOvn.controller.masterSubnetAllocator.AddNetworkRange(clusterNetwork, 24)
-
-				fakeOvn.controller.SCTPSupport = true
-
-				fexec := fakeOvn.fakeExec
-
-				expectedDatabaseState := []libovsdb.TestData{}
 
 				// Add subnet to otherconfig for node
 				expectedNodeSwitch.OtherConfig = map[string]string{"subnet": node1.NodeSubnet}
 
-				expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, fexec, &node1, clusterCIDR, config.IPv6Mode)
+				expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, clusterCIDR, config.IPv6Mode)
 
 				fakeOvn.controller.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(fakeOvn.nbClient, []string{node1.Name})
 				_, err = fakeOvn.controller.joinSwIPManager.EnsureJoinLRPIPs(ovntypes.OVNClusterRouter)
@@ -314,7 +305,6 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.WatchNodes()
 
 				fakeOvn.controller.StartServiceController(wg, false)
-				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 
 				nodeSubnet := ovntest.MustParseIPNet(node1.NodeSubnet)
 				var clusterSubnets []*net.IPNet
@@ -336,7 +326,6 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				skipSnat := false
 				expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{nodeSubnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs}, skipSnat, node1.NodeMgmtPortIP)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-				gomega.Eventually(fexec.CalledMatchesExpected()).Should(gomega.BeTrue(), fexec.ErrorDesc)
 
 				// check the namespace again and ensure the address set
 				// being created with the right set of IPs in it.
@@ -356,14 +345,13 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				"--nodeport",
 			})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
 		})
 	})
 
 	ginkgo.Context("during execution", func() {
 		ginkgo.It("deletes an empty namespace's resources", func() {
 			app.Action = func(ctx *cli.Context) error {
-				fakeOvn.start(ctx, &v1.NamespaceList{
+				fakeOvn.start(&v1.NamespaceList{
 					Items: []v1.Namespace{
 						*newNamespace(namespaceName),
 					},
