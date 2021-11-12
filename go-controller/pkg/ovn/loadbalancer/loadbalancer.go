@@ -2,6 +2,7 @@ package loadbalancer
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -150,6 +151,25 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 	klog.V(5).Infof("Deleted %d stale LBs for %#v", len(toDelete), externalIDs)
 
 	return nil
+}
+
+// LoadBalancersEqualNoUUID compares load balancer objects excluding uuid
+func LoadBalancersEqualNoUUID(lbs1, lbs2 []LB) bool {
+	if len(lbs1) != len(lbs2) {
+		return false
+	}
+	new1 := make([]LB, len(lbs1))
+	new2 := make([]LB, len(lbs2))
+	for _, lb := range lbs1 {
+		lb.UUID = ""
+		new1 = append(new1, lb)
+
+	}
+	for _, lb := range lbs2 {
+		lb.UUID = ""
+		new2 = append(new2, lb)
+	}
+	return reflect.DeepEqual(new1, new2)
 }
 
 func mapLBDifferenceByKey(keyMap map[string][]*nbdb.LoadBalancer, keyIn sets.String, keyNotIn sets.String, lb *nbdb.LoadBalancer) {

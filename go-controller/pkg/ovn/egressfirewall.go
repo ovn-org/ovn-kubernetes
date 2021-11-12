@@ -94,7 +94,7 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 // NOTE: Utilize the fact that we know that all egress firewall related setup must have a priority: types.MinimumReservedEgressFirewallPriority <= priority <= types.EgressFirewallStartPriority
 func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
 	// Lookup all ACLs used for egress Firewalls
-	egressFirewallACLs, err := libovsdbops.FindACLsByPriorityRange(oc.nbClient, types.EgressFirewallStartPriority, types.MinimumReservedEgressFirewallPriority)
+	egressFirewallACLs, err := libovsdbops.FindACLsByPriorityRange(oc.nbClient, types.MinimumReservedEgressFirewallPriority, types.EgressFirewallStartPriority)
 	if err != nil {
 		klog.Errorf("Unable to list egress firewall ACLs, cannot cleanup old stale data, err: %v", err)
 		return
