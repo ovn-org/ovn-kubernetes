@@ -449,7 +449,7 @@ func init() {
 
 // PrepareTestConfig restores default config values. Used by testcases to
 // provide a pristine environment between tests.
-func PrepareTestConfig() {
+func PrepareTestConfig() error {
 	Default = savedDefault
 	Logging = savedLogging
 	Logging.Level = 5
@@ -464,11 +464,17 @@ func PrepareTestConfig() {
 	HybridOverlay = savedHybridOverlay
 	OvnKubeNode = savedOvnKubeNode
 
+	if err := completeConfig(); err != nil {
+		return err
+	}
+
 	// Don't pick up defaults from the environment
 	os.Unsetenv("KUBECONFIG")
 	os.Unsetenv("K8S_CACERT")
 	os.Unsetenv("K8S_APISERVER")
 	os.Unsetenv("K8S_TOKEN")
+
+	return nil
 }
 
 // copy members of struct 'src' into the corresponding field in struct 'dst'
@@ -1183,7 +1189,7 @@ func setOVSExternalID(exec kexec.Interface, key, value string) error {
 	return nil
 }
 
-func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath string, defaults *Defaults, allSubnets *configSubnets) error {
+func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath string, defaults *Defaults) error {
 	// token adn ca.crt may be from files mounted in container.
 	saConfig := savedKubernetes
 	if data, err := ioutil.ReadFile(filepath.Join(saPath, kubeServiceAccountFileToken)); err == nil {
@@ -1268,6 +1274,14 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	if Kubernetes.RawServiceCIDRs == "" {
 		return fmt.Errorf("kubernetes service-cidrs is required")
 	}
+
+	return nil
+}
+
+// completeKubernetesConfig completes the Kubernetes config by parsing raw values
+// into their final form.
+func completeKubernetesConfig(allSubnets *configSubnets) error {
+	Kubernetes.ServiceCIDRs = []*net.IPNet{}
 	for _, cidrString := range strings.Split(Kubernetes.RawServiceCIDRs, ",") {
 		_, serviceCIDR, err := net.ParseCIDR(cidrString)
 		if err != nil {
@@ -1289,10 +1303,11 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 			return fmt.Errorf("labelSelector \"%s\" is invalid: %v", Kubernetes.RawNoHostSubnetNodes, err)
 		}
 	}
+
 	return nil
 }
 
-func buildGatewayConfig(ctx *cli.Context, cli, file *config, allSubnets *configSubnets) error {
+func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 	// Copy config file values over default values
 	if err := overrideFields(&Gateway, &file.Gateway, &savedGateway); err != nil {
 		return err
@@ -1341,6 +1356,10 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config, allSubnets *configS
 		return fmt.Errorf("gateway VLAN ID option: %d is supported only in shared gateway mode", Gateway.VLANID)
 	}
 
+	return nil
+}
+
+func completeGatewayConfig(allSubnets *configSubnets) error {
 	// Validate v4 and v6 join subnets
 	v4IP, v4JoinCIDR, err := net.ParseCIDR(Gateway.V4JoinSubnet)
 	if err != nil || utilnet.IsIPv6(v4IP) {
@@ -1403,7 +1422,13 @@ func buildMonitoringConfig(ctx *cli.Context, cli, file *config) error {
 	if err = overrideFields(&Monitoring, &cli.Monitoring, &savedMonitoring); err != nil {
 		return err
 	}
+	return nil
+}
 
+// completeMonitoringConfig completes the Monitoring config by parsing raw values
+// into their final form.
+func completeMonitoringConfig() error {
+	var err error
 	if Monitoring.RawNetFlowTargets != "" {
 		Monitoring.NetFlowTargets, err = ParseFlowCollectors(Monitoring.RawNetFlowTargets)
 		if err != nil {
@@ -1425,7 +1450,7 @@ func buildMonitoringConfig(ctx *cli.Context, cli, file *config) error {
 	return nil
 }
 
-func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config, allSubnets *configSubnets) error {
+func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config) error {
 	// Copy config file values over default values
 	if err := overrideFields(&HybridOverlay, &file.HybridOverlay, &savedHybridOverlay); err != nil {
 		return err
@@ -1436,26 +1461,33 @@ func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config, allSubnets *c
 		return err
 	}
 
-	if HybridOverlay.Enabled {
-		var err error
-		if len(HybridOverlay.RawClusterSubnets) > 0 {
-			HybridOverlay.ClusterSubnets, err = ParseClusterSubnetEntries(HybridOverlay.RawClusterSubnets)
-			if err != nil {
-				return fmt.Errorf("hybrid overlay cluster subnet invalid: %v", err)
-			}
-			for _, subnet := range HybridOverlay.ClusterSubnets {
-				allSubnets.append(configSubnetHybrid, subnet.CIDR)
-			}
-		}
-		if HybridOverlay.VXLANPort > 65535 {
-			return fmt.Errorf("hybrid overlay vxlan port is invalid. The port cannot be larger than 65535")
-		}
+	if HybridOverlay.Enabled && HybridOverlay.VXLANPort > 65535 {
+		return fmt.Errorf("hybrid overlay vxlan port is invalid. The port cannot be larger than 65535")
 	}
 
 	return nil
 }
 
-func buildDefaultConfig(cli, file *config, allSubnets *configSubnets) error {
+// completeHybridOverlayConfig completes the HybridOverlay config by parsing raw values
+// into their final form.
+func completeHybridOverlayConfig(allSubnets *configSubnets) error {
+	if !HybridOverlay.Enabled || len(HybridOverlay.RawClusterSubnets) == 0 {
+		return nil
+	}
+
+	var err error
+	HybridOverlay.ClusterSubnets, err = ParseClusterSubnetEntries(HybridOverlay.RawClusterSubnets)
+	if err != nil {
+		return fmt.Errorf("hybrid overlay cluster subnet invalid: %v", err)
+	}
+	for _, subnet := range HybridOverlay.ClusterSubnets {
+		allSubnets.append(configSubnetHybrid, subnet.CIDR)
+	}
+
+	return nil
+}
+
+func buildDefaultConfig(cli, file *config) error {
 	if err := overrideFields(&Default, &file.Default, &savedDefault); err != nil {
 		return err
 	}
@@ -1472,6 +1504,12 @@ func buildDefaultConfig(cli, file *config, allSubnets *configSubnets) error {
 		return fmt.Errorf("cluster subnet is required")
 	}
 
+	return nil
+}
+
+// completeDefaultConfig completes the Default config by parsing raw values
+// into their final form.
+func completeDefaultConfig(allSubnets *configSubnets) error {
 	var err error
 	Default.ClusterSubnets, err = ParseClusterSubnetEntries(Default.RawClusterSubnets)
 	if err != nil {
@@ -1532,8 +1570,6 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		HybridOverlay:        savedHybridOverlay,
 		OvnKubeNode:          savedOvnKubeNode,
 	}
-
-	allSubnets := newConfigSubnets()
 
 	configFile, configFileIsDefault = getConfigFilePath(ctx)
 
@@ -1604,11 +1640,11 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		})
 	}
 
-	if err = buildDefaultConfig(&cliConfig, &cfg, allSubnets); err != nil {
+	if err = buildDefaultConfig(&cliConfig, &cfg); err != nil {
 		return "", err
 	}
 
-	if err = buildKubernetesConfig(exec, &cliConfig, &cfg, saPath, defaults, allSubnets); err != nil {
+	if err = buildKubernetesConfig(exec, &cliConfig, &cfg, saPath, defaults); err != nil {
 		return "", err
 	}
 
@@ -1616,7 +1652,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
-	if err = buildGatewayConfig(ctx, &cliConfig, &cfg, allSubnets); err != nil {
+	if err = buildGatewayConfig(ctx, &cliConfig, &cfg); err != nil {
 		return "", err
 	}
 
@@ -1628,7 +1664,11 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
-	if err = buildHybridOverlayConfig(ctx, &cliConfig, &cfg, allSubnets); err != nil {
+	if err = buildHybridOverlayConfig(ctx, &cliConfig, &cfg); err != nil {
+		return "", err
+	}
+
+	if err = buildOvnKubeNodeConfig(ctx, &cliConfig, &cfg); err != nil {
 		return "", err
 	}
 
@@ -1644,17 +1684,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	}
 	OvnSouth = *tmpAuth
 
-	err = allSubnets.checkForOverlaps()
-	if err != nil {
-		return "", err
-	}
-
-	IPv4Mode, IPv6Mode, err = allSubnets.checkIPFamilies()
-	if err != nil {
-		return "", err
-	}
-
-	if err = buildOvnKubeNodeConfig(ctx, &cliConfig, &cfg); err != nil {
+	if err := completeConfig(); err != nil {
 		return "", err
 	}
 
@@ -1670,6 +1700,38 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	klog.V(5).Infof("Ovnkube Node config: %+v", OvnKubeNode)
 
 	return retConfigFile, nil
+}
+
+func completeConfig() error {
+	allSubnets := newConfigSubnets()
+
+	if err := completeKubernetesConfig(allSubnets); err != nil {
+		return err
+	}
+	if err := completeDefaultConfig(allSubnets); err != nil {
+		return err
+	}
+	if err := completeGatewayConfig(allSubnets); err != nil {
+		return err
+	}
+	if err := completeMonitoringConfig(); err != nil {
+		return err
+	}
+	if err := completeHybridOverlayConfig(allSubnets); err != nil {
+		return err
+	}
+
+	if err := allSubnets.checkForOverlaps(); err != nil {
+		return err
+	}
+
+	var err error
+	IPv4Mode, IPv6Mode, err = allSubnets.checkIPFamilies()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func pathExists(path string) bool {
