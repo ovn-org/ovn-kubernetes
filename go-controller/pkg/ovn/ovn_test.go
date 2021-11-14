@@ -1,8 +1,6 @@
 package ovn
 
 import (
-	"sync"
-
 	"github.com/onsi/gomega"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -47,7 +45,6 @@ type FakeOVN struct {
 	nbClient     libovsdbclient.Client
 	sbClient     libovsdbclient.Client
 	dbSetup      libovsdbtest.TestSetup
-	wg           *sync.WaitGroup
 	nbsbCleanup  *libovsdbtest.Cleanup
 }
 
@@ -58,7 +55,6 @@ func NewFakeOVN(fexec *ovntest.FakeExec) *FakeOVN {
 		fakeExec:     fexec,
 		asf:          addressset.NewFakeAddressSetFactory(),
 		fakeRecorder: record.NewFakeRecorder(10),
-		wg:           &sync.WaitGroup{},
 	}
 }
 
@@ -94,7 +90,6 @@ func (o *FakeOVN) shutdown() {
 	o.watcher.Shutdown()
 	close(o.stopChan)
 	o.nbsbCleanup.Cleanup()
-	o.wg.Wait()
 }
 
 func (o *FakeOVN) init() {

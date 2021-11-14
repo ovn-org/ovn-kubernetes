@@ -3,6 +3,7 @@ package ovn
 import (
 	"context"
 	"net"
+	"sync"
 
 	"github.com/urfave/cli/v2"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -69,6 +70,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 	var (
 		app     *cli.App
 		fakeOvn *FakeOVN
+		wg      *sync.WaitGroup
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -80,10 +82,12 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 		app.Flags = config.Flags
 
 		fakeOvn = NewFakeOVN(ovntest.NewLooseCompareFakeExec())
+		wg = &sync.WaitGroup{}
 	})
 
 	ginkgo.AfterEach(func() {
 		fakeOvn.shutdown()
+		wg.Wait()
 	})
 
 	ginkgo.Context("on startup", func() {
@@ -309,7 +313,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 				fakeOvn.controller.WatchNodes()
 
-				fakeOvn.controller.StartServiceController(fakeOvn.wg, false)
+				fakeOvn.controller.StartServiceController(wg, false)
 				gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 
 				nodeSubnet := ovntest.MustParseIPNet(node1.NodeSubnet)
