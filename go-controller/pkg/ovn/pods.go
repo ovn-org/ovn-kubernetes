@@ -7,7 +7,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
@@ -182,7 +181,7 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 	// if there are other network attachments for the pod, then check if those network-attachment's
 	// annotation has default-route key. If present, then we need to skip adding default route for
 	// OVN interface
-	networks, err := util.GetPodNetSelAnnotation(pod, util.NetworkAttachmentAnnotation)
+	networks, err := util.GetK8sPodAllNetworks(pod)
 	if err != nil {
 		return fmt.Errorf("error while getting network attachment definition for [%s/%s]: %v",
 			pod.Namespace, pod.Name, err)
@@ -388,26 +387,20 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 
 		releaseIPs = true
-		var networks []*types.NetworkSelectionElement
-
-		networks, err = util.GetPodNetSelAnnotation(pod, util.DefNetworkAnnotation)
+		network, err := util.GetK8sPodDefaultNetwork(pod)
 		// handle error cases separately first to ensure binding to err, otherwise the
 		// defer will fail
 		if err != nil {
 			return fmt.Errorf("error while getting custom MAC config for port %q from "+
 				"default-network's network-attachment: %v", portName, err)
-		} else if networks != nil && len(networks) != 1 {
-			err = fmt.Errorf("invalid network annotation size while getting custom MAC config"+
-				" for port %q", portName)
-			return err
 		}
 
-		if networks != nil && networks[0].MacRequest != "" {
-			klog.V(5).Infof("Pod %s/%s requested custom MAC: %s", pod.Namespace, pod.Name, networks[0].MacRequest)
-			podMac, err = net.ParseMAC(networks[0].MacRequest)
+		if network != nil && network.MacRequest != "" {
+			klog.V(5).Infof("Pod %s/%s requested custom MAC: %s", pod.Namespace, pod.Name, network.MacRequest)
+			podMac, err = net.ParseMAC(network.MacRequest)
 			if err != nil {
 				return fmt.Errorf("failed to parse mac %s requested in annotation for pod %s: Error %v",
-					networks[0].MacRequest, pod.Name, err)
+					network.MacRequest, pod.Name, err)
 			}
 		}
 		podAnnotation := util.PodAnnotation{
