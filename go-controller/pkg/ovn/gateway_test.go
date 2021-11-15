@@ -131,7 +131,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 	})
 
 	natUUIDs := make([]string, 0, len(clusterIPSubnets))
-	if !skipSnat && config.Gateway.Mode != config.GatewayModeLocal {
+	if !skipSnat {
 		for _, subnet := range clusterIPSubnets {
 			natUUID := libovsdbops.BuildNamedUUID()
 			natUUIDs = append(natUUIDs, natUUID)
