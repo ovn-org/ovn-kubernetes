@@ -352,8 +352,9 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 	// gws or pod CNFs will be added within pods.go addLogicalPort
 	nats := make([]*nbdb.NAT, 0, len(clusterIPSubnet))
 	var nat *nbdb.NAT
-	if !config.Gateway.DisableSNATMultipleGWs && config.Gateway.Mode != config.GatewayModeLocal {
-		// Default SNAT rules.
+	if !config.Gateway.DisableSNATMultipleGWs {
+		// Default SNAT rules. DisableSNATMultipleGWs=false in LGW (traffic egresses via mp0) always.
+		// We are not checking for gateway mode to be shared explicitly to reduce topology differences.
 		externalIPs := make([]net.IP, len(l3GatewayConfig.IPAddresses))
 		for i, ip := range l3GatewayConfig.IPAddresses {
 			externalIPs[i] = ip.IP
