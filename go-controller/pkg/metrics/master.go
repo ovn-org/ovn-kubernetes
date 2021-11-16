@@ -1,9 +1,7 @@
 package metrics
 
 import (
-	"context"
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"runtime"
 	"sync"
 	"time"
@@ -11,12 +9,11 @@ import (
 	"github.com/ovn-org/libovsdb/cache"
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
-	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	goovn "github.com/ebay/go-ovn"
 	"github.com/prometheus/client_golang/prometheus"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -196,7 +193,7 @@ var startMasterMetricUpdaterOnce sync.Once
 
 // RegisterMasterMetrics registers some ovnkube master metrics with the Prometheus
 // registry
-func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
+func RegisterMasterMetrics(sbClient client.Client) {
 	registerMasterMetricsOnce.Do(func() {
 		// ovnkube-master metrics
 		// the updater for this metric is activated
@@ -206,12 +203,12 @@ func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 		prometheus.MustRegister(metricPodCreationLatency)
 
 		scrapeOvnTimestamp := func() float64 {
-			options, err := sbClient.SBGlobalGetOptions()
+			sbGlobal, err := libovsdbops.FindSBGlobal(sbClient)
 			if err != nil {
 				klog.Errorf("Failed to get global options for the SB_Global table")
 				return 0
 			}
-			if val, ok := options["e2e_timestamp"]; ok {
+			if val, ok := sbGlobal.Options["e2e_timestamp"]; ok {
 				return parseMetricToFloat(MetricOvnkubeSubsystemMaster, "sb_e2e_timestamp", val)
 			}
 			return 0
@@ -338,36 +335,13 @@ func UpdateEgressFirewallRuleCount(count float64) {
 }
 
 func updateE2ETimestampMetric(ovnNBClient client.Client) {
-	var rows []nbdb.NBGlobal
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	if err := ovnNBClient.List(ctx, &rows); err != nil {
-		klog.Errorf("Failed to update e2e timestamp metric while attempting to list rows for NB_Global table: %s", err)
-		return
-	}
-	if len(rows) < 1 {
-		klog.Errorf("Failed to update e2e timestamp metric because there are no rows in NB_Global table")
-		return
-	}
 	currentTime := time.Now().Unix()
 	// assumption that only first row is relevant in NB_Global table
-	rows[0].Options["e2e_timestamp"] = fmt.Sprintf("%d", currentTime)
-	operations, err := ovnNBClient.Where(&rows[0]).Update(&rows[0], &rows[0].Options)
-	if err != nil {
-		klog.Errorf("Failed to update e2e timestamp metric because generating OVN northbound operation failed: %v", err)
+	if err := libovsdbops.UpdateNBGlobalOptions(ovnNBClient, map[string]string{"e2e_timestamp": fmt.Sprintf("%d", currentTime)}); err != nil {
+		klog.Errorf("Unable to update E2E timestamp metric err: %v", err)
 		return
 	}
-	reply, err := ovnNBClient.Transact(ctx, operations...)
-	if err != nil {
-		klog.Errorf("Failed to update e2e timestamp metric while updating OVN northbound database: %v", err)
-		return
-	}
-	if opErrs, err := ovsdb.CheckOperationResults(reply, operations); err != nil {
-		for _, oe := range opErrs {
-			klog.Errorf("Failed to update e2e timestamp metric in OVN northbound database: %v", oe)
-		}
-		return
-	}
+
 	metricE2ETimestamp.Set(float64(currentTime))
 }
 

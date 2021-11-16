@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/urfave/cli/v2"
@@ -27,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apimachinerytypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	utilnet "k8s.io/utils/net"
 )
 
 type ipMode struct {
@@ -437,7 +439,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 
 		fExec = ovntest.NewLooseCompareFakeExec()
 		fakeOvn = NewFakeOVN(fExec)
-		ovntest.ResetNumMockExecutions()
 		gomegaFormatMaxLength = format.MaxLength
 		format.MaxLength = 0
 		initialDB = libovsdb.TestSetup{
@@ -2053,19 +2054,22 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		asFactory *addressset.FakeAddressSetFactory
 	)
 
-	ginkgo.BeforeEach(func() {
+	const (
+		nodeName   = "node1"
+		ipv4MgmtIP = "192.168.10.10"
+		ipv6MgmtIP = "fd01::1234"
+	)
+
+	ginkgo.It("computes match strings from address sets correctly", func() {
+		const (
+			pgName string = "pg-name"
+		)
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
 
 		asFactory = addressset.NewFakeAddressSetFactory()
 		config.IPv4Mode = true
 		config.IPv6Mode = false
-	})
-
-	ginkgo.It("computes match strings from address sets correctly", func() {
-		const (
-			pgName string = "pg-name"
-		)
 
 		policy := &knet.NetworkPolicy{
 			ObjectMeta: metav1.ObjectMeta{
@@ -2162,4 +2166,103 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		// deleting again is no-op
 		gomega.Expect(gp.delNamespaceAddressSet(four)).To(gomega.BeFalse())
 	})
+
+	ginkgo.It("Tests AddAllowACLFromNode", func() {
+		ginkgo.By("adding an existing ACL to the node switch", func() {
+			stopChan := make(chan struct{})
+			initialNbdb := libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					&nbdb.LogicalSwitch{
+						Name: nodeName,
+					},
+					&nbdb.ACL{
+						Match:     "ip4.src==" + ipv4MgmtIP,
+						Priority:  types.DefaultAllowPriority,
+						Action:    "allow-related",
+						Direction: types.DirectionToLPort,
+					},
+				},
+			}
+
+			nbClient, _ := libovsdbtest.NewNBTestHarness(initialNbdb, stopChan)
+
+			err := addAllowACLFromNode(nodeName, ovntest.MustParseIP(ipv4MgmtIP), nbClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			testNode, nodeACL := generateAllowFromNodeData(nodeName, ipv4MgmtIP)
+			expectedData := []libovsdb.TestData{
+				testNode,
+				nodeACL,
+			}
+			gomega.Expect(nbClient).Should(libovsdb.HaveData(expectedData...))
+			close(stopChan)
+		})
+
+		ginkgo.By("creating an ipv4 ACL and adding it to node switch", func() {
+			stopChan := make(chan struct{})
+			initialNbdb := libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					&nbdb.LogicalSwitch{
+						Name: nodeName,
+					},
+				},
+			}
+
+			nbClient, _ := libovsdbtest.NewNBTestHarness(initialNbdb, stopChan)
+
+			err := addAllowACLFromNode(nodeName, ovntest.MustParseIP(ipv4MgmtIP), nbClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			testNode, nodeACL := generateAllowFromNodeData(nodeName, ipv4MgmtIP)
+			expectedData := []libovsdb.TestData{
+				testNode,
+				nodeACL,
+			}
+			gomega.Expect(nbClient).Should(libovsdb.HaveData(expectedData...))
+			close(stopChan)
+		})
+		ginkgo.By("creating an ipv6 ACL and adding it to node switch", func() {
+			stopChan := make(chan struct{})
+			initialNbdb := libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					&nbdb.LogicalSwitch{
+						Name: nodeName,
+					},
+				},
+			}
+
+			nbClient, _ := libovsdbtest.NewNBTestHarness(initialNbdb, stopChan)
+
+			err := addAllowACLFromNode(nodeName, ovntest.MustParseIP(ipv6MgmtIP), nbClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			testNode, nodeACL := generateAllowFromNodeData(nodeName, ipv6MgmtIP)
+			expectedData := []libovsdb.TestData{
+				testNode,
+				nodeACL,
+			}
+			gomega.Expect(nbClient).Should(libovsdb.HaveData(expectedData...))
+			close(stopChan)
+		})
+	})
 })
+
+func generateAllowFromNodeData(nodeName, mgmtIP string) (nodeSwitch *nbdb.LogicalSwitch, acl *nbdb.ACL) {
+	var ipFamily = "ip4"
+	if utilnet.IsIPv6(ovntest.MustParseIP(mgmtIP)) {
+		ipFamily = "ip6"
+	}
+
+	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtIP)
+
+	nodeACL := libovsdbops.BuildACL("", types.DirectionToLPort, types.DefaultAllowPriority, match, "allow-related", "", "", false, nil)
+	nodeACL.UUID = libovsdbops.BuildNamedUUID()
+
+	testNode := &nbdb.LogicalSwitch{
+		UUID: libovsdbops.BuildNamedUUID(),
+		Name: nodeName,
+		ACLs: []string{nodeACL.UUID},
+	}
+
+	return testNode, nodeACL
+}

@@ -6,11 +6,9 @@ import (
 	"net"
 	"reflect"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 
-	goovn "github.com/ebay/go-ovn"
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -307,6 +305,8 @@ func addNodeLogicalFlows(testData []libovsdb.TestData, expectedOVNClusterRouter 
 	return testData
 }
 
+/* FIXME for updated local gw
+
 func populatePortAddresses(nodeName, lsp, mac, ips string, ovnClient goovn.Client) {
 	cmd, err := ovnClient.LSPAdd(nodeName, lsp)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -320,7 +320,6 @@ func populatePortAddresses(nodeName, lsp, mac, ips string, ovnClient goovn.Clien
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
-/* FIXME for updated local gw
 var _ = ginkgo.Describe("Master Operations", func() {
 	var (
 		app      *cli.App
@@ -1172,7 +1171,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, fexec, &node1, clusterCIDR, config.IPv6Mode)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(0))
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
@@ -1209,7 +1207,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			}
 
 			skipSnat := false
-			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs}, skipSnat)
+
+			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs}, skipSnat, node1.NodeMgmtPortIP)
 			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 			// Make sure remaining fexec calls are still correct
@@ -1462,7 +1461,6 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			}
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				ovntest.NewMockOVNClient(goovn.DBNB), ovntest.NewMockOVNClient(goovn.DBSB),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(0))
 

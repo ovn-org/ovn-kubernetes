@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	goovn "github.com/ebay/go-ovn"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
@@ -177,12 +176,6 @@ type Controller struct {
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
 
-	// go-ovn northbound client interface
-	ovnNBClient goovn.Client
-
-	// go-ovn southbound client interface
-	ovnSBClient goovn.Client
-
 	// libovsdb northbound client interface
 	nbClient libovsdbclient.Client
 
@@ -241,7 +234,7 @@ func GetIPFullMask(ip string) string {
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
 func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory,
-	ovnNBClient goovn.Client, ovnSBClient goovn.Client, libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
+	libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
 	recorder record.EventRecorder) *Controller {
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
@@ -288,8 +281,6 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		retryPods:                make(map[types.UID]*retryEntry),
 		retryPodsChan:            make(chan struct{}, 1),
 		recorder:                 recorder,
-		ovnNBClient:              ovnNBClient,
-		ovnSBClient:              ovnSBClient,
 		nbClient:                 libovsdbOvnNBClient,
 		sbClient:                 libovsdbOvnSBClient,
 		svcController:            svcController,
