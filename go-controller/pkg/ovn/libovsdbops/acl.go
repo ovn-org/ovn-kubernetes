@@ -134,7 +134,7 @@ func BuildACL(name string, direction nbdb.ACLDirection, priority int, match stri
 		realName = &name
 	}
 	if len(meter) != 0 {
-		realMeter = &match
+		realMeter = &meter
 	}
 	if len(severity) != 0 {
 		realSeverity = &severity
