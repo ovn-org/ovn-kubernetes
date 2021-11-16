@@ -28,6 +28,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
 
@@ -406,48 +407,33 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod *kapi.Pod, namespace str
 		return
 	}
 
+	gws := sets.NewString()
 	for _, gwIP := range foundGws.gws {
-		// check for previously configured pod routes
-		routeInfos := oc.getRouteInfosForNamespace(namespace)
-		for _, routeInfo := range routeInfos {
-			routeInfo.Lock()
-			if routeInfo.deleted {
-				routeInfo.Unlock()
-				continue
-			}
-			for podIP, route := range routeInfo.podExternalRoutes {
-				for routeGwIP, gr := range route {
-					if gwIP.String() == routeGwIP {
-						if err := oc.deletePodGWRoute(routeInfo, podIP, gwIP.String(), gr); err != nil {
-							klog.Errorf(err.Error())
-							continue
-						}
-						delete(route, routeGwIP)
-					}
-				}
-			}
-			routeInfo.Unlock()
-		}
+		gws.Insert(gwIP.String())
 	}
+	oc.deleteGWRoutesForNamespace(namespace, gws)
 }
 
-// deleteGwRoutesForNamespace handles deleting all routes to gateways for a pod on a specific GR
-func (oc *Controller) deleteGWRoutesForNamespace(namespace string) {
-	// TODO(trozet): batch all of these with ebay bindings
-	routeInfos := oc.getRouteInfosForNamespace(namespace)
-	for _, routeInfo := range routeInfos {
+// deleteGwRoutesForNamespace handles deleting routes to gateways for a pod on a specific GR.
+// If a set of gateways is given, only routes for that gateway are deleted. If no gateways
+// are given, all routes for the namespace are deleted.
+func (oc *Controller) deleteGWRoutesForNamespace(namespace string, matchGWs sets.String) {
+	deleteAll := (matchGWs == nil || matchGWs.Len() == 0)
+	for _, routeInfo := range oc.getRouteInfosForNamespace(namespace) {
 		routeInfo.Lock()
 		if routeInfo.deleted {
 			routeInfo.Unlock()
 			continue
 		}
-		for podIP, gwToGr := range routeInfo.podExternalRoutes {
-			for gw, gr := range gwToGr {
-				if err := oc.deletePodGWRoute(routeInfo, podIP, gw, gr); err != nil {
-					klog.Errorf(err.Error())
-					continue
+		for podIP, routes := range routeInfo.podExternalRoutes {
+			for gw, gr := range routes {
+				if deleteAll || matchGWs.Has(gw) {
+					if err := oc.deletePodGWRoute(routeInfo, podIP, gw, gr); err != nil {
+						klog.Errorf(err.Error())
+						continue
+					}
+					delete(routes, gw)
 				}
-				delete(gwToGr, gw)
 			}
 		}
 		routeInfo.Unlock()
@@ -464,18 +450,20 @@ func (oc *Controller) deleteGWRoutesForPod(name ktypes.NamespacedName, podIPNets
 
 	for _, podIPNet := range podIPNets {
 		podIP := podIPNet.IP.String()
-		if gwToGr, ok := routeInfo.podExternalRoutes[podIP]; ok {
-			if len(gwToGr) == 0 {
-				delete(routeInfo.podExternalRoutes, podIP)
+		routes, ok := routeInfo.podExternalRoutes[podIP]
+		if !ok {
+			continue
+		}
+		if len(routes) == 0 {
+			delete(routeInfo.podExternalRoutes, podIP)
+			continue
+		}
+		for gw, gr := range routes {
+			if err := oc.deletePodGWRoute(routeInfo, podIP, gw, gr); err != nil {
+				klog.Errorf(err.Error())
 				continue
 			}
-			for gw, gr := range gwToGr {
-				if err := oc.deletePodGWRoute(routeInfo, podIP, gw, gr); err != nil {
-					klog.Errorf(err.Error())
-					continue
-				}
-				delete(gwToGr, gw)
-			}
+			delete(routes, gw)
 		}
 	}
 }
