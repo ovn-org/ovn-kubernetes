@@ -344,6 +344,36 @@ func (oc *Controller) deleteLogicalRouterStaticRoute(podIP, mask, gw, gr string)
 	return nil
 }
 
+// deletePodGWRoute deletes all associated gateway routing resources for one
+// pod gateway route
+func (oc *Controller) deletePodGWRoute(routeInfo *externalRouteInfo, podIP, gw, gr string) error {
+	if utilnet.IsIPv6String(gw) != utilnet.IsIPv6String(podIP) {
+		return nil
+	}
+
+	mask := GetIPFullMask(podIP)
+	if err := oc.deleteLogicalRouterStaticRoute(podIP, mask, gw, gr); err != nil {
+		return fmt.Errorf("unable to delete pod %s ECMP route to GR %s, GW: %s: %w",
+			routeInfo.podName, gr, gw, err)
+	}
+
+	klog.V(5).Infof("ECMP route deleted for pod: %s, on gr: %s, to gw: %s",
+		routeInfo.podName, gr, gw)
+
+	node := util.GetWorkerFromGatewayRouter(gr)
+	if entry := routeInfo.podExternalRoutes[podIP]; len(entry) == 0 {
+		if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
+			return err
+		}
+	}
+
+	portPrefix, err := oc.extSwitchPrefix(node)
+	if err != nil {
+		return err
+	}
+	return oc.cleanUpBFDEntry(gw, gr, portPrefix)
+}
+
 // deletePodExternalGW detects if a given pod is acting as an external GW and removes all routes in all namespaces
 // associated with that pod
 func (oc *Controller) deletePodExternalGW(pod *kapi.Pod) {
@@ -386,35 +416,14 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod *kapi.Pod, namespace str
 				continue
 			}
 			for podIP, route := range routeInfo.podExternalRoutes {
-				mask := GetIPFullMask(podIP)
 				for routeGwIP, gr := range route {
-					if gwIP.String() != routeGwIP {
-						continue
-					}
-					node := util.GetWorkerFromGatewayRouter(gr)
-					portPrefix, err := oc.extSwitchPrefix(node)
-					if err != nil {
-						klog.Infof("Failed to find ext switch prefix for %s %v", node, err)
-						continue
-					}
-
-					if err := oc.deleteLogicalRouterStaticRoute(podIP, mask, gwIP.String(), gr); err != nil {
-						klog.Errorf("Unable to delete pod %s route to GR %s, GW: %s, err:%v",
-							pod, gr, gwIP.String(), err)
-						klog.Error(err)
-					} else {
-						delete(routeInfo.podExternalRoutes[podIP], gwIP.String())
-						klog.V(5).Infof("ECMP route deleted for pod: %s, on gr: %s, to gw: %s", pod,
-							gr, gwIP.String())
-					}
-
-					if entry := routeInfo.podExternalRoutes[podIP]; len(entry) == 0 {
-						if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
-							klog.Error(err)
+					if gwIP.String() == routeGwIP {
+						if err := oc.deletePodGWRoute(routeInfo, podIP, gwIP.String(), gr); err != nil {
+							klog.Errorf(err.Error())
+							continue
 						}
+						delete(route, routeGwIP)
 					}
-
-					oc.cleanUpBFDEntry(gwIP.String(), gr, portPrefix)
 				}
 			}
 			routeInfo.Unlock()
@@ -433,31 +442,12 @@ func (oc *Controller) deleteGWRoutesForNamespace(namespace string) {
 			continue
 		}
 		for podIP, gwToGr := range routeInfo.podExternalRoutes {
-			mask := GetIPFullMask(podIP)
 			for gw, gr := range gwToGr {
-				if utilnet.IsIPv6String(gw) != utilnet.IsIPv6String(podIP) {
+				if err := oc.deletePodGWRoute(routeInfo, podIP, gw, gr); err != nil {
+					klog.Errorf(err.Error())
 					continue
 				}
-				node := util.GetWorkerFromGatewayRouter(gr)
-				portPrefix, err := oc.extSwitchPrefix(node)
-				if err != nil {
-					klog.Infof("Failed to find ext switch prefix for %s %v", node, err)
-					continue
-				}
-
-				if err := oc.deleteLogicalRouterStaticRoute(podIP, mask, gw, gr); err != nil {
-					klog.Errorf("Unable to delete src-ip route to GR router, err:%v", err)
-				} else {
-					delete(routeInfo.podExternalRoutes[podIP], gw)
-				}
-
-				if entry := routeInfo.podExternalRoutes[podIP]; len(entry) == 0 {
-					if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
-						klog.Error(err)
-					}
-				}
-
-				oc.cleanUpBFDEntry(gw, gr, portPrefix)
+				delete(gwToGr, gw)
 			}
 		}
 		routeInfo.Unlock()
@@ -474,36 +464,17 @@ func (oc *Controller) deleteGWRoutesForPod(name ktypes.NamespacedName, podIPNets
 
 	for _, podIPNet := range podIPNets {
 		podIP := podIPNet.IP.String()
-		mask := GetIPFullMask(podIP)
 		if gwToGr, ok := routeInfo.podExternalRoutes[podIP]; ok {
 			if len(gwToGr) == 0 {
 				delete(routeInfo.podExternalRoutes, podIP)
 				continue
 			}
 			for gw, gr := range gwToGr {
-				node := util.GetWorkerFromGatewayRouter(gr)
-				portPrefix, err := oc.extSwitchPrefix(node)
-				if err != nil {
-					klog.Infof("Failed to find ext switch prefix for %s %v", node, err)
+				if err := oc.deletePodGWRoute(routeInfo, podIP, gw, gr); err != nil {
+					klog.Errorf(err.Error())
 					continue
 				}
-
-				if err := oc.deleteLogicalRouterStaticRoute(podIP, mask, gw, gr); err != nil {
-					klog.Errorf("Unable to delete ECMP route for pod: %s to GR %s, GW: %s, err:%v",
-						name, gr, gw, err)
-				} else {
-					delete(routeInfo.podExternalRoutes[podIP], gw)
-					klog.V(5).Infof("ECMP route deleted for pod: %s, on gr: %s, to gw: %s", name,
-						gr, gw)
-				}
-
-				if entry := routeInfo.podExternalRoutes[podIP]; len(entry) == 0 {
-					if err := oc.delHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
-						klog.Error(err)
-					}
-				}
-
-				oc.cleanUpBFDEntry(gw, gr, portPrefix)
+				delete(gwToGr, gw)
 			}
 		}
 	}
@@ -924,7 +895,7 @@ func (oc *Controller) delAllLegacyHybridRoutePolicies() error {
 // cleanUpBFDEntry checks if the BFD table entry related to the associated
 // gw router / port / gateway ip is referenced by other routing rules, and if
 // not removes the entry to avoid having dangling BFD entries.
-func (oc *Controller) cleanUpBFDEntry(gatewayIP, gatewayRouter, prefix string) {
+func (oc *Controller) cleanUpBFDEntry(gatewayIP, gatewayRouter, prefix string) error {
 	portName := prefix + types.GWRouterToExtSwitchPrefix + gatewayRouter
 
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
@@ -934,12 +905,11 @@ func (oc *Controller) cleanUpBFDEntry(gatewayIP, gatewayRouter, prefix string) {
 		return lrsr.OutputPort != nil && *lrsr.OutputPort == portName && lrsr.Nexthop == gatewayIP && lrsr.BFD != nil && *lrsr.BFD != ""
 	}).List(ctx, &logicalRouterStaticRouteRes)
 	if err != nil {
-		klog.Errorf("cleanUpBFDEntry: failed to list routes for %s, err: %v", portName, err)
-		return
+		return fmt.Errorf("cleanUpBFDEntry failed to list routes for %s: %w", portName, err)
 	}
 
 	if len(logicalRouterStaticRouteRes) > 0 {
-		return
+		return nil
 	}
 
 	opModels := []libovsdbops.OperationModel{
@@ -951,8 +921,10 @@ func (oc *Controller) cleanUpBFDEntry(gatewayIP, gatewayRouter, prefix string) {
 		},
 	}
 	if err := oc.modelClient.Delete(opModels...); err != nil {
-		klog.Errorf("Failed to delete BFD, err: %v", err)
+		return fmt.Errorf("failed to delete BFD: %w", err)
 	}
+
+	return nil
 }
 
 // extSwitchPrefix returns the prefix of the external switch to use for
@@ -1092,7 +1064,9 @@ func (oc *Controller) cleanExGwECMPRoutes() {
 					klog.Errorf("Cannot sync exgw bfd: %+v, unable to determine exgw switch prefix: %v",
 						ovnRoute, err)
 				} else {
-					oc.cleanUpBFDEntry(ovnRoute.nextHop, ovnRoute.router, prefix)
+					if err := oc.cleanUpBFDEntry(ovnRoute.nextHop, ovnRoute.router, prefix); err != nil {
+						klog.Errorf(err.Error())
+					}
 				}
 
 			} else {
