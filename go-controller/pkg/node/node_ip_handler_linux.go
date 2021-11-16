@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -17,6 +18,8 @@ import (
 )
 
 type addressManager struct {
+	nodeName       string
+	watchFactory   factory.NodeWatchFactory
 	addresses      sets.String
 	nodeAnnotator  kube.Annotator
 	mgmtPortConfig *managementPortConfig
@@ -24,8 +27,10 @@ type addressManager struct {
 }
 
 // initializes a new address manager which will hold all the IPs on a node
-func newAddressManager(nodeName string, k kube.Interface, config *managementPortConfig) *addressManager {
+func newAddressManager(nodeName string, k kube.Interface, config *managementPortConfig, watchFactory factory.NodeWatchFactory) *addressManager {
 	mgr := &addressManager{
+		nodeName:       nodeName,
+		watchFactory:   watchFactory,
 		addresses:      sets.NewString(),
 		mgmtPortConfig: config,
 	}
@@ -107,7 +112,7 @@ func (c *addressManager) Run(stopChan <-chan struct{}) {
 					addrChanged = c.delAddr(a.LinkAddress.IP)
 				}
 
-				if addrChanged {
+				if addrChanged || !c.doesNodeHostAddressesMatch() {
 					if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
 						klog.Errorf("Failed to set node annotations: %v", err)
 						continue
@@ -132,6 +137,36 @@ func (c *addressManager) Run(stopChan <-chan struct{}) {
 	}()
 
 	klog.Info("Node IP manager is running")
+}
+
+func (c *addressManager) assignAddresses(nodeHostAddresses sets.String) bool {
+	c.Lock()
+	defer c.Unlock()
+
+	if nodeHostAddresses.Equal(c.addresses) {
+		return false
+	}
+	c.addresses = nodeHostAddresses
+	return true
+}
+
+func (c *addressManager) doesNodeHostAddressesMatch() bool {
+	c.Lock()
+	defer c.Unlock()
+
+	node, err := c.watchFactory.GetNode(c.nodeName)
+	if err != nil {
+		klog.Errorf("Unable to get node from informer")
+		return false
+	}
+	// check to see if ips on the node differ from what we have
+	nodeHostAddresses, err := util.ParseNodeHostAddresses(node)
+	if err != nil {
+		klog.Errorf("Unable to parse addresses from node host")
+		return false
+	}
+
+	return nodeHostAddresses.Equal(c.addresses)
 }
 
 // detects if the IP is valid for a node
@@ -163,24 +198,30 @@ func (c *addressManager) isValidNodeIP(addr net.IP) bool {
 func (c *addressManager) sync() {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		klog.Errorf("Failed to initialize Node IP Manager: unable list all IPs on the node, error: %v", err)
+		klog.Errorf("Failed to sync Node IP Manager: unable list all IPs on the node, error: %v", err)
+		return
 	}
 
-	addrChanged := false
+	currAddresses := sets.NewString()
 	for _, addr := range addrs {
 		ip, _, err := net.ParseCIDR(addr.String())
 		if err != nil {
 			klog.Errorf("Invalid IP address found on host: %s", addr.String())
 			continue
 		}
-		addrChanged = c.addAddr(ip) || addrChanged
+		if !c.isValidNodeIP(ip) {
+			klog.V(5).Info("Skipping invalid IP address found on host: %s", ip.String())
+			continue
+		}
+		currAddresses.Insert(ip.String())
 	}
 
-	if addrChanged {
+	addrChanged := c.assignAddresses(currAddresses)
+	if addrChanged || !c.doesNodeHostAddressesMatch() {
+		klog.Infof("Node address annotation being set to: %v addrChanged: %v", currAddresses, addrChanged)
 		if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
 			klog.Errorf("Failed to set node annotations: %v", err)
-		}
-		if err := c.nodeAnnotator.Run(); err != nil {
+		} else if err := c.nodeAnnotator.Run(); err != nil {
 			klog.Errorf("Failed to set node annotations: %v", err)
 		}
 	}

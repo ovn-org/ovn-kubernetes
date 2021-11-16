@@ -1124,7 +1124,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			return err
 		}
 
-		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg)
+		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory)
 
 		if config.Gateway.NodeportEnable {
 			klog.Info("Creating Shared Gateway Node Port Watcher")
