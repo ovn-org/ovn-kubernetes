@@ -214,7 +214,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", nil, nodeAnnotator, k,
-				&fakeMgmtPortConfig, nil)
+				&fakeMgmtPortConfig, wf)
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(wf)
 			Expect(err).NotTo(HaveOccurred())
