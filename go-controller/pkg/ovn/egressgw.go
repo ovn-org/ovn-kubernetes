@@ -386,11 +386,11 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod *kapi.Pod, namespace str
 				continue
 			}
 			for podIP, route := range routeInfo.podExternalRoutes {
+				mask := GetIPFullMask(podIP)
 				for routeGwIP, gr := range route {
 					if gwIP.String() != routeGwIP {
 						continue
 					}
-					mask := GetIPFullMask(podIP)
 					node := util.GetWorkerFromGatewayRouter(gr)
 					portPrefix, err := oc.extSwitchPrefix(node)
 					if err != nil {
@@ -403,20 +403,17 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod *kapi.Pod, namespace str
 							pod, gr, gwIP.String(), err)
 						klog.Error(err)
 					} else {
+						delete(routeInfo.podExternalRoutes[podIP], gwIP.String())
 						klog.V(5).Infof("ECMP route deleted for pod: %s, on gr: %s, to gw: %s", pod,
 							gr, gwIP.String())
+					}
 
-						delete(routeInfo.podExternalRoutes[podIP], gwIP.String())
-						// clean up if there are no more routes for this podIP
-						if entry := routeInfo.podExternalRoutes[podIP]; len(entry) == 0 {
-							// TODO (trozet): use the go bindings here and batch commands
-							// delete the ovn_cluster_router policy if the pod has no more exgws to revert back to normal
-							// default gw behavior
-							if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
-								klog.Error(err)
-							}
+					if entry := routeInfo.podExternalRoutes[podIP]; len(entry) == 0 {
+						if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
+							klog.Error(err)
 						}
 					}
+
 					oc.cleanUpBFDEntry(gwIP.String(), gr, portPrefix)
 				}
 			}
@@ -436,28 +433,30 @@ func (oc *Controller) deleteGWRoutesForNamespace(namespace string) {
 			continue
 		}
 		for podIP, gwToGr := range routeInfo.podExternalRoutes {
+			mask := GetIPFullMask(podIP)
 			for gw, gr := range gwToGr {
 				if utilnet.IsIPv6String(gw) != utilnet.IsIPv6String(podIP) {
 					continue
 				}
-				mask := GetIPFullMask(podIP)
 				node := util.GetWorkerFromGatewayRouter(gr)
+				portPrefix, err := oc.extSwitchPrefix(node)
+				if err != nil {
+					klog.Infof("Failed to find ext switch prefix for %s %v", node, err)
+					continue
+				}
+
 				if err := oc.deleteLogicalRouterStaticRoute(podIP, mask, gw, gr); err != nil {
 					klog.Errorf("Unable to delete src-ip route to GR router, err:%v", err)
 				} else {
 					delete(routeInfo.podExternalRoutes[podIP], gw)
 				}
+
 				if entry := routeInfo.podExternalRoutes[podIP]; len(entry) == 0 {
 					if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
 						klog.Error(err)
 					}
 				}
 
-				portPrefix, err := oc.extSwitchPrefix(node)
-				if err != nil {
-					klog.Infof("Failed to find ext switch prefix for %s %v", node, err)
-					continue
-				}
 				oc.cleanUpBFDEntry(gw, gr, portPrefix)
 			}
 		}
@@ -474,13 +473,13 @@ func (oc *Controller) deleteGWRoutesForPod(name ktypes.NamespacedName, podIPNets
 	defer routeInfo.Unlock()
 
 	for _, podIPNet := range podIPNets {
-		pod := podIPNet.IP.String()
-		if gwToGr, ok := routeInfo.podExternalRoutes[pod]; ok {
+		podIP := podIPNet.IP.String()
+		mask := GetIPFullMask(podIP)
+		if gwToGr, ok := routeInfo.podExternalRoutes[podIP]; ok {
 			if len(gwToGr) == 0 {
-				delete(routeInfo.podExternalRoutes, pod)
+				delete(routeInfo.podExternalRoutes, podIP)
 				continue
 			}
-			mask := GetIPFullMask(pod)
 			for gw, gr := range gwToGr {
 				node := util.GetWorkerFromGatewayRouter(gr)
 				portPrefix, err := oc.extSwitchPrefix(node)
@@ -488,19 +487,22 @@ func (oc *Controller) deleteGWRoutesForPod(name ktypes.NamespacedName, podIPNets
 					klog.Infof("Failed to find ext switch prefix for %s %v", node, err)
 					continue
 				}
-				if err := oc.deleteLogicalRouterStaticRoute(pod, mask, gw, gr); err != nil {
+
+				if err := oc.deleteLogicalRouterStaticRoute(podIP, mask, gw, gr); err != nil {
 					klog.Errorf("Unable to delete ECMP route for pod: %s to GR %s, GW: %s, err:%v",
 						name, gr, gw, err)
 				} else {
-					delete(routeInfo.podExternalRoutes[pod], gw)
+					delete(routeInfo.podExternalRoutes[podIP], gw)
 					klog.V(5).Infof("ECMP route deleted for pod: %s, on gr: %s, to gw: %s", name,
 						gr, gw)
 				}
-				if entry := routeInfo.podExternalRoutes[pod]; len(entry) == 0 {
+
+				if entry := routeInfo.podExternalRoutes[podIP]; len(entry) == 0 {
 					if err := oc.delHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
 						klog.Error(err)
 					}
 				}
+
 				oc.cleanUpBFDEntry(gw, gr, portPrefix)
 			}
 		}
