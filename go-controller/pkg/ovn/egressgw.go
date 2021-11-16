@@ -86,8 +86,8 @@ func (oc *Controller) ensureRouteInfoLocked(podName ktypes.NamespacedName) (*ext
 	if routeInfoExisted {
 		// Check that the routeInfo wasn't altered in the cache while we were waiting for the lock
 		// and that routeInfo that we locked is not stale.
-		oc.exGWCacheMutex.RLock()
-		defer oc.exGWCacheMutex.RUnlock()
+		oc.exGWCacheMutex.Lock()
+		defer oc.exGWCacheMutex.Unlock()
 		if routeInfo != oc.externalGWCache[podName] {
 			routeInfo.Unlock()
 			return nil, fmt.Errorf("routeInfo for pod %s, was altered during ensure route info", podName)
@@ -99,8 +99,8 @@ func (oc *Controller) ensureRouteInfoLocked(podName ktypes.NamespacedName) (*ext
 
 // getRouteInfosForGateway returns all routeInfos locked for a specific namespace and gateway IP
 func (oc *Controller) getRouteInfosForGateway(gatewayIP, namespace string) []*externalRouteInfo {
-	oc.exGWCacheMutex.RLock()
-	defer oc.exGWCacheMutex.RUnlock()
+	oc.exGWCacheMutex.Lock()
+	defer oc.exGWCacheMutex.Unlock()
 
 	routeInfos := make([]*externalRouteInfo, 0)
 	for namespacedName, routeInfo := range oc.externalGWCache {
@@ -122,8 +122,8 @@ func (oc *Controller) getRouteInfosForGateway(gatewayIP, namespace string) []*ex
 
 // getRouteInfosForNamespace returns all routeInfos locked for a specific namespace
 func (oc *Controller) getRouteInfosForNamespace(namespace string) []*externalRouteInfo {
-	oc.exGWCacheMutex.RLock()
-	defer oc.exGWCacheMutex.RUnlock()
+	oc.exGWCacheMutex.Lock()
+	defer oc.exGWCacheMutex.Unlock()
 
 	routes := make([]*externalRouteInfo, 0)
 	for namespacedName, routeInfo := range oc.externalGWCache {
@@ -141,9 +141,9 @@ func (oc *Controller) getRouteInfosForNamespace(namespace string) []*externalRou
 func (oc *Controller) deleteRouteInfoLocked(name ktypes.NamespacedName) *externalRouteInfo {
 	// Attempt to find the routeInfo in the cache, release the cache lock while
 	// we try to lock the routeInfo to avoid any deadlock
-	oc.exGWCacheMutex.RLock()
+	oc.exGWCacheMutex.Lock()
 	routeInfo := oc.externalGWCache[name]
-	oc.exGWCacheMutex.RUnlock()
+	oc.exGWCacheMutex.Unlock()
 
 	if routeInfo == nil {
 		return nil

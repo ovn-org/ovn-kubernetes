@@ -137,7 +137,7 @@ type Controller struct {
 	namespacesMutex sync.Mutex
 
 	externalGWCache map[ktypes.NamespacedName]*externalRouteInfo
-	exGWCacheMutex  sync.RWMutex
+	exGWCacheMutex  sync.Mutex
 
 	// egressFirewalls is a map of namespaces and the egressFirewall attached to it
 	egressFirewalls sync.Map
@@ -265,7 +265,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		namespaces:                make(map[string]*namespaceInfo),
 		namespacesMutex:           sync.Mutex{},
 		externalGWCache:           make(map[ktypes.NamespacedName]*externalRouteInfo),
-		exGWCacheMutex:            sync.RWMutex{},
+		exGWCacheMutex:            sync.Mutex{},
 		addressSetFactory:         addressSetFactory,
 		lspIngressDenyCache:       make(map[string]int),
 		lspEgressDenyCache:        make(map[string]int),
