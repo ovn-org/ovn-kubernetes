@@ -143,6 +143,13 @@ func (pr *PodRequest) cmdDel() error {
 		return nil
 	}
 
+	if pr.CNIConf.DeviceID != "" {
+		if err := pr.ReleaseVF(); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	if err := pr.PlatformSpecificCleanup(); err != nil {
 		return err
 	}

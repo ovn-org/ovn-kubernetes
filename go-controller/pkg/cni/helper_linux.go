@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 package cni
@@ -409,6 +410,42 @@ func (pr *PodRequest) deletePodConntrack() {
 			continue
 		}
 	}
+}
+
+func (pr *PodRequest) ReleaseVF() error {
+	ifaceName := pr.SandboxID[:15]
+	// Release VF representor from br-int
+	out, err := ovsExec("del-port", "br-int", ifaceName)
+	if err != nil && !strings.Contains(out, "no port named") {
+		// DEL should be idempotent; don't return an error just log it
+		klog.Warningf("Failed to delete OVS port %s: %v\n  %q", ifaceName, err, string(out))
+	}
+	initns, err := ns.GetCurrentNS()
+	if err != nil {
+		return fmt.Errorf("failed to get init netns: %v", err)
+	}
+	netns, err := ns.GetNS(pr.Netns)
+	if err != nil {
+		return fmt.Errorf("failed to open netns %q: %v", pr.Netns, err)
+	}
+	defer netns.Close()
+
+	// Release VF device from pod namespace
+	return netns.Do(func(_ ns.NetNS) error {
+		linkObj, err := util.GetNetLinkOps().LinkByName(pr.IfName)
+		if err != nil {
+			return fmt.Errorf("failed to get netlink device with name %s: %q", pr.IfName, err)
+		}
+		err = util.GetNetLinkOps().LinkSetDown(linkObj)
+		if err != nil {
+			return fmt.Errorf("failed to set link %s down: %q", pr.IfName, err)
+		}
+		err = util.GetNetLinkOps().LinkSetNsFd(linkObj, int(initns.Fd()))
+		if err != nil {
+			return fmt.Errorf("failed to move interface %s to init netns: %v", pr.IfName, err)
+		}
+		return nil
+	})
 }
 
 func (pr *PodRequest) deletePorts() {
