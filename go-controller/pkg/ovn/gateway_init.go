@@ -310,6 +310,11 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		}
 
 		if config.Gateway.Mode != config.GatewayModeLocal {
+			// If migrating from local to shared gateway, let's remove the static routes towards
+			// management port interface for the hostSubnet prefix before adding the routes
+			// towards join switch.
+			mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
+			oc.staticRouteCleanup([]net.IP{mgmtIfAddr.IP})
 
 			logicalRouterStaticRoute := nbdb.LogicalRouterStaticRoute{
 				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
@@ -343,6 +348,34 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 			}
 			if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
 				return fmt.Errorf("failed to add a static route in GR %s with physical gateway as the default next hop, err: %v", gatewayRouter, err)
+			}
+		} else if config.Gateway.Mode == config.GatewayModeLocal {
+			// If migrating from shared to local gateway, let's remove the static routes towards
+			// join switch for the hostSubnet prefix before adding the routes
+			// towards management port which is done in syncNodeManagementPort.
+			logicalRouter := nbdb.LogicalRouter{}
+			logicalRouterStaticRouteRes := []nbdb.LogicalRouterStaticRoute{}
+			opModels = []libovsdbops.OperationModel{
+				{
+					Model: &nbdb.LogicalRouterStaticRoute{},
+					ModelPredicate: func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
+						return lrsr.Nexthop == gwLRPIP[0].String() && lrsr.IPPrefix == hostSubnet.String()
+					},
+					ExistingResult: &logicalRouterStaticRouteRes,
+					DoAfter: func() {
+						logicalRouter.StaticRoutes = libovsdbops.ExtractUUIDsFromModels(&logicalRouterStaticRouteRes)
+					},
+				},
+				{
+					Model:          &logicalRouter,
+					ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+					OnModelMutations: []interface{}{
+						&logicalRouter.StaticRoutes,
+					},
+				},
+			}
+			if err := oc.modelClient.Delete(opModels...); err != nil {
+				return fmt.Errorf("failed to delete static route for nexthop: %s, prefix: %s, err: %v", gwLRPIP[0].String(), hostSubnet.String(), err)
 			}
 		}
 	}
