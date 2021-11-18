@@ -898,7 +898,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			config.Kubernetes.HostNetworkNamespace = ""
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient}, testNode.Name)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil}, testNode.Name)
 			ifaceID := node1.PhysicalBridgeName + "_" + node1.Name
 			vlanID := uint(1024)
 			l3Config := &util.L3GatewayConfig{
@@ -1089,7 +1089,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			config.Kubernetes.HostNetworkNamespace = ""
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient}, testNode.Name)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil}, testNode.Name)
 			ifaceID := node1.PhysicalBridgeName + "_" + node1.Name
 			vlanID := uint(1024)
 			l3Config := &util.L3GatewayConfig{

@@ -13,6 +13,7 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -82,10 +83,21 @@ func setupNode(nodeName string, ipNets []string, mockAllocationIPs map[string]st
 	}
 
 	node := egressNode{
-		v4IP:               v4IP,
-		v6IP:               v6IP,
-		v4Subnet:           v4Subnet,
-		v6Subnet:           v6Subnet,
+		egressIPConfig: &util.ParsedNodeEgressIPConfiguration{
+			V4: util.ParsedIFAddr{
+				IP:  v4IP,
+				Net: v4Subnet,
+			},
+			V6: util.ParsedIFAddr{
+				IP:  v6IP,
+				Net: v6Subnet,
+			},
+			Capacity: util.Capacity{
+				IP:   util.UnlimitedNodeCapacity,
+				IPv4: util.UnlimitedNodeCapacity,
+				IPv6: util.UnlimitedNodeCapacity,
+			},
+		},
 		allocations:        mockAllcations,
 		name:               nodeName,
 		isReady:            true,
@@ -1802,8 +1814,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(1))
 				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node1.Name))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node1.Name].v4Subnet).To(gomega.Equal(ip1V4Sub))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node1.Name].v6Subnet).To(gomega.Equal(ip1V6Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node1.Name].egressIPConfig.V4.Net).To(gomega.Equal(ip1V4Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node1.Name].egressIPConfig.V6.Net).To(gomega.Equal(ip1V6Sub))
 
 				node2.Labels = map[string]string{
 					"k8s.ovn.org/egress-assignable": "",
@@ -1814,9 +1826,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
 				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node1.Name))
 				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node2.Name))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node2.Name].v4Subnet).To(gomega.Equal(ip2V4Sub))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node1.Name].v4Subnet).To(gomega.Equal(ip1V4Sub))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node1.Name].v6Subnet).To(gomega.Equal(ip1V6Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node2.Name].egressIPConfig.V4.Net).To(gomega.Equal(ip2V4Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node1.Name].egressIPConfig.V4.Net).To(gomega.Equal(ip1V4Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node1.Name].egressIPConfig.V6.Net).To(gomega.Equal(ip1V6Sub))
 
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouter{
@@ -2044,8 +2056,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveLen(1))
 				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node.Name))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node.Name].v4Subnet).To(gomega.Equal(ipv4Sub))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node.Name].v6Subnet).To(gomega.Equal(ipv6Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node.Name].egressIPConfig.V4.Net).To(gomega.Equal(ipv4Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node.Name].egressIPConfig.V6.Net).To(gomega.Equal(ipv6Sub))
 
 				gomega.Eventually(getEgressIPReassignmentCount).Should(gomega.Equal(0))
 				expectedDatabaseState = []libovsdbtest.TestData{
@@ -2994,9 +3006,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node2.Name))
 				gomega.Eventually(isEgressAssignableNode(node1.Name)).Should(gomega.BeFalse())
 				gomega.Eventually(isEgressAssignableNode(node2.Name)).Should(gomega.BeFalse())
-				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node1.Name].v4Subnet).To(gomega.Equal(ip1V4Sub))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node1.Name].v6Subnet).To(gomega.Equal(ip1V6Sub))
-				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node2.Name].v4Subnet).To(gomega.Equal(ip2V4Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node1.Name].egressIPConfig.V4.Net).To(gomega.Equal(ip1V4Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node1.Name].egressIPConfig.V6.Net).To(gomega.Equal(ip1V6Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node2.Name].egressIPConfig.V4.Net).To(gomega.Equal(ip2V4Sub))
 				gomega.Eventually(eIP.Status.Items).Should(gomega.HaveLen(0))
 
 				node1.Labels = map[string]string{

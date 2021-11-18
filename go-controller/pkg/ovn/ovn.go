@@ -14,6 +14,7 @@ import (
 	"time"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -244,6 +245,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			KClient:              ovnClient.KubeClient,
 			EIPClient:            ovnClient.EgressIPClient,
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
+			CloudNetworkClient:   ovnClient.CloudNetworkClient,
 		},
 		watchFactory:          wf,
 		stopChan:              stopChan,
@@ -322,6 +324,9 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		oc.WatchEgressNodes()
 		oc.WatchEgressIP()
+		if util.PlatformTypeIsEgressIPCloudProvider() {
+			oc.WatchCloudPrivateIPConfig()
+		}
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressFirewall {
@@ -896,6 +901,32 @@ func (oc *Controller) WatchEgressNodes() {
 			}
 		},
 	}, oc.initClusterEgressPolicies)
+}
+
+// WatchCloudPrivateIPConfig starts the watching of cloudprivateipconfigs
+// resource and calls back the appropriate handler logic.
+func (oc *Controller) WatchCloudPrivateIPConfig() {
+	oc.watchFactory.AddCloudPrivateIPConfigHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
+			if err := oc.reconcileCloudPrivateIPConfig(nil, cloudPrivateIPConfig); err != nil {
+				klog.Errorf("Unable to add CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfig.Name, err)
+			}
+		},
+		UpdateFunc: func(old, new interface{}) {
+			oldCloudPrivateIPConfig := old.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
+			newCloudPrivateIPConfig := new.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
+			if err := oc.reconcileCloudPrivateIPConfig(oldCloudPrivateIPConfig, newCloudPrivateIPConfig); err != nil {
+				klog.Errorf("Unable to update CloudPrivateIPConfig: %s, err: %v", newCloudPrivateIPConfig.Name, err)
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
+			if err := oc.reconcileCloudPrivateIPConfig(cloudPrivateIPConfig, nil); err != nil {
+				klog.Errorf("Unable to delete CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfig.Name, err)
+			}
+		},
+	}, nil)
 }
 
 // WatchEgressIP starts the watching of egressip resource and calls back the

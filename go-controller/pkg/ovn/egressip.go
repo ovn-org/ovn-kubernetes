@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -37,6 +39,8 @@ type egressIPDialer interface {
 }
 
 var dialer egressIPDialer = &egressIPDial{}
+
+var cloudPrivateIPConfigFinalizer = "cloudprivateipconfig.cloud.network.openshift.io/finalizer"
 
 func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err error) {
 	oc.eIPC.egressIPAssignmentMutex.Lock()
@@ -94,24 +98,33 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 	}
 
 	ipsToAdd := validSpecIPs.Difference(validStatusIPs)
-	if len(statusToRemove) > 0 {
-		if err := oc.deleteEgressIPAssignments(oldEIP.Name, statusToRemove, oldEIP.Spec.NamespaceSelector, oldEIP.Spec.PodSelector); err != nil {
+	if !util.PlatformTypeIsEgressIPCloudProvider() {
+		if len(statusToRemove) > 0 {
+			if err := oc.deleteEgressIPAssignments(oldEIP.Name, statusToRemove, oldEIP.Spec.NamespaceSelector, oldEIP.Spec.PodSelector); err != nil {
+				return err
+			}
+		}
+		if len(ipsToAdd) > 0 {
+			statusToAdd = oc.assignEgressIPs(newEIP.Name, ipsToAdd.List())
+			if err := oc.addEgressIPAssignments(newEIP.Name, statusToAdd, newEIP.Spec.NamespaceSelector, newEIP.Spec.PodSelector); err != nil {
+				return err
+			}
+			statusToKeep = append(statusToKeep, statusToAdd...)
+		}
+		if len(statusToAdd) > 0 || (len(statusToRemove) > 0 && new != nil) {
+			if err := oc.updateEgressIPStatus(newEIP.Name, statusToKeep); err != nil {
+				return err
+			}
+			metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
+		}
+	} else {
+		if len(ipsToAdd) > 0 {
+			statusToAdd = oc.assignEgressIPs(newEIP.Name, ipsToAdd.List())
+		}
+		if err := oc.executeCloudPrivateIPConfigChange(newEIP.Name, statusToAdd, statusToRemove); err != nil {
 			return err
 		}
 	}
-	if len(ipsToAdd) > 0 {
-		statusToAdd = oc.assignEgressIPs(newEIP.Name, ipsToAdd.List())
-		if err := oc.addEgressIPAssignments(newEIP.Name, statusToAdd, newEIP.Spec.NamespaceSelector, newEIP.Spec.PodSelector); err != nil {
-			return err
-		}
-		statusToKeep = append(statusToKeep, statusToAdd...)
-	}
-	if len(statusToAdd) > 0 || (len(statusToRemove) > 0 && new != nil) {
-		if err := oc.updateEgressIPStatus(newEIP.Name, statusToKeep); err != nil {
-			return err
-		}
-	}
-	metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 
 	if len(ipsToAdd) == 0 &&
 		len(statusToRemove) == 0 {
@@ -282,6 +295,175 @@ func (oc *Controller) reconcileEgressIPPod(old, new *v1.Pod) error {
 	return nil
 }
 
+func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi.CloudPrivateIPConfig) error {
+	oldCloudPrivateIPConfig, newCloudPrivateIPConfig := &ocpcloudnetworkapi.CloudPrivateIPConfig{}, &ocpcloudnetworkapi.CloudPrivateIPConfig{}
+	shouldDelete, shouldAdd := false, false
+	nodeToDelete := ""
+
+	if old != nil {
+		oldCloudPrivateIPConfig = old
+		shouldDelete = oldCloudPrivateIPConfig.Status.Node != "" || !hasFinalizer(oldCloudPrivateIPConfig.Finalizers, cloudPrivateIPConfigFinalizer)
+		nodeToDelete = oldCloudPrivateIPConfig.Spec.Node
+	}
+	if new != nil {
+		newCloudPrivateIPConfig = new
+		shouldAdd = newCloudPrivateIPConfig.Status.Node == newCloudPrivateIPConfig.Spec.Node &&
+			ocpcloudnetworkapi.CloudPrivateIPConfigConditionType(newCloudPrivateIPConfig.Status.Conditions[0].Type) == ocpcloudnetworkapi.Assigned &&
+			kapi.ConditionStatus(newCloudPrivateIPConfig.Status.Conditions[0].Status) == kapi.ConditionTrue
+		shouldDelete = shouldDelete && newCloudPrivateIPConfig.Status.Node == "" &&
+			ocpcloudnetworkapi.CloudPrivateIPConfigConditionType(newCloudPrivateIPConfig.Status.Conditions[0].Type) == ocpcloudnetworkapi.Assigned &&
+			kapi.ConditionStatus(newCloudPrivateIPConfig.Status.Conditions[0].Status) == kapi.ConditionTrue
+		if shouldDelete {
+			nodeToDelete = oldCloudPrivateIPConfig.Status.Node
+		}
+	}
+
+	if shouldDelete {
+		egressIP, err := oc.getEgressIPFromCloudPrivateIPConfigName(oldCloudPrivateIPConfig.Name)
+		if err != nil {
+			return err
+		}
+		egressIPString := cloudPrivateIPConfigNameToIPString(oldCloudPrivateIPConfig.Name)
+		statusItem := egressipv1.EgressIPStatusItem{
+			Node:     nodeToDelete,
+			EgressIP: egressIPString,
+		}
+		if err := oc.deleteEgressIPAssignments(egressIP.Name, []egressipv1.EgressIPStatusItem{statusItem}, egressIP.Spec.NamespaceSelector, egressIP.Spec.PodSelector); err != nil {
+			return err
+		}
+		updatedStatus := []egressipv1.EgressIPStatusItem{}
+		for _, status := range egressIP.Status.Items {
+			if !reflect.DeepEqual(status, statusItem) {
+				updatedStatus = append(updatedStatus, status)
+			}
+		}
+		if err := oc.updateEgressIPStatus(egressIP.Name, updatedStatus); err != nil {
+			return err
+		}
+	}
+	if shouldAdd {
+		egressIP, err := oc.getEgressIPFromCloudPrivateIPConfigName(newCloudPrivateIPConfig.Name)
+		if err != nil {
+			return err
+		}
+		egressIPString := cloudPrivateIPConfigNameToIPString(newCloudPrivateIPConfig.Name)
+		statusItem := egressipv1.EgressIPStatusItem{
+			Node:     newCloudPrivateIPConfig.Status.Node,
+			EgressIP: egressIPString,
+		}
+		if err := oc.addEgressIPAssignments(egressIP.Name, []egressipv1.EgressIPStatusItem{statusItem}, egressIP.Spec.NamespaceSelector, egressIP.Spec.PodSelector); err != nil {
+			return err
+		}
+		hasStatus := false
+		for _, status := range egressIP.Status.Items {
+			if reflect.DeepEqual(status, statusItem) {
+				hasStatus = true
+			}
+		}
+		if !hasStatus {
+			if err := oc.updateEgressIPStatusWithItem(egressIP.Name, statusItem); err != nil {
+				return err
+			}
+		}
+	}
+	metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
+	return nil
+}
+
+func (oc *Controller) getEgressIPFromCloudPrivateIPConfigName(cloudPrivateIPConfigName string) (*egressipv1.EgressIP, error) {
+	egressIPString := cloudPrivateIPConfigNameToIPString(cloudPrivateIPConfigName)
+	eIPs, err := oc.watchFactory.GetEgressIPs()
+	if err != nil {
+		return nil, fmt.Errorf("unable to get EgressIP objects, err: %v", err)
+	}
+	for _, eIP := range eIPs {
+		for _, egressIP := range eIP.Spec.EgressIPs {
+			if egressIP == egressIPString {
+				return eIP, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("no matching EgressIP found")
+}
+
+type cloudPrivateIPConfigOp struct {
+	toAdd    string
+	toDelete string
+}
+
+func (oc *Controller) executeCloudPrivateIPConfigChange(egressIPName string, toAssign, toRemove []egressipv1.EgressIPStatusItem) error {
+	ops := make(map[string]cloudPrivateIPConfigOp, len(toAssign)*len(toRemove))
+	for _, assignment := range toAssign {
+		ops[assignment.EgressIP] = cloudPrivateIPConfigOp{
+			toAdd: assignment.Node,
+		}
+	}
+	for _, removal := range toRemove {
+		if op, exists := ops[removal.EgressIP]; exists {
+			op.toDelete = removal.Node
+		} else {
+			ops[removal.EgressIP] = cloudPrivateIPConfigOp{
+				toDelete: removal.Node,
+			}
+		}
+	}
+	return oc.executeCloudPrivateIPConfigOps(egressIPName, ops)
+}
+
+func (oc *Controller) executeCloudPrivateIPConfigOps(egressIPName string, ops map[string]cloudPrivateIPConfigOp) error {
+	for egressIP, op := range ops {
+		cloudPrivateIPConfigName := ipStringToCloudPrivateIPConfigName(egressIP)
+		cloudPrivateIPConfig, err := oc.watchFactory.GetCloudPrivateIPConfig(cloudPrivateIPConfigName)
+		if op.toAdd != "" && op.toDelete != "" {
+			if err != nil {
+				return fmt.Errorf("cloud update request failed for CloudPrivateIPConfig: %s, could not get item, err: %v", cloudPrivateIPConfigName, err)
+			}
+			cloudPrivateIPConfig.Spec.Node = op.toAdd
+			if _, err := oc.kube.UpdateCloudPrivateIPConfig(cloudPrivateIPConfig); err != nil {
+				eIPRef := kapi.ObjectReference{
+					Kind: "EgressIP",
+					Name: egressIPName,
+				}
+				oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "CloudUpdateFailed", "egress IP: %s for object EgressIP: %s could not be updated, err: %v", egressIP, egressIPName, err)
+				return fmt.Errorf("cloud update request failed for CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfigName, err)
+			}
+		} else if op.toAdd != "" {
+			if err == nil {
+				return fmt.Errorf("cloud create request failed for CloudPrivateIPConfig: %s, err: item exists", cloudPrivateIPConfigName)
+			}
+			cloudPrivateIPConfig := ocpcloudnetworkapi.CloudPrivateIPConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: cloudPrivateIPConfigName,
+				},
+				Spec: ocpcloudnetworkapi.CloudPrivateIPConfigSpec{
+					Node: op.toAdd,
+				},
+			}
+			if _, err := oc.kube.CreateCloudPrivateIPConfig(&cloudPrivateIPConfig); err != nil {
+				eIPRef := kapi.ObjectReference{
+					Kind: "EgressIP",
+					Name: egressIPName,
+				}
+				oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "CloudAssignmentFailed", "egress IP: %s for object EgressIP: %s could not be created, err: %v", egressIP, egressIPName, err)
+				return fmt.Errorf("cloud add request failed for CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfigName, err)
+			}
+		} else if op.toDelete != "" {
+			if err != nil {
+				return fmt.Errorf("cloud deletion request failed for CloudPrivateIPConfig: %s, could not get item, err: %v", cloudPrivateIPConfigName, err)
+			}
+			if err := oc.kube.DeleteCloudPrivateIPConfig(cloudPrivateIPConfigName); err != nil {
+				eIPRef := kapi.ObjectReference{
+					Kind: "EgressIP",
+					Name: egressIPName,
+				}
+				oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "CloudDeletionFailed", "egress IP: %s for object EgressIP: %s could not be deleted, err: %v", egressIP, egressIPName, err)
+				return fmt.Errorf("cloud deletion request failed for CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfigName, err)
+			}
+		}
+	}
+	return nil
+}
+
 func (oc *Controller) validateEgressIPSpec(name string, egressIPs []string) (sets.String, error) {
 	validatedEgressIPs := sets.NewString()
 	for _, egressIP := range egressIPs {
@@ -335,14 +517,14 @@ func (oc *Controller) validateEgressIPStatus(name string, items []egressipv1.Egr
 				klog.Errorf("Allocator error: EgressIP allocation: %s is the IP of node: %s ", ip.String(), node.name)
 				validAssignment = false
 			}
-			if utilnet.IsIPv6(ip) && eNode.v6Subnet != nil {
-				if !eNode.v6Subnet.Contains(ip) {
-					klog.Errorf("Allocator error: EgressIP allocation: %s on subnet: %s which cannot host it", ip.String(), eNode.v6Subnet.String())
+			if utilnet.IsIPv6(ip) && eNode.egressIPConfig.V6.Net != nil {
+				if !eNode.egressIPConfig.V6.Net.Contains(ip) {
+					klog.Errorf("Allocator error: EgressIP allocation: %s on subnet: %s which cannot host it", ip.String(), eNode.egressIPConfig.V4.Net.String())
 					break
 				}
-			} else if !utilnet.IsIPv6(ip) && eNode.v4Subnet != nil {
-				if !eNode.v4Subnet.Contains(ip) {
-					klog.Errorf("Allocator error: EgressIP allocation: %s on subnet: %s which cannot host it", ip.String(), eNode.v4Subnet.String())
+			} else if !utilnet.IsIPv6(ip) && eNode.egressIPConfig.V4.Net != nil {
+				if !eNode.egressIPConfig.V4.Net.Contains(ip) {
+					klog.Errorf("Allocator error: EgressIP allocation: %s on subnet: %s which cannot host it", ip.String(), eNode.egressIPConfig.V4.Net.String())
 					break
 				}
 			} else {
@@ -645,13 +827,24 @@ func (oc *Controller) generatePodIPCacheForEgressIP(eIPs []interface{}) (map[str
 
 func (oc *Controller) isAnyClusterNodeIP(ip net.IP) *egressNode {
 	for _, eNode := range oc.eIPC.allocator.cache {
-		if ip.Equal(eNode.v6IP) || ip.Equal(eNode.v4IP) {
+		if ip.Equal(eNode.egressIPConfig.V6.IP) || ip.Equal(eNode.egressIPConfig.V4.IP) {
 			return eNode
 		}
 	}
 	return nil
 }
 
+func (oc *Controller) updateEgressIPStatusWithItem(name string, statusItem egressipv1.EgressIPStatusItem) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		egressIP, err := oc.watchFactory.GetEgressIP(name)
+		if err != nil {
+			return err
+		}
+		updateEgressIP := egressIP.DeepCopy()
+		updateEgressIP.Status.Items = append(egressIP.Status.Items, statusItem)
+		return oc.kube.UpdateEgressIP(updateEgressIP)
+	})
+}
 func (oc *Controller) updateEgressIPStatus(name string, statusItems []egressipv1.EgressIPStatusItem) error {
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		egressIP, err := oc.watchFactory.GetEgressIP(name)
@@ -711,8 +904,26 @@ func (oc *Controller) assignEgressIPs(name string, egressIPs []string) []egressi
 				klog.V(5).Infof("Node: %s is already in use by another egress IP for this EgressIP: %s, trying another node", eNode.name, name)
 				continue
 			}
-			if (eNode.v6Subnet != nil && eNode.v6Subnet.Contains(eIPC)) ||
-				(eNode.v4Subnet != nil && eNode.v4Subnet.Contains(eIPC)) {
+			if eNode.egressIPConfig.Capacity.IP < util.UnlimitedNodeCapacity {
+				if eNode.egressIPConfig.Capacity.IP-len(eNode.allocations) <= 0 {
+					klog.V(5).Infof("Additional allocation on Node: %s exhausts it's IP capacity, trying another node", eNode.name)
+					continue
+				}
+			}
+			if eNode.egressIPConfig.Capacity.IPv4 < util.UnlimitedNodeCapacity && utilnet.IsIPv4(eIPC) {
+				if eNode.egressIPConfig.Capacity.IPv4-getIPFamilyAllocationCount(eNode.allocations, false) <= 0 {
+					klog.V(5).Infof("Additional allocation on Node: %s exhausts it's IPv4 capacity, trying another node", eNode.name)
+					continue
+				}
+			}
+			if eNode.egressIPConfig.Capacity.IPv6 < util.UnlimitedNodeCapacity && utilnet.IsIPv6(eIPC) {
+				if eNode.egressIPConfig.Capacity.IPv6-getIPFamilyAllocationCount(eNode.allocations, true) <= 0 {
+					klog.V(5).Infof("Additional allocation on Node: %s exhausts it's IPv6 capacity, trying another node", eNode.name)
+					continue
+				}
+			}
+			if (eNode.egressIPConfig.V6.Net != nil && eNode.egressIPConfig.V6.Net.Contains(eIPC)) ||
+				(eNode.egressIPConfig.V4.Net != nil && eNode.egressIPConfig.V4.Net.Contains(eIPC)) {
 				assignments = append(assignments, egressipv1.EgressIPStatusItem{
 					Node:     eNode.name,
 					EgressIP: eIPC.String(),
@@ -740,6 +951,18 @@ func (oc *Controller) assignEgressIPs(name string, egressIPs []string) []egressi
 		oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "UnassignedRequest", "Not all egress IPs for EgressIP: %s could be assigned, please tag more nodes", name)
 	}
 	return assignments
+}
+
+func getIPFamilyAllocationCount(allocations map[string]string, isIPv6 bool) (count int) {
+	for allocation := range allocations {
+		if utilnet.IsIPv4String(allocation) && !isIPv6 {
+			count++
+		}
+		if utilnet.IsIPv6String(allocation) && isIPv6 {
+			count++
+		}
+	}
+	return
 }
 
 func (oc *Controller) getSortedEgressData() ([]*egressNode, map[string]bool) {
@@ -878,26 +1101,18 @@ func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
 	oc.eIPC.allocator.Lock()
 	defer oc.eIPC.allocator.Unlock()
 	if _, exists := oc.eIPC.allocator.cache[node.Name]; !exists {
-		var v4IP, v6IP net.IP
-		var v4Subnet, v6Subnet *net.IPNet
-		v4IfAddr, v6IfAddr, err := util.ParseNodePrimaryIfAddr(node)
-		if err != nil {
-			klog.V(5).Infof("Unable to use node for egress assignment, err: %v", err)
-			return nil
-		}
-		if v4IfAddr != "" {
-			v4IP, v4Subnet, err = net.ParseCIDR(v4IfAddr)
+		var parsedEgressIPConfig *util.ParsedNodeEgressIPConfiguration
+		if util.PlatformTypeIsEgressIPCloudProvider() {
+			parsedEgressIPConfig, err = util.ParseCloudEgressIPConfig(node)
 			if err != nil {
-				return err
+				return fmt.Errorf("unable to use cloud node for egress assignment, err: %v", err)
+			}
+		} else {
+			parsedEgressIPConfig, err = util.ParseNodePrimaryIfAddr(node)
+			if err != nil {
+				return fmt.Errorf("unable to use node for egress assignment, err: %v", err)
 			}
 		}
-		if v6IfAddr != "" {
-			v6IP, v6Subnet, err = net.ParseCIDR(v6IfAddr)
-			if err != nil {
-				return err
-			}
-		}
-
 		nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(node)
 		if err != nil {
 			return fmt.Errorf("failed to parse node %s subnets annotation %v", node.Name, err)
@@ -907,13 +1122,10 @@ func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
 			mgmtIPs[i] = util.GetNodeManagementIfAddr(subnet).IP
 		}
 		oc.eIPC.allocator.cache[node.Name] = &egressNode{
-			name:        node.Name,
-			v4IP:        v4IP,
-			v6IP:        v6IP,
-			v4Subnet:    v4Subnet,
-			v6Subnet:    v6Subnet,
-			mgmtIPs:     mgmtIPs,
-			allocations: make(map[string]string),
+			name:           node.Name,
+			egressIPConfig: parsedEgressIPConfig,
+			mgmtIPs:        mgmtIPs,
+			allocations:    make(map[string]string),
 		}
 	}
 	return nil
@@ -952,10 +1164,7 @@ func (oc *Controller) initClusterEgressPolicies(nodes []interface{}) {
 
 // egressNode is a cache helper used for egress IP assignment, representing an egress node
 type egressNode struct {
-	v4IP               net.IP
-	v6IP               net.IP
-	v4Subnet           *net.IPNet
-	v6Subnet           *net.IPNet
+	egressIPConfig     *util.ParsedNodeEgressIPConfiguration
 	mgmtIPs            []net.IP
 	allocations        map[string]string
 	isReady            bool
@@ -1513,4 +1722,65 @@ func getEgressIPAllocationTotalCount(allocator allocator) float64 {
 		count += len(eNode.allocations)
 	}
 	return float64(count)
+}
+
+// cloudPrivateIPConfigNameToIPString converts the resource name to the string
+// representation of net.IP. Given a limitation in the Kubernetes API server
+// (see: https://github.com/kubernetes/kubernetes/pull/100950)
+// CloudPrivateIPConfig.metadata.name cannot represent an IPv6 address. To
+// work-around this limitation it was decided that the network plugin creating
+// the CR will fully expand the IPv6 address and replace all colons with dots,
+// ex:
+
+// The CloudPrivateIPConfig name fc00.f853.0ccd.e793.0000.0000.0000.0054 will be
+// represented as address: fc00:f853:ccd:e793::54
+
+// We thus need to replace every fifth character's dot with a colon.
+func cloudPrivateIPConfigNameToIPString(name string) string {
+	// Handle IPv4, which will work fine.
+	if ip := net.ParseIP(name); ip != nil {
+		return name
+	}
+	// Handle IPv6
+	tmp := []byte(name)
+	for i := 4; i < len(tmp); i += 5 {
+		if len(tmp)-i > 4 {
+			tmp[i] = byte(':')
+		}
+	}
+	return string(tmp)
+}
+
+// ipStringToCloudPrivateIPConfigName converts the net.IP string representation
+// to a CloudPrivateIPConfig compatible name.
+
+// The string representation of the IPv6 address fc00:f853:ccd:e793::54 will be
+// represented as: fc00.f853.0ccd.e793.0000.0000.0000.0054
+
+// We thus need to fully expand the IP string and replace every fifth
+// character's colon with a dot.
+func ipStringToCloudPrivateIPConfigName(ipString string) (name string) {
+	ip := net.ParseIP(ipString)
+	if ip.To4() != nil {
+		return ipString
+	}
+	dst := make([]byte, hex.EncodedLen(len(ip)))
+	hex.Encode(dst, ip)
+	for i := 0; i < len(dst); i += 4 {
+		if len(dst)-i == 4 {
+			name += string(dst[i : i+4])
+		} else {
+			name += string(dst[i:i+4]) + "."
+		}
+	}
+	return
+}
+
+func hasFinalizer(finalizers []string, finalizer string) bool {
+	for _, f := range finalizers {
+		if f == finalizer {
+			return true
+		}
+	}
+	return false
 }
