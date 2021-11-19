@@ -71,9 +71,8 @@ func (c *addressManager) Run(stopChan <-chan struct{}) {
 	var addrChan chan netlink.AddrUpdate
 	addrSubscribeOptions := netlink.AddrSubscribeOptions{
 		ErrorCallback: func(err error) {
-			klog.Errorf("Failed during AddrSubscribe callback: %v. Calling sync() explicitly", err)
-			// sync the manager with current addresses on the node
-			c.sync()
+			klog.Errorf("Failed during AddrSubscribe callback: %v", err)
+			// Note: Not calling sync() from here: it is redudant and unsafe when stopChan is closed.
 		},
 	}
 
@@ -210,7 +209,7 @@ func (c *addressManager) sync() {
 			continue
 		}
 		if !c.isValidNodeIP(ip) {
-			klog.V(5).Info("Skipping invalid IP address found on host: %s", ip.String())
+			klog.V(5).Infof("Skipping non-useable IP address for host: %s", ip.String())
 			continue
 		}
 		currAddresses.Insert(ip.String())
