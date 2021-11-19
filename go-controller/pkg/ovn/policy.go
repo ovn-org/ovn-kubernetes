@@ -674,6 +674,13 @@ func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
 			continue
 		}
 
+		// this is portInfo of the previous deleted Pod of the same name
+		// wait for the next Pod update event
+		if !portInfo.expires.IsZero() {
+			klog.Warningf("Port %s is already marked for removal", logicalPort)
+			continue
+		}
+
 		// this pod is somehow already added to this policy, then skip
 		if _, ok := np.localPods.LoadOrStore(portInfo.name, portInfo); ok {
 			continue
