@@ -23,7 +23,7 @@ require (
 	github.com/mitchellh/copystructure v1.2.0
 	github.com/onsi/ginkgo v1.16.4
 	github.com/onsi/gomega v1.14.0
-	github.com/ovn-org/libovsdb v0.6.1-0.20211110143633-426e0bdb7696
+	github.com/ovn-org/libovsdb v0.6.1-0.20211119175802-998d2ca8998d
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.11.0
 	github.com/spf13/afero v1.4.1
@@ -39,7 +39,7 @@ require (
 	k8s.io/api v0.22.0
 	k8s.io/apimachinery v0.22.0
 	k8s.io/client-go v0.22.0
-	k8s.io/klog v0.0.0-20181102134211-b9b56d5dfc92
+	k8s.io/klog v0.0.0-20181102134211-b9b56d5dfc92 // indirect
 	k8s.io/klog/v2 v2.20.0
 	k8s.io/utils v0.0.0-20210707171843-4b05e18ac7d9
 )

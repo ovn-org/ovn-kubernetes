@@ -170,7 +170,7 @@ github.com/onsi/gomega/matchers/support/goraph/edge
 github.com/onsi/gomega/matchers/support/goraph/node
 github.com/onsi/gomega/matchers/support/goraph/util
 github.com/onsi/gomega/types
-# github.com/ovn-org/libovsdb v0.6.1-0.20211110143633-426e0bdb7696
+# github.com/ovn-org/libovsdb v0.6.1-0.20211119175802-998d2ca8998d
 github.com/ovn-org/libovsdb/cache
 github.com/ovn-org/libovsdb/client
 github.com/ovn-org/libovsdb/mapper
@@ -697,8 +697,6 @@ k8s.io/client-go/util/keyutil
 k8s.io/client-go/util/retry
 k8s.io/client-go/util/testing
 k8s.io/client-go/util/workqueue
-# k8s.io/klog v0.0.0-20181102134211-b9b56d5dfc92
-k8s.io/klog
 # k8s.io/klog/v2 v2.20.0
 k8s.io/klog/v2
 k8s.io/klog/v2/klogr
