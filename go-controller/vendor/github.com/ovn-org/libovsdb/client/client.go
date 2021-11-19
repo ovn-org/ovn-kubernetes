@@ -775,10 +775,14 @@ func (o *ovsdbClient) MonitorCancel(ctx context.Context, cookie MonitorCookie) e
 // RFC 7047 : monitor
 func (o *ovsdbClient) Monitor(ctx context.Context, monitor *Monitor) (MonitorCookie, error) {
 	cookie := newMonitorCookie(o.primaryDBName)
+	db := o.databases[o.primaryDBName]
+	db.monitorsMutex.Lock()
+	defer db.monitorsMutex.Unlock()
 	return cookie, o.monitor(ctx, cookie, false, monitor)
 }
 
 //gocyclo:ignore
+// monitor must only be called with a lock on monitorsMutex
 func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconnecting bool, monitor *Monitor) error {
 	// if we're reconnecting, we already hold the rpcMutex
 	if !reconnecting {
@@ -879,9 +883,7 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 	}
 
 	if !reconnecting {
-		db.monitorsMutex.Lock()
 		db.monitors[cookie.ID] = monitor
-		db.monitorsMutex.Unlock()
 		o.metrics.numMonitors.Inc()
 	}
 
@@ -914,9 +916,7 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 			}
 		}
 		if len(update.lastTxnID) > 0 {
-			db.monitorsMutex.Lock()
 			db.monitors[cookie.ID].LastTransactionID = update.lastTxnID
-			db.monitorsMutex.Unlock()
 		}
 	}
 	// clear deferred updates for next time
@@ -962,6 +962,9 @@ func (o *ovsdbClient) watchForLeaderChange() error {
 	// NOTE: _Server does not support monitor_cond_since
 	m.Method = ovsdb.ConditionalMonitorRPC
 	m.Tables = []TableMonitor{{Table: "Database"}}
+	db := o.databases[serverDB]
+	db.monitorsMutex.Lock()
+	defer db.monitorsMutex.Unlock()
 	err := o.monitor(context.Background(), newMonitorCookie(serverDB), false, m)
 	if err != nil {
 		return err
