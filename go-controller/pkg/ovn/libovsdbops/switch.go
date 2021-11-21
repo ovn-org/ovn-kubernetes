@@ -227,7 +227,28 @@ func RemoveACLsFromNodeSwitches(nbClient libovsdbclient.Client, acls []nbdb.ACL)
 	return nil
 }
 
-// RemoveACLsFromAllSwitches removes the ACL uuid entry from Logical Switch acl's list.
+// RemoveACLsFromJoinSwitch removes the specified ACLs from the distributed join switch
+func RemoveACLsFromJoinSwitch(nbClient libovsdbclient.Client, acls []nbdb.ACL) error {
+	// Find join switch
+	joinSwichLookupFcn := func(item *nbdb.LogicalSwitch) bool {
+		// Return only join switch (the per node ones if its old topology & distributed one if its new topology)
+		return (strings.HasPrefix(item.Name, types.JoinSwitchPrefix) || item.Name == "join")
+	}
+
+	switches, err := findSwitchesByPredicate(nbClient, joinSwichLookupFcn)
+	if err != nil {
+		return err
+	}
+
+	err = removeACLsFromSwitches(nbClient, switches, acls)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// RemoveACLFromSwitches removes the ACL uuid entry from Logical Switch acl's list.
 func RemoveACLsFromAllSwitches(nbClient libovsdbclient.Client, acls []nbdb.ACL) error {
 	// Find all switches
 	switches, err := findSwitches(nbClient)
