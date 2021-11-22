@@ -100,7 +100,7 @@ func registerCoverageShowMetrics(target string, metricNamespace string, metricSu
 			Name:      metricName,
 			Help:      metricInfo.help,
 		})
-		prometheus.MustRegister(metricInfo.metric)
+		ovnRegistry.MustRegister(metricInfo.metric)
 	}
 }
 
@@ -214,12 +214,12 @@ func registerStopwatchShowMetrics(component string, metricNamespace string, metr
 			Name:      fmt.Sprintf("%s_long_term_avg", metricName),
 		})
 
-		prometheus.MustRegister(metricInfo.metrics.totalSamples)
-		prometheus.MustRegister(metricInfo.metrics.min)
-		prometheus.MustRegister(metricInfo.metrics.max)
-		prometheus.MustRegister(metricInfo.metrics.percentile95th)
-		prometheus.MustRegister(metricInfo.metrics.shortTermAvg)
-		prometheus.MustRegister(metricInfo.metrics.longTermAvg)
+		ovnRegistry.MustRegister(metricInfo.metrics.totalSamples)
+		ovnRegistry.MustRegister(metricInfo.metrics.min)
+		ovnRegistry.MustRegister(metricInfo.metrics.max)
+		ovnRegistry.MustRegister(metricInfo.metrics.percentile95th)
+		ovnRegistry.MustRegister(metricInfo.metrics.shortTermAvg)
+		ovnRegistry.MustRegister(metricInfo.metrics.longTermAvg)
 	}
 }
 
