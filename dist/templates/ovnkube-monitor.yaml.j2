@@ -31,7 +31,7 @@ metadata:
   namespace: ovn-kubernetes
 spec:
   selector:
-    name: ovnkube-master
+    app: ovnkube-master
   type: ClusterIP
   clusterIP: None
   publishNotReadyAddresses: true
@@ -80,7 +80,7 @@ metadata:
   namespace: ovn-kubernetes
 spec:
   selector:
-    name: ovnkube-node
+    app: ovnkube-node
   type: ClusterIP
   clusterIP: None
   publishNotReadyAddresses: true

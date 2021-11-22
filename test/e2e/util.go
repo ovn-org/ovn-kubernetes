@@ -565,7 +565,7 @@ func waitClusterHealthy(f *framework.Framework, numMasters int) error {
 		}
 
 		podList, err = podClient.List(context.Background(), metav1.ListOptions{
-			LabelSelector: "name=ovnkube-master",
+			LabelSelector: "app=ovnkube-master",
 		})
 		if err != nil {
 			return false, fmt.Errorf("failed to list ovn-kube node pods: %w", err)

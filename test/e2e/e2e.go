@@ -413,7 +413,7 @@ func runCommand(cmd ...string) (string, error) {
 // restartOVNKubeNodePod restarts the ovnkube-node pod from namespace, running on nodeName
 func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nodeName string) error {
 	ovnKubeNodePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
-		LabelSelector: "name=ovnkube-node",
+		LabelSelector: "app=ovnkube-node",
 		FieldSelector: "spec.nodeName=" + nodeName,
 	})
 	if err != nil {
@@ -432,7 +432,7 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 	framework.Logf("waiting for node %s to have running ovnkube-node pod", nodeName)
 	wait.Poll(2*time.Second, 5*time.Minute, func() (bool, error) {
 		ovnKubeNodePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
-			LabelSelector: "name=ovnkube-node",
+			LabelSelector: "app=ovnkube-node",
 			FieldSelector: "spec.nodeName=" + nodeName,
 		})
 		if err != nil {
@@ -478,7 +478,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		}
 
 		masterPods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.Background(), metav1.ListOptions{
-			LabelSelector: "name=ovnkube-master",
+			LabelSelector: "app=ovnkube-master",
 		})
 		framework.ExpectNoError(err)
 		numMasters = len(masterPods.Items)
@@ -528,7 +528,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		podClient := f.ClientSet.CoreV1().Pods("ovn-kubernetes")
 
 		podList, err := podClient.List(context.Background(), metav1.ListOptions{
-			LabelSelector: "name=ovnkube-master",
+			LabelSelector: "app=ovnkube-master",
 		})
 		framework.ExpectNoError(err)
 
@@ -2623,7 +2623,7 @@ var _ = ginkgo.Describe("e2e br-int NetFlow export validation", func() {
 		framework.ExpectNoError(err)
 
 		ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNs).List(context.TODO(), metav1.ListOptions{
-			LabelSelector: "name=ovnkube-node",
+			LabelSelector: "app=ovnkube-node",
 		})
 		if err != nil {
 			framework.Failf("could not get ovnkube-node pods: %v", err)

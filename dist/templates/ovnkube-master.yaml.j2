@@ -17,7 +17,7 @@ spec:
   revisionHistoryLimit: 10
   selector:
     matchLabels:
-      name: ovnkube-master
+      app: ovnkube-master
   strategy:
     rollingUpdate:
       maxSurge: 25%
@@ -26,7 +26,7 @@ spec:
   template:
     metadata:
       labels:
-        name: ovnkube-master
+        app: ovnkube-master
         component: network
         type: infra
         kubernetes.io/os: "linux"
@@ -57,7 +57,7 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             - labelSelector:
                 matchExpressions:
-                  - key: name
+                  - key: app
                     operator: In
                     values:
                       - ovnkube-master
