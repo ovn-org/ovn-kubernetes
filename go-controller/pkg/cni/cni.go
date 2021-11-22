@@ -180,7 +180,7 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, us
 	if response != nil {
 		if result, err1 = response.Marshal(); err1 != nil {
 			return nil, fmt.Errorf("%s %s CNI request %+v failed to marshal result: %v",
-				request, request.Command, request, err)
+				request, request.Command, request, err1)
 		}
 		if resultForLogging, err1 = response.MarshalForLogging(); err1 != nil {
 			klog.Errorf("%s %s CNI request %+v, %v", request, request.Command, request, err1)
