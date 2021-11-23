@@ -206,7 +206,7 @@ func removeACLsFromSwitches(nbClient libovsdbclient.Client, switches []nbdb.Logi
 	return nil
 }
 
-// RemoveACLFromSwitches removes the specified ACLs from the per node Logical Switches
+// RemoveACLsFromNodeSwitches removes the specified ACLs from the per node Logical Switches
 func RemoveACLsFromNodeSwitches(nbClient libovsdbclient.Client, acls []nbdb.ACL) error {
 	// Find all node switches
 	nodeSwichLookupFcn := func(item *nbdb.LogicalSwitch) bool {
@@ -227,7 +227,7 @@ func RemoveACLsFromNodeSwitches(nbClient libovsdbclient.Client, acls []nbdb.ACL)
 	return nil
 }
 
-// RemoveACLFromSwitches removes the ACL uuid entry from Logical Switch acl's list.
+// RemoveACLsFromAllSwitches removes the ACL uuid entry from Logical Switch acl's list.
 func RemoveACLsFromAllSwitches(nbClient libovsdbclient.Client, acls []nbdb.ACL) error {
 	// Find all switches
 	switches, err := findSwitches(nbClient)
