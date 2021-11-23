@@ -342,26 +342,29 @@ func stopwatchShowMetricsUpdater(component string) {
 	}
 }
 
-// The `keepTrying` boolean when set to true will not return an error if we can't find pods with the given label.
+// The `keepTrying` boolean when set to true will not return an error if we can't find pods with one of the given labels.
 // This is so that the caller can re-try again to see if the pods have appeared in the k8s cluster.
-func checkPodRunsOnGivenNode(clientset kubernetes.Interface, label, k8sNodeName string,
+func checkPodRunsOnGivenNode(clientset kubernetes.Interface, labels []string, k8sNodeName string,
 	keepTrying bool) (bool, error) {
-	pods, err := clientset.CoreV1().Pods(config.Kubernetes.OVNConfigNamespace).List(context.TODO(), metav1.ListOptions{
-		LabelSelector: label,
-	})
-	if err != nil {
-		klog.V(5).Infof("Failed to list Pods with label %q: %v. Retrying..", label, err)
-		return false, nil
-	}
-	for _, pod := range pods.Items {
-		if pod.Spec.NodeName == k8sNodeName {
-			return true, nil
+	for _, label := range labels {
+		pods, err := clientset.CoreV1().Pods(config.Kubernetes.OVNConfigNamespace).List(context.TODO(), metav1.ListOptions{
+			LabelSelector: label,
+		})
+		if err != nil {
+			klog.V(5).Infof("Failed to list Pods with label %q: %v. Retrying..", label, err)
+			return false, nil
+		}
+		for _, pod := range pods.Items {
+			if pod.Spec.NodeName == k8sNodeName {
+				return true, nil
+			}
 		}
 	}
 	if keepTrying {
 		return false, nil
 	}
-	return false, fmt.Errorf("the Pod matching the label %q doesn't exist on this node %s", label, k8sNodeName)
+	return false, fmt.Errorf("a Pod matching at least one of the labels %q doesn't exist on this node %s",
+		strings.Join(labels, ","), k8sNodeName)
 }
 
 // StartMetricsServer runs the prometheus listener so that OVN K8s metrics can be collected
