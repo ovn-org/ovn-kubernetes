@@ -259,7 +259,7 @@ func createServiceForPodsWithLabel(f *framework.Framework, namespace string, ser
 		},
 		Spec: v1.ServiceSpec{
 			Ports: []v1.ServicePort{
-				v1.ServicePort{
+				{
 					Protocol:   v1.ProtocolTCP,
 					TargetPort: intstr.Parse(targetPort),
 					Port:       servicePort,
@@ -3025,7 +3025,7 @@ var _ = ginkgo.Describe("e2e IGMP validation", func() {
 	f := framework.NewDefaultFramework(svcname)
 	ginkgo.It("can retrieve multicast IGMP query", func() {
 		// Enable multicast of the test namespace annotation
-		ginkgo.By(fmt.Sprintf("annotating namespace: %s to enable multicast",f.Namespace.Name))
+		ginkgo.By(fmt.Sprintf("annotating namespace: %s to enable multicast", f.Namespace.Name))
 		annotateArgs := []string{
 			"annotate",
 			"namespace",
