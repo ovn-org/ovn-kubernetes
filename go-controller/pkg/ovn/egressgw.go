@@ -96,28 +96,6 @@ func (oc *Controller) ensureRouteInfoLocked(podName ktypes.NamespacedName) (*ext
 	return routeInfo, nil
 }
 
-// getRouteInfosForGateway returns all routeInfos for a specific namespace and gateway IP
-func (oc *Controller) getRouteInfosForGateway(gatewayIP, namespace string) []*externalRouteInfo {
-	oc.exGWCacheMutex.RLock()
-	defer oc.exGWCacheMutex.RUnlock()
-
-	routeInfos := make([]*externalRouteInfo, 0)
-	for namespacedName, routeInfo := range oc.externalGWCache {
-		if namespacedName.Namespace != namespace {
-			continue
-		}
-
-		for _, route := range routeInfo.podExternalRoutes {
-			if _, ok := route[gatewayIP]; ok {
-				routeInfos = append(routeInfos, routeInfo)
-				break
-			}
-		}
-	}
-
-	return routeInfos
-}
-
 // getRouteInfosForNamespace returns all routeInfos for a specific namespace
 func (oc *Controller) getRouteInfosForNamespace(namespace string) []*externalRouteInfo {
 	oc.exGWCacheMutex.RLock()
@@ -125,10 +103,9 @@ func (oc *Controller) getRouteInfosForNamespace(namespace string) []*externalRou
 
 	routes := make([]*externalRouteInfo, 0)
 	for namespacedName, routeInfo := range oc.externalGWCache {
-		if namespacedName.Namespace != namespace {
-			continue
+		if namespacedName.Namespace == namespace {
+			routes = append(routes, routeInfo)
 		}
-		routes = append(routes, routeInfo)
 	}
 
 	return routes
@@ -391,7 +368,7 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
 
 	for _, gwIP := range foundGws.gws {
 		// check for previously configured pod routes
-		routeInfos := oc.getRouteInfosForGateway(gwIP.String(), namespace)
+		routeInfos := oc.getRouteInfosForNamespace(namespace)
 		for _, routeInfo := range routeInfos {
 			routeInfo.Lock()
 			if routeInfo.deleted {
@@ -401,9 +378,6 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
 			for podIP, route := range routeInfo.podExternalRoutes {
 				for routeGwIP, gr := range route {
 					if gwIP.String() != routeGwIP {
-						continue
-					}
-					if gr == "" {
 						continue
 					}
 					mask := GetIPFullMask(podIP)
