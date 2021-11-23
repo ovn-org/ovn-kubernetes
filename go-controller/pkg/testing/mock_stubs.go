@@ -50,7 +50,19 @@ func (mock *MockOVNClient) ASGet(name string) (*goovn.AddressSet, error) {
 }
 
 // Update address set
-func (mock *MockOVNClient) ASUpdate(name string, addrs []string, external_ids map[string]string) (*goovn.OvnCommand, error) {
+func (mock *MockOVNClient) ASUpdate(name string, uuid string, addrs []string, external_ids map[string]string) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+func (mock *MockOVNClient) LSPGetUUID(uuid string) (*goovn.LogicalSwitchPort, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+func (mock *MockOVNClient) ASAddIPs(name, uuid string, addrs []string) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+func (mock *MockOVNClient) ASDelIPs(name, uuid string, addrs []string) (*goovn.OvnCommand, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 

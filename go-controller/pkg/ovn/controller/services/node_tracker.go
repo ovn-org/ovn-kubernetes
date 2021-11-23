@@ -91,7 +91,12 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer) *nodeTracker {
 				return
 			}
 
-			nt.updateNode(newObj)
+			// updateNode needs to be called only when hostSubnet annotation has changed or
+			// if L3Gateway annotation's ip addresses have changed or the name of the node (very rare)
+			// has changed. No need to trigger update for any other field change.
+			if util.NodeSubnetAnnotationChanged(oldObj, newObj) || util.NodeL3GatewayAnnotationChanged(oldObj, newObj) || oldObj.Name != newObj.Name {
+				nt.updateNode(newObj)
+			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			node, ok := obj.(*v1.Node)

@@ -5,13 +5,11 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -20,7 +18,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/afero"
@@ -519,8 +516,9 @@ func getNbOVSDBArgs(command string, args ...string) []string {
 // RunOVNNbctlUnix runs command via ovn-nbctl, with ovn-nbctl using the unix
 // domain sockets to connect to the ovsdb-server backing the OVN NB database.
 func RunOVNNbctlUnix(args ...string) (string, string, error) {
-	cmdArgs, envVars := getNbctlArgsAndEnv(ovsCommandTimeout, args...)
-	stdout, stderr, err := runOVNretry(runner.nbctlPath, envVars, cmdArgs...)
+	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
+	cmdArgs = append(cmdArgs, args...)
+	stdout, stderr, err := runOVNretry(runner.nbctlPath, nil, cmdArgs...)
 	return strings.Trim(strings.TrimFunc(stdout.String(), unicode.IsSpace), "\""),
 		stderr.String(), err
 }
@@ -635,7 +633,14 @@ func RunOVNCtl(args ...string) (string, string, error) {
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
-// RunOVNNBAppCtl runs an 'ovs-appctl -t nbdbCtlSockPath command'.
+// RunOVNNBAppCtlWithTimeout runs an ovn-appctl command with a timeout to nbdb
+func RunOVNNBAppCtlWithTimeout(timeout int, args ...string) (string, string, error) {
+	cmdArgs := []string{fmt.Sprintf("--timeout=%d", timeout)}
+	cmdArgs = append(cmdArgs, args...)
+	return RunOVNNBAppCtl(cmdArgs...)
+}
+
+// RunOVNNBAppCtl runs an 'ovn-appctl -t nbdbCtlSockPath command'.
 func RunOVNNBAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
 	cmdArgs = []string{
@@ -647,7 +652,14 @@ func RunOVNNBAppCtl(args ...string) (string, string, error) {
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
-// RunOVNSBAppCtl runs an 'ovs-appctl -t sbdbCtlSockPath command'.
+// RunOVNSBAppCtlWithTimeout runs an ovn-appctl command with a timeout to sbdb
+func RunOVNSBAppCtlWithTimeout(timeout int, args ...string) (string, string, error) {
+	cmdArgs := []string{fmt.Sprintf("--timeout=%d", timeout)}
+	cmdArgs = append(cmdArgs, args...)
+	return RunOVNSBAppCtl(cmdArgs...)
+}
+
+// RunOVNSBAppCtl runs an 'ovn-appctl -t sbdbCtlSockPath command'.
 func RunOVNSBAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
 	cmdArgs = []string{
@@ -740,7 +752,8 @@ func RunRoute(args ...string) (string, string, error) {
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
-// AddOFFlowWithSpecificAction replaces flows in the bridge with a FLOOD action flow
+// AddOFFlowWithSpecificAction replaces flows in the bridge by a single flow with a
+// specified action
 func AddOFFlowWithSpecificAction(bridgeName, action string) (string, string, error) {
 	args := []string{"-O", "OpenFlow13", "replace-flows", bridgeName, "-"}
 
@@ -874,40 +887,6 @@ func DetectSCTPSupport() (bool, error) {
 		}
 	}
 	return false, nil
-}
-
-// DetermineOVNTopoVersionFromOVN determines what OVN Topology version is being used
-// If "k8s-ovn-topo-version" key in external_ids column does not exist, it is prior to OVN topology versioning
-// and therefore set version number to OvnCurrentTopologyVersion
-func DetermineOVNTopoVersionFromOVN() (int, error) {
-	ver := 0
-	stdout, stderr, err := RunOVNNbctl("--data=bare", "--no-headings", "--columns=name", "find", "logical_router",
-		fmt.Sprintf("name=%s", types.OVNClusterRouter))
-	if err != nil {
-		return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
-			"stderr: %q, error: %v", types.OVNClusterRouter, stderr, err)
-	}
-	if len(stdout) == 0 {
-		// no OVNClusterRouter exists, DB is empty, nothing to upgrade
-		return math.MaxInt32, nil
-	}
-
-	stdout, stderr, err = RunOVNNbctl("--if-exists", "get", "logical_router", types.OVNClusterRouter,
-		"external_ids:k8s-ovn-topo-version")
-	if err != nil {
-		return 0, fmt.Errorf("failed to determine the current version of OVN logical topology: stderr: %q, error: %v",
-			stderr, err)
-	} else if len(stdout) == 0 {
-		klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
-	} else {
-		v, err := strconv.Atoi(stdout)
-		if err != nil {
-			return 0, fmt.Errorf("invalid OVN topology version string for the cluster: %s", stdout)
-		} else {
-			ver = v
-		}
-	}
-	return ver, nil
 }
 
 // NBTxn hold parts of an ovn-nbctl transaction request

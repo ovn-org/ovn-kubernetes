@@ -67,7 +67,7 @@ usage() {
     echo "                                   github CI to be updated with IPv6 settings."
     echo "                                   DEFAULT: Don't allow."
     echo "-gm  | --gateway-mode              Enable 'shared' or 'local' gateway mode."
-    echo "                                   DEFAULT: local."
+    echo "                                   DEFAULT: shared."
     echo "-ov  | --ovn-image            	   Use the specified docker image instead of building locally. DEFAULT: local build."
     echo "-ml  | --master-loglevel           Log level for ovnkube (master), DEFAULT: 5."
     echo "-nl  | --node-loglevel             Log level for ovnkube (node), DEFAULT: 5"
@@ -239,6 +239,25 @@ print_params() {
      echo ""
 }
 
+command_exists() {
+  cmd="$1"
+  which ${cmd} >/dev/null 2>&1
+}
+
+check_dependencies() {
+  for cmd in pip jq kind ; do
+    if ! command_exists ${cmd} ; then
+  	  echo "Dependency not met: Command not found '${cmd}'"
+  	  exit 1
+    fi
+  done
+
+  if ! command_exists docker && ! command_exists podman; then
+  	  echo "Dependency not met: Neither docker nor podman found"
+  	  exit 1
+  fi
+}
+
 install_j2_renderer() {
   # ensure j2 renderer installed
   pip install wheel --user
@@ -249,8 +268,9 @@ install_j2_renderer() {
 set_default_params() {
   # Set default values
   KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
+  KIND_IMAGE=${KIND_IMAGE:-kindest/node}
   K8S_VERSION=${K8S_VERSION:-v1.20.0}
-  OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-local}
+  OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   OVN_HA=${OVN_HA:-false}
   KIND_CONFIG=${KIND_CONFIG:-./kind.yaml.j2}
@@ -407,7 +427,7 @@ create_kind_cluster() {
   if kind get clusters | grep ovn; then
     delete
   fi
-  kind create cluster --name "${KIND_CLUSTER_NAME}" --kubeconfig "${KUBECONFIG}" --image kindest/node:"${K8S_VERSION}" --config=${KIND_CONFIG_LCL}
+  kind create cluster --name "${KIND_CLUSTER_NAME}" --kubeconfig "${KUBECONFIG}" --image "${KIND_IMAGE}":"${K8S_VERSION}" --config=${KIND_CONFIG_LCL}
   cat "${KUBECONFIG}"
 }
 
@@ -421,8 +441,8 @@ docker_disable_ipv6() {
   # is not very common.
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
   for n in $KIND_NODES; do
-    $OCI_BIN exec "$n" sysctl net.ipv6.conf.all.disable_ipv6=0
-    $OCI_BIN exec "$n" sysctl net.ipv6.conf.all.forwarding=1
+    $OCI_BIN exec "$n" sysctl --ignore net.ipv6.conf.all.disable_ipv6=0
+    $OCI_BIN exec "$n" sysctl --ignore net.ipv6.conf.all.forwarding=1
   done
 }
 
@@ -551,6 +571,24 @@ install_ingress() {
 }
 
 kubectl_wait_pods() {
+  echo "Waiting for k8s to create ovn-kubernetes pod resources..."
+  local PODS_CREATED=false
+  for i in {1..10}; do
+    local NUM_PODS=$(kubectl -n ovn-kubernetes get pods -o json 2> /dev/null | jq '.items | length')
+    if [[ "${NUM_PODS}" -ne 0 ]]; then
+      echo "ovn-kubernetes pods created."
+      PODS_CREATED=true
+      break
+    fi
+    sleep 1
+  done
+
+  if [[ "${PODS_CREATED}" == false ]]; then
+    echo "ovn-kubernetes pods were not created."
+    exit 1
+  fi
+  echo "ovn-kubernetes pods created."
+
   # Check that everything is fine and running. IPv6 cluster seems to take a little
   # longer to come up, so extend the wait time.
   OVN_TIMEOUT=300s
@@ -573,11 +611,11 @@ docker_create_second_interface() {
   echo "adding second interfaces to nodes"
 
   # Create the network as dual stack, regardless of the type of the deployment. Ignore if already exists.
-  docker network create --ipv6 --driver=bridge kind-exgw --subnet=172.19.0.0/16 --subnet=fc00:f853:ccd:e798::/64 || true
+  docker network create --ipv6 --driver=bridge kindexgw --subnet=172.19.0.0/16 --subnet=fc00:f853:ccd:e798::/64 || true
 
   KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
   for n in $KIND_NODES; do
-    docker network connect kind-exgw "$n"
+    docker network connect kindexgw "$n"
   done
 }
 
@@ -586,6 +624,7 @@ sleep_until_pods_settle() {
   sleep 30
 }
 
+check_dependencies
 install_j2_renderer
 # In order to allow providing arguments with spaces, e.g. "-vconsole:info -vfile:info" 
 # the original command <parse_args $*> was replaced by <parse_args "$@">

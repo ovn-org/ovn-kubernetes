@@ -7,7 +7,7 @@ type (
 	LogicalRouterPolicyAction = string
 )
 
-const (
+var (
 	LogicalRouterPolicyActionAllow   LogicalRouterPolicyAction = "allow"
 	LogicalRouterPolicyActionDrop    LogicalRouterPolicyAction = "drop"
 	LogicalRouterPolicyActionReroute LogicalRouterPolicyAction = "reroute"
@@ -19,7 +19,8 @@ type LogicalRouterPolicy struct {
 	Action      LogicalRouterPolicyAction `ovsdb:"action"`
 	ExternalIDs map[string]string         `ovsdb:"external_ids"`
 	Match       string                    `ovsdb:"match"`
-	Nexthop     []string                  `ovsdb:"nexthop"`
+	Nexthop     *string                   `ovsdb:"nexthop"`
+	Nexthops    []string                  `ovsdb:"nexthops"`
 	Options     map[string]string         `ovsdb:"options"`
 	Priority    int                       `ovsdb:"priority"`
 }

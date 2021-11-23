@@ -46,7 +46,6 @@ rules:
   - nodes
   - endpoints
   - services
-  - configmaps
   verbs: ["get", "list", "watch"]
 - apiGroups:
   - extensions
@@ -105,6 +104,35 @@ subjects:
   namespace: ovn-kubernetes
 
 ---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: ovn-kubernetes
+  name: ovn-k8s-configmap
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "watch", "list"]
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: only-ovnk8s-configmaps
+  namespace: ovn-kubernetes
+roleRef:
+  name: ovn-k8s-configmap
+  kind: Role
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  name: ovn
+  namespace: ovn-kubernetes
+
+---
+
 # The network cidr and service cidr are set in the ovn-config configmap
 kind: ConfigMap
 apiVersion: v1

@@ -78,7 +78,7 @@ func (c *Condition) UnmarshalJSON(b []byte) error {
 	default:
 		return fmt.Errorf("%s is not a valid function", function)
 	}
-	vv, err := interfaceToOVSDBNotationInterface(reflect.ValueOf(v[2]))
+	vv, err := ovsSliceToGoNotation(v[2])
 	if err != nil {
 		return err
 	}
@@ -88,7 +88,7 @@ func (c *Condition) UnmarshalJSON(b []byte) error {
 
 // Evaluate will evaluate the condition on the two provided values
 // The conditions operately differently depending on the type of
-// the provided values. The behavjour is as described in RFC7047
+// the provided values. The behavior is as described in RFC7047
 func (c ConditionFunction) Evaluate(a interface{}, b interface{}) (bool, error) {
 	x := reflect.ValueOf(a)
 	y := reflect.ValueOf(b)
@@ -163,7 +163,7 @@ func (c ConditionFunction) Evaluate(a interface{}, b interface{}) (bool, error) 
 			return false, fmt.Errorf("condition not supported on %s", x.Kind())
 		}
 	default:
-		return false, fmt.Errorf("unsuported condition function %s", c)
+		return false, fmt.Errorf("unsupported condition function %s", c)
 	}
 	// we should never get here
 	return false, fmt.Errorf("unreachable condition")
