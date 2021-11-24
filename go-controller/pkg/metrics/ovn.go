@@ -377,7 +377,7 @@ func RegisterOvnControllerMetrics() {
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemController,
-			Name:      "integration_bridge_patch_ports_total",
+			Name:      "integration_bridge_patch_ports",
 			Help: "Captures the number of patch ports that connect br-int OVS " +
 				"bridge to physical OVS bridge and br-local OVS bridge.",
 		},
@@ -388,7 +388,7 @@ func RegisterOvnControllerMetrics() {
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemController,
-			Name:      "integration_bridge_geneve_ports_total",
+			Name:      "integration_bridge_geneve_ports",
 			Help:      "Captures the number of geneve ports that are on br-int OVS bridge.",
 		},
 		func() float64 {
