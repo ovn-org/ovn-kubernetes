@@ -12,7 +12,9 @@ import (
 
 	utilnet "k8s.io/utils/net"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -246,7 +248,9 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 			if err != nil {
 				klog.Warningf("Unable to get port %s in cache for SNAT rule removal", logicalPort)
 			} else {
-				oc.deletePerPodGRSNAT(pod.Spec.NodeName, portInfo.ips)
+				if err = deletePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, portInfo.ips); err != nil {
+					klog.Error(err.Error())
+				}
 			}
 		}
 
@@ -572,7 +576,7 @@ func (oc *Controller) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddrs []*n
 
 // deletePerPodGRSNAT removes per pod SNAT rules that are applied to the GR where the pod resides if
 // there are no gateways
-func (oc *Controller) deletePerPodGRSNAT(node string, podIPNets []*net.IPNet) {
+func deletePerPodGRSNAT(nbClient libovsdbclient.Client, node string, podIPNets []*net.IPNet) error {
 	gr := util.GetGatewayRouterFromNode(node)
 	nats := make([]*nbdb.NAT, 0, len(podIPNets))
 	var nat *nbdb.NAT
@@ -588,16 +592,17 @@ func (oc *Controller) deletePerPodGRSNAT(node string, podIPNets []*net.IPNet) {
 		nat = libovsdbops.BuildRouterSNAT(nil, fullMaskPodNet, "", nil)
 		nats = append(nats, nat)
 	}
-	err = libovsdbops.DeleteNatsFromRouter(oc.nbClient, gr, nats...)
+	err = libovsdbops.DeleteNatsFromRouter(nbClient, gr, nats...)
 	if err != nil {
-		klog.Errorf("Failed to delete SNAT rule for pod on gateway router %s, "+
+		return fmt.Errorf("failed to delete SNAT rule for pod on gateway router %s, "+
 			"error: %v", gr, err)
 	}
+	return nil
 }
 
-func (oc *Controller) addPerPodGRSNAT(pod *kapi.Pod, podIfAddrs []*net.IPNet) error {
+func addPerPodGRSNAT(nbClient libovsdbclient.Client, watchFactory *factory.WatchFactory, pod *kapi.Pod, podIfAddrs []*net.IPNet) error {
 	nodeName := pod.Spec.NodeName
-	node, err := oc.watchFactory.GetNode(nodeName)
+	node, err := watchFactory.GetNode(nodeName)
 	if err != nil {
 		return fmt.Errorf("failed to get node %s: %v", nodeName, err)
 	}
@@ -624,7 +629,7 @@ func (oc *Controller) addPerPodGRSNAT(pod *kapi.Pod, podIfAddrs []*net.IPNet) er
 			nats = append(nats, nat)
 		}
 	}
-	if err := libovsdbops.AddOrUpdateNatsToRouter(oc.nbClient, gr, nats...); err != nil {
+	if err := libovsdbops.AddOrUpdateNatsToRouter(nbClient, gr, nats...); err != nil {
 		return fmt.Errorf("failed to update SNAT for pods of router: %s, error: %v", gr, err)
 	}
 	return nil
