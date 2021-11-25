@@ -66,6 +66,14 @@ e2e ingress to host-networked pods traffic validation|\
 host to host-networked pods traffic validation"
 fi
 
+if [ "$OVN_DISABLE_SNAT_MULTIPLE_GWS" == false ]; then
+  if [ "$SKIPPED_TESTS" != "" ]; then
+    SKIPPED_TESTS+="|"
+  fi
+  SKIPPED_TESTS+="Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled|\
+Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario"
+fi
+
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote
 export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock
