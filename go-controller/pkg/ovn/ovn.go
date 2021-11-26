@@ -196,6 +196,8 @@ type Controller struct {
 
 	// channel to indicate we need to retry pods immediately
 	retryPodsChan chan struct{}
+
+	metricsRecorder *metrics.ControlPlaneRecorder
 }
 
 type retryEntry struct {
@@ -286,6 +288,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		svcController:            svcController,
 		svcFactory:               svcFactory,
 		modelClient:              modelClient,
+		metricsRecorder:          metrics.NewControlPlaneRecorder(libovsdbOvnSBClient),
 	}
 }
 
@@ -662,9 +665,11 @@ func (oc *Controller) WatchPods() {
 	}()
 
 	start := time.Now()
+
 	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
+			go oc.metricsRecorder.AddPodEvent(pod.UID)
 			oc.initRetryPod(pod)
 			if !oc.ensurePod(nil, pod, true) {
 				oc.unSkipRetryPod(pod)
@@ -699,6 +704,7 @@ func (oc *Controller) WatchPods() {
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
+			go oc.metricsRecorder.CleanPodRecord(pod.UID)
 			oc.checkAndDeleteRetryPod(pod.UID)
 			if !util.PodWantsNetwork(pod) {
 				oc.deletePodExternalGW(pod)
