@@ -27,7 +27,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
-	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -992,9 +991,6 @@ type egressIPController struct {
 	// Cache used for keeping track of egressIP assigned pods
 	podAssignment map[string][]egressipv1.EgressIPStatusItem
 
-	// Cache of gateway join router IPs, usefull since these should not change often
-	gatewayIPCache sync.Map
-
 	allocator allocator
 
 	// libovsdb northbound client interface
@@ -1076,27 +1072,10 @@ func (e *egressIPController) deletePodEgressIPAssignment(egressIPName string, st
 }
 
 func (e *egressIPController) getGatewayRouterJoinIP(node string, wantsIPv6 bool) (net.IP, error) {
-	var gatewayIPs []*net.IPNet
-	if item, exists := e.gatewayIPCache.Load(node); exists {
-		var ok bool
-		if gatewayIPs, ok = item.([]*net.IPNet); !ok {
-			return nil, fmt.Errorf("unable to cast node: %s gatewayIP cache item to correct type", node)
-		}
-	} else {
-		err := utilwait.ExponentialBackoff(retry.DefaultRetry, func() (bool, error) {
-			var err error
-			gatewayIPs, err = util.GetLRPAddrs(e.nbClient, types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+node)
-			if err != nil {
-				klog.Errorf("Attempt at finding node gateway router network information failed, err: %v", err)
-			}
-			return err == nil, nil
-		})
-		if err != nil {
-			return nil, err
-		}
-		e.gatewayIPCache.Store(node, gatewayIPs)
+	gatewayIPs, err := util.GetLRPAddrs(e.nbClient, types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+node)
+	if err != nil {
+		klog.Errorf("Attempt at finding node gateway router network information failed, err: %v", err)
 	}
-
 	if gatewayIP, err := util.MatchIPNetFamily(wantsIPv6, gatewayIPs); gatewayIP != nil {
 		return gatewayIP.IP, nil
 	} else {
