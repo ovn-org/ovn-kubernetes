@@ -16,6 +16,7 @@ import (
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
 	egressipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions"
+	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
@@ -509,6 +510,16 @@ func (wf *WatchFactory) GetEndpoints(namespace string) ([]*kapi.Endpoints, error
 func (wf *WatchFactory) GetEndpoint(namespace, name string) (*kapi.Endpoints, error) {
 	endpointsLister := wf.informers[endpointsType].lister.(listers.EndpointsLister)
 	return endpointsLister.Endpoints(namespace).Get(name)
+}
+
+func (wf *WatchFactory) GetEgressIP(name string) (*egressipapi.EgressIP, error) {
+	egressIPLister := wf.informers[egressIPType].lister.(egressiplister.EgressIPLister)
+	return egressIPLister.Get(name)
+}
+
+func (wf *WatchFactory) GetEgressIPs() ([]*egressipapi.EgressIP, error) {
+	egressIPLister := wf.informers[egressIPType].lister.(egressiplister.EgressIPLister)
+	return egressIPLister.List(labels.Everything())
 }
 
 // GetNamespace returns a specific namespace

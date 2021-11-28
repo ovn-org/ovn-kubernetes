@@ -259,16 +259,13 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		lspEgressDenyCache:    make(map[string]int),
 		lspMutex:              &sync.Mutex{},
 		eIPC: egressIPController{
-			assignmentRetryMutex:  &sync.Mutex{},
-			assignmentRetry:       make(map[string]bool),
-			namespaceHandlerMutex: &sync.Mutex{},
-			namespaceHandlerCache: make(map[string]*factory.Handler),
-			podHandlerMutex:       &sync.Mutex{},
-			podHandlerCache:       make(map[string]*factory.Handler),
-			allocator:             allocator{&sync.Mutex{}, make(map[string]*egressNode)},
-			nbClient:              libovsdbOvnNBClient,
-			modelClient:           modelClient,
-			watchFactory:          wf,
+			egressIPAssignmentMutex: &sync.Mutex{},
+			podAssignmentMutex:      &sync.Mutex{},
+			podAssignment:           make(map[string][]egressipv1.EgressIPStatusItem),
+			allocator:               allocator{&sync.Mutex{}, make(map[string]*egressNode)},
+			nbClient:                libovsdbOvnNBClient,
+			modelClient:             modelClient,
+			watchFactory:            wf,
 		},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
@@ -901,51 +898,81 @@ func (oc *Controller) WatchEgressNodes() {
 	}, oc.initClusterEgressPolicies)
 }
 
-// WatchEgressIP starts the watching of egressip resource and calls
-// back the appropriate handler logic.
+// WatchEgressIP starts the watching of egressip resource and calls back the
+// appropriate handler logic. It also initiates the other dedicated resource
+// handlers for egress IP setup: namespaces, pods.
 func (oc *Controller) WatchEgressIP() {
 	oc.watchFactory.AddEgressIPHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			eIP := obj.(*egressipv1.EgressIP).DeepCopy()
-			oc.eIPC.assignmentRetryMutex.Lock()
-			defer oc.eIPC.assignmentRetryMutex.Unlock()
-			if err := oc.addEgressIP(eIP); err != nil {
-				klog.Error(err)
+			eIP := obj.(*egressipv1.EgressIP)
+			if err := oc.reconcileEgressIP(nil, eIP); err != nil {
+				klog.Errorf("Unable to add EgressIP: %s, err: %v", eIP.Name, err)
 			}
-			if err := oc.updateEgressIPWithRetry(eIP); err != nil {
-				klog.Error(err)
-			}
-			metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldEIP := old.(*egressipv1.EgressIP)
-			newEIP := new.(*egressipv1.EgressIP).DeepCopy()
-			if !reflect.DeepEqual(oldEIP.Spec, newEIP.Spec) {
-				if err := oc.deleteEgressIP(oldEIP); err != nil {
-					klog.Error(err)
-				}
-				newEIP.Status = egressipv1.EgressIPStatus{
-					Items: []egressipv1.EgressIPStatusItem{},
-				}
-				oc.eIPC.assignmentRetryMutex.Lock()
-				defer oc.eIPC.assignmentRetryMutex.Unlock()
-				if err := oc.addEgressIP(newEIP); err != nil {
-					klog.Error(err)
-				}
-				if err := oc.updateEgressIPWithRetry(newEIP); err != nil {
-					klog.Error(err)
-				}
-				metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
+			newEIP := new.(*egressipv1.EgressIP)
+			if err := oc.reconcileEgressIP(oldEIP, newEIP); err != nil {
+				klog.Errorf("Unable to update EgressIP: %s, err: %v", newEIP.Name, err)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			eIP := obj.(*egressipv1.EgressIP)
-			if err := oc.deleteEgressIP(eIP); err != nil {
-				klog.Error(err)
+			if err := oc.reconcileEgressIP(eIP, nil); err != nil {
+				klog.Errorf("Unable to delete EgressIP: %s, err: %v", eIP.Name, err)
 			}
-			metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 		},
 	}, oc.syncEgressIPs)
+	oc.watchEgressIPNamespaces()
+	oc.watchEgressIPPods()
+}
+
+func (oc *Controller) watchEgressIPNamespaces() {
+	oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			namespace := obj.(*kapi.Namespace)
+			if err := oc.reconcileEgressIPNamespace(nil, namespace); err != nil {
+				klog.Errorf("Unable to add egress IP matching namespace: %s, err: %v", namespace.Name, err)
+			}
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			oldNamespace := oldObj.(*kapi.Namespace)
+			newNamespace := newObj.(*kapi.Namespace)
+			if err := oc.reconcileEgressIPNamespace(oldNamespace, newNamespace); err != nil {
+				klog.Errorf("Unable to update egress IP matching namespace: %s, err: %v", newNamespace.Name, err)
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			namespace := obj.(*kapi.Namespace)
+			if err := oc.reconcileEgressIPNamespace(namespace, nil); err != nil {
+				klog.Errorf("Unable to delete egress IP matching namespace: %s, err: %v", namespace.Name, err)
+			}
+		},
+	}, nil)
+}
+
+func (oc *Controller) watchEgressIPPods() {
+	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			pod := obj.(*kapi.Pod)
+			if err := oc.reconcileEgressIPPod(nil, pod); err != nil {
+				klog.Errorf("Unable to add egress IP matching pod: %s/%s, err: %v", pod.Name, pod.Namespace, err)
+			}
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			oldPod := oldObj.(*kapi.Pod)
+			newPod := newObj.(*kapi.Pod)
+			if err := oc.reconcileEgressIPPod(oldPod, newPod); err != nil {
+				klog.Errorf("Unable to update egress IP matching pod: %s/%s, err: %v", newPod.Name, newPod.Namespace, err)
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			pod := obj.(*kapi.Pod)
+			if err := oc.reconcileEgressIPPod(pod, nil); err != nil {
+				klog.Errorf("Unable to delete egress IP matching pod: %s/%s, err: %v", pod.Name, pod.Namespace, err)
+			}
+		},
+	}, nil)
 }
 
 // WatchNamespaces starts the watching of namespace resource and calls
