@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
@@ -325,44 +324,6 @@ func TestGetNodePrimaryIP(t *testing.T) {
 				assert.Error(t, e)
 			} else {
 				assert.Equal(t, res, tc.expOut)
-			}
-		})
-	}
-}
-
-func TestGetPodNetSelAnnotation(t *testing.T) {
-	tests := []struct {
-		desc             string
-		inpPod           v1.Pod
-		inpNetAnnotation string
-		expErr           bool
-		expOutput        []*types.NetworkSelectionElement
-	}{
-		{
-			desc:             "empty annotation string input",
-			inpPod:           v1.Pod{},
-			inpNetAnnotation: "",
-		},
-		{
-			desc: "json unmarshal error",
-			inpPod: v1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:fd:98:00:01","ip_address":"192.168.0.5/24"}}`},
-				},
-			},
-			inpNetAnnotation: "k8s.ovn.org/pod-networks",
-			expErr:           true,
-		},
-	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, e := GetPodNetSelAnnotation(&tc.inpPod, tc.inpNetAnnotation)
-			t.Log(res, e)
-			if tc.expErr {
-				assert.Error(t, e)
-			}
-			if tc.expOutput != nil {
-				assert.Greater(t, len(res), 0)
 			}
 		})
 	}

@@ -27,14 +27,14 @@ func isOvnReady(podAnnotation map[string]string) bool {
 	return false
 }
 
-// isSmartNICReady is a wait condition smart-NIC: wait for OVN master to set pod-networks annotation and
-// ovnkube running on Smart-NIC to set connection-status pod annotation and its status is Ready
-func isSmartNICReady(podAnnotation map[string]string) bool {
+// isDPUReady is a wait condition which waits for OVN master to set pod-networks annotation and
+// ovnkube running on DPU to set connection-status pod annotation and its status is Ready
+func isDPUReady(podAnnotation map[string]string) bool {
 	if isOvnReady(podAnnotation) {
-		// check Smart-NIC connection status
-		status := util.SmartNICConnectionStatus{}
+		// check DPU connection status
+		status := util.DPUConnectionStatus{}
 		if err := status.FromPodAnnotation(podAnnotation); err == nil {
-			if status.Status == util.SmartNicConnectionStatusReady {
+			if status.Status == util.DPUConnectionStatusReady {
 				return true
 			}
 		}
@@ -102,7 +102,7 @@ func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, k
 }
 
 // PodAnnotation2PodInfo creates PodInterfaceInfo from Pod annotations and additional attributes
-func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, isSmartNic bool, podUID string) (
+func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, isDPU bool, podUID string) (
 	*PodInterfaceInfo, error) {
 	podAnnotSt, err := util.UnmarshalPodAnnotation(podAnnotation)
 	if err != nil {
@@ -123,7 +123,7 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, is
 		Ingress:       ingress,
 		Egress:        egress,
 		CheckExtIDs:   checkExtIDs,
-		IsSmartNic:    isSmartNic,
+		IsDPU:         isDPU,
 		PodUID:        podUID,
 	}
 	return podInterfaceInfo, nil

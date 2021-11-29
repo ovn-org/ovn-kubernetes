@@ -1,7 +1,6 @@
 package util
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,7 +27,6 @@ import (
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
-	cnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
@@ -213,47 +211,6 @@ func PodWantsNetwork(pod *kapi.Pod) bool {
 // PodScheduled returns if the given pod is scheduled
 func PodScheduled(pod *kapi.Pod) bool {
 	return pod.Spec.NodeName != ""
-}
-
-const (
-	// DefNetworkAnnotation is the pod annotation for the cluster-wide default network
-	DefNetworkAnnotation = "v1.multus-cni.io/default-network"
-
-	// NetworkAttachmentAnnotation is the pod annotation for network-attachment-definition
-	NetworkAttachmentAnnotation = "k8s.v1.cni.cncf.io/networks"
-)
-
-// GetPodNetSelAnnotation returns the pod's Network Attachment Selection Annotation either for
-// the cluster-wide default network or the additional networks.
-//
-// This function is a simplified version of parsePodNetworkAnnotation() function in multus-cni
-// repository. We need to revisit once there is a library that we can share.
-//
-// Note that the changes below is based on following assumptions, which is true today.
-// - a pod's default network is OVN managed
-func GetPodNetSelAnnotation(pod *kapi.Pod, netAttachAnnot string) ([]*cnitypes.NetworkSelectionElement, error) {
-	var networkAnnotation string
-	var networks []*cnitypes.NetworkSelectionElement
-
-	networkAnnotation = pod.Annotations[netAttachAnnot]
-	if networkAnnotation == "" {
-		// nothing special to do
-		return nil, nil
-	}
-
-	// it is possible the default network is defined in the form of comma-delimited list of
-	// network attachment resource names (i.e. list of <namespace>/<network name>@<ifname>), but
-	// we are only interested in the NetworkSelectionElement json form that has custom MAC/IP
-	if json.Valid([]byte(networkAnnotation)) {
-		if err := json.Unmarshal([]byte(networkAnnotation), &networks); err != nil {
-			return nil, fmt.Errorf("failed to parse pod's net-attach-definition JSON %q: %v", networkAnnotation, err)
-		}
-	} else {
-		// nothing special to do
-		return nil, nil
-	}
-
-	return networks, nil
 }
 
 // EventRecorder returns an EventRecorder type that can be

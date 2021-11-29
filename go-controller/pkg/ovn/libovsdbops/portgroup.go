@@ -245,16 +245,6 @@ func AddACLsToPortGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 	return ops, nil
 }
 
-func AddACLsToPortGroup(nbClient libovsdbclient.Client, name string, acls ...*nbdb.ACL) error {
-	ops, err := AddACLsToPortGroupOps(nbClient, nil, name, acls...)
-	if err != nil {
-		return err
-	}
-
-	_, err = TransactAndCheck(nbClient, ops)
-	return err
-}
-
 func DeleteACLsFromPortGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, name string, acls ...*nbdb.ACL) ([]libovsdb.Operation, error) {
 	if ops == nil {
 		ops = []libovsdb.Operation{}
@@ -292,16 +282,6 @@ func DeleteACLsFromPortGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 	ops = append(ops, op...)
 
 	return ops, nil
-}
-
-func DeleteACLsFromPortGroup(nbClient libovsdbclient.Client, name string, acls ...*nbdb.ACL) error {
-	ops, err := DeleteACLsFromPortGroupOps(nbClient, nil, name, acls...)
-	if err != nil {
-		return err
-	}
-
-	_, err = TransactAndCheck(nbClient, ops)
-	return err
 }
 
 func deletePortGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, name string) ([]libovsdb.Operation, error) {

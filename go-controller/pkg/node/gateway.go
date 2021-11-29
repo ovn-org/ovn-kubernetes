@@ -343,9 +343,9 @@ func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
 	res.patchPort = "patch-" + res.bridgeName + "_" + nodeName + "-to-br-int"
 
-	// for smart-NIC we use the host MAC address for the Gateway configuration
-	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
-		hostRep, err := util.GetSmartNICHostInterface(res.bridgeName)
+	// for DPU we use the host MAC address for the Gateway configuration
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		hostRep, err := util.GetDPUHostInterface(res.bridgeName)
 		if err != nil {
 			return nil, err
 		}

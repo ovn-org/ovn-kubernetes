@@ -259,7 +259,7 @@ func createServiceForPodsWithLabel(f *framework.Framework, namespace string, ser
 		},
 		Spec: v1.ServiceSpec{
 			Ports: []v1.ServicePort{
-				v1.ServicePort{
+				{
 					Protocol:   v1.ProtocolTCP,
 					TargetPort: intstr.Parse(targetPort),
 					Port:       servicePort,
@@ -2541,114 +2541,147 @@ var _ = ginkgo.Describe("e2e ingress gateway traffic validation", func() {
 	})
 })
 
-// This test validates OVS exports NetFlow data from br-int to an external collector
-var _ = ginkgo.Describe("e2e br-int NetFlow export validation", func() {
+// This test validates that OVS exports flow monitoring data from br-int to an external collector
+var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
+	type flowMonitoringProtocol string
+
 	const (
-		svcname                   string = "netflow-test"
-		ovnNs                     string = "ovn-kubernetes"
-		netFlowCollectorContainer string = "netflow-collector"
-		ciNetworkName             string = "kind"
+		netflow_v5 flowMonitoringProtocol = "netflow"
+		ipfix      flowMonitoringProtocol = "ipfix"
+		sflow      flowMonitoringProtocol = "sflow"
+
+		svcname            string = "netflow-test"
+		ovnNs              string = "ovn-kubernetes"
+		collectorContainer string = "netflow-collector"
+		ciNetworkName      string = "kind"
 	)
 
-	f := framework.NewDefaultFramework(svcname)
+	keywordInLogs := map[flowMonitoringProtocol]string{
+		netflow_v5: "NETFLOW_V5", ipfix: "IPFIX", sflow: "SFLOW_5"}
 
+	f := framework.NewDefaultFramework(svcname)
 	ginkgo.AfterEach(func() {
-		// tear down the NetFlow container
-		if cid, _ := runCommand("docker", "ps", "-qaf", fmt.Sprintf("name=%s", netFlowCollectorContainer)); cid != "" {
-			if _, err := runCommand("docker", "rm", "-f", netFlowCollectorContainer); err != nil {
-				framework.Logf("failed to delete the netFlow collector test container %s %v", netFlowCollectorContainer, err)
+		// tear down the collector container
+		if cid, _ := runCommand("docker", "ps", "-qaf", fmt.Sprintf("name=%s", collectorContainer)); cid != "" {
+			if _, err := runCommand("docker", "rm", "-f", collectorContainer); err != nil {
+				framework.Logf("failed to delete the collector test container %s %v",
+					collectorContainer, err)
 			}
 		}
 	})
 
-	ginkgo.It("Should validate NetFlow data of br-int is sent to an external gateway and unset NetFlow Targets", func() {
-		var (
-			ciNetworkFlag = "{{ .NetworkSettings.Networks.kind.IPAddress }}"
-		)
-		ginkgo.By("Starting a netflow collector container")
-		// start the NetFlow collector container that will receive data
-		_, err := runCommand("docker", "run", "-itd", "--privileged", "--network", ciNetworkName, "--name", netFlowCollectorContainer, "cloudflare/goflow", "-kafka=false")
-		if err != nil {
-			framework.Failf("failed to start NetFlow collector test container %s: %v", netFlowCollectorContainer, err)
-		}
-		// retrieve the container ip of the NetFlow collector container
-		netFlowCollectorIp, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, netFlowCollectorContainer)
-		if err != nil {
-			framework.Failf("failed to start NetFlow collector test container: %v", err)
-		}
-		// trim newline from the inspect output
-		netFlowCollectorIp = strings.TrimSuffix(netFlowCollectorIp, "\n")
-		if ip := net.ParseIP(netFlowCollectorIp); ip == nil {
-			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", netFlowCollectorContainer, netFlowCollectorIp)
-		}
+	table.DescribeTable("Should validate flow data of br-int is sent to an external gateway",
+		func(protocol flowMonitoringProtocol, collectorPort uint16) {
+			protocolStr := string(protocol)
+			ipField := "IPAddress"
+			isIpv6 := IsIPv6Cluster(f.ClientSet)
+			if isIpv6 {
+				ipField = "GlobalIPv6Address"
+			}
+			ciNetworkFlag := fmt.Sprintf("{{ .NetworkSettings.Networks.kind.%s }}", ipField)
 
-		ginkgo.By("Configuring ovnkube-node to use the new netflow collector target")
-		framework.Logf("Setting OVN_NETFLOW_TARGETS environment variable value to NetFlow collector IP %s", netFlowCollectorIp)
-		framework.RunKubectlOrDie(ovnNs, "set", "env", "daemonset/ovnkube-node", "-c", "ovnkube-node", "OVN_NETFLOW_TARGETS="+netFlowCollectorIp+":2056")
+			ginkgo.By("Starting a flow collector container")
+			// start the collector container that will receive data
+			_, err := runCommand("docker", "run", "-itd", "--privileged", "--network", ciNetworkName,
+				"--name", collectorContainer, "cloudflare/goflow", "-kafka=false")
+			if err != nil {
+				framework.Failf("failed to start flow collector container %s: %v", collectorContainer, err)
+			}
+			ovnEnvVar := fmt.Sprintf("OVN_%s_TARGETS", strings.ToUpper(protocolStr))
+			// retrieve the ip of the collector container
+			collectorIP, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, collectorContainer)
+			if err != nil {
+				framework.Failf("could not retrieve IP address of collector container: %v", err)
+			}
+			// trim newline from the inspect output
+			collectorIP = strings.TrimSpace(collectorIP)
+			if net.ParseIP(collectorIP) == nil {
+				framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s",
+					collectorContainer, collectorIP)
+			}
+			addressAndPort := net.JoinHostPort(collectorIP, strconv.Itoa(int(collectorPort)))
+			ginkgo.By(fmt.Sprintf("Configuring ovnkube-node to use the new %s collector target", protocolStr))
+			framework.Logf("Setting %s environment variable to %s",
+				ovnEnvVar, addressAndPort)
 
-		// Make sure the updated daemonset has rolled out, verify it's completion 10 times
-		// TODO (Change this to use the exported upstream function)
-		err = waitForDaemonSetUpdate(f.ClientSet, ovnNs, "ovnkube-node", 0, dsRestartTimeout)
-		framework.ExpectNoError(err)
+			framework.RunKubectlOrDie(ovnNs, "set", "env", "daemonset/ovnkube-node", "-c", "ovnkube-node",
+				fmt.Sprintf("%s=%s", ovnEnvVar, addressAndPort))
 
-		ginkgo.By("Checking that the collector container received netflow")
-		netFlowCollectorContainerLogsTest := func() wait.ConditionFunc {
-			return func() (bool, error) {
-				netFlowCollectorContainerLogs, err := runCommand("docker", "logs", netFlowCollectorContainer)
-				if err != nil {
-					framework.Logf("failed to inspect logs in test container: %v", err)
+			// Make sure the updated daemonset has rolled out
+			// TODO (Change this to use the exported upstream function)
+			err = waitForDaemonSetUpdate(f.ClientSet, ovnNs, "ovnkube-node", 0, dsRestartTimeout)
+			framework.ExpectNoError(err)
+			ginkgo.By(fmt.Sprintf("Checking that the collector container received %s data", protocolStr))
+			keyword := keywordInLogs[protocol]
+			collectorContainerLogsTest := func() wait.ConditionFunc {
+				return func() (bool, error) {
+					collectorContainerLogs, err := runCommand("docker", "logs", collectorContainer)
+					if err != nil {
+						framework.Logf("failed to inspect logs in test container: %v", err)
+						return false, nil
+					}
+					collectorContainerLogs = strings.TrimSuffix(collectorContainerLogs, "\n")
+					logLines := strings.Split(collectorContainerLogs, "\n")
+					lastLine := logLines[len(logLines)-1]
+					// check that flow monitoring traffic has been logged
+					if strings.Contains(lastLine, keyword) {
+						framework.Logf("Successfully found string %s in last log line of"+
+							" the collector: %s", keyword, lastLine)
+						return true, nil
+					}
+					framework.Logf("%s not found in last log line: %s", keyword, lastLine)
 					return false, nil
 				}
-				netFlowCollectorContainerLogs = strings.TrimSuffix(netFlowCollectorContainerLogs, "\n")
-				logLines := strings.Split(netFlowCollectorContainerLogs, "\n")
-				lastLine := logLines[len(logLines)-1]
-				// check that NetFlow traffic has been logged.
-				if strings.Contains(lastLine, "NETFLOW_V5") {
-					framework.Logf("the NetFlow collector received NetFlow data, last logs: %s", logLines[len(logLines)-1])
-					return true, nil
-				}
-				return false, nil
 			}
-		}
+			err = wait.PollImmediate(retryInterval, retryTimeout, collectorContainerLogsTest())
+			framework.ExpectNoError(err, fmt.Sprintf("failed to verify that collector container "+
+				"received %s data from br-int: string %s not found in logs",
+				protocolStr, keyword))
 
-		err = wait.PollImmediate(retryInterval, retryTimeout, netFlowCollectorContainerLogsTest())
-		framework.ExpectNoError(err, "failed to verify that NetFlow collector container received NetFlow data from br-int")
+			ginkgo.By(fmt.Sprintf("Unsetting %s variable in ovnkube-node daemonset", ovnEnvVar))
+			framework.RunKubectlOrDie(ovnNs, "set", "env", "daemonset/ovnkube-node", "-c", "ovnkube-node",
+				fmt.Sprintf("%s-", ovnEnvVar))
 
-		ginkgo.By("Unsetting the OVN_NETFLOW_TARGETS variable in the ovnkube-node daemonset")
-		framework.RunKubectlOrDie(ovnNs, "set", "env", "daemonset/ovnkube-node", "-c", "ovnkube-node", "OVN_NETFLOW_TARGETS-")
+			// Make sure the updated daemonset has rolled out
+			// TODO (Change this to use the exported upstream function)
+			err = waitForDaemonSetUpdate(f.ClientSet, ovnNs, "ovnkube-node", 0, dsRestartTimeout)
+			framework.ExpectNoError(err)
 
-		// Make sure the updated daemonset has rolled out, verify it's completion 10 times
-		// TODO (Change this to use the exported upstream function)
-		err = waitForDaemonSetUpdate(f.ClientSet, ovnNs, "ovnkube-node", 0, dsRestartTimeout)
-		framework.ExpectNoError(err)
-
-		ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNs).List(context.TODO(), metav1.ListOptions{
-			LabelSelector: "name=ovnkube-node",
-		})
-		if err != nil {
-			framework.Failf("could not get ovnkube-node pods: %v", err)
-		}
-
-		for _, ovnKubeNodePod := range ovnKubeNodePods.Items {
-
-			execOptions := framework.ExecOptions{
-				Command:       []string{"ovs-vsctl", "find", "netflow"},
-				Namespace:     ovnNs,
-				PodName:       ovnKubeNodePod.Name,
-				ContainerName: "ovnkube-node",
-				CaptureStdout: true,
-				CaptureStderr: true,
-			}
-
-			targets, stderr, _ := f.ExecWithOptions(execOptions)
-			framework.Logf("execOptions are %v", execOptions)
+			ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNs).List(context.TODO(), metav1.ListOptions{
+				LabelSelector: "name=ovnkube-node",
+			})
 			if err != nil {
-				framework.Failf("could not lookup ovs netflow targets: %v", stderr)
+				framework.Failf("could not get ovnkube-node pods: %v", err)
 			}
-			framework.ExpectEmpty(targets)
-		}
 
-	})
+			for _, ovnKubeNodePod := range ovnKubeNodePods.Items {
+
+				execOptions := framework.ExecOptions{
+					Command:       []string{"ovs-vsctl", "find", strings.ToLower(protocolStr)},
+					Namespace:     ovnNs,
+					PodName:       ovnKubeNodePod.Name,
+					ContainerName: "ovnkube-node",
+					CaptureStdout: true,
+					CaptureStderr: true,
+				}
+
+				targets, stderr, _ := f.ExecWithOptions(execOptions)
+				framework.Logf("execOptions are %v", execOptions)
+				if err != nil {
+					framework.Failf("could not lookup ovs %s targets: %v", protocolStr, stderr)
+				}
+				framework.ExpectEmpty(targets)
+			}
+		},
+		// This is a long test (~5 minutes per run), so let's just validate netflow v5
+		// in an IPv4 cluster and sflow in IPv6 cluster
+		table.Entry("with netflow v5", netflow_v5, uint16(2056)),
+		// goflow doesn't currently support OVS ipfix:
+		// https://github.com/cloudflare/goflow/issues/99
+		// table.Entry("ipfix", ipfix, uint16(2055)),
+		table.Entry("with sflow", sflow, uint16(6343)),
+	)
+
 })
 
 func getNodePodCIDR(nodeName string) (string, error) {
@@ -3025,7 +3058,7 @@ var _ = ginkgo.Describe("e2e IGMP validation", func() {
 	f := framework.NewDefaultFramework(svcname)
 	ginkgo.It("can retrieve multicast IGMP query", func() {
 		// Enable multicast of the test namespace annotation
-		ginkgo.By(fmt.Sprintf("annotating namespace: %s to enable multicast",f.Namespace.Name))
+		ginkgo.By(fmt.Sprintf("annotating namespace: %s to enable multicast", f.Namespace.Name))
 		annotateArgs := []string{
 			"annotate",
 			"namespace",

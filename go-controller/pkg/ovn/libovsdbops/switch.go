@@ -206,7 +206,7 @@ func removeACLsFromSwitches(nbClient libovsdbclient.Client, switches []nbdb.Logi
 	return nil
 }
 
-// RemoveACLFromSwitches removes the specified ACLs from the per node Logical Switches
+// RemoveACLsFromNodeSwitches removes the specified ACLs from the per node Logical Switches
 func RemoveACLsFromNodeSwitches(nbClient libovsdbclient.Client, acls []nbdb.ACL) error {
 	// Find all node switches
 	nodeSwichLookupFcn := func(item *nbdb.LogicalSwitch) bool {
@@ -227,7 +227,7 @@ func RemoveACLsFromNodeSwitches(nbClient libovsdbclient.Client, acls []nbdb.ACL)
 	return nil
 }
 
-// RemoveACLFromSwitches removes the ACL uuid entry from Logical Switch acl's list.
+// RemoveACLsFromAllSwitches removes the ACL uuid entry from Logical Switch acl's list.
 func RemoveACLsFromAllSwitches(nbClient libovsdbclient.Client, acls []nbdb.ACL) error {
 	// Find all switches
 	switches, err := findSwitches(nbClient)
@@ -238,6 +238,49 @@ func RemoveACLsFromAllSwitches(nbClient libovsdbclient.Client, acls []nbdb.ACL) 
 	err = removeACLsFromSwitches(nbClient, switches, acls)
 	if err != nil {
 		return err
+	}
+
+	return nil
+}
+
+// AddACLToNodeSwitch will add the provided ACL to a singe nodeSwitch, create the ACL if needed
+func AddACLToNodeSwitch(nbClient libovsdbclient.Client, nodeName string, nodeACL *nbdb.ACL) error {
+	nodeSwitch := nbdb.LogicalSwitch{
+		Name: nodeName,
+	}
+
+	existingACLres := []nbdb.ACL{}
+
+	// Here we either need to create the ACL and add to the LS or simply add to the LS
+	opModels := []OperationModel{
+		{
+			Model:          nodeACL,
+			ModelPredicate: func(acl *nbdb.ACL) bool { return IsEquivalentACL(acl, nodeACL) },
+			ExistingResult: &existingACLres,
+			DoAfter: func() {
+				// Bulkop is false, we should fail early if we get more than one result
+				// If ACL exists It's UUID will be in opModel.ExistingResult
+				// If it does not, it will be added to the model
+				if len(existingACLres) == 1 {
+					nodeSwitch.ACLs = []string{existingACLres[0].UUID}
+				} else {
+					nodeSwitch.ACLs = []string{nodeACL.UUID}
+				}
+			},
+		},
+		{
+			Model:          &nodeSwitch,
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == nodeName },
+			OnModelMutations: []interface{}{
+				&nodeSwitch.ACLs,
+			},
+			ErrNotFound: true,
+		},
+	}
+
+	m := NewModelClient(nbClient)
+	if _, err := m.CreateOrUpdate(opModels...); err != nil {
+		return fmt.Errorf("failed to add ACL %v, error: %v", nodeACL, err)
 	}
 
 	return nil

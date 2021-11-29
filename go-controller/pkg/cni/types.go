@@ -41,7 +41,7 @@ type PodInterfaceInfo struct {
 	Ingress     int64  `json:"ingress"`
 	Egress      int64  `json:"egress"`
 	CheckExtIDs bool   `json:"check-external-ids"`
-	IsSmartNic  bool   `json:"smartnic"`
+	IsDPU       bool   `json:"dpu"`
 	PodUID      string `json:"pod-uid"`
 }
 
@@ -136,8 +136,8 @@ type PodRequest struct {
 	ctx context.Context
 	// cancel should be called to cancel this request
 	cancel context.CancelFunc
-	// Interface to pod is a Smart-NIC interface
-	IsSmartNIC bool
+	// Interface to pod is a DPU interface
+	IsDPU bool
 }
 
 type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface, kubeAuth *KubeAPIAuth) ([]byte, error)

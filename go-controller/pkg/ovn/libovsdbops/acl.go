@@ -101,7 +101,7 @@ func FindACLsByPriorityRange(nbClient libovsdbclient.Client, minPriority, maxPri
 }
 
 // FindACLsByExternalID looks up the acls with the given externalID/s
-func FindACLsByExernalID(nbClient libovsdbclient.Client, externalIDs map[string]string) ([]nbdb.ACL, error) {
+func FindACLsByExternalID(nbClient libovsdbclient.Client, externalIDs map[string]string) ([]nbdb.ACL, error) {
 	// Find ACLs for with a given exernalID
 	ACLLookupFcn := func(item *nbdb.ACL) bool {
 		aclMatch := false
@@ -134,7 +134,7 @@ func BuildACL(name string, direction nbdb.ACLDirection, priority int, match stri
 		realName = &name
 	}
 	if len(meter) != 0 {
-		realMeter = &match
+		realMeter = &meter
 	}
 	if len(severity) != 0 {
 		realSeverity = &severity

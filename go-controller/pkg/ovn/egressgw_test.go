@@ -8,6 +8,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -2053,6 +2054,99 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		})
 
 	})
+	ginkgo.Context("SNAT on gateway router operations", func() {
+		ginkgo.It("add/delete SNAT per pod on gateway router", func() {
+			app.Action = func(ctx *cli.Context) error {
+				config.Gateway.Mode = config.GatewayModeShared
+				config.Gateway.DisableSNATMultipleGWs = true
+
+				nodeName := "node1"
+				namespaceT := *newNamespace("namespace1")
+				t := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+
+				pod := []v1.Pod{
+					*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
+				}
+
+				fakeOvn.startWithDBSetup(ctx,
+					libovsdbtest.TestSetup{
+						NBData: []libovsdbtest.TestData{
+							&nbdb.LogicalRouterPort{
+								UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + nodeName + "-UUID",
+								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + nodeName,
+								Networks: []string{"100.64.0.4/32"},
+							},
+							&nbdb.LogicalRouter{
+								Name: types.GWRouterPrefix + nodeName,
+								UUID: types.GWRouterPrefix + nodeName + "-UUID",
+							},
+						},
+					},
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.PodList{
+						Items: pod,
+					},
+				)
+				natUUID := libovsdbops.BuildNamedUUID()
+				finalNB := []libovsdbtest.TestData{
+					&nbdb.NAT{
+						UUID:       natUUID,
+						ExternalIP: "169.254.33.2",
+						LogicalIP:  "10.128.1.3",
+						Options:    map[string]string{"stateless": "false"},
+						Type:       nbdb.NATTypeSNAT,
+					},
+					&nbdb.LogicalRouter{
+						Name: types.GWRouterPrefix + nodeName,
+						UUID: types.GWRouterPrefix + nodeName + "-UUID",
+						Nat:  []string{natUUID},
+					},
+					&nbdb.LogicalRouterPort{
+						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + nodeName + "-UUID",
+						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + nodeName,
+						Networks: []string{"100.64.0.4/32"},
+					},
+				}
+				injectNode(fakeOvn)
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
+				_, fullMaskPodNet, _ := net.ParseCIDR("10.128.1.3/32")
+				fakeOvn.controller.addPerPodGRSNAT(&pod[0], []*net.IPNet{fullMaskPodNet})
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
+				finalNB = []libovsdbtest.TestData{
+					&nbdb.LogicalRouter{
+						Name: types.GWRouterPrefix + nodeName,
+						UUID: types.GWRouterPrefix + nodeName + "-UUID",
+						Nat:  []string{},
+					},
+					&nbdb.LogicalRouterPort{
+						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + nodeName + "-UUID",
+						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + nodeName,
+						Networks: []string{"100.64.0.4/32"},
+					},
+				}
+				fakeOvn.controller.deletePerPodGRSNAT(nodeName, []*net.IPNet{fullMaskPodNet})
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+	})
 })
 
 // injectNode adds a valid node to the nodeinformer so the get
@@ -2063,6 +2157,7 @@ func injectNode(fakeOvn *FakeOVN) {
 			Name: "node1",
 			Annotations: map[string]string{"k8s.ovn.org/l3-gateway-config": `{"default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"169.254.33.2/24", "next-hop":"169.254.33.1"}}`,
 				"k8s.ovn.org/node-chassis-id": "79fdcfc4-6fe6-4cd3-8242-c0f85a4668ec",
+				"k8s.ovn.org/node-subnets":    `{"default":"10.128.1.0/24"}`,
 			},
 		},
 	}

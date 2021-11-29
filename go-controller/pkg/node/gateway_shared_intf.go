@@ -52,12 +52,12 @@ func newNodePortWatcherIptables() *nodePortWatcherIptables {
 // nodePortWatcher manages OpenFlow and iptables rules
 // to ensure that services using NodePorts are accessible
 type nodePortWatcher struct {
-	smartNICMode bool
-	gatewayIPv4  string
-	gatewayIPv6  string
-	ofportPhys   string
-	ofportPatch  string
-	gwBridge     string
+	dpuMode     bool
+	gatewayIPv4 string
+	gatewayIPv6 string
+	ofportPhys  string
+	ofportPatch string
+	gwBridge    string
 	// Map of service name to programmed iptables/OF rules
 	serviceInfo     map[ktypes.NamespacedName]*serviceConfig
 	serviceInfoLock sync.Mutex
@@ -367,12 +367,12 @@ func (npw *nodePortWatcher) updateServiceInfo(index ktypes.NamespacedName, servi
 func addServiceRules(service *kapi.Service, hasHostNet bool, npw *nodePortWatcher) {
 	if util.ServiceExternalTrafficPolicyLocal(service) && hasHostNet {
 		klog.V(5).Infof("Adding externalTrafficPolicy:local and hostNetworked rules for %v", service)
-		// For smartnic or Full mode
+		// For dpu or Full mode
 		if npw != nil {
 			npw.updateServiceFlowCache(service, true, true)
 			npw.ofm.requestFlowSync()
-			// Dont touch iptables if in smartNICMode
-			if !npw.smartNICMode {
+			// Dont touch iptables if in dpuMode
+			if !npw.dpuMode {
 				addSharedGatewayIptRules(service, true)
 			}
 			return
@@ -380,11 +380,11 @@ func addServiceRules(service *kapi.Service, hasHostNet bool, npw *nodePortWatche
 		// For Host Only Mode
 		addSharedGatewayIptRules(service, true)
 	} else {
-		// For smartnic or Full mode
+		// For dpu or Full mode
 		if npw != nil {
 			npw.updateServiceFlowCache(service, true, false)
 			npw.ofm.requestFlowSync()
-			if !npw.smartNICMode {
+			if !npw.dpuMode {
 				addSharedGatewayIptRules(service, false)
 			}
 			return
@@ -400,7 +400,7 @@ func delServiceRules(service *kapi.Service, npw *nodePortWatcher) {
 	if npw != nil {
 		npw.updateServiceFlowCache(service, false, false)
 		npw.ofm.requestFlowSync()
-		if !npw.smartNICMode {
+		if !npw.dpuMode {
 			// Always try and delete all rules here
 			delSharedGatewayIptRules(service, true)
 			delSharedGatewayIptRules(service, false)
@@ -409,7 +409,7 @@ func delServiceRules(service *kapi.Service, npw *nodePortWatcher) {
 	}
 
 	// For host only node always try and delete rules here
-	// externalTrafficPolicy is not implemented for smartNic mode
+	// externalTrafficPolicy is not implemented for dpu mode
 	delSharedGatewayIptRules(service, false)
 }
 
@@ -518,14 +518,14 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 		npw.updateServiceFlowCache(service, false, hasHostNet)
 		npw.updateServiceFlowCache(service, true, hasHostNet)
 		// Add correct iptables rules only for Full mode
-		if !npw.smartNICMode {
+		if !npw.dpuMode {
 			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, hasHostNet)...)
 		}
 	}
 	// sync OF rules once
 	npw.ofm.requestFlowSync()
 	// sync IPtables rules once only for Full mode
-	if !npw.smartNICMode {
+	if !npw.dpuMode {
 		for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
 			recreateIPTRules("nat", chain, keepIPTRules)
 		}
@@ -1049,10 +1049,10 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 	bridge.ofPortPatch = ofportPatch
 	bridge.ofPortPhys = ofportPhys
 
-	// Get ofport represeting the host. That is, host representor port in case of Smart-NICs, ovsLocalPort otherwise.
-	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
+	// Get ofport represeting the host. That is, host representor port in case of DPUs, ovsLocalPort otherwise.
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		var stderr string
-		hostRep, err := util.GetSmartNICHostInterface(bridge.bridgeName)
+		hostRep, err := util.GetDPUHostInterface(bridge.bridgeName)
 		if err != nil {
 			return err
 		}
@@ -1180,7 +1180,7 @@ func newNodePortWatcher(patchPort, gwBridge, gwIntf string, ips []*net.IPNet, of
 	// of the node. If someone on the node is trying to access the NodePort service, those packets
 	// will not be processed by the OpenFlow flows, so we need to add iptable rules that DNATs the
 	// NodePortIP:NodePort to ClusterServiceIP:Port. We don't need to do this while
-	// running on Smart-NIC or on Smart-NIC-Host.
+	// running on DPU or on DPU-Host.
 	if config.OvnKubeNode.Mode == types.NodeModeFull {
 		if err := initSharedGatewayIPTables(); err != nil {
 			return nil, err
@@ -1188,16 +1188,16 @@ func newNodePortWatcher(patchPort, gwBridge, gwIntf string, ips []*net.IPNet, of
 	}
 
 	// used to tell addServiceRules which rules to add
-	smartNICMode := false
+	dpuMode := false
 	if config.OvnKubeNode.Mode != types.NodeModeFull {
-		smartNICMode = true
+		dpuMode = true
 	}
 
 	// Get Physical IPs of Node, Can be IPV4 IPV6 or both
 	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(ips)
 
 	npw := &nodePortWatcher{
-		smartNICMode:  smartNICMode,
+		dpuMode:       dpuMode,
 		gatewayIPv4:   gatewayIPv4,
 		gatewayIPv6:   gatewayIPv6,
 		ofportPhys:    ofportPhys,

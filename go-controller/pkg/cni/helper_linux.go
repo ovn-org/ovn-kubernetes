@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 package cni
@@ -172,7 +173,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	}
 	vfNetdevice := vfNetdevices[0]
 
-	if !ifInfo.IsSmartNic {
+	if !ifInfo.IsDPU {
 		// 2. get Uplink netdevice
 		uplink, err := util.GetSriovnetOps().GetUplinkRepresentor(pciAddrs)
 		if err != nil {
@@ -337,8 +338,8 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 		// SR-IOV Case
 		hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID)
 	} else {
-		if pr.IsSmartNIC {
-			return nil, fmt.Errorf("unexpected configuration, pod request on smart-nic host. " +
+		if pr.IsDPU {
+			return nil, fmt.Errorf("unexpected configuration, pod request on dpu host. " +
 				"device ID must be provided")
 		}
 		// General case
@@ -348,7 +349,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 		return nil, err
 	}
 
-	if !ifInfo.IsSmartNic {
+	if !ifInfo.IsDPU {
 		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID,
 			podLister, kclient)
 		if err != nil {

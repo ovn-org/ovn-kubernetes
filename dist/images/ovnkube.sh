@@ -49,7 +49,7 @@ fi
 # OVN_NORTHD_OPTS - the options for the ovn northbound db
 # OVN_GATEWAY_MODE - the gateway mode (shared or local) - v3
 # OVN_GATEWAY_OPTS - the options for the ovn gateway
-# OVN_GATEWAY_ROUTER_SUBNET - the gateway router subnet (shared mode, Smart-NIC only) - v3
+# OVN_GATEWAY_ROUTER_SUBNET - the gateway router subnet (shared mode, DPU only) - v3
 # OVNKUBE_LOGLEVEL - log level for ovnkube (0..5, default 4) - v3
 # OVN_LOGLEVEL_NORTHD - log level (ovn-ctl default: -vconsole:emer -vsyslog:err -vfile:info) - v3
 # OVN_LOGLEVEL_NB - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
@@ -75,9 +75,9 @@ fi
 # OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 # OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
-# OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, smart-nic, smart-nic-host (default: full)
-# OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev. valid when ovnkube node mode is: smart-nic, smart-nic-host
-# OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="smart-nic"
+# OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, dpu, dpu-host (default: full)
+# OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev. valid when ovnkube node mode is: dpu, dpu-host
+# OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="dpu"
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
 
 # The argument to the command is the operation to be performed
@@ -1010,7 +1010,7 @@ ovn-node() {
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnkube.pid
 
-  if [[ ${ovnkube_node_mode} != "smart-nic-host" ]]; then
+  if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
     echo "=============== ovn-node - (wait for ovs)"
     wait_for_event ovs_ready
   fi
@@ -1020,7 +1020,7 @@ ovn-node() {
 
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_conn ${ovn_nbdb_conn}"
 
-  if [[ ${ovnkube_node_mode} != "smart-nic-host" ]]; then
+  if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
     echo "=============== ovn-node - (ovn-node  wait for ovn-controller.pid)"
     wait_for_event process_ready ovn-controller
   fi
@@ -1114,10 +1114,10 @@ ovn-node() {
   ovnkube_node_mode_flag=
   if [[ ${ovnkube_node_mode} != "" ]]; then
     ovnkube_node_mode_flag="--ovnkube-node-mode=${ovnkube_node_mode}"
-    if [[ ${ovnkube_node_mode} == "smart-nic" ]]; then
-      # encap IP is required for smart-nic, this is either provided via OVN_ENCAP_IP env variable or taken from ovs
+    if [[ ${ovnkube_node_mode} == "dpu" ]]; then
+      # encap IP is required for dpu, this is either provided via OVN_ENCAP_IP env variable or taken from ovs
       if [[ ${ovn_encap_ip} == "" ]]; then
-        echo "ovn encap IP must be provided if \"ovnkube-node-mode\" set to \"smart-nic\". Exiting..."
+        echo "ovn encap IP must be provided if \"ovnkube-node-mode\" set to \"dpu\". Exiting..."
         exit 1
       fi
     fi
@@ -1129,7 +1129,7 @@ ovn-node() {
   fi
 
   local ovn_node_ssl_opts=""
-  if [[ ${ovnkube_node_mode} != "smart-nic-host" ]]; then
+  if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
       [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
         ovn_node_ssl_opts="
             --nb-client-privkey ${ovn_controller_pk}
@@ -1191,7 +1191,7 @@ ovn-node() {
      ${ovnkube_node_mgmt_port_netdev_flag} &
 
   wait_for_event attempts=3 process_ready ovnkube
-  if [[ ${ovnkube_node_mode} != "smart-nic" ]]; then
+  if [[ ${ovnkube_node_mode} != "dpu" ]]; then
     setup_cni
   fi
   echo "=============== ovn-node ========== running"
