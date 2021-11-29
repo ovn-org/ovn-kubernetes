@@ -161,11 +161,17 @@ func (manager *LogicalSwitchManager) GetSwitchSubnets(nodeName string) []*net.IP
 // AllocateIPs will block off IPs in the ipnets slice as already allocated
 // for a given switch
 func (manager *LogicalSwitchManager) AllocateIPs(nodeName string, ipnets []*net.IPNet) error {
+	if len(ipnets) == 0 {
+		return fmt.Errorf("unable to allocate empty IPs")
+	}
 	manager.RLock()
 	defer manager.RUnlock()
 	lsi, ok := manager.cache[nodeName]
-	if len(ipnets) == 0 || !ok || len(lsi.ipams) == 0 {
-		return fmt.Errorf("unable to allocate ips %v for node: %s",
+	if !ok {
+		return fmt.Errorf("unable to allocate ips: %v, node: %s does not exist in logical switch manager",
+			ipnets, nodeName)
+	} else if len(lsi.ipams) == 0 {
+		return fmt.Errorf("unable to allocate ips %v for node: %s. logical switch manager has no IPAM",
 			ipnets, nodeName)
 
 	}
@@ -191,7 +197,7 @@ func (manager *LogicalSwitchManager) AllocateIPs(nodeName string, ipnets []*net.
 			cidr := ipam.CIDR()
 			if cidr.Contains(ipnet.IP) {
 				if _, ok = allocated[idx]; ok {
-					err = fmt.Errorf("Error: attempt to reserve multiple IPs in the same IPAM instance")
+					err = fmt.Errorf("error attempting to reserve multiple IPs in the same IPAM instance")
 					return err
 				}
 				if err = ipam.Allocate(ipnet.IP); err != nil {
