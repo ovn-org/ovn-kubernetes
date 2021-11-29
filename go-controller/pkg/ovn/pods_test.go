@@ -411,17 +411,12 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
-				mockAddNBDBError(ovntest.LogicalSwitchPortType, t.portName,
-					ovntest.LogicalSwitchPortExternalId,
-					fmt.Errorf("injected dummy port external_ids set error"),
-					fakeOvn.ovnNBClient)
+
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				// allow pod retry from update annotation to fail
 				time.Sleep(2 * time.Second)
-				mockDelNBDBError(ovntest.LogicalSwitchPortType, t.portName,
-					ovntest.LogicalSwitchPortExternalId,
-					fakeOvn.ovnNBClient)
+
 				patch := struct {
 					Metadata map[string]interface{} `json:"metadata"`
 				}{
