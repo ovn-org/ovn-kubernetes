@@ -38,6 +38,10 @@ func (oc *Controller) syncPods(pods []interface{}) {
 		if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && err == nil {
 			logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 			expectedLogicalPorts[logicalPort] = true
+			if err = oc.waitForNodeLogicalSwitchInCache(pod.Spec.NodeName); err != nil {
+				klog.Errorf("Failed to wait for node %s to be added to cache. IP allocation may fail!",
+					pod.Spec.NodeName)
+			}
 			if err = oc.lsManager.AllocateIPs(pod.Spec.NodeName, annotations.IPs); err != nil {
 				klog.Errorf("couldn't allocate IPs: %s for pod: %s on node: %s"+
 					" error: %v", util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
@@ -175,6 +179,20 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (*nbdb.LogicalSw
 		return nil, fmt.Errorf("timed out waiting for logical switch in libovsdb cache %q subnet: %v", nodeName, err)
 	}
 	return ls, nil
+}
+
+func (oc *Controller) waitForNodeLogicalSwitchInCache(nodeName string) error {
+	// Wait for the node logical switch to be created by the ClusterController.
+	// The node switch will be created when the node's logical network infrastructure
+	// is created by the node watch.
+	var subnets []*net.IPNet
+	if err := wait.PollImmediate(30*time.Millisecond, 30*time.Second, func() (bool, error) {
+		subnets = oc.lsManager.GetSwitchSubnets(nodeName)
+		return subnets != nil, nil
+	}); err != nil {
+		return fmt.Errorf("timed out waiting for logical switch %q subnet: %v", nodeName, err)
+	}
+	return nil
 }
 
 func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet) error {
