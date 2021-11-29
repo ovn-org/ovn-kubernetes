@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alexflint/go-filemutex"
@@ -36,35 +37,80 @@ type TestSetup struct {
 
 type TestData interface{}
 
-type clientBuilderFn func(config.OvnAuthConfig, chan struct{}) (libovsdbclient.Client, error)
+type clientBuilderFn func(config.OvnAuthConfig, *Cleanup) (libovsdbclient.Client, error)
 type serverBuilderFn func(config.OvnAuthConfig, []TestData) (*server.OvsdbServer, error)
 
 var validUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
+type Cleanup struct {
+	clientStopCh chan struct{}
+	clientWg     *sync.WaitGroup
+	serverStopCh chan struct{}
+	serverWg     *sync.WaitGroup
+}
+
+func newCleanup() *Cleanup {
+	return &Cleanup{
+		clientStopCh: make(chan struct{}),
+		clientWg:     &sync.WaitGroup{},
+		serverStopCh: make(chan struct{}),
+		serverWg:     &sync.WaitGroup{},
+	}
+}
+
+func (c *Cleanup) Cleanup() {
+	// Stop the client first to ensure we don't trigger reconnect behavior
+	// due to a stopped server
+	close(c.clientStopCh)
+	c.clientWg.Wait()
+	close(c.serverStopCh)
+	c.serverWg.Wait()
+}
+
 // NewNBSBTestHarness runs NB & SB OVSDB servers and returns corresponding clients
-func NewNBSBTestHarness(setup TestSetup, stopChan chan struct{}) (libovsdbclient.Client, libovsdbclient.Client, error) {
-	nbClient, err := NewNBTestHarness(setup, stopChan)
+func NewNBSBTestHarness(setup TestSetup) (libovsdbclient.Client, libovsdbclient.Client, *Cleanup, error) {
+	cleanup := newCleanup()
+
+	nbClient, _, err := NewNBTestHarness(setup, cleanup)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	sbClient, err := NewSBTestHarness(setup, stopChan)
+	sbClient, _, err := NewSBTestHarness(setup, cleanup)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return nbClient, sbClient, nil
+	return nbClient, sbClient, cleanup, nil
 }
 
 // NewNBTestHarness runs NB server and returns corresponding client
-func NewNBTestHarness(setup TestSetup, stopChan chan struct{}) (libovsdbclient.Client, error) {
-	return newOVSDBTestHarness(setup.NBData, stopChan, newNBServer, newNBClient)
+func NewNBTestHarness(setup TestSetup, cleanup *Cleanup) (libovsdbclient.Client, *Cleanup, error) {
+	if cleanup == nil {
+		cleanup = newCleanup()
+	}
+
+	client, err := newOVSDBTestHarness(setup.NBData, newNBServer, newNBClient, cleanup)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return client, cleanup, err
 }
 
 // NewSBTestHarness runs SB server and returns corresponding client
-func NewSBTestHarness(setup TestSetup, stopChan chan struct{}) (libovsdbclient.Client, error) {
-	return newOVSDBTestHarness(setup.SBData, stopChan, newSBServer, newSBClient)
+func NewSBTestHarness(setup TestSetup, cleanup *Cleanup) (libovsdbclient.Client, *Cleanup, error) {
+	if cleanup == nil {
+		cleanup = newCleanup()
+	}
+
+	client, err := newOVSDBTestHarness(setup.SBData, newSBServer, newSBClient, cleanup)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return client, cleanup, err
 }
 
-func newOVSDBTestHarness(serverData []TestData, stopChan chan struct{}, newServer serverBuilderFn, newClient clientBuilderFn) (libovsdbclient.Client, error) {
+func newOVSDBTestHarness(serverData []TestData, newServer serverBuilderFn, newClient clientBuilderFn, cleanup *Cleanup) (libovsdbclient.Client, error) {
 	cfg := config.OvnAuthConfig{
 		Scheme:  config.OvnDBSchemeUnix,
 		Address: "unix:" + tempOVSDBSocketFileName(),
@@ -75,41 +121,51 @@ func newOVSDBTestHarness(serverData []TestData, stopChan chan struct{}, newServe
 		return nil, err
 	}
 
-	internalStopChan := make(chan struct{})
-	go func() {
-		for {
-			select {
-			case <-stopChan:
-				s.Close()
-				return
-			case <-internalStopChan:
-				s.Close()
-				return
-			}
-		}
-	}()
-
-	c, err := newClient(cfg, stopChan)
+	c, err := newClient(cfg, cleanup)
 	if err != nil {
-		close(internalStopChan)
+		s.Close()
+		return nil, err
 	}
 
-	return c, err
+	cleanup.serverWg.Add(1)
+	go func() {
+		defer cleanup.serverWg.Done()
+		<-cleanup.serverStopCh
+		s.Close()
+	}()
+
+	return c, nil
 }
 
-func newNBClient(cfg config.OvnAuthConfig, stopChan chan struct{}) (libovsdbclient.Client, error) {
+func newNBClient(cfg config.OvnAuthConfig, cleanup *Cleanup) (libovsdbclient.Client, error) {
+	stopChan := make(chan struct{})
 	libovsdbOvnNBClient, err := libovsdb.NewNBClientWithConfig(cfg, stopChan)
 	if err != nil {
 		return nil, err
 	}
+	cleanup.clientWg.Add(1)
+	go func() {
+		defer cleanup.clientWg.Done()
+		<-cleanup.clientStopCh
+		close(stopChan)
+		libovsdbOvnNBClient.Close()
+	}()
 	return libovsdbOvnNBClient, err
 }
 
-func newSBClient(cfg config.OvnAuthConfig, stopChan chan struct{}) (libovsdbclient.Client, error) {
+func newSBClient(cfg config.OvnAuthConfig, cleanup *Cleanup) (libovsdbclient.Client, error) {
+	stopChan := make(chan struct{})
 	libovsdbOvnSBClient, err := libovsdb.NewSBClientWithConfig(cfg, stopChan)
 	if err != nil {
 		return nil, err
 	}
+	cleanup.clientWg.Add(1)
+	go func() {
+		defer cleanup.clientWg.Done()
+		<-cleanup.clientStopCh
+		close(stopChan)
+		libovsdbOvnSBClient.Close()
+	}()
 	return libovsdbOvnSBClient, err
 }
 

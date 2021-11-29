@@ -46,7 +46,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		fakeOvn = NewFakeOVN(nil)
+		fakeOvn = NewFakeOVN()
 	})
 
 	ginkgo.AfterEach(func() {
@@ -74,7 +74,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					namespaceT.Name,
 				)
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalSwitch{
@@ -210,7 +210,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					namespaceT.Name,
 				)
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalSwitch{
@@ -344,7 +344,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					namespaceT.Name,
 				)
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalSwitch{
@@ -511,7 +511,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						namespaceT.Name,
 					)
 
-					fakeOvn.startWithDBSetup(ctx,
+					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
 							NBData: initNB,
 						},
@@ -665,7 +665,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						namespaceT.Name,
 					)
 
-					fakeOvn.startWithDBSetup(ctx,
+					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
 							NBData: initNB,
 						},
@@ -775,7 +775,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						namespaceT.Name,
 					)
 
-					fakeOvn.startWithDBSetup(ctx,
+					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
 							NBData: initNB,
 						},
@@ -961,7 +961,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					gwPod.Annotations["k8s.ovn.org/bfd-enabled"] = ""
 				}
 				gwPod.Spec.HostNetwork = true
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalSwitch{
@@ -1099,7 +1099,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					gwPod.Annotations["k8s.ovn.org/bfd-enabled"] = ""
 				}
 				gwPod.Spec.HostNetwork = true
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalSwitch{
@@ -1244,7 +1244,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					gwPod.Annotations["k8s.ovn.org/bfd-enabled"] = ""
 				}
 				gwPod.Spec.HostNetwork = true
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalSwitch{
@@ -1385,7 +1385,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						gwPod.Annotations["k8s.ovn.org/bfd-enabled"] = ""
 					}
 					gwPod.Spec.HostNetwork = true
-					fakeOvn.startWithDBSetup(ctx,
+					fakeOvn.startWithDBSetup(
 						libovsdbtest.TestSetup{
 							NBData: []libovsdbtest.TestData{
 								&nbdb.LogicalSwitch{
@@ -1584,7 +1584,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				gwPod := *newPod(namespaceX.Name, "gwPod", "node2", "10.0.0.1")
 				gwPod.Annotations = map[string]string{"k8s.ovn.org/routing-namespaces": namespaceT.Name}
 				gwPod.Spec.HostNetwork = true
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalSwitch{
@@ -1697,7 +1697,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				gwPod.Annotations["k8s.ovn.org/bfd-enabled"] = ""
 
 				gwPod.Spec.HostNetwork = true
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalSwitch{
@@ -1805,7 +1805,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					namespaceT.Name,
 				)
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.BFD{
@@ -1881,7 +1881,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeLocal
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouterPort{
@@ -1932,7 +1932,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeLocal
 				intPriority, _ := strconv.Atoi(types.HybridOverlayReroutePriority)
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouterPolicy{
@@ -1991,7 +1991,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeShared
 				intPriority, _ := strconv.Atoi(types.HybridOverlayReroutePriority)
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouterPolicy{
@@ -2077,7 +2077,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
 				}
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouterPort{

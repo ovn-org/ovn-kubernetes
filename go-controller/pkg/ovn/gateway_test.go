@@ -10,11 +10,7 @@ import (
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
-	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -22,8 +18,6 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/tools/record"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -215,6 +209,10 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 }
 
 var _ = ginkgo.Describe("Gateway Init Operations", func() {
+	var (
+		fakeOvn *FakeOVN
+	)
+
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
@@ -222,50 +220,15 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		config.Gateway.Mode = config.GatewayModeShared
 		// Create new LBCache
 		ovnlb.TestOnlySetCache(nil)
+
+		fakeOvn = NewFakeOVN()
 	})
 
-	ginkgo.It("correctly sorts gateway routers", func() {
-		fexec := ovntest.NewFakeExec()
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd: "ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=name,options find logical_router options:lb_force_snat_ip!=-",
-			Output: `node5      chassis=842fdade-747a-43b8-b40a-d8e8e26379fa lb_force_snat_ip=100.64.0.5
-node2 chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_snat_ip=100.64.0.2
-node1 chassis=d17ddb5a-050d-42ab-ab50-7c6ce79a8f2e lb_force_snat_ip=100.64.0.1
-node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
-		})
-
-		err := util.SetExec(fexec)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	})
-
-	ginkgo.It("ignores malformatted gateway router entires", func() {
-		fexec := ovntest.NewFakeExec()
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd: "ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=name,options find logical_router options:lb_force_snat_ip!=-",
-			Output: `node5      chassis=842fdade-747a-43b8-b40a-d8e8e26379fa lb_force_snat_ip=100.64.0.5
-node2 chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_snat_ip=asdfsadf
-node1 chassis=d17ddb5a-050d-42ab-ab50-7c6ce79a8f2e lb_force_xxxxxxx=100.64.0.1
-node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
-		})
-
-		err := util.SetExec(fexec)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	ginkgo.AfterEach(func() {
+		fakeOvn.shutdown()
 	})
 
 	ginkgo.It("creates an IPv4 gateway in OVN", func() {
-
-		stopChan := make(chan struct{})
-		defer close(stopChan)
-		kubeFakeClient := fake.NewSimpleClientset()
-		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-		egressIPFakeClient := &egressipfake.Clientset{}
-		fakeClient := &util.OVNClientset{
-			KubeClient:           kubeFakeClient,
-			EgressIPClient:       egressIPFakeClient,
-			EgressFirewallClient: egressFirewallFakeClient,
-		}
-		f, err := factory.NewMasterWatchFactory(fakeClient)
-
 		expectedOVNClusterRouter := &nbdb.LogicalRouter{
 			UUID: types.OVNClusterRouter + "-UUID",
 			Name: types.OVNClusterRouter,
@@ -274,7 +237,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			UUID: nodeName + "-UUID",
 			Name: nodeName,
 		}
-		dbSetup := libovsdbtest.TestSetup{
+		fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					UUID: types.OVNJoinSwitch + "-UUID",
@@ -283,13 +246,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 				expectedOVNClusterRouter,
 				expectedNodeSwitch,
 			},
-		}
-		libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-		clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-			libovsdbOvnNBClient, libovsdbOvnSBClient,
-			record.NewFakeRecorder(0))
+		})
 
 		clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
 		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23")
@@ -306,11 +263,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		}
 		sctpSupport := false
 
-		fexec := ovntest.NewFakeExec()
-		err = util.SetExec(fexec)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-		err = clusterController.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+		err := fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		testData := []libovsdb.TestData{}
@@ -318,24 +271,10 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		// We don't set up the Allow from mgmt port ACL here
 		mgmtPortIP := ""
 		expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP)
-		gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
+		gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 	})
 
 	ginkgo.It("creates an IPv6 gateway in OVN", func() {
-
-		stopChan := make(chan struct{})
-		defer close(stopChan)
-		kubeFakeClient := fake.NewSimpleClientset()
-		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-		egressIPFakeClient := &egressipfake.Clientset{}
-		fakeClient := &util.OVNClientset{
-			KubeClient:           kubeFakeClient,
-			EgressIPClient:       egressIPFakeClient,
-			EgressFirewallClient: egressFirewallFakeClient,
-		}
-		f, err := factory.NewMasterWatchFactory(fakeClient)
-
 		expectedOVNClusterRouter := &nbdb.LogicalRouter{
 			UUID: types.OVNClusterRouter + "-UUID",
 			Name: types.OVNClusterRouter,
@@ -344,7 +283,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			UUID: nodeName + "-UUID",
 			Name: nodeName,
 		}
-		dbSetup := libovsdbtest.TestSetup{
+		fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					UUID: types.OVNJoinSwitch + "-UUID",
@@ -353,13 +292,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 				expectedOVNClusterRouter,
 				expectedNodeSwitch,
 			},
-		}
-		libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-		clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-			libovsdbOvnNBClient, libovsdbOvnSBClient,
-			record.NewFakeRecorder(0))
+		})
 
 		clusterIPSubnets := ovntest.MustParseIPNets("fd01::/48")
 		hostSubnets := ovntest.MustParseIPNets("fd01:0:0:2::/64")
@@ -377,11 +310,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		}
 		sctpSupport := false
 
-		fexec := ovntest.NewFakeExec()
-		err = util.SetExec(fexec)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-		err = clusterController.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+		err := fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		testData := []libovsdb.TestData{}
@@ -389,24 +318,10 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		// We don't set up the Allow from mgmt port ACL here
 		mgmtPortIP := ""
 		expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP)
-		gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
+		gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 	})
 
 	ginkgo.It("creates a dual-stack gateway in OVN", func() {
-
-		stopChan := make(chan struct{})
-		defer close(stopChan)
-		kubeFakeClient := fake.NewSimpleClientset()
-		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-		egressIPFakeClient := &egressipfake.Clientset{}
-		fakeClient := &util.OVNClientset{
-			KubeClient:           kubeFakeClient,
-			EgressIPClient:       egressIPFakeClient,
-			EgressFirewallClient: egressFirewallFakeClient,
-		}
-		f, err := factory.NewMasterWatchFactory(fakeClient)
-
 		expectedOVNClusterRouter := &nbdb.LogicalRouter{
 			UUID: types.OVNClusterRouter + "-UUID",
 			Name: types.OVNClusterRouter,
@@ -415,7 +330,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			UUID: nodeName + "-UUID",
 			Name: nodeName,
 		}
-		dbSetup := libovsdbtest.TestSetup{
+		fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					UUID: types.OVNJoinSwitch + "-UUID",
@@ -424,13 +339,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 				expectedOVNClusterRouter,
 				expectedNodeSwitch,
 			},
-		}
-		libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-		clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-			libovsdbOvnNBClient, libovsdbOvnSBClient,
-			record.NewFakeRecorder(0))
+		})
 
 		clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14", "fd01::/48")
 		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23", "fd01:0:0:2::/64")
@@ -448,11 +357,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		}
 		sctpSupport := false
 
-		fexec := ovntest.NewFakeExec()
-		err = util.SetExec(fexec)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-		err = clusterController.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+		err := fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		testData := []libovsdb.TestData{}
@@ -460,23 +365,10 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		// We don't set up the Allow from mgmt port ACL here
 		mgmtPortIP := ""
 		expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP)
-		gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
+		gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 	})
 
 	ginkgo.It("cleans up a single-stack gateway in OVN", func() {
-		stopChan := make(chan struct{})
-		defer close(stopChan)
-		kubeFakeClient := fake.NewSimpleClientset()
-		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-		egressIPFakeClient := &egressipfake.Clientset{}
-		fakeClient := &util.OVNClientset{
-			KubeClient:           kubeFakeClient,
-			EgressIPClient:       egressIPFakeClient,
-			EgressFirewallClient: egressFirewallFakeClient,
-		}
-		f, err := factory.NewMasterWatchFactory(fakeClient)
-
 		nodeName := "test-node"
 		hostSubnet := ovntest.MustParseIPNets("10.130.0.0/23")
 
@@ -493,7 +385,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		matchstr5 := fmt.Sprintf(`ip4.src == 10.244.0.2  && ip4.dst != 10.244.0.0/16 /* inter-%s */`, nodeName)
 		matchstr6 := fmt.Sprintf("ip4.src == NO DELETE && ip4.dst == nodePhysicalIP /* %s-no */", nodeName)
 
-		dbSetup := libovsdbtest.TestSetup{
+		fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
 				&nbdb.LogicalRouterPort{
 					Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName,
@@ -573,21 +465,10 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 					UUID: types.ExternalSwitchPrefix + types.ExternalSwitchPrefix + nodeName + "-UUID",
 				},
 			},
-		}
-		libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
 
-		clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-			libovsdbOvnNBClient, libovsdbOvnSBClient,
-			record.NewFakeRecorder(0))
-
-		fexec := ovntest.NewFakeExec()
-		err = util.SetExec(fexec)
+		err := fakeOvn.controller.gatewayCleanup(nodeName)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-		err = clusterController.gatewayCleanup(nodeName)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		gomega.Eventually(fexec.CalledMatchesExpected()).Should(gomega.BeTrue(), fexec.ErrorDesc)
 
 		expectedDatabaseState := []libovsdbtest.TestData{
 			&nbdb.LogicalRouterPort{
@@ -629,23 +510,10 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 				Policies: []string{"match3-UUID", "match4-UUID", "match6-UUID"},
 			},
 		}
-		gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-		libovsdbOvnNBClient.Close()
+		gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 	})
 
 	ginkgo.It("cleans up a dual-stack gateway in OVN", func() {
-		stopChan := make(chan struct{})
-		defer close(stopChan)
-		kubeFakeClient := fake.NewSimpleClientset()
-		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-		egressIPFakeClient := &egressipfake.Clientset{}
-		fakeClient := &util.OVNClientset{
-			KubeClient:           kubeFakeClient,
-			EgressIPClient:       egressIPFakeClient,
-			EgressFirewallClient: egressFirewallFakeClient,
-		}
-		f, err := factory.NewMasterWatchFactory(fakeClient)
-
 		nodeName := "test-node"
 
 		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23", "fd01:0:0:2::/64")
@@ -663,7 +531,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		matchstr5 := fmt.Sprintf(`ip4.src == 10.244.0.2  && ip4.dst != 10.244.0.0/16 /* inter-%s */`, nodeName)
 		matchstr6 := fmt.Sprintf("ip4.src == NO DELETE && ip4.dst == nodePhysicalIP /* %s-no */", nodeName)
 
-		dbSetup := libovsdbtest.TestSetup{
+		fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
 				&nbdb.LogicalRouterPort{
 					Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName,
@@ -747,21 +615,10 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 					UUID: types.ExternalSwitchPrefix + types.ExternalSwitchPrefix + nodeName + "-UUID",
 				},
 			},
-		}
-		libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
 
-		clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-			libovsdbOvnNBClient, libovsdbOvnSBClient,
-			record.NewFakeRecorder(0))
-
-		fexec := ovntest.NewFakeExec()
-		err = util.SetExec(fexec)
+		err := fakeOvn.controller.gatewayCleanup(nodeName)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-		err = clusterController.gatewayCleanup(nodeName)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		gomega.Eventually(fexec.CalledMatchesExpected()).Should(gomega.BeTrue(), fexec.ErrorDesc)
 
 		expectedDatabaseState := []libovsdbtest.TestData{
 			&nbdb.LogicalRouterPort{
@@ -803,24 +660,10 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 				Policies: []string{"match3-UUID", "match4-UUID", "match6-UUID"},
 			},
 		}
-		gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-		libovsdbOvnNBClient.Close()
+		gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 	})
 
 	ginkgo.It("removes leftover SNAT entries during init", func() {
-
-		stopChan := make(chan struct{})
-		defer close(stopChan)
-		kubeFakeClient := fake.NewSimpleClientset()
-		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-		egressIPFakeClient := &egressipfake.Clientset{}
-		fakeClient := &util.OVNClientset{
-			KubeClient:           kubeFakeClient,
-			EgressIPClient:       egressIPFakeClient,
-			EgressFirewallClient: egressFirewallFakeClient,
-		}
-		f, err := factory.NewMasterWatchFactory(fakeClient)
-
 		expectedOVNClusterRouter := &nbdb.LogicalRouter{
 			UUID: types.OVNClusterRouter + "-UUID",
 			Name: types.OVNClusterRouter,
@@ -829,7 +672,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			UUID: nodeName + "-UUID",
 			Name: nodeName,
 		}
-		dbSetup := libovsdbtest.TestSetup{
+		fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					UUID: types.OVNJoinSwitch + "-UUID",
@@ -838,13 +681,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 				expectedOVNClusterRouter,
 				expectedNodeSwitch,
 			},
-		}
-		libovsdbOvnNBClient, libovsdbOvnSBClient, err := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-		clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-			libovsdbOvnNBClient, libovsdbOvnSBClient,
-			record.NewFakeRecorder(0))
+		})
 
 		clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
 		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23")
@@ -863,11 +700,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		sctpSupport := false
 		config.Gateway.DisableSNATMultipleGWs = true
 
-		fexec := ovntest.NewFakeExec()
-		err = util.SetExec(fexec)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-		err = clusterController.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+		err := fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		testData := []libovsdb.TestData{}
@@ -875,8 +708,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		// We don't set up the Allow from mgmt port ACL here
 		mgmtPortIP := ""
 		expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP)
-		gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
-		gomega.Eventually(fexec.CalledMatchesExpected()).Should(gomega.BeTrue(), fexec.ErrorDesc)
-
+		gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 	})
 })

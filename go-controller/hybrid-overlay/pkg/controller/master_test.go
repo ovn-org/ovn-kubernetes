@@ -11,6 +11,7 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
@@ -54,10 +55,11 @@ func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Nod
 
 var _ = Describe("Hybrid SDN Master Operations", func() {
 	var (
-		app      *cli.App
-		stopChan chan struct{}
-		wg       *sync.WaitGroup
-		fexec    *ovntest.FakeExec
+		app             *cli.App
+		stopChan        chan struct{}
+		wg              *sync.WaitGroup
+		fexec           *ovntest.FakeExec
+		libovsdbCleanup *libovsdbtest.Cleanup
 	)
 
 	BeforeEach(func() {
@@ -72,11 +74,16 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 		fexec = ovntest.NewFakeExec()
 		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
+
+		libovsdbCleanup = nil
 	})
 
 	AfterEach(func() {
 		close(stopChan)
 		wg.Wait()
+		if libovsdbCleanup != nil {
+			libovsdbCleanup.Cleanup()
+		}
 	})
 
 	const hybridOverlayClusterCIDR string = "11.1.0.0/16/24"
@@ -99,7 +106,8 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
 			dbSetup := libovsdbtest.TestSetup{}
-			libovsdbOvnNBClient, err := libovsdbtest.NewNBTestHarness(dbSetup, stopChan)
+			var libovsdbOvnNBClient libovsdbclient.Client
+			libovsdbOvnNBClient, libovsdbCleanup, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			m, err := NewMaster(
@@ -203,7 +211,8 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: initialExpectedDB,
 			}
-			libovsdbOvnNBClient, err := libovsdbtest.NewNBTestHarness(dbSetup, stopChan)
+			var libovsdbOvnNBClient libovsdbclient.Client
+			libovsdbOvnNBClient, libovsdbCleanup, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
@@ -331,7 +340,8 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: expectedDatabaseState,
 			}
-			libovsdbOvnNBClient, err := libovsdbtest.NewNBTestHarness(dbSetup, stopChan)
+			var libovsdbOvnNBClient libovsdbclient.Client
+			libovsdbOvnNBClient, libovsdbCleanup, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
@@ -423,7 +433,8 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: expectedDatabaseState,
 			}
-			libovsdbOvnNBClient, err := libovsdbtest.NewNBTestHarness(dbSetup, stopChan)
+			var libovsdbOvnNBClient libovsdbclient.Client
+			libovsdbOvnNBClient, libovsdbCleanup, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			m, err := NewMaster(
