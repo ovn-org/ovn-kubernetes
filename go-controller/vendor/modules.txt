@@ -1,4 +1,4 @@
-# github.com/Mellanox/sriovnet v1.0.3-0.20210630121212-0453bd4b7fbc
+# github.com/Mellanox/sriovnet v1.0.3
 github.com/Mellanox/sriovnet
 github.com/Mellanox/sriovnet/pkg/utils/filesystem
 github.com/Mellanox/sriovnet/pkg/utils/netlinkops
@@ -42,6 +42,8 @@ github.com/cespare/xxhash/v2
 # github.com/containerd/cgroups v0.0.0-20200531161412-0dbf7f05ba59
 github.com/containerd/cgroups/stats/v1
 # github.com/containernetworking/cni v0.8.0
+github.com/containernetworking/cni/libcni
+github.com/containernetworking/cni/pkg/invoke
 github.com/containernetworking/cni/pkg/skel
 github.com/containernetworking/cni/pkg/types
 github.com/containernetworking/cni/pkg/types/020
@@ -61,10 +63,6 @@ github.com/coreos/go-iptables/iptables
 github.com/cpuguy83/go-md2man/v2/md2man
 # github.com/davecgh/go-spew v1.1.1
 github.com/davecgh/go-spew/spew
-# github.com/ebay/go-ovn v0.1.1-0.20210731003635-d96abc06b52c
-github.com/ebay/go-ovn
-# github.com/ebay/libovsdb v0.2.1-0.20200719163122-3332afaeb27c
-github.com/ebay/libovsdb
 # github.com/evanphx/json-patch v4.11.0+incompatible
 github.com/evanphx/json-patch
 # github.com/fsnotify/fsnotify v1.4.9
@@ -113,6 +111,7 @@ github.com/juju/errors
 # github.com/k8snetworkplumbingwg/network-attachment-definition-client v0.0.0-20200626054723-37f83d1996bc
 github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io
 github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1
+github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils
 # github.com/matttproud/golang_protobuf_extensions v1.0.2-0.20181231171920-c182affec369
 github.com/matttproud/golang_protobuf_extensions/pbutil
 # github.com/miekg/dns v1.1.31

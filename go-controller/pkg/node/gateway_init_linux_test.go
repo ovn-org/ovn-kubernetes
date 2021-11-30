@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 package node
@@ -286,7 +287,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 	Expect(err).NotTo(HaveOccurred())
 }
 
-func shareGatewayInterfaceSmartNICTest(app *cli.App, testNS ns.NetNS,
+func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 	brphys, hostMAC, hostCIDR string) {
 	const mtu string = "1400"
 	const clusterCIDR string = "10.1.0.0/16"
@@ -359,7 +360,7 @@ func shareGatewayInterfaceSmartNICTest(app *cli.App, testNS ns.NetNS,
 			Cmd:    "ovs-appctl --timeout=15 dpif/show-dp-features " + brphys,
 			Output: "Check pkt length action: Yes",
 		})
-		// GetSmartNICHostInterface
+		// GetDPUHostInterface
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 list-ports " + brphys,
 			Output: hostRep,
@@ -381,7 +382,7 @@ func shareGatewayInterfaceSmartNICTest(app *cli.App, testNS ns.NetNS,
 			Cmd:    "ovs-vsctl --timeout=15 get interface " + uplinkPort + " ofport",
 			Output: "7",
 		})
-		// GetSmartNICHostInterface
+		// GetDPUHostInterface
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 list-ports " + brphys,
 			Output: hostRep,
@@ -511,13 +512,13 @@ func shareGatewayInterfaceSmartNICTest(app *cli.App, testNS ns.NetNS,
 		"--gateway-interface=" + brphys,
 		"--nodeport",
 		"--mtu=" + mtu,
-		"--ovnkube-node-mode=" + types.NodeModeSmartNIC,
+		"--ovnkube-node-mode=" + types.NodeModeDPU,
 		"--ovnkube-node-mgmt-port-netdev=pf0vf0",
 	})
 	Expect(err).NotTo(HaveOccurred())
 }
 
-func shareGatewayInterfaceSmartNICHostTest(app *cli.App, testNS ns.NetNS, uplinkName, hostIP, gwIP string) {
+func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName, hostIP, gwIP string) {
 	const (
 		clusterCIDR string = "10.1.0.0/16"
 		svcCIDR     string = "172.16.1.0/24"
@@ -560,7 +561,7 @@ func shareGatewayInterfaceSmartNICHostTest(app *cli.App, testNS ns.NetNS, uplink
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			err := n.initGatewaySmartNicHost(net.ParseIP(hostIP))
+			err := n.initGatewayDPUHost(net.ParseIP(hostIP))
 			Expect(err).NotTo(HaveOccurred())
 
 			// Check svc and masquerade routes added towards eth0GWIP
@@ -590,7 +591,7 @@ func shareGatewayInterfaceSmartNICHostTest(app *cli.App, testNS ns.NetNS, uplink
 		"--init-gateways",
 		"--gateway-interface=" + uplinkName,
 		"--k8s-service-cidrs=" + svcCIDR,
-		"--ovnkube-node-mode=smart-nic-host",
+		"--ovnkube-node-mode=dpu-host",
 		"--ovnkube-node-mgmt-port-netdev=pf0vf0",
 	})
 	Expect(err).NotTo(HaveOccurred())
@@ -911,7 +912,7 @@ var _ = Describe("Gateway Init Operations", func() {
 	})
 })
 
-var _ = Describe("Gateway Operations Smart-NIC", func() {
+var _ = Describe("Gateway Operations DPU", func() {
 	var (
 		testNS ns.NetNS
 		app    *cli.App
@@ -934,15 +935,15 @@ var _ = Describe("Gateway Operations Smart-NIC", func() {
 		Expect(testNS.Close()).To(Succeed())
 	})
 
-	Context("Smart-NIC Operations", func() {
+	Context("DPU Operations", func() {
 		const (
-			brphys       string = "brp0"
-			smartNICIP   string = "192.168.1.101"
-			hostIP       string = "192.168.1.10"
-			hostMAC      string = "aa:bb:cc:dd:ee:ff"
-			hostCIDR     string = hostIP + "/24"
-			smartNICCIDR string = smartNICIP + "/24"
-			gwIP         string = "192.168.1.1"
+			brphys   string = "brp0"
+			dpuIP    string = "192.168.1.101"
+			hostIP   string = "192.168.1.10"
+			hostMAC  string = "aa:bb:cc:dd:ee:ff"
+			hostCIDR string = hostIP + "/24"
+			dpuCIDR  string = dpuIP + "/24"
+			gwIP     string = "192.168.1.1"
 		)
 
 		BeforeEach(func() {
@@ -957,7 +958,7 @@ var _ = Describe("Gateway Operations Smart-NIC", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				// Add an IP address
-				addr, err := netlink.ParseAddr(smartNICCIDR)
+				addr, err := netlink.ParseAddr(dpuCIDR)
 				Expect(err).NotTo(HaveOccurred())
 				err = netlink.AddrAdd(l, addr)
 				Expect(err).NotTo(HaveOccurred())
@@ -976,12 +977,12 @@ var _ = Describe("Gateway Operations Smart-NIC", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("sets up a shared interface gateway Smart-NIC", func() {
-			shareGatewayInterfaceSmartNICTest(app, testNS, brphys, hostMAC, hostCIDR)
+		It("sets up a shared interface gateway DPU", func() {
+			shareGatewayInterfaceDPUTest(app, testNS, brphys, hostMAC, hostCIDR)
 		})
 	})
 
-	Context("Smart-NIC Host Operations", func() {
+	Context("DPU Host Operations", func() {
 		const (
 			uplinkName string = "enp3s0f0"
 			hostIP     string = "192.168.1.10"
@@ -1019,8 +1020,8 @@ var _ = Describe("Gateway Operations Smart-NIC", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("sets up a shared interface gateway Smart-NIC host", func() {
-			shareGatewayInterfaceSmartNICHostTest(app, testNS, uplinkName, hostIP, gwIP)
+		It("sets up a shared interface gateway DPU host", func() {
+			shareGatewayInterfaceDPUHostTest(app, testNS, uplinkName, hostIP, gwIP)
 		})
 	})
 })
@@ -1039,43 +1040,43 @@ var _ = Describe("Gateway unit tests", func() {
 		util.SetNetLinkOpMockInst(origNetlinkInst)
 	})
 
-	Context("getSmartNICHostPrimaryIPAddresses", func() {
+	Context("getDPUHostPrimaryIPAddresses", func() {
 
 		It("returns Gateway IP/Subnet for kubernetes node IP", func() {
-			_, smartNicSubnet, _ := net.ParseCIDR("10.0.0.101/24")
+			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
 			nodeIP := net.ParseIP("10.0.0.11")
 			expectedGwSubnet := []*net.IPNet{
 				{IP: nodeIP, Mask: net.CIDRMask(24, 32)},
 			}
-			gwSubnet, err := getSmartNICHostPrimaryIPAddresses(nodeIP, []*net.IPNet{smartNicSubnet})
+			gwSubnet, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(gwSubnet).To(Equal(expectedGwSubnet))
 		})
 
 		It("Fails if node IP is not in host subnets", func() {
-			_, smartNicSubnet, _ := net.ParseCIDR("10.0.0.101/24")
+			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
 			nodeIP := net.ParseIP("10.0.1.11")
-			_, err := getSmartNICHostPrimaryIPAddresses(nodeIP, []*net.IPNet{smartNicSubnet})
+			_, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("returns node IP with config.Gateway.RouterSubnet subnet", func() {
 			config.Gateway.RouterSubnet = "10.1.0.0/16"
-			_, smartNicSubnet, _ := net.ParseCIDR("10.0.0.101/24")
+			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
 			nodeIP := net.ParseIP("10.1.0.11")
 			expectedGwSubnet := []*net.IPNet{
 				{IP: nodeIP, Mask: net.CIDRMask(16, 32)},
 			}
-			gwSubnet, err := getSmartNICHostPrimaryIPAddresses(nodeIP, []*net.IPNet{smartNicSubnet})
+			gwSubnet, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(gwSubnet).To(Equal(expectedGwSubnet))
 		})
 
 		It("Fails if node IP is not in config.Gateway.RouterSubnet subnet", func() {
 			config.Gateway.RouterSubnet = "10.1.0.0/16"
-			_, smartNicSubnet, _ := net.ParseCIDR("10.0.0.101/24")
+			_, dpuSubnet, _ := net.ParseCIDR("10.0.0.101/24")
 			nodeIP := net.ParseIP("10.0.0.11")
-			_, err := getSmartNICHostPrimaryIPAddresses(nodeIP, []*net.IPNet{smartNicSubnet})
+			_, err := getDPUHostPrimaryIPAddresses(nodeIP, []*net.IPNet{dpuSubnet})
 			Expect(err).To(HaveOccurred())
 		})
 	})

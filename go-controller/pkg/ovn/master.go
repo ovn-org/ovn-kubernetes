@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	goovn "github.com/ebay/go-ovn"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -23,6 +22,7 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
@@ -204,31 +204,6 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 	return err
 }
 
-// enableOVNLogicalDataPathGroups sets an OVN flag to enable logical datapath
-// groups on OVN 20.12 and later. The option is ignored if OVN doesn't
-// understand it. Logical datapath groups reduce the size of the southbound
-// database in large clusters. ovn-controllers should be upgraded to a version
-// that supports them before the option is turned on by the master.
-func (oc *Controller) enableOVNLogicalDatapathGroups() error {
-	options, err := oc.ovnNBClient.NBGlobalGetOptions()
-	if err != nil {
-		klog.Errorf("Failed to get NB global options: %v", err)
-		return err
-	}
-	options["use_logical_dp_groups"] = "true"
-	cmd, err := oc.ovnNBClient.NBGlobalSetOptions(options)
-	if err != nil {
-		klog.Errorf("Failed to set NB global option to enable logical datapath groups: %v", err)
-		return err
-	}
-	if err := cmd.Execute(); err != nil {
-		klog.Errorf("Failed to enable logical datapath groups: %v", err)
-		return err
-	}
-
-	return nil
-}
-
 // StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure
 // of nodes in the cluster
 // On an addition to the cluster (node create), a new subnet is created for it that will translate
@@ -260,8 +235,14 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		}
 	}
 
-	// Enable logical datapath groups for OVN 20.12 and later
-	if err := oc.enableOVNLogicalDatapathGroups(); err != nil {
+	// enableOVNLogicalDataPathGroups sets an OVN flag to enable logical datapath
+	// groups on OVN 20.12 and later. The option is ignored if OVN doesn't
+	// understand it. Logical datapath groups reduce the size of the southbound
+	// database in large clusters. ovn-controllers should be upgraded to a version
+	// that supports them before the option is turned on by the master.
+	dpGroupOpts := map[string]string{"use_logical_dp_groups": "true"}
+	if err := libovsdbops.UpdateNBGlobalOptions(oc.nbClient, dpGroupOpts); err != nil {
+		klog.Errorf("Failed to set NB global option to enable logical datapath groups: %v", err)
 		return err
 	}
 
@@ -582,7 +563,7 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 		addresses += " " + mgmtIfAddr.IP.String()
 
-		if err := addAllowACLFromNode(node.Name, mgmtIfAddr.IP, oc.ovnNBClient); err != nil {
+		if err := addAllowACLFromNode(node.Name, mgmtIfAddr.IP, oc.nbClient); err != nil {
 			return err
 		}
 
@@ -1165,12 +1146,12 @@ func (oc *Controller) checkNodeChassisMismatch(node *kapi.Node) (bool, error) {
 		return false, nil
 	}
 
-	chassisList, err := oc.ovnSBClient.ChassisGet(node.Name)
-	if err != nil {
+	chassisList, err := libovsdbops.ListChassis(oc.sbClient)
+	if err != nil && err != libovsdbclient.ErrNotFound {
 		return false, fmt.Errorf("failed to get chassis list for node %s: error: %v", node.Name, err)
 	}
 
-	if len(chassisList) == 0 {
+	if err == libovsdbclient.ErrNotFound {
 		return false, nil
 	}
 
@@ -1188,11 +1169,13 @@ func (oc *Controller) deleteStaleNodeChassis(node *kapi.Node) {
 	if err != nil {
 		klog.Errorf("Failed to check if there is any stale chassis for node %s in SBDB: %v", node.Name, err)
 	} else if mismatch {
-		klog.V(5).Infof("Node %s is now with a new chassis ID, delete its stale chassis in SBDB", node.Name)
-		if err = oc.deleteNodeChassis(node.Name); err != nil {
+		klog.V(5).Infof("Node %s now has a new chassis ID, delete its stale chassis in SBDB", node.Name)
+		if err = libovsdbops.DeleteNodeChassis(oc.sbClient, node.Name); err != nil {
+			// Send an event and Log on failure
 			oc.recorder.Eventf(node, kapi.EventTypeWarning, "ErrorMismatchChassis",
 				"Node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB",
 				node.Name)
+			klog.Errorf("Node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB", node.Name)
 		}
 	}
 }
@@ -1270,7 +1253,7 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet, node
 		klog.Errorf("Failed to clean up GR LRP IPs for node %s: %v", nodeName, err)
 	}
 
-	if err := oc.deleteNodeChassis(nodeName); err != nil {
+	if err := libovsdbops.DeleteNodeChassis(oc.sbClient, nodeName); err != nil {
 		klog.Errorf("Failed to remove the chassis associated with node %s in the OVN SB Chassis table: %v", nodeName, err)
 	}
 }
@@ -1327,41 +1310,6 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newN
 	}
 }
 
-// delete chassis of the given nodeName/chassisName map
-// from chassis & chassis_private table
-func deleteChassis(ovnSBClient goovn.Client, chassisMap map[string]string) {
-	cmds := make([]*goovn.OvnCommand, 0, len(chassisMap))
-	for chassisHostname, chassisName := range chassisMap {
-		if chassisName != "" {
-			klog.Infof("Deleting stale chassis %s (%s)", chassisHostname, chassisName)
-			chassisDelCmd, err := ovnSBClient.ChassisDel(chassisName)
-			if err != nil {
-				klog.Errorf("Unable to create the ChassisDel command for chassis: %s from the sbdb", chassisName)
-			} else {
-				cmds = append(cmds, chassisDelCmd)
-			}
-			// check for chassis_private table in schema and
-			// if present, delete corresponding chassis row in chassis_private table
-			sbDbSchema := ovnSBClient.GetSchema()
-			if _, ok := sbDbSchema.Tables[goovn.TableChassisPrivate]; ok {
-				chassisPrivateDelCmd, err := ovnSBClient.ChassisPrivateDel(chassisName)
-				if err != nil {
-					klog.Errorf("Unable to create the ChassisPrivateDel command for chassis: %s from the sbdb", chassisName)
-				} else {
-					cmds = append(cmds, chassisPrivateDelCmd)
-				}
-			}
-		}
-	}
-
-	if len(cmds) != 0 {
-		if err := ovnSBClient.Execute(cmds...); err != nil {
-			klog.Errorf("Failed to delete chassis row from chassis & chassis_private table "+
-				"for node/chassis map %v: error: %v", chassisMap, err)
-		}
-	}
-}
-
 // this is the worker function that does the periodic sync of nodes from kube API
 // and sbdb and deletes chassis that are stale
 func (oc *Controller) syncNodesPeriodic() {
@@ -1378,34 +1326,46 @@ func (oc *Controller) syncNodesPeriodic() {
 		nodeNames = append(nodeNames, node.Name)
 	}
 
-	chassisList, err := oc.ovnSBClient.ChassisList()
+	chassisList, err := libovsdbops.ListChassis(oc.sbClient)
 	if err != nil {
 		klog.Errorf("Failed to get chassis list: error: %v", err)
 		return
 	}
 
-	chassisMap := map[string]string{}
+	chassisHostNameMap := map[string]string{}
 	for _, chassis := range chassisList {
-		chassisMap[chassis.Hostname] = chassis.Name
+		chassisHostNameMap[chassis.Hostname] = chassis.Name
 	}
 
 	//delete existing nodes from the chassis map.
 	for _, nodeName := range nodeNames {
-		delete(chassisMap, nodeName)
+		delete(chassisHostNameMap, nodeName)
 	}
 
-	deleteChassis(oc.ovnSBClient, chassisMap)
+	staleChassisNames := []string{}
+	for _, v := range chassisHostNameMap {
+		staleChassisNames = append(staleChassisNames, v)
+	}
+
+	if err = libovsdbops.DeleteChassis(oc.sbClient, staleChassisNames...); err != nil {
+		klog.Errorf("Failed Deleting chassis %v error: %v", chassisHostNameMap, err)
+		return
+	}
 }
 
+// We only deal with cleaning up nodes that shouldn't exist here, since
+// watchNodes() will be called for all existing nodes at startup anyway.
+// Note that this list will include the 'join' cluster switch, which we
+// do not want to delete.
 func (oc *Controller) syncNodes(nodes []interface{}) {
-	foundNodes := make(map[string]*kapi.Node)
+	foundNodes := sets.NewString()
 	for _, tmp := range nodes {
 		node, ok := tmp.(*kapi.Node)
 		if !ok {
 			klog.Errorf("Spurious object in syncNodes: %v", tmp)
 			continue
 		}
-		foundNodes[node.Name] = node
+		foundNodes.Insert(node.Name)
 
 		hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
 		klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnets)
@@ -1440,25 +1400,20 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	}
 	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
 
-	// We only deal with cleaning up nodes that shouldn't exist here, since
-	// watchNodes() will be called for all existing nodes at startup anyway.
-	// Note that this list will include the 'join' cluster switch, which we
-	// do not want to delete.
-	chassisList, err := oc.ovnSBClient.ChassisList()
+	chassisHostNames := sets.NewString()
+
+	chassisList, err := libovsdbops.ListChassis(oc.sbClient)
 	if err != nil {
 		klog.Errorf("Failed to get chassis list: error: %v", err)
 		return
 	}
 
-	chassisMap := map[string]string{}
 	for _, chassis := range chassisList {
-		chassisMap[chassis.Hostname] = chassis.Name
+		chassisHostNames.Insert(chassis.Hostname)
 	}
 
-	//delete existing nodes from the chassis map.
-	for nodeName := range foundNodes {
-		delete(chassisMap, nodeName)
-	}
+	// Find difference between existing chassis and found nodes
+	staleChassis := chassisHostNames.Difference(foundNodes)
 
 	nodeSwitches, err := libovsdbops.FindSwitchesWithOtherConfig(oc.nbClient)
 	if err != nil {
@@ -1466,9 +1421,8 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		return
 	}
 
-	// find node logical switches which have other-config value set
 	for _, nodeSwitch := range nodeSwitches {
-		if _, ok := foundNodes[nodeSwitch.Name]; ok {
+		if foundNodes.Has(nodeSwitch.Name) {
 			// node still exists, no cleanup to do
 			continue
 		}
@@ -1499,53 +1453,11 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 
 		oc.deleteNode(nodeSwitch.Name, subnets, nil)
 		//remove the node from the chassis map so we don't delete it twice
-		delete(chassisMap, nodeSwitch.Name)
+		staleChassis.Delete(nodeSwitch.Name)
 	}
 
-	deleteChassis(oc.ovnSBClient, chassisMap)
-}
-
-func (oc *Controller) deleteNodeChassis(nodeName string) error {
-	var chNames []string
-
-	chassisList, err := oc.ovnSBClient.ChassisGet(nodeName)
-	if err != nil {
-		return fmt.Errorf("failed to get chassis list for node %s: error: %v", nodeName, err)
+	if err := libovsdbops.DeleteNodeChassis(oc.sbClient, staleChassis.List()...); err != nil {
+		klog.Errorf("Failed Deleting chassis %v error: %v", staleChassis.List(), err)
+		return
 	}
-
-	cmds := make([]*goovn.OvnCommand, 0, len(chassisList))
-	for _, chassis := range chassisList {
-		if chassis.Name == "" {
-			klog.Warningf("Chassis name is empty for node: %s", nodeName)
-			continue
-		}
-		chDeleteCmd, err := oc.ovnSBClient.ChassisDel(chassis.Name)
-		if err != nil {
-			return fmt.Errorf("unable to create the ChassisDel command for chassis: %s", chassis.Name)
-		} else {
-			cmds = append(cmds, chDeleteCmd)
-		}
-		// check for chassis_private table in db-schema and
-		// if present, delete corresponding chassis row from chassis_private table
-		sbDbSchema := oc.ovnSBClient.GetSchema()
-		if _, ok := sbDbSchema.Tables[goovn.TableChassisPrivate]; ok {
-			chPrivateDeleteCmd, err := oc.ovnSBClient.ChassisPrivateDel(chassis.Name)
-			if err != nil {
-				return fmt.Errorf("unable to create the ChassisPrivateDel command for chassis: %s", chassis.Name)
-			} else {
-				cmds = append(cmds, chPrivateDeleteCmd)
-			}
-		}
-		chNames = append(chNames, chassis.Name)
-	}
-
-	if len(cmds) == 0 {
-		return nil
-	}
-
-	if err = oc.ovnSBClient.Execute(cmds...); err != nil {
-		return fmt.Errorf("failed to delete chassis row %q from chassis & chassis_private table "+
-			"for node %s: error: %v", strings.Join(chNames, ","), nodeName, err)
-	}
-	return nil
 }

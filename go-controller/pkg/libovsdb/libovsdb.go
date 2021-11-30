@@ -71,7 +71,7 @@ func NewSBClient(stopCh <-chan struct{}) (client.Client, error) {
 	return NewSBClientWithConfig(config.OvnSouth, stopCh)
 }
 
-// NewSBClient creates a new OVN Southbound Database client with the provided configuration
+// NewSBClientWithConfig creates a new OVN Southbound Database client with the provided configuration
 func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (client.Client, error) {
 	dbModel, err := sbdb.FullDatabaseModel()
 	if err != nil {
@@ -112,7 +112,7 @@ func NewNBClient(stopCh <-chan struct{}) (client.Client, error) {
 	return NewNBClientWithConfig(config.OvnNorth, stopCh)
 }
 
-// NewNBClient creates a new OVN Northbound Database client with the provided configuration
+// NewNBClientWithConfig creates a new OVN Northbound Database client with the provided configuration
 func NewNBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (client.Client, error) {
 	dbModel, err := nbdb.FullDatabaseModel()
 	if err != nil {

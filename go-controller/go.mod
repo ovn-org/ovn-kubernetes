@@ -3,7 +3,7 @@ module github.com/ovn-org/ovn-kubernetes/go-controller
 go 1.13
 
 require (
-	github.com/Mellanox/sriovnet v1.0.3-0.20210630121212-0453bd4b7fbc
+	github.com/Mellanox/sriovnet v1.0.3
 	github.com/Microsoft/hcsshim v0.8.10-0.20200715222032-5eafd1556990
 	github.com/alexflint/go-filemutex v0.0.0-20171022225611-72bdc8eae2ae
 	github.com/bhendo/go-powershell v0.0.0-20190719160123-219e7fb4e41e
@@ -11,8 +11,6 @@ require (
 	github.com/containernetworking/cni v0.8.0
 	github.com/containernetworking/plugins v0.8.7
 	github.com/coreos/go-iptables v0.4.5
-	github.com/ebay/go-ovn v0.1.1-0.20210731003635-d96abc06b52c
-	github.com/ebay/libovsdb v0.2.1-0.20200719163122-3332afaeb27c
 	github.com/google/uuid v1.2.0
 	github.com/gorilla/mux v1.8.0
 	github.com/juju/errors v0.0.0-20200330140219-3fe23663418f // indirect
@@ -39,7 +37,6 @@ require (
 	k8s.io/api v0.22.0
 	k8s.io/apimachinery v0.22.0
 	k8s.io/client-go v0.22.0
-	k8s.io/klog v0.0.0-20181102134211-b9b56d5dfc92 // indirect
 	k8s.io/klog/v2 v2.20.0
 	k8s.io/utils v0.0.0-20210707171843-4b05e18ac7d9
 )

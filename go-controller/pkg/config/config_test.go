@@ -1496,26 +1496,26 @@ foo=bar
 			}
 			file := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:           types.NodeModeSmartNIC,
+					Mode:           types.NodeModeDPU,
 					MgmtPortNetdev: "enp1s0f0v0",
 				},
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &file)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
-			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeSmartNIC))
+			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeDPU))
 			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal("enp1s0f0v0"))
 		})
 
 		It("Overrides value from CLI", func() {
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:           types.NodeModeSmartNIC,
+					Mode:           types.NodeModeDPU,
 					MgmtPortNetdev: "enp1s0f0v0",
 				},
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
-			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeSmartNIC))
+			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeDPU))
 			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal("enp1s0f0v0"))
 		})
 
@@ -1534,7 +1534,7 @@ foo=bar
 			HybridOverlay.Enabled = true
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode: types.NodeModeSmartNIC,
+					Mode: types.NodeModeDPU,
 				},
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
@@ -1543,10 +1543,10 @@ foo=bar
 				"hybrid overlay is not supported with ovnkube-node mode"))
 		})
 
-		It("Fails if management port is not provided and ovnkube node mode is smart-nic", func() {
+		It("Fails if management port is not provided and ovnkube node mode is dpu", func() {
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode: types.NodeModeSmartNIC,
+					Mode: types.NodeModeDPU,
 				},
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})
@@ -1554,10 +1554,10 @@ foo=bar
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev must be provided"))
 		})
 
-		It("Fails if management port is not provided and ovnkube node mode is smart-nic-host", func() {
+		It("Fails if management port is not provided and ovnkube node mode is dpu-host", func() {
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode: types.NodeModeSmartNICHost,
+					Mode: types.NodeModeDPUHost,
 				},
 			}
 			err := buildOvnKubeNodeConfig(nil, &cliConfig, &config{})

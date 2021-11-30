@@ -1,8 +1,10 @@
 package sriovnet
 
 import (
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -36,7 +38,7 @@ const (
 // Regex that matches on the physical/upling port name
 var physPortRepRegex = regexp.MustCompile(`^p(\d+)$`)
 
-// Regex that matches on PF representor port name. These ports exists on Smart-NICs.
+// Regex that matches on PF representor port name. These ports exists on DPUs.
 var pfPortRepRegex = regexp.MustCompile(`^(?:c\d+)?pf(\d+)$`)
 
 // Regex that matches on VF representor port name
@@ -79,13 +81,18 @@ func isSwitchdev(netdevice string) bool {
 	return false
 }
 
-// GetUplinkRepresentor gets a VF PCI address (e.g '0000:03:00.4') and
-// returns the uplink represntor netdev name for that VF.
-func GetUplinkRepresentor(vfPciAddress string) (string, error) {
-	devicePath := filepath.Join(PciSysDir, vfPciAddress, "physfn", "net")
+// GetUplinkRepresentor gets a VF or PF PCI address (e.g '0000:03:00.4') and
+// returns the uplink represntor netdev name for that VF or PF.
+func GetUplinkRepresentor(pciAddress string) (string, error) {
+	devicePath := filepath.Join(PciSysDir, pciAddress, "physfn", "net")
+	if _, err := utilfs.Fs.Stat(devicePath); errors.Is(err, os.ErrNotExist) {
+		// If physfn symlink to the parent PF doesn't exist, use the current device's dir
+		devicePath = filepath.Join(PciSysDir, pciAddress, "net")
+	}
+
 	devices, err := utilfs.Fs.ReadDir(devicePath)
 	if err != nil {
-		return "", fmt.Errorf("failed to lookup %s: %v", vfPciAddress, err)
+		return "", fmt.Errorf("failed to lookup %s: %v", pciAddress, err)
 	}
 	for _, device := range devices {
 		if isSwitchdev(device.Name()) {
@@ -100,7 +107,7 @@ func GetUplinkRepresentor(vfPciAddress string) (string, error) {
 			return device.Name(), nil
 		}
 	}
-	return "", fmt.Errorf("uplink for %s not found", vfPciAddress)
+	return "", fmt.Errorf("uplink for %s not found", pciAddress)
 }
 
 func GetVfRepresentor(uplink string, vfIndex int) (string, error) {
@@ -183,8 +190,8 @@ func findNetdevWithPortNameCriteria(criteria func(string) bool) (string, error) 
 	return "", fmt.Errorf("no representor matched criteria")
 }
 
-// GetVfRepresentorSmartNIC returns VF representor on Smart-NIC for a host VF identified by pfID and vfIndex
-func GetVfRepresentorSmartNIC(pfID, vfIndex string) (string, error) {
+// GetVfRepresentorDPU returns VF representor on DPU for a host VF identified by pfID and vfIndex
+func GetVfRepresentorDPU(pfID, vfIndex string) (string, error) {
 	// TODO(Adrianc): This method should change to get switchID and vfIndex as input, then common logic can
 	// be shared with GetVfRepresentor, backward compatibility should be preserved when this happens.
 
@@ -199,7 +206,7 @@ func GetVfRepresentorSmartNIC(pfID, vfIndex string) (string, error) {
 	}
 
 	// map for easy search of expected VF rep port name.
-	// Note: no supoport for Multi-Chassis Smart-NICs
+	// Note: no supoport for Multi-Chassis DPUs
 	expectedPhysPortNames := map[string]interface{}{
 		fmt.Sprintf("pf%svf%s", pfID, vfIndex):   nil,
 		fmt.Sprintf("c1pf%svf%s", pfID, vfIndex): nil,
@@ -253,7 +260,7 @@ func GetRepresentorPortFlavour(netdev string) (PortFlavour, error) {
 	return PORT_FLAVOUR_UNKNOWN, nil
 }
 
-// parseSmartNICConfigFileOutput parses the config file content of a smart-nic
+// parseDPUConfigFileOutput parses the config file content of a DPU
 // representor port. The format of the file is a set of <key>:<value> pairs as follows:
 //
 // ```
@@ -261,7 +268,7 @@ func GetRepresentorPortFlavour(netdev string) (PortFlavour, error) {
 //  MaxTxRate  : 0
 //  State      : Follow
 // ```
-func parseSmartNICConfigFileOutput(out string) map[string]string {
+func parseDPUConfigFileOutput(out string) map[string]string {
 	configMap := make(map[string]string)
 	for _, line := range strings.Split(strings.TrimSuffix(out, "\n"), "\n") {
 		entry := strings.SplitN(line, ":", 2)
@@ -277,7 +284,7 @@ func parseSmartNICConfigFileOutput(out string) map[string]string {
 // GetRepresentorPeerMacAddress returns the MAC address of the peer netdev associated with the given
 // representor netdev
 // Note:
-//    This method functionality is currently supported only for Smart-NICs.
+//    This method functionality is currently supported only on DPUs.
 //    Currently only netdev representors with PORT_FLAVOUR_PCI_PF are supported
 func GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error) {
 	flavor, err := GetRepresentorPortFlavour(netdev)
@@ -313,7 +320,7 @@ func GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error) {
 	}
 	uplinkPhysPortName := "p" + portNum[1]
 	// Find uplink netdev for that port
-	// Note(adrianc): As we support only Smart-NICs ATM we do not need to deal with netdevs from different
+	// Note(adrianc): As we support only DPUs ATM we do not need to deal with netdevs from different
 	// eswitch (i.e different switch IDs).
 	uplinkNetdev, err := findNetdevWithPortNameCriteria(func(pname string) bool { return pname == uplinkPhysPortName })
 	if err != nil {
@@ -323,10 +330,10 @@ func GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error) {
 	configPath := filepath.Join(NetSysDir, uplinkNetdev, "smart_nic", "pf", "config")
 	out, err := utilfs.Fs.ReadFile(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read smart-nic config via uplink %s for %s. %v",
+		return nil, fmt.Errorf("failed to read DPU config via uplink %s for %s. %v",
 			uplinkNetdev, netdev, err)
 	}
-	config := parseSmartNICConfigFileOutput(string(out))
+	config := parseDPUConfigFileOutput(string(out))
 	macStr, ok := config["MAC"]
 	if !ok {
 		return nil, fmt.Errorf("MAC address not found for %s", netdev)
@@ -340,7 +347,7 @@ func GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error) {
 
 // SetRepresentorPeerMacAddress sets the given MAC addresss of the peer netdev associated with the given
 // representor netdev.
-// Note: This method functionality is currently supported only for Smart-NICs.
+// Note: This method functionality is currently supported only for DPUs.
 // Currently only netdev representors with PORT_FLAVOUR_PCI_VF are supported
 func SetRepresentorPeerMacAddress(netdev string, mac net.HardwareAddr) error {
 	flavor, err := GetRepresentorPortFlavour(netdev)

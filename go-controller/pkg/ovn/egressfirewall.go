@@ -92,7 +92,7 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 //  	For this it just deletes all LRP setup done for egress firewall
 
 // NOTE: Utilize the fact that we know that all egress firewall related setup must have a priority: types.MinimumReservedEgressFirewallPriority <= priority <= types.EgressFirewallStartPriority
-func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
+func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) {
 	// Lookup all ACLs used for egress Firewalls
 	egressFirewallACLs, err := libovsdbops.FindACLsByPriorityRange(oc.nbClient, types.MinimumReservedEgressFirewallPriority, types.EgressFirewallStartPriority)
 	if err != nil {
@@ -400,7 +400,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 // deleteEgressFirewallRules delete the specific logical router policy/join switch Acls
 func (oc *Controller) deleteEgressFirewallRules(externalID string) error {
 	// Find ACLs for a given egressFirewall
-	egressFirewallACLs, err := libovsdbops.FindACLsByExernalID(oc.nbClient, map[string]string{"egressFirewall": externalID})
+	egressFirewallACLs, err := libovsdbops.FindACLsByExternalID(oc.nbClient, map[string]string{"egressFirewall": externalID})
 	if err != nil {
 		return fmt.Errorf("unable to list egress firewall ACLs, cannot cleanup old stale data, err: %v", err)
 	}

@@ -669,3 +669,32 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 })
+
+func addLinuxNodeCommands(fexec *ovntest.FakeExec, nodeHOMAC, nodeName, nodeHOIP string) {
+	updateLogicalRouterPolicy(fexec)
+
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		// Setting the mac on the lsp
+		"ovn-nbctl --timeout=15 -- " +
+			"--may-exist lsp-add node1 int-node1 -- " +
+			"lsp-set-addresses int-node1 " + nodeHOMAC,
+	})
+
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 lsp-list " + nodeName,
+		Output: "29df5ce5-2802-4ee5-891f-4fb27ca776e9 (" + types.K8sPrefix + nodeName + ")",
+	})
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 -- --if-exists set logical_switch " + nodeName + " other-config:exclude_ips=" + nodeHOIP,
+	})
+}
+
+func updateLogicalRouterPolicy(fexec *ovntest.FakeExec) {
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		// Find if policy exists already
+		Cmd: "ovn-nbctl --timeout=15 --columns _uuid --no-headings find logical_router_policy priority=1002 " +
+			"external_ids=name=hybrid-subnet-node1 action=reroute nexthops=\"10.1.2.3\" " +
+			`match="inport == \"rtos-node1\" && ip4.dst == 11.1.0.0/16"`,
+		Output: "19df5ce5-2802-4ee5-891f-4fb27ca776e9",
+	})
+}

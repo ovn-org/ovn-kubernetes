@@ -311,7 +311,7 @@ type GatewayConfig struct {
 	// back to the original client
 	DisablePacketMTUCheck bool `gcfg:"disable-pkt-mtu-check"`
 	// RouterSubnet is the subnet to be used for the GR external port. auto-detected if not given.
-	// Must match the the kube node IP address. Currently valid for Smart-NICs only.
+	// Must match the the kube node IP address. Currently valid for DPU only.
 	RouterSubnet string `gcfg:"router-subnet"`
 }
 
@@ -1005,7 +1005,7 @@ var OVNGatewayFlags = []cli.Flag{
 		Name: "gateway-router-subnet",
 		Usage: "The Subnet to be used for the gateway router external port (shared mode only). " +
 			"auto-detected if not given. Must match the the kube node IP address. " +
-			"Currently valid for Smart-NICs only",
+			"Currently valid for DPUs only",
 		Destination: &cliConfig.Gateway.RouterSubnet,
 		Value:       Gateway.RouterSubnet,
 	},
@@ -1074,13 +1074,13 @@ var HybridOverlayFlags = []cli.Flag{
 var OvnKubeNodeFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name:        "ovnkube-node-mode",
-		Usage:       "ovnkube-node operating mode full(default), smart-nic, smart-nic-host",
+		Usage:       "ovnkube-node operating mode full(default), dpu, dpu-host",
 		Value:       OvnKubeNode.Mode,
 		Destination: &cliConfig.OvnKubeNode.Mode,
 	},
 	&cli.StringFlag{
 		Name: "ovnkube-node-mgmt-port-netdev",
-		Usage: "valid only when ovnkube-node-mode is either smart-nic or smart-nic-host. " +
+		Usage: "valid only when ovnkube-node-mode is either dpu or dpu-host. " +
 			"when provided, use this netdev as management port. it will be renamed to ovn-k8s-mp0 " +
 			"and used to allow host network services and pods to access k8s pod and service networks. ",
 		Value:       OvnKubeNode.MgmtPortNetdev,
@@ -1899,7 +1899,7 @@ func UpdateOVNNodeAuth(masterIP []string, southboundDBPort, northboundDBPort str
 // ovnKubeNodeModeSupported validates the provided mode is supported by ovnkube node
 func ovnKubeNodeModeSupported(mode string) error {
 	found := false
-	supportedModes := []string{types.NodeModeFull, types.NodeModeSmartNIC, types.NodeModeSmartNICHost}
+	supportedModes := []string{types.NodeModeFull, types.NodeModeDPU, types.NodeModeDPUHost}
 	for _, m := range supportedModes {
 		if mode == m {
 			found = true
@@ -1929,12 +1929,12 @@ func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
 		return err
 	}
 
-	// ovnkube-node-mode smart-nic/smart-nic-host does not support hybrid overlay
+	// ovnkube-node-mode dpu/dpu-host does not support hybrid overlay
 	if OvnKubeNode.Mode != types.NodeModeFull && HybridOverlay.Enabled {
 		return fmt.Errorf("hybrid overlay is not supported with ovnkube-node mode %s", OvnKubeNode.Mode)
 	}
-	// when Smart-NIC are used, management port is backed by a VF. get management port VF information
-	if OvnKubeNode.Mode == types.NodeModeSmartNIC || OvnKubeNode.Mode == types.NodeModeSmartNICHost {
+	// when DPU is used, management port is backed by a VF. get management port VF information
+	if OvnKubeNode.Mode == types.NodeModeDPU || OvnKubeNode.Mode == types.NodeModeDPUHost {
 		if OvnKubeNode.MgmtPortNetdev == "" {
 			return fmt.Errorf("ovnkube-node-mgmt-port-netdev must be provided")
 		}

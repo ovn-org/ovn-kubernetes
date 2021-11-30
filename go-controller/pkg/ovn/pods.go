@@ -7,7 +7,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
@@ -39,6 +38,10 @@ func (oc *Controller) syncPods(pods []interface{}) {
 		if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && err == nil {
 			logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 			expectedLogicalPorts[logicalPort] = true
+			if err = oc.waitForNodeLogicalSwitchInCache(pod.Spec.NodeName); err != nil {
+				klog.Errorf("Failed to wait for node %s to be added to cache. IP allocation may fail!",
+					pod.Spec.NodeName)
+			}
 			if err = oc.lsManager.AllocateIPs(pod.Spec.NodeName, annotations.IPs); err != nil {
 				klog.Errorf("couldn't allocate IPs: %s for pod: %s on node: %s"+
 					" error: %v", util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
@@ -178,12 +181,27 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (*nbdb.LogicalSw
 	return ls, nil
 }
 
+func (oc *Controller) waitForNodeLogicalSwitchInCache(nodeName string) error {
+	// Wait for the node logical switch to be created by the ClusterController.
+	// The node switch will be created when the node's logical network infrastructure
+	// is created by the node watch.
+	var subnets []*net.IPNet
+	if err := wait.PollImmediate(30*time.Millisecond, 30*time.Second, func() (bool, error) {
+		subnets = oc.lsManager.GetSwitchSubnets(nodeName)
+		return subnets != nil, nil
+	}); err != nil {
+		return fmt.Errorf("timed out waiting for logical switch %q subnet: %v", nodeName, err)
+	}
+	return nil
+}
+
 func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet,
 	routingExternalGWs *gatewayInfo, routingPodGWs map[string]*gatewayInfo, hybridOverlayExternalGW net.IP) error {
+
 	// if there are other network attachments for the pod, then check if those network-attachment's
 	// annotation has default-route key. If present, then we need to skip adding default route for
 	// OVN interface
-	networks, err := util.GetPodNetSelAnnotation(pod, util.NetworkAttachmentAnnotation)
+	networks, err := util.GetK8sPodAllNetworks(pod)
 	if err != nil {
 		return fmt.Errorf("error while getting network attachment definition for [%s/%s]: %v",
 			pod.Namespace, pod.Name, err)
@@ -412,26 +430,20 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	if needsIP {
-		var networks []*types.NetworkSelectionElement
-
-		networks, err = util.GetPodNetSelAnnotation(pod, util.DefNetworkAnnotation)
+		network, err := util.GetK8sPodDefaultNetwork(pod)
 		// handle error cases separately first to ensure binding to err, otherwise the
 		// defer will fail
 		if err != nil {
 			return fmt.Errorf("error while getting custom MAC config for port %q from "+
 				"default-network's network-attachment: %v", portName, err)
-		} else if networks != nil && len(networks) != 1 {
-			err = fmt.Errorf("invalid network annotation size while getting custom MAC config"+
-				" for port %q", portName)
-			return err
 		}
 
-		if networks != nil && networks[0].MacRequest != "" {
-			klog.V(5).Infof("Pod %s/%s requested custom MAC: %s", pod.Namespace, pod.Name, networks[0].MacRequest)
-			podMac, err = net.ParseMAC(networks[0].MacRequest)
+		if network != nil && network.MacRequest != "" {
+			klog.V(5).Infof("Pod %s/%s requested custom MAC: %s", pod.Namespace, pod.Name, network.MacRequest)
+			podMac, err = net.ParseMAC(network.MacRequest)
 			if err != nil {
 				return fmt.Errorf("failed to parse mac %s requested in annotation for pod %s: Error %v",
-					networks[0].MacRequest, pod.Name, err)
+					network.MacRequest, pod.Name, err)
 			}
 		}
 		podAnnotation := util.PodAnnotation{

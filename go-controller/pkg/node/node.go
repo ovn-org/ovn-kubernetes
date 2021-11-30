@@ -322,7 +322,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		return fmt.Errorf("failed to parse kubernetes node IP address. %v", err)
 	}
 
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
 			if err := auth.SetDBAuth(); err != nil {
 				return err
@@ -353,7 +353,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	}
 	klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, util.JoinIPNets(subnets, ","))
 
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		isOvnUpEnabled, err = getOVNIfUpCheckMode()
 		if err != nil {
 			return err
@@ -361,7 +361,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	}
 
 	// Create CNI Server
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
 		kclient, ok := n.Kube.(*kube.Kube)
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
@@ -383,8 +383,8 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	}
 
 	// Initialize gateway
-	if config.OvnKubeNode.Mode == types.NodeModeSmartNICHost {
-		err = n.initGatewaySmartNicHost(nodeAddr)
+	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+		err = n.initGatewayDPUHost(nodeAddr)
 		if err != nil {
 			return err
 		}
@@ -407,8 +407,8 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	go n.gateway.Run(n.stopChan, wg)
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
-	// Note(adrianc): Smart-NIC deployments are expected to support the new shared gateway changes, upgrade flow
-	// is not needed. Future upgrade flows will need to take Smart-NICs into account.
+	// Note(adrianc): DPU deployments are expected to support the new shared gateway changes, upgrade flow
+	// is not needed. Future upgrade flows will need to take DPUs into account.
 	if config.OvnKubeNode.Mode == types.NodeModeFull {
 		// Upgrade for Node. If we upgrade workers before masters, then we need to keep service routing via
 		// mgmt port until masters have been updated and modified OVN config. Run a goroutine to handle this case
@@ -493,7 +493,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	}
 
 	if config.HybridOverlay.Enabled {
-		// Not supported with Smart-NIC, enforced in config
+		// Not supported with DPUs, enforced in config
 		// TODO(adrianc): Revisit above comment
 		nodeController, err := honode.NewNode(
 			n.Kube,
@@ -519,7 +519,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	// start management port health check
 	mgmtPort.CheckManagementPortHealth(mgmtPortConfig, n.stopChan)
 
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		// start health check to ensure there are no stale OVS internal ports
 		go wait.Until(func() {
 			checkForStaleOVSInterfaces(n.name, n.watchFactory.(*factory.WatchFactory))
@@ -527,7 +527,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		n.WatchEndpoints()
 	}
 
-	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
 		// conditionally write cni config file
 		confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
 		_, err = os.Stat(confFile)
@@ -539,8 +539,8 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		}
 	}
 
-	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
-		n.watchSmartNicPods(isOvnUpEnabled)
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		n.watchPodsDPU(isOvnUpEnabled)
 	} else {
 		// start the cni server
 		err = cniServer.Start(cni.HandleCNIRequest)

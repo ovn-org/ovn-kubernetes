@@ -578,7 +578,14 @@ func (oc *Controller) deletePerPodGRSNAT(node string, podIPNets []*net.IPNet) {
 	var nat *nbdb.NAT
 	var err error
 	for _, podIPNet := range podIPNets {
-		nat = libovsdbops.BuildRouterSNAT(nil, podIPNet, "", nil)
+		podIP := podIPNet.IP.String()
+		mask := GetIPFullMask(podIP)
+		_, fullMaskPodNet, err := net.ParseCIDR(podIP + mask)
+		if err != nil {
+			klog.Errorf("Invalid IP: %s and mask: %s combination, error: %v", podIP, mask, err)
+			continue
+		}
+		nat = libovsdbops.BuildRouterSNAT(nil, fullMaskPodNet, "", nil)
 		nats = append(nats, nat)
 	}
 	err = libovsdbops.DeleteNatsFromRouter(oc.nbClient, gr, nats...)

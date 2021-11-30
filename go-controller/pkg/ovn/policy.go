@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	goovn "github.com/ebay/go-ovn"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	ovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -150,28 +149,17 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 	}
 }
 
-func addAllowACLFromNode(logicalSwitch string, mgmtPortIP net.IP, ovnNBClient goovn.Client) error {
+func addAllowACLFromNode(nodeName string, mgmtPortIP net.IP, nbClient libovsdbclient.Client) error {
 	ipFamily := "ip4"
 	if utilnet.IsIPv6(mgmtPortIP) {
 		ipFamily = "ip6"
 	}
 	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtPortIP.String())
 
-	priority := types.DefaultAllowPriority
+	nodeACL := libovsdbops.BuildACL("", types.DirectionToLPort, types.DefaultAllowPriority, match, "allow-related", "", "", false, nil)
 
-	// TODO use libovsdb client once logical switch libovsdb work is done
-	aclcmd, err := ovnNBClient.ACLAdd(logicalSwitch, types.DirectionToLPort, match, "allow-related", priority, nil, false, "", "")
-
-	// NOTE: goovn.ErrorExist is returned if the ACL already exists, in such a case ignore that error.
-	// Additional Context-> Per Tim Rozet's review comments, there could be scenarios where ovnkube restarts, in which
-	// case, it would use kubernetes events to reconstruct ACLs and there is a possibility that some of the ACLs may
-	// already be present in the NBDB.
-	if err == nil {
-		if err = ovnNBClient.Execute(aclcmd); err != nil {
-			return fmt.Errorf("failed to create the node acl for logical_switch: %s, %v", logicalSwitch, err)
-		}
-	} else if err != goovn.ErrorExist {
-		return fmt.Errorf("ACLAdd() error when creating node acl for logical switch: %s, %v", logicalSwitch, err)
+	if err := libovsdbops.AddACLToNodeSwitch(nbClient, nodeName, nodeACL); err != nil {
+		return fmt.Errorf("failed to add acl to allow node sourced traffic err: %v", err)
 	}
 
 	return nil
