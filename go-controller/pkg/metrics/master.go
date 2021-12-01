@@ -205,7 +205,7 @@ func RegisterMasterMetrics(sbClient client.Client) {
 		scrapeOvnTimestamp := func() float64 {
 			sbGlobal, err := libovsdbops.FindSBGlobal(sbClient)
 			if err != nil {
-				klog.Errorf("Failed to get global options for the SB_Global table")
+				klog.Errorf("Failed to get global options for the SB_Global table err: %v", err)
 				return 0
 			}
 			if val, ok := sbGlobal.Options["e2e_timestamp"]; ok {
