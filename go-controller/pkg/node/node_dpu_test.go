@@ -132,7 +132,7 @@ var _ = Describe("Node DPU tests", func() {
 				MTU:           1500,
 				Ingress:       -1,
 				Egress:        -1,
-				IsDPU:         true,
+				IsDPUHostMode: true,
 				PodUID:        "a-pod",
 			}
 
