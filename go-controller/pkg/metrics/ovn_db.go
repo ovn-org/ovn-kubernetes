@@ -37,7 +37,7 @@ var metricOVNDBMonitor = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 var metricDBSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: MetricOvnNamespace,
 	Subsystem: MetricOvnSubsystemDB,
-	Name:      "db_size",
+	Name:      "db_size_bytes",
 	Help:      "The size of the database file associated with the OVN DB component."},
 	[]string{
 		"db_name",
