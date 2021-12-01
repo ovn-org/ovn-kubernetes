@@ -50,13 +50,6 @@ if [ "$KIND_IPV6_SUPPORT" == true ]; then
   SKIPPED_TESTS+=$IPV6_SKIPPED_TESTS
 fi
 
-if [ "$OVN_DISABLE_SNAT_MULTIPLE_GWS" == true ]; then
-  if [ "$SKIPPED_TESTS" != "" ]; then
-  	SKIPPED_TESTS+="|"
-  fi
-  SKIPPED_TESTS+="Should validate the egress IP functionality against remote hosts"
-fi
-
 if [ "$OVN_GATEWAY_MODE" == "local" ]; then
   if [ "$SKIPPED_TESTS" != "" ]; then
   	SKIPPED_TESTS+="|"

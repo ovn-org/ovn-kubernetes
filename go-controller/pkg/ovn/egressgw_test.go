@@ -2124,7 +2124,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				_, fullMaskPodNet, _ := net.ParseCIDR("10.128.1.3/32")
-				fakeOvn.controller.addPerPodGRSNAT(&pod[0], []*net.IPNet{fullMaskPodNet})
+				addPerPodGRSNAT(fakeOvn.controller.nbClient, fakeOvn.controller.watchFactory, &pod[0], []*net.IPNet{fullMaskPodNet})
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				finalNB = []libovsdbtest.TestData{
 					&nbdb.LogicalRouter{
@@ -2138,7 +2138,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Networks: []string{"100.64.0.4/32"},
 					},
 				}
-				fakeOvn.controller.deletePerPodGRSNAT(nodeName, []*net.IPNet{fullMaskPodNet})
+				err := deletePerPodGRSNAT(fakeOvn.controller.nbClient, nodeName, []*net.IPNet{fullMaskPodNet})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				return nil
 			}

@@ -273,6 +273,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			allocator:             allocator{&sync.Mutex{}, make(map[string]*egressNode)},
 			nbClient:              libovsdbOvnNBClient,
 			modelClient:           modelClient,
+			watchFactory:          wf,
 		},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
