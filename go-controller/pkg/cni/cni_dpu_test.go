@@ -34,7 +34,6 @@ var _ = Describe("cni_dpu tests", func() {
 				DeviceID: "",
 			},
 			timestamp: time.Time{},
-			IsDPU:     true,
 		}
 	})
 	Context("addDPUConnectionDetailsAnnot", func() {

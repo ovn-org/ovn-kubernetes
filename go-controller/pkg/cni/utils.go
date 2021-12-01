@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -102,7 +103,7 @@ func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, k
 }
 
 // PodAnnotation2PodInfo creates PodInterfaceInfo from Pod annotations and additional attributes
-func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, isDPU bool, podUID string) (
+func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, podUID string) (
 	*PodInterfaceInfo, error) {
 	podAnnotSt, err := util.UnmarshalPodAnnotation(podAnnotation)
 	if err != nil {
@@ -123,7 +124,7 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, is
 		Ingress:       ingress,
 		Egress:        egress,
 		CheckExtIDs:   checkExtIDs,
-		IsDPU:         isDPU,
+		IsDPUHostMode: config.OvnKubeNode.Mode == types.NodeModeDPUHost,
 		PodUID:        podUID,
 	}
 	return podInterfaceInfo, nil

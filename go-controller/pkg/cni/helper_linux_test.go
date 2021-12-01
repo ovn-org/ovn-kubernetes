@@ -700,14 +700,14 @@ func TestSetupSriovInterface(t *testing.T) {
 			},
 		},
 		{
-			desc:         "test code path when IsDPU set to true",
+			desc:         "test code path when working in DPUHost mode",
 			inpNetNS:     mockNS,
 			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
 			inpIfaceName: "eth0",
 			inpPodIfaceInfo: &PodInterfaceInfo{
 				PodAnnotation: util.PodAnnotation{},
 				MTU:           1500,
-				IsDPU:         true,
+				IsDPUHostMode: true,
 			},
 			inpPCIAddrs: "0000:03:00.1",
 			errExp:      false,
