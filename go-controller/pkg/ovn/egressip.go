@@ -517,10 +517,6 @@ func (oc *Controller) isEgressNodeReachable(egressNode *kapi.Node) bool {
 }
 
 func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
-	if err := oc.eIPC.deleteLegacyEgressReroutePolicies(); err != nil {
-		klog.Errorf("Unable to clean up legacy egress IP setup, err: %v", err)
-	}
-
 	// This part will take of syncing stale data which we might have in OVN if
 	// there's no ovnkube-master running for a while, while there are changes to
 	// pods/egress IPs.
@@ -1201,34 +1197,6 @@ func (e *egressIPController) deleteEgressReroutePolicy(filterOption, egressIPNam
 	}
 	if err := e.modelClient.Delete(opsModel...); err != nil {
 		return fmt.Errorf("unable to remove logical router policy, err: %v", err)
-	}
-	return nil
-}
-
-func (e *egressIPController) deleteLegacyEgressReroutePolicies() error {
-	logicalRouter := nbdb.LogicalRouter{}
-	logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
-	opsModel := []libovsdbops.OperationModel{
-		{
-			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
-				return lrp.Priority == types.EgressIPReroutePriority && lrp.Nexthop != nil
-			},
-			ExistingResult: &logicalRouterPolicyRes,
-			DoAfter: func() {
-				logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
-			},
-			BulkOp: true,
-		},
-		{
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: []interface{}{
-				&logicalRouter.Policies,
-			},
-		},
-	}
-	if err := e.modelClient.Delete(opsModel...); err != nil {
-		return fmt.Errorf("unable to remove legacy logical router policies, err: %v", err)
 	}
 	return nil
 }
