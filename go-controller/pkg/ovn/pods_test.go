@@ -715,7 +715,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					namespaceT.Name,
 				)
 
-				fakeOvn.startWithDBSetup(ctx, initialDB,
+				fakeOvn.startWithDBSetup(initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,

@@ -535,7 +535,8 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 			// TODO(trozet) actually check some expected data in the DB?
 			dbSetup := libovsdbtest.TestSetup{}
-			libovsdbOvnNBClient, err := libovsdbtest.NewNBTestHarness(dbSetup, stopChan)
+			var libovsdbOvnNBClient libovsdbclient.Client
+			libovsdbOvnNBClient, libovsdbCleanup, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
@@ -624,7 +625,8 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			// TODO(trozet) actually check some expected data in the DB?
 			dbSetup := libovsdbtest.TestSetup{}
-			libovsdbOvnNBClient, err := libovsdbtest.NewNBTestHarness(dbSetup, stopChan)
+			var libovsdbOvnNBClient libovsdbclient.Client
+			libovsdbOvnNBClient, libovsdbCleanup, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			k := &kube.Kube{KClient: fakeClient}
