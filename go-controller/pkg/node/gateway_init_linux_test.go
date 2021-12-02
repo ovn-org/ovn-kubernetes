@@ -236,6 +236,14 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			},
 			"filter": {},
 		}
+		// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
+		expectedMCSRules := []string{
+			"-p tcp -m tcp --dport 22624 --syn -j REJECT",
+			"-p tcp -m tcp --dport 22623 --syn -j REJECT",
+		}
+		expectedTables["filter"]["FORWARD"] = append(expectedMCSRules, expectedTables["filter"]["FORWARD"]...)
+		expectedTables["filter"]["OUTPUT"] = append(expectedMCSRules, expectedTables["filter"]["OUTPUT"]...)
+		// END OCP HACK
 		f4 := iptV4.(*util.FakeIPTables)
 		err = f4.MatchState(expectedTables)
 		Expect(err).NotTo(HaveOccurred())
@@ -823,6 +831,14 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 				},
 			},
 		}
+		// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
+		expectedMCSRules := []string{
+			"-p tcp -m tcp --dport 22624 --syn -j REJECT",
+			"-p tcp -m tcp --dport 22623 --syn -j REJECT",
+		}
+		expectedTables["filter"]["FORWARD"] = append(expectedMCSRules, expectedTables["filter"]["FORWARD"]...)
+		expectedTables["filter"]["OUTPUT"] = append(expectedMCSRules, expectedTables["filter"]["OUTPUT"]...)
+		// END OCP HACK
 		f4 := iptV4.(*util.FakeIPTables)
 		err = f4.MatchState(expectedTables)
 		Expect(err).NotTo(HaveOccurred())

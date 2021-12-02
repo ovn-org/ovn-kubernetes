@@ -223,11 +223,7 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []iptRule {
 	} else {
 		protocol = iptables.ProtocolIPv4
 	}
-	// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
-	rules := make([]iptRule, 0)
-	generateBlockMCSRules(&rules, protocol)
-	// END OCP HACK
-	return append(rules, []iptRule{
+	return []iptRule{
 		{
 			table: "filter",
 			chain: "FORWARD",
@@ -266,7 +262,7 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []iptRule {
 			},
 			protocol: protocol,
 		},
-	}...)
+	}
 }
 
 // initLocalGatewayNATRules sets up iptables rules for interfaces

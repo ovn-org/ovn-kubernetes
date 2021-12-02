@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -55,6 +56,19 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 			return nil, err
 		}
 	}
+
+	// OCP HACK -- block MCS ports https://github.com/openshift/ovn-kubernetes/pull/170
+	rules := []iptRule{}
+	if config.IPv4Mode {
+		generateBlockMCSRules(&rules, iptables.ProtocolIPv4)
+	}
+	if config.IPv6Mode {
+		generateBlockMCSRules(&rules, iptables.ProtocolIPv6)
+	}
+	if err := addIptRules(rules); err != nil {
+		return nil, fmt.Errorf("failed to setup MCS-blocking rules: %w", err)
+	}
+	// END OCP HACK
 
 	gw.readyFunc = func() (bool, error) {
 		return gatewayReady(gwBridge.patchPort)
