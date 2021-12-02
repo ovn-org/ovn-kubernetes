@@ -21,6 +21,8 @@ require (
 	github.com/mitchellh/copystructure v1.2.0
 	github.com/onsi/ginkgo v1.16.4
 	github.com/onsi/gomega v1.14.0
+	github.com/openshift/api v0.0.0-20211201215911-5a82bae32e46
+	github.com/openshift/client-go v0.0.0-20211202194848-d3f186f2d366
 	github.com/ovn-org/libovsdb v0.6.1-0.20211119175802-998d2ca8998d
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.11.0
@@ -34,9 +36,9 @@ require (
 	gopkg.in/gcfg.v1 v1.2.3
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	k8s.io/api v0.22.0
-	k8s.io/apimachinery v0.22.0
-	k8s.io/client-go v0.22.0
+	k8s.io/api v0.22.1
+	k8s.io/apimachinery v0.22.1
+	k8s.io/client-go v0.22.1
 	k8s.io/klog/v2 v2.20.0
 	k8s.io/utils v0.0.0-20210707171843-4b05e18ac7d9
 )

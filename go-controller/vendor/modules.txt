@@ -169,6 +169,20 @@ github.com/onsi/gomega/matchers/support/goraph/edge
 github.com/onsi/gomega/matchers/support/goraph/node
 github.com/onsi/gomega/matchers/support/goraph/util
 github.com/onsi/gomega/types
+# github.com/openshift/api v0.0.0-20211201215911-5a82bae32e46
+github.com/openshift/api/cloudnetwork/v1
+github.com/openshift/api/config/v1
+# github.com/openshift/client-go v0.0.0-20211202194848-d3f186f2d366
+github.com/openshift/client-go/cloudnetwork/clientset/versioned
+github.com/openshift/client-go/cloudnetwork/clientset/versioned/fake
+github.com/openshift/client-go/cloudnetwork/clientset/versioned/scheme
+github.com/openshift/client-go/cloudnetwork/clientset/versioned/typed/cloudnetwork/v1
+github.com/openshift/client-go/cloudnetwork/clientset/versioned/typed/cloudnetwork/v1/fake
+github.com/openshift/client-go/cloudnetwork/informers/externalversions
+github.com/openshift/client-go/cloudnetwork/informers/externalversions/cloudnetwork
+github.com/openshift/client-go/cloudnetwork/informers/externalversions/cloudnetwork/v1
+github.com/openshift/client-go/cloudnetwork/informers/externalversions/internalinterfaces
+github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1
 # github.com/ovn-org/libovsdb v0.6.1-0.20211119175802-998d2ca8998d
 github.com/ovn-org/libovsdb/cache
 github.com/ovn-org/libovsdb/client
@@ -337,7 +351,7 @@ gopkg.in/warnings.v0
 gopkg.in/yaml.v2
 # gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
 gopkg.in/yaml.v3
-# k8s.io/api v0.22.0 => k8s.io/api v0.22.0
+# k8s.io/api v0.22.1 => k8s.io/api v0.22.0
 k8s.io/api/admissionregistration/v1
 k8s.io/api/admissionregistration/v1beta1
 k8s.io/api/apiserverinternal/v1alpha1
@@ -381,7 +395,7 @@ k8s.io/api/scheduling/v1beta1
 k8s.io/api/storage/v1
 k8s.io/api/storage/v1alpha1
 k8s.io/api/storage/v1beta1
-# k8s.io/apimachinery v0.22.0 => k8s.io/apimachinery v0.22.0
+# k8s.io/apimachinery v0.22.1 => k8s.io/apimachinery v0.22.0
 k8s.io/apimachinery/pkg/api/errors
 k8s.io/apimachinery/pkg/api/meta
 k8s.io/apimachinery/pkg/api/resource
@@ -429,7 +443,7 @@ k8s.io/apimachinery/pkg/watch
 k8s.io/apimachinery/third_party/forked/golang/json
 k8s.io/apimachinery/third_party/forked/golang/netutil
 k8s.io/apimachinery/third_party/forked/golang/reflect
-# k8s.io/client-go v0.22.0 => k8s.io/client-go v0.22.0
+# k8s.io/client-go v0.22.1 => k8s.io/client-go v0.22.0
 k8s.io/client-go/applyconfigurations/admissionregistration/v1
 k8s.io/client-go/applyconfigurations/admissionregistration/v1beta1
 k8s.io/client-go/applyconfigurations/apiserverinternal/v1alpha1
