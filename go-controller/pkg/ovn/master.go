@@ -108,7 +108,7 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup, ctx context.Con
 				// the cache. It is better to exit for now.
 				// kube will restart and this will become a follower.
 				klog.Infof("No longer leader; exiting")
-				os.Exit(1)
+				os.Exit(0)
 			},
 			OnNewLeader: func(newLeaderName string) {
 				if newLeaderName != nodeName {
