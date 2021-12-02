@@ -10,7 +10,6 @@ import (
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
@@ -68,8 +67,7 @@ func (r *repair) runBeforeSync() {
 
 	// Ensure unidling is enabled
 	if globalconfig.Kubernetes.OVNEmptyLbEvents {
-		_, _, err := util.RunOVNNbctl("set", "nb_global", ".", "options:controller_event=true")
-		if err != nil {
+		if err := libovsdbops.UpdateNBGlobalOptions(r.nbClient, map[string]string{"controller_event": "true"}); err != nil {
 			klog.Error("Unable to enable controller events. Unidling not possible")
 		}
 	}
