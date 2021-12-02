@@ -37,12 +37,12 @@ type KubeAPIAuth struct {
 type PodInterfaceInfo struct {
 	util.PodAnnotation
 
-	MTU         int    `json:"mtu"`
-	Ingress     int64  `json:"ingress"`
-	Egress      int64  `json:"egress"`
-	CheckExtIDs bool   `json:"check-external-ids"`
-	IsDPU       bool   `json:"dpu"`
-	PodUID      string `json:"pod-uid"`
+	MTU           int    `json:"mtu"`
+	Ingress       int64  `json:"ingress"`
+	Egress        int64  `json:"egress"`
+	CheckExtIDs   bool   `json:"check-external-ids"`
+	IsDPUHostMode bool   `json:"is-dpu-host-mode"`
+	PodUID        string `json:"pod-uid"`
 }
 
 // Explicit type for CNI commands the server handles
@@ -136,8 +136,6 @@ type PodRequest struct {
 	ctx context.Context
 	// cancel should be called to cancel this request
 	cancel context.CancelFunc
-	// Interface to pod is a DPU interface
-	IsDPU bool
 }
 
 type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface, kubeAuth *KubeAPIAuth) ([]byte, error)
@@ -152,7 +150,4 @@ type Server struct {
 	kclient           kubernetes.Interface
 	podLister         corev1listers.PodLister
 	kubeAuth          *KubeAPIAuth
-
-	// CNI Server mode
-	mode string
 }

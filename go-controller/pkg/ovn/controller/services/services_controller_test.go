@@ -28,7 +28,7 @@ type serviceController struct {
 	*Controller
 	serviceStore       cache.Store
 	endpointSliceStore cache.Store
-	stopChan           chan struct{}
+	libovsdbCleanup    *libovsdbtest.Cleanup
 }
 
 func newController() (*serviceController, error) {
@@ -36,12 +36,11 @@ func newController() (*serviceController, error) {
 }
 
 func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceController, error) {
-	stopChan := make(chan struct{})
-	client := fake.NewSimpleClientset()
-	nbClient, err := libovsdbtest.NewNBTestHarness(dbSetup, stopChan)
+	nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup, nil)
 	if err != nil {
 		return nil, err
 	}
+	client := fake.NewSimpleClientset()
 	informerFactory := informers.NewSharedInformerFactory(client, 0)
 	controller := NewController(client,
 		nbClient,
@@ -55,12 +54,12 @@ func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceControlle
 		controller,
 		informerFactory.Core().V1().Services().Informer().GetStore(),
 		informerFactory.Discovery().V1beta1().EndpointSlices().Informer().GetStore(),
-		stopChan,
+		cleanup,
 	}, nil
 }
 
 func (c *serviceController) close() {
-	close(c.stopChan)
+	c.libovsdbCleanup.Cleanup()
 }
 
 // TestSyncServices - an end-to-end test for the services controller.

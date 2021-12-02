@@ -60,11 +60,7 @@ func newEgressIPMeta(name string) metav1.ObjectMeta {
 	}
 }
 
-var (
-	egressPodLabel = map[string]string{"egress": "needed"}
-	node1Name      = "node1"
-	node2Name      = "node2"
-)
+var egressPodLabel = map[string]string{"egress": "needed"}
 
 func setupNode(nodeName string, ipNets []string, mockAllocationIPs []string) egressNode {
 	var v4IP, v6IP net.IP
@@ -103,6 +99,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 	var (
 		app     *cli.App
 		fakeOvn *FakeOVN
+	)
+	const (
+		node1Name = "node1"
+		node2Name = "node2"
 	)
 
 	dialer = fakeEgressIPDialer{}
@@ -161,8 +161,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		fakeOvn = NewFakeOVN(nil)
-
+		fakeOvn = NewFakeOVN()
 	})
 
 	ginkgo.AfterEach(func() {
@@ -240,7 +239,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouterPort{
@@ -484,7 +483,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouterPort{
@@ -673,7 +672,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouterPort{
@@ -833,7 +832,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouterPort{
@@ -970,7 +969,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouterPort{
@@ -1101,7 +1100,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				egressPod := *newPodWithLabels(namespace, podName, node1Name, "", egressPodLabel)
 				egressNamespace := newNamespace(namespace)
-				fakeOvn.start(ctx,
+				fakeOvn.start(
 					&v1.NamespaceList{
 						Items: []v1.Namespace{*egressNamespace},
 					},
@@ -1170,7 +1169,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouterPort{
@@ -1318,7 +1317,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				egressPod := *newPodWithLabels(namespace, podName, node1Name, "", egressPodLabel)
 				egressNamespace := newNamespaceWithLabels(namespace, egressPodLabel)
-				fakeOvn.start(ctx,
+				fakeOvn.start(
 					&v1.NamespaceList{
 						Items: []v1.Namespace{*egressNamespace},
 					},
@@ -1389,7 +1388,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouterPort{
@@ -1541,7 +1540,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouterPort{
@@ -1723,7 +1722,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-				fakeOvn.startWithDBSetup(ctx, libovsdbtest.TestSetup{
+				fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						&nbdb.LogicalRouter{
 							Name: ovntypes.OVNClusterRouter,
@@ -1861,7 +1860,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-				fakeOvn.start(ctx, &v1.NodeList{
+				fakeOvn.start(&v1.NodeList{
 					Items: []v1.Node{node},
 				})
 
@@ -1926,7 +1925,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouter{
@@ -2115,7 +2114,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouter{
@@ -2275,7 +2274,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouter{
@@ -2505,7 +2504,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouter{
@@ -2676,7 +2675,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				}
 
 				expectedNatLogicalPort := "k8s-node1"
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouterPolicy{
@@ -2866,7 +2865,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouter{
@@ -3144,7 +3143,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouter{
@@ -3418,7 +3417,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				fakeOvn.startWithDBSetup(ctx,
+				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouter{
@@ -3646,7 +3645,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		ginkgo.It("should be able to allocate non-conflicting IPv4 on node which can host it, even if it happens to be the node with more assignments", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				fakeOvn.start(ctx)
+				fakeOvn.start()
 				egressIP := "192.168.126.99"
 
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
@@ -3681,7 +3680,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		ginkgo.It("Should not be able to assign egress IP defined in CIDR notation", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				fakeOvn.start(ctx)
+				fakeOvn.start()
 
 				egressIPs := []string{"192.168.126.99/32"}
 
@@ -3716,7 +3715,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		ginkgo.It("should be able to allocate non-conflicting IP on node with lowest amount of allocations", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				fakeOvn.start(ctx)
+				fakeOvn.start()
 
 				egressIP := "0:0:0:0:0:feff:c0a8:8e0f"
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
@@ -3747,7 +3746,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		ginkgo.It("should be able to allocate several EgressIPs and avoid the same node", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				fakeOvn.start(ctx)
+				fakeOvn.start()
 
 				egressIP1 := "0:0:0:0:0:feff:c0a8:8e0d"
 				egressIP2 := "0:0:0:0:0:feff:c0a8:8e0f"
@@ -3780,7 +3779,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		ginkgo.It("should be able to allocate several EgressIPs and avoid the same node and leave one un-assigned without error", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				fakeOvn.start(ctx)
+				fakeOvn.start()
 
 				egressIP1 := "0:0:0:0:0:feff:c0a8:8e0d"
 				egressIP2 := "0:0:0:0:0:feff:c0a8:8e0e"
@@ -3816,7 +3815,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		ginkgo.It("should not be able to allocate already allocated IP", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				fakeOvn.start(ctx)
+				fakeOvn.start()
 
 				egressIP := "0:0:0:0:0:feff:c0a8:8e32"
 
@@ -3848,7 +3847,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		ginkgo.It("should not be able to allocate node IP", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				fakeOvn.start(ctx)
+				fakeOvn.start()
 
 				egressIP := "0:0:0:0:0:feff:c0a8:8e0c"
 
@@ -3878,7 +3877,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		ginkgo.It("should not be able to allocate conflicting compressed IP", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				fakeOvn.start(ctx)
+				fakeOvn.start()
 
 				egressIP := "::feff:c0a8:8e32"
 
@@ -3911,7 +3910,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		ginkgo.It("should not be able to allocate IPv4 IP on nodes which can only host IPv6", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				fakeOvn.start(ctx)
+				fakeOvn.start()
 
 				egressIP := "192.168.126.16"
 
@@ -3943,7 +3942,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		ginkgo.It("should be able to allocate non-conflicting compressed uppercase IP", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				fakeOvn.start(ctx)
+				fakeOvn.start()
 
 				egressIP := "::FEFF:C0A8:8D32"
 
@@ -3974,7 +3973,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		ginkgo.It("should not be able to allocate conflicting compressed uppercase IP", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				fakeOvn.start(ctx)
+				fakeOvn.start()
 
 				egressIP := "::FEFF:C0A8:8E32"
 
@@ -4006,7 +4005,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		ginkgo.It("should not be able to allocate invalid IP", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				fakeOvn.start(ctx)
+				fakeOvn.start()
 
 				egressIPs := []string{"0:0:0:0:0:feff:c0a8:8e32:5"}
 
@@ -4039,7 +4038,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 		ginkgo.It("should update status correctly for single-stack IPv4", func() {
 			app.Action = func(ctx *cli.Context) error {
-				fakeOvn.start(ctx)
+				fakeOvn.start()
 
 				egressIP := "192.168.126.10"
 				node1 := setupNode(node1Name, []string{"192.168.126.12/24"}, []string{"192.168.126.102", "192.168.126.111"})
@@ -4079,7 +4078,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 		ginkgo.It("should update status correctly for single-stack IPv6", func() {
 			app.Action = func(ctx *cli.Context) error {
-				fakeOvn.start(ctx)
+				fakeOvn.start()
 
 				egressIP := "0:0:0:0:0:feff:c0a8:8e0d"
 
@@ -4115,7 +4114,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 		ginkgo.It("should update status correctly for dual-stack", func() {
 			app.Action = func(ctx *cli.Context) error {
-				fakeOvn.start(ctx)
+				fakeOvn.start()
 
 				egressIPv4 := "192.168.126.101"
 				egressIPv6 := "0:0:0:0:0:feff:c0a8:8e0d"
@@ -4183,10 +4182,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				fakeOvn.start(ctx,
-					&egressipv1.EgressIPList{
-						Items: []egressipv1.EgressIP{eIP},
-					})
+				fakeOvn.start(&egressipv1.EgressIPList{
+					Items: []egressipv1.EgressIP{eIP},
+				})
 
 				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
 				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
@@ -4235,10 +4233,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				fakeOvn.start(ctx,
-					&egressipv1.EgressIPList{
-						Items: []egressipv1.EgressIP{eIP},
-					})
+				fakeOvn.start(&egressipv1.EgressIPList{
+					Items: []egressipv1.EgressIP{eIP},
+				})
 
 				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
 				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
@@ -4282,10 +4279,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				fakeOvn.start(ctx,
-					&egressipv1.EgressIPList{
-						Items: []egressipv1.EgressIP{eIP},
-					})
+				fakeOvn.start(&egressipv1.EgressIPList{
+					Items: []egressipv1.EgressIP{eIP},
+				})
 
 				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
 				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
@@ -4335,10 +4331,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				fakeOvn.start(ctx,
-					&egressipv1.EgressIPList{
-						Items: []egressipv1.EgressIP{eIP},
-					})
+				fakeOvn.start(&egressipv1.EgressIPList{
+					Items: []egressipv1.EgressIP{eIP},
+				})
 
 				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
 				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
@@ -4383,10 +4378,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				fakeOvn.start(ctx,
-					&egressipv1.EgressIPList{
-						Items: []egressipv1.EgressIP{eIP},
-					})
+				fakeOvn.start(&egressipv1.EgressIPList{
+					Items: []egressipv1.EgressIP{eIP},
+				})
 
 				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
 				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
@@ -4429,10 +4423,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				fakeOvn.start(ctx,
-					&egressipv1.EgressIPList{
-						Items: []egressipv1.EgressIP{eIP},
-					})
+				fakeOvn.start(&egressipv1.EgressIPList{
+					Items: []egressipv1.EgressIP{eIP},
+				})
 
 				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
 				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
@@ -4474,10 +4467,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				fakeOvn.start(ctx,
-					&egressipv1.EgressIPList{
-						Items: []egressipv1.EgressIP{eIP},
-					})
+				fakeOvn.start(&egressipv1.EgressIPList{
+					Items: []egressipv1.EgressIP{eIP},
+				})
 
 				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
 				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
@@ -4518,7 +4510,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						EgressIPs: []string{egressIP1},
 					},
 				}
-				fakeOvn.start(ctx)
+				fakeOvn.start()
 
 				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
 				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
@@ -4564,7 +4556,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						EgressIPs: []string{egressIP},
 					},
 				}
-				fakeOvn.start(ctx)
+				fakeOvn.start()
 
 				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
 				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2

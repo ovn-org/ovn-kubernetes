@@ -76,24 +76,7 @@ func delIptRules(rules []iptRule) error {
 	return delErrors
 }
 
-func getSharedGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
-	return []iptRule{
-		{
-			table:    "nat",
-			chain:    "PREROUTING",
-			args:     []string{"-j", chain},
-			protocol: proto,
-		},
-		{
-			table:    "nat",
-			chain:    "OUTPUT",
-			args:     []string{"-j", chain},
-			protocol: proto,
-		},
-	}
-}
-
-func getLocalGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
+func getGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
 	return []iptRule{
 		{
 			table:    "nat",
@@ -240,11 +223,7 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []iptRule {
 	} else {
 		protocol = iptables.ProtocolIPv4
 	}
-	// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
-	rules := make([]iptRule, 0)
-	generateBlockMCSRules(&rules, protocol)
-	// END OCP HACK
-	return append(rules, []iptRule{
+	return []iptRule{
 		{
 			table: "filter",
 			chain: "FORWARD",
@@ -283,7 +262,7 @@ func getLocalGatewayNATRules(ifname string, cidr *net.IPNet) []iptRule {
 			},
 			protocol: protocol,
 		},
-	}...)
+	}
 }
 
 // initLocalGatewayNATRules sets up iptables rules for interfaces
@@ -312,7 +291,7 @@ func handleGatewayIPTables(iptCallback func(rules []iptRule) error, genGatewayCh
 }
 
 func initSharedGatewayIPTables() error {
-	if err := handleGatewayIPTables(addIptRules, getSharedGatewayInitRules); err != nil {
+	if err := handleGatewayIPTables(addIptRules, getGatewayInitRules); err != nil {
 		return err
 	}
 	if err := handleGatewayIPTables(delIptRules, getLegacySharedGatewayInitRules); err != nil {
@@ -322,7 +301,7 @@ func initSharedGatewayIPTables() error {
 }
 
 func initLocalGatewayIPTables() error {
-	if err := handleGatewayIPTables(addIptRules, getLocalGatewayInitRules); err != nil {
+	if err := handleGatewayIPTables(addIptRules, getGatewayInitRules); err != nil {
 		return err
 	}
 	if err := handleGatewayIPTables(delIptRules, getLegacyLocalGatewayInitRules); err != nil {

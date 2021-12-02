@@ -113,6 +113,12 @@ func hasHostNetworkEndpoints(ep *kapi.Endpoints, nodeAddresses *sets.String) boo
 // checkForStaleOVSInternalPorts checks for OVS internal ports without any ofport assigned,
 // they are stale ports that must be deleted
 func checkForStaleOVSInternalPorts() {
+	// Track how long scrubbing stale interfaces takes
+	start := time.Now()
+	defer func() {
+		klog.V(5).Infof("CheckForStaleOVSInternalPorts took %v", time.Since(start))
+	}()
+
 	stdout, _, err := util.RunOVSVsctl("--data=bare", "--no-headings", "--columns=name", "find",
 		"interface", "ofport=-1")
 	if err != nil {
@@ -122,14 +128,24 @@ func checkForStaleOVSInternalPorts() {
 	if len(stdout) == 0 {
 		return
 	}
+	// Batched command length overload shouldn't be a worry here since the number
+	// of interfaces per node should never be very large
+	// TODO: change this to use libovsdb
+	staleInterfaceArgs := []string{}
 	values := strings.Split(stdout, "\n\n")
 	for _, val := range values {
-		klog.Warningf("Found stale interface %s, so deleting it", val)
-		_, stderr, err := util.RunOVSVsctl("--if-exists", "--with-iface", "del-port", val)
-		if err != nil {
-			klog.Errorf("Failed to delete OVS port/interface %s: stderr: %s (%v)",
-				val, stderr, err)
+		klog.Warningf("Found stale interface %s, so queuing it to be deleted", val)
+		if len(staleInterfaceArgs) > 0 {
+			staleInterfaceArgs = append(staleInterfaceArgs, "--")
 		}
+
+		staleInterfaceArgs = append(staleInterfaceArgs, "--if-exists", "--with-iface", "del-port", val)
+	}
+
+	_, stderr, err := util.RunOVSVsctl(staleInterfaceArgs...)
+	if err != nil {
+		klog.Errorf("Failed to delete OVS port/interfaces: stderr: %s (%v)",
+			stderr, err)
 	}
 }
 

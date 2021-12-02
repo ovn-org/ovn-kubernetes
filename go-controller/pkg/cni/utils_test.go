@@ -5,7 +5,9 @@ import (
 	"fmt"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/stretchr/testify/mock"
 	v1 "k8s.io/api/core/v1"
@@ -216,26 +218,28 @@ var _ = Describe("CNI Utils tests", func() {
 "gateway_ip":"192.168.2.1"}}`,
 		}
 		podUID := "4d06bae8-9c38-41f6-945c-f92320e782e4"
-		It("Creates PodInterfaceInfo with IsDPU false", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, false, podUID)
+		It("Creates PodInterfaceInfo in NodeModeFull mode", func() {
+			config.OvnKubeNode.Mode = ovntypes.NodeModeFull
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(pif.IsDPU).To(BeFalse())
+			Expect(pif.IsDPUHostMode).To(BeFalse())
 		})
 
-		It("Creates PodInterfaceInfo with IsDPU true", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, true, podUID)
+		It("Creates PodInterfaceInfo in NodeModeDPUHost mode", func() {
+			config.OvnKubeNode.Mode = ovntypes.NodeModeDPUHost
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(pif.IsDPU).To(BeTrue())
+			Expect(pif.IsDPUHostMode).To(BeTrue())
 		})
 
 		It("Creates PodInterfaceInfo with checkExtIDs false", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, false, podUID)
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.CheckExtIDs).To(BeFalse())
 		})
 
 		It("Creates PodInterfaceInfo with checkExtIDs true", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, true, false, podUID)
+			pif, err := PodAnnotation2PodInfo(podAnnot, true, podUID)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.CheckExtIDs).To(BeTrue())
 		})

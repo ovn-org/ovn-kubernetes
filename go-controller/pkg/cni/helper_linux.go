@@ -173,7 +173,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	}
 	vfNetdevice := vfNetdevices[0]
 
-	if !ifInfo.IsDPU {
+	if !ifInfo.IsDPUHostMode {
 		// 2. get Uplink netdevice
 		uplink, err := util.GetSriovnetOps().GetUplinkRepresentor(pciAddrs)
 		if err != nil {
@@ -273,7 +273,8 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	for i, ip := range ifInfo.IPs {
 		ipStrs[i] = ip.String()
 	}
-	// Add the new sandbox's OVS port
+	// Add the new sandbox's OVS port, tag the interface as transient so stale
+	// pod interfaces are scrubbed on hard reboot
 	ovsArgs := []string{
 		"add-port", "br-int", hostIfaceName, "--", "set",
 		"interface", hostIfaceName,
@@ -282,6 +283,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 		fmt.Sprintf("external_ids:iface-id-ver=%s", initialPodUID),
 		fmt.Sprintf("external_ids:ip_addresses=%s", strings.Join(ipStrs, ",")),
 		fmt.Sprintf("external_ids:sandbox=%s", sandboxID),
+		"other_config:transient=true",
 	}
 
 	if out, err := ovsExec(ovsArgs...); err != nil {
@@ -338,7 +340,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 		// SR-IOV Case
 		hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID)
 	} else {
-		if pr.IsDPU {
+		if ifInfo.IsDPUHostMode {
 			return nil, fmt.Errorf("unexpected configuration, pod request on dpu host. " +
 				"device ID must be provided")
 		}
@@ -349,7 +351,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 		return nil, err
 	}
 
-	if !ifInfo.IsDPU {
+	if !ifInfo.IsDPUHostMode {
 		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID,
 			podLister, kclient)
 		if err != nil {

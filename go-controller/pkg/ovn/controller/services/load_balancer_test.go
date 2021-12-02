@@ -546,7 +546,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					},
 				},
 			},
-			// In shared gateway mode, nodeport and host-network-pods must be per-node
+			// In shared and local gateway modes, nodeport and host-network-pods must be per-node
 			resultSharedGatewayNode: []lbConfig{
 				{
 					vips:     []string{"node"},
@@ -581,8 +581,6 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 						Port:  outport,
 					},
 				},
-			},
-			resultLocalGatewayCluster: []lbConfig{
 				{
 					vips:     []string{"192.168.1.1", "2002::1"},
 					protocol: v1.ProtocolTCP,
@@ -652,8 +650,6 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 						Port:  outport,
 					},
 				},
-			},
-			resultLocalGatewayCluster: []lbConfig{
 				{
 					vips:     []string{"192.168.1.1", "2002::1"},
 					protocol: v1.ProtocolTCP,
@@ -698,7 +694,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					},
 				},
 			},
-			resultLocalGatewayCluster: []lbConfig{
+			resultLocalGatewayNode: []lbConfig{
 				{
 					vips:     []string{"192.168.1.1", "2002::1"},
 					protocol: v1.ProtocolTCP,
@@ -1084,8 +1080,9 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			},
 			expectedLocal: []ovnlb.LB{
 				{
-					Name:        "Service_testns/foo_TCP_node_switch_node-a",
+					Name:        "Service_testns/foo_TCP_node_router+switch_node-a",
 					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-a"},
 					Switches:    []string{"switch-node-a"},
 					Protocol:    "TCP",
 					Rules: []ovnlb.LBRule{
@@ -1096,8 +1093,9 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					},
 				},
 				{
-					Name:        "Service_testns/foo_TCP_node_switch_node-b",
+					Name:        "Service_testns/foo_TCP_node_router+switch_node-b",
 					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-b"},
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
 					Rules: []ovnlb.LBRule{
@@ -1185,6 +1183,22 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			},
 			expectedLocal: []ovnlb.LB{
 				{
+					Name:        "Service_testns/foo_TCP_node_router_node-a",
+					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-a"},
+					Protocol:    "TCP",
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"192.168.0.1", 80},
+							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}},
+						},
+						{
+							Source:  ovnlb.Addr{"10.0.0.1", 80},
+							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}},
+						},
+					},
+				},
+				{
 					Name:        "Service_testns/foo_TCP_node_switch_node-a",
 					ExternalIDs: defaultExternalIDs,
 					Switches:    []string{"switch-node-a"},
@@ -1201,8 +1215,9 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					},
 				},
 				{
-					Name:        "Service_testns/foo_TCP_node_switch_node-b",
+					Name:        "Service_testns/foo_TCP_node_router+switch_node-b",
 					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-b"},
 					Switches:    []string{"switch-node-b"},
 					Protocol:    "TCP",
 					Rules: []ovnlb.LBRule{

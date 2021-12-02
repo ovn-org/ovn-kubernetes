@@ -4,15 +4,16 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/containernetworking/cni/pkg/types/current"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 var (
@@ -101,7 +102,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 	kubecli := &kube.Kube{KClient: kclient}
 	annotCondFn := isOvnReady
 
-	if pr.IsDPU {
+	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
 		// Add DPU connection-details annotation so ovnkube-node running on DPU
 		// performs the needed network plumbing.
 		if err := pr.addDPUConnectionDetailsAnnot(kubecli); err != nil {
@@ -119,7 +120,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 		return nil, err
 	}
 
-	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.IsDPU, pr.PodUID)
+	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.PodUID)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +139,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 }
 
 func (pr *PodRequest) cmdDel() error {
-	if pr.IsDPU {
+	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
 		// nothing to do
 		return nil
 	}
@@ -180,7 +181,7 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, us
 	if response != nil {
 		if result, err1 = response.Marshal(); err1 != nil {
 			return nil, fmt.Errorf("%s %s CNI request %+v failed to marshal result: %v",
-				request, request.Command, request, err)
+				request, request.Command, request, err1)
 		}
 		if resultForLogging, err1 = response.MarshalForLogging(); err1 != nil {
 			klog.Errorf("%s %s CNI request %+v, %v", request, request.Command, request, err1)

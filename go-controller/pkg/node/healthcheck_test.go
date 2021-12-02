@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
@@ -15,8 +16,16 @@ func genListStalePortsCmd() string {
 	return fmt.Sprintf("ovs-vsctl --timeout=15 --data=bare --no-headings --columns=name find interface ofport=-1")
 }
 
-func genDeleteStalePortCmd(iface string) string {
-	return fmt.Sprintf("ovs-vsctl --timeout=15 --if-exists --with-iface del-port %s", iface)
+func genDeleteStalePortCmd(ifaces ...string) string {
+	staleIfacesCmd := ""
+	for _, iface := range ifaces {
+		if len(staleIfacesCmd) > 0 {
+			staleIfacesCmd += fmt.Sprintf(" -- --if-exists --with-iface del-port %s", iface)
+		} else {
+			staleIfacesCmd += fmt.Sprintf("ovs-vsctl --timeout=15 --if-exists --with-iface del-port %s", iface)
+		}
+	}
+	return staleIfacesCmd
 }
 
 func genDeleteStaleRepPortCmd(iface string) string {
@@ -52,12 +61,7 @@ var _ = Describe("Healthcheck tests", func() {
 					Err:    nil,
 				})
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    genDeleteStalePortCmd("foo"),
-					Output: "",
-					Err:    nil,
-				})
-				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    genDeleteStalePortCmd("bar"),
+					Cmd:    genDeleteStalePortCmd("foo", "bar"),
 					Output: "",
 					Err:    nil,
 				})

@@ -980,7 +980,6 @@ func commonFlows(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost string) [
 			} else {
 				ipPrefix = "ip"
 			}
-
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=15, table=1, %s, %s_dst=%s, "+
 					"actions=%s",
@@ -988,6 +987,7 @@ func commonFlows(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost string) [
 		}
 	}
 
+	// table 1, we check to see if this dest mac is the shared mac, if so send to host
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, priority=10, table=1, dl_dst=%s, actions=output:%s",
 			defaultOpenFlowCookie, bridgeMacAddress, ofPortHost))
@@ -1182,8 +1182,14 @@ func newNodePortWatcher(patchPort, gwBridge, gwIntf string, ips []*net.IPNet, of
 	// NodePortIP:NodePort to ClusterServiceIP:Port. We don't need to do this while
 	// running on DPU or on DPU-Host.
 	if config.OvnKubeNode.Mode == types.NodeModeFull {
-		if err := initSharedGatewayIPTables(); err != nil {
-			return nil, err
+		if config.Gateway.Mode == config.GatewayModeLocal {
+			if err := initLocalGatewayIPTables(); err != nil {
+				return nil, err
+			}
+		} else if config.Gateway.Mode == config.GatewayModeShared {
+			if err := initSharedGatewayIPTables(); err != nil {
+				return nil, err
+			}
 		}
 	}
 

@@ -68,11 +68,11 @@ func TestNewCache(t *testing.T) {
 		},
 	}
 
-	stopChan := make(chan struct{})
-	nbClient, err := libovsdb.NewNBTestHarness(libovsdb.TestSetup{NBData: initialDb}, stopChan)
+	nbClient, cleanup, err := libovsdb.NewNBTestHarness(libovsdb.TestSetup{NBData: initialDb}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(cleanup.Cleanup)
 
 	c, err := newCache(nbClient)
 	if err != nil {
@@ -129,7 +129,4 @@ func TestNewCache(t *testing.T) {
 	assert.Equal(t, c.existing["cb6ebcb0-c12d-4404-ada7-5aa2b898f06b"].Switches, sets.String{
 		"ovn-worker2": {},
 	})
-
-	nbClient.Close()
-	close(stopChan)
 }

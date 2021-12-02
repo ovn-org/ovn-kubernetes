@@ -281,7 +281,9 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 					if err != nil {
 						klog.Warningf("Unable to get port %s in cache for SNAT rule removal", logicalPort)
 					} else {
-						oc.deletePerPodGRSNAT(pod.Spec.NodeName, portInfo.ips)
+						if err = deletePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, portInfo.ips); err != nil {
+							klog.Error(err.Error())
+						}
 					}
 				}
 			}
@@ -310,7 +312,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 				if err != nil {
 					klog.Error(err.Error())
 				} else {
-					if err = oc.addPerPodGRSNAT(pod, podAnnotation.IPs); err != nil {
+					if err = addPerPodGRSNAT(oc.nbClient, oc.watchFactory, pod, podAnnotation.IPs); err != nil {
 						klog.Error(err.Error())
 					}
 				}
