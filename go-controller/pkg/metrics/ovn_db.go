@@ -7,6 +7,11 @@ import (
 	"strings"
 	"time"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -261,31 +266,52 @@ func ovnDBSizeMetricsUpdater(direction, database string) {
 	metricDBSize.WithLabelValues(database).Set(float64(fileInfo.Size()))
 }
 
-func ovnE2eTimeStampUpdater(direction, database string) {
-	var stdout, stderr string
+func ovnE2eTimeStampUpdater(direction, database string, nbClient libovsdbclient.Client,
+	sbClient libovsdbclient.Client) {
+	var nbGlobal *nbdb.NBGlobal
+	var sbGlobal *sbdb.SBGlobal
 	var err error
 
-	if direction == "sb" {
-		stdout, stderr, err = util.RunOVNSbctlUnix("--if-exists", "--no-leader-only",
-			"get", "SB_Global", ".", "options:e2e_timestamp")
-	} else {
-		stdout, stderr, err = util.RunOVNNbctlUnix("--if-exists", "--no-leader-only",
-			"get", "NB_Global", ".", "options:e2e_timestamp")
-	}
-	if err != nil {
-		klog.Errorf("Failed to scrape timestamp for database %s: "+
-			"stderr (%s) (%v)", database, stderr, err)
-		return
-	}
-	if stdout != "" {
-		if value, err := strconv.ParseFloat(stdout, 64); err == nil {
+	scrapeAndSetE2ETimestampMetrics := func(options map[string]string) {
+		var v string
+		var ok bool
+
+		if v, ok = options["e2e_timestamp"]; !ok {
+			klog.Errorf("Failed to scrape timestamp from global config options")
+			return
+		}
+
+		if value, err := strconv.ParseFloat(v, 64); err == nil {
 			metricDBE2eTimestamp.WithLabelValues(database).Set(value)
 		} else {
-			klog.Errorf("Failed to parse %s e2e-timestamp value to float64 :(%v)",
-				database, err)
+			klog.Errorf("Failed to parse %s e2e-timestamp value to float64 err: %v", err)
+		}
+	}
+
+	if direction == "sb" {
+		if sbGlobal, err = libovsdbops.FindSBGlobal(sbClient); err != nil && err != libovsdbclient.ErrNotFound {
+			klog.Errorf("Failed to scrape timestamp from sb_Global table "+
+				"err: %v", database, err)
+			return
+		}
+
+		if sbGlobal != nil {
+			scrapeAndSetE2ETimestampMetrics(sbGlobal.Options)
+		} else {
+			metricDBE2eTimestamp.WithLabelValues(database).Set(0)
 		}
 	} else {
-		metricDBE2eTimestamp.WithLabelValues(database).Set(0)
+		if nbGlobal, err = libovsdbops.FindNBGlobal(nbClient); err != nil && err != libovsdbclient.ErrNotFound {
+			klog.Errorf("Failed to scrape timestamp from nb_Global table "+
+				"err: %v", database, err)
+			return
+		}
+
+		if nbGlobal != nil {
+			scrapeAndSetE2ETimestampMetrics(nbGlobal.Options)
+		} else {
+			metricDBE2eTimestamp.WithLabelValues(database).Set(0)
+		}
 	}
 }
 
@@ -349,7 +375,8 @@ func getOvnDbVersionInfo() {
 	}
 }
 
-func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
+func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string, nbClient libovsdbclient.Client,
+	sbClient libovsdbclient.Client) {
 	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
 		return checkPodRunsOnGivenNode(clientset, []string{"ovn-db-pod=true"}, k8sNodeName, false)
 	})
@@ -423,7 +450,7 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 				}
 				ovnDBMemoryMetricsUpdater(direction, database)
 				ovnDBSizeMetricsUpdater(direction, database)
-				ovnE2eTimeStampUpdater(direction, database)
+				ovnE2eTimeStampUpdater(direction, database, nbClient, sbClient)
 			}
 			time.Sleep(30 * time.Second)
 		}

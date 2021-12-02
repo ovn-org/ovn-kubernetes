@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
@@ -405,8 +407,9 @@ func StartOVNMetricsServer(bindAddress string) {
 	}, 5*time.Second, utilwait.NeverStop)
 }
 
-func RegisterOvnMetrics(clientset kubernetes.Interface, k8sNodeName string) {
-	go RegisterOvnDBMetrics(clientset, k8sNodeName)
+func RegisterOvnMetrics(clientset kubernetes.Interface, k8sNodeName string, nbClient libovsdbclient.Client,
+	sbClient libovsdbclient.Client) {
+	go RegisterOvnDBMetrics(clientset, k8sNodeName, nbClient, sbClient)
 	go RegisterOvnControllerMetrics()
-	go RegisterOvnNorthdMetrics(clientset, k8sNodeName)
+	go RegisterOvnNorthdMetrics(clientset, k8sNodeName, nbClient)
 }

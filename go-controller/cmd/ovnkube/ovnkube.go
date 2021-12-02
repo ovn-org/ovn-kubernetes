@@ -220,6 +220,8 @@ func runOvnKube(ctx *cli.Context) error {
 
 	var watchFactory factory.Shutdownable
 	var masterWatchFactory *factory.WatchFactory
+	var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+
 	if master != "" {
 		var err error
 		// create factory and start the controllers asked for
@@ -228,7 +230,6 @@ func runOvnKube(ctx *cli.Context) error {
 			return err
 		}
 		watchFactory = masterWatchFactory
-		var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
 
 		if libovsdbOvnNBClient, err = libovsdb.NewNBClient(stopChan); err != nil {
 			return fmt.Errorf("error when trying to initialize libovsdb NB client: %v", err)
@@ -286,7 +287,7 @@ func runOvnKube(ctx *cli.Context) error {
 	// start the prometheus server to serve OVN Metrics (default port: 9476)
 	// Note: for ovnkube node mode dpu-host no ovn metrics is required as ovn is not running on the node.
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.Kubernetes.OVNMetricsBindAddress != "" {
-		metrics.RegisterOvnMetrics(ovnClientset.KubeClient, node)
+		metrics.RegisterOvnMetrics(ovnClientset.KubeClient, node, libovsdbOvnNBClient, libovsdbOvnSBClient)
 		metrics.StartOVNMetricsServer(config.Kubernetes.OVNMetricsBindAddress)
 	}
 

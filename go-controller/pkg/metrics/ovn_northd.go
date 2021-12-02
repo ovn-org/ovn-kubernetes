@@ -4,8 +4,14 @@ import (
 	"strings"
 	"time"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	"github.com/prometheus/client_golang/prometheus"
+
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
@@ -89,7 +95,7 @@ var ovnNorthdStopwatchShowMetricsMap = map[string]*stopwatchMetricDetails{
 	"ovnsb_db_run":     {},
 }
 
-func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string) {
+func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string, nbClient libovsdbclient.Client) {
 	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
 		return checkPodRunsOnGivenNode(clientset, []string{"app=ovnkube-master", "name=ovnkube-master"}, k8sNodeName, true)
 	})
@@ -128,14 +134,23 @@ func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string
 			Help: "The maximum number of milliseconds of idle time on connection to the OVN SB " +
 				"and NB DB before sending an inactivity probe message",
 		}, func() float64 {
-			stdout, stderr, err := util.RunOVNNbctlWithTimeout(5, "get", "NB_Global", ".",
-				"options:northd_probe_interval")
-			if err != nil {
-				klog.Errorf("Failed to get northd_probe_interval value "+
-					"stderr(%s) :(%v)", stderr, err)
+			var nbGlobal *nbdb.NBGlobal
+			var probeInterval string
+			var ok bool
+			var err error
+
+			if nbGlobal, err = libovsdbops.FindNBGlobal(nbClient); err != nil {
+				klog.Errorf("Failed to get NB_Global table "+
+					"err: %v", err)
 				return 0
 			}
-			return parseMetricToFloat(MetricOvnSubsystemNorthd, "probe_interval", stdout)
+
+			if probeInterval, ok = nbGlobal.Options["northd_probe_interval"]; !ok {
+				klog.Errorf("Failed to get northd_probe_interval from NB_Global table options column")
+				return 0
+			}
+
+			return parseMetricToFloat(MetricOvnSubsystemNorthd, "probe_interval", probeInterval)
 		},
 	))
 	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
