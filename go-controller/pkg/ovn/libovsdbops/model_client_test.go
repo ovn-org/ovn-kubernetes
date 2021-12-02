@@ -30,13 +30,17 @@ type OperationModelTestCase struct {
 	expectedDB               []libovsdbtest.TestData
 }
 
-func runTestCase(tCase OperationModelTestCase, shouldDelete bool) error {
-	stopChan := make(chan struct{})
+func runTestCase(t *testing.T, tCase OperationModelTestCase, shouldDelete bool) error {
 	dbSetup := libovsdbtest.TestSetup{
 		NBData: tCase.initialDB,
 	}
 
-	nbClient, _ := libovsdbtest.NewNBTestHarness(dbSetup, stopChan)
+	nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup, nil)
+	if err != nil {
+		return err
+	}
+	t.Cleanup(cleanup.Cleanup)
+
 	modelClient := NewModelClient(nbClient)
 
 	opModel := tCase.generateCreateOrUpdateOp()
@@ -62,7 +66,6 @@ func runTestCase(tCase OperationModelTestCase, shouldDelete bool) error {
 		return fmt.Errorf("test: \"%s\" encountered error: %v", tCase.name, err)
 	}
 
-	close(stopChan)
 	return nil
 }
 
@@ -199,7 +202,7 @@ func TestCreateOrUpdateForRootObjects(t *testing.T) {
 	}
 
 	for _, tCase := range tt {
-		if err := runTestCase(tCase, false); err != nil {
+		if err := runTestCase(t, tCase, false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -276,7 +279,7 @@ func TestDeleteForRootObjects(t *testing.T) {
 	}
 
 	for _, tCase := range tt {
-		if err := runTestCase(tCase, true); err != nil {
+		if err := runTestCase(t, tCase, true); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -750,7 +753,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 	}
 
 	for _, tCase := range tt {
-		if err := runTestCase(tCase, false); err != nil {
+		if err := runTestCase(t, tCase, false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -961,7 +964,7 @@ func TestDeleteForNonRootObjects(t *testing.T) {
 	}
 
 	for _, tCase := range tt {
-		if err := runTestCase(tCase, true); err != nil {
+		if err := runTestCase(t, tCase, true); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -992,12 +995,16 @@ func TestCreateWithAdHocClient(t *testing.T) {
 	}
 
 	for _, tCase := range tt {
-		stopChan := make(chan struct{})
 		dbSetup := libovsdbtest.TestSetup{
 			SBData: tCase.initialDB,
 		}
 
-		nbClient, sbClient, _ := libovsdbtest.NewNBSBTestHarness(dbSetup, stopChan)
+		nbClient, sbClient, cleanup, err := libovsdbtest.NewNBSBTestHarness(dbSetup)
+		if err != nil {
+			t.Fatalf("test: \"%s\" failed to set up test harness: %v", tCase.name, err)
+		}
+		t.Cleanup(cleanup.Cleanup)
+
 		modelClient := NewModelClient(nbClient)
 
 		opModel := tCase.generateCreateOrUpdateOp()
@@ -1011,7 +1018,5 @@ func TestCreateWithAdHocClient(t *testing.T) {
 		if err != nil {
 			t.Fatalf("test: \"%s\" encountered error: %v", tCase.name, err)
 		}
-
-		close(stopChan)
 	}
 }

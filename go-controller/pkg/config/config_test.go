@@ -222,13 +222,13 @@ var _ = Describe("Config Operations", func() {
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
-		PrepareTestConfig()
+		err := PrepareTestConfig()
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = Flags
 
-		var err error
 		cfgFile, err = ioutil.TempFile("", "conftest-")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})

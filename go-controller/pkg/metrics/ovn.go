@@ -15,17 +15,16 @@ import (
 var metricRemoteProbeInterval = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnNamespace,
 	Subsystem: MetricOvnSubsystemController,
-	Name:      "remote_probe_interval",
-	Help: "The maximum number of milliseconds of idle time on connection to " +
-		"the OVN SB DB before sending an inactivity probe message.",
+	Name:      "remote_probe_interval_seconds",
+	Help:      "The inactivity probe interval of the connection to the OVN SB DB.",
 })
 
 var metricOpenFlowProbeInterval = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnNamespace,
 	Subsystem: MetricOvnSubsystemController,
-	Name:      "openflow_probe_interval",
-	Help: "The maximum number of milliseconds of idle time on OpenFlow connection " +
-		"to the OVS bridge before sending an inactivity probe message.",
+	Name:      "openflow_probe_interval_seconds",
+	Help: "The inactivity probe interval of the OpenFlow connection to the " +
+		"OpenvSwitch integration bridge.",
 })
 
 var metricMonitorAll = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -275,7 +274,7 @@ func setOvnControllerConfigurationMetrics() (err error) {
 			metricOpenFlowProbeInterval.Set(metricValue)
 		case "ovn-remote-probe-interval":
 			metricValue := parseMetricToFloat(MetricOvnSubsystemController, "ovn-remote-probe-interval", fieldValue)
-			metricRemoteProbeInterval.Set(metricValue)
+			metricRemoteProbeInterval.Set(metricValue / 1000)
 		case "ovn-monitor-all":
 			var ovnMonitorValue float64
 			if fieldValue == "true" {
@@ -377,7 +376,7 @@ func RegisterOvnControllerMetrics() {
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemController,
-			Name:      "integration_bridge_patch_ports_total",
+			Name:      "integration_bridge_patch_ports",
 			Help: "Captures the number of patch ports that connect br-int OVS " +
 				"bridge to physical OVS bridge and br-local OVS bridge.",
 		},
@@ -388,7 +387,7 @@ func RegisterOvnControllerMetrics() {
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemController,
-			Name:      "integration_bridge_geneve_ports_total",
+			Name:      "integration_bridge_geneve_ports",
 			Help:      "Captures the number of geneve ports that are on br-int OVS bridge.",
 		},
 		func() float64 {

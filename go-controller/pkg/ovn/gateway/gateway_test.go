@@ -59,19 +59,19 @@ func TestGetOvnGateways(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			stopChan := make(chan struct{})
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: tt.ovnInitState,
 			}
-			libovsdbOvnNBClient, err := libovsdbtest.NewNBTestHarness(dbSetup, stopChan)
+			libovsdbOvnNBClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup, nil)
 			if err != nil {
 				t.Errorf("libovsdb client error: %v", err)
 			}
+			t.Cleanup(cleanup.Cleanup)
+
 			got, err := GetOvnGateways(libovsdbOvnNBClient)
 			if !sets.NewString(got...).HasAll(tt.want...) {
 				t.Errorf("GetOvnGateways() got = %v, want %v", got, tt.want)
 			}
-			close(stopChan)
 		})
 	}
 }
@@ -138,14 +138,15 @@ func TestGetGatewayPhysicalIPs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			stopChan := make(chan struct{})
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: tt.ovnInitState,
 			}
-			libovsdbOvnNBClient, err := libovsdbtest.NewNBTestHarness(dbSetup, stopChan)
+			libovsdbOvnNBClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup, nil)
 			if err != nil {
 				t.Errorf("libovsdb client error: %v", err)
 			}
+			t.Cleanup(cleanup.Cleanup)
+
 			got, err := GetGatewayPhysicalIPs(libovsdbOvnNBClient, "GR_ovn-control-plane")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetGatewayPhysicalIPs() error = %v, wantErr %v", err, tt.wantErr)
@@ -154,7 +155,6 @@ func TestGetGatewayPhysicalIPs(t *testing.T) {
 			if !sets.NewString(got...).HasAll(tt.want...) {
 				t.Errorf("GetOvnGateways() got = %v, want %v", got, tt.want)
 			}
-			close(stopChan)
 		})
 	}
 }

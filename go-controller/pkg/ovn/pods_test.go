@@ -210,7 +210,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		fakeOvn = NewFakeOVN(nil)
+		fakeOvn = NewFakeOVN()
 		initialDB = libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
@@ -243,7 +243,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					namespaceT.Name,
 				)
 
-				fakeOvn.startWithDBSetup(ctx, initialDB,
+				fakeOvn.startWithDBSetup(initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
@@ -299,7 +299,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					namespaceT.Name,
 				)
 
-				fakeOvn.startWithDBSetup(ctx, initialDB,
+				fakeOvn.startWithDBSetup(initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
@@ -348,7 +348,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					namespaceT.Name,
 				)
 
-				fakeOvn.startWithDBSetup(ctx, initialDB,
+				fakeOvn.startWithDBSetup(initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
@@ -400,7 +400,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					namespaceT.Name,
 				)
 
-				fakeOvn.startWithDBSetup(ctx, initialDB,
+				fakeOvn.startWithDBSetup(initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
@@ -458,7 +458,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				)
 				podJSON := t.getAnnotationsJson()
 
-				fakeOvn.startWithDBSetup(ctx, initialDB)
+				fakeOvn.startWithDBSetup(initialDB)
 				t.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
@@ -499,7 +499,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					namespaceT.Name,
 				)
 
-				fakeOvn.startWithDBSetup(ctx, initialDB,
+				fakeOvn.startWithDBSetup(initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
@@ -551,7 +551,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				)
 				pod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
 				setPodAnnotations(pod, t)
-				fakeOvn.startWithDBSetup(ctx, initialDB,
+				fakeOvn.startWithDBSetup(initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
@@ -660,7 +660,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				setPodAnnotations(pod1, t1)
 				pod2 := newPod(t2.namespace, t2.podName, t2.nodeName, t2.podIP)
 				setPodAnnotations(pod2, t2)
-				fakeOvn.startWithDBSetup(ctx, initialDB,
+				fakeOvn.startWithDBSetup(initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,

@@ -57,8 +57,7 @@ type PodInfo struct {
 	ContainerName           string
 	OvnKubeContainerPodName string
 	NodeName                string
-	StorPort                string
-	StorMAC                 string
+	RtosMAC                 string
 	HostNetwork             bool
 }
 
@@ -323,19 +322,17 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 
 	podInfo.OvnKubeContainerPodName = ovnkubePod.Name
 	podInfo.NodeName = ovnkubePod.Spec.NodeName
-	podInfo.StorPort = "stor-" + ovnkubePod.Spec.NodeName
 
-	// Find stor MAC
-	klog.V(5).Infof("Command is: %s", "ovn-nbctl "+cmd+" lsp-get-addresses "+"stor-"+ovnkubePod.Spec.NodeName)
-	lspCmd := "ovn-nbctl " + cmd + " lsp-get-addresses " + "stor-" + ovnkubePod.Spec.NodeName
+	// Find rtos MAC
+	klog.V(5).Infof("Command is: %s", "ovn-nbctl "+cmd+" --bare --no-heading --column=mac list logical-router-port "+"rtos-"+ovnkubePod.Spec.NodeName)
+	lspCmd := "ovn-nbctl " + cmd + " --bare --no-heading --column=mac list logical-router-port " + "rtos-" + ovnkubePod.Spec.NodeName
 	ipOutput, ipError, err := execInPod(coreclient, restconfig, ovnNamespace, ovnkubePod.Name, "ovnkube-node", lspCmd, "")
 	if err != nil {
 		fmt.Printf("execInPod() failed with %s stderr %s stdout %s \n", err, ipError, ipOutput)
 		klog.V(5).Infof("execInPod() failed err %s - podInfo %v - ovnkubePod Name %s", err, podInfo, ovnkubePod.Name)
 		return nil, err
 	}
-
-	podInfo.StorMAC = strings.Replace(ipOutput, "\n", "", -1)
+	podInfo.RtosMAC = strings.Replace(ipOutput, "\n", "", -1)
 
 	k8sMgmtIntfName := util.GetLegacyK8sMgmtIntfName(podInfo.NodeName)
 	if ethName == k8sMgmtIntfName {
@@ -690,7 +687,7 @@ func main() {
 		} else {
 			fromSrc = " 'inport==\"" + srcNamespace + "_" + *srcPodName + "\""
 		}
-		fromSrc += " && eth.dst==" + srcPodInfo.StorMAC
+		fromSrc += " && eth.dst==" + srcPodInfo.RtosMAC
 		fromSrc += " && eth.src==" + srcPodInfo.MAC
 		fromSrc += fmt.Sprintf(" && %s.dst==%s", dstSvcInfo.getL3Ver(), dstSvcInfo.IP)
 		fromSrc += fmt.Sprintf(" && %s.src==%s", srcPodInfo.getL3Ver(), srcPodInfo.IP)
@@ -753,7 +750,7 @@ func main() {
 	} else {
 		fromSrc = " 'inport==\"" + srcNamespace + "_" + *srcPodName + "\""
 	}
-	fromSrc += " && eth.dst==" + srcPodInfo.StorMAC
+	fromSrc += " && eth.dst==" + srcPodInfo.RtosMAC
 	fromSrc += " && eth.src==" + srcPodInfo.MAC
 	fromSrc += fmt.Sprintf(" && %s.dst==%s", dstPodInfo.getL3Ver(), dstPodInfo.IP)
 	fromSrc += fmt.Sprintf(" && %s.src==%s", srcPodInfo.getL3Ver(), srcPodInfo.IP)
@@ -796,7 +793,7 @@ func main() {
 	} else {
 		fromDst = " 'inport==\"" + dstNamespace + "_" + *dstPodName + "\""
 	}
-	fromDst += " && eth.dst==" + dstPodInfo.StorMAC
+	fromDst += " && eth.dst==" + dstPodInfo.RtosMAC
 	fromDst += " && eth.src==" + dstPodInfo.MAC
 	fromDst += fmt.Sprintf(" && %s.dst==%s", srcPodInfo.getL3Ver(), srcPodInfo.IP)
 	fromDst += fmt.Sprintf(" && %s.src==%s", dstPodInfo.getL3Ver(), dstPodInfo.IP)
@@ -832,7 +829,7 @@ func main() {
 
 	fromSrc = "ofproto/trace br-int"
 	fromSrc += " \"in_port=" + srcPodInfo.VethName + ", " + protocol + ","
-	fromSrc += " dl_dst=" + srcPodInfo.StorMAC + ","
+	fromSrc += " dl_dst=" + srcPodInfo.RtosMAC + ","
 	fromSrc += " dl_src=" + srcPodInfo.MAC + ","
 	fromSrc += " nw_dst=" + dstPodInfo.IP + ","
 	fromSrc += " nw_src=" + srcPodInfo.IP + ","
@@ -876,7 +873,7 @@ func main() {
 
 	fromDst = "ofproto/trace br-int"
 	fromDst += " \"in_port=" + dstPodInfo.VethName + ", " + protocol + ","
-	fromDst += " dl_dst=" + dstPodInfo.StorMAC + ","
+	fromDst += " dl_dst=" + dstPodInfo.RtosMAC + ","
 	fromDst += " dl_src=" + dstPodInfo.MAC + ","
 	fromDst += " nw_dst=" + srcPodInfo.IP + ","
 	fromDst += " nw_src=" + dstPodInfo.IP + ","

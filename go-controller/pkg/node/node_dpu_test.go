@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
@@ -26,7 +27,7 @@ func genOVSFindCmd(table, column, condition string) string {
 
 func genOVSAddPortCmd(hostIfaceName, ifaceID, mac, ip, sandboxID, podUID string) string {
 	return fmt.Sprintf("ovs-vsctl --timeout=30 add-port br-int %s -- set interface %s external_ids:attached_mac=%s "+
-		"external_ids:iface-id=%s external_ids:iface-id-ver=%s external_ids:ip_addresses=%s external_ids:sandbox=%s",
+		"external_ids:iface-id=%s external_ids:iface-id-ver=%s external_ids:ip_addresses=%s external_ids:sandbox=%s other_config:transient=true",
 		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ip, sandboxID)
 }
 
@@ -131,7 +132,7 @@ var _ = Describe("Node DPU tests", func() {
 				MTU:           1500,
 				Ingress:       -1,
 				Egress:        -1,
-				IsDPU:         true,
+				IsDPUHostMode: true,
 				PodUID:        "a-pod",
 			}
 

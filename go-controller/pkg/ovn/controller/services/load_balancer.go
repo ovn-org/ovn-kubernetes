@@ -124,8 +124,7 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 		// - Any of the endpoints are host-network
 		//
 		// In that case, we need to create per-node LBs.
-		if globalconfig.Gateway.Mode == globalconfig.GatewayModeShared &&
-			(hasHostEndpoints(eps.V4IPs) || hasHostEndpoints(eps.V6IPs)) {
+		if hasHostEndpoints(eps.V4IPs) || hasHostEndpoints(eps.V6IPs) {
 			perNodeConfigs = append(perNodeConfigs, clusterIPConfig)
 		} else {
 			clusterConfigs = append(clusterConfigs, clusterIPConfig)
@@ -157,7 +156,7 @@ func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeIn
 		// For shared gateway, add to the node's GWR as well.
 		// The node may not have a gateway router - it might be waiting initialization, or
 		// might have disabled GWR creation via the k8s.ovn.org/l3-gateway-config annotation
-		if globalconfig.Gateway.Mode == globalconfig.GatewayModeShared && node.gatewayRouterName != "" {
+		if node.gatewayRouterName != "" {
 			nodeRouters = append(nodeRouters, node.gatewayRouterName)
 		}
 	}
@@ -280,20 +279,17 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 				routerV6targetips := config.eps.V6IPs
 
 				// shared gateway needs to "massage" some of the targets
-				if globalconfig.Gateway.Mode == "shared" {
+				if globalconfig.Gateway.Mode == "shared" && config.externalTrafficLocal {
 					// for ExternalTrafficPolicy=Local, then remove non-local endpoints from the router targets
-					if config.externalTrafficLocal {
-						routerV4targetips = util.FilterIPsSlice(routerV4targetips, node.nodeSubnets(), true)
-						routerV6targetips = util.FilterIPsSlice(routerV6targetips, node.nodeSubnets(), true)
-					}
-
-					// at this point, the targets may be empty
-
-					// any targets local to the node need to have a special
-					// harpin IP added, but only for the router LB
-					routerV4targetips = util.UpdateIPsSlice(routerV4targetips, node.nodeIPs, []string{types.V4HostMasqueradeIP})
-					routerV6targetips = util.UpdateIPsSlice(routerV6targetips, node.nodeIPs, []string{types.V6HostMasqueradeIP})
+					routerV4targetips = util.FilterIPsSlice(routerV4targetips, node.nodeSubnets(), true)
+					routerV6targetips = util.FilterIPsSlice(routerV6targetips, node.nodeSubnets(), true)
 				}
+				// at this point, the targets may be empty
+
+				// any targets local to the node need to have a special
+				// harpin IP added, but only for the router LB
+				routerV4targetips = util.UpdateIPsSlice(routerV4targetips, node.nodeIPs, []string{types.V4HostMasqueradeIP})
+				routerV6targetips = util.UpdateIPsSlice(routerV6targetips, node.nodeIPs, []string{types.V6HostMasqueradeIP})
 
 				routerV4targets := ovnlb.JoinHostsPort(routerV4targetips, config.eps.Port)
 				routerV6targets := ovnlb.JoinHostsPort(routerV6targetips, config.eps.Port)
@@ -325,26 +321,24 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 						Targets: targets,
 					})
 
-					// For shared gateway, there is also a per-router rule
+					// There is also a per-router rule
 					// with targets that *may* be different
-					if globalconfig.Gateway.Mode == "shared" {
-						targets := routerV4targets
-						if isv6 {
-							targets = routerV6targets
-						}
-						rule := ovnlb.LBRule{
-							Source:  ovnlb.Addr{IP: vip, Port: config.inport},
-							Targets: targets,
-						}
+					targets = routerV4targets
+					if isv6 {
+						targets = routerV6targets
+					}
+					rule := ovnlb.LBRule{
+						Source:  ovnlb.Addr{IP: vip, Port: config.inport},
+						Targets: targets,
+					}
 
-						// in other words, is this ExternalTrafficPolicy=local?
-						// if so, this gets a separate load balancer with SNAT disabled
-						// (but there's no need to do this if the list of targets is empty)
-						if config.externalTrafficLocal && len(targets) > 0 {
-							noSNATRouterRules = append(noSNATRouterRules, rule)
-						} else {
-							routerRules = append(routerRules, rule)
-						}
+					// in other words, is this ExternalTrafficPolicy=local?
+					// if so, this gets a separate load balancer with SNAT disabled
+					// (but there's no need to do this if the list of targets is empty)
+					if globalconfig.Gateway.Mode == "shared" && config.externalTrafficLocal && len(targets) > 0 {
+						noSNATRouterRules = append(noSNATRouterRules, rule)
+					} else {
+						routerRules = append(routerRules, rule)
 					}
 				}
 			}

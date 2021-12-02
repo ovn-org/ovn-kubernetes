@@ -25,7 +25,6 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
@@ -113,9 +112,7 @@ type Controller struct {
 	stopChan              <-chan struct{}
 
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
-	masterSubnetAllocator     *subnetallocator.SubnetAllocator
-	nodeLocalNatIPv4Allocator *ipallocator.Range
-	nodeLocalNatIPv6Allocator *ipallocator.Range
+	masterSubnetAllocator *subnetallocator.SubnetAllocator
 
 	hoMaster *hocontroller.MasterController
 
@@ -251,21 +248,19 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			EIPClient:            ovnClient.EgressIPClient,
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 		},
-		watchFactory:              wf,
-		stopChan:                  stopChan,
-		masterSubnetAllocator:     subnetallocator.NewSubnetAllocator(),
-		nodeLocalNatIPv4Allocator: &ipallocator.Range{},
-		nodeLocalNatIPv6Allocator: &ipallocator.Range{},
-		lsManager:                 lsm.NewLogicalSwitchManager(),
-		logicalPortCache:          newPortCache(stopChan),
-		namespaces:                make(map[string]*namespaceInfo),
-		namespacesMutex:           sync.Mutex{},
-		externalGWCache:           make(map[ktypes.NamespacedName]*externalRouteInfo),
-		exGWCacheMutex:            sync.RWMutex{},
-		addressSetFactory:         addressSetFactory,
-		lspIngressDenyCache:       make(map[string]int),
-		lspEgressDenyCache:        make(map[string]int),
-		lspMutex:                  &sync.Mutex{},
+		watchFactory:          wf,
+		stopChan:              stopChan,
+		masterSubnetAllocator: subnetallocator.NewSubnetAllocator(),
+		lsManager:             lsm.NewLogicalSwitchManager(),
+		logicalPortCache:      newPortCache(stopChan),
+		namespaces:            make(map[string]*namespaceInfo),
+		namespacesMutex:       sync.Mutex{},
+		externalGWCache:       make(map[ktypes.NamespacedName]*externalRouteInfo),
+		exGWCacheMutex:        sync.RWMutex{},
+		addressSetFactory:     addressSetFactory,
+		lspIngressDenyCache:   make(map[string]int),
+		lspEgressDenyCache:    make(map[string]int),
+		lspMutex:              &sync.Mutex{},
 		eIPC: egressIPController{
 			assignmentRetryMutex:  &sync.Mutex{},
 			assignmentRetry:       make(map[string]bool),
@@ -276,6 +271,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			allocator:             allocator{&sync.Mutex{}, make(map[string]*egressNode)},
 			nbClient:              libovsdbOvnNBClient,
 			modelClient:           modelClient,
+			watchFactory:          wf,
 		},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
@@ -1150,8 +1146,7 @@ func (oc *Controller) WatchNodes() {
 				"various caches", node.Name)
 
 			nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
-			dnatSnatIPs, _ := util.ParseNodeLocalNatIPAnnotation(node)
-			oc.deleteNode(node.Name, nodeSubnets, dnatSnatIPs)
+			oc.deleteNode(node.Name, nodeSubnets)
 			oc.lsManager.DeleteNode(node.Name)
 			addNodeFailed.Delete(node.Name)
 			mgmtPortFailed.Delete(node.Name)

@@ -804,6 +804,9 @@ type egressIPController struct {
 
 	// modelClient for performing idempotent NB operations
 	modelClient libovsdbops.ModelClient
+
+	// watchFactory watching k8s objects
+	watchFactory *factory.WatchFactory
 }
 
 func (e *egressIPController) addPodEgressIP(eIP *egressipv1.EgressIP, pod *kapi.Pod) error {
@@ -820,6 +823,14 @@ func (e *egressIPController) addPodEgressIP(eIP *egressipv1.EgressIP, pod *kapi.
 	}
 	if err := e.handleEgressReroutePolicy(podIPs, eIP.Status.Items, eIP.Name, e.createEgressReroutePolicy); err != nil {
 		return fmt.Errorf("unable to create logical router policy, err: %v", err)
+	}
+
+	if config.Gateway.DisableSNATMultipleGWs {
+		// remove snats to->nodeIP (from the node where pod exists) for these podIPs before adding the snat to->egressIP
+		err = deletePerPodGRSNAT(e.nbClient, pod.Spec.NodeName, podIPs)
+		if err != nil {
+			return err
+		}
 	}
 
 	var ops []ovsdb.Operation
@@ -854,7 +865,19 @@ func (e *egressIPController) deletePodEgressIP(eIP *egressipv1.EgressIP, pod *ka
 		}
 	}
 	_, err = libovsdbops.TransactAndCheck(e.nbClient, ops)
-	return err
+	if err != nil {
+		return err
+	}
+
+	if config.Gateway.DisableSNATMultipleGWs {
+		// add snats to->nodeIP (on the node where the pod exists) for these podIPs after deleting the snat to->egressIP
+		err = addPerPodGRSNAT(e.nbClient, e.watchFactory, pod, podIPs)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (e *egressIPController) getGatewayRouterJoinIP(node string, wantsIPv6 bool) (net.IP, error) {
@@ -886,16 +909,12 @@ func (e *egressIPController) getGatewayRouterJoinIP(node string, wantsIPv6 bool)
 	}
 }
 
-func (e *egressIPController) getPodIPs(pod *kapi.Pod) ([]net.IP, error) {
+func (e *egressIPController) getPodIPs(pod *kapi.Pod) ([]*net.IPNet, error) {
 	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err != nil {
 		return nil, err
 	}
-	podIPs := make([]net.IP, len(podAnnotation.IPs))
-	for ipIdx, ip := range podAnnotation.IPs {
-		podIPs[ipIdx] = ip.IP
-	}
-	return podIPs, nil
+	return podAnnotation.IPs, nil
 }
 
 func (e *egressIPController) needsRetry(pod *kapi.Pod) bool {
@@ -906,7 +925,7 @@ func (e *egressIPController) needsRetry(pod *kapi.Pod) bool {
 // createEgressReroutePolicy uses logical router policies to force egress traffic to the egress node, for that we need
 // to retrive the internal gateway router IP attached to the egress node. This method handles both the shared and
 // local gateway mode case
-func (e *egressIPController) handleEgressReroutePolicy(podIps []net.IP, statuses []egressipv1.EgressIPStatusItem, egressIPName string, cb func(filterOption, egressIPName string, gatewayRouterIPs []string) error) error {
+func (e *egressIPController) handleEgressReroutePolicy(podIPNets []*net.IPNet, statuses []egressipv1.EgressIPStatusItem, egressIPName string, cb func(filterOption, egressIPName string, gatewayRouterIPs []string) error) error {
 	gatewayRouterIPv4s, gatewayRouterIPv6s := []string{}, []string{}
 	for _, status := range statuses {
 		isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
@@ -921,7 +940,8 @@ func (e *egressIPController) handleEgressReroutePolicy(podIps []net.IP, statuses
 			gatewayRouterIPv4s = append(gatewayRouterIPv4s, gatewayRouterIP.String())
 		}
 	}
-	for _, podIP := range podIps {
+	for _, podIPNet := range podIPNets {
+		podIP := podIPNet.IP
 		if utilnet.IsIPv6(podIP) {
 			if len(gatewayRouterIPv6s) > 0 {
 				filterOption := fmt.Sprintf("ip6.src == %s", podIP.String())
@@ -1293,13 +1313,13 @@ func buildSNATFromEgressIPStatus(podIP net.IP, status egressipv1.EgressIPStatusI
 	return nat, nil
 }
 
-func createNATRuleOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, podIPs []net.IP, status egressipv1.EgressIPStatusItem, egressIPName string) ([]ovsdb.Operation, error) {
+func createNATRuleOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, podIPs []*net.IPNet, status egressipv1.EgressIPStatusItem, egressIPName string) ([]ovsdb.Operation, error) {
 	nats := make([]*nbdb.NAT, 0, len(podIPs))
 	var nat *nbdb.NAT
 	var err error
 	for _, podIP := range podIPs {
-		if (utilnet.IsIPv6String(status.EgressIP) && utilnet.IsIPv6(podIP)) || (!utilnet.IsIPv6String(status.EgressIP) && !utilnet.IsIPv6(podIP)) {
-			nat, err = buildSNATFromEgressIPStatus(podIP, status, egressIPName)
+		if (utilnet.IsIPv6String(status.EgressIP) && utilnet.IsIPv6(podIP.IP)) || (!utilnet.IsIPv6String(status.EgressIP) && !utilnet.IsIPv6(podIP.IP)) {
+			nat, err = buildSNATFromEgressIPStatus(podIP.IP, status, egressIPName)
 			if err != nil {
 				return nil, err
 			}
@@ -1316,13 +1336,13 @@ func createNATRuleOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, pod
 	return ops, nil
 }
 
-func deleteNATRuleOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, podIPs []net.IP, status egressipv1.EgressIPStatusItem, egressIPName string) ([]ovsdb.Operation, error) {
+func deleteNATRuleOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, podIPs []*net.IPNet, status egressipv1.EgressIPStatusItem, egressIPName string) ([]ovsdb.Operation, error) {
 	nats := make([]*nbdb.NAT, 0, len(podIPs))
 	var nat *nbdb.NAT
 	var err error
 	for _, podIP := range podIPs {
-		if (utilnet.IsIPv6String(status.EgressIP) && utilnet.IsIPv6(podIP)) || (!utilnet.IsIPv6String(status.EgressIP) && !utilnet.IsIPv6(podIP)) {
-			nat, err = buildSNATFromEgressIPStatus(podIP, status, egressIPName)
+		if (utilnet.IsIPv6String(status.EgressIP) && utilnet.IsIPv6(podIP.IP)) || (!utilnet.IsIPv6String(status.EgressIP) && !utilnet.IsIPv6(podIP.IP)) {
+			nat, err = buildSNATFromEgressIPStatus(podIP.IP, status, egressIPName)
 			if err != nil {
 				return nil, err
 			}

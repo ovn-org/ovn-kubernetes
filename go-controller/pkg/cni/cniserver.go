@@ -72,7 +72,6 @@ func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWat
 		useOVSExternalIDs: ovnPortBinding,
 		podLister:         corev1listers.NewPodLister(factory.LocalPodInformer().GetIndexer()),
 		kclient:           kclient,
-		mode:              config.OvnKubeNode.Mode,
 		kubeAuth: &KubeAPIAuth{
 			Kubeconfig:    config.Kubernetes.Kubeconfig,
 			KubeAPIServer: config.Kubernetes.APIServer,
@@ -196,10 +195,6 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 		return nil, err
 	}
 	defer req.cancel()
-
-	if s.mode == types.NodeModeDPUHost {
-		req.IsDPU = true
-	}
 
 	useOVSExternalIDs := false
 	if atomic.LoadInt32(&s.useOVSExternalIDs) > 0 {

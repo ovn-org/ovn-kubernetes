@@ -222,9 +222,9 @@ jobs:
         export OVN_IMAGE="ovn-daemonset-f:pr"
         make -C test upgrade-ovn
 
-    - name: Run Single-Stack Tests
+    - name: Run E2E shard-conformance
       run: |
-        make -C test shard-test WHAT="Networking Granular Checks"
+        make -C test shard-conformance
 
     - name: Export logs
       if: always()

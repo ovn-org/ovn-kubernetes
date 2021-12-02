@@ -10,13 +10,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -40,20 +37,12 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		"always_learn_from_arp_request": "false",
 		"dynamic_neigh_routers":         "true",
 		"chassis":                       l3GatewayConfig.ChassisID,
+		"lb_force_snat_ip":              "router_ip",
+		"snat-ct-zone":                  "0",
 	}
 	logicalRouterExternalIDs := map[string]string{
 		"physical_ip":  physicalIPs[0],
 		"physical_ips": strings.Join(physicalIPs, ","),
-	}
-	// Local gateway mode does not need SNAT or routes on GR because GR is only used for multiple external gws
-	// without SNAT. For normal N/S traffic, ingress/egress is mp0 on node switches
-	if config.Gateway.Mode != config.GatewayModeLocal {
-		// When there are multiple gateway routers (which would be the likely
-		// default for any sane deployment), we need to SNAT traffic
-		// heading to the logical space with the Gateway router's IP so that
-		// return traffic comes back to the same gateway router.
-		logicalRouterOptions["lb_force_snat_ip"] = "router_ip"
-		logicalRouterOptions["snat-ct-zone"] = "0"
 	}
 
 	logicalRouter := nbdb.LogicalRouter{
@@ -363,8 +352,9 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 	// gws or pod CNFs will be added within pods.go addLogicalPort
 	nats := make([]*nbdb.NAT, 0, len(clusterIPSubnet))
 	var nat *nbdb.NAT
-	if !config.Gateway.DisableSNATMultipleGWs && config.Gateway.Mode != config.GatewayModeLocal {
-		// Default SNAT rules.
+	if !config.Gateway.DisableSNATMultipleGWs {
+		// Default SNAT rules. DisableSNATMultipleGWs=false in LGW (traffic egresses via mp0) always.
+		// We are not checking for gateway mode to be shared explicitly to reduce topology differences.
 		externalIPs := make([]net.IP, len(l3GatewayConfig.IPAddresses))
 		for i, ip := range l3GatewayConfig.IPAddresses {
 			externalIPs[i] = ip.IP
@@ -391,201 +381,6 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		err := libovsdbops.DeleteNatsFromRouter(oc.nbClient, gatewayRouter, nats...)
 		if err != nil {
 			return fmt.Errorf("failed to delete GW SNAT rule for pod on router %s error: %v", gatewayRouter, err)
-		}
-	}
-
-	return nil
-}
-
-// This DistributedGWPort guarantees to always have both IPv4 and IPv6 regardless of dual-stack
-func (oc *Controller) addDistributedGWPort() error {
-	masterChassisID, err := util.GetNodeChassisID()
-	if err != nil {
-		return fmt.Errorf("failed to get master's chassis ID error: %v", err)
-	}
-
-	// the distributed gateway port is always dual-stack and uses the IPv4 address to generate its mac
-	dgpName := types.RouterToSwitchPrefix + types.NodeLocalSwitch
-
-	dgpMac := util.IPAddrToHWAddr(net.ParseIP(types.V4NodeLocalDistributedGWPortIP)).String()
-	dgpNetworkV4 := fmt.Sprintf("%s/%d", types.V4NodeLocalDistributedGWPortIP, types.V4NodeLocalNATSubnetPrefix)
-	dgpNetworkV6 := fmt.Sprintf("%s/%d", types.V6NodeLocalDistributedGWPortIP, types.V6NodeLocalNATSubnetPrefix)
-
-	logicalRouter := nbdb.LogicalRouter{}
-	logicalRouterPort := nbdb.LogicalRouterPort{
-		Name:     dgpName,
-		MAC:      dgpMac,
-		Networks: []string{dgpNetworkV4, dgpNetworkV6},
-	}
-	opModels := []libovsdbops.OperationModel{
-		{
-			Model: &logicalRouterPort,
-			OnModelUpdates: []interface{}{
-				&logicalRouterPort.MAC,
-				&logicalRouterPort.Networks,
-			},
-			DoAfter: func() {
-				logicalRouter.Ports = []string{logicalRouterPort.UUID}
-			},
-		},
-		{
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: []interface{}{
-				&logicalRouter.Ports,
-			},
-			ErrNotFound: true,
-		},
-	}
-	_, err = oc.modelClient.CreateOrUpdate(opModels...)
-	if err != nil {
-		return fmt.Errorf("unable to add distributed GW port: %s to logical router: %s, err: %v", dgpName, types.OVNClusterRouter, err)
-	}
-	// The DPG port will be used to create the gateway chassis below. It can't
-	// have a named UUID, because it won't be found, hence: swap out the named
-	// UUID to the real one if we are performing a create operation.
-	//if libovsdbops.IsNamedUUID(logicalRouterPort.UUID) {
-	//	logicalRouterPort.UUID = res[0].UUID.GoUUID
-	//}
-
-	gatewayChassis := nbdb.GatewayChassis{
-		ChassisName: masterChassisID,
-		ExternalIDs: map[string]string{
-			"dpg_name": dgpName,
-		},
-		Name:     fmt.Sprintf("%s_%s", dgpName, masterChassisID),
-		Priority: 100,
-	}
-	opModels = []libovsdbops.OperationModel{
-		{
-			Model: &gatewayChassis,
-			OnModelUpdates: []interface{}{
-				&gatewayChassis.ChassisName,
-				&gatewayChassis.Name,
-			},
-			DoAfter: func() {
-				logicalRouterPort.GatewayChassis = []string{gatewayChassis.UUID}
-			},
-		},
-		{
-			Model: &logicalRouterPort,
-			OnModelMutations: []interface{}{
-				&logicalRouterPort.GatewayChassis,
-			},
-			ErrNotFound: true,
-		},
-	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("unable to add gateway chassis: %s to logical router port: %s, err: %v", masterChassisID, dgpName, err)
-	}
-
-	// connect the distributed gateway port to logical switch configured with localnet port
-	logicalSwitch := nbdb.LogicalSwitch{
-		Name: types.NodeLocalSwitch,
-	}
-	opModels = []libovsdbops.OperationModel{
-		{
-			Model:          &logicalSwitch,
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.NodeLocalSwitch },
-		},
-	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("unable to create the logical switch for the localnet port, err: %v", err)
-	}
-
-	// add localnet port to the logical switch
-	lclNetPortname := "lnet-" + types.NodeLocalSwitch
-
-	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name:      lclNetPortname,
-		Addresses: []string{"unknown"},
-		Type:      "localnet",
-		Options: map[string]string{
-			"network_name": types.LocalNetworkName,
-		},
-	}
-	opModels = []libovsdbops.OperationModel{
-		{
-			Model: &logicalSwitchPort,
-			DoAfter: func() {
-				logicalSwitch.Ports = []string{logicalSwitchPort.UUID}
-			},
-		},
-		{
-			Model:          &logicalSwitch,
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.NodeLocalSwitch },
-			OnModelMutations: []interface{}{
-				&logicalSwitch.Ports,
-			},
-			ErrNotFound: true,
-		},
-	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("unable to add the localnet port to the logical switch, err: %v", err)
-	}
-
-	// connect the switch to the distributed router
-	lspName := types.SwitchToRouterPrefix + types.NodeLocalSwitch
-
-	logicalSwitchPort = nbdb.LogicalSwitchPort{
-		Name:      lspName,
-		Addresses: []string{"router"},
-		Type:      "router",
-		Options: map[string]string{
-			"nat-addresses": "router",
-			"router-port":   dgpName,
-		},
-	}
-	opModels = []libovsdbops.OperationModel{
-		{
-			Model: &logicalSwitchPort,
-			DoAfter: func() {
-				logicalSwitch.Ports = []string{logicalSwitchPort.UUID}
-			},
-		},
-		{
-			Model:          &logicalSwitch,
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.NodeLocalSwitch },
-			OnModelMutations: []interface{}{
-				&logicalSwitch.Ports,
-			},
-			ErrNotFound: true,
-		},
-	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("unable to add the localnet port to the logical switch, err: %v", err)
-	}
-
-	// finally add an entry to the OVN SB MAC_Binding table, if not present, to capture the
-	// MAC-IP binding of types.V4NodeLocalNATSubnetNextHop address or
-	// types.V6NodeLocalNATSubnetNextHop address to its MAC. Normally, this will
-	// be learnt and added by the chassis to which the distributed gateway port (DGP) is
-	// bound. However, in our case we don't send any traffic out with the DGP port's IP
-	// as source IP, so that binding will never be learnt and we need to seed it.
-
-	var nodeLocalNatSubnetNextHop string
-	dnatSnatNextHopMac := util.IPAddrToHWAddr(net.ParseIP(types.V4NodeLocalNATSubnetNextHop))
-	nodeLocalNatSubnetNextHop = types.V4NodeLocalNATSubnetNextHop + " " + types.V6NodeLocalNATSubnetNextHop
-
-	macResult := []sbdb.MACBinding{}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	if err := oc.sbClient.WhereCache(func(mb *sbdb.MACBinding) bool {
-		return mb.LogicalPort == dgpName && mb.MAC == dnatSnatNextHopMac.String()
-	}).List(ctx, &macResult); err != nil {
-		return fmt.Errorf("failed to check existence of MAC_Binding entry of (%s, %s) for distributed router port %s "+
-			"error: %v", nodeLocalNatSubnetNextHop, dnatSnatNextHopMac, dgpName, err)
-	}
-
-	if len(macResult) > 0 {
-		klog.Infof("The MAC_Binding entry of (%s, %s) exists on distributed router port %s", nodeLocalNatSubnetNextHop, dnatSnatNextHopMac, dgpName)
-		return nil
-	}
-
-	for _, ip := range []string{types.V4NodeLocalNATSubnetNextHop, types.V6NodeLocalNATSubnetNextHop} {
-		nextHop := net.ParseIP(ip)
-		if err := util.CreateMACBinding(dgpName, types.OVNClusterRouter, dnatSnatNextHopMac, nextHop); err != nil {
-			return fmt.Errorf("unable to create mac binding for DGP: %v", err)
 		}
 	}
 
@@ -736,13 +531,10 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 
 func (oc *Controller) addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet, otherHostAddrs []string) error {
 	var l3Prefix string
-	var natSubnetNextHop string
 	if utilnet.IsIPv6(hostIfAddr.IP) {
 		l3Prefix = "ip6"
-		natSubnetNextHop = types.V6NodeLocalNATSubnetNextHop
 	} else {
 		l3Prefix = "ip4"
-		natSubnetNextHop = types.V4NodeLocalNATSubnetNextHop
 	}
 
 	matches := sets.NewString()
@@ -755,36 +547,6 @@ func (oc *Controller) addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAd
 	}
 	if err := oc.syncPolicyBasedRoutes(nodeName, matches, types.NodeSubnetPolicyPriority, mgmtPortIP); err != nil {
 		return fmt.Errorf("unable to sync node subnet policies, err: %v", err)
-	}
-
-	if config.Gateway.Mode == config.GatewayModeLocal {
-
-		// policy to allow host -> service -> hairpin back to host
-		matchStr := fmt.Sprintf("%s.src == %s && %s.dst == %s /* %s */",
-			l3Prefix, mgmtPortIP, l3Prefix, hostIfAddr.IP.String(), nodeName)
-		if err := oc.syncPolicyBasedRoutes(nodeName, sets.NewString(matchStr), types.MGMTPortPolicyPriority, natSubnetNextHop); err != nil {
-			return fmt.Errorf("unable to sync management port policies, err: %v", err)
-		}
-
-		var matchDst string
-		// Local gw mode needs to use DGP to do hostA -> service -> hostB
-		var clusterL3Prefix string
-		for _, clusterSubnet := range config.Default.ClusterSubnets {
-			if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-				clusterL3Prefix = "ip6"
-			} else {
-				clusterL3Prefix = "ip4"
-			}
-			if l3Prefix != clusterL3Prefix {
-				continue
-			}
-			matchDst += fmt.Sprintf(" && %s.dst != %s", clusterL3Prefix, clusterSubnet.CIDR)
-		}
-		matchStr = fmt.Sprintf("%s.src == %s %s /* inter-%s */",
-			l3Prefix, mgmtPortIP, matchDst, nodeName)
-		if err := oc.syncPolicyBasedRoutes(nodeName, sets.NewString(matchStr), types.InterNodePolicyPriority, natSubnetNextHop); err != nil {
-			return fmt.Errorf("unable to sync inter-node policies, err: %v", err)
-		}
 	}
 
 	return nil
@@ -956,69 +718,6 @@ func (oc *Controller) deletePolicyBasedRoutes(policyID, priority string) error {
 	}
 	if err := oc.modelClient.Delete(opModels...); err != nil {
 		return fmt.Errorf("unable to delete logical router policy, err: %v", err)
-	}
-	return nil
-}
-
-func (oc *Controller) addNodeLocalNatEntries(node *kapi.Node, mgmtPortMAC string, mgmtPortIfAddr *net.IPNet) error {
-	var externalIP net.IP
-
-	isIPv6 := utilnet.IsIPv6CIDR(mgmtPortIfAddr)
-	annotationPresent := false
-	externalIPs, err := util.ParseNodeLocalNatIPAnnotation(node)
-	if err == nil {
-		for _, ip := range externalIPs {
-			if isIPv6 == utilnet.IsIPv6(ip) {
-				klog.V(5).Infof("Found node local NAT IP %s in %v for the node %s, so reusing it", ip, externalIPs, node.Name)
-				externalIP = ip
-				annotationPresent = true
-				break
-			}
-		}
-	}
-	if !annotationPresent {
-		if isIPv6 {
-			externalIP, err = oc.nodeLocalNatIPv6Allocator.AllocateNext()
-		} else {
-			externalIP, err = oc.nodeLocalNatIPv4Allocator.AllocateNext()
-		}
-		if err != nil {
-			return fmt.Errorf("error allocating node local NAT IP for node %s: %v", node.Name, err)
-		}
-		externalIPs = append(externalIPs, externalIP)
-		defer func() {
-			// Release the allocation on error
-			if err != nil {
-				if isIPv6 {
-					_ = oc.nodeLocalNatIPv6Allocator.Release(externalIP)
-				} else {
-					_ = oc.nodeLocalNatIPv4Allocator.Release(externalIP)
-				}
-			}
-		}()
-	}
-
-	mgmtPortName := types.K8sPrefix + node.Name
-	nat := libovsdbops.BuildRouterDNATAndSNAT(&externalIP, mgmtPortIfAddr, mgmtPortName, mgmtPortMAC, nil)
-	err = libovsdbops.AddOrUpdateNatsToRouter(oc.nbClient, types.OVNClusterRouter, nat)
-	if err != nil {
-		return fmt.Errorf("failed to add dnat_and_snat entry for the management port on node %s, "+
-			"error: %v", node.Name, err)
-	}
-
-	if annotationPresent {
-		return nil
-	}
-	// capture the node local NAT IP as a node annotation so that we can re-create it on onvkube-restart
-	nodeAnnotations, err := util.CreateNodeLocalNatAnnotation(externalIPs)
-	if err != nil {
-		return fmt.Errorf("failed to marshal node %q annotation for node local NAT IP %s",
-			node.Name, externalIP.String())
-	}
-	err = oc.kube.SetAnnotationsOnNode(node.Name, nodeAnnotations)
-	if err != nil {
-		return fmt.Errorf("failed to set node local NAT IP annotation on node %s: %v",
-			node.Name, err)
 	}
 	return nil
 }
