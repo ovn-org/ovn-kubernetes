@@ -41,6 +41,10 @@ func getUUID(model model.Model) string {
 		return t.UUID
 	case *nbdb.NBGlobal:
 		return t.UUID
+	case *nbdb.MeterBand:
+		return t.UUID
+	case *nbdb.Meter:
+		return t.UUID
 	case *sbdb.Chassis:
 		return t.UUID
 	case *sbdb.MACBinding:
@@ -81,6 +85,10 @@ func setUUID(model model.Model, uuid string) {
 	case *nbdb.PortGroup:
 		t.UUID = uuid
 	case *nbdb.NBGlobal:
+		t.UUID = uuid
+	case *nbdb.MeterBand:
+		t.UUID = uuid
+	case *nbdb.Meter:
 		t.UUID = uuid
 	case *sbdb.Chassis:
 		t.UUID = uuid
@@ -160,6 +168,17 @@ func copyIndexes(model model.Model) model.Model {
 		return &nbdb.NBGlobal{
 			UUID: t.UUID,
 		}
+	case *nbdb.MeterBand:
+		{
+			return &nbdb.MeterBand{
+				UUID: t.UUID,
+			}
+		}
+	case *nbdb.Meter:
+		return &nbdb.Meter{
+			UUID: t.UUID,
+			Name: t.Name,
+		}
 	case *sbdb.Chassis:
 		return &sbdb.Chassis{
 			UUID: t.UUID,
@@ -207,6 +226,10 @@ func getListFromModel(model model.Model) interface{} {
 		return &[]nbdb.PortGroup{}
 	case *nbdb.NBGlobal:
 		return &[]nbdb.NBGlobal{}
+	case *nbdb.MeterBand:
+		return &[]nbdb.MeterBand{}
+	case *nbdb.Meter:
+		return &[]nbdb.Meter{}
 	case *sbdb.Chassis:
 		return &[]sbdb.Chassis{}
 	case *sbdb.MACBinding:

@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -264,27 +263,40 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		}
 	}
 
-	if stdout, _, err := util.RunOVNNbctl("--data=bare", "--format=csv", "--no-headings", "--columns=_uuid,fair",
-		"find", "meter", "name="+types.OvnACLLoggingMeter); err == nil {
-		if stdout != "" {
-			columns := strings.Split(stdout, ",")
-			uuid := columns[0]
-			fair := columns[1]
-			if fair == "false" {
-				// fair metering ensures that instead of sharing one meter across several entities
-				// each entity will be rate-limited on its own
-				if _, _, err := util.RunOVNNbctl("set", "meter", uuid, "fair=true"); err != nil {
-					klog.Warningf("Failed to enable 'fair' metering for %s meter: %v", types.OvnACLLoggingMeter, err)
-				}
-			}
-		} else {
-			dropRate := strconv.Itoa(config.Logging.ACLLoggingRateLimit)
-			if _, _, err := util.RunOVNNbctl("--fair", "meter-add", types.OvnACLLoggingMeter, "drop", dropRate, "pktps"); err != nil {
-				klog.Warningf("ACL logging support enabled, however acl-logging meter could not be created: %v. "+
-					"Disabling ACL logging support", err)
-				oc.aclLoggingEnabled = false
-			}
+	meterFairness := true
+
+	// This always needs to be looked up in two transactions because there's no way to lookup
+	// a meter's meter_band
+	aclLogMeterPtr, err := libovsdbops.FindMeterByName(oc.nbClient, types.OvnACLLoggingMeter)
+	if err != nil && err != libovsdbclient.ErrNotFound {
+		// Log error but don't stop master setup
+		klog.Errorf("ACL logging support enabled, however failed to find acl-logging meter err: %v"+
+			"Disabling ACL logging support", err)
+		oc.aclLoggingEnabled = false
+	}
+
+	// if meter exists update its fairness, otherwise create it
+	if aclLogMeterPtr != nil {
+		if err := libovsdbops.UpdateMeterFairness(oc.nbClient, aclLogMeterPtr, meterFairness); err != nil {
+			klog.Warningf("Failed to enable 'fair' metering for %s meter: %v", types.OvnACLLoggingMeter, err)
 		}
+	} else {
+		meterBand := &nbdb.MeterBand{
+			Action: types.MeterAction,
+			Rate:   config.Logging.ACLLoggingRateLimit,
+		}
+		meter := &nbdb.Meter{
+			Name: types.OvnACLLoggingMeter,
+			Fair: &meterFairness,
+			Unit: types.PacketsPerSecond,
+		}
+
+		if err := libovsdbops.CreateMeterWithBand(oc.nbClient, meter, meterBand); err != nil {
+			klog.Warningf("ACL logging support enabled, however acl-logging meter could not be created: %v. "+
+				"Disabling ACL logging support", err)
+			oc.aclLoggingEnabled = false
+		}
+
 	}
 
 	// FIXME: When https://github.com/ovn-org/libovsdb/issues/235 is fixed,
