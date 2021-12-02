@@ -6,7 +6,6 @@ package node
 import (
 	"fmt"
 	"net"
-	"os"
 	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
@@ -168,15 +167,12 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 			// we need to warn so that it can be debugged as to why routes are disappearing
 			warnings = append(warnings, fmt.Sprintf("missing route entry for subnet %s via gateway %s on link %v",
 				subnet, cfg.gwIP, mpcfg.ifName))
-			err = util.LinkRoutesAdd(mpcfg.link, cfg.gwIP, []*net.IPNet{subnet}, 0)
-			if err != nil {
-				if os.IsExist(err) {
-					klog.V(5).Infof("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
-						err.Error(), subnet, cfg.gwIP)
-					continue
-				}
-			}
 		}
+		if err != nil {
+			return warnings, err
+		}
+
+		err = util.LinkRoutesAddOrUpdateMTU(mpcfg.link, cfg.gwIP, []*net.IPNet{subnet}, config.Default.RoutableMTU)
 		if err != nil {
 			return warnings, err
 		}

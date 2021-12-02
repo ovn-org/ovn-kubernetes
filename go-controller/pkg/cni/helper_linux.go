@@ -25,7 +25,7 @@ import (
 )
 
 type CNIPluginLibOps interface {
-	AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Link) error
+	AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Link, mtu int) error
 	SetupVeth(contVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error)
 }
 
@@ -33,8 +33,16 @@ type defaultCNIPluginLibOps struct{}
 
 var cniPluginLibOps CNIPluginLibOps = &defaultCNIPluginLibOps{}
 
-func (defaultCNIPluginLibOps) AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Link) error {
-	return ip.AddRoute(ipn, gw, dev)
+func (defaultCNIPluginLibOps) AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Link, mtu int) error {
+	route := &netlink.Route{
+		LinkIndex: dev.Attrs().Index,
+		Scope:     netlink.SCOPE_UNIVERSE,
+		Dst:       ipn,
+		Gw:        gw,
+		MTU:       mtu,
+	}
+
+	return util.GetNetLinkOps().RouteAdd(route)
 }
 
 func (defaultCNIPluginLibOps) SetupVeth(contVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error) {
@@ -99,12 +107,12 @@ func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
 		}
 	}
 	for _, gw := range ifInfo.Gateways {
-		if err := cniPluginLibOps.AddRoute(nil, gw, link); err != nil {
+		if err := cniPluginLibOps.AddRoute(nil, gw, link, ifInfo.RoutableMTU); err != nil {
 			return fmt.Errorf("failed to add gateway route: %v", err)
 		}
 	}
 	for _, route := range ifInfo.Routes {
-		if err := cniPluginLibOps.AddRoute(route.Dest, route.NextHop, link); err != nil {
+		if err := cniPluginLibOps.AddRoute(route.Dest, route.NextHop, link, ifInfo.RoutableMTU); err != nil {
 			return fmt.Errorf("failed to add pod route %v via %v: %v", route.Dest, route.NextHop, err)
 		}
 	}
