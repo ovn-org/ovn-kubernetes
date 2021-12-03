@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/ovn-org/libovsdb/cache"
-	"github.com/ovn-org/libovsdb/client"
+	libovsdbcache "github.com/ovn-org/libovsdb/cache"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
+	libovsdbmodel "github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -224,20 +226,43 @@ var metricPortBindingUpLatency = prometheus.NewHistogram(prometheus.HistogramOpt
 	Buckets:   prometheus.ExponentialBuckets(.01, 2, 15),
 })
 
-var registerMasterMetricsOnce sync.Once
-var startMasterMetricUpdaterOnce sync.Once
+// The nb_cfg metrics: Currently, nb_cfg is a random serial number that we increment every 30 seconds.
+// northd copies this to SBDB table SB_Global, then ovn-controller reads this and writes it to a chassis-specific
+// table Chassis_Private in SBDB as well
+
+// metricNbcfgNbdb is the value of nb_cfg we write to NBDB
+// There is an equivalent metric for the value in SBDB
+var metricNbcfgNbdb = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "nb_cfg_nbdb",
+	Help:      "The value of nb_cfg in OVN Northbound database NB_Global table",
+})
+
+var metricNbcfgChassis = prometheus.NewDesc(
+	prometheus.BuildFQName(MetricOvnkubeNamespace, MetricOvnkubeSubsystemMaster, "nb_cfg_chassis"),
+	"The value of nb_cfg in OVN Southbound database Chassis_Private table as reported by each OVN-controller",
+	[]string{"node"}, nil,
+)
+
+var (
+	registerMasterMetricsOnce    sync.Once
+	startMasterMetricUpdaterOnce sync.Once
+	// nbCfgValue is an arbitrary number written to NB_Global tables nb_cfg field
+	nbCfgValue int
+)
 
 // RegisterMasterMetrics registers some ovnkube master metrics with the Prometheus
 // registry
-func RegisterMasterMetrics(sbClient client.Client) {
+func RegisterMasterMetrics(sbClient libovsdbclient.Client) {
 	registerMasterMetricsOnce.Do(func() {
 		// ovnkube-master metrics
 		// the updater for this metric is activated
 		// after leader election
 		prometheus.MustRegister(metricE2ETimestamp)
+		prometheus.MustRegister(metricNbcfgNbdb)
 		prometheus.MustRegister(MetricMasterLeader)
 		prometheus.MustRegister(metricPodCreationLatency)
-
 		scrapeOvnTimestamp := func() float64 {
 			sbGlobal, err := libovsdbops.FindSBGlobal(sbClient)
 			if err != nil {
@@ -256,6 +281,24 @@ func RegisterMasterMetrics(sbClient client.Client) {
 				Name:      "sb_e2e_timestamp",
 				Help:      "The current e2e-timestamp value as observed in the southbound database",
 			}, scrapeOvnTimestamp))
+		scrapeNbcfgSbdb := func() float64 {
+			row, err := libovsdbops.FindSBGlobal(sbClient)
+			if err != nil {
+				klog.Errorf("Failed to get SB_Global: %v", err)
+				return 0
+			}
+			return float64(row.NbCfg)
+		}
+		prometheus.MustRegister(prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: MetricOvnkubeNamespace,
+				Subsystem: MetricOvnkubeSubsystemMaster,
+				Name:      "nb_cfg_sbdb",
+				Help:      "The value of nb_cfg in OVN Southbound database SB_Global table",
+			},
+			scrapeNbcfgSbdb,
+		))
+		prometheus.MustRegister(&chassisPrivateScraper{sbClient: sbClient})
 		prometheus.MustRegister(prometheus.NewCounterFunc(
 			prometheus.CounterOpts{
 				Namespace: MetricOvnkubeNamespace,
@@ -308,9 +351,10 @@ func RegisterMasterMetrics(sbClient client.Client) {
 }
 
 // StartMasterMetricUpdater adds a goroutine that updates a "timestamp" value in the
-// nbdb every 30 seconds. This is so we can determine freshness of the database.
-// Also, update IPsec enabled or disable metric.
-func StartMasterMetricUpdater(stopChan <-chan struct{}, nbClient client.Client) {
+// NBDB every 30 seconds. This is so we can determine freshness of the database.
+// This goroutine also updates 'nb_cfg' field to an arbitrary value.
+// Add a handler to react to IPsec configuration changes.
+func StartMasterMetricUpdater(stopChan <-chan struct{}, nbClient libovsdbclient.Client) {
 	startMasterMetricUpdaterOnce.Do(func() {
 		addIPSecMetricHandler(nbClient)
 		go func() {
@@ -320,6 +364,7 @@ func StartMasterMetricUpdater(stopChan <-chan struct{}, nbClient client.Client) 
 				select {
 				case <-ticker.C:
 					updateE2ETimestampMetric(nbClient)
+					incrementNbCfg(nbClient)
 				case <-stopChan:
 					return
 				}
@@ -371,10 +416,10 @@ func UpdateEgressFirewallRuleCount(count float64) {
 	metricEgressFirewallRuleCount.Add(count)
 }
 
-func updateE2ETimestampMetric(ovnNBClient client.Client) {
+func updateE2ETimestampMetric(nbClient libovsdbclient.Client) {
 	currentTime := time.Now().Unix()
 	// assumption that only first row is relevant in NB_Global table
-	if err := libovsdbops.UpdateNBGlobalOptions(ovnNBClient, map[string]string{"e2e_timestamp": fmt.Sprintf("%d", currentTime)}); err != nil {
+	if err := libovsdbops.UpdateNBGlobalOptions(nbClient, map[string]string{"e2e_timestamp": fmt.Sprintf("%d", currentTime)}); err != nil {
 		klog.Errorf("Unable to update E2E timestamp metric err: %v", err)
 		return
 	}
@@ -382,21 +427,21 @@ func updateE2ETimestampMetric(ovnNBClient client.Client) {
 	metricE2ETimestamp.Set(float64(currentTime))
 }
 
-func addIPSecMetricHandler(ovnNBClient client.Client) {
-	ovnNBClient.Cache().AddEventHandler(&cache.EventHandlerFuncs{
-		AddFunc: func(table string, model model.Model) {
+func addIPSecMetricHandler(nbClient libovsdbclient.Client) {
+	nbClient.Cache().AddEventHandler(&libovsdbcache.EventHandlerFuncs{
+		AddFunc: func(table string, model libovsdbmodel.Model) {
 			ipsecMetricHandler(table, model)
 		},
-		UpdateFunc: func(table string, _, new model.Model) {
+		UpdateFunc: func(table string, _, new libovsdbmodel.Model) {
 			ipsecMetricHandler(table, new)
 		},
-		DeleteFunc: func(table string, model model.Model) {
+		DeleteFunc: func(table string, model libovsdbmodel.Model) {
 			ipsecMetricHandler(table, model)
 		},
 	})
 }
 
-func ipsecMetricHandler(table string, model model.Model) {
+func ipsecMetricHandler(table string, model libovsdbmodel.Model) {
 	if table != "NB_Global" {
 		return
 	}
@@ -449,7 +494,7 @@ type ControlPlaneRecorder struct {
 	podRecords map[kapimtypes.UID]*record
 }
 
-func NewControlPlaneRecorder(sbClient client.Client) *ControlPlaneRecorder {
+func NewControlPlaneRecorder(sbClient libovsdbclient.Client) *ControlPlaneRecorder {
 	recorder := ControlPlaneRecorder{sync.Mutex{}, make(map[kapimtypes.UID]*record)}
 	sbClient.Cache().AddEventHandler(&cache.EventHandlerFuncs{
 		AddFunc: func(table string, model model.Model) {
@@ -567,4 +612,76 @@ func getPodUIDFromPortBinding(row *sbdb.PortBinding) kapimtypes.UID {
 		return ""
 	}
 	return kapimtypes.UID(podUID)
+}
+
+func incrementNbCfg(nbClient libovsdbclient.Client) {
+	nbCfgValue += 1
+	if err := libovsdbops.UpdateNBGlobalNbCfg(nbClient, nbCfgValue); err != nil {
+		klog.Errorf("Failed to increment NB_Global nb_cfg value: %v", err)
+		return
+	}
+	metricNbcfgNbdb.Set(float64(nbCfgValue))
+}
+
+// chassisPrivateScraper implements the Collector interface so we can
+// generate chassis metrics on-the-fly per scrape
+type chassisPrivateScraper struct {
+	sbClient libovsdbclient.Client
+}
+
+func (c *chassisPrivateScraper) Describe(ch chan<- *prometheus.Desc) {
+	var metricSeen bool
+	metricsCh := make(chan prometheus.Metric)
+	go func() {
+		c.Collect(metricsCh)
+		close(metricsCh)
+	}()
+	for metricRx := range metricsCh {
+		metricSeen = true
+		ch <- metricRx.Desc()
+	}
+	if !metricSeen {
+		descFailErr := fmt.Errorf("failed to describe metric %q", metricNbcfgChassis.String())
+		klog.Errorln(descFailErr.Error())
+		ch <- prometheus.NewInvalidDesc(descFailErr)
+	}
+}
+
+// Collect scrapes the Chassis and Chassis_Private tables to determine the
+func (c *chassisPrivateScraper) Collect(ch chan<- prometheus.Metric) {
+	// the nb_cfg value is in Chassis_Private, but the
+	// hostname is in Chassis. So we need to list both and join
+	allChassis, err := libovsdbops.ListChassis(c.sbClient)
+	if err != nil {
+		errMsg := fmt.Sprintf("Failed to list SBDB Chassis table: %v", err)
+		klog.Error(errMsg)
+		ch <- prometheus.NewInvalidMetric(metricNbcfgChassis, fmt.Errorf("%s", errMsg))
+		return
+	}
+
+	// map of chassis name to hostname
+	hostnames := make(map[string]string, len(allChassis))
+	for _, chassis := range allChassis {
+		hostnames[chassis.Name] = chassis.Hostname
+	}
+
+	allChassisPrivate, err := libovsdbops.FindChassisPrivate(c.sbClient)
+	if err != nil {
+		errMsg := fmt.Sprintf("Failed to list SBDB Chassis_Private table: %v", err)
+		klog.Error(errMsg)
+		ch <- prometheus.NewInvalidMetric(metricNbcfgChassis, fmt.Errorf("%s", errMsg))
+		return
+	}
+	for _, chassis := range allChassisPrivate {
+		hostname, ok := hostnames[chassis.Name]
+		if !ok || hostname == "" {
+			continue
+		}
+		ch <- prometheus.MustNewConstMetric(
+			metricNbcfgChassis,
+			prometheus.GaugeValue,
+			float64(chassis.NbCfg),
+			hostname,
+		)
+	}
 }

@@ -60,3 +60,26 @@ func UpdateNBGlobalOptions(nbClient libovsdbclient.Client, options map[string]st
 
 	return nil
 }
+
+// UpdateNBGlobalNbCfg updates the nb_cfg field for the single row in the NBGlobal table
+func UpdateNBGlobalNbCfg(nbClient libovsdbclient.Client, nbCfg int) error {
+	nbGlobal, err := FindNBGlobal(nbClient)
+	if err != nil {
+		return err
+	}
+	nbGlobal.NbCfg = nbCfg
+
+	opModel := OperationModel{
+		Model: nbGlobal,
+		OnModelUpdates: []interface{}{
+			&nbGlobal.NbCfg,
+		},
+		ErrNotFound: true,
+	}
+
+	m := NewModelClient(nbClient)
+	if _, err := m.CreateOrUpdate(opModel); err != nil {
+		return fmt.Errorf("error while updating NBGlobal nb_cfg: %v", err)
+	}
+	return nil
+}
