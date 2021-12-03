@@ -6,12 +6,17 @@ import (
 	"os"
 	"strings"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
 	kexec "k8s.io/utils/exec"
 )
 
-type readinessFunc func(string) error
+type readinessFunc func(libovsdbclient.Client, libovsdbclient.Client, string) error
 
 var callbacks = map[string]readinessFunc{
 	"ovn-controller": ovnControllerReadiness,
@@ -25,7 +30,7 @@ var callbacks = map[string]readinessFunc{
 	"ovnsb-db-raft":  ovnSBDBRaftReadiness,
 }
 
-func ovnControllerReadiness(target string) error {
+func ovnControllerReadiness(nbClient libovsdbclient.Client, sbClient libovsdbclient.Client, target string) error {
 	// Check if ovn-controller is connected to OVN SB
 	output, _, err := util.RunOVSAppctlWithTimeout(5, "-t", target, "connection-status")
 	if err != nil {
@@ -64,7 +69,7 @@ func ovnControllerReadiness(target string) error {
 	return nil
 }
 
-func ovnNBDBReadiness(target string) error {
+func ovnNBDBReadiness(nbClient libovsdbclient.Client, sbClient libovsdbclient.Client, target string) error {
 	var err error
 	var output string
 
@@ -74,19 +79,23 @@ func ovnNBDBReadiness(target string) error {
 	if err != nil {
 		return fmt.Errorf("failed connecting to %q: (%v)", target, err)
 	}
-	output, _, err = util.RunOVNNbctlWithTimeout(5, "--data=bare", "--no-heading", "--columns=target",
-		"find", "connection", "target!=_")
+
+	connections, err := libovsdbops.FindNBDBConnectionsWithUnsetTargets(nbClient)
 	if err != nil {
 		return fmt.Errorf("%s is not ready: (%v)", target, err)
 	}
 
-	if strings.HasPrefix(output, "ptcp") || strings.HasPrefix(output, "pssl") {
-		return nil
+	// If we see the right connection in the connection list its all set
+	for _, connection := range connections {
+		if strings.HasPrefix(connection.Target, "ptcp") || strings.HasPrefix(connection.Target, "pssl") {
+			return nil
+		}
 	}
+
 	return fmt.Errorf("%s is not setup for passive connection: %v", target, output)
 }
 
-func ovnSBDBReadiness(target string) error {
+func ovnSBDBReadiness(nbClient libovsdbclient.Client, sbClient libovsdbclient.Client, target string) error {
 	var err error
 	var output string
 
@@ -96,19 +105,23 @@ func ovnSBDBReadiness(target string) error {
 	if err != nil {
 		return fmt.Errorf("failed connecting to %q: (%v)", target, err)
 	}
-	output, _, err = util.RunOVNSbctlWithTimeout(5, "--data=bare", "--no-heading", "--columns=target",
-		"find", "connection", "target!=_")
+
+	connections, err := libovsdbops.FindSBDBConnectionsWithUnsetTargets(sbClient)
 	if err != nil {
 		return fmt.Errorf("%s is not ready: (%v)", target, err)
 	}
 
-	if strings.HasPrefix(output, "ptcp") || strings.HasPrefix(output, "pssl") {
-		return nil
+	// If we see the right connection in the connection list its all set
+	for _, connection := range connections {
+		if strings.HasPrefix(connection.Target, "ptcp") || strings.HasPrefix(connection.Target, "pssl") {
+			return nil
+		}
 	}
+
 	return fmt.Errorf("%s is not setup for passive connection: %v", target, output)
 }
 
-func ovnNorthdReadiness(target string) error {
+func ovnNorthdReadiness(nbClient libovsdbclient.Client, sbClient libovsdbclient.Client, target string) error {
 	stdout, _, err := util.RunOVNAppctlWithTimeout(5, "-t", target, "status")
 	if err != nil {
 		return fmt.Errorf("failed to get status from %s: (%v)", target, err)
@@ -136,7 +149,7 @@ func ovnNorthdReadiness(target string) error {
 	return nil
 }
 
-func ovnNbCtlReadiness(target string) error {
+func ovnNbCtlReadiness(nbClient libovsdbclient.Client, sbClient libovsdbclient.Client, target string) error {
 	// checking version works as it connects to the ovn-nbctl daemon and returns the version
 	// if nbctl isn't ready, version may fail to return
 	// NOTE: There is no nbctld process, but nbctl provides a daemon mode,
@@ -148,7 +161,7 @@ func ovnNbCtlReadiness(target string) error {
 	return nil
 }
 
-func ovsDaemonsReadiness(target string) error {
+func ovsDaemonsReadiness(nbClient libovsdbclient.Client, sbClient libovsdbclient.Client, target string) error {
 	_, _, err := util.RunOVSAppctlWithTimeout(5, "-t", "ovsdb-server", "ovsdb-server/list-dbs")
 	if err != nil {
 		return fmt.Errorf("failed retrieving list of databases from ovsdb-server: %v", err)
@@ -160,7 +173,7 @@ func ovsDaemonsReadiness(target string) error {
 	return nil
 }
 
-func ovnNodeReadiness(target string) error {
+func ovnNodeReadiness(nbClient libovsdbclient.Client, sbClient libovsdbclient.Client, target string) error {
 	// Inside the pod we always use `/etc/cni/net.d` folder even if kubelet
 	// was started with a different conf directory
 	confFile := "/etc/cni/net.d/10-ovn-kubernetes.conf"
@@ -171,7 +184,7 @@ func ovnNodeReadiness(target string) error {
 	return nil
 }
 
-func ovnNBDBRaftReadiness(target string) error {
+func ovnNBDBRaftReadiness(nbClient libovsdbclient.Client, sbClient libovsdbclient.Client, target string) error {
 	status, err := util.GetOVNDBServerInfo(15, "nb", "OVN_Northbound")
 	if err != nil {
 		return err
@@ -182,7 +195,7 @@ func ovnNBDBRaftReadiness(target string) error {
 	return nil
 }
 
-func ovnSBDBRaftReadiness(target string) error {
+func ovnSBDBRaftReadiness(nbClient libovsdbclient.Client, sbClient libovsdbclient.Client, target string) error {
 	status, err := util.GetOVNDBServerInfo(15, "sb", "OVN_Southbound")
 	if err != nil {
 		return err
@@ -205,12 +218,26 @@ var ReadinessProbeCommand = cli.Command{
 		},
 	},
 	Action: func(ctx *cli.Context) error {
+		var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+		var err error
 		target := ctx.String("target")
 		if err := util.SetExec(kexec.New()); err != nil {
 			return err
 		}
+
+		stopChan := make(chan struct{})
+		defer close(stopChan)
+
+		if libovsdbOvnNBClient, err = libovsdb.NewNBClient(stopChan); err != nil {
+			return fmt.Errorf("error when trying to initialize libovsdb NB client: %v", err)
+		}
+
+		if libovsdbOvnSBClient, err = libovsdb.NewSBClient(stopChan); err != nil {
+			return fmt.Errorf("error when trying to initialize libovsdb SB client: %v", err)
+		}
+
 		if cbfunc, ok := callbacks[target]; ok {
-			return cbfunc(target)
+			return cbfunc(libovsdbOvnNBClient, libovsdbOvnSBClient, target)
 		}
 		return fmt.Errorf("incorrect target specified")
 	},
