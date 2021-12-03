@@ -1143,7 +1143,7 @@ func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) e
 	return nil
 }
 
-// deleteNodeLogicalNetwork removes the logical switch and router associated with the node
+// deleteNodeLogicalNetwork removes the logical switch and logical router port associated with the node
 func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	// Remove switch to lb associations from the LBCache before removing the switch
 	lbCache, err := ovnlb.GetLBCache(oc.nbClient)
@@ -1152,19 +1152,19 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	}
 	lbCache.RemoveSwitch(nodeName)
 	// Remove the logical switch associated with the node
-	logicalRouterName := types.RouterToSwitchPrefix + nodeName
+	logicalRouterPortName := types.RouterToSwitchPrefix + nodeName
 	opModels := []libovsdbops.OperationModel{
 		{
 			Model:          &nbdb.LogicalSwitch{},
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == nodeName },
 		},
 		{
-			Model:          &nbdb.LogicalRouter{},
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == logicalRouterName },
+			Model:          &nbdb.LogicalRouterPort{},
+			ModelPredicate: func(lrp *nbdb.LogicalRouterPort) bool { return lrp.Name == logicalRouterPortName },
 		},
 	}
 	if err := oc.modelClient.Delete(opModels...); err != nil {
-		return fmt.Errorf("failed to delete logical switch and router associated with node: %s, error: %v", nodeName, err)
+		return fmt.Errorf("failed to delete logical switch and logical router port associated with node: %s, error: %v", nodeName, err)
 	}
 	return nil
 }
