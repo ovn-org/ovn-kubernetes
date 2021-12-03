@@ -58,8 +58,8 @@ func findSwitches(nbClient libovsdbclient.Client) ([]nbdb.LogicalSwitch, error) 
 	return switches, nil
 }
 
-// findSwitchesByPredicate Looks up switches in the cache based on the lookup function
-func findSwitchesByPredicate(nbClient libovsdbclient.Client, lookupFunction func(item *nbdb.LogicalSwitch) bool) ([]nbdb.LogicalSwitch, error) {
+// FindSwitchesByPredicate Looks up switches in the cache based on the lookup function
+func FindSwitchesByPredicate(nbClient libovsdbclient.Client, lookupFunction func(item *nbdb.LogicalSwitch) bool) ([]nbdb.LogicalSwitch, error) {
 	switches := []nbdb.LogicalSwitch{}
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	defer cancel()
@@ -82,7 +82,7 @@ func FindSwitchesWithOtherConfig(nbClient libovsdbclient.Client) ([]nbdb.Logical
 		return item.OtherConfig != nil
 	}
 
-	switches, err := findSwitchesByPredicate(nbClient, otherConfigSearch)
+	switches, err := FindSwitchesByPredicate(nbClient, otherConfigSearch)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func FindPerNodeJoinSwitches(nbClient libovsdbclient.Client) ([]nbdb.LogicalSwit
 		return strings.HasPrefix(item.Name, types.JoinSwitchPrefix)
 	}
 
-	switches, err := findSwitchesByPredicate(nbClient, joinSwitchSearch)
+	switches, err := FindSwitchesByPredicate(nbClient, joinSwitchSearch)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +214,7 @@ func RemoveACLsFromNodeSwitches(nbClient libovsdbclient.Client, acls []nbdb.ACL)
 		return !(strings.HasPrefix(item.Name, types.JoinSwitchPrefix) || item.Name == "join" || strings.HasPrefix(item.Name, types.ExternalSwitchPrefix))
 	}
 
-	switches, err := findSwitchesByPredicate(nbClient, nodeSwichLookupFcn)
+	switches, err := FindSwitchesByPredicate(nbClient, nodeSwichLookupFcn)
 	if err != nil {
 		return err
 	}
@@ -235,7 +235,7 @@ func RemoveACLsFromJoinSwitch(nbClient libovsdbclient.Client, acls []nbdb.ACL) e
 		return (strings.HasPrefix(item.Name, types.JoinSwitchPrefix) || item.Name == "join")
 	}
 
-	switches, err := findSwitchesByPredicate(nbClient, joinSwichLookupFcn)
+	switches, err := FindSwitchesByPredicate(nbClient, joinSwichLookupFcn)
 	if err != nil {
 		return err
 	}

@@ -178,7 +178,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 		// No subnet allocated yet; clean up
 		klog.V(5).Infof("No subnet allocation yet for %s", node.Name)
 		if annotationOK {
-			m.deleteOverlayPort(node)
+			m.deleteOverlayPort(m.nbClient, node)
 			annotator.Delete(types.HybridOverlayDRMAC)
 		}
 		return nil
@@ -227,13 +227,11 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 	if !lspOK {
 		klog.Infof("Creating / updating node %s hybrid overlay port with mac %s", node.Name, portMAC.String())
 
-		var stderr string
 		// create / update lsps
-		_, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", node.Name, portName,
-			"--", "lsp-set-addresses", portName, portMAC.String())
+		err := libovsdbops.CreateLSPOrMutateMac(m.nbClient, node.Name, portName, portMAC.String())
 		if err != nil {
 			return fmt.Errorf("failed to add hybrid overlay port for node %s"+
-				", stderr:%s: %v", node.Name, stderr, err)
+				", err: %v", node.Name, err)
 		}
 		for _, subnet := range subnets {
 			if err := util.UpdateNodeSwitchExcludeIPs(m.nbClient, node.Name, subnet); err != nil {
@@ -252,10 +250,12 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 	return nil
 }
 
-func (m *MasterController) deleteOverlayPort(node *kapi.Node) {
+func (m *MasterController) deleteOverlayPort(nbClient client.Client, node *kapi.Node) {
 	klog.Infof("Removing node %s hybrid overlay port", node.Name)
 	portName := util.GetHybridOverlayPortName(node.Name)
-	_, _, _ = util.RunOVNNbctl("--", "--if-exists", "lsp-del", portName)
+	if err := libovsdbops.LSPDelete(nbClient, portName); err != nil {
+		klog.Errorf("Failed deleting hybrind overlay port for node %s err: %v", node.Name, err)
+	}
 }
 
 // AddNode handles node additions
@@ -296,7 +296,7 @@ func (m *MasterController) DeleteNode(node *kapi.Node) error {
 	}
 
 	if _, ok := node.Annotations[types.HybridOverlayDRMAC]; ok && !houtil.IsHybridOverlayNode(node) {
-		m.deleteOverlayPort(node)
+		m.deleteOverlayPort(m.nbClient, node)
 	}
 
 	if err := m.removeHybridLRPolicySharedGW(node.Name); err != nil {

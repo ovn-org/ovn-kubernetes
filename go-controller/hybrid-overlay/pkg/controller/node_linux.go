@@ -9,10 +9,14 @@ import (
 	"sync"
 	"time"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -51,6 +55,7 @@ type NodeController struct {
 	flowChan chan struct{}
 
 	nodeLister listers.NodeLister
+	nbClient   libovsdbclient.Client
 }
 
 // newNodeController returns a node handler that listens for node events
@@ -62,6 +67,7 @@ func newNodeController(
 	_ kube.Interface,
 	nodeName string,
 	nodeLister listers.NodeLister,
+	nbClient libovsdbclient.Client,
 ) (nodeController, error) {
 
 	node := &NodeController{
@@ -71,6 +77,7 @@ func newNodeController(
 		flowMutex:  sync.Mutex{},
 		flowChan:   make(chan struct{}, 1),
 		nodeLister: nodeLister,
+		nbClient:   nbClient,
 	}
 	return node, nil
 }
@@ -241,16 +248,33 @@ func (n *NodeController) DeleteNode(node *kapi.Node) error {
 	return nil
 }
 
-func getLocalNodeSubnet(nodeName string) (*net.IPNet, error) {
+func getLocalNodeSubnet(nbClient libovsdbclient.Client, nodeName string) (*net.IPNet, error) {
 	var cidr string
 	var err error
 
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
 	if err := wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
-		if cidr, _, err = util.RunOVNNbctl("get", "logical_switch", nodeName, "other-config:subnet"); err != nil {
+		var nodeSwitch []nbdb.LogicalSwitch
+
+		if nodeSwitch, err = libovsdbops.FindSwitchesByPredicate(nbClient,
+			func(item *nbdb.LogicalSwitch) bool { return item.Name == nodeName }); err != nil {
+			klog.Errorf("Failed to lookup Logical Switch for node %s err: %v", nodeName, err)
 			return false, nil
 		}
-		return true, nil
+
+		if len(nodeSwitch) == 1 {
+			var ok bool
+			if cidr, ok = nodeSwitch[0].OtherConfig["subnet"]; !ok {
+				klog.Errorf("Failed for parse the subnet value from %s's other-config")
+				return false, nil
+			}
+
+			return true, nil
+
+		} else {
+			klog.Errorf("Multiple Logical Switches Found for node %s", nodeName)
+			return false, nil
+		}
 	}); err != nil {
 		return nil, fmt.Errorf("timed out waiting for node %q logical switch: %v", nodeName, err)
 	}
@@ -281,7 +305,7 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 		return nil
 	}
 
-	subnet, err := getLocalNodeSubnet(n.nodeName)
+	subnet, err := getLocalNodeSubnet(n.nbClient, n.nodeName)
 	if err != nil {
 		return err
 	}

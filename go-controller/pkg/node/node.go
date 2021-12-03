@@ -25,12 +25,15 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/upgrade"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -495,6 +498,15 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	}
 
 	if config.HybridOverlay.Enabled {
+		var libovsdbNBClient libovsdbclient.Client
+		var err error
+
+		stopChan := make(chan struct{})
+		defer close(stopChan)
+
+		if libovsdbNBClient, err = libovsdb.NewNBClient(stopChan); err != nil {
+			return fmt.Errorf("error when trying to initialize libovsdb NB client: %v", err)
+		}
 		// Not supported with DPUs, enforced in config
 		// TODO(adrianc): Revisit above comment
 		nodeController, err := honode.NewNode(
@@ -503,6 +515,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 			n.watchFactory.NodeInformer(),
 			n.watchFactory.LocalPodInformer(),
 			informer.NewDefaultEventHandler,
+			libovsdbNBClient,
 		)
 		if err != nil {
 			return err

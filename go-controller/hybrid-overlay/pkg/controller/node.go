@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"sync"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
@@ -85,11 +87,12 @@ func NewNode(
 	nodeInformer cache.SharedIndexInformer,
 	podInformer cache.SharedIndexInformer,
 	eventHandlerCreateFunction informer.EventHandlerCreateFunction,
+	nbClient libovsdbclient.Client,
 ) (*Node, error) {
 
 	nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
 
-	controller, err := newNodeController(kube, nodeName, nodeLister)
+	controller, err := newNodeController(kube, nodeName, nodeLister, nbClient)
 	if err != nil {
 		return nil, err
 	}

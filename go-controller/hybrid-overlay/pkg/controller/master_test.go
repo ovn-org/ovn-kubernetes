@@ -17,6 +17,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -193,17 +194,11 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 					Name:     types.OVNClusterRouter,
 					Policies: []string{"reroute-policy-UUID"},
 				},
-				&nbdb.LogicalSwitchPort{
-					Name: types.HybridOverlayPrefix + nodeName,
-					UUID: types.HybridOverlayPrefix + nodeName + "-UUID",
-				},
 			}
 
-			// Pre-add the HO port until the ovn-nbctl lsp-add commands are converted to libovsdb
 			nodeSwitch := &nbdb.LogicalSwitch{
-				Name:  nodeName,
-				UUID:  nodeName + "-UUID",
-				Ports: []string{types.HybridOverlayPrefix + nodeName + "-UUID"},
+				Name: nodeName,
+				UUID: nodeName + "-UUID",
 			}
 
 			initialExpectedDB := append(expectedDatabaseState, nodeSwitch)
@@ -226,20 +221,14 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			)
 			Expect(err).NotTo(HaveOccurred())
 
-			// #1 node add
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				// Setting the mac on the lsp
-				"ovn-nbctl --timeout=15 -- " +
-					"--may-exist lsp-add node1 int-node1 -- " +
-					"lsp-set-addresses int-node1 " + nodeHOMAC,
-			})
-			// #2 comes because we set the ho dr gw mac annotation in #1
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				// Setting the mac on the lsp
-				"ovn-nbctl --timeout=15 -- " +
-					"--may-exist lsp-add node1 int-node1 -- " +
-					"lsp-set-addresses int-node1 " + nodeHOMAC,
-			})
+			// Make the expected LSP is created and added to the node
+			expectedLSP := &nbdb.LogicalSwitchPort{
+				UUID:      libovsdbops.BuildNamedUUID(),
+				Name:      types.HybridOverlayPrefix + nodeName,
+				Addresses: []string{nodeHOMAC},
+			}
+
+			nodeSwitch.Ports = []string{expectedLSP.UUID}
 
 			f.Start(stopChan)
 			wg.Add(1)
@@ -259,28 +248,21 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			nodeSwitch.OtherConfig = map[string]string{"exclude_ips": "10.1.2.2"}
 
-			expectedDatabaseState = append(expectedDatabaseState, nodeSwitch)
+			expectedDatabaseState = append(expectedDatabaseState, nodeSwitch, expectedLSP)
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
-
-			// Test that deleting the node cleans up the OVN objects
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
-			})
 
 			err = fakeClient.CoreV1().Nodes().Delete(context.TODO(), nodeName, *metav1.NewDeleteOptions(0))
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+
+			// In a real db, deleting the LSP would remove the reference here, but in our testing ovsdb server it does not
+			// nodeSwitch.Ports = []string{}
 			expectedDatabaseState = []libovsdbtest.TestData{
 				&nbdb.LogicalRouter{
 					Name: types.OVNClusterRouter,
-				},
-				// This will be deleted once the nbctl commands for lsps are converted
-				&nbdb.LogicalSwitchPort{
-					Name: types.HybridOverlayPrefix + nodeName,
-					UUID: types.HybridOverlayPrefix + nodeName + "-uuid",
 				},
 				nodeSwitch,
 			}
@@ -405,7 +387,8 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
 			dynAdd := nodeHOMAC + " " + nodeHOIP
-			expectedDatabaseState := []libovsdbtest.TestData{
+			lspUUID := libovsdbops.BuildNamedUUID()
+			initialDatabaseState := []libovsdbtest.TestData{
 				&nbdb.LogicalRouterPolicy{
 					Priority: 1002,
 					ExternalIDs: map[string]string{
@@ -421,17 +404,19 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 					Policies: []string{"reroute-policy-UUID"},
 				},
 				&nbdb.LogicalSwitchPort{
+					UUID:             lspUUID,
 					Name:             "int-" + nodeName,
 					Addresses:        []string{nodeHOMAC, nodeHOIP},
 					DynamicAddresses: &dynAdd,
 				},
 				&nbdb.LogicalSwitch{
-					Name: nodeName,
-					UUID: nodeName + "-UUID",
+					Name:  nodeName,
+					UUID:  nodeName + "-UUID",
+					Ports: []string{lspUUID},
 				},
 			}
 			dbSetup := libovsdbtest.TestSetup{
-				NBData: expectedDatabaseState,
+				NBData: initialDatabaseState,
 			}
 			var libovsdbOvnNBClient libovsdbclient.Client
 			libovsdbOvnNBClient, libovsdbCleanup, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
@@ -456,11 +441,8 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			f.WaitForCacheSync(stopChan)
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
-			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(initialDatabaseState))
 
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
-			})
 			k := &kube.Kube{KClient: fakeClient}
 			updatedNode, err := k.GetNode(nodeName)
 			Expect(err).NotTo(HaveOccurred())
@@ -477,6 +459,30 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				}
 				return updatedNode.Annotations, nil
 			}, 5).ShouldNot(HaveKey(hotypes.HybridOverlayDRMAC))
+
+			expectedDatabaseState := []libovsdbtest.TestData{
+				&nbdb.LogicalRouterPolicy{
+					Priority: 1002,
+					ExternalIDs: map[string]string{
+						"name": "hybrid-subnet-node1",
+					},
+					Action:   nbdb.LogicalRouterPolicyActionReroute,
+					Nexthops: []string{nodeHOIP},
+					Match:    "inport == \"rtos-node1\" && ip4.dst == 11.1.0.0/16",
+					UUID:     "reroute-policy-UUID",
+				},
+				&nbdb.LogicalRouter{
+					Name:     types.OVNClusterRouter,
+					Policies: []string{"reroute-policy-UUID"},
+				},
+				&nbdb.LogicalSwitch{
+					Name: nodeName,
+					UUID: nodeName + "-UUID",
+					// CI server doesn't clean this up even though the LSP has been deleted, will
+					// be garbage collected in real scenario
+					Ports: []string{lspUUID},
+				},
+			}
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))

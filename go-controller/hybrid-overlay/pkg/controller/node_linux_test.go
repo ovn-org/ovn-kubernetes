@@ -16,11 +16,15 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -42,10 +46,6 @@ const (
 
 // returns a fake node IP and DR MAC
 func addNodeSetupCmds(fexec *ovntest.FakeExec, nodeName string) (string, string) {
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 get logical_switch mynode other-config:subnet",
-		Output: testNodeSubnet,
-	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface ovn-k8s-mp0 mac_in_use",
 		Output: testMgmtMAC,
@@ -179,6 +179,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		netns    ns.NetNS
 		stopChan chan struct{}
 		wg       *sync.WaitGroup
+		nbClient libovsdbclient.Client
 	)
 	const (
 		thisNode   string = "mynode"
@@ -196,8 +197,21 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		stopChan = make(chan struct{})
 		wg = &sync.WaitGroup{}
 
+		dbSetup := libovsdbtest.TestSetup{
+			NBData: []libovsdbtest.TestData{
+				&nbdb.LogicalSwitch{
+					Name:        thisNode,
+					OtherConfig: map[string]string{"subnet": thisSubnet},
+				},
+			},
+		}
+
+		var err error
+		nbClient, _, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
+		Expect(err).NotTo(HaveOccurred())
+
 		fexec = ovntest.NewLooseCompareFakeExec()
-		err := util.SetExec(fexec)
+		err = util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
 		netns, err = testutils.NewNS()
@@ -256,6 +270,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				nbClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -305,6 +320,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				nbClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -353,6 +369,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				nbClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -402,6 +419,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				nbClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -457,6 +475,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				nbClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -509,6 +528,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				nbClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -560,6 +580,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				nbClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -633,6 +654,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
 				informer.NewTestEventHandler,
+				nbClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			// FIXME: DT Why are these needed?

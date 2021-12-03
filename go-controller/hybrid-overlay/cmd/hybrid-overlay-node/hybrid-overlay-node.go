@@ -10,10 +10,13 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/client-go/informers"
@@ -86,6 +89,8 @@ func signalHandler(c context.Context) {
 }
 
 func runHybridOverlay(ctx *cli.Context) error {
+	var libovsdbOvnNBClient libovsdbclient.Client
+
 	exec := kexec.New()
 	if _, err := config.InitConfig(ctx, exec, nil); err != nil {
 		return err
@@ -108,12 +113,17 @@ func runHybridOverlay(ctx *cli.Context) error {
 	defer close(stopChan)
 	f := informers.NewSharedInformerFactory(clientset, informer.DefaultResyncInterval)
 
+	if libovsdbOvnNBClient, err = libovsdb.NewNBClient(stopChan); err != nil {
+		return fmt.Errorf("error when trying to initialize libovsdb NB client: %v", err)
+	}
+
 	n, err := controller.NewNode(
 		&kube.Kube{KClient: clientset},
 		nodeName,
 		f.Core().V1().Nodes().Informer(),
 		f.Core().V1().Pods().Informer(),
 		informer.NewDefaultEventHandler,
+		libovsdbOvnNBClient,
 	)
 	if err != nil {
 		return err
