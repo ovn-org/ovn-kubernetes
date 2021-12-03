@@ -485,7 +485,7 @@ func (oc *Controller) deleteGWRoutesForPod(name ktypes.NamespacedName, podIPNets
 		if gwToGr, ok := routeInfo.podExternalRoutes[pod]; ok {
 			if len(gwToGr) == 0 {
 				delete(routeInfo.podExternalRoutes, pod)
-				return
+				continue
 			}
 			mask := GetIPFullMask(pod)
 			for gw, gr := range gwToGr {
