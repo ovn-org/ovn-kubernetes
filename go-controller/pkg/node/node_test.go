@@ -7,9 +7,14 @@ import (
 	"github.com/urfave/cli/v2"
 	"github.com/vishvananda/netlink"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	netlink_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -185,6 +190,11 @@ var _ = Describe("Node", func() {
 
 	Describe("Node Operations", func() {
 		var app *cli.App
+		var sbClient libovsdbclient.Client
+		var libovsdbCleanup *libovsdbtest.Cleanup
+		var err error
+		var chassisUUID string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
+		var encapUUID string = libovsdbops.BuildNamedUUID()
 
 		BeforeEach(func() {
 			// Restore global default values before each testcase
@@ -193,6 +203,21 @@ var _ = Describe("Node", func() {
 			app = cli.NewApp()
 			app.Name = "test"
 			app.Flags = config.Flags
+
+			dbSetup := libovsdbtest.TestSetup{
+				SBData: []libovsdbtest.TestData{
+					&sbdb.Encap{
+						UUID:        encapUUID,
+						ChassisName: chassisUUID,
+					},
+				},
+			}
+			sbClient, libovsdbCleanup, err = libovsdbtest.NewSBTestHarness(dbSetup, nil)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		AfterEach(func() {
+			libovsdbCleanup.Cleanup()
 		})
 
 		It("sets correct OVN external IDs", func() {
@@ -242,7 +267,7 @@ var _ = Describe("Node", func() {
 				_, err = config.InitConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				err = setupOVNNode(&node)
+				err = setupOVNNode(sbClient, &node)
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
@@ -255,13 +280,11 @@ var _ = Describe("Node", func() {
 		It("sets non-default OVN encap port", func() {
 			app.Action = func(ctx *cli.Context) error {
 				const (
-					nodeIP      string = "1.2.5.6"
-					nodeName    string = "cannot.be.resolv.ed"
-					encapPort   uint   = 666
-					interval    int    = 100000
-					ofintval    int    = 180
-					chassisUUID string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
-					encapUUID   string = "e4437094-0094-4223-9f14-995d98d5fff8"
+					nodeIP    string = "1.2.5.6"
+					nodeName  string = "cannot.be.resolv.ed"
+					encapPort uint   = 666
+					interval  int    = 100000
+					ofintval  int    = 180
 				)
 				node := kapi.Node{
 					ObjectMeta: metav1.ObjectMeta{
@@ -295,15 +318,6 @@ var _ = Describe("Node", func() {
 					Output: chassisUUID,
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 --data=bare --no-heading --columns=_uuid find "+
-						"Encap chassis_name=%s", chassisUUID),
-					Output: encapUUID,
-				})
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 set encap "+
-						"%s options:dst_port=%d", encapUUID, encapPort),
-				})
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: "ovs-vsctl --timeout=15 -- clear bridge br-int netflow" +
 						" -- " +
 						"clear bridge br-int sflow" +
@@ -318,8 +332,18 @@ var _ = Describe("Node", func() {
 				Expect(err).NotTo(HaveOccurred())
 				config.Default.EncapPort = encapPort
 
-				err = setupOVNNode(&node)
+				err = setupOVNNode(sbClient, &node)
 				Expect(err).NotTo(HaveOccurred())
+
+				expectedDatabaseState := []libovsdbtest.TestData{
+					&sbdb.Encap{
+						UUID:        encapUUID,
+						ChassisName: chassisUUID,
+						Options:     map[string]string{"dst_port": fmt.Sprintf("%d", encapPort)},
+					},
+				}
+
+				Eventually(sbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 				return nil
@@ -380,7 +404,7 @@ var _ = Describe("Node", func() {
 				config.Default.LFlowCacheEnable = false
 				config.Default.LFlowCacheLimit = 1000
 				config.Default.LFlowCacheLimitKb = 100000
-				err = setupOVNNode(&node)
+				err = setupOVNNode(sbClient, &node)
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)

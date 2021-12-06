@@ -35,6 +35,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/upgrade"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -144,7 +145,7 @@ func setOVSFlowTargets() error {
 	return nil
 }
 
-func setupOVNNode(node *kapi.Node) error {
+func setupOVNNode(sbClient libovsdbclient.Client, node *kapi.Node) error {
 	var err error
 
 	encapIP := config.Default.EncapIP
@@ -197,19 +198,9 @@ func setupOVNNode(node *kapi.Node) error {
 		if err != nil {
 			return err
 		}
-		uuid, _, err := util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "Encap",
-			fmt.Sprintf("chassis_name=%s", systemID))
-		if err != nil {
-			return err
-		}
-		if len(uuid) == 0 {
-			return fmt.Errorf("unable to find encap uuid to set geneve port for chassis %s", systemID)
-		}
-		_, stderr, errSet := util.RunOVNSbctl("set", "encap", uuid,
-			fmt.Sprintf("options:dst_port=%d", config.Default.EncapPort),
-		)
-		if errSet != nil {
-			return fmt.Errorf("error setting OVS encap-port: %v\n  %q", errSet, stderr)
+
+		if err = libovsdbops.MutateEncapOptions(sbClient, systemID, map[string]string{"dst_port": fmt.Sprintf("%d", config.Default.EncapPort)}); err != nil {
+			return fmt.Errorf("error mutating OVS encap-port for chasiss %s, err: %v", systemID, err)
 		}
 	}
 
@@ -275,6 +266,9 @@ func getOVNIfUpCheckMode() (bool, error) {
 		klog.Infof("'iface-id-ver' is manually disabled, ovn-installed feature can't be used")
 		return false, nil
 	}
+
+	// FIXME: When https://github.com/ovn-org/libovsdb/issues/235 is fixed,
+	// use IsTableSupported(nbdb.LoadBalancerGroup).
 	if _, stderr, err := util.RunOVNSbctl("--columns=up", "list", "Port_Binding"); err != nil {
 		if strings.Contains(stderr, "does not contain a column") {
 			klog.Infof("Falling back to using legacy OVS flow readiness checks")
@@ -297,6 +291,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	var mgmtPortConfig *managementPortConfig
 	var cniServer *cni.Server
 	var isOvnUpEnabled bool
+	var sbClient libovsdbclient.Client
 
 	klog.Infof("OVN Kube Node initialization, Mode: %s", config.OvnKubeNode.Mode)
 
@@ -310,6 +305,11 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	// Start and sync the watch factory to begin listening for events
 	if err := n.watchFactory.Start(); err != nil {
 		return err
+	}
+
+	// create libovsdbClient
+	if sbClient, err = libovsdb.NewSBClient(n.stopChan); err != nil {
+		return fmt.Errorf("error when trying to initialize libovsdb SB client: %v", err)
 	}
 
 	if node, err = n.Kube.GetNode(n.name); err != nil {
@@ -332,7 +332,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 			}
 		}
 
-		err = setupOVNNode(node)
+		err = setupOVNNode(sbClient, node)
 		if err != nil {
 			return err
 		}
