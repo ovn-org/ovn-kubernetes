@@ -24,7 +24,13 @@ import (
 
 var DBError = errors.New("error interacting with OVN database")
 
-const maxDBRetry = 10
+const (
+	maxDBRetry     = 10
+	nbdbSchema     = "/usr/share/ovn/ovn-nb.ovsschema"
+	nbdbServerSock = "unix:/var/run/ovn/ovnnb_db.sock"
+	sbdbSchema     = "/usr/share/ovn/ovn-sb.ovsschema"
+	sbdbServerSock = "unix:/var/run/ovn/ovnsb_db.sock"
+)
 
 type dbProperties struct {
 	appCtl        func(timeout int, args ...string) (string, string, error)
@@ -39,12 +45,18 @@ func RunDBChecker(kclient kube.Interface, stopCh <-chan struct{}) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		if err := upgradeNBDBSchema(); err != nil {
+			klog.Fatalf("NBDB Upgrade failed: %w", err)
+		}
 		ensureOvnDBState(util.OvnNbdbLocation, kclient, stopCh)
 	}()
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		if err := upgradeSBDBSchema(); err != nil {
+			klog.Fatalf("SBDB Upgrade failed: %w", err)
+		}
 		ensureOvnDBState(util.OvnSbdbLocation, kclient, stopCh)
 	}()
 	<-stopCh
@@ -380,4 +392,45 @@ func propertiesForDB(db string) *dbProperties {
 		appCtl:        util.RunOVNSBAppCtlWithTimeout,
 		dbName:        "OVN_Southbound",
 	}
+}
+
+func upgradeNBDBSchema() error {
+	return upgradeDBSchema(nbdbSchema, nbdbServerSock, "OVN_Northbound")
+}
+
+func upgradeSBDBSchema() error {
+	return upgradeDBSchema(sbdbSchema, sbdbServerSock, "OVN_Southbound")
+}
+
+func upgradeDBSchema(schemaFile, serverSock, dbName string) error {
+	if _, err := os.Stat(schemaFile); err != nil {
+		return err
+	}
+
+	stdout, stderr, err := util.RunOVSDBTool("schema-version", schemaFile)
+	if err != nil {
+		return fmt.Errorf("failed to get schema name: %s, %w", stderr, err)
+	}
+	schemaTarget := strings.TrimSpace(stdout)
+
+	stdout, stderr, err = util.RunOVSDBClient("-t", "10", "get-schema-version", serverSock, dbName)
+	if err != nil {
+		return fmt.Errorf("failed to get schema version for NBDB, stderr: %q, error: %w", stderr, err)
+	}
+	dbSchemaVersion := strings.TrimSpace(stdout)
+
+	_, _, err = util.RunOVSDBTool("compare-versions", dbSchemaVersion, "<", schemaTarget)
+	if err != nil {
+		klog.Infof("No %s DB schema upgrade is required. Current version: %s, target: %s",
+			dbName, dbSchemaVersion, schemaTarget)
+		return nil
+	}
+
+	_, stderr, err = util.RunOVSDBClient("-t", "30", "convert", serverSock, schemaFile)
+	if err != nil {
+		return fmt.Errorf("failed to upgrade schema, stderr: %q, error: %w", stderr, err)
+	}
+
+	klog.Infof("%s DB schema successfully upgraded from: %q, to %q", dbName, dbSchemaVersion, schemaTarget)
+	return nil
 }
