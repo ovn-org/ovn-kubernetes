@@ -6,6 +6,7 @@ import (
 	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -122,24 +123,25 @@ func (uc *unidlingController) Run(stopCh <-chan struct{}) {
 	for {
 		select {
 		case <-ticker.C:
-			out, _, err := util.RunOVNSbctl("--format=json", "list", "controller_event")
+			controllerEvents, err := libovsdbops.ListControllerEvent(uc.sbClient)
 			if err != nil {
 				continue
 			}
 
-			events, err := extractEmptyLBBackendsEvents([]byte(out))
-			if err != nil || len(events) == 0 {
+			emptyLBEvents, err := extractEmptyLBBackendsEvents(controllerEvents)
+			if err != nil || len(emptyLBEvents) == 0 {
 				continue
 			}
 
-			for _, event := range events {
-				_, _, err := util.RunOVNSbctl("destroy", "controller_event", event.uuid)
+			for _, emptyLBEvent := range emptyLBEvents {
+				err = libovsdbops.DeleteControllerEvent(uc.sbClient, emptyLBEvent.controllerEvent)
 				if err != nil {
 					// Don't unidle until we are able to remove the controller event
-					klog.Errorf("Unable to remove controller event %s", event.uuid)
+					klog.Errorf("Unable to remove controller event %s", emptyLBEvent.controllerEvent.UUID)
 					continue
 				}
-				if serviceName, ok := uc.GetServiceVIPToName(event.vip, event.protocol); ok {
+
+				if serviceName, ok := uc.GetServiceVIPToName(emptyLBEvent.vip, emptyLBEvent.protocol); ok {
 					serviceRef := v1.ObjectReference{
 						Kind:      "Service",
 						Namespace: serviceName.Namespace,
