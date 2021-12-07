@@ -8,7 +8,8 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"

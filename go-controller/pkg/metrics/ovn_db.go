@@ -266,10 +266,10 @@ func ovnE2eTimeStampUpdater(direction, database string) {
 	var err error
 
 	if direction == "sb" {
-		stdout, stderr, err = util.RunOVNSbctlUnix("--if-exists", "--no-leader-only",
+		stdout, stderr, err = util.RunOVNSbctl("--if-exists", "--no-leader-only",
 			"get", "SB_Global", ".", "options:e2e_timestamp")
 	} else {
-		stdout, stderr, err = util.RunOVNNbctlUnix("--if-exists", "--no-leader-only",
+		stdout, stderr, err = util.RunOVNNbctl("--if-exists", "--no-leader-only",
 			"get", "NB_Global", ".", "options:e2e_timestamp")
 	}
 	if err != nil {
