@@ -160,9 +160,10 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 			"physical_ip":  physicalIPs[0],
 			"physical_ips": strings.Join(physicalIPs, ","),
 		},
-		Ports:        []string{gwRouterPort + "-UUID", externalRouterPort + "-UUID"},
-		StaticRoutes: grStaticRoutes,
-		Nat:          natUUIDs,
+		Ports:             []string{gwRouterPort + "-UUID", externalRouterPort + "-UUID"},
+		StaticRoutes:      grStaticRoutes,
+		Nat:               natUUIDs,
+		LoadBalancerGroup: []string{types.ClusterLBGroupName + "-UUID"},
 	})
 
 	testData = append(testData, expectedOVNClusterRouter)
@@ -218,6 +219,10 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 			UUID:  externalSwitch + "-UUID",
 			Name:  externalSwitch,
 			Ports: []string{l3GatewayConfig.InterfaceID + "-UUID", externalSwitchPortToRouter + "-UUID"},
+		},
+		&nbdb.LoadBalancerGroup{
+			Name: types.ClusterLBGroupName,
+			UUID: types.ClusterLBGroupName + "-UUID",
 		})
 	return testData
 }
@@ -246,22 +251,35 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		})
 
 		ginkgo.It("creates an IPv4 gateway in OVN", func() {
+			routeUUID := libovsdbops.BuildNamedUUID()
+			leftoverMgmtIPRoute := &nbdb.LogicalRouterStaticRoute{
+				Nexthop: "10.130.0.2",
+				UUID:    routeUUID,
+			}
 			expectedOVNClusterRouter := &nbdb.LogicalRouter{
-				UUID: types.OVNClusterRouter + "-UUID",
-				Name: types.OVNClusterRouter,
+				UUID:         types.OVNClusterRouter + "-UUID",
+				Name:         types.OVNClusterRouter,
+				StaticRoutes: []string{routeUUID},
 			}
 			expectedNodeSwitch := &nbdb.LogicalSwitch{
 				UUID: nodeName + "-UUID",
 				Name: nodeName,
 			}
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterLBGroupName + "-UUID",
+				Name: types.ClusterLBGroupName,
+			}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
+					// tests migration from local to shared
+					leftoverMgmtIPRoute,
 					&nbdb.LogicalSwitch{
 						UUID: types.OVNJoinSwitch + "-UUID",
 						Name: types.OVNJoinSwitch,
 					},
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
+					expectedClusterLBGroup,
 				},
 			})
 
@@ -285,6 +303,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			testData := []libovsdb.TestData{}
 			skipSnat := false
+			expectedOVNClusterRouter.StaticRoutes = []string{} // the leftover LGW route should have got deleted
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
 			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP)
@@ -300,6 +319,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: nodeName + "-UUID",
 				Name: nodeName,
 			}
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterLBGroupName + "-UUID",
+				Name: types.ClusterLBGroupName,
+			}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
@@ -308,6 +331,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					},
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
+					expectedClusterLBGroup,
 				},
 			})
 
@@ -347,6 +371,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: nodeName + "-UUID",
 				Name: nodeName,
 			}
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterLBGroupName + "-UUID",
+				Name: types.ClusterLBGroupName,
+			}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
@@ -355,6 +383,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					},
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
+					expectedClusterLBGroup,
 				},
 			})
 
@@ -394,6 +423,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				UUID: nodeName + "-UUID",
 				Name: nodeName,
 			}
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterLBGroupName + "-UUID",
+				Name: types.ClusterLBGroupName,
+			}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
@@ -402,6 +435,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					},
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
+					expectedClusterLBGroup,
 				},
 			})
 
@@ -442,22 +476,43 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 		ginkgo.It("creates a dual-stack gateway in OVN", func() {
 			// covers both IPv4, IPv6 single stack cases since path is the same.
+			routeUUID1 := libovsdbops.BuildNamedUUID()
+			leftoverJoinRoute1 := &nbdb.LogicalRouterStaticRoute{
+				Nexthop:  "100.64.0.3",
+				IPPrefix: "10.130.0.0/23",
+				UUID:     routeUUID1,
+			}
+			routeUUID2 := libovsdbops.BuildNamedUUID()
+			leftoverJoinRoute2 := &nbdb.LogicalRouterStaticRoute{
+				Nexthop:  "fd98::3",
+				IPPrefix: "fd01:0:0:2::/64",
+				UUID:     routeUUID2,
+			}
 			expectedOVNClusterRouter := &nbdb.LogicalRouter{
-				UUID: types.OVNClusterRouter + "-UUID",
-				Name: types.OVNClusterRouter,
+				UUID:         types.OVNClusterRouter + "-UUID",
+				Name:         types.OVNClusterRouter,
+				StaticRoutes: []string{routeUUID1, routeUUID2},
 			}
 			expectedNodeSwitch := &nbdb.LogicalSwitch{
 				UUID: nodeName + "-UUID",
 				Name: nodeName,
 			}
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				Name: types.ClusterLBGroupName,
+				UUID: types.ClusterLBGroupName + "-UUID",
+			}
 			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
+					// tests migration from shared to local
+					leftoverJoinRoute1,
+					leftoverJoinRoute2,
 					&nbdb.LogicalSwitch{
 						UUID: types.OVNJoinSwitch + "-UUID",
 						Name: types.OVNJoinSwitch,
 					},
 					expectedOVNClusterRouter,
 					expectedNodeSwitch,
+					expectedClusterLBGroup,
 				},
 			})
 
@@ -482,6 +537,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			testData := []libovsdb.TestData{}
 			skipSnat := false
+			expectedOVNClusterRouter.StaticRoutes = []string{} // the leftover SGW route should have got deleted
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
 			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP)

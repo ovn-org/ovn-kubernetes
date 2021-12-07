@@ -535,6 +535,109 @@ func TestLinkRoutesAdd(t *testing.T) {
 	}
 }
 
+func TestLinkRoutesAddOrUpdateMTU(t *testing.T) {
+	mockNetLinkOps := new(mocks.NetLinkOps)
+	mockLink := new(netlink_mocks.Link)
+	// below is defined in net_linux.go
+	netLinkOps = mockNetLinkOps
+
+	tests := []struct {
+		desc                     string
+		inputLink                netlink.Link
+		inputGwIP                net.IP
+		inputSubnets             []*net.IPNet
+		inputMTU                 int
+		errExp                   bool
+		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
+		onRetArgsLinkIfaceOpers  []ovntest.TestifyMockHelper
+	}{
+		{
+			desc:         "Route get fails",
+			inputLink:    mockLink,
+			inputGwIP:    ovntest.MustParseIP("192.168.0.1"),
+			inputSubnets: ovntest.MustParseIPNets("10.18.20.0/24"),
+			errExp:       true,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{}, fmt.Errorf("mock error")}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
+		},
+		{
+			desc:         "Route does not exist and is added",
+			inputLink:    mockLink,
+			inputGwIP:    ovntest.MustParseIP("192.168.0.1"),
+			inputSubnets: ovntest.MustParseIPNets("10.18.20.0/24"),
+			errExp:       false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{}, nil}},
+				{OnCallMethodName: "RouteAdd", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
+		},
+		{
+			desc:         "Route exists, has the same mtu and is not updated",
+			inputLink:    mockLink,
+			inputGwIP:    ovntest.MustParseIP("192.168.0.1"),
+			inputSubnets: ovntest.MustParseIPNets("10.18.20.0/24"),
+			inputMTU:     1400,
+			errExp:       false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
+					{
+						Gw:  ovntest.MustParseIP("192.168.0.1"),
+						MTU: 1400,
+					},
+				}, nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
+		},
+		{
+			desc:         "Route exists, has different mtu and is updated",
+			inputLink:    mockLink,
+			inputGwIP:    ovntest.MustParseIP("192.168.0.1"),
+			inputSubnets: ovntest.MustParseIPNets("10.18.20.0/24"),
+			inputMTU:     1400,
+			errExp:       false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
+					{Gw: ovntest.MustParseIP("192.168.0.1")},
+				}, nil}},
+				{OnCallMethodName: "RouteReplace", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
+		},
+		{
+			desc: "LinkRoutesAddOrUpdateMTU() returns NO error when subnets input list is empty",
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+
+			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
+			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
+
+			err := LinkRoutesAddOrUpdateMTU(tc.inputLink, tc.inputGwIP, tc.inputSubnets, tc.inputMTU)
+			t.Log(err)
+			if tc.errExp {
+				assert.Error(t, err)
+			} else {
+				assert.Nil(t, err)
+			}
+			mockNetLinkOps.AssertExpectations(t)
+			mockLink.AssertExpectations(t)
+		})
+	}
+}
+
 func TestLinkRouteExists(t *testing.T) {
 	mockNetLinkOps := new(mocks.NetLinkOps)
 	mockLink := new(netlink_mocks.Link)

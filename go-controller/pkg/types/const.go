@@ -126,4 +126,6 @@ const (
 	ClusterRtrPortGroupName = "clusterRtrPortGroup"
 
 	OVSDBTimeout = 10 * time.Second
+
+	ClusterLBGroupName = "clusterLBGroup"
 )

@@ -12,9 +12,10 @@ type LB struct {
 
 	Rules []LBRule
 
-	// the names of logical switches and routers that this LB should be attached to
+	// the names of logical switches, routers and LB groups that this LB should be attached to
 	Switches []string
 	Routers  []string
+	Groups   []string
 }
 
 type LBOpts struct {

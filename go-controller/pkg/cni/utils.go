@@ -121,6 +121,7 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, po
 	podInterfaceInfo := &PodInterfaceInfo{
 		PodAnnotation: *podAnnotSt,
 		MTU:           config.Default.MTU,
+		RoutableMTU:   config.Default.RoutableMTU,
 		Ingress:       ingress,
 		Egress:        egress,
 		CheckExtIDs:   checkExtIDs,

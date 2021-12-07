@@ -159,6 +159,10 @@ const (
 type DefaultConfig struct {
 	// MTU value used for the overlay networks.
 	MTU int `gcfg:"mtu"`
+	// RoutableMTU is the maximum routable MTU between nodes, used to facilitate
+	// an MTU migration procedure where different nodes might be using different
+	// MTU values
+	RoutableMTU int `gcfg:"routable-mtu"`
 	// ConntrackZone affects only the gateway nodes, This value is used to track connections
 	// that are initiated from the pods so that the reverse connections go back to the pods.
 	// This represents the conntrack zone used for the conntrack flow rules.
@@ -564,6 +568,11 @@ var CommonFlags = []cli.Flag{
 		Usage:       "MTU value used for the overlay networks (default: 1400)",
 		Destination: &cliConfig.Default.MTU,
 		Value:       Default.MTU,
+	},
+	&cli.IntFlag{
+		Name:        "routable-mtu",
+		Usage:       "Maximum routable MTU between nodes, used to facilitate an MTU migration procedure where different nodes might be using different MTU values",
+		Destination: &cliConfig.Default.RoutableMTU,
 	},
 	&cli.IntFlag{
 		Name:        "conntrack-zone",

@@ -49,7 +49,9 @@ type ovnRoute struct {
 }
 
 type externalRouteInfo struct {
-	sync.RWMutex
+	sync.Mutex
+	deleted bool
+	podName ktypes.NamespacedName
 	// podExternalRoutes is a cache keeping the LR routes added to the GRs when
 	// external gateways are used. The first map key is the podIP (src-ip of the route),
 	// the second the GW IP (next hop), and the third the GR name
@@ -64,17 +66,17 @@ func (oc *Controller) ensureRouteInfoLocked(podName ktypes.NamespacedName) (*ext
 	// 2. If routeInfo existed, release the cache lock
 	// 3. If routeInfo did not exist, safe to hold the cache lock while we create the new routeInfo
 	oc.exGWCacheMutex.Lock()
-	routeInfo, routeInfoExisted := oc.externalGWCache[podName]
-	if routeInfo == nil {
+	routeInfo, ok := oc.externalGWCache[podName]
+	if !ok {
 		routeInfo = &externalRouteInfo{
 			podExternalRoutes: make(map[string]map[string]string),
+			podName:           podName,
 		}
 		// we are creating routeInfo and going to set it in podExternalRoutes map
 		// so safe to hold the lock while we create and add it
 		defer oc.exGWCacheMutex.Unlock()
 		oc.externalGWCache[podName] = routeInfo
 	} else {
-		routeInfoExisted = true
 		// if we found an existing routeInfo, do not hold the cache lock
 		// while waiting for routeInfo to Lock
 		oc.exGWCacheMutex.Unlock()
@@ -83,57 +85,27 @@ func (oc *Controller) ensureRouteInfoLocked(podName ktypes.NamespacedName) (*ext
 	// 4. Now lock the routeInfo
 	routeInfo.Lock()
 
-	// 5. If routeInfo originally existed in the cache, there is a chance it was altered after we
-	// released the cache lock, and before we were able to lock routeInfo
-	if routeInfoExisted {
-		// Check that the routeInfo wasn't altered in the cache while we were waiting for the lock
-		// and that routeInfo that we locked is not stale.
-		oc.exGWCacheMutex.RLock()
-		defer oc.exGWCacheMutex.RUnlock()
-		if routeInfo != oc.externalGWCache[podName] {
-			routeInfo.Unlock()
-			return nil, fmt.Errorf("routeInfo for pod %s, was altered during ensure route info", podName)
-		}
+	// 5. If routeInfo was deleted between releasing the cache lock and grabbing
+	// the routeInfo lock, return an error so the caller doesn't use it and
+	// retries the operation later
+	if routeInfo.deleted {
+		routeInfo.Unlock()
+		return nil, fmt.Errorf("routeInfo for pod %s, was altered during ensure route info", podName)
 	}
 
 	return routeInfo, nil
 }
 
-// getRouteInfosForGateway returns all routeInfos locked for a specific namespace and gateway IP
-func (oc *Controller) getRouteInfosForGateway(gatewayIP, namespace string) []*externalRouteInfo {
-	oc.exGWCacheMutex.RLock()
-	defer oc.exGWCacheMutex.RUnlock()
-
-	routeInfos := make([]*externalRouteInfo, 0)
-	for namespacedName, routeInfo := range oc.externalGWCache {
-		if namespacedName.Namespace != namespace {
-			continue
-		}
-
-		for _, route := range routeInfo.podExternalRoutes {
-			if _, ok := route[gatewayIP]; ok {
-				routeInfo.Lock()
-				routeInfos = append(routeInfos, routeInfo)
-				break
-			}
-		}
-	}
-
-	return routeInfos
-}
-
-// getRouteInfosForNamespace returns all routeInfos locked for a specific namespace
+// getRouteInfosForNamespace returns all routeInfos for a specific namespace
 func (oc *Controller) getRouteInfosForNamespace(namespace string) []*externalRouteInfo {
 	oc.exGWCacheMutex.RLock()
 	defer oc.exGWCacheMutex.RUnlock()
 
 	routes := make([]*externalRouteInfo, 0)
 	for namespacedName, routeInfo := range oc.externalGWCache {
-		if namespacedName.Namespace != namespace {
-			continue
+		if namespacedName.Namespace == namespace {
+			routes = append(routes, routeInfo)
 		}
-		routeInfo.Lock()
-		routes = append(routes, routeInfo)
 	}
 
 	return routes
@@ -152,16 +124,20 @@ func (oc *Controller) deleteRouteInfoLocked(name ktypes.NamespacedName) *externa
 	}
 	routeInfo.Lock()
 
-	// ensure the routeInfo we acquired the lock for is consistent with the
-	// one still in the cache
-	oc.exGWCacheMutex.Lock()
-	defer oc.exGWCacheMutex.Unlock()
-	if routeInfo != oc.externalGWCache[name] {
+	if routeInfo.deleted {
 		routeInfo.Unlock()
 		return nil
 	}
 
-	delete(oc.externalGWCache, name)
+	routeInfo.deleted = true
+
+	go func() {
+		oc.exGWCacheMutex.Lock()
+		defer oc.exGWCacheMutex.Unlock()
+		if newRouteInfo := oc.externalGWCache[name]; routeInfo == newRouteInfo {
+			delete(oc.externalGWCache, name)
+		}
+	}()
 
 	return routeInfo
 }
@@ -392,14 +368,16 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
 
 	for _, gwIP := range foundGws.gws {
 		// check for previously configured pod routes
-		routeInfos := oc.getRouteInfosForGateway(gwIP.String(), namespace)
+		routeInfos := oc.getRouteInfosForNamespace(namespace)
 		for _, routeInfo := range routeInfos {
+			routeInfo.Lock()
+			if routeInfo.deleted {
+				routeInfo.Unlock()
+				continue
+			}
 			for podIP, route := range routeInfo.podExternalRoutes {
 				for routeGwIP, gr := range route {
 					if gwIP.String() != routeGwIP {
-						continue
-					}
-					if gr == "" {
 						continue
 					}
 					mask := GetIPFullMask(podIP)
@@ -442,6 +420,11 @@ func (oc *Controller) deleteGWRoutesForNamespace(namespace string) {
 	// TODO(trozet): batch all of these with ebay bindings
 	routeInfos := oc.getRouteInfosForNamespace(namespace)
 	for _, routeInfo := range routeInfos {
+		routeInfo.Lock()
+		if routeInfo.deleted {
+			routeInfo.Unlock()
+			continue
+		}
 		for podIP, gwToGr := range routeInfo.podExternalRoutes {
 			for gw, gr := range gwToGr {
 				if utilnet.IsIPv6String(gw) != utilnet.IsIPv6String(podIP) {
@@ -485,7 +468,7 @@ func (oc *Controller) deleteGWRoutesForPod(name ktypes.NamespacedName, podIPNets
 		if gwToGr, ok := routeInfo.podExternalRoutes[pod]; ok {
 			if len(gwToGr) == 0 {
 				delete(routeInfo.podExternalRoutes, pod)
-				return
+				continue
 			}
 			mask := GetIPFullMask(pod)
 			for gw, gr := range gwToGr {

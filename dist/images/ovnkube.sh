@@ -162,6 +162,7 @@ ovn_gateway_router_subnet=${OVN_GATEWAY_ROUTER_SUBNET:-""}
 net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
 svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
 mtu=${OVN_MTU:-1400}
+routable_mtu=${OVN_ROUTABLE_MTU:-}
 
 # set metrics endpoint bind to K8S_NODE_IP.
 metrics_endpoint_ip=${K8S_NODE_IP:-0.0.0.0}
@@ -1025,6 +1026,11 @@ ovn-node() {
     wait_for_event process_ready ovn-controller
   fi
 
+  ovn_routable_mtu_flag=
+  if [[ -n "${routable_mtu}" ]]; then
+	  routable_mtu_flag="--routable-mtu ${routable_mtu}"
+  fi
+
   hybrid_overlay_flags=
   if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
     hybrid_overlay_flags="--enable-hybrid-overlay"
@@ -1159,6 +1165,7 @@ ovn-node() {
     ${ovn_unprivileged_flag} \
     --nodeport \
     --mtu=${mtu} \
+    ${routable_mtu_flag} \
     ${ovn_encap_ip_flag} \
     --loglevel=${ovnkube_loglevel} \
     --logfile-maxsize=${ovnkube_logfile_maxsize} \

@@ -30,6 +30,7 @@ type ACL struct {
 	Action      ACLAction         `ovsdb:"action"`
 	Direction   ACLDirection      `ovsdb:"direction"`
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
+	Label       int               `ovsdb:"label"`
 	Log         bool              `ovsdb:"log"`
 	Match       string            `ovsdb:"match"`
 	Meter       *string           `ovsdb:"meter"`

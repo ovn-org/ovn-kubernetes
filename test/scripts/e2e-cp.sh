@@ -39,7 +39,8 @@ else
   	SKIPPED_TESTS+="|"
   fi
 
-  SKIPPED_TESTS+="Should validate connectivity before and after deleting all the db-pods at once in Non-HA mode"
+  SKIPPED_TESTS+="Should validate connectivity before and after deleting all the db-pods at once in Non-HA mode|\
+  e2e br-int NetFlow export validation"
 fi
 
 if [ "$KIND_IPV6_SUPPORT" == true ]; then
