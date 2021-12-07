@@ -32,6 +32,7 @@ type MasterController struct {
 	nodeEventHandler informer.EventHandler
 	modelClient      libovsdbops.ModelClient
 	nbClient         client.Client
+	sbClient         client.Client
 }
 
 // NewMaster a new master controller that listens for node events
@@ -374,7 +375,7 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 
 		if len(logicalRouterPolicyRes) == 0 {
 			logicalPort := ovntypes.RouterToSwitchPrefix + nodeName
-			if err := util.CreateMACBinding(logicalPort, ovntypes.OVNClusterRouter, portMac, drIP); err != nil {
+			if err := util.CreateMACBinding(m.sbClient, logicalPort, ovntypes.OVNClusterRouter, portMac, drIP); err != nil {
 				return fmt.Errorf("failed to create MAC Binding for hybrid overlay: %v", err)
 			}
 		}
