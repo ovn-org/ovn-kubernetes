@@ -145,7 +145,7 @@ var _ = ginkgo.Describe("Unidling", func() {
 			})
 			serviceAddress := net.JoinHostPort(serviceName, strconv.Itoa(port))
 			framework.Logf("waiting up to %v to connect to %v", e2eservice.KubeProxyEndpointLagTimeout, serviceAddress)
-			cmd = fmt.Sprintf("/agnhost connect --timeout=1s %s", serviceAddress)
+			cmd = fmt.Sprintf("/agnhost connect --timeout=3s %s", serviceAddress)
 		})
 
 		ginkgo.It("Should generate a NeedPods event for traffic destined to idled services", func() {
@@ -153,8 +153,9 @@ var _ = ginkgo.Describe("Unidling", func() {
 				return checkService(clientPod, cmd)
 			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(failsWithNoReject), "Service is rejecting")
 
-			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
-			framework.ExpectEqual(generatesNewEvents, true, "New events are not generated")
+			gomega.Eventually(func() bool {
+				return hittingGeneratesNewEvents(service, cs, clientPod, cmd)
+			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(true), "New events are not generated")
 		})
 
 		ginkgo.It("Should not generate a NeedPods event when removing the annotation", func() {
@@ -167,8 +168,9 @@ var _ = ginkgo.Describe("Unidling", func() {
 				return checkService(clientPod, cmd)
 			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(rejects), "Service is not rejecting")
 
-			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
-			framework.ExpectEqual(generatesNewEvents, false, "New events are generated")
+			gomega.Eventually(func() bool {
+				return hittingGeneratesNewEvents(service, cs, clientPod, cmd)
+			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(false), "New events are generated")
 		})
 
 		ginkgo.It("Should not generate a NeedPods event when has backend", func() {
@@ -177,8 +179,9 @@ var _ = ginkgo.Describe("Unidling", func() {
 				return checkService(clientPod, cmd)
 			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(works), "Service is failing")
 
-			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
-			framework.ExpectEqual(generatesNewEvents, false, "New events are generated")
+			gomega.Eventually(func() bool {
+				return hittingGeneratesNewEvents(service, cs, clientPod, cmd)
+			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(false), "New events are generated")
 		})
 
 		ginkgo.It("Should generate a NeedPods event when backends were added and then removed", func() {
@@ -191,8 +194,9 @@ var _ = ginkgo.Describe("Unidling", func() {
 				return checkService(clientPod, cmd)
 			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(failsWithNoReject), "Service is not timing out")
 
-			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
-			framework.ExpectEqual(generatesNewEvents, true, "New events are not generated")
+			gomega.Eventually(func() bool {
+				return hittingGeneratesNewEvents(service, cs, clientPod, cmd)
+			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(true), "New events are not generated")
 		})
 	})
 
@@ -230,7 +234,7 @@ var _ = ginkgo.Describe("Unidling", func() {
 			})
 			serviceAddress := net.JoinHostPort(serviceName, strconv.Itoa(port))
 			framework.Logf("waiting up to %v to connect to %v", e2eservice.KubeProxyEndpointLagTimeout, serviceAddress)
-			cmd = fmt.Sprintf("/agnhost connect --timeout=1s %s", serviceAddress)
+			cmd = fmt.Sprintf("/agnhost connect --timeout=3s %s", serviceAddress)
 		})
 
 		ginkgo.It("Should not generate a NeedPods event for traffic destined to idled services", func() {
@@ -238,8 +242,9 @@ var _ = ginkgo.Describe("Unidling", func() {
 				return checkService(clientPod, cmd)
 			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(rejects), "Service is not rejecting")
 
-			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
-			framework.ExpectEqual(generatesNewEvents, false, "New events are generated")
+			gomega.Eventually(func() bool {
+				return hittingGeneratesNewEvents(service, cs, clientPod, cmd)
+			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(false), "New events are generated")
 		})
 
 		ginkgo.It("Should generate a NeedPods event when adding the annotation", func() {
@@ -252,8 +257,10 @@ var _ = ginkgo.Describe("Unidling", func() {
 				return checkService(clientPod, cmd)
 			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(failsWithNoReject), "Service is not timing out")
 
-			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
-			framework.ExpectEqual(generatesNewEvents, true, "New events are not generated")
+			gomega.Eventually(func() bool {
+				return hittingGeneratesNewEvents(service, cs, clientPod, cmd)
+			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(true), "New events are not generated")
+
 		})
 
 		ginkgo.It("Should not generate a NeedPods event when has backend", func() {
@@ -262,8 +269,9 @@ var _ = ginkgo.Describe("Unidling", func() {
 				return checkService(clientPod, cmd)
 			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(works), "Service is failing")
 
-			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
-			framework.ExpectEqual(generatesNewEvents, false, "New events are generated")
+			gomega.Eventually(func() bool {
+				return hittingGeneratesNewEvents(service, cs, clientPod, cmd)
+			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(false), "New events are generated")
 		})
 
 		ginkgo.It("Should not generate a NeedPods event when backends were added and then removed", func() {
@@ -276,8 +284,10 @@ var _ = ginkgo.Describe("Unidling", func() {
 				return checkService(clientPod, cmd)
 			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(rejects), "Service is not rejecting")
 
-			generatesNewEvents := hittingGeneratesNewEvents(service, cs, clientPod, cmd)
-			framework.ExpectEqual(generatesNewEvents, false, "New events are generated")
+			gomega.Eventually(func() bool {
+				return hittingGeneratesNewEvents(service, cs, clientPod, cmd)
+			}, 10*time.Second, 1*time.Second).Should(gomega.Equal(false), "New events are generated")
+
 		})
 	})
 
@@ -296,6 +306,7 @@ func createBackend(f *framework.Framework, serviceName, namespace, node string, 
 
 // hittingGeneratesNewEvents tells if by hitting a service a brand new needPods event is generated
 func hittingGeneratesNewEvents(service *v1.Service, cs clientset.Interface, clientPod *v1.Pod, cmd string) bool {
+	framework.Logf("checking if needPods events are emitted for service %s in namespace %s", service.Name, service.Namespace)
 	lastEventTime := lastIdlingEventForService(service, cs)
 	// the event time resolution is one second, which is what we use to check if there are new events
 	// we need to sleep 1 second to ensure two events are generated with different timestamps.
@@ -310,6 +321,7 @@ func hittingGeneratesNewEvents(service *v1.Service, cs clientset.Interface, clie
 	})
 
 	if err != nil { // timed out
+		framework.Logf("hittingGeneratesNewEvents fails with error: %v\n", err)
 		return false
 	}
 	return true
@@ -319,7 +331,9 @@ func hittingGeneratesNewEvents(service *v1.Service, cs clientset.Interface, clie
 // The connection can be refused, can timeout or can work.
 func checkService(clientPod *v1.Pod, cmd string) serviceStatus {
 	refusedError := "REFUSED"
-	_, err := framework.RunHostCmd(clientPod.Namespace, clientPod.Name, cmd)
+	stdout, stderr, err := framework.RunHostCmdWithFullOutput(clientPod.Namespace, clientPod.Name, cmd)
+	framework.Logf("checking service with cmd \"%s\" from pod %s in ns %s returned stdout: %v stderr: %v", cmd,
+		clientPod.Name, clientPod.Namespace, stdout, stderr)
 	if err != nil && strings.Contains(err.Error(), refusedError) {
 		return rejects
 	}
