@@ -185,8 +185,9 @@ func copyIndexes(model model.Model) model.Model {
 		}
 	case *sbdb.MACBinding:
 		return &sbdb.MACBinding{
-			UUID: t.UUID,
-			IP:   t.IP,
+			UUID:        t.UUID,
+			LogicalPort: t.LogicalPort,
+			IP:          t.IP,
 		}
 	default:
 		panic(fmt.Sprintf("copyIndexes: unknown model %T", t))
