@@ -3,7 +3,8 @@ package unidling
 import (
 	"testing"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 
 	kapi "k8s.io/api/core/v1"
