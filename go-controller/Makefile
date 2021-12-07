@@ -20,7 +20,7 @@ else
 CONTAINER_RUNTIME=docker
 endif
 CONTAINER_RUNNABLE ?= $(shell $(CONTAINER_RUNTIME) -v > /dev/null 2>&1; echo $$?)
-OVN_VERSION ?= v21.06.0
+OVN_VERSION ?= v21.09.1
 
 .PHONY: all build check test
 

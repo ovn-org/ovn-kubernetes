@@ -287,6 +287,38 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		}
 	}
 
+	// FIXME: When https://github.com/ovn-org/libovsdb/issues/235 is fixed,
+	// use IsTableSupported(nbdb.LoadBalancerGroup).
+	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Load_Balancer_Group"); err != nil {
+		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups.")
+	} else {
+		loadBalancerGroup := nbdb.LoadBalancerGroup{
+			Name: types.ClusterLBGroupName,
+		}
+		loadBalancerGroupRes := []nbdb.LoadBalancerGroup{}
+		opModels := []libovsdbops.OperationModel{
+			{
+				Model:          &loadBalancerGroup,
+				ModelPredicate: func(lbg *nbdb.LoadBalancerGroup) bool { return lbg.Name == types.ClusterLBGroupName },
+				OnModelUpdates: []interface{}{
+					&loadBalancerGroup.Name,
+				},
+				ExistingResult: &loadBalancerGroupRes,
+				DoAfter: func() {
+					if len(loadBalancerGroupRes) > 0 {
+						loadBalancerGroup.UUID = loadBalancerGroupRes[0].UUID
+					}
+				},
+				ErrNotFound: false,
+			},
+		}
+		if _, err = oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+			klog.Errorf("Error creating cluster-wide load balancer group (%v)", err)
+			return err
+		}
+		oc.loadBalancerGroupUUID = loadBalancerGroup.UUID
+	}
+
 	if err := oc.SetupMaster(masterNodeName, nodeNames); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
@@ -512,7 +544,7 @@ func (oc *Controller) addNodeLogicalSwitchPort(logicalSwitchName, portName, port
 	}
 	_, err := oc.modelClient.CreateOrUpdate(opModels...)
 	if err != nil {
-		return "", fmt.Errorf("failed to add logical port %s to switch %s, error: %v", portName, logicalSwitch, err)
+		return "", fmt.Errorf("failed to add logical port %s to switch %s, error: %v", portName, logicalSwitch.Name, err)
 	}
 
 	return logicalSwitchPort.UUID, nil
@@ -794,6 +826,10 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		}
 	}
 
+	if oc.loadBalancerGroupUUID != "" {
+		logicalSwitch.LoadBalancerGroup = []string{oc.loadBalancerGroupUUID}
+	}
+
 	logicalRouterPortName := types.RouterToSwitchPrefix + nodeName
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name:     logicalRouterPortName,
@@ -825,6 +861,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == nodeName },
 			OnModelUpdates: []interface{}{
 				&logicalSwitch.OtherConfig,
+				&logicalSwitch.LoadBalancerGroup,
 			},
 		},
 	}

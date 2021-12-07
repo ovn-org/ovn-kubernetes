@@ -49,6 +49,7 @@ type CachedLB struct {
 
 	Switches sets.String
 	Routers  sets.String
+	Groups   sets.String
 }
 
 // update the database with any existing LBs, along with any
@@ -73,6 +74,7 @@ func (c *LBCache) update(existing []LB, toDelete []string) {
 
 			Switches: sets.NewString(lb.Switches...),
 			Routers:  sets.NewString(lb.Routers...),
+			Groups:   sets.NewString(lb.Groups...),
 		}
 	}
 }
@@ -192,6 +194,19 @@ func newCache(nbClient libovsdbclient.Client) (*LBCache, error) {
 		}
 	}
 
+	groups, err := libovsdbops.ListGroupsWithLoadBalancers(nbClient)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, group := range groups {
+		for _, lbuuid := range group.LoadBalancer {
+			if lb, ok := c.existing[lbuuid]; ok {
+				lb.Groups.Insert(group.Name)
+			}
+		}
+	}
+
 	return &c, nil
 }
 
@@ -211,6 +226,7 @@ func listLBs(nbClient libovsdbclient.Client) ([]CachedLB, error) {
 			VIPs:        sets.String{},
 			Switches:    sets.String{},
 			Routers:     sets.String{},
+			Groups:      sets.String{},
 		}
 
 		if lb.Protocol != nil {

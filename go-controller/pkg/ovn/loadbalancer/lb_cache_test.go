@@ -95,6 +95,7 @@ func TestNewCache(t *testing.T) {
 			Routers: sets.String{
 				"GR_ovn-control-plane": {},
 			},
+			Groups: sets.String{},
 		},
 		"7dc190c4-c615-467f-af83-9856d832c9a0": {
 			UUID:     "7dc190c4-c615-467f-af83-9856d832c9a0",
@@ -113,6 +114,7 @@ func TestNewCache(t *testing.T) {
 				"GR_ovn-worker":  {},
 				"GR_ovn-worker2": {},
 			},
+			Groups: sets.String{},
 		},
 	}, c.existing)
 

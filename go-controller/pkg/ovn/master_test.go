@@ -933,14 +933,19 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				Name: types.ClusterLBGroupName,
+				UUID: types.ClusterLBGroupName + "-UUID",
+			}
 			expectedOVNClusterRouter := &nbdb.LogicalRouter{
 				UUID: types.OVNClusterRouter + "-UUID",
 				Name: types.OVNClusterRouter,
 			}
 			expectedNodeSwitch := &nbdb.LogicalSwitch{
-				UUID:        node1.Name + "-UUID",
-				Name:        node1.Name,
-				OtherConfig: map[string]string{"subnet": node1.NodeSubnet},
+				UUID:              node1.Name + "-UUID",
+				Name:              node1.Name,
+				OtherConfig:       map[string]string{"subnet": node1.NodeSubnet},
+				LoadBalancerGroup: []string{expectedClusterLBGroup.UUID},
 			}
 			expectedClusterRouterPortGroup := &nbdb.PortGroup{
 				UUID: types.ClusterRtrPortGroupName + "-UUID",
@@ -962,13 +967,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						UUID: types.OVNJoinSwitch + "-UUID",
 						Name: types.OVNJoinSwitch,
 					},
-					&nbdb.LogicalSwitch{
-						UUID: node1.Name + "-UUID",
-						Name: node1.Name,
-					},
+					expectedNodeSwitch,
 					expectedOVNClusterRouter,
 					expectedClusterRouterPortGroup,
 					expectedClusterPortGroup,
+					expectedClusterLBGroup,
 				},
 			}
 			var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
@@ -981,6 +984,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(0))
+			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 
 			clusterController.SCTPSupport = true
@@ -1124,14 +1128,19 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				Name: types.ClusterLBGroupName,
+				UUID: types.ClusterLBGroupName + "-UUID",
+			}
 			expectedOVNClusterRouter := &nbdb.LogicalRouter{
 				UUID: types.OVNClusterRouter + "-UUID",
 				Name: types.OVNClusterRouter,
 			}
 			expectedNodeSwitch := &nbdb.LogicalSwitch{
-				UUID:        node1.Name + "-UUID",
-				Name:        node1.Name,
-				OtherConfig: map[string]string{"subnet": node1.NodeSubnet},
+				UUID:              node1.Name + "-UUID",
+				Name:              node1.Name,
+				OtherConfig:       map[string]string{"subnet": node1.NodeSubnet},
+				LoadBalancerGroup: []string{expectedClusterLBGroup.UUID},
 			}
 			expectedClusterRouterPortGroup := &nbdb.PortGroup{
 				UUID: types.ClusterRtrPortGroupName + "-UUID",
@@ -1153,13 +1162,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						UUID: types.OVNJoinSwitch + "-UUID",
 						Name: types.OVNJoinSwitch,
 					},
-					&nbdb.LogicalSwitch{
-						UUID: node1.Name + "-UUID",
-						Name: node1.Name,
-					},
+					expectedNodeSwitch,
 					expectedOVNClusterRouter,
 					expectedClusterRouterPortGroup,
 					expectedClusterPortGroup,
+					expectedClusterLBGroup,
 				},
 			}
 			var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
@@ -1172,6 +1179,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(0))
+			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 
 			clusterController.SCTPSupport = true
@@ -1448,7 +1456,15 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 				t.Fatalf("Error starting master watch factory: %v", err)
 			}
 
-			dbSetup := libovsdbtest.TestSetup{}
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				Name: types.ClusterLBGroupName,
+				UUID: types.ClusterLBGroupName + "-UUID",
+			}
+			dbSetup := libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					expectedClusterLBGroup,
+				},
+			}
 			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err := libovsdbtest.NewNBSBTestHarness(dbSetup)
 			if err != nil {
 				t.Fatalf("Error creating libovsdb test harness %v", err)
@@ -1458,6 +1474,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(0))
+			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 
 			// configure the cluster allocators
 			for _, subnetString := range tt.networkRanges {

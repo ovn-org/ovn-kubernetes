@@ -50,6 +50,11 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		Options:     logicalRouterOptions,
 		ExternalIDs: logicalRouterExternalIDs,
 	}
+
+	if oc.loadBalancerGroupUUID != "" {
+		logicalRouter.LoadBalancerGroup = []string{oc.loadBalancerGroupUUID}
+	}
+
 	opModels := []libovsdbops.OperationModel{
 		{
 			Model:          &logicalRouter,
@@ -57,6 +62,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 			OnModelUpdates: []interface{}{
 				&logicalRouter.Options,
 				&logicalRouter.ExternalIDs,
+				&logicalRouter.LoadBalancerGroup,
 			},
 		},
 	}
