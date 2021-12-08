@@ -378,13 +378,6 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					},
 				}
 
-				//fExec.AddFakeCmdsNoOutputNoError([]string{
-				//	fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_id --format=table find acl priority<=%d priority>=%d", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority),
-				//	fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find acl priority<=%d priority>=%d direction=%s", t.EgressFirewallStartPriority, t.MinimumReservedEgressFirewallPriority, t.DirectionFromLPort),
-				//	"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid --format=table find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1",
-				//	"ovn-nbctl --timeout=15 --id=@node1-10000 create acl priority=10000 direction=" + t.DirectionToLPort + " match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1 -- add logical_switch " + node1Name + " acls @node1-10000",
-				//})
-
 				namespace1 := *newNamespace("namespace1")
 				egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
 					{

@@ -10,7 +10,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
-// findChassis returns all the logical chassis
+// ListChassis returns all the logical chassis
 func ListChassis(sbClient libovsdbclient.Client) ([]sbdb.Chassis, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	defer cancel()

@@ -742,20 +742,13 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 	return oc.watchFactory.AddEgressFirewallHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
-			txn := util.NewNBTxn()
 			addErrors := oc.addEgressFirewall(egressFirewall)
 			if addErrors != nil {
 				klog.Error(addErrors)
 				egressFirewall.Status.Status = egressFirewallAddError
-			} else {
-				_, stderr, err := txn.Commit()
-				if err != nil {
-					klog.Errorf("Failed to commit db changes for egressFirewall in namespace %s stderr: %q, err: %+v", egressFirewall.Namespace, stderr, err)
-					egressFirewall.Status.Status = egressFirewallAddError
-				} else {
-					egressFirewall.Status.Status = egressFirewallAppliedCorrectly
-				}
 			}
+
+			egressFirewall.Status.Status = egressFirewallAppliedCorrectly
 
 			err := oc.updateEgressFirewallWithRetry(egressFirewall)
 			if err != nil {
@@ -768,21 +761,14 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 			newEgressFirewall := newer.(*egressfirewall.EgressFirewall).DeepCopy()
 			oldEgressFirewall := old.(*egressfirewall.EgressFirewall)
 			if !reflect.DeepEqual(oldEgressFirewall.Spec, newEgressFirewall.Spec) {
-				txn := util.NewNBTxn()
 				errList := oc.updateEgressFirewall(oldEgressFirewall, newEgressFirewall)
 				if errList != nil {
 					newEgressFirewall.Status.Status = egressFirewallUpdateError
 					klog.Error(errList)
-				} else {
-					_, stderr, err := txn.Commit()
-					if err != nil {
-						klog.Errorf("Failed to commit db changes for egressFirewall in namespace %s stderr: %q, err: %+v", newEgressFirewall.Namespace, stderr, err)
-						newEgressFirewall.Status.Status = egressFirewallUpdateError
-
-					} else {
-						newEgressFirewall.Status.Status = egressFirewallAppliedCorrectly
-					}
 				}
+
+				newEgressFirewall.Status.Status = egressFirewallAppliedCorrectly
+
 				err := oc.updateEgressFirewallWithRetry(newEgressFirewall)
 				if err != nil {
 					klog.Error(err)
@@ -792,16 +778,12 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 		},
 		DeleteFunc: func(obj interface{}) {
 			egressFirewall := obj.(*egressfirewall.EgressFirewall)
-			txn := util.NewNBTxn()
 			deleteErrors := oc.deleteEgressFirewall(egressFirewall)
 			if deleteErrors != nil {
 				klog.Error(deleteErrors)
 				return
 			}
-			stdout, stderr, err := txn.Commit()
-			if err != nil {
-				klog.Errorf("Failed to commit db changes for egressFirewall in namespace %s stdout: %q, stderr: %q, err: %+v", egressFirewall.Namespace, stdout, stderr, err)
-			}
+
 			metrics.UpdateEgressFirewallRuleCount(float64(-len(egressFirewall.Spec.Egress)))
 			metrics.DecrementEgressFirewallCount()
 		},
