@@ -52,7 +52,7 @@ func GetPortAddresses(portName string, nbClient client.Client) (net.HardwareAddr
 
 	if lsp.DynamicAddresses == nil {
 		if len(lsp.Addresses) > 0 {
-			addresses = lsp.Addresses
+			addresses = strings.Split(lsp.Addresses[0], " ")
 		}
 	} else {
 		// dynamic addresses have format "0a:00:00:00:00:01 192.168.1.3"
