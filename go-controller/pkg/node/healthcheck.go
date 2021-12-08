@@ -96,7 +96,10 @@ func countLocalEndpoints(ep *kapi.Endpoints, nodeName string) int {
 	return num
 }
 
-func hasHostNetworkEndpoints(ep *kapi.Endpoints, nodeAddresses *sets.String) bool {
+// hasLocalHostNetworkEndpoints returns true if there is at least one host-networked endpoint
+// in the provided list that is local to this node.
+// It returns false if none of the endpoints are local host-networked endpoints or if ep.Subsets is nil.
+func hasLocalHostNetworkEndpoints(ep *kapi.Endpoints, nodeAddresses *sets.String) bool {
 	for i := range ep.Subsets {
 		ss := &ep.Subsets[i]
 		for i := range ss.Addresses {

@@ -445,7 +445,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					},
 				},
 			},
-			resultsSame: false,
+			resultsSame: true,
 			resultSharedGatewayCluster: []lbConfig{
 				{
 					vips:     []string{"192.168.1.1", "2002::1"},
@@ -464,19 +464,6 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol:             v1.ProtocolTCP,
 					inport:               inport,
 					externalTrafficLocal: true,
-					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.0.2"},
-						V6IPs: []string{"fe00::1:1"},
-						Port:  outport,
-					},
-				},
-			},
-
-			resultLocalGatewayCluster: []lbConfig{
-				{
-					vips:     []string{"192.168.1.1", "2002::1", "4.2.2.2", "42::42", "5.5.5.5"},
-					protocol: v1.ProtocolTCP,
-					inport:   inport,
 					eps: util.LbEndpoints{
 						V4IPs: []string{"10.128.0.2"},
 						V6IPs: []string{"fe00::1:1"},
@@ -524,6 +511,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					V6IPs: []string{"fe00::1:1"},
 					Port:  outport,
 				},
+				hasNodePort: true,
 			}},
 		},
 		{
@@ -557,6 +545,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 						V6IPs: []string{"2001::1"},
 						Port:  outport,
 					},
+					hasNodePort: true,
 				},
 				{
 					vips:     []string{"192.168.1.1", "2002::1"},
@@ -580,6 +569,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 						V6IPs: []string{"2001::1"},
 						Port:  outport,
 					},
+					hasNodePort: true,
 				},
 				{
 					vips:     []string{"192.168.1.1", "2002::1"},
@@ -614,7 +604,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					},
 				},
 			},
-			// In shared gateway mode, nodeport and host-network-pods must be per-node
+			// In shared & local gateway modes, nodeport and host-network-pods must be per-node
 			resultSharedGatewayNode: []lbConfig{
 				{
 					vips:     []string{"node"},
@@ -626,6 +616,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 						Port:  outport,
 					},
 					externalTrafficLocal: true,
+					hasNodePort:          true,
 				},
 				{
 					vips:     []string{"192.168.1.1", "2002::1"},
@@ -638,7 +629,6 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					},
 				},
 			},
-			// in local gateway mode, only nodePort is per-node
 			resultLocalGatewayNode: []lbConfig{
 				{
 					vips:     []string{"node"},
@@ -649,6 +639,8 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 						V6IPs: []string{"2001::1"},
 						Port:  outport,
 					},
+					externalTrafficLocal: true,
+					hasNodePort:          true,
 				},
 				{
 					vips:     []string{"192.168.1.1", "2002::1"},
@@ -1257,6 +1249,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 					protocol:             v1.ProtocolTCP,
 					inport:               80,
 					externalTrafficLocal: true,
+					hasNodePort:          true,
 					eps: util.LbEndpoints{
 						V4IPs: []string{"10.0.0.1"},
 						Port:  8080,
@@ -1304,6 +1297,10 @@ func Test_buildPerNodeLBs(t *testing.T) {
 							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
 						},
 						{
+							Source:  ovnlb.Addr{"169.254.169.3", 80},
+							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+						},
+						{
 							Source:  ovnlb.Addr{"10.0.0.1", 80},
 							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
 						},
@@ -1339,6 +1336,10 @@ func Test_buildPerNodeLBs(t *testing.T) {
 						{
 							Source:  ovnlb.Addr{"192.168.0.1", 80},
 							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},
+						},
+						{
+							Source:  ovnlb.Addr{"169.254.169.3", 80},
+							Targets: []ovnlb.Addr{},
 						},
 						{
 							Source:  ovnlb.Addr{"10.0.0.2", 80},
