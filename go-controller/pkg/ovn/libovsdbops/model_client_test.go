@@ -199,6 +199,42 @@ func TestCreateOrUpdateForRootObjects(t *testing.T) {
 				},
 			},
 		},
+		{
+			"Test setting of uuid of existing item to model when using model predicate",
+			func() []OperationModel {
+				notTheUUIDWanted := BuildNamedUUID()
+				model := nbdb.AddressSet{
+					UUID: notTheUUIDWanted,
+					Name: adressSetTestName,
+				}
+				return []OperationModel{
+					{
+						Model:          &model,
+						ModelPredicate: func(a *nbdb.AddressSet) bool { return a.Name == adressSetTestName },
+						BulkOp:         false,
+						ErrNotFound:    true,
+						DoAfter: func() {
+							if model.UUID == notTheUUIDWanted {
+								t.Fatalf("Test setting of uuid of existing item to model: should have UUID %s modified to match %s",
+									notTheUUIDWanted, adressSetTestUUID)
+							}
+						},
+					},
+				}
+			},
+			[]libovsdbtest.TestData{
+				&nbdb.AddressSet{
+					Name: adressSetTestName,
+					UUID: adressSetTestUUID,
+				},
+			},
+			[]libovsdbtest.TestData{
+				&nbdb.AddressSet{
+					Name: adressSetTestName,
+					UUID: adressSetTestUUID,
+				},
+			},
+		},
 	}
 
 	for _, tCase := range tt {
