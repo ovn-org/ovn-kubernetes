@@ -47,7 +47,7 @@ func addIptRules(rules []iptRule) error {
 		klog.V(5).Infof("Adding rule in table: %s, chain: %s with args: \"%s\" for protocol: %v ", r.table, r.chain, strings.Join(r.args, " "), r.protocol)
 		ipt, _ := util.GetIPTablesHelper(r.protocol)
 		if err := ipt.NewChain(r.table, r.chain); err != nil {
-			klog.V(5).Infof("Chain: \"%s\" in table: \"%s\" already exists, skipping creation", r.table, r.chain)
+			klog.V(5).Infof("Chain: \"%s\" in table: \"%s\" already exists, skipping creation", r.chain, r.table)
 		}
 		exists, err := ipt.Exists(r.table, r.chain, r.args...)
 		if !exists && err == nil {
@@ -337,7 +337,7 @@ func handleGatewayIPTables(iptCallback func(rules []iptRule) error, genGatewayCh
 				return err
 			}
 			if err := ipt.NewChain("nat", chain); err != nil {
-				klog.V(5).Infof("Chain: \"%s\" in table: \"%s\" already exists, skipping creation", "nat", chain)
+				klog.V(5).Infof("Chain: \"%s\" in table: \"%s\" already exists, skipping creation", chain, "nat")
 			}
 			rules = append(rules, genGatewayChainRules(chain, proto)...)
 		}
