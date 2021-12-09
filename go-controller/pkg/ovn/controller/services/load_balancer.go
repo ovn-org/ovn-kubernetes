@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"strings"
 
-	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -32,6 +31,8 @@ type lbConfig struct {
 	// that means, skipSNAT, and remove any non-local endpoints.
 	// (see below)
 	externalTrafficLocal bool
+	// indicates if this LB is configuring service of type NodePort.
+	hasNodePort bool
 }
 
 // just used for consistent ordering
@@ -53,7 +54,7 @@ var protos = []v1.Protocol{
 //
 // Per-node LBs will be created for
 // - services with NodePort set
-// - services with host-network endpoints (for shared gateway mode)
+// - services with host-network endpoints
 // - services with ExternalTrafficPolicy=Local
 func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.EndpointSlice) (perNodeConfigs []lbConfig, clusterConfigs []lbConfig) {
 	// For each svcPort, determine if it will be applied per-node or cluster-wide
@@ -61,8 +62,7 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 		eps := util.GetLbEndpoints(endpointSlices, svcPort)
 
 		// if ExternalTrafficPolicy is local, then we need to do things a bit differently
-		externalTrafficLocal := globalconfig.Gateway.Mode == globalconfig.GatewayModeShared &&
-			service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal
+		externalTrafficLocal := (service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal)
 
 		// NodePort services get a per-node load balancer, but with the node's physical IP as the vip
 		// Thus, the vip "node" will be expanded later.
@@ -73,6 +73,7 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 				vips:                 []string{placeholderNodeIPs}, // shortcut for all-physical-ips
 				eps:                  eps,
 				externalTrafficLocal: externalTrafficLocal,
+				hasNodePort:          true,
 			}
 			perNodeConfigs = append(perNodeConfigs, nodePortLBConfig)
 		}
@@ -102,6 +103,7 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 				vips:                 externalVips,
 				eps:                  eps,
 				externalTrafficLocal: true,
+				hasNodePort:          false,
 			}
 			perNodeConfigs = append(perNodeConfigs, externalIPConfig)
 		} else {
@@ -116,12 +118,13 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 			vips:                 vips,
 			eps:                  eps,
 			externalTrafficLocal: false, // always false for ClusterIPs
+			hasNodePort:          false,
 		}
 
 		// Normally, the ClusterIP LB is global (on all node switches and routers),
-		// unless both of the following are true:
-		// - We're in shared gateway mode, and
+		// unless any of the following are true:
 		// - Any of the endpoints are host-network
+		// - ETP=local service backed by non-local-host-networked endpoints
 		//
 		// In that case, we need to create per-node LBs.
 		if hasHostEndpoints(eps.V4IPs) || hasHostEndpoints(eps.V6IPs) {
@@ -242,14 +245,10 @@ func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeIn
 }
 
 // buildPerNodeLBs takes a list of lbConfigs and expands them to one LB per protocol per node
-// This works differently based on whether or not we're in shared or local gateway mode.
 //
-// For local gateway, per-node lbs are created for:
-// - nodePort services, attached to each node's switch, vips are node's physical IPs
-//
-// For shared gateway, per-node lbs are created for
+// Per-node lbs are created for
 // - clusterip services with host-network endpoints are attached to each node's gateway router + switch
-// - nodeport services are attached to each node's gateway router + switch, vips are node's physical IPs
+// - nodeport services are attached to each node's gateway router + switch, vips are node's physical IPs (except if etp=local+ovnk backend pods)
 // - any services with host-network endpoints
 // - services with external IPs / LoadBalancer Status IPs
 //
@@ -260,7 +259,8 @@ func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeIn
 // For ExternalTrafficPolicy, all "External" IPs (NodePort, ExternalIPs, Loadbalancer Status) have:
 // - targets filtered to only local targets
 // - SkipSNAT enabled
-// This results in the creation of an additional load balancer on the GatewayRouters.
+// - NP LB on the switch will have masqueradeIP as the vip to handle etp=local for LGW case.
+// This results in the creation of an additional load balancer on the GatewayRouters and NodeSwitches.
 func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) []ovnlb.LB {
 	cbp := configsByProto(configs)
 	eids := util.ExternalIDsForObject(service)
@@ -276,8 +276,7 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 				continue
 			}
 
-			// local gateway mode - attach to switch only
-			// shared gateway mode - attach to router & switch,
+			// attach to router & switch,
 			// rules may or may not be different
 			// localRouterRules are rules with no snat
 			routerRules := make([]ovnlb.LBRule, 0, len(configs))
@@ -289,12 +288,15 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 
 				routerV4targetips := config.eps.V4IPs
 				routerV6targetips := config.eps.V6IPs
+				switchV4targetips := config.eps.V4IPs
+				switchV6targetips := config.eps.V6IPs
 
-				// shared gateway needs to "massage" some of the targets
-				if globalconfig.Gateway.Mode == "shared" && config.externalTrafficLocal {
-					// for ExternalTrafficPolicy=Local, then remove non-local endpoints from the router targets
+				if config.externalTrafficLocal {
+					// for ExternalTrafficPolicy=Local, remove non-local endpoints from the router/switch targets
 					routerV4targetips = util.FilterIPsSlice(routerV4targetips, node.nodeSubnets(), true)
 					routerV6targetips = util.FilterIPsSlice(routerV6targetips, node.nodeSubnets(), true)
+					switchV4targetips = util.FilterIPsSlice(switchV4targetips, node.nodeSubnets(), true)
+					switchV6targetips = util.FilterIPsSlice(switchV6targetips, node.nodeSubnets(), true)
 				}
 				// at this point, the targets may be empty
 
@@ -328,6 +330,19 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 						targets = switchV6Targets
 					}
 
+					if config.externalTrafficLocal && config.hasNodePort {
+						// add special masqueradeIP as a vip if its nodePort svc with ETP=local
+						mvip := types.V4HostETPLocalMasqueradeIP
+						targetsETP := ovnlb.JoinHostsPort(switchV4targetips, config.eps.Port)
+						if isv6 {
+							mvip = types.V6HostETPLocalMasqueradeIP
+							targetsETP = ovnlb.JoinHostsPort(switchV6targetips, config.eps.Port)
+						}
+						switchRules = append(switchRules, ovnlb.LBRule{
+							Source:  ovnlb.Addr{IP: mvip, Port: config.inport},
+							Targets: targetsETP,
+						})
+					}
 					switchRules = append(switchRules, ovnlb.LBRule{
 						Source:  ovnlb.Addr{IP: vip, Port: config.inport},
 						Targets: targets,
@@ -347,7 +362,7 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 					// in other words, is this ExternalTrafficPolicy=local?
 					// if so, this gets a separate load balancer with SNAT disabled
 					// (but there's no need to do this if the list of targets is empty)
-					if globalconfig.Gateway.Mode == "shared" && config.externalTrafficLocal && len(targets) > 0 {
+					if config.externalTrafficLocal && len(targets) > 0 {
 						noSNATRouterRules = append(noSNATRouterRules, rule)
 					} else {
 						routerRules = append(routerRules, rule)

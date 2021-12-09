@@ -139,7 +139,7 @@ func TestGetPortAddresses(t *testing.T) {
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitchPort{
 						Name:      portName,
-						Addresses: []string{hwAddr, badIPAddr},
+						Addresses: []string{fmt.Sprintf("%s %s", hwAddr, badIPAddr)},
 					},
 				},
 			},
@@ -151,7 +151,7 @@ func TestGetPortAddresses(t *testing.T) {
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitchPort{
 						Name:      portName,
-						Addresses: []string{hwAddr, ipAddr},
+						Addresses: []string{fmt.Sprintf("%s %s", hwAddr, ipAddr)},
 					},
 				},
 			},
