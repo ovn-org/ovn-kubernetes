@@ -11,6 +11,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
@@ -230,7 +231,7 @@ var startMasterMetricUpdaterOnce sync.Once
 
 // RegisterMasterMetrics registers some ovnkube master metrics with the Prometheus
 // registry
-func RegisterMasterMetrics(nbClient libovsdbclient.Client, sbClient libovsdbclient.Client) {
+func RegisterMasterMetrics(nbClient, sbClient *libovsdb.Client) {
 	registerMasterMetricsOnce.Do(func() {
 		// ovnkube-master metrics
 		// the updater for this metric is activated
@@ -240,6 +241,10 @@ func RegisterMasterMetrics(nbClient libovsdbclient.Client, sbClient libovsdbclie
 		prometheus.MustRegister(metricPodCreationLatency)
 
 		scrapeOvnTimestamp := func() float64 {
+			if !sbClient.IsRunning() {
+				// Not listening to database updates because we're not the leader
+				return 0
+			}
 			sbGlobal, err := libovsdbops.FindSBGlobal(sbClient)
 			if err != nil {
 				klog.Errorf("Failed to get global options for the SB_Global table err: %v", err)
@@ -329,6 +334,10 @@ func RegisterMasterMetrics(nbClient libovsdbclient.Client, sbClient libovsdbclie
 				var ok bool
 				var err error
 
+				if !nbClient.IsRunning() {
+					// Not listening to database updates because we're not the leader
+					return 0
+				}
 				if nbGlobal, err = libovsdbops.FindNBGlobal(nbClient); err != nil {
 					klog.Errorf("Failed to get NB_Global table "+
 						"err: %v", err)
@@ -488,19 +497,23 @@ type ControlPlaneRecorder struct {
 	podRecords map[kapimtypes.UID]*record
 }
 
-func NewControlPlaneRecorder(sbClient libovsdbclient.Client) *ControlPlaneRecorder {
-	recorder := ControlPlaneRecorder{sync.Mutex{}, make(map[kapimtypes.UID]*record)}
+func NewControlPlaneRecorder() *ControlPlaneRecorder {
+	return &ControlPlaneRecorder{
+		podRecords: make(map[kapimtypes.UID]*record),
+	}
+}
+
+func (ps *ControlPlaneRecorder) Run(sbClient *libovsdb.Client) {
 	sbClient.Cache().AddEventHandler(&cache.EventHandlerFuncs{
 		AddFunc: func(table string, model model.Model) {
-			go recorder.AddPortBindingEvent(table, model)
+			go ps.AddPortBindingEvent(table, model)
 		},
 		UpdateFunc: func(table string, old model.Model, new model.Model) {
-			go recorder.UpdatePortBindingEvent(table, old, new)
+			go ps.UpdatePortBindingEvent(table, old, new)
 		},
 		DeleteFunc: func(table string, model model.Model) {
 		},
 	})
-	return &recorder
 }
 
 func (ps *ControlPlaneRecorder) AddPodEvent(podUID kapimtypes.UID) {
@@ -618,8 +631,7 @@ var metricDBE2eTimestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	},
 )
 
-func ovnE2eTimeStampUpdater(direction, database string, nbClient libovsdbclient.Client,
-	sbClient libovsdbclient.Client) {
+func ovnE2eTimeStampUpdater(direction, database string, nbClient, sbClient *libovsdb.Client) {
 	var nbGlobal *nbdb.NBGlobal
 	var sbGlobal *sbdb.SBGlobal
 	var err error
@@ -641,6 +653,10 @@ func ovnE2eTimeStampUpdater(direction, database string, nbClient libovsdbclient.
 	}
 
 	if direction == "sb" {
+		if !sbClient.IsRunning() {
+			// Not listening to database updates because we're not the leader
+			return
+		}
 		if sbGlobal, err = libovsdbops.FindSBGlobal(sbClient); err != nil && err != libovsdbclient.ErrNotFound {
 			klog.Errorf("Failed to scrape timestamp from sb_Global table "+
 				"err: %v", err)
@@ -653,6 +669,10 @@ func ovnE2eTimeStampUpdater(direction, database string, nbClient libovsdbclient.
 			metricDBE2eTimestamp.WithLabelValues(database).Set(0)
 		}
 	} else {
+		if !nbClient.IsRunning() {
+			// Not listening to database updates because we're not the leader
+			return
+		}
 		if nbGlobal, err = libovsdbops.FindNBGlobal(nbClient); err != nil && err != libovsdbclient.ErrNotFound {
 			klog.Errorf("Failed to scrape timestamp from nb_Global table "+
 				"err: %v", err)

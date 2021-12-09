@@ -2,8 +2,8 @@ package ovn
 
 import (
 	"github.com/onsi/gomega"
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -40,8 +40,8 @@ type FakeOVN struct {
 	stopChan     chan struct{}
 	asf          *addressset.FakeAddressSetFactory
 	fakeRecorder *record.FakeRecorder
-	nbClient     libovsdbclient.Client
-	sbClient     libovsdbclient.Client
+	nbClient     *libovsdb.Client
+	sbClient     *libovsdb.Client
 	dbSetup      libovsdbtest.TestSetup
 	nbsbCleanup  *libovsdbtest.Cleanup
 }
@@ -76,6 +76,11 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		EgressFirewallClient: egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
 	}
 	o.init()
+
+	err = o.nbClient.Run()
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	err = o.sbClient.Run()
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
 func (o *FakeOVN) startWithDBSetup(dbSetup libovsdbtest.TestSetup, objects ...runtime.Object) {

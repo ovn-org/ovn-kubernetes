@@ -67,6 +67,9 @@ func TestGetOvnGateways(t *testing.T) {
 				t.Errorf("libovsdb client error: %v", err)
 			}
 			t.Cleanup(cleanup.Cleanup)
+			if err := libovsdbOvnNBClient.Run(); err != nil {
+				t.Errorf("couldn't to start NB client: %v", err)
+			}
 
 			got, err := GetOvnGateways(libovsdbOvnNBClient)
 			if !sets.NewString(got...).HasAll(tt.want...) {
@@ -146,6 +149,9 @@ func TestGetGatewayPhysicalIPs(t *testing.T) {
 				t.Errorf("libovsdb client error: %v", err)
 			}
 			t.Cleanup(cleanup.Cleanup)
+			if err := libovsdbOvnNBClient.Run(); err != nil {
+				t.Errorf("couldn't to start NB client: %v", err)
+			}
 
 			got, err := GetGatewayPhysicalIPs(libovsdbOvnNBClient, "GR_ovn-control-plane")
 			if (err != nil) != tt.wantErr {

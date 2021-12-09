@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/ovn-org/libovsdb/client"
@@ -21,10 +22,20 @@ import (
 	"k8s.io/klog/v2/klogr"
 )
 
+type sslUpdateFn func(client.Client, <-chan struct{})
+
+type Client struct {
+	sync.Mutex
+	client.Client
+	stopCh   <-chan struct{}
+	monitors []client.MonitorOption
+	running  bool
+}
+
 // newClient creates a new client object given the provided config
 // the stopCh is required to ensure the goroutine for ssl cert
 // update is not leaked
-func newClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-chan struct{}) (client.Client, error) {
+func newClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-chan struct{}, monitors []client.MonitorOption) (*Client, error) {
 	logger := klogr.New()
 	options := []client.Option{
 		client.WithReconnect(types.OVSDBTimeout, &backoff.ZeroBackOff{}),
@@ -34,7 +45,8 @@ func newClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-c
 	for _, endpoint := range strings.Split(cfg.GetURL(), ",") {
 		options = append(options, client.WithEndpoint(endpoint))
 	}
-	var updateFn func(client.Client, <-chan struct{})
+
+	var updateFn sslUpdateFn
 	if cfg.Scheme == config.OvnDBSchemeSSL {
 		tlsConfig, err := createTLSConfig(cfg.Cert, cfg.PrivKey, cfg.CACert, cfg.CertCommonName)
 		if err != nil {
@@ -47,102 +59,105 @@ func newClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-c
 		options = append(options, client.WithTLSConfig(tlsConfig))
 	}
 
-	client, err := client.NewOVSDBClient(dbModel, options...)
+	ovsdbClient, err := client.NewOVSDBClient(dbModel, options...)
 	if err != nil {
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	err = client.Connect(ctx)
-	if err != nil {
-		return nil, err
+	c := &Client{
+		stopCh:   stopCh,
+		monitors: monitors,
+		Client:   ovsdbClient,
 	}
 
 	if updateFn != nil {
-		go updateFn(client, stopCh)
+		go updateFn(c, stopCh)
 	}
 
-	return client, nil
+	return c, nil
+}
+
+func (c *Client) IsRunning() bool {
+	c.Lock()
+	defer c.Unlock()
+	return c.running
+}
+
+// run connects the client to the database and begins processing events
+func (c *Client) Run() error {
+	c.Lock()
+	defer c.Unlock()
+	if c.running {
+		return nil
+	}
+
+	connectCtx, connectCancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer connectCancel()
+	if err := c.Connect(connectCtx); err != nil {
+		return err
+	}
+
+	monitorCtx, monitorCancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	go func() {
+		<-c.stopCh
+		monitorCancel()
+	}()
+
+	var err error
+	if len(c.monitors) > 0 {
+		_, err = c.Monitor(monitorCtx, c.NewMonitor(c.monitors...))
+	} else {
+		_, err = c.MonitorAll(monitorCtx)
+	}
+	if err != nil {
+		c.Close()
+		return err
+	}
+
+	c.running = true
+	return nil
 }
 
 // NewSBClient creates a new OVN Southbound Database client
-func NewSBClient(stopCh <-chan struct{}) (client.Client, error) {
+func NewSBClient(stopCh <-chan struct{}) (*Client, error) {
 	return NewSBClientWithConfig(config.OvnSouth, stopCh)
 }
 
 // NewSBClientWithConfig creates a new OVN Southbound Database client with the provided configuration
-func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (client.Client, error) {
+func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (*Client, error) {
 	dbModel, err := sbdb.FullDatabaseModel()
 	if err != nil {
 		return nil, err
 	}
-	c, err := newClient(cfg, dbModel, stopCh)
-	if err != nil {
-		return nil, err
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	go func() {
-		<-stopCh
-		cancel()
-	}()
-
-	// Only Monitor Required SBDB tables to reduce memory overhead
-	_, err = c.Monitor(ctx,
-		c.NewMonitor(
-			// used by unidling controller
-			client.WithTable(&sbdb.ControllerEvent{}),
-			// used for gateway
-			client.WithTable(&sbdb.MACBinding{}),
-			// used by libovsdbops
-			client.WithTable(&sbdb.Chassis{}),
-			// used for metrics
-			client.WithTable(&sbdb.SBGlobal{}),
-			// used for metrics
-			client.WithTable(&sbdb.PortBinding{}),
-			// used for hybrid-overlay
-			client.WithTable(&sbdb.DatapathBinding{}),
-		),
-	)
-	if err != nil {
-		c.Close()
-		return nil, err
-	}
-
-	return c, nil
+	// Only monitor required SBDB tables to reduce memory overhead
+	return newClient(cfg, dbModel, stopCh, []client.MonitorOption{
+		// used by unidling controller
+		client.WithTable(&sbdb.ControllerEvent{}),
+		// used for gateway
+		client.WithTable(&sbdb.MACBinding{}),
+		// used by libovsdbops
+		client.WithTable(&sbdb.Chassis{}),
+		// used for metrics
+		client.WithTable(&sbdb.SBGlobal{}),
+		// used for metrics
+		client.WithTable(&sbdb.PortBinding{}),
+		// used for hybrid-overlay
+		client.WithTable(&sbdb.DatapathBinding{}),
+	})
 }
 
 // NewNBClient creates a new OVN Northbound Database client
-func NewNBClient(stopCh <-chan struct{}) (client.Client, error) {
+func NewNBClient(stopCh <-chan struct{}) (*Client, error) {
 	return NewNBClientWithConfig(config.OvnNorth, stopCh)
 }
 
 // NewNBClientWithConfig creates a new OVN Northbound Database client with the provided configuration
-func NewNBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (client.Client, error) {
+func NewNBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (*Client, error) {
 	dbModel, err := nbdb.FullDatabaseModel()
 	if err != nil {
 		return nil, err
 	}
-
-	c, err := newClient(cfg, dbModel, stopCh)
-	if err != nil {
-		return nil, err
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	go func() {
-		<-stopCh
-		cancel()
-	}()
-
-	_, err = c.MonitorAll(ctx)
-	if err != nil {
-		c.Close()
-		return nil, err
-	}
-
-	return c, nil
+	return newClient(cfg, dbModel, stopCh, nil)
 }
 
 func createTLSConfig(certFile, privKeyFile, caCertFile, serverName string) (*tls.Config, error) {
@@ -165,9 +180,9 @@ func createTLSConfig(certFile, privKeyFile, caCertFile, serverName string) (*tls
 }
 
 // Watch TLS key/cert files, and update the ovndb tlsConfig Certificate.
-// Call ovndbclient.Close() will disconnect underlying rpc2client connection.
-// With ovndbclient initalized with reconnect flag, rcp2client will reconnct with new tlsConfig Certificate.
-func newSSLKeyPairWatcherFunc(certFile, privKeyFile string, tlsConfig *tls.Config) (func(client.Client, <-chan struct{}), error) {
+// Call ovnDBClient.Close() will disconnect underlying rpc2client connection.
+// With ovnDBClient initalized with reconnect flag, rcp2client will reconnct with new tlsConfig Certificate.
+func newSSLKeyPairWatcherFunc(certFile, privKeyFile string, tlsConfig *tls.Config) (sslUpdateFn, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err

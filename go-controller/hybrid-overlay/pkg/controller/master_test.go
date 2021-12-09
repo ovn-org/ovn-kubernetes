@@ -11,11 +11,11 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
@@ -106,10 +106,12 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
 			dbSetup := libovsdbtest.TestSetup{}
-			var libovsdbOvnNBClient libovsdbclient.Client
-			var libovsdbOvnSBClient libovsdbclient.Client
-
+			var libovsdbOvnNBClient, libovsdbOvnSBClient *libovsdb.Client
 			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			Expect(err).NotTo(HaveOccurred())
+			err = libovsdbOvnNBClient.Run()
+			Expect(err).NotTo(HaveOccurred())
+			err = libovsdbOvnSBClient.Run()
 			Expect(err).NotTo(HaveOccurred())
 
 			m, err := NewMaster(
@@ -216,11 +218,12 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				NBData: initialNBDB,
 				SBData: initialSBDB,
 			}
-
-			var libovsdbOvnNBClient libovsdbclient.Client
-			var libovsdbOvnSBClient libovsdbclient.Client
-
+			var libovsdbOvnNBClient, libovsdbOvnSBClient *libovsdb.Client
 			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			Expect(err).NotTo(HaveOccurred())
+			err = libovsdbOvnNBClient.Run()
+			Expect(err).NotTo(HaveOccurred())
+			err = libovsdbOvnSBClient.Run()
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
@@ -418,12 +421,14 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				NBData: initialNBDB,
 				SBData: initialSBDB,
 			}
-
-			var libovsdbOvnNBClient libovsdbclient.Client
-			var libovsdbOvnSBClient libovsdbclient.Client
+			var libovsdbOvnNBClient, libovsdbOvnSBClient *libovsdb.Client
 
 			// nothing will occur in the SBDB or NBDB in this instance because the HO lrp already exists
 			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			Expect(err).NotTo(HaveOccurred())
+			err = libovsdbOvnNBClient.Run()
+			Expect(err).NotTo(HaveOccurred())
+			err = libovsdbOvnSBClient.Run()
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
@@ -524,12 +529,15 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				NBData: initialDatabaseState,
 				SBData: nil,
 			}
-			var libovsdbOvnNBClient libovsdbclient.Client
-			var libovsdbOvnSBClient libovsdbclient.Client
+			var libovsdbOvnNBClient, libovsdbOvnSBClient *libovsdb.Client
 
 			// nothing will occur in the SBDB in this instance because we don't explicitly clean up any created
 			// mac bindings
 			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			Expect(err).NotTo(HaveOccurred())
+			err = libovsdbOvnNBClient.Run()
+			Expect(err).NotTo(HaveOccurred())
+			err = libovsdbOvnSBClient.Run()
 			Expect(err).NotTo(HaveOccurred())
 
 			m, err := NewMaster(

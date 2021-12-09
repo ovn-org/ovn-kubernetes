@@ -88,6 +88,9 @@ func TestRemoveACLsFromSwitches(t *testing.T) {
 				t.Fatalf("test: \"%s\" failed to set up test harness: %v", tt.desc, err)
 			}
 			t.Cleanup(cleanup.Cleanup)
+			if err := nbClient.Run(); err != nil {
+				t.Fatalf("test: \"%s\" couldn't to start NB client: %v", tt.desc, err)
+			}
 
 			fakeSwitches := []nbdb.LogicalSwitch{
 				*fakeSwitch1,

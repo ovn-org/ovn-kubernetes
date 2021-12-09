@@ -40,6 +40,9 @@ func runTestCase(t *testing.T, tCase OperationModelTestCase, shouldDelete bool) 
 		return err
 	}
 	t.Cleanup(cleanup.Cleanup)
+	if err := nbClient.Run(); err != nil {
+		return fmt.Errorf("test: \"%s\" couldn't to start NB client: %v", tCase.name, err)
+	}
 
 	modelClient := NewModelClient(nbClient)
 
@@ -1040,6 +1043,12 @@ func TestCreateWithAdHocClient(t *testing.T) {
 			t.Fatalf("test: \"%s\" failed to set up test harness: %v", tCase.name, err)
 		}
 		t.Cleanup(cleanup.Cleanup)
+		if err := nbClient.Run(); err != nil {
+			t.Fatalf("test: \"%s\" couldn't to start NB client: %v", tCase.name, err)
+		}
+		if err := sbClient.Run(); err != nil {
+			t.Fatalf("test: \"%s\" couldn't to start SB client: %v", tCase.name, err)
+		}
 
 		modelClient := NewModelClient(nbClient)
 

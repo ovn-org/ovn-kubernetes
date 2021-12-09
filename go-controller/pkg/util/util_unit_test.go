@@ -423,6 +423,9 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 				t.Fatal(fmt.Errorf("test: \"%s\" failed to create test harness: %v", tc.desc, err))
 			}
 			t.Cleanup(cleanup.Cleanup)
+			if err := nbClient.Run(); err != nil {
+				t.Fatal(err)
+			}
 
 			_, ipnet, err := net.ParseCIDR(tc.inpSubnetStr)
 			if err != nil {

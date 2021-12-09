@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -49,7 +49,7 @@ var NoServiceLabelError = fmt.Errorf("endpointSlice missing %s label", discovery
 
 // NewController returns a new *Controller.
 func NewController(client clientset.Interface,
-	nbClient libovsdbclient.Client,
+	nbClient *libovsdb.Client,
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
 	nodeInformer coreinformers.NodeInformer,
@@ -109,7 +109,7 @@ type Controller struct {
 	client clientset.Interface
 
 	// libovsdb northbound client interface
-	nbClient         libovsdbclient.Client
+	nbClient         *libovsdb.Client
 	eventBroadcaster record.EventBroadcaster
 	eventRecorder    record.EventRecorder
 
@@ -156,6 +156,10 @@ type Controller struct {
 // Run will not return until stopCh is closed. workers determines how many
 // endpoints will be handled in parallel.
 func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGroups bool) error {
+	if err := c.nbClient.Run(); err != nil {
+		return err
+	}
+
 	defer utilruntime.HandleCrash()
 	defer c.queue.ShutDown()
 

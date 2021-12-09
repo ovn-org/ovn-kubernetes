@@ -31,10 +31,6 @@ type serviceController struct {
 	libovsdbCleanup    *libovsdbtest.Cleanup
 }
 
-func newController() (*serviceController, error) {
-	return newControllerWithDBSetup(libovsdbtest.TestSetup{})
-}
-
 func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceController, error) {
 	nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup, nil)
 	if err != nil {
@@ -615,11 +611,14 @@ func TestSyncServices(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Error creating controller: %v", err)
 			}
-			defer controller.close()
+			t.Cleanup(controller.close)
+			if err := controller.nbClient.Run(); err != nil {
+				t.Fatalf("Error starting OVN NB client: %v", err)
+			}
+
 			// Add objects to the Store
 			controller.endpointSliceStore.Add(tt.slice)
 			controller.serviceStore.Add(tt.service)
-
 			controller.nodeTracker.nodes = defaultNodes
 
 			err = controller.syncService(ns + "/" + serviceName)

@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -57,9 +57,11 @@ var _ = Describe("Unidling Controller", func() {
 		stopCh := make(chan struct{})
 		defer close(stopCh)
 
-		var sbClient libovsdbclient.Client
+		var sbClient *libovsdb.Client
 		var err error
 		sbClient, cleanup, err = libovsdbtest.NewSBTestHarness(testSetup, nil)
+		Expect(err).NotTo(HaveOccurred())
+		err = sbClient.Run()
 		Expect(err).NotTo(HaveOccurred())
 
 		config.OvnSouth.Scheme = config.OvnDBSchemeTCP

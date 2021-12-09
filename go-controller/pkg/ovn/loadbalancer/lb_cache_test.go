@@ -73,6 +73,9 @@ func TestNewCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(cleanup.Cleanup)
+	if err := nbClient.Run(); err != nil {
+		t.Fatal(err)
+	}
 
 	c, err := newCache(nbClient)
 	if err != nil {

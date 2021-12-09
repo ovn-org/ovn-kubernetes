@@ -11,12 +11,12 @@ import (
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
@@ -969,7 +969,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedClusterLBGroup,
 				},
 			}
-			var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+			var libovsdbOvnNBClient, libovsdbOvnSBClient *libovsdb.Client
 			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -981,6 +981,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				record.NewFakeRecorder(0))
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
+			err = libovsdbOvnNBClient.Run()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = libovsdbOvnSBClient.Run()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController.SCTPSupport = true
 			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, []string{node1.Name})
@@ -1157,7 +1161,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedClusterLBGroup,
 				},
 			}
-			var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+			var libovsdbOvnNBClient, libovsdbOvnSBClient *libovsdb.Client
 			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1169,6 +1173,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				record.NewFakeRecorder(0))
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
+			err = libovsdbOvnNBClient.Run()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = libovsdbOvnSBClient.Run()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController.SCTPSupport = true
 			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, []string{node1.Name})
@@ -1463,6 +1471,13 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
 				record.NewFakeRecorder(0))
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
+
+			if err := libovsdbOvnNBClient.Run(); err != nil {
+				t.Fatalf("Error starting OVN NB client: %v", err)
+			}
+			if err := libovsdbOvnSBClient.Run(); err != nil {
+				t.Fatalf("Error starting OVN SB client: %v", err)
+			}
 
 			// configure the cluster allocators
 			for _, subnetString := range tt.networkRanges {

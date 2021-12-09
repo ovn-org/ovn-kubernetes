@@ -16,7 +16,6 @@ import (
 
 	"k8s.io/klog/v2"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -229,7 +228,7 @@ func runOvnKube(ctx *cli.Context) error {
 			return err
 		}
 		watchFactory = masterWatchFactory
-		var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+		var libovsdbOvnNBClient, libovsdbOvnSBClient *libovsdb.Client
 
 		if libovsdbOvnNBClient, err = libovsdb.NewNBClient(stopChan); err != nil {
 			return fmt.Errorf("error when trying to initialize libovsdb NB client: %v", err)
