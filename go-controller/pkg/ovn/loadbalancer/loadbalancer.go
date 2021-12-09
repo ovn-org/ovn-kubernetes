@@ -55,6 +55,8 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 	removeLBsFromSwitch := map[string][]*nbdb.LoadBalancer{}
 	addLBsToRouter := map[string][]*nbdb.LoadBalancer{}
 	removesLBsFromRouter := map[string][]*nbdb.LoadBalancer{}
+	addLBsToGroups := map[string][]*nbdb.LoadBalancer{}
+	removeLBsFromGroups := map[string][]*nbdb.LoadBalancer{}
 	wantedByName := make(map[string]*LB, len(LBs))
 	for i, lb := range LBs {
 		wantedByName[lb.Name] = &LBs[i]
@@ -63,17 +65,22 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 		existingLB := existingByName[lb.Name]
 		existingRouters := sets.String{}
 		existingSwitches := sets.String{}
+		existingGroups := sets.String{}
 		if existingLB != nil {
 			toDelete.Delete(existingLB.UUID)
 			existingRouters = existingLB.Routers
 			existingSwitches = existingLB.Switches
+			existingGroups = existingLB.Groups
 		}
 		wantRouters := sets.NewString(lb.Routers...)
 		wantSwitches := sets.NewString(lb.Switches...)
+		wantGroups := sets.NewString(lb.Groups...)
 		mapLBDifferenceByKey(addLBsToSwitch, wantSwitches, existingSwitches, blb)
 		mapLBDifferenceByKey(removeLBsFromSwitch, existingSwitches, wantSwitches, blb)
 		mapLBDifferenceByKey(addLBsToRouter, wantRouters, existingRouters, blb)
 		mapLBDifferenceByKey(removesLBsFromRouter, existingRouters, wantRouters, blb)
+		mapLBDifferenceByKey(addLBsToGroups, wantGroups, existingGroups, blb)
+		mapLBDifferenceByKey(removeLBsFromGroups, existingGroups, wantGroups, blb)
 	}
 
 	ops, err := libovsdbops.CreateOrUpdateLoadBalancersOps(nbClient, nil, lbs...)
@@ -124,6 +131,30 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 	}
 	for k, v := range removesLBsFromRouter {
 		ops, err = libovsdbops.RemoveLoadBalancersFromRouterOps(nbClient, ops, getRouter(k), v...)
+		if err != nil {
+			return err
+		}
+	}
+
+	// cache groups for this round of ops
+	groups := map[string]*nbdb.LoadBalancerGroup{}
+	getGroup := func(name string) *nbdb.LoadBalancerGroup {
+		var group *nbdb.LoadBalancerGroup
+		var found bool
+		if group, found = groups[name]; !found {
+			group = &nbdb.LoadBalancerGroup{Name: name}
+			groups[name] = group
+		}
+		return group
+	}
+	for k, v := range addLBsToGroups {
+		ops, err = libovsdbops.AddLoadBalancersToGroupOps(nbClient, ops, getGroup(k), v...)
+		if err != nil {
+			return err
+		}
+	}
+	for k, v := range removeLBsFromGroups {
+		ops, err = libovsdbops.RemoveLoadBalancersFromGroupOps(nbClient, ops, getGroup(k), v...)
 		if err != nil {
 			return err
 		}
@@ -235,7 +266,7 @@ func buildVipMap(rules []LBRule) map[string]string {
 }
 
 // DeleteLBs deletes all load balancer uuids supplied
-// Note: this also automatically removes them from the switches and the routers :-)
+// Note: this also automatically removes them from the switches, routers, and the groups :-)
 func DeleteLBs(nbClient libovsdbclient.Client, uuids []string) error {
 	if len(uuids) == 0 {
 		return nil

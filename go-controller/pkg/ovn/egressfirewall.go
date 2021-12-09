@@ -91,6 +91,9 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 // -	Cleanup the old implementation (using LRP) in local GW mode -> shared GW mode implementation (using ACLs on the join switch)
 //  	For this it just deletes all LRP setup done for egress firewall
 
+// -    Cleanup for migration from shared GW mode -> local GW mode
+//      For this it just deletes all the ACLs on the distributed join switch
+
 // NOTE: Utilize the fact that we know that all egress firewall related setup must have a priority: types.MinimumReservedEgressFirewallPriority <= priority <= types.EgressFirewallStartPriority
 func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) {
 	// Lookup all ACLs used for egress Firewalls
@@ -104,6 +107,15 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) {
 		// Mode is shared gateway mode, make sure to delete all egfw ACLs on the node switches
 		if len(egressFirewallACLs) != 0 {
 			err = libovsdbops.RemoveACLsFromNodeSwitches(oc.nbClient, egressFirewallACLs)
+			if err != nil {
+				klog.Errorf("Failed to remove reject acl from node logical switches: %v", err)
+				return
+			}
+		}
+	} else if config.Gateway.Mode == config.GatewayModeLocal {
+		// Mode is local gateway mode, make sure to delete all egfw ACLs on the join switches
+		if len(egressFirewallACLs) != 0 {
+			err = libovsdbops.RemoveACLsFromJoinSwitch(oc.nbClient, egressFirewallACLs)
 			if err != nil {
 				klog.Errorf("Failed to remove reject acl from node logical switches: %v", err)
 				return
@@ -129,7 +141,7 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) {
 		}
 	}
 	// In any gateway mode, make sure to delete all LRPs on ovn_cluster_router.
-	// This covers old local GW mode -> shared GW and old local GW mode -> new local GW mode
+	// This covers migration from LGW mode that used LRPs for EFW to using ACLs in SGW/LGW modes
 	logicalRouter := nbdb.LogicalRouter{}
 	logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
 	opModels := []libovsdbops.OperationModel{

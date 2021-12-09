@@ -148,16 +148,27 @@ func makeLBName(service *v1.Service, proto v1.Protocol, scope string) string {
 // It takes a list of (proto:[vips]:port -> [endpoints]) configs and re-aggregates
 // them to a list of (proto:[vip:port -> [endpoint:port]])
 // This load balancer is attached to all node switches. In shared-GW mode, it is also on all routers
-func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeInfo) []ovnlb.LB {
-	nodeSwitches := make([]string, 0, len(nodeInfos))
-	nodeRouters := make([]string, 0, len(nodeInfos))
-	for _, node := range nodeInfos {
-		nodeSwitches = append(nodeSwitches, node.switchName)
-		// For shared gateway, add to the node's GWR as well.
-		// The node may not have a gateway router - it might be waiting initialization, or
-		// might have disabled GWR creation via the k8s.ovn.org/l3-gateway-config annotation
-		if node.gatewayRouterName != "" {
-			nodeRouters = append(nodeRouters, node.gatewayRouterName)
+func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeInfo, useLBGroup bool) []ovnlb.LB {
+	var nodeSwitches []string
+	var nodeRouters []string
+	var groups []string
+	if useLBGroup {
+		nodeSwitches = make([]string, 0)
+		nodeRouters = make([]string, 0)
+		groups = []string{types.ClusterLBGroupName}
+	} else {
+		nodeSwitches = make([]string, 0, len(nodeInfos))
+		nodeRouters = make([]string, 0, len(nodeInfos))
+		groups = make([]string, 0)
+
+		for _, node := range nodeInfos {
+			nodeSwitches = append(nodeSwitches, node.switchName)
+			// For shared gateway, add to the node's GWR as well.
+			// The node may not have a gateway router - it might be waiting initialization, or
+			// might have disabled GWR creation via the k8s.ovn.org/l3-gateway-config annotation
+			if node.gatewayRouterName != "" {
+				nodeRouters = append(nodeRouters, node.gatewayRouterName)
+			}
 		}
 	}
 
@@ -177,6 +188,7 @@ func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeIn
 
 			Switches: nodeSwitches,
 			Routers:  nodeRouters,
+			Groups:   groups,
 		}
 
 		for _, config := range cfgs {

@@ -49,7 +49,7 @@ func FullDatabaseModel() (model.ClientDBModel, error) {
 
 var schema = `{
   "name": "OVN_Southbound",
-  "version": "20.17.0",
+  "version": "20.20.0",
   "tables": {
     "Address_Set": {
       "columns": {
@@ -501,9 +501,7 @@ var schema = `{
         "load_balancers": {
           "type": {
             "key": {
-              "type": "uuid",
-              "refTable": "Load_Balancer",
-              "refType": "weak"
+              "type": "uuid"
             },
             "min": 0,
             "max": "unlimited"
@@ -958,6 +956,15 @@ var schema = `{
         "actions": {
           "type": "string"
         },
+        "controller_meter": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": 1
+          }
+        },
         "external_ids": {
           "type": {
             "key": {
@@ -1023,6 +1030,18 @@ var schema = `{
               "minInteger": 0,
               "maxInteger": 32
             }
+          }
+        },
+        "tags": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
           }
         }
       }
@@ -1521,7 +1540,7 @@ var schema = `{
             "key": {
               "type": "integer",
               "minInteger": 0,
-              "maxInteger": 32767
+              "maxInteger": 65535
             }
           }
         },

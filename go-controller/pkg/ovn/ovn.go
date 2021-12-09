@@ -158,6 +158,9 @@ type Controller struct {
 	// Supports multicast?
 	multicastSupport bool
 
+	// Cluster wide Load_Balancer_Group UUID.
+	loadBalancerGroupUUID string
+
 	// Controller used for programming OVN for egress IP
 	eIPC egressIPController
 
@@ -275,6 +278,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
+		loadBalancerGroupUUID:    "",
 		aclLoggingEnabled:        true,
 		joinSwIPManager:          nil,
 		retryPods:                make(map[types.UID]*retryEntry),
@@ -1295,9 +1299,10 @@ func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		useLBGroups := oc.loadBalancerGroupUUID != ""
 		// use 5 workers like most of the kubernetes controllers in the
 		// kubernetes controller-manager
-		err := oc.svcController.Run(5, oc.stopChan, runRepair)
+		err := oc.svcController.Run(5, oc.stopChan, runRepair, useLBGroups)
 		if err != nil {
 			klog.Errorf("Error running OVN Kubernetes Services controller: %v", err)
 		}

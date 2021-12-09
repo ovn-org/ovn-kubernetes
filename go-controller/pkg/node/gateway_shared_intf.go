@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net"
-	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -1286,19 +1285,7 @@ func addMasqueradeRoute(netIfaceName string, nextHops []net.IP) error {
 		return fmt.Errorf("no valid ipv4 next hop exists: %v", err)
 	}
 	_, masqIPNet, _ := net.ParseCIDR(types.V4MasqueradeSubnet)
-	exists, err := util.LinkRouteExists(netIfaceLink, v4nextHops[0], masqIPNet)
-	if err != nil {
-		return fmt.Errorf("failed to check if route exists for masquerade subnet, error: %v", err)
-	}
-	if exists {
-		return nil
-	}
-	err = util.LinkRoutesAdd(netIfaceLink, v4nextHops[0], []*net.IPNet{masqIPNet}, 0)
-	if os.IsExist(err) {
-		klog.V(5).Infof("Ignoring error %s from 'route add %s via %s'",
-			err.Error(), masqIPNet, v4nextHops[0])
-		return nil
-	}
+	err = util.LinkRoutesAddOrUpdateMTU(netIfaceLink, v4nextHops[0], []*net.IPNet{masqIPNet}, config.Default.RoutableMTU)
 	if err != nil {
 		return fmt.Errorf("unable to add OVN masquerade route to host, error: %v", err)
 	}

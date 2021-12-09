@@ -7,6 +7,7 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -103,4 +104,5 @@ func (o *FakeOVN) init() {
 		o.nbClient, o.sbClient,
 		o.fakeRecorder)
 	o.controller.multicastSupport = true
+	o.controller.loadBalancerGroupUUID = types.ClusterLBGroupName + "-UUID"
 }

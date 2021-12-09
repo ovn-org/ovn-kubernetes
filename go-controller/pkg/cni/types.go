@@ -38,6 +38,7 @@ type PodInterfaceInfo struct {
 	util.PodAnnotation
 
 	MTU           int    `json:"mtu"`
+	RoutableMTU   int    `json:"routable-mtu"`
 	Ingress       int64  `json:"ingress"`
 	Egress        int64  `json:"egress"`
 	CheckExtIDs   bool   `json:"check-external-ids"`

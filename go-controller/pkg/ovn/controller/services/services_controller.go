@@ -148,16 +148,21 @@ type Controller struct {
 	// if a service's config hasn't changed
 	alreadyApplied     map[string][]ovnlb.LB
 	alreadyAppliedLock sync.Mutex
+
+	// 'true' if Load_Balancer_Group is supported.
+	useLBGroups bool
 }
 
 // Run will not return until stopCh is closed. workers determines how many
 // endpoints will be handled in parallel.
-func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair bool) error {
+func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGroups bool) error {
 	defer utilruntime.HandleCrash()
 	defer c.queue.ShutDown()
 
 	klog.Infof("Starting controller %s", controllerName)
 	defer klog.Infof("Shutting down controller %s", controllerName)
+
+	c.useLBGroups = useLBGroups
 
 	// Wait for the caches to be synced
 	klog.Info("Waiting for informer caches to sync")
@@ -276,7 +281,9 @@ func (c *Controller) syncService(key string) error {
 
 	//
 	// The Service exists in the cache: update it in OVN
-	//
+
+	klog.V(5).Infof("Service %s retrieved from lister: %v", service.Name, service)
+
 	// Get the endpoint slices associated to the Service
 	esLabelSelector := labels.Set(map[string]string{
 		discovery.LabelServiceName: name,
@@ -296,7 +303,7 @@ func (c *Controller) syncService(key string) error {
 
 	// Convert the LB configs in to load-balancer objects
 	nodeInfos := c.nodeTracker.allNodes()
-	clusterLBs := buildClusterLBs(service, clusterConfigs, nodeInfos)
+	clusterLBs := buildClusterLBs(service, clusterConfigs, nodeInfos, c.useLBGroups)
 	perNodeLBs := buildPerNodeLBs(service, perNodeConfigs, nodeInfos)
 	klog.V(5).Infof("Built service %s cluster-wide LB %#v", key, clusterLBs)
 	klog.V(5).Infof("Built service %s per-node LB %#v", key, perNodeLBs)

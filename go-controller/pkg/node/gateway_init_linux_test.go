@@ -1238,7 +1238,7 @@ var _ = Describe("Gateway unit tests", func() {
 			netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
 			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
 			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
-			netlinkMock.On("RouteReplace", expectedRoute).Return(nil)
+			netlinkMock.On("RouteAdd", expectedRoute).Return(nil)
 
 			err = configureSvcRouteViaInterface("ens1f0", gwIPs)
 			Expect(err).ToNot(HaveOccurred())
@@ -1301,6 +1301,28 @@ var _ = Describe("Gateway unit tests", func() {
 			Expect(err).To(HaveOccurred())
 		})
 
+		It("Fails if link route add fails", func() {
+			_, ipnet, err := net.ParseCIDR("10.96.0.0/16")
+			Expect(err).ToNot(HaveOccurred())
+			config.Kubernetes.ServiceCIDRs = []*net.IPNet{ipnet}
+			gwIPs := []net.IP{net.ParseIP("10.0.0.11")}
+
+			lnk := &linkMock.Link{}
+			lnkAttr := &netlink.LinkAttrs{
+				Name:  "ens1f0",
+				Index: 5,
+			}
+
+			lnk.On("Attrs").Return(lnkAttr)
+			netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
+			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
+			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
+			netlinkMock.On("RouteAdd", mock.Anything).Return(fmt.Errorf("failed to replace route"))
+
+			err = configureSvcRouteViaInterface("ens1f0", gwIPs)
+			Expect(err).To(HaveOccurred())
+		})
+
 		It("Fails if link route replace fails", func() {
 			_, ipnet, err := net.ParseCIDR("10.96.0.0/16")
 			Expect(err).ToNot(HaveOccurred())
@@ -1312,10 +1334,18 @@ var _ = Describe("Gateway unit tests", func() {
 				Name:  "ens1f0",
 				Index: 5,
 			}
+			previousRoute := &netlink.Route{
+				Dst:       ipnet,
+				LinkIndex: 5,
+				Scope:     netlink.SCOPE_UNIVERSE,
+				Gw:        gwIPs[0],
+				MTU:       config.Default.MTU - 100,
+			}
+
 			lnk.On("Attrs").Return(lnkAttr)
 			netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
 			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
-			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
+			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{*previousRoute}, nil)
 			netlinkMock.On("RouteReplace", mock.Anything).Return(fmt.Errorf("failed to replace route"))
 
 			err = configureSvcRouteViaInterface("ens1f0", gwIPs)

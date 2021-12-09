@@ -288,30 +288,30 @@ func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int
 			if os.IsExist(err) {
 				return err
 			}
-			return fmt.Errorf("failed to add route for subnet %s via gateway %s: %v",
-				subnet.String(), gwIP.String(), err)
+			return fmt.Errorf("failed to add route for subnet %s via gateway %s with mtu %d: %v",
+				subnet.String(), gwIP.String(), mtu, err)
 		}
 	}
 	return nil
 }
 
-// LinkRoutesReplace adds or changes a route for given subnets through the gwIPstr
-func LinkRoutesReplace(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int) error {
+func LinkRoutesAddOrUpdateMTU(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int) error {
 	for _, subnet := range subnets {
-		route := &netlink.Route{
-			Dst:       subnet,
-			LinkIndex: link.Attrs().Index,
-			Scope:     netlink.SCOPE_UNIVERSE,
-			Gw:        gwIP,
-		}
-		if mtu != 0 {
-			route.MTU = mtu
-		}
-
-		err := netLinkOps.RouteReplace(route)
+		route, err := LinkRouteGet(link, gwIP, subnet)
 		if err != nil {
-			return fmt.Errorf("failed to replace a route for subnet %s via gateway %s: %v",
-				subnet.String(), gwIP.String(), err)
+			return err
+		}
+		if route != nil {
+			if route.MTU == mtu {
+				return nil
+			}
+			route.MTU = mtu
+			err = netLinkOps.RouteReplace(route)
+			if err != nil {
+				return fmt.Errorf("failed to replace route for subnet %s via gateway %s with mtu %d: %v", subnet.String(), gwIP.String(), mtu, err)
+			}
+		} else {
+			return LinkRoutesAdd(link, gwIP, []*net.IPNet{subnet}, mtu)
 		}
 	}
 	return nil
