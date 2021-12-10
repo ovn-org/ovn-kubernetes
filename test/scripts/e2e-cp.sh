@@ -51,15 +51,6 @@ if [ "$KIND_IPV6_SUPPORT" == true ]; then
   SKIPPED_TESTS+=$IPV6_SKIPPED_TESTS
 fi
 
-if [ "$OVN_GATEWAY_MODE" == "local" ]; then
-  if [ "$SKIPPED_TESTS" != "" ]; then
-  	SKIPPED_TESTS+="|"
-  fi
-  SKIPPED_TESTS+="Should be allowed to node local cluster-networked endpoints by nodeport services with externalTrafficPolicy=local|\
-e2e ingress to host-networked pods traffic validation|\
-host to host-networked pods traffic validation"
-fi
-
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote
 export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock

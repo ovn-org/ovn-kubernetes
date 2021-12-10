@@ -135,6 +135,7 @@ var _ = Describe("Node Operations", func() {
 					kapi.ServiceTypeClusterIP,
 					[]string{"8.8.8.8"},
 					v1.ServiceStatus{},
+					false,
 				)
 
 				pcw.AddService(service)
@@ -171,6 +172,7 @@ var _ = Describe("Node Operations", func() {
 					kapi.ServiceTypeNodePort,
 					[]string{},
 					v1.ServiceStatus{},
+					false,
 				)
 
 				pcw.AddService(service)
@@ -209,6 +211,7 @@ var _ = Describe("Node Operations", func() {
 					kapi.ServiceTypeNodePort,
 					[]string{"8.8.8.8"},
 					v1.ServiceStatus{},
+					false,
 				)
 
 				pcw.AddService(service)
@@ -247,6 +250,7 @@ var _ = Describe("Node Operations", func() {
 					kapi.ServiceTypeNodePort,
 					[]string{"8.8.8.8"},
 					v1.ServiceStatus{},
+					false,
 				)
 
 				pcw.AddService(service)
@@ -278,6 +282,7 @@ var _ = Describe("Node Operations", func() {
 					kapi.ServiceTypeClusterIP,
 					[]string{},
 					v1.ServiceStatus{},
+					false,
 				)
 
 				pcw.AddService(service)
@@ -314,6 +319,7 @@ var _ = Describe("Node Operations", func() {
 					kapi.ServiceTypeClusterIP,
 					[]string{},
 					v1.ServiceStatus{},
+					false,
 				)
 				newService := newService("service7", "namespace1", "10.129.0.2",
 					[]kapi.ServicePort{
@@ -329,6 +335,7 @@ var _ = Describe("Node Operations", func() {
 					kapi.ServiceTypeClusterIP,
 					[]string{},
 					v1.ServiceStatus{},
+					false,
 				)
 
 				pcw.UpdateService(oldService, newService)
@@ -358,6 +365,7 @@ var _ = Describe("Node Operations", func() {
 					kapi.ServiceTypeClusterIP,
 					[]string{"8.8.8.8"},
 					v1.ServiceStatus{},
+					false,
 				)
 				newService := newService("service9", "namespace1", "10.129.0.2",
 					[]kapi.ServicePort{
@@ -373,6 +381,7 @@ var _ = Describe("Node Operations", func() {
 					kapi.ServiceTypeClusterIP,
 					[]string{},
 					v1.ServiceStatus{},
+					false,
 				)
 
 				portMap := make(map[utilnet.LocalPort]bool)
@@ -418,6 +427,7 @@ var _ = Describe("Node Operations", func() {
 					kapi.ServiceTypeClusterIP,
 					[]string{"8.8.8.8", "10.10.10.10"},
 					v1.ServiceStatus{},
+					false,
 				)
 				portMap := make(map[utilnet.LocalPort]bool)
 				lp, _ := utilnet.NewLocalPort(getDescription("", service, false), "8.8.8.8", "", 8088, utilnet.TCP)
@@ -462,6 +472,7 @@ var _ = Describe("Node Operations", func() {
 					kapi.ServiceTypeNodePort,
 					[]string{"8.8.8.8"},
 					v1.ServiceStatus{},
+					false,
 				)
 
 				portMap := make(map[utilnet.LocalPort]bool)
@@ -508,6 +519,7 @@ var _ = Describe("Node Operations", func() {
 					kapi.ServiceTypeNodePort,
 					[]string{"8.8.8.8"},
 					v1.ServiceStatus{},
+					false,
 				)
 
 				portMap := make(map[utilnet.LocalPort]bool)
@@ -552,6 +564,7 @@ var _ = Describe("Node Operations", func() {
 					kapi.ServiceTypeNodePort,
 					[]string{},
 					v1.ServiceStatus{},
+					false,
 				)
 
 				portMap := make(map[utilnet.LocalPort]bool)
@@ -604,6 +617,7 @@ var _ = Describe("Node Operations", func() {
 					kapi.ServiceTypeNodePort,
 					[]string{"127.0.0.1", "8.8.8.8"},
 					v1.ServiceStatus{},
+					false,
 				)
 
 				errors := handleService(service, lpm.open)
