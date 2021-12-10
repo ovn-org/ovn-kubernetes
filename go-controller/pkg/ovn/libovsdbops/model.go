@@ -120,6 +120,7 @@ func copyIndexes(model model.Model) model.Model {
 	case *nbdb.LoadBalancerGroup:
 		return &nbdb.LoadBalancerGroup{
 			UUID: t.UUID,
+			Name: t.Name,
 		}
 	case *nbdb.LogicalRouter:
 		return &nbdb.LogicalRouter{
