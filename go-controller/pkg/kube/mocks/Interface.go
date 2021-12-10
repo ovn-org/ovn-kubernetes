@@ -3,6 +3,7 @@
 package mocks
 
 import (
+	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	egressfirewallv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -40,6 +41,21 @@ func (_m *KubeInterface) CreateEndpoint(namespace string, ep *v1.Endpoints) (*v1
 	}
 
 	return r0, r1
+}
+
+// There is no documentation as to how to use mockery to generate this stuff. It
+// doesn't seem to be needed in any case, so if this ever changes in the future
+// someone will have to implement this.
+func (_m *KubeInterface) CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {
+	return nil, nil
+}
+
+func (_m *KubeInterface) UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {
+	return nil, nil
+}
+
+func (_m *KubeInterface) DeleteCloudPrivateIPConfig(name string) error {
+	return nil
 }
 
 // Events provides a mock function with given fields:

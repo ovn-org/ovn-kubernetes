@@ -99,6 +99,7 @@ var (
 		RawServiceCIDRs:      "172.16.1.0/24",
 		OVNConfigNamespace:   "ovn-kubernetes",
 		HostNetworkNamespace: "",
+		PlatformType:         "",
 	}
 
 	// OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
@@ -269,6 +270,7 @@ type KubernetesConfig struct {
 	RawNoHostSubnetNodes  string `gcfg:"no-hostsubnet-nodes"`
 	NoHostSubnetNodes     *metav1.LabelSelector
 	HostNetworkNamespace  string `gcfg:"host-network-namespace"`
+	PlatformType          string `gcfg:"platform-type"`
 }
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
@@ -866,6 +868,13 @@ var K8sFlags = []cli.Flag{
 		Usage:       "specify a namespace which will be used to classify host network traffic for network policy",
 		Destination: &cliConfig.Kubernetes.HostNetworkNamespace,
 		Value:       Kubernetes.HostNetworkNamespace,
+	},
+	&cli.StringFlag{
+		Name: "platform-type",
+		Usage: "The cloud provider platform type ovn-kubernetes is deployed on. " +
+			"Valid values can be found in: https://github.com/ovn-org/ovn-kubernetes/blob/master/go-controller/vendor/github.com/openshift/api/config/v1/types_infrastructure.go#L130-L172",
+		Destination: &cliConfig.Kubernetes.PlatformType,
+		Value:       Kubernetes.PlatformType,
 	},
 }
 
