@@ -56,7 +56,7 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNClientset, fak
 		return err
 	}
 
-	k := &kube.Kube{fakeClient.KubeClient, nil, nil}
+	k := &kube.Kube{fakeClient.KubeClient, nil, nil, nil}
 	n.nodeIPManager = newAddressManager(fakeNodeName, k, fakeMgmtPortConfig, n.watchFactory)
 	localHostNetEp := "192.168.18.15/32"
 	ip, _, _ := net.ParseCIDR(localHostNetEp)

@@ -16,6 +16,11 @@ import (
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
 	egressipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions"
+	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
+
+	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
+	ocpcloudnetworkinformerfactory "github.com/openshift/client-go/cloudnetwork/informers/externalversions"
+	ocpcloudnetworklister "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
@@ -37,10 +42,11 @@ type WatchFactory struct {
 	// requirements with atomic accesses
 	handlerCounter uint64
 
-	iFactory   informerfactory.SharedInformerFactory
-	eipFactory egressipinformerfactory.SharedInformerFactory
-	efFactory  egressfirewallinformerfactory.SharedInformerFactory
-	informers  map[reflect.Type]*informer
+	iFactory     informerfactory.SharedInformerFactory
+	eipFactory   egressipinformerfactory.SharedInformerFactory
+	efFactory    egressfirewallinformerfactory.SharedInformerFactory
+	cpipcFactory ocpcloudnetworkinformerfactory.SharedInformerFactory
+	informers    map[reflect.Type]*informer
 
 	stopChan chan struct{}
 }
@@ -64,14 +70,15 @@ const (
 )
 
 var (
-	podType            reflect.Type = reflect.TypeOf(&kapi.Pod{})
-	serviceType        reflect.Type = reflect.TypeOf(&kapi.Service{})
-	endpointsType      reflect.Type = reflect.TypeOf(&kapi.Endpoints{})
-	policyType         reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
-	namespaceType      reflect.Type = reflect.TypeOf(&kapi.Namespace{})
-	nodeType           reflect.Type = reflect.TypeOf(&kapi.Node{})
-	egressFirewallType reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
-	egressIPType       reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
+	podType                  reflect.Type = reflect.TypeOf(&kapi.Pod{})
+	serviceType              reflect.Type = reflect.TypeOf(&kapi.Service{})
+	endpointsType            reflect.Type = reflect.TypeOf(&kapi.Endpoints{})
+	policyType               reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
+	namespaceType            reflect.Type = reflect.TypeOf(&kapi.Namespace{})
+	nodeType                 reflect.Type = reflect.TypeOf(&kapi.Node{})
+	egressFirewallType       reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
+	egressIPType             reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
+	cloudPrivateIPConfigType reflect.Type = reflect.TypeOf(&ocpcloudnetworkapi.CloudPrivateIPConfig{})
 )
 
 // NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
@@ -83,11 +90,12 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	wf := &WatchFactory{
-		iFactory:   informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		eipFactory: egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
-		efFactory:  egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
-		informers:  make(map[reflect.Type]*informer),
-		stopChan:   make(chan struct{}),
+		iFactory:     informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		eipFactory:   egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
+		efFactory:    egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
+		cpipcFactory: ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
+		informers:    make(map[reflect.Type]*informer),
+		stopChan:     make(chan struct{}),
 	}
 
 	if err := egressipapi.AddToScheme(egressipscheme.Scheme); err != nil {
@@ -160,7 +168,12 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 			return nil, err
 		}
 	}
-
+	if util.PlatformTypeIsEgressIPCloudProvider() {
+		wf.informers[cloudPrivateIPConfigType], err = newInformer(cloudPrivateIPConfigType, wf.cpipcFactory.Cloud().V1().CloudPrivateIPConfigs().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
 	return wf, nil
 }
 
@@ -188,7 +201,14 @@ func (wf *WatchFactory) Start() error {
 			}
 		}
 	}
-
+	if util.PlatformTypeIsEgressIPCloudProvider() && wf.cpipcFactory != nil {
+		wf.cpipcFactory.Start(wf.stopChan)
+		for oType, synced := range wf.cpipcFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
 	return nil
 }
 
@@ -297,6 +317,10 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 	case egressIPType:
 		if egressIP, ok := obj.(*egressipapi.EgressIP); ok {
 			return &egressIP.ObjectMeta, nil
+		}
+	case cloudPrivateIPConfigType:
+		if cloudPrivateIPConfig, ok := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig); ok {
+			return &cloudPrivateIPConfig.ObjectMeta, nil
 		}
 	}
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
@@ -427,6 +451,16 @@ func (wf *WatchFactory) RemoveEgressIPHandler(handler *Handler) {
 	wf.removeHandler(egressIPType, handler)
 }
 
+// AddCloudPrivateIPConfigHandler adds a handler function that will be executed on CloudPrivateIPConfig object changes
+func (wf *WatchFactory) AddCloudPrivateIPConfigHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(cloudPrivateIPConfigType, "", nil, handlerFuncs, processExisting)
+}
+
+// RemoveCloudPrivateIPConfigHandler removes an CloudPrivateIPConfig object event handler function
+func (wf *WatchFactory) RemoveCloudPrivateIPConfigHandler(handler *Handler) {
+	wf.removeHandler(cloudPrivateIPConfigType, handler)
+}
+
 // AddNamespaceHandler adds a handler function that will be executed on Namespace object changes
 func (wf *WatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(namespaceType, "", nil, handlerFuncs, processExisting)
@@ -509,6 +543,21 @@ func (wf *WatchFactory) GetEndpoints(namespace string) ([]*kapi.Endpoints, error
 func (wf *WatchFactory) GetEndpoint(namespace, name string) (*kapi.Endpoints, error) {
 	endpointsLister := wf.informers[endpointsType].lister.(listers.EndpointsLister)
 	return endpointsLister.Endpoints(namespace).Get(name)
+}
+
+func (wf *WatchFactory) GetCloudPrivateIPConfig(name string) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {
+	cloudPrivateIPConfigLister := wf.informers[cloudPrivateIPConfigType].lister.(ocpcloudnetworklister.CloudPrivateIPConfigLister)
+	return cloudPrivateIPConfigLister.Get(name)
+}
+
+func (wf *WatchFactory) GetEgressIP(name string) (*egressipapi.EgressIP, error) {
+	egressIPLister := wf.informers[egressIPType].lister.(egressiplister.EgressIPLister)
+	return egressIPLister.Get(name)
+}
+
+func (wf *WatchFactory) GetEgressIPs() ([]*egressipapi.EgressIP, error) {
+	egressIPLister := wf.informers[egressIPType].lister.(egressiplister.EgressIPLister)
+	return egressIPLister.List(labels.Everything())
 }
 
 // GetNamespace returns a specific namespace
