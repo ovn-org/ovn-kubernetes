@@ -348,11 +348,14 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 
 	if config.Kubernetes.OVNEmptyLbEvents {
 		klog.Infof("Starting unidling controller")
-		unidlingController := unidling.NewController(
+		unidlingController, err := unidling.NewController(
 			oc.recorder,
 			oc.watchFactory.ServiceInformer(),
 			oc.sbClient,
 		)
+		if err != nil {
+			return err
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
