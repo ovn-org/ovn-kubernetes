@@ -838,6 +838,11 @@ func (oc *Controller) WatchEgressNodes() {
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
 			newNode := new.(*kapi.Node)
+			// Initialize the allocator on every update,
+			// ovnkube-node/cloud-network-config-controller will make sure to
+			// annotate the node with the egressIPConfig, but that might have
+			// happened after we processed the ADD for that object, hence keep
+			// retrying for all UPDATEs.
 			if err := oc.initEgressIPAllocator(newNode); err != nil {
 				klog.Error(err)
 			}
@@ -845,6 +850,9 @@ func (oc *Controller) WatchEgressNodes() {
 			newLabels := newNode.GetLabels()
 			_, oldHadEgressLabel := oldLabels[nodeEgressLabel]
 			_, newHasEgressLabel := newLabels[nodeEgressLabel]
+			// If the node is not labelled for egress assignment, just return
+			// directly, we don't really need to set the ready / reachable
+			// status on this node if the user doesn't care about using it.
 			if !oldHadEgressLabel && !newHasEgressLabel {
 				return
 			}
