@@ -3,6 +3,7 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"strconv"
 
@@ -61,6 +62,11 @@ const (
 
 	// ovnNodeHostAddresses is used to track the different host IP addresses on the node
 	ovnNodeHostAddresses = "k8s.ovn.org/host-addresses"
+
+	// egressIPConfigAnnotationKey is used to indicate the cloud subnet and
+	// capacity for each node. It is set by
+	// openshift/cloud-network-config-controller
+	cloudEgressIPConfigAnnotationKey = "cloud.network.openshift.io/egress-ipconfig"
 )
 
 type L3GatewayConfig struct {
@@ -321,20 +327,117 @@ func SetNodePrimaryIfAddr(nodeAnnotator kube.Annotator, nodeIPNetv4, nodeIPNetv6
 	return nodeAnnotator.Set(ovnNodeIfAddr, primaryIfAddrAnnotation)
 }
 
+const UnlimitedNodeCapacity = math.MaxInt32
+
+type ifAddr struct {
+	IPv4 string `json:"ipv4,omitempty"`
+	IPv6 string `json:"ipv6,omitempty"`
+}
+
+type Capacity struct {
+	IPv4 int `json:"ipv4,omitempty"`
+	IPv6 int `json:"ipv6,omitempty"`
+	IP   int `json:"ip,omitempty"`
+}
+
+type nodeEgressIPConfiguration struct {
+	Interface string   `json:"interface"`
+	IFAddr    ifAddr   `json:"ifaddr"`
+	Capacity  Capacity `json:"capacity"`
+}
+
+type ParsedIFAddr struct {
+	IP  net.IP
+	Net *net.IPNet
+}
+
+type ParsedNodeEgressIPConfiguration struct {
+	V4       ParsedIFAddr
+	V6       ParsedIFAddr
+	Capacity Capacity
+}
+
 // ParseNodePrimaryIfAddr returns the IPv4 / IPv6 values for the node's primary network interface
-func ParseNodePrimaryIfAddr(node *kapi.Node) (string, string, error) {
+func ParseNodePrimaryIfAddr(node *kapi.Node) (*ParsedNodeEgressIPConfiguration, error) {
 	nodeIfAddrAnnotation, ok := node.Annotations[ovnNodeIfAddr]
 	if !ok {
-		return "", "", newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeIfAddr, node.Name)
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeIfAddr, node.Name)
 	}
 	nodeIfAddr := primaryIfAddrAnnotation{}
 	if err := json.Unmarshal([]byte(nodeIfAddrAnnotation), &nodeIfAddr); err != nil {
-		return "", "", fmt.Errorf("failed to unmarshal annotation: %s for node %q, err: %v", ovnNodeIfAddr, node.Name, err)
+		return nil, fmt.Errorf("failed to unmarshal annotation: %s for node %q, err: %v", ovnNodeIfAddr, node.Name, err)
 	}
 	if nodeIfAddr.IPv4 == "" && nodeIfAddr.IPv6 == "" {
-		return "", "", fmt.Errorf("node: %q does not have any IP information set", node.Name)
+		return nil, fmt.Errorf("node: %q does not have any IP information set", node.Name)
 	}
-	return nodeIfAddr.IPv4, nodeIfAddr.IPv6, nil
+	nodeEgressIPConfig := nodeEgressIPConfiguration{
+		IFAddr: ifAddr(nodeIfAddr),
+		Capacity: Capacity{
+			IP:   UnlimitedNodeCapacity,
+			IPv4: UnlimitedNodeCapacity,
+			IPv6: UnlimitedNodeCapacity,
+		},
+	}
+	parsedEgressIPConfig, err := parseNodeEgressIPConfig(&nodeEgressIPConfig)
+	if err != nil {
+		return nil, err
+	}
+	return parsedEgressIPConfig, nil
+}
+
+// ParseCloudEgressIPConfig returns the cloud's information concerning the node's primary network interface
+func ParseCloudEgressIPConfig(node *kapi.Node) (*ParsedNodeEgressIPConfiguration, error) {
+	egressIPConfigAnnotation, ok := node.Annotations[cloudEgressIPConfigAnnotationKey]
+	if !ok {
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", cloudEgressIPConfigAnnotationKey, node.Name)
+	}
+	nodeEgressIPConfig := []nodeEgressIPConfiguration{
+		{
+			Capacity: Capacity{
+				IP:   UnlimitedNodeCapacity,
+				IPv4: UnlimitedNodeCapacity,
+				IPv6: UnlimitedNodeCapacity,
+			},
+		},
+	}
+	if err := json.Unmarshal([]byte(egressIPConfigAnnotation), &nodeEgressIPConfig); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal annotation: %s for node %q, err: %v", ovnNodeIfAddr, node.Name, err)
+	}
+	if len(nodeEgressIPConfig) > 0 {
+		parsedEgressIPConfig, err := parseNodeEgressIPConfig(&nodeEgressIPConfig[0])
+		if err != nil {
+			return nil, err
+		}
+		return parsedEgressIPConfig, nil
+	}
+	return nil, fmt.Errorf("empty annotation: %s for node: %q", cloudEgressIPConfigAnnotationKey, node.Name)
+}
+
+func parseNodeEgressIPConfig(egressIPConfig *nodeEgressIPConfiguration) (*ParsedNodeEgressIPConfiguration, error) {
+	parsedEgressIPConfig := &ParsedNodeEgressIPConfiguration{
+		Capacity: egressIPConfig.Capacity,
+	}
+	if egressIPConfig.IFAddr.IPv4 != "" {
+		ipv4, v4Subnet, err := net.ParseCIDR(egressIPConfig.IFAddr.IPv4)
+		if err != nil {
+			return nil, err
+		}
+		parsedEgressIPConfig.V4 = ParsedIFAddr{
+			IP:  ipv4,
+			Net: v4Subnet,
+		}
+	}
+	if egressIPConfig.IFAddr.IPv6 != "" {
+		ipv6, v6Subnet, err := net.ParseCIDR(egressIPConfig.IFAddr.IPv6)
+		if err != nil {
+			return nil, err
+		}
+		parsedEgressIPConfig.V6 = ParsedIFAddr{
+			IP:  ipv6,
+			Net: v6Subnet,
+		}
+	}
+	return parsedEgressIPConfig, nil
 }
 
 // GetNodeEgressLabel returns label annotation needed for marking nodes as egress assignable

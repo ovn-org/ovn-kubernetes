@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	ocpconfigapi "github.com/openshift/api/config/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -66,4 +68,10 @@ func GetDatapathUUID(datapathName string) (string, error) {
 			"stdout: %q, error: %v", ovntypes.OVNClusterRouter, datapath, err)
 	}
 	return datapath, nil
+}
+
+func PlatformTypeIsEgressIPCloudProvider() bool {
+	return config.Kubernetes.PlatformType == string(ocpconfigapi.AWSPlatformType) ||
+		config.Kubernetes.PlatformType == string(ocpconfigapi.GCPPlatformType) ||
+		config.Kubernetes.PlatformType == string(ocpconfigapi.AzurePlatformType)
 }
