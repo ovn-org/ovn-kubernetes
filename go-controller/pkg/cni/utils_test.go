@@ -220,26 +220,26 @@ var _ = Describe("CNI Utils tests", func() {
 		podUID := "4d06bae8-9c38-41f6-945c-f92320e782e4"
 		It("Creates PodInterfaceInfo in NodeModeFull mode", func() {
 			config.OvnKubeNode.Mode = ovntypes.NodeModeFull
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID)
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "")
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.IsDPUHostMode).To(BeFalse())
 		})
 
 		It("Creates PodInterfaceInfo in NodeModeDPUHost mode", func() {
 			config.OvnKubeNode.Mode = ovntypes.NodeModeDPUHost
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID)
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "")
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.IsDPUHostMode).To(BeTrue())
 		})
 
 		It("Creates PodInterfaceInfo with checkExtIDs false", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID)
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "")
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.CheckExtIDs).To(BeFalse())
 		})
 
 		It("Creates PodInterfaceInfo with checkExtIDs true", func() {
-			pif, err := PodAnnotation2PodInfo(podAnnot, true, podUID)
+			pif, err := PodAnnotation2PodInfo(podAnnot, true, podUID, "")
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.CheckExtIDs).To(BeTrue())
 		})
