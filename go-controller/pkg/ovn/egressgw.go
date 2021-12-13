@@ -951,10 +951,27 @@ func (oc *Controller) cleanExGwECMPRoutes() {
 		klog.Infof("Syncing exgw routes took %v", time.Since(start))
 	}()
 
+	// migration from LGW to SGW mode
+	// for shared gateway mode, these LRPs shouldn't exist, so delete them all
+	if config.Gateway.Mode == config.GatewayModeShared {
+		if err := oc.delAllHybridRoutePolicies(); err != nil {
+			klog.Errorf("Error while removing hybrid policies on moving to SGW mode, error: %v", err)
+		}
+	} else if config.Gateway.Mode == config.GatewayModeLocal {
+		// remove all legacy hybrid route policies
+		if err := oc.delAllLegacyHybridRoutePolicies(); err != nil {
+			klog.Errorf("Error while removing legacy hybrid policies, error: %v", err)
+		}
+	}
+
 	// Get all ECMP routes in OVN and build cache
 	ovnRouteCache := oc.buildOVNECMPCache()
 
 	if len(ovnRouteCache) == 0 {
+		// Even if no ECMP routes exist, we should ensure no 501 LRPs exist either
+		if err := oc.delAllHybridRoutePolicies(); err != nil {
+			klog.Errorf("Error while removing hybrid policies, error: %v", err)
+		}
 		// nothing in OVN, so no reason to search for stale routes
 		return
 	}
@@ -1063,19 +1080,6 @@ func (oc *Controller) cleanExGwECMPRoutes() {
 						podIP, gr, err)
 				}
 			}
-		}
-	}
-
-	// migration from LGW to SGW mode
-	// for shared gateway mode, these LRPs shouldn't exist, so delete them all
-	if config.Gateway.Mode == config.GatewayModeShared {
-		if err := oc.delAllHybridRoutePolicies(); err != nil {
-			klog.Errorf("Error while removing hybrid policies on moving to SGW mode, error: %v", err)
-		}
-	} else if config.Gateway.Mode == config.GatewayModeLocal {
-		// remove all legacy hybrid route policies
-		if err := oc.delAllLegacyHybridRoutePolicies(); err != nil {
-			klog.Errorf("Error while removing legacy hybrid policies, error: %v", err)
 		}
 	}
 }
