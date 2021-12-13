@@ -2052,7 +2052,84 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
+		ginkgo.It("delete legacy hybrid route policies", func() {
+			app.Action = func(ctx *cli.Context) error {
+				config.Gateway.Mode = config.GatewayModeLocal
+				intPriority, _ := strconv.Atoi(types.HybridOverlayReroutePriority)
+				fakeOvn.startWithDBSetup(
+					libovsdbtest.TestSetup{
+						NBData: []libovsdbtest.TestData{
+							&nbdb.LogicalRouterPolicy{
+								UUID:     "501-1st-UUID",
+								Priority: intPriority,
+								Action:   nbdb.LogicalRouterPolicyActionReroute,
+								Nexthops: []string{"100.64.0.4"},
+								Match:    "inport == \"rtos-node1\" && ip4.src == 1.3.3.7 && ip4.dst != 10.128.0.0/14",
+							},
+							&nbdb.LogicalRouterPolicy{
+								UUID:     "501-2nd-UUID",
+								Priority: intPriority,
+								Action:   nbdb.LogicalRouterPolicyActionReroute,
+								Nexthops: []string{"100.64.1.4"},
+								Match:    "inport == \"rtos-node2\" && ip4.src == 1.3.3.8 && ip4.dst != 10.128.0.0/14",
+							},
+							&nbdb.LogicalRouterPolicy{
+								UUID:     "501-new-UUID",
+								Priority: intPriority,
+								Action:   nbdb.LogicalRouterPolicyActionReroute,
+								Nexthops: []string{"100.64.1.4"},
+								Match:    "inport == \"rtos-node2\" && ip4.src == $a17568862106095406051 && ip4.dst != 10.128.0.0/14",
+							},
+							&nbdb.LogicalRouter{
+								Name:     ovntypes.OVNClusterRouter,
+								UUID:     ovntypes.OVNClusterRouter + "-UUID",
+								Policies: []string{"501-1st-UUID", "501-2nd-UUID", "501-new-UUID"},
+							},
+							&nbdb.LogicalRouter{
+								UUID: "GR_node1-UUID",
+								Name: "GR_node1",
+							},
+							&nbdb.LogicalRouterPort{
+								UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID",
+								Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
+								Networks: []string{"100.64.0.4/32"},
+							},
+						},
+					},
+				)
+				finalNB := []libovsdbtest.TestData{
+					&nbdb.LogicalRouterPolicy{
+						UUID:     "501-new-UUID",
+						Priority: intPriority,
+						Action:   nbdb.LogicalRouterPolicyActionReroute,
+						Nexthops: []string{"100.64.1.4"},
+						Match:    "inport == \"rtos-node2\" && ip4.src == $a17568862106095406051 && ip4.dst != 10.128.0.0/14",
+					},
+					&nbdb.LogicalRouter{
+						Name:     ovntypes.OVNClusterRouter,
+						UUID:     ovntypes.OVNClusterRouter + "-UUID",
+						Policies: []string{"501-new-UUID"},
+					},
+					&nbdb.LogicalRouter{
+						UUID: "GR_node1-UUID",
+						Name: "GR_node1",
+					},
+					&nbdb.LogicalRouterPort{
+						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID",
+						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1",
+						Networks: []string{"100.64.0.4/32"},
+					},
+				}
 
+				err := fakeOvn.controller.delAllLegacyHybridRoutePolicies()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
 	})
 	ginkgo.Context("SNAT on gateway router operations", func() {
 		ginkgo.It("add/delete SNAT per pod on gateway router", func() {
