@@ -46,7 +46,7 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) {
 					retryPods.Store(pod.UID, true)
 					return
 				}
-				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, string(pod.UID))
+				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, string(pod.UID), "")
 				if err != nil {
 					retryPods.Store(pod.UID, true)
 					return
@@ -82,7 +82,7 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) {
 					klog.Infof("Failed to get rep name, %s. retrying", err)
 					return
 				}
-				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, string(pod.UID))
+				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, string(pod.UID), "")
 				if err != nil {
 					return
 				}
