@@ -4,29 +4,16 @@ package cni
 
 import (
 	"fmt"
-	"github.com/containernetworking/plugins/pkg/ns"
 	"os/exec"
+
+	"github.com/containernetworking/plugins/pkg/ns"
+	configv1 "github.com/openshift/api/config/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 
 	utilnet "k8s.io/utils/net"
 )
 
 // OCP HACK: block access to MCS/metadata; https://github.com/openshift/ovn-kubernetes/pull/19
-var iptablesCommands = [][]string{
-	// Block MCS
-	{"-A", "OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "22623", "--syn", "-j", "REJECT"},
-	{"-A", "OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "22624", "--syn", "-j", "REJECT"},
-	{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "--dport", "22623", "--syn", "-j", "REJECT"},
-	{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "--dport", "22624", "--syn", "-j", "REJECT"},
-}
-
-var iptables4OnlyCommands = [][]string{
-	// Block cloud provider metadata IP except DNS
-	{"-A", "OUTPUT", "-p", "tcp", "-m", "tcp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
-	{"-A", "OUTPUT", "-p", "udp", "-m", "udp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
-	{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
-	{"-A", "FORWARD", "-p", "udp", "-m", "udp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
-}
-
 func setupIPTablesBlocks(netns ns.NetNS, ifInfo *PodInterfaceInfo) error {
 	return netns.Do(func(hostNS ns.NetNS) error {
 		var hasIPv4, hasIPv6 bool
@@ -36,6 +23,25 @@ func setupIPTablesBlocks(netns ns.NetNS, ifInfo *PodInterfaceInfo) error {
 			} else {
 				hasIPv4 = true
 			}
+		}
+
+		var iptablesCommands = [][]string{
+			// Block MCS
+			{"-A", "OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "22623", "--syn", "-j", "REJECT"},
+			{"-A", "OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "22624", "--syn", "-j", "REJECT"},
+			{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "--dport", "22623", "--syn", "-j", "REJECT"},
+			{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "--dport", "22624", "--syn", "-j", "REJECT"},
+		}
+		metadataServiceIP := "169.254.169.254"
+		if config.Kubernetes.PlatformType == string(configv1.AlibabaCloudPlatformType) {
+			metadataServiceIP = "100.100.100.200"
+		}
+		var iptables4OnlyCommands = [][]string{
+			// Block cloud provider metadata IP except DNS
+			{"-A", "OUTPUT", "-p", "tcp", "-m", "tcp", "-d", metadataServiceIP, "!", "--dport", "53", "-j", "REJECT"},
+			{"-A", "OUTPUT", "-p", "udp", "-m", "udp", "-d", metadataServiceIP, "!", "--dport", "53", "-j", "REJECT"},
+			{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "-d", metadataServiceIP, "!", "--dport", "53", "-j", "REJECT"},
+			{"-A", "FORWARD", "-p", "udp", "-m", "udp", "-d", metadataServiceIP, "!", "--dport", "53", "-j", "REJECT"},
 		}
 
 		for _, args := range iptablesCommands {
