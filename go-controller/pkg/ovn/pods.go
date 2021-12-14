@@ -538,6 +538,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 		return fmt.Errorf("could not perform creation or update of logical switch port %s - %+v", portName, err)
 	}
+	go oc.metricsRecorder.AddLSPEvent(pod.UID)
 
 	// Add the pod's logical switch port to the port cache
 	var lspUUID string
