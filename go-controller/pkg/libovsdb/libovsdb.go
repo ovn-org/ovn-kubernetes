@@ -99,6 +99,8 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 			client.WithTable(&sbdb.Chassis{}),
 			// used for metrics
 			client.WithTable(&sbdb.SBGlobal{}),
+			// used for metrics
+			client.WithTable(&sbdb.PortBinding{}),
 		),
 	)
 	if err != nil {
