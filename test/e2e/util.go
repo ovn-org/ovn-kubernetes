@@ -12,6 +12,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -23,7 +24,10 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-const ovnNamespace = "ovn-kubernetes"
+const (
+	ovnNamespace   = "ovn-kubernetes"
+	ovnNodeSubnets = "k8s.ovn.org/node-subnets"
+)
 
 type IpNeighbor struct {
 	Dst    string `dst`
@@ -193,9 +197,7 @@ func unmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, erro
 	return podAnnotation, nil
 }
 
-func nodePortServiceSpecFrom(svcName string, httpPort, updPort, clusterHTTPPort, clusterUDPPort int, selector map[string]string, local v1.ServiceExternalTrafficPolicyType) *v1.Service {
-	preferDual := v1.IPFamilyPolicyPreferDualStack
-
+func nodePortServiceSpecFrom(svcName string, ipFamily v1.IPFamilyPolicyType, httpPort, updPort, clusterHTTPPort, clusterUDPPort int, selector map[string]string, local v1.ServiceExternalTrafficPolicyType) *v1.Service {
 	res := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: svcName,
@@ -207,7 +209,7 @@ func nodePortServiceSpecFrom(svcName string, httpPort, updPort, clusterHTTPPort,
 				{Port: int32(clusterUDPPort), Name: "udp", Protocol: v1.ProtocolUDP, TargetPort: intstr.FromInt(updPort)},
 			},
 			Selector:              selector,
-			IPFamilyPolicy:        &preferDual,
+			IPFamilyPolicy:        &ipFamily,
 			ExternalTrafficPolicy: local,
 		},
 	}
@@ -649,4 +651,47 @@ func assertDenyLogs(targetNodeName string, namespace string, policyName string, 
 		}
 	}
 	return false, nil
+}
+
+// patchService patches service serviceName in namespace serviceNamespace.
+func patchService(c kubernetes.Interface, serviceName, serviceNamespace, jsonPath, value string) error {
+	patch := []struct {
+		Op    string `json:"op"`
+		Path  string `json:"path"`
+		Value string `json:"value"`
+	}{{
+		Op:    "replace",
+		Path:  jsonPath,
+		Value: value,
+	}}
+	patchBytes, _ := json.Marshal(patch)
+
+	_, err := c.CoreV1().Services(serviceNamespace).Patch(
+		context.TODO(),
+		serviceName,
+		types.JSONPatchType,
+		patchBytes,
+		metav1.PatchOptions{})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// isDualStackCluster returns 'true' if at least one of the nodes has more than one node subnet.
+// This can reliably be determined by checking that Annotations["k8s.ovn.org/node-subnets"] parses into map[string][]string.
+func isDualStackCluster(nodes *v1.NodeList) bool {
+	for _, node := range nodes.Items {
+		annotation, ok := node.Annotations[ovnNodeSubnets]
+		if !ok {
+			continue
+		}
+
+		subnetsDual := make(map[string][]string)
+		if err := json.Unmarshal([]byte(annotation), &subnetsDual); err == nil {
+			return true
+		}
+	}
+	return false
 }
