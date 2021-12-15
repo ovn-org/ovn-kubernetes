@@ -371,6 +371,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 					DoAfter: func() {
 						logicalRouter.StaticRoutes = libovsdbops.ExtractUUIDsFromModels(&logicalRouterStaticRouteRes)
 					},
+					BulkOp: true,
 				},
 				{
 					Model:          &logicalRouter,

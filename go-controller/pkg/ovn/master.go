@@ -295,21 +295,11 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		loadBalancerGroup := nbdb.LoadBalancerGroup{
 			Name: types.ClusterLBGroupName,
 		}
-		loadBalancerGroupRes := []nbdb.LoadBalancerGroup{}
+		// Create loadBalancerGroup if needed. Since this table is indexed by name, there is no need to
+		// mention that field in OnModelUpdates or ModelPredicate.
 		opModels := []libovsdbops.OperationModel{
 			{
-				Model:          &loadBalancerGroup,
-				ModelPredicate: func(lbg *nbdb.LoadBalancerGroup) bool { return lbg.Name == types.ClusterLBGroupName },
-				OnModelUpdates: []interface{}{
-					&loadBalancerGroup.Name,
-				},
-				ExistingResult: &loadBalancerGroupRes,
-				DoAfter: func() {
-					if len(loadBalancerGroupRes) > 0 {
-						loadBalancerGroup.UUID = loadBalancerGroupRes[0].UUID
-					}
-				},
-				ErrNotFound: false,
+				Model: &loadBalancerGroup,
 			},
 		}
 		if _, err = oc.modelClient.CreateOrUpdate(opModels...); err != nil {

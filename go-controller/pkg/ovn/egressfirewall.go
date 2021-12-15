@@ -381,21 +381,13 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 		}...)
 	}
 
-	foundACLs := []nbdb.ACL{}
 	opModels = append([]libovsdbops.OperationModel{
 		{
 			Model:          egressFirewallACL,
 			ModelPredicate: func(acl *nbdb.ACL) bool { return libovsdbops.IsEquivalentACL(acl, egressFirewallACL) },
-			ExistingResult: &foundACLs,
 			DoAfter: func() {
-				var uuid string
-				if len(foundACLs) == 1 {
-					uuid = foundACLs[0].UUID
-				} else {
-					uuid = egressFirewallACL.UUID
-				}
 				for _, lsw := range switches {
-					lsw.ACLs = []string{uuid}
+					lsw.ACLs = []string{egressFirewallACL.UUID}
 				}
 			},
 		},

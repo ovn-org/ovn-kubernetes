@@ -270,23 +270,14 @@ func AddACLToNodeSwitch(nbClient libovsdbclient.Client, nodeName string, nodeACL
 		Name: nodeName,
 	}
 
-	existingACLres := []nbdb.ACL{}
-
 	// Here we either need to create the ACL and add to the LS or simply add to the LS
 	opModels := []OperationModel{
 		{
 			Model:          nodeACL,
 			ModelPredicate: func(acl *nbdb.ACL) bool { return IsEquivalentACL(acl, nodeACL) },
-			ExistingResult: &existingACLres,
 			DoAfter: func() {
 				// Bulkop is false, we should fail early if we get more than one result
-				// If ACL exists It's UUID will be in opModel.ExistingResult
-				// If it does not, it will be added to the model
-				if len(existingACLres) == 1 {
-					nodeSwitch.ACLs = []string{existingACLres[0].UUID}
-				} else {
-					nodeSwitch.ACLs = []string{nodeACL.UUID}
-				}
+				nodeSwitch.ACLs = []string{nodeACL.UUID}
 			},
 		},
 		{
