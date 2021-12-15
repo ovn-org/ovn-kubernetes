@@ -165,6 +165,12 @@ spec:
           value: "{{ ovn_sflow_targets }}"
         - name: OVN_IPFIX_TARGETS
           value: "{{ ovn_ipfix_targets }}"
+        - name: OVN_IPFIX_SAMPLING
+          value: "{{ ovn_ipfix_sampling }}"
+        - name: OVN_IPFIX_CACHE_MAX_FLOWS
+          value: "{{ ovn_ipfix_cache_max_flows }}"
+        - name: OVN_IPFIX_CACHE_ACTIVE_TIMEOUT
+          value: "{{ ovn_ipfix_cache_active_timeout }}"
         - name: OVN_V4_JOIN_SUBNET
           value: "{{ ovn_v4_join_subnet }}"
         - name: OVN_V6_JOIN_SUBNET

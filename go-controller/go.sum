@@ -352,8 +352,8 @@ github.com/openshift/build-machinery-go v0.0.0-20210712174854-1bb7fd1518d3/go.mo
 github.com/openshift/client-go v0.0.0-20211202194848-d3f186f2d366 h1:/llKlbXC7F6rqTkAl2GE//9GDR0iDsqJEFvvJ1kLJXg=
 github.com/openshift/client-go v0.0.0-20211202194848-d3f186f2d366/go.mod h1:HJeHsH6mPyrrOVS/2j1zcztGAJG9ETKbqtlyohs84yY=
 github.com/ory/dockertest/v3 v3.8.0/go.mod h1:9zPATATlWQru+ynXP+DytBQrsXV7Tmlx7K86H6fQaDo=
-github.com/ovn-org/libovsdb v0.6.1-0.20211119175802-998d2ca8998d h1:QC2xQbV4D9fv8YxaiAIsQfqJMiUL1AzNRRJMAJN6hjc=
-github.com/ovn-org/libovsdb v0.6.1-0.20211119175802-998d2ca8998d/go.mod h1:aLvY7gPs/vLyJXF+PpZzvWlR5LB4QNJvBYIQMskJLZk=
+github.com/ovn-org/libovsdb v0.6.1-0.20211214213353-4303261c8de4 h1:6Ucw7tHsq8XLMsb+tIROg1rMlIs07T8zhJ7cbMZHFoQ=
+github.com/ovn-org/libovsdb v0.6.1-0.20211214213353-4303261c8de4/go.mod h1:aLvY7gPs/vLyJXF+PpZzvWlR5LB4QNJvBYIQMskJLZk=
 github.com/peterbourgon/diskv v2.0.1+incompatible/go.mod h1:uqqh8zWWbv1HBMNONnaR/tNboyR3/BZd58JJSHlUSCU=
 github.com/pkg/errors v0.8.0/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/pkg/errors v0.8.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=

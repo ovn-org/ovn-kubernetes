@@ -48,7 +48,7 @@ func (db *inMemoryDatabase) CreateDatabase(name string, schema ovsdb.DatabaseSch
 	}
 	database, err := cache.NewTableCache(dbModel, nil, nil)
 	if err != nil {
-		return nil
+		return err
 	}
 	db.databases[name] = database
 	return nil

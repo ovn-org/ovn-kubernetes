@@ -11,7 +11,7 @@ import (
 )
 
 // findNBGlobal returns the NBGlobal table entry
-func findNBGlobal(nbClient libovsdbclient.Client) (*nbdb.NBGlobal, error) {
+func FindNBGlobal(nbClient libovsdbclient.Client) (*nbdb.NBGlobal, error) {
 	nbGlobal := []nbdb.NBGlobal{}
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	defer cancel()
@@ -35,7 +35,7 @@ func findNBGlobal(nbClient libovsdbclient.Client) (*nbdb.NBGlobal, error) {
 func UpdateNBGlobalOptions(nbClient libovsdbclient.Client, options map[string]string) error {
 	// find the nbGlobal table's UUID, we don't have any other way to reliably look this table entry since it can
 	// only be indexed by UUID
-	nbGlobal, err := findNBGlobal(nbClient)
+	nbGlobal, err := FindNBGlobal(nbClient)
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,7 @@
 package node
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -74,13 +75,40 @@ func clearOVSFlowTargets() error {
 	return nil
 }
 
-func setOVSFlowTargets() error {
-	if config.Monitoring.NetFlowTargets != nil {
-		collectors := ""
-		for _, v := range config.Monitoring.NetFlowTargets {
-			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
+// collectorsString joins all HostPort entry into a string that is acceptable as
+// target by the ovs-vsctl command. If an entry has an empty host, it uses the Node IP
+func collectorsString(node *kapi.Node, targets []config.HostPort) (string, error) {
+	if len(targets) == 0 {
+		return "", errors.New("collector targets can't be empty")
+	}
+	var joined strings.Builder
+	for n, v := range targets {
+		if n == 0 {
+			joined.WriteByte('"')
+		} else {
+			joined.WriteString(`","`)
 		}
-		collectors = strings.TrimSuffix(collectors, ",")
+		var host string
+		if v.Host != nil && len(*v.Host) != 0 {
+			host = v.Host.String()
+		} else {
+			var err error
+			if host, err = util.GetNodePrimaryIP(node); err != nil {
+				return "", fmt.Errorf("composing flow collectors' IPs: %w", err)
+			}
+		}
+		joined.WriteString(util.JoinHostPortInt32(host, v.Port))
+	}
+	joined.WriteByte('"')
+	return joined.String(), nil
+}
+
+func setOVSFlowTargets(node *kapi.Node) error {
+	if len(config.Monitoring.NetFlowTargets) != 0 {
+		collectors, err := collectorsString(node, config.Monitoring.NetFlowTargets)
+		if err != nil {
+			return fmt.Errorf("error joining NetFlow targets: %w", err)
+		}
 
 		_, stderr, err := util.RunOVSVsctl(
 			"--",
@@ -96,12 +124,11 @@ func setOVSFlowTargets() error {
 			return fmt.Errorf("error setting NetFlow: %v\n  %q", err, stderr)
 		}
 	}
-	if config.Monitoring.SFlowTargets != nil {
-		collectors := ""
-		for _, v := range config.Monitoring.SFlowTargets {
-			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
+	if len(config.Monitoring.SFlowTargets) != 0 {
+		collectors, err := collectorsString(node, config.Monitoring.SFlowTargets)
+		if err != nil {
+			return fmt.Errorf("error joining SFlow targets: %w", err)
 		}
-		collectors = strings.TrimSuffix(collectors, ",")
 
 		_, stderr, err := util.RunOVSVsctl(
 			"--",
@@ -117,23 +144,28 @@ func setOVSFlowTargets() error {
 			return fmt.Errorf("error setting SFlow: %v\n  %q", err, stderr)
 		}
 	}
-	if config.Monitoring.IPFIXTargets != nil {
-		collectors := ""
-		for _, v := range config.Monitoring.IPFIXTargets {
-			collectors += "\"" + util.JoinHostPortInt32(v.Host.String(), v.Port) + "\"" + ","
+	if len(config.Monitoring.IPFIXTargets) != 0 {
+		collectors, err := collectorsString(node, config.Monitoring.IPFIXTargets)
+		if err != nil {
+			return fmt.Errorf("error joining IPFIX targets: %w", err)
 		}
-		collectors = strings.TrimSuffix(collectors, ",")
 
-		_, stderr, err := util.RunOVSVsctl(
+		args := []string{
 			"--",
 			"--id=@ipfix",
 			"create",
 			"ipfix",
 			fmt.Sprintf("targets=[%s]", collectors),
-			"cache_active_timeout=60",
-			"--",
-			"set", "bridge", "br-int", "ipfix=@ipfix",
-		)
+			fmt.Sprintf("cache_active_timeout=%d", config.IPFIX.CacheActiveTimeout),
+		}
+		if config.IPFIX.CacheMaxFlows != 0 {
+			args = append(args, fmt.Sprintf("cache_max_flows=%d", config.IPFIX.CacheMaxFlows))
+		}
+		if config.IPFIX.Sampling != 0 {
+			args = append(args, fmt.Sprintf("sampling=%d", config.IPFIX.Sampling))
+		}
+		args = append(args, "--", "set", "bridge", "br-int", "ipfix=@ipfix")
+		_, stderr, err := util.RunOVSVsctl(args...)
 		if err != nil {
 			return fmt.Errorf("error setting IPFIX: %v\n  %q", err, stderr)
 		}
@@ -216,7 +248,7 @@ func setupOVNNode(node *kapi.Node) error {
 		return fmt.Errorf("error clearing stale ovs flow targets: %q", err)
 	}
 	// set new ovs flow targets if needed
-	err = setOVSFlowTargets()
+	err = setOVSFlowTargets(node)
 	if err != nil {
 		return fmt.Errorf("error setting ovs flow targets: %q", err)
 	}

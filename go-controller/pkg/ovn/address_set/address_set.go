@@ -3,10 +3,11 @@ package addressset
 import (
 	"context"
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"net"
 	"sort"
 	"strings"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/pkg/errors"
 
@@ -14,8 +15,9 @@ import (
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/apimachinery/pkg/util/sets"

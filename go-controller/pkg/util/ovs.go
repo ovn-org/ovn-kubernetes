@@ -2,7 +2,6 @@ package util
 
 import (
 	"bytes"
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,7 +12,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
-	"unicode"
 
 	"github.com/pkg/errors"
 
@@ -409,6 +407,7 @@ func RunOVNAppctlWithTimeout(timeout int, args ...string) (string, string, error
 
 // Run the ovn-ctl command and retry if "Connection refused"
 // poll waitng for service to become available
+// FIXME: Remove when https://github.com/ovn-org/libovsdb/issues/235 is fixed
 func runOVNretry(cmdPath string, envVars []string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 
 	retriesLeft := ovnCmdRetryCount
@@ -513,23 +512,15 @@ func getNbOVSDBArgs(command string, args ...string) []string {
 	return cmdArgs
 }
 
-// RunOVNNbctlUnix runs command via ovn-nbctl, with ovn-nbctl using the unix
-// domain sockets to connect to the ovsdb-server backing the OVN NB database.
-func RunOVNNbctlUnix(args ...string) (string, string, error) {
-	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
-	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := runOVNretry(runner.nbctlPath, nil, cmdArgs...)
-	return strings.Trim(strings.TrimFunc(stdout.String(), unicode.IsSpace), "\""),
-		stderr.String(), err
-}
-
 // RunOVNNbctlWithTimeout runs command via ovn-nbctl with a specific timeout
+// FIXME: Remove when https://github.com/ovn-org/libovsdb/issues/235 is fixed
 func RunOVNNbctlWithTimeout(timeout int, args ...string) (string, string, error) {
 	stdout, stderr, err := RunOVNNbctlRawOutput(timeout, args...)
 	return strings.Trim(strings.TrimSpace(stdout), "\""), stderr, err
 }
 
 // RunOVNNbctlRawOutput returns the output with no trimming or other string manipulation
+// FIXME: Remove when https://github.com/ovn-org/libovsdb/issues/235 is fixed
 func RunOVNNbctlRawOutput(timeout int, args ...string) (string, string, error) {
 	cmdArgs, envVars := getNbctlArgsAndEnv(timeout, args...)
 	start := time.Now()
@@ -540,43 +531,14 @@ func RunOVNNbctlRawOutput(timeout int, args ...string) (string, string, error) {
 	return stdout.String(), stderr.String(), err
 }
 
-// RunOVNNbctlCSV runs an nbctl command that results in CSV output, parses the rows returned,
-// and returns the records
-func RunOVNNbctlCSV(args []string) ([][]string, error) {
-	args = append([]string{"--no-heading", "--format=csv"}, args...)
-
-	stdout, _, err := RunOVNNbctlRawOutput(15, args...)
-	if err != nil {
-		return nil, err
-	}
-	if len(stdout) == 0 {
-		return nil, nil
-	}
-
-	r := csv.NewReader(strings.NewReader(stdout))
-	records, err := r.ReadAll()
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse nbctl CSV response: %w", err)
-	}
-	return records, nil
-}
-
 // RunOVNNbctl runs a command via ovn-nbctl.
+// FIXME: Remove when https://github.com/ovn-org/libovsdb/issues/235 is fixed
 func RunOVNNbctl(args ...string) (string, string, error) {
 	return RunOVNNbctlWithTimeout(ovsCommandTimeout, args...)
 }
 
-// RunOVNSbctlUnix runs command via ovn-sbctl, with ovn-sbctl using the unix
-// domain sockets to connect to the ovsdb-server backing the OVN SB database.
-func RunOVNSbctlUnix(args ...string) (string, string, error) {
-	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
-	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := runOVNretry(runner.sbctlPath, nil, cmdArgs...)
-	return strings.Trim(strings.TrimFunc(stdout.String(), unicode.IsSpace), "\""),
-		stderr.String(), err
-}
-
 // RunOVNSbctlWithTimeout runs command via ovn-sbctl with a specific timeout
+// FIXME: Remove when https://github.com/ovn-org/libovsdb/issues/235 is fixed
 func RunOVNSbctlWithTimeout(timeout int, args ...string) (string, string,
 	error) {
 	var cmdArgs []string
@@ -623,14 +585,9 @@ func RunOVSDBClientOVNNB(command string, args ...string) (string, string, error)
 }
 
 // RunOVNSbctl runs a command via ovn-sbctl.
+// FIXME: Remove when https://github.com/ovn-org/libovsdb/issues/235 is fixed
 func RunOVNSbctl(args ...string) (string, string, error) {
 	return RunOVNSbctlWithTimeout(ovsCommandTimeout, args...)
-}
-
-// RunOVNCtl runs an ovn-ctl command.
-func RunOVNCtl(args ...string) (string, string, error) {
-	stdout, stderr, err := runOVNretry(runner.ovnctlPath, nil, args...)
-	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
 // RunOVNNBAppCtlWithTimeout runs an ovn-appctl command with a timeout to nbdb

@@ -207,8 +207,6 @@ type opModelToOpMapper func(model interface{}, opModel *OperationModel) (o []ovs
 func (m *ModelClient) buildOps(doWhenFound opModelToOpMapper, doWhenNotFound opModelToOpMapper, opModels ...OperationModel) (interface{}, []ovsdb.Operation, error) {
 	ops := []ovsdb.Operation{}
 	notfound := []interface{}{}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
 	for _, opModel := range opModels {
 		if opModel.ExistingResult == nil && opModel.Model != nil {
 			opModel.ExistingResult = getListFromModel(opModel.Model)
@@ -216,7 +214,7 @@ func (m *ModelClient) buildOps(doWhenFound opModelToOpMapper, doWhenNotFound opM
 
 		// lookup
 		if opModel.ModelPredicate != nil {
-			if err := m.client.WhereCache(opModel.ModelPredicate).List(ctx, opModel.ExistingResult); err != nil {
+			if err := m.whereCache(&opModel); err != nil {
 				return nil, nil, fmt.Errorf("unable to list items for model, err: %v", err)
 			}
 		} else if opModel.Model != nil {
@@ -336,6 +334,27 @@ func (m *ModelClient) get(opModel *OperationModel) (interface{}, error) {
 	}
 	addToExistingResult(copy, opModel.ExistingResult)
 	return copy, nil
+}
+
+func (m *ModelClient) whereCache(opModel *OperationModel) error {
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	var err error
+	if err = m.client.WhereCache(opModel.ModelPredicate).List(ctx, opModel.ExistingResult); err != nil {
+		return err
+	}
+
+	if opModel.Model == nil || opModel.BulkOp {
+		return nil
+	}
+
+	// for non-bulk op cases, copy (the one) uuid found to model provided, for convenience
+	err = onModels(opModel.ExistingResult, func(model interface{}) error {
+		uuid := getUUID(model)
+		setUUID(opModel.Model, uuid)
+		return nil
+	})
+	return err
 }
 
 func addToExistingResult(model interface{}, existingResult interface{}) {
