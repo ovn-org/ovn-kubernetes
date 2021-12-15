@@ -414,11 +414,16 @@ jobs:
     - name: Convert IPv4 cluster to Dual Stack
       run: |
         ./contrib/kind-dual-stack-conversion.sh
-    - name: Run Dual-Stack Tests
+    - name: Run Dual-Stack Shard Tests
       run: |
         KIND_IPV4_SUPPORT="true"
         KIND_IPV6_SUPPORT="true"
         make -C test shard-test WHAT="Networking Granular Checks\|DualStack"
+    - name: Run Dual-Stack Control-Plane Tests
+      run: |
+        KIND_IPV4_SUPPORT="true"
+        KIND_IPV6_SUPPORT="true"
+        make -C test control-plane WHAT="DualStack"
     - name: Upload Junit Reports
       if: always()
       uses: actions/upload-artifact@v2
