@@ -91,15 +91,20 @@ func ParseFlowCollectors(flowCollectors string) ([]HostPort, error) {
 		if err != nil {
 			return nil, fmt.Errorf("cannot parse hostport: %v", err)
 		}
-		ip := net.ParseIP(host)
-		if ip == nil {
-			return nil, fmt.Errorf("collector IP %s is not a valid IP", host)
+		var ipp *net.IP
+		// If the host IP is not provided, we keep it nil and later will assume the Node IP
+		if host != "" {
+			ip := net.ParseIP(host)
+			if ip == nil {
+				return nil, fmt.Errorf("collector IP %s is not a valid IP", host)
+			}
+			ipp = &ip
 		}
 		parsedPort, err := strconv.ParseInt(port, 10, 32)
 		if err != nil {
 			return nil, fmt.Errorf("collector port %s is not a valid port: %v", port, err)
 		}
-		parsedFlowsCollectors = append(parsedFlowsCollectors, HostPort{Host: &ip, Port: int32(parsedPort)})
+		parsedFlowsCollectors = append(parsedFlowsCollectors, HostPort{Host: ipp, Port: int32(parsedPort)})
 	}
 
 	return parsedFlowsCollectors, nil

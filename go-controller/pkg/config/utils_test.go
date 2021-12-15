@@ -233,3 +233,17 @@ func Test_checkForOverlap(t *testing.T) {
 		}
 	}
 }
+
+func TestParseFlowCollectors(t *testing.T) {
+	hp, err := ParseFlowCollectors("10.0.0.2:3030,:8888,[2020:1111:f::1:0933]:3333,10.0.0.3:3031")
+	if err != nil {
+		t.Error("can't parse flowCollectors", err)
+	}
+	if len(hp) != 4 ||
+		hp[0].Host.String() != "10.0.0.2" || hp[0].Port != 3030 ||
+		hp[1].Host != nil || hp[1].Port != 8888 ||
+		hp[2].Host.String() != "2020:1111:f::1:933" || hp[2].Port != 3333 ||
+		hp[3].Host.String() != "10.0.0.3" || hp[3].Port != 3031 {
+		t.Errorf("parsed hostPorts returned unexpected results: %+v", hp)
+	}
+}
