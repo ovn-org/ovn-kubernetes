@@ -401,23 +401,21 @@ func pokeEndpointClientIP(clientContainer, protocol, targetHost string, targetPo
 // leverages a container running the netexec command to send a request to a target running
 // netexec on the given target host / protocol / port
 // returns either the name of backend pod or "Timeout" if the curl request timed out
-func curlInContainer(clientContainer, protocol, targetHost string, targetPort int32, endPoint string) string {
+func curlInContainer(clientContainer, protocol, targetHost string, targetPort int32, endPoint string, maxTime int) (string, error) {
 	cmd := []string{"docker", "exec", clientContainer}
 	if utilnet.IsIPv6String(targetHost) {
 		targetHost = fmt.Sprintf("[%s]", targetHost)
 	}
 
 	// we leverage the dial command from netexec, that is already supporting multiple protocols
-	curlCommand := strings.Split(fmt.Sprintf("curl -g -q -s http://%s:%d/%s",
+	curlCommand := strings.Split(fmt.Sprintf("curl -g -q -s --max-time %d http://%s:%d/%s",
+		maxTime,
 		targetHost,
 		targetPort,
 		endPoint), " ")
 
 	cmd = append(cmd, curlCommand...)
-	res, err := runCommand(cmd...)
-	framework.ExpectNoError(err, "failed to run command on external container")
-
-	return res
+	return runCommand(cmd...)
 }
 
 func parseNetexecResponse(response string) (string, error) {
