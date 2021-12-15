@@ -928,6 +928,7 @@ ovn-master() {
   fi
   echo "egressfirewall_enabled_flag=${egressfirewall_enabled_flag}"
 
+  ovn_metrics_bind_address="${metrics_endpoint_ip}:9477"
   ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
 
   echo "=============== ovn-master ========== MASTER ONLY"
@@ -954,6 +955,7 @@ ovn-master() {
     ${egressip_enabled_flag} \
     ${egressfirewall_enabled_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
+    --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
     --host-network-namespace ${ovn_host_network_namespace} &
 
   echo "=============== ovn-master ========== running"

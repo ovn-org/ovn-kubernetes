@@ -404,9 +404,3 @@ func StartOVNMetricsServer(bindAddress string) {
 		}
 	}, 5*time.Second, utilwait.NeverStop)
 }
-
-func RegisterOvnMetrics(clientset kubernetes.Interface, k8sNodeName string) {
-	go RegisterOvnDBMetrics(clientset, k8sNodeName)
-	go RegisterOvnControllerMetrics()
-	go RegisterOvnNorthdMetrics(clientset, k8sNodeName)
-}
