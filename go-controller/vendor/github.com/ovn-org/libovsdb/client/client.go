@@ -246,6 +246,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 			for id, request := range db.monitors {
 				err := o.monitor(ctx, MonitorCookie{DatabaseName: dbName, ID: id}, true, request)
 				if err != nil {
+					o.rpcClient.Close()
 					o.rpcClient = nil
 					return err
 				}

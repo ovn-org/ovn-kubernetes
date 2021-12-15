@@ -23,13 +23,14 @@ require (
 	github.com/onsi/gomega v1.14.0
 	github.com/openshift/api v0.0.0-20211201215911-5a82bae32e46
 	github.com/openshift/client-go v0.0.0-20211202194848-d3f186f2d366
-	github.com/ovn-org/libovsdb v0.6.1-0.20211119175802-998d2ca8998d
+	github.com/ovn-org/libovsdb v0.6.1-0.20211214213353-4303261c8de4
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.11.0
 	github.com/spf13/afero v1.4.1
 	github.com/stretchr/testify v1.7.0
 	github.com/urfave/cli/v2 v2.2.0
 	github.com/vishvananda/netlink v1.1.1-0.20210518155637-4cb3795f2ccb
+	golang.org/x/net v0.0.0-20210520170846-37e1c6afe023
 	golang.org/x/sys v0.0.0-20210616094352-59db8d763f22
 	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac
 	gopkg.in/fsnotify/fsnotify.v1 v1.4.7
