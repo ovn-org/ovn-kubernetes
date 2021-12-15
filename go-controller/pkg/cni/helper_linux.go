@@ -271,17 +271,16 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	for i, ip := range ifInfo.IPs {
 		ipStrs[i] = ip.String()
 	}
-	// Add the new sandbox's OVS port, tag the interface as transient so stale
-	// pod interfaces are scrubbed on hard reboot
+	// Add the new sandbox's OVS port, tag the port as transient so stale
+	// pod ports are scrubbed on hard reboot
 	ovsArgs := []string{
-		"add-port", "br-int", hostIfaceName, "--", "set",
+		"add-port", "br-int", hostIfaceName, "other_config:transient=true", "--", "set",
 		"interface", hostIfaceName,
 		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
 		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
 		fmt.Sprintf("external_ids:iface-id-ver=%s", initialPodUID),
 		fmt.Sprintf("external_ids:ip_addresses=%s", strings.Join(ipStrs, ",")),
 		fmt.Sprintf("external_ids:sandbox=%s", sandboxID),
-		"other_config:transient=true",
 	}
 
 	if len(ifInfo.VfNetdevName) != 0 {
