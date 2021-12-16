@@ -96,14 +96,20 @@ type RowCache struct {
 	mutex    sync.RWMutex
 }
 
-// Row returns one model from the cache by UUID
-func (r *RowCache) Row(uuid string) model.Model {
-	r.mutex.RLock()
-	defer r.mutex.RUnlock()
+// rowByUUID returns one model from the cache by UUID. Caller must hold the row
+// cache lock.
+func (r *RowCache) rowByUUID(uuid string) model.Model {
 	if row, ok := r.cache[uuid]; ok {
 		return model.Clone(row)
 	}
 	return nil
+}
+
+// Row returns one model from the cache by UUID
+func (r *RowCache) Row(uuid string) model.Model {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+	return r.rowByUUID(uuid)
 }
 
 // RowByModel searches the cache using a the indexes for a provided model
@@ -119,7 +125,7 @@ func (r *RowCache) RowByModel(m model.Model) model.Model {
 		return nil
 	}
 	if uuid.(string) != "" {
-		return r.Row(uuid.(string))
+		return r.rowByUUID(uuid.(string))
 	}
 	for index := range r.indexes {
 		val, err := valueFromIndex(info, index)
@@ -127,7 +133,7 @@ func (r *RowCache) RowByModel(m model.Model) model.Model {
 			continue
 		}
 		if uuid, ok := r.indexes[index][val]; ok {
-			return r.Row(uuid)
+			return r.rowByUUID(uuid)
 		}
 	}
 	return nil

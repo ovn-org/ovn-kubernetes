@@ -1193,14 +1193,29 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	lbCache.RemoveSwitch(nodeName)
 	// Remove the logical switch associated with the node
 	logicalRouterPortName := types.RouterToSwitchPrefix + nodeName
+	clusterRouterModel := nbdb.LogicalRouter{}
+	nodeLogicalRouterPort := nbdb.LogicalRouterPort{
+		Name: logicalRouterPortName,
+	}
 	opModels := []libovsdbops.OperationModel{
 		{
 			Model:          &nbdb.LogicalSwitch{},
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == nodeName },
 		},
 		{
-			Model:          &nbdb.LogicalRouterPort{},
-			ModelPredicate: func(lrp *nbdb.LogicalRouterPort) bool { return lrp.Name == logicalRouterPortName },
+			Model: &nodeLogicalRouterPort,
+			DoAfter: func() {
+				if nodeLogicalRouterPort.UUID != "" {
+					clusterRouterModel.Ports = []string{nodeLogicalRouterPort.UUID}
+				}
+			},
+		},
+		{
+			Model:          &clusterRouterModel,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+			OnModelMutations: []interface{}{
+				&clusterRouterModel.Ports,
+			},
 		},
 	}
 	if err := oc.modelClient.Delete(opModels...); err != nil {
