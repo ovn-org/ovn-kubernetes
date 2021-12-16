@@ -327,20 +327,26 @@ func (oc *Controller) reconcileEgressIPNamespace(old, new *v1.Namespace) error {
 	return nil
 }
 
-func (oc *Controller) reconcileEgressIPPod(old, new *v1.Pod) error {
+func (oc *Controller) reconcileEgressIPPod(old, new *v1.Pod) (err error) {
 	oldPod, newPod := &v1.Pod{}, &v1.Pod{}
+	namespace := &v1.Namespace{}
 	if old != nil {
 		oldPod = old
+		namespace, err = oc.watchFactory.GetNamespace(oldPod.Namespace)
+		if err != nil {
+			return err
+		}
 	}
 	if new != nil {
 		newPod = new
+		namespace, err = oc.watchFactory.GetNamespace(newPod.Namespace)
+		if err != nil {
+			return err
+		}
 	}
+
 	newPodLabels := labels.Set(newPod.Labels)
 	oldPodLabels := labels.Set(oldPod.Labels)
-	namespace, err := oc.watchFactory.GetNamespace(newPod.Namespace)
-	if err != nil {
-		return err
-	}
 
 	// If the namespace the pod belongs to does not have any labels, just return
 	// it can't match any EgressIP object
@@ -1323,7 +1329,7 @@ func (oc *Controller) addNodeForEgress(node *v1.Node) error {
 		return err
 	}
 	if err := oc.initEgressIPAllocator(node); err != nil {
-		return fmt.Errorf("egress node initialization error: %v", err)
+		klog.V(5).Infof("Egress node initialization error: %v", err)
 	}
 	return nil
 }
