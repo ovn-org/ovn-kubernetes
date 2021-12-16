@@ -851,7 +851,7 @@ func (oc *Controller) WatchEgressNodes() {
 			// happened after we processed the ADD for that object, hence keep
 			// retrying for all UPDATEs.
 			if err := oc.initEgressIPAllocator(newNode); err != nil {
-				klog.Error(err)
+				klog.V(5).Infof("Egress node initialization error: %v", err)
 			}
 			oldLabels := oldNode.GetLabels()
 			newLabels := newNode.GetLabels()
