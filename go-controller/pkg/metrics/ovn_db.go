@@ -3,6 +3,7 @@ package metrics
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -251,14 +252,34 @@ var metricDBE2eTimestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	},
 )
 
-func ovnDBSizeMetricsUpdater(direction, database string) {
-	dbFile := fmt.Sprintf("/etc/ovn/ovn%s_db.db", direction)
-	fileInfo, err := os.Stat(dbFile)
-	if err != nil {
-		klog.Errorf("Failed to get the DB size for database %s: %v", database, err)
-		return
+func ovnDBSizeMetricsUpdater(basePath, direction, database string) {
+	if size, err := getOvnDBSizeViaPath(basePath, direction, database); err != nil {
+		klog.Errorf("Failed to update OVN DB size metric: %v", err)
+	} else {
+		metricDBSize.WithLabelValues(database).Set(float64(size))
 	}
-	metricDBSize.WithLabelValues(database).Set(float64(fileInfo.Size()))
+}
+
+// isOvnDBFoundViaPath attempts to find the OVN DBs, return false if not found.
+func isOvnDBFoundViaPath(basePath string, dirDbMap map[string]string) bool {
+	enabled := true
+	for direction, database := range dirDbMap {
+		if _, err := getOvnDBSizeViaPath(basePath, direction, database); err != nil {
+			enabled = false
+			break
+		}
+	}
+	return enabled
+}
+
+func getOvnDBSizeViaPath(basePath, direction, database string) (int64, error) {
+	dbFile := fmt.Sprintf("ovn%s_db.db", direction)
+	dbPath := filepath.Join(basePath, dbFile)
+	fileInfo, err := os.Stat(dbPath)
+	if err != nil {
+		return 0, fmt.Errorf("failed to find OVN DB database %s at path %s: %v", database, dbPath, err)
+	}
+	return fileInfo.Size(), nil
 }
 
 func ovnE2eTimeStampUpdater(direction, database string) {
@@ -369,7 +390,6 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 	// register metrics that will be served off of /metrics path
 	ovnRegistry.MustRegister(metricOVNDBMonitor)
 	ovnRegistry.MustRegister(metricOVNDBSessions)
-	ovnRegistry.MustRegister(metricDBSize)
 	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
@@ -409,20 +429,28 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 		ovnRegistry.MustRegister(metricDBClusterConnOutErr)
 	}
 	ovnRegistry.MustRegister(metricDBE2eTimestamp)
-
+	dirDbMap := map[string]string{
+		"nb": "OVN_Northbound",
+		"sb": "OVN_Southbound",
+	}
+	dbBasePath := "/etc/ovn/"
+	dbFoundViaPath := isOvnDBFoundViaPath(dbBasePath, dirDbMap)
+	if dbFoundViaPath {
+		ovnRegistry.MustRegister(metricDBSize)
+	} else {
+		klog.Infof("Unable to enable OVN DB size metric because no OVN DBs found at path %q", dbBasePath)
+	}
 	// functions responsible for collecting the values and updating the prometheus metrics
 	go func() {
-		dirDbMap := map[string]string{
-			"nb": "OVN_Northbound",
-			"sb": "OVN_Southbound",
-		}
 		for {
 			for direction, database := range dirDbMap {
 				if dbIsClustered {
 					ovnDBClusterStatusMetricsUpdater(direction, database)
 				}
+				if dbFoundViaPath {
+					ovnDBSizeMetricsUpdater(dbBasePath, direction, database)
+				}
 				ovnDBMemoryMetricsUpdater(direction, database)
-				ovnDBSizeMetricsUpdater(direction, database)
 				ovnE2eTimeStampUpdater(direction, database)
 			}
 			time.Sleep(30 * time.Second)
