@@ -3,11 +3,12 @@ package metrics
 import (
 	"fmt"
 	"runtime"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/ovn-org/libovsdb/cache"
-	"github.com/ovn-org/libovsdb/client"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
@@ -229,7 +230,7 @@ var startMasterMetricUpdaterOnce sync.Once
 
 // RegisterMasterMetrics registers some ovnkube master metrics with the Prometheus
 // registry
-func RegisterMasterMetrics(sbClient client.Client) {
+func RegisterMasterMetrics(nbClient libovsdbclient.Client, sbClient libovsdbclient.Client) {
 	registerMasterMetricsOnce.Do(func() {
 		// ovnkube-master metrics
 		// the updater for this metric is activated
@@ -304,13 +305,51 @@ func RegisterMasterMetrics(sbClient client.Client) {
 		prometheus.MustRegister(metricEgressFirewallCount)
 		registerControlPlaneRecorderMetrics()
 		registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemMaster)
+
+		// register DBe2eTimestamp to ensure northd is not hung
+		ovnRegistry.MustRegister(metricDBE2eTimestamp)
+		go func() {
+			for {
+				ovnE2eTimeStampUpdater("nb", "OVN_Northbound", nbClient, sbClient)
+				ovnE2eTimeStampUpdater("sb", "OVN_Southbound", nbClient, sbClient)
+				time.Sleep(30 * time.Second)
+			}
+		}()
+
+		prometheus.MustRegister(prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: MetricOvnNamespace,
+				Subsystem: MetricOvnSubsystemNorthd,
+				Name:      "northd_probe_interval",
+				Help: "The maximum number of milliseconds of idle time on connection to the OVN SB " +
+					"and NB DB before sending an inactivity probe message",
+			}, func() float64 {
+				var nbGlobal *nbdb.NBGlobal
+				var probeInterval string
+				var ok bool
+				var err error
+
+				if nbGlobal, err = libovsdbops.FindNBGlobal(nbClient); err != nil {
+					klog.Errorf("Failed to get NB_Global table "+
+						"err: %v", err)
+					return 0
+				}
+
+				if probeInterval, ok = nbGlobal.Options["northd_probe_interval"]; !ok {
+					klog.Errorf("Failed to get northd_probe_interval from NB_Global table options column")
+					return 0
+				}
+
+				return parseMetricToFloat(MetricOvnSubsystemNorthd, "probe_interval", probeInterval)
+			},
+		))
 	})
 }
 
 // StartMasterMetricUpdater adds a goroutine that updates a "timestamp" value in the
 // nbdb every 30 seconds. This is so we can determine freshness of the database.
 // Also, update IPsec enabled or disable metric.
-func StartMasterMetricUpdater(stopChan <-chan struct{}, nbClient client.Client) {
+func StartMasterMetricUpdater(stopChan <-chan struct{}, nbClient libovsdbclient.Client) {
 	startMasterMetricUpdaterOnce.Do(func() {
 		addIPSecMetricHandler(nbClient)
 		go func() {
@@ -371,7 +410,7 @@ func UpdateEgressFirewallRuleCount(count float64) {
 	metricEgressFirewallRuleCount.Add(count)
 }
 
-func updateE2ETimestampMetric(ovnNBClient client.Client) {
+func updateE2ETimestampMetric(ovnNBClient libovsdbclient.Client) {
 	currentTime := time.Now().Unix()
 	// assumption that only first row is relevant in NB_Global table
 	if err := libovsdbops.UpdateNBGlobalOptions(ovnNBClient, map[string]string{"e2e_timestamp": fmt.Sprintf("%d", currentTime)}); err != nil {
@@ -382,7 +421,7 @@ func updateE2ETimestampMetric(ovnNBClient client.Client) {
 	metricE2ETimestamp.Set(float64(currentTime))
 }
 
-func addIPSecMetricHandler(ovnNBClient client.Client) {
+func addIPSecMetricHandler(ovnNBClient libovsdbclient.Client) {
 	ovnNBClient.Cache().AddEventHandler(&cache.EventHandlerFuncs{
 		AddFunc: func(table string, model model.Model) {
 			ipsecMetricHandler(table, model)
@@ -449,7 +488,7 @@ type ControlPlaneRecorder struct {
 	podRecords map[kapimtypes.UID]*record
 }
 
-func NewControlPlaneRecorder(sbClient client.Client) *ControlPlaneRecorder {
+func NewControlPlaneRecorder(sbClient libovsdbclient.Client) *ControlPlaneRecorder {
 	recorder := ControlPlaneRecorder{sync.Mutex{}, make(map[kapimtypes.UID]*record)}
 	sbClient.Cache().AddEventHandler(&cache.EventHandlerFuncs{
 		AddFunc: func(table string, model model.Model) {
@@ -567,4 +606,63 @@ func getPodUIDFromPortBinding(row *sbdb.PortBinding) kapimtypes.UID {
 		return ""
 	}
 	return kapimtypes.UID(podUID)
+}
+
+var metricDBE2eTimestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvnNamespace,
+	Subsystem: MetricOvnSubsystemDB,
+	Name:      "e2e_timestamp",
+	Help:      "The current e2e-timestamp value as observed in this instance of the database"},
+	[]string{
+		"db_name",
+	},
+)
+
+func ovnE2eTimeStampUpdater(direction, database string, nbClient libovsdbclient.Client,
+	sbClient libovsdbclient.Client) {
+	var nbGlobal *nbdb.NBGlobal
+	var sbGlobal *sbdb.SBGlobal
+	var err error
+
+	scrapeAndSetE2ETimestampMetrics := func(options map[string]string) {
+		var v string
+		var ok bool
+
+		if v, ok = options["e2e_timestamp"]; !ok {
+			klog.Error("Failed to scrape timestamp from global config options")
+			return
+		}
+
+		if value, err := strconv.ParseFloat(v, 64); err == nil {
+			metricDBE2eTimestamp.WithLabelValues(database).Set(value)
+		} else {
+			klog.Errorf("Failed to parse e2e-timestamp value to float64 err: %v", err)
+		}
+	}
+
+	if direction == "sb" {
+		if sbGlobal, err = libovsdbops.FindSBGlobal(sbClient); err != nil && err != libovsdbclient.ErrNotFound {
+			klog.Errorf("Failed to scrape timestamp from sb_Global table "+
+				"err: %v", err)
+			return
+		}
+
+		if sbGlobal != nil {
+			scrapeAndSetE2ETimestampMetrics(sbGlobal.Options)
+		} else {
+			metricDBE2eTimestamp.WithLabelValues(database).Set(0)
+		}
+	} else {
+		if nbGlobal, err = libovsdbops.FindNBGlobal(nbClient); err != nil && err != libovsdbclient.ErrNotFound {
+			klog.Errorf("Failed to scrape timestamp from nb_Global table "+
+				"err: %v", err)
+			return
+		}
+
+		if nbGlobal != nil {
+			scrapeAndSetE2ETimestampMetrics(nbGlobal.Options)
+		} else {
+			metricDBE2eTimestamp.WithLabelValues(database).Set(0)
+		}
+	}
 }
