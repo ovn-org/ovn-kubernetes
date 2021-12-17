@@ -199,7 +199,7 @@ func (oc *Controller) waitForNodeLogicalSwitchInCache(nodeName string) error {
 }
 
 func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet,
-	routingExternalGWs *gatewayInfo, routingPodGWs map[string]*gatewayInfo, hybridOverlayExternalGW net.IP) error {
+	routingExternalGWs *gatewayInfo, routingPodGWs map[string]gatewayInfo, hybridOverlayExternalGW net.IP) error {
 
 	// if there are other network attachments for the pod, then check if those network-attachment's
 	// annotation has default-route key. If present, then we need to skip adding default route for
@@ -485,7 +485,10 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	for _, gw := range routingPodGWs {
 		if len(gw.gws) > 0 {
-			gateways = append(gateways, gw)
+			if err = validateRoutingPodGWs(routingPodGWs); err != nil {
+				klog.Error(err)
+			}
+			gateways = append(gateways, &gw)
 		} else {
 			klog.Warningf("Found routingPodGW with no gateways ip set for namespace %s", pod.Namespace)
 		}
