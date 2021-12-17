@@ -267,7 +267,7 @@ func ensureClusterRaftMembership(db *dbProperties, kclient kube.Interface) error
 			if err != nil {
 				// warn only: we might fail to kick since other nodes will also be trying to kick the member
 				klog.Warningf("Error while kicking old Raft member: %s, for address: %s in db: %s,"+
-					"stderr: %v, err: %v", member[1], member[2], db.dbAlias, stderr, err)
+					"stderr: %v, err: %v", member[1], member[3], db.dbAlias, stderr, err)
 				continue
 			}
 			kickedMembersCount = kickedMembersCount + 1
@@ -325,7 +325,7 @@ func resetRaftDB(db *dbProperties) error {
 	backupDB := filepath.Join(filepath.Dir(db.dbAlias), backupFile)
 	err := os.Rename(db.dbAlias, backupDB)
 	if err != nil {
-		return fmt.Errorf("failed to back up the db to backupFile: %s", backupFile)
+		return fmt.Errorf("failed to back up the db to backupFile: %s, error: %s", backupDB, err)
 	}
 
 	klog.Infof("Backed up the db to backupFile: %s", backupFile)
