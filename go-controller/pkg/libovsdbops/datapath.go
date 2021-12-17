@@ -2,7 +2,6 @@ package libovsdbops
 
 import (
 	"context"
-	"fmt"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
@@ -10,7 +9,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
-func findDatapathByPredicate(sbClient libovsdbclient.Client, lookupFcn func(dp *sbdb.DatapathBinding) bool) (*sbdb.DatapathBinding, error) {
+func findDatapathByPredicate(sbClient libovsdbclient.Client, lookupFcn func(dp *sbdb.DatapathBinding) bool) ([]sbdb.DatapathBinding, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	defer cancel()
 	datapathBindings := []sbdb.DatapathBinding{}
@@ -19,25 +18,21 @@ func findDatapathByPredicate(sbClient libovsdbclient.Client, lookupFcn func(dp *
 		return nil, err
 	}
 
-	if len(datapathBindings) != 1 {
-		return nil, fmt.Errorf("multiple datapath bindings found for a given lookup function")
-	}
-
-	return &datapathBindings[0], nil
+	return datapathBindings, nil
 }
 
-func FindDatapathByExternalIDs(sbClient libovsdbclient.Client, externalIDs map[string]string) (*sbdb.DatapathBinding, error) {
+func FindDatapathByExternalIDs(sbClient libovsdbclient.Client, externalIDs map[string]string) ([]sbdb.DatapathBinding, error) {
 	datapathLookupFcn := func(dp *sbdb.DatapathBinding) bool {
-		datapathMatch := false
 		for k, v := range externalIDs {
 			if itemVal, ok := dp.ExternalIDs[k]; ok {
-				if itemVal == v {
-					datapathMatch = true
+				if itemVal != v {
+					return false
 				}
+			} else {
+				return false
 			}
 		}
-
-		return datapathMatch
+		return true
 	}
 
 	return findDatapathByPredicate(sbClient, datapathLookupFcn)
