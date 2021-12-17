@@ -478,7 +478,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// if we have any external or pod Gateways, add routes
-	gateways := make([]*gatewayInfo, 0)
+	gateways := make([]*gatewayInfo, 0, len(routingExternalGWs.gws)+len(routingPodGWs))
 
 	if len(routingExternalGWs.gws) > 0 {
 		gateways = append(gateways, routingExternalGWs)
