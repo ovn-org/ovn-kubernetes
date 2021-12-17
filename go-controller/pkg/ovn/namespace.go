@@ -13,6 +13,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
 
@@ -60,12 +61,28 @@ func (oc *Controller) getRoutingExternalGWs(nsInfo *namespaceInfo) *gatewayInfo 
 	return &res
 }
 
-func (oc *Controller) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]*gatewayInfo {
+// wrapper function to log if there are duplicate gateway IPs present in the cache
+func validateRoutingPodGWs(podGWs map[string]gatewayInfo) error {
+	// map to hold IP/podName
+	ipTracker := make(map[string]string)
+	for podName, gwInfo := range podGWs {
+		for _, gwIP := range gwInfo.gws {
+			if foundPod, ok := ipTracker[gwIP.String()]; ok {
+				return fmt.Errorf("duplicate IP found in ECMP Pod route cache! IP: %q, first pod: %q, second "+
+					"pod: %q", gwIP, podName, foundPod)
+			}
+			ipTracker[gwIP.String()] = podName
+		}
+	}
+	return nil
+}
+
+func (oc *Controller) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]gatewayInfo {
 	// return a copy of the object so it can be handled without the
 	// namespace locked
-	res := make(map[string]*gatewayInfo)
+	res := make(map[string]gatewayInfo)
 	for k, v := range nsInfo.routingExternalPodGWs {
-		item := &gatewayInfo{
+		item := gatewayInfo{
 			bfdEnabled: v.bfdEnabled,
 			gws:        make([]net.IP, len(v.gws)),
 		}
@@ -77,7 +94,7 @@ func (oc *Controller) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]*gatewa
 
 // addPodToNamespace adds the pod's IP to the namespace's address set and returns
 // pod's routing gateway info
-func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]*gatewayInfo, error) {
+func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]gatewayInfo, error) {
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns, true, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to ensure namespace locked: %v", err)
@@ -167,11 +184,17 @@ func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *names
 
 func parseRoutingExternalGWAnnotation(annotation string) ([]net.IP, error) {
 	var routingExternalGWs []net.IP
+	ipTracker := sets.NewString()
 	for _, v := range strings.Split(annotation, ",") {
 		parsedAnnotation := net.ParseIP(v)
 		if parsedAnnotation == nil {
 			return nil, fmt.Errorf("could not parse routing external gw annotation value %s", v)
 		}
+		if ipTracker.Has(parsedAnnotation.String()) {
+			klog.Warningf("Duplicate IP detected in routing external gw annotation: %s", annotation)
+			continue
+		}
+		ipTracker.Insert(parsedAnnotation.String())
 		routingExternalGWs = append(routingExternalGWs, parsedAnnotation)
 	}
 	return routingExternalGWs, nil

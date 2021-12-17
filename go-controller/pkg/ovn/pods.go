@@ -465,7 +465,10 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	for _, gw := range routingPodGWs {
 		if len(gw.gws) > 0 {
-			gateways = append(gateways, gw)
+			if err = validateRoutingPodGWs(routingPodGWs); err != nil {
+				klog.Error(err)
+			}
+			gateways = append(gateways, &gw)
 		} else {
 			klog.Warningf("Found routingPodGW with no gateways ip set for namespace %s", pod.Namespace)
 		}
