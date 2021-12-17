@@ -85,7 +85,9 @@ usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
                  [-ho |--hybrid-enabled] [-ii|--install-ingress] [-n4|--no-ipv4]
                  [-i6 |--ipv6] [-wk|--num-workers <num>] [-ds|--disable-snat-multiple-gws]
                  [-dp |--disable-pkt-mtu-check]
-                 [-nf |--netflow-targets <targets>] [sf|--sflow-targets <targets>] [-if|--ipfix-targets]
+                 [-nf |--netflow-targets <targets>] [sf|--sflow-targets <targets>]
+                 [-if |--ipfix-targets <targets>] [-ifs|--ipfix-sampling <num>]
+                 [-ifm|--ipfix-cache-max-flows <num>] [-ifa|--ipfix-cache-active-timeout <num>]
                  [-sw |--allow-system-writes] [-gm|--gateway-mode <mode>]
                  [-nl |--node-loglevel <num>] [-ml|--master-loglevel <num>]
                  [-dbl|--dbchecker-loglevel <num>] [-ndl|--ovn-loglevel-northd <loglevel>]
@@ -95,41 +97,44 @@ usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
                  [-eb |--egress-gw-separate-bridge]
                  [-h]]
 
--cf  | --config-file               Name of the KIND J2 configuration file.
-                                   DEFAULT: ./kind.yaml.j2
--kt  | --keep-taint                Do not remove taint components.
-                                   DEFAULT: Remove taint components.
--ha  | --ha-enabled                Enable high availability. DEFAULT: HA Disabled.
--ho  | --hybrid-enabled            Enable hybrid overlay. DEFAULT: Disabled.
--ds  | --disable-snat-multiple-gws Disable SNAT for multiple gws. DEFAULT: Disabled.
--dp  | --disable-pkt-mtu-check     Disable checking packet size greater than MTU. Default: Disabled
--nf  | --netflow-targets           Comma delimited list of ip:port netflow collectors. DEFAULT: Disabled.
--sf  | --sflow-targets             Comma delimited list of ip:port sflow collectors. DEFAULT: Disabled.
--if  | --ipfix-targets             Comma delimited list of ip:port ipfix collectors. DEFAULT: Disabled.
--el  | --ovn-empty-lb-events       Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled
--ii  | --install-ingress           Flag to install Ingress Components.
-                                   DEFAULT: Don't install ingress components.
--n4  | --no-ipv4                   Disable IPv4. DEFAULT: IPv4 Enabled.
--i6  | --ipv6                      Enable IPv6. DEFAULT: IPv6 Disabled.
--wk  | --num-workers               Number of worker nodes. DEFAULT: HA - 2 worker
-                                   nodes and no HA - 0 worker nodes.
--sw  | --allow-system-writes       Allow script to update system. Intended to allow
-                                   github CI to be updated with IPv6 settings.
-                                   DEFAULT: Don't allow.
--gm  | --gateway-mode              Enable 'shared' or 'local' gateway mode.
-                                   DEFAULT: shared.
--ov  | --ovn-image            	   Use the specified docker image instead of building locally. DEFAULT: local build.
--ml  | --master-loglevel           Log level for ovnkube (master), DEFAULT: 5.
--nl  | --node-loglevel             Log level for ovnkube (node), DEFAULT: 5
--dbl | --dbchecker-loglevel        Log level for ovn-dbchecker (ovnkube-db), DEFAULT: 5.
--ndl | --ovn-loglevel-northd       Log config for ovn northd, DEFAULT: '-vconsole:info -vfile:info'.
--nbl | --ovn-loglevel-nb           Log config for northbound DB DEFAULT: '-vconsole:info -vfile:info'.
--sbl | --ovn-loglevel-sb           Log config for southboudn DB DEFAULT: '-vconsole:info -vfile:info'.
--cl  | --ovn-loglevel-controller   Log config for ovn-controller DEFAULT: '-vconsole:info'.
--dl  | --ovn-loglevel-nbctld       Log config for nbctl daemon DEFAULT: '-vconsole:info'.
--ep  | --experimental-provider     Use an experimental OCI provider such as podman, instead of docker. DEFAULT: Disabled.
--eb  | --egress-gw-separate-bridge The external gateway traffic uses a separate bridge.
---delete                      	   Delete current cluster
+-cf  | --config-file                Name of the KIND J2 configuration file.
+                                    DEFAULT: ./kind.yaml.j2
+-kt  | --keep-taint                 Do not remove taint components.
+                                    DEFAULT: Remove taint components.
+-ha  | --ha-enabled                 Enable high availability. DEFAULT: HA Disabled.
+-ho  | --hybrid-enabled             Enable hybrid overlay. DEFAULT: Disabled.
+-ds  | --disable-snat-multiple-gws  Disable SNAT for multiple gws. DEFAULT: Disabled.
+-dp  | --disable-pkt-mtu-check      Disable checking packet size greater than MTU. Default: Disabled
+-nf  | --netflow-targets            Comma delimited list of ip:port or :port (using node IP) netflow collectors. DEFAULT: Disabled.
+-sf  | --sflow-targets              Comma delimited list of ip:port or :port (using node IP) sflow collectors. DEFAULT: Disabled.
+-if  | --ipfix-targets              Comma delimited list of ip:port or :port (using node IP) ipfix collectors. DEFAULT: Disabled.
+-ifs | --ipfix-sampling             Fraction of packets that are sampled and sent to each target collector: 1 packet out of every <num>. DEFAULT: 400 (1 out of 400 packets).
+-ifm | --ipfix-cache-max-flows      Maximum number of IPFIX flow records that can be cached at a time. If 0, caching is disabled. DEFAULT: Disabled.
+-ifa | --ipfix-cache-active-timeout Maximum period in seconds for which an IPFIX flow record is cached and aggregated before being sent. If 0, caching is disabled. DEFAULT: 60.
+-el  | --ovn-empty-lb-events        Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled
+-ii  | --install-ingress            Flag to install Ingress Components.
+                                    DEFAULT: Don't install ingress components.
+-n4  | --no-ipv4                    Disable IPv4. DEFAULT: IPv4 Enabled.
+-i6  | --ipv6                       Enable IPv6. DEFAULT: IPv6 Disabled.
+-wk  | --num-workers                Number of worker nodes. DEFAULT: HA - 2 worker
+                                    nodes and no HA - 0 worker nodes.
+-sw  | --allow-system-writes        Allow script to update system. Intended to allow
+                                    github CI to be updated with IPv6 settings.
+                                    DEFAULT: Don't allow.
+-gm  | --gateway-mode               Enable 'shared' or 'local' gateway mode.
+                                    DEFAULT: shared.
+-ov  | --ovn-image            	    Use the specified docker image instead of building locally. DEFAULT: local build.
+-ml  | --master-loglevel            Log level for ovnkube (master), DEFAULT: 5.
+-nl  | --node-loglevel              Log level for ovnkube (node), DEFAULT: 5
+-dbl | --dbchecker-loglevel         Log level for ovn-dbchecker (ovnkube-db), DEFAULT: 5.
+-ndl | --ovn-loglevel-northd        Log config for ovn northd, DEFAULT: '-vconsole:info -vfile:info'.
+-nbl | --ovn-loglevel-nb            Log config for northbound DB DEFAULT: '-vconsole:info -vfile:info'.
+-sbl | --ovn-loglevel-sb            Log config for southboudn DB DEFAULT: '-vconsole:info -vfile:info'.
+-cl  | --ovn-loglevel-controller    Log config for ovn-controller DEFAULT: '-vconsole:info'.
+-dl  | --ovn-loglevel-nbctld        Log config for nbctl daemon DEFAULT: '-vconsole:info'.
+-ep  | --experimental-provider      Use an experimental OCI provider such as podman, instead of docker. DEFAULT: Disabled.
+-eb  | --egress-gw-separate-bridge  The external gateway traffic uses a separate bridge.
+--delete                      	    Delete current cluster
 ```
 
 As seen above, if you do not specify any options the script will assume the default values.

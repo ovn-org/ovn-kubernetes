@@ -10,13 +10,16 @@ import (
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/prometheus/client_golang/prometheus"
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/klog/v2"
+	kapimtypes "k8s.io/apimachinery/pkg/types"
+	klog "k8s.io/klog/v2"
 )
 
 // metricE2ETimestamp is a timestamp value we have persisted to nbdb. We will
@@ -38,7 +41,7 @@ var metricPodCreationLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15),
 })
 
-// metricPodCreationLatency is the time between a pod being scheduled and the
+// metricOvnCliLatency is the time between a pod being scheduled and the
 // ovn controller setting the network annotations.
 var metricOvnCliLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
@@ -188,6 +191,39 @@ var metricEgressFirewallCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "The number of egress firewall policies",
 })
 
+// metricFirstSeenLSPLatency is the time between a pod first seen in OVN-Kubernetes and its Logical Switch Port is created
+var metricFirstSeenLSPLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "pod_first_seen_lsp_created_duration_seconds",
+	Help:      "The duration between a pod first observed in OVN-Kubernetes and Logical Switch Port created",
+	Buckets:   prometheus.ExponentialBuckets(.01, 2, 15),
+})
+
+var metricLSPPortBindingLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "pod_lsp_created_port_binding_duration_seconds",
+	Help:      "The duration between a pods Logical Switch Port created and port binding observed in cache",
+	Buckets:   prometheus.ExponentialBuckets(.01, 2, 15),
+})
+
+var metricPortBindingChassisLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "pod_port_binding_port_binding_chassis_duration_seconds",
+	Help:      "The duration between a pods port binding observed and port binding chassis update observed in cache",
+	Buckets:   prometheus.ExponentialBuckets(.01, 2, 15),
+})
+
+var metricPortBindingUpLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "pod_port_binding_chassis_port_binding_up_duration_seconds",
+	Help:      "The duration between a pods port binding chassis update and port binding up observed in cache",
+	Buckets:   prometheus.ExponentialBuckets(.01, 2, 15),
+})
+
 var registerMasterMetricsOnce sync.Once
 var startMasterMetricUpdaterOnce sync.Once
 
@@ -266,6 +302,7 @@ func RegisterMasterMetrics(sbClient client.Client) {
 		prometheus.MustRegister(metricEgressFirewallRuleCount)
 		prometheus.MustRegister(metricIPsecEnabled)
 		prometheus.MustRegister(metricEgressFirewallCount)
+		registerControlPlaneRecorderMetrics()
 		registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemMaster)
 	})
 }
@@ -379,4 +416,155 @@ func IncrementEgressFirewallCount() {
 // DecrementEgressFirewallCount decrements the number of Egress firewalls
 func DecrementEgressFirewallCount() {
 	metricEgressFirewallCount.Dec()
+}
+
+func registerControlPlaneRecorderMetrics() {
+	prometheus.MustRegister(metricFirstSeenLSPLatency)
+	prometheus.MustRegister(metricLSPPortBindingLatency)
+	prometheus.MustRegister(metricPortBindingUpLatency)
+	prometheus.MustRegister(metricPortBindingChassisLatency)
+}
+
+type timestampType int
+
+const (
+	// pod event first handled by OVN-Kubernetes control plane
+	firstSeen timestampType = iota
+	// OVN-Kubernetes control plane created Logical Switch Port in northbound database
+	logicalSwitchPort
+	// port binding seen in OVN-Kubernetes control plane southbound database libovsdb cache
+	portBinding
+	// port binding with updated chassis seen in OVN-Kubernetes  control plane southbound database libovsdb cache
+	portBindingChassis
+	portBindingTable = "Port_Binding"
+)
+
+type record struct {
+	timestamp time.Time
+	timestampType
+}
+
+type ControlPlaneRecorder struct {
+	sync.Mutex
+	podRecords map[kapimtypes.UID]*record
+}
+
+func NewControlPlaneRecorder(sbClient client.Client) *ControlPlaneRecorder {
+	recorder := ControlPlaneRecorder{sync.Mutex{}, make(map[kapimtypes.UID]*record)}
+	sbClient.Cache().AddEventHandler(&cache.EventHandlerFuncs{
+		AddFunc: func(table string, model model.Model) {
+			go recorder.AddPortBindingEvent(table, model)
+		},
+		UpdateFunc: func(table string, old model.Model, new model.Model) {
+			go recorder.UpdatePortBindingEvent(table, old, new)
+		},
+		DeleteFunc: func(table string, model model.Model) {
+		},
+	})
+	return &recorder
+}
+
+func (ps *ControlPlaneRecorder) AddPodEvent(podUID kapimtypes.UID) {
+	ps.Lock()
+	ps.podRecords[podUID] = &record{timestamp: time.Now(), timestampType: firstSeen}
+	ps.Unlock()
+}
+
+func (ps *ControlPlaneRecorder) CleanPodRecord(podUID kapimtypes.UID) {
+	ps.Lock()
+	delete(ps.podRecords, podUID)
+	ps.Unlock()
+}
+
+func (ps *ControlPlaneRecorder) AddLSPEvent(podUID kapimtypes.UID) {
+	now := time.Now()
+	ps.Lock()
+	defer ps.Unlock()
+	var r *record
+	if r = ps.getRecord(podUID); r == nil {
+		klog.Errorf("Metrics: add Logical Switch Port event expected pod with UID %q in cache", podUID)
+		return
+	}
+	if r.timestampType != firstSeen {
+		klog.Errorf("Metrics: unexpected last event type (%d) in cache for pod with UID %q", r.timestampType, podUID)
+		return
+	}
+	metricFirstSeenLSPLatency.Observe(now.Sub(r.timestamp).Seconds())
+	r.timestamp = now
+	r.timestampType = logicalSwitchPort
+}
+
+func (ps *ControlPlaneRecorder) AddPortBindingEvent(table string, m model.Model) {
+	if table != portBindingTable {
+		return
+	}
+	var r *record
+	now := time.Now()
+	row := m.(*sbdb.PortBinding)
+	podUID := getPodUIDFromPortBinding(row)
+	if podUID == "" {
+		return
+	}
+	ps.Lock()
+	defer ps.Unlock()
+	if r = ps.getRecord(podUID); r == nil {
+		klog.Errorf("Metrics: add port binding event expected pod with UID %q in cache", podUID)
+		return
+	}
+	if r.timestampType != logicalSwitchPort {
+		klog.Errorf("Metrics: unexpected last event entry (%d) in cache for pod with UID %q", r.timestampType, podUID)
+		return
+	}
+	metricLSPPortBindingLatency.Observe(now.Sub(r.timestamp).Seconds())
+	r.timestamp = now
+	r.timestampType = portBinding
+}
+
+func (ps *ControlPlaneRecorder) UpdatePortBindingEvent(table string, old, new model.Model) {
+	if table != portBindingTable {
+		return
+	}
+	var r *record
+	oldRow := old.(*sbdb.PortBinding)
+	newRow := new.(*sbdb.PortBinding)
+	now := time.Now()
+	podUID := getPodUIDFromPortBinding(newRow)
+	if podUID == "" {
+		return
+	}
+	ps.Lock()
+	defer ps.Unlock()
+	if r = ps.getRecord(podUID); r == nil {
+		klog.Errorf("Metrics: port binding update expected pod with UID %q in cache", podUID)
+		return
+	}
+	if oldRow.Chassis == nil && newRow.Chassis != nil && r.timestampType == portBinding {
+		metricPortBindingChassisLatency.Observe(now.Sub(r.timestamp).Seconds())
+		r.timestamp = now
+		r.timestampType = portBindingChassis
+	}
+	if oldRow.Up != nil && !*oldRow.Up && newRow.Up != nil && *newRow.Up && r.timestampType == portBindingChassis {
+		metricPortBindingUpLatency.Observe(now.Sub(r.timestamp).Seconds())
+	}
+}
+
+// getRecord assumes lock is held by caller and returns record from map with func argument as the key
+func (ps *ControlPlaneRecorder) getRecord(podUID kapimtypes.UID) *record {
+	r, ok := ps.podRecords[podUID]
+	if !ok {
+		klog.Errorf("Metrics: cache entry expected pod with UID %q but failed to find it", podUID)
+		return nil
+	}
+	return r
+}
+
+func getPodUIDFromPortBinding(row *sbdb.PortBinding) kapimtypes.UID {
+	if isPod, ok := row.ExternalIDs["pod"]; !ok || isPod != "true" {
+		return ""
+	}
+	podUID, ok := row.Options["iface-id-ver"]
+	if !ok {
+		return ""
+	}
+	return kapimtypes.UID(podUID)
 }

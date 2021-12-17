@@ -7,7 +7,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-func (pr *PodRequest) addDPUConnectionDetailsAnnot(k kube.Interface) error {
+func (pr *PodRequest) addDPUConnectionDetailsAnnot(k kube.Interface, vfNetdevName string) error {
 	// 1. Verify there is a device id
 	if pr.CNIConf.DeviceID == "" {
 		return fmt.Errorf("DeviceID must be set for Pod request with DPU")
@@ -35,9 +35,10 @@ func (pr *PodRequest) addDPUConnectionDetailsAnnot(k kube.Interface) error {
 	}
 
 	dpuConnDetails := util.DPUConnectionDetails{
-		PfId:      fmt.Sprint(fn),
-		VfId:      fmt.Sprint(vfindex),
-		SandboxId: pr.SandboxID,
+		PfId:         fmt.Sprint(fn),
+		VfId:         fmt.Sprint(vfindex),
+		SandboxId:    pr.SandboxID,
+		VfNetdevName: vfNetdevName,
 	}
 
 	podAnnot := kube.NewPodAnnotator(k, pr.PodName, pr.PodNamespace)

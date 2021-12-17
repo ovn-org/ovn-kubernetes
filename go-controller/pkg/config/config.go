@@ -87,6 +87,14 @@ var (
 		RawIPFIXTargets:   "",
 	}
 
+	// IPFIX holds IPFIX-related performance configuration options. It requires that the
+	// IPFIXTargets value of the Monitoring section contains at least one endpoint.
+	IPFIX = IPFIXConfig{
+		Sampling:           400,
+		CacheActiveTimeout: 60,
+		CacheMaxFlows:      0,
+	}
+
 	// CNI holds CNI-related parsed config file parameters and command-line overrides
 	CNI = CNIConfig{
 		ConfDir: "/etc/cni/net.d",
@@ -243,6 +251,23 @@ type MonitoringConfig struct {
 	IPFIXTargets []HostPort
 }
 
+// IPFIXConfig holds IPFIX-related performance configuration options. It requires that the ipfix-targets
+// value of the [monitoring] section contains at least one endpoint.
+type IPFIXConfig struct {
+	// Sampling is an optional integer in range 1 to 4,294,967,295. It holds the rate at which
+	// packets should be sampled and sent to each target collector. If not specified, defaults to
+	// 400, which means one out of 400 packets, on average, will be sent to each target collector.
+	Sampling uint `gcfg:"sampling"`
+	// CacheActiveTimeout is an optional integer in range 0 to 4,200. It holds the maximum period in
+	// seconds for which an IPFIX flow record is cached and aggregated before being sent. If not
+	// specified, defaults to 60. If 0, caching is disabled.
+	CacheActiveTimeout uint `gcfg:"cache-active-timeout"`
+	// CacheMaxFlows is an optional integer in range 0 to 4,294,967,295. It holds the maximum number
+	// of IPFIX flow records that can be cached at a time. If not specified in OVS, defaults to 0
+	// (however, this controller defaults it to 60). If 0, caching is disabled.
+	CacheMaxFlows uint `gcfg:"cache-max-flows"`
+}
+
 // CNIConfig holds CNI-related parsed config file parameters and command-line overrides
 type CNIConfig struct {
 	// ConfDir specifies the CNI config directory in which to write the overlay CNI config file
@@ -384,6 +409,7 @@ type config struct {
 	Default              DefaultConfig
 	Logging              LoggingConfig
 	Monitoring           MonitoringConfig
+	IPFIX                IPFIXConfig
 	CNI                  CNIConfig
 	OVNKubernetesFeature OVNKubernetesFeatureConfig
 	Kubernetes           KubernetesConfig
@@ -399,6 +425,7 @@ var (
 	savedDefault              DefaultConfig
 	savedLogging              LoggingConfig
 	savedMonitoring           MonitoringConfig
+	savedIPFIX                IPFIXConfig
 	savedCNI                  CNIConfig
 	savedOVNKubernetesFeature OVNKubernetesFeatureConfig
 	savedKubernetes           KubernetesConfig
@@ -423,6 +450,7 @@ func init() {
 	savedDefault = Default
 	savedLogging = Logging
 	savedMonitoring = Monitoring
+	savedIPFIX = IPFIX
 	savedCNI = CNI
 	savedOVNKubernetesFeature = OVNKubernetesFeature
 	savedKubernetes = Kubernetes
@@ -450,6 +478,7 @@ func init() {
 	Flags = append(Flags, MasterHAFlags...)
 	Flags = append(Flags, HybridOverlayFlags...)
 	Flags = append(Flags, MonitoringFlags...)
+	Flags = append(Flags, IPFIXFlags...)
 	Flags = append(Flags, OvnKubeNodeFlags...)
 }
 
@@ -731,22 +760,43 @@ var MonitoringFlags = []cli.Flag{
 		Name:  "netflow-targets",
 		Value: Monitoring.RawNetFlowTargets,
 		Usage: "A comma separated set of NetFlow collectors to export flow data (eg, \"10.128.0.150:2056,10.0.0.151:2056\")." +
-			"Each entry is given in the form [IP address:port]",
+			"Each entry is given in the form [IP address:port] or [:port]. If only port is provided, it uses the Node IP",
 		Destination: &cliConfig.Monitoring.RawNetFlowTargets,
 	},
 	&cli.StringFlag{
 		Name:  "sflow-targets",
 		Value: Monitoring.RawSFlowTargets,
 		Usage: "A comma separated set of SFlow collectors to export flow data (eg, \"10.128.0.150:6343,10.0.0.151:6343\")." +
-			"Each entry is given in the form [IP address:port]",
+			"Each entry is given in the form [IP address:port] or [:port]. If only port is provided, it uses the Node IP",
 		Destination: &cliConfig.Monitoring.RawSFlowTargets,
 	},
 	&cli.StringFlag{
 		Name:  "ipfix-targets",
 		Value: Monitoring.RawIPFIXTargets,
 		Usage: "A comma separated set of IPFIX collectors to export flow data (eg, \"10.128.0.150:2055,10.0.0.151:2055\")." +
-			"Each entry is given in the form [IP address:port]",
+			"Each entry is given in the form [IP address:port] or [:port]. If only port is provided, it uses the Node IP",
 		Destination: &cliConfig.Monitoring.RawIPFIXTargets,
+	},
+}
+
+// IPFIXFlags capture IPFIX-related options
+var IPFIXFlags = []cli.Flag{
+	&cli.UintFlag{
+		Name:        "ipfix-sampling",
+		Usage:       "Rate at which packets should be sampled and sent to each target collector (default: 400)",
+		Destination: &cliConfig.IPFIX.Sampling,
+		Value:       IPFIX.Sampling,
+	},
+	&cli.UintFlag{
+		Name:        "ipfix-cache-max-flows",
+		Usage:       "Maximum number of IPFIX flow records that can be cached at a time. If 0, caching is disabled (default: 0)",
+		Destination: &cliConfig.IPFIX.CacheMaxFlows,
+		Value:       IPFIX.CacheMaxFlows,
+	}, &cli.UintFlag{
+		Name:        "ipfix-cache-active-timeout",
+		Usage:       "Maximum period in seconds for which an IPFIX flow record is cached and aggregated before being sent. If 0, caching is disabled (default: 60)",
+		Destination: &cliConfig.IPFIX.CacheActiveTimeout,
+		Value:       IPFIX.CacheActiveTimeout,
 	},
 }
 
@@ -1136,6 +1186,7 @@ func GetFlags(customFlags []cli.Flag) []cli.Flag {
 	flags = append(flags, MasterHAFlags...)
 	flags = append(flags, HybridOverlayFlags...)
 	flags = append(flags, MonitoringFlags...)
+	flags = append(flags, IPFIXFlags...)
 	flags = append(flags, OvnKubeNodeFlags...)
 	flags = append(flags, customFlags...)
 	return flags
@@ -1468,6 +1519,13 @@ func completeMonitoringConfig() error {
 	return nil
 }
 
+func buildIPFIXConfig(cli, file *config) error {
+	if err := overrideFields(&IPFIX, &file.IPFIX, &savedIPFIX); err != nil {
+		return err
+	}
+	return overrideFields(&IPFIX, &cli.IPFIX, &savedIPFIX)
+}
+
 func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config) error {
 	// Copy config file values over default values
 	if err := overrideFields(&HybridOverlay, &file.HybridOverlay, &savedHybridOverlay); err != nil {
@@ -1578,6 +1636,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	cfg := config{
 		Default:              savedDefault,
 		Logging:              savedLogging,
+		IPFIX:                savedIPFIX,
 		CNI:                  savedCNI,
 		OVNKubernetesFeature: savedOVNKubernetesFeature,
 		Kubernetes:           savedKubernetes,
@@ -1682,6 +1741,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
+	if err = buildIPFIXConfig(&cliConfig, &cfg); err != nil {
+		return "", err
+	}
+
 	if err = buildHybridOverlayConfig(ctx, &cliConfig, &cfg); err != nil {
 		return "", err
 	}
@@ -1709,6 +1772,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	klog.V(5).Infof("Default config: %+v", Default)
 	klog.V(5).Infof("Logging config: %+v", Logging)
 	klog.V(5).Infof("Monitoring config: %+v", Monitoring)
+	klog.V(5).Infof("IPFIX config: %+v", IPFIX)
 	klog.V(5).Infof("CNI config: %+v", CNI)
 	klog.V(5).Infof("Kubernetes config: %+v", Kubernetes)
 	klog.V(5).Infof("Gateway config: %+v", Gateway)

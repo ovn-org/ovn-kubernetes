@@ -26,8 +26,8 @@ func genOVSFindCmd(table, column, condition string) string {
 }
 
 func genOVSAddPortCmd(hostIfaceName, ifaceID, mac, ip, sandboxID, podUID string) string {
-	return fmt.Sprintf("ovs-vsctl --timeout=30 add-port br-int %s -- set interface %s external_ids:attached_mac=%s "+
-		"external_ids:iface-id=%s external_ids:iface-id-ver=%s external_ids:ip_addresses=%s external_ids:sandbox=%s other_config:transient=true",
+	return fmt.Sprintf("ovs-vsctl --timeout=30 add-port br-int %s other_config:transient=true -- set interface %s external_ids:attached_mac=%s "+
+		"external_ids:iface-id=%s external_ids:iface-id-ver=%s external_ids:ip_addresses=%s external_ids:sandbox=%s",
 		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ip, sandboxID)
 }
 

@@ -21,12 +21,13 @@ import (
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
+
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -200,6 +201,8 @@ type Controller struct {
 
 	// channel to indicate we need to retry pods immediately
 	retryPodsChan chan struct{}
+
+	metricsRecorder *metrics.ControlPlaneRecorder
 }
 
 type retryEntry struct {
@@ -288,6 +291,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		svcController:            svcController,
 		svcFactory:               svcFactory,
 		modelClient:              modelClient,
+		metricsRecorder:          metrics.NewControlPlaneRecorder(libovsdbOvnSBClient),
 	}
 }
 
@@ -351,11 +355,14 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 
 	if config.Kubernetes.OVNEmptyLbEvents {
 		klog.Infof("Starting unidling controller")
-		unidlingController := unidling.NewController(
+		unidlingController, err := unidling.NewController(
 			oc.recorder,
 			oc.watchFactory.ServiceInformer(),
 			oc.sbClient,
 		)
+		if err != nil {
+			return err
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -667,9 +674,11 @@ func (oc *Controller) WatchPods() {
 	}()
 
 	start := time.Now()
+
 	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
+			go oc.metricsRecorder.AddPodEvent(pod.UID)
 			oc.initRetryPod(pod)
 			if !oc.ensurePod(nil, pod, true) {
 				oc.unSkipRetryPod(pod)
@@ -704,6 +713,7 @@ func (oc *Controller) WatchPods() {
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
+			go oc.metricsRecorder.CleanPodRecord(pod.UID)
 			oc.checkAndDeleteRetryPod(pod.UID)
 			if !util.PodWantsNetwork(pod) {
 				oc.deletePodExternalGW(pod)
@@ -747,19 +757,12 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 	return oc.watchFactory.AddEgressFirewallHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
-			txn := util.NewNBTxn()
 			addErrors := oc.addEgressFirewall(egressFirewall)
 			if addErrors != nil {
 				klog.Error(addErrors)
 				egressFirewall.Status.Status = egressFirewallAddError
 			} else {
-				_, stderr, err := txn.Commit()
-				if err != nil {
-					klog.Errorf("Failed to commit db changes for egressFirewall in namespace %s stderr: %q, err: %+v", egressFirewall.Namespace, stderr, err)
-					egressFirewall.Status.Status = egressFirewallAddError
-				} else {
-					egressFirewall.Status.Status = egressFirewallAppliedCorrectly
-				}
+				egressFirewall.Status.Status = egressFirewallAppliedCorrectly
 			}
 
 			err := oc.updateEgressFirewallWithRetry(egressFirewall)
@@ -773,21 +776,14 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 			newEgressFirewall := newer.(*egressfirewall.EgressFirewall).DeepCopy()
 			oldEgressFirewall := old.(*egressfirewall.EgressFirewall)
 			if !reflect.DeepEqual(oldEgressFirewall.Spec, newEgressFirewall.Spec) {
-				txn := util.NewNBTxn()
 				errList := oc.updateEgressFirewall(oldEgressFirewall, newEgressFirewall)
 				if errList != nil {
 					newEgressFirewall.Status.Status = egressFirewallUpdateError
 					klog.Error(errList)
 				} else {
-					_, stderr, err := txn.Commit()
-					if err != nil {
-						klog.Errorf("Failed to commit db changes for egressFirewall in namespace %s stderr: %q, err: %+v", newEgressFirewall.Namespace, stderr, err)
-						newEgressFirewall.Status.Status = egressFirewallUpdateError
-
-					} else {
-						newEgressFirewall.Status.Status = egressFirewallAppliedCorrectly
-					}
+					newEgressFirewall.Status.Status = egressFirewallAppliedCorrectly
 				}
+
 				err := oc.updateEgressFirewallWithRetry(newEgressFirewall)
 				if err != nil {
 					klog.Error(err)
@@ -797,16 +793,12 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 		},
 		DeleteFunc: func(obj interface{}) {
 			egressFirewall := obj.(*egressfirewall.EgressFirewall)
-			txn := util.NewNBTxn()
 			deleteErrors := oc.deleteEgressFirewall(egressFirewall)
 			if deleteErrors != nil {
 				klog.Error(deleteErrors)
 				return
 			}
-			stdout, stderr, err := txn.Commit()
-			if err != nil {
-				klog.Errorf("Failed to commit db changes for egressFirewall in namespace %s stdout: %q, stderr: %q, err: %+v", egressFirewall.Namespace, stdout, stderr, err)
-			}
+
 			metrics.UpdateEgressFirewallRuleCount(float64(-len(egressFirewall.Spec.Egress)))
 			metrics.DecrementEgressFirewallCount()
 		},
@@ -851,7 +843,7 @@ func (oc *Controller) WatchEgressNodes() {
 			// happened after we processed the ADD for that object, hence keep
 			// retrying for all UPDATEs.
 			if err := oc.initEgressIPAllocator(newNode); err != nil {
-				klog.Error(err)
+				klog.V(5).Infof("Egress node initialization error: %v", err)
 			}
 			oldLabels := oldNode.GetLabels()
 			newLabels := newNode.GetLabels()

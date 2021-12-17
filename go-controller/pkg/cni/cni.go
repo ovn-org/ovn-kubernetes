@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 var (
@@ -92,27 +93,46 @@ func (pr *PodRequest) checkOrUpdatePodUID(podUID string) error {
 	return nil
 }
 
-func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) (*Response, error) {
-	namespace := pr.PodNamespace
-	podName := pr.PodName
-	if namespace == "" || podName == "" {
-		return nil, fmt.Errorf("required CNI variable missing")
-	}
+func (pr *PodRequest) getVFNetdevName() (string, error) {
+	// Get the vf device Name
+	vfNetdevices, err := util.GetSriovnetOps().GetNetDevicesFromPci(pr.CNIConf.DeviceID)
+	if err != nil {
+		return "", err
 
+	}
+	// Make sure we have 1 netdevice per pci address
+	if len(vfNetdevices) != 1 {
+		return "", fmt.Errorf("failed to get one netdevice interface per %s", pr.CNIConf.DeviceID)
+	}
+	return vfNetdevices[0], nil
+}
+
+func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) (*Response, error) {
 	kubecli := &kube.Kube{KClient: kclient}
 	annotCondFn := isOvnReady
 
-	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
-		// Add DPU connection-details annotation so ovnkube-node running on DPU
-		// performs the needed network plumbing.
-		if err := pr.addDPUConnectionDetailsAnnot(kubecli); err != nil {
-			return nil, err
+	vfNetdevName := ""
+	if pr.CNIConf.DeviceID != "" {
+		var err error
+
+		vfNetdevName, err = pr.getVFNetdevName()
+		if err != nil {
+			return nil, fmt.Errorf("failed in cmdAdd while getting VF Netdevice name: %v", err)
 		}
-		annotCondFn = isDPUReady
+		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+			// Add DPU connection-details annotation so ovnkube-node running on DPU
+			// performs the needed network plumbing.
+			if err = pr.addDPUConnectionDetailsAnnot(kubecli, vfNetdevName); err != nil {
+				return nil, err
+			}
+			annotCondFn = isDPUReady
+		}
+		// In the case of SmartNIC (CX5), we store the VFNetdevname in the VF representor's
+		// OVS interface's external_id column. This is done in ConfigureInterface().
 	}
 	// Get the IP address and MAC address of the pod
 	// for DPU, ensure connection-details is present
-	podUID, annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, namespace, podName, annotCondFn)
+	podUID, annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, pr.PodNamespace, pr.PodName, annotCondFn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
@@ -120,7 +140,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 		return nil, err
 	}
 
-	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.PodUID)
+	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.PodUID, vfNetdevName)
 	if err != nil {
 		return nil, err
 	}
@@ -138,16 +158,53 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 	return response, nil
 }
 
-func (pr *PodRequest) cmdDel() error {
-	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
-		// nothing to do
-		return nil
+func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernetes.Interface) (*Response, error) {
+	// assume success case, return an empty Result
+	response := &Response{}
+	response.Result = &current.Result{}
+
+	vfNetdevName := ""
+	if pr.CNIConf.DeviceID != "" {
+		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+			pod, err := getPod(podLister, kclient, pr.PodNamespace, pr.PodName)
+			if err != nil {
+				klog.Warningf("Failed to get pod %s/%s: %v", pr.PodNamespace, pr.PodName, err)
+				return response, nil
+			}
+			dpuCD := util.DPUConnectionDetails{}
+			if err := dpuCD.FromPodAnnotation(pod.Annotations); err != nil {
+				klog.Warningf("Failed to get DPU connection details annotation for pod %s/%s: %v", pr.PodNamespace,
+					pr.PodName, err)
+				return response, nil
+			}
+			vfNetdevName = dpuCD.VfNetdevName
+		} else {
+			ovsIfName := pr.SandboxID[:15]
+			out, err := ovsGet("interface", ovsIfName, "external_ids", "vf-netdev-name")
+			if err != nil {
+				klog.Warningf("Couldn't find the original VF Netdev name from OVS interface %s for pod %s/%s: %v",
+					ovsIfName, pr.PodNamespace, pr.PodName, err)
+			} else {
+				vfNetdevName = out
+			}
+		}
 	}
 
-	if err := pr.PlatformSpecificCleanup(); err != nil {
-		return err
+	podInterfaceInfo := &PodInterfaceInfo{
+		IsDPUHostMode: config.OvnKubeNode.Mode == types.NodeModeDPUHost,
+		VfNetdevName:  vfNetdevName,
 	}
-	return nil
+	if !config.UnprivilegedMode {
+		err := pr.UnconfigureInterface(podInterfaceInfo)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// pass the isDPU flag and vfNetdevName back to cniShim
+		response.Result = nil
+		response.PodIFInfo = podInterfaceInfo
+	}
+	return response, nil
 }
 
 func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) error {
@@ -172,7 +229,7 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, us
 	case CNIAdd:
 		response, err = request.cmdAdd(kubeAuth, podLister, useOVSExternalIDs, kclient)
 	case CNIDel:
-		err = request.cmdDel()
+		response, err = request.cmdDel(podLister, kclient)
 	case CNICheck:
 		err = request.cmdCheck(podLister, useOVSExternalIDs, kclient)
 	default:

@@ -3,9 +3,10 @@ package ovn
 import (
 	"context"
 	"fmt"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"net"
 	"time"
+
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -20,8 +21,8 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/libovsdbops"
 )
 
 func (oc *Controller) syncPods(pods []interface{}) {
@@ -558,6 +559,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 		return fmt.Errorf("could not perform creation or update of logical switch port %s - %+v", portName, err)
 	}
+	go oc.metricsRecorder.AddLSPEvent(pod.UID)
 
 	// Add the pod's logical switch port to the port cache
 	var lspUUID string

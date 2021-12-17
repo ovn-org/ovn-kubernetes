@@ -157,6 +157,11 @@ netflow-targets=2.2.2.2:2055
 sflow-targets=2.2.2.2:2056
 ipfix-targets=2.2.2.2:2057
 
+[ipfix]
+sampling=123
+cache-max-flows=456
+cache-active-timeout=789
+
 [cni]
 conf-dir=/etc/cni/net.d22
 plugin=ovn-k8s-cni-overlay22
@@ -253,6 +258,9 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Monitoring.RawNetFlowTargets).To(gomega.Equal(""))
 			gomega.Expect(Monitoring.RawSFlowTargets).To(gomega.Equal(""))
 			gomega.Expect(Monitoring.RawIPFIXTargets).To(gomega.Equal(""))
+			gomega.Expect(IPFIX.Sampling).To(gomega.Equal(uint(400)))
+			gomega.Expect(IPFIX.CacheMaxFlows).To(gomega.Equal(uint(0)))
+			gomega.Expect(IPFIX.CacheActiveTimeout).To(gomega.Equal(uint(60)))
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/etc/cni/net.d"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("ovn-k8s-cni-overlay"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(""))
@@ -508,6 +516,9 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Monitoring.RawNetFlowTargets).To(gomega.Equal("2.2.2.2:2055"))
 			gomega.Expect(Monitoring.RawSFlowTargets).To(gomega.Equal("2.2.2.2:2056"))
 			gomega.Expect(Monitoring.RawIPFIXTargets).To(gomega.Equal("2.2.2.2:2057"))
+			gomega.Expect(IPFIX.Sampling).To(gomega.Equal(uint(123)))
+			gomega.Expect(IPFIX.CacheMaxFlows).To(gomega.Equal(uint(456)))
+			gomega.Expect(IPFIX.CacheActiveTimeout).To(gomega.Equal(uint(789)))
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/etc/cni/net.d22"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("ovn-k8s-cni-overlay22"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
@@ -907,6 +918,9 @@ mode=shared
 			gomega.Expect(Monitoring.RawNetFlowTargets).To(gomega.Equal("2.2.2.2:2055"))
 			gomega.Expect(Monitoring.RawSFlowTargets).To(gomega.Equal("2.2.2.2:2056"))
 			gomega.Expect(Monitoring.RawIPFIXTargets).To(gomega.Equal("2.2.2.2:2057"))
+			gomega.Expect(IPFIX.Sampling).To(gomega.Equal(uint(1123)))
+			gomega.Expect(IPFIX.CacheMaxFlows).To(gomega.Equal(uint(1456)))
+			gomega.Expect(IPFIX.CacheActiveTimeout).To(gomega.Equal(uint(1789)))
 			gomega.Expect(CNI.ConfDir).To(gomega.Equal("/some/cni/dir"))
 			gomega.Expect(CNI.Plugin).To(gomega.Equal("a-plugin"))
 			gomega.Expect(Kubernetes.Kubeconfig).To(gomega.Equal(kubeconfigFile))
@@ -947,6 +961,9 @@ mode=shared
 			"-netflow-targets=2.2.2.2:2055",
 			"-sflow-targets=2.2.2.2:2056",
 			"-ipfix-targets=2.2.2.2:2057",
+			"-ipfix-sampling=1123",
+			"-ipfix-cache-max-flows=1456",
+			"-ipfix-cache-active-timeout=1789",
 			"-cni-conf-dir=/some/cni/dir",
 			"-cni-plugin=a-plugin",
 			"-k8s-kubeconfig=" + kubeconfigFile,

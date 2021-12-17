@@ -103,7 +103,7 @@ func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, k
 }
 
 // PodAnnotation2PodInfo creates PodInterfaceInfo from Pod annotations and additional attributes
-func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, podUID string) (
+func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, podUID, vfNetdevname string) (
 	*PodInterfaceInfo, error) {
 	podAnnotSt, err := util.UnmarshalPodAnnotation(podAnnotation)
 	if err != nil {
@@ -127,6 +127,7 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, po
 		CheckExtIDs:   checkExtIDs,
 		IsDPUHostMode: config.OvnKubeNode.Mode == types.NodeModeDPUHost,
 		PodUID:        podUID,
+		VfNetdevName:  vfNetdevname,
 	}
 	return podInterfaceInfo, nil
 }
