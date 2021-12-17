@@ -316,12 +316,12 @@ func ensureElectionTimeout(db *dbProperties) error {
 	if db.electionTimer <= maxElectionTimer {
 		_, stderr, err := db.appCtl(5, "cluster/change-election-timer", db.dbName, fmt.Sprint(db.electionTimer))
 		if err != nil {
-			return fmt.Errorf("failed to change election timer for %s %v %v", db.dbName, err, stderr)
+			return fmt.Errorf("failed to change election timer for %s, %v, %v", db.dbName, err, stderr)
 		}
 	} else {
 		_, stderr, err = db.appCtl(5, "cluster/change-election-timer", db.dbName, fmt.Sprint(maxElectionTimer))
 		if err != nil {
-			return fmt.Errorf("failed to change election timer for %s %v %v", db.dbName, err, stderr)
+			return fmt.Errorf("failed to change election timer for %s, %v, %v", db.dbName, err, stderr)
 		}
 	}
 	return nil

@@ -13,11 +13,12 @@ type mockRes struct {
 	called bool
 }
 
-const status_template = `87f0
-Name: OVN_Northbound
+const (
+	status_template = `87f0
+Name: %s
 Cluster ID: f832 (f832bbff-e28c-4656-83f0-075e91a7ab8f)
 Server ID: 87f0 (87f0d686-8a8d-4585-9513-45efac449101)
-Address: ssl:10.1.1.185:9643
+Address: %s
 Status: cluster member
 Role: %s
 Term: 4
@@ -30,14 +31,19 @@ Entries not yet committed: 0
 Entries not yet applied: 0
 Connections: ->bbf6 ->ad31 <-bbf6 <-ad31
 Disconnections: 1
-Servers:
+%s`
+
+	serverAddress = "ssl:10.1.1.185:9643"
+
+	servers = `Servers:
     87f0 (87f0 at ssl:10.1.1.185:9643) (self)
     bbf6 (bbf6 at ssl:10.1.1.218:9643) last msg 2757 ms ago
     ad31 (ad31 at ssl:10.1.1.211:9643) last msg 153868958 ms ago`
+)
 
-func TestElectionTimer(t *testing.T) {
+func TestEnsureElectionTimeout(t *testing.T) {
 	var mockCalls map[string]*mockRes
-	var unexpectedKeys []string
+	unexpectedKeys := make([]string, 0)
 	mock := func(timeout int, args ...string) (string, string, error) {
 		key := keyForArgs(args...)
 		res, ok := mockCalls[key]
@@ -59,53 +65,108 @@ func TestElectionTimer(t *testing.T) {
 		timeout      int
 		role         string
 		currentTimer string
+		errorString  string
 	}{
 		{
-			"Follower, not trying to change",
-			map[string]*mockRes{},
-			1000,
-			"follower",
-			"10000",
+			desc: "Test error: Unable to get cluster status",
+			mockCalls: map[string]*mockRes{
+				keyForArgs("cluster/status", "OVN_Northbound"): {
+					res:    "",
+					stderr: "failure",
+					err:    fmt.Errorf("failure"),
+				},
+			},
+			errorString: "unable to get cluster status for",
 		},
 		{
-			"leader, timer doesn't change",
-			map[string]*mockRes{},
-			1000,
-			"leader",
-			"1000",
+			desc:         "Test error: Failed to get current election timer",
+			mockCalls:    map[string]*mockRes{},
+			currentTimer: "a",
+			role:         "leader",
+			errorString:  "failed to get current election timer",
 		},
 		{
-			"leader, timer must change",
-			map[string]*mockRes{
+			desc:         "Follower, not trying to change",
+			mockCalls:    map[string]*mockRes{},
+			timeout:      1000,
+			role:         "follower",
+			currentTimer: "10000",
+		},
+		{
+			desc:         "leader, timer doesn't change",
+			mockCalls:    map[string]*mockRes{},
+			timeout:      1000,
+			role:         "leader",
+			currentTimer: "1000",
+		},
+		{
+			desc: "Test error: failed to change election timer when leader timer must change",
+			mockCalls: map[string]*mockRes{
+				keyForArgs("cluster/change-election-timer", "OVN_Northbound", "2000"): {
+					res:    "",
+					stderr: "failure",
+					err:    fmt.Errorf("failure"),
+				},
+			},
+			timeout:      2000,
+			role:         "leader",
+			currentTimer: "1500",
+			errorString:  "failed to change election timer for",
+		},
+		{
+			desc: "Test error: failed to change election timer when leader timer must change but desired is more than double",
+			mockCalls: map[string]*mockRes{
+				keyForArgs("cluster/change-election-timer", "OVN_Northbound", "3000"): {
+					res:    "",
+					stderr: "failure",
+					err:    fmt.Errorf("failure"),
+				},
+			},
+			timeout:      5000,
+			role:         "leader",
+			currentTimer: "1500",
+			errorString:  "failed to change election timer for",
+		},
+		{
+			desc: "leader, timer must change",
+			mockCalls: map[string]*mockRes{
 				keyForArgs("cluster/change-election-timer", "OVN_Northbound", "2000"): {
 					res:    "change of election timer initiated",
 					stderr: "",
 					err:    nil,
 				},
 			},
-			2000,
-			"leader",
-			"1500",
+			timeout:      2000,
+			role:         "leader",
+			currentTimer: "1500",
 		},
 		{
-			"leader, timer must change but desired is more than double",
-			map[string]*mockRes{
+			desc: "leader, timer must change but desired is more than double",
+			mockCalls: map[string]*mockRes{
 				keyForArgs("cluster/change-election-timer", "OVN_Northbound", "3000"): {
 					res:    "change of election timer initiated",
 					stderr: "",
 					err:    nil,
 				},
 			},
-			5000,
-			"leader",
-			"1500",
+			timeout:      5000,
+			role:         "leader",
+			currentTimer: "1500",
 		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			// default mockCalls which may be supplemented or overwritten by
+			// more specific tc mockCalls from the above maps
 			mockCalls = map[string]*mockRes{
 				keyForArgs("cluster/status", "OVN_Northbound"): {
-					res:    fmt.Sprintf(status_template, tc.role, tc.currentTimer),
+					res: fmt.Sprintf(
+						status_template,
+						serverAddress,
+						"OVN_Northbound",
+						tc.role,
+						tc.currentTimer,
+						servers),
 					stderr: "",
 					err:    nil,
 				},
@@ -114,9 +175,13 @@ func TestElectionTimer(t *testing.T) {
 				mockCalls[k] = v
 			}
 
-			unexpectedKeys = make([]string, 0)
 			db.electionTimer = tc.timeout
-			ensureElectionTimeout(db)
+			err := ensureElectionTimeout(db)
+
+			// fail either if an error is seen but not expected
+			// or if an error is expected but when the subscring does not match the error
+			failOnErrorMismatch(t, err, tc.errorString)
+
 			for k, c := range tc.mockCalls {
 				if !c.called {
 					t.Errorf("Expecting call with args %s", k)
@@ -131,4 +196,18 @@ func TestElectionTimer(t *testing.T) {
 
 func keyForArgs(args ...string) string {
 	return strings.Join(args, "-")
+}
+
+// failOnErrorMismatch fails either if an error is seen but not expected
+// or if an error is expected but when the substring does not match the error
+func failOnErrorMismatch(t *testing.T, receivedErr error, expectedErrorString string) {
+	if receivedErr != nil {
+		if expectedErrorString == "" {
+			t.Errorf("No error expected. However, received '%v' from method under test.", receivedErr)
+		} else if !strings.Contains(receivedErr.Error(), expectedErrorString) {
+			t.Errorf("Expected error string to contain '%s'. However, method under test threw error '%v'.", expectedErrorString, receivedErr)
+		}
+	} else if expectedErrorString != "" {
+		t.Errorf("Error with error string '%s' expected. However, method under test completed without error.", expectedErrorString)
+	}
 }
