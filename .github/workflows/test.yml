@@ -274,13 +274,13 @@ jobs:
          # in agnhost images. Disable them for now.
          - {"ipfamily": "dualstack", "target": "control-plane"}
          - {"ipfamily": "ipv6", "target": "control-plane"}
-         # No need to run disable-snat-multiple-gws with local GW mode
+         # No need to run disable-snat-multiple-gws with local GW mode || shard conformance
          - {"disable-snat-multiple-gws": "noSnatGW", "gateway-mode": "local"}
+         - {"disable-snat-multiple-gws": "noSnatGW", "target": "shard-conformance"}
          - {"second-bridge": "2br", "gateway-mode": "local"}
          - {"second-bridge": "2br", "disable-snat-multiple-gws": "snatGW"}
          - {"second-bridge": "2br", "ha": "HA"}
          - {"second-bridge": "2br", "target": "control-plane"}
-         - {"second-bridge": "1br", "disable-snat-multiple-gws": "noSnatGW"}
     needs: [ build-pr ]
     env:
       JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}"
