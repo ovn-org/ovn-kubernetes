@@ -31,6 +31,7 @@ const (
 	MetricOvnSubsystemController = "controller"
 	MetricOvsNamespace           = "ovs"
 	MetricOvsSubsystemVswitchd   = "vswitchd"
+	MetricOvsSubsystemDB         = "db"
 
 	ovnNorthd     = "ovn-northd"
 	ovnController = "ovn-controller"
