@@ -236,9 +236,9 @@ func externalIPServiceSpecFrom(svcName string, httpPort, updPort, clusterHTTPPor
 	return res
 }
 
-// leverages a container running the netexec command to send a "hostname" request to a target running
-// netexec on the given target host / protocol / port
-// returns either the name of backend pod or "Timeout" if the curl request timed out
+// pokeEndpointHostname leverages a container running the netexec command to send a "hostname" request to a target running
+// netexec on the given target host / protocol / port.
+// Returns the name of backend pod.
 func pokeEndpointHostname(clientContainer, protocol, targetHost string, targetPort int32) string {
 	ipPort := net.JoinHostPort("localhost", "80")
 	cmd := []string{"docker", "exec", clientContainer}
@@ -369,9 +369,9 @@ func isNeighborEntryStable(clientContainer, targetHost string, iterations int) b
 	return true
 }
 
-// leverages a container running the netexec command to send a "clientip" request to a target running
-// netexec on the given target host / protocol / port
-// returns either the src ip of the packet or "Timeout" if the curl request timed out
+// pokeEndpointClientIP leverages a container running the netexec command to send a "clientip" request to a target running
+// netexec on the given target host / protocol / port.
+// Returns the src ip of the packet.
 func pokeEndpointClientIP(clientContainer, protocol, targetHost string, targetPort int32) string {
 	ipPort := net.JoinHostPort("localhost", "80")
 	cmd := []string{"docker", "exec", clientContainer}
@@ -398,9 +398,9 @@ func pokeEndpointClientIP(clientContainer, protocol, targetHost string, targetPo
 	return ip
 }
 
-// leverages a container running the netexec command to send a request to a target running
-// netexec on the given target host / protocol / port
-// returns either the name of backend pod or "Timeout" if the curl request timed out
+// curlInContainer leverages a container running the netexec command to send a request to a target running
+// netexec on the given target host / protocol / port.
+// Returns a pair of either result, nil or "", error in case of an error.
 func curlInContainer(clientContainer, protocol, targetHost string, targetPort int32, endPoint string, maxTime int) (string, error) {
 	cmd := []string{"docker", "exec", clientContainer}
 	if utilnet.IsIPv6String(targetHost) {
@@ -418,6 +418,8 @@ func curlInContainer(clientContainer, protocol, targetHost string, targetPort in
 	return runCommand(cmd...)
 }
 
+// parseNetexecResponse parses a json string of type '{"responses":"...", "errors":""}'.
+// it returns "", error if the errors value is not empty, or the responses otherwise.
 func parseNetexecResponse(response string) (string, error) {
 	res := struct {
 		Responses []string `json:"responses"`
@@ -427,9 +429,6 @@ func parseNetexecResponse(response string) (string, error) {
 		return "", fmt.Errorf("failed to unmarshal curl response %s", response)
 	}
 	if len(res.Errors) > 0 {
-		if strings.Contains(strings.ToLower(res.Errors[0]), "timeout") {
-			return "Timeout", nil
-		}
 		return "", fmt.Errorf("curl response %s contains errors", response)
 	}
 	if len(res.Responses) == 0 {
