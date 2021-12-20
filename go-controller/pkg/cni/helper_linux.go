@@ -284,7 +284,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	}
 
 	if len(ifInfo.VfNetdevName) != 0 {
-		ovsArgs = append(ovsArgs, "external_ids:vf-netdev-name=%s", ifInfo.VfNetdevName)
+		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:vf-netdev-name=%s", ifInfo.VfNetdevName))
 	}
 	if out, err := ovsExec(ovsArgs...); err != nil {
 		return fmt.Errorf("failure in plugging pod interface: %v\n  %q", err, out)
