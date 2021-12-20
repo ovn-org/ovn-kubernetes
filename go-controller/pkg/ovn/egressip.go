@@ -282,6 +282,62 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 	return nil
 }
 
+func (oc *Controller) reconcileEgressNode(old, new *v1.Node) error {
+	oldNode, newNode := &v1.Node{}, &v1.Node{}
+	if old != nil {
+		oldNode = old
+	}
+	_, oldHasEgressLabel := oldNode.Labels[util.GetNodeEgressLabel()]
+	oldIsReady := oc.isEgressNodeReady(oldNode)
+	oldIsReachable := oc.isEgressNodeReachable(oldNode)
+
+	if new != nil {
+		newNode = new
+		if err := oc.initEgressIPAllocator(newNode); err != nil {
+			// Transient error which might be caused by the other control loops
+			// not having annotated the node at this moment in time
+			klog.V(5).Infof("Egress node initialization error: %v", err)
+			return nil
+		}
+	}
+
+	_, newHasEgressLabel := newNode.Labels[util.GetNodeEgressLabel()]
+	newIsReady := oc.isEgressNodeReady(newNode)
+	newIsReachable := oc.isEgressNodeReachable(newNode)
+
+	oc.setNodeEgressAssignable(newNode.Name, newHasEgressLabel)
+	oc.setNodeEgressReady(newNode.Name, newIsReady)
+	oc.setNodeEgressReachable(newNode.Name, newIsReachable)
+
+	if old != nil && new == nil {
+		oc.deleteNodeForEgress(oldNode)
+	}
+	if new != nil && old == nil {
+		oc.addNodeForEgress(newNode)
+	}
+
+	if oldHasEgressLabel && !newHasEgressLabel {
+		return oc.deleteEgressNode(oldNode)
+	}
+	if !oldHasEgressLabel && newHasEgressLabel {
+		klog.Infof("Node: %s has been labelled, adding it for egress assignment", newNode.Name)
+		if newIsReady && newIsReachable {
+			return oc.addEgressNode(newNode)
+		}
+		return fmt.Errorf("Node: %s has been labelled, but node is not ready and reachable, cannot use it for egress assignment", newNode.Name)
+	}
+	if oldHasEgressLabel && newHasEgressLabel {
+		if (!newIsReady || !newIsReachable) && (oldIsReady && oldIsReachable) {
+			klog.Warningf("Node: %s is ready: %v, reachable: %v, deleting it from egress assignment", newNode.Name, newIsReady, newIsReachable)
+			return oc.deleteEgressNode(newNode)
+		} else if (newIsReady && newIsReachable) && (!oldIsReady || !oldIsReachable) {
+			klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
+			return oc.addEgressNode(newNode)
+		}
+	}
+	return nil
+}
+
 func (oc *Controller) reconcileEgressIPNamespace(old, new *v1.Namespace) error {
 	// Same as for reconcileEgressIP: labels play nicely with empty object, not
 	// nil ones.
@@ -1319,33 +1375,22 @@ func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
 	return nil
 }
 
-// addNodeForEgress sets up default logical router policy for every node and
-// initiates the allocator cache for the node in question, if the node has the
-// necessary annotation.
-func (oc *Controller) addNodeForEgress(node *v1.Node) error {
+// addNodeForEgress sets up default logical router policy for every node
+func (oc *Controller) addNodeForEgress(node *v1.Node) {
 	v4Addr, v6Addr := getNodeInternalAddrs(node)
 	v4ClusterSubnet, v6ClusterSubnet := getClusterSubnets()
-	if err := oc.createDefaultNoRerouteNodePolicies(v4Addr, v6Addr, v4ClusterSubnet, v6ClusterSubnet); err != nil {
-		return err
-	}
-	if err := oc.initEgressIPAllocator(node); err != nil {
-		klog.V(5).Infof("Egress node initialization error: %v", err)
-	}
-	return nil
+	oc.createDefaultNoRerouteNodePolicies(v4Addr, v6Addr, v4ClusterSubnet, v6ClusterSubnet)
 }
 
 // deleteNodeForEgress remove the default allow logical router policies for the
 // node and removes the node from the allocator cache.
-func (oc *Controller) deleteNodeForEgress(node *v1.Node) error {
+func (oc *Controller) deleteNodeForEgress(node *v1.Node) {
 	v4Addr, v6Addr := getNodeInternalAddrs(node)
 	v4ClusterSubnet, v6ClusterSubnet := getClusterSubnets()
-	if err := oc.deleteDefaultNoRerouteNodePolicies(v4Addr, v6Addr, v4ClusterSubnet, v6ClusterSubnet); err != nil {
-		return err
-	}
+	oc.deleteDefaultNoRerouteNodePolicies(v4Addr, v6Addr, v4ClusterSubnet, v6ClusterSubnet)
 	oc.eIPC.allocator.Lock()
+	defer oc.eIPC.allocator.Unlock()
 	delete(oc.eIPC.allocator.cache, node.Name)
-	oc.eIPC.allocator.Unlock()
-	return nil
 }
 
 // initClusterEgressPolicies will initialize the default allow policies for
@@ -1786,7 +1831,7 @@ func (oc *Controller) createDefaultNoReroutePodPolicies(v4ClusterSubnet, v6Clust
 
 // createDefaultNoRerouteNodePolicies ensures egress pods east<->west traffic with hostNetwork pods,
 // i.e: ensuring that an egress pod can still communicate with a hostNetwork pod / service backed by hostNetwork pods
-func (oc *Controller) createDefaultNoRerouteNodePolicies(v4NodeAddr, v6NodeAddr net.IP, v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) error {
+func (oc *Controller) createDefaultNoRerouteNodePolicies(v4NodeAddr, v6NodeAddr net.IP, v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) {
 	if v4NodeAddr != nil {
 		for _, v4Subnet := range v4ClusterSubnet {
 			match := fmt.Sprintf("ip4.src == %s && ip4.dst == %s/32", v4Subnet.String(), v4NodeAddr.String())
@@ -1803,7 +1848,25 @@ func (oc *Controller) createDefaultNoRerouteNodePolicies(v4NodeAddr, v6NodeAddr 
 			}
 		}
 	}
-	return nil
+}
+
+func (oc *Controller) deleteDefaultNoRerouteNodePolicies(v4NodeAddr, v6NodeAddr net.IP, v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) {
+	if v4NodeAddr != nil {
+		for _, v4Subnet := range v4ClusterSubnet {
+			match := fmt.Sprintf("ip4.src == %s && ip4.dst == %s/32", v4Subnet.String(), v4NodeAddr.String())
+			if err := oc.deleteLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
+				klog.Errorf("Unable to delete IPv4 no-reroute node policies, err: %v", err)
+			}
+		}
+	}
+	if v6NodeAddr != nil {
+		for _, v6Subnet := range v6ClusterSubnet {
+			match := fmt.Sprintf("ip6.src == %s && ip6.dst == %s/128", v6Subnet.String(), v6NodeAddr.String())
+			if err := oc.deleteLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
+				klog.Errorf("Unable to delete IPv6 no-reroute node policies, err: %v", err)
+			}
+		}
+	}
 }
 
 func (oc *Controller) createLogicalRouterPolicy(match string, priority int) error {
@@ -1865,26 +1928,6 @@ func (oc *Controller) deleteLogicalRouterPolicy(match string, priority int) erro
 
 	if err := oc.modelClient.Delete(opModels...); err != nil {
 		return fmt.Errorf("unable to delete logical router policy, err: %v", err)
-	}
-	return nil
-}
-
-func (oc *Controller) deleteDefaultNoRerouteNodePolicies(v4NodeAddr, v6NodeAddr net.IP, v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) error {
-	if v4NodeAddr != nil {
-		for _, v4Subnet := range v4ClusterSubnet {
-			match := fmt.Sprintf("ip4.src == %s && ip4.dst == %s/32", v4Subnet.String(), v4NodeAddr.String())
-			if err := oc.deleteLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
-				return fmt.Errorf("unable to delete IPv4 no-reroute node policies, err: %v", err)
-			}
-		}
-	}
-	if v6NodeAddr != nil {
-		for _, v6Subnet := range v6ClusterSubnet {
-			match := fmt.Sprintf("ip6.src == %s && ip6.dst == %s/128", v6Subnet.String(), v6NodeAddr.String())
-			if err := oc.deleteLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
-				return fmt.Errorf("unable to delete IPv6 no-reroute node policies, err: %v", err)
-			}
-		}
 	}
 	return nil
 }

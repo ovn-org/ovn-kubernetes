@@ -805,103 +805,24 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 // WatchEgressNodes starts the watching of egress assignable nodes and calls
 // back the appropriate handler logic.
 func (oc *Controller) WatchEgressNodes() {
-	nodeEgressLabel := util.GetNodeEgressLabel()
 	oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
-			if err := oc.addNodeForEgress(node); err != nil {
-				klog.Error(err)
-			}
-			nodeLabels := node.GetLabels()
-			_, hasEgressLabel := nodeLabels[nodeEgressLabel]
-			if hasEgressLabel {
-				oc.setNodeEgressAssignable(node.Name, true)
-			}
-			isReady := oc.isEgressNodeReady(node)
-			if isReady {
-				oc.setNodeEgressReady(node.Name, true)
-			}
-			isReachable := oc.isEgressNodeReachable(node)
-			if isReachable {
-				oc.setNodeEgressReachable(node.Name, true)
-			}
-			if hasEgressLabel && isReachable && isReady {
-				if err := oc.addEgressNode(node); err != nil {
-					klog.Error(err)
-				}
+			if err := oc.reconcileEgressNode(nil, node); err != nil {
+				klog.Errorf("Unable to add node egress: %s, err: %v", node.Name, err)
 			}
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
 			newNode := new.(*kapi.Node)
-			// Initialize the allocator on every update,
-			// ovnkube-node/cloud-network-config-controller will make sure to
-			// annotate the node with the egressIPConfig, but that might have
-			// happened after we processed the ADD for that object, hence keep
-			// retrying for all UPDATEs.
-			if err := oc.initEgressIPAllocator(newNode); err != nil {
-				klog.V(5).Infof("Egress node initialization error: %v", err)
-			}
-			oldLabels := oldNode.GetLabels()
-			newLabels := newNode.GetLabels()
-			_, oldHadEgressLabel := oldLabels[nodeEgressLabel]
-			_, newHasEgressLabel := newLabels[nodeEgressLabel]
-			// If the node is not labelled for egress assignment, just return
-			// directly, we don't really need to set the ready / reachable
-			// status on this node if the user doesn't care about using it.
-			if !oldHadEgressLabel && !newHasEgressLabel {
-				return
-			}
-			if oldHadEgressLabel && !newHasEgressLabel {
-				klog.Infof("Node: %s has been un-labelled, deleting it from egress assignment", newNode.Name)
-				oc.setNodeEgressAssignable(oldNode.Name, false)
-				if err := oc.deleteEgressNode(oldNode); err != nil {
-					klog.Error(err)
-				}
-				return
-			}
-			isOldReady := oc.isEgressNodeReady(oldNode)
-			isNewReady := oc.isEgressNodeReady(newNode)
-			isNewReachable := oc.isEgressNodeReachable(newNode)
-			oc.setNodeEgressReady(newNode.Name, isNewReady)
-			oc.setNodeEgressReachable(newNode.Name, isNewReachable)
-			if !oldHadEgressLabel && newHasEgressLabel {
-				klog.Infof("Node: %s has been labelled, adding it for egress assignment", newNode.Name)
-				oc.setNodeEgressAssignable(newNode.Name, true)
-				if isNewReady && isNewReachable {
-					if err := oc.addEgressNode(newNode); err != nil {
-						klog.Error(err)
-					}
-				} else {
-					klog.Warningf("Node: %s has been labelled, but node is not ready and reachable, cannot use it for egress assignment", newNode.Name)
-				}
-				return
-			}
-			if isOldReady == isNewReady {
-				return
-			}
-			if !isNewReady {
-				klog.Warningf("Node: %s is not ready, deleting it from egress assignment", newNode.Name)
-				if err := oc.deleteEgressNode(newNode); err != nil {
-					klog.Error(err)
-				}
-			} else if isNewReady && isNewReachable {
-				klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
-				if err := oc.addEgressNode(newNode); err != nil {
-					klog.Error(err)
-				}
+			if err := oc.reconcileEgressNode(oldNode, newNode); err != nil {
+				klog.Errorf("Unable to update node egress: %s, err: %v", newNode.Name, err)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
-			if err := oc.deleteNodeForEgress(node); err != nil {
-				klog.Error(err)
-			}
-			nodeLabels := node.GetLabels()
-			if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel {
-				if err := oc.deleteEgressNode(node); err != nil {
-					klog.Error(err)
-				}
+			if err := oc.reconcileEgressNode(node, nil); err != nil {
+				klog.Errorf("Unable to delete node egress: %s, err: %v", node.Name, err)
 			}
 		},
 	}, oc.initClusterEgressPolicies)
