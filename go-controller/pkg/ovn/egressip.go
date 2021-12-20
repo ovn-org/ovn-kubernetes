@@ -1669,7 +1669,7 @@ func (oc *Controller) checkEgressNodesReachability() {
 		for nodeName, shouldDelete := range reAddOrDelete {
 			node, err := oc.watchFactory.GetNode(nodeName)
 			if err != nil {
-				klog.Errorf("Node: %s reachability changed, but could not retrieve node from cache, err: %v", node.Name, err)
+				klog.Errorf("Node: %s reachability changed, but could not retrieve node from cache, err: %v", nodeName, err)
 			}
 			if shouldDelete {
 				klog.Warningf("Node: %s is detected as unreachable, deleting it from egress assignment", node.Name)
