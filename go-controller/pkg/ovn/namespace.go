@@ -271,7 +271,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 	_, oldBFDEnabled := old.Annotations[bfdAnnotation]
 
 	if gwAnnotation != oldGWAnnotation || newBFDEnabled != oldBFDEnabled {
-		// if old gw annotation was empty, new one must not be empty, so we should remove any per pod SNAT
+		// if old gw annotation was empty, new one must not be empty, so we should remove any per pod SNAT towards nodeIP
 		if oldGWAnnotation == "" {
 			if config.Gateway.DisableSNATMultipleGWs {
 				existingPods, err := oc.watchFactory.GetPods(old.Name)
@@ -284,7 +284,9 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 					if err != nil {
 						klog.Warningf("Unable to get port %s in cache for SNAT rule removal", logicalPort)
 					} else {
-						if err = deletePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, portInfo.ips); err != nil {
+						if extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName); err != nil {
+							klog.Error(err.Error())
+						} else if err = deletePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, portInfo.ips); err != nil {
 							klog.Error(err.Error())
 						}
 					}
@@ -315,7 +317,9 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 				if err != nil {
 					klog.Error(err.Error())
 				} else {
-					if err = addPerPodGRSNAT(oc.nbClient, oc.watchFactory, pod, podAnnotation.IPs); err != nil {
+					if extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName); err != nil {
+						klog.Error(err.Error())
+					} else if err = addOrUpdatePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, podAnnotation.IPs); err != nil {
 						klog.Error(err.Error())
 					}
 				}

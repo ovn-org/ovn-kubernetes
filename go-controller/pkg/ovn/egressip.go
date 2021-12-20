@@ -1441,7 +1441,11 @@ func (e *egressIPController) addPodEgressIPAssignment(egressIPName string, statu
 	}
 	if config.Gateway.DisableSNATMultipleGWs {
 		// remove snats to->nodeIP (from the node where pod exists) for these podIPs before adding the snat to->egressIP
-		err = deletePerPodGRSNAT(e.nbClient, pod.Spec.NodeName, podIPs)
+		extIPs, err := getExternalIPsGRSNAT(e.watchFactory, pod.Spec.NodeName)
+		if err != nil {
+			return err
+		}
+		err = deletePerPodGRSNAT(e.nbClient, pod.Spec.NodeName, extIPs, podIPs)
 		if err != nil {
 			return err
 		}
@@ -1492,7 +1496,11 @@ func (e *egressIPController) deletePodEgressIPAssignment(egressIPName string, st
 			klog.Warningf("Failed to get pod %s/%s: %v", pod.Namespace, pod.Name, err)
 		} else {
 			// if the pod still exists, add snats to->nodeIP (on the node where the pod exists) for these podIPs after deleting the snat to->egressIP
-			err = addPerPodGRSNAT(e.nbClient, e.watchFactory, fetchPod, podIPs)
+			extIPs, err := getExternalIPsGRSNAT(e.watchFactory, fetchPod.Spec.NodeName)
+			if err != nil {
+				return err
+			}
+			err = addOrUpdatePerPodGRSNAT(e.nbClient, fetchPod.Spec.NodeName, extIPs, podIPs)
 			if err != nil {
 				return err
 			}
