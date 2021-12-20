@@ -2191,7 +2191,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 
 			var err error
 			var nbClient *libovsdb.Client
-			nbClient, nbCleanup, err = libovsdbtest.NewNBTestHarness(initialNbdb, nil)
+			nbClient, nbCleanup, err = libovsdbtest.NewNBTestHarness(initialNbdb)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nbClient.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -2218,7 +2218,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 
 			var err error
 			var nbClient *libovsdb.Client
-			nbClient, nbCleanup, err = libovsdbtest.NewNBTestHarness(initialNbdb, nil)
+			nbClient, nbCleanup, err = libovsdbtest.NewNBTestHarness(initialNbdb)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nbClient.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -2244,7 +2244,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 
 			var err error
 			var nbClient *libovsdb.Client
-			nbClient, nbCleanup, err = libovsdbtest.NewNBTestHarness(initialNbdb, nil)
+			nbClient, nbCleanup, err = libovsdbtest.NewNBTestHarness(initialNbdb)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nbClient.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())

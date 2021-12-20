@@ -32,7 +32,7 @@ type serviceController struct {
 }
 
 func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceController, error) {
-	nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup, nil)
+	nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup)
 	if err != nil {
 		return nil, err
 	}

@@ -35,7 +35,7 @@ func runTestCase(t *testing.T, tCase OperationModelTestCase, shouldDelete bool) 
 		NBData: tCase.initialDB,
 	}
 
-	nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup, nil)
+	nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup)
 	if err != nil {
 		return err
 	}

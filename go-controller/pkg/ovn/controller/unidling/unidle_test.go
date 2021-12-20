@@ -59,7 +59,7 @@ var _ = Describe("Unidling Controller", func() {
 
 		var sbClient *libovsdb.Client
 		var err error
-		sbClient, cleanup, err = libovsdbtest.NewSBTestHarness(testSetup, nil)
+		sbClient, cleanup, err = libovsdbtest.NewSBTestHarness(testSetup)
 		Expect(err).NotTo(HaveOccurred())
 		err = sbClient.Run()
 		Expect(err).NotTo(HaveOccurred())

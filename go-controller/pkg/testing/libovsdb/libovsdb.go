@@ -71,42 +71,55 @@ func (c *Cleanup) Cleanup() {
 func NewNBSBTestHarness(setup TestSetup) (*libovsdb.Client, *libovsdb.Client, *Cleanup, error) {
 	cleanup := newCleanup()
 
-	nbClient, _, err := NewNBTestHarness(setup, cleanup)
+	nbClient, err := newNBTestHarnessWithCleanup(setup, cleanup)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	sbClient, _, err := NewSBTestHarness(setup, cleanup)
+	sbClient, err := newSBTestHarnessWithCleanup(setup, cleanup)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	return nbClient, sbClient, cleanup, nil
 }
 
-// NewNBTestHarness runs NB server and returns corresponding client
-func NewNBTestHarness(setup TestSetup, cleanup *Cleanup) (*libovsdb.Client, *Cleanup, error) {
-	if cleanup == nil {
-		cleanup = newCleanup()
+// newNBTestHarnessWithCleanup runs NB server and returns corresponding client,
+// using the given cleanup to clean up the server and client
+func newNBTestHarnessWithCleanup(setup TestSetup, cleanup *Cleanup) (*libovsdb.Client, error) {
+	client, err := newOVSDBTestHarness(setup.NBData, newNBServer, newNBClient, cleanup)
+	if err != nil {
+		return nil, err
 	}
 
-	client, err := newOVSDBTestHarness(setup.NBData, newNBServer, newNBClient, cleanup)
+	return client, err
+}
+
+// NewNBTestHarness runs NB server and returns corresponding client
+func NewNBTestHarness(setup TestSetup) (*libovsdb.Client, *Cleanup, error) {
+	cleanup := newCleanup()
+	client, err := newNBTestHarnessWithCleanup(setup, cleanup)
 	if err != nil {
 		return nil, nil, err
 	}
-
 	return client, cleanup, err
 }
 
-// NewSBTestHarness runs SB server and returns corresponding client
-func NewSBTestHarness(setup TestSetup, cleanup *Cleanup) (*libovsdb.Client, *Cleanup, error) {
-	if cleanup == nil {
-		cleanup = newCleanup()
-	}
-
+// newSBTestHarnessWithCleanup runs SB server and returns corresponding client,
+// using the given cleanup to clean up the server and client
+func newSBTestHarnessWithCleanup(setup TestSetup, cleanup *Cleanup) (*libovsdb.Client, error) {
 	client, err := newOVSDBTestHarness(setup.SBData, newSBServer, newSBClient, cleanup)
+	if err != nil {
+		return nil, err
+	}
+	return client, err
+}
+
+// NewSBTestHarness runs SB server and returns corresponding client
+func NewSBTestHarness(setup TestSetup) (*libovsdb.Client, *Cleanup, error) {
+	cleanup := newCleanup()
+	client, err := newSBTestHarnessWithCleanup(setup, cleanup)
 	if err != nil {
 		return nil, nil, err
 	}
-
 	return client, cleanup, err
 }
 

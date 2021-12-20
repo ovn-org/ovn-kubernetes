@@ -62,7 +62,7 @@ func TestGetOvnGateways(t *testing.T) {
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: tt.ovnInitState,
 			}
-			libovsdbOvnNBClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup, nil)
+			libovsdbOvnNBClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup)
 			if err != nil {
 				t.Errorf("libovsdb client error: %v", err)
 			}
@@ -144,7 +144,7 @@ func TestGetGatewayPhysicalIPs(t *testing.T) {
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: tt.ovnInitState,
 			}
-			libovsdbOvnNBClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup, nil)
+			libovsdbOvnNBClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup)
 			if err != nil {
 				t.Errorf("libovsdb client error: %v", err)
 			}
