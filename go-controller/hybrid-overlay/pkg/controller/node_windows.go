@@ -222,7 +222,7 @@ func (n *NodeController) DeleteNode(node *kapi.Node) error {
 	network, err := hcn.GetNetworkByID(n.networkID)
 	if err != nil {
 		if _, isNotExist := err.(hcn.NetworkNotFoundError); !isNotExist {
-			return fmt.Errorf("Couldn't retrieve network with ID '%s' on node '%s'", n.networkID, node.Name)
+			return fmt.Errorf("couldn't retrieve network with ID '%s' on node '%s'", n.networkID, node.Name)
 		}
 		return nil
 	}

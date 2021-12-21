@@ -103,12 +103,12 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer) *nodeTracker {
 			if !ok {
 				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
 				if !ok {
-					klog.Errorf("couldn't understand non-tombstone object")
+					klog.Errorf("Couldn't understand non-tombstone object")
 					return
 				}
 				node, ok = tombstone.Obj.(*v1.Node)
 				if !ok {
-					klog.Errorf("couldn't understand tombstone object")
+					klog.Errorf("Couldn't understand tombstone object")
 					return
 				}
 			}

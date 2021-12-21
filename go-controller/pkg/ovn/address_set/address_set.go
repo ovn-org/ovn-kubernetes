@@ -574,7 +574,7 @@ func (as *ovnAddressSet) deleteIPs(ips []net.IP) error {
 }
 
 func (as *ovnAddressSet) destroy() error {
-	klog.V(5).Infof("destroy(%s)", asDetail(as))
+	klog.V(5).Infof("Destroy(%s)", asDetail(as))
 	addrset := &nbdb.AddressSet{UUID: as.uuid}
 	ops, err := as.nbClient.Where(addrset).Delete()
 	if err != nil {
