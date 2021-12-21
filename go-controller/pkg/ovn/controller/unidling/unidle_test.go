@@ -26,15 +26,19 @@ func TestUnidlingContoller(t *testing.T) {
 
 var _ = Describe("Unidling Controller", func() {
 	var testHarness *libovsdbtest.Harness
+	var stopCh chan struct{}
 
 	BeforeEach(func() {
-		testHarness = nil
+		var err error
+		testHarness, err = libovsdbtest.NewSBTestHarness()
+		Expect(err).NotTo(HaveOccurred())
+
+		stopCh = make(chan struct{})
 	})
 
 	AfterEach(func() {
-		if testHarness != nil {
-			testHarness.Cleanup()
-		}
+		close(stopCh)
+		testHarness.Cleanup()
 	})
 
 	It("should respond to a controller event", func() {
@@ -53,13 +57,7 @@ var _ = Describe("Unidling Controller", func() {
 				},
 			},
 		}
-		stopCh := make(chan struct{})
-		defer close(stopCh)
-
-		var err error
-		testHarness, err = libovsdbtest.NewSBTestHarness(testSetup)
-		Expect(err).NotTo(HaveOccurred())
-		err = testHarness.Run()
+		err := testHarness.Run(testSetup)
 		Expect(err).NotTo(HaveOccurred())
 
 		config.OvnSouth.Scheme = config.OvnDBSchemeTCP

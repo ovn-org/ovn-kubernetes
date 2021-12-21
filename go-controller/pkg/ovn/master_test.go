@@ -829,7 +829,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		stopChan = make(chan struct{})
 		wg = &sync.WaitGroup{}
 
-		testHarness = nil
+		var err error
+		testHarness, err = libovsdbtest.NewNBSBTestHarness()
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
 	ginkgo.AfterEach(func() {
@@ -968,7 +970,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedClusterLBGroup,
 				},
 			}
-			testHarness, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			err = testHarness.Run(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedDatabaseState := []libovsdbtest.TestData{}
@@ -979,8 +981,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				record.NewFakeRecorder(0))
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			err = testHarness.Run()
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController.SCTPSupport = true
 			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, []string{node1.Name})
@@ -1157,7 +1157,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedClusterLBGroup,
 				},
 			}
-			testHarness, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			err = testHarness.Run(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedDatabaseState := []libovsdbtest.TestData{}
@@ -1168,8 +1168,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				record.NewFakeRecorder(0))
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			err = testHarness.Run()
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController.SCTPSupport = true
 			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, []string{node1.Name})
@@ -1445,27 +1443,27 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 				t.Fatalf("Error starting master watch factory: %v", err)
 			}
 
-			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
-				Name: types.ClusterLBGroupName,
-				UUID: types.ClusterLBGroupName + "-UUID",
-			}
-			dbSetup := libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					expectedClusterLBGroup,
-				},
-			}
-			testHarness, err := libovsdbtest.NewNBSBTestHarness(dbSetup)
+			testHarness, err := libovsdbtest.NewNBSBTestHarness()
 			if err != nil {
 				t.Fatalf("Error creating libovsdb test harness %v", err)
 			}
 			t.Cleanup(testHarness.Cleanup)
 
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				Name: types.ClusterLBGroupName,
+				UUID: types.ClusterLBGroupName + "-UUID",
+			}
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				testHarness.NBClient, testHarness.SBClient,
 				record.NewFakeRecorder(0))
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 
-			if err := testHarness.Run(); err != nil {
+			dbSetup := libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					expectedClusterLBGroup,
+				},
+			}
+			if err := testHarness.Run(dbSetup); err != nil {
 				t.Fatalf("Error starting test harness: %v", err)
 			}
 

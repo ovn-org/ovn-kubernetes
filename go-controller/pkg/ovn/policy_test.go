@@ -2056,13 +2056,13 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 	)
 
 	ginkgo.BeforeEach(func() {
-		testHarness = nil
+		var err error
+		testHarness, err = libovsdbtest.NewNBTestHarness()
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
 	ginkgo.AfterEach(func() {
-		if testHarness != nil {
-			testHarness.Cleanup()
-		}
+		testHarness.Cleanup()
 	})
 
 	ginkgo.It("computes match strings from address sets correctly", func() {
@@ -2172,8 +2172,8 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		gomega.Expect(gp.delNamespaceAddressSet(four)).To(gomega.BeFalse())
 	})
 
-	ginkgo.It("Tests AddAllowACLFromNode", func() {
-		ginkgo.By("adding an existing ACL to the node switch", func() {
+	ginkgo.Context("When calling AddAllowACLFromNode", func() {
+		ginkgo.It("adds an existing ACL to the node switch", func() {
 			initialNbdb := libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
@@ -2187,11 +2187,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 					},
 				},
 			}
-
-			var err error
-			testHarness, err = libovsdbtest.NewNBTestHarness(initialNbdb)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = testHarness.Run()
+			err := testHarness.Run(initialNbdb)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			err = addAllowACLFromNode(nodeName, ovntest.MustParseIP(ipv4MgmtIP), testHarness.NBClient)
@@ -2205,7 +2201,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 			gomega.Expect(testHarness.NBClient).Should(libovsdbtest.HaveData(expectedData...))
 		})
 
-		ginkgo.By("creating an ipv4 ACL and adding it to node switch", func() {
+		ginkgo.It("creates an ipv4 ACL and adding it to node switch", func() {
 			initialNbdb := libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
@@ -2213,11 +2209,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 					},
 				},
 			}
-
-			var err error
-			testHarness, err = libovsdbtest.NewNBTestHarness(initialNbdb)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = testHarness.Run()
+			err := testHarness.Run(initialNbdb)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			err = addAllowACLFromNode(nodeName, ovntest.MustParseIP(ipv4MgmtIP), testHarness.NBClient)
@@ -2230,7 +2222,8 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 			}
 			gomega.Expect(testHarness.NBClient).Should(libovsdbtest.HaveData(expectedData...))
 		})
-		ginkgo.By("creating an ipv6 ACL and adding it to node switch", func() {
+
+		ginkgo.It("creates an ipv6 ACL and adding it to node switch", func() {
 			initialNbdb := libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					&nbdb.LogicalSwitch{
@@ -2238,11 +2231,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 					},
 				},
 			}
-
-			var err error
-			testHarness, err = libovsdbtest.NewNBTestHarness(initialNbdb)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = testHarness.Run()
+			err := testHarness.Run(initialNbdb)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			err = addAllowACLFromNode(nodeName, ovntest.MustParseIP(ipv6MgmtIP), testHarness.NBClient)

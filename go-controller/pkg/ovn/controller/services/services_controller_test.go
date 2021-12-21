@@ -31,8 +31,8 @@ type serviceController struct {
 	testHarness        *libovsdbtest.Harness
 }
 
-func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceController, error) {
-	testHarness, err := libovsdbtest.NewNBTestHarness(dbSetup)
+func newControllerWithDBSetup() (*serviceController, error) {
+	testHarness, err := libovsdbtest.NewNBTestHarness()
 	if err != nil {
 		return nil, err
 	}
@@ -607,12 +607,12 @@ func TestSyncServices(t *testing.T) {
 			}
 
 			ovnlb.TestOnlySetCache(nil)
-			controller, err := newControllerWithDBSetup(libovsdbtest.TestSetup{NBData: tt.initialDb})
+			controller, err := newControllerWithDBSetup()
 			if err != nil {
 				t.Fatalf("Error creating controller: %v", err)
 			}
 			t.Cleanup(controller.close)
-			if err := controller.testHarness.Run(); err != nil {
+			if err := controller.testHarness.Run(libovsdbtest.TestSetup{NBData: tt.initialDb}); err != nil {
 				t.Fatalf("Error starting OVN NB client: %v", err)
 			}
 

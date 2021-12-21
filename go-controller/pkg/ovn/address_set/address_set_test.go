@@ -54,13 +54,13 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		testHarness = nil
+		var err error
+		testHarness, err = libovsdbtest.NewNBTestHarness()
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
 	ginkgo.AfterEach(func() {
-		if testHarness != nil {
-			testHarness.Cleanup()
-		}
+		testHarness.Cleanup()
 	})
 
 	ginkgo.Context("when iterating address sets", func() {
@@ -83,10 +83,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 						},
 					},
 				}
-				var err error
-				testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = testHarness.Run()
+				err := testHarness.Run(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				asFactory = NewOvnAddressSetFactory(testHarness.NBClient)
@@ -145,10 +142,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 						},
 					},
 				}
-				var err error
-				testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = testHarness.Run()
+				err := testHarness.Run(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				asFactory = NewOvnAddressSetFactory(testHarness.NBClient)
@@ -183,10 +177,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 						},
 					},
 				}
-				var err error
-				testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = testHarness.Run()
+				err := testHarness.Run(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				_, err = config.InitConfig(ctx, nil, nil)
@@ -211,10 +202,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 		ginkgo.It("creates a new address set and sets IPs", func() {
 			app.Action = func(ctx *cli.Context) error {
 				dbSetup := libovsdbtest.TestSetup{}
-				var err error
-				testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = testHarness.Run()
+				err := testHarness.Run(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				asFactory = NewOvnAddressSetFactory(testHarness.NBClient)
@@ -250,10 +238,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 						},
 					},
 				}
-				var err error
-				testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = testHarness.Run()
+				err := testHarness.Run(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				asFactory = NewOvnAddressSetFactory(testHarness.NBClient)
@@ -301,10 +286,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 						},
 					},
 				}
-				var err error
-				testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = testHarness.Run()
+				err := testHarness.Run(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				asFactory = NewOvnAddressSetFactory(testHarness.NBClient)
@@ -354,10 +336,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 						},
 					},
 				}
-				var err error
-				testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = testHarness.Run()
+				err := testHarness.Run(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				asFactory = NewOvnAddressSetFactory(testHarness.NBClient)
@@ -394,10 +373,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 		ginkgo.It("ensures an address set exists and if not creates a new one", func() {
 			app.Action = func(ctx *cli.Context) error {
 				dbSetup := libovsdbtest.TestSetup{}
-				var err error
-				testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = testHarness.Run()
+				err := testHarness.Run(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				asFactory = NewOvnAddressSetFactory(testHarness.NBClient)
@@ -428,10 +404,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 	ginkgo.It("destroys an address set", func() {
 		app.Action = func(ctx *cli.Context) error {
 			dbSetup := libovsdbtest.TestSetup{}
-			var err error
-			testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = testHarness.Run()
+			err := testHarness.Run(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			asFactory = NewOvnAddressSetFactory(testHarness.NBClient)
@@ -459,10 +432,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				const addr1 string = "1.2.3.4"
 
 				dbSetup := libovsdbtest.TestSetup{}
-				var err error
-				testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = testHarness.Run()
+				err := testHarness.Run(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				asFactory = NewOvnAddressSetFactory(testHarness.NBClient)
@@ -501,10 +471,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 						},
 					},
 				}
-				var err error
-				testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = testHarness.Run()
+				err := testHarness.Run(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				asFactory = NewOvnAddressSetFactory(testHarness.NBClient)
@@ -534,9 +501,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				dbSetup := libovsdbtest.TestSetup{}
-				testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = testHarness.Run()
+				err = testHarness.Run(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				asFactory = NewOvnAddressSetFactory(testHarness.NBClient)
@@ -572,9 +537,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				dbSetup := libovsdbtest.TestSetup{}
-				testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = testHarness.Run()
+				err = testHarness.Run(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				asFactory = NewOvnAddressSetFactory(testHarness.NBClient)
@@ -616,9 +579,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				config.IPv6Mode = true
 
 				dbSetup := libovsdbtest.TestSetup{}
-				testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = testHarness.Run()
+				err = testHarness.Run(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				asFactory = NewOvnAddressSetFactory(testHarness.NBClient)
@@ -659,9 +620,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				config.IPv6Mode = true
 
 				dbSetup := libovsdbtest.TestSetup{}
-				testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = testHarness.Run()
+				err = testHarness.Run(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				asFactory = NewOvnAddressSetFactory(testHarness.NBClient)
@@ -705,9 +664,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				config.IPv6Mode = true
 
 				dbSetup := libovsdbtest.TestSetup{}
-				testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = testHarness.Run()
+				err = testHarness.Run(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				asFactory = NewOvnAddressSetFactory(testHarness.NBClient)
@@ -749,9 +706,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 			config.IPv6Mode = true
 
 			dbSetup := libovsdbtest.TestSetup{}
-			testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = testHarness.Run()
+			err = testHarness.Run(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			asFactory = NewOvnAddressSetFactory(testHarness.NBClient)
@@ -795,9 +750,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				config.IPv6Mode = true
 
 				dbSetup := libovsdbtest.TestSetup{}
-				testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = testHarness.Run()
+				err = testHarness.Run(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				asFactory = NewOvnAddressSetFactory(testHarness.NBClient)
@@ -855,9 +808,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				config.IPv6Mode = true
 
 				dbSetup := libovsdbtest.TestSetup{}
-				testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = testHarness.Run()
+				err = testHarness.Run(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				asFactory = NewOvnAddressSetFactory(testHarness.NBClient)
@@ -906,9 +857,6 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 	})
 
 	ginkgo.Context("Dual Stack : when cleaning up old address sets", func() {
-		ginkgo.BeforeEach(func() {
-		})
-
 		ginkgo.It("destroys address sets in old non dual stack format", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespaces := []testAddressSetName{
@@ -986,9 +934,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				config.IPv6Mode = true
 
-				testHarness, err = libovsdbtest.NewNBTestHarness(dbSetup)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = testHarness.Run()
+				err = testHarness.Run(dbSetup)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				asFactory = NewOvnAddressSetFactory(testHarness.NBClient)

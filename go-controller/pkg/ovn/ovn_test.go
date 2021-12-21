@@ -74,7 +74,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 	}
 	o.init()
 
-	err = o.testHarness.Run()
+	err = o.testHarness.Run(o.dbSetup)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
@@ -95,7 +95,7 @@ func (o *FakeOVN) init() {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	err = o.watcher.Start()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	o.testHarness, err = libovsdbtest.NewNBSBTestHarness(o.dbSetup)
+	o.testHarness, err = libovsdbtest.NewNBSBTestHarness()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	o.stopChan = make(chan struct{})

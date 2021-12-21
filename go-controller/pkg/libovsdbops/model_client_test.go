@@ -35,12 +35,12 @@ func runTestCase(t *testing.T, tCase OperationModelTestCase, shouldDelete bool) 
 		NBData: tCase.initialDB,
 	}
 
-	th, err := libovsdbtest.NewNBTestHarness(dbSetup)
+	th, err := libovsdbtest.NewNBTestHarness()
 	if err != nil {
 		return err
 	}
 	t.Cleanup(th.Cleanup)
-	if err := th.Run(); err != nil {
+	if err := th.Run(dbSetup); err != nil {
 		return fmt.Errorf("test: \"%s\" couldn't to start NB client: %v", tCase.name, err)
 	}
 
@@ -1038,12 +1038,12 @@ func TestCreateWithAdHocClient(t *testing.T) {
 			SBData: tCase.initialDB,
 		}
 
-		th, err := libovsdbtest.NewSBTestHarness(dbSetup)
+		th, err := libovsdbtest.NewSBTestHarness()
 		if err != nil {
 			t.Fatalf("test: \"%s\" failed to set up test harness: %v", tCase.name, err)
 		}
 		t.Cleanup(th.Cleanup)
-		if err := th.Run(); err != nil {
+		if err := th.Run(dbSetup); err != nil {
 			t.Fatalf("test: \"%s\" couldn't to start test harness: %v", tCase.name, err)
 		}
 

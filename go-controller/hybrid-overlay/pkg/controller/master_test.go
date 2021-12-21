@@ -74,15 +74,14 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
-		testHarness = nil
+		testHarness, err = libovsdbtest.NewNBSBTestHarness()
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	AfterEach(func() {
 		close(stopChan)
 		wg.Wait()
-		if testHarness != nil {
-			testHarness.Cleanup()
-		}
+		testHarness.Cleanup()
 	})
 
 	const hybridOverlayClusterCIDR string = "11.1.0.0/16/24"
@@ -105,9 +104,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
 			dbSetup := libovsdbtest.TestSetup{}
-			testHarness, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
-			Expect(err).NotTo(HaveOccurred())
-			err = testHarness.Run()
+			err = testHarness.Run(dbSetup)
 			Expect(err).NotTo(HaveOccurred())
 
 			m, err := NewMaster(
@@ -214,9 +211,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				NBData: initialNBDB,
 				SBData: initialSBDB,
 			}
-			testHarness, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
-			Expect(err).NotTo(HaveOccurred())
-			err = testHarness.Run()
+			err = testHarness.Run(dbSetup)
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
@@ -416,9 +411,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			}
 
 			// nothing will occur in the SBDB or NBDB in this instance because the HO lrp already exists
-			testHarness, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
-			Expect(err).NotTo(HaveOccurred())
-			err = testHarness.Run()
+			err = testHarness.Run(dbSetup)
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
@@ -522,9 +515,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			// nothing will occur in the SBDB in this instance because we don't explicitly clean up any created
 			// mac bindings
-			testHarness, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
-			Expect(err).NotTo(HaveOccurred())
-			err = testHarness.Run()
+			err = testHarness.Run(dbSetup)
 			Expect(err).NotTo(HaveOccurred())
 
 			m, err := NewMaster(

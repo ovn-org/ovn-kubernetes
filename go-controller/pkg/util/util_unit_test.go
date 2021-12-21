@@ -418,12 +418,12 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			testHarness, err := libovsdbtest.NewNBTestHarness(tc.initialNbdb)
+			testHarness, err := libovsdbtest.NewNBTestHarness()
 			if err != nil {
 				t.Fatal(fmt.Errorf("test: \"%s\" failed to create test harness: %v", tc.desc, err))
 			}
 			t.Cleanup(testHarness.Cleanup)
-			if err := testHarness.Run(); err != nil {
+			if err := testHarness.Run(tc.initialNbdb); err != nil {
 				t.Fatal(err)
 			}
 

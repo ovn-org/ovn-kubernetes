@@ -83,12 +83,12 @@ func TestRemoveACLsFromSwitches(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {
-			th, err := libovsdbtest.NewNBTestHarness(tt.initialNbdb)
+			th, err := libovsdbtest.NewNBTestHarness()
 			if err != nil {
 				t.Fatalf("test: \"%s\" failed to set up test harness: %v", tt.desc, err)
 			}
 			t.Cleanup(th.Cleanup)
-			if err := th.Run(); err != nil {
+			if err := th.Run(tt.initialNbdb); err != nil {
 				t.Fatalf("test: \"%s\" couldn't to start the test harness: %v", tt.desc, err)
 			}
 
