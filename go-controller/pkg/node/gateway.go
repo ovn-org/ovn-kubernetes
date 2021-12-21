@@ -216,7 +216,7 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, subnets []*
 	}
 
 	l3GwConfig := util.L3GatewayConfig{
-		Mode:           config.GatewayModeShared,
+		Mode:           config.Gateway.Mode,
 		ChassisID:      chassisID,
 		InterfaceID:    gatewayBridge.interfaceID,
 		MACAddress:     gatewayBridge.macAddress,

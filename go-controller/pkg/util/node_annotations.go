@@ -163,9 +163,6 @@ func (cfg *L3GatewayConfig) UnmarshalJSON(bytes []byte) error {
 		if err != nil {
 			return fmt.Errorf("bad 'vlan-id' value %q: %v", cfgjson.VLANID, err)
 		}
-		if cfg.Mode != config.GatewayModeShared && uint(vlanID64) != 0 {
-			return fmt.Errorf("vlan-id is supported only in shared gateway mode")
-		}
 		// VLANID is used for specifying TagRequest on the logical switch port
 		// connected to the external logical switch, NB DB specifies a maximum
 		// value on the TagRequest to 4095, hence validate this:
