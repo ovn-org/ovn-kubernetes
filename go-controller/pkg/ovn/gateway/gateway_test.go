@@ -62,16 +62,16 @@ func TestGetOvnGateways(t *testing.T) {
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: tt.ovnInitState,
 			}
-			libovsdbOvnNBClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup)
+			testHarness, err := libovsdbtest.NewNBTestHarness(dbSetup)
 			if err != nil {
 				t.Errorf("libovsdb client error: %v", err)
 			}
-			t.Cleanup(cleanup.Cleanup)
-			if err := libovsdbOvnNBClient.Run(); err != nil {
+			t.Cleanup(testHarness.Cleanup)
+			if err := testHarness.Run(); err != nil {
 				t.Errorf("couldn't to start NB client: %v", err)
 			}
 
-			got, err := GetOvnGateways(libovsdbOvnNBClient)
+			got, err := GetOvnGateways(testHarness.NBClient)
 			if !sets.NewString(got...).HasAll(tt.want...) {
 				t.Errorf("GetOvnGateways() got = %v, want %v", got, tt.want)
 			}
@@ -144,16 +144,16 @@ func TestGetGatewayPhysicalIPs(t *testing.T) {
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: tt.ovnInitState,
 			}
-			libovsdbOvnNBClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup)
+			testHarness, err := libovsdbtest.NewNBTestHarness(dbSetup)
 			if err != nil {
 				t.Errorf("libovsdb client error: %v", err)
 			}
-			t.Cleanup(cleanup.Cleanup)
-			if err := libovsdbOvnNBClient.Run(); err != nil {
+			t.Cleanup(testHarness.Cleanup)
+			if err := testHarness.Run(); err != nil {
 				t.Errorf("couldn't to start NB client: %v", err)
 			}
 
-			got, err := GetGatewayPhysicalIPs(libovsdbOvnNBClient, "GR_ovn-control-plane")
+			got, err := GetGatewayPhysicalIPs(testHarness.NBClient, "GR_ovn-control-plane")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetGatewayPhysicalIPs() error = %v, wantErr %v", err, tt.wantErr)
 				return

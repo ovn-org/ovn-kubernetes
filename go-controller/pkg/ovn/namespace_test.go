@@ -277,7 +277,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, clusterCIDR, config.IPv6Mode)
 
-			fakeOvn.controller.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(fakeOvn.nbClient, []string{node1.Name})
+			fakeOvn.controller.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(fakeOvn.testHarness.NBClient, []string{node1.Name})
 			_, err = fakeOvn.controller.joinSwIPManager.EnsureJoinLRPIPs(ovntypes.OVNClusterRouter)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gwLRPIPs, err := fakeOvn.controller.joinSwIPManager.EnsureJoinLRPIPs(node1.Name)
@@ -309,7 +309,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 			skipSnat := false
 			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{nodeSubnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs}, skipSnat, node1.NodeMgmtPortIP)
-			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+			gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 			// check the namespace again and ensure the address set
 			// being created with the right set of IPs in it.

@@ -430,7 +430,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
 			}
 
@@ -665,7 +665,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				return nil
 			}
@@ -795,7 +795,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				egressIPs, nodes := getEgressIPStatus(eIP.Name)
 				gomega.Expect(nodes[0]).To(gomega.Equal(node2.name))
@@ -842,7 +842,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
 			}
 
@@ -966,7 +966,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Nat:  []string{"egressip-nat-UUID"},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				egressIPs, nodes := getEgressIPStatus(eIP.Name)
 				gomega.Expect(nodes[0]).To(gomega.Equal(node2.name))
@@ -981,7 +981,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Eventually(getEgressIPStatusLen(eIP.Name)).Should(gomega.Equal(1))
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				return nil
 			}
@@ -1117,7 +1117,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Nat:  []string{"egressip-nat-UUID"},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
 			}
 
@@ -1302,7 +1302,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Nat:  []string{"egressip-nat-UUID"},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				egressIPs, nodes := getEgressIPStatus(eIP.Name)
 				gomega.Expect(nodes[0]).To(gomega.Equal(node2.name))
@@ -1347,7 +1347,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Nat:  nil,
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
 			}
 
@@ -1534,7 +1534,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Nat:  []string{"egressip-nat-UUID"},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				egressIPs, nodes := getEgressIPStatus(eIP.Name)
 				gomega.Expect(nodes[0]).To(gomega.Equal(node2.name))
@@ -1557,7 +1557,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				_, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIPUpdate, metav1.UpdateOptions{})
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				gomega.Eventually(func() string {
 					egressIPs, _ := getEgressIPStatus(eIP.Name)
@@ -1686,7 +1686,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Nat:  []string{"egressip-nat-UUID"},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				egressIPs, nodes := getEgressIPStatus(eIP.Name)
 				gomega.Expect(nodes[0]).To(gomega.Equal(node2.name))
@@ -1709,7 +1709,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				_, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIPUpdate, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				gomega.Eventually(getEgressIPStatusLen(eIP.Name)).Should(gomega.Equal(1))
 
 				egressIPs, nodes = getEgressIPStatus(eIP.Name)
@@ -1875,7 +1875,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
 			}
 
@@ -2032,7 +2032,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(1))
 				gomega.Eventually(isEgressAssignableNode(node.Name)).Should(gomega.BeFalse())
@@ -2092,7 +2092,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
 			}
 
@@ -2247,7 +2247,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
 				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node1.Name))
@@ -2405,7 +2405,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
@@ -2467,7 +2467,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
 			}
 
@@ -2658,7 +2658,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
 			}
 
@@ -2848,7 +2848,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
 			}
 
@@ -2999,7 +2999,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
 				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node1.Name))
@@ -3061,7 +3061,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(0))
 				gomega.Eventually(isEgressAssignableNode(node1.Name)).Should(gomega.BeTrue())
@@ -3125,7 +3125,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				return nil
 			}
@@ -3273,7 +3273,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
 				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node1.Name))
@@ -3330,7 +3330,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 				egressIPs, nodes := getEgressIPStatus(egressIPName)
@@ -3394,7 +3394,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
 			}
 
@@ -3548,7 +3548,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(1))
 				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node1.Name))
@@ -3604,7 +3604,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 				egressIPs, nodes = getEgressIPStatus(egressIPName)
@@ -3677,7 +3677,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 				return nil
 			}
 

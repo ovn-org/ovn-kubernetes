@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -26,15 +25,15 @@ func TestUnidlingContoller(t *testing.T) {
 }
 
 var _ = Describe("Unidling Controller", func() {
-	var cleanup *libovsdbtest.Cleanup
+	var testHarness *libovsdbtest.Harness
 
 	BeforeEach(func() {
-		cleanup = nil
+		testHarness = nil
 	})
 
 	AfterEach(func() {
-		if cleanup != nil {
-			cleanup.Cleanup()
+		if testHarness != nil {
+			testHarness.Cleanup()
 		}
 	})
 
@@ -57,11 +56,10 @@ var _ = Describe("Unidling Controller", func() {
 		stopCh := make(chan struct{})
 		defer close(stopCh)
 
-		var sbClient *libovsdb.Client
 		var err error
-		sbClient, cleanup, err = libovsdbtest.NewSBTestHarness(testSetup)
+		testHarness, err = libovsdbtest.NewSBTestHarness(testSetup)
 		Expect(err).NotTo(HaveOccurred())
-		err = sbClient.Run()
+		err = testHarness.Run()
 		Expect(err).NotTo(HaveOccurred())
 
 		config.OvnSouth.Scheme = config.OvnDBSchemeTCP
@@ -70,7 +68,7 @@ var _ = Describe("Unidling Controller", func() {
 		c, err := NewController(
 			recorder,
 			informerFactory.Core().V1().Services().Informer(),
-			sbClient,
+			testHarness.SBClient,
 		)
 		Expect(err).NotTo(HaveOccurred())
 		c.AddServiceVIPToName("10.10.10.10:80", kapi.ProtocolTCP, "foo_ns", "foo_service")
@@ -81,7 +79,7 @@ var _ = Describe("Unidling Controller", func() {
 			func() int {
 				ctx, _ := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 				var events []sbdb.ControllerEvent
-				err = sbClient.List(ctx, &events)
+				err = testHarness.SBClient.List(ctx, &events)
 				Expect(err).NotTo(HaveOccurred())
 				return len(events)
 			},

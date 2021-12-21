@@ -16,7 +16,6 @@ import (
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
@@ -808,11 +807,11 @@ subnet=%s
 
 var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	var (
-		app             *cli.App
-		f               *factory.WatchFactory
-		stopChan        chan struct{}
-		wg              *sync.WaitGroup
-		libovsdbCleanup *libovsdbtest.Cleanup
+		app         *cli.App
+		f           *factory.WatchFactory
+		stopChan    chan struct{}
+		wg          *sync.WaitGroup
+		testHarness *libovsdbtest.Harness
 	)
 
 	const (
@@ -830,11 +829,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		stopChan = make(chan struct{})
 		wg = &sync.WaitGroup{}
 
-		libovsdbCleanup = nil
+		testHarness = nil
 	})
 
 	ginkgo.AfterEach(func() {
-		libovsdbCleanup.Cleanup()
+		testHarness.Cleanup()
 		close(stopChan)
 		f.Shutdown()
 		wg.Wait()
@@ -969,21 +968,18 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedClusterLBGroup,
 				},
 			}
-			var libovsdbOvnNBClient, libovsdbOvnSBClient *libovsdb.Client
-			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			testHarness, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedDatabaseState := []libovsdbtest.TestData{}
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, clusterCIDR, config.IPv6Mode)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
+				testHarness.NBClient, testHarness.SBClient,
 				record.NewFakeRecorder(0))
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			err = libovsdbOvnNBClient.Run()
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = libovsdbOvnSBClient.Run()
+			err = testHarness.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController.SCTPSupport = true
@@ -1017,7 +1013,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			skipSnat := false
 			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs}, skipSnat, node1.NodeMgmtPortIP)
-			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+			gomega.Eventually(testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 			return nil
 		}
@@ -1161,21 +1157,18 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					expectedClusterLBGroup,
 				},
 			}
-			var libovsdbOvnNBClient, libovsdbOvnSBClient *libovsdb.Client
-			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			testHarness, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedDatabaseState := []libovsdbtest.TestData{}
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, clusterCIDR, config.IPv6Mode)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
+				testHarness.NBClient, testHarness.SBClient,
 				record.NewFakeRecorder(0))
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			err = libovsdbOvnNBClient.Run()
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = libovsdbOvnSBClient.Run()
+			err = testHarness.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			clusterController.SCTPSupport = true
@@ -1209,7 +1202,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			skipSnat := false
 			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs}, skipSnat, node1.NodeMgmtPortIP)
-			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+			gomega.Eventually(testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 			return nil
 		}
@@ -1461,22 +1454,19 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 					expectedClusterLBGroup,
 				},
 			}
-			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err := libovsdbtest.NewNBSBTestHarness(dbSetup)
+			testHarness, err := libovsdbtest.NewNBSBTestHarness(dbSetup)
 			if err != nil {
 				t.Fatalf("Error creating libovsdb test harness %v", err)
 			}
-			t.Cleanup(libovsdbCleanup.Cleanup)
+			t.Cleanup(testHarness.Cleanup)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
+				testHarness.NBClient, testHarness.SBClient,
 				record.NewFakeRecorder(0))
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 
-			if err := libovsdbOvnNBClient.Run(); err != nil {
-				t.Fatalf("Error starting OVN NB client: %v", err)
-			}
-			if err := libovsdbOvnSBClient.Run(); err != nil {
-				t.Fatalf("Error starting OVN SB client: %v", err)
+			if err := testHarness.Run(); err != nil {
+				t.Fatalf("Error starting test harness: %v", err)
 			}
 
 			// configure the cluster allocators

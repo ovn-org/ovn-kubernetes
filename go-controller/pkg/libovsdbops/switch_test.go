@@ -83,13 +83,13 @@ func TestRemoveACLsFromSwitches(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {
-			nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(tt.initialNbdb)
+			th, err := libovsdbtest.NewNBTestHarness(tt.initialNbdb)
 			if err != nil {
 				t.Fatalf("test: \"%s\" failed to set up test harness: %v", tt.desc, err)
 			}
-			t.Cleanup(cleanup.Cleanup)
-			if err := nbClient.Run(); err != nil {
-				t.Fatalf("test: \"%s\" couldn't to start NB client: %v", tt.desc, err)
+			t.Cleanup(th.Cleanup)
+			if err := th.Run(); err != nil {
+				t.Fatalf("test: \"%s\" couldn't to start the test harness: %v", tt.desc, err)
 			}
 
 			fakeSwitches := []nbdb.LogicalSwitch{
@@ -103,16 +103,16 @@ func TestRemoveACLsFromSwitches(t *testing.T) {
 				*fakeACL2,
 			}
 
-			err = removeACLsFromSwitches(nbClient, fakeSwitches, ACLs)
+			err = removeACLsFromSwitches(th.NBClient, fakeSwitches, ACLs)
 			if err != nil && !tt.expectErr {
 				t.Fatal(fmt.Errorf("RemoveACLFromNodeSwitches() error = %v", err))
 			}
 
 			matcher := libovsdbtest.HaveData(tt.expectedNbdb.NBData)
-			success, err := matcher.Match(nbClient)
+			success, err := matcher.Match(th.NBClient)
 
 			if !success {
-				t.Fatal(fmt.Errorf("test: \"%s\" didn't match expected with actual, err: %v", tt.desc, matcher.FailureMessage(nbClient)))
+				t.Fatal(fmt.Errorf("test: \"%s\" didn't match expected with actual, err: %v", tt.desc, matcher.FailureMessage(th.NBClient)))
 			}
 			if err != nil {
 				t.Fatal(fmt.Errorf("test: \"%s\" encountered error: %v", tt.desc, err))

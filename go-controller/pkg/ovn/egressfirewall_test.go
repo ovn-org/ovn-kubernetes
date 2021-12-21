@@ -180,7 +180,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					finalJoinSwitch,
 				}
 
-				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOVN.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				return nil
 			}
@@ -263,7 +263,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					finalNodeSwitch,
 				}
 
-				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOVN.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				return nil
 			}
@@ -351,7 +351,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					finalNodeSwitch,
 				}
 
-				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOVN.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				return nil
 			}
@@ -448,7 +448,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					finalNodeSwitch,
 				}
 
-				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOVN.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				return nil
 			}
@@ -542,7 +542,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					nodeSwitch2,
 				}
 
-				gomega.Expect(fakeOVN.nbClient).To(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Expect(fakeOVN.testHarness.NBClient).To(libovsdbtest.HaveData(expectedDatabaseState))
 
 				err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Delete(context.TODO(), egressFirewall.Name, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -555,7 +555,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					nodeSwitch2,
 				}
 
-				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOVN.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				return nil
 			}
@@ -649,7 +649,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					finalNodeSwitch,
 				}
 
-				gomega.Expect(fakeOVN.nbClient).To(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Expect(fakeOVN.testHarness.NBClient).To(libovsdbtest.HaveData(expectedDatabaseState))
 
 				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -658,7 +658,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				ipv4ACL.Action = nbdb.ACLActionDrop
 
-				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOVN.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				return nil
 			}
@@ -804,7 +804,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					finalJoinSwitch,
 				}
 
-				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOVN.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				return nil
 			}
@@ -882,7 +882,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					finalJoinSwitch,
 				}
 
-				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOVN.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				return nil
 			}
@@ -965,7 +965,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					finalJoinSwitch,
 				}
 
-				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOVN.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				return nil
 			}
@@ -1059,7 +1059,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					finalJoinSwitch,
 				}
 
-				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOVN.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				return nil
 			}
@@ -1139,13 +1139,13 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					finalJoinSwitch,
 				}
 
-				gomega.Expect(fakeOVN.nbClient).To(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Expect(fakeOVN.testHarness.NBClient).To(libovsdbtest.HaveData(expectedDatabaseState))
 
 				err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Delete(context.TODO(), egressFirewall.Name, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// join switch should return to orignal state, egfw was deleted
-				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(fakeOVN.dbSetup.NBData))
+				gomega.Eventually(fakeOVN.testHarness.NBClient).Should(libovsdbtest.HaveData(fakeOVN.dbSetup.NBData))
 
 				return nil
 			}
@@ -1227,7 +1227,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					finalJoinSwitch,
 				}
 
-				gomega.Expect(fakeOVN.nbClient).To(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Expect(fakeOVN.testHarness.NBClient).To(libovsdbtest.HaveData(expectedDatabaseState))
 
 				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1236,7 +1236,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 
 				ipv4ACL.Action = nbdb.ACLActionDrop
 
-				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				gomega.Eventually(fakeOVN.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 				return nil
 			}

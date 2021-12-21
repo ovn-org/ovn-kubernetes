@@ -308,7 +308,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
 			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP)
-			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+			gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		})
 
 		ginkgo.It("creates an IPv6 gateway in OVN", func() {
@@ -360,7 +360,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
 			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP)
-			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+			gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		})
 
 		ginkgo.It("creates a dual-stack gateway in OVN", func() {
@@ -412,7 +412,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
 			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP)
-			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+			gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		})
 
 		ginkgo.It("removes leftover SNAT entries during init", func() {
@@ -465,7 +465,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
 			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP)
-			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+			gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		})
 	})
 
@@ -542,7 +542,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
 			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP)
-			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+			gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		})
 
 	})
@@ -663,7 +663,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					Policies: []string{"match3-UUID", "match6-UUID"},
 				},
 			}
-			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+			gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		})
 
 		ginkgo.It("cleans up a dual-stack gateway in OVN", func() {
@@ -783,7 +783,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					Policies: []string{"match3-UUID", "match6-UUID"},
 				},
 			}
-			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+			gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		})
 	})
 })

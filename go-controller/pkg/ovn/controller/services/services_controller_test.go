@@ -28,18 +28,18 @@ type serviceController struct {
 	*Controller
 	serviceStore       cache.Store
 	endpointSliceStore cache.Store
-	libovsdbCleanup    *libovsdbtest.Cleanup
+	testHarness        *libovsdbtest.Harness
 }
 
 func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceController, error) {
-	nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup)
+	testHarness, err := libovsdbtest.NewNBTestHarness(dbSetup)
 	if err != nil {
 		return nil, err
 	}
 	client := fake.NewSimpleClientset()
 	informerFactory := informers.NewSharedInformerFactory(client, 0)
 	controller := NewController(client,
-		nbClient,
+		testHarness.NBClient,
 		informerFactory.Core().V1().Services(),
 		informerFactory.Discovery().V1beta1().EndpointSlices(),
 		informerFactory.Core().V1().Nodes(),
@@ -50,12 +50,12 @@ func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceControlle
 		controller,
 		informerFactory.Core().V1().Services().Informer().GetStore(),
 		informerFactory.Discovery().V1beta1().EndpointSlices().Informer().GetStore(),
-		cleanup,
+		testHarness,
 	}, nil
 }
 
 func (c *serviceController) close() {
-	c.libovsdbCleanup.Cleanup()
+	c.testHarness.Cleanup()
 }
 
 // TestSyncServices - an end-to-end test for the services controller.
@@ -612,7 +612,7 @@ func TestSyncServices(t *testing.T) {
 				t.Fatalf("Error creating controller: %v", err)
 			}
 			t.Cleanup(controller.close)
-			if err := controller.nbClient.Run(); err != nil {
+			if err := controller.testHarness.Run(); err != nil {
 				t.Fatalf("Error starting OVN NB client: %v", err)
 			}
 

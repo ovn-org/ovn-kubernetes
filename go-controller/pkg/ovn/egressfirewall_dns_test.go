@@ -23,15 +23,16 @@ import (
 
 func TestNewEgressDNS(t *testing.T) {
 	testCh := make(chan struct{})
+	t.Cleanup(func() { close(testCh) })
 	dbSetup := libovsdbtest.TestSetup{}
 
-	libovsdbOvnNBClient, libovsdbCleanup, err := libovsdbtest.NewNBTestHarness(dbSetup)
+	th, err := libovsdbtest.NewNBTestHarness(dbSetup)
 	assert.Nil(t, err)
-	t.Cleanup(libovsdbCleanup.Cleanup)
-	err = libovsdbOvnNBClient.Run()
+	t.Cleanup(th.Cleanup)
+	err = th.Run()
 	assert.Nil(t, err)
 
-	testOvnAddFtry := addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
+	testOvnAddFtry := addressset.NewOvnAddressSetFactory(th.NBClient)
 	mockDnsOps := new(util_mocks.DNSOps)
 	util.SetDNSLibOpsMockInst(mockDnsOps)
 	tests := []struct {

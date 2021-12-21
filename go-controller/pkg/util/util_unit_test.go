@@ -418,12 +418,12 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(tc.initialNbdb)
+			testHarness, err := libovsdbtest.NewNBTestHarness(tc.initialNbdb)
 			if err != nil {
 				t.Fatal(fmt.Errorf("test: \"%s\" failed to create test harness: %v", tc.desc, err))
 			}
-			t.Cleanup(cleanup.Cleanup)
-			if err := nbClient.Run(); err != nil {
+			t.Cleanup(testHarness.Cleanup)
+			if err := testHarness.Run(); err != nil {
 				t.Fatal(err)
 			}
 
@@ -434,21 +434,21 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			var e error
 			if tc.setCfgHybridOvlyEnabled {
 				config.HybridOverlay.Enabled = true
-				if e = UpdateNodeSwitchExcludeIPs(nbClient, nodeName, ipnet); e != nil {
+				if e = UpdateNodeSwitchExcludeIPs(testHarness.NBClient, nodeName, ipnet); e != nil {
 					t.Fatal(fmt.Errorf("failed to update NodeSwitchExcludeIPs with Hybrid Overlay enabled err: %v", e))
 				}
 				config.HybridOverlay.Enabled = false
 			} else {
-				if e = UpdateNodeSwitchExcludeIPs(nbClient, nodeName, ipnet); e != nil {
+				if e = UpdateNodeSwitchExcludeIPs(testHarness.NBClient, nodeName, ipnet); e != nil {
 					t.Fatal(fmt.Errorf("failed to update NodeSwitchExcludeIPs with Hybrid Overlay disabled err: %v", e))
 				}
 
 			}
 
 			matcher := libovsdbtest.HaveDataIgnoringUUIDs(tc.expectedNbdb.NBData)
-			success, err := matcher.Match(nbClient)
+			success, err := matcher.Match(testHarness.NBClient)
 			if !success {
-				t.Fatal(fmt.Errorf("test: \"%s\" didn't match expected with actual, err: %v", tc.desc, matcher.FailureMessage(nbClient)))
+				t.Fatal(fmt.Errorf("test: \"%s\" didn't match expected with actual, err: %v", tc.desc, matcher.FailureMessage(testHarness.NBClient)))
 			}
 			if err != nil {
 				t.Fatal(fmt.Errorf("test: \"%s\" encountered error: %v", tc.desc, err))

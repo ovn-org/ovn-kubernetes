@@ -3,7 +3,6 @@ package ovn
 import (
 	"github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -40,10 +39,8 @@ type FakeOVN struct {
 	stopChan     chan struct{}
 	asf          *addressset.FakeAddressSetFactory
 	fakeRecorder *record.FakeRecorder
-	nbClient     *libovsdb.Client
-	sbClient     *libovsdb.Client
 	dbSetup      libovsdbtest.TestSetup
-	nbsbCleanup  *libovsdbtest.Cleanup
+	testHarness  *libovsdbtest.Harness
 }
 
 func NewFakeOVN() *FakeOVN {
@@ -77,9 +74,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 	}
 	o.init()
 
-	err = o.nbClient.Run()
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	err = o.sbClient.Run()
+	err = o.testHarness.Run()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
@@ -91,7 +86,7 @@ func (o *FakeOVN) startWithDBSetup(dbSetup libovsdbtest.TestSetup, objects ...ru
 func (o *FakeOVN) shutdown() {
 	o.watcher.Shutdown()
 	close(o.stopChan)
-	o.nbsbCleanup.Cleanup()
+	o.testHarness.Cleanup()
 }
 
 func (o *FakeOVN) init() {
@@ -100,13 +95,13 @@ func (o *FakeOVN) init() {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	err = o.watcher.Start()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	o.nbClient, o.sbClient, o.nbsbCleanup, err = libovsdbtest.NewNBSBTestHarness(o.dbSetup)
+	o.testHarness, err = libovsdbtest.NewNBSBTestHarness(o.dbSetup)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	o.stopChan = make(chan struct{})
 	o.controller = NewOvnController(o.fakeClient, o.watcher,
 		o.stopChan, o.asf,
-		o.nbClient, o.sbClient,
+		o.testHarness.NBClient, o.testHarness.SBClient,
 		o.fakeRecorder)
 	o.controller.multicastSupport = true
 	o.controller.loadBalancerGroupUUID = types.ClusterLBGroupName + "-UUID"

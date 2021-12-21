@@ -35,16 +35,16 @@ func runTestCase(t *testing.T, tCase OperationModelTestCase, shouldDelete bool) 
 		NBData: tCase.initialDB,
 	}
 
-	nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup)
+	th, err := libovsdbtest.NewNBTestHarness(dbSetup)
 	if err != nil {
 		return err
 	}
-	t.Cleanup(cleanup.Cleanup)
-	if err := nbClient.Run(); err != nil {
+	t.Cleanup(th.Cleanup)
+	if err := th.Run(); err != nil {
 		return fmt.Errorf("test: \"%s\" couldn't to start NB client: %v", tCase.name, err)
 	}
 
-	modelClient := NewModelClient(nbClient)
+	modelClient := NewModelClient(th.NBClient)
 
 	opModel := tCase.generateCreateOrUpdateOp()
 
@@ -61,9 +61,9 @@ func runTestCase(t *testing.T, tCase OperationModelTestCase, shouldDelete bool) 
 	}
 
 	matcher := libovsdbtest.HaveData(tCase.expectedDB)
-	success, err := matcher.Match(nbClient)
+	success, err := matcher.Match(th.NBClient)
 	if !success {
-		return fmt.Errorf("test: \"%s\" didn't match expected with actual, err: %s", tCase.name, matcher.FailureMessage(nbClient))
+		return fmt.Errorf("test: \"%s\" didn't match expected with actual, err: %s", tCase.name, matcher.FailureMessage(th.NBClient))
 	}
 	if err != nil {
 		return fmt.Errorf("test: \"%s\" encountered error: %v", tCase.name, err)
@@ -1038,27 +1038,24 @@ func TestCreateWithAdHocClient(t *testing.T) {
 			SBData: tCase.initialDB,
 		}
 
-		nbClient, sbClient, cleanup, err := libovsdbtest.NewNBSBTestHarness(dbSetup)
+		th, err := libovsdbtest.NewSBTestHarness(dbSetup)
 		if err != nil {
 			t.Fatalf("test: \"%s\" failed to set up test harness: %v", tCase.name, err)
 		}
-		t.Cleanup(cleanup.Cleanup)
-		if err := nbClient.Run(); err != nil {
-			t.Fatalf("test: \"%s\" couldn't to start NB client: %v", tCase.name, err)
-		}
-		if err := sbClient.Run(); err != nil {
-			t.Fatalf("test: \"%s\" couldn't to start SB client: %v", tCase.name, err)
+		t.Cleanup(th.Cleanup)
+		if err := th.Run(); err != nil {
+			t.Fatalf("test: \"%s\" couldn't to start test harness: %v", tCase.name, err)
 		}
 
-		modelClient := NewModelClient(nbClient)
+		modelClient := NewModelClient(th.SBClient)
 
 		opModel := tCase.generateCreateOrUpdateOp()
-		modelClient.WithClient(sbClient).CreateOrUpdate(opModel...)
+		modelClient.WithClient(th.SBClient).CreateOrUpdate(opModel...)
 
 		matcher := libovsdbtest.HaveData(tCase.expectedDB)
-		success, err := matcher.Match(sbClient)
+		success, err := matcher.Match(th.SBClient)
 		if !success {
-			t.Fatalf("test: \"%s\" didn't match expected with actual, err: %s", tCase.name, matcher.FailureMessage(sbClient))
+			t.Fatalf("test: \"%s\" didn't match expected with actual, err: %s", tCase.name, matcher.FailureMessage(th.SBClient))
 		}
 		if err != nil {
 			t.Fatalf("test: \"%s\" encountered error: %v", tCase.name, err)

@@ -275,7 +275,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
 
 				return nil
 			}
@@ -323,7 +323,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
 				return nil
 			}
 
@@ -375,7 +375,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).To(gomega.HaveOccurred())
 				gomega.Expect(pod).To(gomega.BeNil())
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
 				return nil
 			}
 
@@ -433,7 +433,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
 				return nil
 			}
 
@@ -471,7 +471,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				// Add Pod logical port should succeed even without namespace
 				gomega.Expect(getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)).Should(gomega.MatchJSON(podJSON))
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
 
 				return nil
 			}
@@ -525,7 +525,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 
-				gomega.Eventually(fakeOvn.nbClient).Should(
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(
 					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
 				return nil
 			}
@@ -571,7 +571,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				fakeOvn.controller.WatchPods()
 
 				// check nbdb data is added
-				gomega.Eventually(fakeOvn.nbClient).Should(
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(
 					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
 				// check that the pod annotations are preserved
 				// makes sense only when handling is finished, therefore check after nbdb is updated
@@ -680,7 +680,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				fakeOvn.controller.WatchPods()
 
 				// check db values are updated to correlate with test pods settings
-				gomega.Eventually(fakeOvn.nbClient).Should(
+				gomega.Eventually(fakeOvn.testHarness.NBClient).Should(
 					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t1, t2}, []string{"node1", "node2"})))
 				// check annotations are preserved
 				// makes sense only when handling is finished, therefore check after nbdb is updated

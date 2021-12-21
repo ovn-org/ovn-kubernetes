@@ -68,16 +68,16 @@ func TestNewCache(t *testing.T) {
 		},
 	}
 
-	nbClient, cleanup, err := libovsdb.NewNBTestHarness(libovsdb.TestSetup{NBData: initialDb})
+	testHarness, err := libovsdb.NewNBTestHarness(libovsdb.TestSetup{NBData: initialDb})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(cleanup.Cleanup)
-	if err := nbClient.Run(); err != nil {
+	t.Cleanup(testHarness.Cleanup)
+	if err := testHarness.Run(); err != nil {
 		t.Fatal(err)
 	}
 
-	c, err := newCache(nbClient)
+	c, err := newCache(testHarness.NBClient)
 	if err != nil {
 		t.Fatal(err)
 	}
