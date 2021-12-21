@@ -368,7 +368,7 @@ func initLocalGatewayIPTables() error {
 	return nil
 }
 
-func cleanupSharedGatewayIPTChains() {
+func cleanupGatewayIPTChains() {
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
 		// We clean up both IPv4 and IPv6, regardless of what is currently in use
 		for _, proto := range []iptables.Protocol{iptables.ProtocolIPv4, iptables.ProtocolIPv6} {

@@ -19,9 +19,49 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net.IP, gwIntf string,
-	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface, watchFactory factory.NodeWatchFactory) (*gateway, error) {
-	klog.Info("Creating new local gateway")
+// deletes the local bridge used for DGP and removes the corresponding iface, as well as OVS bridge mappings
+func deleteLocalNodeAccessBridge() error {
+	// remove br-local bridge
+	_, stderr, err := util.RunOVSVsctl("--if-exists", "del-br", types.LocalBridgeName)
+	if err != nil {
+		return fmt.Errorf("failed to delete bridge %s, stderr:%s (%v)",
+			types.LocalBridgeName, stderr, err)
+	}
+	// ovn-bridge-mappings maps a physical network name to a local ovs bridge
+	// that provides connectivity to that network. It is in the form of physnet1:br1,physnet2:br2.
+	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
+		"external_ids:ovn-bridge-mappings")
+	if err != nil {
+		return fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
+	}
+	if len(stdout) > 0 {
+		locnetMapping := fmt.Sprintf("%s:%s", types.LocalNetworkName, types.LocalBridgeName)
+		if strings.Contains(stdout, locnetMapping) {
+			var newMappings string
+			bridgeMappings := strings.Split(stdout, ",")
+			for _, bridgeMapping := range bridgeMappings {
+				if bridgeMapping != locnetMapping {
+					if len(newMappings) != 0 {
+						newMappings += ","
+					}
+					newMappings += bridgeMapping
+				}
+			}
+			_, stderr, err = util.RunOVSVsctl("set", "Open_vSwitch", ".",
+				fmt.Sprintf("external_ids:ovn-bridge-mappings=%s", newMappings))
+			if err != nil {
+				return fmt.Errorf("failed to set ovn-bridge-mappings, stderr:%s, error: (%v)", stderr, err)
+			}
+		}
+	}
+
+	klog.Info("Local Node Access bridge removed")
+	return nil
+}
+
+func newRoutingViaHostGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net.IP, gwIntf string,
+	nodeAnnotator kube.Annotator, cfg *managementPortConfig, kube kube.Interface, watchFactory factory.NodeWatchFactory) (*gateway, error) {
+	klog.Info("Creating new gateway that will perform routing through host networking stack")
 	gw := &gateway{}
 
 	for _, hostSubnet := range hostSubnets {
@@ -61,12 +101,12 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 	}
 
 	gw.initFunc = func() error {
-		klog.Info("Creating Local Gateway Openflow Manager")
+		klog.Info("Creating Routing Via Host Gateway Openflow Manager")
 		err := setBridgeOfPorts(gwBridge)
 		if err != nil {
 			return err
 		}
-		gw.openflowManager, err = newLocalGatewayOpenflowManager(gwBridge)
+		gw.openflowManager, err = newRoutingViaHostGatewayOpenflowManager(gwBridge)
 		if err != nil {
 			return err
 		}
@@ -85,7 +125,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		return nil
 	}
 
-	klog.Info("Local Gateway Creation Complete")
+	klog.Info("Routing Via Host Gateway Creation Complete")
 	return gw, nil
 }
 
@@ -118,34 +158,13 @@ func getLocalAddrs() (map[string]net.IPNet, error) {
 	return localAddrSet, nil
 }
 
-func cleanupLocalnetGateway(physnet string) error {
-	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
-		"external_ids:ovn-bridge-mappings")
-	if err != nil {
-		return fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
-	}
-	bridgeMappings := strings.Split(stdout, ",")
-	for _, bridgeMapping := range bridgeMappings {
-		m := strings.Split(bridgeMapping, ":")
-		if physnet == m[0] {
-			bridgeName := m[1]
-			_, stderr, err = util.RunOVSVsctl("--", "--if-exists", "del-br", bridgeName)
-			if err != nil {
-				return fmt.Errorf("failed to ovs-vsctl del-br %s stderr:%s (%v)", bridgeName, stderr, err)
-			}
-			break
-		}
-	}
-	return err
-}
-
 // since we share the host's k8s node IP, add OpenFlow flows
 // -- to steer the NodePort traffic arriving on the host to the OVN logical topology and
 // -- to also connection track the outbound north-south traffic through l3 gateway so that
 //    the return traffic can be steered back to OVN logical topology
 // -- to handle host -> service access, via masquerading from the host to OVN GR
 // -- to handle external -> service(ExternalTrafficPolicy: Local) -> host access without SNAT
-func newLocalGatewayOpenflowManager(gwBridge *bridgeConfiguration) (*openflowManager, error) {
+func newRoutingViaHostGatewayOpenflowManager(gwBridge *bridgeConfiguration) (*openflowManager, error) {
 	var dftFlows []string
 
 	dftFlows, err := flowsForDefaultBridge(gwBridge.ofPortPhys, gwBridge.macAddress.String(), gwBridge.ofPortPatch,
