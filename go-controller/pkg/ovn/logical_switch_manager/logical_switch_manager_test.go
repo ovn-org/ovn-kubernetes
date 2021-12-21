@@ -267,7 +267,7 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 				err = lsManager.AddNode(testNode.nodeName, ovntest.MustParseIPNets(testNode.subnets...))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = lsManager.AllocateIPs(testNode.nodeName, allocatedIPNets)
-				klog.Errorf("error: %v", err)
+				klog.Errorf("Error: %v", err)
 				gomega.Expect(err).To(gomega.HaveOccurred())
 				return nil
 			}

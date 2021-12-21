@@ -44,7 +44,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 					pod.Spec.NodeName)
 			}
 			if err = oc.lsManager.AllocateIPs(pod.Spec.NodeName, annotations.IPs); err != nil {
-				klog.Errorf("couldn't allocate IPs: %s for pod: %s on node: %s"+
+				klog.Errorf("Couldn't allocate IPs: %s for pod: %s on node: %s"+
 					" error: %v", util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
 					pod.Spec.NodeName, err)
 			}
