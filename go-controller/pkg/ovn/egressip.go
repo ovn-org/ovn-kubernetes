@@ -747,16 +747,22 @@ func (oc *Controller) addNamespaceEgressIPAssignments(name string, statusAssignm
 func (oc *Controller) addPodEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem, pod *kapi.Pod) error {
 	oc.eIPC.podAssignmentMutex.Lock()
 	defer oc.eIPC.podAssignmentMutex.Unlock()
-	var remainingAssignments, successfulAssignments, existingAssignments []egressipv1.EgressIPStatusItem
-	existing, exists := oc.eIPC.podAssignment[getPodKey(pod)]
+	var remainingAssignments []egressipv1.EgressIPStatusItem
+	podKey := getPodKey(pod)
+	existing, exists := oc.eIPC.podAssignment[podKey]
 	if !exists {
 		remainingAssignments = statusAssignments
 	} else {
 		for _, status := range statusAssignments {
+			shouldAdd := true
 			for _, existingAssignment := range existing {
-				if status != existingAssignment {
-					remainingAssignments = append(remainingAssignments, status)
+				if reflect.DeepEqual(status, existingAssignment) {
+					shouldAdd = false
+					break
 				}
+			}
+			if shouldAdd {
+				remainingAssignments = append(remainingAssignments, status)
 			}
 		}
 	}
@@ -764,14 +770,11 @@ func (oc *Controller) addPodEgressIPAssignments(name string, statusAssignments [
 		klog.V(5).Infof("Adding pod egress IP status: %v for EgressIP: %s and pod: %s/%s", status, name, pod.Name, pod.Namespace)
 		if err := oc.eIPC.addPodEgressIPAssignment(name, status, pod); err != nil && !errors.Is(err, skippedPodError) {
 			return err
-		} else if err == nil {
-			successfulAssignments = append(successfulAssignments, status)
+		} else if !errors.Is(err, skippedPodError) {
+			existing = append(existing, status)
 		}
 	}
-	if len(successfulAssignments) > 0 {
-		existingAssignments = append(existingAssignments, successfulAssignments...)
-		oc.eIPC.podAssignment[getPodKey(pod)] = existingAssignments
-	}
+	oc.eIPC.podAssignment[podKey] = existing
 	return nil
 }
 
@@ -787,29 +790,27 @@ func (oc *Controller) deleteAllocatorEgressIPAssignments(statusAssignments []egr
 	}
 }
 
-func (oc *Controller) deleteEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem) error {
+// deleteEgressIPAssignments performs a full egress IP setup deletion on a per
+// (egress IP name - status) basis. The idea is thus to list the full content of
+// the NB DB for that egress IP object and delete everything which match the
+// status.
+func (oc *Controller) deleteEgressIPAssignments(name string, statusesToRemove []egressipv1.EgressIPStatusItem) error {
 	oc.eIPC.podAssignmentMutex.Lock()
 	defer oc.eIPC.podAssignmentMutex.Unlock()
-	for _, status := range statusAssignments {
-		klog.V(5).Infof("Deleting pod egress IP status: %v for EgressIP: %s", status, name)
-		if err := oc.eIPC.deleteEgressIPStatusSetup(name, status); err != nil {
+	for _, statusToRemove := range statusesToRemove {
+		klog.V(5).Infof("Deleting pod egress IP status: %v for EgressIP: %s", statusToRemove, name)
+		if err := oc.eIPC.deleteEgressIPStatusSetup(name, statusToRemove); err != nil {
 			return err
 		}
-		for podKey, existingAssignments := range oc.eIPC.podAssignment {
-			remainingAssignments := []egressipv1.EgressIPStatusItem{}
-			for _, existingAssignment := range existingAssignments {
-				if !reflect.DeepEqual(existingAssignment, status) {
-					remainingAssignments = append(remainingAssignments, existingAssignment)
+		for podKey, podStatus := range oc.eIPC.podAssignment {
+			for idx, existingStatus := range podStatus {
+				if reflect.DeepEqual(existingStatus, statusToRemove) {
+					podStatus = append(podStatus[:idx], podStatus[idx+1:]...)
+					break
 				}
 			}
-			if len(remainingAssignments) == 0 {
+			if len(podStatus) == 0 {
 				delete(oc.eIPC.podAssignment, podKey)
-				podNamespace, podName := getPodNamespaceAndNameFromKey(podKey)
-				if err := oc.eIPC.addPerPodGRSNAT(podNamespace, podName, nil); err != nil {
-					return err
-				}
-			} else if len(remainingAssignments) != len(existingAssignments) {
-				oc.eIPC.podAssignment[podKey] = remainingAssignments
 			}
 		}
 	}
@@ -839,15 +840,32 @@ func (oc *Controller) deleteNamespaceEgressIPAssignment(name string, statusAssig
 	return nil
 }
 
-func (oc *Controller) deletePodEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem, pod *kapi.Pod) error {
+func (oc *Controller) deletePodEgressIPAssignments(name string, statusesToRemove []egressipv1.EgressIPStatusItem, pod *kapi.Pod) error {
 	oc.eIPC.podAssignmentMutex.Lock()
 	defer oc.eIPC.podAssignmentMutex.Unlock()
-	for _, status := range statusAssignments {
-		klog.V(5).Infof("Deleting pod egress IP status: %v for EgressIP: %s and pod: %s/%s", status, name, pod.Name, pod.Namespace)
-		if err := oc.eIPC.deletePodEgressIPAssignment(name, status, pod); err != nil {
+	podKey := getPodKey(pod)
+	existingAssignments, exists := oc.eIPC.podAssignment[podKey]
+	if !exists {
+		return nil
+	}
+	for _, statusToRemove := range statusesToRemove {
+		klog.V(5).Infof("Deleting pod egress IP status: %v for EgressIP: %s and pod: %s/%s", statusToRemove, name, pod.Name, pod.Namespace)
+		if err := oc.eIPC.deletePodEgressIPAssignment(name, statusToRemove, pod); err != nil {
 			return err
 		}
+		for idx, existingAssignment := range existingAssignments {
+			if reflect.DeepEqual(existingAssignment, statusToRemove) {
+				existingAssignments = append(existingAssignments[:idx], existingAssignments[idx+1:]...)
+				break
+			}
+		}
 	}
+	if len(existingAssignments) > 0 {
+		return nil
+	}
+	// Delete the key if there are no more status assignments to keep
+	// for the pod.
+	delete(oc.eIPC.podAssignment, podKey)
 	return nil
 }
 
@@ -1505,11 +1523,6 @@ func (e *egressIPController) deletePodEgressIPAssignment(egressIPName string, st
 	if len(podIPs) == 0 {
 		return fmt.Errorf("unable to retrieve pod IPs, err: no pod IPs defined")
 	}
-	defer func() {
-		if err == nil {
-			delete(e.podAssignment, getPodKey(pod))
-		}
-	}()
 	if err := e.handleEgressReroutePolicy(podIPs, status, egressIPName, e.deleteEgressReroutePolicy); err != nil {
 		return fmt.Errorf("unable to delete logical router policy, err: %v", err)
 	}
