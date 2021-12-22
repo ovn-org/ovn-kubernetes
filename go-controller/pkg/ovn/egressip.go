@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -145,7 +146,7 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 		// Update the object only on an ADD/UPDATE. If we are processing a
 		// DELETE, new will be nil and we should not update the object.
 		if len(statusToAdd) > 0 || (len(statusToRemove) > 0 && new != nil) {
-			if err := oc.updateEgressIPStatus(newEIP.Name, statusToKeep); err != nil {
+			if err := oc.patchReplaceEgressIPStatus(newEIP.Name, statusToKeep); err != nil {
 				return err
 			}
 			metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
@@ -449,7 +450,7 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 				updatedStatus = append(updatedStatus, status)
 			}
 		}
-		if err := oc.updateEgressIPStatus(egressIP.Name, updatedStatus); err != nil {
+		if err := oc.patchReplaceEgressIPStatus(egressIP.Name, updatedStatus); err != nil {
 			return err
 		}
 	}
@@ -473,10 +474,12 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 		for _, status := range egressIP.Status.Items {
 			if reflect.DeepEqual(status, statusItem) {
 				hasStatus = true
+				break
 			}
 		}
 		if !hasStatus {
-			if err := oc.updateEgressIPStatusWithItem(egressIP.Name, statusItem); err != nil {
+			statusToKeep := append(egressIP.Status.Items, statusItem)
+			if err := oc.patchReplaceEgressIPStatus(egressIP.Name, statusToKeep); err != nil {
 				return err
 			}
 		}
@@ -985,32 +988,35 @@ func (oc *Controller) isAnyClusterNodeIP(ip net.IP) *egressNode {
 	return nil
 }
 
-func (oc *Controller) updateEgressIPStatusWithItem(name string, statusItem egressipv1.EgressIPStatusItem) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		// Get the latest item from the store before updating.
-		egressIP, err := oc.watchFactory.GetEgressIP(name)
-		if err != nil {
-			return err
-		}
-		// Copy the item, since the object retrieved from the store (informer
-		// cache) will point to the same object we are trying to update, hence
-		// not doing this might cause race conditions when running tests.
-		updateEgressIP := egressIP.DeepCopy()
-		updateEgressIP.Status.Items = append(egressIP.Status.Items, statusItem)
-		return oc.kube.UpdateEgressIP(updateEgressIP)
-	})
+type EgressIPPatchStatus struct {
+	Op    string                    `json:"op"`
+	Path  string                    `json:"path"`
+	Value egressipv1.EgressIPStatus `json:"value"`
 }
 
-func (oc *Controller) updateEgressIPStatus(name string, statusItems []egressipv1.EgressIPStatusItem) error {
+// patchReplaceEgressIPStatus performs a replace patch operation of the egress
+// IP status by replacing the status with the provided value. This allows us to
+// update only the status field, without overwriting any other. This is
+// important because processing egress IPs can take a while (when running on a
+// public cloud and in the worst case), hence we don't want to perform a full
+// object update which risks resetting the EgressIP object's fields to the state
+// they had when we started processing the change.
+func (oc *Controller) patchReplaceEgressIPStatus(name string, statusItems []egressipv1.EgressIPStatusItem) error {
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		// see: updateEgressIPStatusWithItem
-		egressIP, err := oc.watchFactory.GetEgressIP(name)
-		if err != nil {
-			return err
+		t := []EgressIPPatchStatus{
+			{
+				Op:   "replace",
+				Path: "/status",
+				Value: egressipv1.EgressIPStatus{
+					Items: statusItems,
+				},
+			},
 		}
-		updateEgressIP := egressIP.DeepCopy()
-		updateEgressIP.Status.Items = statusItems
-		return oc.kube.UpdateEgressIP(updateEgressIP)
+		op, err := json.Marshal(&t)
+		if err != nil {
+			return fmt.Errorf("error serializing status patch operation: %+v, err: %v", statusItems, err)
+		}
+		return oc.kube.PatchEgressIP(name, op)
 	})
 }
 
@@ -1220,11 +1226,11 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 	// egress IPs which are missing an assignment. If there are, we need to send a
 	// synthetic update since reconcileEgressIP will then try to assign those IPs to
 	// this node (if possible)
-	egressIPs, err := oc.watchFactory.GetEgressIPs()
+	egressIPs, err := oc.kube.GetEgressIPs()
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
-	for _, egressIP := range egressIPs {
+	for _, egressIP := range egressIPs.Items {
 		if len(egressIP.Spec.EgressIPs) != len(egressIP.Status.Items) {
 			// Send a "synthetic update" on all egress IPs which are not fully
 			// assigned, the reconciliation loop for WatchEgressIP will try to
@@ -1232,7 +1238,7 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 			// implementation will not trigger a watch event for updates on
 			// objects which have no semantic difference, hence: call the
 			// reconciliation function directly.
-			if err := oc.reconcileEgressIP(egressIP, egressIP); err != nil {
+			if err := oc.reconcileEgressIP(&egressIP, &egressIP); err != nil {
 				klog.Errorf("Synthetic update for EgressIP: %s failed, err: %v", egressIP.Name, err)
 			}
 		}
@@ -1262,11 +1268,11 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 	// Since the node has been labelled as "not usable" for egress IP
 	// assignments we need to find all egress IPs which have an assignment to
 	// it, and move them elsewhere.
-	egressIPs, err := oc.watchFactory.GetEgressIPs()
+	egressIPs, err := oc.kube.GetEgressIPs()
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
-	for _, eIP := range egressIPs {
+	for _, eIP := range egressIPs.Items {
 		keepStatusItems := []egressipv1.EgressIPStatusItem{}
 		for _, status := range eIP.Status.Items {
 			if status.Node != egressNode.Name {
@@ -1283,7 +1289,7 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 			// loop's function directly we'll need to update the object in that
 			// function and have the update recursively call the reconciliation
 			// loop again, i.e: perform two reconciliations for the same change.
-			if err := oc.updateEgressIPStatus(eIP.Name, keepStatusItems); err != nil {
+			if err := oc.patchReplaceEgressIPStatus(eIP.Name, keepStatusItems); err != nil {
 				klog.Errorf("Re-assignment for EgressIP: %s failed, unable to update object, err: %v", eIP.Name, err)
 			}
 		}
