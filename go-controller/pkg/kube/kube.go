@@ -31,6 +31,7 @@ type Interface interface {
 	PatchNode(old, new *kapi.Node) error
 	UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewall) error
 	UpdateEgressIP(eIP *egressipv1.EgressIP) error
+	PatchEgressIP(name string, patchData []byte) error
 	UpdateNodeStatus(node *kapi.Node) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
 	GetNodes() (*kapi.NodeList, error)
@@ -236,6 +237,12 @@ func (k *Kube) UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewal
 func (k *Kube) UpdateEgressIP(eIP *egressipv1.EgressIP) error {
 	klog.Infof("Updating status on EgressIP %s", eIP.Name)
 	_, err := k.EIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIP, metav1.UpdateOptions{})
+	return err
+}
+
+func (k *Kube) PatchEgressIP(name string, patchData []byte) error {
+	klog.Infof("Patching status on EgressIP %s", name)
+	_, err := k.EIPClient.K8sV1().EgressIPs().Patch(context.TODO(), name, types.JSONPatchType, patchData, metav1.PatchOptions{})
 	return err
 }
 
