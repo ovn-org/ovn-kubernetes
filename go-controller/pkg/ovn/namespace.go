@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -92,44 +93,47 @@ func (oc *Controller) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]gateway
 	return res
 }
 
-// addPodToNamespace adds the pod's IP to the namespace's address set and returns
-// pod's routing gateway info
-func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]gatewayInfo, error) {
+// addPodToNamespace returns pod's routing gateway info and the ops needed
+// to add pod's IP to the namespace's address set.
+func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]gatewayInfo, []ovsdb.Operation, error) {
+	var ops []ovsdb.Operation
+	var err error
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns, true, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to ensure namespace locked: %v", err)
+		return nil, nil, nil, fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
 
 	defer nsUnlock()
 
-	if err := nsInfo.addressSet.AddIPs(createIPAddressSlice(ips)); err != nil {
-		return nil, nil, err
+	if ops, err = nsInfo.addressSet.AddIPsReturnOps(createIPAddressSlice(ips)); err != nil {
+		return nil, nil, nil, err
 	}
 
-	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nil
+	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), ops, nil
 }
 
-func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error {
+func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) ([]ovsdb.Operation, error) {
 	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
 	if nsInfo == nil {
-		return nil
+		return nil, nil
 	}
 	defer nsUnlock()
-
+	var ops []ovsdb.Operation
+	var err error
 	if nsInfo.addressSet != nil {
-		if err := nsInfo.addressSet.DeleteIPs(createIPAddressSlice(portInfo.ips)); err != nil {
-			return err
+		if ops, err = nsInfo.addressSet.DeleteIPsReturnOps(createIPAddressSlice(portInfo.ips)); err != nil {
+			return nil, err
 		}
 	}
 
 	// Remove the port from the multicast allow policy.
 	if oc.multicastSupport && nsInfo.multicastEnabled {
-		if err := podDeleteAllowMulticastPolicy(oc.nbClient, ns, portInfo); err != nil {
-			return err
+		if err = podDeleteAllowMulticastPolicy(oc.nbClient, ns, portInfo); err != nil {
+			return nil, err
 		}
 	}
 
-	return nil
+	return ops, nil
 }
 
 func createIPAddressSlice(ips []*net.IPNet) []net.IP {

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -259,17 +260,25 @@ func (as *fakeAddressSets) AddIPs(ips []net.IP) error {
 	as.Lock()
 	defer as.Unlock()
 
+	_, err = as.AddIPsReturnOps(ips)
+	return err
+}
+
+func (as *fakeAddressSets) AddIPsReturnOps(ips []net.IP) ([]ovsdb.Operation, error) {
+	var ops []ovsdb.Operation
+	var err error
+
 	for _, ip := range ips {
 		if utilnet.IsIPv6(ip) {
-			err = as.ipv6.addIP(ip)
+			ops, err = as.ipv6.addIP(ip)
 		} else {
-			err = as.ipv4.addIP(ip)
+			ops, err = as.ipv4.addIP(ip)
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return ops, nil
 }
 
 func (as *fakeAddressSets) GetIPs() ([]string, []string) {
@@ -299,17 +308,25 @@ func (as *fakeAddressSets) DeleteIPs(ips []net.IP) error {
 	as.Lock()
 	defer as.Unlock()
 
+	_, err = as.DeleteIPsReturnOps(ips)
+	return err
+}
+
+func (as *fakeAddressSets) DeleteIPsReturnOps(ips []net.IP) ([]ovsdb.Operation, error) {
+	var ops []ovsdb.Operation
+	var err error
+
 	for _, ip := range ips {
 		if utilnet.IsIPv6(ip) {
-			err = as.ipv6.deleteIP(ip)
+			ops, err = as.ipv6.deleteIP(ip)
 		} else {
-			err = as.ipv4.deleteIP(ip)
+			ops, err = as.ipv4.deleteIP(ip)
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return ops, nil
 }
 
 func (as *fakeAddressSets) Destroy() error {
@@ -338,7 +355,7 @@ func (as *fakeAddressSet) getName() string {
 	return as.name
 }
 
-func (as *fakeAddressSet) addIP(ip net.IP) error {
+func (as *fakeAddressSet) addIP(ip net.IP) ([]ovsdb.Operation, error) {
 	as.Lock()
 	defer as.Unlock()
 	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
@@ -346,7 +363,7 @@ func (as *fakeAddressSet) addIP(ip net.IP) error {
 	if _, ok := as.ips[ipStr]; !ok {
 		as.ips[ip.String()] = ip
 	}
-	return nil
+	return nil, nil
 }
 
 func (as *fakeAddressSet) getIPs() ([]string, error) {
@@ -360,12 +377,12 @@ func (as *fakeAddressSet) getIPs() ([]string, error) {
 	return uniqIPs, nil
 }
 
-func (as *fakeAddressSet) deleteIP(ip net.IP) error {
+func (as *fakeAddressSet) deleteIP(ip net.IP) ([]ovsdb.Operation, error) {
 	as.Lock()
 	defer as.Unlock()
 	gomega.Expect(atomic.LoadUint32(&as.destroyed)).To(gomega.Equal(uint32(0)))
 	delete(as.ips, ip.String())
-	return nil
+	return nil, nil
 }
 
 func (as *fakeAddressSet) destroy() error {
