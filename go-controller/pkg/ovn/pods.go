@@ -132,9 +132,14 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		klog.Errorf(err.Error())
 		// If ovnkube-master restarts, it is also possible the Pod's logical switch port
 		// is not re-added into the cache. Delete logical switch port anyway.
-		err = oc.ovnNBLSPDel(logicalPort, pod.Spec.NodeName)
+		ops, err := oc.ovnNBLSPDel(logicalPort, pod.Spec.NodeName)
 		if err != nil {
 			klog.Errorf(err.Error())
+		} else {
+			_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+			if err != nil {
+				klog.Errorf("Cannot delete logical switch port %s, %v", logicalPort, err)
+			}
 		}
 
 		// Even if the port is not in the cache, IPs annotated in the Pod annotation may already be allocated,
@@ -148,14 +153,23 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	}
 
 	// FIXME: if any of these steps fails we need to stop and try again later...
-
-	if err := oc.deletePodFromNamespace(pod.Namespace, portInfo); err != nil {
+	var allOps, ops []ovsdb.Operation
+	if ops, err = oc.deletePodFromNamespace(pod.Namespace, portInfo); err != nil {
 		klog.Errorf(err.Error())
+	} else {
+		allOps = append(allOps, ops...)
 	}
 
-	err = oc.ovnNBLSPDel(logicalPort, pod.Spec.NodeName)
+	ops, err = oc.ovnNBLSPDel(logicalPort, pod.Spec.NodeName)
 	if err != nil {
 		klog.Errorf(err.Error())
+	} else {
+		allOps = append(allOps, ops...)
+	}
+
+	_, err = libovsdbops.TransactAndCheck(oc.nbClient, allOps)
+	if err != nil {
+		klog.Errorf("Cannot delete logical switch port %s, %v", logicalPort, err)
 	}
 
 	if err := oc.lsManager.ReleaseIPs(portInfo.logicalSwitch, portInfo.ips); err != nil {
@@ -434,10 +448,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// Ensure the namespace/nsInfo exists
-	routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
+	routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, ops, err := oc.addPodToNamespace(pod.Namespace, podIfAddrs)
 	if err != nil {
 		return err
 	}
+	allOps = append(allOps, ops...)
 
 	if needsIP {
 		network, err := util.GetK8sPodDefaultNetwork(pod)
@@ -536,6 +551,10 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// CNI depends on the flows from port security, delay setting it until end
 	lsp.PortSecurity = addresses
 
+	// If address_set.AddIPs was a separate transaction from the creation of address_set,
+	// then we will have 1 (if single stack) or 2 entries (dual stack) in allOps currently.
+	// Save this index to be able to calculate the next index where lsp UUID will be present.
+	lspUUIDIndex := len(allOps)
 	if !lspExist {
 		// create new logical switch port
 		ops, err := oc.nbClient.Create(lsp)
@@ -574,8 +593,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// Add the pod's logical switch port to the port cache
 	var lspUUID string
 	if len(results) >= 1 && !lspExist {
-		// the results may have mutltiple entries but should only be on one UUID
-		lspUUID = results[0].UUID.GoUUID
+		lspUUID = results[lspUUIDIndex].UUID.GoUUID
 	} else {
 		lspUUID = lsp.UUID
 	}
@@ -648,11 +666,11 @@ func (oc *Controller) getPortAddresses(nodeName, portName string) (net.HardwareA
 }
 
 // ovnNBLSPDel deletes the given logical switch using the libovsdb library
-func (oc *Controller) ovnNBLSPDel(logicalPort, logicalSwitch string) error {
+func (oc *Controller) ovnNBLSPDel(logicalPort, logicalSwitch string) ([]ovsdb.Operation, error) {
 	var allOps []ovsdb.Operation
 	ls := &nbdb.LogicalSwitch{}
 	if lsUUID, ok := oc.lsManager.GetUUID(logicalSwitch); !ok {
-		return fmt.Errorf("error getting logical switch for node %s: %s", logicalSwitch, "switch not in logical switch cache")
+		return nil, fmt.Errorf("error getting logical switch for node %s: %s", logicalSwitch, "switch not in logical switch cache")
 	} else {
 		ls.UUID = lsUUID
 	}
@@ -662,7 +680,7 @@ func (oc *Controller) ovnNBLSPDel(logicalPort, logicalSwitch string) error {
 	defer cancel()
 	err := oc.nbClient.Get(ctx, lsp)
 	if err != nil {
-		return fmt.Errorf("cannot delete logical switch port %s failed retrieving the object %v", logicalPort, err)
+		return nil, fmt.Errorf("cannot delete logical switch port %s failed retrieving the object %v", logicalPort, err)
 	}
 	ops, err := oc.nbClient.Where(ls).Mutate(ls, model.Mutation{
 		Field:   &ls.Ports,
@@ -670,19 +688,15 @@ func (oc *Controller) ovnNBLSPDel(logicalPort, logicalSwitch string) error {
 		Value:   []string{lsp.UUID},
 	})
 	if err != nil {
-		return fmt.Errorf("cannot generate ops delete logical switch port %s: %v", logicalPort, err)
+		return nil, fmt.Errorf("cannot generate ops delete logical switch port %s: %v", logicalPort, err)
 	}
 	allOps = append(allOps, ops...)
 	//for testing purposes the explicit delete of the logical switch port is required
 	ops, err = oc.nbClient.Where(lsp).Delete()
 	if err != nil {
-		return fmt.Errorf("cannot generate ops delete logical switch port %s: %v", logicalPort, err)
+		return nil, fmt.Errorf("cannot generate ops delete logical switch port %s: %v", logicalPort, err)
 	}
 	allOps = append(allOps, ops...)
 
-	_, err = libovsdbops.TransactAndCheck(oc.nbClient, allOps)
-	if err != nil {
-		return fmt.Errorf("cannot delete logical switch port %s, %v", logicalPort, err)
-	}
-	return nil
+	return allOps, nil
 }
