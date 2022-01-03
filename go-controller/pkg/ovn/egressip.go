@@ -162,11 +162,19 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 		}
 		if len(ipsToAssign) > 0 {
 			statusToAdd = oc.assignEgressIPs(name, ipsToAssign.UnsortedList())
-			if err := oc.addEgressIPAssignments(name, statusToAdd, newEIP.Spec.NamespaceSelector, newEIP.Spec.PodSelector); err != nil {
-				return err
-			}
 			statusToKeep = append(statusToKeep, statusToAdd...)
 		}
+		// Assign all statusToKeep, we need to warm up the podAssignment cache
+		// on restart. We won't perform any additional transactions to the NB DB
+		// for things which exists because the libovsdb operations use
+		// modelClient which is idempotent.
+		if err := oc.addEgressIPAssignments(name, statusToKeep, newEIP.Spec.NamespaceSelector, newEIP.Spec.PodSelector); err != nil {
+			return err
+		}
+		// Add all assignments which are to be kept to the allocator cache,
+		// allowing us to track all assignments which have been performed and
+		// avoid incorrect future assignments due to a de-synchronized cache.
+		oc.addAllocatorEgressIPAssignments(name, statusToKeep)
 		// Update the object only on an ADD/UPDATE. If we are processing a
 		// DELETE, new will be nil and we should not update the object.
 		if len(statusToAdd) > 0 || (len(statusToRemove) > 0 && new != nil) {
@@ -176,15 +184,28 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 			metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 		}
 	} else {
+		// Delete all assignments that are to be removed from the allocator
+		// cache. If we don't do this we will occupy assignment positions for
+		// the ipsToAdd, even though statusToRemove will be removed afterwards
+		oc.deleteAllocatorEgressIPAssignments(statusToRemove)
 		// If running on a public cloud we should not program OVN just yet, we
 		// need confirmation from the cloud-network-config-controller that it
 		// can assign the IPs. reconcileCloudPrivateIPConfig will take care of
 		// processing the answer from the requests we make here, and update OVN
 		// accordingly when we know what the outcome is.
 		if len(ipsToAssign) > 0 {
-			statusToAdd = oc.assignEgressIPs(newEIP.Name, ipsToAssign.UnsortedList())
+			statusToAdd = oc.assignEgressIPs(name, ipsToAssign.UnsortedList())
+			statusToKeep = append(statusToKeep, statusToAdd...)
 		}
-		if err := oc.executeCloudPrivateIPConfigChange(newEIP.Name, statusToAdd, statusToRemove); err != nil {
+		// Same as above: Add all assignments which are to be kept to the
+		// allocator cache, allowing us to track all assignments which have been
+		// performed and avoid incorrect future assignments due to a
+		// de-synchronized cache.
+		oc.addAllocatorEgressIPAssignments(name, statusToKeep)
+		// Execute CloudPrivateIPConfig changes for assignments which need to be
+		// added/removed, assignments which don't change do not require any
+		// further setup.
+		if err := oc.executeCloudPrivateIPConfigChange(name, statusToAdd, statusToRemove); err != nil {
 			return err
 		}
 	}
@@ -716,7 +737,6 @@ func (oc *Controller) addAllocatorEgressIPAssignments(name string, statusAssignm
 }
 
 func (oc *Controller) addEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem, namespaceSelector, podSelector metav1.LabelSelector) error {
-	oc.addAllocatorEgressIPAssignments(name, statusAssignments)
 	namespaces, err := oc.watchFactory.GetNamespacesBySelector(namespaceSelector)
 	if err != nil {
 		return err
