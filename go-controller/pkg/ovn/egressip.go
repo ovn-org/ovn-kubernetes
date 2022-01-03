@@ -28,6 +28,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -471,12 +472,26 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 		}
 	}
 
+	// As opposed to reconcileEgressIP, here we are only interested in changes
+	// made to the status (since we are the only ones performing the change made
+	// to the spec). So don't process the object if there is no change made to
+	// the status.
+	if reflect.DeepEqual(oldCloudPrivateIPConfig.Status, newCloudPrivateIPConfig.Status) {
+		return nil
+	}
+
 	if shouldDelete {
-		// There can only be one EgressIP object holding a given egress IP. If
-		// multiple objects specify the same egress IP the assignment algorithm
-		// invalidates it, hence: the following is safe.
-		egressIP, err := oc.getEgressIPFromCloudPrivateIPConfigName(oldCloudPrivateIPConfig.Name)
-		if err != nil {
+		// Get the EgressIP owner reference
+		egressIPName, exists := oldCloudPrivateIPConfig.Annotations[util.OVNEgressIPOwnerRefLabel]
+		if !exists {
+			return fmt.Errorf("CloudPrivateIPConfig object: %s is missing the egress IP owner reference annotation", oldCloudPrivateIPConfig.Name)
+		}
+		// Check if the egress IP has been deleted or not, if we are processing
+		// a CloudPrivateIPConfig delete because the EgressIP has been deleted
+		// then we need to remove the setup made for it, but not update the
+		// object.
+		egressIP, err := oc.kube.GetEgressIP(egressIPName)
+		if err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
 		egressIPString := cloudPrivateIPConfigNameToIPString(oldCloudPrivateIPConfig.Name)
@@ -484,11 +499,15 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 			Node:     nodeToDelete,
 			EgressIP: egressIPString,
 		}
-		if err := oc.deleteEgressIPAssignments(egressIP.Name, []egressipv1.EgressIPStatusItem{statusItem}); err != nil {
+		if err := oc.deleteEgressIPAssignments(egressIPName, []egressipv1.EgressIPStatusItem{statusItem}); err != nil {
 			return err
 		}
-		// Deleting here means updating the object with the statuses we want to
-		// keep
+		// If the EgressIP has been deleted just return at this point.
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		// Deleting a status here means updating the object with the statuses we
+		// want to keep
 		updatedStatus := []egressipv1.EgressIPStatusItem{}
 		for _, status := range egressIP.Status.Items {
 			if !reflect.DeepEqual(status, statusItem) {
@@ -500,8 +519,12 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 		}
 	}
 	if shouldAdd {
-		// Same explanation as for delete above.
-		egressIP, err := oc.getEgressIPFromCloudPrivateIPConfigName(newCloudPrivateIPConfig.Name)
+		// Get the EgressIP owner reference
+		egressIPName, exists := oldCloudPrivateIPConfig.Annotations[util.OVNEgressIPOwnerRefLabel]
+		if !exists {
+			return fmt.Errorf("CloudPrivateIPConfig object: %s is missing the egress IP owner reference annotation", oldCloudPrivateIPConfig.Name)
+		}
+		egressIP, err := oc.kube.GetEgressIP(egressIPName)
 		if err != nil {
 			return err
 		}
@@ -533,26 +556,6 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 	return nil
 }
 
-// getEgressIPFromCloudPrivateIPConfigName retrieves the EgressIP object holding
-// the egress IP represented by the CloudPrivateIPConfig name. Only one egress
-// IPs are unique for EgressIP object, so no two objects can reference the same
-// egress IP, hence why this should work.
-func (oc *Controller) getEgressIPFromCloudPrivateIPConfigName(cloudPrivateIPConfigName string) (*egressipv1.EgressIP, error) {
-	egressIPString := cloudPrivateIPConfigNameToIPString(cloudPrivateIPConfigName)
-	eIPs, err := oc.watchFactory.GetEgressIPs()
-	if err != nil {
-		return nil, fmt.Errorf("unable to get EgressIP objects, err: %v", err)
-	}
-	for _, eIP := range eIPs {
-		for _, egressIP := range eIP.Spec.EgressIPs {
-			if egressIP == egressIPString {
-				return eIP, nil
-			}
-		}
-	}
-	return nil, fmt.Errorf("no matching EgressIP found")
-}
-
 type cloudPrivateIPConfigOp struct {
 	toAdd    string
 	toDelete string
@@ -565,7 +568,7 @@ type cloudPrivateIPConfigOp struct {
 // IP, cloudPrivateIPConfigOp is a helper used to determine that sort of
 // operations from toAssign/toRemove
 func (oc *Controller) executeCloudPrivateIPConfigChange(egressIPName string, toAssign, toRemove []egressipv1.EgressIPStatusItem) error {
-	ops := make(map[string]cloudPrivateIPConfigOp, len(toAssign)*len(toRemove))
+	ops := make(map[string]cloudPrivateIPConfigOp, len(toAssign)+len(toRemove))
 	for _, assignment := range toAssign {
 		ops[assignment.EgressIP] = cloudPrivateIPConfigOp{
 			toAdd: assignment.Node,
@@ -611,6 +614,9 @@ func (oc *Controller) executeCloudPrivateIPConfigOps(egressIPName string, ops ma
 			cloudPrivateIPConfig := ocpcloudnetworkapi.CloudPrivateIPConfig{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: cloudPrivateIPConfigName,
+					Annotations: map[string]string{
+						util.OVNEgressIPOwnerRefLabel: egressIPName,
+					},
 				},
 				Spec: ocpcloudnetworkapi.CloudPrivateIPConfigSpec{
 					Node: op.toAdd,
@@ -2165,14 +2171,10 @@ func cloudPrivateIPConfigNameToIPString(name string) string {
 	if ip := net.ParseIP(name); ip != nil {
 		return name
 	}
-	// Handle IPv6
-	tmp := []byte(name)
-	for i := 4; i < len(tmp); i += 5 {
-		if len(tmp)-i > 4 {
-			tmp[i] = byte(':')
-		}
-	}
-	return string(tmp)
+	// Handle IPv6, for which we want to convert the fully expanded "special
+	// name" to go's default IP representation
+	name = strings.ReplaceAll(name, ".", ":")
+	return net.ParseIP(name).String()
 }
 
 // ipStringToCloudPrivateIPConfigName converts the net.IP string representation
