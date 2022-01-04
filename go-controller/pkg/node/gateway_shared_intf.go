@@ -475,25 +475,22 @@ func delServiceRules(service *kapi.Service, npw *nodePortWatcher) {
 			// | svcHasLocalHostNetEndPnt | ExternalTrafficPolicy | GatewayMode  |     Scenario for deletion      |
 			// |--------------------------|-----------------------|--------------|--------------------------------|
 			// |                          |                       |              |      deletes the REDIRECT      |
-			// |         true             |          local        | shared/local |      rules for etp=local +     |
+			// |         true             |          local        | shared+local |      rules for etp=local +     |
 			// |                          |                       |              |      host-networked eps        |
 			// |--------------------------|-----------------------|--------------|--------------------------------|
 			// |                          |                       |              | deletes the DNAT rules for     |
-			// |         false            |          local        |   local      | etp=local + non-local-host-net |
+			// |         false            |          local        | shared+local | etp=local + non-local-host-net |
 			// |                          |                       |              | eps towards masqueradeIP       |
 			// |--------------------------|-----------------------|--------------|--------------------------------|
-			// |                          |                       |              |                                |
-			// |         false            |          cluster      | shared/local |   	deletes the DNAT rules    |
-			// |         false            |           local       |   shared     |         towards clusterIP      |
+			// |                          |                       |              |    deletes the DNAT rules      |
+			// |         false            |          cluster      | shared+local |   	towards clusterIP         |
 			// |                          |                       |              |       for the default case     |
 			// +--------------------------+-----------------------+--------------+--------------------------------+
 
 			// case1: deletes the REDIRECT rules for etp=local + host-networked pods in both gw modes
 			delGatewayIptRules(service, true)
-			// case2 Or case3a/3b:
-			// deletes the DNAT rules towards masqueradeIP for etp=local + ovn-k pods in LGW mode OR
-			// deletes the DNAT rules towards clusterIP for etp=local + ovn-k pods in SGW mode OR
-			// deletes the DNAT rules towards clusterIP for etp=cluster in both gw modes
+			// case2: deletes the DNAT rules towards masqueradeIP for etp=local + ovn-k pods in both gw modes OR
+			// case3: deletes the DNAT rules towards clusterIP for etp=cluster in both gw modes
 			delGatewayIptRules(service, false)
 		}
 		return
@@ -502,10 +499,8 @@ func delServiceRules(service *kapi.Service, npw *nodePortWatcher) {
 	// For host only mode always try and delete all rules here
 	// case1: deletes the REDIRECT rules for etp=local + host-networked pods in both gw modes
 	delGatewayIptRules(service, true)
-	// case2 Or case3a/3b:
-	// deletes the DNAT rules towards masqueradeIP for etp=local + ovn-k pods in LGW mode OR
-	// deletes the DNAT rules towards clusterIP for etp=local + ovn-k pods in SGW mode OR
-	// deletes the DNAT rules towards clusterIP for etp=cluster in both gw modes
+	// case2: deletes the DNAT rules towards masqueradeIP for etp=local + ovn-k pods in both gw modes OR
+	// case3: deletes the DNAT rules towards clusterIP for etp=cluster in both gw modes
 	delGatewayIptRules(service, false)
 }
 
