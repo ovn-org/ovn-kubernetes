@@ -852,7 +852,7 @@ func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 	//   ovnkube-master was down
 	if egressIPToPodIPCache, err := oc.generatePodIPCacheForEgressIP(eIPs); err == nil {
 		oc.syncStaleEgressReroutePolicy(egressIPToPodIPCache)
-		oc.syncStaleNATRules(egressIPToPodIPCache)
+		oc.syncStaleSNATRules(egressIPToPodIPCache)
 	}
 }
 
@@ -890,7 +890,7 @@ func (oc *Controller) syncStaleEgressReroutePolicy(egressIPToPodIPCache map[stri
 	}
 }
 
-func (oc *Controller) syncStaleNATRules(egressIPToPodIPCache map[string]sets.String) {
+func (oc *Controller) syncStaleSNATRules(egressIPToPodIPCache map[string]sets.String) {
 	predicate := func(item *nbdb.NAT) bool {
 		egressIPName, exists := item.ExternalIDs["name"]
 		// Skip nat rows that do not have egressIPName attribute available
