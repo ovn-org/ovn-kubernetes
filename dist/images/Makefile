@@ -13,35 +13,31 @@ all: ubuntu centos fedora
 SLASH = -
 ARCH = $(subst aarch64,arm64,$(subst x86_64,amd64,$(patsubst i%86,386,$(shell uname -m))))
 IMAGE_ARCH = $(SLASH)$(ARCH)
-DOCKERFILE_ARCH =
-ifeq ($(ARCH),arm64)
-        DOCKERFILE_ARCH=.arm64
-endif
 OVS_BRANCH ?= master
 OVN_BRANCH ?= main
 OCI_BIN ?= docker
 
+ifeq ($(ARCH),amd64)
+	IMAGE_ARCH=""
+endif
+
 # The image of ovnkube/ovn-daemonset-u should be multi-arched before using it on arm64
 ubuntu: bld
-	${OCI_BIN} build -t ovn-kube-u$(IMAGE_ARCH) -f Dockerfile.ubuntu$(DOCKERFILE_ARCH) .
-ifeq ($(ARCH),amd64)
-	${OCI_BIN} tag "ovn-kube-u$(IMAGE_ARCH):latest" \
-              "ovn-kube-u:latest"
-endif
+	${OCI_BIN} build -t ovn-kube-u$(IMAGE_ARCH) -f Dockerfile.ubuntu .
 	# This is the default in the ovnkube*.yaml files
 	# ${OCI_BIN} login -u ovnkube docker.io/ovnkube
 	# ${OCI_BIN} push docker.io/ovnkube/ovn-daemonset-u:latest
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest
 
 centos: bld
-	${OCI_BIN} build --build-arg rpmArch=$(shell uname -m) -t ovn-daemonset .
-	${OCI_BIN} tag ovn-daemonset docker.io/ovnkube/ovn-daemonset:latest
+	${OCI_BIN} build --build-arg rpmArch=$(shell uname -m) -t ovn-daemonset$(IMAGE_ARCH) .
+	${OCI_BIN} tag ovn-daemonset$(IMAGE_ARCH) docker.io/ovnkube/ovn-daemonset:latest
 	# ${OCI_BIN} login -u ovnkube docker.io/ovnkube
 	# ${OCI_BIN} push docker.io/ovnkube/ovn-daemonset:latest
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset:latest
 
 fedora: bld
-	${OCI_BIN} build -t ovn-kube-f -f Dockerfile.fedora .
+	${OCI_BIN} build -t ovn-kube-f$(IMAGE_ARCH) -f Dockerfile.fedora .
 	# ${OCI_BIN} login -u ovnkube docker.io/ovnkube
 	# ${OCI_BIN} push docker.io/ovnkube/ovn-daemonset-f:latest
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-f:latest
@@ -50,7 +46,7 @@ fedora-dev: bld
 	${OCI_BIN} build \
 		     --build-arg OVS_BRANCH=$(OVS_BRANCH) \
 		     --build-arg OVN_BRANCH=$(OVN_BRANCH) \
-		     -t ovn-kube-f-dev -f Dockerfile.fedora.dev .
+		     -t ovn-kube-f-dev$(IMAGE_ARCH) -f Dockerfile.fedora.dev .
 	# ${OCI_BIN} login -u ovnkube docker.io/ovnkube
 	# ${OCI_BIN} push docker.io/ovnkube/ovn-daemonset-f:latest
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-f:latest \
