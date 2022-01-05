@@ -3,6 +3,8 @@
 
 package sbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 // DNS defines an object in DNS table
 type DNS struct {
 	UUID        string            `ovsdb:"_uuid"`
@@ -10,3 +12,116 @@ type DNS struct {
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
 	Records     map[string]string `ovsdb:"records"`
 }
+
+func copyDNSDatapaths(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalDNSDatapaths(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func copyDNSExternalIDs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalDNSExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyDNSRecords(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalDNSRecords(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *DNS) DeepCopyInto(b *DNS) {
+	*b = *a
+	b.Datapaths = copyDNSDatapaths(a.Datapaths)
+	b.ExternalIDs = copyDNSExternalIDs(a.ExternalIDs)
+	b.Records = copyDNSRecords(a.Records)
+}
+
+func (a *DNS) DeepCopy() *DNS {
+	b := new(DNS)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *DNS) CloneModelInto(b model.Model) {
+	c := b.(*DNS)
+	a.DeepCopyInto(c)
+}
+
+func (a *DNS) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *DNS) Equals(b *DNS) bool {
+	return a.UUID == b.UUID &&
+		equalDNSDatapaths(a.Datapaths, b.Datapaths) &&
+		equalDNSExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		equalDNSRecords(a.Records, b.Records)
+}
+
+func (a *DNS) EqualsModel(b model.Model) bool {
+	c := b.(*DNS)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &DNS{}
+var _ model.ComparableModel = &DNS{}

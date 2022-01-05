@@ -3,9 +3,69 @@
 
 package nbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 // LoadBalancerGroup defines an object in Load_Balancer_Group table
 type LoadBalancerGroup struct {
 	UUID         string   `ovsdb:"_uuid"`
 	LoadBalancer []string `ovsdb:"load_balancer"`
 	Name         string   `ovsdb:"name"`
 }
+
+func copyLoadBalancerGroupLoadBalancer(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalLoadBalancerGroupLoadBalancer(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *LoadBalancerGroup) DeepCopyInto(b *LoadBalancerGroup) {
+	*b = *a
+	b.LoadBalancer = copyLoadBalancerGroupLoadBalancer(a.LoadBalancer)
+}
+
+func (a *LoadBalancerGroup) DeepCopy() *LoadBalancerGroup {
+	b := new(LoadBalancerGroup)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *LoadBalancerGroup) CloneModelInto(b model.Model) {
+	c := b.(*LoadBalancerGroup)
+	a.DeepCopyInto(c)
+}
+
+func (a *LoadBalancerGroup) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *LoadBalancerGroup) Equals(b *LoadBalancerGroup) bool {
+	return a.UUID == b.UUID &&
+		equalLoadBalancerGroupLoadBalancer(a.LoadBalancer, b.LoadBalancer) &&
+		a.Name == b.Name
+}
+
+func (a *LoadBalancerGroup) EqualsModel(b model.Model) bool {
+	c := b.(*LoadBalancerGroup)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &LoadBalancerGroup{}
+var _ model.ComparableModel = &LoadBalancerGroup{}

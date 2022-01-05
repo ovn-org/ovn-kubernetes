@@ -3,6 +3,8 @@
 
 package sbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 // Connection defines an object in Connection table
 type Connection struct {
 	UUID            string            `ovsdb:"_uuid"`
@@ -16,3 +18,162 @@ type Connection struct {
 	Status          map[string]string `ovsdb:"status"`
 	Target          string            `ovsdb:"target"`
 }
+
+func copyConnectionExternalIDs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalConnectionExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyConnectionInactivityProbe(a *int) *int {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalConnectionInactivityProbe(a, b *int) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyConnectionMaxBackoff(a *int) *int {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalConnectionMaxBackoff(a, b *int) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyConnectionOtherConfig(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalConnectionOtherConfig(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyConnectionStatus(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalConnectionStatus(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *Connection) DeepCopyInto(b *Connection) {
+	*b = *a
+	b.ExternalIDs = copyConnectionExternalIDs(a.ExternalIDs)
+	b.InactivityProbe = copyConnectionInactivityProbe(a.InactivityProbe)
+	b.MaxBackoff = copyConnectionMaxBackoff(a.MaxBackoff)
+	b.OtherConfig = copyConnectionOtherConfig(a.OtherConfig)
+	b.Status = copyConnectionStatus(a.Status)
+}
+
+func (a *Connection) DeepCopy() *Connection {
+	b := new(Connection)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *Connection) CloneModelInto(b model.Model) {
+	c := b.(*Connection)
+	a.DeepCopyInto(c)
+}
+
+func (a *Connection) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *Connection) Equals(b *Connection) bool {
+	return a.UUID == b.UUID &&
+		equalConnectionExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		equalConnectionInactivityProbe(a.InactivityProbe, b.InactivityProbe) &&
+		a.IsConnected == b.IsConnected &&
+		equalConnectionMaxBackoff(a.MaxBackoff, b.MaxBackoff) &&
+		equalConnectionOtherConfig(a.OtherConfig, b.OtherConfig) &&
+		a.ReadOnly == b.ReadOnly &&
+		a.Role == b.Role &&
+		equalConnectionStatus(a.Status, b.Status) &&
+		a.Target == b.Target
+}
+
+func (a *Connection) EqualsModel(b model.Model) bool {
+	c := b.(*Connection)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &Connection{}
+var _ model.ComparableModel = &Connection{}

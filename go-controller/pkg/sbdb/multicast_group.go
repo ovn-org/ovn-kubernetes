@@ -3,6 +3,8 @@
 
 package sbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 // MulticastGroup defines an object in Multicast_Group table
 type MulticastGroup struct {
 	UUID      string   `ovsdb:"_uuid"`
@@ -11,3 +13,63 @@ type MulticastGroup struct {
 	Ports     []string `ovsdb:"ports"`
 	TunnelKey int      `ovsdb:"tunnel_key"`
 }
+
+func copyMulticastGroupPorts(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalMulticastGroupPorts(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *MulticastGroup) DeepCopyInto(b *MulticastGroup) {
+	*b = *a
+	b.Ports = copyMulticastGroupPorts(a.Ports)
+}
+
+func (a *MulticastGroup) DeepCopy() *MulticastGroup {
+	b := new(MulticastGroup)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *MulticastGroup) CloneModelInto(b model.Model) {
+	c := b.(*MulticastGroup)
+	a.DeepCopyInto(c)
+}
+
+func (a *MulticastGroup) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *MulticastGroup) Equals(b *MulticastGroup) bool {
+	return a.UUID == b.UUID &&
+		a.Datapath == b.Datapath &&
+		a.Name == b.Name &&
+		equalMulticastGroupPorts(a.Ports, b.Ports) &&
+		a.TunnelKey == b.TunnelKey
+}
+
+func (a *MulticastGroup) EqualsModel(b model.Model) bool {
+	c := b.(*MulticastGroup)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &MulticastGroup{}
+var _ model.ComparableModel = &MulticastGroup{}

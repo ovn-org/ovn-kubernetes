@@ -3,6 +3,8 @@
 
 package sbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 // GatewayChassis defines an object in Gateway_Chassis table
 type GatewayChassis struct {
 	UUID        string            `ovsdb:"_uuid"`
@@ -12,3 +14,112 @@ type GatewayChassis struct {
 	Options     map[string]string `ovsdb:"options"`
 	Priority    int               `ovsdb:"priority"`
 }
+
+func copyGatewayChassisChassis(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalGatewayChassisChassis(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyGatewayChassisExternalIDs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalGatewayChassisExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyGatewayChassisOptions(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalGatewayChassisOptions(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *GatewayChassis) DeepCopyInto(b *GatewayChassis) {
+	*b = *a
+	b.Chassis = copyGatewayChassisChassis(a.Chassis)
+	b.ExternalIDs = copyGatewayChassisExternalIDs(a.ExternalIDs)
+	b.Options = copyGatewayChassisOptions(a.Options)
+}
+
+func (a *GatewayChassis) DeepCopy() *GatewayChassis {
+	b := new(GatewayChassis)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *GatewayChassis) CloneModelInto(b model.Model) {
+	c := b.(*GatewayChassis)
+	a.DeepCopyInto(c)
+}
+
+func (a *GatewayChassis) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *GatewayChassis) Equals(b *GatewayChassis) bool {
+	return a.UUID == b.UUID &&
+		equalGatewayChassisChassis(a.Chassis, b.Chassis) &&
+		equalGatewayChassisExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		a.Name == b.Name &&
+		equalGatewayChassisOptions(a.Options, b.Options) &&
+		a.Priority == b.Priority
+}
+
+func (a *GatewayChassis) EqualsModel(b model.Model) bool {
+	c := b.(*GatewayChassis)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &GatewayChassis{}
+var _ model.ComparableModel = &GatewayChassis{}

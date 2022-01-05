@@ -3,6 +3,8 @@
 
 package sbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 // PortBinding defines an object in Port_Binding table
 type PortBinding struct {
 	UUID           string            `ovsdb:"_uuid"`
@@ -23,3 +25,312 @@ type PortBinding struct {
 	Up             *bool             `ovsdb:"up"`
 	VirtualParent  *string           `ovsdb:"virtual_parent"`
 }
+
+func copyPortBindingChassis(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalPortBindingChassis(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyPortBindingEncap(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalPortBindingEncap(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyPortBindingExternalIDs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalPortBindingExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyPortBindingGatewayChassis(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalPortBindingGatewayChassis(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func copyPortBindingHaChassisGroup(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalPortBindingHaChassisGroup(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyPortBindingMAC(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalPortBindingMAC(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func copyPortBindingNatAddresses(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalPortBindingNatAddresses(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func copyPortBindingOptions(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalPortBindingOptions(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyPortBindingParentPort(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalPortBindingParentPort(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyPortBindingTag(a *int) *int {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalPortBindingTag(a, b *int) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyPortBindingUp(a *bool) *bool {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalPortBindingUp(a, b *bool) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyPortBindingVirtualParent(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalPortBindingVirtualParent(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func (a *PortBinding) DeepCopyInto(b *PortBinding) {
+	*b = *a
+	b.Chassis = copyPortBindingChassis(a.Chassis)
+	b.Encap = copyPortBindingEncap(a.Encap)
+	b.ExternalIDs = copyPortBindingExternalIDs(a.ExternalIDs)
+	b.GatewayChassis = copyPortBindingGatewayChassis(a.GatewayChassis)
+	b.HaChassisGroup = copyPortBindingHaChassisGroup(a.HaChassisGroup)
+	b.MAC = copyPortBindingMAC(a.MAC)
+	b.NatAddresses = copyPortBindingNatAddresses(a.NatAddresses)
+	b.Options = copyPortBindingOptions(a.Options)
+	b.ParentPort = copyPortBindingParentPort(a.ParentPort)
+	b.Tag = copyPortBindingTag(a.Tag)
+	b.Up = copyPortBindingUp(a.Up)
+	b.VirtualParent = copyPortBindingVirtualParent(a.VirtualParent)
+}
+
+func (a *PortBinding) DeepCopy() *PortBinding {
+	b := new(PortBinding)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *PortBinding) CloneModelInto(b model.Model) {
+	c := b.(*PortBinding)
+	a.DeepCopyInto(c)
+}
+
+func (a *PortBinding) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *PortBinding) Equals(b *PortBinding) bool {
+	return a.UUID == b.UUID &&
+		equalPortBindingChassis(a.Chassis, b.Chassis) &&
+		a.Datapath == b.Datapath &&
+		equalPortBindingEncap(a.Encap, b.Encap) &&
+		equalPortBindingExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		equalPortBindingGatewayChassis(a.GatewayChassis, b.GatewayChassis) &&
+		equalPortBindingHaChassisGroup(a.HaChassisGroup, b.HaChassisGroup) &&
+		a.LogicalPort == b.LogicalPort &&
+		equalPortBindingMAC(a.MAC, b.MAC) &&
+		equalPortBindingNatAddresses(a.NatAddresses, b.NatAddresses) &&
+		equalPortBindingOptions(a.Options, b.Options) &&
+		equalPortBindingParentPort(a.ParentPort, b.ParentPort) &&
+		equalPortBindingTag(a.Tag, b.Tag) &&
+		a.TunnelKey == b.TunnelKey &&
+		a.Type == b.Type &&
+		equalPortBindingUp(a.Up, b.Up) &&
+		equalPortBindingVirtualParent(a.VirtualParent, b.VirtualParent)
+}
+
+func (a *PortBinding) EqualsModel(b model.Model) bool {
+	c := b.(*PortBinding)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &PortBinding{}
+var _ model.ComparableModel = &PortBinding{}
