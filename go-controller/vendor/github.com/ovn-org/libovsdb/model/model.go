@@ -24,13 +24,45 @@ import (
 //}
 type Model interface{}
 
+type CloneableModel interface {
+	CloneModel() Model
+	CloneModelInto(Model)
+}
+
+type ComparableModel interface {
+	EqualsModel(Model) bool
+}
+
 // Clone creates a deep copy of a model
 func Clone(a Model) Model {
+	if cloner, ok := a.(CloneableModel); ok {
+		return cloner.CloneModel()
+	}
+
 	val := reflect.Indirect(reflect.ValueOf(a))
 	b := reflect.New(val.Type()).Interface()
 	aBytes, _ := json.Marshal(a)
 	_ = json.Unmarshal(aBytes, b)
 	return b
+}
+
+// CloneInto deep copies a model into another one
+func CloneInto(src, dst Model) {
+	if cloner, ok := src.(CloneableModel); ok {
+		cloner.CloneModelInto(dst)
+		return
+	}
+
+	aBytes, _ := json.Marshal(src)
+	_ = json.Unmarshal(aBytes, dst)
+}
+
+func Equal(l, r Model) bool {
+	if comparator, ok := l.(ComparableModel); ok {
+		return comparator.EqualsModel(r)
+	}
+
+	return reflect.DeepEqual(l, r)
 }
 
 func modelSetUUID(model Model, uuid string) error {
