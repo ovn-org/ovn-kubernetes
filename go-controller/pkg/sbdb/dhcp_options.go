@@ -3,6 +3,8 @@
 
 package sbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 type (
 	DHCPOptionsType = string
 )
@@ -26,3 +28,37 @@ type DHCPOptions struct {
 	Name string          `ovsdb:"name"`
 	Type DHCPOptionsType `ovsdb:"type"`
 }
+
+func (a *DHCPOptions) DeepCopyInto(b *DHCPOptions) {
+	*b = *a
+}
+
+func (a *DHCPOptions) DeepCopy() *DHCPOptions {
+	b := new(DHCPOptions)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *DHCPOptions) CloneModelInto(b model.Model) {
+	c := b.(*DHCPOptions)
+	a.DeepCopyInto(c)
+}
+
+func (a *DHCPOptions) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *DHCPOptions) Equals(b *DHCPOptions) bool {
+	return a.UUID == b.UUID &&
+		a.Code == b.Code &&
+		a.Name == b.Name &&
+		a.Type == b.Type
+}
+
+func (a *DHCPOptions) EqualsModel(b model.Model) bool {
+	c := b.(*DHCPOptions)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &DHCPOptions{}
+var _ model.ComparableModel = &DHCPOptions{}

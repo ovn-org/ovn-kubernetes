@@ -3,6 +3,8 @@
 
 package sbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 // RBACPermission defines an object in RBAC_Permission table
 type RBACPermission struct {
 	UUID          string   `ovsdb:"_uuid"`
@@ -11,3 +13,88 @@ type RBACPermission struct {
 	Table         string   `ovsdb:"table"`
 	Update        []string `ovsdb:"update"`
 }
+
+func copyRBACPermissionAuthorization(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalRBACPermissionAuthorization(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func copyRBACPermissionUpdate(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalRBACPermissionUpdate(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *RBACPermission) DeepCopyInto(b *RBACPermission) {
+	*b = *a
+	b.Authorization = copyRBACPermissionAuthorization(a.Authorization)
+	b.Update = copyRBACPermissionUpdate(a.Update)
+}
+
+func (a *RBACPermission) DeepCopy() *RBACPermission {
+	b := new(RBACPermission)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *RBACPermission) CloneModelInto(b model.Model) {
+	c := b.(*RBACPermission)
+	a.DeepCopyInto(c)
+}
+
+func (a *RBACPermission) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *RBACPermission) Equals(b *RBACPermission) bool {
+	return a.UUID == b.UUID &&
+		equalRBACPermissionAuthorization(a.Authorization, b.Authorization) &&
+		a.InsertDelete == b.InsertDelete &&
+		a.Table == b.Table &&
+		equalRBACPermissionUpdate(a.Update, b.Update)
+}
+
+func (a *RBACPermission) EqualsModel(b model.Model) bool {
+	c := b.(*RBACPermission)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &RBACPermission{}
+var _ model.ComparableModel = &RBACPermission{}

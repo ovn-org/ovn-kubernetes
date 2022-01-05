@@ -3,6 +3,8 @@
 
 package sbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 type (
 	LoadBalancerProtocol = string
 )
@@ -23,3 +25,165 @@ type LoadBalancer struct {
 	Protocol    *LoadBalancerProtocol `ovsdb:"protocol"`
 	Vips        map[string]string     `ovsdb:"vips"`
 }
+
+func copyLoadBalancerDatapaths(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalLoadBalancerDatapaths(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func copyLoadBalancerExternalIDs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalLoadBalancerExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyLoadBalancerOptions(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalLoadBalancerOptions(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyLoadBalancerProtocol(a *LoadBalancerProtocol) *LoadBalancerProtocol {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLoadBalancerProtocol(a, b *LoadBalancerProtocol) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyLoadBalancerVips(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalLoadBalancerVips(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *LoadBalancer) DeepCopyInto(b *LoadBalancer) {
+	*b = *a
+	b.Datapaths = copyLoadBalancerDatapaths(a.Datapaths)
+	b.ExternalIDs = copyLoadBalancerExternalIDs(a.ExternalIDs)
+	b.Options = copyLoadBalancerOptions(a.Options)
+	b.Protocol = copyLoadBalancerProtocol(a.Protocol)
+	b.Vips = copyLoadBalancerVips(a.Vips)
+}
+
+func (a *LoadBalancer) DeepCopy() *LoadBalancer {
+	b := new(LoadBalancer)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *LoadBalancer) CloneModelInto(b model.Model) {
+	c := b.(*LoadBalancer)
+	a.DeepCopyInto(c)
+}
+
+func (a *LoadBalancer) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *LoadBalancer) Equals(b *LoadBalancer) bool {
+	return a.UUID == b.UUID &&
+		equalLoadBalancerDatapaths(a.Datapaths, b.Datapaths) &&
+		equalLoadBalancerExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		a.Name == b.Name &&
+		equalLoadBalancerOptions(a.Options, b.Options) &&
+		equalLoadBalancerProtocol(a.Protocol, b.Protocol) &&
+		equalLoadBalancerVips(a.Vips, b.Vips)
+}
+
+func (a *LoadBalancer) EqualsModel(b model.Model) bool {
+	c := b.(*LoadBalancer)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &LoadBalancer{}
+var _ model.ComparableModel = &LoadBalancer{}

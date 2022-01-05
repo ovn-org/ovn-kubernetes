@@ -3,6 +3,8 @@
 
 package nbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 type (
 	QoSAction    = string
 	QoSBandwidth = string
@@ -27,3 +29,121 @@ type QoS struct {
 	Match       string            `ovsdb:"match"`
 	Priority    int               `ovsdb:"priority"`
 }
+
+func copyQoSAction(a map[string]int) map[string]int {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]int, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalQoSAction(a, b map[string]int) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyQoSBandwidth(a map[string]int) map[string]int {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]int, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalQoSBandwidth(a, b map[string]int) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyQoSExternalIDs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalQoSExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *QoS) DeepCopyInto(b *QoS) {
+	*b = *a
+	b.Action = copyQoSAction(a.Action)
+	b.Bandwidth = copyQoSBandwidth(a.Bandwidth)
+	b.ExternalIDs = copyQoSExternalIDs(a.ExternalIDs)
+}
+
+func (a *QoS) DeepCopy() *QoS {
+	b := new(QoS)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *QoS) CloneModelInto(b model.Model) {
+	c := b.(*QoS)
+	a.DeepCopyInto(c)
+}
+
+func (a *QoS) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *QoS) Equals(b *QoS) bool {
+	return a.UUID == b.UUID &&
+		equalQoSAction(a.Action, b.Action) &&
+		equalQoSBandwidth(a.Bandwidth, b.Bandwidth) &&
+		a.Direction == b.Direction &&
+		equalQoSExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		a.Match == b.Match &&
+		a.Priority == b.Priority
+}
+
+func (a *QoS) EqualsModel(b model.Model) bool {
+	c := b.(*QoS)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &QoS{}
+var _ model.ComparableModel = &QoS{}

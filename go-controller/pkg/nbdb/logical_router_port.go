@@ -3,6 +3,8 @@
 
 package nbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 // LogicalRouterPort defines an object in Logical_Router_Port table
 type LogicalRouterPort struct {
 	UUID           string            `ovsdb:"_uuid"`
@@ -18,3 +20,258 @@ type LogicalRouterPort struct {
 	Options        map[string]string `ovsdb:"options"`
 	Peer           *string           `ovsdb:"peer"`
 }
+
+func copyLogicalRouterPortEnabled(a *bool) *bool {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalRouterPortEnabled(a, b *bool) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyLogicalRouterPortExternalIDs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalLogicalRouterPortExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyLogicalRouterPortGatewayChassis(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalLogicalRouterPortGatewayChassis(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func copyLogicalRouterPortHaChassisGroup(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalRouterPortHaChassisGroup(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyLogicalRouterPortIpv6Prefix(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalLogicalRouterPortIpv6Prefix(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func copyLogicalRouterPortIpv6RaConfigs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalLogicalRouterPortIpv6RaConfigs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyLogicalRouterPortNetworks(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalLogicalRouterPortNetworks(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func copyLogicalRouterPortOptions(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalLogicalRouterPortOptions(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyLogicalRouterPortPeer(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalRouterPortPeer(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func (a *LogicalRouterPort) DeepCopyInto(b *LogicalRouterPort) {
+	*b = *a
+	b.Enabled = copyLogicalRouterPortEnabled(a.Enabled)
+	b.ExternalIDs = copyLogicalRouterPortExternalIDs(a.ExternalIDs)
+	b.GatewayChassis = copyLogicalRouterPortGatewayChassis(a.GatewayChassis)
+	b.HaChassisGroup = copyLogicalRouterPortHaChassisGroup(a.HaChassisGroup)
+	b.Ipv6Prefix = copyLogicalRouterPortIpv6Prefix(a.Ipv6Prefix)
+	b.Ipv6RaConfigs = copyLogicalRouterPortIpv6RaConfigs(a.Ipv6RaConfigs)
+	b.Networks = copyLogicalRouterPortNetworks(a.Networks)
+	b.Options = copyLogicalRouterPortOptions(a.Options)
+	b.Peer = copyLogicalRouterPortPeer(a.Peer)
+}
+
+func (a *LogicalRouterPort) DeepCopy() *LogicalRouterPort {
+	b := new(LogicalRouterPort)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *LogicalRouterPort) CloneModelInto(b model.Model) {
+	c := b.(*LogicalRouterPort)
+	a.DeepCopyInto(c)
+}
+
+func (a *LogicalRouterPort) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *LogicalRouterPort) Equals(b *LogicalRouterPort) bool {
+	return a.UUID == b.UUID &&
+		equalLogicalRouterPortEnabled(a.Enabled, b.Enabled) &&
+		equalLogicalRouterPortExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		equalLogicalRouterPortGatewayChassis(a.GatewayChassis, b.GatewayChassis) &&
+		equalLogicalRouterPortHaChassisGroup(a.HaChassisGroup, b.HaChassisGroup) &&
+		equalLogicalRouterPortIpv6Prefix(a.Ipv6Prefix, b.Ipv6Prefix) &&
+		equalLogicalRouterPortIpv6RaConfigs(a.Ipv6RaConfigs, b.Ipv6RaConfigs) &&
+		a.MAC == b.MAC &&
+		a.Name == b.Name &&
+		equalLogicalRouterPortNetworks(a.Networks, b.Networks) &&
+		equalLogicalRouterPortOptions(a.Options, b.Options) &&
+		equalLogicalRouterPortPeer(a.Peer, b.Peer)
+}
+
+func (a *LogicalRouterPort) EqualsModel(b model.Model) bool {
+	c := b.(*LogicalRouterPort)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &LogicalRouterPort{}
+var _ model.ComparableModel = &LogicalRouterPort{}

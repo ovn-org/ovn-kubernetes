@@ -3,6 +3,8 @@
 
 package sbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 // FDB defines an object in FDB table
 type FDB struct {
 	UUID    string `ovsdb:"_uuid"`
@@ -10,3 +12,37 @@ type FDB struct {
 	MAC     string `ovsdb:"mac"`
 	PortKey int    `ovsdb:"port_key"`
 }
+
+func (a *FDB) DeepCopyInto(b *FDB) {
+	*b = *a
+}
+
+func (a *FDB) DeepCopy() *FDB {
+	b := new(FDB)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *FDB) CloneModelInto(b model.Model) {
+	c := b.(*FDB)
+	a.DeepCopyInto(c)
+}
+
+func (a *FDB) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *FDB) Equals(b *FDB) bool {
+	return a.UUID == b.UUID &&
+		a.DpKey == b.DpKey &&
+		a.MAC == b.MAC &&
+		a.PortKey == b.PortKey
+}
+
+func (a *FDB) EqualsModel(b model.Model) bool {
+	c := b.(*FDB)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &FDB{}
+var _ model.ComparableModel = &FDB{}

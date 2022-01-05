@@ -3,6 +3,8 @@
 
 package nbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 type (
 	NATType = string
 )
@@ -27,3 +29,174 @@ type NAT struct {
 	Options           map[string]string `ovsdb:"options"`
 	Type              NATType           `ovsdb:"type"`
 }
+
+func copyNATAllowedExtIPs(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalNATAllowedExtIPs(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyNATExemptedExtIPs(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalNATExemptedExtIPs(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyNATExternalIDs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalNATExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyNATExternalMAC(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalNATExternalMAC(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyNATLogicalPort(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalNATLogicalPort(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyNATOptions(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalNATOptions(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *NAT) DeepCopyInto(b *NAT) {
+	*b = *a
+	b.AllowedExtIPs = copyNATAllowedExtIPs(a.AllowedExtIPs)
+	b.ExemptedExtIPs = copyNATExemptedExtIPs(a.ExemptedExtIPs)
+	b.ExternalIDs = copyNATExternalIDs(a.ExternalIDs)
+	b.ExternalMAC = copyNATExternalMAC(a.ExternalMAC)
+	b.LogicalPort = copyNATLogicalPort(a.LogicalPort)
+	b.Options = copyNATOptions(a.Options)
+}
+
+func (a *NAT) DeepCopy() *NAT {
+	b := new(NAT)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *NAT) CloneModelInto(b model.Model) {
+	c := b.(*NAT)
+	a.DeepCopyInto(c)
+}
+
+func (a *NAT) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *NAT) Equals(b *NAT) bool {
+	return a.UUID == b.UUID &&
+		equalNATAllowedExtIPs(a.AllowedExtIPs, b.AllowedExtIPs) &&
+		equalNATExemptedExtIPs(a.ExemptedExtIPs, b.ExemptedExtIPs) &&
+		equalNATExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		a.ExternalIP == b.ExternalIP &&
+		equalNATExternalMAC(a.ExternalMAC, b.ExternalMAC) &&
+		a.ExternalPortRange == b.ExternalPortRange &&
+		a.LogicalIP == b.LogicalIP &&
+		equalNATLogicalPort(a.LogicalPort, b.LogicalPort) &&
+		equalNATOptions(a.Options, b.Options) &&
+		a.Type == b.Type
+}
+
+func (a *NAT) EqualsModel(b model.Model) bool {
+	c := b.(*NAT)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &NAT{}
+var _ model.ComparableModel = &NAT{}

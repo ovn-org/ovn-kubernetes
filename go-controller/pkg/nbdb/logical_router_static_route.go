@@ -3,6 +3,8 @@
 
 package nbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 type (
 	LogicalRouterStaticRoutePolicy = string
 )
@@ -23,3 +25,152 @@ type LogicalRouterStaticRoute struct {
 	OutputPort  *string                         `ovsdb:"output_port"`
 	Policy      *LogicalRouterStaticRoutePolicy `ovsdb:"policy"`
 }
+
+func copyLogicalRouterStaticRouteBFD(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalRouterStaticRouteBFD(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyLogicalRouterStaticRouteExternalIDs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalLogicalRouterStaticRouteExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyLogicalRouterStaticRouteOptions(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalLogicalRouterStaticRouteOptions(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyLogicalRouterStaticRouteOutputPort(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalRouterStaticRouteOutputPort(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyLogicalRouterStaticRoutePolicy(a *LogicalRouterStaticRoutePolicy) *LogicalRouterStaticRoutePolicy {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalRouterStaticRoutePolicy(a, b *LogicalRouterStaticRoutePolicy) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func (a *LogicalRouterStaticRoute) DeepCopyInto(b *LogicalRouterStaticRoute) {
+	*b = *a
+	b.BFD = copyLogicalRouterStaticRouteBFD(a.BFD)
+	b.ExternalIDs = copyLogicalRouterStaticRouteExternalIDs(a.ExternalIDs)
+	b.Options = copyLogicalRouterStaticRouteOptions(a.Options)
+	b.OutputPort = copyLogicalRouterStaticRouteOutputPort(a.OutputPort)
+	b.Policy = copyLogicalRouterStaticRoutePolicy(a.Policy)
+}
+
+func (a *LogicalRouterStaticRoute) DeepCopy() *LogicalRouterStaticRoute {
+	b := new(LogicalRouterStaticRoute)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *LogicalRouterStaticRoute) CloneModelInto(b model.Model) {
+	c := b.(*LogicalRouterStaticRoute)
+	a.DeepCopyInto(c)
+}
+
+func (a *LogicalRouterStaticRoute) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *LogicalRouterStaticRoute) Equals(b *LogicalRouterStaticRoute) bool {
+	return a.UUID == b.UUID &&
+		equalLogicalRouterStaticRouteBFD(a.BFD, b.BFD) &&
+		equalLogicalRouterStaticRouteExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		a.IPPrefix == b.IPPrefix &&
+		a.Nexthop == b.Nexthop &&
+		equalLogicalRouterStaticRouteOptions(a.Options, b.Options) &&
+		equalLogicalRouterStaticRouteOutputPort(a.OutputPort, b.OutputPort) &&
+		equalLogicalRouterStaticRoutePolicy(a.Policy, b.Policy)
+}
+
+func (a *LogicalRouterStaticRoute) EqualsModel(b model.Model) bool {
+	c := b.(*LogicalRouterStaticRoute)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &LogicalRouterStaticRoute{}
+var _ model.ComparableModel = &LogicalRouterStaticRoute{}

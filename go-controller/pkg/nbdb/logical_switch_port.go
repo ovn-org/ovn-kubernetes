@@ -3,6 +3,8 @@
 
 package nbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 // LogicalSwitchPort defines an object in Logical_Switch_Port table
 type LogicalSwitchPort struct {
 	UUID             string            `ovsdb:"_uuid"`
@@ -22,3 +24,324 @@ type LogicalSwitchPort struct {
 	Type             string            `ovsdb:"type"`
 	Up               *bool             `ovsdb:"up"`
 }
+
+func copyLogicalSwitchPortAddresses(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalLogicalSwitchPortAddresses(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func copyLogicalSwitchPortDhcpv4Options(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalSwitchPortDhcpv4Options(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyLogicalSwitchPortDhcpv6Options(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalSwitchPortDhcpv6Options(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyLogicalSwitchPortDynamicAddresses(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalSwitchPortDynamicAddresses(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyLogicalSwitchPortEnabled(a *bool) *bool {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalSwitchPortEnabled(a, b *bool) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyLogicalSwitchPortExternalIDs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalLogicalSwitchPortExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyLogicalSwitchPortHaChassisGroup(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalSwitchPortHaChassisGroup(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyLogicalSwitchPortOptions(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalLogicalSwitchPortOptions(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyLogicalSwitchPortParentName(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalSwitchPortParentName(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyLogicalSwitchPortPortSecurity(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalLogicalSwitchPortPortSecurity(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func copyLogicalSwitchPortTag(a *int) *int {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalSwitchPortTag(a, b *int) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyLogicalSwitchPortTagRequest(a *int) *int {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalSwitchPortTagRequest(a, b *int) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyLogicalSwitchPortUp(a *bool) *bool {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalSwitchPortUp(a, b *bool) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func (a *LogicalSwitchPort) DeepCopyInto(b *LogicalSwitchPort) {
+	*b = *a
+	b.Addresses = copyLogicalSwitchPortAddresses(a.Addresses)
+	b.Dhcpv4Options = copyLogicalSwitchPortDhcpv4Options(a.Dhcpv4Options)
+	b.Dhcpv6Options = copyLogicalSwitchPortDhcpv6Options(a.Dhcpv6Options)
+	b.DynamicAddresses = copyLogicalSwitchPortDynamicAddresses(a.DynamicAddresses)
+	b.Enabled = copyLogicalSwitchPortEnabled(a.Enabled)
+	b.ExternalIDs = copyLogicalSwitchPortExternalIDs(a.ExternalIDs)
+	b.HaChassisGroup = copyLogicalSwitchPortHaChassisGroup(a.HaChassisGroup)
+	b.Options = copyLogicalSwitchPortOptions(a.Options)
+	b.ParentName = copyLogicalSwitchPortParentName(a.ParentName)
+	b.PortSecurity = copyLogicalSwitchPortPortSecurity(a.PortSecurity)
+	b.Tag = copyLogicalSwitchPortTag(a.Tag)
+	b.TagRequest = copyLogicalSwitchPortTagRequest(a.TagRequest)
+	b.Up = copyLogicalSwitchPortUp(a.Up)
+}
+
+func (a *LogicalSwitchPort) DeepCopy() *LogicalSwitchPort {
+	b := new(LogicalSwitchPort)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *LogicalSwitchPort) CloneModelInto(b model.Model) {
+	c := b.(*LogicalSwitchPort)
+	a.DeepCopyInto(c)
+}
+
+func (a *LogicalSwitchPort) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *LogicalSwitchPort) Equals(b *LogicalSwitchPort) bool {
+	return a.UUID == b.UUID &&
+		equalLogicalSwitchPortAddresses(a.Addresses, b.Addresses) &&
+		equalLogicalSwitchPortDhcpv4Options(a.Dhcpv4Options, b.Dhcpv4Options) &&
+		equalLogicalSwitchPortDhcpv6Options(a.Dhcpv6Options, b.Dhcpv6Options) &&
+		equalLogicalSwitchPortDynamicAddresses(a.DynamicAddresses, b.DynamicAddresses) &&
+		equalLogicalSwitchPortEnabled(a.Enabled, b.Enabled) &&
+		equalLogicalSwitchPortExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		equalLogicalSwitchPortHaChassisGroup(a.HaChassisGroup, b.HaChassisGroup) &&
+		a.Name == b.Name &&
+		equalLogicalSwitchPortOptions(a.Options, b.Options) &&
+		equalLogicalSwitchPortParentName(a.ParentName, b.ParentName) &&
+		equalLogicalSwitchPortPortSecurity(a.PortSecurity, b.PortSecurity) &&
+		equalLogicalSwitchPortTag(a.Tag, b.Tag) &&
+		equalLogicalSwitchPortTagRequest(a.TagRequest, b.TagRequest) &&
+		a.Type == b.Type &&
+		equalLogicalSwitchPortUp(a.Up, b.Up)
+}
+
+func (a *LogicalSwitchPort) EqualsModel(b model.Model) bool {
+	c := b.(*LogicalSwitchPort)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &LogicalSwitchPort{}
+var _ model.ComparableModel = &LogicalSwitchPort{}

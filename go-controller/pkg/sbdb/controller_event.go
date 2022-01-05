@@ -3,6 +3,8 @@
 
 package sbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 type (
 	ControllerEventEventType = string
 )
@@ -19,3 +21,84 @@ type ControllerEvent struct {
 	EventType ControllerEventEventType `ovsdb:"event_type"`
 	SeqNum    int                      `ovsdb:"seq_num"`
 }
+
+func copyControllerEventChassis(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalControllerEventChassis(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyControllerEventEventInfo(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalControllerEventEventInfo(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *ControllerEvent) DeepCopyInto(b *ControllerEvent) {
+	*b = *a
+	b.Chassis = copyControllerEventChassis(a.Chassis)
+	b.EventInfo = copyControllerEventEventInfo(a.EventInfo)
+}
+
+func (a *ControllerEvent) DeepCopy() *ControllerEvent {
+	b := new(ControllerEvent)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *ControllerEvent) CloneModelInto(b model.Model) {
+	c := b.(*ControllerEvent)
+	a.DeepCopyInto(c)
+}
+
+func (a *ControllerEvent) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *ControllerEvent) Equals(b *ControllerEvent) bool {
+	return a.UUID == b.UUID &&
+		equalControllerEventChassis(a.Chassis, b.Chassis) &&
+		equalControllerEventEventInfo(a.EventInfo, b.EventInfo) &&
+		a.EventType == b.EventType &&
+		a.SeqNum == b.SeqNum
+}
+
+func (a *ControllerEvent) EqualsModel(b model.Model) bool {
+	c := b.(*ControllerEvent)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &ControllerEvent{}
+var _ model.ComparableModel = &ControllerEvent{}
