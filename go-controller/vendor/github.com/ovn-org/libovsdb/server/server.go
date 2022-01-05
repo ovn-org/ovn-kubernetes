@@ -100,7 +100,10 @@ func (o *OvsdbServer) Close() {
 	o.readyMutex.Lock()
 	o.ready = false
 	o.readyMutex.Unlock()
-	o.listener.Close()
+	// Only close the listener if Serve() has been called
+	if o.listener != nil {
+		o.listener.Close()
+	}
 	close(o.done)
 }
 
