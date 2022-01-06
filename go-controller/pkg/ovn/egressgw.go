@@ -1049,6 +1049,7 @@ func (oc *Controller) cleanExGwECMPRoutes() {
 						},
 					},
 				}
+				// TODO(flaviof): This may be a good candidate for DeleteOps()
 				if err := oc.modelClient.Delete(opModels...); err != nil {
 					klog.Errorf("Failed to destroy Logical_Router_Static_Route %s, err: %v", ovnRoute.uuid, err)
 				}
