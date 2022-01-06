@@ -242,7 +242,7 @@ func runOvnKube(ctx *cli.Context) error {
 		// register prometheus metrics exported by the master
 		// this must be done prior to calling controller start
 		// since we capture some metrics in Start()
-		metrics.RegisterMasterMetrics(libovsdbOvnSBClient)
+		metrics.RegisterMasterMetrics(libovsdbOvnNBClient, libovsdbOvnSBClient)
 
 		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil,
 			libovsdbOvnNBClient, libovsdbOvnSBClient, util.EventRecorder(ovnClientset.KubeClient))
