@@ -861,19 +861,24 @@ func (oc *Controller) syncStaleEgressReroutePolicy(egressIPToPodIPCache map[stri
 	logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
 	opModels := []libovsdbops.OperationModel{
 		{
-			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool { return lrp.Priority == types.EgressIPReroutePriority },
+			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
+				if lrp.Priority != types.EgressIPReroutePriority {
+					return false
+				}
+				egressIPName := lrp.ExternalIDs["name"]
+				podIPCache, exists := egressIPToPodIPCache[egressIPName]
+				splitMatch := strings.Split(lrp.Match, " ")
+				logicalIP := splitMatch[len(splitMatch)-1]
+				parsedLogicalIP := net.ParseIP(logicalIP)
+				if !exists || !podIPCache.Has(parsedLogicalIP.String()) {
+					klog.Infof("syncStaleEgressReroutePolicy will delete %s: %v", egressIPName, lrp)
+					return true
+				}
+				return false
+			},
 			ExistingResult: &logicalRouterPolicyRes,
 			DoAfter: func() {
-				for _, item := range logicalRouterPolicyRes {
-					egressIPName := item.ExternalIDs["name"]
-					podIPCache, exists := egressIPToPodIPCache[egressIPName]
-					splitMatch := strings.Split(item.Match, " ")
-					logicalIP := splitMatch[len(splitMatch)-1]
-					parsedLogicalIP := net.ParseIP(logicalIP)
-					if !exists || !podIPCache.Has(parsedLogicalIP.String()) {
-						logicalRouter.Policies = append(logicalRouter.Policies, item.UUID)
-					}
-				}
+				logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
 			},
 			BulkOp: true,
 		},
@@ -893,13 +898,17 @@ func (oc *Controller) syncStaleEgressReroutePolicy(egressIPToPodIPCache map[stri
 func (oc *Controller) syncStaleSNATRules(egressIPToPodIPCache map[string]sets.String) {
 	predicate := func(item *nbdb.NAT) bool {
 		egressIPName, exists := item.ExternalIDs["name"]
-		// Skip nat rows that do not have egressIPName attribute available
-		if !exists {
+		// Exclude rows that have no name or are not the right type
+		if !exists || item.Type != nbdb.NATTypeSNAT {
 			return false
 		}
 		parsedLogicalIP := net.ParseIP(item.LogicalIP).String()
 		podIPCache, exists := egressIPToPodIPCache[egressIPName]
-		return !exists || !podIPCache.Has(parsedLogicalIP)
+		if !exists || !podIPCache.Has(parsedLogicalIP) {
+			klog.Infof("syncStaleSNATRules will delete %s: %v", egressIPName, item)
+			return true
+		}
+		return false
 	}
 
 	nats, err := libovsdbops.FindNatsUsingPredicate(oc.nbClient, predicate)
@@ -1621,9 +1630,7 @@ func (e *egressIPController) deleteEgressReroutePolicy(filterOption, egressIPNam
 			},
 			ExistingResult: &logicalRouterPolicyRes,
 			DoAfter: func() {
-				if len(logicalRouterPolicyRes) == 1 && len(logicalRouterPolicyRes[0].Nexthops) == 1 && logicalRouterPolicyRes[0].Nexthops[0] == gatewayRouterIP {
-					logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
-				}
+				logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
 			},
 		},
 		{

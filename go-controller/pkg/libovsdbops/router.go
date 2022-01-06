@@ -237,8 +237,8 @@ func FindNatsUsingPredicate(nbClient libovsdbclient.Client, predicate func(item 
 	}
 	// Turn nats into nat pointers, bc that is what callers actually need
 	natsPtrs := make([]*nbdb.NAT, 0, len(nats))
-	for _, nat := range nats {
-		natsPtrs = append(natsPtrs, &nat)
+	for i := 0; i < len(nats); i++ {
+		natsPtrs = append(natsPtrs, &nats[i])
 	}
 	return natsPtrs, nil
 }
