@@ -23,7 +23,7 @@ require (
 	github.com/onsi/gomega v1.14.0
 	github.com/openshift/api v0.0.0-20211201215911-5a82bae32e46
 	github.com/openshift/client-go v0.0.0-20211202194848-d3f186f2d366
-	github.com/ovn-org/libovsdb v0.6.1-0.20211216134718-ab69150b65ee
+	github.com/ovn-org/libovsdb v0.6.1-0.20220105115935-66dba396bab5
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.11.0
 	github.com/spf13/afero v1.4.1
