@@ -125,9 +125,13 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 		// unless any of the following are true:
 		// - Any of the endpoints are host-network
 		// - ETP=local service backed by non-local-host-networked endpoints
+		// - OCP only HACK: It's an openshift-dns:default-dns service
 		//
 		// In that case, we need to create per-node LBs.
-		if hasHostEndpoints(eps.V4IPs) || hasHostEndpoints(eps.V6IPs) {
+		if hasHostEndpoints(eps.V4IPs) || hasHostEndpoints(eps.V6IPs) ||
+			// OCP only hack begin
+			(service.Namespace == "openshift-dns" && service.Name == "dns-default") {
+			// OCP only hack end
 			perNodeConfigs = append(perNodeConfigs, clusterIPConfig)
 		} else {
 			clusterConfigs = append(clusterConfigs, clusterIPConfig)
@@ -310,6 +314,24 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 
 				switchV4Targets := ovnlb.JoinHostsPort(config.eps.V4IPs, config.eps.Port)
 				switchV6Targets := ovnlb.JoinHostsPort(config.eps.V6IPs, config.eps.Port)
+
+				// OCP HACK begin
+				// TODO: Remove this hack once we add support for ITP:preferLocal and DNS operator starts using it.
+				if service.Namespace == "openshift-dns" && service.Name == "dns-default" {
+					// Filter out endpoints that are local to this node.
+					switchV4targetDNSips := util.FilterIPsSlice(config.eps.V4IPs, node.podSubnets, true)
+					switchV6targetDNSips := util.FilterIPsSlice(config.eps.V6IPs, node.podSubnets, true)
+					// If no local endpoints were found add all the endpoints as targets.
+					if len(switchV4targetDNSips) == 0 {
+						switchV4targetDNSips = config.eps.V4IPs
+					}
+					if len(switchV6targetDNSips) == 0 {
+						switchV6targetDNSips = config.eps.V6IPs
+					}
+					switchV4Targets = ovnlb.JoinHostsPort(switchV4targetDNSips, config.eps.Port)
+					switchV6Targets = ovnlb.JoinHostsPort(switchV6targetDNSips, config.eps.Port)
+				}
+				// OCP HACK end
 
 				// Substitute the special vip "node" for the node's physical ips
 				// This is used for nodeport
