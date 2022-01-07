@@ -270,7 +270,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		eIPC: egressIPController{
 			egressIPAssignmentMutex: &sync.Mutex{},
 			podAssignmentMutex:      &sync.Mutex{},
-			podAssignment:           make(map[string][]egressipv1.EgressIPStatusItem),
+			podAssignment:           make(map[string]*podAssignmentState),
 			allocator:               allocator{&sync.Mutex{}, make(map[string]*egressNode)},
 			nbClient:                libovsdbOvnNBClient,
 			modelClient:             modelClient,
