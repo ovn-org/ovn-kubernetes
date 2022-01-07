@@ -401,9 +401,15 @@ func (oc *Controller) reconcileEgressIPPod(old, new *v1.Pod) (err error) {
 	}
 
 	// Iterate all EgressIPs and check if this pod start/stops matching any and
-	// add/remove the setup accordingly. Pods cannot match multiple EgressIP
-	// objects: that is considered a user error and is undefined. Hence, just
-	// just perform the setup against the first object matched.
+	// add/remove the setup accordingly. Pods should not match multiple EgressIP
+	// objects: that is considered a user error and is undefined. However, in
+	// such events iterate all EgressIPs and clean up as much as possible. By
+	// iterating all EgressIPs we also cover the case where a pod has its labels
+	// changed from matching one EgressIP to another, ex: EgressIP1 matching
+	// "blue pods" and EgressIP2 matching "red pods". If a pod with a red label
+	// gets changed to a blue label: we need add and remove the set up for both
+	// EgressIP obejcts - since we can't be sure of which EgressIP object we
+	// process first, always iterate all.
 	egressIPs, err := oc.watchFactory.GetEgressIPs()
 	if err != nil {
 		return err
@@ -418,20 +424,50 @@ func (oc *Controller) reconcileEgressIPPod(old, new *v1.Pod) (err error) {
 			// check that. If there is no podSelector: the user intends it to
 			// match all pods in the namespace.
 			podSelector, _ := metav1.LabelSelectorAsSelector(&egressIP.Spec.PodSelector)
-			// If the podSelector is not empty then check if the pod stopped
-			// matching. If the pod was deleted, "new" will be nil and
-			// newPodLabels will not match, so this is should cover that case.
-			if !podSelector.Empty() && !podSelector.Matches(newPodLabels) && podSelector.Matches(oldPodLabels) {
-				return oc.deletePodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, oldPod)
+			if !podSelector.Empty() {
+				newMatches := podSelector.Matches(newPodLabels)
+				oldMatches := podSelector.Matches(oldPodLabels)
+				// If the podSelector doesn't match the pod, then continue
+				// because this EgressIP intends to match other pods in that
+				// namespace and not this one. Other EgressIP objects might
+				// match the pod though so we need to check that.
+				if !newMatches && !oldMatches {
+					continue
+				}
+				// Check if the pod stopped matching. If the pod was deleted,
+				// "new" will be nil and newPodLabels will not match, so this is
+				// should cover that case.
+				if !newMatches && oldMatches {
+					if err := oc.deletePodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, oldPod); err != nil {
+						return err
+					}
+					continue
+				}
+				// If the pod starts matching the podSelector or continues to
+				// match: add the pod. The reason as to why we need to continue
+				// adding it if it continues to match, as opposed to once when
+				// it started matching, is because the pod might not have pod
+				// IPs assigned at that point and we need to continue trying the
+				// pod setup for every pod update as to make sure we process the
+				// pod IP assignment.
+				if err := oc.addPodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, newPod); err != nil {
+					return err
+				}
+				continue
 			}
 			// If the podSelector is empty (i.e: the EgressIP object is intended
 			// to match all pods in the namespace) and the pod has been deleted:
 			// "new" will be nil and we need to remove the setup
-			if podSelector.Empty() && new == nil {
-				return oc.deletePodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, oldPod)
+			if new == nil {
+				if err := oc.deletePodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, oldPod); err != nil {
+					return err
+				}
+				continue
 			}
 			// For all else, perform a setup for the pod
-			return oc.addPodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, newPod)
+			if err := oc.addPodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, newPod); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
