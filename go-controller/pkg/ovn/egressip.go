@@ -376,14 +376,25 @@ func (oc *Controller) reconcileEgressIPPod(old, new *v1.Pod) (err error) {
 			// If the podSelector is not empty then check if the pod stopped
 			// matching. If the pod was deleted, "new" will be nil and
 			// newPodLabels will not match, so this is should cover that case.
-			if !podSelector.Empty() && !podSelector.Matches(newPodLabels) && podSelector.Matches(oldPodLabels) {
-				return oc.deletePodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, oldPod)
+			if !podSelector.Empty() && !podSelector.Matches(newPodLabels) {
+				if podSelector.Matches(oldPodLabels) {
+					err = oc.deletePodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, oldPod)
+					if err != nil {
+						return err
+					}
+				}
+				// egressIP has a podSelector that pod does not match: skip it
+				continue
 			}
 			// If the podSelector is empty (i.e: the EgressIP object is intended
 			// to match all pods in the namespace) and the pod has been deleted:
 			// "new" will be nil and we need to remove the setup
 			if podSelector.Empty() && new == nil {
-				return oc.deletePodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, oldPod)
+				err = oc.deletePodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, oldPod)
+				if err != nil {
+					return err
+				}
+				continue
 			}
 			// For all else, perform a setup for the pod
 			return oc.addPodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, newPod)
