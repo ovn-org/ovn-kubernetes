@@ -201,9 +201,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node2IPv4 := "192.168.126.51/24"
 
 				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
-				egressPod.Annotations = map[string]string{
-					"k8s.ovn.org/pod-networks": fmt.Sprintf("{\"default\":{\"ip_addresses\":[\"%s/23\"],\"mac_address\":\"0a:58:0a:83:00:0f\",\"gateway_ips\":[\"%s\"],\"ip_address\":\"%s/23\",\"gateway_ip\":\"%s\"}}", podV4IP, v4GatewayIP, podV4IP, v4GatewayIP),
-				}
 				egressNamespace := newNamespace(namespace)
 
 				node1 := v1.Node{
@@ -449,9 +446,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node2IPv4 := "192.168.126.51/24"
 
 				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
-				egressPod.Annotations = map[string]string{
-					"k8s.ovn.org/pod-networks": fmt.Sprintf("{\"default\":{\"ip_addresses\":[\"%s/23\"],\"mac_address\":\"0a:58:0a:83:00:0f\",\"gateway_ips\":[\"%s\"],\"ip_address\":\"%s/23\",\"gateway_ip\":\"%s\"}}", podV4IP, v4GatewayIP, podV4IP, v4GatewayIP),
-				}
 				egressNamespace := newNamespace(namespace)
 
 				node1 := v1.Node{
@@ -700,9 +694,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				egressIP := net.ParseIP("0:0:0:0:0:feff:c0a8:8e0d")
 
 				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV6IP, egressPodLabel)
-				egressPod.Annotations = map[string]string{
-					"k8s.ovn.org/pod-networks": fmt.Sprintf("{\"default\":{\"ip_addresses\":[\"%s/23\"],\"mac_address\":\"0a:58:0a:83:00:0f\",\"gateway_ips\":[\"%s\"],\"ip_address\":\"%s/23\",\"gateway_ip\":\"%s\"}}", podV6IP, v6GatewayIP, podV6IP, v6GatewayIP),
-				}
 				egressNamespace := newNamespace(namespace)
 
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
@@ -876,9 +867,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				egressIP := net.ParseIP("0:0:0:0:0:feff:c0a8:8e0d")
 
 				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV6IP, egressPodLabel)
-				egressPod.Annotations = map[string]string{
-					"k8s.ovn.org/pod-networks": fmt.Sprintf("{\"default\":{\"ip_addresses\":[\"%s/23\"],\"mac_address\":\"0a:58:0a:83:00:0f\",\"gateway_ips\":[\"%s\"],\"ip_address\":\"%s/23\",\"gateway_ip\":\"%s\"}}", podV6IP, v6GatewayIP, podV6IP, v6GatewayIP),
-				}
 				egressNamespace := newNamespace(namespace)
 
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
@@ -1219,9 +1207,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				egressIP := net.ParseIP("0:0:0:0:0:feff:c0a8:8e0d")
 
 				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV6IP, egressPodLabel)
-				egressPod.Annotations = map[string]string{
-					"k8s.ovn.org/pod-networks": fmt.Sprintf("{\"default\":{\"ip_addresses\":[\"%s/23\"],\"mac_address\":\"0a:58:0a:83:00:0f\",\"gateway_ips\":[\"%s\"],\"ip_address\":\"%s/23\",\"gateway_ip\":\"%s\"}}", podV6IP, v6GatewayIP, podV6IP, v6GatewayIP),
-				}
 				egressNamespace := newNamespaceWithLabels(namespace, egressPodLabel)
 
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
@@ -1387,9 +1372,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				egressIP := net.ParseIP("0:0:0:0:0:feff:c0a8:8e0d")
 
 				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV6IP, egressPodLabel)
-				egressPod.Annotations = map[string]string{
-					"k8s.ovn.org/pod-networks": fmt.Sprintf("{\"default\":{\"ip_addresses\":[\"%s/23\"],\"mac_address\":\"0a:58:0a:83:00:0f\",\"gateway_ips\":[\"%s\"],\"ip_address\":\"%s/23\",\"gateway_ip\":\"%s\"}}", podV6IP, v6GatewayIP, podV6IP, v6GatewayIP),
-				}
 				egressNamespace := newNamespaceWithLabels(namespace, egressPodLabel)
 
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
@@ -1625,9 +1607,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node2IPv4 := "192.168.126.51/24"
 
 				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
-				egressPod.Annotations = map[string]string{
-					"k8s.ovn.org/pod-networks": fmt.Sprintf("{\"default\":{\"ip_addresses\":[\"%s/23\"],\"mac_address\":\"0a:58:0a:83:00:0f\",\"gateway_ips\":[\"%s\"],\"ip_address\":\"%s/23\",\"gateway_ip\":\"%s\"}}", podV4IP, v4GatewayIP, podV4IP, v4GatewayIP),
-				}
 				egressNamespace := newNamespace(namespace)
 
 				node1 := v1.Node{
@@ -1979,9 +1958,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				updatedEgressIP := net.ParseIP("0:0:0:0:0:feff:c0a8:8ffd")
 
 				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV6IP, egressPodLabel)
-				egressPod.Annotations = map[string]string{
-					"k8s.ovn.org/pod-networks": fmt.Sprintf("{\"default\":{\"ip_addresses\":[\"%s/23\"],\"mac_address\":\"0a:58:0a:83:00:0f\",\"gateway_ips\":[\"%s\"],\"ip_address\":\"%s/23\",\"gateway_ip\":\"%s\"}}", podV6IP, v6GatewayIP, podV6IP, v6GatewayIP),
-				}
 				egressNamespace := newNamespaceWithLabels(namespace, egressPodLabel)
 
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
@@ -2134,9 +2110,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				egressIP := net.ParseIP("0:0:0:0:0:feff:c0a8:8e0d")
 
 				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV6IP, egressPodLabel)
-				egressPod.Annotations = map[string]string{
-					"k8s.ovn.org/pod-networks": fmt.Sprintf("{\"default\":{\"ip_addresses\":[\"%s/23\"],\"mac_address\":\"0a:58:0a:83:00:0f\",\"gateway_ips\":[\"%s\"],\"ip_address\":\"%s/23\",\"gateway_ip\":\"%s\"}}", podV6IP, v6GatewayIP, podV6IP, v6GatewayIP),
-				}
 				egressNamespace := newNamespaceWithLabels(namespace, egressPodLabel)
 
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
@@ -3042,9 +3015,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				node1IPv4 := "192.168.126.51/24"
 
 				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
-				egressPod.Annotations = map[string]string{
-					"k8s.ovn.org/pod-networks": fmt.Sprintf("{\"default\":{\"ip_addresses\":[\"%s/23\"],\"mac_address\":\"0a:58:0a:83:00:0f\",\"gateway_ips\":[\"%s\"],\"ip_address\":\"%s/23\",\"gateway_ip\":\"%s\"}}", podV4IP, v4GatewayIP, podV4IP, v4GatewayIP),
-				}
 				egressNamespace := newNamespace(namespace)
 
 				node1 := v1.Node{

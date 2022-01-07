@@ -3,7 +3,6 @@ package ovn
 import (
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -829,7 +828,7 @@ func (oc *Controller) addPodEgressIPAssignments(name string, statusAssignments [
 	}
 	var remainingAssignments []egressipv1.EgressIPStatusItem
 	podKey := getPodKey(pod)
-	existing, exists := oc.eIPC.podAssignment[podKey]
+	podState, exists := oc.eIPC.podAssignment[podKey]
 	if !exists {
 		remainingAssignments = statusAssignments
 		// Retrieve the pod's networking configuration from the
@@ -838,35 +837,32 @@ func (oc *Controller) addPodEgressIPAssignments(name string, statusAssignments [
 		// addLogicalPort has finished successfully setting up networking for
 		// the pod, so we can proceed with retrieving its IP and deleting the
 		// external GW configuration created in addLogicalPort for the pod.
-		if _, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name)); err != nil {
+		logicalPort, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name))
+		if err != nil {
 			return nil
 		}
-		if err := oc.eIPC.deletePerPodGRSNAT(pod); err != nil && !errors.Is(err, skippedPodError) {
+		podState = &podAssignmentState{
+			egressStatuses: make(map[egressipv1.EgressIPStatusItem]string),
+			podIPs:         logicalPort.ips,
+		}
+		oc.eIPC.podAssignment[podKey] = podState
+		if err := oc.eIPC.deletePerPodGRSNAT(pod, logicalPort.ips); err != nil {
 			return err
 		}
 	} else {
 		for _, status := range statusAssignments {
-			shouldAdd := true
-			for _, existingAssignment := range existing {
-				if reflect.DeepEqual(status, existingAssignment) {
-					shouldAdd = false
-					break
-				}
-			}
-			if shouldAdd {
+			if _, exists := podState.egressStatuses[status]; !exists {
 				remainingAssignments = append(remainingAssignments, status)
 			}
 		}
 	}
 	for _, status := range remainingAssignments {
 		klog.V(5).Infof("Adding pod egress IP status: %v for EgressIP: %s and pod: %s/%s", status, name, pod.Name, pod.Namespace)
-		if err := oc.eIPC.addPodEgressIPAssignment(name, status, pod); err != nil && !errors.Is(err, skippedPodError) {
+		if err := oc.eIPC.addPodEgressIPAssignment(name, status, pod, podState.podIPs); err != nil {
 			return err
-		} else if !errors.Is(err, skippedPodError) {
-			existing = append(existing, status)
 		}
+		podState.egressStatuses[status] = ""
 	}
-	oc.eIPC.podAssignment[podKey] = existing
 	return nil
 }
 
@@ -896,15 +892,10 @@ func (oc *Controller) deleteEgressIPAssignments(name string, statusesToRemove []
 			return err
 		}
 		for podKey, podStatus := range oc.eIPC.podAssignment {
-			for idx, existingStatus := range podStatus {
-				if reflect.DeepEqual(existingStatus, statusToRemove) {
-					podStatus = append(podStatus[:idx], podStatus[idx+1:]...)
-					break
-				}
-			}
-			if len(podStatus) == 0 {
+			delete(podStatus.egressStatuses, statusToRemove)
+			if len(podStatus.egressStatuses) == 0 {
 				podNamespace, podName := getPodNamespaceAndNameFromKey(podKey)
-				if err := oc.eIPC.addPerPodGRSNAT(podNamespace, podName); err != nil {
+				if err := oc.eIPC.addPerPodGRSNAT(podNamespace, podName, podStatus.podIPs); err != nil {
 					return err
 				}
 				delete(oc.eIPC.podAssignment, podKey)
@@ -941,29 +932,27 @@ func (oc *Controller) deletePodEgressIPAssignments(name string, statusesToRemove
 	oc.eIPC.podAssignmentMutex.Lock()
 	defer oc.eIPC.podAssignmentMutex.Unlock()
 	podKey := getPodKey(pod)
-	existingAssignments, exists := oc.eIPC.podAssignment[podKey]
+	podStatus, exists := oc.eIPC.podAssignment[podKey]
 	if !exists {
 		return nil
 	}
 	for _, statusToRemove := range statusesToRemove {
 		klog.V(5).Infof("Deleting pod egress IP status: %v for EgressIP: %s and pod: %s/%s", statusToRemove, name, pod.Name, pod.Namespace)
-		if err := oc.eIPC.deletePodEgressIPAssignment(name, statusToRemove, pod); err != nil {
+		if err := oc.eIPC.deletePodEgressIPAssignment(name, statusToRemove, podStatus.podIPs); err != nil {
 			return err
 		}
-		for idx, existingAssignment := range existingAssignments {
-			if reflect.DeepEqual(existingAssignment, statusToRemove) {
-				existingAssignments = append(existingAssignments[:idx], existingAssignments[idx+1:]...)
-				break
-			}
-		}
+		delete(podStatus.egressStatuses, statusToRemove)
 	}
-	if len(existingAssignments) > 0 {
+	if len(podStatus.egressStatuses) > 0 {
 		return nil
+	}
+	if err := oc.eIPC.addPerPodGRSNAT(pod.Namespace, pod.Name, podStatus.podIPs); err != nil {
+		return err
 	}
 	// Delete the key if there are no more status assignments to keep
 	// for the pod.
 	delete(oc.eIPC.podAssignment, podKey)
-	return oc.eIPC.addPerPodGRSNAT(pod.Namespace, pod.Name)
+	return nil
 }
 
 func (oc *Controller) isEgressNodeReady(egressNode *kapi.Node) bool {
@@ -1532,6 +1521,11 @@ func (e *egressNode) getAllocationCountForEgressIP(name string) (count int) {
 	return
 }
 
+type podAssignmentState struct {
+	egressStatuses map[egressipv1.EgressIPStatusItem]string
+	podIPs         []*net.IPNet
+}
+
 type allocator struct {
 	*sync.Mutex
 	// A cache used for egress IP assignments containing data for all cluster nodes
@@ -1551,7 +1545,7 @@ type egressIPController struct {
 	podAssignmentMutex *sync.Mutex
 	// podAssignment is a cache used for keeping track of which egressIP status
 	// has been setup for each pod. The key is defined by getPodKey
-	podAssignment map[string][]egressipv1.EgressIPStatusItem
+	podAssignment map[string]*podAssignmentState
 	// allocator is a cache of egress IP centric data needed to when both route
 	// health-checking and tracking allocations made
 	allocator allocator
@@ -1563,22 +1557,10 @@ type egressIPController struct {
 	watchFactory *factory.WatchFactory
 }
 
-var skippedPodError = errors.New("pod has been skipped")
-
 // addPodEgressIPAssignment will program OVN with logical router policies
 // (routing pod traffic to the egress node) and NAT objects on the egress node
-// (SNAT-ing to the egress IP). We can only do that for pods which have an
-// assigned IP address though, so if this is not that case at a particular point
-// in time just skip it. When the pod gets updates with an IP address we will
-// just process that event and do it then.
-func (e *egressIPController) addPodEgressIPAssignment(egressIPName string, status egressipv1.EgressIPStatusItem, pod *kapi.Pod) (err error) {
-	if pod.Spec.HostNetwork {
-		return skippedPodError
-	}
-	podIPs, err := e.getPodIPs(pod)
-	if err != nil || len(podIPs) == 0 {
-		return skippedPodError
-	}
+// (SNAT-ing to the egress IP).
+func (e *egressIPController) addPodEgressIPAssignment(egressIPName string, status egressipv1.EgressIPStatusItem, pod *kapi.Pod, podIPs []*net.IPNet) (err error) {
 	if err := e.handleEgressReroutePolicy(podIPs, status, egressIPName, e.createEgressReroutePolicy); err != nil {
 		return fmt.Errorf("unable to create logical router policy, err: %v", err)
 	}
@@ -1591,19 +1573,8 @@ func (e *egressIPController) addPodEgressIPAssignment(egressIPName string, statu
 }
 
 // deletePodEgressIPAssignment deletes the OVN programmed egress IP
-// configuration mentioned for addPodEgressIPAssignment. It only does so for
-// pods which have a pod IP.
-func (e *egressIPController) deletePodEgressIPAssignment(egressIPName string, status egressipv1.EgressIPStatusItem, pod *kapi.Pod) error {
-	if pod.Spec.HostNetwork {
-		return nil
-	}
-	podIPs, err := e.getPodIPs(pod)
-	if err != nil {
-		return fmt.Errorf("unable to retrieve pod IPs, err: %v", err)
-	}
-	if len(podIPs) == 0 {
-		return fmt.Errorf("unable to retrieve pod IPs, err: no pod IPs defined")
-	}
+// configuration mentioned for addPodEgressIPAssignment.
+func (e *egressIPController) deletePodEgressIPAssignment(egressIPName string, status egressipv1.EgressIPStatusItem, podIPs []*net.IPNet) error {
 	if err := e.handleEgressReroutePolicy(podIPs, status, egressIPName, e.deleteEgressReroutePolicy); err != nil {
 		return fmt.Errorf("unable to delete logical router policy, err: %v", err)
 	}
@@ -1626,13 +1597,9 @@ func (e *egressIPController) deletePodEgressIPAssignment(egressIPName string, st
 // check the informer cache since on pod deletion the event handlers are
 // triggered after the update to the informer cache. We should not re-add the
 // external GW setup in those cases.
-func (e *egressIPController) addPerPodGRSNAT(podNamespace, podName string) error {
+func (e *egressIPController) addPerPodGRSNAT(podNamespace, podName string, podIPs []*net.IPNet) error {
 	if config.Gateway.DisableSNATMultipleGWs {
 		if pod, err := e.watchFactory.GetPod(podNamespace, podName); err == nil {
-			podIPs, err := e.getPodIPs(pod)
-			if err != nil {
-				return fmt.Errorf("unable to retrieve pod IPs, err: %v", err)
-			}
 			// if the pod still exists, add snats to->nodeIP (on the node where the pod exists) for these podIPs after deleting the snat to->egressIP
 			extIPs, err := getExternalIPsGRSNAT(e.watchFactory, pod.Spec.NodeName)
 			if err != nil {
@@ -1647,12 +1614,8 @@ func (e *egressIPController) addPerPodGRSNAT(podNamespace, podName string) error
 	return nil
 }
 
-func (e *egressIPController) deletePerPodGRSNAT(pod *kapi.Pod) error {
+func (e *egressIPController) deletePerPodGRSNAT(pod *kapi.Pod, podIPs []*net.IPNet) error {
 	if config.Gateway.DisableSNATMultipleGWs {
-		podIPs, err := e.getPodIPs(pod)
-		if err != nil || len(podIPs) == 0 {
-			return skippedPodError
-		}
 		// remove snats to->nodeIP (from the node where pod exists) for these podIPs before adding the snat to->egressIP
 		extIPs, err := getExternalIPsGRSNAT(e.watchFactory, pod.Spec.NodeName)
 		if err != nil {
@@ -1676,14 +1639,6 @@ func (e *egressIPController) getGatewayRouterJoinIP(node string, wantsIPv6 bool)
 	} else {
 		return nil, fmt.Errorf("could not find node %s gateway router: %v", node, err)
 	}
-}
-
-func (e *egressIPController) getPodIPs(pod *kapi.Pod) ([]*net.IPNet, error) {
-	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
-	if err != nil {
-		return nil, err
-	}
-	return podAnnotation.IPs, nil
 }
 
 // createEgressReroutePolicy uses logical router policies to force egress traffic to the egress node, for that we need
