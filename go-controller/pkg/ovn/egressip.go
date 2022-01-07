@@ -181,7 +181,6 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 			if err := oc.patchReplaceEgressIPStatus(name, statusToKeep); err != nil {
 				return err
 			}
-			metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 		}
 	} else {
 		// Delete all assignments that are to be removed from the allocator
@@ -209,6 +208,9 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 			return err
 		}
 	}
+
+	// Record the egress IP allocator count
+	metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 
 	// If nothing has changed for what concerns the assignments, then check if
 	// the namespaceSelector and podSelector have changed. If they have changed
@@ -587,7 +589,6 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 			}
 		}
 	}
-	metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 	return nil
 }
 
