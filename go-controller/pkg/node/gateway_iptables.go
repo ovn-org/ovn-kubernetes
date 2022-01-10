@@ -438,7 +438,15 @@ func getGatewayIPTRules(service *kapi.Service, svcHasLocalHostNetEndPnt bool) []
 				}
 			}
 		}
-		for _, externalIP := range service.Spec.ExternalIPs {
+		externalIPs := make([]string, 0, len(service.Spec.ExternalIPs)+len(service.Status.LoadBalancer.Ingress))
+		externalIPs = append(externalIPs, service.Spec.ExternalIPs...)
+		for _, ingress := range service.Status.LoadBalancer.Ingress {
+			if len(ingress.IP) > 0 {
+				externalIPs = append(externalIPs, ingress.IP)
+			}
+		}
+
+		for _, externalIP := range externalIPs {
 			err := util.ValidatePort(svcPort.Protocol, svcPort.Port)
 			if err != nil {
 				klog.Errorf("Skipping service: %s, invalid service port %v", svcPort.Name, err)
