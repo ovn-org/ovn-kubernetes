@@ -247,3 +247,27 @@ func TestParseFlowCollectors(t *testing.T) {
 		t.Errorf("parsed hostPorts returned unexpected results: %+v", hp)
 	}
 }
+
+func TestParseFlowCollectors_DeduplicateEntries(t *testing.T) {
+	hp, err := ParseFlowCollectors("10.0.0.2:3030,[1::1]:3333,10.0.0.2:3030,[1::1]:3333")
+	if err != nil {
+		t.Error("can't parse flowCollectors", err)
+	}
+	if len(hp) != 2 ||
+		hp[0].Host.String() != "10.0.0.2" || hp[0].Port != 3030 ||
+		hp[1].Host.String() != "1::1" || hp[1].Port != 3333 {
+		t.Errorf("parsed hostPorts returned unexpected results: %+v", hp)
+	}
+}
+
+func TestParseFlowCollectors_DeduplicateEquivalentEntries(t *testing.T) {
+	hp, err := ParseFlowCollectors(
+		"[fd00:1101:0000:0001:0000:0000:0000:0002]:1234,[fd00:1101:0000:0001::0002]:1234")
+	if err != nil {
+		t.Error("can't parse flowCollectors", err)
+	}
+	if len(hp) != 1 ||
+		hp[0].Host.String() != "fd00:1101:0:1::2" || hp[0].Port != 1234 {
+		t.Errorf("parsed hostPorts returned unexpected results: %+v", hp)
+	}
+}
