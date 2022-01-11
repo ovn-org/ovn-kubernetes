@@ -390,23 +390,25 @@ func (jsIPManager *JoinSwitchIPManager) delJoinLRPCacheIPs(nodeName string) {
 	delete(jsIPManager.lrpIPCache, nodeName)
 }
 
-// reserveJoinLRPIPs tries to add the LRP IPs to the JoinSwitchIPManager, then they will be stored in the cache;
-func (jsIPManager *JoinSwitchIPManager) reserveJoinLRPIPs(nodeName string, gwLRPIPs []*net.IPNet) (err error) {
+// reserveJoinLRPIPs tries to add the LRP IPs to the joinSwitchIPManager, then they will be stored in the cache;
+func (jsIPManager *JoinSwitchIPManager) reserveJoinLRPIPs(nodeName string, gwLRPIPs []*net.IPNet) error {
 	// reserve the given IP in the allocator
-	if err = jsIPManager.lsm.AllocateIPs(types.OVNJoinSwitch, gwLRPIPs); err == nil {
-		defer func() {
-			if err != nil {
-				if relErr := jsIPManager.lsm.ReleaseIPs(types.OVNJoinSwitch, gwLRPIPs); relErr != nil {
-					klog.Errorf("Failed to release logical router port IPs %v just reserved for node %s: %q",
-						util.JoinIPNetIPs(gwLRPIPs, " "), nodeName, relErr)
-				}
-			}
-		}()
-		if err = jsIPManager.setJoinLRPCacheIPs(nodeName, gwLRPIPs); err != nil {
-			klog.Errorf("Failed to add node %s reserved IPs %v to the join switch IP cache: %s", nodeName, gwLRPIPs, err.Error())
-		}
+	if err := jsIPManager.lsm.AllocateIPs(types.OVNJoinSwitch, gwLRPIPs); err != nil {
+		return err
 	}
-	return err
+
+	// store the allocated IPs in the cache if possible
+	if err := jsIPManager.setJoinLRPCacheIPs(nodeName, gwLRPIPs); err != nil {
+		// if storing the IPs to the cache fails, release the IPs again and return the error
+		klog.Errorf("Failed to add node %s reserved IPs %v to the join switch IP cache: %s", nodeName, gwLRPIPs, err.Error())
+		if relErr := jsIPManager.lsm.ReleaseIPs(types.OVNJoinSwitch, gwLRPIPs); relErr != nil {
+			klog.Errorf("Failed to release logical router port IPs %v just reserved for node %s: %q",
+				util.JoinIPNetIPs(gwLRPIPs, " "), nodeName, relErr)
+		}
+		return err
+	}
+
+	return nil
 }
 
 // ensureJoinLRPIPs tries to allocate the LRP IPs if it is not yet allocated, then they will be stored in the cache
