@@ -92,7 +92,7 @@ func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, po
 	shouldBeLogged := logSeverity != nbdb.ACLSeverityInfo
 	egressDenyACL := libovsdbops.BuildACL(
 		networkPolicy.Namespace+"_"+networkPolicy.Name,
-		nbdb.ACLDirectionToLport,
+		nbdb.ACLDirectionFromLport,
 		types.DefaultDenyPriority,
 		"inport == @"+pgHash+"_"+egressDenyPG,
 		nbdb.ACLActionDrop,
@@ -107,7 +107,7 @@ func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, po
 
 	egressAllowACL := libovsdbops.BuildACL(
 		networkPolicy.Namespace+"_ARPallowPolicy",
-		nbdb.ACLDirectionToLport,
+		nbdb.ACLDirectionFromLport,
 		types.DefaultAllowPriority,
 		"inport == @"+pgHash+"_"+egressDenyPG+" && arp",
 		nbdb.ACLActionAllow,
@@ -244,7 +244,7 @@ func (n kNetworkPolicy) getPolicyData(networkPolicy *knet.NetworkPolicy, policyP
 			egressAsMatch := asMatch(append(peerNamespaces, getAddressSetName(networkPolicy.Namespace, networkPolicy.Name, knet.PolicyTypeEgress, i)))
 			acl := libovsdbops.BuildACL(
 				aclName,
-				nbdb.ACLDirectionToLport,
+				nbdb.ACLDirectionFromLport,
 				types.DefaultAllowPriority,
 				fmt.Sprintf("ip4.dst == {%s} && inport == @%s", egressAsMatch, pgHash),
 				nbdb.ACLActionAllowRelated,
@@ -266,7 +266,7 @@ func (n kNetworkPolicy) getPolicyData(networkPolicy *knet.NetworkPolicy, policyP
 		for _, v := range tcpPeerPorts {
 			acl := libovsdbops.BuildACL(
 				aclName,
-				nbdb.ACLDirectionToLport,
+				nbdb.ACLDirectionFromLport,
 				types.DefaultAllowPriority,
 				fmt.Sprintf("ip4 && tcp && tcp.dst==%d && inport == @%s", v, pgHash),
 				nbdb.ACLActionAllowRelated,

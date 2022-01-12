@@ -215,9 +215,14 @@ func defaultDenyPortGroup(namespace, gressSuffix string) string {
 
 func buildDenyACLs(namespace, policy, pg, aclLogging string, policyType knet.PolicyType) (denyACL, allowACL *nbdb.ACL) {
 	denyMatch := getACLMatch(pg, "", policyType)
-	denyACL = buildACL(namespace, pg, policy, nbdb.ACLDirectionToLport, types.DefaultDenyPriority, denyMatch, nbdb.ACLActionDrop, aclLogging, policyType)
 	allowMatch := getACLMatch(pg, "arp", policyType)
-	allowACL = buildACL(namespace, pg, "ARPallowPolicy", nbdb.ACLDirectionToLport, types.DefaultAllowPriority, allowMatch, nbdb.ACLActionAllow, "", policyType)
+	if policyType == knet.PolicyTypeIngress {
+		denyACL = buildACL(namespace, pg, policy, nbdb.ACLDirectionToLport, types.DefaultDenyPriority, denyMatch, nbdb.ACLActionDrop, aclLogging, policyType)
+		allowACL = buildACL(namespace, pg, "ARPallowPolicy", nbdb.ACLDirectionToLport, types.DefaultAllowPriority, allowMatch, nbdb.ACLActionAllow, "", policyType)
+	} else {
+		denyACL = buildACL(namespace, pg, policy, nbdb.ACLDirectionFromLport, types.DefaultDenyPriority, denyMatch, nbdb.ACLActionDrop, aclLogging, policyType)
+		allowACL = buildACL(namespace, pg, "ARPallowPolicy", nbdb.ACLDirectionFromLport, types.DefaultAllowPriority, allowMatch, nbdb.ACLActionAllow, "", policyType)
+	}
 	return
 }
 
