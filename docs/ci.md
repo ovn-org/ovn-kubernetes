@@ -192,7 +192,7 @@ To run the tests locally, run a KIND deployment as described above. The E2E
 tests look for the kube config file in a special location, so make a copy:
 
 ```
-cp ~/admin.conf ~/.kube/kind-config-kind
+cp ~/ovn.conf ~/.kube/kind-config-kind
 ```
 
 To run the desired shard, first make sure that the necessary environment variables are exported (see section above). Then, go to the location of your local copy of the `ovn-kubernetes` repository:
@@ -255,7 +255,7 @@ For example:
 + NUM_NODES=20
 + export NUM_WORKER_NODES=3
 + NUM_WORKER_NODES=3
-+ ginkgo --nodes=20 '--focus=should\sbe\sable\sto\spreserve\sUDP\straffic\swhen\sserver\spod\scycles\sfor\sa\sNodePort\sservice' '--skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|Disruptive|DisruptionController|\[sig-apps\]\sCronJob|\[sig-storage\]|\[Feature:Federation\]|should\shave\sipv4\sand\sipv6\sinternal\snode\sip|should\shave\sipv4\sand\sipv6\snode\spodCIDRs|kube-proxy|should\sset\sTCP\sCLOSE_WAIT\stimeout|should\shave\ssession\saffinity\stimeout\swork|named\sport.+\[Feature:NetworkPolicy\]|\[Feature:SCTP\]|service.kubernetes.io/headless|should\sresolve\sconnection\sreset\sissue\s#74839|sig-api-machinery|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer)|configMap\snameserver|ClusterDns\s\[Feature:Example\]|should\sset\sdefault\svalue\son\snew\sIngressClass|should\sprevent\sIngress\screation\sif\smore\sthan\s1\sIngressClass\smarked\sas\sdefault|\[Feature:Networking-IPv6\]|\[Feature:.*DualStack.*\]' --flakeAttempts=5 /usr/local/bin/e2e.test -- --kubeconfig=/root/admin.conf --provider=local --dump-logs-on-failure=false --report-dir=/root/ovn-kubernetes/test/_artifacts --disable-log-dump=true --num-nodes=3
++ ginkgo --nodes=20 '--focus=should\sbe\sable\sto\spreserve\sUDP\straffic\swhen\sserver\spod\scycles\sfor\sa\sNodePort\sservice' '--skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|Disruptive|DisruptionController|\[sig-apps\]\sCronJob|\[sig-storage\]|\[Feature:Federation\]|should\shave\sipv4\sand\sipv6\sinternal\snode\sip|should\shave\sipv4\sand\sipv6\snode\spodCIDRs|kube-proxy|should\sset\sTCP\sCLOSE_WAIT\stimeout|should\shave\ssession\saffinity\stimeout\swork|named\sport.+\[Feature:NetworkPolicy\]|\[Feature:SCTP\]|service.kubernetes.io/headless|should\sresolve\sconnection\sreset\sissue\s#74839|sig-api-machinery|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer)|configMap\snameserver|ClusterDns\s\[Feature:Example\]|should\sset\sdefault\svalue\son\snew\sIngressClass|should\sprevent\sIngress\screation\sif\smore\sthan\s1\sIngressClass\smarked\sas\sdefault|\[Feature:Networking-IPv6\]|\[Feature:.*DualStack.*\]' --flakeAttempts=5 /usr/local/bin/e2e.test -- --kubeconfig=/root/ovn.conf --provider=local --dump-logs-on-failure=false --report-dir=/root/ovn-kubernetes/test/_artifacts --disable-log-dump=true --num-nodes=3
 Running Suite: Kubernetes e2e suite
 (...)
 • [SLOW TEST:28.091 seconds]
@@ -303,7 +303,7 @@ For example:
 ./e2e/multicast.go:	ginkgo.It("should be able to send multicast UDP traffic between nodes", func() {
 # make control-plane WHAT="should be able to send multicast UDP traffic between nodes"
 (...)
-+ go test -timeout=0 -v . -ginkgo.v -ginkgo.focus 'should\sbe\sable\sto\ssend\smulticast\sUDP\straffic\sbetween\snodes' -ginkgo.flakeAttempts 2 '-ginkgo.skip=recovering from deleting db files while maintain connectivity|Should validate connectivity before and after deleting all the db-pods at once in HA mode|Should be allowed to node local cluster-networked endpoints by nodeport services with externalTrafficPolicy=local|e2e ingress to host-networked pods traffic validation|host to host-networked pods traffic validation' -provider skeleton -kubeconfig /root/admin.conf --num-nodes=2 --report-dir=/root/ovn-kubernetes/test/_artifacts --report-prefix=control-plane_
++ go test -timeout=0 -v . -ginkgo.v -ginkgo.focus 'should\sbe\sable\sto\ssend\smulticast\sUDP\straffic\sbetween\snodes' -ginkgo.flakeAttempts 2 '-ginkgo.skip=recovering from deleting db files while maintain connectivity|Should validate connectivity before and after deleting all the db-pods at once in HA mode|Should be allowed to node local cluster-networked endpoints by nodeport services with externalTrafficPolicy=local|e2e ingress to host-networked pods traffic validation|host to host-networked pods traffic validation' -provider skeleton -kubeconfig /root/ovn.conf --num-nodes=2 --report-dir=/root/ovn-kubernetes/test/_artifacts --report-prefix=control-plane_
 I0817 15:26:21.762483 1197731 test_context.go:457] Tolerating taints "node-role.kubernetes.io/master" when considering if nodes are ready
 === RUN   TestE2e
 I0817 15:26:21.762635 1197731 e2e_suite_test.go:67] Saving reports to /root/ovn-kubernetes/test/_artifacts

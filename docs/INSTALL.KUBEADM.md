@@ -387,7 +387,7 @@ Deploy on the master node `node1`:
 ~~~
 kubeadm init --pod-network-cidr 172.16.0.0/16 --service-cidr 172.17.0.0/16 --apiserver-advertise-address 192.168.123.1
 mkdir -p $HOME/.kube
-sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo cp -i /etc/kubernetes/ovn.conf $HOME/.kube/config
 sudo chown $(id -u):$(id -g) $HOME/.kube/config
 ~~~
 
