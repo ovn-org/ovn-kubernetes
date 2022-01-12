@@ -41,8 +41,6 @@ type egressIPDialer interface {
 
 var dialer egressIPDialer = &egressIPDial{}
 
-var cloudPrivateIPConfigFinalizer = "cloudprivateipconfig.cloud.network.openshift.io/finalizer"
-
 func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err error) {
 	// Lock the assignment, this is needed because this function can end up
 	// being called from WatchEgressNodes and WatchEgressIP, i.e: two different
@@ -403,9 +401,8 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 		// old egress IP <-> node assignment has been removed. This is indicated
 		// by the old object having a .status.node set and the new object having
 		// .status.node empty and the condition on the new being successful. B)
-		// object DELETE, for which the CloudPrivateIPConfig will not have a
-		// finalizer anymore
-		shouldDelete = oldCloudPrivateIPConfig.Status.Node != "" || !hasFinalizer(oldCloudPrivateIPConfig.Finalizers, cloudPrivateIPConfigFinalizer)
+		// object DELETE, for which new is nil
+		shouldDelete = oldCloudPrivateIPConfig.Status.Node != "" || new == nil
 		// On DELETE we need to delete the .spec.node for the old object
 		nodeToDelete = oldCloudPrivateIPConfig.Spec.Node
 	}
@@ -2028,13 +2025,4 @@ func ipStringToCloudPrivateIPConfigName(ipString string) (name string) {
 		}
 	}
 	return
-}
-
-func hasFinalizer(finalizers []string, finalizer string) bool {
-	for _, f := range finalizers {
-		if f == finalizer {
-			return true
-		}
-	}
-	return false
 }
