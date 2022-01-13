@@ -105,6 +105,20 @@ func FindPerNodeJoinSwitches(nbClient libovsdbclient.Client) ([]nbdb.LogicalSwit
 	return switches, nil
 }
 
+func FindAllNodeLocalSwitches(nbClient libovsdbclient.Client) ([]nbdb.LogicalSwitch, error) {
+	// Find all node switches
+	nodeSwichLookupFcn := func(item *nbdb.LogicalSwitch) bool {
+		// Ignore external and Join switches(both legacy and current)
+		return !(strings.HasPrefix(item.Name, types.JoinSwitchPrefix) || item.Name == "join" || strings.HasPrefix(item.Name, types.ExternalSwitchPrefix))
+	}
+
+	switches, err := findSwitchesByPredicate(nbClient, nodeSwichLookupFcn)
+	if err != nil {
+		return nil, err
+	}
+	return switches, nil
+}
+
 func AddLoadBalancersToSwitchOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lswitch *nbdb.LogicalSwitch, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
 	if ops == nil {
 		ops = []libovsdb.Operation{}
