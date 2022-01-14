@@ -22,6 +22,8 @@ type logicalSwitchInfo struct {
 	hostSubnets  []*net.IPNet
 	ipams        []ipam.Interface
 	noHostSubnet bool
+	// the uuid of the logicalSwitch described by this struct
+	uuid string
 }
 
 type ipamFactoryFunc func(*net.IPNet) (ipam.Interface, error)
@@ -32,6 +34,16 @@ type LogicalSwitchManager struct {
 	// A RW mutex for LogicalSwitchManager which holds logicalSwitch information
 	sync.RWMutex
 	ipamFunc ipamFactoryFunc
+}
+
+// GetUUID returns the UUID for the given logical switch name if
+func (manager *LogicalSwitchManager) GetUUID(name string) (string, bool) {
+	manager.RLock()
+	defer manager.RUnlock()
+	if _, ok := manager.cache[name]; !ok {
+		return "", ok
+	}
+	return manager.cache[name].uuid, true
 }
 
 // NewIPAMAllocator provides an ipam interface which can be used for IPAM
@@ -91,7 +103,7 @@ func NewLogicalSwitchManager() *LogicalSwitchManager {
 
 // AddNode adds/updates a node to the logical switch manager for subnet
 // and IPAM management.
-func (manager *LogicalSwitchManager) AddNode(nodeName string, hostSubnets []*net.IPNet) error {
+func (manager *LogicalSwitchManager) AddNode(nodeName, uuid string, hostSubnets []*net.IPNet) error {
 	manager.Lock()
 	defer manager.Unlock()
 	if lsi, ok := manager.cache[nodeName]; ok && !reflect.DeepEqual(lsi.hostSubnets, hostSubnets) {
@@ -111,6 +123,7 @@ func (manager *LogicalSwitchManager) AddNode(nodeName string, hostSubnets []*net
 		hostSubnets:  hostSubnets,
 		ipams:        ipams,
 		noHostSubnet: len(hostSubnets) == 0,
+		uuid:         uuid,
 	}
 
 	return nil
@@ -122,7 +135,7 @@ func (manager *LogicalSwitchManager) AddNoHostSubnetNode(nodeName string) error 
 	// setting the hostSubnets slice argument to nil in the cache means an object
 	// exists for the switch but it was not assigned a hostSubnet by ovn-kubernetes
 	// this will be true for nodes that are marked as host-subnet only.
-	return manager.AddNode(nodeName, nil)
+	return manager.AddNode(nodeName, "", nil)
 }
 
 // Remove a switch/node from the the logical switch manager
@@ -314,7 +327,7 @@ func NewJoinIPAMAllocator(cidr *net.IPNet) (ipam.Interface, error) {
 
 // Initializes a new join switch logical switch manager.
 // This IPmanager guaranteed to always have both IPv4 and IPv6 regardless of dual-stack
-func NewJoinLogicalSwitchIPManager(nbClient libovsdbclient.Client, existingNodeNames []string) (*JoinSwitchIPManager, error) {
+func NewJoinLogicalSwitchIPManager(nbClient libovsdbclient.Client, uuid string, existingNodeNames []string) (*JoinSwitchIPManager, error) {
 	j := JoinSwitchIPManager{
 		lsm: &LogicalSwitchManager{
 			cache:    make(map[string]logicalSwitchInfo),
@@ -338,7 +351,7 @@ func NewJoinLogicalSwitchIPManager(nbClient libovsdbclient.Client, existingNodeN
 		}
 		joinSubnets = append(joinSubnets, joinSubnet)
 	}
-	err := j.lsm.AddNode(types.OVNJoinSwitch, joinSubnets)
+	err := j.lsm.AddNode(types.OVNJoinSwitch, uuid, joinSubnets)
 	if err != nil {
 		return nil, err
 	}

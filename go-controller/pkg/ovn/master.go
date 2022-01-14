@@ -420,20 +420,6 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 		}
 	}
 
-	// Initialize the OVNJoinSwitch switch IP manager
-	// The OVNJoinSwitch will be allocated IP addresses in the range 100.64.0.0/16 or fd98::/64.
-	oc.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(oc.nbClient, existingNodeNames)
-	if err != nil {
-		return err
-	}
-
-	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
-	// allocate the first IPs in the join switch subnets
-	gwLRPIfAddrs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
-	if err != nil {
-		return fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", types.OVNClusterRouter, err)
-	}
-
 	// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name: types.OVNJoinSwitch,
@@ -447,6 +433,20 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("failed to create logical switch %s, error: %v", types.OVNJoinSwitch, err)
 
+	}
+
+	// Initialize the OVNJoinSwitch switch IP manager
+	// The OVNJoinSwitch will be allocated IP addresses in the range 100.64.0.0/16 or fd98::/64.
+	oc.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(oc.nbClient, logicalSwitch.UUID, existingNodeNames)
+	if err != nil {
+		return err
+	}
+
+	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
+	// allocate the first IPs in the join switch subnets
+	gwLRPIfAddrs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
+	if err != nil {
+		return fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", types.OVNClusterRouter, err)
 	}
 
 	// Connect the distributed router to OVNJoinSwitch.
@@ -923,8 +923,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		// Create the Node's Logical Switch and set it's subnet
 		opModels = []libovsdbops.OperationModel{
 			{
-				Model:          &logicalSwitch,
-				ModelPredicate: func(lr *nbdb.LogicalSwitch) bool { return lr.Name == nodeName },
+				Model: &logicalSwitch,
 				OnModelMutations: []interface{}{
 					&logicalSwitch.OtherConfig,
 				},
@@ -951,7 +950,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	}
 
 	// Add the node to the logical switch cache
-	return oc.lsManager.AddNode(nodeName, hostSubnets)
+	return oc.lsManager.AddNode(nodeName, logicalSwitch.UUID, hostSubnets)
 }
 
 func (oc *Controller) addNodeAnnotations(node *kapi.Node, hostSubnets []*net.IPNet) error {
