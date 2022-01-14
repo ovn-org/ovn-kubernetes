@@ -3,6 +3,8 @@
 
 package nbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 type (
 	LogicalRouterPolicyAction = string
 )
@@ -24,3 +26,139 @@ type LogicalRouterPolicy struct {
 	Options     map[string]string         `ovsdb:"options"`
 	Priority    int                       `ovsdb:"priority"`
 }
+
+func copyLogicalRouterPolicyExternalIDs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalLogicalRouterPolicyExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyLogicalRouterPolicyNexthop(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalRouterPolicyNexthop(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyLogicalRouterPolicyNexthops(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalLogicalRouterPolicyNexthops(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func copyLogicalRouterPolicyOptions(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalLogicalRouterPolicyOptions(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *LogicalRouterPolicy) DeepCopyInto(b *LogicalRouterPolicy) {
+	*b = *a
+	b.ExternalIDs = copyLogicalRouterPolicyExternalIDs(a.ExternalIDs)
+	b.Nexthop = copyLogicalRouterPolicyNexthop(a.Nexthop)
+	b.Nexthops = copyLogicalRouterPolicyNexthops(a.Nexthops)
+	b.Options = copyLogicalRouterPolicyOptions(a.Options)
+}
+
+func (a *LogicalRouterPolicy) DeepCopy() *LogicalRouterPolicy {
+	b := new(LogicalRouterPolicy)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *LogicalRouterPolicy) CloneModelInto(b model.Model) {
+	c := b.(*LogicalRouterPolicy)
+	a.DeepCopyInto(c)
+}
+
+func (a *LogicalRouterPolicy) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *LogicalRouterPolicy) Equals(b *LogicalRouterPolicy) bool {
+	return a.UUID == b.UUID &&
+		a.Action == b.Action &&
+		equalLogicalRouterPolicyExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		a.Match == b.Match &&
+		equalLogicalRouterPolicyNexthop(a.Nexthop, b.Nexthop) &&
+		equalLogicalRouterPolicyNexthops(a.Nexthops, b.Nexthops) &&
+		equalLogicalRouterPolicyOptions(a.Options, b.Options) &&
+		a.Priority == b.Priority
+}
+
+func (a *LogicalRouterPolicy) EqualsModel(b model.Model) bool {
+	c := b.(*LogicalRouterPolicy)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &LogicalRouterPolicy{}
+var _ model.ComparableModel = &LogicalRouterPolicy{}

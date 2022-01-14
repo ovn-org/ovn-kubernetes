@@ -3,6 +3,8 @@
 
 package nbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 // NBGlobal defines an object in NB_Global table
 type NBGlobal struct {
 	UUID           string            `ovsdb:"_uuid"`
@@ -19,3 +21,144 @@ type NBGlobal struct {
 	SbCfgTimestamp int               `ovsdb:"sb_cfg_timestamp"`
 	SSL            *string           `ovsdb:"ssl"`
 }
+
+func copyNBGlobalConnections(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalNBGlobalConnections(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func copyNBGlobalExternalIDs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalNBGlobalExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyNBGlobalOptions(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalNBGlobalOptions(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyNBGlobalSSL(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalNBGlobalSSL(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func (a *NBGlobal) DeepCopyInto(b *NBGlobal) {
+	*b = *a
+	b.Connections = copyNBGlobalConnections(a.Connections)
+	b.ExternalIDs = copyNBGlobalExternalIDs(a.ExternalIDs)
+	b.Options = copyNBGlobalOptions(a.Options)
+	b.SSL = copyNBGlobalSSL(a.SSL)
+}
+
+func (a *NBGlobal) DeepCopy() *NBGlobal {
+	b := new(NBGlobal)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *NBGlobal) CloneModelInto(b model.Model) {
+	c := b.(*NBGlobal)
+	a.DeepCopyInto(c)
+}
+
+func (a *NBGlobal) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *NBGlobal) Equals(b *NBGlobal) bool {
+	return a.UUID == b.UUID &&
+		equalNBGlobalConnections(a.Connections, b.Connections) &&
+		equalNBGlobalExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		a.HvCfg == b.HvCfg &&
+		a.HvCfgTimestamp == b.HvCfgTimestamp &&
+		a.Ipsec == b.Ipsec &&
+		a.Name == b.Name &&
+		a.NbCfg == b.NbCfg &&
+		a.NbCfgTimestamp == b.NbCfgTimestamp &&
+		equalNBGlobalOptions(a.Options, b.Options) &&
+		a.SbCfg == b.SbCfg &&
+		a.SbCfgTimestamp == b.SbCfgTimestamp &&
+		equalNBGlobalSSL(a.SSL, b.SSL)
+}
+
+func (a *NBGlobal) EqualsModel(b model.Model) bool {
+	c := b.(*NBGlobal)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &NBGlobal{}
+var _ model.ComparableModel = &NBGlobal{}

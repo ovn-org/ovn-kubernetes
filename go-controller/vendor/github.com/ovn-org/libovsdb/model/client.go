@@ -69,13 +69,14 @@ func NewClientDBModel(name string, models map[string]Model) (ClientDBModel, erro
 			if field := modelType.Elem().Field(i); field.Tag.Get("ovsdb") == "_uuid" &&
 				field.Type.Kind() == reflect.String {
 				hasUUID = true
+				break
 			}
 		}
 		if !hasUUID {
 			return ClientDBModel{}, fmt.Errorf("model is expected to have a string field called uuid")
 		}
 
-		types[table] = reflect.TypeOf(model)
+		types[table] = modelType
 	}
 	return ClientDBModel{
 		types: types,

@@ -1126,34 +1126,45 @@ func (o *ovsdbClient) Close() {
 }
 
 // Ensures the cache is consistent by evaluating that the client is connected
-// and the monitor is fully setup, with the cache populated
+// and the monitor is fully setup, with the cache populated. Caller must hold
+// the database's cache mutex for reading.
 func isCacheConsistent(db *database) bool {
 	// This works because when a client is disconnected the deferUpdates variable
 	// will be set to true. deferUpdates is also protected by the db.cacheMutex.
 	// When the client reconnects and then re-establishes the monitor; the final step
 	// is to process all deferred updates, set deferUpdates back to false, and unlock cacheMutex
-	db.cacheMutex.RLock()
-	defer db.cacheMutex.RUnlock()
 	return !db.deferUpdates
 }
 
-// best effort to ensure cache is in a good state for reading
+// best effort to ensure cache is in a good state for reading. RLocks the
+// database's cache before returning; caller must always unlock.
 func waitForCacheConsistent(ctx context.Context, db *database, logger *logr.Logger, dbName string) {
 	if !hasMonitors(db) {
+		db.cacheMutex.RLock()
 		return
 	}
+	// Check immediately as a fastpath
+	db.cacheMutex.RLock()
+	if isCacheConsistent(db) {
+		return
+	}
+	db.cacheMutex.RUnlock()
+
 	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			logger.V(3).Info("warning: unable to ensure cache consistency for reading",
 				"database", dbName)
+			db.cacheMutex.RLock()
 			return
 		case <-ticker.C:
+			db.cacheMutex.RLock()
 			if isCacheConsistent(db) {
 				return
 			}
-
+			db.cacheMutex.RUnlock()
 		}
 	}
 }
@@ -1172,7 +1183,6 @@ func hasMonitors(db *database) bool {
 func (o *ovsdbClient) Get(ctx context.Context, model model.Model) error {
 	primaryDB := o.primaryDB()
 	waitForCacheConsistent(ctx, primaryDB, o.logger, o.primaryDBName)
-	primaryDB.cacheMutex.RLock()
 	defer primaryDB.cacheMutex.RUnlock()
 	return primaryDB.api.Get(ctx, model)
 }
@@ -1186,7 +1196,6 @@ func (o *ovsdbClient) Create(models ...model.Model) ([]ovsdb.Operation, error) {
 func (o *ovsdbClient) List(ctx context.Context, result interface{}) error {
 	primaryDB := o.primaryDB()
 	waitForCacheConsistent(ctx, primaryDB, o.logger, o.primaryDBName)
-	primaryDB.cacheMutex.RLock()
 	defer primaryDB.cacheMutex.RUnlock()
 	return primaryDB.api.List(ctx, result)
 }

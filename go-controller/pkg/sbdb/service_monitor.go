@@ -3,6 +3,8 @@
 
 package sbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 type (
 	ServiceMonitorProtocol = string
 	ServiceMonitorStatus   = string
@@ -29,3 +31,135 @@ type ServiceMonitor struct {
 	SrcMAC      string                  `ovsdb:"src_mac"`
 	Status      *ServiceMonitorStatus   `ovsdb:"status"`
 }
+
+func copyServiceMonitorExternalIDs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalServiceMonitorExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyServiceMonitorOptions(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalServiceMonitorOptions(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyServiceMonitorProtocol(a *ServiceMonitorProtocol) *ServiceMonitorProtocol {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalServiceMonitorProtocol(a, b *ServiceMonitorProtocol) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyServiceMonitorStatus(a *ServiceMonitorStatus) *ServiceMonitorStatus {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalServiceMonitorStatus(a, b *ServiceMonitorStatus) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func (a *ServiceMonitor) DeepCopyInto(b *ServiceMonitor) {
+	*b = *a
+	b.ExternalIDs = copyServiceMonitorExternalIDs(a.ExternalIDs)
+	b.Options = copyServiceMonitorOptions(a.Options)
+	b.Protocol = copyServiceMonitorProtocol(a.Protocol)
+	b.Status = copyServiceMonitorStatus(a.Status)
+}
+
+func (a *ServiceMonitor) DeepCopy() *ServiceMonitor {
+	b := new(ServiceMonitor)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *ServiceMonitor) CloneModelInto(b model.Model) {
+	c := b.(*ServiceMonitor)
+	a.DeepCopyInto(c)
+}
+
+func (a *ServiceMonitor) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *ServiceMonitor) Equals(b *ServiceMonitor) bool {
+	return a.UUID == b.UUID &&
+		equalServiceMonitorExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		a.IP == b.IP &&
+		a.LogicalPort == b.LogicalPort &&
+		equalServiceMonitorOptions(a.Options, b.Options) &&
+		a.Port == b.Port &&
+		equalServiceMonitorProtocol(a.Protocol, b.Protocol) &&
+		a.SrcIP == b.SrcIP &&
+		a.SrcMAC == b.SrcMAC &&
+		equalServiceMonitorStatus(a.Status, b.Status)
+}
+
+func (a *ServiceMonitor) EqualsModel(b model.Model) bool {
+	c := b.(*ServiceMonitor)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &ServiceMonitor{}
+var _ model.ComparableModel = &ServiceMonitor{}

@@ -94,12 +94,7 @@ func generateModelInfo(dbSchema ovsdb.DatabaseSchema, modelTypes map[string]refl
 			continue
 		}
 
-		mtype, ok := modelTypes[tableName]
-		if !ok {
-			errors = append(errors, fmt.Errorf("table %s not found in database model", tableName))
-			continue
-		}
-		obj := reflect.New(mtype.Elem()).Interface().(Model)
+		obj := reflect.New(tType.Elem()).Interface().(Model)
 		info, err := mapper.NewInfo(tableName, tableSchema, obj)
 		if err != nil {
 			errors = append(errors, err)

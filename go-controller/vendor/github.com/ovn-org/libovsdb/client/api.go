@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -223,8 +222,7 @@ func (a api) Get(ctx context.Context, m model.Model) error {
 		return ErrNotFound
 	}
 
-	foundBytes, _ := json.Marshal(found)
-	_ = json.Unmarshal(foundBytes, m)
+	model.CloneInto(found, m)
 
 	return nil
 }

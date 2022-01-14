@@ -3,6 +3,8 @@
 
 package nbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 // DHCPOptions defines an object in DHCP_Options table
 type DHCPOptions struct {
 	UUID        string            `ovsdb:"_uuid"`
@@ -10,3 +12,91 @@ type DHCPOptions struct {
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
 	Options     map[string]string `ovsdb:"options"`
 }
+
+func copyDHCPOptionsExternalIDs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalDHCPOptionsExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyDHCPOptionsOptions(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalDHCPOptionsOptions(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *DHCPOptions) DeepCopyInto(b *DHCPOptions) {
+	*b = *a
+	b.ExternalIDs = copyDHCPOptionsExternalIDs(a.ExternalIDs)
+	b.Options = copyDHCPOptionsOptions(a.Options)
+}
+
+func (a *DHCPOptions) DeepCopy() *DHCPOptions {
+	b := new(DHCPOptions)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *DHCPOptions) CloneModelInto(b model.Model) {
+	c := b.(*DHCPOptions)
+	a.DeepCopyInto(c)
+}
+
+func (a *DHCPOptions) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *DHCPOptions) Equals(b *DHCPOptions) bool {
+	return a.UUID == b.UUID &&
+		a.Cidr == b.Cidr &&
+		equalDHCPOptionsExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		equalDHCPOptionsOptions(a.Options, b.Options)
+}
+
+func (a *DHCPOptions) EqualsModel(b model.Model) bool {
+	c := b.(*DHCPOptions)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &DHCPOptions{}
+var _ model.ComparableModel = &DHCPOptions{}

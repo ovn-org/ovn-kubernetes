@@ -3,6 +3,8 @@
 
 package sbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 // Chassis defines an object in Chassis table
 type Chassis struct {
 	UUID                string            `ovsdb:"_uuid"`
@@ -15,3 +17,171 @@ type Chassis struct {
 	TransportZones      []string          `ovsdb:"transport_zones"`
 	VtepLogicalSwitches []string          `ovsdb:"vtep_logical_switches"`
 }
+
+func copyChassisEncaps(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalChassisEncaps(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func copyChassisExternalIDs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalChassisExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyChassisOtherConfig(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalChassisOtherConfig(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyChassisTransportZones(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalChassisTransportZones(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func copyChassisVtepLogicalSwitches(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalChassisVtepLogicalSwitches(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *Chassis) DeepCopyInto(b *Chassis) {
+	*b = *a
+	b.Encaps = copyChassisEncaps(a.Encaps)
+	b.ExternalIDs = copyChassisExternalIDs(a.ExternalIDs)
+	b.OtherConfig = copyChassisOtherConfig(a.OtherConfig)
+	b.TransportZones = copyChassisTransportZones(a.TransportZones)
+	b.VtepLogicalSwitches = copyChassisVtepLogicalSwitches(a.VtepLogicalSwitches)
+}
+
+func (a *Chassis) DeepCopy() *Chassis {
+	b := new(Chassis)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *Chassis) CloneModelInto(b model.Model) {
+	c := b.(*Chassis)
+	a.DeepCopyInto(c)
+}
+
+func (a *Chassis) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *Chassis) Equals(b *Chassis) bool {
+	return a.UUID == b.UUID &&
+		equalChassisEncaps(a.Encaps, b.Encaps) &&
+		equalChassisExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		a.Hostname == b.Hostname &&
+		a.Name == b.Name &&
+		a.NbCfg == b.NbCfg &&
+		equalChassisOtherConfig(a.OtherConfig, b.OtherConfig) &&
+		equalChassisTransportZones(a.TransportZones, b.TransportZones) &&
+		equalChassisVtepLogicalSwitches(a.VtepLogicalSwitches, b.VtepLogicalSwitches)
+}
+
+func (a *Chassis) EqualsModel(b model.Model) bool {
+	c := b.(*Chassis)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &Chassis{}
+var _ model.ComparableModel = &Chassis{}

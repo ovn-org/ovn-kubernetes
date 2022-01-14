@@ -3,6 +3,8 @@
 
 package nbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 type (
 	ACLAction    = string
 	ACLDirection = string
@@ -38,3 +40,128 @@ type ACL struct {
 	Priority    int               `ovsdb:"priority"`
 	Severity    *ACLSeverity      `ovsdb:"severity"`
 }
+
+func copyACLExternalIDs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalACLExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyACLMeter(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalACLMeter(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyACLName(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalACLName(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyACLSeverity(a *ACLSeverity) *ACLSeverity {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalACLSeverity(a, b *ACLSeverity) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func (a *ACL) DeepCopyInto(b *ACL) {
+	*b = *a
+	b.ExternalIDs = copyACLExternalIDs(a.ExternalIDs)
+	b.Meter = copyACLMeter(a.Meter)
+	b.Name = copyACLName(a.Name)
+	b.Severity = copyACLSeverity(a.Severity)
+}
+
+func (a *ACL) DeepCopy() *ACL {
+	b := new(ACL)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *ACL) CloneModelInto(b model.Model) {
+	c := b.(*ACL)
+	a.DeepCopyInto(c)
+}
+
+func (a *ACL) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *ACL) Equals(b *ACL) bool {
+	return a.UUID == b.UUID &&
+		a.Action == b.Action &&
+		a.Direction == b.Direction &&
+		equalACLExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		a.Label == b.Label &&
+		a.Log == b.Log &&
+		a.Match == b.Match &&
+		equalACLMeter(a.Meter, b.Meter) &&
+		equalACLName(a.Name, b.Name) &&
+		a.Priority == b.Priority &&
+		equalACLSeverity(a.Severity, b.Severity)
+}
+
+func (a *ACL) EqualsModel(b model.Model) bool {
+	c := b.(*ACL)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &ACL{}
+var _ model.ComparableModel = &ACL{}

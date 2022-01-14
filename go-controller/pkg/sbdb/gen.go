@@ -1,3 +1,3 @@
 package sbdb
 
-//go:generate modelgen -p sbdb -o . ovn-sb.ovsschema
+//go:generate modelgen --extended -p sbdb -o . ovn-sb.ovsschema
