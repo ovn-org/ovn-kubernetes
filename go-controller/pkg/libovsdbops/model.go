@@ -17,6 +17,8 @@ func getUUID(model model.Model) string {
 		return t.UUID
 	case *nbdb.BFD:
 		return t.UUID
+	case *nbdb.Copp:
+		return t.UUID
 	case *nbdb.GatewayChassis:
 		return t.UUID
 	case *nbdb.LoadBalancer:
@@ -61,6 +63,8 @@ func setUUID(model model.Model, uuid string) {
 	case *nbdb.AddressSet:
 		t.UUID = uuid
 	case *nbdb.BFD:
+		t.UUID = uuid
+	case *nbdb.Copp:
 		t.UUID = uuid
 	case *nbdb.GatewayChassis:
 		t.UUID = uuid
@@ -115,6 +119,10 @@ func copyIndexes(model model.Model) model.Model {
 			UUID:        t.UUID,
 			LogicalPort: t.LogicalPort,
 			DstIP:       t.DstIP,
+		}
+	case *nbdb.Copp:
+		return &nbdb.Copp{
+			UUID: t.UUID,
 		}
 	case *nbdb.GatewayChassis:
 		return &nbdb.GatewayChassis{
@@ -202,6 +210,8 @@ func getListFromModel(model model.Model) interface{} {
 		return &[]nbdb.AddressSet{}
 	case *nbdb.BFD:
 		return &[]nbdb.BFD{}
+	case *nbdb.Copp:
+		return &[]nbdb.Copp{}
 	case *nbdb.GatewayChassis:
 		return &[]nbdb.GatewayChassis{}
 	case *nbdb.LoadBalancer:

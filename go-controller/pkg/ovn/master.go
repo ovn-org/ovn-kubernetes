@@ -292,7 +292,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 			Unit: types.PacketsPerSecond,
 		}
 
-		if err := libovsdbops.CreateMeterWithBand(oc.nbClient, meter, meterBand); err != nil {
+		if _, err := libovsdbops.CreateMeterWithBand(oc.nbClient, meter, meterBand); err != nil {
 			klog.Warningf("ACL logging support enabled, however acl-logging meter could not be created: %v. "+
 				"Disabling ACL logging support", err)
 			oc.aclLoggingEnabled = false

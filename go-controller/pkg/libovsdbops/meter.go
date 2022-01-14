@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -48,7 +49,7 @@ func UpdateMeterFairness(nbClient libovsdbclient.Client, meter *nbdb.Meter, fair
 
 // CreateMeterWithBand simulates the ovn-nbctl operation performed by the `meter-add` command. i.e create the Meter
 // and accompanying meter_band, and add the meterband to the meter only call this if the meter does not exist
-func CreateMeterWithBand(nbClient libovsdbclient.Client, meter *nbdb.Meter, meterBand *nbdb.MeterBand) error {
+func CreateMeterWithBand(nbClient libovsdbclient.Client, meter *nbdb.Meter, meterBand *nbdb.MeterBand) ([]ovsdb.OperationResult, error) {
 	opModels := []OperationModel{
 		{
 			Model: meterBand,
@@ -62,9 +63,11 @@ func CreateMeterWithBand(nbClient libovsdbclient.Client, meter *nbdb.Meter, mete
 	}
 
 	m := NewModelClient(nbClient)
-	if _, err := m.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("error while creating Meter_Band %+v and Meter %+v error %v", meterBand, meter, err)
+	var results []ovsdb.OperationResult
+	var err error
+	if results, err = m.CreateOrUpdate(opModels...); err != nil {
+		return nil, fmt.Errorf("error while creating Meter_Band %+v and Meter %+v error %v", meterBand, meter, err)
 	}
 
-	return nil
+	return results, nil
 }
