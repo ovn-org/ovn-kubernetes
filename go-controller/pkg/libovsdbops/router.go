@@ -3,8 +3,10 @@ package libovsdbops
 import (
 	"context"
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"net"
+	"time"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
 )
 
 // findRouter looks up the router in the cache
@@ -45,6 +48,10 @@ func findRouter(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) (*nb
 }
 
 func AddLoadBalancersToRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished AddLoadBalancersToRouterOps: %v", time.Since(startTime))
+	}()
 	if ops == nil {
 		ops = []libovsdb.Operation{}
 	}
@@ -76,6 +83,10 @@ func AddLoadBalancersToRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.
 }
 
 func RemoveLoadBalancersFromRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished RemoveLoadBalancersFromRouterOps: %v", time.Since(startTime))
+	}()
 	if ops == nil {
 		ops = []libovsdb.Operation{}
 	}

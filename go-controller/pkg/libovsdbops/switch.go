@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -138,6 +140,10 @@ func FindSwitchByName(nbClient libovsdbclient.Client, name string) (*nbdb.Logica
 }
 
 func AddLoadBalancersToSwitchOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lswitch *nbdb.LogicalSwitch, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished AddLoadBalancersToSwitchOps: %v", time.Since(startTime))
+	}()
 	if ops == nil {
 		ops = []libovsdb.Operation{}
 	}
@@ -168,6 +174,10 @@ func AddLoadBalancersToSwitchOps(nbClient libovsdbclient.Client, ops []libovsdb.
 }
 
 func RemoveLoadBalancersFromSwitchOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lswitch *nbdb.LogicalSwitch, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished RemoveLoadBalancersFromSwitchOps: %v", time.Since(startTime))
+	}()
 	if ops == nil {
 		ops = []libovsdb.Operation{}
 	}

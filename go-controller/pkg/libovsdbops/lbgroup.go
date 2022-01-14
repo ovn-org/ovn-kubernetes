@@ -3,10 +3,12 @@ package libovsdbops
 import (
 	"context"
 	"fmt"
+	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -41,6 +43,10 @@ func findLBGroup(nbClient libovsdbclient.Client, group *nbdb.LoadBalancerGroup) 
 }
 
 func AddLoadBalancersToGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, group *nbdb.LoadBalancerGroup, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished AddLoadBalancersToGroupOps: %v", time.Since(startTime))
+	}()
 	if ops == nil {
 		ops = []libovsdb.Operation{}
 	}
@@ -71,6 +77,10 @@ func AddLoadBalancersToGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 }
 
 func RemoveLoadBalancersFromGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, group *nbdb.LoadBalancerGroup, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished RemoveLoadBalancersFromGroupOps: %v", time.Since(startTime))
+	}()
 	if ops == nil {
 		ops = []libovsdb.Operation{}
 	}

@@ -132,6 +132,10 @@ func (r *repair) runBeforeSync() {
 // If all services have successfully synced at least once, kick off
 // runAfterSync()
 func (r *repair) serviceSynced(key string) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished deleteServiceFromLegacyLBs: %v", time.Since(startTime))
+	}()
 	r.Lock()
 	defer r.Unlock()
 	if len(r.unsyncedServices) == 0 {

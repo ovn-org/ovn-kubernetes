@@ -3,7 +3,10 @@ package libovsdbops
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"k8s.io/klog/v2"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
@@ -136,6 +139,10 @@ func createOrUpdateLoadBalancerOps(nbClient libovsdbclient.Client, ops []libovsd
 }
 
 func CreateOrUpdateLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished CreateOrUpdateLoadBalancersOps: %v", time.Since(startTime))
+	}()
 	if ops == nil {
 		ops = []libovsdb.Operation{}
 	}
@@ -197,6 +204,10 @@ func deleteLoadBalancerOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 }
 
 func DeleteLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished DeleteLoadBalancersOps: %v", time.Since(startTime))
+	}()
 	if ops == nil {
 		ops = []libovsdb.Operation{}
 	}

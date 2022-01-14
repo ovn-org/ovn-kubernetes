@@ -5,6 +5,7 @@ import (
 	"net"
 	"regexp"
 	"strings"
+	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -13,6 +14,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
 )
 
 // deleteServiceFrom LegacyLBs removes any of a service's vips from
@@ -20,6 +22,10 @@ import (
 // This misses cleaning up NodePort services, but those will be caught
 // when the repair PostSync is done.
 func deleteServiceFromLegacyLBs(nbClient libovsdbclient.Client, service *v1.Service) error {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished deleteServiceFromLegacyLBs: %v", time.Since(startTime))
+	}()
 	vipPortsPerProtocol := map[v1.Protocol]sets.String{}
 
 	// Generate list of vip:port by proto

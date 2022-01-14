@@ -34,6 +34,10 @@ func TransactWithRetry(ctx context.Context, c client.Client, ops []ovsdb.Operati
 }
 
 func TransactAndCheck(c client.Client, ops []ovsdb.Operation) ([]ovsdb.OperationResult, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished TransactAndCheck: %v", time.Since(startTime))
+	}()
 	if len(ops) <= 0 {
 		return []ovsdb.OperationResult{{}}, nil
 	}
@@ -61,6 +65,10 @@ func TransactAndCheck(c client.Client, ops []ovsdb.Operation) ([]ovsdb.Operation
 // the passed models if they were inserted and have a named-uuid (as built by
 // BuildNamedUUID)
 func TransactAndCheckAndSetUUIDs(client client.Client, models interface{}, ops []ovsdb.Operation) ([]ovsdb.OperationResult, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished TransactAndCheckAndSetUUIDs: %v", time.Since(startTime))
+	}()
 	results, err := TransactAndCheck(client, ops)
 	if err != nil {
 		return nil, err

@@ -312,9 +312,18 @@ func (c *Controller) syncService(key string) error {
 	lbs := append(clusterLBs, perNodeLBs...)
 
 	// Short-circuit if nothing has changed
-	c.alreadyAppliedLock.Lock()
-	existingLBs, ok := c.alreadyApplied[key]
-	c.alreadyAppliedLock.Unlock()
+	var existingLBs []ovnlb.LB
+	var ok bool
+	func() {
+		startTime := time.Now()
+		defer func() {
+			klog.V(4).Infof("Finished reading alreadyApplied: %v", time.Since(startTime))
+		}()
+		c.alreadyAppliedLock.Lock()
+		existingLBs, ok = c.alreadyApplied[key]
+		c.alreadyAppliedLock.Unlock()
+	}()
+
 	if ok && ovnlb.LoadBalancersEqualNoUUID(existingLBs, lbs) {
 		klog.V(3).Infof("Skipping no-op change for service %s", key)
 	} else {
@@ -326,10 +335,15 @@ func (c *Controller) syncService(key string) error {
 		if err := ovnlb.EnsureLBs(c.nbClient, util.ExternalIDsForObject(service), lbs); err != nil {
 			return fmt.Errorf("failed to ensure service %s load balancers: %w", key, err)
 		}
-
-		c.alreadyAppliedLock.Lock()
-		c.alreadyApplied[key] = lbs
-		c.alreadyAppliedLock.Unlock()
+		func() {
+			startTime := time.Now()
+			defer func() {
+				klog.V(4).Infof("Finished writing alreadyApplied: %v", time.Since(startTime))
+			}()
+			c.alreadyAppliedLock.Lock()
+			c.alreadyApplied[key] = lbs
+			c.alreadyAppliedLock.Unlock()
+		}()
 	}
 
 	if !c.repair.legacyLBsDeleted() {

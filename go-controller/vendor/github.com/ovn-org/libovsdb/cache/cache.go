@@ -11,6 +11,9 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
+
+	"k8s.io/klog/v2"
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/stdr"
@@ -552,6 +555,10 @@ func (t *TableCache) Update(context interface{}, tableUpdates ovsdb.TableUpdates
 // this populates a channel with updates so they can be processed after the initial
 // state has been Populated
 func (t *TableCache) Update2(context interface{}, tableUpdates ovsdb.TableUpdates2) error {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished Update2: %v", time.Since(startTime))
+	}()
 	if len(tableUpdates) == 0 {
 		return nil
 	}

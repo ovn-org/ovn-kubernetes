@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -57,6 +58,10 @@ var protos = []v1.Protocol{
 // - services with host-network endpoints
 // - services with ExternalTrafficPolicy=Local
 func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.EndpointSlice) (perNodeConfigs []lbConfig, clusterConfigs []lbConfig) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished buildServiceLBConfigs: %v", time.Since(startTime))
+	}()
 	// For each svcPort, determine if it will be applied per-node or cluster-wide
 	for _, svcPort := range service.Spec.Ports {
 		eps := util.GetLbEndpoints(endpointSlices, svcPort)
@@ -156,6 +161,10 @@ func makeLBName(service *v1.Service, proto v1.Protocol, scope string) string {
 // them to a list of (proto:[vip:port -> [endpoint:port]])
 // This load balancer is attached to all node switches. In shared-GW mode, it is also on all routers
 func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeInfo, useLBGroup bool) []ovnlb.LB {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished buildClusterLBs: %v", time.Since(startTime))
+	}()
 	var nodeSwitches []string
 	var nodeRouters []string
 	var groups []string
@@ -266,6 +275,10 @@ func buildClusterLBs(service *v1.Service, configs []lbConfig, nodeInfos []nodeIn
 // - NP LB on the switch will have masqueradeIP as the vip to handle etp=local for LGW case.
 // This results in the creation of an additional load balancer on the GatewayRouters and NodeSwitches.
 func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) []ovnlb.LB {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished buildPerNodeLBs: %v", time.Since(startTime))
+	}()
 	cbp := configsByProto(configs)
 	eids := util.ExternalIDsForObject(service)
 
