@@ -343,12 +343,12 @@ func (oc *Controller) addEgressFirewallRules(ef *egressFirewall, hashedAddressSe
 func (oc *Controller) createEgressFirewallRules(priority int, match, action, externalID string) error {
 	logicalSwitches := []string{}
 	if config.Gateway.Mode == config.GatewayModeLocal {
-		nodes, err := oc.watchFactory.GetNodes()
+		nodeLocalSwitches, err := libovsdbops.FindAllNodeLocalSwitches(oc.nbClient)
 		if err != nil {
 			return fmt.Errorf("unable to setup egress firewall ACLs on cluster nodes, err: %v", err)
 		}
-		for _, node := range nodes {
-			logicalSwitches = append(logicalSwitches, node.Name)
+		for _, nodeLocalSwitch := range nodeLocalSwitches {
+			logicalSwitches = append(logicalSwitches, nodeLocalSwitch.Name)
 		}
 	} else {
 		logicalSwitches = append(logicalSwitches, types.OVNJoinSwitch)
