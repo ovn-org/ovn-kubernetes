@@ -56,7 +56,7 @@ func AddLoadBalancersToGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 
 	err := findLBGroup(nbClient, group)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("can't find LB group %+v: %v", *group, err)
 	}
 
 	lbUUIDs := make([]string, 0, len(lbs))
@@ -90,7 +90,7 @@ func RemoveLoadBalancersFromGroupOps(nbClient libovsdbclient.Client, ops []libov
 
 	err := findLBGroup(nbClient, group)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("can't find LB group %+v: %v", *group, err)
 	}
 
 	lbUUIDs := make([]string, 0, len(lbs))

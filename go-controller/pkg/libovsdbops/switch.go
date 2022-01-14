@@ -153,7 +153,7 @@ func AddLoadBalancersToSwitchOps(nbClient libovsdbclient.Client, ops []libovsdb.
 
 	err := findSwitchUUID(nbClient, lswitch)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("can't find switch %+v: %v", *lswitch, err)
 	}
 
 	lbUUIDs := make([]string, 0, len(lbs))
@@ -187,7 +187,7 @@ func RemoveLoadBalancersFromSwitchOps(nbClient libovsdbclient.Client, ops []libo
 
 	err := findSwitchUUID(nbClient, lswitch)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("can't find switch %+v: %v", *lswitch, err)
 	}
 
 	lbUUIDs := make([]string, 0, len(lbs))
