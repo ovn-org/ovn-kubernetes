@@ -208,13 +208,7 @@ networked pods or cluster networked pods
 
 ### Host -> Service -> OVN Pod
 
-#### **Shared Gateway Mode**
-
-Documentation will be updated after https://bugzilla.redhat.com/show_bug.cgi?id=2025467 is fixed.
-
-#### **Local Gateway Mode**
-
-This case is similar to steps 3-6 on `External -> Service -> OVN Pod` traffic senario we saw above for local gateway.
+This case is similar to steps 3-6 on `External -> Service -> OVN Pod` traffic senario we saw above for local gateway. The traffic will flow from host->PRE-ROUTING iptable rule DNAT towards `169.254.169.3`, which gets routed into `ovn-k8s-mp0` and hits the load balancer on the node-local-switch preserving sourceIP.
 
 ### Host -> Service -> Host
 
