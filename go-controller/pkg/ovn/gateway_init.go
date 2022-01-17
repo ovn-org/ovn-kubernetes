@@ -409,7 +409,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 			nat = libovsdbops.BuildRouterSNAT(&externalIP[0], entry, "", nil)
 			nats = append(nats, nat)
 		}
-		err := libovsdbops.AddOrUpdateNatsToRouter(oc.nbClient, gatewayRouter, nats...)
+		err := libovsdbops.AddOrUpdateNATsToRouter(oc.nbClient, gatewayRouter, nats...)
 		if err != nil {
 			return fmt.Errorf("failed to update SNAT rule for pod on router %s error: %v", gatewayRouter, err)
 		}
@@ -419,7 +419,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 			nat = libovsdbops.BuildRouterSNAT(nil, logicalSubnet, "", nil)
 			nats = append(nats, nat)
 		}
-		err := libovsdbops.DeleteNatsFromRouter(oc.nbClient, gatewayRouter, nats...)
+		err := libovsdbops.DeleteNATsFromRouter(oc.nbClient, gatewayRouter, nats...)
 		if err != nil {
 			return fmt.Errorf("failed to delete GW SNAT rule for pod on router %s error: %v", gatewayRouter, err)
 		}

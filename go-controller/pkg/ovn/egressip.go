@@ -908,7 +908,7 @@ func (oc *Controller) syncStaleSNATRules(egressIPToPodIPCache map[string]sets.St
 		return false
 	}
 
-	nats, err := libovsdbops.FindNatsUsingPredicate(oc.nbClient, predicate)
+	nats, err := libovsdbops.FindNATsUsingPredicate(oc.nbClient, predicate)
 	if err != nil {
 		klog.Errorf("Unable to sync egress IPs err: %v", err)
 		return
@@ -919,7 +919,7 @@ func (oc *Controller) syncStaleSNATRules(egressIPToPodIPCache map[string]sets.St
 		return
 	}
 
-	routers, err := libovsdbops.FindRoutersUsingNat(oc.nbClient, nats)
+	routers, err := libovsdbops.FindRoutersUsingNAT(oc.nbClient, nats)
 	if err != nil {
 		klog.Errorf("Unable to sync egress IPs, err: %v", err)
 		return
@@ -927,7 +927,7 @@ func (oc *Controller) syncStaleSNATRules(egressIPToPodIPCache map[string]sets.St
 
 	ops := []ovsdb.Operation{}
 	for _, router := range routers {
-		ops, err = libovsdbops.DeleteNatsFromRouterOps(oc.nbClient, ops, &router, nats...)
+		ops, err = libovsdbops.DeleteNATsFromRouterOps(oc.nbClient, ops, &router, nats...)
 		if err != nil {
 			klog.Errorf("Error deleting stale NAT from router %s: %v", router.Name, err)
 			continue
@@ -1923,7 +1923,7 @@ func createNATRuleOps(nbClient libovsdbclient.Client, podIPs []*net.IPNet, statu
 	router := &nbdb.LogicalRouter{
 		Name: util.GetGatewayRouterFromNode(status.Node),
 	}
-	ops, err := libovsdbops.AddOrUpdateNatsToRouterOps(nbClient, []ovsdb.Operation{}, router, nats...)
+	ops, err := libovsdbops.AddOrUpdateNATsToRouterOps(nbClient, []ovsdb.Operation{}, router, nats...)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create snat rules, for router: %s, error: %v", router.Name, err)
 	}
@@ -1946,7 +1946,7 @@ func deleteNATRuleOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, pod
 	router := &nbdb.LogicalRouter{
 		Name: util.GetGatewayRouterFromNode(status.Node),
 	}
-	ops, err = libovsdbops.DeleteNatsFromRouterOps(nbClient, ops, router, nats...)
+	ops, err = libovsdbops.DeleteNATsFromRouterOps(nbClient, ops, router, nats...)
 	if err != nil {
 		return nil, fmt.Errorf("unable to remove snat rules for router: %s, error: %v", router.Name, err)
 	}

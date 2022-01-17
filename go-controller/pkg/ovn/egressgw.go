@@ -582,7 +582,7 @@ func deletePerPodGRSNAT(nbClient libovsdbclient.Client, node string, podIPNets [
 		nat = libovsdbops.BuildRouterSNAT(nil, fullMaskPodNet, "", nil)
 		nats = append(nats, nat)
 	}
-	err = libovsdbops.DeleteNatsFromRouter(nbClient, gr, nats...)
+	err = libovsdbops.DeleteNATsFromRouter(nbClient, gr, nats...)
 	if err != nil {
 		return fmt.Errorf("failed to delete SNAT rule for pod on gateway router %s, "+
 			"error: %v", gr, err)
@@ -619,7 +619,7 @@ func addPerPodGRSNAT(nbClient libovsdbclient.Client, watchFactory *factory.Watch
 			nats = append(nats, nat)
 		}
 	}
-	if err := libovsdbops.AddOrUpdateNatsToRouter(nbClient, gr, nats...); err != nil {
+	if err := libovsdbops.AddOrUpdateNATsToRouter(nbClient, gr, nats...); err != nil {
 		return fmt.Errorf("failed to update SNAT for pods of router: %s, error: %v", gr, err)
 	}
 	return nil
