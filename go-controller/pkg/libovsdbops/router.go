@@ -227,7 +227,7 @@ func isEquivalentNAT(existing *nbdb.NAT, searched *nbdb.NAT) bool {
 	return true
 }
 
-func FindNatsUsingPredicate(nbClient libovsdbclient.Client, predicate func(item *nbdb.NAT) bool) ([]*nbdb.NAT, error) {
+func FindNATsUsingPredicate(nbClient libovsdbclient.Client, predicate func(item *nbdb.NAT) bool) ([]*nbdb.NAT, error) {
 	nats := []nbdb.NAT{}
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	defer cancel()
@@ -243,8 +243,8 @@ func FindNatsUsingPredicate(nbClient libovsdbclient.Client, predicate func(item 
 	return natsPtrs, nil
 }
 
-// FindRoutersUsingNat looks up routers that have any of the provided nats in its column
-func FindRoutersUsingNat(nbClient libovsdbclient.Client, nats []*nbdb.NAT) ([]nbdb.LogicalRouter, error) {
+// FindRoutersUsingNAT looks up routers that have any of the provided nats in its column
+func FindRoutersUsingNAT(nbClient libovsdbclient.Client, nats []*nbdb.NAT) ([]nbdb.LogicalRouter, error) {
 	natUUIDs := sets.String{}
 	for _, nat := range nats {
 		if nat != nil {
@@ -272,7 +272,7 @@ func FindRoutersUsingNat(nbClient libovsdbclient.Client, nats []*nbdb.NAT) ([]nb
 	return routers, nil
 }
 
-func getRouterNats(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) ([]*nbdb.NAT, error) {
+func getRouterNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) ([]*nbdb.NAT, error) {
 	nats := []*nbdb.NAT{}
 
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
@@ -292,7 +292,7 @@ func getRouterNats(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) (
 }
 
 // This non-public function can be leveraged by future cases when logical router is created with nats via libovsdb
-func addOrUpdateNatToRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, routerNats []*nbdb.NAT, nat *nbdb.NAT) ([]libovsdb.Operation, error) {
+func addOrUpdateNATToRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, routerNats []*nbdb.NAT, nat *nbdb.NAT) ([]libovsdb.Operation, error) {
 	if ops == nil {
 		ops = []libovsdb.Operation{}
 	}
@@ -346,20 +346,20 @@ func addOrUpdateNatToRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Op
 	return ops, nil
 }
 
-func AddOrUpdateNatsToRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, nats ...*nbdb.NAT) ([]libovsdb.Operation, error) {
+func AddOrUpdateNATsToRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, nats ...*nbdb.NAT) ([]libovsdb.Operation, error) {
 	router, err := findRouter(nbClient, router)
 	if err != nil {
 		return ops, err
 	}
 
-	routerNats, err := getRouterNats(nbClient, router)
+	routerNats, err := getRouterNATs(nbClient, router)
 	if err != nil {
 		return ops, err
 	}
 
 	for _, nat := range nats {
 		if nat != nil {
-			ops, err = addOrUpdateNatToRouterOps(nbClient, ops, router, routerNats, nat)
+			ops, err = addOrUpdateNATToRouterOps(nbClient, ops, router, routerNats, nat)
 			if err != nil {
 				return ops, err
 			}
@@ -369,7 +369,7 @@ func AddOrUpdateNatsToRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 	return ops, nil
 }
 
-func DeleteNatsFromRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, nats ...*nbdb.NAT) ([]libovsdb.Operation, error) {
+func DeleteNATsFromRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, nats ...*nbdb.NAT) ([]libovsdb.Operation, error) {
 	if ops == nil {
 		ops = []libovsdb.Operation{}
 	}
@@ -379,7 +379,7 @@ func DeleteNatsFromRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Oper
 		return ops, err
 	}
 
-	routerNats, err := getRouterNats(nbClient, router)
+	routerNats, err := getRouterNATs(nbClient, router)
 	if err != nil {
 		return ops, err
 	}
@@ -427,9 +427,9 @@ func DeleteNatsFromRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Oper
 	return ops, nil
 }
 
-func AddOrUpdateNatsToRouter(nbClient libovsdbclient.Client, routerName string, nats ...*nbdb.NAT) error {
+func AddOrUpdateNATsToRouter(nbClient libovsdbclient.Client, routerName string, nats ...*nbdb.NAT) error {
 	router := &nbdb.LogicalRouter{Name: routerName}
-	ops, err := AddOrUpdateNatsToRouterOps(nbClient, nil, router, nats...)
+	ops, err := AddOrUpdateNATsToRouterOps(nbClient, nil, router, nats...)
 	if err != nil {
 		return err
 	}
@@ -438,9 +438,9 @@ func AddOrUpdateNatsToRouter(nbClient libovsdbclient.Client, routerName string, 
 	return err
 }
 
-func DeleteNatsFromRouter(nbClient libovsdbclient.Client, routerName string, nats ...*nbdb.NAT) error {
+func DeleteNATsFromRouter(nbClient libovsdbclient.Client, routerName string, nats ...*nbdb.NAT) error {
 	router := &nbdb.LogicalRouter{Name: routerName}
-	ops, err := DeleteNatsFromRouterOps(nbClient, nil, router, nats...)
+	ops, err := DeleteNATsFromRouterOps(nbClient, nil, router, nats...)
 	if err != nil {
 		return err
 	}
