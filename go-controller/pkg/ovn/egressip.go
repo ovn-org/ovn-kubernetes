@@ -785,11 +785,29 @@ func (oc *Controller) addNamespaceEgressIPAssignments(name string, statusAssignm
 func (oc *Controller) addPodEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem, pod *kapi.Pod) error {
 	oc.eIPC.podAssignmentMutex.Lock()
 	defer oc.eIPC.podAssignmentMutex.Unlock()
+	// If statusAssignments is empty just return, not doing this will delete the
+	// external GW set up, even though there might be no egress IP set up to
+	// perform.
+	if len(statusAssignments) == 0 {
+		return nil
+	}
 	var remainingAssignments []egressipv1.EgressIPStatusItem
 	podKey := getPodKey(pod)
 	existing, exists := oc.eIPC.podAssignment[podKey]
 	if !exists {
 		remainingAssignments = statusAssignments
+		// Retrieve the pod's networking configuration from the
+		// logicalPortCache. The reason for doing this: a) only normal network
+		// pods are placed in this cache, b) once the pod is placed here we know
+		// addLogicalPort has finished successfully setting up networking for
+		// the pod, so we can proceed with retrieving its IP and deleting the
+		// external GW configuration created in addLogicalPort for the pod.
+		if _, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name)); err != nil {
+			return nil
+		}
+		if err := oc.eIPC.deletePerPodGRSNAT(pod); err != nil && !errors.Is(err, skippedPodError) {
+			return err
+		}
 	} else {
 		for _, status := range statusAssignments {
 			shouldAdd := true
@@ -831,7 +849,8 @@ func (oc *Controller) deleteAllocatorEgressIPAssignments(statusAssignments []egr
 // deleteEgressIPAssignments performs a full egress IP setup deletion on a per
 // (egress IP name - status) basis. The idea is thus to list the full content of
 // the NB DB for that egress IP object and delete everything which match the
-// status.
+// status. We also need to update the podAssignment cache and finally re-add the
+// external GW setup in case the pod still exists.
 func (oc *Controller) deleteEgressIPAssignments(name string, statusesToRemove []egressipv1.EgressIPStatusItem) error {
 	oc.eIPC.podAssignmentMutex.Lock()
 	defer oc.eIPC.podAssignmentMutex.Unlock()
@@ -848,6 +867,10 @@ func (oc *Controller) deleteEgressIPAssignments(name string, statusesToRemove []
 				}
 			}
 			if len(podStatus) == 0 {
+				podNamespace, podName := getPodNamespaceAndNameFromKey(podKey)
+				if err := oc.eIPC.addPerPodGRSNAT(podNamespace, podName); err != nil {
+					return err
+				}
 				delete(oc.eIPC.podAssignment, podKey)
 			}
 		}
@@ -904,7 +927,7 @@ func (oc *Controller) deletePodEgressIPAssignments(name string, statusesToRemove
 	// Delete the key if there are no more status assignments to keep
 	// for the pod.
 	delete(oc.eIPC.podAssignment, podKey)
-	return nil
+	return oc.eIPC.addPerPodGRSNAT(pod.Namespace, pod.Name)
 }
 
 func (oc *Controller) isEgressNodeReady(egressNode *kapi.Node) bool {
@@ -1523,17 +1546,6 @@ func (e *egressIPController) addPodEgressIPAssignment(egressIPName string, statu
 	if err := e.handleEgressReroutePolicy(podIPs, status, egressIPName, e.createEgressReroutePolicy); err != nil {
 		return fmt.Errorf("unable to create logical router policy, err: %v", err)
 	}
-	if config.Gateway.DisableSNATMultipleGWs {
-		// remove snats to->nodeIP (from the node where pod exists) for these podIPs before adding the snat to->egressIP
-		extIPs, err := getExternalIPsGRSNAT(e.watchFactory, pod.Spec.NodeName)
-		if err != nil {
-			return err
-		}
-		err = deletePerPodGRSNAT(e.nbClient, pod.Spec.NodeName, extIPs, podIPs)
-		if err != nil {
-			return err
-		}
-	}
 	ops, err := createNATRuleOps(e.nbClient, podIPs, status, egressIPName)
 	if err != nil {
 		return fmt.Errorf("unable to create NAT rule for status: %v, err: %v", status, err)
@@ -1564,23 +1576,26 @@ func (e *egressIPController) deletePodEgressIPAssignment(egressIPName string, st
 		return fmt.Errorf("unable to delete NAT rule for status: %v, err: %v", status, err)
 	}
 	_, err = libovsdbops.TransactAndCheck(e.nbClient, ops)
-	if err != nil {
-		return err
-	}
-	if err := e.addPerPodGRSNAT(pod.Namespace, pod.Name, podIPs); err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
-func (e *egressIPController) addPerPodGRSNAT(podNamespace, podName string, podIPs []*net.IPNet) error {
+// addPerPodGRSNAT performs the required external GW setup in two particular
+// cases:
+// - An egress IP matching pod stops matching by means of EgressIP object
+// deletion
+// - An egress IP matching pod stops matching by means of changed EgressIP
+// selector change.
+// In both cases we should re-add the external GW setup. We however need to
+// guard against a third case, which is: pod deletion, for that it's enough to
+// check the informer cache since on pod deletion the event handlers are
+// triggered after the update to the informer cache. We should not re-add the
+// external GW setup in those cases.
+func (e *egressIPController) addPerPodGRSNAT(podNamespace, podName string) error {
 	if config.Gateway.DisableSNATMultipleGWs {
 		if pod, err := e.watchFactory.GetPod(podNamespace, podName); err == nil {
-			if podIPs == nil {
-				podIPs, err = e.getPodIPs(pod)
-				if err != nil {
-					return fmt.Errorf("unable to retrieve pod IPs, err: %v", err)
-				}
+			podIPs, err := e.getPodIPs(pod)
+			if err != nil {
+				return fmt.Errorf("unable to retrieve pod IPs, err: %v", err)
 			}
 			// if the pod still exists, add snats to->nodeIP (on the node where the pod exists) for these podIPs after deleting the snat to->egressIP
 			extIPs, err := getExternalIPsGRSNAT(e.watchFactory, pod.Spec.NodeName)
@@ -1591,6 +1606,25 @@ func (e *egressIPController) addPerPodGRSNAT(podNamespace, podName string, podIP
 			if err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func (e *egressIPController) deletePerPodGRSNAT(pod *kapi.Pod) error {
+	if config.Gateway.DisableSNATMultipleGWs {
+		podIPs, err := e.getPodIPs(pod)
+		if err != nil || len(podIPs) == 0 {
+			return skippedPodError
+		}
+		// remove snats to->nodeIP (from the node where pod exists) for these podIPs before adding the snat to->egressIP
+		extIPs, err := getExternalIPsGRSNAT(e.watchFactory, pod.Spec.NodeName)
+		if err != nil {
+			return err
+		}
+		err = deletePerPodGRSNAT(e.nbClient, pod.Spec.NodeName, extIPs, podIPs)
+		if err != nil {
+			return err
 		}
 	}
 	return nil
