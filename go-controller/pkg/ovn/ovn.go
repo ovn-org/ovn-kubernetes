@@ -334,6 +334,18 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	oc.WatchNetworkPolicy()
 
 	if config.OVNKubernetesFeature.EnableEgressIP {
+		// This is probably the best starting order for all egress IP handlers.
+		// WatchEgressIPNamespaces and WatchEgressIPPods only use the informer
+		// cache to retrieve the egress IPs when determining if namespace/pods
+		// match. It is thus better if we initialize them first and allow
+		// WatchEgressNodes / WatchEgressIP to initialize after. Those handlers
+		// might change the assignments of the existing objects. If we do the
+		// inverse and start WatchEgressIPNamespaces / WatchEgressIPPod last, we
+		// risk performing a bunch of modifications on the EgressIP objects when
+		// we restart and then have these handlers act on stale data when they
+		// sync.
+		oc.WatchEgressIPNamespaces()
+		oc.WatchEgressIPPods()
 		oc.WatchEgressNodes()
 		oc.WatchEgressIP()
 		if util.PlatformTypeIsEgressIPCloudProvider() {
@@ -962,11 +974,9 @@ func (oc *Controller) WatchEgressIP() {
 			}
 		},
 	}, oc.syncEgressIPs)
-	oc.watchEgressIPNamespaces()
-	oc.watchEgressIPPods()
 }
 
-func (oc *Controller) watchEgressIPNamespaces() {
+func (oc *Controller) WatchEgressIPNamespaces() {
 	oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			namespace := obj.(*kapi.Namespace)
@@ -990,7 +1000,7 @@ func (oc *Controller) watchEgressIPNamespaces() {
 	}, nil)
 }
 
-func (oc *Controller) watchEgressIPPods() {
+func (oc *Controller) WatchEgressIPPods() {
 	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
