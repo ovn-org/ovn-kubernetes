@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ovn-org/libovsdb/client"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
@@ -40,8 +40,8 @@ type MasterController struct {
 	namespaceEventHandler informer.EventHandler
 	podEventHandler       informer.EventHandler
 	modelClient           libovsdbops.ModelClient
-	nbClient              client.Client
-	sbClient              client.Client
+	nbClient              libovsdbclient.Client
+	sbClient              libovsdbclient.Client
 }
 
 // NewMaster a new master controller that listens for node events
@@ -49,7 +49,8 @@ func NewMaster(kube kube.Interface,
 	nodeInformer cache.SharedIndexInformer,
 	namespaceInformer cache.SharedIndexInformer,
 	podInformer cache.SharedIndexInformer,
-	libovsdbNBClient client.Client,
+	libovsdbNBClient libovsdbclient.Client,
+	libovsdbSBClient libovsdbclient.Client,
 	eventHandlerCreateFunction informer.EventHandlerCreateFunction,
 ) (*MasterController, error) {
 
@@ -60,6 +61,7 @@ func NewMaster(kube kube.Interface,
 		allocator:   subnetallocator.NewSubnetAllocator(),
 		modelClient: modelClient,
 		nbClient:    libovsdbNBClient,
+		sbClient:    libovsdbSBClient,
 	}
 
 	m.nodeEventHandler = eventHandlerCreateFunction("node", nodeInformer,
@@ -409,9 +411,7 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 				},
 				ExistingResult: &logicalRouterPolicyRes,
 				DoAfter: func() {
-					if logicalRouterPolicy.UUID != "" {
-						logicalRouter.Policies = []string{logicalRouterPolicy.UUID}
-					}
+					logicalRouter.Policies = []string{logicalRouterPolicy.UUID}
 				},
 			},
 			{
@@ -428,11 +428,9 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 		}
 		klog.Infof("Created hybrid overlay logical route policy for node %s", nodeName)
 
-		if len(logicalRouterPolicyRes) == 0 {
-			logicalPort := ovntypes.RouterToSwitchPrefix + nodeName
-			if err := util.CreateMACBinding(m.sbClient, logicalPort, ovntypes.OVNClusterRouter, portMac, drIP); err != nil {
-				return fmt.Errorf("failed to create MAC Binding for hybrid overlay: %v", err)
-			}
+		logicalPort := ovntypes.RouterToSwitchPrefix + nodeName
+		if err := util.CreateMACBinding(m.sbClient, logicalPort, ovntypes.OVNClusterRouter, portMac, drIP); err != nil {
+			return fmt.Errorf("failed to create MAC Binding for hybrid overlay: %v", err)
 		}
 	}
 	return nil

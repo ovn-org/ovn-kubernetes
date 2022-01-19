@@ -21,6 +21,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -28,11 +29,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	. "github.com/onsi/ginkgo"
-	"github.com/onsi/gomega"
 	. "github.com/onsi/gomega"
 )
-
-const hoNodeCliArg string = "-no-hostsubnet-nodes=" + v1.LabelOSStable + "=windows"
 
 func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Node {
 	annotations := make(map[string]string)
@@ -112,8 +110,10 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			dbSetup := libovsdbtest.TestSetup{}
 			var libovsdbOvnNBClient libovsdbclient.Client
-			libovsdbOvnNBClient, libovsdbCleanup, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			var libovsdbOvnSBClient libovsdbclient.Client
+
+			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			Expect(err).NotTo(HaveOccurred())
 
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
@@ -121,6 +121,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
 				libovsdbOvnNBClient,
+				libovsdbOvnSBClient,
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -152,6 +153,11 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			}, 2).Should(MatchError(fmt.Sprintf("node %q has no \"k8s.ovn.org/node-subnets\" annotation", nodeName)))
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+
+			// nothing should be done in OVN dbs from HO running on windows node
+			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(dbSetup.NBData))
+			Eventually(libovsdbOvnSBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(dbSetup.SBData))
+
 			return nil
 		}
 
@@ -183,36 +189,42 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			expectedDatabaseState := []libovsdbtest.TestData{
-				&nbdb.LogicalRouterPolicy{
-					Priority: 1002,
-					ExternalIDs: map[string]string{
-						"name": "hybrid-subnet-node1",
-					},
-					Action:   nbdb.LogicalRouterPolicyActionReroute,
-					Nexthops: []string{nodeHOIP},
-					Match:    "inport == \"rtos-node1\" && ip4.dst == 11.1.0.0/16",
-					UUID:     "reroute-policy-UUID",
-				},
-				&nbdb.LogicalRouter{
-					Name:     types.OVNClusterRouter,
-					Policies: []string{"reroute-policy-UUID"},
-				},
-			}
-
+			// pre-existing nbdb objects
 			nodeSwitch := &nbdb.LogicalSwitch{
 				Name: nodeName,
-				UUID: nodeName + "-UUID",
+				UUID: libovsdbops.BuildNamedUUID(),
 			}
 
-			initialExpectedDB := append(expectedDatabaseState, nodeSwitch)
+			ovnClusterRouter := &nbdb.LogicalRouter{
+				Name: types.OVNClusterRouter,
+				UUID: libovsdbops.BuildNamedUUID(),
+			}
+
+			initialNBDB := []libovsdbtest.TestData{
+				nodeSwitch,
+				ovnClusterRouter,
+			}
+
+			// pre-existing sbdb objects
+			clusterRouterDatapath := &sbdb.DatapathBinding{
+				UUID:        libovsdbops.BuildNamedUUID(),
+				ExternalIDs: map[string]string{"logical-router": ovnClusterRouter.UUID, "name": types.OVNClusterRouter},
+			}
+
+			initialSBDB := []libovsdbtest.TestData{
+				clusterRouterDatapath,
+			}
 
 			dbSetup := libovsdbtest.TestSetup{
-				NBData: initialExpectedDB,
+				NBData: initialNBDB,
+				SBData: initialSBDB,
 			}
+
 			var libovsdbOvnNBClient libovsdbclient.Client
-			libovsdbOvnNBClient, libovsdbCleanup, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			var libovsdbOvnSBClient libovsdbclient.Client
+
+			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 			m, err := NewMaster(
@@ -221,18 +233,40 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
 				libovsdbOvnNBClient,
+				libovsdbOvnSBClient,
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
-			// Make the expected LSP is created and added to the node
+			// make sure the expected LSP is created and added to the node
 			expectedLSP := &nbdb.LogicalSwitchPort{
 				UUID:      libovsdbops.BuildNamedUUID(),
 				Name:      types.HybridOverlayPrefix + nodeName,
 				Addresses: []string{nodeHOMAC},
 			}
 
+			// make sure the expected LRP is created and added to cluster router
+			expectedLRP := &nbdb.LogicalRouterPolicy{
+				Priority: 1002,
+				ExternalIDs: map[string]string{
+					"name": "hybrid-subnet-node1",
+				},
+				Action:   nbdb.LogicalRouterPolicyActionReroute,
+				Nexthops: []string{nodeHOIP},
+				Match:    "inport == \"rtos-node1\" && ip4.dst == 11.1.0.0/16",
+				UUID:     libovsdbops.BuildNamedUUID(),
+			}
+
 			nodeSwitch.Ports = []string{expectedLSP.UUID}
+			ovnClusterRouter.Policies = []string{expectedLRP.UUID}
+
+			expectedMACBinding := &sbdb.MACBinding{
+				UUID:        libovsdbops.BuildNamedUUID(),
+				Datapath:    clusterRouterDatapath.UUID,
+				IP:          nodeHOIP,
+				LogicalPort: types.RouterToSwitchPrefix + nodeName,
+				MAC:         nodeHOMAC,
+			}
 
 			f.Start(stopChan)
 			wg.Add(1)
@@ -252,25 +286,44 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			nodeSwitch.OtherConfig = map[string]string{"exclude_ips": "10.1.2.2"}
 
-			expectedDatabaseState = append(expectedDatabaseState, nodeSwitch, expectedLSP)
+			expectedNBDatabaseState := []libovsdbtest.TestData{
+				nodeSwitch,
+				ovnClusterRouter,
+				expectedLSP,
+				expectedLRP,
+			}
+
+			expectedSBDatabaseState := []libovsdbtest.TestData{
+				clusterRouterDatapath,
+				expectedMACBinding,
+			}
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
-			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedNBDatabaseState))
+			Eventually(libovsdbOvnSBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedSBDatabaseState))
 
 			err = fakeClient.CoreV1().Nodes().Delete(context.TODO(), nodeName, *metav1.NewDeleteOptions(0))
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 
-			// In a real db, deleting the LSP would remove the reference here, but in our testing ovsdb server it does not
+			// LRP should have been deleted and removed
+			ovnClusterRouter.Policies = []string{}
+			// in a real db, deleting the LSP would remove the reference here, but in our testing ovsdb server it does not
 			// nodeSwitch.Ports = []string{}
-			expectedDatabaseState = []libovsdbtest.TestData{
-				&nbdb.LogicalRouter{
-					Name: types.OVNClusterRouter,
-				},
+			expectedNBDatabaseState = []libovsdbtest.TestData{
+				ovnClusterRouter,
 				nodeSwitch,
 			}
-			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+			// in a real db, deleting the HO LSP would result in the Mac Binding being removed as well
+			expectedSBDatabaseState = []libovsdbtest.TestData{
+				clusterRouterDatapath,
+				expectedMACBinding,
+			}
+
+			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedNBDatabaseState))
+			Eventually(libovsdbOvnSBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedSBDatabaseState))
 			return nil
 		}
 
@@ -283,7 +336,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("handles a Linux node with no annotation but an existing port", func() {
+	It("handles a Linux node with no annotation but an existing port and lrp", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				nodeName   string = "node1"
@@ -302,33 +355,79 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			dynAdd := nodeHOMAC + " " + nodeHOIP
-			expectedDatabaseState := []libovsdbtest.TestData{
-				&nbdb.LogicalRouterPolicy{
-					Priority: 1002,
-					ExternalIDs: map[string]string{
-						"name": "hybrid-subnet-node1",
-					},
-					Action:   nbdb.LogicalRouterPolicyActionReroute,
-					Nexthops: []string{nodeHOIP},
-					Match:    "inport == \"rtos-node1\" && ip4.dst == 11.1.0.0/16",
-					UUID:     "reroute-policy-UUID",
-				},
-				&nbdb.LogicalSwitchPort{
-					Name:             "int-" + nodeName,
-					Addresses:        []string{nodeHOMAC, nodeHOIP},
-					DynamicAddresses: &dynAdd,
-				},
-				&nbdb.LogicalRouter{
-					Name:     types.OVNClusterRouter,
-					Policies: []string{"reroute-policy-UUID"},
-				},
+
+			// pre-existing nbdb objects
+
+			existingLSP := &nbdb.LogicalSwitchPort{
+				UUID:             libovsdbops.BuildNamedUUID(),
+				Name:             types.HybridOverlayPrefix + nodeName,
+				Addresses:        []string{nodeHOMAC},
+				DynamicAddresses: &dynAdd,
 			}
+
+			existingLRP := &nbdb.LogicalRouterPolicy{
+				Priority: 1002,
+				ExternalIDs: map[string]string{
+					"name": "hybrid-subnet-node1",
+				},
+				Action:   nbdb.LogicalRouterPolicyActionReroute,
+				Nexthops: []string{nodeHOIP},
+				Match:    "inport == \"rtos-node1\" && ip4.dst == 11.1.0.0/16",
+				UUID:     libovsdbops.BuildNamedUUID(),
+			}
+
+			nodeSwitch := &nbdb.LogicalSwitch{
+				Name:  nodeName,
+				UUID:  libovsdbops.BuildNamedUUID(),
+				Ports: []string{existingLSP.UUID},
+			}
+
+			ovnClusterRouter := &nbdb.LogicalRouter{
+				Name: types.OVNClusterRouter,
+				UUID: libovsdbops.BuildNamedUUID(),
+				// Something in the test harness causes this names uuid to be added again
+				// comment out for now
+				// Policies: []string{existingLRP.UUID},
+			}
+
+			initialNBDB := []libovsdbtest.TestData{
+				nodeSwitch,
+				ovnClusterRouter,
+				existingLRP,
+				existingLSP,
+			}
+
+			// pre-existing sbdb objects
+			clusterRouterDatapath := &sbdb.DatapathBinding{
+				UUID:        libovsdbops.BuildNamedUUID(),
+				ExternalIDs: map[string]string{"logical-router": ovnClusterRouter.UUID, "name": types.OVNClusterRouter},
+			}
+
+			// the mac binding should already exist
+			existingMACBinding := &sbdb.MACBinding{
+				UUID:        libovsdbops.BuildNamedUUID(),
+				Datapath:    clusterRouterDatapath.UUID,
+				IP:          nodeHOIP,
+				LogicalPort: types.RouterToSwitchPrefix + nodeName,
+				MAC:         nodeHOMAC,
+			}
+
+			initialSBDB := []libovsdbtest.TestData{
+				clusterRouterDatapath,
+				existingMACBinding,
+			}
+
 			dbSetup := libovsdbtest.TestSetup{
-				NBData: expectedDatabaseState,
+				NBData: initialNBDB,
+				SBData: initialSBDB,
 			}
+
 			var libovsdbOvnNBClient libovsdbclient.Client
-			libovsdbOvnNBClient, libovsdbCleanup, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			var libovsdbOvnSBClient libovsdbclient.Client
+
+			// nothing will occur in the SBDB or NBDB in this instance because the HO lrp already exists
+			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 			m, err := NewMaster(
@@ -337,6 +436,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
 				libovsdbOvnNBClient,
+				libovsdbOvnSBClient,
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -358,7 +458,11 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			}, 2).Should(HaveKeyWithValue(hotypes.HybridOverlayDRMAC, nodeHOMAC))
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
-			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+			// OVN DB state shouldn't change here
+			ovnClusterRouter.Policies = []string{existingLRP.UUID}
+			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(dbSetup.NBData))
+			Eventually(libovsdbOvnSBClient).Should(libovsdbtest.HaveData(dbSetup.SBData))
+
 			return nil
 		}
 		err := app.Run([]string{
@@ -421,10 +525,15 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			}
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: initialDatabaseState,
+				SBData: nil,
 			}
 			var libovsdbOvnNBClient libovsdbclient.Client
-			libovsdbOvnNBClient, libovsdbCleanup, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			var libovsdbOvnSBClient libovsdbclient.Client
+
+			// nothing will occur in the SBDB in this instance because we don't explicitly clean up any created
+			// mac bindings
+			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			Expect(err).NotTo(HaveOccurred())
 
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
@@ -432,6 +541,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
 				libovsdbOvnNBClient,
+				libovsdbOvnSBClient,
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -490,6 +600,10 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+
+			// nothing will written to sbdb here since the logical router policy already exists
+			Eventually(libovsdbOvnSBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(dbSetup.SBData))
+
 			return nil
 		}
 
