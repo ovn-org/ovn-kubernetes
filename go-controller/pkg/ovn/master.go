@@ -29,7 +29,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
-	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -1185,12 +1184,6 @@ func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) e
 
 // deleteNodeLogicalNetwork removes the logical switch and logical router port associated with the node
 func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
-	// Remove switch to lb associations from the LBCache before removing the switch
-	lbCache, err := ovnlb.GetLBCache(oc.nbClient)
-	if err != nil {
-		return fmt.Errorf("failed to get load_balancer cache for node %s: %v", nodeName, err)
-	}
-	lbCache.RemoveSwitch(nodeName)
 	// Remove the logical switch associated with the node
 	logicalRouterPortName := types.RouterToSwitchPrefix + nodeName
 	clusterRouterModel := nbdb.LogicalRouter{}

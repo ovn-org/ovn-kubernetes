@@ -8,6 +8,8 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -61,9 +63,12 @@ func deleteServiceFromLegacyLBs(nbClient libovsdbclient.Client, service *v1.Serv
 			LBUUID: lb.UUID,
 		}
 
-		proto := v1.Protocol(strings.ToUpper(lb.Protocol))
+		proto := v1.ProtocolTCP
+		if lb.Protocol != nil {
+			proto = v1.Protocol(strings.ToUpper(*lb.Protocol))
+		}
 		for _, vip := range vipPortsPerProtocol[proto].List() {
-			if _, ok := lb.VIPs[vip]; ok {
+			if _, ok := lb.Vips[vip]; ok {
 				r.VIPs = append(r.VIPs, vip)
 			}
 		}
@@ -85,16 +90,12 @@ func deleteServiceFromLegacyLBs(nbClient libovsdbclient.Client, service *v1.Serv
 // - k8s-cluster-lb-<proto>
 // - k8s-idling-lb-<proto>
 // - <PROTO>_lb_gateway_router
-func findLegacyLBs(nbClient libovsdbclient.Client) ([]ovnlb.CachedLB, error) {
-	lbCache, err := ovnlb.GetLBCache(nbClient)
-	if err != nil {
-		return nil, err
-	}
-	lbs := lbCache.Find(nil)
+func findLegacyLBs(nbClient libovsdbclient.Client) ([]nbdb.LoadBalancer, error) {
+	lbs := libovsdbops.FindLoadBalancersByExternalIDs(nbClient, nil)
 
 	legacyLBPattern := regexp.MustCompile(`(k8s-(worker|cluster|idling)-lb-(tcp|udp|sctp)|(TCP|UDP|SCTP)_lb_gateway_router)`)
 
-	out := []ovnlb.CachedLB{}
+	out := []nbdb.LoadBalancer{}
 	for _, lb := range lbs {
 		// legacy LBs had no name
 		if lb.Name != "" {
@@ -102,7 +103,7 @@ func findLegacyLBs(nbClient libovsdbclient.Client) ([]ovnlb.CachedLB, error) {
 		}
 		for key := range lb.ExternalIDs {
 			if legacyLBPattern.MatchString(key) {
-				out = append(out, *lb)
+				out = append(out, lb)
 				continue
 			}
 		}

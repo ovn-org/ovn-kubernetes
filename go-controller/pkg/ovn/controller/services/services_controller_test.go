@@ -8,7 +8,6 @@ import (
 	"github.com/onsi/gomega"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 
 	v1 "k8s.io/api/core/v1"
@@ -610,7 +609,6 @@ func TestSyncServices(t *testing.T) {
 				globalconfig.Gateway.Mode = globalconfig.GatewayModeShared
 			}
 
-			ovnlb.TestOnlySetCache(nil)
 			controller, err := newControllerWithDBSetup(libovsdbtest.TestSetup{NBData: tt.initialDb})
 			if err != nil {
 				t.Fatalf("Error creating controller: %v", err)

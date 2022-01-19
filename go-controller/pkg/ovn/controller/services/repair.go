@@ -82,11 +82,7 @@ func (r *repair) runBeforeSync() {
 	}
 
 	// Find all load-balancers associated with Services
-	lbCache, err := ovnlb.GetLBCache(r.nbClient)
-	if err != nil {
-		klog.Errorf("Failed to get load_balancer cache: %v", err)
-	}
-	existingLBs := lbCache.Find(map[string]string{"k8s.ovn.org/kind": "Service"})
+	existingLBs := libovsdbops.FindLoadBalancersByExternalIDs(r.nbClient, map[string]string{"k8s.ovn.org/kind": "Service"})
 
 	// Look for any load balancers whose Service no longer exists in the apiserver
 	staleLBs := []string{}

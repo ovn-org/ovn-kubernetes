@@ -36,41 +36,59 @@ import (
 // It is assumed that names are meaningful and somewhat stable, to minimize churn. This
 // function doesn't work with Load_Balancers without a name.
 func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LBs []LB) error {
-	lbCache, err := GetLBCache(nbClient)
-	if err != nil {
-		return fmt.Errorf("failed initialize LBcache: %w", err)
-	}
-
-	existing := lbCache.Find(externalIDs)
-	existingByName := make(map[string]*CachedLB, len(existing))
+	existing := libovsdbops.FindLoadBalancersByExternalIDs(nbClient, externalIDs)
+	existingByName := make(map[string]nbdb.LoadBalancer, len(existing))
 	toDelete := sets.NewString()
 
+	// gather some data
+	lbToSwitchNames, switchNamesToUUID, err := listSwitches(nbClient)
+	if err != nil {
+		return err
+	}
+	lbToRouterNames, routerNamesToUUID, err := listRouters(nbClient)
+	if err != nil {
+		return err
+	}
+	lbToGroupNames, groupNamesToUUID, err := listGroups(nbClient)
+	if err != nil {
+		return err
+	}
+
 	for _, lb := range existing {
+		// collision - somehow things didn't come together how we expected
+		// rare but we have seen it happen, see https://bugzilla.redhat.com/show_bug.cgi?id=2042001
+		if _, ok := existingByName[lb.Name]; ok {
+			klog.V(2).Infof("Name collision for load balancer %s: deleting both and re-creating")
+			toDelete.Insert(lb.UUID)
+			delete(existingByName, lb.Name)
+			continue
+		}
 		existingByName[lb.Name] = lb
 		toDelete.Insert(lb.UUID)
 	}
 
-	lbs := make([]*nbdb.LoadBalancer, 0, len(LBs))
+	desired := make([]*nbdb.LoadBalancer, 0, len(LBs))
+
 	addLBsToSwitch := map[string][]*nbdb.LoadBalancer{}
 	removeLBsFromSwitch := map[string][]*nbdb.LoadBalancer{}
 	addLBsToRouter := map[string][]*nbdb.LoadBalancer{}
 	removesLBsFromRouter := map[string][]*nbdb.LoadBalancer{}
 	addLBsToGroups := map[string][]*nbdb.LoadBalancer{}
 	removeLBsFromGroups := map[string][]*nbdb.LoadBalancer{}
-	wantedByName := make(map[string]*LB, len(LBs))
-	for i, lb := range LBs {
-		wantedByName[lb.Name] = &LBs[i]
+
+	for _, lb := range LBs {
 		blb := buildLB(&lb)
-		lbs = append(lbs, blb)
-		existingLB := existingByName[lb.Name]
+		desired = append(desired, blb)
+		existingLB, exists := existingByName[lb.Name]
 		existingRouters := sets.String{}
 		existingSwitches := sets.String{}
 		existingGroups := sets.String{}
-		if existingLB != nil {
+		if exists {
+			blb.UUID = existingLB.UUID
 			toDelete.Delete(existingLB.UUID)
-			existingRouters = existingLB.Routers
-			existingSwitches = existingLB.Switches
-			existingGroups = existingLB.Groups
+			existingRouters = lbToRouterNames[existingLB.UUID]
+			existingSwitches = lbToSwitchNames[existingLB.UUID]
+			existingGroups = lbToGroupNames[existingLB.UUID]
 		}
 		wantRouters := sets.NewString(lb.Routers...)
 		wantSwitches := sets.NewString(lb.Switches...)
@@ -83,7 +101,7 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 		mapLBDifferenceByKey(removeLBsFromGroups, existingGroups, wantGroups, blb)
 	}
 
-	ops, err := libovsdbops.CreateOrUpdateLoadBalancersOps(nbClient, nil, lbs...)
+	ops, err := libovsdbops.CreateOrUpdateLoadBalancersOps(nbClient, nil, desired...)
 	if err != nil {
 		return err
 	}
@@ -94,7 +112,7 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 		var lswitch *nbdb.LogicalSwitch
 		var found bool
 		if lswitch, found = lswitches[name]; !found {
-			lswitch = &nbdb.LogicalSwitch{Name: name}
+			lswitch = &nbdb.LogicalSwitch{Name: name, UUID: switchNamesToUUID[name]}
 			lswitches[name] = lswitch
 		}
 		return lswitch
@@ -118,7 +136,7 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 		var router *nbdb.LogicalRouter
 		var found bool
 		if router, found = routers[name]; !found {
-			router = &nbdb.LogicalRouter{Name: name}
+			router = &nbdb.LogicalRouter{Name: name, UUID: routerNamesToUUID[name]}
 			routers[name] = router
 		}
 		return router
@@ -142,7 +160,7 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 		var group *nbdb.LoadBalancerGroup
 		var found bool
 		if group, found = groups[name]; !found {
-			group = &nbdb.LoadBalancerGroup{Name: name}
+			group = &nbdb.LoadBalancerGroup{Name: name, UUID: groupNamesToUUID[name]}
 			groups[name] = group
 		}
 		return group
@@ -169,16 +187,11 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 		return err
 	}
 
-	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(nbClient, lbs, ops)
+	_, err = libovsdbops.TransactAndCheck(nbClient, ops)
 	if err != nil {
 		return err
 	}
 
-	for _, lb := range lbs {
-		wantedByName[lb.Name].UUID = lb.UUID
-	}
-
-	lbCache.update(LBs, toDelete.UnsortedList())
 	klog.V(5).Infof("Deleted %d stale LBs for %#v", len(toDelete), externalIDs)
 
 	return nil
@@ -272,22 +285,16 @@ func DeleteLBs(nbClient libovsdbclient.Client, uuids []string) error {
 		return nil
 	}
 
-	cache, err := GetLBCache(nbClient)
-	if err != nil {
-		return err
-	}
-
 	lbs := make([]*nbdb.LoadBalancer, 0, len(uuids))
 	for _, uuid := range uuids {
 		lbs = append(lbs, &nbdb.LoadBalancer{UUID: uuid})
 	}
 
-	err = libovsdbops.DeleteLoadBalancers(nbClient, lbs)
+	err := libovsdbops.DeleteLoadBalancers(nbClient, lbs)
 	if err != nil {
 		return err
 	}
 
-	cache.update(nil, uuids)
 	return nil
 }
 
@@ -298,12 +305,8 @@ type DeleteVIPEntry struct {
 
 // DeleteLoadBalancerVIPs removes VIPs from load-balancers in a single shot.
 func DeleteLoadBalancerVIPs(nbClient libovsdbclient.Client, toRemove []DeleteVIPEntry) error {
-	lbCache, err := GetLBCache(nbClient)
-	if err != nil {
-		return err
-	}
-
 	var ops []libovsdb.Operation
+	var err error
 	for _, entry := range toRemove {
 		ops, err = libovsdbops.RemoveLoadBalancerVipsOps(nbClient, ops, &nbdb.LoadBalancer{UUID: entry.LBUUID}, entry.VIPs...)
 		if err != nil {
@@ -316,7 +319,95 @@ func DeleteLoadBalancerVIPs(nbClient libovsdbclient.Client, toRemove []DeleteVIP
 		return fmt.Errorf("failed to remove vips from load_balancer: %w", err)
 	}
 
-	lbCache.removeVips(toRemove)
-
 	return nil
+}
+
+// listSwitches builds up the lists we need to reconcile the lb -> switch mapping
+// returns:
+// - map of lb UUID to switch names
+// - map of switch name to switch uuid
+func listSwitches(nbClient libovsdbclient.Client) (lbToSwitches map[string]sets.String, nameToUUID map[string]string, err error) {
+	switches, err := libovsdbops.ListSwitchesWithLoadBalancers(nbClient)
+	if err != nil {
+		return
+	}
+
+	lbToSwitches = map[string]sets.String{}
+	nameToUUID = map[string]string{}
+
+	for _, swtch := range switches {
+		if swtch.Name == "" {
+			continue
+		}
+		nameToUUID[swtch.Name] = swtch.UUID
+		for _, lbUUID := range swtch.LoadBalancer {
+			if _, ok := lbToSwitches[lbUUID]; !ok {
+				lbToSwitches[lbUUID] = sets.NewString()
+			}
+
+			lbToSwitches[lbUUID].Insert(swtch.Name)
+		}
+	}
+
+	return
+}
+
+// listRouters builds up the lists we need to reconcile the lb -> router mapping
+// returns:
+// - map of lb UUID to router names
+// - map of router name to router uuid
+func listRouters(nbClient libovsdbclient.Client) (lbToRouters map[string]sets.String, nameToUUID map[string]string, err error) {
+	routers, err := libovsdbops.ListRoutersWithLoadBalancers(nbClient)
+	if err != nil {
+		return
+	}
+
+	lbToRouters = map[string]sets.String{}
+	nameToUUID = map[string]string{}
+
+	for _, router := range routers {
+		if router.Name == "" {
+			continue
+		}
+		nameToUUID[router.Name] = router.UUID
+		for _, lbUUID := range router.LoadBalancer {
+			if _, ok := lbToRouters[lbUUID]; !ok {
+				lbToRouters[lbUUID] = sets.NewString()
+			}
+
+			lbToRouters[lbUUID].Insert(router.Name)
+		}
+	}
+
+	return
+}
+
+// listGroups builds up the lists we need to reconcile the lb -> group mapping
+// returns:
+// - map of lb UUID to group names
+// - map of group name to group uuid
+func listGroups(nbClient libovsdbclient.Client) (lbToGroups map[string]sets.String, nameToUUID map[string]string, err error) {
+	groups, err := libovsdbops.ListGroupsWithLoadBalancers(nbClient)
+	if err != nil {
+		return
+	}
+
+	lbToGroups = map[string]sets.String{}
+	nameToUUID = map[string]string{}
+
+	for _, group := range groups {
+		if group.Name == "" {
+			continue
+		}
+		nameToUUID[group.Name] = group.UUID
+		for _, lbUUID := range group.LoadBalancer {
+			if _, ok := lbToGroups[lbUUID]; !ok {
+				lbToGroups[lbUUID] = sets.NewString()
+			}
+
+			lbToGroups[lbUUID].Insert(group.Name)
+		}
+	}
+
+	return
 }

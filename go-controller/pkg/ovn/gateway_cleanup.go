@@ -8,8 +8,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-
-	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -60,13 +58,6 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 	if err := oc.modelClient.Delete(opModels...); err != nil {
 		return fmt.Errorf("failed to delete logical switch port %s%s:, error: %v", types.JoinSwitchToGWRouterPrefix, gatewayRouter, err)
 	}
-
-	// Remove router to lb associations from the LBCache before removing the router
-	lbCache, err := ovnlb.GetLBCache(oc.nbClient)
-	if err != nil {
-		return fmt.Errorf("failed to get load_balancer cache for router %s: %v", gatewayRouter, err)
-	}
-	lbCache.RemoveRouter(gatewayRouter)
 
 	// Remove the gateway router associated with nodeName
 	opModel := libovsdbops.OperationModel{
@@ -262,13 +253,6 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 	if upgradeOnly {
 		return nil
 	}
-
-	// Remove router to lb associations from the LBCache before removing the router
-	lbCache, err := ovnlb.GetLBCache(oc.nbClient)
-	if err != nil {
-		return fmt.Errorf("failed to get load_balancer cache for router %s: %v", gatewayRouter, err)
-	}
-	lbCache.RemoveRouter(gatewayRouter)
 
 	// Remove the gateway router associated with nodeName
 	opModel = libovsdbops.OperationModel{
