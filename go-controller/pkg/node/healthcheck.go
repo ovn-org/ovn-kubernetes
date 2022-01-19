@@ -10,6 +10,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/healthcheck"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 
@@ -195,12 +196,22 @@ func checkForStaleOVSInternalPorts() {
 	staleInterfaceArgs := []string{}
 	values := strings.Split(stdout, "\n\n")
 	for _, val := range values {
+		if val == types.K8sMgmtIntfName {
+			klog.Errorf("The representor for the ovn-k8s-mp0 management port is missing on the DPU. " +
+				"Perhaps the host rebooted or SR-IOV VFs were disabled on the host.")
+			continue
+		}
 		klog.Warningf("Found stale interface %s, so queuing it to be deleted", val)
 		if len(staleInterfaceArgs) > 0 {
 			staleInterfaceArgs = append(staleInterfaceArgs, "--")
 		}
 
 		staleInterfaceArgs = append(staleInterfaceArgs, "--if-exists", "--with-iface", "del-port", val)
+	}
+
+	// Don't call ovs if all interfaces were skipped in the loop above
+	if len(staleInterfaceArgs) == 0 {
+		return
 	}
 
 	_, stderr, err := util.RunOVSVsctl(staleInterfaceArgs...)

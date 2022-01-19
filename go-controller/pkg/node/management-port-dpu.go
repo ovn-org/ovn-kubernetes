@@ -95,8 +95,48 @@ func (mp *managementPortDPU) Create(nodeAnnotator kube.Annotator, waiter *startu
 	return mpcfg, nil
 }
 
-func (mpo *managementPortDPU) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
-	// Note(adrianc): For now, no checks are needed. This can be revisited in the future.
+func (mp *managementPortDPU) checkRepresentorPortHealth(cfg *managementPortConfig) {
+	// After host reboot, management port link name changes back to default name.
+	link, err := util.GetNetLinkOps().LinkByName(cfg.ifName)
+	if err != nil {
+		klog.Errorf("Failed to get link device %s, error: %v", cfg.ifName, err)
+		// Get management port representor name
+		link, err := util.GetNetLinkOps().LinkByName(mp.vfRepName)
+		if err != nil {
+			klog.Errorf("Failed to get link device %s, error: %v", mp.vfRepName, err)
+			return
+		}
+		if err = util.GetNetLinkOps().LinkSetDown(link); err != nil {
+			klog.Errorf("Failed to set link down for device %s. %v", mp.vfRepName, err)
+			return
+		}
+		if err = util.GetNetLinkOps().LinkSetName(link, cfg.ifName); err != nil {
+			klog.Errorf("Rename link from %s to %s failed: %v", mp.vfRepName, cfg.ifName, err)
+			return
+		}
+		if link.Attrs().MTU != config.Default.MTU {
+			if err = util.GetNetLinkOps().LinkSetMTU(link, config.Default.MTU); err != nil {
+				klog.Errorf("Failed to set link MTU for device %s. %v", cfg.ifName, err)
+			}
+		}
+		if err = util.GetNetLinkOps().LinkSetUp(link); err != nil {
+			klog.Errorf("Failed to set link up for device %s. %v", cfg.ifName, err)
+		}
+		cfg.link = link
+	} else if (link.Attrs().Flags & net.FlagUp) != net.FlagUp {
+		if err = util.GetNetLinkOps().LinkSetUp(link); err != nil {
+			klog.Errorf("Failed to set link up for device %s. %v", cfg.ifName, err)
+		}
+	}
+}
+
+func (mp *managementPortDPU) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
+	go wait.Until(
+		func() {
+			mp.checkRepresentorPortHealth(cfg)
+		},
+		5*time.Second,
+		stopChan)
 }
 
 type managementPortDPUHost struct {
