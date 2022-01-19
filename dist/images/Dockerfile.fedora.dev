@@ -11,91 +11,86 @@
 # Please change the branch name if image needs to be build with different
 # branch.
 #
-# 2) User need to make sure that ovs datapath module built with the same
-# kernel is installed and loaded on the host machines for ovs daemons to
-# load properly.
-#
-# 3) User can change the kernel version if binaries needs to be build
-# with different kernel version (need to make sure repo has the respective
-# (kernel-devel) package to install.
-#
-# 4) This image is only for development environment, so please DO NOT DEPLOY
+# 2) This image is only for development environment, so please DO NOT DEPLOY
 # this image in any production environment.
 #
 
-FROM fedora:34
+FROM fedora:34 AS ovnbuilder
 
 USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
-ARG KERNEL_VERSION
-ARG OVN_REPO=https://github.com/ovn-org/ovn.git
-ARG OVN_BRANCH=main
+# Install tools that are required for building ovs/ovn.
+RUN INSTALL_PKGS=" \
+    python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
+    libpcap hostname \
+    python3-openvswitch python3-pyOpenSSL \
+    autoconf automake libtool g++ gcc fedora-packager rpmdevtools \
+    unbound unbound-devel groff python3-sphinx graphviz openssl openssl-devel \
+    checkpolicy libcap-ng-devel selinux-policy-devel" && \
+    dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
+    dnf clean all && rm -rf /var/cache/dnf/*
+
+# Clone OVS Source Code.
 ARG OVS_REPO=https://github.com/openvswitch/ovs.git
 ARG OVS_BRANCH=master
-
-#Install tools that is required for building ovs/ovn
-
-RUN dnf upgrade -y && dnf install --best --refresh -y --setopt=tsflags=nodocs \
-	python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
-        libpcap hostname kubernetes-client python3-openvswitch python3-pyOpenSSL  \
-        iptables iproute iputils strace socat\
-        "kernel-devel-uname-r == $KERNEL_VERSION" \
-	@'Development Tools' rpm-build dnf-plugins-core kmod && \
-	dnf clean all && rm -rf /var/cache/dnf/*
-
-#Clone OVS Source Code
 WORKDIR /root
-RUN git clone $OVS_REPO
+RUN git clone $OVS_REPO --single-branch --branch=$OVS_BRANCH
 
-#Build OVS dependency
+# Build OVS rpms.
 WORKDIR /root/ovs
-RUN git fetch && git checkout $OVS_BRANCH && git log -n 1
-RUN sed -e 's/@VERSION@/0.0.1/' rhel/openvswitch-fedora.spec.in > /tmp/ovs.spec
-RUN dnf builddep /tmp/ovs.spec -y
-RUN rm -f /tmp/ovs.spec
-
-#Build OVS binaries and install
-RUN echo "Building OVS with kernel version : " $KERNEL_VERSION
 RUN ./boot.sh
-RUN ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc --enable-ssl --with-linux=/usr/src/kernels/$KERNEL_VERSION/
-RUN make && make install
-RUN ovs-vsctl --version && ovs-ofctl --version
+RUN ./configure
+RUN make rpm-fedora
+RUN rm rpm/rpmbuild/RPMS/x86_64/*debug*
+RUN rm rpm/rpmbuild/RPMS/x86_64/*devel*
+RUN git log -n 1
 
-#Clone OVN Source Code
+# Clone OVN Source Code.
+ARG OVN_REPO=https://github.com/ovn-org/ovn.git
+ARG OVN_BRANCH=main
 WORKDIR /root
-RUN git clone $OVN_REPO
+RUN git clone $OVN_REPO --single-branch --branch=$OVN_BRANCH
 
-#Build OVN binaries and install
+# Build OVN rpms.
 WORKDIR /root/ovn/
-RUN git fetch && git checkout $OVN_BRANCH && git log -n 1
 RUN ./boot.sh
-RUN ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc --with-ovs-source=/root/ovs/
-RUN make && make install
-RUN ovn-nbctl --version && ovn-sbctl --version
+RUN ./configure --with-ovs-source=/root/ovs/
+RUN make rpm-fedora
+RUN rm rpm/rpmbuild/RPMS/x86_64/*debug*
+RUN rm rpm/rpmbuild/RPMS/x86_64/*docker*
+RUN git log -n 1
 
-RUN mkdir -p /var/run/openvswitch && \
-    mkdir -p /usr/libexec/cni/
+# Build the final image
+FROM fedora:34
 
-COPY ovnkube ovn-kube-util ovndbchecker /usr/bin/
+# Install needed dependencies.
+RUN INSTALL_PKGS=" \
+    iptables iproute iputils hostname unbound-libs kubernetes-client kmod" && \
+    dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
+    dnf clean all && rm -rf /var/cache/dnf/*
+
+RUN mkdir -p /var/run/openvswitch
+
+# Install openvswitch and ovn rpms built in previous stages.
+COPY --from=ovnbuilder /root/ovn/rpm/rpmbuild/RPMS/x86_64/*rpm ./
+COPY --from=ovnbuilder /root/ovs/rpm/rpmbuild/RPMS/x86_64/*rpm ./
+COPY --from=ovnbuilder /root/ovs/rpm/rpmbuild/RPMS/noarch/*rpm ./
+RUN dnf install -y *.rpm && rm -f *.rpm
+
+# Install ovn-kubernetes binaries built in previous stage.
+RUN mkdir -p /usr/libexec/cni/
+COPY ovnkube /usr/bin/
+COPY ovn-kube-util /usr/bin/
+COPY ovndbchecker /usr/bin/
 COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 
-# copy git commit number into image
-COPY git_info /root
-RUN cat /root/git_info
-
-# iptables wrappers
-COPY ./iptables-scripts/iptables /usr/sbin/
-COPY ./iptables-scripts/iptables-save /usr/sbin/
-COPY ./iptables-scripts/iptables-restore /usr/sbin/
-COPY ./iptables-scripts/ip6tables /usr/sbin/
-COPY ./iptables-scripts/ip6tables-save /usr/sbin/
-COPY ./iptables-scripts/ip6tables-restore /usr/sbin/
-
 # ovnkube.sh is the entry point. This script examines environment
-# variables to direct operation and configure ovn
-COPY ovnkube.sh ovndb-raft-functions.sh /root/
+# variables to direct operation and configure ovn.
+COPY ovnkube.sh /root/
+COPY ovndb-raft-functions.sh /root/
+COPY iptables-scripts /usr/sbin/
 
 RUN getent group openvswitch >/dev/null || groupadd -r openvswitch
 RUN getent passwd openvswitch >/dev/null || useradd -r -g openvswitch -d / -s /sbin/nologin -c "Open vSwitch Daemons" openvswitch
