@@ -106,7 +106,7 @@ func (oc *Controller) delPbrAndNatRules(nodeName string, lrpTypes []string) {
 	// because there will be none since this NAT is only for outbound traffic and not for inbound
 	mgmtPortName := types.K8sPrefix + nodeName
 	nat := libovsdbops.BuildRouterDNATAndSNAT(nil, nil, mgmtPortName, "", nil)
-	err := libovsdbops.DeleteNatsFromRouter(oc.nbClient, types.OVNClusterRouter, nat)
+	err := libovsdbops.DeleteNATsFromRouter(oc.nbClient, types.OVNClusterRouter, nat)
 	if err != nil {
 		klog.Errorf("Failed to delete the dnat_and_snat associated with the management "+
 			"port %s, error: %v", mgmtPortName, err)

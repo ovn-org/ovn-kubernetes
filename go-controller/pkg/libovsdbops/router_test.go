@@ -8,7 +8,7 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 )
 
-func TestFindNatsUsingPredicate(t *testing.T) {
+func TestFindNATsUsingPredicate(t *testing.T) {
 	fakeNAT1 := &nbdb.NAT{
 		UUID: BuildNamedUUID(),
 		Type: nbdb.NATTypeSNAT,
@@ -62,9 +62,9 @@ func TestFindNatsUsingPredicate(t *testing.T) {
 			}
 			t.Cleanup(cleanup.Cleanup)
 
-			rc, err := FindNatsUsingPredicate(nbClient, tt.predFunc)
+			rc, err := FindNATsUsingPredicate(nbClient, tt.predFunc)
 			if err != nil {
-				t.Fatal(fmt.Errorf("FindNatsUsingPredicate() error = %v", err))
+				t.Fatal(fmt.Errorf("FindNATsUsingPredicate() error = %v", err))
 			}
 
 			if len(rc) != len(tt.expectedRc) {
@@ -89,7 +89,7 @@ func TestFindNatsUsingPredicate(t *testing.T) {
 	}
 }
 
-func TestFindRoutersUsingNat(t *testing.T) {
+func TestFindRoutersUsingNAT(t *testing.T) {
 	fakeNAT1 := &nbdb.NAT{
 		UUID: BuildNamedUUID(),
 		Type: nbdb.NATTypeSNAT,
@@ -167,9 +167,9 @@ func TestFindRoutersUsingNat(t *testing.T) {
 			}
 			t.Cleanup(cleanup.Cleanup)
 
-			rc, err := FindRoutersUsingNat(nbClient, tt.nats)
+			rc, err := FindRoutersUsingNAT(nbClient, tt.nats)
 			if err != nil {
-				t.Fatal(fmt.Errorf("FindRoutersUsingNat() error = %v", err))
+				t.Fatal(fmt.Errorf("FindRoutersUsingNAT() error = %v", err))
 			}
 
 			if len(rc) != len(tt.expectedRc) {
@@ -194,7 +194,7 @@ func TestFindRoutersUsingNat(t *testing.T) {
 	}
 }
 
-func TestDeleteNatsFromRouter(t *testing.T) {
+func TestDeleteNATsFromRouter(t *testing.T) {
 	fakeNAT1 := &nbdb.NAT{
 		UUID:       BuildNamedUUID(),
 		ExternalIP: "192.168.1.110",
@@ -305,9 +305,9 @@ func TestDeleteNatsFromRouter(t *testing.T) {
 			}
 			t.Cleanup(cleanup.Cleanup)
 
-			err = DeleteNatsFromRouter(nbClient, tt.routerName, tt.nats...)
+			err = DeleteNATsFromRouter(nbClient, tt.routerName, tt.nats...)
 			if err != nil && !tt.expectErr {
-				t.Fatal(fmt.Errorf("DeleteNatsFromRouter() error = %v", err))
+				t.Fatal(fmt.Errorf("DeleteNATsFromRouter() error = %v", err))
 			}
 
 			matcher := libovsdbtest.HaveData(tt.expectedNbdb.NBData)
