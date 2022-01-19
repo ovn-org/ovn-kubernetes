@@ -93,6 +93,16 @@ func ensureLoadBalancerUUID(lb *nbdb.LoadBalancer) {
 	}
 }
 
+func createLoadBalancerOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lb *nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
+	ensureLoadBalancerUUID(lb)
+	op, err := nbClient.Create(lb)
+	if err != nil {
+		return nil, err
+	}
+	ops = append(ops, op...)
+	return ops, nil
+}
+
 func createOrUpdateLoadBalancerOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lb *nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
 	if ops == nil {
 		ops = []libovsdb.Operation{}
@@ -105,13 +115,7 @@ func createOrUpdateLoadBalancerOps(nbClient libovsdbclient.Client, ops []libovsd
 
 	// If LoadBalancer does not exist, create it
 	if err == libovsdbclient.ErrNotFound {
-		ensureLoadBalancerUUID(lb)
-		op, err := nbClient.Create(lb)
-		if err != nil {
-			return nil, err
-		}
-		ops = append(ops, op...)
-		return ops, nil
+		return createLoadBalancerOps(nbClient, ops, lb)
 	}
 
 	fields := getNonZeroLoadBalancerMutableFields(lb)
@@ -120,6 +124,21 @@ func createOrUpdateLoadBalancerOps(nbClient libovsdbclient.Client, ops []libovsd
 		return nil, err
 	}
 	ops = append(ops, op...)
+
+	return ops, nil
+}
+
+func CreateLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
+	if ops == nil {
+		ops = []libovsdb.Operation{}
+	}
+	for _, lb := range lbs {
+		var err error
+		ops, err = createLoadBalancerOps(nbClient, ops, lb)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	return ops, nil
 }

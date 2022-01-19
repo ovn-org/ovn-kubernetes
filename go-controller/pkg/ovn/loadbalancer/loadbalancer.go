@@ -57,6 +57,8 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 	}
 
 	lbs := make([]*nbdb.LoadBalancer, 0, len(LBs))
+	existinglbs := make([]*nbdb.LoadBalancer, 0, len(LBs))
+	newlbs := make([]*nbdb.LoadBalancer, 0, len(LBs))
 	addLBsToSwitch := map[string][]*nbdb.LoadBalancer{}
 	removeLBsFromSwitch := map[string][]*nbdb.LoadBalancer{}
 	addLBsToRouter := map[string][]*nbdb.LoadBalancer{}
@@ -72,10 +74,16 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 		existingSwitches := sets.String{}
 		existingGroups := sets.String{}
 		if existingLB, ok := existingByName[lb.Name]; ok {
+			// there must only be one existing UUID here or the LB would have been deleted
+			// earlier in the function
+			blb.UUID = existingLB.UUIDs.UnsortedList()[0]
+			existinglbs = append(existinglbs, blb)
 			toDelete.Delete(existingLB.Name)
 			existingRouters = existingLB.Routers
 			existingSwitches = existingLB.Switches
 			existingGroups = existingLB.Groups
+		} else {
+			newlbs = append(newlbs, blb)
 		}
 		wantRouters := sets.NewString(lb.Routers...)
 		wantSwitches := sets.NewString(lb.Switches...)
@@ -88,7 +96,12 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 		mapLBDifferenceByKey(removeLBsFromGroups, existingGroups, wantGroups, blb)
 	}
 
-	ops, err := libovsdbops.CreateOrUpdateLoadBalancersOps(nbClient, nil, lbs...)
+	ops, err := libovsdbops.CreateOrUpdateLoadBalancersOps(nbClient, nil, existinglbs...)
+	if err != nil {
+		return err
+	}
+
+	ops, err = libovsdbops.CreateLoadBalancersOps(nbClient, ops, newlbs...)
 	if err != nil {
 		return err
 	}
