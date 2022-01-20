@@ -98,12 +98,12 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 
 	ops, err := libovsdbops.CreateOrUpdateLoadBalancersOps(nbClient, nil, existinglbs...)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create or update load balancer ops: %v", err)
 	}
 
 	ops, err = libovsdbops.CreateLoadBalancersOps(nbClient, ops, newlbs...)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create or load balancer ops: %v", err)
 	}
 
 	// cache switches for this round of ops
@@ -120,13 +120,13 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 	for k, v := range addLBsToSwitch {
 		ops, err = libovsdbops.AddLoadBalancersToSwitchOps(nbClient, ops, getSwitch(k), v...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to make load balancer to switch ops: %v", err)
 		}
 	}
 	for k, v := range removeLBsFromSwitch {
 		ops, err = libovsdbops.RemoveLoadBalancersFromSwitchOps(nbClient, ops, getSwitch(k), v...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to make remove load balancer to switch ops: %v", err)
 		}
 	}
 
@@ -144,13 +144,13 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 	for k, v := range addLBsToRouter {
 		ops, err = libovsdbops.AddLoadBalancersToRouterOps(nbClient, ops, getRouter(k), v...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to make load balancer to router ops: %v", err)
 		}
 	}
 	for k, v := range removesLBsFromRouter {
 		ops, err = libovsdbops.RemoveLoadBalancersFromRouterOps(nbClient, ops, getRouter(k), v...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to make remove load balancer to router ops: %v", err)
 		}
 	}
 
@@ -168,13 +168,13 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 	for k, v := range addLBsToGroups {
 		ops, err = libovsdbops.AddLoadBalancersToGroupOps(nbClient, ops, getGroup(k), v...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to make load balancer to group ops: %v", err)
 		}
 	}
 	for k, v := range removeLBsFromGroups {
 		ops, err = libovsdbops.RemoveLoadBalancersFromGroupOps(nbClient, ops, getGroup(k), v...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to make remove load balancer to group ops: %v", err)
 		}
 	}
 
@@ -187,12 +187,12 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 	}
 	ops, err = libovsdbops.DeleteLoadBalancersOps(nbClient, ops, deleteLBs...)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to make delete load balancer to ops: %v", err)
 	}
 
 	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(nbClient, lbs, ops)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to execute load balancer ovn txn: %v", err)
 	}
 
 	for _, lb := range lbs {

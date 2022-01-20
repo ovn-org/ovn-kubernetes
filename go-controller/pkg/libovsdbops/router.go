@@ -37,7 +37,7 @@ func findRouter(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) (*nb
 	}
 
 	if len(routers) == 0 {
-		return nil, libovsdbclient.ErrNotFound
+		return nil, fmt.Errorf("unable to find router %s: %w", router.Name, libovsdbclient.ErrNotFound)
 	}
 
 	router.UUID = routers[0].UUID

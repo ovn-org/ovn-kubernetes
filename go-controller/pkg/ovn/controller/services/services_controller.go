@@ -359,7 +359,7 @@ func (c *Controller) syncService(key string) error {
 	if ok && ovnlb.LoadBalancersEqualNoUUID(existingLBs, lbs) && !hasDupes {
 		klog.V(3).Infof("Skipping no-op change for service %s", key)
 	} else {
-		klog.V(5).Infof("Services do not match, existing lbs: %#v, built lbs: %#v", existingLBs, lbs)
+		klog.V(5).Infof("Services do not match, *EXISTING LBs: %#v, *BUILT LBs: %#v", existingLBs, lbs)
 		// Actually apply load-balancers to OVN.
 		//
 		// Note: this may fail if a node was deleted between listing nodes and applying.

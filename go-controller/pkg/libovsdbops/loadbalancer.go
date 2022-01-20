@@ -2,12 +2,13 @@ package libovsdbops
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
@@ -33,7 +34,7 @@ func findLoadBalancer(nbClient libovsdbclient.Client, lb *nbdb.LoadBalancer) err
 	}
 
 	if len(lbs) == 0 {
-		return libovsdbclient.ErrNotFound
+		return fmt.Errorf("error while finding load balancer %q: %w", lb.Name, libovsdbclient.ErrNotFound)
 	}
 
 	lb.UUID = lbs[0].UUID
@@ -109,7 +110,7 @@ func createOrUpdateLoadBalancerOps(nbClient libovsdbclient.Client, ops []libovsd
 	}
 
 	err := findLoadBalancer(nbClient, lb)
-	if err != nil && err != libovsdbclient.ErrNotFound {
+	if err != nil && !errors.As(err, &libovsdbclient.ErrNotFound) {
 		return nil, err
 	}
 
@@ -165,7 +166,7 @@ func RemoveLoadBalancerVipsOps(nbClient libovsdbclient.Client, ops []libovsdb.Op
 
 	err := findLoadBalancer(nbClient, lb)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot delete vips for lb: %s failed retrieving the object %v", lb.UUID, err)
 	}
 
 	op, err := nbClient.Where(lb).Mutate(lb, model.Mutation{
@@ -187,12 +188,12 @@ func deleteLoadBalancerOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 	}
 
 	err := findLoadBalancer(nbClient, lb)
-	if err == libovsdbclient.ErrNotFound {
+	if errors.As(err, &libovsdbclient.ErrNotFound) {
 		// noop
 		return ops, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed find LB for making deleteLoadBalancerOps: %w", err)
 	}
 
 	op, err := nbClient.Where(lb).Delete()
