@@ -897,7 +897,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			ifaceID := node1.PhysicalBridgeName + "_" + node1.Name
 			vlanID := uint(1024)
 			l3Config := &util.L3GatewayConfig{
-				Mode:           config.GatewayModeShared,
+				Mode:           config.GatewayModeLocal,
 				ChassisID:      node1.SystemID,
 				InterfaceID:    ifaceID,
 				MACAddress:     ovntest.MustParseMAC(node1.PhysicalBridgeMAC),
