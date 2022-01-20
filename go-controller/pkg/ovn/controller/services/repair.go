@@ -96,13 +96,13 @@ func (r *repair) runBeforeSync() {
 		namespace, name, err := cache.SplitMetaNamespaceKey(owner)
 		if err != nil || namespace == "" {
 			klog.Warningf("Service LB %#v has unreadable owner, deleting", lb)
-			staleLBs = append(staleLBs, lb.UUID)
+			staleLBs = append(staleLBs, lb.UUIDs.UnsortedList()...)
 		}
 
 		_, err = r.serviceLister.Services(namespace).Get(name)
 		if apierrors.IsNotFound(err) {
 			klog.V(5).Infof("Found stale service LB %#v", lb)
-			staleLBs = append(staleLBs, lb.UUID)
+			staleLBs = append(staleLBs, lb.UUIDs.UnsortedList()...)
 		}
 	}
 
@@ -168,7 +168,7 @@ func (r *repair) deleteLegacyLBs() error {
 	klog.V(2).Infof("Deleting %d legacy LBs", len(legacyLBs))
 	toDelete := make([]string, 0, len(legacyLBs))
 	for _, lb := range legacyLBs {
-		toDelete = append(toDelete, lb.UUID)
+		toDelete = append(toDelete, lb.UUIDs.UnsortedList()...)
 	}
 	if err := ovnlb.DeleteLBs(r.nbClient, toDelete); err != nil {
 		return fmt.Errorf("failed to delete LBs: %w", err)

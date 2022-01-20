@@ -41,13 +41,19 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 		return fmt.Errorf("failed initialize LBcache: %w", err)
 	}
 
-	existing := lbCache.Find(externalIDs)
-	existingByName := make(map[string]*CachedLB, len(existing))
+	existingByName := lbCache.Find(externalIDs)
 	toDelete := sets.NewString()
 
-	for _, lb := range existing {
-		existingByName[lb.Name] = lb
-		toDelete.Insert(lb.UUID)
+	for name, lb := range existingByName {
+		if lb.UUIDs.Len() > 1 {
+			// Multiple UUIDs found for the same load balancer name, this shouldn't happen
+			// see https://bugzilla.redhat.com/show_bug.cgi?id=2042001
+			// remove all uuids associated with this load balancer
+			klog.Errorf("Multiple OVN load balancer UUIDs detected for load balancer name: %s. UUIDs: %s",
+				name, lb.UUIDs)
+			delete(existingByName, name)
+		}
+		toDelete.Insert(name)
 	}
 
 	lbs := make([]*nbdb.LoadBalancer, 0, len(LBs))
@@ -62,12 +68,11 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 		wantedByName[lb.Name] = &LBs[i]
 		blb := buildLB(&lb)
 		lbs = append(lbs, blb)
-		existingLB := existingByName[lb.Name]
 		existingRouters := sets.String{}
 		existingSwitches := sets.String{}
 		existingGroups := sets.String{}
-		if existingLB != nil {
-			toDelete.Delete(existingLB.UUID)
+		if existingLB, ok := existingByName[lb.Name]; ok {
+			toDelete.Delete(existingLB.Name)
 			existingRouters = existingLB.Routers
 			existingSwitches = existingLB.Switches
 			existingGroups = existingLB.Groups
@@ -161,8 +166,11 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 	}
 
 	deleteLBs := make([]*nbdb.LoadBalancer, 0, len(toDelete))
-	for uuid := range toDelete {
-		deleteLBs = append(deleteLBs, &nbdb.LoadBalancer{UUID: uuid})
+	for name := range toDelete {
+		uuids := lbCache.Get(name)
+		for _, uuid := range uuids {
+			deleteLBs = append(deleteLBs, &nbdb.LoadBalancer{UUID: uuid})
+		}
 	}
 	ops, err = libovsdbops.DeleteLoadBalancersOps(nbClient, ops, deleteLBs...)
 	if err != nil {
@@ -292,7 +300,7 @@ func DeleteLBs(nbClient libovsdbclient.Client, uuids []string) error {
 }
 
 type DeleteVIPEntry struct {
-	LBUUID string
+	LBName string
 	VIPs   []string // ip:string (or v6 equivalent)
 }
 
@@ -305,9 +313,15 @@ func DeleteLoadBalancerVIPs(nbClient libovsdbclient.Client, toRemove []DeleteVIP
 
 	var ops []libovsdb.Operation
 	for _, entry := range toRemove {
-		ops, err = libovsdbops.RemoveLoadBalancerVipsOps(nbClient, ops, &nbdb.LoadBalancer{UUID: entry.LBUUID}, entry.VIPs...)
-		if err != nil {
-			return err
+		uuids := lbCache.Get(entry.LBName)
+		if len(uuids) > 1 {
+			klog.Warningf("Multiple load balancers found for load balancer: %s", entry.LBName)
+		}
+		for _, uuid := range uuids {
+			ops, err = libovsdbops.RemoveLoadBalancerVipsOps(nbClient, ops, &nbdb.LoadBalancer{UUID: uuid}, entry.VIPs...)
+			if err != nil {
+				return err
+			}
 		}
 	}
 

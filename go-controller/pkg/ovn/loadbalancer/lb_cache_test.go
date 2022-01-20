@@ -80,8 +80,8 @@ func TestNewCache(t *testing.T) {
 	}
 
 	assert.Equal(t, map[string]*CachedLB{
-		"cb6ebcb0-c12d-4404-ada7-5aa2b898f06b": {
-			UUID:     "cb6ebcb0-c12d-4404-ada7-5aa2b898f06b",
+		"Service_default/kubernetes_TCP_node_router_ovn-control-plane": {
+			UUIDs:    sets.NewString("cb6ebcb0-c12d-4404-ada7-5aa2b898f06b"),
 			Name:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 			Protocol: "tcp",
 			ExternalIDs: map[string]string{
@@ -97,8 +97,8 @@ func TestNewCache(t *testing.T) {
 			},
 			Groups: sets.String{},
 		},
-		"7dc190c4-c615-467f-af83-9856d832c9a0": {
-			UUID:     "7dc190c4-c615-467f-af83-9856d832c9a0",
+		"Service_default/kubernetes_TCP_node_switch_ovn-control-plane_merged": {
+			UUIDs:    sets.NewString("7dc190c4-c615-467f-af83-9856d832c9a0"),
 			Name:     "Service_default/kubernetes_TCP_node_switch_ovn-control-plane_merged",
 			Protocol: "tcp",
 			ExternalIDs: map[string]string{
@@ -119,16 +119,16 @@ func TestNewCache(t *testing.T) {
 	}, c.existing)
 
 	c.RemoveRouter("GR_ovn-worker")
-	assert.Equal(t, c.existing["7dc190c4-c615-467f-af83-9856d832c9a0"].Routers, sets.String{
+	assert.Equal(t, c.existing["Service_default/kubernetes_TCP_node_switch_ovn-control-plane_merged"].Routers, sets.String{
 		"GR_ovn-worker2": {},
 	})
 
 	c.RemoveSwitch("ovn-worker")
-	assert.Equal(t, c.existing["7dc190c4-c615-467f-af83-9856d832c9a0"].Switches, sets.String{
+	assert.Equal(t, c.existing["Service_default/kubernetes_TCP_node_switch_ovn-control-plane_merged"].Switches, sets.String{
 		"ovn-control-plane": {},
 	})
 	// nothing changed
-	assert.Equal(t, c.existing["cb6ebcb0-c12d-4404-ada7-5aa2b898f06b"].Switches, sets.String{
+	assert.Equal(t, c.existing["Service_default/kubernetes_TCP_node_router_ovn-control-plane"].Switches, sets.String{
 		"ovn-worker2": {},
 	})
 }

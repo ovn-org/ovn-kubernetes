@@ -57,8 +57,10 @@ func deleteServiceFromLegacyLBs(nbClient libovsdbclient.Client, service *v1.Serv
 
 	// Find any legacy LBs with these vips
 	for _, lb := range legacyLBs {
+		// legacy lbs have no name, so we copy over the external id instead for ovnk LB cache
+		legacyLBName := ovnlb.FindLegacyLBExtIDKey(lb.ExternalIDs)
 		r := ovnlb.DeleteVIPEntry{
-			LBUUID: lb.UUID,
+			LBName: legacyLBName,
 		}
 
 		proto := v1.Protocol(strings.ToUpper(lb.Protocol))
@@ -96,15 +98,9 @@ func findLegacyLBs(nbClient libovsdbclient.Client) ([]ovnlb.CachedLB, error) {
 
 	out := []ovnlb.CachedLB{}
 	for _, lb := range lbs {
-		// legacy LBs had no name
-		if lb.Name != "" {
-			continue
-		}
-		for key := range lb.ExternalIDs {
-			if legacyLBPattern.MatchString(key) {
-				out = append(out, *lb)
-				continue
-			}
+		// we copy the signature of legacy lbs external id key to name in our cache
+		if legacyLBPattern.MatchString(lb.Name) {
+			out = append(out, lb)
 		}
 	}
 	return out, nil

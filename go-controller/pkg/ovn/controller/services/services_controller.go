@@ -6,8 +6,11 @@ import (
 	"sync"
 	"time"
 
+	libovsdbcache "github.com/ovn-org/libovsdb/cache"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"golang.org/x/time/rate"
@@ -63,10 +66,23 @@ func NewController(client clientset.Interface,
 	c := &Controller{
 		client:           client,
 		nbClient:         nbClient,
+		ovsdbQueue:       make(chan nbdb.LoadBalancer),
 		queue:            workqueue.NewNamedRateLimitingQueue(newRatelimiter(100), controllerName),
 		workerLoopPeriod: time.Second,
 		alreadyApplied:   map[string][]ovnlb.LB{},
 	}
+
+	klog.Info("Registering OVN NB Loadbalancer handler")
+	// add all empty lb backend events to a channel
+	nbClient.Cache().AddEventHandler(
+		&libovsdbcache.EventHandlerFuncs{
+			AddFunc: func(table string, m model.Model) {
+				if lb, ok := m.(*nbdb.LoadBalancer); ok {
+					c.ovsdbQueue <- *lb
+				}
+			},
+		},
+	)
 
 	// services
 	klog.Info("Setting up event handlers for services")
@@ -128,6 +144,9 @@ type Controller struct {
 
 	nodesSynced cache.InformerSynced
 
+	// ovsdbQueue is used to receive additions to load balancers in ovsdb cache
+	ovsdbQueue chan nbdb.LoadBalancer
+
 	// Services that need to be updated. A channel is inappropriate here,
 	// because it allows services with lots of pods to be serviced much
 	// more often than services with few pods; it also would cause a
@@ -176,6 +195,14 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, runRepair, useLBGr
 		// and handles removal of stale data on upgrades
 		c.repair.runBeforeSync()
 	}
+
+	lbCache, err := ovnlb.GetLBCache(c.nbClient)
+	if err != nil {
+		return fmt.Errorf("unable to get LB cache: %v", err)
+	}
+	// goroutine to initialize entries from OVN into the OVN cache
+	go c.reconcileOVNLBs(stopCh, lbCache)
+
 	// Start the workers after the repair loop to avoid races
 	klog.Info("Starting workers")
 	for i := 0; i < workers; i++ {
@@ -315,7 +342,21 @@ func (c *Controller) syncService(key string) error {
 	c.alreadyAppliedLock.Lock()
 	existingLBs, ok := c.alreadyApplied[key]
 	c.alreadyAppliedLock.Unlock()
-	if ok && ovnlb.LoadBalancersEqualNoUUID(existingLBs, lbs) {
+
+	// check if any existing LBs have more than one UUID
+	lbCache, err := ovnlb.GetLBCache(c.nbClient)
+	if err != nil {
+		return fmt.Errorf("failed initialize LBcache: %w", err)
+	}
+	hasDupes := false
+	for _, lb := range existingLBs {
+		if len(lbCache.Get(lb.Name)) > 0 {
+			hasDupes = true
+			break
+		}
+	}
+
+	if ok && ovnlb.LoadBalancersEqualNoUUID(existingLBs, lbs) && !hasDupes {
 		klog.V(3).Infof("Skipping no-op change for service %s", key)
 	} else {
 		klog.V(5).Infof("Services do not match, existing lbs: %#v, built lbs: %#v", existingLBs, lbs)
@@ -484,4 +525,26 @@ func newRatelimiter(qps int) workqueue.RateLimiter {
 		workqueue.NewItemExponentialFailureRateLimiter(5*time.Millisecond, 1000*time.Second),
 		&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(qps), qps*5)},
 	)
+}
+
+func (c *Controller) reconcileOVNLBs(stopCh <-chan struct{}, lbCache *ovnlb.LBCache) {
+	for {
+		select {
+		case lb := <-c.ovsdbQueue:
+			uuids := lbCache.AddOrUpdateEntry(lb.Name, lb.UUID)
+			if len(uuids) > 1 {
+				klog.Warningf("Multiple UUIDs found for load balancer name: %s, UUIDs: %+v",
+					lb.Name, uuids)
+				// attempt to request service controller to resync the service associated with this lb
+				svcName := getSvcName(lb.Name)
+				if len(svcName) > 0 {
+					klog.Infof("Duplicate UUID detection - Requesting service sync for lb: %s, service: %s",
+						lb.Name, svcName)
+					c.queue.Add(svcName)
+				}
+			}
+		case <-stopCh:
+			return
+		}
+	}
 }

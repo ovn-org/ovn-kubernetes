@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
@@ -135,6 +136,16 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 	}
 
 	return
+}
+
+// GetSvcName finds the service name (as a namespaced key) from a load balancer name
+func getSvcName(lbName string) string {
+	re := regexp.MustCompile(`^Service_([^ ]+)_(SCTP|UDP|TCP)`)
+	match := re.FindStringSubmatch("Service_default/my-service_TCP_node_router+switch_ovn-worker")
+	if len(match) > 1 {
+		return match[1]
+	}
+	return ""
 }
 
 // makeLBName creates the load balancer name - used to minimize churn
