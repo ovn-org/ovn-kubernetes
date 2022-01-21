@@ -2,7 +2,7 @@ package ovn
 
 import (
 	"encoding/hex"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -27,6 +27,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -41,14 +42,18 @@ type egressIPDialer interface {
 
 var dialer egressIPDialer = &egressIPDial{}
 
-var cloudPrivateIPConfigFinalizer = "cloudprivateipconfig.cloud.network.openshift.io/finalizer"
-
 func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err error) {
 	// Lock the assignment, this is needed because this function can end up
 	// being called from WatchEgressNodes and WatchEgressIP, i.e: two different
 	// go-routines and we need to make sure the assignment is safe.
 	oc.eIPC.egressIPAssignmentMutex.Lock()
 	defer oc.eIPC.egressIPAssignmentMutex.Unlock()
+
+	// Initialize an empty name which is filled depending on the operation
+	// (ADD/UPDATE/DELETE) we are performing. This is done as to be able to
+	// delete the NB DB set up correctly when searching the DB based on the
+	// name.
+	name := ""
 
 	// Initialize two empty objects as to avoid SIGSEGV. The code should play
 	// nicely with empty objects though.
@@ -67,6 +72,7 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 		if err != nil {
 			return fmt.Errorf("invalid old namespaceSelector, err: %v", err)
 		}
+		name = oldEIP.Name
 	}
 	if new != nil {
 		newEIP = new
@@ -74,6 +80,13 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 		if err != nil {
 			return fmt.Errorf("invalid new namespaceSelector, err: %v", err)
 		}
+		name = newEIP.Name
+	}
+
+	// If the spec hasn't changed don't process the object, this avoids us
+	// processing our own updates on the object.
+	if reflect.DeepEqual(oldEIP.Spec, newEIP.Spec) {
+		return nil
 	}
 
 	// We do not initialize a nothing selector for the podSelector, because
@@ -91,7 +104,7 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 	// Validate the spec and use only the valid egress IPs when performing any
 	// successive operations, theoretically: the user could specify invalid IP
 	// addresses, which would break us.
-	validSpecIPs, err := oc.validateEgressIPSpec(newEIP.Name, newEIP.Spec.EgressIPs)
+	validSpecIPs, err := oc.validateEgressIPSpec(name, newEIP.Spec.EgressIPs)
 	if err != nil {
 		return fmt.Errorf("invalid EgressIP spec, err: %v", err)
 	}
@@ -101,76 +114,109 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 	// anymore (specifically if ovnkube-master has been crashing for a while).
 	// Any invalid status at this point in time needs to be removed and assigned
 	// to a valid node.
-	validStatuses, statusToRemove := oc.validateEgressIPStatus(newEIP.Name, newEIP.Status.Items)
-	statusToKeep := []egressipv1.EgressIPStatusItem{}
-	statusToAdd := []egressipv1.EgressIPStatusItem{}
-	validStatusIPs := sets.NewString()
-	for _, validStatus := range validStatuses {
-		validStatusIPs.Insert(validStatus.EgressIP)
-
+	validStatus, invalidStatus := oc.validateEgressIPStatus(name, newEIP.Status.Items)
+	for status := range validStatus {
 		// If the spec has changed and an egress IP has been removed by the
-		// user: we need to un-assign that egress IP, else keep it.
-		if !validSpecIPs.Has(validStatus.EgressIP) {
-			statusToRemove = append(statusToRemove, validStatus)
-		} else {
-			statusToKeep = append(statusToKeep, validStatus)
+		// user: we need to un-assign that egress IP
+		if !validSpecIPs.Has(status.EgressIP) {
+			invalidStatus[status] = ""
+			delete(validStatus, status)
 		}
 	}
 
-	// Check the old egress IP and its status assignments. This is mainly done
-	// if a node is detected as not ready/reachable: we'll end up getting called
-	// from deleteEgressNode, which will have updated the object with only the
-	// statuses to keep. Hence, if the new object does not have the old
-	// assignment, we need to remove those.
+	// Check the old egress IP and its status assignments. When an EgressIP is
+	// deleted we'll need to clear all old status assignments. If a user removes
+	// an egress IP from .spec.egressIPs we however need to guard against adding
+	// the same status to statusToRemove twice, which would happen with the code
+	// above for validStatuses because both newEIP and oldEIP will have the old
+	// assignment status.
 	for _, oldStatus := range oldEIP.Status.Items {
-		if !validStatusIPs.Has(oldStatus.EgressIP) {
-			statusToRemove = append(statusToRemove, oldStatus)
+		if !validSpecIPs.Has(oldStatus.EgressIP) {
+			invalidStatus[oldStatus] = ""
 		}
 	}
 
 	// Add only the diff between what is requested and valid and that which
 	// isn't already assigned.
-	ipsToAdd := validSpecIPs.Difference(validStatusIPs)
+	ipsToAssign := validSpecIPs
+	statusToAdd := make([]egressipv1.EgressIPStatusItem, 0, len(ipsToAssign))
+	statusToKeep := make([]egressipv1.EgressIPStatusItem, 0, len(validStatus))
+	for status := range validStatus {
+		statusToKeep = append(statusToKeep, status)
+		ipsToAssign.Delete(status.EgressIP)
+	}
+	statusToRemove := make([]egressipv1.EgressIPStatusItem, 0, len(invalidStatus))
+	for status := range invalidStatus {
+		statusToRemove = append(statusToRemove, status)
+	}
+
 	if !util.PlatformTypeIsEgressIPCloudProvider() {
 		if len(statusToRemove) > 0 {
-			if err := oc.deleteEgressIPAssignments(oldEIP.Name, statusToRemove, oldEIP.Spec.NamespaceSelector, oldEIP.Spec.PodSelector); err != nil {
+			// Delete the statusToRemove from the allocator cache. If we don't
+			// do this we will occupy assignment positions for the ipsToAssign,
+			// even though statusToRemove will be removed afterwards
+			oc.deleteAllocatorEgressIPAssignments(statusToRemove)
+			if err := oc.deleteEgressIPAssignments(name, statusToRemove); err != nil {
 				return err
 			}
 		}
-		if len(ipsToAdd) > 0 {
-			statusToAdd = oc.assignEgressIPs(newEIP.Name, ipsToAdd.List())
-			if err := oc.addEgressIPAssignments(newEIP.Name, statusToAdd, newEIP.Spec.NamespaceSelector, newEIP.Spec.PodSelector); err != nil {
-				return err
-			}
+		if len(ipsToAssign) > 0 {
+			statusToAdd = oc.assignEgressIPs(name, ipsToAssign.UnsortedList())
 			statusToKeep = append(statusToKeep, statusToAdd...)
 		}
+		// Assign all statusToKeep, we need to warm up the podAssignment cache
+		// on restart. We won't perform any additional transactions to the NB DB
+		// for things which exists because the libovsdb operations use
+		// modelClient which is idempotent.
+		if err := oc.addEgressIPAssignments(name, statusToKeep, newEIP.Spec.NamespaceSelector, newEIP.Spec.PodSelector); err != nil {
+			return err
+		}
+		// Add all assignments which are to be kept to the allocator cache,
+		// allowing us to track all assignments which have been performed and
+		// avoid incorrect future assignments due to a de-synchronized cache.
+		oc.addAllocatorEgressIPAssignments(name, statusToKeep)
 		// Update the object only on an ADD/UPDATE. If we are processing a
 		// DELETE, new will be nil and we should not update the object.
 		if len(statusToAdd) > 0 || (len(statusToRemove) > 0 && new != nil) {
-			if err := oc.updateEgressIPStatus(newEIP.Name, statusToKeep); err != nil {
+			if err := oc.patchReplaceEgressIPStatus(name, statusToKeep); err != nil {
 				return err
 			}
-			metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 		}
 	} else {
+		// Delete all assignments that are to be removed from the allocator
+		// cache. If we don't do this we will occupy assignment positions for
+		// the ipsToAdd, even though statusToRemove will be removed afterwards
+		oc.deleteAllocatorEgressIPAssignments(statusToRemove)
 		// If running on a public cloud we should not program OVN just yet, we
 		// need confirmation from the cloud-network-config-controller that it
 		// can assign the IPs. reconcileCloudPrivateIPConfig will take care of
 		// processing the answer from the requests we make here, and update OVN
 		// accordingly when we know what the outcome is.
-		if len(ipsToAdd) > 0 {
-			statusToAdd = oc.assignEgressIPs(newEIP.Name, ipsToAdd.List())
+		if len(ipsToAssign) > 0 {
+			statusToAdd = oc.assignEgressIPs(name, ipsToAssign.UnsortedList())
+			statusToKeep = append(statusToKeep, statusToAdd...)
 		}
-		if err := oc.executeCloudPrivateIPConfigChange(newEIP.Name, statusToAdd, statusToRemove); err != nil {
+		// Same as above: Add all assignments which are to be kept to the
+		// allocator cache, allowing us to track all assignments which have been
+		// performed and avoid incorrect future assignments due to a
+		// de-synchronized cache.
+		oc.addAllocatorEgressIPAssignments(name, statusToKeep)
+		// Execute CloudPrivateIPConfig changes for assignments which need to be
+		// added/removed, assignments which don't change do not require any
+		// further setup.
+		if err := oc.executeCloudPrivateIPConfigChange(name, statusToAdd, statusToRemove); err != nil {
 			return err
 		}
 	}
+
+	// Record the egress IP allocator count
+	metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 
 	// If nothing has changed for what concerns the assignments, then check if
 	// the namespaceSelector and podSelector have changed. If they have changed
 	// then remove the setup for all pods which matched the old and add
 	// everything for all pods which match the new.
-	if len(ipsToAdd) == 0 &&
+	if len(ipsToAssign) == 0 &&
 		len(statusToRemove) == 0 {
 		// Only the namespace selector changed: remove the setup for all pods
 		// matching the old and not matching the new, and add setup for the pod
@@ -183,12 +229,12 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 			for _, namespace := range namespaces {
 				namespaceLabels := labels.Set(namespace.Labels)
 				if !newNamespaceSelector.Matches(namespaceLabels) && oldNamespaceSelector.Matches(namespaceLabels) {
-					if err := oc.deleteNamespaceEgressIPAssignment(oldEIP.Name, oldEIP.Status.Items, namespace, oldEIP.Spec.PodSelector); err != nil {
+					if err := oc.deleteNamespaceEgressIPAssignment(name, oldEIP.Status.Items, namespace, oldEIP.Spec.PodSelector); err != nil {
 						return err
 					}
 				}
 				if newNamespaceSelector.Matches(namespaceLabels) && !oldNamespaceSelector.Matches(namespaceLabels) {
-					if err := oc.addNamespaceEgressIPAssignments(newEIP.Name, newEIP.Status.Items, namespace, newEIP.Spec.PodSelector); err != nil {
+					if err := oc.addNamespaceEgressIPAssignments(name, newEIP.Status.Items, namespace, newEIP.Spec.PodSelector); err != nil {
 						return err
 					}
 				}
@@ -209,12 +255,12 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 				for _, pod := range pods {
 					podLabels := labels.Set(pod.Labels)
 					if !newPodSelector.Matches(podLabels) && oldPodSelector.Matches(podLabels) {
-						if err := oc.deletePodEgressIPAssignments(oldEIP.Name, oldEIP.Status.Items, pod); err != nil {
+						if err := oc.deletePodEgressIPAssignments(name, oldEIP.Status.Items, pod); err != nil {
 							return err
 						}
 					}
 					if newPodSelector.Matches(podLabels) && !oldPodSelector.Matches(podLabels) {
-						if err := oc.addPodEgressIPAssignments(newEIP.Name, newEIP.Status.Items, pod); err != nil {
+						if err := oc.addPodEgressIPAssignments(name, newEIP.Status.Items, pod); err != nil {
 							return err
 						}
 					}
@@ -233,7 +279,7 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 				// If the namespace does not match anymore then there's no
 				// reason to look at the pod selector.
 				if !newNamespaceSelector.Matches(namespaceLabels) && oldNamespaceSelector.Matches(namespaceLabels) {
-					if err := oc.deleteNamespaceEgressIPAssignment(oldEIP.Name, oldEIP.Status.Items, namespace, oldEIP.Spec.PodSelector); err != nil {
+					if err := oc.deleteNamespaceEgressIPAssignment(name, oldEIP.Status.Items, namespace, oldEIP.Spec.PodSelector); err != nil {
 						return err
 					}
 				}
@@ -249,7 +295,7 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 					for _, pod := range pods {
 						podLabels := labels.Set(pod.Labels)
 						if newPodSelector.Matches(podLabels) {
-							if err := oc.addPodEgressIPAssignments(newEIP.Name, newEIP.Status.Items, pod); err != nil {
+							if err := oc.addPodEgressIPAssignments(name, newEIP.Status.Items, pod); err != nil {
 								return err
 							}
 						}
@@ -265,12 +311,12 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 					for _, pod := range pods {
 						podLabels := labels.Set(pod.Labels)
 						if !newPodSelector.Matches(podLabels) && oldPodSelector.Matches(podLabels) {
-							if err := oc.deletePodEgressIPAssignments(oldEIP.Name, oldEIP.Status.Items, pod); err != nil {
+							if err := oc.deletePodEgressIPAssignments(name, oldEIP.Status.Items, pod); err != nil {
 								return err
 							}
 						}
 						if newPodSelector.Matches(podLabels) && !oldPodSelector.Matches(podLabels) {
-							if err := oc.addPodEgressIPAssignments(newEIP.Name, newEIP.Status.Items, pod); err != nil {
+							if err := oc.addPodEgressIPAssignments(name, newEIP.Status.Items, pod); err != nil {
 								return err
 							}
 						}
@@ -356,9 +402,15 @@ func (oc *Controller) reconcileEgressIPPod(old, new *v1.Pod) (err error) {
 	}
 
 	// Iterate all EgressIPs and check if this pod start/stops matching any and
-	// add/remove the setup accordingly. Pods cannot match multiple EgressIP
-	// objects: that is considered a user error and is undefined. Hence, just
-	// just perform the setup against the first object matched.
+	// add/remove the setup accordingly. Pods should not match multiple EgressIP
+	// objects: that is considered a user error and is undefined. However, in
+	// such events iterate all EgressIPs and clean up as much as possible. By
+	// iterating all EgressIPs we also cover the case where a pod has its labels
+	// changed from matching one EgressIP to another, ex: EgressIP1 matching
+	// "blue pods" and EgressIP2 matching "red pods". If a pod with a red label
+	// gets changed to a blue label: we need add and remove the set up for both
+	// EgressIP obejcts - since we can't be sure of which EgressIP object we
+	// process first, always iterate all.
 	egressIPs, err := oc.watchFactory.GetEgressIPs()
 	if err != nil {
 		return err
@@ -373,20 +425,50 @@ func (oc *Controller) reconcileEgressIPPod(old, new *v1.Pod) (err error) {
 			// check that. If there is no podSelector: the user intends it to
 			// match all pods in the namespace.
 			podSelector, _ := metav1.LabelSelectorAsSelector(&egressIP.Spec.PodSelector)
-			// If the podSelector is not empty then check if the pod stopped
-			// matching. If the pod was deleted, "new" will be nil and
-			// newPodLabels will not match, so this is should cover that case.
-			if !podSelector.Empty() && !podSelector.Matches(newPodLabels) && podSelector.Matches(oldPodLabels) {
-				return oc.deletePodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, oldPod)
+			if !podSelector.Empty() {
+				newMatches := podSelector.Matches(newPodLabels)
+				oldMatches := podSelector.Matches(oldPodLabels)
+				// If the podSelector doesn't match the pod, then continue
+				// because this EgressIP intends to match other pods in that
+				// namespace and not this one. Other EgressIP objects might
+				// match the pod though so we need to check that.
+				if !newMatches && !oldMatches {
+					continue
+				}
+				// Check if the pod stopped matching. If the pod was deleted,
+				// "new" will be nil and newPodLabels will not match, so this is
+				// should cover that case.
+				if !newMatches && oldMatches {
+					if err := oc.deletePodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, oldPod); err != nil {
+						return err
+					}
+					continue
+				}
+				// If the pod starts matching the podSelector or continues to
+				// match: add the pod. The reason as to why we need to continue
+				// adding it if it continues to match, as opposed to once when
+				// it started matching, is because the pod might not have pod
+				// IPs assigned at that point and we need to continue trying the
+				// pod setup for every pod update as to make sure we process the
+				// pod IP assignment.
+				if err := oc.addPodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, newPod); err != nil {
+					return err
+				}
+				continue
 			}
 			// If the podSelector is empty (i.e: the EgressIP object is intended
 			// to match all pods in the namespace) and the pod has been deleted:
 			// "new" will be nil and we need to remove the setup
-			if podSelector.Empty() && new == nil {
-				return oc.deletePodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, oldPod)
+			if new == nil {
+				if err := oc.deletePodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, oldPod); err != nil {
+					return err
+				}
+				continue
 			}
 			// For all else, perform a setup for the pod
-			return oc.addPodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, newPod)
+			if err := oc.addPodEgressIPAssignments(egressIP.Name, egressIP.Status.Items, newPod); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -403,9 +485,8 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 		// old egress IP <-> node assignment has been removed. This is indicated
 		// by the old object having a .status.node set and the new object having
 		// .status.node empty and the condition on the new being successful. B)
-		// object DELETE, for which the CloudPrivateIPConfig will not have a
-		// finalizer anymore
-		shouldDelete = oldCloudPrivateIPConfig.Status.Node != "" || !hasFinalizer(oldCloudPrivateIPConfig.Finalizers, cloudPrivateIPConfigFinalizer)
+		// object DELETE, for which new is nil
+		shouldDelete = oldCloudPrivateIPConfig.Status.Node != "" || new == nil
 		// On DELETE we need to delete the .spec.node for the old object
 		nodeToDelete = oldCloudPrivateIPConfig.Spec.Node
 	}
@@ -428,12 +509,26 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 		}
 	}
 
+	// As opposed to reconcileEgressIP, here we are only interested in changes
+	// made to the status (since we are the only ones performing the change made
+	// to the spec). So don't process the object if there is no change made to
+	// the status.
+	if reflect.DeepEqual(oldCloudPrivateIPConfig.Status, newCloudPrivateIPConfig.Status) {
+		return nil
+	}
+
 	if shouldDelete {
-		// There can only be one EgressIP object holding a given egress IP. If
-		// multiple objects specify the same egress IP the assignment algorithm
-		// invalidates it, hence: the following is safe.
-		egressIP, err := oc.getEgressIPFromCloudPrivateIPConfigName(oldCloudPrivateIPConfig.Name)
-		if err != nil {
+		// Get the EgressIP owner reference
+		egressIPName, exists := oldCloudPrivateIPConfig.Annotations[util.OVNEgressIPOwnerRefLabel]
+		if !exists {
+			return fmt.Errorf("CloudPrivateIPConfig object: %s is missing the egress IP owner reference annotation", oldCloudPrivateIPConfig.Name)
+		}
+		// Check if the egress IP has been deleted or not, if we are processing
+		// a CloudPrivateIPConfig delete because the EgressIP has been deleted
+		// then we need to remove the setup made for it, but not update the
+		// object.
+		egressIP, err := oc.kube.GetEgressIP(egressIPName)
+		if err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
 		egressIPString := cloudPrivateIPConfigNameToIPString(oldCloudPrivateIPConfig.Name)
@@ -441,24 +536,32 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 			Node:     nodeToDelete,
 			EgressIP: egressIPString,
 		}
-		if err := oc.deleteEgressIPAssignments(egressIP.Name, []egressipv1.EgressIPStatusItem{statusItem}, egressIP.Spec.NamespaceSelector, egressIP.Spec.PodSelector); err != nil {
+		if err := oc.deleteEgressIPAssignments(egressIPName, []egressipv1.EgressIPStatusItem{statusItem}); err != nil {
 			return err
 		}
-		// Deleting here means updating the object with the statuses we want to
-		// keep
+		// If the EgressIP has been deleted just return at this point.
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		// Deleting a status here means updating the object with the statuses we
+		// want to keep
 		updatedStatus := []egressipv1.EgressIPStatusItem{}
 		for _, status := range egressIP.Status.Items {
 			if !reflect.DeepEqual(status, statusItem) {
 				updatedStatus = append(updatedStatus, status)
 			}
 		}
-		if err := oc.updateEgressIPStatus(egressIP.Name, updatedStatus); err != nil {
+		if err := oc.patchReplaceEgressIPStatus(egressIP.Name, updatedStatus); err != nil {
 			return err
 		}
 	}
 	if shouldAdd {
-		// Same explanation as for delete above.
-		egressIP, err := oc.getEgressIPFromCloudPrivateIPConfigName(newCloudPrivateIPConfig.Name)
+		// Get the EgressIP owner reference
+		egressIPName, exists := oldCloudPrivateIPConfig.Annotations[util.OVNEgressIPOwnerRefLabel]
+		if !exists {
+			return fmt.Errorf("CloudPrivateIPConfig object: %s is missing the egress IP owner reference annotation", oldCloudPrivateIPConfig.Name)
+		}
+		egressIP, err := oc.kube.GetEgressIP(egressIPName)
 		if err != nil {
 			return err
 		}
@@ -476,36 +579,17 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 		for _, status := range egressIP.Status.Items {
 			if reflect.DeepEqual(status, statusItem) {
 				hasStatus = true
+				break
 			}
 		}
 		if !hasStatus {
-			if err := oc.updateEgressIPStatusWithItem(egressIP.Name, statusItem); err != nil {
+			statusToKeep := append(egressIP.Status.Items, statusItem)
+			if err := oc.patchReplaceEgressIPStatus(egressIP.Name, statusToKeep); err != nil {
 				return err
 			}
 		}
 	}
-	metrics.RecordEgressIPCount(getEgressIPAllocationTotalCount(oc.eIPC.allocator))
 	return nil
-}
-
-// getEgressIPFromCloudPrivateIPConfigName retrieves the EgressIP object holding
-// the egress IP represented by the CloudPrivateIPConfig name. Only one egress
-// IPs are unique for EgressIP object, so no two objects can reference the same
-// egress IP, hence why this should work.
-func (oc *Controller) getEgressIPFromCloudPrivateIPConfigName(cloudPrivateIPConfigName string) (*egressipv1.EgressIP, error) {
-	egressIPString := cloudPrivateIPConfigNameToIPString(cloudPrivateIPConfigName)
-	eIPs, err := oc.watchFactory.GetEgressIPs()
-	if err != nil {
-		return nil, fmt.Errorf("unable to get EgressIP objects, err: %v", err)
-	}
-	for _, eIP := range eIPs {
-		for _, egressIP := range eIP.Spec.EgressIPs {
-			if egressIP == egressIPString {
-				return eIP, nil
-			}
-		}
-	}
-	return nil, fmt.Errorf("no matching EgressIP found")
 }
 
 type cloudPrivateIPConfigOp struct {
@@ -520,7 +604,7 @@ type cloudPrivateIPConfigOp struct {
 // IP, cloudPrivateIPConfigOp is a helper used to determine that sort of
 // operations from toAssign/toRemove
 func (oc *Controller) executeCloudPrivateIPConfigChange(egressIPName string, toAssign, toRemove []egressipv1.EgressIPStatusItem) error {
-	ops := make(map[string]cloudPrivateIPConfigOp, len(toAssign)*len(toRemove))
+	ops := make(map[string]cloudPrivateIPConfigOp, len(toAssign)+len(toRemove))
 	for _, assignment := range toAssign {
 		ops[assignment.EgressIP] = cloudPrivateIPConfigOp{
 			toAdd: assignment.Node,
@@ -566,6 +650,9 @@ func (oc *Controller) executeCloudPrivateIPConfigOps(egressIPName string, ops ma
 			cloudPrivateIPConfig := ocpcloudnetworkapi.CloudPrivateIPConfig{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: cloudPrivateIPConfigName,
+					Annotations: map[string]string{
+						util.OVNEgressIPOwnerRefLabel: egressIPName,
+					},
 				},
 				Spec: ocpcloudnetworkapi.CloudPrivateIPConfigSpec{
 					Node: op.toAdd,
@@ -619,10 +706,10 @@ func (oc *Controller) validateEgressIPSpec(name string, egressIPs []string) (set
 // cache knows about all egress nodes. WatchEgressNodes is initialized before
 // any other egress IP handler, so te cache should be warm and correct once we
 // start going this.
-func (oc *Controller) validateEgressIPStatus(name string, items []egressipv1.EgressIPStatusItem) ([]egressipv1.EgressIPStatusItem, []egressipv1.EgressIPStatusItem) {
+func (oc *Controller) validateEgressIPStatus(name string, items []egressipv1.EgressIPStatusItem) (map[egressipv1.EgressIPStatusItem]string, map[egressipv1.EgressIPStatusItem]string) {
 	oc.eIPC.allocator.Lock()
 	defer oc.eIPC.allocator.Unlock()
-	var valid, invalid []egressipv1.EgressIPStatusItem
+	valid, invalid := make(map[egressipv1.EgressIPStatusItem]string), make(map[egressipv1.EgressIPStatusItem]string)
 	for _, eIPStatus := range items {
 		validAssignment := true
 		eNode, exists := oc.eIPC.allocator.cache[eIPStatus.Node]
@@ -658,12 +745,12 @@ func (oc *Controller) validateEgressIPStatus(name string, items []egressipv1.Egr
 			if utilnet.IsIPv6(ip) && eNode.egressIPConfig.V6.Net != nil {
 				if !eNode.egressIPConfig.V6.Net.Contains(ip) {
 					klog.Errorf("Allocator error: EgressIP allocation: %s on subnet: %s which cannot host it", ip.String(), eNode.egressIPConfig.V4.Net.String())
-					break
+					validAssignment = false
 				}
 			} else if !utilnet.IsIPv6(ip) && eNode.egressIPConfig.V4.Net != nil {
 				if !eNode.egressIPConfig.V4.Net.Contains(ip) {
 					klog.Errorf("Allocator error: EgressIP allocation: %s on subnet: %s which cannot host it", ip.String(), eNode.egressIPConfig.V4.Net.String())
-					break
+					validAssignment = false
 				}
 			} else {
 				klog.Errorf("Allocator error: EgressIP allocation on node: %s which does not support its IP protocol version", eIPStatus.Node)
@@ -671,9 +758,9 @@ func (oc *Controller) validateEgressIPStatus(name string, items []egressipv1.Egr
 			}
 		}
 		if validAssignment {
-			valid = append(valid, eIPStatus)
+			valid[eIPStatus] = ""
 		} else {
-			invalid = append(invalid, eIPStatus)
+			invalid[eIPStatus] = ""
 		}
 	}
 	return valid, invalid
@@ -692,7 +779,6 @@ func (oc *Controller) addAllocatorEgressIPAssignments(name string, statusAssignm
 }
 
 func (oc *Controller) addEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem, namespaceSelector, podSelector metav1.LabelSelector) error {
-	oc.addAllocatorEgressIPAssignments(name, statusAssignments)
 	namespaces, err := oc.watchFactory.GetNamespacesBySelector(namespaceSelector)
 	if err != nil {
 		return err
@@ -735,30 +821,48 @@ func (oc *Controller) addNamespaceEgressIPAssignments(name string, statusAssignm
 func (oc *Controller) addPodEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem, pod *kapi.Pod) error {
 	oc.eIPC.podAssignmentMutex.Lock()
 	defer oc.eIPC.podAssignmentMutex.Unlock()
-	var remainingAssignments, successfulAssignments, existingAssignments []egressipv1.EgressIPStatusItem
-	existing, exists := oc.eIPC.podAssignment[getPodKey(pod)]
+	// If statusAssignments is empty just return, not doing this will delete the
+	// external GW set up, even though there might be no egress IP set up to
+	// perform.
+	if len(statusAssignments) == 0 {
+		return nil
+	}
+	var remainingAssignments []egressipv1.EgressIPStatusItem
+	podKey := getPodKey(pod)
+	podState, exists := oc.eIPC.podAssignment[podKey]
 	if !exists {
 		remainingAssignments = statusAssignments
+		// Retrieve the pod's networking configuration from the
+		// logicalPortCache. The reason for doing this: a) only normal network
+		// pods are placed in this cache, b) once the pod is placed here we know
+		// addLogicalPort has finished successfully setting up networking for
+		// the pod, so we can proceed with retrieving its IP and deleting the
+		// external GW configuration created in addLogicalPort for the pod.
+		logicalPort, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name))
+		if err != nil {
+			return nil
+		}
+		podState = &podAssignmentState{
+			egressStatuses: make(map[egressipv1.EgressIPStatusItem]string),
+			podIPs:         logicalPort.ips,
+		}
+		oc.eIPC.podAssignment[podKey] = podState
+		if err := oc.eIPC.deletePerPodGRSNAT(pod, logicalPort.ips); err != nil {
+			return err
+		}
 	} else {
 		for _, status := range statusAssignments {
-			for _, existingAssignment := range existing {
-				if status != existingAssignment {
-					remainingAssignments = append(remainingAssignments, status)
-				}
+			if _, exists := podState.egressStatuses[status]; !exists {
+				remainingAssignments = append(remainingAssignments, status)
 			}
 		}
 	}
 	for _, status := range remainingAssignments {
 		klog.V(5).Infof("Adding pod egress IP status: %v for EgressIP: %s and pod: %s/%s", status, name, pod.Name, pod.Namespace)
-		if err := oc.eIPC.addPodEgressIPAssignment(name, status, pod); err != nil && !errors.Is(err, skippedPodError) {
+		if err := oc.eIPC.addPodEgressIPAssignment(name, status, pod, podState.podIPs); err != nil {
 			return err
-		} else if err == nil {
-			successfulAssignments = append(successfulAssignments, status)
 		}
-	}
-	if len(successfulAssignments) > 0 {
-		existingAssignments = append(existingAssignments, successfulAssignments...)
-		oc.eIPC.podAssignment[getPodKey(pod)] = existingAssignments
+		podState.egressStatuses[status] = ""
 	}
 	return nil
 }
@@ -775,15 +879,28 @@ func (oc *Controller) deleteAllocatorEgressIPAssignments(statusAssignments []egr
 	}
 }
 
-func (oc *Controller) deleteEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem, namespaceSelector, podSelector metav1.LabelSelector) error {
-	oc.deleteAllocatorEgressIPAssignments(statusAssignments)
-	namespaces, err := oc.watchFactory.GetNamespacesBySelector(namespaceSelector)
-	if err != nil {
-		return err
-	}
-	for _, namespace := range namespaces {
-		if err := oc.deleteNamespaceEgressIPAssignment(name, statusAssignments, namespace, podSelector); err != nil {
+// deleteEgressIPAssignments performs a full egress IP setup deletion on a per
+// (egress IP name - status) basis. The idea is thus to list the full content of
+// the NB DB for that egress IP object and delete everything which match the
+// status. We also need to update the podAssignment cache and finally re-add the
+// external GW setup in case the pod still exists.
+func (oc *Controller) deleteEgressIPAssignments(name string, statusesToRemove []egressipv1.EgressIPStatusItem) error {
+	oc.eIPC.podAssignmentMutex.Lock()
+	defer oc.eIPC.podAssignmentMutex.Unlock()
+	for _, statusToRemove := range statusesToRemove {
+		klog.V(5).Infof("Deleting pod egress IP status: %v for EgressIP: %s", statusToRemove, name)
+		if err := oc.eIPC.deleteEgressIPStatusSetup(name, statusToRemove); err != nil {
 			return err
+		}
+		for podKey, podStatus := range oc.eIPC.podAssignment {
+			delete(podStatus.egressStatuses, statusToRemove)
+			if len(podStatus.egressStatuses) == 0 {
+				podNamespace, podName := getPodNamespaceAndNameFromKey(podKey)
+				if err := oc.eIPC.addPerPodGRSNAT(podNamespace, podName, podStatus.podIPs); err != nil {
+					return err
+				}
+				delete(oc.eIPC.podAssignment, podKey)
+			}
 		}
 	}
 	return nil
@@ -812,15 +929,30 @@ func (oc *Controller) deleteNamespaceEgressIPAssignment(name string, statusAssig
 	return nil
 }
 
-func (oc *Controller) deletePodEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem, pod *kapi.Pod) error {
+func (oc *Controller) deletePodEgressIPAssignments(name string, statusesToRemove []egressipv1.EgressIPStatusItem, pod *kapi.Pod) error {
 	oc.eIPC.podAssignmentMutex.Lock()
 	defer oc.eIPC.podAssignmentMutex.Unlock()
-	for _, status := range statusAssignments {
-		klog.V(5).Infof("Deleting pod egress IP status: %v for EgressIP: %s and pod: %s/%s", status, name, pod.Name, pod.Namespace)
-		if err := oc.eIPC.deletePodEgressIPAssignment(name, status, pod); err != nil {
+	podKey := getPodKey(pod)
+	podStatus, exists := oc.eIPC.podAssignment[podKey]
+	if !exists {
+		return nil
+	}
+	for _, statusToRemove := range statusesToRemove {
+		klog.V(5).Infof("Deleting pod egress IP status: %v for EgressIP: %s and pod: %s/%s", statusToRemove, name, pod.Name, pod.Namespace)
+		if err := oc.eIPC.deletePodEgressIPAssignment(name, statusToRemove, podStatus.podIPs); err != nil {
 			return err
 		}
+		delete(podStatus.egressStatuses, statusToRemove)
 	}
+	if len(podStatus.egressStatuses) > 0 {
+		return nil
+	}
+	if err := oc.eIPC.addPerPodGRSNAT(pod.Namespace, pod.Name, podStatus.podIPs); err != nil {
+		return err
+	}
+	// Delete the key if there are no more status assignments to keep
+	// for the pod.
+	delete(oc.eIPC.podAssignment, podKey)
 	return nil
 }
 
@@ -988,32 +1120,35 @@ func (oc *Controller) isAnyClusterNodeIP(ip net.IP) *egressNode {
 	return nil
 }
 
-func (oc *Controller) updateEgressIPStatusWithItem(name string, statusItem egressipv1.EgressIPStatusItem) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		// Get the latest item from the store before updating.
-		egressIP, err := oc.watchFactory.GetEgressIP(name)
-		if err != nil {
-			return err
-		}
-		// Copy the item, since the object retrieved from the store (informer
-		// cache) will point to the same object we are trying to update, hence
-		// not doing this might cause race conditions when running tests.
-		updateEgressIP := egressIP.DeepCopy()
-		updateEgressIP.Status.Items = append(egressIP.Status.Items, statusItem)
-		return oc.kube.UpdateEgressIP(updateEgressIP)
-	})
+type EgressIPPatchStatus struct {
+	Op    string                    `json:"op"`
+	Path  string                    `json:"path"`
+	Value egressipv1.EgressIPStatus `json:"value"`
 }
 
-func (oc *Controller) updateEgressIPStatus(name string, statusItems []egressipv1.EgressIPStatusItem) error {
+// patchReplaceEgressIPStatus performs a replace patch operation of the egress
+// IP status by replacing the status with the provided value. This allows us to
+// update only the status field, without overwriting any other. This is
+// important because processing egress IPs can take a while (when running on a
+// public cloud and in the worst case), hence we don't want to perform a full
+// object update which risks resetting the EgressIP object's fields to the state
+// they had when we started processing the change.
+func (oc *Controller) patchReplaceEgressIPStatus(name string, statusItems []egressipv1.EgressIPStatusItem) error {
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		// see: updateEgressIPStatusWithItem
-		egressIP, err := oc.watchFactory.GetEgressIP(name)
-		if err != nil {
-			return err
+		t := []EgressIPPatchStatus{
+			{
+				Op:   "replace",
+				Path: "/status",
+				Value: egressipv1.EgressIPStatus{
+					Items: statusItems,
+				},
+			},
 		}
-		updateEgressIP := egressIP.DeepCopy()
-		updateEgressIP.Status.Items = statusItems
-		return oc.kube.UpdateEgressIP(updateEgressIP)
+		op, err := json.Marshal(&t)
+		if err != nil {
+			return fmt.Errorf("error serializing status patch operation: %+v, err: %v", statusItems, err)
+		}
+		return oc.kube.PatchEgressIP(name, op)
 	})
 }
 
@@ -1223,11 +1358,11 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 	// egress IPs which are missing an assignment. If there are, we need to send a
 	// synthetic update since reconcileEgressIP will then try to assign those IPs to
 	// this node (if possible)
-	egressIPs, err := oc.watchFactory.GetEgressIPs()
+	egressIPs, err := oc.kube.GetEgressIPs()
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
-	for _, egressIP := range egressIPs {
+	for _, egressIP := range egressIPs.Items {
 		if len(egressIP.Spec.EgressIPs) != len(egressIP.Status.Items) {
 			// Send a "synthetic update" on all egress IPs which are not fully
 			// assigned, the reconciliation loop for WatchEgressIP will try to
@@ -1235,7 +1370,7 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 			// implementation will not trigger a watch event for updates on
 			// objects which have no semantic difference, hence: call the
 			// reconciliation function directly.
-			if err := oc.reconcileEgressIP(egressIP, egressIP); err != nil {
+			if err := oc.reconcileEgressIP(nil, &egressIP); err != nil {
 				klog.Errorf("Synthetic update for EgressIP: %s failed, err: %v", egressIP.Name, err)
 			}
 		}
@@ -1265,29 +1400,24 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 	// Since the node has been labelled as "not usable" for egress IP
 	// assignments we need to find all egress IPs which have an assignment to
 	// it, and move them elsewhere.
-	egressIPs, err := oc.watchFactory.GetEgressIPs()
+	egressIPs, err := oc.kube.GetEgressIPs()
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
-	for _, eIP := range egressIPs {
-		keepStatusItems := []egressipv1.EgressIPStatusItem{}
-		for _, status := range eIP.Status.Items {
-			if status.Node != egressNode.Name {
-				// Keep only assignments that are not assigned to this node. Any
-				// egress IPs which are missing an assignment will try to be
-				// assigned once we've updated the object in reconcileEgressIP
-				keepStatusItems = append(keepStatusItems, status)
-			}
-		}
-		if len(keepStatusItems) != len(eIP.Status.Items) {
-			// Update the egress IP. The reconciliation loop for WatchEgressIP
-			// will try to assign the un-assigned IPs to whatever nodes remain.
-			// Perform a real update here. If we would call the reconciliation
-			// loop's function directly we'll need to update the object in that
-			// function and have the update recursively call the reconciliation
-			// loop again, i.e: perform two reconciliations for the same change.
-			if err := oc.updateEgressIPStatus(eIP.Name, keepStatusItems); err != nil {
-				klog.Errorf("Re-assignment for EgressIP: %s failed, unable to update object, err: %v", eIP.Name, err)
+	for _, egressIP := range egressIPs.Items {
+		for _, status := range egressIP.Status.Items {
+			if status.Node == egressNode.Name {
+				// Send a "synthetic update" on all egress IPs which have an
+				// assignment to this node. The reconciliation loop for
+				// WatchEgressIP will see that the current assignment status to
+				// this node is invalid and try to re-assign elsewhere. The
+				// workqueue's delta FIFO implementation will not trigger a
+				// watch event for updates on objects which have no semantic
+				// difference, hence: call the reconciliation function directly.
+				if err := oc.reconcileEgressIP(nil, &egressIP); err != nil {
+					klog.Errorf("Re-assignment for EgressIP: %s failed, unable to update object, err: %v", egressIP.Name, err)
+				}
+				break
 			}
 		}
 	}
@@ -1392,6 +1522,11 @@ func (e *egressNode) getAllocationCountForEgressIP(name string) (count int) {
 	return
 }
 
+type podAssignmentState struct {
+	egressStatuses map[egressipv1.EgressIPStatusItem]string
+	podIPs         []*net.IPNet
+}
+
 type allocator struct {
 	*sync.Mutex
 	// A cache used for egress IP assignments containing data for all cluster nodes
@@ -1411,7 +1546,7 @@ type egressIPController struct {
 	podAssignmentMutex *sync.Mutex
 	// podAssignment is a cache used for keeping track of which egressIP status
 	// has been setup for each pod. The key is defined by getPodKey
-	podAssignment map[string][]egressipv1.EgressIPStatusItem
+	podAssignment map[string]*podAssignmentState
 	// allocator is a cache of egress IP centric data needed to when both route
 	// health-checking and tracking allocations made
 	allocator allocator
@@ -1423,25 +1558,64 @@ type egressIPController struct {
 	watchFactory *factory.WatchFactory
 }
 
-var skippedPodError = errors.New("pod has been skipped")
-
 // addPodEgressIPAssignment will program OVN with logical router policies
 // (routing pod traffic to the egress node) and NAT objects on the egress node
-// (SNAT-ing to the egress IP). We can only do that for pods which have an
-// assigned IP address though, so if this is not that case at a particular point
-// in time just skip it. When the pod gets updates with an IP address we will
-// just process that event and do it then.
-func (e *egressIPController) addPodEgressIPAssignment(egressIPName string, status egressipv1.EgressIPStatusItem, pod *kapi.Pod) (err error) {
-	if pod.Spec.HostNetwork {
-		return skippedPodError
-	}
-	podIPs, err := e.getPodIPs(pod)
-	if err != nil || len(podIPs) == 0 {
-		return skippedPodError
-	}
+// (SNAT-ing to the egress IP).
+func (e *egressIPController) addPodEgressIPAssignment(egressIPName string, status egressipv1.EgressIPStatusItem, pod *kapi.Pod, podIPs []*net.IPNet) (err error) {
 	if err := e.handleEgressReroutePolicy(podIPs, status, egressIPName, e.createEgressReroutePolicy); err != nil {
 		return fmt.Errorf("unable to create logical router policy, err: %v", err)
 	}
+	ops, err := createNATRuleOps(e.nbClient, podIPs, status, egressIPName)
+	if err != nil {
+		return fmt.Errorf("unable to create NAT rule for status: %v, err: %v", status, err)
+	}
+	_, err = libovsdbops.TransactAndCheck(e.nbClient, ops)
+	return err
+}
+
+// deletePodEgressIPAssignment deletes the OVN programmed egress IP
+// configuration mentioned for addPodEgressIPAssignment.
+func (e *egressIPController) deletePodEgressIPAssignment(egressIPName string, status egressipv1.EgressIPStatusItem, podIPs []*net.IPNet) error {
+	if err := e.handleEgressReroutePolicy(podIPs, status, egressIPName, e.deleteEgressReroutePolicy); err != nil {
+		return fmt.Errorf("unable to delete logical router policy, err: %v", err)
+	}
+	ops, err := deleteNATRuleOps(e.nbClient, []ovsdb.Operation{}, podIPs, status, egressIPName)
+	if err != nil {
+		return fmt.Errorf("unable to delete NAT rule for status: %v, err: %v", status, err)
+	}
+	_, err = libovsdbops.TransactAndCheck(e.nbClient, ops)
+	return err
+}
+
+// addPerPodGRSNAT performs the required external GW setup in two particular
+// cases:
+// - An egress IP matching pod stops matching by means of EgressIP object
+// deletion
+// - An egress IP matching pod stops matching by means of changed EgressIP
+// selector change.
+// In both cases we should re-add the external GW setup. We however need to
+// guard against a third case, which is: pod deletion, for that it's enough to
+// check the informer cache since on pod deletion the event handlers are
+// triggered after the update to the informer cache. We should not re-add the
+// external GW setup in those cases.
+func (e *egressIPController) addPerPodGRSNAT(podNamespace, podName string, podIPs []*net.IPNet) error {
+	if config.Gateway.DisableSNATMultipleGWs {
+		if pod, err := e.watchFactory.GetPod(podNamespace, podName); err == nil {
+			// if the pod still exists, add snats to->nodeIP (on the node where the pod exists) for these podIPs after deleting the snat to->egressIP
+			extIPs, err := getExternalIPsGRSNAT(e.watchFactory, pod.Spec.NodeName)
+			if err != nil {
+				return err
+			}
+			err = addOrUpdatePerPodGRSNAT(e.nbClient, pod.Spec.NodeName, extIPs, podIPs)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (e *egressIPController) deletePerPodGRSNAT(pod *kapi.Pod, podIPs []*net.IPNet) error {
 	if config.Gateway.DisableSNATMultipleGWs {
 		// remove snats to->nodeIP (from the node where pod exists) for these podIPs before adding the snat to->egressIP
 		extIPs, err := getExternalIPsGRSNAT(e.watchFactory, pod.Spec.NodeName)
@@ -1453,63 +1627,6 @@ func (e *egressIPController) addPodEgressIPAssignment(egressIPName string, statu
 			return err
 		}
 	}
-	ops, err := createNATRuleOps(e.nbClient, podIPs, status, egressIPName)
-	if err != nil {
-		return fmt.Errorf("unable to create NAT rule for status: %v, err: %v", status, err)
-	}
-	_, err = libovsdbops.TransactAndCheck(e.nbClient, ops)
-	return err
-}
-
-// deletePodEgressIPAssignment deletes the OVN programmed egress IP
-// configuration mentioned for addPodEgressIPAssignment. It only does so for
-// pods which have a pod IP.
-func (e *egressIPController) deletePodEgressIPAssignment(egressIPName string, status egressipv1.EgressIPStatusItem, pod *kapi.Pod) error {
-	if pod.Spec.HostNetwork {
-		return nil
-	}
-	podIPs, err := e.getPodIPs(pod)
-	if err != nil {
-		return fmt.Errorf("unable to retrieve pod IPs, err: %v", err)
-	}
-	if len(podIPs) == 0 {
-		return fmt.Errorf("unable to retrieve pod IPs, err: no pod IPs defined")
-	}
-	defer func() {
-		if err == nil {
-			delete(e.podAssignment, getPodKey(pod))
-		}
-	}()
-	if err := e.handleEgressReroutePolicy(podIPs, status, egressIPName, e.deleteEgressReroutePolicy); err != nil {
-		return fmt.Errorf("unable to delete logical router policy, err: %v", err)
-	}
-
-	ops, err := deleteNATRuleOps(e.nbClient, []ovsdb.Operation{}, podIPs, status, egressIPName)
-	if err != nil {
-		return fmt.Errorf("unable to delete NAT rule for status: %v, err: %v", status, err)
-	}
-	_, err = libovsdbops.TransactAndCheck(e.nbClient, ops)
-	if err != nil {
-		return err
-	}
-
-	if config.Gateway.DisableSNATMultipleGWs {
-		fetchPod, err := e.watchFactory.GetPod(pod.Namespace, pod.Name)
-		if err != nil {
-			klog.Warningf("Failed to get pod %s/%s: %v", pod.Namespace, pod.Name, err)
-		} else {
-			// if the pod still exists, add snats to->nodeIP (on the node where the pod exists) for these podIPs after deleting the snat to->egressIP
-			extIPs, err := getExternalIPsGRSNAT(e.watchFactory, fetchPod.Spec.NodeName)
-			if err != nil {
-				return err
-			}
-			err = addOrUpdatePerPodGRSNAT(e.nbClient, fetchPod.Spec.NodeName, extIPs, podIPs)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
 	return nil
 }
 
@@ -1523,14 +1640,6 @@ func (e *egressIPController) getGatewayRouterJoinIP(node string, wantsIPv6 bool)
 	} else {
 		return nil, fmt.Errorf("could not find node %s gateway router: %v", node, err)
 	}
-}
-
-func (e *egressIPController) getPodIPs(pod *kapi.Pod) ([]*net.IPNet, error) {
-	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
-	if err != nil {
-		return nil, err
-	}
-	return podAnnotation.IPs, nil
 }
 
 // createEgressReroutePolicy uses logical router policies to force egress traffic to the egress node, for that we need
@@ -1656,6 +1765,94 @@ func (e *egressIPController) deleteEgressReroutePolicy(filterOption, egressIPNam
 	}
 	if err := e.modelClient.Delete(opsModel...); err != nil {
 		return fmt.Errorf("unable to remove logical router policy, err: %v", err)
+	}
+	return nil
+}
+
+// deleteEgressIPStatusSetup deletes the entire set up in the NB DB for an
+// EgressIPStatusItem. The set up in the NB DB gets tagged with the name of the
+// EgressIP, hence lookup the LRP and NAT objects which match that as well as
+// the attributes of the EgressIPStatusItem. Keep in mind: the LRP should get
+// completely deleted once the remaining and last nexthop equals the
+// gatewayRouterIP corresponding to the node in the EgressIPStatusItem, else
+// just remove the gatewayRouterIP from the list of nexthops
+func (e *egressIPController) deleteEgressIPStatusSetup(name string, status egressipv1.EgressIPStatusItem) error {
+	isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
+	gatewayRouterIP, err := e.getGatewayRouterJoinIP(status.Node, isEgressIPv6)
+	if err != nil {
+		return fmt.Errorf("unable to retrieve gateway IP for node: %s, protocol is IPv6: %v, err: %v", status.Node, isEgressIPv6, err)
+	}
+
+	nat := nbdb.NAT{}
+	natResult := []nbdb.NAT{}
+	natLogicalRouter := nbdb.LogicalRouter{}
+	logicalRouter := nbdb.LogicalRouter{}
+	logicalRouterPolicy := nbdb.LogicalRouterPolicy{
+		Nexthops: []string{gatewayRouterIP.String()},
+	}
+	logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
+	opsModel := []libovsdbops.OperationModel{
+		{
+			Model: &logicalRouterPolicy,
+			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
+				hasGatewayRouterIPNexthop := false
+				for _, nexthop := range lrp.Nexthops {
+					if nexthop == gatewayRouterIP.String() {
+						hasGatewayRouterIPNexthop = true
+						break
+					}
+				}
+				return lrp.Priority == types.EgressIPReroutePriority && lrp.ExternalIDs["name"] == name && hasGatewayRouterIPNexthop
+			},
+			OnModelMutations: []interface{}{
+				&logicalRouterPolicy.Nexthops,
+			},
+			ExistingResult: &logicalRouterPolicyRes,
+			DoAfter: func() {
+				tmp := []nbdb.LogicalRouterPolicy{}
+				for _, lrp := range logicalRouterPolicyRes {
+					if len(lrp.Nexthops) == 1 && lrp.Nexthops[0] == gatewayRouterIP.String() {
+						tmp = append(tmp, lrp)
+					}
+				}
+				logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&tmp)
+			},
+			BulkOp: true,
+		},
+		{
+			Model: &logicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
+				return lr.Name == types.OVNClusterRouter
+			},
+			OnModelMutations: []interface{}{
+				&logicalRouter.Policies,
+			},
+			ErrNotFound: true,
+		},
+		{
+			Model: &nat,
+			ModelPredicate: func(nat *nbdb.NAT) bool {
+				return nat.ExternalIDs["name"] == name && nat.ExternalIP == status.EgressIP
+			},
+			ExistingResult: &natResult,
+			DoAfter: func() {
+				natLogicalRouter.Nat = libovsdbops.ExtractUUIDsFromModels(&natResult)
+			},
+			BulkOp: true,
+		},
+		{
+			Model: &natLogicalRouter,
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
+				return lr.Name == util.GetGatewayRouterFromNode(status.Node)
+			},
+			OnModelMutations: []interface{}{
+				&natLogicalRouter.Nat,
+			},
+			ErrNotFound: true,
+		},
+	}
+	if err := e.modelClient.Delete(opsModel...); err != nil {
+		return fmt.Errorf("unable to remove egress IP status setup, err: %v", err)
 	}
 	return nil
 }
@@ -1968,6 +2165,11 @@ func getPodKey(pod *kapi.Pod) string {
 	return fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
 }
 
+func getPodNamespaceAndNameFromKey(podKey string) (string, string) {
+	parts := strings.Split(podKey, "_")
+	return parts[0], parts[1]
+}
+
 func getEgressIPAllocationTotalCount(allocator allocator) float64 {
 	count := 0
 	allocator.Lock()
@@ -1995,14 +2197,10 @@ func cloudPrivateIPConfigNameToIPString(name string) string {
 	if ip := net.ParseIP(name); ip != nil {
 		return name
 	}
-	// Handle IPv6
-	tmp := []byte(name)
-	for i := 4; i < len(tmp); i += 5 {
-		if len(tmp)-i > 4 {
-			tmp[i] = byte(':')
-		}
-	}
-	return string(tmp)
+	// Handle IPv6, for which we want to convert the fully expanded "special
+	// name" to go's default IP representation
+	name = strings.ReplaceAll(name, ".", ":")
+	return net.ParseIP(name).String()
 }
 
 // ipStringToCloudPrivateIPConfigName converts the net.IP string representation
@@ -2028,13 +2226,4 @@ func ipStringToCloudPrivateIPConfigName(ipString string) (name string) {
 		}
 	}
 	return
-}
-
-func hasFinalizer(finalizers []string, finalizer string) bool {
-	for _, f := range finalizers {
-		if f == finalizer {
-			return true
-		}
-	}
-	return false
 }

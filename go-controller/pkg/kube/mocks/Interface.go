@@ -58,6 +58,10 @@ func (_m *KubeInterface) DeleteCloudPrivateIPConfig(name string) error {
 	return nil
 }
 
+func (_m *KubeInterface) PatchEgressIP(name string, patch []byte) error {
+	return nil
+}
+
 // Events provides a mock function with given fields:
 func (_m *KubeInterface) Events() corev1.EventInterface {
 	ret := _m.Called()
