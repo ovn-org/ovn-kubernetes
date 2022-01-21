@@ -129,7 +129,12 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) {
 		for i := range egressFirewallACLs {
 			egressFirewallACL := egressFirewallACLs[i]
 			egressFirewallACL.Direction = types.DirectionToLPort
+			aclName := ""
+			if egressFirewallACL.Name != nil {
+				aclName = *egressFirewallACL.Name
+			}
 			opModels = append(opModels, libovsdbops.OperationModel{
+				Name:  aclName,
 				Model: &egressFirewallACL,
 				OnModelUpdates: []interface{}{
 					&egressFirewallACL.Direction,
@@ -371,6 +376,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 		switches = append(switches, &lsw)
 		opModels = append(opModels, []libovsdbops.OperationModel{
 			{
+				Name:           lsw.Name,
 				Model:          &lsw,
 				ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == lsn },
 				OnModelMutations: []interface{}{
@@ -382,8 +388,14 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 		}...)
 	}
 
+	aclName := ""
+	if egressFirewallACL.Name != nil {
+		aclName = *egressFirewallACL.Name
+	}
+
 	opModels = append([]libovsdbops.OperationModel{
 		{
+			Name:           aclName,
 			Model:          egressFirewallACL,
 			ModelPredicate: func(acl *nbdb.ACL) bool { return libovsdbops.IsEquivalentACL(acl, egressFirewallACL) },
 			DoAfter: func() {

@@ -558,6 +558,17 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// Save this index to be able to calculate the next index where lsp UUID will be present.
 	lspUUIDIndex := len(allOps)
 	if !lspExist {
+		timeout := ovntypes.OVSDBWaitTimeout
+		allOps = append(allOps, ovsdb.Operation{
+			Op:      ovsdb.OperationWait,
+			Timeout: &timeout,
+			Table:   "Logical_Switch_Port",
+			Where:   []ovsdb.Condition{{Column: "name", Function: ovsdb.ConditionEqual, Value: lsp.Name}},
+			Columns: []string{"name"},
+			Until:   "!=",
+			Rows:    []ovsdb.Row{{"name": lsp.Name}},
+		})
+
 		// create new logical switch port
 		ops, err := oc.nbClient.Create(lsp)
 		if err != nil {
