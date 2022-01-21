@@ -297,6 +297,7 @@ func UpdateNodeSwitchExcludeIPs(nbClient libovsdbclient.Client, nodeName string,
 
 	opModels := []libovsdbops.OperationModel{
 		{
+			Name:           logicalSwitchDes.Name,
 			Model:          &logicalSwitchDes,
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == nodeName },
 			OnModelMutations: []interface{}{

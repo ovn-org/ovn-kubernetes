@@ -312,6 +312,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		// mention that field in OnModelUpdates or ModelPredicate.
 		opModels := []libovsdbops.OperationModel{
 			{
+				Name:  loadBalancerGroup.Name,
 				Model: &loadBalancerGroup,
 			},
 		}
@@ -364,6 +365,7 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 	}
 	opModels := []libovsdbops.OperationModel{
 		{
+			Name:           logicalRouter.Name,
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
 		},
@@ -426,6 +428,7 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 	}
 	opModels = []libovsdbops.OperationModel{
 		{
+			Name:           logicalSwitch.Name,
 			Model:          &logicalSwitch,
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.OVNJoinSwitch },
 		},
@@ -475,6 +478,7 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 			},
 		},
 		{
+			Name:           logicalRouter.Name,
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
 			OnModelMutations: []interface{}{
@@ -504,6 +508,7 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 			},
 		},
 		{
+			Name:           logicalSwitch.Name,
 			Model:          &logicalSwitch,
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.OVNJoinSwitch },
 			OnModelMutations: []interface{}{
@@ -538,6 +543,7 @@ func (oc *Controller) addNodeLogicalSwitchPort(logicalSwitchName, portName, port
 			},
 		},
 		{
+			Name:           logicalSwitch.Name,
 			Model:          &logicalSwitch,
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == logicalSwitchName },
 			OnModelMutations: []interface{}{
@@ -605,6 +611,7 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 					},
 				},
 				{
+					Name:           logicalRouter.Name,
 					Model:          &logicalRouter,
 					ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
 					OnModelMutations: []interface{}{
@@ -734,6 +741,7 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 			},
 		},
 		{
+			Name:           logicalRouter.Name,
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
 			OnModelMutations: []interface{}{
@@ -757,6 +765,7 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 
 	opModels = []libovsdbops.OperationModel{
 		{
+			Name:  gatewayChassis.Name,
 			Model: &gatewayChassis,
 			OnModelUpdates: []interface{}{
 				&gatewayChassis.ChassisName,
@@ -853,6 +862,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 			},
 		},
 		{
+			Name:           logicalRouter.Name,
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
 			OnModelMutations: []interface{}{
@@ -861,6 +871,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 			ErrNotFound: true,
 		},
 		{
+			Name:           logicalSwitch.Name,
 			Model:          &logicalSwitch,
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == nodeName },
 			OnModelUpdates: []interface{}{
@@ -923,6 +934,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		// Create the Node's Logical Switch and set it's subnet
 		opModels = []libovsdbops.OperationModel{
 			{
+				Name:  logicalSwitch.Name,
 				Model: &logicalSwitch,
 				OnModelMutations: []interface{}{
 					&logicalSwitch.OtherConfig,

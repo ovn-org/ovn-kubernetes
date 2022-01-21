@@ -112,8 +112,19 @@ func ensureOvnAddressSet(nbClient libovsdbclient.Client, name string) (*ovnAddre
 	}
 
 	if len(addrset.UUID) == 0 {
+		ops := make([]ovsdb.Operation, 0, 2)
+		timeout := types.OVSDBWaitTimeout
+		ops = append(ops, ovsdb.Operation{
+			Op:      ovsdb.OperationWait,
+			Timeout: &timeout,
+			Table:   "Address_Set",
+			Where:   []ovsdb.Condition{{Column: "name", Function: ovsdb.ConditionEqual, Value: name}},
+			Columns: []string{"name"},
+			Until:   "!=",
+			Rows:    []ovsdb.Row{{"name": name}},
+		})
 		//create the address_set with no IPs
-		ops, err := as.nbClient.Create(&nbdb.AddressSet{
+		op, err := as.nbClient.Create(&nbdb.AddressSet{
 			Name:        as.hashName,
 			ExternalIDs: map[string]string{"name": name},
 		})
@@ -121,6 +132,7 @@ func ensureOvnAddressSet(nbClient libovsdbclient.Client, name string) (*ovnAddre
 			return nil, fmt.Errorf("failed to create address set %s (%v)",
 				name, err)
 		}
+		ops = append(ops, op...)
 		results, err := libovsdbops.TransactAndCheck(as.nbClient, ops)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create address set %s (%v)",
