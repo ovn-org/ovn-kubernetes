@@ -3,6 +3,8 @@
 
 package sbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 type (
 	EncapType = string
 )
@@ -21,3 +23,65 @@ type Encap struct {
 	Options     map[string]string `ovsdb:"options"`
 	Type        EncapType         `ovsdb:"type"`
 }
+
+func copyEncapOptions(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalEncapOptions(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *Encap) DeepCopyInto(b *Encap) {
+	*b = *a
+	b.Options = copyEncapOptions(a.Options)
+}
+
+func (a *Encap) DeepCopy() *Encap {
+	b := new(Encap)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *Encap) CloneModelInto(b model.Model) {
+	c := b.(*Encap)
+	a.DeepCopyInto(c)
+}
+
+func (a *Encap) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *Encap) Equals(b *Encap) bool {
+	return a.UUID == b.UUID &&
+		a.ChassisName == b.ChassisName &&
+		a.IP == b.IP &&
+		equalEncapOptions(a.Options, b.Options) &&
+		a.Type == b.Type
+}
+
+func (a *Encap) EqualsModel(b model.Model) bool {
+	c := b.(*Encap)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &Encap{}
+var _ model.ComparableModel = &Encap{}

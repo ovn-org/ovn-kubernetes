@@ -59,11 +59,15 @@ type AddressSet interface {
 	GetName() string
 	// AddIPs adds the array of IPs to the address set
 	AddIPs(ip []net.IP) error
+	// AddIPsReturnOps returns the ops needed to add the array of IPs to the address set
+	AddIPsReturnOps(ip []net.IP) ([]ovsdb.Operation, error)
 	// GetIPs gets the list of v4 & v6 IPs from the address set
 	GetIPs() ([]string, []string)
 	// SetIPs sets the address set to the given array of addresses
 	SetIPs(ip []net.IP) error
 	DeleteIPs(ip []net.IP) error
+	// DeleteIPsReturnOps returns the ops needed to delete the array of IPs from the address set
+	DeleteIPsReturnOps(ip []net.IP) ([]ovsdb.Operation, error)
 	Destroy() error
 }
 
@@ -157,7 +161,7 @@ func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) (AddressSet, erro
 		}
 	}
 
-	return &ovnAddressSets{name: name, ipv4: v4set, ipv6: v6set}, nil
+	return &ovnAddressSets{nbClient: asf.nbClient, name: name, ipv4: v4set, ipv6: v6set}, nil
 }
 
 func forEachAddressSet(nbClient libovsdbclient.Client, do func(string)) error {
@@ -266,9 +270,10 @@ type ovnAddressSet struct {
 }
 
 type ovnAddressSets struct {
-	name string
-	ipv4 *ovnAddressSet
-	ipv6 *ovnAddressSet
+	nbClient libovsdbclient.Client
+	name     string
+	ipv4     *ovnAddressSet
+	ipv6     *ovnAddressSet
 }
 
 // ovnAddressSets implements the AddressSet interface
@@ -303,7 +308,7 @@ func newOvnAddressSets(nbClient libovsdbclient.Client, name string, ips []net.IP
 			return nil, err
 		}
 	}
-	return &ovnAddressSets{name: name, ipv4: v4set, ipv6: v6set}, nil
+	return &ovnAddressSets{nbClient: nbClient, name: name, ipv4: v4set, ipv6: v6set}, nil
 }
 
 func newOvnAddressSet(nbClient libovsdbclient.Client, name string, ips []net.IP) (*ovnAddressSet, error) {
@@ -421,39 +426,84 @@ func (as *ovnAddressSets) AddIPs(ips []net.IP) error {
 	if len(ips) == 0 {
 		return nil
 	}
+	var ops []ovsdb.Operation
+	var err error
+	if ops, err = as.AddIPsReturnOps(ips); err != nil {
+		return err
+	}
+	_, err = libovsdbops.TransactAndCheck(as.nbClient, ops)
+	if err != nil {
+		return fmt.Errorf("failed add ips to address set %s (%v)",
+			as.name, err)
+	}
+	return nil
+}
+
+func (as *ovnAddressSets) AddIPsReturnOps(ips []net.IP) ([]ovsdb.Operation, error) {
+	var ops []ovsdb.Operation
+	var err error
+	if len(ips) == 0 {
+		return ops, nil
+	}
 
 	v4ips, v6ips := splitIPsByFamily(ips)
+	var op []ovsdb.Operation
 	if as.ipv6 != nil {
-		if err := as.ipv6.addIPs(v6ips); err != nil {
-			return fmt.Errorf("failed to AddIPs to the v6 set: %w", err)
+		if op, err = as.ipv6.addIPs(v6ips); err != nil {
+			return nil, fmt.Errorf("failed to AddIPs to the v6 set: %w", err)
 		}
+		ops = append(ops, op...)
 	}
 	if as.ipv4 != nil {
-		if err := as.ipv4.addIPs(v4ips); err != nil {
-			return fmt.Errorf("failed to AddIPs to the v4 set: %w", err)
+		if op, err = as.ipv4.addIPs(v4ips); err != nil {
+			return nil, fmt.Errorf("failed to AddIPs to the v4 set: %w", err)
 		}
+		ops = append(ops, op...)
 	}
 
-	return nil
+	return ops, nil
 }
 
 func (as *ovnAddressSets) DeleteIPs(ips []net.IP) error {
 	if len(ips) == 0 {
 		return nil
 	}
-
-	v4ips, v6ips := splitIPsByFamily(ips)
-	if as.ipv6 != nil {
-		if err := as.ipv6.deleteIPs(v6ips); err != nil {
-			return fmt.Errorf("failed to DeleteIPs to the v6 set: %w", err)
-		}
+	var ops []ovsdb.Operation
+	var err error
+	if ops, err = as.DeleteIPsReturnOps(ips); err != nil {
+		return err
 	}
-	if as.ipv4 != nil {
-		if err := as.ipv4.deleteIPs(v4ips); err != nil {
-			return fmt.Errorf("failed to DeleteIPs to the v4 set: %w", err)
-		}
+
+	_, err = libovsdbops.TransactAndCheck(as.nbClient, ops)
+	if err != nil {
+		return fmt.Errorf("failed to delete ips from address set %s (%v)",
+			as.name, err)
 	}
 	return nil
+}
+
+func (as *ovnAddressSets) DeleteIPsReturnOps(ips []net.IP) ([]ovsdb.Operation, error) {
+	var ops []ovsdb.Operation
+	var err error
+	if len(ips) == 0 {
+		return ops, nil
+	}
+
+	v4ips, v6ips := splitIPsByFamily(ips)
+	var op []ovsdb.Operation
+	if as.ipv6 != nil {
+		if op, err = as.ipv6.deleteIPs(v6ips); err != nil {
+			return nil, fmt.Errorf("failed to DeleteIPs from the v6 set: %w", err)
+		}
+		ops = append(ops, op...)
+	}
+	if as.ipv4 != nil {
+		if op, err = as.ipv4.deleteIPs(v4ips); err != nil {
+			return nil, fmt.Errorf("failed to DeleteIPs from the v4 set: %w", err)
+		}
+		ops = append(ops, op...)
+	}
+	return ops, nil
 }
 
 func (as *ovnAddressSets) Destroy() error {
@@ -509,68 +559,59 @@ func (as *ovnAddressSet) getIPs() ([]string, error) {
 }
 
 // addIPs appends the set of IPs to the existing address_set.
-func (as *ovnAddressSet) addIPs(ips []net.IP) error {
-
+func (as *ovnAddressSet) addIPs(ips []net.IP) ([]ovsdb.Operation, error) {
+	var ops []ovsdb.Operation
+	var err error
+	if len(ips) == 0 {
+		return ops, nil
+	}
 	uniqIPs := make([]string, 0, len(ips))
 	for _, ip := range ips {
 		uniqIPs = append(uniqIPs, ip.String())
 	}
 
-	if len(ips) == 0 {
-		return nil
-	}
-
 	klog.V(5).Infof("(%s) adding IPs (%s) to address set", asDetail(as), uniqIPs)
 	addrset := &nbdb.AddressSet{UUID: as.uuid}
-	ops, err := as.nbClient.Where(addrset).Mutate(addrset, model.Mutation{
+	ops, err = as.nbClient.Where(addrset).Mutate(addrset, model.Mutation{
 		Field:   &addrset.Addresses,
 		Mutator: ovsdb.MutateOperationInsert,
 		Value:   uniqIPs,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to add IPs to address set %q (%v)",
+		return nil, fmt.Errorf("failed to add IPs to address set %q (%v)",
 			asDetail(as), err)
 	}
-	_, err = libovsdbops.TransactAndCheck(as.nbClient, ops)
-	if err != nil {
-		return fmt.Errorf("failed add ips to address set %s (%v)",
-			as.name, err)
-	}
 
-	return nil
+	return ops, nil
 }
 
 // deleteIPs removes selected IPs from the existing address_set
-func (as *ovnAddressSet) deleteIPs(ips []net.IP) error {
+func (as *ovnAddressSet) deleteIPs(ips []net.IP) ([]ovsdb.Operation, error) {
 	// dedup
 	uniqIPs := make([]string, 0, len(ips))
 	for _, ip := range ips {
 		uniqIPs = append(uniqIPs, ip.String())
 	}
-
+	var ops []ovsdb.Operation
+	var err error
 	if len(uniqIPs) == 0 {
-		return nil
+		return ops, nil
 	}
 
 	klog.V(5).Infof("(%s) deleting IP %s from address set", asDetail(as), uniqIPs)
 
 	addrset := &nbdb.AddressSet{UUID: as.uuid}
-	ops, err := as.nbClient.Where(addrset).Mutate(addrset, model.Mutation{
+	ops, err = as.nbClient.Where(addrset).Mutate(addrset, model.Mutation{
 		Field:   &addrset.Addresses,
 		Mutator: ovsdb.MutateOperationDelete,
 		Value:   uniqIPs,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to delete IPs from address set %q (%v)",
+		return nil, fmt.Errorf("failed to delete IPs from address set %q (%v)",
 			asDetail(as), err)
 	}
-	_, err = libovsdbops.TransactAndCheck(as.nbClient, ops)
-	if err != nil {
-		return fmt.Errorf("failed to delete ips from address set %s (%v)",
-			as.name, err)
-	}
 
-	return nil
+	return ops, nil
 }
 
 func (as *ovnAddressSet) destroy() error {

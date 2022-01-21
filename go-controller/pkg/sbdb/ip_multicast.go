@@ -3,6 +3,8 @@
 
 package sbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 // IPMulticast defines an object in IP_Multicast table
 type IPMulticast struct {
 	UUID          string `ovsdb:"_uuid"`
@@ -18,3 +20,159 @@ type IPMulticast struct {
 	SeqNo         int    `ovsdb:"seq_no"`
 	TableSize     *int   `ovsdb:"table_size"`
 }
+
+func copyIPMulticastEnabled(a *bool) *bool {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalIPMulticastEnabled(a, b *bool) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyIPMulticastIdleTimeout(a *int) *int {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalIPMulticastIdleTimeout(a, b *int) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyIPMulticastQuerier(a *bool) *bool {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalIPMulticastQuerier(a, b *bool) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyIPMulticastQueryInterval(a *int) *int {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalIPMulticastQueryInterval(a, b *int) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyIPMulticastQueryMaxResp(a *int) *int {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalIPMulticastQueryMaxResp(a, b *int) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyIPMulticastTableSize(a *int) *int {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalIPMulticastTableSize(a, b *int) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func (a *IPMulticast) DeepCopyInto(b *IPMulticast) {
+	*b = *a
+	b.Enabled = copyIPMulticastEnabled(a.Enabled)
+	b.IdleTimeout = copyIPMulticastIdleTimeout(a.IdleTimeout)
+	b.Querier = copyIPMulticastQuerier(a.Querier)
+	b.QueryInterval = copyIPMulticastQueryInterval(a.QueryInterval)
+	b.QueryMaxResp = copyIPMulticastQueryMaxResp(a.QueryMaxResp)
+	b.TableSize = copyIPMulticastTableSize(a.TableSize)
+}
+
+func (a *IPMulticast) DeepCopy() *IPMulticast {
+	b := new(IPMulticast)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *IPMulticast) CloneModelInto(b model.Model) {
+	c := b.(*IPMulticast)
+	a.DeepCopyInto(c)
+}
+
+func (a *IPMulticast) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *IPMulticast) Equals(b *IPMulticast) bool {
+	return a.UUID == b.UUID &&
+		a.Datapath == b.Datapath &&
+		equalIPMulticastEnabled(a.Enabled, b.Enabled) &&
+		a.EthSrc == b.EthSrc &&
+		equalIPMulticastIdleTimeout(a.IdleTimeout, b.IdleTimeout) &&
+		a.Ip4Src == b.Ip4Src &&
+		a.Ip6Src == b.Ip6Src &&
+		equalIPMulticastQuerier(a.Querier, b.Querier) &&
+		equalIPMulticastQueryInterval(a.QueryInterval, b.QueryInterval) &&
+		equalIPMulticastQueryMaxResp(a.QueryMaxResp, b.QueryMaxResp) &&
+		a.SeqNo == b.SeqNo &&
+		equalIPMulticastTableSize(a.TableSize, b.TableSize)
+}
+
+func (a *IPMulticast) EqualsModel(b model.Model) bool {
+	c := b.(*IPMulticast)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &IPMulticast{}
+var _ model.ComparableModel = &IPMulticast{}

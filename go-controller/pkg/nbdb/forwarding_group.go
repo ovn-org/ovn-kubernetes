@@ -3,6 +3,8 @@
 
 package nbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 // ForwardingGroup defines an object in Forwarding_Group table
 type ForwardingGroup struct {
 	UUID        string            `ovsdb:"_uuid"`
@@ -13,3 +15,92 @@ type ForwardingGroup struct {
 	Vip         string            `ovsdb:"vip"`
 	Vmac        string            `ovsdb:"vmac"`
 }
+
+func copyForwardingGroupChildPort(a []string) []string {
+	if a == nil {
+		return nil
+	}
+	b := make([]string, len(a))
+	copy(b, a)
+	return b
+}
+
+func equalForwardingGroupChildPort(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if b[i] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func copyForwardingGroupExternalIDs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalForwardingGroupExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *ForwardingGroup) DeepCopyInto(b *ForwardingGroup) {
+	*b = *a
+	b.ChildPort = copyForwardingGroupChildPort(a.ChildPort)
+	b.ExternalIDs = copyForwardingGroupExternalIDs(a.ExternalIDs)
+}
+
+func (a *ForwardingGroup) DeepCopy() *ForwardingGroup {
+	b := new(ForwardingGroup)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *ForwardingGroup) CloneModelInto(b model.Model) {
+	c := b.(*ForwardingGroup)
+	a.DeepCopyInto(c)
+}
+
+func (a *ForwardingGroup) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *ForwardingGroup) Equals(b *ForwardingGroup) bool {
+	return a.UUID == b.UUID &&
+		equalForwardingGroupChildPort(a.ChildPort, b.ChildPort) &&
+		equalForwardingGroupExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		a.Liveness == b.Liveness &&
+		a.Name == b.Name &&
+		a.Vip == b.Vip &&
+		a.Vmac == b.Vmac
+}
+
+func (a *ForwardingGroup) EqualsModel(b model.Model) bool {
+	c := b.(*ForwardingGroup)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &ForwardingGroup{}
+var _ model.ComparableModel = &ForwardingGroup{}

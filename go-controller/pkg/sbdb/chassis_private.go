@@ -3,6 +3,8 @@
 
 package sbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 // ChassisPrivate defines an object in Chassis_Private table
 type ChassisPrivate struct {
 	UUID           string            `ovsdb:"_uuid"`
@@ -12,3 +14,85 @@ type ChassisPrivate struct {
 	NbCfg          int               `ovsdb:"nb_cfg"`
 	NbCfgTimestamp int               `ovsdb:"nb_cfg_timestamp"`
 }
+
+func copyChassisPrivateChassis(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalChassisPrivateChassis(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyChassisPrivateExternalIDs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalChassisPrivateExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *ChassisPrivate) DeepCopyInto(b *ChassisPrivate) {
+	*b = *a
+	b.Chassis = copyChassisPrivateChassis(a.Chassis)
+	b.ExternalIDs = copyChassisPrivateExternalIDs(a.ExternalIDs)
+}
+
+func (a *ChassisPrivate) DeepCopy() *ChassisPrivate {
+	b := new(ChassisPrivate)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *ChassisPrivate) CloneModelInto(b model.Model) {
+	c := b.(*ChassisPrivate)
+	a.DeepCopyInto(c)
+}
+
+func (a *ChassisPrivate) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *ChassisPrivate) Equals(b *ChassisPrivate) bool {
+	return a.UUID == b.UUID &&
+		equalChassisPrivateChassis(a.Chassis, b.Chassis) &&
+		equalChassisPrivateExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		a.Name == b.Name &&
+		a.NbCfg == b.NbCfg &&
+		a.NbCfgTimestamp == b.NbCfgTimestamp
+}
+
+func (a *ChassisPrivate) EqualsModel(b model.Model) bool {
+	c := b.(*ChassisPrivate)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &ChassisPrivate{}
+var _ model.ComparableModel = &ChassisPrivate{}

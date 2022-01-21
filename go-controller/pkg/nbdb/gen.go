@@ -1,3 +1,3 @@
 package nbdb
 
-//go:generate modelgen -p nbdb -o . ovn-nb.ovsschema
+//go:generate modelgen --extended -p nbdb -o . ovn-nb.ovsschema

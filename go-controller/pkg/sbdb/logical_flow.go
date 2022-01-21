@@ -3,6 +3,8 @@
 
 package sbdb
 
+import "github.com/ovn-org/libovsdb/model"
+
 type (
 	LogicalFlowPipeline = string
 )
@@ -26,3 +28,155 @@ type LogicalFlow struct {
 	TableID         int                 `ovsdb:"table_id"`
 	Tags            map[string]string   `ovsdb:"tags"`
 }
+
+func copyLogicalFlowControllerMeter(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalFlowControllerMeter(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyLogicalFlowExternalIDs(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalLogicalFlowExternalIDs(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func copyLogicalFlowLogicalDatapath(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalFlowLogicalDatapath(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyLogicalFlowLogicalDpGroup(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalFlowLogicalDpGroup(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func copyLogicalFlowTags(a map[string]string) map[string]string {
+	if a == nil {
+		return nil
+	}
+	b := make(map[string]string, len(a))
+	for k, v := range a {
+		b[k] = v
+	}
+	return b
+}
+
+func equalLogicalFlowTags(a, b map[string]string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *LogicalFlow) DeepCopyInto(b *LogicalFlow) {
+	*b = *a
+	b.ControllerMeter = copyLogicalFlowControllerMeter(a.ControllerMeter)
+	b.ExternalIDs = copyLogicalFlowExternalIDs(a.ExternalIDs)
+	b.LogicalDatapath = copyLogicalFlowLogicalDatapath(a.LogicalDatapath)
+	b.LogicalDpGroup = copyLogicalFlowLogicalDpGroup(a.LogicalDpGroup)
+	b.Tags = copyLogicalFlowTags(a.Tags)
+}
+
+func (a *LogicalFlow) DeepCopy() *LogicalFlow {
+	b := new(LogicalFlow)
+	a.DeepCopyInto(b)
+	return b
+}
+
+func (a *LogicalFlow) CloneModelInto(b model.Model) {
+	c := b.(*LogicalFlow)
+	a.DeepCopyInto(c)
+}
+
+func (a *LogicalFlow) CloneModel() model.Model {
+	return a.DeepCopy()
+}
+
+func (a *LogicalFlow) Equals(b *LogicalFlow) bool {
+	return a.UUID == b.UUID &&
+		a.Actions == b.Actions &&
+		equalLogicalFlowControllerMeter(a.ControllerMeter, b.ControllerMeter) &&
+		equalLogicalFlowExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
+		equalLogicalFlowLogicalDatapath(a.LogicalDatapath, b.LogicalDatapath) &&
+		equalLogicalFlowLogicalDpGroup(a.LogicalDpGroup, b.LogicalDpGroup) &&
+		a.Match == b.Match &&
+		a.Pipeline == b.Pipeline &&
+		a.Priority == b.Priority &&
+		a.TableID == b.TableID &&
+		equalLogicalFlowTags(a.Tags, b.Tags)
+}
+
+func (a *LogicalFlow) EqualsModel(b model.Model) bool {
+	c := b.(*LogicalFlow)
+	return a.Equals(c)
+}
+
+var _ model.CloneableModel = &LogicalFlow{}
+var _ model.ComparableModel = &LogicalFlow{}
