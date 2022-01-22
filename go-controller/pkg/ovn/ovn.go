@@ -608,6 +608,7 @@ func (oc *Controller) addRetryPods(pods []kapi.Pod) {
 	oc.retryPodsLock.Lock()
 	defer oc.retryPodsLock.Unlock()
 	for _, pod := range pods {
+		pod := pod
 		if entry, ok := oc.retryPods[pod.UID]; ok {
 			entry.timeStamp = time.Now()
 		} else {
