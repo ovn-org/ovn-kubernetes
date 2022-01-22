@@ -482,11 +482,11 @@ func (ps *ControlPlaneRecorder) AddLSPEvent(podUID kapimtypes.UID) {
 	defer ps.Unlock()
 	var r *record
 	if r = ps.getRecord(podUID); r == nil {
-		klog.Errorf("Metrics: add Logical Switch Port event expected pod with UID %q in cache", podUID)
+		klog.V(5).Infof("Add Logical Switch Port event expected pod with UID %q in cache", podUID)
 		return
 	}
 	if r.timestampType != firstSeen {
-		klog.Errorf("Metrics: unexpected last event type (%d) in cache for pod with UID %q", r.timestampType, podUID)
+		klog.V(5).Infof("Unexpected last event type (%d) in cache for pod with UID %q", r.timestampType, podUID)
 		return
 	}
 	metricFirstSeenLSPLatency.Observe(now.Sub(r.timestamp).Seconds())
@@ -508,11 +508,11 @@ func (ps *ControlPlaneRecorder) AddPortBindingEvent(table string, m model.Model)
 	ps.Lock()
 	defer ps.Unlock()
 	if r = ps.getRecord(podUID); r == nil {
-		klog.Errorf("Metrics: add port binding event expected pod with UID %q in cache", podUID)
+		klog.V(5).Infof("Add port binding event expected pod with UID %q in cache", podUID)
 		return
 	}
 	if r.timestampType != logicalSwitchPort {
-		klog.Errorf("Metrics: unexpected last event entry (%d) in cache for pod with UID %q", r.timestampType, podUID)
+		klog.V(5).Infof("Unexpected last event entry (%d) in cache for pod with UID %q", r.timestampType, podUID)
 		return
 	}
 	metricLSPPortBindingLatency.Observe(now.Sub(r.timestamp).Seconds())
@@ -535,7 +535,7 @@ func (ps *ControlPlaneRecorder) UpdatePortBindingEvent(table string, old, new mo
 	ps.Lock()
 	defer ps.Unlock()
 	if r = ps.getRecord(podUID); r == nil {
-		klog.Errorf("Metrics: port binding update expected pod with UID %q in cache", podUID)
+		klog.V(5).Infof("Port binding update expected pod with UID %q in cache", podUID)
 		return
 	}
 	if oldRow.Chassis == nil && newRow.Chassis != nil && r.timestampType == portBinding {
@@ -552,7 +552,7 @@ func (ps *ControlPlaneRecorder) UpdatePortBindingEvent(table string, old, new mo
 func (ps *ControlPlaneRecorder) getRecord(podUID kapimtypes.UID) *record {
 	r, ok := ps.podRecords[podUID]
 	if !ok {
-		klog.Errorf("Metrics: cache entry expected pod with UID %q but failed to find it", podUID)
+		klog.V(5).Infof("Cache entry expected pod with UID %q but failed to find it", podUID)
 		return nil
 	}
 	return r
