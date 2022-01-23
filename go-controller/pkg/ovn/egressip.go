@@ -557,9 +557,9 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 	}
 	if shouldAdd {
 		// Get the EgressIP owner reference
-		egressIPName, exists := oldCloudPrivateIPConfig.Annotations[util.OVNEgressIPOwnerRefLabel]
+		egressIPName, exists := newCloudPrivateIPConfig.Annotations[util.OVNEgressIPOwnerRefLabel]
 		if !exists {
-			return fmt.Errorf("CloudPrivateIPConfig object: %s is missing the egress IP owner reference annotation", oldCloudPrivateIPConfig.Name)
+			return fmt.Errorf("CloudPrivateIPConfig object: %s is missing the egress IP owner reference annotation", newCloudPrivateIPConfig.Name)
 		}
 		egressIP, err := oc.kube.GetEgressIP(egressIPName)
 		if err != nil {
