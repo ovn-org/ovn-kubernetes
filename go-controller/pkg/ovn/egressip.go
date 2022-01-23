@@ -604,9 +604,9 @@ type cloudPrivateIPConfigOp struct {
 // IP, cloudPrivateIPConfigOp is a helper used to determine that sort of
 // operations from toAssign/toRemove
 func (oc *Controller) executeCloudPrivateIPConfigChange(egressIPName string, toAssign, toRemove []egressipv1.EgressIPStatusItem) error {
-	ops := make(map[string]cloudPrivateIPConfigOp, len(toAssign)+len(toRemove))
+	ops := make(map[string]*cloudPrivateIPConfigOp, len(toAssign)+len(toRemove))
 	for _, assignment := range toAssign {
-		ops[assignment.EgressIP] = cloudPrivateIPConfigOp{
+		ops[assignment.EgressIP] = &cloudPrivateIPConfigOp{
 			toAdd: assignment.Node,
 		}
 	}
@@ -614,7 +614,7 @@ func (oc *Controller) executeCloudPrivateIPConfigChange(egressIPName string, toA
 		if op, exists := ops[removal.EgressIP]; exists {
 			op.toDelete = removal.Node
 		} else {
-			ops[removal.EgressIP] = cloudPrivateIPConfigOp{
+			ops[removal.EgressIP] = &cloudPrivateIPConfigOp{
 				toDelete: removal.Node,
 			}
 		}
@@ -622,7 +622,7 @@ func (oc *Controller) executeCloudPrivateIPConfigChange(egressIPName string, toA
 	return oc.executeCloudPrivateIPConfigOps(egressIPName, ops)
 }
 
-func (oc *Controller) executeCloudPrivateIPConfigOps(egressIPName string, ops map[string]cloudPrivateIPConfigOp) error {
+func (oc *Controller) executeCloudPrivateIPConfigOps(egressIPName string, ops map[string]*cloudPrivateIPConfigOp) error {
 	for egressIP, op := range ops {
 		cloudPrivateIPConfigName := ipStringToCloudPrivateIPConfigName(egressIP)
 		cloudPrivateIPConfig, err := oc.watchFactory.GetCloudPrivateIPConfig(cloudPrivateIPConfigName)
