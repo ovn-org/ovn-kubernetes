@@ -1947,14 +1947,19 @@ func getClusterSubnets() ([]*net.IPNet, []*net.IPNet) {
 	return v4ClusterSubnets, v6ClusterSubnets
 }
 
+// getNodeInternalAddrs returns the first IPv4 and/or IPv6 InternalIP defined
+// for the node. On certain cloud providers (AWS) the egress IP will be added to
+// the list of node IPs as an InternalIP address, we don't want to create the
+// default allow logical router policies for that IP. Node IPs are ordered,
+// meaning the egress IP will never be first in this list.
 func getNodeInternalAddrs(node *v1.Node) (net.IP, net.IP) {
 	var v4Addr, v6Addr net.IP
 	for _, nodeAddr := range node.Status.Addresses {
 		if nodeAddr.Type == v1.NodeInternalIP {
 			ip := net.ParseIP(nodeAddr.Address)
-			if !utilnet.IsIPv6(ip) {
+			if !utilnet.IsIPv6(ip) && v4Addr == nil {
 				v4Addr = ip
-			} else {
+			} else if utilnet.IsIPv6(ip) && v6Addr == nil {
 				v6Addr = ip
 			}
 		}
