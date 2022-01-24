@@ -362,6 +362,72 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
+		ginkgo.It("retryPod cache operations while adding a new pod", func() {
+			app.Action = func(ctx *cli.Context) error {
+				config.Gateway.DisableSNATMultipleGWs = true
+				namespaceT := *newNamespace("namespace1")
+				t := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{},
+					},
+				)
+
+				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
+
+				pod, _ := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
+				gomega.Expect(pod).To(gomega.BeNil())
+
+				podObj := &v1.Pod{
+					Spec: v1.PodSpec{NodeName: "node1"},
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      t.podName,
+						Namespace: namespaceT.Name,
+						UID:       types.UID("123"),
+					},
+				}
+				success := fakeOvn.controller.ensurePod(nil, podObj, true) // this fails since pod doesn't exist to set annotations
+				gomega.Expect(success).To(gomega.BeFalse())
+
+				gomega.Expect(len(fakeOvn.controller.retryPods)).To(gomega.Equal(0))
+				fakeOvn.controller.addRetryPods([]v1.Pod{*podObj})
+				gomega.Expect(len(fakeOvn.controller.retryPods)).To(gomega.Equal(1))
+				gomega.Expect(fakeOvn.controller.retryPods["123"]).ToNot(gomega.BeNil())
+				gomega.Expect(fakeOvn.controller.retryPods["123"].ignore).To(gomega.BeFalse())
+				gomega.Expect(fakeOvn.controller.retryPods["123"].pod.UID).To(gomega.Equal(podObj.UID))
+
+				fakeOvn.controller.checkAndSkipRetryPod(podObj.UID)
+				gomega.Expect(fakeOvn.controller.retryPods["123"].ignore).To(gomega.BeTrue())
+
+				fakeOvn.controller.unSkipRetryPod(podObj)
+				gomega.Expect(fakeOvn.controller.retryPods["123"].ignore).To(gomega.BeFalse())
+
+				fakeOvn.controller.checkAndDeleteRetryPod(podObj.UID)
+				gomega.Expect(fakeOvn.controller.retryPods["123"]).To(gomega.BeNil())
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("reconciles a deleted pod", func() {
 			app.Action = func(ctx *cli.Context) error {
 
