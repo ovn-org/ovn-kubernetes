@@ -55,6 +55,11 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 	// name.
 	name := ""
 
+	// Initialize a status which will be used to compare against
+	// new.spec.egressIPs and decide on what from the status should get deleted
+	// or kept.
+	status := []egressipv1.EgressIPStatusItem{}
+
 	// Initialize two empty objects as to avoid SIGSEGV. The code should play
 	// nicely with empty objects though.
 	oldEIP, newEIP := &egressipv1.EgressIP{}, &egressipv1.EgressIP{}
@@ -73,6 +78,7 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 			return fmt.Errorf("invalid old namespaceSelector, err: %v", err)
 		}
 		name = oldEIP.Name
+		status = oldEIP.Status.Items
 	}
 	if new != nil {
 		newEIP = new
@@ -81,12 +87,7 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 			return fmt.Errorf("invalid new namespaceSelector, err: %v", err)
 		}
 		name = newEIP.Name
-	}
-
-	// If the spec hasn't changed don't process the object, this avoids us
-	// processing our own updates on the object.
-	if reflect.DeepEqual(oldEIP.Spec, newEIP.Spec) {
-		return nil
+		status = newEIP.Status.Items
 	}
 
 	// We do not initialize a nothing selector for the podSelector, because
@@ -114,7 +115,7 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 	// anymore (specifically if ovnkube-master has been crashing for a while).
 	// Any invalid status at this point in time needs to be removed and assigned
 	// to a valid node.
-	validStatus, invalidStatus := oc.validateEgressIPStatus(name, newEIP.Status.Items)
+	validStatus, invalidStatus := oc.validateEgressIPStatus(name, status)
 	for status := range validStatus {
 		// If the spec has changed and an egress IP has been removed by the
 		// user: we need to un-assign that egress IP
@@ -124,21 +125,10 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 		}
 	}
 
-	// Check the old egress IP and its status assignments. When an EgressIP is
-	// deleted we'll need to clear all old status assignments. If a user removes
-	// an egress IP from .spec.egressIPs we however need to guard against adding
-	// the same status to statusToRemove twice, which would happen with the code
-	// above for validStatuses because both newEIP and oldEIP will have the old
-	// assignment status.
-	for _, oldStatus := range oldEIP.Status.Items {
-		if !validSpecIPs.Has(oldStatus.EgressIP) {
-			invalidStatus[oldStatus] = ""
-		}
-	}
-
 	// Add only the diff between what is requested and valid and that which
 	// isn't already assigned.
 	ipsToAssign := validSpecIPs
+	ipsToRemove := sets.NewString()
 	statusToAdd := make([]egressipv1.EgressIPStatusItem, 0, len(ipsToAssign))
 	statusToKeep := make([]egressipv1.EgressIPStatusItem, 0, len(validStatus))
 	for status := range validStatus {
@@ -148,6 +138,33 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 	statusToRemove := make([]egressipv1.EgressIPStatusItem, 0, len(invalidStatus))
 	for status := range invalidStatus {
 		statusToRemove = append(statusToRemove, status)
+		ipsToRemove.Insert(status.EgressIP)
+	}
+	if ipsToRemove.Len() > 0 {
+		// The following is added as to ensure that we only add after having
+		// successfully removed egress IPs. This case is not very important on
+		// bare-metal (since we execute the add after the remove below, and
+		// hence have full control of the execution - barring its success), but
+		// on a cloud: we don't execute anything below, we wait for the status
+		// on the CloudPrivateIPConfig(s) we create to be set before executing
+		// anything in the OVN DB. So, we need to make sure that we delete and
+		// then add, mainly because if EIP1 is added to nodeX and then EIP2 is
+		// removed from nodeX, we might remove the setup made for EIP1. The
+		// add/delete ordering of events is not guaranteed on the cloud where we
+		// depend on other controllers to execute the work for us however. By
+		// comparing the spec to the status and applying the following truth
+		// table we can ensure that order of events.
+
+		// case ID    |    Egress IP to add    |    Egress IP to remove    |    ipsToAssign
+		// 1          |    e1                  |    e1                     |    e1
+		// 2          |    e2                  |    e1                     |    -
+		// 3          |    e2                  |    -                      |    e2
+		// 4          |    -                   |    e1                     |    -
+
+		// Case 1 handles updates. Case 2 and 3 makes sure we don't add until we
+		// successfully delete. Case 4 just shows an example of what would
+		// happen if we don't have anything to add
+		ipsToAssign = ipsToAssign.Intersection(ipsToRemove)
 	}
 
 	if !util.PlatformTypeIsEgressIPCloudProvider() {
