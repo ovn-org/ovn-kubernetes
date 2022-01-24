@@ -458,9 +458,17 @@ func (o *ovsdbClient) isEndpointLeader(ctx context.Context) (bool, string, error
 		}
 
 		// Clustered database must have a Server ID
-		sid, ok := row["sid"].(ovsdb.UUID)
-		if !ok {
-			return false, "", fmt.Errorf("could not parse server id")
+		var sid string
+		sid1, ok1 := row["sid"].(ovsdb.UUID)
+		sid2, ok2 := row["sid"].(string)
+		if ok1 {
+			sid = sid1.GoUUID
+			o.logger.V(3).Info("sid was a uuid")
+		} else if ok2 {
+			sid = sid2
+			o.logger.V(3).Info("sid was a string")
+		} else {
+			return false, "", fmt.Errorf("could not parse server id: %t", row["sid"])
 		}
 
 		leader, ok := row["leader"].(bool)
@@ -468,7 +476,7 @@ func (o *ovsdbClient) isEndpointLeader(ctx context.Context) (bool, string, error
 			return false, "", fmt.Errorf("could not parse leader")
 		}
 
-		return leader, sid.GoUUID, nil
+		return leader, sid, nil
 	}
 
 	// Extremely unlikely: there is no _Server row for the desired DB (which we made sure existed)
