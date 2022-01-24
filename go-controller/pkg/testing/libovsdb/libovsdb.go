@@ -284,12 +284,14 @@ func newOVSDBServer(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, schem
 	}
 
 	// Populate the _Server database table
+	sid := fmt.Sprintf("%04x", rand.Uint32())
 	serverData := []TestData{
 		&serverdb.Database{
 			Name:      dbModel.Name(),
 			Connected: true,
 			Leader:    true,
 			Model:     serverdb.DatabaseModelClustered,
+			Sid:       &sid,
 		},
 	}
 	if err := updateData(db, serverDBModel, serverSchema, serverData); err != nil {
