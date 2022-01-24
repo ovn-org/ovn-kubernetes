@@ -71,6 +71,11 @@ func NewOvsdbServer(db Database, models ...model.DatabaseModel) (*OvsdbServer, e
 	return o, nil
 }
 
+// OnConnect registers a function to run when a client connects.
+func (o *OvsdbServer) OnConnect(f func(*rpc2.Client)) {
+	o.srv.OnConnect(f)
+}
+
 // Serve starts the OVSDB server on the given path and protocol
 func (o *OvsdbServer) Serve(protocol string, path string) error {
 	var err error

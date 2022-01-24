@@ -153,7 +153,7 @@ func (*testLogicalSwitchPort) Table() string {
 	return "Logical_Switch_Port"
 }
 
-func apiTestCache(t *testing.T, data map[string]map[string]model.Model) *cache.TableCache {
+func apiTestCache(t testing.TB, data map[string]map[string]model.Model) *cache.TableCache {
 	var schema ovsdb.DatabaseSchema
 	err := json.Unmarshal(apiTestSchema, &schema)
 	assert.Nil(t, err)
