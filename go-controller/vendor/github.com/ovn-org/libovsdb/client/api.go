@@ -126,7 +126,7 @@ func (a api) List(ctx context.Context, result interface{}) error {
 	}
 	i := resultVal.Len()
 
-	for _, row := range tableCache.Rows() {
+	for _, row := range tableCache.RowsShallow() {
 		if i >= resultVal.Cap() {
 			break
 		}
@@ -138,8 +138,10 @@ func (a api) List(ctx context.Context, result interface{}) error {
 				continue
 			}
 		}
+		// clone only the models that match the predicate
+		m := model.Clone(row)
 
-		resultVal.Set(reflect.Append(resultVal, reflect.Indirect(reflect.ValueOf(row))))
+		resultVal.Set(reflect.Append(resultVal, reflect.Indirect(reflect.ValueOf(m))))
 		i++
 	}
 	return nil
