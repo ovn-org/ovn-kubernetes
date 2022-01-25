@@ -1200,12 +1200,18 @@ func (oc *Controller) assignEgressIPs(name string, egressIPs []string) []egressi
 		klog.V(5).Infof("Will attempt assignment for egress IP: %s", egressIP)
 		eIPC := net.ParseIP(egressIP)
 		if _, exists := existingAllocations[eIPC.String()]; exists {
-			eIPRef := kapi.ObjectReference{
-				Kind: "EgressIP",
-				Name: name,
-			}
-			oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "InvalidEgressIP", "egress IP: %s for object EgressIP: %s is already referenced by another EgressIP object", egressIP, name)
-			klog.Errorf("Egress IP: %q for EgressIP: %s is already allocated, invalid", egressIP, name)
+			// On public clouds we will re-process assignments for the same IP
+			// multiple times due to the nature of syncing each individual
+			// CloudPrivateIPConfig one at a time. This means that we are
+			// expected to end up in this situation multiple times per sync. Ex:
+			// Say we an EgressIP is created with IP1, IP2, IP3. We begin by
+			// assigning them all the first round. Next we get the
+			// CloudPrivateIPConfig confirming the addition of IP1, leading us
+			// to re-assign IP2, IP3, but since we've already assigned them
+			// we'll end up here. This is not an error. What would be an error
+			// is if the user created EIP1 with IP1 and a second EIP2 with IP1,
+			// then we'll end up here too and that would be a "user error".
+			klog.V(5).Infof("Egress IP: %q for EgressIP: %s is already allocated, this might be a user error", egressIP, name)
 			return assignments
 		}
 		if node := oc.isAnyClusterNodeIP(eIPC); node != nil {
