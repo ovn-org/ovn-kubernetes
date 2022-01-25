@@ -2117,10 +2117,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
-				gomega.Eventually(func() string {
-					egressIPs, _ := getEgressIPStatus(eIP.Name)
-					return egressIPs[0]
-				}).Should(gomega.Equal(updatedEgressIP.String()))
+				gomega.Eventually(func() []string {
+					egressIPs, _ = getEgressIPStatus(eIP.Name)
+					return egressIPs
+				}).Should(gomega.ContainElement(updatedEgressIP.String()))
+
 				gomega.Expect(nodes[0]).To(gomega.Equal(node2.name))
 				return nil
 			}
