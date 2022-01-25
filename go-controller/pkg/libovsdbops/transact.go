@@ -56,8 +56,8 @@ func TransactAndCheck(c client.Client, ops []ovsdb.Operation) ([]ovsdb.Operation
 	return results, nil
 }
 
-// TransactAndCheckAndSetUUIDs transacts the given ops againts client and returns
-// results if no error ocurred or an error otherwise. It sets the real uuids for
+// TransactAndCheckAndSetUUIDs transacts the given ops against client and returns
+// results if no error occurred or an error otherwise. It sets the real uuids for
 // the passed models if they were inserted and have a named-uuid (as built by
 // BuildNamedUUID)
 func TransactAndCheckAndSetUUIDs(client client.Client, models interface{}, ops []ovsdb.Operation) ([]ovsdb.OperationResult, error) {
