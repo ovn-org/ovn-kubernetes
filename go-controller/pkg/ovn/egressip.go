@@ -545,7 +545,8 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 		// then we need to remove the setup made for it, but not update the
 		// object.
 		egressIP, err := oc.kube.GetEgressIP(egressIPName)
-		if err != nil && !apierrors.IsNotFound(err) {
+		isDeleted := apierrors.IsNotFound(err)
+		if err != nil && !isDeleted {
 			return err
 		}
 		egressIPString := cloudPrivateIPConfigNameToIPString(oldCloudPrivateIPConfig.Name)
@@ -556,20 +557,29 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 		if err := oc.deleteEgressIPAssignments(egressIPName, []egressipv1.EgressIPStatusItem{statusItem}); err != nil {
 			return err
 		}
-		// If the EgressIP has been deleted just return at this point.
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		// Deleting a status here means updating the object with the statuses we
-		// want to keep
-		updatedStatus := []egressipv1.EgressIPStatusItem{}
-		for _, status := range egressIP.Status.Items {
-			if !reflect.DeepEqual(status, statusItem) {
-				updatedStatus = append(updatedStatus, status)
+		// If we are not processing a delete, update the EgressIP object's
+		// status assignments
+		if !isDeleted {
+			// Deleting a status here means updating the object with the statuses we
+			// want to keep
+			updatedStatus := []egressipv1.EgressIPStatusItem{}
+			for _, status := range egressIP.Status.Items {
+				if !reflect.DeepEqual(status, statusItem) {
+					updatedStatus = append(updatedStatus, status)
+				}
+			}
+			if err := oc.patchReplaceEgressIPStatus(egressIP.Name, updatedStatus); err != nil {
+				return err
 			}
 		}
-		if err := oc.patchReplaceEgressIPStatus(egressIP.Name, updatedStatus); err != nil {
+		resyncEgressIPs, err := oc.removePendingOpsAndGetResyncs(egressIPName, egressIPString)
+		if err != nil {
 			return err
+		}
+		for _, resyncEgressIP := range resyncEgressIPs {
+			if err := oc.reconcileEgressIP(nil, &resyncEgressIP); err != nil {
+				klog.Errorf("Synthetic update for EgressIP: %s failed, err: %v", egressIP.Name, err)
+			}
 		}
 	}
 	if shouldAdd {
@@ -605,8 +615,96 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 				return err
 			}
 		}
+
+		oc.eIPC.pendingCloudPrivateIPConfigsMutex.Lock()
+		defer oc.eIPC.pendingCloudPrivateIPConfigsMutex.Unlock()
+		// Remove the finished add / update operation from the pending cache. We
+		// never process add and deletes in the same sync, and for updates:
+		// deletes are always performed before adds, hence we should only ever
+		// fully delete the item from the pending cache once the add has
+		// finished.
+		ops, pending := oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName]
+		if !pending {
+			// Do not return an error here, it will lead to spurious error
+			// messages on restart because we will process a bunch of adds for
+			// all existing objects, for which no CR was issued.
+			klog.V(5).Infof("No pending operation found for EgressIP: %s while processing created CloudPrivateIPConfig", egressIPName)
+			return nil
+		}
+		op, exists := ops[egressIPString]
+		if !exists {
+			klog.V(5).Infof("Pending operations found for EgressIP: %s, but not for the created CloudPrivateIPConfig: %s", egressIPName, egressIPString)
+			return nil
+		}
+		// Process finalized add / updates, hence: (op.toAdd != "" &&
+		// op.toDelete != "") || (op.toAdd != "" && op.toDelete == ""), which is
+		// equivalent the below.
+		if op.toAdd != "" {
+			delete(ops, egressIPString)
+		}
+		if len(ops) == 0 {
+			delete(oc.eIPC.pendingCloudPrivateIPConfigsOps, egressIPName)
+		}
 	}
 	return nil
+}
+
+// removePendingOps removes the existing pending CloudPrivateIPConfig operations
+// from the cache and returns the EgressIP object which can be re-synced given
+// the new assignment possibilities.
+func (oc *Controller) removePendingOpsAndGetResyncs(egressIPName, egressIP string) ([]egressipv1.EgressIP, error) {
+	oc.eIPC.pendingCloudPrivateIPConfigsMutex.Lock()
+	defer oc.eIPC.pendingCloudPrivateIPConfigsMutex.Unlock()
+	ops, pending := oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName]
+	if !pending {
+		return nil, fmt.Errorf("no pending operation found for EgressIP: %s", egressIPName)
+	}
+	op, exists := ops[egressIP]
+	if !exists {
+		return nil, fmt.Errorf("pending operations found for EgressIP: %s, but not for the finalized IP: %s", egressIPName, egressIP)
+	}
+	// Make sure we are dealing with a delete operation, since for update
+	// operations will still need to process the add afterwards.
+	if op.toAdd == "" && op.toDelete != "" {
+		delete(ops, egressIP)
+	}
+	if len(ops) == 0 {
+		delete(oc.eIPC.pendingCloudPrivateIPConfigsOps, egressIPName)
+	}
+
+	// Some EgressIP objects might not have all of their spec.egressIPs
+	// assigned because there was no room to assign them. Hence, every time
+	// we process a final deletion for a CloudPrivateIPConfig: have a look
+	// at what other EgressIP objects have something un-assigned, and force
+	// a reconciliation on them by sending a synthetic update.
+	egressIPs, err := oc.kube.GetEgressIPs()
+	if err != nil {
+		return nil, fmt.Errorf("unable to list EgressIPs, err: %v", err)
+	}
+	resyncs := make([]egressipv1.EgressIP, 0, len(egressIPs.Items))
+	for _, egressIP := range egressIPs.Items {
+		// Do not process the egress IP object which owns the
+		// CloudPrivateIPConfig for which we are currently processing the
+		// deletion for.
+		if egressIP.Name == egressIPName {
+			continue
+		}
+		unassigned := len(egressIP.Spec.EgressIPs) - len(egressIP.Status.Items)
+		ops, pending := oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIP.Name]
+		// If the EgressIP was never added to the pending cache to begin
+		// with, but has un-assigned egress IPs, try it.
+		if !pending && unassigned > 0 {
+			resyncs = append(resyncs, egressIP)
+			continue
+		}
+		// If the EgressIP has pending operations, have a look at if the
+		// unassigned operations superseed the pending ones. It could be
+		// that it could only execute a couple of assignments at one point.
+		if pending && unassigned > len(ops) {
+			resyncs = append(resyncs, egressIP)
+		}
+	}
+	return resyncs, nil
 }
 
 type cloudPrivateIPConfigOp struct {
@@ -621,6 +719,8 @@ type cloudPrivateIPConfigOp struct {
 // IP, cloudPrivateIPConfigOp is a helper used to determine that sort of
 // operations from toAssign/toRemove
 func (oc *Controller) executeCloudPrivateIPConfigChange(egressIPName string, toAssign, toRemove []egressipv1.EgressIPStatusItem) error {
+	oc.eIPC.pendingCloudPrivateIPConfigsMutex.Lock()
+	defer oc.eIPC.pendingCloudPrivateIPConfigsMutex.Unlock()
 	ops := make(map[string]*cloudPrivateIPConfigOp, len(toAssign)+len(toRemove))
 	for _, assignment := range toAssign {
 		ops[assignment.EgressIP] = &cloudPrivateIPConfigOp{
@@ -635,6 +735,9 @@ func (oc *Controller) executeCloudPrivateIPConfigChange(egressIPName string, toA
 				toDelete: removal.Node,
 			}
 		}
+	}
+	if len(ops) > 0 {
+		oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName] = ops
 	}
 	return oc.executeCloudPrivateIPConfigOps(egressIPName, ops)
 }
@@ -1570,6 +1673,20 @@ type egressIPController struct {
 	// podAssignment is a cache used for keeping track of which egressIP status
 	// has been setup for each pod. The key is defined by getPodKey
 	podAssignment map[string]*podAssignmentState
+	// pendingCloudPrivateIPConfigsMutex is used to ensure synchronized access
+	// to pendingCloudPrivateIPConfigsOps which is accessed by the egress IP and
+	// cloudPrivateIPConfig go-routines
+	pendingCloudPrivateIPConfigsMutex *sync.Mutex
+	// pendingCloudPrivateIPConfigsOps is a cache of pending
+	// CloudPrivateIPConfig changes that we are waiting on an answer for. Items
+	// in this map are only ever removed once the op is fully finished and we've
+	// been notified of this. That means:
+	// - On add operations we only delete once we've seen that the
+	// CloudPrivateIPConfig is fully added.
+	// - On delete: when it's fully deleted.
+	// - On update: once we finish processing the add - which comes after the
+	// delete.
+	pendingCloudPrivateIPConfigsOps map[string]map[string]*cloudPrivateIPConfigOp
 	// allocator is a cache of egress IP centric data needed to when both route
 	// health-checking and tracking allocations made
 	allocator allocator
