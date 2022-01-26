@@ -80,7 +80,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				purgeACL := libovsdbops.BuildACL(
 					"",
-					t.DirectionFromLPort,
+					nbdb.ACLDirectionFromLport,
 					t.EgressFirewallStartPriority,
 					"",
 					nbdb.ACLActionDrop,
@@ -93,7 +93,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				keepACL := libovsdbops.BuildACL(
 					"",
-					t.DirectionFromLPort,
+					nbdb.ACLDirectionFromLport,
 					t.EgressFirewallStartPriority-1,
 					"",
 					nbdb.ACLActionDrop,
@@ -107,7 +107,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				// this ACL is not in the egress firewall priority range and should be untouched
 				otherACL := libovsdbops.BuildACL(
 					"",
-					t.DirectionFromLPort,
+					nbdb.ACLDirectionFromLport,
 					t.MinimumReservedEgressFirewallPriority-1,
 					"",
 					nbdb.ACLActionDrop,
@@ -171,7 +171,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				}
 
 				// Direction of both ACLs will be converted to
-				keepACL.Direction = t.DirectionToLPort
+				keepACL.Direction = nbdb.ACLDirectionToLport
 
 				expectedDatabaseState := []libovsdb.TestData{
 					otherACL,
@@ -240,7 +240,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				ipv4ACL := libovsdbops.BuildACL(
 					"",
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionAllow,
@@ -328,7 +328,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				ipv6ACL := libovsdbops.BuildACL(
 					"",
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionAllow,
@@ -424,7 +424,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				udpACL := libovsdbops.BuildACL(
 					"",
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionDrop,
@@ -521,7 +521,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				ipv4ACL := libovsdbops.BuildACL(
 					"",
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.5/23) && ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionAllow,
@@ -625,7 +625,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				ipv4ACL := libovsdbops.BuildACL(
 					"",
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionAllow,
@@ -704,7 +704,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 			app.Action = func(ctx *cli.Context) error {
 				purgeACL := libovsdbops.BuildACL(
 					"",
-					t.DirectionFromLPort,
+					nbdb.ACLDirectionFromLport,
 					t.EgressFirewallStartPriority,
 					"",
 					nbdb.ACLActionDrop,
@@ -717,7 +717,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 
 				keepACL := libovsdbops.BuildACL(
 					"",
-					t.DirectionFromLPort,
+					nbdb.ACLDirectionFromLport,
 					t.EgressFirewallStartPriority-1,
 					"",
 					nbdb.ACLActionDrop,
@@ -731,7 +731,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				// this ACL is not in the egress firewall priority range and should be untouched
 				otherACL := libovsdbops.BuildACL(
 					"",
-					t.DirectionFromLPort,
+					nbdb.ACLDirectionFromLport,
 					t.MinimumReservedEgressFirewallPriority-1,
 					"",
 					nbdb.ACLActionDrop,
@@ -795,7 +795,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				}
 
 				// Direction of both ACLs will be converted to
-				keepACL.Direction = t.DirectionToLPort
+				keepACL.Direction = nbdb.ACLDirectionToLport
 
 				expectedDatabaseState := []libovsdb.TestData{
 					otherACL,
@@ -859,7 +859,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 
 				ipv4ACL := libovsdbops.BuildACL(
 					"",
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \""+t.JoinSwitchToGWRouterPrefix+t.OVNClusterRouter+"\"",
 					nbdb.ACLActionAllow,
@@ -942,7 +942,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 
 				ipv6ACL := libovsdbops.BuildACL(
 					"",
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && inport == \""+t.JoinSwitchToGWRouterPrefix+t.OVNClusterRouter+"\"",
 					nbdb.ACLActionAllow,
@@ -1034,7 +1034,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 
 				udpACL := libovsdbops.BuildACL(
 					"",
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && inport == \""+
 						t.JoinSwitchToGWRouterPrefix+t.OVNClusterRouter+"\"",
@@ -1115,7 +1115,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 
 				ipv4ACL := libovsdbops.BuildACL(
 					"",
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.5/23) && "+
 						"ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && inport == \""+t.JoinSwitchToGWRouterPrefix+t.OVNClusterRouter+"\"",
@@ -1204,7 +1204,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 
 				ipv4ACL := libovsdbops.BuildACL(
 					"",
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \""+t.JoinSwitchToGWRouterPrefix+t.OVNClusterRouter+"\"",
 					nbdb.ACLActionAllow,
