@@ -403,7 +403,7 @@ func (oc *Controller) SetupMaster(existingNodeNames []string) error {
 		},
 	}
 	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("failed to create a single common distributed router for the cluster, error: %v", err)
+		return fmt.Errorf("failed to create a single common distributed router for network %s, error: %v", oc.nadInfo.NetName, err)
 	}
 
 	if oc.nadInfo.NotDefault {
@@ -484,7 +484,7 @@ func (oc *Controller) SetupMaster(existingNodeNames []string) error {
 		},
 	}
 	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("failed to create logical switch %s, error: %v", types.OVNJoinSwitch, err)
+		return fmt.Errorf("failed to create logical switch %s, error: %v", joinSwitchName, err)
 	}
 
 	// Connect the distributed router to OVNJoinSwitch.
@@ -927,7 +927,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		},
 		{
 			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == oc.nadInfo.Prefix+types.OVNClusterRouter },
 			OnModelMutations: []interface{}{
 				&logicalRouter.Ports,
 			},
@@ -935,10 +935,11 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		},
 		{
 			Model:          &logicalSwitch,
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == nodeName },
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == switchName },
 			OnModelUpdates: []interface{}{
 				&logicalSwitch.OtherConfig,
 				&logicalSwitch.LoadBalancerGroup,
+				&logicalSwitch.ExternalIDs,
 			},
 		},
 	}
@@ -996,18 +997,20 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		}
 
 		// Create the Node's Logical Switch and set it's subnet
+		onModelMutations := []interface{}{&logicalSwitch.OtherConfig}
+		if len(logicalSwitch.ExternalIDs) > 0 {
+			onModelMutations = append(onModelMutations, &logicalSwitch.ExternalIDs)
+		}
 		opModels = []libovsdbops.OperationModel{
 			{
-				Model:          &logicalSwitch,
-				ModelPredicate: func(lr *nbdb.LogicalSwitch) bool { return lr.Name == nodeName },
-				OnModelMutations: []interface{}{
-					&logicalSwitch.OtherConfig,
-				},
-				ErrNotFound: true,
+				Model:            &logicalSwitch,
+				ModelPredicate:   func(ls *nbdb.LogicalSwitch) bool { return ls.Name == switchName },
+				OnModelMutations: onModelMutations,
+				ErrNotFound:      true,
 			},
 		}
 		if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
-			return fmt.Errorf("failed to configure Multicast on logical switch for node %s, error: %v", nodeName, err)
+			return fmt.Errorf("failed to configure Multicast on logical switch for node %s network %s, error: %v", nodeName, oc.nadInfo.NetName, err)
 		}
 	}
 
@@ -1032,7 +1035,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 }
 
 func isError(err error) bool {
-	return true
+	return err != nil
 }
 
 func (oc *Controller) updateNodeAnnotationWithRetry(nodeName string, hostSubnets []*net.IPNet) error {
@@ -1298,7 +1301,7 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	opModels := []libovsdbops.OperationModel{
 		{
 			Model:          &nbdb.LogicalSwitch{},
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == nodeName },
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == switchName },
 		},
 		{
 			Model: &nodeLogicalRouterPort,
@@ -1310,7 +1313,7 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 		},
 		{
 			Model:          &clusterRouterModel,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == oc.nadInfo.Prefix+types.OVNClusterRouter },
 			OnModelMutations: []interface{}{
 				&clusterRouterModel.Ports,
 			},
@@ -1479,16 +1482,19 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 			util.UpdateUsedHostSubnetsCount(hostSubnet, &oc.v4HostSubnetsUsed, &oc.v6HostSubnetsUsed, true)
 		}
 
-		// For each existing node, reserve its joinSwitch LRP IPs if they already exist.
-		_, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
-		if err != nil {
-			klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
+		if !oc.nadInfo.NotDefault {
+			// For each existing node, reserve its joinSwitch LRP IPs if they already exist.
+			_, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
+			if err != nil {
+				klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
+			}
 		}
 	}
 
 	chassisHostNames := sets.NewString()
 	staleChassis := sets.NewString()
 	if !oc.nadInfo.NotDefault {
+		// update metrics for host subnets, default network only for now. TBD
 		metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
 
 		chassisList, err := libovsdbops.ListChassis(oc.mc.sbClient)
@@ -1506,7 +1512,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	}
 
 	nodeSwitches, err := libovsdbops.FindSwitchesWithOtherConfig(oc.mc.nbClient)
-	if err != nil {
+	if err != nil && err != libovsdbclient.ErrNotFound {
 		klog.Errorf("Failed to get node logical switches which have other-config set error: %v", err)
 		return
 	}

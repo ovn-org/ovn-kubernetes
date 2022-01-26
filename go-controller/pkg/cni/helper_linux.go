@@ -17,6 +17,7 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/vishvananda/netlink"
+
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
@@ -110,7 +111,7 @@ func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
 		}
 	}
 	for _, route := range ifInfo.Routes {
-		if err := cniPluginLibOps.AddRoute(route.Dest, route.NextHop, link, ifInfo.RoutableMTU); err != nil {
+		if err := cniPluginLibOps.AddRoute(route.Dest, route.NextHop, link, ifInfo.RoutableMTU); err != nil && !os.IsExist(err) {
 			return fmt.Errorf("failed to add pod route %v via %v: %v", route.Dest, route.NextHop, err)
 		}
 	}
@@ -404,15 +405,15 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 }
 
 func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
-	podDesc := fmt.Sprintf("for pod %s/%s", pr.PodNamespace, pr.PodName)
+	podDesc := fmt.Sprintf("for pod %s/%s nad %s", pr.PodNamespace, pr.PodName, pr.effectiveNADName)
 	klog.V(5).Infof("Tear down interface (%+v) %s", *pr, podDesc)
-	if pr.CNIConf.DeviceID == "" {
-		if ifInfo.IsDPUHostMode {
-			klog.Warningf("Unexpected configuration %s, Device ID must be present for pod request on smart-nic host",
-				podDesc)
-			return nil
-		}
+	if pr.CNIConf.DeviceID == "" && ifInfo.IsDPUHostMode {
+		klog.Warningf("Unexpected configuration %s, Device ID must be present for pod request on smart-nic host", podDesc)
+		return nil
 	}
+	// 1. For SRIOV case, we'd need to move the VF from container namespace back to the host namespace
+	// 2. If it is non-default network and non-dpu mode, needs to get the container interface index
+	//    so that we know the host-side interface name.
 	ifnameSuffix := ""
 	if pr.CNIConf.DeviceID != "" || (pr.CNIConf.NotDefault && !ifInfo.IsDPUHostMode) {
 		// For SRIOV case, we'd need to move the VF from container namespace back to the host namespace
@@ -435,6 +436,7 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 				return fmt.Errorf("failed to get container interface %s %s: %v", pr.IfName, podDesc, err)
 			}
 			if pr.CNIConf.DeviceID != "" {
+				// SR-IOV Case
 				err = util.GetNetLinkOps().LinkSetDown(link)
 				if err != nil {
 					return fmt.Errorf("failed to bring down container interface %s %s: %v", pr.IfName, podDesc, err)

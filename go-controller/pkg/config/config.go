@@ -834,7 +834,7 @@ var OVNK8sFeatureFlags = []cli.Flag{
 	},
 	&cli.BoolFlag{
 		Name:        "enable-multi-network",
-		Usage:       "Configure to use NetworkAttachmentDefition CRD feature with ovn-kubernetes.",
+		Usage:       "Configure to use multiple NetworkAttachmentDefinition CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableMultiNetwork,
 		Value:       OVNKubernetesFeature.EnableMultiNetwork,
 	},

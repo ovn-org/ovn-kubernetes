@@ -28,7 +28,7 @@ func (nc *ovnNodeController) addDPUPod4Nad(pod *kapi.Pod, isOvnUpEnabled bool, n
 		return err
 	}
 	podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, isOvnUpEnabled, string(pod.UID), "",
-		nadName, nc.nadInfo.NetNameInfo)
+		nadName, 0, nc.nadInfo.NetNameInfo)
 	if err != nil {
 		klog.Infof("Failed to get pod interface information of %s: %v. retrying", podDesc, err)
 		return err

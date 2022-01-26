@@ -475,27 +475,28 @@ func (oc *Controller) Run(nodeName string) error {
 	logicalRouterRes := []nbdb.LogicalRouter{}
 	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
 	defer cancel()
+	clusterRouterName := oc.nadInfo.Prefix + ovntypes.OVNClusterRouter
 	if err := oc.mc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
-		return lr.Name == ovntypes.OVNClusterRouter
+		return lr.Name == clusterRouterName
 	}).List(ctx, &logicalRouterRes); err != nil {
-		return fmt.Errorf("failed in retrieving %s, error: %v", ovntypes.OVNClusterRouter, err)
+		return fmt.Errorf("failed in retrieving %s, error: %v", clusterRouterName, err)
 	}
 	// Update topology version on distributed cluster router
 	logicalRouterRes[0].ExternalIDs["k8s-ovn-topo-version"] = currentTopologyVersion
 	logicalRouter := nbdb.LogicalRouter{
-		Name:        ovntypes.OVNClusterRouter,
+		Name:        clusterRouterName,
 		ExternalIDs: logicalRouterRes[0].ExternalIDs,
 	}
 	opModel := libovsdbops.OperationModel{
 		Model:          &logicalRouter,
-		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
+		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == clusterRouterName },
 		OnModelUpdates: []interface{}{
 			&logicalRouter.ExternalIDs,
 		},
 		ErrNotFound: true,
 	}
 	if _, err := oc.mc.modelClient.CreateOrUpdate(opModel); err != nil {
-		return fmt.Errorf("failed to generate set topology version in OVN, err: %v", err)
+		return fmt.Errorf("failed to generate set topology version in OVN for network %s, err: %v", oc.nadInfo.NetName, err)
 	}
 
 	if !oc.nadInfo.NotDefault {
@@ -535,10 +536,10 @@ func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
 	defer cancel()
 	if err := oc.mc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
-		return lr.Name == ovntypes.OVNClusterRouter
+		return lr.Name == oc.nadInfo.Prefix+ovntypes.OVNClusterRouter
 	}).List(ctx, &logicalRouterRes); err != nil {
 		return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
-			"error: %v", ovntypes.OVNClusterRouter, err)
+			"error: %v", oc.nadInfo.Prefix+ovntypes.OVNClusterRouter, err)
 	}
 	if len(logicalRouterRes) == 0 {
 		// no OVNClusterRouter exists, DB is empty, nothing to upgrade
@@ -1478,6 +1479,7 @@ func (mc *OvnMHController) addNetworkAttachDefinition(netattachdef *nettypes.Net
 }
 
 func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
+	klog.Infof("Delete Network Attachment Definition %s/%s", netattachdef.Namespace, netattachdef.Name)
 	netconf := &cnitypes.NetConf{}
 	err := json.Unmarshal([]byte(netattachdef.Spec.Config), &netconf)
 	if err != nil && netconf.Type != "ovn-k8s-cni-overlay" {

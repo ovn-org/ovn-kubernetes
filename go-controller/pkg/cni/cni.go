@@ -148,8 +148,12 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 
 	netPrefix := util.GetNetworkPrefix(pr.effectiveNetName, !pr.CNIConf.NotDefault)
 	netNameInfo := util.NetNameInfo{NetName: pr.effectiveNetName, Prefix: netPrefix, NotDefault: pr.CNIConf.NotDefault}
+	mtu := pr.CNIConf.MTU
+	if mtu == 0 {
+		mtu = config.Default.MTU
+	}
 	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.PodUID, vfNetdevName,
-		pr.effectiveNADName, netNameInfo)
+		pr.effectiveNADName, mtu, netNameInfo)
 	if err != nil {
 		return nil, err
 	}

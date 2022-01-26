@@ -85,31 +85,6 @@ func updateSubnetAnnotation(annotations map[string]string, annotationName, netNa
 	return nil
 }
 
-func createSubnetAnnotation(annotationName string, defaultSubnets []*net.IPNet) (map[string]interface{}, error) {
-	var bytes []byte
-	var err error
-
-	if len(defaultSubnets) == 1 {
-		bytes, err = json.Marshal(map[string]string{
-			types.DefaultNetworkName: defaultSubnets[0].String(),
-		})
-	} else {
-		defaultSubnetStrs := make([]string, len(defaultSubnets))
-		for i := range defaultSubnets {
-			defaultSubnetStrs[i] = defaultSubnets[i].String()
-		}
-		bytes, err = json.Marshal(map[string][]string{
-			types.DefaultNetworkName: defaultSubnetStrs,
-		})
-	}
-	if err != nil {
-		return nil, err
-	}
-	return map[string]interface{}{
-		annotationName: string(bytes),
-	}, nil
-}
-
 func setSubnetAnnotation(nodeAnnotator kube.Annotator, annotationName string, defaultSubnets []*net.IPNet) error {
 	annotation := map[string]string{}
 	err := updateSubnetAnnotation(annotation, annotationName, types.DefaultNetworkName, defaultSubnets)

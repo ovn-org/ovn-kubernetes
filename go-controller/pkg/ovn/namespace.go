@@ -524,7 +524,7 @@ func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (addressset.Addre
 	var ips []net.IP
 	// special handling of host network namespace
 	if config.Kubernetes.HostNetworkNamespace != "" &&
-		ns == config.Kubernetes.HostNetworkNamespace {
+		ns == config.Kubernetes.HostNetworkNamespace && !oc.nadInfo.NotDefault {
 		// add the mp0 interface addresses to this namespace.
 		existingNodes, err := oc.mc.watchFactory.GetNodes()
 		if err != nil {

@@ -153,8 +153,6 @@ spec:
           value: "{{ ovn_hybrid_overlay_enable }}"
         - name: OVN_EGRESSIP_ENABLE
           value: "{{ ovn_egress_ip_enable }}"
-        - name: OVN_MULTIHOME_ENABLE
-          value: "{{ ovn_multihome_enable }}"
         - name: OVN_HYBRID_OVERLAY_NET_CIDR
           value: "{{ ovn_hybrid_overlay_net_cidr }}"
         - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
@@ -198,6 +196,8 @@ spec:
           value: "{{ ovn_lflow_cache_limit }}"
         - name: OVN_LFLOW_CACHE_LIMIT_KB
           value: "{{ ovn_lflow_cache_limit_kb }}"
+        - name: OVN_MULTI_NETWORK_ENABLE
+          value: "{{ ovn_multi_network_enable }}"
         {% endif -%}
         {% if ovnkube_app_name=="ovnkube-node-dpu-host" -%}
         - name: OVNKUBE_NODE_MODE
