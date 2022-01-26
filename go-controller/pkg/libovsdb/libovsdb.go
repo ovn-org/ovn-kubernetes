@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/ovn-org/libovsdb/client"
@@ -25,9 +26,13 @@ import (
 // the stopCh is required to ensure the goroutine for ssl cert
 // update is not leaked
 func newClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-chan struct{}) (client.Client, error) {
+	const connectTimeout time.Duration = types.OVSDBTimeout * 2
 	logger := klogr.New()
 	options := []client.Option{
-		client.WithReconnect(types.OVSDBTimeout, &backoff.ZeroBackOff{}),
+		// Reading and parsing the DB after reconnect at scale can (unsurprisingly)
+		// take longer than a normal ovsdb operation. Give it a bit more time so
+		// we don't time out and enter a reconnect loop.
+		client.WithReconnect(connectTimeout, &backoff.ZeroBackOff{}),
 		client.WithLeaderOnly(true),
 		client.WithLogger(&logger),
 	}
@@ -52,7 +57,7 @@ func newClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-c
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
 	defer cancel()
 	err = client.Connect(ctx)
 	if err != nil {
