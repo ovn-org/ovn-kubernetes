@@ -970,6 +970,22 @@ func (oc *Controller) WatchEgressIP() {
 			if err := oc.reconcileEgressIP(eIP, nil); err != nil {
 				klog.Errorf("Unable to delete EgressIP: %s, err: %v", eIP.Name, err)
 			}
+
+			// If an egress IP was removed we need to check if there are any
+			// egress IPs which are missing an assignment. If there are, we need to send a
+			// synthetic update since reconcileEgressIP will then try to assign those IPs
+			egressIPs, err := oc.kube.GetEgressIPs()
+			if err != nil {
+				klog.Errorf("Unable to list EgressIPs, err: %v", err)
+			} else {
+				for _, egressIP := range egressIPs.Items {
+					if len(egressIP.Spec.EgressIPs) != len(egressIP.Status.Items) {
+						if err := oc.reconcileEgressIP(nil, &egressIP); err != nil {
+							klog.Errorf("Synthetic update for EgressIP: %s failed, err: %v", egressIP.Name, err)
+						}
+					}
+				}
+			}
 		},
 	}, oc.syncEgressIPs)
 }
