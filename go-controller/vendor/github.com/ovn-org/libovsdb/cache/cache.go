@@ -316,6 +316,21 @@ func (r *RowCache) Rows() map[string]model.Model {
 	return result
 }
 
+// RowsShallow returns a clone'd list of f all Rows in the cache, but does not
+// clone the underlying objects. Therefore, the objects returned are READ ONLY.
+// This is, however, thread safe, as the cached objects are cloned before being updated
+// when modifications come in.
+func (r *RowCache) RowsShallow() map[string]model.Model {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+
+	result := make(map[string]model.Model, len(r.cache))
+	for k, v := range r.cache {
+		result[k] = v
+	}
+	return result
+}
+
 func (r *RowCache) RowsByCondition(conditions []ovsdb.Condition) (map[string]model.Model, error) {
 	results := make(map[string]model.Model)
 	schema := r.dbModel.Schema.Table(r.name)
