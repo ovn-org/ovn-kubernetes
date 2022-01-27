@@ -113,6 +113,12 @@ type OperationModel struct {
 	// DoAfter is invoked at the end of the operation and allows to setup a
 	// subsequent operation with values obtained from this one.
 	DoAfter func()
+	// Name is used to signify if this model has a name being used. Typically
+	// corresponds to Name field used on ovsdb objects. Using a non-empty
+	// Name indicates that during a Create the model will have a predicate
+	// operation to ensure a duplicate txn will not occur. See:
+	// https://bugzilla.redhat.com/show_bug.cgi?id=2042001
+	Name string
 }
 
 // WithClient is useful for ad-hoc override of the targetted OVS DB. Can be used,
@@ -265,19 +271,47 @@ func (m *ModelClient) buildOps(doWhenFound opModelToOpMapper, doWhenNotFound opM
 /*
  create does a bit more than just "create". create needs to set the generated
  UUID (because if this function is called we know the item does not exists yet)
- then create the item.
+ then create the item. Generates an until clause and uses a wait operation to avoid
+ https://bugzilla.redhat.com/show_bug.cgi?id=2042001
 */
 func (m *ModelClient) create(opModel *OperationModel) ([]ovsdb.Operation, error) {
 	uuid := getUUID(opModel.Model)
 	if uuid == "" {
 		setUUID(opModel.Model, BuildNamedUUID())
 	}
+	ops := make([]ovsdb.Operation, 0, 1)
 	o, err := m.client.Create(opModel.Model)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create model, err: %v", err)
 	}
-	klog.V(5).Infof("Create operations generated as: %+v", o)
-	return o, nil
+
+	// Add wait methods accordingly
+	// ACL we would have to use external_ids + name for unique match
+	// However external_ids would be a performance hit, and in one case we use
+	// an empty name and external_ids for addAllowACLFromNode
+	if len(opModel.Name) > 0 && o[0].Table != "ACL" {
+		timeout := types.OVSDBWaitTimeout
+		ops = append(ops, ovsdb.Operation{
+			Op:      ovsdb.OperationWait,
+			Timeout: &timeout,
+			Table:   o[0].Table,
+			Where:   []ovsdb.Condition{{Column: "name", Function: ovsdb.ConditionEqual, Value: opModel.Name}},
+			Columns: []string{"name"},
+			Until:   "!=",
+			Rows:    []ovsdb.Row{{"name": opModel.Name}},
+		})
+	} else if info, err := m.client.Cache().DatabaseModel().NewModelInfo(opModel.Model); err == nil {
+		if name, err := info.FieldByColumn("name"); err == nil {
+			if len(fmt.Sprint(name)) > 0 {
+				klog.Warningf("OVSDB Create operation detected without setting opModel Name. Name: %s, %#v",
+					name, info)
+			}
+		}
+	}
+
+	ops = append(ops, o...)
+	klog.V(5).Infof("Create operations generated as: %+v", ops)
+	return ops, nil
 }
 
 func (m *ModelClient) update(lookUpModel interface{}, opModel *OperationModel) (o []ovsdb.Operation, err error) {
