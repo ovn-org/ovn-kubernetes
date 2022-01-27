@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/ovn-org/libovsdb/cache"
@@ -514,8 +515,102 @@ func (t *Transaction) Delete(database, table string, where []ovsdb.Condition) (o
 		}
 }
 
-func (t *Transaction) Wait(database, table string, timeout int, conditions []ovsdb.Condition, columns []string, until string, rows []ovsdb.Row) ovsdb.OperationResult {
-	e := ovsdb.NotSupported{}
+func (t *Transaction) Wait(database, table string, timeout *int, where []ovsdb.Condition, columns []string, until string, rows []ovsdb.Row) ovsdb.OperationResult {
+	start := time.Now()
+
+	if until != "!=" && until != "==" {
+		e := ovsdb.NotSupported{}
+		return ovsdb.OperationResult{Error: e.Error()}
+	}
+
+	dbModel := t.Model
+	realTable := dbModel.Schema.Table(table)
+	if realTable == nil {
+		e := ovsdb.NotSupported{}
+		return ovsdb.OperationResult{Error: e.Error()}
+	}
+	model, err := dbModel.NewModel(table)
+	if err != nil {
+		panic(err)
+	}
+
+Loop:
+	for {
+		var filteredRows []ovsdb.Row
+		foundRowModels, err := t.rowsFromTransactionCacheAndDatabase(table, where)
+		if err != nil {
+			panic(err)
+		}
+
+		m := dbModel.Mapper
+		for _, rowModel := range foundRowModels {
+			info, err := dbModel.NewModelInfo(rowModel)
+			if err != nil {
+				panic(err)
+			}
+
+			foundMatch := true
+			for _, column := range columns {
+				columnSchema := info.Metadata.TableSchema.Column(column)
+				for _, r := range rows {
+					i, err := dbModel.NewModelInfo(model)
+					if err != nil {
+						panic(err)
+					}
+					err = dbModel.Mapper.GetRowData(&r, i)
+					if err != nil {
+						panic(err)
+					}
+					x, err := i.FieldByColumn(column)
+					if err != nil {
+						panic(err)
+					}
+
+					// check to see if field value is default for given rows
+					// if it is default (not provided) we shouldn't try to compare
+					// for equality
+					if ovsdb.IsDefaultValue(columnSchema, x) {
+						continue
+					}
+					y, err := info.FieldByColumn(column)
+					if err != nil {
+						panic(err)
+					}
+					if !reflect.DeepEqual(x, y) {
+						foundMatch = false
+					}
+				}
+			}
+
+			if foundMatch {
+				resultRow, err := m.NewRow(info)
+				if err != nil {
+					panic(err)
+				}
+				filteredRows = append(filteredRows, resultRow)
+			}
+
+		}
+
+		if until == "==" && len(filteredRows) == len(rows) {
+			return ovsdb.OperationResult{}
+		} else if until == "!=" && len(filteredRows) != len(rows) {
+			return ovsdb.OperationResult{}
+		}
+
+		if timeout != nil {
+			// TODO(trozet): this really shouldn't just break and loop on a time interval
+			// Really this client handler should pause, wait for another handler to update the DB
+			// and then try again. However the server is single threaded for now and not capable of
+			// doing something like that.
+			if time.Since(start) > time.Duration(*timeout)*time.Millisecond {
+				break Loop
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	e := ovsdb.TimedOut{}
 	return ovsdb.OperationResult{Error: e.Error()}
 }
 
