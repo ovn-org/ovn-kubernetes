@@ -35,7 +35,7 @@ type Operation struct {
 	Rows      []Row       `json:"rows,omitempty"`
 	Columns   []string    `json:"columns,omitempty"`
 	Mutations []Mutation  `json:"mutations,omitempty"`
-	Timeout   int         `json:"timeout,omitempty"`
+	Timeout   *int        `json:"timeout,omitempty"`
 	Where     []Condition `json:"where,omitempty"`
 	Until     string      `json:"until,omitempty"`
 	Durable   *bool       `json:"durable,omitempty"`
