@@ -165,6 +165,8 @@ func createOrUpdateACLOps(nbClient libovsdbclient.Client, ops []libovsdb.Operati
 
 	// If ACL does not exist, create it
 	if err == libovsdbclient.ErrNotFound {
+		// FIXME(trozet): Wait method for ACL would need to use external_ids and name for matching
+		// external_ids matching will have a performance impact, so we should move to name ACLs uniquely
 		ensureACLUUID(acl)
 		op, err := nbClient.Create(acl)
 		if err != nil {

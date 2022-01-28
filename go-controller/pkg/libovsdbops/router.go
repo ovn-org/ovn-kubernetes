@@ -314,6 +314,10 @@ func addOrUpdateNATToRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Op
 	if natIndex == -1 {
 		nat.UUID = BuildNamedUUID()
 
+		// FIXME(trozet): we cannot use the OVSDB wait method predicate here
+		// to avoid: https://bugzilla.redhat.com/show_bug.cgi?id=2042001
+		// NAT has no name field, and extIDS we currently set to nil.
+		// Need to update NAT's to use extIDs potentially and use wait method here
 		op, err := nbClient.Create(nat)
 		if err != nil {
 			return ops, fmt.Errorf("error creating NAT %s for logical router %s %#v : %v", nat.UUID, router.Name, *nat, err)

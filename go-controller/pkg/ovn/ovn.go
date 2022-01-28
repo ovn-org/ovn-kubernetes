@@ -415,6 +415,7 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 		ExternalIDs: logicalRouterRes[0].ExternalIDs,
 	}
 	opModel := libovsdbops.OperationModel{
+		Name:           logicalRouter.Name,
 		Model:          &logicalRouter,
 		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
 		OnModelUpdates: []interface{}{
