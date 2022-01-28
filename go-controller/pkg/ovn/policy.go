@@ -112,13 +112,17 @@ func hashedPortGroup(s string) string {
 }
 
 func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
+	oc.syncWithRetry("syncNetworkPolicies", func() error { return oc.syncNetworkPoliciesRetriable(networkPolicies) })
+}
+
+// This function implements the main body of work of syncNetworkPolicies.
+// Upon failure, it may be invoked multiple times in order to avoid a pod restart.
+func (oc *Controller) syncNetworkPoliciesRetriable(networkPolicies []interface{}) error {
 	expectedPolicies := make(map[string]map[string]bool)
 	for _, npInterface := range networkPolicies {
 		policy, ok := npInterface.(*knet.NetworkPolicy)
 		if !ok {
-			klog.Errorf("Spurious object in syncNetworkPolicies: %v",
-				npInterface)
-			continue
+			return fmt.Errorf("spurious object in syncNetworkPolicies: %v", npInterface)
 		}
 
 		if nsMap, ok := expectedPolicies[policy.Namespace]; ok {
@@ -146,13 +150,13 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 		return nil
 	})
 	if err != nil {
-		klog.Errorf("Error in syncing network policies: %v", err)
+		return fmt.Errorf("error in syncing network policies: %v", err)
 	}
 
 	if len(stalePGs) > 0 {
 		err = libovsdbops.DeletePortGroups(oc.nbClient, stalePGs...)
 		if err != nil {
-			klog.Errorf("Error removing stale port groups %v: %v", stalePGs, err)
+			return fmt.Errorf("error removing stale port groups %v: %v", stalePGs, err)
 		}
 	}
 
@@ -160,12 +164,12 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 	var allEgressACLs []nbdb.ACL
 	egressACLs, err := libovsdbops.FindACLsByExternalID(oc.nbClient, map[string]string{policyTypeACLExtIdKey: string(knet.PolicyTypeEgress)})
 	if err != nil {
-		klog.Errorf("error cannot sync NetworkPolicy Egress obj: %v", err)
+		return fmt.Errorf("error cannot sync NetworkPolicy Egress obj: %v", err)
 	}
 	allEgressACLs = append(allEgressACLs, egressACLs...)
 	egressACLs, err = libovsdbops.FindACLsByExternalID(oc.nbClient, map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress)})
 	if err != nil {
-		klog.Errorf("error cannot sync NetworkPolicy Egress obj: %v", err)
+		return fmt.Errorf("error cannot sync NetworkPolicy Egress obj: %v", err)
 	}
 	allEgressACLs = append(allEgressACLs, egressACLs...)
 	// if the first egress ACL is correct they should all be correct and not need to update
@@ -179,15 +183,16 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 		}
 		ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, egressACLsPTR...)
 		if err != nil {
-			klog.Errorf("cannot create ops to update old Egress NetworkPolicy ACLs: %v", err)
+			return fmt.Errorf("cannot create ops to update old Egress NetworkPolicy ACLs: %v", err)
 		}
 		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 		if err != nil {
-			klog.Errorf("cannot update old Egress NetworkPolicy ACLs: %v", err)
+			return fmt.Errorf("cannot update old Egress NetworkPolicy ACLs: %v", err)
 		}
 
 	}
 
+	return nil
 }
 
 func addAllowACLFromNode(nodeName string, mgmtPortIP net.IP, nbClient libovsdbclient.Client) error {
