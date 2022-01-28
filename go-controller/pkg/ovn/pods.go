@@ -26,27 +26,39 @@ import (
 )
 
 func (oc *Controller) syncPods(pods []interface{}) {
+	oc.syncWithRetry("syncPods", func() error { return oc.syncPodsRetriable(pods) })
+}
+
+// This function implements the main body of work of syncPods.
+// Upon failure, it may be invoked multiple times in order to avoid a pod restart.
+func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 	var allOps []ovsdb.Operation
 	// get the list of logical switch ports (equivalent to pods)
 	expectedLogicalPorts := make(map[string]bool)
 	for _, podInterface := range pods {
 		pod, ok := podInterface.(*kapi.Pod)
 		if !ok {
-			klog.Errorf("Spurious object in syncPods: %v", podInterface)
-			continue
+			return fmt.Errorf("spurious object in syncPods: %v", podInterface)
 		}
 		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations)
 		if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && err == nil {
 			logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 			expectedLogicalPorts[logicalPort] = true
 			if err = oc.waitForNodeLogicalSwitchInCache(pod.Spec.NodeName); err != nil {
-				klog.Errorf("Failed to wait for node %s to be added to cache. IP allocation may fail!",
+				return fmt.Errorf("failed to wait for node %s to be added to cache. IP allocation may fail!",
 					pod.Spec.NodeName)
 			}
 			if err = oc.lsManager.AllocateIPs(pod.Spec.NodeName, annotations.IPs); err != nil {
-				klog.Errorf("Couldn't allocate IPs: %s for pod: %s on node: %s"+
-					" error: %v", util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
-					pod.Spec.NodeName, err)
+				if err == ipallocator.ErrAllocated {
+					// already allocated: log an error but not stop syncPod from continuing
+					klog.Errorf("Already allocated IPs: %s for pod: %s on node: %s",
+						util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
+						pod.Spec.NodeName)
+				} else {
+					return fmt.Errorf("Couldn't allocate IPs: %s for pod: %s on node: %s"+
+						" error: %v", util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
+						pod.Spec.NodeName, err)
+				}
 			}
 		}
 	}
@@ -58,8 +70,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 	defer cancel()
 	err := oc.nbClient.List(ctx, &lspList)
 	if err != nil {
-		klog.Errorf("Cannot sync pods, cannot retrieve list of logical switch ports (%+v)", err)
-		return
+		return fmt.Errorf("cannot sync pods, cannot retrieve list of logical switch ports (%+v)", err)
 	}
 	for _, lsp := range lspList {
 		portCache[lsp.UUID] = lsp
@@ -67,8 +78,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 	// get all the nodes from the watchFactory
 	nodes, err := oc.watchFactory.GetNodes()
 	if err != nil {
-		klog.Errorf("Failed to get nodes: %v", err)
-		return
+		return fmt.Errorf("failed to get nodes: %v", err)
 	}
 	for _, n := range nodes {
 		stalePorts := []string{}
@@ -76,17 +86,19 @@ func (oc *Controller) syncPods(pods []interface{}) {
 		ls := &nbdb.LogicalSwitch{}
 		if lsUUID, ok := oc.lsManager.GetUUID(n.Name); !ok {
 			klog.Errorf("Error getting logical switch for node %s: %s", n.Name, "Switch not in logical switch cache")
-			continue
+
+			// Not in cache: Try getting the logical switch from ovn database (slower method)
+			if ls, err = libovsdbops.FindSwitchByName(oc.nbClient, n.Name); err != nil {
+				return fmt.Errorf("can't find switch for node %s: %v", n.Name, err)
+			}
 		} else {
 			ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
 			defer cancel()
 
 			ls.UUID = lsUUID
 			if err := oc.nbClient.Get(ctx, ls); err != nil {
-				klog.Errorf("Error getting logical switch for node %d (UUID: %d) from ovn database (%v)", n.Name, ls.UUID, err)
-				continue
+				return fmt.Errorf("error getting logical switch for node %s (UUID: %s) from ovn database (%v)", n.Name, ls.UUID, err)
 			}
-
 		}
 		for _, port := range ls.Ports {
 			if portCache[port].ExternalIDs["pod"] == "true" {
@@ -102,16 +114,16 @@ func (oc *Controller) syncPods(pods []interface{}) {
 				Value:   stalePorts,
 			})
 			if err != nil {
-				klog.Errorf("Could not generate ops to delete stale ports from logical switch %s (%+v)", n.Name, err)
-				continue
+				return fmt.Errorf("could not generate ops to delete stale ports from logical switch %s (%+v)", n.Name, err)
 			}
 			allOps = append(allOps, ops...)
 		}
 	}
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, allOps)
 	if err != nil {
-		klog.Errorf("Could not remove stale logicalPorts from switches (%+v)", err)
+		return fmt.Errorf("could not remove stale logicalPorts from switches (%+v)", err)
 	}
+	return nil
 }
 
 func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {

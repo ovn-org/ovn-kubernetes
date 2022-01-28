@@ -30,6 +30,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
@@ -999,13 +1000,25 @@ func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 	// - Egress IPs which have been deleted while ovnkube-master was down
 	// - pods/namespaces which have stopped matching on egress IPs while
 	//   ovnkube-master was down
-	if egressIPToPodIPCache, err := oc.generatePodIPCacheForEgressIP(eIPs); err == nil {
-		oc.syncStaleEgressReroutePolicy(egressIPToPodIPCache)
-		oc.syncStaleSNATRules(egressIPToPodIPCache)
-	}
+	oc.syncWithRetry("syncEgressIPs", func() error {
+		egressIPToPodIPCache, err := oc.generatePodIPCacheForEgressIP(eIPs)
+		if err != nil {
+			return fmt.Errorf("syncEgressIPs unable to generate cache for egressip: %v", err)
+		}
+		if err = oc.syncStaleEgressReroutePolicy(egressIPToPodIPCache); err != nil {
+			return fmt.Errorf("syncEgressIPs unable to remove stale reroute policies: %v", err)
+		}
+		if err = oc.syncStaleSNATRules(egressIPToPodIPCache); err != nil {
+			return fmt.Errorf("syncEgressIPs unable to remove stale nats: %v", err)
+		}
+		return nil
+	})
 }
 
-func (oc *Controller) syncStaleEgressReroutePolicy(egressIPToPodIPCache map[string]sets.String) {
+// This function implements a portion of syncEgressIPs.
+// It removes OVN logical router policies used by EgressIPs deleted while ovnkube-master was down.
+// Upon failure, it may be invoked multiple times in order to avoid a pod restart.
+func (oc *Controller) syncStaleEgressReroutePolicy(egressIPToPodIPCache map[string]sets.String) error {
 	logicalRouter := nbdb.LogicalRouter{}
 	logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
 	opModels := []libovsdbops.OperationModel{
@@ -1040,11 +1053,15 @@ func (oc *Controller) syncStaleEgressReroutePolicy(egressIPToPodIPCache map[stri
 		},
 	}
 	if err := oc.modelClient.Delete(opModels...); err != nil {
-		klog.Errorf("Unable to remove stale logical router policies, err: %v", err)
+		return fmt.Errorf("unable to remove stale logical router policies, err: %v", err)
 	}
+	return nil
 }
 
-func (oc *Controller) syncStaleSNATRules(egressIPToPodIPCache map[string]sets.String) {
+// This function implements a portion of syncEgressIPs.
+// It removes OVN NAT rules used by EgressIPs deleted while ovnkube-master was down.
+// Upon failure, it may be invoked multiple times in order to avoid a pod restart.
+func (oc *Controller) syncStaleSNATRules(egressIPToPodIPCache map[string]sets.String) error {
 	predicate := func(item *nbdb.NAT) bool {
 		egressIPName, exists := item.ExternalIDs["name"]
 		// Exclude rows that have no name or are not the right type
@@ -1062,34 +1079,38 @@ func (oc *Controller) syncStaleSNATRules(egressIPToPodIPCache map[string]sets.St
 
 	nats, err := libovsdbops.FindNATsUsingPredicate(oc.nbClient, predicate)
 	if err != nil {
-		klog.Errorf("Unable to sync egress IPs err: %v", err)
-		return
+		return fmt.Errorf("unable to sync egress IPs err: %v", err)
 	}
 
 	if len(nats) == 0 {
 		// No stale nat entries to deal with: noop.
-		return
+		return nil
 	}
 
 	routers, err := libovsdbops.FindRoutersUsingNAT(oc.nbClient, nats)
 	if err != nil {
-		klog.Errorf("Unable to sync egress IPs, err: %v", err)
-		return
+		return fmt.Errorf("unable to sync egress IPs, err: %v", err)
 	}
 
+	var errors []error
 	ops := []ovsdb.Operation{}
 	for _, router := range routers {
 		ops, err = libovsdbops.DeleteNATsFromRouterOps(oc.nbClient, ops, &router, nats...)
 		if err != nil {
 			klog.Errorf("Error deleting stale NAT from router %s: %v", router.Name, err)
+			errors = append(errors, err)
 			continue
 		}
+	}
+	if len(errors) > 0 {
+		return fmt.Errorf("failed deleting stale NAT: %v", utilerrors.NewAggregate(errors))
 	}
 
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
-		klog.Errorf("Error deleting stale NATs: %v", err)
+		return fmt.Errorf("error deleting stale NATs: %v", err)
 	}
+	return nil
 }
 
 // generatePodIPCacheForEgressIP builds a cache of egressIP name -> podIPs for fast
