@@ -504,10 +504,11 @@ func delServiceRules(service *kapi.Service, npw *nodePortWatcher) {
 	delGatewayIptRules(service, false)
 }
 
-func serviceUpdateNeeded(old, new *kapi.Service) bool {
+func serviceUpdateNotNeeded(old, new *kapi.Service) bool {
 	return reflect.DeepEqual(new.Spec.Ports, old.Spec.Ports) &&
 		reflect.DeepEqual(new.Spec.ExternalIPs, old.Spec.ExternalIPs) &&
 		reflect.DeepEqual(new.Spec.ClusterIP, old.Spec.ClusterIP) &&
+		reflect.DeepEqual(new.Spec.ClusterIPs, old.Spec.ClusterIPs) &&
 		reflect.DeepEqual(new.Spec.Type, old.Spec.Type) &&
 		reflect.DeepEqual(new.Status.LoadBalancer.Ingress, old.Status.LoadBalancer.Ingress) &&
 		reflect.DeepEqual(new.Spec.ExternalTrafficPolicy, old.Spec.ExternalTrafficPolicy)
@@ -543,9 +544,9 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) {
 func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) {
 	name := ktypes.NamespacedName{Namespace: old.Namespace, Name: old.Name}
 
-	if serviceUpdateNeeded(old, new) {
+	if serviceUpdateNotNeeded(old, new) {
 		klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, "+
-			".Spec.ExternalIP, .Spec.ClusterIP, .Spec.Type, .Status.LoadBalancer.Ingress, .Spec.ExternalTrafficPolicy", new.Name)
+			".Spec.ExternalIP, .Spec.ClusterIP, .Spec.ClusterIPs, .Spec.Type, .Status.LoadBalancer.Ingress, .Spec.ExternalTrafficPolicy", new.Name)
 		return
 	}
 	// Update the service in svcConfig if we need to so that other handler
@@ -708,9 +709,9 @@ func (npwipt *nodePortWatcherIptables) AddService(service *kapi.Service) {
 }
 
 func (npwipt *nodePortWatcherIptables) UpdateService(old, new *kapi.Service) {
-	if serviceUpdateNeeded(old, new) {
+	if serviceUpdateNotNeeded(old, new) {
 		klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, "+
-			".Spec.ExternalIP, .Spec.ClusterIP, .Spec.Type, .Status.LoadBalancer.Ingress", new.Name)
+			".Spec.ExternalIP, .Spec.ClusterIP, .Spec.ClusterIPs, .Spec.Type, .Status.LoadBalancer.Ingress", new.Name)
 		return
 	}
 
