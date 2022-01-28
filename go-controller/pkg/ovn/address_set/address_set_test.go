@@ -106,7 +106,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 					},
 				}
 
-				err = asFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) {
+				err = asFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) error {
 					found := false
 					for _, n := range namespaces {
 						name := n.makeNames()
@@ -116,6 +116,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 						}
 					}
 					gomega.Expect(found).To(gomega.BeTrue())
+					return nil
 				})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				return nil

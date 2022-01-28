@@ -131,7 +131,7 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 	}
 
 	stalePGs := []string{}
-	err := oc.addressSetFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, policyName string) {
+	err := oc.addressSetFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, policyName string) error {
 		if policyName != "" && !expectedPolicies[namespaceName][policyName] {
 			// policy doesn't exist on k8s. Delete the port group
 			portGroupName := fmt.Sprintf("%s_%s", namespaceName, policyName)
@@ -140,8 +140,10 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 			// delete the address sets for this old policy from OVN
 			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
 				klog.Errorf(err.Error())
+				return err
 			}
 		}
+		return nil
 	})
 	if err != nil {
 		klog.Errorf("Error in syncing network policies: %v", err)

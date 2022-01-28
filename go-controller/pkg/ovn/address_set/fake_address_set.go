@@ -86,7 +86,9 @@ func (f *FakeAddressSetFactory) ProcessEachAddressSet(iteratorFn AddressSetIterF
 		if len(parts) >= 2 {
 			nameSuffix = parts[1]
 		}
-		iteratorFn(asName, addrSetNamespace, nameSuffix)
+		if err := iteratorFn(asName, addrSetNamespace, nameSuffix); err != nil {
+			return err
+		}
 	}
 	return nil
 }
