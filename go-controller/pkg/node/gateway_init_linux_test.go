@@ -974,6 +974,15 @@ var _ = Describe("Gateway Init Operations", func() {
 		It("sets up a shared interface gateway with tagged VLAN", func() {
 			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0IP, eth0GWIP, eth0CIDR, 3000)
 		})
+
+		config.Gateway.Interface = eth0Name
+		It("sets up a shared interface gateway with predetermined gateway interface", func() {
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0IP, eth0GWIP, eth0CIDR, 0)
+		})
+
+		It("sets up a shared interface gateway with tagged VLAN + predetermined gateway interface", func() {
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0IP, eth0GWIP, eth0CIDR, 3000)
+		})
 	})
 })
 

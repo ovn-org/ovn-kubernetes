@@ -17,13 +17,14 @@ import (
 
 // getDefaultGatewayInterfaceDetails returns the interface name on
 // which the default gateway (for route to 0.0.0.0) is configured.
+// optionally pass the pre-determined gateway interface
 // It also returns the default gateways themselves.
-func getDefaultGatewayInterfaceDetails() (string, []net.IP, error) {
+func getDefaultGatewayInterfaceDetails(gwIface string) (string, []net.IP, error) {
 	var intfName string
 	var gatewayIPs []net.IP
 
 	if config.IPv4Mode {
-		intfIPv4Name, gw, err := getDefaultGatewayInterfaceByFamily(netlink.FAMILY_V4)
+		intfIPv4Name, gw, err := getDefaultGatewayInterfaceByFamily(netlink.FAMILY_V4, gwIface)
 		if err != nil {
 			return "", gatewayIPs, err
 		}
@@ -32,7 +33,7 @@ func getDefaultGatewayInterfaceDetails() (string, []net.IP, error) {
 	}
 
 	if config.IPv6Mode {
-		intfIPv6Name, gw, err := getDefaultGatewayInterfaceByFamily(netlink.FAMILY_V6)
+		intfIPv6Name, gw, err := getDefaultGatewayInterfaceByFamily(netlink.FAMILY_V6, gwIface)
 		if err != nil {
 			return "", gatewayIPs, err
 		}
@@ -51,10 +52,29 @@ func getDefaultGatewayInterfaceDetails() (string, []net.IP, error) {
 	return intfName, gatewayIPs, nil
 }
 
-func getDefaultGatewayInterfaceByFamily(family int) (string, net.IP, error) {
+// uses netlink to do a route lookup for default gateway
+// takes IP address family and optional name of a pre-determined gateway interface
+// returns name of default gateway interface, the default gateway ip, and any error
+func getDefaultGatewayInterfaceByFamily(family int, gwIface string) (string, net.IP, error) {
 	// filter the default route to obtain the gateway
 	filter := &netlink.Route{Dst: nil}
-	routes, err := netlink.RouteListFiltered(family, filter, netlink.RT_FILTER_DST)
+	mask := netlink.RT_FILTER_DST
+	// gw interface provided
+	if len(gwIface) > 0 {
+		link, err := netlink.LinkByName(gwIface)
+		if err != nil {
+			return "", nil, fmt.Errorf("error looking up gw interface: %q, error: %w", gwIface, err)
+		}
+		if link.Attrs() == nil {
+			return "", nil, fmt.Errorf("no attributes found for link: %#v", link)
+		}
+		gwIfIdx := link.Attrs().Index
+		klog.Infof("Provided gateway interface %q, found as index: %d", gwIface, gwIfIdx)
+		filter.LinkIndex = gwIfIdx
+		mask = mask | netlink.RT_FILTER_OIF
+	}
+
+	routes, err := netlink.RouteListFiltered(family, filter, mask)
 	if err != nil {
 		return "", nil, errors.Wrapf(err, "failed to get routing table in node")
 	}
@@ -71,8 +91,17 @@ func getDefaultGatewayInterfaceByFamily(family int) (string, net.IP, error) {
 				klog.Warningf("Failed to get gateway for route %v : %v", r, err)
 				continue
 			}
-			klog.Infof("Found default gateway interface %s %s", intfLink.Attrs().Name, r.Gw.String())
-			return intfLink.Attrs().Name, r.Gw, nil
+			if intfLink.Attrs() == nil {
+				return "", nil, fmt.Errorf("no attributes found for link: %#v", intfLink.Attrs())
+			}
+			foundIfName := intfLink.Attrs().Name
+			klog.Infof("Found default gateway interface %s %s", foundIfName, r.Gw.String())
+			if len(gwIface) > 0 && gwIface != foundIfName {
+				// this should not happen, but if it did, indicates something broken with our use of the netlink lib
+				return "", nil, fmt.Errorf("mistmaching provided gw interface: %s and gateway found: %s",
+					gwIface, foundIfName)
+			}
+			return foundIfName, r.Gw, nil
 		}
 
 		// multipath, use the first valid entry
@@ -88,8 +117,17 @@ func getDefaultGatewayInterfaceByFamily(family int) (string, net.IP, error) {
 				klog.Warningf("Failed to get gateway for multipath route %v : %v", nh, err)
 				continue
 			}
-			klog.Infof("Found default gateway interface %s %s", intfLink.Attrs().Name, nh.Gw.String())
-			return intfLink.Attrs().Name, nh.Gw, nil
+			if intfLink.Attrs() == nil {
+				return "", nil, fmt.Errorf("no attributes found for link: %#v", intfLink.Attrs())
+			}
+			foundIfName := intfLink.Attrs().Name
+			klog.Infof("Found default gateway interface %s %s", foundIfName, nh.Gw.String())
+			if len(gwIface) > 0 && gwIface != foundIfName {
+				// this should not happen, but if it did, indicates something broken with our use of the netlink lib
+				return "", nil, fmt.Errorf("mistmaching provided gw interface: %q and gateway found: %q",
+					gwIface, foundIfName)
+			}
+			return foundIfName, nh.Gw, nil
 		}
 	}
 	return "", net.IP{}, fmt.Errorf("failed to get default gateway interface")
