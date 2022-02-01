@@ -1016,10 +1016,11 @@ func commonFlows(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost string) [
 
 		// table 0, packets coming from host Commit connections with ct_mark ctMarkHost
 		// so that reverse direction goes back to the host.
+		// output:NORMAL to avoid problems with invalid port number when NetworkManager is restarted.
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=100, in_port=%s, ip, "+
-				"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
-				defaultOpenFlowCookie, ofPortHost, config.Default.ConntrackZone, ctMarkHost, ofPortPhys))
+				"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:NORMAL",
+				defaultOpenFlowCookie, ofPortHost, config.Default.ConntrackZone, ctMarkHost))
 
 		// table 0, packets coming from external. Send it through conntrack and
 		// resubmit to table 1 to know the state and mark of the connection.
@@ -1037,10 +1038,11 @@ func commonFlows(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost string) [
 
 		// table 0, packets coming from host. Commit connections with ct_mark ctMarkHost
 		// so that reverse direction goes back to the host.
+		// output:NORMAL to avoid problems with invalid port number when NetworkManager is restarted.
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=100, in_port=%s, ipv6, "+
-				"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
-				defaultOpenFlowCookie, ofPortHost, config.Default.ConntrackZone, ctMarkHost, ofPortPhys))
+				"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:NORMAL",
+				defaultOpenFlowCookie, ofPortHost, config.Default.ConntrackZone, ctMarkHost))
 
 		// table 0, packets coming from external. Send it through conntrack and
 		// resubmit to table 1 to know the state and mark of the connection.
