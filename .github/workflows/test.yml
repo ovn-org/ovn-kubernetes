@@ -8,8 +8,8 @@ on:
     - cron: '0 */12 * * *'
 
 env:
-  GO_VERSION: "1.16.3"
-  K8S_VERSION: v1.20.2
+  GO_VERSION: "1.17.6"
+  K8S_VERSION: v1.23.3
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
   KIND_ALLOW_SYSTEM_WRITES: true
