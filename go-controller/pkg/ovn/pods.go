@@ -126,13 +126,13 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 	return nil
 }
 
-func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
+func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) (err error) {
 	oc.deletePodExternalGW(pod)
 	if pod.Spec.HostNetwork {
-		return
+		return nil
 	}
 	if !util.PodScheduled(pod) {
-		return
+		return nil
 	}
 
 	podDesc := pod.Namespace + "/" + pod.Name
@@ -146,57 +146,55 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		// is not re-added into the cache. Delete logical switch port anyway.
 		ops, err := oc.delLSPOps(logicalPort, pod.Spec.NodeName, "")
 		if err != nil {
-			klog.Errorf(err.Error())
-		} else {
-			_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-			if err != nil {
-				klog.Errorf("Cannot delete logical switch port %s, %v", logicalPort, err)
-			}
+			return fmt.Errorf("failed to create delete ops for the lsp: %s: %s", logicalPort, err)
+		}
+		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+		if err != nil {
+			return fmt.Errorf("cannot delete logical switch port %s, %v", logicalPort, err)
 		}
 
 		// Even if the port is not in the cache, IPs annotated in the Pod annotation may already be allocated,
 		// need to release them to avoid leakage.
 		annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
-		if err == nil {
-			podIfAddrs := annotation.IPs
-			_ = oc.lsManager.ReleaseIPs(pod.Spec.NodeName, podIfAddrs)
+		if err != nil {
+			return fmt.Errorf("unable to unmarshal pod annocations for pod %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
-		return
+		podIfAddrs := annotation.IPs
+		return oc.lsManager.ReleaseIPs(pod.Spec.NodeName, podIfAddrs)
 	}
 
 	// FIXME: if any of these steps fails we need to stop and try again later...
 	var allOps, ops []ovsdb.Operation
 	if ops, err = oc.deletePodFromNamespace(pod.Namespace, portInfo); err != nil {
-		klog.Errorf(err.Error())
-	} else {
-		allOps = append(allOps, ops...)
+		return fmt.Errorf("unable to delete pod %s from namespace: %w", podDesc, err)
 	}
+	allOps = append(allOps, ops...)
 
 	ops, err = oc.delLSPOps(logicalPort, pod.Spec.NodeName, portInfo.uuid)
 	if err != nil {
-		klog.Errorf(err.Error())
-	} else {
-		allOps = append(allOps, ops...)
+		return fmt.Errorf("failed to create delete ops for the lsp: %s: %s", logicalPort, err)
 	}
+	allOps = append(allOps, ops...)
 
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, allOps)
 	if err != nil {
-		klog.Errorf("Cannot delete logical switch port %s, %v", logicalPort, err)
+		return fmt.Errorf("cannot delete logical switch port %s, %v", logicalPort, err)
 	}
 
 	if err := oc.lsManager.ReleaseIPs(portInfo.logicalSwitch, portInfo.ips); err != nil {
-		klog.Errorf(err.Error())
+		return fmt.Errorf("cannot release IPs for pod %s: %w", podDesc, err)
 	}
 
 	if config.Gateway.DisableSNATMultipleGWs {
 		if err := deletePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, []*net.IPNet{}, portInfo.ips); err != nil {
-			klog.Errorf(err.Error())
+			return fmt.Errorf("cannot delete GR SNAT for pod %s: %w", podDesc, err)
 		}
 	}
 	podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
 	oc.deleteGWRoutesForPod(podNsName, portInfo.ips)
 
 	oc.logicalPortCache.remove(logicalPort)
+	return nil
 }
 
 func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (*nbdb.LogicalSwitch, error) {
