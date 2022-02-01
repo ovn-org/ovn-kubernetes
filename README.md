@@ -175,6 +175,11 @@ This feature allows to offload the OVS data-plane to the NIC while maintaining O
 can be clustered. The databases are OVN_Northbound and OVN_Southbound. This document explains how to 
 cluster them and start various daemons for the ovn-kubernetes integration.
 
+[External IP and LoadBalancer Ingress](./docs/external-ip-and-loadbalancer-ingress.md)
+OVN Kubernetes implements both External IPs and LoadBalancer Ingress IPs in the form of highly available
+OVN load balancers. It is the administrator's responsibility to route traffic to the Kubernetes nodes for
+both of these VIP types.
+
 ## Other
 [Unit test mocks](./docs/mocks-ut-faq.md)
 
@@ -183,5 +188,5 @@ ovn-kubernetes driven cluster.
 
 # OVN Kubernetes Basics
 A good resource to get started with understanding `ovn-kubernetes` is the following recording and slides, which run through the basic architecture and functionality of the system.
-[slides](https://docs.google.com/presentation/d/1vlEjEqqVz02P4_oubt_FmMSHrvpS8ewmHWNuEl4lKDI/edit?usp=sharing)
-[recording](https://drive.google.com/file/d/1FogbqRgT-yIA8UKfcAQNXNQrcq5Hz0z9/view?usp=sharing)
+[slides](https://docs.google.com/presentation/d/1ZtwP3t6uNAU0g4S7IbqSxPg2bmQW-pPGyMW2ZNj9Nrg/edit?usp=sharing)
+[recording](https://youtu.be/IzhR0Ig2030)

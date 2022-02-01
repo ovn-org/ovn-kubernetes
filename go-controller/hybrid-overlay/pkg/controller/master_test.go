@@ -657,14 +657,16 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			// TODO(trozet) actually check some expected data in the DB?
 			dbSetup := libovsdbtest.TestSetup{}
 			var libovsdbOvnNBClient libovsdbclient.Client
-			libovsdbOvnNBClient, libovsdbCleanup, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			var libovsdbOvnSBClient libovsdbclient.Client
+			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			Expect(err).NotTo(HaveOccurred())
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
 				libovsdbOvnNBClient,
+				libovsdbOvnSBClient,
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -747,8 +749,9 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			// TODO(trozet) actually check some expected data in the DB?
 			dbSetup := libovsdbtest.TestSetup{}
 			var libovsdbOvnNBClient libovsdbclient.Client
-			libovsdbOvnNBClient, libovsdbCleanup, err = libovsdbtest.NewNBTestHarness(dbSetup, nil)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			var libovsdbOvnSBClient libovsdbclient.Client
+			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			Expect(err).NotTo(HaveOccurred())
 
 			k := &kube.Kube{KClient: fakeClient}
 			m, err := NewMaster(
@@ -757,6 +760,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
 				libovsdbOvnNBClient,
+				libovsdbOvnSBClient,
 				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())

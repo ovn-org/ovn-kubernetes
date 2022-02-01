@@ -242,16 +242,6 @@ var metricDBClusterConnOutErr = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	},
 )
 
-var metricDBE2eTimestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvnNamespace,
-	Subsystem: MetricOvnSubsystemDB,
-	Name:      "e2e_timestamp",
-	Help:      "The current e2e-timestamp value as observed in this instance of the database"},
-	[]string{
-		"db_name",
-	},
-)
-
 func ovnDBSizeMetricsUpdater(basePath, direction, database string) {
 	if size, err := getOvnDBSizeViaPath(basePath, direction, database); err != nil {
 		klog.Errorf("Failed to update OVN DB size metric: %v", err)
@@ -280,34 +270,6 @@ func getOvnDBSizeViaPath(basePath, direction, database string) (int64, error) {
 		return 0, fmt.Errorf("failed to find OVN DB database %s at path %s: %v", database, dbPath, err)
 	}
 	return fileInfo.Size(), nil
-}
-
-func ovnE2eTimeStampUpdater(direction, database string) {
-	var stdout, stderr string
-	var err error
-
-	if direction == "sb" {
-		stdout, stderr, err = util.RunOVNSbctl("--if-exists", "--no-leader-only",
-			"get", "SB_Global", ".", "options:e2e_timestamp")
-	} else {
-		stdout, stderr, err = util.RunOVNNbctl("--if-exists", "--no-leader-only",
-			"get", "NB_Global", ".", "options:e2e_timestamp")
-	}
-	if err != nil {
-		klog.Errorf("Failed to scrape timestamp for database %s: "+
-			"stderr (%s) (%v)", database, stderr, err)
-		return
-	}
-	if stdout != "" {
-		if value, err := strconv.ParseFloat(stdout, 64); err == nil {
-			metricDBE2eTimestamp.WithLabelValues(database).Set(value)
-		} else {
-			klog.Errorf("Failed to parse %s e2e-timestamp value to float64 :(%v)",
-				database, err)
-		}
-	} else {
-		metricDBE2eTimestamp.WithLabelValues(database).Set(0)
-	}
 }
 
 func ovnDBMemoryMetricsUpdater(direction, database string) {
@@ -428,7 +390,6 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 		ovnRegistry.MustRegister(metricDBClusterConnInErr)
 		ovnRegistry.MustRegister(metricDBClusterConnOutErr)
 	}
-	ovnRegistry.MustRegister(metricDBE2eTimestamp)
 	dirDbMap := map[string]string{
 		"nb": "OVN_Northbound",
 		"sb": "OVN_Southbound",
@@ -440,6 +401,7 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 	} else {
 		klog.Infof("Unable to enable OVN DB size metric because no OVN DBs found at path %q", dbBasePath)
 	}
+
 	// functions responsible for collecting the values and updating the prometheus metrics
 	go func() {
 		for {
@@ -451,7 +413,6 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 					ovnDBSizeMetricsUpdater(dbBasePath, direction, database)
 				}
 				ovnDBMemoryMetricsUpdater(direction, database)
-				ovnE2eTimeStampUpdater(direction, database)
 			}
 			time.Sleep(30 * time.Second)
 		}
