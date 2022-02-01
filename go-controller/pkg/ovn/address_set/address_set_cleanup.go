@@ -16,7 +16,7 @@ func NonDualStackAddressSetCleanup(nbClient libovsdbclient.Client) error {
 	const old = 0
 	const new = 1
 	addressSets := map[string][2]bool{}
-	err := forEachAddressSet(nbClient, func(name string) {
+	err := forEachAddressSet(nbClient, func(name string) error {
 		shortName := truncateSuffixFromAddressSet(name)
 		spec, found := addressSets[shortName]
 		if !found {
@@ -30,6 +30,7 @@ func NonDualStackAddressSetCleanup(nbClient libovsdbclient.Client) error {
 			spec[new] = true
 		}
 		addressSets[shortName] = spec
+		return nil
 	})
 
 	if err != nil {
