@@ -16,6 +16,18 @@ type HostPort struct {
 	Port int32
 }
 
+// String representation of a HostPort entry
+func (hp *HostPort) String() string {
+	switch {
+	case hp.Host == nil:
+		return fmt.Sprintf(":%d", hp.Port)
+	case hp.Host.To4() != nil:
+		return fmt.Sprintf("%s:%d", *hp.Host, hp.Port)
+	default:
+		return fmt.Sprintf("[%s]:%d", *hp.Host, hp.Port)
+	}
+}
+
 // CIDRNetworkEntry is the object that holds the definition for a single network CIDR range
 type CIDRNetworkEntry struct {
 	CIDR             *net.IPNet
@@ -84,7 +96,7 @@ func ParseClusterSubnetEntries(clusterSubnetCmd string) ([]CIDRNetworkEntry, err
 // These entries define the flow collectors OVS will send flow metadata by using NetFlow/SFlow/IPFIX.
 func ParseFlowCollectors(flowCollectors string) ([]HostPort, error) {
 	var parsedFlowsCollectors []HostPort
-
+	readCollectors := map[string]struct{}{}
 	collectors := strings.Split(flowCollectors, ",")
 	for _, v := range collectors {
 		host, port, err := net.SplitHostPort(v)
@@ -104,7 +116,15 @@ func ParseFlowCollectors(flowCollectors string) ([]HostPort, error) {
 		if err != nil {
 			return nil, fmt.Errorf("collector port %s is not a valid port: %v", port, err)
 		}
-		parsedFlowsCollectors = append(parsedFlowsCollectors, HostPort{Host: ipp, Port: int32(parsedPort)})
+		// checking if HostPort entry is duplicate
+		hostPort := HostPort{Host: ipp, Port: int32(parsedPort)}
+		hps := hostPort.String()
+		if _, ok := readCollectors[hps]; ok {
+			// duplicate flow collector. Ignore it
+			continue
+		}
+		readCollectors[hps] = struct{}{}
+		parsedFlowsCollectors = append(parsedFlowsCollectors, hostPort)
 	}
 
 	return parsedFlowsCollectors, nil
