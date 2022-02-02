@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -57,16 +58,17 @@ var (
 
 	// Default holds parsed config file parameters and command-line overrides
 	Default = DefaultConfig{
-		MTU:               1400,
-		ConntrackZone:     64000,
-		EncapType:         "geneve",
-		EncapIP:           "",
-		EncapPort:         DefaultEncapPort,
-		InactivityProbe:   100000, // in Milliseconds
-		OpenFlowProbe:     180,    // in Seconds
-		MonitorAll:        true,
-		LFlowCacheEnable:  true,
-		RawClusterSubnets: "10.128.0.0/14/23",
+		MTU:                 1400,
+		ConntrackZone:       64000,
+		EncapType:           "geneve",
+		EncapIP:             "",
+		EncapPort:           DefaultEncapPort,
+		InactivityProbe:     100000, // in Milliseconds
+		OpenFlowProbe:       180,    // in Seconds
+		MonitorAll:          true,
+		LFlowCacheEnable:    true,
+		RawClusterSubnets:   "10.128.0.0/14/23",
+		OVSDBConnectTimeout: types.OVSDBTimeout,
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -214,6 +216,8 @@ type DefaultConfig struct {
 	// ClusterSubnets holds parsed cluster subnet entries and may be used
 	// outside the config module.
 	ClusterSubnets []CIDRNetworkEntry
+	// OVSDBConnectTimeout indicates timeout when (re)connecting to ovsdb server
+	OVSDBConnectTimeout time.Duration `gcfg:"ovsdb-connect-timeout"`
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -750,6 +754,13 @@ var CommonFlags = []cli.Flag{
 		Usage:       "The largest number of messages per second that gets logged before drop (default 20)",
 		Destination: &cliConfig.Logging.ACLLoggingRateLimit,
 		Value:       20,
+	},
+	&cli.DurationFlag{
+		Name:        "ovsdb-connect-timeout",
+		Usage:       "Specify timeout when (re)connecting to ovsdb",
+		Destination: &cliConfig.Default.OVSDBConnectTimeout,
+		Value:       types.OVSDBTimeout,
+		DefaultText: types.OVSDBTimeout.String(),
 	},
 }
 

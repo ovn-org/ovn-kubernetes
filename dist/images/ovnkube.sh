@@ -79,6 +79,7 @@ fi
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev. valid when ovnkube node mode is: dpu, dpu-host
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="dpu"
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
+# OVSDB_CONNECT_TIMEOUT - custom timeout value when connecting to nb/sb ovsdb (default 10 seconds)
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -247,6 +248,12 @@ fi
 
 OVS_RUNDIR=/var/run/openvswitch
 OVS_LOGDIR=/var/log/openvswitch
+
+# OVSDB_CONNECT_TIMEOUT
+ovsdb_connect_timeout_flag=
+if [ -n "${OVSDB_CONNECT_TIMEOUT}" ]; then
+  ovsdb_connect_timeout_flag="--ovsdb-connect-timeout ${OVSDB_CONNECT_TIMEOUT}"
+fi
 
 # =========================================
 
@@ -957,7 +964,8 @@ ovn-master() {
     ${egressip_enabled_flag} \
     ${egressfirewall_enabled_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
-    --host-network-namespace ${ovn_host_network_namespace} &
+    --host-network-namespace ${ovn_host_network_namespace} \
+    ${ovsdb_connect_timeout_flag} &
 
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master

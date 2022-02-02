@@ -58,6 +58,7 @@ OVN_IPFIX_CACHE_ACTIVE_TIMEOUT=""
 OVN_HOST_NETWORK_NAMESPACE=""
 OVN_EX_GW_NETWORK_INTERFACE=""
 OVNKUBE_NODE_MGMT_PORT_NETDEV=""
+OVSDB_CONNECT_TIMEOUT=""
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -223,6 +224,9 @@ while [ "$1" != "" ]; do
   --ovnkube-node-mgmt-port-netdev)
     OVNKUBE_NODE_MGMT_PORT_NETDEV=$VALUE
     ;;
+  --ovsdb-connect-timeout)
+    OVSDB_CONNECT_TIMEOUT=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -340,6 +344,8 @@ ovn_ex_gw_networking_interface=${OVN_EX_GW_NETWORK_INTERFACE}
 echo "ovn_ex_gw_networking_interface: ${ovn_ex_gw_networking_interface}"
 ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV}
 echo "ovnkube_node_mgmt_port_netdev: ${ovnkube_node_mgmt_port_netdev}"
+ovsdb_connect_timeout=${OVSDB_CONNECT_TIMEOUT}
+echo "ovsdb_connect_timeout: ${ovsdb_connect_timeout}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -431,6 +437,7 @@ ovn_image=${image} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovsdb_connect_timeout=${ovsdb_connect_timeout} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ../yaml/ovnkube-master.yaml
 
 ovn_image=${image} \

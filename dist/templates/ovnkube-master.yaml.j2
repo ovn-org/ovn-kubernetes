@@ -265,6 +265,10 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: host_network_namespace
+        {% if ovsdb_connect_timeout!="" -%}
+        - name: OVSDB_CONNECT_TIMEOUT
+          value: "{{ovsdb_connect_timeout}}"
+        {% endif -%}
       # end of container
 
       volumes:

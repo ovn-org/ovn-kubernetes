@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/urfave/cli/v2"
 	kexec "k8s.io/utils/exec"
@@ -139,6 +140,7 @@ conntrack-zone=64321
 cluster-subnets=10.132.0.0/14/23
 lflow-cache-limit=1000
 lflow-cache-limit-kb=100000
+ovsdb-connect-timeout=19000000000
 
 [kubernetes]
 kubeconfig=/path/to/kubeconfig
@@ -288,6 +290,8 @@ var _ = Describe("Config Operations", func() {
 				gomega.Expect(a.Address).To(gomega.Equal(""))
 				gomega.Expect(a.CertCommonName).To(gomega.Equal(""))
 			}
+
+			gomega.Expect(Default.OVSDBConnectTimeout).To(gomega.Equal(10 * time.Second))
 			return nil
 		}
 		err := app.Run([]string{app.Name, "-config-file=" + cfgFile.Name()})
@@ -559,6 +563,7 @@ var _ = Describe("Config Operations", func() {
 				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
 
+			gomega.Expect(Default.OVSDBConnectTimeout).To(gomega.Equal(19 * time.Second))
 			return nil
 		}
 		err = app.Run([]string{app.Name, "-config-file=" + cfgFile.Name()})
@@ -629,7 +634,7 @@ var _ = Describe("Config Operations", func() {
 				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
 			gomega.Expect(Default.MonitorAll).To(gomega.BeFalse())
-
+			gomega.Expect(Default.OVSDBConnectTimeout).To(gomega.Equal(25 * time.Second))
 			return nil
 		}
 		cliArgs := []string{
@@ -669,6 +674,7 @@ var _ = Describe("Config Operations", func() {
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=11.132.0.0/14/23",
 			"-monitor-all=false",
+			"-ovsdb-connect-timeout=25s",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
