@@ -504,6 +504,41 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
+		ginkgo.It("returns ops to add duplicate IPs to an empty address set", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const addr1 string = "1.2.3.4"
+				dbSetup := libovsdbtest.TestSetup{}
+				var libovsdbOvnNBClient libovsdbclient.Client
+				var err error
+				libovsdbOvnNBClient, _, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				asFactory = NewOvnAddressSetFactory(libovsdbOvnNBClient)
+
+				_, err = config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				as, err := asFactory.NewAddressSet("foobar", nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				ops, err := as.AddIPsReturnOps([]net.IP{net.ParseIP(addr1), net.ParseIP(addr1)})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				var addr1Interface interface{} = addr1
+				expectedOps, err := ovsdb.NewOvsSet(addr1Interface)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(ops[0].Mutations[0].Value).To(gomega.Equal(expectedOps))
+				expectedDatabaseState := &nbdb.AddressSet{
+					Name:        hashedAddressSet(addrsetName + ipv4AddressSetSuffix),
+					Addresses:   []string{}, // nothing added to address set yet since transact isn't called
+					ExternalIDs: map[string]string{"name": addrsetName + ipv4AddressSetSuffix},
+				}
+				gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("gets all IPs from an address set", func() {
 			app.Action = func(ctx *cli.Context) error {
 				dbSetup := libovsdbtest.TestSetup{
