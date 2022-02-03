@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"sort"
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -336,7 +335,7 @@ func newOvnAddressSet(nbClient libovsdbclient.Client, name string, ips []net.IP)
 		name:     name,
 		hashName: hashedAddressSet(name),
 	}
-	uniqIPs := ipToStringSort(ips)
+	uniqIPs := ipsToString(ips)
 	addrSet := &nbdb.AddressSet{Name: hashedAddressSet(name)}
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	defer cancel()
@@ -683,13 +682,11 @@ func splitIPsByFamily(ips []net.IP) (v4 []net.IP, v6 []net.IP) {
 	return
 }
 
-func ipToStringSort(ips []net.IP) []string {
+func ipsToString(ips []net.IP) []string {
 	// my kingdom for a ".values()" function
 	out := make([]string, 0, len(ips))
 	for _, ip := range ips {
 		out = append(out, ip.String())
 	}
-	// so the tests are predictable
-	sort.Strings(out)
 	return out
 }
