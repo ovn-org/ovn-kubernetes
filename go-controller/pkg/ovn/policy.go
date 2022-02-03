@@ -1187,7 +1187,10 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(gp *gressPolicy, objs ...in
 		}
 		pods = append(pods, pod)
 	}
-	if err := gp.addPeerPods(pods...); err != nil {
+	// If no IP is found, the pod handler may not have added it by the time the network policy handler
+	// processed this pod event. It will grab it during the pod update event to add the annotation,
+	// so don't log an error here.
+	if err := gp.addPeerPods(pods...); err != nil && !errors.Is(err, util.ErrNoPodIPFound) {
 		klog.Errorf(err.Error())
 	}
 }
