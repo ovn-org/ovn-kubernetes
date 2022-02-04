@@ -61,12 +61,13 @@ const (
 	// ovnkube master (currently, it is just a 'get' loop)
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
-	resyncInterval        = 0
-	handlerAlive   uint32 = 0
-	handlerDead    uint32 = 1
+	resyncInterval = 0
 
 	// namespace, node, and pod handlers
 	defaultNumEventQueues uint32 = 15
+
+	// default tag for handlers, basically untagged
+	defaultHandlerTag uint64 = 0
 )
 
 var (
@@ -326,7 +327,7 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
 }
 
-func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, tag uint64, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	inf, ok := wf.informers[objType]
 	if !ok {
 		klog.Fatalf("Tried to add handler of unknown object type %v", objType)
@@ -367,9 +368,14 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel l
 	}
 
 	handlerID := atomic.AddUint64(&wf.handlerCounter, 1)
-	handler := inf.addHandler(handlerID, filterFunc, funcs, items)
+	handler := inf.addHandler(handlerID, tag, filterFunc, funcs, items)
 	klog.V(5).Infof("Added %v event handler %d", objType, handler.id)
 	return handler
+}
+
+// removeHandlersByTag removes handlers on an informer by a specific tag
+func (wf *WatchFactory) removeHandlersByTag(objType reflect.Type, tag uint64) {
+	wf.informers[objType].removeHandlersByTag(tag)
 }
 
 func (wf *WatchFactory) removeHandler(objType reflect.Type, handler *Handler) {
@@ -378,12 +384,12 @@ func (wf *WatchFactory) removeHandler(objType reflect.Type, handler *Handler) {
 
 // AddPodHandler adds a handler function that will be executed on Pod object changes
 func (wf *WatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(podType, "", nil, handlerFuncs, processExisting)
+	return wf.addHandler(podType, "", defaultHandlerTag, nil, handlerFuncs, processExisting)
 }
 
 // AddFilteredPodHandler adds a handler function that will be executed when Pod objects that match the given filters change
-func (wf *WatchFactory) AddFilteredPodHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(podType, namespace, sel, handlerFuncs, processExisting)
+func (wf *WatchFactory) AddFilteredPodHandler(namespace string, tag uint64, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(podType, namespace, tag, sel, handlerFuncs, processExisting)
 }
 
 // RemovePodHandler removes a Pod object event handler function
@@ -391,14 +397,19 @@ func (wf *WatchFactory) RemovePodHandler(handler *Handler) {
 	wf.removeHandler(podType, handler)
 }
 
+// RemovePodHandlerByTag removes all Pod object event handlers that matches a specific tag
+func (wf *WatchFactory) RemovePodHandlerByTag(tag uint64) {
+	wf.removeHandlersByTag(podType, tag)
+}
+
 // AddServiceHandler adds a handler function that will be executed on Service object changes
 func (wf *WatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(serviceType, "", nil, handlerFuncs, processExisting)
+	return wf.addHandler(serviceType, "", defaultHandlerTag, nil, handlerFuncs, processExisting)
 }
 
 // AddFilteredServiceHandler adds a handler function that will be executed on all Service object changes for a specific namespace
-func (wf *WatchFactory) AddFilteredServiceHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(serviceType, namespace, nil, handlerFuncs, processExisting)
+func (wf *WatchFactory) AddFilteredServiceHandler(namespace string, tag uint64, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(serviceType, namespace, tag, nil, handlerFuncs, processExisting)
 }
 
 // RemoveServiceHandler removes a Service object event handler function
@@ -406,14 +417,19 @@ func (wf *WatchFactory) RemoveServiceHandler(handler *Handler) {
 	wf.removeHandler(serviceType, handler)
 }
 
+// RemoveServiceHandlersByTag removes all Service object event handlers that match a specific tag
+func (wf *WatchFactory) RemoveServiceHandlersByTag(tag uint64) {
+	wf.removeHandlersByTag(serviceType, tag)
+}
+
 // AddEndpointsHandler adds a handler function that will be executed on Endpoints object changes
 func (wf *WatchFactory) AddEndpointsHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(endpointsType, "", nil, handlerFuncs, processExisting)
+	return wf.addHandler(endpointsType, "", defaultHandlerTag, nil, handlerFuncs, processExisting)
 }
 
 // AddFilteredEndpointsHandler adds a handler function that will be executed when Endpoint objects that match the given filters change
 func (wf *WatchFactory) AddFilteredEndpointsHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(endpointsType, namespace, sel, handlerFuncs, processExisting)
+	return wf.addHandler(endpointsType, namespace, defaultHandlerTag, sel, handlerFuncs, processExisting)
 }
 
 // RemoveEndpointsHandler removes a Endpoints object event handler function
@@ -423,7 +439,7 @@ func (wf *WatchFactory) RemoveEndpointsHandler(handler *Handler) {
 
 // AddPolicyHandler adds a handler function that will be executed on NetworkPolicy object changes
 func (wf *WatchFactory) AddPolicyHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(policyType, "", nil, handlerFuncs, processExisting)
+	return wf.addHandler(policyType, "", defaultHandlerTag, nil, handlerFuncs, processExisting)
 }
 
 // RemovePolicyHandler removes a NetworkPolicy object event handler function
@@ -433,7 +449,7 @@ func (wf *WatchFactory) RemovePolicyHandler(handler *Handler) {
 
 // AddEgressFirewallHandler adds a handler function that will be executed on EgressFirewall object changes
 func (wf *WatchFactory) AddEgressFirewallHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(egressFirewallType, "", nil, handlerFuncs, processExisting)
+	return wf.addHandler(egressFirewallType, "", defaultHandlerTag, nil, handlerFuncs, processExisting)
 }
 
 // RemoveEgressFirewallHandler removes an EgressFirewall object event handler function
@@ -443,7 +459,7 @@ func (wf *WatchFactory) RemoveEgressFirewallHandler(handler *Handler) {
 
 // AddEgressIPHandler adds a handler function that will be executed on EgressIP object changes
 func (wf *WatchFactory) AddEgressIPHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(egressIPType, "", nil, handlerFuncs, processExisting)
+	return wf.addHandler(egressIPType, "", defaultHandlerTag, nil, handlerFuncs, processExisting)
 }
 
 // RemoveEgressIPHandler removes an EgressIP object event handler function
@@ -453,7 +469,7 @@ func (wf *WatchFactory) RemoveEgressIPHandler(handler *Handler) {
 
 // AddCloudPrivateIPConfigHandler adds a handler function that will be executed on CloudPrivateIPConfig object changes
 func (wf *WatchFactory) AddCloudPrivateIPConfigHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(cloudPrivateIPConfigType, "", nil, handlerFuncs, processExisting)
+	return wf.addHandler(cloudPrivateIPConfigType, "", defaultHandlerTag, nil, handlerFuncs, processExisting)
 }
 
 // RemoveCloudPrivateIPConfigHandler removes an CloudPrivateIPConfig object event handler function
@@ -463,12 +479,12 @@ func (wf *WatchFactory) RemoveCloudPrivateIPConfigHandler(handler *Handler) {
 
 // AddNamespaceHandler adds a handler function that will be executed on Namespace object changes
 func (wf *WatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(namespaceType, "", nil, handlerFuncs, processExisting)
+	return wf.addHandler(namespaceType, "", defaultHandlerTag, nil, handlerFuncs, processExisting)
 }
 
 // AddFilteredNamespaceHandler adds a handler function that will be executed when Namespace objects that match the given filters change
-func (wf *WatchFactory) AddFilteredNamespaceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(namespaceType, namespace, sel, handlerFuncs, processExisting)
+func (wf *WatchFactory) AddFilteredNamespaceHandler(namespace string, tag uint64, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(namespaceType, namespace, tag, sel, handlerFuncs, processExisting)
 }
 
 // RemoveNamespaceHandler removes a Namespace object event handler function
@@ -476,14 +492,19 @@ func (wf *WatchFactory) RemoveNamespaceHandler(handler *Handler) {
 	wf.removeHandler(namespaceType, handler)
 }
 
+// RemoveNamespaceHandlersByTag removes Namespace object event handlers that match a specific tag
+func (wf *WatchFactory) RemoveNamespaceHandlersByTag(tag uint64) {
+	wf.removeHandlersByTag(namespaceType, tag)
+}
+
 // AddNodeHandler adds a handler function that will be executed on Node object changes
 func (wf *WatchFactory) AddNodeHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(nodeType, "", nil, handlerFuncs, processExisting)
+	return wf.addHandler(nodeType, "", defaultHandlerTag, nil, handlerFuncs, processExisting)
 }
 
 // AddFilteredNodeHandler dds a handler function that will be executed when Node objects that match the given label selector
 func (wf *WatchFactory) AddFilteredNodeHandler(sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(nodeType, "", sel, handlerFuncs, processExisting)
+	return wf.addHandler(nodeType, "", defaultHandlerTag, sel, handlerFuncs, processExisting)
 }
 
 // RemoveNodeHandler removes a Node object event handler function
@@ -509,7 +530,7 @@ func (wf *WatchFactory) GetPods(namespace string) ([]*kapi.Pod, error) {
 	return podLister.Pods(namespace).List(labels.Everything())
 }
 
-// GetPods returns all the pods in a given namespace by the label selector
+// GetPodsBySelector returns all the pods in a given namespace by the label selector
 func (wf *WatchFactory) GetPodsBySelector(namespace string, selector metav1.LabelSelector) ([]*kapi.Pod, error) {
 	podLister := wf.informers[podType].lister.(listers.PodLister)
 	return podLister.Pods(namespace).List(labels.Set(selector.MatchLabels).AsSelector())

@@ -27,34 +27,21 @@ type Handler struct {
 	base cache.FilteringResourceEventHandler
 
 	id uint64
-	// tombstone is used to track the handler's lifetime. handlerAlive
-	// indicates the handler can be called, while handlerDead indicates
-	// it has been scheduled for removal and should not be called.
-	// tombstone should only be set using atomic operations since it is
-	// used from multiple goroutines.
-	tombstone uint32
+	// tag is used to as a way to categorize one or more handlers into a group
+	// useful for operations on a group of handlers referenced by their tag
+	tag uint64
 }
 
 func (h *Handler) OnAdd(obj interface{}) {
-	if atomic.LoadUint32(&h.tombstone) == handlerAlive {
-		h.base.OnAdd(obj)
-	}
+	h.base.OnAdd(obj)
 }
 
 func (h *Handler) OnUpdate(oldObj, newObj interface{}) {
-	if atomic.LoadUint32(&h.tombstone) == handlerAlive {
-		h.base.OnUpdate(oldObj, newObj)
-	}
+	h.base.OnUpdate(oldObj, newObj)
 }
 
 func (h *Handler) OnDelete(obj interface{}) {
-	if atomic.LoadUint32(&h.tombstone) == handlerAlive {
-		h.base.OnDelete(obj)
-	}
-}
-
-func (h *Handler) kill() bool {
-	return atomic.CompareAndSwapUint32(&h.tombstone, handlerAlive, handlerDead)
+	h.base.OnDelete(obj)
 }
 
 type event struct {
@@ -89,15 +76,10 @@ type informer struct {
 
 func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
 	i.RLock()
-	curHandlers := make([]*Handler, 0, len(i.handlers))
 	for _, handler := range i.handlers {
-		curHandlers = append(curHandlers, handler)
-	}
-	i.RUnlock()
-
-	for _, handler := range curHandlers {
 		f(handler)
 	}
+	i.RUnlock()
 }
 
 func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
@@ -115,14 +97,14 @@ func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
 	}
 }
 
-func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
+func (i *informer) addHandler(id, tag uint64, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
 	handler := &Handler{
 		cache.FilteringResourceEventHandler{
 			FilterFunc: filterFunc,
 			Handler:    funcs,
 		},
 		id,
-		handlerAlive,
+		tag,
 	}
 
 	// Send existing items to the handler's add function; informers usually
@@ -134,25 +116,30 @@ func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, 
 	return handler
 }
 
-func (i *informer) removeHandler(handler *Handler) {
-	if !handler.kill() {
-		klog.Errorf("Removing already-removed %v event handler %d", i.oType, handler.id)
-		return
-	}
-
-	klog.V(5).Infof("Sending %v event handler %d for removal", i.oType, handler.id)
-
-	go func() {
-		i.Lock()
-		defer i.Unlock()
-		if _, ok := i.handlers[handler.id]; ok {
-			// Remove the handler
-			delete(i.handlers, handler.id)
-			klog.V(5).Infof("Removed %v event handler %d", i.oType, handler.id)
-		} else {
-			klog.Warningf("Tried to remove unknown object type %v event handler %d", i.oType, handler.id)
+func (i *informer) removeHandlersByTag(tag uint64) {
+	klog.V(5).Infof("Removing %v event handlers with tag: %d", i.oType, tag)
+	i.Lock()
+	defer i.Unlock()
+	for id, handler := range i.handlers {
+		if handler.tag == tag {
+			klog.V(5).Infof("Removing %v event handler %d with tag: %d", i.oType, handler.id, handler.tag)
+			delete(i.handlers, id)
 		}
-	}()
+	}
+}
+
+func (i *informer) removeHandler(handler *Handler) {
+	klog.V(5).Infof("Removing %v event handler %d, tag: %d", i.oType, handler.id, handler.tag)
+
+	i.Lock()
+	defer i.Unlock()
+	if _, ok := i.handlers[handler.id]; ok {
+		// Remove the handler
+		delete(i.handlers, handler.id)
+		klog.V(5).Infof("Removed %v event handler %d", i.oType, handler.id)
+	} else {
+		klog.Warningf("Tried to remove unknown object type %v event handler %d", i.oType, handler.id)
+	}
 }
 
 func (i *informer) processEvents(events chan *event, stopChan <-chan struct{}) {
@@ -345,8 +332,6 @@ func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
 }
 
 func (i *informer) removeAllHandlers() {
-	i.Lock()
-	defer i.Unlock()
 	for _, handler := range i.handlers {
 		i.removeHandler(handler)
 	}

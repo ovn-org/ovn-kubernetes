@@ -6,12 +6,12 @@ import (
 	"net"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	ovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
@@ -43,7 +43,9 @@ const (
 	policyTypeNumACLExtIdKey = "%s_num"
 )
 
-var NetworkPolicyNotCreated error
+// policyHandlerCounter is used to create new tags for adding child handlers for a network policy
+// the tag should be unique per policy
+var policyHandlerCounter uint64
 
 type networkPolicy struct {
 	// RWMutex synchronizes operations on the policy.
@@ -55,9 +57,21 @@ type networkPolicy struct {
 	policyTypes     []knet.PolicyType
 	ingressPolicies []*gressPolicy
 	egressPolicies  []*gressPolicy
-	podHandlerList  []*factory.Handler
-	svcHandlerList  []*factory.Handler
-	nsHandlerList   []*factory.Handler
+
+	// policyHandlerID is a generated unique ID used to track all handlers created
+	// for this policy
+	policyHandlerID uint64
+
+	// subLock is a temporary lock until we move to workqueues/level driven.
+	// We need a way to lock parts of the network policy for operations without
+	// needing a full lock on the entire policy, especially around concurrent gress policy ops.
+	// Handlers may run in parallel, and therefore we need some lock to protect those ops.
+	// Mainly when we add handlers we don't want to give up the np.Lock.
+	// Right now the create -> run handlers -> delete is serialized.
+	// During "run handlers" the NP itself can not be destroyed or created,
+	// therefore only subLock is needed to operate on pieces of the np.
+	// For overall NP delete/create operations, NP full lock is required.
+	subLock *sync.Mutex
 
 	// localPods is a list of pods affected by ths policy
 	// this is a sync map so we can handle multiple pods at once
@@ -65,8 +79,6 @@ type networkPolicy struct {
 	localPods sync.Map
 
 	portGroupName string
-	deleted       bool //deleted policy
-	created       bool
 }
 
 func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
@@ -76,9 +88,8 @@ func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
 		policyTypes:     policy.Spec.PolicyTypes,
 		ingressPolicies: make([]*gressPolicy, 0),
 		egressPolicies:  make([]*gressPolicy, 0),
-		podHandlerList:  make([]*factory.Handler, 0),
-		svcHandlerList:  make([]*factory.Handler, 0),
-		nsHandlerList:   make([]*factory.Handler, 0),
+		subLock:         &sync.Mutex{},
+		policyHandlerID: atomic.AddUint64(&policyHandlerCounter, 1),
 		localPods:       sync.Map{},
 	}
 	return np
@@ -260,16 +271,8 @@ func (oc *Controller) createDefaultDenyPGAndACLs(namespace, policy string, nsInf
 }
 
 func (oc *Controller) updateACLLoggingForPolicy(np *networkPolicy, logLevel string) error {
-	np.Lock()
-	defer np.Unlock()
-
-	if np.deleted {
-		return nil
-	}
-
-	if !np.created {
-		return NetworkPolicyNotCreated
-	}
+	np.subLock.Lock()
+	defer np.subLock.Unlock()
 
 	acls := oc.buildNetworkPolicyACLs(np, logLevel)
 	ops, err := libovsdbops.UpdateACLsLoggingOps(oc.nbClient, nil, acls...)
@@ -296,29 +299,19 @@ func (oc *Controller) setACLLoggingForNamespace(ns string, nsInfo *namespaceInfo
 	}
 
 	klog.V(5).Infof("Setting network policy ACLs for ns: %s", ns)
+
+	var policyErr error
 	for name, policy := range nsInfo.networkPolicies {
-		// REMOVEME(trozet): once we can hold the np lock for the duration of the np create
-		// there is no reason to do this loop
-		// 24ms is chosen because gomega.Eventually default timeout is 50ms
-		// libovsdb transactions take less than 50ms usually as well so pod create
-		// should be done within a couple iterations
-		retryErr := wait.PollImmediate(24*time.Millisecond, 1*time.Second, func() (bool, error) {
-			if err := oc.updateACLLoggingForPolicy(policy, nsInfo.aclLogging.Allow); err == nil {
-				return true, nil
-			} else if errors.Is(err, NetworkPolicyNotCreated) {
-				return false, nil
-			} else {
-				return false, fmt.Errorf("unable to update ACL for network policy: %v", err)
-			}
-		})
-		if retryErr != nil {
-			return retryErr
+		if err := oc.updateACLLoggingForPolicy(policy, nsInfo.aclLogging.Allow); err != nil {
+			policyErr = fmt.Errorf("%w, unable to update ACL for network policy %s/%s: %v",
+				policyErr, policy.namespace, policy.name, err)
+			continue
 		}
 
 		klog.Infof("ACL for network policy: %s, updated to new log level: %s", name, nsInfo.aclLogging.Allow)
 	}
 
-	return nil
+	return policyErr
 }
 
 func targetPortGroupName(portGroupIngressDenyName string, portGroupEgressDenyName string, policyType knet.PolicyType) string {
@@ -605,8 +598,8 @@ func (oc *Controller) localPodAddDefaultDeny(policy *knet.NetworkPolicy,
 
 // localPodDelDefaultDeny decrements a pod's policy reference count and removes a pod
 // from the default-deny portgroups if the reference count for the pod is 0
-func (oc *Controller) localPodDelDefaultDeny(
-	np *networkPolicy, ports ...*lpInfo) (ingressDenyPorts, egressDenyPorts []string) {
+func (oc *Controller) localPodDelDefaultDeny(policyTypes []knet.PolicyType, numEgressRules int,
+	ports ...*lpInfo) (ingressDenyPorts, egressDenyPorts []string) {
 	oc.lspMutex.Lock()
 
 	ingressDenyPorts = []string{}
@@ -614,7 +607,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 
 	// Remove port from ingress deny port-group for [Ingress] and [ingress,egress] PolicyTypes
 	// If NOT [egress] PolicyType
-	if !(len(np.policyTypes) == 1 && np.policyTypes[0] == knet.PolicyTypeEgress) {
+	if !(len(policyTypes) == 1 && policyTypes[0] == knet.PolicyTypeEgress) {
 		for _, portInfo := range ports {
 			if oc.lspIngressDenyCache[portInfo.name] > 0 {
 				oc.lspIngressDenyCache[portInfo.name]--
@@ -628,8 +621,8 @@ func (oc *Controller) localPodDelDefaultDeny(
 
 	// Remove port from egress deny port group for [egress] and [ingress,egress] PolicyTypes
 	// if [egress] PolicyType OR there are any egress rules OR [ingress,egress] PolicyType
-	if (len(np.policyTypes) == 1 && np.policyTypes[0] == knet.PolicyTypeEgress) ||
-		len(np.egressPolicies) > 0 || len(np.policyTypes) == 2 {
+	if (len(policyTypes) == 1 && policyTypes[0] == knet.PolicyTypeEgress) ||
+		numEgressRules > 0 || len(policyTypes) == 2 {
 		for _, portInfo := range ports {
 			if oc.lspEgressDenyCache[portInfo.name] > 0 {
 				oc.lspEgressDenyCache[portInfo.name]--
@@ -646,8 +639,8 @@ func (oc *Controller) localPodDelDefaultDeny(
 }
 
 func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
-	np *networkPolicy, objs ...interface{}) (policyPorts, ingressDenyPorts, egressDenyPorts []string) {
-	klog.Infof("Processing NetworkPolicy %s/%s to have %d local pods...", np.namespace, np.name, len(objs))
+	localPods *sync.Map, objs ...interface{}) (policyPorts, ingressDenyPorts, egressDenyPorts []string) {
+	klog.Infof("Processing NetworkPolicy %s/%s to have %d local pods...", policy.Namespace, policy.Name, len(objs))
 
 	// get list of pods and their logical ports to add
 	// theoretically this should never filter any pods but it's always good to be
@@ -703,7 +696,7 @@ func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
 		}
 
 		// if this pod is somehow already added to this policy, then skip
-		if _, ok := np.localPods.LoadOrStore(portInfo.name, portInfo); ok {
+		if _, ok := localPods.LoadOrStore(portInfo.name, portInfo); ok {
 			return
 		}
 
@@ -732,9 +725,9 @@ func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
 	return
 }
 
-func (oc *Controller) processLocalPodSelectorDelPods(np *networkPolicy,
+func (oc *Controller) processLocalPodSelectorDelPods(policy *knet.NetworkPolicy, localPods *sync.Map,
 	objs ...interface{}) (policyPorts, ingressDenyPorts, egressDenyPorts []string) {
-	klog.Infof("Processing NetworkPolicy %s/%s to delete %d local pods...", np.namespace, np.name, len(objs))
+	klog.Infof("Processing NetworkPolicy %s/%s to delete %d local pods...", policy.Namespace, policy.Name, len(objs))
 
 	policyPorts = make([]string, 0, len(objs))
 	policyPortsInfo := make([]*lpInfo, 0, len(objs))
@@ -753,7 +746,7 @@ func (oc *Controller) processLocalPodSelectorDelPods(np *networkPolicy,
 		}
 
 		// If we never saw this pod, short-circuit
-		if _, ok := np.localPods.LoadAndDelete(logicalPort); !ok {
+		if _, ok := localPods.LoadAndDelete(logicalPort); !ok {
 			continue
 		}
 
@@ -761,111 +754,99 @@ func (oc *Controller) processLocalPodSelectorDelPods(np *networkPolicy,
 		policyPorts = append(policyPorts, portInfo.uuid)
 	}
 
-	ingressDenyPorts, egressDenyPorts = oc.localPodDelDefaultDeny(np, policyPortsInfo...)
+	ingressDenyPorts, egressDenyPorts = oc.localPodDelDefaultDeny(policy.Spec.PolicyTypes, len(policy.Spec.Egress),
+		policyPortsInfo...)
 
 	return
 }
 
 // handleLocalPodSelectorAddFunc adds a new pod to an existing NetworkPolicy
-func (oc *Controller) handleLocalPodSelectorAddFunc(policy *knet.NetworkPolicy, np *networkPolicy,
-	portGroupIngressDenyName, portGroupEgressDenyName string, obj interface{}) {
-	np.RLock()
-	defer np.RUnlock()
-	if np.deleted {
-		return
-	}
-
-	policyPorts, ingressDenyPorts, egressDenyPorts := oc.processLocalPodSelectorSetPods(policy, np, obj)
+func (oc *Controller) handleLocalPodSelectorAddFunc(policy *knet.NetworkPolicy, localPods *sync.Map,
+	portGroupIngressDenyName, portGroupEgressDenyName, portGroupName string, obj interface{}) error {
+	policyPorts, ingressDenyPorts, egressDenyPorts := oc.processLocalPodSelectorSetPods(policy, localPods, obj)
 
 	ops, err := libovsdbops.AddPortsToPortGroupOps(oc.nbClient, nil, portGroupIngressDenyName, ingressDenyPorts...)
 	if err != nil {
-		oc.processLocalPodSelectorDelPods(np, obj)
-		klog.Errorf(err.Error())
+		return err
 	}
 
 	ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, portGroupEgressDenyName, egressDenyPorts...)
 	if err != nil {
-		oc.processLocalPodSelectorDelPods(np, obj)
-		klog.Errorf(err.Error())
+		return err
 	}
 
-	ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, np.portGroupName, policyPorts...)
+	ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, portGroupName, policyPorts...)
 	if err != nil {
-		oc.processLocalPodSelectorDelPods(np, obj)
-		klog.Errorf(err.Error())
+		return err
 	}
 
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
-		oc.processLocalPodSelectorDelPods(np, obj)
-		klog.Errorf(err.Error())
-		return
+		return err
 	}
+	return nil
 }
 
-func (oc *Controller) handleLocalPodSelectorDelFunc(policy *knet.NetworkPolicy, np *networkPolicy,
-	portGroupIngressDenyName, portGroupEgressDenyName string, obj interface{}) {
-	np.RLock()
-	defer np.RUnlock()
-	if np.deleted {
-		return
-	}
-
-	policyPorts, ingressDenyPorts, egressDenyPorts := oc.processLocalPodSelectorDelPods(np, obj)
+func (oc *Controller) handleLocalPodSelectorDelFunc(policy *knet.NetworkPolicy, localPods *sync.Map,
+	portGroupIngressDenyName, portGroupEgressDenyName, portGroupName string, obj interface{}) error {
+	policyPorts, ingressDenyPorts, egressDenyPorts := oc.processLocalPodSelectorDelPods(policy, localPods, obj)
 
 	ops, err := libovsdbops.DeletePortsFromPortGroupOps(oc.nbClient, nil, portGroupIngressDenyName, ingressDenyPorts...)
 	if err != nil {
-		oc.processLocalPodSelectorSetPods(policy, np, obj)
-		klog.Errorf(err.Error())
-		return
+		return err
 	}
 
 	ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.nbClient, ops, portGroupEgressDenyName, egressDenyPorts...)
 	if err != nil {
-		oc.processLocalPodSelectorSetPods(policy, np, obj)
-		klog.Errorf(err.Error())
-		return
+		return err
 	}
 
-	ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.nbClient, ops, np.portGroupName, policyPorts...)
+	ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.nbClient, ops, portGroupName, policyPorts...)
 	if err != nil {
-		oc.processLocalPodSelectorSetPods(policy, np, obj)
-		klog.Errorf(err.Error())
+		return err
 	}
 
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
-		oc.processLocalPodSelectorSetPods(policy, np, obj)
-		klog.Errorf(err.Error())
-		return
+		return err
 	}
+	return nil
 }
 
 func (oc *Controller) handleLocalPodSelector(
-	policy *knet.NetworkPolicy, np *networkPolicy, portGroupIngressDenyName, portGroupEgressDenyName string,
+	policy *knet.NetworkPolicy, policyHandlerID uint64, localPods *sync.Map,
+	portGroupIngressDenyName, portGroupEgressDenyName, portGroupName string,
 	handleInitialItems func([]interface{})) {
 
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	sel, _ := metav1.LabelSelectorAsSelector(&policy.Spec.PodSelector)
 
-	h := oc.watchFactory.AddFilteredPodHandler(policy.Namespace, sel,
+	oc.watchFactory.AddFilteredPodHandler(policy.Namespace, policyHandlerID, sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
-				oc.handleLocalPodSelectorAddFunc(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, obj)
+				if err := oc.handleLocalPodSelectorAddFunc(policy, localPods, portGroupIngressDenyName,
+					portGroupEgressDenyName, portGroupName, obj); err != nil {
+					klog.Errorf(err.Error())
+					oc.processLocalPodSelectorDelPods(policy, localPods, obj)
+				}
 			},
 			DeleteFunc: func(obj interface{}) {
-				oc.handleLocalPodSelectorDelFunc(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, obj)
+				if err := oc.handleLocalPodSelectorDelFunc(policy, localPods, portGroupIngressDenyName,
+					portGroupEgressDenyName, portGroupName, obj); err != nil {
+					klog.Errorf(err.Error())
+					oc.processLocalPodSelectorSetPods(policy, localPods, obj)
+				}
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				oc.handleLocalPodSelectorAddFunc(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, newObj)
+				if err := oc.handleLocalPodSelectorAddFunc(policy, localPods, portGroupIngressDenyName,
+					portGroupEgressDenyName, portGroupName, newObj); err != nil {
+					klog.Errorf(err.Error())
+					oc.processLocalPodSelectorDelPods(policy, localPods, newObj)
+				}
 			},
 		}, func(objs []interface{}) {
 			handleInitialItems(objs)
 		})
-
-	np.Lock()
-	defer np.Unlock()
-	np.podHandlerList = append(np.podHandlerList, h)
 }
 
 // we only need to create an address set if there is a podSelector or namespaceSelector
@@ -879,10 +860,9 @@ func hasAnyLabelSelector(peers []knet.NetworkPolicyPeer) bool {
 }
 
 // createNetworkPolicy creates a network policy
+// should only ever be called with a lock on np
 func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.NetworkPolicy, aclLogDeny, aclLogAllow,
 	portGroupIngressDenyName, portGroupEgressDenyName string) {
-
-	np.Lock()
 
 	if aclLogDeny != "" || aclLogAllow != "" {
 		klog.Infof("ACL logging for network policy %s in namespace %s set to deny=%s, allow=%s",
@@ -899,7 +879,7 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 	// addressSet for the peer pods.
 	for i, ingressJSON := range policy.Spec.Ingress {
 		klog.V(5).Infof("Network policy ingress is %+v", ingressJSON)
-
+		np.subLock.Lock()
 		ingress := newGressPolicy(knet.PolicyTypeIngress, i, policy.Namespace, policy.Name)
 
 		// Each ingress rule can have multiple ports to which we allow traffic.
@@ -911,10 +891,9 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 			klog.V(5).Infof("Network policy %s with ingress rule %s has a selector", policy.Name, ingress.policyName)
 			if err := ingress.ensurePeerAddressSet(oc.addressSetFactory); err != nil {
 				klog.Errorf(err.Error())
+				np.subLock.Unlock()
 				continue
 			}
-			// Start service handlers ONLY if there's an ingress Address Set
-			oc.handlePeerService(policy, ingress, np)
 		}
 
 		for _, fromJSON := range ingressJSON.From {
@@ -930,13 +909,19 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 			})
 		}
 		np.ingressPolicies = append(np.ingressPolicies, ingress)
+		np.subLock.Unlock()
+
+		if hasAnyLabelSelector(ingressJSON.From) {
+			// Start service handlers ONLY if there's an ingress Address Set
+			oc.handlePeerService(policy, ingress, np.policyHandlerID, np.subLock)
+		}
 	}
 
 	// Go through each egress rule.  For each egress rule, create an
 	// addressSet for the peer pods.
 	for i, egressJSON := range policy.Spec.Egress {
 		klog.V(5).Infof("Network policy egress is %+v", egressJSON)
-
+		np.subLock.Lock()
 		egress := newGressPolicy(knet.PolicyTypeEgress, i, policy.Namespace, policy.Name)
 
 		// Each egress rule can have multiple ports to which we allow traffic.
@@ -948,6 +933,7 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 			klog.V(5).Infof("Network policy %s with egress rule %s has a selector", policy.Name, egress.policyName)
 			if err := egress.ensurePeerAddressSet(oc.addressSetFactory); err != nil {
 				klog.Errorf(err.Error())
+				np.subLock.Unlock()
 				continue
 			}
 		}
@@ -965,38 +951,45 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 			})
 		}
 		np.egressPolicies = append(np.egressPolicies, egress)
+		np.subLock.Unlock()
 	}
-	np.Unlock()
 
+	readableGroupName := fmt.Sprintf("%s_%s", policy.Namespace, policy.Name)
+	np.portGroupName = hashedPortGroup(readableGroupName)
+
+	// as handlers are added, we need to start holding subLock to operate on parts of the policy
 	for _, handler := range policyHandlers {
 		if handler.namespaceSelector != nil && handler.podSelector != nil {
 			// For each rule that contains both peer namespace selector and
 			// peer pod selector, we create a watcher for each matching namespace
 			// that populates the addressSet
-			oc.handlePeerNamespaceAndPodSelector(handler.namespaceSelector, handler.podSelector, handler.gress, np)
+			oc.handlePeerNamespaceAndPodSelector(handler.namespaceSelector, handler.podSelector, handler.gress,
+				np.policyHandlerID, np.subLock)
 		} else if handler.namespaceSelector != nil {
 			// For each peer namespace selector, we create a watcher that
 			// populates ingress.peerAddressSets
-			oc.handlePeerNamespaceSelector(handler.namespaceSelector, handler.gress, np)
+			oc.handlePeerNamespaceSelector(handler.namespaceSelector, handler.gress, np.policyHandlerID, policy,
+				np.portGroupName, np.subLock)
 		} else if handler.podSelector != nil {
 			// For each peer pod selector, we create a watcher that
 			// populates the addressSet
 			oc.handlePeerPodSelector(policy, handler.podSelector,
-				handler.gress, np)
+				handler.gress, np.policyHandlerID, np.subLock)
 		}
 	}
 
-	readableGroupName := fmt.Sprintf("%s_%s", policy.Namespace, policy.Name)
-	np.portGroupName = hashedPortGroup(readableGroupName)
 	ops := []ovsdb.Operation{}
 
 	// Build policy ACLs
+	np.subLock.Lock()
 	acls := oc.buildNetworkPolicyACLs(np, aclLogAllow)
 	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, ops, acls...)
 	if err != nil {
 		klog.Errorf(err.Error())
+		np.subLock.Unlock()
 		return
 	}
+	np.subLock.Unlock()
 
 	// Build a port group for the policy. All the pods that this policy
 	// selects will be eventually added to this port group.
@@ -1008,42 +1001,35 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 	var selectedPods []interface{}
 	handleInitialSelectedPods := func(objs []interface{}) {
 		selectedPods = objs
-		policyPorts, ingressDenyPorts, egressDenyPorts := oc.processLocalPodSelectorSetPods(policy, np, selectedPods...)
+		policyPorts, ingressDenyPorts, egressDenyPorts := oc.processLocalPodSelectorSetPods(policy, &np.localPods, selectedPods...)
 		pg.Ports = append(pg.Ports, policyPorts...)
 		ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, portGroupIngressDenyName, ingressDenyPorts...)
 		if err != nil {
-			oc.processLocalPodSelectorDelPods(np, selectedPods...)
+			oc.processLocalPodSelectorDelPods(policy, &np.localPods, selectedPods...)
 			klog.Errorf(err.Error())
 		}
 		ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, portGroupEgressDenyName, egressDenyPorts...)
 		if err != nil {
-			oc.processLocalPodSelectorDelPods(np, selectedPods...)
+			oc.processLocalPodSelectorDelPods(policy, &np.localPods, selectedPods...)
 			klog.Errorf(err.Error())
 		}
 	}
-	oc.handleLocalPodSelector(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, handleInitialSelectedPods)
-
-	np.Lock()
-	defer np.Unlock()
-	if np.deleted {
-		oc.processLocalPodSelectorDelPods(np, selectedPods...)
-		return
-	}
+	oc.handleLocalPodSelector(policy, np.policyHandlerID, &np.localPods, portGroupIngressDenyName,
+		portGroupEgressDenyName, np.portGroupName, handleInitialSelectedPods)
 
 	ops, err = libovsdbops.CreateOrUpdatePortGroupsOps(oc.nbClient, ops, pg)
 	if err != nil {
-		oc.processLocalPodSelectorDelPods(np, selectedPods...)
+		oc.processLocalPodSelectorDelPods(policy, &np.localPods, selectedPods...)
 		klog.Errorf(err.Error())
 		return
 	}
 
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
-		oc.processLocalPodSelectorDelPods(np, selectedPods...)
+		oc.processLocalPodSelectorDelPods(policy, &np.localPods, selectedPods...)
 		klog.Errorf(err.Error())
 		return
 	}
-	np.created = true
 }
 
 // addNetworkPolicy creates and applies OVN ACLs to pod logical switch
@@ -1064,7 +1050,8 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		return
 	}
 	np := NewNetworkPolicy(policy)
-
+	np.Lock()
+	defer np.Unlock()
 	if len(nsInfo.networkPolicies) == 0 {
 		err = oc.createDefaultDenyPGAndACLs(policy.Namespace, policy.Name, nsInfo)
 		if err != nil {
@@ -1080,6 +1067,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	portGroupEgressDenyName := nsInfo.portGroupEgressDenyName
 	nsUnlock()
 	oc.createNetworkPolicy(np, policy, aclLogDeny, aclLogAllow, portGroupIngressDenyName, portGroupEgressDenyName)
+	klog.Infof("Policy created: %s/%s", policy.Namespace, policy.Name)
 }
 
 // buildNetworkPolicyACLs builds the ACLS associated with the 'gress policies
@@ -1123,7 +1111,6 @@ func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy) {
 func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, nsInfo *namespaceInfo) {
 	np.Lock()
 	defer np.Unlock()
-	np.deleted = true
 	oc.shutdownHandlers(np)
 
 	ports := []*lpInfo{}
@@ -1133,7 +1120,9 @@ func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, nsInfo *namespaceI
 		return true
 	})
 
-	ingressDenyPorts, egressDenyPorts := oc.localPodDelDefaultDeny(np, ports...)
+	np.subLock.Lock()
+	defer np.subLock.Unlock()
+	ingressDenyPorts, egressDenyPorts := oc.localPodDelDefaultDeny(np.policyTypes, len(np.egressPolicies), ports...)
 
 	ops := []ovsdb.Operation{}
 	var err error
@@ -1185,7 +1174,7 @@ func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, nsInfo *namespaceI
 // handlePeerPodSelectorAddUpdate adds the IP address of a pod that has been
 // selected as a peer by a NetworkPolicy's ingress/egress section to that
 // ingress/egress address set
-func (oc *Controller) handlePeerPodSelectorAddUpdate(gp *gressPolicy, objs ...interface{}) {
+func (oc *Controller) handlePeerPodSelectorAddUpdate(gp *gressPolicy, subLock *sync.Mutex, objs ...interface{}) {
 	pods := make([]*kapi.Pod, 0, len(objs))
 	for _, obj := range objs {
 		pod := obj.(*kapi.Pod)
@@ -1194,6 +1183,8 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(gp *gressPolicy, objs ...in
 		}
 		pods = append(pods, pod)
 	}
+	subLock.Lock()
+	defer subLock.Unlock()
 	// If no IP is found, the pod handler may not have added it by the time the network policy handler
 	// processed this pod event. It will grab it during the pod update event to add the annotation,
 	// so don't log an error here.
@@ -1205,11 +1196,13 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(gp *gressPolicy, objs ...in
 // handlePeerPodSelectorDelete removes the IP address of a pod that no longer
 // matches a NetworkPolicy ingress/egress section's selectors from that
 // ingress/egress address set
-func (oc *Controller) handlePeerPodSelectorDelete(gp *gressPolicy, obj interface{}) {
+func (oc *Controller) handlePeerPodSelectorDelete(gp *gressPolicy, subLock *sync.Mutex, obj interface{}) {
 	pod := obj.(*kapi.Pod)
 	if pod.Spec.NodeName == "" {
 		return
 	}
+	subLock.Lock()
+	defer subLock.Unlock()
 	if err := gp.deletePeerPod(pod); err != nil {
 		klog.Errorf(err.Error())
 	}
@@ -1217,8 +1210,10 @@ func (oc *Controller) handlePeerPodSelectorDelete(gp *gressPolicy, obj interface
 
 // handlePeerServiceSelectorAddUpdate adds the VIP of a service that selects
 // pods that are selected by the Network Policy
-func (oc *Controller) handlePeerServiceAdd(gp *gressPolicy, obj interface{}) {
+func (oc *Controller) handlePeerServiceAdd(gp *gressPolicy, subLock *sync.Mutex, obj interface{}) {
 	service := obj.(*kapi.Service)
+	subLock.Lock()
+	defer subLock.Unlock()
 	klog.V(5).Infof("A Service: %s matches the namespace as the gress policy: %s", service.Name, gp.policyName)
 	if err := gp.addPeerSvcVip(oc.nbClient, service); err != nil {
 		klog.Errorf(err.Error())
@@ -1227,8 +1222,10 @@ func (oc *Controller) handlePeerServiceAdd(gp *gressPolicy, obj interface{}) {
 
 // handlePeerServiceDelete removes the VIP of a service that selects
 // pods that are selected by the Network Policy
-func (oc *Controller) handlePeerServiceDelete(gp *gressPolicy, obj interface{}) {
+func (oc *Controller) handlePeerServiceDelete(gp *gressPolicy, subLock *sync.Mutex, obj interface{}) {
 	service := obj.(*kapi.Service)
+	subLock.Lock()
+	defer subLock.Unlock()
 	if err := gp.deletePeerSvcVip(oc.nbClient, service); err != nil {
 		klog.Errorf(err.Error())
 	}
@@ -1237,17 +1234,17 @@ func (oc *Controller) handlePeerServiceDelete(gp *gressPolicy, obj interface{}) 
 // Watch Services that are in the same Namespace as the NP
 // To account for hairpined traffic
 func (oc *Controller) handlePeerService(
-	policy *knet.NetworkPolicy, gp *gressPolicy, np *networkPolicy) {
+	policy *knet.NetworkPolicy, gp *gressPolicy, policyHandlerID uint64, subLock *sync.Mutex) {
 
-	h := oc.watchFactory.AddFilteredServiceHandler(policy.Namespace,
+	oc.watchFactory.AddFilteredServiceHandler(policy.Namespace, policyHandlerID,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				// Service is matched so add VIP to addressSet
-				oc.handlePeerServiceAdd(gp, obj)
+				oc.handlePeerServiceAdd(gp, subLock, obj)
 			},
 			DeleteFunc: func(obj interface{}) {
 				// If Service that has matched pods are deleted remove VIP
-				oc.handlePeerServiceDelete(gp, obj)
+				oc.handlePeerServiceDelete(gp, subLock, obj)
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
 				// If Service Is updated make sure same pods are still matched
@@ -1263,81 +1260,67 @@ func (oc *Controller) handlePeerService(
 					return
 				}
 
-				oc.handlePeerServiceDelete(gp, oldObj)
-				oc.handlePeerServiceAdd(gp, newObj)
+				oc.handlePeerServiceDelete(gp, subLock, oldObj)
+				oc.handlePeerServiceAdd(gp, subLock, newObj)
 			},
 		}, nil)
-	np.svcHandlerList = append(np.svcHandlerList, h)
 }
 
 func (oc *Controller) handlePeerPodSelector(
 	policy *knet.NetworkPolicy, podSelector *metav1.LabelSelector,
-	gp *gressPolicy, np *networkPolicy) {
+	gp *gressPolicy, policyHandlerID uint64, subLock *sync.Mutex) {
 
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	sel, _ := metav1.LabelSelectorAsSelector(podSelector)
 
-	h := oc.watchFactory.AddFilteredPodHandler(policy.Namespace, sel,
+	oc.watchFactory.AddFilteredPodHandler(policy.Namespace, policyHandlerID, sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
-				oc.handlePeerPodSelectorAddUpdate(gp, obj)
+				oc.handlePeerPodSelectorAddUpdate(gp, subLock, obj)
 			},
 			DeleteFunc: func(obj interface{}) {
-				oc.handlePeerPodSelectorDelete(gp, obj)
+				oc.handlePeerPodSelectorDelete(gp, subLock, obj)
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				oc.handlePeerPodSelectorAddUpdate(gp, newObj)
+				oc.handlePeerPodSelectorAddUpdate(gp, subLock, newObj)
 			},
 		}, func(objs []interface{}) {
-			oc.handlePeerPodSelectorAddUpdate(gp, objs...)
+			oc.handlePeerPodSelectorAddUpdate(gp, subLock, objs...)
 		})
-	np.podHandlerList = append(np.podHandlerList, h)
 }
 
 func (oc *Controller) handlePeerNamespaceAndPodSelector(
 	namespaceSelector *metav1.LabelSelector,
 	podSelector *metav1.LabelSelector,
 	gp *gressPolicy,
-	np *networkPolicy) {
+	policyHandlerID uint64,
+	subLock *sync.Mutex) {
 
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	nsSel, _ := metav1.LabelSelectorAsSelector(namespaceSelector)
 	podSel, _ := metav1.LabelSelectorAsSelector(podSelector)
 
-	namespaceHandler := oc.watchFactory.AddFilteredNamespaceHandler("", nsSel,
+	oc.watchFactory.AddFilteredNamespaceHandler("", policyHandlerID, nsSel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
-				np.RLock()
-				alreadyDeleted := np.deleted
-				np.RUnlock()
-				if alreadyDeleted {
-					return
-				}
 
 				// The AddFilteredPodHandler call might call handlePeerPodSelectorAddUpdate
 				// on existing pods so we can't be holding the lock at this point
-				podHandler := oc.watchFactory.AddFilteredPodHandler(namespace.Name, podSel,
+				oc.watchFactory.AddFilteredPodHandler(namespace.Name, policyHandlerID, podSel,
 					cache.ResourceEventHandlerFuncs{
 						AddFunc: func(obj interface{}) {
-							oc.handlePeerPodSelectorAddUpdate(gp, obj)
+							oc.handlePeerPodSelectorAddUpdate(gp, subLock, obj)
 						},
 						DeleteFunc: func(obj interface{}) {
-							oc.handlePeerPodSelectorDelete(gp, obj)
+							oc.handlePeerPodSelectorDelete(gp, subLock, obj)
 						},
 						UpdateFunc: func(oldObj, newObj interface{}) {
-							oc.handlePeerPodSelectorAddUpdate(gp, newObj)
+							oc.handlePeerPodSelectorAddUpdate(gp, subLock, newObj)
 						},
 					}, func(objs []interface{}) {
-						oc.handlePeerPodSelectorAddUpdate(gp, objs...)
+						oc.handlePeerPodSelectorAddUpdate(gp, subLock, objs...)
 					})
-				np.Lock()
-				defer np.Unlock()
-				if np.deleted {
-					oc.watchFactory.RemovePodHandler(podHandler)
-					return
-				}
-				np.podHandlerList = append(np.podHandlerList, podHandler)
 			},
 			DeleteFunc: func(obj interface{}) {
 				// when the namespace labels no longer apply
@@ -1346,30 +1329,32 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 				pods, _ := oc.watchFactory.GetPods(namespace.Name)
 
 				for _, pod := range pods {
-					oc.handlePeerPodSelectorDelete(gp, pod)
+					oc.handlePeerPodSelectorDelete(gp, subLock, pod)
 				}
 
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
 			},
 		}, nil)
-	np.nsHandlerList = append(np.nsHandlerList, namespaceHandler)
 }
 
-func (oc *Controller) handlePeerNamespaceSelectorOnUpdate(np *networkPolicy, gp *gressPolicy, doUpdate func() bool) {
-	aclLoggingLevels := oc.GetNetworkPolicyACLLogging(np.namespace)
-	np.Lock()
-	defer np.Unlock()
-	// This needs to be a write lock because there's no locking around 'gress policies
-	if !np.deleted && doUpdate() {
-		acls := gp.buildLocalPodACLs(np.portGroupName, aclLoggingLevels.Allow)
+func (oc *Controller) handlePeerNamespaceSelectorOnUpdate(policy *knet.NetworkPolicy, portGroupName string,
+	gp *gressPolicy, subLock *sync.Mutex,
+	doUpdate func() bool) {
+	aclLoggingLevels := oc.GetNetworkPolicyACLLogging(policy.Namespace)
+	subLock.Lock()
+	defer subLock.Unlock()
+	if doUpdate() {
+		acls := gp.buildLocalPodACLs(portGroupName, aclLoggingLevels.Allow)
 		ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, acls...)
 		if err != nil {
-			klog.Errorf(err.Error())
+			klog.Errorf("Network Policy %s/%s: failed to create/update ACL Ops, error: %v",
+				policy.Namespace, policy.Name, err)
 		}
-		ops, err = libovsdbops.AddACLsToPortGroupOps(oc.nbClient, ops, np.portGroupName, acls...)
+		ops, err = libovsdbops.AddACLsToPortGroupOps(oc.nbClient, ops, portGroupName, acls...)
 		if err != nil {
-			klog.Errorf(err.Error())
+			klog.Errorf("Network Policy %s/%s: failed to make addACLsToPortGroupOps, acls: %#v acls,"+
+				" port group: %v, error: %v", policy.Namespace, policy.Name, acls, portGroupName, err.Error())
 		}
 		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 		if err != nil {
@@ -1380,53 +1365,53 @@ func (oc *Controller) handlePeerNamespaceSelectorOnUpdate(np *networkPolicy, gp 
 
 func (oc *Controller) handlePeerNamespaceSelector(
 	namespaceSelector *metav1.LabelSelector,
-	gress *gressPolicy, np *networkPolicy) {
+	gress *gressPolicy, policyHandlerID uint64,
+	policy *knet.NetworkPolicy, portGroupName string, subLock *sync.Mutex) {
 
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	sel, _ := metav1.LabelSelectorAsSelector(namespaceSelector)
 
-	h := oc.watchFactory.AddFilteredNamespaceHandler("", sel,
+	oc.watchFactory.AddFilteredNamespaceHandler("", policyHandlerID, sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
 				// Update the ACL ...
-				oc.handlePeerNamespaceSelectorOnUpdate(np, gress, func() bool {
-					// ... on condition that the added address set was not already in the 'gress policy
-					return gress.addNamespaceAddressSet(namespace.Name)
-				})
+				oc.handlePeerNamespaceSelectorOnUpdate(policy, portGroupName, gress, subLock,
+					func() bool {
+						// ... on condition that the added address set was not already in the 'gress policy
+						return gress.addNamespaceAddressSet(namespace.Name)
+					})
 			},
 			DeleteFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
 				// Update the ACL ...
-				oc.handlePeerNamespaceSelectorOnUpdate(np, gress, func() bool {
-					// ... on condition that the removed address set was in the 'gress policy
-					return gress.delNamespaceAddressSet(namespace.Name)
-				})
+				oc.handlePeerNamespaceSelectorOnUpdate(policy, portGroupName, gress, subLock,
+					func() bool {
+						// ... on condition that the removed address set was in the 'gress policy
+						return gress.delNamespaceAddressSet(namespace.Name)
+					})
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
 			},
 		}, func(i []interface{}) {
-			// This needs to be a write lock because there's no locking around 'gress policies
-			np.Lock()
-			defer np.Unlock()
 			// We load the existing address set into the 'gress policy.
 			// Notice that this will make the AddFunc for this initial
 			// address set a noop.
 			// The ACL must be set explicitly after setting up this handler
 			// for the address set to be considered.
+			subLock.Lock()
+			defer subLock.Unlock()
 			gress.addNamespaceAddressSets(i)
 		})
-	np.nsHandlerList = append(np.nsHandlerList, h)
 }
 
+// shutdownHandlers all of the handlers from the respective informers
+// note this is a blocking operation. To remove handlers requires informer lock
+// and processing events for handlers requires informer read lock, so there
+// is an implicit guarantee that no dangling handlers will still be processing
+// after shutdown
 func (oc *Controller) shutdownHandlers(np *networkPolicy) {
-	for _, handler := range np.podHandlerList {
-		oc.watchFactory.RemovePodHandler(handler)
-	}
-	for _, handler := range np.nsHandlerList {
-		oc.watchFactory.RemoveNamespaceHandler(handler)
-	}
-	for _, handler := range np.svcHandlerList {
-		oc.watchFactory.RemoveServiceHandler(handler)
-	}
+	oc.watchFactory.RemovePodHandlerByTag(np.policyHandlerID)
+	oc.watchFactory.RemoveNamespaceHandlersByTag(np.policyHandlerID)
+	oc.watchFactory.RemoveServiceHandlersByTag(np.policyHandlerID)
 }
