@@ -203,6 +203,14 @@ type Controller struct {
 	// channel to indicate we need to retry pods immediately
 	retryPodsChan chan struct{}
 
+	// Map of network policies that need to be retried, and the timestamp of when they last failed
+	// keyed by namespace/name
+	retryNetPolices map[string]*retryNetPolEntry
+	retryNetPolLock sync.Mutex
+
+	// channel to indicate we need to retry policy immediately
+	retryPolicyChan chan struct{}
+
 	metricsRecorder *metrics.ControlPlaneRecorder
 }
 
@@ -211,6 +219,16 @@ type retryEntry struct {
 	timeStamp  time.Time
 	backoffSec time.Duration
 	// whether to include this pod in retry iterations
+	ignore bool
+}
+
+type retryNetPolEntry struct {
+	newPolicy  *kapisnetworking.NetworkPolicy
+	oldPolicy  *kapisnetworking.NetworkPolicy
+	np         *networkPolicy
+	timeStamp  time.Time
+	backoffSec time.Duration
+	// whether to include this NP in retry iterations
 	ignore bool
 }
 
@@ -286,6 +304,8 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		joinSwIPManager:          nil,
 		retryPods:                make(map[types.UID]*retryEntry),
 		retryPodsChan:            make(chan struct{}, 1),
+		retryNetPolices:          make(map[string]*retryNetPolEntry),
+		retryPolicyChan:          make(chan struct{}, 1),
 		recorder:                 recorder,
 		nbClient:                 libovsdbOvnNBClient,
 		sbClient:                 libovsdbOvnSBClient,
@@ -744,23 +764,68 @@ func (oc *Controller) WatchPods() {
 // WatchNetworkPolicy starts the watching of network policy resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNetworkPolicy() {
+	go func() {
+		// track the retryNetworkPolicies map and every 30 seconds check if any pods need to be retried
+		for {
+			select {
+			case <-time.After(30 * time.Second):
+				oc.iterateRetryNetworkPolicies(false)
+			case <-oc.retryPolicyChan:
+				oc.iterateRetryNetworkPolicies(true)
+			case <-oc.stopChan:
+				return
+			}
+		}
+	}()
+
 	start := time.Now()
 	oc.watchFactory.AddPolicyHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
-			oc.addNetworkPolicy(policy)
+			oc.initRetryPolicy(policy)
+			if err := oc.addNetworkPolicy(policy); err != nil {
+				klog.Errorf("Failed to create network policy %s, error: %v",
+					getPolicyNamespacedName(policy), err)
+				oc.unSkipRetryPolicy(policy)
+				return
+			}
+			oc.checkAndDeleteRetryPolicy(policy)
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			oldPolicy := old.(*kapisnetworking.NetworkPolicy)
 			newPolicy := newer.(*kapisnetworking.NetworkPolicy)
 			if !reflect.DeepEqual(oldPolicy, newPolicy) {
-				oc.deleteNetworkPolicy(oldPolicy)
-				oc.addNetworkPolicy(newPolicy)
+				oc.checkAndSkipRetryPolicy(oldPolicy)
+				if err := oc.deleteNetworkPolicy(oldPolicy, nil); err != nil {
+					oc.initRetryPolicyWithDelete(oldPolicy, nil)
+					oc.initRetryPolicy(newPolicy)
+					oc.unSkipRetryPolicy(oldPolicy)
+					klog.Errorf("Failed to delete network policy %s, during update: %v",
+						getPolicyNamespacedName(oldPolicy), err)
+					return
+				}
+				// remove the old policy from retry entry since it was correctly deleted
+				oc.removeDeleteFromRetryPolicy(oldPolicy)
+				if err := oc.addNetworkPolicy(newPolicy); err != nil {
+					oc.initRetryPolicy(newPolicy)
+					oc.unSkipRetryPolicy(newPolicy)
+					klog.Errorf("Failed to create network policy %s, during update: %v",
+						getPolicyNamespacedName(newPolicy), err)
+					return
+				}
+				oc.checkAndDeleteRetryPolicy(newPolicy)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
-			oc.deleteNetworkPolicy(policy)
+			oc.checkAndSkipRetryPolicy(policy)
+			oc.initRetryPolicyWithDelete(policy, nil)
+			if err := oc.deleteNetworkPolicy(policy, nil); err != nil {
+				oc.unSkipRetryPolicy(policy)
+				klog.Errorf("Failed to delete network policy %s, error: %v", getPolicyNamespacedName(policy), err)
+				return
+			}
+			oc.checkAndDeleteRetryPolicy(policy)
 		},
 	}, oc.syncNetworkPolicies)
 	klog.Infof("Bootstrapping existing policies and cleaning stale policies took %v", time.Since(start))
