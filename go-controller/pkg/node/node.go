@@ -13,11 +13,7 @@ import (
 	"time"
 
 	kapi "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
@@ -443,23 +439,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	if config.OvnKubeNode.Mode == types.NodeModeFull {
 		// Upgrade for Node. If we upgrade workers before masters, then we need to keep service routing via
 		// mgmt port until masters have been updated and modified OVN config. Run a goroutine to handle this case
-
-		// note this will change in the future to control-plane:
-		// https://github.com/kubernetes/kubernetes/pull/95382
-		masterNode, err := labels.NewRequirement("node-role.kubernetes.io/master", selection.Exists, nil)
-		if err != nil {
-			return err
-		}
-
-		labelSelector := labels.NewSelector()
-		labelSelector = labelSelector.Add(*masterNode)
-
-		informerFactory := informers.NewSharedInformerFactoryWithOptions(n.client, 0,
-			informers.WithTweakListOptions(func(options *metav1.ListOptions) {
-				options.LabelSelector = labelSelector.String()
-			}))
-
-		upgradeController := upgrade.NewController(n.Kube, informerFactory.Core().V1().Nodes())
+		upgradeController := upgrade.NewController(n.client)
 		initialTopoVersion := upgradeController.GetInitialTopoVersion()
 		bridgeName := n.gateway.GetGatewayBridgeIface()
 
@@ -497,10 +477,8 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 				}
 			}
 			// need to run upgrade controller
-			informerStop := make(chan struct{})
-			informerFactory.Start(informerStop)
 			go func() {
-				if err := upgradeController.Run(n.stopChan, informerStop); err != nil {
+				if err := upgradeController.Run(n.stopChan); err != nil {
 					klog.Fatalf("Error while running upgrade controller: %v", err)
 				}
 				// upgrade complete now see what needs upgrading
