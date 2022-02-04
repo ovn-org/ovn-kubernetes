@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"context"
 	"github.com/onsi/gomega"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -9,7 +10,6 @@ import (
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
@@ -105,4 +105,16 @@ func (o *FakeOVN) init() {
 		o.fakeRecorder)
 	o.controller.multicastSupport = true
 	o.controller.loadBalancerGroupUUID = types.ClusterLBGroupName + "-UUID"
+}
+
+func (o *FakeOVN) resetNBClient(ctx context.Context) {
+	if o.controller.nbClient.Connected() {
+		o.controller.nbClient.Close()
+	}
+	gomega.Eventually(o.controller.nbClient.Connected()).Should(gomega.BeFalse())
+	err := o.controller.nbClient.Connect(ctx)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	gomega.Eventually(o.controller.nbClient.Connected()).Should(gomega.BeTrue())
+	_, err = o.controller.nbClient.MonitorAll(ctx)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
