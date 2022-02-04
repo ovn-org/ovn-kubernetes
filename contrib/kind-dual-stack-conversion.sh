@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 
-convert_kubelet() {
- echo "Converting kubelet on nodes $NODES"
+restart_kubelet() {
+ echo "Restarting kubelet on nodes $NODES"
  for n in $NODES; do
-   docker exec $n cp /var/lib/kubelet/config.yaml /var/lib/kubelet/config.yaml.bak
-   # kubelet already has a featureGate configured so we need to ammend a new one
-   # NOTE: if there weren't feature gates configured we have to change this
-   docker exec $n sed -i '/featureGates/a\  IPv6DualStack: true' /var/lib/kubelet/config.yaml
+   # Set --node-ip extra-args to be passed to kubelet. Needed for the e2e tests
+   ipv4=$(docker exec $n cat /kind/old-ipv4)
+   echo ${ipv4}
+   ipv6=$(docker exec $n cat /kind/old-ipv6)
+   echo ${ipv4}
+   docker exec $n sed -i -e "s/${ipv4}/${ipv4},${ipv6}/g" /var/lib/kubelet/kubeadm-flags.env
    # Restart kubelet
    docker exec $n systemctl restart kubelet
-  echo "Converted kubelet on node $n"
+  echo "Restarted kubelet on node $n"
  done
 }
 
@@ -51,23 +53,14 @@ convert_k8s_control_plane(){
     docker exec $n cp ${API_CONFIG_FILE} /kind/kube-apiserver.yaml.bak
     # append second service cidr --service-cluster-ip-range=<IPv4 CIDR>,<IPv6 CIDR>
     docker exec $n sed -i -e "s#.*service-cluster-ip-range.*#&\,${SECONDARY_SERVICE_SUBNET}#" ${API_CONFIG_FILE}
-    # OVN has already the SCTP feature enable, we just need to append the new one
-    # NOTE: if there was not feature-gate enabled we must use    
-    # docker exec $n sed -i '/service-cluster-ip-range/i\    - --feature-gates=IPv6DualStack=true' ${API_CONFIG_FILE}
-    docker exec $n sed -i -e "s#.*feature-gates.*#&\,IPv6DualStack=true#" ${API_CONFIG_FILE}
     # kube-controller-manager /etc/kubernetes/manifests/kube-controller-manager.yaml
     docker exec $n cp ${CM_CONFIG_FILE} /kind/kube-controller-manager.bak
     # append second service cidr --service-cluster-ip-range=<IPv4 CIDR>,<IPv6 CIDR>
     docker exec $n sed -i -e "s#.*service-cluster-ip-range.*#&\,${SECONDARY_SERVICE_SUBNET}#" ${CM_CONFIG_FILE}
     # append second cluster cidr --cluster-cidr=<IPv4 CIDR>,<IPv6 CIDR>
     docker exec $n sed -i -e "s#.*cluster-cidr.*#&\,${SECONDARY_CLUSTER_SUBNET}#" ${CM_CONFIG_FILE}
-    # OVN has already the SCTP feature enable, we just need to append the new one
-    # NOTE: if there was not feature-gate enabled we must use    
-    # docker exec $n sed -i '/service-cluster-ip-range/i\    - --feature-gates=IPv6DualStack=true' ${CM_CONFIG_FILE}
-    docker exec $n sed -i -e "s#.*feature-gates.*#&\,IPv6DualStack=true#" ${CM_CONFIG_FILE}
     echo "Finished converting control plane on node $n"
   done
-
 }
 
 usage()
@@ -167,10 +160,12 @@ fi
 
 # Start the conversion to dual stack
 # TODO revisit order
-convert_kubelet
-# FIXME: this is a random value to give time to pods to restart
-sleep 10
 convert_k8s_control_plane
+# FIXME: Fix this random sleep value by adding a wait_till_apiserver_isready() function
+sleep 60
+# We need to manually restart kubelet for the changes to take effect since apiserver and kube-controller
+# are created as static pods. See https://github.com/kubernetes/kubernetes/pull/107900 for details
+restart_kubelet
 # FIXME: this is a random value to give time to pods to restart
 sleep 10
 convert_cni
