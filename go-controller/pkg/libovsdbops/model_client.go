@@ -151,14 +151,19 @@ func (m *ModelClient) WithClient(client client.Client) *ModelClient {
  If BulkOp is set, update or mutate can happen accross multiple models found.
 */
 func (m *ModelClient) CreateOrUpdate(opModels ...OperationModel) ([]ovsdb.OperationResult, error) {
-	created, ops, err := m.CreateOrUpdateOps(opModels...)
+	created, ops, err := m.createOrUpdateOps(nil, opModels...)
 	if err != nil {
 		return nil, err
 	}
 	return TransactAndCheckAndSetUUIDs(m.client, created, ops)
 }
 
-func (m *ModelClient) CreateOrUpdateOps(opModels ...OperationModel) (interface{}, []ovsdb.Operation, error) {
+func (m *ModelClient) CreateOrUpdateOps(ops []ovsdb.Operation, opModels ...OperationModel) ([]ovsdb.Operation, error) {
+	_, ops, err := m.createOrUpdateOps(ops, opModels...)
+	return ops, err
+}
+
+func (m *ModelClient) createOrUpdateOps(ops []ovsdb.Operation, opModels ...OperationModel) (interface{}, []ovsdb.Operation, error) {
 	doWhenFound := func(model interface{}, opModel *OperationModel) ([]ovsdb.Operation, error) {
 		if opModel.OnModelUpdates != nil {
 			return m.update(model, opModel)
@@ -170,7 +175,7 @@ func (m *ModelClient) CreateOrUpdateOps(opModels ...OperationModel) (interface{}
 	doWhenNotFound := func(model interface{}, opModel *OperationModel) ([]ovsdb.Operation, error) {
 		return m.create(opModel)
 	}
-	return m.buildOps(doWhenFound, doWhenNotFound, opModels...)
+	return m.buildOps(ops, doWhenFound, doWhenNotFound, opModels...)
 }
 
 /*
@@ -189,7 +194,7 @@ func (m *ModelClient) CreateOrUpdateOps(opModels ...OperationModel) (interface{}
  If BulkOp is set, delete or mutate can happen accross multiple models found.
 */
 func (m *ModelClient) Delete(opModels ...OperationModel) error {
-	ops, err := m.DeleteOps(opModels...)
+	ops, err := m.DeleteOps(nil, opModels...)
 	if err != nil {
 		return err
 	}
@@ -197,7 +202,7 @@ func (m *ModelClient) Delete(opModels ...OperationModel) error {
 	return err
 }
 
-func (m *ModelClient) DeleteOps(opModels ...OperationModel) ([]ovsdb.Operation, error) {
+func (m *ModelClient) DeleteOps(ops []ovsdb.Operation, opModels ...OperationModel) ([]ovsdb.Operation, error) {
 	doWhenFound := func(model interface{}, opModel *OperationModel) (o []ovsdb.Operation, err error) {
 		if opModel.OnModelMutations != nil {
 			return m.mutate(model, opModel, ovsdb.MutateOperationDelete)
@@ -205,14 +210,16 @@ func (m *ModelClient) DeleteOps(opModels ...OperationModel) ([]ovsdb.Operation, 
 			return m.delete(model, opModel)
 		}
 	}
-	_, ops, err := m.buildOps(doWhenFound, nil, opModels...)
+	_, ops, err := m.buildOps(ops, doWhenFound, nil, opModels...)
 	return ops, err
 }
 
 type opModelToOpMapper func(model interface{}, opModel *OperationModel) (o []ovsdb.Operation, err error)
 
-func (m *ModelClient) buildOps(doWhenFound opModelToOpMapper, doWhenNotFound opModelToOpMapper, opModels ...OperationModel) (interface{}, []ovsdb.Operation, error) {
-	ops := []ovsdb.Operation{}
+func (m *ModelClient) buildOps(ops []ovsdb.Operation, doWhenFound opModelToOpMapper, doWhenNotFound opModelToOpMapper, opModels ...OperationModel) (interface{}, []ovsdb.Operation, error) {
+	if ops == nil {
+		ops = []ovsdb.Operation{}
+	}
 	notfound := []interface{}{}
 	for _, opModel := range opModels {
 		if opModel.ExistingResult == nil && opModel.Model != nil {
