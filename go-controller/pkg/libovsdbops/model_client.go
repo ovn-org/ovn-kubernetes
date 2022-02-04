@@ -382,8 +382,8 @@ func (m *ModelClient) get(opModel *OperationModel) (interface{}, error) {
 	if uuid == "" || IsNamedUUID(uuid) {
 		setUUID(opModel.Model, getUUID(copy))
 	}
-	addToExistingResult(copy, opModel.ExistingResult)
-	return copy, nil
+	err := addToExistingResult(copy, opModel.ExistingResult)
+	return copy, err
 }
 
 func (m *ModelClient) whereCache(opModel *OperationModel) error {
@@ -407,10 +407,31 @@ func (m *ModelClient) whereCache(opModel *OperationModel) error {
 	return err
 }
 
-func addToExistingResult(model interface{}, existingResult interface{}) {
+func addToExistingResult(model interface{}, existingResult interface{}) error {
 	resultPtr := reflect.ValueOf(existingResult)
+	if resultPtr.Type().Kind() != reflect.Ptr {
+		return fmt.Errorf("expected existingResult as a pointer but got %s", resultPtr.Type().Kind())
+	}
+
 	resultVal := reflect.Indirect(resultPtr)
-	resultVal.Set(reflect.Append(resultVal, reflect.Indirect(reflect.ValueOf(model))))
+	if resultVal.Type().Kind() != reflect.Slice {
+		return fmt.Errorf("expected existingResult as a pointer to a slice but got %s", resultVal.Type().Kind())
+	}
+
+	var v reflect.Value
+	if resultVal.Type().Elem().Kind() == reflect.Ptr {
+		v = reflect.ValueOf(model)
+	} else {
+		v = reflect.Indirect(reflect.ValueOf(model))
+	}
+
+	if v.Type() != resultVal.Type().Elem() {
+		return fmt.Errorf("expected existingResult as a pointer to a slice of %s but got %s", v.Type(), resultVal.Type().Elem())
+	}
+
+	resultVal.Set(reflect.Append(resultVal, v))
+
+	return nil
 }
 
 func getString(field interface{}) string {

@@ -205,45 +205,45 @@ func copyIndexes(model model.Model) model.Model {
 func getListFromModel(model model.Model) interface{} {
 	switch t := model.(type) {
 	case *nbdb.ACL:
-		return &[]nbdb.ACL{}
+		return &[]*nbdb.ACL{}
 	case *nbdb.AddressSet:
-		return &[]nbdb.AddressSet{}
+		return &[]*nbdb.AddressSet{}
 	case *nbdb.BFD:
-		return &[]nbdb.BFD{}
+		return &[]*nbdb.BFD{}
 	case *nbdb.Copp:
-		return &[]nbdb.Copp{}
+		return &[]*nbdb.Copp{}
 	case *nbdb.GatewayChassis:
-		return &[]nbdb.GatewayChassis{}
+		return &[]*nbdb.GatewayChassis{}
 	case *nbdb.LoadBalancer:
-		return &[]nbdb.LoadBalancer{}
+		return &[]*nbdb.LoadBalancer{}
 	case *nbdb.LoadBalancerGroup:
-		return &[]nbdb.LoadBalancerGroup{}
+		return &[]*nbdb.LoadBalancerGroup{}
 	case *nbdb.LogicalRouter:
-		return &[]nbdb.LogicalRouter{}
+		return &[]*nbdb.LogicalRouter{}
 	case *nbdb.LogicalRouterPolicy:
-		return &[]nbdb.LogicalRouterPolicy{}
+		return &[]*nbdb.LogicalRouterPolicy{}
 	case *nbdb.LogicalRouterPort:
-		return &[]nbdb.LogicalRouterPort{}
+		return &[]*nbdb.LogicalRouterPort{}
 	case *nbdb.LogicalRouterStaticRoute:
-		return &[]nbdb.LogicalRouterStaticRoute{}
+		return &[]*nbdb.LogicalRouterStaticRoute{}
 	case *nbdb.LogicalSwitch:
-		return &[]nbdb.LogicalSwitch{}
+		return &[]*nbdb.LogicalSwitch{}
 	case *nbdb.LogicalSwitchPort:
-		return &[]nbdb.LogicalSwitchPort{}
+		return &[]*nbdb.LogicalSwitchPort{}
 	case *nbdb.NAT:
-		return &[]nbdb.NAT{}
+		return &[]*nbdb.NAT{}
 	case *nbdb.PortGroup:
-		return &[]nbdb.PortGroup{}
+		return &[]*nbdb.PortGroup{}
 	case *nbdb.NBGlobal:
-		return &[]nbdb.NBGlobal{}
+		return &[]*nbdb.NBGlobal{}
 	case *nbdb.MeterBand:
-		return &[]nbdb.MeterBand{}
+		return &[]*nbdb.MeterBand{}
 	case *nbdb.Meter:
-		return &[]nbdb.Meter{}
+		return &[]*nbdb.Meter{}
 	case *sbdb.Chassis:
-		return &[]sbdb.Chassis{}
+		return &[]*sbdb.Chassis{}
 	case *sbdb.MACBinding:
-		return &[]sbdb.MACBinding{}
+		return &[]*sbdb.MACBinding{}
 	default:
 		panic(fmt.Sprintf("getModelList: unknown model %T", t))
 	}
