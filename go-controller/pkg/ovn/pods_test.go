@@ -827,7 +827,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				)
 				podMAC := ovntest.MustParseMAC(tP.podMAC)
 				fakeOvn.controller.logicalPortCache.add(tP.nodeName, tP.portName, fakeUUID, podMAC, []*net.IPNet{ovntest.MustParseIPNet(tP.nodeSubnet)})
-				tP.populateLogicalSwitchCache(fakeOvn)
+				tP.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, tP.nodeName))
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				gomega.Eventually(func() string {

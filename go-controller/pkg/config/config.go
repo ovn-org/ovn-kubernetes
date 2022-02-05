@@ -1213,10 +1213,10 @@ func rawExec(exec kexec.Interface, cmd string, args ...string) (string, error) {
 		return "", err
 	}
 
-	klog.V(5).Infof("exec: %s %s", cmdPath, strings.Join(args, " "))
+	klog.V(5).Infof("Exec: %s %s", cmdPath, strings.Join(args, " "))
 	out, err := exec.Command(cmdPath, args...).CombinedOutput()
 	if err != nil {
-		klog.V(5).Infof("exec: %s %s => %v", cmdPath, strings.Join(args, " "), err)
+		klog.V(5).Infof("Exec: %s %s => %v", cmdPath, strings.Join(args, " "), err)
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil

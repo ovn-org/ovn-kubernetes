@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
 export KUBECONFIG=${HOME}/admin.conf
 
 run_kubectl() {
@@ -290,7 +292,7 @@ set_default_params() {
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   OVN_HA=${OVN_HA:-false}
-  KIND_CONFIG=${KIND_CONFIG:-./kind.yaml.j2}
+  KIND_CONFIG=${KIND_CONFIG:-${DIR}/kind.yaml.j2}
   KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
   KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
   KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
@@ -428,7 +430,7 @@ set_cluster_cidr_ip_families() {
 
 create_kind_cluster() {
   # Output of the j2 command
-  KIND_CONFIG_LCL=./kind.yaml
+  KIND_CONFIG_LCL=${DIR}/kind.yaml
 
   ovn_apiServerAddress=${API_IP} \
     ovn_ip_family=${IP_FAMILY} \
@@ -498,12 +500,12 @@ coredns_patch() {
 build_ovn_image() {
   if [ "$OVN_IMAGE" == local ]; then
     # Build ovn docker image
-    pushd ../go-controller
+    pushd ${DIR}/../go-controller
     make
     popd
 
     # Build ovn kube image
-    pushd ../dist/images
+    pushd ${DIR}/../dist/images
     # Find all built executables, but ignore the 'windows' directory if it exists
     find ../../go-controller/_output/go/bin/ -maxdepth 1 -type f -exec cp -f {} . \;
     echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
@@ -514,7 +516,7 @@ build_ovn_image() {
 }
 
 create_ovn_kube_manifests() {
-  pushd ../dist/images
+  pushd ${DIR}/../dist/images
   ./daemonset.sh \
     --image="${OVN_IMAGE}" \
     --net-cidr="${NET_CIDR}" \
@@ -556,7 +558,7 @@ install_ovn_image() {
 }
 
 install_ovn() {
-  pushd ../dist/yaml
+  pushd ${DIR}/../dist/yaml
   run_kubectl apply -f k8s.ovn.org_egressfirewalls.yaml
   run_kubectl apply -f k8s.ovn.org_egressips.yaml
   run_kubectl apply -f ovn-setup.yaml

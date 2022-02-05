@@ -2225,10 +2225,9 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 
 		ginkgo.AfterEach(func() {
 			deleteClusterExternalContainer(clientContainerName)
-		})
-		ginkgo.JustAfterEach(func() {
-			// Since we're using host neworked pods in the test wait until namespaces delete after each test
-			framework.WaitForNamespacesDeleted(f.ClientSet, []string{f.Namespace.Name}, wait.ForeverTestTimeout)
+			// f.Delete will delete the namespace and run WaitForNamespacesDeleted
+			// This is inside the Context and will happen before the framework's teardown inside the Describe
+			f.DeleteNamespace(f.Namespace.Name)
 		})
 
 		// Make sure ingress traffic can reach host pod backends for a service without SNAT when externalTrafficPolicy is set to local
@@ -2350,9 +2349,10 @@ var _ = ginkgo.Describe("host to host-networked pods traffic validation", func()
 				maxTries = len(endPoints)*len(endPoints) + 30
 			}
 		})
-		ginkgo.JustAfterEach(func() {
-			// Since we're using host neworked pods in the test wait until namespaces delete after each test
-			framework.WaitForNamespacesDeleted(f.ClientSet, []string{f.Namespace.Name}, wait.ForeverTestTimeout)
+		ginkgo.AfterEach(func() {
+			// f.Delete will delete the namespace and run WaitForNamespacesDeleted
+			// This is inside the Context and will happen before the framework's teardown inside the Describe
+			f.DeleteNamespace(f.Namespace.Name)
 		})
 		// Make sure host sourced traffic can reach host pod backends for a service without SNAT when externalTrafficPolicy is set to local
 		// Only verify with http

@@ -124,24 +124,6 @@ func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemNorthd,
-			Name:      "probe_interval",
-			Help: "The maximum number of milliseconds of idle time on connection to the OVN SB " +
-				"and NB DB before sending an inactivity probe message",
-		}, func() float64 {
-			stdout, stderr, err := util.RunOVNNbctlWithTimeout(5, "get", "NB_Global", ".",
-				"options:northd_probe_interval")
-			if err != nil {
-				klog.Errorf("Failed to get northd_probe_interval value "+
-					"stderr(%s) :(%v)", stderr, err)
-				return 0
-			}
-			return parseMetricToFloat(MetricOvnSubsystemNorthd, "probe_interval", stdout)
-		},
-	))
-	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
-		prometheus.GaugeOpts{
-			Namespace: MetricOvnNamespace,
-			Subsystem: MetricOvnSubsystemNorthd,
 			Name:      "status",
 			Help:      "Specifies whether this instance of ovn-northd is standby(0) or active(1) or paused(2).",
 		}, func() float64 {

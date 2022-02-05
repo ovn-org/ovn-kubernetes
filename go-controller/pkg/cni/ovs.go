@@ -114,16 +114,16 @@ func ofctlExec(args ...string) (string, error) {
 	cmd.SetStderr(&stderr)
 
 	cmdStr := strings.Join(args, " ")
-	klog.V(5).Infof("exec: %s %s", ofctlPath, cmdStr)
+	klog.V(5).Infof("Exec: %s %s", ofctlPath, cmdStr)
 
 	err := cmd.Run()
 	if err != nil {
 		stderrStr := stderr.String()
-		klog.Errorf("exec: %s %s : stderr: %q", ofctlPath, cmdStr, stderrStr)
+		klog.Errorf("Exec: %s %s : stderr: %q", ofctlPath, cmdStr, stderrStr)
 		return "", fmt.Errorf("failed to run '%s %s': %v\n  %q", ofctlPath, cmdStr, err, stderrStr)
 	}
 	stdoutStr := stdout.String()
-	klog.V(5).Infof("exec: %s %s: stdout: %q", ofctlPath, cmdStr, stdoutStr)
+	klog.V(5).Infof("Exec: %s %s: stdout: %q", ofctlPath, cmdStr, stdoutStr)
 
 	trimmed := strings.TrimSpace(stdoutStr)
 	// If output is a single line, strip the trailing newline

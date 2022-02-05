@@ -27,7 +27,7 @@ OVN_VERSION ?= v21.09.1
 # Example:
 #   make
 #   make all
-#   make all GCFLAGS="-N -l"
+#   make all GCFLAGS=all="-N -l"
 #       (disables compiler optimization and inlining to aid source debugging tools
 #        like delve)
 

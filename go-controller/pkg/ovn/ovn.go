@@ -535,7 +535,7 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 		}
 
 		if !util.PodScheduled(kPod) {
-			klog.V(5).Infof("retry: %s not scheduled", podDesc)
+			klog.V(5).Infof("Retry: %s not scheduled", podDesc)
 			continue
 		}
 		podEntry.backoffSec = (podEntry.backoffSec * 2)

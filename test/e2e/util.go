@@ -255,8 +255,8 @@ func pokeEndpointHostname(clientContainer, protocol, targetHost string, targetPo
 	framework.ExpectNoError(err, "failed to run command on external container")
 	hostName, err := parseNetexecResponse(res)
 	if err != nil {
-		fmt.Printf("FAILED Command was %s", curlCommand)
-		fmt.Printf("FAILED Response was %v", res)
+		framework.Logf("FAILED Command was %s", curlCommand)
+		framework.Logf("FAILED Response was %v", res)
 	}
 	framework.ExpectNoError(err)
 
@@ -390,8 +390,8 @@ func pokeEndpointClientIP(clientContainer, protocol, targetHost string, targetPo
 	framework.ExpectNoError(err)
 	ip, _, err := net.SplitHostPort(clientIP)
 	if err != nil {
-		fmt.Printf("FAILED Command was %s", curlCommand)
-		fmt.Printf("FAILED Response was %v", res)
+		framework.Logf("FAILED Command was %s", curlCommand)
+		framework.Logf("FAILED Response was %v", res)
 	}
 	framework.ExpectNoError(err, "failed to parse client ip:port")
 
