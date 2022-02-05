@@ -93,10 +93,11 @@ const (
 	RouteAdvertisementICMPType    = 134
 	NeighborAdvertisementICMPType = 136
 
-	// ACL logging constants
-	OvnACLLoggingMeter = "acl-logging"
-	PacketsPerSecond   = "pktps"
-	MeterAction        = "drop"
+	// Meter constants
+	OvnACLLoggingMeter   = "acl-logging"
+	OvnRateLimitingMeter = "rate-limiter"
+	PacketsPerSecond     = "pktps"
+	MeterAction          = "drop"
 
 	// OVN-K8S Address Sets Names
 	HybridRoutePolicyPrefix = "hybrid-route-pods-"
