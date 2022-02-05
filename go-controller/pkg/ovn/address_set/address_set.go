@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"sort"
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -336,7 +335,7 @@ func newOvnAddressSet(nbClient libovsdbclient.Client, name string, ips []net.IP)
 		name:     name,
 		hashName: hashedAddressSet(name),
 	}
-	uniqIPs := ipToStringSort(ips)
+	uniqIPs := ipsToStringUnique(ips)
 	addrSet := &nbdb.AddressSet{Name: hashedAddressSet(name)}
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	defer cancel()
@@ -556,11 +555,8 @@ func (as *ovnAddressSets) Destroy() error {
 // existing state.
 func (as *ovnAddressSet) setIPs(ips []net.IP) error {
 	var err error
-	ipStrings := make([]string, 0, len(ips))
-	for _, ip := range ips {
-		ipStrings = append(ipStrings, ip.String())
-	}
-	addrset := &nbdb.AddressSet{UUID: as.uuid, Addresses: ipStrings}
+	uniqIPs := ipsToStringUnique(ips)
+	addrset := &nbdb.AddressSet{UUID: as.uuid, Addresses: uniqIPs}
 	ops, err := as.nbClient.Where(addrset).Update(addrset, &addrset.Addresses)
 	if err != nil {
 		return err
@@ -592,13 +588,11 @@ func (as *ovnAddressSet) getIPs() ([]string, error) {
 func (as *ovnAddressSet) addIPs(ips []net.IP) ([]ovsdb.Operation, error) {
 	var ops []ovsdb.Operation
 	var err error
+
 	if len(ips) == 0 {
 		return ops, nil
 	}
-	uniqIPs := make([]string, 0, len(ips))
-	for _, ip := range ips {
-		uniqIPs = append(uniqIPs, ip.String())
-	}
+	uniqIPs := ipsToStringUnique(ips)
 
 	klog.V(5).Infof("(%s) adding IPs (%s) to address set", asDetail(as), uniqIPs)
 	addrset := &nbdb.AddressSet{UUID: as.uuid}
@@ -617,16 +611,13 @@ func (as *ovnAddressSet) addIPs(ips []net.IP) ([]ovsdb.Operation, error) {
 
 // deleteIPs removes selected IPs from the existing address_set
 func (as *ovnAddressSet) deleteIPs(ips []net.IP) ([]ovsdb.Operation, error) {
-	// dedup
-	uniqIPs := make([]string, 0, len(ips))
-	for _, ip := range ips {
-		uniqIPs = append(uniqIPs, ip.String())
-	}
 	var ops []ovsdb.Operation
 	var err error
-	if len(uniqIPs) == 0 {
+
+	if len(ips) == 0 {
 		return ops, nil
 	}
+	uniqIPs := ipsToStringUnique(ips)
 
 	klog.V(5).Infof("(%s) deleting IP %s from address set", asDetail(as), uniqIPs)
 
@@ -683,13 +674,11 @@ func splitIPsByFamily(ips []net.IP) (v4 []net.IP, v6 []net.IP) {
 	return
 }
 
-func ipToStringSort(ips []net.IP) []string {
-	// my kingdom for a ".values()" function
-	out := make([]string, 0, len(ips))
+// Takes a slice of IPs and returns a slice with unique IPs
+func ipsToStringUnique(ips []net.IP) []string {
+	s := sets.NewString()
 	for _, ip := range ips {
-		out = append(out, ip.String())
+		s.Insert(ip.String())
 	}
-	// so the tests are predictable
-	sort.Strings(out)
-	return out
+	return s.UnsortedList()
 }
