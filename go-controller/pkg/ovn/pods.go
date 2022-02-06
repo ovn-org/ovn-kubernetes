@@ -122,6 +122,22 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	if !util.PodScheduled(pod) {
 		return
 	}
+	// If the pod's node doesn't have an assigned subnet, we may still need
+	// to clean the pod's IPs from the namespace
+	if oc.lsManager.IsNonHostSubnetSwitch(pod.Spec.NodeName) {
+		ips, err := util.GetAllPodIPs(pod)
+		if err == nil && len(ips) > 0 {
+			_, _, ops, err := oc.deletePodFromNamespace(pod.Namespace, ips)
+			if err == nil {
+				_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+			}
+			if err != nil {
+				klog.Errorf("Failed to remove %s/%s IPs from namespace address set: %v",
+					pod.Namespace, pod.Name, err)
+			}
+		}
+		return err
+	}
 
 	podDesc := pod.Namespace + "/" + pod.Name
 	klog.Infof("Deleting pod: %s", podDesc)
@@ -298,7 +314,18 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// If a node does node have an assigned hostsubnet don't wait for the logical switch to appear
 	if oc.lsManager.IsNonHostSubnetSwitch(pod.Spec.NodeName) {
-		return nil
+		ips, err := util.GetAllPodIPs(pod)
+		if err == nil && len(ips) > 0 {
+			_, _, ops, err := oc.addPodToNamespace(pod.Namespace, ips)
+			if err == nil {
+				_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+			}
+			if err != nil {
+				klog.Errorf("Failed to add %s/%s IPs from namespace address set: %v",
+					pod.Namespace, pod.Name, err)
+			}
+		}
+		return err
 	}
 
 	// Keep track of how long syncs take.
