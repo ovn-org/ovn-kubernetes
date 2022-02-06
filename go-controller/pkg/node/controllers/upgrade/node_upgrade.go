@@ -113,17 +113,17 @@ func (uc *upgradeController) Run(stopCh <-chan struct{}, informerStop chan struc
 				klog.Infof("Masters have completed upgrade from topology version %d to %d",
 					uc.initialTopoVersion, ovntypes.OvnCurrentTopologyVersion)
 				ticker.Stop()
-				informerStop <- struct{}{}
+				close(informerStop)
 				return nil
 			}
 		case <-deadline:
 			ticker.Stop()
-			informerStop <- struct{}{}
+			close(informerStop)
 			klog.Fatal("Failed to detect completion of master upgrade after 30 minutes. Check if " +
 				"ovnkube-masters have upgraded correctly!")
 		case <-stopCh:
 			ticker.Stop()
-			informerStop <- struct{}{}
+			close(informerStop)
 			return nil
 		}
 	}
