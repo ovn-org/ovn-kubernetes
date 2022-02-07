@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	v1 "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -92,12 +93,6 @@ func newPolicy(name, namespace string) *knet.NetworkPolicy {
 	}
 }
 
-func newEndpoints(name, namespace string) *v1.Endpoints {
-	return &v1.Endpoints{
-		ObjectMeta: newObjectMeta(name, namespace),
-	}
-}
-
 func newService(name, namespace string) *v1.Service {
 	return &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -107,6 +102,16 @@ func newService(name, namespace string) *v1.Service {
 			Labels: map[string]string{
 				"name": name,
 			},
+		},
+	}
+}
+
+func newEndpointSlice(name, namespace string) *discovery.EndpointSlice {
+	return &discovery.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			UID:       types.UID(name),
+			Namespace: namespace,
 		},
 	}
 }
@@ -196,27 +201,32 @@ func (c *handlerCalls) getDeleted() int {
 
 var _ = Describe("Watch Factory Operations", func() {
 	var (
-		ovnClientset                              *util.OVNClientset
-		fakeClient                                *fake.Clientset
-		egressIPFakeClient                        *egressipfake.Clientset
-		egressFirewallFakeClient                  *egressfirewallfake.Clientset
-		cloudNetworkFakeClient                    *ocpcloudnetworkclientsetfake.Clientset
-		podWatch, namespaceWatch, nodeWatch       *watch.FakeWatcher
-		policyWatch, endpointsWatch, serviceWatch *watch.FakeWatcher
-		egressFirewallWatch                       *watch.FakeWatcher
-		egressIPWatch                             *watch.FakeWatcher
-		cloudPrivateIPConfigWatch                 *watch.FakeWatcher
-		pods                                      []*v1.Pod
-		namespaces                                []*v1.Namespace
-		nodes                                     []*v1.Node
-		policies                                  []*knet.NetworkPolicy
-		endpoints                                 []*v1.Endpoints
-		services                                  []*v1.Service
-		egressIPs                                 []*egressip.EgressIP
-		cloudPrivateIPConfigs                     []*ocpcloudnetworkapi.CloudPrivateIPConfig
-		wf                                        *WatchFactory
-		egressFirewalls                           []*egressfirewall.EgressFirewall
-		err                                       error
+		ovnClientset                        *util.OVNClientset
+		fakeClient                          *fake.Clientset
+		egressIPFakeClient                  *egressipfake.Clientset
+		egressFirewallFakeClient            *egressfirewallfake.Clientset
+		cloudNetworkFakeClient              *ocpcloudnetworkclientsetfake.Clientset
+		podWatch, namespaceWatch, nodeWatch *watch.FakeWatcher
+		policyWatch, serviceWatch           *watch.FakeWatcher
+		endpointSliceWatch                  *watch.FakeWatcher
+		egressFirewallWatch                 *watch.FakeWatcher
+		egressIPWatch                       *watch.FakeWatcher
+		cloudPrivateIPConfigWatch           *watch.FakeWatcher
+		pods                                []*v1.Pod
+		namespaces                          []*v1.Namespace
+		nodes                               []*v1.Node
+		policies                            []*knet.NetworkPolicy
+		endpointSlices                      []*discovery.EndpointSlice
+		services                            []*v1.Service
+		egressIPs                           []*egressip.EgressIP
+		cloudPrivateIPConfigs               []*ocpcloudnetworkapi.CloudPrivateIPConfig
+		wf                                  *WatchFactory
+		egressFirewalls                     []*egressfirewall.EgressFirewall
+		err                                 error
+	)
+
+	const (
+		nodeName string = "node1"
 	)
 
 	BeforeEach(func() {
@@ -275,19 +285,19 @@ var _ = Describe("Watch Factory Operations", func() {
 			return true, obj, nil
 		})
 
-		endpoints = make([]*v1.Endpoints, 0)
-		endpointsWatch = objSetup(fakeClient, "endpoints", func(core.Action) (bool, runtime.Object, error) {
-			obj := &v1.EndpointsList{}
-			for _, p := range endpoints {
+		services = make([]*v1.Service, 0)
+		serviceWatch = objSetup(fakeClient, "services", func(core.Action) (bool, runtime.Object, error) {
+			obj := &v1.ServiceList{}
+			for _, p := range services {
 				obj.Items = append(obj.Items, *p)
 			}
 			return true, obj, nil
 		})
 
-		services = make([]*v1.Service, 0)
-		serviceWatch = objSetup(fakeClient, "services", func(core.Action) (bool, runtime.Object, error) {
-			obj := &v1.ServiceList{}
-			for _, p := range services {
+		endpointSlices = make([]*discovery.EndpointSlice, 0)
+		endpointSliceWatch = objSetup(fakeClient, "endpointslices", func(core.Action) (bool, runtime.Object, error) {
+			obj := &discovery.EndpointSliceList{}
+			for _, p := range endpointSlices {
 				obj.Items = append(obj.Items, *p)
 			}
 			return true, obj, nil
@@ -327,7 +337,11 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	Context("when a processExisting is given", func() {
 		testExisting := func(objType reflect.Type, namespace string, sel labels.Selector) {
-			wf, err = NewMasterWatchFactory(ovnClientset)
+			if objType == endpointSliceType {
+				wf, err = NewNodeWatchFactory(ovnClientset, nodeName)
+			} else {
+				wf, err = NewMasterWatchFactory(ovnClientset)
+			}
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -361,9 +375,9 @@ var _ = Describe("Watch Factory Operations", func() {
 			testExisting(policyType, "", nil)
 		})
 
-		It("is called for each existing endpoints", func() {
-			endpoints = append(endpoints, newEndpoints("myendpoint", "default"))
-			testExisting(endpointsType, "", nil)
+		It("is called for each existing endpointSlice", func() {
+			endpointSlices = append(endpointSlices, newEndpointSlice("myendpointSlice", "default"))
+			testExisting(endpointSliceType, "", nil)
 		})
 
 		It("is called for each existing service", func() {
@@ -402,7 +416,11 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	Context("when existing items are known to the informer", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewMasterWatchFactory(ovnClientset)
+			if objType == endpointSliceType {
+				wf, err = NewNodeWatchFactory(ovnClientset, nodeName)
+			} else {
+				wf, err = NewMasterWatchFactory(ovnClientset)
+			}
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -443,10 +461,10 @@ var _ = Describe("Watch Factory Operations", func() {
 			testExisting(policyType)
 		})
 
-		It("calls ADD for each existing endpoints", func() {
-			endpoints = append(endpoints, newEndpoints("myendpoint", "default"))
-			endpoints = append(endpoints, newEndpoints("myendpoint2", "default"))
-			testExisting(endpointsType)
+		It("calls ADD for each existing endpointSlices", func() {
+			endpointSlices = append(endpointSlices, newEndpointSlice("myendpointSlice", "default"))
+			endpointSlices = append(endpointSlices, newEndpointSlice("myendpointSlie2", "default"))
+			testExisting(endpointSliceType)
 		})
 
 		It("calls ADD for each existing service", func() {
@@ -454,6 +472,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			services = append(services, newService("myservice2", "default"))
 			testExisting(serviceType)
 		})
+
 		It("calls ADD for each existing egressFirewall", func() {
 			egressFirewalls = append(egressFirewalls, newEgressFirewall("myFirewall", "default"))
 			egressFirewalls = append(egressFirewalls, newEgressFirewall("myFirewall1", "default"))
@@ -997,47 +1016,42 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemovePolicyHandler(h)
 	})
 
-	It("responds to endpoints add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+	It("responds to endpointslices add/update/delete events", func() {
+		wf, err = NewNodeWatchFactory(ovnClientset, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		added := newEndpoints("myendpoints", "default")
-		h, c := addHandler(wf, endpointsType, cache.ResourceEventHandlerFuncs{
+		added := newEndpointSlice("myendpointSlice", "default")
+		h, c := addHandler(wf, endpointSliceType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
-				eps := obj.(*v1.Endpoints)
-				Expect(reflect.DeepEqual(eps, added)).To(BeTrue())
+				epSlice := obj.(*discovery.EndpointSlice)
+				Expect(reflect.DeepEqual(epSlice, added)).To(BeTrue())
 			},
 			UpdateFunc: func(old, new interface{}) {
-				newEPs := new.(*v1.Endpoints)
-				Expect(reflect.DeepEqual(newEPs, added)).To(BeTrue())
-				Expect(len(newEPs.Subsets)).To(Equal(1))
+				newEpSlice := new.(*discovery.EndpointSlice)
+				Expect(reflect.DeepEqual(newEpSlice, added)).To(BeTrue())
+				Expect(len(newEpSlice.Endpoints)).To(Equal(1))
 			},
 			DeleteFunc: func(obj interface{}) {
-				eps := obj.(*v1.Endpoints)
-				Expect(reflect.DeepEqual(eps, added)).To(BeTrue())
+				epSlice := obj.(*discovery.EndpointSlice)
+				Expect(reflect.DeepEqual(epSlice, added)).To(BeTrue())
 			},
 		})
 
-		endpoints = append(endpoints, added)
-		endpointsWatch.Add(added)
+		endpointSlices = append(endpointSlices, added)
+		endpointSliceWatch.Add(added)
 		Eventually(c.getAdded, 2).Should(Equal(1))
-		added.Subsets = append(added.Subsets, v1.EndpointSubset{
-			Ports: []v1.EndpointPort{
-				{
-					Name: "foobar",
-					Port: 1234,
-				},
-			},
+		added.Endpoints = append(added.Endpoints, discovery.Endpoint{
+			Addresses: []string{"1.1.1.1"},
 		})
-		endpointsWatch.Modify(added)
+		endpointSliceWatch.Modify(added)
 		Eventually(c.getUpdated, 2).Should(Equal(1))
-		endpoints = endpoints[:0]
-		endpointsWatch.Delete(added)
+		endpointSlices = endpointSlices[:0]
+		endpointSliceWatch.Delete(added)
 		Eventually(c.getDeleted, 2).Should(Equal(1))
 
-		wf.RemoveEndpointsHandler(h)
+		wf.RemoveEndpointSliceHandler(h)
 	})
 
 	It("responds to service add/update/delete events", func() {

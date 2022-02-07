@@ -14,6 +14,7 @@ import (
 	"github.com/urfave/cli/v2"
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -110,10 +111,16 @@ func newService(name, namespace, ip string, ports []v1.ServicePort, serviceType 
 	}
 }
 
-func newEndpoints(name, namespace string, eps []v1.EndpointSubset) *v1.Endpoints {
-	return &v1.Endpoints{
-		ObjectMeta: newObjectMeta(name, namespace),
-		Subsets:    eps,
+func newEndpointSlice(svcName, namespace string, endpoints []discovery.Endpoint, endpointPort []discovery.EndpointPort) *discovery.EndpointSlice {
+	return &discovery.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      svcName + "ab23",
+			Namespace: namespace,
+			Labels:    map[string]string{discovery.LabelServiceName: svcName},
+		},
+		Ports:       endpointPort,
+		AddressType: discovery.AddressTypeIPv4,
+		Endpoints:   endpoints,
 	}
 }
 
@@ -328,7 +335,7 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					false,
 				)
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+				endpointSlice := *newEndpointSlice("service1", "namespace1", []discovery.Endpoint{}, []discovery.EndpointPort{})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -336,7 +343,7 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
@@ -376,6 +383,8 @@ var _ = Describe("Node Operations", func() {
 		It("inits iptables rules and openflows with NodePort where ETP=local, LGW", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeLocal
+				epPortName := "https"
+				epPortValue := int32(443)
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -389,23 +398,15 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true,
 				)
-				addr := v1.EndpointAddress{
-					IP: "10.244.0.3",
+				ep1 := discovery.Endpoint{
+					Addresses: []string{"10.244.0.3"},
 				}
-				port := v1.EndpointPort{
-					Name: "https",
-					Port: int32(443),
+				epPort1 := discovery.EndpointPort{
+					Name: &epPortName,
+					Port: &epPortValue,
 				}
-				ep := v1.EndpointSubset{
-					Addresses: []v1.EndpointAddress{
-						addr,
-					},
-					Ports: []v1.EndpointPort{
-						port,
-					},
-				}
-				// endpoints.Subset is ovn-networked so this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{ep})
+				// endpointSlice.Endpoints is ovn-networked so this will come under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice("service1", "namespace1", []discovery.Endpoint{ep1}, []discovery.EndpointPort{epPort1})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -413,7 +414,7 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
@@ -487,7 +488,7 @@ var _ = Describe("Node Operations", func() {
 					},
 					false,
 				)
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+				endpointSlice := *newEndpointSlice("service1", "namespace1", []discovery.Endpoint{}, []discovery.EndpointPort{})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -495,7 +496,7 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
@@ -558,8 +559,8 @@ var _ = Describe("Node Operations", func() {
 					},
 					true,
 				)
-				// endpoints.Subset is empty and yet this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+				// endpointSlice.Endpoints is empty and yet this will come under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice("service1", "namespace1", []discovery.Endpoint{}, []discovery.EndpointPort{})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -567,7 +568,7 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
@@ -656,8 +657,8 @@ var _ = Describe("Node Operations", func() {
 					},
 					true,
 				)
-				// endpoints.Subset is empty and yet this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+				// endpointSlice.Endpoints is empty and yet this will come under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice("service1", "namespace1", []discovery.Endpoint{}, []discovery.EndpointPort{})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -665,7 +666,7 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
@@ -747,7 +748,7 @@ var _ = Describe("Node Operations", func() {
 					false,
 				)
 				service.Spec.ClusterIPs = []string{"10.129.0.2", "fd00:10:96::10"}
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+				endpointSlice := *newEndpointSlice("service1", "namespace1", []discovery.Endpoint{}, []discovery.EndpointPort{})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -755,7 +756,7 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
@@ -1193,6 +1194,8 @@ var _ = Describe("Node Operations", func() {
 		It("manages iptables rules and openflows for NodePort backed by ovn-k pods where ETP=local, LGW", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeLocal
+				epPortName := "https"
+				epPortValue := int32(443)
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -1206,23 +1209,15 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true,
 				)
-				addr := v1.EndpointAddress{
-					IP: "10.244.0.3",
+				ep1 := discovery.Endpoint{
+					Addresses: []string{"10.244.0.3"},
 				}
-				port := v1.EndpointPort{
-					Name: "https",
-					Port: int32(443),
+				epPort1 := discovery.EndpointPort{
+					Name: &epPortName,
+					Port: &epPortValue,
 				}
-				ep := v1.EndpointSubset{
-					Addresses: []v1.EndpointAddress{
-						addr,
-					},
-					Ports: []v1.EndpointPort{
-						port,
-					},
-				}
-				// endpoints.Subset is ovn-networked so this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{ep})
+				// endpointSlice.Endpoints is ovn-networked so this will come under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice("service1", "namespace1", []discovery.Endpoint{ep1}, []discovery.EndpointPort{epPort1})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -1230,7 +1225,7 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
@@ -1306,6 +1301,8 @@ var _ = Describe("Node Operations", func() {
 		It("manages iptables rules and openflows for NodePort backed by ovn-k pods where ETP=local, SGW", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeShared
+				epPortName := "https"
+				epPortValue := int32(443)
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -1319,23 +1316,15 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true,
 				)
-				addr := v1.EndpointAddress{
-					IP: "10.244.0.3",
+				ep1 := discovery.Endpoint{
+					Addresses: []string{"10.244.0.3"},
 				}
-				port := v1.EndpointPort{
-					Name: "https",
-					Port: int32(443),
+				epPort1 := discovery.EndpointPort{
+					Name: &epPortName,
+					Port: &epPortValue,
 				}
-				ep := v1.EndpointSubset{
-					Addresses: []v1.EndpointAddress{
-						addr,
-					},
-					Ports: []v1.EndpointPort{
-						port,
-					},
-				}
-				// endpoints.Subset is ovn-networked so this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{ep})
+				// endpointSlice.Endpoints is ovn-networked so this will come under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice("service1", "namespace1", []discovery.Endpoint{ep1}, []discovery.EndpointPort{epPort1})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -1343,7 +1332,7 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
@@ -1418,6 +1407,7 @@ var _ = Describe("Node Operations", func() {
 		It("manages iptables rules and openflows for NodePort backed by local-host-networked pods where ETP=local, LGW", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeLocal
+				epPortName := "https"
 				outport := int32(443)
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
@@ -1433,23 +1423,15 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true,
 				)
-				addr := v1.EndpointAddress{
-					IP: "192.168.18.15", // host-networked endpoint local to this node
+				ep1 := discovery.Endpoint{
+					Addresses: []string{"192.168.18.15"}, // host-networked endpoint local to this node
 				}
-				port := v1.EndpointPort{
-					Name: "https",
-					Port: int32(443),
+				epPort1 := discovery.EndpointPort{
+					Name: &epPortName,
+					Port: &outport,
 				}
-				ep := v1.EndpointSubset{
-					Addresses: []v1.EndpointAddress{
-						addr,
-					},
-					Ports: []v1.EndpointPort{
-						port,
-					},
-				}
-				// endpoints.Subset is ovn-networked so this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{ep})
+				// endpointSlice.Endpoints is host-networked so this will come under hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice("service1", "namespace1", []discovery.Endpoint{ep1}, []discovery.EndpointPort{epPort1})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -1457,13 +1439,13 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
 				// to ensure the endpoint is local-host-networked
-				res := fNPW.nodeIPManager.addresses.Has(ep.Addresses[0].IP)
+				res := fNPW.nodeIPManager.addresses.Has(endpointSlice.Endpoints[0].Addresses[0])
 				Expect(res).To(BeTrue())
 				fNPW.AddService(&service)
 
