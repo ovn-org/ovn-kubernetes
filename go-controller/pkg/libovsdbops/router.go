@@ -461,3 +461,31 @@ func DeleteNATsFromRouter(nbClient libovsdbclient.Client, routerName string, nat
 	_, err = TransactAndCheck(nbClient, ops)
 	return err
 }
+
+// GATEWAY CHASSIS OPs
+
+// CreateOrUpdateGatewayChassis creates or updates the provided gateway chassis
+// and sets it to the provided logical router port
+func CreateOrUpdateGatewayChassis(nbClient libovsdbclient.Client, port *nbdb.LogicalRouterPort, chassis *nbdb.GatewayChassis) error {
+	opModels := []OperationModel{
+		{
+			Model:          chassis,
+			OnModelUpdates: onModelUpdatesAll(),
+			DoAfter:        func() { port.GatewayChassis = []string{chassis.UUID} },
+			ErrNotFound:    false,
+			BulkOp:         false,
+		},
+		{
+			Model: port,
+			// use update here, as of now we only ever want a single chassis
+			// associated with a port
+			OnModelUpdates: []interface{}{&port.GatewayChassis},
+			ErrNotFound:    true,
+			BulkOp:         false,
+		},
+	}
+
+	modelClient := NewModelClient(nbClient)
+	_, err := modelClient.CreateOrUpdate(opModels...)
+	return err
+}
