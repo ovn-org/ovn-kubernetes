@@ -249,15 +249,21 @@ func (m *ModelClient) buildOps(doWhenFound opModelToOpMapper, doWhenNotFound opM
 		}
 
 		// otherwise act when not found
-		if !hadExistingResults && !opModel.ErrNotFound && doWhenNotFound != nil && opModel.Model != nil {
-			o, err := doWhenNotFound(nil, &opModel)
-			if err != nil {
-				return nil, nil, err
+		if !hadExistingResults {
+			// return ErrNotFound,
+			// - if caller explicitly requested for it or
+			// - failed to provide a Model for us to apply the operation on
+			if opModel.ErrNotFound || (doWhenNotFound != nil && opModel.Model == nil) {
+				return nil, nil, client.ErrNotFound
 			}
-			ops = append(ops, o...)
-			notfound = append(notfound, opModel.Model)
-		} else if !hadExistingResults && (doWhenNotFound != nil || opModel.ErrNotFound) {
-			return nil, nil, client.ErrNotFound
+			if doWhenNotFound != nil && opModel.Model != nil {
+				o, err := doWhenNotFound(nil, &opModel)
+				if err != nil {
+					return nil, nil, err
+				}
+				ops = append(ops, o...)
+				notfound = append(notfound, opModel.Model)
+			}
 		}
 
 		if opModel.DoAfter != nil {
