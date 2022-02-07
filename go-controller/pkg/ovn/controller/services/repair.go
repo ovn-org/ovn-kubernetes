@@ -9,6 +9,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 
@@ -114,13 +115,16 @@ func (r *repair) runBeforeSync() {
 
 	// Remove existing reject rules. They are not used anymore
 	// given the introduction of idling loadbalancers
-	acls, err := libovsdbops.FindRejectACLs(r.nbClient)
+	p := func(item *nbdb.ACL) bool {
+		return item.Action == nbdb.ACLActionReject
+	}
+	acls, err := libovsdbops.FindACLsWithPredicate(r.nbClient, p)
 	if err != nil {
 		klog.Errorf("Error while finding reject ACLs error: %v", err)
 	}
 
 	if len(acls) > 0 {
-		err = libovsdbops.RemoveACLsFromAllSwitches(r.nbClient, acls)
+		err = libovsdbops.RemoveACLsFromAllSwitches(r.nbClient, acls...)
 		if err != nil {
 			klog.Errorf("Failed to purge existing reject rules: %v", err)
 		}

@@ -95,12 +95,12 @@ func TestRemoveACLsFromSwitches(t *testing.T) {
 				*fakeSwitch3,
 			}
 
-			ACLs := []nbdb.ACL{
-				*fakeACL1,
-				*fakeACL2,
+			ACLs := []*nbdb.ACL{
+				fakeACL1,
+				fakeACL2,
 			}
 
-			err = removeACLsFromSwitches(nbClient, fakeSwitches, ACLs)
+			err = removeACLsFromSwitches(nbClient, fakeSwitches, ACLs...)
 			if err != nil && !tt.expectErr {
 				t.Fatal(fmt.Errorf("RemoveACLFromNodeSwitches() error = %v", err))
 			}
