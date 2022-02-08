@@ -71,3 +71,48 @@ func CreateMeterWithBand(nbClient libovsdbclient.Client, meter *nbdb.Meter, mete
 
 	return results, nil
 }
+
+// FindMeterBands returns all MeterBands that belong to a given meter.
+// If one of the meter bands cannot be found in the database, return an error.
+func GetMeterBands(nbClient libovsdbclient.Client, meter *nbdb.Meter) ([]*nbdb.MeterBand, error) {
+	var meterBands []*nbdb.MeterBand
+
+	if meter == nil {
+		return nil, fmt.Errorf("provided meter is invalid: <nil>")
+	}
+
+	for _, bandUUID := range meter.Bands {
+		meterBand := &nbdb.MeterBand{
+			UUID: bandUUID,
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+		defer cancel()
+		err := nbClient.Get(ctx, meterBand)
+		if err != nil {
+			return nil, err
+		}
+		meterBands = append(meterBands, meterBand)
+	}
+	return meterBands, nil
+}
+
+// UpdateMeterBandRate updates the `rate` column of an OVN MeterBand.
+func UpdateMeterBandRate(nbClient libovsdbclient.Client, meterBand *nbdb.MeterBand, rate int) error {
+	meterBand.Rate = rate
+
+	opModel := OperationModel{
+		Model: meterBand,
+		OnModelUpdates: []interface{}{
+			&meterBand.Rate,
+		},
+		ErrNotFound: true,
+	}
+
+	m := NewModelClient(nbClient)
+	if _, err := m.CreateOrUpdate(opModel); err != nil {
+		return fmt.Errorf("error while updating MeterBand Rate to: %d error %v", rate, err)
+	}
+
+	return nil
+}
