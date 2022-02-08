@@ -116,7 +116,7 @@ var _ = AfterSuite(func() {
 func createTempFile(name string) (string, []byte, error) {
 	fileData := []byte{0x20}
 	fname := filepath.Join(tmpDir, name)
-	if err := ioutil.WriteFile(fname, fileData, 0644); err != nil {
+	if err := ioutil.WriteFile(fname, fileData, 0o644); err != nil {
 		return "", nil, err
 	}
 	return fname, fileData, nil
@@ -124,7 +124,7 @@ func createTempFile(name string) (string, []byte, error) {
 
 func createTempFileContent(name, value string) (string, error) {
 	fname := filepath.Join(tmpDir, name)
-	if err := ioutil.WriteFile(fname, []byte(value), 0644); err != nil {
+	if err := ioutil.WriteFile(fname, []byte(value), 0o644); err != nil {
 		return "", err
 	}
 	return fname, nil
@@ -211,7 +211,7 @@ mode=full
 		}
 		newData += line + "\n"
 	}
-	return ioutil.WriteFile(path, []byte(newData), 0644)
+	return ioutil.WriteFile(path, []byte(newData), 0o644)
 }
 
 var _ = Describe("Config Operations", func() {
@@ -677,7 +677,7 @@ var _ = Describe("Config Operations", func() {
 	It("overrides config file and defaults with CLI legacy service-cluster-ip-range option", func() {
 		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[kubernetes]
 service-cidrs=172.18.0.0/24
-`), 0644)
+`), 0o644)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		app.Action = func(ctx *cli.Context) error {
@@ -700,7 +700,7 @@ service-cidrs=172.18.0.0/24
 	It("accepts legacy service-cidr config file option", func() {
 		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[kubernetes]
 service-cidr=172.18.0.0/24
-`), 0644)
+`), 0o644)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		app.Action = func(ctx *cli.Context) error {
@@ -736,7 +736,7 @@ service-cidr=172.18.0.0/24
 	It("overrides config file and defaults with CLI legacy cluster-subnet option", func() {
 		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
 cluster-subnets=172.18.0.0/23
-`), 0644)
+`), 0o644)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		app.Action = func(ctx *cli.Context) error {
@@ -792,7 +792,7 @@ cluster-subnets=172.18.0.0/23
 	It("overrides config file and defaults with CLI legacy --init-gateways option", func() {
 		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[gateway]
 mode=local
-`), 0644)
+`), 0o644)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		app.Action = func(ctx *cli.Context) error {
@@ -815,7 +815,7 @@ mode=local
 	It("overrides config file and defaults with CLI legacy --gateway-local option", func() {
 		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[gateway]
 mode=shared
-`), 0644)
+`), 0o644)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		app.Action = func(ctx *cli.Context) error {
@@ -1186,7 +1186,7 @@ mtu=1234
 
 [foobar]
 foo=bar
-`), 0644)
+`), 0o644)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		app.Action = func(ctx *cli.Context) error {
@@ -1215,7 +1215,7 @@ mtu=1234
 
 [foobar
 foo=bar
-`), 0644)
+`), 0o644)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		app.Action = func(ctx *cli.Context) error {

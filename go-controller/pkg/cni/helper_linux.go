@@ -69,7 +69,7 @@ func renameLink(curName, newName string) error {
 }
 
 func setSysctl(sysctl string, newVal int) error {
-	return ioutil.WriteFile(sysctl, []byte(strconv.Itoa(newVal)), 0640)
+	return ioutil.WriteFile(sysctl, []byte(strconv.Itoa(newVal)), 0o640)
 }
 
 func moveIfToNetns(ifname string, netns ns.NetNS) error {

@@ -44,7 +44,7 @@ var _ = AfterSuite(func() {
 
 func createTempFile(name string) (string, error) {
 	fname := filepath.Join(tmpDir, name)
-	if err := ioutil.WriteFile(fname, []byte{0x20}, 0644); err != nil {
+	if err := ioutil.WriteFile(fname, []byte{0x20}, 0o644); err != nil {
 		return "", err
 	}
 	return fname, nil

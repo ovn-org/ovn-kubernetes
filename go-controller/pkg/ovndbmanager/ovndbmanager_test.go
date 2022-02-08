@@ -625,7 +625,7 @@ func keyForArgs(args ...string) string {
 func createDbFile(t *testing.T, name string) {
 	_, err := os.Stat(name)
 	if os.IsNotExist(err) {
-		f, err := os.OpenFile(name, os.O_RDONLY|os.O_CREATE, 0644)
+		f, err := os.OpenFile(name, os.O_RDONLY|os.O_CREATE, 0o644)
 		if err != nil {
 			t.Errorf("Unexpected error: %v", err)
 		}
