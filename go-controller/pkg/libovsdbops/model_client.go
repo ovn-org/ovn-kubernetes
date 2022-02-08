@@ -302,9 +302,18 @@ func (m *ModelClient) create(opModel *OperationModel) ([]ovsdb.Operation, error)
 		})
 	} else if info, err := m.client.Cache().DatabaseModel().NewModelInfo(opModel.Model); err == nil {
 		if name, err := info.FieldByColumn("name"); err == nil {
-			if len(fmt.Sprint(name)) > 0 {
+			objName, ok := name.(string)
+			if !ok {
+				if strPtr, ok := name.(*string); ok {
+					if strPtr != nil {
+						objName = *strPtr
+					}
+				}
+			}
+			if len(objName) > 0 {
 				klog.Warningf("OVSDB Create operation detected without setting opModel Name. Name: %s, %#v",
-					name, info)
+					objName, info)
+
 			}
 		}
 	}
