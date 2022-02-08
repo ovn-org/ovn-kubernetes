@@ -44,10 +44,10 @@ chmod +x ./kubectl
 sudo mv ./kubectl /usr/local/bin/kubectl
 
 # Install e2e test binary and ginkgo
-curl -L https://github.com/trozet/ovnFiles/blob/master/kubernetes-test-linux-v1.21.0-alpha.0.341%2B46d481b4556e33.tar.gz?raw=true -o kubernetes-test-linux-amd64.tar.gz
+curl -L https://storage.googleapis.com/kubernetes-release/release/v1.23.0/kubernetes-test-linux-amd64.tar.gz -o kubernetes-test-linux-amd64.tar.gz
 tar xvzf kubernetes-test-linux-amd64.tar.gz
-sudo mv ./e2e.test /usr/local/bin/e2e.test
-sudo mv ./ginkgo /usr/local/bin/ginkgo
+sudo mv kubernetes/test/bin/e2e.test /usr/local/bin/e2e.test
+sudo mv kubernetes/test/bin/ginkgo /usr/local/bin/ginkgo
 rm kubernetes-test-linux-amd64.tar.gz
 
 install_kind

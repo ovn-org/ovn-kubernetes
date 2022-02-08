@@ -27,8 +27,8 @@ spec:
         type: infra
         kubernetes.io/os: "linux"
       annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
+      priorityClassName: "system-cluster-critical"
       hostNetwork: true
       {{ "hostPID: true" if ovn_unprivileged_mode=="no" }}
       containers:
