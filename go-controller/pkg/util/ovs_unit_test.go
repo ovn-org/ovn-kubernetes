@@ -19,7 +19,7 @@ import (
 func TestRunningPlatform(t *testing.T) {
 	// Below is defined in ovs.go file
 	AppFs = afero.NewMemMapFs()
-	AppFs.MkdirAll("/etc", 0755)
+	AppFs.MkdirAll("/etc", 0o755)
 	tests := []struct {
 		desc            string
 		fileContent     []byte
@@ -35,31 +35,31 @@ func TestRunningPlatform(t *testing.T) {
 			desc:            "failed to find platform name",
 			expErr:          fmt.Errorf("failed to find the platform name"),
 			fileContent:     []byte("NAME="),
-			filePermissions: 0755,
+			filePermissions: 0o755,
 		},
 		{
 			desc:            "platform name returned is RHEL",
 			expOut:          "RHEL",
 			fileContent:     []byte("NAME=\"CentOS Linux\""),
-			filePermissions: 0755,
+			filePermissions: 0o755,
 		},
 		{
 			desc:            "platform name returned is Ubuntu",
 			expOut:          "Ubuntu",
 			fileContent:     []byte("NAME=\"Debian\""),
-			filePermissions: 0755,
+			filePermissions: 0o755,
 		},
 		{
 			desc:            "platform name returned is Photon",
 			expOut:          "Photon",
 			fileContent:     []byte("NAME=\"VMware\""),
-			filePermissions: 0755,
+			filePermissions: 0o755,
 		},
 		{
 			desc:            "unknown platform",
 			expErr:          fmt.Errorf("unknown platform"),
 			fileContent:     []byte("NAME=\"blah\""),
-			filePermissions: 0755,
+			filePermissions: 0o755,
 		},
 	}
 	for i, tc := range tests {
@@ -166,9 +166,9 @@ func TestGetNbctlSocketPath(t *testing.T) {
 			dirFileMocks: []ovntest.AferoDirMockHelper{
 				{
 					DirName:     "/some/blah/",
-					Permissions: 0755,
+					Permissions: 0o755,
 					Files: []ovntest.AferoFileMockHelper{
-						{"/some/blah/path", 0755, []byte("blah")},
+						{"/some/blah/path", 0o755, []byte("blah")},
 					},
 				},
 			},
@@ -179,9 +179,9 @@ func TestGetNbctlSocketPath(t *testing.T) {
 			dirFileMocks: []ovntest.AferoDirMockHelper{
 				{
 					DirName:     "/some/blah/",
-					Permissions: 0755,
+					Permissions: 0o755,
 					Files: []ovntest.AferoFileMockHelper{
-						{"/some/blah/path", 0755, []byte("blah")},
+						{"/some/blah/path", 0o755, []byte("blah")},
 					},
 				},
 			},
@@ -192,10 +192,10 @@ func TestGetNbctlSocketPath(t *testing.T) {
 			dirFileMocks: []ovntest.AferoDirMockHelper{
 				{
 					DirName:     "/var/run/ovn/",
-					Permissions: 0755,
+					Permissions: 0o755,
 					Files: []ovntest.AferoFileMockHelper{
-						{"/var/run/ovn/ovn-nbctl.pid", 0755, []byte("pid")},
-						{"/var/run/ovn/ovn-nbctl.pid.ctl", 0755, []byte("blah")},
+						{"/var/run/ovn/ovn-nbctl.pid", 0o755, []byte("pid")},
+						{"/var/run/ovn/ovn-nbctl.pid.ctl", 0o755, []byte("blah")},
 					},
 				},
 			},
@@ -256,9 +256,9 @@ func TestGetNbctlArgsAndEnv(t *testing.T) {
 			dirFileMocks: []ovntest.AferoDirMockHelper{
 				{
 					DirName:     "/some/blah/",
-					Permissions: 0755,
+					Permissions: 0o755,
 					Files: []ovntest.AferoFileMockHelper{
-						{"/some/blah/path", 0755, []byte("blah")},
+						{"/some/blah/path", 0o755, []byte("blah")},
 					},
 				},
 			},
@@ -412,9 +412,9 @@ func TestRunOVNNorthAppCtl(t *testing.T) {
 			dirFileMocks: []ovntest.AferoDirMockHelper{
 				{
 					DirName:     "/var/run/ovn/",
-					Permissions: 0755,
+					Permissions: 0o755,
 					Files: []ovntest.AferoFileMockHelper{
-						{"/var/run/ovn/ovn-northd.pid", 0755, []byte("pid")},
+						{"/var/run/ovn/ovn-northd.pid", 0o755, []byte("pid")},
 					},
 				},
 			},
@@ -485,9 +485,9 @@ func TestRunOVNControllerAppCtl(t *testing.T) {
 			dirFileMocks: []ovntest.AferoDirMockHelper{
 				{
 					DirName:     "/var/run/ovn/",
-					Permissions: 0755,
+					Permissions: 0o755,
 					Files: []ovntest.AferoFileMockHelper{
-						{"/var/run/ovn/ovn-controller.pid", 0755, []byte("pid")},
+						{"/var/run/ovn/ovn-controller.pid", 0o755, []byte("pid")},
 					},
 				},
 			},
@@ -556,9 +556,9 @@ func TestRunOvsVswitchdAppCtl(t *testing.T) {
 			dirFileMocks: []ovntest.AferoDirMockHelper{
 				{
 					DirName:     "/var/run/openvswitch/",
-					Permissions: 0755,
+					Permissions: 0o755,
 					Files: []ovntest.AferoFileMockHelper{
-						{"/var/run/openvswitch/ovs-vswitchd.pid", 0755, []byte("pid")},
+						{"/var/run/openvswitch/ovs-vswitchd.pid", 0o755, []byte("pid")},
 					},
 				},
 			},

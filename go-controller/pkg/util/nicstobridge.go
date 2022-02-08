@@ -206,7 +206,7 @@ func setupDefaultFile() {
 
 	// The defaultFile does not contain '--delete-transient-ports' set.
 	// We should set it.
-	f, err := os.OpenFile(defaultFile, os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(defaultFile, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		klog.Errorf("Failed to open %s to write (%v)", defaultFile, err)
 		return
