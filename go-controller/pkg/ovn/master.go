@@ -273,51 +273,11 @@ func (oc *Controller) StartClusterMaster() error {
 		}
 	}
 
-	meterFairness := true
-
-	// This always needs to be looked up in two transactions because there's no way to lookup
-	// a meter's meter_band
-	aclLogMeterPtr, err := libovsdbops.FindMeterByName(oc.nbClient, types.OvnACLLoggingMeter)
-	if err != nil && err != libovsdbclient.ErrNotFound {
-		// Log error but don't stop master setup
-		klog.Errorf("ACL logging support enabled, however failed to find acl-logging meter err: %v"+
+	err = oc.createACLLoggingMeter()
+	if err != nil {
+		klog.Warningf("ACL logging support enabled, however acl-logging meter could not be created: %v. "+
 			"Disabling ACL logging support", err)
 		oc.aclLoggingEnabled = false
-	}
-
-	// if meter exists update its fairness and rate limit, otherwise create it
-	if aclLogMeterPtr != nil {
-		// update fairness
-		if err := libovsdbops.UpdateMeterFairness(oc.nbClient, aclLogMeterPtr, meterFairness); err != nil {
-			klog.Warningf("Failed to enable 'fair' metering for %s meter: %v", types.OvnACLLoggingMeter, err)
-		}
-		// get all MeterBands and update their rate limit
-		if meterBands, err := libovsdbops.GetMeterBands(oc.nbClient, aclLogMeterPtr); err == nil {
-			for _, meterBand := range meterBands {
-				if err := libovsdbops.UpdateMeterBandRate(oc.nbClient, meterBand, config.Logging.ACLLoggingRateLimit); err != nil {
-					klog.Warningf("Failed to update MeterBand '%s': %v", meterBand.UUID, err)
-				}
-			}
-		} else {
-			klog.Warningf("Could not find MeterBands for Meter '%s': %v", aclLogMeterPtr.Name, err)
-		}
-	} else {
-		meterBand := &nbdb.MeterBand{
-			Action: types.MeterAction,
-			Rate:   config.Logging.ACLLoggingRateLimit,
-		}
-		meter := &nbdb.Meter{
-			Name: types.OvnACLLoggingMeter,
-			Fair: &meterFairness,
-			Unit: types.PacketsPerSecond,
-		}
-
-		if _, err := libovsdbops.CreateMeterWithBand(oc.nbClient, meter, meterBand); err != nil {
-			klog.Warningf("ACL logging support enabled, however acl-logging meter could not be created: %v. "+
-				"Disabling ACL logging support", err)
-			oc.aclLoggingEnabled = false
-		}
-
 	}
 
 	// FIXME: When https://github.com/ovn-org/libovsdb/issues/235 is fixed,
@@ -1655,4 +1615,33 @@ func (oc *Controller) iterateRetryNodes(updateAll bool) {
 			klog.V(5).Infof("%s retry node not after timer yet, time: %s", nodeName, nTimer)
 		}
 	}
+}
+
+func (oc *Controller) createACLLoggingMeter() error {
+	band := &nbdb.MeterBand{
+		Action: types.MeterAction,
+		Rate:   config.Logging.ACLLoggingRateLimit,
+	}
+	ops, err := libovsdbops.CreateMeterBandOps(oc.nbClient, nil, band)
+	if err != nil {
+		return fmt.Errorf("can't create meter band %v: %v", band, err)
+	}
+
+	meterFairness := true
+	meter := &nbdb.Meter{
+		Name: types.OvnACLLoggingMeter,
+		Fair: &meterFairness,
+		Unit: types.PacketsPerSecond,
+	}
+	ops, err = libovsdbops.CreateOrUpdateMeterOps(oc.nbClient, ops, meter, band)
+	if err != nil {
+		return fmt.Errorf("can't create meter %v: %v", meter, err)
+	}
+
+	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+	if err != nil {
+		return fmt.Errorf("can't transact ACL logging meter: %v", err)
+	}
+
+	return nil
 }

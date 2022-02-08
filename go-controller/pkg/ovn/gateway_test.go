@@ -153,14 +153,14 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		Rate:   int(25),
 	})
 	meters := map[string]string{
-		libovsdbops.OVNARPRateLimiter:              libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNARPRateLimiter),
-		libovsdbops.OVNARPResolveRateLimiter:       libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNARPResolveRateLimiter),
-		libovsdbops.OVNBFDRateLimiter:              libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNBFDRateLimiter),
-		libovsdbops.OVNControllerEventsRateLimiter: libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNControllerEventsRateLimiter),
-		libovsdbops.OVNICMPV4ErrorsRateLimiter:     libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNICMPV4ErrorsRateLimiter),
-		libovsdbops.OVNICMPV6ErrorsRateLimiter:     libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNICMPV6ErrorsRateLimiter),
-		libovsdbops.OVNRejectRateLimiter:           libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNRejectRateLimiter),
-		libovsdbops.OVNTCPRSTRateLimiter:           libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNTCPRSTRateLimiter),
+		types.OVNARPRateLimiter:              getMeterNameForProtocol(types.OVNARPRateLimiter),
+		types.OVNARPResolveRateLimiter:       getMeterNameForProtocol(types.OVNARPResolveRateLimiter),
+		types.OVNBFDRateLimiter:              getMeterNameForProtocol(types.OVNBFDRateLimiter),
+		types.OVNControllerEventsRateLimiter: getMeterNameForProtocol(types.OVNControllerEventsRateLimiter),
+		types.OVNICMPV4ErrorsRateLimiter:     getMeterNameForProtocol(types.OVNICMPV4ErrorsRateLimiter),
+		types.OVNICMPV6ErrorsRateLimiter:     getMeterNameForProtocol(types.OVNICMPV6ErrorsRateLimiter),
+		types.OVNRejectRateLimiter:           getMeterNameForProtocol(types.OVNRejectRateLimiter),
+		types.OVNTCPRSTRateLimiter:           getMeterNameForProtocol(types.OVNTCPRSTRateLimiter),
 	}
 	fairness := true
 	for _, v := range meters {

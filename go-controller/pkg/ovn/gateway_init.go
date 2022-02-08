@@ -58,7 +58,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		logicalRouter.LoadBalancerGroup = []string{oc.loadBalancerGroupUUID}
 	}
 
-	coppUUID, err := libovsdbops.CreateDefaultCOPP(oc.nbClient)
+	coppUUID, err := oc.createDefaultCOPP()
 	if err != nil || len(coppUUID) <= 0 {
 		klog.Warningf("Unable to create control plane protection on router %s:%v", gatewayRouter, err)
 	} else {
@@ -833,4 +833,61 @@ func (oc *Controller) deletePolicyBasedRoutes(policyID, priority string) error {
 		return fmt.Errorf("unable to delete logical router policy, err: %v", err)
 	}
 	return nil
+}
+
+// createDefaultCOPP creates the default COPP that needs to be added to each GR
+func (oc *Controller) createDefaultCOPP() (string, error) {
+	band := &nbdb.MeterBand{
+		Action: types.MeterAction,
+		Rate:   int(25), // hard-coding for now. TODO(tssurya): make this configurable if needed
+	}
+	ops, err := libovsdbops.CreateMeterBandOps(oc.nbClient, nil, band)
+	if err != nil {
+		return "", fmt.Errorf("can't create meter band %v: %v", band, err)
+	}
+
+	defaultProtocolNames := []string{
+		types.OVNARPRateLimiter,
+		types.OVNARPResolveRateLimiter,
+		types.OVNBFDRateLimiter,
+		types.OVNControllerEventsRateLimiter,
+		types.OVNICMPV4ErrorsRateLimiter,
+		types.OVNICMPV6ErrorsRateLimiter,
+		types.OVNRejectRateLimiter,
+		types.OVNTCPRSTRateLimiter,
+	}
+	copp := &nbdb.Copp{
+		Meters: make(map[string]string, len(defaultProtocolNames)),
+	}
+	meterFairness := true
+	for _, protocol := range defaultProtocolNames {
+		meterName := getMeterNameForProtocol(protocol)
+		copp.Meters[protocol] = meterName
+		meter := &nbdb.Meter{
+			Name: meterName,
+			Fair: &meterFairness,
+			Unit: types.PacketsPerSecond,
+		}
+		ops, err = libovsdbops.CreateOrUpdateMeterOps(oc.nbClient, ops, meter, band)
+		if err != nil {
+			return "", fmt.Errorf("can't create meter %v: %v", meter, err)
+		}
+	}
+
+	ops, err = libovsdbops.CreateOrUpdateCOPPsOps(oc.nbClient, ops, copp)
+	if err != nil {
+		return "", fmt.Errorf("can't create COPP %v: %v", copp, err)
+	}
+
+	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(oc.nbClient, copp, ops)
+	if err != nil {
+		return "", fmt.Errorf("can't transact COPP: %v", err)
+	}
+
+	return copp.UUID, nil
+}
+
+func getMeterNameForProtocol(protocol string) string {
+	// format: <OVNSupportedProtocolName>-rate-limiter
+	return protocol + "-" + types.OvnRateLimitingMeter
 }
