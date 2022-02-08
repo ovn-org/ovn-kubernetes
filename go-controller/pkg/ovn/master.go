@@ -288,16 +288,9 @@ func (oc *Controller) StartClusterMaster() error {
 		loadBalancerGroup := nbdb.LoadBalancerGroup{
 			Name: types.ClusterLBGroupName,
 		}
-		// Create loadBalancerGroup if needed. Since this table is indexed by name, there is no need to
-		// mention that field in OnModelUpdates or ModelPredicate.
-		opModels := []libovsdbops.OperationModel{
-			{
-				Name:  &loadBalancerGroup.Name,
-				Model: &loadBalancerGroup,
-			},
-		}
-		if _, err = oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-			klog.Errorf("Error creating cluster-wide load balancer group (%v)", err)
+		err := libovsdbops.CreateOrUpdateLoadBalancerGroup(oc.nbClient, &loadBalancerGroup)
+		if err != nil {
+			klog.Errorf("Error creating cluster-wide load balancer group %s: %v", types.ClusterLBGroupName, err)
 			return err
 		}
 		oc.loadBalancerGroupUUID = loadBalancerGroup.UUID

@@ -7,6 +7,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 )
@@ -195,7 +196,11 @@ func newCache(nbClient libovsdbclient.Client) (*LBCache, error) {
 		}
 	}
 
-	groups, err := libovsdbops.ListGroupsWithLoadBalancers(nbClient)
+	// Get non-empty LB groups
+	p := func(item *nbdb.LoadBalancerGroup) bool {
+		return len(item.LoadBalancer) > 0
+	}
+	groups, err := libovsdbops.FindLoadBalancerGroupsWithPredicate(nbClient, p)
 	if err != nil {
 		return nil, err
 	}
