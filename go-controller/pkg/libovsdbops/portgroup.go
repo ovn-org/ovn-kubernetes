@@ -22,7 +22,7 @@ func findPortGroup(nbClient libovsdbclient.Client, pg *nbdb.PortGroup) error {
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	defer cancel()
 	err := nbClient.Get(ctx, searched)
-	if err != nil {
+	if err == nil {
 		pg.UUID = searched.UUID
 	}
 

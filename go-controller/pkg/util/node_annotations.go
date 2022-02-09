@@ -354,21 +354,29 @@ type ParsedNodeEgressIPConfiguration struct {
 	Capacity Capacity
 }
 
-// ParseNodePrimaryIfAddr returns the IPv4 / IPv6 values for the node's primary network interface
-func ParseNodePrimaryIfAddr(node *kapi.Node) (*ParsedNodeEgressIPConfiguration, error) {
+func getNodeIfAddrAnnotation(node *kapi.Node) (*primaryIfAddrAnnotation, error) {
 	nodeIfAddrAnnotation, ok := node.Annotations[ovnNodeIfAddr]
 	if !ok {
 		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeIfAddr, node.Name)
 	}
-	nodeIfAddr := primaryIfAddrAnnotation{}
-	if err := json.Unmarshal([]byte(nodeIfAddrAnnotation), &nodeIfAddr); err != nil {
+	nodeIfAddr := &primaryIfAddrAnnotation{}
+	if err := json.Unmarshal([]byte(nodeIfAddrAnnotation), nodeIfAddr); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal annotation: %s for node %q, err: %v", ovnNodeIfAddr, node.Name, err)
 	}
 	if nodeIfAddr.IPv4 == "" && nodeIfAddr.IPv6 == "" {
 		return nil, fmt.Errorf("node: %q does not have any IP information set", node.Name)
 	}
+	return nodeIfAddr, nil
+}
+
+// ParseNodePrimaryIfAddr returns the IPv4 / IPv6 values for the node's primary network interface
+func ParseNodePrimaryIfAddr(node *kapi.Node) (*ParsedNodeEgressIPConfiguration, error) {
+	nodeIfAddr, err := getNodeIfAddrAnnotation(node)
+	if err != nil {
+		return nil, err
+	}
 	nodeEgressIPConfig := nodeEgressIPConfiguration{
-		IFAddr: ifAddr(nodeIfAddr),
+		IFAddr: ifAddr(*nodeIfAddr),
 		Capacity: Capacity{
 			IP:   UnlimitedNodeCapacity,
 			IPv4: UnlimitedNodeCapacity,
@@ -400,14 +408,38 @@ func ParseCloudEgressIPConfig(node *kapi.Node) (*ParsedNodeEgressIPConfiguration
 	if err := json.Unmarshal([]byte(egressIPConfigAnnotation), &nodeEgressIPConfig); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal annotation: %s for node %q, err: %v", ovnNodeIfAddr, node.Name, err)
 	}
-	if len(nodeEgressIPConfig) > 0 {
-		parsedEgressIPConfig, err := parseNodeEgressIPConfig(&nodeEgressIPConfig[0])
+	if len(nodeEgressIPConfig) == 0 {
+		return nil, fmt.Errorf("empty annotation: %s for node: %q", cloudEgressIPConfigAnnotationKey, node.Name)
+	}
+
+	parsedEgressIPConfig, err := parseNodeEgressIPConfig(&nodeEgressIPConfig[0])
+	if err != nil {
+		return nil, err
+	}
+
+	// ParsedNodeEgressIPConfiguration.V[4|6].IP is used to verify if an egress IP matches node IP to disable its creation
+	// use node IP instead of the value assigned from cloud egress CIDR config
+	nodeIfAddr, err := getNodeIfAddrAnnotation(node)
+	if err != nil {
+		return nil, err
+	}
+	if nodeIfAddr.IPv4 != "" {
+		ipv4, _, err := net.ParseCIDR(nodeIfAddr.IPv4)
 		if err != nil {
 			return nil, err
 		}
-		return parsedEgressIPConfig, nil
+		parsedEgressIPConfig.V4.IP = ipv4
 	}
-	return nil, fmt.Errorf("empty annotation: %s for node: %q", cloudEgressIPConfigAnnotationKey, node.Name)
+	if nodeIfAddr.IPv6 != "" {
+		ipv6, _, err := net.ParseCIDR(nodeIfAddr.IPv6)
+		if err != nil {
+			return nil, err
+		}
+		parsedEgressIPConfig.V6.IP = ipv6
+	}
+
+	return parsedEgressIPConfig, nil
+
 }
 
 func parseNodeEgressIPConfig(egressIPConfig *nodeEgressIPConfiguration) (*ParsedNodeEgressIPConfiguration, error) {

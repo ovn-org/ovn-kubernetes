@@ -147,6 +147,38 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		}
 	}
 
+	testData = append(testData, &nbdb.MeterBand{
+		UUID:   "25-pktps-rate-limiter-UUID",
+		Action: types.MeterAction,
+		Rate:   int(25),
+	})
+	meters := map[string]string{
+		libovsdbops.OVNARPRateLimiter:              libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNARPRateLimiter),
+		libovsdbops.OVNARPResolveRateLimiter:       libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNARPResolveRateLimiter),
+		libovsdbops.OVNBFDRateLimiter:              libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNBFDRateLimiter),
+		libovsdbops.OVNControllerEventsRateLimiter: libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNControllerEventsRateLimiter),
+		libovsdbops.OVNICMPV4ErrorsRateLimiter:     libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNICMPV4ErrorsRateLimiter),
+		libovsdbops.OVNICMPV6ErrorsRateLimiter:     libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNICMPV6ErrorsRateLimiter),
+		libovsdbops.OVNRejectRateLimiter:           libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNRejectRateLimiter),
+		libovsdbops.OVNTCPRSTRateLimiter:           libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNTCPRSTRateLimiter),
+	}
+	fairness := true
+	for _, v := range meters {
+		testData = append(testData, &nbdb.Meter{
+			UUID:  v + "-UUID",
+			Bands: []string{"25-pktps-rate-limiter-UUID"},
+			Name:  v,
+			Unit:  types.PacketsPerSecond,
+			Fair:  &fairness,
+		})
+	}
+
+	copp := &nbdb.Copp{
+		UUID:   "copp-UUID",
+		Meters: meters,
+	}
+	testData = append(testData, copp)
+
 	testData = append(testData, &nbdb.LogicalRouter{
 		UUID: GRName + "-UUID",
 		Name: GRName,
@@ -165,6 +197,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		StaticRoutes:      grStaticRoutes,
 		Nat:               natUUIDs,
 		LoadBalancerGroup: []string{types.ClusterLBGroupName + "-UUID"},
+		Copp:              &copp.UUID,
 	})
 
 	testData = append(testData, expectedOVNClusterRouter)

@@ -1,6 +1,7 @@
 package util
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -238,7 +239,7 @@ func TestGetAllPodIPs(t *testing.T) {
 		{
 			desc:     "test when pod.status.PodIP is empty",
 			inpPod:   &v1.Pod{},
-			errMatch: fmt.Errorf("no pod IPs found on pod"),
+			errMatch: ErrNoPodIPFound,
 		},
 		{
 			desc: "test when pod.status.PodIP is non-empty",
@@ -269,7 +270,7 @@ func TestGetAllPodIPs(t *testing.T) {
 					},
 				},
 			},
-			outExp: []net.IP{},
+			errMatch: ErrNoPodIPFound,
 		},
 	}
 	for i, tc := range tests {
@@ -279,7 +280,11 @@ func TestGetAllPodIPs(t *testing.T) {
 			if tc.errAssert {
 				assert.Error(t, e)
 			} else if tc.errMatch != nil {
-				assert.Contains(t, e.Error(), tc.errMatch.Error())
+				if errors.Is(tc.errMatch, ErrNoPodIPFound) {
+					assert.ErrorIs(t, e, ErrNoPodIPFound)
+				} else {
+					assert.Contains(t, e.Error(), tc.errMatch.Error())
+				}
 			} else {
 				assert.Equal(t, tc.outExp, res)
 			}

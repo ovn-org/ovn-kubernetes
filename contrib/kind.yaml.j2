@@ -16,11 +16,6 @@ networking:
 {%- if ovn_ip_family %}
   ipFamily: {{ ovn_ip_family }}
 {%- endif %}
-featureGates:
-  SCTPSupport: true
-{%- if ovn_ip_family == "dual" %}
-  IPv6DualStack: true
-{%- endif %}
 kubeadmConfigPatches:
 - |
   kind: ClusterConfiguration

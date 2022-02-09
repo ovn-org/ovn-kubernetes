@@ -1,17 +1,21 @@
 package upgrade
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"time"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	coreinformers "k8s.io/client-go/informers/core/v1"
+	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
@@ -25,8 +29,9 @@ const (
 // upgradeController checks the OVN master nodes periodically
 // for upgrade annotation
 type upgradeController struct {
-	client kube.Interface
-	// nodeLister is able to list/get endpoint slices and is populated
+	client          kubernetes.Interface
+	informerFactory informers.SharedInformerFactory
+	// nodeLister is able to list/get nodes and is populated
 	// by the shared informer passed to upgradeController
 	nodeLister corelisters.NodeLister
 	// nodeSynced returns true if the node shared informer
@@ -41,12 +46,27 @@ type upgradeController struct {
 }
 
 // NewController creates a new upgrade controller
-func NewController(client kube.Interface, nodeInformer coreinformers.NodeInformer) *upgradeController {
+func NewController(client kubernetes.Interface) *upgradeController {
 	uc := &upgradeController{
 		client: client,
 		queue:  workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), controllerName),
 	}
 
+	// note this will change in the future to control-plane:
+	// https://github.com/kubernetes/kubernetes/pull/95382
+	masterNode, err := labels.NewRequirement("node-role.kubernetes.io/master", selection.Exists, nil)
+	if err != nil {
+		klog.Fatalf("Unable to create labels.NewRequirement: %v", err)
+	}
+
+	labelSelector := labels.NewSelector()
+	labelSelector = labelSelector.Add(*masterNode)
+
+	uc.informerFactory = informers.NewSharedInformerFactoryWithOptions(client, 0,
+		informers.WithTweakListOptions(func(options *metav1.ListOptions) {
+			options.LabelSelector = labelSelector.String()
+		}))
+	nodeInformer := uc.informerFactory.Core().V1().Nodes()
 	klog.Info("Setting up event handlers for node upgrade")
 	nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    uc.onNodeAdd,
@@ -54,8 +74,7 @@ func NewController(client kube.Interface, nodeInformer coreinformers.NodeInforme
 	})
 	uc.nodeLister = nodeInformer.Lister()
 	uc.nodesSynced = nodeInformer.Informer().HasSynced
-	var err error
-	uc.initialTopoVersion, err = uc.detectInitialVersion()
+	uc.initialTopoVersion, err = uc.detectInitialVersion(labelSelector)
 	if err != nil {
 		klog.Fatalf("Unable to run initial version detection: %v", err)
 	}
@@ -90,13 +109,15 @@ func (uc *upgradeController) onNodeUpdate(oldObj, newObj interface{}) {
 	}
 }
 
-func (uc *upgradeController) Run(stopCh <-chan struct{}, informerStop chan struct{}) error {
+func (uc *upgradeController) Run(stopCh <-chan struct{}) error {
 	defer utilruntime.HandleCrash()
 	defer uc.queue.ShutDown()
 
 	klog.Infof("Starting controller %s", controllerName)
 	defer klog.Infof("Shutting down controller %s", controllerName)
 
+	informerStop := make(chan struct{})
+	uc.informerFactory.Start(informerStop)
 	// Wait for the caches to be synced
 	klog.Info("Waiting for informer caches to sync")
 	if !cache.WaitForNamedCacheSync(controllerName, stopCh, uc.nodesSynced) {
@@ -113,17 +134,17 @@ func (uc *upgradeController) Run(stopCh <-chan struct{}, informerStop chan struc
 				klog.Infof("Masters have completed upgrade from topology version %d to %d",
 					uc.initialTopoVersion, ovntypes.OvnCurrentTopologyVersion)
 				ticker.Stop()
-				informerStop <- struct{}{}
+				close(informerStop)
 				return nil
 			}
 		case <-deadline:
 			ticker.Stop()
-			informerStop <- struct{}{}
+			close(informerStop)
 			klog.Fatal("Failed to detect completion of master upgrade after 30 minutes. Check if " +
 				"ovnkube-masters have upgraded correctly!")
 		case <-stopCh:
 			ticker.Stop()
-			informerStop <- struct{}{}
+			close(informerStop)
 			return nil
 		}
 	}
@@ -171,15 +192,23 @@ func (uc *upgradeController) detectUpgradeDone(nodeName string) (bool, error) {
 }
 
 // DetermineOVNTopoVersionOnNode determines what OVN Topology version is being used
-func (uc *upgradeController) detectInitialVersion() (int, error) {
-	ver := 0
+func (uc *upgradeController) detectInitialVersion(selector labels.Selector) (int, error) {
 	// Find out the current OVN topology version by checking "k8s.ovn.org/topo-version" annotation on Master nodes
-	nodeList, err := uc.client.GetNodes()
+	nodeList, err := uc.client.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{
+		LabelSelector: selector.String(),
+	})
 	if err != nil {
 		return -1, fmt.Errorf("unable to get nodes for checking topo version: %v", err)
 	}
 
 	verFound := false
+	ver := 0
+	maxVers := ver
+	// say, we have three ovnkube-master Pods. on rolling update, one of the Pods will
+	// perform the topology/master upgrade and set the topology-version annotation for
+	// that node. other ovnkube-master Pods will be in standby mode and wouldn't have
+	// updated the annotation. so, we need to get the topology-version from all the
+	// nodes and pick the maximum value.
 	for _, node := range nodeList.Items {
 		topoVer, ok := node.Annotations[ovntypes.OvnK8sTopoAnno]
 		if ok && len(topoVer) > 0 {
@@ -189,7 +218,9 @@ func (uc *upgradeController) detectInitialVersion() (int, error) {
 					ovntypes.OvnK8sTopoAnno, node.Name, topoVer, err)
 			} else {
 				verFound = true
-				break
+				if ver > maxVers {
+					maxVers = ver
+				}
 			}
 		}
 	}
@@ -197,7 +228,7 @@ func (uc *upgradeController) detectInitialVersion() (int, error) {
 	if !verFound {
 		klog.Warningf("Unable to detect topology version on nodes")
 	}
-	return ver, nil
+	return maxVers, nil
 }
 
 func (uc *upgradeController) GetInitialTopoVersion() int {

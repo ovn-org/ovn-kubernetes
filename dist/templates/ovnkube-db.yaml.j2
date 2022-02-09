@@ -53,9 +53,8 @@ spec:
         component: network
         type: infra
         kubernetes.io/os: "linux"
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
+      priorityClassName: "system-cluster-critical"
       # Requires fairly broad permissions - ability to read all services and network functions as well
       # as all pods.
       serviceAccountName: ovn

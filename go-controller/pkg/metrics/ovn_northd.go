@@ -94,12 +94,8 @@ func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string
 		return checkPodRunsOnGivenNode(clientset, []string{"app=ovnkube-master", "name=ovnkube-master"}, k8sNodeName, true)
 	})
 	if err != nil {
-		if err == wait.ErrWaitTimeout {
-			klog.Errorf("Timed out while checking if OVNKube Master Pod runs on this %q K8s Node: %v. "+
-				"Not registering OVN North Metrics on this Node", k8sNodeName, err)
-		} else {
-			klog.Infof("Not registering OVN North Metrics on this Node since ovn-northd is not running on this node.")
-		}
+		klog.Infof("Not registering OVN North Metrics because OVNKube Master Pod was not found running on this "+
+			"node (%s)", k8sNodeName)
 		return
 	}
 	klog.Info("Found OVNKube Master Pod running on this node. Registering OVN North Metrics")

@@ -135,7 +135,7 @@ func setupPIDFile(pidfile string) error {
 
 	// Create if it doesn't exist, else exit with error
 	if os.IsNotExist(err) {
-		if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
+		if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
 			klog.Errorf("Failed to write pidfile %s (%v). Ignoring..", pidfile, err)
 		}
 	} else {
@@ -147,7 +147,7 @@ func setupPIDFile(pidfile string) error {
 		_, err1 := os.Stat("/proc/" + string(pid[:]) + "/cmdline")
 		if os.IsNotExist(err1) {
 			// Left over pid from dead process
-			if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
+			if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
 				klog.Errorf("Failed to write pidfile %s (%v). Ignoring..", pidfile, err)
 			}
 		} else {
