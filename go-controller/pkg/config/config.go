@@ -1623,6 +1623,17 @@ func InitConfigSa(ctx *cli.Context, exec kexec.Interface, saPath string, default
 	return initConfigWithPath(ctx, exec, saPath, defaults)
 }
 
+// stripTokenFromK8sConfig removes k8s SA token & CAData values
+// from the KubernetesConfig struct used for logging.
+func stripTokenFromK8sConfig() KubernetesConfig {
+	k8sConf := Kubernetes
+	// Token and CAData are sensitive fields so stripping
+	// them while logging.
+	k8sConf.Token = ""
+	k8sConf.CAData = []byte{}
+	return k8sConf
+}
+
 // initConfigWithPath reads the given config file (or if empty, reads the config file
 // specified by command-line arguments, or empty, the default config file) and
 // common command-line options and constructs the global config object from
@@ -1774,7 +1785,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	klog.V(5).Infof("Monitoring config: %+v", Monitoring)
 	klog.V(5).Infof("IPFIX config: %+v", IPFIX)
 	klog.V(5).Infof("CNI config: %+v", CNI)
-	klog.V(5).Infof("Kubernetes config: %+v", Kubernetes)
+	klog.V(5).Infof("Kubernetes config: %+v", stripTokenFromK8sConfig())
 	klog.V(5).Infof("Gateway config: %+v", Gateway)
 	klog.V(5).Infof("OVN North config: %+v", OvnNorth)
 	klog.V(5).Infof("OVN South config: %+v", OvnSouth)
