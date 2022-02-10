@@ -8,7 +8,7 @@
 # The registry is configured in /etc/containers/registries.conf
 # on each node in both "registries:" and "insecure_registries:" sections.
 
-all: ubuntu centos fedora
+all: ubuntu fedora
 
 SLASH = -
 ARCH = $(subst aarch64,arm64,$(subst x86_64,amd64,$(patsubst i%86,386,$(shell uname -m))))
@@ -32,13 +32,6 @@ endif
 	# ${OCI_BIN} login -u ovnkube docker.io/ovnkube
 	# ${OCI_BIN} push docker.io/ovnkube/ovn-daemonset-u:latest
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest
-
-centos: bld
-	${OCI_BIN} build --build-arg rpmArch=$(shell uname -m) -t ovn-daemonset .
-	${OCI_BIN} tag ovn-daemonset docker.io/ovnkube/ovn-daemonset:latest
-	# ${OCI_BIN} login -u ovnkube docker.io/ovnkube
-	# ${OCI_BIN} push docker.io/ovnkube/ovn-daemonset:latest
-	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset:latest
 
 fedora: bld
 	${OCI_BIN} build -t ovn-kube-f -f Dockerfile.fedora .
