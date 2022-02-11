@@ -121,7 +121,7 @@ func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayIn
 	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nsInfo.hybridOverlayExternalGW, ops, nil
 }
 
-func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) ([]ovsdb.Operation, error) {
+func (oc *Controller) deletePodFromNamespace(ns string, podIfAddrs []*net.IPNet, portUUID string) ([]ovsdb.Operation, error) {
 	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
 	if nsInfo == nil {
 		return nil, nil
@@ -130,14 +130,14 @@ func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) ([]ovs
 	var ops []ovsdb.Operation
 	var err error
 	if nsInfo.addressSet != nil {
-		if ops, err = nsInfo.addressSet.DeleteIPsReturnOps(createIPAddressSlice(portInfo.ips)); err != nil {
+		if ops, err = nsInfo.addressSet.DeleteIPsReturnOps(createIPAddressSlice(podIfAddrs)); err != nil {
 			return nil, err
 		}
 	}
 
 	// Remove the port from the multicast allow policy.
-	if oc.multicastSupport && nsInfo.multicastEnabled {
-		if err = podDeleteAllowMulticastPolicy(oc.nbClient, ns, portInfo); err != nil {
+	if oc.multicastSupport && nsInfo.multicastEnabled && len(portUUID) > 0 {
+		if err = podDeleteAllowMulticastPolicy(oc.nbClient, ns, portUUID); err != nil {
 			return nil, err
 		}
 	}
