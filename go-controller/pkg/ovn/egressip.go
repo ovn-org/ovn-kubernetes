@@ -1138,9 +1138,13 @@ func (oc *Controller) generatePodIPCacheForEgressIP(eIPs []interface{}) (map[str
 				continue
 			}
 			for _, pod := range pods {
-				for _, podIP := range pod.Status.PodIPs {
-					ip := net.ParseIP(podIP.IP)
-					egressIPToPodIPCache[egressIP.Name].Insert(ip.String())
+				logicalPort, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name))
+				if err != nil {
+					klog.Errorf("Error getting logical port %s, err: %v", util.GetLogicalPortName(pod.Namespace, pod.Name), err)
+					continue
+				}
+				for _, ipNet := range logicalPort.ips {
+					egressIPToPodIPCache[egressIP.Name].Insert(ipNet.IP.String())
 				}
 			}
 		}

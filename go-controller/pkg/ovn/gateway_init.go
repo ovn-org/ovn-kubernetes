@@ -15,6 +15,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -56,6 +57,13 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		logicalRouter.LoadBalancerGroup = []string{oc.loadBalancerGroupUUID}
 	}
 
+	coppUUID, err := libovsdbops.CreateDefaultCOPP(oc.nbClient)
+	if err != nil || len(coppUUID) <= 0 {
+		klog.Warningf("Unable to create control plane protection on router %s:%v", gatewayRouter, err)
+	} else {
+		logicalRouter.Copp = &coppUUID
+	}
+
 	opModels := []libovsdbops.OperationModel{
 		{
 			Name:           logicalRouter.Name,
@@ -65,6 +73,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 				&logicalRouter.Options,
 				&logicalRouter.ExternalIDs,
 				&logicalRouter.LoadBalancerGroup,
+				&logicalRouter.Copp,
 			},
 		},
 	}

@@ -69,7 +69,7 @@ func renameLink(curName, newName string) error {
 }
 
 func setSysctl(sysctl string, newVal int) error {
-	return ioutil.WriteFile(sysctl, []byte(strconv.Itoa(newVal)), 0640)
+	return ioutil.WriteFile(sysctl, []byte(strconv.Itoa(newVal)), 0o640)
 }
 
 func moveIfToNetns(ifname string, netns ns.NetNS) error {
@@ -355,7 +355,7 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, hostIface.Name, ifInfo, pr.SandboxID,
 			podLister, kclient)
 		if err != nil {
-			pr.deletePorts(hostIface.Name)
+			pr.deletePorts(hostIface.Name, pr.PodNamespace, pr.PodName)
 			return nil, err
 		}
 	}
@@ -451,22 +451,12 @@ func (pr *PodRequest) UnconfigureInterface(ifInfo *PodInterfaceInfo) error {
 		return nil
 	}
 
-	// host side interface deletion
+	// host side deletion of OVS port and kernel interface
 	ifName := pr.SandboxID[:15]
-	out, err := ovsExec("del-port", "br-int", ifName)
-	if err != nil && !strings.Contains(out, "no port named") {
-		// DEL should be idempotent; don't return an error just log it
-		klog.Warningf("Failed to delete OVS port %s %s from br-int: %v\n %q", ifName, podDesc, err, string(out))
-	}
-	err = clearPodBandwidth(pr.SandboxID)
-	if err != nil {
+	pr.deletePorts(ifName, pr.PodNamespace, pr.PodName)
+
+	if err := clearPodBandwidth(pr.SandboxID); err != nil {
 		klog.Warningf("Failed to clearPodBandwidth sandbox %v %s: %v", pr.SandboxID, podDesc, err)
-	}
-	// In SmartNic (CX5) case, there is no point in deleting the representor port
-	if pr.CNIConf.DeviceID == "" {
-		if err = util.LinkDelete(ifName); err != nil {
-			klog.Warningf("Failed to delete interface %s %s: %v", ifName, podDesc, err)
-		}
 	}
 	pr.deletePodConntrack()
 	return nil
@@ -499,14 +489,18 @@ func (pr *PodRequest) deletePodConntrack() {
 	}
 }
 
-func (pr *PodRequest) deletePorts(ifaceName string) {
+func (pr *PodRequest) deletePorts(ifaceName, podNamespace, podName string) {
+	podDesc := fmt.Sprintf("%s/%s", podNamespace, podName)
+
 	out, err := ovsExec("del-port", "br-int", ifaceName)
-	if err != nil && !strings.Contains(out, "no port named") {
+	if err != nil && !strings.Contains(err.Error(), "no port named") {
 		// DEL should be idempotent; don't return an error just log it
-		klog.Warningf("Failed to delete OVS port %s: %v\n  %q", ifaceName, err, string(out))
+		klog.Warningf("Failed to delete pod %q OVS port %s: %v\n  %q", podDesc, ifaceName, err, string(out))
 	}
 	// skip deleting representor ports
 	if pr.CNIConf.DeviceID == "" {
-		_ = util.LinkDelete(ifaceName)
+		if err = util.LinkDelete(ifaceName); err != nil {
+			klog.Warningf("Failed to delete pod %q interface %s: %v", podDesc, ifaceName, err)
+		}
 	}
 }

@@ -53,7 +53,7 @@ func (s *Server) Start(requestFunc cniRequestFunc) error {
 		}
 
 		// Check permissions
-		if info.Mode()&0777 != 0700 {
+		if info.Mode()&0o777 != 0o700 {
 			return fmt.Errorf("insecure permissions on pod info socket directory %s: %v", s.rundir, info.Mode())
 		}
 
@@ -62,7 +62,7 @@ func (s *Server) Start(requestFunc cniRequestFunc) error {
 			return fmt.Errorf("failed to remove old pod info socket %s: %v", socketPath, err)
 		}
 	}
-	if err := os.MkdirAll(s.rundir, 0700); err != nil {
+	if err := os.MkdirAll(s.rundir, 0o700); err != nil {
 		return fmt.Errorf("failed to create pod info socket directory %s: %v", s.rundir, err)
 	}
 
@@ -73,7 +73,7 @@ func (s *Server) Start(requestFunc cniRequestFunc) error {
 	if err != nil {
 		return fmt.Errorf("failed to listen on pod info socket: %v", err)
 	}
-	if err := os.Chmod(socketPath, 0600); err != nil {
+	if err := os.Chmod(socketPath, 0o600); err != nil {
 		l.Close()
 		return fmt.Errorf("failed to set pod info socket mode: %v", err)
 	}
