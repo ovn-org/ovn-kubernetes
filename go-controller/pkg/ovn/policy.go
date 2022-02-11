@@ -1255,11 +1255,12 @@ func (oc *Controller) handlePeerService(
 				newSvc := newObj.(*kapi.Service)
 				if reflect.DeepEqual(newSvc.Spec.ExternalIPs, oldSvc.Spec.ExternalIPs) &&
 					reflect.DeepEqual(newSvc.Spec.ClusterIP, oldSvc.Spec.ClusterIP) &&
+					reflect.DeepEqual(newSvc.Spec.ClusterIPs, oldSvc.Spec.ClusterIPs) &&
 					reflect.DeepEqual(newSvc.Spec.Type, oldSvc.Spec.Type) &&
 					reflect.DeepEqual(newSvc.Status.LoadBalancer.Ingress, oldSvc.Status.LoadBalancer.Ingress) {
 
-					klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, "+
-						".Spec.ExternalIP, .Spec.ClusterIP, .Spec.Type, .Status.LoadBalancer.Ingress", newSvc.Name)
+					klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of "+
+						".Spec.ExternalIP, .Spec.ClusterIP, .Spec.ClusterIPs, .Spec.Type, .Status.LoadBalancer.Ingress", newSvc.Name)
 					return
 				}
 
