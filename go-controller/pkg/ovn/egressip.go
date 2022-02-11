@@ -959,7 +959,7 @@ func (oc *Controller) addPodEgressIPAssignments(name string, statusAssignments [
 		// addLogicalPort has finished successfully setting up networking for
 		// the pod, so we can proceed with retrieving its IP and deleting the
 		// external GW configuration created in addLogicalPort for the pod.
-		logicalPort, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name, types.DefaultNetworkName, true))
+		logicalPort, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name, types.DefaultNetworkName, !oc.nadInfo.IsSecondary))
 		if err != nil {
 			return nil
 		}

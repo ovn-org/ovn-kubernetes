@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+	multinetworkpolicyapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	knet "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"math/rand"
@@ -27,7 +28,17 @@ func (oc *Controller) iterateRetryNetworkPolicies(updateAll bool) {
 		if npEntry.newPolicy != nil {
 			// get the latest version of the new policy from the informer, if it doesn't exist we are not going to
 			// create the new policy
-			np, err := oc.mc.watchFactory.GetNetworkPolicy(npEntry.newPolicy.Namespace, npEntry.newPolicy.Name)
+			var np *knet.NetworkPolicy
+			var mp *multinetworkpolicyapi.MultiNetworkPolicy
+			var err error
+			if oc.nadInfo.IsSecondary {
+				mp, err = oc.mc.watchFactory.GetMultiNetworkPolicy(npEntry.newPolicy.Namespace, npEntry.newPolicy.Name)
+				if err == nil {
+					np = convertMultiNetPolicyToNetPolicy(mp)
+				}
+			} else {
+				np, err = oc.mc.watchFactory.GetNetworkPolicy(npEntry.newPolicy.Namespace, npEntry.newPolicy.Name)
+			}
 			if err != nil && errors.IsNotFound(err) {
 				klog.Infof("%s policy not found in the informers cache, not going to retry policy create", namespacedName)
 				npEntry.newPolicy = nil

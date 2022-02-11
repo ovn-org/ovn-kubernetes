@@ -44,22 +44,6 @@ func findRouter(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) (*nb
 	return &routers[0], nil
 }
 
-// FindRoutersWitherExternalIds Looks up all routers in the cache based on given externalIDs
-func FindRoutersWitherExternalIds(nbClient libovsdbclient.Client, externalIDs map[string]string) ([]nbdb.LogicalRouter, error) {
-	routers := []nbdb.LogicalRouter{}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	err := nbClient.WhereCache(func(item *nbdb.LogicalRouter) bool {
-		for k, v := range externalIDs {
-			if item.ExternalIDs[k] != v {
-				return false
-			}
-		}
-		return true
-	}).List(ctx, &routers)
-	return routers, err
-}
-
 func AddLoadBalancersToRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
 	if ops == nil {
 		ops = []libovsdb.Operation{}
@@ -120,6 +104,22 @@ func RemoveLoadBalancersFromRouterOps(nbClient libovsdbclient.Client, ops []libo
 	ops = append(ops, op...)
 
 	return ops, nil
+}
+
+// FindRoutersWitherExternalIds Looks up all routers in the cache based on given externalIDs
+func FindRoutersWitherExternalIds(nbClient libovsdbclient.Client, externalIDs map[string]string) ([]nbdb.LogicalRouter, error) {
+	routers := []nbdb.LogicalRouter{}
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	err := nbClient.WhereCache(func(item *nbdb.LogicalRouter) bool {
+		for k, v := range externalIDs {
+			if item.ExternalIDs[k] != v {
+				return false
+			}
+		}
+		return true
+	}).List(ctx, &routers)
+	return routers, err
 }
 
 func ListRoutersWithLoadBalancers(nbClient libovsdbclient.Client) ([]nbdb.LogicalRouter, error) {

@@ -92,6 +92,11 @@ rules:
   resources:
   - network-attachment-definitions
   verbs: ["list", "get", "watch"]
+- apiGroups:
+  - k8s.cni.cncf.io
+  resources:
+  - multi-networkpolicies
+  verbs: ["list", "get", "watch"]
 
 
 ---

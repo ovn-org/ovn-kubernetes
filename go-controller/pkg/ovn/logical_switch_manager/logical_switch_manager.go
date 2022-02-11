@@ -280,7 +280,7 @@ func (manager *LogicalSwitchManager) ReleaseIPs(switchName string, ipnets []*net
 	manager.RLock()
 	defer manager.RUnlock()
 	if ipnets == nil || switchName == "" {
-		klog.V(5).Infof("Node name is empty or ip slice to release is nil")
+		klog.V(5).Infof("Switch name is empty or ip slice to release is nil")
 		return nil
 	}
 	lsi, ok := manager.cache[switchName]

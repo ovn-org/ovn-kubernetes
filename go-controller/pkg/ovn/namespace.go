@@ -215,7 +215,7 @@ func parseRoutingExternalGWAnnotation(annotation string) ([]net.IP, error) {
 
 // AddNamespace creates corresponding addressset in ovn db
 func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
-	klog.Infof("[%s] adding namespace", ns.Name)
+	klog.Infof("[%s] adding namespace for network %s", ns.Name, oc.nadInfo.NetName)
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
@@ -234,28 +234,29 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 // configureNamespace ensures internal structures are updated based on namespace
 // must be called with nsInfo lock
 func (oc *Controller) configureNamespace(nsInfo *namespaceInfo, ns *kapi.Namespace) {
-	if annotation, ok := ns.Annotations[routingExternalGWsAnnotation]; ok {
-		exGateways, err := parseRoutingExternalGWAnnotation(annotation)
-		if err != nil {
-			klog.Errorf(err.Error())
-		} else {
-			_, bfdEnabled := ns.Annotations[bfdAnnotation]
-			err = oc.addExternalGWsForNamespace(gatewayInfo{gws: exGateways, bfdEnabled: bfdEnabled}, nsInfo, ns.Name)
+	if !oc.nadInfo.IsSecondary {
+		if annotation, ok := ns.Annotations[routingExternalGWsAnnotation]; ok {
+			exGateways, err := parseRoutingExternalGWAnnotation(annotation)
 			if err != nil {
-				klog.Error(err.Error())
+				klog.Errorf(err.Error())
+			} else {
+				_, bfdEnabled := ns.Annotations[bfdAnnotation]
+				err = oc.addExternalGWsForNamespace(gatewayInfo{gws: exGateways, bfdEnabled: bfdEnabled}, nsInfo, ns.Name)
+				if err != nil {
+					klog.Error(err.Error())
+				}
+			}
+			if _, ok := ns.Annotations[bfdAnnotation]; ok {
+				nsInfo.routingExternalGWs.bfdEnabled = true
 			}
 		}
-		if _, ok := ns.Annotations[bfdAnnotation]; ok {
-			nsInfo.routingExternalGWs.bfdEnabled = true
-		}
-	}
-
-	annotation := ns.Annotations[aclLoggingAnnotation]
-	if annotation != "" {
-		if oc.aclLoggingCanEnable(annotation, nsInfo) {
-			klog.Infof("Namespace %s: ACL logging is set to deny=%s allow=%s", ns.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
-		} else {
-			klog.Warningf("Namespace %s: ACL logging is not enabled due to malformed annotation", ns.Name)
+		annotation := ns.Annotations[aclLoggingAnnotation]
+		if annotation != "" {
+			if oc.aclLoggingCanEnable(annotation, nsInfo) {
+				klog.Infof("Namespace %s: ACL logging is set to deny=%s allow=%s", ns.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
+			} else {
+				klog.Warningf("Namespace %s: ACL logging is not enabled due to malformed annotation", ns.Name)
+			}
 		}
 	}
 
@@ -269,7 +270,7 @@ func (oc *Controller) configureNamespace(nsInfo *namespaceInfo, ns *kapi.Namespa
 }
 
 func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
-	klog.Infof("[%s] updating namespace", old.Name)
+	klog.Infof("[%s] updating namespace for network %s", old.Name, oc.nadInfo.NetName)
 
 	nsInfo, nsUnlock := oc.getNamespaceLocked(old.Name, false)
 	if nsInfo == nil {
@@ -340,6 +341,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 				}
 			}
 		}
+
 		aclAnnotation := newer.Annotations[aclLoggingAnnotation]
 		oldACLAnnotation := old.Annotations[aclLoggingAnnotation]
 		// support for ACL logging update, if new annotation is empty, make sure we propagate new setting
@@ -359,7 +361,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 }
 
 func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
-	klog.Infof("[%s] deleting namespace", ns.Name)
+	klog.Infof("[%s] deleting namespace for network %s", ns.Name, oc.nadInfo.NetName)
 
 	nsInfo := oc.deleteNamespaceLocked(ns.Name)
 	if nsInfo == nil {
@@ -382,7 +384,9 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 			delete(nsInfo.networkPolicies, np.name)
 		}
 	}
-	oc.deleteGWRoutesForNamespace(ns.Name, nil)
+	if !oc.nadInfo.IsSecondary {
+		oc.deleteGWRoutesForNamespace(ns.Name, nil)
+	}
 	oc.multicastDeleteNamespace(ns, nsInfo)
 }
 
@@ -491,6 +495,9 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool, namespace 
 
 // deleteNamespaceLocked locks namespacesMutex, finds and deletes ns, and returns the
 // namespace, locked.
+// when net-attach-def of the given controller is deleted, noDefer is set to true. In
+// this case, the NetworkPolicy handler is already removed, simply delete the address_set
+// directly without delay.
 func (oc *Controller) deleteNamespaceLocked(ns string) *namespaceInfo {
 	// The locking here is the same as in getNamespaceLocked
 

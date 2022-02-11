@@ -215,6 +215,8 @@ ovn_egressfirewall_enable=${OVN_EGRESSFIREWALL_ENABLE:-false}
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER:-false}
 #OVN_MULTI_NETWORK_ENABLE - enable multiple network support for ovn-kubernetes
 ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE:-false}
+#OVN_MULTI_NETWORKPOLICY_ENABLE - enable multi network policy for ovn-kubernetes
+ovn_multi_networkpolicy_enable=${OVN_MULTI_NETWORKPOLICY_ENABLE:-false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 ovn_netflow_targets=${OVN_NETFLOW_TARGETS:-}
 ovn_sflow_targets=${OVN_SFLOW_TARGETS:-}
@@ -954,11 +956,18 @@ ovn-master() {
 	  egressfirewall_enabled_flag="--enable-egress-firewall"
   fi
   echo "egressfirewall_enabled_flag=${egressfirewall_enabled_flag}"
+
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
 	  multi_network_enabled_flag="--enable-multi-network"
   fi
   echo "multi_network_enabled_flag=${multi_network_enabled_flag}"
+
+  multi_networkpolicy_enabled_flag=
+  if [[ ${ovn_multi_networkpolicy_enable} == "true" ]]; then
+      multi_networkpolicy_enabled_flag="--enable-multi-networkpolicy"
+  fi
+  echo "multi_networkpolicy_enabled_flag=${multi_networkpolicy_enabled_flag}"
 
   ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
 
@@ -986,6 +995,7 @@ ovn-master() {
     ${egressip_enabled_flag} \
     ${egressfirewall_enabled_flag} \
     ${multi_network_enabled_flag} \
+    ${multi_networkpolicy_enabled_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --host-network-namespace ${ovn_host_network_namespace} &
 

@@ -254,14 +254,14 @@ func GetAllPodIPs(pod *v1.Pod, netAttachInfo *NetAttachDefInfo) ([]net.IP, error
 				ips = append(ips, ip.IP)
 			}
 			// An OVN annotation should never have empty IPs, but just in case
-			if len(annotation.IPs) == 0 {
-				klog.Warningf("No IPs found in existing OVN annotation of nad %s Pod Name: %s, Annotation: %#v",
+			if len(ips) == 0 {
+				klog.Warningf("No IPs found in existing OVN annotation for nad %s! Pod Name: %s, Annotation: %#v",
 					nadName, pod.Name, annotation)
 			}
 		}
 	}
 
-	if len(ips) > 0 {
+	if len(ips) != 0 {
 		return ips, nil
 	}
 
@@ -270,7 +270,7 @@ func GetAllPodIPs(pod *v1.Pod, netAttachInfo *NetAttachDefInfo) ([]net.IP, error
 			pod.Namespace, pod.Name, netAttachInfo.NetName)
 	}
 
-	// Otherwise if the annotation is not valid try to use Kube API pod IP
+	// Otherwise, default network, if the annotation is not valid try to use Kube API pod IPs
 	ips = make([]net.IP, 0, len(pod.Status.PodIPs))
 	for _, podIP := range pod.Status.PodIPs {
 		ip := net.ParseIP(podIP.IP)

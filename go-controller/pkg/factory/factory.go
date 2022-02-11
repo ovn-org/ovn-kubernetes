@@ -23,6 +23,11 @@ import (
 	ocpcloudnetworkinformerfactory "github.com/openshift/client-go/cloudnetwork/informers/externalversions"
 	ocpcloudnetworklister "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
 
+	multinetworkpolicyapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
+	multinetworkpolicyscheme "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/scheme"
+	multinetworkpolicyinformerfactory "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/informers/externalversions"
+	multinetworkpolicylister "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/listers/k8s.cni.cncf.io/v1beta1"
+
 	networkattachmentdefinitionapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	networkattachmentdefinitionscheme "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/scheme"
 	networkattachmentdefinitioninformerfactory "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions"
@@ -53,6 +58,7 @@ type WatchFactory struct {
 	efFactory    egressfirewallinformerfactory.SharedInformerFactory
 	cpipcFactory ocpcloudnetworkinformerfactory.SharedInformerFactory
 	nadFactory   networkattachmentdefinitioninformerfactory.SharedInformerFactory
+	mnpFactory   multinetworkpolicyinformerfactory.SharedInformerFactory
 	informers    map[reflect.Type]*informer
 
 	stopChan chan struct{}
@@ -87,6 +93,7 @@ var (
 	egressIPType                    reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
 	cloudPrivateIPConfigType        reflect.Type = reflect.TypeOf(&ocpcloudnetworkapi.CloudPrivateIPConfig{})
 	networkattachmentdefinitionType reflect.Type = reflect.TypeOf(&networkattachmentdefinitionapi.NetworkAttachmentDefinition{})
+	multinetworkpolicyType          reflect.Type = reflect.TypeOf(&multinetworkpolicyapi.MultiNetworkPolicy{})
 )
 
 // NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
@@ -103,6 +110,7 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		efFactory:    egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
 		cpipcFactory: ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
 		nadFactory:   networkattachmentdefinitioninformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval),
+		mnpFactory:   multinetworkpolicyinformerfactory.NewSharedInformerFactory(ovnClientset.MultiNetworkPolicyClient, resyncInterval),
 		informers:    make(map[reflect.Type]*informer),
 		stopChan:     make(chan struct{}),
 	}
@@ -114,6 +122,9 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		return nil, err
 	}
 	if err := networkattachmentdefinitionapi.AddToScheme(networkattachmentdefinitionscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := multinetworkpolicyapi.AddToScheme(multinetworkpolicyscheme.Scheme); err != nil {
 		return nil, err
 	}
 	// For Services and Endpoints, pre-populate the shared Informer with one that
@@ -192,6 +203,13 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 			return nil, err
 		}
 	}
+	if config.OVNKubernetesFeature.EnableMultiNetworkPolicy {
+		wf.informers[multinetworkpolicyType], err = newInformer(multinetworkpolicyType,
+			wf.mnpFactory.K8sCniCncfIo().V1beta1().MultiNetworkPolicies().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
 	return wf, nil
 }
 
@@ -235,6 +253,15 @@ func (wf *WatchFactory) Start() error {
 			}
 		}
 	}
+	if config.OVNKubernetesFeature.EnableMultiNetworkPolicy && wf.mnpFactory != nil {
+		wf.mnpFactory.Start(wf.stopChan)
+		for oType, synced := range wf.mnpFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -366,6 +393,10 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 	case networkattachmentdefinitionType:
 		if networkattachmentdefinition, ok := obj.(*networkattachmentdefinitionapi.NetworkAttachmentDefinition); ok {
 			return &networkattachmentdefinition.ObjectMeta, nil
+		}
+	case multinetworkpolicyType:
+		if multinetworkpolicy, ok := obj.(*multinetworkpolicyapi.MultiNetworkPolicy); ok {
+			return &multinetworkpolicy.ObjectMeta, nil
 		}
 	}
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
@@ -516,6 +547,16 @@ func (wf *WatchFactory) RemoveCloudPrivateIPConfigHandler(handler *Handler) {
 	wf.removeHandler(cloudPrivateIPConfigType, handler)
 }
 
+// AddMultiNetworkPolicyHandler adds a handler function that will be executed on MultiNetworkPolicy object changes
+func (wf *WatchFactory) AddMultiNetworkPolicyHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(multinetworkpolicyType, "", nil, handlerFuncs, processExisting)
+}
+
+// RemoveMultiNetworkPolicyHandler removes an MultiNetworkPolicy object event handler function
+func (wf *WatchFactory) RemoveMultiNetworkPolicyHandler(handler *Handler) {
+	wf.removeHandler(multinetworkpolicyType, handler)
+}
+
 // AddNamespaceHandler adds a handler function that will be executed on Namespace object changes
 func (wf *WatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(namespaceType, "", nil, handlerFuncs, processExisting)
@@ -645,6 +686,12 @@ func (wf *WatchFactory) GetNamespacesBySelector(labelSelector metav1.LabelSelect
 func (wf *WatchFactory) GetNetworkPolicy(namespace, name string) (*knet.NetworkPolicy, error) {
 	networkPolicyLister := wf.informers[policyType].lister.(netlisters.NetworkPolicyLister)
 	return networkPolicyLister.NetworkPolicies(namespace).Get(name)
+}
+
+// GetMultiNetworkPolicy gets a specific multi network policy by the namespace/name
+func (wf *WatchFactory) GetMultiNetworkPolicy(namespace, name string) (*multinetworkpolicyapi.MultiNetworkPolicy, error) {
+	multiPolicylister := wf.informers[multinetworkpolicyType].lister.(multinetworkpolicylister.MultiNetworkPolicyLister)
+	return multiPolicylister.MultiNetworkPolicies(namespace).Get(name)
 }
 
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {

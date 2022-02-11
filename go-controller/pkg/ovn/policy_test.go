@@ -365,11 +365,11 @@ type multicastPolicy struct{}
 
 func (p multicastPolicy) getMulticastPolicyExpectedData(ns string, ports []string) []libovsdb.TestData {
 	pg_hash := hashedPortGroup(ns)
-	egressMatch := getACLMatch(pg_hash, getMulticastACLEgrMatch(), knet.PolicyTypeEgress)
+	egressMatch := getACLMatch(pg_hash, getMulticastACLEgrMatch(), knet.PolicyTypeEgress, util.NetNameInfo{types.DefaultNetworkName, "", false})
 
 	ip4AddressSet, ip6AddressSet := addressset.MakeAddressSetHashNames(ns)
 	mcastMatch := getACLMatchAF(getMulticastACLIgrMatchV4(ip4AddressSet), getMulticastACLIgrMatchV6(ip6AddressSet))
-	ingressMatch := getACLMatch(pg_hash, mcastMatch, knet.PolicyTypeIngress)
+	ingressMatch := getACLMatch(pg_hash, mcastMatch, knet.PolicyTypeIngress, util.NetNameInfo{types.DefaultNetworkName, "", false})
 
 	egressACL := libovsdbops.BuildACL(
 		ns+"_MulticastAllowEgress",

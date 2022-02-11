@@ -255,7 +255,8 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister, us
 	var response *Response
 	var err, err1 error
 
-	klog.Infof("%s %s starting CNI request %+v", request, request.Command, request)
+	klog.Infof("%s %s starting CNI request (%+v) DeviceID(%q) for pod %s/%s network %s", request, request.Command, request,
+		request.CNIConf.DeviceID, request.PodNamespace, request.PodName, request.effectiveNADName)
 	switch request.Command {
 	case CNIAdd:
 		response, err = request.cmdAdd(kubeAuth, podLister, useOVSExternalIDs, kclient)

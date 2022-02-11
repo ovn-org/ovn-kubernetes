@@ -86,7 +86,7 @@ func NewOvnAddressSetFactory(netNameInfo util.NetNameInfo, nbClient libovsdbclie
 }
 
 // ovnAddressSetFactory implements the AddressSetFactory interface
-var _ AddressSetFactory = &ovnAddressSetFactory{}
+//var _ AddressSetFactory = &ovnAddressSetFactory{}
 
 // NewAddressSet returns a new address set object
 func (asf *ovnAddressSetFactory) NewAddressSet(name string, ips []net.IP) (AddressSet, error) {

@@ -272,7 +272,7 @@ func (oc *Controller) waitForNodeLogicalSwitchInCache(switchName string) error {
 }
 
 func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet,
-	network *networkattachmentdefinitionapi.NetworkSelectionElement) (err error) {
+	network *networkattachmentdefinitionapi.NetworkSelectionElement) error {
 
 	if oc.nadInfo.IsSecondary {
 		// non default network, see if its network-attachment's annotation has default-route key.
@@ -747,7 +747,7 @@ func (oc *Controller) assignPodAddresses(switchName string) (net.HardwareAddr, [
 	return podMAC, podCIDRs, nil
 }
 
-// Given a pod and the node on which it is scheduled, get all addresses currently assigned
+// Given a pod and the switch on which it is scheduled, get all addresses currently assigned
 // to it from the nbdb.
 func (oc *Controller) getPortAddresses(switchName, portName string) (net.HardwareAddr, []*net.IPNet, error) {
 	podMac, podIPs, err := util.GetPortAddresses(portName, oc.mc.nbClient)

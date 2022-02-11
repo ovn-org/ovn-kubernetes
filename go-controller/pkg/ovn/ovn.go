@@ -38,6 +38,7 @@ import (
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 
+	multinetworkpolicy "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	utilnet "k8s.io/utils/net"
 
 	kapi "k8s.io/api/core/v1"
@@ -74,6 +75,8 @@ type ACLLoggingLevels struct {
 // nsInfo.Unlock() on it when you are done with it. (No code outside of the code that
 // manages the oc.namespaces map is ever allowed to hold an unlocked namespaceInfo.)
 type namespaceInfo struct {
+	util.NetNameInfo
+
 	sync.RWMutex
 
 	// addressSet is an address set object that holds the IP addresses
@@ -137,14 +140,16 @@ type OvnMHController struct {
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
-	mc                    *OvnMHController
-	wg                    *sync.WaitGroup
-	stopChan              chan struct{}
-	egressFirewallHandler *factory.Handler
-	podHandler            *factory.Handler
-	nodeHandler           *factory.Handler
-	isStarted             bool
-	startMutex            sync.Mutex
+	mc                        *OvnMHController
+	wg                        *sync.WaitGroup
+	stopChan                  chan struct{}
+	egressFirewallHandler     *factory.Handler
+	podHandler                *factory.Handler
+	nodeHandler               *factory.Handler
+	namespaceHandler          *factory.Handler
+	multiNetworkPolicyHandler *factory.Handler
+	isStarted                 bool
+	startMutex                sync.Mutex
 
 	nadInfo *util.NetAttachDefInfo
 
@@ -414,9 +419,7 @@ func (oc *Controller) Run(nodeName string) error {
 
 	// WatchNamespaces() should be started first because it has no other
 	// dependencies, and WatchNodes() depends on it
-	if !oc.nadInfo.IsSecondary {
-		oc.WatchNamespaces()
-	}
+	oc.WatchNamespaces()
 
 	// WatchNodes must be started next because it creates the node switch
 	// which most other watches depend on.
@@ -495,6 +498,9 @@ func (oc *Controller) Run(nodeName string) error {
 			}()
 		}
 	} else {
+		if oc.nadInfo.IsSecondary && config.OVNKubernetesFeature.EnableMultiNetworkPolicy {
+			oc.multiNetworkPolicyHandler = oc.WatchMultiNetworkPolicy()
+		}
 		klog.Infof("Completing all the Watchers for network %s took %v", oc.nadInfo.NetName, time.Since(start))
 	}
 
@@ -557,7 +563,7 @@ func (oc *Controller) ovnTopologyCleanup() error {
 	}
 
 	// Cleanup address sets in non dual stack formats in all versions known to possibly exist.
-	if ver <= ovntypes.OvnPortBindingTopoVersion {
+	if ver <= ovntypes.OvnPortBindingTopoVersion && !oc.nadInfo.IsSecondary {
 		err = addressset.NonDualStackAddressSetCleanup(oc.nadInfo.NetNameInfo, oc.mc.nbClient)
 	}
 	return err
@@ -860,6 +866,73 @@ func (oc *Controller) WatchPods() {
 	klog.Infof("Bootstrapping existing pods and cleaning stale pods took %v", time.Since(start))
 }
 
+// WatchMultiNetworkPolicy starts the watching of multi network policy resource and calls
+// back the appropriate handler logic
+func (oc *Controller) WatchMultiNetworkPolicy() *factory.Handler {
+	if !oc.nadInfo.IsSecondary {
+		klog.Infof("WatchMultiNetworkPolicy for OVN Primary networkis a no-op")
+		return nil
+	}
+	go func() {
+		// track the retryNetworkPolicies map and every 30 seconds check if any pods need to be retried
+		for {
+			select {
+			case <-time.After(30 * time.Second):
+				oc.iterateRetryNetworkPolicies(false)
+			case <-oc.retryPolicyChan:
+				oc.iterateRetryNetworkPolicies(true)
+			case <-oc.stopChan:
+				return
+			}
+		}
+	}()
+
+	start := time.Now()
+	handler := oc.mc.watchFactory.AddMultiNetworkPolicyHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			mpolicy := obj.(*multinetworkpolicy.MultiNetworkPolicy)
+			if !oc.shouldApplyMultiPolicy(mpolicy) {
+				return
+			}
+			policy := convertMultiNetPolicyToNetPolicy(mpolicy)
+			oc.addPolicyHandler(policy)
+		},
+		UpdateFunc: func(old, newer interface{}) {
+			oldMPolicy := old.(*multinetworkpolicy.MultiNetworkPolicy)
+			newMPolicy := newer.(*multinetworkpolicy.MultiNetworkPolicy)
+			oldPolicy := convertMultiNetPolicyToNetPolicy(oldMPolicy)
+			newPolicy := convertMultiNetPolicyToNetPolicy(newMPolicy)
+			oldApply := oc.shouldApplyMultiPolicy(oldMPolicy)
+			newApply := oc.shouldApplyMultiPolicy(newMPolicy)
+			if oldApply == newApply {
+				if !oldApply {
+					return
+				}
+				if !reflect.DeepEqual(oldPolicy, newPolicy) {
+					oc.updatePolicyHandler(oldPolicy, newPolicy)
+				}
+			} else {
+				if newApply {
+					oc.addPolicyHandler(newPolicy)
+				} else {
+					oc.deletePolicyHandler(oldPolicy)
+				}
+			}
+
+		},
+		DeleteFunc: func(obj interface{}) {
+			mpolicy := obj.(*multinetworkpolicy.MultiNetworkPolicy)
+			if !oc.shouldApplyMultiPolicy(mpolicy) {
+				return
+			}
+			policy := convertMultiNetPolicyToNetPolicy(mpolicy)
+			oc.deletePolicyHandler(policy)
+		},
+	}, oc.syncMultiNetworkPolicies)
+	klog.Infof("Bootstrapping existing multi network policies and cleaning stale policies on network %s took %v", oc.nadInfo.NetName, time.Since(start))
+	return handler
+}
+
 // WatchNetworkPolicy starts the watching of network policy resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNetworkPolicy() {
@@ -885,80 +958,92 @@ func (oc *Controller) WatchNetworkPolicy() {
 	oc.mc.watchFactory.AddPolicyHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
-			oc.initRetryPolicy(policy)
-			oc.checkAndSkipRetryPolicy(policy)
-			// If there is a delete entry this is a network policy being added
-			// with the same name as a previous network policy that failed deletion.
-			// Destroy it first before we add the new policy.
-			if retryEntry := oc.getPolicyRetryEntry(policy); retryEntry != nil && retryEntry.oldPolicy != nil {
-				klog.Infof("Detected stale policy during new policy add with the same name: %s/%s",
-					policy.Namespace, policy.Name)
-				if err := oc.deleteNetworkPolicy(retryEntry.oldPolicy, nil); err != nil {
-					oc.unSkipRetryPolicy(policy)
-					klog.Errorf("Failed to delete stale network policy %s, during add: %v",
-						getPolicyNamespacedName(policy), err)
-					return
-				}
-				oc.removeDeleteFromRetryPolicy(policy)
-			}
-			start := time.Now()
-			if err := oc.addNetworkPolicy(policy); err != nil {
-				klog.Errorf("Failed to create network policy %s, error: %v",
-					getPolicyNamespacedName(policy), err)
-				oc.unSkipRetryPolicy(policy)
-				return
-			}
-			klog.Infof("Created Network Policy: %s took: %v", getPolicyNamespacedName(policy), time.Since(start))
-			oc.checkAndDeleteRetryPolicy(policy)
+			oc.addPolicyHandler(policy)
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			oldPolicy := old.(*kapisnetworking.NetworkPolicy)
 			newPolicy := newer.(*kapisnetworking.NetworkPolicy)
 			if !reflect.DeepEqual(oldPolicy, newPolicy) {
-				oc.checkAndSkipRetryPolicy(oldPolicy)
-				// check if there was already a retry entry with an old policy
-				// else just look to delete the old policy in the update
-				if retryEntry := oc.getPolicyRetryEntry(oldPolicy); retryEntry != nil && retryEntry.oldPolicy != nil {
-					if err := oc.deleteNetworkPolicy(retryEntry.oldPolicy, nil); err != nil {
-						oc.initRetryPolicy(newPolicy)
-						oc.unSkipRetryPolicy(oldPolicy)
-						klog.Errorf("Failed to delete stale network policy %s, during update: %v",
-							getPolicyNamespacedName(oldPolicy), err)
-						return
-					}
-				} else if err := oc.deleteNetworkPolicy(oldPolicy, nil); err != nil {
-					oc.initRetryPolicyWithDelete(oldPolicy, nil)
-					oc.initRetryPolicy(newPolicy)
-					oc.unSkipRetryPolicy(oldPolicy)
-					klog.Errorf("Failed to delete network policy %s, during update: %v",
-						getPolicyNamespacedName(oldPolicy), err)
-					return
-				}
-				// remove the old policy from retry entry since it was correctly deleted
-				oc.removeDeleteFromRetryPolicy(oldPolicy)
-				if err := oc.addNetworkPolicy(newPolicy); err != nil {
-					oc.initRetryPolicy(newPolicy)
-					oc.unSkipRetryPolicy(newPolicy)
-					klog.Errorf("Failed to create network policy %s, during update: %v",
-						getPolicyNamespacedName(newPolicy), err)
-					return
-				}
-				oc.checkAndDeleteRetryPolicy(newPolicy)
+				oc.updatePolicyHandler(oldPolicy, newPolicy)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
-			oc.checkAndSkipRetryPolicy(policy)
-			oc.initRetryPolicyWithDelete(policy, nil)
-			if err := oc.deleteNetworkPolicy(policy, nil); err != nil {
-				oc.unSkipRetryPolicy(policy)
-				klog.Errorf("Failed to delete network policy %s, error: %v", getPolicyNamespacedName(policy), err)
-				return
-			}
-			oc.checkAndDeleteRetryPolicy(policy)
+			oc.deletePolicyHandler(policy)
 		},
 	}, oc.syncNetworkPolicies)
 	klog.Infof("Bootstrapping existing policies and cleaning stale policies took %v", time.Since(start))
+}
+
+func (oc *Controller) addPolicyHandler(policy *kapisnetworking.NetworkPolicy) {
+	oc.initRetryPolicy(policy)
+	oc.checkAndSkipRetryPolicy(policy)
+	// If there is a delete entry this is a network policy being added
+	// with the same name as a previous network policy that failed deletion.
+	// Destroy it first before we add the new policy.
+	if retryEntry := oc.getPolicyRetryEntry(policy); retryEntry != nil && retryEntry.oldPolicy != nil {
+		klog.Infof("Detected stale policy during new policy add with the same name on network %s: %s/%s",
+			policy.Namespace, policy.Name, oc.nadInfo.NetName)
+		if err := oc.deleteNetworkPolicy(retryEntry.oldPolicy, nil); err != nil {
+			oc.unSkipRetryPolicy(policy)
+			klog.Errorf("Failed to delete stale network policy %s on network %s, during add: %v",
+				getPolicyNamespacedName(policy), oc.nadInfo.NetName, err)
+			return
+		}
+		oc.removeDeleteFromRetryPolicy(policy)
+	}
+	start := time.Now()
+	if err := oc.addNetworkPolicy(policy); err != nil {
+		klog.Errorf("Failed to create network policy %s on network %s, error: %v",
+			getPolicyNamespacedName(policy), oc.nadInfo.NetName, err)
+		oc.unSkipRetryPolicy(policy)
+		return
+	}
+	klog.Infof("Created Network Policy: %s on network %s took: %v", getPolicyNamespacedName(policy), oc.nadInfo.NetName, time.Since(start))
+	oc.checkAndDeleteRetryPolicy(policy)
+}
+
+func (oc *Controller) updatePolicyHandler(oldPolicy, newPolicy *kapisnetworking.NetworkPolicy) {
+	oc.checkAndSkipRetryPolicy(oldPolicy)
+	// check if there was already a retry entry with an old policy
+	// else just look to delete the old policy in the update
+	if retryEntry := oc.getPolicyRetryEntry(oldPolicy); retryEntry != nil && retryEntry.oldPolicy != nil {
+		if err := oc.deleteNetworkPolicy(retryEntry.oldPolicy, nil); err != nil {
+			oc.initRetryPolicy(newPolicy)
+			oc.unSkipRetryPolicy(oldPolicy)
+			klog.Errorf("Failed to delete stale network policy %s on network %s, during update: %v",
+				getPolicyNamespacedName(oldPolicy), oc.nadInfo.NetName, err)
+			return
+		}
+	} else if err := oc.deleteNetworkPolicy(oldPolicy, nil); err != nil {
+		oc.initRetryPolicyWithDelete(oldPolicy, nil)
+		oc.initRetryPolicy(newPolicy)
+		oc.unSkipRetryPolicy(oldPolicy)
+		klog.Errorf("Failed to delete network policy %s on network %s, during update: %v",
+			getPolicyNamespacedName(oldPolicy), oc.nadInfo.NetName, err)
+		return
+	}
+	// remove the old policy from retry entry since it was correctly deleted
+	oc.removeDeleteFromRetryPolicy(oldPolicy)
+	if err := oc.addNetworkPolicy(newPolicy); err != nil {
+		oc.initRetryPolicy(newPolicy)
+		oc.unSkipRetryPolicy(newPolicy)
+		klog.Errorf("Failed to create network policy %s on network %s, during update: %v",
+			getPolicyNamespacedName(newPolicy), oc.nadInfo.NetName, err)
+		return
+	}
+	oc.checkAndDeleteRetryPolicy(newPolicy)
+}
+
+func (oc *Controller) deletePolicyHandler(policy *kapisnetworking.NetworkPolicy) {
+	oc.checkAndSkipRetryPolicy(policy)
+	oc.initRetryPolicyWithDelete(policy, nil)
+	if err := oc.deleteNetworkPolicy(policy, nil); err != nil {
+		oc.unSkipRetryPolicy(policy)
+		klog.Errorf("Failed to delete network policy %s on network on network %s, error: %v", getPolicyNamespacedName(policy), oc.nadInfo.NetName, err)
+		return
+	}
+	oc.checkAndDeleteRetryPolicy(policy)
 }
 
 // WatchEgressFirewall starts the watching of egressfirewall resource and calls
@@ -1238,13 +1323,8 @@ func (oc *Controller) WatchEgressIPPods() {
 // WatchNamespaces starts the watching of namespace resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNamespaces() {
-	if oc.nadInfo.IsSecondary {
-		klog.Infof("WatchNamespaces for network %s is a no-op", oc.nadInfo.NetName)
-		return
-	}
-
 	start := time.Now()
-	oc.mc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
+	oc.namespaceHandler = oc.mc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ns := obj.(*kapi.Namespace)
 			oc.AddNamespace(ns)
@@ -1641,12 +1721,25 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 	oc.wg.Wait()
 	close(oc.stopChan)
 
+	if oc.multiNetworkPolicyHandler != nil {
+		oc.mc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.multiNetworkPolicyHandler)
+	}
+
 	if oc.podHandler != nil {
 		oc.mc.watchFactory.RemovePodHandler(oc.podHandler)
 	}
 
 	if oc.nodeHandler != nil {
 		oc.mc.watchFactory.RemoveNodeHandler(oc.nodeHandler)
+	}
+
+	if oc.namespaceHandler != nil {
+		oc.mc.watchFactory.RemoveNamespaceHandler(oc.namespaceHandler)
+	}
+
+	for namespace := range oc.namespaces {
+		ns := kapi.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
+		oc.deleteNamespace(&ns)
 	}
 
 	oc.deleteMaster()
@@ -1656,6 +1749,7 @@ func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.
 		klog.Errorf("Error in initializing/fetching subnets: %v", err)
 		return
 	}
+
 	// remove hostsubnet annoation for this network
 	for _, node := range existingNodes.Items {
 		err := oc.deleteNodeLogicalNetwork(node.Name)

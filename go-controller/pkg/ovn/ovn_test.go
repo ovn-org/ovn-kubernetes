@@ -2,8 +2,8 @@ package ovn
 
 import (
 	"context"
-	"github.com/onsi/gomega"
 	networkattachmentdefinitionfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
+	"github.com/onsi/gomega"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"

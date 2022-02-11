@@ -14,6 +14,7 @@ require (
 	github.com/coreos/go-iptables v0.4.5
 	github.com/google/uuid v1.2.0
 	github.com/gorilla/mux v1.8.0
+	github.com/k8snetworkplumbingwg/multi-networkpolicy v0.0.0-20200914073308-0f33b9190170
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.1.1-0.20210510153419-66a699ae3b05
 	github.com/miekg/dns v1.1.31
 	github.com/mitchellh/copystructure v1.2.0

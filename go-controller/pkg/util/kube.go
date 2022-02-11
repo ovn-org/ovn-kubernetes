@@ -23,6 +23,7 @@ import (
 	"k8s.io/client-go/util/cert"
 	"k8s.io/klog/v2"
 
+	multinetworkpolicyclientset "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned"
 	networkattchmentdefclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
@@ -35,11 +36,12 @@ import (
 
 // OVNClientset is a wrapper around all clientsets used by OVN-Kubernetes
 type OVNClientset struct {
-	KubeClient            kubernetes.Interface
-	EgressIPClient        egressipclientset.Interface
-	EgressFirewallClient  egressfirewallclientset.Interface
-	CloudNetworkClient    ocpcloudnetworkclientset.Interface
-	NetworkAttchDefClient networkattchmentdefclientset.Interface
+	KubeClient               kubernetes.Interface
+	EgressIPClient           egressipclientset.Interface
+	EgressFirewallClient     egressfirewallclientset.Interface
+	CloudNetworkClient       ocpcloudnetworkclientset.Interface
+	NetworkAttchDefClient    networkattchmentdefclientset.Interface
+	MultiNetworkPolicyClient multinetworkpolicyclientset.Interface
 }
 
 func adjustCommit() string {
@@ -142,12 +144,17 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, err
 	}
+	multiNetworkPolicyClientset, err := multinetworkpolicyclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
 	return &OVNClientset{
-		KubeClient:            kclientset,
-		EgressIPClient:        egressIPClientset,
-		EgressFirewallClient:  egressFirewallClientset,
-		CloudNetworkClient:    cloudNetworkClientset,
-		NetworkAttchDefClient: networkAttchmntDefClientset,
+		KubeClient:               kclientset,
+		EgressIPClient:           egressIPClientset,
+		EgressFirewallClient:     egressFirewallClientset,
+		CloudNetworkClient:       cloudNetworkClientset,
+		NetworkAttchDefClient:    networkAttchmntDefClientset,
+		MultiNetworkPolicyClient: multiNetworkPolicyClientset,
 	}, nil
 }
 
