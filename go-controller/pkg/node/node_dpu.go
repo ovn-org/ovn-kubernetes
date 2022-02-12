@@ -68,7 +68,7 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool) {
 	nc.podHandler = n.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			klog.Infof("Add for Pod: %s/%s for nad %s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName(), nc.nadInfo.NetName)
+			klog.Infof("Add for Pod: %s/%s for network %s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName(), nc.nadInfo.NetName)
 			// Is this pod based on hostNetwork or it is created on different node where the DPU
 			if !util.PodWantsNetwork(pod) || (util.PodScheduled(pod) && n.name != pod.Spec.NodeName) {
 				return
@@ -93,7 +93,7 @@ func (nc *ovnNodeController) watchPodsDPU(isOvnUpEnabled bool) {
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			pod := newer.(*kapi.Pod)
-			klog.Infof("Update for Pod: %s/%s for network", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName(), nc.nadInfo.NetName)
+			klog.Infof("Update for Pod: %s/%s for network %s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName(), nc.nadInfo.NetName)
 			if !util.PodWantsNetwork(pod) || (util.PodScheduled(pod) && n.name != pod.Spec.NodeName) {
 				retryPods.Delete(pod.UID)
 				servedPods.Delete(pod.UID)
