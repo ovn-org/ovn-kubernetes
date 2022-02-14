@@ -54,7 +54,7 @@ func AddLoadBalancersToRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.
 
 	_, err := findRouter(nbClient, router)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unable to find router %q: %w", router.Name, err)
 	}
 
 	lbUUIDs := make([]string, 0, len(lbs))
@@ -85,7 +85,7 @@ func RemoveLoadBalancersFromRouterOps(nbClient libovsdbclient.Client, ops []libo
 
 	_, err := findRouter(nbClient, router)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unable to find router %q: %w", router.Name, err)
 	}
 
 	lbUUIDs := make([]string, 0, len(lbs))
@@ -351,21 +351,25 @@ func addOrUpdateNATToRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Op
 }
 
 func AddOrUpdateNATsToRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, nats ...*nbdb.NAT) ([]libovsdb.Operation, error) {
+	var routerName string
+	if router != nil {
+		routerName = router.Name
+	}
 	router, err := findRouter(nbClient, router)
 	if err != nil {
-		return ops, err
+		return ops, fmt.Errorf("unable to find router %q: %w", routerName, err)
 	}
 
 	routerNats, err := getRouterNATs(nbClient, router)
 	if err != nil {
-		return ops, err
+		return ops, fmt.Errorf("unable to get NAT entries for router %q: %w", routerName, err)
 	}
 
 	for _, nat := range nats {
 		if nat != nil {
 			ops, err = addOrUpdateNATToRouterOps(nbClient, ops, router, routerNats, nat)
 			if err != nil {
-				return ops, err
+				return ops, fmt.Errorf("unable to generate OPs for NAT+Router %q update %w", routerName, err)
 			}
 		}
 	}
@@ -378,14 +382,18 @@ func DeleteNATsFromRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Oper
 		ops = []libovsdb.Operation{}
 	}
 
+	var routerName string
+	if router != nil {
+		routerName = router.Name
+	}
 	router, err := findRouter(nbClient, router)
 	if err != nil {
-		return ops, err
+		return ops, fmt.Errorf("unable to find router %q: %w", routerName, err)
 	}
 
 	routerNats, err := getRouterNATs(nbClient, router)
 	if err != nil {
-		return ops, err
+		return ops, fmt.Errorf("unable to get NAT entries for router %q: %w", routerName, err)
 	}
 
 	natUUIDs := make([]string, 0, len(nats))
@@ -423,7 +431,8 @@ func DeleteNATsFromRouterOps(nbClient libovsdbclient.Client, ops []libovsdb.Oper
 		}
 		mutateOp, err := nbClient.Where(router).Mutate(router, mutations...)
 		if err != nil {
-			return ops, err
+			return ops, fmt.Errorf("unable to generate mutate ops for router: %s, mutations: %+v: %w",
+				routerName, mutations, err)
 		}
 		ops = append(ops, mutateOp...)
 	}
