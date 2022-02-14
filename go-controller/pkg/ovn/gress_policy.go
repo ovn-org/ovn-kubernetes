@@ -459,10 +459,12 @@ func getSvcVips(nbClient client.Client, service *v1.Service) []net.IP {
 		}
 	}
 	if util.ServiceTypeHasClusterIP(service) {
-		if util.IsClusterIPSet(service) {
-			ip := net.ParseIP(service.Spec.ClusterIP)
+		ipStrs := util.GetClusterIPs(service)
+		for _, ipStr := range ipStrs {
+			ip := net.ParseIP(ipStr)
 			if ip == nil {
 				klog.Errorf("Failed to parse cluster IP %q", service.Spec.ClusterIP)
+				continue
 			}
 			ips = append(ips, ip)
 		}
