@@ -1095,6 +1095,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) error {
 			policy.Name, policy.Namespace, err)
 	}
 	defer nsUnlock()
+	nsInfo.networkPolicies[policy.Name] = np
 	// there may have been a namespace update for ACL logging while we were creating the NP
 	// update it
 	if err := oc.setACLLoggingForNamespace(policy.Namespace, nsInfo); err != nil {
@@ -1103,7 +1104,6 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) error {
 		klog.Infof("Namespace %s: ACL logging setting updated to deny=%s allow=%s",
 			policy.Namespace, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
 	}
-	nsInfo.networkPolicies[policy.Name] = np
 	return nil
 }
 
