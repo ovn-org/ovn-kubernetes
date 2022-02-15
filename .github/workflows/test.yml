@@ -254,10 +254,10 @@ jobs:
             # hybrid-overlay = multicast-enable = emptylb-enable = true
           - "control-plane"
         ha: ["HA", "noHA"]
-        disable-snat-multiple-gws: ["noSnatGW", "snatGW"]
         gateway-mode: ["local", "shared"]
-        second-bridge: ["2br", "1br"]
         ipfamily: ["ipv4", "ipv6", "dualstack"]
+        disable-snat-multiple-gws: ["noSnatGW", "snatGW"]
+        second-bridge: ["2br", "1br"]
         # Example of how to exclude a fully qualified test:
         # - {"ipfamily": "ipv4"}, "ha": "HA", "gateway-mode": "shared", "target": "control-plane"}
         exclude:
