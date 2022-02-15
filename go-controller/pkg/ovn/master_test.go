@@ -873,6 +873,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		kubeFakeClient    *fake.Clientset
 		clusterController *Controller
 		nodeAnnotator     kube.Annotator
+		events            []string
+		eventsLock        sync.Mutex
+		recorder          *record.FakeRecorder
 	)
 
 	const (
@@ -890,6 +893,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		app.Flags = config.Flags
 		stopChan = make(chan struct{})
 		wg = &sync.WaitGroup{}
+		events = make([]string, 0)
 
 		libovsdbCleanup = nil
 
@@ -967,9 +971,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		err = f.Start()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+		recorder = record.NewFakeRecorder(10)
 		clusterController = NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-			libovsdbOvnNBClient, libovsdbOvnSBClient,
-			record.NewFakeRecorder(0))
+			libovsdbOvnNBClient, libovsdbOvnSBClient, recorder)
 		clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 		gomega.Expect(clusterController).NotTo(gomega.BeNil())
 		clusterController.defaultCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
@@ -978,6 +982,21 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = clusterController.masterSubnetAllocator.InitRanges(subnets)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		// record events for testcases to check
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				event, ok := <-recorder.Events
+				if !ok {
+					return
+				}
+				eventsLock.Lock()
+				events = append(events, event)
+				eventsLock.Unlock()
+			}
+		}()
 
 		clusterController.SCTPSupport = true
 		clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
@@ -988,6 +1007,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		libovsdbCleanup.Cleanup()
 		close(stopChan)
 		f.Shutdown()
+		close(recorder.Events)
 		wg.Wait()
 	})
 
@@ -1312,6 +1332,18 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				gomega.BeNil(),             // oldObj should be nil
 				gomega.Not(gomega.BeNil()), // newObj should not be nil
 			)
+
+			// check that a node event was posted
+			gomega.Eventually(func() []string {
+				eventsLock.Lock()
+				defer eventsLock.Unlock()
+				eventsCopy := make([]string, 0, len(events))
+				for _, e := range events {
+					eventsCopy = append(eventsCopy, e)
+				}
+				return eventsCopy
+			}, 10).Should(gomega.ContainElement(gomega.ContainSubstring("Warning ErrorReconcilingNode error creating gateway for node node1")))
+
 			connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 			defer cancel()
 			ginkgo.By("bring up NBDB")
@@ -1438,7 +1470,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				clusterController.retryNodes.ResourceHandler.AddResource(
 					&testNode, false)).To(
 				gomega.MatchError(
-					"nodeAdd: error creating subnet for node node1: error allocating networks for node node1: 1 subnets expected only new 0 subnets allocated"))
+					"nodeAdd: error adding node \"node1\": error allocating networks for node node1: 1 subnets expected only new 0 subnets allocated"))
 
 			ginkgo.By("annotating the node with no host subnet")
 			testNode.Labels = nodeNoHostSubnetAnnotation()
