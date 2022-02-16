@@ -765,10 +765,15 @@ func (oc *Controller) executeCloudPrivateIPConfigOps(egressIPName string, ops ma
 				oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "CloudUpdateFailed", "egress IP: %s for object EgressIP: %s could not be updated, err: %v", egressIP, egressIPName, err)
 				return fmt.Errorf("cloud update request failed for CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfigName, err)
 			}
-			// toAdd is non-empty, this indicates an ADD for which
-			// the object **must not** exist, if not: that's an error.
+			// toAdd is non-empty, this indicates an ADD
+			// if the object already exists for the specified node that's a no-op
+			// if the object already exists and the request is for a different node, that's an error
 		} else if op.toAdd != "" {
 			if err == nil {
+				if op.toAdd == cloudPrivateIPConfig.Spec.Node {
+					klog.Infof("CloudPrivateIPConfig: %s already assigned to node: %s", cloudPrivateIPConfigName, cloudPrivateIPConfig.Spec.Node)
+					continue
+				}
 				return fmt.Errorf("cloud create request failed for CloudPrivateIPConfig: %s, err: item exists", cloudPrivateIPConfigName)
 			}
 			cloudPrivateIPConfig := ocpcloudnetworkapi.CloudPrivateIPConfig{
@@ -1401,7 +1406,7 @@ func (oc *Controller) assignEgressIPs(name string, egressIPs []string) []egressi
 	for _, egressIP := range egressIPs {
 		klog.V(5).Infof("Will attempt assignment for egress IP: %s", egressIP)
 		eIPC := net.ParseIP(egressIP)
-		if _, exists := existingAllocations[eIPC.String()]; exists {
+		if status, exists := existingAllocations[eIPC.String()]; exists {
 			// On public clouds we will re-process assignments for the same IP
 			// multiple times due to the nature of syncing each individual
 			// CloudPrivateIPConfig one at a time. This means that we are
@@ -1411,10 +1416,18 @@ func (oc *Controller) assignEgressIPs(name string, egressIPs []string) []egressi
 			// CloudPrivateIPConfig confirming the addition of IP1, leading us
 			// to re-assign IP2, IP3, but since we've already assigned them
 			// we'll end up here. This is not an error. What would be an error
-			// is if the user created EIP1 with IP1 and a second EIP2 with IP1,
-			// then we'll end up here too and that would be a "user error".
-			klog.V(5).Infof("Egress IP: %q for EgressIP: %s is already allocated, this might be a user error", egressIP, name)
-			return assignments
+			// is if the user created EIP1 with IP1 and a second EIP2 with IP1
+			if name == status.Name {
+				// IP is already assigned for this EgressIP object
+				assignments = append(assignments, egressipv1.EgressIPStatusItem{
+					Node:     status.Node,
+					EgressIP: eIPC.String(),
+				})
+				continue
+			} else {
+				klog.Errorf("IP: %q for EgressIP: %s is already allocated for EgressIP: %s on %s", egressIP, name, status.Name, status.Node)
+				return assignments
+			}
 		}
 		if node := oc.isAnyClusterNodeIP(eIPC); node != nil {
 			eIPRef := kapi.ObjectReference{
@@ -1497,17 +1510,22 @@ func getIPFamilyAllocationCount(allocations map[string]string, isIPv6 bool) (cou
 	return
 }
 
+type egressIPNodeStatus struct {
+	Node string
+	Name string
+}
+
 // getSortedEgressData returns a sorted slice of all egressNodes based on the
 // amount of allocations found in the cache
-func (oc *Controller) getSortedEgressData() ([]*egressNode, map[string]bool) {
+func (oc *Controller) getSortedEgressData() ([]*egressNode, map[string]egressIPNodeStatus) {
 	assignableNodes := []*egressNode{}
-	allAllocations := make(map[string]bool)
+	allAllocations := make(map[string]egressIPNodeStatus)
 	for _, eNode := range oc.eIPC.allocator.cache {
 		if eNode.isEgressAssignable && eNode.isReady && eNode.isReachable {
 			assignableNodes = append(assignableNodes, eNode)
 		}
-		for ip := range eNode.allocations {
-			allAllocations[ip] = true
+		for ip, eipName := range eNode.allocations {
+			allAllocations[ip] = egressIPNodeStatus{Node: eNode.name, Name: eipName}
 		}
 	}
 	sort.Slice(assignableNodes, func(i, j int) bool {
