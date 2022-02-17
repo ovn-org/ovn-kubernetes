@@ -222,23 +222,10 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 	if err != nil {
 		return fmt.Errorf("failed to get all the pods (%v)", err)
 	}
-	// TODO (trozet): use the go bindings here and batch commands
 	for _, pod := range existingPods {
-		podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
-		if config.Gateway.DisableSNATMultipleGWs {
-			logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
-			portInfo, err := oc.logicalPortCache.get(logicalPort)
-			if err != nil {
-				klog.Warningf("Unable to get port %s in cache for SNAT rule removal", logicalPort)
-			} else {
-				// delete all perPodSNATs (if this pod was controlled by egressIP controller, it will stop working since
-				// a pod cannot be used for multiple-external-gateways and egressIPs at the same time)
-				if err = deletePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, []*net.IPNet{}, portInfo.ips); err != nil {
-					klog.Error(err.Error())
-				}
-			}
+		if util.PodCompleted(pod) || !util.PodWantsNetwork(pod) {
+			continue
 		}
-
 		podIPs := make([]*net.IPNet, 0)
 		for _, podIP := range pod.Status.PodIPs {
 			cidr := podIP.IP + GetIPFullMask(podIP.IP)
@@ -248,6 +235,18 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 			}
 			podIPs = append(podIPs, ipNet)
 		}
+		if len(podIPs) == 0 {
+			klog.Warningf("Will not add gateway routes pod %s/%s. IPs not found!", pod.Namespace, pod.Name)
+			continue
+		}
+		if config.Gateway.DisableSNATMultipleGWs {
+			// delete all perPodSNATs (if this pod was controlled by egressIP controller, it will stop working since
+			// a pod cannot be used for multiple-external-gateways and egressIPs at the same time)
+			if err = deletePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, []*net.IPNet{}, podIPs); err != nil {
+				klog.Error(err.Error())
+			}
+		}
+		podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
 		if err := oc.addGWRoutesForPod([]*gatewayInfo{&egress}, podIPs, podNsName, pod.Spec.NodeName); err != nil {
 			return err
 		}

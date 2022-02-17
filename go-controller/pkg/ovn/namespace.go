@@ -292,13 +292,21 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 				}
 				for _, pod := range existingPods {
 					logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
-					portInfo, err := oc.logicalPortCache.get(logicalPort)
+					if !util.PodWantsNetwork(pod) {
+						continue
+					}
+					podIPs, err := util.GetAllPodIPs(pod)
 					if err != nil {
-						klog.Warningf("Unable to get port %s in cache for SNAT rule removal", logicalPort)
-					} else {
+						klog.Warningf("Unable to get pod %q IPs for SNAT rule removal", logicalPort)
+					}
+					ips := make([]*net.IPNet, 0, len(podIPs))
+					for _, podIP := range podIPs {
+						ips = append(ips, &net.IPNet{IP: podIP})
+					}
+					if len(ips) > 0 {
 						if extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName); err != nil {
 							klog.Error(err.Error())
-						} else if err = deletePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, portInfo.ips); err != nil {
+						} else if err = deletePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, ips); err != nil {
 							klog.Error(err.Error())
 						}
 					}
