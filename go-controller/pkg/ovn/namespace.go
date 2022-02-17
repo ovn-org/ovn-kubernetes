@@ -347,13 +347,23 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 	aclAnnotation := newer.Annotations[aclLoggingAnnotation]
 	oldACLAnnotation := old.Annotations[aclLoggingAnnotation]
 	// support for ACL logging update, if new annotation is empty, make sure we propagate new setting
-	if aclAnnotation != oldACLAnnotation && (oc.aclLoggingCanEnable(aclAnnotation, nsInfo) || aclAnnotation == "") &&
-		len(nsInfo.networkPolicies) > 0 {
-		// deny rules are all one per namespace
-		if err := oc.setACLLoggingForNamespace(old.Name, nsInfo); err != nil {
+	if aclAnnotation != oldACLAnnotation && (oc.aclLoggingCanEnable(aclAnnotation, nsInfo) || aclAnnotation == "") {
+		if len(nsInfo.networkPolicies) > 0 {
+			// deny rules are all one per namespace
+			if err := oc.setNetworkPolicyACLLoggingForNamespace(old.Name, nsInfo); err != nil {
+				klog.Warningf(err.Error())
+			} else {
+				klog.Infof("Namespace %s: NetworkPolicy ACL logging setting updated to deny=%s allow=%s",
+					old.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
+			}
+		}
+		// Trigger an egress fw logging update - this will only happen if an egress firewall exists for the NS, otherwise
+		// this will not do anything.
+		updated, err := oc.refreshEgressFirewallLogging(old.Name)
+		if err != nil {
 			klog.Warningf(err.Error())
-		} else {
-			klog.Infof("Namespace %s: ACL logging setting updated to deny=%s allow=%s",
+		} else if updated {
+			klog.Infof("Namespace %s: EgressFirewall ACL logging setting updated to deny=%s allow=%s",
 				old.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
 		}
 	}
