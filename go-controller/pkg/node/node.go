@@ -431,7 +431,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	if err := waiter.Wait(); err != nil {
 		return err
 	}
-	go n.gateway.Run(n.stopChan, wg)
+	n.gateway.Start(n.stopChan, wg)
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
 	// Note(adrianc): DPU deployments are expected to support the new shared gateway changes, upgrade flow

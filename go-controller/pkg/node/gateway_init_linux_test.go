@@ -165,9 +165,11 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		stop := make(chan struct{})
 		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
+		wg := &sync.WaitGroup{}
 		defer func() {
 			close(stop)
 			wf.Shutdown()
+			wg.Wait()
 		}()
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -196,7 +198,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			go sharedGw.Run(stop, &sync.WaitGroup{})
+			sharedGw.Start(stop, wg)
 
 			// Verify the code moved eth0's IP address, MAC, and routes
 			// over to breth0
@@ -433,9 +435,11 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		stop := make(chan struct{})
 		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
+		wg := &sync.WaitGroup{}
 		defer func() {
 			close(stop)
 			wf.Shutdown()
+			wg.Wait()
 		}()
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -465,7 +469,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			go sharedGw.Run(stop, &sync.WaitGroup{})
+			sharedGw.Start(stop, wg)
 			return nil
 		})
 
@@ -741,9 +745,11 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		stop := make(chan struct{})
 		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
+		wg := &sync.WaitGroup{}
 		defer func() {
 			close(stop)
 			wf.Shutdown()
+			wg.Wait()
 		}()
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -772,7 +778,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			go localGw.Run(stop, &sync.WaitGroup{})
+			localGw.Start(stop, wg)
 
 			// Verify the code moved eth0's IP address, MAC, and routes
 			// over to breth0
