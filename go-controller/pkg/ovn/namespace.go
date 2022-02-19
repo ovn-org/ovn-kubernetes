@@ -325,7 +325,9 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 				}
 			}
 		} else {
-			oc.deleteGWRoutesForNamespace(old.Name, nil)
+			if err := oc.deleteGWRoutesForNamespace(old.Name, nil); err != nil {
+				klog.Error(err.Error())
+			}
 			nsInfo.routingExternalGWs = gatewayInfo{}
 		}
 		exGateways, err := parseRoutingExternalGWAnnotation(gwAnnotation)
@@ -421,7 +423,9 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 			delete(nsInfo.networkPolicies, np.name)
 		}
 	}
-	oc.deleteGWRoutesForNamespace(ns.Name, nil)
+	if err := oc.deleteGWRoutesForNamespace(ns.Name, nil); err != nil {
+		klog.Errorf("Failed to delete GW routes for namespace: %s, error: %v", ns.Name, err)
+	}
 	oc.multicastDeleteNamespace(ns, nsInfo)
 }
 

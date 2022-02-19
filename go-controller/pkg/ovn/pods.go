@@ -135,16 +135,18 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 }
 
 func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) (err error) {
-	oc.deletePodExternalGW(pod)
+	podDesc := pod.Namespace + "/" + pod.Name
+	klog.Infof("Deleting pod: %s", podDesc)
+
+	if err = oc.deletePodExternalGW(pod); err != nil {
+		return fmt.Errorf("unable to delete external gateway routes for pod %s: %w", podDesc, err)
+	}
 	if pod.Spec.HostNetwork {
 		return nil
 	}
 	if !util.PodScheduled(pod) {
 		return nil
 	}
-
-	podDesc := pod.Namespace + "/" + pod.Name
-	klog.Infof("Deleting pod: %s", podDesc)
 
 	logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 	portInfo, err := oc.logicalPortCache.get(logicalPort)
@@ -199,7 +201,9 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) (err error) {
 		}
 	}
 	podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
-	oc.deleteGWRoutesForPod(podNsName, portInfo.ips)
+	if err := oc.deleteGWRoutesForPod(podNsName, portInfo.ips); err != nil {
+		return fmt.Errorf("cannot delete GW Routes for pod %s: %w", podDesc, err)
+	}
 
 	oc.logicalPortCache.remove(logicalPort)
 	return nil
