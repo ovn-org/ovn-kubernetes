@@ -580,7 +580,11 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 		// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
 		// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
 		// care of updating the exgw updates
-		oc.deletePodExternalGW(oldPod)
+		if err := oc.deletePodExternalGW(oldPod); err != nil {
+			klog.Errorf(err.Error())
+			oc.recordPodEvent(err, pod)
+			return false
+		}
 	}
 
 	if util.PodWantsNetwork(pod) && addPort {
