@@ -144,7 +144,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		klog.Errorf(err.Error())
 		// If ovnkube-master restarts, it is also possible the Pod's logical switch port
 		// is not re-added into the cache. Delete logical switch port anyway.
-		ops, err := oc.ovnNBLSPDel(logicalPort, pod.Spec.NodeName, "")
+		ops, err := oc.delLSPOps(logicalPort, pod.Spec.NodeName, "")
 		if err != nil {
 			klog.Errorf(err.Error())
 		} else {
@@ -172,7 +172,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		allOps = append(allOps, ops...)
 	}
 
-	ops, err = oc.ovnNBLSPDel(logicalPort, pod.Spec.NodeName, portInfo.uuid)
+	ops, err = oc.delLSPOps(logicalPort, pod.Spec.NodeName, portInfo.uuid)
 	if err != nil {
 		klog.Errorf(err.Error())
 	} else {
@@ -673,15 +673,9 @@ func (oc *Controller) getPortAddresses(nodeName, portName string) (net.HardwareA
 	return podMac, podIPNets, nil
 }
 
-// ovnNBLSPDel deletes the given logical switch using the libovsdb library
-func (oc *Controller) ovnNBLSPDel(logicalPort, logicalSwitch, lspUUID string) ([]ovsdb.Operation, error) {
+// delLSPOps returns the ovsdb operations required to delete the given logical switch port (LSP)
+func (oc *Controller) delLSPOps(logicalPort, logicalSwitch, lspUUID string) ([]ovsdb.Operation, error) {
 	var allOps []ovsdb.Operation
-	ls := &nbdb.LogicalSwitch{}
-	if lsUUID, ok := oc.lsManager.GetUUID(logicalSwitch); !ok {
-		return nil, fmt.Errorf("error getting logical switch for node %s: switch not in logical switch cache", logicalSwitch)
-	} else {
-		ls.UUID = lsUUID
-	}
 
 	lsp := &nbdb.LogicalSwitchPort{
 		UUID: lspUUID,
@@ -690,9 +684,24 @@ func (oc *Controller) ovnNBLSPDel(logicalPort, logicalSwitch, lspUUID string) ([
 	if lspUUID == "" {
 		ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
 		defer cancel()
-		if err := oc.nbClient.Get(ctx, lsp); err != nil {
+		if err := oc.nbClient.Get(ctx, lsp); err != nil && err != libovsdbclient.ErrNotFound {
 			return nil, fmt.Errorf("cannot delete logical switch port %s failed retrieving the object %v", logicalPort, err)
+		} else if err == libovsdbclient.ErrNotFound {
+			// lsp doesn't exist; nothing to do
+			return allOps, nil
 		}
+	}
+
+	ls := &nbdb.LogicalSwitch{}
+	var err error
+	if lsUUID, ok := oc.lsManager.GetUUID(logicalSwitch); !ok {
+		klog.Errorf("Error getting logical switch for node %s: switch not in logical switch cache", logicalSwitch)
+		// Not in cache: Try getting the logical switch from ovn database (slower method)
+		if ls, err = libovsdbops.FindSwitchByName(oc.nbClient, logicalSwitch); err != nil {
+			return nil, fmt.Errorf("can't find switch for node %s: %v", logicalSwitch, err)
+		}
+	} else {
+		ls.UUID = lsUUID
 	}
 
 	ops, err := oc.nbClient.Where(ls).Mutate(ls, model.Mutation{
