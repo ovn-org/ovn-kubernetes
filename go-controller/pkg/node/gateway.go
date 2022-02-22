@@ -24,7 +24,7 @@ import (
 type Gateway interface {
 	informer.ServiceAndEndpointsEventHandler
 	Init(factory.NodeWatchFactory) error
-	Run(<-chan struct{}, *sync.WaitGroup)
+	Start(<-chan struct{}, *sync.WaitGroup)
 	GetGatewayBridgeIface() string
 }
 
@@ -169,16 +169,14 @@ func (g *gateway) Init(wf factory.NodeWatchFactory) error {
 	return nil
 }
 
-func (g *gateway) Run(stopChan <-chan struct{}, wg *sync.WaitGroup) {
+func (g *gateway) Start(stopChan <-chan struct{}, wg *sync.WaitGroup) {
 	if g.nodeIPManager != nil {
-		g.nodeIPManager.Run(stopChan)
+		g.nodeIPManager.Run(stopChan, wg)
 	}
 
 	if g.openflowManager != nil {
 		klog.Info("Spawning Conntrack Rule Check Thread")
-		wg.Add(1)
-		defer wg.Done()
-		g.openflowManager.Run(stopChan)
+		g.openflowManager.Run(stopChan, wg)
 	}
 }
 

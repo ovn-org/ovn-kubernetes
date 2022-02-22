@@ -783,12 +783,29 @@ func (oc *Controller) WatchNetworkPolicy() {
 		AddFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
 			oc.initRetryPolicy(policy)
+			oc.checkAndSkipRetryPolicy(policy)
+			// If there is a delete entry this is a network policy being added
+			// with the same name as a previous network policy that failed deletion.
+			// Destroy it first before we add the new policy.
+			if retryEntry := oc.getPolicyRetryEntry(policy); retryEntry != nil && retryEntry.oldPolicy != nil {
+				klog.Infof("Detected stale policy during new policy add with the same name: %s/%s",
+					policy.Namespace, policy.Name)
+				if err := oc.deleteNetworkPolicy(retryEntry.oldPolicy, nil); err != nil {
+					oc.unSkipRetryPolicy(policy)
+					klog.Errorf("Failed to delete stale network policy %s, during add: %v",
+						getPolicyNamespacedName(policy), err)
+					return
+				}
+				oc.removeDeleteFromRetryPolicy(policy)
+			}
+			start := time.Now()
 			if err := oc.addNetworkPolicy(policy); err != nil {
 				klog.Errorf("Failed to create network policy %s, error: %v",
 					getPolicyNamespacedName(policy), err)
 				oc.unSkipRetryPolicy(policy)
 				return
 			}
+			klog.Infof("Created Network Policy: %s took: %v", getPolicyNamespacedName(policy), time.Since(start))
 			oc.checkAndDeleteRetryPolicy(policy)
 		},
 		UpdateFunc: func(old, newer interface{}) {
@@ -796,7 +813,17 @@ func (oc *Controller) WatchNetworkPolicy() {
 			newPolicy := newer.(*kapisnetworking.NetworkPolicy)
 			if !reflect.DeepEqual(oldPolicy, newPolicy) {
 				oc.checkAndSkipRetryPolicy(oldPolicy)
-				if err := oc.deleteNetworkPolicy(oldPolicy, nil); err != nil {
+				// check if there was already a retry entry with an old policy
+				// else just look to delete the old policy in the update
+				if retryEntry := oc.getPolicyRetryEntry(oldPolicy); retryEntry != nil && retryEntry.oldPolicy != nil {
+					if err := oc.deleteNetworkPolicy(retryEntry.oldPolicy, nil); err != nil {
+						oc.initRetryPolicy(newPolicy)
+						oc.unSkipRetryPolicy(oldPolicy)
+						klog.Errorf("Failed to delete stale network policy %s, during update: %v",
+							getPolicyNamespacedName(oldPolicy), err)
+						return
+					}
+				} else if err := oc.deleteNetworkPolicy(oldPolicy, nil); err != nil {
 					oc.initRetryPolicyWithDelete(oldPolicy, nil)
 					oc.initRetryPolicy(newPolicy)
 					oc.unSkipRetryPolicy(oldPolicy)

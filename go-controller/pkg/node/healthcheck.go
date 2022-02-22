@@ -21,6 +21,7 @@ import (
 // ServiceTypeLoadBalancer services
 
 type loadBalancerHealthChecker struct {
+	sync.Mutex
 	nodeName  string
 	server    healthcheck.Server
 	services  map[ktypes.NamespacedName]uint16
@@ -38,6 +39,8 @@ func newLoadBalancerHealthChecker(nodeName string) *loadBalancerHealthChecker {
 
 func (l *loadBalancerHealthChecker) AddService(svc *kapi.Service) {
 	if svc.Spec.HealthCheckNodePort != 0 {
+		l.Lock()
+		defer l.Unlock()
 		name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
 		l.services[name] = uint16(svc.Spec.HealthCheckNodePort)
 		_ = l.server.SyncServices(l.services)
@@ -50,6 +53,8 @@ func (l *loadBalancerHealthChecker) UpdateService(old, new *kapi.Service) {
 
 func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) {
 	if svc.Spec.HealthCheckNodePort != 0 {
+		l.Lock()
+		defer l.Unlock()
 		name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
 		delete(l.services, name)
 		delete(l.endpoints, name)
@@ -61,6 +66,8 @@ func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) {}
 
 func (l *loadBalancerHealthChecker) AddEndpoints(ep *kapi.Endpoints) {
 	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
+	l.Lock()
+	defer l.Unlock()
 	if _, exists := l.services[name]; exists {
 		l.endpoints[name] = countLocalEndpoints(ep, l.nodeName)
 		_ = l.server.SyncEndpoints(l.endpoints)
@@ -69,6 +76,8 @@ func (l *loadBalancerHealthChecker) AddEndpoints(ep *kapi.Endpoints) {
 
 func (l *loadBalancerHealthChecker) UpdateEndpoints(old, new *kapi.Endpoints) {
 	name := ktypes.NamespacedName{Namespace: new.Namespace, Name: new.Name}
+	l.Lock()
+	defer l.Unlock()
 	if _, exists := l.services[name]; exists {
 		l.endpoints[name] = countLocalEndpoints(new, l.nodeName)
 		_ = l.server.SyncEndpoints(l.endpoints)
@@ -78,6 +87,8 @@ func (l *loadBalancerHealthChecker) UpdateEndpoints(old, new *kapi.Endpoints) {
 
 func (l *loadBalancerHealthChecker) DeleteEndpoints(ep *kapi.Endpoints) {
 	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
+	l.Lock()
+	defer l.Unlock()
 	delete(l.endpoints, name)
 	_ = l.server.SyncEndpoints(l.endpoints)
 }
@@ -314,30 +325,34 @@ func (c *openflowManager) syncFlows() {
 
 // checkDefaultOpenFlow checks for the existence of default OpenFlow rules and
 // exits if the output is not as expected
-func (c *openflowManager) Run(stopChan <-chan struct{}) {
-	for {
-		select {
-		case <-time.After(15 * time.Second):
-			if err := checkPorts(c.defaultBridge.patchPort, c.defaultBridge.ofPortPatch,
-				c.defaultBridge.uplinkName, c.defaultBridge.ofPortPhys); err != nil {
-				klog.Errorf("Checkports failed %v", err)
-				continue
-			}
-			if c.externalGatewayBridge != nil {
-				if err := checkPorts(
-					c.externalGatewayBridge.patchPort, c.externalGatewayBridge.ofPortPatch,
-					c.externalGatewayBridge.uplinkName, c.externalGatewayBridge.ofPortPhys); err != nil {
+func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
+	doneWg.Add(1)
+	go func() {
+		defer doneWg.Done()
+		for {
+			select {
+			case <-time.After(15 * time.Second):
+				if err := checkPorts(c.defaultBridge.patchPort, c.defaultBridge.ofPortPatch,
+					c.defaultBridge.uplinkName, c.defaultBridge.ofPortPhys); err != nil {
 					klog.Errorf("Checkports failed %v", err)
 					continue
 				}
+				if c.externalGatewayBridge != nil {
+					if err := checkPorts(
+						c.externalGatewayBridge.patchPort, c.externalGatewayBridge.ofPortPatch,
+						c.externalGatewayBridge.uplinkName, c.externalGatewayBridge.ofPortPhys); err != nil {
+						klog.Errorf("Checkports failed %v", err)
+						continue
+					}
+				}
+				c.syncFlows()
+			case <-c.flowChan:
+				c.syncFlows()
+			case <-stopChan:
+				return
 			}
-			c.syncFlows()
-		case <-c.flowChan:
-			c.syncFlows()
-		case <-stopChan:
-			return
 		}
-	}
+	}()
 }
 
 func checkPorts(patchIntf, ofPortPatch, physIntf, ofPortPhys string) error {

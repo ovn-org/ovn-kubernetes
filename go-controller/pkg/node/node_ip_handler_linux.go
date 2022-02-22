@@ -68,7 +68,7 @@ func (c *addressManager) delAddr(ip net.IP) bool {
 	return false
 }
 
-func (c *addressManager) Run(stopChan <-chan struct{}) {
+func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 	var addrChan chan netlink.AddrUpdate
 	addrSubscribeOptions := netlink.AddrSubscribeOptions{
 		ErrorCallback: func(err error) {
@@ -87,7 +87,10 @@ func (c *addressManager) Run(stopChan <-chan struct{}) {
 		return true, nil
 	}
 
+	doneWg.Add(1)
 	go func() {
+		defer doneWg.Done()
+
 		addressSyncTimer := time.NewTicker(30 * time.Second)
 
 		subscribed, err := subScribeFcn()
