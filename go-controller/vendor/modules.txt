@@ -28,6 +28,9 @@ github.com/Microsoft/hcsshim/internal/vmcompute
 # github.com/alexflint/go-filemutex v0.0.0-20171022225611-72bdc8eae2ae
 ## explicit
 github.com/alexflint/go-filemutex
+# github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d
+## explicit; go 1.13
+github.com/asaskevich/govalidator
 # github.com/beorn7/perks v1.0.1
 ## explicit; go 1.11
 github.com/beorn7/perks/quantile
