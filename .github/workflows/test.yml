@@ -17,6 +17,23 @@ env:
   # Current Serial tests are not relevant for OVN
   PARALLEL: true
 
+  # This must be a directory
+  CI_IMAGE_CACHE: /tmp/image_cache/
+  # This must be a directory
+  CI_RUN_LOG_CACHE: /tmp/run_logs/
+  # This must be a file
+  CI_LAST_RUN_STATUS_CACHE: /tmp/last_run_status
+
+  CI_IMAGE_MASTER_TAR: image-master.tar
+  CI_IMAGE_PR_TAR: image-pr.tar
+  CI_DIST_IMAGES_OUTPUT: dist/images/_output/
+
+  CI_LOGS_OVN_UPGRADE: logs_ovn_upgrade.txt
+  CI_LOGS_SHARD_CONFORMANCE: logs_shard_conformance.txt
+  CI_LOGS_GENERIC: logs.txt
+  CI_LOGS_DUAL_STACK: dual_stack_logs.txt
+  CI_LOGS_SINGLE_STACK: single_stack_logs.txt
+
 jobs:
   # separate job for parallelism
   lint:
@@ -43,7 +60,7 @@ jobs:
       uses: actions/cache@v2
       with:
         path: |
-          /tmp/image_cache/
+          ${{ env.CI_IMAGE_CACHE }}
         key: ${{ github.run_id }}-image-cache-master
 
     - name: Check if master image build is needed
@@ -51,10 +68,10 @@ jobs:
       continue-on-error: true
       run: |
         set -x
-        if [ -f /tmp/image_cache/image-master.tar.gz ]; then
-            mkdir -p dist/images/_output
-            cp /tmp/image_cache/image-master.tar.gz dist/images/_output/image-master.tar.gz
-            gunzip dist/images/_output/image-master.tar.gz
+        if [ -f ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR}.gz ]; then
+            mkdir -p ${CI_DIST_IMAGES_OUTPUT}
+            cp ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR}.gz ${CI_DIST_IMAGES_OUTPUT}/${CI_IMAGE_MASTER_TAR}.gz
+            gunzip ${CI_DIST_IMAGES_OUTPUT}/${CI_IMAGE_MASTER_TAR}.gz
             echo "::set-output name=MASTER_IMAGE_RESTORED::true"
         fi
 
@@ -89,28 +106,29 @@ jobs:
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
           docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
           mkdir _output
-          docker save ovn-daemonset-f:dev > _output/image-master.tar
+          docker save ovn-daemonset-f:dev > _output/${CI_IMAGE_MASTER_TAR}
         popd
 
     - name: Cache master image
       if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
       continue-on-error: true
       run: |
-        if [ -f /tmp/image_cache/image-master.tar ]; then
-            rm -f /tmp/image_cache/image-master.tar
+        set -x
+        if [ -f ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR} ]; then
+            rm -f ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR}
         fi
-        if [ -f /tmp/image_cache/image-master.tar.gz ]; then
-            rm -f /tmp/image_cache/image-master.tar.gz
+        if [ -f ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR}.gz ]; then
+            rm -f ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR}.gz
         fi
-        mkdir -p /tmp/image_cache/
-        cp dist/images/_output/image-master.tar /tmp/image_cache/image-master.tar
-        gzip /tmp/image_cache/image-master.tar
+        mkdir -p ${CI_IMAGE_CACHE}/
+        cp ${CI_DIST_IMAGES_OUTPUT}/${CI_IMAGE_MASTER_TAR} ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR}
+        gzip ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR}
 
     # run the following always if none of the steps before failed
     - uses: actions/upload-artifact@v2
       with:
         name: test-image-master
-        path: dist/images/_output/image-master.tar
+        path: ${{ env.CI_DIST_IMAGES_OUTPUT }}/${{ env.CI_IMAGE_MASTER_TAR }}
 
   build-pr:
     name: Build-PR
@@ -122,7 +140,7 @@ jobs:
       uses: actions/cache@v2
       with:
         path: |
-          /tmp/image_cache/
+          ${{ env.CI_IMAGE_CACHE }}
         key: ${{ github.run_id }}-image-cache-pr
 
     - name: Check if PR image build is needed
@@ -130,10 +148,10 @@ jobs:
       continue-on-error: true
       run: |
         set -x
-        if [ -f /tmp/image_cache/image-pr.tar.gz ]; then
-            mkdir -p dist/images/_output
-            cp /tmp/image_cache/image-pr.tar.gz dist/images/_output/image-pr.tar.gz
-            gunzip dist/images/_output/image-pr.tar.gz
+        if [ -f ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR}.gz ]; then
+            mkdir -p ${CI_DIST_IMAGES_OUTPUT}
+            cp ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR}.gz ${CI_DIST_IMAGES_OUTPUT}/${CI_IMAGE_PR_TAR}.gz
+            gunzip ${CI_DIST_IMAGES_OUTPUT}/${CI_IMAGE_PR_TAR}.gz
             echo "::set-output name=PR_IMAGE_RESTORED::true"
         fi
 
@@ -169,7 +187,7 @@ jobs:
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
           docker build -t ovn-daemonset-f:pr -f Dockerfile.fedora .
           mkdir _output
-          docker save ovn-daemonset-f:pr > _output/image-pr.tar
+          docker save ovn-daemonset-f:pr > _output/${CI_IMAGE_PR_TAR}
         popd
 
     - name: Upload Junit Reports
@@ -202,21 +220,22 @@ jobs:
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
       continue-on-error: true
       run: |
-        if [ -f /tmp/image_cache/image-pr.tar ]; then
-            rm -f /tmp/image_cache/image-pr.tar
+        set -x
+        if [ -f ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR} ]; then
+            rm -f ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR}
         fi
-        if [ -f /tmp/image_cache/image-pr.tar.gz ]; then
-           rm -f /tmp/image_cache/image-pr.tar.gz
+        if [ -f ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR}.gz ]; then
+           rm -f ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR}.gz
         fi
-        mkdir -p /tmp/image_cache/
-        cp dist/images/_output/image-pr.tar /tmp/image_cache/image-pr.tar
-        gzip /tmp/image_cache/image-pr.tar
+        mkdir -p ${CI_IMAGE_CACHE}/
+        cp ${CI_DIST_IMAGES_OUTPUT}/${CI_IMAGE_PR_TAR} ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR}
+        gzip ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR}
 
     # run the following if none of the previous steps failed
     - uses: actions/upload-artifact@v2
       with:
         name: test-image-pr
-        path: dist/images/_output/image-pr.tar
+        path: ${{ env.CI_DIST_IMAGES_OUTPUT }}/${{ env.CI_IMAGE_PR_TAR }}
 
   ovn-upgrade-e2e:
     name: Upgrade OVN from Master to PR branch based image
@@ -245,7 +264,7 @@ jobs:
       uses: actions/cache@v2
       with:
         path: |
-          /tmp/last_run_status
+          ${{ env.CI_LAST_RUN_STATUS_CACHE }}
         key: ${{ env.JOB_NAME }}-${{ github.run_id }}-last-run-status
 
     # The last run status comes from the run_cache file in the cache
@@ -255,8 +274,8 @@ jobs:
     - name: Fetch last run status from file in cache
       id: last_run_status
       run: |
-        if  [ -f /tmp/last_run_status ]; then
-            cat /tmp/last_run_status
+        if  [ -f ${CI_LAST_RUN_STATUS_CACHE} ]; then
+            cat ${CI_LAST_RUN_STATUS_CACHE}
         fi
 
     # Create a cache for test results
@@ -265,7 +284,7 @@ jobs:
       uses: actions/cache@v2
       with:
         path: |
-          /tmp/run_logs/
+          ${{ env.CI_RUN_LOG_CACHE }}
         key: ${{ env.JOB_NAME }}-${{ github.run_id }}-run-logs
 
     - name: Set up Go
@@ -302,7 +321,7 @@ jobs:
     - name: Load docker image
       if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
-        docker load --input image-master.tar
+        docker load --input ${CI_IMAGE_MASTER_TAR}
 
     - name: Check out code into the Go module directory - from PR branch
       if: steps.last_run_status.outputs.STATUS != 'completed' && success()
@@ -341,21 +360,21 @@ jobs:
     - name: Load docker image
       if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
-        docker load --input image-pr.tar
+        docker load --input ${CI_IMAGE_PR_TAR}
 
     - name: ovn upgrade
       if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
-        mkdir -p /tmp/run_logs
-        exec > >(tee -a /tmp/run_logs/logs_ovn_upgrade.txt) 2>&1
+        mkdir -p ${CI_RUN_LOG_CACHE}
+        exec > >(tee -a ${CI_RUN_LOG_CACHE}/${CI_LOGS_OVN_UPGRADE}) 2>&1
         export OVN_IMAGE="ovn-daemonset-f:pr"
         make -C test upgrade-ovn
 
     - name: Run E2E shard-conformance
       if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
-        mkdir -p /tmp/run_logs
-        exec > >(tee -a /tmp/run_logs/logs_shard_conformance.txt) 2>&1
+        mkdir -p ${CI_RUN_LOG_CACHE}
+        exec > >(tee -a ${CI_RUN_LOG_CACHE}/${CI_LOGS_SHARD_CONFORMANCE}) 2>&1
         make -C test shard-conformance
 
     - name: Export kind logs
@@ -376,18 +395,18 @@ jobs:
       if: steps.last_run_status.outputs.STATUS == 'completed' && success()
       continue-on-error: true
       run: |
-        if  [ -f /tmp/run_logs/logs_ovn_upgrade.txt ]; then
-            cat /tmp/run_logs/logs_ovn_upgrade.txt
+        if  [ -f ${CI_RUN_LOG_CACHE}/${CI_LOGS_OVN_UPGRADE} ]; then
+            cat ${CI_RUN_LOG_CACHE}/${CI_LOGS_OVN_UPGRADE}
         fi
-        if  [ -f /tmp/run_logs/logs_shard_conformance.txt ]; then
-            cat /tmp/run_logs/logs_shard_conformance.txt
+        if  [ -f ${CI_RUN_LOG_CACHE}/${CI_LOGS_SHARD_CONFORMANCE} ]; then
+            cat ${CI_RUN_LOG_CACHE}/${CI_LOGS_SHARD_CONFORMANCE}
         fi
 
     # This will set the name=STATUS to 'completed' if none of the above steps
     # failed
     - name: Set last run status to completed
       run: |
-        echo '::set-output name=STATUS::completed' > /tmp/last_run_status
+        echo '::set-output name=STATUS::completed' > ${CI_LAST_RUN_STATUS_CACHE}
 
   e2e:
     name: e2e
@@ -450,7 +469,7 @@ jobs:
       uses: actions/cache@v2
       with:
         path: |
-          /tmp/last_run_status
+          ${{ env.CI_LAST_RUN_STATUS_CACHE }}
         key: ${{ env.JOB_NAME }}-${{ github.run_id }}-last-run-status
 
     # The last run status comes from the run_cache file in the cache
@@ -460,8 +479,8 @@ jobs:
     - name: Fetch last run status from file in cache
       id: last_run_status
       run: |
-        if  [ -f /tmp/last_run_status ]; then
-            cat /tmp/last_run_status
+        if  [ -f ${CI_LAST_RUN_STATUS_CACHE} ]; then
+            cat ${CI_LAST_RUN_STATUS_CACHE}
         fi
 
     # Create a cache for test results
@@ -470,7 +489,7 @@ jobs:
       uses: actions/cache@v2
       with:
         path: |
-          /tmp/run_logs/
+          ${{ env.CI_RUN_LOG_CACHE }}
         key: ${{ env.JOB_NAME }}-${{ github.run_id }}-run-logs
 
     - name: Free up disk space
@@ -515,7 +534,7 @@ jobs:
     - name: Load docker image
       if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
-        docker load --input image-pr.tar
+        docker load --input ${CI_IMAGE_PR_TAR}
 
     - name: kind setup
       if: steps.last_run_status.outputs.STATUS != 'completed' && success()
@@ -530,8 +549,8 @@ jobs:
       # set 2 1/2 hours for control-plane tests as these might take a while
       timeout-minutes: ${{ matrix.target == 'control-plane' && 150 || 90 }}
       run: |
-        mkdir -p /tmp/run_logs
-        exec > >(tee -a /tmp/run_logs/logs.txt) 2>&1
+        mkdir -p ${CI_RUN_LOG_CACHE}
+        exec > >(tee -a ${CI_RUN_LOG_CACHE}/${CI_LOGS_GENERIC}) 2>&1
         make -C test ${{ matrix.target }}
 
     # The following steps will always run unless the job is marked as completed
@@ -560,15 +579,15 @@ jobs:
       if: steps.last_run_status.outputs.STATUS == 'completed' && success()
       continue-on-error: true
       run: |
-        if  [ -f /tmp/run_logs/logs.txt ]; then
-            cat /tmp/run_logs/logs.txt
+        if  [ -f ${CI_RUN_LOG_CACHE}/${CI_LOGS_GENERIC} ]; then
+            cat ${CI_RUN_LOG_CACHE}/${CI_LOGS_GENERIC}
         fi
 
     # This will set the name=STATUS to 'completed' if none of the above steps
     # failed
     - name: Set last run status to completed
       run: |
-        echo '::set-output name=STATUS::completed' > /tmp/last_run_status
+        echo '::set-output name=STATUS::completed' > ${CI_LAST_RUN_STATUS_CACHE}
 
   e2e-dual-conversion:
     name: e2e-dual-conversion
@@ -595,7 +614,7 @@ jobs:
       uses: actions/cache@v2
       with:
         path: |
-          /tmp/last_run_status
+          ${{ env.CI_LAST_RUN_STATUS_CACHE }}
         key: ${{ env.JOB_NAME }}-${{ github.run_id }}-last-run-status
 
     # The last run status comes from the run_cache file in the cache
@@ -605,8 +624,8 @@ jobs:
     - name: Fetch last run status from file in cache
       id: last_run_status
       run: |
-        if  [ -f /tmp/last_run_status ]; then
-            cat /tmp/last_run_status
+        if  [ -f ${CI_LAST_RUN_STATUS_CACHE} ]; then
+            cat ${CI_LAST_RUN_STATUS_CACHE}
         fi
 
     # Create a cache for test results
@@ -615,7 +634,7 @@ jobs:
       uses: actions/cache@v2
       with:
         path: |
-          /tmp/run_logs/
+          ${{ env.CI_RUN_LOG_CACHE }}
         key: ${{ env.JOB_NAME }}-${{ github.run_id }}-run-logs
 
     - name: Set up Go
@@ -652,7 +671,7 @@ jobs:
     - name: Load docker image
       if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
-        docker load --input image-pr.tar
+        docker load --input ${CI_IMAGE_PR_TAR}
 
     - name: kind IPv4 setup
       if: steps.last_run_status.outputs.STATUS != 'completed' && success()
@@ -663,8 +682,8 @@ jobs:
     - name: Run Single-Stack Tests
       if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
-        mkdir -p /tmp/run_logs
-        exec > >(tee -a /tmp/run_logs/single_stack_logs.txt) 2>&1
+        mkdir -p ${CI_RUN_LOG_CACHE}
+        exec > >(tee -a ${CI_RUN_LOG_CACHE}/${CI_LOGS_SINGLE_STACK}) 2>&1
         make -C test shard-test WHAT="Networking Granular Checks"
 
     - name: Convert IPv4 cluster to Dual Stack
@@ -675,8 +694,8 @@ jobs:
     - name: Run Dual-Stack Tests
       if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
-        mkdir -p /tmp/run_logs
-        exec > >(tee -a /tmp/run_logs/dual_stack_logs.txt) 2>&1
+        mkdir -p ${CI_RUN_LOG_CACHE}
+        exec > >(tee -a ${CI_RUN_LOG_CACHE}/${CI_LOGS_DUAL_STACK}) 2>&1
         KIND_IPV4_SUPPORT="true"
         KIND_IPV6_SUPPORT="true"
         make -C test shard-test WHAT="Networking Granular Checks\|DualStack"
@@ -706,18 +725,18 @@ jobs:
       if: steps.last_run_status.outputs.STATUS == 'completed' && success()
       continue-on-error: true
       run: |
-        if  [ -f /tmp/run_logs/single_stack_logs.txt ]; then
-            cat /tmp/run_logs/single_stack_logs.txt
+        if  [ -f ${CI_RUN_LOG_CACHE}/${CI_LOGS_SINGLE_STACK} ]; then
+            cat ${CI_RUN_LOG_CACHE}/${CI_LOGS_SINGLE_STACK}
         fi
-        if  [ -f /tmp/run_logs/dual_stack_logs.txt ]; then
-            cat /tmp/run_logs/dual_stack_logs.txt
+        if  [ -f ${CI_RUN_LOG_CACHE}/${CI_LOGS_DUAL_STACK} ]; then
+            cat ${CI_RUN_LOG_CACHE}/${CI_LOGS_DUAL_STACK}
         fi
 
     # This will set the name=STATUS to 'completed' if none of the above steps
     # failed
     - name: Set last run status to completed
       run: |
-        echo '::set-output name=STATUS::completed' > /tmp/last_run_status
+        echo '::set-output name=STATUS::completed' > ${CI_LAST_RUN_STATUS_CACHE}
 
   e2e-periodic:
     name: e2e-periodic
@@ -768,7 +787,7 @@ jobs:
           name: test-image-pr
       - name: Load docker image
         run: |
-          docker load --input image-pr.tar
+          docker load --input ${CI_IMAGE_PR_TAR}
       - name: kind setup
         run: |
           export OVN_IMAGE="ovn-daemonset-f:pr"
