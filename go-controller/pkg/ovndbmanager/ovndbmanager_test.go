@@ -62,6 +62,22 @@ Disconnections: 1
     ad31 (ad31 at ssl:10.1.1.211:9643) last msg 153868958 ms ago`
 
 	knownMembers = "ssl:10.1.1.185:9643,ssl:10.1.1.218:9643,ssl:10.1.1.211:9643"
+
+	dnsServerAddress = "ssl:ovnkube-master-0.ovnkube-master.ovn-kubernetes.svc.cluster.local:9643"
+
+	dnsServers = `Servers:
+    87f0 (87f0 at ssl:ovnkube-master-0.ovnkube-master.ovn-kubernetes.svc.cluster.local:9643) (self)
+    bbf6 (bbf6 at ssl:ovnkube-master-1.ovnkube-master.ovn-kubernetes.svc.cluster.local:9643) last msg 2757 ms ago
+    ad31 (ad31 at ssl:ovnkube-master-2.ovnkube-master.ovn-kubernetes.svc.cluster.local:9643) last msg 153868958 ms ago`
+
+	unknownDNSServers = `Servers:
+    87f0 (87f0 at ssl:ovnkube-master-0.ovnkube-master.ovn-kubernetes.svc.cluster.local:9643) (self)
+    c10c (c10c at ssl:ovnkube-master-5.ovnkube-master.ovn-kubernetes.svc.cluster.local:9643) last msg 2757 ms ago
+    fc43 (fc43 at ssl:ovnkube-master-6.ovnkube-master.ovn-kubernetes.svc.cluster.local:9643) last msg 2123 ms ago
+    bbf6 (bbf6 at ssl:ovnkube-master-1.ovnkube-master.ovn-kubernetes.svc.cluster.local:9643) last msg 1543 ms ago
+    ad31 (ad31 at ssl:ovnkube-master-2.ovnkube-master.ovn-kubernetes.svc.cluster.local:9643) last msg 153868958 ms ago`
+
+	knownDNSMembers = "ssl:ovnkube-master-0.ovnkube-master.ovn-kubernetes.svc.cluster.local:9643,ssl:ovnkube-master-1.ovnkube-master.ovn-kubernetes.svc.cluster.local:9643,ssl:ovnkube-master-2.ovnkube-master.ovn-kubernetes.svc.cluster.local:9643"
 )
 
 var (
@@ -327,6 +343,138 @@ func TestEnsureClusterRaftMembership(t *testing.T) {
 						status_template,
 						tc.dbName,
 						serverAddress,
+						"leader",
+						"1000",
+						tc.servers),
+					stderr: "",
+					err:    nil,
+				},
+				keyForArgs("cluster/sid", tc.dbName): {
+					res:    tc.sid,
+					stderr: "",
+					err:    nil,
+				},
+			}
+			for k, v := range tc.mockCalls {
+				mockCalls[k] = v
+			}
+
+			db.dbName = tc.dbName
+			db.dbAlias = tc.dbAlias
+			err := ensureClusterRaftMembership(db, kubeInterface)
+
+			// fail either if an error is seen but not expected
+			// or if an error is expected but when the substring does not match the error
+			failOnErrorMismatch(t, err, tc.errorString)
+
+			for k, c := range tc.mockCalls {
+				if !c.called {
+					t.Errorf("Expecting call with args %s", k)
+				}
+			}
+			if len(unexpectedKeys) > 0 {
+				t.Errorf("Received unexpected calls %v", unexpectedKeys)
+			}
+		})
+	}
+}
+
+func TestEnsureClusterDNSRaftMembership(t *testing.T) {
+	var mockCalls map[string]*mockRes
+	unexpectedKeys := make([]string, 0)
+
+	mock := func(timeout int, args ...string) (string, string, error) {
+		key := keyForArgs(args...)
+		res, ok := mockCalls[key]
+		if !ok {
+			unexpectedKeys = append(unexpectedKeys, key)
+			return "", "key not found", fmt.Errorf("key not found")
+		}
+		res.called = true
+		return res.res, res.stderr, res.err
+	}
+
+	config.OvnNorth.Address = knownDNSMembers
+	config.OvnSouth.Address = knownDNSMembers
+
+	fakeClient := fake.NewSimpleClientset()
+	kubeInterface := &kube.Kube{
+		KClient: fakeClient,
+	}
+
+	db := &dbProperties{
+		appCtl: mock,
+	}
+	tests := []struct {
+		desc        string
+		dbAlias     string
+		dbName      string
+		mockCalls   map[string]*mockRes
+		servers     string
+		sid         string
+		errorString string
+	}{
+		{
+			desc:        "Test error: Invalid database name",
+			dbAlias:     "ovnnb",
+			dbName:      "OVN_Northboundd",
+			mockCalls:   map[string]*mockRes{},
+			servers:     dnsServers,
+			errorString: "invalid database name",
+		},
+		{
+			desc:   "Test error: Unable to get cluster status",
+			dbName: "OVN_Northbound",
+			mockCalls: map[string]*mockRes{
+				keyForArgs("cluster/status", "OVN_Northbound"): {
+					res:    "",
+					stderr: "failure",
+					err:    fmt.Errorf("failure"),
+				},
+			},
+			sid:         "87f0d686-8a8d-4585-9513-45efac449101",
+			errorString: "Unable to get cluster status for",
+		},
+		{
+			desc:      "Consistent database, no action needed",
+			dbAlias:   "ovnnb",
+			dbName:    "OVN_Northbound",
+			mockCalls: map[string]*mockRes{},
+			servers:   dnsServers,
+			sid:       "87f0d686-8a8d-4585-9513-45efac449101",
+		},
+		{
+			desc:    "Unknown Raft member, kick",
+			dbAlias: "ovnnb",
+			dbName:  "OVN_Northbound",
+			mockCalls: map[string]*mockRes{
+				keyForArgs("cluster/kick", "OVN_Northbound", unknownSids[0]): {
+					res:    "started removal",
+					stderr: "",
+					err:    nil,
+				},
+				// warn only: we might fail to kick since other nodes will also be trying to kick the member
+				// the test should not fail here but continue instead
+				keyForArgs("cluster/kick", "OVN_Northbound", unknownSids[1]): {
+					res:    "started removal",
+					stderr: "unknown server\novn-appctl: /var/run/ovn/ovnnb_db.ctl: server returned an error",
+					err:    fmt.Errorf("error unkown server"),
+				},
+			},
+			servers: unknownDNSServers,
+			sid:     "87f0d686-8a8d-4585-9513-45efac449101",
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			// default mockCalls which may be supplemented or overwritten by
+			// more specific tc mockCalls from the above maps
+			mockCalls = map[string]*mockRes{
+				keyForArgs("cluster/status", tc.dbName): {
+					res: fmt.Sprintf(
+						status_template,
+						tc.dbName,
+						dnsServerAddress,
 						"leader",
 						"1000",
 						tc.servers),
