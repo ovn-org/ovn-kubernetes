@@ -182,8 +182,8 @@ func (oc *Controller) RequestRetryPolicy() {
 	}
 }
 
-// Used for Unit Tests only
-func (oc *Controller) getRetryEntry(policy *knet.NetworkPolicy) *retryNetPolEntry {
+// getPolicyRetryEntry returns a copy of a policy retry entry from the cache
+func (oc *Controller) getPolicyRetryEntry(policy *knet.NetworkPolicy) *retryNetPolEntry {
 	oc.retryNetPolLock.Lock()
 	defer oc.retryNetPolLock.Unlock()
 	key := getPolicyNamespacedName(policy)
