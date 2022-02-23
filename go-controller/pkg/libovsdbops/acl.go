@@ -53,32 +53,6 @@ func FindACLsWithPredicate(nbClient libovsdbclient.Client, p aclPredicate) ([]*n
 	return acls, err
 }
 
-// findACL looks up the ACL in the cache and sets the UUID
-func findACL(nbClient libovsdbclient.Client, acl *nbdb.ACL) error {
-	if acl.UUID != "" && !IsNamedUUID(acl.UUID) {
-		return nil
-	}
-
-	acls, err := FindACLsWithPredicate(nbClient, func(item *nbdb.ACL) bool {
-		return isEquivalentACL(item, acl)
-	})
-
-	if err != nil {
-		return fmt.Errorf("can't find ACL by equivalence %+v: %v", *acl, err)
-	}
-
-	if len(acls) > 1 {
-		return fmt.Errorf("unexpectedly found multiple equivalent ACLs: %+v", acls)
-	}
-
-	if len(acls) == 0 {
-		return libovsdbclient.ErrNotFound
-	}
-
-	acl.UUID = acls[0].UUID
-	return nil
-}
-
 // BuildACL builds an ACL with empty optional properties unset
 func BuildACL(name string, direction nbdb.ACLDirection, priority int, match string, action nbdb.ACLAction, meter string, severity nbdb.ACLSeverity, log bool, externalIds map[string]string, options map[string]string) *nbdb.ACL {
 	name = fmt.Sprintf("%.63s", name)
