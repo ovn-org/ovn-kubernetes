@@ -232,10 +232,15 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 		klog.Infof("Creating / updating node %s hybrid overlay port with mac %s", node.Name, portMAC.String())
 
 		// create / update lsps
-		err := libovsdbops.CreateLSPOrMutateMac(m.nbClient, node.Name, portName, portMAC.String())
+		lsp := nbdb.LogicalSwitchPort{
+			Name:      portName,
+			Addresses: []string{portMAC.String()},
+		}
+		sw := nbdb.LogicalSwitch{Name: node.Name}
+
+		err := libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(m.nbClient, &sw, &lsp)
 		if err != nil {
-			return fmt.Errorf("failed to add hybrid overlay port for node %s"+
-				", err: %v", node.Name, err)
+			return fmt.Errorf("failed to add hybrid overlay port %+v for node %s: %v", lsp, node.Name, err)
 		}
 		for _, subnet := range subnets {
 			if err := util.UpdateNodeSwitchExcludeIPs(m.nbClient, node.Name, subnet); err != nil {
@@ -257,8 +262,10 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 func (m *MasterController) deleteOverlayPort(node *kapi.Node) {
 	klog.Infof("Removing node %s hybrid overlay port", node.Name)
 	portName := util.GetHybridOverlayPortName(node.Name)
-	if err := libovsdbops.LSPDelete(m.nbClient, portName); err != nil {
-		klog.Errorf("Failed deleting hybrind overlay port for node %s err: %v", node.Name, err)
+	lsp := nbdb.LogicalSwitchPort{Name: portName}
+	sw := nbdb.LogicalSwitch{Name: node.Name}
+	if err := libovsdbops.DeleteLogicalSwitchPorts(m.nbClient, &sw, &lsp); err != nil {
+		klog.Errorf("Failed deleting hybrind overlay port %s for node %s err: %v", portName, node.Name, err)
 	}
 }
 

@@ -204,8 +204,19 @@ func addAllowACLFromNode(nodeName string, mgmtPortIP net.IP, nbClient libovsdbcl
 
 	nodeACL := libovsdbops.BuildACL("", types.DirectionToLPort, types.DefaultAllowPriority, match, "allow-related", "", "", false, nil, nil)
 
-	if err := libovsdbops.AddACLToNodeSwitch(nbClient, nodeName, nodeACL); err != nil {
-		return fmt.Errorf("failed to add acl to allow node sourced traffic err: %v", err)
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(nbClient, nil, nodeACL)
+	if err != nil {
+		return fmt.Errorf("failed to create or update ACL %v: %v", nodeACL, err)
+	}
+
+	ops, err = libovsdbops.AddACLsToLogicalSwitchOps(nbClient, ops, nodeName, nodeACL)
+	if err != nil {
+		return fmt.Errorf("failed to add ACL %v to switch %s: %v", nodeACL, nodeName, err)
+	}
+
+	_, err = libovsdbops.TransactAndCheck(nbClient, ops)
+	if err != nil {
+		return err
 	}
 
 	return nil

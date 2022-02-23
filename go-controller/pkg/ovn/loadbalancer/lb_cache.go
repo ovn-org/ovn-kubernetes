@@ -170,7 +170,10 @@ func newCache(nbClient libovsdbclient.Client) (*LBCache, error) {
 		c.existing[lbs[i].UUID] = &lbs[i]
 	}
 
-	switches, err := libovsdbops.ListSwitchesWithLoadBalancers(nbClient)
+	ps := func(item *nbdb.LogicalSwitch) bool {
+		return len(item.LoadBalancer) > 0
+	}
+	switches, err := libovsdbops.FindLogicalSwitchesWithPredicate(nbClient, ps)
 	if err != nil {
 		return nil, err
 	}
@@ -197,10 +200,10 @@ func newCache(nbClient libovsdbclient.Client) (*LBCache, error) {
 	}
 
 	// Get non-empty LB groups
-	p := func(item *nbdb.LoadBalancerGroup) bool {
+	pg := func(item *nbdb.LoadBalancerGroup) bool {
 		return len(item.LoadBalancer) > 0
 	}
-	groups, err := libovsdbops.FindLoadBalancerGroupsWithPredicate(nbClient, p)
+	groups, err := libovsdbops.FindLoadBalancerGroupsWithPredicate(nbClient, pg)
 	if err != nil {
 		return nil, err
 	}

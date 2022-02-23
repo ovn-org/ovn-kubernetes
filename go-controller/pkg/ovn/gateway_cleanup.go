@@ -36,29 +36,12 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 	oc.staticRouteCleanup(nextHops)
 
 	// Remove the patch port that connects join switch to gateway router
-	logicalSwitch := nbdb.LogicalSwitch{}
-	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name: types.JoinSwitchToGWRouterPrefix + gatewayRouter,
-	}
-	opModels := []libovsdbops.OperationModel{
-		{
-			Model: &logicalSwitchPort,
-			DoAfter: func() {
-				if logicalSwitchPort.UUID != "" {
-					logicalSwitch.Ports = []string{logicalSwitchPort.UUID}
-				}
-			},
-		},
-		{
-			Model:          &logicalSwitch,
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.OVNJoinSwitch },
-			OnModelMutations: []interface{}{
-				&logicalSwitch.Ports,
-			},
-		},
-	}
-	if err := oc.modelClient.Delete(opModels...); err != nil {
-		return fmt.Errorf("failed to delete logical switch port %s%s:, error: %v", types.JoinSwitchToGWRouterPrefix, gatewayRouter, err)
+	portName := types.JoinSwitchToGWRouterPrefix + gatewayRouter
+	lsp := nbdb.LogicalSwitchPort{Name: portName}
+	sw := nbdb.LogicalSwitch{Name: types.OVNJoinSwitch}
+	err = libovsdbops.DeleteLogicalSwitchPorts(oc.nbClient, &sw, &lsp)
+	if err != nil {
+		return fmt.Errorf("failed to delete logical switch port %s from switch %s: %v", portName, types.OVNJoinSwitch, err)
 	}
 
 	// Remove router to lb associations from the LBCache before removing the router
@@ -78,21 +61,16 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 	}
 
 	// Remove external switch
-	opModel = libovsdbops.OperationModel{
-		ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.ExternalSwitchPrefix+nodeName },
-		ExistingResult: &[]nbdb.LogicalSwitch{},
-	}
-	if err := oc.modelClient.Delete(opModel); err != nil {
-		return fmt.Errorf("failed to delete external switch %s, error: %v", types.ExternalSwitchPrefix+nodeName, err)
+	externalSwitch := types.ExternalSwitchPrefix + nodeName
+	err = libovsdbops.DeleteLogicalSwitch(oc.nbClient, externalSwitch)
+	if err != nil {
+		return fmt.Errorf("failed to delete external switch %s: %v", externalSwitch, err)
 	}
 
 	exGWexternalSwitch := types.ExternalSwitchPrefix + types.ExternalSwitchPrefix + nodeName
-	opModel = libovsdbops.OperationModel{
-		ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == exGWexternalSwitch },
-		ExistingResult: &[]nbdb.LogicalSwitch{},
-	}
-	if err := oc.modelClient.Delete(opModel); err != nil {
-		return fmt.Errorf("failed to delete external switch %s, error: %v", exGWexternalSwitch, err)
+	err = libovsdbops.DeleteLogicalSwitch(oc.nbClient, exGWexternalSwitch)
+	if err != nil {
+		return fmt.Errorf("failed to delete external switch %s: %v", exGWexternalSwitch, err)
 	}
 
 	// This will cleanup the NodeSubnetPolicy in local and shared gateway modes. It will be a no-op for any other mode.
@@ -200,11 +178,10 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 	oc.staticRouteCleanup(nextHops)
 
 	// Remove the join switch that connects ovn_cluster_router to gateway router
-	opModel := libovsdbops.OperationModel{
-		ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.JoinSwitchPrefix+nodeName },
-	}
-	if err := oc.modelClient.Delete(opModel); err != nil {
-		return fmt.Errorf("failed to delete the join logical switch %s, error: %v", types.JoinSwitchPrefix+nodeName, err)
+	joinSwitchName := types.JoinSwitchPrefix + nodeName
+	err = libovsdbops.DeleteLogicalSwitch(oc.nbClient, joinSwitchName)
+	if err != nil {
+		return fmt.Errorf("failed to delete the join logical switch %s: %v", joinSwitchName, err)
 	}
 
 	// Remove the logical router port on the distributed router that connects to the join switch
@@ -271,7 +248,7 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 	lbCache.RemoveRouter(gatewayRouter)
 
 	// Remove the gateway router associated with nodeName
-	opModel = libovsdbops.OperationModel{
+	opModel := libovsdbops.OperationModel{
 		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
 	}
 	if err := oc.modelClient.Delete(opModel); err != nil {
@@ -279,11 +256,10 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 	}
 
 	// Remove external switch
-	opModel = libovsdbops.OperationModel{
-		ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.ExternalSwitchPrefix+nodeName },
-	}
-	if err := oc.modelClient.Delete(opModel); err != nil {
-		return fmt.Errorf("failed to delete external switch %s, error: %v", types.ExternalSwitchPrefix+nodeName, err)
+	extSwitchName := types.ExternalSwitchPrefix + nodeName
+	err = libovsdbops.DeleteLogicalSwitch(oc.nbClient, extSwitchName)
+	if err != nil {
+		return fmt.Errorf("failed to delete external switch %s: %v", extSwitchName, err)
 	}
 
 	// This will cleanup the NodeSubnetPolicy in local and shared gateway modes. It will be a no-op for any other mode.
@@ -348,14 +324,9 @@ func (oc *Controller) cleanupDGP(nodes *kapi.NodeList) error {
 		}
 	}
 	// remove node local switch
-	opModels := []libovsdbops.OperationModel{
-		{
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.NodeLocalSwitch },
-			ExistingResult: &[]nbdb.LogicalSwitch{},
-		},
-	}
-	if err := oc.modelClient.Delete(opModels...); err != nil {
-		return fmt.Errorf("unable to remove node local switch, err: %v", err)
+	err := libovsdbops.DeleteLogicalSwitch(oc.nbClient, types.NodeLocalSwitch)
+	if err != nil {
+		return fmt.Errorf("unable to remove node local switch %s, err: %v", types.NodeLocalSwitch, err)
 	}
 
 	// remove lrp on ovn_cluster_router. Will also remove gateway chassis.
@@ -364,7 +335,7 @@ func (oc *Controller) cleanupDGP(nodes *kapi.NodeList) error {
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name: dgpName,
 	}
-	opModels = []libovsdbops.OperationModel{
+	opModels := []libovsdbops.OperationModel{
 		{
 			Model: &logicalRouterPort,
 			DoAfter: func() {

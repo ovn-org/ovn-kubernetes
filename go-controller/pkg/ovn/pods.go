@@ -1,12 +1,9 @@
 package ovn
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"time"
-
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -19,7 +16,6 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -32,7 +28,6 @@ func (oc *Controller) syncPods(pods []interface{}) {
 // This function implements the main body of work of syncPods.
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.
 func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
-	var allOps []ovsdb.Operation
 	// get the list of logical switch ports (equivalent to pods)
 	expectedLogicalPorts := make(map[string]bool)
 	for _, podInterface := range pods {
@@ -67,70 +62,37 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 		}
 	}
 
-	// in order to minimize the number of database transactions build a map of all ports keyed by UUID
-	portCache := make(map[string]nbdb.LogicalSwitchPort)
-	lspList := []nbdb.LogicalSwitchPort{}
-	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
-	defer cancel()
-	err := oc.nbClient.List(ctx, &lspList)
-	if err != nil {
-		return fmt.Errorf("cannot sync pods, cannot retrieve list of logical switch ports (%+v)", err)
-	}
-	for _, lsp := range lspList {
-		portCache[lsp.UUID] = lsp
-	}
 	// get all the nodes from the watchFactory
 	nodes, err := oc.watchFactory.GetNodes()
 	if err != nil {
 		return fmt.Errorf("failed to get nodes: %v", err)
 	}
+
+	var ops []ovsdb.Operation
 	for _, n := range nodes {
 		// skip nodes that are not running ovnk (inferred from host subnets)
 		if oc.lsManager.IsNonHostSubnetSwitch(n.Name) {
 			continue
 		}
-		stalePorts := []string{}
-		// find the logical switch for the node
-		ls := &nbdb.LogicalSwitch{}
-		if lsUUID, ok := oc.lsManager.GetUUID(n.Name); !ok {
-			klog.Errorf("Error getting logical switch for node %s: %s", n.Name, "Switch not in logical switch cache")
-
-			// Not in cache: Try getting the logical switch from ovn database (slower method)
-			if ls, err = libovsdbops.FindSwitchByName(oc.nbClient, n.Name); err != nil {
-				return fmt.Errorf("can't find switch for node %s: %v", n.Name, err)
-			}
-		} else {
-			ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
-			defer cancel()
-
-			ls.UUID = lsUUID
-			if err := oc.nbClient.Get(ctx, ls); err != nil {
-				return fmt.Errorf("error getting logical switch for node %s (UUID: %s) from ovn database (%v)", n.Name, ls.UUID, err)
-			}
+		p := func(item *nbdb.LogicalSwitchPort) bool {
+			return item.ExternalIDs["pod"] == "true" && !expectedLogicalPorts[item.Name]
 		}
-		for _, port := range ls.Ports {
-			if portCache[port].ExternalIDs["pod"] == "true" {
-				if _, ok := expectedLogicalPorts[portCache[port].Name]; !ok {
-					stalePorts = append(stalePorts, port)
-				}
-			}
+		sw := nbdb.LogicalSwitch{
+			Name: n.Name,
 		}
-		if len(stalePorts) > 0 {
-			ops, err := oc.nbClient.Where(ls).Mutate(ls, model.Mutation{
-				Field:   &ls.Ports,
-				Mutator: ovsdb.MutateOperationDelete,
-				Value:   stalePorts,
-			})
-			if err != nil {
-				return fmt.Errorf("could not generate ops to delete stale ports from logical switch %s (%+v)", n.Name, err)
-			}
-			allOps = append(allOps, ops...)
+		sw.UUID, _ = oc.lsManager.GetUUID(n.Name)
+
+		ops, err = libovsdbops.DeleteLogicalSwitchPortsWithPredicateOps(oc.nbClient, ops, &sw, p)
+		if err != nil {
+			return fmt.Errorf("could not generate ops to delete stale ports from logical switch %s (%+v)", n.Name, err)
 		}
 	}
-	_, err = libovsdbops.TransactAndCheck(oc.nbClient, allOps)
+
+	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
 		return fmt.Errorf("could not remove stale logicalPorts from switches (%+v)", err)
 	}
+
 	return nil
 }
 
@@ -334,30 +296,21 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	var podMac net.HardwareAddr
 	var podIfAddrs []*net.IPNet
-	var allOps []ovsdb.Operation
 	var addresses []string
 	var releaseIPs bool
 	lspExist := false
 	needsIP := true
 
-	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
-	defer cancel()
 	// Check if the pod's logical switch port already exists. If it
 	// does don't re-add the port to OVN as this will change its
 	// UUID and and the port cache, address sets, and port groups
 	// will still have the old UUID.
-	getLSP := &nbdb.LogicalSwitchPort{Name: portName}
-	err = oc.nbClient.Get(ctx, getLSP)
-	if err != nil && err != libovsdbclient.ErrNotFound {
-		return fmt.Errorf("unable to get the lsp: %s from the nbdb: %s", portName, err)
-	}
 	lsp := &nbdb.LogicalSwitchPort{Name: portName}
-	if len(getLSP.UUID) == 0 {
-		lsp.UUID = libovsdbops.BuildNamedUUID()
-	} else {
-		lsp.UUID = getLSP.UUID
-		lspExist = true
+	existingLSP, err := libovsdbops.GetLogicalSwitchPort(oc.nbClient, lsp)
+	if err != nil && err != libovsdbclient.ErrNotFound {
+		return fmt.Errorf("unable to get the lsp %s from the nbdb: %s", portName, err)
 	}
+	lspExist = err != libovsdbclient.ErrNotFound
 
 	lsp.Options = make(map[string]string)
 	// Unique identifier to distinguish interfaces for recreated pods, also set by ovnkube-node
@@ -371,7 +324,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// (then ovn-controller won't bind the interface).
 	// May happen on upgrade, because ovnkube-node doesn't update
 	// existing OVS interfaces with new iface-id-ver option.
-	if !lspExist || len(getLSP.Options["iface-id-ver"]) != 0 {
+	if !lspExist || len(existingLSP.Options["iface-id-ver"]) != 0 {
 		lsp.Options["iface-id-ver"] = string(pod.UID)
 	}
 	// Bind the port to the node's chassis; prevents ping-ponging between
@@ -496,7 +449,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	if err != nil {
 		return err
 	}
-	allOps = append(allOps, ops...)
 
 	// if we have any external or pod Gateways, add routes
 	gateways := make([]*gatewayInfo, 0, len(routingExternalGWs.gws)+len(routingPodGWs))
@@ -552,58 +504,22 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// CNI depends on the flows from port security, delay setting it until end
 	lsp.PortSecurity = addresses
 
-	if !lspExist {
-		timeout := ovntypes.OVSDBWaitTimeout
-		condition := model.Condition{
-			Field:    &lsp.Name,
-			Function: ovsdb.ConditionEqual,
-			Value:    lsp.Name,
-		}
-		waitOps, err := oc.nbClient.Where(lsp, condition).Wait(ovsdb.WaitConditionNotEqual, &timeout, lsp, &lsp.Name)
-		if err != nil {
-			return err
-		}
-		allOps = append(allOps, waitOps...)
-
-		// create new logical switch port
-		ops, err := oc.nbClient.Create(lsp)
-		if err != nil {
-			return err
-		}
-		allOps = append(allOps, ops...)
-
-		//add the logical switch port to the logical switch
-		ops, err = oc.nbClient.Where(ls).Mutate(ls, model.Mutation{
-			Field:   &ls.Ports,
-			Mutator: ovsdb.MutateOperationInsert,
-			Value:   []string{lsp.UUID},
-		})
-		if err != nil {
-			return err
-		}
-		allOps = append(allOps, ops...)
-
-	} else {
-		//update Existing logical switch port
-		ops, err := oc.nbClient.Where(lsp).Update(lsp, &lsp.Addresses, &lsp.ExternalIDs, &lsp.Options, &lsp.PortSecurity)
-		if err != nil {
-			return fmt.Errorf("could not create commands to update logical switch port %s - %+v", portName, err)
-		}
-		allOps = append(allOps, ops...)
+	ops, err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitchOps(oc.nbClient, ops, ls, lsp)
+	if err != nil {
+		return fmt.Errorf("error creating logical switch port %+v on switch %+v: %+v", *lsp, *ls, err)
 	}
 
 	transactStart := time.Now()
-	results, err := libovsdbops.TransactAndCheckAndSetUUIDs(oc.nbClient, lsp, allOps)
+	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(oc.nbClient, lsp, ops)
 	libovsdbExecuteTime = time.Since(transactStart)
 	if err != nil {
-
-		return fmt.Errorf("could not perform creation or update of logical switch port %s - %+v", portName, err)
+		return fmt.Errorf("error transacting operations %+v: %v", ops, err)
 	}
 	oc.metricsRecorder.AddLSP(pod.UID)
 
 	// if somehow lspUUID is empty, there is a bug here with interpreting OVSDB results
 	if len(lsp.UUID) == 0 {
-		return fmt.Errorf("UUID is empty from LSP: %q create operation. OVSDB results: %#v", portName, results)
+		return fmt.Errorf("UUID is empty from LSP: %+v", *lsp)
 	}
 
 	// Add the pod's logical switch port to the port cache
@@ -677,51 +593,19 @@ func (oc *Controller) getPortAddresses(nodeName, portName string) (net.HardwareA
 
 // delLSPOps returns the ovsdb operations required to delete the given logical switch port (LSP)
 func (oc *Controller) delLSPOps(logicalPort, logicalSwitch, lspUUID string) ([]ovsdb.Operation, error) {
-	var allOps []ovsdb.Operation
-
-	lsp := &nbdb.LogicalSwitchPort{
+	lsUUID, _ := oc.lsManager.GetUUID(logicalSwitch)
+	lsw := nbdb.LogicalSwitch{
+		UUID: lsUUID,
+		Name: logicalSwitch,
+	}
+	lsp := nbdb.LogicalSwitchPort{
 		UUID: lspUUID,
 		Name: logicalPort,
 	}
-	if lspUUID == "" {
-		ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
-		defer cancel()
-		if err := oc.nbClient.Get(ctx, lsp); err != nil && err != libovsdbclient.ErrNotFound {
-			return nil, fmt.Errorf("cannot delete logical switch port %s failed retrieving the object %v", logicalPort, err)
-		} else if err == libovsdbclient.ErrNotFound {
-			// lsp doesn't exist; nothing to do
-			return allOps, nil
-		}
-	}
-
-	ls := &nbdb.LogicalSwitch{}
-	var err error
-	if lsUUID, ok := oc.lsManager.GetUUID(logicalSwitch); !ok {
-		klog.Errorf("Error getting logical switch for node %s: switch not in logical switch cache", logicalSwitch)
-		// Not in cache: Try getting the logical switch from ovn database (slower method)
-		if ls, err = libovsdbops.FindSwitchByName(oc.nbClient, logicalSwitch); err != nil {
-			return nil, fmt.Errorf("can't find switch for node %s: %v", logicalSwitch, err)
-		}
-	} else {
-		ls.UUID = lsUUID
-	}
-
-	ops, err := oc.nbClient.Where(ls).Mutate(ls, model.Mutation{
-		Field:   &ls.Ports,
-		Mutator: ovsdb.MutateOperationDelete,
-		Value:   []string{lsp.UUID},
-	})
+	ops, err := libovsdbops.DeleteLogicalSwitchPortsOps(oc.nbClient, nil, &lsw, &lsp)
 	if err != nil {
-		return nil, fmt.Errorf("cannot generate ops delete logical switch port %s: %v", logicalPort, err)
+		return nil, fmt.Errorf("error deleting logical switch port %+v from switch %+v: %v", lsp, lsw, err)
 	}
-	allOps = append(allOps, ops...)
 
-	// for testing purposes the explicit delete of the logical switch port is required
-	ops, err = oc.nbClient.Where(lsp).Delete()
-	if err != nil {
-		return nil, fmt.Errorf("cannot generate ops delete logical switch port %s: %v", logicalPort, err)
-	}
-	allOps = append(allOps, ops...)
-
-	return allOps, nil
+	return ops, nil
 }

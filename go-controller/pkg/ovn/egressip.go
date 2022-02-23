@@ -1585,25 +1585,20 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 	// as to notify them the change. If this is not the case: packets will
 	// continue to be routed to the old node which hosted the egress IP before
 	// it was moved, and the connections will fail.
+	portName := types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + egressNode.Name
 	lsp := nbdb.LogicalSwitchPort{
-		Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + egressNode.Name,
+		Name: portName,
 		// Setting nat-addresses to router will send out GARPs for all externalIPs and LB VIPs
 		// hosted on the GR. Setting exclude-lb-vips-from-garp to true will make sure GARPs for
 		// LB VIPs are not sent, thereby preventing GARP overload.
 		Options: map[string]string{"nat-addresses": "router", "exclude-lb-vips-from-garp": "true"},
 	}
-	opModel := libovsdbops.OperationModel{
-		Model: &lsp,
-		OnModelMutations: []interface{}{
-			&lsp.Options,
-		},
-		ErrNotFound: true,
-	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModel); err != nil {
+	err := libovsdbops.UpdateLogicalSwitchPortSetOptions(oc.nbClient, &lsp)
+	if err != nil {
 		klog.Errorf("Unable to configure GARP on external logical switch port for egress node: %s, "+
 			"this will result in packet drops during egress IP re-assignment,  err: %v", egressNode.Name, err)
-
 	}
+
 	// If a node has been labelled for egress IP we need to check if there are any
 	// egress IPs which are missing an assignment. If there are, we need to send a
 	// synthetic update since reconcileEgressIP will then try to assign those IPs to
@@ -1633,20 +1628,16 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 	// This will remove the option described in addEgressNode from the logical
 	// switch port, since this node will not be used for egress IP assignments
 	// from now on.
+	portName := types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + egressNode.Name
 	lsp := nbdb.LogicalSwitchPort{
-		Name:    types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + egressNode.Name,
+		Name: portName,
 		Options: map[string]string{"nat-addresses": "", "exclude-lb-vips-from-garp": ""},
 	}
-	opModel := libovsdbops.OperationModel{
-		Model: &lsp,
-		OnModelMutations: []interface{}{
-			&lsp.Options,
-		},
-		ErrNotFound: true,
-	}
-	if err := oc.modelClient.Delete(opModel); err != nil {
+	err := libovsdbops.UpdateLogicalSwitchPortSetOptions(oc.nbClient, &lsp)
+	if err != nil {
 		klog.Errorf("Unable to remove GARP configuration on external logical switch port for egress node: %s, err: %v", egressNode.Name, err)
 	}
+
 	// Since the node has been labelled as "not usable" for egress IP
 	// assignments we need to find all egress IPs which have an assignment to
 	// it, and move them elsewhere.

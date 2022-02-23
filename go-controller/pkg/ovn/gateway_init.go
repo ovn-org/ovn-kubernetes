@@ -110,7 +110,6 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 	gwSwitchPort := types.JoinSwitchToGWRouterPrefix + gatewayRouter
 	gwRouterPort := types.GWRouterToJoinSwitchPrefix + gatewayRouter
 
-	logicalSwitch := nbdb.LogicalSwitch{}
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
 		Name:      gwSwitchPort,
 		Type:      "router",
@@ -119,27 +118,10 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 			"router-port": gwRouterPort,
 		},
 	}
-
-	opModels = []libovsdbops.OperationModel{
-		{
-			Model: &logicalSwitchPort,
-			DoAfter: func() {
-				logicalSwitch.Ports = []string{logicalSwitchPort.UUID}
-			},
-		},
-		{
-			Name:           &logicalSwitch.Name,
-			Model:          &logicalSwitch,
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.OVNJoinSwitch },
-			OnModelMutations: []interface{}{
-				&logicalSwitch.Ports,
-			},
-			ErrNotFound: true,
-		},
-	}
-
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("failed to add port %q to logical switch %q, err: %v", gwSwitchPort, types.OVNJoinSwitch, err)
+	sw := nbdb.LogicalSwitch{Name: types.OVNJoinSwitch}
+	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
+	if err != nil {
+		return fmt.Errorf("failed to create port %v on logical switch %q: %v", gwSwitchPort, types.OVNJoinSwitch, err)
 	}
 
 	gwLRPMAC := util.IPAddrToHWAddr(gwLRPIPs[0])
@@ -498,69 +480,10 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 // addExternalSwitch creates a switch connected to the external bridge and connects it to
 // the gateway router
 func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRouter, macAddress, physNetworkName string, ipAddresses []*net.IPNet, vlanID *uint) error {
-	// Create the external switch for the physical interface to connect to.
-	externalSwitch := fmt.Sprintf("%s%s%s", prefix, types.ExternalSwitchPrefix, nodeName)
-
-	externalLogicalSwitch := nbdb.LogicalSwitch{
-		Name: externalSwitch,
-	}
-	opModels := []libovsdbops.OperationModel{
-		{
-			Name:           &externalLogicalSwitch.Name,
-			Model:          &externalLogicalSwitch,
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == externalSwitch },
-		},
-	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("failed to create logical switch %s, err: %v", externalSwitch, err)
-	}
-
-	// Add external interface as a logical port to external_switch.
-	// This is a learning switch port with "unknown" address. The external
-	// world is accessed via this port.
-	externalLogicalSwitchPort := nbdb.LogicalSwitchPort{
-		Addresses: []string{"unknown"},
-		Type:      "localnet",
-		Options: map[string]string{
-			"network_name": physNetworkName,
-		},
-		Name: interfaceID,
-	}
-	if vlanID != nil {
-		intVlanID := int(*vlanID)
-		externalLogicalSwitchPort.TagRequest = &intVlanID
-	}
-
-	opModels = []libovsdbops.OperationModel{
-		{
-			Model: &externalLogicalSwitchPort,
-			OnModelUpdates: []interface{}{
-				&externalLogicalSwitchPort.Addresses,
-				&externalLogicalSwitchPort.Type,
-				&externalLogicalSwitchPort.TagRequest,
-				&externalLogicalSwitchPort.Options,
-			},
-			DoAfter: func() {
-				externalLogicalSwitch.Ports = []string{externalLogicalSwitchPort.UUID}
-			},
-		},
-		{
-			Name:           &externalLogicalSwitch.Name,
-			Model:          &externalLogicalSwitch,
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == externalSwitch },
-			OnModelMutations: []interface{}{
-				&externalLogicalSwitch.Ports,
-			},
-			ErrNotFound: true,
-		},
-	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("failed to add logical switch port: %s to switch %s, err: %v", interfaceID, externalSwitch, err)
-	}
-
-	// Connect GR to external_switch with mac address of external interface
-	// and that IP address. In the case of `local` gateway mode, whenever ovnkube-node container
-	// restarts a new br-local bridge will be created with a new `nicMacAddress`.
+	// Create the GR port that connects to external_switch with mac address of
+	// external interface and that IP address. In the case of `local` gateway
+	// mode, whenever ovnkube-node container restarts a new br-local bridge will
+	// be created with a new `nicMacAddress`.
 	externalRouterPort := prefix + types.GWRouterToExtSwitchPrefix + gatewayRouter
 
 	externalRouterPortNetworks := []string{}
@@ -577,7 +500,7 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 	}
 
 	logicalRouter := nbdb.LogicalRouter{}
-	opModels = []libovsdbops.OperationModel{
+	opModels := []libovsdbops.OperationModel{
 		{
 			Model: &externalLogicalRouterPort,
 			OnModelUpdates: []interface{}{
@@ -602,9 +525,26 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 		return fmt.Errorf("failed to add logical router port: %s to router %s, err: %v", externalRouterPort, gatewayRouter, err)
 	}
 
-	// Connect the external_switch to the router.
-	externalSwitchPortToRouter := prefix + types.EXTSwitchToGWRouterPrefix + gatewayRouter
+	// Create the external switch for the physical interface to connect to
+	// and add external interface as a logical port to external_switch.
+	// This is a learning switch port with "unknown" address. The external
+	// world is accessed via this port.
+	externalSwitch := fmt.Sprintf("%s%s%s", prefix, types.ExternalSwitchPrefix, nodeName)
+	externalLogicalSwitchPort := nbdb.LogicalSwitchPort{
+		Addresses: []string{"unknown"},
+		Type:      "localnet",
+		Options: map[string]string{
+			"network_name": physNetworkName,
+		},
+		Name: interfaceID,
+	}
+	if vlanID != nil {
+		intVlanID := int(*vlanID)
+		externalLogicalSwitchPort.TagRequest = &intVlanID
+	}
 
+	// Also add the port to connect the external_switch to the router.
+	externalSwitchPortToRouter := prefix + types.EXTSwitchToGWRouterPrefix + gatewayRouter
 	externalLogicalSwitchPortToRouter := nbdb.LogicalSwitchPort{
 		Name: externalSwitchPortToRouter,
 		Type: "router",
@@ -613,31 +553,14 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 		},
 		Addresses: []string{macAddress},
 	}
-	opModels = []libovsdbops.OperationModel{
-		{
-			Model: &externalLogicalSwitchPortToRouter,
-			OnModelUpdates: []interface{}{
-				&externalLogicalSwitchPortToRouter.Addresses,
-				&externalLogicalSwitchPortToRouter.Type,
-				&externalLogicalSwitchPortToRouter.Options,
-			},
-			DoAfter: func() {
-				externalLogicalSwitch.Ports = []string{externalLogicalSwitchPortToRouter.UUID}
-			},
-		},
-		{
-			Name:           &externalLogicalSwitch.Name,
-			Model:          &externalLogicalSwitch,
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == externalSwitch },
-			OnModelMutations: []interface{}{
-				&externalLogicalSwitch.Ports,
-			},
-			ErrNotFound: true,
-		},
+	sw := nbdb.LogicalSwitch{Name: externalSwitch}
+
+	err := libovsdbops.CreateOrUpdateLogicalSwitchPortsAndSwitch(oc.nbClient, &sw, &externalLogicalSwitchPort, &externalLogicalSwitchPortToRouter)
+	if err != nil {
+		return fmt.Errorf("failed to create logical switch ports %+v, %+v, and switch %s: %v",
+			externalLogicalSwitchPort, externalLogicalSwitchPortToRouter, externalSwitch, err)
 	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("failed to add logical switch port: %s to switch %s, err: %v", externalSwitchPortToRouter, externalSwitch, err)
-	}
+
 	return nil
 }
 

@@ -124,7 +124,8 @@ func (r *repair) runBeforeSync() {
 	}
 
 	if len(acls) > 0 {
-		err = libovsdbops.RemoveACLsFromAllSwitches(r.nbClient, acls...)
+		p := func(item *nbdb.LogicalSwitch) bool { return true }
+		err = libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(r.nbClient, p, acls...)
 		if err != nil {
 			klog.Errorf("Failed to purge existing reject rules: %v", err)
 		}

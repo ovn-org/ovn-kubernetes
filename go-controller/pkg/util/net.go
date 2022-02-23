@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/libovsdb/client"
@@ -39,13 +40,10 @@ func intToIP(i *big.Int) net.IP {
 // GetPortAddresses returns the MAC and IPs of the given logical switch port
 func GetPortAddresses(portName string, nbClient client.Client) (net.HardwareAddr, []net.IP, error) {
 	lsp := &nbdb.LogicalSwitchPort{Name: portName}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	err := nbClient.Get(ctx, lsp)
-	if err != nil {
-		if err == client.ErrNotFound {
-			return nil, nil, nil
-		}
+	lsp, err := libovsdbops.GetLogicalSwitchPort(nbClient, lsp)
+	if err == client.ErrNotFound {
+		return nil, nil, nil
+	} else if err != nil {
 		return nil, nil, err
 	}
 

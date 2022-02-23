@@ -24,7 +24,6 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
@@ -160,7 +159,10 @@ func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.No
 		}
 	}
 
-	legacyJoinSwitches, err := libovsdbops.FindPerNodeJoinSwitches(oc.nbClient)
+	p := func(item *nbdb.LogicalSwitch) bool {
+		return strings.HasPrefix(item.Name, types.JoinSwitchPrefix)
+	}
+	legacyJoinSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(oc.nbClient, p)
 	if err != nil {
 		klog.Errorf("Failed to remove any legacy per node join switches")
 	}
@@ -399,16 +401,9 @@ func (oc *Controller) SetupMaster(existingNodeNames []string) error {
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name: types.OVNJoinSwitch,
 	}
-	opModels = []libovsdbops.OperationModel{
-		{
-			Name:           &logicalSwitch.Name,
-			Model:          &logicalSwitch,
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.OVNJoinSwitch },
-		},
-	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("failed to create logical switch %s, error: %v", types.OVNJoinSwitch, err)
-
+	err = libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch)
+	if err != nil {
+		return fmt.Errorf("failed to create logical switch %+v: %v", logicalSwitch, err)
 	}
 
 	// Initialize the OVNJoinSwitch switch IP manager
@@ -464,7 +459,8 @@ func (oc *Controller) SetupMaster(existingNodeNames []string) error {
 		return fmt.Errorf("failed to add logical router port %s, error: %v", drRouterPort, err)
 	}
 
-	// Connect the switch OVNJoinSwitch to the router.
+	// Create OVNJoinSwitch that will be used to connect gateway routers to the
+	// distributed router and connect it to said dsitributed router.
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
 		Name: drSwitchPort,
 		Type: "router",
@@ -473,64 +469,13 @@ func (oc *Controller) SetupMaster(existingNodeNames []string) error {
 		},
 		Addresses: []string{"router"},
 	}
-	opModels = []libovsdbops.OperationModel{
-		{
-			Model: &logicalSwitchPort,
-			DoAfter: func() {
-				logicalSwitch.Ports = []string{logicalSwitchPort.UUID}
-			},
-		},
-		{
-			Name:           &logicalSwitch.Name,
-			Model:          &logicalSwitch,
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.OVNJoinSwitch },
-			OnModelMutations: []interface{}{
-				&logicalSwitch.Ports,
-			},
-			ErrNotFound: true,
-		},
-	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("failed to add router-type logical switch port %s to %s, error: %v",
-			drSwitchPort, types.OVNJoinSwitch, err)
-	}
-	return nil
-}
-
-func (oc *Controller) addNodeLogicalSwitchPort(logicalSwitchName, portName, portType string, addresses []string, options map[string]string) (string, error) {
-	logicalSwitch := nbdb.LogicalSwitch{}
-	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name:      portName,
-		Type:      portType,
-		Options:   options,
-		Addresses: addresses,
-	}
-	opModels := []libovsdbops.OperationModel{
-		{
-			Model: &logicalSwitchPort,
-			OnModelUpdates: []interface{}{
-				&logicalSwitchPort.Addresses,
-			},
-			DoAfter: func() {
-				logicalSwitch.Ports = []string{logicalSwitchPort.UUID}
-			},
-		},
-		{
-			Name:           &logicalSwitch.Name,
-			Model:          &logicalSwitch,
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == logicalSwitchName },
-			OnModelMutations: []interface{}{
-				&logicalSwitch.Ports,
-			},
-			ErrNotFound: true,
-		},
-	}
-	_, err := oc.modelClient.CreateOrUpdate(opModels...)
+	sw := nbdb.LogicalSwitch{Name: types.OVNJoinSwitch}
+	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
 	if err != nil {
-		return "", fmt.Errorf("failed to add logical port %s to switch %s, error: %v", portName, logicalSwitch.Name, err)
+		return fmt.Errorf("failed to create logical switch port %+v and switch %s: %v", logicalSwitchPort, types.OVNJoinSwitch, err)
 	}
 
-	return logicalSwitchPort.UUID, nil
+	return nil
 }
 
 func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
@@ -601,13 +546,17 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 	}
 
 	// Create this node's management logical port on the node switch
-	portName := types.K8sPrefix + node.Name
-	uuid, err := oc.addNodeLogicalSwitchPort(node.Name, portName, "", []string{addresses}, nil)
+	logicalSwitchPort := nbdb.LogicalSwitchPort{
+		Name:      types.K8sPrefix + node.Name,
+		Addresses: []string{addresses},
+	}
+	sw := nbdb.LogicalSwitch{Name: node.Name}
+	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
 	if err != nil {
 		return err
 	}
 
-	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, types.ClusterPortGroupName, uuid)
+	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, types.ClusterPortGroupName, logicalSwitchPort.UUID)
 	if err != nil {
 		klog.Errorf(err.Error())
 		return err
@@ -821,18 +770,14 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 			},
 			ErrNotFound: true,
 		},
-		{
-			Name:           &logicalSwitch.Name,
-			Model:          &logicalSwitch,
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == nodeName },
-			OnModelUpdates: []interface{}{
-				&logicalSwitch.OtherConfig,
-				&logicalSwitch.LoadBalancerGroup,
-			},
-		},
 	}
 	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("failed to add logical port to router, error: %v", err)
+	}
+
+	err := libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch)
+	if err != nil {
+		return fmt.Errorf("failed to add logical switch %+v: %v", logicalSwitch, err)
 	}
 
 	// also add the join switch IPs for this node - needed in shared gateway mode
@@ -882,31 +827,27 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 			logicalSwitch.OtherConfig["mcast_querier"] = "false"
 		}
 
-		// Create the Node's Logical Switch and set it's subnet
-		opModels = []libovsdbops.OperationModel{
-			{
-				Name:  &logicalSwitch.Name,
-				Model: &logicalSwitch,
-				OnModelMutations: []interface{}{
-					&logicalSwitch.OtherConfig,
-				},
-				ErrNotFound: true,
-			},
-		}
-		if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-			return fmt.Errorf("failed to configure Multicast on logical switch for node %s, error: %v", nodeName, err)
+		err := libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch)
+		if err != nil {
+			return fmt.Errorf("failed to configure Multicast on logical switch %+v: %v", logicalSwitch, err)
 		}
 	}
 
 	// Connect the switch to the router.
-	nodeSwToRtrUUID, err := oc.addNodeLogicalSwitchPort(nodeName, types.SwitchToRouterPrefix+nodeName,
-		"router", []string{"router"}, map[string]string{"router-port": types.RouterToSwitchPrefix + nodeName})
+	logicalSwitchPort := nbdb.LogicalSwitchPort{
+		Name:      types.SwitchToRouterPrefix + nodeName,
+		Type:      "router",
+		Addresses: []string{"router"},
+		Options:   map[string]string{"router-port": types.RouterToSwitchPrefix + nodeName},
+	}
+	sw := nbdb.LogicalSwitch{Name: nodeName}
+	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
 	if err != nil {
-		klog.Errorf("Failed to add logical port to switch, error: %v", err)
+		klog.Errorf("Failed to add logical port %+v to switch %s: %v", logicalSwitchPort, nodeName, err)
 		return err
 	}
 
-	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, types.ClusterRtrPortGroupName, nodeSwToRtrUUID)
+	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, types.ClusterRtrPortGroupName, logicalSwitchPort.UUID)
 	if err != nil {
 		klog.Errorf(err.Error())
 		return err
@@ -1155,17 +1096,19 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 		return fmt.Errorf("failed to get load_balancer cache for node %s: %v", nodeName, err)
 	}
 	lbCache.RemoveSwitch(nodeName)
+
 	// Remove the logical switch associated with the node
+	err = libovsdbops.DeleteLogicalSwitch(oc.nbClient, nodeName)
+	if err != nil {
+		return fmt.Errorf("failed to delete logical switch %s: %v", nodeName, err)
+	}
+
 	logicalRouterPortName := types.RouterToSwitchPrefix + nodeName
 	clusterRouterModel := nbdb.LogicalRouter{}
 	nodeLogicalRouterPort := nbdb.LogicalRouterPort{
 		Name: logicalRouterPortName,
 	}
 	opModels := []libovsdbops.OperationModel{
-		{
-			Model:          &nbdb.LogicalSwitch{},
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == nodeName },
-		},
 		{
 			Model: &nodeLogicalRouterPort,
 			DoAfter: func() {
@@ -1375,11 +1318,14 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 	// Find difference between existing chassis and found nodes
 	staleChassis := chassisHostNames.Difference(foundNodes)
 
-	nodeSwitches, err := libovsdbops.FindSwitchesWithOtherConfig(oc.nbClient)
+	p := func(item *nbdb.LogicalSwitch) bool {
+		return len(item.OtherConfig) > 0
+	}
+	nodeSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(oc.nbClient, p)
 	if err != nil {
-		if err != libovsdbclient.ErrNotFound {
-			return fmt.Errorf("failed to get node logical switches which have other-config set error: %v", err)
-		}
+		return fmt.Errorf("failed to get node logical switches which have other-config set error: %v", err)
+	}
+	if len(nodeSwitches) == 0 {
 		klog.Warning("Did not find any logical switches with other-config")
 	}
 

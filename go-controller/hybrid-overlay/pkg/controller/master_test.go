@@ -306,8 +306,10 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			// LRP should have been deleted and removed
 			ovnClusterRouter.Policies = []string{}
-			// in a real db, deleting the LSP would remove the reference here, but in our testing ovsdb server it does not
-			// nodeSwitch.Ports = []string{}
+
+			// LSP should have been deleted and removed
+			nodeSwitch.Ports = []string{}
+
 			expectedNBDatabaseState = []libovsdbtest.TestData{
 				ovnClusterRouter,
 				nodeSwitch,
@@ -589,9 +591,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				&nbdb.LogicalSwitch{
 					Name: nodeName,
 					UUID: nodeName + "-UUID",
-					// CI server doesn't clean this up even though the LSP has been deleted, will
-					// be garbage collected in real scenario
-					Ports: []string{lspUUID},
 				},
 			}
 
