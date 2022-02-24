@@ -681,6 +681,19 @@ EOF
   fi
 }
 
+function memory_trim_on_compaction_supported {
+  if [[ $1 == "nbdb" ]]; then
+    mem_trim_check=$(ovn-appctl -t ${OVN_RUNDIR}/ovnnb_db.ctl list-commands | grep "memory-trim-on-compaction")
+  elif [[ $1 == "sbdb"  ]]; then
+    mem_trim_check=$(ovn-appctl -t ${OVN_RUNDIR}/ovnsb_db.ctl list-commands | grep "memory-trim-on-compaction")
+  fi
+  if [[ ${mem_trim_check} != "" ]]; then
+    return $(/bin/true)
+  else
+    return $(/bin/false)
+  fi
+}
+
 # v3 - run nb_ovsdb in a separate container
 nb-ovsdb() {
   trap 'ovsdb_cleanup nb' TERM
@@ -707,10 +720,14 @@ nb-ovsdb() {
     echo "=============== nb-ovsdb ========== reconfigured for SSL"
   }
   ovn-nbctl --inactivity-probe=0 set-connection p${transport}:${ovn_nb_port}:$(bracketify ${ovn_db_host})
-
+  if memory_trim_on_compaction_supported "nbdb"
+  then
+    # Enable NBDB memory trimming on DB compaction, Every 10mins DBs are compacted
+    # memory on the heap is freed, when enable memory trimmming freed memory will go back to OS.
+    ovn-appctl -t ${OVN_RUNDIR}/ovnnb_db.ctl ovsdb-server/memory-trim-on-compaction on
+  fi
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-nb.log &
   ovn_tail_pid=$!
-
   process_healthy ovnnb_db ${ovn_tail_pid}
   echo "=============== run nb_ovsdb ========== terminated"
 }
@@ -743,7 +760,12 @@ sb-ovsdb() {
   # create the ovnkube-db endpoints
   wait_for_event attempts=10 check_ovnkube_db_ep ${ovn_db_host} ${ovn_nb_port}
   set_ovnkube_db_ep ${ovn_db_host}
-
+  if memory_trim_on_compaction_supported "sbdb"
+  then
+    # Enable SBDB memory trimming on DB compaction, Every 10mins DBs are compacted
+    # memory on the heap is freed, when enable memory trimmming freed memory will go back to OS.
+    ovn-appctl -t ${OVN_RUNDIR}/ovnsb_db.ctl ovsdb-server/memory-trim-on-compaction on
+  fi
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-sb.log &
   ovn_tail_pid=$!
 
