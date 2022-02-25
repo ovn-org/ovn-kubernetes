@@ -1449,7 +1449,7 @@ func newServiceController(client clientset.Interface, nbClient libovsdbclient.Cl
 		client,
 		nbClient,
 		svcFactory.Core().V1().Services(),
-		svcFactory.Discovery().V1beta1().EndpointSlices(),
+		svcFactory.Discovery().V1().EndpointSlices(),
 		svcFactory.Core().V1().Nodes(),
 	)
 

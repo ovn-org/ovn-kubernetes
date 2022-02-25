@@ -13,6 +13,7 @@ import (
 	"time"
 
 	kapi "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
@@ -535,7 +536,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		go wait.Until(func() {
 			checkForStaleOVSInterfaces(n.name, n.watchFactory.(*factory.WatchFactory))
 		}, time.Minute, n.stopChan)
-		n.WatchEndpoints()
+		n.WatchEndpointSlices()
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPU {
@@ -560,29 +561,40 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	return err
 }
 
-func (n *OvnNode) WatchEndpoints() {
-	n.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
+func (n *OvnNode) WatchEndpointSlices() {
+	n.watchFactory.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(old, new interface{}) {
-			epNew := new.(*kapi.Endpoints)
-			epOld := old.(*kapi.Endpoints)
-			newEpAddressMap := buildEndpointAddressMap(epNew.Subsets)
-			for item := range buildEndpointAddressMap(epOld.Subsets) {
-				if _, ok := newEpAddressMap[item]; !ok {
-					err := deleteConntrack(item.ip, item.port, item.protocol)
-					if err != nil {
-						klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
+			newEndpointSlice := new.(*discovery.EndpointSlice)
+			oldEndpointSlice := old.(*discovery.EndpointSlice)
+			for _, port := range oldEndpointSlice.Ports {
+				for _, endpoint := range oldEndpointSlice.Endpoints {
+					for _, ip := range endpoint.Addresses {
+						if isEPSliceContainsEndpoint(newEndpointSlice, ip, *port.Port, *port.Protocol) {
+							continue
+						}
+						if *port.Protocol == kapi.ProtocolUDP || *port.Protocol == kapi.ProtocolSCTP {
+							err := deleteConntrack(ip, *port.Port, *port.Protocol)
+							if err != nil {
+								klog.Errorf("Failed to delete conntrack entry for %s: %v", ip, err)
+							}
+						}
 					}
 				}
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
-			ep := obj.(*kapi.Endpoints)
-			for item := range buildEndpointAddressMap(ep.Subsets) {
-				err := deleteConntrack(item.ip, item.port, item.protocol)
-				if err != nil {
-					klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
+			endpointSlice := obj.(*discovery.EndpointSlice)
+			for _, port := range endpointSlice.Ports {
+				for _, endpoint := range endpointSlice.Endpoints {
+					for _, ip := range endpoint.Addresses {
+						if *port.Protocol == kapi.ProtocolUDP || *port.Protocol == kapi.ProtocolSCTP {
+							err := deleteConntrack(ip, *port.Port, *port.Protocol)
+							if err != nil {
+								klog.Errorf("Failed to delete conntrack entry for %s: %v", ip, err)
+							}
+						}
+					}
 				}
-
 			}
 		},
 	}, nil)
@@ -631,30 +643,20 @@ func (n *OvnNode) validateVTEPInterfaceMTU() error {
 	})
 }
 
-type epAddressItem struct {
-	ip       string
-	port     int32
-	protocol kapi.Protocol
-}
-
-//buildEndpointAddressMap builds a map of all UDP and SCTP ports in the endpoint subset along with that port's IP address
-func buildEndpointAddressMap(epSubsets []kapi.EndpointSubset) map[epAddressItem]struct{} {
-	epMap := make(map[epAddressItem]struct{})
-	for _, subset := range epSubsets {
-		for _, address := range subset.Addresses {
-			for _, port := range subset.Ports {
-				if port.Protocol == kapi.ProtocolUDP || port.Protocol == kapi.ProtocolSCTP {
-					epMap[epAddressItem{
-						ip:       address.IP,
-						port:     port.Port,
-						protocol: port.Protocol,
-					}] = struct{}{}
+// isEPSliceContainsEndpoint checks whether the endpointslice
+// contains a specific endpoint with IP/Port/Protocol
+func isEPSliceContainsEndpoint(epSlice *discovery.EndpointSlice,
+	epIP string, epPort int32, protocol kapi.Protocol) bool {
+	for _, port := range epSlice.Ports {
+		for _, endpoint := range epSlice.Endpoints {
+			for _, ip := range endpoint.Addresses {
+				if ip == epIP && *port.Port == epPort && *port.Protocol == protocol {
+					return true
 				}
 			}
 		}
 	}
-
-	return epMap
+	return false
 }
 
 func configureSvcRouteViaBridge(bridge string) error {
