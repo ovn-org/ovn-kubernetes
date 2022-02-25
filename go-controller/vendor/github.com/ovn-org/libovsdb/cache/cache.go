@@ -673,7 +673,7 @@ func (t *TableCache) Populate2(tableUpdates ovsdb.TableUpdates2) error {
 				modified := model.Clone(existing)
 				err := t.ApplyModifications(table, modified, *row.Modify)
 				if err != nil {
-					return fmt.Errorf("unable to apply row modifications: %v", err)
+					return fmt.Errorf("unable to apply row modifications: %w", err)
 				}
 				if !model.Equal(modified, existing) {
 					logger.V(5).Info("updating row", "old", fmt.Sprintf("%+v", existing), "new", fmt.Sprintf("%+v", modified))
