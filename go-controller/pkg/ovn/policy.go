@@ -9,6 +9,7 @@ import (
 	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	ovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -29,7 +30,7 @@ import (
 const (
 	// defaultDenyPolicyTypeACLExtIdKey external ID key for default deny policy type
 	defaultDenyPolicyTypeACLExtIdKey = "default-deny-policy-type"
-	// l4MatchACLExtIdKey external ID key for L4 Match on 'gress policy ACLs
+	// l4MatchACLExtIdKey external ID key for consolidated L4 Match in 'gress policy ACLs
 	l4MatchACLExtIdKey = "l4Match"
 	// ipBlockCIDRACLExtIdKey external ID key for IP block CIDR on 'gress policy ACLs
 	ipBlockCIDRACLExtIdKey = "ipblock_cidr"
@@ -45,6 +46,8 @@ const (
 	ingressDefaultDenySuffix = "ingressDefaultDeny"
 	// egressDefaultDenySuffix is the suffix used when creating the ingress port group for a namespace
 	egressDefaultDenySuffix = "egressDefaultDeny"
+	// origL4MatchACLExtIdKey external ID key for as-specified L4 Match in 'gress policy ACLs from netpol
+	origL4MatchACLExtIdKey = "origL4Match"
 )
 
 var NetworkPolicyNotCreated error
@@ -159,6 +162,69 @@ func (oc *Controller) syncNetworkPoliciesRetriable(networkPolicies []interface{}
 			return fmt.Errorf("error removing stale port groups %v: %v", stalePGs, err)
 		}
 	}
+	return nil
+}
+
+// L4 Matches are consolidated by OVN version OvnL4ACLConsolidatedVersion; if we are
+// upgrading to this version from previous ones, then we'll be left with some stale
+// L4 ACls, we walk through them and delete here.
+func (oc *Controller) cleanUpUnconsolidatedL4ACLs() error {
+	netPolicies := make(map[string]map[string][]*nbdb.ACL)
+
+	klog.V(5).Infof("cleanUpUnconsolidatedL4ACLs: Checking for  obsoleted L4 acls")
+
+	// Take a lock to do the clean up. Probably a big hammer, but we don't want
+	// acls, np or ns to be deleted when doing this. This cleanup runs only when we
+	// *upgrade* to OvnL4ACLConsolidatedVersion the 1st time, so the implications
+	// (potential additional latency in ns/np addition/deletion etc.) of this
+	// big hammer approach should be rather limited.
+	oc.namespacesMutex.Lock()
+
+	defer oc.namespacesMutex.Unlock()
+
+	// Get the list if ACLs that are left behind after consolidation, i.e.
+	// the ones with external-id "l4Match", but not "origL4Match".
+	// (origL4Match was added by OvnL4ACLConsolidatedVersion).
+	staleL4MatchACLs, err := libovsdbops.FindObsoletedL4MatchACLs(oc.nbClient, l4MatchACLExtIdKey, origL4MatchACLExtIdKey)
+	if err != nil {
+		return fmt.Errorf("cleanUpUnconsolidatedL4ACLs: failed to get state L4 ACLs : %v", err)
+	}
+	klog.V(5).Infof("cleanUpUnconsolidatedL4ACLs: Got obsoleted acls %v", staleL4MatchACLs)
+	for _, acl := range staleL4MatchACLs {
+		// Range variables are reused so can't just do a &acl in the append below.
+		aclTmp := acl
+		// Probably via API in libovsdbops instead of directly accessing these extids.
+		nSpace := aclTmp.ExternalIDs[namespaceACLExtIdKey]
+		nPolicy := aclTmp.ExternalIDs[policyACLExtIdKey]
+		if netPolicies[nSpace] == nil {
+			netPolicies[nSpace] = make(map[string][]*nbdb.ACL)
+		}
+		netPolicies[nSpace][nPolicy] = append(netPolicies[nSpace][nPolicy], &aclTmp)
+	}
+	var ops []libovsdb.Operation
+	ops = nil
+	// Not locking namespace or npolicy etc. since we have the meta lock above.
+	for nspace := range netPolicies {
+		klog.V(5).Infof("cleanUpUnconsolidatedL4ACLs: Looking for stale network policies for NS %s", nspace)
+		for npolicy, acls := range netPolicies[nspace] {
+			pgName := fmt.Sprintf("%s_%s", nspace, npolicy)
+			hashedPG := hashedPortGroup(pgName)
+			klog.V(5).Infof("cleanUpUnconsolidatedL4ACLs: Deleting acls %v for  pg %v len %d", acls, hashedPG, len(acls))
+			ops, err = libovsdbops.DeleteACLsFromPortGroupOps(oc.nbClient, ops, hashedPG, acls...)
+			if err != nil {
+				klog.Errorf("cleanUpUnconsolidatedL4ACLs: Error getting ops to delete stale L4 match ACLs %v from portgroup %v: %v", acls, hashedPG, err)
+				return err
+			}
+		}
+	}
+	if ops != nil {
+		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+		if err != nil {
+			klog.Errorf("cleanUpUnconsolidatedL4ACLs: Error transacting removal of stale ACLs: %v", err)
+			return err
+		}
+	}
+	klog.V(5).Infof("cleanUpUnconsolidatedL4ACLs: Done cleaning obsoleted L4 acls")
 	return nil
 }
 

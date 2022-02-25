@@ -51,7 +51,7 @@ type portPolicy struct {
 	endPort  int32
 }
 
-func (pp *portPolicy) getL4Match() (string, error) {
+func (pp *portPolicy) collectL4Match(l4Matches map[string]map[string]string) error {
 	var supportedProtocols = []string{TCP, UDP, SCTP}
 	var foundProtocol string
 	for _, protocol := range supportedProtocols {
@@ -61,15 +61,35 @@ func (pp *portPolicy) getL4Match() (string, error) {
 		}
 	}
 	if len(foundProtocol) == 0 {
-		return "", fmt.Errorf("unknown port protocol %v", pp.protocol)
+		return fmt.Errorf("unknown port protocol %v", pp.protocol)
+	}
+	// We are already configured to match on all ports, so not need
+	// to look for ports.
+	if l4Matches[foundProtocol] == nil {
+		l4Matches[foundProtocol] = make(map[string]string)
+	}
+	if l4Matches[foundProtocol]["portlist"] == "all" {
+		return nil
 	}
 	if pp.endPort != 0 && pp.endPort != pp.port {
-		return fmt.Sprintf("%s && %d<=%s.dst<=%d", foundProtocol, pp.port, foundProtocol, pp.endPort), nil
-
+		if l4Matches[foundProtocol]["portrange"] == "" {
+			l4Matches[foundProtocol]["portrange"] = fmt.Sprintf("%d<=%s.dst<=%d", pp.port,
+				foundProtocol, pp.endPort)
+		} else {
+			l4Matches[foundProtocol]["portrange"] = fmt.Sprintf("%s || %d<=%s.dst<=%d",
+				l4Matches[foundProtocol]["portrange"], pp.port, foundProtocol, pp.endPort)
+		}
 	} else if pp.port != 0 {
-		return fmt.Sprintf("%s && %s.dst==%d", foundProtocol, foundProtocol, pp.port), nil
+		if l4Matches[foundProtocol]["portlist"] != "" {
+			l4Matches[foundProtocol]["portlist"] = fmt.Sprintf("%s,%d", l4Matches[foundProtocol]["portlist"],
+				pp.port)
+		} else {
+			l4Matches[foundProtocol]["portlist"] = fmt.Sprintf("%d", pp.port)
+		}
+	} else {
+		l4Matches[foundProtocol]["portlist"] = "all"
 	}
-	return foundProtocol, nil
+	return nil
 }
 
 func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string) *gressPolicy {
@@ -301,7 +321,38 @@ func (gp *gressPolicy) delNamespaceAddressSet(name string) bool {
 	return true
 }
 
-// buildLocalPodACLs builds the ACLs that implement the gress policy's rules to the
+// helper function to stitch together the L4 match string to unify all the L4
+// matches for the same protocol into a single acl (to avoid exploding the
+// number of acls)
+func getL4MatchStr(protocol string, portList, portRange string) string {
+	var l4MatchStr string
+	if portList == "all" {
+		return protocol
+	}
+	l4MatchStr = ""
+	if portList != "" {
+		if strings.Contains(portList, ",") {
+			l4MatchStr = fmt.Sprintf("%s.dst=={%s}", protocol, portList)
+		} else {
+			l4MatchStr = fmt.Sprintf("%s.dst==%s", protocol, portList)
+		}
+	}
+	if portRange != "" {
+		if l4MatchStr == "" {
+			if strings.Contains(portRange, "||") {
+				l4MatchStr = fmt.Sprintf("(%s)", portRange)
+			} else {
+				l4MatchStr = portRange
+			}
+		} else {
+			l4MatchStr = fmt.Sprintf("(%s || %s)", l4MatchStr, portRange)
+		}
+
+	}
+	l4MatchStr = fmt.Sprintf("%s && %s", protocol, l4MatchStr)
+	return l4MatchStr
+}
+
 // given Port Group (which should contain all pod logical switch ports selected
 // by the parent NetworkPolicy)
 func (gp *gressPolicy) buildLocalPodACLs(portGroupName, aclLogging string) []*nbdb.ACL {
@@ -323,33 +374,60 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName, aclLogging string) []*nb
 			// Add ACL allow rule for IPBlock CIDR
 			cidrMatches = gp.getMatchFromIPBlock(lportMatch, l4Match)
 			for i, cidrMatch := range cidrMatches {
-				acl := gp.buildACLAllow(cidrMatch, l4Match, i+1, aclLogging)
+				acl := gp.buildACLAllow(cidrMatch, l4Match, l4Match, i+1, aclLogging)
 				acls = append(acls, acl)
 			}
 		}
 		// if there are pod/namespace selector, then allow packets from/to that address_set or
 		// if the NetworkPolicyPeer is empty, then allow from all sources or to all destinations.
 		if gp.sizeOfAddressSet() > 0 || len(gp.ipBlock) == 0 {
-			acl := gp.buildACLAllow(match, l4Match, 0, aclLogging)
+			acl := gp.buildACLAllow(match, l4Match, l4Match, 0, aclLogging)
 			acls = append(acls, acl)
 		}
+		return acls
 	}
+
+	// Consolidate ports based on protocol, if possible.
+	l4Filters := make(map[string]map[string]string)
 	for _, port := range gp.portPolicies {
-		l4Match, err := port.getL4Match()
+		err := port.collectL4Match(l4Filters)
 		if err != nil {
+			klog.Warning("Failed to get L4 match filter for localPodSetACL: %s", err.Error())
 			continue
 		}
+	}
+	for protocol := range l4Filters {
+		portRange := l4Filters[protocol]["portrange"]
+		portList := l4Filters[protocol]["portlist"]
+		l4Match := getL4MatchStr(protocol, portList, portRange)
 		match := fmt.Sprintf("%s && %s && %s", l3Match, l4Match, lportMatch)
+		// We use origL4Match in the external ids to distinguish between
+		// post-consolidated ACLs - so that the individual ACLs, during
+		// restart, can be cleaned up when we sync. Presently, it will be
+		// same as l4Match, but in the future if consolidation has more
+		// smarts to detect overlap etc. then this list can be used as a
+		// reference to validate the consolidated l4Match.
+		// An alternative would be to rename l4Match, but we don't want
+		// to do that in case any application uses that external id for
+		// any reason.
+		origL4Match := portList
+		if portRange != "" {
+			if origL4Match != "" {
+				origL4Match = fmt.Sprintf("%s,%s", origL4Match, strings.ReplaceAll(portRange, "||", ","))
+			} else {
+				origL4Match = strings.ReplaceAll(portRange, "||", ",")
+			}
+		}
 		if len(gp.ipBlock) > 0 {
 			// Add ACL allow rule for IPBlock CIDR
 			cidrMatches = gp.getMatchFromIPBlock(lportMatch, l4Match)
 			for i, cidrMatch := range cidrMatches {
-				acl := gp.buildACLAllow(cidrMatch, l4Match, i+1, aclLogging)
+				acl := gp.buildACLAllow(cidrMatch, l4Match, origL4Match, i+1, aclLogging)
 				acls = append(acls, acl)
 			}
 		}
 		if gp.sizeOfAddressSet() > 0 || len(gp.ipBlock) == 0 {
-			acl := gp.buildACLAllow(match, l4Match, 0, aclLogging)
+			acl := gp.buildACLAllow(match, l4Match, origL4Match, 0, aclLogging)
 			acls = append(acls, acl)
 		}
 	}
@@ -358,7 +436,7 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName, aclLogging string) []*nb
 }
 
 // buildACLAllow builds an allow-related ACL for a given given match
-func (gp *gressPolicy) buildACLAllow(match, l4Match string, ipBlockCIDR int, aclLogging string) *nbdb.ACL {
+func (gp *gressPolicy) buildACLAllow(match, l4Match, origL4Match string, ipBlockCIDR int, aclLogging string) *nbdb.ACL {
 	priority := types.DefaultAllowPriority
 	direction := nbdb.ACLDirectionToLport
 	action := nbdb.ACLActionAllowRelated
@@ -382,6 +460,7 @@ func (gp *gressPolicy) buildACLAllow(match, l4Match string, ipBlockCIDR int, acl
 
 	externalIds := map[string]string{
 		l4MatchACLExtIdKey:     l4Match,
+		origL4MatchACLExtIdKey: origL4Match,
 		ipBlockCIDRACLExtIdKey: ipBlockCIDRString,
 		namespaceACLExtIdKey:   gp.policyNamespace,
 		policyACLExtIdKey:      gp.policyName,

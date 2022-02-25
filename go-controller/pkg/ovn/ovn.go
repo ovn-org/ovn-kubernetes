@@ -464,8 +464,15 @@ func (oc *Controller) ovnTopologyCleanup() error {
 	}
 
 	// Cleanup address sets in non dual stack formats in all versions known to possibly exist.
-	if ver <= ovntypes.OvnPortBindingTopoVersion {
+	// If it is for all versions, we should probably use OvnCurrentTopologyVersion?
+	if ver <= ovntypes.OvnL4ACLConsolidatedVersion {
 		err = addressset.NonDualStackAddressSetCleanup(oc.nbClient)
+		if err != nil {
+			return err
+		}
+	}
+	if ver < ovntypes.OvnL4ACLConsolidatedVersion {
+		err = oc.cleanUpUnconsolidatedL4ACLs()
 	}
 	return err
 }

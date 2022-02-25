@@ -1,8 +1,10 @@
 package ovn
 
 import (
+	"fmt"
 	"github.com/stretchr/testify/assert"
 	knet "k8s.io/api/networking/v1"
+	"strings"
 	"testing"
 )
 
@@ -156,13 +158,28 @@ func TestGetL4Match(t *testing.T) {
 		},
 	}
 
+	l4Filters := make(map[string]map[string]string)
 	for _, tc := range testcases {
+		var l4MatchStr string
 		pp := &portPolicy{
 			protocol: tc.protocol,
 			port:     tc.port,
 			endPort:  tc.endPort,
 		}
-		l4Match, _ := pp.getL4Match()
-		assert.Equal(t, tc.expected, l4Match)
+		_ = pp.collectL4Match(l4Filters)
+		if l4Filters[strings.ToLower(tc.protocol)] == nil {
+			l4MatchStr = ""
+		} else if tc.endPort != 0 {
+			l4MatchStr = fmt.Sprintf("%s && %s", strings.ToLower(tc.protocol),
+				l4Filters[strings.ToLower(tc.protocol)]["portrange"])
+		} else {
+			if l4Filters[strings.ToLower(tc.protocol)]["portlist"] == "all" {
+				l4MatchStr = fmt.Sprintf("%s", strings.ToLower(tc.protocol))
+			} else {
+				l4MatchStr = fmt.Sprintf("%s && %s.dst==%s", strings.ToLower(tc.protocol),
+					strings.ToLower(tc.protocol), l4Filters[strings.ToLower(tc.protocol)]["portlist"])
+			}
+		}
+		assert.Equal(t, tc.expected, l4MatchStr)
 	}
 }

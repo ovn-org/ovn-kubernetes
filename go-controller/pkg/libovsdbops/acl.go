@@ -264,3 +264,22 @@ func UpdateACLLogging(nbClient libovsdbclient.Client, acl *nbdb.ACL) error {
 	_, err = TransactAndCheck(nbClient, ops)
 	return err
 }
+
+// FindUpdatedL4MatchACLs looks up the acls that have been updated by
+// consolidated L4 Match acls, and hence becomne redundant.
+func FindObsoletedL4MatchACLs(nbClient libovsdbclient.Client, match, notmatch string) ([]nbdb.ACL, error) {
+	// Find ACLs matching the criteria: non-null match and null notmatch.
+	ACLLookupFcn := func(item *nbdb.ACL) bool {
+		if item.ExternalIDs[match] != "" && item.ExternalIDs[notmatch] == "" {
+			return true
+		}
+		return false
+	}
+
+	acls, err := findACLsByPredicate(nbClient, ACLLookupFcn)
+	if err != nil {
+		return nil, err
+	}
+
+	return acls, nil
+}

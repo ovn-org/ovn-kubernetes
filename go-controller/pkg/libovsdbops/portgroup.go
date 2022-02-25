@@ -274,10 +274,12 @@ func DeleteACLsFromPortGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 	uuids := make([]string, 0, len(acls))
 	for _, acl := range acls {
 		err := findACL(nbClient, acl)
-		if err != nil {
+		// Continue to check others if we don't find an ACL.
+		if err != nil && err != libovsdbclient.ErrNotFound {
 			return nil, err
+		} else if err == nil {
+			uuids = append(uuids, acl.UUID)
 		}
-		uuids = append(uuids, acl.UUID)
 	}
 
 	op, err := nbClient.Where(pg).Mutate(pg, model.Mutation{
