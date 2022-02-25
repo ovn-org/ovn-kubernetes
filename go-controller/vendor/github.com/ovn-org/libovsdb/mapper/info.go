@@ -7,6 +7,24 @@ import (
 	"github.com/ovn-org/libovsdb/ovsdb"
 )
 
+// ErrColumnNotFound is an error that can occur when the column does not exist for a table
+type ErrColumnNotFound struct {
+	column string
+	table  string
+}
+
+// Error implements the error interface
+func (e *ErrColumnNotFound) Error() string {
+	return fmt.Sprintf("column: %s not found in table: %s", e.column, e.table)
+}
+
+func NewErrColumnNotFound(column, table string) *ErrColumnNotFound {
+	return &ErrColumnNotFound{
+		column: column,
+		table:  table,
+	}
+}
+
 // Info is a struct that wraps an object with its metadata
 type Info struct {
 	// FieldName indexed by column
@@ -25,7 +43,7 @@ type Metadata struct {
 func (i *Info) FieldByColumn(column string) (interface{}, error) {
 	fieldName, ok := i.Metadata.Fields[column]
 	if !ok {
-		return nil, fmt.Errorf("FieldByColumn: column %s not found in orm info for table %s", column, i.Metadata.TableName)
+		return nil, NewErrColumnNotFound(column, i.Metadata.TableName)
 	}
 	return reflect.ValueOf(i.Obj).Elem().FieldByName(fieldName).Interface(), nil
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/go-logr/stdr"
 	"github.com/ovn-org/libovsdb/cache"
+	"github.com/ovn-org/libovsdb/mapper"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/libovsdb/ovsdb/serverdb"
@@ -1068,12 +1069,17 @@ func (o *ovsdbClient) watchForLeaderChange() error {
 
 func (o *ovsdbClient) handleClientErrors(stopCh <-chan struct{}) {
 	defer o.handlerShutdown.Done()
+	var errColumnNotFound *mapper.ErrColumnNotFound
+	var errCacheInconsistent *cache.ErrCacheInconsistent
+	var errIndexExists *cache.ErrIndexExists
 	for {
 		select {
 		case <-stopCh:
 			return
 		case err := <-o.errorCh:
-			if errors.Is(err, &cache.ErrCacheInconsistent{}) || errors.Is(err, &cache.ErrIndexExists{}) {
+			if errors.As(err, &errColumnNotFound) {
+				o.logger.V(3).Error(err, "error updating cache, DB schema may be newer than client!")
+			} else if errors.As(err, &errCacheInconsistent) || errors.As(err, &errIndexExists) {
 				// trigger a reconnect, which will purge the cache
 				// hopefully a rebuild will fix any inconsistency
 				o.logger.V(3).Error(err, "triggering reconnect to rebuild cache")
