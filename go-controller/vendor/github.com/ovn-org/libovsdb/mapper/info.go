@@ -25,7 +25,7 @@ type Metadata struct {
 func (i *Info) FieldByColumn(column string) (interface{}, error) {
 	fieldName, ok := i.Metadata.Fields[column]
 	if !ok {
-		return nil, fmt.Errorf("FieldByColumn: column %s not found in orm info", column)
+		return nil, fmt.Errorf("FieldByColumn: column %s not found in orm info for table %s", column, i.Metadata.TableName)
 	}
 	return reflect.ValueOf(i.Obj).Elem().FieldByName(fieldName).Interface(), nil
 }
