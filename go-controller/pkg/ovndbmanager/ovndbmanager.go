@@ -17,6 +17,7 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	"github.com/asaskevich/govalidator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -155,7 +156,7 @@ func ensureLocalRaftServerID(db *dbProperties) error {
 		return fmt.Errorf("%w: unable to get cluster status for: %s, stderr: %v, err: %v", DBError, db.dbAlias, stderr, err)
 	}
 
-	r := regexp.MustCompile(`Address: *((ssl|tcp):[?[a-z0-9.:]+]?)`)
+	r := regexp.MustCompile(`Address: *((ssl|tcp):[?[a-z0-9\-.:]+]?)`)
 	matches := r.FindStringSubmatch(out)
 	if len(matches) < 2 {
 		return fmt.Errorf("unable to parse Address for db: %s, output: %s", db.dbAlias, out)
@@ -192,7 +193,7 @@ func ensureClusterRaftMembership(db *dbProperties, kclient kube.Interface) error
 
 	// IPv4 example: tcp:172.18.0.2:6641
 	// IPv6 example: tcp:[fc00:f853:ccd:e793::3]:6642
-	dbServerRegexp := `(ssl|tcp):(\[?([a-z0-9.:]+)\]?:\d+)`
+	dbServerRegexp := `(ssl|tcp):(\[?([a-z0-9\-.:]+)\]?:\d+)`
 	r := regexp.MustCompile(dbServerRegexp)
 
 	if db.dbName == "OVN_Northbound" {
@@ -209,7 +210,7 @@ func ensureClusterRaftMembership(db *dbProperties, kclient kube.Interface) error
 			continue
 		}
 		server := match[3]
-		if !(utilnet.IsIPv4String(server) || utilnet.IsIPv6String(server)) {
+		if !(utilnet.IsIPv4String(server) || utilnet.IsIPv6String(server) || govalidator.IsDNSName(server)) {
 			klog.Warningf("Found invalid value for IP address of known %s member %s: %s",
 				db.dbName, knownMember, server)
 			continue
@@ -237,7 +238,7 @@ func ensureClusterRaftMembership(db *dbProperties, kclient kube.Interface) error
 			return fmt.Errorf("unable to parse member in %s: %s", db.dbName, member)
 		}
 		matchedServer := member[4]
-		if !(utilnet.IsIPv4String(matchedServer) || utilnet.IsIPv6String(matchedServer)) {
+		if !(utilnet.IsIPv4String(matchedServer) || utilnet.IsIPv6String(matchedServer) || govalidator.IsDNSName(matchedServer)) {
 			klog.Warningf("Unable to parse address portion of member entry in %s: %s",
 				db, matchedServer)
 			continue

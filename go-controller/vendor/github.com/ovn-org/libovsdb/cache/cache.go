@@ -457,7 +457,6 @@ type TableCache struct {
 	cache          map[string]*RowCache
 	eventProcessor *eventProcessor
 	dbModel        model.DatabaseModel
-	errorChan      chan error
 	ovsdb.NotificationHandler
 	mutex  sync.RWMutex
 	logger *logr.Logger
@@ -500,7 +499,6 @@ func NewTableCache(dbModel model.DatabaseModel, data Data, logger *logr.Logger) 
 		eventProcessor: eventProcessor,
 		dbModel:        dbModel,
 		mutex:          sync.RWMutex{},
-		errorChan:      make(chan error),
 		logger:         logger,
 	}, nil
 }
@@ -545,7 +543,6 @@ func (t *TableCache) Update(context interface{}, tableUpdates ovsdb.TableUpdates
 	}
 	if err := t.Populate(tableUpdates); err != nil {
 		t.logger.Error(err, "during libovsdb cache populate")
-		t.errorChan <- NewErrCacheInconsistent(err.Error())
 		return err
 	}
 	return nil
@@ -560,7 +557,6 @@ func (t *TableCache) Update2(context interface{}, tableUpdates ovsdb.TableUpdate
 	}
 	if err := t.Populate2(tableUpdates); err != nil {
 		t.logger.Error(err, "during libovsdb cache populate2")
-		t.errorChan <- NewErrCacheInconsistent(err.Error())
 		return err
 	}
 	return nil
@@ -677,7 +673,7 @@ func (t *TableCache) Populate2(tableUpdates ovsdb.TableUpdates2) error {
 				modified := model.Clone(existing)
 				err := t.ApplyModifications(table, modified, *row.Modify)
 				if err != nil {
-					return fmt.Errorf("unable to apply row modifications: %v", err)
+					return fmt.Errorf("unable to apply row modifications: %w", err)
 				}
 				if !model.Equal(modified, existing) {
 					logger.V(5).Info("updating row", "old", fmt.Sprintf("%+v", existing), "new", fmt.Sprintf("%+v", modified))
@@ -734,11 +730,6 @@ func (t *TableCache) Run(stopCh <-chan struct{}) {
 		t.eventProcessor.Run(stopCh)
 	}()
 	wg.Wait()
-}
-
-// Errors returns a channel where errors that occur during cache propagation can be received
-func (t *TableCache) Errors() <-chan error {
-	return t.errorChan
 }
 
 // newRowCache creates a new row cache with the provided data
