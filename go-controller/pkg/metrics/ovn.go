@@ -282,16 +282,21 @@ func setOvnControllerConfigurationMetrics() (err error) {
 			}
 			metricMonitorAll.Set(ovnMonitorValue)
 		case "ovn-encap-ip":
+			// To update not only values but also labels for metrics, we use Reset() to delete previous labels+value
+			metricEncapIP.Reset()
 			metricEncapIP.WithLabelValues(fieldValue).Set(1)
 		case "ovn-remote":
+			metricSbConnectionMethod.Reset()
 			metricSbConnectionMethod.WithLabelValues(fieldValue).Set(1)
 		case "ovn-encap-type":
+			metricEncapType.Reset()
 			metricEncapType.WithLabelValues(fieldValue).Set(1)
 		case "ovn-k8s-node-port":
 			if fieldValue == "false" {
 				ovnNodePortValue = 0
 			}
 		case "ovn-bridge-mappings":
+			metricBridgeMappings.Reset()
 			metricBridgeMappings.WithLabelValues(fieldValue).Set(1)
 		}
 	}
