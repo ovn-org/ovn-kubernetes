@@ -21,6 +21,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/go-logr/stdr"
 	"github.com/ovn-org/libovsdb/cache"
+	"github.com/ovn-org/libovsdb/mapper"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/libovsdb/ovsdb/serverdb"
@@ -95,10 +96,13 @@ type ovsdbClient struct {
 	primaryDBName string
 	databases     map[string]*database
 
+	errorCh       chan error
 	stopCh        chan struct{}
 	disconnect    chan struct{}
 	shutdown      bool
 	shutdownMutex sync.Mutex
+
+	handlerShutdown *sync.WaitGroup
 
 	logger *logr.Logger
 }
@@ -146,7 +150,9 @@ func newOVSDBClient(clientDBModel model.ClientDBModel, opts ...Option) (*ovsdbCl
 				deferredUpdates: make([]*bufferedUpdate, 0),
 			},
 		},
-		disconnect: make(chan struct{}),
+		errorCh:         make(chan error),
+		handlerShutdown: &sync.WaitGroup{},
+		disconnect:      make(chan struct{}),
 	}
 	var err error
 	ovs.options, err = newOptions(opts...)
@@ -289,8 +295,15 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 
 	go o.handleDisconnectNotification()
 	for _, db := range o.databases {
-		go o.handleCacheErrors(o.stopCh, db.cache.Errors())
-		go db.cache.Run(o.stopCh)
+		o.handlerShutdown.Add(1)
+		eventStopChan := make(chan struct{})
+		go o.handleClientErrors(eventStopChan)
+		o.handlerShutdown.Add(1)
+		go func(db *database) {
+			defer o.handlerShutdown.Done()
+			db.cache.Run(o.stopCh)
+			close(eventStopChan)
+		}(db)
 	}
 
 	o.connected = true
@@ -580,6 +593,10 @@ func (o *ovsdbClient) update(params []json.RawMessage, reply *[]interface{}) err
 	err = db.cache.Update(cookie.ID, updates)
 	db.cacheMutex.RUnlock()
 
+	if err != nil {
+		o.errorCh <- err
+	}
+
 	return err
 }
 
@@ -616,6 +633,10 @@ func (o *ovsdbClient) update2(params []json.RawMessage, reply *[]interface{}) er
 	db.cacheMutex.RLock()
 	err = db.cache.Update2(cookie, updates)
 	db.cacheMutex.RUnlock()
+
+	if err != nil {
+		o.errorCh <- err
+	}
 
 	return err
 }
@@ -1046,13 +1067,19 @@ func (o *ovsdbClient) watchForLeaderChange() error {
 	return nil
 }
 
-func (o *ovsdbClient) handleCacheErrors(stopCh <-chan struct{}, errorChan <-chan error) {
+func (o *ovsdbClient) handleClientErrors(stopCh <-chan struct{}) {
+	defer o.handlerShutdown.Done()
+	var errColumnNotFound *mapper.ErrColumnNotFound
+	var errCacheInconsistent *cache.ErrCacheInconsistent
+	var errIndexExists *cache.ErrIndexExists
 	for {
 		select {
 		case <-stopCh:
 			return
-		case err := <-errorChan:
-			if errors.Is(err, &cache.ErrCacheInconsistent{}) || errors.Is(err, &cache.ErrIndexExists{}) {
+		case err := <-o.errorCh:
+			if errors.As(err, &errColumnNotFound) {
+				o.logger.V(3).Error(err, "error updating cache, DB schema may be newer than client!")
+			} else if errors.As(err, &errCacheInconsistent) || errors.As(err, &errIndexExists) {
 				// trigger a reconnect, which will purge the cache
 				// hopefully a rebuild will fix any inconsistency
 				o.logger.V(3).Error(err, "triggering reconnect to rebuild cache")
@@ -1078,6 +1105,8 @@ func (o *ovsdbClient) handleDisconnectNotification() {
 	// close the stopCh, which will stop the cache event processor
 	close(o.stopCh)
 	o.metrics.numDisconnects.Inc()
+	// wait for client related handlers to shutdown
+	o.handlerShutdown.Wait()
 	o.rpcMutex.Lock()
 	if o.options.reconnect && !o.shutdown {
 		o.rpcClient = nil

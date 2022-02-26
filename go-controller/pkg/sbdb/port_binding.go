@@ -7,23 +7,24 @@ import "github.com/ovn-org/libovsdb/model"
 
 // PortBinding defines an object in Port_Binding table
 type PortBinding struct {
-	UUID           string            `ovsdb:"_uuid"`
-	Chassis        *string           `ovsdb:"chassis"`
-	Datapath       string            `ovsdb:"datapath"`
-	Encap          *string           `ovsdb:"encap"`
-	ExternalIDs    map[string]string `ovsdb:"external_ids"`
-	GatewayChassis []string          `ovsdb:"gateway_chassis"`
-	HaChassisGroup *string           `ovsdb:"ha_chassis_group"`
-	LogicalPort    string            `ovsdb:"logical_port"`
-	MAC            []string          `ovsdb:"mac"`
-	NatAddresses   []string          `ovsdb:"nat_addresses"`
-	Options        map[string]string `ovsdb:"options"`
-	ParentPort     *string           `ovsdb:"parent_port"`
-	Tag            *int              `ovsdb:"tag"`
-	TunnelKey      int               `ovsdb:"tunnel_key"`
-	Type           string            `ovsdb:"type"`
-	Up             *bool             `ovsdb:"up"`
-	VirtualParent  *string           `ovsdb:"virtual_parent"`
+	UUID             string            `ovsdb:"_uuid"`
+	Chassis          *string           `ovsdb:"chassis"`
+	Datapath         string            `ovsdb:"datapath"`
+	Encap            *string           `ovsdb:"encap"`
+	ExternalIDs      map[string]string `ovsdb:"external_ids"`
+	GatewayChassis   []string          `ovsdb:"gateway_chassis"`
+	HaChassisGroup   *string           `ovsdb:"ha_chassis_group"`
+	LogicalPort      string            `ovsdb:"logical_port"`
+	MAC              []string          `ovsdb:"mac"`
+	NatAddresses     []string          `ovsdb:"nat_addresses"`
+	Options          map[string]string `ovsdb:"options"`
+	ParentPort       *string           `ovsdb:"parent_port"`
+	RequestedChassis *string           `ovsdb:"requested_chassis"`
+	Tag              *int              `ovsdb:"tag"`
+	TunnelKey        int               `ovsdb:"tunnel_key"`
+	Type             string            `ovsdb:"type"`
+	Up               *bool             `ovsdb:"up"`
+	VirtualParent    *string           `ovsdb:"virtual_parent"`
 }
 
 func copyPortBindingChassis(a *string) *string {
@@ -222,6 +223,24 @@ func equalPortBindingParentPort(a, b *string) bool {
 	return *a == *b
 }
 
+func copyPortBindingRequestedChassis(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalPortBindingRequestedChassis(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
 func copyPortBindingTag(a *int) *int {
 	if a == nil {
 		return nil
@@ -287,6 +306,7 @@ func (a *PortBinding) DeepCopyInto(b *PortBinding) {
 	b.NatAddresses = copyPortBindingNatAddresses(a.NatAddresses)
 	b.Options = copyPortBindingOptions(a.Options)
 	b.ParentPort = copyPortBindingParentPort(a.ParentPort)
+	b.RequestedChassis = copyPortBindingRequestedChassis(a.RequestedChassis)
 	b.Tag = copyPortBindingTag(a.Tag)
 	b.Up = copyPortBindingUp(a.Up)
 	b.VirtualParent = copyPortBindingVirtualParent(a.VirtualParent)
@@ -320,6 +340,7 @@ func (a *PortBinding) Equals(b *PortBinding) bool {
 		equalPortBindingNatAddresses(a.NatAddresses, b.NatAddresses) &&
 		equalPortBindingOptions(a.Options, b.Options) &&
 		equalPortBindingParentPort(a.ParentPort, b.ParentPort) &&
+		equalPortBindingRequestedChassis(a.RequestedChassis, b.RequestedChassis) &&
 		equalPortBindingTag(a.Tag, b.Tag) &&
 		a.TunnelKey == b.TunnelKey &&
 		a.Type == b.Type &&
