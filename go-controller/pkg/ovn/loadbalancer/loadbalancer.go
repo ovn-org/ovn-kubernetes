@@ -124,13 +124,13 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 		return router
 	}
 	for k, v := range addLBsToRouter {
-		ops, err = libovsdbops.AddLoadBalancersToRouterOps(nbClient, ops, getRouter(k), v...)
+		ops, err = libovsdbops.AddLoadBalancersToLogicalRouterOps(nbClient, ops, getRouter(k), v...)
 		if err != nil {
 			return err
 		}
 	}
 	for k, v := range removesLBsFromRouter {
-		ops, err = libovsdbops.RemoveLoadBalancersFromRouterOps(nbClient, ops, getRouter(k), v...)
+		ops, err = libovsdbops.RemoveLoadBalancersFromLogicalRouterOps(nbClient, ops, getRouter(k), v...)
 		if err != nil {
 			return err
 		}

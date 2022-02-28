@@ -83,11 +83,13 @@ func (oc *Controller) delPbrAndNatRules(nodeName string, lrpTypes []string) {
 	// Note: we don't need to delete any MAC bindings that are dynamically learned from OVN SB DB
 	// because there will be none since this NAT is only for outbound traffic and not for inbound
 	mgmtPortName := types.K8sPrefix + nodeName
-	nat := libovsdbops.BuildRouterDNATAndSNAT(nil, nil, mgmtPortName, "", nil)
-	err := libovsdbops.DeleteNATsFromRouter(oc.nbClient, types.OVNClusterRouter, nat)
+	nat := libovsdbops.BuildDNATAndSNAT(nil, nil, mgmtPortName, "", nil)
+	logicalRouter := nbdb.LogicalRouter{
+		Name: types.OVNClusterRouter,
+	}
+	err := libovsdbops.DeleteNATs(oc.nbClient, &logicalRouter, nat)
 	if err != nil {
-		klog.Errorf("Failed to delete the dnat_and_snat associated with the management "+
-			"port %s, error: %v", mgmtPortName, err)
+		klog.Errorf("Failed to delete the dnat_and_snat associated with the management port %s: %v", mgmtPortName, err)
 	}
 
 	// delete all logical router policies on ovn_cluster_router

@@ -186,7 +186,10 @@ func newCache(nbClient libovsdbclient.Client) (*LBCache, error) {
 		}
 	}
 
-	routers, err := libovsdbops.ListRoutersWithLoadBalancers(nbClient)
+	pr := func(item *nbdb.LogicalRouter) bool {
+		return len(item.LoadBalancer) > 0
+	}
+	routers, err := libovsdbops.FindLogicalRoutersWithPredicate(nbClient, pr)
 	if err != nil {
 		return nil, err
 	}

@@ -60,7 +60,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 
 	coppUUID, err := oc.createDefaultCOPP()
 	if err != nil || len(coppUUID) <= 0 {
-		klog.Warningf("Unable to create control plane protection on router %s:%v", gatewayRouter, err)
+		klog.Warningf("Unable to create control plane protection on router %s: %v", gatewayRouter, err)
 	} else {
 		logicalRouter.Copp = &coppUUID
 	}
@@ -427,7 +427,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 				predicate := func(item *nbdb.NAT) bool {
 					return item.ExternalIP == oldExternalIP[0].String() && item.Type == nbdb.NATTypeSNAT
 				}
-				natsToUpdate, err = libovsdbops.FindNATsUsingPredicate(oc.nbClient, predicate)
+				natsToUpdate, err = libovsdbops.FindNATsWithPredicate(oc.nbClient, predicate)
 				if err != nil {
 					return fmt.Errorf("failed to update GW SNAT rule for pods on router %s error: %v", gatewayRouter, err)
 				}
@@ -436,7 +436,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 				}
 			}
 		}
-		err := libovsdbops.AddOrUpdateNATsToRouter(oc.nbClient, gatewayRouter, natsToUpdate...)
+		err := libovsdbops.CreateOrUpdateNATs(oc.nbClient, &logicalRouter, natsToUpdate...)
 		if err != nil {
 			return fmt.Errorf("failed to update GW SNAT rule for pod on router %s error: %v", gatewayRouter, err)
 		}
@@ -452,20 +452,20 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 				return fmt.Errorf("failed to create default SNAT rules for gateway router %s: %v",
 					gatewayRouter, err)
 			}
-			nat = libovsdbops.BuildRouterSNAT(&externalIP[0], entry, "", nil)
+			nat = libovsdbops.BuildSNAT(&externalIP[0], entry, "", nil)
 			nats = append(nats, nat)
 		}
-		err := libovsdbops.AddOrUpdateNATsToRouter(oc.nbClient, gatewayRouter, nats...)
+		err := libovsdbops.CreateOrUpdateNATs(oc.nbClient, &logicalRouter, nats...)
 		if err != nil {
 			return fmt.Errorf("failed to update SNAT rule for pod on router %s error: %v", gatewayRouter, err)
 		}
 	} else {
 		// ensure we do not have any leftover SNAT entries after an upgrade
 		for _, logicalSubnet := range clusterIPSubnet {
-			nat = libovsdbops.BuildRouterSNAT(nil, logicalSubnet, "", nil)
+			nat = libovsdbops.BuildSNAT(nil, logicalSubnet, "", nil)
 			nats = append(nats, nat)
 		}
-		err := libovsdbops.DeleteNATsFromRouter(oc.nbClient, gatewayRouter, nats...)
+		err := libovsdbops.DeleteNATs(oc.nbClient, &logicalRouter, nats...)
 		if err != nil {
 			return fmt.Errorf("failed to delete GW SNAT rule for pod on router %s error: %v", gatewayRouter, err)
 		}
