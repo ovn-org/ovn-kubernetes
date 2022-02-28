@@ -211,6 +211,10 @@ func ServiceExternalTrafficPolicyLocal(service *kapi.Service) bool {
 	return service.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeLocal
 }
 
+func ServiceInternalTrafficPolicyLocal(service *kapi.Service) bool {
+	return service.Spec.InternalTrafficPolicy != nil && *service.Spec.InternalTrafficPolicy == kapi.ServiceInternalTrafficPolicyLocal
+}
+
 // GetNodePrimaryIP extracts the primary IP address from the node status in the  API
 func GetNodePrimaryIP(node *kapi.Node) (string, error) {
 	if node == nil {

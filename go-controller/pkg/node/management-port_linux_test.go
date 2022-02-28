@@ -111,6 +111,7 @@ func checkMgmtPortTestIptables(configs []managementPortTestConfig, mgmtPortName 
 				},
 			},
 			"filter": {},
+			"mangle": {},
 		}
 		if cfg.protocol == iptables.ProtocolIPv4 {
 			err = fakeIpv4.MatchState(expectedTables)

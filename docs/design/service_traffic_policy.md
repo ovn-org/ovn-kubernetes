@@ -297,3 +297,134 @@ where packet leaves the node and goes back to the external entity that initiated
 
 ## Sources
 - https://www.asykim.com/blog/deep-dive-into-kubernetes-external-traffic-policies
+
+## Internal Traffic Policy
+
+Service Internal Traffic Policy (ITP) is a feature that can be enabled on a kubernetes service type object. This feature imposes restrictions on traffic that originates internally by routing it only to endpoints that are local to the node from where the traffic originated from. Here "internal" traffic means traffic originating from pods and nodes within the cluster. See https://kubernetes.io/docs/concepts/services-networking/service-traffic-policy/ for more details.
+
+```
+NOTE1: ITP is applicable only to service of type "ClusterIP" meaning it has no effect on services of type NodePorts, ExternalIPs or LoadBalancers. So if
+InternalTrafficPolicy=Local for services of types NodePorts, ExternalIPs or LoadBalancers, then the restirction of traffic policy will apply only to the
+clusterIP serviceVIP of these service types.
+
+NOTE2: Unlike ETP, it is not necessary that the srcIP be preserved in case of ITP.
+```
+
+By default ITP is of type `Cluster` on all services; meaning internal traffic will be routed to any of the endpoints for that service. When it is set to `Local`, only local endpoints are considered. The way this is implemented in OVN-K is by filtering out endpoints from the load balancer on the node switches for `ClusterIP` services .
+
+## InternalTrafficPolicy=Local
+
+This feature is implemented exactly in the same way for both the gateway modes.
+
+### **Pod Traffic**
+
+This section will cover the networking entities hit when traffic travels from an OVN pod via a service backed by either host networked pods or cluster networked pods.
+
+We have a service of type `NodePort` where `internalTrafficPolicy: Local`:
+
+```
+$ oc get svc
+NAMESPACE        NAME            TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)                  AGE
+default          hello-world-2   NodePort    10.96.61.132   172.18.0.9    80:31358/TCP             108m
+$ oc get ep
+NAME            ENDPOINTS                         AGE
+hello-world-2   10.244.0.6:8080,10.244.1.3:8080   111m
+```
+
+This service is backed by two ovn pods:
+```
+$ oc get pods -owide -n surya
+NAME                            READY   STATUS    RESTARTS   AGE    IP           NODE          NOMINATED NODE   READINESS GATES
+hello-world-2-5c87676b7-h6rm5   1/1     Running   0          111m   10.244.0.6   ovn-worker    <none>           <none>
+hello-world-2-5c87676b7-l82w8   1/1     Running   0          111m   10.244.1.3   ovn-worker2   <none>           <none>
+```
+
+Traffic from pod hits the load balancer on the switch where the non-local endpoints for clusterIPs are filtered out. So traffic will be DNAT-ed to local endpoints if any. Here is how the load balancers will look like on the three KIND worker nodes for the above service.
+
+```
+a7865d9f-43d2-4cf9-a316-fc35e8c357a8    Service_surya/he    tcp        10.96.61.132:80        
+                                                            tcp        172.18.0.4:31358       10.244.0.6:8080,10.244.1.3:8080
+                                                            tcp        172.18.0.9:80          10.244.0.6:8080,10.244.1.3:8080
+d58c012a-7b1f-45ad-a817-a86845fde164    Service_surya/he    tcp        10.96.61.132:80        10.244.0.6:8080
+                                                            tcp        172.18.0.2:31358       10.244.0.6:8080,10.244.1.3:8080
+                                                            tcp        172.18.0.9:80          10.244.0.6:8080,10.244.1.3:8080
+a993003a-a177-4673-8f7c-825e2c9bf205    Service_surya/he    tcp        10.96.61.132:80        10.244.1.3:8080
+                                                            tcp        172.18.0.3:31358       10.244.0.6:8080,10.244.1.3:8080
+                                                            tcp        172.18.0.9:80          10.244.0.6:8080,10.244.1.3:8080
+```
+
+Once the packet is DNAT-ed it is then redirected to the backend pod.
+
+NOTE: This traffic flow behaves exactly the same if the backend pods were host-networked.
+
+### **Host Traffic**
+
+This section will cover the networking entities hit when traffic travels from a cluster host via a clusterIP service to either host
+networked pods or cluster networked pods. Note that host to clusterIP is considered "internal" traffic.
+
+### **Host -> Service (ClusterIP) -> OVN Pod**
+
+1. Packet generated from the host towards clusterIP service `10.96.61.132:80` is marked for forwarding in the `mangle` table by an IP table rule called from the `OUTPUT` chain:
+
+```
+-A OUTPUT -j OVN-KUBE-ITP
+[1:60] -A OVN-KUBE-ITP -d 10.96.61.132/32 -p tcp -m tcp --dport 80 -j MARK --set-xmark 0x1745ec/0xffffffff
+```
+
+2. A routing policy (priority 30) is setup in the database to match on this mark and send it to custom routing table `number 7`:
+
+```
+root@ovn-worker:/# ip rule
+30:	from all fwmark 0x1745ec lookup 7
+```
+
+3. In routing table `7` we have a route that steers this traffic into management port `ovn-k8s-mp0` instead of sending it via default service route towards `breth0`:
+
+```
+root@ovn-worker:/# ip r show table 7
+10.96.0.0/16 via 10.244.0.1 dev ovn-k8s-mp0 
+```
+
+4. Packet enters ovn via `k8s-nodename` port and hits the load balancer on the switch where the packet is DNAT-ed into the local endpoint if any, else rejected.
+
+Here is a sample load balancer on `ovn-worker` node which has an endpoint:
+
+```
+_uuid               : d58c012a-7b1f-45ad-a817-a86845fde164
+external_ids        : {"k8s.ovn.org/kind"=Service, "k8s.ovn.org/owner"="surya/hello-world-2"}
+health_check        : []
+ip_port_mappings    : {}
+name                : "Service_surya/hello-world-2_TCP_node_switch_ovn-worker"
+options             : {event="false", reject="true", skip_snat="false"}
+protocol            : tcp
+selection_fields    : []
+vips                : {"10.96.61.132:80"="10.244.0.6:8080", "172.18.0.2:31358"="10.244.0.6:8080,10.244.1.3:8080", "172.18.0.9:80"="10.244.0.6:8080,10.244.1.3:8080"}
+```
+
+Note that only endpoints for `ClusterIP` are filtered, externalIPs/nodePorts are not.
+
+Here is a sample load balancer on `ovn-control-plane` node which does not have an endpoint:
+
+```
+_uuid               : a7865d9f-43d2-4cf9-a316-fc35e8c357a8
+external_ids        : {"k8s.ovn.org/kind"=Service, "k8s.ovn.org/owner"="surya/hello-world-2"}
+health_check        : []
+ip_port_mappings    : {}
+name                : "Service_surya/hello-world-2_TCP_node_switch_ovn-control-plane"
+options             : {event="false", reject="true", skip_snat="false"}
+protocol            : tcp
+selection_fields    : []
+vips                : {"10.96.61.132:80"="", "172.18.0.4:31358"="10.244.0.6:8080,10.244.1.3:8080", "172.18.0.9:80"="10.244.0.6:8080,10.244.1.3:8080"}
+```
+
+5. Packet is then delivered to backend pod.
+
+### **Host -> Service -> Host Networked Pod**
+
+When the backend is a host networked pod we shortcircuit OVN to counter reverse path filtering issues and use iptables rules on the host to DNAT directly to the correct host endpoint.
+
+```
+[1:60] -A OVN-KUBE-ITP -d 10.96.48.132/32 -p tcp -m tcp --dport 80 -j REDIRECT --to-ports 8080
+```
+
+NOTE: If a service with ITP=local has both host-networked pods and ovn pods as local endpoints, traffic will always be delivered to the host-networked pod. This is acceptable since traffic policy claims unfair load balancing as a side effect of the feature.
