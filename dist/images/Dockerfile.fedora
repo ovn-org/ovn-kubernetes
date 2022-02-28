@@ -15,7 +15,7 @@ USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
-ARG ovnver=ovn-21.12.0-3.fc35
+ARG ovnver=ovn-21.12.0-4.fc35
 # Automatically populated when using docker buildx
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
