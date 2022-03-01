@@ -311,7 +311,6 @@ func RegisterMasterMetrics(nbClient libovsdbclient.Client, sbClient libovsdbclie
 		prometheus.MustRegister(metricIPsecEnabled)
 		prometheus.MustRegister(metricEgressFirewallCount)
 		prometheus.MustRegister(metricEgressRoutingViaHost)
-		registerControlPlaneRecorderMetrics()
 		registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemMaster)
 
 		// register DBe2eTimestamp to ensure northd is not hung
@@ -483,13 +482,6 @@ func DecrementEgressFirewallCount() {
 	metricEgressFirewallCount.Dec()
 }
 
-func registerControlPlaneRecorderMetrics() {
-	prometheus.MustRegister(metricFirstSeenLSPLatency)
-	prometheus.MustRegister(metricLSPPortBindingLatency)
-	prometheus.MustRegister(metricPortBindingUpLatency)
-	prometheus.MustRegister(metricPortBindingChassisLatency)
-}
-
 type timestampType int
 
 const (
@@ -514,19 +506,29 @@ type ControlPlaneRecorder struct {
 	podRecords map[kapimtypes.UID]*record
 }
 
-func NewControlPlaneRecorder(sbClient libovsdbclient.Client) *ControlPlaneRecorder {
-	recorder := ControlPlaneRecorder{sync.Mutex{}, make(map[kapimtypes.UID]*record)}
+func NewControlPlaneRecorder() *ControlPlaneRecorder {
+	return &ControlPlaneRecorder{
+		podRecords: make(map[kapimtypes.UID]*record),
+	}
+}
+
+func (ps *ControlPlaneRecorder) Run(sbClient libovsdbclient.Client) {
+	// only register the metrics when we want them
+	prometheus.MustRegister(metricFirstSeenLSPLatency)
+	prometheus.MustRegister(metricLSPPortBindingLatency)
+	prometheus.MustRegister(metricPortBindingUpLatency)
+	prometheus.MustRegister(metricPortBindingChassisLatency)
+
 	sbClient.Cache().AddEventHandler(&cache.EventHandlerFuncs{
 		AddFunc: func(table string, model model.Model) {
-			go recorder.AddPortBindingEvent(table, model)
+			go ps.AddPortBindingEvent(table, model)
 		},
 		UpdateFunc: func(table string, old model.Model, new model.Model) {
-			go recorder.UpdatePortBindingEvent(table, old, new)
+			go ps.UpdatePortBindingEvent(table, old, new)
 		},
 		DeleteFunc: func(table string, model model.Model) {
 		},
 	})
-	return &recorder
 }
 
 func (ps *ControlPlaneRecorder) AddPodEvent(podUID kapimtypes.UID) {

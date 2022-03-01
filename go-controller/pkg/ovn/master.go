@@ -215,6 +215,8 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	klog.Infof("Starting cluster master")
 
+	oc.metricsRecorder.Run(oc.sbClient)
+
 	// enableOVNLogicalDataPathGroups sets an OVN flag to enable logical datapath
 	// groups on OVN 20.12 and later. The option is ignored if OVN doesn't
 	// understand it. Logical datapath groups reduce the size of the southbound
