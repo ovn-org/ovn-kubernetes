@@ -185,6 +185,13 @@ var metricIPsecEnabled = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "Specifies whether IPSec is enabled for this cluster(1) or not enabled for this cluster(0)",
 })
 
+var metricEgressRoutingViaHost = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "egress_routing_via_host",
+	Help:      "Specifies whether egress gateway mode is via host networking stack(1) or not(0)",
+})
+
 var metricEgressFirewallCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
@@ -303,6 +310,7 @@ func RegisterMasterMetrics(nbClient libovsdbclient.Client, sbClient libovsdbclie
 		prometheus.MustRegister(metricEgressFirewallRuleCount)
 		prometheus.MustRegister(metricIPsecEnabled)
 		prometheus.MustRegister(metricEgressFirewallCount)
+		prometheus.MustRegister(metricEgressRoutingViaHost)
 		registerControlPlaneRecorderMetrics()
 		registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemMaster)
 
@@ -408,6 +416,24 @@ func RecordEgressIPCount(count float64) {
 // UpdateEgressFirewallRuleCount records the number of Egress firewall rules.
 func UpdateEgressFirewallRuleCount(count float64) {
 	metricEgressFirewallRuleCount.Add(count)
+}
+
+// RecordEgressRoutingViaHost records the egress gateway mode of the cluster
+// The values are:
+// 0: If it is shared gateway mode
+// 1: If it is local gateway mode
+// 2: invalid mode
+func RecordEgressRoutingViaHost() {
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		// routingViaHost is enabled
+		metricEgressRoutingViaHost.Set(1)
+	} else if config.Gateway.Mode == config.GatewayModeShared {
+		// routingViaOVN is enabled
+		metricEgressRoutingViaHost.Set(0)
+	} else {
+		// invalid mode
+		metricEgressRoutingViaHost.Set(2)
+	}
 }
 
 func updateE2ETimestampMetric(ovnNBClient libovsdbclient.Client) {
