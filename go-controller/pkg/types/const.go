@@ -111,9 +111,14 @@ const (
 	OvnCurrentTopologyVersion      = OvnRoutingViaHostTopoVersion
 
 	// OVN-K8S annotation & taint constants
-	OvnK8sPrefix           = "k8s.ovn.org"
+	OvnK8sPrefix = "k8s.ovn.org"
+	// Deprecated: we used to set topology version as an annotation on the node. We don't do this anymore.
 	OvnK8sTopoAnno         = OvnK8sPrefix + "/" + "topology-version"
 	OvnK8sSmallMTUTaintKey = OvnK8sPrefix + "/" + "mtu-too-small"
+
+	// name of the configmap used to synchronize status (e.g. watch for topology changes)
+	OvnK8sStatusCMName         = "control-plane-status"
+	OvnK8sStatusKeyTopoVersion = "topology-version"
 
 	// Monitoring constants
 	SFlowAgent = "ovn-k8s-mp0"

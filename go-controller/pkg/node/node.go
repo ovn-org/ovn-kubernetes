@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -313,7 +314,7 @@ func getOVNIfUpCheckMode() (bool, error) {
 
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
-func (n *OvnNode) Start(wg *sync.WaitGroup) error {
+func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	var err error
 	var node *kapi.Node
 	var subnets []*net.IPNet
@@ -439,8 +440,12 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	if config.OvnKubeNode.Mode == types.NodeModeFull {
 		// Upgrade for Node. If we upgrade workers before masters, then we need to keep service routing via
 		// mgmt port until masters have been updated and modified OVN config. Run a goroutine to handle this case
-		upgradeController := upgrade.NewController(n.client)
-		initialTopoVersion := upgradeController.GetInitialTopoVersion()
+		upgradeController := upgrade.NewController(n.client, n.watchFactory)
+		initialTopoVersion, err := upgradeController.GetTopologyVersion(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get initial topology version: %w", err)
+		}
+		klog.Infof("Current control-plane topology version is %d", initialTopoVersion)
 		bridgeName := n.gateway.GetGatewayBridgeIface()
 
 		needLegacySvcRoute := true
@@ -478,8 +483,8 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 			}
 			// need to run upgrade controller
 			go func() {
-				if err := upgradeController.Run(n.stopChan); err != nil {
-					klog.Fatalf("Error while running upgrade controller: %v", err)
+				if err := upgradeController.WaitForTopologyVersion(ctx, types.OvnCurrentTopologyVersion, 30*time.Minute); err != nil {
+					klog.Fatalf("Error while waiting for Topology Version to be updated: %v", err)
 				}
 				// upgrade complete now see what needs upgrading
 				// migrate service route from ovn-k8s-mp0 to shared gw bridge
