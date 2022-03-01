@@ -2,6 +2,14 @@
 
 On Linux, the easiest way to get started is to use OVN DaemonSet and Deployments.
 
+# Master Based Ovn-Kubernetes Images 
+
+With every PR that is merged into master, ovn-kubernetes images are automatically
+rebuilt and pushed to ghcr.io (i.e [ovn-org's packages](https://github.com/orgs/ovn-org/packages))
+for consumption.  They are built with fedora, and ubuntu base images both of which 
+are built for arm64 and amd64 architectures.  These are not official releases and are just provided to make 
+using ovn-kubernetes easier for other projects.    
+
 ## Install Open vSwitch kernel modules on all hosts.
 
 Most Linux distributions come with Open vSwitch kernel module by default.  You
