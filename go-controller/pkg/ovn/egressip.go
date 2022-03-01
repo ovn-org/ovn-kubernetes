@@ -1283,7 +1283,7 @@ func (oc *Controller) assignEgressIPs(name string, egressIPs []string) []egressi
 					Node:     eNode.name,
 					EgressIP: eIPC.String(),
 				})
-				klog.V(5).Infof("Successful assignment of egress IP: %s on node: %+v", egressIP, eNode)
+				klog.Infof("Successful assignment of egress IP: %s on node: %+v", egressIP, eNode)
 				eNode.allocations[eIPC.String()] = name
 				break
 			}
