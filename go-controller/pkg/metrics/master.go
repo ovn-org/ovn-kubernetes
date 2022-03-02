@@ -245,92 +245,96 @@ var metricPortBindingUpLatency = prometheus.NewHistogram(prometheus.HistogramOpt
 	Buckets:   prometheus.ExponentialBuckets(.01, 2, 15),
 })
 
-var registerMasterMetricsOnce sync.Once
-
-// RegisterMasterMetrics registers some ovnkube master metrics with the Prometheus
-// registry
-func RegisterMasterMetrics(nbClient libovsdbclient.Client, sbClient libovsdbclient.Client) {
-	registerMasterMetricsOnce.Do(func() {
-		// ovnkube-master metrics
-		// the updater for this metric is activated
-		// after leader election
-		prometheus.MustRegister(MetricMasterLeader)
-		prometheus.MustRegister(metricPodCreationLatency)
-		prometheus.MustRegister(prometheus.NewCounterFunc(
-			prometheus.CounterOpts{
-				Namespace: MetricOvnkubeNamespace,
-				Subsystem: MetricOvnkubeSubsystemMaster,
-				Name:      "skipped_nbctl_daemon_total",
-				Help:      "The number of times we skipped using ovn-nbctl daemon and directly interacted with OVN NB DB",
-			}, func() float64 {
-				return float64(util.SkippedNbctlDaemonCounter)
-			}))
-		prometheus.MustRegister(MetricMasterReadyDuration)
-		prometheus.MustRegister(metricOvnCliLatency)
-		// this is to not to create circular import between metrics and util package
-		util.MetricOvnCliLatency = metricOvnCliLatency
-		prometheus.MustRegister(MetricResourceUpdateCount)
-		prometheus.MustRegister(MetricResourceAddLatency)
-		prometheus.MustRegister(MetricResourceUpdateLatency)
-		prometheus.MustRegister(MetricResourceDeleteLatency)
-		prometheus.MustRegister(MetricRequeueServiceCount)
-		prometheus.MustRegister(MetricSyncServiceCount)
-		prometheus.MustRegister(MetricSyncServiceLatency)
-		prometheus.MustRegister(prometheus.NewGaugeFunc(
-			prometheus.GaugeOpts{
-				Namespace: MetricOvnkubeNamespace,
-				Subsystem: MetricOvnkubeSubsystemMaster,
-				Name:      "build_info",
-				Help: "A metric with a constant '1' value labeled by version, revision, branch, " +
-					"and go version from which ovnkube was built and when and who built it",
-				ConstLabels: prometheus.Labels{
-					"version":    "0.0",
-					"revision":   config.Commit,
-					"branch":     config.Branch,
-					"build_user": config.BuildUser,
-					"build_date": config.BuildDate,
-					"goversion":  runtime.Version(),
-				},
+// RegisterMasterBase registers ovnkube master base metrics with the Prometheus registry.
+// This function should only be called once.
+func RegisterMasterBase() {
+	prometheus.MustRegister(MetricMasterLeader)
+	prometheus.MustRegister(MetricMasterReadyDuration)
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{
+			Namespace: MetricOvnkubeNamespace,
+			Subsystem: MetricOvnkubeSubsystemMaster,
+			Name:      "build_info",
+			Help: "A metric with a constant '1' value labeled by version, revision, branch, " +
+				"and go version from which ovnkube was built and when and who built it",
+			ConstLabels: prometheus.Labels{
+				"version":    "0.0",
+				"revision":   config.Commit,
+				"branch":     config.Branch,
+				"build_user": config.BuildUser,
+				"build_date": config.BuildDate,
+				"goversion":  runtime.Version(),
 			},
-			func() float64 { return 1 },
-		))
-		prometheus.MustRegister(metricV4HostSubnetCount)
-		prometheus.MustRegister(metricV6HostSubnetCount)
-		prometheus.MustRegister(metricV4AllocatedHostSubnetCount)
-		prometheus.MustRegister(metricV6AllocatedHostSubnetCount)
-		prometheus.MustRegister(metricEgressIPCount)
-		prometheus.MustRegister(metricEgressFirewallRuleCount)
-		prometheus.MustRegister(metricEgressFirewallCount)
-		prometheus.MustRegister(metricEgressRoutingViaHost)
-		registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemMaster)
-		prometheus.MustRegister(prometheus.NewGaugeFunc(
-			prometheus.GaugeOpts{
-				Namespace: MetricOvnNamespace,
-				Subsystem: MetricOvnSubsystemNorthd,
-				Name:      "northd_probe_interval",
-				Help: "The maximum number of milliseconds of idle time on connection to the OVN SB " +
-					"and NB DB before sending an inactivity probe message",
-			}, func() float64 {
-				var nbGlobal *nbdb.NBGlobal
-				var probeInterval string
-				var ok bool
-				var err error
+		},
+		func() float64 { return 1 },
+	))
+}
 
-				if nbGlobal, err = libovsdbops.FindNBGlobal(nbClient); err != nil {
-					klog.Errorf("Failed to get NB_Global table "+
-						"err: %v", err)
-					return 0
-				}
+// RegisterMasterPerformance registers metrics that help us understand ovnkube-master performance. Call once after LE is won.
+func RegisterMasterPerformance(nbClient libovsdbclient.Client) {
+	// No need to unregister because process exits when leadership is lost.
+	prometheus.MustRegister(metricPodCreationLatency)
+	prometheus.MustRegister(MetricResourceUpdateCount)
+	prometheus.MustRegister(MetricResourceAddLatency)
+	prometheus.MustRegister(MetricResourceUpdateLatency)
+	prometheus.MustRegister(MetricResourceDeleteLatency)
+	prometheus.MustRegister(MetricRequeueServiceCount)
+	prometheus.MustRegister(MetricSyncServiceCount)
+	prometheus.MustRegister(MetricSyncServiceLatency)
+	prometheus.MustRegister(metricOvnCliLatency)
+	// This is set to not create circular import between metrics and util package
+	util.MetricOvnCliLatency = metricOvnCliLatency
+	registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemMaster)
+	prometheus.MustRegister(prometheus.NewCounterFunc(
+		prometheus.CounterOpts{
+			Namespace: MetricOvnkubeNamespace,
+			Subsystem: MetricOvnkubeSubsystemMaster,
+			Name:      "skipped_nbctl_daemon_total",
+			Help:      "The number of times we skipped using ovn-nbctl daemon and directly interacted with OVN NB DB",
+		}, func() float64 {
+			return float64(util.SkippedNbctlDaemonCounter)
+		}))
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{
+			Namespace: MetricOvnNamespace,
+			Subsystem: MetricOvnSubsystemNorthd,
+			Name:      "northd_probe_interval",
+			Help: "The maximum number of milliseconds of idle time on connection to the OVN SB " +
+				"and NB DB before sending an inactivity probe message",
+		}, func() float64 {
+			var nbGlobal *nbdb.NBGlobal
+			var probeInterval string
+			var ok bool
+			var err error
 
-				if probeInterval, ok = nbGlobal.Options["northd_probe_interval"]; !ok {
-					klog.Errorf("Failed to get northd_probe_interval from NB_Global table options column")
-					return 0
-				}
+			if nbGlobal, err = libovsdbops.FindNBGlobal(nbClient); err != nil {
+				klog.Errorf("Failed to get NB_Global table "+
+					"err: %v", err)
+				return 0
+			}
 
-				return parseMetricToFloat(MetricOvnSubsystemNorthd, "probe_interval", probeInterval)
-			},
-		))
-	})
+			if probeInterval, ok = nbGlobal.Options["northd_probe_interval"]; !ok {
+				klog.Errorf("Failed to get northd_probe_interval from NB_Global table options column")
+				return 0
+			}
+
+			return parseMetricToFloat(MetricOvnSubsystemNorthd, "probe_interval", probeInterval)
+		},
+	))
+}
+
+// RegisterMasterFunctional is a collection of metrics that help us understand ovnkube-master functions. Call once after
+// LE is won.
+func RegisterMasterFunctional() {
+	// No need to unregister because process exits when leadership is lost.
+	prometheus.MustRegister(metricV4HostSubnetCount)
+	prometheus.MustRegister(metricV6HostSubnetCount)
+	prometheus.MustRegister(metricV4AllocatedHostSubnetCount)
+	prometheus.MustRegister(metricV6AllocatedHostSubnetCount)
+	prometheus.MustRegister(metricEgressIPCount)
+	prometheus.MustRegister(metricEgressFirewallRuleCount)
+	prometheus.MustRegister(metricEgressFirewallCount)
+	prometheus.MustRegister(metricEgressRoutingViaHost)
 }
 
 // RunTimestamp adds a goroutine that registers and updates timestamp metrics.
@@ -517,6 +521,7 @@ func NewControlPlaneRecorder() *ControlPlaneRecorder {
 	}
 }
 
+//Run will register the necessary metrics and add event handlers.
 func (ps *ControlPlaneRecorder) Run(sbClient libovsdbclient.Client) {
 	// only register the metrics when we want them
 	prometheus.MustRegister(metricFirstSeenLSPLatency)

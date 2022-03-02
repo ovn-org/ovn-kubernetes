@@ -214,6 +214,8 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	klog.Infof("Starting cluster master")
 
+	metrics.RegisterMasterPerformance(oc.nbClient)
+	metrics.RegisterMasterFunctional()
 	metrics.RunTimestamp(oc.stopChan, oc.sbClient, oc.nbClient)
 	metrics.MonitorIPSec(oc.nbClient)
 	oc.metricsRecorder.Run(oc.sbClient)
