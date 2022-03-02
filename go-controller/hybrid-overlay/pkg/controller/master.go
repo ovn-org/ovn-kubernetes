@@ -3,7 +3,6 @@ package controller
 import (
 	"fmt"
 	"net"
-	"strconv"
 	"sync"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -338,11 +337,8 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.dst == %s`,
 			ovntypes.RouterToSwitchPrefix, nodeName, L3Prefix, hybridCIDR)
 
-		intPriority, _ := strconv.Atoi(ovntypes.HybridOverlaySubnetPriority)
-
-		logicalRouter := nbdb.LogicalRouter{}
 		logicalRouterPolicy := nbdb.LogicalRouterPolicy{
-			Priority: intPriority,
+			Priority: ovntypes.HybridOverlaySubnetPriority,
 			ExternalIDs: map[string]string{
 				"name": ovntypes.HybridSubnetPrefix + nodeName,
 			},
@@ -350,33 +346,12 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 			Nexthops: []string{drIP.String()},
 			Match:    matchStr,
 		}
-		logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
-		opModels := []libovsdbops.OperationModel{
-			{
-				Model: &logicalRouterPolicy,
-				ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
-					return lrp.Priority == intPriority &&
-						lrp.ExternalIDs["name"] == ovntypes.HybridSubnetPrefix+nodeName
-				},
-				OnModelUpdates: []interface{}{
-					&logicalRouterPolicy.Nexthops,
-					&logicalRouterPolicy.Match,
-				},
-				ExistingResult: &logicalRouterPolicyRes,
-				DoAfter: func() {
-					logicalRouter.Policies = []string{logicalRouterPolicy.UUID}
-				},
-			},
-			{
-				Model:          &logicalRouter,
-				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
-				OnModelMutations: []interface{}{
-					&logicalRouter.Policies,
-				},
-				ErrNotFound: true,
-			},
+		p := func(item *nbdb.LogicalRouterPolicy) bool {
+			return item.Priority == logicalRouterPolicy.Priority &&
+				item.ExternalIDs["name"] == logicalRouterPolicy.ExternalIDs["name"]
 		}
-		if _, err := m.modelClient.CreateOrUpdate(opModels...); err != nil {
+
+		if err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(m.nbClient, ovntypes.OVNClusterRouter, &logicalRouterPolicy, p); err != nil {
 			return fmt.Errorf("failed to add policy route '%s' for host %q on %s , error: %v", matchStr, nodeName, ovntypes.OVNClusterRouter, err)
 		}
 		klog.Infof("Created hybrid overlay logical route policy for node %s", nodeName)
@@ -390,29 +365,12 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 }
 
 func (m *MasterController) removeHybridLRPolicySharedGW(nodeName string) error {
-	logicalRouter := nbdb.LogicalRouter{}
-	logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
-	opModels := []libovsdbops.OperationModel{
-		{
-			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
-				return lrp.ExternalIDs["name"] == ovntypes.HybridSubnetPrefix+nodeName
-			},
-			ExistingResult: &logicalRouterPolicyRes,
-			DoAfter: func() {
-				logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
-			},
-			BulkOp: true,
-		},
-		{
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
-			OnModelMutations: []interface{}{
-				&logicalRouter.Policies,
-			},
-		},
+	policyName := ovntypes.HybridSubnetPrefix + nodeName
+	p := func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.ExternalIDs["name"] == policyName
 	}
-	if err := m.modelClient.Delete(opModels...); err != nil {
-		return fmt.Errorf("failed to delete policy from %s, error: %v", ovntypes.OVNClusterRouter, err)
+	if err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(m.nbClient, ovntypes.OVNClusterRouter, p); err != nil {
+		return fmt.Errorf("failed to delete policy %s from %s, error: %v", policyName, ovntypes.OVNClusterRouter, err)
 	}
 	return nil
 }

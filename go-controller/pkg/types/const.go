@@ -66,8 +66,8 @@ const (
 	MGMTPortPolicyPriority                = "1005"
 	NodeSubnetPolicyPriority              = "1004"
 	InterNodePolicyPriority               = "1003"
-	HybridOverlaySubnetPriority           = "1002"
-	HybridOverlayReroutePriority          = "501"
+	HybridOverlaySubnetPriority           = 1002
+	HybridOverlayReroutePriority          = 501
 	DefaultNoRereoutePriority             = 101
 	EgressIPReroutePriority               = 100
 

@@ -15,6 +15,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
 
@@ -97,32 +98,16 @@ func (oc *Controller) delPbrAndNatRules(nodeName string, lrpTypes []string) {
 }
 
 func (oc *Controller) staticRouteCleanup(nextHops []net.IP) {
+	ips := sets.String{}
 	for _, nextHop := range nextHops {
-		logicalRouter := nbdb.LogicalRouter{}
-		logicalRouterStaticRouteRes := []nbdb.LogicalRouterStaticRoute{}
-		opModels := []libovsdbops.OperationModel{
-			{
-				Model: &nbdb.LogicalRouterStaticRoute{},
-				ModelPredicate: func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
-					return lrsr.Nexthop == nextHop.String()
-				},
-				ExistingResult: &logicalRouterStaticRouteRes,
-				DoAfter: func() {
-					logicalRouter.StaticRoutes = libovsdbops.ExtractUUIDsFromModels(&logicalRouterStaticRouteRes)
-				},
-				BulkOp: true,
-			},
-			{
-				Model:          &logicalRouter,
-				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-				OnModelMutations: []interface{}{
-					&logicalRouter.StaticRoutes,
-				},
-			},
-		}
-		if err := oc.modelClient.Delete(opModels...); err != nil {
-			klog.Errorf("Failed to delete static route for nexthop: %s, err: %v", nextHop.String(), err)
-		}
+		ips.Insert(nextHop.String())
+	}
+	p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return ips.Has(item.Nexthop)
+	}
+	err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
+	if err != nil {
+		klog.Errorf("Failed to delete static route for nexthops %+v: %v", ips.UnsortedList(), err)
 	}
 }
 
@@ -142,41 +127,27 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 	gatewayRouter := types.GWRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
-	var nextHops []net.IP
 
 	gwIPAddrs, err := util.GetLRPAddrs(oc.nbClient, types.GWRouterToJoinSwitchPrefix+gatewayRouter)
 	if err != nil {
 		return err
 	}
 
+	var nextHops []net.IP
+	nextHopsStr := sets.String{}
 	for _, gwIPAddr := range gwIPAddrs {
-		// Delete logical router policy whose nexthop is the old rtoj- gateway port address
-		logicalRouter := nbdb.LogicalRouter{}
-		logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
-		opModels := []libovsdbops.OperationModel{
-			{
-				ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
-					return lrp.Nexthop != nil && *lrp.Nexthop == gwIPAddr.IP.String()
-				},
-				ExistingResult: &logicalRouterPolicyRes,
-				DoAfter: func() {
-					logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
-				},
-				BulkOp: true,
-			},
-			{
-				Model:          &logicalRouter,
-				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-				OnModelMutations: []interface{}{
-					&logicalRouter.Policies,
-				},
-			},
-		}
-		if err := oc.modelClient.Delete(opModels...); err != nil {
-			klog.Errorf("Unable to remove LR policy : %s, err: %v", err)
-		}
 		nextHops = append(nextHops, gwIPAddr.IP)
+		nextHopsStr.Insert(gwIPAddr.IP.String())
 	}
+
+	p := func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.Nexthop != nil && nextHopsStr.Has(*item.Nexthop)
+	}
+	err = libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
+	if err != nil {
+		klog.Errorf("Error deleting policies with nexthops %+v: %v", nextHopsStr.UnsortedList(), err)
+	}
+
 	oc.staticRouteCleanup(nextHops)
 
 	// Remove the join switch that connects ovn_cluster_router to gateway router
@@ -275,33 +246,19 @@ func (oc *Controller) removeLRPolicies(nodeName string, priorities []string) {
 	if len(priorities) == 0 {
 		priorities = []string{types.NodeSubnetPolicyPriority}
 	}
+
+	intPriorities := sets.Int{}
 	for _, priority := range priorities {
 		intPriority, _ := strconv.Atoi(priority)
+		intPriorities.Insert(intPriority)
+	}
 
-		logicalRouter := nbdb.LogicalRouter{}
-		result := []nbdb.LogicalRouterPolicy{}
-		opModels := []libovsdbops.OperationModel{
-			{
-				ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
-					return strings.Contains(lrp.Match, fmt.Sprintf("%s ", nodeName)) && lrp.Priority == intPriority
-				},
-				ExistingResult: &result,
-				DoAfter: func() {
-					logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&result)
-				},
-				BulkOp: true,
-			},
-			{
-				Model:          &logicalRouter,
-				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-				OnModelMutations: []interface{}{
-					&logicalRouter.Policies,
-				},
-			},
-		}
-		if err := oc.modelClient.Delete(opModels...); err != nil {
-			klog.Errorf("Failed to remove the policy routes %s associated with the node %s, error: %v", priority, nodeName, err)
-		}
+	p := func(item *nbdb.LogicalRouterPolicy) bool {
+		return strings.Contains(item.Match, fmt.Sprintf("%s ", nodeName)) && intPriorities.Has(item.Priority)
+	}
+	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
+	if err != nil {
+		klog.Errorf("Error deleting policies with priorities %v associated with the node %s: %v", priorities, nodeName, err)
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net"
-	"strconv"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
@@ -1920,11 +1919,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						},
 					},
 				)
-				intPriority, _ := strconv.Atoi(types.HybridOverlayReroutePriority)
 				finalNB := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						UUID:     "2a7a61cb-fb13-4266-a3f0-9ac5c4471123 [u2596996164]",
-						Priority: intPriority,
+						Priority: types.HybridOverlayReroutePriority,
 						Action:   nbdb.LogicalRouterPolicyActionReroute,
 						Nexthops: []string{"100.64.0.4"},
 						Match:    "inport == \"rtos-node1\" && ip4.src == $a17568862106095406051 && ip4.dst != 10.128.0.0/14",
@@ -2009,14 +2007,13 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 
-				intPriority, _ := strconv.Atoi(types.HybridOverlayReroutePriority)
 				nbWithLRP := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						UUID:     "lrp1",
 						Action:   "reroute",
 						Match:    "inport == \"rtos-node1\" && ip4.src == $a17568862106095406051 && ip4.dst != 10.128.0.0/14",
 						Nexthops: []string{"100.64.0.4"},
-						Priority: intPriority,
+						Priority: types.HybridOverlayReroutePriority,
 					},
 					&nbdb.LogicalRouterPort{
 						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + "node1" + "-UUID",
@@ -2100,13 +2097,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		ginkgo.It("delete hybrid route policy for pods", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeLocal
-				intPriority, _ := strconv.Atoi(types.HybridOverlayReroutePriority)
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouterPolicy{
 								UUID:     "2a7a61cb-fb13-4266-a3f0-9ac5c4471123 [u2596996164]",
-								Priority: intPriority,
+								Priority: types.HybridOverlayReroutePriority,
 								Action:   nbdb.LogicalRouterPolicyActionReroute,
 								Nexthops: []string{"100.64.0.4"},
 								Match:    "inport == \"rtos-node1\" && ip4.src == $a17568862106095406051 && ip4.dst != 10.128.0.0/14",
@@ -2159,20 +2155,19 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		ginkgo.It("delete hybrid route policy for pods with force", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeShared
-				intPriority, _ := strconv.Atoi(types.HybridOverlayReroutePriority)
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouterPolicy{
 								UUID:     "501-1st-UUID",
-								Priority: intPriority,
+								Priority: types.HybridOverlayReroutePriority,
 								Action:   nbdb.LogicalRouterPolicyActionReroute,
 								Nexthops: []string{"100.64.0.4"},
 								Match:    "inport == \"rtos-node1\" && ip4.src == $a17568862106095406050 && ip4.dst != 10.128.0.0/14",
 							},
 							&nbdb.LogicalRouterPolicy{
 								UUID:     "501-2nd-UUID",
-								Priority: intPriority,
+								Priority: types.HybridOverlayReroutePriority,
 								Action:   nbdb.LogicalRouterPolicyActionReroute,
 								Nexthops: []string{"100.64.1.4"},
 								Match:    "inport == \"rtos-node2\" && ip4.src == $a17568862106095406051 && ip4.dst != 10.128.0.0/14",
@@ -2224,27 +2219,26 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		ginkgo.It("delete legacy hybrid route policies", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeLocal
-				intPriority, _ := strconv.Atoi(types.HybridOverlayReroutePriority)
 				fakeOvn.startWithDBSetup(
 					libovsdbtest.TestSetup{
 						NBData: []libovsdbtest.TestData{
 							&nbdb.LogicalRouterPolicy{
 								UUID:     "501-1st-UUID",
-								Priority: intPriority,
+								Priority: types.HybridOverlayReroutePriority,
 								Action:   nbdb.LogicalRouterPolicyActionReroute,
 								Nexthops: []string{"100.64.0.4"},
 								Match:    "inport == \"rtos-node1\" && ip4.src == 1.3.3.7 && ip4.dst != 10.128.0.0/14",
 							},
 							&nbdb.LogicalRouterPolicy{
 								UUID:     "501-2nd-UUID",
-								Priority: intPriority,
+								Priority: types.HybridOverlayReroutePriority,
 								Action:   nbdb.LogicalRouterPolicyActionReroute,
 								Nexthops: []string{"100.64.1.4"},
 								Match:    "inport == \"rtos-node2\" && ip4.src == 1.3.3.8 && ip4.dst != 10.128.0.0/14",
 							},
 							&nbdb.LogicalRouterPolicy{
 								UUID:     "501-new-UUID",
-								Priority: intPriority,
+								Priority: types.HybridOverlayReroutePriority,
 								Action:   nbdb.LogicalRouterPolicyActionReroute,
 								Nexthops: []string{"100.64.1.4"},
 								Match:    "inport == \"rtos-node2\" && ip4.src == $a17568862106095406051 && ip4.dst != 10.128.0.0/14",
@@ -2269,7 +2263,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				finalNB := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						UUID:     "501-new-UUID",
-						Priority: intPriority,
+						Priority: types.HybridOverlayReroutePriority,
 						Action:   nbdb.LogicalRouterPolicyActionReroute,
 						Nexthops: []string{"100.64.1.4"},
 						Match:    "inport == \"rtos-node2\" && ip4.src == $a17568862106095406051 && ip4.dst != 10.128.0.0/14",

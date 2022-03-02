@@ -506,41 +506,17 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 		}
 
 		if config.Gateway.Mode == config.GatewayModeLocal {
-			logicalRouter := nbdb.LogicalRouter{}
-			logicalRouterStaticRoutes := nbdb.LogicalRouterStaticRoute{
+			lrsr := nbdb.LogicalRouterStaticRoute{
 				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 				IPPrefix: hostSubnet.String(),
 				Nexthop:  mgmtIfAddr.IP.String(),
 			}
-			opModels := []libovsdbops.OperationModel{
-				{
-					Model: &logicalRouterStaticRoutes,
-					ModelPredicate: func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
-						return lrsr.IPPrefix == hostSubnet.String() && lrsr.Nexthop == mgmtIfAddr.IP.String()
-					},
-					OnModelUpdates: []interface{}{
-						&logicalRouterStaticRoutes.Nexthop,
-						&logicalRouterStaticRoutes.IPPrefix,
-					},
-					DoAfter: func() {
-						if logicalRouterStaticRoutes.UUID != "" {
-							logicalRouter.StaticRoutes = []string{logicalRouterStaticRoutes.UUID}
-						}
-					},
-				},
-				{
-					Name:           &logicalRouter.Name,
-					Model:          &logicalRouter,
-					ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-					OnModelMutations: []interface{}{
-						&logicalRouter.StaticRoutes,
-					},
-					ErrNotFound: true,
-				},
+			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+				return item.IPPrefix == lrsr.IPPrefix && item.Nexthop == lrsr.Nexthop && item.Policy != nil && *item.Policy == *lrsr.Policy
 			}
-			if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-				return fmt.Errorf("failed to add source IP address based "+
-					"routes in distributed router %s, error: %v", types.OVNClusterRouter, err)
+			err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.nbClient, types.OVNClusterRouter, &lrsr, p)
+			if err != nil {
+				return fmt.Errorf("error creating static route %+v on router %s: %v", lrsr, types.OVNClusterRouter, err)
 			}
 		}
 	}

@@ -117,6 +117,15 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		node2Name = "node2"
 	)
 
+	clusterRouterDbSetup := libovsdbtest.TestSetup{
+		NBData: []libovsdbtest.TestData{
+			&nbdb.LogicalRouter{
+				Name: ovntypes.OVNClusterRouter,
+				UUID: ovntypes.OVNClusterRouter + "-UUID",
+			},
+		},
+	}
+
 	dialer = fakeEgressIPDialer{}
 
 	getEgressIPAllocatorSizeSafely := func() int {
@@ -830,19 +839,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(getEgressIPStatusLen(eIP.Name)).Should(gomega.Equal(1))
 
 				expectedDatabaseState = []libovsdbtest.TestData{
-					// This will never happen during real operations because OVS
-					// DB server will GC unreferenced non-root items. However
-					// until https://github.com/ovn-org/libovsdb/issues/219 is
-					// done, libovsdb test server won't
-					&nbdb.LogicalRouterPolicy{
-						Priority: types.EgressIPReroutePriority,
-						Match:    fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP),
-						Action:   nbdb.LogicalRouterPolicyActionReroute,
-						ExternalIDs: map[string]string{
-							"name": eIP.Name,
-						},
-						UUID: "reroute-UUID",
-					},
 					&nbdb.LogicalRouter{
 						Name:     ovntypes.OVNClusterRouter,
 						UUID:     ovntypes.OVNClusterRouter + "-UUID",
@@ -1162,7 +1158,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				egressPod := *newPodWithLabels(namespace, podName, node1Name, "", egressPodLabel)
 				egressNamespace := newNamespace(namespace)
-				fakeOvn.start(
+				fakeOvn.startWithDBSetup(clusterRouterDbSetup,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{*egressNamespace},
 					},
@@ -1347,19 +1343,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				expectedDatabaseState = []libovsdbtest.TestData{
-					// This will never happen during real operations because OVS
-					// DB server will GC unreferenced non-root items. However
-					// until https://github.com/ovn-org/libovsdb/issues/219 is
-					// done, libovsdb test server won't
-					&nbdb.LogicalRouterPolicy{
-						Priority: types.EgressIPReroutePriority,
-						Match:    fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP),
-						Action:   nbdb.LogicalRouterPolicyActionReroute,
-						ExternalIDs: map[string]string{
-							"name": eIP.Name,
-						},
-						UUID: "reroute-UUID",
-					},
 					&nbdb.LogicalRouter{
 						Name: ovntypes.OVNClusterRouter,
 						UUID: ovntypes.OVNClusterRouter + "-UUID",
@@ -1517,19 +1500,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(getEgressIPStatusLen(eIP.Name)).Should(gomega.Equal(1))
 
 				expectedDatabaseState = []libovsdbtest.TestData{
-					// This will never happen during real operations because OVS
-					// DB server will GC unreferenced non-root items. However
-					// until https://github.com/ovn-org/libovsdb/issues/219 is
-					// done, libovsdb test server won't
-					&nbdb.LogicalRouterPolicy{
-						Priority: types.EgressIPReroutePriority,
-						Match:    fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP),
-						Action:   nbdb.LogicalRouterPolicyActionReroute,
-						ExternalIDs: map[string]string{
-							"name": eIP.Name,
-						},
-						UUID: "reroute-UUID",
-					},
 					&nbdb.LogicalRouter{
 						Name: ovntypes.OVNClusterRouter,
 						UUID: ovntypes.OVNClusterRouter + "-UUID",
@@ -1564,7 +1534,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				egressPod := *newPodWithLabels(namespace, podName, node1Name, "", egressPodLabel)
 				egressNamespace := newNamespaceWithLabels(namespace, egressPodLabel)
-				fakeOvn.start(
+				fakeOvn.startWithDBSetup(clusterRouterDbSetup,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{*egressNamespace},
 					},
@@ -4711,7 +4681,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 		ginkgo.It("should update status correctly for single-stack IPv4", func() {
 			app.Action = func(ctx *cli.Context) error {
-				fakeOvn.start()
+				fakeOvn.startWithDBSetup(clusterRouterDbSetup)
 
 				egressIP := "192.168.126.10"
 				node1 := setupNode(node1Name, []string{"192.168.126.12/24"}, map[string]string{"192.168.126.102": "bogus1", "192.168.126.111": "bogus2"})
@@ -4751,7 +4721,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 		ginkgo.It("should update status correctly for single-stack IPv6", func() {
 			app.Action = func(ctx *cli.Context) error {
-				fakeOvn.start()
+				fakeOvn.startWithDBSetup(clusterRouterDbSetup)
 
 				egressIP := "0:0:0:0:0:feff:c0a8:8e0d"
 
@@ -4787,7 +4757,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 		ginkgo.It("should update status correctly for dual-stack", func() {
 			app.Action = func(ctx *cli.Context) error {
-				fakeOvn.start()
+				fakeOvn.startWithDBSetup(clusterRouterDbSetup)
 
 				egressIPv4 := "192.168.126.101"
 				egressIPv6 := "0:0:0:0:0:feff:c0a8:8e0d"
@@ -4852,9 +4822,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				fakeOvn.start(&egressipv1.EgressIPList{
-					Items: []egressipv1.EgressIP{eIP},
-				})
+				fakeOvn.startWithDBSetup(clusterRouterDbSetup,
+					&egressipv1.EgressIPList{
+						Items: []egressipv1.EgressIP{eIP},
+					},
+				)
 
 				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
 				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
@@ -5120,9 +5092,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				fakeOvn.start(&egressipv1.EgressIPList{
-					Items: []egressipv1.EgressIP{eIP},
-				})
+				fakeOvn.startWithDBSetup(clusterRouterDbSetup,
+					&egressipv1.EgressIPList{
+						Items: []egressipv1.EgressIP{eIP},
+					},
+				)
 
 				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
 				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2
@@ -5163,7 +5137,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						EgressIPs: []string{egressIP1},
 					},
 				}
-				fakeOvn.start()
+
+				fakeOvn.startWithDBSetup(clusterRouterDbSetup)
 
 				fakeOvn.controller.eIPC.allocator.cache[node1.name] = &node1
 				fakeOvn.controller.eIPC.allocator.cache[node2.name] = &node2

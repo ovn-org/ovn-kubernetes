@@ -54,6 +54,11 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 		node2Name string = "node2"
 	)
 
+	clusterRouter := &nbdb.LogicalRouter{
+		UUID: t.OVNClusterRouter + "-UUID",
+		Name: t.OVNClusterRouter,
+	}
+
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
@@ -139,6 +144,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 						keepACL,
 						InitialNodeSwitch,
 						InitialJoinSwitch,
+						clusterRouter,
 					},
 				}
 
@@ -181,6 +187,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					keepACL,
 					finalNodeSwitch,
 					finalJoinSwitch,
+					clusterRouter,
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -206,6 +213,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						InitialNodeSwitch,
+						clusterRouter,
 					},
 				}
 
@@ -265,6 +273,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				expectedDatabaseState := []libovsdb.TestData{
 					ipv4ACL,
 					finalNodeSwitch,
+					clusterRouter,
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -290,6 +299,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						InitialNodeSwitch,
+						clusterRouter,
 					},
 				}
 
@@ -354,6 +364,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				expectedDatabaseState := []libovsdb.TestData{
 					ipv6ACL,
 					finalNodeSwitch,
+					clusterRouter,
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -381,6 +392,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						InitialNodeSwitch,
+						clusterRouter,
 					},
 				}
 
@@ -452,6 +464,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				expectedDatabaseState := []libovsdb.TestData{
 					udpACL,
 					finalNodeSwitch,
+					clusterRouter,
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -481,6 +494,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					NBData: []libovsdbtest.TestData{
 						nodeSwitch1,
 						nodeSwitch2,
+						clusterRouter,
 					},
 				}
 
@@ -547,6 +561,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					ipv4ACL,
 					nodeSwitch1,
 					nodeSwitch2,
+					clusterRouter,
 				}
 
 				gomega.Expect(fakeOVN.nbClient).To(libovsdbtest.HaveData(expectedDatabaseState))
@@ -560,6 +575,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				expectedDatabaseState = []libovsdb.TestData{
 					nodeSwitch1,
 					nodeSwitch2,
+					clusterRouter,
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -584,6 +600,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						InitialNodeSwitch,
+						clusterRouter,
 					},
 				}
 
@@ -655,6 +672,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				expectedDatabaseState := []libovsdb.TestData{
 					ipv4ACL,
 					finalNodeSwitch,
+					clusterRouter,
 				}
 
 				gomega.Expect(fakeOVN.nbClient).To(libovsdbtest.HaveData(expectedDatabaseState))
@@ -689,6 +707,11 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 		node1Name string = "node1"
 		node2Name string = "node2"
 	)
+
+	clusterRouter := &nbdb.LogicalRouter{
+		UUID: t.OVNClusterRouter + "-UUID",
+		Name: t.OVNClusterRouter,
+	}
 
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each test
@@ -772,6 +795,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 						otherACL,
 						InitialNodeSwitch,
 						InitialJoinSwitch,
+						clusterRouter,
 					},
 				}
 				fakeOVN.startWithDBSetup(dbSetup,
@@ -813,6 +837,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					keepACL,
 					finalNodeSwitch,
 					finalJoinSwitch,
+					clusterRouter,
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -844,6 +869,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						InitialJoinSwitch,
+						clusterRouter,
 					},
 				}
 				fakeOVN.startWithDBSetup(dbSetup,
@@ -892,6 +918,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				expectedDatabaseState := []libovsdb.TestData{
 					ipv4ACL,
 					finalJoinSwitch,
+					clusterRouter,
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -923,6 +950,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						InitialJoinSwitch,
+						clusterRouter,
 					},
 				}
 				fakeOVN.startWithDBSetup(dbSetup,
@@ -976,6 +1004,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				expectedDatabaseState := []libovsdb.TestData{
 					ipv6ACL,
 					finalJoinSwitch,
+					clusterRouter,
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -1015,6 +1044,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						initialJoinSwitch,
+						clusterRouter,
 					},
 				}
 				fakeOVN.startWithDBSetup(dbSetup,
@@ -1071,6 +1101,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				expectedDatabaseState := []libovsdb.TestData{
 					udpACL,
 					finalJoinSwitch,
+					clusterRouter,
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -1106,6 +1137,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						initialJoinSwitch,
+						clusterRouter,
 					},
 				}
 				fakeOVN.startWithDBSetup(dbSetup,
@@ -1152,6 +1184,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				expectedDatabaseState := []libovsdb.TestData{
 					ipv4ACL,
 					finalJoinSwitch,
+					clusterRouter,
 				}
 
 				gomega.Expect(fakeOVN.nbClient).To(libovsdbtest.HaveData(expectedDatabaseState))
@@ -1196,6 +1229,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						initialJoinSwitch,
+						clusterRouter,
 					},
 				}
 				fakeOVN.startWithDBSetup(dbSetup,
@@ -1241,6 +1275,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				expectedDatabaseState := []libovsdb.TestData{
 					ipv4ACL,
 					finalJoinSwitch,
+					clusterRouter,
 				}
 
 				gomega.Expect(fakeOVN.nbClient).To(libovsdbtest.HaveData(expectedDatabaseState))

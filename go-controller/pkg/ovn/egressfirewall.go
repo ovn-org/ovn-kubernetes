@@ -142,29 +142,12 @@ func (oc *Controller) syncEgressFirewallRetriable(egressFirewalls []interface{})
 
 	// In any gateway mode, make sure to delete all LRPs on ovn_cluster_router.
 	// This covers migration from LGW mode that used LRPs for EFW to using ACLs in SGW/LGW modes
-	logicalRouter := nbdb.LogicalRouter{}
-	logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
-	opModels := []libovsdbops.OperationModel{
-		{
-			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
-				return lrp.Priority <= types.EgressFirewallStartPriority && lrp.Priority >= types.MinimumReservedEgressFirewallPriority
-			},
-			ExistingResult: &logicalRouterPolicyRes,
-			DoAfter: func() {
-				logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
-			},
-			BulkOp: true,
-		},
-		{
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: []interface{}{
-				&logicalRouter.Policies,
-			},
-		},
+	p := func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.Priority <= types.EgressFirewallStartPriority && item.Priority >= types.MinimumReservedEgressFirewallPriority
 	}
-	if err := oc.modelClient.Delete(opModels...); err != nil {
-		return fmt.Errorf("unable to remove egress firewall policy, cannot cleanup old stale data, err: %v", err)
+	err = libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
+	if err != nil {
+		return fmt.Errorf("error deleting egress firewall policies on router %s: %v", types.OVNClusterRouter, err)
 	}
 
 	// sync the ovn and k8s egressFirewall states

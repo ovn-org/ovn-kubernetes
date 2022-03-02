@@ -512,12 +512,14 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			// covers both IPv4, IPv6 single stack cases since path is the same.
 			routeUUID1 := libovsdbops.BuildNamedUUID()
 			leftoverJoinRoute1 := &nbdb.LogicalRouterStaticRoute{
+				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 				Nexthop:  "100.64.0.3",
 				IPPrefix: "10.130.0.0/23",
 				UUID:     routeUUID1,
 			}
 			routeUUID2 := libovsdbops.BuildNamedUUID()
 			leftoverJoinRoute2 := &nbdb.LogicalRouterStaticRoute{
+				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 				Nexthop:  "fd98::3",
 				IPPrefix: "fd01:0:0:2::/64",
 				UUID:     routeUUID2,
