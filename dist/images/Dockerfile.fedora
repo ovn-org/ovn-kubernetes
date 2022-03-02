@@ -16,6 +16,11 @@ USER root
 ENV PYTHONDONTWRITEBYTECODE yes
 
 ARG ovnver=ovn-21.12.0-3.fc35
+# Automatically populated when using docker buildx
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+
+RUN echo "Running on $BUILDPLATFORM, building for $TARGETPLATFORM"
 
 # install needed rpms - openvswitch must be 2.10.4 or higher
 RUN INSTALL_PKGS=" \
@@ -29,7 +34,9 @@ RUN INSTALL_PKGS=" \
 
 RUN mkdir -p /var/run/openvswitch
 
-RUN koji download-build $ovnver --arch=x86_64
+RUN if [ "$TARGETPLATFORM" = "linux/amd64" ] || [ -z "$TARGETPLATFORM"] ; then koji download-build $ovnver --arch=x86_64  ; \
+    else koji download-build $ovnver --arch=aarch64 ; fi 
+
 RUN rpm -Uhv --nodeps --force *.rpm
 
 # Built in ../../go_controller, then the binaries are copied here.

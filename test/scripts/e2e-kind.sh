@@ -166,7 +166,7 @@ ginkgo --nodes=${NUM_NODES} \
 	--flakeAttempts=${FLAKE_ATTEMPTS} \
 	/usr/local/bin/e2e.test \
 	-- \
-	--kubeconfig=${HOME}/admin.conf \
+	--kubeconfig=${HOME}/ovn.conf \
 	--provider=local \
 	--dump-logs-on-failure=false \
 	--report-dir=${E2E_REPORT_DIR}	\

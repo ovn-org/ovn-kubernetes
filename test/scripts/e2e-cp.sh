@@ -4,7 +4,7 @@ set -ex
 
 # setting this env prevents ginkgo e2e from trying to run provider setup
 export KUBERNETES_CONFORMANCE_TEST=y
-export KUBECONFIG=${HOME}/admin.conf
+export KUBECONFIG=${HOME}/ovn.conf
 
 # Skip tests which are not IPv6 ready yet (see description of https://github.com/ovn-org/ovn-kubernetes/pull/2276)
 # (Note that netflow v5 is IPv4 only)
