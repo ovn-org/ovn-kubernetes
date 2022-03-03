@@ -57,6 +57,11 @@ func (c *MockConditionalAPI) Delete() ([]ovsdb.Operation, error) {
 	return nil, nil
 }
 
+// Wait is an empty mock method.
+func (c *MockConditionalAPI) Wait(ovsdb.WaitCondition, *int, model.Model, ...interface{}) ([]ovsdb.Operation, error) {
+	return nil, nil
+}
+
 // MockLibOvsDbClient is a mock implementation of libovsdbclient.ConditionalAPI.
 type MockLibOvsDbClient struct {
 	libovsdbclient.ConditionalAPI
