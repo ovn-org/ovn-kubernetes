@@ -531,10 +531,16 @@ func (ps *ControlPlaneRecorder) Run(sbClient libovsdbclient.Client) {
 
 	sbClient.Cache().AddEventHandler(&cache.EventHandlerFuncs{
 		AddFunc: func(table string, model model.Model) {
-			go ps.AddPortBindingEvent(table, model)
+			if table != portBindingTable {
+				return
+			}
+			go ps.AddPortBindingEvent(model)
 		},
 		UpdateFunc: func(table string, old model.Model, new model.Model) {
-			go ps.UpdatePortBindingEvent(table, old, new)
+			if table != portBindingTable {
+				return
+			}
+			go ps.UpdatePortBindingEvent(old, new)
 		},
 		DeleteFunc: func(table string, model model.Model) {
 		},
@@ -571,10 +577,7 @@ func (ps *ControlPlaneRecorder) AddLSPEvent(podUID kapimtypes.UID) {
 	r.timestampType = logicalSwitchPort
 }
 
-func (ps *ControlPlaneRecorder) AddPortBindingEvent(table string, m model.Model) {
-	if table != portBindingTable {
-		return
-	}
+func (ps *ControlPlaneRecorder) AddPortBindingEvent(m model.Model) {
 	var r *record
 	now := time.Now()
 	row := m.(*sbdb.PortBinding)
@@ -597,10 +600,7 @@ func (ps *ControlPlaneRecorder) AddPortBindingEvent(table string, m model.Model)
 	r.timestampType = portBinding
 }
 
-func (ps *ControlPlaneRecorder) UpdatePortBindingEvent(table string, old, new model.Model) {
-	if table != portBindingTable {
-		return
-	}
+func (ps *ControlPlaneRecorder) UpdatePortBindingEvent(old, new model.Model) {
 	var r *record
 	oldRow := old.(*sbdb.PortBinding)
 	newRow := new.(*sbdb.PortBinding)
