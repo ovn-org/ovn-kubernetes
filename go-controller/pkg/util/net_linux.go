@@ -387,11 +387,6 @@ func DeleteConntrack(ip string, port int32, protocol kapi.Protocol) error {
 		if err := filter.AddProtocol(17); err != nil {
 			return fmt.Errorf("could not add Protocol UDP to conntrack filter %v", err)
 		}
-	} else if protocol == kapi.ProtocolSCTP {
-		// 132 = SCTP protocol
-		if err := filter.AddProtocol(132); err != nil {
-			return fmt.Errorf("could not add Protocol SCTP to conntrack filter %v", err)
-		}
 	}
 	if port > 0 {
 		if err := filter.AddPort(netlink.ConntrackOrigDstPort, uint16(port)); err != nil {
