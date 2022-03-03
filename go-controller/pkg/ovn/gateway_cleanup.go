@@ -53,12 +53,10 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 	lbCache.RemoveRouter(gatewayRouter)
 
 	// Remove the gateway router associated with nodeName
-	opModel := libovsdbops.OperationModel{
-		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
-		ExistingResult: &[]nbdb.LogicalRouter{},
-	}
-	if err := oc.modelClient.Delete(opModel); err != nil {
-		return fmt.Errorf("failed to delete gateway router %s, error: %v", gatewayRouter, err)
+	logicalRouter := nbdb.LogicalRouter{Name: gatewayRouter}
+	err = libovsdbops.DeleteLogicalRouter(oc.nbClient, &logicalRouter)
+	if err != nil {
+		return fmt.Errorf("failed to delete gateway router %s: %v", gatewayRouter, err)
 	}
 
 	// Remove external switch
@@ -158,55 +156,23 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 	}
 
 	// Remove the logical router port on the distributed router that connects to the join switch
-	logicalRouter := nbdb.LogicalRouter{}
+	logicalRouter := nbdb.LogicalRouter{Name: types.OVNClusterRouter}
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name: types.DistRouterToJoinSwitchPrefix + nodeName,
 	}
-	opModels := []libovsdbops.OperationModel{
-		{
-			Model: &logicalRouterPort,
-			DoAfter: func() {
-				if logicalRouterPort.UUID != "" {
-					logicalRouter.Ports = []string{logicalRouterPort.UUID}
-				}
-			},
-		},
-		{
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: []interface{}{
-				&logicalRouter.Ports,
-			},
-		},
-	}
-	if err := oc.modelClient.Delete(opModels...); err != nil {
-		return fmt.Errorf("failed to delete the patch port %s-%s on distributed router, error: %v", types.DistRouterToJoinSwitchPrefix, nodeName, err)
+	err = libovsdbops.DeleteLogicalRouterPorts(oc.nbClient, &logicalRouter, &logicalRouterPort)
+	if err != nil {
+		return fmt.Errorf("failed to delete the patch port %s on router %s: %v", logicalRouterPort.Name, types.OVNClusterRouter, err)
 	}
 
 	// Remove the logical router port on the gateway router that connects to the join switch
-	logicalRouter = nbdb.LogicalRouter{}
+	logicalRouter = nbdb.LogicalRouter{Name: gatewayRouter}
 	logicalRouterPort = nbdb.LogicalRouterPort{
 		Name: types.GWRouterToJoinSwitchPrefix + gatewayRouter,
 	}
-	opModels = []libovsdbops.OperationModel{
-		{
-			Model: &logicalRouterPort,
-			DoAfter: func() {
-				if logicalRouterPort.UUID != "" {
-					logicalRouter.Ports = []string{logicalRouterPort.UUID}
-				}
-			},
-		},
-		{
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
-			OnModelMutations: []interface{}{
-				&logicalRouter.Ports,
-			},
-		},
-	}
-	if err := oc.modelClient.Delete(opModels...); err != nil {
-		return fmt.Errorf("failed to delete the port %s%s on gateway router, error: %v", types.GWRouterToJoinSwitchPrefix, gatewayRouter, err)
+	err = libovsdbops.DeleteLogicalRouterPorts(oc.nbClient, &logicalRouter, &logicalRouterPort)
+	if err != nil {
+		return fmt.Errorf("failed to delete port %s on router %s: %v", logicalRouterPort.Name, types.OVNClusterRouter, err)
 	}
 
 	if upgradeOnly {
@@ -221,11 +187,9 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 	lbCache.RemoveRouter(gatewayRouter)
 
 	// Remove the gateway router associated with nodeName
-	opModel := libovsdbops.OperationModel{
-		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
-	}
-	if err := oc.modelClient.Delete(opModel); err != nil {
-		return fmt.Errorf("failed to delete gateway router %s, error: %v", gatewayRouter, err)
+	err = libovsdbops.DeleteLogicalRouter(oc.nbClient, &logicalRouter)
+	if err != nil {
+		return fmt.Errorf("failed to delete gateway router %s: %v", gatewayRouter, err)
 	}
 
 	// Remove external switch
@@ -289,32 +253,14 @@ func (oc *Controller) cleanupDGP(nodes *kapi.NodeList) error {
 	}
 
 	// remove lrp on ovn_cluster_router. Will also remove gateway chassis.
-	dgpName := types.RouterToSwitchPrefix + types.NodeLocalSwitch
-	logicalRouter := nbdb.LogicalRouter{}
+	logicalRouter := nbdb.LogicalRouter{Name: types.OVNClusterRouter}
 	logicalRouterPort := nbdb.LogicalRouterPort{
-		Name: dgpName,
+		Name: types.RouterToSwitchPrefix + types.NodeLocalSwitch,
 	}
-	opModels := []libovsdbops.OperationModel{
-		{
-			Model: &logicalRouterPort,
-			DoAfter: func() {
-				if logicalRouterPort.UUID != "" {
-					logicalRouter.Ports = []string{logicalRouterPort.UUID}
-				}
-			},
-		},
-		{
-			Model: &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
-				return lr.Name == types.OVNClusterRouter
-			},
-			OnModelMutations: []interface{}{
-				&logicalRouter.Ports,
-			},
-		},
+	err = libovsdbops.DeleteLogicalRouterPorts(oc.nbClient, &logicalRouter, &logicalRouterPort)
+	if err != nil {
+		return fmt.Errorf("unable to delete router port %s: %v", logicalRouterPort.Name, err)
 	}
-	if err := oc.modelClient.Delete(opModels...); err != nil {
-		return fmt.Errorf("unable to delete DGP LRP, error: %v", err)
-	}
+
 	return nil
 }

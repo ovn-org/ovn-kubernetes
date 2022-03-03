@@ -187,7 +187,7 @@ func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.No
 }
 
 func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
-	ver, err := oc.determineOVNTopoVersionFromOVN(context.TODO())
+	ver, err := oc.determineOVNTopoVersionFromOVN()
 	if err != nil {
 		return err
 	}
@@ -338,14 +338,9 @@ func (oc *Controller) SetupMaster(existingNodeNames []string) error {
 			"mcast_relay": "true",
 		}
 	}
-	opModels := []libovsdbops.OperationModel{
-		{
-			Name:           &logicalRouter.Name,
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-		},
-	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+
+	err := libovsdbops.CreateOrUpdateLogicalRouter(oc.nbClient, &logicalRouter)
+	if err != nil {
 		return fmt.Errorf("failed to create a single common distributed router for the cluster, error: %v", err)
 	}
 
@@ -434,29 +429,10 @@ func (oc *Controller) SetupMaster(existingNodeNames []string) error {
 		MAC:      gwLRPMAC.String(),
 		Networks: gwLRPNetworks,
 	}
-	opModels = []libovsdbops.OperationModel{
-		{
-			Model: &logicalRouterPort,
-			OnModelUpdates: []interface{}{
-				&logicalRouterPort.MAC,
-				&logicalRouterPort.Networks,
-			},
-			DoAfter: func() {
-				logicalRouter.Ports = []string{logicalRouterPort.UUID}
-			},
-		},
-		{
-			Name:           &logicalRouter.Name,
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: []interface{}{
-				&logicalRouter.Ports,
-			},
-			ErrNotFound: true,
-		},
-	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("failed to add logical router port %s, error: %v", drRouterPort, err)
+
+	err = libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, &logicalRouter, &logicalRouterPort)
+	if err != nil {
+		return fmt.Errorf("failed to add logical router port %+v on router %+v: %v", logicalRouterPort, logicalRouter, err)
 	}
 
 	// Create OVNJoinSwitch that will be used to connect gateway routers to the
@@ -624,33 +600,11 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 		MAC:      nodeLRPMAC.String(),
 		Networks: lrpNetworks,
 	}
-	logicalRouter := nbdb.LogicalRouter{}
-	opModels := []libovsdbops.OperationModel{
-		{
-			Model: &logicalRouterPort,
-			OnModelUpdates: []interface{}{
-				&logicalRouterPort.MAC,
-				&logicalRouterPort.Networks,
-			},
-			DoAfter: func() {
-				if logicalRouterPort.UUID != "" {
-					logicalRouter.Ports = []string{logicalRouterPort.UUID}
-				}
-			},
-		},
-		{
-			Name:           &logicalRouter.Name,
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: []interface{}{
-				&logicalRouter.Ports,
-			},
-			ErrNotFound: true,
-		},
-	}
+	logicalRouter := nbdb.LogicalRouter{Name: types.OVNClusterRouter}
 
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		klog.Errorf("Failed to add logical router port %s to router %s, error: %v", lrpName, types.OVNClusterRouter, err)
+	err = libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, &logicalRouter, &logicalRouterPort)
+	if err != nil {
+		klog.Errorf("Failed to add logical router port %+v to router %s: %v", logicalRouterPort, types.OVNClusterRouter, err)
 		return err
 	}
 
@@ -725,33 +679,14 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		MAC:      nodeLRPMAC.String(),
 		Networks: logicalRouterPortNetwork,
 	}
-	logicalRouter := nbdb.LogicalRouter{}
-	opModels := []libovsdbops.OperationModel{
-		{
-			Model: &logicalRouterPort,
-			OnModelUpdates: []interface{}{
-				&logicalRouterPort.Networks,
-				&logicalRouterPort.MAC,
-			},
-			DoAfter: func() {
-				logicalRouter.Ports = []string{logicalRouterPort.UUID}
-			},
-		},
-		{
-			Name:           &logicalRouter.Name,
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: []interface{}{
-				&logicalRouter.Ports,
-			},
-			ErrNotFound: true,
-		},
-	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("failed to add logical port to router, error: %v", err)
+	logicalRouter := nbdb.LogicalRouter{Name: types.OVNClusterRouter}
+
+	err := libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, &logicalRouter, &logicalRouterPort)
+	if err != nil {
+		return fmt.Errorf("failed to add logical router port %+v to router %s: %v", logicalRouterPort, types.OVNClusterRouter, err)
 	}
 
-	err := libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch)
+	err = libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch)
 	if err != nil {
 		return fmt.Errorf("failed to add logical switch %+v: %v", logicalSwitch, err)
 	}
@@ -1079,31 +1014,15 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 		return fmt.Errorf("failed to delete logical switch %s: %v", nodeName, err)
 	}
 
-	logicalRouterPortName := types.RouterToSwitchPrefix + nodeName
-	clusterRouterModel := nbdb.LogicalRouter{}
-	nodeLogicalRouterPort := nbdb.LogicalRouterPort{
-		Name: logicalRouterPortName,
+	logiccalRouter := nbdb.LogicalRouter{Name: types.OVNClusterRouter}
+	logicalRouterPort := nbdb.LogicalRouterPort{
+		Name: types.RouterToSwitchPrefix + nodeName,
 	}
-	opModels := []libovsdbops.OperationModel{
-		{
-			Model: &nodeLogicalRouterPort,
-			DoAfter: func() {
-				if nodeLogicalRouterPort.UUID != "" {
-					clusterRouterModel.Ports = []string{nodeLogicalRouterPort.UUID}
-				}
-			},
-		},
-		{
-			Model:          &clusterRouterModel,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: []interface{}{
-				&clusterRouterModel.Ports,
-			},
-		},
+	err = libovsdbops.DeleteLogicalRouterPorts(oc.nbClient, &logiccalRouter, &logicalRouterPort)
+	if err != nil {
+		return fmt.Errorf("failed to delete router port %s: %v", logicalRouterPort.Name, err)
 	}
-	if err := oc.modelClient.Delete(opModels...); err != nil {
-		return fmt.Errorf("failed to delete logical switch and logical router port associated with node: %s, error: %v", nodeName, err)
-	}
+
 	return nil
 }
 

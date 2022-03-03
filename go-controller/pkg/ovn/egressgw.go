@@ -1,7 +1,6 @@
 package ovn
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -1096,21 +1095,21 @@ func (oc *Controller) buildOVNECMPCache() map[string][]*ovnRoute {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
 	ovnRouteCache := make(map[string][]*ovnRoute)
 	for _, logicalRouterStaticRoute := range logicalRouterStaticRoutes {
-		logicalRouterRes := []nbdb.LogicalRouter{}
-		if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
-			return util.SliceHasStringItem(lr.StaticRoutes, logicalRouterStaticRoute.UUID)
-		}).List(ctx, &logicalRouterRes); err != nil {
+		p := func(item *nbdb.LogicalRouter) bool {
+			return util.SliceHasStringItem(item.StaticRoutes, logicalRouterStaticRoute.UUID)
+		}
+		logicalRouters, err := libovsdbops.FindLogicalRoutersWithPredicate(oc.nbClient, p)
+		if err != nil {
 			klog.Errorf("CleanECMPRoutes: failed to find logical router for %s, err: %v", logicalRouterStaticRoute.UUID, err)
 			continue
 		}
+
 		route := &ovnRoute{
 			nextHop: logicalRouterStaticRoute.Nexthop,
 			uuid:    logicalRouterStaticRoute.UUID,
-			router:  logicalRouterRes[0].Name,
+			router:  logicalRouters[0].Name,
 			outport: *logicalRouterStaticRoute.OutputPort,
 		}
 		podIP, _, _ := net.ParseCIDR(logicalRouterStaticRoute.IPPrefix)

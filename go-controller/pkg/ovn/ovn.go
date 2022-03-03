@@ -419,7 +419,7 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 	}
 
 	// Final step to cleanup after resource handlers have synced
-	err := oc.ovnTopologyCleanup(ctx)
+	err := oc.ovnTopologyCleanup()
 	if err != nil {
 		klog.Errorf("Failed to cleanup OVN topology to version %d: %v", ovntypes.OvnCurrentTopologyVersion, err)
 		return err
