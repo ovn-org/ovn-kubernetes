@@ -779,6 +779,7 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 		Priority:    1,
 	}
 
+	// Set the gateway chassis of the LRP. (Use "Update" so that the old value, if any, would be replaced)
 	opModels = []libovsdbops.OperationModel{
 		{
 			Name:  gatewayChassis.Name,
@@ -795,7 +796,7 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 		},
 		{
 			Model: &logicalRouterPort,
-			OnModelMutations: []interface{}{
+			OnModelUpdates: []interface{}{
 				&logicalRouterPort.GatewayChassis,
 			},
 			ErrNotFound: true,
@@ -803,7 +804,7 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 	}
 
 	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		klog.Errorf("Failed to add gateway chassis %s to logical router port %s, error: %v", chassisID, lrpName, err)
+		klog.Errorf("Failed to set gateway chassis %s to logical router port %s, error: %v", chassisID, lrpName, err)
 		return err
 	}
 
