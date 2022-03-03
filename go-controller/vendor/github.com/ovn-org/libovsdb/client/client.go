@@ -21,6 +21,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/go-logr/stdr"
 	"github.com/ovn-org/libovsdb/cache"
+	"github.com/ovn-org/libovsdb/mapper"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/libovsdb/ovsdb/serverdb"
@@ -95,10 +96,13 @@ type ovsdbClient struct {
 	primaryDBName string
 	databases     map[string]*database
 
+	errorCh       chan error
 	stopCh        chan struct{}
 	disconnect    chan struct{}
 	shutdown      bool
 	shutdownMutex sync.Mutex
+
+	handlerShutdown *sync.WaitGroup
 
 	logger *logr.Logger
 }
@@ -146,7 +150,9 @@ func newOVSDBClient(clientDBModel model.ClientDBModel, opts ...Option) (*ovsdbCl
 				deferredUpdates: make([]*bufferedUpdate, 0),
 			},
 		},
-		disconnect: make(chan struct{}),
+		errorCh:         make(chan error),
+		handlerShutdown: &sync.WaitGroup{},
+		disconnect:      make(chan struct{}),
 	}
 	var err error
 	ovs.options, err = newOptions(opts...)
@@ -277,6 +283,15 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 		for dbName, db := range o.databases {
 			db.monitorsMutex.Lock()
 			defer db.monitorsMutex.Unlock()
+
+			// Purge entire cache if no monitors exist to update dynamically
+			if len(db.monitors) == 0 {
+				db.cache.Purge(db.model)
+				continue
+			}
+
+			// Restart all monitors; each monitor will handle purging
+			// the cache if necessary
 			for id, request := range db.monitors {
 				err := o.monitor(ctx, MonitorCookie{DatabaseName: dbName, ID: id}, true, request)
 				if err != nil {
@@ -289,8 +304,15 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 
 	go o.handleDisconnectNotification()
 	for _, db := range o.databases {
-		go o.handleCacheErrors(o.stopCh, db.cache.Errors())
-		go db.cache.Run(o.stopCh)
+		o.handlerShutdown.Add(1)
+		eventStopChan := make(chan struct{})
+		go o.handleClientErrors(eventStopChan)
+		o.handlerShutdown.Add(1)
+		go func(db *database) {
+			defer o.handlerShutdown.Done()
+			db.cache.Run(o.stopCh)
+			close(eventStopChan)
+		}(db)
 	}
 
 	o.connected = true
@@ -371,8 +393,6 @@ func (o *ovsdbClient) tryEndpoint(ctx context.Context, u *url.URL) (string, erro
 				return "", err
 			}
 			db.api = newAPI(db.cache, o.logger)
-		} else {
-			db.cache.Purge(db.model)
 		}
 		db.cacheMutex.Unlock()
 	}
@@ -580,6 +600,10 @@ func (o *ovsdbClient) update(params []json.RawMessage, reply *[]interface{}) err
 	err = db.cache.Update(cookie.ID, updates)
 	db.cacheMutex.RUnlock()
 
+	if err != nil {
+		o.errorCh <- err
+	}
+
 	return err
 }
 
@@ -616,6 +640,10 @@ func (o *ovsdbClient) update2(params []json.RawMessage, reply *[]interface{}) er
 	db.cacheMutex.RLock()
 	err = db.cache.Update2(cookie, updates)
 	db.cacheMutex.RUnlock()
+
+	if err != nil {
+		o.errorCh <- err
+	}
 
 	return err
 }
@@ -859,18 +887,22 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 
 	var args []interface{}
 	if monitor.Method == ovsdb.ConditionalMonitorSinceRPC {
-		// FIXME: We should pass the monitor.LastTransactionID here
-		// But that would require delaying clearing the cache until
-		// after the monitors have been re-established - the logic
-		// would also need to be different for monitor and monitor_cond
-		// as we must always clear the cache in that instance
-		args = ovsdb.NewMonitorCondSinceArgs(dbName, cookie, requests, emptyUUID)
+		// If we are reconnecting a CondSince monitor that is the only
+		// monitor, then we can use its LastTransactionID since it is
+		// valid (because we're reconnecting) and we can safely keep
+		// the cache intact (because it's the only monitor).
+		transactionID := emptyUUID
+		if reconnecting && len(db.monitors) == 1 {
+			transactionID = monitor.LastTransactionID
+		}
+		args = ovsdb.NewMonitorCondSinceArgs(dbName, cookie, requests, transactionID)
 	} else {
 		args = ovsdb.NewMonitorArgs(dbName, cookie, requests)
 	}
 	var err error
 	var tableUpdates interface{}
 
+	var lastTransactionFound bool
 	switch monitor.Method {
 	case ovsdb.MonitorRPC:
 		var reply ovsdb.TableUpdates
@@ -885,6 +917,7 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 		err = o.rpcClient.CallWithContext(ctx, monitor.Method, args, &reply)
 		if err == nil && reply.Found {
 			monitor.LastTransactionID = reply.LastTransactionID
+			lastTransactionFound = true
 		}
 		tableUpdates = reply.Updates
 	default:
@@ -917,6 +950,16 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 
 	db.cacheMutex.Lock()
 	defer db.cacheMutex.Unlock()
+
+	// On reconnect, purge the cache _unless_ the only monitor is a
+	// MonitorCondSince one, whose LastTransactionID was known to the
+	// server. In this case the reply contains only updates to the existing
+	// cache data, while otherwise it includes complete DB data so we must
+	// purge to get rid of old rows.
+	if reconnecting && (len(db.monitors) > 1 || !lastTransactionFound) {
+		db.cache.Purge(db.model)
+	}
+
 	if monitor.Method == ovsdb.MonitorRPC {
 		u := tableUpdates.(ovsdb.TableUpdates)
 		err = db.cache.Populate(u)
@@ -1046,13 +1089,19 @@ func (o *ovsdbClient) watchForLeaderChange() error {
 	return nil
 }
 
-func (o *ovsdbClient) handleCacheErrors(stopCh <-chan struct{}, errorChan <-chan error) {
+func (o *ovsdbClient) handleClientErrors(stopCh <-chan struct{}) {
+	defer o.handlerShutdown.Done()
+	var errColumnNotFound *mapper.ErrColumnNotFound
+	var errCacheInconsistent *cache.ErrCacheInconsistent
+	var errIndexExists *cache.ErrIndexExists
 	for {
 		select {
 		case <-stopCh:
 			return
-		case err := <-errorChan:
-			if errors.Is(err, &cache.ErrCacheInconsistent{}) || errors.Is(err, &cache.ErrIndexExists{}) {
+		case err := <-o.errorCh:
+			if errors.As(err, &errColumnNotFound) {
+				o.logger.V(3).Error(err, "error updating cache, DB schema may be newer than client!")
+			} else if errors.As(err, &errCacheInconsistent) || errors.As(err, &errIndexExists) {
 				// trigger a reconnect, which will purge the cache
 				// hopefully a rebuild will fix any inconsistency
 				o.logger.V(3).Error(err, "triggering reconnect to rebuild cache")
@@ -1078,6 +1127,8 @@ func (o *ovsdbClient) handleDisconnectNotification() {
 	// close the stopCh, which will stop the cache event processor
 	close(o.stopCh)
 	o.metrics.numDisconnects.Inc()
+	// wait for client related handlers to shutdown
+	o.handlerShutdown.Wait()
 	o.rpcMutex.Lock()
 	if o.options.reconnect && !o.shutdown {
 		o.rpcClient = nil

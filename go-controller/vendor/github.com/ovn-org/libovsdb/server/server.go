@@ -100,6 +100,16 @@ func (o *OvsdbServer) Serve(protocol string, path string) error {
 	}
 }
 
+func isClosed(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+	}
+
+	return false
+}
+
 // Close closes the OvsdbServer
 func (o *OvsdbServer) Close() {
 	o.readyMutex.Lock()
@@ -107,9 +117,13 @@ func (o *OvsdbServer) Close() {
 	o.readyMutex.Unlock()
 	// Only close the listener if Serve() has been called
 	if o.listener != nil {
-		o.listener.Close()
+		if err := o.listener.Close(); err != nil {
+			o.logger.Error(err, "failed to close listener")
+		}
 	}
-	close(o.done)
+	if !isClosed(o.done) {
+		close(o.done)
+	}
 }
 
 // Ready returns true if a server is ready to handle connections
