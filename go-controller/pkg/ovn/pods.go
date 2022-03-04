@@ -327,10 +327,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return nil
 	}
 
+	var libovsdbExecuteTime time.Duration
+	var podAnnoTime time.Duration
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
-		klog.Infof("[%s/%s] addLogicalPort took %v", pod.Namespace, pod.Name, time.Since(start))
+		klog.Infof("[%s/%s] addLogicalPort took %v, libovsdb time %v, annotation time: %v",
+			pod.Namespace, pod.Name, time.Since(start), libovsdbExecuteTime, podAnnoTime)
 	}()
 
 	logicalSwitch := pod.Spec.NodeName
@@ -504,7 +507,10 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s\nAnnotation=%s",
 			podIfAddrs, podMac, podAnnotation.Gateways, marshalledAnnotation)
-		if err = oc.kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, marshalledAnnotation); err != nil {
+		annoStart := time.Now()
+		err = oc.kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, marshalledAnnotation)
+		podAnnoTime = time.Since(annoStart)
+		if err != nil {
 			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 		}
 		releaseIPs = false
@@ -603,7 +609,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		allOps = append(allOps, ops...)
 	}
 
+	transactStart := time.Now()
 	results, err := libovsdbops.TransactAndCheckAndSetUUIDs(oc.nbClient, lsp, allOps)
+	libovsdbExecuteTime = time.Since(transactStart)
 	if err != nil {
 
 		return fmt.Errorf("could not perform creation or update of logical switch port %s - %+v", portName, err)

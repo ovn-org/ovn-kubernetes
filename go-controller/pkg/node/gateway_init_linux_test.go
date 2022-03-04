@@ -168,8 +168,8 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		wg := &sync.WaitGroup{}
 		defer func() {
 			close(stop)
-			wf.Shutdown()
 			wg.Wait()
+			wf.Shutdown()
 		}()
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -446,8 +446,8 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		wg := &sync.WaitGroup{}
 		defer func() {
 			close(stop)
-			wf.Shutdown()
 			wg.Wait()
+			wf.Shutdown()
 		}()
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -756,8 +756,8 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		wg := &sync.WaitGroup{}
 		defer func() {
 			close(stop)
-			wf.Shutdown()
 			wg.Wait()
+			wf.Shutdown()
 		}()
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())

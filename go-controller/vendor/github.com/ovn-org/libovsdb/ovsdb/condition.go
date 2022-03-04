@@ -7,6 +7,7 @@ import (
 )
 
 type ConditionFunction string
+type WaitCondition string
 
 const (
 	// ConditionLessThan is the less than condition
@@ -25,6 +26,11 @@ const (
 	ConditionIncludes ConditionFunction = "includes"
 	// ConditionExcludes is the excludes condition
 	ConditionExcludes ConditionFunction = "excludes"
+
+	// WaitConditionEqual is the equal condition
+	WaitConditionEqual WaitCondition = "=="
+	// WaitConditionNotEqual is the not equal condition
+	WaitConditionNotEqual WaitCondition = "!="
 )
 
 // Condition is described in RFC 7047: 5.1

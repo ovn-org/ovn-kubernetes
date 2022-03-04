@@ -246,6 +246,8 @@ func ovnDBSizeMetricsUpdater(basePath, direction, database string) {
 	if size, err := getOvnDBSizeViaPath(basePath, direction, database); err != nil {
 		klog.Errorf("Failed to update OVN DB size metric: %v", err)
 	} else {
+		// To update not only values but also labels for metrics, we use Reset() to delete previous labels+value
+		metricDBSize.Reset()
 		metricDBSize.WithLabelValues(database).Set(float64(size))
 	}
 }
@@ -291,6 +293,8 @@ func ovnDBMemoryMetricsUpdater(direction, database string) {
 			// kvPair will be of the form monitors:2
 			fields := strings.Split(kvPair, ":")
 			if value, err := strconv.ParseFloat(fields[1], 64); err == nil {
+				// To update not only values but also labels for metrics, we use Reset() to delete previous labels+value
+				metricOVNDBMonitor.Reset()
 				metricOVNDBMonitor.WithLabelValues(database).Set(value)
 			} else {
 				klog.Errorf("Failed to parse the monitor's value %s to float64: err(%v)",
@@ -300,6 +304,7 @@ func ovnDBMemoryMetricsUpdater(direction, database string) {
 			// kvPair will be of the form sessions:2
 			fields := strings.Split(kvPair, ":")
 			if value, err := strconv.ParseFloat(fields[1], 64); err == nil {
+				metricOVNDBSessions.Reset()
 				metricOVNDBSessions.WithLabelValues(database).Set(value)
 			} else {
 				klog.Errorf("Failed to parse the sessions' value %s to float64: err(%v)",
@@ -532,31 +537,47 @@ func ovnDBClusterStatusMetricsUpdater(direction, database string) {
 		klog.Errorf(err.Error())
 		return
 	}
+	// To update not only values but also labels for metrics, we use Reset() to delete previous labels+value
+	metricDBClusterCID.Reset()
 	metricDBClusterCID.WithLabelValues(database, clusterStatus.cid).Set(1)
+	metricDBClusterSID.Reset()
 	metricDBClusterSID.WithLabelValues(database, clusterStatus.cid, clusterStatus.sid).Set(1)
+	metricDBClusterServerStatus.Reset()
 	metricDBClusterServerStatus.WithLabelValues(database, clusterStatus.cid, clusterStatus.sid,
 		clusterStatus.status).Set(1)
+	metricDBClusterTerm.Reset()
 	metricDBClusterTerm.WithLabelValues(database, clusterStatus.cid, clusterStatus.sid).Set(clusterStatus.term)
+	metricDBClusterServerRole.Reset()
 	metricDBClusterServerRole.WithLabelValues(database, clusterStatus.cid, clusterStatus.sid,
 		clusterStatus.role).Set(1)
+	metricDBClusterServerVote.Reset()
 	metricDBClusterServerVote.WithLabelValues(database, clusterStatus.cid, clusterStatus.sid,
 		clusterStatus.vote).Set(1)
+	metricDBClusterElectionTimer.Reset()
 	metricDBClusterElectionTimer.WithLabelValues(database, clusterStatus.cid,
 		clusterStatus.sid).Set(clusterStatus.electionTimer)
+	metricDBClusterLogIndexStart.Reset()
 	metricDBClusterLogIndexStart.WithLabelValues(database, clusterStatus.cid,
 		clusterStatus.sid).Set(clusterStatus.logIndexStart)
+	metricDBClusterLogIndexNext.Reset()
 	metricDBClusterLogIndexNext.WithLabelValues(database, clusterStatus.cid,
 		clusterStatus.sid).Set(clusterStatus.logIndexNext)
+	metricDBClusterLogNotCommitted.Reset()
 	metricDBClusterLogNotCommitted.WithLabelValues(database, clusterStatus.cid,
 		clusterStatus.sid).Set(clusterStatus.logNotCommitted)
+	metricDBClusterLogNotApplied.Reset()
 	metricDBClusterLogNotApplied.WithLabelValues(database, clusterStatus.cid,
 		clusterStatus.sid).Set(clusterStatus.logNotApplied)
+	metricDBClusterConnIn.Reset()
 	metricDBClusterConnIn.WithLabelValues(database, clusterStatus.cid,
 		clusterStatus.sid).Set(clusterStatus.connIn)
+	metricDBClusterConnOut.Reset()
 	metricDBClusterConnOut.WithLabelValues(database, clusterStatus.cid,
 		clusterStatus.sid).Set(clusterStatus.connOut)
+	metricDBClusterConnInErr.Reset()
 	metricDBClusterConnInErr.WithLabelValues(database, clusterStatus.cid,
 		clusterStatus.sid).Set(clusterStatus.connInErr)
+	metricDBClusterConnOutErr.Reset()
 	metricDBClusterConnOutErr.WithLabelValues(database, clusterStatus.cid,
 		clusterStatus.sid).Set(clusterStatus.connOutErr)
 }

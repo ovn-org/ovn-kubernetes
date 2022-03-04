@@ -46,7 +46,7 @@ Launch the KIND Deployment.
 
 ```
 $ pushd contrib
-$ export KUBECONFIG=${HOME}/admin.conf
+$ export KUBECONFIG=${HOME}/ovn.conf
 $ ./kind.sh
 $ popd
 ```
@@ -152,7 +152,7 @@ To deploy KIND however, you need to start it as root and then copy root's kube c
 ```
 $ pushd contrib
 $ sudo ./kind.sh -ep podman
-$ sudo cp /root/admin.conf ~/.kube/kind-config
+$ sudo cp /root/ovn.conf ~/.kube/kind-config
 $ sudo chown $(id -u):$(id -g) ~/.kube/kind-config
 $ export KUBECONFIG=~/.kube/kind-config
 $ popd
@@ -309,9 +309,9 @@ $ KIND_IPV4_SUPPORT=false KIND_IPV6_SUPPORT=true ./kind.sh
 Once `kind.sh` completes, setup kube config file:
 
 ```
-$ cp ~/admin.conf ~/.kube/config
+$ cp ~/ovn.conf ~/.kube/config
 -- OR --
-$ KUBECONFIG=~/admin.conf
+$ KUBECONFIG=~/ovn.conf
 ```
 
 Once testing is complete, to tear down the KIND deployment:
@@ -412,9 +412,9 @@ $ KIND_IPV4_SUPPORT=true KIND_IPV6_SUPPORT=true K8S_VERSION=v1.23.3 ./kind.sh
 Once `kind.sh` completes, setup kube config file:
 
 ```
-$ cp ~/admin.conf ~/.kube/config
+$ cp ~/ovn.conf ~/.kube/config
 -- OR --
-$ KUBECONFIG=~/admin.conf
+$ KUBECONFIG=~/ovn.conf
 ```
 
 Once testing is complete, to tear down the KIND deployment:

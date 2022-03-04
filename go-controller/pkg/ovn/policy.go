@@ -914,8 +914,8 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 		if hasAnyLabelSelector(ingressJSON.From) {
 			klog.V(5).Infof("Network policy %s with ingress rule %s has a selector", policy.Name, ingress.policyName)
 			if err := ingress.ensurePeerAddressSet(oc.addressSetFactory); err != nil {
-				klog.Errorf(err.Error())
-				continue
+				np.Unlock()
+				return err
 			}
 			// Start service handlers ONLY if there's an ingress Address Set
 			oc.handlePeerService(policy, ingress, np)
@@ -951,8 +951,8 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 		if hasAnyLabelSelector(egressJSON.To) {
 			klog.V(5).Infof("Network policy %s with egress rule %s has a selector", policy.Name, egress.policyName)
 			if err := egress.ensurePeerAddressSet(oc.addressSetFactory); err != nil {
-				klog.Errorf(err.Error())
-				continue
+				np.Unlock()
+				return err
 			}
 		}
 

@@ -4,7 +4,7 @@
 set -ex
 
 
-export KUBECONFIG=${HOME}/admin.conf
+export KUBECONFIG=${HOME}/ovn.conf
 export OVN_IMAGE=${OVN_IMAGE:-ovn-daemonset-f:pr}
 
 kubectl_wait_pods() {
