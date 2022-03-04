@@ -735,28 +735,22 @@ func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string) erro
 // Called when migrating to SGW from LGW.
 func (oc *Controller) delAllHybridRoutePolicies() error {
 	// nuke all the policies
-	p := func(item *nbdb.LogicalRouterPolicy) bool {
+	policyPred := func(item *nbdb.LogicalRouterPolicy) bool {
 		return item.Priority == types.HybridOverlayReroutePriority
 	}
-	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
+	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, policyPred)
 	if err != nil {
 		return fmt.Errorf("error deleting hybrid route policies on %s: %v", types.OVNClusterRouter, err)
 	}
 
 	// nuke all the address-sets.
 	// if we fail to remove LRP's above, we don't attempt to remove ASes due to dependency constraints.
-	addrSetList := []nbdb.AddressSet{}
-	addrSetOpModels := []libovsdbops.OperationModel{
-		{
-			ModelPredicate: func(as *nbdb.AddressSet) bool {
-				return strings.Contains(as.ExternalIDs["name"], types.HybridRoutePolicyPrefix)
-			},
-			ExistingResult: &addrSetList,
-			BulkOp:         true,
-		},
+	asPred := func(item *nbdb.AddressSet) bool {
+		return strings.Contains(item.ExternalIDs["name"], types.HybridRoutePolicyPrefix)
 	}
-	if err := oc.modelClient.Delete(addrSetOpModels...); err != nil {
-		return fmt.Errorf("failed to remove hybrid route address sets, err: %v", err)
+	err = libovsdbops.DeleteAddressSetsWithPredicate(oc.nbClient, asPred)
+	if err != nil {
+		return fmt.Errorf("failed to remove hybrid route address sets: %v", err)
 	}
 
 	return nil
