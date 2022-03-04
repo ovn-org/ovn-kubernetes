@@ -524,6 +524,7 @@ func SetNodeHostAddresses(nodeAnnotator kube.Annotator, addresses sets.String) e
 }
 
 // ParseNodeHostAddresses returns the parsed host addresses living on a node
+// as stored in k8s.ovn.org/host-addresses.
 func ParseNodeHostAddresses(node *kapi.Node) (sets.String, error) {
 	addrAnnotation, ok := node.Annotations[ovnNodeHostAddresses]
 	if !ok {

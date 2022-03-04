@@ -86,7 +86,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 			}
 		}
 
-		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory)
+		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory, gwBridge, nil)
 
 		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, gw.nodeIPManager.ListAddresses())
 		if err != nil {

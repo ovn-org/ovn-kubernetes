@@ -1334,7 +1334,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 				return err
 			}
 		}
-		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory)
+		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory, gwBridge, nil)
 		nodeIPs := gw.nodeIPManager.ListAddresses()
 
 		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, nodeIPs)
