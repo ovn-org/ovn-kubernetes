@@ -440,18 +440,12 @@ var _ = Describe("Node Operations", func() {
 					},
 					"filter": {},
 				}
-				expectedFlows := []string{
-					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=eth0, tcp, tp_dst=31111, actions=ct(commit,zone=64003,table=6)",
-					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=LOCAL, tcp, tp_src=31111, actions=ct(zone=64003,table=7)",
-					"cookie=0xe745ecf105, priority=110, table=6, actions=output:LOCAL",
-					"cookie=0xe745ecf105, priority=110, table=7, actions=output:eth0",
-				}
 
 				f4 := iptV4.(*util.FakeIPTables)
 				err := f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(Equal(expectedFlows))
+				Expect(flows).To(BeNil())
 				fakeOvnNode.shutdown()
 				return nil
 			}
@@ -597,30 +591,103 @@ var _ = Describe("Node Operations", func() {
 					},
 					"filter": {},
 				}
-				expectedNodePortFlows := []string{
-					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=eth0, tcp, tp_dst=31111, actions=ct(commit,zone=64003,table=6)",
-					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=LOCAL, tcp, tp_src=31111, actions=ct(zone=64003,table=7)",
-					"cookie=0xe745ecf105, priority=110, table=6, actions=output:LOCAL",
-					"cookie=0xe745ecf105, priority=110, table=7, actions=output:eth0",
-				}
 				expectedLBIngressFlows := []string{
-					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, tcp, nw_dst=5.5.5.5, tp_dst=8080, actions=ct(commit,zone=64003,table=6)",
-					"cookie=0x10c6b89e483ea111, priority=110, in_port=LOCAL, tcp, nw_src=5.5.5.5, tp_src=8080, actions=ct(zone=64003,table=7)",
-					"cookie=0xe745ecf105, priority=110, table=6, actions=output:LOCAL",
-					"cookie=0xe745ecf105, priority=110, table=7, actions=output:eth0",
+					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
 				}
 				expectedLBExternalIPFlows := []string{
-					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, tcp, nw_dst=1.1.1.1, tp_dst=8080, actions=ct(commit,zone=64003,table=6)",
-					"cookie=0x71765945a31dc2f1, priority=110, in_port=LOCAL, tcp, nw_src=1.1.1.1, tp_src=8080, actions=ct(zone=64003,table=7)",
-					"cookie=0xe745ecf105, priority=110, table=6, actions=output:LOCAL",
-					"cookie=0xe745ecf105, priority=110, table=7, actions=output:eth0",
+					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
 				err := f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(Equal(expectedNodePortFlows))
+				Expect(flows).To(BeNil())
+				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
+				Expect(flows).To(Equal(expectedLBIngressFlows))
+				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
+				Expect(flows).To(Equal(expectedLBExternalIPFlows))
+
+				fakeOvnNode.shutdown()
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("inits iptables rules and openflows with LoadBalancer where ETP=cluster, LGW mode", func() {
+			app.Action = func(ctx *cli.Context) error {
+				externalIP := "1.1.1.1"
+				config.Gateway.Mode = config.GatewayModeLocal
+				service := *newService("service1", "namespace1", "10.129.0.2",
+					[]v1.ServicePort{
+						{
+							NodePort: int32(31111),
+							Protocol: v1.ProtocolTCP,
+							Port:     int32(8080),
+						},
+					},
+					v1.ServiceTypeLoadBalancer,
+					[]string{externalIP},
+					v1.ServiceStatus{
+						LoadBalancer: v1.LoadBalancerStatus{
+							Ingress: []v1.LoadBalancerIngress{{
+								IP: "5.5.5.5",
+							}},
+						},
+					},
+					false, // ETP=cluster
+				)
+				// endpoints.Subset is empty and yet this will come under !hasLocalHostNetEp case
+				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+
+				fakeOvnNode.start(ctx,
+					&v1.ServiceList{
+						Items: []v1.Service{
+							service,
+						},
+					},
+					&endpoints,
+				)
+
+				fNPW.watchFactory = fakeOvnNode.watcher
+				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				fNPW.AddService(&service)
+
+				expectedTables := map[string]util.FakeTable{
+					"nat": {
+						"PREROUTING": []string{
+							"-j OVN-KUBE-EXTERNALIP",
+							"-j OVN-KUBE-NODEPORT",
+						},
+						"OUTPUT": []string{
+							"-j OVN-KUBE-EXTERNALIP",
+							"-j OVN-KUBE-NODEPORT",
+						},
+						"OVN-KUBE-NODEPORT": []string{
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+						},
+						"OVN-KUBE-SNAT-MGMTPORT": []string{},
+						"OVN-KUBE-EXTERNALIP": []string{
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Status.LoadBalancer.Ingress[0].IP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+						},
+					},
+					"filter": {},
+				}
+
+				expectedLBIngressFlows := []string{
+					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
+				}
+				expectedLBExternalIPFlows := []string{
+					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
+				}
+
+				f4 := iptV4.(*util.FakeIPTables)
+				err := f4.MatchState(expectedTables)
+				Expect(err).NotTo(HaveOccurred())
+				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				Expect(flows).To(BeNil())
 				flows = fNPW.ofm.flowCache["Ingress_namespace1_service1_5.5.5.5_8080"]
 				Expect(flows).To(Equal(expectedLBIngressFlows))
 				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
@@ -708,14 +775,14 @@ var _ = Describe("Node Operations", func() {
 					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=patch-breth0_ov, tcp, tp_src=31111, actions=output:eth0",
 				}
 				expectedLBIngressFlows := []string{
+					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
 					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, tcp, nw_dst=5.5.5.5, tp_dst=8080, actions=check_pkt_larger(1414)->reg0[0],resubmit(,11)",
 					"cookie=0x10c6b89e483ea111, priority=110, in_port=patch-breth0_ov, tcp, nw_src=5.5.5.5, tp_src=8080, actions=output:eth0",
-					"cookie=0x10c6b89e483ea111, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=5.5.5.5, actions=output:LOCAL",
 				}
 				expectedLBExternalIPFlows := []string{
+					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
 					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, tcp, nw_dst=1.1.1.1, tp_dst=8080, actions=check_pkt_larger(1414)->reg0[0],resubmit(,11)",
 					"cookie=0x71765945a31dc2f1, priority=110, in_port=patch-breth0_ov, tcp, nw_src=1.1.1.1, tp_src=8080, actions=output:eth0",
-					"cookie=0x71765945a31dc2f1, priority=110, in_port=eth0, arp, arp_op=1, arp_tpa=1.1.1.1, actions=output:LOCAL",
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
@@ -1035,10 +1102,10 @@ var _ = Describe("Node Operations", func() {
 		It("manages iptables rules with ExternalIP", func() {
 			app.Action = func(ctx *cli.Context) error {
 				externalIP := "10.10.10.1"
-				externalIPPort := int32(8034)
 				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: "ovs-ofctl show ",
 				})
+				externalIPPort := int32(8034)
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -1265,18 +1332,12 @@ var _ = Describe("Node Operations", func() {
 					},
 					"filter": {},
 				}
-				expectedFlows := []string{
-					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=eth0, tcp, tp_dst=31111, actions=ct(commit,zone=64003,table=6)",
-					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=LOCAL, tcp, tp_src=31111, actions=ct(zone=64003,table=7)",
-					"cookie=0xe745ecf105, priority=110, table=6, actions=output:LOCAL",
-					"cookie=0xe745ecf105, priority=110, table=7, actions=output:eth0",
-				}
 
 				f4 := iptV4.(*util.FakeIPTables)
 				err := f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
-				Expect(flows).To(Equal(expectedFlows))
+				Expect(flows).To(BeNil())
 
 				fNPW.DeleteService(&service)
 
