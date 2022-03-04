@@ -234,20 +234,16 @@ func (oc *Controller) cleanupDGP(nodes *kapi.NodeList) error {
 		oc.delPbrAndNatRules(node.Name, []string{types.InterNodePolicyPriority, types.MGMTPortPolicyPriority})
 	}
 	// remove SBDB MAC bindings for DGP
-	for _, ip := range []string{types.V4NodeLocalNATSubnetNextHop, types.V6NodeLocalNATSubnetNextHop} {
-		opModels := []libovsdbops.OperationModel{
-			{
-				Model: &sbdb.MACBinding{
-					IP: ip,
-				},
-			},
-		}
-		if err := oc.modelClient.WithClient(oc.sbClient).Delete(opModels...); err != nil {
-			return fmt.Errorf("unable to remove mac_binding for DGP, err: %v", err)
-		}
+	p := func(item *sbdb.MACBinding) bool {
+		return item.IP == types.V4NodeLocalNATSubnetNextHop || item.IP == types.V6NodeLocalNATSubnetNextHop
 	}
+	err := libovsdbops.DeleteMacBindingWithPredicate(oc.sbClient, p)
+	if err != nil {
+		return fmt.Errorf("unable to remove mac_binding for DGP: %v", err)
+	}
+
 	// remove node local switch
-	err := libovsdbops.DeleteLogicalSwitch(oc.nbClient, types.NodeLocalSwitch)
+	err = libovsdbops.DeleteLogicalSwitch(oc.nbClient, types.NodeLocalSwitch)
 	if err != nil {
 		return fmt.Errorf("unable to remove node local switch %s, err: %v", types.NodeLocalSwitch, err)
 	}
