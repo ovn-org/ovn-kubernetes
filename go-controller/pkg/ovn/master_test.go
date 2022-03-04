@@ -812,6 +812,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		f               *factory.WatchFactory
 		stopChan        chan struct{}
 		wg              *sync.WaitGroup
+		nodeWg          *sync.WaitGroup
 		libovsdbCleanup *libovsdbtest.Cleanup
 	)
 
@@ -829,6 +830,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		app.Flags = config.Flags
 		stopChan = make(chan struct{})
 		wg = &sync.WaitGroup{}
+		nodeWg = &sync.WaitGroup{}
 
 		libovsdbCleanup = nil
 	})
@@ -838,6 +840,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		close(stopChan)
 		f.Shutdown()
 		wg.Wait()
+		nodeWg.Wait()
 	})
 
 	ginkgo.It("sets up a local gateway", func() {
@@ -986,8 +989,12 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
-			// Let the real code run and ensure OVN database sync
-			clusterController.WatchNodes()
+			clusterController.initNodeController(clusterController.watchFactory.NodeInformer())
+			nodeWg.Add(1)
+			go func() {
+				defer nodeWg.Done()
+				clusterController.runNodeController(10, clusterController.stopChan)
+			}()
 
 			clusterController.StartServiceController(wg, false)
 
@@ -1174,8 +1181,12 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
-			// Let the real code run and ensure OVN database sync
-			clusterController.WatchNodes()
+			clusterController.initNodeController(clusterController.watchFactory.NodeInformer())
+			nodeWg.Add(1)
+			go func() {
+				defer nodeWg.Done()
+				clusterController.runNodeController(10, clusterController.stopChan)
+			}()
 
 			clusterController.StartServiceController(wg, false)
 

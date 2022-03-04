@@ -3,6 +3,10 @@ package ovn
 import (
 	"context"
 	"fmt"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
 	"net"
 	"os"
 	"reflect"
@@ -15,6 +19,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
+	informers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/util/retry"
@@ -28,11 +33,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 const (
@@ -342,9 +347,9 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	if config.HybridOverlay.Enabled {
 		oc.hoMaster, err = hocontroller.NewMaster(
 			oc.kube,
-			oc.watchFactory.NodeInformer(),
-			oc.watchFactory.NamespaceInformer(),
-			oc.watchFactory.PodInformer(),
+			oc.watchFactory.NodeInformer().Informer(),
+			oc.watchFactory.NamespaceInformer().Informer(),
+			oc.watchFactory.PodInformer().Informer(),
 			oc.nbClient,
 			oc.sbClient,
 			informer.NewDefaultEventHandler,
@@ -1110,7 +1115,6 @@ func (oc *Controller) allocateNodeSubnets(node *kapi.Node) ([]*net.IPNet, []*net
 }
 
 func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
-	oc.clearInitialNodeNetworkUnavailableCondition(node, nil)
 	hostSubnets, allocatedSubnets, err := oc.allocateNodeSubnets(node)
 	if err != nil {
 		return nil, err
@@ -1283,13 +1287,13 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet) {
 // TODO: make upstream kubelet more flexible with overlays and GCE so this
 // condition doesn't get added for network plugins that don't want it, and then
 // we can remove this function.
-func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newNode *kapi.Node) {
+func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode *util.NodeCacheEntry, newNode *kapi.Node) {
 	// If it is not a Cloud Provider node, then nothing to do.
-	if origNode.Spec.ProviderID == "" {
+	if origNode.ProviderID == "" {
 		return
 	}
 	// if newNode is not nil, then we are called from UpdateFunc()
-	if newNode != nil && reflect.DeepEqual(origNode.Status.Conditions, newNode.Status.Conditions) {
+	if newNode != nil && reflect.DeepEqual(origNode.Conditions, newNode.Status.Conditions) {
 		return
 	}
 
@@ -1328,49 +1332,6 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newN
 	}
 }
 
-// this is the worker function that does the periodic sync of nodes from kube API
-// and sbdb and deletes chassis that are stale
-func (oc *Controller) syncNodesPeriodic() {
-	//node names is a slice of all node names
-	nodes, err := oc.kube.GetNodes()
-	if err != nil {
-		klog.Errorf("Error getting existing nodes from kube API: %v", err)
-		return
-	}
-
-	nodeNames := make([]string, 0, len(nodes.Items))
-
-	for _, node := range nodes.Items {
-		nodeNames = append(nodeNames, node.Name)
-	}
-
-	chassisList, err := libovsdbops.ListChassis(oc.sbClient)
-	if err != nil {
-		klog.Errorf("Failed to get chassis list: error: %v", err)
-		return
-	}
-
-	chassisHostNameMap := map[string]string{}
-	for _, chassis := range chassisList {
-		chassisHostNameMap[chassis.Hostname] = chassis.Name
-	}
-
-	//delete existing nodes from the chassis map.
-	for _, nodeName := range nodeNames {
-		delete(chassisHostNameMap, nodeName)
-	}
-
-	staleChassisNames := []string{}
-	for _, v := range chassisHostNameMap {
-		staleChassisNames = append(staleChassisNames, v)
-	}
-
-	if err = libovsdbops.DeleteChassis(oc.sbClient, staleChassisNames...); err != nil {
-		klog.Errorf("Failed Deleting chassis %v error: %v", chassisHostNameMap, err)
-		return
-	}
-}
-
 // syncWithRetry is a wrapper that calls a sync function and retries it in case of failures.
 func (oc *Controller) syncWithRetry(syncName string, syncFunc func() error) {
 	err := utilwait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
@@ -1385,25 +1346,160 @@ func (oc *Controller) syncWithRetry(syncName string, syncFunc func() error) {
 	}
 }
 
-// We only deal with cleaning up nodes that shouldn't exist here, since
-// watchNodes() will be called for all existing nodes at startup anyway.
-// Note that this list will include the 'join' cluster switch, which we
-// do not want to delete.
-func (oc *Controller) syncNodes(nodes []interface{}) {
-	oc.syncWithRetry("syncNodes", func() error { return oc.syncNodesRetriable(nodes) })
+const (
+	maxNodeRetries = 10
+)
+
+func (oc *Controller) cacheNode(key string, node *kapi.Node) {
+	oc.nodesCache.Store(key, &util.NodeCacheEntry{
+		UID:         node.UID,
+		Name:        node.Name,
+		Annotations: node.Annotations,
+		Labels:      node.Labels,
+		ProviderID:  node.Spec.ProviderID,
+		Conditions:  node.Status.Conditions,
+	})
 }
 
-// This function implements the main body of work of what is described by syncNodes.
-// Upon failure, it may be invoked multiple times in order to avoid a pod restart.
-func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
-	foundNodes := sets.NewString()
-	for _, tmp := range nodes {
-		node, ok := tmp.(*kapi.Node)
-		if !ok {
-			return fmt.Errorf("spurious object in syncNodes: %v", tmp)
-		}
-		foundNodes.Insert(node.Name)
+// initNodeController initializes the Node controller and *must* be called before
+// runNodeController
+func (oc *Controller) initNodeController(nodes informers.NodeInformer) {
+	oc.nodes = nodes.Lister()
+	oc.nodesSynced = nodes.Informer().HasSynced
+	oc.nodesQueue = workqueue.NewNamedRateLimitingQueue(
+		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
+		"nodes",
+	)
 
+	nodes.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			key, err := cache.MetaNamespaceKeyFunc(obj)
+			if err == nil {
+				oc.nodesQueue.Add(key)
+			}
+		},
+		UpdateFunc: func(old, new interface{}) {
+			key, err := cache.MetaNamespaceKeyFunc(new)
+			if err == nil {
+				oc.nodesQueue.Add(key)
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
+			if err == nil {
+				oc.nodesQueue.Add(key)
+			}
+		},
+	})
+}
+
+func (oc *Controller) runNodeController(threadiness int, stopCh <-chan struct{}) {
+	// don't let panics crash the process
+	defer utilruntime.HandleCrash()
+
+	klog.Infof("Starting Node Controller")
+
+	// wait for your caches to fill before starting your work
+	if !cache.WaitForCacheSync(stopCh, oc.nodesSynced) {
+		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
+		klog.Infof("Synchronization failed")
+		return
+	}
+
+	// run the repair controller
+	klog.Infof("Repairing Nodes")
+	oc.repairNodes()
+
+	// start up your worker threads based on threadiness.  Some controllers
+	// have multiple kinds of workers
+	wg := &sync.WaitGroup{}
+	for i := 0; i < threadiness; i++ {
+		wg.Add(1)
+		// runWorker will loop until "something bad" happens.  The .Until will
+		// then rekick the worker after one second
+		go func() {
+			defer wg.Done()
+			utilwait.Until(func() {
+				oc.runNodeWorker(wg)
+			}, time.Second, stopCh)
+		}()
+	}
+
+	// wait until we're told to stop
+	<-stopCh
+
+	klog.Infof("Shutting down Node controller")
+	// make sure the work queue is shutdown which will trigger workers to end
+	oc.nodesQueue.ShutDown()
+	// wait for workers to finish
+	wg.Wait()
+}
+
+func (oc *Controller) runNodeWorker(wg *sync.WaitGroup) {
+	// hot loop until we're told to stop.  processNextWorkItem will
+	// automatically wait until there's work available, so we don't worry
+	// about secondary waits
+	for oc.processNextNodeWorkItem(wg) {
+	}
+}
+
+// processNextPodWorkItem deals with one key off the queue.  It returns false
+// when it's time to quit.
+func (oc *Controller) processNextNodeWorkItem(wg *sync.WaitGroup) bool {
+	wg.Add(1)
+	defer wg.Done()
+	// pull the next work item from queue.  It should be a key we use to lookup
+	// something in a cache
+	key, quit := oc.nodesQueue.Get()
+	if quit {
+		return false
+	}
+	// you always have to indicate to the queue that you've completed a piece of
+	// work
+	defer oc.nodesQueue.Done(key)
+
+	// do your work on the key.  This method will contains your "do stuff" logic
+	err := oc.syncNodeHandler(key.(string))
+	if err == nil {
+		// if you had no error, tell the queue to stop tracking history for your
+		// key. This will reset things like failure counts for per-item rate
+		// limiting
+		oc.nodesQueue.Forget(key)
+		return true
+	}
+
+	// there was a failure so be sure to report it.  This method allows for
+	// pluggable error handling which can be used for things like
+	// cluster-monitoring
+	utilruntime.HandleError(fmt.Errorf("%v failed with : %v", key, err))
+
+	// since we failed, we should requeue the item to work on later.
+	// but only if we've not exceeded max retries. This method
+	// will add a backoff to avoid hotlooping on particular items
+	// (they're probably still not going to work right away) and overall
+	// controller protection (everything I've done is broken, this controller
+	// needs to calm down or it can starve other useful work) cases.
+	if oc.nodesQueue.NumRequeues(key) < maxNodeRetries {
+		oc.nodesQueue.AddRateLimited(key)
+		return true
+	}
+
+	// if we've exceeded MaxRetries, remove the item from the queue
+	oc.nodesQueue.Forget(key)
+	return true
+}
+
+func (oc *Controller) repairNodes() {
+	klog.Infof("Getting node list")
+	nodes, err := oc.nodes.List(labels.Everything())
+	// as the this is called after the cache has synced we shouldn't hit this
+	if err != nil {
+		klog.Error(err)
+		utilruntime.HandleError(err)
+	}
+	foundNodes := sets.NewString()
+	for _, node := range nodes {
+		foundNodes.Insert(node.Name)
 		hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
 		klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnets)
 		for _, hostSubnet := range hostSubnets {
@@ -1427,7 +1523,8 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 
 	chassisList, err := libovsdbops.ListChassis(oc.sbClient)
 	if err != nil {
-		return fmt.Errorf("failed to get chassis list: error: %v", err)
+		klog.Errorf("Failed to get chassis list: error: %v", err)
+		return
 	}
 
 	for _, chassis := range chassisList {
@@ -1440,7 +1537,8 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 	nodeSwitches, err := libovsdbops.FindSwitchesWithOtherConfig(oc.nbClient)
 	if err != nil {
 		if err != libovsdbclient.ErrNotFound {
-			return fmt.Errorf("failed to get node logical switches which have other-config set error: %v", err)
+			klog.Errorf("Failed to get node logical switches which have other-config set error: %v", err)
+			return
 		}
 		klog.Warning("Did not find any logical switches with other-config")
 	}
@@ -1481,7 +1579,203 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 	}
 
 	if err := libovsdbops.DeleteNodeChassis(oc.sbClient, staleChassis.List()...); err != nil {
-		return fmt.Errorf("failed deleting chassis %v error: %v", staleChassis.List(), err)
+		klog.Errorf("Failed deleting chassis %v error: %v", staleChassis.List(), err)
+		return
+	}
+}
+
+func (oc *Controller) addNodeAndCache(key string, node *kapi.Node) error {
+	var gatewaysFailed sync.Map
+	var mgmtPortFailed sync.Map
+	var addNodeFailed sync.Map
+	var nodeClusterRouterPortFailed sync.Map
+
+	defer oc.cacheNode(key, node)
+	if noHostSubnet := noHostSubnet(node); noHostSubnet {
+		err := oc.lsManager.AddNoHostSubnetNode(node.Name)
+		if err != nil {
+			klog.Errorf("Error creating logical switch cache for node %s: %v", node.Name, err)
+			return err
+		}
+	}
+
+	klog.V(5).Infof("Add event for Node %q", node.Name)
+	hostSubnets, err := oc.addNode(node)
+	if err != nil {
+		klog.Errorf("NodeAdd: error creating subnet for node %s: %v", node.Name, err)
+		addNodeFailed.Store(node.Name, true)
+		mgmtPortFailed.Store(node.Name, true)
+		gatewaysFailed.Store(node.Name, true)
+		return err
+	}
+
+	if err = oc.syncNodeClusterRouterPort(node, hostSubnets); err != nil {
+		if !util.IsAnnotationNotSetError(err) {
+			klog.Warningf(err.Error())
+		}
+		nodeClusterRouterPortFailed.Store(node.Name, true)
+	}
+
+	err = oc.syncNodeManagementPort(node, hostSubnets)
+	if err != nil {
+		if !util.IsAnnotationNotSetError(err) {
+			klog.Warningf("Error creating management port for node %s: %v", node.Name, err)
+		}
+		mgmtPortFailed.Store(node.Name, true)
+	}
+
+	if err := oc.syncNodeGateway(node, hostSubnets); err != nil {
+		if !util.IsAnnotationNotSetError(err) {
+			klog.Warningf(err.Error())
+		}
+		gatewaysFailed.Store(node.Name, true)
+	}
+
+	return nil
+}
+
+func (oc *Controller) updateNodeAndCache(key string, node *kapi.Node) error {
+	var gatewaysFailed sync.Map
+	var mgmtPortFailed sync.Map
+	var addNodeFailed sync.Map
+	var nodeClusterRouterPortFailed sync.Map
+	var hostSubnets []*net.IPNet
+	var err error
+
+	tmp, ok := oc.nodesCache.Load(key)
+	if !ok {
+		klog.Errorf("NodeUpdate: node %s not found in the cache ", node.Name)
+		return nil
+	}
+	oldNode := tmp.(*util.NodeCacheEntry)
+	shouldUpdate, err := shouldUpdate(node, oldNode)
+	if err != nil {
+		klog.Errorf(err.Error())
+	}
+	if !shouldUpdate {
+		// the hostsubnet is not assigned by ovn-kubernetes
+		return nil
+	}
+	klog.V(5).Infof("Update event for Node %q", oldNode.Name)
+	defer oc.cacheNode(key, node)
+	_, failed := addNodeFailed.Load(node.Name)
+	if failed {
+		oc.clearInitialNodeNetworkUnavailableCondition(oldNode, nil)
+		hostSubnets, err = oc.addNode(node)
+		if err != nil {
+			klog.Errorf("NodeUpdate: error creating subnet for node %s: %v", node.Name, err)
+			return err
+		}
+		addNodeFailed.Delete(node.Name)
+	}
+
+	_, failed = nodeClusterRouterPortFailed.Load(node.Name)
+	if failed || nodeChassisChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
+		if err := oc.syncNodeClusterRouterPort(node, nil); err != nil {
+			if !util.IsAnnotationNotSetError(err) {
+				klog.Warningf(err.Error())
+			}
+			nodeClusterRouterPortFailed.Store(node.Name, true)
+		} else {
+			nodeClusterRouterPortFailed.Delete(node.Name)
+		}
+	}
+	_, failed = mgmtPortFailed.Load(node.Name)
+	if failed || macAddressChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
+		err := oc.syncNodeManagementPort(node, hostSubnets)
+		if err != nil {
+			if !util.IsAnnotationNotSetError(err) {
+				klog.Errorf("Error updating management port for node %s: %v", node.Name, err)
+				return err
+			}
+			mgmtPortFailed.Store(node.Name, true)
+		} else {
+			mgmtPortFailed.Delete(node.Name)
+		}
+	}
+	if nodeChassisChanged(oldNode, node) {
+		// delete stale chassis in SBDB if any
+		oc.deleteStaleNodeChassis(node)
+	}
+	oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
+	_, failed = gatewaysFailed.Load(node.Name)
+	if failed || gatewayChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) || hostAddressesChanged(oldNode, node) {
+		err := oc.syncNodeGateway(node, nil)
+		if err != nil {
+			if !util.IsAnnotationNotSetError(err) {
+				klog.Errorf(err.Error())
+				return err
+			}
+			gatewaysFailed.Store(node.Name, true)
+		} else {
+			gatewaysFailed.Delete(node.Name)
+		}
 	}
 	return nil
+}
+
+func (oc *Controller) deleteNodeAndCache(key string) error {
+	var gatewaysFailed sync.Map
+	var mgmtPortFailed sync.Map
+	var addNodeFailed sync.Map
+	var nodeClusterRouterPortFailed sync.Map
+
+	node, ok := oc.nodesCache.Load(key)
+	if !ok {
+		klog.Warningf("Node %s not found in nodes cache on delete; may not have been scheduled", key)
+		return nil
+	}
+	cachedNode := node.(*util.NodeCacheEntry)
+	nodeName := cachedNode.Name
+	klog.V(5).Infof("Delete event for Node %q. Removing the node from "+
+		"various caches", nodeName)
+	nodeSubnets, _ := util.ParseCachedNodeHostSubnetAnnotation(cachedNode)
+	oc.deleteNode(nodeName, nodeSubnets)
+	oc.lsManager.DeleteNode(nodeName)
+	addNodeFailed.Delete(nodeName)
+	mgmtPortFailed.Delete(nodeName)
+	gatewaysFailed.Delete(nodeName)
+	nodeClusterRouterPortFailed.Delete(nodeName)
+	oc.nodesCache.Delete(key)
+
+	return nil
+}
+
+// sync node handler brings the node resource in sync
+func (oc *Controller) syncNodeHandler(key string) error {
+	klog.Infof("Syncing %s", key)
+	_, name, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		return err
+	}
+	node, err := oc.nodes.Get(name)
+	if err != nil && !apierrors.IsNotFound(err) {
+		// Very unlikely to see any error other than "not found" since
+		// wer're pulling from the informer cache, but just try again
+		return err
+	}
+	// Delete node if was not found
+	if apierrors.IsNotFound(err) {
+		return oc.deleteNodeAndCache(key)
+	}
+
+	// If the node was deleted and re-added quickly; delete and re-add the node
+	ne, ok := oc.nodesCache.Load(key)
+	if ok {
+		cachedNode := ne.(*util.NodeCacheEntry)
+		if cachedNode.UID != node.UID {
+			if err := oc.deleteNodeAndCache(key); err != nil {
+				return err
+			}
+		} else {
+			// this is node update
+			if err := oc.updateNodeAndCache(key, node); err != nil {
+				return err
+			}
+		}
+	} else {
+		// This is new node add
+		err = oc.addNodeAndCache(key, node)
+	}
+	return err
 }

@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/util/workqueue"
 	"math"
 	"math/rand"
 	"net"
@@ -41,7 +43,6 @@ import (
 	kapisnetworking "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
@@ -209,6 +210,12 @@ type Controller struct {
 	retryPolicyChan chan struct{}
 
 	metricsRecorder *metrics.ControlPlaneRecorder
+
+	// nodeController
+	nodes       listers.NodeLister
+	nodesSynced cache.InformerSynced
+	nodesQueue  workqueue.RateLimitingInterface
+	nodesCache  sync.Map
 }
 
 type retryEntry struct {
@@ -322,7 +329,6 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 		return err
 	}
 
-	oc.syncPeriodic()
 	klog.Infof("Starting all the Watchers...")
 	start := time.Now()
 
@@ -334,10 +340,15 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	// dependencies, and WatchNodes() depends on it
 	oc.WatchNamespaces()
 
-	// WatchNodes must be started next because it creates the node switch
-	// which most other watches depend on.
+	// NodesController must be started next because it creates the node switch
+	// which most other controllers depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
-	oc.WatchNodes()
+	oc.initNodeController(oc.watchFactory.NodeInformer())
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		oc.runNodeController(10, oc.stopChan)
+	}()
 
 	// Start service watch factory and sync services
 	oc.svcFactory.Start(oc.stopChan)
@@ -389,7 +400,7 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 		klog.Infof("Starting unidling controller")
 		unidlingController, err := unidling.NewController(
 			oc.recorder,
-			oc.watchFactory.ServiceInformer(),
+			oc.watchFactory.ServiceInformer().Informer(),
 			oc.sbClient,
 		)
 		if err != nil {
@@ -500,24 +511,6 @@ func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
 		return 0, fmt.Errorf("invalid OVN topology version string for the cluster, err: %v", err)
 	}
 	return ver, nil
-}
-
-// syncPeriodic adds a goroutine that periodically does some work
-// right now there is only one ticker registered
-// for syncNodesPeriodic which deletes chassis records from the sbdb
-// every 5 minutes
-func (oc *Controller) syncPeriodic() {
-	go func() {
-		nodeSyncTicker := time.NewTicker(5 * time.Minute)
-		for {
-			select {
-			case <-nodeSyncTicker.C:
-				oc.syncNodesPeriodic()
-			case <-oc.stopChan:
-				return
-			}
-		}
-	}()
 }
 
 func (oc *Controller) recordPodEvent(addErr error, pod *kapi.Pod) {
@@ -680,15 +673,6 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 	}
 
 	return true
-}
-
-func (oc *Controller) requestRetryPods() {
-	select {
-	case oc.retryPodsChan <- struct{}{}:
-		klog.V(5).Infof("Iterate retry pods requested")
-	default:
-		klog.V(5).Infof("Iterate retry pods already requested")
-	}
 }
 
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
@@ -1174,155 +1158,6 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 	return nil
 }
 
-// WatchNodes starts the watching of node resource and calls
-// back the appropriate handler logic
-func (oc *Controller) WatchNodes() {
-	var gatewaysFailed sync.Map
-	var mgmtPortFailed sync.Map
-	var addNodeFailed sync.Map
-	var nodeClusterRouterPortFailed sync.Map
-
-	start := time.Now()
-	oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			node := obj.(*kapi.Node)
-			if noHostSubnet := noHostSubnet(node); noHostSubnet {
-				err := oc.lsManager.AddNoHostSubnetNode(node.Name)
-				if err != nil {
-					klog.Errorf("Error creating logical switch cache for node %s: %v", node.Name, err)
-				}
-				return
-			}
-
-			klog.V(5).Infof("Added event for Node %q", node.Name)
-			hostSubnets, err := oc.addNode(node)
-			if err != nil {
-				klog.Errorf("NodeAdd: error creating subnet for node %s: %v", node.Name, err)
-				addNodeFailed.Store(node.Name, true)
-				mgmtPortFailed.Store(node.Name, true)
-				gatewaysFailed.Store(node.Name, true)
-				return
-			}
-
-			if err = oc.syncNodeClusterRouterPort(node, hostSubnets); err != nil {
-				if !util.IsAnnotationNotSetError(err) {
-					klog.Warningf(err.Error())
-				}
-				nodeClusterRouterPortFailed.Store(node.Name, true)
-			}
-
-			err = oc.syncNodeManagementPort(node, hostSubnets)
-			if err != nil {
-				if !util.IsAnnotationNotSetError(err) {
-					klog.Warningf("Error creating management port for node %s: %v", node.Name, err)
-				}
-				mgmtPortFailed.Store(node.Name, true)
-			}
-
-			if err := oc.syncNodeGateway(node, hostSubnets); err != nil {
-				if !util.IsAnnotationNotSetError(err) {
-					klog.Warningf(err.Error())
-				}
-				gatewaysFailed.Store(node.Name, true)
-			}
-
-			// ensure pods that already exist on this node have their logical ports created
-			options := metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String()}
-			pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
-			if err != nil {
-				klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
-			} else {
-				oc.addRetryPods(pods.Items)
-				oc.requestRetryPods()
-			}
-
-		},
-		UpdateFunc: func(old, new interface{}) {
-			oldNode := old.(*kapi.Node)
-			node := new.(*kapi.Node)
-
-			shouldUpdate, err := shouldUpdate(node, oldNode)
-			if err != nil {
-				klog.Errorf(err.Error())
-			}
-			if !shouldUpdate {
-				// the hostsubnet is not assigned by ovn-kubernetes
-				return
-			}
-
-			var hostSubnets []*net.IPNet
-			_, failed := addNodeFailed.Load(node.Name)
-			if failed {
-				hostSubnets, err = oc.addNode(node)
-				if err != nil {
-					klog.Errorf("NodeUpdate: error creating subnet for node %s: %v", node.Name, err)
-					return
-				}
-				addNodeFailed.Delete(node.Name)
-			}
-
-			_, failed = nodeClusterRouterPortFailed.Load(node.Name)
-			if failed || nodeChassisChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
-				if err = oc.syncNodeClusterRouterPort(node, nil); err != nil {
-					if !util.IsAnnotationNotSetError(err) {
-						klog.Warningf(err.Error())
-					}
-					nodeClusterRouterPortFailed.Store(node.Name, true)
-				} else {
-					nodeClusterRouterPortFailed.Delete(node.Name)
-				}
-			}
-
-			_, failed = mgmtPortFailed.Load(node.Name)
-			if failed || macAddressChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
-				err := oc.syncNodeManagementPort(node, hostSubnets)
-				if err != nil {
-					if !util.IsAnnotationNotSetError(err) {
-						klog.Errorf("Error updating management port for node %s: %v", node.Name, err)
-					}
-					mgmtPortFailed.Store(node.Name, true)
-				} else {
-					mgmtPortFailed.Delete(node.Name)
-				}
-			}
-
-			if nodeChassisChanged(oldNode, node) {
-				// delete stale chassis in SBDB if any
-				oc.deleteStaleNodeChassis(node)
-			}
-
-			oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
-
-			_, failed = gatewaysFailed.Load(node.Name)
-			if failed || gatewayChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) || hostAddressesChanged(oldNode, node) {
-				err := oc.syncNodeGateway(node, nil)
-				if err != nil {
-					if !util.IsAnnotationNotSetError(err) {
-						klog.Errorf(err.Error())
-					}
-					gatewaysFailed.Store(node.Name, true)
-				} else {
-					gatewaysFailed.Delete(node.Name)
-				}
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			node := obj.(*kapi.Node)
-			klog.V(5).Infof("Delete event for Node %q. Removing the node from "+
-				"various caches", node.Name)
-
-			nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
-			oc.deleteNode(node.Name, nodeSubnets)
-			oc.lsManager.DeleteNode(node.Name)
-			addNodeFailed.Delete(node.Name)
-			mgmtPortFailed.Delete(node.Name)
-			gatewaysFailed.Delete(node.Name)
-			nodeClusterRouterPortFailed.Delete(node.Name)
-		},
-	}, oc.syncNodes)
-	klog.Infof("Bootstrapping existing nodes and cleaning stale nodes took %v", time.Since(start))
-}
-
 // GetNetworkPolicyACLLogging retrieves ACL deny policy logging setting for the Namespace
 func (oc *Controller) GetNetworkPolicyACLLogging(ns string) *ACLLoggingLevels {
 	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
@@ -1363,36 +1198,54 @@ func (oc *Controller) aclLoggingCanEnable(annotation string, nsInfo *namespaceIn
 }
 
 // gatewayChanged() compares old annotations to new and returns true if something has changed.
-func gatewayChanged(oldNode, newNode *kapi.Node) bool {
-	oldL3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(oldNode)
+func gatewayChanged(oldNode *util.NodeCacheEntry, newNode *kapi.Node) bool {
+	oldL3GatewayConfig, _ := util.ParseCachedNodeL3GatewayAnnotation(oldNode)
 	l3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(newNode)
 	return !reflect.DeepEqual(oldL3GatewayConfig, l3GatewayConfig)
 }
 
 // hostAddressesChanged compares old annotations to new and returns true if the something has changed.
-func hostAddressesChanged(oldNode, newNode *kapi.Node) bool {
-	oldAddrs, _ := util.ParseNodeHostAddresses(oldNode)
+func hostAddressesChanged(oldNode *util.NodeCacheEntry, newNode *kapi.Node) bool {
+	oldAddrs, _ := util.ParseCachedNodeHostAddresses(oldNode)
 	Addrs, _ := util.ParseNodeHostAddresses(newNode)
 	return !oldAddrs.Equal(Addrs)
 }
 
 // macAddressChanged() compares old annotations to new and returns true if something has changed.
-func macAddressChanged(oldNode, node *kapi.Node) bool {
-	oldMacAddress, _ := util.ParseNodeManagementPortMACAddress(oldNode)
+func macAddressChanged(oldNode *util.NodeCacheEntry, node *kapi.Node) bool {
+	oldMacAddress, _ := util.ParseCachedNodeManagementPortMACAddress(oldNode)
 	macAddress, _ := util.ParseNodeManagementPortMACAddress(node)
 	return !bytes.Equal(oldMacAddress, macAddress)
 }
 
-func nodeSubnetChanged(oldNode, node *kapi.Node) bool {
-	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode)
+func nodeSubnetChanged(oldNode *util.NodeCacheEntry, node *kapi.Node) bool {
+	oldSubnets, _ := util.ParseCachedNodeHostSubnetAnnotation(oldNode)
 	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
 	return !reflect.DeepEqual(oldSubnets, newSubnets)
 }
 
-func nodeChassisChanged(oldNode, node *kapi.Node) bool {
-	oldChassis, _ := util.ParseNodeChassisIDAnnotation(oldNode)
+func nodeChassisChanged(oldNode *util.NodeCacheEntry, node *kapi.Node) bool {
+	oldChassis, _ := util.ParseCachedNodeChassisIDAnnotation(oldNode)
 	newChassis, _ := util.ParseNodeChassisIDAnnotation(node)
 	return oldChassis != newChassis
+}
+
+// shouldUpdate() determines if the ovn-kubernetes plugin should update the state of the node.
+// ovn-kube should not perform an update if it does not assign a hostsubnet, or if you want to change
+// whether or not ovn-kubernetes assigns a hostsubnet
+func shouldUpdate(node *kapi.Node, oldNode *util.NodeCacheEntry) (bool, error) {
+	newNoHostSubnet := noHostSubnet(node)
+	oldNoHostSubnet := noHostSubnetCacheNode(oldNode)
+
+	if oldNoHostSubnet && newNoHostSubnet {
+		return false, nil
+	} else if oldNoHostSubnet && !newNoHostSubnet {
+		return false, fmt.Errorf("error updating node %s, cannot remove assigned hostsubnet, please delete node and recreate.", node.Name)
+	} else if !oldNoHostSubnet && newNoHostSubnet {
+		return false, fmt.Errorf("error updating node %s, cannot assign a hostsubnet to already created node, please delete node and recreate.", node.Name)
+	}
+
+	return true, nil
 }
 
 // noHostSubnet() compares the no-hostsubenet-nodes flag with node labels to see if the node is manageing its
@@ -1406,22 +1259,13 @@ func noHostSubnet(node *kapi.Node) bool {
 	return nodeSelector.Matches(labels.Set(node.Labels))
 }
 
-// shouldUpdate() determines if the ovn-kubernetes plugin should update the state of the node.
-// ovn-kube should not perform an update if it does not assign a hostsubnet, or if you want to change
-// whether or not ovn-kubernetes assigns a hostsubnet
-func shouldUpdate(node, oldNode *kapi.Node) (bool, error) {
-	newNoHostSubnet := noHostSubnet(node)
-	oldNoHostSubnet := noHostSubnet(oldNode)
-
-	if oldNoHostSubnet && newNoHostSubnet {
-		return false, nil
-	} else if oldNoHostSubnet && !newNoHostSubnet {
-		return false, fmt.Errorf("error updating node %s, cannot remove assigned hostsubnet, please delete node and recreate.", node.Name)
-	} else if !oldNoHostSubnet && newNoHostSubnet {
-		return false, fmt.Errorf("error updating node %s, cannot assign a hostsubnet to already created node, please delete node and recreate.", node.Name)
+func noHostSubnetCacheNode(node *util.NodeCacheEntry) bool {
+	if config.Kubernetes.NoHostSubnetNodes == nil {
+		return false
 	}
 
-	return true, nil
+	nodeSelector, _ := metav1.LabelSelectorAsSelector(config.Kubernetes.NoHostSubnetNodes)
+	return nodeSelector.Matches(labels.Set(node.Labels))
 }
 
 func newServiceController(client clientset.Interface, nbClient libovsdbclient.Client) (*svccontroller.Controller, informers.SharedInformerFactory) {

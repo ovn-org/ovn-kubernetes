@@ -286,7 +286,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			fakeOvn.controller.WatchNamespaces()
 			fakeOvn.asf.EventuallyExpectEmptyAddressSetExist(hostNetworkNamespace)
 
-			fakeOvn.controller.WatchNodes()
+			fakeOvn.InitAndRunNodeController()
 
 			fakeOvn.controller.StartServiceController(wg, false)
 

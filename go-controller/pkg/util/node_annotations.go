@@ -3,6 +3,7 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	ktypes "k8s.io/apimachinery/pkg/types"
 	"math"
 	"net"
 	"strconv"
@@ -97,6 +98,15 @@ type l3GatewayConfigJSON struct {
 	NextHop             string             `json:"next-hop,omitempty"`
 	NodePortEnable      string             `json:"node-port-enable,omitempty"`
 	VLANID              string             `json:"vlan-id,omitempty"`
+}
+
+type NodeCacheEntry struct {
+	UID         ktypes.UID
+	Name        string
+	Annotations map[string]string
+	Labels      map[string]string
+	ProviderID  string
+	Conditions  []kapi.NodeCondition
 }
 
 func (cfg *L3GatewayConfig) MarshalJSON() ([]byte, error) {
@@ -254,16 +264,15 @@ func SetL3GatewayConfig(nodeAnnotator kube.Annotator, cfg *L3GatewayConfig) erro
 	return nil
 }
 
-// ParseNodeL3GatewayAnnotation returns the parsed l3-gateway-config annotation
-func ParseNodeL3GatewayAnnotation(node *kapi.Node) (*L3GatewayConfig, error) {
-	l3GatewayAnnotation, ok := node.Annotations[ovnNodeL3GatewayConfig]
+func parseNodeL3GatewayAnnotationCommon(annotations map[string]string, name string) (*L3GatewayConfig, error) {
+	l3GatewayAnnotation, ok := annotations[ovnNodeL3GatewayConfig]
 	if !ok {
-		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeL3GatewayConfig, node.Name)
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeL3GatewayConfig, name)
 	}
 
 	var cfgs map[string]*L3GatewayConfig
 	if err := json.Unmarshal([]byte(l3GatewayAnnotation), &cfgs); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal l3 gateway config annotation %s for node %q: %v", l3GatewayAnnotation, node.Name, err)
+		return nil, fmt.Errorf("failed to unmarshal l3 gateway config annotation %s for node %q: %v", l3GatewayAnnotation, name, err)
 	}
 
 	cfg, ok := cfgs[ovnDefaultNetworkGateway]
@@ -272,7 +281,7 @@ func ParseNodeL3GatewayAnnotation(node *kapi.Node) (*L3GatewayConfig, error) {
 	}
 
 	if cfg.Mode != config.GatewayModeDisabled {
-		cfg.ChassisID, ok = node.Annotations[ovnNodeChassisID]
+		cfg.ChassisID, ok = annotations[ovnNodeChassisID]
 		if !ok {
 			return nil, fmt.Errorf("%s annotation not found", ovnNodeChassisID)
 		}
@@ -280,31 +289,56 @@ func ParseNodeL3GatewayAnnotation(node *kapi.Node) (*L3GatewayConfig, error) {
 	return cfg, nil
 }
 
+// ParseNodeL3GatewayAnnotation returns the parsed l3-gateway-config annotation
+func ParseNodeL3GatewayAnnotation(node *kapi.Node) (*L3GatewayConfig, error) {
+	return parseNodeL3GatewayAnnotationCommon(node.Annotations, node.Name)
+}
+
+func ParseCachedNodeL3GatewayAnnotation(node *NodeCacheEntry) (*L3GatewayConfig, error) {
+	return parseNodeL3GatewayAnnotationCommon(node.Annotations, node.Name)
+}
+
 func NodeL3GatewayAnnotationChanged(oldNode, newNode *kapi.Node) bool {
 	return oldNode.Annotations[ovnNodeL3GatewayConfig] != newNode.Annotations[ovnNodeL3GatewayConfig]
 }
 
-// ParseNodeChassisIDAnnotation returns the node's ovnNodeChassisID annotation
-func ParseNodeChassisIDAnnotation(node *kapi.Node) (string, error) {
-	chassisID, ok := node.Annotations[ovnNodeChassisID]
+func parseNodeChassisIDAnnotationCommon(annotations map[string]string, name string) (string, error) {
+	chassisID, ok := annotations[ovnNodeChassisID]
 	if !ok {
-		return "", fmt.Errorf("%s annotation not found for node %s", ovnNodeChassisID, node.Name)
+		return "", fmt.Errorf("%s annotation not found for node %s", ovnNodeChassisID, name)
 	}
 
 	return chassisID, nil
+}
+
+// ParseNodeChassisIDAnnotation returns the node's ovnNodeChassisID annotation
+func ParseNodeChassisIDAnnotation(node *kapi.Node) (string, error) {
+	return parseNodeChassisIDAnnotationCommon(node.Annotations, node.Name)
+}
+
+func ParseCachedNodeChassisIDAnnotation(node *NodeCacheEntry) (string, error) {
+	return parseNodeChassisIDAnnotationCommon(node.Annotations, node.Name)
 }
 
 func SetNodeManagementPortMACAddress(nodeAnnotator kube.Annotator, macAddress net.HardwareAddr) error {
 	return nodeAnnotator.Set(ovnNodeManagementPortMacAddress, macAddress.String())
 }
 
-func ParseNodeManagementPortMACAddress(node *kapi.Node) (net.HardwareAddr, error) {
-	macAddress, ok := node.Annotations[ovnNodeManagementPortMacAddress]
+func parseNodeManagementPortMACAddressCommon(annotations map[string]string, name string) (net.HardwareAddr, error) {
+	macAddress, ok := annotations[ovnNodeManagementPortMacAddress]
 	if !ok {
-		return nil, newAnnotationNotSetError("macAddress annotation not found for node %q ", node.Name)
+		return nil, newAnnotationNotSetError("macAddress annotation not found for node %q ", name)
 	}
 
 	return net.ParseMAC(macAddress)
+}
+
+func ParseNodeManagementPortMACAddress(node *kapi.Node) (net.HardwareAddr, error) {
+	return parseNodeManagementPortMACAddressCommon(node.Annotations, node.Name)
+}
+
+func ParseCachedNodeManagementPortMACAddress(node *NodeCacheEntry) (net.HardwareAddr, error) {
+	return parseNodeManagementPortMACAddressCommon(node.Annotations, node.Name)
 }
 
 type primaryIfAddrAnnotation struct {
@@ -478,18 +512,27 @@ func SetNodeHostAddresses(nodeAnnotator kube.Annotator, addresses sets.String) e
 	return nodeAnnotator.Set(ovnNodeHostAddresses, addresses.List())
 }
 
-// ParseNodeHostAddresses returns the parsed host addresses living on a node
-func ParseNodeHostAddresses(node *kapi.Node) (sets.String, error) {
-	addrAnnotation, ok := node.Annotations[ovnNodeHostAddresses]
+func parseNodeHostAddressesCommon(annotations map[string]string, name string) (sets.String, error) {
+	addrAnnotation, ok := annotations[ovnNodeHostAddresses]
 	if !ok {
-		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeHostAddresses, node.Name)
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeHostAddresses, name)
 	}
 
 	var cfg []string
 	if err := json.Unmarshal([]byte(addrAnnotation), &cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal host addresses annotation %s for node %q: %v",
-			addrAnnotation, node.Name, err)
+			addrAnnotation, name, err)
 	}
 
 	return sets.NewString(cfg...), nil
+}
+
+// ParseNodeHostAddresses returns the parsed host addresses living on a node
+func ParseNodeHostAddresses(node *kapi.Node) (sets.String, error) {
+	return parseNodeHostAddressesCommon(node.Annotations, node.Name)
+}
+
+// ParseCachedNodeHostAddresses returns the parsed host addresses living on a node
+func ParseCachedNodeHostAddresses(node *NodeCacheEntry) (sets.String, error) {
+	return parseNodeHostAddressesCommon(node.Annotations, node.Name)
 }

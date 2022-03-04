@@ -17,6 +17,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/klog/v2"
+	"sync"
 )
 
 const (
@@ -42,6 +44,7 @@ type FakeOVN struct {
 	nbClient     libovsdbclient.Client
 	sbClient     libovsdbclient.Client
 	dbSetup      libovsdbtest.TestSetup
+	nodeWg       *sync.WaitGroup
 	nbsbCleanup  *libovsdbtest.Cleanup
 }
 
@@ -49,6 +52,7 @@ func NewFakeOVN() *FakeOVN {
 	return &FakeOVN{
 		asf:          addressset.NewFakeAddressSetFactory(),
 		fakeRecorder: record.NewFakeRecorder(10),
+		nodeWg:       &sync.WaitGroup{},
 	}
 }
 
@@ -82,9 +86,20 @@ func (o *FakeOVN) startWithDBSetup(dbSetup libovsdbtest.TestSetup, objects ...ru
 	o.start(objects...)
 }
 
+func (o *FakeOVN) InitAndRunNodeController() {
+	klog.Warningf("#### [%p] INIT Node", o)
+	o.controller.initNodeController(o.watcher.NodeInformer())
+	o.nodeWg.Add(1)
+	go func() {
+		defer o.nodeWg.Done()
+		o.controller.runNodeController(10, o.stopChan)
+	}()
+}
+
 func (o *FakeOVN) shutdown() {
 	o.watcher.Shutdown()
 	close(o.stopChan)
+	o.nodeWg.Wait()
 	o.nbsbCleanup.Cleanup()
 }
 

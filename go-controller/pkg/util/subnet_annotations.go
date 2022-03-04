@@ -70,10 +70,10 @@ func setSubnetAnnotation(nodeAnnotator kube.Annotator, annotationName string, de
 	return nodeAnnotator.Set(annotationName, annotation[annotationName])
 }
 
-func parseSubnetAnnotation(node *kapi.Node, annotationName string) ([]*net.IPNet, error) {
-	annotation, ok := node.Annotations[annotationName]
+func parseSubnetAnnotationCommon(annotations map[string]string, name string, annotationName string) ([]*net.IPNet, error) {
+	annotation, ok := annotations[annotationName]
 	if !ok {
-		return nil, newAnnotationNotSetError("node %q has no %q annotation", node.Name, annotationName)
+		return nil, newAnnotationNotSetError("node %q has no %q annotation", name, annotationName)
 	}
 
 	var subnets []string
@@ -105,6 +105,14 @@ func parseSubnetAnnotation(node *kapi.Node, annotationName string) ([]*net.IPNet
 	return ipnets, nil
 }
 
+func parseSubnetAnnotation(node *kapi.Node, annotationName string) ([]*net.IPNet, error) {
+	return parseSubnetAnnotationCommon(node.Annotations, node.Name, annotationName)
+}
+
+func parseCachedNodeSubnetAnnotation(node *NodeCacheEntry, annotationName string) ([]*net.IPNet, error) {
+	return parseSubnetAnnotationCommon(node.Annotations, node.Name, annotationName)
+}
+
 func NodeSubnetAnnotationChanged(oldNode, newNode *v1.Node) bool {
 	return oldNode.Annotations[ovnNodeSubnets] != newNode.Annotations[ovnNodeSubnets]
 }
@@ -131,4 +139,10 @@ func DeleteNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator) {
 // on a node and returns the "default" host subnet.
 func ParseNodeHostSubnetAnnotation(node *kapi.Node) ([]*net.IPNet, error) {
 	return parseSubnetAnnotation(node, ovnNodeSubnets)
+}
+
+// ParseCachedNodeHostSubnetAnnotation parses the "k8s.ovn.org/node-subnets" annotation
+// on a node and returns the "default" host subnet.
+func ParseCachedNodeHostSubnetAnnotation(node *NodeCacheEntry) ([]*net.IPNet, error) {
+	return parseCachedNodeSubnetAnnotation(node, ovnNodeSubnets)
 }
