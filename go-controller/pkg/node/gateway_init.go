@@ -74,7 +74,7 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface, physicalNetw
 }
 
 // getNetworkInterfaceIPAddresses returns the IP addresses for the network interface 'iface'.
-func getNetworkInterfaceIPAddresses(iface string) ([]*net.IPNet, error) {
+func getNetworkInterfaceIPAddresses(iface string, kubeNodeIP net.IP) ([]*net.IPNet, error) {
 	allIPs, err := util.GetNetworkInterfaceIPs(iface)
 	if err != nil {
 		return nil, fmt.Errorf("could not find IP addresses: %v", err)
@@ -105,6 +105,18 @@ func getNetworkInterfaceIPAddresses(iface string) ([]*net.IPNet, error) {
 	} else if config.IPv6Mode && !foundIPv6 {
 		return nil, fmt.Errorf("failed to find IPv6 address on interface %s", iface)
 	}
+
+	// For DPU need to use the host IP addr which currently is assumed to be K8s Node cluster
+	// internal IP address.
+	// Just for safety, also check that this is GatewayModeShared
+	if config.Gateway.Mode == config.GatewayModeShared &&
+		config.OvnKubeNode.Mode == types.NodeModeDPU {
+		ips, err = getDPUHostPrimaryIPAddresses(kubeNodeIP, ips)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return ips, nil
 }
 
@@ -283,24 +295,14 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 		egressGWInterface = interfaceForEXGW(config.Gateway.EgressGWInterface)
 	}
 
-	ifAddrs, err = getNetworkInterfaceIPAddresses(gatewayIntf)
+	// returns the IP addresses and accounts for DPU
+	ifAddrs, err = getNetworkInterfaceIPAddresses(gatewayIntf, kubeNodeIP)
 	if err != nil {
 		return err
 	}
 
-	// For DPU need to use the host IP addr which currently is assumed to be K8s Node cluster
-	// internal IP address.
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		ifAddrs, err = getDPUHostPrimaryIPAddresses(kubeNodeIP, ifAddrs)
-		if err != nil {
-			return err
-		}
-	}
-
-	v4IfAddr, _ := util.MatchIPNetFamily(false, ifAddrs)
-	v6IfAddr, _ := util.MatchIPNetFamily(true, ifAddrs)
-
-	if err := util.SetNodePrimaryIfAddr(nodeAnnotator, v4IfAddr, v6IfAddr); err != nil {
+	// sets both IPv4 and IPv6 primary IP addr in annotation k8s.ovn.org/node-primary-ifaddr
+	if err := util.SetNodePrimaryIfAddrs(nodeAnnotator, ifAddrs); err != nil {
 		klog.Errorf("Unable to set primary IP net label on node, err: %v", err)
 	}
 

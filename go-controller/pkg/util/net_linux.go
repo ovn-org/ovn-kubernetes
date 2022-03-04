@@ -10,6 +10,7 @@ import (
 	"os"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -440,6 +441,7 @@ func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
 		// flags are used to mark load balancer IPs that aren't permanently owned
 		// by the node).
 		if (addr.Flags & (unix.IFA_F_SECONDARY | unix.IFA_F_DEPRECATED)) != 0 {
+			klog.Infof("Skipping IP address %v on interface %s because it is a secondary IP address", addr.IPNet, iface)
 			continue
 		}
 		ips = append(ips, addr.IPNet)
