@@ -23,10 +23,10 @@ import (
 	klog "k8s.io/klog/v2"
 )
 
-// metricNbE2eTimestamp is the UNIX timestamp value set to NB DB. A corresponding metric
-// 'sb_e2e_timestamp' for SB DB will contain the timestamp that was written to NB DB.
-// This is registered within func RunTimestamp in order to allow gathering this metric on
-// the fly when metrics are scraped.
+// metricNbE2eTimestamp is the UNIX timestamp value set to NB DB. Northd will eventually copy this
+// timestamp from NB DB to SB DB. The metric 'sb_e2e_timestamp' stores the timestamp that is
+// read from SB DB. This is registered within func RunTimestamp in order to allow gathering this
+// metric on the fly when metrics are scraped.
 var metricNbE2eTimestamp = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
