@@ -245,6 +245,11 @@ var metricPortBindingUpLatency = prometheus.NewHistogram(prometheus.HistogramOpt
 	Buckets:   prometheus.ExponentialBuckets(.01, 2, 15),
 })
 
+const (
+	globalOptionsTimestampField     = "e2e_timestamp"
+	globalOptionsProbeIntervalField = "northd_probe_interval"
+)
+
 // RegisterMasterBase registers ovnkube master base metrics with the Prometheus registry.
 // This function should only be called once.
 func RegisterMasterBase() {
@@ -302,23 +307,7 @@ func RegisterMasterPerformance(nbClient libovsdbclient.Client) {
 			Help: "The maximum number of milliseconds of idle time on connection to the OVN SB " +
 				"and NB DB before sending an inactivity probe message",
 		}, func() float64 {
-			var nbGlobal *nbdb.NBGlobal
-			var probeInterval string
-			var ok bool
-			var err error
-
-			if nbGlobal, err = libovsdbops.FindNBGlobal(nbClient); err != nil {
-				klog.Errorf("Failed to get NB_Global table "+
-					"err: %v", err)
-				return 0
-			}
-
-			if probeInterval, ok = nbGlobal.Options["northd_probe_interval"]; !ok {
-				klog.Errorf("Failed to get northd_probe_interval from NB_Global table options column")
-				return 0
-			}
-
-			return parseMetricToFloat(MetricOvnSubsystemNorthd, "probe_interval", probeInterval)
+			return getGlobalOptionsValue(nbClient, globalOptionsProbeIntervalField)
 		},
 	))
 }
@@ -347,24 +336,15 @@ func RunTimestamp(stopChan <-chan struct{}, sbClient, nbClient libovsdbclient.Cl
 
 	// Metric named sb_e2e_timestamp is the UNIX timestamp observed in SB DB. The value is read from the SB DB
 	// cache when metrics HTTP endpoint is scraped.
-	scrapeOvnSbE2eTimestamp := func() float64 {
-		sbGlobal, err := libovsdbops.FindSBGlobal(sbClient)
-		if err != nil {
-			klog.Errorf("Failed to get global options for the SB_Global table: %v", err)
-			return 0
-		}
-		if val, ok := sbGlobal.Options["e2e_timestamp"]; ok {
-			return parseMetricToFloat(MetricOvnkubeSubsystemMaster, "sb_e2e_timestamp", val)
-		}
-		return 0
-	}
 	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnkubeNamespace,
 			Subsystem: MetricOvnkubeSubsystemMaster,
 			Name:      "sb_e2e_timestamp",
 			Help:      "The current e2e-timestamp value as observed in the southbound database",
-		}, scrapeOvnSbE2eTimestamp))
+		}, func() float64 {
+			return getGlobalOptionsValue(sbClient, globalOptionsTimestampField)
+		}))
 
 	// Metric named e2e_timestamp is the UNIX timestamp observed in NB and SB DBs cache with the DB name
 	// (OVN_Northbound|OVN_Southbound) set as a label. Updated every 30s.
@@ -379,10 +359,12 @@ func RunTimestamp(stopChan <-chan struct{}, sbClient, nbClient libovsdbclient.Cl
 				currentTime := time.Now().Unix()
 				if setNbE2eTimestamp(nbClient, currentTime) {
 					metricNbE2eTimestamp.Set(float64(currentTime))
+				} else {
+					metricNbE2eTimestamp.Set(0)
 				}
 
-				metricDbTimestamp.WithLabelValues(nbClient.Schema().Name).Set(getDbOptionsTimestamp(nbClient))
-				metricDbTimestamp.WithLabelValues(sbClient.Schema().Name).Set(getDbOptionsTimestamp(sbClient))
+				metricDbTimestamp.WithLabelValues(nbClient.Schema().Name).Set(getGlobalOptionsValue(nbClient, globalOptionsTimestampField))
+				metricDbTimestamp.WithLabelValues(sbClient.Schema().Name).Set(getGlobalOptionsValue(sbClient, globalOptionsTimestampField))
 			case <-stopChan:
 				return
 			}
@@ -649,7 +631,7 @@ func getPodUIDFromPortBinding(row *sbdb.PortBinding) kapimtypes.UID {
 // setNbE2eTimestamp return true if setting timestamp to NB global options is successful
 func setNbE2eTimestamp(ovnNBClient libovsdbclient.Client, timestamp int64) bool {
 	// assumption that only first row is relevant in NB_Global table
-	options := map[string]string{"e2e_timestamp": fmt.Sprintf("%d", timestamp)}
+	options := map[string]string{globalOptionsTimestampField: fmt.Sprintf("%d", timestamp)}
 	if err := libovsdbops.UpdateNBGlobalOptions(ovnNBClient, options); err != nil {
 		klog.Errorf("Unable to update NB global options E2E timestamp metric err: %v", err)
 		return false
@@ -657,7 +639,7 @@ func setNbE2eTimestamp(ovnNBClient libovsdbclient.Client, timestamp int64) bool 
 	return true
 }
 
-func getDbOptionsTimestamp(client libovsdbclient.Client) float64 {
+func getGlobalOptionsValue(client libovsdbclient.Client, field string) float64 {
 	var options map[string]string
 	dbName := client.Schema().Name
 
@@ -678,22 +660,16 @@ func getDbOptionsTimestamp(client libovsdbclient.Client) float64 {
 			options = sbGlobal.Options
 		}
 	}
-	return extractOptionsTimestamp(options, dbName)
-}
 
-func extractOptionsTimestamp(options map[string]string, name string) float64 {
-	var v string
-	var ok bool
-
-	if v, ok = options["e2e_timestamp"]; !ok {
-		klog.V(5).Infof("Failed to find 'e2e-timestamp' from %s options. This may occur at startup.", name)
-		return 0
-	}
-
-	if value, err := strconv.ParseFloat(v, 64); err != nil {
-		klog.Errorf("Failed to parse 'e2e-timestamp' value to float64 err: %v", err)
+	if v, ok := options[field]; !ok {
+		klog.V(5).Infof("Failed to find %q from %s options. This may occur at startup.", field, dbName)
 		return 0
 	} else {
-		return value
+		if value, err := strconv.ParseFloat(v, 64); err != nil {
+			klog.Errorf("Failed to parse %q value to float64 err: %v", field, err)
+			return 0
+		} else {
+			return value
+		}
 	}
 }
