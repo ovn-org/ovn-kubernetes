@@ -228,6 +228,10 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 
 	// Remove any stale representor ports
 	for _, ifaceInfo := range interfaceInfos {
+		// ignore non-vf representor ports
+		if _, ok := ifaceInfo.Attributes["vf-netdev-name"]; !ok {
+			continue
+		}
 		ifaceId, ok := ifaceInfo.Attributes["iface-id"]
 		if !ok {
 			klog.Warningf("iface-id attribute was not found for OVS interface %s. "+
@@ -235,8 +239,6 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 			continue
 		}
 		if _, ok := expectedIfaceIds[ifaceId]; !ok {
-			// TODO(adrianc): To make this more strict we can check if the interface is a VF representor
-			// interface via sriovnet.
 			klog.Warningf("Found stale OVS Interface, deleting OVS Port with interface %s", ifaceInfo.Name)
 			_, stderr, err := util.RunOVSVsctl("--if-exists", "--with-iface", "del-port", ifaceInfo.Name)
 			if err != nil {

@@ -92,8 +92,7 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup, ctx context.Con
 					end := time.Since(start)
 					metrics.MetricMasterReadyDuration.Set(end.Seconds())
 				}()
-				// run only on the active master node.
-				metrics.StartMasterMetricUpdater(oc.stopChan, oc.nbClient)
+
 				if err := oc.StartClusterMaster(nodeName); err != nil {
 					panic(err.Error())
 				}
@@ -214,6 +213,12 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 //  If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	klog.Infof("Starting cluster master")
+
+	metrics.RegisterMasterPerformance(oc.nbClient)
+	metrics.RegisterMasterFunctional()
+	metrics.RunTimestamp(oc.stopChan, oc.sbClient, oc.nbClient)
+	metrics.MonitorIPSec(oc.nbClient)
+	oc.metricsRecorder.Run(oc.sbClient)
 
 	// enableOVNLogicalDataPathGroups sets an OVN flag to enable logical datapath
 	// groups on OVN 20.12 and later. The option is ignored if OVN doesn't

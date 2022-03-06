@@ -283,6 +283,15 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 		for dbName, db := range o.databases {
 			db.monitorsMutex.Lock()
 			defer db.monitorsMutex.Unlock()
+
+			// Purge entire cache if no monitors exist to update dynamically
+			if len(db.monitors) == 0 {
+				db.cache.Purge(db.model)
+				continue
+			}
+
+			// Restart all monitors; each monitor will handle purging
+			// the cache if necessary
 			for id, request := range db.monitors {
 				err := o.monitor(ctx, MonitorCookie{DatabaseName: dbName, ID: id}, true, request)
 				if err != nil {
@@ -384,8 +393,6 @@ func (o *ovsdbClient) tryEndpoint(ctx context.Context, u *url.URL) (string, erro
 				return "", err
 			}
 			db.api = newAPI(db.cache, o.logger)
-		} else {
-			db.cache.Purge(db.model)
 		}
 		db.cacheMutex.Unlock()
 	}
@@ -880,18 +887,22 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 
 	var args []interface{}
 	if monitor.Method == ovsdb.ConditionalMonitorSinceRPC {
-		// FIXME: We should pass the monitor.LastTransactionID here
-		// But that would require delaying clearing the cache until
-		// after the monitors have been re-established - the logic
-		// would also need to be different for monitor and monitor_cond
-		// as we must always clear the cache in that instance
-		args = ovsdb.NewMonitorCondSinceArgs(dbName, cookie, requests, emptyUUID)
+		// If we are reconnecting a CondSince monitor that is the only
+		// monitor, then we can use its LastTransactionID since it is
+		// valid (because we're reconnecting) and we can safely keep
+		// the cache intact (because it's the only monitor).
+		transactionID := emptyUUID
+		if reconnecting && len(db.monitors) == 1 {
+			transactionID = monitor.LastTransactionID
+		}
+		args = ovsdb.NewMonitorCondSinceArgs(dbName, cookie, requests, transactionID)
 	} else {
 		args = ovsdb.NewMonitorArgs(dbName, cookie, requests)
 	}
 	var err error
 	var tableUpdates interface{}
 
+	var lastTransactionFound bool
 	switch monitor.Method {
 	case ovsdb.MonitorRPC:
 		var reply ovsdb.TableUpdates
@@ -906,6 +917,7 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 		err = o.rpcClient.CallWithContext(ctx, monitor.Method, args, &reply)
 		if err == nil && reply.Found {
 			monitor.LastTransactionID = reply.LastTransactionID
+			lastTransactionFound = true
 		}
 		tableUpdates = reply.Updates
 	default:
@@ -938,6 +950,16 @@ func (o *ovsdbClient) monitor(ctx context.Context, cookie MonitorCookie, reconne
 
 	db.cacheMutex.Lock()
 	defer db.cacheMutex.Unlock()
+
+	// On reconnect, purge the cache _unless_ the only monitor is a
+	// MonitorCondSince one, whose LastTransactionID was known to the
+	// server. In this case the reply contains only updates to the existing
+	// cache data, while otherwise it includes complete DB data so we must
+	// purge to get rid of old rows.
+	if reconnecting && (len(db.monitors) > 1 || !lastTransactionFound) {
+		db.cache.Purge(db.model)
+	}
+
 	if monitor.Method == ovsdb.MonitorRPC {
 		u := tableUpdates.(ovsdb.TableUpdates)
 		err = db.cache.Populate(u)

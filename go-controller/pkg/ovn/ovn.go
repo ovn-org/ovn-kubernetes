@@ -314,7 +314,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		svcController:            svcController,
 		svcFactory:               svcFactory,
 		modelClient:              modelClient,
-		metricsRecorder:          metrics.NewControlPlaneRecorder(libovsdbOvnSBClient),
+		metricsRecorder:          metrics.NewControlPlaneRecorder(),
 	}
 }
 

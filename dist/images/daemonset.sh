@@ -7,9 +7,16 @@ set -e
 # The script renders j2 templates into yaml files in ../yaml/
 
 # ensure j2 renderer installed
-pip freeze | grep j2cli || pip install j2cli[yaml] --user
-export PATH=~/.local/bin:$PATH
+if ! command -v j2 >/dev/null 2>&1 ; then 
+  if ! command -v pip >/dev/null 2>&1 ; then 
+    echo "Dependency not met: 'j2' not installed and cannot install with 'pip'"
+    exit 1
+  fi
+  echo "'j2' not found, installing with 'pip'"
+  install_j2_renderer
+fi 
 
+OVN_OUTPUT_DIR=""
 OVN_IMAGE=""
 OVN_IMAGE_PULL_POLICY=""
 OVN_NET_CIDR=""
@@ -64,6 +71,9 @@ while [ "$1" != "" ]; do
   PARAM=$(echo $1 | awk -F= '{print $1}')
   VALUE=$(echo $1 | cut -d= -f2-)
   case $PARAM in
+  --output-directory) 
+    OVN_OUTPUT_DIR=$VALUE
+    ;;
   --image)
     OVN_IMAGE=$VALUE
     ;;
@@ -232,7 +242,17 @@ while [ "$1" != "" ]; do
 done
 
 # Create the daemonsets with the desired image
-# They are expanded into daemonsets in ../yaml
+# They are expanded into daemonsets in the specified
+# output directory.
+if [ -z ${OVN_OUTPUT_DIR} ] ; then 
+  output_dir="../yaml"
+else 
+  output_dir=${OVN_OUTPUT_DIR}
+  if [ ! -d ${OVN_OUTPUT_DIR} ]; then
+    mkdir $output_dir
+  fi 
+fi 
+echo "output_dir: $output_dir"
 
 image=${OVN_IMAGE:-"docker.io/ovnkube/ovn-daemonset:latest"}
 echo "image: ${image}"
@@ -374,7 +394,7 @@ ovn_image=${image} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   ovnkube_app_name=ovnkube-node \
-  j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
+  j2 ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node.yaml
 
 # ovnkube node for dpu-host daemonset
 # TODO: we probably dont need all of these when running on dpu host
@@ -406,7 +426,7 @@ ovn_image=${image} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
   ovnkube_app_name=ovnkube-node-dpu-host \
-  j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node-dpu-host.yaml
+  j2 ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node-dpu-host.yaml
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -431,7 +451,7 @@ ovn_image=${image} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
-  j2 ../templates/ovnkube-master.yaml.j2 -o ../yaml/ovnkube-master.yaml
+  j2 ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -440,7 +460,7 @@ ovn_image=${image} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_nb_port=${ovn_nb_port} \
   ovn_sb_port=${ovn_sb_port} \
-  j2 ../templates/ovnkube-db.yaml.j2 -o ../yaml/ovnkube-db.yaml
+  j2 ../templates/ovnkube-db.yaml.j2 -o ${output_dir}/ovnkube-db.yaml
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -458,12 +478,12 @@ ovn_image=${image} \
   ovn_sb_port=${ovn_sb_port} \
   ovn_nb_raft_port=${ovn_nb_raft_port} \
   ovn_sb_raft_port=${ovn_sb_raft_port} \
-  j2 ../templates/ovnkube-db-raft.yaml.j2 -o ../yaml/ovnkube-db-raft.yaml
+  j2 ../templates/ovnkube-db-raft.yaml.j2 -o ${output_dir}/ovnkube-db-raft.yaml
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
-  j2 ../templates/ovs-node.yaml.j2 -o ../yaml/ovs-node.yaml
+  j2 ../templates/ovs-node.yaml.j2 -o ${output_dir}/ovs-node.yaml
 
 # ovn-setup.yaml
 net_cidr=${OVN_NET_CIDR:-"10.128.0.0/14/23"}
@@ -480,10 +500,10 @@ echo "host_network_namespace: ${host_network_namespace}"
 net_cidr=${net_cidr} svc_cidr=${svc_cidr} \
   mtu_value=${mtu} k8s_apiserver=${k8s_apiserver} \
   host_network_namespace=${host_network_namespace}	\
-  j2 ../templates/ovn-setup.yaml.j2 -o ../yaml/ovn-setup.yaml
+  j2 ../templates/ovn-setup.yaml.j2 -o ${output_dir}/ovn-setup.yaml
 
-cp ../templates/ovnkube-monitor.yaml.j2 ../yaml/ovnkube-monitor.yaml
-cp ../templates/k8s.ovn.org_egressfirewalls.yaml.j2 ../yaml/k8s.ovn.org_egressfirewalls.yaml
-cp ../templates/k8s.ovn.org_egressips.yaml.j2 ../yaml/k8s.ovn.org_egressips.yaml
+cp ../templates/ovnkube-monitor.yaml.j2 ${output_dir}/ovnkube-monitor.yaml
+cp ../templates/k8s.ovn.org_egressfirewalls.yaml.j2 ${output_dir}/k8s.ovn.org_egressfirewalls.yaml
+cp ../templates/k8s.ovn.org_egressips.yaml.j2 ${output_dir}/k8s.ovn.org_egressips.yaml
 
 exit 0

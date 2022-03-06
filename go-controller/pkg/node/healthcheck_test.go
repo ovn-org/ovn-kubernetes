@@ -118,9 +118,9 @@ var _ = Describe("Healthcheck tests", func() {
 				// mock call to find OVS interfaces with non-empty external_ids:sandbox
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: genFindInterfaceWithSandboxCmd(),
-					Output: "pod-a-ifc,sandbox=123abcfaa iface-id=a-ns_a-pod\n" +
-						"pod-b-ifc,sandbox=123abcfaa iface-id=b-ns_b-pod\n" +
-						"stale-pod-ifc,sandbox=123abcfaa iface-id=stale-ns_stale-pod\n",
+					Output: "pod-a-ifc,sandbox=123abcfaa iface-id=a-ns_a-pod vf-netdev-name=blah\n" +
+						"pod-b-ifc,sandbox=123abcfaa iface-id=b-ns_b-pod vf-netdev-name=blah\n" +
+						"stale-pod-ifc,sandbox=123abcfaa iface-id=stale-ns_stale-pod vf-netdev-name=blah\n",
 					Err: nil,
 				})
 
