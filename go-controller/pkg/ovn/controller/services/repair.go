@@ -68,9 +68,12 @@ func (r *repair) runBeforeSync() {
 	}()
 
 	// Ensure unidling is enabled
+	nbGlobal := nbdb.NBGlobal{
+		Options: map[string]string{"controller_event": "true"},
+	}
 	if globalconfig.Kubernetes.OVNEmptyLbEvents {
-		if err := libovsdbops.UpdateNBGlobalOptions(r.nbClient, map[string]string{"controller_event": "true"}); err != nil {
-			klog.Error("Unable to enable controller events. Unidling not possible")
+		if err := libovsdbops.UpdateNBGlobalSetOptions(r.nbClient, &nbGlobal); err != nil {
+			klog.Errorf("Unable to enable controller events, unidling not possible: %v", err)
 		}
 	}
 

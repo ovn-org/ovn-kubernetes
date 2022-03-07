@@ -231,8 +231,10 @@ func (oc *Controller) StartClusterMaster() error {
 	// understand it. Logical datapath groups reduce the size of the southbound
 	// database in large clusters. ovn-controllers should be upgraded to a version
 	// that supports them before the option is turned on by the master.
-	dpGroupOpts := map[string]string{"use_logical_dp_groups": "true"}
-	if err := libovsdbops.UpdateNBGlobalOptions(oc.nbClient, dpGroupOpts); err != nil {
+	nbGlobal := nbdb.NBGlobal{
+		Options: map[string]string{"use_logical_dp_groups": "true"},
+	}
+	if err := libovsdbops.UpdateNBGlobalSetOptions(oc.nbClient, &nbGlobal); err != nil {
 		klog.Errorf("Failed to set NB global option to enable logical datapath groups: %v", err)
 		return err
 	}
