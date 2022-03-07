@@ -6,7 +6,6 @@ import (
 	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -2344,10 +2343,9 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Items: pod,
 					},
 				)
-				natUUID := libovsdbops.BuildNamedUUID()
 				finalNB := []libovsdbtest.TestData{
 					&nbdb.NAT{
-						UUID:       natUUID,
+						UUID:       "nat-UUID",
 						ExternalIP: "169.254.33.2",
 						LogicalIP:  "10.128.1.3",
 						Options:    map[string]string{"stateless": "false"},
@@ -2356,7 +2354,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					&nbdb.LogicalRouter{
 						Name: types.GWRouterPrefix + nodeName,
 						UUID: types.GWRouterPrefix + nodeName + "-UUID",
-						Nat:  []string{natUUID},
+						Nat:  []string{"nat-UUID"},
 					},
 					&nbdb.LogicalRouterPort{
 						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + nodeName + "-UUID",

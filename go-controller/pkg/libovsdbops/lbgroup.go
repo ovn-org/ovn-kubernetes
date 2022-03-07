@@ -13,14 +13,14 @@ import (
 // CreateOrUpdateLoadBalancerGroup creates or updates the provided load balancer
 // group
 func CreateOrUpdateLoadBalancerGroup(nbClient libovsdbclient.Client, group *nbdb.LoadBalancerGroup) error {
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:          group,
 		OnModelUpdates: onModelUpdatesAll(),
 		ErrNotFound:    false,
 		BulkOp:         false,
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	_, err := m.CreateOrUpdate(opModel)
 	return err
 }
@@ -33,7 +33,7 @@ func AddLoadBalancersToGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 	for _, lb := range lbs {
 		group.LoadBalancer = append(group.LoadBalancer, lb.UUID)
 	}
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:            group,
 		ModelPredicate:   func(item *nbdb.LoadBalancerGroup) bool { return item.Name == group.Name },
 		OnModelMutations: []interface{}{&group.LoadBalancer},
@@ -41,7 +41,7 @@ func AddLoadBalancersToGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 		BulkOp:           false,
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	ops, err := m.CreateOrUpdateOps(ops, opModel)
 	group.LoadBalancer = originalLBs
 	return ops, err
@@ -55,7 +55,7 @@ func RemoveLoadBalancersFromGroupOps(nbClient libovsdbclient.Client, ops []libov
 	for _, lb := range lbs {
 		group.LoadBalancer = append(group.LoadBalancer, lb.UUID)
 	}
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:            group,
 		ModelPredicate:   func(item *nbdb.LoadBalancerGroup) bool { return item.Name == group.Name },
 		OnModelMutations: []interface{}{&group.LoadBalancer},
@@ -63,7 +63,7 @@ func RemoveLoadBalancersFromGroupOps(nbClient libovsdbclient.Client, ops []libov
 		BulkOp:           false,
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	ops, err := m.DeleteOps(ops, opModel)
 	group.LoadBalancer = originalLBs
 	return ops, err

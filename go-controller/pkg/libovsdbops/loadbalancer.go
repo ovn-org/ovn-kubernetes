@@ -61,11 +61,11 @@ func BuildLoadBalancer(name string, protocol nbdb.LoadBalancerProtocol, selectio
 // CreateOrUpdateLoadBalancersOps creates or updates the provided load balancers
 // returning the corresponding ops
 func CreateOrUpdateLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
-	opModels := make([]OperationModel, 0, len(lbs))
+	opModels := make([]operationModel, 0, len(lbs))
 	for i := range lbs {
 		// can't use i in the predicate, for loop replaces it in-memory
 		lb := lbs[i]
-		opModel := OperationModel{
+		opModel := operationModel{
 			Name:           &lb.Name,
 			Model:          lb,
 			ModelPredicate: func(item *nbdb.LoadBalancer) bool { return item.Name == lb.Name },
@@ -76,7 +76,7 @@ func CreateOrUpdateLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovs
 		opModels = append(opModels, opModel)
 	}
 
-	modelClient := NewModelClient(nbClient)
+	modelClient := newModelClient(nbClient)
 	return modelClient.CreateOrUpdateOps(ops, opModels...)
 }
 
@@ -88,7 +88,7 @@ func RemoveLoadBalancerVipsOps(nbClient libovsdbclient.Client, ops []libovsdb.Op
 	for _, vip := range vips {
 		lb.Vips[vip] = ""
 	}
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:            lb,
 		ModelPredicate:   func(item *nbdb.LoadBalancer) bool { return item.Name == lb.Name },
 		OnModelMutations: []interface{}{&lb.Vips},
@@ -96,7 +96,7 @@ func RemoveLoadBalancerVipsOps(nbClient libovsdbclient.Client, ops []libovsdb.Op
 		BulkOp:           false,
 	}
 
-	modelClient := NewModelClient(nbClient)
+	modelClient := newModelClient(nbClient)
 	ops, err := modelClient.DeleteOps(ops, opModel)
 	lb.Vips = originalVips
 	return ops, err
@@ -105,11 +105,11 @@ func RemoveLoadBalancerVipsOps(nbClient libovsdbclient.Client, ops []libovsdb.Op
 // DeleteLoadBalancersOps deletes the provided load balancers and returns the
 // corresponding ops
 func DeleteLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
-	opModels := make([]OperationModel, 0, len(lbs))
+	opModels := make([]operationModel, 0, len(lbs))
 	for i := range lbs {
 		// can't use i in the predicate, for loop replaces it in-memory
 		lb := lbs[i]
-		opModel := OperationModel{
+		opModel := operationModel{
 			Model: lb,
 			// TODO: remove UUID match from predicate once model_client prioritizes indexed search over predicate
 			ModelPredicate: func(item *nbdb.LoadBalancer) bool { return item.UUID == lb.UUID || item.Name == lb.Name },
@@ -119,7 +119,7 @@ func DeleteLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovsdb.Opera
 		opModels = append(opModels, opModel)
 	}
 
-	modelClient := NewModelClient(nbClient)
+	modelClient := newModelClient(nbClient)
 	return modelClient.DeleteOps(ops, opModels...)
 }
 

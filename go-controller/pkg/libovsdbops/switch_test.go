@@ -10,22 +10,22 @@ import (
 
 func TestRemoveACLsFromSwitches(t *testing.T) {
 	fakeACL1 := nbdb.ACL{
-		UUID: BuildNamedUUID(),
+		UUID: buildNamedUUID(),
 	}
 
 	fakeACL2 := nbdb.ACL{
-		UUID: BuildNamedUUID(),
+		UUID: buildNamedUUID(),
 	}
 
 	fakeSwitch1 := nbdb.LogicalSwitch{
 		Name: "sw1",
-		UUID: BuildNamedUUID(),
+		UUID: buildNamedUUID(),
 		ACLs: []string{fakeACL1.UUID},
 	}
 
 	fakeSwitch2 := nbdb.LogicalSwitch{
 		Name: "sw2",
-		UUID: BuildNamedUUID(),
+		UUID: buildNamedUUID(),
 		ACLs: []string{fakeACL1.UUID, fakeACL2.UUID},
 	}
 
@@ -33,7 +33,7 @@ func TestRemoveACLsFromSwitches(t *testing.T) {
 	// can handle this case
 	fakeSwitch3 := nbdb.LogicalSwitch{
 		Name: "sw3",
-		UUID: BuildNamedUUID(),
+		UUID: buildNamedUUID(),
 	}
 
 	tests := []struct {

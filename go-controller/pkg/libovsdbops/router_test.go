@@ -10,12 +10,12 @@ import (
 
 func TestFindNATsUsingPredicate(t *testing.T) {
 	fakeNAT1 := &nbdb.NAT{
-		UUID: BuildNamedUUID(),
+		UUID: buildNamedUUID(),
 		Type: nbdb.NATTypeSNAT,
 	}
 
 	fakeNAT2 := &nbdb.NAT{
-		UUID:        BuildNamedUUID(),
+		UUID:        buildNamedUUID(),
 		ExternalIDs: map[string]string{"name": "fakeNAT2"},
 	}
 
@@ -91,26 +91,26 @@ func TestFindNATsUsingPredicate(t *testing.T) {
 
 func TestDeleteNATsFromRouter(t *testing.T) {
 	fakeNAT1 := &nbdb.NAT{
-		UUID:       BuildNamedUUID(),
+		UUID:       buildNamedUUID(),
 		ExternalIP: "192.168.1.110",
 		Type:       nbdb.NATTypeSNAT,
 	}
 
 	fakeNAT2 := &nbdb.NAT{
-		UUID:       BuildNamedUUID(),
+		UUID:       buildNamedUUID(),
 		ExternalIP: "192.168.1.110",
 		Type:       nbdb.NATTypeDNATAndSNAT,
 	}
 
 	fakeNAT3 := &nbdb.NAT{
-		UUID:        BuildNamedUUID(),
+		UUID:        buildNamedUUID(),
 		ExternalIP:  "192.168.1.111",
 		Type:        nbdb.NATTypeSNAT,
 		ExternalIDs: map[string]string{"name": "fakeNAT3"},
 	}
 
 	fakeNAT4 := &nbdb.NAT{
-		UUID:        BuildNamedUUID(),
+		UUID:        buildNamedUUID(),
 		ExternalIP:  "192.168.1.112",
 		Type:        nbdb.NATTypeSNAT,
 		ExternalIDs: map[string]string{"name": "fakeNAT4"},
@@ -118,13 +118,13 @@ func TestDeleteNATsFromRouter(t *testing.T) {
 
 	fakeRouter1 := &nbdb.LogicalRouter{
 		Name: "rtr1",
-		UUID: BuildNamedUUID(),
+		UUID: buildNamedUUID(),
 		Nat:  []string{fakeNAT1.UUID},
 	}
 
 	fakeRouter2 := &nbdb.LogicalRouter{
 		Name: "rtr2",
-		UUID: BuildNamedUUID(),
+		UUID: buildNamedUUID(),
 		Nat:  []string{fakeNAT2.UUID, fakeNAT3.UUID},
 	}
 

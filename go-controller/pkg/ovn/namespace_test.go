@@ -117,7 +117,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceT.Name, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName, []string{tP.podIP})
+			fakeOvn.asf.EventuallyExpectAddressSetWithIPs(namespaceName, []string{tP.podIP})
 		})
 
 		ginkgo.It("creates an empty address set for the namespace without pods", func() {

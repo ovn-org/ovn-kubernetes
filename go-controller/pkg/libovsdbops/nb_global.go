@@ -9,7 +9,7 @@ import (
 // GetNBGlobal looks up the NB Global entry from the cache
 func GetNBGlobal(nbClient libovsdbclient.Client, nbGlobal *nbdb.NBGlobal) (*nbdb.NBGlobal, error) {
 	found := []*nbdb.NBGlobal{}
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:          nbGlobal,
 		ModelPredicate: func(item *nbdb.NBGlobal) bool { return true },
 		ExistingResult: &found,
@@ -18,7 +18,7 @@ func GetNBGlobal(nbClient libovsdbclient.Client, nbGlobal *nbdb.NBGlobal) (*nbdb
 		BulkOp:         false,
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	_, err := m.CreateOrUpdate(opModel)
 	if err != nil {
 		return nil, err
@@ -50,7 +50,7 @@ func UpdateNBGlobalSetOptions(nbClient libovsdbclient.Client, nbGlobal *nbdb.NBG
 	}
 
 	// Update the options column in the nbGlobal entry since we already performed a lookup
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model: updatedNbGlobal,
 		OnModelUpdates: []interface{}{
 			&updatedNbGlobal.Options,
@@ -59,7 +59,7 @@ func UpdateNBGlobalSetOptions(nbClient libovsdbclient.Client, nbGlobal *nbdb.NBG
 		BulkOp:      false,
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	_, err = m.CreateOrUpdate(opModel)
 	return err
 }

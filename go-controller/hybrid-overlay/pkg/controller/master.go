@@ -30,7 +30,6 @@ type MasterController struct {
 	kube             kube.Interface
 	allocator        *subnetallocator.SubnetAllocator
 	nodeEventHandler informer.EventHandler
-	modelClient      libovsdbops.ModelClient
 	nbClient         libovsdbclient.Client
 	sbClient         libovsdbclient.Client
 }
@@ -45,14 +44,11 @@ func NewMaster(kube kube.Interface,
 	eventHandlerCreateFunction informer.EventHandlerCreateFunction,
 ) (*MasterController, error) {
 
-	modelClient := libovsdbops.NewModelClient(libovsdbNBClient)
-
 	m := &MasterController{
-		kube:        kube,
-		allocator:   subnetallocator.NewSubnetAllocator(),
-		modelClient: modelClient,
-		nbClient:    libovsdbNBClient,
-		sbClient:    libovsdbSBClient,
+		kube:      kube,
+		allocator: subnetallocator.NewSubnetAllocator(),
+		nbClient:  libovsdbNBClient,
+		sbClient:  libovsdbSBClient,
 	}
 
 	m.nodeEventHandler = eventHandlerCreateFunction("node", nodeInformer,

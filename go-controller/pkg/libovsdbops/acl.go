@@ -88,11 +88,11 @@ func BuildACL(name string, direction nbdb.ACLDirection, priority int, match stri
 // CreateOrUpdateACLsOps creates or updates the provided ACLs returning the
 // corresponding ops
 func CreateOrUpdateACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, acls ...*nbdb.ACL) ([]libovsdb.Operation, error) {
-	opModels := make([]OperationModel, 0, len(acls))
+	opModels := make([]operationModel, 0, len(acls))
 	for i := range acls {
 		// can't use i in the predicate, for loop replaces it in-memory
 		acl := acls[i]
-		opModel := OperationModel{
+		opModel := operationModel{
 			Model:          acl,
 			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
 			OnModelUpdates: onModelUpdatesAll(),
@@ -102,7 +102,7 @@ func CreateOrUpdateACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 		opModels = append(opModels, opModel)
 	}
 
-	modelClient := NewModelClient(nbClient)
+	modelClient := newModelClient(nbClient)
 	return modelClient.CreateOrUpdateOps(ops, opModels...)
 }
 
@@ -120,11 +120,11 @@ func CreateOrUpdateACLs(nbClient libovsdbclient.Client, acls ...*nbdb.ACL) error
 // UpdateACLsLoggingOps updates the log and severity on the provided ACLs and
 // returns the corresponding ops
 func UpdateACLsLoggingOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, acls ...*nbdb.ACL) ([]libovsdb.Operation, error) {
-	opModels := make([]OperationModel, 0, len(acls))
+	opModels := make([]operationModel, 0, len(acls))
 	for i := range acls {
 		// can't use i in the predicate, for loop replaces it in-memory
 		acl := acls[i]
-		opModel := OperationModel{
+		opModel := operationModel{
 			Model:          acl,
 			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
 			OnModelUpdates: []interface{}{&acl.Severity, &acl.Log},
@@ -134,17 +134,17 @@ func UpdateACLsLoggingOps(nbClient libovsdbclient.Client, ops []libovsdb.Operati
 		opModels = append(opModels, opModel)
 	}
 
-	modelClient := NewModelClient(nbClient)
+	modelClient := newModelClient(nbClient)
 	return modelClient.CreateOrUpdateOps(ops, opModels...)
 }
 
 // UpdateACLsDirection updates the direction on the provided ACLs
 func UpdateACLsDirection(nbClient libovsdbclient.Client, acls ...*nbdb.ACL) error {
-	opModels := make([]OperationModel, 0, len(acls))
+	opModels := make([]operationModel, 0, len(acls))
 	for i := range acls {
 		// can't use i in the predicate, for loop replaces it in-memory
 		acl := acls[i]
-		opModel := OperationModel{
+		opModel := operationModel{
 			Model:          acl,
 			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
 			OnModelUpdates: []interface{}{&acl.Direction},
@@ -154,18 +154,18 @@ func UpdateACLsDirection(nbClient libovsdbclient.Client, acls ...*nbdb.ACL) erro
 		opModels = append(opModels, opModel)
 	}
 
-	modelClient := NewModelClient(nbClient)
+	modelClient := newModelClient(nbClient)
 	_, err := modelClient.CreateOrUpdate(opModels...)
 	return err
 }
 
 // DeleteACLs deletes the provided ACLs
 func DeleteACLs(nbClient libovsdbclient.Client, acls ...*nbdb.ACL) error {
-	opModels := make([]OperationModel, 0, len(acls))
+	opModels := make([]operationModel, 0, len(acls))
 	for i := range acls {
 		// can't use i in the predicate, for loop replaces it in-memory
 		acl := acls[i]
-		opModel := OperationModel{
+		opModel := operationModel{
 			Model:          acl,
 			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
 			ErrNotFound:    false,
@@ -174,6 +174,6 @@ func DeleteACLs(nbClient libovsdbclient.Client, acls ...*nbdb.ACL) error {
 		opModels = append(opModels, opModel)
 	}
 
-	modelClient := NewModelClient(nbClient)
+	modelClient := newModelClient(nbClient)
 	return modelClient.Delete(opModels...)
 }

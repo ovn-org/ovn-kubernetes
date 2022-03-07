@@ -20,7 +20,7 @@ func equalsMeterBand(a, b *nbdb.MeterBand) bool {
 // CreateMeterBandOps creates the provided meter band if it does not exist
 func CreateMeterBandOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, meterBand *nbdb.MeterBand) ([]ovsdb.Operation, error) {
 	bands := []*nbdb.MeterBand{}
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:          meterBand,
 		ModelPredicate: func(item *nbdb.MeterBand) bool { return equalsMeterBand(item, meterBand) },
 		OnModelUpdates: onModelUpdatesNone(),
@@ -40,7 +40,7 @@ func CreateMeterBandOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, m
 		BulkOp:      false,
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	return m.CreateOrUpdateOps(ops, opModel)
 }
 
@@ -51,13 +51,13 @@ func CreateOrUpdateMeterOps(nbClient libovsdbclient.Client, ops []ovsdb.Operatio
 	for _, band := range meterBands {
 		meter.Bands = append(meter.Bands, band.UUID)
 	}
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:          meter,
 		OnModelUpdates: onModelUpdatesAll(),
 		ErrNotFound:    false,
 		BulkOp:         false,
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	return m.CreateOrUpdateOps(ops, opModel)
 }

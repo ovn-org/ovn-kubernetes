@@ -20,9 +20,9 @@ func ListChassis(sbClient libovsdbclient.Client) ([]*sbdb.Chassis, error) {
 
 // DeleteChassis deletes the provided chassis
 func DeleteChassis(sbClient libovsdbclient.Client, chassis ...*sbdb.Chassis) error {
-	opModels := make([]OperationModel, 0, len(chassis))
+	opModels := make([]operationModel, 0, len(chassis))
 	for i := range chassis {
-		opModel := OperationModel{
+		opModel := operationModel{
 			Model:       chassis[i],
 			ErrNotFound: false,
 			BulkOp:      false,
@@ -30,7 +30,7 @@ func DeleteChassis(sbClient libovsdbclient.Client, chassis ...*sbdb.Chassis) err
 		opModels = append(opModels, opModel)
 	}
 
-	m := NewModelClient(sbClient)
+	m := newModelClient(sbClient)
 	err := m.Delete(opModels...)
 	return err
 }
@@ -40,13 +40,13 @@ type chassisPredicate func(*sbdb.Chassis) bool
 // DeleteChassisWithPredicate looks up chassis from the cache based on a given
 // predicate and deletes them
 func DeleteChassisWithPredicate(sbClient libovsdbclient.Client, p chassisPredicate) error {
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:          &sbdb.Chassis{},
 		ModelPredicate: p,
 		ErrNotFound:    false,
 		BulkOp:         true,
 	}
-	m := NewModelClient(sbClient)
+	m := newModelClient(sbClient)
 	err := m.Delete(opModel)
 	return err
 }

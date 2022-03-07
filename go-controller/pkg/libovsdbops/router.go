@@ -19,7 +19,7 @@ type logicalRouterPredicate func(*nbdb.LogicalRouter) bool
 // GetLogicalRouter looks up a logical router from the cache
 func GetLogicalRouter(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) (*nbdb.LogicalRouter, error) {
 	found := []*nbdb.LogicalRouter{}
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:          router,
 		ModelPredicate: func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		ExistingResult: &found,
@@ -28,7 +28,7 @@ func GetLogicalRouter(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter
 		BulkOp:         false,
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	_, err := m.CreateOrUpdate(opModel)
 	if err != nil {
 		return nil, err
@@ -49,7 +49,7 @@ func FindLogicalRoutersWithPredicate(nbClient libovsdbclient.Client, p logicalRo
 
 // CreateOrUpdateLogicalRouter creates or updates the provided logical router
 func CreateOrUpdateLogicalRouter(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) error {
-	opModel := OperationModel{
+	opModel := operationModel{
 		Name:           &router.Name,
 		Model:          router,
 		ModelPredicate: func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
@@ -58,7 +58,7 @@ func CreateOrUpdateLogicalRouter(nbClient libovsdbclient.Client, router *nbdb.Lo
 		BulkOp:         false,
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	_, err := m.CreateOrUpdate(opModel)
 	return err
 }
@@ -85,28 +85,28 @@ func UpdateLogicalRouterSetExternalIDs(nbClient libovsdbclient.Client, router *n
 		}
 	}
 
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:          router,
 		OnModelUpdates: []interface{}{&router.ExternalIDs},
 		ErrNotFound:    true,
 		BulkOp:         false,
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	_, err = m.CreateOrUpdate(opModel)
 	return err
 }
 
 // DeleteLogicalRouter deletes the provided logical router
 func DeleteLogicalRouter(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) error {
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:          router,
 		ModelPredicate: func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		ErrNotFound:    false,
 		BulkOp:         false,
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	return m.Delete(opModel)
 }
 
@@ -129,10 +129,10 @@ func GetLogicalRouterPort(nbClient libovsdbclient.Client, lrp *nbdb.LogicalRoute
 func CreateOrUpdateLogicalRouterPorts(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter, lrps ...*nbdb.LogicalRouterPort) error {
 	originalPorts := router.Ports
 	router.Ports = make([]string, 0, len(lrps))
-	opModels := make([]OperationModel, 0, len(lrps)+1)
+	opModels := make([]operationModel, 0, len(lrps)+1)
 	for i := range lrps {
 		lrp := lrps[i]
-		opModel := OperationModel{
+		opModel := operationModel{
 			Model:          lrp,
 			OnModelUpdates: onModelUpdatesAll(),
 			DoAfter:        func() { router.Ports = append(router.Ports, lrp.UUID) },
@@ -141,7 +141,7 @@ func CreateOrUpdateLogicalRouterPorts(nbClient libovsdbclient.Client, router *nb
 		}
 		opModels = append(opModels, opModel)
 	}
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:            router,
 		ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		OnModelMutations: []interface{}{&router.Ports},
@@ -150,7 +150,7 @@ func CreateOrUpdateLogicalRouterPorts(nbClient libovsdbclient.Client, router *nb
 	}
 	opModels = append(opModels, opModel)
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	_, err := m.CreateOrUpdate(opModels...)
 	router.Ports = originalPorts
 	return err
@@ -161,10 +161,10 @@ func CreateOrUpdateLogicalRouterPorts(nbClient libovsdbclient.Client, router *nb
 func DeleteLogicalRouterPorts(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter, lrps ...*nbdb.LogicalRouterPort) error {
 	originalPorts := router.Ports
 	router.Ports = make([]string, 0, len(lrps))
-	opModels := make([]OperationModel, 0, len(lrps)+1)
+	opModels := make([]operationModel, 0, len(lrps)+1)
 	for i := range lrps {
 		lrp := lrps[i]
-		opModel := OperationModel{
+		opModel := operationModel{
 			Model: lrp,
 			DoAfter: func() {
 				if lrp.UUID != "" {
@@ -176,7 +176,7 @@ func DeleteLogicalRouterPorts(nbClient libovsdbclient.Client, router *nbdb.Logic
 		}
 		opModels = append(opModels, opModel)
 	}
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:            router,
 		ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		OnModelMutations: []interface{}{&router.Ports},
@@ -185,7 +185,7 @@ func DeleteLogicalRouterPorts(nbClient libovsdbclient.Client, router *nbdb.Logic
 	}
 	opModels = append(opModels, opModel)
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	err := m.Delete(opModels...)
 	router.Ports = originalPorts
 	return err
@@ -208,7 +208,7 @@ func FindLogicalRouterPoliciesWithPredicate(nbClient libovsdbclient.Client, p lo
 // GetLogicalRouterPolicy looks up a logical router policy from the cache
 func GetLogicalRouterPolicy(nbClient libovsdbclient.Client, policy *nbdb.LogicalRouterPolicy) (*nbdb.LogicalRouterPolicy, error) {
 	found := []*nbdb.LogicalRouterPolicy{}
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:          policy,
 		ExistingResult: &found,
 		OnModelUpdates: nil, // no update
@@ -216,7 +216,7 @@ func GetLogicalRouterPolicy(nbClient libovsdbclient.Client, policy *nbdb.Logical
 		BulkOp:         false,
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	_, err := m.CreateOrUpdate(opModel)
 	if err != nil {
 		return nil, err
@@ -234,7 +234,7 @@ func CreateOrUpdateLogicalRouterPolicyWithPredicate(nbClient libovsdbclient.Clie
 		Name: routerName,
 	}
 
-	opModels := []OperationModel{
+	opModels := []operationModel{
 		{
 			Model:          lrp,
 			ModelPredicate: p,
@@ -252,7 +252,7 @@ func CreateOrUpdateLogicalRouterPolicyWithPredicate(nbClient libovsdbclient.Clie
 		},
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	_, err := m.CreateOrUpdate(opModels...)
 	return err
 }
@@ -266,11 +266,11 @@ func DeleteLogicalRouterPoliciesWithPredicate(nbClient libovsdbclient.Client, ro
 	}
 
 	deleted := []*nbdb.LogicalRouterPolicy{}
-	opModels := []OperationModel{
+	opModels := []operationModel{
 		{
 			ModelPredicate: p,
 			ExistingResult: &deleted,
-			DoAfter:        func() { router.Policies = ExtractUUIDsFromModels(&deleted) },
+			DoAfter:        func() { router.Policies = extractUUIDsFromModels(&deleted) },
 			ErrNotFound:    false,
 			BulkOp:         true,
 		},
@@ -283,7 +283,7 @@ func DeleteLogicalRouterPoliciesWithPredicate(nbClient libovsdbclient.Client, ro
 		},
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	return m.Delete(opModels...)
 }
 
@@ -297,7 +297,7 @@ func CreateOrAddNextHopsToLogicalRouterPolicyWithPredicate(nbClient libovsdbclie
 		Name: routerName,
 	}
 
-	opModels := []OperationModel{
+	opModels := []operationModel{
 		{
 			Model:            lrp,
 			ModelPredicate:   p,
@@ -315,14 +315,14 @@ func CreateOrAddNextHopsToLogicalRouterPolicyWithPredicate(nbClient libovsdbclie
 		},
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	_, err := m.CreateOrUpdate(opModels...)
 	return err
 }
 
 func deleteNextHopsFromLogicalRouterPolicyOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, routerName string, lrps []*nbdb.LogicalRouterPolicy, nextHops ...string) ([]libovsdb.Operation, error) {
 	nextHopSet := sets.NewString(nextHops...)
-	opModels := []OperationModel{}
+	opModels := []operationModel{}
 	router := &nbdb.LogicalRouter{
 		Name:     routerName,
 		Policies: []string{},
@@ -333,7 +333,7 @@ func deleteNextHopsFromLogicalRouterPolicyOps(nbClient libovsdbclient.Client, op
 		if nextHopSet.HasAll(lrp.Nexthops...) {
 			// if no next-hops remain in the policy, remove it alltogether
 			router.Policies = append(router.Policies, lrp.UUID)
-			opModel := OperationModel{
+			opModel := operationModel{
 				Model:       lrp,
 				BulkOp:      false,
 				ErrNotFound: false,
@@ -342,7 +342,7 @@ func deleteNextHopsFromLogicalRouterPolicyOps(nbClient libovsdbclient.Client, op
 		} else {
 			// otherwise just remove the next-hops
 			lrp.Nexthops = nextHops
-			opModel := OperationModel{
+			opModel := operationModel{
 				Model:            lrp,
 				OnModelMutations: []interface{}{&lrp.Nexthops},
 				BulkOp:           false,
@@ -353,7 +353,7 @@ func deleteNextHopsFromLogicalRouterPolicyOps(nbClient libovsdbclient.Client, op
 	}
 
 	if len(router.Policies) > 0 {
-		opModel := OperationModel{
+		opModel := operationModel{
 			Model:            router,
 			ModelPredicate:   func(lr *nbdb.LogicalRouter) bool { return lr.Name == router.Name },
 			OnModelMutations: []interface{}{&router.Policies},
@@ -363,7 +363,7 @@ func deleteNextHopsFromLogicalRouterPolicyOps(nbClient libovsdbclient.Client, op
 		opModels = append(opModels, opModel)
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	return m.DeleteOps(ops, opModels...)
 }
 
@@ -428,10 +428,10 @@ func DeleteLogicalRouterPolicies(nbClient libovsdbclient.Client, routerName stri
 		Policies: make([]string, 0, len(lrps)),
 	}
 
-	opModels := make([]OperationModel, 0, len(lrps)+1)
+	opModels := make([]operationModel, 0, len(lrps)+1)
 	for _, lrp := range lrps {
 		router.Policies = append(router.Policies, lrp.UUID)
-		opModel := OperationModel{
+		opModel := operationModel{
 			Model:       lrp,
 			ErrNotFound: false,
 			BulkOp:      false,
@@ -439,7 +439,7 @@ func DeleteLogicalRouterPolicies(nbClient libovsdbclient.Client, routerName stri
 		opModels = append(opModels, opModel)
 	}
 
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:            router,
 		ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		OnModelMutations: []interface{}{&router.Policies},
@@ -448,7 +448,7 @@ func DeleteLogicalRouterPolicies(nbClient libovsdbclient.Client, routerName stri
 	}
 	opModels = append(opModels, opModel)
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	return m.Delete(opModels...)
 }
 
@@ -476,7 +476,7 @@ func CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient libovsdbcl
 		Name: routerName,
 	}
 
-	opModels := []OperationModel{
+	opModels := []operationModel{
 		{
 			Model:          lrsr,
 			ModelPredicate: p,
@@ -494,7 +494,7 @@ func CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient libovsdbcl
 		},
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	return m.CreateOrUpdateOps(ops, opModels...)
 }
 
@@ -522,11 +522,11 @@ func DeleteLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Client
 	}
 
 	deleted := []*nbdb.LogicalRouterStaticRoute{}
-	opModels := []OperationModel{
+	opModels := []operationModel{
 		{
 			ModelPredicate: p,
 			ExistingResult: &deleted,
-			DoAfter:        func() { router.StaticRoutes = ExtractUUIDsFromModels(deleted) },
+			DoAfter:        func() { router.StaticRoutes = extractUUIDsFromModels(deleted) },
 			ErrNotFound:    false,
 			BulkOp:         true,
 		},
@@ -539,7 +539,7 @@ func DeleteLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Client
 		},
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	return m.Delete(opModels...)
 }
 
@@ -551,10 +551,10 @@ func DeleteLogicalRouterStaticRoutes(nbClient libovsdbclient.Client, routerName 
 		StaticRoutes: make([]string, 0, len(lrsrs)),
 	}
 
-	opModels := make([]OperationModel, 0, len(lrsrs)+1)
+	opModels := make([]operationModel, 0, len(lrsrs)+1)
 	for _, lrsr := range lrsrs {
 		router.StaticRoutes = append(router.StaticRoutes, lrsr.UUID)
-		opModel := OperationModel{
+		opModel := operationModel{
 			Model:       lrsr,
 			ErrNotFound: false,
 			BulkOp:      false,
@@ -562,7 +562,7 @@ func DeleteLogicalRouterStaticRoutes(nbClient libovsdbclient.Client, routerName 
 		opModels = append(opModels, opModel)
 	}
 
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:            router,
 		ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		OnModelMutations: []interface{}{&router.StaticRoutes},
@@ -571,7 +571,7 @@ func DeleteLogicalRouterStaticRoutes(nbClient libovsdbclient.Client, routerName 
 	}
 	opModels = append(opModels, opModel)
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	return m.Delete(opModels...)
 }
 
@@ -580,10 +580,10 @@ func DeleteLogicalRouterStaticRoutes(nbClient libovsdbclient.Client, routerName 
 // CreateOrUpdateLogicalRouter creates or updates the provided BFDs and returns
 // the corresponding ops
 func CreateOrUpdateBFDOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, bfds ...*nbdb.BFD) ([]libovsdb.Operation, error) {
-	opModels := make([]OperationModel, 0, len(bfds))
+	opModels := make([]operationModel, 0, len(bfds))
 	for i := range bfds {
 		bfd := bfds[i]
-		opModel := OperationModel{
+		opModel := operationModel{
 			Model:          bfd,
 			OnModelUpdates: onModelUpdatesAll(),
 			ErrNotFound:    false,
@@ -592,16 +592,16 @@ func CreateOrUpdateBFDOps(nbClient libovsdbclient.Client, ops []libovsdb.Operati
 		opModels = append(opModels, opModel)
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	return m.CreateOrUpdateOps(ops, opModels...)
 }
 
 // CreateOrUpdateLogicalRouter deletes the provided BFDs
 func DeleteBFDs(nbClient libovsdbclient.Client, bfds ...*nbdb.BFD) error {
-	opModels := make([]OperationModel, 0, len(bfds))
+	opModels := make([]operationModel, 0, len(bfds))
 	for i := range bfds {
 		bfd := bfds[i]
-		opModel := OperationModel{
+		opModel := operationModel{
 			Model:       bfd,
 			ErrNotFound: false,
 			BulkOp:      false,
@@ -609,7 +609,7 @@ func DeleteBFDs(nbClient libovsdbclient.Client, bfds ...*nbdb.BFD) error {
 		opModels = append(opModels, opModel)
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	return m.Delete(opModels...)
 }
 
@@ -623,7 +623,7 @@ func AddLoadBalancersToLogicalRouterOps(nbClient libovsdbclient.Client, ops []li
 	for _, lb := range lbs {
 		router.LoadBalancer = append(router.LoadBalancer, lb.UUID)
 	}
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:            router,
 		ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		OnModelMutations: []interface{}{&router.LoadBalancer},
@@ -631,7 +631,7 @@ func AddLoadBalancersToLogicalRouterOps(nbClient libovsdbclient.Client, ops []li
 		BulkOp:           false,
 	}
 
-	modelClient := NewModelClient(nbClient)
+	modelClient := newModelClient(nbClient)
 	ops, err := modelClient.CreateOrUpdateOps(ops, opModel)
 	router.LoadBalancer = originalLBs
 	return ops, err
@@ -645,7 +645,7 @@ func RemoveLoadBalancersFromLogicalRouterOps(nbClient libovsdbclient.Client, ops
 	for _, lb := range lbs {
 		router.LoadBalancer = append(router.LoadBalancer, lb.UUID)
 	}
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:            router,
 		ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		OnModelMutations: []interface{}{&router.LoadBalancer},
@@ -653,7 +653,7 @@ func RemoveLoadBalancersFromLogicalRouterOps(nbClient libovsdbclient.Client, ops
 		BulkOp:           false,
 	}
 
-	modelClient := NewModelClient(nbClient)
+	modelClient := newModelClient(nbClient)
 	ops, err := modelClient.DeleteOps(ops, opModel)
 	router.LoadBalancer = originalLBs
 	return ops, err
@@ -777,7 +777,7 @@ type natPredicate func(*nbdb.NAT) bool
 // GetNAT looks up an NAT from the cache
 func GetNAT(nbClient libovsdbclient.Client, nat *nbdb.NAT) (*nbdb.NAT, error) {
 	found := []*nbdb.NAT{}
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:          nat,
 		ModelPredicate: func(item *nbdb.NAT) bool { return isEquivalentNAT(item, nat) },
 		ExistingResult: &found,
@@ -786,7 +786,7 @@ func GetNAT(nbClient libovsdbclient.Client, nat *nbdb.NAT) (*nbdb.NAT, error) {
 		BulkOp:         false,
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	_, err := m.CreateOrUpdate(opModel)
 	if err != nil {
 		return nil, err
@@ -834,7 +834,7 @@ func CreateOrUpdateNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 
 	originalNats := router.Nat
 	router.Nat = make([]string, 0, len(nats))
-	opModels := make([]OperationModel, 0, len(nats)+1)
+	opModels := make([]operationModel, 0, len(nats)+1)
 	for i := range nats {
 		inputNat := nats[i]
 		for _, routerNat := range routerNats {
@@ -843,7 +843,7 @@ func CreateOrUpdateNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 				break
 			}
 		}
-		opModel := OperationModel{
+		opModel := operationModel{
 			Model:          inputNat,
 			OnModelUpdates: onModelUpdatesAll(),
 			ErrNotFound:    false,
@@ -852,7 +852,7 @@ func CreateOrUpdateNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 		}
 		opModels = append(opModels, opModel)
 	}
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:            router,
 		OnModelMutations: []interface{}{&router.Nat},
 		ErrNotFound:      true,
@@ -860,7 +860,7 @@ func CreateOrUpdateNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 	}
 	opModels = append(opModels, opModel)
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	ops, err = m.CreateOrUpdateOps(ops, opModels...)
 	router.Nat = originalNats
 	return ops, err
@@ -888,12 +888,12 @@ func DeleteNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, rou
 
 	originalNats := router.Nat
 	router.Nat = make([]string, 0, len(nats))
-	opModels := make([]OperationModel, 0, len(routerNats)+1)
+	opModels := make([]operationModel, 0, len(routerNats)+1)
 	for _, routerNat := range routerNats {
 		for _, inputNat := range nats {
 			if isEquivalentNAT(routerNat, inputNat) {
 				router.Nat = append(router.Nat, routerNat.UUID)
-				opModel := OperationModel{
+				opModel := operationModel{
 					Model:       routerNat,
 					ErrNotFound: false,
 					BulkOp:      false,
@@ -906,7 +906,7 @@ func DeleteNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, rou
 	if len(router.Nat) == 0 {
 		return ops, nil
 	}
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:            router,
 		OnModelMutations: []interface{}{&router.Nat},
 		ErrNotFound:      true,
@@ -914,7 +914,7 @@ func DeleteNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, rou
 	}
 	opModels = append(opModels, opModel)
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	ops, err = m.DeleteOps(ops, opModels...)
 	router.Nat = originalNats
 	return ops, err
@@ -939,12 +939,12 @@ func DeleteNATsWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 	deleted := []*nbdb.NAT{}
 	router := &nbdb.LogicalRouter{}
 	natUUIDs := sets.String{}
-	opModels := []OperationModel{
+	opModels := []operationModel{
 		{
 			ModelPredicate: p,
 			ExistingResult: &deleted,
 			DoAfter: func() {
-				router.Nat = ExtractUUIDsFromModels(&deleted)
+				router.Nat = extractUUIDsFromModels(&deleted)
 				natUUIDs.Insert(router.Nat...)
 			},
 			BulkOp: true,
@@ -958,7 +958,7 @@ func DeleteNATsWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 		},
 	}
 
-	m := NewModelClient(nbClient)
+	m := newModelClient(nbClient)
 	return m.DeleteOps(ops, opModels...)
 }
 
@@ -967,7 +967,7 @@ func DeleteNATsWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 // CreateOrUpdateGatewayChassis creates or updates the provided gateway chassis
 // and sets it to the provided logical router port
 func CreateOrUpdateGatewayChassis(nbClient libovsdbclient.Client, port *nbdb.LogicalRouterPort, chassis *nbdb.GatewayChassis) error {
-	opModels := []OperationModel{
+	opModels := []operationModel{
 		{
 			Model:          chassis,
 			OnModelUpdates: onModelUpdatesAll(),
@@ -985,7 +985,7 @@ func CreateOrUpdateGatewayChassis(nbClient libovsdbclient.Client, port *nbdb.Log
 		},
 	}
 
-	modelClient := NewModelClient(nbClient)
+	modelClient := newModelClient(nbClient)
 	_, err := modelClient.CreateOrUpdate(opModels...)
 	return err
 }

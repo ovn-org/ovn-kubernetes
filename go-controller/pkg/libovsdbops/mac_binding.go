@@ -8,14 +8,14 @@ import (
 
 // CreateOrUpdateMacBinding creates or updates the provided mac binding
 func CreateOrUpdateMacBinding(sbClient libovsdbclient.Client, mb *sbdb.MACBinding) error {
-	opModel := OperationModel{
+	opModel := operationModel{
 		Model:          mb,
 		OnModelUpdates: onModelUpdatesAll(),
 		ErrNotFound:    false,
 		BulkOp:         false,
 	}
 
-	m := NewModelClient(sbClient)
+	m := newModelClient(sbClient)
 	_, err := m.CreateOrUpdate(opModel)
 	return err
 }
@@ -26,13 +26,13 @@ type macBindingPredicate func(*sbdb.MACBinding) bool
 // given predicate and deletes them
 func DeleteMacBindingWithPredicate(sbClient libovsdbclient.Client, p macBindingPredicate) error {
 	deleted := []*sbdb.MACBinding{}
-	opModel := OperationModel{
+	opModel := operationModel{
 		ModelPredicate: p,
 		ExistingResult: &deleted,
 		ErrNotFound:    false,
 		BulkOp:         true,
 	}
 
-	m := NewModelClient(sbClient)
+	m := newModelClient(sbClient)
 	return m.Delete(opModel)
 }

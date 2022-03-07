@@ -18,7 +18,6 @@ import (
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
@@ -178,8 +177,6 @@ type Controller struct {
 	// libovsdb southbound client interface
 	sbClient libovsdbclient.Client
 
-	modelClient libovsdbops.ModelClient
-
 	// v4HostSubnetsUsed keeps track of number of v4 subnets currently assigned to nodes
 	v4HostSubnetsUsed float64
 
@@ -262,7 +259,6 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
 	}
-	modelClient := libovsdbops.NewModelClient(libovsdbOvnNBClient)
 	svcController, svcFactory := newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient)
 	return &Controller{
 		client: ovnClient.KubeClient,
@@ -293,7 +289,6 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			pendingCloudPrivateIPConfigsOps:   make(map[string]map[string]*cloudPrivateIPConfigOp),
 			allocator:                         allocator{&sync.Mutex{}, make(map[string]*egressNode)},
 			nbClient:                          libovsdbOvnNBClient,
-			modelClient:                       modelClient,
 			watchFactory:                      wf,
 		},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
@@ -318,7 +313,6 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		sbClient:        libovsdbOvnSBClient,
 		svcController:   svcController,
 		svcFactory:      svcFactory,
-		modelClient:     modelClient,
 		metricsRecorder: metrics.NewControlPlaneRecorder(),
 	}
 }

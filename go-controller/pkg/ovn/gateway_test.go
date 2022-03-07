@@ -10,7 +10,6 @@ import (
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
@@ -133,8 +132,8 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 
 	natUUIDs := make([]string, 0, len(clusterIPSubnets))
 	if !skipSnat {
-		for _, subnet := range clusterIPSubnets {
-			natUUID := libovsdbops.BuildNamedUUID()
+		for i, subnet := range clusterIPSubnets {
+			natUUID := fmt.Sprintf("nat-%d-UUID", i)
 			natUUIDs = append(natUUIDs, natUUID)
 			physicalIP, _ := util.MatchIPNetFamily(utilnet.IsIPv6CIDR(subnet), l3GatewayConfig.IPAddresses)
 			testData = append(testData, &nbdb.NAT{
@@ -285,7 +284,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		})
 
 		ginkgo.It("creates an IPv4 gateway in OVN", func() {
-			routeUUID := libovsdbops.BuildNamedUUID()
+			routeUUID := "route-UUID"
 			leftoverMgmtIPRoute := &nbdb.LogicalRouterStaticRoute{
 				Nexthop: "10.130.0.2",
 				UUID:    routeUUID,
@@ -510,14 +509,14 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 		ginkgo.It("creates a dual-stack gateway in OVN", func() {
 			// covers both IPv4, IPv6 single stack cases since path is the same.
-			routeUUID1 := libovsdbops.BuildNamedUUID()
+			routeUUID1 := "route1-UUID"
 			leftoverJoinRoute1 := &nbdb.LogicalRouterStaticRoute{
 				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 				Nexthop:  "100.64.0.3",
 				IPPrefix: "10.130.0.0/23",
 				UUID:     routeUUID1,
 			}
-			routeUUID2 := libovsdbops.BuildNamedUUID()
+			routeUUID2 := "route2-UUID"
 			leftoverJoinRoute2 := &nbdb.LogicalRouterStaticRoute{
 				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 				Nexthop:  "fd98::3",

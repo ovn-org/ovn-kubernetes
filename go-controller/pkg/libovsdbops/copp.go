@@ -12,11 +12,11 @@ import (
 // CreateOrUpdateCOPPsOps creates or updates the provided COPP returning the
 // corresponding ops
 func CreateOrUpdateCOPPsOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, copps ...*nbdb.Copp) ([]ovsdb.Operation, error) {
-	opModels := make([]OperationModel, 0, len(copps))
+	opModels := make([]operationModel, 0, len(copps))
 	for i := range copps {
 		// can't use i in the predicate, for loop replaces it in-memory
 		copp := copps[i]
-		opModel := OperationModel{
+		opModel := operationModel{
 			Model:          copp,
 			ModelPredicate: func(item *nbdb.Copp) bool { return reflect.DeepEqual(item.Meters, copp.Meters) },
 			OnModelUpdates: onModelUpdatesNone(),
@@ -26,6 +26,6 @@ func CreateOrUpdateCOPPsOps(nbClient libovsdbclient.Client, ops []ovsdb.Operatio
 		opModels = append(opModels, opModel)
 	}
 
-	modelClient := NewModelClient(nbClient)
+	modelClient := newModelClient(nbClient)
 	return modelClient.CreateOrUpdateOps(ops, opModels...)
 }
