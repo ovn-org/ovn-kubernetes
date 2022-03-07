@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"runtime"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/ovn-org/libovsdb/cache"
@@ -20,6 +19,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	kapi "k8s.io/api/core/v1"
 	kapimtypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/workqueue"
 	klog "k8s.io/klog/v2"
 )
 
@@ -473,7 +474,10 @@ func DecrementEgressFirewallCount() {
 	metricEgressFirewallCount.Dec()
 }
 
-type timestampType int
+type (
+	timestampType int
+	operation     int
+)
 
 const (
 	// pod event first handled by OVN-Kubernetes control plane
@@ -485,6 +489,13 @@ const (
 	// port binding with updated chassis seen in OVN-Kubernetes  control plane southbound database libovsdb cache
 	portBindingChassis
 	portBindingTable = "Port_Binding"
+
+	queueCheckPeriod           = time.Millisecond * 500
+	addPortBinding   operation = iota
+	updatePortBinding
+	addPod
+	cleanPod
+	addLogicalSwitchPort
 )
 
 type record struct {
@@ -492,9 +503,17 @@ type record struct {
 	timestampType
 }
 
+// item is the data structure for ControlPlaneRecorders queue
+type item struct {
+	op     operation
+	old    model.Model
+	new    model.Model
+	podUID kapimtypes.UID
+}
+
 type ControlPlaneRecorder struct {
-	sync.Mutex
 	podRecords map[kapimtypes.UID]*record
+	queue      workqueue.Interface
 }
 
 func NewControlPlaneRecorder() *ControlPlaneRecorder {
@@ -503,50 +522,69 @@ func NewControlPlaneRecorder() *ControlPlaneRecorder {
 	}
 }
 
-//Run will register the necessary metrics and add event handlers.
-func (ps *ControlPlaneRecorder) Run(sbClient libovsdbclient.Client) {
+//Run will manage metrics for monitoring control plane objects and block until stop signal received.
+//Monitors pod setup latency
+func (cpr *ControlPlaneRecorder) Run(sbClient libovsdbclient.Client, stop <-chan struct{}) {
 	// only register the metrics when we want them
 	prometheus.MustRegister(metricFirstSeenLSPLatency)
 	prometheus.MustRegister(metricLSPPortBindingLatency)
 	prometheus.MustRegister(metricPortBindingUpLatency)
 	prometheus.MustRegister(metricPortBindingChassisLatency)
+	cpr.queue = workqueue.New()
 
 	sbClient.Cache().AddEventHandler(&cache.EventHandlerFuncs{
 		AddFunc: func(table string, model model.Model) {
 			if table != portBindingTable {
 				return
 			}
-			go ps.AddPortBindingEvent(model)
+			cpr.queue.Add(item{op: addPortBinding, old: model})
 		},
 		UpdateFunc: func(table string, old model.Model, new model.Model) {
 			if table != portBindingTable {
 				return
 			}
-			go ps.UpdatePortBindingEvent(old, new)
+			cpr.queue.Add(item{op: updatePortBinding, old: old, new: new})
 		},
 		DeleteFunc: func(table string, model model.Model) {
 		},
 	})
+
+	go func() {
+		wait.Until(cpr.runWorker, queueCheckPeriod, stop)
+		cpr.queue.ShutDown()
+	}()
 }
 
-func (ps *ControlPlaneRecorder) AddPodEvent(podUID kapimtypes.UID) {
-	ps.Lock()
-	ps.podRecords[podUID] = &record{timestamp: time.Now(), timestampType: firstSeen}
-	ps.Unlock()
+func (cpr *ControlPlaneRecorder) AddPodEvent(podUID kapimtypes.UID) {
+	if cpr.queue != nil {
+		cpr.queue.Add(item{op: addPod, podUID: podUID})
+	}
 }
 
-func (ps *ControlPlaneRecorder) CleanPodRecord(podUID kapimtypes.UID) {
-	ps.Lock()
-	delete(ps.podRecords, podUID)
-	ps.Unlock()
+func (cpr *ControlPlaneRecorder) addPodEvent(podUID kapimtypes.UID) {
+	cpr.podRecords[podUID] = &record{timestamp: time.Now(), timestampType: firstSeen}
 }
 
-func (ps *ControlPlaneRecorder) AddLSPEvent(podUID kapimtypes.UID) {
+func (cpr *ControlPlaneRecorder) CleanPodRecord(podUID kapimtypes.UID) {
+	if cpr.queue != nil {
+		cpr.queue.Add(item{op: cleanPod, podUID: podUID})
+	}
+}
+
+func (cpr *ControlPlaneRecorder) cleanPodRecord(podUID kapimtypes.UID) {
+	delete(cpr.podRecords, podUID)
+}
+
+func (cpr *ControlPlaneRecorder) AddLSPEvent(podUID kapimtypes.UID) {
+	if cpr.queue != nil {
+		cpr.queue.Add(item{op: addLogicalSwitchPort, podUID: podUID})
+	}
+}
+
+func (cpr *ControlPlaneRecorder) addLSPEvent(podUID kapimtypes.UID) {
 	now := time.Now()
-	ps.Lock()
-	defer ps.Unlock()
 	var r *record
-	if r = ps.getRecord(podUID); r == nil {
+	if r = cpr.getRecord(podUID); r == nil {
 		klog.V(5).Infof("Add Logical Switch Port event expected pod with UID %q in cache", podUID)
 		return
 	}
@@ -559,7 +597,7 @@ func (ps *ControlPlaneRecorder) AddLSPEvent(podUID kapimtypes.UID) {
 	r.timestampType = logicalSwitchPort
 }
 
-func (ps *ControlPlaneRecorder) AddPortBindingEvent(m model.Model) {
+func (cpr *ControlPlaneRecorder) addPortBindingEvent(m model.Model) {
 	var r *record
 	now := time.Now()
 	row := m.(*sbdb.PortBinding)
@@ -567,9 +605,7 @@ func (ps *ControlPlaneRecorder) AddPortBindingEvent(m model.Model) {
 	if podUID == "" {
 		return
 	}
-	ps.Lock()
-	defer ps.Unlock()
-	if r = ps.getRecord(podUID); r == nil {
+	if r = cpr.getRecord(podUID); r == nil {
 		klog.V(5).Infof("Add port binding event expected pod with UID %q in cache", podUID)
 		return
 	}
@@ -582,7 +618,7 @@ func (ps *ControlPlaneRecorder) AddPortBindingEvent(m model.Model) {
 	r.timestampType = portBinding
 }
 
-func (ps *ControlPlaneRecorder) UpdatePortBindingEvent(old, new model.Model) {
+func (cpr *ControlPlaneRecorder) updatePortBindingEvent(old, new model.Model) {
 	var r *record
 	oldRow := old.(*sbdb.PortBinding)
 	newRow := new.(*sbdb.PortBinding)
@@ -591,9 +627,7 @@ func (ps *ControlPlaneRecorder) UpdatePortBindingEvent(old, new model.Model) {
 	if podUID == "" {
 		return
 	}
-	ps.Lock()
-	defer ps.Unlock()
-	if r = ps.getRecord(podUID); r == nil {
+	if r = cpr.getRecord(podUID); r == nil {
 		klog.V(5).Infof("Port binding update expected pod with UID %q in cache", podUID)
 		return
 	}
@@ -607,9 +641,39 @@ func (ps *ControlPlaneRecorder) UpdatePortBindingEvent(old, new model.Model) {
 	}
 }
 
+func (cpr *ControlPlaneRecorder) runWorker() {
+	for cpr.processNextItem() {
+	}
+}
+
+func (cpr *ControlPlaneRecorder) processNextItem() bool {
+	i, term := cpr.queue.Get()
+	if term {
+		return false
+	}
+	cpr.processItem(i.(item))
+	cpr.queue.Done(i)
+	return true
+}
+
+func (cpr *ControlPlaneRecorder) processItem(i item) {
+	switch i.op {
+	case addPortBinding:
+		cpr.addPortBindingEvent(i.old)
+	case updatePortBinding:
+		cpr.updatePortBindingEvent(i.old, i.new)
+	case addPod:
+		cpr.addPodEvent(i.podUID)
+	case cleanPod:
+		cpr.cleanPodRecord(i.podUID)
+	case addLogicalSwitchPort:
+		cpr.addLSPEvent(i.podUID)
+	}
+}
+
 // getRecord assumes lock is held by caller and returns record from map with func argument as the key
-func (ps *ControlPlaneRecorder) getRecord(podUID kapimtypes.UID) *record {
-	r, ok := ps.podRecords[podUID]
+func (cpr *ControlPlaneRecorder) getRecord(podUID kapimtypes.UID) *record {
+	r, ok := cpr.podRecords[podUID]
 	if !ok {
 		klog.V(5).Infof("Cache entry expected pod with UID %q but failed to find it", podUID)
 		return nil
