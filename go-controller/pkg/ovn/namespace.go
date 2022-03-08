@@ -3,8 +3,17 @@ package ovn
 import (
 	"context"
 	"fmt"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/labels"
+	ktypes "k8s.io/apimachinery/pkg/types"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	utilwait "k8s.io/apimachinery/pkg/util/wait"
+	informers "k8s.io/client-go/informers/core/v1"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ovn-org/libovsdb/ovsdb"
@@ -29,23 +38,20 @@ const (
 	aclLoggingAnnotation = "k8s.ovn.org/acl-logging"
 )
 
-func (oc *Controller) syncNamespaces(namespaces []interface{}) {
-	oc.syncWithRetry("syncNamespaces", func() error { return oc.syncNamespacesRetriable(namespaces) })
-}
-
-// This function implements the main body of work of syncNamespaces.
-// Upon failure, it may be invoked multiple times in order to avoid a pod restart.
-func (oc *Controller) syncNamespacesRetriable(namespaces []interface{}) error {
+func (oc *Controller) repairNamespaces() {
+	klog.Infof("Getting namespace list")
+	namespaces, err := oc.namespacesLister.List(labels.Everything())
+	// as the this is called after the cache has synced we shouldn't hit this
+	if err != nil {
+		klog.Error(err)
+		utilruntime.HandleError(err)
+	}
 	expectedNs := make(map[string]bool)
-	for _, nsInterface := range namespaces {
-		ns, ok := nsInterface.(*kapi.Namespace)
-		if !ok {
-			return fmt.Errorf("spurious object in syncNamespaces: %v", nsInterface)
-		}
+	for _, ns := range namespaces {
 		expectedNs[ns.Name] = true
 	}
 
-	err := oc.addressSetFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) error {
+	err = oc.addressSetFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) error {
 		if nameSuffix == "" && !expectedNs[namespaceName] {
 			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
 				klog.Errorf(err.Error())
@@ -55,9 +61,8 @@ func (oc *Controller) syncNamespacesRetriable(namespaces []interface{}) error {
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("error in syncing namespaces: %v", err)
+		klog.Errorf("Error in syncing namespaces: %v", err)
 	}
-	return nil
 }
 
 func (oc *Controller) getRoutingExternalGWs(nsInfo *namespaceInfo) *gatewayInfo {
@@ -185,10 +190,10 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 
 // Cleans up the multicast policy for this namespace if multicast was
 // previously allowed.
-func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) {
+func (oc *Controller) multicastDeleteNamespace(name string, nsInfo *namespaceInfo) {
 	if nsInfo.multicastEnabled {
 		nsInfo.multicastEnabled = false
-		if err := deleteMulticastAllowPolicy(oc.nbClient, ns.Name, nsInfo); err != nil {
+		if err := deleteMulticastAllowPolicy(oc.nbClient, name, nsInfo); err != nil {
 			klog.Errorf(err.Error())
 		}
 	}
@@ -212,22 +217,24 @@ func parseRoutingExternalGWAnnotation(annotation string) ([]net.IP, error) {
 	return routingExternalGWs, nil
 }
 
-// AddNamespace creates corresponding addressset in ovn db
-func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
+// addNamespace creates corresponding addressset in ovn db
+func (oc *Controller) addNamespace(key string, ns *kapi.Namespace) error {
 	klog.Infof("[%s] adding namespace", ns.Name)
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
+		oc.cacheNamespace(key, ns)
 		klog.Infof("[%s] adding namespace took %v", ns.Name, time.Since(start))
 	}()
 
 	_, nsUnlock, err := oc.ensureNamespaceLocked(ns.Name, false, ns)
 	if err != nil {
 		klog.Errorf("Failed to ensure namespace locked: %v", err)
-		return
+		return err
 	}
 
 	defer nsUnlock()
+	return nil
 }
 
 // configureNamespace ensures internal structures are updated based on namespace
@@ -267,13 +274,19 @@ func (oc *Controller) configureNamespace(nsInfo *namespaceInfo, ns *kapi.Namespa
 	oc.multicastUpdateNamespace(ns, nsInfo)
 }
 
-func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
+func (oc *Controller) updateNamespace(key string, newer *kapi.Namespace) error {
+	tmp, ok := oc.namespacesCache.Load(key)
+	if !ok {
+		klog.Errorf("NodeUpdate: namespace %s not found in the cache ", newer.Name)
+		return nil
+	}
+	old := tmp.(*namespaceCacheEntry)
 	klog.Infof("[%s] updating namespace", old.Name)
-
+	defer oc.cacheNamespace(key, newer)
 	nsInfo, nsUnlock := oc.getNamespaceLocked(old.Name, false)
 	if nsInfo == nil {
 		klog.Warningf("Update event for unknown namespace %q", old.Name)
-		return
+		return nil
 	}
 	defer nsUnlock()
 
@@ -352,16 +365,23 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		}
 	}
 	oc.multicastUpdateNamespace(newer, nsInfo)
+	return nil
 }
 
-func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
-	klog.Infof("[%s] deleting namespace", ns.Name)
-
-	nsInfo := oc.deleteNamespaceLocked(ns.Name)
+func (oc *Controller) deleteNamespace(key string) error {
+	ns, ok := oc.namespacesCache.Load(key)
+	if !ok {
+		klog.Warningf("Namespace %s not found in namespaces cache on delete; may not have been scheduled", key)
+		return nil
+	}
+	cachedNs := ns.(*namespaceCacheEntry)
+	klog.Infof("[%s] deleting namespace", cachedNs.Name)
+	nsInfo := oc.deleteNamespaceLocked(cachedNs.Name)
 	if nsInfo == nil {
-		return
+		return nil
 	}
 	defer nsInfo.Unlock()
+	defer oc.namespacesCache.Delete(key)
 
 	klog.V(5).Infof("Deleting Namespace's NetworkPolicy entities")
 	for _, np := range nsInfo.networkPolicies {
@@ -378,8 +398,9 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 			delete(nsInfo.networkPolicies, np.name)
 		}
 	}
-	oc.deleteGWRoutesForNamespace(ns.Name, nil)
-	oc.multicastDeleteNamespace(ns, nsInfo)
+	oc.deleteGWRoutesForNamespace(cachedNs.Name, nil)
+	oc.multicastDeleteNamespace(cachedNs.Name, nsInfo)
+	return nil
 }
 
 // getNamespaceLocked locks namespacesMutex, looks up ns, and (if found), returns it with
@@ -467,7 +488,7 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool, namespace 
 	// nsInfo and namespace didn't exist, get it from lister
 	if namespace == nil {
 		var err error
-		namespace, err = oc.watchFactory.GetNamespace(ns)
+		namespace, err = oc.namespacesLister.Get(ns)
 		if err != nil {
 			namespace, err = oc.client.CoreV1().Namespaces().Get(context.TODO(), ns, metav1.GetOptions{})
 			if err != nil {
@@ -594,4 +615,193 @@ func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (addressset.Addre
 		}
 	}
 	return oc.addressSetFactory.NewAddressSet(ns, ips)
+}
+
+type namespaceCacheEntry struct {
+	UID         ktypes.UID
+	Name        string
+	Namespace   string
+	Annotations map[string]string
+}
+
+const (
+	maxNamespaceRetries = 10
+)
+
+func (oc *Controller) cacheNamespace(key string, namespace *kapi.Namespace) {
+	oc.namespacesCache.Store(key, &namespaceCacheEntry{
+		UID:         namespace.UID,
+		Name:        namespace.Name,
+		Namespace:   namespace.Namespace,
+		Annotations: namespace.Annotations,
+	})
+}
+
+// initNamespaceController initializes the Namespace controller and *must* be called before
+// runNamespaceController
+func (oc *Controller) initNamespaceController(namespaces informers.NamespaceInformer) {
+	oc.namespacesLister = namespaces.Lister()
+	oc.namespacesSynced = namespaces.Informer().HasSynced
+	oc.namespacesQueue = workqueue.NewNamedRateLimitingQueue(
+		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
+		"namespaces",
+	)
+
+	namespaces.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			key, err := cache.MetaNamespaceKeyFunc(obj)
+			if err == nil {
+				oc.namespacesQueue.Add(key)
+			}
+		},
+		UpdateFunc: func(old, new interface{}) {
+			key, err := cache.MetaNamespaceKeyFunc(new)
+			if err == nil {
+				oc.namespacesQueue.Add(key)
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
+			if err == nil {
+				oc.namespacesQueue.Add(key)
+			}
+		},
+	})
+}
+
+func (oc *Controller) runNamespaceController(threadiness int, stopCh <-chan struct{}) {
+	// don't let panics crash the process
+	defer utilruntime.HandleCrash()
+
+	klog.Infof("Starting Namespace Controller")
+
+	// wait for your caches to fill before starting your work
+	if !cache.WaitForCacheSync(stopCh, oc.namespacesSynced) {
+		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
+		klog.Infof("Synchronization failed")
+		return
+	}
+	// run the repair controller
+	klog.Infof("Repairing Namespaces")
+	oc.repairNamespaces()
+
+	// start up your worker threads based on threadiness.  Some controllers
+	// have multiple kinds of workers
+	wg := &sync.WaitGroup{}
+	for i := 0; i < threadiness; i++ {
+		wg.Add(1)
+		// runNamespaceWorker will loop until "something bad" happens.  The .Until will
+		// then rekick the worker after one second
+		go func() {
+			defer wg.Done()
+			utilwait.Until(func() {
+				oc.runNamespaceWorker(wg)
+			}, time.Second, stopCh)
+		}()
+	}
+
+	// wait until we're told to stop
+	<-stopCh
+
+	klog.Infof("Shutting down namespace controller")
+	// make sure the work queue is shutdown which will trigger workers to end
+	oc.namespacesQueue.ShutDown()
+	// wait for workers to finish
+	wg.Wait()
+}
+
+func (oc *Controller) runNamespaceWorker(wg *sync.WaitGroup) {
+	// hot loop until we're told to stop.  processNextWorkItem will
+	// automatically wait until there's work available, so we don't worry
+	// about secondary waits
+	for oc.processNextNamespaceWorkItem(wg) {
+	}
+}
+
+// processNextNamespaceWorkItem deals with one key off the queue.  It returns false
+// when it's time to quit.
+func (oc *Controller) processNextNamespaceWorkItem(wg *sync.WaitGroup) bool {
+	wg.Add(1)
+	defer wg.Done()
+	// pull the next work item from queue.  It should be a key we use to lookup
+	// something in a cache
+	key, quit := oc.namespacesQueue.Get()
+	if quit {
+		return false
+	}
+	// you always have to indicate to the queue that you've completed a piece of
+	// work
+	defer oc.namespacesQueue.Done(key)
+
+	// do your work on the key.  This method will contain your "do stuff" logic
+	err := oc.syncNamespaceHandler(key.(string))
+	if err == nil {
+		// if you had no error, tell the queue to stop tracking history for your
+		// key. This will reset things like failure counts for per-item rate
+		// limiting
+		oc.namespacesQueue.Forget(key)
+		return true
+	}
+
+	// there was a failure so be sure to report it.  This method allows for
+	// pluggable error handling which can be used for things like
+	// cluster-monitoring
+	utilruntime.HandleError(fmt.Errorf("%v failed with : %v", key, err))
+
+	// since we failed, we should requeue the item to work on later.
+	// but only if we've not exceeded max retries. This method
+	// will add a backoff to avoid hotlooping on particular items
+	// (they're probably still not going to work right away) and overall
+	// controller protection (everything I've done is broken, this controller
+	// needs to calm down or it can starve other useful work) cases.
+	if oc.namespacesQueue.NumRequeues(key) < maxNamespaceRetries {
+		oc.namespacesQueue.AddRateLimited(key)
+		return true
+	}
+
+	// if we've exceeded MaxRetries, remove the item from the queue
+	oc.namespacesQueue.Forget(key)
+	return true
+}
+
+// sync namespace handler brings the namespace resource in sync
+func (oc *Controller) syncNamespaceHandler(key string) error {
+	klog.Infof("Syncing %s", key)
+	_, name, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		return err
+	}
+	ns, err := oc.namespacesLister.Get(name)
+	if err != nil && !apierrors.IsNotFound(err) {
+		// Very unlikely to see any error other than "not found" since
+		// wer're pulling from the informer cache, but just try again
+		return err
+	}
+	// Delete namespace if was not found
+	if apierrors.IsNotFound(err) {
+		if err := oc.deleteNamespace(key); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// If the namespace was deleted and re-added quickly; delete and re-add the namesapce
+	ne, ok := oc.namespacesCache.Load(key)
+	if ok {
+		cachedNamespace := ne.(*namespaceCacheEntry)
+		if cachedNamespace.UID != ns.UID {
+			if err := oc.deleteNamespace(key); err != nil {
+				return err
+			}
+		} else {
+			// this is namespace update
+			if err := oc.updateNamespace(key, ns); err != nil {
+				return err
+			}
+		}
+	} else {
+		// This is new namespace add
+		err = oc.addNamespace(key, ns)
+	}
+	return err
 }

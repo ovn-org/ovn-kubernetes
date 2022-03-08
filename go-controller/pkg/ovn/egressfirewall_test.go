@@ -320,7 +320,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 						},
 					})
 				config.IPv6Mode = true
-				fakeOVN.controller.WatchNamespaces()
+				fakeOVN.InitAndRunNamespaceController()
 				fakeOVN.controller.WatchEgressFirewall()
 
 				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
@@ -416,7 +416,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 						},
 					})
 
-				fakeOVN.controller.WatchNamespaces()
+				fakeOVN.InitAndRunNamespaceController()
 				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -620,7 +620,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 						},
 					})
 
-				fakeOVN.controller.WatchNamespaces()
+				fakeOVN.InitAndRunNamespaceController()
 				fakeOVN.controller.WatchEgressFirewall()
 
 				ipv4ACL := libovsdbops.BuildACL(
@@ -934,7 +934,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 						},
 					})
 				config.IPv6Mode = true
-				fakeOVN.controller.WatchNamespaces()
+				fakeOVN.InitAndRunNamespaceController()
 				fakeOVN.controller.WatchEgressFirewall()
 
 				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
@@ -1026,7 +1026,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 						},
 					})
 
-				fakeOVN.controller.WatchNamespaces()
+				fakeOVN.InitAndRunNamespaceController()
 				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 

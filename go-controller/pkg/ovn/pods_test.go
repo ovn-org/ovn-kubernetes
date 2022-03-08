@@ -284,7 +284,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(len(lsl)).To(gomega.Equal(1))
 
-				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.InitAndRunNamespaceController()
 				fakeOvn.controller.WatchPods()
 
 				pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
@@ -340,7 +340,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				)
 
 				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
-				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.InitAndRunNamespaceController()
 				fakeOvn.controller.WatchPods()
 
 				pod, _ := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
@@ -389,7 +389,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				)
 
 				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
-				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.InitAndRunNamespaceController()
 				fakeOvn.controller.WatchPods()
 
 				pod, _ := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
@@ -458,7 +458,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				)
 				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
 
-				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.InitAndRunNamespaceController()
 				fakeOvn.controller.WatchPods()
 
 				gomega.Eventually(func() string {
@@ -510,7 +510,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				)
 				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
 
-				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.InitAndRunNamespaceController()
 				fakeOvn.controller.WatchPods()
 				// allow pod retry from update annotation to fail
 				time.Sleep(2 * time.Second)
@@ -556,7 +556,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				fakeOvn.startWithDBSetup(initialDB)
 				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
-				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.InitAndRunNamespaceController()
 				fakeOvn.controller.WatchPods()
 
 				// Add pod before namespace; pod will be annotated
@@ -615,7 +615,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				_, ok := pod.Annotations[util.OvnPodAnnotationName]
 				gomega.Expect(ok).To(gomega.BeFalse())
 
-				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.InitAndRunNamespaceController()
 				fakeOvn.controller.WatchPods()
 				// check that after start networks annotations and nbdb will be updated
 				gomega.Eventually(func() string {
@@ -664,7 +664,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				annotations := getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
 				gomega.Expect(annotations).To(gomega.MatchJSON(t.getAnnotationsJson()))
 
-				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.InitAndRunNamespaceController()
 				fakeOvn.controller.WatchPods()
 
 				// check nbdb data is added
@@ -773,7 +773,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				t2.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node2"))
 				// pod annotations and lsp exist now
 
-				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.InitAndRunNamespaceController()
 				fakeOvn.controller.WatchPods()
 
 				// check db values are updated to correlate with test pods settings

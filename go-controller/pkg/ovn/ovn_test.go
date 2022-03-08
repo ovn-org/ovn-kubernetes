@@ -45,6 +45,7 @@ type FakeOVN struct {
 	sbClient     libovsdbclient.Client
 	dbSetup      libovsdbtest.TestSetup
 	nodeWg       *sync.WaitGroup
+	nsWg         *sync.WaitGroup
 	nbsbCleanup  *libovsdbtest.Cleanup
 }
 
@@ -53,6 +54,7 @@ func NewFakeOVN() *FakeOVN {
 		asf:          addressset.NewFakeAddressSetFactory(),
 		fakeRecorder: record.NewFakeRecorder(10),
 		nodeWg:       &sync.WaitGroup{},
+		nsWg:         &sync.WaitGroup{},
 	}
 }
 
@@ -96,11 +98,23 @@ func (o *FakeOVN) InitAndRunNodeController() {
 	}()
 }
 
+func (o *FakeOVN) InitAndRunNamespaceController() {
+	klog.Warningf("#### [%p] INIT Namespace", o)
+	o.controller.initNamespaceController(o.watcher.NamespaceInformer())
+	o.nsWg.Add(1)
+	go func() {
+		defer o.nsWg.Done()
+		o.controller.runNamespaceController(10, o.stopChan)
+	}()
+}
+
 func (o *FakeOVN) shutdown() {
 	o.watcher.Shutdown()
 	close(o.stopChan)
 	o.nodeWg.Wait()
+	o.nsWg.Wait()
 	o.nbsbCleanup.Cleanup()
+	klog.Warningf("#### [%p] SHUTDOWN", o)
 }
 
 func (o *FakeOVN) init() {

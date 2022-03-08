@@ -216,6 +216,12 @@ type Controller struct {
 	nodesSynced cache.InformerSynced
 	nodesQueue  workqueue.RateLimitingInterface
 	nodesCache  sync.Map
+
+	// namespaceController
+	namespacesLister listers.NamespaceLister
+	namespacesSynced cache.InformerSynced
+	namespacesQueue  workqueue.RateLimitingInterface
+	namespacesCache  sync.Map
 }
 
 type retryEntry struct {
@@ -336,9 +342,12 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	// or via pods. So execute an individual sync method at startup
 	oc.cleanExGwECMPRoutes()
 
-	// WatchNamespaces() should be started first because it has no other
-	// dependencies, and WatchNodes() depends on it
-	oc.WatchNamespaces()
+	oc.initNamespaceController(oc.watchFactory.NamespaceInformer())
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		oc.runNamespaceController(10, oc.stopChan)
+	}()
 
 	// NodesController must be started next because it creates the node switch
 	// which most other controllers depend on.
@@ -1099,27 +1108,6 @@ func (oc *Controller) WatchEgressIPPods() {
 			}
 		},
 	}, nil)
-}
-
-// WatchNamespaces starts the watching of namespace resource and calls
-// back the appropriate handler logic
-func (oc *Controller) WatchNamespaces() {
-	start := time.Now()
-	oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			ns := obj.(*kapi.Namespace)
-			oc.AddNamespace(ns)
-		},
-		UpdateFunc: func(old, newer interface{}) {
-			oldNs, newNs := old.(*kapi.Namespace), newer.(*kapi.Namespace)
-			oc.updateNamespace(oldNs, newNs)
-		},
-		DeleteFunc: func(obj interface{}) {
-			ns := obj.(*kapi.Namespace)
-			oc.deleteNamespace(ns)
-		},
-	}, oc.syncNamespaces)
-	klog.Infof("Bootstrapping existing namespaces and cleaning stale namespaces took %v", time.Since(start))
 }
 
 // syncNodeGateway ensures a node's gateway router is configured
