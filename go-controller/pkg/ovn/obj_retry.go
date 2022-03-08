@@ -2,13 +2,14 @@ package ovn
 
 import (
 	"fmt"
-	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	"math/rand"
 	"net"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
+
+	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
@@ -841,6 +842,24 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 	case factory.EgressNodeType:
 		oldNode := oldObj.(*kapi.Node)
 		newNode := newObj.(*kapi.Node)
+
+		// Check if the node's internal addresses changed
+		// If so, delete and readd the node for egress to update
+		// LR policies.
+		// We are only interested in the IPs here, not the subnet
+		// information.
+		oldV4Addr, oldV6Addr := getNodeInternalAddrs(oldNode)
+		newV4Addr, newV6Addr := getNodeInternalAddrs(newNode)
+		if !oldV4Addr.Equal(newV4Addr) || !oldV6Addr.Equal(newV6Addr) {
+			klog.Infof("Egress IP detected IP address change. Recreating node %s for Egress IP.", newNode.Name)
+			if err := oc.deleteNodeForEgress(oldNode); err != nil {
+				klog.Error(err)
+			}
+			if err := oc.addNodeForEgress(newNode); err != nil {
+				klog.Error(err)
+			}
+		}
+
 		// Initialize the allocator on every update,
 		// ovnkube-node/cloud-network-config-controller will make sure to
 		// annotate the node with the egressIPConfig, but that might have
@@ -870,7 +889,9 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 		isNewReachable := oc.isEgressNodeReachable(newNode)
 		oc.setNodeEgressReady(newNode.Name, isNewReady)
 		oc.setNodeEgressReachable(newNode.Name, isNewReachable)
-		if !oldHadEgressLabel && newHasEgressLabel {
+		// Verify the old assignable label or cached assignable state (in case of a mismatch between label
+		// and cache) vs the new label in case the label was set.
+		if newHasEgressLabel && (!oldHadEgressLabel || !oc.isNodeEgressAssignable(oldNode.Name)) {
 			klog.Infof("Node: %s has been labeled, adding it for egress assignment", newNode.Name)
 			oc.setNodeEgressAssignable(newNode.Name, true)
 			if isNewReady && isNewReachable {
