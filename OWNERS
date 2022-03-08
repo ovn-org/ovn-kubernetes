@@ -1,8 +1,8 @@
 reviewers:
   - abhat
-  - alexanderConstantinescu
   - dcbw
   - JacobTanenbaum
+  - jcaamano
   - squeed
   - tssurya
   - trozet
@@ -10,10 +10,11 @@ approvers:
   - abhat
   - danwinship
   - dcbw
-  - knobunc
-  - trozet
-  - squeed
   - JacobTanenbaum
+  - jcaamano
+  - knobunc
+  - squeed
+  - trozet
 
 # Bugzilla info
 component: Networking
