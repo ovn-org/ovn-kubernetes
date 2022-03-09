@@ -124,7 +124,7 @@ func ensureACLUUID(acl *nbdb.ACL) {
 	}
 }
 
-func BuildACL(name string, direction nbdb.ACLDirection, priority int, match string, action nbdb.ACLAction, meter string, severity nbdb.ACLSeverity, log bool, externalIds map[string]string) *nbdb.ACL {
+func BuildACL(name string, direction nbdb.ACLDirection, priority int, match string, action nbdb.ACLAction, meter string, severity nbdb.ACLSeverity, log bool, externalIds map[string]string, options map[string]string) *nbdb.ACL {
 	name = fmt.Sprintf("%.63s", name)
 
 	var realName *string
@@ -139,8 +139,7 @@ func BuildACL(name string, direction nbdb.ACLDirection, priority int, match stri
 	if len(severity) != 0 {
 		realSeverity = &severity
 	}
-
-	return &nbdb.ACL{
+	acl := &nbdb.ACL{
 		Name:        realName,
 		Direction:   direction,
 		Match:       match,
@@ -150,7 +149,10 @@ func BuildACL(name string, direction nbdb.ACLDirection, priority int, match stri
 		Log:         log,
 		Meter:       realMeter,
 		ExternalIDs: externalIds,
+		Options:     options,
 	}
+
+	return acl
 }
 
 func createOrUpdateACLOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, acl *nbdb.ACL) ([]libovsdb.Operation, error) {
