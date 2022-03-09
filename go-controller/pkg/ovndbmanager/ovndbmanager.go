@@ -226,7 +226,7 @@ func ensureClusterRaftMembership(db *dbProperties, kclient kube.Interface) error
 	members := r.FindAllStringSubmatch(out, -1)
 	kickedMembersCount := 0
 	dbAppLabel := map[string]string{"ovn-db-pod": "true"}
-	dbPods, err := kclient.GetPods(config.Kubernetes.OVNConfigNamespace,
+	dbPods, err := kclient.GetPods(config.Kubernetes.OVNConfigNamespace, //nolint:staticcheck // We don't have a running informer
 		metav1.LabelSelector{
 			MatchLabels: dbAppLabel,
 		})

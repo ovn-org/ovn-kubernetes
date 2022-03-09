@@ -447,7 +447,7 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	}
 
 	// Update topology version on node
-	node, err := oc.kube.GetNode(nodeName)
+	node, err := oc.kube.GetNode(nodeName) //nolint:staticcheck
 	if err != nil {
 		return fmt.Errorf("unable to get node: %s", nodeName)
 	}

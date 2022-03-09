@@ -231,7 +231,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		return err
 	}
 
-	existingNodes, err := oc.kube.GetNodes()
+	existingNodes, err := oc.kube.GetNodes() //nolint:staticcheck // We need to list nodes before the informer starts
 	if err != nil {
 		klog.Errorf("Error in fetching nodes: %v", err)
 		return err
@@ -1302,7 +1302,7 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newN
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		var err error
 
-		oldNode, err := oc.kube.GetNode(origNode.Name)
+		oldNode, err := oc.kube.GetNode(origNode.Name) //nolint:staticcheck
 		if err != nil {
 			return err
 		}
@@ -1336,8 +1336,8 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newN
 // this is the worker function that does the periodic sync of nodes from kube API
 // and sbdb and deletes chassis that are stale
 func (oc *Controller) syncNodesPeriodic() {
-	//node names is a slice of all node names
-	nodes, err := oc.kube.GetNodes()
+	// node names is a slice of all node names
+	nodes, err := oc.kube.GetNodes() //nolint:staticcheck // We need to list nodes before the informer starts
 	if err != nil {
 		klog.Errorf("Error getting existing nodes from kube API: %v", err)
 		return

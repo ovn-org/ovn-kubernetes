@@ -83,7 +83,7 @@ func NewMaster(kube kube.Interface,
 	}
 
 	// Mark existing hostsubnets as already allocated
-	existingNodes, err := m.kube.GetNodes()
+	existingNodes, err := m.kube.GetNodes() //nolint:staticcheck // We need to list nodes before the informer starts
 	if err != nil {
 		return nil, fmt.Errorf("error in initializing/fetching subnets: %v", err)
 	}

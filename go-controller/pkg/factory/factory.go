@@ -12,6 +12,7 @@ import (
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
 	egressfirewallinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions"
+	egressfirewalllisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
 
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
@@ -587,6 +588,11 @@ func (wf *WatchFactory) GetNamespacesBySelector(labelSelector metav1.LabelSelect
 	return namespaceLister.List(selector)
 }
 
+func (wf *WatchFactory) GetEgressFirewalls() ([]*egressfirewallapi.EgressFirewall, error) {
+	l := wf.informers[egressFirewallType].lister.(egressfirewalllisters.EgressFirewallLister)
+	return l.List(nil)
+}
+
 // GetNetworkPolicy gets a specific network policy by the namespace/name
 func (wf *WatchFactory) GetNetworkPolicy(namespace, name string) (*knet.NetworkPolicy, error) {
 	networkPolicyLister := wf.informers[policyType].lister.(netlisters.NetworkPolicyLister)
@@ -595,6 +601,10 @@ func (wf *WatchFactory) GetNetworkPolicy(namespace, name string) (*knet.NetworkP
 
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {
 	return wf.informers[nodeType].inf
+}
+
+func (wf *WatchFactory) NodeLister() listers.NodeLister {
+	return wf.informers[nodeType].lister.(listers.NodeLister)
 }
 
 // LocalPodInformer returns a shared Informer that may or may not only

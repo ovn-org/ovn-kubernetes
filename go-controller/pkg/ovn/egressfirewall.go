@@ -190,12 +190,12 @@ func (oc *Controller) syncEgressFirewallRetriable(egressFirewalls []interface{})
 	}
 
 	// get all the k8s EgressFirewall Objects
-	egressFirewallList, err := oc.kube.GetEgressFirewalls()
+	egressFirewallList, err := oc.watchFactory.GetEgressFirewalls()
 	if err != nil {
 		return fmt.Errorf("cannot reconcile the state of egressfirewalls in ovn database and k8s. err: %v", err)
 	}
 	// delete entries from the map that exist in k8s and ovn
-	for _, egressFirewall := range egressFirewallList.Items {
+	for _, egressFirewall := range egressFirewallList {
 		delete(ovnEgressFirewalls, egressFirewall.Namespace)
 	}
 	// any that are left are spurious and should be cleaned up

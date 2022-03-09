@@ -545,7 +545,7 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 		// a CloudPrivateIPConfig delete because the EgressIP has been deleted
 		// then we need to remove the setup made for it, but not update the
 		// object.
-		egressIP, err := oc.kube.GetEgressIP(egressIPName)
+		egressIP, err := oc.watchFactory.GetEgressIP(egressIPName)
 		isDeleted := apierrors.IsNotFound(err)
 		if err != nil && !isDeleted {
 			return err
@@ -578,7 +578,7 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 			return err
 		}
 		for _, resyncEgressIP := range resyncEgressIPs {
-			if err := oc.reconcileEgressIP(nil, &resyncEgressIP); err != nil {
+			if err := oc.reconcileEgressIP(nil, resyncEgressIP); err != nil {
 				klog.Errorf("Synthetic update for EgressIP: %s failed, err: %v", egressIP.Name, err)
 			}
 		}
@@ -589,7 +589,7 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 		if !exists {
 			return fmt.Errorf("CloudPrivateIPConfig object: %s is missing the egress IP owner reference annotation", newCloudPrivateIPConfig.Name)
 		}
-		egressIP, err := oc.kube.GetEgressIP(egressIPName)
+		egressIP, err := oc.watchFactory.GetEgressIP(egressIPName)
 		if err != nil {
 			return err
 		}
@@ -653,7 +653,7 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 // removePendingOps removes the existing pending CloudPrivateIPConfig operations
 // from the cache and returns the EgressIP object which can be re-synced given
 // the new assignment possibilities.
-func (oc *Controller) removePendingOpsAndGetResyncs(egressIPName, egressIP string) ([]egressipv1.EgressIP, error) {
+func (oc *Controller) removePendingOpsAndGetResyncs(egressIPName, egressIP string) ([]*egressipv1.EgressIP, error) {
 	oc.eIPC.pendingCloudPrivateIPConfigsMutex.Lock()
 	defer oc.eIPC.pendingCloudPrivateIPConfigsMutex.Unlock()
 	ops, pending := oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName]
@@ -678,12 +678,12 @@ func (oc *Controller) removePendingOpsAndGetResyncs(egressIPName, egressIP strin
 	// we process a final deletion for a CloudPrivateIPConfig: have a look
 	// at what other EgressIP objects have something un-assigned, and force
 	// a reconciliation on them by sending a synthetic update.
-	egressIPs, err := oc.kube.GetEgressIPs()
+	egressIPs, err := oc.watchFactory.GetEgressIPs()
 	if err != nil {
 		return nil, fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
-	resyncs := make([]egressipv1.EgressIP, 0, len(egressIPs.Items))
-	for _, egressIP := range egressIPs.Items {
+	resyncs := make([]*egressipv1.EgressIP, 0, len(egressIPs))
+	for _, egressIP := range egressIPs {
 		// Do not process the egress IP object which owns the
 		// CloudPrivateIPConfig for which we are currently processing the
 		// deletion for.
@@ -1512,11 +1512,11 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 	// egress IPs which are missing an assignment. If there are, we need to send a
 	// synthetic update since reconcileEgressIP will then try to assign those IPs to
 	// this node (if possible)
-	egressIPs, err := oc.kube.GetEgressIPs()
+	egressIPs, err := oc.watchFactory.GetEgressIPs()
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
-	for _, egressIP := range egressIPs.Items {
+	for _, egressIP := range egressIPs {
 		if len(egressIP.Spec.EgressIPs) != len(egressIP.Status.Items) {
 			// Send a "synthetic update" on all egress IPs which are not fully
 			// assigned, the reconciliation loop for WatchEgressIP will try to
@@ -1524,7 +1524,7 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 			// implementation will not trigger a watch event for updates on
 			// objects which have no semantic difference, hence: call the
 			// reconciliation function directly.
-			if err := oc.reconcileEgressIP(nil, &egressIP); err != nil {
+			if err := oc.reconcileEgressIP(nil, egressIP); err != nil {
 				klog.Errorf("Synthetic update for EgressIP: %s failed, err: %v", egressIP.Name, err)
 			}
 		}
@@ -1554,11 +1554,11 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 	// Since the node has been labelled as "not usable" for egress IP
 	// assignments we need to find all egress IPs which have an assignment to
 	// it, and move them elsewhere.
-	egressIPs, err := oc.kube.GetEgressIPs()
+	egressIPs, err := oc.watchFactory.GetEgressIPs()
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
-	for _, egressIP := range egressIPs.Items {
+	for _, egressIP := range egressIPs {
 		for _, status := range egressIP.Status.Items {
 			if status.Node == egressNode.Name {
 				// Send a "synthetic update" on all egress IPs which have an
@@ -1568,7 +1568,7 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 				// workqueue's delta FIFO implementation will not trigger a
 				// watch event for updates on objects which have no semantic
 				// difference, hence: call the reconciliation function directly.
-				if err := oc.reconcileEgressIP(nil, &egressIP); err != nil {
+				if err := oc.reconcileEgressIP(nil, egressIP); err != nil {
 					klog.Errorf("Re-assignment for EgressIP: %s failed, unable to update object, err: %v", egressIP.Name, err)
 				}
 				break

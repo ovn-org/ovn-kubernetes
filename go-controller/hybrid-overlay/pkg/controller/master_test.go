@@ -555,7 +555,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(initialDatabaseState))
 
 			k := &kube.Kube{KClient: fakeClient}
-			updatedNode, err := k.GetNode(nodeName)
+			updatedNode, err := k.GetNode(nodeName) //nolint:staticcheck
 			Expect(err).NotTo(HaveOccurred())
 
 			nodeAnnotator := kube.NewNodeAnnotator(k, updatedNode.Name)
@@ -564,7 +564,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func() (map[string]string, error) {
-				updatedNode, err = k.GetNode(nodeName)
+				updatedNode, err = k.GetNode(nodeName) //nolint:staticcheck
 				if err != nil {
 					return nil, err
 				}

@@ -21,7 +21,8 @@ import (
 )
 
 // Interface represents the exported methods for dealing with getting/setting
-// kubernetes resources
+// kubernetes resources directly from the apiserver (as opposed to the informer cache).
+// In general, we should avoid reading from the apiserver unless absolutely necessary.
 type Interface interface {
 	SetAnnotationsOnPod(namespace, podName string, annotations map[string]interface{}) error
 	SetAnnotationsOnNode(nodeName string, annotations map[string]interface{}) error
@@ -33,15 +34,12 @@ type Interface interface {
 	UpdateEgressIP(eIP *egressipv1.EgressIP) error
 	PatchEgressIP(name string, patchData []byte) error
 	UpdateNodeStatus(node *kapi.Node) error
-	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
+	// Deprecated: use the informer instead
 	GetNodes() (*kapi.NodeList, error)
-	GetEgressIP(name string) (*egressipv1.EgressIP, error)
-	GetEgressIPs() (*egressipv1.EgressIPList, error)
-	GetEgressFirewalls() (*egressfirewall.EgressFirewallList, error)
-	GetNamespaces(labelSelector metav1.LabelSelector) (*kapi.NamespaceList, error)
+	// Deprecated: use the informer instead
 	GetPods(namespace string, labelSelector metav1.LabelSelector) (*kapi.PodList, error)
+	// Deprecated: use the informer instead
 	GetNode(name string) (*kapi.Node, error)
-	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
 	CreateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error)
 	CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
 	UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
@@ -138,7 +136,7 @@ func (k *Kube) SetAnnotationsOnNamespace(namespaceName string, annotations map[s
 
 // SetTaintOnNode tries to add a new taint to the node. If the taint already exists, it doesn't do anything.
 func (k *Kube) SetTaintOnNode(nodeName string, taint *kapi.Taint) error {
-	node, err := k.GetNode(nodeName)
+	node, err := k.GetNode(nodeName) //nolint:staticcheck
 	if err != nil {
 		klog.Errorf("Unable to retrieve node %s for tainting %s: %v", nodeName, taint.ToString(), err)
 		return err
@@ -171,7 +169,7 @@ func (k *Kube) SetTaintOnNode(nodeName string, taint *kapi.Taint) error {
 // RemoveTaintFromNode removes all the taints that have the same key and effect from the node.
 // If the taint doesn't exist, it doesn't do anything.
 func (k *Kube) RemoveTaintFromNode(nodeName string, taint *kapi.Taint) error {
-	node, err := k.GetNode(nodeName)
+	node, err := k.GetNode(nodeName) //nolint:staticcheck
 	if err != nil {
 		klog.Errorf("Unable to retrieve node %s for tainting %s: %v", nodeName, taint.ToString(), err)
 		return err
@@ -254,15 +252,6 @@ func (k *Kube) UpdateNodeStatus(node *kapi.Node) error {
 		klog.Errorf("Error in updating status on node %s: %v", node.Name, err)
 	}
 	return err
-}
-
-// GetAnnotationsOnPod obtains the pod annotations from kubernetes apiserver, given the name and namespace
-func (k *Kube) GetAnnotationsOnPod(namespace, name string) (map[string]string, error) {
-	pod, err := k.KClient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-	return pod.ObjectMeta.Annotations, nil
 }
 
 // GetNamespaces returns the list of all Namespace objects matching the labelSelector
