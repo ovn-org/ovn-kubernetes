@@ -618,6 +618,7 @@ func (oc *Controller) initRetryPod(pod *kapi.Pod) {
 	defer oc.retryPodsLock.Unlock()
 	if entry, ok := oc.retryPods[pod.UID]; ok {
 		entry.timeStamp = time.Now()
+		entry.ignore = true
 	} else {
 		oc.retryPods[pod.UID] = &retryEntry{pod, time.Now(), 1, true}
 	}
