@@ -555,33 +555,33 @@ func (cpr *ControlPlaneRecorder) Run(sbClient libovsdbclient.Client, stop <-chan
 	}()
 }
 
-func (cpr *ControlPlaneRecorder) AddPodEvent(podUID kapimtypes.UID) {
+func (cpr *ControlPlaneRecorder) AddPod(podUID kapimtypes.UID) {
 	if cpr.queue != nil {
 		cpr.queue.Add(item{op: addPod, podUID: podUID})
 	}
 }
 
-func (cpr *ControlPlaneRecorder) addPodEvent(podUID kapimtypes.UID) {
+func (cpr *ControlPlaneRecorder) addPod(podUID kapimtypes.UID) {
 	cpr.podRecords[podUID] = &record{timestamp: time.Now(), timestampType: firstSeen}
 }
 
-func (cpr *ControlPlaneRecorder) CleanPodRecord(podUID kapimtypes.UID) {
+func (cpr *ControlPlaneRecorder) CleanPod(podUID kapimtypes.UID) {
 	if cpr.queue != nil {
 		cpr.queue.Add(item{op: cleanPod, podUID: podUID})
 	}
 }
 
-func (cpr *ControlPlaneRecorder) cleanPodRecord(podUID kapimtypes.UID) {
+func (cpr *ControlPlaneRecorder) cleanPod(podUID kapimtypes.UID) {
 	delete(cpr.podRecords, podUID)
 }
 
-func (cpr *ControlPlaneRecorder) AddLSPEvent(podUID kapimtypes.UID) {
+func (cpr *ControlPlaneRecorder) AddLSP(podUID kapimtypes.UID) {
 	if cpr.queue != nil {
 		cpr.queue.Add(item{op: addLogicalSwitchPort, podUID: podUID})
 	}
 }
 
-func (cpr *ControlPlaneRecorder) addLSPEvent(podUID kapimtypes.UID) {
+func (cpr *ControlPlaneRecorder) addLSP(podUID kapimtypes.UID) {
 	now := time.Now()
 	var r *record
 	if r = cpr.getRecord(podUID); r == nil {
@@ -597,7 +597,7 @@ func (cpr *ControlPlaneRecorder) addLSPEvent(podUID kapimtypes.UID) {
 	r.timestampType = logicalSwitchPort
 }
 
-func (cpr *ControlPlaneRecorder) addPortBindingEvent(m model.Model) {
+func (cpr *ControlPlaneRecorder) addPortBinding(m model.Model) {
 	var r *record
 	now := time.Now()
 	row := m.(*sbdb.PortBinding)
@@ -618,7 +618,7 @@ func (cpr *ControlPlaneRecorder) addPortBindingEvent(m model.Model) {
 	r.timestampType = portBinding
 }
 
-func (cpr *ControlPlaneRecorder) updatePortBindingEvent(old, new model.Model) {
+func (cpr *ControlPlaneRecorder) updatePortBinding(old, new model.Model) {
 	var r *record
 	oldRow := old.(*sbdb.PortBinding)
 	newRow := new.(*sbdb.PortBinding)
@@ -659,15 +659,15 @@ func (cpr *ControlPlaneRecorder) processNextItem() bool {
 func (cpr *ControlPlaneRecorder) processItem(i item) {
 	switch i.op {
 	case addPortBinding:
-		cpr.addPortBindingEvent(i.old)
+		cpr.addPortBinding(i.old)
 	case updatePortBinding:
-		cpr.updatePortBindingEvent(i.old, i.new)
+		cpr.updatePortBinding(i.old, i.new)
 	case addPod:
-		cpr.addPodEvent(i.podUID)
+		cpr.addPod(i.podUID)
 	case cleanPod:
-		cpr.cleanPodRecord(i.podUID)
+		cpr.cleanPod(i.podUID)
 	case addLogicalSwitchPort:
-		cpr.addLSPEvent(i.podUID)
+		cpr.addLSP(i.podUID)
 	}
 }
 
