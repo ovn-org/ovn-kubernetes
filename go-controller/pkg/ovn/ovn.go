@@ -1199,6 +1199,7 @@ func (oc *Controller) WatchNodes() {
 			if err != nil {
 				klog.Errorf("NodeAdd: error creating subnet for node %s: %v", node.Name, err)
 				addNodeFailed.Store(node.Name, true)
+				nodeClusterRouterPortFailed.Store(node.Name, true)
 				mgmtPortFailed.Store(node.Name, true)
 				gatewaysFailed.Store(node.Name, true)
 				return
