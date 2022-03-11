@@ -235,7 +235,7 @@ func (k *Kube) UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewal
 
 // UpdateEgressIP updates the EgressIP with the provided EgressIP data
 func (k *Kube) UpdateEgressIP(eIP *egressipv1.EgressIP) error {
-	klog.Infof("Updating status on EgressIP %s", eIP.Name)
+	klog.Infof("Updating status on EgressIP %s status %v", eIP.Name, eIP.Status)
 	_, err := k.EIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIP, metav1.UpdateOptions{})
 	return err
 }
