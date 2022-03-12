@@ -400,8 +400,18 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 
 	klog.V(5).Infof("Deleting Namespace's NetworkPolicy entities")
 	for _, np := range nsInfo.networkPolicies {
-		delete(nsInfo.networkPolicies, np.name)
-		oc.destroyNetworkPolicy(np, nsInfo)
+		oc.checkAndSkipRetryPolicy(np.policy)
+		// add the full np object to the retry entry, since the namespace is going to be removed
+		// along with any mappings of nsInfo -> network policies
+		oc.initRetryPolicyWithDelete(np.policy, np)
+		isLastPolicyInNamespace := len(nsInfo.networkPolicies) == 1
+		if err := oc.destroyNetworkPolicy(np, isLastPolicyInNamespace); err != nil {
+			klog.Errorf("Failed to delete network policy: %s, error: %v", getPolicyNamespacedName(np.policy), err)
+			oc.unSkipRetryPolicy(np.policy)
+		} else {
+			oc.checkAndDeleteRetryPolicy(np.policy)
+			delete(nsInfo.networkPolicies, np.name)
+		}
 	}
 	oc.deleteGWRoutesForNamespace(ns.Name)
 	oc.multicastDeleteNamespace(ns, nsInfo)
@@ -608,7 +618,7 @@ func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (addressset.Addre
 	} else {
 		ips = make([]net.IP, 0, len(existingPods))
 		for _, pod := range existingPods {
-			if pod.Status.PodIP != "" && !pod.Spec.HostNetwork {
+			if !pod.Spec.HostNetwork {
 				podIPs, err := util.GetAllPodIPs(pod)
 				if err != nil {
 					klog.Warningf(err.Error())

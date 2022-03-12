@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/extensions/table"
@@ -1204,6 +1205,291 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
+		ginkgo.It("correctly retries creating a network policy allowing a port to a local pod", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespace1 := *newNamespace(namespaceName1)
+				nPodTest := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespace1.Name,
+				)
+				nPod := newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP)
+
+				const (
+					labelName string = "pod-name"
+					labelVal  string = "server"
+					portNum   int32  = 81
+				)
+				nPod.Labels[labelName] = labelVal
+
+				tcpProtocol := v1.Protocol(v1.ProtocolTCP)
+				networkPolicy := newNetworkPolicy("networkpolicy1", namespace1.Name,
+					metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							labelName: labelVal,
+						},
+					},
+					[]knet.NetworkPolicyIngressRule{{
+						Ports: []knet.NetworkPolicyPort{{
+							Port:     &intstr.IntOrString{IntVal: portNum},
+							Protocol: &tcpProtocol,
+						}},
+					}},
+					[]knet.NetworkPolicyEgressRule{{
+						Ports: []knet.NetworkPolicyPort{{
+							Port:     &intstr.IntOrString{IntVal: portNum},
+							Protocol: &tcpProtocol,
+						}},
+					}},
+				)
+
+				// This is not yet going to be created
+				networkPolicy2 := newNetworkPolicy("networkpolicy2", namespace1.Name,
+					metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							labelName: labelVal,
+						},
+					},
+					[]knet.NetworkPolicyIngressRule{{
+						Ports: []knet.NetworkPolicyPort{{
+							Port:     &intstr.IntOrString{IntVal: portNum + 1},
+							Protocol: &tcpProtocol,
+						}},
+					}},
+					[]knet.NetworkPolicyEgressRule{{
+						Ports: []knet.NetworkPolicyPort{{
+							Port:     &intstr.IntOrString{IntVal: portNum + 1},
+							Protocol: &tcpProtocol,
+						}},
+					}},
+				)
+
+				npTest := kNetworkPolicy{}
+				gressPolicy1ExpectedData := npTest.getPolicyData(networkPolicy, []string{nPodTest.portUUID}, nil, []int32{portNum}, nbdb.ACLSeverityInfo)
+				defaultDenyExpectedData := npTest.getDefaultDenyData(networkPolicy, []string{nPodTest.portUUID}, nbdb.ACLSeverityInfo)
+				expectedData := []libovsdb.TestData{}
+				expectedData = append(expectedData, gressPolicy1ExpectedData...)
+				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
+
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{namespace1},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{*nPod},
+					},
+					&knet.NetworkPolicyList{
+						Items: []knet.NetworkPolicy{*networkPolicy},
+					},
+				)
+				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
+				fakeOvn.controller.WatchNetworkPolicy()
+
+				ginkgo.By("Creating a network policy that applies to a pod")
+
+				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
+
+				ginkgo.By("Bringing down NBDB")
+				// inject transient problem, nbdb is down
+				fakeOvn.controller.nbClient.Close()
+				gomega.Eventually(func() bool {
+					return fakeOvn.controller.nbClient.Connected()
+				}).Should(gomega.BeFalse())
+
+				// Create a second NP
+				ginkgo.By("Creating and deleting another policy that references that pod")
+
+				_, err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Create(context.TODO(), networkPolicy2, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// sleep long enough for TransactWithRetry to fail, causing NP Add to fail
+				time.Sleep(types.OVSDBTimeout + time.Second)
+				// check to see if the retry cache has an entry for this policy
+				fakeOvn.controller.getPolicyRetryEntry(networkPolicy2)
+				gomega.Eventually(func() *retryNetPolEntry {
+					return fakeOvn.controller.getPolicyRetryEntry(networkPolicy2)
+				}).ShouldNot(gomega.BeNil())
+				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+				defer cancel()
+				fakeOvn.resetNBClient(connCtx)
+				fakeOvn.controller.RequestRetryPolicy()
+
+				gressPolicy2ExpectedData := npTest.getPolicyData(networkPolicy2, []string{nPodTest.portUUID}, nil, []int32{portNum + 1}, nbdb.ACLSeverityInfo)
+				expectedDataWithPolicy2 := append(expectedData, gressPolicy2ExpectedData...)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedDataWithPolicy2...))
+				// check the cache no longer has the entry
+				gomega.Eventually(func() *retryNetPolEntry {
+					return fakeOvn.controller.getPolicyRetryEntry(networkPolicy2)
+				}).Should(gomega.BeNil())
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("correctly retries recreating a network policy with the same name", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespace1 := *newNamespace(namespaceName1)
+				nPodTest := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespace1.Name,
+				)
+				nPod := newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP)
+
+				const (
+					labelName string = "pod-name"
+					labelVal  string = "server"
+					portNum   int32  = 81
+				)
+				nPod.Labels[labelName] = labelVal
+
+				tcpProtocol := v1.Protocol(v1.ProtocolTCP)
+				networkPolicy := newNetworkPolicy("networkpolicy1", namespace1.Name,
+					metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							labelName: labelVal,
+						},
+					},
+					[]knet.NetworkPolicyIngressRule{{
+						Ports: []knet.NetworkPolicyPort{{
+							Port:     &intstr.IntOrString{IntVal: portNum},
+							Protocol: &tcpProtocol,
+						}},
+					}},
+					[]knet.NetworkPolicyEgressRule{{
+						Ports: []knet.NetworkPolicyPort{{
+							Port:     &intstr.IntOrString{IntVal: portNum},
+							Protocol: &tcpProtocol,
+						}},
+					}},
+				)
+
+				// This is not yet going to be created
+				networkPolicy2 := newNetworkPolicy("networkpolicy1", namespace1.Name,
+					metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							labelName: labelVal,
+						},
+					},
+					[]knet.NetworkPolicyIngressRule{{
+						Ports: []knet.NetworkPolicyPort{{
+							Port:     &intstr.IntOrString{IntVal: portNum + 1},
+							Protocol: &tcpProtocol,
+						}},
+					}},
+					[]knet.NetworkPolicyEgressRule{{
+						Ports: []knet.NetworkPolicyPort{{
+							Port:     &intstr.IntOrString{IntVal: portNum + 1},
+							Protocol: &tcpProtocol,
+						}},
+					}},
+				)
+
+				npTest := kNetworkPolicy{}
+				gressPolicy1ExpectedData := npTest.getPolicyData(networkPolicy, []string{nPodTest.portUUID}, nil, []int32{portNum}, nbdb.ACLSeverityInfo)
+				defaultDenyExpectedData := npTest.getDefaultDenyData(networkPolicy, []string{nPodTest.portUUID}, nbdb.ACLSeverityInfo)
+				expectedData := []libovsdb.TestData{}
+				expectedData = append(expectedData, gressPolicy1ExpectedData...)
+				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
+
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{namespace1},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{*nPod},
+					},
+					&knet.NetworkPolicyList{
+						Items: []knet.NetworkPolicy{*networkPolicy},
+					},
+				)
+				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
+				fakeOvn.controller.WatchNetworkPolicy()
+
+				ginkgo.By("Creating a network policy that applies to a pod")
+
+				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
+
+				ginkgo.By("Bringing down NBDB")
+				// inject transient problem, nbdb is down
+				fakeOvn.controller.nbClient.Close()
+				gomega.Eventually(func() bool {
+					return fakeOvn.controller.nbClient.Connected()
+				}).Should(gomega.BeFalse())
+
+				ginkgo.By("Delete the first network policy")
+				err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Delete(context.TODO(), networkPolicy.Name, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// sleep long enough for TransactWithRetry to fail, causing NP Add to fail
+				time.Sleep(types.OVSDBTimeout + time.Second)
+				// check to see if the retry cache has an entry for this policy
+				gomega.Eventually(func() *retryNetPolEntry {
+					return fakeOvn.controller.getPolicyRetryEntry(networkPolicy2)
+				}).ShouldNot(gomega.BeNil())
+				retryEntry := fakeOvn.controller.getPolicyRetryEntry(networkPolicy2)
+				ginkgo.By("retry entry new policy should be nil")
+				gomega.Expect(retryEntry.newPolicy).To(gomega.BeNil())
+				ginkgo.By("retry entry old policy should not be nil")
+				gomega.Expect(retryEntry.oldPolicy).NotTo(gomega.BeNil())
+				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+				defer cancel()
+				fakeOvn.resetNBClient(connCtx)
+
+				ginkgo.By("Create a new network policy with same name")
+
+				_, err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Create(context.TODO(), networkPolicy2, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				gressPolicy2ExpectedData := npTest.getPolicyData(networkPolicy2, []string{nPodTest.portUUID}, nil, []int32{portNum + 1}, nbdb.ACLSeverityInfo)
+				defaultDenyExpectedData2 := npTest.getDefaultDenyData(networkPolicy2, []string{nPodTest.portUUID}, nbdb.ACLSeverityInfo)
+
+				expectedData = []libovsdb.TestData{}
+				// FIXME(trozet): libovsdb server doesn't remove referenced ACLs to PG when deleting the PG
+				// https://github.com/ovn-org/libovsdb/issues/219
+				expectedPolicy1ACLs := gressPolicy1ExpectedData[:len(gressPolicy1ExpectedData)-1]
+				expectedData = append(expectedData, expectedPolicy1ACLs...)
+				expectedData = append(expectedData, gressPolicy2ExpectedData...)
+				expectedData = append(expectedData, defaultDenyExpectedData2...)
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
+				// check the cache no longer has the entry
+				gomega.Eventually(func() *retryNetPolEntry {
+					return fakeOvn.controller.getPolicyRetryEntry(networkPolicy)
+				}).Should(gomega.BeNil())
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("reconciles a deleted namespace referenced by a networkpolicy with a local running pod", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespace1 := *newNamespace(namespaceName1)
@@ -1796,6 +2082,125 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)))
 
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("retries a deleted network policy", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespace1 := *newNamespace(namespaceName1)
+
+				nPodTest := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespace1.Name,
+				)
+				networkPolicy := newNetworkPolicy("networkpolicy1", namespace1.Name,
+					metav1.LabelSelector{},
+					[]knet.NetworkPolicyIngressRule{
+						{
+							From: []knet.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": nPodTest.podName,
+										},
+									},
+								},
+							},
+						},
+					},
+					[]knet.NetworkPolicyEgressRule{
+						{
+							To: []knet.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": nPodTest.podName,
+										},
+									},
+								},
+							},
+						},
+					})
+
+				npTest := kNetworkPolicy{}
+				gressPolicyExpectedData := npTest.getPolicyData(networkPolicy, []string{nPodTest.portUUID}, []string{}, nil, nbdb.ACLSeverityInfo)
+				defaultDenyExpectedData := npTest.getDefaultDenyData(networkPolicy, []string{nPodTest.portUUID}, nbdb.ACLSeverityInfo)
+				expectedData := []libovsdb.TestData{}
+				expectedData = append(expectedData, gressPolicyExpectedData...)
+				expectedData = append(expectedData, defaultDenyExpectedData...)
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
+
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP),
+						},
+					},
+					&knet.NetworkPolicyList{
+						Items: []knet.NetworkPolicy{
+							*networkPolicy,
+						},
+					},
+				)
+				gomega.Eventually(func() bool {
+					return fakeOvn.controller.nbClient.Connected()
+				}).Should(gomega.BeTrue())
+
+				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
+				fakeOvn.controller.WatchNetworkPolicy()
+
+				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
+				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
+
+				// inject transient problem, nbdb is down
+				fakeOvn.controller.nbClient.Close()
+				gomega.Eventually(func() bool {
+					return fakeOvn.controller.nbClient.Connected()
+				}).Should(gomega.BeFalse())
+				err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Delete(context.TODO(), networkPolicy.Name, *metav1.NewDeleteOptions(0))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// sleep long enough for TransactWithRetry to fail, causing NP Add to fail
+				time.Sleep(types.OVSDBTimeout + time.Second)
+				// check to see if the retry cache has an entry for this policy
+				gomega.Eventually(func() *retryNetPolEntry {
+					return fakeOvn.controller.getPolicyRetryEntry(networkPolicy)
+				}).ShouldNot(gomega.BeNil())
+				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+				defer cancel()
+				fakeOvn.resetNBClient(connCtx)
+				fakeOvn.controller.RequestRetryPolicy()
+
+				eventuallyExpectNoAddressSets(fakeOvn, networkPolicy)
+
+				acls := []libovsdb.TestData{}
+				acls = append(acls, gressPolicyExpectedData[:len(gressPolicyExpectedData)-1]...)
+				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
+				gomega.Eventually(fakeOvn.controller.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)))
+
+				// check the cache no longer has the entry
+				gomega.Eventually(func() *retryNetPolEntry {
+					return fakeOvn.controller.getPolicyRetryEntry(networkPolicy)
+				}).Should(gomega.BeNil())
 				return nil
 			}
 

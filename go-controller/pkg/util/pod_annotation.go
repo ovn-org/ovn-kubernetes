@@ -2,6 +2,7 @@ package util
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 
@@ -50,6 +51,8 @@ const (
 	// DefNetworkAnnotation is the pod annotation for the cluster-wide default network
 	DefNetworkAnnotation = "v1.multus-cni.io/default-network"
 )
+
+var ErrNoPodIPFound = errors.New("no pod IPs found")
 
 // PodAnnotation describes the assigned network details for a single pod network. (The
 // actual annotation may include the equivalent of multiple PodAnnotations.)
@@ -222,22 +225,18 @@ func UnmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, erro
 // also return IPs for HostNetwork and other non-OVN-IPAM-ed pods.
 func GetAllPodIPs(pod *v1.Pod) ([]net.IP, error) {
 	annotation, err := UnmarshalPodAnnotation(pod.Annotations)
-	if annotation != nil {
+	if err == nil && annotation != nil {
 		// Use the OVN annotation if valid
 		ips := make([]net.IP, 0, len(annotation.IPs))
 		for _, ip := range annotation.IPs {
 			ips = append(ips, ip.IP)
 		}
-		return ips, nil
-	}
-
-	// return error if there are no IPs in pod status
-	if len(pod.Status.PodIPs) == 0 {
-		if pod.Status.PodIP == "" {
-			return nil, fmt.Errorf("no pod IPs found on pod %s: %v", pod.Name, err)
+		// An OVN annotation should never have empty IPs, but just in case
+		if len(ips) > 0 {
+			return ips, nil
 		}
-		// Kubelets < 1.16 only set podIP
-		return []net.IP{net.ParseIP(pod.Status.PodIP)}, nil
+		klog.Warningf("No IPs found in existing OVN annotation! Pod Name: %s, Annotation: %#v",
+			pod.Name, annotation)
 	}
 
 	// Otherwise if the annotation is not valid try to use Kube API pod IPs
@@ -250,7 +249,19 @@ func GetAllPodIPs(pod *v1.Pod) ([]net.IP, error) {
 		}
 		ips = append(ips, ip)
 	}
-	return ips, nil
+
+	if len(ips) > 0 {
+		return ips, nil
+	}
+
+	// Fallback check pod.Status.PodIP
+	// Kubelet < 1.16 only set podIP
+	ip := net.ParseIP(pod.Status.PodIP)
+	if ip == nil {
+		return nil, fmt.Errorf("pod %s/%s: %w ", pod.Namespace, pod.Name, ErrNoPodIPFound)
+	}
+
+	return []net.IP{ip}, nil
 }
 
 // GetK8sPodDefaultNetwork get pod default network from annotations

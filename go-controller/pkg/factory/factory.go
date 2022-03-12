@@ -32,6 +32,7 @@ import (
 	v1coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
 	listers "k8s.io/client-go/listers/core/v1"
+	netlisters "k8s.io/client-go/listers/networking/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 )
@@ -576,6 +577,12 @@ func (wf *WatchFactory) GetNamespaces() ([]*kapi.Namespace, error) {
 func (wf *WatchFactory) GetNamespacesBySelector(selector metav1.LabelSelector) ([]*kapi.Namespace, error) {
 	namespaceLister := wf.informers[namespaceType].lister.(listers.NamespaceLister)
 	return namespaceLister.List(labels.Set(selector.MatchLabels).AsSelector())
+}
+
+// GetNetworkPolicy gets a specific network policy by the namespace/name
+func (wf *WatchFactory) GetNetworkPolicy(namespace, name string) (*knet.NetworkPolicy, error) {
+	networkPolicyLister := wf.informers[policyType].lister.(netlisters.NetworkPolicyLister)
+	return networkPolicyLister.NetworkPolicies(namespace).Get(name)
 }
 
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {
