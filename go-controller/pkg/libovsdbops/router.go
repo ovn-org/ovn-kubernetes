@@ -23,13 +23,12 @@ func GetLogicalRouter(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter
 		Model:          router,
 		ModelPredicate: func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		ExistingResult: &found,
-		OnModelUpdates: nil, // no update
 		ErrNotFound:    true,
 		BulkOp:         false,
 	}
 
 	m := newModelClient(nbClient)
-	_, err := m.CreateOrUpdate(opModel)
+	err := m.Lookup(opModel)
 	if err != nil {
 		return nil, err
 	}
@@ -114,14 +113,21 @@ func DeleteLogicalRouter(nbClient libovsdbclient.Client, router *nbdb.LogicalRou
 
 // GetLogicalRouterPort looks up a logical router port from the cache
 func GetLogicalRouterPort(nbClient libovsdbclient.Client, lrp *nbdb.LogicalRouterPort) (*nbdb.LogicalRouterPort, error) {
-	found := &nbdb.LogicalRouterPort{
-		UUID: lrp.UUID,
-		Name: lrp.Name,
+	found := []*nbdb.LogicalRouterPort{}
+	opModel := operationModel{
+		Model:          lrp,
+		ExistingResult: &found,
+		ErrNotFound:    true,
+		BulkOp:         false,
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	err := nbClient.Get(ctx, found)
-	return found, err
+
+	m := newModelClient(nbClient)
+	err := m.Lookup(opModel)
+	if err != nil {
+		return nil, err
+	}
+
+	return found[0], nil
 }
 
 // CreateOrUpdateLogicalRouterPorts creates or updates the provided logical
@@ -211,13 +217,12 @@ func GetLogicalRouterPolicy(nbClient libovsdbclient.Client, policy *nbdb.Logical
 	opModel := operationModel{
 		Model:          policy,
 		ExistingResult: &found,
-		OnModelUpdates: nil, // no update
 		ErrNotFound:    true,
 		BulkOp:         false,
 	}
 
 	m := newModelClient(nbClient)
-	_, err := m.CreateOrUpdate(opModel)
+	err := m.Lookup(opModel)
 	if err != nil {
 		return nil, err
 	}
@@ -781,13 +786,12 @@ func GetNAT(nbClient libovsdbclient.Client, nat *nbdb.NAT) (*nbdb.NAT, error) {
 		Model:          nat,
 		ModelPredicate: func(item *nbdb.NAT) bool { return isEquivalentNAT(item, nat) },
 		ExistingResult: &found,
-		OnModelUpdates: nil, // no update
 		ErrNotFound:    true,
 		BulkOp:         false,
 	}
 
 	m := newModelClient(nbClient)
-	_, err := m.CreateOrUpdate(opModel)
+	err := m.Lookup(opModel)
 	if err != nil {
 		return nil, err
 	}

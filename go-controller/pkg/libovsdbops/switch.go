@@ -32,13 +32,12 @@ func GetLogicalSwitch(nbClient libovsdbclient.Client, sw *nbdb.LogicalSwitch) (*
 		Model:          sw,
 		ModelPredicate: func(item *nbdb.LogicalSwitch) bool { return item.Name == sw.Name },
 		ExistingResult: &found,
-		OnModelUpdates: nil, // no update
 		ErrNotFound:    true,
 		BulkOp:         false,
 	}
 
 	m := newModelClient(nbClient)
-	_, err := m.CreateOrUpdate(opModel)
+	err := m.Lookup(opModel)
 	if err != nil {
 		return nil, err
 	}
@@ -206,13 +205,12 @@ func GetLogicalSwitchPort(nbClient libovsdbclient.Client, lsp *nbdb.LogicalSwitc
 	opModel := operationModel{
 		Model:          lsp,
 		ExistingResult: &found,
-		OnModelUpdates: nil, // no update
 		ErrNotFound:    true,
 		BulkOp:         false,
 	}
 
 	m := newModelClient(nbClient)
-	_, err := m.CreateOrUpdate(opModel)
+	err := m.Lookup(opModel)
 	if err != nil {
 		return nil, err
 	}

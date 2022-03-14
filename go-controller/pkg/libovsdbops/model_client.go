@@ -14,6 +14,8 @@ import (
 	"k8s.io/klog/v2"
 )
 
+var errMultipleResults = errors.New("unexpectedly found multiple results for provided predicate")
+
 type modelClient struct {
 	client client.Client
 }
@@ -223,34 +225,27 @@ func (m *modelClient) buildOps(ops []ovsdb.Operation, doWhenFound opModelToOpMap
 	}
 	notfound := []interface{}{}
 	for _, opModel := range opModels {
-		if opModel.ExistingResult == nil && opModel.Model != nil {
-			opModel.ExistingResult = getListFromModel(opModel.Model)
-		}
-
-		// lookup
-		if opModel.ModelPredicate != nil {
-			if err := m.whereCache(&opModel); err != nil {
-				return nil, nil, fmt.Errorf("unable to list items for model, err: %v", err)
-			}
-		} else if opModel.Model != nil {
-			_, err := m.get(&opModel)
-			if err != nil && !errors.Is(err, client.ErrNotFound) {
-				return nil, nil, fmt.Errorf("unable to get model, err: %v", err)
-			}
+		// do lookup
+		err := m.lookup(&opModel)
+		if err != nil && err != client.ErrNotFound {
+			return nil, nil, fmt.Errorf("unable to lookup model %+v: %v", opModel, err)
 		}
 
 		// do updates
 		var hadExistingResults bool
-		err := onModels(opModel.ExistingResult, func(model interface{}) error {
+		err = onModels(opModel.ExistingResult, func(model interface{}) error {
 			if hadExistingResults && !opModel.BulkOp {
-				return fmt.Errorf("unexpectedly found multiple results for provided predicate")
+				return errMultipleResults
 			}
 			hadExistingResults = true
-			o, err := doWhenFound(model, &opModel)
-			if err != nil {
-				return err
+
+			if doWhenFound != nil {
+				o, err := doWhenFound(model, &opModel)
+				if err != nil {
+					return err
+				}
+				ops = append(ops, o...)
 			}
-			ops = append(ops, o...)
 			return nil
 		})
 		if err != nil {
@@ -367,6 +362,35 @@ func (m *modelClient) delete(lookUpModel interface{}, opModel *operationModel) (
 	return o, nil
 }
 
+func (m *modelClient) Lookup(opModels ...operationModel) error {
+	_, _, err := m.buildOps(nil, nil, nil, opModels...)
+	return err
+}
+
+// lookup the model in the cache prioritizing provided indexes over a
+// predicate unless bulkop is set
+func (m *modelClient) lookup(opModel *operationModel) error {
+	if opModel.ExistingResult == nil && opModel.Model != nil {
+		opModel.ExistingResult = getListFromModel(opModel.Model)
+	}
+
+	var err error
+	if opModel.Model != nil && !opModel.BulkOp {
+		err = m.get(opModel)
+		if err == nil || err != client.ErrNotFound {
+			return err
+		}
+	}
+
+	if opModel.ModelPredicate != nil {
+		err = m.whereCache(opModel)
+	} else if opModel.BulkOp {
+		panic("Expected a ModelPredicate with BulkOp==true")
+	}
+
+	return err
+}
+
 /*
  get copies the model, since this function ends up being called from update /
  mutate, and Get'ing the model will modify the object to the one currently
@@ -374,19 +398,22 @@ func (m *modelClient) delete(lookUpModel interface{}, opModel *operationModel) (
  return the retrived object though, in case the caller needs to act on the
  object's UUID
 */
-func (m *modelClient) get(opModel *operationModel) (interface{}, error) {
+func (m *modelClient) get(opModel *operationModel) error {
 	copy := copyIndexes(opModel.Model)
+	if reflect.ValueOf(copy).Elem().IsZero() {
+		// no indexes available
+		return client.ErrNotFound
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	defer cancel()
 	if err := m.client.Get(ctx, copy); err != nil {
-		return nil, err
+		return err
 	}
 	uuid := getUUID(opModel.Model)
 	if uuid == "" || isNamedUUID(uuid) {
 		setUUID(opModel.Model, getUUID(copy))
 	}
-	err := addToExistingResult(copy, opModel.ExistingResult)
-	return copy, err
+	return addToExistingResult(copy, opModel.ExistingResult)
 }
 
 func (m *modelClient) whereCache(opModel *operationModel) error {

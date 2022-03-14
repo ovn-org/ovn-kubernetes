@@ -2617,18 +2617,18 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		gomega.Expect(gp.addNamespaceAddressSet(one)).To(gomega.BeTrue())
 		expected := buildExpectedACL(gp, pgName, []string{asName, one})
 		actual := gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
-		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
+		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		gomega.Expect(gp.addNamespaceAddressSet(two)).To(gomega.BeTrue())
 		expected = buildExpectedACL(gp, pgName, []string{asName, one, two})
 		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
-		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
+		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		// address sets should be alphabetized
 		gomega.Expect(gp.addNamespaceAddressSet(three)).To(gomega.BeTrue())
 		expected = buildExpectedACL(gp, pgName, []string{asName, one, two, three})
 		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
-		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
+		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		// re-adding an existing set is a no-op
 		gomega.Expect(gp.addNamespaceAddressSet(three)).To(gomega.BeFalse())
@@ -2636,13 +2636,13 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		gomega.Expect(gp.addNamespaceAddressSet(four)).To(gomega.BeTrue())
 		expected = buildExpectedACL(gp, pgName, []string{asName, one, two, three, four})
 		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
-		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
+		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		// now delete a set
 		gomega.Expect(gp.delNamespaceAddressSet(one)).To(gomega.BeTrue())
 		expected = buildExpectedACL(gp, pgName, []string{asName, two, three, four})
 		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
-		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
+		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		// deleting again is a no-op
 		gomega.Expect(gp.delNamespaceAddressSet(one)).To(gomega.BeFalse())
@@ -2651,12 +2651,12 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		gomega.Expect(gp.addNamespaceAddressSet(five)).To(gomega.BeTrue())
 		expected = buildExpectedACL(gp, pgName, []string{asName, two, three, four, five})
 		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
-		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
+		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		gomega.Expect(gp.delNamespaceAddressSet(three)).To(gomega.BeTrue())
 		expected = buildExpectedACL(gp, pgName, []string{asName, two, four, five})
 		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
-		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
+		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		// deleting again is no-op
 		gomega.Expect(gp.delNamespaceAddressSet(one)).To(gomega.BeFalse())
@@ -2664,27 +2664,27 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		gomega.Expect(gp.addNamespaceAddressSet(six)).To(gomega.BeTrue())
 		expected = buildExpectedACL(gp, pgName, []string{asName, two, four, five, six})
 		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
-		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
+		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		gomega.Expect(gp.delNamespaceAddressSet(two)).To(gomega.BeTrue())
 		expected = buildExpectedACL(gp, pgName, []string{asName, four, five, six})
 		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
-		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
+		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		gomega.Expect(gp.delNamespaceAddressSet(five)).To(gomega.BeTrue())
 		expected = buildExpectedACL(gp, pgName, []string{asName, four, six})
 		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
-		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
+		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		gomega.Expect(gp.delNamespaceAddressSet(six)).To(gomega.BeTrue())
 		expected = buildExpectedACL(gp, pgName, []string{asName, four})
 		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
-		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
+		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		gomega.Expect(gp.delNamespaceAddressSet(four)).To(gomega.BeTrue())
 		expected = buildExpectedACL(gp, pgName, []string{asName})
 		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
-		gomega.Expect(actual).To(gomega.ConsistOf(libovsdb.EqualIgnoringUUIDs(expected)))
+		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 
 		// deleting again is no-op
 		gomega.Expect(gp.delNamespaceAddressSet(four)).To(gomega.BeFalse())

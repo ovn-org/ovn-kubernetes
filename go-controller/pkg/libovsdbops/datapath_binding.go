@@ -16,13 +16,12 @@ func GetDatapathBindingWithPredicate(sbClient libovsdbclient.Client, p datapathB
 	opModel := operationModel{
 		ModelPredicate: p,
 		ExistingResult: &found,
-		OnModelUpdates: nil, // no update
 		ErrNotFound:    true,
 		BulkOp:         false,
 	}
 
 	m := newModelClient(sbClient)
-	_, err := m.CreateOrUpdate(opModel)
+	err := m.Lookup(opModel)
 	if err != nil {
 		return nil, err
 	}

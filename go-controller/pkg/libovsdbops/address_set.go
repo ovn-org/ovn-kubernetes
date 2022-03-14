@@ -42,14 +42,21 @@ func FindAddressSetsWithPredicate(nbClient libovsdbclient.Client, p addressSetPr
 
 // GetAddressSet looks up an address sets from the cache
 func GetAddressSet(nbClient libovsdbclient.Client, as *nbdb.AddressSet) (*nbdb.AddressSet, error) {
-	found := &nbdb.AddressSet{
-		UUID: as.UUID,
-		Name: as.Name,
+	found := []*nbdb.AddressSet{}
+	opModel := operationModel{
+		Model:          as,
+		ExistingResult: &found,
+		ErrNotFound:    true,
+		BulkOp:         false,
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	err := nbClient.Get(ctx, found)
-	return found, err
+
+	m := newModelClient(nbClient)
+	err := m.Lookup(opModel)
+	if err != nil {
+		return nil, err
+	}
+
+	return found[0], nil
 }
 
 // CreateAddressSets creates the provided address sets
