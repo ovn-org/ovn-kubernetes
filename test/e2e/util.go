@@ -100,6 +100,28 @@ func newAgnhostPod(namespace, name string, command ...string) *v1.Pod {
 	}
 }
 
+// newAgnhostPod returns a pod that uses the agnhost image. The image's binary supports various subcommands
+// that behave the same, no matter the underlying OS.
+func newAgnhostPodOnNode(name, nodeName string, labels map[string]string, command ...string) *v1.Pod {
+	return &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: labels,
+		},
+		Spec: v1.PodSpec{
+			NodeName: nodeName,
+			Containers: []v1.Container{
+				{
+					Name:    name,
+					Image:   agnhostImage,
+					Command: command,
+				},
+			},
+			RestartPolicy: v1.RestartPolicyNever,
+		},
+	}
+}
+
 // IsIPv6Cluster returns true if the kubernetes default service is IPv6
 func IsIPv6Cluster(c clientset.Interface) bool {
 	// Get the ClusterIP of the kubernetes service created in the default namespace
@@ -649,9 +671,13 @@ func waitForDaemonSetUpdate(c clientset.Interface, ns string, dsName string, all
 }
 
 func pokePod(fr *framework.Framework, srcPodName string, dstPodIP string) error {
+	targetIP := dstPodIP
+	if utilnet.IsIPv6String(dstPodIP) {
+		targetIP = fmt.Sprintf("[%s]", dstPodIP)
+	}
 	stdout, stderr, err := fr.ExecShellInPodWithFullOutput(
 		srcPodName,
-		fmt.Sprintf("curl --output /dev/stdout -m 1 -I %s:8000 | head -n1", dstPodIP))
+		fmt.Sprintf("curl --output /dev/stdout -m 1 -I %s:8000 | head -n1", targetIP))
 	if err == nil && stdout == "HTTP/1.1 200 OK" {
 		return nil
 	}
@@ -847,4 +873,9 @@ func countAclLogs(targetNodeName string, policyNameRegex string, expectedAclVerd
 
 	framework.Logf("The audit log contains %d occurrences of: '%s'", count, stringToMatch)
 	return count, nil
+}
+
+func removeSliceElement(s []string, i int) []string {
+	s[i] = s[len(s)-1]
+	return s[:len(s)-1]
 }

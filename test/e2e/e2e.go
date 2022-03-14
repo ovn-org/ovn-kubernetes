@@ -860,11 +860,6 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		}
 	}
 
-	removeSliceElement := func(s []string, i int) []string {
-		s[i] = s[len(s)-1]
-		return s[:len(s)-1]
-	}
-
 	// targetExternalContainerAndTest targets the external test container from
 	// our test pods, collects its logs and verifies that the logs have traces
 	// of the `verifyIPs` provided. We need to target the external test
