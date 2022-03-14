@@ -4,6 +4,13 @@
 #Always exit on errors
 set -e
 
+install_j2_renderer() {
+  # ensure j2 renderer installed
+  pip install wheel --user
+  pip freeze | grep j2cli || pip install j2cli[yaml] --user
+  export PATH=~/.local/bin:$PATH
+}
+
 # The script renders j2 templates into yaml files in ../yaml/
 
 # ensure j2 renderer installed
