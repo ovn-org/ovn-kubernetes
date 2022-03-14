@@ -700,6 +700,15 @@ jobs:
         KIND_IPV6_SUPPORT="true"
         make -C test shard-test WHAT="Networking Granular Checks\|DualStack"
 
+    - name: Run Dual-Stack Control-Plane Tests
+      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
+      run: |
+        mkdir -p ${CI_RUN_LOG_CACHE}
+        exec > >(tee -a ${CI_RUN_LOG_CACHE}/${CI_LOGS_DUAL_STACK}) 2>&1
+        KIND_IPV4_SUPPORT="true"
+        KIND_IPV6_SUPPORT="true"
+        make -C test control-plane WHAT="DualStack"
+
     - name: Upload Junit Reports
       if: steps.last_run_status.outputs.STATUS != 'completed' && always()
       uses: actions/upload-artifact@v2
