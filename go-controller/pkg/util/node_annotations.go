@@ -493,3 +493,7 @@ func ParseNodeHostAddresses(node *kapi.Node) (sets.String, error) {
 
 	return sets.NewString(cfg...), nil
 }
+
+func NodeHostAddressesChanged(oldNode, newNode *kapi.Node) bool {
+	return oldNode.Annotations[ovnNodeHostAddresses] != newNode.Annotations[ovnNodeHostAddresses]
+}

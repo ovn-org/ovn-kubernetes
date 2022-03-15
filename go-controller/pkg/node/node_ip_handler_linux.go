@@ -24,16 +24,21 @@ type addressManager struct {
 	addresses      sets.String
 	nodeAnnotator  kube.Annotator
 	mgmtPortConfig *managementPortConfig
+	resyncFn       func()
 	sync.Mutex
 }
 
 // initializes a new address manager which will hold all the IPs on a node
-func newAddressManager(nodeName string, k kube.Interface, config *managementPortConfig, watchFactory factory.NodeWatchFactory) *addressManager {
+func newAddressManager(nodeName string, k kube.Interface, config *managementPortConfig, watchFactory factory.NodeWatchFactory, resyncFn *func()) *addressManager {
 	mgr := &addressManager{
 		nodeName:       nodeName,
 		watchFactory:   watchFactory,
 		addresses:      sets.NewString(),
 		mgmtPortConfig: config,
+		resyncFn:       func() {},
+	}
+	if resyncFn != nil {
+		mgr.resyncFn = *resyncFn
 	}
 	mgr.nodeAnnotator = kube.NewNodeAnnotator(k, nodeName)
 	mgr.sync()
@@ -123,6 +128,7 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 					if err := c.nodeAnnotator.Run(); err != nil {
 						klog.Errorf("Failed to set node annotations: %v", err)
 					}
+					c.resyncFn()
 				}
 			case <-addressSyncTimer.C:
 				if subscribed {

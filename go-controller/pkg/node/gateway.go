@@ -41,6 +41,7 @@ type gateway struct {
 	nodeIPManager   *addressManager
 	initFunc        func() error
 	readyFunc       func() (bool, error)
+	initDone        bool
 }
 
 func (g *gateway) AddService(svc *kapi.Service) {
@@ -166,6 +167,7 @@ func (g *gateway) Init(wf factory.NodeWatchFactory) error {
 			g.DeleteEndpoints(ep)
 		},
 	}, nil)
+	g.initDone = true
 	return nil
 }
 

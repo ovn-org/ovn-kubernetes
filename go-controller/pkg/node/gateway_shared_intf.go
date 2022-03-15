@@ -602,9 +602,13 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 			continue
 		}
 		hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(ep, &npw.nodeIPManager.addresses)
-		npw.getAndSetServiceInfo(name, service, hasLocalHostNetworkEp)
+		oldHasLocalHostNetworkEp := hasLocalHostNetworkEp
+		oldSvcInfo, _ := npw.getAndSetServiceInfo(name, service, hasLocalHostNetworkEp)
+		if oldSvcInfo != nil {
+			oldHasLocalHostNetworkEp = oldSvcInfo.hasLocalHostNetworkEp
+		}
 		// Delete OF rules for service if they exist
-		npw.updateServiceFlowCache(service, false, hasLocalHostNetworkEp)
+		npw.updateServiceFlowCache(service, false, oldHasLocalHostNetworkEp)
 		npw.updateServiceFlowCache(service, true, hasLocalHostNetworkEp)
 		// Add correct iptables rules only for Full mode
 		if !npw.dpuMode {
@@ -1215,7 +1219,24 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			return err
 		}
 
-		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory)
+		// resync Services on address change
+		resyncAddressFn := func() {
+			if gw.nodePortWatcher == nil {
+				return
+			}
+			if !gw.initDone {
+				return
+			}
+			klog.V(2).Infof("Detected node address change, resyncing local services")
+			services, _ := watchFactory.GetServices()
+			sint := make([]interface{}, 0, len(services))
+			for _, service := range services {
+				sint = append(sint, service)
+			}
+			gw.nodePortWatcher.SyncServices(sint)
+
+		}
+		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory, &resyncAddressFn)
 
 		if config.Gateway.NodeportEnable {
 			klog.Info("Creating Shared Gateway Node Port Watcher")

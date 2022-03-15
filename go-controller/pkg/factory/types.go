@@ -48,6 +48,7 @@ type NodeWatchFactory interface {
 	GetNode(name string) (*kapi.Node, error)
 
 	GetService(namespace, name string) (*kapi.Service, error)
+	GetServices() ([]*kapi.Service, error)
 	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
 }
 

@@ -538,6 +538,12 @@ func (wf *WatchFactory) GetService(namespace, name string) (*kapi.Service, error
 	return serviceLister.Services(namespace).Get(name)
 }
 
+// GetServices returns all services
+func (wf *WatchFactory) GetServices() ([]*kapi.Service, error) {
+	serviceLister := wf.informers[serviceType].lister.(listers.ServiceLister)
+	return serviceLister.List(labels.Everything())
+}
+
 // GetEndpoints returns the endpoints list in a given namespace
 func (wf *WatchFactory) GetEndpoints(namespace string) ([]*kapi.Endpoints, error) {
 	endpointsLister := wf.informers[endpointsType].lister.(listers.EndpointsLister)

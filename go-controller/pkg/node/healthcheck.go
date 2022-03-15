@@ -116,11 +116,13 @@ func hasLocalHostNetworkEndpoints(ep *kapi.Endpoints, nodeAddresses *sets.String
 		for i := range ss.Addresses {
 			addr := &ss.Addresses[i]
 			if nodeAddresses.Has(addr.IP) {
+				klog.V(5).Infof("Endpoints %s/%s has host-local endpoints", ep.Namespace, ep.Name)
 				return true
 			}
 		}
 	}
 
+	klog.V(5).Infof("Endpoints %s/%s does NOT have host-local endpoints", ep.Namespace, ep.Name)
 	return false
 }
 
