@@ -218,7 +218,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	metrics.RegisterMasterFunctional()
 	metrics.RunTimestamp(oc.stopChan, oc.sbClient, oc.nbClient)
 	metrics.MonitorIPSec(oc.nbClient)
-	oc.metricsRecorder.Run(oc.sbClient)
+	oc.metricsRecorder.Run(oc.sbClient, oc.stopChan)
 
 	// enableOVNLogicalDataPathGroups sets an OVN flag to enable logical datapath
 	// groups on OVN 20.12 and later. The option is ignored if OVN doesn't

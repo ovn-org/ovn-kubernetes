@@ -597,7 +597,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 		return fmt.Errorf("could not perform creation or update of logical switch port %s - %+v", portName, err)
 	}
-	go oc.metricsRecorder.AddLSPEvent(pod.UID)
+	oc.metricsRecorder.AddLSP(pod.UID)
 
 	// if somehow lspUUID is empty, there is a bug here with interpreting OVSDB results
 	if len(lsp.UUID) == 0 {
