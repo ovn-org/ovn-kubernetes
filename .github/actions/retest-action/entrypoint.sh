@@ -2,8 +2,6 @@
 
 set -ex
 
-cat ${GITHUB_EVENT_PATH}
-
 if ! jq -e '.issue.pull_request' ${GITHUB_EVENT_PATH}; then
     echo "Not a PR... Exiting."
     exit 0
@@ -31,8 +29,6 @@ curl --request GET \
     --header "authorization: Bearer ${GITHUB_TOKEN}" \
     --header "content-type: application/json" | jq '.workflow_runs | max_by(.run_number)' > run.json
 
-cat run.json
-
 RERUN_URL=$(jq -r '.rerun_url' run.json)
 if [ "${ACTION}" == "/retest-failed" ]; then
   # New feature, rerun failed jobs:
@@ -45,7 +41,7 @@ fi
 # Store the answer in file .rerun-response.json.
 RESPONSE_CODE=$(curl --write-out '%{http_code}' --silent --output .rerun-response.json --request POST \
     --url "${RERUN_URL}" \
-    --header "authorization: Bearer ${GITHUB_TOKEN}" \
+    --header "authorization: Bearer a${GITHUB_TOKEN}" \
     --header "content-type: application/json")
 
 REACTION_URL="$(jq -r '.comment.url' ${GITHUB_EVENT_PATH})/reactions"
@@ -61,12 +57,12 @@ curl --request POST \
     --data '{ "content" : "'${REACTION_SYMBOL}'" }'
 
 PR_COMMENT_URL="${PR_URL}/comments"
-if [[ "${RESPONSE_CODE}" != "2*" ]]; then
-  RESPONSE_MESSAGE="$(jq -r '.message' .rerun-response.json"
+if [[ ${RESPONSE_CODE} != 2* ]]; then
+  RESPONSE_MESSAGE=$(jq -r '.message' .rerun-response.json)
   curl --request POST \
       --url "${PR_COMMENT_URL}" \
       --header "authorization: Bearer ${GITHUB_TOKEN}" \
       --header "accept: application/vnd.github.squirrel-girl-preview+json" \
       --header "content-type: application/json" \
-      --data '{ "body" : "Oops, somethind went wrong...: '${RESPONSE_MESSAGE}'" }'
+      --data '{ "body" : "Oops, something went wrong...: '${RESPONSE_MESSAGE}'" }'
 fi
