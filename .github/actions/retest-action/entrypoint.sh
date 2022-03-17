@@ -11,8 +11,10 @@ fi
 
 ACTION=""
 if [ "$(jq -r '.comment.body' ${GITHUB_EVENT_PATH})" == "/retest" ]; then
+  echo "Retesting all jobs"
   ACTION="retest"
 elif [ "$(jq -r '.comment.body' ${GITHUB_EVENT_PATH})" == "/retest-failed" ]; then
+  echo "Retesting only failed jobs"
   ACTION="retest-failed"
 else
     echo "Nothing to do... Exiting."
