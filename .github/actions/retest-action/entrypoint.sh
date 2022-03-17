@@ -64,5 +64,5 @@ if [[ ${RESPONSE_CODE} != 2* ]]; then
       --header "authorization: Bearer ${GITHUB_TOKEN}" \
       --header "accept: application/vnd.github.squirrel-girl-preview+json" \
       --header "content-type: application/json" \
-      --data '{ "body" : "Oops, something went wrong:\n~~~\n'"${RESPONSE_MESSAGE}"\n~~~\n'" }'
+      --data '{ "body" : "Oops, something went wrong:\n~~~\n'"${RESPONSE_MESSAGE}"'\n~~~\n" }'
 fi
