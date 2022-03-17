@@ -40,15 +40,16 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-    - name: Check out code
-      uses: actions/checkout@v2
-
-    - name: Verify
-      uses: golangci/golangci-lint-action@v2
-      with:
-        version: v1.33.2
-        working-directory: go-controller
-        args: --modules-download-mode=vendor --timeout=15m0s --verbose
+    # Create a cache for the built master image
+    - name: Restore master image cache
+      id: image_cache_master
+      run: |
+        RANDOM=(echo $((1 + $RANDOM % 10)))
+        if [ $RANDOM -le 5 ]; then 
+          echo failed
+          exit 1
+        fi
+        echo success
       
   build-master:
     name: Build-master
