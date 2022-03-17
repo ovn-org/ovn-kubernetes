@@ -41,7 +41,7 @@ fi
 # Store the answer in file .rerun-response.json.
 RESPONSE_CODE=$(curl --write-out '%{http_code}' --silent --output .rerun-response.json --request POST \
     --url "${RERUN_URL}" \
-    --header "authorization: Bearer a${GITHUB_TOKEN}" \
+    --header "authorization: Bearer ${GITHUB_TOKEN}" \
     --header "content-type: application/json")
 
 REACTION_URL="$(jq -r '.comment.url' ${GITHUB_EVENT_PATH})/reactions"
