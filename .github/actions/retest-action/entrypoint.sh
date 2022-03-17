@@ -56,13 +56,13 @@ curl --request POST \
     --header "content-type: application/json" \
     --data '{ "content" : "'${REACTION_SYMBOL}'" }'
 
-PR_COMMENT_URL="${PR_URL}/comments"
 if [[ ${RESPONSE_CODE} != 2* ]]; then
+  COMMENTS_URL=$(jq -r '.issue.comments_url' ${GITHUB_EVENT_PATH})
   RESPONSE_MESSAGE=$(jq -r '.message' .rerun-response.json)
   curl --request POST \
-      --url "${PR_COMMENT_URL}" \
+      --url "${COMMENTS_URL}" \
       --header "authorization: Bearer ${GITHUB_TOKEN}" \
       --header "accept: application/vnd.github.squirrel-girl-preview+json" \
       --header "content-type: application/json" \
-      --data '{ "body" : "Oops, something went wrong...: '${RESPONSE_MESSAGE}'" }'
+      --data '{ "body" : "Oops, something went wrong...: '"${RESPONSE_MESSAGE}"'" }'
 fi

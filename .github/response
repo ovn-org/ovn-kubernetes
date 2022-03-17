@@ -1,0 +1,4 @@
+{
+  "message": "Must have admin rights to Repository.",
+  "documentation_url": "https://docs.github.com/rest/reference/actions#re-run-a-workflow"
+}
