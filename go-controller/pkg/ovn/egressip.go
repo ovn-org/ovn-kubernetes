@@ -1095,6 +1095,12 @@ func (oc *Controller) isEgressNodeReachable(egressNode *kapi.Node) bool {
 	return false
 }
 
+type egressIPCacheEntry struct {
+	podIPs           sets.String
+	gatewayRouterIPs sets.String
+	egressIPs        sets.String
+}
+
 func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 	// This part will take of syncing stale data which we might have in OVN if
 	// there's no ovnkube-master running for a while, while there are changes to
@@ -1104,14 +1110,14 @@ func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 	// - pods/namespaces which have stopped matching on egress IPs while
 	//   ovnkube-master was down
 	oc.syncWithRetry("syncEgressIPs", func() error {
-		egressIPToPodIPCache, err := oc.generatePodIPCacheForEgressIP(eIPs)
+		egressIPCache, err := oc.generateCacheForEgressIP(eIPs)
 		if err != nil {
 			return fmt.Errorf("syncEgressIPs unable to generate cache for egressip: %v", err)
 		}
-		if err = oc.syncStaleEgressReroutePolicy(egressIPToPodIPCache); err != nil {
+		if err = oc.syncStaleEgressReroutePolicy(egressIPCache); err != nil {
 			return fmt.Errorf("syncEgressIPs unable to remove stale reroute policies: %v", err)
 		}
-		if err = oc.syncStaleSNATRules(egressIPToPodIPCache); err != nil {
+		if err = oc.syncStaleSNATRules(egressIPCache); err != nil {
 			return fmt.Errorf("syncEgressIPs unable to remove stale nats: %v", err)
 		}
 		return nil
@@ -1120,10 +1126,12 @@ func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 
 // This function implements a portion of syncEgressIPs.
 // It removes OVN logical router policies used by EgressIPs deleted while ovnkube-master was down.
+// It also removes stale nexthops from router policies used by EgressIPs.
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.
-func (oc *Controller) syncStaleEgressReroutePolicy(egressIPToPodIPCache map[string]sets.String) error {
+func (oc *Controller) syncStaleEgressReroutePolicy(egressIPCache map[string]egressIPCacheEntry) error {
 	logicalRouter := nbdb.LogicalRouter{}
 	logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
+	logicalRouterPolicyStaleNexthops := make(map[string]nbdb.LogicalRouterPolicy)
 	opModels := []libovsdbops.OperationModel{
 		{
 			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
@@ -1131,13 +1139,35 @@ func (oc *Controller) syncStaleEgressReroutePolicy(egressIPToPodIPCache map[stri
 					return false
 				}
 				egressIPName := lrp.ExternalIDs["name"]
-				podIPCache, exists := egressIPToPodIPCache[egressIPName]
+				cacheEntry, exists := egressIPCache[egressIPName]
 				splitMatch := strings.Split(lrp.Match, " ")
 				logicalIP := splitMatch[len(splitMatch)-1]
 				parsedLogicalIP := net.ParseIP(logicalIP)
-				if !exists || !podIPCache.Has(parsedLogicalIP.String()) {
-					klog.Infof("syncStaleEgressReroutePolicy will delete %s: %v", egressIPName, lrp)
+				if !exists || cacheEntry.gatewayRouterIPs.Len() == 0 || !cacheEntry.podIPs.Has(parsedLogicalIP.String()) {
+					klog.Infof("syncStaleEgressReroutePolicy will delete %s due to no nexthop or stale logical ip: %v", egressIPName, lrp)
 					return true
+				}
+				// Check for stale nexthops that may exist in the logical router policy and store that in logicalRouterPolicyStaleNexthops.
+				// Note: adding missing nexthop(s) to the logical router policy is done outside the scope of this function.
+				onlyStaleNextHops := true
+				staleNextHops := sets.NewString()
+				for _, nexthop := range lrp.Nexthops {
+					if cacheEntry.gatewayRouterIPs.Has(nexthop) {
+						onlyStaleNextHops = false
+					} else {
+						staleNextHops.Insert(nexthop)
+					}
+				}
+				if staleNextHops.Len() > 0 {
+					// If all nexthops are stale, let's go ahead and remove the entire row
+					if onlyStaleNextHops {
+						klog.Infof("syncStaleEgressReroutePolicy will delete %s due to stale nexthops: %v", egressIPName, lrp)
+						return true
+					}
+					logicalRouterPolicyStaleNexthops[lrp.UUID] = nbdb.LogicalRouterPolicy{
+						UUID:     lrp.UUID,
+						Nexthops: staleNextHops.UnsortedList(),
+					}
 				}
 				return false
 			},
@@ -1158,13 +1188,31 @@ func (oc *Controller) syncStaleEgressReroutePolicy(egressIPToPodIPCache map[stri
 	if err := oc.modelClient.Delete(opModels...); err != nil {
 		return fmt.Errorf("unable to remove stale logical router policies, err: %v", err)
 	}
+
+	// Update Logical Router Policies that have stale nexthops. Notice that we must do this separately
+	// because 1) there is no model predicates, and 2) logicalRouterPolicyStaleNexthops must be populated
+	opModels2 := make([]libovsdbops.OperationModel, 0, len(logicalRouterPolicyStaleNexthops))
+	for lrpUUID := range logicalRouterPolicyStaleNexthops {
+		lrp := logicalRouterPolicyStaleNexthops[lrpUUID]
+		klog.Infof("syncStaleEgressReroutePolicy will update %s to remove stale nexthops: %v", lrp.UUID, lrp.Nexthops)
+		opModels2 = append(opModels2, libovsdbops.OperationModel{
+			Model: &lrp,
+			OnModelMutations: []interface{}{
+				&lrp.Nexthops,
+			},
+		})
+	}
+	if err := oc.modelClient.Delete(opModels2...); err != nil {
+		return fmt.Errorf("unable to remove stale next hops from logical router policies, err: %v", err)
+	}
+
 	return nil
 }
 
 // This function implements a portion of syncEgressIPs.
 // It removes OVN NAT rules used by EgressIPs deleted while ovnkube-master was down.
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.
-func (oc *Controller) syncStaleSNATRules(egressIPToPodIPCache map[string]sets.String) error {
+func (oc *Controller) syncStaleSNATRules(egressIPCache map[string]egressIPCacheEntry) error {
 	predicate := func(item *nbdb.NAT) bool {
 		egressIPName, exists := item.ExternalIDs["name"]
 		// Exclude rows that have no name or are not the right type
@@ -1172,9 +1220,13 @@ func (oc *Controller) syncStaleSNATRules(egressIPToPodIPCache map[string]sets.St
 			return false
 		}
 		parsedLogicalIP := net.ParseIP(item.LogicalIP).String()
-		podIPCache, exists := egressIPToPodIPCache[egressIPName]
-		if !exists || !podIPCache.Has(parsedLogicalIP) {
-			klog.Infof("syncStaleSNATRules will delete %s: %v", egressIPName, item)
+		cacheEntry, exists := egressIPCache[egressIPName]
+		if !exists || !cacheEntry.podIPs.Has(parsedLogicalIP) {
+			klog.Infof("syncStaleSNATRules will delete %s due to logical ip: %v", egressIPName, item)
+			return true
+		}
+		if !cacheEntry.egressIPs.Has(item.ExternalIP) {
+			klog.Infof("syncStaleSNATRules will delete %s due to external ip: %v", egressIPName, item)
 			return true
 		}
 		return false
@@ -1216,19 +1268,34 @@ func (oc *Controller) syncStaleSNATRules(egressIPToPodIPCache map[string]sets.St
 	return nil
 }
 
-// generatePodIPCacheForEgressIP builds a cache of egressIP name -> podIPs for fast
+// generateCacheForEgressIP builds a cache of egressIP name -> podIPs for fast
 // access when syncing egress IPs. The Egress IP setup will return a lot of
 // atomic items with the same general information repeated across most (egressIP
 // name, logical IP defined for that name), hence use a cache to avoid round
 // trips to the API server per item.
-func (oc *Controller) generatePodIPCacheForEgressIP(eIPs []interface{}) (map[string]sets.String, error) {
-	egressIPToPodIPCache := make(map[string]sets.String)
+func (oc *Controller) generateCacheForEgressIP(eIPs []interface{}) (map[string]egressIPCacheEntry, error) {
+	egressIPCache := make(map[string]egressIPCacheEntry)
 	for _, eIP := range eIPs {
 		egressIP, ok := eIP.(*egressipv1.EgressIP)
 		if !ok {
 			continue
 		}
-		egressIPToPodIPCache[egressIP.Name] = sets.NewString()
+		egressIPCache[egressIP.Name] = egressIPCacheEntry{
+			podIPs:           sets.NewString(),
+			gatewayRouterIPs: sets.NewString(),
+			egressIPs:        sets.NewString(),
+		}
+		for _, status := range egressIP.Status.Items {
+			isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
+			gatewayRouterIP, err := oc.eIPC.getGatewayRouterJoinIP(status.Node, isEgressIPv6)
+			if err != nil {
+				klog.Errorf("Unable to retrieve gateway IP for node: %s, protocol is IPv6: %v, err: %v", status.Node, isEgressIPv6, err)
+				continue
+			}
+			egressIPCache[egressIP.Name].gatewayRouterIPs.Insert(gatewayRouterIP.String())
+			egressIPCache[egressIP.Name].egressIPs.Insert(status.EgressIP)
+		}
+
 		namespaces, err := oc.watchFactory.GetNamespacesBySelector(egressIP.Spec.NamespaceSelector)
 		if err != nil {
 			klog.Errorf("Error building egress IP sync cache, cannot retrieve namespaces for EgressIP: %s, err: %v", egressIP.Name, err)
@@ -1247,12 +1314,12 @@ func (oc *Controller) generatePodIPCacheForEgressIP(eIPs []interface{}) (map[str
 					continue
 				}
 				for _, ipNet := range logicalPort.ips {
-					egressIPToPodIPCache[egressIP.Name].Insert(ipNet.IP.String())
+					egressIPCache[egressIP.Name].podIPs.Insert(ipNet.IP.String())
 				}
 			}
 		}
 	}
-	return egressIPToPodIPCache, nil
+	return egressIPCache, nil
 }
 
 // isAnyClusterNodeIP verifies that the IP is not any node IP.
@@ -1386,7 +1453,7 @@ func (oc *Controller) assignEgressIPs(name string, egressIPs []string) []egressi
 					Node:     eNode.name,
 					EgressIP: eIPC.String(),
 				})
-				klog.V(5).Infof("Successful assignment of egress IP: %s on node: %+v", egressIP, eNode)
+				klog.Infof("Successful assignment of egress IP: %s on node: %+v", egressIP, eNode)
 				eNode.allocations[eIPC.String()] = name
 				break
 			}
