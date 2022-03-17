@@ -5,7 +5,7 @@ on:
 
 jobs:
   retest:
-    if: github.repository == 'ovn-org/ovn-kubernetes'
+    #    if: github.repository == 'ovn-org/ovn-kubernetes'
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
