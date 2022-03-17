@@ -56,6 +56,7 @@ curl --request POST \
     --header "content-type: application/json" \
     --data '{ "content" : "'${REACTION_SYMBOL}'" }'
 
+# In case we received a non 2xx response code, relay the error message as a comment.
 if [[ ${RESPONSE_CODE} != 2* ]]; then
   COMMENTS_URL=$(jq -r '.issue.comments_url' ${GITHUB_EVENT_PATH})
   RESPONSE_MESSAGE=$(jq -r '.message' .rerun-response.json)
