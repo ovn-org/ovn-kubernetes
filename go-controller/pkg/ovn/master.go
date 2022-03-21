@@ -60,7 +60,7 @@ func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.Swi
 }
 
 // Start waits until this process is the leader before starting master functions
-func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup, ctx context.Context) error {
+func (oc *Controller) Start(identity string, wg *sync.WaitGroup, ctx context.Context) error {
 	// Set up leader election process first
 	rl, err := resourcelock.New(
 		resourcelock.ConfigMapsResourceLock,
@@ -69,7 +69,7 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup, ctx context.Con
 		oc.client.CoreV1(),
 		nil,
 		resourcelock.ResourceLockConfig{
-			Identity:      nodeName,
+			Identity:      identity,
 			EventRecorder: oc.recorder,
 		},
 	)
@@ -93,10 +93,10 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup, ctx context.Con
 					metrics.MetricMasterReadyDuration.Set(end.Seconds())
 				}()
 
-				if err := oc.StartClusterMaster(nodeName); err != nil {
+				if err := oc.StartClusterMaster(); err != nil {
 					panic(err.Error())
 				}
-				if err := oc.Run(wg, nodeName); err != nil {
+				if err := oc.Run(ctx, wg); err != nil {
 					panic(err.Error())
 				}
 			},
@@ -110,7 +110,7 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup, ctx context.Con
 				os.Exit(0)
 			},
 			OnNewLeader: func(newLeaderName string) {
-				if newLeaderName != nodeName {
+				if newLeaderName != identity {
 					klog.Infof("Lost the election to %s; in standby mode", newLeaderName)
 				}
 			},
@@ -181,7 +181,7 @@ func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.No
 }
 
 func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
-	ver, err := oc.determineOVNTopoVersionFromOVN()
+	ver, err := oc.determineOVNTopoVersionFromOVN(context.TODO())
 	if err != nil {
 		return err
 	}
@@ -211,7 +211,7 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 //
 // TODO: Verify that the cluster was not already called with a different global subnet
 //  If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
-func (oc *Controller) StartClusterMaster(masterNodeName string) error {
+func (oc *Controller) StartClusterMaster() error {
 	klog.Infof("Starting cluster master")
 
 	metrics.RegisterMasterPerformance(oc.nbClient)
@@ -339,7 +339,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		oc.loadBalancerGroupUUID = loadBalancerGroup.UUID
 	}
 
-	if err := oc.SetupMaster(masterNodeName, nodeNames); err != nil {
+	if err := oc.SetupMaster(nodeNames); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
 	}
@@ -363,7 +363,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 }
 
 // SetupMaster creates the central router and load-balancers for the network
-func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []string) error {
+func (oc *Controller) SetupMaster(existingNodeNames []string) error {
 	// Create a single common distributed router for the cluster.
 	logicalRouter := nbdb.LogicalRouter{
 		Name: types.OVNClusterRouter,

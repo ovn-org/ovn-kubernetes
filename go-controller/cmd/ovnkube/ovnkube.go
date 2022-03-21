@@ -269,7 +269,7 @@ func runOvnKube(ctx *cli.Context) error {
 		metrics.RegisterNodeMetrics()
 		start := time.Now()
 		n := ovnnode.NewNode(ovnClientset.KubeClient, nodeWatchFactory, node, stopChan, util.EventRecorder(ovnClientset.KubeClient))
-		if err := n.Start(wg); err != nil {
+		if err := n.Start(ctx.Context, wg); err != nil {
 			return err
 		}
 		end := time.Since(start)
