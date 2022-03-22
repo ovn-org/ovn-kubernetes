@@ -1362,8 +1362,11 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 	// continue to be routed to the old node which hosted the egress IP before
 	// it was moved, and the connections will fail.
 	lsp := nbdb.LogicalSwitchPort{
-		Name:    types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + egressNode.Name,
-		Options: map[string]string{"nat-addresses": "router"},
+		Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + egressNode.Name,
+		// Setting nat-addresses to router will send out GARPs for all externalIPs and LB VIPs
+		// hosted on the GR. Setting exclude-lb-vips-from-garp to true will make sure GARPs for
+		// LB VIPs are not sent, thereby preventing GARP overload.
+		Options: map[string]string{"nat-addresses": "router", "exclude-lb-vips-from-garp": "true"},
 	}
 	opModel := libovsdbops.OperationModel{
 		Model: &lsp,
@@ -1408,7 +1411,7 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 	// from now on.
 	lsp := nbdb.LogicalSwitchPort{
 		Name:    types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + egressNode.Name,
-		Options: map[string]string{"nat-addresses": ""},
+		Options: map[string]string{"nat-addresses": "", "exclude-lb-vips-from-garp": ""},
 	}
 	opModel := libovsdbops.OperationModel{
 		Model: &lsp,
