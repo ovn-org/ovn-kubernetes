@@ -549,8 +549,8 @@ func podAddAllowMulticastPolicy(nbClient libovsdbclient.Client, ns string, portI
 // podDeleteAllowMulticastPolicy removes the pod's logical switch port from the
 // namespace's multicast port group. Caller must hold the namespace's
 // namespaceInfo object lock.
-func podDeleteAllowMulticastPolicy(nbClient libovsdbclient.Client, ns string, portInfo *lpInfo) error {
-	return libovsdbops.DeletePortsFromPortGroup(nbClient, hashedPortGroup(ns), portInfo.uuid)
+func podDeleteAllowMulticastPolicy(nbClient libovsdbclient.Client, ns string, portUUID string) error {
+	return libovsdbops.DeletePortsFromPortGroup(nbClient, hashedPortGroup(ns), portUUID)
 }
 
 // localPodAddDefaultDeny ensures ports (i.e. pods) are in the correct
