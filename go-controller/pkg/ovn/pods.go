@@ -605,7 +605,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	results, err := libovsdbops.TransactAndCheckAndSetUUIDs(oc.nbClient, lsp, allOps)
 	if err != nil {
-
 		return fmt.Errorf("could not perform creation or update of logical switch port %s - %+v", portName, err)
 	}
 	go oc.metricsRecorder.AddLSPEvent(pod.UID)

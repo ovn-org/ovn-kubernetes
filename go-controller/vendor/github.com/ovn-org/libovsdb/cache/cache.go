@@ -13,8 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"k8s.io/klog/v2"
-
 	"github.com/go-logr/logr"
 	"github.com/go-logr/stdr"
 	"github.com/ovn-org/libovsdb/mapper"
@@ -143,9 +141,8 @@ func (r *RowCache) RowByModel(m model.Model) model.Model {
 }
 
 // Create writes the provided content to the cache
-func (r *RowCache) Create(uuid string, m model.Model, checkIndexes bool) error {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+func (r *RowCache) CreateTime(uuid string, m model.Model, checkIndexes bool, opt *OpTime) error {
+	start := time.Now()
 	if _, ok := r.cache[uuid]; ok {
 		return NewErrCacheInconsistent(fmt.Sprintf("cannot create row %s as it already exists", uuid))
 	}
@@ -156,6 +153,8 @@ func (r *RowCache) Create(uuid string, m model.Model, checkIndexes bool) error {
 	if err != nil {
 		return err
 	}
+	opt.setupTime = time.Since(start)
+	start = time.Now()
 	newIndexes := newColumnToValue(r.dbModel.Schema.Table(r.name).Indexes)
 	for index, vals := range r.indexes {
 		val, err := valueFromIndex(info, index)
@@ -169,25 +168,34 @@ func (r *RowCache) Create(uuid string, m model.Model, checkIndexes bool) error {
 
 		newIndexes[index][val] = uuid
 	}
+	opt.genIdxTime = time.Since(start)
+	opt.numIdx = len(r.indexes)
 
 	// write indexes
+	start = time.Now()
 	for k1, v1 := range newIndexes {
 		vals := r.indexes[k1]
 		for k2, v2 := range v1 {
 			vals[k2] = v2
 		}
 	}
+	opt.writeIdxTime = time.Since(start)
+	start = time.Now()
 	r.cache[uuid] = model.Clone(m)
+	opt.cloneTime = time.Since(start)
 	return nil
 }
 
-// Update updates the content in the cache
-func (r *RowCache) Update(uuid string, m model.Model, checkIndexes bool) error {
+func (r *RowCache) Create(uuid string, m model.Model, checkIndexes bool) error {
+	a := &OpTime{}
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
-	if _, ok := r.cache[uuid]; !ok {
-		return NewErrCacheInconsistent(fmt.Sprintf("cannot update row %s as it does not exist in the cache", uuid))
-	}
+	return r.CreateTime(uuid, m, checkIndexes, a)
+}
+
+// Update updates the content in the cache; caller must check for inconsistency
+func (r *RowCache) UpdateTime(uuid string, m model.Model, checkIndexes bool, opt *OpTime) error {
+	start := time.Now()
 	oldRow := model.Clone(r.cache[uuid])
 	oldInfo, err := r.dbModel.NewModelInfo(oldRow)
 	if err != nil {
@@ -197,10 +205,13 @@ func (r *RowCache) Update(uuid string, m model.Model, checkIndexes bool) error {
 	if err != nil {
 		return err
 	}
+	opt.setupTime = time.Since(start)
+	start = time.Now()
 	indexes := r.dbModel.Schema.Table(r.name).Indexes
 	newIndexes := newColumnToValue(indexes)
 	oldIndexes := newColumnToValue(indexes)
 	var errs []error
+	opt.numIdx = len(r.indexes)
 	for index, vals := range r.indexes {
 		var err error
 		oldVal, err := valueFromIndex(oldInfo, index)
@@ -232,9 +243,11 @@ func (r *RowCache) Update(uuid string, m model.Model, checkIndexes bool) error {
 		newIndexes[index][newVal] = uuid
 		oldIndexes[index][oldVal] = ""
 	}
+	opt.genIdxTime = time.Since(start)
 	if len(errs) > 0 {
 		return fmt.Errorf("%+v", errs)
 	}
+	start = time.Now()
 	// write indexes
 	for k1, v1 := range newIndexes {
 		vals := r.indexes[k1]
@@ -249,8 +262,21 @@ func (r *RowCache) Update(uuid string, m model.Model, checkIndexes bool) error {
 			delete(vals, k2)
 		}
 	}
+	opt.writeIdxTime = time.Since(start)
+	start = time.Now()
 	r.cache[uuid] = model.Clone(m)
+	opt.cloneTime = time.Since(start)
 	return nil
+}
+
+func (r *RowCache) Update(uuid string, m model.Model, checkIndexes bool) error {
+	a := &OpTime{}
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	if _, ok := r.cache[uuid]; !ok {
+		return NewErrCacheInconsistent(fmt.Sprintf("cannot update row %s as it does not exist in the cache", uuid))
+	}
+	return r.UpdateTime(uuid, m, checkIndexes, a)
 }
 
 func (r *RowCache) IndexExists(row model.Model) error {
@@ -280,10 +306,8 @@ func (r *RowCache) IndexExists(row model.Model) error {
 	return nil
 }
 
-// Delete deletes a row from the cache
-func (r *RowCache) Delete(uuid string) error {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+func (r *RowCache) DeleteUnlocked(uuid string, opt *OpTime) error {
+	start := time.Now()
 	if _, ok := r.cache[uuid]; !ok {
 		return NewErrCacheInconsistent(fmt.Sprintf("cannot delete row %s as it does not exist in the cache", uuid))
 	}
@@ -292,6 +316,9 @@ func (r *RowCache) Delete(uuid string) error {
 	if err != nil {
 		return err
 	}
+	opt.setupTime = time.Since(start)
+	start = time.Now()
+	opt.numIdx = len(r.indexes)
 	for index, vals := range r.indexes {
 		oldVal, err := valueFromIndex(oldInfo, index)
 		if err != nil {
@@ -304,8 +331,19 @@ func (r *RowCache) Delete(uuid string) error {
 			delete(vals, oldVal)
 		}
 	}
+	opt.genIdxTime = time.Since(start)
+	start = time.Now()
 	delete(r.cache, uuid)
+	opt.cloneTime = time.Since(start)
 	return nil
+}
+
+// Delete deletes a row from the cache
+func (r *RowCache) Delete(uuid string) error {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	a := &OpTime{}
+	return r.DeleteUnlocked(uuid, a)
 }
 
 // Rows returns a copy of all Rows in the Cache
@@ -457,6 +495,7 @@ func (e *EventHandlerFuncs) OnDelete(table string, row model.Model) {
 // It implements the ovsdb.NotificationHandler interface so it may
 // handle update notifications
 type TableCache struct {
+	name           string
 	cache          map[string]*RowCache
 	eventProcessor *eventProcessor
 	dbModel        model.DatabaseModel
@@ -469,15 +508,19 @@ type TableCache struct {
 type Data map[string]map[string]model.Model
 
 // NewTableCache creates a new TableCache
-func NewTableCache(dbModel model.DatabaseModel, data Data, logger *logr.Logger) (*TableCache, error) {
+func NewTableCache(dbName string, dbModel model.DatabaseModel, data Data, logger *logr.Logger) (*TableCache, error) {
 	if !dbModel.Valid() {
 		return nil, fmt.Errorf("tablecache without valid databasemodel cannot be populated")
 	}
 	if logger == nil {
-		l := stdr.NewWithOptions(log.New(os.Stderr, "", log.LstdFlags), stdr.Options{LogCaller: stdr.All}).WithName("cache")
+		l := stdr.NewWithOptions(log.New(os.Stderr, "", log.LstdFlags), stdr.Options{LogCaller: stdr.All}).WithName("cache").WithValues(
+			"database", dbName,
+		)
 		logger = &l
 	} else {
-		l := logger.WithName("cache")
+		l := logger.WithName("cache").WithValues(
+			"database", dbName,
+		)
 		logger = &l
 	}
 	eventProcessor := newEventProcessor(bufferSize, logger)
@@ -554,19 +597,21 @@ func (t *TableCache) Update(context interface{}, tableUpdates ovsdb.TableUpdates
 // Update2 implements the update method of the NotificationHandler interface
 // this populates a channel with updates so they can be processed after the initial
 // state has been Populated
-func (t *TableCache) Update2(context interface{}, tableUpdates ovsdb.TableUpdates2) error {
-	startTime := time.Now()
-	defer func() {
-		klog.V(4).Infof("Finished Update2: %v", time.Since(startTime))
-	}()
+func (t *TableCache) Update2Time(context interface{}, tableUpdates ovsdb.TableUpdates2) (error, time.Duration, time.Duration, []*OpTime) {
 	if len(tableUpdates) == 0 {
-		return nil
+		return nil, 0, 0, nil
 	}
-	if err := t.Populate2(tableUpdates); err != nil {
+	err, lockTime, popTime, opTimes := t.Populate2Time(tableUpdates)
+	if err != nil {
 		t.logger.Error(err, "during libovsdb cache populate2")
-		return err
+		return err, 0, 0, nil
 	}
-	return nil
+	return nil, lockTime, popTime, opTimes
+}
+
+func (t *TableCache) Update2(context interface{}, tableUpdates ovsdb.TableUpdates2) error {
+	err, _, _, _ := t.Update2Time(context, tableUpdates)
+	return err
 }
 
 // Locked implements the locked method of the NotificationHandler interface
@@ -638,75 +683,147 @@ func (t *TableCache) Populate(tableUpdates ovsdb.TableUpdates) error {
 	return nil
 }
 
+type OpTime struct {
+	optype       string
+	overall      time.Duration
+	lockTime     time.Duration
+	modelTime    time.Duration
+	applyTime    time.Duration
+	eqTime       time.Duration
+	setupTime    time.Duration
+	genIdxTime   time.Duration
+	numIdx       int
+	writeIdxTime time.Duration
+	cloneTime    time.Duration
+	evtTime      time.Duration
+}
+
+func (o *OpTime) String() string {
+	return fmt.Sprintf("[{%s %v} lk: %v, m: %v, ay: %v, eq: %v, st: %v, gi(%d): %v, wi: %v, cln: %v, evt: %v]",
+		o.optype, o.overall, o.lockTime, o.modelTime, o.applyTime, o.eqTime, o.setupTime, o.numIdx, o.genIdxTime, o.writeIdxTime, o.cloneTime, o.evtTime)
+}
+
+func (t *TableCache) updateRow(table, uuid string, row *ovsdb.RowUpdate2, rCache *RowCache) (error, *OpTime) {
+	logger := t.logger.WithValues("uuid", uuid, "table", table)
+	logger.V(5).Info("processing update")
+
+	start := time.Now()
+	rCache.mutex.Lock()
+	defer rCache.mutex.Unlock()
+	opt := &OpTime{}
+	opt.lockTime = time.Since(start)
+
+	switch {
+	case row.Initial != nil:
+		opt.optype = "INI"
+		start = time.Now()
+		m, err := t.CreateModel(table, row.Initial, uuid)
+		opt.modelTime = time.Since(start)
+		if err != nil {
+			return err, nil
+		}
+		logger.V(5).Info("creating row", "model", fmt.Sprintf("%+v", m))
+		if err := rCache.CreateTime(uuid, m, false, opt); err != nil {
+			return err, nil
+		}
+		start = time.Now()
+		t.eventProcessor.AddEvent(addEvent, table, nil, m)
+		opt.evtTime = time.Since(start)
+	case row.Insert != nil:
+		opt.optype = "INS"
+		start = time.Now()
+		m, err := t.CreateModel(table, row.Insert, uuid)
+		opt.modelTime = time.Since(start)
+		if err != nil {
+			return err, nil
+		}
+		logger.V(5).Info("inserting row", "model", fmt.Sprintf("%+v", m))
+		if err := rCache.CreateTime(uuid, m, false, opt); err != nil {
+			return err, nil
+		}
+		start = time.Now()
+		t.eventProcessor.AddEvent(addEvent, table, nil, m)
+		opt.evtTime = time.Since(start)
+	case row.Modify != nil:
+		opt.optype = "MOD"
+		start = time.Now()
+		existing := rCache.rowByUUID(uuid)
+		if existing == nil {
+			return NewErrCacheInconsistent(fmt.Sprintf("row with uuid %s does not exist", uuid)), nil
+		}
+		modified := model.Clone(existing)
+		opt.modelTime = time.Since(start)
+		start = time.Now()
+		err := t.ApplyModifications(table, modified, *row.Modify)
+		opt.applyTime = time.Since(start)
+		if err != nil {
+			return fmt.Errorf("unable to apply row modifications: %w", err), nil
+		}
+		start = time.Now()
+		equal := model.Equal(modified, existing)
+		opt.eqTime = time.Since(start)
+		if !equal {
+			logger.V(5).Info("updating row", "old", fmt.Sprintf("%+v", existing), "new", fmt.Sprintf("%+v", modified))
+			if err := rCache.UpdateTime(uuid, modified, false, opt); err != nil {
+				return err, nil
+			}
+			start = time.Now()
+			t.eventProcessor.AddEvent(updateEvent, table, existing, modified)
+			opt.evtTime = time.Since(start)
+		}
+	case row.Delete != nil:
+		fallthrough
+	default:
+		opt.optype = "DEL"
+		// If everything else is nil (including Delete because it's a key with
+		// no value on the wire), then process a delete
+		start = time.Now()
+		m := rCache.rowByUUID(uuid)
+		opt.modelTime = time.Since(start)
+		if m == nil {
+			return NewErrCacheInconsistent(fmt.Sprintf("row with uuid %s does not exist", uuid)), nil
+		}
+		logger.V(5).Info("deleting row", "model", fmt.Sprintf("%+v", m))
+		if err := rCache.DeleteUnlocked(uuid, opt); err != nil {
+			return err, nil
+		}
+		start = time.Now()
+		t.eventProcessor.AddEvent(deleteEvent, table, m, nil)
+		opt.evtTime = time.Since(start)
+	}
+	return nil, opt
+}
+
 // Populate2 adds data to the cache and places an event on the channel
-func (t *TableCache) Populate2(tableUpdates ovsdb.TableUpdates2) error {
+func (t *TableCache) Populate2Time(tableUpdates ovsdb.TableUpdates2) (error, time.Duration, time.Duration, []*OpTime) {
+	start := time.Now()
 	t.mutex.Lock()
+	lockTime := time.Since(start)
 	defer t.mutex.Unlock()
+	start = time.Now()
+	opTimes := make([]*OpTime, 0, 10)
 	for table := range t.dbModel.Types() {
 		updates, ok := tableUpdates[table]
 		if !ok {
 			continue
 		}
-		tCache := t.cache[table]
+		rCache := t.cache[table]
 		for uuid, row := range updates {
-			logger := t.logger.WithValues("uuid", uuid, "table", table)
-			logger.V(5).Info("processing update")
-			switch {
-			case row.Initial != nil:
-				m, err := t.CreateModel(table, row.Initial, uuid)
-				if err != nil {
-					return err
-				}
-				logger.V(5).Info("creating row", "model", fmt.Sprintf("%+v", m))
-				if err := tCache.Create(uuid, m, false); err != nil {
-					return err
-				}
-				t.eventProcessor.AddEvent(addEvent, table, nil, m)
-			case row.Insert != nil:
-				m, err := t.CreateModel(table, row.Insert, uuid)
-				if err != nil {
-					return err
-				}
-				logger.V(5).Info("inserting row", "model", fmt.Sprintf("%+v", m))
-				if err := tCache.Create(uuid, m, false); err != nil {
-					return err
-				}
-				t.eventProcessor.AddEvent(addEvent, table, nil, m)
-			case row.Modify != nil:
-				existing := tCache.Row(uuid)
-				if existing == nil {
-					return NewErrCacheInconsistent(fmt.Sprintf("row with uuid %s does not exist", uuid))
-				}
-				modified := model.Clone(existing)
-				err := t.ApplyModifications(table, modified, *row.Modify)
-				if err != nil {
-					return fmt.Errorf("unable to apply row modifications: %w", err)
-				}
-				if !model.Equal(modified, existing) {
-					logger.V(5).Info("updating row", "old", fmt.Sprintf("%+v", existing), "new", fmt.Sprintf("%+v", modified))
-					if err := tCache.Update(uuid, modified, false); err != nil {
-						return err
-					}
-					t.eventProcessor.AddEvent(updateEvent, table, existing, modified)
-				}
-			case row.Delete != nil:
-				fallthrough
-			default:
-				// If everything else is nil (including Delete because it's a key with
-				// no value on the wire), then process a delete
-				m := tCache.Row(uuid)
-				if m == nil {
-					return NewErrCacheInconsistent(fmt.Sprintf("row with uuid %s does not exist", uuid))
-				}
-				logger.V(5).Info("deleting row", "model", fmt.Sprintf("%+v", m))
-				if err := tCache.Delete(uuid); err != nil {
-					return err
-				}
-				t.eventProcessor.AddEvent(deleteEvent, table, m, nil)
+			foo := time.Now()
+			err, opt := t.updateRow(table, uuid, row, rCache)
+			if err != nil {
+				return err, 0, 0, nil
 			}
+			opt.overall = time.Since(foo)
+			opTimes = append(opTimes, opt)
 		}
 	}
-	return nil
+	return nil, lockTime, time.Since(start), opTimes
+}
+
+func (t *TableCache) Populate2(tableUpdates ovsdb.TableUpdates2) error {
+	err, _, _, _ := t.Populate2Time(tableUpdates)
+	return err
 }
 
 // Purge drops all data in the cache and reinitializes it using the
@@ -821,7 +938,7 @@ func (e *eventProcessor) AddEvent(eventType string, table string, old model.Mode
 		// noop
 		return
 	default:
-		e.logger.V(0).Info("dropping event because event buffer is full")
+		e.logger.V(0).Info("dropping event because event buffer is full", "event", fmt.Sprintf("%+v", event))
 	}
 }
 

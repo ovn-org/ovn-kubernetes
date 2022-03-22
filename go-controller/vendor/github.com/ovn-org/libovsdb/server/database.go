@@ -46,7 +46,7 @@ func (db *inMemoryDatabase) CreateDatabase(name string, schema ovsdb.DatabaseSch
 	if len(errs) > 0 {
 		return fmt.Errorf("failed to create DatabaseModel: %#+v", errs)
 	}
-	database, err := cache.NewTableCache(dbModel, nil, nil)
+	database, err := cache.NewTableCache(name, dbModel, nil, nil)
 	if err != nil {
 		return err
 	}

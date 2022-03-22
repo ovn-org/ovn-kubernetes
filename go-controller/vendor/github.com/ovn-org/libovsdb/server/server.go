@@ -157,7 +157,7 @@ type Transaction struct {
 }
 
 func (o *OvsdbServer) NewTransaction(model model.DatabaseModel, dbName string, database Database) Transaction {
-	cache, err := cache.NewTableCache(model, nil, &o.logger)
+	cache, err := cache.NewTableCache(dbName, model, nil, &o.logger)
 	if err != nil {
 		panic(err)
 	}
