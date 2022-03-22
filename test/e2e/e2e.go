@@ -1783,6 +1783,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 	var newNodeAddresses []string
 	var externalIpv4 string
 	var externalIpv6 string
+	var isDualStack bool
 
 	ginkgo.Context("Validating ingress traffic", func() {
 		ginkgo.BeforeEach(func() {
@@ -1798,6 +1799,8 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 					"Test requires >= 3 Ready nodes, but there are only %v nodes",
 					len(nodes.Items))
 			}
+
+			isDualStack = isDualStackCluster(nodes)
 
 			ginkgo.By("Creating the endpoints pod, one for each worker")
 			for _, node := range nodes.Items {
@@ -1842,7 +1845,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 		ginkgo.It("Should be allowed by nodeport services", func() {
 			serviceName := "nodeportsvc"
 			ginkgo.By("Creating the nodeport service")
-			npSpec := nodePortServiceSpecFrom(serviceName, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, v1.ServiceExternalTrafficPolicyTypeCluster)
+			npSpec := nodePortServiceSpecFrom(serviceName, v1.IPFamilyPolicyPreferDualStack, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, v1.ServiceExternalTrafficPolicyTypeCluster)
 			np, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), npSpec, metav1.CreateOptions{})
 			nodeTCPPort, nodeUDPPort := nodePortsFromService(np)
 			framework.ExpectNoError(err)
@@ -1883,6 +1886,94 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 				}
 			}
 		})
+
+		// This test validates ingress traffic to NodePorts in a dual stack cluster after a Service upgrade from single stack to dual stack.
+		// After an upgrade to DualStack cluster, 2 tests must be run:
+		// a) Test from outside the cluster towards the NodePort - this test would fail in earlier versions of ovn-kubernetes
+		// b) Test from the node itself towards its own NodePort - this test would fail in more recent versions of ovn-kubernetes even though a) would pass.
+		//
+		// This test tests a)
+		// For test b), see test: "Should be allowed to node local host-networked endpoints by nodeport services with externalTrafficPolicy=local after upgrade to DualStack"
+		//
+		// In order to test this, this test does the following:
+		// It creates a SingleStack nodeport service on both udp and tcp, and creates a backend pod on each node.
+		// It then updates the nodeport service to PreferDualStack
+		// It then waits for the service to get 2 ClusterIPs.
+		// The backend pods are using the agnhost - netexec command which replies to commands
+		// with different protocols. We use the "hostname" command to have each backend pod to reply
+		// with its hostname.
+		//
+		// To test a) We use an external container to poke the service exposed on the node and we iterate until
+		// all the hostnames are returned.
+		// In case of dual stack enabled cluster, we iterate over all the nodes ips and try to hit the
+		// endpoints from both each node's ips.
+		//
+		// This test will be skipped if the cluster is not in DualStack mode.
+		ginkgo.It("Should be allowed by nodeport services after upgrade to DualStack", func() {
+			if !isDualStack {
+				ginkgo.Skip("Skipping as this is not a DualStack cluster")
+			}
+			serviceName := "nodeportsvc"
+			ginkgo.By("Creating the nodeport service")
+			npSpec := nodePortServiceSpecFrom(serviceName, v1.IPFamilyPolicySingleStack, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, v1.ServiceExternalTrafficPolicyTypeCluster)
+			np, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), npSpec, metav1.CreateOptions{})
+			nodeTCPPort, nodeUDPPort := nodePortsFromService(np)
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Waiting for the endpoints to pop up")
+			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
+
+			ginkgo.By("Upgrading the nodeport service to PreferDualStack")
+			err = patchService(f.ClientSet, np.Name, np.Namespace, "/spec/ipFamilyPolicy", "PreferDualStack")
+			framework.ExpectNoError(err)
+
+			for _, protocol := range []string{"http", "udp"} {
+				for _, node := range nodes.Items {
+					for _, nodeAddress := range node.Status.Addresses {
+						// skipping hostnames
+						if !addressIsIP(nodeAddress) {
+							continue
+						}
+
+						nodePort := nodeTCPPort
+						if protocol == "udp" {
+							nodePort = nodeUDPPort
+						}
+
+						// After the DualStack upgrade, we might hit a timeout on the Service.
+						// Give this 5 tries to settle
+						// This could be implemented way more elegantly with gomega 1.14.0 (dependency on k8s 1.22) and above, see:
+						// https://github.com/onsi/gomega/commit/2f04e6e3467d2c0c695786c3e7880f1e940274cf#
+						ginkgo.By(fmt.Sprintf("Waiting for the service to stabilize after the DualStack upgrade on address %s (node %s)", nodeAddress.Address, node.Name))
+						gomega.Eventually(func() (r bool) {
+							failures := gomega.InterceptGomegaFailures(func() {
+								framework.Logf("Trying to poke node %s with address %s and port %s/%d", node.Name, nodeAddress.Address, protocol, nodePort)
+								pokeEndpointHostname(clientContainerName, protocol, nodeAddress.Address, nodePort)
+							})
+							return len(failures) == 0
+						}, 5*time.Second, 1*time.Second).Should(gomega.BeTrue())
+
+						ginkgo.By("Hitting the nodeport on " + node.Name + " and reaching all the endpoints " + protocol)
+						responses := sets.NewString()
+						valid := false
+						for i := 0; i < maxTries; i++ {
+							epHostname := pokeEndpointHostname(clientContainerName, protocol, nodeAddress.Address, nodePort)
+							responses.Insert(epHostname)
+
+							// each endpoint returns its hostname. By doing this, we validate that each ep was reached at least once.
+							if responses.Equal(nodesHostnames) {
+								framework.Logf("Validated node %s on address %s after %d tries", node.Name, nodeAddress.Address, i)
+								valid = true
+								break
+							}
+						}
+						framework.ExpectEqual(valid, true, "Validation failed for node", node, responses, nodePort)
+					}
+				}
+			}
+		})
+
 		// This test validates ingress traffic to nodeports with externalTrafficPolicy Set to local.
 		// It creates a nodeport service on both udp and tcp, and creates a backend pod on each node.
 		// The backend pod is using the agnhost - netexec command which replies to commands
@@ -1896,7 +1987,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 		ginkgo.It("Should be allowed to node local cluster-networked endpoints by nodeport services with externalTrafficPolicy=local", func() {
 			serviceName := "nodeportsvclocal"
 			ginkgo.By("Creating the nodeport service with externalTrafficPolicy=local")
-			npSpec := nodePortServiceSpecFrom(serviceName, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, v1.ServiceExternalTrafficPolicyTypeLocal)
+			npSpec := nodePortServiceSpecFrom(serviceName, v1.IPFamilyPolicyPreferDualStack, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, v1.ServiceExternalTrafficPolicyTypeLocal)
 			np, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), npSpec, metav1.CreateOptions{})
 			nodeTCPPort, nodeUDPPort := nodePortsFromService(np)
 			framework.ExpectNoError(err)
@@ -2178,7 +2269,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 	// We use an external container to poke the service exposed on the node and ensure that only the
 	// nodeport on the node with the backend actually receives traffic and that the packet is not
 	// SNATed.
-	ginkgo.Context("Validating ingress traffic to Host Networked pods", func() {
+	ginkgo.Context("Validating ingress traffic to Host Networked pods with externalTrafficPolicy=local", func() {
 		ginkgo.BeforeEach(func() {
 			endPoints = make([]*v1.Pod, 0)
 			nodesHostnames = sets.NewString()
@@ -2231,10 +2322,10 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 		})
 
 		// Make sure ingress traffic can reach host pod backends for a service without SNAT when externalTrafficPolicy is set to local
-		ginkgo.It("Should be allowed to node local host-networked endpoints by nodeport services with externalTrafficPolicy=local", func() {
+		ginkgo.It("Should be allowed to node local host-networked endpoints by nodeport services", func() {
 			serviceName := "nodeportsvclocalhostnet"
-			ginkgo.By("Creating the nodeport service with externalTrafficPolicy=local")
-			npSpec := nodePortServiceSpecFrom(serviceName, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, hostNetEndpointsSelector, v1.ServiceExternalTrafficPolicyTypeLocal)
+			ginkgo.By("Creating the nodeport service")
+			npSpec := nodePortServiceSpecFrom(serviceName, v1.IPFamilyPolicyPreferDualStack, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, hostNetEndpointsSelector, v1.ServiceExternalTrafficPolicyTypeLocal)
 			np, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), npSpec, metav1.CreateOptions{})
 			framework.ExpectNoError(err)
 			nodeTCPPort, nodeUDPPort := nodePortsFromService(np)
@@ -2291,10 +2382,11 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 // Send traffic from the cluster node itself to a nodeport service on that node
 var _ = ginkgo.Describe("host to host-networked pods traffic validation", func() {
 	const (
-		endpointHTTPPort = 8085
-		endpointUDPPort  = 9095
-		clusterHTTPPort  = 81
-		clusterUDPPort   = 91
+		endpointHTTPPort       = 8085
+		endpointUDPPort        = 9095
+		clusterHTTPPort        = 81
+		clusterUDPPort         = 91
+		curlInContainerMaxTime = 10
 	)
 
 	f := framework.NewDefaultFramework("host-to-host-test")
@@ -2303,6 +2395,8 @@ var _ = ginkgo.Describe("host to host-networked pods traffic validation", func()
 	var nodesHostnames sets.String
 	maxTries := 0
 	var nodes *v1.NodeList
+	var isDualStack bool
+
 	// This test validates ingress traffic to nodeports with externalTrafficPolicy Set to local.
 	// It creates a nodeport service on both udp and tcp, and creates a host networked
 	// backend pod on each node. The backend pod is using the agnhost - netexec command which
@@ -2311,7 +2405,7 @@ var _ = ginkgo.Describe("host to host-networked pods traffic validation", func()
 	// We use the docker exec command to poke the service exposed on the node from the node itself
 	// and ensure that only the nodeport on the node with the backend actually receives traffic and
 	// that the packet is not SNATed.
-	ginkgo.Context("Validating Host to Host Netwoked pods traffic", func() {
+	ginkgo.Context("Validating Host to Host Networked pods traffic with externalTrafficPolicy=local", func() {
 		ginkgo.BeforeEach(func() {
 			endPoints = make([]*v1.Pod, 0)
 			nodesHostnames = sets.NewString()
@@ -2325,6 +2419,8 @@ var _ = ginkgo.Describe("host to host-networked pods traffic validation", func()
 					"Test requires >= 3 Ready nodes, but there are only %v nodes",
 					len(nodes.Items))
 			}
+
+			isDualStack = isDualStackCluster(nodes)
 
 			ginkgo.By("Creating the endpoints pod, one for each worker")
 			for _, node := range nodes.Items {
@@ -2345,8 +2441,8 @@ var _ = ginkgo.Describe("host to host-networked pods traffic validation", func()
 				endPoints = append(endPoints, hostNetPod)
 				nodesHostnames.Insert(hostNetPod.Name)
 
-				// this is arbitrary and mutuated from k8s network e2e tests. We aim to hit all the endpoints at least once
-				maxTries = len(endPoints)*len(endPoints) + 30
+				// this is arbitrary but 10 maxTries should be more than enough; we are only hitting the local endpoint due to externalTrafficPolicy=local
+				maxTries = 10
 			}
 		})
 		ginkgo.AfterEach(func() {
@@ -2356,10 +2452,10 @@ var _ = ginkgo.Describe("host to host-networked pods traffic validation", func()
 		})
 		// Make sure host sourced traffic can reach host pod backends for a service without SNAT when externalTrafficPolicy is set to local
 		// Only verify with http
-		ginkgo.It("Should be allowed to node local host-networked endpoints by nodeport services with externalTrafficPolicy=local", func() {
+		ginkgo.It("Should be allowed to node local host-networked endpoints by nodeport services", func() {
 			serviceName := "nodeportsvclocalhostnet"
-			ginkgo.By("Creating the nodeport service with externalTrafficPolicy=local")
-			npSpec := nodePortServiceSpecFrom(serviceName, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, hostNetEndpointsSelector, v1.ServiceExternalTrafficPolicyTypeLocal)
+			ginkgo.By("Creating the nodeport service")
+			npSpec := nodePortServiceSpecFrom(serviceName, v1.IPFamilyPolicyPreferDualStack, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, hostNetEndpointsSelector, v1.ServiceExternalTrafficPolicyTypeLocal)
 			np, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), npSpec, metav1.CreateOptions{})
 			nodeTCPPort, _ := nodePortsFromService(np)
 			framework.ExpectNoError(err)
@@ -2376,31 +2472,117 @@ var _ = ginkgo.Describe("host to host-networked pods traffic validation", func()
 							continue
 						}
 
-						responses := sets.NewString()
-						// Fill expected responses, it should hit the nodeLocal endpoints only and not SNAT packet IP
-						expectedResponses := sets.NewString()
-
-						expectedResponses.Insert(node.Name, nodeAddress.Address)
-
 						valid := false
 						nodePort := nodeTCPPort
+						var epHostname string
+						var ip string
 
-						ginkgo.By("Hitting the nodeport on " + node.Name + " and trying to reach only the local endpoint with protocol " + protocol)
+						ginkgo.By(fmt.Sprintf("Hitting nodeport %d on %s and trying to reach only the local endpoint with protocol %s", nodePort, node.Name, protocol))
 						for i := 0; i < maxTries; i++ {
-							epHostname := curlInContainer(node.Name, protocol, nodeAddress.Address, nodePort, "hostname")
-							epClientIP := curlInContainer(node.Name, protocol, nodeAddress.Address, nodePort, "clientip")
-							ip, _, err := net.SplitHostPort(epClientIP)
-							framework.ExpectNoError(err)
-							responses.Insert(epHostname, ip)
+							epHostname, err = curlInContainer(node.Name, protocol, nodeAddress.Address, nodePort, "hostname", curlInContainerMaxTime)
+							framework.ExpectNoError(err, "failed to run command on external container")
 
-							if responses.Equal(expectedResponses) {
+							epClientIP, err := curlInContainer(node.Name, protocol, nodeAddress.Address, nodePort, "clientip", curlInContainerMaxTime)
+							framework.ExpectNoError(err, "failed to run command on external container")
+
+							ip, _, err = net.SplitHostPort(epClientIP)
+							framework.ExpectNoError(err)
+
+							if epHostname == node.Name && ip == nodeAddress.Address {
 								framework.Logf("Validated local endpoint on node %s with address %s, and packet src IP %s ", node.Name, nodeAddress.Address, epClientIP)
 								valid = true
 								break
 							}
 
 						}
-						framework.ExpectEqual(valid, true, "Validation failed for node", node.Name, responses, nodePort)
+						framework.ExpectEqual(
+							valid,
+							true,
+							fmt.Sprintf("Validation failed for node %s and nodePort %d. Expected '%s'/'%s' but got '%s'/'%s'", node.Name, nodePort, node.Name, nodeAddress.Address, epHostname, ip),
+						)
+					}
+				}
+			}
+		})
+
+		// This test makes sure host sourced traffic can reach host pod backends for a service without SNAT when externalTrafficPolicy is set to local after an
+		// upgrade to DualStack.
+		//
+		// After an upgrade to DualStack cluster, 2 tests must be run:
+		// a) Test from outside the cluster towards the NodePort - this test would fail in earlier versions of ovn-kubernetes
+		// b) Test from the node itself towards its own NodePort - this test would fail in more recent versions of ovn-kubernetes even though a) would pass.
+		//
+		// This test tests b)
+		// For test a), see test: "Should be allowed by nodeport services after upgrade to DualStack"
+		//
+		// To test b) We use curlInContainer to curl the endpoints directly from the host
+		// Due to the limitations of curlInContainer (only http), we only test against that protocol and no UDP
+		//
+		// This test will be skipped if the cluster is not in DualStack mode.
+		ginkgo.It("Should be allowed to node local host-networked endpoints by nodeport services after upgrade to DualStack", func() {
+			if !isDualStack {
+				ginkgo.Skip("Skipping as this is not a DualStack cluster")
+			}
+			serviceName := "nodeportsvclocalhostnet"
+			ginkgo.By("Creating the nodeport service")
+			npSpec := nodePortServiceSpecFrom(serviceName, v1.IPFamilyPolicySingleStack, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, hostNetEndpointsSelector, v1.ServiceExternalTrafficPolicyTypeLocal)
+			np, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), npSpec, metav1.CreateOptions{})
+			nodeTCPPort, _ := nodePortsFromService(np)
+			framework.ExpectNoError(err)
+
+			ginkgo.By("Waiting for the endpoints to pop up")
+			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
+			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
+
+			ginkgo.By("Upgrading the nodeport service to PreferDualStack")
+			err = patchService(f.ClientSet, np.Name, np.Namespace, "/spec/ipFamilyPolicy", "PreferDualStack")
+			framework.ExpectNoError(err)
+
+			for _, protocol := range []string{"http"} {
+				for _, node := range nodes.Items {
+					for _, nodeAddress := range node.Status.Addresses {
+						// skipping hostnames
+						if !addressIsIP(nodeAddress) {
+							continue
+						}
+
+						valid := false
+						nodePort := nodeTCPPort
+
+						ginkgo.By(fmt.Sprintf("Hitting nodeport %d on %s and trying to reach only the local endpoint with protocol %s", nodePort, node.Name, protocol))
+						var epHostname string
+						var ip string
+						// we are letting this continue on failure to account for possible timeouts during the migration to DualStack
+						// a bit less restrictive than the non-upgrade to Dualstack test; we want this to converge eventually
+						for i := 0; i < maxTries; i++ {
+							epHostname, err = curlInContainer(node.Name, protocol, nodeAddress.Address, nodePort, "hostname", curlInContainerMaxTime)
+							if err != nil {
+								framework.Logf("failed to run command on external container: %s", err.Error())
+								continue
+							}
+							epClientIP, err := curlInContainer(node.Name, protocol, nodeAddress.Address, nodePort, "clientip", curlInContainerMaxTime)
+							if err != nil {
+								framework.Logf("failed to run command on external container: %s", err.Error())
+								continue
+							}
+							ip, _, err = net.SplitHostPort(epClientIP)
+							if err != nil {
+								framework.Logf("failed to parse client IP: %s", err.Error())
+								continue
+							}
+
+							if epHostname == node.Name && ip == nodeAddress.Address {
+								framework.Logf("Validated local endpoint on node %s with address %s, and packet src IP %s ", node.Name, nodeAddress.Address, epClientIP)
+								valid = true
+								break
+							}
+
+						}
+						framework.ExpectEqual(
+							valid,
+							true,
+							fmt.Sprintf("Validation failed for node %s and nodePort %d. Expected '%s'/'%s' but got '%s'/'%s'", node.Name, nodePort, node.Name, nodeAddress.Address, epHostname, ip),
+						)
 					}
 				}
 			}

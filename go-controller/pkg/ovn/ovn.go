@@ -715,7 +715,7 @@ func (oc *Controller) WatchPods() {
 	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			go oc.metricsRecorder.AddPodEvent(pod.UID)
+			oc.metricsRecorder.AddPod(pod.UID)
 			oc.initRetryPod(pod)
 			if !oc.ensurePod(nil, pod, true) {
 				oc.unSkipRetryPod(pod)
@@ -750,7 +750,7 @@ func (oc *Controller) WatchPods() {
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			go oc.metricsRecorder.CleanPodRecord(pod.UID)
+			oc.metricsRecorder.CleanPod(pod.UID)
 			oc.checkAndDeleteRetryPod(pod.UID)
 			if !util.PodWantsNetwork(pod) {
 				oc.deletePodExternalGW(pod)
@@ -1202,6 +1202,7 @@ func (oc *Controller) WatchNodes() {
 			if err != nil {
 				klog.Errorf("NodeAdd: error creating subnet for node %s: %v", node.Name, err)
 				addNodeFailed.Store(node.Name, true)
+				nodeClusterRouterPortFailed.Store(node.Name, true)
 				mgmtPortFailed.Store(node.Name, true)
 				gatewaysFailed.Store(node.Name, true)
 				return

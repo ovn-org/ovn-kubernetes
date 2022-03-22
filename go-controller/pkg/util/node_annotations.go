@@ -288,7 +288,7 @@ func NodeL3GatewayAnnotationChanged(oldNode, newNode *kapi.Node) bool {
 func ParseNodeChassisIDAnnotation(node *kapi.Node) (string, error) {
 	chassisID, ok := node.Annotations[ovnNodeChassisID]
 	if !ok {
-		return "", fmt.Errorf("%s annotation not found for node %s", ovnNodeChassisID, node.Name)
+		return "", newAnnotationNotSetError("%s annotation not found for node %s", ovnNodeChassisID, node.Name)
 	}
 
 	return chassisID, nil
