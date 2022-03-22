@@ -1928,6 +1928,11 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			err = patchService(f.ClientSet, np.Name, np.Namespace, "/spec/ipFamilyPolicy", "PreferDualStack")
 			framework.ExpectNoError(err)
 
+			// After the DualStack upgrade, we might hit a timeout on the Service.
+			// Give things some time to settle, probe each IP address and service port, and make sure that
+			// we get a stable answer eventually.
+			// Give this up to 30 seconds to settle per IP / port.
+			ginkgo.By("Giving services some determined amount of time to settle after the conversion process")
 			for _, protocol := range []string{"http", "udp"} {
 				for _, node := range nodes.Items {
 					for _, nodeAddress := range node.Status.Addresses {
@@ -1941,20 +1946,35 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							nodePort = nodeUDPPort
 						}
 
-						// After the DualStack upgrade, we might hit a timeout on the Service.
-						// Give this 5 tries to settle
 						// This could be implemented way more elegantly with gomega 1.14.0 (dependency on k8s 1.22) and above, see:
 						// https://github.com/onsi/gomega/commit/2f04e6e3467d2c0c695786c3e7880f1e940274cf#
-						ginkgo.By(fmt.Sprintf("Waiting for the service to stabilize after the DualStack upgrade on address %s (node %s)", nodeAddress.Address, node.Name))
+						framework.Logf("Waiting for the service to stabilize after the DualStack upgrade on address %s (node %s)", nodeAddress.Address, node.Name)
 						gomega.Eventually(func() (r bool) {
 							failures := gomega.InterceptGomegaFailures(func() {
 								framework.Logf("Trying to poke node %s with address %s and port %s/%d", node.Name, nodeAddress.Address, protocol, nodePort)
-								pokeEndpointHostname(clientContainerName, protocol, nodeAddress.Address, nodePort)
+								pokeEndpointHostnameWithTimeout(clientContainerName, protocol, nodeAddress.Address, nodePort, 4)
 							})
 							return len(failures) == 0
-						}, 5*time.Second, 1*time.Second).Should(gomega.BeTrue())
+						}, 30*time.Second, 5*time.Second).Should(gomega.BeTrue())
+					}
+				}
+			}
 
-						ginkgo.By("Hitting the nodeport on " + node.Name + " and reaching all the endpoints " + protocol)
+			ginkgo.By("Hitting all nodeports and reaching all endpoints from each nodeport")
+			for _, protocol := range []string{"http", "udp"} {
+				for _, node := range nodes.Items {
+					for _, nodeAddress := range node.Status.Addresses {
+						// skipping hostnames
+						if !addressIsIP(nodeAddress) {
+							continue
+						}
+
+						nodePort := nodeTCPPort
+						if protocol == "udp" {
+							nodePort = nodeUDPPort
+						}
+
+						framework.Logf("Hitting the nodeport on %s and reaching all the endpoints (%s)", node.Name, protocol)
 						responses := sets.NewString()
 						valid := false
 						for i := 0; i < maxTries; i++ {

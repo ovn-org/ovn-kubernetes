@@ -265,6 +265,34 @@ func pokeEndpointHostname(clientContainer, protocol, targetHost string, targetPo
 	return hostName
 }
 
+// pokeEndpointHostnameWithTimeout leverages a container running the netexec command to send a "hostname" request to a target running
+// netexec on the given target host / protocol / port.
+// Returns the name of backend pod.
+func pokeEndpointHostnameWithTimeout(clientContainer, protocol, targetHost string, targetPort int32, timeout int) string {
+	ipPort := net.JoinHostPort("localhost", "80")
+	cmd := []string{"docker", "exec", clientContainer}
+
+	// we leverage the dial command from netexec, that is already supporting multiple protocols
+	curlCommand := strings.Split(fmt.Sprintf("curl --max-time %d -g -q -s http://%s/dial?request=hostname&protocol=%s&host=%s&port=%d&tries=1",
+		timeout,
+		ipPort,
+		protocol,
+		targetHost,
+		targetPort), " ")
+
+	cmd = append(cmd, curlCommand...)
+	res, err := runCommand(cmd...)
+	framework.ExpectNoError(err, "failed to run command on external container")
+	hostName, err := parseNetexecResponse(res)
+	if err != nil {
+		framework.Logf("FAILED Command was %s", curlCommand)
+		framework.Logf("FAILED Response was %v", res)
+	}
+	framework.ExpectNoError(err)
+
+	return hostName
+}
+
 // wrapper logic around pokeEndpointHostname
 // contact the ExternalIP service until each endpoint returns its hostname and return true, or false otherwise
 func pokeExternalIpService(clientContainerName, protocol, externalAddress string, externalPort int32, maxTries int, nodesHostnames sets.String) bool {
