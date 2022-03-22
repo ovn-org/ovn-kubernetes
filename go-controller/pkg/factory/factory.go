@@ -522,8 +522,13 @@ func (wf *WatchFactory) GetPodsBySelector(namespace string, labelSelector metav1
 
 // GetNodes returns the node specs of all the nodes
 func (wf *WatchFactory) GetNodes() ([]*kapi.Node, error) {
+	return wf.ListNodes(labels.Everything())
+}
+
+// ListNodes returns nodes that match a selector
+func (wf *WatchFactory) ListNodes(selector labels.Selector) ([]*kapi.Node, error) {
 	nodeLister := wf.informers[nodeType].lister.(listers.NodeLister)
-	return nodeLister.List(labels.Everything())
+	return nodeLister.List(selector)
 }
 
 // GetNode returns the node spec of a given node by name

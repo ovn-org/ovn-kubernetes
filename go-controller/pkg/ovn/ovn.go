@@ -5,11 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"math/rand"
 	"net"
 	"reflect"
-	"strconv"
 	"sync"
 	"time"
 
@@ -23,7 +21,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
@@ -319,7 +316,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 }
 
 // Run starts the actual watching.
-func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
+func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 	// Start and sync the watch factory to begin listening for events
 	if err := oc.watchFactory.Start(); err != nil {
 		return err
@@ -414,95 +411,19 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	}
 
 	// Final step to cleanup after resource handlers have synced
-	err := oc.ovnTopologyCleanup()
+	err := oc.ovnTopologyCleanup(ctx)
 	if err != nil {
 		klog.Errorf("Failed to cleanup OVN topology to version %d: %v", ovntypes.OvnCurrentTopologyVersion, err)
 		return err
 	}
 
-	// Master is fully running and resource handlers have synced, update Topology version in OVN
-	currentTopologyVersion := strconv.Itoa(ovntypes.OvnCurrentTopologyVersion)
-	logicalRouterRes := []nbdb.LogicalRouter{}
-	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
-	defer cancel()
-	if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
-		return lr.Name == ovntypes.OVNClusterRouter
-	}).List(ctx, &logicalRouterRes); err != nil {
-		return fmt.Errorf("failed in retrieving %s, error: %v", ovntypes.OVNClusterRouter, err)
-	}
-	// Update topology version on distributed cluster router
-	logicalRouterRes[0].ExternalIDs["k8s-ovn-topo-version"] = currentTopologyVersion
-	logicalRouter := nbdb.LogicalRouter{
-		Name:        ovntypes.OVNClusterRouter,
-		ExternalIDs: logicalRouterRes[0].ExternalIDs,
-	}
-	opModel := libovsdbops.OperationModel{
-		Name:           logicalRouter.Name,
-		Model:          &logicalRouter,
-		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
-		OnModelUpdates: []interface{}{
-			&logicalRouter.ExternalIDs,
-		},
-		ErrNotFound: true,
-	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModel); err != nil {
-		return fmt.Errorf("failed to generate set topology version in OVN, err: %v", err)
-	}
-
-	// Update topology version on node
-	node, err := oc.kube.GetNode(nodeName)
-	if err != nil {
-		return fmt.Errorf("unable to get node: %s", nodeName)
-	}
-	err = oc.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{ovntypes.OvnK8sTopoAnno: strconv.Itoa(ovntypes.OvnCurrentTopologyVersion)})
-	if err != nil {
-		return fmt.Errorf("failed to set topology annotation for node %s", node.Name)
-	}
-
-	return nil
-}
-
-func (oc *Controller) ovnTopologyCleanup() error {
-	ver, err := oc.determineOVNTopoVersionFromOVN()
-	if err != nil {
+	// Master is fully running and resource handlers have synced, update Topology version in OVN and the ConfigMap
+	if err := oc.reportTopologyVersion(ctx); err != nil {
+		klog.Errorf("Failed to report topology version: %v", err)
 		return err
 	}
 
-	// Cleanup address sets in non dual stack formats in all versions known to possibly exist.
-	if ver <= ovntypes.OvnPortBindingTopoVersion {
-		err = addressset.NonDualStackAddressSetCleanup(oc.nbClient)
-	}
-	return err
-}
-
-// determineOVNTopoVersionFromOVN determines what OVN Topology version is being used
-// If "k8s-ovn-topo-version" key in external_ids column does not exist, it is prior to OVN topology versioning
-// and therefore set version number to OvnCurrentTopologyVersion
-func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
-	ver := 0
-	logicalRouterRes := []nbdb.LogicalRouter{}
-	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
-	defer cancel()
-	if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
-		return lr.Name == ovntypes.OVNClusterRouter
-	}).List(ctx, &logicalRouterRes); err != nil {
-		return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
-			"error: %v", ovntypes.OVNClusterRouter, err)
-	}
-	if len(logicalRouterRes) == 0 {
-		// no OVNClusterRouter exists, DB is empty, nothing to upgrade
-		return math.MaxInt32, nil
-	}
-	v, exists := logicalRouterRes[0].ExternalIDs["k8s-ovn-topo-version"]
-	if !exists {
-		klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
-		return ver, nil
-	}
-	ver, err := strconv.Atoi(v)
-	if err != nil {
-		return 0, fmt.Errorf("invalid OVN topology version string for the cluster, err: %v", err)
-	}
-	return ver, nil
+	return nil
 }
 
 // syncPeriodic adds a goroutine that periodically does some work
