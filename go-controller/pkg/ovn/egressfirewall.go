@@ -82,6 +82,10 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 	return efr, nil
 }
 
+func (oc *Controller) createNodeAllowACLs(match string) error {
+
+}
+
 func (oc *Controller) addNodeForEgressFirewall(node *v1.Node) error {
 	v4Addr, v6Addr := getNodeInternalAddrs(node)
 	if v4Addr != nil {

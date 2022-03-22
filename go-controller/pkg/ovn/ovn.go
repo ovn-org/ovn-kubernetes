@@ -138,6 +138,10 @@ type Controller struct {
 	externalGWCache map[ktypes.NamespacedName]*externalRouteInfo
 	exGWCacheMutex  sync.RWMutex
 
+	// An addressSet of all the node host Addresses
+	nodeAddressSet      addressset.AddressSet
+	nodeAddressSetMutex sync.RWMutex
+
 	// egressFirewalls is a map of namespaces and the egressFirewall attached to it
 	egressFirewalls sync.Map
 
@@ -359,23 +363,7 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 		oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
 		oc.egressFirewallHandler = oc.WatchEgressFirewall()
 
-		// For shared gateway mode we need to initialize a watcher on nodes
-		// which setup allow ACLs for egress firewall matching pods to the host
-		// network. This can only be done in shared gateway mode because we
-		// program the ACLs on the join switch, as supposed to local gateway
-		// mode which does so on the node's switch. For local gateway mode there
-		// is no way to fix this issue. Given that this "allow ACL" needs to
-		// take precedence over all egress firewall rules (and needs to have a
-		// priority of 10001) for connectivity to work to the host network: it
-		// would also take precedence over all network policy ACLs (which are
-		// also programmed on the node's switch). Hence if a user would create a
-		// network policy denying access to the Kubernetes service API, this
-		// default allow ACL would overwrite it and grant access (since the
-		// egress firewall priority supersede the network policy ones), hence
-		// why this cannot be done in local gateway mode.
-		if config.Gateway.Mode == config.GatewayModeShared {
-			oc.WatchEgressFirewallNodes()
-		}
+		oc.WatchEgressFirewallNodes()
 	}
 
 	klog.Infof("Completing all the Watchers took %v", time.Since(start))
