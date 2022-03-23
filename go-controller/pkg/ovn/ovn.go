@@ -677,6 +677,7 @@ func (oc *Controller) WatchPods() {
 				oc.recordPodEvent(err, pod)
 				klog.Errorf("Failed to update pod %s, error: %v",
 					getPodNamespacedName(pod), err)
+				oc.initRetryAddPod(pod)
 				// unskip failed pod for next retry iteration
 				oc.unSkipRetryPod(pod)
 				return
