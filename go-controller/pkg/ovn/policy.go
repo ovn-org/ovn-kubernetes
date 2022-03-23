@@ -3,6 +3,7 @@ package ovn
 import (
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"reflect"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
@@ -1096,7 +1098,8 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) error {
 		// rollback network policy
 		if err := oc.deleteNetworkPolicy(policy, np); err != nil {
 			// rollback failed, add to retry to cleanup
-			oc.addDeleteToRetryPolicy(policy, np)
+			key := getPolicyNamespacedName(policy)
+			oc.retryNetPolices.addDeleteToRetryObj(policy, key, np)
 		}
 		return fmt.Errorf("unable to ensure namespace for network policy: %s, namespace: %s, error: %v",
 			policy.Name, policy.Namespace, err)
@@ -1491,4 +1494,80 @@ func (oc *Controller) shutdownHandlers(np *networkPolicy) {
 	for _, handler := range np.svcHandlerList {
 		oc.watchFactory.RemoveServiceHandler(handler)
 	}
+}
+
+// iterateRetryNetworkPolicies checks if any outstanding NetworkPolicies exist
+// then tries to re-add them if so
+// updateAll forces all policies to be attempted to be retried regardless
+func (oc *Controller) iterateRetryNetworkPolicies(updateAll bool) {
+	oc.retryNetPolices.retryMutex.Lock()
+	defer oc.retryNetPolices.retryMutex.Unlock()
+	now := time.Now()
+	for namespacedName, npEntry := range oc.retryNetPolices.entries {
+		if npEntry.ignore {
+			continue
+		}
+		// check if we need to create
+		if npEntry.newObj != nil {
+			p := npEntry.newObj.(*knet.NetworkPolicy)
+			// get the latest version of the new policy from the informer, if it doesn't exist we are not going to
+			// create the new policy
+			np, err := oc.watchFactory.GetNetworkPolicy(p.Namespace, p.Name)
+			if err != nil && kerrors.IsNotFound(err) {
+				klog.Infof("%s policy not found in the informers cache, not going to retry policy create", namespacedName)
+				npEntry.newObj = nil
+			} else {
+				npEntry.newObj = np
+			}
+		}
+
+		npEntry.backoffSec = npEntry.backoffSec * 2
+		if npEntry.backoffSec > 60 {
+			npEntry.backoffSec = 60
+		}
+		backoff := (npEntry.backoffSec * time.Second) + (time.Duration(rand.Intn(500)) * time.Millisecond)
+		npTimer := npEntry.timeStamp.Add(backoff)
+		if !updateAll && now.Before(npTimer) {
+			klog.V(5).Infof("%s retry network policy not after timer yet, time: %s", namespacedName, npTimer)
+			continue
+		}
+		klog.Infof("Network Policy Retry: %s retry network policy setup", namespacedName)
+
+		// check if we need to delete anything
+		if npEntry.oldObj != nil {
+			var np *networkPolicy
+			klog.Infof("Network Policy Retry: Removing old policy for %s", namespacedName)
+			knp := npEntry.oldObj.(*knet.NetworkPolicy)
+			if npEntry.config != nil {
+				np = npEntry.config.(*networkPolicy)
+			}
+			if err := oc.deleteNetworkPolicy(knp, np); err != nil {
+				klog.Infof("Network Policy Retry delete failed for %s, will try again later: %v",
+					namespacedName, err)
+				npEntry.timeStamp = time.Now()
+				continue
+			}
+			// successfully cleaned up old policy, remove it from the retry cache
+			npEntry.oldObj = nil
+		}
+
+		// create new policy if needed
+		if npEntry.newObj != nil {
+			klog.Infof("Network Policy Retry: Creating new policy for %s", namespacedName)
+			if err := oc.addNetworkPolicy(npEntry.newObj.(*knet.NetworkPolicy)); err != nil {
+				klog.Infof("Network Policy Retry create failed for %s, will try again later: %v",
+					namespacedName, err)
+				npEntry.timeStamp = time.Now()
+				continue
+			}
+			// successfully cleaned up old policy, remove it from the retry cache
+			npEntry.newObj = nil
+		}
+
+		klog.Infof("Network Policy Retry successful for %s", namespacedName)
+		oc.retryNetPolices.deleteRetryObj(namespacedName, false)
+	}
+}
+func getPolicyNamespacedName(policy *knet.NetworkPolicy) string {
+	return fmt.Sprintf("%v/%v", policy.Namespace, policy.Name)
 }

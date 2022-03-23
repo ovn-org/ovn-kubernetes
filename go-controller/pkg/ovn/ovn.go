@@ -36,7 +36,6 @@ import (
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	ktypes "k8s.io/apimachinery/pkg/types"
@@ -195,13 +194,16 @@ type Controller struct {
 	// channel to indicate we need to retry pods immediately
 	retryPodsChan chan struct{}
 
-	// Map of network policies that need to be retried, and the timestamp of when they last failed
-	// keyed by namespace/name
-	retryNetPolices map[string]*retryNetPolEntry
-	retryNetPolLock sync.Mutex
+	// Objects for network policies that need to be retried
+	retryNetPolices *retryObjs
 
-	// channel to indicate we need to retry policy immediately
-	retryPolicyChan chan struct{}
+	// Objects for node that need to be retried
+	retryNodes *retryObjs
+	// Node's specific syncMap used by WatchNode event handler
+	gatewaysFailed              sync.Map
+	mgmtPortFailed              sync.Map
+	addNodeFailed               sync.Map
+	nodeClusterRouterPortFailed sync.Map
 
 	metricsRecorder *metrics.ControlPlaneRecorder
 }
@@ -219,14 +221,12 @@ type retryEntry struct {
 	needsDel *lpInfo
 }
 
-type retryNetPolEntry struct {
-	newPolicy  *kapisnetworking.NetworkPolicy
-	oldPolicy  *kapisnetworking.NetworkPolicy
-	np         *networkPolicy
-	timeStamp  time.Time
-	backoffSec time.Duration
-	// whether to include this NP in retry iterations
-	ignore bool
+type retryObjs struct {
+	retryMutex sync.Mutex
+	// cache to hold object needs retry to successfully complete processing
+	entries map[string]*retryObjEntry
+	// channel to indicate we need to retry objs immediately
+	retryChan chan struct{}
 }
 
 const (
@@ -303,15 +303,23 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		joinSwIPManager:          nil,
 		retryPods:                make(map[string]*retryEntry),
 		retryPodsChan:            make(chan struct{}, 1),
-		retryNetPolices:          make(map[string]*retryNetPolEntry),
-		retryPolicyChan:          make(chan struct{}, 1),
-		recorder:                 recorder,
-		nbClient:                 libovsdbOvnNBClient,
-		sbClient:                 libovsdbOvnSBClient,
-		svcController:            svcController,
-		svcFactory:               svcFactory,
-		modelClient:              modelClient,
-		metricsRecorder:          metrics.NewControlPlaneRecorder(),
+		retryNetPolices: &retryObjs{
+			retryMutex: sync.Mutex{},
+			entries:    make(map[string]*retryObjEntry),
+			retryChan:  make(chan struct{}, 1),
+		},
+		retryNodes: &retryObjs{
+			retryMutex: sync.Mutex{},
+			entries:    make(map[string]*retryObjEntry),
+			retryChan:  make(chan struct{}, 1),
+		},
+		recorder:        recorder,
+		nbClient:        libovsdbOvnNBClient,
+		sbClient:        libovsdbOvnSBClient,
+		svcController:   svcController,
+		svcFactory:      svcFactory,
+		modelClient:     modelClient,
+		metricsRecorder: metrics.NewControlPlaneRecorder(),
 	}
 }
 
@@ -517,19 +525,7 @@ func (oc *Controller) removePod(pod *kapi.Pod, portInfo *lpInfo) error {
 
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() {
-	go func() {
-		// track the retryPods map and every 30 seconds check if any pods need to be retried
-		for {
-			select {
-			case <-time.After(30 * time.Second):
-				oc.iterateRetryPods(false)
-			case <-oc.retryPodsChan:
-				oc.iterateRetryPods(true)
-			case <-oc.stopChan:
-				return
-			}
-		}
-	}()
+	oc.triggerRetryObjs(oc.retryPodsChan, oc.iterateRetryPods)
 
 	start := time.Now()
 
@@ -633,95 +629,88 @@ func (oc *Controller) WatchPods() {
 // WatchNetworkPolicy starts the watching of network policy resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNetworkPolicy() {
-	go func() {
-		// track the retryNetworkPolicies map and every 30 seconds check if any pods need to be retried
-		for {
-			select {
-			case <-time.After(30 * time.Second):
-				oc.iterateRetryNetworkPolicies(false)
-			case <-oc.retryPolicyChan:
-				oc.iterateRetryNetworkPolicies(true)
-			case <-oc.stopChan:
-				return
-			}
-		}
-	}()
-
+	oc.triggerRetryObjs(oc.retryNetPolices.retryChan, oc.iterateRetryNetworkPolicies)
 	start := time.Now()
 	oc.watchFactory.AddPolicyHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
-			oc.initRetryPolicy(policy)
-			oc.checkAndSkipRetryPolicy(policy)
+			key := getPolicyNamespacedName(policy)
+			oc.retryNetPolices.initRetryObjWithAdd(policy, key)
+			oc.retryNetPolices.skipRetryObj(key)
 			// If there is a delete entry this is a network policy being added
 			// with the same name as a previous network policy that failed deletion.
 			// Destroy it first before we add the new policy.
-			if retryEntry := oc.getPolicyRetryEntry(policy); retryEntry != nil && retryEntry.oldPolicy != nil {
+			if retryEntry := oc.retryNetPolices.getObjRetryEntry(key); retryEntry != nil && retryEntry.oldObj != nil {
 				klog.Infof("Detected stale policy during new policy add with the same name: %s/%s",
 					policy.Namespace, policy.Name)
-				if err := oc.deleteNetworkPolicy(retryEntry.oldPolicy, nil); err != nil {
-					oc.unSkipRetryPolicy(policy)
+				knp := retryEntry.oldObj.(*kapisnetworking.NetworkPolicy)
+				if err := oc.deleteNetworkPolicy(knp, nil); err != nil {
+					oc.retryNetPolices.unSkipRetryObj(key)
 					klog.Errorf("Failed to delete stale network policy %s, during add: %v",
-						getPolicyNamespacedName(policy), err)
+						key, err)
 					return
 				}
-				oc.removeDeleteFromRetryPolicy(policy)
+				oc.retryNetPolices.removeDeleteFromRetryObj(key)
 			}
 			start := time.Now()
 			if err := oc.addNetworkPolicy(policy); err != nil {
 				klog.Errorf("Failed to create network policy %s, error: %v",
 					getPolicyNamespacedName(policy), err)
-				oc.unSkipRetryPolicy(policy)
+				oc.retryNetPolices.unSkipRetryObj(key)
 				return
 			}
-			klog.Infof("Created Network Policy: %s took: %v", getPolicyNamespacedName(policy), time.Since(start))
-			oc.checkAndDeleteRetryPolicy(policy)
+			klog.Infof("Created Network Policy: %s took: %v", key, time.Since(start))
+			oc.retryNetPolices.deleteRetryObj(key, true)
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			oldPolicy := old.(*kapisnetworking.NetworkPolicy)
 			newPolicy := newer.(*kapisnetworking.NetworkPolicy)
 			if !reflect.DeepEqual(oldPolicy, newPolicy) {
-				oc.checkAndSkipRetryPolicy(oldPolicy)
+				newKey := getPolicyNamespacedName(newPolicy)
+				oldKey := getPolicyNamespacedName(oldPolicy)
+				oc.retryNetPolices.skipRetryObj(oldKey)
 				// check if there was already a retry entry with an old policy
 				// else just look to delete the old policy in the update
-				if retryEntry := oc.getPolicyRetryEntry(oldPolicy); retryEntry != nil && retryEntry.oldPolicy != nil {
-					if err := oc.deleteNetworkPolicy(retryEntry.oldPolicy, nil); err != nil {
-						oc.initRetryPolicy(newPolicy)
-						oc.unSkipRetryPolicy(oldPolicy)
+				if retryEntry := oc.retryNetPolices.getObjRetryEntry(oldKey); retryEntry != nil && retryEntry.oldObj != nil {
+					knp := retryEntry.oldObj.(*kapisnetworking.NetworkPolicy)
+					if err := oc.deleteNetworkPolicy(knp, nil); err != nil {
+						oc.retryNetPolices.initRetryObjWithAdd(newPolicy, newKey)
+						oc.retryNetPolices.unSkipRetryObj(oldKey)
 						klog.Errorf("Failed to delete stale network policy %s, during update: %v",
-							getPolicyNamespacedName(oldPolicy), err)
+							oldKey, err)
 						return
 					}
 				} else if err := oc.deleteNetworkPolicy(oldPolicy, nil); err != nil {
-					oc.initRetryPolicyWithDelete(oldPolicy, nil)
-					oc.initRetryPolicy(newPolicy)
-					oc.unSkipRetryPolicy(oldPolicy)
+					oc.retryNetPolices.initRetryObjWithDelete(oldPolicy, oldKey, nil)
+					oc.retryNetPolices.initRetryObjWithAdd(newPolicy, newKey)
+					oc.retryNetPolices.unSkipRetryObj(oldKey)
 					klog.Errorf("Failed to delete network policy %s, during update: %v",
-						getPolicyNamespacedName(oldPolicy), err)
+						oldKey, err)
 					return
 				}
 				// remove the old policy from retry entry since it was correctly deleted
-				oc.removeDeleteFromRetryPolicy(oldPolicy)
+				oc.retryNetPolices.removeDeleteFromRetryObj(oldKey)
 				if err := oc.addNetworkPolicy(newPolicy); err != nil {
-					oc.initRetryPolicy(newPolicy)
-					oc.unSkipRetryPolicy(newPolicy)
+					oc.retryNetPolices.initRetryObjWithAdd(newPolicy, newKey)
+					oc.retryNetPolices.unSkipRetryObj(newKey)
 					klog.Errorf("Failed to create network policy %s, during update: %v",
-						getPolicyNamespacedName(newPolicy), err)
+						newKey, err)
 					return
 				}
-				oc.checkAndDeleteRetryPolicy(newPolicy)
+				oc.retryNetPolices.deleteRetryObj(newKey, true)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
-			oc.checkAndSkipRetryPolicy(policy)
-			oc.initRetryPolicyWithDelete(policy, nil)
+			key := getPolicyNamespacedName(policy)
+			oc.retryNetPolices.skipRetryObj(key)
+			oc.retryNetPolices.initRetryObjWithDelete(policy, key, nil)
 			if err := oc.deleteNetworkPolicy(policy, nil); err != nil {
-				oc.unSkipRetryPolicy(policy)
+				oc.retryNetPolices.unSkipRetryObj(key)
 				klog.Errorf("Failed to delete network policy %s, error: %v", getPolicyNamespacedName(policy), err)
 				return
 			}
-			oc.checkAndDeleteRetryPolicy(policy)
+			oc.retryNetPolices.deleteRetryObj(key, true)
 		},
 	}, oc.syncNetworkPolicies)
 	klog.Infof("Bootstrapping existing policies and cleaning stale policies took %v", time.Since(start))
@@ -1047,72 +1036,39 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNodes() {
-	var gatewaysFailed sync.Map
-	var mgmtPortFailed sync.Map
-	var addNodeFailed sync.Map
-	var nodeClusterRouterPortFailed sync.Map
-
+	oc.triggerRetryObjs(oc.retryNodes.retryChan, oc.iterateRetryNodes)
 	start := time.Now()
 	oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
-			if noHostSubnet := noHostSubnet(node); noHostSubnet {
-				err := oc.lsManager.AddNoHostSubnetNode(node.Name)
-				if err != nil {
-					klog.Errorf("Error creating logical switch cache for node %s: %v", node.Name, err)
+			oc.retryNodes.initRetryObjWithAdd(node, node.Name)
+			oc.retryNodes.skipRetryObj(node.Name)
+			if retryEntry := oc.retryNodes.getObjRetryEntry(node.Name); retryEntry != nil && retryEntry.oldObj != nil {
+				klog.Infof("Detected leftover old node during new node add  %s.", node.Name)
+				if err := oc.deleteNodeEvent(node); err != nil {
+					oc.retryNodes.unSkipRetryObj(node.Name)
+					klog.Errorf("Failed to delete node %s, error: %v",
+						node.Name, err)
+					return
 				}
+				oc.retryNodes.removeDeleteFromRetryObj(node.Name)
+			}
+			start := time.Now()
+			if err := oc.addUpdateNodeEvent(node,
+				&nodeSyncs{true, true, true, true}); err != nil {
+				klog.Errorf("Failed to create node %s, error: %v",
+					node.Name, err)
+				oc.retryNodes.unSkipRetryObj(node.Name)
 				return
 			}
-
-			klog.V(5).Infof("Added event for Node %q", node.Name)
-			hostSubnets, err := oc.addNode(node)
-			if err != nil {
-				klog.Errorf("NodeAdd: error creating subnet for node %s: %v", node.Name, err)
-				addNodeFailed.Store(node.Name, true)
-				nodeClusterRouterPortFailed.Store(node.Name, true)
-				mgmtPortFailed.Store(node.Name, true)
-				gatewaysFailed.Store(node.Name, true)
-				return
-			}
-
-			if err = oc.syncNodeClusterRouterPort(node, hostSubnets); err != nil {
-				if !util.IsAnnotationNotSetError(err) {
-					klog.Warningf(err.Error())
-				}
-				nodeClusterRouterPortFailed.Store(node.Name, true)
-			}
-
-			err = oc.syncNodeManagementPort(node, hostSubnets)
-			if err != nil {
-				if !util.IsAnnotationNotSetError(err) {
-					klog.Warningf("Error creating management port for node %s: %v", node.Name, err)
-				}
-				mgmtPortFailed.Store(node.Name, true)
-			}
-
-			if err := oc.syncNodeGateway(node, hostSubnets); err != nil {
-				if !util.IsAnnotationNotSetError(err) {
-					klog.Warningf(err.Error())
-				}
-				gatewaysFailed.Store(node.Name, true)
-			}
-
-			// ensure pods that already exist on this node have their logical ports created
-			options := metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String()}
-			pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
-			if err != nil {
-				klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
-			} else {
-				oc.addRetryPods(pods.Items)
-				oc.requestRetryPods()
-			}
-
+			klog.Infof("Created Node: %s took: %v", node.Name, time.Since(start))
+			oc.retryNodes.deleteRetryObj(node.Name, true)
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
-			node := new.(*kapi.Node)
+			newNode := new.(*kapi.Node)
 
-			shouldUpdate, err := shouldUpdate(node, oldNode)
+			shouldUpdate, err := shouldUpdate(newNode, oldNode)
 			if err != nil {
 				klog.Errorf(err.Error())
 			}
@@ -1121,74 +1077,48 @@ func (oc *Controller) WatchNodes() {
 				return
 			}
 
-			var hostSubnets []*net.IPNet
-			_, failed := addNodeFailed.Load(node.Name)
-			if failed {
-				hostSubnets, err = oc.addNode(node)
-				if err != nil {
-					klog.Errorf("NodeUpdate: error creating subnet for node %s: %v", node.Name, err)
+			oc.retryNodes.skipRetryObj(oldNode.Name)
+			if retryEntry := oc.retryNodes.getObjRetryEntry(oldNode.Name); retryEntry != nil && retryEntry.oldObj != nil {
+				klog.Infof("Detected leftover old node during node update  %s.", newNode.Name)
+				if err := oc.deleteNodeEvent(oldNode); err != nil {
+					oc.retryNodes.initRetryObjWithAdd(newNode, newNode.Name)
+					oc.retryNodes.unSkipRetryObj(oldNode.Name)
+					klog.Errorf("Failed to delete stale node %s, during update: %v",
+						oldNode.Name, err)
 					return
 				}
-				addNodeFailed.Delete(node.Name)
 			}
+			// remove the old node from retry entry since it was correctly deleted
+			oc.retryNodes.removeDeleteFromRetryObj(oldNode.Name)
 
-			_, failed = nodeClusterRouterPortFailed.Load(node.Name)
-			if failed || nodeChassisChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
-				if err = oc.syncNodeClusterRouterPort(node, nil); err != nil {
-					if !util.IsAnnotationNotSetError(err) {
-						klog.Warningf(err.Error())
-					}
-					nodeClusterRouterPortFailed.Store(node.Name, true)
-				} else {
-					nodeClusterRouterPortFailed.Delete(node.Name)
-				}
+			// determine what actually changed in this update
+			_, nodeSync := oc.addNodeFailed.Load(newNode.Name)
+			_, failed := oc.nodeClusterRouterPortFailed.Load(newNode.Name)
+			clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
+			_, failed = oc.mgmtPortFailed.Load(newNode.Name)
+			mgmtSync := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
+			_, failed = oc.gatewaysFailed.Load(newNode.Name)
+			gwSync := failed || gatewayChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode) || hostAddressesChanged(oldNode, newNode)
+
+			if err := oc.addUpdateNodeEvent(newNode,
+				&nodeSyncs{nodeSync, clusterRtrSync, mgmtSync, gwSync}); err != nil {
+				klog.Errorf("Failed to update node %s, error: %v", newNode.Name, err)
+				oc.retryNodes.initRetryObjWithAdd(newNode, newNode.Name)
+				oc.retryNodes.unSkipRetryObj(newNode.Name)
+				return
 			}
-
-			_, failed = mgmtPortFailed.Load(node.Name)
-			if failed || macAddressChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
-				err := oc.syncNodeManagementPort(node, hostSubnets)
-				if err != nil {
-					if !util.IsAnnotationNotSetError(err) {
-						klog.Errorf("Error updating management port for node %s: %v", node.Name, err)
-					}
-					mgmtPortFailed.Store(node.Name, true)
-				} else {
-					mgmtPortFailed.Delete(node.Name)
-				}
-			}
-
-			if nodeChassisChanged(oldNode, node) {
-				// delete stale chassis in SBDB if any
-				oc.deleteStaleNodeChassis(node)
-			}
-
-			oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
-
-			_, failed = gatewaysFailed.Load(node.Name)
-			if failed || gatewayChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) || hostAddressesChanged(oldNode, node) {
-				err := oc.syncNodeGateway(node, nil)
-				if err != nil {
-					if !util.IsAnnotationNotSetError(err) {
-						klog.Errorf(err.Error())
-					}
-					gatewaysFailed.Store(node.Name, true)
-				} else {
-					gatewaysFailed.Delete(node.Name)
-				}
-			}
+			oc.retryNodes.deleteRetryObj(newNode.Name, true)
 		},
 		DeleteFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
-			klog.V(5).Infof("Delete event for Node %q. Removing the node from "+
-				"various caches", node.Name)
-
-			nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
-			oc.deleteNode(node.Name, nodeSubnets)
-			oc.lsManager.DeleteNode(node.Name)
-			addNodeFailed.Delete(node.Name)
-			mgmtPortFailed.Delete(node.Name)
-			gatewaysFailed.Delete(node.Name)
-			nodeClusterRouterPortFailed.Delete(node.Name)
+			oc.retryNodes.skipRetryObj(node.Name)
+			oc.retryNodes.initRetryObjWithDelete(node, node.Name, nil)
+			if err := oc.deleteNodeEvent(node); err != nil {
+				oc.retryNodes.unSkipRetryObj(node.Name)
+				klog.Errorf("Failed to delete node %s, error: %v", node.Name, err)
+				return
+			}
+			oc.retryNodes.deleteRetryObj(node.Name, true)
 		},
 	}, oc.syncNodes)
 	klog.Infof("Bootstrapping existing nodes and cleaning stale nodes took %v", time.Since(start))
