@@ -83,35 +83,62 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 }
 
 func (oc *Controller) createNodeAllowACLs(match string) error {
+	if _, _, err := util.RunOVNNbctl(
+		"--may-exist",
+		"acl-add",
+		types.OVNJoinSwitch,
+		types.DirectionToLPort,
+		types.DefaultEgressFirewallAllowPriority,
+		match,
+		"allow",
+	); err != nil {
+		return fmt.Errorf("could not create default IPv4 allow ACL for egress firewall, err: %v", err)
+	}
+	return nil
+}
 
+func (oc *Controller) deleteNodeAllowACLs(match string) error {
+	if _, _, err := util.RunOVNNbctl(
+		"--if-exist",
+		"acl-del",
+		types.OVNJoinSwitch,
+		types.DirectionToLPort,
+		types.DefaultEgressFirewallAllowPriority,
+		match,
+	); err != nil {
+		return fmt.Errorf("could not delete default IPv6 allow ACL for egress firewall, err: %v", err)
+	}
+	return nil
 }
 
 func (oc *Controller) addNodeForEgressFirewall(node *v1.Node) error {
+	oc.nodeAddressSetMutex.Lock()
+	defer oc.nodeAddressSetMutex.Unlock()
 	v4Addr, v6Addr := getNodeInternalAddrs(node)
+	addrsToAdd := []net.IP{}
 	if v4Addr != nil {
-		if _, _, err := util.RunOVNNbctl(
-			"--may-exist",
-			"acl-add",
-			types.OVNJoinSwitch,
-			types.DirectionToLPort,
-			types.DefaultEgressFirewallAllowPriority,
-			fmt.Sprintf("ip4.dst == %v/32", v4Addr),
-			"allow",
-		); err != nil {
-			return fmt.Errorf("could not create default IPv4 allow ACL for egress firewall, err: %v", err)
-		}
+		addrsToAdd = append(addrsToAdd, v4Addr)
 	}
 	if v6Addr != nil {
-		if _, _, err := util.RunOVNNbctl(
-			"--may-exist",
-			"acl-add",
-			types.OVNJoinSwitch,
-			types.DirectionToLPort,
-			types.DefaultEgressFirewallAllowPriority,
-			fmt.Sprintf("ip6.dst == %v/128", v4Addr),
-			"allow",
-		); err != nil {
-			return fmt.Errorf("could not create default IPv6 allow ACL for egress firewall, err: %v", err)
+		addrsToAdd = append(addrsToAdd, v6Addr)
+	}
+
+	if oc.nodeAddressSet == nil {
+		var err error
+		oc.nodeAddressSet, err = oc.addressSetFactory.NewAddressSet("nodeAddressSet", addrsToAdd)
+		if err != nil {
+			return fmt.Errorf("could not create address set of node IP addresses %v", err)
+		}
+		if config.Gateway.Mode == config.GatewayModeShared {
+			ipv4HashedAS, ipv6HashedAS := addressset.MakeAddressSetHashNames("nodeAddressSet")
+			match := fmt.Sprintf("ip4.dst == $%s || ip6.dst == $%s", ipv4HashedAS, ipv6HashedAS)
+			if err := oc.createNodeAllowACLs(match); err != nil {
+				return fmt.Errorf("could not create default allow ACL for egress firewall, err: %v", err)
+			}
+		} else {
+			if err := oc.nodeAddressSet.AddIPs(addrsToAdd); err != nil {
+				return fmt.Errorf("could not add IPs to addressSet of node IPs: %v", err)
+			}
 		}
 	}
 	return nil
@@ -120,26 +147,14 @@ func (oc *Controller) addNodeForEgressFirewall(node *v1.Node) error {
 func (oc *Controller) deleteNodeForEgressFirewall(node *v1.Node) error {
 	v4Addr, v6Addr := getNodeInternalAddrs(node)
 	if v4Addr != nil {
-		if _, _, err := util.RunOVNNbctl(
-			"--if-exist",
-			"acl-del",
-			types.OVNJoinSwitch,
-			types.DirectionToLPort,
-			types.DefaultEgressFirewallAllowPriority,
-			fmt.Sprintf("ip4.dst == %v/32", v4Addr),
-		); err != nil {
+		match := fmt.Sprintf("ip4.dst == %v/32", v4Addr)
+		if err := oc.deleteNodeAllowACLs(match); err != nil {
 			return fmt.Errorf("could not delete default IPv4 allow ACL for egress firewall, err: %v", err)
 		}
 	}
 	if v6Addr != nil {
-		if _, _, err := util.RunOVNNbctl(
-			"--if-exist",
-			"acl-add",
-			types.OVNJoinSwitch,
-			types.DirectionToLPort,
-			types.DefaultEgressFirewallAllowPriority,
-			fmt.Sprintf("ip6.dst == %v/128", v4Addr),
-		); err != nil {
+		match := fmt.Sprintf("ip6.dst == %v/128", v4Addr)
+		if err := oc.deleteNodeAllowACLs(match); err != nil {
 			return fmt.Errorf("could not delete default IPv6 allow ACL for egress firewall, err: %v", err)
 		}
 	}
