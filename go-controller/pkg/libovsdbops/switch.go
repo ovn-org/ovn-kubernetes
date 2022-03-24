@@ -320,7 +320,7 @@ func AddACLToNodeSwitch(nbClient libovsdbclient.Client, nodeName string, nodeACL
 			},
 		},
 		{
-			Name:           nodeSwitch.Name,
+			Name:           &nodeSwitch.Name,
 			Model:          &nodeSwitch,
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == nodeName },
 			OnModelMutations: []interface{}{

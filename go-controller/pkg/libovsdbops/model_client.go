@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"reflect"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
@@ -118,7 +119,7 @@ type OperationModel struct {
 	// Name indicates that during a Create the model will have a predicate
 	// operation to ensure a duplicate txn will not occur. See:
 	// https://bugzilla.redhat.com/show_bug.cgi?id=2042001
-	Name string
+	Name interface{}
 }
 
 // WithClient is useful for ad-hoc override of the targetted OVS DB. Can be used,
@@ -295,31 +296,24 @@ func (m *ModelClient) create(opModel *OperationModel) ([]ovsdb.Operation, error)
 	// ACL we would have to use external_ids + name for unique match
 	// However external_ids would be a performance hit, and in one case we use
 	// an empty name and external_ids for addAllowACLFromNode
-	if len(opModel.Name) > 0 && o[0].Table != "ACL" {
+	if opModel.Name != nil && o[0].Table != "ACL" {
 		timeout := types.OVSDBWaitTimeout
-		ops = append(ops, ovsdb.Operation{
-			Op:      ovsdb.OperationWait,
-			Timeout: &timeout,
-			Table:   o[0].Table,
-			Where:   []ovsdb.Condition{{Column: "name", Function: ovsdb.ConditionEqual, Value: opModel.Name}},
-			Columns: []string{"name"},
-			Until:   "!=",
-			Rows:    []ovsdb.Row{{"name": opModel.Name}},
-		})
+		condition := model.Condition{
+			Field:    opModel.Name,
+			Function: ovsdb.ConditionEqual,
+			Value:    getString(opModel.Name),
+		}
+		waitOps, err := m.client.Where(opModel.Model, condition).Wait(ovsdb.WaitConditionNotEqual, &timeout, opModel.Model, opModel.Name)
+		if err != nil {
+			return nil, err
+		}
+		ops = append(ops, waitOps...)
 	} else if info, err := m.client.Cache().DatabaseModel().NewModelInfo(opModel.Model); err == nil {
 		if name, err := info.FieldByColumn("name"); err == nil {
-			objName, ok := name.(string)
-			if !ok {
-				if strPtr, ok := name.(*string); ok {
-					if strPtr != nil {
-						objName = *strPtr
-					}
-				}
-			}
+			objName := getString(name)
 			if len(objName) > 0 {
 				klog.Warningf("OVSDB Create operation detected without setting opModel Name. Name: %s, %#v",
 					objName, info)
-
 			}
 		}
 	}
@@ -410,4 +404,16 @@ func addToExistingResult(model interface{}, existingResult interface{}) {
 	resultPtr := reflect.ValueOf(existingResult)
 	resultVal := reflect.Indirect(resultPtr)
 	resultVal.Set(reflect.Append(resultVal, reflect.Indirect(reflect.ValueOf(model))))
+}
+
+func getString(field interface{}) string {
+	objName, ok := field.(string)
+	if !ok {
+		if strPtr, ok := field.(*string); ok {
+			if strPtr != nil {
+				objName = *strPtr
+			}
+		}
+	}
+	return objName
 }

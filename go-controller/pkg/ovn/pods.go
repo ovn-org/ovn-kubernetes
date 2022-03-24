@@ -554,15 +554,16 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	if !lspExist {
 		timeout := ovntypes.OVSDBWaitTimeout
-		allOps = append(allOps, ovsdb.Operation{
-			Op:      ovsdb.OperationWait,
-			Timeout: &timeout,
-			Table:   "Logical_Switch_Port",
-			Where:   []ovsdb.Condition{{Column: "name", Function: ovsdb.ConditionEqual, Value: lsp.Name}},
-			Columns: []string{"name"},
-			Until:   "!=",
-			Rows:    []ovsdb.Row{{"name": lsp.Name}},
-		})
+		condition := model.Condition{
+			Field:    &lsp.Name,
+			Function: ovsdb.ConditionEqual,
+			Value:    lsp.Name,
+		}
+		waitOps, err := oc.nbClient.Where(lsp, condition).Wait(ovsdb.WaitConditionNotEqual, &timeout, lsp, &lsp.Name)
+		if err != nil {
+			return err
+		}
+		allOps = append(allOps, waitOps...)
 
 		// create new logical switch port
 		ops, err := oc.nbClient.Create(lsp)

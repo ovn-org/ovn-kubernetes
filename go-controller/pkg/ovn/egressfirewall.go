@@ -379,7 +379,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 		switches = append(switches, &lsw)
 		opModels = append(opModels, []libovsdbops.OperationModel{
 			{
-				Name:           lsw.Name,
+				Name:           &lsw.Name,
 				Model:          &lsw,
 				ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == lsn },
 				OnModelMutations: []interface{}{
