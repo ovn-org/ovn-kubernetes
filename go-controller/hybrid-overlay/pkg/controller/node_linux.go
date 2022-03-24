@@ -604,13 +604,16 @@ func (n *NodeController) RunFlowSync(stopCh <-chan struct{}) {
 	klog.Info("Starting hybrid overlay OpenFlow sync thread")
 	klog.Info("Running initial OpenFlow sync")
 	n.syncFlows()
-
+	syncPeriod := 30 * time.Second
+	timer := time.NewTicker(syncPeriod)
+	defer timer.Stop()
 	for {
 		select {
-		case <-time.After(30 * time.Second):
+		case <-timer.C:
 			n.syncFlows()
 		case <-n.flowChan:
 			n.syncFlows()
+			timer.Reset(syncPeriod)
 		case <-stopCh:
 			klog.Info("Shutting down OpenFlow sync thread")
 			return
