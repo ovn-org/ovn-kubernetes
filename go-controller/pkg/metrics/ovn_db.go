@@ -322,6 +322,7 @@ func getNBDBSockPath() (string, error) {
 	paths := []string{"/var/run/openvswitch/", "/var/run/ovn/"}
 	for _, basePath := range paths {
 		if _, err := os.Stat(basePath + "ovnnb_db.sock"); err == nil {
+			klog.Infof("ovnnb_db.sock found at %s", basePath)
 			return basePath, nil
 		} else {
 			klog.Infof("%sovnnb_db.sock getting info failed: %s", basePath, err)
@@ -356,7 +357,7 @@ func getOvnDbVersionInfo() {
 	}
 }
 
-func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
+func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string, stopChan <-chan struct{}) {
 	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
 		return checkPodRunsOnGivenNode(clientset, []string{"ovn-db-pod=true"}, k8sNodeName, false)
 	})
@@ -419,6 +420,7 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 		klog.Info("Found db is standalone, don't register db_cluster metrics")
 	}
 	if dbIsClustered {
+		klog.Info("Found db is clustered, register db_cluster metrics")
 		ovnRegistry.MustRegister(metricDBClusterCID)
 		ovnRegistry.MustRegister(metricDBClusterSID)
 		ovnRegistry.MustRegister(metricDBClusterServerStatus)
@@ -446,25 +448,31 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 
 	// functions responsible for collecting the values and updating the prometheus metrics
 	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
 		for {
-			for _, dbProperty := range dbProperties {
+			select {
+			case <-ticker.C:
+				// To update not only values but also labels for metrics, we use Reset() to delete previous labels+value
 				if dbIsClustered {
-					ovnDBClusterStatusMetricsUpdater(dbProperty)
+					resetOvnDbClusterMetrics()
 				}
 				if dbFoundViaPath {
-					ovnDBSizeMetricsUpdater(dbProperty)
+					resetOvnDbSizeMetric()
 				}
-				ovnDBMemoryMetricsUpdater(dbProperty)
+				resetOvnDbMemoryMetrics()
+				for _, dbProperty := range dbProperties {
+					if dbIsClustered {
+						ovnDBClusterStatusMetricsUpdater(dbProperty)
+					}
+					if dbFoundViaPath {
+						ovnDBSizeMetricsUpdater(dbProperty)
+					}
+					ovnDBMemoryMetricsUpdater(dbProperty)
+				}
+			case <-stopChan:
+				return
 			}
-			time.Sleep(30 * time.Second)
-			// To update not only values but also labels for metrics, we use Reset() to delete previous labels+value
-			if dbIsClustered {
-				resetOvnDbClusterMetrics()
-			}
-			if dbFoundViaPath {
-				resetOvnDbSizeMetric()
-			}
-			resetOvnDbMemoryMetrics()
 		}
 	}()
 }
