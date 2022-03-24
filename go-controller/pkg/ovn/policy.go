@@ -417,6 +417,9 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 		klog.Warningf("Failed to get pods for namespace %q: %v", ns, err)
 	}
 	for _, pod := range pods {
+		if util.PodCompleted(pod) {
+			continue
+		}
 		portName := util.GetLogicalPortName(pod.Namespace, pod.Name)
 		if portInfo, err := oc.logicalPortCache.get(portName); err != nil {
 			klog.Errorf(err.Error())
@@ -717,6 +720,11 @@ func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
 	for _, obj := range objs {
 		pod := obj.(*kapi.Pod)
 
+		if util.PodCompleted(pod) {
+			// if pod is completed, do not add it to NP port group
+			continue
+		}
+
 		getPolicyPortsWg.Add(1)
 		go getPortInfo(pod)
 	}
@@ -861,7 +869,12 @@ func (oc *Controller) handleLocalPodSelector(
 				oc.handleLocalPodSelectorDelFunc(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, obj)
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				oc.handleLocalPodSelectorAddFunc(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, newObj)
+				pod := newObj.(*kapi.Pod)
+				if util.PodCompleted(pod) {
+					oc.handleLocalPodSelectorDelFunc(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, oldObj)
+				} else {
+					oc.handleLocalPodSelectorAddFunc(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, newObj)
+				}
 			},
 		}, func(objs []interface{}) {
 			handleInitialItems(objs)
@@ -1348,7 +1361,12 @@ func (oc *Controller) handlePeerPodSelector(
 				oc.handlePeerPodSelectorDelete(gp, obj)
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				oc.handlePeerPodSelectorAddUpdate(gp, newObj)
+				pod := newObj.(*kapi.Pod)
+				if util.PodCompleted(pod) {
+					oc.handlePeerPodSelectorDelete(gp, oldObj)
+				} else {
+					oc.handlePeerPodSelectorAddUpdate(gp, newObj)
+				}
 			},
 		}, func(objs []interface{}) {
 			oc.handlePeerPodSelectorAddUpdate(gp, objs...)
@@ -1388,7 +1406,12 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 							oc.handlePeerPodSelectorDelete(gp, obj)
 						},
 						UpdateFunc: func(oldObj, newObj interface{}) {
-							oc.handlePeerPodSelectorAddUpdate(gp, newObj)
+							pod := oldObj.(*kapi.Pod)
+							if util.PodCompleted(pod) {
+								oc.handlePeerPodSelectorDelete(gp, oldObj)
+							} else {
+								oc.handlePeerPodSelectorAddUpdate(gp, newObj)
+							}
 						},
 					}, func(objs []interface{}) {
 						oc.handlePeerPodSelectorAddUpdate(gp, objs...)

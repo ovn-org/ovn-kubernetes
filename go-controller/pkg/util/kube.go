@@ -216,6 +216,11 @@ func PodWantsNetwork(pod *kapi.Pod) bool {
 	return !pod.Spec.HostNetwork
 }
 
+// PodCompleted checks if the pod is marked as completed (in a terminal state)
+func PodCompleted(pod *kapi.Pod) bool {
+	return pod.Status.Phase == kapi.PodSucceeded || pod.Status.Phase == kapi.PodFailed
+}
+
 // PodScheduled returns if the given pod is scheduled
 func PodScheduled(pod *kapi.Pod) bool {
 	return pod.Spec.NodeName != ""

@@ -537,8 +537,32 @@ func (oc *Controller) WatchPods() {
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			go oc.metricsRecorder.AddPod(pod.UID)
-			oc.initRetryAddPod(pod)
 			oc.checkAndSkipRetryPod(pod)
+			// in case ovnkube-master is restarted and gets all the add events with completed pods
+			if util.PodCompleted(pod) {
+				// pod is in completed state, remove it
+				klog.Infof("Detected completed pod: %s. Will remove.", getPodNamespacedName(pod))
+				oc.initRetryDelPod(pod)
+				oc.removeAddRetry(pod)
+				oc.logicalPortCache.remove(util.GetLogicalPortName(pod.Namespace, pod.Name))
+				retryEntry := oc.getPodRetryEntry(pod)
+				var portInfo *lpInfo
+				if retryEntry != nil {
+					// retryEntry shouldn't be nil since we usually add the pod to retryCache above
+					portInfo = retryEntry.needsDel
+				}
+				if err := oc.removePod(pod, portInfo); err != nil {
+					oc.recordPodEvent(err, pod)
+					klog.Errorf("Failed to delete completed pod %s, error: %v",
+						getPodNamespacedName(pod), err)
+					oc.unSkipRetryPod(pod)
+					return
+				}
+				oc.checkAndDeleteRetryPod(pod)
+				return
+			}
+			// need to add new pod
+			oc.initRetryAddPod(pod)
 			if retryEntry := oc.getPodRetryEntry(pod); retryEntry != nil && retryEntry.needsDel != nil {
 				klog.Infof("Detected leftover old pod during new pod add with the same name: %s. "+
 					"Attempting deletion of leftover old...", getPodNamespacedName(pod))
@@ -592,11 +616,34 @@ func (oc *Controller) WatchPods() {
 				}
 				// deletion was a success; remove delete retry entry
 				oc.removeDeleteRetry(pod)
+			} else if util.PodCompleted(pod) {
+				// pod is in completed state, remove it
+				klog.Infof("Detected completed pod: %s. Will remove.", getPodNamespacedName(pod))
+				oc.initRetryDelPod(pod)
+				oc.removeAddRetry(pod)
+				oc.logicalPortCache.remove(util.GetLogicalPortName(pod.Namespace, pod.Name))
+				retryEntry := oc.getPodRetryEntry(pod)
+				var portInfo *lpInfo
+				if retryEntry != nil {
+					// retryEntry shouldn't be nil since we usually add the pod to retryCache above
+					portInfo = retryEntry.needsDel
+				}
+				if err := oc.removePod(pod, portInfo); err != nil {
+					oc.recordPodEvent(err, pod)
+					klog.Errorf("Failed to delete completed pod %s, error: %v",
+						getPodNamespacedName(pod), err)
+					oc.unSkipRetryPod(pod)
+					return
+				}
+				oc.checkAndDeleteRetryPod(pod)
+				return
 			}
+
 			if err := oc.ensurePod(oldPod, pod, oc.checkAndSkipRetryPod(pod)); err != nil {
 				oc.recordPodEvent(err, pod)
 				klog.Errorf("Failed to update pod %s, error: %v",
 					getPodNamespacedName(pod), err)
+				oc.initRetryAddPod(pod)
 				// unskip failed pod for next retry iteration
 				oc.unSkipRetryPod(pod)
 				return
@@ -974,8 +1021,15 @@ func (oc *Controller) WatchEgressIPPods() {
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			oldPod := oldObj.(*kapi.Pod)
 			newPod := newObj.(*kapi.Pod)
-			if err := oc.reconcileEgressIPPod(oldPod, newPod); err != nil {
-				klog.Errorf("Unable to update egress IP matching pod: %s/%s, err: %v", newPod.Name, newPod.Namespace, err)
+			if util.PodCompleted(newPod) {
+				if err := oc.reconcileEgressIPPod(oldPod, nil); err != nil {
+					klog.Errorf("Unable to delete egress IP matching completed pod: %s/%s, err: %v",
+						oldPod.Name, oldPod.Namespace, err)
+				}
+			} else {
+				if err := oc.reconcileEgressIPPod(oldPod, newPod); err != nil {
+					klog.Errorf("Unable to update egress IP matching pod: %s/%s, err: %v", newPod.Name, newPod.Namespace, err)
+				}
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
