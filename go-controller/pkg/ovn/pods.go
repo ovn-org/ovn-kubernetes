@@ -42,6 +42,10 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 		}
 		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations)
 		if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && err == nil {
+			// skip nodes that are not running ovnk (inferred from host subnets)
+			if oc.lsManager.IsNonHostSubnetSwitch(pod.Spec.NodeName) {
+				continue
+			}
 			logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 			expectedLogicalPorts[logicalPort] = true
 			if err = oc.waitForNodeLogicalSwitchInCache(pod.Spec.NodeName); err != nil {
@@ -81,6 +85,10 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 		return fmt.Errorf("failed to get nodes: %v", err)
 	}
 	for _, n := range nodes {
+		// skip nodes that are not running ovnk (inferred from host subnets)
+		if oc.lsManager.IsNonHostSubnetSwitch(n.Name) {
+			continue
+		}
 		stalePorts := []string{}
 		// find the logical switch for the node
 		ls := &nbdb.LogicalSwitch{}
