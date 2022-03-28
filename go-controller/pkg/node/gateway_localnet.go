@@ -148,14 +148,12 @@ func cleanupLocalnetGateway(physnet string) error {
 func newLocalGatewayOpenflowManager(gwBridge *bridgeConfiguration) (*openflowManager, error) {
 	var dftFlows []string
 
-	dftFlows, err := flowsForDefaultBridge(gwBridge.ofPortPhys, gwBridge.macAddress.String(), gwBridge.ofPortPatch,
-		gwBridge.ofPortHost, gwBridge.ips)
+	dftFlows, err := flowsForDefaultBridge(gwBridge, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	dftCommonFlows := commonFlows(gwBridge.ofPortPhys, gwBridge.macAddress.String(), gwBridge.ofPortPatch,
-		gwBridge.ofPortHost)
+	dftCommonFlows := commonFlows(gwBridge)
 	dftFlows = append(dftFlows, dftCommonFlows...)
 
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge

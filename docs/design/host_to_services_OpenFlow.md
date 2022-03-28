@@ -160,9 +160,19 @@ This is the most complicated use case. Unlike the previous examples, multiple se
 NAME          ENDPOINTS                       AGE
 web-service   172.18.0.3:80,172.18.0.3:9999   42m
 ```
-Like the previous example, Steps 1-4 are the same. Continuing with Step 5:
 
-5. OVN GR receives the packet, DNAT's to ovn-worker's endpoint IP. However, the endpoint IP in this load balancer is **not** the node IP. It has been replaced by the load balancer behavior with the host masquerade IP (169.254.169.2):
+There is another manifestation of this case. Sometimes, an endpoint contains a *secondary* interface on a node. This can happen when endpoints are manually managed (especially in the case of api-server trickery). Thus, the endpoints look like
+```text
+$ kubectl get ep kubernetes
+NAME          ENDPOINTS                       AGE
+kubernetes    172.20.0.2:4443                  42m
+```
+
+where `172.20.0.2` is an "extra" address, maybe even on a different interface (e.g. `lo`).
+
+Like the previous example, Steps 1-4 are the same. Continuing with Step 5   :
+
+5. OVN GR receives the packet, DNAT's to ovn-worker's endpoint IP. However, if the endpoint IP is the node's physical IP, then it is replaced in the OVN load-balancer backends with the host masquerade IP (169.254.169.2):
 CT Entry:
 ```text
 tcp      6 117 TIME_WAIT src=169.254.169.2 dst=10.96.146.87 sport=33316 dport=80 src=169.254.169.2 dst=169.254.169.2 sport=80 dport=33316 [ASSURED] mark=0 secctx=system_u:object_r:unlabeled_t:s0 zone=16 use=1
@@ -173,11 +183,12 @@ CT Entry:
 ```text
 tcp      6 117 TIME_WAIT src=169.254.169.2 dst=169.254.169.2 sport=33316 dport=80 src=169.254.169.2 dst=172.18.0.3 sport=80 dport=33316 [ASSURED] mark=0 secctx=system_u:object_r:unlabeled_t:s0 use=1
 ```
-7. The packet is received in br-eth0, where it hits this flow:
+7. The packet is received in br-eth0, where it hits one of two flows, depending on if the destination is the masquerade IP or a "secondary" IP:
 ```text
-cookie=0xdeff105, duration=2877.527s, table=0, n_packets=11, n_bytes=810, priority=500,ip,in_port="patch-breth0_ov",nw_src=172.18.0.3,nw_dst=169.254.169.2 actions=ct(commit,table=4,zone=64001,nat(dst=172.18.0.3))
+cookie=0xdeff105, duration=2877.527s, table=0, n_packets=11, n_bytes=810, priority=500,ip,in_port="patch-breth0_ov",nw_src=172.18.0.3,nw_dst=169.254.169.2 actions=ct(commit,table=4,zone=64001,nat(dst=172.18.0.3)) #primary case
+cookie=0xdeff105, duration=2877.527s, table=0, n_packets=11, n_bytes=810, priority=500,ip,in_port="patch-breth0_ov",nw_src=172.18.0.3,nw_dst=127.20.0.2 actions=ct(commit,table=4,zone=64001) # secondary case
 ```
-This flow detects the packet is destined for the masqueraded host IP, DNATs it accordingly while sending to table 4.
+This flow detects the packet is destined for the masqueraded host IP, DNATs it if necessary back to the host, and sends to table 4.
 CT Entry:
 ```text
 tcp      6 117 TIME_WAIT src=172.18.0.3 dst=169.254.169.2 sport=33316 dport=80 src=172.18.0.3 dst=172.18.0.3 sport=80 dport=33316 [ASSURED] mark=0 secctx=system_u:object_r:unlabeled_t:s0 zone=64001 use=1

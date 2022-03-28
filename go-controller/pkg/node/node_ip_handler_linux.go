@@ -24,6 +24,8 @@ type addressManager struct {
 	addresses      sets.String
 	nodeAnnotator  kube.Annotator
 	mgmtPortConfig *managementPortConfig
+
+	OnChanged func()
 	sync.Mutex
 }
 
@@ -34,6 +36,7 @@ func newAddressManager(nodeName string, k kube.Interface, config *managementPort
 		watchFactory:   watchFactory,
 		addresses:      sets.NewString(),
 		mgmtPortConfig: config,
+		OnChanged:      func() {},
 	}
 	mgr.nodeAnnotator = kube.NewNodeAnnotator(k, nodeName)
 	mgr.sync()
@@ -66,6 +69,22 @@ func (c *addressManager) delAddr(ip net.IP) bool {
 	}
 
 	return false
+}
+
+// ListAddresses returns all the addresses we know about
+func (c *addressManager) ListAddresses() []net.IP {
+	c.Lock()
+	defer c.Unlock()
+	addrs := c.addresses.List()
+	out := make([]net.IP, 0, len(addrs))
+	for _, addr := range addrs {
+		ip := net.ParseIP(addr)
+		if ip == nil {
+			continue
+		}
+		out = append(out, ip)
+	}
+	return out
 }
 
 func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
@@ -123,6 +142,7 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 					if err := c.nodeAnnotator.Run(); err != nil {
 						klog.Errorf("Failed to set node annotations: %v", err)
 					}
+					c.OnChanged()
 				}
 			case <-addressSyncTimer.C:
 				if subscribed {
