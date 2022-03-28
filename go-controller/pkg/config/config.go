@@ -283,6 +283,7 @@ type KubernetesConfig struct {
 	CAData                []byte
 	APIServer             string `gcfg:"apiserver"`
 	Token                 string `gcfg:"token"`
+	TokenFile             string `gcfg:"tokenFile"`
 	CompatServiceCIDR     string `gcfg:"service-cidr"`
 	RawServiceCIDRs       string `gcfg:"service-cidrs"`
 	ServiceCIDRs          []*net.IPNet
@@ -508,6 +509,7 @@ func PrepareTestConfig() error {
 	os.Unsetenv("K8S_CACERT")
 	os.Unsetenv("K8S_APISERVER")
 	os.Unsetenv("K8S_TOKEN")
+	os.Unsetenv("K8S_TOKEN_FILE")
 
 	return nil
 }
@@ -876,6 +878,11 @@ var K8sFlags = []cli.Flag{
 		Destination: &cliConfig.Kubernetes.Token,
 	},
 	&cli.StringFlag{
+		Name:        "k8s-token-file",
+		Usage:       "the path to Kubernetes API token. If set, it is periodically read and takes precedence over k8s-token",
+		Destination: &cliConfig.Kubernetes.TokenFile,
+	},
+	&cli.StringFlag{
 		Name:        "ovn-config-namespace",
 		Usage:       "specify a namespace which will contain services to config the OVN databases",
 		Destination: &cliConfig.Kubernetes.OVNConfigNamespace,
@@ -1199,6 +1206,7 @@ type Defaults struct {
 	OvnNorthAddress bool
 	K8sAPIServer    bool
 	K8sToken        bool
+	K8sTokenFile    bool
 	K8sCert         bool
 }
 
@@ -1263,6 +1271,7 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	saConfig := savedKubernetes
 	if data, err := ioutil.ReadFile(filepath.Join(saPath, kubeServiceAccountFileToken)); err == nil {
 		saConfig.Token = string(data)
+		saConfig.TokenFile = filepath.Join(saPath, kubeServiceAccountFileToken)
 	}
 	if _, err2 := os.Stat(filepath.Join(saPath, kubeServiceAccountFileCACert)); err2 == nil {
 		saConfig.CACert = filepath.Join(saPath, kubeServiceAccountFileCACert)
@@ -1282,6 +1291,7 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 		"CACert":               "K8S_CACERT",
 		"APIServer":            "K8S_APISERVER",
 		"Token":                "K8S_TOKEN",
+		"TokenFile":            "K8S_TOKEN_FILE",
 		"HostNetworkNamespace": "OVN_HOST_NETWORK_NAMESPACE",
 	}
 	for k, v := range envVarsMap {
@@ -1311,6 +1321,10 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	if defaults.K8sToken {
 		Kubernetes.Token = getOVSExternalID(exec, "k8s-api-token")
 	}
+	if defaults.K8sTokenFile {
+		Kubernetes.TokenFile = getOVSExternalID(exec, "k8s-api-token-file")
+	}
+
 	if defaults.K8sCert {
 		Kubernetes.CACert = getOVSExternalID(exec, "k8s-ca-certificate")
 	}

@@ -75,6 +75,7 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 		kconfig = &rest.Config{
 			Host:            conf.APIServer,
 			BearerToken:     conf.Token,
+			BearerTokenFile: conf.TokenFile,
 			TLSClientConfig: rest.TLSClientConfig{CAData: conf.CAData},
 		}
 	} else if strings.HasPrefix(conf.APIServer, "http") {
