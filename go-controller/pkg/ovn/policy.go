@@ -158,12 +158,12 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 	var allEgressACLs []nbdb.ACL
 	egressACLs, err := libovsdbops.FindACLsByExternalID(oc.nbClient, map[string]string{policyTypeACLExtIdKey: string(knet.PolicyTypeEgress)})
 	if err != nil {
-		return fmt.Errorf("error cannot sync NetworkPolicy Egress obj: %v", err)
+		klog.Errorf("error cannot sync NetworkPolicy Egress obj: %v", err)
 	}
 	allEgressACLs = append(allEgressACLs, egressACLs...)
 	egressACLs, err = libovsdbops.FindACLsByExternalID(oc.nbClient, map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress)})
 	if err != nil {
-		return fmt.Errorf("error cannot sync NetworkPolicy Egress obj: %v", err)
+		klog.Errorf("error cannot sync NetworkPolicy Egress obj: %v", err)
 	}
 	allEgressACLs = append(allEgressACLs, egressACLs...)
 	// if the first egress ACL is correct they should all be correct and not need to update
