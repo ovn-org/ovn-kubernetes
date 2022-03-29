@@ -460,7 +460,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			// provide host IP as GR IP
 			gwIPs := []*net.IPNet{ovntest.MustParseIPNet(hostCIDR)}
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
-				gatewayIntf, "", gwIPs, nodeAnnotator, k, &fakeMgmtPortConfig, nil)
+				gatewayIntf, "", gwIPs, nodeAnnotator, k, &fakeMgmtPortConfig, wf)
 
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(wf)
