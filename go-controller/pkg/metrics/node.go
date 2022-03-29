@@ -20,6 +20,20 @@ var MetricCNIRequestDuration = prometheus.NewHistogramVec(prometheus.HistogramOp
 	[]string{"command", "err"},
 )
 
+var MetricCNIRequest = prometheus.NewCounter(prometheus.CounterOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemNode,
+	Name:      "cni_request_total",
+	Help:      "The total count of network requests (add/delete) to OVN-Kubernetes",
+})
+
+var MetricCNIRequestError = prometheus.NewCounter(prometheus.CounterOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemNode,
+	Name:      "cni_request_error_total",
+	Help:      "The total count of network requests (add/delete) to OVN-Kubernetes that ended in an error state",
+})
+
 var MetricNodeReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemNode,
@@ -40,6 +54,8 @@ func RegisterNodeMetrics() {
 	registerNodeMetricsOnce.Do(func() {
 		// ovnkube-node metrics
 		prometheus.MustRegister(MetricCNIRequestDuration)
+		prometheus.MustRegister(MetricCNIRequest)
+		prometheus.MustRegister(MetricCNIRequestError)
 		prometheus.MustRegister(MetricNodeReadyDuration)
 		prometheus.MustRegister(metricOvnNodePortEnabled)
 		prometheus.MustRegister(prometheus.NewGaugeFunc(

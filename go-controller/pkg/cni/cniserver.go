@@ -212,12 +212,15 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 
 func (s *Server) handleCNIMetrics(w http.ResponseWriter, r *http.Request) {
 	var cm CNIRequestMetrics
-
+	metrics.MetricCNIRequest.Inc()
 	b, _ := ioutil.ReadAll(r.Body)
 	if err := json.Unmarshal(b, &cm); err != nil {
 		klog.Warningf("Failed to unmarshal JSON (%s) to CNIRequestMetrics struct: %v",
 			string(b), err)
 	} else {
+		if cm.HasErr {
+			metrics.MetricCNIRequestError.Inc()
+		}
 		hasErr := fmt.Sprintf("%t", cm.HasErr)
 		metrics.MetricCNIRequestDuration.WithLabelValues(string(cm.Command), hasErr).Observe(cm.ElapsedTime)
 	}
