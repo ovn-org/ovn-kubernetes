@@ -153,6 +153,39 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 			klog.Errorf("Error removing stale port groups %v: %v", stalePGs, err)
 		}
 	}
+
+	// update existing egress network policies to use the updated ACLs
+	var allEgressACLs []nbdb.ACL
+	egressACLs, err := libovsdbops.FindACLsByExternalID(oc.nbClient, map[string]string{policyTypeACLExtIdKey: string(knet.PolicyTypeEgress)})
+	if err != nil {
+		klog.Errorf("error cannot sync NetworkPolicy Egress obj: %v", err)
+	}
+	allEgressACLs = append(allEgressACLs, egressACLs...)
+	egressACLs, err = libovsdbops.FindACLsByExternalID(oc.nbClient, map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress)})
+	if err != nil {
+		klog.Errorf("error cannot sync NetworkPolicy Egress obj: %v", err)
+	}
+	allEgressACLs = append(allEgressACLs, egressACLs...)
+	// if the first egress ACL is correct they should all be correct and not need to update
+	if allEgressACLs != nil && allEgressACLs[0].Direction != nbdb.ACLDirectionFromLport {
+		// TODO(jtanenba) make all the libovsdbops.ACL commands deal with pointers to ACLs
+		var egressACLsPTR []*nbdb.ACL
+		for _, acl := range allEgressACLs {
+			acl.Direction = nbdb.ACLDirectionFromLport
+			acl.Options = map[string]string{"apply-after-lb": "true"}
+			egressACLsPTR = append(egressACLsPTR, &acl)
+		}
+		ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, egressACLsPTR...)
+		if err != nil {
+			klog.Errorf("cannot create ops to update old Egress NetworkPolicy ACLs: %v", err)
+		}
+		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+		if err != nil {
+			klog.Errorf("cannot update old Egress NetworkPolicy ACLs: %v", err)
+		}
+
+	}
+
 }
 
 func addAllowACLFromNode(nodeName string, mgmtPortIP net.IP, nbClient libovsdbclient.Client) error {
@@ -219,9 +252,14 @@ func defaultDenyPortGroup(namespace, gressSuffix string) string {
 
 func buildDenyACLs(namespace, policy, pg, aclLogging string, policyType knet.PolicyType) (denyACL, allowACL *nbdb.ACL) {
 	denyMatch := getACLMatch(pg, "", policyType)
-	denyACL = buildACL(namespace, pg, policy, nbdb.ACLDirectionToLport, types.DefaultDenyPriority, denyMatch, nbdb.ACLActionDrop, aclLogging, policyType)
 	allowMatch := getACLMatch(pg, "arp", policyType)
-	allowACL = buildACL(namespace, pg, "ARPallowPolicy", nbdb.ACLDirectionToLport, types.DefaultAllowPriority, allowMatch, nbdb.ACLActionAllow, "", policyType)
+	if policyType == knet.PolicyTypeIngress {
+		denyACL = buildACL(namespace, pg, policy, nbdb.ACLDirectionToLport, types.DefaultDenyPriority, denyMatch, nbdb.ACLActionDrop, aclLogging, policyType)
+		allowACL = buildACL(namespace, pg, "ARPallowPolicy", nbdb.ACLDirectionToLport, types.DefaultAllowPriority, allowMatch, nbdb.ACLActionAllow, "", policyType)
+	} else {
+		denyACL = buildACL(namespace, pg, policy, nbdb.ACLDirectionFromLport, types.DefaultDenyPriority, denyMatch, nbdb.ACLActionDrop, aclLogging, policyType)
+		allowACL = buildACL(namespace, pg, "ARPallowPolicy", nbdb.ACLDirectionFromLport, types.DefaultAllowPriority, allowMatch, nbdb.ACLActionAllow, "", policyType)
+	}
 	return
 }
 
@@ -1233,6 +1271,39 @@ func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, lastPolicy bool) e
 				np.namespace, np.name, err)
 		}
 	}
+
+	// update existing egress network policies to use the updated ACLs
+	var allEgressACLs []nbdb.ACL
+	egressACLs, err := libovsdbops.FindACLsByExternalID(oc.nbClient, map[string]string{policyTypeACLExtIdKey: string(knet.PolicyTypeEgress)})
+	if err != nil {
+		return fmt.Errorf("error cannot sync NetworkPolicy Egress obj: %v", err)
+	}
+	allEgressACLs = append(allEgressACLs, egressACLs...)
+	egressACLs, err = libovsdbops.FindACLsByExternalID(oc.nbClient, map[string]string{defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress)})
+	if err != nil {
+		return fmt.Errorf("error cannot sync NetworkPolicy Egress obj: %v", err)
+	}
+	allEgressACLs = append(allEgressACLs, egressACLs...)
+	// if the first egress ACL is correct they should all be correct and not need to update
+	if allEgressACLs != nil && allEgressACLs[0].Direction != nbdb.ACLDirectionFromLport {
+		// TODO(jtanenba) make all the libovsdbops.ACL commands deal with pointers to ACLs
+		var egressACLsPTR []*nbdb.ACL
+		for _, acl := range allEgressACLs {
+			acl.Direction = nbdb.ACLDirectionFromLport
+			acl.Options = map[string]string{"apply-after-lb": "true"}
+			egressACLsPTR = append(egressACLsPTR, &acl)
+		}
+		ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, egressACLsPTR...)
+		if err != nil {
+			return fmt.Errorf("cannot create ops to update old Egress NetworkPolicy ACLs: %v", err)
+		}
+		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+		if err != nil {
+			return fmt.Errorf("cannot update old Egress NetworkPolicy ACLs: %v", err)
+		}
+
+	}
+
 	return nil
 }
 
