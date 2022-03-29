@@ -98,11 +98,11 @@ func (o *OvsdbServer) transact(name string, operations []ovsdb.Operation) ([]ovs
 func (t *Transaction) rowsFromTransactionCacheAndDatabase(table string, where []ovsdb.Condition) (map[string]model.Model, error) {
 	txnRows, err := t.Cache.Table(table).RowsByCondition(where)
 	if err != nil {
-		return nil, fmt.Errorf("failed getting rows for table %s from transaction cache", table)
+		return nil, fmt.Errorf("failed getting rows for table %s from transaction cache: %v", table, err)
 	}
 	rows, err := t.Database.List(t.DbName, table, where...)
 	if err != nil {
-		return nil, fmt.Errorf("failed getting rows for table %s from database", table)
+		return nil, fmt.Errorf("failed getting rows for table %s from database: %v", table, err)
 	}
 
 	// prefer rows from transaction cache while copying into cache
