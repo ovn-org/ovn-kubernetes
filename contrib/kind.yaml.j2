@@ -14,10 +14,6 @@ networking:
 {%- if ovn_ip_family %}
   ipFamily: {{ ovn_ip_family }}
 {%- endif %}
-featureGates:
-{%- if ovn_ip_family == "dual" %}
-  IPv6DualStack: true
-{%- endif %}
 {%- if use_local_registy == "true"%}
 containerdConfigPatches:
   - |-

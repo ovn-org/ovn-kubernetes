@@ -536,7 +536,7 @@ func (oc *Controller) WatchPods() {
 	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			go oc.metricsRecorder.AddPod(pod.UID)
+			oc.metricsRecorder.AddPod(pod.UID)
 			oc.checkAndSkipRetryPod(pod)
 			// in case ovnkube-master is restarted and gets all the add events with completed pods
 			if util.PodCompleted(pod) {
@@ -652,7 +652,7 @@ func (oc *Controller) WatchPods() {
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			go oc.metricsRecorder.CleanPod(pod.UID)
+			oc.metricsRecorder.CleanPod(pod.UID)
 			oc.initRetryDelPod(pod)
 			// we have a copy of portInfo in the retry cache now, we can remove it from
 			// logicalPortCache so that we don't race with a new add pod that comes with
