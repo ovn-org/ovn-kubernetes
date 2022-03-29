@@ -43,6 +43,7 @@ type NodeController struct {
 	initialized bool
 	drMAC       net.HardwareAddr
 	drIP        net.IP
+	gwLRPIP     net.IP
 	vxlanPort   uint16
 	// contains a map of pods to corresponding tunnels
 	flowCache map[string]*flowCacheEntry
@@ -211,6 +212,14 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 			"output:"+extVXLANName,
 			cookie, cidr.String(), hotypes.HybridOverlayVNI, nodeIP.String(), drMAC.String()))
 
+	flows = append(flows,
+		fmt.Sprintf("cookie=0x%s,table=0,priority=101,ip,nw_dst=%s,nw_src=%s"+
+			"actions=load:%d->NXM_NX_TUN_ID[0..31],"+
+			"set_field:%s->nw_src,"+
+			"set_field:%s->tun_dst,"+
+			"set_field:%s->eth_dst,"+
+			"output:"+extVXLANName,
+			cookie, cidr.String(), n.gwLRPIP.String(), hotypes.HybridOverlayVNI, n.drIP, nodeIP.String(), drMAC.String()))
 	n.updateFlowCacheEntry(cookie, flows, false)
 	n.requestFlowSync()
 	return nil
@@ -219,6 +228,25 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 // AddNode handles node additions and updates
 func (n *NodeController) AddNode(node *kapi.Node) error {
 	var err error
+	if n.drIP == nil {
+		subnet, err := getLocalNodeSubnet(n.nodeName)
+		if err != nil {
+			return err
+		}
+		// n.drIP is always 3rd address in the subnet
+		hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(subnet)
+		n.drIP = hybridOverlayIfAddr.IP
+	}
+	localNode, err := n.nodeLister.Get(n.nodeName)
+	if err != nil {
+		return fmt.Errorf("failed to get local node: %v", err)
+	}
+	if n.gwLRPIP == nil {
+		n.gwLRPIP, err = util.ParseNodeGatewayRouterLRPAddr(localNode)
+		if err != nil {
+			return fmt.Errorf("invalid Gateway Router LRP IP: %v", err)
+		}
+	}
 	if node.Name == n.nodeName {
 		// Retry hybrid overlay initialization if the master was
 		// slow to add the hybrid overlay logical network elements
@@ -435,6 +463,13 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 			fmt.Sprintf("table=10,priority=100,ip,nw_dst=%s,"+
 				"actions=mod_dl_src:%s,mod_dl_dst:%s,output:ext",
 				mgmtIfAddr.IP.String(), portMAC.String(), mgmtPortMAC.String()))
+		// Add a rule to fix up return nodePort service traffic
+		gwIfAddr := util.GetNodeGatewayIfAddr(subnet)
+		gwPortMAC := util.IPAddrToHWAddr(gwIfAddr.IP)
+		flows = append(flows,
+			fmt.Sprintf("table=10,priority=100,ip,nw_dst=%s,"+
+				"actions=mod_nw_dst:%s,mod_dl_src:%s,mod_dl_dst:%s,output:ext",
+				n.drIP, n.gwLRPIP.String(), portMAC.String(), gwPortMAC.String()))
 	}
 
 	n.updateFlowCacheEntry("0x0", flows, false)
