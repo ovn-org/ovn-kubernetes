@@ -520,6 +520,10 @@ func getOVNDBClusterStatusInfo(timeout int, direction, database string) (cluster
 				clusterStatus.logNotApplied = value
 			}
 		case "Connections":
+			// db cluster with 1 member has empty Connections list
+			if idx+2 >= len(line) {
+				continue
+			}
 			// the value is of the format `->0000 (->56d7) <-46ac <-56d7`
 			var connIn, connOut, connInErr, connOutErr float64
 			for _, conn := range strings.Fields(line[idx+2:]) {
