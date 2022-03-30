@@ -70,16 +70,30 @@ const (
 	defaultNumEventQueues uint32 = 15
 )
 
+// types for dynamic handlers created when adding a network policy
+type peerService struct{}
+type peerNamespaceAndPodSelector struct{}
+type peerPodForNamespaceAndPodSelector struct{} // created during the add function of peerNamespaceAndPodSelectorType
+type peerNamespaceSelector struct{}
+type peerPodSelector struct{}
+type localPodSelector struct{}
+
 var (
-	podType                  reflect.Type = reflect.TypeOf(&kapi.Pod{})
-	serviceType              reflect.Type = reflect.TypeOf(&kapi.Service{})
-	endpointsType            reflect.Type = reflect.TypeOf(&kapi.Endpoints{})
-	policyType               reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
-	namespaceType            reflect.Type = reflect.TypeOf(&kapi.Namespace{})
-	nodeType                 reflect.Type = reflect.TypeOf(&kapi.Node{})
-	egressFirewallType       reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
-	egressIPType             reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
-	cloudPrivateIPConfigType reflect.Type = reflect.TypeOf(&ocpcloudnetworkapi.CloudPrivateIPConfig{})
+	PodType                               reflect.Type = reflect.TypeOf(&kapi.Pod{})
+	ServiceType                           reflect.Type = reflect.TypeOf(&kapi.Service{})
+	EndpointsType                         reflect.Type = reflect.TypeOf(&kapi.Endpoints{})
+	PolicyType                            reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
+	NamespaceType                         reflect.Type = reflect.TypeOf(&kapi.Namespace{})
+	NodeType                              reflect.Type = reflect.TypeOf(&kapi.Node{})
+	EgressFirewallType                    reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
+	EgressIPType                          reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
+	CloudPrivateIPConfigType              reflect.Type = reflect.TypeOf(&ocpcloudnetworkapi.CloudPrivateIPConfig{})
+	PeerServiceType                       reflect.Type = reflect.TypeOf(&peerService{})
+	PeerNamespaceAndPodSelectorType       reflect.Type = reflect.TypeOf(&peerNamespaceAndPodSelector{})
+	PeerPodForNamespaceAndPodSelectorType reflect.Type = reflect.TypeOf(&peerPodForNamespaceAndPodSelector{})
+	PeerNamespaceSelectorType             reflect.Type = reflect.TypeOf(&peerNamespaceSelector{})
+	PeerPodSelectorType                   reflect.Type = reflect.TypeOf(&peerPodSelector{})
+	LocalPodSelectorType                  reflect.Type = reflect.TypeOf(&localPodSelector{})
 )
 
 // NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
@@ -129,48 +143,48 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	var err error
 
 	// Create our informer-wrapper informer (and underlying shared informer) for types we need
-	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
+	wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
 		defaultNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[serviceType], err = newInformer(serviceType, wf.iFactory.Core().V1().Services().Informer())
+	wf.informers[ServiceType], err = newInformer(ServiceType, wf.iFactory.Core().V1().Services().Informer())
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[endpointsType], err = newInformer(endpointsType, wf.iFactory.Core().V1().Endpoints().Informer())
+	wf.informers[EndpointsType], err = newInformer(EndpointsType, wf.iFactory.Core().V1().Endpoints().Informer())
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[policyType], err = newInformer(policyType, wf.iFactory.Networking().V1().NetworkPolicies().Informer())
+	wf.informers[PolicyType], err = newInformer(PolicyType, wf.iFactory.Networking().V1().NetworkPolicies().Informer())
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[namespaceType], err = newQueuedInformer(namespaceType, wf.iFactory.Core().V1().Namespaces().Informer(),
+	wf.informers[NamespaceType], err = newQueuedInformer(NamespaceType, wf.iFactory.Core().V1().Namespaces().Informer(),
 		wf.stopChan, defaultNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[nodeType], err = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan,
+	wf.informers[NodeType], err = newQueuedInformer(NodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan,
 		defaultNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressIP {
-		wf.informers[egressIPType], err = newInformer(egressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer())
+		wf.informers[EgressIPType], err = newInformer(EgressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer())
 		if err != nil {
 			return nil, err
 		}
 	}
 	if config.OVNKubernetesFeature.EnableEgressFirewall {
-		wf.informers[egressFirewallType], err = newInformer(egressFirewallType, wf.efFactory.K8s().V1().EgressFirewalls().Informer())
+		wf.informers[EgressFirewallType], err = newInformer(EgressFirewallType, wf.efFactory.K8s().V1().EgressFirewalls().Informer())
 		if err != nil {
 			return nil, err
 		}
 	}
 	if util.PlatformTypeIsEgressIPCloudProvider() {
-		wf.informers[cloudPrivateIPConfigType], err = newInformer(cloudPrivateIPConfigType, wf.cpipcFactory.Cloud().V1().CloudPrivateIPConfigs().Informer())
+		wf.informers[CloudPrivateIPConfigType], err = newInformer(CloudPrivateIPConfigType, wf.cpipcFactory.Cloud().V1().CloudPrivateIPConfigs().Informer())
 		if err != nil {
 			return nil, err
 		}
@@ -254,21 +268,21 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 	})
 
 	var err error
-	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
+	wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
 		defaultNumEventQueues)
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[serviceType], err = newInformer(serviceType, wf.iFactory.Core().V1().Services().Informer())
+	wf.informers[ServiceType], err = newInformer(ServiceType, wf.iFactory.Core().V1().Services().Informer())
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[endpointsType], err = newInformer(endpointsType, wf.iFactory.Core().V1().Endpoints().Informer())
+	wf.informers[EndpointsType], err = newInformer(EndpointsType, wf.iFactory.Core().V1().Endpoints().Informer())
 	if err != nil {
 		return nil, err
 	}
 
-	wf.informers[nodeType], err = newInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer())
+	wf.informers[NodeType], err = newInformer(NodeType, wf.iFactory.Core().V1().Nodes().Informer())
 	if err != nil {
 		return nil, err
 	}
@@ -287,42 +301,85 @@ func (wf *WatchFactory) Shutdown() {
 
 func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, error) {
 	switch objType {
-	case podType:
+	case PodType:
 		if pod, ok := obj.(*kapi.Pod); ok {
 			return &pod.ObjectMeta, nil
 		}
-	case serviceType:
+	case ServiceType:
 		if service, ok := obj.(*kapi.Service); ok {
 			return &service.ObjectMeta, nil
 		}
-	case endpointsType:
+	case EndpointsType:
 		if endpoints, ok := obj.(*kapi.Endpoints); ok {
 			return &endpoints.ObjectMeta, nil
 		}
-	case policyType:
+	case PolicyType:
 		if policy, ok := obj.(*knet.NetworkPolicy); ok {
 			return &policy.ObjectMeta, nil
 		}
-	case namespaceType:
+	case NamespaceType:
 		if namespace, ok := obj.(*kapi.Namespace); ok {
 			return &namespace.ObjectMeta, nil
 		}
-	case nodeType:
+	case NodeType:
 		if node, ok := obj.(*kapi.Node); ok {
 			return &node.ObjectMeta, nil
 		}
-	case egressFirewallType:
+	case EgressFirewallType:
 		if egressFirewall, ok := obj.(*egressfirewallapi.EgressFirewall); ok {
 			return &egressFirewall.ObjectMeta, nil
 		}
-	case egressIPType:
+	case EgressIPType:
 		if egressIP, ok := obj.(*egressipapi.EgressIP); ok {
 			return &egressIP.ObjectMeta, nil
 		}
-	case cloudPrivateIPConfigType:
+	case CloudPrivateIPConfigType:
 		if cloudPrivateIPConfig, ok := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig); ok {
 			return &cloudPrivateIPConfig.ObjectMeta, nil
 		}
+	}
+	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
+}
+
+type AddHandlerFuncType func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
+
+func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandlerFuncType, error) {
+	switch objType {
+	case PolicyType:
+		return func(namespace string, sel labels.Selector,
+			funcs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+			return wf.AddPolicyHandler(funcs, processExisting)
+		}, nil
+
+	case NodeType:
+		return func(namespace string, sel labels.Selector,
+			funcs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+			return wf.AddNodeHandler(funcs, processExisting)
+		}, nil
+
+	case PeerServiceType:
+		return func(namespace string, sel labels.Selector,
+			funcs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+			return wf.AddFilteredServiceHandler(namespace, funcs, processExisting)
+		}, nil
+
+	case PeerPodSelectorType, LocalPodSelectorType, PodType:
+		return func(namespace string, sel labels.Selector,
+			funcs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+			return wf.AddFilteredPodHandler(namespace, sel, funcs, processExisting)
+		}, nil
+
+	case PeerNamespaceAndPodSelectorType, PeerNamespaceSelectorType:
+		return func(namespace string, sel labels.Selector,
+			funcs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+			return wf.AddFilteredNamespaceHandler(namespace, sel, funcs, processExisting)
+		}, nil
+
+	case PeerPodForNamespaceAndPodSelectorType:
+		return func(namespace string, sel labels.Selector,
+			funcs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+			return wf.AddFilteredPodHandler(namespace, sel, funcs, processExisting)
+		}, nil
 	}
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
 }
@@ -379,140 +436,140 @@ func (wf *WatchFactory) removeHandler(objType reflect.Type, handler *Handler) {
 
 // AddPodHandler adds a handler function that will be executed on Pod object changes
 func (wf *WatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(podType, "", nil, handlerFuncs, processExisting)
+	return wf.addHandler(PodType, "", nil, handlerFuncs, processExisting)
 }
 
 // AddFilteredPodHandler adds a handler function that will be executed when Pod objects that match the given filters change
 func (wf *WatchFactory) AddFilteredPodHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(podType, namespace, sel, handlerFuncs, processExisting)
+	return wf.addHandler(PodType, namespace, sel, handlerFuncs, processExisting)
 }
 
 // RemovePodHandler removes a Pod object event handler function
 func (wf *WatchFactory) RemovePodHandler(handler *Handler) {
-	wf.removeHandler(podType, handler)
+	wf.removeHandler(PodType, handler)
 }
 
 // AddServiceHandler adds a handler function that will be executed on Service object changes
 func (wf *WatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(serviceType, "", nil, handlerFuncs, processExisting)
+	return wf.addHandler(ServiceType, "", nil, handlerFuncs, processExisting)
 }
 
 // AddFilteredServiceHandler adds a handler function that will be executed on all Service object changes for a specific namespace
 func (wf *WatchFactory) AddFilteredServiceHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(serviceType, namespace, nil, handlerFuncs, processExisting)
+	return wf.addHandler(ServiceType, namespace, nil, handlerFuncs, processExisting)
 }
 
 // RemoveServiceHandler removes a Service object event handler function
 func (wf *WatchFactory) RemoveServiceHandler(handler *Handler) {
-	wf.removeHandler(serviceType, handler)
+	wf.removeHandler(ServiceType, handler)
 }
 
 // AddEndpointsHandler adds a handler function that will be executed on Endpoints object changes
 func (wf *WatchFactory) AddEndpointsHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(endpointsType, "", nil, handlerFuncs, processExisting)
+	return wf.addHandler(EndpointsType, "", nil, handlerFuncs, processExisting)
 }
 
 // AddFilteredEndpointsHandler adds a handler function that will be executed when Endpoint objects that match the given filters change
 func (wf *WatchFactory) AddFilteredEndpointsHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(endpointsType, namespace, sel, handlerFuncs, processExisting)
+	return wf.addHandler(EndpointsType, namespace, sel, handlerFuncs, processExisting)
 }
 
 // RemoveEndpointsHandler removes a Endpoints object event handler function
 func (wf *WatchFactory) RemoveEndpointsHandler(handler *Handler) {
-	wf.removeHandler(endpointsType, handler)
+	wf.removeHandler(EndpointsType, handler)
 }
 
 // AddPolicyHandler adds a handler function that will be executed on NetworkPolicy object changes
 func (wf *WatchFactory) AddPolicyHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(policyType, "", nil, handlerFuncs, processExisting)
+	return wf.addHandler(PolicyType, "", nil, handlerFuncs, processExisting)
 }
 
 // RemovePolicyHandler removes a NetworkPolicy object event handler function
 func (wf *WatchFactory) RemovePolicyHandler(handler *Handler) {
-	wf.removeHandler(policyType, handler)
+	wf.removeHandler(PolicyType, handler)
 }
 
 // AddEgressFirewallHandler adds a handler function that will be executed on EgressFirewall object changes
 func (wf *WatchFactory) AddEgressFirewallHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(egressFirewallType, "", nil, handlerFuncs, processExisting)
+	return wf.addHandler(EgressFirewallType, "", nil, handlerFuncs, processExisting)
 }
 
 // RemoveEgressFirewallHandler removes an EgressFirewall object event handler function
 func (wf *WatchFactory) RemoveEgressFirewallHandler(handler *Handler) {
-	wf.removeHandler(egressFirewallType, handler)
+	wf.removeHandler(EgressFirewallType, handler)
 }
 
 // AddEgressIPHandler adds a handler function that will be executed on EgressIP object changes
 func (wf *WatchFactory) AddEgressIPHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(egressIPType, "", nil, handlerFuncs, processExisting)
+	return wf.addHandler(EgressIPType, "", nil, handlerFuncs, processExisting)
 }
 
 // RemoveEgressIPHandler removes an EgressIP object event handler function
 func (wf *WatchFactory) RemoveEgressIPHandler(handler *Handler) {
-	wf.removeHandler(egressIPType, handler)
+	wf.removeHandler(EgressIPType, handler)
 }
 
 // AddCloudPrivateIPConfigHandler adds a handler function that will be executed on CloudPrivateIPConfig object changes
 func (wf *WatchFactory) AddCloudPrivateIPConfigHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(cloudPrivateIPConfigType, "", nil, handlerFuncs, processExisting)
+	return wf.addHandler(CloudPrivateIPConfigType, "", nil, handlerFuncs, processExisting)
 }
 
 // RemoveCloudPrivateIPConfigHandler removes an CloudPrivateIPConfig object event handler function
 func (wf *WatchFactory) RemoveCloudPrivateIPConfigHandler(handler *Handler) {
-	wf.removeHandler(cloudPrivateIPConfigType, handler)
+	wf.removeHandler(CloudPrivateIPConfigType, handler)
 }
 
 // AddNamespaceHandler adds a handler function that will be executed on Namespace object changes
 func (wf *WatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(namespaceType, "", nil, handlerFuncs, processExisting)
+	return wf.addHandler(NamespaceType, "", nil, handlerFuncs, processExisting)
 }
 
 // AddFilteredNamespaceHandler adds a handler function that will be executed when Namespace objects that match the given filters change
 func (wf *WatchFactory) AddFilteredNamespaceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(namespaceType, namespace, sel, handlerFuncs, processExisting)
+	return wf.addHandler(NamespaceType, namespace, sel, handlerFuncs, processExisting)
 }
 
 // RemoveNamespaceHandler removes a Namespace object event handler function
 func (wf *WatchFactory) RemoveNamespaceHandler(handler *Handler) {
-	wf.removeHandler(namespaceType, handler)
+	wf.removeHandler(NamespaceType, handler)
 }
 
 // AddNodeHandler adds a handler function that will be executed on Node object changes
 func (wf *WatchFactory) AddNodeHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(nodeType, "", nil, handlerFuncs, processExisting)
+	return wf.addHandler(NodeType, "", nil, handlerFuncs, processExisting)
 }
 
 // AddFilteredNodeHandler dds a handler function that will be executed when Node objects that match the given label selector
 func (wf *WatchFactory) AddFilteredNodeHandler(sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
-	return wf.addHandler(nodeType, "", sel, handlerFuncs, processExisting)
+	return wf.addHandler(NodeType, "", sel, handlerFuncs, processExisting)
 }
 
 // RemoveNodeHandler removes a Node object event handler function
 func (wf *WatchFactory) RemoveNodeHandler(handler *Handler) {
-	wf.removeHandler(nodeType, handler)
+	wf.removeHandler(NodeType, handler)
 }
 
 // GetPod returns the pod spec given the namespace and pod name
 func (wf *WatchFactory) GetPod(namespace, name string) (*kapi.Pod, error) {
-	podLister := wf.informers[podType].lister.(listers.PodLister)
+	podLister := wf.informers[PodType].lister.(listers.PodLister)
 	return podLister.Pods(namespace).Get(name)
 }
 
 // GetAllPods returns all the pods in the cluster
 func (wf *WatchFactory) GetAllPods() ([]*kapi.Pod, error) {
-	podLister := wf.informers[podType].lister.(listers.PodLister)
+	podLister := wf.informers[PodType].lister.(listers.PodLister)
 	return podLister.List(labels.Everything())
 }
 
 // GetPods returns all the pods in a given namespace
 func (wf *WatchFactory) GetPods(namespace string) ([]*kapi.Pod, error) {
-	podLister := wf.informers[podType].lister.(listers.PodLister)
+	podLister := wf.informers[PodType].lister.(listers.PodLister)
 	return podLister.Pods(namespace).List(labels.Everything())
 }
 
 // GetPodsBySelector returns all the pods in a given namespace by the label selector
 func (wf *WatchFactory) GetPodsBySelector(namespace string, labelSelector metav1.LabelSelector) ([]*kapi.Pod, error) {
-	podLister := wf.informers[podType].lister.(listers.PodLister)
+	podLister := wf.informers[PodType].lister.(listers.PodLister)
 	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
 	if err != nil {
 		return nil, err
@@ -527,64 +584,64 @@ func (wf *WatchFactory) GetNodes() ([]*kapi.Node, error) {
 
 // ListNodes returns nodes that match a selector
 func (wf *WatchFactory) ListNodes(selector labels.Selector) ([]*kapi.Node, error) {
-	nodeLister := wf.informers[nodeType].lister.(listers.NodeLister)
+	nodeLister := wf.informers[NodeType].lister.(listers.NodeLister)
 	return nodeLister.List(selector)
 }
 
 // GetNode returns the node spec of a given node by name
 func (wf *WatchFactory) GetNode(name string) (*kapi.Node, error) {
-	nodeLister := wf.informers[nodeType].lister.(listers.NodeLister)
+	nodeLister := wf.informers[NodeType].lister.(listers.NodeLister)
 	return nodeLister.Get(name)
 }
 
 // GetService returns the service spec of a service in a given namespace
 func (wf *WatchFactory) GetService(namespace, name string) (*kapi.Service, error) {
-	serviceLister := wf.informers[serviceType].lister.(listers.ServiceLister)
+	serviceLister := wf.informers[ServiceType].lister.(listers.ServiceLister)
 	return serviceLister.Services(namespace).Get(name)
 }
 
 // GetEndpoints returns the endpoints list in a given namespace
 func (wf *WatchFactory) GetEndpoints(namespace string) ([]*kapi.Endpoints, error) {
-	endpointsLister := wf.informers[endpointsType].lister.(listers.EndpointsLister)
+	endpointsLister := wf.informers[EndpointsType].lister.(listers.EndpointsLister)
 	return endpointsLister.Endpoints(namespace).List(labels.Everything())
 }
 
 // GetEndpoint returns a specific endpoint in a given namespace
 func (wf *WatchFactory) GetEndpoint(namespace, name string) (*kapi.Endpoints, error) {
-	endpointsLister := wf.informers[endpointsType].lister.(listers.EndpointsLister)
+	endpointsLister := wf.informers[EndpointsType].lister.(listers.EndpointsLister)
 	return endpointsLister.Endpoints(namespace).Get(name)
 }
 
 func (wf *WatchFactory) GetCloudPrivateIPConfig(name string) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {
-	cloudPrivateIPConfigLister := wf.informers[cloudPrivateIPConfigType].lister.(ocpcloudnetworklister.CloudPrivateIPConfigLister)
+	cloudPrivateIPConfigLister := wf.informers[CloudPrivateIPConfigType].lister.(ocpcloudnetworklister.CloudPrivateIPConfigLister)
 	return cloudPrivateIPConfigLister.Get(name)
 }
 
 func (wf *WatchFactory) GetEgressIP(name string) (*egressipapi.EgressIP, error) {
-	egressIPLister := wf.informers[egressIPType].lister.(egressiplister.EgressIPLister)
+	egressIPLister := wf.informers[EgressIPType].lister.(egressiplister.EgressIPLister)
 	return egressIPLister.Get(name)
 }
 
 func (wf *WatchFactory) GetEgressIPs() ([]*egressipapi.EgressIP, error) {
-	egressIPLister := wf.informers[egressIPType].lister.(egressiplister.EgressIPLister)
+	egressIPLister := wf.informers[EgressIPType].lister.(egressiplister.EgressIPLister)
 	return egressIPLister.List(labels.Everything())
 }
 
 // GetNamespace returns a specific namespace
 func (wf *WatchFactory) GetNamespace(name string) (*kapi.Namespace, error) {
-	namespaceLister := wf.informers[namespaceType].lister.(listers.NamespaceLister)
+	namespaceLister := wf.informers[NamespaceType].lister.(listers.NamespaceLister)
 	return namespaceLister.Get(name)
 }
 
 // GetNamespaces returns a list of namespaces in the cluster
 func (wf *WatchFactory) GetNamespaces() ([]*kapi.Namespace, error) {
-	namespaceLister := wf.informers[namespaceType].lister.(listers.NamespaceLister)
+	namespaceLister := wf.informers[NamespaceType].lister.(listers.NamespaceLister)
 	return namespaceLister.List(labels.Everything())
 }
 
 // GetNamespacesBySelector returns a list of namespaces in the cluster by the label selector
 func (wf *WatchFactory) GetNamespacesBySelector(labelSelector metav1.LabelSelector) ([]*kapi.Namespace, error) {
-	namespaceLister := wf.informers[namespaceType].lister.(listers.NamespaceLister)
+	namespaceLister := wf.informers[NamespaceType].lister.(listers.NamespaceLister)
 	selector, err := metav1.LabelSelectorAsSelector(&labelSelector)
 	if err != nil {
 		return nil, err
@@ -594,30 +651,30 @@ func (wf *WatchFactory) GetNamespacesBySelector(labelSelector metav1.LabelSelect
 
 // GetNetworkPolicy gets a specific network policy by the namespace/name
 func (wf *WatchFactory) GetNetworkPolicy(namespace, name string) (*knet.NetworkPolicy, error) {
-	networkPolicyLister := wf.informers[policyType].lister.(netlisters.NetworkPolicyLister)
+	networkPolicyLister := wf.informers[PolicyType].lister.(netlisters.NetworkPolicyLister)
 	return networkPolicyLister.NetworkPolicies(namespace).Get(name)
 }
 
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {
-	return wf.informers[nodeType].inf
+	return wf.informers[NodeType].inf
 }
 
 // LocalPodInformer returns a shared Informer that may or may not only
 // return pods running on the local node.
 func (wf *WatchFactory) LocalPodInformer() cache.SharedIndexInformer {
-	return wf.informers[podType].inf
+	return wf.informers[PodType].inf
 }
 
 func (wf *WatchFactory) PodInformer() cache.SharedIndexInformer {
-	return wf.informers[podType].inf
+	return wf.informers[PodType].inf
 }
 
 func (wf *WatchFactory) NamespaceInformer() cache.SharedIndexInformer {
-	return wf.informers[namespaceType].inf
+	return wf.informers[NamespaceType].inf
 }
 
 func (wf *WatchFactory) ServiceInformer() cache.SharedIndexInformer {
-	return wf.informers[serviceType].inf
+	return wf.informers[ServiceType].inf
 }
 
 // noHeadlessServiceSelector is a LabelSelector added to the watch for

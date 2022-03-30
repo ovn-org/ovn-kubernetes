@@ -361,23 +361,23 @@ func (i *informer) shutdown() {
 
 func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (listerInterface, error) {
 	switch oType {
-	case podType:
+	case PodType:
 		return listers.NewPodLister(sharedInformer.GetIndexer()), nil
-	case serviceType:
+	case ServiceType:
 		return listers.NewServiceLister(sharedInformer.GetIndexer()), nil
-	case endpointsType:
+	case EndpointsType:
 		return listers.NewEndpointsLister(sharedInformer.GetIndexer()), nil
-	case namespaceType:
+	case NamespaceType:
 		return listers.NewNamespaceLister(sharedInformer.GetIndexer()), nil
-	case nodeType:
+	case NodeType:
 		return listers.NewNodeLister(sharedInformer.GetIndexer()), nil
-	case policyType:
+	case PolicyType:
 		return netlisters.NewNetworkPolicyLister(sharedInformer.GetIndexer()), nil
-	case egressFirewallType:
+	case EgressFirewallType:
 		return egressfirewalllister.NewEgressFirewallLister(sharedInformer.GetIndexer()), nil
-	case egressIPType:
+	case EgressIPType:
 		return egressiplister.NewEgressIPLister(sharedInformer.GetIndexer()), nil
-	case cloudPrivateIPConfigType:
+	case CloudPrivateIPConfigType:
 		return cloudprivateipconfiglister.NewCloudPrivateIPConfigLister(sharedInformer.GetIndexer()), nil
 	}
 

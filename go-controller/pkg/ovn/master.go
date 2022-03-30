@@ -3,8 +3,6 @@ package ovn
 import (
 	"context"
 	"fmt"
-	"k8s.io/apimachinery/pkg/fields"
-	"math/rand"
 	"net"
 	"os"
 	"strings"
@@ -12,8 +10,8 @@ import (
 	"time"
 
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -1168,12 +1166,6 @@ func (oc *Controller) syncWithRetry(syncName string, syncFunc func() error) {
 // watchNodes() will be called for all existing nodes at startup anyway.
 // Note that this list will include the 'join' cluster switch, which we
 // do not want to delete.
-func (oc *Controller) syncNodes(nodes []interface{}) {
-	oc.syncWithRetry("syncNodes", func() error { return oc.syncNodesRetriable(nodes) })
-}
-
-// This function implements the main body of work of what is described by syncNodes.
-// Upon failure, it may be invoked multiple times in order to avoid a pod restart.
 func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 	foundNodes := sets.NewString()
 	for _, tmp := range nodes {
@@ -1352,8 +1344,13 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 	if err != nil {
 		klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
 	} else {
-		oc.addRetryPods(pods.Items)
-		oc.requestRetryPods()
+		klog.V(5).Infof("When adding node %s, found %d pods to add to retryPods", node.Name, len(pods.Items))
+		for _, pod := range pods.Items {
+			pod := pod
+			klog.V(5).Infof("Adding pod %s/%s to retryPods", pod.Namespace, pod.Name)
+			oc.retryPods.addRetryObj(&pod)
+		}
+		oc.retryPods.requestRetryObjs()
 	}
 
 	if len(errs) == 0 {
@@ -1376,82 +1373,6 @@ func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
 	oc.gatewaysFailed.Delete(node.Name)
 	oc.nodeClusterRouterPortFailed.Delete(node.Name)
 	return nil
-}
-
-// iterateRetryNodes checks if any outstanding Nodes exists
-// then tries to re-add them if so
-// updateAll forces all nodes to be attempted to be retried regardless
-func (oc *Controller) iterateRetryNodes(updateAll bool) {
-	oc.retryNodes.retryMutex.Lock()
-	defer oc.retryNodes.retryMutex.Unlock()
-	now := time.Now()
-	for nodeName, entry := range oc.retryNodes.entries {
-		if entry.ignore {
-			// neither addition nor deletion is being retried
-			continue
-		}
-		// check if we need to create
-		if entry.newObj != nil {
-			n := entry.newObj.(*kapi.Node)
-			kNode, err := oc.watchFactory.GetNode(n.Name)
-			if err != nil && errors.IsNotFound(err) {
-				klog.Infof("%s node not found in the informers cache, not going to retry node setup", nodeName)
-				entry.newObj = nil
-			} else {
-				entry.newObj = kNode
-			}
-		}
-
-		entry.backoffSec = entry.backoffSec * 2
-		if entry.backoffSec > 60 {
-			entry.backoffSec = 60
-		}
-		backoff := (entry.backoffSec * time.Second) + (time.Duration(rand.Intn(500)) * time.Millisecond)
-		nTimer := entry.timeStamp.Add(backoff)
-		if updateAll || now.After(nTimer) {
-			klog.Infof("Node Retry: %s retry node setup", nodeName)
-
-			// check if we need to delete
-			if entry.oldObj != nil {
-				klog.Infof("Node Retry: Removing old Node for %s", nodeName)
-				node := entry.oldObj.(*kapi.Node)
-				if err := oc.deleteNodeEvent(node); err != nil {
-					klog.Infof("Node Retry delete failed for %s, will try again later: %v",
-						nodeName, err)
-					entry.timeStamp = time.Now()
-					continue
-				}
-				// successfully cleaned up old node, remove it from the retry cache
-				entry.oldObj = nil
-			}
-
-			// create new node if needed
-			if entry.newObj != nil {
-				klog.Infof("Node Retry: Creating new node for %s", nodeName)
-				_, nodeSync := oc.addNodeFailed.Load(nodeName)
-				_, clusterRtrSync := oc.nodeClusterRouterPortFailed.Load(nodeName)
-				_, mgmtSync := oc.mgmtPortFailed.Load(nodeName)
-				_, gwSync := oc.gatewaysFailed.Load(nodeName)
-				if err := oc.addUpdateNodeEvent(entry.newObj.(*kapi.Node),
-					&nodeSyncs{nodeSync,
-						clusterRtrSync,
-						mgmtSync,
-						gwSync}); err != nil {
-					klog.Infof("Node Retry create failed for %s, will try again later: %v",
-						nodeName, err)
-					entry.timeStamp = time.Now()
-					continue
-				}
-				// successfully create node, remove it from the retry cache
-				entry.newObj = nil
-			}
-
-			klog.Infof("Node Retry successful for %s", nodeName)
-			oc.retryNodes.deleteRetryObj(nodeName, false)
-		} else {
-			klog.V(5).Infof("%s retry node not after timer yet, time: %s", nodeName, nTimer)
-		}
-	}
 }
 
 func (oc *Controller) createACLLoggingMeter() error {
