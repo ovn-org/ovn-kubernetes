@@ -295,7 +295,7 @@ func (oc *Controller) createBFDStaticRoute(bfdEnabled bool, gw net.IP, podIP, gr
 				}
 			},
 		}, {
-			Name:  logicalRouter.Name,
+			Name:  &logicalRouter.Name,
 			Model: &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
 				return lr.Name == gr
@@ -697,7 +697,7 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 				},
 			},
 			{
-				Name:           logicalRouter.Name,
+				Name:           &logicalRouter.Name,
 				Model:          &logicalRouter,
 				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
 				OnModelMutations: []interface{}{
