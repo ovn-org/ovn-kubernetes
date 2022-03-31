@@ -4,7 +4,9 @@
 package node
 
 import (
+	"errors"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +18,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+
+	"golang.org/x/sys/unix"
 )
 
 type addressManager struct {
@@ -70,10 +74,18 @@ func (c *addressManager) delAddr(ip net.IP) bool {
 
 func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 	var addrChan chan netlink.AddrUpdate
+	timeout := unix.Timeval{Sec: 5, Usec: 0}
 	addrSubscribeOptions := netlink.AddrSubscribeOptions{
-		ErrorCallback: func(err error) {
-			klog.Errorf("Failed during AddrSubscribe callback: %v", err)
+		ReceiveTimeout: &timeout,
+		ErrorCallback: func(err error) bool {
+			if strings.Contains(err.Error(), "Receive failed") {
+				// EAGAIN means timeout; ignore and try again
+				return errors.Is(err, unix.EAGAIN)
+			}
 			// Note: Not calling sync() from here: it is redudant and unsafe when stopChan is closed.
+			klog.Errorf("Failed during AddrSubscribe callback: %v", err)
+			// Unrecognized error; terminate the subscription and try again
+			return false
 		},
 	}
 
@@ -134,6 +146,8 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 					}
 				}
 			case <-stopChan:
+				// Wait for Subscribe() to finish
+				<-addrChan
 				return
 			}
 		}
