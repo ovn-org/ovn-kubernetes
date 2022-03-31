@@ -305,11 +305,17 @@ func AddrSubscribeAt(ns netns.NsHandle, ch chan<- AddrUpdate, done <-chan struct
 	return addrSubscribeAt(ns, netns.None(), ch, done, nil, false, 0, nil)
 }
 
+// AddrSubscribeErrorCallback defines the function signature of an optional
+// function called when AddrSubscribe functions indicate an error. The function
+// should return true if the error should be ignored, false to terminate the
+// subscription.
+type AddrSubscribeErrorCallback func(err error) bool
+
 // AddrSubscribeOptions contains a set of options to use with
 // AddrSubscribeWithOptions.
 type AddrSubscribeOptions struct {
 	Namespace         *netns.NsHandle
-	ErrorCallback     func(error)
+	ErrorCallback     AddrSubscribeErrorCallback
 	ListExisting      bool
 	ReceiveBufferSize int
 	ReceiveTimeout    *unix.Timeval
@@ -326,7 +332,7 @@ func AddrSubscribeWithOptions(ch chan<- AddrUpdate, done <-chan struct{}, option
 	return addrSubscribeAt(*options.Namespace, netns.None(), ch, done, options.ErrorCallback, options.ListExisting, options.ReceiveBufferSize, options.ReceiveTimeout)
 }
 
-func addrSubscribeAt(newNs, curNs netns.NsHandle, ch chan<- AddrUpdate, done <-chan struct{}, cberr func(error), listExisting bool, rcvbuf int, rcvTimeout *unix.Timeval) error {
+func addrSubscribeAt(newNs, curNs netns.NsHandle, ch chan<- AddrUpdate, done <-chan struct{}, cberr AddrSubscribeErrorCallback, listExisting bool, rcvbuf int, rcvTimeout *unix.Timeval) error {
 	s, err := nl.SubscribeAt(newNs, curNs, unix.NETLINK_ROUTE, unix.RTNLGRP_IPV4_IFADDR, unix.RTNLGRP_IPV6_IFADDR)
 	if err != nil {
 		return err
@@ -358,22 +364,29 @@ func addrSubscribeAt(newNs, curNs netns.NsHandle, ch chan<- AddrUpdate, done <-c
 			return err
 		}
 	}
+
+	handleErr := func(err error, defaultIgnore bool) bool {
+		if cberr != nil {
+			return cberr(err)
+		}
+		return defaultIgnore
+	}
+
 	go func() {
 		defer close(ch)
 		for {
 			msgs, from, err := s.Receive()
 			if err != nil {
-				if cberr != nil {
-					cberr(fmt.Errorf("Receive failed: %v",
-						err))
+				if handleErr(fmt.Errorf("Receive failed: %w", err), false) {
+					continue
 				}
 				return
 			}
 			if from.Pid != nl.PidKernel {
-				if cberr != nil {
-					cberr(fmt.Errorf("Wrong sender portid %d, expected %d", from.Pid, nl.PidKernel))
+				if handleErr(fmt.Errorf("Wrong sender portid %d, expected %d", from.Pid, nl.PidKernel), true) {
+					continue
 				}
-				continue
+				return
 			}
 			for _, m := range msgs {
 				if m.Header.Type == unix.NLMSG_DONE {
@@ -384,26 +397,25 @@ func addrSubscribeAt(newNs, curNs netns.NsHandle, ch chan<- AddrUpdate, done <-c
 					if error == 0 {
 						continue
 					}
-					if cberr != nil {
-						cberr(fmt.Errorf("error message: %v",
-							syscall.Errno(-error)))
+					if handleErr(fmt.Errorf("error message: %v", syscall.Errno(-error)), true) {
+						continue
 					}
-					continue
+					return
 				}
 				msgType := m.Header.Type
 				if msgType != unix.RTM_NEWADDR && msgType != unix.RTM_DELADDR {
-					if cberr != nil {
-						cberr(fmt.Errorf("bad message type: %d", msgType))
+					if handleErr(fmt.Errorf("bad message type: %d", msgType), true) {
+						continue
 					}
-					continue
+					return
 				}
 
 				addr, _, err := parseAddr(m.Data)
 				if err != nil {
-					if cberr != nil {
-						cberr(fmt.Errorf("could not parse address: %v", err))
+					if handleErr(fmt.Errorf("could not parse address: %w", err), true) {
+						continue
 					}
-					continue
+					return
 				}
 
 				ch <- AddrUpdate{LinkAddress: *addr.IPNet,
