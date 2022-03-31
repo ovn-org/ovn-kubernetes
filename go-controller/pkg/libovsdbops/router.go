@@ -49,7 +49,6 @@ func FindLogicalRoutersWithPredicate(nbClient libovsdbclient.Client, p logicalRo
 // CreateOrUpdateLogicalRouter creates or updates the provided logical router
 func CreateOrUpdateLogicalRouter(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) error {
 	opModel := operationModel{
-		Name:           &router.Name,
 		Model:          router,
 		ModelPredicate: func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
 		OnModelUpdates: onModelUpdatesAll(),

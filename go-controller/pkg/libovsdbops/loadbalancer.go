@@ -66,7 +66,6 @@ func CreateOrUpdateLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovs
 		// can't use i in the predicate, for loop replaces it in-memory
 		lb := lbs[i]
 		opModel := operationModel{
-			Name:           &lb.Name,
 			Model:          lb,
 			ModelPredicate: func(item *nbdb.LoadBalancer) bool { return item.Name == lb.Name },
 			OnModelUpdates: getNonZeroLoadBalancerMutableFields(lb),

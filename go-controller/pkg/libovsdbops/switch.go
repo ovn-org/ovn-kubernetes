@@ -48,7 +48,6 @@ func GetLogicalSwitch(nbClient libovsdbclient.Client, sw *nbdb.LogicalSwitch) (*
 // CreateOrUpdateLogicalRouter creates or updates the provided logical switch
 func CreateOrUpdateLogicalSwitch(nbClient libovsdbclient.Client, sw *nbdb.LogicalSwitch) error {
 	opModel := operationModel{
-		Name:           &sw.Name,
 		Model:          sw,
 		ModelPredicate: func(item *nbdb.LogicalSwitch) bool { return item.Name == sw.Name },
 		OnModelUpdates: onModelUpdatesAll(),
@@ -234,7 +233,6 @@ func createOrUpdateLogicalSwitchPortsOps(nbClient libovsdbclient.Client, ops []l
 		opModels = append(opModels, opModel)
 	}
 	opModel := operationModel{
-		Name:             &sw.Name,
 		Model:            sw,
 		ModelPredicate:   func(item *nbdb.LogicalSwitch) bool { return item.Name == sw.Name },
 		OnModelMutations: []interface{}{&sw.Ports},

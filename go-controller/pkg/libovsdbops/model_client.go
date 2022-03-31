@@ -116,12 +116,6 @@ type operationModel struct {
 	// DoAfter is invoked at the end of the operation and allows to setup a
 	// subsequent operation with values obtained from this one.
 	DoAfter func()
-	// Name is used to signify if this model has a name being used. Typically
-	// corresponds to Name field used on ovsdb objects. Using a non-empty
-	// Name indicates that during a Create the model will have a predicate
-	// operation to ensure a duplicate txn will not occur. See:
-	// https://bugzilla.redhat.com/show_bug.cgi?id=2042001
-	Name interface{}
 }
 
 func onModelUpdatesNone() []interface{} {
@@ -289,41 +283,18 @@ func (m *modelClient) create(opModel *operationModel) ([]ovsdb.Operation, error)
 	if uuid == "" {
 		setUUID(opModel.Model, buildNamedUUID())
 	}
-	ops := make([]ovsdb.Operation, 0, 1)
-	o, err := m.client.Create(opModel.Model)
+
+	ops, err := buildFailOnDuplicateOps(m.client, opModel.Model)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create model, err: %v", err)
 	}
 
-	// Add wait methods accordingly
-	// ACL we would have to use external_ids + name for unique match
-	// However external_ids would be a performance hit, and in one case we use
-	// an empty name and external_ids for addAllowACLFromNode
-	if opModel.Name != nil && o[0].Table != "ACL" {
-		timeout := types.OVSDBWaitTimeout
-		condition := model.Condition{
-			Field:    opModel.Name,
-			Function: ovsdb.ConditionEqual,
-			Value:    getString(opModel.Name),
-		}
-		waitOps, err := m.client.Where(opModel.Model, condition).Wait(ovsdb.WaitConditionNotEqual, &timeout, opModel.Model, opModel.Name)
-		if err != nil {
-			return nil, err
-		}
-		ops = append(ops, waitOps...)
-	} else if cache := m.client.Cache(); cache != nil { // cache might be nil if disconnected
-		if info, err := cache.DatabaseModel().NewModelInfo(opModel.Model); err == nil {
-			if name, err := info.FieldByColumn("name"); err == nil {
-				objName := getString(name)
-				if len(objName) > 0 {
-					klog.Warningf("OVSDB Create operation detected without setting opModel Name. Name: %s, %#v",
-						objName, info)
-				}
-			}
-		}
+	op, err := m.client.Create(opModel.Model)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create model, err: %v", err)
 	}
+	ops = append(ops, op...)
 
-	ops = append(ops, o...)
 	klog.V(5).Infof("Create operations generated as: %+v", ops)
 	return ops, nil
 }
@@ -462,16 +433,4 @@ func addToExistingResult(model interface{}, existingResult interface{}) error {
 	resultVal.Set(reflect.Append(resultVal, v))
 
 	return nil
-}
-
-func getString(field interface{}) string {
-	objName, ok := field.(string)
-	if !ok {
-		if strPtr, ok := field.(*string); ok {
-			if strPtr != nil {
-				objName = *strPtr
-			}
-		}
-	}
-	return objName
 }

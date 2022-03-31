@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 func getUUID(model model.Model) string {
@@ -308,4 +311,42 @@ func onModels(models interface{}, do func(interface{}) error) error {
 		panic(fmt.Sprintf("Expected slice or struct but got %s", v.Kind()))
 	}
 	return nil
+}
+
+// buildFailOnDuplicateOps builds a wait operation on a condition that will fail
+// if a duplicate to the provided model is considered to be found. We use this
+// to avoid duplicates on certain unknown scenarios that are still to be tracked
+// down. See: https://bugzilla.redhat.com/show_bug.cgi?id=2042001.
+// When no specific operation is required for the provided model, returns an empty
+// array for convenience.
+func buildFailOnDuplicateOps(c client.Client, m model.Model) ([]ovsdb.Operation, error) {
+	// Right now we only consider models with a "Name" field that is not an
+	// index for which we don't expect duplicate names.
+	// A duplicate Name field that is an index will fail without the
+	// need of this wait operation.
+	// Models that require a complex condition to detect duplicates are not
+	// considered for the time being due to the performance hit (i.e ACLs).
+	var field interface{}
+	var value string
+	switch t := m.(type) {
+	case *nbdb.LoadBalancer:
+		field = &t.Name
+		value = t.Name
+	case *nbdb.LogicalRouter:
+		field = &t.Name
+		value = t.Name
+	case *nbdb.LogicalSwitch:
+		field = &t.Name
+		value = t.Name
+	default:
+		return []ovsdb.Operation{}, nil
+	}
+
+	timeout := types.OVSDBWaitTimeout
+	cond := model.Condition{
+		Field:    field,
+		Function: ovsdb.ConditionEqual,
+		Value:    value,
+	}
+	return c.Where(m, cond).Wait(ovsdb.WaitConditionNotEqual, &timeout, m, field)
 }
