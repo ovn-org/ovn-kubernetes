@@ -295,7 +295,7 @@ github.com/stretchr/testify/mock
 # github.com/urfave/cli/v2 v2.2.0
 ## explicit; go 1.11
 github.com/urfave/cli/v2
-# github.com/vishvananda/netlink v1.1.1-0.20210518155637-4cb3795f2ccb
+# github.com/vishvananda/netlink v1.2.0-beta.0.20220329170256-5cb84e47adb7
 ## explicit; go 1.12
 github.com/vishvananda/netlink
 github.com/vishvananda/netlink/nl
