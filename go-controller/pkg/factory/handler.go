@@ -89,13 +89,8 @@ type informer struct {
 
 func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
 	i.RLock()
-	curHandlers := make([]*Handler, 0, len(i.handlers))
+	defer i.RUnlock()
 	for _, handler := range i.handlers {
-		curHandlers = append(curHandlers, handler)
-	}
-	i.RUnlock()
-
-	for _, handler := range curHandlers {
 		f(handler)
 	}
 }
