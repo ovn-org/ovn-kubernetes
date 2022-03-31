@@ -31,26 +31,34 @@ const (
 )
 
 func (oc *Controller) syncNamespaces(namespaces []interface{}) {
+	oc.syncWithRetry("syncNamespaces", func() error { return oc.syncNamespacesRetriable(namespaces) })
+}
+
+// This function implements the main body of work of syncNamespaces.
+// Upon failure, it may be invoked multiple times in order to avoid a pod restart.
+func (oc *Controller) syncNamespacesRetriable(namespaces []interface{}) error {
 	expectedNs := make(map[string]bool)
 	for _, nsInterface := range namespaces {
 		ns, ok := nsInterface.(*kapi.Namespace)
 		if !ok {
-			klog.Errorf("Spurious object in syncNamespaces: %v", nsInterface)
-			continue
+			return fmt.Errorf("spurious object in syncNamespaces: %v", nsInterface)
 		}
 		expectedNs[ns.Name] = true
 	}
 
-	err := oc.addressSetFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) {
+	err := oc.addressSetFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) error {
 		if nameSuffix == "" && !expectedNs[namespaceName] {
 			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
 				klog.Errorf(err.Error())
+				return err
 			}
 		}
+		return nil
 	})
 	if err != nil {
-		klog.Errorf("Error in syncing namespaces: %v", err)
+		return fmt.Errorf("error in syncing namespaces: %v", err)
 	}
+	return nil
 }
 
 func (oc *Controller) getRoutingExternalGWs(nsInfo *namespaceInfo) *gatewayInfo {

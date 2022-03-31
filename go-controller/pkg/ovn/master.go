@@ -1360,17 +1360,36 @@ func (oc *Controller) syncNodesPeriodic() {
 	}
 }
 
+// syncWithRetry is a wrapper that calls a sync function and retries it in case of failures.
+func (oc *Controller) syncWithRetry(syncName string, syncFunc func() error) {
+	err := utilwait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
+		if err := syncFunc(); err != nil {
+			klog.Errorf("Failed (will retry) in syncing %s: %v", syncName, err)
+			return false, nil
+		}
+		return true, nil
+	})
+	if err != nil {
+		klog.Fatalf("Error in syncing %s: %v", syncName, err)
+	}
+}
+
 // We only deal with cleaning up nodes that shouldn't exist here, since
 // watchNodes() will be called for all existing nodes at startup anyway.
 // Note that this list will include the 'join' cluster switch, which we
 // do not want to delete.
 func (oc *Controller) syncNodes(nodes []interface{}) {
+	oc.syncWithRetry("syncNodes", func() error { return oc.syncNodesRetriable(nodes) })
+}
+
+// This function implements the main body of work of what is described by syncNodes.
+// Upon failure, it may be invoked multiple times in order to avoid a pod restart.
+func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 	foundNodes := sets.NewString()
 	for _, tmp := range nodes {
 		node, ok := tmp.(*kapi.Node)
 		if !ok {
-			klog.Errorf("Spurious object in syncNodes: %v", tmp)
-			continue
+			return fmt.Errorf("spurious object in syncNodes: %v", tmp)
 		}
 		foundNodes.Insert(node.Name)
 
@@ -1387,6 +1406,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		// For each existing node, reserve its joinSwitch LRP IPs if they already exist.
 		_, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
 		if err != nil {
+			// TODO (flaviof): keep going even if EnsureJoinLRPIPs returned an error. Maybe we should not.
 			klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
 		}
 	}
@@ -1396,8 +1416,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 
 	chassisList, err := libovsdbops.ListChassis(oc.sbClient)
 	if err != nil {
-		klog.Errorf("Failed to get chassis list: error: %v", err)
-		return
+		return fmt.Errorf("failed to get chassis list: error: %v", err)
 	}
 
 	for _, chassis := range chassisList {
@@ -1409,8 +1428,10 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 
 	nodeSwitches, err := libovsdbops.FindSwitchesWithOtherConfig(oc.nbClient)
 	if err != nil {
-		klog.Errorf("Failed to get node logical switches which have other-config set error: %v", err)
-		return
+		if err != libovsdbclient.ErrNotFound {
+			return fmt.Errorf("failed to get node logical switches which have other-config set error: %v", err)
+		}
+		klog.Warning("Did not find any logical switches with other-config")
 	}
 
 	for _, nodeSwitch := range nodeSwitches {
@@ -1449,7 +1470,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	}
 
 	if err := libovsdbops.DeleteNodeChassis(oc.sbClient, staleChassis.List()...); err != nil {
-		klog.Errorf("Failed Deleting chassis %v error: %v", staleChassis.List(), err)
-		return
+		return fmt.Errorf("failed deleting chassis %v error: %v", staleChassis.List(), err)
 	}
+	return nil
 }

@@ -13,8 +13,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
-// findSwitch looks up the switch in the cache and sets the UUID
-func findSwitch(nbClient libovsdbclient.Client, lswitch *nbdb.LogicalSwitch) error {
+// findSwitchUUID looks up the switch in the cache and sets the UUID
+func findSwitchUUID(nbClient libovsdbclient.Client, lswitch *nbdb.LogicalSwitch) error {
 	if lswitch.UUID != "" && !IsNamedUUID(lswitch.UUID) {
 		return nil
 	}
@@ -119,6 +119,24 @@ func FindAllNodeLocalSwitches(nbClient libovsdbclient.Client) ([]nbdb.LogicalSwi
 	return switches, nil
 }
 
+// FindSwitchByName finds switch with provided name. If more than one is found, it will error.
+func FindSwitchByName(nbClient libovsdbclient.Client, name string) (*nbdb.LogicalSwitch, error) {
+	nameSearch := func(item *nbdb.LogicalSwitch) bool {
+		return item.Name == name
+	}
+
+	switches, err := findSwitchesByPredicate(nbClient, nameSearch)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(switches) > 1 {
+		return nil, fmt.Errorf("unexpectedly found multiple switches with same name: %+v", switches)
+	}
+
+	return &switches[0], nil
+}
+
 func AddLoadBalancersToSwitchOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lswitch *nbdb.LogicalSwitch, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
 	if ops == nil {
 		ops = []libovsdb.Operation{}
@@ -127,7 +145,7 @@ func AddLoadBalancersToSwitchOps(nbClient libovsdbclient.Client, ops []libovsdb.
 		return ops, nil
 	}
 
-	err := findSwitch(nbClient, lswitch)
+	err := findSwitchUUID(nbClient, lswitch)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +175,7 @@ func RemoveLoadBalancersFromSwitchOps(nbClient libovsdbclient.Client, ops []libo
 		return ops, nil
 	}
 
-	err := findSwitch(nbClient, lswitch)
+	err := findSwitchUUID(nbClient, lswitch)
 	if err != nil {
 		return nil, err
 	}

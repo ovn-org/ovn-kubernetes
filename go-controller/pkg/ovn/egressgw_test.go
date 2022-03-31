@@ -2190,6 +2190,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 								Name: types.GWRouterPrefix + nodeName,
 								UUID: types.GWRouterPrefix + nodeName + "-UUID",
 							},
+							&nbdb.LogicalSwitch{
+								UUID: "node1",
+								Name: "node1",
+							},
 						},
 					},
 					&v1.NamespaceList{
@@ -2220,6 +2224,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + nodeName,
 						Networks: []string{"100.64.0.4/32"},
 					},
+					&nbdb.LogicalSwitch{
+						UUID: "node1",
+						Name: "node1",
+					},
 				}
 				injectNode(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
@@ -2240,6 +2248,10 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + nodeName + "-UUID",
 						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + nodeName,
 						Networks: []string{"100.64.0.4/32"},
+					},
+					&nbdb.LogicalSwitch{
+						UUID: "node1",
+						Name: "node1",
 					},
 				}
 				err = deletePerPodGRSNAT(fakeOvn.controller.nbClient, nodeName, extIPs, []*net.IPNet{fullMaskPodNet})
