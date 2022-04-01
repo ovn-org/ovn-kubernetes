@@ -318,20 +318,41 @@ var (
 	sbDbSchemaVersion string
 )
 
+func getNBDBSockPath() (string, error) {
+	paths := []string{"/var/run/openvswitch/", "/var/run/ovn/"}
+	for _, basePath := range paths {
+		if _, err := os.Stat(basePath + "ovnnb_db.sock"); err == nil {
+			return basePath, nil
+		} else {
+			klog.Infof("%sovnnb_db.sock getting info failed: %s", basePath, err)
+		}
+	}
+	return "", fmt.Errorf("ovn db sock files weren't found in %s", strings.Join(paths, " or "))
+}
+
 func getOvnDbVersionInfo() {
 	stdout, _, err := util.RunOVSDBClient("-V")
 	if err == nil && strings.HasPrefix(stdout, "ovsdb-client (Open vSwitch) ") {
 		ovnDbVersion = strings.Fields(stdout)[3]
 	}
-	sockPath := "unix:/var/run/openvswitch/ovnnb_db.sock"
+	basePath, err := getNBDBSockPath()
+	if err != nil {
+		klog.Errorf("OVN db schema versions can't be fetched: %s", err)
+		return
+	}
+	sockPath := "unix:" + basePath + "ovnnb_db.sock"
 	stdout, _, err = util.RunOVSDBClient("get-schema-version", sockPath, "OVN_Northbound")
 	if err == nil {
 		nbDbSchemaVersion = strings.TrimSpace(stdout)
+	} else {
+		klog.Errorf("OVN nbdb schema version can't be fetched: %s", err)
 	}
-	sockPath = "unix:/var/run/openvswitch/ovnsb_db.sock"
+	sockPath = "unix:" + basePath + "ovnsb_db.sock"
 	stdout, _, err = util.RunOVSDBClient("get-schema-version", sockPath, "OVN_Southbound")
 	if err == nil {
 		sbDbSchemaVersion = strings.TrimSpace(stdout)
+	} else {
+		klog.Errorf("OVN sbdb schema version can't be fetched: %s", err)
 	}
 }
 
@@ -388,10 +409,14 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 		return
 	}
 	// check if DB is clustered or not
+	// the usual way would be to call `ovsdb-tool db-is-standalone`,
+	// but that command requires access to the db, and we don't always have it.
+	// Therefore, we check cluster/status output for "not valid command" error
 	dbIsClustered := true
-	_, _, err = util.RunOVSDBTool("db-is-standalone", "/etc/openvswitch/ovnsb_db.db")
-	if err == nil {
+	_, stderr, err := dbProperties[0].AppCtl(5, "cluster/status", dbProperties[0].DbName)
+	if err != nil && strings.Contains(stderr, "is not a valid command") {
 		dbIsClustered = false
+		klog.Info("Found db is standalone, don't register db_cluster metrics")
 	}
 	if dbIsClustered {
 		ovnRegistry.MustRegister(metricDBClusterCID)
