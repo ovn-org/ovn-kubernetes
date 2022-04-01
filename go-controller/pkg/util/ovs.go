@@ -941,3 +941,32 @@ func DetectCheckPktLengthSupport(bridge string) (bool, error) {
 
 	return false, nil
 }
+
+type OvsDbProperties struct {
+	AppCtl        func(timeout int, args ...string) (string, string, error)
+	DbAlias       string
+	DbName        string
+	ElectionTimer int
+}
+
+// GetOvsDbProperties inits OvsDbProperties based on db file path given to it.
+// Now it only works with ovn dbs (nbdb and sbdb)
+func GetOvsDbProperties(db string) (*OvsDbProperties, error) {
+	if strings.Contains(db, "ovnnb") {
+		return &OvsDbProperties{
+			ElectionTimer: int(config.OvnNorth.ElectionTimer) * 1000,
+			AppCtl:        RunOVNNBAppCtlWithTimeout,
+			DbName:        "OVN_Northbound",
+			DbAlias:       db,
+		}, nil
+	} else if strings.Contains(db, "ovnsb") {
+		return &OvsDbProperties{
+			ElectionTimer: int(config.OvnSouth.ElectionTimer) * 1000,
+			AppCtl:        RunOVNSBAppCtlWithTimeout,
+			DbName:        "OVN_Southbound",
+			DbAlias:       db,
+		}, nil
+	} else {
+		return nil, fmt.Errorf("failed to parse ovn db type Northbound/Southbound from the path %s", db)
+	}
+}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -98,8 +99,8 @@ func TestEnsureLocalRaftServerID(t *testing.T) {
 		return res.res, res.stderr, res.err
 	}
 
-	db := &dbProperties{
-		appCtl: mock,
+	db := &util.OvsDbProperties{
+		AppCtl: mock,
 	}
 
 	tests := []struct {
@@ -226,8 +227,8 @@ func TestEnsureLocalRaftServerID(t *testing.T) {
 				mockCalls[k] = v
 			}
 
-			db.dbName = tc.dbName
-			db.dbAlias = tc.dbAlias
+			db.DbName = tc.dbName
+			db.DbAlias = tc.dbAlias
 
 			err := ensureLocalRaftServerID(db)
 
@@ -270,8 +271,8 @@ func TestEnsureClusterRaftMembership(t *testing.T) {
 		KClient: fakeClient,
 	}
 
-	db := &dbProperties{
-		appCtl: mock,
+	db := &util.OvsDbProperties{
+		AppCtl: mock,
 	}
 	tests := []struct {
 		desc        string
@@ -359,8 +360,8 @@ func TestEnsureClusterRaftMembership(t *testing.T) {
 				mockCalls[k] = v
 			}
 
-			db.dbName = tc.dbName
-			db.dbAlias = tc.dbAlias
+			db.DbName = tc.dbName
+			db.DbAlias = tc.dbAlias
 			err := ensureClusterRaftMembership(db, kubeInterface)
 
 			// fail either if an error is seen but not expected
@@ -402,8 +403,8 @@ func TestEnsureClusterDNSRaftMembership(t *testing.T) {
 		KClient: fakeClient,
 	}
 
-	db := &dbProperties{
-		appCtl: mock,
+	db := &util.OvsDbProperties{
+		AppCtl: mock,
 	}
 	tests := []struct {
 		desc        string
@@ -491,8 +492,8 @@ func TestEnsureClusterDNSRaftMembership(t *testing.T) {
 				mockCalls[k] = v
 			}
 
-			db.dbName = tc.dbName
-			db.dbAlias = tc.dbAlias
+			db.DbName = tc.dbName
+			db.DbAlias = tc.dbAlias
 			err := ensureClusterRaftMembership(db, kubeInterface)
 
 			// fail either if an error is seen but not expected
@@ -525,9 +526,9 @@ func TestEnsureElectionTimeout(t *testing.T) {
 		return res.res, res.stderr, res.err
 	}
 
-	db := &dbProperties{
-		appCtl: mock,
-		dbName: "OVN_Northbound",
+	db := &util.OvsDbProperties{
+		AppCtl: mock,
+		DbName: "OVN_Northbound",
 	}
 	tests := []struct {
 		desc         string
@@ -645,7 +646,7 @@ func TestEnsureElectionTimeout(t *testing.T) {
 				mockCalls[k] = v
 			}
 
-			db.electionTimer = tc.timeout
+			db.ElectionTimer = tc.timeout
 			err := ensureElectionTimeout(db)
 
 			// fail either if an error is seen but not expected
@@ -682,8 +683,8 @@ func TestResetRaftDB(t *testing.T) {
 		return res.res, res.stderr, res.err
 	}
 
-	db := &dbProperties{
-		appCtl: mock,
+	db := &util.OvsDbProperties{
+		AppCtl: mock,
 	}
 	tests := []struct {
 		desc         string
@@ -738,13 +739,13 @@ func TestResetRaftDB(t *testing.T) {
 				mockCalls[k] = v
 			}
 
-			db.dbName = tc.dbName
-			db.dbAlias = filepath.Join(tmpDir, tc.dbAlias)
+			db.DbName = tc.dbName
+			db.DbAlias = filepath.Join(tmpDir, tc.dbAlias)
 
 			// resetRaftDb expects a file with the db alias' name. This can be an
 			// absolute path as well. Create it.
 			if tc.createDbFile {
-				createDbFile(t, db.dbAlias)
+				createDbFile(t, db.DbAlias)
 			}
 			// test resetRaftDb
 			err := resetRaftDB(db)
