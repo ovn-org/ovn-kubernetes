@@ -1238,13 +1238,20 @@ func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, lastPolicy bool) e
 		return true
 	})
 
+	var err error
 	ingressPGName := defaultDenyPortGroup(np.namespace, ingressDefaultDenySuffix)
 	egressPGName := defaultDenyPortGroup(np.namespace, egressDefaultDenySuffix)
 
 	ingressDenyPorts, egressDenyPorts := oc.localPodDelDefaultDeny(np, ports...)
+	defer func() {
+		// In case of error, undo localPodDelDefaultDeny() and restore lspIngressDenyCache/lspEgressDenyCache refcnt.
+		// Deletion will be retried.
+		if err != nil {
+			oc.localPodAddDefaultDeny(np.policy, ports...)
+		}
+	}()
 
 	ops := []ovsdb.Operation{}
-	var err error
 	// we haven't deleted our np from the namespace yet so there should be 1 policy
 	// if there are no more policies left on the namespace
 	if lastPolicy {
@@ -1286,13 +1293,15 @@ func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, lastPolicy bool) e
 
 	// Delete ingress/egress address sets
 	for _, policy := range np.ingressPolicies {
-		if err := policy.destroy(); err != nil {
+		err = policy.destroy()
+		if err != nil {
 			return fmt.Errorf("failed to delete network policy ingress address sets, policy: %s/%s, error: %v",
 				np.namespace, np.name, err)
 		}
 	}
 	for _, policy := range np.egressPolicies {
-		if err := policy.destroy(); err != nil {
+		err = policy.destroy()
+		if err != nil {
 			return fmt.Errorf("failed to delete network policy egress address sets, policy: %s/%s, error: %v",
 				np.namespace, np.name, err)
 		}
