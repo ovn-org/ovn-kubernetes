@@ -139,7 +139,8 @@ func BuildACL(name string, direction nbdb.ACLDirection, priority int, match stri
 	if len(severity) != 0 {
 		realSeverity = &severity
 	}
-	acl := &nbdb.ACL{
+
+	return &nbdb.ACL{
 		Name:        realName,
 		Direction:   direction,
 		Match:       match,
@@ -150,11 +151,6 @@ func BuildACL(name string, direction nbdb.ACLDirection, priority int, match stri
 		Meter:       realMeter,
 		ExternalIDs: externalIds,
 	}
-	if direction == nbdb.ACLDirectionFromLport {
-		acl.Options = map[string]string{"apply-after-lb": "true"}
-	}
-
-	return acl
 }
 
 func createOrUpdateACLOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, acl *nbdb.ACL) ([]libovsdb.Operation, error) {
