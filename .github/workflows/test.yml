@@ -19,20 +19,10 @@ env:
 
   # This must be a directory
   CI_IMAGE_CACHE: /tmp/image_cache/
-  # This must be a directory
-  CI_RUN_LOG_CACHE: /tmp/run_logs/
-  # This must be a file
-  CI_LAST_RUN_STATUS_CACHE: /tmp/last_run_status
-
   CI_IMAGE_MASTER_TAR: image-master.tar
   CI_IMAGE_PR_TAR: image-pr.tar
   CI_DIST_IMAGES_OUTPUT: dist/images/_output/
 
-  CI_LOGS_OVN_UPGRADE: logs_ovn_upgrade.txt
-  CI_LOGS_SHARD_CONFORMANCE: logs_shard_conformance.txt
-  CI_LOGS_GENERIC: logs.txt
-  CI_LOGS_DUAL_STACK: dual_stack_logs.txt
-  CI_LOGS_SINGLE_STACK: single_stack_logs.txt
 
 jobs:
   # separate job for parallelism
@@ -46,7 +36,7 @@ jobs:
     - name: Verify
       uses: golangci/golangci-lint-action@v2
       with:
-        version: v1.33.2
+        version: v1.45.2
         working-directory: go-controller
         args: --modules-download-mode=vendor --timeout=15m0s --verbose
 
@@ -258,83 +248,46 @@ jobs:
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
       OVN_MULTICAST_ENABLE:  "false"
     steps:
-    # This will write to key ${{ env.JOB_NAME }}-${{ github.run_id }}
-    - name: Initialize last run status cache
-      id: last_run_status_cache
-      uses: actions/cache@v2
-      with:
-        path: |
-          ${{ env.CI_LAST_RUN_STATUS_CACHE }}
-        key: ${{ env.JOB_NAME }}-${{ github.run_id }}-last-run-status
-
-    # The last run status comes from the run_cache file in the cache
-    # Verify all of the following steps. Only execute them if the cache does not
-    # contain: steps.last_run_status.outputs.STATUS != 'completed' and if none
-    # of the previous steps have failed
-    - name: Fetch last run status from file in cache
-      id: last_run_status
-      run: |
-        if  [ -f ${CI_LAST_RUN_STATUS_CACHE} ]; then
-            cat ${CI_LAST_RUN_STATUS_CACHE}
-        fi
-
-    # Create a cache for test results
-    - name: Create cache for run logs
-      id: run_log_cache
-      uses: actions/cache@v2
-      with:
-        path: |
-          ${{ env.CI_RUN_LOG_CACHE }}
-        key: ${{ env.JOB_NAME }}-${{ github.run_id }}-run-logs
-
     - name: Set up Go
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       uses: actions/setup-go@v1
       with:
         go-version: ${{ env.GO_VERSION }}
       id: go
 
     - name: Set up environment
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
         export GOPATH=$(go env GOPATH)
         echo "GOPATH=$GOPATH" >> $GITHUB_ENV
         echo "$GOPATH/bin" >> $GITHUB_PATH
 
     - name: Free up disk space
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
 
     - name: Download test-image-master
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       uses: actions/download-artifact@v2
       with:
         name: test-image-master
 
     - name: Disable ufw
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
       # Not needed for KIND deployments, so just disable all the time.
       run: |
         sudo ufw disable
 
     - name: Load docker image
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
         docker load --input ${CI_IMAGE_MASTER_TAR}
 
     - name: Check out code into the Go module directory - from PR branch
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       uses: actions/checkout@v2
 
     - name: kind setup
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
         export OVN_IMAGE="ovn-daemonset-f:dev"
         make -C test install-kind
 
     - name: Export kind logs
-      if: steps.last_run_status.outputs.STATUS != 'completed' && always()
+      if: always()
       run: |
         mkdir -p /tmp/kind/logs
         kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
@@ -345,68 +298,42 @@ jobs:
         docker exec ovn-worker2 crictl images 
 
     - name: Upload kind logs
-      if: steps.last_run_status.outputs.STATUS != 'completed' && always()
+      if: always()
       uses: actions/upload-artifact@v2
       with:
         name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/logs
 
     - name: Download test-image-pr
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       uses: actions/download-artifact@v2
       with:
         name: test-image-pr
 
     - name: Load docker image
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
         docker load --input ${CI_IMAGE_PR_TAR}
 
     - name: ovn upgrade
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
-        mkdir -p ${CI_RUN_LOG_CACHE}
-        exec > >(tee -a ${CI_RUN_LOG_CACHE}/${CI_LOGS_OVN_UPGRADE}) 2>&1
         export OVN_IMAGE="ovn-daemonset-f:pr"
         make -C test upgrade-ovn
 
     - name: Run E2E shard-conformance
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
-        mkdir -p ${CI_RUN_LOG_CACHE}
-        exec > >(tee -a ${CI_RUN_LOG_CACHE}/${CI_LOGS_SHARD_CONFORMANCE}) 2>&1
         make -C test shard-conformance
 
     - name: Export kind logs
-      if: steps.last_run_status.outputs.STATUS != 'completed' && always()
+      if: always()
       run: |
         mkdir -p /tmp/kind/logs-kind-pr-branch
         kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs-kind-pr-branch
 
     - name: Upload kind logs
-      if: steps.last_run_status.outputs.STATUS != 'completed' && always()
+      if: always()
       uses: actions/upload-artifact@v2
       with:
         name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}-after-upgrade
         path: /tmp/kind/logs-kind-pr-branch
-
-    # The following steps will run if the job is marked completed and no step failed
-    - name: Display run logs from successful tests
-      if: steps.last_run_status.outputs.STATUS == 'completed' && success()
-      continue-on-error: true
-      run: |
-        if  [ -f ${CI_RUN_LOG_CACHE}/${CI_LOGS_OVN_UPGRADE} ]; then
-            cat ${CI_RUN_LOG_CACHE}/${CI_LOGS_OVN_UPGRADE}
-        fi
-        if  [ -f ${CI_RUN_LOG_CACHE}/${CI_LOGS_SHARD_CONFORMANCE} ]; then
-            cat ${CI_RUN_LOG_CACHE}/${CI_LOGS_SHARD_CONFORMANCE}
-        fi
-
-    # This will set the name=STATUS to 'completed' if none of the above steps
-    # failed
-    - name: Set last run status to completed
-      run: |
-        echo '::set-output name=STATUS::completed' > ${CI_LAST_RUN_STATUS_CACHE}
 
   e2e:
     name: e2e
@@ -463,52 +390,20 @@ jobs:
       KIND_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
       KIND_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
     steps:
-    # This will write to key ${{ env.JOB_NAME }}-${{ github.run_id }}
-    - name: Initialize last run status cache
-      id: last_run_status_cache
-      uses: actions/cache@v2
-      with:
-        path: |
-          ${{ env.CI_LAST_RUN_STATUS_CACHE }}
-        key: ${{ env.JOB_NAME }}-${{ github.run_id }}-last-run-status
-
-    # The last run status comes from the run_cache file in the cache
-    # Verify all of the following steps. Only execute them if the cache does not
-    # contain: steps.last_run_status.outputs.STATUS != 'completed' and if none
-    # of the previous steps have failed
-    - name: Fetch last run status from file in cache
-      id: last_run_status
-      run: |
-        if  [ -f ${CI_LAST_RUN_STATUS_CACHE} ]; then
-            cat ${CI_LAST_RUN_STATUS_CACHE}
-        fi
-
-    # Create a cache for test results
-    - name: Create cache for run logs
-      id: run_log_cache
-      uses: actions/cache@v2
-      with:
-        path: |
-          ${{ env.CI_RUN_LOG_CACHE }}
-        key: ${{ env.JOB_NAME }}-${{ github.run_id }}-run-logs
 
     - name: Free up disk space
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
 
     - name: Set up Go
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       uses: actions/setup-go@v2
       with:
         go-version: ${{ env.GO_VERSION }}
       id: go
 
     - name: Check out code into the Go module directory
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       uses: actions/checkout@v2
 
     - name: Set up environment
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
         export GOPATH=$(go env GOPATH)
         echo "GOPATH=$GOPATH" >> $GITHUB_ENV
@@ -519,75 +414,52 @@ jobs:
         fi
 
     - name: Disable ufw
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
       # Not needed for KIND deployments, so just disable all the time.
       run: |
         sudo ufw disable
 
     - name: Download test-image-pr
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       uses: actions/download-artifact@v2
       with:
         name: test-image-pr
 
     - name: Load docker image
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
         docker load --input ${CI_IMAGE_PR_TAR}
 
     - name: kind setup
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       timeout-minutes: 30
       run: |
         export OVN_IMAGE="ovn-daemonset-f:pr"
         make -C test install-kind
 
     - name: Run Tests
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       # e2e tests take ~60 minutes normally, 90 should be more than enough
       # set 2 1/2 hours for control-plane tests as these might take a while
       timeout-minutes: ${{ matrix.target == 'control-plane' && 150 || 90 }}
       run: |
-        mkdir -p ${CI_RUN_LOG_CACHE}
-        exec > >(tee -a ${CI_RUN_LOG_CACHE}/${CI_LOGS_GENERIC}) 2>&1
         make -C test ${{ matrix.target }}
 
-    # The following steps will always run unless the job is marked as completed
     - name: Upload Junit Reports
-      if: steps.last_run_status.outputs.STATUS != 'completed' && always()
+      if: always()
       uses: actions/upload-artifact@v2
       with:
         name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: './test/_artifacts/*.xml'
 
     - name: Export kind logs
-      if: steps.last_run_status.outputs.STATUS != 'completed' && always()
+      if: always()
       run: |
         mkdir -p /tmp/kind/logs
         kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
 
     - name: Upload kind logs
-      if: steps.last_run_status.outputs.STATUS != 'completed' && always()
+      if: always()
       uses: actions/upload-artifact@v2
       with:
         name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/logs
-
-    # The following steps will run if the job is marked completed and no step failed
-    - name: Display run logs from successful tests
-      if: steps.last_run_status.outputs.STATUS == 'completed' && success()
-      continue-on-error: true
-      run: |
-        if  [ -f ${CI_RUN_LOG_CACHE}/${CI_LOGS_GENERIC} ]; then
-            cat ${CI_RUN_LOG_CACHE}/${CI_LOGS_GENERIC}
-        fi
-
-    # This will set the name=STATUS to 'completed' if none of the above steps
-    # failed
-    - name: Set last run status to completed
-      run: |
-        echo '::set-output name=STATUS::completed' > ${CI_LAST_RUN_STATUS_CACHE}
 
   e2e-dual-conversion:
     name: e2e-dual-conversion
@@ -608,144 +480,81 @@ jobs:
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
       OVN_MULTICAST_ENABLE:  "false"
     steps:
-    # This will write to key ${{ env.JOB_NAME }}-${{ github.run_id }}
-    - name: Initialize last run status cache
-      id: last_run_status_cache
-      uses: actions/cache@v2
-      with:
-        path: |
-          ${{ env.CI_LAST_RUN_STATUS_CACHE }}
-        key: ${{ env.JOB_NAME }}-${{ github.run_id }}-last-run-status
-
-    # The last run status comes from the run_cache file in the cache
-    # Verify all of the following steps. Only execute them if the cache does not
-    # contain: steps.last_run_status.outputs.STATUS != 'completed' and if none
-    # of the previous steps have failed
-    - name: Fetch last run status from file in cache
-      id: last_run_status
-      run: |
-        if  [ -f ${CI_LAST_RUN_STATUS_CACHE} ]; then
-            cat ${CI_LAST_RUN_STATUS_CACHE}
-        fi
-
-    # Create a cache for test results
-    - name: Create cache for run logs
-      id: run_log_cache
-      uses: actions/cache@v2
-      with:
-        path: |
-          ${{ env.CI_RUN_LOG_CACHE }}
-        key: ${{ env.JOB_NAME }}-${{ github.run_id }}-run-logs
 
     - name: Set up Go
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       uses: actions/setup-go@v2
       with:
         go-version: ${{ env.GO_VERSION }}
       id: go
 
     - name: Check out code into the Go module directory
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       uses: actions/checkout@v2
 
     - name: Set up environment
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
         export GOPATH=$(go env GOPATH)
         echo "GOPATH=$GOPATH" >> $GITHUB_ENV
         echo "$GOPATH/bin" >> $GITHUB_PATH
 
     - name: Disable ufw
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
       # Not needed for KIND deployments, so just disable all the time.
       run: |
         sudo ufw disable
 
     - name: Download test-image-pr
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       uses: actions/download-artifact@v2
       with:
         name: test-image-pr
 
     - name: Load docker image
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
         docker load --input ${CI_IMAGE_PR_TAR}
 
     - name: kind IPv4 setup
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
         export OVN_IMAGE="ovn-daemonset-f:pr"
         make -C test install-kind
 
     - name: Run Single-Stack Tests
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
-        mkdir -p ${CI_RUN_LOG_CACHE}
-        exec > >(tee -a ${CI_RUN_LOG_CACHE}/${CI_LOGS_SINGLE_STACK}) 2>&1
         make -C test shard-test WHAT="Networking Granular Checks"
 
     - name: Convert IPv4 cluster to Dual Stack
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
         ./contrib/kind-dual-stack-conversion.sh
 
     - name: Run Dual-Stack Tests
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
-        mkdir -p ${CI_RUN_LOG_CACHE}
-        exec > >(tee -a ${CI_RUN_LOG_CACHE}/${CI_LOGS_DUAL_STACK}) 2>&1
         KIND_IPV4_SUPPORT="true"
         KIND_IPV6_SUPPORT="true"
         make -C test shard-test WHAT="Networking Granular Checks\|DualStack"
 
     - name: Run Dual-Stack Control-Plane Tests
-      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       run: |
-        mkdir -p ${CI_RUN_LOG_CACHE}
-        exec > >(tee -a ${CI_RUN_LOG_CACHE}/${CI_LOGS_DUAL_STACK}) 2>&1
         KIND_IPV4_SUPPORT="true"
         KIND_IPV6_SUPPORT="true"
         make -C test control-plane WHAT="DualStack"
 
     - name: Upload Junit Reports
-      if: steps.last_run_status.outputs.STATUS != 'completed' && always()
+      if: always()
       uses: actions/upload-artifact@v2
       with:
         name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: './test/_artifacts/*.xml'
 
     - name: Export kind logs
-      if: steps.last_run_status.outputs.STATUS != 'completed' && always()
+      if: always()
       run: |
         mkdir -p /tmp/kind/logs
         kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
 
     - name: Upload kind logs
-      if: steps.last_run_status.outputs.STATUS != 'completed' && always()
+      if: always()
       uses: actions/upload-artifact@v2
       with:
         name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/logs
-
-    # The following steps will run if the job is marked completed and no step failed
-    - name: Display run logs from successful tests
-      if: steps.last_run_status.outputs.STATUS == 'completed' && success()
-      continue-on-error: true
-      run: |
-        if  [ -f ${CI_RUN_LOG_CACHE}/${CI_LOGS_SINGLE_STACK} ]; then
-            cat ${CI_RUN_LOG_CACHE}/${CI_LOGS_SINGLE_STACK}
-        fi
-        if  [ -f ${CI_RUN_LOG_CACHE}/${CI_LOGS_DUAL_STACK} ]; then
-            cat ${CI_RUN_LOG_CACHE}/${CI_LOGS_DUAL_STACK}
-        fi
-
-    # This will set the name=STATUS to 'completed' if none of the above steps
-    # failed
-    - name: Set last run status to completed
-      run: |
-        echo '::set-output name=STATUS::completed' > ${CI_LAST_RUN_STATUS_CACHE}
 
   e2e-periodic:
     name: e2e-periodic

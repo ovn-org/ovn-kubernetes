@@ -121,7 +121,7 @@ func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayIn
 	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nsInfo.hybridOverlayExternalGW, ops, nil
 }
 
-func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) ([]ovsdb.Operation, error) {
+func (oc *Controller) deletePodFromNamespace(ns string, podIfAddrs []*net.IPNet, portUUID string) ([]ovsdb.Operation, error) {
 	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
 	if nsInfo == nil {
 		return nil, nil
@@ -130,14 +130,14 @@ func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) ([]ovs
 	var ops []ovsdb.Operation
 	var err error
 	if nsInfo.addressSet != nil {
-		if ops, err = nsInfo.addressSet.DeleteIPsReturnOps(createIPAddressSlice(portInfo.ips)); err != nil {
+		if ops, err = nsInfo.addressSet.DeleteIPsReturnOps(createIPAddressSlice(podIfAddrs)); err != nil {
 			return nil, err
 		}
 	}
 
 	// Remove the port from the multicast allow policy.
-	if oc.multicastSupport && nsInfo.multicastEnabled {
-		if err = podDeleteAllowMulticastPolicy(oc.nbClient, ns, portInfo); err != nil {
+	if oc.multicastSupport && nsInfo.multicastEnabled && len(portUUID) > 0 {
+		if err = podDeleteAllowMulticastPolicy(oc.nbClient, ns, portUUID); err != nil {
 			return nil, err
 		}
 	}
@@ -312,20 +312,30 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 				}
 				for _, pod := range existingPods {
 					logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
-					portInfo, err := oc.logicalPortCache.get(logicalPort)
+					if !util.PodWantsNetwork(pod) {
+						continue
+					}
+					podIPs, err := util.GetAllPodIPs(pod)
 					if err != nil {
-						klog.Warningf("Unable to get port %s in cache for SNAT rule removal", logicalPort)
-					} else {
+						klog.Warningf("Unable to get pod %q IPs for SNAT rule removal", logicalPort)
+					}
+					ips := make([]*net.IPNet, 0, len(podIPs))
+					for _, podIP := range podIPs {
+						ips = append(ips, &net.IPNet{IP: podIP})
+					}
+					if len(ips) > 0 {
 						if extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName); err != nil {
 							klog.Error(err.Error())
-						} else if err = deletePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, portInfo.ips); err != nil {
+						} else if err = deletePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, ips); err != nil {
 							klog.Error(err.Error())
 						}
 					}
 				}
 			}
 		} else {
-			oc.deleteGWRoutesForNamespace(old.Name, nil)
+			if err := oc.deleteGWRoutesForNamespace(old.Name, nil); err != nil {
+				klog.Error(err.Error())
+			}
 			nsInfo.routingExternalGWs = gatewayInfo{}
 		}
 		exGateways, err := parseRoutingExternalGWAnnotation(gwAnnotation)
@@ -421,7 +431,9 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 			delete(nsInfo.networkPolicies, np.name)
 		}
 	}
-	oc.deleteGWRoutesForNamespace(ns.Name, nil)
+	if err := oc.deleteGWRoutesForNamespace(ns.Name, nil); err != nil {
+		klog.Errorf("Failed to delete GW routes for namespace: %s, error: %v", ns.Name, err)
+	}
 	oc.multicastDeleteNamespace(ns, nsInfo)
 }
 

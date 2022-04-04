@@ -95,9 +95,13 @@ func (n *NodeController) AddPod(pod *kapi.Pod) error {
 	if !util.PodWantsNetwork(pod) {
 		return nil
 	}
+	if util.PodCompleted(pod) {
+		klog.Infof("Cleaning up hybrid overlay pod %s/%s because it has completed", pod.Namespace, pod.Name)
+		return n.DeletePod(pod)
+	}
 	podIPs, podMAC, err := getPodDetails(pod)
 	if err != nil {
-		klog.V(5).Infof("Cleaning up hybrid overlay pod %s/%s because %v", pod.Namespace, pod.Name, err)
+		klog.Warningf("Cleaning up hybrid overlay pod %s/%s because it has no OVN annotation %v", pod.Namespace, pod.Name, err)
 		return n.DeletePod(pod)
 	}
 

@@ -52,7 +52,7 @@ func (oc *Controller) reportTopologyVersion(ctx context.Context) error {
 		ExternalIDs: logicalRouterRes[0].ExternalIDs,
 	}
 	opModel := libovsdbops.OperationModel{
-		Name:           logicalRouter.Name,
+		Name:           &logicalRouter.Name,
 		Model:          &logicalRouter,
 		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == ovntypes.OVNClusterRouter },
 		OnModelUpdates: []interface{}{
