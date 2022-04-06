@@ -1210,10 +1210,15 @@ func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy, np *networ
 	defer nsUnlock()
 
 	// try to use the more official np found in nsInfo
-	if foundNp := nsInfo.networkPolicies[policy.Name]; foundNp != nil {
+	// also, if this is called during the process of the policy creation, the current network policy
+	// may not be added to nsInfo.networkPolicies yet.
+	expectedLastPolicyNum := 0
+	foundNp, ok := nsInfo.networkPolicies[policy.Name]
+	if ok {
+		expectedLastPolicyNum = 1
 		np = foundNp
 	}
-	isLastPolicyInNamespace := len(nsInfo.networkPolicies) == 1
+	isLastPolicyInNamespace := len(nsInfo.networkPolicies) == expectedLastPolicyNum
 	if err := oc.destroyNetworkPolicy(np, isLastPolicyInNamespace); err != nil {
 		return fmt.Errorf("failed to destroy network policy: %s/%s", policy.Namespace, policy.Name)
 	}
