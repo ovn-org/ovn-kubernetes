@@ -75,6 +75,7 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 		kconfig = &rest.Config{
 			Host:            conf.APIServer,
 			BearerToken:     conf.Token,
+			BearerTokenFile: conf.TokenFile,
 			TLSClientConfig: rest.TLSClientConfig{CAData: conf.CAData},
 		}
 	} else if strings.HasPrefix(conf.APIServer, "http") {
@@ -214,6 +215,11 @@ func GetNodePrimaryIP(node *kapi.Node) (string, error) {
 // needs to be setup
 func PodWantsNetwork(pod *kapi.Pod) bool {
 	return !pod.Spec.HostNetwork
+}
+
+// PodCompleted checks if the pod is marked as completed (in a terminal state)
+func PodCompleted(pod *kapi.Pod) bool {
+	return pod.Status.Phase == kapi.PodSucceeded || pod.Status.Phase == kapi.PodFailed
 }
 
 // PodScheduled returns if the given pod is scheduled

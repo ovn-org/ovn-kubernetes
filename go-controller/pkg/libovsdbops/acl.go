@@ -124,7 +124,7 @@ func ensureACLUUID(acl *nbdb.ACL) {
 	}
 }
 
-func BuildACL(name string, direction nbdb.ACLDirection, priority int, match string, action nbdb.ACLAction, meter string, severity nbdb.ACLSeverity, log bool, externalIds map[string]string) *nbdb.ACL {
+func BuildACL(name string, direction nbdb.ACLDirection, priority int, match string, action nbdb.ACLAction, meter string, severity nbdb.ACLSeverity, log bool, externalIds map[string]string, options map[string]string) *nbdb.ACL {
 	name = fmt.Sprintf("%.63s", name)
 
 	var realName *string
@@ -149,9 +149,7 @@ func BuildACL(name string, direction nbdb.ACLDirection, priority int, match stri
 		Log:         log,
 		Meter:       realMeter,
 		ExternalIDs: externalIds,
-	}
-	if direction == nbdb.ACLDirectionFromLport {
-		acl.Options = map[string]string{"apply-after-lb": "true"}
+		Options:     options,
 	}
 
 	return acl

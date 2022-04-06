@@ -189,7 +189,9 @@ func (oc *Controller) syncNetworkPoliciesRetriable(networkPolicies []interface{}
 		if err != nil {
 			return fmt.Errorf("cannot update old Egress NetworkPolicy ACLs: %v", err)
 		}
+
 	}
+
 	return nil
 }
 
@@ -200,7 +202,7 @@ func addAllowACLFromNode(nodeName string, mgmtPortIP net.IP, nbClient libovsdbcl
 	}
 	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtPortIP.String())
 
-	nodeACL := libovsdbops.BuildACL("", types.DirectionToLPort, types.DefaultAllowPriority, match, "allow-related", "", "", false, nil)
+	nodeACL := libovsdbops.BuildACL("", types.DirectionToLPort, types.DefaultAllowPriority, match, "allow-related", "", "", false, nil, nil)
 
 	if err := libovsdbops.AddACLToNodeSwitch(nbClient, nodeName, nodeACL); err != nil {
 		return fmt.Errorf("failed to add acl to allow node sourced traffic err: %v", err)
@@ -237,6 +239,7 @@ func namespacePortGroupACLName(namespace, portGroup, name string) string {
 }
 
 func buildACL(namespace, portGroup, name, direction string, priority int, match, action, aclLogging string, policyType knet.PolicyType) *nbdb.ACL {
+	var options map[string]string
 	aclName := namespacePortGroupACLName(namespace, portGroup, name)
 	log := aclLogging != ""
 	severity := getACLLoggingSeverity(aclLogging)
@@ -247,8 +250,13 @@ func buildACL(namespace, portGroup, name, direction string, priority int, match,
 			defaultDenyPolicyTypeACLExtIdKey: string(policyType),
 		}
 	}
+	if policyType == knet.PolicyTypeEgress {
+		options = map[string]string{
+			"apply-after-lb": "true",
+		}
+	}
 
-	return libovsdbops.BuildACL(aclName, direction, priority, match, action, meter, severity, log, externalIds)
+	return libovsdbops.BuildACL(aclName, direction, priority, match, action, meter, severity, log, externalIds, options)
 }
 
 func defaultDenyPortGroup(namespace, gressSuffix string) string {
@@ -257,7 +265,7 @@ func defaultDenyPortGroup(namespace, gressSuffix string) string {
 
 func buildDenyACLs(namespace, policy, pg, aclLogging string, policyType knet.PolicyType) (denyACL, allowACL *nbdb.ACL) {
 	denyMatch := getACLMatch(pg, "", policyType)
-	allowMatch := getACLMatch(pg, "arp", policyType)
+	allowMatch := getACLMatch(pg, "(arp || nd)", policyType)
 	if policyType == knet.PolicyTypeIngress {
 		denyACL = buildACL(namespace, pg, policy, nbdb.ACLDirectionToLport, types.DefaultDenyPriority, denyMatch, nbdb.ACLActionDrop, aclLogging, policyType)
 		allowACL = buildACL(namespace, pg, "ARPallowPolicy", nbdb.ACLDirectionToLport, types.DefaultAllowPriority, allowMatch, nbdb.ACLActionAllow, "", policyType)
@@ -453,6 +461,9 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 		klog.Warningf("Failed to get pods for namespace %q: %v", ns, err)
 	}
 	for _, pod := range pods {
+		if util.PodCompleted(pod) {
+			continue
+		}
 		portName := util.GetLogicalPortName(pod.Namespace, pod.Name)
 		if portInfo, err := oc.logicalPortCache.get(portName); err != nil {
 			klog.Errorf(err.Error())
@@ -585,8 +596,8 @@ func podAddAllowMulticastPolicy(nbClient libovsdbclient.Client, ns string, portI
 // podDeleteAllowMulticastPolicy removes the pod's logical switch port from the
 // namespace's multicast port group. Caller must hold the namespace's
 // namespaceInfo object lock.
-func podDeleteAllowMulticastPolicy(nbClient libovsdbclient.Client, ns string, portInfo *lpInfo) error {
-	return libovsdbops.DeletePortsFromPortGroup(nbClient, hashedPortGroup(ns), portInfo.uuid)
+func podDeleteAllowMulticastPolicy(nbClient libovsdbclient.Client, ns string, portUUID string) error {
+	return libovsdbops.DeletePortsFromPortGroup(nbClient, hashedPortGroup(ns), portUUID)
 }
 
 // localPodAddDefaultDeny ensures ports (i.e. pods) are in the correct
@@ -753,6 +764,11 @@ func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
 	for _, obj := range objs {
 		pod := obj.(*kapi.Pod)
 
+		if util.PodCompleted(pod) {
+			// if pod is completed, do not add it to NP port group
+			continue
+		}
+
 		getPolicyPortsWg.Add(1)
 		go getPortInfo(pod)
 	}
@@ -897,7 +913,12 @@ func (oc *Controller) handleLocalPodSelector(
 				oc.handleLocalPodSelectorDelFunc(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, obj)
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				oc.handleLocalPodSelectorAddFunc(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, newObj)
+				pod := newObj.(*kapi.Pod)
+				if util.PodCompleted(pod) {
+					oc.handleLocalPodSelectorDelFunc(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, oldObj)
+				} else {
+					oc.handleLocalPodSelectorAddFunc(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, newObj)
+				}
 			},
 		}, func(objs []interface{}) {
 			handleInitialItems(objs)
@@ -1384,7 +1405,12 @@ func (oc *Controller) handlePeerPodSelector(
 				oc.handlePeerPodSelectorDelete(gp, obj)
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				oc.handlePeerPodSelectorAddUpdate(gp, newObj)
+				pod := newObj.(*kapi.Pod)
+				if util.PodCompleted(pod) {
+					oc.handlePeerPodSelectorDelete(gp, oldObj)
+				} else {
+					oc.handlePeerPodSelectorAddUpdate(gp, newObj)
+				}
 			},
 		}, func(objs []interface{}) {
 			oc.handlePeerPodSelectorAddUpdate(gp, objs...)
@@ -1424,7 +1450,12 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 							oc.handlePeerPodSelectorDelete(gp, obj)
 						},
 						UpdateFunc: func(oldObj, newObj interface{}) {
-							oc.handlePeerPodSelectorAddUpdate(gp, newObj)
+							pod := oldObj.(*kapi.Pod)
+							if util.PodCompleted(pod) {
+								oc.handlePeerPodSelectorDelete(gp, oldObj)
+							} else {
+								oc.handlePeerPodSelectorAddUpdate(gp, newObj)
+							}
 						},
 					}, func(objs []interface{}) {
 						oc.handlePeerPodSelectorAddUpdate(gp, objs...)

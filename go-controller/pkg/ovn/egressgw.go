@@ -222,23 +222,10 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 	if err != nil {
 		return fmt.Errorf("failed to get all the pods (%v)", err)
 	}
-	// TODO (trozet): use the go bindings here and batch commands
 	for _, pod := range existingPods {
-		podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
-		if config.Gateway.DisableSNATMultipleGWs {
-			logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
-			portInfo, err := oc.logicalPortCache.get(logicalPort)
-			if err != nil {
-				klog.Warningf("Unable to get port %s in cache for SNAT rule removal", logicalPort)
-			} else {
-				// delete all perPodSNATs (if this pod was controlled by egressIP controller, it will stop working since
-				// a pod cannot be used for multiple-external-gateways and egressIPs at the same time)
-				if err = deletePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, []*net.IPNet{}, portInfo.ips); err != nil {
-					klog.Error(err.Error())
-				}
-			}
+		if util.PodCompleted(pod) || !util.PodWantsNetwork(pod) {
+			continue
 		}
-
 		podIPs := make([]*net.IPNet, 0)
 		for _, podIP := range pod.Status.PodIPs {
 			cidr := podIP.IP + GetIPFullMask(podIP.IP)
@@ -248,6 +235,18 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 			}
 			podIPs = append(podIPs, ipNet)
 		}
+		if len(podIPs) == 0 {
+			klog.Warningf("Will not add gateway routes pod %s/%s. IPs not found!", pod.Namespace, pod.Name)
+			continue
+		}
+		if config.Gateway.DisableSNATMultipleGWs {
+			// delete all perPodSNATs (if this pod was controlled by egressIP controller, it will stop working since
+			// a pod cannot be used for multiple-external-gateways and egressIPs at the same time)
+			if err = deletePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, []*net.IPNet{}, podIPs); err != nil {
+				klog.Error(err.Error())
+			}
+		}
+		podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
 		if err := oc.addGWRoutesForPod([]*gatewayInfo{&egress}, podIPs, podNsName, pod.Spec.NodeName); err != nil {
 			return err
 		}
@@ -296,7 +295,7 @@ func (oc *Controller) createBFDStaticRoute(bfdEnabled bool, gw net.IP, podIP, gr
 				}
 			},
 		}, {
-			Name:  logicalRouter.Name,
+			Name:  &logicalRouter.Name,
 			Model: &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
 				return lr.Name == gr
@@ -364,7 +363,7 @@ func (oc *Controller) deletePodGWRoute(routeInfo *externalRouteInfo, podIP, gw, 
 	node := util.GetWorkerFromGatewayRouter(gr)
 	if entry := routeInfo.podExternalRoutes[podIP]; len(entry) == 0 {
 		if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
-			return err
+			return fmt.Errorf("unable to delete hybrid route policy for pod %s: err: %v", routeInfo.podName, err)
 		}
 	}
 
@@ -377,23 +376,27 @@ func (oc *Controller) deletePodGWRoute(routeInfo *externalRouteInfo, podIP, gw, 
 
 // deletePodExternalGW detects if a given pod is acting as an external GW and removes all routes in all namespaces
 // associated with that pod
-func (oc *Controller) deletePodExternalGW(pod *kapi.Pod) {
+func (oc *Controller) deletePodExternalGW(pod *kapi.Pod) (err error) {
 	podRoutingNamespaceAnno := pod.Annotations[routingNamespaceAnnotation]
 	if podRoutingNamespaceAnno == "" {
-		return
+		return nil
 	}
 	klog.Infof("Deleting routes for external gateway pod: %s, for namespace(s) %s", pod.Name,
 		podRoutingNamespaceAnno)
 	for _, namespace := range strings.Split(podRoutingNamespaceAnno, ",") {
-		oc.deletePodGWRoutesForNamespace(pod, namespace)
+		if err := oc.deletePodGWRoutesForNamespace(pod, namespace); err != nil {
+			// if we encounter error while deleting things in one namespace we return and don't try subsequent namespaces
+			return fmt.Errorf("failed to delete ecmp routes for pod %s in namespace %s", pod.Name, namespace)
+		}
 	}
+	return nil
 }
 
 // deletePodGwRoutesForNamespace handles deleting all routes in a namespace for a specific pod GW
-func (oc *Controller) deletePodGWRoutesForNamespace(pod *kapi.Pod, namespace string) {
+func (oc *Controller) deletePodGWRoutesForNamespace(pod *kapi.Pod, namespace string) (err error) {
 	nsInfo, nsUnlock := oc.getNamespaceLocked(namespace, false)
 	if nsInfo == nil {
-		return
+		return nil
 	}
 	podGWKey := makePodGWKey(pod)
 	// check if any gateways were stored for this pod
@@ -404,20 +407,28 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod *kapi.Pod, namespace str
 	if !ok || len(foundGws.gws) == 0 {
 		klog.Infof("No gateways found to remove for annotated gateway pod: %s on namespace: %s",
 			pod, namespace)
-		return
+		return nil
 	}
 
 	gws := sets.NewString()
 	for _, gwIP := range foundGws.gws {
 		gws.Insert(gwIP.String())
 	}
-	oc.deleteGWRoutesForNamespace(namespace, gws)
+	if err := oc.deleteGWRoutesForNamespace(namespace, gws); err != nil {
+		// add the entry back to nsInfo for retrying later
+		nsInfo, nsUnlock := oc.getNamespaceLocked(namespace, false)
+		// we add back all the gw routes as we don't know which specific route for which pod error-ed out
+		nsInfo.routingExternalPodGWs[podGWKey] = foundGws
+		nsUnlock()
+		return fmt.Errorf("failed to delete GW routes for pod %s: %w", pod.Name, err)
+	}
+	return nil
 }
 
 // deleteGwRoutesForNamespace handles deleting routes to gateways for a pod on a specific GR.
 // If a set of gateways is given, only routes for that gateway are deleted. If no gateways
 // are given, all routes for the namespace are deleted.
-func (oc *Controller) deleteGWRoutesForNamespace(namespace string, matchGWs sets.String) {
+func (oc *Controller) deleteGWRoutesForNamespace(namespace string, matchGWs sets.String) error {
 	deleteAll := (matchGWs == nil || matchGWs.Len() == 0)
 	for _, routeInfo := range oc.getRouteInfosForNamespace(namespace) {
 		routeInfo.Lock()
@@ -429,8 +440,9 @@ func (oc *Controller) deleteGWRoutesForNamespace(namespace string, matchGWs sets
 			for gw, gr := range routes {
 				if deleteAll || matchGWs.Has(gw) {
 					if err := oc.deletePodGWRoute(routeInfo, podIP, gw, gr); err != nil {
-						klog.Errorf(err.Error())
-						continue
+						// if we encounter error while deleting routes for one pod; we return and don't try subsequent pods
+						routeInfo.Unlock()
+						return fmt.Errorf("delete pod GW route failed: %w", err)
 					}
 					delete(routes, gw)
 				}
@@ -438,13 +450,14 @@ func (oc *Controller) deleteGWRoutesForNamespace(namespace string, matchGWs sets
 		}
 		routeInfo.Unlock()
 	}
+	return nil
 }
 
 // deleteGwRoutesForPod handles deleting all routes to gateways for a pod IP on a specific GR
-func (oc *Controller) deleteGWRoutesForPod(name ktypes.NamespacedName, podIPNets []*net.IPNet) {
+func (oc *Controller) deleteGWRoutesForPod(name ktypes.NamespacedName, podIPNets []*net.IPNet) (err error) {
 	routeInfo := oc.deleteRouteInfoLocked(name)
 	if routeInfo == nil {
-		return
+		return nil
 	}
 	defer routeInfo.Unlock()
 
@@ -460,12 +473,13 @@ func (oc *Controller) deleteGWRoutesForPod(name ktypes.NamespacedName, podIPNets
 		}
 		for gw, gr := range routes {
 			if err := oc.deletePodGWRoute(routeInfo, podIP, gw, gr); err != nil {
-				klog.Errorf(err.Error())
-				continue
+				// if we encounter error while deleting routes for one pod; we return and don't try subsequent pods
+				return fmt.Errorf("delete pod GW route failed: %w", err)
 			}
 			delete(routes, gw)
 		}
 	}
+	return nil
 }
 
 // addEgressGwRoutesForPod handles adding all routes to gateways for a pod on a specific GR
@@ -683,7 +697,7 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 				},
 			},
 			{
-				Name:           logicalRouter.Name,
+				Name:           &logicalRouter.Name,
 				Model:          &logicalRouter,
 				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
 				OnModelMutations: []interface{}{
@@ -1053,7 +1067,7 @@ func (oc *Controller) cleanExGwECMPRoutes() {
 						ovnRoute, err)
 				} else {
 					if err := oc.cleanUpBFDEntry(ovnRoute.nextHop, ovnRoute.router, prefix); err != nil {
-						klog.Errorf(err.Error())
+						klog.Errorf("Cannot clean up BFD entry: %w", err)
 					}
 				}
 

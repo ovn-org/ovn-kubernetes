@@ -21,7 +21,7 @@ require (
 	github.com/onsi/gomega v1.14.0
 	github.com/openshift/api v0.0.0-20211201215911-5a82bae32e46
 	github.com/openshift/client-go v0.0.0-20211202194848-d3f186f2d366
-	github.com/ovn-org/libovsdb v0.6.1-0.20220225160119-c8b4494412b1
+	github.com/ovn-org/libovsdb v0.6.1-0.20220328142833-2cbe2d093e12
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.11.0
 	github.com/spf13/afero v1.4.1
@@ -52,8 +52,8 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
 	github.com/fsnotify/fsnotify v1.4.9 // indirect
-	github.com/go-logr/logr v1.2.0 // indirect
-	github.com/go-logr/stdr v1.1.0 // indirect
+	github.com/go-logr/logr v1.2.2 // indirect
+	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.2 // indirect

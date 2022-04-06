@@ -277,6 +277,9 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 							return err
 						}
 					}
+					if util.PodCompleted(pod) {
+						continue
+					}
 					if newPodSelector.Matches(podLabels) && !oldPodSelector.Matches(podLabels) {
 						if err := oc.addPodEgressIPAssignments(name, newEIP.Status.Items, pod); err != nil {
 							return err
@@ -1308,6 +1311,10 @@ func (oc *Controller) generateCacheForEgressIP(eIPs []interface{}) (map[string]e
 				continue
 			}
 			for _, pod := range pods {
+				if util.PodCompleted(pod) {
+					continue
+				}
+				// FIXME(trozet): potential race where pod is not yet added in the cache by the pod handler
 				logicalPort, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name))
 				if err != nil {
 					klog.Errorf("Error getting logical port %s, err: %v", util.GetLogicalPortName(pod.Namespace, pod.Name), err)
@@ -1944,7 +1951,7 @@ func (e *egressIPController) createEgressReroutePolicy(filterOption, egressIPNam
 			},
 		},
 		{
-			Name:           logicalRouter.Name,
+			Name:           &logicalRouter.Name,
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
 			OnModelMutations: []interface{}{
@@ -2279,7 +2286,7 @@ func (oc *Controller) createLogicalRouterPolicy(match string, priority int) erro
 			},
 		},
 		{
-			Name:           logicalRouter.Name,
+			Name:           &logicalRouter.Name,
 			Model:          &logicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
 			OnModelMutations: []interface{}{
