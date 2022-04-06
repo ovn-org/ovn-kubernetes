@@ -93,7 +93,7 @@ cookie=0xdeff105, duration=3189.787s, table=1, n_packets=108, n_bytes=23004, pri
 3. In the host, we have an IPtable rule in the PREROUTING chain that DNATs this packet matched on nodePort to a masqueradeIP (169.254.169.3) used specially for this traffic flow.
 
 ```
-[3:180] -A OVN-KUBE-NODEPORT -p tcp -m addrtype --dst-type LOCAL -m tcp --dport 31746 -j DNAT --to-destination 169.254.169.3:31746
+[3:180] -A OVN-KUBE-ETP -p tcp -m addrtype --dst-type LOCAL -m tcp --dport 31746 -j DNAT --to-destination 169.254.169.3:31746
 ```
 
 4. The special masquerade route in the host sends this packet into OVN via the management port.
@@ -202,25 +202,7 @@ cookie=0x790ba3355d0c209b, duration=501.037s, table=7, n_packets=12, n_bytes=125
 
 ### Host Traffic
 
-This section will cover the networking entities hit when traffic travels from a cluster host via a service to either host
-networked pods or cluster networked pods. These flows are the same for both the gateway modes.
-
-### Host -> Service -> OVN Pod
-
-This case is similar to steps 3-6 on `External -> Service -> OVN Pod` traffic senario we saw above for local gateway. The traffic will flow from host->PRE-ROUTING iptable rule DNAT towards `169.254.169.3`, which gets routed into `ovn-k8s-mp0` and hits the load balancer on the node-local-switch preserving sourceIP.
-
-### Host -> Service -> Host Networked Pod
-
-Again when the backend is a host networked pod we shortcircuit OVN to avoid SNAT and use iptables rules on the host
-to DNAT directly to the correct host endpoint.
-
-```
-[0:0] -A OVN-KUBE-NODEPORT -p tcp -m addrtype --dst-type LOCAL -m tcp --dport 30940 -j REDIRECT --to-ports 8080
-```
-
-### Intra Cluster traffic
-
-For all service traffic that stays in the overlay the flows will remain the same for `externaltrafficpolicy:local`. If the traffic crosses over to the underlay then its not guaranteed to be the same. See https://bugzilla.redhat.com/show_bug.cgi?id=2027270.
+NOTE: Host-> svc (NP/EIP/LB) is neither "internal" nor "external" traffic, hence it defaults to special case "Cluster" even if ETP=local. Only Host->differentNP traffic flow obeys ETP=local.
 
 ## ExternalTrafficPolicy=Cluster
 

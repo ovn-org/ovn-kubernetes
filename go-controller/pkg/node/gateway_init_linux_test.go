@@ -224,6 +224,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		expectedTables := map[string]util.FakeTable{
 			"nat": {
 				"PREROUTING": []string{
+					"-j OVN-KUBE-ETP",
 					"-j OVN-KUBE-EXTERNALIP",
 					"-j OVN-KUBE-NODEPORT",
 				},
@@ -234,6 +235,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				"OVN-KUBE-NODEPORT":      []string{},
 				"OVN-KUBE-EXTERNALIP":    []string{},
 				"OVN-KUBE-SNAT-MGMTPORT": []string{},
+				"OVN-KUBE-ETP":           []string{},
 			},
 			"filter": {},
 		}
@@ -808,6 +810,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		expectedTables := map[string]util.FakeTable{
 			"nat": {
 				"PREROUTING": []string{
+					"-j OVN-KUBE-ETP",
 					"-j OVN-KUBE-EXTERNALIP",
 					"-j OVN-KUBE-NODEPORT",
 				},
@@ -823,6 +826,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 					"-s 10.1.1.0/24 -j MASQUERADE",
 				},
 				"OVN-KUBE-SNAT-MGMTPORT": []string{},
+				"OVN-KUBE-ETP":           []string{},
 			},
 			"filter": {
 				"FORWARD": []string{
