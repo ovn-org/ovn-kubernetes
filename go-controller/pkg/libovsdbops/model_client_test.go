@@ -7,6 +7,8 @@ import (
 
 	"github.com/onsi/gomega/types"
 	"github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/libovsdb/model"
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 )
@@ -1372,6 +1374,119 @@ func TestLookup(t *testing.T) {
 	for _, tCase := range tt {
 		if err := runTestCase(t, tCase); err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+func TestBuildMutationsFromFields(t *testing.T) {
+	invalidField := 5
+	mapField := map[string]string{
+		"key1": "value1",
+		"key2": "",
+		"":     "value3",
+	}
+	emptyMapField := map[string]string{}
+	var nilMapField map[string]string
+	sliceField := []string{"item1", "item2"}
+	emptySliceField := []string{}
+	invalidSliceField := []string{"item1", "", "item2"}
+	var nilSliceField []string
+
+	tt := []struct {
+		name      string
+		fields    []interface{}
+		mutator   ovsdb.Mutator
+		mutations []model.Mutation
+		err       bool
+	}{
+		{
+			name:   "build mutation over invalid type",
+			fields: []interface{}{&invalidField},
+			err:    true,
+		},
+		{
+			name:    "build insert mutation over map",
+			fields:  []interface{}{&mapField},
+			mutator: ovsdb.MutateOperationInsert,
+			mutations: []model.Mutation{
+				{
+					Field:   &mapField,
+					Mutator: ovsdb.MutateOperationInsert,
+					Value:   mapField,
+				},
+			},
+		},
+		{
+			name:    "build delete mutation over map",
+			fields:  []interface{}{&mapField},
+			mutator: ovsdb.MutateOperationDelete,
+			mutations: []model.Mutation{
+				{
+					Field:   &mapField,
+					Mutator: ovsdb.MutateOperationDelete,
+					Value:   []string{"key2"},
+				},
+				{
+					Field:   &mapField,
+					Mutator: ovsdb.MutateOperationDelete,
+					Value: map[string]string{
+						"key1": "value1",
+						"":     "value3",
+					},
+				},
+			},
+		},
+		{
+			name:      "build mutation over nil map",
+			fields:    []interface{}{&nilMapField},
+			mutator:   ovsdb.MutateOperationInsert,
+			mutations: []model.Mutation{},
+		},
+		{
+			name:      "build mutation over empty map",
+			fields:    []interface{}{&emptyMapField},
+			mutator:   ovsdb.MutateOperationInsert,
+			mutations: []model.Mutation{},
+		},
+		{
+			name:    "build insert mutation over slice",
+			fields:  []interface{}{&sliceField},
+			mutator: ovsdb.MutateOperationInsert,
+			mutations: []model.Mutation{
+				{
+					Field:   &sliceField,
+					Mutator: ovsdb.MutateOperationInsert,
+					Value:   sliceField,
+				},
+			},
+		},
+		{
+			name:      "build mutation over nil slice",
+			fields:    []interface{}{&nilSliceField},
+			mutator:   ovsdb.MutateOperationInsert,
+			mutations: []model.Mutation{},
+		},
+		{
+			name:      "build mutation over empty slice",
+			fields:    []interface{}{&emptySliceField},
+			mutator:   ovsdb.MutateOperationInsert,
+			mutations: []model.Mutation{},
+		},
+		{
+			name:    "build mutation over slice with empty value",
+			fields:  []interface{}{&invalidSliceField},
+			mutator: ovsdb.MutateOperationInsert,
+			err:     true,
+		},
+	}
+
+	for _, tCase := range tt {
+		mutations, err := buildMutationsFromFields(tCase.fields, tCase.mutator)
+		if err != nil && !tCase.err {
+			t.Fatalf("%s: got unexpected error: %v", tCase.name, err)
+		}
+		if !reflect.DeepEqual(mutations, tCase.mutations) {
+			t.Fatalf("%s: unexpected mutations, got: %+v expected: %+v", tCase.name, mutations, tCase.mutations)
 		}
 	}
 }

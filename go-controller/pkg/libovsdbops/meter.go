@@ -28,7 +28,7 @@ func CreateMeterBandOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, m
 		DoAfter: func() {
 			// in case we have multiple equal bands, pick the first one for
 			// convergence, OVSDB will remove unreferenced ones
-			if len(bands) > 1 {
+			if len(bands) > 0 {
 				uuids := sets.NewString()
 				for _, band := range bands {
 					uuids.Insert(band.UUID)
@@ -37,7 +37,7 @@ func CreateMeterBandOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, m
 			}
 		},
 		ErrNotFound: false,
-		BulkOp:      false,
+		BulkOp:      true,
 	}
 
 	m := newModelClient(nbClient)
