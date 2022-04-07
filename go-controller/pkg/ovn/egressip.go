@@ -756,6 +756,10 @@ func (oc *Controller) executeCloudPrivateIPConfigOps(egressIPName string, ops ma
 			if err != nil {
 				return fmt.Errorf("cloud update request failed for CloudPrivateIPConfig: %s, could not get item, err: %v", cloudPrivateIPConfigName, err)
 			}
+			// Do not update if object is being deleted
+			if !cloudPrivateIPConfig.GetDeletionTimestamp().IsZero() {
+				return fmt.Errorf("cloud update request failed, CloudPrivateIPConfig: %s is being deleted", cloudPrivateIPConfigName)
+			}
 			cloudPrivateIPConfig.Spec.Node = op.toAdd
 			if _, err := oc.kube.UpdateCloudPrivateIPConfig(cloudPrivateIPConfig); err != nil {
 				eIPRef := kapi.ObjectReference{
