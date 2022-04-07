@@ -30,6 +30,7 @@ spec:
     spec:
       priorityClassName: "system-cluster-critical"
       hostNetwork: true
+      dnsPolicy: Default
       {{ "hostPID: true" if ovn_unprivileged_mode=="no" }}
       containers:
 

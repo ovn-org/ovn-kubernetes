@@ -36,6 +36,7 @@ spec:
       # as all pods.
       serviceAccountName: ovn
       hostNetwork: true
+      dnsPolicy: Default
 
       # required to be scheduled on a linux node with node-role.kubernetes.io/master label and
       # only one instance of ovnkube-master pod per node
