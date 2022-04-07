@@ -1111,6 +1111,7 @@ func (oc *Controller) WatchNodes() {
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			if noHostSubnet := noHostSubnet(node); noHostSubnet {
+				oc.clearInitialNodeNetworkUnavailableCondition(node, nil)
 				err := oc.lsManager.AddNoHostSubnetNode(node.Name)
 				if err != nil {
 					klog.Errorf("Error creating logical switch cache for node %s: %v", node.Name, err)
@@ -1171,7 +1172,9 @@ func (oc *Controller) WatchNodes() {
 				klog.Errorf(err.Error())
 			}
 			if !shouldUpdate {
-				// the hostsubnet is not assigned by ovn-kubernetes
+				// the host subnet is not assigned by ovn-kubernetes, but we should clear the NetworkUnavailable on the
+				// Node object to be on the safe side
+				oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
 				return
 			}
 
