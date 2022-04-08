@@ -2108,12 +2108,19 @@ func (e *egressIPController) deleteEgressIPStatusSetup(name string, status egres
 		{
 			Model: &natLogicalRouter,
 			ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
-				return lr.Name == util.GetGatewayRouterFromNode(status.Node)
+				// Find the router that has the removed nat
+				for _, lrNat := range lr.Nat {
+					for _, delNat := range natLogicalRouter.Nat {
+						if lrNat == delNat {
+							return true
+						}
+					}
+				}
+				return false
 			},
 			OnModelMutations: []interface{}{
 				&natLogicalRouter.Nat,
 			},
-			ErrNotFound: true,
 		},
 	}
 	if err := e.modelClient.Delete(opsModel...); err != nil {
