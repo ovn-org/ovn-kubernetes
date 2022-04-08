@@ -1119,7 +1119,6 @@ func (oc *Controller) allocateNodeSubnets(node *kapi.Node) ([]*net.IPNet, []*net
 }
 
 func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
-	oc.clearInitialNodeNetworkUnavailableCondition(node)
 	hostSubnets, allocatedSubnets, err := oc.allocateNodeSubnets(node)
 	if err != nil {
 		return nil, err
