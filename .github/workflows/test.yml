@@ -18,7 +18,7 @@ env:
   PARALLEL: true
 
   # This must be a directory
-  CI_IMAGE_CACHE: /tmp/image_cache/
+  CI_IMAGE_CACHE: tmp/image_cache/
   CI_IMAGE_MASTER_TAR: image-master.tar
   CI_IMAGE_PR_TAR: image-pr.tar
   CI_DIST_IMAGES_OUTPUT: dist/images/_output/
@@ -39,7 +39,6 @@ jobs:
         version: v1.45.2
         working-directory: go-controller
         args: --modules-download-mode=vendor --timeout=15m0s --verbose
-
   build-master:
     name: Build-master
     runs-on: ubuntu-latest
@@ -52,19 +51,27 @@ jobs:
         path: |
           ${{ env.CI_IMAGE_CACHE }}
         key: ${{ github.run_id }}-image-cache-master
-
+    # if CI_IMAGE_MASTER_TAR isn't in cache, try pulling it and saving to the cache rather 
+    # than building, resort back to building if the cache isn't populated and 
+    # pulling the image fails.
     - name: Check if master image build is needed
       id: is_master_image_build_needed
-      continue-on-error: true
+      continue-on-error: false
       run: |
         set -x
-        if [ -f ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR}.gz ]; then
-            mkdir -p ${CI_DIST_IMAGES_OUTPUT}
-            cp ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR}.gz ${CI_DIST_IMAGES_OUTPUT}/${CI_IMAGE_MASTER_TAR}.gz
-            gunzip ${CI_DIST_IMAGES_OUTPUT}/${CI_IMAGE_MASTER_TAR}.gz
-            echo "::set-output name=MASTER_IMAGE_RESTORED::true"
-        fi
+        if [ -f ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}.gz ]; then
+            cp ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR}.gz ${CI_IMAGE_MASTER_TAR}.gz
+            gunzip ${CI_IMAGE_MASTER_TAR}.gz
+            echo "::set-output name=MASTER_IMAGE_RESTORED_FROM_CACHE::true"
+            exit 0
+        fi 
+        
+        if docker pull ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-f:master; then 
+            docker tag ghcr.io/ovn-org/ovn-kubernetes/ovn-kube-f:master ovn-daemonset-f:dev
 
+            echo "::set-output name=MASTER_IMAGE_RESTORED_FROM_GHCR::true"
+            exit 0
+        fi
     # only run the following steps if the master image was not found in the cache
     - name: Set up Go
       if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
@@ -74,13 +81,13 @@ jobs:
       id: go
 
     - name: Check out code into the Go module directory - from master branch
-      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
+      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_GHCR != 'true' && steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_CACHE != 'true' && success()
       uses: actions/checkout@v2
       with:
         ref: master
 
     - name: Build - from master branch
-      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
+      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_GHCR != 'true' && steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_CACHE != 'true' && success()
       run: |
         set -x
         pushd go-controller
@@ -89,36 +96,35 @@ jobs:
         popd
 
     - name: Build docker image - from master branch
-      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
+      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_GHCR != 'true' && steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_CACHE != 'true' && success()
       run: |
         pushd dist/images
           sudo cp -f ../../go-controller/_output/go/bin/ovn* .
           echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
           docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
-          mkdir _output
-          docker save ovn-daemonset-f:dev > _output/${CI_IMAGE_MASTER_TAR}
-        popd
+        popd 
 
     - name: Cache master image
-      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED != 'true' && success()
-      continue-on-error: true
+      if: steps.is_master_image_build_needed.outputs.MASTER_IMAGE_RESTORED_FROM_CACHE != 'true' && success()
+      continue-on-error: false
       run: |
         set -x
-        if [ -f ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR} ]; then
-            rm -f ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR}
+        if [ -f ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR} ]; then
+            rm -f ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}
         fi
-        if [ -f ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR}.gz ]; then
-            rm -f ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR}.gz
+        if [ -f ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}.gz ]; then
+            rm -f ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}.gz
         fi
-        mkdir -p ${CI_IMAGE_CACHE}/
-        cp ${CI_DIST_IMAGES_OUTPUT}/${CI_IMAGE_MASTER_TAR} ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR}
-        gzip ${CI_IMAGE_CACHE}/${CI_IMAGE_MASTER_TAR}
+        docker save ovn-daemonset-f:dev -o ${CI_IMAGE_MASTER_TAR}
+        mkdir -p ${CI_IMAGE_CACHE}
+        cp ${CI_IMAGE_MASTER_TAR} ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}
+        gzip ${CI_IMAGE_CACHE}${CI_IMAGE_MASTER_TAR}
 
     # run the following always if none of the steps before failed
     - uses: actions/upload-artifact@v2
       with:
         name: test-image-master
-        path: ${{ env.CI_DIST_IMAGES_OUTPUT }}/${{ env.CI_IMAGE_MASTER_TAR }}
+        path: ${{ env.CI_IMAGE_MASTER_TAR }}
 
   build-pr:
     name: Build-PR
@@ -249,7 +255,7 @@ jobs:
       OVN_MULTICAST_ENABLE:  "false"
     steps:
     - name: Set up Go
-      uses: actions/setup-go@v1
+      uses: actions/setup-go@v2
       with:
         go-version: ${{ env.GO_VERSION }}
       id: go
