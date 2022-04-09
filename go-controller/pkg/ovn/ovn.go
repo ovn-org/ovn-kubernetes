@@ -28,8 +28,6 @@ import (
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
-
 	utilnet "k8s.io/utils/net"
 
 	kapi "k8s.io/api/core/v1"
@@ -96,11 +94,10 @@ type namespaceInfo struct {
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
-	client                clientset.Interface
-	kube                  kube.Interface
-	watchFactory          *factory.WatchFactory
-	egressFirewallHandler *factory.Handler
-	stopChan              <-chan struct{}
+	client       clientset.Interface
+	kube         kube.Interface
+	watchFactory *factory.WatchFactory
+	stopChan     <-chan struct{}
 
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
 	masterSubnetAllocator *subnetallocator.SubnetAllocator
@@ -191,6 +188,9 @@ type Controller struct {
 	// Objects for network policies that need to be retried
 	retryNetworkPolicies *retryObjs
 
+	// Objects for egress firewall that need to be retried
+	retryEgressFirewalls *retryObjs
+
 	// Objects for nodes that need to be retried
 	retryNodes *retryObjs
 	// Node-specific syncMap used by node event handler
@@ -280,6 +280,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		retryPods:                NewRetryObjs(factory.PodType, "", nil, nil, nil),
 		retryNetworkPolicies:     NewRetryObjs(factory.PolicyType, "", nil, nil, nil),
 		retryNodes:               NewRetryObjs(factory.NodeType, "", nil, nil, nil),
+		retryEgressFirewalls:     NewRetryObjs(factory.EgressFirewallType, "", nil, nil, nil),
 		recorder:                 recorder,
 		nbClient:                 libovsdbOvnNBClient,
 		sbClient:                 libovsdbOvnSBClient,
@@ -353,7 +354,7 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 			return err
 		}
 		oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
-		oc.egressFirewallHandler = oc.WatchEgressFirewall()
+		oc.WatchEgressFirewall()
 
 	}
 
@@ -502,56 +503,8 @@ func (oc *Controller) WatchNetworkPolicy() {
 
 // WatchEgressFirewall starts the watching of egressfirewall resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchEgressFirewall() *factory.Handler {
-	return oc.watchFactory.AddEgressFirewallHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
-			addErrors := oc.addEgressFirewall(egressFirewall)
-			if addErrors != nil {
-				klog.Error(addErrors)
-				egressFirewall.Status.Status = egressFirewallAddError
-			} else {
-				egressFirewall.Status.Status = egressFirewallAppliedCorrectly
-			}
-
-			err := oc.updateEgressFirewallWithRetry(egressFirewall)
-			if err != nil {
-				klog.Error(err)
-			}
-			metrics.UpdateEgressFirewallRuleCount(float64(len(egressFirewall.Spec.Egress)))
-			metrics.IncrementEgressFirewallCount()
-		},
-		UpdateFunc: func(old, newer interface{}) {
-			newEgressFirewall := newer.(*egressfirewall.EgressFirewall).DeepCopy()
-			oldEgressFirewall := old.(*egressfirewall.EgressFirewall)
-			if !reflect.DeepEqual(oldEgressFirewall.Spec, newEgressFirewall.Spec) {
-				errList := oc.updateEgressFirewall(oldEgressFirewall, newEgressFirewall)
-				if errList != nil {
-					newEgressFirewall.Status.Status = egressFirewallUpdateError
-					klog.Error(errList)
-				} else {
-					newEgressFirewall.Status.Status = egressFirewallAppliedCorrectly
-				}
-
-				err := oc.updateEgressFirewallWithRetry(newEgressFirewall)
-				if err != nil {
-					klog.Error(err)
-				}
-				metrics.UpdateEgressFirewallRuleCount(float64(len(newEgressFirewall.Spec.Egress) - len(oldEgressFirewall.Spec.Egress)))
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			egressFirewall := obj.(*egressfirewall.EgressFirewall)
-			deleteErrors := oc.deleteEgressFirewall(egressFirewall)
-			if deleteErrors != nil {
-				klog.Error(deleteErrors)
-				return
-			}
-
-			metrics.UpdateEgressFirewallRuleCount(float64(-len(egressFirewall.Spec.Egress)))
-			metrics.DecrementEgressFirewallCount()
-		},
-	}, oc.syncEgressFirewall)
+func (oc *Controller) WatchEgressFirewall() {
+	oc.WatchResource(oc.retryEgressFirewalls)
 }
 
 // WatchEgressNodes starts the watching of egress assignable nodes and calls

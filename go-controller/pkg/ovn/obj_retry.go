@@ -18,7 +18,9 @@ import (
 
 	"k8s.io/klog/v2"
 
+	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	factory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -242,22 +244,22 @@ func areResourcesEqual(objType reflect.Type, obj1, obj2 interface{}) (bool, erro
 	case factory.PolicyType:
 		np1, ok := obj1.(*knet.NetworkPolicy)
 		if !ok {
-			return false, fmt.Errorf("could not cast obj1 of type interface{} to *knet.NetworkPolicy")
+			return false, fmt.Errorf("could not cast obj1 of type %T to *knet.NetworkPolicy", obj1)
 		}
 		np2, ok := obj2.(*knet.NetworkPolicy)
 		if !ok {
-			return false, fmt.Errorf("could not cast obj2 of type interface{}  to *knet.NetworkPolicy")
+			return false, fmt.Errorf("could not cast obj2 of type %T to *knet.NetworkPolicy", obj2)
 		}
 		return reflect.DeepEqual(np1, np2), nil
 
 	case factory.NodeType:
 		node1, ok := obj1.(*kapi.Node)
 		if !ok {
-			return false, fmt.Errorf("could not cast obj1 of type interface{} to *kapi.Node")
+			return false, fmt.Errorf("could not cast obj1 of type %T to *kapi.Node", obj1)
 		}
 		node2, ok := obj2.(*kapi.Node)
 		if !ok {
-			return false, fmt.Errorf("could not cast obj2 of type interface{} to *kapi.Node")
+			return false, fmt.Errorf("could not cast obj2 of type %T to *kapi.Node", obj2)
 		}
 
 		// when shouldUpdate is false, the hostsubnet is not assigned by ovn-kubernetes
@@ -270,11 +272,11 @@ func areResourcesEqual(objType reflect.Type, obj1, obj2 interface{}) (bool, erro
 	case factory.PeerServiceType:
 		service1, ok := obj1.(*kapi.Service)
 		if !ok {
-			return false, fmt.Errorf("could not cast obj1 of type interface{} to *kapi.Service")
+			return false, fmt.Errorf("could not cast obj1 of type %T to *kapi.Service", obj1)
 		}
 		service2, ok := obj2.(*kapi.Service)
 		if !ok {
-			return false, fmt.Errorf("could not cast obj2 of type interface{} to *kapi.Service")
+			return false, fmt.Errorf("could not cast obj2 of type %T to *kapi.Service", obj2)
 		}
 		areEqual := reflect.DeepEqual(service1.Spec.ExternalIPs, service2.Spec.ExternalIPs) &&
 			reflect.DeepEqual(service1.Spec.ClusterIP, service2.Spec.ClusterIP) &&
@@ -296,6 +298,17 @@ func areResourcesEqual(objType reflect.Type, obj1, obj2 interface{}) (bool, erro
 		// For these types there is no update code, so pretend old and new
 		// objs are always equivalent and stop processing the update event.
 		return true, nil
+
+	case factory.EgressFirewallType:
+		newEgressFirewall, ok := obj1.(*egressfirewall.EgressFirewall)
+		if !ok {
+			return false, fmt.Errorf("could not cast obj1 of type %T to *egressfirewall.EgressFirewall", obj1)
+		}
+		oldEgressFirewall, ok := obj2.(*egressfirewall.EgressFirewall)
+		if !ok {
+			return false, fmt.Errorf("could not cast obj2 of type %T to *egressfirewall.EgressFirewall", obj2)
+		}
+		return reflect.DeepEqual(oldEgressFirewall.Spec, newEgressFirewall.Spec), nil
 	}
 
 	return false, fmt.Errorf("no object comparison for type %v", objType)
@@ -309,21 +322,21 @@ func getResourceKey(objType reflect.Type, obj interface{}) (string, error) {
 	case factory.PolicyType:
 		np, ok := obj.(*knet.NetworkPolicy)
 		if !ok {
-			return "", fmt.Errorf("could not cast interface{} object to *knet.NetworkPolicy")
+			return "", fmt.Errorf("could not cast %T object to *knet.NetworkPolicy", obj)
 		}
 		return getPolicyNamespacedName(np), nil
 
 	case factory.NodeType:
 		node, ok := obj.(*kapi.Node)
 		if !ok {
-			return "", fmt.Errorf("could not cast interface{} object to *kapi.Node")
+			return "", fmt.Errorf("could not cast %T object to *kapi.Node", obj)
 		}
 		return node.Name, nil
 
 	case factory.PeerServiceType:
 		service, ok := obj.(*kapi.Service)
 		if !ok {
-			return "", fmt.Errorf("could not cast interface{} object to *kapi.Service")
+			return "", fmt.Errorf("could not cast %T object to *kapi.Service", obj)
 		}
 		return getNamespacedName(service.Namespace, service.Name), nil
 
@@ -333,7 +346,7 @@ func getResourceKey(objType reflect.Type, obj interface{}) (string, error) {
 		factory.LocalPodSelectorType:
 		pod, ok := obj.(*kapi.Pod)
 		if !ok {
-			return "", fmt.Errorf("could not cast interface{} object to *kapi.Pod")
+			return "", fmt.Errorf("could not cast %T object to *kapi.Pod", obj)
 		}
 		return getNamespacedName(pod.Namespace, pod.Name), nil
 
@@ -341,9 +354,16 @@ func getResourceKey(objType reflect.Type, obj interface{}) (string, error) {
 		factory.PeerNamespaceSelectorType:
 		namespace, ok := obj.(*kapi.Namespace)
 		if !ok {
-			return "", fmt.Errorf("could not cast interface{} object to *kapi.Namespace")
+			return "", fmt.Errorf("could not cast %T object to *kapi.Namespace", obj)
 		}
 		return namespace.Name, nil
+
+	case factory.EgressFirewallType:
+		egressFirewall, ok := obj.(*egressfirewall.EgressFirewall)
+		if !ok {
+			return "", fmt.Errorf("could not cast %T object to *egressfirewall.EgressFirewall", obj)
+		}
+		return getEgressFirewallNamespacedName(egressFirewall), nil
 	}
 
 	return "", fmt.Errorf("object type %v not supported", objType)
@@ -409,6 +429,10 @@ func (oc *Controller) getResourceFromInformerCache(objType reflect.Type, key str
 		factory.PeerNamespaceSelectorType:
 		obj, err = oc.watchFactory.GetNamespace(key)
 
+	case factory.EgressFirewallType:
+		namespace, name := splitNamespacedName(key)
+		obj, err = oc.watchFactory.GetEgressFirewall(namespace, name)
+
 	default:
 		err = fmt.Errorf("object type %v not supported, cannot retrieve it from informers cache",
 			objType)
@@ -436,7 +460,8 @@ func (oc *Controller) recordDeleteEvent(objType reflect.Type, obj interface{}) {
 	}
 }
 
-// Given an object and its type, recordErrorEvent records an error event on this object. Only used for pods now.
+// Given an object and its type, recordErrorEvent records an error event on this object.
+// Only used for pods now.
 func (oc *Controller) recordErrorEvent(objType reflect.Type, obj interface{}, err error) {
 	switch objType {
 	case factory.PodType:
@@ -468,14 +493,14 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 	case factory.PodType:
 		pod, ok := obj.(*kapi.Pod)
 		if !ok {
-			return fmt.Errorf("could not cast interface{} object to *knet.Pod")
+			return fmt.Errorf("could not cast %T object to *knet.Pod", obj)
 		}
 		return oc.ensurePod(nil, pod, true)
 
 	case factory.PolicyType:
 		np, ok := obj.(*knet.NetworkPolicy)
 		if !ok {
-			return fmt.Errorf("could not cast interface{} object to *knet.NetworkPolicy")
+			return fmt.Errorf("could not cast %T object to *knet.NetworkPolicy", obj)
 		}
 		if err = oc.addNetworkPolicy(np); err != nil {
 			klog.Infof("Network Policy retry delete failed for %s/%s, will try again later: %v",
@@ -486,7 +511,7 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 	case factory.NodeType:
 		node, ok := obj.(*kapi.Node)
 		if !ok {
-			return fmt.Errorf("could not cast interface{} object to *kapi.Node")
+			return fmt.Errorf("could not cast %T object to *kapi.Node", obj)
 		}
 		var nodeParams *nodeSyncs
 		if fromRetryLoop {
@@ -512,7 +537,7 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 	case factory.PeerServiceType:
 		service, ok := obj.(*kapi.Service)
 		if !ok {
-			return fmt.Errorf("could not cast peer service of type interface{} to *kapi.Service")
+			return fmt.Errorf("could not cast peer service of type %T to *kapi.Service", obj)
 		}
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handlePeerServiceAdd(extraParameters.gp, service)
@@ -572,7 +597,21 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 			extraParameters.portGroupIngressDenyName,
 			extraParameters.portGroupEgressDenyName,
 			obj)
-
+	case factory.EgressFirewallType:
+		var err error
+		egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
+		if err = oc.addEgressFirewall(egressFirewall); err != nil {
+			egressFirewall.Status.Status = egressFirewallAddError
+			err = fmt.Errorf("failed to create egress firewall %s, error: %v", getEgressFirewallNamespacedName(egressFirewall), err)
+		} else {
+			egressFirewall.Status.Status = egressFirewallAppliedCorrectly
+			metrics.UpdateEgressFirewallRuleCount(float64(len(egressFirewall.Spec.Egress)))
+			metrics.IncrementEgressFirewallCount()
+		}
+		if err := oc.updateEgressFirewallStatusWithRetry(egressFirewall); err != nil {
+			klog.Errorf("Failed to update egress firewall status %s, error: %v", getEgressFirewallNamespacedName(egressFirewall), err)
+		}
+		return err
 	default:
 		return fmt.Errorf("no add function for object type %v", objectsToRetry.oType)
 	}
@@ -596,11 +635,11 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 	case factory.NodeType:
 		newNode, ok := newObj.(*kapi.Node)
 		if !ok {
-			return fmt.Errorf("could not cast newObj of type interface{} to *kapi.Node")
+			return fmt.Errorf("could not cast newObj of type %T to *kapi.Node", newObj)
 		}
 		oldNode, ok := oldObj.(*kapi.Node)
 		if !ok {
-			return fmt.Errorf("could not cast oldObj of type interface{} to *kapi.Node")
+			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
 		// determine what actually changed in this update
 		_, nodeSync := oc.addNodeFailed.Load(newNode.Name)
@@ -653,7 +692,7 @@ func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj i
 		var cachedNP *networkPolicy
 		knp, ok := obj.(*knet.NetworkPolicy)
 		if !ok {
-			return fmt.Errorf("could not cast obj of type interface{} to *knet.NetworkPolicy")
+			return fmt.Errorf("could not cast obj of type %T to *knet.NetworkPolicy", obj)
 		}
 		if cachedObj != nil {
 			if cachedNP, ok = cachedObj.(*networkPolicy); !ok {
@@ -665,14 +704,14 @@ func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj i
 	case factory.NodeType:
 		node, ok := obj.(*kapi.Node)
 		if !ok {
-			return fmt.Errorf("could not cast obj of type interface{} to *knet.Node")
+			return fmt.Errorf("could not cast obj of type %T to *knet.Node", obj)
 		}
 		return oc.deleteNodeEvent(node)
 
 	case factory.PeerServiceType:
 		service, ok := obj.(*kapi.Service)
 		if !ok {
-			return fmt.Errorf("could not cast peer service of type interface{} to *kapi.Service")
+			return fmt.Errorf("could not cast peer service of type %T to *kapi.Service", obj)
 		}
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handlePeerServiceDelete(extraParameters.gp, service)
@@ -728,6 +767,14 @@ func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj i
 			extraParameters.portGroupEgressDenyName,
 			obj)
 
+	case factory.EgressFirewallType:
+		egressFirewall := obj.(*egressfirewall.EgressFirewall)
+		if err := oc.deleteEgressFirewall(egressFirewall); err != nil {
+			return fmt.Errorf("failed to delete egress firewall %s, error: %v", getEgressFirewallNamespacedName(egressFirewall), err)
+		}
+		metrics.UpdateEgressFirewallRuleCount(float64(-len(egressFirewall.Spec.Egress)))
+		metrics.DecrementEgressFirewallCount()
+		return nil
 	default:
 		return fmt.Errorf("object type %v not supported", objectsToRetry.oType)
 	}
@@ -896,6 +943,10 @@ func (oc *Controller) getSyncResourcesFunc(r *retryObjs) (func([]interface{}), e
 	case factory.LocalPodSelectorType:
 		name = "LocalPodSelectorType"
 		syncRetriableFunc = r.syncFunc
+
+	case factory.EgressFirewallType:
+		name = "syncEgressFirewall"
+		syncRetriableFunc = oc.syncEgressFirewall
 
 	default:
 		return nil, fmt.Errorf("no sync function for object type %v", r.oType)
@@ -1154,7 +1205,6 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) *factory.Handler 
 						return
 					}
 				}
-
 				objectsToRetry.deleteRetryObj(newKey, true)
 
 			},

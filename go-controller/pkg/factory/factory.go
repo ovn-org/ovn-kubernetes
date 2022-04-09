@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
 	egressfirewallinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions"
+	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
@@ -380,6 +380,12 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 			funcs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 			return wf.AddFilteredPodHandler(namespace, sel, funcs, processExisting)
 		}, nil
+
+	case EgressFirewallType:
+		return func(namespace string, sel labels.Selector,
+			funcs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+			return wf.AddEgressFirewallHandler(funcs, processExisting)
+		}, nil
 	}
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
 }
@@ -653,6 +659,11 @@ func (wf *WatchFactory) GetNamespacesBySelector(labelSelector metav1.LabelSelect
 func (wf *WatchFactory) GetNetworkPolicy(namespace, name string) (*knet.NetworkPolicy, error) {
 	networkPolicyLister := wf.informers[PolicyType].lister.(netlisters.NetworkPolicyLister)
 	return networkPolicyLister.NetworkPolicies(namespace).Get(name)
+}
+
+func (wf *WatchFactory) GetEgressFirewall(namespace, name string) (*egressfirewallapi.EgressFirewall, error) {
+	egressFirewallLister := wf.informers[EgressFirewallType].lister.(egressfirewalllister.EgressFirewallLister)
+	return egressFirewallLister.EgressFirewalls(namespace).Get(name)
 }
 
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {
