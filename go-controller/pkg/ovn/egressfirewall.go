@@ -2,9 +2,13 @@ package ovn
 
 import (
 	"fmt"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/util/retry"
+	"math/rand"
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 
@@ -17,7 +21,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -215,7 +218,7 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	ef.Lock()
 	defer ef.Unlock()
 	// there should not be an item already in egressFirewall map for the given Namespace
-	if _, loaded := oc.egressFirewalls.LoadOrStore(egressFirewall.Namespace, ef); loaded {
+	if _, loaded := oc.egressFirewalls.Load(egressFirewall.Namespace); loaded {
 		return fmt.Errorf("error attempting to add egressFirewall %s to namespace %s when it already has an egressFirewall",
 			egressFirewall.Name, egressFirewall.Namespace)
 	}
@@ -249,27 +252,17 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 		return fmt.Errorf("cannot Ensure that addressSet for namespace %s exists %v", egressFirewall.Namespace, err)
 	}
 	ipv4HashedAS, ipv6HashedAS := addressset.MakeAddressSetHashNames(egressFirewall.Namespace)
-	err = oc.addEgressFirewallRules(ef, ipv4HashedAS, ipv6HashedAS, types.EgressFirewallStartPriority)
-	if err != nil {
+	if err := oc.addEgressFirewallRules(ef, ipv4HashedAS, ipv6HashedAS, types.EgressFirewallStartPriority); err != nil {
 		return err
 	}
-
+	oc.egressFirewalls.Store(egressFirewall.Namespace, ef)
 	return nil
-}
-
-func (oc *Controller) updateEgressFirewall(oldEgressFirewall, newEgressFirewall *egressfirewallapi.EgressFirewall) error {
-	updateErrors := oc.deleteEgressFirewall(oldEgressFirewall)
-	if updateErrors != nil {
-		return updateErrors
-	}
-	updateErrors = oc.addEgressFirewall(newEgressFirewall)
-	return updateErrors
 }
 
 func (oc *Controller) deleteEgressFirewall(egressFirewallObj *egressfirewallapi.EgressFirewall) error {
 	klog.Infof("Deleting egress Firewall %s in namespace %s", egressFirewallObj.Name, egressFirewallObj.Namespace)
 	deleteDNS := false
-	obj, loaded := oc.egressFirewalls.LoadAndDelete(egressFirewallObj.Namespace)
+	obj, loaded := oc.egressFirewalls.Load(egressFirewallObj.Namespace)
 	if !loaded {
 		return fmt.Errorf("there is no egressFirewall found in namespace %s",
 			egressFirewallObj.Namespace)
@@ -291,10 +284,16 @@ func (oc *Controller) deleteEgressFirewall(egressFirewallObj *egressfirewallapi.
 		}
 	}
 	if deleteDNS {
-		oc.egressFirewallDNS.Delete(egressFirewallObj.Namespace)
+		if _, err := oc.egressFirewallDNS.Delete(egressFirewallObj.Namespace); err != nil {
+			return err
+		}
 	}
 
-	return oc.deleteEgressFirewallRules(egressFirewallObj.Namespace)
+	if err := oc.deleteEgressFirewallRules(egressFirewallObj.Namespace); err != nil {
+		return err
+	}
+	oc.egressFirewalls.Delete(egressFirewallObj.Namespace)
+	return nil
 }
 
 func (oc *Controller) updateEgressFirewallWithRetry(egressfirewall *egressfirewallapi.EgressFirewall) error {
@@ -408,7 +407,6 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 			},
 		},
 	}, opModels...)
-
 	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("failed to create egressFirewall ACL in ns %s and add to logical switches %v err: %v",
 			externalID, logicalSwitches, err)
@@ -605,4 +603,77 @@ func getClusterSubnetsExclusion() string {
 		}
 	}
 	return exclusion
+}
+
+// iterateRetryEgressFirewalls checks if any outstanding EgressFirewalls exist
+// then tries to re-add them if so
+// updateAll forces all egress firewalls to be attempted to be retried regardless
+func (oc *Controller) iterateRetryEgressFirewalls(updateAll bool) {
+	oc.retryEgressFirewalls.retryMutex.Lock()
+	defer oc.retryEgressFirewalls.retryMutex.Unlock()
+	now := time.Now()
+	for namespacedName, efEntry := range oc.retryEgressFirewalls.entries {
+		if efEntry.ignore {
+			continue
+		}
+		// check if we need to create
+		if efEntry.newObj != nil {
+			ef := efEntry.newObj.(*egressfirewallapi.EgressFirewall)
+			// get the latest version of the new egress firewall from the informer, if it doesn't exist we are not going to
+			// create the new egress firewall
+			ef, err := oc.watchFactory.GetEgressFirewall(ef.Namespace, ef.Name)
+			if err != nil && kerrors.IsNotFound(err) {
+				klog.Infof("%s egress firewall not found in the informers cache, not going to retry egress firewall create", namespacedName)
+				efEntry.newObj = nil
+			} else {
+				efEntry.newObj = ef
+			}
+		}
+
+		efEntry.backoffSec = efEntry.backoffSec * 2
+		if efEntry.backoffSec > 60 {
+			efEntry.backoffSec = 60
+		}
+		backoff := (efEntry.backoffSec * time.Second) + (time.Duration(rand.Intn(500)) * time.Millisecond)
+		efTimer := efEntry.timeStamp.Add(backoff)
+		if !updateAll && now.Before(efTimer) {
+			klog.V(5).Infof("%s retry egress firewall not after timer yet, time: %s", namespacedName, efTimer)
+			continue
+		}
+		klog.Infof("Egress Firewall Retry: %s retry egress firewall setup", namespacedName)
+
+		// check if we need to delete anything
+		if efEntry.oldObj != nil {
+			klog.Infof("Egress Firewall Retry: Removing old egress firewall for %s", namespacedName)
+			egressfirewall := efEntry.oldObj.(*egressfirewallapi.EgressFirewall)
+			if err := oc.deleteEgressFirewall(egressfirewall); err != nil {
+				klog.Infof("Egress Firewall Retry delete failed for %s, will try again later: %v",
+					namespacedName, err)
+				efEntry.timeStamp = time.Now()
+				continue
+			}
+			// successfully cleaned up old egress firewall, remove it from the retry cache
+			efEntry.oldObj = nil
+		}
+
+		// create new egress firewall if needed
+		if efEntry.newObj != nil {
+			klog.Infof("Egress Firwall Retry: Creating new egress firewall for %s", namespacedName)
+			if err := oc.addEgressFirewall(efEntry.newObj.(*egressfirewallapi.EgressFirewall)); err != nil {
+				klog.Infof("Egress Firewall Retry create failed for %s, will try again later: %v",
+					namespacedName, err)
+				efEntry.timeStamp = time.Now()
+				continue
+			}
+			// successfully cleaned up old egress firewall, remove it from the retry cache
+			efEntry.newObj = nil
+		}
+
+		klog.Infof("Egress Firewall Retry successful for %s", namespacedName)
+		oc.retryEgressFirewalls.deleteRetryObj(namespacedName, false)
+	}
+}
+
+func getEgressFirewallNamespacedName(egressFirewall *egressfirewallapi.EgressFirewall) string {
+	return fmt.Sprintf("%v/%v", egressFirewall.Namespace, egressFirewall.Name)
 }

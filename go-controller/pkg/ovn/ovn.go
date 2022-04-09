@@ -197,6 +197,9 @@ type Controller struct {
 	// Objects for network policies that need to be retried
 	retryNetPolices *retryObjs
 
+	// Objects for egress firewall that need to be retried
+	retryEgressFirewalls *retryObjs
+
 	// Objects for node that need to be retried
 	retryNodes *retryObjs
 	// Node's specific syncMap used by WatchNode event handler
@@ -304,6 +307,11 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		retryPods:                make(map[string]*retryEntry),
 		retryPodsChan:            make(chan struct{}, 1),
 		retryNetPolices: &retryObjs{
+			retryMutex: sync.Mutex{},
+			entries:    make(map[string]*retryObjEntry),
+			retryChan:  make(chan struct{}, 1),
+		},
+		retryEgressFirewalls: &retryObjs{
 			retryMutex: sync.Mutex{},
 			entries:    make(map[string]*retryObjEntry),
 			retryChan:  make(chan struct{}, 1),
@@ -766,19 +774,35 @@ func (oc *Controller) WatchNetworkPolicy() {
 // WatchEgressFirewall starts the watching of egressfirewall resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchEgressFirewall() *factory.Handler {
+	oc.triggerRetryObjs(oc.retryEgressFirewalls.retryChan, oc.iterateRetryEgressFirewalls)
 	return oc.watchFactory.AddEgressFirewallHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
-			addErrors := oc.addEgressFirewall(egressFirewall)
-			if addErrors != nil {
-				klog.Error(addErrors)
+			key := getEgressFirewallNamespacedName(egressFirewall)
+			oc.retryEgressFirewalls.initRetryObjWithAdd(egressFirewall, key)
+			oc.retryEgressFirewalls.skipRetryObj(key)
+			if retryEntry := oc.retryEgressFirewalls.getObjRetryEntry(key); retryEntry != nil && retryEntry.oldObj != nil {
+				klog.Infof("Detected stale egress firewall during new one add with the same name: %s", key)
+				egressFirewall := retryEntry.oldObj.(*egressfirewall.EgressFirewall)
+				if err := oc.deleteEgressFirewall(egressFirewall); err != nil {
+					oc.retryEgressFirewalls.unSkipRetryObj(key)
+					klog.Errorf("Failed to delete stale egress firewall %s, during add: %v", key, err)
+					egressFirewall.Status.Status = egressFirewallAddError
+					return
+				}
+				oc.retryEgressFirewalls.removeDeleteFromRetryObj(key)
+			}
+			start := time.Now()
+			if err := oc.addEgressFirewall(egressFirewall); err != nil {
+				klog.Errorf("Failed to create egress firewall %s, error: %v", key, err)
 				egressFirewall.Status.Status = egressFirewallAddError
+				oc.retryEgressFirewalls.unSkipRetryObj(key)
 			} else {
+				oc.retryEgressFirewalls.deleteRetryObj(key, true)
 				egressFirewall.Status.Status = egressFirewallAppliedCorrectly
 			}
-
-			err := oc.updateEgressFirewallWithRetry(egressFirewall)
-			if err != nil {
+			klog.Infof("Created Egress firewall: %s took: %v status: %s", key, time.Since(start), egressFirewall.Status.Status)
+			if err := oc.updateEgressFirewallWithRetry(egressFirewall); err != nil {
 				klog.Error(err)
 			}
 			metrics.UpdateEgressFirewallRuleCount(float64(len(egressFirewall.Spec.Egress)))
@@ -788,16 +812,40 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 			newEgressFirewall := newer.(*egressfirewall.EgressFirewall).DeepCopy()
 			oldEgressFirewall := old.(*egressfirewall.EgressFirewall)
 			if !reflect.DeepEqual(oldEgressFirewall.Spec, newEgressFirewall.Spec) {
-				errList := oc.updateEgressFirewall(oldEgressFirewall, newEgressFirewall)
-				if errList != nil {
+				newKey := getEgressFirewallNamespacedName(newEgressFirewall)
+				oldKey := getEgressFirewallNamespacedName(oldEgressFirewall)
+				oc.retryEgressFirewalls.skipRetryObj(oldKey)
+				if retryEntry := oc.retryEgressFirewalls.getObjRetryEntry(oldKey); retryEntry != nil && retryEntry.oldObj != nil {
+					egressFirewall := retryEntry.oldObj.(*egressfirewall.EgressFirewall)
+					if err := oc.deleteEgressFirewall(egressFirewall); err != nil {
+						oc.retryEgressFirewalls.initRetryObjWithAdd(newEgressFirewall, newKey)
+						oc.retryEgressFirewalls.unSkipRetryObj(oldKey)
+						klog.Errorf("Failed to delete stale egress firewall %s, during update: %v",
+							oldKey, err)
+						newEgressFirewall.Status.Status = egressFirewallUpdateError
+					}
+				} else if err := oc.deleteEgressFirewall(oldEgressFirewall); err != nil {
+					oc.retryEgressFirewalls.initRetryObjWithDelete(oldEgressFirewall, oldKey, nil)
+					oc.retryEgressFirewalls.initRetryObjWithAdd(newEgressFirewall, newKey)
+					oc.retryEgressFirewalls.unSkipRetryObj(oldKey)
+					klog.Errorf("Failed to delete egress firewall %s, during update: %v",
+						oldKey, err)
 					newEgressFirewall.Status.Status = egressFirewallUpdateError
-					klog.Error(errList)
 				} else {
-					newEgressFirewall.Status.Status = egressFirewallAppliedCorrectly
+					// remove the old egress firewall from retry entry since it was correctly deleted
+					oc.retryEgressFirewalls.removeDeleteFromRetryObj(oldKey)
+					if err := oc.addEgressFirewall(newEgressFirewall); err != nil {
+						oc.retryEgressFirewalls.initRetryObjWithAdd(newEgressFirewall, newKey)
+						oc.retryEgressFirewalls.unSkipRetryObj(newKey)
+						klog.Errorf("Failed to create egress firewall %s, during update: %v",
+							newKey, err)
+						newEgressFirewall.Status.Status = egressFirewallUpdateError
+					} else {
+						oc.retryEgressFirewalls.deleteRetryObj(newKey, true)
+						newEgressFirewall.Status.Status = egressFirewallAppliedCorrectly
+					}
 				}
-
-				err := oc.updateEgressFirewallWithRetry(newEgressFirewall)
-				if err != nil {
+				if err := oc.updateEgressFirewallWithRetry(newEgressFirewall); err != nil {
 					klog.Error(err)
 				}
 				metrics.UpdateEgressFirewallRuleCount(float64(len(newEgressFirewall.Spec.Egress) - len(oldEgressFirewall.Spec.Egress)))
@@ -805,12 +853,15 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 		},
 		DeleteFunc: func(obj interface{}) {
 			egressFirewall := obj.(*egressfirewall.EgressFirewall)
-			deleteErrors := oc.deleteEgressFirewall(egressFirewall)
-			if deleteErrors != nil {
-				klog.Error(deleteErrors)
+			key := getEgressFirewallNamespacedName(egressFirewall)
+			oc.retryEgressFirewalls.skipRetryObj(key)
+			oc.retryEgressFirewalls.initRetryObjWithDelete(egressFirewall, key, nil)
+			if err := oc.deleteEgressFirewall(egressFirewall); err != nil {
+				oc.retryEgressFirewalls.unSkipRetryObj(key)
+				klog.Errorf("Failed to delete egress firewall %s, error: %v", key, err)
 				return
 			}
-
+			oc.retryEgressFirewalls.deleteRetryObj(key, true)
 			metrics.UpdateEgressFirewallRuleCount(float64(-len(egressFirewall.Spec.Egress)))
 			metrics.DecrementEgressFirewallCount()
 		},
