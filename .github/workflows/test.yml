@@ -277,9 +277,12 @@ jobs:
     - name: Load docker image
       run: |
         docker load --input ${CI_IMAGE_MASTER_TAR}
-
-    - name: Check out code into the Go module directory - from PR branch
+        
+    - name: Check out code into the Go module directory - from Master branch
+      if: steps.last_run_status.outputs.STATUS != 'completed' && success()
       uses: actions/checkout@v2
+      with: 
+          ref: master
 
     - name: kind setup
       run: |
@@ -312,6 +315,9 @@ jobs:
     - name: Load docker image
       run: |
         docker load --input ${CI_IMAGE_PR_TAR}
+    
+    - name: Check out code into the Go module directory - from PR branch
+      uses: actions/checkout@v2
 
     - name: ovn upgrade
       run: |
