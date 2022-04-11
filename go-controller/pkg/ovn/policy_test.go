@@ -92,8 +92,12 @@ func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, po
 	pgHash := hashedPortGroup(networkPolicy.Namespace)
 	shouldBeLogged := logSeverity != nbdb.ACLSeverityInfo
 	egressDirection := nbdb.ACLDirectionFromLport
+	egressOptions := map[string]string{
+		"apply-after-lb": "true",
+	}
 	if oldEgress {
 		egressDirection = nbdb.ACLDirectionToLport
+		egressOptions = map[string]string{}
 	}
 	egressDenyACL := libovsdbops.BuildACL(
 		networkPolicy.Namespace+"_"+networkPolicy.Name,
@@ -107,9 +111,7 @@ func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, po
 		map[string]string{
 			defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress),
 		},
-		map[string]string{
-			"apply-after-lb": "true",
-		},
+		egressOptions,
 	)
 	egressDenyACL.UUID = libovsdbops.BuildNamedUUID()
 
@@ -125,9 +127,7 @@ func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, po
 		map[string]string{
 			defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress),
 		},
-		map[string]string{
-			"apply-after-lb": "true",
-		},
+		egressOptions,
 	)
 	egressAllowACL.UUID = libovsdbops.BuildNamedUUID()
 
@@ -254,8 +254,12 @@ func (n kNetworkPolicy) getPolicyData(networkPolicy *knet.NetworkPolicy, policyP
 
 	for i := range networkPolicy.Spec.Egress {
 		direction := nbdb.ACLDirectionFromLport
+		options := map[string]string{
+			"apply-after-lb": "true",
+		}
 		if oldEgress {
 			direction = nbdb.ACLDirectionToLport
+			options = map[string]string{}
 		}
 		aclName := networkPolicy.Namespace + "_" + networkPolicy.Name + "_" + strconv.Itoa(i)
 		policyType := string(knet.PolicyTypeEgress)
@@ -278,9 +282,7 @@ func (n kNetworkPolicy) getPolicyData(networkPolicy *knet.NetworkPolicy, policyP
 					policyTypeACLExtIdKey:  policyType,
 					policyType + "_num":    strconv.Itoa(i),
 				},
-				map[string]string{
-					"apply-after-lb": "true",
-				},
+				options,
 			)
 			acl.UUID = libovsdbops.BuildNamedUUID()
 			acls = append(acls, acl)
@@ -303,9 +305,7 @@ func (n kNetworkPolicy) getPolicyData(networkPolicy *knet.NetworkPolicy, policyP
 					policyTypeACLExtIdKey:  policyType,
 					policyType + "_num":    strconv.Itoa(i),
 				},
-				map[string]string{
-					"apply-after-lb": "true",
-				},
+				options,
 			)
 			acl.UUID = libovsdbops.BuildNamedUUID()
 			acls = append(acls, acl)
@@ -827,7 +827,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
-		ginkgo.It("reconciles an egress networkPolicy updating existing ACLs ", func() {
+		ginkgo.It("reconciles an egress networkPolicy updating existing ACLs", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespace1 := *newNamespace(namespaceName1)
 				namespace2 := *newNamespace(namespaceName2)
@@ -859,22 +859,12 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 							},
 						},
 					})
-				// stuff goes here
 				npTest := kNetworkPolicy{}
 				gressPolicyInitialData := npTest.getPolicyData(networkPolicy, nil, []string{namespace2.Name}, nil, nbdb.ACLSeverityInfo, true)
 				defaultDenyInitialData := npTest.getDefaultDenyData(networkPolicy, nil, nbdb.ACLSeverityInfo, true)
 				initialData := []libovsdb.TestData{}
 				initialData = append(initialData, gressPolicyInitialData...)
 				initialData = append(initialData, defaultDenyInitialData...)
-				/*
-					initialDB = libovsdb.TestSetup{
-						NBData: []libovsdb.TestData{
-							&nbdb.LogicalSwitch{
-								Name: "node1",
-							},
-						},
-					}
-				*/
 				fakeOvn.startWithDBSetup(
 					libovsdb.TestSetup{
 						NBData: initialData,
@@ -893,7 +883,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				)
 
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchNetworkPolicy()
+				fakeOvn.controller.syncNetworkPolicies([]interface{}{networkPolicy})
 
 				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName1)
 				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName2)
