@@ -32,6 +32,11 @@ func DeleteChassis(sbClient libovsdbclient.Client, chassisNames ...string) error
 				Name: chassisName,
 			},
 		})
+		opModels = append(opModels, OperationModel{
+			Model: &sbdb.ChassisPrivate{
+				Name: chassisName,
+			},
+		})
 	}
 
 	m := NewModelClient(sbClient)
@@ -44,14 +49,34 @@ func DeleteChassis(sbClient libovsdbclient.Client, chassisNames ...string) error
 func DeleteNodeChassis(sbClient libovsdbclient.Client, nodeNames ...string) error {
 	var opModels []OperationModel
 
-	for _, nodeName := range nodeNames {
-		opModels = append(opModels, OperationModel{
-			Model: &sbdb.Chassis{},
-			// we must use a predicate here since chassis are not indexed by hostname
-			ModelPredicate: func(chass *sbdb.Chassis) bool { return chass.Hostname == nodeName },
-		})
+	allChassis, err := ListChassis(sbClient)
+	if err != nil {
+		return err
 	}
 
+	// As we find the chassis to be deleted via their node name, assemble a slice
+	// with chassis names, so we can remove the associated rows in chassis private table
+	chassisNamesToRemove := make([]string, 0, len(nodeNames))
+
+	for _, nodeName := range nodeNames {
+		for _, chassis := range allChassis {
+			if chassis.Hostname == nodeName {
+				opModels = append(opModels, OperationModel{
+					Model: &sbdb.Chassis{UUID: chassis.UUID},
+				})
+				chassisNamesToRemove = append(chassisNamesToRemove, chassis.Name)
+				break
+			}
+		}
+	}
+
+	for _, chassisName := range chassisNamesToRemove {
+		opModels = append(opModels, OperationModel{
+			Model: &sbdb.ChassisPrivate{
+				Name: chassisName,
+			},
+		})
+	}
 	m := NewModelClient(sbClient)
 	if err := m.Delete(opModels...); err != nil {
 		return err

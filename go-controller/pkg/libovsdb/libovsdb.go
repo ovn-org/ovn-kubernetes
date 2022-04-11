@@ -102,6 +102,8 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 			client.WithTable(&sbdb.MACBinding{}),
 			// used by libovsdbops
 			client.WithTable(&sbdb.Chassis{}),
+			// used by libovsdbops
+			client.WithTable(&sbdb.ChassisPrivate{}),
 			// used for metrics
 			client.WithTable(&sbdb.SBGlobal{}),
 			// used for metrics
