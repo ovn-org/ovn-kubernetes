@@ -258,7 +258,7 @@ func (f *FakeIPTables) MatchState(tables map[string]FakeTable) error {
 			for k := range *foundTable {
 				foundKeys = append(foundKeys, k)
 			}
-			return fmt.Errorf("expected %v chains from table %s, got %v", keys, tableName, foundKeys)
+			return fmt.Errorf("expected the following chains from table %s: %v; but got the following chains: %v", tableName, keys, foundKeys)
 		}
 		for chainName, chain := range table {
 			foundChain, err := foundTable.getChain(chainName)

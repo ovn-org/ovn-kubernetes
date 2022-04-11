@@ -89,7 +89,9 @@ type serviceConfig struct {
 //
 // `add` parameter indicates if the flows should exist or be removed from the cache
 // `hasLocalHostNetworkEp` indicates if at least one host networked endpoint exists for this service which is local to this node.
-func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, hasLocalHostNetworkEp bool) {
+// `addressFamily` parameter limits the scope of the update to the given addressFamily (0 for both families, 4 for IPv4 only,
+// 6 for IPv6 only).
+func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, hasLocalHostNetworkEp bool, addressFamily int) {
 	var cookie, key string
 	var err error
 
@@ -111,10 +113,10 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 		protocol := strings.ToLower(string(svcPort.Protocol))
 		if svcPort.NodePort > 0 {
 			flowProtocols := []string{}
-			if config.IPv4Mode {
+			if config.IPv4Mode && (addressFamily == 0 || addressFamily == 4) {
 				flowProtocols = append(flowProtocols, protocol)
 			}
-			if config.IPv6Mode {
+			if config.IPv6Mode && (addressFamily == 0 || addressFamily == 6) {
 				flowProtocols = append(flowProtocols, protocol+"6")
 			}
 			for _, flowProtocol := range flowProtocols {
@@ -403,7 +405,7 @@ func (npw *nodePortWatcher) updateServiceInfo(index ktypes.NamespacedName, servi
 func addServiceRules(service *kapi.Service, svcHasLocalHostNetEndPnt bool, npw *nodePortWatcher) {
 	// For dpu or Full mode
 	if npw != nil {
-		npw.updateServiceFlowCache(service, true, svcHasLocalHostNetEndPnt)
+		npw.updateServiceFlowCache(service, true, svcHasLocalHostNetEndPnt, 0)
 		npw.ofm.requestFlowSync()
 		if !npw.dpuMode {
 			// add iptable rules only in full mode
@@ -417,10 +419,12 @@ func addServiceRules(service *kapi.Service, svcHasLocalHostNetEndPnt bool, npw *
 
 // delServiceRules deletes all possible iptables rules and OpenFlow physical
 // flows for a service
-func delServiceRules(service *kapi.Service, npw *nodePortWatcher) {
+// addressFamily can be either "0" (delete both IPv4 and IPv6, "4" to delete only IPv4, and
+// "6" to delete IPv6 only.
+func delServiceRules(service *kapi.Service, npw *nodePortWatcher, addressFamily int) {
 	// full mode || dpu mode
 	if npw != nil {
-		npw.updateServiceFlowCache(service, false, false)
+		npw.updateServiceFlowCache(service, false, false, addressFamily)
 		npw.ofm.requestFlowSync()
 		if !npw.dpuMode {
 			// Always try and delete all rules here in full mode & in host only mode. We don't touch iptables in dpu mode.
@@ -441,20 +445,20 @@ func delServiceRules(service *kapi.Service, npw *nodePortWatcher) {
 			// +--------------------------+-----------------------+--------------+--------------------------------+
 
 			// case1: deletes the REDIRECT rules for etp=local + host-networked pods in both gw modes
-			delGatewayIptRules(service, true)
+			delGatewayIptRules(service, true, addressFamily)
 			// case2: deletes the DNAT rules towards masqueradeIP for etp=local + ovn-k pods in both gw modes OR
 			// case3: deletes the DNAT rules towards clusterIP for etp=cluster in both gw modes
-			delGatewayIptRules(service, false)
+			delGatewayIptRules(service, false, addressFamily)
 		}
 		return
 	}
 
 	// For host only mode always try and delete all rules here
 	// case1: deletes the REDIRECT rules for etp=local + host-networked pods in both gw modes
-	delGatewayIptRules(service, true)
+	delGatewayIptRules(service, true, addressFamily)
 	// case2: deletes the DNAT rules towards masqueradeIP for etp=local + ovn-k pods in both gw modes OR
 	// case3: deletes the DNAT rules towards clusterIP for etp=cluster in both gw modes
-	delGatewayIptRules(service, false)
+	delGatewayIptRules(service, false, addressFamily)
 }
 
 func serviceUpdateNotNeeded(old, new *kapi.Service) bool {
@@ -465,6 +469,30 @@ func serviceUpdateNotNeeded(old, new *kapi.Service) bool {
 		reflect.DeepEqual(new.Spec.Type, old.Spec.Type) &&
 		reflect.DeepEqual(new.Status.LoadBalancer.Ingress, old.Status.LoadBalancer.Ingress) &&
 		reflect.DeepEqual(new.Spec.ExternalTrafficPolicy, old.Spec.ExternalTrafficPolicy)
+}
+
+// isIPFamilyChangeOnly returns 3 values, the first one, isIPFamilyChangeOnly, indicates if this is only a change to IP Family Policy.
+// changedIPFamily indicates which IP address family changed.
+// isIPFamilyUpgrade indicates if this is an IP Family upgrade or downgrade (upgrade being from SingleStack to DualStack).
+func isIPFamilyChangeOnly(old, new *kapi.Service) (isIPFamilyChangeOnly bool, changedIPFamily int, isIPFamilyUpgrade bool) {
+	if reflect.DeepEqual(new.Spec.Ports, old.Spec.Ports) &&
+		reflect.DeepEqual(new.Spec.ClusterIP, old.Spec.ClusterIP) &&
+		reflect.DeepEqual(new.Spec.Type, old.Spec.Type) &&
+		reflect.DeepEqual(new.Spec.ExternalIPs, old.Spec.ExternalIPs) &&
+		reflect.DeepEqual(new.Status.LoadBalancer.Ingress, old.Status.LoadBalancer.Ingress) &&
+		reflect.DeepEqual(new.Spec.ExternalTrafficPolicy, old.Spec.ExternalTrafficPolicy) &&
+		new.Spec.ClusterIPs[0] == old.Spec.ClusterIPs[0] &&
+		len(new.Spec.ClusterIPs) != len(old.Spec.ClusterIPs) {
+		isIPFamilyChangeOnly = true
+		// ClusterIP is stable, and there can be only a single IP of each family. Hence,
+		// if ClusterIP is IPv6, then the changed IP family is IPv4, and vice versa.
+		changedIPFamily = 6
+		if utilnet.IsIPv6String(old.Spec.ClusterIP) {
+			changedIPFamily = 4
+		}
+		isIPFamilyUpgrade = len(new.Spec.ClusterIPs) > len(old.Spec.ClusterIPs)
+	}
+	return
 }
 
 // AddService handles configuring shared gateway bridge flows to steer External IP, Node Port, Ingress LB traffic into OVN
@@ -513,8 +541,22 @@ func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) {
 	if util.ServiceTypeHasClusterIP(old) && util.IsClusterIPSet(old) {
 		// Delete old rules if needed, but don't delete svcConfig
 		// so that we don't miss any endpoint update events here
-		klog.V(5).Infof("Deleting old service rules for: %v", old)
-		delServiceRules(old, npw)
+
+		// Determine if only the IP Family changed and if so, if this is a migration from SingleStack to DualStack
+		// or which of the 2 IP Address Families was removed.
+		isIPFamilyChangeOnly, changedIPFamily, isIPFamilyUpgrade := isIPFamilyChangeOnly(old, new)
+
+		// If more than just the IP Family changed, delete rules for both families.
+		if !isIPFamilyChangeOnly && !isIPFamilyUpgrade {
+			klog.V(5).Infof("Deleting old service rules for: %v", old)
+			delServiceRules(old, npw, 0)
+		} else {
+			// If this is an IP Family upgrade, we do not have to do anything here as we only add rules.
+			if !isIPFamilyUpgrade {
+				klog.V(5).Infof("Deleting old service rules for IPv%d: %v", changedIPFamily, old)
+				delServiceRules(old, npw, changedIPFamily)
+			}
+		}
 	}
 
 	if util.ServiceTypeHasClusterIP(new) && util.IsClusterIPSet(new) {
@@ -531,7 +573,7 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) {
 	klog.V(5).Infof("Deleting service %s in namespace %s", service.Name, service.Namespace)
 	name := ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}
 	if svcConfig, exists := npw.getAndDeleteServiceInfo(name); exists {
-		delServiceRules(svcConfig.service, npw)
+		delServiceRules(svcConfig.service, npw, 0)
 	} else {
 		klog.Warningf("Deletion failed No service found in cache for endpoint %s in namespace %s", service.Name, service.Namespace)
 	}
@@ -558,11 +600,11 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 		hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(ep, &npw.nodeIPManager.addresses)
 		npw.getAndSetServiceInfo(name, service, hasLocalHostNetworkEp)
 		// Delete OF rules for service if they exist
-		npw.updateServiceFlowCache(service, false, hasLocalHostNetworkEp)
-		npw.updateServiceFlowCache(service, true, hasLocalHostNetworkEp)
+		npw.updateServiceFlowCache(service, false, hasLocalHostNetworkEp, 0)
+		npw.updateServiceFlowCache(service, true, hasLocalHostNetworkEp, 0)
 		// Add correct iptables rules only for Full mode
 		if !npw.dpuMode {
-			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, hasLocalHostNetworkEp)...)
+			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, hasLocalHostNetworkEp, 0)...)
 		}
 	}
 	// sync OF rules once
@@ -605,7 +647,7 @@ func (npw *nodePortWatcher) AddEndpoints(ep *kapi.Endpoints) {
 
 	if out.hasLocalHostNetworkEp != hasLocalHostNetworkEp {
 		klog.V(5).Infof("Endpoint %s ADD event in namespace %s is updating rules", ep.Name, ep.Namespace)
-		delServiceRules(svc, npw)
+		delServiceRules(svc, npw, 0)
 		addServiceRules(svc, hasLocalHostNetworkEp, npw)
 	}
 
@@ -623,7 +665,7 @@ func (npw *nodePortWatcher) DeleteEndpoints(ep *kapi.Endpoints) {
 		npw.serviceInfoLock.Lock()
 		defer npw.serviceInfoLock.Unlock()
 
-		delServiceRules(svcConfig.service, npw)
+		delServiceRules(svcConfig.service, npw, 0)
 		addServiceRules(svcConfig.service, hasLocalHostNetworkEp, npw)
 	}
 }
@@ -669,7 +711,7 @@ func (npwipt *nodePortWatcherIptables) UpdateService(old, new *kapi.Service) {
 	}
 
 	if util.ServiceTypeHasClusterIP(old) && util.IsClusterIPSet(old) {
-		delServiceRules(old, nil)
+		delServiceRules(old, nil, 0)
 	}
 
 	if util.ServiceTypeHasClusterIP(new) && util.IsClusterIPSet(new) {
@@ -682,7 +724,7 @@ func (npwipt *nodePortWatcherIptables) DeleteService(service *kapi.Service) {
 	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
 		return
 	}
-	delServiceRules(service, nil)
+	delServiceRules(service, nil, 0)
 }
 
 func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) {
@@ -696,7 +738,7 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) {
 		}
 		// Add correct iptables rules.
 		// TODO: ETP is not implemented for smart NIC mode.
-		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, false)...)
+		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, false, 0)...)
 	}
 
 	// sync IPtables rules once

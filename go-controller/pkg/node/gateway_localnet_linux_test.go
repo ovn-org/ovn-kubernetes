@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"net"
 
@@ -1599,5 +1600,143 @@ var _ = Describe("Node Operations", func() {
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
 		})
+	})
+
+	Context("on update", func() {
+		It("upgrades iptables rules and flows when converting to DualStack", func() {
+			app.Action = func(ctx *cli.Context) error {
+				config.Gateway.Mode = config.GatewayModeShared
+				nodePort := int32(31111)
+
+				fNPW.gatewayIPv6 = v6localnetGatewayIP
+
+				By("Starting the node port watcher with the IPv4 service namespace1/service1")
+				originalSvcDefinition := *newService("service1", "namespace1", "10.129.0.2",
+					[]v1.ServicePort{
+						{
+							NodePort: nodePort,
+							Protocol: v1.ProtocolTCP,
+							Port:     int32(8080),
+						},
+					},
+					v1.ServiceTypeNodePort,
+					nil,
+					v1.ServiceStatus{},
+					false,
+				)
+				originalSvcDefinition.Spec.ClusterIPs = []string{"10.129.0.2"}
+				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+
+				fakeOvnNode.start(ctx,
+					&v1.ServiceList{
+						Items: []v1.Service{
+							originalSvcDefinition,
+						},
+					},
+					&endpoints,
+				)
+				// must activate this here (order is important), otherwise it will be overritten.
+				config.IPv6Mode = true
+
+				fNPW.watchFactory = fakeOvnNode.watcher
+				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				fNPW.AddService(&originalSvcDefinition)
+				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+
+				By("Verifying that all IPv4 iptables rules are in place")
+				expectedTables4 := map[string]util.FakeTable{
+					"nat": {
+						"PREROUTING": []string{
+							"-j OVN-KUBE-EXTERNALIP",
+							"-j OVN-KUBE-NODEPORT",
+						},
+						"OUTPUT": []string{
+							"-j OVN-KUBE-EXTERNALIP",
+							"-j OVN-KUBE-NODEPORT",
+						},
+						"OVN-KUBE-NODEPORT": []string{
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", originalSvcDefinition.Spec.Ports[0].Protocol, originalSvcDefinition.Spec.Ports[0].NodePort, originalSvcDefinition.Spec.ClusterIPs[0], originalSvcDefinition.Spec.Ports[0].Port),
+						},
+						"OVN-KUBE-EXTERNALIP":    []string{},
+						"OVN-KUBE-SNAT-MGMTPORT": []string{},
+					},
+					"filter": {},
+				}
+
+				f4 := iptV4.(*util.FakeIPTables)
+				err := f4.MatchState(expectedTables4)
+				Expect(err).NotTo(HaveOccurred())
+
+				By("Verifying that all flows for IPv4 are in place")
+				expectedFlows := []string{
+					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=eth0, tcp, tp_dst=31111, actions=check_pkt_larger(1414)->reg0[0],resubmit(,11)",
+					"cookie=0x453ae29bcbbc08bd, priority=110, in_port=patch-breth0_ov, tcp, tp_src=31111, actions=output:eth0",
+				}
+				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				Expect(flows).To(Equal(expectedFlows))
+
+				// Promote the service to DualStack.
+				By("Retrieving the service from the ClientSet")
+				c := fakeOvnNode.fakeClient.KubeClient
+				svcBeforeUpdate, err := c.CoreV1().Services("namespace1").Get(context.TODO(), "service1", metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				By("Promoting the service to IPv6")
+				svcBeforeUpdate.Spec.ClusterIPs = []string{"10.129.0.2", "fd00:10:96::10"}
+				// Note: the following does not work because we'd be executing the actions asynchronously:
+				// _, err = c.CoreV1().Services("namespace1").Update(context.TODO(), svcBeforeUpdate, metav1.UpdateOptions{})
+				// Expect(err).NotTo(HaveOccurred())*/
+				// Instead, call f.NPW.UpdateService directly:
+				fNPW.UpdateService(&originalSvcDefinition, svcBeforeUpdate)
+				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+
+				By("Verifying that all IPv4 and IPv6 iptables rules are in place")
+				err = f4.MatchState(expectedTables4)
+
+				Expect(err).NotTo(HaveOccurred())
+				expectedTables6 := map[string]util.FakeTable{
+					"nat": {
+						"PREROUTING": []string{
+							"-j OVN-KUBE-EXTERNALIP",
+							"-j OVN-KUBE-NODEPORT",
+						},
+						"OUTPUT": []string{
+							"-j OVN-KUBE-EXTERNALIP",
+							"-j OVN-KUBE-NODEPORT",
+						},
+						"OVN-KUBE-NODEPORT": []string{
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination [%s]:%v",
+								originalSvcDefinition.Spec.Ports[0].Protocol,
+								originalSvcDefinition.Spec.Ports[0].NodePort,
+								svcBeforeUpdate.Spec.ClusterIPs[1],
+								originalSvcDefinition.Spec.Ports[0].Port),
+						},
+						"OVN-KUBE-EXTERNALIP":    []string{},
+						"OVN-KUBE-SNAT-MGMTPORT": []string{},
+					},
+					"filter": {},
+				}
+				f6 := iptV6.(*util.FakeIPTables)
+				err = f6.MatchState(expectedTables6)
+				Expect(err).NotTo(HaveOccurred())
+
+				By("Verifying that all flows for IPv4 and IPv6 are in place")
+				expectedFlows6 := []string{
+					"cookie=0xc61e10a53ef147f7, priority=110, in_port=eth0, tcp6, tp_dst=31111, actions=check_pkt_larger(1414)->reg0[0],resubmit(,11)",
+					"cookie=0xc61e10a53ef147f7, priority=110, in_port=patch-breth0_ov, tcp6, tp_src=31111, actions=output:eth0",
+				}
+				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
+				Expect(flows).To(Equal(expectedFlows))
+				flows6 := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp6_31111"]
+				Expect(flows6).To(Equal(expectedFlows6))
+
+				By("Shutting down the fake ovn node")
+				fakeOvnNode.shutdown()
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
 	})
 })

@@ -43,8 +43,14 @@ type iptRule struct {
 
 func addIptRules(rules []iptRule) error {
 	var addErrors error
+	var protocolStr string
 	for _, r := range rules {
-		klog.V(5).Infof("Adding rule in table: %s, chain: %s with args: \"%s\" for protocol: %v ", r.table, r.chain, strings.Join(r.args, " "), r.protocol)
+		if r.protocol == iptables.ProtocolIPv4 {
+			protocolStr = "ipv4"
+		} else {
+			protocolStr = "ipv6"
+		}
+		klog.V(5).Infof("Adding rule in table: %s, chain: %s with args: \"%s\" for protocol: %s ", r.table, r.chain, strings.Join(r.args, " "), protocolStr)
 		ipt, _ := util.GetIPTablesHelper(r.protocol)
 		if err := ipt.NewChain(r.table, r.chain); err != nil {
 			klog.V(5).Infof("Chain: \"%s\" in table: \"%s\" already exists, skipping creation", r.chain, r.table)
@@ -63,8 +69,14 @@ func addIptRules(rules []iptRule) error {
 
 func delIptRules(rules []iptRule) error {
 	var delErrors error
+	var protocolStr string
 	for _, r := range rules {
-		klog.V(5).Infof("Deleting rule in table: %s, chain: %s with args: \"%s\" for protocol: %v ", r.table, r.chain, strings.Join(r.args, " "), r.protocol)
+		if r.protocol == iptables.ProtocolIPv4 {
+			protocolStr = "ipv4"
+		} else {
+			protocolStr = "ipv6"
+		}
+		klog.V(5).Infof("Deleting rule in table: %s, chain: %s with args: \"%s\" for protocol: %s ", r.table, r.chain, strings.Join(r.args, " "), protocolStr)
 		ipt, _ := util.GetIPTablesHelper(r.protocol)
 		if exists, err := ipt.Exists(r.table, r.chain, r.args...); err == nil && exists {
 			err := ipt.Delete(r.table, r.chain, r.args...)
@@ -401,7 +413,9 @@ func recreateIPTRules(table, chain string, keepIPTRules []iptRule) {
 // to ovn-k8s-mp0 preserving sourceIP are added.
 //
 // case3: (default) if externalTrafficPolicy=cluster, irrespective of gateway modes, DNAT rule towards clusterIP svc is added.
-func getGatewayIPTRules(service *kapi.Service, svcHasLocalHostNetEndPnt bool) []iptRule {
+//
+// addressFamily can be either "0" for both addressFamilies, or "4" or "6" to delete only a single AF.
+func getGatewayIPTRules(service *kapi.Service, svcHasLocalHostNetEndPnt bool, addressFamily int) []iptRule {
 	rules := make([]iptRule, 0)
 	clusterIPs := util.GetClusterIPs(service)
 	svcTypeIsETPLocal := util.ServiceExternalTrafficPolicyLocal(service)
@@ -421,7 +435,12 @@ func getGatewayIPTRules(service *kapi.Service, svcHasLocalHostNetEndPnt bool) []
 				// case1 (see function description for details)
 				// Port redirect host -> Nodeport -> host traffic directly to endpoint
 				for _, clusterIP := range clusterIPs {
-					rules = append(rules, getNodePortETPLocalIPTRules(svcPort, clusterIP, int32(svcPort.TargetPort.IntValue()), svcHasLocalHostNetEndPnt, svcTypeIsETPLocal)...)
+					// Adhere to the addressFamily filter if it's 4 or 6.
+					if addressFamily == 0 ||
+						addressFamily == 6 && utilnet.IsIPv6String(clusterIP) ||
+						addressFamily == 4 && utilnet.IsIPv4String(clusterIP) {
+						rules = append(rules, getNodePortETPLocalIPTRules(svcPort, clusterIP, int32(svcPort.TargetPort.IntValue()), svcHasLocalHostNetEndPnt, svcTypeIsETPLocal)...)
+					}
 				}
 			} else if svcTypeIsETPLocal && !svcHasLocalHostNetEndPnt {
 				// case2 (see function description for details)
@@ -432,7 +451,11 @@ func getGatewayIPTRules(service *kapi.Service, svcHasLocalHostNetEndPnt bool) []
 			} else {
 				// case3 (see function description for details)
 				for _, clusterIP := range clusterIPs {
-					rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.Port, svcHasLocalHostNetEndPnt, svcTypeIsETPLocal)...)
+					if addressFamily == 0 ||
+						addressFamily == 6 && utilnet.IsIPv6String(clusterIP) ||
+						addressFamily == 4 && utilnet.IsIPv4String(clusterIP) {
+						rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.Port, svcHasLocalHostNetEndPnt, svcTypeIsETPLocal)...)
+					}
 				}
 			}
 		}
