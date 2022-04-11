@@ -18,7 +18,6 @@ var callbacks = map[string]readinessFunc{
 	"ovnnb-db":       ovnNBDBReadiness,
 	"ovnsb-db":       ovnSBDBReadiness,
 	"ovn-northd":     ovnNorthdReadiness,
-	"ovn-nbctl":      ovnNbCtlReadiness,
 	"ovs-daemons":    ovsDaemonsReadiness,
 	"ovnkube-node":   ovnNodeReadiness,
 	"ovnnb-db-raft":  ovnNBDBRaftReadiness,
@@ -132,18 +131,6 @@ func ovnNorthdReadiness(target string) error {
 		return fmt.Errorf("failed to get sb-connection-status from %s: (%v)", target, err)
 	} else if sbConnectionStatus != "connected" {
 		return fmt.Errorf("%s sb-connection-status is %s", target, sbConnectionStatus)
-	}
-	return nil
-}
-
-func ovnNbCtlReadiness(target string) error {
-	// checking version works as it connects to the ovn-nbctl daemon and returns the version
-	// if nbctl isn't ready, version may fail to return
-	// NOTE: There is no nbctld process, but nbctl provides a daemon mode,
-	// which is invoked by using --detach option to start an ovn-nbctl in a daemon mode.
-	_, _, err := util.RunOVNAppctlWithTimeout(5, "-t", target, "version")
-	if err != nil {
-		return fmt.Errorf("failed to get version from %s: (%v)", target, err)
 	}
 	return nil
 }

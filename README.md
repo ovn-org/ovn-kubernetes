@@ -51,7 +51,6 @@ list to the above command. Set values are the default values.
     --ovn-loglevel-nb="-vconsole:info -vfile:info" \\ Log config for northbound db
     --ovn-loglevel-sb="-vconsole:info -vfile:info" \\ Log config for southboudn db
     --ovn-loglevel-controller="-vconsole:info" \\ Log config for ovn-controller
-    --ovn-loglevel-nbctld="-vconsole:info" \\ Log config for nbctl daemon
 ```
 
 If you are not running OVS directly in the nodes, you must apply the OVS Daemonset yaml.
