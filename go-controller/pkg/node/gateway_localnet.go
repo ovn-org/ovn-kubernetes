@@ -66,12 +66,22 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		if err != nil {
 			return err
 		}
-		gw.openflowManager, err = newLocalGatewayOpenflowManager(gwBridge)
+
+		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory)
+
+		gw.openflowManager, err = newLocalGatewayOpenflowManager(gwBridge, gw.nodeIPManager.ListAddresses())
 		if err != nil {
 			return err
 		}
-
-		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory)
+		// resync flows on IP change
+		gw.nodeIPManager.OnChanged = func() {
+			klog.V(5).Info("Node addresses changed, re-syncing bridge flows")
+			if err := gw.openflowManager.updateBridgeFlowCache(gw.nodeIPManager.ListAddresses()); err != nil {
+				// very unlikely - somehow node has lost its IP address
+				klog.Errorf("Failed to re-generate gateway flows after address change: %v", err)
+			}
+			gw.openflowManager.requestFlowSync()
+		}
 
 		if config.Gateway.NodeportEnable {
 			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge.patchPort, gwBridge.bridgeName, gwBridge.uplinkName, gwBridge.ips, gw.openflowManager, gw.nodeIPManager, watchFactory)
@@ -145,19 +155,7 @@ func cleanupLocalnetGateway(physnet string) error {
 //    the return traffic can be steered back to OVN logical topology
 // -- to handle host -> service access, via masquerading from the host to OVN GR
 // -- to handle external -> service(ExternalTrafficPolicy: Local) -> host access without SNAT
-func newLocalGatewayOpenflowManager(gwBridge *bridgeConfiguration) (*openflowManager, error) {
-	var dftFlows []string
-
-	dftFlows, err := flowsForDefaultBridge(gwBridge.ofPortPhys, gwBridge.macAddress.String(), gwBridge.ofPortPatch,
-		gwBridge.ofPortHost, gwBridge.ips)
-	if err != nil {
-		return nil, err
-	}
-
-	dftCommonFlows := commonFlows(gwBridge.ofPortPhys, gwBridge.macAddress.String(), gwBridge.ofPortPatch,
-		gwBridge.ofPortHost)
-	dftFlows = append(dftFlows, dftCommonFlows...)
-
+func newLocalGatewayOpenflowManager(gwBridge *bridgeConfiguration, extraIPs []net.IP) (*openflowManager, error) {
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
 	ofm := &openflowManager{
 		defaultBridge: gwBridge,
@@ -165,8 +163,11 @@ func newLocalGatewayOpenflowManager(gwBridge *bridgeConfiguration) (*openflowMan
 		flowMutex:     sync.Mutex{},
 		flowChan:      make(chan struct{}, 1),
 	}
-	ofm.updateFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
-	ofm.updateFlowCacheEntry("DEFAULT", dftFlows)
+
+	if err := ofm.updateBridgeFlowCache(extraIPs); err != nil {
+		return nil, err
+	}
+
 	ofm.requestFlowSync()
 	return ofm, nil
 }
