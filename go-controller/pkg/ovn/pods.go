@@ -533,15 +533,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		// namespace annotations to go through external egress router
 		if extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName); err != nil {
 			return err
-		} else if err = addOrUpdatePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, podIfAddrs); err != nil {
+		} else if ops, err = oc.addOrUpdatePerPodGRSNATReturnOps(pod.Spec.NodeName, extIPs, podIfAddrs, ops); err != nil {
 			return err
 		}
-	}
-
-	// check if this pod is serving as an external GW
-	err = oc.addPodExternalGW(pod)
-	if err != nil {
-		return fmt.Errorf("failed to handle external GW check: %v", err)
 	}
 
 	// set addresses on the port
@@ -579,6 +573,12 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	txOkCallBack()
 	oc.podRecorder.AddLSP(pod.UID)
+
+	// check if this pod is serving as an external GW
+	err = oc.addPodExternalGW(pod)
+	if err != nil {
+		return fmt.Errorf("failed to handle external GW check: %v", err)
+	}
 
 	// if somehow lspUUID is empty, there is a bug here with interpreting OVSDB results
 	if len(lsp.UUID) == 0 {
