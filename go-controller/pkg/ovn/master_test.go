@@ -1382,7 +1382,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Eventually(func() bool {
 				return clusterController.nbClient.Connected()
 			}).Should(gomega.BeFalse())
-
+			_, err = fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			// sleep long enough for TransactWithRetry to fail, causing node Add to fail
 			time.Sleep(types.OVSDBTimeout + time.Second)
 			// syncGateway should fail because we brought NBDB down
