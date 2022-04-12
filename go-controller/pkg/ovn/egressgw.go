@@ -588,6 +588,22 @@ func addOrUpdatePerPodGRSNAT(nbClient libovsdbclient.Client, nodeName string, ex
 	return nil
 }
 
+// addOrUpdatePerPodGRSNATReturnOps returns the operation that adds or updates per pod SNAT rules towards the nodeIP that are
+// applied to the GR where the pod resides
+// used when disableSNATMultipleGWs=true
+func (oc *Controller) addOrUpdatePerPodGRSNATReturnOps(nodeName string, extIPs, podIfAddrs []*net.IPNet, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
+	gr := types.GWRouterPrefix + nodeName
+	router := &nbdb.LogicalRouter{Name: gr}
+	nats, err := buildPerPodGRSNAT(extIPs, podIfAddrs)
+	if err != nil {
+		return nil, err
+	}
+	if ops, err = libovsdbops.CreateOrUpdateNATsOps(oc.nbClient, ops, router, nats...); err != nil {
+		return nil, fmt.Errorf("failed to update SNAT for pods of router: %s, error: %v", gr, err)
+	}
+	return ops, nil
+}
+
 // addHybridRoutePolicyForPod handles adding a higher priority allow policy to allow traffic to be routed normally
 // by ecmp routes
 func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) error {
