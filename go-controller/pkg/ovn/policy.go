@@ -178,10 +178,12 @@ func (oc *Controller) syncNetworkPoliciesRetriable(networkPolicies []interface{}
 	if allEgressACLs != nil && allEgressACLs[0].Direction != nbdb.ACLDirectionFromLport {
 		// TODO(jtanenba) make all the libovsdbops.ACL commands deal with pointers to ACLs
 		var egressACLsPTR []*nbdb.ACL
-		for _, acl := range allEgressACLs {
-			acl.Direction = nbdb.ACLDirectionFromLport
-			acl.Options = map[string]string{"apply-after-lb": "true"}
-			egressACLsPTR = append(egressACLsPTR, &acl)
+		for _, aclUnsafe := range allEgressACLs {
+			// to prevent aclUnsafe from being overwritten every iteration
+			aclSafe := aclUnsafe
+			aclSafe.Direction = nbdb.ACLDirectionFromLport
+			aclSafe.Options = map[string]string{"apply-after-lb": "true"}
+			egressACLsPTR = append(egressACLsPTR, &aclSafe)
 		}
 		ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, egressACLsPTR...)
 		if err != nil {
