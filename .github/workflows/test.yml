@@ -355,39 +355,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target:
-            # hybrid-overlay = multicast-enable = emptylb-enable = false
-          - "shard-conformance"
-            # hybrid-overlay = multicast-enable = emptylb-enable = true
-          - "control-plane"
-        ha: ["HA", "noHA"]
-        gateway-mode: ["local", "shared"]
-        ipfamily: ["ipv4", "ipv6", "dualstack"]
-        disable-snat-multiple-gws: ["noSnatGW", "snatGW"]
-        second-bridge: ["2br", "1br"]
-        # Example of how to exclude a fully qualified test:
-        # - {"ipfamily": "ipv4"}, "ha": "HA", "gateway-mode": "shared", "target": "control-plane"}
-        exclude:
-         # Not currently supported but needs to be.
-         - {"ipfamily": "dualstack", "target": "control-plane"}
-         # Limit matrix combinations for CI. DISABLED items added to exclude list:
-         - {"ipfamily": "ipv4", "ha": "HA", "gateway-mode": "local"}
-         - {"ipfamily": "ipv4", "ha": "noHA", "gateway-mode": "shared"}
-         - {"ipfamily": "ipv6", "ha": "noHA", "gateway-mode": "local"}
-         - {"ipfamily": "ipv6", "ha": "noHA", "gateway-mode": "shared"}
-         - {"ipfamily": "dualstack", "ha": "HA", "gateway-mode": "shared"}
-         - {"ipfamily": "dualstack", "ha": "noHA"}
-         # IPv6 multicast is supported but tests fail due to old iperf version
-         # in agnhost images. Disable them for now.
-         - {"ipfamily": "dualstack", "target": "control-plane"}
-         - {"ipfamily": "ipv6", "target": "control-plane"}
-         # No need to run disable-snat-multiple-gws with shard conformance
-         - {"disable-snat-multiple-gws": "noSnatGW", "target": "shard-conformance"}
-         - {"second-bridge": "2br", "disable-snat-multiple-gws": "snatGW"}
-         - {"second-bridge": "2br", "ha": "HA"}
-         - {"second-bridge": "1br", "ha": "noHA", "gateway-mode": "local", "target": "control-plane", "disable-snat-multiple-gws": "snatGW"}
+        # Valid options are:
+        # target: ["shard-conformance", "control-plane" ]
+        #         shard-conformance: hybrid-overlay = multicast-enable = emptylb-enable = false
+        #         control-plane: hybrid-overlay = multicast-enable = emptylb-enable = true
+        # ha: ["HA", "noHA"]
+        # gateway-mode: ["local", "shared"]
+        # ipfamily: ["ipv4", "ipv6", "dualstack"]
+        # disable-snat-multiple-gws: ["noSnatGW", "snatGW"]
+        # second-bridge: ["2br", "1br"]
         include:
-         - {"target": "control-plane", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br"}
+          - {"target": "shard-conformance", "ha": "HA",   "gateway-mode": "local",  "ipfamily": "ipv6",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br"}
+          - {"target": "shard-conformance", "ha": "HA",   "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br"}
+          - {"target": "shard-conformance", "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br"}
+          - {"target": "shard-conformance", "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br"}
+          - {"target": "shard-conformance", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br"}
+          - {"target": "control-plane",     "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br"}
+          - {"target": "control-plane",     "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br"}
+          - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br"}
+          - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br"}
+          - {"target": "control-plane",     "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br"}
     needs: [ build-pr ]
     env:
       JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}"
