@@ -482,7 +482,8 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) {
 		// No endpoint object exists yet so default to false
 		hasLocalHostNetworkEp = false
 	} else {
-		hasLocalHostNetworkEp = hasLocalHostNetworkEndpoints(ep, &npw.nodeIPManager.addresses)
+		nodeIPs := npw.nodeIPManager.ListAddresses()
+		hasLocalHostNetworkEp = hasLocalHostNetworkEndpoints(ep, nodeIPs)
 	}
 
 	// If something didn't already do it add correct Service rules
@@ -555,7 +556,8 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 			klog.V(5).Infof("No endpoint found for service %s in namespace %s during sync", service.Name, service.Namespace)
 			continue
 		}
-		hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(ep, &npw.nodeIPManager.addresses)
+		nodeIPs := npw.nodeIPManager.ListAddresses()
+		hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(ep, nodeIPs)
 		npw.getAndSetServiceInfo(name, service, hasLocalHostNetworkEp)
 		// Delete OF rules for service if they exist
 		npw.updateServiceFlowCache(service, false, hasLocalHostNetworkEp)
@@ -591,7 +593,8 @@ func (npw *nodePortWatcher) AddEndpoints(ep *kapi.Endpoints) {
 	}
 
 	klog.V(5).Infof("Adding endpoints %s in namespace %s", ep.Name, ep.Namespace)
-	hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(ep, &npw.nodeIPManager.addresses)
+	nodeIPs := npw.nodeIPManager.ListAddresses()
+	hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(ep, nodeIPs)
 
 	// Here we make sure the correct rules are programmed whenever an AddEndpoint
 	// event is received, only alter flows if we need to, i.e if cache wasn't
@@ -645,8 +648,9 @@ func (npw *nodePortWatcher) UpdateEndpoints(old *kapi.Endpoints, new *kapi.Endpo
 	}
 
 	// Update rules if hasLocalHostNetworkEpNew status changed.
-	hasLocalHostNetworkEpOld := hasLocalHostNetworkEndpoints(old, &npw.nodeIPManager.addresses)
-	hasLocalHostNetworkEpNew := hasLocalHostNetworkEndpoints(new, &npw.nodeIPManager.addresses)
+	nodeIPs := npw.nodeIPManager.ListAddresses()
+	hasLocalHostNetworkEpOld := hasLocalHostNetworkEndpoints(old, nodeIPs)
+	hasLocalHostNetworkEpNew := hasLocalHostNetworkEndpoints(new, nodeIPs)
 	if hasLocalHostNetworkEpOld != hasLocalHostNetworkEpNew {
 		npw.DeleteEndpoints(old)
 		npw.AddEndpoints(new)
