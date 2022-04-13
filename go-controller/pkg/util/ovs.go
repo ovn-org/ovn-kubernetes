@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -432,57 +430,8 @@ func runOVNretry(cmdPath string, envVars []string, args ...string) (*bytes.Buffe
 	}
 }
 
-var SkippedNbctlDaemonCounter uint64
-
-// getNbctlSocketPath returns the OVN_NB_DAEMON environment variable to add to
-// the ovn-nbctl child process environment, or an error if the nbctl daemon
-// control socket cannot be found
-func getNbctlSocketPath() (string, error) {
-	// Try already-set OVN_NB_DAEMON environment variable
-	if nbctlSocketPath := os.Getenv("OVN_NB_DAEMON"); nbctlSocketPath != "" {
-		if _, err := AppFs.Stat(nbctlSocketPath); err != nil {
-			return "", fmt.Errorf("OVN_NB_DAEMON ovn-nbctl daemon control socket %s missing: %v",
-				nbctlSocketPath, err)
-		}
-		return "OVN_NB_DAEMON=" + nbctlSocketPath, nil
-	}
-
-	// OVN 2.13 (by mistake?) didn't switch the default nbctl control socket
-	// path from /var/run/openvswitch -> /var/run/ovn. Try both
-	dirs := []string{ovnRunDir, ovsRunDir}
-	for _, runDir := range dirs {
-		// Try autodetecting the socket path based on the nbctl daemon pid
-		pidfile := filepath.Join(runDir, "ovn-nbctl.pid")
-		if pid, err := afero.ReadFile(AppFs, pidfile); err == nil {
-			fname := fmt.Sprintf("ovn-nbctl.%s.ctl", strings.TrimSpace(string(pid)))
-			nbctlSocketPath := filepath.Join(runDir, fname)
-			if _, err := AppFs.Stat(nbctlSocketPath); err == nil {
-				return "OVN_NB_DAEMON=" + nbctlSocketPath, nil
-			}
-		}
-	}
-
-	return "", fmt.Errorf("failed to find ovn-nbctl daemon pidfile/socket in %s", strings.Join(dirs, ","))
-}
-
 func getNbctlArgsAndEnv(timeout int, args ...string) ([]string, []string) {
 	var cmdArgs []string
-
-	if config.NbctlDaemonMode {
-		// when ovn-nbctl is running in a "daemon mode", the user first starts
-		// ovn-nbctl running in the background and afterward uses the daemon to execute
-		// operations. The client needs to use the control socket and set the path to the
-		// control socket in environment variable OVN_NB_DAEMON
-		envVar, err := getNbctlSocketPath()
-		if err == nil {
-			envVars := []string{envVar}
-			cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
-			cmdArgs = append(cmdArgs, args...)
-			return cmdArgs, envVars
-		}
-		klog.Warningf(err.Error() + "; resorting to non-daemon mode")
-		atomic.AddUint64(&SkippedNbctlDaemonCounter, 1)
-	}
 
 	if config.OvnNorth.Scheme == config.OvnDBSchemeSSL {
 		cmdArgs = append(cmdArgs,

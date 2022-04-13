@@ -137,9 +137,6 @@ var (
 		VXLANPort: DefaultVXLANPort,
 	}
 
-	// NbctlDaemon enables ovn-nbctl to run in daemon mode
-	NbctlDaemonMode bool
-
 	// UnprivilegedMode allows ovnkube-node to run without SYS_ADMIN capability, by performing interface setup in the CNI plugin
 	UnprivilegedMode bool
 
@@ -694,11 +691,6 @@ var CommonFlags = []cli.Flag{
 			"hostsubnet-prefix should be specified, but for backward compatibility " +
 			"it defaults to 24 if unspecified.",
 		Destination: &cliConfig.Default.RawClusterSubnets,
-	},
-	&cli.BoolFlag{
-		Name:        "nbctl-daemon-mode",
-		Usage:       "Run ovn-nbctl in daemon mode to improve performance in large clusters",
-		Destination: &NbctlDaemonMode,
 	},
 	&cli.BoolFlag{
 		Name:        "unprivileged-mode",
