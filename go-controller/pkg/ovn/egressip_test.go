@@ -4500,7 +4500,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("should not be able to allocate already allocated IP", func() {
+		ginkgo.It("should return the already allocated IP with the same node if it is allocated again", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				fakeOvn.start()
@@ -4522,7 +4522,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				}
 
 				assignedStatuses := fakeOvn.controller.assignEgressIPs(eIP.Name, eIP.Spec.EgressIPs)
-				gomega.Expect(assignedStatuses).To(gomega.HaveLen(0))
+				gomega.Expect(assignedStatuses).To(gomega.HaveLen(1))
+				gomega.Expect(assignedStatuses[0].Node).To(gomega.Equal(node1Name))
 				return nil
 			}
 
