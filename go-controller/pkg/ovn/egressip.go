@@ -1147,7 +1147,7 @@ type egressIPCacheEntry struct {
 	egressIPs        sets.String
 }
 
-func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
+func (oc *Controller) syncEgressIPs(eIPs []interface{}) error {
 	// This part will take of syncing stale data which we might have in OVN if
 	// there's no ovnkube-master running for a while, while there are changes to
 	// pods/egress IPs.
@@ -1155,19 +1155,17 @@ func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 	// - Egress IPs which have been deleted while ovnkube-master was down
 	// - pods/namespaces which have stopped matching on egress IPs while
 	//   ovnkube-master was down
-	oc.syncWithRetry("syncEgressIPs", func() error {
-		egressIPCache, err := oc.generateCacheForEgressIP(eIPs)
-		if err != nil {
-			return fmt.Errorf("syncEgressIPs unable to generate cache for egressip: %v", err)
-		}
-		if err = oc.syncStaleEgressReroutePolicy(egressIPCache); err != nil {
-			return fmt.Errorf("syncEgressIPs unable to remove stale reroute policies: %v", err)
-		}
-		if err = oc.syncStaleSNATRules(egressIPCache); err != nil {
-			return fmt.Errorf("syncEgressIPs unable to remove stale nats: %v", err)
-		}
-		return nil
-	})
+	egressIPCache, err := oc.generateCacheForEgressIP(eIPs)
+	if err != nil {
+		return fmt.Errorf("syncEgressIPs unable to generate cache for egressip: %v", err)
+	}
+	if err = oc.syncStaleEgressReroutePolicy(egressIPCache); err != nil {
+		return fmt.Errorf("syncEgressIPs unable to remove stale reroute policies: %v", err)
+	}
+	if err = oc.syncStaleSNATRules(egressIPCache); err != nil {
+		return fmt.Errorf("syncEgressIPs unable to remove stale nats: %v", err)
+	}
+	return nil
 }
 
 // This function implements a portion of syncEgressIPs.
@@ -1746,11 +1744,17 @@ func (oc *Controller) deleteNodeForEgress(node *v1.Node) error {
 // egress node experiences problems we want to move all egress IP assignment
 // away from that node elsewhere so that the pods using the egress IP can
 // continue to do so without any issues.
-func (oc *Controller) initClusterEgressPolicies(nodes []interface{}) {
+func (oc *Controller) initClusterEgressPolicies(nodes []interface{}) error {
 	v4ClusterSubnet, v6ClusterSubnet := getClusterSubnets()
-	oc.createDefaultNoReroutePodPolicies(v4ClusterSubnet, v6ClusterSubnet)
-	oc.createDefaultNoRerouteServicePolicies(v4ClusterSubnet, v6ClusterSubnet)
+	if err := oc.createDefaultNoReroutePodPolicies(v4ClusterSubnet, v6ClusterSubnet); err != nil {
+		return err
+	}
+	if err := oc.createDefaultNoRerouteServicePolicies(v4ClusterSubnet, v6ClusterSubnet); err != nil {
+		return err
+	}
+	// TODO(FF): Make go routine below use oc.stopChan
 	go oc.checkEgressNodesReachability()
+	return nil
 }
 
 // egressNode is a cache helper used for egress IP assignment, representing an egress node
@@ -2152,36 +2156,38 @@ func getNodeInternalAddrs(node *v1.Node) (net.IP, net.IP) {
 
 // createDefaultNoRerouteServicePolicies ensures service reachability from the
 // host network to any service backed by egress IP matching pods
-func (oc *Controller) createDefaultNoRerouteServicePolicies(v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) {
+func (oc *Controller) createDefaultNoRerouteServicePolicies(v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) error {
 	for _, v4Subnet := range v4ClusterSubnet {
 		match := fmt.Sprintf("ip4.src == %s && ip4.dst == %s", v4Subnet.String(), config.Gateway.V4JoinSubnet)
 		if err := oc.createLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
-			klog.Errorf("Unable to create IPv4 no-reroute service policies, err: %v", err)
+			return fmt.Errorf("unable to create IPv4 no-reroute service policies, err: %v", err)
 		}
 	}
 	for _, v6Subnet := range v6ClusterSubnet {
 		match := fmt.Sprintf("ip6.src == %s && ip6.dst == %s", v6Subnet.String(), config.Gateway.V6JoinSubnet)
 		if err := oc.createLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
-			klog.Errorf("Unable to create IPv6 no-reroute service policies, err: %v", err)
+			return fmt.Errorf("unable to create IPv6 no-reroute service policies, err: %v", err)
 		}
 	}
+	return nil
 }
 
 // createDefaultNoReroutePodPolicies ensures egress pods east<->west traffic with regular pods,
 // i.e: ensuring that an egress pod can still communicate with a regular pod / service backed by regular pods
-func (oc *Controller) createDefaultNoReroutePodPolicies(v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) {
+func (oc *Controller) createDefaultNoReroutePodPolicies(v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) error {
 	for _, v4Subnet := range v4ClusterSubnet {
 		match := fmt.Sprintf("ip4.src == %s && ip4.dst == %s", v4Subnet.String(), v4Subnet.String())
 		if err := oc.createLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
-			klog.Errorf("Unable to create IPv4 no-reroute pod policies, err: %v", err)
+			return fmt.Errorf("unable to create IPv4 no-reroute pod policies, err: %v", err)
 		}
 	}
 	for _, v6Subnet := range v6ClusterSubnet {
 		match := fmt.Sprintf("ip6.src == %s && ip6.dst == %s", v6Subnet.String(), v6Subnet.String())
 		if err := oc.createLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
-			klog.Errorf("Unable to create IPv6 no-reroute pod policies, err: %v", err)
+			return fmt.Errorf("unable to create IPv6 no-reroute pod policies, err: %v", err)
 		}
 	}
+	return nil
 }
 
 // createDefaultNoRerouteNodePolicies ensures egress pods east<->west traffic with hostNetwork pods,

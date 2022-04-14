@@ -169,7 +169,9 @@ func (p *portClaimWatcher) DeleteService(svc *kapi.Service) {
 	}
 }
 
-func (p *portClaimWatcher) SyncServices(objs []interface{}) {}
+func (p *portClaimWatcher) SyncServices(objs []interface{}) error {
+	return nil
+}
 
 func handleService(svc *kapi.Service, handler handler) []error {
 	errors := []error{}

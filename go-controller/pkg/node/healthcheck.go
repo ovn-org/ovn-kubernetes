@@ -62,7 +62,9 @@ func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) {
 	}
 }
 
-func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) {}
+func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) error {
+	return nil
+}
 
 func (l *loadBalancerHealthChecker) AddEndpoints(ep *kapi.Endpoints) {
 	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}

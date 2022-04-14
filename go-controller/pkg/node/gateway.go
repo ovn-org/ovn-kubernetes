@@ -88,19 +88,24 @@ func (g *gateway) DeleteService(svc *kapi.Service) {
 	}
 }
 
-func (g *gateway) SyncServices(objs []interface{}) {
+func (g *gateway) SyncServices(objs []interface{}) error {
+	var err error
 	if g.portClaimWatcher != nil {
-		g.portClaimWatcher.SyncServices(objs)
+		err = g.portClaimWatcher.SyncServices(objs)
 	}
-	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.SyncServices(objs)
+	if err == nil && g.loadBalancerHealthChecker != nil {
+		err = g.loadBalancerHealthChecker.SyncServices(objs)
 	}
-	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.SyncServices(objs)
+	if err == nil && g.nodePortWatcher != nil {
+		err = g.nodePortWatcher.SyncServices(objs)
 	}
-	if g.nodePortWatcherIptables != nil {
-		g.nodePortWatcherIptables.SyncServices(objs)
+	if err == nil && g.nodePortWatcherIptables != nil {
+		err = g.nodePortWatcherIptables.SyncServices(objs)
 	}
+	if err != nil {
+		return fmt.Errorf("gateway sync services failed: %v", err)
+	}
+	return nil
 }
 
 func (g *gateway) AddEndpoints(ep *kapi.Endpoints) {
@@ -135,7 +140,7 @@ func (g *gateway) Init(wf factory.NodeWatchFactory) error {
 	if err != nil {
 		return err
 	}
-	wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+	_, err = wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			svc := obj.(*kapi.Service)
 			g.AddService(svc)
@@ -150,8 +155,12 @@ func (g *gateway) Init(wf factory.NodeWatchFactory) error {
 			g.DeleteService(svc)
 		},
 	}, g.SyncServices)
+	if err != nil {
+		klog.Errorf("Gateway init failed to add service handler: %v", err)
+		return err
+	}
 
-	wf.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
+	_, err = wf.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)
 			g.AddEndpoints(ep)
@@ -166,6 +175,10 @@ func (g *gateway) Init(wf factory.NodeWatchFactory) error {
 			g.DeleteEndpoints(ep)
 		},
 	}, nil)
+	if err != nil {
+		klog.Errorf("Gateway init failed to add endpoints handler: %v", err)
+		return err
+	}
 	return nil
 }
 
