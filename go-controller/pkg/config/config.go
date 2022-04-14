@@ -110,6 +110,9 @@ var (
 		PlatformType:         "",
 	}
 
+	// Metrics holds Prometheus metrics-related parameters.
+	Metrics MetricsConfig
+
 	// OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
 	OVNKubernetesFeature OVNKubernetesFeatureConfig
 
@@ -275,25 +278,36 @@ type CNIConfig struct {
 
 // KubernetesConfig holds Kubernetes-related parsed config file parameters and command-line overrides
 type KubernetesConfig struct {
-	Kubeconfig            string `gcfg:"kubeconfig"`
-	CACert                string `gcfg:"cacert"`
-	CAData                []byte
-	APIServer             string `gcfg:"apiserver"`
-	Token                 string `gcfg:"token"`
-	TokenFile             string `gcfg:"tokenFile"`
-	CompatServiceCIDR     string `gcfg:"service-cidr"`
-	RawServiceCIDRs       string `gcfg:"service-cidrs"`
-	ServiceCIDRs          []*net.IPNet
-	OVNConfigNamespace    string `gcfg:"ovn-config-namespace"`
-	MetricsBindAddress    string `gcfg:"metrics-bind-address"`
+	Kubeconfig           string `gcfg:"kubeconfig"`
+	CACert               string `gcfg:"cacert"`
+	CAData               []byte
+	APIServer            string `gcfg:"apiserver"`
+	Token                string `gcfg:"token"`
+	TokenFile            string `gcfg:"tokenFile"`
+	CompatServiceCIDR    string `gcfg:"service-cidr"`
+	RawServiceCIDRs      string `gcfg:"service-cidrs"`
+	ServiceCIDRs         []*net.IPNet
+	OVNConfigNamespace   string `gcfg:"ovn-config-namespace"`
+	OVNEmptyLbEvents     bool   `gcfg:"ovn-empty-lb-events"`
+	PodIP                string `gcfg:"pod-ip"` // UNUSED
+	RawNoHostSubnetNodes string `gcfg:"no-hostsubnet-nodes"`
+	NoHostSubnetNodes    *metav1.LabelSelector
+	HostNetworkNamespace string `gcfg:"host-network-namespace"`
+	PlatformType         string `gcfg:"platform-type"`
+
+	// CompatMetricsBindAddress is overridden by the corresponding option in MetricsConfig
+	CompatMetricsBindAddress string `gcfg:"metrics-bind-address"`
+	// CompatOVNMetricsBindAddress is overridden by the corresponding option in MetricsConfig
+	CompatOVNMetricsBindAddress string `gcfg:"ovn-metrics-bind-address"`
+	// CompatMetricsEnablePprof is overridden by the corresponding option in MetricsConfig
+	CompatMetricsEnablePprof bool `gcfg:"metrics-enable-pprof"`
+}
+
+// MetricsConfig holds Prometheus metrics-related parameters.
+type MetricsConfig struct {
+	BindAddress           string `gcfg:"bind-address"`
 	OVNMetricsBindAddress string `gcfg:"ovn-metrics-bind-address"`
-	MetricsEnablePprof    bool   `gcfg:"metrics-enable-pprof"`
-	OVNEmptyLbEvents      bool   `gcfg:"ovn-empty-lb-events"`
-	PodIP                 string `gcfg:"pod-ip"` // UNUSED
-	RawNoHostSubnetNodes  string `gcfg:"no-hostsubnet-nodes"`
-	NoHostSubnetNodes     *metav1.LabelSelector
-	HostNetworkNamespace  string `gcfg:"host-network-namespace"`
-	PlatformType          string `gcfg:"platform-type"`
+	EnablePprof           bool   `gcfg:"enable-pprof"`
 }
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
@@ -411,6 +425,7 @@ type config struct {
 	CNI                  CNIConfig
 	OVNKubernetesFeature OVNKubernetesFeatureConfig
 	Kubernetes           KubernetesConfig
+	Metrics              MetricsConfig
 	OvnNorth             OvnAuthConfig
 	OvnSouth             OvnAuthConfig
 	Gateway              GatewayConfig
@@ -427,6 +442,7 @@ var (
 	savedCNI                  CNIConfig
 	savedOVNKubernetesFeature OVNKubernetesFeatureConfig
 	savedKubernetes           KubernetesConfig
+	savedMetrics              MetricsConfig
 	savedOvnNorth             OvnAuthConfig
 	savedOvnSouth             OvnAuthConfig
 	savedGateway              GatewayConfig
@@ -452,6 +468,7 @@ func init() {
 	savedCNI = CNI
 	savedOVNKubernetesFeature = OVNKubernetesFeature
 	savedKubernetes = Kubernetes
+	savedMetrics = Metrics
 	savedOvnNorth = OvnNorth
 	savedOvnSouth = OvnSouth
 	savedGateway = Gateway
@@ -466,18 +483,7 @@ func init() {
 		fmt.Printf("Build date: %s\n", BuildDate)
 		fmt.Printf("OS/Arch: %s\n", OSArch)
 	}
-	Flags = append(Flags, CommonFlags...)
-	Flags = append(Flags, CNIFlags...)
-	Flags = append(Flags, OVNK8sFeatureFlags...)
-	Flags = append(Flags, K8sFlags...)
-	Flags = append(Flags, OvnNBFlags...)
-	Flags = append(Flags, OvnSBFlags...)
-	Flags = append(Flags, OVNGatewayFlags...)
-	Flags = append(Flags, MasterHAFlags...)
-	Flags = append(Flags, HybridOverlayFlags...)
-	Flags = append(Flags, MonitoringFlags...)
-	Flags = append(Flags, IPFIXFlags...)
-	Flags = append(Flags, OvnKubeNodeFlags...)
+	Flags = GetFlags([]cli.Flag{})
 }
 
 // PrepareTestConfig restores default config values. Used by testcases to
@@ -490,6 +496,7 @@ func PrepareTestConfig() error {
 	CNI = savedCNI
 	OVNKubernetesFeature = savedOVNKubernetesFeature
 	Kubernetes = savedKubernetes
+	Metrics = savedMetrics
 	OvnNorth = savedOvnNorth
 	OvnSouth = savedOvnSouth
 	Gateway = savedGateway
@@ -880,21 +887,6 @@ var K8sFlags = []cli.Flag{
 		Destination: &cliConfig.Kubernetes.OVNConfigNamespace,
 		Value:       Kubernetes.OVNConfigNamespace,
 	},
-	&cli.StringFlag{
-		Name:        "metrics-bind-address",
-		Usage:       "The IP address and port for the OVN K8s metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
-		Destination: &cliConfig.Kubernetes.MetricsBindAddress,
-	},
-	&cli.StringFlag{
-		Name:        "ovn-metrics-bind-address",
-		Usage:       "The IP address and port for the OVN metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
-		Destination: &cliConfig.Kubernetes.OVNMetricsBindAddress,
-	},
-	&cli.BoolFlag{
-		Name:        "metrics-enable-pprof",
-		Usage:       "If true, then also accept pprof requests on the metrics port.",
-		Destination: &cliConfig.Kubernetes.MetricsEnablePprof,
-	},
 	&cli.BoolFlag{
 		Name: "ovn-empty-lb-events",
 		Usage: "If set, then load balancers do not get deleted when all backends are removed. " +
@@ -924,6 +916,26 @@ var K8sFlags = []cli.Flag{
 			"Valid values can be found in: https://github.com/ovn-org/ovn-kubernetes/blob/master/go-controller/vendor/github.com/openshift/api/config/v1/types_infrastructure.go#L130-L172",
 		Destination: &cliConfig.Kubernetes.PlatformType,
 		Value:       Kubernetes.PlatformType,
+	},
+}
+
+// MetricsFlags capture metrics-related options
+var MetricsFlags = []cli.Flag{
+	&cli.StringFlag{
+		Name:        "metrics-bind-address",
+		Usage:       "The IP address and port for the OVN K8s metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
+		Destination: &cliConfig.Metrics.BindAddress,
+	},
+	&cli.StringFlag{
+		Name:        "ovn-metrics-bind-address",
+		Usage:       "The IP address and port for the OVN metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
+		Destination: &cliConfig.Metrics.OVNMetricsBindAddress,
+	},
+	&cli.BoolFlag{
+		Name:        "metrics-enable-pprof",
+		Usage:       "If true, then also accept pprof requests on the metrics port.",
+		Destination: &cliConfig.Metrics.EnablePprof,
+		Value:       Metrics.EnablePprof,
 	},
 }
 
@@ -1179,6 +1191,7 @@ func GetFlags(customFlags []cli.Flag) []cli.Flag {
 	flags = append(flags, CNIFlags...)
 	flags = append(flags, OVNK8sFeatureFlags...)
 	flags = append(flags, K8sFlags...)
+	flags = append(flags, MetricsFlags...)
 	flags = append(flags, OvnNBFlags...)
 	flags = append(flags, OvnSBFlags...)
 	flags = append(flags, OVNGatewayFlags...)
@@ -1377,6 +1390,29 @@ func completeKubernetesConfig(allSubnets *configSubnets) error {
 		} else {
 			return fmt.Errorf("labelSelector \"%s\" is invalid: %v", Kubernetes.RawNoHostSubnetNodes, err)
 		}
+	}
+
+	return nil
+}
+
+func buildMetricsConfig(cli, file *config) error {
+	// Copy KubernetesConfig backwards-compat values over default values
+	if Kubernetes.CompatMetricsBindAddress != "" {
+		Metrics.BindAddress = Kubernetes.CompatMetricsBindAddress
+	}
+	if Kubernetes.CompatOVNMetricsBindAddress != "" {
+		Metrics.OVNMetricsBindAddress = Kubernetes.CompatOVNMetricsBindAddress
+	}
+	Metrics.EnablePprof = Kubernetes.CompatMetricsEnablePprof
+
+	// Copy config file values over Kubernetes and default values
+	if err := overrideFields(&Metrics, &file.Metrics, &savedMetrics); err != nil {
+		return err
+	}
+
+	// And CLI overrides over config file, Kubernetes, and default values
+	if err := overrideFields(&Metrics, &cli.Metrics, &savedMetrics); err != nil {
+		return err
 	}
 
 	return nil
@@ -1739,6 +1775,12 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	}
 
 	if err = buildKubernetesConfig(exec, &cliConfig, &cfg, saPath, defaults); err != nil {
+		return "", err
+	}
+
+	// Metrics must be built after Kubernetes to ensure metrics options override
+	// legacy Kubernetes metrics options
+	if err = buildMetricsConfig(&cliConfig, &cfg); err != nil {
 		return "", err
 	}
 
