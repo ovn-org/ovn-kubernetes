@@ -493,6 +493,7 @@ func PrepareTestConfig() error {
 	Logging = savedLogging
 	Logging.Level = 5
 	Monitoring = savedMonitoring
+	IPFIX = savedIPFIX
 	CNI = savedCNI
 	OVNKubernetesFeature = savedOVNKubernetesFeature
 	Kubernetes = savedKubernetes
