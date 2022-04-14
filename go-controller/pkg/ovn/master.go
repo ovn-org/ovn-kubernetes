@@ -945,11 +945,6 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 			}
 		}
 	}()
-	// Ensure that the node's logical network has been created
-	err = oc.ensureNodeLogicalNetwork(node, hostSubnets)
-	if err != nil {
-		return nil, err
-	}
 
 	// Set the HostSubnet annotation on the node object to signal
 	// to nodes that their logical infrastructure is set up and they can
@@ -961,6 +956,15 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 
 	// delete stale chassis in SBDB if any
 	if err = oc.deleteStaleNodeChassis(node); err != nil {
+		return nil, err
+	}
+
+	// Ensure that the node's logical network has been created. Note that if the
+	// subsequent operation in addNode() fails, oc.lsManager.DeleteNode(node.Name)
+	// needs to be done, otherwise, this node's IPAM will be overwritten and the
+	// same IP could be allocated to multiple Pods scheduled on this node.
+	err = oc.ensureNodeLogicalNetwork(node, hostSubnets)
+	if err != nil {
 		return nil, err
 	}
 
