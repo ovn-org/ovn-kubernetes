@@ -149,6 +149,11 @@ cacert=/path/to/kubeca.crt
 service-cidrs=172.18.0.0/24
 no-hostsubnet-nodes=label=another-test-label
 
+[metrics]
+bind-address=1.1.1.1:8080
+ovn-metrics-bind-address=1.1.1.2:8081
+enable-pprof=true
+
 [logging]
 loglevel=5
 logfile=/var/log/ovnkube.log
@@ -551,6 +556,10 @@ var _ = Describe("Config Operations", func() {
 				{ovntest.MustParseIPNet("10.132.0.0/14"), 23},
 			}))
 
+			gomega.Expect(Metrics.BindAddress).To(gomega.Equal("1.1.1.1:8080"))
+			gomega.Expect(Metrics.OVNMetricsBindAddress).To(gomega.Equal("1.1.1.2:8081"))
+			gomega.Expect(Metrics.EnablePprof).To(gomega.Equal(true))
+
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeSSL))
 			gomega.Expect(OvnNorth.PrivKey).To(gomega.Equal("/path/to/nb-client-private.key"))
 			gomega.Expect(OvnNorth.Cert).To(gomega.Equal("/path/to/nb-client.crt"))
@@ -625,6 +634,10 @@ var _ = Describe("Config Operations", func() {
 				{ovntest.MustParseIPNet("10.130.0.0/15"), 24},
 			}))
 
+			gomega.Expect(Metrics.BindAddress).To(gomega.Equal("2.2.2.2:8080"))
+			gomega.Expect(Metrics.OVNMetricsBindAddress).To(gomega.Equal("2.2.2.3:8081"))
+			gomega.Expect(Metrics.EnablePprof).To(gomega.Equal(true))
+
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeSSL))
 			gomega.Expect(OvnNorth.PrivKey).To(gomega.Equal("/client/privkey"))
 			gomega.Expect(OvnNorth.Cert).To(gomega.Equal("/client/cert"))
@@ -691,6 +704,9 @@ var _ = Describe("Config Operations", func() {
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=11.132.0.0/14/23",
 			"-monitor-all=false",
+			"-metrics-bind-address=2.2.2.2:8080",
+			"-ovn-metrics-bind-address=2.2.2.3:8081",
+			"-metrics-enable-pprof=false",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -853,6 +869,63 @@ mode=shared
 			"-config-file=" + cfgFile.Name(),
 			"-init-gateways",
 			"-gateway-local",
+		}
+		err = app.Run(cliArgs)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
+	It("honors legacy [kubernetes] metrics config file options", func() {
+		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[kubernetes]
+metrics-bind-address=1.1.1.1:8080
+ovn-metrics-bind-address=1.1.1.2:8081
+metrics-enable-pprof=true
+`), 0o644)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			var cfgPath string
+			cfgPath, err = InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(cfgPath).To(gomega.Equal(cfgFile.Name()))
+			gomega.Expect(Metrics.BindAddress).To(gomega.Equal("1.1.1.1:8080"))
+			gomega.Expect(Metrics.OVNMetricsBindAddress).To(gomega.Equal("1.1.1.2:8081"))
+			gomega.Expect(Metrics.EnablePprof).To(gomega.Equal(true))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-config-file=" + cfgFile.Name(),
+		}
+		err = app.Run(cliArgs)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
+	It("overrides legacy [kubernetes] metrics config file options with [metrics] ones", func() {
+		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[kubernetes]
+metrics-bind-address=1.1.1.1:8080
+ovn-metrics-bind-address=1.1.1.2:8081
+metrics-enable-pprof=false
+
+[metrics]
+bind-address=2.2.2.2:8080
+ovn-metrics-bind-address=2.2.2.3:8081
+enable-pprof=true
+`), 0o644)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			var cfgPath string
+			cfgPath, err = InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(cfgPath).To(gomega.Equal(cfgFile.Name()))
+			gomega.Expect(Metrics.BindAddress).To(gomega.Equal("2.2.2.2:8080"))
+			gomega.Expect(Metrics.OVNMetricsBindAddress).To(gomega.Equal("2.2.2.3:8081"))
+			gomega.Expect(Metrics.EnablePprof).To(gomega.Equal(true))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-config-file=" + cfgFile.Name(),
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
