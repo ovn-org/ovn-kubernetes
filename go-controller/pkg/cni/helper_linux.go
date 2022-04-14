@@ -26,7 +26,7 @@ import (
 
 type CNIPluginLibOps interface {
 	AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Link, mtu int) error
-	SetupVeth(contVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error)
+	SetupVeth(contVethName string, hostVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error)
 }
 
 type defaultCNIPluginLibOps struct{}
@@ -45,8 +45,8 @@ func (defaultCNIPluginLibOps) AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Li
 	return util.GetNetLinkOps().RouteAdd(route)
 }
 
-func (defaultCNIPluginLibOps) SetupVeth(contVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error) {
-	return ip.SetupVeth(contVethName, mtu, hostNS)
+func (defaultCNIPluginLibOps) SetupVeth(contVethName string, hostVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error) {
+	return ip.SetupVethWithName(contVethName, hostVethName, mtu, hostNS)
 }
 
 func renameLink(curName, newName string) error {
@@ -124,10 +124,10 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 	hostIface := &current.Interface{}
 	contIface := &current.Interface{}
 
-	var oldHostVethName string
 	err := netns.Do(func(hostNS ns.NetNS) error {
 		// create the veth pair in the container and move host end into host netns
-		hostVeth, containerVeth, err := cniPluginLibOps.SetupVeth(ifName, ifInfo.MTU, hostNS)
+		hostIface.Name = containerID[:15]
+		hostVeth, containerVeth, err := cniPluginLibOps.SetupVeth(ifName, hostIface.Name, ifInfo.MTU, hostNS)
 		if err != nil {
 			return err
 		}
@@ -146,18 +146,10 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 		contIface.Mac = ifInfo.MAC.String()
 		contIface.Sandbox = netns.Path()
 
-		oldHostVethName = hostVeth.Name
-
 		return nil
 	})
 	if err != nil {
 		return nil, nil, err
-	}
-
-	// rename the host end of veth pair
-	hostIface.Name = containerID[:15]
-	if err := renameLink(oldHostVethName, hostIface.Name); err != nil {
-		return nil, nil, fmt.Errorf("failed to rename %s to %s: %v", oldHostVethName, hostIface.Name, err)
 	}
 
 	return hostIface, contIface, nil
