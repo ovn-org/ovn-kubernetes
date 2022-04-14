@@ -401,7 +401,7 @@ func StartOVNMetricsServer(bindAddress string) {
 	go utilwait.Until(func() {
 		err := http.ListenAndServe(bindAddress, mux)
 		if err != nil {
-			utilruntime.HandleError(fmt.Errorf("starting metrics server failed: %v", err))
+			utilruntime.HandleError(fmt.Errorf("starting OVN metrics server failed: %v", err))
 		}
 	}, 5*time.Second, utilwait.NeverStop)
 }
