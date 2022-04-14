@@ -453,6 +453,11 @@ func (oc *Controller) SetupMaster(existingNodeNames []string) error {
 		return fmt.Errorf("failed to create logical switch port %+v and switch %s: %v", logicalSwitchPort, types.OVNJoinSwitch, err)
 	}
 
+	// Create default gateway Control Plane Protection (COPP) entry for gateway routers
+	if oc.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(oc.nbClient); err != nil {
+		return fmt.Errorf("unable to create gateway router control plane protection: %w", err)
+	}
+
 	return nil
 }
 
