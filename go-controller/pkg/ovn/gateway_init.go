@@ -561,7 +561,7 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 	// Connect GR to external_switch with mac address of external interface
 	// and that IP address. In the case of `local` gateway mode, whenever ovnkube-node container
 	// restarts a new br-local bridge will be created with a new `nicMacAddress`.
-	externalRouterPort := types.GWRouterToExtSwitchPrefix + gatewayRouter
+	externalRouterPort := prefix + types.GWRouterToExtSwitchPrefix + gatewayRouter
 
 	externalRouterPortNetworks := []string{}
 	for _, ip := range ipAddresses {
@@ -603,7 +603,7 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 	}
 
 	// Connect the external_switch to the router.
-	externalSwitchPortToRouter := types.EXTSwitchToGWRouterPrefix + gatewayRouter
+	externalSwitchPortToRouter := prefix + types.EXTSwitchToGWRouterPrefix + gatewayRouter
 
 	externalLogicalSwitchPortToRouter := nbdb.LogicalSwitchPort{
 		Name: externalSwitchPortToRouter,
