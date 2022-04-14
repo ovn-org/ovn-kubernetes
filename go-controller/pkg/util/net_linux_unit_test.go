@@ -951,6 +951,14 @@ func TestDeleteConntrack(t *testing.T) {
 			},
 		},
 		{
+			desc:          "Valid IPv4 address input with TCP protocol",
+			inputIPStr:    "192.168.1.14",
+			inputProtocol: kapi.ProtocolTCP,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "ConntrackDeleteFilter", OnCallMethodArgType: []string{"netlink.ConntrackTableType", "netlink.InetFamily", "*netlink.ConntrackFilter"}, RetArgList: []interface{}{uint(1), nil}},
+			},
+		},
+		{
 			desc:       "Valid IPv4 address input with valid port input and NO layer 4 protocol input",
 			errExp:     true,
 			inputIPStr: "192.168.1.14",
@@ -973,7 +981,20 @@ func TestDeleteConntrack(t *testing.T) {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
 
-			err := DeleteConntrack(tc.inputIPStr, tc.inputPort, tc.inputProtocol)
+			err := DeleteConntrack(tc.inputIPStr, tc.inputPort, tc.inputProtocol, netlink.ConntrackReplyAnyIP)
+			if tc.errExp {
+				assert.Error(t, err)
+			} else {
+				assert.Nil(t, err)
+			}
+			mockNetLinkOps.AssertExpectations(t)
+		})
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
+
+			err := DeleteConntrack(tc.inputIPStr, tc.inputPort, tc.inputProtocol, netlink.ConntrackOrigDstIP)
 			if tc.errExp {
 				assert.Error(t, err)
 			} else {

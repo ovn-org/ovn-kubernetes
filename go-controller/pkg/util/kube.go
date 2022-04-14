@@ -162,6 +162,20 @@ func GetClusterIPs(service *kapi.Service) []string {
 	return []string{}
 }
 
+// GetExternalAndLBIPs returns an array with the ExternalIPs and LoadBalancer IPs present in the service
+func GetExternalAndLBIPs(service *kapi.Service) []string {
+	svcVIPs := []string{}
+	svcVIPs = append(svcVIPs, service.Spec.ExternalIPs...)
+	if ServiceTypeHasLoadBalancer(service) {
+		for _, ingressVIP := range service.Status.LoadBalancer.Ingress {
+			if len(ingressVIP.IP) > 0 {
+				svcVIPs = append(svcVIPs, ingressVIP.IP)
+			}
+		}
+	}
+	return svcVIPs
+}
+
 // ValidatePort checks if the port is non-zero and port protocol is valid
 func ValidatePort(proto kapi.Protocol, port int32) error {
 	if port <= 0 || port > 65535 {
@@ -186,6 +200,11 @@ func ServiceTypeHasClusterIP(service *kapi.Service) bool {
 // ServiceTypeHasNodePort checks if the service has an associated NodePort or not
 func ServiceTypeHasNodePort(service *kapi.Service) bool {
 	return service.Spec.Type == kapi.ServiceTypeNodePort || service.Spec.Type == kapi.ServiceTypeLoadBalancer
+}
+
+// ServiceTypeHasLoadBalancer checks if the service has an associated LoadBalancer or not
+func ServiceTypeHasLoadBalancer(service *kapi.Service) bool {
+	return service.Spec.Type == kapi.ServiceTypeLoadBalancer
 }
 
 func ServiceExternalTrafficPolicyLocal(service *kapi.Service) bool {
