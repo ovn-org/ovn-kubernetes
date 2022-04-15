@@ -217,7 +217,7 @@ type Controller struct {
 	addNodeFailed               sync.Map
 	nodeClusterRouterPortFailed sync.Map
 
-	metricsRecorder *metrics.ControlPlaneRecorder
+	podRecorder metrics.PodRecorder
 }
 
 const (
@@ -304,7 +304,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		sbClient:                 libovsdbOvnSBClient,
 		svcController:            svcController,
 		svcFactory:               svcFactory,
-		metricsRecorder:          metrics.NewControlPlaneRecorder(),
+		podRecorder:              metrics.NewPodRecorder(),
 	}
 }
 

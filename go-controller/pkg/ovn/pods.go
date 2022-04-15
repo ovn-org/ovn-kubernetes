@@ -562,7 +562,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	if err != nil {
 		return fmt.Errorf("error transacting operations %+v: %v", ops, err)
 	}
-	oc.metricsRecorder.AddLSP(pod.UID)
+	oc.podRecorder.AddLSP(pod.UID)
 
 	// if somehow lspUUID is empty, there is a bug here with interpreting OVSDB results
 	if len(lsp.UUID) == 0 {

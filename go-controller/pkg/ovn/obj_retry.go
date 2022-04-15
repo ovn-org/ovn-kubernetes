@@ -446,7 +446,7 @@ func (oc *Controller) recordAddEvent(objType reflect.Type, obj interface{}) {
 	case factory.PodType:
 		klog.V(5).Infof("Recording add event on pod")
 		pod := obj.(*kapi.Pod)
-		oc.metricsRecorder.AddPod(pod.UID)
+		oc.podRecorder.AddPod(pod.UID)
 	}
 }
 
@@ -456,7 +456,7 @@ func (oc *Controller) recordDeleteEvent(objType reflect.Type, obj interface{}) {
 	case factory.PodType:
 		klog.V(5).Infof("Recording add event on pod")
 		pod := obj.(*kapi.Pod)
-		oc.metricsRecorder.CleanPod(pod.UID)
+		oc.podRecorder.CleanPod(pod.UID)
 	}
 }
 
