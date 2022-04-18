@@ -56,7 +56,6 @@ fedora-dev: bld
                     --ovn-loglevel-nb="-vconsole:info -vfile:info" \
                     --ovn-loglevel-sb="-vconsole:info -vfile:info" \
                     --ovn-loglevel-controller="-vconsole:info" \
-                    --ovn-loglevel-nbctld="-vconsole:info" \
                     --ovn_nb_raft_election_timer="1000" \
                     --ovn_sb_raft_election_timer="1000"
 

@@ -712,16 +712,7 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) {
 //    the return traffic can be steered back to OVN logical topology
 // -- to handle host -> service access, via masquerading from the host to OVN GR
 // -- to handle external -> service(ExternalTrafficPolicy: Local) -> host access without SNAT
-func newSharedGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration) (*openflowManager, error) {
-	dftFlows, err := flowsForDefaultBridge(gwBridge.ofPortPhys, gwBridge.macAddress.String(), gwBridge.ofPortPatch,
-		gwBridge.ofPortHost, gwBridge.ips)
-	if err != nil {
-		return nil, err
-	}
-	dftCommonFlows := commonFlows(gwBridge.ofPortPhys, gwBridge.macAddress.String(), gwBridge.ofPortPatch,
-		gwBridge.ofPortHost)
-	dftFlows = append(dftFlows, dftCommonFlows...)
-
+func newSharedGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, extraIPs []net.IP) (*openflowManager, error) {
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
 	ofm := &openflowManager{
 		defaultBridge:         gwBridge,
@@ -733,22 +724,43 @@ func newSharedGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration) 
 		flowChan:              make(chan struct{}, 1),
 	}
 
-	ofm.updateFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
-	ofm.updateFlowCacheEntry("DEFAULT", dftFlows)
-
-	// we consume ex gw bridge flows only if that is enabled
-	if exGWBridge != nil {
-		ofm.updateExBridgeFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
-		exGWBridgeDftFlows := commonFlows(exGWBridge.ofPortPhys, exGWBridge.macAddress.String(),
-			exGWBridge.ofPortPatch, exGWBridge.ofPortHost)
-		ofm.updateExBridgeFlowCacheEntry("DEFAULT", exGWBridgeDftFlows)
+	if err := ofm.updateBridgeFlowCache(extraIPs); err != nil {
+		return nil, err
 	}
 
 	// defer flowSync until syncService() to prevent the existing service OpenFlows being deleted
 	return ofm, nil
 }
 
-func flowsForDefaultBridge(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost string, bridgeIPs []*net.IPNet) ([]string, error) {
+// updateBridgeFlowCache generates the "static" per-bridge flows
+// note: this is shared between shared and local gateway modes
+func (ofm *openflowManager) updateBridgeFlowCache(extraIPs []net.IP) error {
+	dftFlows, err := flowsForDefaultBridge(ofm.defaultBridge, extraIPs)
+	if err != nil {
+		return err
+	}
+	dftCommonFlows := commonFlows(ofm.defaultBridge)
+	dftFlows = append(dftFlows, dftCommonFlows...)
+
+	ofm.updateFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
+	ofm.updateFlowCacheEntry("DEFAULT", dftFlows)
+
+	// we consume ex gw bridge flows only if that is enabled
+	if ofm.externalGatewayBridge != nil {
+		ofm.updateExBridgeFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
+		exGWBridgeDftFlows := commonFlows(ofm.externalGatewayBridge)
+		ofm.updateExBridgeFlowCacheEntry("DEFAULT", exGWBridgeDftFlows)
+	}
+	return nil
+}
+
+func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]string, error) {
+	ofPortPhys := bridge.ofPortPhys
+	bridgeMacAddress := bridge.macAddress.String()
+	ofPortPatch := bridge.ofPortPatch
+	ofPortHost := bridge.ofPortHost
+	bridgeIPs := bridge.ips
+
 	var dftFlows []string
 	// 14 bytes of overhead for ethernet header (does not include VLAN)
 	maxPktLength := getMaxFrameLength()
@@ -780,6 +792,23 @@ func flowsForDefaultBridge(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost
 				"actions=ct(commit,zone=%d,nat(dst=%s),table=4)",
 				defaultOpenFlowCookie, ofPortPatch, types.V4HostMasqueradeIP, physicalIP.IP,
 				HostMasqCTZone, physicalIP.IP))
+
+		// table 0, hairpin from OVN destined to local host (but an additional node IP), send to table 4
+		for _, ip := range extraIPs {
+			if ip.To4() == nil {
+				continue
+			}
+			// not needed for the physical IP
+			if ip.Equal(physicalIP.IP) {
+				continue
+			}
+
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=500, in_port=%s, ip, ip_dst=%s, ip_src=%s,"+
+					"actions=ct(commit,zone=%d,table=4)",
+					defaultOpenFlowCookie, ofPortPatch, ip.String(), physicalIP.IP,
+					HostMasqCTZone))
+		}
 
 		// table 0, Reply SVC traffic from Host -> OVN, unSNAT and goto table 5
 		dftFlows = append(dftFlows,
@@ -814,6 +843,23 @@ func flowsForDefaultBridge(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost
 				"actions=ct(commit,zone=%d,nat(dst=%s),table=4)",
 				defaultOpenFlowCookie, ofPortPatch, types.V6HostMasqueradeIP, physicalIP.IP,
 				HostMasqCTZone, physicalIP.IP))
+
+		// table 0, hairpin from OVN destined to local host (but an additional node IP), send to table 4
+		for _, ip := range extraIPs {
+			if ip.To4() != nil {
+				continue
+			}
+			// not needed for the physical IP
+			if ip.Equal(physicalIP.IP) {
+				continue
+			}
+
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=500, in_port=%s, ipv6, ipv6_dst=%s, ipv6_src=%s,"+
+					"actions=ct(commit,zone=%d,table=4)",
+					defaultOpenFlowCookie, ofPortPatch, ip.String(), physicalIP.IP,
+					HostMasqCTZone))
+		}
 
 		// table 0, Reply SVC traffic from Host -> OVN, unSNAT and goto table 5
 		dftFlows = append(dftFlows,
@@ -952,7 +998,12 @@ func flowsForDefaultBridge(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost
 	return dftFlows, nil
 }
 
-func commonFlows(ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost string) []string {
+func commonFlows(bridge *bridgeConfiguration) []string {
+	ofPortPhys := bridge.ofPortPhys
+	bridgeMacAddress := bridge.macAddress.String()
+	ofPortPatch := bridge.ofPortPatch
+	ofPortHost := bridge.ofPortHost
+
 	var dftFlows []string
 	maxPktLength := getMaxFrameLength()
 
@@ -1178,12 +1229,23 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 				return err
 			}
 		}
-		gw.openflowManager, err = newSharedGatewayOpenFlowManager(gwBridge, exGwBridge)
+		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory)
+		nodeIPs := gw.nodeIPManager.ListAddresses()
+
+		gw.openflowManager, err = newSharedGatewayOpenFlowManager(gwBridge, exGwBridge, nodeIPs)
 		if err != nil {
 			return err
 		}
 
-		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory)
+		// resync flows on IP change
+		gw.nodeIPManager.OnChanged = func() {
+			klog.V(5).Info("Node addresses changed, re-syncing bridge flows")
+			if err := gw.openflowManager.updateBridgeFlowCache(gw.nodeIPManager.ListAddresses()); err != nil {
+				// very unlikely - somehow node has lost its IP address
+				klog.Errorf("Failed to re-generate gateway flows after address change: %v", err)
+			}
+			gw.openflowManager.requestFlowSync()
+		}
 
 		if config.Gateway.NodeportEnable {
 			klog.Info("Creating Shared Gateway Node Port Watcher")

@@ -3,7 +3,6 @@
 # always exit on errors
 set -ex
 
-
 export KUBECONFIG=${HOME}/ovn.conf
 export OVN_IMAGE=${OVN_IMAGE:-ovn-daemonset-f:pr}
 
@@ -116,16 +115,170 @@ kubectl_wait_for_upgrade(){
 
 }
 
-## This script is responsible to upgrade ovn daemonsets to run new pods with image built from a PR
+create_ovn_kube_manifests() {
+  pushd ../dist/images
+  ./daemonset.sh \
+    --image="${OVN_IMAGE}" \
+    --net-cidr="${NET_CIDR}" \
+    --svc-cidr="${SVC_CIDR}" \
+    --gateway-mode="${OVN_GATEWAY_MODE}" \
+    --hybrid-enabled="${OVN_HYBRID_OVERLAY_ENABLE}" \
+    --disable-snat-multiple-gws="${OVN_DISABLE_SNAT_MULTIPLE_GWS}" \
+    --disable-pkt-mtu-check="${OVN_DISABLE_PKT_MTU_CHECK}" \
+    --ovn-empty-lb-events="${OVN_EMPTY_LB_EVENTS}" \
+    --multicast-enabled="${OVN_MULTICAST_ENABLE}" \
+    --k8s-apiserver="${API_URL}" \
+    --ovn-master-count="${KIND_NUM_MASTER}" \
+    --ovn-unprivileged-mode=no \
+    --master-loglevel="${MASTER_LOG_LEVEL}" \
+    --node-loglevel="${NODE_LOG_LEVEL}" \
+    --dbchecker-loglevel="${DBCHECKER_LOG_LEVEL}" \
+    --ovn-loglevel-northd="${OVN_LOG_LEVEL_NORTHD}" \
+    --ovn-loglevel-nb="${OVN_LOG_LEVEL_NB}" \
+    --ovn-loglevel-sb="${OVN_LOG_LEVEL_SB}" \
+    --ovn-loglevel-controller="${OVN_LOG_LEVEL_CONTROLLER}" \
+    --egress-ip-enable=true \
+    --egress-firewall-enable=true \
+    --v4-join-subnet="${JOIN_SUBNET_IPV4}" \
+    --v6-join-subnet="${JOIN_SUBNET_IPV6}" \
+    --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}"
+  popd
+}
+
+set_default_ovn_manifest_params() {
+  # Set default values
+  # kind configs 
+  KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
+  KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
+  OVN_HA=${OVN_HA:-false}
+  # ovn configs 
+  OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
+  OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
+  OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-false}
+  OVN_DISABLE_PKT_MTU_CHECK=${OVN_DISABLE_PKT_MTU_CHECK:-false}
+  OVN_EMPTY_LB_EVENTS=${OVN_EMPTY_LB_EVENTS:-false}
+  OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
+  OVN_IMAGE=${OVN_IMAGE:-local}
+  MASTER_LOG_LEVEL=${MASTER_LOG_LEVEL:-5}
+  NODE_LOG_LEVEL=${NODE_LOG_LEVEL:-5}
+  DBCHECKER_LOG_LEVEL=${DBCHECKER_LOG_LEVEL:-5}
+  OVN_LOG_LEVEL_NORTHD=${OVN_LOG_LEVEL_NORTHD:-"-vconsole:info -vfile:info"}
+  OVN_LOG_LEVEL_NB=${OVN_LOG_LEVEL_NB:-"-vconsole:info -vfile:info"}
+  OVN_LOG_LEVEL_SB=${OVN_LOG_LEVEL_SB:-"-vconsole:info -vfile:info"}
+  OVN_LOG_LEVEL_CONTROLLER=${OVN_LOG_LEVEL_CONTROLLER:-"-vconsole:info"}
+  OVN_ENABLE_EX_GW_NETWORK_BRIDGE=${OVN_ENABLE_EX_GW_NETWORK_BRIDGE:-false}
+  OVN_EX_GW_NETWORK_INTERFACE=""
+  if [ "$OVN_ENABLE_EX_GW_NETWORK_BRIDGE" == true ]; then
+    OVN_EX_GW_NETWORK_INTERFACE="eth1"
+  fi
+  # Input not currently validated. Modify outside script at your own risk.
+  # These are the same values defaulted to in KIND code (kind/default.go).
+  # NOTE: KIND NET_CIDR_IPV6 default use a /64 but OVN have a /64 per host
+  # so it needs to use a larger subnet
+  #  Upstream - NET_CIDR_IPV6=fd00:10:244::/64 SVC_CIDR_IPV6=fd00:10:96::/112
+  NET_CIDR_IPV4=${NET_CIDR_IPV4:-10.244.0.0/16}
+  NET_SECOND_CIDR_IPV4=${NET_SECOND_CIDR_IPV4:-172.19.0.0/16}
+  SVC_CIDR_IPV4=${SVC_CIDR_IPV4:-10.96.0.0/16}
+  NET_CIDR_IPV6=${NET_CIDR_IPV6:-fd00:10:244::/48}
+  SVC_CIDR_IPV6=${SVC_CIDR_IPV6:-fd00:10:96::/112}
+  JOIN_SUBNET_IPV4=${JOIN_SUBNET_IPV4:-100.64.0.0/16}
+  JOIN_SUBNET_IPV6=${JOIN_SUBNET_IPV6:-fd98::/64}
+  KIND_NUM_MASTER=1
+  if [ "$OVN_HA" == true ]; then
+    KIND_NUM_MASTER=3
+    KIND_NUM_WORKER=${KIND_NUM_WORKER:-0}
+  else
+    KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
+  fi
+  OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
+  OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
+}
+
+print_ovn_manifest_params() {
+     echo "Using these parameters to build upgraded ovn-k manifests"
+     echo ""
+     echo "KIND_IPV4_SUPPORT = $KIND_IPV4_SUPPORT"
+     echo "KIND_IPV6_SUPPORT = $KIND_IPV6_SUPPORT"
+     echo "OVN_HA = $OVN_HA"
+     echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
+     echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
+     echo "OVN_DISABLE_SNAT_MULTIPLE_GWS = $OVN_DISABLE_SNAT_MULTIPLE_GWS"
+     echo "OVN_DISABLE_PKT_MTU_CHECK = $OVN_DISABLE_PKT_MTU_CHECK"
+     echo "OVN_NETFLOW_TARGETS = $OVN_NETFLOW_TARGETS"
+     echo "OVN_SFLOW_TARGETS = $OVN_SFLOW_TARGETS"
+     echo "OVN_IPFIX_TARGETS = $OVN_IPFIX_TARGETS"
+     echo "OVN_EMPTY_LB_EVENTS = $OVN_EMPTY_LB_EVENTS"
+     echo "OVN_MULTICAST_ENABLE = $OVN_MULTICAST_ENABLE"
+     echo "OVN_IMAGE = $OVN_IMAGE"
+     echo "MASTER_LOG_LEVEL = $MASTER_LOG_LEVEL"
+     echo "NODE_LOG_LEVEL = $NODE_LOG_LEVEL"
+     echo "DBCHECKER_LOG_LEVEL = $DBCHECKER_LOG_LEVEL"
+     echo "OVN_LOG_LEVEL_NORTHD = $OVN_LOG_LEVEL_NORTHD"
+     echo "OVN_LOG_LEVEL_NB = $OVN_LOG_LEVEL_NB"
+     echo "OVN_LOG_LEVEL_SB = $OVN_LOG_LEVEL_SB"
+     echo "OVN_LOG_LEVEL_CONTROLLER = $OVN_LOG_LEVEL_CONTROLLER"
+     echo "OVN_HOST_NETWORK_NAMESPACE = $OVN_HOST_NETWORK_NAMESPACE"
+     echo "OVN_ENABLE_EX_GW_NETWORK_BRIDGE = $OVN_ENABLE_EX_GW_NETWORK_BRIDGE"
+     echo "OVN_EX_GW_NETWORK_INTERFACE = $OVN_EX_GW_NETWORK_INTERFACE"
+     echo ""
+}
+
+set_cluster_cidr_ip_families() {
+  if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == false ]; then
+    IP_FAMILY=""
+    NET_CIDR=$NET_CIDR_IPV4
+    SVC_CIDR=$SVC_CIDR_IPV4
+    echo "IPv4 Only Support: API_IP=$API_IP --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
+  elif [ "$KIND_IPV4_SUPPORT" == false ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
+    IP_FAMILY="ipv6"
+    NET_CIDR=$NET_CIDR_IPV6
+    SVC_CIDR=$SVC_CIDR_IPV6
+    echo "IPv6 Only Support: API_IP=$API_IP --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
+  elif [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
+    IP_FAMILY="dual"
+    NET_CIDR=$NET_CIDR_IPV4,$NET_CIDR_IPV6
+    SVC_CIDR=$SVC_CIDR_IPV4,$SVC_CIDR_IPV6
+    echo "Dual Stack Support: API_IP=$API_IP --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
+  else
+    echo "Invalid setup. KIND_IPV4_SUPPORT and/or KIND_IPV6_SUPPORT must be true."
+    exit 1
+  fi
+}
+
+# This script is responsible for upgrading the ovn-kubernetes related resources 
+# within a running cluster built from master, to new resources buit from the 
+# checked-out branch.  
+
 KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn} # Set default values
+
+# setup env needed for regenerating ovn resources from the checked-out branch
+# this will use the new OVN image as well: ovn-daemonset-f:pr
+set_default_ovn_manifest_params
+print_ovn_manifest_params
+
+# create upgraded OVN manifests from checked-out branch
+create_ovn_kube_manifests
+set_cluster_cidr_ip_families
 install_ovn_image
-run_kubectl set image daemonsets.apps ovnkube-node ovnkube-node="${OVN_IMAGE}" ovs-metrics-exporter="${OVN_IMAGE}"  ovn-controller="${OVN_IMAGE}" -n ovn-kubernetes
+
+pushd ../dist/yaml
+
+# install updated ovnkube-node daemonset 
+run_kubectl apply -f ovnkube-node.yaml
+
 kubectl_wait_daemonset ovnkube-node
 
 run_kubectl get all -n ovn-kubernetes
 CURRENT_REPLICAS_OVNKUBE_DB=$(run_kubectl get deploy -n ovn-kubernetes ovnkube-db -o=jsonpath='{.spec.replicas}')
 run_kubectl scale deploy -n ovn-kubernetes ovnkube-db --replicas=0
-run_kubectl set image deploy  ovnkube-db nb-ovsdb="${OVN_IMAGE}" sb-ovsdb="${OVN_IMAGE}" -n ovn-kubernetes
+
+# install update ovnkube-db daemonset 
+if [ "$OVN_HA" == true ]; then
+  run_kubectl apply -f ovnkube-db-raft.yaml
+else
+  run_kubectl apply -f ovnkube-db.yaml
+fi
+
 run_kubectl scale deploy -n ovn-kubernetes ovnkube-db --replicas=$CURRENT_REPLICAS_OVNKUBE_DB
 kubectl_wait_deployment ovnkube-db
 
@@ -136,7 +289,10 @@ CURRENT_REPLICAS_OVNKUBE_MASTER=$(run_kubectl get deploy -n ovn-kubernetes ovnku
 # and the new pod with the new image would be stuck in "Pending" state
 run_kubectl scale deploy -n ovn-kubernetes ovnkube-master --replicas=0
 
-run_kubectl set image deploy  ovnkube-master ovn-northd="${OVN_IMAGE}" nbctl-daemon="${OVN_IMAGE}" ovnkube-master="${OVN_IMAGE}" -n ovn-kubernetes
+# install updated ovnkube-master deployment
+run_kubectl apply -f ovnkube-master.yaml
+
+popd
 
 run_kubectl scale deploy -n ovn-kubernetes ovnkube-master --replicas=$CURRENT_REPLICAS_OVNKUBE_MASTER
 kubectl_wait_deployment ovnkube-master

@@ -144,9 +144,6 @@ while [ "$1" != "" ]; do
   --ovn-loglevel-controller)
     OVN_LOGLEVEL_CONTROLLER=$VALUE
     ;;
-  --ovn-loglevel-nbctld)
-    OVN_LOGLEVEL_NBCTLD=$VALUE
-    ;;
   --ovnkube-logfile-maxsize)
     OVNKUBE_LOGFILE_MAXSIZE=$VALUE
     ;;
@@ -291,8 +288,6 @@ ovn_loglevel_sb=${OVN_LOGLEVEL_SB:-"-vconsole:info -vfile:info"}
 echo "ovn_loglevel_sb: ${ovn_loglevel_sb}"
 ovn_loglevel_controller=${OVN_LOGLEVEL_CONTROLLER:-"-vconsole:info"}
 echo "ovn_loglevel_controller: ${ovn_loglevel_controller}"
-ovn_loglevel_nbctld=${OVN_LOGLEVEL_NBCTLD:-"-vconsole:info"}
-echo "ovn_loglevel_nbctld: ${ovn_loglevel_nbctld}"
 ovnkube_logfile_maxsize=${OVNKUBE_LOGFILE_MAXSIZE:-"100"}
 echo "ovnkube_logfile_maxsize: ${ovnkube_logfile_maxsize}"
 ovnkube_logfile_maxbackups=${OVNKUBE_LOGFILE_MAXBACKUPS:-"5"}
@@ -439,7 +434,6 @@ ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovnkube_master_loglevel=${master_loglevel} \
   ovn_loglevel_northd=${ovn_loglevel_northd} \
-  ovn_loglevel_nbctld=${ovn_loglevel_nbctld} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \

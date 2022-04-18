@@ -106,18 +106,18 @@ func (o *FakeOVN) init() {
 	o.controller.loadBalancerGroupUUID = types.ClusterLBGroupName + "-UUID"
 }
 
-func (o *FakeOVN) resetNBClient(ctx context.Context) {
-	if o.controller.nbClient.Connected() {
-		o.controller.nbClient.Close()
+func resetNBClient(ctx context.Context, nbClient libovsdbclient.Client) {
+	if nbClient.Connected() {
+		nbClient.Close()
 	}
 	gomega.Eventually(func() bool {
-		return o.controller.nbClient.Connected()
+		return nbClient.Connected()
 	}).Should(gomega.BeFalse())
-	err := o.controller.nbClient.Connect(ctx)
+	err := nbClient.Connect(ctx)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	gomega.Eventually(func() bool {
-		return o.controller.nbClient.Connected()
+		return nbClient.Connected()
 	}).Should(gomega.BeTrue())
-	_, err = o.controller.nbClient.MonitorAll(ctx)
+	_, err = nbClient.MonitorAll(ctx)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }

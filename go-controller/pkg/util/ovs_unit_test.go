@@ -140,140 +140,20 @@ func TestRunOVNretry(t *testing.T) {
 	}
 }
 
-func TestGetNbctlSocketPath(t *testing.T) {
-	// Below is defined in ovs.go file
-	AppFs = afero.NewMemMapFs()
-
-	tests := []struct {
-		desc         string
-		mockEnvKey   string
-		mockEnvVal   string
-		errMatch     error
-		outExp       string
-		dirFileMocks []ovntest.AferoDirMockHelper
-	}{
-		{
-			desc:       "test code path when `os.Getenv() is non empty` and when Stat() returns error",
-			mockEnvKey: "OVN_NB_DAEMON",
-			mockEnvVal: "/some/blah/path",
-			errMatch:   fmt.Errorf("OVN_NB_DAEMON ovn-nbctl daemon control socket"),
-			outExp:     "",
-		},
-		{
-			desc:       "test code path when `os.Getenv() is non empty` and when Stat() returns success",
-			mockEnvKey: "OVN_NB_DAEMON",
-			mockEnvVal: "/some/blah/path",
-			dirFileMocks: []ovntest.AferoDirMockHelper{
-				{
-					DirName:     "/some/blah/",
-					Permissions: 0o755,
-					Files: []ovntest.AferoFileMockHelper{
-						{"/some/blah/path", 0o755, []byte("blah")},
-					},
-				},
-			},
-			outExp: "OVN_NB_DAEMON=/some/blah/path",
-		},
-		{
-			desc: "test code path when ReadFile() returns error",
-			dirFileMocks: []ovntest.AferoDirMockHelper{
-				{
-					DirName:     "/some/blah/",
-					Permissions: 0o755,
-					Files: []ovntest.AferoFileMockHelper{
-						{"/some/blah/path", 0o755, []byte("blah")},
-					},
-				},
-			},
-			errMatch: fmt.Errorf("failed to find ovn-nbctl daemon pidfile/socket in /var/run/ovn/,/var/run/openvswitch/"),
-		},
-		{
-			desc: "test code path when ReadFile() and Stat succeed",
-			dirFileMocks: []ovntest.AferoDirMockHelper{
-				{
-					DirName:     "/var/run/ovn/",
-					Permissions: 0o755,
-					Files: []ovntest.AferoFileMockHelper{
-						{"/var/run/ovn/ovn-nbctl.pid", 0o755, []byte("pid")},
-						{"/var/run/ovn/ovn-nbctl.pid.ctl", 0o755, []byte("blah")},
-					},
-				},
-			},
-			outExp: "OVN_NB_DAEMON=/var/run/ovn/ovn-nbctl.pid.ctl",
-		},
-	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			if len(tc.mockEnvKey) != 0 && len(tc.mockEnvVal) != 0 {
-				prevVal := os.Getenv(tc.mockEnvKey)
-				os.Setenv(tc.mockEnvKey, tc.mockEnvVal)
-				defer os.Setenv(tc.mockEnvKey, prevVal)
-			}
-			if len(tc.dirFileMocks) > 0 {
-				for _, item := range tc.dirFileMocks {
-					AppFs.MkdirAll(item.DirName, item.Permissions)
-					defer AppFs.Remove(item.DirName)
-					if len(item.Files) != 0 {
-						for _, f := range item.Files {
-							afero.WriteFile(AppFs, f.FileName, f.Content, f.Permissions)
-						}
-					}
-				}
-			}
-			out, err := getNbctlSocketPath()
-			t.Log(out, err)
-			if tc.errMatch != nil {
-				assert.Contains(t, err.Error(), tc.errMatch.Error())
-				assert.Equal(t, len(out), 0)
-			} else {
-				assert.Nil(t, err)
-				assert.Equal(t, tc.outExp, out)
-			}
-		})
-	}
-}
-
 func TestGetNbctlArgsAndEnv(t *testing.T) {
 	// Below is defined in ovs.go file
 	AppFs = afero.NewMemMapFs()
 
 	tests := []struct {
-		desc            string
-		nbctlDaemonMode bool
-		ovnnbscheme     config.OvnDBScheme
-		mockEnvKey      string
-		mockEnvVal      string
-		dirFileMocks    []ovntest.AferoDirMockHelper
-		inpTimeout      int
-		outCmdArgs      []string
-		outEnvArgs      []string
+		desc         string
+		ovnnbscheme  config.OvnDBScheme
+		mockEnvKey   string
+		mockEnvVal   string
+		dirFileMocks []ovntest.AferoDirMockHelper
+		inpTimeout   int
+		outCmdArgs   []string
+		outEnvArgs   []string
 	}{
-		{
-			desc:            "test success path when confg.NbctlDaemonMode is true",
-			nbctlDaemonMode: true,
-			mockEnvKey:      "OVN_NB_DAEMON",
-			mockEnvVal:      "/some/blah/path",
-			dirFileMocks: []ovntest.AferoDirMockHelper{
-				{
-					DirName:     "/some/blah/",
-					Permissions: 0o755,
-					Files: []ovntest.AferoFileMockHelper{
-						{"/some/blah/path", 0o755, []byte("blah")},
-					},
-				},
-			},
-			inpTimeout: 15,
-			outCmdArgs: []string{"--timeout=15"},
-			outEnvArgs: []string{"OVN_NB_DAEMON=/some/blah/path"},
-		},
-		{
-			desc:            "test error path when config.NbctlDaemonMode is true",
-			nbctlDaemonMode: true,
-			ovnnbscheme:     config.OvnDBSchemeUnix,
-			inpTimeout:      15,
-			outCmdArgs:      []string{"--timeout=15"},
-			outEnvArgs:      []string{},
-		},
 		{
 			desc:        "test path when config.OvnNorth.Scheme == config.OvnDBSchemeSSL",
 			ovnnbscheme: config.OvnDBSchemeSSL,
@@ -303,14 +183,6 @@ func TestGetNbctlArgsAndEnv(t *testing.T) {
 				prevVal := os.Getenv(tc.mockEnvKey)
 				os.Setenv(tc.mockEnvKey, tc.mockEnvVal)
 				defer os.Setenv(tc.mockEnvKey, prevVal)
-			}
-			if tc.nbctlDaemonMode {
-				preValNbctlDaemonMode := config.NbctlDaemonMode
-				config.NbctlDaemonMode = tc.nbctlDaemonMode
-				// defining below func to reset daemon mode to the previous value
-				resetMode := func(preVal bool) { config.NbctlDaemonMode = preVal }
-				// defer is allowed only for functions
-				defer resetMode(preValNbctlDaemonMode)
 			}
 			if len(tc.ovnnbscheme) != 0 {
 				preValOvnNBScheme := config.OvnNorth.Scheme
@@ -620,18 +492,6 @@ func TestDefaultExecRunner_RunCmd(t *testing.T) {
 			cmd:         nil,
 		},
 		{
-			desc:        "set envars and ensure cmd.SetEnv is invoked",
-			expectedErr: nil,
-			cmd:         mockCmd,
-			envVars:     []string{"OVN_NB_DAEMON=/some/blah/path"},
-			onRetArgsCmdList: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Run", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil}},
-				{OnCallMethodName: "SetStdout", OnCallMethodArgType: []string{"*bytes.Buffer"}, RetArgList: nil},
-				{OnCallMethodName: "SetStderr", OnCallMethodArgType: []string{"*bytes.Buffer"}, RetArgList: nil},
-				{OnCallMethodName: "SetEnv", OnCallMethodArgType: []string{"[]string"}, RetArgList: nil},
-			},
-		},
-		{
 			desc:        "cmd.Run returns error test",
 			expectedErr: fmt.Errorf("mock error"),
 			cmd:         mockCmd,
@@ -912,17 +772,16 @@ func TestRunWithEnvVars(t *testing.T) {
 			},
 		},
 		{
-			desc:           "positive: run `ip addr` command with envVars",
+			desc:           "positive: run `ip addr` command",
 			expectedErr:    nil,
 			cmdPath:        "ip",
 			cmdArg:         "a",
-			envArgs:        []string{"OVN_NB_DAEMON=/some/blah/path"},
+			envArgs:        []string{},
 			onRetArgsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{mockCmd}},
 			onRetArgsCmdList: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "Run", OnCallMethodArgType: []string{}, RetArgList: []interface{}{nil}},
 				{OnCallMethodName: "SetStdout", OnCallMethodArgType: []string{"*bytes.Buffer"}, RetArgList: nil},
 				{OnCallMethodName: "SetStderr", OnCallMethodArgType: []string{"*bytes.Buffer"}, RetArgList: nil},
-				{OnCallMethodName: "SetEnv", OnCallMethodArgType: []string{"[]string"}, RetArgList: nil},
 			},
 		},
 		{
