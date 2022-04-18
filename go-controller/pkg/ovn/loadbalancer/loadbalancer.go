@@ -189,7 +189,11 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 	if err != nil {
 		return err
 	}
-	klog.V(4).Infof("Finished TransactAndCheckAndSetUUIDsTime, rpc time: %v", rpcTime)
+	if len(ops) > 0 {
+		klog.V(4).Infof("Finished TransactAndCheckAndSetUUIDsTime, rpc time: %v ops: %+v", rpcTime, ops[0])
+	} else {
+		klog.V(4).Infof("Finished TransactAndCheckAndSetUUIDsTime, rpc time: %v", rpcTime)
+	}
 
 	for _, lb := range lbs {
 		wantedByName[lb.Name].UUID = lb.UUID

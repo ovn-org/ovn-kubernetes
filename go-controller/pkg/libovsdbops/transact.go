@@ -26,7 +26,7 @@ func TransactWithRetryTime(ctx context.Context, c client.Client, ops []ovsdb.Ope
 			return true, nil
 		}
 		if err != nil && errors.Is(err, client.ErrNotConnected) {
-			klog.V(5).Infof("Unable to execute transaction: %+v. Client is disconnected, will retry...", ops)
+			klog.V(4).Infof("Unable to execute transaction: %+v. Client is disconnected, will retry...", ops[0])
 			return false, nil
 		}
 		return false, err
@@ -40,13 +40,13 @@ func TransactWithRetry(ctx context.Context, c client.Client, ops []ovsdb.Operati
 }
 
 func TransactAndCheckTime(c client.Client, ops []ovsdb.Operation) ([]ovsdb.OperationResult, error, time.Duration) {
-	startTime := time.Now()
-	defer func() {
-		klog.V(4).Infof("Finished TransactAndCheckTime: %v", time.Since(startTime))
-	}()
 	if len(ops) <= 0 {
 		return []ovsdb.OperationResult{{}}, nil, 0
 	}
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished TransactAndCheckTime: %v ops: %+v", time.Since(startTime), ops[0])
+	}()
 
 	klog.Infof("Configuring OVN: %+v", ops)
 

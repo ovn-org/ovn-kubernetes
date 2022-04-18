@@ -238,9 +238,19 @@ func (o *ovsdbClient) resetRPCClient() {
 	}
 }
 
-func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
+func (o *ovsdbClient) rpcMutexLock(reason string) {
+	o.logger.V(4).Info("rpcMutexLock", "reason", reason)
 	o.rpcMutex.Lock()
-	defer o.rpcMutex.Unlock()
+}
+
+func (o *ovsdbClient) rpcMutexUnlock(reason string) {
+	o.logger.V(4).Info("rpcMutexUnlock", "reason", reason)
+	o.rpcMutex.Unlock()
+}
+
+func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
+	o.rpcMutexLock("connect")
+	defer o.rpcMutexUnlock("connect")
 	if o.rpcClient != nil {
 		return ErrAlreadyConnected
 	}
@@ -316,7 +326,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 // tryEndpoint connects to a single database endpoint. Returns the
 // server ID (if clustered) on success, or an error.
 func (o *ovsdbClient) tryEndpoint(ctx context.Context, u *url.URL) (string, error) {
-	o.logger.V(5).Info("trying to connect", "endpoint", fmt.Sprintf("%v", u))
+	o.logger.V(4).Info("trying to connect", "endpoint", fmt.Sprintf("%v", u))
 	var dialer net.Dialer
 	var err error
 	var c net.Conn
@@ -752,11 +762,12 @@ func (o *ovsdbClient) Transact(ctx context.Context, operation ...ovsdb.Operation
 // Transact performs the provided Operations on the database
 // RFC 7047 : transact
 func (o *ovsdbClient) TransactTime(ctx context.Context, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error, time.Duration) {
+	rpcMutexTime := time.Now()
 	o.rpcMutex.RLock()
 	if o.rpcClient == nil || !o.connected {
 		o.rpcMutex.RUnlock()
 		if o.options.reconnect {
-			o.logger.V(5).Info("blocking transaction until reconnected", "operations",
+			o.logger.V(4).Info("blocking transaction until reconnected", "operations",
 				fmt.Sprintf("%+v", operation))
 			ticker := time.NewTicker(50 * time.Millisecond)
 			defer ticker.Stop()
@@ -778,6 +789,7 @@ func (o *ovsdbClient) TransactTime(ctx context.Context, operation ...ovsdb.Opera
 		}
 	}
 	defer o.rpcMutex.RUnlock()
+	o.logger.V(4).Info("Finished rpcMutexTime", "rpcMutexTime", time.Since(rpcMutexTime))
 	res, err, rpcTime := o.transactTime(ctx, o.primaryDBName, operation...)
 	return res, err, rpcTime
 }
@@ -790,9 +802,11 @@ func (o *ovsdbClient) transact(ctx context.Context, dbName string, operation ...
 func (o *ovsdbClient) transactTime(ctx context.Context, dbName string, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error, time.Duration) {
 	var reply []ovsdb.OperationResult
 	db := o.databases[dbName]
+	modelMutexTime := time.Now()
 	db.modelMutex.RLock()
 	schema := o.databases[dbName].model.Schema
 	db.modelMutex.RUnlock()
+	o.logger.V(4).Info("Finished modelMutexTime", "modelMutexTime", time.Since(modelMutexTime))
 
 	if reflect.DeepEqual(schema, ovsdb.DatabaseSchema{}) {
 		return nil, fmt.Errorf("cannot transact to database %s: schema unknown", dbName), 0
@@ -833,8 +847,8 @@ func (o *ovsdbClient) MonitorAll(ctx context.Context) (MonitorCookie, error) {
 func (o *ovsdbClient) MonitorCancel(ctx context.Context, cookie MonitorCookie) error {
 	var reply ovsdb.OperationResult
 	args := ovsdb.NewMonitorCancelArgs(cookie)
-	o.rpcMutex.Lock()
-	defer o.rpcMutex.Unlock()
+	o.rpcMutexLock("MonitorCancel")
+	defer o.rpcMutexUnlock("MonitorCancel")
 	if o.rpcClient == nil {
 		return ErrNotConnected
 	}
@@ -1083,7 +1097,7 @@ func (o *ovsdbClient) watchForLeaderChange() error {
 				continue
 			}
 
-			o.rpcMutex.Lock()
+			o.rpcMutexLock("watchForLeaderChange")
 			if !dbInfo.Leader && o.connected {
 				activeEndpoint := o.endpoints[0]
 				if sid == activeEndpoint.serverID {
@@ -1098,7 +1112,7 @@ func (o *ovsdbClient) watchForLeaderChange() error {
 						"expected", activeEndpoint.serverID, "found", sid)
 				}
 			}
-			o.rpcMutex.Unlock()
+			o.rpcMutexUnlock("watchForLeaderChange")
 		}
 	}()
 	return nil
@@ -1144,10 +1158,10 @@ func (o *ovsdbClient) handleDisconnectNotification() {
 	o.metrics.numDisconnects.Inc()
 	// wait for client related handlers to shutdown
 	o.handlerShutdown.Wait()
-	o.rpcMutex.Lock()
+	o.rpcMutexLock("handleDisconnectNotification")
 	if o.options.reconnect && !o.shutdown {
 		o.rpcClient = nil
-		o.rpcMutex.Unlock()
+		o.rpcMutexUnlock("handleDisconnectNotification")
 		suppressionCounter := 1
 		connect := func() error {
 			// need to ensure deferredUpdates is cleared on every reconnect attempt
@@ -1184,7 +1198,7 @@ func (o *ovsdbClient) handleDisconnectNotification() {
 
 	// clear connection state
 	o.rpcClient = nil
-	o.rpcMutex.Unlock()
+	o.rpcMutexUnlock("handleDisconnectNotification")
 
 	for _, db := range o.databases {
 		db.cacheMutex.Lock()
@@ -1231,8 +1245,8 @@ func (o *ovsdbClient) _disconnect() {
 // If the client was created with WithReconnect then the client
 // will reconnect afterwards
 func (o *ovsdbClient) Disconnect() {
-	o.rpcMutex.Lock()
-	defer o.rpcMutex.Unlock()
+	o.rpcMutexLock("Disconnect")
+	defer o.rpcMutexUnlock("Disconnect")
 	o._disconnect()
 }
 
@@ -1240,8 +1254,8 @@ func (o *ovsdbClient) Disconnect() {
 // It will remove all stored state ready for the next connection
 // Even If the client was created with WithReconnect it will not reconnect afterwards
 func (o *ovsdbClient) Close() {
-	o.rpcMutex.Lock()
-	defer o.rpcMutex.Unlock()
+	o.rpcMutexLock("Close")
+	defer o.rpcMutexUnlock("Close")
 	o.connected = false
 	if o.rpcClient == nil {
 		return
