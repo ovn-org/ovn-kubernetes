@@ -1513,6 +1513,7 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 		if err != nil {
 			return fmt.Errorf("nodeAdd: error adding noHost subnet for node %s: %w", node.Name, err)
 		}
+		return nil
 	}
 
 	klog.Infof("Adding or Updating Node %q", node.Name)
