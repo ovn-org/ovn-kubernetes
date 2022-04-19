@@ -308,11 +308,11 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
 		klog.Info("Preparing Local Gateway")
-		gw, err = newLocalGateway(n.name, subnets, gatewayNextHops, gatewayIntf, ifAddrs, nodeAnnotator,
+		gw, err = newLocalGateway(n.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
 			managementPortConfig, n.Kube, n.watchFactory)
 	case config.GatewayModeShared:
 		klog.Info("Preparing Shared Gateway")
-		gw, err = newSharedGateway(n.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator, n.Kube,
+		gw, err = newSharedGateway(n.name, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator, n.Kube,
 			managementPortConfig, n.watchFactory)
 	case config.GatewayModeDisabled:
 		var chassisID string

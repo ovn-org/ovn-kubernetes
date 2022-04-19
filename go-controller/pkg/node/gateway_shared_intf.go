@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/vishvananda/netlink"
 
 	kapi "k8s.io/api/core/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
@@ -428,10 +429,6 @@ func delServiceRules(service *kapi.Service, npw *nodePortWatcher) {
 			// +--------------------------+-----------------------+--------------+--------------------------------+
 			// | svcHasLocalHostNetEndPnt | ExternalTrafficPolicy | GatewayMode  |     Scenario for deletion      |
 			// |--------------------------|-----------------------|--------------|--------------------------------|
-			// |                          |                       |              |      deletes the REDIRECT      |
-			// |         true             |          local        | shared+local |      rules for etp=local +     |
-			// |                          |                       |              |      host-networked eps        |
-			// |--------------------------|-----------------------|--------------|--------------------------------|
 			// |                          |                       |              | deletes the DNAT rules for     |
 			// |         false            |          local        | shared+local | etp=local + non-local-host-net |
 			// |                          |                       |              | eps towards masqueradeIP       |
@@ -441,20 +438,15 @@ func delServiceRules(service *kapi.Service, npw *nodePortWatcher) {
 			// |                          |                       |              |       for the default case     |
 			// +--------------------------+-----------------------+--------------+--------------------------------+
 
-			// case1: deletes the REDIRECT rules for etp=local + host-networked pods in both gw modes
-			delGatewayIptRules(service, true)
-			// case2: deletes the DNAT rules towards masqueradeIP for etp=local + ovn-k pods in both gw modes OR
-			// case3: deletes the DNAT rules towards clusterIP for etp=cluster in both gw modes
+			// case1: deletes the DNAT rules towards masqueradeIP for etp=local + ovn-k pods in both gw modes OR
+			// case2: deletes the DNAT rules towards clusterIP for etp=cluster in both gw modes
 			delGatewayIptRules(service, false)
 		}
 		return
 	}
 
-	// For host only mode always try and delete all rules here
-	// case1: deletes the REDIRECT rules for etp=local + host-networked pods in both gw modes
-	delGatewayIptRules(service, true)
-	// case2: deletes the DNAT rules towards masqueradeIP for etp=local + ovn-k pods in both gw modes OR
-	// case3: deletes the DNAT rules towards clusterIP for etp=cluster in both gw modes
+	// case1: deletes the DNAT rules towards masqueradeIP for etp=local + ovn-k pods in both gw modes OR
+	// case2: deletes the DNAT rules towards clusterIP for etp=cluster in both gw modes
 	delGatewayIptRules(service, false)
 }
 
@@ -483,7 +475,8 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) {
 		// No endpoint object exists yet so default to false
 		hasLocalHostNetworkEp = false
 	} else {
-		hasLocalHostNetworkEp = hasLocalHostNetworkEndpoints(ep, &npw.nodeIPManager.addresses)
+		nodeIPs := npw.nodeIPManager.ListAddresses()
+		hasLocalHostNetworkEp = hasLocalHostNetworkEndpoints(ep, nodeIPs)
 	}
 
 	// If something didn't already do it add correct Service rules
@@ -524,6 +517,48 @@ func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) {
 	}
 }
 
+// deleteConntrackForServiceVIP deletes the conntrack entries for the provided svcVIP:svcPort by comparing them to ConntrackOrigDstIP:ConntrackOrigDstPort
+func deleteConntrackForServiceVIP(svcVIPs []string, svcPorts []kapi.ServicePort, ns, name string) error {
+	for _, svcVIP := range svcVIPs {
+		for _, svcPort := range svcPorts {
+			err := util.DeleteConntrack(svcVIP, svcPort.Port, svcPort.Protocol, netlink.ConntrackOrigDstIP)
+			if err != nil {
+				return fmt.Errorf("failed to delete conntrack entry for service %s/%s with svcVIP %s, svcPort %d, protocol %s: %v",
+					ns, name, svcVIP, svcPort.Port, svcPort.Protocol, err)
+			}
+		}
+	}
+	return nil
+}
+
+// deleteConntrackForService deletes the conntrack entries corresponding to the service VIPs of the provided service
+func (npw *nodePortWatcher) deleteConntrackForService(service *kapi.Service) error {
+	// remove conntrack entries for LB VIPs and External IPs
+	externalIPs := util.GetExternalAndLBIPs(service)
+	if err := deleteConntrackForServiceVIP(externalIPs, service.Spec.Ports, service.Namespace, service.Name); err != nil {
+		return err
+	}
+	if util.ServiceTypeHasNodePort(service) {
+		// remove conntrack entries for NodePorts
+		nodeIPs := npw.nodeIPManager.ListAddresses()
+		for _, nodeIP := range nodeIPs {
+			for _, svcPort := range service.Spec.Ports {
+				err := util.DeleteConntrack(nodeIP.String(), svcPort.NodePort, svcPort.Protocol, netlink.ConntrackOrigDstIP)
+				if err != nil {
+					return fmt.Errorf("failed to delete conntrack entry for service %s/%s with nodeIP %s, nodePort %d, protocol %s: %v",
+						service.Namespace, service.Name, nodeIP, svcPort.Port, svcPort.Protocol, err)
+				}
+			}
+		}
+	}
+	// remove conntrack entries for ClusterIPs
+	clusterIPs := util.GetClusterIPs(service)
+	if err := deleteConntrackForServiceVIP(clusterIPs, service.Spec.Ports, service.Namespace, service.Name); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (npw *nodePortWatcher) DeleteService(service *kapi.Service) {
 	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
 		return
@@ -531,6 +566,13 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) {
 
 	klog.V(5).Infof("Deleting service %s in namespace %s", service.Name, service.Namespace)
 	name := ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}
+	// Remove all conntrack entries for the serviceVIPs of this service irrespective of protocol stack
+	// since service deletion is considered as unplugging the network cable and hence graceful termination
+	// is not guaranteed. See https://github.com/kubernetes/kubernetes/issues/108523#issuecomment-1074044415.
+	err := npw.deleteConntrackForService(service)
+	if err != nil {
+		klog.Errorf("Failed to delete conntrack entry for service %v: %v", name, err)
+	}
 	if svcConfig, exists := npw.getAndDeleteServiceInfo(name); exists {
 		delServiceRules(svcConfig.service, npw)
 	} else {
@@ -556,7 +598,8 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 			klog.V(5).Infof("No endpoint found for service %s in namespace %s during sync", service.Name, service.Namespace)
 			continue
 		}
-		hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(ep, &npw.nodeIPManager.addresses)
+		nodeIPs := npw.nodeIPManager.ListAddresses()
+		hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(ep, nodeIPs)
 		npw.getAndSetServiceInfo(name, service, hasLocalHostNetworkEp)
 		// Delete OF rules for service if they exist
 		npw.updateServiceFlowCache(service, false, hasLocalHostNetworkEp)
@@ -570,7 +613,8 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 	npw.ofm.requestFlowSync()
 	// sync IPtables rules once only for Full mode
 	if !npw.dpuMode {
-		for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain, iptableMgmPortChain} {
+		for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain, iptableETPChain, iptableMgmPortChain} {
+			// (NOTE: Order is important, add jump to iptableETPChain before jump to NP/EIP chains)
 			recreateIPTRules("nat", chain, keepIPTRules)
 		}
 	}
@@ -592,7 +636,8 @@ func (npw *nodePortWatcher) AddEndpoints(ep *kapi.Endpoints) {
 	}
 
 	klog.V(5).Infof("Adding endpoints %s in namespace %s", ep.Name, ep.Namespace)
-	hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(ep, &npw.nodeIPManager.addresses)
+	nodeIPs := npw.nodeIPManager.ListAddresses()
+	hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(ep, nodeIPs)
 
 	// Here we make sure the correct rules are programmed whenever an AddEndpoint
 	// event is received, only alter flows if we need to, i.e if cache wasn't
@@ -646,8 +691,9 @@ func (npw *nodePortWatcher) UpdateEndpoints(old *kapi.Endpoints, new *kapi.Endpo
 	}
 
 	// Update rules if hasLocalHostNetworkEpNew status changed.
-	hasLocalHostNetworkEpOld := hasLocalHostNetworkEndpoints(old, &npw.nodeIPManager.addresses)
-	hasLocalHostNetworkEpNew := hasLocalHostNetworkEndpoints(new, &npw.nodeIPManager.addresses)
+	nodeIPs := npw.nodeIPManager.ListAddresses()
+	hasLocalHostNetworkEpOld := hasLocalHostNetworkEndpoints(old, nodeIPs)
+	hasLocalHostNetworkEpNew := hasLocalHostNetworkEndpoints(new, nodeIPs)
 	if hasLocalHostNetworkEpOld != hasLocalHostNetworkEpNew {
 		npw.DeleteEndpoints(old)
 		npw.AddEndpoints(new)
@@ -712,7 +758,7 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) {
 //    the return traffic can be steered back to OVN logical topology
 // -- to handle host -> service access, via masquerading from the host to OVN GR
 // -- to handle external -> service(ExternalTrafficPolicy: Local) -> host access without SNAT
-func newSharedGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, extraIPs []net.IP) (*openflowManager, error) {
+func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, extraIPs []net.IP) (*openflowManager, error) {
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
 	ofm := &openflowManager{
 		defaultBridge:         gwBridge,
@@ -1165,13 +1211,13 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 	return nil
 }
 
-func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
+func newSharedGateway(nodeName string, gwNextHops []net.IP, gwIntf, egressGWIntf string,
 	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, kube kube.Interface, cfg *managementPortConfig, watchFactory factory.NodeWatchFactory) (*gateway, error) {
 	klog.Info("Creating new shared gateway")
 	gw := &gateway{}
 
 	gwBridge, exGwBridge, err := gatewayInitInternal(
-		nodeName, gwIntf, egressGWIntf, subnets, gwNextHops, gwIPs, nodeAnnotator)
+		nodeName, gwIntf, egressGWIntf, gwNextHops, gwIPs, nodeAnnotator)
 	if err != nil {
 		return nil, err
 	}
@@ -1232,7 +1278,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory)
 		nodeIPs := gw.nodeIPManager.ListAddresses()
 
-		gw.openflowManager, err = newSharedGatewayOpenFlowManager(gwBridge, exGwBridge, nodeIPs)
+		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, nodeIPs)
 		if err != nil {
 			return err
 		}

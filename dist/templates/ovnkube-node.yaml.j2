@@ -32,6 +32,7 @@ spec:
       # as all pods.
       serviceAccountName: ovn
       hostNetwork: true
+      dnsPolicy: Default
       {{ "hostPID: true" if ovn_unprivileged_mode=="no" }}
       containers:
 

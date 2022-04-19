@@ -375,7 +375,7 @@ func LinkNeighExists(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAdd
 	return false, nil
 }
 
-func DeleteConntrack(ip string, port int32, protocol kapi.Protocol) error {
+func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType netlink.ConntrackFilterType) error {
 	ipAddress := net.ParseIP(ip)
 	if ipAddress == nil {
 		return fmt.Errorf("value %q passed to DeleteConntrack is not an IP address", ipAddress)
@@ -392,13 +392,18 @@ func DeleteConntrack(ip string, port int32, protocol kapi.Protocol) error {
 		if err := filter.AddProtocol(132); err != nil {
 			return fmt.Errorf("could not add Protocol SCTP to conntrack filter %v", err)
 		}
+	} else if protocol == kapi.ProtocolTCP {
+		// 6 = TCP protocol
+		if err := filter.AddProtocol(6); err != nil {
+			return fmt.Errorf("could not add Protocol TCP to conntrack filter %v", err)
+		}
 	}
 	if port > 0 {
 		if err := filter.AddPort(netlink.ConntrackOrigDstPort, uint16(port)); err != nil {
 			return fmt.Errorf("could not add port %d to conntrack filter: %v", port, err)
 		}
 	}
-	if err := filter.AddIP(netlink.ConntrackReplyAnyIP, ipAddress); err != nil {
+	if err := filter.AddIP(ipFilterType, ipAddress); err != nil {
 		return fmt.Errorf("could not add IP: %s to conntrack filter: %v", ipAddress, err)
 	}
 	if ipAddress.To4() != nil {

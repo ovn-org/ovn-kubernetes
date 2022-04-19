@@ -240,7 +240,7 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID, sct
 }
 */
 
-func addNodeLogicalFlows(testData []libovsdbtest.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter, expectedNodeSwitch *nbdb.LogicalSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup *nbdb.PortGroup, node *tNode, clusterCIDR string, enableIPv6 bool) []libovsdbtest.TestData {
+func addNodeLogicalFlows(testData []libovsdbtest.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter, expectedNodeSwitch *nbdb.LogicalSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup *nbdb.PortGroup, node *tNode) []libovsdbtest.TestData {
 
 	lrpName := types.RouterToSwitchPrefix + node.Name
 	chassisName := node.SystemID
@@ -975,7 +975,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedDatabaseState := []libovsdbtest.TestData{}
-			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, clusterCIDR, config.IPv6Mode)
+			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
@@ -1172,7 +1172,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedDatabaseState := []libovsdbtest.TestData{}
-			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, clusterCIDR, config.IPv6Mode)
+			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
@@ -1225,7 +1225,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
-	ginkgo.It("use node retry with adding a node", func() {
+	ginkgo.It("use node retry with updating a node", func() {
 
 		app.Action = func(ctx *cli.Context) error {
 			node1 := tNode{
@@ -1301,13 +1301,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(updatedNode)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			hostAddrs, err := util.ParseNodeHostAddresses(updatedNode)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
 			f, err = factory.NewMasterWatchFactory(fakeClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
@@ -1359,7 +1352,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedDatabaseState := []libovsdbtest.TestData{}
-			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, clusterCIDR, config.IPv6Mode)
+			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
@@ -1372,10 +1365,28 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 			// Let the real code run and ensure OVN database sync
 			clusterController.WatchNodes()
-			ginkgo.By("injecting node add errors")
-			// inject errors
-			clusterController.addNodeFailed.Store(testNode.Name, true)
-			clusterController.gatewaysFailed.Store(testNode.Name, true)
+			// ensure db is consistent
+			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
+
+			var clusterSubnets []*net.IPNet
+			for _, clusterSubnet := range config.Default.ClusterSubnets {
+				clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
+			}
+			joinLRPIP, joinLRNetwork, _ := net.ParseCIDR(node1.LrpIP + "/16")
+			dLRPIP, dLRPNetwork, _ := net.ParseCIDR(node1.DrLrpIP + "/16")
+
+			joinLRPIPs := &net.IPNet{
+				IP:   joinLRPIP,
+				Mask: joinLRNetwork.Mask,
+			}
+			dLRPIPs := &net.IPNet{
+				IP:   dLRPIP,
+				Mask: dLRPNetwork.Mask,
+			}
+
+			skipSnat := false
+			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config, []*net.IPNet{joinLRPIPs}, []*net.IPNet{dLRPIPs}, skipSnat, node1.NodeMgmtPortIP)
+			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 			ginkgo.By("Bringing down NBDB")
 			// inject transient problem, nbdb is down
 			clusterController.nbClient.Close()
@@ -1383,13 +1394,26 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				return clusterController.nbClient.Connected()
 			}).Should(gomega.BeFalse())
 
+			ginkgo.By("modifying the node and triggering an update")
+			// modify the node and trigger an update
+			node1.GatewayRouterNextHop = "172.16.16.111"
+			l3Config = &util.L3GatewayConfig{
+				Mode:           config.GatewayModeShared,
+				ChassisID:      node1.SystemID,
+				InterfaceID:    ifaceID,
+				MACAddress:     ovntest.MustParseMAC(node1.PhysicalBridgeMAC),
+				IPAddresses:    ovntest.MustParseIPNets(node1.GatewayRouterIPMask),
+				NextHops:       ovntest.MustParseIPs(node1.GatewayRouterNextHop),
+				NodePortEnable: true,
+				VLANID:         &vlanID,
+			}
+			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = nodeAnnotator.Run()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			// sleep long enough for TransactWithRetry to fail, causing node Add to fail
 			time.Sleep(types.OVSDBTimeout + time.Second)
-			// syncGateway should fail because we brought NBDB down
-			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
-			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
-			gomega.Expect(err).To(gomega.HaveOccurred())
-
+			ginkgo.By("update should have failed with a retry present")
 			// check to see if the retry cache has an entry for this node
 			gomega.Eventually(func() *retryObjEntry {
 				return clusterController.retryNodes.getObjRetryEntry(testNode.Name)
@@ -1399,15 +1423,24 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(retryEntry.newObj).NotTo(gomega.BeNil())
 			ginkgo.By("retry entry old obj should be nil")
 			gomega.Expect(retryEntry.oldObj).To(gomega.BeNil())
+
 			connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 			defer cancel()
+			ginkgo.By("bring up NBDB")
 			resetNBClient(connCtx, clusterController.nbClient)
 			clusterController.retryNodes.requestRetryObjs() // retry the failed entry
-
+			ginkgo.By("should be no retry entry after update completes")
 			gomega.Eventually(func() *retryObjEntry {
 				return clusterController.retryNodes.getObjRetryEntry(testNode.Name)
 			}).Should(gomega.BeNil())
-
+			for _, data := range expectedDatabaseState {
+				if route, ok := data.(*nbdb.LogicalRouterStaticRoute); ok {
+					if route.Nexthop == "172.16.16.1" {
+						route.Nexthop = node1.GatewayRouterNextHop
+					}
+				}
+			}
+			gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 			return nil
 		}
 
@@ -1553,7 +1586,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedDatabaseState := []libovsdbtest.TestData{}
-			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, clusterCIDR, config.IPv6Mode)
+			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
