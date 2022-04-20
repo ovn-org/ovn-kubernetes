@@ -291,15 +291,6 @@ func RegisterMasterPerformance(nbClient libovsdbclient.Client) {
 	// This is set to not create circular import between metrics and util package
 	util.MetricOvnCliLatency = metricOvnCliLatency
 	registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemMaster)
-	prometheus.MustRegister(prometheus.NewCounterFunc(
-		prometheus.CounterOpts{
-			Namespace: MetricOvnkubeNamespace,
-			Subsystem: MetricOvnkubeSubsystemMaster,
-			Name:      "skipped_nbctl_daemon_total",
-			Help:      "The number of times we skipped using ovn-nbctl daemon and directly interacted with OVN NB DB",
-		}, func() float64 {
-			return float64(util.SkippedNbctlDaemonCounter)
-		}))
 	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,

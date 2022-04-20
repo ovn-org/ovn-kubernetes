@@ -43,7 +43,7 @@ usage() {
     echo "                 [-nl |--node-loglevel <num>] [-ml|--master-loglevel <num>]"
     echo "                 [-dbl|--dbchecker-loglevel <num>] [-ndl|--ovn-loglevel-northd <loglevel>]"
     echo "                 [-nbl|--ovn-loglevel-nb <loglevel>] [-sbl|--ovn-loglevel-sb <loglevel>]"
-    echo "                 [-cl |--ovn-loglevel-controller <loglevel>] [-dl|--ovn-loglevel-nbctld <loglevel>]"
+    echo "                 [-cl |--ovn-loglevel-controller <loglevel>]"
     echo "                 [-ep |--experimental-provider <name>] |"
     echo "                 [-eb |--egress-gw-separate-bridge] |"
     echo "                 [-lr |--local-kind-registry |"
@@ -86,7 +86,6 @@ usage() {
     echo "-nbl | --ovn-loglevel-nb            Log config for northbound DB DEFAULT: '-vconsole:info -vfile:info'."
     echo "-sbl | --ovn-loglevel-sb            Log config for southboudn DB DEFAULT: '-vconsole:info -vfile:info'."
     echo "-cl  | --ovn-loglevel-controller    Log config for ovn-controller DEFAULT: '-vconsole:info'."
-    echo "-dl  | --ovn-loglevel-nbctld        Log config for nbctl daemon DEFAULT: '-vconsole:info'."
     echo "-ep  | --experimental-provider      Use an experimental OCI provider such as podman, instead of docker. DEFAULT: Disabled."
     echo "-eb  | --egress-gw-separate-bridge  The external gateway traffic uses a separate bridge."
     echo "-lr  | --local-kind-registry        Configure kind to use a local docker registry rather than manually loading images"
@@ -207,9 +206,6 @@ parse_args() {
                                                 ;;
             -cl  | --ovn-loglevel-controller )  shift
                                                 OVN_LOG_LEVEL_CONTROLLER=$1
-                                                ;;
-            -dl  | --ovn-loglevel-nbctld )      shift
-                                                OVN_LOG_LEVEL_NBCTLD=$1
                                                 ;;
             -hns | --host-network-namespace )   OVN_HOST_NETWORK_NAMESPACE=$1
                                                 ;;
@@ -581,7 +577,6 @@ create_ovn_kube_manifests() {
     --ovn-loglevel-nb="${OVN_LOG_LEVEL_NB}" \
     --ovn-loglevel-sb="${OVN_LOG_LEVEL_SB}" \
     --ovn-loglevel-controller="${OVN_LOG_LEVEL_CONTROLLER}" \
-    --ovn-loglevel-nbctld="${OVN_LOG_LEVEL_NBCTLD}" \
     --egress-ip-enable=true \
     --egress-firewall-enable=true \
     --v4-join-subnet="${JOIN_SUBNET_IPV4}" \

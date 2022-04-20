@@ -92,7 +92,7 @@ usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
                  [-nl |--node-loglevel <num>] [-ml|--master-loglevel <num>]
                  [-dbl|--dbchecker-loglevel <num>] [-ndl|--ovn-loglevel-northd <loglevel>]
                  [-nbl|--ovn-loglevel-nb <loglevel>] [-sbl|--ovn-loglevel-sb <loglevel>]
-                 [-cl |--ovn-loglevel-controller <loglevel>] [-dl|--ovn-loglevel-nbctld <loglevel>]
+                 [-cl |--ovn-loglevel-controller <loglevel>]
                  [-ep |--experimental-provider <name>] |
                  [-eb |--egress-gw-separate-bridge]
                  [-h]]
@@ -131,7 +131,6 @@ usage: kind.sh [[[-cf |--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
 -nbl | --ovn-loglevel-nb            Log config for northbound DB DEFAULT: '-vconsole:info -vfile:info'.
 -sbl | --ovn-loglevel-sb            Log config for southboudn DB DEFAULT: '-vconsole:info -vfile:info'.
 -cl  | --ovn-loglevel-controller    Log config for ovn-controller DEFAULT: '-vconsole:info'.
--dl  | --ovn-loglevel-nbctld        Log config for nbctl daemon DEFAULT: '-vconsole:info'.
 -ep  | --experimental-provider      Use an experimental OCI provider such as podman, instead of docker. DEFAULT: Disabled.
 -eb  | --egress-gw-separate-bridge  The external gateway traffic uses a separate bridge.
 --delete                      	    Delete current cluster

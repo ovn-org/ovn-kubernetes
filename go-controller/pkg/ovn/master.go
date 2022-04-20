@@ -3,15 +3,18 @@ package ovn
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/fields"
+	"math/rand"
 	"net"
 	"os"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
@@ -1116,7 +1119,6 @@ func (oc *Controller) allocateNodeSubnets(node *kapi.Node) ([]*net.IPNet, []*net
 }
 
 func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
-	oc.clearInitialNodeNetworkUnavailableCondition(node, nil)
 	hostSubnets, allocatedSubnets, err := oc.allocateNodeSubnets(node)
 	if err != nil {
 		return nil, err
@@ -1148,7 +1150,9 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 	}
 
 	// delete stale chassis in SBDB if any
-	oc.deleteStaleNodeChassis(node)
+	if err = oc.deleteStaleNodeChassis(node); err != nil {
+		return nil, err
+	}
 
 	// If node annotation succeeds and subnets were allocated, update the used subnet count
 	if len(allocatedSubnets) > 0 {
@@ -1187,10 +1191,10 @@ func (oc *Controller) checkNodeChassisMismatch(node *kapi.Node) (bool, error) {
 }
 
 // delete stale chassis in SBDB if system-id of the specific node has changed.
-func (oc *Controller) deleteStaleNodeChassis(node *kapi.Node) {
+func (oc *Controller) deleteStaleNodeChassis(node *kapi.Node) error {
 	mismatch, err := oc.checkNodeChassisMismatch(node)
 	if err != nil {
-		klog.Errorf("Failed to check if there is any stale chassis for node %s in SBDB: %v", node.Name, err)
+		return fmt.Errorf("failed to check if there is any stale chassis for node %s in SBDB: %v", node.Name, err)
 	} else if mismatch {
 		klog.V(5).Infof("Node %s now has a new chassis ID, delete its stale chassis in SBDB", node.Name)
 		if err = libovsdbops.DeleteNodeChassis(oc.sbClient, node.Name); err != nil {
@@ -1198,9 +1202,10 @@ func (oc *Controller) deleteStaleNodeChassis(node *kapi.Node) {
 			oc.recorder.Eventf(node, kapi.EventTypeWarning, "ErrorMismatchChassis",
 				"Node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB",
 				node.Name)
-			klog.Errorf("Node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB", node.Name)
+			return fmt.Errorf("node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB", node.Name)
 		}
 	}
+	return nil
 }
 
 func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) error {
@@ -1253,33 +1258,32 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	return nil
 }
 
-func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet) {
-	// Clean up as much as we can but don't hard error
+func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet) error {
 	for _, hostSubnet := range hostSubnets {
 		if err := oc.deleteNodeHostSubnet(nodeName, hostSubnet); err != nil {
-			klog.Errorf("Error deleting node %s HostSubnet %v: %v", nodeName, hostSubnet, err)
-		} else {
-			util.UpdateUsedHostSubnetsCount(hostSubnet, &oc.v4HostSubnetsUsed, &oc.v6HostSubnetsUsed, false)
+			return fmt.Errorf("error deleting node %s HostSubnet %v: %v", nodeName, hostSubnet, err)
 		}
+		util.UpdateUsedHostSubnetsCount(hostSubnet, &oc.v4HostSubnetsUsed, &oc.v6HostSubnetsUsed, false)
 	}
 	// update metrics
 	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
 
 	if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
-		klog.Errorf("Error deleting node %s logical network: %v", nodeName, err)
+		return fmt.Errorf("error deleting node %s logical network: %v", nodeName, err)
 	}
 
 	if err := oc.gatewayCleanup(nodeName); err != nil {
-		klog.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
+		return fmt.Errorf("failed to clean up node %s gateway: (%v)", nodeName, err)
 	}
 
 	if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(nodeName); err != nil {
-		klog.Errorf("Failed to clean up GR LRP IPs for node %s: %v", nodeName, err)
+		return fmt.Errorf("failed to clean up GR LRP IPs for node %s: %v", nodeName, err)
 	}
 
 	if err := libovsdbops.DeleteNodeChassis(oc.sbClient, nodeName); err != nil {
-		klog.Errorf("Failed to remove the chassis associated with node %s in the OVN SB Chassis table: %v", nodeName, err)
+		return fmt.Errorf("failed to remove the chassis associated with node %s in the OVN SB Chassis table: %v", nodeName, err)
 	}
+	return nil
 }
 
 // OVN uses an overlay and doesn't need GCE Routes, we need to
@@ -1289,13 +1293,9 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet) {
 // TODO: make upstream kubelet more flexible with overlays and GCE so this
 // condition doesn't get added for network plugins that don't want it, and then
 // we can remove this function.
-func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newNode *kapi.Node) {
+func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode *kapi.Node) {
 	// If it is not a Cloud Provider node, then nothing to do.
 	if origNode.Spec.ProviderID == "" {
-		return
-	}
-	// if newNode is not nil, then we are called from UpdateFunc()
-	if newNode != nil && reflect.DeepEqual(origNode.Status.Conditions, newNode.Status.Conditions) {
 		return
 	}
 
@@ -1481,7 +1481,9 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 			continue
 		}
 
-		oc.deleteNode(nodeSwitch.Name, subnets)
+		if err := oc.deleteNode(nodeSwitch.Name, subnets); err != nil {
+			return fmt.Errorf("failed to delete node:%s, err:%v", nodeSwitch.Name, err)
+		}
 		//remove the node from the chassis map so we don't delete it twice
 		staleChassis.Delete(nodeSwitch.Name)
 	}
@@ -1490,4 +1492,182 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 		return fmt.Errorf("failed deleting chassis %v error: %v", staleChassis.List(), err)
 	}
 	return nil
+}
+
+// nodeSyncs structure contains flags for the different failures
+// so the retry logic can control what need to retry based
+type nodeSyncs struct {
+	syncNode              bool
+	syncClusterRouterPort bool
+	syncMgmtPort          bool
+	syncGw                bool
+}
+
+func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
+	var hostSubnets []*net.IPNet
+	var errs []error
+	var err error
+
+	if noHostSubnet := noHostSubnet(node); noHostSubnet {
+		err := oc.lsManager.AddNoHostSubnetNode(node.Name)
+		if err != nil {
+			return fmt.Errorf("nodeAdd: error adding noHost subnet for node %s: %w", node.Name, err)
+		}
+		return nil
+	}
+
+	klog.Infof("Adding or Updating Node %q", node.Name)
+	if nSyncs.syncNode {
+		if hostSubnets, err = oc.addNode(node); err != nil {
+			oc.addNodeFailed.Store(node.Name, true)
+			oc.nodeClusterRouterPortFailed.Store(node.Name, true)
+			oc.mgmtPortFailed.Store(node.Name, true)
+			oc.gatewaysFailed.Store(node.Name, true)
+			return fmt.Errorf("nodeAdd: error creating subnet for node %s: %w", node.Name, err)
+		}
+		oc.addNodeFailed.Delete(node.Name)
+	}
+
+	if nSyncs.syncClusterRouterPort {
+		if err = oc.syncNodeClusterRouterPort(node, nil); err != nil {
+			errs = append(errs, err)
+			oc.nodeClusterRouterPortFailed.Store(node.Name, true)
+		} else {
+			oc.nodeClusterRouterPortFailed.Delete(node.Name)
+		}
+	}
+
+	if nSyncs.syncMgmtPort {
+		err := oc.syncNodeManagementPort(node, hostSubnets)
+		if err != nil {
+			errs = append(errs, err)
+			oc.mgmtPortFailed.Store(node.Name, true)
+		} else {
+			oc.mgmtPortFailed.Delete(node.Name)
+		}
+	}
+
+	// delete stale chassis in SBDB if any
+	if err := oc.deleteStaleNodeChassis(node); err != nil {
+		errs = append(errs, err)
+	}
+
+	oc.clearInitialNodeNetworkUnavailableCondition(node)
+
+	if nSyncs.syncGw {
+		err := oc.syncNodeGateway(node, nil)
+		if err != nil {
+			errs = append(errs, err)
+			oc.gatewaysFailed.Store(node.Name, true)
+		} else {
+			oc.gatewaysFailed.Delete(node.Name)
+		}
+	}
+
+	// ensure pods that already exist on this node have their logical ports created
+	options := metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String()}
+	pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
+	if err != nil {
+		klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
+	} else {
+		oc.addRetryPods(pods.Items)
+		oc.requestRetryPods()
+	}
+
+	if len(errs) == 0 {
+		return nil
+	}
+	return kerrors.NewAggregate(errs)
+}
+
+func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
+	klog.V(5).Infof("Deleting Node %q. Removing the node from "+
+		"various caches", node.Name)
+
+	nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
+	if err := oc.deleteNode(node.Name, nodeSubnets); err != nil {
+		return err
+	}
+	oc.lsManager.DeleteNode(node.Name)
+	oc.addNodeFailed.Delete(node.Name)
+	oc.mgmtPortFailed.Delete(node.Name)
+	oc.gatewaysFailed.Delete(node.Name)
+	oc.nodeClusterRouterPortFailed.Delete(node.Name)
+	return nil
+}
+
+// iterateRetryNodes checks if any outstanding Nodes exists
+// then tries to re-add them if so
+// updateAll forces all nodes to be attempted to be retried regardless
+func (oc *Controller) iterateRetryNodes(updateAll bool) {
+	oc.retryNodes.retryMutex.Lock()
+	defer oc.retryNodes.retryMutex.Unlock()
+	now := time.Now()
+	for nodeName, entry := range oc.retryNodes.entries {
+		if entry.ignore {
+			// neither addition nor deletion is being retried
+			continue
+		}
+		// check if we need to create
+		if entry.newObj != nil {
+			n := entry.newObj.(*kapi.Node)
+			kNode, err := oc.watchFactory.GetNode(n.Name)
+			if err != nil && errors.IsNotFound(err) {
+				klog.Infof("%s node not found in the informers cache, not going to retry node setup", nodeName)
+				entry.newObj = nil
+			} else {
+				entry.newObj = kNode
+			}
+		}
+
+		entry.backoffSec = entry.backoffSec * 2
+		if entry.backoffSec > 60 {
+			entry.backoffSec = 60
+		}
+		backoff := (entry.backoffSec * time.Second) + (time.Duration(rand.Intn(500)) * time.Millisecond)
+		nTimer := entry.timeStamp.Add(backoff)
+		if updateAll || now.After(nTimer) {
+			klog.Infof("Node Retry: %s retry node setup", nodeName)
+
+			// check if we need to delete
+			if entry.oldObj != nil {
+				klog.Infof("Node Retry: Removing old Node for %s", nodeName)
+				node := entry.oldObj.(*kapi.Node)
+				if err := oc.deleteNodeEvent(node); err != nil {
+					klog.Infof("Node Retry delete failed for %s, will try again later: %v",
+						nodeName, err)
+					entry.timeStamp = time.Now()
+					continue
+				}
+				// successfully cleaned up old node, remove it from the retry cache
+				entry.oldObj = nil
+			}
+
+			// create new node if needed
+			if entry.newObj != nil {
+				klog.Infof("Node Retry: Creating new node for %s", nodeName)
+				_, nodeSync := oc.addNodeFailed.Load(nodeName)
+				_, clusterRtrSync := oc.nodeClusterRouterPortFailed.Load(nodeName)
+				_, mgmtSync := oc.mgmtPortFailed.Load(nodeName)
+				_, gwSync := oc.gatewaysFailed.Load(nodeName)
+				if err := oc.addUpdateNodeEvent(entry.newObj.(*kapi.Node),
+					&nodeSyncs{nodeSync,
+						clusterRtrSync,
+						mgmtSync,
+						gwSync}); err != nil {
+					klog.Infof("Node Retry create failed for %s, will try again later: %v",
+						nodeName, err)
+					entry.timeStamp = time.Now()
+					continue
+				}
+				// successfully create node, remove it from the retry cache
+				entry.newObj = nil
+			}
+
+			klog.Infof("Node Retry successful for %s", nodeName)
+			oc.retryNodes.deleteRetryObj(nodeName, false)
+		} else {
+			klog.V(5).Infof("%s retry node not after timer yet, time: %s", nodeName, nTimer)
+		}
+	}
 }
