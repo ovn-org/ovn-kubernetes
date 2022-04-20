@@ -2,114 +2,81 @@ package libovsdbops
 
 import (
 	"context"
-	"fmt"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/model"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
-// findLBGroup looks up the Group in the cache and sets the UUID
-func findLBGroup(nbClient libovsdbclient.Client, group *nbdb.LoadBalancerGroup) error {
-	if group.UUID != "" && !IsNamedUUID(group.UUID) {
-		return nil
+// CreateOrUpdateLoadBalancerGroup creates or updates the provided load balancer
+// group
+func CreateOrUpdateLoadBalancerGroup(nbClient libovsdbclient.Client, group *nbdb.LoadBalancerGroup) error {
+	opModel := operationModel{
+		Model:          group,
+		OnModelUpdates: onModelUpdatesAll(),
+		ErrNotFound:    false,
+		BulkOp:         false,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	groups := []nbdb.LoadBalancerGroup{}
-	err := nbClient.WhereCache(func(item *nbdb.LoadBalancerGroup) bool {
-		return item.Name == group.Name
-	}).List(ctx, &groups)
-	if err != nil {
-		return fmt.Errorf("can't find LB group %+v: %v", *group, err)
-	}
-
-	if len(groups) > 1 {
-		return fmt.Errorf("unexpectedly found multiple LB Groups: %+v", groups)
-	}
-
-	if len(groups) == 0 {
-		return libovsdbclient.ErrNotFound
-	}
-
-	group.UUID = groups[0].UUID
-	return nil
+	m := newModelClient(nbClient)
+	_, err := m.CreateOrUpdate(opModel)
+	return err
 }
 
+// AddLoadBalancersToGroupOps adds the provided load balancers to the provided
+// group and returns the corresponding ops
 func AddLoadBalancersToGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, group *nbdb.LoadBalancerGroup, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
-	if ops == nil {
-		ops = []libovsdb.Operation{}
-	}
-	if len(lbs) == 0 {
-		return ops, nil
-	}
-
-	err := findLBGroup(nbClient, group)
-	if err != nil {
-		return nil, err
-	}
-
-	lbUUIDs := make([]string, 0, len(lbs))
+	originalLBs := group.LoadBalancer
+	group.LoadBalancer = make([]string, 0, len(lbs))
 	for _, lb := range lbs {
-		lbUUIDs = append(lbUUIDs, lb.UUID)
+		group.LoadBalancer = append(group.LoadBalancer, lb.UUID)
+	}
+	opModel := operationModel{
+		Model:            group,
+		ModelPredicate:   func(item *nbdb.LoadBalancerGroup) bool { return item.Name == group.Name },
+		OnModelMutations: []interface{}{&group.LoadBalancer},
+		ErrNotFound:      true,
+		BulkOp:           false,
 	}
 
-	op, err := nbClient.Where(group).Mutate(group, model.Mutation{
-		Field:   &group.LoadBalancer,
-		Mutator: libovsdb.MutateOperationInsert,
-		Value:   lbUUIDs,
-	})
-	if err != nil {
-		return nil, err
-	}
-	ops = append(ops, op...)
-	return ops, nil
+	m := newModelClient(nbClient)
+	ops, err := m.CreateOrUpdateOps(ops, opModel)
+	group.LoadBalancer = originalLBs
+	return ops, err
 }
 
+// RemoveLoadBalancersFromGroupOps removes the provided load balancers from the
+// provided group and returns the corresponding ops
 func RemoveLoadBalancersFromGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, group *nbdb.LoadBalancerGroup, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
-	if ops == nil {
-		ops = []libovsdb.Operation{}
-	}
-	if len(lbs) == 0 {
-		return ops, nil
-	}
-
-	err := findLBGroup(nbClient, group)
-	if err != nil {
-		return nil, err
-	}
-
-	lbUUIDs := make([]string, 0, len(lbs))
+	originalLBs := group.LoadBalancer
+	group.LoadBalancer = make([]string, 0, len(lbs))
 	for _, lb := range lbs {
-		lbUUIDs = append(lbUUIDs, lb.UUID)
+		group.LoadBalancer = append(group.LoadBalancer, lb.UUID)
+	}
+	opModel := operationModel{
+		Model:            group,
+		ModelPredicate:   func(item *nbdb.LoadBalancerGroup) bool { return item.Name == group.Name },
+		OnModelMutations: []interface{}{&group.LoadBalancer},
+		ErrNotFound:      true,
+		BulkOp:           false,
 	}
 
-	op, err := nbClient.Where(group).Mutate(group, model.Mutation{
-		Field:   &group.LoadBalancer,
-		Mutator: libovsdb.MutateOperationDelete,
-		Value:   lbUUIDs,
-	})
-	if err != nil {
-		return nil, err
-	}
-	ops = append(ops, op...)
-
-	return ops, nil
+	m := newModelClient(nbClient)
+	ops, err := m.DeleteOps(ops, opModel)
+	group.LoadBalancer = originalLBs
+	return ops, err
 }
 
-func ListGroupsWithLoadBalancers(nbClient libovsdbclient.Client) ([]nbdb.LoadBalancerGroup, error) {
-	groups := &[]nbdb.LoadBalancerGroup{}
+type loadBalancerGroupPredicate func(*nbdb.LoadBalancerGroup) bool
+
+// FindLoadBalancerGroupsWithPredicate looks up load balancer groups from the
+// cache based on a given predicate
+func FindLoadBalancerGroupsWithPredicate(nbClient libovsdbclient.Client, p loadBalancerGroupPredicate) ([]*nbdb.LoadBalancerGroup, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	defer cancel()
-	err := nbClient.WhereCache(func(item *nbdb.LoadBalancerGroup) bool {
-		return item.LoadBalancer != nil
-	}).List(ctx, groups)
-	if err != nil {
-		return nil, err
-	}
-	return *groups, nil
+	groups := []*nbdb.LoadBalancerGroup{}
+	err := nbClient.WhereCache(p).List(ctx, &groups)
+	return groups, err
 }

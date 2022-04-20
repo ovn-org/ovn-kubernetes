@@ -2,10 +2,14 @@ package libovsdbops
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 
+	"github.com/onsi/gomega/types"
+	"github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/libovsdb/model"
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 )
 
@@ -24,13 +28,16 @@ var (
 )
 
 type OperationModelTestCase struct {
-	name                     string
-	generateCreateOrUpdateOp func() []OperationModel
-	initialDB                []libovsdbtest.TestData
-	expectedDB               []libovsdbtest.TestData
+	name        string
+	op          string
+	generateOp  func() []operationModel
+	initialDB   []libovsdbtest.TestData
+	expectedDB  []libovsdbtest.TestData
+	expectedRes [][]libovsdbtest.TestData
+	expectedErr error
 }
 
-func runTestCase(t *testing.T, tCase OperationModelTestCase, shouldDelete bool) error {
+func runTestCase(t *testing.T, tCase OperationModelTestCase) error {
 	dbSetup := libovsdbtest.TestSetup{
 		NBData: tCase.initialDB,
 	}
@@ -41,29 +48,56 @@ func runTestCase(t *testing.T, tCase OperationModelTestCase, shouldDelete bool) 
 	}
 	t.Cleanup(cleanup.Cleanup)
 
-	modelClient := NewModelClient(nbClient)
+	modelClient := newModelClient(nbClient)
 
-	opModel := tCase.generateCreateOrUpdateOp()
+	opModels := tCase.generateOp()
 
-	if shouldDelete {
-		err := modelClient.Delete(opModel...)
-		if err != nil {
-			return fmt.Errorf("test: \"%s\" couldn't generate the Delete operations, err: %v", tCase.name, err)
-		}
+	switch tCase.op {
+	case "Lookup":
+		err = modelClient.Lookup(opModels...)
+	case "CreateOrUpdate":
+		_, err = modelClient.CreateOrUpdate(opModels...)
+	case "Delete":
+		err = modelClient.Delete(opModels...)
+	default:
+		return fmt.Errorf("test \"%s\": unknown op %s", tCase.name, tCase.op)
+	}
+
+	if err != tCase.expectedErr {
+		return fmt.Errorf("test \"%s\": unexpected error generating %s operations, got %v, expected %v", tCase.name, tCase.op, err, tCase.expectedErr)
+	}
+
+	var matcher types.GomegaMatcher
+	if tCase.expectedDB != nil {
+		matcher = libovsdbtest.HaveData(tCase.expectedDB)
 	} else {
-		_, err := modelClient.CreateOrUpdate(opModel...)
-		if err != nil {
-			return fmt.Errorf("test: \"%s\" couldn't generate the CreateOrUpdate operations, err: %v", tCase.name, err)
-		}
+		matcher = libovsdbtest.HaveData(tCase.initialDB)
+	}
+	success, err := matcher.Match(nbClient)
+	if err != nil {
+		return fmt.Errorf("test \"%s\": DB state did not match: %v", tCase.name, err)
+	}
+	if !success {
+		return fmt.Errorf("test \"%s\": DB state did not match: %s", tCase.name, matcher.FailureMessage(nbClient))
 	}
 
-	matcher := libovsdbtest.HaveData(tCase.expectedDB)
-	success, err := matcher.Match(nbClient)
-	if !success {
-		return fmt.Errorf("test: \"%s\" didn't match expected with actual, err: %s", tCase.name, matcher.FailureMessage(nbClient))
-	}
-	if err != nil {
-		return fmt.Errorf("test: \"%s\" encountered error: %v", tCase.name, err)
+	var i int
+	for _, opModel := range opModels {
+		if opModel.ExistingResult != nil {
+			if len(tCase.expectedRes) == i {
+				break
+			}
+			actual := reflect.ValueOf(opModel.ExistingResult).Elem().Interface()
+			matcher = libovsdbtest.ConsistOfIgnoringUUIDs(tCase.expectedRes[i]...)
+			success, err := matcher.Match(actual)
+			if err != nil {
+				return fmt.Errorf("test \"%s\": existing result did not match: %v", tCase.name, err)
+			}
+			if !success {
+				return fmt.Errorf("test \"%s\": existing result did not match: %s", tCase.name, matcher.FailureMessage(actual))
+			}
+			i++
+		}
 	}
 
 	return nil
@@ -75,9 +109,10 @@ func runTestCase(t *testing.T, tCase OperationModelTestCase, shouldDelete bool) 
 func TestCreateOrUpdateForRootObjects(t *testing.T) {
 	tt := []OperationModelTestCase{
 		{
-			"Test create non-existing item by model predicate specification",
-			func() []OperationModel {
-				return []OperationModel{
+			name: "Test create non-existing item by model predicate specification",
+			op:   "CreateOrUpdate",
+			generateOp: func() []operationModel {
+				return []operationModel{
 					{
 						Model: &nbdb.AddressSet{
 							Name: adressSetTestName,
@@ -86,8 +121,8 @@ func TestCreateOrUpdateForRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{},
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.AddressSet{
 					Name: adressSetTestName,
 					UUID: adressSetTestUUID,
@@ -95,9 +130,10 @@ func TestCreateOrUpdateForRootObjects(t *testing.T) {
 			},
 		},
 		{
-			"Test create non-existing item by model",
-			func() []OperationModel {
-				return []OperationModel{
+			name: "Test create non-existing item by model",
+			op:   "CreateOrUpdate",
+			generateOp: func() []operationModel {
+				return []operationModel{
 					{
 						Model: &nbdb.AddressSet{
 							Name: adressSetTestName,
@@ -105,8 +141,8 @@ func TestCreateOrUpdateForRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{},
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.AddressSet{
 					Name: adressSetTestName,
 					UUID: adressSetTestUUID,
@@ -114,13 +150,14 @@ func TestCreateOrUpdateForRootObjects(t *testing.T) {
 			},
 		},
 		{
-			"Test update existing item by model predicate specification",
-			func() []OperationModel {
+			name: "Test update existing item by model predicate specification",
+			op:   "CreateOrUpdate",
+			generateOp: func() []operationModel {
 				model := nbdb.AddressSet{
 					Name:      adressSetTestName,
 					Addresses: []string{adressSetTestAdress},
 				}
-				return []OperationModel{
+				return []operationModel{
 					{
 						Model:          &model,
 						ModelPredicate: func(a *nbdb.AddressSet) bool { return a.Name == adressSetTestName },
@@ -130,13 +167,13 @@ func TestCreateOrUpdateForRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{
 				&nbdb.AddressSet{
 					Name: adressSetTestName,
 					UUID: adressSetTestUUID,
 				},
 			},
-			[]libovsdbtest.TestData{
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.AddressSet{
 					Name:      adressSetTestName,
 					UUID:      adressSetTestUUID,
@@ -145,13 +182,14 @@ func TestCreateOrUpdateForRootObjects(t *testing.T) {
 			},
 		},
 		{
-			"Test update existing item by model",
-			func() []OperationModel {
+			name: "Test update existing item by model",
+			op:   "CreateOrUpdate",
+			generateOp: func() []operationModel {
 				model := nbdb.AddressSet{
 					Name:      adressSetTestName,
 					Addresses: []string{adressSetTestAdress},
 				}
-				return []OperationModel{
+				return []operationModel{
 					{
 						Model: &model,
 						OnModelUpdates: []interface{}{
@@ -160,13 +198,13 @@ func TestCreateOrUpdateForRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{
 				&nbdb.AddressSet{
 					Name: adressSetTestName,
 					UUID: adressSetTestUUID,
 				},
 			},
-			[]libovsdbtest.TestData{
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.AddressSet{
 					Name:      adressSetTestName,
 					UUID:      adressSetTestUUID,
@@ -175,13 +213,14 @@ func TestCreateOrUpdateForRootObjects(t *testing.T) {
 			},
 		},
 		{
-			"Test create/update of non-existing item by model",
-			func() []OperationModel {
+			name: "Test create/update of non-existing item by model",
+			op:   "CreateOrUpdate",
+			generateOp: func() []operationModel {
 				model := nbdb.AddressSet{
 					Name:      adressSetTestName,
 					Addresses: []string{adressSetTestAdress},
 				}
-				return []OperationModel{
+				return []operationModel{
 					{
 						Model: &model,
 						OnModelUpdates: []interface{}{
@@ -190,8 +229,8 @@ func TestCreateOrUpdateForRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{},
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.AddressSet{
 					Name:      adressSetTestName,
 					UUID:      adressSetTestUUID,
@@ -200,14 +239,15 @@ func TestCreateOrUpdateForRootObjects(t *testing.T) {
 			},
 		},
 		{
-			"Test setting of uuid of existing item to model when using model predicate",
-			func() []OperationModel {
-				notTheUUIDWanted := BuildNamedUUID()
+			name: "Test setting of uuid of existing item to model when using model predicate",
+			op:   "CreateOrUpdate",
+			generateOp: func() []operationModel {
+				notTheUUIDWanted := buildNamedUUID()
 				model := nbdb.AddressSet{
 					UUID: notTheUUIDWanted,
 					Name: adressSetTestName,
 				}
-				return []OperationModel{
+				return []operationModel{
 					{
 						Model:          &model,
 						ModelPredicate: func(a *nbdb.AddressSet) bool { return a.Name == adressSetTestName },
@@ -222,13 +262,13 @@ func TestCreateOrUpdateForRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{
 				&nbdb.AddressSet{
 					Name: adressSetTestName,
 					UUID: adressSetTestUUID,
 				},
 			},
-			[]libovsdbtest.TestData{
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.AddressSet{
 					Name: adressSetTestName,
 					UUID: adressSetTestUUID,
@@ -238,7 +278,7 @@ func TestCreateOrUpdateForRootObjects(t *testing.T) {
 	}
 
 	for _, tCase := range tt {
-		if err := runTestCase(t, tCase, false); err != nil {
+		if err := runTestCase(t, tCase); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -247,9 +287,10 @@ func TestCreateOrUpdateForRootObjects(t *testing.T) {
 func TestDeleteForRootObjects(t *testing.T) {
 	tt := []OperationModelTestCase{
 		{
-			"Test delete non-existing item by model predicate specification",
-			func() []OperationModel {
-				return []OperationModel{
+			name: "Test delete non-existing item by model predicate specification",
+			op:   "Delete",
+			generateOp: func() []operationModel {
+				return []operationModel{
 					{
 						Model: &nbdb.AddressSet{
 							Name: adressSetTestName,
@@ -258,13 +299,14 @@ func TestDeleteForRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{},
-			[]libovsdbtest.TestData{},
+			initialDB:  []libovsdbtest.TestData{},
+			expectedDB: []libovsdbtest.TestData{},
 		},
 		{
-			"Test delete non-existing item by model specification",
-			func() []OperationModel {
-				return []OperationModel{
+			name: "Test delete non-existing item by model specification",
+			op:   "Delete",
+			generateOp: func() []operationModel {
+				return []operationModel{
 					{
 						Model: &nbdb.AddressSet{
 							Name: adressSetTestName,
@@ -272,13 +314,14 @@ func TestDeleteForRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{},
-			[]libovsdbtest.TestData{},
+			initialDB:  []libovsdbtest.TestData{},
+			expectedDB: []libovsdbtest.TestData{},
 		},
 		{
-			"Test delete existing item by model predicate specification",
-			func() []OperationModel {
-				return []OperationModel{
+			name: "Test delete existing item by model predicate specification",
+			op:   "Delete",
+			generateOp: func() []operationModel {
+				return []operationModel{
 					{
 						Model: &nbdb.AddressSet{
 							Name: adressSetTestName,
@@ -287,17 +330,18 @@ func TestDeleteForRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{
 				&nbdb.AddressSet{
 					Name: adressSetTestName,
 				},
 			},
-			[]libovsdbtest.TestData{},
+			expectedDB: []libovsdbtest.TestData{},
 		},
 		{
-			"Test delete existing item by model specification",
-			func() []OperationModel {
-				return []OperationModel{
+			name: "Test delete existing item by model specification",
+			op:   "Delete",
+			generateOp: func() []operationModel {
+				return []operationModel{
 					{
 						Model: &nbdb.AddressSet{
 							Name: adressSetTestName,
@@ -305,17 +349,17 @@ func TestDeleteForRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{
 				&nbdb.AddressSet{
 					Name: adressSetTestName,
 				},
 			},
-			[]libovsdbtest.TestData{},
+			expectedDB: []libovsdbtest.TestData{},
 		},
 	}
 
 	for _, tCase := range tt {
-		if err := runTestCase(t, tCase, true); err != nil {
+		if err := runTestCase(t, tCase); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -328,15 +372,16 @@ func TestDeleteForRootObjects(t *testing.T) {
 func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 	tt := []OperationModelTestCase{
 		{
-			"Test create non-existing no-root by model predicate specification and parent model mutation",
-			func() []OperationModel {
+			name: "Test create non-existing no-root by model predicate specification and parent model mutation",
+			op:   "CreateOrUpdate",
+			generateOp: func() []operationModel {
 				m := nbdb.LogicalSwitchPort{
 					Name: logicalSwitchPortTestName,
 				}
 				parentModel := nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 				}
-				return []OperationModel{
+				return []operationModel{
 					{
 						Model:          &m,
 						ModelPredicate: func(lsp *nbdb.LogicalSwitchPort) bool { return lsp.Name == logicalSwitchPortTestName },
@@ -353,13 +398,13 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 					UUID: logicalSwitchTestUUID,
 				},
 			},
-			[]libovsdbtest.TestData{
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name:  logicalSwitchTestName,
 					UUID:  logicalSwitchTestUUID,
@@ -372,15 +417,16 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 			},
 		},
 		{
-			"Test create non-existing no-root by model predicate specification and non-existing parent model mutation",
-			func() []OperationModel {
+			name: "Test create non-existing no-root by model predicate specification and non-existing parent model mutation",
+			op:   "CreateOrUpdate",
+			generateOp: func() []operationModel {
 				m := nbdb.LogicalSwitchPort{
 					Name: logicalSwitchPortTestName,
 				}
 				parentModel := nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 				}
-				return []OperationModel{
+				return []operationModel{
 					{
 						Model:          &m,
 						ModelPredicate: func(lsp *nbdb.LogicalSwitchPort) bool { return lsp.Name == logicalSwitchPortTestName },
@@ -397,8 +443,8 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{},
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name:  logicalSwitchTestName,
 					UUID:  logicalSwitchTestUUID,
@@ -411,13 +457,14 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 			},
 		},
 		{
-			"Test create non-existing no-root by model predicate specification and parent model update",
-			func() []OperationModel {
+			name: "Test create non-existing no-root by model predicate specification and parent model update",
+			op:   "CreateOrUpdate",
+			generateOp: func() []operationModel {
 				parentModel := nbdb.LogicalSwitch{
 					Name:  logicalSwitchTestName,
 					Ports: []string{logicalSwitchPortTestUUID},
 				}
-				return []OperationModel{
+				return []operationModel{
 					{
 						Model: &nbdb.LogicalSwitchPort{
 							Name: logicalSwitchPortTestName,
@@ -433,13 +480,13 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 					UUID: logicalSwitchTestUUID,
 				},
 			},
-			[]libovsdbtest.TestData{
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name:  logicalSwitchTestName,
 					UUID:  logicalSwitchTestUUID,
@@ -452,15 +499,16 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 			},
 		},
 		{
-			"Test create non-existing no-root by model and parent model mutate",
-			func() []OperationModel {
+			name: "Test create non-existing no-root by model and parent model mutate",
+			op:   "CreateOrUpdate",
+			generateOp: func() []operationModel {
 				m := nbdb.LogicalSwitchPort{
 					Name: logicalSwitchPortTestName,
 				}
 				parentModel := nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 				}
-				return []OperationModel{
+				return []operationModel{
 					{
 						Model: &m,
 						DoAfter: func() {
@@ -476,13 +524,13 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 					UUID: logicalSwitchTestUUID,
 				},
 			},
-			[]libovsdbtest.TestData{
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name:  logicalSwitchTestName,
 					UUID:  logicalSwitchTestUUID,
@@ -495,13 +543,14 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 			},
 		},
 		{
-			"Test create non-existing no-root by model and parent model update",
-			func() []OperationModel {
+			name: "Test create non-existing no-root by model and parent model update",
+			op:   "CreateOrUpdate",
+			generateOp: func() []operationModel {
 				parentModel := nbdb.LogicalSwitch{
 					Name:  logicalSwitchTestName,
 					Ports: []string{logicalSwitchPortTestUUID},
 				}
-				return []OperationModel{
+				return []operationModel{
 					{
 						Model: &nbdb.LogicalSwitchPort{
 							Name: logicalSwitchPortTestName,
@@ -516,13 +565,13 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 					UUID: logicalSwitchTestUUID,
 				},
 			},
-			[]libovsdbtest.TestData{
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name:  logicalSwitchTestName,
 					UUID:  logicalSwitchTestUUID,
@@ -535,8 +584,9 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 			},
 		},
 		{
-			"Test update existing no-root by model update and parent model update",
-			func() []OperationModel {
+			name: "Test update existing no-root by model update and parent model update",
+			op:   "CreateOrUpdate",
+			generateOp: func() []operationModel {
 				model := nbdb.LogicalSwitchPort{
 					Name:      logicalSwitchPortTestName,
 					Addresses: []string{logicalSwitchPortAddress},
@@ -545,7 +595,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					Name:  logicalSwitchTestName,
 					Ports: []string{logicalSwitchPortTestUUID},
 				}
-				return []OperationModel{
+				return []operationModel{
 					{
 						Model: &model,
 						OnModelUpdates: []interface{}{
@@ -561,7 +611,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					Name: logicalSwitchPortTestName,
 					UUID: logicalSwitchPortTestUUID,
@@ -572,7 +622,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					Ports: []string{logicalSwitchPortTestUUID},
 				},
 			},
-			[]libovsdbtest.TestData{
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name:  logicalSwitchTestName,
 					UUID:  logicalSwitchTestUUID,
@@ -586,8 +636,9 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 			},
 		},
 		{
-			"Test update existing no-root by model mutation and parent model update",
-			func() []OperationModel {
+			name: "Test update existing no-root by model mutation and parent model update",
+			op:   "CreateOrUpdate",
+			generateOp: func() []operationModel {
 				m := nbdb.LogicalSwitchPort{
 					Name:      logicalSwitchPortTestName,
 					Addresses: []string{logicalSwitchPortAddress},
@@ -596,7 +647,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					Name:  logicalSwitchTestName,
 					Ports: []string{logicalSwitchPortTestUUID},
 				}
-				return []OperationModel{
+				return []operationModel{
 					{
 						Model: &m,
 						OnModelMutations: []interface{}{
@@ -612,7 +663,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					Name: logicalSwitchPortTestName,
 					UUID: logicalSwitchPortTestUUID,
@@ -623,7 +674,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					Ports: []string{logicalSwitchPortTestUUID},
 				},
 			},
-			[]libovsdbtest.TestData{
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name:  logicalSwitchTestName,
 					UUID:  logicalSwitchTestUUID,
@@ -637,8 +688,9 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 			},
 		},
 		{
-			"Test update non-existing no-root by model mutation and parent model mutation",
-			func() []OperationModel {
+			name: "Test update non-existing no-root by model mutation and parent model mutation",
+			op:   "CreateOrUpdate",
+			generateOp: func() []operationModel {
 				m := nbdb.LogicalSwitchPort{
 					Name:      logicalSwitchPortTestName,
 					Addresses: []string{logicalSwitchPortAddress},
@@ -646,7 +698,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 				pm := nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 				}
-				return []OperationModel{
+				return []operationModel{
 					{
 						Model: &m,
 						OnModelMutations: []interface{}{
@@ -665,13 +717,13 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 					UUID: logicalSwitchTestUUID,
 				},
 			},
-			[]libovsdbtest.TestData{
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name:  logicalSwitchTestName,
 					UUID:  logicalSwitchTestUUID,
@@ -685,8 +737,9 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 			},
 		},
 		{
-			"Test update existing no-root by model specification and parent model mutation without specifying direct ID",
-			func() []OperationModel {
+			name: "Test update existing no-root by model specification and parent model mutation without specifying direct ID",
+			op:   "CreateOrUpdate",
+			generateOp: func() []operationModel {
 				m := nbdb.LogicalSwitchPort{
 					Name:      logicalSwitchPortTestName,
 					Addresses: []string{logicalSwitchPortAddress},
@@ -694,7 +747,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 				parentModel := nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 				}
-				return []OperationModel{
+				return []operationModel{
 					{
 						Model: &m,
 						OnModelUpdates: []interface{}{
@@ -713,7 +766,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					Name: logicalSwitchPortTestName,
 					UUID: logicalSwitchPortTestUUID,
@@ -724,7 +777,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					Ports: []string{logicalSwitchPortTestUUID},
 				},
 			},
-			[]libovsdbtest.TestData{
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name:  logicalSwitchTestName,
 					UUID:  logicalSwitchTestUUID,
@@ -738,8 +791,9 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 			},
 		},
 		{
-			"Test no update of existing non-root object by model specification and parent model mutation without specifying direct ID",
-			func() []OperationModel {
+			name: "Test no update of existing non-root object by model specification and parent model mutation without specifying direct ID",
+			op:   "CreateOrUpdate",
+			generateOp: func() []operationModel {
 				m := nbdb.LogicalSwitchPort{
 					Name:      logicalSwitchPortTestName,
 					Addresses: []string{logicalSwitchPortAddress},
@@ -747,7 +801,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 				parentModel := nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 				}
-				return []OperationModel{
+				return []operationModel{
 					{
 						Model: &m,
 						DoAfter: func() {
@@ -763,7 +817,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					Name: logicalSwitchPortTestName,
 					UUID: logicalSwitchPortTestUUID,
@@ -774,7 +828,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 					Ports: []string{logicalSwitchPortTestUUID},
 				},
 			},
-			[]libovsdbtest.TestData{
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name:  logicalSwitchTestName,
 					UUID:  logicalSwitchTestUUID,
@@ -789,7 +843,7 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 	}
 
 	for _, tCase := range tt {
-		if err := runTestCase(t, tCase, false); err != nil {
+		if err := runTestCase(t, tCase); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -798,13 +852,14 @@ func TestCreateOrUpdateForNonRootObjects(t *testing.T) {
 func TestDeleteForNonRootObjects(t *testing.T) {
 	tt := []OperationModelTestCase{
 		{
-			"Test delete non-existing no-root by model predicate specification and parent model mutation",
-			func() []OperationModel {
+			name: "Test delete non-existing no-root by model predicate specification and parent model mutation",
+			op:   "Delete",
+			generateOp: func() []operationModel {
 				parentModel := nbdb.LogicalSwitch{
 					Name:  logicalSwitchTestName,
 					Ports: []string{logicalSwitchPortTestUUID},
 				}
-				return []OperationModel{
+				return []operationModel{
 					{
 						Model: &nbdb.LogicalSwitchPort{
 							Name: logicalSwitchPortTestName,
@@ -820,13 +875,13 @@ func TestDeleteForNonRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 					UUID: logicalSwitchTestUUID,
 				},
 			},
-			[]libovsdbtest.TestData{
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 					UUID: logicalSwitchTestUUID,
@@ -834,18 +889,19 @@ func TestDeleteForNonRootObjects(t *testing.T) {
 			},
 		},
 		{
-			"Test delete existing no-root by model predicate specification and parent model mutation",
-			func() []OperationModel {
+			name: "Test delete existing no-root by model predicate specification and parent model mutation",
+			op:   "Delete",
+			generateOp: func() []operationModel {
 				parentModel := nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 				}
 				logicalSwitchPortRes := []nbdb.LogicalSwitchPort{}
-				return []OperationModel{
+				return []operationModel{
 					{
 						ModelPredicate: func(lsp *nbdb.LogicalSwitchPort) bool { return lsp.Name == logicalSwitchPortTestName },
 						ExistingResult: &logicalSwitchPortRes,
 						DoAfter: func() {
-							parentModel.Ports = ExtractUUIDsFromModels(&logicalSwitchPortRes)
+							parentModel.Ports = extractUUIDsFromModels(&logicalSwitchPortRes)
 						},
 					},
 					{
@@ -857,7 +913,7 @@ func TestDeleteForNonRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					Name: logicalSwitchPortTestName,
 					UUID: logicalSwitchPortTestUUID,
@@ -868,7 +924,7 @@ func TestDeleteForNonRootObjects(t *testing.T) {
 					Ports: []string{logicalSwitchPortTestUUID},
 				},
 			},
-			[]libovsdbtest.TestData{
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 					UUID: logicalSwitchTestUUID,
@@ -876,15 +932,16 @@ func TestDeleteForNonRootObjects(t *testing.T) {
 			},
 		},
 		{
-			"Test delete existing no-root by model specification and parent model mutation without specifying direct ID",
-			func() []OperationModel {
+			name: "Test delete existing no-root by model specification and parent model mutation without specifying direct ID",
+			op:   "Delete",
+			generateOp: func() []operationModel {
 				m := nbdb.LogicalSwitchPort{
 					Name: logicalSwitchPortTestName,
 				}
 				parentModel := nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 				}
-				return []OperationModel{
+				return []operationModel{
 					{
 						Model: &m,
 						DoAfter: func() {
@@ -900,7 +957,7 @@ func TestDeleteForNonRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitchPort{
 					Name: logicalSwitchPortTestName,
 					UUID: logicalSwitchPortTestUUID,
@@ -911,7 +968,7 @@ func TestDeleteForNonRootObjects(t *testing.T) {
 					Ports: []string{logicalSwitchPortTestUUID},
 				},
 			},
-			[]libovsdbtest.TestData{
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 					UUID: logicalSwitchTestUUID,
@@ -919,18 +976,19 @@ func TestDeleteForNonRootObjects(t *testing.T) {
 			},
 		},
 		{
-			"Test delete existing non-root by model specification and parent model mutation without predicate",
-			func() []OperationModel {
+			name: "Test delete existing non-root by model specification and parent model mutation without predicate",
+			op:   "Delete",
+			generateOp: func() []operationModel {
 				parentModel := nbdb.PortGroup{
 					Name: portGroupTestName,
 				}
 				aclRes := []nbdb.ACL{}
-				return []OperationModel{
+				return []operationModel{
 					{
 						ModelPredicate: func(acl *nbdb.ACL) bool { return acl.Action == nbdb.ACLActionAllow },
 						ExistingResult: &aclRes,
 						DoAfter: func() {
-							parentModel.ACLs = ExtractUUIDsFromModels(&aclRes)
+							parentModel.ACLs = extractUUIDsFromModels(&aclRes)
 						},
 					},
 					{
@@ -941,7 +999,7 @@ func TestDeleteForNonRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{
 				&nbdb.ACL{
 					Action: nbdb.ACLActionAllow,
 					UUID:   aclTestUUID,
@@ -952,7 +1010,7 @@ func TestDeleteForNonRootObjects(t *testing.T) {
 					ACLs: []string{aclTestUUID},
 				},
 			},
-			[]libovsdbtest.TestData{
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.PortGroup{
 					Name: portGroupTestName,
 					UUID: portGroupTestUUID,
@@ -960,15 +1018,16 @@ func TestDeleteForNonRootObjects(t *testing.T) {
 			},
 		},
 		{
-			"Test delete existing no-root by model specification and parent model mutation with empty ID slice",
-			func() []OperationModel {
+			name: "Test delete existing no-root by model specification and parent model mutation with empty ID slice",
+			op:   "Delete",
+			generateOp: func() []operationModel {
 				m := nbdb.LogicalSwitchPort{
 					Name: logicalSwitchPortTestName,
 				}
 				parentModel := nbdb.LogicalSwitch{
 					Name: logicalSwitchTestName,
 				}
-				return []OperationModel{
+				return []operationModel{
 					{
 						Model: &m,
 						DoAfter: func() {
@@ -984,13 +1043,13 @@ func TestDeleteForNonRootObjects(t *testing.T) {
 					},
 				}
 			},
-			[]libovsdbtest.TestData{
+			initialDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					UUID: logicalSwitchTestUUID,
 					Name: logicalSwitchTestName,
 				},
 			},
-			[]libovsdbtest.TestData{
+			expectedDB: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
 					UUID: logicalSwitchTestUUID,
 					Name: logicalSwitchTestName,
@@ -1000,59 +1059,434 @@ func TestDeleteForNonRootObjects(t *testing.T) {
 	}
 
 	for _, tCase := range tt {
-		if err := runTestCase(t, tCase, true); err != nil {
+		if err := runTestCase(t, tCase); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+}
+
+func TestLookup(t *testing.T) {
+	lookupUUID := "b9998337-2498-4d1e-86e6-fc0417abb2f0"
+	tt := []OperationModelTestCase{
+		{
+			name: "Test lookup by index over predicate",
+			op:   "Lookup",
+			generateOp: func() []operationModel {
+				return []operationModel{
+					{
+						Model: &nbdb.AddressSet{
+							Name: adressSetTestName,
+						},
+						ModelPredicate: func(item *nbdb.AddressSet) bool { return false },
+						ExistingResult: &[]*nbdb.AddressSet{},
+						ErrNotFound:    true,
+					},
+				}
+			},
+			initialDB: []libovsdbtest.TestData{
+				&nbdb.AddressSet{
+					UUID:      adressSetTestUUID,
+					Name:      adressSetTestName,
+					Addresses: []string{adressSetTestAdress},
+				},
+			},
+			expectedRes: [][]libovsdbtest.TestData{
+				{
+					&nbdb.AddressSet{
+						Name:      adressSetTestName,
+						Addresses: []string{adressSetTestAdress},
+					},
+				},
+			},
+		},
+		{
+			name: "Test lookup by UUID over predicate",
+			op:   "Lookup",
+			generateOp: func() []operationModel {
+				return []operationModel{
+					{
+						Model: &nbdb.AddressSet{
+							UUID: lookupUUID,
+						},
+						ModelPredicate: func(item *nbdb.AddressSet) bool { return false },
+						ExistingResult: &[]*nbdb.AddressSet{},
+						ErrNotFound:    true,
+					},
+				}
+			},
+			initialDB: []libovsdbtest.TestData{
+				&nbdb.AddressSet{
+					UUID:      lookupUUID,
+					Name:      adressSetTestName,
+					Addresses: []string{adressSetTestAdress},
+				},
+			},
+			expectedRes: [][]libovsdbtest.TestData{
+				{
+					&nbdb.AddressSet{
+						Name:      adressSetTestName,
+						Addresses: []string{adressSetTestAdress},
+					},
+				},
+			},
+		},
+		{
+			name: "Test lookup by index not found error",
+			op:   "Lookup",
+			generateOp: func() []operationModel {
+				return []operationModel{
+					{
+						Model: &nbdb.AddressSet{
+							Name: adressSetTestName + "-not-found",
+						},
+						ExistingResult: &[]*nbdb.AddressSet{},
+						ErrNotFound:    true,
+					},
+				}
+			},
+			initialDB: []libovsdbtest.TestData{
+				&nbdb.AddressSet{
+					UUID:      adressSetTestUUID,
+					Name:      adressSetTestName,
+					Addresses: []string{adressSetTestAdress},
+				},
+			},
+			expectedErr: client.ErrNotFound,
+		},
+		{
+			name: "Test lookup by index not found no error",
+			op:   "Lookup",
+			generateOp: func() []operationModel {
+				return []operationModel{
+					{
+						Model: &nbdb.AddressSet{
+							Name: adressSetTestName + "-not-found",
+						},
+						ModelPredicate: func(item *nbdb.AddressSet) bool { return false },
+						ExistingResult: &[]*nbdb.AddressSet{},
+						ErrNotFound:    false,
+					},
+				}
+			},
+			initialDB: []libovsdbtest.TestData{
+				&nbdb.AddressSet{
+					UUID:      adressSetTestUUID,
+					Name:      adressSetTestName,
+					Addresses: []string{adressSetTestAdress},
+				},
+			},
+			expectedRes: [][]libovsdbtest.TestData{{}},
+		},
+		{
+			name: "Test lookup by predicate no indexes",
+			op:   "Lookup",
+			generateOp: func() []operationModel {
+				return []operationModel{
+					{
+						Model:          &nbdb.AddressSet{},
+						ModelPredicate: func(item *nbdb.AddressSet) bool { return item.Name == adressSetTestName },
+						ExistingResult: &[]*nbdb.AddressSet{},
+						ErrNotFound:    true,
+					},
+				}
+			},
+			initialDB: []libovsdbtest.TestData{
+				&nbdb.AddressSet{
+					UUID:      adressSetTestUUID,
+					Name:      adressSetTestName,
+					Addresses: []string{adressSetTestAdress},
+				},
+			},
+			expectedRes: [][]libovsdbtest.TestData{
+				{
+					&nbdb.AddressSet{
+						Name:      adressSetTestName,
+						Addresses: []string{adressSetTestAdress},
+					},
+				},
+			},
+		},
+		{
+			name: "Test lookup by predicate fallback",
+			op:   "Lookup",
+			generateOp: func() []operationModel {
+				return []operationModel{
+					{
+						Model: &nbdb.AddressSet{
+							Name: adressSetTestName + "-not-found",
+						},
+						ModelPredicate: func(item *nbdb.AddressSet) bool { return item.Name == adressSetTestName },
+						ExistingResult: &[]*nbdb.AddressSet{},
+						ErrNotFound:    true,
+					},
+				}
+			},
+			initialDB: []libovsdbtest.TestData{
+				&nbdb.AddressSet{
+					UUID:      adressSetTestUUID,
+					Name:      adressSetTestName,
+					Addresses: []string{adressSetTestAdress},
+				},
+			},
+			expectedRes: [][]libovsdbtest.TestData{
+				{
+					&nbdb.AddressSet{
+						Name:      adressSetTestName,
+						Addresses: []string{adressSetTestAdress},
+					},
+				},
+			},
+		},
+		{
+			name: "Test lookup by predicate not found error",
+			op:   "Lookup",
+			generateOp: func() []operationModel {
+				return []operationModel{
+					{
+						ModelPredicate: func(item *nbdb.AddressSet) bool { return false },
+						ExistingResult: &[]*nbdb.AddressSet{},
+						ErrNotFound:    true,
+					},
+				}
+			},
+			initialDB: []libovsdbtest.TestData{
+				&nbdb.AddressSet{
+					UUID:      adressSetTestUUID,
+					Name:      adressSetTestName,
+					Addresses: []string{adressSetTestAdress},
+				},
+			},
+			expectedErr: client.ErrNotFound,
+		},
+		{
+			name: "Test lookup by predicate not found no error",
+			op:   "Lookup",
+			generateOp: func() []operationModel {
+				return []operationModel{
+					{
+						ModelPredicate: func(item *nbdb.AddressSet) bool { return false },
+						ExistingResult: &[]*nbdb.AddressSet{},
+						ErrNotFound:    false,
+					},
+				}
+			},
+			initialDB: []libovsdbtest.TestData{
+				&nbdb.AddressSet{
+					UUID:      adressSetTestUUID,
+					Name:      adressSetTestName,
+					Addresses: []string{adressSetTestAdress},
+				},
+			},
+			expectedRes: [][]libovsdbtest.TestData{{}},
+		},
+		{
+			name: "Test lookup by predicate over index when bulk op",
+			op:   "Lookup",
+			generateOp: func() []operationModel {
+				return []operationModel{
+					{
+						Model: &nbdb.AddressSet{
+							Name: adressSetTestName,
+						},
+						ModelPredicate: func(item *nbdb.AddressSet) bool { return false },
+						ExistingResult: &[]*nbdb.AddressSet{},
+						ErrNotFound:    true,
+						BulkOp:         true,
+					},
+				}
+			},
+			initialDB: []libovsdbtest.TestData{
+				&nbdb.AddressSet{
+					UUID:      adressSetTestUUID,
+					Name:      adressSetTestName,
+					Addresses: []string{adressSetTestAdress},
+				},
+			},
+			expectedErr: client.ErrNotFound,
+		},
+		{
+			name: "Test lookup by predicate bulk op multiple results",
+			op:   "Lookup",
+			generateOp: func() []operationModel {
+				return []operationModel{
+					{
+						ModelPredicate: func(item *nbdb.AddressSet) bool { return true },
+						ExistingResult: &[]*nbdb.AddressSet{},
+						BulkOp:         true,
+					},
+				}
+			},
+			initialDB: []libovsdbtest.TestData{
+				&nbdb.AddressSet{
+					UUID:      adressSetTestUUID,
+					Name:      adressSetTestName,
+					Addresses: []string{adressSetTestAdress},
+				},
+				&nbdb.AddressSet{
+					UUID:      adressSetTestUUID + "-2",
+					Name:      adressSetTestName + "-2",
+					Addresses: []string{adressSetTestAdress + "-2"},
+				},
+			},
+			expectedRes: [][]libovsdbtest.TestData{
+				{
+					&nbdb.AddressSet{
+						Name:      adressSetTestName,
+						Addresses: []string{adressSetTestAdress},
+					},
+					&nbdb.AddressSet{
+						UUID:      adressSetTestUUID + "-2",
+						Name:      adressSetTestName + "-2",
+						Addresses: []string{adressSetTestAdress + "-2"},
+					},
+				},
+			},
+		},
+		{
+			name: "Test lookup by predicate multiple results error no bulk op",
+			op:   "Lookup",
+			generateOp: func() []operationModel {
+				return []operationModel{
+					{
+						ModelPredicate: func(item *nbdb.AddressSet) bool { return true },
+						ExistingResult: &[]*nbdb.AddressSet{},
+						BulkOp:         false,
+					},
+				}
+			},
+			initialDB: []libovsdbtest.TestData{
+				&nbdb.AddressSet{
+					UUID:      adressSetTestUUID,
+					Name:      adressSetTestName,
+					Addresses: []string{adressSetTestAdress},
+				},
+				&nbdb.AddressSet{
+					UUID:      adressSetTestUUID + "-2",
+					Name:      adressSetTestName + "-2",
+					Addresses: []string{adressSetTestAdress + "-2"},
+				},
+			},
+			expectedErr: errMultipleResults,
+		},
+	}
+
+	for _, tCase := range tt {
+		if err := runTestCase(t, tCase); err != nil {
 			t.Fatal(err)
 		}
 	}
 }
 
-func TestCreateWithAdHocClient(t *testing.T) {
-	tt := []OperationModelTestCase{
+func TestBuildMutationsFromFields(t *testing.T) {
+	invalidField := 5
+	mapField := map[string]string{
+		"key1": "value1",
+		"key2": "",
+		"":     "value3",
+	}
+	emptyMapField := map[string]string{}
+	var nilMapField map[string]string
+	sliceField := []string{"item1", "item2"}
+	emptySliceField := []string{}
+	invalidSliceField := []string{"item1", "", "item2"}
+	var nilSliceField []string
+
+	tt := []struct {
+		name      string
+		fields    []interface{}
+		mutator   ovsdb.Mutator
+		mutations []model.Mutation
+		err       bool
+	}{
 		{
-			"Test create non-existing item by model predicate specification",
-			func() []OperationModel {
-				return []OperationModel{
-					{
-						Model: &sbdb.Chassis{
-							Name: "chassis-name",
-						},
-						ModelPredicate: func(c *sbdb.Chassis) bool { return c.Name == "chassis-name" },
-					},
-				}
-			},
-			[]libovsdbtest.TestData{},
-			[]libovsdbtest.TestData{
-				&sbdb.Chassis{
-					Name: "chassis-name",
-					UUID: "chassis-uuid",
+			name:   "build mutation over invalid type",
+			fields: []interface{}{&invalidField},
+			err:    true,
+		},
+		{
+			name:    "build insert mutation over map",
+			fields:  []interface{}{&mapField},
+			mutator: ovsdb.MutateOperationInsert,
+			mutations: []model.Mutation{
+				{
+					Field:   &mapField,
+					Mutator: ovsdb.MutateOperationInsert,
+					Value:   mapField,
 				},
 			},
+		},
+		{
+			name:    "build delete mutation over map",
+			fields:  []interface{}{&mapField},
+			mutator: ovsdb.MutateOperationDelete,
+			mutations: []model.Mutation{
+				{
+					Field:   &mapField,
+					Mutator: ovsdb.MutateOperationDelete,
+					Value:   []string{"key2"},
+				},
+				{
+					Field:   &mapField,
+					Mutator: ovsdb.MutateOperationDelete,
+					Value: map[string]string{
+						"key1": "value1",
+						"":     "value3",
+					},
+				},
+			},
+		},
+		{
+			name:      "build mutation over nil map",
+			fields:    []interface{}{&nilMapField},
+			mutator:   ovsdb.MutateOperationInsert,
+			mutations: []model.Mutation{},
+		},
+		{
+			name:      "build mutation over empty map",
+			fields:    []interface{}{&emptyMapField},
+			mutator:   ovsdb.MutateOperationInsert,
+			mutations: []model.Mutation{},
+		},
+		{
+			name:    "build insert mutation over slice",
+			fields:  []interface{}{&sliceField},
+			mutator: ovsdb.MutateOperationInsert,
+			mutations: []model.Mutation{
+				{
+					Field:   &sliceField,
+					Mutator: ovsdb.MutateOperationInsert,
+					Value:   sliceField,
+				},
+			},
+		},
+		{
+			name:      "build mutation over nil slice",
+			fields:    []interface{}{&nilSliceField},
+			mutator:   ovsdb.MutateOperationInsert,
+			mutations: []model.Mutation{},
+		},
+		{
+			name:      "build mutation over empty slice",
+			fields:    []interface{}{&emptySliceField},
+			mutator:   ovsdb.MutateOperationInsert,
+			mutations: []model.Mutation{},
+		},
+		{
+			name:    "build mutation over slice with empty value",
+			fields:  []interface{}{&invalidSliceField},
+			mutator: ovsdb.MutateOperationInsert,
+			err:     true,
 		},
 	}
 
 	for _, tCase := range tt {
-		dbSetup := libovsdbtest.TestSetup{
-			SBData: tCase.initialDB,
+		mutations, err := buildMutationsFromFields(tCase.fields, tCase.mutator)
+		if err != nil && !tCase.err {
+			t.Fatalf("%s: got unexpected error: %v", tCase.name, err)
 		}
-
-		nbClient, sbClient, cleanup, err := libovsdbtest.NewNBSBTestHarness(dbSetup)
-		if err != nil {
-			t.Fatalf("test: \"%s\" failed to set up test harness: %v", tCase.name, err)
-		}
-		t.Cleanup(cleanup.Cleanup)
-
-		modelClient := NewModelClient(nbClient)
-
-		opModel := tCase.generateCreateOrUpdateOp()
-		modelClient.WithClient(sbClient).CreateOrUpdate(opModel...)
-
-		matcher := libovsdbtest.HaveData(tCase.expectedDB)
-		success, err := matcher.Match(sbClient)
-		if !success {
-			t.Fatalf("test: \"%s\" didn't match expected with actual, err: %s", tCase.name, matcher.FailureMessage(sbClient))
-		}
-		if err != nil {
-			t.Fatalf("test: \"%s\" encountered error: %v", tCase.name, err)
+		if !reflect.DeepEqual(mutations, tCase.mutations) {
+			t.Fatalf("%s: unexpected mutations, got: %+v expected: %+v", tCase.name, mutations, tCase.mutations)
 		}
 	}
 }

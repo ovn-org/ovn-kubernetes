@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 func getUUID(model model.Model) string {
@@ -50,6 +53,8 @@ func getUUID(model model.Model) string {
 	case *sbdb.Chassis:
 		return t.UUID
 	case *sbdb.MACBinding:
+		return t.UUID
+	case *sbdb.SBGlobal:
 		return t.UUID
 	default:
 		panic(fmt.Sprintf("getUUID: unknown model %T", t))
@@ -97,6 +102,8 @@ func setUUID(model model.Model, uuid string) {
 	case *sbdb.Chassis:
 		t.UUID = uuid
 	case *sbdb.MACBinding:
+		t.UUID = uuid
+	case *sbdb.SBGlobal:
 		t.UUID = uuid
 	default:
 		panic(fmt.Sprintf("setUUID: unknown model %T", t))
@@ -197,6 +204,10 @@ func copyIndexes(model model.Model) model.Model {
 			LogicalPort: t.LogicalPort,
 			IP:          t.IP,
 		}
+	case *sbdb.SBGlobal:
+		return &sbdb.SBGlobal{
+			UUID: t.UUID,
+		}
 	default:
 		panic(fmt.Sprintf("copyIndexes: unknown model %T", t))
 	}
@@ -205,45 +216,45 @@ func copyIndexes(model model.Model) model.Model {
 func getListFromModel(model model.Model) interface{} {
 	switch t := model.(type) {
 	case *nbdb.ACL:
-		return &[]nbdb.ACL{}
+		return &[]*nbdb.ACL{}
 	case *nbdb.AddressSet:
-		return &[]nbdb.AddressSet{}
+		return &[]*nbdb.AddressSet{}
 	case *nbdb.BFD:
-		return &[]nbdb.BFD{}
+		return &[]*nbdb.BFD{}
 	case *nbdb.Copp:
-		return &[]nbdb.Copp{}
+		return &[]*nbdb.Copp{}
 	case *nbdb.GatewayChassis:
-		return &[]nbdb.GatewayChassis{}
+		return &[]*nbdb.GatewayChassis{}
 	case *nbdb.LoadBalancer:
-		return &[]nbdb.LoadBalancer{}
+		return &[]*nbdb.LoadBalancer{}
 	case *nbdb.LoadBalancerGroup:
-		return &[]nbdb.LoadBalancerGroup{}
+		return &[]*nbdb.LoadBalancerGroup{}
 	case *nbdb.LogicalRouter:
-		return &[]nbdb.LogicalRouter{}
+		return &[]*nbdb.LogicalRouter{}
 	case *nbdb.LogicalRouterPolicy:
-		return &[]nbdb.LogicalRouterPolicy{}
+		return &[]*nbdb.LogicalRouterPolicy{}
 	case *nbdb.LogicalRouterPort:
-		return &[]nbdb.LogicalRouterPort{}
+		return &[]*nbdb.LogicalRouterPort{}
 	case *nbdb.LogicalRouterStaticRoute:
-		return &[]nbdb.LogicalRouterStaticRoute{}
+		return &[]*nbdb.LogicalRouterStaticRoute{}
 	case *nbdb.LogicalSwitch:
-		return &[]nbdb.LogicalSwitch{}
+		return &[]*nbdb.LogicalSwitch{}
 	case *nbdb.LogicalSwitchPort:
-		return &[]nbdb.LogicalSwitchPort{}
+		return &[]*nbdb.LogicalSwitchPort{}
 	case *nbdb.NAT:
-		return &[]nbdb.NAT{}
+		return &[]*nbdb.NAT{}
 	case *nbdb.PortGroup:
-		return &[]nbdb.PortGroup{}
+		return &[]*nbdb.PortGroup{}
 	case *nbdb.NBGlobal:
-		return &[]nbdb.NBGlobal{}
+		return &[]*nbdb.NBGlobal{}
 	case *nbdb.MeterBand:
-		return &[]nbdb.MeterBand{}
+		return &[]*nbdb.MeterBand{}
 	case *nbdb.Meter:
-		return &[]nbdb.Meter{}
+		return &[]*nbdb.Meter{}
 	case *sbdb.Chassis:
-		return &[]sbdb.Chassis{}
+		return &[]*sbdb.Chassis{}
 	case *sbdb.MACBinding:
-		return &[]sbdb.MACBinding{}
+		return &[]*sbdb.MACBinding{}
 	default:
 		panic(fmt.Sprintf("getModelList: unknown model %T", t))
 	}
@@ -300,4 +311,42 @@ func onModels(models interface{}, do func(interface{}) error) error {
 		panic(fmt.Sprintf("Expected slice or struct but got %s", v.Kind()))
 	}
 	return nil
+}
+
+// buildFailOnDuplicateOps builds a wait operation on a condition that will fail
+// if a duplicate to the provided model is considered to be found. We use this
+// to avoid duplicates on certain unknown scenarios that are still to be tracked
+// down. See: https://bugzilla.redhat.com/show_bug.cgi?id=2042001.
+// When no specific operation is required for the provided model, returns an empty
+// array for convenience.
+func buildFailOnDuplicateOps(c client.Client, m model.Model) ([]ovsdb.Operation, error) {
+	// Right now we only consider models with a "Name" field that is not an
+	// index for which we don't expect duplicate names.
+	// A duplicate Name field that is an index will fail without the
+	// need of this wait operation.
+	// Models that require a complex condition to detect duplicates are not
+	// considered for the time being due to the performance hit (i.e ACLs).
+	var field interface{}
+	var value string
+	switch t := m.(type) {
+	case *nbdb.LoadBalancer:
+		field = &t.Name
+		value = t.Name
+	case *nbdb.LogicalRouter:
+		field = &t.Name
+		value = t.Name
+	case *nbdb.LogicalSwitch:
+		field = &t.Name
+		value = t.Name
+	default:
+		return []ovsdb.Operation{}, nil
+	}
+
+	timeout := types.OVSDBWaitTimeout
+	cond := model.Condition{
+		Field:    field,
+		Function: ovsdb.ConditionEqual,
+		Value:    value,
+	}
+	return c.Where(m, cond).Wait(ovsdb.WaitConditionNotEqual, &timeout, m, field)
 }

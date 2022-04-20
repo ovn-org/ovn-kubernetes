@@ -1141,81 +1141,49 @@ func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 // It also removes stale nexthops from router policies used by EgressIPs.
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.
 func (oc *Controller) syncStaleEgressReroutePolicy(egressIPCache map[string]egressIPCacheEntry) error {
-	logicalRouter := nbdb.LogicalRouter{}
-	logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
-	logicalRouterPolicyStaleNexthops := make(map[string]nbdb.LogicalRouterPolicy)
-	opModels := []libovsdbops.OperationModel{
-		{
-			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
-				if lrp.Priority != types.EgressIPReroutePriority {
-					return false
-				}
-				egressIPName := lrp.ExternalIDs["name"]
-				cacheEntry, exists := egressIPCache[egressIPName]
-				splitMatch := strings.Split(lrp.Match, " ")
-				logicalIP := splitMatch[len(splitMatch)-1]
-				parsedLogicalIP := net.ParseIP(logicalIP)
-				if !exists || cacheEntry.gatewayRouterIPs.Len() == 0 || !cacheEntry.podIPs.Has(parsedLogicalIP.String()) {
-					klog.Infof("syncStaleEgressReroutePolicy will delete %s due to no nexthop or stale logical ip: %v", egressIPName, lrp)
-					return true
-				}
-				// Check for stale nexthops that may exist in the logical router policy and store that in logicalRouterPolicyStaleNexthops.
-				// Note: adding missing nexthop(s) to the logical router policy is done outside the scope of this function.
-				onlyStaleNextHops := true
-				staleNextHops := sets.NewString()
-				for _, nexthop := range lrp.Nexthops {
-					if cacheEntry.gatewayRouterIPs.Has(nexthop) {
-						onlyStaleNextHops = false
-					} else {
-						staleNextHops.Insert(nexthop)
-					}
-				}
-				if staleNextHops.Len() > 0 {
-					// If all nexthops are stale, let's go ahead and remove the entire row
-					if onlyStaleNextHops {
-						klog.Infof("syncStaleEgressReroutePolicy will delete %s due to stale nexthops: %v", egressIPName, lrp)
-						return true
-					}
-					logicalRouterPolicyStaleNexthops[lrp.UUID] = nbdb.LogicalRouterPolicy{
-						UUID:     lrp.UUID,
-						Nexthops: staleNextHops.UnsortedList(),
-					}
-				}
-				return false
-			},
-			ExistingResult: &logicalRouterPolicyRes,
-			DoAfter: func() {
-				logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
-			},
-			BulkOp: true,
-		},
-		{
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: []interface{}{
-				&logicalRouter.Policies,
-			},
-		},
+	logicalRouterPolicyStaleNexthops := []*nbdb.LogicalRouterPolicy{}
+	p := func(item *nbdb.LogicalRouterPolicy) bool {
+		if item.Priority != types.EgressIPReroutePriority {
+			return false
+		}
+		egressIPName := item.ExternalIDs["name"]
+		cacheEntry, exists := egressIPCache[egressIPName]
+		splitMatch := strings.Split(item.Match, " ")
+		logicalIP := splitMatch[len(splitMatch)-1]
+		parsedLogicalIP := net.ParseIP(logicalIP)
+		if !exists || cacheEntry.gatewayRouterIPs.Len() == 0 || !cacheEntry.podIPs.Has(parsedLogicalIP.String()) {
+			klog.Infof("syncStaleEgressReroutePolicy will delete %s due to no nexthop or stale logical ip: %v", egressIPName, item)
+			return true
+		}
+		// Check for stale nexthops that may exist in the logical router policy and store that in logicalRouterPolicyStaleNexthops.
+		// Note: adding missing nexthop(s) to the logical router policy is done outside the scope of this function.
+		staleNextHops := []string{}
+		for _, nexthop := range item.Nexthops {
+			if !cacheEntry.gatewayRouterIPs.Has(nexthop) {
+				staleNextHops = append(staleNextHops, nexthop)
+			}
+		}
+		if len(staleNextHops) > 0 {
+			lrp := nbdb.LogicalRouterPolicy{
+				UUID:     item.UUID,
+				Nexthops: staleNextHops,
+			}
+			logicalRouterPolicyStaleNexthops = append(logicalRouterPolicyStaleNexthops, &lrp)
+		}
+		return false
 	}
-	if err := oc.modelClient.Delete(opModels...); err != nil {
-		return fmt.Errorf("unable to remove stale logical router policies, err: %v", err)
+
+	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
+	if err != nil {
+		return fmt.Errorf("error deleting stale logical router policies from router %s: %v", types.OVNClusterRouter, err)
 	}
 
 	// Update Logical Router Policies that have stale nexthops. Notice that we must do this separately
-	// because 1) there is no model predicates, and 2) logicalRouterPolicyStaleNexthops must be populated
-	opModels2 := make([]libovsdbops.OperationModel, 0, len(logicalRouterPolicyStaleNexthops))
-	for lrpUUID := range logicalRouterPolicyStaleNexthops {
-		lrp := logicalRouterPolicyStaleNexthops[lrpUUID]
-		klog.Infof("syncStaleEgressReroutePolicy will update %s to remove stale nexthops: %v", lrp.UUID, lrp.Nexthops)
-		opModels2 = append(opModels2, libovsdbops.OperationModel{
-			Model: &lrp,
-			OnModelMutations: []interface{}{
-				&lrp.Nexthops,
-			},
-		})
-	}
-	if err := oc.modelClient.Delete(opModels2...); err != nil {
-		return fmt.Errorf("unable to remove stale next hops from logical router policies, err: %v", err)
+	// because logicalRouterPolicyStaleNexthops must be populated first
+	klog.Infof("syncStaleEgressReroutePolicy will remove stale nexthops: %+v", logicalRouterPolicyStaleNexthops)
+	err = libovsdbops.DeleteNextHopsFromLogicalRouterPolicies(oc.nbClient, types.OVNClusterRouter, logicalRouterPolicyStaleNexthops...)
+	if err != nil {
+		return fmt.Errorf("unable to remove stale next hops from logical router policies: %v", err)
 	}
 
 	return nil
@@ -1244,7 +1212,7 @@ func (oc *Controller) syncStaleSNATRules(egressIPCache map[string]egressIPCacheE
 		return false
 	}
 
-	nats, err := libovsdbops.FindNATsUsingPredicate(oc.nbClient, predicate)
+	nats, err := libovsdbops.FindNATsWithPredicate(oc.nbClient, predicate)
 	if err != nil {
 		return fmt.Errorf("unable to sync egress IPs err: %v", err)
 	}
@@ -1254,7 +1222,14 @@ func (oc *Controller) syncStaleSNATRules(egressIPCache map[string]egressIPCacheE
 		return nil
 	}
 
-	routers, err := libovsdbops.FindRoutersUsingNAT(oc.nbClient, nats)
+	natIds := sets.String{}
+	for _, nat := range nats {
+		natIds.Insert(nat.UUID)
+	}
+	p := func(item *nbdb.LogicalRouter) bool {
+		return natIds.HasAny(item.Nat...)
+	}
+	routers, err := libovsdbops.FindLogicalRoutersWithPredicate(oc.nbClient, p)
 	if err != nil {
 		return fmt.Errorf("unable to sync egress IPs, err: %v", err)
 	}
@@ -1262,7 +1237,7 @@ func (oc *Controller) syncStaleSNATRules(egressIPCache map[string]egressIPCacheE
 	var errors []error
 	ops := []ovsdb.Operation{}
 	for _, router := range routers {
-		ops, err = libovsdbops.DeleteNATsFromRouterOps(oc.nbClient, ops, &router, nats...)
+		ops, err = libovsdbops.DeleteNATsOps(oc.nbClient, ops, router, nats...)
 		if err != nil {
 			klog.Errorf("Error deleting stale NAT from router %s: %v", router.Name, err)
 			errors = append(errors, err)
@@ -1585,25 +1560,20 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 	// as to notify them the change. If this is not the case: packets will
 	// continue to be routed to the old node which hosted the egress IP before
 	// it was moved, and the connections will fail.
+	portName := types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + egressNode.Name
 	lsp := nbdb.LogicalSwitchPort{
-		Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + egressNode.Name,
+		Name: portName,
 		// Setting nat-addresses to router will send out GARPs for all externalIPs and LB VIPs
 		// hosted on the GR. Setting exclude-lb-vips-from-garp to true will make sure GARPs for
 		// LB VIPs are not sent, thereby preventing GARP overload.
 		Options: map[string]string{"nat-addresses": "router", "exclude-lb-vips-from-garp": "true"},
 	}
-	opModel := libovsdbops.OperationModel{
-		Model: &lsp,
-		OnModelMutations: []interface{}{
-			&lsp.Options,
-		},
-		ErrNotFound: true,
-	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModel); err != nil {
+	err := libovsdbops.UpdateLogicalSwitchPortSetOptions(oc.nbClient, &lsp)
+	if err != nil {
 		klog.Errorf("Unable to configure GARP on external logical switch port for egress node: %s, "+
 			"this will result in packet drops during egress IP re-assignment,  err: %v", egressNode.Name, err)
-
 	}
+
 	// If a node has been labelled for egress IP we need to check if there are any
 	// egress IPs which are missing an assignment. If there are, we need to send a
 	// synthetic update since reconcileEgressIP will then try to assign those IPs to
@@ -1633,20 +1603,16 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 	// This will remove the option described in addEgressNode from the logical
 	// switch port, since this node will not be used for egress IP assignments
 	// from now on.
+	portName := types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + egressNode.Name
 	lsp := nbdb.LogicalSwitchPort{
-		Name:    types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + egressNode.Name,
+		Name:    portName,
 		Options: map[string]string{"nat-addresses": "", "exclude-lb-vips-from-garp": ""},
 	}
-	opModel := libovsdbops.OperationModel{
-		Model: &lsp,
-		OnModelMutations: []interface{}{
-			&lsp.Options,
-		},
-		ErrNotFound: true,
-	}
-	if err := oc.modelClient.Delete(opModel); err != nil {
+	err := libovsdbops.UpdateLogicalSwitchPortSetOptions(oc.nbClient, &lsp)
+	if err != nil {
 		klog.Errorf("Unable to remove GARP configuration on external logical switch port for egress node: %s, err: %v", egressNode.Name, err)
 	}
+
 	// Since the node has been labelled as "not usable" for egress IP
 	// assignments we need to find all egress IPs which have an assignment to
 	// it, and move them elsewhere.
@@ -1816,8 +1782,6 @@ type egressIPController struct {
 	allocator allocator
 	// libovsdb northbound client interface
 	nbClient libovsdbclient.Client
-	// modelClient for performing idempotent NB operations
-	modelClient libovsdbops.ModelClient
 	// watchFactory watching k8s objects
 	watchFactory *factory.WatchFactory
 }
@@ -1947,8 +1911,7 @@ func (e *egressIPController) handleEgressReroutePolicy(podIPNets []*net.IPNet, s
 // - if the LogicalRouterPolicy does exist: it add the gatewayRouterIP to the
 // array of nexthops
 func (e *egressIPController) createEgressReroutePolicy(filterOption, egressIPName string, gatewayRouterIP string) error {
-	logicalRouter := nbdb.LogicalRouter{}
-	logicalRouterPolicy := nbdb.LogicalRouterPolicy{
+	lrp := nbdb.LogicalRouterPolicy{
 		Match:    filterOption,
 		Priority: types.EgressIPReroutePriority,
 		Nexthops: []string{gatewayRouterIP},
@@ -1957,33 +1920,12 @@ func (e *egressIPController) createEgressReroutePolicy(filterOption, egressIPNam
 			"name": egressIPName,
 		},
 	}
-	opsModel := []libovsdbops.OperationModel{
-		{
-			Model: &logicalRouterPolicy,
-			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
-				return lrp.Match == filterOption && lrp.Priority == types.EgressIPReroutePriority && lrp.ExternalIDs["name"] == egressIPName
-			},
-			OnModelMutations: []interface{}{
-				&logicalRouterPolicy.Nexthops,
-			},
-			DoAfter: func() {
-				if logicalRouterPolicy.UUID != "" {
-					logicalRouter.Policies = []string{logicalRouterPolicy.UUID}
-				}
-			},
-		},
-		{
-			Name:           &logicalRouter.Name,
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: []interface{}{
-				&logicalRouter.Policies,
-			},
-			ErrNotFound: true,
-		},
+	p := func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.Match == lrp.Match && item.Priority == lrp.Priority && item.ExternalIDs["name"] == lrp.ExternalIDs["name"]
 	}
-	if _, err := e.modelClient.CreateOrUpdate(opsModel...); err != nil {
-		return fmt.Errorf("unable to create logical router policy, err: %v", err)
+	err := libovsdbops.CreateOrAddNextHopsToLogicalRouterPolicyWithPredicate(e.nbClient, types.OVNClusterRouter, &lrp, p)
+	if err != nil {
+		return fmt.Errorf("error creating logical router policy %+v on router %s: %v", lrp, types.OVNClusterRouter, err)
 	}
 	return nil
 }
@@ -1996,41 +1938,15 @@ func (e *egressIPController) createEgressReroutePolicy(filterOption, egressIPNam
 // - if the LogicalRouterPolicy exist and has the len(nexthops) == 1: it removes
 // the LogicalRouterPolicy completely
 func (e *egressIPController) deleteEgressReroutePolicy(filterOption, egressIPName string, gatewayRouterIP string) error {
-	logicalRouter := nbdb.LogicalRouter{}
-	logicalRouterPolicy := nbdb.LogicalRouterPolicy{
-		Nexthops: []string{gatewayRouterIP},
+	p := func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.Match == filterOption && item.Priority == types.EgressIPReroutePriority && item.ExternalIDs["name"] == egressIPName
 	}
-	logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
-	opsModel := []libovsdbops.OperationModel{
-		{
-			Model: &logicalRouterPolicy,
-			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
-				return lrp.Match == filterOption && lrp.Priority == types.EgressIPReroutePriority && lrp.ExternalIDs["name"] == egressIPName
-			},
-			OnModelMutations: []interface{}{
-				&logicalRouterPolicy.Nexthops,
-			},
-			ExistingResult: &logicalRouterPolicyRes,
-			DoAfter: func() {
-				logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
-			},
-		},
-		{
-			Model: &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
-				if len(logicalRouterPolicyRes) == 1 && len(logicalRouterPolicyRes[0].Nexthops) == 1 && logicalRouterPolicyRes[0].Nexthops[0] == gatewayRouterIP {
-					return lr.Name == types.OVNClusterRouter
-				}
-				return false
-			},
-			OnModelMutations: []interface{}{
-				&logicalRouter.Policies,
-			},
-		},
+	err := libovsdbops.DeleteNextHopFromLogicalRouterPoliciesWithPredicate(e.nbClient, types.OVNClusterRouter, p, gatewayRouterIP)
+	if err != nil {
+		return fmt.Errorf("error removing nexthop IP %s from egress ip %s policies on router %s: %v",
+			gatewayRouterIP, egressIPName, types.OVNClusterRouter, err)
 	}
-	if err := e.modelClient.Delete(opsModel...); err != nil {
-		return fmt.Errorf("unable to remove logical router policy, err: %v", err)
-	}
+
 	return nil
 }
 
@@ -2048,84 +1964,37 @@ func (e *egressIPController) deleteEgressIPStatusSetup(name string, status egres
 		return fmt.Errorf("unable to retrieve gateway IP for node: %s, protocol is IPv6: %v, err: %v", status.Node, isEgressIPv6, err)
 	}
 
-	nat := nbdb.NAT{}
-	natResult := []nbdb.NAT{}
-	natLogicalRouter := nbdb.LogicalRouter{}
-	logicalRouter := nbdb.LogicalRouter{}
-	logicalRouterPolicy := nbdb.LogicalRouterPolicy{
-		Nexthops: []string{gatewayRouterIP.String()},
+	gwIP := gatewayRouterIP.String()
+	policyPred := func(item *nbdb.LogicalRouterPolicy) bool {
+		hasGatewayRouterIPNexthop := false
+		for _, nexthop := range item.Nexthops {
+			if nexthop == gwIP {
+				hasGatewayRouterIPNexthop = true
+				break
+			}
+		}
+		return item.Priority == types.EgressIPReroutePriority && item.ExternalIDs["name"] == name && hasGatewayRouterIPNexthop
 	}
-	logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
-	opsModel := []libovsdbops.OperationModel{
-		{
-			Model: &logicalRouterPolicy,
-			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
-				hasGatewayRouterIPNexthop := false
-				for _, nexthop := range lrp.Nexthops {
-					if nexthop == gatewayRouterIP.String() {
-						hasGatewayRouterIPNexthop = true
-						break
-					}
-				}
-				return lrp.Priority == types.EgressIPReroutePriority && lrp.ExternalIDs["name"] == name && hasGatewayRouterIPNexthop
-			},
-			OnModelMutations: []interface{}{
-				&logicalRouterPolicy.Nexthops,
-			},
-			ExistingResult: &logicalRouterPolicyRes,
-			DoAfter: func() {
-				tmp := []nbdb.LogicalRouterPolicy{}
-				for _, lrp := range logicalRouterPolicyRes {
-					if len(lrp.Nexthops) == 1 && lrp.Nexthops[0] == gatewayRouterIP.String() {
-						tmp = append(tmp, lrp)
-					}
-				}
-				logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&tmp)
-			},
-			BulkOp: true,
-		},
-		{
-			Model: &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
-				return lr.Name == types.OVNClusterRouter
-			},
-			OnModelMutations: []interface{}{
-				&logicalRouter.Policies,
-			},
-			ErrNotFound: true,
-		},
-		{
-			Model: &nat,
-			ModelPredicate: func(nat *nbdb.NAT) bool {
-				return nat.ExternalIDs["name"] == name && nat.ExternalIP == status.EgressIP
-			},
-			ExistingResult: &natResult,
-			DoAfter: func() {
-				natLogicalRouter.Nat = libovsdbops.ExtractUUIDsFromModels(&natResult)
-			},
-			BulkOp: true,
-		},
-		{
-			Model: &natLogicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool {
-				// Find the router that has the removed nat
-				for _, lrNat := range lr.Nat {
-					for _, delNat := range natLogicalRouter.Nat {
-						if lrNat == delNat {
-							return true
-						}
-					}
-				}
-				return false
-			},
-			OnModelMutations: []interface{}{
-				&natLogicalRouter.Nat,
-			},
-		},
+	ops, err := libovsdbops.DeleteNextHopFromLogicalRouterPoliciesWithPredicateOps(e.nbClient, nil, types.OVNClusterRouter, policyPred, gwIP)
+	if err != nil {
+		return fmt.Errorf("error removing nexthop IP %s from egress ip %s policies on router %s: %v",
+			gatewayRouterIP, name, types.OVNClusterRouter, err)
 	}
-	if err := e.modelClient.Delete(opsModel...); err != nil {
-		return fmt.Errorf("unable to remove egress IP status setup, err: %v", err)
+
+	routerName := util.GetGatewayRouterFromNode(status.Node)
+	natPred := func(nat *nbdb.NAT) bool {
+		return nat.ExternalIDs["name"] == name && nat.ExternalIP == status.EgressIP
 	}
+	ops, err = libovsdbops.DeleteNATsWithPredicateOps(e.nbClient, ops, natPred)
+	if err != nil {
+		return fmt.Errorf("error removing egress ip %s nats on router %s: %v", name, routerName, err)
+	}
+
+	_, err = libovsdbops.TransactAndCheck(e.nbClient, ops)
+	if err != nil {
+		return fmt.Errorf("error trasnsacting ops %+v: %v", ops, err)
+	}
+
 	return nil
 }
 
@@ -2296,66 +2165,30 @@ func (oc *Controller) createDefaultNoRerouteNodePolicies(v4NodeAddr, v6NodeAddr 
 }
 
 func (oc *Controller) createLogicalRouterPolicy(match string, priority int) error {
-	logicalRouter := nbdb.LogicalRouter{}
-	logicalRouterPolicy := nbdb.LogicalRouterPolicy{
+	lrp := nbdb.LogicalRouterPolicy{
 		Priority: priority,
 		Action:   nbdb.LogicalRouterPolicyActionAllow,
 		Match:    match,
 	}
-	opModels := []libovsdbops.OperationModel{
-		{
-			Model: &logicalRouterPolicy,
-			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
-				return lrp.Match == match && lrp.Priority == priority
-			},
-			DoAfter: func() {
-				if logicalRouterPolicy.UUID != "" {
-					logicalRouter.Policies = []string{logicalRouterPolicy.UUID}
-				}
-			},
-		},
-		{
-			Name:           &logicalRouter.Name,
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: []interface{}{
-				&logicalRouter.Policies,
-			},
-			ErrNotFound: true,
-		},
+	p := func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.Match == lrp.Match && item.Priority == lrp.Priority
 	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("unable to create logical router policy, err: %v", err)
+	err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.nbClient, types.OVNClusterRouter, &lrp, p)
+	if err != nil {
+		return fmt.Errorf("error creating logical router policy %+v on router %s: %v", lrp, types.OVNClusterRouter, err)
 	}
 	return nil
 }
 
 func (oc *Controller) deleteLogicalRouterPolicy(match string, priority int) error {
-	logicalRouter := nbdb.LogicalRouter{}
-	logicalRouterPolicyRes := []nbdb.LogicalRouterPolicy{}
-	opModels := []libovsdbops.OperationModel{
-		{
-			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
-				return lrp.Match == match && lrp.Priority == priority
-			},
-			ExistingResult: &logicalRouterPolicyRes,
-			DoAfter: func() {
-				logicalRouter.Policies = libovsdbops.ExtractUUIDsFromModels(&logicalRouterPolicyRes)
-			},
-			BulkOp: true,
-		},
-		{
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: []interface{}{
-				&logicalRouter.Policies,
-			},
-		},
+	p := func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.Match == match && item.Priority == priority
+	}
+	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
+	if err != nil {
+		return fmt.Errorf("error deleting router policy with priotity %d and match %s: %v", priority, match, err)
 	}
 
-	if err := oc.modelClient.Delete(opModels...); err != nil {
-		return fmt.Errorf("unable to delete logical router policy, err: %v", err)
-	}
 	return nil
 }
 
@@ -2389,7 +2222,7 @@ func buildSNATFromEgressIPStatus(podIP net.IP, status egressipv1.EgressIPStatusI
 	externalIP := net.ParseIP(status.EgressIP)
 	logicalPort := types.K8sPrefix + status.Node
 	externalIds := map[string]string{"name": egressIPName}
-	nat := libovsdbops.BuildRouterSNAT(&externalIP, logicalIP, logicalPort, externalIds)
+	nat := libovsdbops.BuildSNAT(&externalIP, logicalIP, logicalPort, externalIds)
 	return nat, nil
 }
 
@@ -2409,7 +2242,7 @@ func createNATRuleOps(nbClient libovsdbclient.Client, podIPs []*net.IPNet, statu
 	router := &nbdb.LogicalRouter{
 		Name: util.GetGatewayRouterFromNode(status.Node),
 	}
-	ops, err := libovsdbops.AddOrUpdateNATsToRouterOps(nbClient, []ovsdb.Operation{}, router, nats...)
+	ops, err := libovsdbops.CreateOrUpdateNATsOps(nbClient, []ovsdb.Operation{}, router, nats...)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create snat rules, for router: %s, error: %v", router.Name, err)
 	}
@@ -2432,7 +2265,7 @@ func deleteNATRuleOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, pod
 	router := &nbdb.LogicalRouter{
 		Name: util.GetGatewayRouterFromNode(status.Node),
 	}
-	ops, err = libovsdbops.DeleteNATsFromRouterOps(nbClient, ops, router, nats...)
+	ops, err = libovsdbops.DeleteNATsOps(nbClient, ops, router, nats...)
 	if err != nil {
 		return nil, fmt.Errorf("unable to remove snat rules for router: %s, error: %v", router.Name, err)
 	}

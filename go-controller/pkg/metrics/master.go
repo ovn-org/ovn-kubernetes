@@ -684,8 +684,10 @@ func getPodUIDFromPortBinding(row *sbdb.PortBinding) kapimtypes.UID {
 // setNbE2eTimestamp return true if setting timestamp to NB global options is successful
 func setNbE2eTimestamp(ovnNBClient libovsdbclient.Client, timestamp int64) bool {
 	// assumption that only first row is relevant in NB_Global table
-	options := map[string]string{globalOptionsTimestampField: fmt.Sprintf("%d", timestamp)}
-	if err := libovsdbops.UpdateNBGlobalOptions(ovnNBClient, options); err != nil {
+	nbGlobal := nbdb.NBGlobal{
+		Options: map[string]string{globalOptionsTimestampField: fmt.Sprintf("%d", timestamp)},
+	}
+	if err := libovsdbops.UpdateNBGlobalSetOptions(ovnNBClient, &nbGlobal); err != nil {
 		klog.Errorf("Unable to update NB global options E2E timestamp metric err: %v", err)
 		return false
 	}
@@ -695,9 +697,11 @@ func setNbE2eTimestamp(ovnNBClient libovsdbclient.Client, timestamp int64) bool 
 func getGlobalOptionsValue(client libovsdbclient.Client, field string) float64 {
 	var options map[string]string
 	dbName := client.Schema().Name
+	nbGlobal := nbdb.NBGlobal{}
+	sbGlobal := sbdb.SBGlobal{}
 
 	if dbName == "OVN_Northbound" {
-		if nbGlobal, err := libovsdbops.FindNBGlobal(client); err != nil && err != libovsdbclient.ErrNotFound {
+		if nbGlobal, err := libovsdbops.GetNBGlobal(client, &nbGlobal); err != nil && err != libovsdbclient.ErrNotFound {
 			klog.Errorf("Failed to get NB_Global table err: %v", err)
 			return 0
 		} else {
@@ -706,7 +710,7 @@ func getGlobalOptionsValue(client libovsdbclient.Client, field string) float64 {
 	}
 
 	if dbName == "OVN_Southbound" {
-		if sbGlobal, err := libovsdbops.FindSBGlobal(client); err != nil && err != libovsdbclient.ErrNotFound {
+		if sbGlobal, err := libovsdbops.GetSBGlobal(client, &sbGlobal); err != nil && err != libovsdbclient.ErrNotFound {
 			klog.Errorf("Failed to get SB_Global table err: %v", err)
 			return 0
 		} else {
