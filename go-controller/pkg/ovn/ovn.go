@@ -153,6 +153,9 @@ type Controller struct {
 	// Cluster wide Load_Balancer_Group UUID.
 	loadBalancerGroupUUID string
 
+	// Cluster-wide gateway router default Control Plane Protection (COPP) UUID
+	defaultGatewayCOPPUUID string
+
 	// Controller used for programming OVN for egress IP
 	eIPC egressIPController
 

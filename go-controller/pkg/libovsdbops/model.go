@@ -130,6 +130,7 @@ func copyIndexes(model model.Model) model.Model {
 	case *nbdb.Copp:
 		return &nbdb.Copp{
 			UUID: t.UUID,
+			Name: t.Name,
 		}
 	case *nbdb.GatewayChassis:
 		return &nbdb.GatewayChassis{

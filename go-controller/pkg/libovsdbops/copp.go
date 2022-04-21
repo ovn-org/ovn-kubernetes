@@ -1,13 +1,13 @@
 package libovsdbops
 
 import (
-	"reflect"
-
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
+
+type coppPredicate func(*nbdb.Copp) bool
 
 // CreateOrUpdateCOPPsOps creates or updates the provided COPP returning the
 // corresponding ops
@@ -18,8 +18,7 @@ func CreateOrUpdateCOPPsOps(nbClient libovsdbclient.Client, ops []ovsdb.Operatio
 		copp := copps[i]
 		opModel := operationModel{
 			Model:          copp,
-			ModelPredicate: func(item *nbdb.Copp) bool { return reflect.DeepEqual(item.Meters, copp.Meters) },
-			OnModelUpdates: onModelUpdatesNone(),
+			OnModelUpdates: onModelUpdatesAll(),
 			ErrNotFound:    false,
 			BulkOp:         false,
 		}
@@ -28,4 +27,21 @@ func CreateOrUpdateCOPPsOps(nbClient libovsdbclient.Client, ops []ovsdb.Operatio
 
 	modelClient := newModelClient(nbClient)
 	return modelClient.CreateOrUpdateOps(ops, opModels...)
+}
+
+// DeleteCOPPsOps deletes the provided COPPs found using the predicate, returning the
+// corresponding ops
+func DeleteCOPPsWithPredicateOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, p coppPredicate) ([]ovsdb.Operation, error) {
+	copp := nbdb.Copp{}
+	opModels := []operationModel{
+		{
+			Model:          &copp,
+			ModelPredicate: p,
+			ErrNotFound:    false,
+			BulkOp:         true,
+		},
+	}
+
+	modelClient := newModelClient(nbClient)
+	return modelClient.DeleteOps(ops, opModels...)
 }
