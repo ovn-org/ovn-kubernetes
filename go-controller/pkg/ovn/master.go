@@ -1221,25 +1221,12 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 	}
 	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
 
-	chassisList, err := libovsdbops.ListChassis(oc.sbClient)
-	if err != nil {
-		return fmt.Errorf("failed to get chassis list: error: %v", err)
-	}
-
-	chassisHostNames := sets.NewString()
-	for _, chassis := range chassisList {
-		chassisHostNames.Insert(chassis.Hostname)
-	}
-
-	// Find difference between existing chassis and found nodes
-	staleChassis := chassisHostNames.Difference(foundNodes)
-
 	p := func(item *nbdb.LogicalSwitch) bool {
 		return len(item.OtherConfig) > 0
 	}
 	nodeSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(oc.nbClient, p)
 	if err != nil {
-		return fmt.Errorf("failed to get node logical switches which have other-config set error: %v", err)
+		return fmt.Errorf("failed to get node logical switches which have other-config set: %v", err)
 	}
 	if len(nodeSwitches) == 0 {
 		klog.Warning("Did not find any logical switches with other-config")
@@ -1278,19 +1265,45 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 		if err := oc.deleteNode(nodeSwitch.Name, subnets); err != nil {
 			return fmt.Errorf("failed to delete node:%s, err:%v", nodeSwitch.Name, err)
 		}
-		//remove the node from the chassis map so we don't delete it twice
-		staleChassis.Delete(nodeSwitch.Name)
 	}
 
+	// cleanup stale chassis with no corresponding nodes
+	chassisList, err := libovsdbops.ListChassis(oc.sbClient)
+	if err != nil {
+		return fmt.Errorf("failed to get chassis list: %v", err)
+	}
+
+	knownChassisNames := sets.NewString()
 	chassisDeleteList := []*sbdb.Chassis{}
 	for _, chassis := range chassisList {
-		if staleChassis.Has(chassis.Hostname) {
-			chassisDeleteList = append(chassisDeleteList, chassis)
+		knownChassisNames.Insert(chassis.Name)
+		// skip chassis that have a corresponding node
+		if foundNodes.Has(chassis.Hostname) {
+			continue
 		}
+		chassisDeleteList = append(chassisDeleteList, chassis)
 	}
 
+	// cleanup stale chassis private with no corresponding chassis
+	chassisPrivateList, err := libovsdbops.ListChassisPrivate(oc.sbClient)
+	if err != nil {
+		return fmt.Errorf("failed to get chassis private list: %v", err)
+	}
+
+	for _, chassis := range chassisPrivateList {
+		// skip chassis private that have a corresponding chassis
+		if knownChassisNames.Has(chassis.Name) {
+			continue
+		}
+		// we add to the list what would be the corresponding Chassis. Even if
+		// the Chassis does not exist in SBDB, DeleteChassis will remove the
+		// ChassisPrivate.
+		chassisDeleteList = append(chassisDeleteList, &sbdb.Chassis{Name: chassis.Name})
+	}
+
+	// Delete stale chassis and associated chassis private
 	if err := libovsdbops.DeleteChassis(oc.sbClient, chassisDeleteList...); err != nil {
-		return fmt.Errorf("failed deleting chassis %v error: %v", chassisDeleteList, err)
+		return fmt.Errorf("failed deleting chassis %v: %v", chassisDeleteList, err)
 	}
 	return nil
 }
