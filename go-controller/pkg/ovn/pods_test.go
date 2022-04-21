@@ -925,6 +925,73 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
+		ginkgo.It("reconciles an existing logical switch port without an existing pod", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespaceT := *newNamespace("namespace1")
+				// create ovsdb with no pod
+				initialDB = libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						&nbdb.LogicalSwitchPort{
+							UUID:      "namespace1_non-existing-pod-UUID",
+							Name:      "namespace1_non-existing-pod",
+							Addresses: []string{"0a:58:0a:80:02:03", "10.128.2.3"},
+							ExternalIDs: map[string]string{
+								"pod": "true",
+							},
+						},
+						&nbdb.LogicalSwitch{
+							UUID:  "ls-uuid",
+							Name:  "node1",
+							Ports: []string{"namespace1_non-existing-pod-UUID"},
+						},
+					},
+				}
+
+				testNode := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+					},
+				}
+
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							testNode,
+						},
+					},
+					// no pods
+					&v1.PodList{
+						Items: []v1.Pod{},
+					},
+				)
+
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
+				// expect stale logical switch port removed and stale logical switch port removed from logical switch
+				expectData := []libovsdbtest.TestData{
+					&nbdb.LogicalSwitch{
+						UUID:  "ls-uuid",
+						Name:  "node1",
+						Ports: []string{},
+					},
+				}
+
+				gomega.Eventually(fakeOvn.nbClient).Should(
+					libovsdbtest.HaveData(expectData))
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		})
+
 		ginkgo.It("reconciles an existing pod with an existing logical switch port", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *newNamespace("namespace1")
