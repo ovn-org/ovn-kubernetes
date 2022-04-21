@@ -103,6 +103,9 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		}
 
 		if config.Gateway.NodeportEnable {
+			if err := initSvcViaMgmPortRoutingRules(hostSubnets); err != nil {
+				return err
+			}
 			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge.patchPort, gwBridge.bridgeName, gwBridge.uplinkName, gwBridge.ips, gw.openflowManager, gw.nodeIPManager, watchFactory)
 			if err != nil {
 				return err

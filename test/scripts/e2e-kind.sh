@@ -59,9 +59,6 @@ should set default value on new IngressClass
 # RACE CONDITION IN TEST, SEE https://github.com/kubernetes/kubernetes/pull/90254
 should prevent Ingress creation if more than 1 IngressClass marked as default
 
-# Skip ITP=local till we support it
-\[Feature:ServiceInternalTrafficPolicy\]
-
 # TODO: Figure out why the below test is failing and if we need to add support in OVN-K for them
 validates that there is no conflict between pods with same hostPort but different hostIP and protocol
 "

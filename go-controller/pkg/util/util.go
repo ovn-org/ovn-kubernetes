@@ -200,6 +200,21 @@ ipLoop:
 	return out
 }
 
+// IsClusterIP checks if the provided IP is a clusterIP
+func IsClusterIP(svcVIP string) bool {
+	ip := net.ParseIP(svcVIP)
+	is4 := ip.To4() != nil
+	for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
+		if is4 && svcCIDR.IP.To4() != nil && svcCIDR.Contains(ip) {
+			return true
+		}
+		if !is4 && svcCIDR.IP.To4() == nil && svcCIDR.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
 func GetLogicalPortName(podNamespace, podName string) string {
 	return composePortName(podNamespace, podName)
 }
