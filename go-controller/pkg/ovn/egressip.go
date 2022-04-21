@@ -980,9 +980,6 @@ func (oc *Controller) addPodEgressIPAssignments(name string, statusAssignments [
 			podIPs:         logicalPort.ips,
 		}
 		oc.eIPC.podAssignment[podKey] = podState
-		if err := oc.eIPC.deletePerPodGRSNAT(pod, logicalPort.ips); err != nil {
-			return err
-		}
 	} else {
 		for _, status := range statusAssignments {
 			if _, exists := podState.egressStatuses[status]; !exists {
@@ -1027,13 +1024,11 @@ func (oc *Controller) deleteEgressIPAssignments(name string, statusesToRemove []
 		}
 		for podKey, podStatus := range oc.eIPC.podAssignment {
 			delete(podStatus.egressStatuses, statusToRemove)
-			if len(podStatus.egressStatuses) == 0 {
-				podNamespace, podName := getPodNamespaceAndNameFromKey(podKey)
-				if err := oc.eIPC.addPerPodGRSNAT(podNamespace, podName, podStatus.podIPs); err != nil {
-					return err
-				}
-				delete(oc.eIPC.podAssignment, podKey)
+			podNamespace, podName := getPodNamespaceAndNameFromKey(podKey)
+			if err := oc.eIPC.addPerPodGRSNAT(podNamespace, podName, podStatus.podIPs); err != nil {
+				return err
 			}
+			delete(oc.eIPC.podAssignment, podKey)
 		}
 	}
 	return nil
@@ -1076,9 +1071,6 @@ func (oc *Controller) deletePodEgressIPAssignments(name string, statusesToRemove
 			return err
 		}
 		delete(podStatus.egressStatuses, statusToRemove)
-	}
-	if len(podStatus.egressStatuses) > 0 {
-		return nil
 	}
 	if err := oc.eIPC.addPerPodGRSNAT(pod.Namespace, pod.Name, podStatus.podIPs); err != nil {
 		return err
@@ -1337,6 +1329,7 @@ type EgressIPPatchStatus struct {
 // object update which risks resetting the EgressIP object's fields to the state
 // they had when we started processing the change.
 func (oc *Controller) patchReplaceEgressIPStatus(name string, statusItems []egressipv1.EgressIPStatusItem) error {
+	klog.Infof("Patching status on EgressIP %s: %v", name, statusItems)
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		t := []EgressIPPatchStatus{
 			{
@@ -1790,6 +1783,9 @@ type egressIPController struct {
 // (routing pod traffic to the egress node) and NAT objects on the egress node
 // (SNAT-ing to the egress IP).
 func (e *egressIPController) addPodEgressIPAssignment(egressIPName string, status egressipv1.EgressIPStatusItem, pod *kapi.Pod, podIPs []*net.IPNet) (err error) {
+	if err := e.deletePerPodGRSNAT(pod, podIPs, status); err != nil {
+		return err
+	}
 	if err := e.handleEgressReroutePolicy(podIPs, status, egressIPName, e.createEgressReroutePolicy); err != nil {
 		return fmt.Errorf("unable to create logical router policy, err: %v", err)
 	}
@@ -1843,9 +1839,10 @@ func (e *egressIPController) addPerPodGRSNAT(podNamespace, podName string, podIP
 	return nil
 }
 
-func (e *egressIPController) deletePerPodGRSNAT(pod *kapi.Pod, podIPs []*net.IPNet) error {
-	if config.Gateway.DisableSNATMultipleGWs {
-		// remove snats to->nodeIP (from the node where pod exists) for these podIPs before adding the snat to->egressIP
+func (e *egressIPController) deletePerPodGRSNAT(pod *kapi.Pod, podIPs []*net.IPNet, status egressipv1.EgressIPStatusItem) error {
+	if config.Gateway.DisableSNATMultipleGWs && status.Node == pod.Spec.NodeName {
+		// remove snats to->nodeIP (from the node where pod exists if that node is also serving
+		// as an egress node for this pod) for these podIPs before adding the snat to->egressIP
 		extIPs, err := getExternalIPsGRSNAT(e.watchFactory, pod.Spec.NodeName)
 		if err != nil {
 			return err
@@ -1854,6 +1851,9 @@ func (e *egressIPController) deletePerPodGRSNAT(pod *kapi.Pod, podIPs []*net.IPN
 		if err != nil {
 			return err
 		}
+	} else if config.Gateway.DisableSNATMultipleGWs {
+		// it means the node on which the pod is is different from the egressNode that is managing the pod
+		klog.V(5).Infof("Not deleting SNAT on %s since egress node managing %s/%s is %s", pod.Spec.NodeName, pod.Namespace, pod.Name, status.Node)
 	}
 	return nil
 }
