@@ -357,7 +357,7 @@ func DeleteLogicalSwitchPortsWithPredicateOps(nbClient libovsdbclient.Client, op
 		opModel := operationModel{
 			Model:       lsp,
 			ErrNotFound: false,
-			BulkOp:      true,
+			BulkOp:      false,
 		}
 		opModels = append(opModels, opModel)
 	}
