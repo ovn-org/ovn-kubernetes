@@ -24,7 +24,7 @@ const (
 
 var _ = ginkgo.Describe("Multicast", func() {
 
-	fr := framework.NewDefaultFramework("multicast")
+	fr := wrappedTestFramework("multicast")
 
 	type nodeInfo struct {
 		name   string
