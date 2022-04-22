@@ -571,7 +571,7 @@ func ovsBridgeMetricsUpdate() {
 	}
 }
 
-func registerOvsInterfaceMetrics(metricNamespace, metricSubsystem string) {
+func registerOvsInterfaceMetrics(registry prometheus.Registerer, metricNamespace, metricSubsystem string) {
 	for InterfaceMetricName, InterfaceMetricInfo := range ovsInterfaceMetricsDataMap {
 		InterfaceMetricInfo.metric = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: metricNamespace,
@@ -584,7 +584,7 @@ func registerOvsInterfaceMetrics(metricNamespace, metricSubsystem string) {
 				"port",
 				"interface",
 			})
-		prometheus.MustRegister(InterfaceMetricInfo.metric)
+		registry.MustRegister(InterfaceMetricInfo.metric)
 	}
 }
 
@@ -1184,10 +1184,18 @@ var ovsVswitchdCoverageShowMetricsMap = map[string]*metricDetails{
 }
 var registerOvsMetricsOnce sync.Once
 
-func RegisterOvsMetrics() {
+func RegisterStandaloneOvsMetrics() {
+	registerOvsMetrics(prometheus.DefaultRegisterer)
+}
+
+func RegisterOvsMetricsWithOvnMetrics() {
+	registerOvsMetrics(ovnRegistry)
+}
+
+func registerOvsMetrics(registry prometheus.Registerer) {
 	registerOvsMetricsOnce.Do(func() {
 		getOvsVersionInfo()
-		prometheus.MustRegister(prometheus.NewGaugeFunc(
+		registry.MustRegister(prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
 				Namespace: MetricOvsNamespace,
 				Name:      "build_info",
@@ -1200,43 +1208,43 @@ func RegisterOvsMetrics() {
 		))
 
 		// Register OVS datapath metrics.
-		prometheus.MustRegister(metricOvsDpTotal)
-		prometheus.MustRegister(metricOvsDp)
-		prometheus.MustRegister(metricOvsDpIfTotal)
-		prometheus.MustRegister(metricOvsDpIf)
-		prometheus.MustRegister(metricOvsDpFlowsTotal)
-		prometheus.MustRegister(metricOvsDpFlowsLookupHit)
-		prometheus.MustRegister(metricOvsDpFlowsLookupMissed)
-		prometheus.MustRegister(metricOvsDpFlowsLookupLost)
-		prometheus.MustRegister(metricOvsDpPacketsTotal)
-		prometheus.MustRegister(metricOvsdpMasksHit)
-		prometheus.MustRegister(metricOvsDpMasksTotal)
-		prometheus.MustRegister(metricOvsDpMasksHitRatio)
+		registry.MustRegister(metricOvsDpTotal)
+		registry.MustRegister(metricOvsDp)
+		registry.MustRegister(metricOvsDpIfTotal)
+		registry.MustRegister(metricOvsDpIf)
+		registry.MustRegister(metricOvsDpFlowsTotal)
+		registry.MustRegister(metricOvsDpFlowsLookupHit)
+		registry.MustRegister(metricOvsDpFlowsLookupMissed)
+		registry.MustRegister(metricOvsDpFlowsLookupLost)
+		registry.MustRegister(metricOvsDpPacketsTotal)
+		registry.MustRegister(metricOvsdpMasksHit)
+		registry.MustRegister(metricOvsDpMasksTotal)
+		registry.MustRegister(metricOvsDpMasksHitRatio)
 		// Register OVS bridge statistics & attributes metrics
-		prometheus.MustRegister(metricOvsBridgeTotal)
-		prometheus.MustRegister(metricOvsBridge)
-		prometheus.MustRegister(metricOvsBridgePortsTotal)
-		prometheus.MustRegister(metricOvsBridgeFlowsTotal)
+		registry.MustRegister(metricOvsBridgeTotal)
+		registry.MustRegister(metricOvsBridge)
+		registry.MustRegister(metricOvsBridgePortsTotal)
+		registry.MustRegister(metricOvsBridgeFlowsTotal)
 		// Register ovs Memory metrics
-		prometheus.MustRegister(metricOvsHandlersTotal)
-		prometheus.MustRegister(metricOvsRevalidatorsTotal)
+		registry.MustRegister(metricOvsHandlersTotal)
+		registry.MustRegister(metricOvsRevalidatorsTotal)
 		// Register OVS HW offload metrics
-		prometheus.MustRegister(metricOvsHwOffload)
-		prometheus.MustRegister(metricOvsTcPolicy)
+		registry.MustRegister(metricOvsHwOffload)
+		registry.MustRegister(metricOvsTcPolicy)
 		// Register OVS Interface metrics
-		registerOvsInterfaceMetrics(MetricOvsNamespace, MetricOvsSubsystemVswitchd)
-		prometheus.MustRegister(metricInterafceDriverName)
-		prometheus.MustRegister(metricInterafceDriverVersion)
-		prometheus.MustRegister(metricInterafceFirmwareVersion)
+		registerOvsInterfaceMetrics(registry, MetricOvsNamespace, MetricOvsSubsystemVswitchd)
+		registry.MustRegister(metricInterafceDriverName)
+		registry.MustRegister(metricInterafceDriverVersion)
+		registry.MustRegister(metricInterafceFirmwareVersion)
 		// Register the OVS coverage/show metrics
 		componentCoverageShowMetricsMap[ovsVswitchd] = ovsVswitchdCoverageShowMetricsMap
 		registerCoverageShowMetrics(ovsVswitchd, MetricOvsNamespace, MetricOvsSubsystemVswitchd)
 
-		prometheus.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
+		registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
 			PidFn:     prometheus.NewPidFileFn("/var/run/openvswitch/ovs-vswitchd.pid"),
 			Namespace: fmt.Sprintf("%s_%s", MetricOvsNamespace, MetricOvsSubsystemVswitchd),
 		}))
-		prometheus.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
+		registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
 			PidFn:     prometheus.NewPidFileFn("/var/run/openvswitch/ovsdb-server.pid"),
 			Namespace: fmt.Sprintf("%s_%s", MetricOvsNamespace, MetricOvsSubsystemDB),
 		}))

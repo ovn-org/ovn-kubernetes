@@ -152,6 +152,7 @@ no-hostsubnet-nodes=label=another-test-label
 [metrics]
 bind-address=1.1.1.1:8080
 ovn-metrics-bind-address=1.1.1.2:8081
+export-ovs-metrics=true
 enable-pprof=true
 
 [logging]
@@ -558,6 +559,7 @@ var _ = Describe("Config Operations", func() {
 
 			gomega.Expect(Metrics.BindAddress).To(gomega.Equal("1.1.1.1:8080"))
 			gomega.Expect(Metrics.OVNMetricsBindAddress).To(gomega.Equal("1.1.1.2:8081"))
+			gomega.Expect(Metrics.ExportOVSMetrics).To(gomega.Equal(true))
 			gomega.Expect(Metrics.EnablePprof).To(gomega.Equal(true))
 
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeSSL))
@@ -636,6 +638,7 @@ var _ = Describe("Config Operations", func() {
 
 			gomega.Expect(Metrics.BindAddress).To(gomega.Equal("2.2.2.2:8080"))
 			gomega.Expect(Metrics.OVNMetricsBindAddress).To(gomega.Equal("2.2.2.3:8081"))
+			gomega.Expect(Metrics.ExportOVSMetrics).To(gomega.Equal(true))
 			gomega.Expect(Metrics.EnablePprof).To(gomega.Equal(true))
 
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeSSL))
@@ -706,6 +709,7 @@ var _ = Describe("Config Operations", func() {
 			"-monitor-all=false",
 			"-metrics-bind-address=2.2.2.2:8080",
 			"-ovn-metrics-bind-address=2.2.2.3:8081",
+			"-export-ovs-metrics=false",
 			"-metrics-enable-pprof=false",
 		}
 		err = app.Run(cliArgs)
