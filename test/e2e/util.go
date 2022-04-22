@@ -462,6 +462,26 @@ func addressIsIP(address v1.NodeAddress) bool {
 	return true
 }
 
+// addressIsIPv4 tells whether the given address is an
+// IPv4 address.
+func addressIsIPv4(address v1.NodeAddress) bool {
+	addr := net.ParseIP(address.Address)
+	if addr == nil {
+		return false
+	}
+	return utilnet.IsIPv4String(addr.String())
+}
+
+// addressIsIPv6 tells whether the given address is an
+// IPv6 address.
+func addressIsIPv6(address v1.NodeAddress) bool {
+	addr := net.ParseIP(address.Address)
+	if addr == nil {
+		return false
+	}
+	return utilnet.IsIPv6String(addr.String())
+}
+
 // Returns pod's ipv4 and ipv6 addresses IN ORDER
 func getPodAddresses(pod *v1.Pod) (string, string) {
 	var ipv4Res, ipv6Res string
