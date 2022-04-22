@@ -1348,7 +1348,7 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 	pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
 	if err != nil {
 		klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
-	} else {
+	} else if nSyncs.syncNode { // do this only if its a new node add
 		klog.V(5).Infof("When adding node %s, found %d pods to add to retryPods", node.Name, len(pods.Items))
 		for _, pod := range pods.Items {
 			pod := pod
