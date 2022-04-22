@@ -1,11 +1,12 @@
 package node
 
 import (
+	"reflect"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"reflect"
 )
 
 var _ = Describe("Mananagement port tests", func() {
