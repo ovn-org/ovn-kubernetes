@@ -774,10 +774,32 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 }
 
 func (oc *Controller) addNodeAnnotations(node *kapi.Node, hostSubnets []*net.IPNet) error {
+	gwLRPIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
+	if err != nil {
+		return fmt.Errorf("failed to allocate join switch port IP address for node %s: %v", node.Name, err)
+	}
+	var v4Addr, v6Addr *net.IPNet
+	for _, ip := range gwLRPIPs {
+		if ip.IP.To4() != nil {
+			v4Addr = ip
+		} else if ip.IP.To16() != nil {
+			v6Addr = ip
+		}
+	}
+	gwLPRAnnotations, err := util.CreateNodeGateRouterLRPAddrAnnotation(v4Addr, v6Addr)
+	if err != nil {
+		return fmt.Errorf("failed to marshal node %q annotation for Gateway LRP IP %v",
+			node.Name, gwLRPIPs)
+	}
+
 	nodeAnnotations, err := util.CreateNodeHostSubnetAnnotation(hostSubnets)
 	if err != nil {
 		return fmt.Errorf("failed to marshal node %q annotation for subnet %s",
 			node.Name, util.JoinIPNets(hostSubnets, ","))
+	}
+
+	for k, v := range gwLPRAnnotations {
+		nodeAnnotations[k] = v
 	}
 	// FIXME: the real solution is to reconcile the node object. Once we have a work-queue based
 	// implementation where we can add the item back to the work queue when it fails to
