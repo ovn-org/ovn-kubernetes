@@ -95,7 +95,7 @@ var _ = ginkgo.Describe("Multicast", func() {
 		// Start a multicast listener on the same groups and verify it received the traffic (iperf server is the multicast listener)
 		// join multicast group (-B 224.3.3.3), UDP (-u), during (-t 30) seconds, report every (-i 1) seconds
 		ginkgo.By("creating first multicast listener pod in node " + serverNodeInfo.name)
-		iperf = fmt.Sprintf("iperf -s -B %s -u -t 30 -i 5", mcastGroup)
+		iperf = fmt.Sprintf("iperf -s -B %s -u -t 180 -i 5", mcastGroup)
 		if IsIPv6Cluster(cs) {
 			iperf = iperf + " -V"
 		}
@@ -107,7 +107,7 @@ var _ = ginkgo.Describe("Multicast", func() {
 		// Start a multicast listener on on other group and verify it does not receive the traffic (iperf server is the multicast listener)
 		// join multicast group (-B 224.4.4.4), UDP (-u), during (-t 30) seconds, report every (-i 1) seconds
 		ginkgo.By("creating second multicast listener pod in node " + serverNodeInfo.name)
-		iperf = fmt.Sprintf("iperf -s -B %s -u -t 30 -i 5", mcastGroupBad)
+		iperf = fmt.Sprintf("iperf -s -B %s -u -t 180 -i 5", mcastGroupBad)
 		if IsIPv6Cluster(cs) {
 			iperf = iperf + " -V"
 		}
