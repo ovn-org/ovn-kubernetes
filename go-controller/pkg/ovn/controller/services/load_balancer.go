@@ -31,6 +31,9 @@ type lbConfig struct {
 	// that means, skipSNAT, and remove any non-local endpoints.
 	// (see below)
 	externalTrafficLocal bool
+	// if true, then vips added on the switch are in "local" mode
+	// that means, remove any non-local endpoints.
+	internalTrafficLocal bool
 	// indicates if this LB is configuring service of type NodePort.
 	hasNodePort bool
 }
@@ -56,16 +59,19 @@ var protos = []v1.Protocol{
 // - services with NodePort set
 // - services with host-network endpoints
 // - services with ExternalTrafficPolicy=Local
+// - services with InternalTrafficPolicy=Local
 func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.EndpointSlice) (perNodeConfigs []lbConfig, clusterConfigs []lbConfig) {
 	// For each svcPort, determine if it will be applied per-node or cluster-wide
 	for _, svcPort := range service.Spec.Ports {
 		eps := util.GetLbEndpoints(endpointSlices, svcPort)
 
-		// if ExternalTrafficPolicy is local, then we need to do things a bit differently
+		// if ExternalTrafficPolicy or InternalTrafficPolicy is local, then we need to do things a bit differently
 		externalTrafficLocal := (service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal)
+		internalTrafficLocal := (service.Spec.InternalTrafficPolicy != nil) && (*service.Spec.InternalTrafficPolicy == v1.ServiceInternalTrafficPolicyLocal)
 
 		// NodePort services get a per-node load balancer, but with the node's physical IP as the vip
 		// Thus, the vip "node" will be expanded later.
+		// This is NEVER influenced by InternalTrafficPolicy
 		if svcPort.NodePort != 0 {
 			nodePortLBConfig := lbConfig{
 				protocol:             svcPort.Protocol,
@@ -73,6 +79,7 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 				vips:                 []string{placeholderNodeIPs}, // shortcut for all-physical-ips
 				eps:                  eps,
 				externalTrafficLocal: externalTrafficLocal,
+				internalTrafficLocal: false, // always false for non-ClusterIPs
 				hasNodePort:          true,
 			}
 			perNodeConfigs = append(perNodeConfigs, nodePortLBConfig)
@@ -96,6 +103,7 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 
 		// if ETP=Local, then treat ExternalIPs and LoadBalancer IPs specially
 		// otherwise, they're just cluster IPs
+		// This is NEVER influenced by InternalTrafficPolicy
 		if externalTrafficLocal && len(externalVips) > 0 {
 			externalIPConfig := lbConfig{
 				protocol:             svcPort.Protocol,
@@ -103,6 +111,7 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 				vips:                 externalVips,
 				eps:                  eps,
 				externalTrafficLocal: true,
+				internalTrafficLocal: false, // always false for non-ClusterIPs
 				hasNodePort:          false,
 			}
 			perNodeConfigs = append(perNodeConfigs, externalIPConfig)
@@ -118,6 +127,7 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 			vips:                 vips,
 			eps:                  eps,
 			externalTrafficLocal: false, // always false for ClusterIPs
+			internalTrafficLocal: internalTrafficLocal,
 			hasNodePort:          false,
 		}
 
@@ -128,7 +138,7 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 		// - OCP only HACK: It's an openshift-dns:default-dns service
 		//
 		// In that case, we need to create per-node LBs.
-		if hasHostEndpoints(eps.V4IPs) || hasHostEndpoints(eps.V6IPs) ||
+		if hasHostEndpoints(eps.V4IPs) || hasHostEndpoints(eps.V6IPs) || internalTrafficLocal ||
 			// OCP only hack begin
 			(service.Namespace == "openshift-dns" && service.Name == "dns-default") {
 			// OCP only hack end
@@ -297,8 +307,14 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 
 				if config.externalTrafficLocal {
 					// for ExternalTrafficPolicy=Local, remove non-local endpoints from the router/switch targets
+					// NOTE: on the switches, filtered eps are used only by masqueradeVIP
 					routerV4targetips = util.FilterIPsSlice(routerV4targetips, node.nodeSubnets(), true)
 					routerV6targetips = util.FilterIPsSlice(routerV6targetips, node.nodeSubnets(), true)
+					switchV4targetips = util.FilterIPsSlice(switchV4targetips, node.nodeSubnets(), true)
+					switchV6targetips = util.FilterIPsSlice(switchV6targetips, node.nodeSubnets(), true)
+				}
+				if config.internalTrafficLocal {
+					// for InternalTrafficPolicy=Local, remove non-local endpoints from the switch targets only
 					switchV4targetips = util.FilterIPsSlice(switchV4targetips, node.nodeSubnets(), true)
 					switchV6targetips = util.FilterIPsSlice(switchV6targetips, node.nodeSubnets(), true)
 				}
@@ -365,10 +381,21 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 							Targets: targetsETP,
 						})
 					}
-					switchRules = append(switchRules, ovnlb.LBRule{
-						Source:  ovnlb.Addr{IP: vip, Port: config.inport},
-						Targets: targets,
-					})
+					if config.internalTrafficLocal && util.IsClusterIP(vip) { // ITP only applicable to CIP
+						targetsITP := ovnlb.JoinHostsPort(switchV4targetips, config.eps.Port)
+						if isv6 {
+							targetsITP = ovnlb.JoinHostsPort(switchV6targetips, config.eps.Port)
+						}
+						switchRules = append(switchRules, ovnlb.LBRule{
+							Source:  ovnlb.Addr{IP: vip, Port: config.inport},
+							Targets: targetsITP,
+						})
+					} else {
+						switchRules = append(switchRules, ovnlb.LBRule{
+							Source:  ovnlb.Addr{IP: vip, Port: config.inport},
+							Targets: targets,
+						})
+					}
 
 					// There is also a per-router rule
 					// with targets that *may* be different

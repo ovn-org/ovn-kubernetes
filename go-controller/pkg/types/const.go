@@ -66,8 +66,8 @@ const (
 	MGMTPortPolicyPriority                = "1005"
 	NodeSubnetPolicyPriority              = "1004"
 	InterNodePolicyPriority               = "1003"
-	HybridOverlaySubnetPriority           = "1002"
-	HybridOverlayReroutePriority          = "501"
+	HybridOverlaySubnetPriority           = 1002
+	HybridOverlayReroutePriority          = 501
 	DefaultNoRereoutePriority             = 101
 	EgressIPReroutePriority               = 100
 
@@ -98,6 +98,16 @@ const (
 	OvnRateLimitingMeter = "rate-limiter"
 	PacketsPerSecond     = "pktps"
 	MeterAction          = "drop"
+
+	// Default Meters created on GRs.
+	OVNARPRateLimiter              = "arp"
+	OVNARPResolveRateLimiter       = "arp-resolve"
+	OVNBFDRateLimiter              = "bfd"
+	OVNControllerEventsRateLimiter = "event-elb"
+	OVNICMPV4ErrorsRateLimiter     = "icmp4-error"
+	OVNICMPV6ErrorsRateLimiter     = "icmp6-error"
+	OVNRejectRateLimiter           = "reject"
+	OVNTCPRSTRateLimiter           = "tcp-reset"
 
 	// OVN-K8S Address Sets Names
 	HybridRoutePolicyPrefix = "hybrid-route-pods-"

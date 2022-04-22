@@ -117,7 +117,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceT.Name, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName, []string{tP.podIP})
+			fakeOvn.asf.EventuallyExpectAddressSetWithIPs(namespaceName, []string{tP.podIP})
 		})
 
 		ginkgo.It("creates an empty address set for the namespace without pods", func() {
@@ -230,6 +230,9 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			fakeOvn.controller.multicastSupport = false
 			fakeOvn.controller.SCTPSupport = true
 
+			fakeOvn.controller.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 			_, clusterNetwork, err := net.ParseCIDR(clusterCIDR)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			fakeOvn.controller.masterSubnetAllocator.AddNetworkRange(clusterNetwork, 24)
@@ -317,7 +320,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			for _, lrpIP := range gwLRPIPs {
 				allowIPs = append(allowIPs, lrpIP.IP.String())
 			}
-			fakeOvn.asf.ExpectAddressSetWithIPs(hostNetworkNamespace, allowIPs)
+			fakeOvn.asf.EventuallyExpectAddressSetWithIPs(hostNetworkNamespace, allowIPs)
 		})
 	})
 

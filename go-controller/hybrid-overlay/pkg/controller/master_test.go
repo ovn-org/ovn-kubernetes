@@ -19,7 +19,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 
@@ -192,12 +191,12 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			// pre-existing nbdb objects
 			nodeSwitch := &nbdb.LogicalSwitch{
 				Name: nodeName,
-				UUID: libovsdbops.BuildNamedUUID(),
+				UUID: nodeName + "-UUID",
 			}
 
 			ovnClusterRouter := &nbdb.LogicalRouter{
 				Name: types.OVNClusterRouter,
-				UUID: libovsdbops.BuildNamedUUID(),
+				UUID: types.OVNClusterRouter + "-UUID",
 			}
 
 			initialNBDB := []libovsdbtest.TestData{
@@ -207,7 +206,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			// pre-existing sbdb objects
 			clusterRouterDatapath := &sbdb.DatapathBinding{
-				UUID:        libovsdbops.BuildNamedUUID(),
+				UUID:        types.OVNClusterRouter + "-UUID",
 				ExternalIDs: map[string]string{"logical-router": ovnClusterRouter.UUID, "name": types.OVNClusterRouter},
 			}
 
@@ -240,7 +239,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			// make sure the expected LSP is created and added to the node
 			expectedLSP := &nbdb.LogicalSwitchPort{
-				UUID:      libovsdbops.BuildNamedUUID(),
+				UUID:      types.HybridOverlayPrefix + nodeName + "-UUID",
 				Name:      types.HybridOverlayPrefix + nodeName,
 				Addresses: []string{nodeHOMAC},
 			}
@@ -254,14 +253,13 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				Action:   nbdb.LogicalRouterPolicyActionReroute,
 				Nexthops: []string{nodeHOIP},
 				Match:    "inport == \"rtos-node1\" && ip4.dst == 11.1.0.0/16",
-				UUID:     libovsdbops.BuildNamedUUID(),
+				UUID:     "expectedLRP-UUID",
 			}
 
 			nodeSwitch.Ports = []string{expectedLSP.UUID}
 			ovnClusterRouter.Policies = []string{expectedLRP.UUID}
 
 			expectedMACBinding := &sbdb.MACBinding{
-				UUID:        libovsdbops.BuildNamedUUID(),
 				Datapath:    clusterRouterDatapath.UUID,
 				IP:          nodeHOIP,
 				LogicalPort: types.RouterToSwitchPrefix + nodeName,
@@ -309,8 +307,10 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			// LRP should have been deleted and removed
 			ovnClusterRouter.Policies = []string{}
-			// in a real db, deleting the LSP would remove the reference here, but in our testing ovsdb server it does not
-			// nodeSwitch.Ports = []string{}
+
+			// LSP should have been deleted and removed
+			nodeSwitch.Ports = []string{}
+
 			expectedNBDatabaseState = []libovsdbtest.TestData{
 				ovnClusterRouter,
 				nodeSwitch,
@@ -359,7 +359,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			// pre-existing nbdb objects
 
 			existingLSP := &nbdb.LogicalSwitchPort{
-				UUID:             libovsdbops.BuildNamedUUID(),
+				UUID:             types.HybridOverlayPrefix + nodeName + "-UUID",
 				Name:             types.HybridOverlayPrefix + nodeName,
 				Addresses:        []string{nodeHOMAC},
 				DynamicAddresses: &dynAdd,
@@ -373,18 +373,18 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				Action:   nbdb.LogicalRouterPolicyActionReroute,
 				Nexthops: []string{nodeHOIP},
 				Match:    "inport == \"rtos-node1\" && ip4.dst == 11.1.0.0/16",
-				UUID:     libovsdbops.BuildNamedUUID(),
+				UUID:     "hybrid-subnet-node1-UUID",
 			}
 
 			nodeSwitch := &nbdb.LogicalSwitch{
 				Name:  nodeName,
-				UUID:  libovsdbops.BuildNamedUUID(),
+				UUID:  nodeName + "-UUID",
 				Ports: []string{existingLSP.UUID},
 			}
 
 			ovnClusterRouter := &nbdb.LogicalRouter{
 				Name: types.OVNClusterRouter,
-				UUID: libovsdbops.BuildNamedUUID(),
+				UUID: types.OVNClusterRouter + "-UUID",
 				// Something in the test harness causes this names uuid to be added again
 				// comment out for now
 				// Policies: []string{existingLRP.UUID},
@@ -399,13 +399,13 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			// pre-existing sbdb objects
 			clusterRouterDatapath := &sbdb.DatapathBinding{
-				UUID:        libovsdbops.BuildNamedUUID(),
+				UUID:        types.OVNClusterRouter + "-UUID",
 				ExternalIDs: map[string]string{"logical-router": ovnClusterRouter.UUID, "name": types.OVNClusterRouter},
 			}
 
 			// the mac binding should already exist
 			existingMACBinding := &sbdb.MACBinding{
-				UUID:        libovsdbops.BuildNamedUUID(),
+				UUID:        types.RouterToSwitchPrefix + nodeName + "-UUID",
 				Datapath:    clusterRouterDatapath.UUID,
 				IP:          nodeHOIP,
 				LogicalPort: types.RouterToSwitchPrefix + nodeName,
@@ -495,7 +495,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
 			dynAdd := nodeHOMAC + " " + nodeHOIP
-			lspUUID := libovsdbops.BuildNamedUUID()
 			initialDatabaseState := []libovsdbtest.TestData{
 				&nbdb.LogicalRouterPolicy{
 					Priority: 1002,
@@ -512,7 +511,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 					Policies: []string{"reroute-policy-UUID"},
 				},
 				&nbdb.LogicalSwitchPort{
-					UUID:             lspUUID,
+					UUID:             "int-" + nodeName + "-UUID",
 					Name:             "int-" + nodeName,
 					Addresses:        []string{nodeHOMAC, nodeHOIP},
 					DynamicAddresses: &dynAdd,
@@ -520,7 +519,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				&nbdb.LogicalSwitch{
 					Name:  nodeName,
 					UUID:  nodeName + "-UUID",
-					Ports: []string{lspUUID},
+					Ports: []string{"int-" + nodeName + "-UUID"},
 				},
 			}
 			dbSetup := libovsdbtest.TestSetup{
@@ -592,9 +591,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				&nbdb.LogicalSwitch{
 					Name: nodeName,
 					UUID: nodeName + "-UUID",
-					// CI server doesn't clean this up even though the LSP has been deleted, will
-					// be garbage collected in real scenario
-					Ports: []string{lspUUID},
 				},
 			}
 

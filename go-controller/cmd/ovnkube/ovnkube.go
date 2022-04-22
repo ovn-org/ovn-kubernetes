@@ -282,9 +282,12 @@ func runOvnKube(ctx *cli.Context) error {
 		metrics.StartMetricsServer(config.Metrics.BindAddress, config.Metrics.EnablePprof)
 	}
 
-	// start the prometheus server to serve OVN Metrics (default port: 9476)
-	// Note: for ovnkube node mode dpu-host no ovn metrics is required as ovn is not running on the node.
+	// start the prometheus server to serve OVS and OVN Metrics (default port: 9476)
+	// Note: for ovnkube node mode dpu-host no metrics is required as ovs/ovn is not running on the node.
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.Metrics.OVNMetricsBindAddress != "" {
+		if config.Metrics.ExportOVSMetrics {
+			metrics.RegisterOvsMetricsWithOvnMetrics()
+		}
 		metrics.RegisterOvnMetrics(ovnClientset.KubeClient, node)
 		metrics.StartOVNMetricsServer(config.Metrics.OVNMetricsBindAddress)
 	}

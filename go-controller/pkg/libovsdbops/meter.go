@@ -1,118 +1,63 @@
 package libovsdbops
 
 import (
-	"context"
-	"fmt"
+	"reflect"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
-// FindMeterByName finds an ovn meter by name, will return `errNotFound` if it does not exist
-func FindMeterByName(nbClient libovsdbclient.Client, name string) (*nbdb.Meter, error) {
-	searched := &nbdb.Meter{
-		Name: name,
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	err := nbClient.Get(ctx, searched)
-	if err != nil {
-		return nil, err
-	}
-
-	return searched, nil
+func equalsMeterBand(a, b *nbdb.MeterBand) bool {
+	return a.Action == b.Action &&
+		a.BurstSize == b.BurstSize &&
+		a.Rate == b.Rate &&
+		reflect.DeepEqual(a.ExternalIDs, b.ExternalIDs)
 }
 
-// UpdateMeterFairness updates the `fair` column of an ovn Meter
-func UpdateMeterFairness(nbClient libovsdbclient.Client, meter *nbdb.Meter, fairness bool) error {
-	meter.Fair = &fairness
-
-	opModel := OperationModel{
-		Model: meter,
-		OnModelUpdates: []interface{}{
-			&meter.Fair,
+// CreateMeterBandOps creates the provided meter band if it does not exist
+func CreateMeterBandOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, meterBand *nbdb.MeterBand) ([]ovsdb.Operation, error) {
+	bands := []*nbdb.MeterBand{}
+	opModel := operationModel{
+		Model:          meterBand,
+		ModelPredicate: func(item *nbdb.MeterBand) bool { return equalsMeterBand(item, meterBand) },
+		OnModelUpdates: onModelUpdatesNone(),
+		ExistingResult: &bands,
+		DoAfter: func() {
+			// in case we have multiple equal bands, pick the first one for
+			// convergence, OVSDB will remove unreferenced ones
+			if len(bands) > 0 {
+				uuids := sets.NewString()
+				for _, band := range bands {
+					uuids.Insert(band.UUID)
+				}
+				meterBand.UUID = uuids.List()[0]
+			}
 		},
-		ErrNotFound: true,
+		ErrNotFound: false,
+		BulkOp:      true,
 	}
 
-	m := NewModelClient(nbClient)
-	if _, err := m.CreateOrUpdate(opModel); err != nil {
-		return fmt.Errorf("error while updating Meter Fairness to: %v error %v", fairness, err)
-	}
-
-	return nil
+	m := newModelClient(nbClient)
+	return m.CreateOrUpdateOps(ops, opModel)
 }
 
-// CreateMeterWithBand simulates the ovn-nbctl operation performed by the `meter-add` command. i.e create the Meter
-// and accompanying meter_band, and add the meterband to the meter only call this if the meter does not exist
-func CreateMeterWithBand(nbClient libovsdbclient.Client, meter *nbdb.Meter, meterBand *nbdb.MeterBand) ([]ovsdb.OperationResult, error) {
-	opModels := []OperationModel{
-		{
-			Model: meterBand,
-			DoAfter: func() {
-				meter.Bands = []string{meterBand.UUID}
-			},
-		},
-		{
-			Model: meter,
-		},
+// CreateOrUpdateMeterOps creates or updates the provided meter associated to
+// the provided meter bands and returns the corresponding ops
+func CreateOrUpdateMeterOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, meter *nbdb.Meter, meterBands ...*nbdb.MeterBand) ([]ovsdb.Operation, error) {
+	meter.Bands = make([]string, 0, len(meterBands))
+	for _, band := range meterBands {
+		meter.Bands = append(meter.Bands, band.UUID)
+	}
+	opModel := operationModel{
+		Model:          meter,
+		OnModelUpdates: onModelUpdatesAll(),
+		ErrNotFound:    false,
+		BulkOp:         false,
 	}
 
-	m := NewModelClient(nbClient)
-	var results []ovsdb.OperationResult
-	var err error
-	if results, err = m.CreateOrUpdate(opModels...); err != nil {
-		return nil, fmt.Errorf("error while creating Meter_Band %+v and Meter %+v error %v", meterBand, meter, err)
-	}
-
-	return results, nil
-}
-
-// FindMeterBands returns all MeterBands that belong to a given meter.
-// If one of the meter bands cannot be found in the database, return an error.
-func GetMeterBands(nbClient libovsdbclient.Client, meter *nbdb.Meter) ([]*nbdb.MeterBand, error) {
-	var meterBands []*nbdb.MeterBand
-
-	if meter == nil {
-		return nil, fmt.Errorf("provided meter is invalid: <nil>")
-	}
-
-	for _, bandUUID := range meter.Bands {
-		meterBand := &nbdb.MeterBand{
-			UUID: bandUUID,
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-		defer cancel()
-		err := nbClient.Get(ctx, meterBand)
-		if err != nil {
-			return nil, err
-		}
-		meterBands = append(meterBands, meterBand)
-	}
-	return meterBands, nil
-}
-
-// UpdateMeterBandRate updates the `rate` column of an OVN MeterBand.
-func UpdateMeterBandRate(nbClient libovsdbclient.Client, meterBand *nbdb.MeterBand, rate int) error {
-	meterBand.Rate = rate
-
-	opModel := OperationModel{
-		Model: meterBand,
-		OnModelUpdates: []interface{}{
-			&meterBand.Rate,
-		},
-		ErrNotFound: true,
-	}
-
-	m := NewModelClient(nbClient)
-	if _, err := m.CreateOrUpdate(opModel); err != nil {
-		return fmt.Errorf("error while updating MeterBand Rate to: %d error %v", rate, err)
-	}
-
-	return nil
+	m := newModelClient(nbClient)
+	return m.CreateOrUpdateOps(ops, opModel)
 }

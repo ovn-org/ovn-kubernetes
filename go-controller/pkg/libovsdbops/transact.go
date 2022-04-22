@@ -69,7 +69,7 @@ func TransactAndCheckAndSetUUIDs(client client.Client, models interface{}, ops [
 	namedModelMap := map[string]model.Model{}
 	_ = onModels(models, func(model interface{}) error {
 		uuid := getUUID(model)
-		if IsNamedUUID(uuid) {
+		if isNamedUUID(uuid) {
 			namedModelMap[uuid] = model
 		}
 		return nil
@@ -84,7 +84,7 @@ func TransactAndCheckAndSetUUIDs(client client.Client, models interface{}, ops [
 			continue
 		}
 
-		if !IsNamedUUID(op.UUIDName) {
+		if !isNamedUUID(op.UUIDName) {
 			continue
 		}
 

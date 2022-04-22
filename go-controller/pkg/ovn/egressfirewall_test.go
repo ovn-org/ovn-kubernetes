@@ -54,6 +54,11 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 		node2Name string = "node2"
 	)
 
+	clusterRouter := &nbdb.LogicalRouter{
+		UUID: t.OVNClusterRouter + "-UUID",
+		Name: t.OVNClusterRouter,
+	}
+
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
@@ -90,7 +95,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					map[string]string{"egressFirewall": "none"},
 					nil,
 				)
-				purgeACL.UUID = libovsdbops.BuildNamedUUID()
+				purgeACL.UUID = "purgeACL-UUID"
 
 				keepACL := libovsdbops.BuildACL(
 					"",
@@ -104,7 +109,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					map[string]string{"egressFirewall": "default"},
 					nil,
 				)
-				keepACL.UUID = libovsdbops.BuildNamedUUID()
+				keepACL.UUID = "keepACL-UUID"
 
 				// this ACL is not in the egress firewall priority range and should be untouched
 				otherACL := libovsdbops.BuildACL(
@@ -119,15 +124,15 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					map[string]string{"egressFirewall": "default"},
 					nil,
 				)
-				otherACL.UUID = libovsdbops.BuildNamedUUID()
+				otherACL.UUID = "otherACL-UUID"
 
 				InitialNodeSwitch := &nbdb.LogicalSwitch{
-					UUID: libovsdbops.BuildNamedUUID(),
+					UUID: node1Name + "-UUID",
 					Name: node1Name,
 					ACLs: []string{purgeACL.UUID, keepACL.UUID},
 				}
 				InitialJoinSwitch := &nbdb.LogicalSwitch{
-					UUID: libovsdbops.BuildNamedUUID(),
+					UUID: "join-UUID",
 					Name: "join",
 					ACLs: []string{purgeACL.UUID, keepACL.UUID},
 				}
@@ -139,6 +144,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 						keepACL,
 						InitialNodeSwitch,
 						InitialJoinSwitch,
+						clusterRouter,
 					},
 				}
 
@@ -163,13 +169,13 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				// Both ACLS will be removed from the join switch
 				finalJoinSwitch := &nbdb.LogicalSwitch{
 					UUID: InitialJoinSwitch.UUID,
-					Name: "join",
+					Name: InitialJoinSwitch.Name,
 				}
 
 				// stale ACL will be removed from the node switch
 				finalNodeSwitch := &nbdb.LogicalSwitch{
 					UUID: InitialNodeSwitch.UUID,
-					Name: node1Name,
+					Name: InitialNodeSwitch.Name,
 					ACLs: []string{keepACL.UUID},
 				}
 
@@ -181,6 +187,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					keepACL,
 					finalNodeSwitch,
 					finalJoinSwitch,
+					clusterRouter,
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -199,13 +206,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				)
 
 				InitialNodeSwitch := &nbdb.LogicalSwitch{
-					UUID: libovsdbops.BuildNamedUUID(),
+					UUID: node1Name + "-UUID",
 					Name: node1Name,
 				}
 
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						InitialNodeSwitch,
+						clusterRouter,
 					},
 				}
 
@@ -253,18 +261,19 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
 				)
-				ipv4ACL.UUID = libovsdbops.BuildNamedUUID()
+				ipv4ACL.UUID = "ipv4ACL-UUID"
 
 				// new ACL will be added to the switch
 				finalNodeSwitch := &nbdb.LogicalSwitch{
 					UUID: InitialNodeSwitch.UUID,
-					Name: node1Name,
+					Name: InitialNodeSwitch.Name,
 					ACLs: []string{ipv4ACL.UUID},
 				}
 
 				expectedDatabaseState := []libovsdb.TestData{
 					ipv4ACL,
 					finalNodeSwitch,
+					clusterRouter,
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -283,13 +292,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				)
 
 				InitialNodeSwitch := &nbdb.LogicalSwitch{
-					UUID: libovsdbops.BuildNamedUUID(),
+					UUID: node1Name + "-UUID",
 					Name: node1Name,
 				}
 
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						InitialNodeSwitch,
+						clusterRouter,
 					},
 				}
 
@@ -342,18 +352,19 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
 				)
-				ipv6ACL.UUID = libovsdbops.BuildNamedUUID()
+				ipv6ACL.UUID = "ipv6ACL-UUID"
 
 				// new ACL will be added to the switch
 				finalNodeSwitch := &nbdb.LogicalSwitch{
 					UUID: InitialNodeSwitch.UUID,
-					Name: node1Name,
+					Name: InitialNodeSwitch.Name,
 					ACLs: []string{ipv6ACL.UUID},
 				}
 
 				expectedDatabaseState := []libovsdb.TestData{
 					ipv6ACL,
 					finalNodeSwitch,
+					clusterRouter,
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -374,13 +385,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				)
 
 				InitialNodeSwitch := &nbdb.LogicalSwitch{
-					UUID: libovsdbops.BuildNamedUUID(),
+					UUID: node1Name + "-UUID",
 					Name: node1Name,
 				}
 
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						InitialNodeSwitch,
+						clusterRouter,
 					},
 				}
 
@@ -439,19 +451,19 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
 				)
-
-				udpACL.UUID = libovsdbops.BuildNamedUUID()
+				udpACL.UUID = "udpACL-UUID"
 
 				// new ACL will be added to the switch
 				finalNodeSwitch := &nbdb.LogicalSwitch{
 					UUID: InitialNodeSwitch.UUID,
-					Name: node1Name,
+					Name: InitialNodeSwitch.Name,
 					ACLs: []string{udpACL.UUID},
 				}
 
 				expectedDatabaseState := []libovsdb.TestData{
 					udpACL,
 					finalNodeSwitch,
+					clusterRouter,
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -469,11 +481,11 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				)
 
 				nodeSwitch1 := &nbdb.LogicalSwitch{
-					UUID: libovsdbops.BuildNamedUUID(),
+					UUID: node1Name + "-UUID",
 					Name: node1Name,
 				}
 				nodeSwitch2 := &nbdb.LogicalSwitch{
-					UUID: libovsdbops.BuildNamedUUID(),
+					UUID: node2Name + "-UUID",
 					Name: node2Name,
 				}
 
@@ -481,6 +493,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					NBData: []libovsdbtest.TestData{
 						nodeSwitch1,
 						nodeSwitch2,
+						clusterRouter,
 					},
 				}
 
@@ -537,7 +550,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
 				)
-				ipv4ACL.UUID = libovsdbops.BuildNamedUUID()
+				ipv4ACL.UUID = "ipv4ACL-UUID"
 
 				// new ACL will be added to the switches
 				nodeSwitch1.ACLs = []string{ipv4ACL.UUID}
@@ -547,6 +560,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					ipv4ACL,
 					nodeSwitch1,
 					nodeSwitch2,
+					clusterRouter,
 				}
 
 				gomega.Expect(fakeOVN.nbClient).To(libovsdbtest.HaveData(expectedDatabaseState))
@@ -560,6 +574,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				expectedDatabaseState = []libovsdb.TestData{
 					nodeSwitch1,
 					nodeSwitch2,
+					clusterRouter,
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -577,13 +592,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				)
 
 				InitialNodeSwitch := &nbdb.LogicalSwitch{
-					UUID: libovsdbops.BuildNamedUUID(),
+					UUID: node1Name + "-UUID",
 					Name: node1Name,
 				}
 
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						InitialNodeSwitch,
+						clusterRouter,
 					},
 				}
 
@@ -642,12 +658,12 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
 				)
-				ipv4ACL.UUID = libovsdbops.BuildNamedUUID()
+				ipv4ACL.UUID = "ipv4ACL-UUID"
 
 				// new ACL will be added to the switch
 				finalNodeSwitch := &nbdb.LogicalSwitch{
 					UUID: InitialNodeSwitch.UUID,
-					Name: node1Name,
+					Name: InitialNodeSwitch.Name,
 					ACLs: []string{ipv4ACL.UUID},
 				}
 
@@ -655,6 +671,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				expectedDatabaseState := []libovsdb.TestData{
 					ipv4ACL,
 					finalNodeSwitch,
+					clusterRouter,
 				}
 
 				gomega.Expect(fakeOVN.nbClient).To(libovsdbtest.HaveData(expectedDatabaseState))
@@ -690,6 +707,11 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 		node2Name string = "node2"
 	)
 
+	clusterRouter := &nbdb.LogicalRouter{
+		UUID: t.OVNClusterRouter + "-UUID",
+		Name: t.OVNClusterRouter,
+	}
+
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each test
 		config.PrepareTestConfig()
@@ -722,7 +744,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					map[string]string{"egressFirewall": "none"},
 					nil,
 				)
-				purgeACL.UUID = libovsdbops.BuildNamedUUID()
+				purgeACL.UUID = "purgeACL-UUID"
 
 				keepACL := libovsdbops.BuildACL(
 					"",
@@ -736,7 +758,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					map[string]string{"egressFirewall": "default"},
 					nil,
 				)
-				keepACL.UUID = libovsdbops.BuildNamedUUID()
+				keepACL.UUID = "keepACL-UUID"
 
 				// this ACL is not in the egress firewall priority range and should be untouched
 				otherACL := libovsdbops.BuildACL(
@@ -751,16 +773,16 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					map[string]string{"egressFirewall": "default"},
 					nil,
 				)
-				otherACL.UUID = libovsdbops.BuildNamedUUID()
+				otherACL.UUID = "otherACL-UUID"
 
 				InitialNodeSwitch := &nbdb.LogicalSwitch{
-					UUID: libovsdbops.BuildNamedUUID(),
+					UUID: node1Name + "-UUID",
 					Name: node1Name,
 					ACLs: []string{purgeACL.UUID, keepACL.UUID},
 				}
 
 				InitialJoinSwitch := &nbdb.LogicalSwitch{
-					UUID: libovsdbops.BuildNamedUUID(),
+					UUID: "join-UUID",
 					Name: "join",
 					ACLs: []string{purgeACL.UUID, keepACL.UUID},
 				}
@@ -772,6 +794,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 						otherACL,
 						InitialNodeSwitch,
 						InitialJoinSwitch,
+						clusterRouter,
 					},
 				}
 				fakeOVN.startWithDBSetup(dbSetup,
@@ -800,8 +823,8 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 
 				// purgeACL will be removed form the join switch
 				finalJoinSwitch := &nbdb.LogicalSwitch{
-					UUID: libovsdbops.BuildNamedUUID(),
-					Name: "join",
+					UUID: InitialJoinSwitch.UUID,
+					Name: InitialJoinSwitch.Name,
 					ACLs: []string{keepACL.UUID},
 				}
 
@@ -813,6 +836,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					keepACL,
 					finalNodeSwitch,
 					finalJoinSwitch,
+					clusterRouter,
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -827,7 +851,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 		ginkgo.It("reconciles an existing egressFirewall with IPv4 CIDR", func() {
 			app.Action = func(ctx *cli.Context) error {
 				InitialJoinSwitch := &nbdb.LogicalSwitch{
-					UUID: libovsdbops.BuildNamedUUID(),
+					UUID: "join-UUID",
 					Name: "join",
 				}
 
@@ -844,6 +868,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						InitialJoinSwitch,
+						clusterRouter,
 					},
 				}
 				fakeOVN.startWithDBSetup(dbSetup,
@@ -880,18 +905,19 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
 				)
-				ipv4ACL.UUID = libovsdbops.BuildNamedUUID()
+				ipv4ACL.UUID = "ipv4ACL-UUID"
 
 				// new ACL will be added to the switch
 				finalJoinSwitch := &nbdb.LogicalSwitch{
 					UUID: InitialJoinSwitch.UUID,
-					Name: "join",
+					Name: InitialJoinSwitch.Name,
 					ACLs: []string{ipv4ACL.UUID},
 				}
 
 				expectedDatabaseState := []libovsdb.TestData{
 					ipv4ACL,
 					finalJoinSwitch,
+					clusterRouter,
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -906,7 +932,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 		ginkgo.It("reconciles an existing egressFirewall with IPv6 CIDR", func() {
 			app.Action = func(ctx *cli.Context) error {
 				InitialJoinSwitch := &nbdb.LogicalSwitch{
-					UUID: libovsdbops.BuildNamedUUID(),
+					UUID: "join-UUID",
 					Name: "join",
 				}
 
@@ -923,6 +949,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						InitialJoinSwitch,
+						clusterRouter,
 					},
 				}
 				fakeOVN.startWithDBSetup(dbSetup,
@@ -964,18 +991,19 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
 				)
-				ipv6ACL.UUID = libovsdbops.BuildNamedUUID()
+				ipv6ACL.UUID = "ipv6ACL-UUID"
 
 				// new ACL will be added to the switch
 				finalJoinSwitch := &nbdb.LogicalSwitch{
 					UUID: InitialJoinSwitch.UUID,
-					Name: "join",
+					Name: InitialJoinSwitch.Name,
 					ACLs: []string{ipv6ACL.UUID},
 				}
 
 				expectedDatabaseState := []libovsdb.TestData{
 					ipv6ACL,
 					finalJoinSwitch,
+					clusterRouter,
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -992,7 +1020,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 		ginkgo.It("correctly creates an egressfirewall denying traffic udp traffic on port 100", func() {
 			app.Action = func(ctx *cli.Context) error {
 				initialJoinSwitch := &nbdb.LogicalSwitch{
-					UUID: libovsdbops.BuildNamedUUID(),
+					UUID: "join-UUID",
 					Name: "join",
 				}
 
@@ -1015,6 +1043,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						initialJoinSwitch,
+						clusterRouter,
 					},
 				}
 				fakeOVN.startWithDBSetup(dbSetup,
@@ -1059,18 +1088,19 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					nil,
 				)
 
-				udpACL.UUID = libovsdbops.BuildNamedUUID()
+				udpACL.UUID = "udpACL-UUID"
 
 				// new ACL will be added to the switch
 				finalJoinSwitch := &nbdb.LogicalSwitch{
 					UUID: initialJoinSwitch.UUID,
-					Name: "join",
+					Name: initialJoinSwitch.Name,
 					ACLs: []string{udpACL.UUID},
 				}
 
 				expectedDatabaseState := []libovsdb.TestData{
 					udpACL,
 					finalJoinSwitch,
+					clusterRouter,
 				}
 
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -1083,7 +1113,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 		ginkgo.It("correctly deletes an egressfirewall", func() {
 			app.Action = func(ctx *cli.Context) error {
 				initialJoinSwitch := &nbdb.LogicalSwitch{
-					UUID: libovsdbops.BuildNamedUUID(),
+					UUID: "join-UUID",
 					Name: "join",
 				}
 
@@ -1106,6 +1136,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						initialJoinSwitch,
+						clusterRouter,
 					},
 				}
 				fakeOVN.startWithDBSetup(dbSetup,
@@ -1140,18 +1171,19 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
 				)
-				ipv4ACL.UUID = libovsdbops.BuildNamedUUID()
+				ipv4ACL.UUID = "ipv4ACL-UUID"
 
 				// new ACL will be added to the switch
 				finalJoinSwitch := &nbdb.LogicalSwitch{
 					UUID: initialJoinSwitch.UUID,
-					Name: "join",
+					Name: initialJoinSwitch.Name,
 					ACLs: []string{ipv4ACL.UUID},
 				}
 
 				expectedDatabaseState := []libovsdb.TestData{
 					ipv4ACL,
 					finalJoinSwitch,
+					clusterRouter,
 				}
 
 				gomega.Expect(fakeOVN.nbClient).To(libovsdbtest.HaveData(expectedDatabaseState))
@@ -1171,7 +1203,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 		ginkgo.It("correctly updates an egressfirewall", func() {
 			app.Action = func(ctx *cli.Context) error {
 				initialJoinSwitch := &nbdb.LogicalSwitch{
-					UUID: libovsdbops.BuildNamedUUID(),
+					UUID: "join-UUID",
 					Name: "join",
 				}
 
@@ -1196,6 +1228,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						initialJoinSwitch,
+						clusterRouter,
 					},
 				}
 				fakeOVN.startWithDBSetup(dbSetup,
@@ -1229,18 +1262,19 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
 				)
-				ipv4ACL.UUID = libovsdbops.BuildNamedUUID()
+				ipv4ACL.UUID = "ipv4ACL-UUID"
 
 				// new ACL will be added to the switch
 				finalJoinSwitch := &nbdb.LogicalSwitch{
 					UUID: initialJoinSwitch.UUID,
-					Name: "join",
+					Name: initialJoinSwitch.Name,
 					ACLs: []string{ipv4ACL.UUID},
 				}
 
 				expectedDatabaseState := []libovsdb.TestData{
 					ipv4ACL,
 					finalJoinSwitch,
+					clusterRouter,
 				}
 
 				gomega.Expect(fakeOVN.nbClient).To(libovsdbtest.HaveData(expectedDatabaseState))

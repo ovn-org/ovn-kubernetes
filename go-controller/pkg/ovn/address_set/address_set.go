@@ -1,28 +1,22 @@
 package addressset
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"strings"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-
-	"github.com/pkg/errors"
-
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
+	"github.com/pkg/errors"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 const (
@@ -103,51 +97,15 @@ func ensureOvnAddressSet(nbClient libovsdbclient.Client, name string) (*ovnAddre
 		hashName: hashedAddressSet(name),
 	}
 
-	addrSet := &nbdb.AddressSet{Name: as.hashName, ExternalIDs: map[string]string{"name": name}}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	err := as.nbClient.Get(ctx, addrSet)
-	if err != nil && err != libovsdbclient.ErrNotFound {
-		return nil, fmt.Errorf("ensuring address set %s failed: %+v", name, err)
+	addrSet := nbdb.AddressSet{
+		Name:        as.hashName,
+		ExternalIDs: map[string]string{"name": name},
 	}
 
-	if len(addrSet.UUID) == 0 {
-		ops := make([]ovsdb.Operation, 0, 2)
-		timeout := types.OVSDBWaitTimeout
-		condition := model.Condition{
-			Field:    &addrSet.Name,
-			Function: ovsdb.ConditionEqual,
-			Value:    addrSet.Name,
-		}
-		waitOps, err := as.nbClient.Where(addrSet, condition).Wait(ovsdb.WaitConditionNotEqual, &timeout, addrSet, &addrSet.Name)
-		if err != nil {
-			return nil, err
-		}
-		ops = append(ops, waitOps...)
-		// hack used to make TransactAndCheckAndSetUUIDs track the model correctly
-		addrSet.UUID = libovsdbops.BuildNamedUUID()
-		// create the address_set with no IPs
-		op, err := as.nbClient.Create(addrSet)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create address set %s (%v)",
-				name, err)
-		}
-		ops = append(ops, op...)
-		results, err := libovsdbops.TransactAndCheckAndSetUUIDs(as.nbClient, addrSet, ops)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create address set %s (%v)",
-				name, err)
-		}
-		as.uuid = addrSet.UUID
-
-		if len(as.uuid) == 0 {
-			//should never happen
-			return nil, fmt.Errorf("ensureOvnAddressSet: empty UUID in address set %q, model: %#v, results: %#v",
-				name, *addrSet, results)
-		}
-	} else {
-		// if there is already an addressSet, reuse the addressSet and return it
-		as.uuid = addrSet.UUID
+	err := libovsdbops.CreateAddressSets(nbClient, &addrSet)
+	// UUID should always be set if no error, check anyway
+	if err != nil || addrSet.UUID == "" {
+		return nil, fmt.Errorf("failed to create address set %+v: %v", addrSet, err)
 	}
 
 	return as, nil
@@ -178,20 +136,17 @@ func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) (AddressSet, erro
 }
 
 func forEachAddressSet(nbClient libovsdbclient.Client, do func(string) error) error {
-	addrSetList := &[]nbdb.AddressSet{}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	err := nbClient.WhereCache(
-		func(addrSet *nbdb.AddressSet) bool {
-			_, exists := addrSet.ExternalIDs["name"]
-			return exists
-		}).List(ctx, addrSetList)
+	p := func(addrSet *nbdb.AddressSet) bool {
+		_, exists := addrSet.ExternalIDs["name"]
+		return exists
+	}
+	addrSetList, err := libovsdbops.FindAddressSetsWithPredicate(nbClient, p)
 	if err != nil {
 		return fmt.Errorf("error reading address sets: %+v", err)
 	}
 
 	var errors []error
-	for _, addrSet := range *addrSetList {
+	for _, addrSet := range addrSetList {
 		if err := do(addrSet.ExternalIDs["name"]); err != nil {
 			errors = append(errors, err)
 		}
@@ -264,19 +219,12 @@ func (asf *ovnAddressSetFactory) DestroyAddressSetInBackingStore(name string) er
 }
 
 func destroyAddressSet(nbClient libovsdbclient.Client, name string) error {
-	addrset := &nbdb.AddressSet{
-		Name:        hashedAddressSet(name),
-		ExternalIDs: map[string]string{"name": name},
+	addrset := nbdb.AddressSet{
+		Name: hashedAddressSet(name),
 	}
-	ops, err := nbClient.Where(addrset).Delete()
+	err := libovsdbops.DeleteAddressSets(nbClient, &addrset)
 	if err != nil {
-		return fmt.Errorf("failed to delete address set %s (%v)",
-			name, err)
-	}
-	_, err = libovsdbops.TransactAndCheck(nbClient, ops)
-	if err != nil {
-		return fmt.Errorf("failed to delete address set %s (%v)",
-			name, err)
+		return fmt.Errorf("failed to delete address set %s: %v", name, err)
 	}
 	return nil
 }
@@ -336,72 +284,22 @@ func newOvnAddressSet(nbClient libovsdbclient.Client, name string, ips []net.IP)
 		name:     name,
 		hashName: hashedAddressSet(name),
 	}
+
 	uniqIPs := ipsToStringUnique(ips)
-	addrSet := &nbdb.AddressSet{Name: hashedAddressSet(name)}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	err := as.nbClient.Get(ctx, addrSet)
-	if err != nil && err != libovsdbclient.ErrNotFound {
-		return nil, err
+	addrSet := nbdb.AddressSet{
+		Name:        hashedAddressSet(name),
+		ExternalIDs: map[string]string{"name": as.name},
+		Addresses:   uniqIPs,
 	}
 
-	// Update address set IPs and external ID
-	addrSet.Addresses = uniqIPs
-	addrSet.ExternalIDs = map[string]string{"name": as.name}
-
-	if len(addrSet.UUID) > 0 {
-		// if there is already an addressSet, reuse the addressSet and set the IPs to the slice provided
-		as.uuid = addrSet.UUID
-		klog.V(5).Infof("New(%s) already exists; updating IPs", asDetail(as))
-
-		ops, err := as.nbClient.Where(addrSet).Update(addrSet, &addrSet.Addresses)
-		if err != nil {
-			return nil, err
-		}
-		_, err = libovsdbops.TransactAndCheck(nbClient, ops)
-		if err != nil {
-			return nil, fmt.Errorf("failed to update address set %s (%v)",
-				name, err)
-		}
-	} else {
-		ops := make([]ovsdb.Operation, 0, 2)
-		timeout := types.OVSDBWaitTimeout
-		condition := model.Condition{
-			Field:    &addrSet.Name,
-			Function: ovsdb.ConditionEqual,
-			Value:    addrSet.Name,
-		}
-		waitOps, err := as.nbClient.Where(addrSet, condition).Wait(ovsdb.WaitConditionNotEqual, &timeout, addrSet, &addrSet.Name)
-		if err != nil {
-			return nil, err
-		}
-		ops = append(ops, waitOps...)
-		if addrSet.UUID == "" {
-			// hack used to make TransactAndCheckAndSetUUIDs track the model correctly
-			addrSet.UUID = libovsdbops.BuildNamedUUID()
-		}
-		// create a new addressSet
-		op, err := nbClient.Create(addrSet)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create address set %s (%v)",
-				name, err)
-		}
-		ops = append(ops, op...)
-		results, err := libovsdbops.TransactAndCheckAndSetUUIDs(nbClient, addrSet, ops)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create new address set %s (%v)",
-				name, err)
-		}
-		as.uuid = addrSet.UUID
-		if len(as.uuid) == 0 {
-			// should never happen
-			return nil, fmt.Errorf("newOVNAddressSet: empty UUID in address set %q, model: %#v,"+
-				" results: %#v", name, *addrSet, results)
-		}
+	err := libovsdbops.CreateOrUpdateAddressSets(nbClient, &addrSet)
+	// UUID should always be set if no error, check anyway
+	if err != nil || addrSet.UUID == "" {
+		return nil, fmt.Errorf("failed to create or update address set %+v: %v", addrSet, err)
 	}
 
+	as.uuid = addrSet.UUID
 	klog.V(5).Infof("New(%s) with %v", asDetail(as), ips)
-
 	return as, nil
 }
 
@@ -556,18 +454,15 @@ func (as *ovnAddressSets) Destroy() error {
 // setIP updates the given address set in OVN to be only the given IPs, disregarding
 // existing state.
 func (as *ovnAddressSet) setIPs(ips []net.IP) error {
-	var err error
 	uniqIPs := ipsToStringUnique(ips)
-	addrset := &nbdb.AddressSet{UUID: as.uuid, Addresses: uniqIPs}
-	ops, err := as.nbClient.Where(addrset).Update(addrset, &addrset.Addresses)
-	if err != nil {
-		return err
+	addrset := nbdb.AddressSet{
+		UUID:      as.uuid,
+		Name:      as.hashName,
+		Addresses: uniqIPs,
 	}
-
-	_, err = libovsdbops.TransactAndCheck(as.nbClient, ops)
+	err := libovsdbops.UpdateAddressSetsIPs(as.nbClient, &addrset)
 	if err != nil {
-		return fmt.Errorf("failed set ips for address set %s (%v)",
-			as.name, err)
+		return fmt.Errorf("failed to update address set IPs %+v: %v", addrset, err)
 	}
 
 	return nil
@@ -575,10 +470,11 @@ func (as *ovnAddressSet) setIPs(ips []net.IP) error {
 
 // getIPs gets the IPs of a given address set in OVN from libovsdb cache
 func (as *ovnAddressSet) getIPs() ([]string, error) {
-	addrset := &nbdb.AddressSet{Name: as.hashName}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	err := as.nbClient.Get(ctx, addrset)
+	addrset := &nbdb.AddressSet{
+		UUID: as.uuid,
+		Name: as.hashName,
+	}
+	addrset, err := libovsdbops.GetAddressSet(as.nbClient, addrset)
 	if err != nil {
 		return nil, err
 	}
@@ -588,24 +484,21 @@ func (as *ovnAddressSet) getIPs() ([]string, error) {
 
 // addIPs appends the set of IPs to the existing address_set.
 func (as *ovnAddressSet) addIPs(ips []net.IP) ([]ovsdb.Operation, error) {
-	var ops []ovsdb.Operation
-	var err error
-
 	if len(ips) == 0 {
-		return ops, nil
+		return nil, nil
 	}
+
 	uniqIPs := ipsToStringUnique(ips)
 
 	klog.V(5).Infof("(%s) adding IPs (%s) to address set", asDetail(as), uniqIPs)
-	addrset := &nbdb.AddressSet{UUID: as.uuid}
-	ops, err = as.nbClient.Where(addrset).Mutate(addrset, model.Mutation{
-		Field:   &addrset.Addresses,
-		Mutator: ovsdb.MutateOperationInsert,
-		Value:   uniqIPs,
-	})
+
+	addrset := nbdb.AddressSet{
+		UUID: as.uuid,
+		Name: as.hashName,
+	}
+	ops, err := libovsdbops.AddIPsToAddressSetOps(as.nbClient, nil, &addrset, uniqIPs...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to add IPs to address set %q (%v)",
-			asDetail(as), err)
+		return nil, fmt.Errorf("failed to add IPs %v to address set %+v: %v", uniqIPs, addrset, err)
 	}
 
 	return ops, nil
@@ -613,25 +506,21 @@ func (as *ovnAddressSet) addIPs(ips []net.IP) ([]ovsdb.Operation, error) {
 
 // deleteIPs removes selected IPs from the existing address_set
 func (as *ovnAddressSet) deleteIPs(ips []net.IP) ([]ovsdb.Operation, error) {
-	var ops []ovsdb.Operation
-	var err error
-
 	if len(ips) == 0 {
-		return ops, nil
+		return nil, nil
 	}
+
 	uniqIPs := ipsToStringUnique(ips)
 
 	klog.V(5).Infof("(%s) deleting IP %s from address set", asDetail(as), uniqIPs)
 
-	addrset := &nbdb.AddressSet{UUID: as.uuid}
-	ops, err = as.nbClient.Where(addrset).Mutate(addrset, model.Mutation{
-		Field:   &addrset.Addresses,
-		Mutator: ovsdb.MutateOperationDelete,
-		Value:   uniqIPs,
-	})
+	addrset := nbdb.AddressSet{
+		UUID: as.uuid,
+		Name: as.hashName,
+	}
+	ops, err := libovsdbops.DeleteIPsFromAddressSetOps(as.nbClient, nil, &addrset, uniqIPs...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to delete IPs from address set %q (%v)",
-			asDetail(as), err)
+		return nil, fmt.Errorf("failed to delete IPs %v to address set %+v: %v", uniqIPs, addrset, err)
 	}
 
 	return ops, nil
@@ -639,16 +528,13 @@ func (as *ovnAddressSet) deleteIPs(ips []net.IP) ([]ovsdb.Operation, error) {
 
 func (as *ovnAddressSet) destroy() error {
 	klog.V(5).Infof("Destroy(%s)", asDetail(as))
-	addrset := &nbdb.AddressSet{UUID: as.uuid}
-	ops, err := as.nbClient.Where(addrset).Delete()
-	if err != nil {
-		return fmt.Errorf("failed to destroy address set %q (%v)",
-			asDetail(as), err)
+	addrset := nbdb.AddressSet{
+		UUID: as.uuid,
+		Name: as.hashName,
 	}
-	_, err = libovsdbops.TransactAndCheck(as.nbClient, ops)
+	err := libovsdbops.DeleteAddressSets(as.nbClient, &addrset)
 	if err != nil {
-		return fmt.Errorf("failed to destroy address set %s (%v)",
-			as.name, err)
+		return fmt.Errorf("failed to delete address set %+v: %v", addrset, err)
 	}
 
 	return nil

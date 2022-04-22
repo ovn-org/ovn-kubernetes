@@ -100,13 +100,13 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 		return lswitch
 	}
 	for k, v := range addLBsToSwitch {
-		ops, err = libovsdbops.AddLoadBalancersToSwitchOps(nbClient, ops, getSwitch(k), v...)
+		ops, err = libovsdbops.AddLoadBalancersToLogicalSwitchOps(nbClient, ops, getSwitch(k), v...)
 		if err != nil {
 			return err
 		}
 	}
 	for k, v := range removeLBsFromSwitch {
-		ops, err = libovsdbops.RemoveLoadBalancersFromSwitchOps(nbClient, ops, getSwitch(k), v...)
+		ops, err = libovsdbops.RemoveLoadBalancersFromLogicalSwitchOps(nbClient, ops, getSwitch(k), v...)
 		if err != nil {
 			return err
 		}
@@ -124,13 +124,13 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 		return router
 	}
 	for k, v := range addLBsToRouter {
-		ops, err = libovsdbops.AddLoadBalancersToRouterOps(nbClient, ops, getRouter(k), v...)
+		ops, err = libovsdbops.AddLoadBalancersToLogicalRouterOps(nbClient, ops, getRouter(k), v...)
 		if err != nil {
 			return err
 		}
 	}
 	for k, v := range removesLBsFromRouter {
-		ops, err = libovsdbops.RemoveLoadBalancersFromRouterOps(nbClient, ops, getRouter(k), v...)
+		ops, err = libovsdbops.RemoveLoadBalancersFromLogicalRouterOps(nbClient, ops, getRouter(k), v...)
 		if err != nil {
 			return err
 		}

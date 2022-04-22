@@ -36,6 +36,13 @@ const (
 	ctMarkOVN = "0x1"
 	// ctMarkHost is the conntrack mark value for host traffic
 	ctMarkHost = "0x2"
+	// ovnkubeITPMark is the fwmark used for host->ITP=local svc traffic. Note that the fwmark is not a part
+	// of the packet, but just stored by kernel in its memory to track/filter packet. Hence fwmark is lost as
+	// soon as packet exits the host.
+	ovnkubeITPMark = "0x1745ec" // constant itp(174)-service(5ec)
+	// ovnkubeSvcViaMgmPortRT is the number of the custom routing table used to steer host->service
+	// traffic packets into OVN via ovn-k8s-mp0. Currently only used for ITP=local traffic.
+	ovnkubeSvcViaMgmPortRT = "7"
 )
 
 var (
@@ -426,27 +433,38 @@ func delServiceRules(service *kapi.Service, npw *nodePortWatcher) {
 		npw.ofm.requestFlowSync()
 		if !npw.dpuMode {
 			// Always try and delete all rules here in full mode & in host only mode. We don't touch iptables in dpu mode.
-			// +--------------------------+-----------------------+--------------+--------------------------------+
-			// | svcHasLocalHostNetEndPnt | ExternalTrafficPolicy | GatewayMode  |     Scenario for deletion      |
-			// |--------------------------|-----------------------|--------------|--------------------------------|
-			// |                          |                       |              | deletes the DNAT rules for     |
-			// |         false            |          local        | shared+local | etp=local + non-local-host-net |
-			// |                          |                       |              | eps towards masqueradeIP       |
-			// |--------------------------|-----------------------|--------------|--------------------------------|
-			// |                          |                       |              |    deletes the DNAT rules      |
-			// |         false            |          cluster      | shared+local |   	towards clusterIP         |
-			// |                          |                       |              |       for the default case     |
-			// +--------------------------+-----------------------+--------------+--------------------------------+
+			// +--------------------------+-----------------------+-----------------------+--------------------------------+
+			// | svcHasLocalHostNetEndPnt | ExternalTrafficPolicy | InternalTrafficPolicy |     Scenario for deletion      |
+			// |--------------------------|-----------------------|-----------------------|--------------------------------|
+			// |                          |                       |                       |      deletes the MARK          |
+			// |         false            |         cluster       |          local        |      rules for itp=local       |
+			// |                          |                       |                       |       called from mangle       |
+			// |--------------------------|-----------------------|-----------------------|--------------------------------|
+			// |                          |                       |                       |      deletes the REDIRECT      |
+			// |         true             |         cluster       |          local        |      rules towards target      |
+			// |                          |                       |                       |       port for itp=local       |
+			// |--------------------------|-----------------------|-----------------------|--------------------------------|
+			// |                          |                       |                       | deletes the DNAT rules for     |
+			// |         false            |          local        |          cluster      |    non-local-host-net          |
+			// |                          |                       |                       | eps towards masqueradeIP +     |
+			// |                          |                       |                       | DNAT rules towards clusterIP   |
+			// |--------------------------|-----------------------|-----------------------|--------------------------------|
+			// |                          |                       |                       |    deletes the DNAT rules      |
+			// |       false||true        |          cluster      |          cluster      |   	towards clusterIP          |
+			// |                          |                       |                       |       for the default case     |
+			// |--------------------------|-----------------------|-----------------------|--------------------------------|
+			// |                          |                       |                       |      deletes all the rules     |
+			// |       false||true        |          local        |          local        |   for etp=local + itp=local    |
+			// |                          |                       |                       |   + default dnat towards CIP   |
+			// +--------------------------+-----------------------+-----------------------+--------------------------------+
 
-			// case1: deletes the DNAT rules towards masqueradeIP for etp=local + ovn-k pods in both gw modes OR
-			// case2: deletes the DNAT rules towards clusterIP for etp=cluster in both gw modes
+			delGatewayIptRules(service, true)
 			delGatewayIptRules(service, false)
 		}
 		return
 	}
 
-	// case1: deletes the DNAT rules towards masqueradeIP for etp=local + ovn-k pods in both gw modes OR
-	// case2: deletes the DNAT rules towards clusterIP for etp=cluster in both gw modes
+	delGatewayIptRules(service, true)
 	delGatewayIptRules(service, false)
 }
 
@@ -457,7 +475,8 @@ func serviceUpdateNotNeeded(old, new *kapi.Service) bool {
 		reflect.DeepEqual(new.Spec.ClusterIPs, old.Spec.ClusterIPs) &&
 		reflect.DeepEqual(new.Spec.Type, old.Spec.Type) &&
 		reflect.DeepEqual(new.Status.LoadBalancer.Ingress, old.Status.LoadBalancer.Ingress) &&
-		reflect.DeepEqual(new.Spec.ExternalTrafficPolicy, old.Spec.ExternalTrafficPolicy)
+		reflect.DeepEqual(new.Spec.ExternalTrafficPolicy, old.Spec.ExternalTrafficPolicy) &&
+		reflect.DeepEqual(*new.Spec.InternalTrafficPolicy, *old.Spec.InternalTrafficPolicy)
 }
 
 // AddService handles configuring shared gateway bridge flows to steer External IP, Node Port, Ingress LB traffic into OVN
@@ -493,7 +512,8 @@ func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) {
 
 	if serviceUpdateNotNeeded(old, new) {
 		klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, "+
-			".Spec.ExternalIP, .Spec.ClusterIP, .Spec.ClusterIPs, .Spec.Type, .Status.LoadBalancer.Ingress, .Spec.ExternalTrafficPolicy", new.Name)
+			".Spec.ExternalIP, .Spec.ClusterIP, .Spec.ClusterIPs, .Spec.Type, .Status.LoadBalancer.Ingress, "+
+			".Spec.ExternalTrafficPolicy, .Spec.InternalTrafficPolicy", new.Name)
 		return
 	}
 	// Update the service in svcConfig if we need to so that other handler
@@ -613,10 +633,11 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 	npw.ofm.requestFlowSync()
 	// sync IPtables rules once only for Full mode
 	if !npw.dpuMode {
-		for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain, iptableETPChain, iptableMgmPortChain} {
-			// (NOTE: Order is important, add jump to iptableETPChain before jump to NP/EIP chains)
+		// (NOTE: Order is important, add jump to iptableETPChain before jump to NP/EIP chains)
+		for _, chain := range []string{iptableITPChain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain, iptableMgmPortChain} {
 			recreateIPTRules("nat", chain, keepIPTRules)
 		}
+		recreateIPTRules("mangle", iptableITPChain, keepIPTRules)
 	}
 }
 
@@ -742,7 +763,7 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) {
 			continue
 		}
 		// Add correct iptables rules.
-		// TODO: ETP is not implemented for smart NIC mode.
+		// TODO: ETP and ITP is not implemented for smart NIC mode.
 		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, false)...)
 	}
 
@@ -1211,7 +1232,52 @@ func setBridgeOfPorts(bridge *bridgeConfiguration) error {
 	return nil
 }
 
-func newSharedGateway(nodeName string, gwNextHops []net.IP, gwIntf, egressGWIntf string,
+// initSvcViaMgmPortRoutingRules creates the svc2managementport routing table, routes and rules
+// that let's us forward service traffic to ovn-k8s-mp0 as opposed to the default route towards breth0
+func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
+	// create ovnkubeSvcViaMgmPortRT and service route towards ovn-k8s-mp0
+	for _, hostSubnet := range hostSubnets {
+		isIPv6 := utilnet.IsIPv6CIDR(hostSubnet)
+		gatewayIP := util.GetNodeGatewayIfAddr(hostSubnet).IP.String()
+		for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
+			if isIPv6 == utilnet.IsIPv6CIDR(svcCIDR) {
+				if stdout, stderr, err := util.RunIP("route", "replace", "table", ovnkubeSvcViaMgmPortRT, svcCIDR.String(), "via", gatewayIP, "dev", types.K8sMgmtIntfName); err != nil {
+					return fmt.Errorf("error adding routing table entry into custom routing table: %s: stdout: %s, stderr: %s, err: %v", ovnkubeSvcViaMgmPortRT, stdout, stderr, err)
+				}
+				klog.V(5).Infof("Successfully added route into custom routing table: %s", ovnkubeSvcViaMgmPortRT)
+			}
+		}
+	}
+
+	createRule := func(family string) error {
+		stdout, stderr, err := util.RunIP(family, "rule")
+		if err != nil {
+			return fmt.Errorf("error listing routing rules, stdout: %s, stderr: %s, err: %v", stdout, stderr, err)
+		}
+		if !strings.Contains(stdout, fmt.Sprintf("from all fwmark %s lookup %s", ovnkubeITPMark, ovnkubeSvcViaMgmPortRT)) {
+			if stdout, stderr, err := util.RunIP(family, "rule", "add", "fwmark", ovnkubeITPMark, "lookup", ovnkubeSvcViaMgmPortRT, "prio", "30"); err != nil {
+				return fmt.Errorf("error adding routing rule for service via management table (%s): stdout: %s, stderr: %s, err: %v", ovnkubeSvcViaMgmPortRT, stdout, stderr, err)
+			}
+		}
+		return nil
+	}
+
+	// create ip rule that will forward ovnkubeITPMark marked packets to ovnkubeITPRoutingTable
+	if config.IPv4Mode {
+		if err := createRule("-4"); err != nil {
+			return fmt.Errorf("could not add IPv4 rule: %v", err)
+		}
+	}
+	if config.IPv6Mode {
+		if err := createRule("-6"); err != nil {
+			return fmt.Errorf("could not add IPv6 rule: %v", err)
+		}
+	}
+
+	return nil
+}
+
+func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf, egressGWIntf string,
 	gwIPs []*net.IPNet, nodeAnnotator kube.Annotator, kube kube.Interface, cfg *managementPortConfig, watchFactory factory.NodeWatchFactory) (*gateway, error) {
 	klog.Info("Creating new shared gateway")
 	gw := &gateway{}
@@ -1294,6 +1360,9 @@ func newSharedGateway(nodeName string, gwNextHops []net.IP, gwIntf, egressGWIntf
 		}
 
 		if config.Gateway.NodeportEnable {
+			if err := initSvcViaMgmPortRoutingRules(subnets); err != nil {
+				return err
+			}
 			klog.Info("Creating Shared Gateway Node Port Watcher")
 			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge.patchPort, gwBridge.bridgeName, gwBridge.uplinkName, gwBridge.ips, gw.openflowManager, gw.nodeIPManager, watchFactory)
 			if err != nil {

@@ -255,8 +255,19 @@ func matchTestData(ignoreUUID bool, expected TestData) *testDataMatcher {
 	}
 }
 
-func EqualIgnoringUUIDs(expected TestData) gomegatypes.GomegaMatcher {
-	return matchTestData(true, expected)
+func ConsistOfIgnoringUUIDs(expected ...TestData) gomegatypes.GomegaMatcher {
+	if len(expected) == 0 {
+		return gomega.BeEmpty()
+	}
+	if e, ok := expected[0].([]TestData); len(expected) == 1 && ok {
+		// flatten
+		expected = e
+	}
+	matchers := []*testDataMatcher{}
+	for _, e := range expected {
+		matchers = append(matchers, matchTestData(true, e))
+	}
+	return gomega.ConsistOf(matchers)
 }
 
 type testDataMatcher struct {
