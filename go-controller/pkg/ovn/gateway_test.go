@@ -10,7 +10,6 @@ import (
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
@@ -133,8 +132,8 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 
 	natUUIDs := make([]string, 0, len(clusterIPSubnets))
 	if !skipSnat {
-		for _, subnet := range clusterIPSubnets {
-			natUUID := libovsdbops.BuildNamedUUID()
+		for i, subnet := range clusterIPSubnets {
+			natUUID := fmt.Sprintf("nat-%d-UUID", i)
 			natUUIDs = append(natUUIDs, natUUID)
 			physicalIP, _ := util.MatchIPNetFamily(utilnet.IsIPv6CIDR(subnet), l3GatewayConfig.IPAddresses)
 			testData = append(testData, &nbdb.NAT{
@@ -153,14 +152,14 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 		Rate:   int(25),
 	})
 	meters := map[string]string{
-		libovsdbops.OVNARPRateLimiter:              libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNARPRateLimiter),
-		libovsdbops.OVNARPResolveRateLimiter:       libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNARPResolveRateLimiter),
-		libovsdbops.OVNBFDRateLimiter:              libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNBFDRateLimiter),
-		libovsdbops.OVNControllerEventsRateLimiter: libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNControllerEventsRateLimiter),
-		libovsdbops.OVNICMPV4ErrorsRateLimiter:     libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNICMPV4ErrorsRateLimiter),
-		libovsdbops.OVNICMPV6ErrorsRateLimiter:     libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNICMPV6ErrorsRateLimiter),
-		libovsdbops.OVNRejectRateLimiter:           libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNRejectRateLimiter),
-		libovsdbops.OVNTCPRSTRateLimiter:           libovsdbops.GetMeterNameForProtocol(libovsdbops.OVNTCPRSTRateLimiter),
+		types.OVNARPRateLimiter:              getMeterNameForProtocol(types.OVNARPRateLimiter),
+		types.OVNARPResolveRateLimiter:       getMeterNameForProtocol(types.OVNARPResolveRateLimiter),
+		types.OVNBFDRateLimiter:              getMeterNameForProtocol(types.OVNBFDRateLimiter),
+		types.OVNControllerEventsRateLimiter: getMeterNameForProtocol(types.OVNControllerEventsRateLimiter),
+		types.OVNICMPV4ErrorsRateLimiter:     getMeterNameForProtocol(types.OVNICMPV4ErrorsRateLimiter),
+		types.OVNICMPV6ErrorsRateLimiter:     getMeterNameForProtocol(types.OVNICMPV6ErrorsRateLimiter),
+		types.OVNRejectRateLimiter:           getMeterNameForProtocol(types.OVNRejectRateLimiter),
+		types.OVNTCPRSTRateLimiter:           getMeterNameForProtocol(types.OVNTCPRSTRateLimiter),
 	}
 	fairness := true
 	for _, v := range meters {
@@ -175,6 +174,7 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 
 	copp := &nbdb.Copp{
 		UUID:   "copp-UUID",
+		Name:   "ovnkube-default",
 		Meters: meters,
 	}
 	testData = append(testData, copp)
@@ -285,7 +285,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		})
 
 		ginkgo.It("creates an IPv4 gateway in OVN", func() {
-			routeUUID := libovsdbops.BuildNamedUUID()
+			routeUUID := "route-UUID"
 			leftoverMgmtIPRoute := &nbdb.LogicalRouterStaticRoute{
 				Nexthop: "10.130.0.2",
 				UUID:    routeUUID,
@@ -332,7 +332,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			}
 			sctpSupport := false
 
-			err := fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+			var err error
+			fakeOvn.controller.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			err = fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			testData := []libovsdb.TestData{}
@@ -385,7 +389,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			}
 			sctpSupport := false
 
-			err := fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+			var err error
+			fakeOvn.controller.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			err = fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			testData := []libovsdb.TestData{}
@@ -437,7 +445,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			}
 			sctpSupport := false
 
-			err := fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+			var err error
+			fakeOvn.controller.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			err = fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			testData := []libovsdb.TestData{}
@@ -490,7 +502,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			sctpSupport := false
 			config.Gateway.DisableSNATMultipleGWs = true
 
-			err := fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+			var err error
+			fakeOvn.controller.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			err = fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			testData := []libovsdb.TestData{}
@@ -510,14 +526,16 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 		ginkgo.It("creates a dual-stack gateway in OVN", func() {
 			// covers both IPv4, IPv6 single stack cases since path is the same.
-			routeUUID1 := libovsdbops.BuildNamedUUID()
+			routeUUID1 := "route1-UUID"
 			leftoverJoinRoute1 := &nbdb.LogicalRouterStaticRoute{
+				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 				Nexthop:  "100.64.0.3",
 				IPPrefix: "10.130.0.0/23",
 				UUID:     routeUUID1,
 			}
-			routeUUID2 := libovsdbops.BuildNamedUUID()
+			routeUUID2 := "route2-UUID"
 			leftoverJoinRoute2 := &nbdb.LogicalRouterStaticRoute{
+				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 				Nexthop:  "fd98::3",
 				IPPrefix: "fd01:0:0:2::/64",
 				UUID:     routeUUID2,
@@ -566,7 +584,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			}
 			sctpSupport := false
 
-			err := fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+			var err error
+			fakeOvn.controller.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			err = fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			testData := []libovsdb.TestData{}
@@ -648,6 +670,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						UUID: types.JoinSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName + "-UUID",
 					},
 					&nbdb.LogicalSwitch{
+						UUID: types.OVNJoinSwitch + "-UUID",
+						Name: types.OVNJoinSwitch,
+					},
+					&nbdb.LogicalSwitch{
 						Name: types.ExternalSwitchPrefix + nodeName,
 						UUID: types.ExternalSwitchPrefix + nodeName + "-UUID ",
 					},
@@ -694,6 +720,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					Name:     types.OVNClusterRouter,
 					UUID:     types.OVNClusterRouter + "-UUID",
 					Policies: []string{"match3-UUID", "match6-UUID"},
+				},
+				&nbdb.LogicalSwitch{
+					UUID: types.OVNJoinSwitch + "-UUID",
+					Name: types.OVNJoinSwitch,
 				},
 			}
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
@@ -769,6 +799,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						UUID: types.JoinSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName + "-UUID",
 					},
 					&nbdb.LogicalSwitch{
+						UUID: types.OVNJoinSwitch + "-UUID",
+						Name: types.OVNJoinSwitch,
+					},
+					&nbdb.LogicalSwitch{
 						Name: types.ExternalSwitchPrefix + nodeName,
 						UUID: types.ExternalSwitchPrefix + nodeName + "-UUID ",
 					},
@@ -814,6 +848,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					Name:     types.OVNClusterRouter,
 					UUID:     types.OVNClusterRouter + "-UUID",
 					Policies: []string{"match3-UUID", "match6-UUID"},
+				},
+				&nbdb.LogicalSwitch{
+					UUID: types.OVNJoinSwitch + "-UUID",
+					Name: types.OVNJoinSwitch,
 				},
 			}
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))

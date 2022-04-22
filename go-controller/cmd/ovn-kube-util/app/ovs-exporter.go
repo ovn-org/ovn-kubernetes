@@ -34,7 +34,7 @@ var OvsExporterCommand = cli.Command{
 		mux.Handle("/metrics", promhttp.Handler())
 
 		// register ovs metrics that will be served off of /metrics path
-		metrics.RegisterOvsMetrics()
+		metrics.RegisterStandaloneOvsMetrics()
 
 		err := http.ListenAndServe(bindAddress, mux)
 		if err != nil {

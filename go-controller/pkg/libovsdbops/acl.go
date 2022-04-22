@@ -21,10 +21,10 @@ func getACLName(acl *nbdb.ACL) string {
 	return ""
 }
 
-// IsEquivalentACL if it has same uuid, or if it has same name
+// isEquivalentACL if it has same uuid, or if it has same name
 // and external ids, or if it has same priority, direction, match
 // and action.
-func IsEquivalentACL(existing *nbdb.ACL, searched *nbdb.ACL) bool {
+func isEquivalentACL(existing *nbdb.ACL, searched *nbdb.ACL) bool {
 	if searched.UUID != "" && existing.UUID == searched.UUID {
 		return true
 	}
@@ -42,88 +42,18 @@ func IsEquivalentACL(existing *nbdb.ACL, searched *nbdb.ACL) bool {
 		existing.Action == searched.Action
 }
 
-// findACLsByPredicate looks up ACLs from the cache based on a given predicate
-func findACLsByPredicate(nbClient libovsdbclient.Client, lookupFunction func(item *nbdb.ACL) bool) ([]nbdb.ACL, error) {
+type aclPredicate func(*nbdb.ACL) bool
+
+// FindACLsWithPredicate looks up ACLs from the cache based on a given predicate
+func FindACLsWithPredicate(nbClient libovsdbclient.Client, p aclPredicate) ([]*nbdb.ACL, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	defer cancel()
-	acls := []nbdb.ACL{}
-	err := nbClient.WhereCache(lookupFunction).List(ctx, &acls)
-	if err != nil {
-		return nil, err
-	}
-
-	return acls, nil
+	acls := []*nbdb.ACL{}
+	err := nbClient.WhereCache(p).List(ctx, &acls)
+	return acls, err
 }
 
-// findACL looks up the ACL in the cache and sets the UUID
-func findACL(nbClient libovsdbclient.Client, acl *nbdb.ACL) error {
-	if acl.UUID != "" && !IsNamedUUID(acl.UUID) {
-		return nil
-	}
-
-	acls, err := findACLsByPredicate(nbClient, func(item *nbdb.ACL) bool {
-		return IsEquivalentACL(item, acl)
-	})
-
-	if err != nil {
-		return fmt.Errorf("can't find ACL by equivalence %+v: %v", *acl, err)
-	}
-
-	if len(acls) > 1 {
-		return fmt.Errorf("unexpectedly found multiple equivalent ACLs: %+v", acls)
-	}
-
-	if len(acls) == 0 {
-		return libovsdbclient.ErrNotFound
-	}
-
-	acl.UUID = acls[0].UUID
-	return nil
-}
-
-// FindRejectACLs looks up the acls with reject action
-func FindRejectACLs(nbClient libovsdbclient.Client) ([]nbdb.ACL, error) {
-	rejectACLLookupFcn := func(acl *nbdb.ACL) bool {
-		return acl.Action == nbdb.ACLActionReject
-	}
-
-	return findACLsByPredicate(nbClient, rejectACLLookupFcn)
-}
-
-// FindACLsByPriorityRange looks up the acls with priorities within a given inclusive range
-func FindACLsByPriorityRange(nbClient libovsdbclient.Client, minPriority, maxPriority int) ([]nbdb.ACL, error) {
-	// Lookup all ACLs in the specified priority range
-	priorityRangeLookupFcn := func(item *nbdb.ACL) bool {
-		return (item.Priority >= minPriority) && (item.Priority <= maxPriority)
-	}
-
-	return findACLsByPredicate(nbClient, priorityRangeLookupFcn)
-}
-
-// FindACLsByExternalID looks up the acls with the given externalID/s
-func FindACLsByExternalID(nbClient libovsdbclient.Client, externalIDs map[string]string) ([]nbdb.ACL, error) {
-	// Find ACLs for with a given exernalID
-	ACLLookupFcn := func(item *nbdb.ACL) bool {
-		aclMatch := false
-		for k, v := range externalIDs {
-			if itemVal, ok := item.ExternalIDs[k]; ok {
-				if itemVal == v {
-					aclMatch = true
-				}
-			}
-		}
-		return aclMatch
-	}
-
-	return findACLsByPredicate(nbClient, ACLLookupFcn)
-}
-
-func ensureACLUUID(acl *nbdb.ACL) {
-	if acl.UUID == "" {
-		acl.UUID = BuildNamedUUID()
-	}
-}
-
+// BuildACL builds an ACL with empty optional properties unset
 func BuildACL(name string, direction nbdb.ACLDirection, priority int, match string, action nbdb.ACLAction, meter string, severity nbdb.ACLSeverity, log bool, externalIds map[string]string, options map[string]string) *nbdb.ACL {
 	name = fmt.Sprintf("%.63s", name)
 
@@ -155,114 +85,95 @@ func BuildACL(name string, direction nbdb.ACLDirection, priority int, match stri
 	return acl
 }
 
-func createOrUpdateACLOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, acl *nbdb.ACL) ([]libovsdb.Operation, error) {
-	if ops == nil {
-		ops = []libovsdb.Operation{}
-	}
-
-	err := findACL(nbClient, acl)
-	if err != nil && err != libovsdbclient.ErrNotFound {
-		return nil, err
-	}
-
-	// If ACL does not exist, create it
-	if err == libovsdbclient.ErrNotFound {
-		// FIXME(trozet): Wait method for ACL would need to use external_ids and name for matching
-		// external_ids matching will have a performance impact, so we should move to name ACLs uniquely
-		ensureACLUUID(acl)
-		op, err := nbClient.Create(acl)
-		if err != nil {
-			return nil, err
-		}
-		ops = append(ops, op...)
-		return ops, nil
-	}
-
-	uuid := acl.UUID
-	acl.UUID = ""
-	op, err := nbClient.Where(&nbdb.ACL{UUID: uuid}).Update(acl)
-	if err != nil {
-		return nil, err
-	}
-	ops = append(ops, op...)
-	acl.UUID = uuid
-
-	return ops, nil
-}
-
+// CreateOrUpdateACLsOps creates or updates the provided ACLs returning the
+// corresponding ops
 func CreateOrUpdateACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, acls ...*nbdb.ACL) ([]libovsdb.Operation, error) {
-	if ops == nil {
-		ops = []libovsdb.Operation{}
-	}
-	for _, acl := range acls {
-		var err error
-		ops, err = createOrUpdateACLOps(nbClient, ops, acl)
-		if err != nil {
-			return nil, err
+	opModels := make([]operationModel, 0, len(acls))
+	for i := range acls {
+		// can't use i in the predicate, for loop replaces it in-memory
+		acl := acls[i]
+		opModel := operationModel{
+			Model:          acl,
+			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
+			OnModelUpdates: onModelUpdatesAll(),
+			ErrNotFound:    false,
+			BulkOp:         false,
 		}
+		opModels = append(opModels, opModel)
 	}
 
-	return ops, nil
+	modelClient := newModelClient(nbClient)
+	return modelClient.CreateOrUpdateOps(ops, opModels...)
 }
 
+// CreateOrUpdateACLs creates or updates the provided ACLs
 func CreateOrUpdateACLs(nbClient libovsdbclient.Client, acls ...*nbdb.ACL) error {
 	ops, err := CreateOrUpdateACLsOps(nbClient, nil, acls...)
 	if err != nil {
 		return err
 	}
 
-	_, err = TransactAndCheck(nbClient, ops)
+	_, err = TransactAndCheckAndSetUUIDs(nbClient, acls, ops)
 	return err
 }
 
+// UpdateACLsLoggingOps updates the log and severity on the provided ACLs and
+// returns the corresponding ops
 func UpdateACLsLoggingOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, acls ...*nbdb.ACL) ([]libovsdb.Operation, error) {
-	if ops == nil {
-		ops = []libovsdb.Operation{}
+	opModels := make([]operationModel, 0, len(acls))
+	for i := range acls {
+		// can't use i in the predicate, for loop replaces it in-memory
+		acl := acls[i]
+		opModel := operationModel{
+			Model:          acl,
+			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
+			OnModelUpdates: []interface{}{&acl.Severity, &acl.Log},
+			ErrNotFound:    true,
+			BulkOp:         false,
+		}
+		opModels = append(opModels, opModel)
 	}
 
-	for _, acl := range acls {
-		err := findACL(nbClient, acl)
-		if err != nil {
-			return nil, err
-		}
-
-		uuid := acl.UUID
-		acl.UUID = ""
-		op, err := nbClient.Where(&nbdb.ACL{UUID: uuid}).Update(acl, &acl.Severity, &acl.Log)
-		if err != nil {
-			return nil, err
-		}
-		ops = append(ops, op...)
-		acl.UUID = uuid
-	}
-
-	return ops, nil
+	modelClient := newModelClient(nbClient)
+	return modelClient.CreateOrUpdateOps(ops, opModels...)
 }
 
-func DeleteACLs(nbClient libovsdbclient.Client, acls []nbdb.ACL) error {
-	opModels := []OperationModel{}
-	for _, acl := range acls {
-		opModels = append(opModels, OperationModel{
-			Model:          &acl,
-			ModelPredicate: func(item *nbdb.ACL) bool { return IsEquivalentACL(item, &acl) },
-		})
+// UpdateACLsDirection updates the direction on the provided ACLs
+func UpdateACLsDirection(nbClient libovsdbclient.Client, acls ...*nbdb.ACL) error {
+	opModels := make([]operationModel, 0, len(acls))
+	for i := range acls {
+		// can't use i in the predicate, for loop replaces it in-memory
+		acl := acls[i]
+		opModel := operationModel{
+			Model:          acl,
+			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
+			OnModelUpdates: []interface{}{&acl.Direction},
+			ErrNotFound:    true,
+			BulkOp:         false,
+		}
+		opModels = append(opModels, opModel)
 	}
 
-	m := NewModelClient(nbClient)
-	err := m.Delete(opModels...)
-	if err != nil {
-		return fmt.Errorf("failed to manually delete ACLs err: %v", err)
-	}
-
-	return nil
-}
-
-func UpdateACLLogging(nbClient libovsdbclient.Client, acl *nbdb.ACL) error {
-	ops, err := UpdateACLsLoggingOps(nbClient, nil, acl)
-	if err != nil {
-		return err
-	}
-
-	_, err = TransactAndCheck(nbClient, ops)
+	modelClient := newModelClient(nbClient)
+	_, err := modelClient.CreateOrUpdate(opModels...)
 	return err
+}
+
+// DeleteACLs deletes the provided ACLs
+func DeleteACLs(nbClient libovsdbclient.Client, acls ...*nbdb.ACL) error {
+	opModels := make([]operationModel, 0, len(acls))
+	for i := range acls {
+		// can't use i in the predicate, for loop replaces it in-memory
+		acl := acls[i]
+		opModel := operationModel{
+			Model:          acl,
+			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
+			ErrNotFound:    false,
+			BulkOp:         false,
+		}
+		opModels = append(opModels, opModel)
+	}
+
+	modelClient := newModelClient(nbClient)
+	return modelClient.Delete(opModels...)
 }

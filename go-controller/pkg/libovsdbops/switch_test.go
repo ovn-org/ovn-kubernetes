@@ -9,31 +9,31 @@ import (
 )
 
 func TestRemoveACLsFromSwitches(t *testing.T) {
-	fakeACL1 := &nbdb.ACL{
-		UUID: BuildNamedUUID(),
+	fakeACL1 := nbdb.ACL{
+		UUID: buildNamedUUID(),
 	}
 
-	fakeACL2 := &nbdb.ACL{
-		UUID: BuildNamedUUID(),
+	fakeACL2 := nbdb.ACL{
+		UUID: buildNamedUUID(),
 	}
 
-	fakeSwitch1 := &nbdb.LogicalSwitch{
+	fakeSwitch1 := nbdb.LogicalSwitch{
 		Name: "sw1",
-		UUID: BuildNamedUUID(),
+		UUID: buildNamedUUID(),
 		ACLs: []string{fakeACL1.UUID},
 	}
 
-	fakeSwitch2 := &nbdb.LogicalSwitch{
+	fakeSwitch2 := nbdb.LogicalSwitch{
 		Name: "sw2",
-		UUID: BuildNamedUUID(),
+		UUID: buildNamedUUID(),
 		ACLs: []string{fakeACL1.UUID, fakeACL2.UUID},
 	}
 
 	// Add switch without ACL to ensure the delete function
 	// can handle this case
-	fakeSwitch3 := &nbdb.LogicalSwitch{
+	fakeSwitch3 := nbdb.LogicalSwitch{
 		Name: "sw3",
-		UUID: BuildNamedUUID(),
+		UUID: buildNamedUUID(),
 	}
 
 	tests := []struct {
@@ -47,9 +47,9 @@ func TestRemoveACLsFromSwitches(t *testing.T) {
 			expectErr: false,
 			initialNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
-					fakeSwitch1,
-					fakeSwitch2,
-					fakeSwitch3,
+					fakeSwitch1.DeepCopy(),
+					fakeSwitch2.DeepCopy(),
+					fakeSwitch3.DeepCopy(),
 				},
 			},
 			expectedNbdb: libovsdbtest.TestSetup{
@@ -62,7 +62,7 @@ func TestRemoveACLsFromSwitches(t *testing.T) {
 						Name: "sw2",
 						UUID: fakeSwitch2.UUID,
 					},
-					fakeSwitch3,
+					fakeSwitch3.DeepCopy(),
 				},
 			},
 		},
@@ -71,12 +71,12 @@ func TestRemoveACLsFromSwitches(t *testing.T) {
 			expectErr: true,
 			initialNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
-					fakeSwitch3,
+					fakeSwitch3.DeepCopy(),
 				},
 			},
 			expectedNbdb: libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
-					fakeSwitch3,
+					fakeSwitch3.DeepCopy(),
 				},
 			},
 		},
@@ -89,18 +89,13 @@ func TestRemoveACLsFromSwitches(t *testing.T) {
 			}
 			t.Cleanup(cleanup.Cleanup)
 
-			fakeSwitches := []nbdb.LogicalSwitch{
-				*fakeSwitch1,
-				*fakeSwitch2,
-				*fakeSwitch3,
+			ACLs := []*nbdb.ACL{
+				&fakeACL1,
+				&fakeACL2,
 			}
 
-			ACLs := []nbdb.ACL{
-				*fakeACL1,
-				*fakeACL2,
-			}
-
-			err = removeACLsFromSwitches(nbClient, fakeSwitches, ACLs)
+			p := func(item *nbdb.LogicalSwitch) bool { return true }
+			err = RemoveACLsFromLogicalSwitchesWithPredicate(nbClient, p, ACLs...)
 			if err != nil && !tt.expectErr {
 				t.Fatal(fmt.Errorf("RemoveACLFromNodeSwitches() error = %v", err))
 			}

@@ -109,6 +109,18 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Cmd:    "ovs-vsctl --timeout=15 get interface eth0 ofport",
 			Output: "7",
 		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ip route replace table 7 172.16.1.0/24 via 10.1.1.1 dev ovn-k8s-mp0",
+			Output: "0",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ip -4 rule",
+			Output: "0",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ip -4 rule add fwmark 0x1745ec lookup 7 prio 30",
+			Output: "0",
+		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovs-ofctl -O OpenFlow13 --bundle replace-flows breth0 -",
 		})
@@ -189,7 +201,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			defer GinkgoRecover()
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
-			sharedGw, err := newSharedGateway(nodeName, gatewayNextHops, gatewayIntf, "", nil, nodeAnnotator, k,
+			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", nil, nodeAnnotator, k,
 				&fakeMgmtPortConfig, wf)
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(wf)
@@ -233,13 +245,21 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				"OUTPUT": []string{
 					"-j OVN-KUBE-EXTERNALIP",
 					"-j OVN-KUBE-NODEPORT",
+					"-j OVN-KUBE-ITP",
 				},
 				"OVN-KUBE-NODEPORT":      []string{},
 				"OVN-KUBE-EXTERNALIP":    []string{},
 				"OVN-KUBE-SNAT-MGMTPORT": []string{},
 				"OVN-KUBE-ETP":           []string{},
+				"OVN-KUBE-ITP":           []string{},
 			},
 			"filter": {},
+			"mangle": {
+				"OUTPUT": []string{
+					"-j OVN-KUBE-ITP",
+				},
+				"OVN-KUBE-ITP": []string{},
+			},
 		}
 		// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
 		expectedMCSRules := []string{
@@ -256,6 +276,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		expectedTables = map[string]util.FakeTable{
 			"nat":    {},
 			"filter": {},
+			"mangle": {},
 		}
 		f6 := iptV6.(*util.FakeIPTables)
 		err = f6.MatchState(expectedTables)
@@ -388,6 +409,18 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			Cmd:    "ovs-vsctl --timeout=15 get interface " + hostRep + " ofport",
 			Output: "9",
 		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ip route replace table 7 172.16.1.0/24 via 10.1.1.1 dev ovn-k8s-mp0",
+			Output: "0",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ip -4 rule",
+			Output: "0",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ip -4 rule add fwmark 0x1745ec lookup 7 prio 30",
+			Output: "0",
+		})
 		// cleanup flows
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovs-ofctl -O OpenFlow13 --bundle replace-flows " + brphys + " -",
@@ -469,7 +502,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			// provide host IP as GR IP
 			gwIPs := []*net.IPNet{ovntest.MustParseIPNet(hostCIDR)}
-			sharedGw, err := newSharedGateway(nodeName, gatewayNextHops,
+			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
 				gatewayIntf, "", gwIPs, nodeAnnotator, k, &fakeMgmtPortConfig, wf)
 
 			Expect(err).NotTo(HaveOccurred())
@@ -659,6 +692,18 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: "7",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ip route replace table 7 172.16.1.0/24 via 10.1.1.1 dev ovn-k8s-mp0",
+			Output: "0",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ip -4 rule",
+			Output: "0",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ip -4 rule add fwmark 0x1745ec lookup 7 prio 30",
+			Output: "0",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-ofctl show breth0",
 			Output: `
 OFPT_FEATURES_REPLY (xid=0x2): dpid:00000242ac120002
@@ -715,7 +760,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 			v1.ServiceTypeClusterIP,
 			[]string{externalIP},
 			v1.ServiceStatus{},
-			false,
+			false, false,
 		)
 		endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
 
@@ -823,6 +868,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 				"OUTPUT": []string{
 					"-j OVN-KUBE-EXTERNALIP",
 					"-j OVN-KUBE-NODEPORT",
+					"-j OVN-KUBE-ITP",
 				},
 				"OVN-KUBE-NODEPORT": []string{},
 				"OVN-KUBE-EXTERNALIP": []string{
@@ -833,6 +879,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 				},
 				"OVN-KUBE-SNAT-MGMTPORT": []string{},
 				"OVN-KUBE-ETP":           []string{},
+				"OVN-KUBE-ITP":           []string{},
 			},
 			"filter": {
 				"FORWARD": []string{
@@ -842,6 +889,12 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 				"INPUT": []string{
 					"-i ovn-k8s-mp0 -m comment --comment from OVN to localhost -j ACCEPT",
 				},
+			},
+			"mangle": {
+				"OUTPUT": []string{
+					"-j OVN-KUBE-ITP",
+				},
+				"OVN-KUBE-ITP": []string{},
 			},
 		}
 		// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
@@ -859,6 +912,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		expectedTables = map[string]util.FakeTable{
 			"nat":    {},
 			"filter": {},
+			"mangle": {},
 		}
 		f6 := iptV6.(*util.FakeIPTables)
 		err = f6.MatchState(expectedTables)

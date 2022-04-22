@@ -1,10 +1,10 @@
 package gateway
 
 import (
-	"context"
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"strings"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -24,55 +24,36 @@ var (
 
 // GetOvnGateways return all created gateways.
 func GetOvnGateways(nbClient client.Client) ([]string, error) {
-	logicalRouterRes := []nbdb.LogicalRouter{}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	if err := nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
-		return lr.Options["chassis"] != "null"
-	}).List(ctx, &logicalRouterRes); err != nil {
+	p := func(item *nbdb.LogicalRouter) bool {
+		return item.Options["chassis"] != "null"
+	}
+	logicalRouters, err := libovsdbops.FindLogicalRoutersWithPredicate(nbClient, p)
+	if err != nil {
 		return nil, err
 	}
+
 	result := []string{}
-	for _, logicalRouter := range logicalRouterRes {
+	for _, logicalRouter := range logicalRouters {
 		result = append(result, logicalRouter.Name)
 	}
 	return result, nil
 }
 
-// GetGatewayPhysicalIP return gateway physical IP
-func GetGatewayPhysicalIP(nbClient client.Client, gatewayRouter string) (string, error) {
-	logicalRouterRes := []nbdb.LogicalRouter{}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	if err := nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
-		physicalIP, exists := lr.ExternalIDs["physical_ip"]
-		return lr.Name == gatewayRouter && exists && physicalIP != ""
-	}).List(ctx, &logicalRouterRes); err != nil {
-		return "", errors.Wrapf(err, "error to obtain physical IP on router %s, err: %v", gatewayRouter, err)
-	}
-	if len(logicalRouterRes) == 0 {
-		return "", fmt.Errorf("no physical IP found for gateway %s", gatewayRouter)
-	}
-	return logicalRouterRes[0].ExternalIDs["physical_ip"], nil
-}
-
 // GetGatewayPhysicalIPs return gateway physical IPs
 func GetGatewayPhysicalIPs(nbClient client.Client, gatewayRouter string) ([]string, error) {
-	logicalRouterRes := []nbdb.LogicalRouter{}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	if err := nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
-		physicalIPs, exists := lr.ExternalIDs["physical_ips"]
-		return lr.Name == gatewayRouter && exists && physicalIPs != ""
-	}).List(ctx, &logicalRouterRes); err != nil {
-		return nil, errors.Wrapf(err, "error to obtain physical IP on router %s, err: %v", gatewayRouter, err)
-	}
-	if len(logicalRouterRes) == 1 {
-		return strings.Split(logicalRouterRes[0].ExternalIDs["physical_ips"], ","), nil
-	}
-	physicalIP, err := GetGatewayPhysicalIP(nbClient, gatewayRouter)
+	logicalRouter := &nbdb.LogicalRouter{Name: gatewayRouter}
+	logicalRouter, err := libovsdbops.GetLogicalRouter(nbClient, logicalRouter)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error getting router %s: %v", gatewayRouter, err)
 	}
-	return []string{physicalIP}, nil
+
+	if ips := logicalRouter.ExternalIDs["physical_ips"]; ips != "" {
+		return strings.Split(ips, ","), nil
+	}
+
+	if ip := logicalRouter.ExternalIDs["physical_ip"]; ip != "" {
+		return []string{ip}, nil
+	}
+
+	return nil, fmt.Errorf("no physical IPs found for gateway %s", gatewayRouter)
 }

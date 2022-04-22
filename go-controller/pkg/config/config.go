@@ -307,6 +307,7 @@ type KubernetesConfig struct {
 type MetricsConfig struct {
 	BindAddress           string `gcfg:"bind-address"`
 	OVNMetricsBindAddress string `gcfg:"ovn-metrics-bind-address"`
+	ExportOVSMetrics      bool   `gcfg:"export-ovs-metrics"`
 	EnablePprof           bool   `gcfg:"enable-pprof"`
 }
 
@@ -931,6 +932,11 @@ var MetricsFlags = []cli.Flag{
 		Name:        "ovn-metrics-bind-address",
 		Usage:       "The IP address and port for the OVN metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
 		Destination: &cliConfig.Metrics.OVNMetricsBindAddress,
+	},
+	&cli.BoolFlag{
+		Name:        "export-ovs-metrics",
+		Usage:       "When true exports OVS metrics from the OVN metrics server",
+		Destination: &cliConfig.Metrics.ExportOVSMetrics,
 	},
 	&cli.BoolFlag{
 		Name:        "metrics-enable-pprof",

@@ -1,12 +1,12 @@
 package ovn
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -16,7 +16,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -52,65 +51,44 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		Name:        gatewayRouter,
 		Options:     logicalRouterOptions,
 		ExternalIDs: logicalRouterExternalIDs,
+		Copp:        &oc.defaultGatewayCOPPUUID,
 	}
 
 	if oc.loadBalancerGroupUUID != "" {
 		logicalRouter.LoadBalancerGroup = []string{oc.loadBalancerGroupUUID}
 	}
 
-	coppUUID, err := libovsdbops.CreateDefaultCOPP(oc.nbClient)
-	if err != nil || len(coppUUID) <= 0 {
-		klog.Warningf("Unable to create control plane protection on router %s:%v", gatewayRouter, err)
-	} else {
-		logicalRouter.Copp = &coppUUID
-	}
-
-	opModels := []libovsdbops.OperationModel{
-		{
-			Name:           &logicalRouter.Name,
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
-			OnModelUpdates: []interface{}{
-				&logicalRouter.Options,
-				&logicalRouter.ExternalIDs,
-				&logicalRouter.LoadBalancerGroup,
-				&logicalRouter.Copp,
-			},
-		},
-	}
-
-	var oldExtIPs []net.IP
 	// If l3gatewayAnnotation.IPAddresses changed, we need to update the perPodSNATs,
 	// so let's save the old value before we update the router for later use
-	oldlogicalGRRes := []nbdb.LogicalRouter{}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
-		return lr.Name == gatewayRouter
-	}).List(ctx, &oldlogicalGRRes); err != nil {
+	var oldExtIPs []net.IP
+	oldLogicalRouter, err := libovsdbops.GetLogicalRouter(oc.nbClient, &logicalRouter)
+	if err != nil && err != libovsdbclient.ErrNotFound {
 		return fmt.Errorf("failed in retrieving %s, error: %v", gatewayRouter, err)
 	}
-	// no need to do anything if GR doesn't exist yet
-	if len(oldlogicalGRRes) > 0 {
-		oldExternalIPs := strings.Split(oldlogicalGRRes[0].ExternalIDs["physical_ips"], ",")
-		oldExtIPs = make([]net.IP, len(oldExternalIPs))
-		for i, oldExternalIP := range oldExternalIPs {
-			cidr := oldExternalIP + GetIPFullMask(oldExternalIP)
-			ip, _, err := net.ParseCIDR(cidr)
-			if err != nil {
-				return fmt.Errorf("invalid cidr:%s error: %v", cidr, err)
+
+	if oldLogicalRouter != nil && oldLogicalRouter.ExternalIDs != nil {
+		if physicalIPs, ok := oldLogicalRouter.ExternalIDs["physical_ips"]; ok {
+			oldExternalIPs := strings.Split(physicalIPs, ",")
+			oldExtIPs = make([]net.IP, len(oldExternalIPs))
+			for i, oldExternalIP := range oldExternalIPs {
+				cidr := oldExternalIP + GetIPFullMask(oldExternalIP)
+				ip, _, err := net.ParseCIDR(cidr)
+				if err != nil {
+					return fmt.Errorf("invalid cidr:%s error: %v", cidr, err)
+				}
+				oldExtIPs[i] = ip
 			}
-			oldExtIPs[i] = ip
 		}
 	}
 
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("failed to create logical router %v, err: %v", gatewayRouter, err)
+	err = libovsdbops.CreateOrUpdateLogicalRouter(oc.nbClient, &logicalRouter)
+	if err != nil {
+		return fmt.Errorf("failed to create logical router %+v: %v", logicalRouter, err)
 	}
+
 	gwSwitchPort := types.JoinSwitchToGWRouterPrefix + gatewayRouter
 	gwRouterPort := types.GWRouterToJoinSwitchPrefix + gatewayRouter
 
-	logicalSwitch := nbdb.LogicalSwitch{}
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
 		Name:      gwSwitchPort,
 		Type:      "router",
@@ -119,27 +97,10 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 			"router-port": gwRouterPort,
 		},
 	}
-
-	opModels = []libovsdbops.OperationModel{
-		{
-			Model: &logicalSwitchPort,
-			DoAfter: func() {
-				logicalSwitch.Ports = []string{logicalSwitchPort.UUID}
-			},
-		},
-		{
-			Name:           &logicalSwitch.Name,
-			Model:          &logicalSwitch,
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.OVNJoinSwitch },
-			OnModelMutations: []interface{}{
-				&logicalSwitch.Ports,
-			},
-			ErrNotFound: true,
-		},
-	}
-
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("failed to add port %q to logical switch %q, err: %v", gwSwitchPort, types.OVNJoinSwitch, err)
+	sw := nbdb.LogicalSwitch{Name: types.OVNJoinSwitch}
+	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
+	if err != nil {
+		return fmt.Errorf("failed to create port %v on logical switch %q: %v", gwSwitchPort, types.OVNJoinSwitch, err)
 	}
 
 	gwLRPMAC := util.IPAddrToHWAddr(gwLRPIPs[0])
@@ -153,30 +114,10 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		MAC:      gwLRPMAC.String(),
 		Networks: gwLRPNetworks,
 	}
-	opModels = []libovsdbops.OperationModel{
-		{
-			Model: &logicalRouterPort,
-			OnModelUpdates: []interface{}{
-				&logicalRouterPort.MAC,
-				&logicalRouterPort.Networks,
-			},
-			DoAfter: func() {
-				logicalRouter.Ports = []string{logicalRouterPort.UUID}
-			},
-		},
-		{
-			Name:           &logicalRouter.Name,
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
-			OnModelMutations: []interface{}{
-				&logicalRouter.Ports,
-			},
-			ErrNotFound: true,
-		},
-	}
 
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("failed to add logical router port %q for gateway router %s, err: %v", gwRouterPort, gatewayRouter, err)
+	err = libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, &logicalRouter, &logicalRouterPort)
+	if err != nil {
+		return fmt.Errorf("failed to create port %+v on router %+v: %v", logicalRouterPort, logicalRouter, err)
 	}
 
 	for _, entry := range clusterIPSubnet {
@@ -187,47 +128,29 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 				gatewayRouter, err)
 		}
 
-		logicalRouterStaticRoute := nbdb.LogicalRouterStaticRoute{
+		// TODO There has to be a better way to do this. It seems like the
+		// whole purpose is to update the appropriate route in case it already
+		// exists *only* in the context of this router. But then it does not
+		// make sense to refresh it on every loop, unless it is also way to
+		// check for duplicate cluster IP subnets for which there would also be
+		// a better way to do it. Adding support for indirection in ModelClients
+		// opModel (being able to operate on thins pointed to from another model)
+		// would be agreat way to simplify this.
+		updatedLogicalRouter, err := libovsdbops.GetLogicalRouter(oc.nbClient, &logicalRouter)
+		if err != nil {
+			return fmt.Errorf("unable to retrieve logical router %+v: %v", logicalRouter, err)
+		}
+
+		lrsr := nbdb.LogicalRouterStaticRoute{
 			IPPrefix: entry.String(),
 			Nexthop:  drLRPIfAddr.IP.String(),
 		}
-
-		tmpRouters := []nbdb.LogicalRouter{}
-		if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter }).List(ctx, &tmpRouters); err != nil {
-			return fmt.Errorf("unable to list logical router: %s, err: %v", gatewayRouter, err)
+		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+			return item.IPPrefix == lrsr.IPPrefix && util.SliceHasStringItem(updatedLogicalRouter.StaticRoutes, item.UUID)
 		}
-		if len(tmpRouters) != 1 {
-			return fmt.Errorf("unable to retrieve unique logical router: %s, found: %+v", gatewayRouter, tmpRouters)
-		}
-
-		opModels = []libovsdbops.OperationModel{
-			{
-				Model: &logicalRouterStaticRoute,
-				ModelPredicate: func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
-					return lrsr.IPPrefix == entry.String() && util.SliceHasStringItem(tmpRouters[0].StaticRoutes, lrsr.UUID)
-				},
-				OnModelUpdates: []interface{}{
-					&logicalRouterStaticRoute.IPPrefix,
-					&logicalRouterStaticRoute.Nexthop,
-				},
-				DoAfter: func() {
-					if logicalRouterStaticRoute.UUID != "" {
-						logicalRouter.StaticRoutes = []string{logicalRouterStaticRoute.UUID}
-					}
-				},
-			},
-			{
-				Name:           &logicalRouter.Name,
-				Model:          &logicalRouter,
-				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
-				OnModelMutations: []interface{}{
-					&logicalRouter.StaticRoutes,
-				},
-				ErrNotFound: true,
-			},
-		}
-		if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-			return fmt.Errorf("failed to add a static route in GR %s with distributed router as the nexthop, err: %v", gatewayRouter, err)
+		err = libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.nbClient, gatewayRouter, &lrsr, p)
+		if err != nil {
+			return fmt.Errorf("failed to add a static route %+v in GR %s with distributed router as the nexthop, err: %v", lrsr, gatewayRouter, err)
 		}
 	}
 
@@ -266,38 +189,17 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 			allIPs = "0.0.0.0/0"
 		}
 
-		logicalRouterStaticRoute := nbdb.LogicalRouterStaticRoute{
+		lrsr := nbdb.LogicalRouterStaticRoute{
 			IPPrefix:   allIPs,
 			Nexthop:    nextHop.String(),
 			OutputPort: &externalRouterPort,
 		}
-		opModels = []libovsdbops.OperationModel{
-			{
-				Model: &logicalRouterStaticRoute,
-				ModelPredicate: func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
-					return lrsr.OutputPort != nil && *lrsr.OutputPort == externalRouterPort && lrsr.IPPrefix == allIPs
-				},
-				OnModelUpdates: []interface{}{
-					&logicalRouterStaticRoute.Nexthop,
-				},
-				DoAfter: func() {
-					if logicalRouterStaticRoute.UUID != "" {
-						logicalRouter.StaticRoutes = []string{logicalRouterStaticRoute.UUID}
-					}
-				},
-			},
-			{
-				Name:           &logicalRouter.Name,
-				Model:          &logicalRouter,
-				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
-				OnModelMutations: []interface{}{
-					&logicalRouter.StaticRoutes,
-				},
-				ErrNotFound: true,
-			},
+		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+			return item.OutputPort != nil && *item.OutputPort == *lrsr.OutputPort && item.IPPrefix == lrsr.IPPrefix
 		}
-		if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-			return fmt.Errorf("failed to add a static route in GR %s with physical gateway as the default next hop, err: %v", gatewayRouter, err)
+		err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.nbClient, gatewayRouter, &lrsr, p)
+		if err != nil {
+			return fmt.Errorf("error creating static route %+v in GR %s: %v", lrsr, gatewayRouter, err)
 		}
 	}
 
@@ -307,39 +209,16 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 	//
 	// This can be removed once https://bugzilla.redhat.com/show_bug.cgi?id=1891516 is fixed.
 	for _, gwLRPIP := range gwLRPIPs {
-
-		logicalRouterStaticRoute := nbdb.LogicalRouterStaticRoute{
+		lrsr := nbdb.LogicalRouterStaticRoute{
 			IPPrefix: gwLRPIP.String(),
 			Nexthop:  gwLRPIP.String(),
 		}
-		opModels = []libovsdbops.OperationModel{
-			{
-				Model: &logicalRouterStaticRoute,
-				ModelPredicate: func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
-					return lrsr.Nexthop == gwLRPIP.String() && lrsr.IPPrefix == gwLRPIP.String()
-				},
-				OnModelUpdates: []interface{}{
-					&logicalRouterStaticRoute.Nexthop,
-					&logicalRouterStaticRoute.IPPrefix,
-				},
-				DoAfter: func() {
-					if logicalRouterStaticRoute.UUID != "" {
-						logicalRouter.StaticRoutes = []string{logicalRouterStaticRoute.UUID}
-					}
-				},
-			},
-			{
-				Name:           &logicalRouter.Name,
-				Model:          &logicalRouter,
-				ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-				OnModelMutations: []interface{}{
-					&logicalRouter.StaticRoutes,
-				},
-				ErrNotFound: true,
-			},
+		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+			return item.Nexthop == lrsr.Nexthop && item.IPPrefix == lrsr.IPPrefix
 		}
-		if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-			return fmt.Errorf("failed to add a static route in GR %s with physical gateway as the default next hop, err: %v", gatewayRouter, err)
+		err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.nbClient, types.OVNClusterRouter, &lrsr, p)
+		if err != nil {
+			return fmt.Errorf("error creating static route %+v in GR %s: %v", lrsr, gatewayRouter, err)
 		}
 	}
 
@@ -353,6 +232,14 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 				types.OVNClusterRouter, err)
 		}
 
+		lrsr := nbdb.LogicalRouterStaticRoute{
+			Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+			IPPrefix: hostSubnet.String(),
+			Nexthop:  gwLRPIP[0].String(),
+		}
+		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+			return item.Nexthop == lrsr.Nexthop && item.IPPrefix == lrsr.IPPrefix && item.Policy != nil && *item.Policy == *lrsr.Policy
+		}
 		if config.Gateway.Mode != config.GatewayModeLocal {
 			// If migrating from local to shared gateway, let's remove the static routes towards
 			// management port interface for the hostSubnet prefix before adding the routes
@@ -360,68 +247,17 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 			mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 			oc.staticRouteCleanup([]net.IP{mgmtIfAddr.IP})
 
-			logicalRouterStaticRoute := nbdb.LogicalRouterStaticRoute{
-				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
-				IPPrefix: hostSubnet.String(),
-				Nexthop:  gwLRPIP[0].String(),
-			}
-			opModels = []libovsdbops.OperationModel{
-				{
-					Model: &logicalRouterStaticRoute,
-					ModelPredicate: func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
-						return lrsr.Nexthop == gwLRPIP[0].String() && lrsr.IPPrefix == hostSubnet.String()
-					},
-					OnModelUpdates: []interface{}{
-						&logicalRouterStaticRoute.Nexthop,
-						&logicalRouterStaticRoute.IPPrefix,
-					},
-					DoAfter: func() {
-						if logicalRouterStaticRoute.UUID != "" {
-							logicalRouter.StaticRoutes = []string{logicalRouterStaticRoute.UUID}
-						}
-					},
-				},
-				{
-					Name:           &logicalRouter.Name,
-					Model:          &logicalRouter,
-					ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-					OnModelMutations: []interface{}{
-						&logicalRouter.StaticRoutes,
-					},
-					ErrNotFound: true,
-				},
-			}
-			if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-				return fmt.Errorf("failed to add a static route in GR %s with physical gateway as the default next hop, err: %v", gatewayRouter, err)
+			err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.nbClient, types.OVNClusterRouter, &lrsr, p)
+			if err != nil {
+				return fmt.Errorf("error creating static route %+v in GR %s: %v", lrsr, types.OVNClusterRouter, err)
 			}
 		} else if config.Gateway.Mode == config.GatewayModeLocal {
 			// If migrating from shared to local gateway, let's remove the static routes towards
 			// join switch for the hostSubnet prefix before adding the routes
 			// towards management port which is done in syncNodeManagementPort.
-			logicalRouter := nbdb.LogicalRouter{}
-			logicalRouterStaticRouteRes := []nbdb.LogicalRouterStaticRoute{}
-			opModels = []libovsdbops.OperationModel{
-				{
-					Model: &nbdb.LogicalRouterStaticRoute{},
-					ModelPredicate: func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
-						return lrsr.Nexthop == gwLRPIP[0].String() && lrsr.IPPrefix == hostSubnet.String()
-					},
-					ExistingResult: &logicalRouterStaticRouteRes,
-					DoAfter: func() {
-						logicalRouter.StaticRoutes = libovsdbops.ExtractUUIDsFromModels(&logicalRouterStaticRouteRes)
-					},
-					BulkOp: true,
-				},
-				{
-					Model:          &logicalRouter,
-					ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-					OnModelMutations: []interface{}{
-						&logicalRouter.StaticRoutes,
-					},
-				},
-			}
-			if err := oc.modelClient.Delete(opModels...); err != nil {
-				return fmt.Errorf("failed to delete static route for nexthop: %s, prefix: %s, err: %v", gwLRPIP[0].String(), hostSubnet.String(), err)
+			err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
+			if err != nil {
+				return fmt.Errorf("error deleting static route %+v in GR %s: %v", lrsr, types.OVNClusterRouter, err)
 			}
 		}
 	}
@@ -445,7 +281,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 				predicate := func(item *nbdb.NAT) bool {
 					return item.ExternalIP == oldExternalIP[0].String() && item.Type == nbdb.NATTypeSNAT
 				}
-				natsToUpdate, err = libovsdbops.FindNATsUsingPredicate(oc.nbClient, predicate)
+				natsToUpdate, err = libovsdbops.FindNATsWithPredicate(oc.nbClient, predicate)
 				if err != nil {
 					return fmt.Errorf("failed to update GW SNAT rule for pods on router %s error: %v", gatewayRouter, err)
 				}
@@ -454,7 +290,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 				}
 			}
 		}
-		err := libovsdbops.AddOrUpdateNATsToRouter(oc.nbClient, gatewayRouter, natsToUpdate...)
+		err := libovsdbops.CreateOrUpdateNATs(oc.nbClient, &logicalRouter, natsToUpdate...)
 		if err != nil {
 			return fmt.Errorf("failed to update GW SNAT rule for pod on router %s error: %v", gatewayRouter, err)
 		}
@@ -470,20 +306,20 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 				return fmt.Errorf("failed to create default SNAT rules for gateway router %s: %v",
 					gatewayRouter, err)
 			}
-			nat = libovsdbops.BuildRouterSNAT(&externalIP[0], entry, "", nil)
+			nat = libovsdbops.BuildSNAT(&externalIP[0], entry, "", nil)
 			nats = append(nats, nat)
 		}
-		err := libovsdbops.AddOrUpdateNATsToRouter(oc.nbClient, gatewayRouter, nats...)
+		err := libovsdbops.CreateOrUpdateNATs(oc.nbClient, &logicalRouter, nats...)
 		if err != nil {
 			return fmt.Errorf("failed to update SNAT rule for pod on router %s error: %v", gatewayRouter, err)
 		}
 	} else {
 		// ensure we do not have any leftover SNAT entries after an upgrade
 		for _, logicalSubnet := range clusterIPSubnet {
-			nat = libovsdbops.BuildRouterSNAT(nil, logicalSubnet, "", nil)
+			nat = libovsdbops.BuildSNAT(nil, logicalSubnet, "", nil)
 			nats = append(nats, nat)
 		}
-		err := libovsdbops.DeleteNATsFromRouter(oc.nbClient, gatewayRouter, nats...)
+		err := libovsdbops.DeleteNATs(oc.nbClient, &logicalRouter, nats...)
 		if err != nil {
 			return fmt.Errorf("failed to delete GW SNAT rule for pod on router %s error: %v", gatewayRouter, err)
 		}
@@ -498,69 +334,10 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 // addExternalSwitch creates a switch connected to the external bridge and connects it to
 // the gateway router
 func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRouter, macAddress, physNetworkName string, ipAddresses []*net.IPNet, vlanID *uint) error {
-	// Create the external switch for the physical interface to connect to.
-	externalSwitch := fmt.Sprintf("%s%s%s", prefix, types.ExternalSwitchPrefix, nodeName)
-
-	externalLogicalSwitch := nbdb.LogicalSwitch{
-		Name: externalSwitch,
-	}
-	opModels := []libovsdbops.OperationModel{
-		{
-			Name:           &externalLogicalSwitch.Name,
-			Model:          &externalLogicalSwitch,
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == externalSwitch },
-		},
-	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("failed to create logical switch %s, err: %v", externalSwitch, err)
-	}
-
-	// Add external interface as a logical port to external_switch.
-	// This is a learning switch port with "unknown" address. The external
-	// world is accessed via this port.
-	externalLogicalSwitchPort := nbdb.LogicalSwitchPort{
-		Addresses: []string{"unknown"},
-		Type:      "localnet",
-		Options: map[string]string{
-			"network_name": physNetworkName,
-		},
-		Name: interfaceID,
-	}
-	if vlanID != nil {
-		intVlanID := int(*vlanID)
-		externalLogicalSwitchPort.TagRequest = &intVlanID
-	}
-
-	opModels = []libovsdbops.OperationModel{
-		{
-			Model: &externalLogicalSwitchPort,
-			OnModelUpdates: []interface{}{
-				&externalLogicalSwitchPort.Addresses,
-				&externalLogicalSwitchPort.Type,
-				&externalLogicalSwitchPort.TagRequest,
-				&externalLogicalSwitchPort.Options,
-			},
-			DoAfter: func() {
-				externalLogicalSwitch.Ports = []string{externalLogicalSwitchPort.UUID}
-			},
-		},
-		{
-			Name:           &externalLogicalSwitch.Name,
-			Model:          &externalLogicalSwitch,
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == externalSwitch },
-			OnModelMutations: []interface{}{
-				&externalLogicalSwitch.Ports,
-			},
-			ErrNotFound: true,
-		},
-	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("failed to add logical switch port: %s to switch %s, err: %v", interfaceID, externalSwitch, err)
-	}
-
-	// Connect GR to external_switch with mac address of external interface
-	// and that IP address. In the case of `local` gateway mode, whenever ovnkube-node container
-	// restarts a new br-local bridge will be created with a new `nicMacAddress`.
+	// Create the GR port that connects to external_switch with mac address of
+	// external interface and that IP address. In the case of `local` gateway
+	// mode, whenever ovnkube-node container restarts a new br-local bridge will
+	// be created with a new `nicMacAddress`.
 	externalRouterPort := prefix + types.GWRouterToExtSwitchPrefix + gatewayRouter
 
 	externalRouterPortNetworks := []string{}
@@ -575,36 +352,33 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 		Networks: externalRouterPortNetworks,
 		Name:     externalRouterPort,
 	}
+	logicalRouter := nbdb.LogicalRouter{Name: gatewayRouter}
 
-	logicalRouter := nbdb.LogicalRouter{}
-	opModels = []libovsdbops.OperationModel{
-		{
-			Model: &externalLogicalRouterPort,
-			OnModelUpdates: []interface{}{
-				&externalLogicalRouterPort.MAC,
-				&externalLogicalRouterPort.Networks,
-			},
-			DoAfter: func() {
-				logicalRouter.Ports = []string{externalLogicalRouterPort.UUID}
-			},
-		},
-		{
-			Name:           &logicalRouter.Name,
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
-			OnModelMutations: []interface{}{
-				&logicalRouter.Ports,
-			},
-			ErrNotFound: true,
-		},
-	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("failed to add logical router port: %s to router %s, err: %v", externalRouterPort, gatewayRouter, err)
+	err := libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, &logicalRouter, &externalLogicalRouterPort)
+	if err != nil {
+		return fmt.Errorf("failed to add logical router port %+v to router %s: %v", externalLogicalRouterPort, gatewayRouter, err)
 	}
 
-	// Connect the external_switch to the router.
+	// Create the external switch for the physical interface to connect to
+	// and add external interface as a logical port to external_switch.
+	// This is a learning switch port with "unknown" address. The external
+	// world is accessed via this port.
+	externalSwitch := fmt.Sprintf("%s%s%s", prefix, types.ExternalSwitchPrefix, nodeName)
+	externalLogicalSwitchPort := nbdb.LogicalSwitchPort{
+		Addresses: []string{"unknown"},
+		Type:      "localnet",
+		Options: map[string]string{
+			"network_name": physNetworkName,
+		},
+		Name: interfaceID,
+	}
+	if vlanID != nil {
+		intVlanID := int(*vlanID)
+		externalLogicalSwitchPort.TagRequest = &intVlanID
+	}
+
+	// Also add the port to connect the external_switch to the router.
 	externalSwitchPortToRouter := prefix + types.EXTSwitchToGWRouterPrefix + gatewayRouter
-
 	externalLogicalSwitchPortToRouter := nbdb.LogicalSwitchPort{
 		Name: externalSwitchPortToRouter,
 		Type: "router",
@@ -613,31 +387,14 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 		},
 		Addresses: []string{macAddress},
 	}
-	opModels = []libovsdbops.OperationModel{
-		{
-			Model: &externalLogicalSwitchPortToRouter,
-			OnModelUpdates: []interface{}{
-				&externalLogicalSwitchPortToRouter.Addresses,
-				&externalLogicalSwitchPortToRouter.Type,
-				&externalLogicalSwitchPortToRouter.Options,
-			},
-			DoAfter: func() {
-				externalLogicalSwitch.Ports = []string{externalLogicalSwitchPortToRouter.UUID}
-			},
-		},
-		{
-			Name:           &externalLogicalSwitch.Name,
-			Model:          &externalLogicalSwitch,
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == externalSwitch },
-			OnModelMutations: []interface{}{
-				&externalLogicalSwitch.Ports,
-			},
-			ErrNotFound: true,
-		},
+	sw := nbdb.LogicalSwitch{Name: externalSwitch}
+
+	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsAndSwitch(oc.nbClient, &sw, &externalLogicalSwitchPort, &externalLogicalSwitchPortToRouter)
+	if err != nil {
+		return fmt.Errorf("failed to create logical switch ports %+v, %+v, and switch %s: %v",
+			externalLogicalSwitchPort, externalLogicalSwitchPortToRouter, externalSwitch, err)
 	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("failed to add logical switch port: %s to switch %s, err: %v", externalSwitchPortToRouter, externalSwitch, err)
-	}
+
 	return nil
 }
 
@@ -754,83 +511,46 @@ func (oc *Controller) syncPolicyBasedRoutes(nodeName string, matches sets.String
 	return nil
 }
 
-func (oc *Controller) findPolicyBasedRoutes(priority string) ([]nbdb.LogicalRouterPolicy, error) {
+func (oc *Controller) findPolicyBasedRoutes(priority string) ([]*nbdb.LogicalRouterPolicy, error) {
 	intPriority, _ := strconv.Atoi(priority)
-	logicalRouterPolicyResult := []nbdb.LogicalRouterPolicy{}
-	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
-	defer cancel()
-	err := oc.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
-		return lrp.Priority == intPriority
-	}).List(ctx, &logicalRouterPolicyResult)
-	if err != nil {
-		return nil, fmt.Errorf("unable to find logical router policy, err: %v", err)
+	p := func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.Priority == intPriority
 	}
-	return logicalRouterPolicyResult, nil
+	logicalRouterStaticPolicies, err := libovsdbops.FindLogicalRouterPoliciesWithPredicate(oc.nbClient, p)
+	if err != nil {
+		return nil, fmt.Errorf("unable to find logical router policy: %v", err)
+	}
+
+	return logicalRouterStaticPolicies, nil
 }
 
 func (oc *Controller) createPolicyBasedRoutes(match, priority, nexthops string) error {
 	intPriority, _ := strconv.Atoi(priority)
-
-	logicalRouterPolicy := nbdb.LogicalRouterPolicy{
+	lrp := nbdb.LogicalRouterPolicy{
 		Priority: intPriority,
 		Match:    match,
 		Nexthops: []string{nexthops},
 		Action:   nbdb.LogicalRouterPolicyActionReroute,
 	}
-	logicalRouter := nbdb.LogicalRouter{}
-	opModels := []libovsdbops.OperationModel{
-		{
-			Model: &logicalRouterPolicy,
-			ModelPredicate: func(lrp *nbdb.LogicalRouterPolicy) bool {
-				return lrp.Priority == intPriority && lrp.Match == match
-			},
-			OnModelUpdates: []interface{}{
-				&logicalRouterPolicy.Nexthops,
-				&logicalRouterPolicy.Match,
-			},
-			DoAfter: func() {
-				if logicalRouterPolicy.UUID != "" {
-					logicalRouter.Policies = []string{logicalRouterPolicy.UUID}
-				}
-			},
-		},
-		{
-			Name:           &logicalRouter.Name,
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: []interface{}{
-				&logicalRouter.Policies,
-			},
-			ErrNotFound: true,
-		},
+
+	p := func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.Priority == lrp.Priority && item.Match == lrp.Match
 	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		return fmt.Errorf("unable to create policy based routes, err: %v", err)
+
+	err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.nbClient, types.OVNClusterRouter, &lrp, p)
+	if err != nil {
+		return fmt.Errorf("error creating policy %+v on router %s: %v", lrp, types.OVNClusterRouter, err)
 	}
+
 	return nil
 }
 
 func (oc *Controller) deletePolicyBasedRoutes(policyID, priority string) error {
-	logicalRouterPolicy := nbdb.LogicalRouterPolicy{
-		UUID: policyID,
+	lrp := nbdb.LogicalRouterPolicy{UUID: policyID}
+	err := libovsdbops.DeleteLogicalRouterPolicies(oc.nbClient, types.OVNClusterRouter, &lrp)
+	if err != nil {
+		return fmt.Errorf("error deleting policy %s: %v", policyID, err)
 	}
-	logicalRouter := nbdb.LogicalRouter{
-		Policies: []string{policyID},
-	}
-	opModels := []libovsdbops.OperationModel{
-		{
-			Model: &logicalRouterPolicy,
-		},
-		{
-			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
-			OnModelMutations: []interface{}{
-				&logicalRouter.Policies,
-			},
-		},
-	}
-	if err := oc.modelClient.Delete(opModels...); err != nil {
-		return fmt.Errorf("unable to delete logical router policy, err: %v", err)
-	}
+
 	return nil
 }
