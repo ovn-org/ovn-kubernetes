@@ -42,7 +42,7 @@ var _ = ginkgo.Describe("Unidling", func() {
 		port              = 80
 	)
 
-	f := framework.NewDefaultFramework("unidling")
+	f := wrappedTestFramework("unidling")
 
 	var cs clientset.Interface
 

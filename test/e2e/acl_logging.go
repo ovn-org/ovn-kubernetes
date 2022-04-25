@@ -31,7 +31,7 @@ var _ = Describe("ACL Logging", func() {
 		pokedPodIndex           = 1
 	)
 
-	fr := framework.NewDefaultFramework(namespacePrefix)
+	fr := wrappedTestFramework(namespacePrefix)
 
 	var (
 		nsName string
