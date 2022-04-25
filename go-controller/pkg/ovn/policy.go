@@ -569,7 +569,7 @@ func (oc *Controller) createDefaultAllowMulticastPolicy() error {
 	egressACL := buildACL("", types.ClusterRtrPortGroupName, "DefaultAllowMulticastEgress", nbdb.ACLDirectionFromLport, types.DefaultMcastAllowPriority, egressMatch, nbdb.ACLActionAllow, "", knet.PolicyTypeEgress)
 
 	ingressMatch := getACLMatch(types.ClusterRtrPortGroupName, mcastMatch, knet.PolicyTypeIngress)
-	ingressACL := buildACL("", types.ClusterRtrPortGroupName, "DefaultAllowMulticastIngress", nbdb.ACLDirectionToLport, types.DefaultMcastAllowPriority, ingressMatch, nbdb.ACLActionAllow, "", knet.PolicyTypeEgress)
+	ingressACL := buildACL("", types.ClusterRtrPortGroupName, "DefaultAllowMulticastIngress", nbdb.ACLDirectionToLport, types.DefaultMcastAllowPriority, ingressMatch, nbdb.ACLActionAllow, "", knet.PolicyTypeIngress)
 
 	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, egressACL, ingressACL)
 	if err != nil {
