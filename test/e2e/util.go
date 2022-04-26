@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -462,6 +463,26 @@ func addressIsIP(address v1.NodeAddress) bool {
 	return true
 }
 
+// addressIsIPv4 tells whether the given address is an
+// IPv4 address.
+func addressIsIPv4(address v1.NodeAddress) bool {
+	addr := net.ParseIP(address.Address)
+	if addr == nil {
+		return false
+	}
+	return utilnet.IsIPv4String(addr.String())
+}
+
+// addressIsIPv6 tells whether the given address is an
+// IPv6 address.
+func addressIsIPv6(address v1.NodeAddress) bool {
+	addr := net.ParseIP(address.Address)
+	if addr == nil {
+		return false
+	}
+	return utilnet.IsIPv6String(addr.String())
+}
+
 // Returns pod's ipv4 and ipv6 addresses IN ORDER
 func getPodAddresses(pod *v1.Pod) (string, string) {
 	var ipv4Res, ipv6Res string
@@ -694,4 +715,58 @@ func isDualStackCluster(nodes *v1.NodeList) bool {
 		}
 	}
 	return false
+}
+
+// used to inject OVN specific test actions
+func wrappedTestFramework(basename string) *framework.Framework{
+	f := framework.NewDefaultFramework(basename)
+	// inject dumping dbs on failure
+	ginkgo.JustAfterEach(func() {
+		if ! ginkgo.CurrentGinkgoTestDescription().Failed {
+			return
+		}
+
+		ovnDocker := "ovn-control-plane"
+
+		logLocation := "/var/log"
+		dbLocation := "/var/lib/openvswitch"
+		ovsdbLocation := "/etc/origin/openvswitch"
+		dbs := []string{"ovnnb_db.db", "ovnsb_db.db"}
+		ovsdb := "conf.db"
+
+		testName :=  strings.Replace(ginkgo.CurrentGinkgoTestDescription().TestText, " ", "_", -1)
+		logDir := fmt.Sprintf("%s/e2e-dbs/%s-%s", logLocation, testName, f.UniqueName)
+
+		var args []string
+
+		// grab all OVS dbs
+		nodes, err := f.ClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+		framework.ExpectNoError(err)
+		for _, node := range nodes.Items {
+			// ensure e2e-dbs directory with test case exists
+			args = []string{"docker", "exec", node.Name, "mkdir", "-p", logDir}
+			_, err = runCommand(args...)
+			framework.ExpectNoError(err)
+
+			// node name is the same in kapi and docker
+			args = []string{"docker", "exec", node.Name, "cp", "-f", fmt.Sprintf("%s/%s", ovsdbLocation, ovsdb),
+				fmt.Sprintf("%s/%s", logDir, fmt.Sprintf("%s-%s", node.Name, ovsdb))}
+			_, err = runCommand(args...)
+			framework.ExpectNoError(err)
+		}
+
+		args = []string{"docker", "exec", ovnDocker, "stat", fmt.Sprintf("%s/%s", dbLocation, dbs[0])}
+		_, err = runCommand(args...)
+		framework.ExpectNoError(err)
+
+		// grab the OVN dbs
+		for _, db := range dbs {
+			args = []string{"docker", "exec", ovnDocker, "cp", "-f", fmt.Sprintf("%s/%s", dbLocation, db),
+				fmt.Sprintf("%s/%s", logDir, db)}
+			_, err = runCommand(args...)
+			framework.ExpectNoError(err)
+		}
+	})
+
+	return f
 }

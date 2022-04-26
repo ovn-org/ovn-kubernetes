@@ -419,16 +419,16 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 	klog.V(5).Infof("Deleting Namespace's NetworkPolicy entities")
 	for _, np := range nsInfo.networkPolicies {
 		key := getPolicyNamespacedName(np.policy)
-		oc.retryNetPolices.skipRetryObj(key)
+		oc.retryNetworkPolicies.skipRetryObj(key)
 		// add the full np object to the retry entry, since the namespace is going to be removed
 		// along with any mappings of nsInfo -> network policies
-		oc.retryNetPolices.initRetryObjWithDelete(np.policy, key, np)
+		oc.retryNetworkPolicies.initRetryObjWithDelete(np.policy, key, np)
 		isLastPolicyInNamespace := len(nsInfo.networkPolicies) == 1
 		if err := oc.destroyNetworkPolicy(np, isLastPolicyInNamespace); err != nil {
 			klog.Errorf("Failed to delete network policy: %s, error: %v", key, err)
-			oc.retryNetPolices.unSkipRetryObj(key)
+			oc.retryNetworkPolicies.unSkipRetryObj(key)
 		} else {
-			oc.retryNetPolices.deleteRetryObj(key, true)
+			oc.retryNetworkPolicies.deleteRetryObj(key, true)
 			delete(nsInfo.networkPolicies, np.name)
 		}
 	}
@@ -496,7 +496,7 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool, namespace 
 		oc.namespaces[ns] = nsInfo
 	} else {
 		nsInfoExisted = true
-		// if we found and existing nsInfo, do not hold the namespaces lock
+		// if we found an existing nsInfo, do not hold the namespaces lock
 		// while waiting for nsInfo to Lock
 		oc.namespacesMutex.Unlock()
 	}

@@ -387,6 +387,7 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.dst == %s`,
 			ovntypes.RouterToSwitchPrefix, nodeName, L3Prefix, hybridCIDR)
 
+		// Logic route policy to steer packet from pod to hybrid overlay nodes
 		logicalRouterPolicy := nbdb.LogicalRouterPolicy{
 			Priority: ovntypes.HybridOverlaySubnetPriority,
 			ExternalIDs: map[string]string{
@@ -396,31 +397,110 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 			Nexthops: []string{drIP.String()},
 			Match:    matchStr,
 		}
-		p := func(item *nbdb.LogicalRouterPolicy) bool {
+
+		if err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(m.nbClient, ovntypes.OVNClusterRouter, &logicalRouterPolicy, func(item *nbdb.LogicalRouterPolicy) bool {
 			return item.Priority == logicalRouterPolicy.Priority &&
 				item.ExternalIDs["name"] == logicalRouterPolicy.ExternalIDs["name"]
-		}
-
-		if err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(m.nbClient, ovntypes.OVNClusterRouter, &logicalRouterPolicy, p); err != nil {
+		}); err != nil {
 			return fmt.Errorf("failed to add policy route '%s' for host %q on %s , error: %v", matchStr, nodeName, ovntypes.OVNClusterRouter, err)
 		}
-		klog.Infof("Created hybrid overlay logical route policy for node %s", nodeName)
 
 		logicalPort := ovntypes.RouterToSwitchPrefix + nodeName
 		if err := util.CreateMACBinding(m.sbClient, logicalPort, ovntypes.OVNClusterRouter, portMac, drIP); err != nil {
 			return fmt.Errorf("failed to create MAC Binding for hybrid overlay: %v", err)
 		}
+
+		// Logic route policy to steer packet from external to nodePort service backed by non-ovnkube pods to hybrid overlay nodes
+		gwLRPIfAddrs, err := util.GetLRPAddrs(m.nbClient, ovntypes.GWRouterToJoinSwitchPrefix+ovntypes.GWRouterPrefix+nodeName)
+		if err != nil {
+			return err
+		}
+		gwLRPIfAddr, err := util.MatchIPNetFamily(utilnet.IsIPv6CIDR(hybridCIDR), gwLRPIfAddrs)
+		if err != nil {
+			return err
+		}
+		grMatchStr := fmt.Sprintf(`%s.src == %s && %s.dst == %s`,
+			L3Prefix, gwLRPIfAddr.IP.String(), L3Prefix, hybridCIDR)
+		grLogicalRouterPolicy := nbdb.LogicalRouterPolicy{
+			Priority: ovntypes.HybridOverlaySubnetPriority,
+			ExternalIDs: map[string]string{
+				"name": ovntypes.HybridSubnetPrefix + nodeName + "-gr",
+			},
+			Action:   nbdb.LogicalRouterPolicyActionReroute,
+			Nexthops: []string{drIP.String()},
+			Match:    grMatchStr,
+		}
+
+		if err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(m.nbClient, ovntypes.OVNClusterRouter, &grLogicalRouterPolicy, func(item *nbdb.LogicalRouterPolicy) bool {
+			return item.Priority == grLogicalRouterPolicy.Priority &&
+				item.ExternalIDs["name"] == grLogicalRouterPolicy.ExternalIDs["name"]
+		}); err != nil {
+			return fmt.Errorf("failed to add policy route '%s' for host %q on %s , error: %v", matchStr, nodeName, ovntypes.OVNClusterRouter, err)
+		}
+		klog.Infof("Created hybrid overlay logical route policies for node %s", nodeName)
+
+		// Static route to steer packets from external to nodePort service backed by pods on hybrid overlay node.
+		// This route is to used for triggering above route policy
+		clutsterRouterStaticRoutes := nbdb.LogicalRouterStaticRoute{
+			IPPrefix: hybridCIDR.String(),
+			Nexthop:  drIP.String(),
+			ExternalIDs: map[string]string{
+				"name": ovntypes.HybridSubnetPrefix + nodeName,
+			},
+		}
+		if err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(m.nbClient, ovntypes.OVNClusterRouter, &clutsterRouterStaticRoutes, func(item *nbdb.LogicalRouterStaticRoute) bool {
+			return item.IPPrefix == clutsterRouterStaticRoutes.IPPrefix && item.Nexthop == clutsterRouterStaticRoutes.Nexthop &&
+				item.ExternalIDs["name"] == clutsterRouterStaticRoutes.ExternalIDs["name"]
+		}); err != nil {
+			return fmt.Errorf("failed to add policy route static '%s %s' for on %s , error: %v", clutsterRouterStaticRoutes.IPPrefix, clutsterRouterStaticRoutes.Nexthop, ovntypes.GWRouterPrefix+nodeName, err)
+		}
+		klog.Infof("Created hybrid overlay logical route static route at cluster router for node %s", nodeName)
+
+		// Static route to steer packets from external to nodePort service backed by pods on hybrid overlay node to cluster router.
+		drLRPIfAddrs, err := util.GetLRPAddrs(m.nbClient, ovntypes.GWRouterToJoinSwitchPrefix+ovntypes.OVNClusterRouter)
+		if err != nil {
+			return err
+		}
+		drLRPIfAddr, err := util.MatchIPNetFamily(utilnet.IsIPv6CIDR(hybridCIDR), drLRPIfAddrs)
+		if err != nil {
+			return fmt.Errorf("failed to match cluster router join interface IPs: %v, err: %v", drLRPIfAddr, err)
+		}
+		nodeGWRouterStaticRoutes := nbdb.LogicalRouterStaticRoute{
+			IPPrefix: hybridCIDR.String(),
+			Nexthop:  drLRPIfAddr.IP.String(),
+			ExternalIDs: map[string]string{
+				"name": ovntypes.HybridSubnetPrefix + nodeName + "-gr",
+			},
+		}
+		if err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(m.nbClient, ovntypes.GWRouterPrefix+nodeName, &nodeGWRouterStaticRoutes, func(item *nbdb.LogicalRouterStaticRoute) bool {
+			return item.IPPrefix == nodeGWRouterStaticRoutes.IPPrefix && item.Nexthop == nodeGWRouterStaticRoutes.Nexthop &&
+				item.ExternalIDs["name"] == nodeGWRouterStaticRoutes.ExternalIDs["name"]
+		}); err != nil {
+			return fmt.Errorf("failed to add policy route static '%s %s' for on %s , error: %v", nodeGWRouterStaticRoutes.IPPrefix, nodeGWRouterStaticRoutes.Nexthop, ovntypes.GWRouterPrefix+nodeName, err)
+		}
+		klog.Infof("Created hybrid overlay logical route static route at gateway router for node %s", nodeName)
 	}
 	return nil
 }
 
 func (m *MasterController) removeHybridLRPolicySharedGW(nodeName string) error {
-	policyName := ovntypes.HybridSubnetPrefix + nodeName
-	p := func(item *nbdb.LogicalRouterPolicy) bool {
-		return item.ExternalIDs["name"] == policyName
+	name := ovntypes.HybridSubnetPrefix + nodeName
+
+	if err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(m.nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.ExternalIDs["name"] == ovntypes.HybridSubnetPrefix+nodeName || item.ExternalIDs["name"] == ovntypes.HybridSubnetPrefix+nodeName+"-gr"
+	}); err != nil {
+		return fmt.Errorf("failed to delete policy %s from %s, error: %v", name, ovntypes.OVNClusterRouter, err)
 	}
-	if err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(m.nbClient, ovntypes.OVNClusterRouter, p); err != nil {
-		return fmt.Errorf("failed to delete policy %s from %s, error: %v", policyName, ovntypes.OVNClusterRouter, err)
+
+	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(m.nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return item.ExternalIDs["name"] == name
+	}); err != nil {
+		return fmt.Errorf("failed to delete static route %s from %s, error: %v", name, ovntypes.OVNClusterRouter, err)
+	}
+	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(m.nbClient, ovntypes.GWRouterPrefix+nodeName, func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return item.ExternalIDs["name"] == name+"-gr"
+	}); err != nil {
+		return fmt.Errorf("failed to delete static route %s from %s, error: %v", name+"gr", ovntypes.GWRouterPrefix+nodeName, err)
 	}
 	return nil
 }

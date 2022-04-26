@@ -1914,61 +1914,128 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 				ginkgo.Skip("Skipping as this is not a DualStack cluster")
 			}
 			serviceName := "nodeportsvc"
+
 			ginkgo.By("Creating the nodeport service")
 			npSpec := nodePortServiceSpecFrom(serviceName, v1.IPFamilyPolicySingleStack, endpointHTTPPort, endpointUDPPort, clusterHTTPPort, clusterUDPPort, endpointsSelector, v1.ServiceExternalTrafficPolicyTypeCluster)
 			np, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.Background(), npSpec, metav1.CreateOptions{})
 			nodeTCPPort, nodeUDPPort := nodePortsFromService(np)
+			protocolPorts := map[string]int32{
+				"http": nodeTCPPort,
+				"udp":  nodeUDPPort,
+			}
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Waiting for the endpoints to pop up")
 			err = framework.WaitForServiceEndpointsNum(f.ClientSet, f.Namespace.Name, serviceName, len(endPoints), time.Second, wait.ForeverTestTimeout)
 			framework.ExpectNoError(err, "failed to validate endpoints for service %s in namespace: %s", serviceName, f.Namespace.Name)
 
-			ginkgo.By("Upgrading the nodeport service to PreferDualStack")
-			err = patchService(f.ClientSet, np.Name, np.Namespace, "/spec/ipFamilyPolicy", "PreferDualStack")
-			framework.ExpectNoError(err)
+			ginkgo.By("Collecting IPv4 and IPv6 node addresses")
+			// Mapping of nodeName to all node IPv4 addresses and
+			// mapping of nodeName to all node IPv6 addresses.
+			ipv4Addresses := make(map[string][]string)
+			ipv6Addresses := make(map[string][]string)
+			var n string
+			for _, node := range nodes.Items {
+				n = node.Name
+				ipv4Addresses[n] = []string{}
+				ipv6Addresses[n] = []string{}
+				for _, nodeAddress := range node.Status.Addresses {
+					if addressIsIPv6(nodeAddress) {
+						ipv6Addresses[n] = append(ipv6Addresses[n], nodeAddress.Address)
+					} else if addressIsIPv4(nodeAddress) {
+						ipv4Addresses[n] = append(ipv4Addresses[n], nodeAddress.Address)
+					}
+				}
+			}
+			// Mapping IPv4 -> nodeNames -> IP addreses.
+			// Mapping IPv6 -> nodeNames -> IP addreses.
+			ipAddressFamilyTargets := map[string]map[string][]string{
+				"IPv4": ipv4Addresses,
+				"IPv6": ipv6Addresses,
+			}
 
-			for _, protocol := range []string{"http", "udp"} {
-				for _, node := range nodes.Items {
-					for _, nodeAddress := range node.Status.Addresses {
-						// skipping hostnames
-						if !addressIsIP(nodeAddress) {
-							continue
-						}
+			// First, upgrade to PreferDualStack and test endpoints.
+			// Then, downgrade back to SingleStack and test endpoints.
+			for _, ipFamilyPolicy := range []string{"PreferDualStack", "SingleStack"} {
+				ginkgo.By(fmt.Sprintf("Changing the nodeport service to %s", ipFamilyPolicy))
+				err = patchService(f.ClientSet, np.Name, np.Namespace, "/spec/ipFamilyPolicy", ipFamilyPolicy)
+				framework.ExpectNoError(err)
 
-						nodePort := nodeTCPPort
-						if protocol == "udp" {
-							nodePort = nodeUDPPort
-						}
+				// It is expected that endpoints take a bit of time to come up after conversion. We remove all iptables rules and all breth0 flows.
+				// Therefore, test IPv4 endpoints until they are stable, only then proceed to the actual test.
+				// To be removed once https://github.com/ovn-org/ovn-kubernetes/issues/2933 is fixed.
+				framework.Logf("Monitoring endpoints for up to 60 seconds for IPv4 to give them time to come up (issue 2933)")
+				gomega.Eventually(func() (r bool) {
+					// Sleep for 5 seconds before proceeding.
+					framework.Logf("Sleeping for 5 seconds")
+					time.Sleep(5 * time.Second)
 
-						// After the DualStack upgrade, we might hit a timeout on the Service.
-						// Give this 5 tries to settle
-						// This could be implemented way more elegantly with gomega 1.14.0 (dependency on k8s 1.22) and above, see:
-						// https://github.com/onsi/gomega/commit/2f04e6e3467d2c0c695786c3e7880f1e940274cf#
-						ginkgo.By(fmt.Sprintf("Waiting for the service to stabilize after the DualStack upgrade on address %s (node %s)", nodeAddress.Address, node.Name))
-						gomega.Eventually(func() (r bool) {
-							failures := gomega.InterceptGomegaFailures(func() {
-								framework.Logf("Trying to poke node %s with address %s and port %s/%d", node.Name, nodeAddress.Address, protocol, nodePort)
-								pokeEndpointHostname(clientContainerName, protocol, nodeAddress.Address, nodePort)
-							})
-							return len(failures) == 0
-						}, 5*time.Second, 1*time.Second).Should(gomega.BeTrue())
-
-						ginkgo.By("Hitting the nodeport on " + node.Name + " and reaching all the endpoints " + protocol)
-						responses := sets.NewString()
-						valid := false
-						for i := 0; i < maxTries; i++ {
-							epHostname := pokeEndpointHostname(clientContainerName, protocol, nodeAddress.Address, nodePort)
-							responses.Insert(epHostname)
-
-							// each endpoint returns its hostname. By doing this, we validate that each ep was reached at least once.
-							if responses.Equal(nodesHostnames) {
-								framework.Logf("Validated node %s on address %s after %d tries", node.Name, nodeAddress.Address, i)
-								valid = true
-								break
+					// Test all node IPv4 addresses http and return true if all of them come back with a valid answer.
+					ipPort := net.JoinHostPort("localhost", "80")
+					for _, ipAddresses := range ipv4Addresses {
+						for _, targetHost := range ipAddresses {
+							cmd := []string{"docker", "exec", clientContainerName}
+							curlCommand := strings.Split(fmt.Sprintf("curl --max-time 2 -g -q -s http://%s/dial?request=hostname&protocol=http&host=%s&port=%d&tries=1",
+								ipPort,
+								targetHost,
+								protocolPorts["http"]), " ")
+							cmd = append(cmd, curlCommand...)
+							framework.Logf("Running command %v", cmd)
+							res, err := runCommand(cmd...)
+							if err != nil {
+								framework.Logf("Failed, res: %v, err: %v", res, err)
+								return false
+							}
+							res, err = parseNetexecResponse(res)
+							if err != nil {
+								framework.Logf("Failed, res: %v, err: %v", res, err)
+								return false
 							}
 						}
-						framework.ExpectEqual(valid, true, "Validation failed for node", node, responses, nodePort)
+					}
+					return true
+				}, 60*time.Second, 10*time.Second).Should(gomega.BeTrue())
+
+				// Test in the following order:
+				// for IPv4, then IPv6:
+				//   for each node:
+				//      for all node IP addresses that belong to that node:
+				//        probe http service port
+				//          make sure that all endpoints can be reached
+				//        probe udp service port
+				//          make sure that all endpoints can be reached
+				// Hit the exact same IP address family, IP address, protocol and port for maxTries times until we get back all endpoint hostnames for that
+				// tuple.
+				ipFamiliesToTest := []string{"IPv4"}
+				if ipFamilyPolicy == "PreferDualStack" {
+					ipFamiliesToTest = append(ipFamiliesToTest, "IPv6")
+				}
+				for _, ipAddressFamily := range ipFamiliesToTest {
+					ginkgo.By(fmt.Sprintf("Testing %s services", ipAddressFamily))
+					nodeToAddressesMapping := ipAddressFamilyTargets[ipAddressFamily]
+					for nodeName, ipAddresses := range nodeToAddressesMapping {
+						for _, address := range ipAddresses {
+							// Use a slice for stable order, always tests http first and udp second due to
+							// https://github.com/ovn-org/ovn-kubernetes/issues/2913.
+							for _, protocol := range []string{"http", "udp"} {
+								port := protocolPorts[protocol]
+								ginkgo.By(fmt.Sprintf("Hitting nodeport %s/%d on %s with IP %s and reaching all the endpoints ", protocol, port, nodeName, address))
+								responses := sets.NewString()
+								valid := false
+								for i := 0; i < maxTries; i++ {
+									epHostname := pokeEndpointHostname(clientContainerName, protocol, address, port)
+									responses.Insert(epHostname)
+
+									// each endpoint returns its hostname. By doing this, we validate that each ep was reached at least once.
+									if responses.Equal(nodesHostnames) {
+										framework.Logf("Validated node %s on address %s after %d tries", nodeName, address, i)
+										valid = true
+										break
+									}
+								}
+								framework.ExpectEqual(valid, true, "Validation failed for node", nodeName, responses, port)
+							}
+						}
 					}
 				}
 			}

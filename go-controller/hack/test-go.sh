@@ -36,7 +36,11 @@ function testrun {
             go test -mod=vendor -covermode set -c "${pkg}" -o "${testfile}"
         fi
         args=""
-        go_test="sudo ${testfile}"
+        if [ "$NOROOT" = "TRUE" ]; then
+            go_test="${testfile}"
+        else
+            go_test="sudo ${testfile}"
+        fi
     fi
     if [[ -n "$gingko_focus" ]]; then
         local ginkgoargs=${ginkgo_focus:-}
@@ -57,7 +61,7 @@ function testrun {
     ${go_test} -test.v ${args} ${ginkgoargs} 2>&1
 }
 
-# These packages requires root for network namespace maniuplation in unit tests
+# These packages requires root for network namespace manipulation in unit tests
 root_pkgs=("github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node" "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller")
 
 i=0

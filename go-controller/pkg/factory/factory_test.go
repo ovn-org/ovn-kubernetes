@@ -343,45 +343,45 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		It("is called for each existing pod", func() {
 			pods = append(pods, newPod("pod1", "default"))
-			testExisting(podType, "", nil)
+			testExisting(PodType, "", nil)
 		})
 
 		It("is called for each existing namespace", func() {
 			namespaces = append(namespaces, newNamespace("default"))
-			testExisting(namespaceType, "", nil)
+			testExisting(NamespaceType, "", nil)
 		})
 
 		It("is called for each existing node", func() {
 			nodes = append(nodes, newNode("default"))
-			testExisting(nodeType, "", nil)
+			testExisting(NodeType, "", nil)
 		})
 
 		It("is called for each existing policy", func() {
 			policies = append(policies, newPolicy("denyall", "default"))
-			testExisting(policyType, "", nil)
+			testExisting(PolicyType, "", nil)
 		})
 
 		It("is called for each existing endpoints", func() {
 			endpoints = append(endpoints, newEndpoints("myendpoint", "default"))
-			testExisting(endpointsType, "", nil)
+			testExisting(EndpointsType, "", nil)
 		})
 
 		It("is called for each existing service", func() {
 			services = append(services, newService("myservice", "default"))
-			testExisting(serviceType, "", nil)
+			testExisting(ServiceType, "", nil)
 		})
 
 		It("is called for each existing egressFirewall", func() {
 			egressFirewalls = append(egressFirewalls, newEgressFirewall("myEgressFirewall", "default"))
-			testExisting(egressFirewallType, "", nil)
+			testExisting(EgressFirewallType, "", nil)
 		})
 		It("is called for each existing egressIP", func() {
 			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
-			testExisting(egressIPType, "", nil)
+			testExisting(EgressIPType, "", nil)
 		})
 		It("is called for each existing cloudPrivateIPConfig", func() {
 			cloudPrivateIPConfigs = append(cloudPrivateIPConfigs, newCloudPrivateIPConfig("192.168.176.25"))
-			testExisting(cloudPrivateIPConfigType, "", nil)
+			testExisting(CloudPrivateIPConfigType, "", nil)
 		})
 
 		It("is called for each existing pod that matches a given namespace and label", func() {
@@ -396,7 +396,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			)
 			Expect(err).NotTo(HaveOccurred())
 
-			testExisting(podType, "default", sel)
+			testExisting(PodType, "default", sel)
 		})
 	})
 
@@ -422,52 +422,52 @@ var _ = Describe("Watch Factory Operations", func() {
 		It("calls ADD for each existing pod", func() {
 			pods = append(pods, newPod("pod1", "default"))
 			pods = append(pods, newPod("pod2", "default"))
-			testExisting(podType)
+			testExisting(PodType)
 		})
 
 		It("calls ADD for each existing namespace", func() {
 			namespaces = append(namespaces, newNamespace("default"))
 			namespaces = append(namespaces, newNamespace("default2"))
-			testExisting(namespaceType)
+			testExisting(NamespaceType)
 		})
 
 		It("calls ADD for each existing node", func() {
 			nodes = append(nodes, newNode("default"))
 			nodes = append(nodes, newNode("default2"))
-			testExisting(nodeType)
+			testExisting(NodeType)
 		})
 
 		It("calls ADD for each existing policy", func() {
 			policies = append(policies, newPolicy("denyall", "default"))
 			policies = append(policies, newPolicy("denyall2", "default"))
-			testExisting(policyType)
+			testExisting(PolicyType)
 		})
 
 		It("calls ADD for each existing endpoints", func() {
 			endpoints = append(endpoints, newEndpoints("myendpoint", "default"))
 			endpoints = append(endpoints, newEndpoints("myendpoint2", "default"))
-			testExisting(endpointsType)
+			testExisting(EndpointsType)
 		})
 
 		It("calls ADD for each existing service", func() {
 			services = append(services, newService("myservice", "default"))
 			services = append(services, newService("myservice2", "default"))
-			testExisting(serviceType)
+			testExisting(ServiceType)
 		})
 		It("calls ADD for each existing egressFirewall", func() {
 			egressFirewalls = append(egressFirewalls, newEgressFirewall("myFirewall", "default"))
 			egressFirewalls = append(egressFirewalls, newEgressFirewall("myFirewall1", "default"))
-			testExisting(egressFirewallType)
+			testExisting(EgressFirewallType)
 		})
 		It("calls ADD for each existing egressIP", func() {
 			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
 			egressIPs = append(egressIPs, newEgressIP("myEgressIP1", "default"))
-			testExisting(egressIPType)
+			testExisting(EgressIPType)
 		})
 		It("calls ADD for each existing cloudPrivateIPConfig", func() {
 			cloudPrivateIPConfigs = append(cloudPrivateIPConfigs, newCloudPrivateIPConfig("192.168.126.25"))
 			cloudPrivateIPConfigs = append(cloudPrivateIPConfigs, newCloudPrivateIPConfig("192.168.126.26"))
-			testExisting(cloudPrivateIPConfigType)
+			testExisting(CloudPrivateIPConfigType)
 		})
 	})
 
@@ -481,7 +481,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		}
 		It("does not contain Egress IP informer", func() {
 			config.OVNKubernetesFeature.EnableEgressIP = false
-			testExisting(egressIPType)
+			testExisting(EgressIPType)
 		})
 	})
 	Context("when EgressFirewall is disabled", func() {
@@ -494,7 +494,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		}
 		It("does not contain EgressFirewall informer", func() {
 			config.OVNKubernetesFeature.EnableEgressFirewall = false
-			testExisting(egressFirewallType)
+			testExisting(EgressFirewallType)
 		})
 	})
 
@@ -532,7 +532,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newPod("pod1", "default")
-		h, c := addHandler(wf, podType, cache.ResourceEventHandlerFuncs{
+		h, c := addHandler(wf, PodType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				pod := obj.(*v1.Pod)
 				Expect(reflect.DeepEqual(pod, added)).To(BeTrue())
@@ -583,7 +583,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			testPods[name] = &opTest{pod: pod}
 		}
 
-		h, c := addHandler(wf, podType, cache.ResourceEventHandlerFuncs{
+		h, c := addHandler(wf, PodType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				pod := obj.(*v1.Pod)
 				ot, ok := testPods[pod.Name]
@@ -651,7 +651,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newNamespace("default")
-		h, c := addHandler(wf, namespaceType, cache.ResourceEventHandlerFuncs{
+		h, c := addHandler(wf, NamespaceType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				ns := obj.(*v1.Namespace)
 				Expect(reflect.DeepEqual(ns, added)).To(BeTrue())
@@ -687,7 +687,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newNode("mynode")
-		h, c := addHandler(wf, nodeType, cache.ResourceEventHandlerFuncs{
+		h, c := addHandler(wf, NodeType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				node := obj.(*v1.Node)
 				Expect(reflect.DeepEqual(node, added)).To(BeTrue())
@@ -737,7 +737,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			testNodes[name] = &opTest{node: node}
 		}
 
-		h, c := addHandler(wf, nodeType, cache.ResourceEventHandlerFuncs{
+		h, c := addHandler(wf, NodeType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				node := obj.(*v1.Node)
 				ot, ok := testNodes[node.Name]
@@ -820,7 +820,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		h, c := addHandler(wf, nodeType, cache.ResourceEventHandlerFuncs{
+		h, c := addHandler(wf, NodeType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				defer GinkgoRecover()
 				node := obj.(*v1.Node)
@@ -914,7 +914,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		}()
 		startWg.Wait()
 
-		h, c := addHandler(wf, namespaceType, cache.ResourceEventHandlerFuncs{
+		h, c := addHandler(wf, NamespaceType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				defer GinkgoRecover()
 				namespace := obj.(*v1.Namespace)
@@ -968,7 +968,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newPolicy("mypolicy", "default")
-		h, c := addHandler(wf, policyType, cache.ResourceEventHandlerFuncs{
+		h, c := addHandler(wf, PolicyType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				np := obj.(*knet.NetworkPolicy)
 				Expect(reflect.DeepEqual(np, added)).To(BeTrue())
@@ -1004,7 +1004,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newEndpoints("myendpoints", "default")
-		h, c := addHandler(wf, endpointsType, cache.ResourceEventHandlerFuncs{
+		h, c := addHandler(wf, EndpointsType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				eps := obj.(*v1.Endpoints)
 				Expect(reflect.DeepEqual(eps, added)).To(BeTrue())
@@ -1047,7 +1047,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newService("myservice", "default")
-		h, c := addHandler(wf, serviceType, cache.ResourceEventHandlerFuncs{
+		h, c := addHandler(wf, ServiceType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				service := obj.(*v1.Service)
 				Expect(reflect.DeepEqual(service, added)).To(BeTrue())
@@ -1083,7 +1083,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newEgressFirewall("myEgressFirewall", "default")
-		h, c := addHandler(wf, egressFirewallType, cache.ResourceEventHandlerFuncs{
+		h, c := addHandler(wf, EgressFirewallType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				egressFirewall := obj.(*egressfirewall.EgressFirewall)
 				Expect(reflect.DeepEqual(egressFirewall, added)).To(BeTrue())
@@ -1118,7 +1118,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newEgressIP("myEgressIP", "default")
-		h, c := addHandler(wf, egressIPType, cache.ResourceEventHandlerFuncs{
+		h, c := addHandler(wf, EgressIPType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				egressIP := obj.(*egressip.EgressIP)
 				Expect(reflect.DeepEqual(egressIP, added)).To(BeTrue())
@@ -1153,7 +1153,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newCloudPrivateIPConfig("192.168.126.25")
-		h, c := addHandler(wf, cloudPrivateIPConfigType, cache.ResourceEventHandlerFuncs{
+		h, c := addHandler(wf, CloudPrivateIPConfigType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 				Expect(reflect.DeepEqual(cloudPrivateIPConfig, added)).To(BeTrue())
@@ -1188,7 +1188,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newNamespace("default")
-		h, c := addHandler(wf, namespaceType, cache.ResourceEventHandlerFuncs{
+		h, c := addHandler(wf, NamespaceType, cache.ResourceEventHandlerFuncs{
 			AddFunc:    func(obj interface{}) {},
 			UpdateFunc: func(old, new interface{}) {},
 			DeleteFunc: func(obj interface{}) {},
@@ -1233,7 +1233,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		_, c := addFilteredHandler(wf,
-			podType,
+			PodType,
 			"default",
 			sel,
 			cache.ResourceEventHandlerFuncs{
@@ -1301,7 +1301,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		equalPod := pod
 		h, c := addFilteredHandler(wf,
-			podType,
+			PodType,
 			"default",
 			sel,
 			cache.ResourceEventHandlerFuncs{

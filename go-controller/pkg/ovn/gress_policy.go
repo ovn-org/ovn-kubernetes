@@ -247,7 +247,8 @@ func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) []string 
 }
 
 // addNamespaceAddressSet adds a namespace address set to the gress policy
-// if it does not exist and returns `false` if it does.
+// if the address set does not exist and returns `true`;  if the address set already exists,
+// it returns `false`.
 func (gp *gressPolicy) addNamespaceAddressSet(name string) bool {
 	v4HashName, v6HashName := addressset.MakeAddressSetHashNames(name)
 	v4HashName = "$" + v4HashName

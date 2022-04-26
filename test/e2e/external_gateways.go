@@ -71,7 +71,7 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 		clientSet                kubernetes.Interface
 	)
 
-	f := framework.NewDefaultFramework(svcname)
+	f := wrappedTestFramework(svcname)
 
 	ginkgo.BeforeEach(func() {
 		clientSet = f.ClientSet // so it can be used in AfterEach
@@ -232,7 +232,7 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 		externalUDPPort        = 90
 	)
 
-	f := framework.NewDefaultFramework(svcname)
+	f := wrappedTestFramework(svcname)
 
 	var addressesv4, addressesv6 gatewayTestIPs
 
@@ -399,7 +399,7 @@ var _ = ginkgo.Context("BFD", func() {
 			clientSet                kubernetes.Interface
 		)
 
-		f := framework.NewDefaultFramework(svcname)
+		f := wrappedTestFramework(svcname)
 
 		ginkgo.BeforeEach(func() {
 			clientSet = f.ClientSet // so it can be used in AfterEach
@@ -603,7 +603,7 @@ var _ = ginkgo.Context("BFD", func() {
 		testContainer := fmt.Sprintf("%s-container", srcPodName)
 		testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
 
-		f := framework.NewDefaultFramework(svcname)
+		f := wrappedTestFramework(svcname)
 
 		var addressesv4, addressesv6 gatewayTestIPs
 
