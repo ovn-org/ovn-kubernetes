@@ -948,6 +948,13 @@ ovn-master() {
   echo "egressfirewall_enabled_flag=${egressfirewall_enabled_flag}"
 
   ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
+  local ovnkube_metrics_tls_opts=""
+  if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
+    ovnkube_metrics_tls_opts="
+        --node-server-privkey ${OVNKUBE_METRICS_PK}
+        --node-server-cert ${OVNKUBE_METRICS_CERT}
+      "
+  fi
 
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
@@ -967,6 +974,7 @@ ovn-master() {
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     ${ovn_master_ssl_opts} \
+    ${ovnkube_metrics_tls_opts} \
     ${multicast_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
     ${egressip_enabled_flag} \
@@ -1187,6 +1195,14 @@ ovn-node() {
   ovn_metrics_bind_address="${metrics_endpoint_ip}:9476"
   ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:9410"
 
+  local ovnkube_metrics_tls_opts=""
+  if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
+    ovnkube_metrics_tls_opts="
+        --node-server-privkey ${OVNKUBE_METRICS_PK}
+        --node-server-cert ${OVNKUBE_METRICS_CERT}
+      "
+  fi
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
@@ -1208,6 +1224,7 @@ ovn-node() {
     --pidfile ${OVN_RUNDIR}/ovnkube.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube.log \
     ${ovn_node_ssl_opts} \
+    ${ovnkube_metrics_tls_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
     ${monitor_all} \
     ${enable_lflow_cache} \
