@@ -309,6 +309,8 @@ type MetricsConfig struct {
 	OVNMetricsBindAddress string `gcfg:"ovn-metrics-bind-address"`
 	ExportOVSMetrics      bool   `gcfg:"export-ovs-metrics"`
 	EnablePprof           bool   `gcfg:"enable-pprof"`
+	NodeServerPrivKey     string `gcfg:"node-server-privkey"`
+	NodeServerCert        string `gcfg:"node-server-cert"`
 }
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
@@ -943,6 +945,16 @@ var MetricsFlags = []cli.Flag{
 		Usage:       "If true, then also accept pprof requests on the metrics port.",
 		Destination: &cliConfig.Metrics.EnablePprof,
 		Value:       Metrics.EnablePprof,
+	},
+	&cli.StringFlag{
+		Name:        "node-server-privkey",
+		Usage:       "Private key that the OVN node K8s metrics server uses to serve metrics over TLS.",
+		Destination: &cliConfig.Metrics.NodeServerPrivKey,
+	},
+	&cli.StringFlag{
+		Name:        "node-server-cert",
+		Usage:       "Certificate that the OVN node K8s metrics server uses to serve metrics over TLS.",
+		Destination: &cliConfig.Metrics.NodeServerCert,
 	},
 }
 
