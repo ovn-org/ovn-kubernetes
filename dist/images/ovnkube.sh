@@ -68,6 +68,7 @@ fi
 # OVN_SSL_ENABLE - use SSL transport to NB/SB db and northd (default: no)
 # OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 # OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB
+# OVN_OFCTRL_WAIT_BEFORE_CLEAR - ovn-controller wait time in ms before clearing OpenFlow rules during start up
 # OVN_ENABLE_LFLOW_CACHE - enable ovn-controller lflow-cache
 # OVN_LFLOW_CACHE_LIMIT - maximum number of logical flow cache entries of ovn-controller
 # OVN_LFLOW_CACHE_LIMIT_KB - maximum size of the logical flow cache of ovn-controller
@@ -201,6 +202,8 @@ ovn_v6_join_subnet=${OVN_V6_JOIN_SUBNET:-}
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
 #OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB
 ovn_monitor_all=${OVN_MONITOR_ALL:-}
+#OVN_OFCTRL_WAIT_BEFORE_CLEAR - ovn-controller wait time in ms before clearing OpenFlow rules during start up
+ovn_ofctrl_wait_before_clear=${OVN_OFCTRL_WAIT_BEFORE_CLEAR:-}
 ovn_enable_lflow_cache=${OVN_ENABLE_LFLOW_CACHE:-}
 ovn_lflow_cache_limit=${OVN_LFLOW_CACHE_LIMIT:-}
 ovn_lflow_cache_limit_kb=${OVN_LFLOW_CACHE_LIMIT_KB:-}
@@ -1113,6 +1116,11 @@ ovn-node() {
      monitor_all="--monitor-all=${ovn_monitor_all}"
   fi
 
+  ofctrl_wait_before_clear=
+  if [[ -n ${ovn_ofctrl_wait_before_clear} ]]; then
+     ofctrl_wait_before_clear="--ofctrl-wait-before-clear=${ovn_ofctrl_wait_before_clear}"
+  fi
+
   enable_lflow_cache=
   if [[ -n ${ovn_enable_lflow_cache} ]]; then
      enable_lflow_cache="--enable-lflow-cache=${ovn_enable_lflow_cache}"
@@ -1210,6 +1218,7 @@ ovn-node() {
     ${ovn_node_ssl_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
     ${monitor_all} \
+    ${ofctrl_wait_before_clear} \
     ${enable_lflow_cache} \
     ${lflow_cache_limit} \
     ${lflow_cache_limit_kb} \

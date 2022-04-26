@@ -666,6 +666,7 @@ var _ = Describe("Config Operations", func() {
 				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
 			gomega.Expect(Default.MonitorAll).To(gomega.BeFalse())
+			gomega.Expect(Default.OfctrlWaitBeforeClear).To(gomega.Equal(5000))
 
 			return nil
 		}
@@ -711,6 +712,7 @@ var _ = Describe("Config Operations", func() {
 			"-ovn-metrics-bind-address=2.2.2.3:8081",
 			"-export-ovs-metrics=false",
 			"-metrics-enable-pprof=false",
+			"-ofctrl-wait-before-clear=5000",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())

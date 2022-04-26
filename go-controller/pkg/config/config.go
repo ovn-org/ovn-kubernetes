@@ -57,16 +57,17 @@ var (
 
 	// Default holds parsed config file parameters and command-line overrides
 	Default = DefaultConfig{
-		MTU:               1400,
-		ConntrackZone:     64000,
-		EncapType:         "geneve",
-		EncapIP:           "",
-		EncapPort:         DefaultEncapPort,
-		InactivityProbe:   100000, // in Milliseconds
-		OpenFlowProbe:     180,    // in Seconds
-		MonitorAll:        true,
-		LFlowCacheEnable:  true,
-		RawClusterSubnets: "10.128.0.0/14/23",
+		MTU:                   1400,
+		ConntrackZone:         64000,
+		EncapType:             "geneve",
+		EncapIP:               "",
+		EncapPort:             DefaultEncapPort,
+		InactivityProbe:       100000, // in Milliseconds
+		OpenFlowProbe:         180,    // in Seconds
+		OfctrlWaitBeforeClear: 0,      // in Milliseconds
+		MonitorAll:            true,
+		LFlowCacheEnable:      true,
+		RawClusterSubnets:     "10.128.0.0/14/23",
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -191,6 +192,10 @@ type DefaultConfig struct {
 	// Maximum number of seconds of idle time on the OpenFlow connection
 	// that ovn-controller will wait before it sends a connection health probe
 	OpenFlowProbe int `gcfg:"openflow-probe"`
+	// Maximum number of milliseconds that ovn-controller waits before clearing existing flows
+	// during start up, to make sure the initial flow compute is complete and avoid data plane
+	// interruptions.
+	OfctrlWaitBeforeClear int `gcfg:"ofctrl-wait-before-clear"`
 	// The  boolean  flag  indicates  if  ovn-controller  should monitor all data in SB DB
 	// instead of conditionally monitoring the data relevant to this node only.
 	// By default monitor-all is enabled.
@@ -649,6 +654,14 @@ var CommonFlags = []cli.Flag{
 			"connection for ovn-controller before it sends a inactivity probe",
 		Destination: &cliConfig.Default.OpenFlowProbe,
 		Value:       Default.OpenFlowProbe,
+	},
+	&cli.IntFlag{
+		Name: "ofctrl-wait-before-clear",
+		Usage: "Maximum number of milliseconds that ovn-controller waits before " +
+			"clearing existing flows during start up, to make sure the initial flow " +
+			"compute is complete and avoid data plane interruptions.",
+		Destination: &cliConfig.Default.OfctrlWaitBeforeClear,
+		Value:       Default.OfctrlWaitBeforeClear,
 	},
 	&cli.BoolFlag{
 		Name: "monitor-all",
