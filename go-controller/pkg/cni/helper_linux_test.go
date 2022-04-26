@@ -379,26 +379,9 @@ func TestSetupInterface(t *testing.T) {
 			},
 			errExp: true,
 			cniPluginMockHelper: []ovntest.TestifyMockHelper{
-				{"SetupVeth",[]string{"string", "int", "*ns.NetNS"}, []interface{}{nil, nil, fmt.Errorf("mock error")}},
+				{"SetupVeth",[]string{"string", "string", "int", "*ns.NetNS"}, []interface{}{nil, nil, fmt.Errorf("mock error")}},
 			},
 		},*/
-		{
-			desc:         "test code path when renameLink() returns error",
-			inpNetNS:     mockNS,
-			inpContID:    "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a",
-			inpIfaceName: "eth0",
-			inpPodIfaceInfo: &PodInterfaceInfo{
-				PodAnnotation: util.PodAnnotation{},
-				MTU:           1500,
-			},
-			errMatch: fmt.Errorf("failed to rename"),
-			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
-			},
-			nsMockHelper: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "Do", OnCallMethodArgType: []string{"func(ns.NetNS) error"}, RetArgList: []interface{}{nil}},
-			},
-		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {

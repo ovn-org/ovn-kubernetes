@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	utilnet "k8s.io/utils/net"
 	"net"
 	"strconv"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
+	utilnet "k8s.io/utils/net"
 )
 
 var runner kexec.Interface
@@ -53,6 +53,27 @@ func ovsExec(args ...string) (string, error) {
 	}
 
 	return strings.TrimSuffix(string(output), "\n"), nil
+}
+
+// ovsGetMultiOutput allows running get command with multiple columns
+// returns a slice of requested fields
+// if row doesn't exist command output will be a slice with an empty string
+// empty ovsdb value [] will be replaced with an empty string
+func ovsGetMultiOutput(table, record string, columns []string) ([]string, error) {
+	args := []string{"--if-exists", "get", table, record}
+	args = append(args, columns...)
+	output, err := ovsExec(args...)
+	var result []string
+	// columns are separated with \n
+	// remove \" as with --data=bare formatting
+	for _, column := range strings.Split(strings.ReplaceAll(output, "\"", ""), "\n") {
+		if column == "[]" {
+			result = append(result, "")
+		} else {
+			result = append(result, column)
+		}
+	}
+	return result, err
 }
 
 func ovsCreate(table string, values ...string) (string, error) {
@@ -131,31 +152,6 @@ func ofctlExec(args ...string) (string, error) {
 		stdoutStr = trimmed
 	}
 	return stdoutStr, nil
-}
-
-// isIfaceIDSet checks to see if the interface has its external id set, which indicates if it is active
-func isIfaceIDSet(ifaceName, ifaceID string) error {
-	// ensure the OVS interface is still active. It may have been cleared by a subsequent CNI ADD
-	// and if so, there's no need to keep checking for flows
-	out, err := ovsGet("Interface", ifaceName, "external-ids", "iface-id")
-	if err == nil && out != ifaceID {
-		return fmt.Errorf("OVS sandbox port %s is no longer active (probably due to a subsequent "+
-			"CNI ADD)", ifaceName)
-	}
-
-	// Try again
-	return nil
-}
-
-func isIfaceOvnInstalledSet(ifaceName string) bool {
-	out, err := ovsGet("Interface", ifaceName, "external-ids", "ovn-installed")
-	if err == nil && out == "true" {
-		klog.V(5).Infof("Interface %s has ovn-installed=true", ifaceName)
-		return true
-	}
-
-	klog.V(5).Infof("Still waiting for OVS port %s to have ovn-installed=true", ifaceName)
-	return false
 }
 
 // getIfaceOFPort returns the of port number for an interface
@@ -273,15 +269,21 @@ func checkCancelSandbox(mac string, podLister corev1listers.PodLister, kclient k
 }
 
 func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
-	ifaceName, ifaceID string, ofPort int, checkExternalIDs bool,
+	ifaceName, ifaceID string, checkExternalIDs bool,
 	podLister corev1listers.PodLister, kclient kubernetes.Interface,
 	namespace, name, initialPodUID string) error {
 	var detail string
+	var ofPort int
+	var err error
 
 	if checkExternalIDs {
 		detail = " (ovn-installed)"
+	} else {
+		ofPort, err = getIfaceOFPort(ifaceName)
+		if err != nil {
+			return err
+		}
 	}
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -291,14 +293,24 @@ func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 			}
 			return fmt.Errorf("%s waiting for OVS port binding%s for %s %v", errDetail, detail, mac, ifAddrs)
 		default:
-			if err := isIfaceIDSet(ifaceName, ifaceID); err != nil {
-				return err
+			columns := []string{"external-ids:iface-id"}
+			if checkExternalIDs {
+				// get ovn-installed flag in the same request
+				columns = append(columns, "external-ids:ovn-installed")
+			}
+			output, err := ovsGetMultiOutput("Interface", ifaceName, columns)
+			// check to see if the interface has its external id set, which indicates if it is active
+			// It may have been cleared by a subsequent CNI ADD and if so, there's no need to keep checking for flows
+			if err == nil && len(output) > 0 && output[0] != ifaceID {
+				return fmt.Errorf("OVS sandbox port %s is no longer active (probably due to a subsequent "+
+					"CNI ADD)", ifaceName)
 			}
 			if checkExternalIDs {
-				if isIfaceOvnInstalledSet(ifaceName) {
-					//success
+				if err == nil && len(output) == 2 && output[1] == "true" {
+					klog.V(5).Infof("Interface %s has ovn-installed=true", ifaceName)
 					return nil
 				}
+				klog.V(5).Infof("Still waiting for OVS port %s to have ovn-installed=true", ifaceName)
 			} else {
 				if doPodFlowsExist(mac, ifAddrs, ofPort) {
 					// success
