@@ -998,7 +998,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("newLocalGateway sets up a local interface gateway", func() {
+		ovntest.OnSupportedPlatformsIt("newLocalGateway sets up a local interface gateway", func() {
 			localGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0IP, eth0GWIP, eth0CIDR)
 		})
 
@@ -1047,20 +1047,20 @@ var _ = Describe("Gateway Init Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("sets up a shared interface gateway", func() {
+		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway", func() {
 			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0IP, eth0GWIP, eth0CIDR, 0)
 		})
 
-		It("sets up a shared interface gateway with tagged VLAN", func() {
+		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with tagged VLAN", func() {
 			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0IP, eth0GWIP, eth0CIDR, 3000)
 		})
 
 		config.Gateway.Interface = eth0Name
-		It("sets up a shared interface gateway with predetermined gateway interface", func() {
+		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with predetermined gateway interface", func() {
 			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0IP, eth0GWIP, eth0CIDR, 0)
 		})
 
-		It("sets up a shared interface gateway with tagged VLAN + predetermined gateway interface", func() {
+		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with tagged VLAN + predetermined gateway interface", func() {
 			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0IP, eth0GWIP, eth0CIDR, 3000)
 		})
 	})
@@ -1131,7 +1131,7 @@ var _ = Describe("Gateway Operations DPU", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("sets up a shared interface gateway DPU", func() {
+		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway DPU", func() {
 			shareGatewayInterfaceDPUTest(app, testNS, brphys, hostMAC, hostCIDR)
 		})
 	})
@@ -1174,7 +1174,7 @@ var _ = Describe("Gateway Operations DPU", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("sets up a shared interface gateway DPU host", func() {
+		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway DPU host", func() {
 			shareGatewayInterfaceDPUHostTest(app, testNS, uplinkName, hostIP, gwIP)
 		})
 	})
