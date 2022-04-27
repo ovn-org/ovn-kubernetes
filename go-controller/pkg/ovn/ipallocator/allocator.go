@@ -34,8 +34,6 @@ type Interface interface {
 	Release(net.IP)
 	ForEach(func(net.IP))
 	CIDR() net.IPNet
-
-	// Has is used for testing
 	Has(ip net.IP) bool
 }
 

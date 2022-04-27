@@ -321,6 +321,40 @@ func (manager *LogicalSwitchManager) ReleaseIPs(nodeName string, ipnets []*net.I
 	return nil
 }
 
+// ConditionalIPRelease determines if any IP is available to be released from an IPAM conditionally if func is true.
+// It guarantees state of the allocator will not change while executing the predicate function
+// TODO(trozet): add unit testing for this function
+func (manager *LogicalSwitchManager) ConditionalIPRelease(nodeName string, ipnets []*net.IPNet, predicate func() (bool, error)) (bool, error) {
+	manager.RLock()
+	defer manager.RUnlock()
+	if ipnets == nil || nodeName == "" {
+		klog.V(5).Infof("Node name is empty or ip slice to release is nil")
+		return false, nil
+	}
+	lsi, ok := manager.cache[nodeName]
+	if !ok {
+		return false, nil
+	}
+	if len(lsi.ipams) == 0 {
+		return false, nil
+	}
+
+	// check if ipam has one of the ip addresses, and then execute the predicate function to determine
+	// if this IP should be released or not
+	for _, ipnet := range ipnets {
+		for _, ipam := range lsi.ipams {
+			cidr := ipam.CIDR()
+			if cidr.Contains(ipnet.IP) {
+				if ipam.Has(ipnet.IP) {
+					return predicate()
+				}
+			}
+		}
+	}
+
+	return false, nil
+}
+
 // IP allocator manager for join switch's IPv4 and IPv6 subnets.
 type JoinSwitchIPManager struct {
 	lsm            *LogicalSwitchManager
