@@ -1314,6 +1314,7 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 		if err != nil {
 			return fmt.Errorf("nodeAdd: error adding noHost subnet for node %s: %w", node.Name, err)
 		}
+		oc.clearInitialNodeNetworkUnavailableCondition(node)
 		return nil
 	}
 
