@@ -5,12 +5,15 @@ import (
 	"reflect"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/klog/v2"
 )
@@ -35,7 +38,8 @@ import (
 //
 // It is assumed that names are meaningful and somewhat stable, to minimize churn. This
 // function doesn't work with Load_Balancers without a name.
-func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LBs []LB) error {
+func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB) error {
+	externalIDs := util.ExternalIDsForObject(service)
 	lbCache, err := GetLBCache(nbClient)
 	if err != nil {
 		return fmt.Errorf("failed initialize LBcache: %w", err)
@@ -169,10 +173,18 @@ func EnsureLBs(nbClient libovsdbclient.Client, externalIDs map[string]string, LB
 		return err
 	}
 
+	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(nbClient, "service",
+		service.Namespace, service.Name)
+	if err != nil {
+		klog.Errorf("Failed to record config duration: %v", err)
+	}
+	ops = append(ops, recordOps...)
+
 	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(nbClient, lbs, ops)
 	if err != nil {
 		return err
 	}
+	txOkCallBack()
 
 	for _, lb := range lbs {
 		wantedByName[lb.Name].UUID = lb.UUID

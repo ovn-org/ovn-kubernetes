@@ -209,15 +209,16 @@ func (c *Controller) processNextWorkItem() bool {
 }
 
 func (c *Controller) handleErr(err error, key interface{}) {
-	if err == nil {
-		c.queue.Forget(key)
-		return
-	}
-
 	ns, name, keyErr := cache.SplitMetaNamespaceKey(key.(string))
 	if keyErr != nil {
 		klog.ErrorS(err, "Failed to split meta namespace cache key", "key", key)
 	}
+	if err == nil {
+		metrics.GetConfigDurationRecorder().End("service", ns, name)
+		c.queue.Forget(key)
+		return
+	}
+
 	metrics.MetricRequeueServiceCount.Inc()
 
 	if c.queue.NumRequeues(key) < maxRetries {
@@ -227,6 +228,7 @@ func (c *Controller) handleErr(err error, key interface{}) {
 	}
 
 	klog.Warningf("Dropping service %q out of the queue: %v", key, err)
+	metrics.GetConfigDurationRecorder().End("service", ns, name)
 	c.queue.Forget(key)
 	utilruntime.HandleError(err)
 }
@@ -270,7 +272,7 @@ func (c *Controller) syncService(key string) error {
 			},
 		}
 
-		if err := ovnlb.EnsureLBs(c.nbClient, util.ExternalIDsForObject(service), nil); err != nil {
+		if err := ovnlb.EnsureLBs(c.nbClient, service, nil); err != nil {
 			return fmt.Errorf("failed to delete load balancers for service %s/%s: %w",
 				namespace, name, err)
 		}
@@ -323,7 +325,7 @@ func (c *Controller) syncService(key string) error {
 		//
 		// Note: this may fail if a node was deleted between listing nodes and applying.
 		// If so, this will fail and we will resync.
-		if err := ovnlb.EnsureLBs(c.nbClient, util.ExternalIDsForObject(service), lbs); err != nil {
+		if err := ovnlb.EnsureLBs(c.nbClient, service, lbs); err != nil {
 			return fmt.Errorf("failed to ensure service %s load balancers: %w", key, err)
 		}
 
@@ -367,6 +369,8 @@ func (c *Controller) onServiceAdd(obj interface{}) {
 		return
 	}
 	klog.V(4).Infof("Adding service %s", key)
+	service := obj.(*v1.Service)
+	metrics.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name)
 	c.queue.Add(key)
 }
 
@@ -383,6 +387,7 @@ func (c *Controller) onServiceUpdate(oldObj, newObj interface{}) {
 
 	key, err := cache.MetaNamespaceKeyFunc(newObj)
 	if err == nil {
+		metrics.GetConfigDurationRecorder().Start("service", newService.Namespace, newService.Name)
 		c.queue.Add(key)
 	}
 }
@@ -395,6 +400,8 @@ func (c *Controller) onServiceDelete(obj interface{}) {
 		return
 	}
 	klog.V(4).Infof("Deleting service %s", key)
+	service := obj.(*v1.Service)
+	metrics.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name)
 	c.queue.Add(key)
 }
 

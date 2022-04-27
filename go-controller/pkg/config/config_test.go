@@ -156,6 +156,7 @@ export-ovs-metrics=true
 enable-pprof=true
 node-server-privkey=/path/to/node-metrics-private.key
 node-server-cert=/path/to/node-metrics.crt
+enable-config-duration=true
 
 [logging]
 loglevel=5
@@ -567,6 +568,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Metrics.EnablePprof).To(gomega.Equal(true))
 			gomega.Expect(Metrics.NodeServerPrivKey).To(gomega.Equal("/path/to/node-metrics-private.key"))
 			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal("/path/to/node-metrics.crt"))
+			gomega.Expect(Metrics.EnableConfigDuration).To(gomega.Equal(true))
 
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeSSL))
 			gomega.Expect(OvnNorth.PrivKey).To(gomega.Equal("/path/to/nb-client-private.key"))
@@ -648,6 +650,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Metrics.EnablePprof).To(gomega.Equal(true))
 			gomega.Expect(Metrics.NodeServerPrivKey).To(gomega.Equal("/tls/nodeprivkey"))
 			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal("/tls/nodecert"))
+			gomega.Expect(Metrics.EnableConfigDuration).To(gomega.Equal(true))
 
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeSSL))
 			gomega.Expect(OvnNorth.PrivKey).To(gomega.Equal("/client/privkey"))
@@ -723,6 +726,7 @@ var _ = Describe("Config Operations", func() {
 			"-export-ovs-metrics=false",
 			"-metrics-enable-pprof=false",
 			"-ofctrl-wait-before-clear=5000",
+			"-metrics-enable-config-duration=true",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())

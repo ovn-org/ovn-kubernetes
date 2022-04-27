@@ -440,13 +440,32 @@ func (oc *Controller) getResourceFromInformerCache(objType reflect.Type, key str
 	return obj, err
 }
 
-// Given an object and its type, recordAddEvent records the add event on this object. Only used for pods now.
+// Given an object and its type, recordAddEvent records the add event on this object.
 func (oc *Controller) recordAddEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
 	case factory.PodType:
 		klog.V(5).Infof("Recording add event on pod")
 		pod := obj.(*kapi.Pod)
 		oc.podRecorder.AddPod(pod.UID)
+		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
+	case factory.PolicyType:
+		klog.V(5).Infof("Recording add event on network policy")
+		np := obj.(*knet.NetworkPolicy)
+		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
+	}
+}
+
+// Given an object and its type, recordUpdateEvent records the update event on this object.
+func (oc *Controller) recordUpdateEvent(objType reflect.Type, obj interface{}) {
+	switch objType {
+	case factory.PodType:
+		klog.V(5).Infof("Recording update event on pod")
+		pod := obj.(*kapi.Pod)
+		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
+	case factory.PolicyType:
+		klog.V(5).Infof("Recording update event on network policy")
+		np := obj.(*knet.NetworkPolicy)
+		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
 	}
 }
 
@@ -454,9 +473,27 @@ func (oc *Controller) recordAddEvent(objType reflect.Type, obj interface{}) {
 func (oc *Controller) recordDeleteEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
 	case factory.PodType:
-		klog.V(5).Infof("Recording add event on pod")
+		klog.V(5).Infof("Recording delete event on pod")
 		pod := obj.(*kapi.Pod)
 		oc.podRecorder.CleanPod(pod.UID)
+		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
+	case factory.PolicyType:
+		klog.V(5).Infof("Recording delete event on network policy")
+		np := obj.(*knet.NetworkPolicy)
+		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
+	}
+}
+
+func (oc *Controller) recordSuccessEvent(objType reflect.Type, obj interface{}) {
+	switch objType {
+	case factory.PodType:
+		klog.V(5).Infof("Recording success event on pod")
+		pod := obj.(*kapi.Pod)
+		metrics.GetConfigDurationRecorder().End("pod", pod.Namespace, pod.Name)
+	case factory.PolicyType:
+		klog.V(5).Infof("Recording success event on network policy")
+		np := obj.(*knet.NetworkPolicy)
+		metrics.GetConfigDurationRecorder().End("networkpolicy", np.Namespace, np.Name)
 	}
 }
 
@@ -501,6 +538,7 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *knet.NetworkPolicy", obj)
 		}
+
 		if err = oc.addNetworkPolicy(np); err != nil {
 			klog.Infof("Network Policy retry delete failed for %s/%s, will try again later: %v",
 				np.Namespace, np.Name, err)
@@ -625,6 +663,7 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 	case factory.PodType:
 		oldPod := oldObj.(*kapi.Pod)
 		newPod := newObj.(*kapi.Pod)
+
 		newKey, err := getResourceKey(objectsToRetry.oType, newObj)
 		if err != nil {
 			return err
@@ -681,6 +720,7 @@ func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj i
 	case factory.PodType:
 		var portInfo *lpInfo
 		pod := obj.(*kapi.Pod)
+
 		if cachedObj != nil {
 			portInfo = cachedObj.(*lpInfo)
 		}
@@ -693,6 +733,7 @@ func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj i
 		if !ok {
 			return fmt.Errorf("could not cast obj of type %T to *knet.NetworkPolicy", obj)
 		}
+
 		if cachedObj != nil {
 			if cachedNP, ok = cachedObj.(*networkPolicy); !ok {
 				cachedNP = nil
@@ -789,6 +830,13 @@ func (oc *Controller) iterateRetryResources(r *retryObjs, updateAll bool) {
 		if entry.ignore {
 			continue
 		}
+		// storing original obj for metrics
+		var initObj interface{}
+		if entry.newObj != nil {
+			initObj = entry.newObj
+		} else if entry.oldObj != nil {
+			initObj = entry.oldObj
+		}
 		// check if we need to create the resource object
 		if entry.newObj != nil {
 			// get the latest version of the resource object from the informer;
@@ -855,8 +903,10 @@ func (oc *Controller) iterateRetryResources(r *retryObjs, updateAll bool) {
 		}
 
 		klog.Infof("%v retry successful for %s", r.oType, objKey)
+		if initObj != nil {
+			oc.recordSuccessEvent(r.oType, initObj)
+		}
 		r.deleteRetryObj(objKey, false)
-
 	}
 }
 
@@ -1082,6 +1132,7 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) *factory.Handler 
 				}
 				klog.Infof("Creating %v %s took: %v", objectsToRetry.oType, key, time.Since(start))
 				objectsToRetry.deleteRetryObj(key, true)
+				oc.recordSuccessEvent(objectsToRetry.oType, obj)
 			},
 
 			UpdateFunc: func(old, newer interface{}) {
@@ -1097,6 +1148,7 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) *factory.Handler 
 				if areEqual {
 					return
 				}
+				oc.recordUpdateEvent(objectsToRetry.oType, newer)
 
 				// get the object keys for newer and old (expected to be the same)
 				newKey, err := getResourceKey(objectsToRetry.oType, newer)
@@ -1201,6 +1253,7 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) *factory.Handler 
 					}
 				}
 				objectsToRetry.deleteRetryObj(newKey, true)
+				oc.recordSuccessEvent(objectsToRetry.oType, newer)
 
 			},
 			DeleteFunc: func(obj interface{}) {
@@ -1227,6 +1280,7 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) *factory.Handler 
 					return
 				}
 				objectsToRetry.deleteRetryObj(key, true)
+				oc.recordSuccessEvent(objectsToRetry.oType, obj)
 			},
 		},
 		syncFunc) // adds all existing objects at startup
