@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 
 	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
+	egressqoslister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 
 	cloudprivateipconfiglister "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
 	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
@@ -374,6 +375,8 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return egressiplister.NewEgressIPLister(sharedInformer.GetIndexer()), nil
 	case CloudPrivateIPConfigType:
 		return cloudprivateipconfiglister.NewCloudPrivateIPConfigLister(sharedInformer.GetIndexer()), nil
+	case EgressQoSType:
+		return egressqoslister.NewEgressQoSLister(sharedInformer.GetIndexer()), nil
 	}
 
 	return nil, fmt.Errorf("cannot create lister from type %v", oType)

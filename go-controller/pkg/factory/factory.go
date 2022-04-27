@@ -22,6 +22,11 @@ import (
 	ocpcloudnetworkinformerfactory "github.com/openshift/client-go/cloudnetwork/informers/externalversions"
 	ocpcloudnetworklister "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
 
+	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
+	egressqosscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/scheme"
+	egressqosinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions"
+	egressqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
+
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,11 +48,12 @@ type WatchFactory struct {
 	// requirements with atomic accesses
 	handlerCounter uint64
 
-	iFactory     informerfactory.SharedInformerFactory
-	eipFactory   egressipinformerfactory.SharedInformerFactory
-	efFactory    egressfirewallinformerfactory.SharedInformerFactory
-	cpipcFactory ocpcloudnetworkinformerfactory.SharedInformerFactory
-	informers    map[reflect.Type]*informer
+	iFactory         informerfactory.SharedInformerFactory
+	eipFactory       egressipinformerfactory.SharedInformerFactory
+	efFactory        egressfirewallinformerfactory.SharedInformerFactory
+	cpipcFactory     ocpcloudnetworkinformerfactory.SharedInformerFactory
+	egressQoSFactory egressqosinformerfactory.SharedInformerFactory
+	informers        map[reflect.Type]*informer
 
 	stopChan chan struct{}
 }
@@ -88,6 +94,7 @@ var (
 	EgressFirewallType                    reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
 	EgressIPType                          reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
 	CloudPrivateIPConfigType              reflect.Type = reflect.TypeOf(&ocpcloudnetworkapi.CloudPrivateIPConfig{})
+	EgressQoSType                         reflect.Type = reflect.TypeOf(&egressqosapi.EgressQoS{})
 	PeerServiceType                       reflect.Type = reflect.TypeOf(&peerService{})
 	PeerNamespaceAndPodSelectorType       reflect.Type = reflect.TypeOf(&peerNamespaceAndPodSelector{})
 	PeerPodForNamespaceAndPodSelectorType reflect.Type = reflect.TypeOf(&peerPodForNamespaceAndPodSelector{})
@@ -105,18 +112,22 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	wf := &WatchFactory{
-		iFactory:     informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		eipFactory:   egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
-		efFactory:    egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
-		cpipcFactory: ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
-		informers:    make(map[reflect.Type]*informer),
-		stopChan:     make(chan struct{}),
+		iFactory:         informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		eipFactory:       egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
+		efFactory:        egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
+		cpipcFactory:     ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
+		egressQoSFactory: egressqosinformerfactory.NewSharedInformerFactory(ovnClientset.EgressQoSClient, resyncInterval),
+		informers:        make(map[reflect.Type]*informer),
+		stopChan:         make(chan struct{}),
 	}
 
 	if err := egressipapi.AddToScheme(egressipscheme.Scheme); err != nil {
 		return nil, err
 	}
 	if err := egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := egressqosapi.AddToScheme(egressqosscheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -189,6 +200,13 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 			return nil, err
 		}
 	}
+	if config.OVNKubernetesFeature.EnableEgressQoS {
+		wf.informers[EgressQoSType], err = newInformer(EgressQoSType, wf.egressQoSFactory.K8s().V1().EgressQoSes().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return wf, nil
 }
 
@@ -224,6 +242,15 @@ func (wf *WatchFactory) Start() error {
 			}
 		}
 	}
+	if config.OVNKubernetesFeature.EnableEgressQoS && wf.egressQoSFactory != nil {
+		wf.egressQoSFactory.Start(wf.stopChan)
+		for oType, synced := range wf.egressQoSFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -499,6 +526,11 @@ func (wf *WatchFactory) RemoveEgressFirewallHandler(handler *Handler) {
 	wf.removeHandler(EgressFirewallType, handler)
 }
 
+// RemoveEgressQoSHandler removes an EgressQoS object event handler function
+func (wf *WatchFactory) RemoveEgressQoSHandler(handler *Handler) {
+	wf.removeHandler(EgressQoSType, handler)
+}
+
 // AddEgressIPHandler adds a handler function that will be executed on EgressIP object changes
 func (wf *WatchFactory) AddEgressIPHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(EgressIPType, "", nil, handlerFuncs, processExisting)
@@ -659,6 +691,10 @@ func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {
 	return wf.informers[NodeType].inf
 }
 
+func (wf *WatchFactory) NodeCoreInformer() v1coreinformers.NodeInformer {
+	return wf.iFactory.Core().V1().Nodes()
+}
+
 // LocalPodInformer returns a shared Informer that may or may not only
 // return pods running on the local node.
 func (wf *WatchFactory) LocalPodInformer() cache.SharedIndexInformer {
@@ -669,12 +705,20 @@ func (wf *WatchFactory) PodInformer() cache.SharedIndexInformer {
 	return wf.informers[PodType].inf
 }
 
+func (wf *WatchFactory) PodCoreInformer() v1coreinformers.PodInformer {
+	return wf.iFactory.Core().V1().Pods()
+}
+
 func (wf *WatchFactory) NamespaceInformer() cache.SharedIndexInformer {
 	return wf.informers[NamespaceType].inf
 }
 
 func (wf *WatchFactory) ServiceInformer() cache.SharedIndexInformer {
 	return wf.informers[ServiceType].inf
+}
+
+func (wf *WatchFactory) EgressQoSInformer() egressqosinformer.EgressQoSInformer {
+	return wf.egressQoSFactory.K8s().V1().EgressQoSes()
 }
 
 // noHeadlessServiceSelector is a LabelSelector added to the watch for

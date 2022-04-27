@@ -17,6 +17,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	core "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/utils/pointer"
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
@@ -25,6 +26,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
+
+	egressqos "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
+	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
 
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	ocpconfigapi "github.com/openshift/api/config/v1"
@@ -148,6 +152,20 @@ func newCloudPrivateIPConfig(name string) *ocpcloudnetworkapi.CloudPrivateIPConf
 	}
 }
 
+func newEgressQoS(name, namespace string) *egressqos.EgressQoS {
+	return &egressqos.EgressQoS{
+		ObjectMeta: newObjectMeta(name, namespace),
+		Spec: egressqos.EgressQoSSpec{
+			Egress: []egressqos.EgressQoSRule{
+				{
+					DSCP:    50,
+					DstCIDR: pointer.String("1.2.3.4/32"),
+				},
+			},
+		},
+	}
+}
+
 func objSetup(c *fake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
 	w := watch.NewFake()
 	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
@@ -170,6 +188,13 @@ func egressIPObjSetup(c *egressipfake.Clientset, objType string, listFn func(cor
 }
 
 func cloudPrivateIPConfigObjSetup(c *ocpcloudnetworkclientsetfake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
+	w := watch.NewFake()
+	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
+	c.AddReactor("list", objType, listFn)
+	return w
+}
+
+func egressQoSObjSetup(c *egressqosfake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
 	w := watch.NewFake()
 	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
 	c.AddReactor("list", objType, listFn)
@@ -201,11 +226,13 @@ var _ = Describe("Watch Factory Operations", func() {
 		egressIPFakeClient                        *egressipfake.Clientset
 		egressFirewallFakeClient                  *egressfirewallfake.Clientset
 		cloudNetworkFakeClient                    *ocpcloudnetworkclientsetfake.Clientset
+		egressQoSFakeClient                       *egressqosfake.Clientset
 		podWatch, namespaceWatch, nodeWatch       *watch.FakeWatcher
 		policyWatch, endpointsWatch, serviceWatch *watch.FakeWatcher
 		egressFirewallWatch                       *watch.FakeWatcher
 		egressIPWatch                             *watch.FakeWatcher
 		cloudPrivateIPConfigWatch                 *watch.FakeWatcher
+		egressQoSWatch                            *watch.FakeWatcher
 		pods                                      []*v1.Pod
 		namespaces                                []*v1.Namespace
 		nodes                                     []*v1.Node
@@ -216,6 +243,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		cloudPrivateIPConfigs                     []*ocpcloudnetworkapi.CloudPrivateIPConfig
 		wf                                        *WatchFactory
 		egressFirewalls                           []*egressfirewall.EgressFirewall
+		egressQoSes                               []*egressqos.EgressQoS
 		err                                       error
 	)
 
@@ -225,18 +253,21 @@ var _ = Describe("Watch Factory Operations", func() {
 		config.PrepareTestConfig()
 		config.OVNKubernetesFeature.EnableEgressIP = true
 		config.OVNKubernetesFeature.EnableEgressFirewall = true
+		config.OVNKubernetesFeature.EnableEgressQoS = true
 		config.Kubernetes.PlatformType = string(ocpconfigapi.AWSPlatformType)
 
 		fakeClient = &fake.Clientset{}
 		egressFirewallFakeClient = &egressfirewallfake.Clientset{}
 		egressIPFakeClient = &egressipfake.Clientset{}
 		cloudNetworkFakeClient = &ocpcloudnetworkclientsetfake.Clientset{}
+		egressQoSFakeClient = &egressqosfake.Clientset{}
 
 		ovnClientset = &util.OVNClientset{
 			KubeClient:           fakeClient,
 			EgressIPClient:       egressIPFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
 			CloudNetworkClient:   cloudNetworkFakeClient,
+			EgressQoSClient:      egressQoSFakeClient,
 		}
 
 		pods = make([]*v1.Pod, 0)
@@ -319,6 +350,15 @@ var _ = Describe("Watch Factory Operations", func() {
 			}
 			return true, obj, nil
 		})
+
+		egressQoSes = make([]*egressqos.EgressQoS, 0)
+		egressQoSWatch = egressQoSObjSetup(egressQoSFakeClient, "egressqoses", func(core.Action) (bool, runtime.Object, error) {
+			obj := &egressqos.EgressQoSList{}
+			for _, p := range egressQoSes {
+				obj.Items = append(obj.Items, *p)
+			}
+			return true, obj, nil
+		})
 	})
 
 	AfterEach(func() {
@@ -382,6 +422,10 @@ var _ = Describe("Watch Factory Operations", func() {
 		It("is called for each existing cloudPrivateIPConfig", func() {
 			cloudPrivateIPConfigs = append(cloudPrivateIPConfigs, newCloudPrivateIPConfig("192.168.176.25"))
 			testExisting(CloudPrivateIPConfigType, "", nil)
+		})
+		It("is called for each existing egressQoS", func() {
+			egressQoSes = append(egressQoSes, newEgressQoS("myEgressQoS", "default"))
+			testExisting(EgressQoSType, "", nil)
 		})
 
 		It("is called for each existing pod that matches a given namespace and label", func() {
@@ -469,6 +513,11 @@ var _ = Describe("Watch Factory Operations", func() {
 			cloudPrivateIPConfigs = append(cloudPrivateIPConfigs, newCloudPrivateIPConfig("192.168.126.26"))
 			testExisting(CloudPrivateIPConfigType)
 		})
+		It("calls ADD for each existing egressQoS", func() {
+			egressQoSes = append(egressQoSes, newEgressQoS("myEgressQoS", "default"))
+			egressQoSes = append(egressQoSes, newEgressQoS("myEgressQoS1", "default"))
+			testExisting(EgressQoSType)
+		})
 	})
 
 	Context("when EgressIP is disabled", func() {
@@ -495,6 +544,19 @@ var _ = Describe("Watch Factory Operations", func() {
 		It("does not contain EgressFirewall informer", func() {
 			config.OVNKubernetesFeature.EnableEgressFirewall = false
 			testExisting(EgressFirewallType)
+		})
+	})
+	Context("when EgressQoS is disabled", func() {
+		testExisting := func(objType reflect.Type) {
+			wf, err = NewMasterWatchFactory(ovnClientset)
+			Expect(err).NotTo(HaveOccurred())
+			err = wf.Start()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(wf.informers).NotTo(HaveKey(objType))
+		}
+		It("does not contain EgressQoS informer", func() {
+			config.OVNKubernetesFeature.EnableEgressQoS = false
+			testExisting(EgressQoSType)
 		})
 	})
 
@@ -1180,6 +1242,41 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(c.getDeleted, 2).Should(Equal(1))
 
 		wf.RemoveCloudPrivateIPConfigHandler(h)
+	})
+	It("responds to egressQoS add/update/delete events", func() {
+		wf, err = NewMasterWatchFactory(ovnClientset)
+		Expect(err).NotTo(HaveOccurred())
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
+
+		added := newEgressQoS("myEgressQoS", "default")
+		h, c := addHandler(wf, EgressQoSType, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				egressQoS := obj.(*egressqos.EgressQoS)
+				Expect(reflect.DeepEqual(egressQoS, added)).To(BeTrue())
+			},
+			UpdateFunc: func(old, new interface{}) {
+				newEgressQoS := new.(*egressqos.EgressQoS)
+				Expect(reflect.DeepEqual(newEgressQoS, added)).To(BeTrue())
+				Expect(newEgressQoS.Spec.Egress[0].DSCP).To(Equal(40))
+			},
+			DeleteFunc: func(obj interface{}) {
+				egressQoS := obj.(*egressqos.EgressQoS)
+				Expect(reflect.DeepEqual(egressQoS, added)).To(BeTrue())
+			},
+		})
+
+		egressQoSes = append(egressQoSes, added)
+		egressQoSWatch.Add(added)
+		Eventually(c.getAdded, 2).Should(Equal(1))
+		added.Spec.Egress[0].DSCP = 40
+		egressQoSWatch.Modify(added)
+		Eventually(c.getUpdated, 2).Should(Equal(1))
+		egressQoSes = egressQoSes[:0]
+		egressQoSWatch.Delete(added)
+		Eventually(c.getDeleted, 2).Should(Equal(1))
+
+		wf.RemoveEgressQoSHandler(h)
 	})
 	It("stops processing events after the handler is removed", func() {
 		wf, err = NewMasterWatchFactory(ovnClientset)

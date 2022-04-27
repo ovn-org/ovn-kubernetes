@@ -33,6 +33,7 @@ import (
 
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
+	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -169,9 +170,11 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		})
 		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 		egressIPFakeClient := &egressipfake.Clientset{}
+		egressQoSFakeClient := &egressqosfake.Clientset{}
 		fakeClient := &util.OVNClientset{
 			KubeClient:           kubeFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
+			EgressQoSClient:      egressQoSFakeClient,
 		}
 
 		stop := make(chan struct{})
@@ -443,9 +446,11 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		})
 		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 		egressIPFakeClient := &egressipfake.Clientset{}
+		egressQoSFakeClient := &egressqosfake.Clientset{}
 		fakeClient := &util.OVNClientset{
 			KubeClient:           kubeFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
+			EgressQoSClient:      egressQoSFakeClient,
 		}
 
 		_, nodeNet, err := net.ParseCIDR(nodeSubnet)
@@ -784,9 +789,11 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		)
 		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 		egressIPFakeClient := &egressipfake.Clientset{}
+		egressQoSFakeClient := &egressqosfake.Clientset{}
 		fakeClient := &util.OVNClientset{
 			KubeClient:           kubeFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
+			EgressQoSClient:      egressQoSFakeClient,
 		}
 
 		stop := make(chan struct{})

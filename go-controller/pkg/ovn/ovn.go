@@ -22,6 +22,7 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
@@ -32,6 +33,7 @@ import (
 
 	utilnet "k8s.io/utils/net"
 
+	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -44,6 +46,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	ref "k8s.io/client-go/tools/reference"
+	"k8s.io/client-go/util/workqueue"
+
 	"k8s.io/klog/v2"
 )
 
@@ -131,6 +135,20 @@ type Controller struct {
 
 	// egressFirewalls is a map of namespaces and the egressFirewall attached to it
 	egressFirewalls sync.Map
+
+	// EgressQoS
+	egressQoSLister egressqoslisters.EgressQoSLister
+	egressQoSSynced cache.InformerSynced
+	egressQoSQueue  workqueue.RateLimitingInterface
+	egressQoSCache  sync.Map
+
+	egressQoSPodLister corev1listers.PodLister
+	egressQoSPodSynced cache.InformerSynced
+	egressQoSPodQueue  workqueue.RateLimitingInterface
+
+	egressQoSNodeLister corev1listers.NodeLister
+	egressQoSNodeSynced cache.InformerSynced
+	egressQoSNodeQueue  workqueue.RateLimitingInterface
 
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
@@ -355,6 +373,18 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 		oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
 		oc.egressFirewallHandler = oc.WatchEgressFirewall()
 
+	}
+
+	if config.OVNKubernetesFeature.EnableEgressQoS {
+		oc.initEgressQoSController(
+			oc.watchFactory.EgressQoSInformer(),
+			oc.watchFactory.PodCoreInformer(),
+			oc.watchFactory.NodeCoreInformer())
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			oc.runEgressQoSController(1, oc.stopChan)
+		}()
 	}
 
 	klog.Infof("Completing all the Watchers took %v", time.Since(start))

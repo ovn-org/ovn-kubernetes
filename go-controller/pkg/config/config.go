@@ -317,6 +317,7 @@ type MetricsConfig struct {
 type OVNKubernetesFeatureConfig struct {
 	EnableEgressIP       bool `gcfg:"enable-egress-ip"`
 	EnableEgressFirewall bool `gcfg:"enable-egress-firewall"`
+	EnableEgressQoS      bool `gcfg:"enable-egress-qos"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -835,6 +836,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use EgressFirewall CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressFirewall,
 		Value:       OVNKubernetesFeature.EnableEgressFirewall,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-egress-qos",
+		Usage:       "Configure to use EgressQoS CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressQoS,
+		Value:       OVNKubernetesFeature.EnableEgressQoS,
 	},
 }
 

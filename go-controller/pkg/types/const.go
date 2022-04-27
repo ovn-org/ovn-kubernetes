@@ -111,6 +111,7 @@ const (
 
 	// OVN-K8S Address Sets Names
 	HybridRoutePolicyPrefix = "hybrid-route-pods-"
+	EgressQoSRulePrefix     = "egress-qos-pods-"
 
 	// OVN-K8S Topology Versions
 	OvnSingleJoinSwitchTopoVersion = 1
