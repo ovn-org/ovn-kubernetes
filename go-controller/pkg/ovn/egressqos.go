@@ -123,7 +123,7 @@ func (oc *Controller) createASForEgressQoSRule(podSelector metav1.LabelSelector,
 		if err != nil {
 			return nil, nil, fmt.Errorf("cannot ensure that addressSet for namespace %s exists %v", namespace, err)
 		}
-		return addrSet, nil, nil
+		return addrSet, &sync.Map{}, nil
 	}
 
 	podsCache := sync.Map{}
