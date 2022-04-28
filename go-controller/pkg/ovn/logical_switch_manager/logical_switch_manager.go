@@ -215,9 +215,8 @@ func (manager *LogicalSwitchManager) AllocateIPs(nodeName string, ipnets []*net.
 			// iterate over range of already allocated indices and release
 			// ips allocated before the error occurred.
 			for relIdx, relIPNet := range allocated {
-				if relErr := lsi.ipams[relIdx].Release(relIPNet.IP); relErr != nil {
-					klog.Errorf("Error while releasing IP: %s, err: %v", relIPNet.IP, relErr)
-				} else if relIPNet.IP != nil {
+				lsi.ipams[relIdx].Release(relIPNet.IP)
+				if relIPNet.IP != nil {
 					klog.Warningf("Reserved IP: %s was released", relIPNet.IP.String())
 				}
 			}
@@ -271,9 +270,8 @@ func (manager *LogicalSwitchManager) AllocateNextIPs(nodeName string) ([]*net.IP
 			// iterate over range of already allocated indices and release
 			// ips allocated before the error occurred.
 			for relIdx, relIPNet := range ipnets {
-				if relErr := lsi.ipams[relIdx].Release(relIPNet.IP); relErr != nil {
-					klog.Errorf("Error while releasing IP: %s, err: %v", relIPNet.IP, relErr)
-				} else if relIPNet.IP != nil {
+				lsi.ipams[relIdx].Release(relIPNet.IP)
+				if relIPNet.IP != nil {
 					klog.Warningf("Reserved IP: %s was released", relIPNet.IP.String())
 				}
 			}
@@ -315,9 +313,7 @@ func (manager *LogicalSwitchManager) ReleaseIPs(nodeName string, ipnets []*net.I
 		for _, ipam := range lsi.ipams {
 			cidr := ipam.CIDR()
 			if cidr.Contains(ipnet.IP) {
-				if err := ipam.Release(ipnet.IP); err != nil {
-					return err
-				}
+				ipam.Release(ipnet.IP)
 				break
 			}
 		}
