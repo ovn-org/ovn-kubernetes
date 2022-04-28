@@ -301,8 +301,25 @@ func (as *fakeAddressSets) GetIPs() ([]string, []string) {
 }
 
 func (as *fakeAddressSets) SetIPs(ips []net.IP) error {
-	// NOOP
-	return nil
+	allIPs := []net.IP{}
+	if as.ipv4 != nil {
+		for _, ip := range as.ipv4.ips {
+			allIPs = append(allIPs, ip)
+		}
+	}
+
+	if as.ipv6 != nil {
+		for _, ip := range as.ipv6.ips {
+			allIPs = append(allIPs, ip)
+		}
+	}
+
+	err := as.DeleteIPs(allIPs)
+	if err != nil {
+		return err
+	}
+
+	return as.AddIPs(ips)
 }
 
 func (as *fakeAddressSets) DeleteIPs(ips []net.IP) error {
