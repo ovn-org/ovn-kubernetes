@@ -1018,10 +1018,6 @@ func (oc *Controller) processObjectInTerminalState(objectsToRetry *retryObjs, ob
 // Note: when applying WatchResource to a new resource type, the appropriate resource-specific logic must be added to the
 // the different methods it calls.
 func (oc *Controller) WatchResource(objectsToRetry *retryObjs) *factory.Handler {
-	// track the retry entries and every 30 seconds (or upon explicit request) check if any objects
-	// need to be retried
-	go oc.periodicallyRetryResources(objectsToRetry)
-
 	addHandlerFunc, err := oc.watchFactory.GetResourceHandlerFunc(objectsToRetry.oType)
 	if err != nil {
 		klog.Errorf("No resource handler function found for resource %v. "+
@@ -1235,6 +1231,10 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) *factory.Handler 
 			},
 		},
 		syncFunc) // adds all existing objects at startup
+
+	// track the retry entries and every 30 seconds (or upon explicit request) check if any objects
+	// need to be retried
+	go oc.periodicallyRetryResources(objectsToRetry)
 
 	return handler
 }

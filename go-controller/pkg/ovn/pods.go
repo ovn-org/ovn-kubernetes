@@ -22,7 +22,10 @@ import (
 )
 
 func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
-	// get the list of logical switch ports (equivalent to pods)
+	// get the list of logical switch ports (equivalent to pods). Reserve all existing Pod IPs to
+	// avoid subsequent new Pods getting the same duplicate Pod IP.
+	//
+	// TBD: Before this succeeds, add Pod handler should not continue to allocate IPs for the new Pods.
 	expectedLogicalPorts := make(map[string]bool)
 	for _, podInterface := range pods {
 		pod, ok := podInterface.(*kapi.Pod)
