@@ -3,8 +3,8 @@ package ovn
 import (
 	"context"
 	"fmt"
-
 	"net"
+	"time"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -692,9 +692,277 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		})
+		ginkgo.It("correctly retries deleting an egressfirewall", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const (
+					node1Name string = "node1"
+					node2Name string = "node2"
+				)
 
+				nodeSwitch1 := &nbdb.LogicalSwitch{
+					UUID: node1Name + "-UUID",
+					Name: node1Name,
+				}
+				nodeSwitch2 := &nbdb.LogicalSwitch{
+					UUID: node2Name + "-UUID",
+					Name: node2Name,
+				}
+
+				dbSetup := libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						nodeSwitch1,
+						nodeSwitch2,
+						clusterRouter,
+					},
+				}
+
+				namespace1 := *newNamespace("namespace1")
+				egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
+					{
+						Type: "Allow",
+						Ports: []egressfirewallapi.EgressFirewallPort{
+							{
+								Protocol: "TCP",
+								Port:     100,
+							},
+						},
+						To: egressfirewallapi.EgressFirewallDestination{
+							CIDRSelector: "1.2.3.5/23",
+						},
+					},
+				})
+
+				fakeOVN.startWithDBSetup(dbSetup,
+					&egressfirewallapi.EgressFirewallList{
+						Items: []egressfirewallapi.EgressFirewall{
+							*egressFirewall,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							{
+								Status: v1.NodeStatus{
+									Phase: v1.NodeRunning,
+								},
+								ObjectMeta: newObjectMeta(node1Name, ""),
+							},
+							{
+								Status: v1.NodeStatus{
+									Phase: v1.NodeRunning,
+								},
+								ObjectMeta: newObjectMeta(node2Name, ""),
+							},
+						},
+					})
+
+				fakeOVN.controller.WatchEgressFirewall()
+
+				ipv4ACL := libovsdbops.BuildACL(
+					"",
+					t.DirectionToLPort,
+					t.EgressFirewallStartPriority,
+					"(ip4.dst == 1.2.3.5/23) && ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && ip4.dst != 10.128.0.0/14",
+					nbdb.ACLActionAllow,
+					"",
+					"",
+					false,
+					map[string]string{"egressFirewall": "namespace1"},
+					nil,
+				)
+				ipv4ACL.UUID = "ipv4ACL-UUID"
+
+				// new ACL will be added to the switches
+				nodeSwitch1.ACLs = []string{ipv4ACL.UUID}
+				nodeSwitch2.ACLs = []string{ipv4ACL.UUID}
+
+				expectedDatabaseState := []libovsdb.TestData{
+					ipv4ACL,
+					nodeSwitch1,
+					nodeSwitch2,
+					clusterRouter,
+				}
+
+				gomega.Expect(fakeOVN.nbClient).To(libovsdbtest.HaveData(expectedDatabaseState))
+
+				ginkgo.By("Bringing down NBDB")
+				// inject transient problem, nbdb is down
+				fakeOVN.controller.nbClient.Close()
+				gomega.Eventually(func() bool {
+					return fakeOVN.controller.nbClient.Connected()
+				}).Should(gomega.BeFalse())
+
+				err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Delete(context.TODO(), egressFirewall.Name, *metav1.NewDeleteOptions(0))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// sleep long enough for TransactWithRetry to fail, causing egress firewall Add to fail
+				time.Sleep(t.OVSDBTimeout + time.Second)
+				// check to see if the retry cache has an entry for this egress firewall
+				key := getEgressFirewallNamespacedName(egressFirewall)
+				gomega.Eventually(func() *retryObjEntry {
+					return fakeOVN.controller.retryEgressFirewalls.getObjRetryEntry(key)
+				}).ShouldNot(gomega.BeNil())
+				retryEntry := fakeOVN.controller.retryEgressFirewalls.getObjRetryEntry(key)
+				ginkgo.By("retry entry new obj should be nil")
+				gomega.Expect(retryEntry.newObj).To(gomega.BeNil())
+				ginkgo.By("retry entry old obj should not be nil")
+				gomega.Expect(retryEntry.oldObj).NotTo(gomega.BeNil())
+
+				connCtx, cancel := context.WithTimeout(context.Background(), t.OVSDBTimeout)
+				defer cancel()
+				resetNBClient(connCtx, fakeOVN.controller.nbClient)
+				fakeOVN.controller.retryEgressFirewalls.requestRetryObjs()
+
+				// ACL should be removed from switches after egfw is deleted
+				nodeSwitch1.ACLs = []string{}
+				nodeSwitch2.ACLs = []string{}
+				expectedDatabaseState = []libovsdb.TestData{
+					nodeSwitch1,
+					nodeSwitch2,
+					clusterRouter,
+				}
+
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				// check the cache no longer has the entry
+				gomega.Eventually(func() *retryObjEntry {
+					return fakeOVN.controller.retryEgressFirewalls.getObjRetryEntry(key)
+				}).Should(gomega.BeNil())
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("correctly retries adding and updating an egressfirewall", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const (
+					node1Name string = "node1"
+				)
+
+				InitialNodeSwitch := &nbdb.LogicalSwitch{
+					UUID: node1Name + "-UUID",
+					Name: node1Name,
+				}
+
+				dbSetup := libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						InitialNodeSwitch,
+						clusterRouter,
+					},
+				}
+
+				namespace1 := *newNamespace("namespace1")
+				egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
+					{
+						Type: "Allow",
+						To: egressfirewallapi.EgressFirewallDestination{
+							CIDRSelector: "1.2.3.4/23",
+						},
+					},
+				})
+				egressFirewall1 := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
+					{
+						Type: "Deny",
+						To: egressfirewallapi.EgressFirewallDestination{
+							CIDRSelector: "1.2.3.4/23",
+						},
+					},
+				})
+
+				fakeOVN.startWithDBSetup(dbSetup,
+					&egressfirewallapi.EgressFirewallList{
+						Items: []egressfirewallapi.EgressFirewall{
+							*egressFirewall,
+						},
+					},
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							{
+								Status: v1.NodeStatus{
+									Phase: v1.NodeRunning,
+								},
+								ObjectMeta: newObjectMeta(node1Name, ""),
+							},
+						},
+					})
+
+				fakeOVN.controller.WatchNamespaces()
+				fakeOVN.controller.WatchEgressFirewall()
+
+				ipv4ACL := libovsdbops.BuildACL(
+					"",
+					t.DirectionToLPort,
+					t.EgressFirewallStartPriority,
+					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14",
+					nbdb.ACLActionAllow,
+					"",
+					"",
+					false,
+					map[string]string{"egressFirewall": "namespace1"},
+					nil,
+				)
+				ipv4ACL.UUID = "ipv4ACL-UUID"
+
+				// new ACL will be added to the switch
+				finalNodeSwitch := &nbdb.LogicalSwitch{
+					UUID: InitialNodeSwitch.UUID,
+					Name: InitialNodeSwitch.Name,
+					ACLs: []string{ipv4ACL.UUID},
+				}
+
+				// new ACL will be added to the switch
+				expectedDatabaseState := []libovsdb.TestData{
+					ipv4ACL,
+					finalNodeSwitch,
+					clusterRouter,
+				}
+
+				gomega.Expect(fakeOVN.nbClient).To(libovsdbtest.HaveData(expectedDatabaseState))
+				ginkgo.By("Bringing down NBDB")
+				// inject transient problem, nbdb is down
+				fakeOVN.controller.nbClient.Close()
+				gomega.Eventually(func() bool {
+					return fakeOVN.controller.nbClient.Connected()
+				}).Should(gomega.BeFalse())
+
+				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				_, err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall1.Namespace).Update(context.TODO(), egressFirewall1, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// sleep long enough for TransactWithRetry to fail, causing egress firewall Add to fail
+				time.Sleep(t.OVSDBTimeout + time.Second)
+				// check to see if the retry cache has an entry for this egress firewall
+				key := getEgressFirewallNamespacedName(egressFirewall)
+				gomega.Eventually(func() *retryObjEntry {
+					return fakeOVN.controller.retryEgressFirewalls.getObjRetryEntry(key)
+				}).ShouldNot(gomega.BeNil())
+				retryEntry := fakeOVN.controller.retryEgressFirewalls.getObjRetryEntry(key)
+				ginkgo.By("retry entry new obj should not be nil")
+				gomega.Expect(retryEntry.newObj).NotTo(gomega.BeNil())
+				ginkgo.By("retry entry old obj should not be nil")
+				gomega.Expect(retryEntry.oldObj).NotTo(gomega.BeNil())
+				connCtx, cancel := context.WithTimeout(context.Background(), t.OVSDBTimeout)
+				defer cancel()
+				resetNBClient(connCtx, fakeOVN.controller.nbClient)
+				fakeOVN.controller.retryEgressFirewalls.requestRetryObjs()
+				// check the cache no longer has the entry
+				gomega.Eventually(func() *retryObjEntry {
+					return fakeOVN.controller.retryEgressFirewalls.getObjRetryEntry(key)
+				}).Should(gomega.BeNil())
+				ipv4ACL.Action = nbdb.ACLActionDrop
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		})
 	})
-
 })
 
 var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode", func() {
@@ -1295,7 +1563,6 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		})
-
 	})
 
 })
