@@ -1388,6 +1388,9 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 		klog.V(5).Infof("When adding node %s, found %d pods to add to retryPods", node.Name, len(pods.Items))
 		for _, pod := range pods.Items {
 			pod := pod
+			if util.PodCompleted(&pod) {
+				continue
+			}
 			klog.V(5).Infof("Adding pod %s/%s to retryPods", pod.Namespace, pod.Name)
 			oc.retryPods.addRetryObj(&pod)
 		}
