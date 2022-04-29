@@ -76,54 +76,18 @@ type serviceConfig struct {
 	hasLocalHostNetworkEp bool
 }
 
-// createFlowsForNonLocalHostNetEp adds the necessary openflows for a service when its backed by non-local-host-networked endpoints
-// This function is currently used only in LGW mode and when ETP=local for the service
-// cookie is the hash value of openflow cookie, svcPort is the nodePort of the service, flowProtocol is tcp/udp/sctp in v4 or v6 modes,
-// externalIPOrLBIngressIP is either externalIP or LB.status.ingress, nwDst&nwSrc are constants used to match on the destinations based on the flowprotocol
-func (npw *nodePortWatcher) createFlowsForNonLocalHostNetEp(cookie string, svcPort int32, flowProtocol string, externalIPOrLBIngressIP, nwDst, nwSrc string) []string {
-	var nodeportFlowsResult []string
-	if len(externalIPOrLBIngressIP) != 0 {
-		// if externalIPOrLBIngressIP is set then this service is of type LB/EIP
-		nodeportFlowsResult = append(nodeportFlowsResult,
-			fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_dst=%d, actions=ct(commit,zone=%d,table=6)",
-				cookie, npw.ofportPhys, flowProtocol, nwDst, externalIPOrLBIngressIP, svcPort, HostNodePortCTZone),
-			fmt.Sprintf("cookie=%s, priority=110, in_port=LOCAL, %s, %s=%s, tp_src=%d, actions=ct(zone=%d,table=7)",
-				cookie, flowProtocol, nwSrc, externalIPOrLBIngressIP, svcPort, HostNodePortCTZone))
-	} else {
-		// if externalIPOrLBIngressIP is not set then this service is of type NP
-		nodeportFlowsResult = append(nodeportFlowsResult,
-			// Traffic destined for ETP=local backed by OVN-K pod in LGW mode is matched on the svcNP and sent to table6.
-			fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, tp_dst=%d, actions=ct(commit,zone=%d,table=6)",
-				cookie, npw.ofportPhys, flowProtocol, svcPort, HostNodePortCTZone),
-			// Return traffic is matched on the svcNP as the sourcePort and gets un-DNATed back to nodeIP.
-			fmt.Sprintf("cookie=%s, priority=110, in_port=LOCAL, %s, tp_src=%d, actions=ct(zone=%d,table=7)",
-				cookie, flowProtocol, svcPort, HostNodePortCTZone))
-	}
-	nodeportFlowsResult = append(nodeportFlowsResult,
-		// table 6, Sends the packet to Host. Note that the constant etp svc cookie is used since this flow would be
-		// same for all such services.
-		fmt.Sprintf("cookie=%s, priority=110, table=6, actions=output:LOCAL",
-			etpSvcOpenFlowCookie),
-		// table 7, Sends the reply packet back out eth0 to the external client. Note that the constant etp svc
-		// cookie is used since this would be same for all such services.
-		fmt.Sprintf("cookie=%s, priority=110, table=7, actions=output:%s",
-			etpSvcOpenFlowCookie, npw.ofportPhys))
-	return nodeportFlowsResult
-}
-
 // updateServiceFlowCache handles managing breth0 gateway flows for ingress traffic towards kubernetes services
 // (nodeport, external, ingress). By default incoming traffic into the node is steered directly into OVN (case3 below).
 //
 // case1: If a service has externalTrafficPolicy=local, and has host-networked endpoints local to the node (hasLocalHostNetworkEp),
 // traffic instead will be steered directly into the host and DNAT-ed to the targetPort on the host.
 //
-// case2: Only applicable for LGW mode: If a service has externalTrafficPolicy=local, and it doesn't have host-networked
-// endpoints local to the node (!hasLocalHostNetworkEp - including empty endpoint.Subset), traffic will be steered into LOCAL
-// preserving sourceIP and IPTables will steer this traffic into OVN via ovn-k8s-mp0.
+// case2: All other types of services in SGW mode i.e:
+//        case2a: if externalTrafficPolicy=cluster + SGW mode, traffic will be steered into OVN via GR.
+//        case2b: if externalTrafficPolicy=local + !hasLocalHostNetworkEp + SGW mode, traffic will be steered into OVN via GR.
 //
-// case3: All other types of services i.e:
-//        case3a: if externalTrafficPolicy=cluster, irrespective of gateway modes, traffic will be steered into OVN via GR.
-//        case3b: if externalTrafficPolicy=local+!hasLocalHostNetworkEp+SGW mode, traffic will be steered into OVN via GR.
+// NOTE: If LGW mode, the default flow will take care of sending traffic to host irrespective of service flow type.
+//
 // `add` parameter indicates if the flows should exist or be removed from the cache
 // `hasLocalHostNetworkEp` indicates if at least one host networked endpoint exists for this service which is local to this node.
 func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, hasLocalHostNetworkEp bool) {
@@ -167,7 +131,6 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 					npw.ofm.deleteFlowsByKey(key)
 					continue
 				}
-				// (astoycos) TODO combine flow generation into a single function
 				// This allows external traffic ingress when the svc's ExternalTrafficPolicy is
 				// set to Local, and the backend pod is HostNetworked. We need to add
 				// Flows that will DNAT all traffic coming into nodeport to the nodeIP:Port and
@@ -176,8 +139,8 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 					// case1 (see function description for details)
 					var nodeportFlows []string
 					klog.V(5).Infof("Adding flows on breth0 for Nodeport Service %s in Namespace: %s since ExternalTrafficPolicy=local", service.Name, service.Namespace)
-					// table 0, This rule matches on all traffic with dst port == NodePort, DNAT's it to the correct NodeIP
-					// If ipv6 make sure to choose the ipv6 node address), and sends to table 6
+					// table 0, This rule matches on all traffic with dst port == NodePort, DNAT's the nodePort to the svc targetPort
+					// If ipv6 make sure to choose the ipv6 node address for rule
 					if strings.Contains(flowProtocol, "6") {
 						nodeportFlows = append(nodeportFlows,
 							fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, tp_dst=%d, actions=ct(commit,zone=%d,nat(dst=[%s]:%s),table=6)",
@@ -199,20 +162,15 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 						// cookie is used since this would be same for all such services.
 						fmt.Sprintf("cookie=%s, priority=110, table=7, "+
 							"actions=output:%s", etpSvcOpenFlowCookie, npw.ofportPhys))
-
 					npw.ofm.updateFlowCacheEntry(key, nodeportFlows)
-				} else if isServiceTypeETPLocal && !hasLocalHostNetworkEp && config.Gateway.Mode == config.GatewayModeLocal {
+				} else if config.Gateway.Mode == config.GatewayModeShared {
 					// case2 (see function description for details)
-					var nodeportFlows []string
-					klog.V(5).Infof("Adding flows on breth0 for Nodeport Service %s in Namespace: %s since ExternalTrafficPolicy=local", service.Name, service.Namespace)
-					nodeportFlows = npw.createFlowsForNonLocalHostNetEp(cookie, svcPort.NodePort, flowProtocol, "", "", "")
-					npw.ofm.updateFlowCacheEntry(key, nodeportFlows)
-				} else {
-					// case3 (see function description for details)
 					npw.ofm.updateFlowCacheEntry(key, []string{
+						// table=0, matches on service traffic towards nodePort and sends it to OVN pipeline
 						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, tp_dst=%d, "+
 							"actions=%s",
 							cookie, npw.ofportPhys, flowProtocol, svcPort.NodePort, actions),
+						// table=0, matches on return traffic from service nodePort and sends it out to primary node interface (br-ex)
 						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, tp_src=%d, "+
 							"actions=output:%s",
 							cookie, npw.ofportPatch, flowProtocol, svcPort.NodePort, npw.ofportPhys)})
@@ -247,13 +205,12 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 // case1: If a service has externalTrafficPolicy=local, and has host-networked endpoints local to the node (hasLocalHostNetworkEp),
 // traffic instead will be steered directly into the host and DNAT-ed to the targetPort on the host.
 //
-// case2: Only applicable for LGW mode: If a service has externalTrafficPolicy=local, and it doesn't have host-networked
-// endpoints local to the node (!hasLocalHostNetworkEp - including empty endpoint.Subset), traffic will be steered into LOCAL
-// preserving sourceIP and IPTables will steer this traffic into OVN via ovn-k8s-mp0.
+// case2: All other types of services in SGW mode i.e:
+//        case2a: if externalTrafficPolicy=cluster + SGW mode, traffic will be steered into OVN via GR.
+//        case2b: if externalTrafficPolicy=local + !hasLocalHostNetworkEp + SGW mode, traffic will be steered into OVN via GR.
 //
-// case3: All other types of services i.e:
-//        case3a: if externalTrafficPolicy=cluster, irrespective of gateway modes, traffic will be steered into OVN via GR.
-//        case3b: if externalTrafficPolicy=local+!hasLocalHostNetworkEp+SGW mode, traffic will be steered into OVN via GR.
+// NOTE: If LGW mode, the default flow will take care of sending traffic to host irrespective of service flow type.
+//
 // `add` parameter indicates if the flows should exist or be removed from the cache
 // `hasLocalHostNetworkEp` indicates if at least one host networked endpoint exists for this service which is local to this node.
 // `protocol` is TCP/UDP/SCTP as set in the svc.Port
@@ -284,6 +241,9 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, s
 		npw.ofm.deleteFlowsByKey(key)
 		return nil
 	}
+	// add the ARP bypass flow regarless of service type or gateway modes since its applicable in all scenarios.
+	arpFlow := npw.generateArpBypassFlow(protocol, externalIPOrLBIngressIP, cookie)
+	externalIPFlows := []string{arpFlow}
 	// This allows external traffic ingress when the svc's ExternalTrafficPolicy is
 	// set to Local, and the backend pod is HostNetworked. We need to add
 	// Flows that will DNAT all external traffic destined for the lb/externalIP service
@@ -293,49 +253,43 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, s
 	isServiceTypeETPLocal := util.ServiceExternalTrafficPolicyLocal(service)
 	if isServiceTypeETPLocal && hasLocalHostNetworkEp {
 		// case1 (see function description for details)
-		var nodeportFlows []string
 		klog.V(5).Infof("Adding flows on breth0 for %s Service %s in Namespace: %s since ExternalTrafficPolicy=local", ipType, service.Name, service.Namespace)
-		// table 0, This rule matches on all traffic with dst ip == LoadbalancerIP / externalIP, DNAT's it to the correct NodeIP
+		// table 0, This rule matches on all traffic with dst ip == LoadbalancerIP / externalIP, DNAT's the nodePort to the svc targetPort
 		// If ipv6 make sure to choose the ipv6 node address for rule
 		if strings.Contains(flowProtocol, "6") {
-			nodeportFlows = append(nodeportFlows,
+			externalIPFlows = append(externalIPFlows,
 				fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_dst=%d, actions=ct(commit,zone=%d,nat(dst=[%s]:%s),table=6)",
 					cookie, npw.ofportPhys, flowProtocol, nwDst, externalIPOrLBIngressIP, svcPort.Port, HostNodePortCTZone, npw.gatewayIPv6, svcPort.TargetPort.String()))
 		} else {
-			nodeportFlows = append(nodeportFlows,
+			externalIPFlows = append(externalIPFlows,
 				fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_dst=%d, actions=ct(commit,zone=%d,nat(dst=%s:%s),table=6)",
 					cookie, npw.ofportPhys, flowProtocol, nwDst, externalIPOrLBIngressIP, svcPort.Port, HostNodePortCTZone, npw.gatewayIPv4, svcPort.TargetPort.String()))
 		}
-		nodeportFlows = append(nodeportFlows,
-			// table 6, Sends the packet to the host
+		externalIPFlows = append(externalIPFlows,
+			// table 6, Sends the packet to Host. Note that the constant etp svc cookie is used since this flow would be
+			// same for all such services.
 			fmt.Sprintf("cookie=%s, priority=110, table=6, actions=output:LOCAL",
 				etpSvcOpenFlowCookie),
 			// table 0, Matches on return traffic, i.e traffic coming from the host networked pod's port, and unDNATs
 			fmt.Sprintf("cookie=%s, priority=110, in_port=LOCAL, %s, tp_src=%s, actions=ct(commit,zone=%d nat,table=7)",
 				cookie, flowProtocol, svcPort.TargetPort.String(), HostNodePortCTZone),
-			// table 7, the packet back out eth0 to the external client
-			fmt.Sprintf("cookie=%s, priority=110, table=7, "+
-				"actions=output:%s", etpSvcOpenFlowCookie, npw.ofportPhys))
-
-		npw.ofm.updateFlowCacheEntry(key, nodeportFlows)
-
-	} else if isServiceTypeETPLocal && !hasLocalHostNetworkEp && config.Gateway.Mode == config.GatewayModeLocal {
+			// table 7, Sends the reply packet back out eth0 to the external client. Note that the constant etp svc
+			// cookie is used since this would be same for all such services.
+			fmt.Sprintf("cookie=%s, priority=110, table=7, actions=output:%s",
+				etpSvcOpenFlowCookie, npw.ofportPhys))
+	} else if config.Gateway.Mode == config.GatewayModeShared {
 		// case2 (see function description for details)
-		var nodeportFlows []string
-		klog.V(5).Infof("Adding flows on breth0 for %s Service %s in Namespace: %s since ExternalTrafficPolicy=local", ipType, service.Name, service.Namespace)
-		nodeportFlows = npw.createFlowsForNonLocalHostNetEp(cookie, svcPort.Port, flowProtocol, externalIPOrLBIngressIP, nwDst, nwSrc)
-		npw.ofm.updateFlowCacheEntry(key, nodeportFlows)
-	} else {
-		// case3 (see function description for details)
-		npw.ofm.updateFlowCacheEntry(key, []string{
+		externalIPFlows = append(externalIPFlows,
+			// table=0, matches on service traffic towards externalIP or LB ingress and sends it to OVN pipeline
 			fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_dst=%d, "+
 				"actions=%s",
 				cookie, npw.ofportPhys, flowProtocol, nwDst, externalIPOrLBIngressIP, svcPort.Port, actions),
+			// table=0, matches on return traffic from service externalIP or LB ingress and sends it out to primary node interface (br-ex)
 			fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_src=%d, "+
 				"actions=output:%s",
-				cookie, npw.ofportPatch, flowProtocol, nwSrc, externalIPOrLBIngressIP, svcPort.Port, npw.ofportPhys),
-			npw.generateArpBypassFlow(protocol, externalIPOrLBIngressIP, cookie)})
+				cookie, npw.ofportPatch, flowProtocol, nwSrc, externalIPOrLBIngressIP, svcPort.Port, npw.ofportPhys))
 	}
+	npw.ofm.updateFlowCacheEntry(key, externalIPFlows)
 
 	return nil
 }
