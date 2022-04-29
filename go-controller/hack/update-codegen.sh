@@ -40,6 +40,7 @@ fi
 for crd in ${crds}; do
   echo "Generating deepcopy funcs for $crd"
   deepcopy-gen \
+    --go-header-file hack/boilerplate.go.txt \
     --input-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1 \
     -O zz_generated.deepcopy \
     --bounding-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd
@@ -47,6 +48,7 @@ for crd in ${crds}; do
 
   echo "Generating clientset for $crd"
   client-gen \
+    --go-header-file hack/boilerplate.go.txt \
     --clientset-name "${CLIENTSET_NAME_VERSIONED:-versioned}" \
     --input-base "" \
     --input github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1 \
@@ -55,12 +57,14 @@ for crd in ${crds}; do
 
   echo "Generating listers for $crd"
   lister-gen \
+    --go-header-file hack/boilerplate.go.txt \
     --input-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1 \
     --output-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/listers \
     "$@"
 
   echo "Generating informers for $crd"
   informer-gen \
+    --go-header-file hack/boilerplate.go.txt \
     --input-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1 \
     --versioned-clientset-package github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/clientset/versioned \
     --listers-package  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1/apis/listers \
@@ -82,3 +86,8 @@ sed -i -e':begin;$!N;s/.*metadata:\n.*type: object/&\n            properties:\n 
 ## adding validation to objects only to the fields
 sed -i -e ':begin;$!N;s/                          type: string\n.*type: object/&\n                      minProperties: 1\n                      maxProperties: 1/;P;D' \
 	_output/crds/k8s.ovn.org_egressfirewalls.yaml
+
+echo "Editing EgressQoS CRD"
+## We desire that only EgressQoS with the name "default" are accepted by the apiserver.
+sed -i -e':begin;$!N;s/.*metadata:\n.*type: object/&\n            properties:\n              name:\n                type: string\n                pattern: ^default$/;P;D' \
+	_output/crds/k8s.ovn.org_egressqoses.yaml

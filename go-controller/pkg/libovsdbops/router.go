@@ -885,6 +885,9 @@ func CreateOrUpdateNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRout
 // logical router and returns the corresponding ops
 func DeleteNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, nats ...*nbdb.NAT) ([]libovsdb.Operation, error) {
 	routerNats, err := getRouterNATs(nbClient, router)
+	if err == libovsdbclient.ErrNotFound {
+		return ops, nil
+	}
 	if err != nil {
 		return ops, fmt.Errorf("unable to get NAT entries for router %+v: %w", router, err)
 	}

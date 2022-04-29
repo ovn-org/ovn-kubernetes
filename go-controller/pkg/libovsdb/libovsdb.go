@@ -94,14 +94,17 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 	}()
 
 	// Only Monitor Required SBDB tables to reduce memory overhead
+	chassisPrivate := sbdb.ChassisPrivate{}
 	_, err = c.Monitor(ctx,
 		c.NewMonitor(
 			// used by unidling controller
 			client.WithTable(&sbdb.ControllerEvent{}),
 			// used for gateway
 			client.WithTable(&sbdb.MACBinding{}),
-			// used by libovsdbops
+			// used by node sync
 			client.WithTable(&sbdb.Chassis{}),
+			// used by node sync, only interested in names
+			client.WithTable(&chassisPrivate, &chassisPrivate.Name),
 			// used for metrics
 			client.WithTable(&sbdb.SBGlobal{}),
 			// used for metrics

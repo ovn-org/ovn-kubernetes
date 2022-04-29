@@ -68,11 +68,13 @@ fi
 # OVN_SSL_ENABLE - use SSL transport to NB/SB db and northd (default: no)
 # OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 # OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB
+# OVN_OFCTRL_WAIT_BEFORE_CLEAR - ovn-controller wait time in ms before clearing OpenFlow rules during start up
 # OVN_ENABLE_LFLOW_CACHE - enable ovn-controller lflow-cache
 # OVN_LFLOW_CACHE_LIMIT - maximum number of logical flow cache entries of ovn-controller
 # OVN_LFLOW_CACHE_LIMIT_KB - maximum size of the logical flow cache of ovn-controller
 # OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 # OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
+# OVN_EGRESSQOS_ENABLE - enable egress QoS for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, dpu, dpu-host (default: full)
 # OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev. valid when ovnkube node mode is: dpu, dpu-host
@@ -201,6 +203,8 @@ ovn_v6_join_subnet=${OVN_V6_JOIN_SUBNET:-}
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
 #OVN_MONITOR_ALL - ovn-controller monitor all data in SB DB
 ovn_monitor_all=${OVN_MONITOR_ALL:-}
+#OVN_OFCTRL_WAIT_BEFORE_CLEAR - ovn-controller wait time in ms before clearing OpenFlow rules during start up
+ovn_ofctrl_wait_before_clear=${OVN_OFCTRL_WAIT_BEFORE_CLEAR:-}
 ovn_enable_lflow_cache=${OVN_ENABLE_LFLOW_CACHE:-}
 ovn_lflow_cache_limit=${OVN_LFLOW_CACHE_LIMIT:-}
 ovn_lflow_cache_limit_kb=${OVN_LFLOW_CACHE_LIMIT_KB:-}
@@ -209,6 +213,8 @@ ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
 #OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 ovn_egressfirewall_enable=${OVN_EGRESSFIREWALL_ENABLE:-false}
+#OVN_EGRESSQOS_ENABLE - enable egress QoS for ovn-kubernetes
+ovn_egressqos_enable=${OVN_EGRESSQOS_ENABLE:-false}
 #OVN_DISABLE_OVN_IFACE_ID_VER - disable usage of the OVN iface-id-ver option
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER:-false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
@@ -946,8 +952,19 @@ ovn-master() {
 	  egressfirewall_enabled_flag="--enable-egress-firewall"
   fi
   echo "egressfirewall_enabled_flag=${egressfirewall_enabled_flag}"
+  egressqos_enabled_flag=
+  if [[ ${ovn_egressqos_enable} == "true" ]]; then
+	  egressqos_enabled_flag="--enable-egress-qos"
+  fi
 
   ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
+  local ovnkube_metrics_tls_opts=""
+  if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
+    ovnkube_metrics_tls_opts="
+        --node-server-privkey ${OVNKUBE_METRICS_PK}
+        --node-server-cert ${OVNKUBE_METRICS_CERT}
+      "
+  fi
 
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
@@ -967,10 +984,12 @@ ovn-master() {
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     ${ovn_master_ssl_opts} \
+    ${ovnkube_metrics_tls_opts} \
     ${multicast_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
     ${egressip_enabled_flag} \
     ${egressfirewall_enabled_flag} \
+    ${egressqos_enabled_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --host-network-namespace ${ovn_host_network_namespace} &
 
@@ -1113,6 +1132,11 @@ ovn-node() {
      monitor_all="--monitor-all=${ovn_monitor_all}"
   fi
 
+  ofctrl_wait_before_clear=
+  if [[ -n ${ovn_ofctrl_wait_before_clear} ]]; then
+     ofctrl_wait_before_clear="--ofctrl-wait-before-clear=${ovn_ofctrl_wait_before_clear}"
+  fi
+
   enable_lflow_cache=
   if [[ -n ${ovn_enable_lflow_cache} ]]; then
      enable_lflow_cache="--enable-lflow-cache=${ovn_enable_lflow_cache}"
@@ -1187,6 +1211,14 @@ ovn-node() {
   ovn_metrics_bind_address="${metrics_endpoint_ip}:9476"
   ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:9410"
 
+  local ovnkube_metrics_tls_opts=""
+  if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
+    ovnkube_metrics_tls_opts="
+        --node-server-privkey ${OVNKUBE_METRICS_PK}
+        --node-server-cert ${OVNKUBE_METRICS_CERT}
+      "
+  fi
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
@@ -1208,8 +1240,10 @@ ovn-node() {
     --pidfile ${OVN_RUNDIR}/ovnkube.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube.log \
     ${ovn_node_ssl_opts} \
+    ${ovnkube_metrics_tls_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
     ${monitor_all} \
+    ${ofctrl_wait_before_clear} \
     ${enable_lflow_cache} \
     ${lflow_cache_limit} \
     ${lflow_cache_limit_kb} \

@@ -50,6 +50,7 @@ OVN_ACL_LOGGING_RATE_LIMIT=""
 OVN_MASTER_COUNT=""
 OVN_REMOTE_PROBE_INTERVAL=""
 OVN_MONITOR_ALL=""
+OVN_OFCTRL_WAIT_BEFORE_CLEAR=""
 OVN_ENABLE_LFLOW_CACHE=""
 OVN_LFLOW_CACHE_LIMIT=""
 OVN_LFLOW_CACHE_LIMIT_KB=""
@@ -60,6 +61,7 @@ OVN_EMPTY_LB_EVENTS=""
 OVN_MULTICAST_ENABLE=""
 OVN_EGRESSIP_ENABLE=
 OVN_EGRESSFIREWALL_ENABLE=
+OVN_EGRESSQOS_ENABLE=
 OVN_DISABLE_OVN_IFACE_ID_VER="false"
 OVN_V4_JOIN_SUBNET=""
 OVN_V6_JOIN_SUBNET=""
@@ -95,6 +97,9 @@ while [ "$1" != "" ]; do
     ;;
   --ovn-monitor-all)
     OVN_MONITOR_ALL=$VALUE
+    ;;
+  --ovn-ofctrl-wait-before-clear)
+    OVN_OFCTRL_WAIT_BEFORE_CLEAR=$VALUE
     ;;
   --ovn-enable-lflow-cache)
     OVN_ENABLE_LFLOW_CACHE=$VALUE
@@ -204,6 +209,9 @@ while [ "$1" != "" ]; do
   --egress-firewall-enable)
     OVN_EGRESSFIREWALL_ENABLE=$VALUE
     ;;
+  --egress-qos-enable)
+    OVN_EGRESSQOS_ENABLE=$VALUE
+    ;;
   --v4-join-subnet)
     OVN_V4_JOIN_SUBNET=$VALUE
     ;;
@@ -302,6 +310,8 @@ ovn_egress_ip_enable=${OVN_EGRESSIP_ENABLE}
 echo "ovn_egress_ip_enable: ${ovn_egress_ip_enable}"
 ovn_egress_firewall_enable=${OVN_EGRESSFIREWALL_ENABLE}
 echo "ovn_egress_firewall_enable: ${ovn_egress_firewall_enable}"
+ovn_egress_qos_enable=${OVN_EGRESSQOS_ENABLE}
+echo "ovn_egress_qos_enable: ${ovn_egress_qos_enable}"
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER}
 echo "ovn_disable_ovn_iface_id_ver: ${ovn_disable_ovn_iface_id_ver}"
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
@@ -326,6 +336,8 @@ ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-"100000"}
 echo "ovn_remote_probe_interval: ${ovn_remote_probe_interval}"
 ovn_monitor_all=${OVN_MONITOR_ALL}
 echo "ovn_monitor_all: ${ovn_monitor_all}"
+ovn_ofctrl_wait_before_clear=${OVN_OFCTRL_WAIT_BEFORE_CLEAR}
+echo "ovn_ofctrl_wait_before_clear: ${ovn_ofctrl_wait_before_clear}"
 ovn_enable_lflow_cache=${OVN_ENABLE_LFLOW_CACHE}
 echo "ovn_enable_lflow_cache: ${ovn_enable_lflow_cache}"
 ovn_lflow_cache_limit=${OVN_LFLOW_CACHE_LIMIT}
@@ -384,6 +396,7 @@ ovn_image=${image} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_monitor_all=${ovn_monitor_all} \
+  ovn_ofctrl_wait_before_clear=${ovn_ofctrl_wait_before_clear} \
   ovn_enable_lflow_cache=${ovn_enable_lflow_cache} \
   ovn_lflow_cache_limit=${ovn_lflow_cache_limit} \
   ovn_lflow_cache_limit_kb=${ovn_lflow_cache_limit_kb} \
@@ -448,6 +461,7 @@ ovn_image=${image} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_egress_firewall_enable=${ovn_egress_firewall_enable} \
+  ovn_egress_qos_enable=${ovn_egress_qos_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
@@ -506,5 +520,6 @@ net_cidr=${net_cidr} svc_cidr=${svc_cidr} \
 cp ../templates/ovnkube-monitor.yaml.j2 ${output_dir}/ovnkube-monitor.yaml
 cp ../templates/k8s.ovn.org_egressfirewalls.yaml.j2 ${output_dir}/k8s.ovn.org_egressfirewalls.yaml
 cp ../templates/k8s.ovn.org_egressips.yaml.j2 ${output_dir}/k8s.ovn.org_egressips.yaml
+cp ../templates/k8s.ovn.org_egressqoses.yaml.j2 ${output_dir}/k8s.ovn.org_egressqoses.yaml
 
 exit 0

@@ -113,8 +113,9 @@ github.com/containerd/go-runc v0.0.0-20180907222934-5a6d9f37cfa3/go.mod h1:IV7qH
 github.com/containerd/ttrpc v0.0.0-20190828154514-0e0f228740de/go.mod h1:PvCDdDGpgqzQIzDW1TphrGLssLDZp2GuS+X5DkEJB8o=
 github.com/containerd/typeurl v0.0.0-20180627222232-a93fcdb778cd/go.mod h1:Cm3kwCdlkCfMSHURc+r6fwoGH6/F1hH3S4sg0rLFWPc=
 github.com/containernetworking/cni v0.7.1/go.mod h1:LGwApLUm2FpoOfxTDEeq8T9ipbpZ61X79hmU3w8FmsY=
-github.com/containernetworking/cni v0.8.0 h1:BT9lpgGoH4jw3lFC7Odz2prU5ruiYKcgAjMCbgybcKI=
 github.com/containernetworking/cni v0.8.0/go.mod h1:LGwApLUm2FpoOfxTDEeq8T9ipbpZ61X79hmU3w8FmsY=
+github.com/containernetworking/cni v0.8.1 h1:7zpDnQ3T3s4ucOuJ/ZCLrYBxzkg0AELFfII3Epo9TmI=
+github.com/containernetworking/cni v0.8.1/go.mod h1:LGwApLUm2FpoOfxTDEeq8T9ipbpZ61X79hmU3w8FmsY=
 github.com/containernetworking/plugins v0.8.7 h1:bU7QieuAp+sACI2vCzESJ3FoT860urYP+lThyZkb/2M=
 github.com/containernetworking/plugins v0.8.7/go.mod h1:R7lXeZaBzpfqapcAbHRW8/CYwm0dHzbz0XEjofx0uB0=
 github.com/coreos/go-iptables v0.4.5 h1:DpHb9vJrZQEFMcVLFKAAGMUVX0XoRC0ptCthinRYm38=
@@ -399,8 +400,8 @@ github.com/openshift/build-machinery-go v0.0.0-20210712174854-1bb7fd1518d3/go.mo
 github.com/openshift/client-go v0.0.0-20211202194848-d3f186f2d366 h1:/llKlbXC7F6rqTkAl2GE//9GDR0iDsqJEFvvJ1kLJXg=
 github.com/openshift/client-go v0.0.0-20211202194848-d3f186f2d366/go.mod h1:HJeHsH6mPyrrOVS/2j1zcztGAJG9ETKbqtlyohs84yY=
 github.com/ory/dockertest/v3 v3.8.0/go.mod h1:9zPATATlWQru+ynXP+DytBQrsXV7Tmlx7K86H6fQaDo=
-github.com/ovn-org/libovsdb v0.6.1-0.20220328142833-2cbe2d093e12 h1:0omm+gRCOGkS2JyFoMYAF4NUrd8b4A+wnbooJZKH02g=
-github.com/ovn-org/libovsdb v0.6.1-0.20220328142833-2cbe2d093e12/go.mod h1:BQPdnSM2QOKxPwxl7wHJDSPP4B/CDKq3+vzgFW3J5gE=
+github.com/ovn-org/libovsdb v0.6.1-0.20220427123326-d7b273399db4 h1:atUIOA34Cg9GVFn/8rmIsmnOIbi0D82x+xfhV2UuF1Q=
+github.com/ovn-org/libovsdb v0.6.1-0.20220427123326-d7b273399db4/go.mod h1:BQPdnSM2QOKxPwxl7wHJDSPP4B/CDKq3+vzgFW3J5gE=
 github.com/peterbourgon/diskv v2.0.1+incompatible/go.mod h1:uqqh8zWWbv1HBMNONnaR/tNboyR3/BZd58JJSHlUSCU=
 github.com/pkg/errors v0.8.0/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/pkg/errors v0.8.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
