@@ -130,9 +130,6 @@ type Controller struct {
 	externalGWCache map[ktypes.NamespacedName]*externalRouteInfo
 	exGWCacheMutex  sync.RWMutex
 
-	// egressFirewalls is a map of namespaces and the egressFirewall attached to it
-	egressFirewalls sync.Map
-
 	// EgressQoS
 	egressQoSLister egressqoslisters.EgressQoSLister
 	egressQoSSynced cache.InformerSynced

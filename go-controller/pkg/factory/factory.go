@@ -693,6 +693,11 @@ func (wf *WatchFactory) GetNetworkPolicy(namespace, name string) (*knet.NetworkP
 	return networkPolicyLister.NetworkPolicies(namespace).Get(name)
 }
 
+func (wf *WatchFactory) GetEgressFirewalls(namespace string) ([]*egressfirewallapi.EgressFirewall, error) {
+	egressFirewallLister := wf.informers[EgressFirewallType].lister.(egressfirewalllister.EgressFirewallLister)
+	return egressFirewallLister.EgressFirewalls(namespace).List(labels.Everything())
+}
+
 func (wf *WatchFactory) GetEgressFirewall(namespace, name string) (*egressfirewallapi.EgressFirewall, error) {
 	egressFirewallLister := wf.informers[EgressFirewallType].lister.(egressfirewalllister.EgressFirewallLister)
 	return egressFirewallLister.EgressFirewalls(namespace).Get(name)

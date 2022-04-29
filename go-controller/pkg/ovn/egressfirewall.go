@@ -189,9 +189,18 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	ef.Lock()
 	defer ef.Unlock()
 	// there should not be an item already in egressFirewall map for the given Namespace
-	if _, loaded := oc.egressFirewalls.Load(egressFirewall.Namespace); loaded {
-		return fmt.Errorf("error attempting to add egressFirewall %s to namespace %s when it already has an egressFirewall",
-			egressFirewall.Name, egressFirewall.Namespace)
+	existing, err := oc.watchFactory.GetEgressFirewalls(egressFirewall.Namespace)
+	if err != nil {
+		return fmt.Errorf("unable to check number of existing egress firewalls: %v", err)
+	} else if len(existing) > 1 {
+		fws := []string{}
+		for _, fw := range existing {
+			if fw.Name != egressFirewall.Name {
+				fws = append(fws, fw.Name)
+			}
+		}
+		return fmt.Errorf("error attempting to add egressFirewall %s to namespace %s when it already has an egressFirewalls: %s",
+			egressFirewall.Name, egressFirewall.Namespace, strings.Join(fws, ", "))
 	}
 
 	var addErrors error
@@ -218,7 +227,7 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	// EgressFirewall needs to make sure that the address_set for the namespace exists independently of the namespace object
 	// so that OVN doesn't get unresolved references to the address_set.
 	// TODO: This should go away once we do something like refcounting for address_sets.
-	_, err := oc.addressSetFactory.EnsureAddressSet(egressFirewall.Namespace)
+	_, err = oc.addressSetFactory.EnsureAddressSet(egressFirewall.Namespace)
 	if err != nil {
 		return fmt.Errorf("cannot Ensure that addressSet for namespace %s exists %v", egressFirewall.Namespace, err)
 	}
@@ -226,44 +235,27 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	if err := oc.addEgressFirewallRules(ef, ipv4HashedAS, ipv6HashedAS, types.EgressFirewallStartPriority); err != nil {
 		return err
 	}
-	oc.egressFirewalls.Store(egressFirewall.Namespace, ef)
 	return nil
 }
 
-func (oc *Controller) deleteEgressFirewall(egressFirewallObj *egressfirewallapi.EgressFirewall) error {
-	klog.Infof("Deleting egress Firewall %s in namespace %s", egressFirewallObj.Name, egressFirewallObj.Namespace)
+func (oc *Controller) deleteEgressFirewall(ef *egressfirewallapi.EgressFirewall) error {
+	klog.Infof("Deleting egress Firewall %s in namespace %s", ef.Name, ef.Namespace)
 	deleteDNS := false
-	obj, loaded := oc.egressFirewalls.Load(egressFirewallObj.Namespace)
-	if !loaded {
-		return fmt.Errorf("there is no egressFirewall found in namespace %s",
-			egressFirewallObj.Namespace)
-	}
-
-	ef, ok := obj.(*egressFirewall)
-	if !ok {
-		return fmt.Errorf("deleteEgressFirewall failed: type assertion to *egressFirewall"+
-			" failed for EgressFirewall %s of type %T in namespace %s",
-			egressFirewallObj.Name, obj, egressFirewallObj.Namespace)
-	}
-
-	ef.Lock()
-	defer ef.Unlock()
-	for _, rule := range ef.egressRules {
-		if len(rule.to.dnsName) > 0 {
+	for _, rule := range ef.Spec.Egress {
+		if len(rule.To.DNSName) > 0 {
 			deleteDNS = true
 			break
 		}
 	}
 	if deleteDNS {
-		if err := oc.egressFirewallDNS.Delete(egressFirewallObj.Namespace); err != nil {
+		if err := oc.egressFirewallDNS.Delete(ef.Namespace); err != nil {
 			return err
 		}
 	}
 
-	if err := oc.deleteEgressFirewallRules(egressFirewallObj.Namespace); err != nil {
+	if err := oc.deleteEgressFirewallRules(ef.Namespace); err != nil {
 		return err
 	}
-	oc.egressFirewalls.Delete(egressFirewallObj.Namespace)
 	return nil
 }
 
