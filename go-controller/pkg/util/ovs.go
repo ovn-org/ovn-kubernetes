@@ -505,6 +505,7 @@ func RunOVNSbctlWithTimeout(timeout int, args ...string) (string, string,
 	}
 
 	cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
+	cmdArgs = append(cmdArgs, "--no-leader-only")
 	cmdArgs = append(cmdArgs, args...)
 	start := time.Now()
 	stdout, stderr, err := runOVNretry(runner.sbctlPath, nil, cmdArgs...)
