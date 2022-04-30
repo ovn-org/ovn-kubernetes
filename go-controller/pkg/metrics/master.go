@@ -628,13 +628,17 @@ func (cpr *ControlPlaneRecorder) updatePortBinding(old, new model.Model, t time.
 		klog.V(5).Infof("Port binding update expected pod with UID %q in cache", podUID)
 		return
 	}
+
 	if oldRow.Chassis == nil && newRow.Chassis != nil && r.timestampType == portBinding {
 		metricPortBindingChassisLatency.Observe(t.Sub(r.timestamp).Seconds())
 		r.timestamp = t
 		r.timestampType = portBindingChassis
+
 	}
+
 	if oldRow.Up != nil && !*oldRow.Up && newRow.Up != nil && *newRow.Up && r.timestampType == portBindingChassis {
 		metricPortBindingUpLatency.Observe(t.Sub(r.timestamp).Seconds())
+		delete(cpr.podRecords, podUID)
 	}
 }
 
