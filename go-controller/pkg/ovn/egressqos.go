@@ -657,16 +657,16 @@ func (oc *Controller) syncEgressQoSPod(key string) error {
 		return err
 	}
 
-	klog.Infof("Processing sync for EgressQoS pod %s/%s", namespace, name)
-
-	defer func() {
-		klog.V(4).Infof("Finished syncing EgressQoS pod %s on namespace %s : %v", name, namespace, time.Since(startTime))
-	}()
-
 	obj, loaded := oc.egressQoSCache.Load(namespace)
 	if !loaded { // no EgressQoS in the namespace
 		return nil
 	}
+
+	klog.V(5).Infof("Processing sync for EgressQoS pod %s/%s", namespace, name)
+
+	defer func() {
+		klog.V(4).Infof("Finished syncing EgressQoS pod %s on namespace %s : %v", name, namespace, time.Since(startTime))
+	}()
 
 	eq := obj.(*egressQoS)
 	eq.RLock() // allow multiple pods to sync
@@ -774,7 +774,6 @@ func (oc *Controller) onEgressQoSPodAdd(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Adding EgressQoS pod %s", key)
 	oc.egressQoSPodQueue.Add(key)
 }
 
