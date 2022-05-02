@@ -84,7 +84,7 @@ func (e *EgressDNS) Add(namespace, dnsName string) (addressset.AddressSet, error
 
 }
 
-func (e *EgressDNS) Delete(namespace string) bool {
+func (e *EgressDNS) Delete(namespace string) error {
 	e.lock.Lock()
 	var dnsNamesToDelete []string
 
@@ -96,7 +96,7 @@ func (e *EgressDNS) Delete(namespace string) bool {
 			// the dnsEntry appears in no other namespace, so delete the address_set
 			err := dnsEntry.dnsAddressSet.Destroy()
 			if err != nil {
-				klog.Errorf("Error deleting EgressFirewall AddressSet for dnsName: %s %v", dnsName, err)
+				return fmt.Errorf("error deleting EgressFirewall AddressSet for dnsName: %s %v", dnsName, err)
 			}
 			// the dnsEntry is no longer needed because nothing references it, so delete it
 			delete(e.dnsEntries, dnsName)
@@ -111,7 +111,7 @@ func (e *EgressDNS) Delete(namespace string) bool {
 		// blocks only if Run() is busy updating its internal values)
 		e.deleted <- name
 	}
-	return len(e.dnsEntries) == 0
+	return nil
 }
 
 func (e *EgressDNS) Update(dns string) (bool, error) {

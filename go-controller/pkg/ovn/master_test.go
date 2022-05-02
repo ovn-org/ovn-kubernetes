@@ -15,11 +15,13 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
+	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -884,10 +886,12 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			})
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
+			egressQoSFakeClient := &egressqosfake.Clientset{}
 			fakeClient := &util.OVNClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
+				EgressQoSClient:      egressQoSFakeClient,
 			}
 
 			_, err := config.InitConfig(ctx, nil, nil)
@@ -1083,10 +1087,12 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			})
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
+			egressQoSFakeClient := &egressqosfake.Clientset{}
 			fakeClient := &util.OVNClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
+				EgressQoSClient:      egressQoSFakeClient,
 			}
 
 			_, err := config.InitConfig(ctx, nil, nil)
@@ -1860,10 +1866,12 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			kubeFakeClient := fake.NewSimpleClientset()
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
+			egressQoSFakeClient := &egressqosfake.Clientset{}
 			fakeClient := &util.OVNClientset{
 				KubeClient:           kubeFakeClient,
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
+				EgressQoSClient:      egressQoSFakeClient,
 			}
 			f, err := factory.NewMasterWatchFactory(fakeClient)
 			if err != nil {
@@ -1922,6 +1930,91 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 
 			if len(allocated) != tt.allocated {
 				t.Errorf("Expected %d subnets allocated, received %d", tt.allocated, len(allocated))
+			}
+		})
+	}
+}
+
+func TestController_syncNodesRetriable(t *testing.T) {
+	tests := []struct {
+		name         string
+		initialSBDB  []libovsdbtest.TestData
+		expectedSBDB []libovsdbtest.TestData
+	}{
+		{
+			name: "removes stale chassis and chassis private",
+			initialSBDB: []libovsdbtest.TestData{
+				&sbdb.Chassis{Name: "chassis-node1", Hostname: "node1"},
+				&sbdb.ChassisPrivate{Name: "chassis-node1"},
+				&sbdb.Chassis{Name: "chassis-node2", Hostname: "node2"},
+				&sbdb.ChassisPrivate{Name: "chassis-node2"},
+				&sbdb.ChassisPrivate{Name: "chassis-node3"},
+			},
+			expectedSBDB: []libovsdbtest.TestData{
+				&sbdb.Chassis{Name: "chassis-node1", Hostname: "node1"},
+				&sbdb.ChassisPrivate{Name: "chassis-node1"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stopChan := make(chan struct{})
+			defer close(stopChan)
+
+			testNode := v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node1",
+				},
+			}
+
+			kubeFakeClient := fake.NewSimpleClientset()
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
+			egressIPFakeClient := &egressipfake.Clientset{}
+			fakeClient := &util.OVNClientset{
+				KubeClient:           kubeFakeClient,
+				EgressIPClient:       egressIPFakeClient,
+				EgressFirewallClient: egressFirewallFakeClient,
+			}
+			f, err := factory.NewMasterWatchFactory(fakeClient)
+			if err != nil {
+				t.Fatalf("%s: Error creating master watch factory: %v", tt.name, err)
+			}
+
+			dbSetup := libovsdbtest.TestSetup{
+				SBData: tt.initialSBDB,
+			}
+			nbClient, sbClient, libovsdbCleanup, err := libovsdbtest.NewNBSBTestHarness(dbSetup)
+			if err != nil {
+				t.Fatalf("Error creating libovsdb test harness: %v", err)
+			}
+			t.Cleanup(libovsdbCleanup.Cleanup)
+
+			controller := NewOvnController(
+				fakeClient,
+				f,
+				stopChan,
+				addressset.NewFakeAddressSetFactory(),
+				nbClient,
+				sbClient,
+				record.NewFakeRecorder(0))
+
+			controller.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(nbClient, "", []string{})
+			if err != nil {
+				t.Fatalf("%s: Error creating joinSwIPManager: %v", tt.name, err)
+			}
+
+			err = controller.syncNodesRetriable([]interface{}{&testNode})
+			if err != nil {
+				t.Fatalf("%s: Error on syncNodesRetriable: %v", tt.name, err)
+			}
+
+			matcher := libovsdbtest.HaveDataIgnoringUUIDs(tt.expectedSBDB)
+			match, err := matcher.Match(sbClient)
+			if err != nil {
+				t.Fatalf("%s: matcher error: %v", tt.name, err)
+			}
+			if !match {
+				t.Fatalf("%s: DB state did not match: %s", tt.name, matcher.FailureMessage(sbClient))
 			}
 		})
 	}

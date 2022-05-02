@@ -25,7 +25,6 @@ import (
 const (
 	egressFirewallAppliedCorrectly = "EgressFirewall Rules applied"
 	egressFirewallAddError         = "EgressFirewall Rules not correctly added"
-	egressFirewallUpdateError      = "EgressFirewall Rules not correctly updated"
 )
 
 type egressFirewall struct {
@@ -96,8 +95,9 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 //      For this it just deletes all the ACLs on the distributed join switch
 
 // NOTE: Utilize the fact that we know that all egress firewall related setup must have a priority: types.MinimumReservedEgressFirewallPriority <= priority <= types.EgressFirewallStartPriority
-func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) {
+func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) error {
 	oc.syncWithRetry("syncEgressFirewall", func() error { return oc.syncEgressFirewallRetriable(egressFirewalls) })
+	return nil
 }
 
 // This function implements the main body of work of what is described by syncEgressFirewall.
@@ -189,7 +189,7 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	ef.Lock()
 	defer ef.Unlock()
 	// there should not be an item already in egressFirewall map for the given Namespace
-	if _, loaded := oc.egressFirewalls.LoadOrStore(egressFirewall.Namespace, ef); loaded {
+	if _, loaded := oc.egressFirewalls.Load(egressFirewall.Namespace); loaded {
 		return fmt.Errorf("error attempting to add egressFirewall %s to namespace %s when it already has an egressFirewall",
 			egressFirewall.Name, egressFirewall.Namespace)
 	}
@@ -223,27 +223,17 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 		return fmt.Errorf("cannot Ensure that addressSet for namespace %s exists %v", egressFirewall.Namespace, err)
 	}
 	ipv4HashedAS, ipv6HashedAS := addressset.MakeAddressSetHashNames(egressFirewall.Namespace)
-	err = oc.addEgressFirewallRules(ef, ipv4HashedAS, ipv6HashedAS, types.EgressFirewallStartPriority)
-	if err != nil {
+	if err := oc.addEgressFirewallRules(ef, ipv4HashedAS, ipv6HashedAS, types.EgressFirewallStartPriority); err != nil {
 		return err
 	}
-
+	oc.egressFirewalls.Store(egressFirewall.Namespace, ef)
 	return nil
-}
-
-func (oc *Controller) updateEgressFirewall(oldEgressFirewall, newEgressFirewall *egressfirewallapi.EgressFirewall) error {
-	updateErrors := oc.deleteEgressFirewall(oldEgressFirewall)
-	if updateErrors != nil {
-		return updateErrors
-	}
-	updateErrors = oc.addEgressFirewall(newEgressFirewall)
-	return updateErrors
 }
 
 func (oc *Controller) deleteEgressFirewall(egressFirewallObj *egressfirewallapi.EgressFirewall) error {
 	klog.Infof("Deleting egress Firewall %s in namespace %s", egressFirewallObj.Name, egressFirewallObj.Namespace)
 	deleteDNS := false
-	obj, loaded := oc.egressFirewalls.LoadAndDelete(egressFirewallObj.Namespace)
+	obj, loaded := oc.egressFirewalls.Load(egressFirewallObj.Namespace)
 	if !loaded {
 		return fmt.Errorf("there is no egressFirewall found in namespace %s",
 			egressFirewallObj.Namespace)
@@ -265,13 +255,19 @@ func (oc *Controller) deleteEgressFirewall(egressFirewallObj *egressfirewallapi.
 		}
 	}
 	if deleteDNS {
-		oc.egressFirewallDNS.Delete(egressFirewallObj.Namespace)
+		if err := oc.egressFirewallDNS.Delete(egressFirewallObj.Namespace); err != nil {
+			return err
+		}
 	}
 
-	return oc.deleteEgressFirewallRules(egressFirewallObj.Namespace)
+	if err := oc.deleteEgressFirewallRules(egressFirewallObj.Namespace); err != nil {
+		return err
+	}
+	oc.egressFirewalls.Delete(egressFirewallObj.Namespace)
+	return nil
 }
 
-func (oc *Controller) updateEgressFirewallWithRetry(egressfirewall *egressfirewallapi.EgressFirewall) error {
+func (oc *Controller) updateEgressFirewallStatusWithRetry(egressfirewall *egressfirewallapi.EgressFirewall) error {
 	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		return oc.kube.UpdateEgressFirewall(egressfirewall)
 	})
@@ -561,4 +557,8 @@ func getClusterSubnetsExclusion() string {
 		}
 	}
 	return exclusion
+}
+
+func getEgressFirewallNamespacedName(egressFirewall *egressfirewallapi.EgressFirewall) string {
+	return fmt.Sprintf("%v/%v", egressFirewall.Namespace, egressFirewall.Name)
 }

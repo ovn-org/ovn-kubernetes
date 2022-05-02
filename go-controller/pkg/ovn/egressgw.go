@@ -1015,6 +1015,10 @@ func (oc *Controller) buildClusterECMPCacheFromNamespaces(clusterRouteCache map[
 		}
 		for _, gwIP := range gwIPs {
 			for _, nsPod := range nsPods {
+				// ignore completed pods, host networked pods, pods not scheduled
+				if !util.PodWantsNetwork(nsPod) || util.PodCompleted(nsPod) || !util.PodScheduled(nsPod) {
+					continue
+				}
 				for _, podIP := range nsPod.Status.PodIPs {
 					if utilnet.IsIPv6(gwIP) != utilnet.IsIPv6String(podIP.IP) {
 						continue
@@ -1068,6 +1072,10 @@ func (oc *Controller) buildClusterECMPCacheFromPods(clusterRouteCache map[string
 		}
 		for _, gwIP := range gwIPs {
 			for _, nsPod := range nsPods {
+				// ignore completed pods, host networked pods, pods not scheduled
+				if !util.PodWantsNetwork(nsPod) || util.PodCompleted(nsPod) || !util.PodScheduled(nsPod) {
+					continue
+				}
 				for _, podIP := range nsPod.Status.PodIPs {
 					if utilnet.IsIPv6(gwIP) != utilnet.IsIPv6String(podIP.IP) {
 						continue

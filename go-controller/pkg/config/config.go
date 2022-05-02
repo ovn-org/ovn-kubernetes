@@ -57,16 +57,17 @@ var (
 
 	// Default holds parsed config file parameters and command-line overrides
 	Default = DefaultConfig{
-		MTU:               1400,
-		ConntrackZone:     64000,
-		EncapType:         "geneve",
-		EncapIP:           "",
-		EncapPort:         DefaultEncapPort,
-		InactivityProbe:   100000, // in Milliseconds
-		OpenFlowProbe:     180,    // in Seconds
-		MonitorAll:        true,
-		LFlowCacheEnable:  true,
-		RawClusterSubnets: "10.128.0.0/14/23",
+		MTU:                   1400,
+		ConntrackZone:         64000,
+		EncapType:             "geneve",
+		EncapIP:               "",
+		EncapPort:             DefaultEncapPort,
+		InactivityProbe:       100000, // in Milliseconds
+		OpenFlowProbe:         180,    // in Seconds
+		OfctrlWaitBeforeClear: 0,      // in Milliseconds
+		MonitorAll:            true,
+		LFlowCacheEnable:      true,
+		RawClusterSubnets:     "10.128.0.0/14/23",
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -191,6 +192,10 @@ type DefaultConfig struct {
 	// Maximum number of seconds of idle time on the OpenFlow connection
 	// that ovn-controller will wait before it sends a connection health probe
 	OpenFlowProbe int `gcfg:"openflow-probe"`
+	// Maximum number of milliseconds that ovn-controller waits before clearing existing flows
+	// during start up, to make sure the initial flow compute is complete and avoid data plane
+	// interruptions.
+	OfctrlWaitBeforeClear int `gcfg:"ofctrl-wait-before-clear"`
 	// The  boolean  flag  indicates  if  ovn-controller  should monitor all data in SB DB
 	// instead of conditionally monitoring the data relevant to this node only.
 	// By default monitor-all is enabled.
@@ -309,12 +314,15 @@ type MetricsConfig struct {
 	OVNMetricsBindAddress string `gcfg:"ovn-metrics-bind-address"`
 	ExportOVSMetrics      bool   `gcfg:"export-ovs-metrics"`
 	EnablePprof           bool   `gcfg:"enable-pprof"`
+	NodeServerPrivKey     string `gcfg:"node-server-privkey"`
+	NodeServerCert        string `gcfg:"node-server-cert"`
 }
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
 type OVNKubernetesFeatureConfig struct {
 	EnableEgressIP       bool `gcfg:"enable-egress-ip"`
 	EnableEgressFirewall bool `gcfg:"enable-egress-firewall"`
+	EnableEgressQoS      bool `gcfg:"enable-egress-qos"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -650,6 +658,14 @@ var CommonFlags = []cli.Flag{
 		Destination: &cliConfig.Default.OpenFlowProbe,
 		Value:       Default.OpenFlowProbe,
 	},
+	&cli.IntFlag{
+		Name: "ofctrl-wait-before-clear",
+		Usage: "Maximum number of milliseconds that ovn-controller waits before " +
+			"clearing existing flows during start up, to make sure the initial flow " +
+			"compute is complete and avoid data plane interruptions.",
+		Destination: &cliConfig.Default.OfctrlWaitBeforeClear,
+		Value:       Default.OfctrlWaitBeforeClear,
+	},
 	&cli.BoolFlag{
 		Name: "monitor-all",
 		Usage: "Enable monitoring all data from SB DB instead of conditionally " +
@@ -834,6 +850,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressFirewall,
 		Value:       OVNKubernetesFeature.EnableEgressFirewall,
 	},
+	&cli.BoolFlag{
+		Name:        "enable-egress-qos",
+		Usage:       "Configure to use EgressQoS CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressQoS,
+		Value:       OVNKubernetesFeature.EnableEgressQoS,
+	},
 }
 
 // K8sFlags capture Kubernetes-related options
@@ -943,6 +965,16 @@ var MetricsFlags = []cli.Flag{
 		Usage:       "If true, then also accept pprof requests on the metrics port.",
 		Destination: &cliConfig.Metrics.EnablePprof,
 		Value:       Metrics.EnablePprof,
+	},
+	&cli.StringFlag{
+		Name:        "node-server-privkey",
+		Usage:       "Private key that the OVN node K8s metrics server uses to serve metrics over TLS.",
+		Destination: &cliConfig.Metrics.NodeServerPrivKey,
+	},
+	&cli.StringFlag{
+		Name:        "node-server-cert",
+		Usage:       "Certificate that the OVN node K8s metrics server uses to serve metrics over TLS.",
+		Destination: &cliConfig.Metrics.NodeServerCert,
 	},
 }
 

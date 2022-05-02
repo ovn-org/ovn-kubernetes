@@ -65,18 +65,43 @@ type TableMonitor struct {
 	Condition model.Condition
 	// Fields are the fields in the model to monitor
 	// If none are supplied, all fields will be used
-	Fields []interface{}
+	Fields []string
+}
+
+func fieldsAsStrings(dbModel model.DatabaseModel, m model.Model, fields []interface{}) ([]string, error) {
+	var columns []string
+
+	if len(fields) == 0 {
+		return columns, nil
+	}
+	data, err := dbModel.NewModelInfo(m)
+	if err != nil {
+		return nil, fmt.Errorf("unable to obtain info from model %v: %v", m, err)
+	}
+	for _, f := range fields {
+		column, err := data.ColumnByPtr(f)
+		if err != nil {
+			return nil, fmt.Errorf("unable to obtain column from model %v: %v", data, err)
+		}
+		columns = append(columns, column)
+	}
+	return columns, nil
 }
 
 func WithTable(m model.Model, fields ...interface{}) MonitorOption {
 	return func(o *ovsdbClient, monitor *Monitor) error {
-		tableName := o.primaryDB().model.FindTable(reflect.TypeOf(m))
+		dbModel := o.primaryDB().model
+		tableName := dbModel.FindTable(reflect.TypeOf(m))
 		if tableName == "" {
 			return fmt.Errorf("object of type %s is not part of the ClientDBModel", reflect.TypeOf(m))
 		}
+		fieldsStr, err := fieldsAsStrings(dbModel, m, fields)
+		if err != nil {
+			return err
+		}
 		tableMonitor := TableMonitor{
 			Table:  tableName,
-			Fields: fields,
+			Fields: fieldsStr,
 		}
 		monitor.Tables = append(monitor.Tables, tableMonitor)
 		return nil
@@ -85,14 +110,19 @@ func WithTable(m model.Model, fields ...interface{}) MonitorOption {
 
 func WithConditionalTable(m model.Model, condition model.Condition, fields ...interface{}) MonitorOption {
 	return func(o *ovsdbClient, monitor *Monitor) error {
-		tableName := o.primaryDB().model.FindTable(reflect.TypeOf(m))
+		dbModel := o.primaryDB().model
+		tableName := dbModel.FindTable(reflect.TypeOf(m))
 		if tableName == "" {
 			return fmt.Errorf("object of type %s is not part of the ClientDBModel", reflect.TypeOf(m))
+		}
+		fieldsStr, err := fieldsAsStrings(dbModel, m, fields)
+		if err != nil {
+			return err
 		}
 		tableMonitor := TableMonitor{
 			Table:     tableName,
 			Condition: condition,
-			Fields:    fields,
+			Fields:    fieldsStr,
 		}
 		monitor.Tables = append(monitor.Tables, tableMonitor)
 		return nil

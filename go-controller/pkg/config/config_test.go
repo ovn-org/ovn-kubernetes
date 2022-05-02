@@ -154,6 +154,8 @@ bind-address=1.1.1.1:8080
 ovn-metrics-bind-address=1.1.1.2:8081
 export-ovs-metrics=true
 enable-pprof=true
+node-server-privkey=/path/to/node-metrics-private.key
+node-server-cert=/path/to/node-metrics.crt
 
 [logging]
 loglevel=5
@@ -278,6 +280,8 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Kubernetes.APIServer).To(gomega.Equal(DefaultAPIServer))
 			gomega.Expect(Kubernetes.RawServiceCIDRs).To(gomega.Equal("172.16.1.0/24"))
 			gomega.Expect(Kubernetes.RawNoHostSubnetNodes).To(gomega.Equal(""))
+			gomega.Expect(Metrics.NodeServerPrivKey).To(gomega.Equal(""))
+			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal(""))
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("10.128.0.0/14"), 23},
 			}))
@@ -561,6 +565,8 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Metrics.OVNMetricsBindAddress).To(gomega.Equal("1.1.1.2:8081"))
 			gomega.Expect(Metrics.ExportOVSMetrics).To(gomega.Equal(true))
 			gomega.Expect(Metrics.EnablePprof).To(gomega.Equal(true))
+			gomega.Expect(Metrics.NodeServerPrivKey).To(gomega.Equal("/path/to/node-metrics-private.key"))
+			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal("/path/to/node-metrics.crt"))
 
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeSSL))
 			gomega.Expect(OvnNorth.PrivKey).To(gomega.Equal("/path/to/nb-client-private.key"))
@@ -640,6 +646,8 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Metrics.OVNMetricsBindAddress).To(gomega.Equal("2.2.2.3:8081"))
 			gomega.Expect(Metrics.ExportOVSMetrics).To(gomega.Equal(true))
 			gomega.Expect(Metrics.EnablePprof).To(gomega.Equal(true))
+			gomega.Expect(Metrics.NodeServerPrivKey).To(gomega.Equal("/tls/nodeprivkey"))
+			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal("/tls/nodecert"))
 
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeSSL))
 			gomega.Expect(OvnNorth.PrivKey).To(gomega.Equal("/client/privkey"))
@@ -666,6 +674,7 @@ var _ = Describe("Config Operations", func() {
 				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
 			gomega.Expect(Default.MonitorAll).To(gomega.BeFalse())
+			gomega.Expect(Default.OfctrlWaitBeforeClear).To(gomega.Equal(5000))
 
 			return nil
 		}
@@ -699,6 +708,8 @@ var _ = Describe("Config Operations", func() {
 			"-sb-client-cert=/client/cert2",
 			"-sb-client-cacert=/client/cacert2",
 			"-sb-cert-common-name=testsbcommonname",
+			"-node-server-privkey=/tls/nodeprivkey",
+			"-node-server-cert=/tls/nodecert",
 			"-gateway-mode=shared",
 			"-nodeport",
 			"-gateway-v4-join-subnet=100.63.0.0/16",
@@ -711,6 +722,7 @@ var _ = Describe("Config Operations", func() {
 			"-ovn-metrics-bind-address=2.2.2.3:8081",
 			"-export-ovs-metrics=false",
 			"-metrics-enable-pprof=false",
+			"-ofctrl-wait-before-clear=5000",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())

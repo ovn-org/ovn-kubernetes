@@ -31,18 +31,15 @@ import (
 type Interface interface {
 	Allocate(net.IP) error
 	AllocateNext() (net.IP, error)
-	Release(net.IP) error
+	Release(net.IP)
 	ForEach(func(net.IP))
 	CIDR() net.IPNet
-
-	// For testing
 	Has(ip net.IP) bool
 }
 
 var (
-	ErrFull              = errors.New("range is full")
-	ErrAllocated         = errors.New("provided IP is already allocated")
-	ErrMismatchedNetwork = errors.New("the provided network does not match the current range")
+	ErrFull      = errors.New("range is full")
+	ErrAllocated = errors.New("provided IP is already allocated")
 )
 
 type ErrNotInRange struct {
@@ -109,7 +106,7 @@ func NewAllocatorCIDRRange(cidr *net.IPNet, allocatorFactory allocator.Allocator
 	return &r, err
 }
 
-// Helper that wraps NewAllocatorCIDRRange, for creating a range backed by an in-memory store.
+// NewCIDRRange is a helper that wraps NewAllocatorCIDRRange, for creating a range backed by an in-memory store.
 func NewCIDRRange(cidr *net.IPNet) (*Range, error) {
 	return NewAllocatorCIDRRange(cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
 		return allocator.NewAllocationMap(max, rangeSpec), nil
@@ -174,13 +171,13 @@ func (r *Range) AllocateNext() (net.IP, error) {
 // Release releases the IP back to the pool. Releasing an
 // unallocated IP or an IP out of the range is a no-op and
 // returns no error.
-func (r *Range) Release(ip net.IP) error {
+func (r *Range) Release(ip net.IP) {
 	ok, offset := r.contains(ip)
 	if !ok {
-		return nil
+		return
 	}
 
-	return r.alloc.Release(offset)
+	r.alloc.Release(offset)
 }
 
 // ForEach calls the provided function for each allocated IP.

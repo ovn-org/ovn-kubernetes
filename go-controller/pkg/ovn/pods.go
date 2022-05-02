@@ -22,7 +22,10 @@ import (
 )
 
 func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
-	// get the list of logical switch ports (equivalent to pods)
+	// get the list of logical switch ports (equivalent to pods). Reserve all existing Pod IPs to
+	// avoid subsequent new Pods getting the same duplicate Pod IP.
+	//
+	// TBD: Before this succeeds, add Pod handler should not continue to allocate IPs for the new Pods.
 	expectedLogicalPorts := make(map[string]bool)
 	for _, podInterface := range pods {
 		pod, ok := podInterface.(*kapi.Pod)
@@ -30,7 +33,7 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 			return fmt.Errorf("spurious object in syncPods: %v", podInterface)
 		}
 		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations)
-		if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && err == nil {
+		if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && !util.PodCompleted(pod) && err == nil {
 			// skip nodes that are not running ovnk (inferred from host subnets)
 			if oc.lsManager.IsNonHostSubnetSwitch(pod.Spec.NodeName) {
 				continue
@@ -120,12 +123,53 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 		podIfAddrs = portInfo.ips
 	}
 
-	var allOps, ops []ovsdb.Operation
-	if ops, err = oc.deletePodFromNamespace(pod.Namespace, podIfAddrs, portUUID); err != nil {
-		return fmt.Errorf("unable to delete pod %s from namespace: %w", podDesc, err)
-	}
-	allOps = append(allOps, ops...)
+	shouldRelease := true
+	// check to make sure no other pods are using this IP before we try to release it if this is a completed pod.
+	if util.PodCompleted(pod) {
+		if shouldRelease, err = oc.lsManager.ConditionalIPRelease(pod.Spec.NodeName, podIfAddrs, func() (bool, error) {
+			pods, err := oc.watchFactory.GetAllPods()
+			if err != nil {
+				return false, fmt.Errorf("unable to get pods to determine if completed pod IP is in use by another pod. "+
+					"Will not release pod %s/%s IP: %#v from allocator", pod.Namespace, pod.Name, podIfAddrs)
+			}
+			// iterate through all pods, ignore pods on other nodes
+			for _, p := range pods {
+				if util.PodCompleted(p) || !util.PodWantsNetwork(p) || !util.PodScheduled(p) || p.Spec.NodeName != pod.Spec.NodeName {
+					continue
+				}
+				// check if the pod addresses match in the OVN annotation
+				pAddrs, err := util.GetAllPodIPs(p)
+				if err != nil {
+					continue
+				}
 
+				for _, pAddr := range pAddrs {
+					for _, podAddr := range podIfAddrs {
+						if pAddr.Equal(podAddr.IP) {
+							klog.Infof("Will not release IP address: %s for pod %s/%s. Detected another pod"+
+								" using this IP: %s/%s", pAddr.String(), pod.Namespace, pod.Name, p.Namespace, p.Name)
+							return false, nil
+						}
+					}
+				}
+			}
+			klog.Infof("Releasing IPs for Completed pod: %s/%s, ips: %s", pod.Namespace, pod.Name,
+				util.JoinIPNetIPs(podIfAddrs, " "))
+			return true, nil
+		}); err != nil {
+			return fmt.Errorf("cannot determine if IPs are safe to release for completed pod: %s: %w", podDesc, err)
+		}
+	}
+
+	var allOps, ops []ovsdb.Operation
+
+	// if the ip is in use by another pod we should not try to remove it from the address set
+	if shouldRelease {
+		if ops, err = oc.deletePodFromNamespace(pod.Namespace, podIfAddrs, portUUID); err != nil {
+			return fmt.Errorf("unable to delete pod %s from namespace: %w", podDesc, err)
+		}
+		allOps = append(allOps, ops...)
+	}
 	ops, err = oc.delLSPOps(logicalPort, pod.Spec.NodeName, portUUID)
 	if err != nil {
 		return fmt.Errorf("failed to create delete ops for the lsp: %s: %s", logicalPort, err)
@@ -137,10 +181,9 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 		return fmt.Errorf("cannot delete logical switch port %s, %v", logicalPort, err)
 	}
 
-	klog.Infof("Attempting to release IPs for pod: %s/%s, ips: %s", pod.Namespace, pod.Name,
-		util.JoinIPNetIPs(podIfAddrs, " "))
-	if err := oc.lsManager.ReleaseIPs(pod.Spec.NodeName, podIfAddrs); err != nil {
-		return fmt.Errorf("cannot release IPs for pod %s: %w", podDesc, err)
+	// do not remove SNATs/GW routes/IPAM for an IP address unless we have validated no other pod is using it
+	if !shouldRelease {
+		return nil
 	}
 
 	if config.Gateway.DisableSNATMultipleGWs {
@@ -151,6 +194,16 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 	podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
 	if err := oc.deleteGWRoutesForPod(podNsName, podIfAddrs); err != nil {
 		return fmt.Errorf("cannot delete GW Routes for pod %s: %w", podDesc, err)
+	}
+
+	// Releasing IPs needs to happen last so that we can deterministically know that if delete failed that
+	// the IP of the pod needs to be released. Otherwise we could have a completed pod failed to be removed
+	// and we dont know if the IP was released or not, and subsequently could accidentally release the IP
+	// while it is now on another pod
+	klog.Infof("Attempting to release IPs for pod: %s/%s, ips: %s", pod.Namespace, pod.Name,
+		util.JoinIPNetIPs(podIfAddrs, " "))
+	if err := oc.lsManager.ReleaseIPs(pod.Spec.NodeName, podIfAddrs); err != nil {
+		return fmt.Errorf("cannot release IPs for pod %s: %w", podDesc, err)
 	}
 
 	return nil

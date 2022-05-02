@@ -228,6 +228,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-openflow-probe-interval=%d "+
 						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-monitor-all=true "+
+						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=true",
 						nodeIP, interval, ofintval, nodeName),
 				})
@@ -288,6 +289,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-openflow-probe-interval=%d "+
 						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-monitor-all=true "+
+						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=true",
 						nodeIP, interval, ofintval, nodeName),
 				})
@@ -297,12 +299,12 @@ var _ = Describe("Node", func() {
 					Output: chassisUUID,
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 --data=bare --no-heading --columns=_uuid find "+
+					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 --no-leader-only --data=bare --no-heading --columns=_uuid find "+
 						"Encap chassis_name=%s", chassisUUID),
 					Output: encapUUID,
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 set encap "+
+					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 --no-leader-only set encap "+
 						"%s options:dst_port=%d", encapUUID, encapPort),
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -361,6 +363,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-openflow-probe-interval=%d "+
 						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-monitor-all=true "+
+						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=false "+
 						"external_ids:ovn-limit-lflow-cache=1000 "+
 						"external_ids:ovn-limit-lflow-cache-kb=100000",
@@ -426,6 +429,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-openflow-probe-interval=%d "+
 						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-monitor-all=true "+
+						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=true",
 						nodeIP, interval, ofintval, nodeName),
 				})
@@ -497,6 +501,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-openflow-probe-interval=%d "+
 						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-monitor-all=true "+
+						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=true",
 						nodeIP, interval, ofintval, nodeName),
 				})
@@ -568,6 +573,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-openflow-probe-interval=%d "+
 						"external_ids:hostname=\"%s\" "+
 						"external_ids:ovn-monitor-all=true "+
+						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=true",
 						nodeIP, interval, ofintval, nodeName),
 				})
