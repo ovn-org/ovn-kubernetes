@@ -28,13 +28,15 @@ var (
 )
 
 type OperationModelTestCase struct {
-	name        string
-	op          string
-	generateOp  func() []operationModel
-	initialDB   []libovsdbtest.TestData
-	expectedDB  []libovsdbtest.TestData
-	expectedRes [][]libovsdbtest.TestData
-	expectedErr error
+	name           string
+	op             string
+	generateOp     func() []operationModel
+	interleaveOp   bool
+	initialDB      []libovsdbtest.TestData
+	expectedDB     []libovsdbtest.TestData
+	expectedRes    [][]libovsdbtest.TestData
+	expectedOpsErr error
+	expectedTxnErr bool
 }
 
 func runTestCase(t *testing.T, tCase OperationModelTestCase) error {
@@ -52,19 +54,32 @@ func runTestCase(t *testing.T, tCase OperationModelTestCase) error {
 
 	opModels := tCase.generateOp()
 
+	ops := []ovsdb.Operation{}
 	switch tCase.op {
 	case "Lookup":
 		err = modelClient.Lookup(opModels...)
 	case "CreateOrUpdate":
-		_, err = modelClient.CreateOrUpdate(opModels...)
+		ops, err = modelClient.CreateOrUpdateOps(ops, opModels...)
 	case "Delete":
-		err = modelClient.Delete(opModels...)
+		ops, err = modelClient.DeleteOps(ops, opModels...)
 	default:
 		return fmt.Errorf("test \"%s\": unknown op %s", tCase.name, tCase.op)
 	}
 
-	if err != tCase.expectedErr {
-		return fmt.Errorf("test \"%s\": unexpected error generating %s operations, got %v, expected %v", tCase.name, tCase.op, err, tCase.expectedErr)
+	if err != tCase.expectedOpsErr {
+		return fmt.Errorf("test \"%s\": unexpected error generating %s operations, got %v, expected %v", tCase.name, tCase.op, err, tCase.expectedOpsErr)
+	}
+
+	if tCase.interleaveOp {
+		_, err = modelClient.CreateOrUpdate(opModels...)
+		if err != nil {
+			return fmt.Errorf("test \"%s\": unexpected error executing interleave operations: %v", tCase.name, err)
+		}
+	}
+
+	_, err = TransactAndCheck(nbClient, ops)
+	if err != nil && !tCase.expectedTxnErr {
+		return fmt.Errorf("test \"%s\": unexpected error transacting operations: %v", tCase.name, err)
 	}
 
 	var matcher types.GomegaMatcher
@@ -1152,7 +1167,7 @@ func TestLookup(t *testing.T) {
 					Addresses: []string{adressSetTestAdress},
 				},
 			},
-			expectedErr: client.ErrNotFound,
+			expectedOpsErr: client.ErrNotFound,
 		},
 		{
 			name: "Test lookup by index not found no error",
@@ -1257,7 +1272,7 @@ func TestLookup(t *testing.T) {
 					Addresses: []string{adressSetTestAdress},
 				},
 			},
-			expectedErr: client.ErrNotFound,
+			expectedOpsErr: client.ErrNotFound,
 		},
 		{
 			name: "Test lookup by predicate not found no error",
@@ -1303,7 +1318,7 @@ func TestLookup(t *testing.T) {
 					Addresses: []string{adressSetTestAdress},
 				},
 			},
-			expectedErr: client.ErrNotFound,
+			expectedOpsErr: client.ErrNotFound,
 		},
 		{
 			name: "Test lookup by predicate bulk op multiple results",
@@ -1367,7 +1382,7 @@ func TestLookup(t *testing.T) {
 					Addresses: []string{adressSetTestAdress + "-2"},
 				},
 			},
-			expectedErr: errMultipleResults,
+			expectedOpsErr: errMultipleResults,
 		},
 	}
 
@@ -1489,4 +1504,38 @@ func TestBuildMutationsFromFields(t *testing.T) {
 			t.Fatalf("%s: unexpected mutations, got: %+v expected: %+v", tCase.name, mutations, tCase.mutations)
 		}
 	}
+}
+
+func TestWaitForDuplicates(t *testing.T) {
+	tt := []OperationModelTestCase{
+		{
+			name: "Test non-root model transaction fails when duplicate",
+			op:   "CreateOrUpdate",
+			generateOp: func() []operationModel {
+				return []operationModel{
+					{
+						Model: &nbdb.LogicalSwitch{
+							Name: logicalSwitchTestName,
+						},
+					},
+				}
+			},
+			interleaveOp: true,
+			initialDB:    []libovsdbtest.TestData{},
+			expectedDB: []libovsdbtest.TestData{
+				&nbdb.LogicalSwitch{
+					UUID: logicalSwitchTestUUID,
+					Name: logicalSwitchTestName,
+				},
+			},
+			expectedTxnErr: true,
+		},
+	}
+
+	for _, tCase := range tt {
+		if err := runTestCase(t, tCase); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 }
