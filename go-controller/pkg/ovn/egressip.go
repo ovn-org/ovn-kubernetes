@@ -72,6 +72,9 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 	// empty selectors, matching everything, whereas we would mean the inverse
 	newNamespaceSelector, _ := metav1.LabelSelectorAsSelector(nil)
 	oldNamespaceSelector, _ := metav1.LabelSelectorAsSelector(nil)
+	// Initialize a sets.String which holds egress IPs that were not fully assigned
+	// but are allocated and they are meant to be removed.
+	staleEgressIPs := sets.NewString()
 	if old != nil {
 		oldEIP = old
 		oldNamespaceSelector, err = metav1.LabelSelectorAsSelector(&oldEIP.Spec.NamespaceSelector)
@@ -80,6 +83,7 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 		}
 		name = oldEIP.Name
 		status = oldEIP.Status.Items
+		staleEgressIPs.Insert(oldEIP.Spec.EgressIPs...)
 	}
 	if new != nil {
 		newEIP = new
@@ -89,6 +93,13 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 		}
 		name = newEIP.Name
 		status = newEIP.Status.Items
+		if staleEgressIPs.Len() > 0 {
+			for _, egressIP := range newEIP.Spec.EgressIPs {
+				if staleEgressIPs.Has(egressIP) {
+					staleEgressIPs.Delete(egressIP)
+				}
+			}
+		}
 	}
 
 	// We do not initialize a nothing selector for the podSelector, because
@@ -219,6 +230,23 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 		// performed and avoid incorrect future assignments due to a
 		// de-synchronized cache.
 		oc.addAllocatorEgressIPAssignments(name, statusToKeep)
+
+		// When egress IP is not fully assigned to a node, then statusToRemove may not
+		// have those entries, hence retrieve it from staleEgressIPs for removing
+		// the item from cloudprivateipconfig.
+		for _, toRemove := range statusToRemove {
+			if !staleEgressIPs.Has(toRemove.EgressIP) {
+				continue
+			}
+			staleEgressIPs.Delete(toRemove.EgressIP)
+		}
+		for staleEgressIP := range staleEgressIPs {
+			if oc.deleteAllocatorEgressIPAssignmentIfExists(name, staleEgressIP) {
+				statusToRemove = append(statusToRemove,
+					egressipv1.EgressIPStatusItem{EgressIP: staleEgressIP})
+			}
+		}
+
 		// Execute CloudPrivateIPConfig changes for assignments which need to be
 		// added/removed, assignments which don't change do not require any
 		// further setup.
@@ -998,6 +1026,20 @@ func (oc *Controller) addPodEgressIPAssignments(name string, statusAssignments [
 		podState.egressStatuses[status] = ""
 	}
 	return nil
+}
+
+// deleteAllocatorEgressIPAssignmentIfExists deletes egressIP config from node allocations map
+// if the entry is available and returns true, otherwise returns false.
+func (oc *Controller) deleteAllocatorEgressIPAssignmentIfExists(name, egressIP string) bool {
+	oc.eIPC.allocator.Lock()
+	defer oc.eIPC.allocator.Unlock()
+	for _, eNode := range oc.eIPC.allocator.cache {
+		if egressIPName, exists := eNode.allocations[egressIP]; exists && egressIPName == name {
+			delete(eNode.allocations, egressIP)
+			return true
+		}
+	}
+	return false
 }
 
 // deleteAllocatorEgressIPAssignments deletes the allocation as to keep the
