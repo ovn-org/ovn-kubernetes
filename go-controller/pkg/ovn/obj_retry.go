@@ -629,7 +629,7 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 		if err != nil {
 			return err
 		}
-		return oc.ensurePod(oldPod, newPod, objectsToRetry.checkRetryObj(newKey))
+		return oc.ensurePod(oldPod, newPod, objectsToRetry.checkRetryObj(newKey) || util.PodScheduled(oldPod) != util.PodScheduled(newPod))
 
 	case factory.NodeType:
 		newNode, ok := newObj.(*kapi.Node)
