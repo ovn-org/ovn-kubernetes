@@ -467,7 +467,6 @@ func (oc *Controller) recordErrorEvent(objType reflect.Type, obj interface{}, er
 	case factory.PodType:
 		klog.V(5).Infof("Recording error event on pod")
 		pod := obj.(*kapi.Pod)
-		oc.metricsRecorder.AddPod(pod.UID)
 		oc.recordPodEvent(err, pod)
 	}
 }
