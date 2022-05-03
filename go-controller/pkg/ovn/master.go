@@ -223,10 +223,10 @@ func (oc *Controller) StartClusterMaster() error {
 	metrics.RunTimestamp(oc.stopChan, oc.sbClient, oc.nbClient)
 	metrics.MonitorIPSec(oc.nbClient)
 	if config.Metrics.EnableConfigDuration {
-		// with k=20,
-		//  for a cluster with 10 nodes, measurement of 1 in every 200 requests
-		//  for a cluster with 100 nodes, measurement of 1 in every 2000 requests
-		metrics.GetConfigDurationRecorder().Run(oc.nbClient, oc.kube, 20, time.Second*5, oc.stopChan)
+		// with k=10,
+		//  for a cluster with 10 nodes, measurement of 1 in every 100 requests
+		//  for a cluster with 100 nodes, measurement of 1 in every 1000 requests
+		metrics.GetConfigDurationRecorder().Run(oc.nbClient, oc.kube, 10, time.Second*5, oc.stopChan)
 	}
 	oc.podRecorder.Run(oc.sbClient, oc.stopChan)
 
