@@ -467,7 +467,6 @@ func (oc *Controller) recordErrorEvent(objType reflect.Type, obj interface{}, er
 	case factory.PodType:
 		klog.V(5).Infof("Recording error event on pod")
 		pod := obj.(*kapi.Pod)
-		oc.metricsRecorder.AddPod(pod.UID)
 		oc.recordPodEvent(err, pod)
 	}
 }
@@ -630,7 +629,7 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 		if err != nil {
 			return err
 		}
-		return oc.ensurePod(oldPod, newPod, objectsToRetry.checkRetryObj(newKey))
+		return oc.ensurePod(oldPod, newPod, objectsToRetry.checkRetryObj(newKey) || util.PodScheduled(oldPod) != util.PodScheduled(newPod))
 
 	case factory.NodeType:
 		newNode, ok := newObj.(*kapi.Node)

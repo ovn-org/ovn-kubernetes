@@ -11,7 +11,8 @@ export KUBECONFIG=${HOME}/ovn.conf
 IPV6_SKIPPED_TESTS="Should be allowed by externalip services|\
 should provide connection to external host by DNS name from a pod|\
 Should validate flow data of br-int is sent to an external gateway with netflow v5|\
-test tainting a node according to its defaults interface MTU size"
+test tainting a node according to its defaults interface MTU size|\
+ipv4 pod"
 
 SKIPPED_TESTS=""
 
@@ -22,7 +23,7 @@ if [ "$KIND_IPV4_SUPPORT" == true ]; then
     else
 	# Skip sflow in IPv4 since it's a long test (~5 minutes)
 	# We're validating netflow v5 with an ipv4 cluster, sflow with an ipv6 cluster
-	SKIPPED_TESTS="Should validate flow data of br-int is sent to an external gateway with sflow"
+	SKIPPED_TESTS="Should validate flow data of br-int is sent to an external gateway with sflow|ipv6 pod"
     fi
 fi
 
