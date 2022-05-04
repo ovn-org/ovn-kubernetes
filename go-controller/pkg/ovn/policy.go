@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -299,10 +300,17 @@ func (oc *Controller) createDefaultDenyPGAndACLs(namespace, policy string, nsInf
 		return err
 	}
 
+	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.nbClient, "networkpolicy",
+		namespace, policy)
+	if err != nil {
+		klog.Errorf("Failed to record config duration: %v", err)
+	}
+	ops = append(ops, recordOps...)
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
 		return err
 	}
+	txOkCallBack()
 
 	nsInfo.portGroupEgressDenyName = egressPGName
 	nsInfo.portGroupIngressDenyName = ingressPGName
@@ -1106,11 +1114,19 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 		return fmt.Errorf("failed to create ops to add port to a port group: %v", err)
 	}
 
+	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.nbClient, "networkpolicy",
+		policy.Namespace, policy.Name)
+	if err != nil {
+		klog.Errorf("Failed to record config duration: %v", err)
+	}
+	ops = append(ops, recordOps...)
+
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
 		oc.processLocalPodSelectorDelPods(np, selectedPods...)
 		return fmt.Errorf("failed to run ovsdb txn to add ports to port group: %v", err)
 	}
+	txOkCallBack()
 	np.created = true
 	return nil
 }
@@ -1301,11 +1317,19 @@ func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, lastPolicy bool) e
 			" error: %v", np.namespace, np.name, np.portGroupName, err)
 	}
 
+	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.nbClient, "networkpolicy",
+		np.policy.Namespace, np.policy.Name)
+	if err != nil {
+		klog.Errorf("Failed to record config duration: %v", err)
+	}
+	ops = append(ops, recordOps...)
+
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
 		return fmt.Errorf("failed to execute ovsdb txn to delete network policy: %s/%s, error: %v",
 			np.namespace, np.name, err)
 	}
+	txOkCallBack()
 
 	// Delete ingress/egress address sets
 	for _, policy := range np.ingressPolicies {

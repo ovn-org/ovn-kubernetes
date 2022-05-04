@@ -316,6 +316,9 @@ type MetricsConfig struct {
 	EnablePprof           bool   `gcfg:"enable-pprof"`
 	NodeServerPrivKey     string `gcfg:"node-server-privkey"`
 	NodeServerCert        string `gcfg:"node-server-cert"`
+	// EnableConfigDuration holds the boolean flag to enable OVN-Kubernetes master to monitor OVN-Kubernetes master
+	// configuration duration and optionally, its application to all nodes
+	EnableConfigDuration bool `gcfg:"enable-config-duration"`
 }
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
@@ -975,6 +978,11 @@ var MetricsFlags = []cli.Flag{
 		Name:        "node-server-cert",
 		Usage:       "Certificate that the OVN node K8s metrics server uses to serve metrics over TLS.",
 		Destination: &cliConfig.Metrics.NodeServerCert,
+	},
+	&cli.BoolFlag{
+		Name:        "metrics-enable-config-duration",
+		Usage:       "Enables monitoring OVN-Kubernetes master and OVN configuration duration",
+		Destination: &cliConfig.Metrics.EnableConfigDuration,
 	},
 }
 

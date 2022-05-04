@@ -577,6 +577,7 @@ create_ovn_kube_manifests() {
     --ovn-loglevel-nb="${OVN_LOG_LEVEL_NB}" \
     --ovn-loglevel-sb="${OVN_LOG_LEVEL_SB}" \
     --ovn-loglevel-controller="${OVN_LOG_LEVEL_CONTROLLER}" \
+    --ovnkube-config-duration-enable=true \
     --egress-ip-enable=true \
     --egress-firewall-enable=true \
     --egress-qos-enable=true \
