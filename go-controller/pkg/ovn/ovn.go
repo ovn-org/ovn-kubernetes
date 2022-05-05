@@ -11,11 +11,9 @@ import (
 	"time"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -209,8 +207,18 @@ type Controller struct {
 	// Objects for egress firewall that need to be retried
 	retryEgressFirewalls *retryObjs
 
+	// Objects for egress IP that need to be retried
+	retryEgressIPs *retryObjs
+	// Objects for egress IP Namespaces that need to be retried
+	retryEgressIPNamespaces *retryObjs
+	// Objects for egress IP Pods that need to be retried
+	retryEgressIPPods *retryObjs
+	// Objects for Egress nodes that need to be retried
+	retryEgressNodes *retryObjs
 	// Objects for nodes that need to be retried
 	retryNodes *retryObjs
+	// Objects for Cloud private IP config that need to be retried
+	retryCloudPrivateIPConfig *retryObjs
 	// Node-specific syncMap used by node event handler
 	gatewaysFailed              sync.Map
 	mgmtPortFailed              sync.Map
@@ -290,21 +298,26 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			nbClient:                          libovsdbOvnNBClient,
 			watchFactory:                      wf,
 		},
-		loadbalancerClusterCache: make(map[kapi.Protocol]string),
-		multicastSupport:         config.EnableMulticast,
-		loadBalancerGroupUUID:    "",
-		aclLoggingEnabled:        true,
-		joinSwIPManager:          nil,
-		retryPods:                NewRetryObjs(factory.PodType, "", nil, nil, nil),
-		retryNetworkPolicies:     NewRetryObjs(factory.PolicyType, "", nil, nil, nil),
-		retryNodes:               NewRetryObjs(factory.NodeType, "", nil, nil, nil),
-		retryEgressFirewalls:     NewRetryObjs(factory.EgressFirewallType, "", nil, nil, nil),
-		recorder:                 recorder,
-		nbClient:                 libovsdbOvnNBClient,
-		sbClient:                 libovsdbOvnSBClient,
-		svcController:            svcController,
-		svcFactory:               svcFactory,
-		podRecorder:              metrics.NewPodRecorder(),
+		loadbalancerClusterCache:  make(map[kapi.Protocol]string),
+		multicastSupport:          config.EnableMulticast,
+		loadBalancerGroupUUID:     "",
+		aclLoggingEnabled:         true,
+		joinSwIPManager:           nil,
+		retryPods:                 NewRetryObjs(factory.PodType, "", nil, nil, nil),
+		retryNetworkPolicies:      NewRetryObjs(factory.PolicyType, "", nil, nil, nil),
+		retryNodes:                NewRetryObjs(factory.NodeType, "", nil, nil, nil),
+		retryEgressFirewalls:      NewRetryObjs(factory.EgressFirewallType, "", nil, nil, nil),
+		retryEgressIPs:            NewRetryObjs(factory.EgressIPType, "", nil, nil, nil),
+		retryEgressIPNamespaces:   NewRetryObjs(factory.EgressIPNamespaceType, "", nil, nil, nil),
+		retryEgressIPPods:         NewRetryObjs(factory.EgressIPPodType, "", nil, nil, nil),
+		retryEgressNodes:          NewRetryObjs(factory.EgressNodeType, "", nil, nil, nil),
+		retryCloudPrivateIPConfig: NewRetryObjs(factory.CloudPrivateIPConfigType, "", nil, nil, nil),
+		recorder:                  recorder,
+		nbClient:                  libovsdbOvnNBClient,
+		sbClient:                  libovsdbOvnSBClient,
+		svcController:             svcController,
+		svcFactory:                svcFactory,
+		podRecorder:               metrics.NewPodRecorder(),
 	}
 }
 
@@ -563,133 +576,14 @@ func (oc *Controller) WatchEgressFirewall() error {
 // WatchEgressNodes starts the watching of egress assignable nodes and calls
 // back the appropriate handler logic.
 func (oc *Controller) WatchEgressNodes() error {
-	nodeEgressLabel := util.GetNodeEgressLabel()
-	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			node := obj.(*kapi.Node)
-			if err := oc.addNodeForEgress(node); err != nil {
-				klog.Error(err)
-			}
-			nodeLabels := node.GetLabels()
-			_, hasEgressLabel := nodeLabels[nodeEgressLabel]
-			if hasEgressLabel {
-				oc.setNodeEgressAssignable(node.Name, true)
-			}
-			isReady := oc.isEgressNodeReady(node)
-			if isReady {
-				oc.setNodeEgressReady(node.Name, true)
-			}
-			isReachable := oc.isEgressNodeReachable(node)
-			if isReachable {
-				oc.setNodeEgressReachable(node.Name, true)
-			}
-			if hasEgressLabel && isReachable && isReady {
-				if err := oc.addEgressNode(node); err != nil {
-					klog.Error(err)
-				}
-			}
-		},
-		UpdateFunc: func(old, new interface{}) {
-			oldNode := old.(*kapi.Node)
-			newNode := new.(*kapi.Node)
-			// Initialize the allocator on every update,
-			// ovnkube-node/cloud-network-config-controller will make sure to
-			// annotate the node with the egressIPConfig, but that might have
-			// happened after we processed the ADD for that object, hence keep
-			// retrying for all UPDATEs.
-			if err := oc.initEgressIPAllocator(newNode); err != nil {
-				klog.V(5).Infof("Egress node initialization error: %v", err)
-			}
-			oldLabels := oldNode.GetLabels()
-			newLabels := newNode.GetLabels()
-			_, oldHadEgressLabel := oldLabels[nodeEgressLabel]
-			_, newHasEgressLabel := newLabels[nodeEgressLabel]
-			// If the node is not labelled for egress assignment, just return
-			// directly, we don't really need to set the ready / reachable
-			// status on this node if the user doesn't care about using it.
-			if !oldHadEgressLabel && !newHasEgressLabel {
-				return
-			}
-			if oldHadEgressLabel && !newHasEgressLabel {
-				klog.Infof("Node: %s has been un-labelled, deleting it from egress assignment", newNode.Name)
-				oc.setNodeEgressAssignable(oldNode.Name, false)
-				if err := oc.deleteEgressNode(oldNode); err != nil {
-					klog.Error(err)
-				}
-				return
-			}
-			isOldReady := oc.isEgressNodeReady(oldNode)
-			isNewReady := oc.isEgressNodeReady(newNode)
-			isNewReachable := oc.isEgressNodeReachable(newNode)
-			oc.setNodeEgressReady(newNode.Name, isNewReady)
-			oc.setNodeEgressReachable(newNode.Name, isNewReachable)
-			if !oldHadEgressLabel && newHasEgressLabel {
-				klog.Infof("Node: %s has been labelled, adding it for egress assignment", newNode.Name)
-				oc.setNodeEgressAssignable(newNode.Name, true)
-				if isNewReady && isNewReachable {
-					if err := oc.addEgressNode(newNode); err != nil {
-						klog.Error(err)
-					}
-				} else {
-					klog.Warningf("Node: %s has been labelled, but node is not ready and reachable, cannot use it for egress assignment", newNode.Name)
-				}
-				return
-			}
-			if isOldReady == isNewReady {
-				return
-			}
-			if !isNewReady {
-				klog.Warningf("Node: %s is not ready, deleting it from egress assignment", newNode.Name)
-				if err := oc.deleteEgressNode(newNode); err != nil {
-					klog.Error(err)
-				}
-			} else if isNewReady && isNewReachable {
-				klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
-				if err := oc.addEgressNode(newNode); err != nil {
-					klog.Error(err)
-				}
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			node := obj.(*kapi.Node)
-			if err := oc.deleteNodeForEgress(node); err != nil {
-				klog.Error(err)
-			}
-			nodeLabels := node.GetLabels()
-			if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel {
-				if err := oc.deleteEgressNode(node); err != nil {
-					klog.Error(err)
-				}
-			}
-		},
-	}, oc.initClusterEgressPolicies)
+	_, err := oc.WatchResource(oc.retryEgressNodes)
 	return err
 }
 
 // WatchCloudPrivateIPConfig starts the watching of cloudprivateipconfigs
 // resource and calls back the appropriate handler logic.
 func (oc *Controller) WatchCloudPrivateIPConfig() error {
-	_, err := oc.watchFactory.AddCloudPrivateIPConfigHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
-			if err := oc.reconcileCloudPrivateIPConfig(nil, cloudPrivateIPConfig); err != nil {
-				klog.Errorf("Unable to add CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfig.Name, err)
-			}
-		},
-		UpdateFunc: func(old, new interface{}) {
-			oldCloudPrivateIPConfig := old.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
-			newCloudPrivateIPConfig := new.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
-			if err := oc.reconcileCloudPrivateIPConfig(oldCloudPrivateIPConfig, newCloudPrivateIPConfig); err != nil {
-				klog.Errorf("Unable to update CloudPrivateIPConfig: %s, err: %v", newCloudPrivateIPConfig.Name, err)
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
-			if err := oc.reconcileCloudPrivateIPConfig(cloudPrivateIPConfig, nil); err != nil {
-				klog.Errorf("Unable to delete CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfig.Name, err)
-			}
-		},
-	}, nil)
+	_, err := oc.WatchResource(oc.retryCloudPrivateIPConfig)
 	return err
 }
 
@@ -697,84 +591,17 @@ func (oc *Controller) WatchCloudPrivateIPConfig() error {
 // appropriate handler logic. It also initiates the other dedicated resource
 // handlers for egress IP setup: namespaces, pods.
 func (oc *Controller) WatchEgressIP() error {
-	_, err := oc.watchFactory.AddEgressIPHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			eIP := obj.(*egressipv1.EgressIP)
-			if err := oc.reconcileEgressIP(nil, eIP); err != nil {
-				klog.Errorf("Unable to add EgressIP: %s, err: %v", eIP.Name, err)
-			}
-		},
-		UpdateFunc: func(old, new interface{}) {
-			oldEIP := old.(*egressipv1.EgressIP)
-			newEIP := new.(*egressipv1.EgressIP)
-			if err := oc.reconcileEgressIP(oldEIP, newEIP); err != nil {
-				klog.Errorf("Unable to update EgressIP: %s, err: %v", newEIP.Name, err)
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			eIP := obj.(*egressipv1.EgressIP)
-			if err := oc.reconcileEgressIP(eIP, nil); err != nil {
-				klog.Errorf("Unable to delete EgressIP: %s, err: %v", eIP.Name, err)
-			}
-		},
-	}, oc.syncEgressIPs)
+	_, err := oc.WatchResource(oc.retryEgressIPs)
 	return err
 }
 
 func (oc *Controller) WatchEgressIPNamespaces() error {
-	_, err := oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			namespace := obj.(*kapi.Namespace)
-			if err := oc.reconcileEgressIPNamespace(nil, namespace); err != nil {
-				klog.Errorf("Unable to add egress IP matching namespace: %s, err: %v", namespace.Name, err)
-			}
-		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			oldNamespace := oldObj.(*kapi.Namespace)
-			newNamespace := newObj.(*kapi.Namespace)
-			if err := oc.reconcileEgressIPNamespace(oldNamespace, newNamespace); err != nil {
-				klog.Errorf("Unable to update egress IP matching namespace: %s, err: %v", newNamespace.Name, err)
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			namespace := obj.(*kapi.Namespace)
-			if err := oc.reconcileEgressIPNamespace(namespace, nil); err != nil {
-				klog.Errorf("Unable to delete egress IP matching namespace: %s, err: %v", namespace.Name, err)
-			}
-		},
-	}, nil)
+	_, err := oc.WatchResource(oc.retryEgressIPNamespaces)
 	return err
 }
 
 func (oc *Controller) WatchEgressIPPods() error {
-	_, err := oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			pod := obj.(*kapi.Pod)
-			if err := oc.reconcileEgressIPPod(nil, pod); err != nil {
-				klog.Errorf("Unable to add egress IP matching pod: %s/%s, err: %v", pod.Name, pod.Namespace, err)
-			}
-		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			oldPod := oldObj.(*kapi.Pod)
-			newPod := newObj.(*kapi.Pod)
-			if util.PodCompleted(newPod) {
-				if err := oc.reconcileEgressIPPod(oldPod, nil); err != nil {
-					klog.Errorf("Unable to delete egress IP matching completed pod: %s/%s, err: %v",
-						oldPod.Name, oldPod.Namespace, err)
-				}
-			} else {
-				if err := oc.reconcileEgressIPPod(oldPod, newPod); err != nil {
-					klog.Errorf("Unable to update egress IP matching pod: %s/%s, err: %v", newPod.Name, newPod.Namespace, err)
-				}
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			pod := obj.(*kapi.Pod)
-			if err := oc.reconcileEgressIPPod(pod, nil); err != nil {
-				klog.Errorf("Unable to delete egress IP matching pod: %s/%s, err: %v", pod.Name, pod.Namespace, err)
-			}
-		},
-	}, nil)
+	_, err := oc.WatchResource(oc.retryEgressIPPods)
 	return err
 }
 

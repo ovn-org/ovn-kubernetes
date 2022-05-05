@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	"math/rand"
 	"net"
 	"reflect"
@@ -19,6 +20,7 @@ import (
 	"k8s.io/klog/v2"
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	factory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -103,6 +105,21 @@ func (r *retryObjs) initRetryObjWithAdd(obj interface{}, key string) {
 		entry.newObj = obj
 	} else {
 		r.entries[key] = &retryObjEntry{newObj: obj,
+			timeStamp: time.Now(), backoffSec: 1, ignore: true}
+	}
+}
+
+// initRetryObjWithUpdate tracks objects that failed to be updated to potentially retry later
+// initially it is marked as skipped for retry loop (ignore = true)
+func (r *retryObjs) initRetryObjWithUpdate(oldObj, newObj interface{}, key string) {
+	r.retryMutex.Lock()
+	defer r.retryMutex.Unlock()
+	if entry, ok := r.entries[key]; ok {
+		entry.timeStamp = time.Now()
+		entry.newObj = newObj
+		entry.config = oldObj
+	} else {
+		r.entries[key] = &retryObjEntry{newObj: newObj, config: oldObj,
 			timeStamp: time.Now(), backoffSec: 1, ignore: true}
 	}
 }
@@ -228,6 +245,11 @@ func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 		factory.NodeType,
 		factory.PeerPodSelectorType,
 		factory.PeerPodForNamespaceAndPodSelectorType,
+		factory.EgressIPType,
+		factory.EgressIPNamespaceType,
+		factory.EgressIPPodType,
+		factory.EgressNodeType,
+		factory.CloudPrivateIPConfigType,
 		factory.LocalPodSelectorType:
 		return true
 	}
@@ -286,6 +308,7 @@ func areResourcesEqual(objType reflect.Type, obj1, obj2 interface{}) (bool, erro
 		return areEqual, nil
 
 	case factory.PodType,
+		factory.EgressIPPodType,
 		factory.PeerPodSelectorType,
 		factory.PeerPodForNamespaceAndPodSelectorType,
 		factory.LocalPodSelectorType:
@@ -300,15 +323,23 @@ func areResourcesEqual(objType reflect.Type, obj1, obj2 interface{}) (bool, erro
 		return true, nil
 
 	case factory.EgressFirewallType:
-		newEgressFirewall, ok := obj1.(*egressfirewall.EgressFirewall)
+		oldEgressFirewall, ok := obj1.(*egressfirewall.EgressFirewall)
 		if !ok {
 			return false, fmt.Errorf("could not cast obj1 of type %T to *egressfirewall.EgressFirewall", obj1)
 		}
-		oldEgressFirewall, ok := obj2.(*egressfirewall.EgressFirewall)
+		newEgressFirewall, ok := obj2.(*egressfirewall.EgressFirewall)
 		if !ok {
 			return false, fmt.Errorf("could not cast obj2 of type %T to *egressfirewall.EgressFirewall", obj2)
 		}
 		return reflect.DeepEqual(oldEgressFirewall.Spec, newEgressFirewall.Spec), nil
+
+	case factory.EgressIPType,
+		factory.EgressIPNamespaceType,
+		factory.EgressNodeType,
+		factory.CloudPrivateIPConfigType:
+		// force update path for EgressIP resource.
+		return false, nil
+
 	}
 
 	return false, fmt.Errorf("no object comparison for type %v", objType)
@@ -326,7 +357,8 @@ func getResourceKey(objType reflect.Type, obj interface{}) (string, error) {
 		}
 		return getPolicyNamespacedName(np), nil
 
-	case factory.NodeType:
+	case factory.NodeType,
+		factory.EgressNodeType:
 		node, ok := obj.(*kapi.Node)
 		if !ok {
 			return "", fmt.Errorf("could not cast %T object to *kapi.Node", obj)
@@ -343,7 +375,8 @@ func getResourceKey(objType reflect.Type, obj interface{}) (string, error) {
 	case factory.PodType,
 		factory.PeerPodSelectorType,
 		factory.PeerPodForNamespaceAndPodSelectorType,
-		factory.LocalPodSelectorType:
+		factory.LocalPodSelectorType,
+		factory.EgressIPPodType:
 		pod, ok := obj.(*kapi.Pod)
 		if !ok {
 			return "", fmt.Errorf("could not cast %T object to *kapi.Pod", obj)
@@ -351,7 +384,8 @@ func getResourceKey(objType reflect.Type, obj interface{}) (string, error) {
 		return getNamespacedName(pod.Namespace, pod.Name), nil
 
 	case factory.PeerNamespaceAndPodSelectorType,
-		factory.PeerNamespaceSelectorType:
+		factory.PeerNamespaceSelectorType,
+		factory.EgressIPNamespaceType:
 		namespace, ok := obj.(*kapi.Namespace)
 		if !ok {
 			return "", fmt.Errorf("could not cast %T object to *kapi.Namespace", obj)
@@ -364,6 +398,19 @@ func getResourceKey(objType reflect.Type, obj interface{}) (string, error) {
 			return "", fmt.Errorf("could not cast %T object to *egressfirewall.EgressFirewall", obj)
 		}
 		return getEgressFirewallNamespacedName(egressFirewall), nil
+
+	case factory.EgressIPType:
+		eIP, ok := obj.(*egressipv1.EgressIP)
+		if !ok {
+			return "", fmt.Errorf("could not cast %T object to *egressipv1.EgressIP", obj)
+		}
+		return eIP.Name, nil
+	case factory.CloudPrivateIPConfigType:
+		cloudPrivateIPConfig, ok := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
+		if !ok {
+			return "", fmt.Errorf("could not cast %T object to *ocpcloudnetworkapi.CloudPrivateIPConfig", obj)
+		}
+		return cloudPrivateIPConfig.Name, nil
 	}
 
 	return "", fmt.Errorf("object type %v not supported", objType)
@@ -411,7 +458,8 @@ func (oc *Controller) getResourceFromInformerCache(objType reflect.Type, key str
 		namespace, name := splitNamespacedName(key)
 		obj, err = oc.watchFactory.GetNetworkPolicy(namespace, name)
 
-	case factory.NodeType:
+	case factory.NodeType,
+		factory.EgressNodeType:
 		obj, err = oc.watchFactory.GetNode(key)
 
 	case factory.PeerServiceType:
@@ -421,17 +469,25 @@ func (oc *Controller) getResourceFromInformerCache(objType reflect.Type, key str
 	case factory.PodType,
 		factory.PeerPodSelectorType,
 		factory.PeerPodForNamespaceAndPodSelectorType,
-		factory.LocalPodSelectorType:
+		factory.LocalPodSelectorType,
+		factory.EgressIPPodType:
 		namespace, name := splitNamespacedName(key)
 		obj, err = oc.watchFactory.GetPod(namespace, name)
 
 	case factory.PeerNamespaceAndPodSelectorType,
-		factory.PeerNamespaceSelectorType:
+		factory.PeerNamespaceSelectorType,
+		factory.EgressIPNamespaceType:
 		obj, err = oc.watchFactory.GetNamespace(key)
 
 	case factory.EgressFirewallType:
 		namespace, name := splitNamespacedName(key)
 		obj, err = oc.watchFactory.GetEgressFirewall(namespace, name)
+
+	case factory.EgressIPType:
+		obj, err = oc.watchFactory.GetEgressIP(key)
+
+	case factory.CloudPrivateIPConfigType:
+		obj, err = oc.watchFactory.GetCloudPrivateIPConfig(key)
 
 	default:
 		err = fmt.Errorf("object type %v not supported, cannot retrieve it from informers cache",
@@ -517,6 +573,19 @@ func isResourceScheduled(objType reflect.Type, obj interface{}) bool {
 		return util.PodScheduled(pod)
 	}
 	return true
+}
+
+// Given an object type, resourceNeedsUpdate returns true if the object needs to invoke update during iterate retry.
+func resourceNeedsUpdate(objType reflect.Type) bool {
+	switch objType {
+	case factory.EgressNodeType,
+		factory.EgressIPType,
+		factory.EgressIPPodType,
+		factory.EgressIPNamespaceType,
+		factory.CloudPrivateIPConfigType:
+		return true
+	}
+	return false
 }
 
 // Given a *retryObjs instance, an object to add and a boolean specifying if the function was executed from
@@ -638,12 +707,12 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 			extraParameters.portGroupIngressDenyName,
 			extraParameters.portGroupEgressDenyName,
 			obj)
+
 	case factory.EgressFirewallType:
 		var err error
 		egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
 		if err = oc.addEgressFirewall(egressFirewall); err != nil {
 			egressFirewall.Status.Status = egressFirewallAddError
-			err = fmt.Errorf("failed to create egress firewall %s, error: %v", getEgressFirewallNamespacedName(egressFirewall), err)
 		} else {
 			egressFirewall.Status.Status = egressFirewallAppliedCorrectly
 			metrics.UpdateEgressFirewallRuleCount(float64(len(egressFirewall.Spec.Egress)))
@@ -653,6 +722,48 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 			klog.Errorf("Failed to update egress firewall status %s, error: %v", getEgressFirewallNamespacedName(egressFirewall), err)
 		}
 		return err
+
+	case factory.EgressIPType:
+		eIP := obj.(*egressipv1.EgressIP)
+		return oc.reconcileEgressIP(nil, eIP)
+
+	case factory.EgressIPNamespaceType:
+		namespace := obj.(*kapi.Namespace)
+		return oc.reconcileEgressIPNamespace(nil, namespace)
+
+	case factory.EgressIPPodType:
+		pod := obj.(*kapi.Pod)
+		return oc.reconcileEgressIPPod(nil, pod)
+
+	case factory.EgressNodeType:
+		node := obj.(*kapi.Node)
+		if err := oc.addNodeForEgress(node); err != nil {
+			return err
+		}
+		nodeEgressLabel := util.GetNodeEgressLabel()
+		nodeLabels := node.GetLabels()
+		_, hasEgressLabel := nodeLabels[nodeEgressLabel]
+		if hasEgressLabel {
+			oc.setNodeEgressAssignable(node.Name, true)
+		}
+		isReady := oc.isEgressNodeReady(node)
+		if isReady {
+			oc.setNodeEgressReady(node.Name, true)
+		}
+		isReachable := oc.isEgressNodeReachable(node)
+		if isReachable {
+			oc.setNodeEgressReachable(node.Name, true)
+		}
+		if hasEgressLabel && isReachable && isReady {
+			if err := oc.addEgressNode(node); err != nil {
+				return err
+			}
+		}
+
+	case factory.CloudPrivateIPConfigType:
+		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
+		return oc.reconcileCloudPrivateIPConfig(nil, cloudPrivateIPConfig)
+
 	default:
 		return fmt.Errorf("no add function for object type %v", objectsToRetry.oType)
 	}
@@ -711,6 +822,86 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 			extraParameters.portGroupIngressDenyName,
 			extraParameters.portGroupEgressDenyName,
 			newObj)
+
+	case factory.EgressIPType:
+		oldEIP := oldObj.(*egressipv1.EgressIP)
+		newEIP := newObj.(*egressipv1.EgressIP)
+		return oc.reconcileEgressIP(oldEIP, newEIP)
+
+	case factory.EgressIPNamespaceType:
+		oldNamespace := oldObj.(*kapi.Namespace)
+		newNamespace := newObj.(*kapi.Namespace)
+		return oc.reconcileEgressIPNamespace(oldNamespace, newNamespace)
+
+	case factory.EgressIPPodType:
+		oldPod := oldObj.(*kapi.Pod)
+		newPod := newObj.(*kapi.Pod)
+		return oc.reconcileEgressIPPod(oldPod, newPod)
+
+	case factory.EgressNodeType:
+		oldNode := oldObj.(*kapi.Node)
+		newNode := newObj.(*kapi.Node)
+		// Initialize the allocator on every update,
+		// ovnkube-node/cloud-network-config-controller will make sure to
+		// annotate the node with the egressIPConfig, but that might have
+		// happened after we processed the ADD for that object, hence keep
+		// retrying for all UPDATEs.
+		if err := oc.initEgressIPAllocator(newNode); err != nil {
+			klog.Warningf("Egress node initialization error: %v", err)
+		}
+		nodeEgressLabel := util.GetNodeEgressLabel()
+		oldLabels := oldNode.GetLabels()
+		newLabels := newNode.GetLabels()
+		_, oldHadEgressLabel := oldLabels[nodeEgressLabel]
+		_, newHasEgressLabel := newLabels[nodeEgressLabel]
+		// If the node is not labeled for egress assignment, just return
+		// directly, we don't really need to set the ready / reachable
+		// status on this node if the user doesn't care about using it.
+		if !oldHadEgressLabel && !newHasEgressLabel {
+			return nil
+		}
+		if oldHadEgressLabel && !newHasEgressLabel {
+			klog.Infof("Node: %s has been un-labeled, deleting it from egress assignment", newNode.Name)
+			oc.setNodeEgressAssignable(oldNode.Name, false)
+			return oc.deleteEgressNode(oldNode)
+		}
+		isOldReady := oc.isEgressNodeReady(oldNode)
+		isNewReady := oc.isEgressNodeReady(newNode)
+		isNewReachable := oc.isEgressNodeReachable(newNode)
+		oc.setNodeEgressReady(newNode.Name, isNewReady)
+		oc.setNodeEgressReachable(newNode.Name, isNewReachable)
+		if !oldHadEgressLabel && newHasEgressLabel {
+			klog.Infof("Node: %s has been labeled, adding it for egress assignment", newNode.Name)
+			oc.setNodeEgressAssignable(newNode.Name, true)
+			if isNewReady && isNewReachable {
+				if err := oc.addEgressNode(newNode); err != nil {
+					return err
+				}
+			} else {
+				klog.Warningf("Node: %s has been labeled, but node is not ready and reachable, cannot use it for egress assignment", newNode.Name)
+			}
+			return nil
+		}
+		if isOldReady == isNewReady {
+			return nil
+		}
+		if !isNewReady {
+			klog.Warningf("Node: %s is not ready, deleting it from egress assignment", newNode.Name)
+			if err := oc.deleteEgressNode(newNode); err != nil {
+				return err
+			}
+		} else if isNewReady && isNewReachable {
+			klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
+			if err := oc.addEgressNode(newNode); err != nil {
+				return err
+			}
+		}
+		return nil
+
+	case factory.CloudPrivateIPConfigType:
+		oldCloudPrivateIPConfig := oldObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
+		newCloudPrivateIPConfig := newObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
+		return oc.reconcileCloudPrivateIPConfig(oldCloudPrivateIPConfig, newCloudPrivateIPConfig)
 	}
 
 	return fmt.Errorf("no update function for object type %v", objectsToRetry.oType)
@@ -814,11 +1005,42 @@ func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj i
 	case factory.EgressFirewallType:
 		egressFirewall := obj.(*egressfirewall.EgressFirewall)
 		if err := oc.deleteEgressFirewall(egressFirewall); err != nil {
-			return fmt.Errorf("failed to delete egress firewall %s, error: %v", getEgressFirewallNamespacedName(egressFirewall), err)
+			return err
 		}
 		metrics.UpdateEgressFirewallRuleCount(float64(-len(egressFirewall.Spec.Egress)))
 		metrics.DecrementEgressFirewallCount()
 		return nil
+
+	case factory.EgressIPType:
+		eIP := obj.(*egressipv1.EgressIP)
+		return oc.reconcileEgressIP(eIP, nil)
+
+	case factory.EgressIPNamespaceType:
+		namespace := obj.(*kapi.Namespace)
+		return oc.reconcileEgressIPNamespace(namespace, nil)
+
+	case factory.EgressIPPodType:
+		pod := obj.(*kapi.Pod)
+		return oc.reconcileEgressIPPod(pod, nil)
+
+	case factory.EgressNodeType:
+		node := obj.(*kapi.Node)
+		if err := oc.deleteNodeForEgress(node); err != nil {
+			return err
+		}
+		nodeEgressLabel := util.GetNodeEgressLabel()
+		nodeLabels := node.GetLabels()
+		if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel {
+			if err := oc.deleteEgressNode(node); err != nil {
+				return err
+			}
+		}
+		return nil
+
+	case factory.CloudPrivateIPConfigType:
+		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
+		return oc.reconcileCloudPrivateIPConfig(cloudPrivateIPConfig, nil)
+
 	default:
 		return fmt.Errorf("object type %v not supported", objectsToRetry.oType)
 	}
@@ -874,36 +1096,48 @@ func (oc *Controller) iterateRetryResources(r *retryObjs, updateAll bool) {
 
 		klog.Infof("%v %s: retry object setup", r.oType, objKey)
 
-		// delete old object if needed
-		if entry.oldObj != nil {
-			klog.Infof("%v retry: removing old object for %s", r.oType, objKey)
-			if !isResourceScheduled(r.oType, entry.oldObj) {
-				klog.V(5).Infof("Retry: %s %s not scheduled", r.oType, objKey)
-				continue
-			}
-			if err := oc.deleteResource(r, entry.oldObj, entry.config); err != nil {
-				klog.Infof("%v retry delete failed for %s, will try again later: %v", r.oType, objKey, err)
+		if resourceNeedsUpdate(r.oType) && entry.config != nil && entry.newObj != nil {
+			klog.Infof("%v retry: updating object %s", r.oType, objKey)
+			if err := oc.updateResource(r, entry.config, entry.newObj); err != nil {
+				klog.Infof("%v retry update failed for %s, will try again later: %v", r.oType, objKey, err)
 				entry.timeStamp = time.Now()
 				continue
 			}
-			// successfully cleaned up old object, remove it from the retry cache
-			entry.oldObj = nil
-		}
-
-		// create new object if needed
-		if entry.newObj != nil {
-			klog.Infof("%v retry: creating object for %s", r.oType, objKey)
-			if !isResourceScheduled(r.oType, entry.newObj) {
-				klog.V(5).Infof("Retry: %s %s not scheduled", r.oType, objKey)
-				continue
-			}
-			if err := oc.addResource(r, entry.newObj, true); err != nil {
-				klog.Infof("%v retry create failed for %s, will try again later: %v", r.oType, objKey, err)
-				entry.timeStamp = time.Now()
-				continue
-			}
-			// successfully cleaned up old object, remove it from the retry cache
+			// successfully cleaned up new and old object, remove it from the retry cache
 			entry.newObj = nil
+			entry.config = nil
+		} else {
+			// delete old object if needed
+			if entry.oldObj != nil {
+				klog.Infof("%v retry: removing old object for %s", r.oType, objKey)
+				if !isResourceScheduled(r.oType, entry.oldObj) {
+					klog.V(5).Infof("Retry: %s %s not scheduled", r.oType, objKey)
+					continue
+				}
+				if err := oc.deleteResource(r, entry.oldObj, entry.config); err != nil {
+					klog.Infof("%v retry delete failed for %s, will try again later: %v", r.oType, objKey, err)
+					entry.timeStamp = time.Now()
+					continue
+				}
+				// successfully cleaned up old object, remove it from the retry cache
+				entry.oldObj = nil
+			}
+
+			// create new object if needed
+			if entry.newObj != nil {
+				klog.Infof("%v retry: creating object for %s", r.oType, objKey)
+				if !isResourceScheduled(r.oType, entry.newObj) {
+					klog.V(5).Infof("Retry: %s %s not scheduled", r.oType, objKey)
+					continue
+				}
+				if err := oc.addResource(r, entry.newObj, true); err != nil {
+					klog.Infof("%v retry create failed for %s, will try again later: %v", r.oType, objKey, err)
+					entry.timeStamp = time.Now()
+					continue
+				}
+				// successfully cleaned up new object, remove it from the retry cache
+				entry.newObj = nil
+			}
 		}
 
 		klog.Infof("%v retry successful for %s", r.oType, objKey)
@@ -988,6 +1222,17 @@ func (oc *Controller) getSyncResourcesFunc(r *retryObjs) (func([]interface{}) er
 	case factory.EgressFirewallType:
 		syncFunc = oc.syncEgressFirewall
 
+	case factory.EgressIPType:
+		syncFunc = oc.syncEgressIPs
+
+	case factory.EgressNodeType:
+		syncFunc = oc.initClusterEgressPolicies
+
+	case factory.EgressIPPodType,
+		factory.EgressIPNamespaceType,
+		factory.CloudPrivateIPConfigType:
+		syncFunc = nil
+
 	default:
 		return nil, fmt.Errorf("no sync function for object type %v", r.oType)
 	}
@@ -1002,7 +1247,8 @@ func (oc *Controller) isObjectInTerminalState(objType reflect.Type, obj interfac
 	case factory.PodType,
 		factory.PeerPodSelectorType,
 		factory.PeerPodForNamespaceAndPodSelectorType,
-		factory.LocalPodSelectorType:
+		factory.LocalPodSelectorType,
+		factory.EgressIPPodType:
 		pod := obj.(*kapi.Pod)
 		return util.PodCompleted(pod)
 
@@ -1161,7 +1407,7 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 
 				// STEP 1:
 				// Delete existing (old) object if:
-				// a) it has a retry entry marked for deletion or
+				// a) it has a retry entry marked for deletion and doesn't use update or
 				// b) the resource is in terminal state (e.g. pod is completed) or
 				// c) this resource type has no update function, so an update means delete old obj and add new one
 				retryEntry := objectsToRetry.getObjRetryEntry(oldKey)
@@ -1218,7 +1464,11 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 						klog.Errorf("Failed to update resource %v, old=%s, new=%s, error: %v",
 							objectsToRetry.oType, oldKey, newKey, err)
 						oc.recordErrorEvent(objectsToRetry.oType, newer, err)
-						objectsToRetry.initRetryObjWithAdd(newer, newKey)
+						if resourceNeedsUpdate(objectsToRetry.oType) {
+							objectsToRetry.initRetryObjWithUpdate(old, newer, newKey)
+						} else {
+							objectsToRetry.initRetryObjWithAdd(newer, newKey)
+						}
 						objectsToRetry.unSkipRetryObj(newKey)
 						return
 					}
