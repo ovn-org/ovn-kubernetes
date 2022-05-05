@@ -939,7 +939,7 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		Items []egressIP `json:"items"`
 	}
 
-	testStatus := func() []egressIPStatus {
+	getEgressIPStatusItems := func() []egressIPStatus {
 		egressIPs := egressIPs{}
 		egressIPStdout, err := framework.RunKubectl("default", "get", "eip", "-o", "json")
 		if err != nil {
@@ -956,7 +956,7 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 	verifyEgressIPStatusLengthEquals := func(statusLength int) []egressIPStatus {
 		var statuses []egressIPStatus
 		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			statuses = testStatus()
+			statuses = getEgressIPStatusItems()
 			return len(statuses) == statusLength, nil
 		})
 		if err != nil {
@@ -1309,10 +1309,12 @@ spec:
 		framework.RemoveLabelOffNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable")
 
 		ginkgo.By("9. Check that the status is of length one and that it is assigned to egress2Node")
-		statuses = verifyEgressIPStatusLengthEquals(1)
 		// There is sometimes a slight delay for the EIP fail over to happen,
 		// so let's use the pollimmediate struct to check if eventually egress2Node becomes the egress node
-		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) { return statuses[0].Node == egress2Node.name, nil })
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) { 
+			statuses := getEgressIPStatusItems()
+			return (len(statuses) == 1) && (statuses[0].Node == egress2Node.name), nil
+		})
 		framework.ExpectNoError(err, "Step 9. Check that the status is of length one and that it is assigned to egress2Node, failed: %v", err)
 
 		ginkgo.By("10. Check connectivity from pod to an external \"node\" and verify that the srcIP is the expected egressIP")
