@@ -478,7 +478,7 @@ func networkStatusAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
 func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
 	// Try unscheduled pods later
 	if !util.PodScheduled(pod) {
-		return fmt.Errorf("failed to ensurePod %s/%s since it is not yet scheduled", pod.Namespace, pod.Name)
+		return nil
 	}
 
 	if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
@@ -942,7 +942,7 @@ func newServiceController(client clientset.Interface, nbClient libovsdbclient.Cl
 		client,
 		nbClient,
 		svcFactory.Core().V1().Services(),
-		svcFactory.Discovery().V1beta1().EndpointSlices(),
+		svcFactory.Discovery().V1().EndpointSlices(),
 		svcFactory.Core().V1().Nodes(),
 	)
 

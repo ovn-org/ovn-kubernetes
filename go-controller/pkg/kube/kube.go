@@ -241,7 +241,6 @@ func (k *Kube) UpdateEgressIP(eIP *egressipv1.EgressIP) error {
 }
 
 func (k *Kube) PatchEgressIP(name string, patchData []byte) error {
-	klog.Infof("Patching status on EgressIP %s", name)
 	_, err := k.EIPClient.K8sV1().EgressIPs().Patch(context.TODO(), name, types.JSONPatchType, patchData, metav1.PatchOptions{})
 	return err
 }

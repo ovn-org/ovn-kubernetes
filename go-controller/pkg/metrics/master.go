@@ -535,7 +535,15 @@ func (cpr *ControlPlaneRecorder) Run(sbClient libovsdbclient.Client, stop <-chan
 			if table != portBindingTable {
 				return
 			}
-			cpr.queue.Add(item{op: updatePortBinding, old: old, new: new, t: time.Now()})
+			oldRow := old.(*sbdb.PortBinding)
+			newRow := new.(*sbdb.PortBinding)
+			// chassis assigned
+			if oldRow.Chassis == nil && newRow.Chassis != nil {
+				cpr.queue.Add(item{op: updatePortBinding, old: old, new: new, t: time.Now()})
+				// port binding up
+			} else if oldRow.Up != nil && !*oldRow.Up && newRow.Up != nil && *newRow.Up {
+				cpr.queue.Add(item{op: updatePortBinding, old: old, new: new, t: time.Now()})
+			}
 		},
 		DeleteFunc: func(table string, model model.Model) {
 		},
@@ -620,13 +628,17 @@ func (cpr *ControlPlaneRecorder) updatePortBinding(old, new model.Model, t time.
 		klog.V(5).Infof("Port binding update expected pod with UID %q in cache", podUID)
 		return
 	}
+
 	if oldRow.Chassis == nil && newRow.Chassis != nil && r.timestampType == portBinding {
 		metricPortBindingChassisLatency.Observe(t.Sub(r.timestamp).Seconds())
 		r.timestamp = t
 		r.timestampType = portBindingChassis
+
 	}
+
 	if oldRow.Up != nil && !*oldRow.Up && newRow.Up != nil && *newRow.Up && r.timestampType == portBindingChassis {
 		metricPortBindingUpLatency.Observe(t.Sub(r.timestamp).Seconds())
+		delete(cpr.podRecords, podUID)
 	}
 }
 
