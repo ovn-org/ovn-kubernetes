@@ -1185,20 +1185,6 @@ func (oc *Controller) syncNodesPeriodic() {
 	}
 }
 
-// syncWithRetry is a wrapper that calls a sync function and retries it in case of failures.
-func (oc *Controller) syncWithRetry(syncName string, syncFunc func() error) {
-	err := utilwait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
-		if err := syncFunc(); err != nil {
-			klog.Errorf("Failed (will retry) in syncing %s: %v", syncName, err)
-			return false, nil
-		}
-		return true, nil
-	})
-	if err != nil {
-		klog.Fatalf("Error in syncing %s: %v", syncName, err)
-	}
-}
-
 // We only deal with cleaning up nodes that shouldn't exist here, since
 // watchNodes() will be called for all existing nodes at startup anyway.
 // Note that this list will include the 'join' cluster switch, which we

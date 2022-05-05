@@ -29,13 +29,9 @@ const (
 	aclLoggingAnnotation = "k8s.ovn.org/acl-logging"
 )
 
-func (oc *Controller) syncNamespaces(namespaces []interface{}) {
-	oc.syncWithRetry("syncNamespaces", func() error { return oc.syncNamespacesRetriable(namespaces) })
-}
-
 // This function implements the main body of work of syncNamespaces.
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.
-func (oc *Controller) syncNamespacesRetriable(namespaces []interface{}) error {
+func (oc *Controller) syncNamespaces(namespaces []interface{}) error {
 	expectedNs := make(map[string]bool)
 	for _, nsInterface := range namespaces {
 		ns, ok := nsInterface.(*kapi.Namespace)

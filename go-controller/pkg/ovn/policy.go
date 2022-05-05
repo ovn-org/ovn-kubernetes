@@ -917,13 +917,13 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(policy *knet.NetworkPolicy, 
 
 func (oc *Controller) handleLocalPodSelector(
 	policy *knet.NetworkPolicy, np *networkPolicy, portGroupIngressDenyName, portGroupEgressDenyName string,
-	handleInitialItems func([]interface{}) error) {
+	handleInitialItems func([]interface{}) error) error {
 
 	// NetworkPolicy is validated by the apiserver
 	sel, err := metav1.LabelSelectorAsSelector(&policy.Spec.PodSelector)
 	if err != nil {
 		klog.Errorf("Could not set up watcher for local pods: %v", err)
-		return
+		return err
 	}
 
 	retryLocalPods := NewRetryObjs(
@@ -938,11 +938,16 @@ func (oc *Controller) handleLocalPodSelector(
 			portGroupEgressDenyName:  portGroupEgressDenyName,
 		})
 
-	podHandler := oc.WatchResource(retryLocalPods)
+	podHandler, err := oc.WatchResource(retryLocalPods)
+	if err != nil {
+		klog.Errorf("Failed WatchResource for handleLocalPodSelector: %v", err)
+		return err
+	}
 
 	np.Lock()
 	defer np.Unlock()
 	np.podHandlerList = append(np.podHandlerList, podHandler)
+	return nil
 }
 
 // we only need to create an address set if there is a podSelector or namespaceSelector
@@ -991,7 +996,10 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 				return err
 			}
 			// Start service handlers ONLY if there's an ingress Address Set
-			oc.handlePeerService(policy, ingress, np)
+			if err := oc.handlePeerService(policy, ingress, np); err != nil {
+				np.Unlock()
+				return err
+			}
 		}
 
 		for _, fromJSON := range ingressJSON.From {
@@ -1046,20 +1054,24 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 	np.Unlock()
 
 	for _, handler := range policyHandlers {
+		var err error
 		if handler.namespaceSelector != nil && handler.podSelector != nil {
 			// For each rule that contains both peer namespace selector and
 			// peer pod selector, we create a watcher for each matching namespace
 			// that populates the addressSet
-			oc.handlePeerNamespaceAndPodSelector(handler.namespaceSelector, handler.podSelector, handler.gress, np)
+			err = oc.handlePeerNamespaceAndPodSelector(handler.namespaceSelector, handler.podSelector, handler.gress, np)
 		} else if handler.namespaceSelector != nil {
 			// For each peer namespace selector, we create a watcher that
 			// populates ingress.peerAddressSets
-			oc.handlePeerNamespaceSelector(handler.namespaceSelector, handler.gress, np)
+			err = oc.handlePeerNamespaceSelector(handler.namespaceSelector, handler.gress, np)
 		} else if handler.podSelector != nil {
 			// For each peer pod selector, we create a watcher that
 			// populates the addressSet
-			oc.handlePeerPodSelector(policy, handler.podSelector,
+			err = oc.handlePeerPodSelector(policy, handler.podSelector,
 				handler.gress, np)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to handle policy handler selector: %v", err)
 		}
 	}
 
@@ -1099,7 +1111,10 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 		}
 		return kerrorsutil.NewAggregate(errs)
 	}
-	oc.handleLocalPodSelector(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, handleInitialSelectedPods)
+	err = oc.handleLocalPodSelector(policy, np, portGroupIngressDenyName, portGroupEgressDenyName, handleInitialSelectedPods)
+	if err != nil {
+		return fmt.Errorf("failed to handle local pod selector: %v", err)
+	}
 
 	np.Lock()
 	defer np.Unlock()
@@ -1410,7 +1425,7 @@ type NetworkPolicyExtraParameters struct {
 // Watch services that are in the same Namespace as the NP
 // To account for hairpined traffic
 func (oc *Controller) handlePeerService(
-	policy *knet.NetworkPolicy, gp *gressPolicy, np *networkPolicy) {
+	policy *knet.NetworkPolicy, gp *gressPolicy, np *networkPolicy) error {
 	// start watching services in the same namespace as the network policy
 	retryPeerServices := NewRetryObjs(
 		factory.PeerServiceType,
@@ -1418,13 +1433,19 @@ func (oc *Controller) handlePeerService(
 		nil, nil,
 		&NetworkPolicyExtraParameters{gp: gp})
 
-	serviceHandler := oc.WatchResource(retryPeerServices)
+	serviceHandler, err := oc.WatchResource(retryPeerServices)
+	if err != nil {
+		klog.Errorf("Failed WatchResource for handlePeerService: %v", err)
+		return err
+	}
+
 	np.svcHandlerList = append(np.svcHandlerList, serviceHandler)
+	return nil
 }
 
 func (oc *Controller) handlePeerPodSelector(
 	policy *knet.NetworkPolicy, podSelector *metav1.LabelSelector,
-	gp *gressPolicy, np *networkPolicy) {
+	gp *gressPolicy, np *networkPolicy) error {
 
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	sel, _ := metav1.LabelSelectorAsSelector(podSelector)
@@ -1437,15 +1458,21 @@ func (oc *Controller) handlePeerPodSelector(
 		sel, nil,
 		&NetworkPolicyExtraParameters{gp: gp})
 
-	podHandler := oc.WatchResource(retryPeerPods)
+	podHandler, err := oc.WatchResource(retryPeerPods)
+	if err != nil {
+		klog.Errorf("Failed WatchResource for handlePeerPodSelector: %v", err)
+		return err
+	}
+
 	np.podHandlerList = append(np.podHandlerList, podHandler)
+	return nil
 }
 
 func (oc *Controller) handlePeerNamespaceAndPodSelector(
 	namespaceSelector *metav1.LabelSelector,
 	podSelector *metav1.LabelSelector,
 	gp *gressPolicy,
-	np *networkPolicy) {
+	np *networkPolicy) error {
 
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	nsSel, _ := metav1.LabelSelectorAsSelector(namespaceSelector)
@@ -1463,8 +1490,14 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 			podSelector: podSel}, // will be used in the addFunc to create a pod handler
 	)
 
-	namespaceHandler := oc.WatchResource(retryPeerNamespaces)
+	namespaceHandler, err := oc.WatchResource(retryPeerNamespaces)
+	if err != nil {
+		klog.Errorf("Failed WatchResource for handlePeerNamespaceAndPodSelector: %v", err)
+		return err
+	}
+
 	np.nsHandlerList = append(np.nsHandlerList, namespaceHandler)
+	return nil
 }
 
 func (oc *Controller) handlePeerNamespaceSelectorOnUpdate(np *networkPolicy, gp *gressPolicy, doUpdate func() bool) error {
@@ -1492,7 +1525,7 @@ func (oc *Controller) handlePeerNamespaceSelectorOnUpdate(np *networkPolicy, gp 
 
 func (oc *Controller) handlePeerNamespaceSelector(
 	namespaceSelector *metav1.LabelSelector,
-	gress *gressPolicy, np *networkPolicy) {
+	gress *gressPolicy, np *networkPolicy) error {
 
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	sel, _ := metav1.LabelSelectorAsSelector(namespaceSelector)
@@ -1504,9 +1537,14 @@ func (oc *Controller) handlePeerNamespaceSelector(
 		&NetworkPolicyExtraParameters{gp: gress, np: np},
 	)
 
-	namespaceHandler := oc.WatchResource(retryPeerNamespaces)
+	namespaceHandler, err := oc.WatchResource(retryPeerNamespaces)
+	if err != nil {
+		klog.Errorf("Failed WatchResource for handlePeerNamespaceSelector: %v", err)
+		return err
+	}
 
 	np.nsHandlerList = append(np.nsHandlerList, namespaceHandler)
+	return nil
 }
 
 func (oc *Controller) shutdownHandlers(np *networkPolicy) {

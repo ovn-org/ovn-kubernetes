@@ -600,7 +600,7 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) {
 
 }
 
-func (npw *nodePortWatcher) SyncServices(services []interface{}) {
+func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 	keepIPTRules := []iptRule{}
 	for _, serviceInterface := range services {
 		name := ktypes.NamespacedName{Namespace: serviceInterface.(*kapi.Service).Namespace, Name: serviceInterface.(*kapi.Service).Name}
@@ -638,6 +638,9 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 		}
 		recreateIPTRules("mangle", iptableITPChain, keepIPTRules)
 	}
+	// FIXME(FF): This function must propagate errors back to caller.
+	// https://bugzilla.redhat.com/show_bug.cgi?id=2081857
+	return nil
 }
 
 func (npw *nodePortWatcher) AddEndpoints(ep *kapi.Endpoints) {
@@ -752,7 +755,7 @@ func (npwipt *nodePortWatcherIptables) DeleteService(service *kapi.Service) {
 	delServiceRules(service, nil)
 }
 
-func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) {
+func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) error {
 	keepIPTRules := []iptRule{}
 	for _, serviceInterface := range services {
 		service, ok := serviceInterface.(*kapi.Service)
@@ -770,6 +773,9 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) {
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
 		recreateIPTRules("nat", chain, keepIPTRules)
 	}
+	// FIXME(FF): This function must propagate errors back to caller.
+	// https://bugzilla.redhat.com/show_bug.cgi?id=2081858
+	return nil
 }
 
 // since we share the host's k8s node IP, add OpenFlow flows
