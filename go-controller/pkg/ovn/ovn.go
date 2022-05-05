@@ -220,7 +220,7 @@ type Controller struct {
 	addNodeFailed               sync.Map
 	nodeClusterRouterPortFailed sync.Map
 
-	metricsRecorder *metrics.ControlPlaneRecorder
+	podRecorder metrics.PodRecorder
 }
 
 const (
@@ -307,7 +307,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		sbClient:                 libovsdbOvnSBClient,
 		svcController:            svcController,
 		svcFactory:               svcFactory,
-		metricsRecorder:          metrics.NewControlPlaneRecorder(),
+		podRecorder:              metrics.NewPodRecorder(),
 	}
 }
 
@@ -328,12 +328,16 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 
 	// WatchNamespaces() should be started first because it has no other
 	// dependencies, and WatchNodes() depends on it
-	oc.WatchNamespaces()
+	if err := oc.WatchNamespaces(); err != nil {
+		return err
+	}
 
 	// WatchNodes must be started next because it creates the node switch
 	// which most other watches depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
-	oc.WatchNodes()
+	if err := oc.WatchNodes(); err != nil {
+		return err
+	}
 
 	// Start service watch factory and sync services
 	oc.svcFactory.Start(oc.stopChan)
@@ -343,10 +347,14 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 		return err
 	}
 
-	oc.WatchPods()
+	if err := oc.WatchPods(); err != nil {
+		return err
+	}
 
 	// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
-	oc.WatchNetworkPolicy()
+	if err := oc.WatchNetworkPolicy(); err != nil {
+		return err
+	}
 
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		// This is probably the best starting order for all egress IP handlers.
@@ -359,12 +367,22 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 		// risk performing a bunch of modifications on the EgressIP objects when
 		// we restart and then have these handlers act on stale data when they
 		// sync.
-		oc.WatchEgressIPNamespaces()
-		oc.WatchEgressIPPods()
-		oc.WatchEgressNodes()
-		oc.WatchEgressIP()
+		if err := oc.WatchEgressIPNamespaces(); err != nil {
+			return err
+		}
+		if err := oc.WatchEgressIPPods(); err != nil {
+			return err
+		}
+		if err := oc.WatchEgressNodes(); err != nil {
+			return err
+		}
+		if err := oc.WatchEgressIP(); err != nil {
+			return err
+		}
 		if util.PlatformTypeIsEgressIPCloudProvider() {
-			oc.WatchCloudPrivateIPConfig()
+			if err := oc.WatchCloudPrivateIPConfig(); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -375,8 +393,10 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 			return err
 		}
 		oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
-		oc.WatchEgressFirewall()
-
+		err = oc.WatchEgressFirewall()
+		if err != nil {
+			return err
+		}
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressQoS {
@@ -524,27 +544,30 @@ func (oc *Controller) removePod(pod *kapi.Pod, portInfo *lpInfo) error {
 }
 
 // WatchPods starts the watching of the Pod resource and calls back the appropriate handler logic
-func (oc *Controller) WatchPods() {
-	oc.WatchResource(oc.retryPods)
+func (oc *Controller) WatchPods() error {
+	_, err := oc.WatchResource(oc.retryPods)
+	return err
 }
 
 // WatchNetworkPolicy starts the watching of the network policy resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchNetworkPolicy() {
-	oc.WatchResource(oc.retryNetworkPolicies)
+func (oc *Controller) WatchNetworkPolicy() error {
+	_, err := oc.WatchResource(oc.retryNetworkPolicies)
+	return err
 }
 
 // WatchEgressFirewall starts the watching of egressfirewall resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchEgressFirewall() {
-	oc.WatchResource(oc.retryEgressFirewalls)
+func (oc *Controller) WatchEgressFirewall() error {
+	_, err := oc.WatchResource(oc.retryEgressFirewalls)
+	return err
 }
 
 // WatchEgressNodes starts the watching of egress assignable nodes and calls
 // back the appropriate handler logic.
-func (oc *Controller) WatchEgressNodes() {
+func (oc *Controller) WatchEgressNodes() error {
 	nodeEgressLabel := util.GetNodeEgressLabel()
-	oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
+	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			if err := oc.addNodeForEgress(node); err != nil {
@@ -643,12 +666,13 @@ func (oc *Controller) WatchEgressNodes() {
 			}
 		},
 	}, oc.initClusterEgressPolicies)
+	return err
 }
 
 // WatchCloudPrivateIPConfig starts the watching of cloudprivateipconfigs
 // resource and calls back the appropriate handler logic.
-func (oc *Controller) WatchCloudPrivateIPConfig() {
-	oc.watchFactory.AddCloudPrivateIPConfigHandler(cache.ResourceEventHandlerFuncs{
+func (oc *Controller) WatchCloudPrivateIPConfig() error {
+	_, err := oc.watchFactory.AddCloudPrivateIPConfigHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 			if err := oc.reconcileCloudPrivateIPConfig(nil, cloudPrivateIPConfig); err != nil {
@@ -669,13 +693,14 @@ func (oc *Controller) WatchCloudPrivateIPConfig() {
 			}
 		},
 	}, nil)
+	return err
 }
 
 // WatchEgressIP starts the watching of egressip resource and calls back the
 // appropriate handler logic. It also initiates the other dedicated resource
 // handlers for egress IP setup: namespaces, pods.
-func (oc *Controller) WatchEgressIP() {
-	oc.watchFactory.AddEgressIPHandler(cache.ResourceEventHandlerFuncs{
+func (oc *Controller) WatchEgressIP() error {
+	_, err := oc.watchFactory.AddEgressIPHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			eIP := obj.(*egressipv1.EgressIP)
 			if err := oc.reconcileEgressIP(nil, eIP); err != nil {
@@ -696,10 +721,11 @@ func (oc *Controller) WatchEgressIP() {
 			}
 		},
 	}, oc.syncEgressIPs)
+	return err
 }
 
-func (oc *Controller) WatchEgressIPNamespaces() {
-	oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
+func (oc *Controller) WatchEgressIPNamespaces() error {
+	_, err := oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			namespace := obj.(*kapi.Namespace)
 			if err := oc.reconcileEgressIPNamespace(nil, namespace); err != nil {
@@ -720,10 +746,11 @@ func (oc *Controller) WatchEgressIPNamespaces() {
 			}
 		},
 	}, nil)
+	return err
 }
 
-func (oc *Controller) WatchEgressIPPods() {
-	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
+func (oc *Controller) WatchEgressIPPods() error {
+	_, err := oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			if err := oc.reconcileEgressIPPod(nil, pod); err != nil {
@@ -751,13 +778,14 @@ func (oc *Controller) WatchEgressIPPods() {
 			}
 		},
 	}, nil)
+	return err
 }
 
 // WatchNamespaces starts the watching of namespace resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchNamespaces() {
+func (oc *Controller) WatchNamespaces() error {
 	start := time.Now()
-	oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
+	_, err := oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ns := obj.(*kapi.Namespace)
 			oc.AddNamespace(ns)
@@ -772,6 +800,11 @@ func (oc *Controller) WatchNamespaces() {
 		},
 	}, oc.syncNamespaces)
 	klog.Infof("Bootstrapping existing namespaces and cleaning stale namespaces took %v", time.Since(start))
+	if err != nil {
+		klog.Errorf("Failed to watch namespaces err: %v", err)
+		return err
+	}
+	return nil
 }
 
 // syncNodeGateway ensures a node's gateway router is configured
@@ -812,8 +845,9 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchNodes() {
-	oc.WatchResource(oc.retryNodes)
+func (oc *Controller) WatchNodes() error {
+	_, err := oc.WatchResource(oc.retryNodes)
+	return err
 }
 
 // GetNetworkPolicyACLLogging retrieves ACL deny policy logging setting for the Namespace

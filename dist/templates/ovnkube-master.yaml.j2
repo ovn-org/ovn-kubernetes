@@ -162,6 +162,8 @@ spec:
           value: "{{ ovnkube_logfile_maxbackups }}"
         - name: OVNKUBE_LOGFILE_MAXAGE
           value: "{{ ovnkube_logfile_maxage }}"
+        - name: OVNKUBE_CONFIG_DURATION_ENABLE
+          value: "{{ ovnkube_config_duration_enable }}"
         - name: OVN_NET_CIDR
           valueFrom:
             configMapKeyRef:

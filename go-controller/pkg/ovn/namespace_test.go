@@ -112,9 +112,10 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			podMAC := ovntest.MustParseMAC(tP.podMAC)
 			podIPNets := []*net.IPNet{ovntest.MustParseIPNet(tP.podIP + "/24")}
 			fakeOvn.controller.logicalPortCache.add(tP.nodeName, tP.portName, fakeUUID, podMAC, podIPNets)
-			fakeOvn.controller.WatchNamespaces()
+			err := fakeOvn.controller.WatchNamespaces()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceT.Name, metav1.GetOptions{})
+			_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceT.Name, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			fakeOvn.asf.EventuallyExpectAddressSetWithIPs(namespaceName, []string{tP.podIP})
@@ -126,9 +127,10 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 					*newNamespace(namespaceName),
 				},
 			})
-			fakeOvn.controller.WatchNamespaces()
+			err := fakeOvn.controller.WatchNamespaces()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceName, metav1.GetOptions{})
+			_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceName, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			fakeOvn.asf.ExpectEmptyAddressSet(namespaceName)
@@ -286,7 +288,8 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			gwLRPIPs, err := fakeOvn.controller.joinSwIPManager.EnsureJoinLRPIPs(node1.Name)
 			gomega.Expect(len(gwLRPIPs) != 0).To(gomega.BeTrue())
 
-			fakeOvn.controller.WatchNamespaces()
+			err = fakeOvn.controller.WatchNamespaces()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			fakeOvn.asf.EventuallyExpectEmptyAddressSetExist(hostNetworkNamespace)
 
 			fakeOvn.controller.WatchNodes()
@@ -331,10 +334,11 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 					*newNamespace(namespaceName),
 				},
 			})
-			fakeOvn.controller.WatchNamespaces()
+			err := fakeOvn.controller.WatchNamespaces()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			fakeOvn.asf.ExpectEmptyAddressSet(namespaceName)
 
-			err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), namespaceName, *metav1.NewDeleteOptions(1))
+			err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), namespaceName, *metav1.NewDeleteOptions(1))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			fakeOvn.asf.EventuallyExpectNoAddressSet(namespaceName)
 		})

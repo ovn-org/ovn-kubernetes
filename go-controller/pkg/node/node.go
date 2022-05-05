@@ -542,7 +542,10 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		go wait.Until(func() {
 			checkForStaleOVSInterfaces(n.name, n.watchFactory.(*factory.WatchFactory))
 		}, time.Minute, n.stopChan)
-		n.WatchEndpoints()
+		err := n.WatchEndpoints()
+		if err != nil {
+			return fmt.Errorf("failed to watch endpoints: %w", err)
+		}
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPU {
@@ -558,7 +561,7 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	}
 
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		n.watchPodsDPU(isOvnUpEnabled)
+		err = n.watchPodsDPU(isOvnUpEnabled)
 	} else {
 		// start the cni server
 		err = cniServer.Start(cni.HandleCNIRequest)
@@ -567,8 +570,8 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	return err
 }
 
-func (n *OvnNode) WatchEndpoints() {
-	n.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
+func (n *OvnNode) WatchEndpoints() error {
+	_, err := n.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(old, new interface{}) {
 			epNew := new.(*kapi.Endpoints)
 			epOld := old.(*kapi.Endpoints)
@@ -594,6 +597,7 @@ func (n *OvnNode) WatchEndpoints() {
 			}
 		},
 	}, nil)
+	return err
 }
 
 // validateVTEPInterfaceMTU checks if the MTU of the interface that has ovn-encap-ip is big

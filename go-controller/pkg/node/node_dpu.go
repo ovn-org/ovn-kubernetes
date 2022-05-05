@@ -19,7 +19,7 @@ import (
 )
 
 //watchPodsDPU watch updates for pod dpu annotations
-func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) {
+func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) error {
 	var retryPods sync.Map
 	// servedPods tracks the pods that got a VF
 	var servedPods sync.Map
@@ -27,7 +27,7 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) {
 	podLister := corev1listers.NewPodLister(n.watchFactory.LocalPodInformer().GetIndexer())
 	kclient := n.Kube.(*kube.Kube)
 
-	_ = n.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
+	_, err := n.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			klog.Infof("Add for Pod: %s/%s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName())
@@ -114,6 +114,7 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) {
 			}
 		},
 	}, nil)
+	return err
 }
 
 // getVfRepName returns the VF's representor of the VF assigned to the pod

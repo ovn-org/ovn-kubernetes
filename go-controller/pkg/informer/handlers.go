@@ -8,7 +8,7 @@ type ServiceEventHandler interface {
 	AddService(*kapi.Service)
 	DeleteService(*kapi.Service)
 	UpdateService(old, new *kapi.Service)
-	SyncServices([]interface{})
+	SyncServices([]interface{}) error
 }
 
 type EndpointsEventHandler interface {

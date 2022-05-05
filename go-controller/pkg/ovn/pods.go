@@ -176,10 +176,17 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 	}
 	allOps = append(allOps, ops...)
 
+	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.nbClient, "pod", pod.Namespace,
+		pod.Name)
+	if err != nil {
+		klog.Errorf("Failed to record config duration: %v", err)
+	}
+	allOps = append(allOps, recordOps...)
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, allOps)
 	if err != nil {
 		return fmt.Errorf("cannot delete logical switch port %s, %v", logicalPort, err)
 	}
+	txOkCallBack()
 
 	// do not remove SNATs/GW routes/IPAM for an IP address unless we have validated no other pod is using it
 	if !shouldRelease {
@@ -576,13 +583,21 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("error creating logical switch port %+v on switch %+v: %+v", *lsp, *ls, err)
 	}
 
+	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.nbClient, "pod", pod.Namespace,
+		pod.Name)
+	if err != nil {
+		klog.Errorf("Config duration recorder: %v", err)
+	}
+	ops = append(ops, recordOps...)
+
 	transactStart := time.Now()
 	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(oc.nbClient, lsp, ops)
 	libovsdbExecuteTime = time.Since(transactStart)
 	if err != nil {
 		return fmt.Errorf("error transacting operations %+v: %v", ops, err)
 	}
-	oc.metricsRecorder.AddLSP(pod.UID)
+	txOkCallBack()
+	oc.podRecorder.AddLSP(pod.UID)
 
 	// if somehow lspUUID is empty, there is a bug here with interpreting OVSDB results
 	if len(lsp.UUID) == 0 {

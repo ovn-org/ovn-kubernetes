@@ -371,13 +371,15 @@ var _ = Describe("Watch Factory Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
-			h := wf.addHandler(objType, namespace, sel,
+			h, err := wf.addHandler(objType, namespace, sel,
 				cache.ResourceEventHandlerFuncs{},
-				func(objs []interface{}) {
+				func(objs []interface{}) error {
 					defer GinkgoRecover()
 					Expect(len(objs)).To(Equal(1))
+					return nil
 				})
 			Expect(h).NotTo(BeNil())
+			Expect(err).NotTo(HaveOccurred())
 			wf.removeHandler(objType, h)
 		}
 
@@ -451,7 +453,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
 			var addCalls int32
-			h := wf.addHandler(objType, "", nil,
+			h, err := wf.addHandler(objType, "", nil,
 				cache.ResourceEventHandlerFuncs{
 					AddFunc: func(obj interface{}) {
 						atomic.AddInt32(&addCalls, 1)
@@ -460,6 +462,7 @@ var _ = Describe("Watch Factory Operations", func() {
 					DeleteFunc: func(obj interface{}) {},
 				}, nil)
 			Expect(int(addCalls)).To(Equal(2))
+			Expect(err).NotTo(HaveOccurred())
 			wf.removeHandler(objType, h)
 		}
 
@@ -562,7 +565,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	addFilteredHandler := func(wf *WatchFactory, objType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandlerFuncs) (*Handler, *handlerCalls) {
 		calls := handlerCalls{}
-		h := wf.addHandler(objType, namespace, sel, cache.ResourceEventHandlerFuncs{
+		h, err := wf.addHandler(objType, namespace, sel, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				defer GinkgoRecover()
 				atomic.AddInt32(&calls.added, 1)
@@ -580,6 +583,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			},
 		}, nil)
 		Expect(h).NotTo(BeNil())
+		Expect(err).NotTo(HaveOccurred())
 		return h, &calls
 	}
 

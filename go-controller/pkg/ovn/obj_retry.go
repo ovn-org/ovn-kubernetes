@@ -440,13 +440,32 @@ func (oc *Controller) getResourceFromInformerCache(objType reflect.Type, key str
 	return obj, err
 }
 
-// Given an object and its type, recordAddEvent records the add event on this object. Only used for pods now.
+// Given an object and its type, recordAddEvent records the add event on this object.
 func (oc *Controller) recordAddEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
 	case factory.PodType:
 		klog.V(5).Infof("Recording add event on pod")
 		pod := obj.(*kapi.Pod)
-		oc.metricsRecorder.AddPod(pod.UID)
+		oc.podRecorder.AddPod(pod.UID)
+		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
+	case factory.PolicyType:
+		klog.V(5).Infof("Recording add event on network policy")
+		np := obj.(*knet.NetworkPolicy)
+		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
+	}
+}
+
+// Given an object and its type, recordUpdateEvent records the update event on this object.
+func (oc *Controller) recordUpdateEvent(objType reflect.Type, obj interface{}) {
+	switch objType {
+	case factory.PodType:
+		klog.V(5).Infof("Recording update event on pod")
+		pod := obj.(*kapi.Pod)
+		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
+	case factory.PolicyType:
+		klog.V(5).Infof("Recording update event on network policy")
+		np := obj.(*knet.NetworkPolicy)
+		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
 	}
 }
 
@@ -454,9 +473,27 @@ func (oc *Controller) recordAddEvent(objType reflect.Type, obj interface{}) {
 func (oc *Controller) recordDeleteEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
 	case factory.PodType:
-		klog.V(5).Infof("Recording add event on pod")
+		klog.V(5).Infof("Recording delete event on pod")
 		pod := obj.(*kapi.Pod)
-		oc.metricsRecorder.CleanPod(pod.UID)
+		oc.podRecorder.CleanPod(pod.UID)
+		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
+	case factory.PolicyType:
+		klog.V(5).Infof("Recording delete event on network policy")
+		np := obj.(*knet.NetworkPolicy)
+		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
+	}
+}
+
+func (oc *Controller) recordSuccessEvent(objType reflect.Type, obj interface{}) {
+	switch objType {
+	case factory.PodType:
+		klog.V(5).Infof("Recording success event on pod")
+		pod := obj.(*kapi.Pod)
+		metrics.GetConfigDurationRecorder().End("pod", pod.Namespace, pod.Name)
+	case factory.PolicyType:
+		klog.V(5).Infof("Recording success event on network policy")
+		np := obj.(*knet.NetworkPolicy)
+		metrics.GetConfigDurationRecorder().End("networkpolicy", np.Namespace, np.Name)
 	}
 }
 
@@ -501,6 +538,7 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *knet.NetworkPolicy", obj)
 		}
+
 		if err = oc.addNetworkPolicy(np); err != nil {
 			klog.Infof("Network Policy retry delete failed for %s/%s, will try again later: %v",
 				np.Namespace, np.Name, err)
@@ -565,7 +603,11 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 		)
 		// The AddFilteredPodHandler call might call handlePeerPodSelectorAddUpdate
 		// on existing pods so we can't be holding the lock at this point
-		podHandler := oc.WatchResource(retryPeerPods)
+		podHandler, err := oc.WatchResource(retryPeerPods)
+		if err != nil {
+			klog.Errorf("Failed WatchResource for PeerNamespaceAndPodSelectorTypeVar: %v", err)
+			return err
+		}
 
 		extraParameters.np.Lock()
 		defer extraParameters.np.Unlock()
@@ -625,6 +667,7 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 	case factory.PodType:
 		oldPod := oldObj.(*kapi.Pod)
 		newPod := newObj.(*kapi.Pod)
+
 		newKey, err := getResourceKey(objectsToRetry.oType, newObj)
 		if err != nil {
 			return err
@@ -681,6 +724,7 @@ func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj i
 	case factory.PodType:
 		var portInfo *lpInfo
 		pod := obj.(*kapi.Pod)
+
 		if cachedObj != nil {
 			portInfo = cachedObj.(*lpInfo)
 		}
@@ -693,6 +737,7 @@ func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj i
 		if !ok {
 			return fmt.Errorf("could not cast obj of type %T to *knet.NetworkPolicy", obj)
 		}
+
 		if cachedObj != nil {
 			if cachedNP, ok = cachedObj.(*networkPolicy); !ok {
 				cachedNP = nil
@@ -789,6 +834,13 @@ func (oc *Controller) iterateRetryResources(r *retryObjs, updateAll bool) {
 		if entry.ignore {
 			continue
 		}
+		// storing original obj for metrics
+		var initObj interface{}
+		if entry.newObj != nil {
+			initObj = entry.newObj
+		} else if entry.oldObj != nil {
+			initObj = entry.oldObj
+		}
 		// check if we need to create the resource object
 		if entry.newObj != nil {
 			// get the latest version of the resource object from the informer;
@@ -855,8 +907,10 @@ func (oc *Controller) iterateRetryResources(r *retryObjs, updateAll bool) {
 		}
 
 		klog.Infof("%v retry successful for %s", r.oType, objKey)
+		if initObj != nil {
+			oc.recordSuccessEvent(r.oType, initObj)
+		}
 		r.deleteRetryObj(objKey, false)
-
 	}
 }
 
@@ -882,52 +936,40 @@ func (oc *Controller) periodicallyRetryResources(r *retryObjs) {
 
 // Given a *retryObjs instance, getSyncResourcesFunc retuns the sync function for a given resource type.
 // This will be then called on all existing objects when a watcher is started.
-func (oc *Controller) getSyncResourcesFunc(r *retryObjs) (func([]interface{}), error) {
+func (oc *Controller) getSyncResourcesFunc(r *retryObjs) (func([]interface{}) error, error) {
 
-	var syncRetriableFunc func([]interface{}) error
-	var syncFunc func([]interface{})
-	var name string
+	var syncFunc func([]interface{}) error
 
-	// If a type needs a retriable sync funcion, it will set syncRetriableFunc
-	// and will keep syncFunc=nil. For a non-retriable sync func,
-	// it will directly set syncFunc.
 	switch r.oType {
 	case factory.PodType:
-		name = "SyncPods"
-		syncRetriableFunc = oc.syncPodsRetriable
+		syncFunc = oc.syncPodsRetriable
 
 	case factory.PolicyType:
-		name = "syncNetworkPolicies"
-		syncRetriableFunc = oc.syncNetworkPolicies
+		syncFunc = oc.syncNetworkPolicies
 
 	case factory.NodeType:
-		name = "syncNodes"
-		syncRetriableFunc = oc.syncNodesRetriable
+		syncFunc = oc.syncNodesRetriable
 
 	case factory.PeerServiceType,
 		factory.PeerNamespaceAndPodSelectorType:
-		name = ""
-		syncRetriableFunc = nil
+		syncFunc = nil
 
 	case factory.PeerPodSelectorType:
-		name = "PeerPodSelector"
 		extraParameters := r.extraParameters.(*NetworkPolicyExtraParameters)
-		syncRetriableFunc = func(objs []interface{}) error {
+		syncFunc = func(objs []interface{}) error {
 			return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, objs...)
 		}
 
 	case factory.PeerPodForNamespaceAndPodSelectorType:
-		name = "PeerPodForNamespaceAndPodSelector"
 		extraParameters := r.extraParameters.(*NetworkPolicyExtraParameters)
-		syncRetriableFunc = func(objs []interface{}) error {
+		syncFunc = func(objs []interface{}) error {
 			return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, objs...)
 		}
 
 	case factory.PeerNamespaceSelectorType:
-		name = "PeerNamespaceSelector"
 		extraParameters := r.extraParameters.(*NetworkPolicyExtraParameters)
 		// the function below will never fail, so there's no point in making it retriable...
-		syncFunc = func(i []interface{}) {
+		syncFunc = func(i []interface{}) error {
 			// This needs to be a write lock because there's no locking around 'gress policies
 			extraParameters.np.Lock()
 			defer extraParameters.np.Unlock()
@@ -937,28 +979,19 @@ func (oc *Controller) getSyncResourcesFunc(r *retryObjs) (func([]interface{}), e
 			// The ACL must be set explicitly after setting up this handler
 			// for the address set to be considered.
 			extraParameters.gp.addNamespaceAddressSets(i)
+			return nil
 		}
 
 	case factory.LocalPodSelectorType:
-		name = "LocalPodSelectorType"
-		syncRetriableFunc = r.syncFunc
+		syncFunc = r.syncFunc
 
 	case factory.EgressFirewallType:
-		name = "syncEgressFirewall"
-		syncRetriableFunc = oc.syncEgressFirewall
+		syncFunc = oc.syncEgressFirewall
 
 	default:
 		return nil, fmt.Errorf("no sync function for object type %v", r.oType)
 	}
 
-	if syncFunc == nil {
-		syncFunc = func(objects []interface{}) {
-			if syncRetriableFunc == nil {
-				return
-			}
-			oc.syncWithRetry(name, func() error { return syncRetriableFunc(objects) })
-		}
-	}
 	return syncFunc, nil
 }
 
@@ -1016,22 +1049,20 @@ func (oc *Controller) processObjectInTerminalState(objectsToRetry *retryObjs, ob
 // periodically or when explicitly requested.
 // Note: when applying WatchResource to a new resource type, the appropriate resource-specific logic must be added to the
 // the different methods it calls.
-func (oc *Controller) WatchResource(objectsToRetry *retryObjs) *factory.Handler {
+func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler, error) {
 	addHandlerFunc, err := oc.watchFactory.GetResourceHandlerFunc(objectsToRetry.oType)
 	if err != nil {
-		klog.Errorf("No resource handler function found for resource %v. "+
+		return nil, fmt.Errorf("no resource handler function found for resource %v. "+
 			"Cannot watch this resource.", objectsToRetry.oType)
-		return nil
 	}
 	syncFunc, err := oc.getSyncResourcesFunc(objectsToRetry)
 	if err != nil {
-		klog.Errorf("No sync function found for resource %v. "+
+		return nil, fmt.Errorf("no sync function found for resource %v. "+
 			"Cannot watch this resource.", objectsToRetry.oType)
-		return nil
 	}
 
 	// create the actual watcher
-	handler := addHandlerFunc(
+	handler, err := addHandlerFunc(
 		objectsToRetry.namespaceForFilteredHandler,     // filter out objects not in this namespace
 		objectsToRetry.labelSelectorForFilteredHandler, // filter out objects not matching these labels
 		cache.ResourceEventHandlerFuncs{
@@ -1082,6 +1113,7 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) *factory.Handler 
 				}
 				klog.Infof("Creating %v %s took: %v", objectsToRetry.oType, key, time.Since(start))
 				objectsToRetry.deleteRetryObj(key, true)
+				oc.recordSuccessEvent(objectsToRetry.oType, obj)
 			},
 
 			UpdateFunc: func(old, newer interface{}) {
@@ -1097,6 +1129,7 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) *factory.Handler 
 				if areEqual {
 					return
 				}
+				oc.recordUpdateEvent(objectsToRetry.oType, newer)
 
 				// get the object keys for newer and old (expected to be the same)
 				newKey, err := getResourceKey(objectsToRetry.oType, newer)
@@ -1201,6 +1234,7 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) *factory.Handler 
 					}
 				}
 				objectsToRetry.deleteRetryObj(newKey, true)
+				oc.recordSuccessEvent(objectsToRetry.oType, newer)
 
 			},
 			DeleteFunc: func(obj interface{}) {
@@ -1227,13 +1261,19 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) *factory.Handler 
 					return
 				}
 				objectsToRetry.deleteRetryObj(key, true)
+				oc.recordSuccessEvent(objectsToRetry.oType, obj)
 			},
 		},
 		syncFunc) // adds all existing objects at startup
+
+	if err != nil {
+		return nil, fmt.Errorf("watchResource for resource %v. "+
+			"Failed addHandlerFunc: %v", objectsToRetry.oType, err)
+	}
 
 	// track the retry entries and every 30 seconds (or upon explicit request) check if any objects
 	// need to be retried
 	go oc.periodicallyRetryResources(objectsToRetry)
 
-	return handler
+	return handler, nil
 }
