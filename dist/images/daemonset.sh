@@ -74,6 +74,7 @@ OVN_IPFIX_CACHE_ACTIVE_TIMEOUT=""
 OVN_HOST_NETWORK_NAMESPACE=""
 OVN_EX_GW_NETWORK_INTERFACE=""
 OVNKUBE_NODE_MGMT_PORT_NETDEV=""
+OVNKUBE_CONFIG_DURATION_ENABLE=
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -245,6 +246,9 @@ while [ "$1" != "" ]; do
   --ovnkube-node-mgmt-port-netdev)
     OVNKUBE_NODE_MGMT_PORT_NETDEV=$VALUE
     ;;
+  --ovnkube-config-duration-enable)
+    OVNKUBE_CONFIG_DURATION_ENABLE=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -374,6 +378,8 @@ ovn_ex_gw_networking_interface=${OVN_EX_GW_NETWORK_INTERFACE}
 echo "ovn_ex_gw_networking_interface: ${ovn_ex_gw_networking_interface}"
 ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV}
 echo "ovnkube_node_mgmt_port_netdev: ${ovnkube_node_mgmt_port_netdev}"
+ovnkube_config_duration_enable=${OVNKUBE_CONFIG_DURATION_ENABLE}
+echo "ovnkube_config_duration_enable: ${ovnkube_config_duration_enable}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -450,6 +456,7 @@ ovn_image=${image} \
   ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
   ovn_acl_logging_rate_limit=${ovn_acl_logging_rate_limit} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \

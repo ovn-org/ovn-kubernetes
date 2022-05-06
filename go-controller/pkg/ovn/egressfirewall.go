@@ -95,14 +95,8 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 //      For this it just deletes all the ACLs on the distributed join switch
 
 // NOTE: Utilize the fact that we know that all egress firewall related setup must have a priority: types.MinimumReservedEgressFirewallPriority <= priority <= types.EgressFirewallStartPriority
-func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) error {
-	oc.syncWithRetry("syncEgressFirewall", func() error { return oc.syncEgressFirewallRetriable(egressFirewalls) })
-	return nil
-}
-
-// This function implements the main body of work of what is described by syncEgressFirewall.
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.
-func (oc *Controller) syncEgressFirewallRetriable(egressFirewalls []interface{}) error {
+func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) error {
 	// Lookup all ACLs used for egress Firewalls
 	aclPred := func(item *nbdb.ACL) bool {
 		return item.Priority >= types.MinimumReservedEgressFirewallPriority && item.Priority <= types.EgressFirewallStartPriority

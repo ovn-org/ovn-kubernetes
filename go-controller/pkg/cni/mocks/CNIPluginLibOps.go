@@ -32,26 +32,26 @@ func (_m *CNIPluginLibOps) AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Link,
 }
 
 // SetupVeth provides a mock function with given fields: contVethName, mtu, hostNS
-func (_m *CNIPluginLibOps) SetupVeth(contVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error) {
-	ret := _m.Called(contVethName, mtu, hostNS)
+func (_m *CNIPluginLibOps) SetupVeth(contVethName string, hostVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error) {
+	ret := _m.Called(contVethName, hostVethName, mtu, hostNS)
 
 	var r0 net.Interface
-	if rf, ok := ret.Get(0).(func(string, int, ns.NetNS) net.Interface); ok {
-		r0 = rf(contVethName, mtu, hostNS)
+	if rf, ok := ret.Get(0).(func(string, string, int, ns.NetNS) net.Interface); ok {
+		r0 = rf(contVethName, hostVethName, mtu, hostNS)
 	} else {
 		r0 = ret.Get(0).(net.Interface)
 	}
 
 	var r1 net.Interface
-	if rf, ok := ret.Get(1).(func(string, int, ns.NetNS) net.Interface); ok {
-		r1 = rf(contVethName, mtu, hostNS)
+	if rf, ok := ret.Get(1).(func(string, string, int, ns.NetNS) net.Interface); ok {
+		r1 = rf(contVethName, hostVethName, mtu, hostNS)
 	} else {
 		r1 = ret.Get(1).(net.Interface)
 	}
 
 	var r2 error
-	if rf, ok := ret.Get(2).(func(string, int, ns.NetNS) error); ok {
-		r2 = rf(contVethName, mtu, hostNS)
+	if rf, ok := ret.Get(2).(func(string, string, int, ns.NetNS) error); ok {
+		r2 = rf(contVethName, hostVethName, mtu, hostNS)
 	} else {
 		r2 = ret.Error(2)
 	}
