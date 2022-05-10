@@ -33,7 +33,7 @@ RUN yum install -y  \
 	yum clean all
 
 ARG ovsver=2.17.0-8.el8fdp
-ARG ovnver=22.03.0-9.el8fdp
+ARG ovnver=22.03.0-24.el8fdp
 
 RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
