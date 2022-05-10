@@ -97,7 +97,7 @@ type serviceConfig struct {
 //
 // `add` parameter indicates if the flows should exist or be removed from the cache
 // `hasLocalHostNetworkEp` indicates if at least one host networked endpoint exists for this service which is local to this node.
-func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, hasLocalHostNetworkEp bool) {
+func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, hasLocalHostNetworkEp bool) error {
 	var cookie, key string
 	var err error
 
@@ -192,7 +192,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 			if len(ing.IP) > 0 {
 				err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, hasLocalHostNetworkEp, protocol, actions, ing.IP, "Ingress")
 				if err != nil {
-					klog.Errorf(err.Error())
+					return err
 				}
 			}
 		}
@@ -200,10 +200,11 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 		for _, externalIP := range service.Spec.ExternalIPs {
 			err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, hasLocalHostNetworkEp, protocol, actions, externalIP, "External")
 			if err != nil {
-				klog.Errorf(err.Error())
+				return err
 			}
 		}
 	}
+	return nil
 }
 
 // createLbAndExternalSvcFlows handles managing breth0 gateway flows for ingress traffic towards kubernetes services
@@ -408,63 +409,75 @@ func (npw *nodePortWatcher) updateServiceInfo(index ktypes.NamespacedName, servi
 
 // addServiceRules ensures the correct iptables rules and OpenFlow physical
 // flows are programmed for a given service and endpoint configuration
-func addServiceRules(service *kapi.Service, svcHasLocalHostNetEndPnt bool, npw *nodePortWatcher) {
-	// For dpu or Full mode
-	if npw != nil {
-		npw.updateServiceFlowCache(service, true, svcHasLocalHostNetEndPnt)
-		npw.ofm.requestFlowSync()
-		if !npw.dpuMode {
-			// add iptable rules only in full mode
-			addGatewayIptRules(service, svcHasLocalHostNetEndPnt)
-		}
-		return
-	}
+func addServiceRules(service *kapi.Service, svcHasLocalHostNetEndPnt bool, npw *nodePortWatcher) error {
 	// For Host Only Mode
-	addGatewayIptRules(service, svcHasLocalHostNetEndPnt)
+	if npw == nil {
+		return addGatewayIptRules(service, svcHasLocalHostNetEndPnt)
+	}
+	// For dpu or Full mode
+	err := npw.updateServiceFlowCache(service, true, svcHasLocalHostNetEndPnt)
+	if err != nil {
+		return err
+	}
+	npw.ofm.requestFlowSync()
+	if !npw.dpuMode {
+		// add iptable rules only in full mode
+		err = addGatewayIptRules(service, svcHasLocalHostNetEndPnt)
+	}
+	return err
 }
 
 // delServiceRules deletes all possible iptables rules and OpenFlow physical
 // flows for a service
-func delServiceRules(service *kapi.Service, npw *nodePortWatcher) {
-	// full mode || dpu mode
-	if npw != nil {
-		npw.updateServiceFlowCache(service, false, false)
-		npw.ofm.requestFlowSync()
-		if !npw.dpuMode {
-			// Always try and delete all rules here in full mode & in host only mode. We don't touch iptables in dpu mode.
-			// +--------------------------+-----------------------+-----------------------+--------------------------------+
-			// | svcHasLocalHostNetEndPnt | ExternalTrafficPolicy | InternalTrafficPolicy |     Scenario for deletion      |
-			// |--------------------------|-----------------------|-----------------------|--------------------------------|
-			// |                          |                       |                       |      deletes the MARK          |
-			// |         false            |         cluster       |          local        |      rules for itp=local       |
-			// |                          |                       |                       |       called from mangle       |
-			// |--------------------------|-----------------------|-----------------------|--------------------------------|
-			// |                          |                       |                       |      deletes the REDIRECT      |
-			// |         true             |         cluster       |          local        |      rules towards target      |
-			// |                          |                       |                       |       port for itp=local       |
-			// |--------------------------|-----------------------|-----------------------|--------------------------------|
-			// |                          |                       |                       | deletes the DNAT rules for     |
-			// |         false            |          local        |          cluster      |    non-local-host-net          |
-			// |                          |                       |                       | eps towards masqueradeIP +     |
-			// |                          |                       |                       | DNAT rules towards clusterIP   |
-			// |--------------------------|-----------------------|-----------------------|--------------------------------|
-			// |                          |                       |                       |    deletes the DNAT rules      |
-			// |       false||true        |          cluster      |          cluster      |   	towards clusterIP          |
-			// |                          |                       |                       |       for the default case     |
-			// |--------------------------|-----------------------|-----------------------|--------------------------------|
-			// |                          |                       |                       |      deletes all the rules     |
-			// |       false||true        |          local        |          local        |   for etp=local + itp=local    |
-			// |                          |                       |                       |   + default dnat towards CIP   |
-			// +--------------------------+-----------------------+-----------------------+--------------------------------+
-
-			delGatewayIptRules(service, true)
-			delGatewayIptRules(service, false)
+func delServiceRules(service *kapi.Service, npw *nodePortWatcher) error {
+	// For Host Only Mode
+	if npw == nil {
+		err := delGatewayIptRules(service, true)
+		if err != nil {
+			return err
 		}
-		return
+		return delGatewayIptRules(service, false)
 	}
+	// full mode || dpu mode
+	err := npw.updateServiceFlowCache(service, false, false)
+	if err != nil {
+		return err
+	}
+	npw.ofm.requestFlowSync()
+	if !npw.dpuMode {
+		// Always try and delete all rules here in full mode & in host only mode. We don't touch iptables in dpu mode.
+		// +--------------------------+-----------------------+-----------------------+--------------------------------+
+		// | svcHasLocalHostNetEndPnt | ExternalTrafficPolicy | InternalTrafficPolicy |     Scenario for deletion      |
+		// |--------------------------|-----------------------|-----------------------|--------------------------------|
+		// |                          |                       |                       |      deletes the MARK          |
+		// |         false            |         cluster       |          local        |      rules for itp=local       |
+		// |                          |                       |                       |       called from mangle       |
+		// |--------------------------|-----------------------|-----------------------|--------------------------------|
+		// |                          |                       |                       |      deletes the REDIRECT      |
+		// |         true             |         cluster       |          local        |      rules towards target      |
+		// |                          |                       |                       |       port for itp=local       |
+		// |--------------------------|-----------------------|-----------------------|--------------------------------|
+		// |                          |                       |                       | deletes the DNAT rules for     |
+		// |         false            |          local        |          cluster      |    non-local-host-net          |
+		// |                          |                       |                       | eps towards masqueradeIP +     |
+		// |                          |                       |                       | DNAT rules towards clusterIP   |
+		// |--------------------------|-----------------------|-----------------------|--------------------------------|
+		// |                          |                       |                       |    deletes the DNAT rules      |
+		// |       false||true        |          cluster      |          cluster      |   	towards clusterIP          |
+		// |                          |                       |                       |       for the default case     |
+		// |--------------------------|-----------------------|-----------------------|--------------------------------|
+		// |                          |                       |                       |      deletes all the rules     |
+		// |       false||true        |          local        |          local        |   for etp=local + itp=local    |
+		// |                          |                       |                       |   + default dnat towards CIP   |
+		// +--------------------------+-----------------------+-----------------------+--------------------------------+
 
-	delGatewayIptRules(service, true)
-	delGatewayIptRules(service, false)
+		err = delGatewayIptRules(service, true)
+		if err != nil {
+			return err
+		}
+		err = delGatewayIptRules(service, false)
+	}
+	return err
 }
 
 func serviceUpdateNotNeeded(old, new *kapi.Service) bool {
@@ -480,10 +493,10 @@ func serviceUpdateNotNeeded(old, new *kapi.Service) bool {
 }
 
 // AddService handles configuring shared gateway bridge flows to steer External IP, Node Port, Ingress LB traffic into OVN
-func (npw *nodePortWatcher) AddService(service *kapi.Service) {
+func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
 	var hasLocalHostNetworkEp bool
 	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
-		return
+		return nil
 	}
 
 	klog.V(5).Infof("Adding service %s in namespace %s", service.Name, service.Namespace)
@@ -501,40 +514,51 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) {
 	// If something didn't already do it add correct Service rules
 	if exists := npw.addOrSetServiceInfo(name, service, hasLocalHostNetworkEp); !exists {
 		klog.V(5).Infof("Service Add %s event in namespace %s came before endpoint event setting svcConfig", service.Name, service.Namespace)
-		addServiceRules(service, hasLocalHostNetworkEp, npw)
+		err := addServiceRules(service, hasLocalHostNetworkEp, npw)
+		if err != nil {
+			return err
+		}
 	} else {
 		klog.V(5).Infof("Rules already programmed for %s in namespace %s", service.Name, service.Namespace)
 	}
+	return nil
 }
 
-func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) {
+func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) error {
 	name := ktypes.NamespacedName{Namespace: old.Namespace, Name: old.Name}
 
 	if serviceUpdateNotNeeded(old, new) {
 		klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, "+
 			".Spec.ExternalIP, .Spec.ClusterIP, .Spec.ClusterIPs, .Spec.Type, .Status.LoadBalancer.Ingress, "+
 			".Spec.ExternalTrafficPolicy, .Spec.InternalTrafficPolicy", new.Name)
-		return
+		return nil
 	}
 	// Update the service in svcConfig if we need to so that other handler
 	// threads do the correct thing, leave hasLocalHostNetworkEp alone in the cache
 	svcConfig, exists := npw.updateServiceInfo(name, new, nil)
 	if !exists {
 		klog.V(5).Infof("Service %s in namespace %s was deleted during service Update", old.Name, old.Namespace)
-		return
+		return nil
 	}
 
 	if util.ServiceTypeHasClusterIP(old) && util.IsClusterIPSet(old) {
 		// Delete old rules if needed, but don't delete svcConfig
 		// so that we don't miss any endpoint update events here
 		klog.V(5).Infof("Deleting old service rules for: %v", old)
-		delServiceRules(old, npw)
+		err := delServiceRules(old, npw)
+		if err != nil {
+			return err
+		}
 	}
 
 	if util.ServiceTypeHasClusterIP(new) && util.IsClusterIPSet(new) {
 		klog.V(5).Infof("Adding new service rules for: %v", new)
-		addServiceRules(new, svcConfig.hasLocalHostNetworkEp, npw)
+		err := addServiceRules(new, svcConfig.hasLocalHostNetworkEp, npw)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // deleteConntrackForServiceVIP deletes the conntrack entries for the provided svcVIP:svcPort by comparing them to ConntrackOrigDstIP:ConntrackOrigDstPort
@@ -579,9 +603,9 @@ func (npw *nodePortWatcher) deleteConntrackForService(service *kapi.Service) err
 	return nil
 }
 
-func (npw *nodePortWatcher) DeleteService(service *kapi.Service) {
+func (npw *nodePortWatcher) DeleteService(service *kapi.Service) error {
 	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
-		return
+		return nil
 	}
 
 	klog.V(5).Infof("Deleting service %s in namespace %s", service.Name, service.Namespace)
@@ -591,14 +615,17 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) {
 	// is not guaranteed. See https://github.com/kubernetes/kubernetes/issues/108523#issuecomment-1074044415.
 	err := npw.deleteConntrackForService(service)
 	if err != nil {
-		klog.Errorf("Failed to delete conntrack entry for service %v: %v", name, err)
+		return err
 	}
 	if svcConfig, exists := npw.getAndDeleteServiceInfo(name); exists {
-		delServiceRules(svcConfig.service, npw)
+		err = delServiceRules(svcConfig.service, npw)
+		if err != nil {
+			return err
+		}
 	} else {
 		klog.Warningf("Deletion failed No service found in cache for endpoint %s in namespace %s", service.Name, service.Namespace)
 	}
-
+	return nil
 }
 
 func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
@@ -622,8 +649,12 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		hasLocalHostNetworkEp := hasLocalHostNetworkEndpoints(ep, nodeIPs)
 		npw.getAndSetServiceInfo(name, service, hasLocalHostNetworkEp)
 		// Delete OF rules for service if they exist
-		npw.updateServiceFlowCache(service, false, hasLocalHostNetworkEp)
-		npw.updateServiceFlowCache(service, true, hasLocalHostNetworkEp)
+		if err := npw.updateServiceFlowCache(service, false, hasLocalHostNetworkEp); err != nil {
+			return err
+		}
+		if err := npw.updateServiceFlowCache(service, true, hasLocalHostNetworkEp); err != nil {
+			return err
+		}
 		// Add correct iptables rules only for Full mode
 		if !npw.dpuMode {
 			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, hasLocalHostNetworkEp)...)
@@ -635,16 +666,18 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 	if !npw.dpuMode {
 		// (NOTE: Order is important, add jump to iptableETPChain before jump to NP/EIP chains)
 		for _, chain := range []string{iptableITPChain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain, iptableMgmPortChain} {
-			recreateIPTRules("nat", chain, keepIPTRules)
+			if err := recreateIPTRules("nat", chain, keepIPTRules); err != nil {
+				return err
+			}
 		}
-		recreateIPTRules("mangle", iptableITPChain, keepIPTRules)
+		if err := recreateIPTRules("mangle", iptableITPChain, keepIPTRules); err != nil {
+			return err
+		}
 	}
-	// FIXME(FF): This function must propagate errors back to caller.
-	// https://bugzilla.redhat.com/show_bug.cgi?id=2081857
 	return nil
 }
 
-func (npw *nodePortWatcher) AddEndpoints(ep *kapi.Endpoints) {
+func (npw *nodePortWatcher) AddEndpoints(ep *kapi.Endpoints) error {
 	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
 
 	svc, err := npw.watchFactory.GetService(ep.Namespace, ep.Name)
@@ -652,11 +685,11 @@ func (npw *nodePortWatcher) AddEndpoints(ep *kapi.Endpoints) {
 		// This is not necessarily an error. For e.g when there are endpoints
 		// without a corresponding service.
 		klog.V(5).Infof("No service found for endpoint %s in namespace %s during add", ep.Name, ep.Namespace)
-		return
+		return nil
 	}
 
 	if !util.ServiceTypeHasClusterIP(svc) || !util.IsClusterIPSet(svc) {
-		return
+		return nil
 	}
 
 	klog.V(5).Infof("Adding endpoints %s in namespace %s", ep.Name, ep.Namespace)
@@ -669,19 +702,24 @@ func (npw *nodePortWatcher) AddEndpoints(ep *kapi.Endpoints) {
 	out, exists := npw.getAndSetServiceInfo(name, svc, hasLocalHostNetworkEp)
 	if !exists {
 		klog.V(5).Infof("Endpoint %s ADD event in namespace %s is creating rules", ep.Name, ep.Namespace)
-		addServiceRules(svc, hasLocalHostNetworkEp, npw)
-		return
+		return addServiceRules(svc, hasLocalHostNetworkEp, npw)
 	}
 
 	if out.hasLocalHostNetworkEp != hasLocalHostNetworkEp {
 		klog.V(5).Infof("Endpoint %s ADD event in namespace %s is updating rules", ep.Name, ep.Namespace)
-		delServiceRules(svc, npw)
-		addServiceRules(svc, hasLocalHostNetworkEp, npw)
+		err := delServiceRules(svc, npw)
+		if err != nil {
+			return err
+		}
+		err = addServiceRules(svc, hasLocalHostNetworkEp, npw)
+		if err != nil {
+			return err
+		}
 	}
-
+	return nil
 }
 
-func (npw *nodePortWatcher) DeleteEndpoints(ep *kapi.Endpoints) {
+func (npw *nodePortWatcher) DeleteEndpoints(ep *kapi.Endpoints) error {
 	var hasLocalHostNetworkEp = false
 
 	klog.V(5).Infof("Deleting endpoints %s in namespace %s", ep.Name, ep.Namespace)
@@ -693,16 +731,23 @@ func (npw *nodePortWatcher) DeleteEndpoints(ep *kapi.Endpoints) {
 		npw.serviceInfoLock.Lock()
 		defer npw.serviceInfoLock.Unlock()
 
-		delServiceRules(svcConfig.service, npw)
-		addServiceRules(svcConfig.service, hasLocalHostNetworkEp, npw)
+		err := delServiceRules(svcConfig.service, npw)
+		if err != nil {
+			return err
+		}
+		err = addServiceRules(svcConfig.service, hasLocalHostNetworkEp, npw)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (npw *nodePortWatcher) UpdateEndpoints(old *kapi.Endpoints, new *kapi.Endpoints) {
+func (npw *nodePortWatcher) UpdateEndpoints(old *kapi.Endpoints, new *kapi.Endpoints) error {
 	name := ktypes.NamespacedName{Namespace: old.Namespace, Name: old.Name}
 
 	if reflect.DeepEqual(new.Subsets, old.Subsets) {
-		return
+		return nil
 	}
 
 	klog.V(5).Infof("Updating endpoints %s in namespace %s", old.Name, old.Namespace)
@@ -710,7 +755,10 @@ func (npw *nodePortWatcher) UpdateEndpoints(old *kapi.Endpoints, new *kapi.Endpo
 	// Delete old endpoint rules and add normal ones back
 	if len(new.Subsets) == 0 {
 		if _, exists := npw.getServiceInfo(name); exists {
-			npw.DeleteEndpoints(old)
+			err := npw.DeleteEndpoints(old)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -719,41 +767,55 @@ func (npw *nodePortWatcher) UpdateEndpoints(old *kapi.Endpoints, new *kapi.Endpo
 	hasLocalHostNetworkEpOld := hasLocalHostNetworkEndpoints(old, nodeIPs)
 	hasLocalHostNetworkEpNew := hasLocalHostNetworkEndpoints(new, nodeIPs)
 	if hasLocalHostNetworkEpOld != hasLocalHostNetworkEpNew {
-		npw.DeleteEndpoints(old)
-		npw.AddEndpoints(new)
+		err := npw.DeleteEndpoints(old)
+		if err != nil {
+			return err
+		}
+		err = npw.AddEndpoints(new)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (npwipt *nodePortWatcherIptables) AddService(service *kapi.Service) {
+func (npwipt *nodePortWatcherIptables) AddService(service *kapi.Service) error {
 	// don't process headless service or services that doesn't have NodePorts or ExternalIPs
 	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
-		return
+		return nil
 	}
-	addServiceRules(service, false, nil)
+	return addServiceRules(service, false, nil)
 }
 
-func (npwipt *nodePortWatcherIptables) UpdateService(old, new *kapi.Service) {
+func (npwipt *nodePortWatcherIptables) UpdateService(old, new *kapi.Service) error {
 	if serviceUpdateNotNeeded(old, new) {
 		klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, "+
 			".Spec.ExternalIP, .Spec.ClusterIP, .Spec.ClusterIPs, .Spec.Type, .Status.LoadBalancer.Ingress", new.Name)
-		return
+		return nil
 	}
 
 	if util.ServiceTypeHasClusterIP(old) && util.IsClusterIPSet(old) {
-		delServiceRules(old, nil)
+		err := delServiceRules(old, nil)
+		if err != nil {
+			return err
+		}
 	}
 
 	if util.ServiceTypeHasClusterIP(new) && util.IsClusterIPSet(new) {
-		addServiceRules(new, false, nil)
+		err := addServiceRules(new, false, nil)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (npwipt *nodePortWatcherIptables) DeleteService(service *kapi.Service) {
+func (npwipt *nodePortWatcherIptables) DeleteService(service *kapi.Service) error {
 	// don't process headless service
 	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
-		return
+		return nil
 	}
-	delServiceRules(service, nil)
+	return delServiceRules(service, nil)
 }
 
 func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) error {
@@ -772,10 +834,11 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 
 	// sync IPtables rules once
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
-		recreateIPTRules("nat", chain, keepIPTRules)
+		err := recreateIPTRules("nat", chain, keepIPTRules)
+		if err != nil {
+			return err
+		}
 	}
-	// FIXME(FF): This function must propagate errors back to caller.
-	// https://bugzilla.redhat.com/show_bug.cgi?id=2081858
 	return nil
 }
 

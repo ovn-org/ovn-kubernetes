@@ -391,16 +391,20 @@ func cleanupSharedGatewayIPTChains() {
 	}
 }
 
-func recreateIPTRules(table, chain string, keepIPTRules []iptRule) {
+func recreateIPTRules(table, chain string, keepIPTRules []iptRule) error {
 	for _, proto := range clusterIPTablesProtocols() {
-		ipt, _ := util.GetIPTablesHelper(proto)
-		if err := ipt.ClearChain(table, chain); err != nil {
-			klog.Errorf("Error clearing chain: %s in table: %s, err: %v", chain, table, err)
+		ipt, err := util.GetIPTablesHelper(proto)
+		if err != nil {
+			return err
+		}
+		if err = ipt.ClearChain(table, chain); err != nil {
+			return err
 		}
 	}
 	if err := addIptRules(keepIPTRules); err != nil {
-		klog.Error(err)
+		return err
 	}
+	return nil
 }
 
 // getGatewayIPTRules returns ClusterIP, NodePort, ExternalIP and LoadBalancer iptables rules for service.

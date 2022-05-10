@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/pkg/errors"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -139,34 +140,40 @@ func newPortClaimWatcher(recorder record.EventRecorder) (*portClaimWatcher, erro
 	}, nil
 }
 
-func (p *portClaimWatcher) AddService(svc *kapi.Service) {
-	if errors := handleService(svc, p.port.open); len(errors) > 0 {
-		for _, err := range errors {
-			klog.Errorf("Error claiming port for service: %s/%s: %v", svc.Namespace, svc.Name, err)
+func (p *portClaimWatcher) AddService(svc *kapi.Service) error {
+	var addErrors error
+	if errs := handleService(svc, p.port.open); len(errs) > 0 {
+		for _, err := range errs {
+			addErrors = errors.Wrapf(addErrors, "Error claiming port for service: %s/%s: %v", svc.Namespace, svc.Name, err)
 		}
 	}
+	return addErrors
 }
 
-func (p *portClaimWatcher) UpdateService(old, new *kapi.Service) {
+func (p *portClaimWatcher) UpdateService(old, new *kapi.Service) error {
 	if reflect.DeepEqual(old.Spec.ExternalIPs, new.Spec.ExternalIPs) && reflect.DeepEqual(old.Spec.Ports, new.Spec.Ports) {
-		return
+		return nil
 	}
-	errors := []error{}
-	errors = append(errors, handleService(old, p.port.close)...)
-	errors = append(errors, handleService(new, p.port.open)...)
-	if len(errors) > 0 {
-		for _, err := range errors {
-			klog.Errorf("Error updating port claim for service: %s/%s: %v", old.Namespace, old.Name, err)
+	var updateErrors error
+	errs := []error{}
+	errs = append(errs, handleService(old, p.port.close)...)
+	errs = append(errs, handleService(new, p.port.open)...)
+	if len(errs) > 0 {
+		for _, err := range errs {
+			updateErrors = errors.Wrapf(updateErrors, "Error updating port claim for service: %s/%s: %v", old.Namespace, old.Name, err)
 		}
 	}
+	return updateErrors
 }
 
-func (p *portClaimWatcher) DeleteService(svc *kapi.Service) {
-	if errors := handleService(svc, p.port.close); len(errors) > 0 {
-		for _, err := range errors {
-			klog.Errorf("Error removing port claim for service: %s/%s: %v", svc.Namespace, svc.Name, err)
+func (p *portClaimWatcher) DeleteService(svc *kapi.Service) error {
+	var deleteErrors error
+	if errs := handleService(svc, p.port.close); len(errs) > 0 {
+		for _, err := range errs {
+			deleteErrors = errors.Wrapf(deleteErrors, "Error removing port claim for service: %s/%s: %v", svc.Namespace, svc.Name, err)
 		}
 	}
+	return deleteErrors
 }
 
 func (p *portClaimWatcher) SyncServices(objs []interface{}) error {

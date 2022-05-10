@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -13,6 +14,7 @@ import (
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 )
@@ -43,49 +45,88 @@ type gateway struct {
 	readyFunc       func() (bool, error)
 }
 
-func (g *gateway) AddService(svc *kapi.Service) {
+func (g *gateway) AddService(svc *kapi.Service) error {
 	if g.portClaimWatcher != nil {
-		g.portClaimWatcher.AddService(svc)
+		err := g.portClaimWatcher.AddService(svc)
+		if err != nil {
+			return err
+		}
 	}
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.AddService(svc)
+		err := g.loadBalancerHealthChecker.AddService(svc)
+		if err != nil {
+			return err
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.AddService(svc)
+		err := g.nodePortWatcher.AddService(svc)
+		if err != nil {
+			return err
+		}
 	}
 	if g.nodePortWatcherIptables != nil {
-		g.nodePortWatcherIptables.AddService(svc)
+		err := g.nodePortWatcherIptables.AddService(svc)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (g *gateway) UpdateService(old, new *kapi.Service) {
+func (g *gateway) UpdateService(old, new *kapi.Service) error {
 	if g.portClaimWatcher != nil {
-		g.portClaimWatcher.UpdateService(old, new)
+		err := g.portClaimWatcher.UpdateService(old, new)
+		if err != nil {
+			return err
+		}
 	}
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.UpdateService(old, new)
+		err := g.loadBalancerHealthChecker.UpdateService(old, new)
+		if err != nil {
+			return err
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.UpdateService(old, new)
+		err := g.nodePortWatcher.UpdateService(old, new)
+		if err != nil {
+			return err
+		}
 	}
 	if g.nodePortWatcherIptables != nil {
-		g.nodePortWatcherIptables.UpdateService(old, new)
+		err := g.nodePortWatcherIptables.UpdateService(old, new)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (g *gateway) DeleteService(svc *kapi.Service) {
+func (g *gateway) DeleteService(svc *kapi.Service) error {
 	if g.portClaimWatcher != nil {
-		g.portClaimWatcher.DeleteService(svc)
+		err := g.portClaimWatcher.DeleteService(svc)
+		if err != nil {
+			return err
+		}
 	}
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.DeleteService(svc)
+		err := g.loadBalancerHealthChecker.DeleteService(svc)
+		if err != nil {
+			return err
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.DeleteService(svc)
+		err := g.nodePortWatcher.DeleteService(svc)
+		if err != nil {
+			return err
+		}
 	}
 	if g.nodePortWatcherIptables != nil {
-		g.nodePortWatcherIptables.DeleteService(svc)
+		err := g.nodePortWatcherIptables.DeleteService(svc)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (g *gateway) SyncServices(objs []interface{}) error {
@@ -108,31 +149,52 @@ func (g *gateway) SyncServices(objs []interface{}) error {
 	return nil
 }
 
-func (g *gateway) AddEndpoints(ep *kapi.Endpoints) {
+func (g *gateway) AddEndpoints(ep *kapi.Endpoints) error {
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.AddEndpoints(ep)
+		err := g.loadBalancerHealthChecker.AddEndpoints(ep)
+		if err != nil {
+			return err
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.AddEndpoints(ep)
+		err := g.nodePortWatcher.AddEndpoints(ep)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (g *gateway) UpdateEndpoints(old, new *kapi.Endpoints) {
+func (g *gateway) UpdateEndpoints(old, new *kapi.Endpoints) error {
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.UpdateEndpoints(old, new)
+		err := g.loadBalancerHealthChecker.UpdateEndpoints(old, new)
+		if err != nil {
+			return err
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.UpdateEndpoints(old, new)
+		err := g.nodePortWatcher.UpdateEndpoints(old, new)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (g *gateway) DeleteEndpoints(ep *kapi.Endpoints) {
+func (g *gateway) DeleteEndpoints(ep *kapi.Endpoints) error {
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.DeleteEndpoints(ep)
+		err := g.loadBalancerHealthChecker.DeleteEndpoints(ep)
+		if err != nil {
+			return err
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.DeleteEndpoints(ep)
+		err := g.nodePortWatcher.DeleteEndpoints(ep)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (g *gateway) Init(wf factory.NodeWatchFactory) error {
@@ -143,16 +205,43 @@ func (g *gateway) Init(wf factory.NodeWatchFactory) error {
 	_, err = wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			svc := obj.(*kapi.Service)
-			g.AddService(svc)
+			err := wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
+				if err := g.AddService(svc); err != nil {
+					klog.Errorf("Failed (will retry) in AddService %v: %v", svc, err)
+					return false, nil
+				}
+				return true, nil
+			})
+			if err != nil {
+				klog.Errorf(err.Error())
+			}
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldSvc := old.(*kapi.Service)
 			newSvc := new.(*kapi.Service)
-			g.UpdateService(oldSvc, newSvc)
+			err := wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
+				if err := g.UpdateService(oldSvc, newSvc); err != nil {
+					klog.Errorf("Failed (will retry) in UpdateService %v: %v", newSvc, err)
+					return false, nil
+				}
+				return true, nil
+			})
+			if err != nil {
+				klog.Errorf(err.Error())
+			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			svc := obj.(*kapi.Service)
-			g.DeleteService(svc)
+			err := wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
+				if err := g.DeleteService(svc); err != nil {
+					klog.Errorf("Failed (will retry) in DeleteService %v: %v", svc, err)
+					return false, nil
+				}
+				return true, nil
+			})
+			if err != nil {
+				klog.Errorf(err.Error())
+			}
 		},
 	}, g.SyncServices)
 	if err != nil {
@@ -163,16 +252,43 @@ func (g *gateway) Init(wf factory.NodeWatchFactory) error {
 	_, err = wf.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)
-			g.AddEndpoints(ep)
+			err := wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
+				if err := g.AddEndpoints(ep); err != nil {
+					klog.Errorf("Failed (will retry) in AddEndpoints %v: %v", ep, err)
+					return false, nil
+				}
+				return true, nil
+			})
+			if err != nil {
+				klog.Errorf(err.Error())
+			}
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldEp := old.(*kapi.Endpoints)
 			newEp := new.(*kapi.Endpoints)
-			g.UpdateEndpoints(oldEp, newEp)
+			err := wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
+				if err := g.UpdateEndpoints(oldEp, newEp); err != nil {
+					klog.Errorf("Failed (will retry) in UpdateEndpoints %v: %v", newEp, err)
+					return false, nil
+				}
+				return true, nil
+			})
+			if err != nil {
+				klog.Errorf(err.Error())
+			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)
-			g.DeleteEndpoints(ep)
+			err := wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
+				if err := g.DeleteEndpoints(ep); err != nil {
+					klog.Errorf("Failed (will retry) in DeleteEndpoints %v: %v", ep, err)
+					return false, nil
+				}
+				return true, nil
+			})
+			if err != nil {
+				klog.Errorf(err.Error())
+			}
 		},
 	}, nil)
 	if err != nil {

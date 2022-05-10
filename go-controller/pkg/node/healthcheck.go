@@ -37,62 +37,72 @@ func newLoadBalancerHealthChecker(nodeName string) *loadBalancerHealthChecker {
 	}
 }
 
-func (l *loadBalancerHealthChecker) AddService(svc *kapi.Service) {
-	if svc.Spec.HealthCheckNodePort != 0 {
-		l.Lock()
-		defer l.Unlock()
-		name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
-		l.services[name] = uint16(svc.Spec.HealthCheckNodePort)
-		_ = l.server.SyncServices(l.services)
+func (l *loadBalancerHealthChecker) AddService(svc *kapi.Service) error {
+	if svc.Spec.HealthCheckNodePort == 0 {
+		return nil
 	}
+	l.Lock()
+	defer l.Unlock()
+	name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
+	l.services[name] = uint16(svc.Spec.HealthCheckNodePort)
+	return l.server.SyncServices(l.services)
 }
 
-func (l *loadBalancerHealthChecker) UpdateService(old, new *kapi.Service) {
+func (l *loadBalancerHealthChecker) UpdateService(old, new *kapi.Service) error {
 	// HealthCheckNodePort can't be changed on update
+	return nil
 }
 
-func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) {
-	if svc.Spec.HealthCheckNodePort != 0 {
-		l.Lock()
-		defer l.Unlock()
-		name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
-		delete(l.services, name)
-		delete(l.endpoints, name)
-		_ = l.server.SyncServices(l.services)
+func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) error {
+	if svc.Spec.HealthCheckNodePort == 0 {
+		return nil
 	}
+	l.Lock()
+	defer l.Unlock()
+	name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
+	delete(l.services, name)
+	delete(l.endpoints, name)
+	return l.server.SyncServices(l.services)
 }
 
 func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) error {
 	return nil
 }
 
-func (l *loadBalancerHealthChecker) AddEndpoints(ep *kapi.Endpoints) {
+func (l *loadBalancerHealthChecker) AddEndpoints(ep *kapi.Endpoints) error {
 	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
 	l.Lock()
 	defer l.Unlock()
 	if _, exists := l.services[name]; exists {
 		l.endpoints[name] = countLocalEndpoints(ep, l.nodeName)
-		_ = l.server.SyncEndpoints(l.endpoints)
+		err := l.server.SyncEndpoints(l.endpoints)
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (l *loadBalancerHealthChecker) UpdateEndpoints(old, new *kapi.Endpoints) {
+func (l *loadBalancerHealthChecker) UpdateEndpoints(old, new *kapi.Endpoints) error {
 	name := ktypes.NamespacedName{Namespace: new.Namespace, Name: new.Name}
 	l.Lock()
 	defer l.Unlock()
 	if _, exists := l.services[name]; exists {
 		l.endpoints[name] = countLocalEndpoints(new, l.nodeName)
-		_ = l.server.SyncEndpoints(l.endpoints)
+		err := l.server.SyncEndpoints(l.endpoints)
+		if err != nil {
+			return err
+		}
 	}
-
+	return nil
 }
 
-func (l *loadBalancerHealthChecker) DeleteEndpoints(ep *kapi.Endpoints) {
+func (l *loadBalancerHealthChecker) DeleteEndpoints(ep *kapi.Endpoints) error {
 	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
 	l.Lock()
 	defer l.Unlock()
 	delete(l.endpoints, name)
-	_ = l.server.SyncEndpoints(l.endpoints)
+	return l.server.SyncEndpoints(l.endpoints)
 }
 
 func countLocalEndpoints(ep *kapi.Endpoints, nodeName string) int {
