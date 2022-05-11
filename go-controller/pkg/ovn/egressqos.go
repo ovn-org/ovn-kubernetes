@@ -279,7 +279,6 @@ func (oc *Controller) onEgressQoSAdd(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Adding EgressQoS %s", key)
 	oc.egressQoSQueue.Add(key)
 }
 
@@ -306,7 +305,6 @@ func (oc *Controller) onEgressQoSDelete(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Deleting EgressQoS %s", key)
 	oc.egressQoSQueue.Add(key)
 }
 
@@ -811,7 +809,6 @@ func (oc *Controller) onEgressQoSPodDelete(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Deleting EgressQoS Pod %s", key)
 	oc.egressQoSPodQueue.Add(key)
 }
 
@@ -853,7 +850,6 @@ func (oc *Controller) onEgressQoSNodeAdd(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	klog.V(4).Infof("Adding EgressQoS node %s", key)
 	oc.egressQoSNodeQueue.Add(key)
 }
 
