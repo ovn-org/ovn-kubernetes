@@ -84,6 +84,9 @@ type peerPodForNamespaceAndPodSelector struct{} // created during the add functi
 type peerNamespaceSelector struct{}
 type peerPodSelector struct{}
 type localPodSelector struct{}
+type egressIPPod struct{}
+type egressIPNamespace struct{}
+type egressNode struct{}
 
 var (
 	PodType                               reflect.Type = reflect.TypeOf(&kapi.Pod{})
@@ -94,6 +97,9 @@ var (
 	NodeType                              reflect.Type = reflect.TypeOf(&kapi.Node{})
 	EgressFirewallType                    reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
 	EgressIPType                          reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
+	EgressIPNamespaceType                 reflect.Type = reflect.TypeOf(&egressIPNamespace{})
+	EgressIPPodType                       reflect.Type = reflect.TypeOf(&egressIPPod{})
+	EgressNodeType                        reflect.Type = reflect.TypeOf(&egressNode{})
 	CloudPrivateIPConfigType              reflect.Type = reflect.TypeOf(&ocpcloudnetworkapi.CloudPrivateIPConfig{})
 	EgressQoSType                         reflect.Type = reflect.TypeOf(&egressqosapi.EgressQoS{})
 	PeerServiceType                       reflect.Type = reflect.TypeOf(&peerService{})
@@ -182,7 +188,6 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	if err != nil {
 		return nil, err
 	}
-
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		wf.informers[EgressIPType], err = newInformer(EgressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer())
 		if err != nil {
@@ -379,7 +384,7 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 			return wf.AddPolicyHandler(funcs, processExisting)
 		}, nil
 
-	case NodeType:
+	case NodeType, EgressNodeType:
 		return func(namespace string, sel labels.Selector,
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddNodeHandler(funcs, processExisting)
@@ -391,13 +396,13 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 			return wf.AddFilteredServiceHandler(namespace, funcs, processExisting)
 		}, nil
 
-	case PeerPodSelectorType, LocalPodSelectorType, PodType:
+	case PeerPodSelectorType, LocalPodSelectorType, PodType, EgressIPPodType:
 		return func(namespace string, sel labels.Selector,
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredPodHandler(namespace, sel, funcs, processExisting)
 		}, nil
 
-	case PeerNamespaceAndPodSelectorType, PeerNamespaceSelectorType:
+	case PeerNamespaceAndPodSelectorType, PeerNamespaceSelectorType, EgressIPNamespaceType:
 		return func(namespace string, sel labels.Selector,
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredNamespaceHandler(namespace, sel, funcs, processExisting)
@@ -413,6 +418,18 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 		return func(namespace string, sel labels.Selector,
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddEgressFirewallHandler(funcs, processExisting)
+		}, nil
+
+	case EgressIPType:
+		return func(namespace string, sel labels.Selector,
+			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+			return wf.AddEgressIPHandler(funcs, processExisting)
+		}, nil
+
+	case CloudPrivateIPConfigType:
+		return func(namespace string, sel labels.Selector,
+			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+			return wf.AddCloudPrivateIPConfigHandler(funcs, processExisting)
 		}, nil
 	}
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)

@@ -16,6 +16,7 @@ linters:
     - gosimple
     - govet
     - ineffassign
+    - nosprintfhostport
     - staticcheck
     - structcheck
     - typecheck

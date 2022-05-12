@@ -364,6 +364,9 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 								return err
 							}
 						}
+						if util.PodCompleted(pod) {
+							continue
+						}
 						if newPodSelector.Matches(podLabels) && !oldPodSelector.Matches(podLabels) {
 							if err := oc.addPodEgressIPAssignments(name, newEIP.Status.Items, pod); err != nil {
 								return err
@@ -610,7 +613,7 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 		}
 		for _, resyncEgressIP := range resyncEgressIPs {
 			if err := oc.reconcileEgressIP(nil, &resyncEgressIP); err != nil {
-				klog.Errorf("Synthetic update for EgressIP: %s failed, err: %v", egressIP.Name, err)
+				return fmt.Errorf("synthetic update for EgressIP: %s failed, err: %v", egressIP.Name, err)
 			}
 		}
 	}
@@ -1271,13 +1274,12 @@ func (oc *Controller) syncStaleSNATRules(egressIPCache map[string]egressIPCacheE
 	for _, router := range routers {
 		ops, err = libovsdbops.DeleteNATsOps(oc.nbClient, ops, router, nats...)
 		if err != nil {
-			klog.Errorf("Error deleting stale NAT from router %s: %v", router.Name, err)
-			errors = append(errors, err)
+			errors = append(errors, fmt.Errorf("error deleting stale NAT from router %s: %v", router.Name, err))
 			continue
 		}
 	}
 	if len(errors) > 0 {
-		return fmt.Errorf("failed deleting stale NAT: %v", utilerrors.NewAggregate(errors))
+		return utilerrors.NewAggregate(errors)
 	}
 
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
@@ -1342,6 +1344,7 @@ func (oc *Controller) generateCacheForEgressIP(eIPs []interface{}) (map[string]e
 			}
 		}
 	}
+
 	return egressIPCache, nil
 }
 
@@ -1585,6 +1588,7 @@ func (oc *Controller) setNodeEgressReachable(nodeName string, isReachable bool) 
 }
 
 func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
+	var errors []error
 	klog.V(5).Infof("Egress node: %s about to be initialized", egressNode.Name)
 	// This option will program OVN to start sending GARPs for all external IPS
 	// that the logical switch port has been configured to use. This is
@@ -1603,8 +1607,8 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 	}
 	err := libovsdbops.UpdateLogicalSwitchPortSetOptions(oc.nbClient, &lsp)
 	if err != nil {
-		klog.Errorf("Unable to configure GARP on external logical switch port for egress node: %s, "+
-			"this will result in packet drops during egress IP re-assignment,  err: %v", egressNode.Name, err)
+		errors = append(errors, fmt.Errorf("unable to configure GARP on external logical switch port for egress node: %s, "+
+			"this will result in packet drops during egress IP re-assignment,  err: %v", egressNode.Name, err))
 	}
 
 	// If a node has been labelled for egress IP we need to check if there are any
@@ -1624,14 +1628,19 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 			// objects which have no semantic difference, hence: call the
 			// reconciliation function directly.
 			if err := oc.reconcileEgressIP(nil, &egressIP); err != nil {
-				klog.Errorf("Synthetic update for EgressIP: %s failed, err: %v", egressIP.Name, err)
+				errors = append(errors, fmt.Errorf("synthetic update for EgressIP: %s failed, err: %v", egressIP.Name, err))
 			}
 		}
+	}
+
+	if len(errors) > 0 {
+		return utilerrors.NewAggregate(errors)
 	}
 	return nil
 }
 
 func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
+	var errors []error
 	klog.V(5).Infof("Egress node: %s about to be removed", egressNode.Name)
 	// This will remove the option described in addEgressNode from the logical
 	// switch port, since this node will not be used for egress IP assignments
@@ -1643,7 +1652,7 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 	}
 	err := libovsdbops.UpdateLogicalSwitchPortSetOptions(oc.nbClient, &lsp)
 	if err != nil {
-		klog.Errorf("Unable to remove GARP configuration on external logical switch port for egress node: %s, err: %v", egressNode.Name, err)
+		errors = append(errors, fmt.Errorf("unable to remove GARP configuration on external logical switch port for egress node: %s, err: %v", egressNode.Name, err))
 	}
 
 	// Since the node has been labelled as "not usable" for egress IP
@@ -1664,11 +1673,14 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 				// watch event for updates on objects which have no semantic
 				// difference, hence: call the reconciliation function directly.
 				if err := oc.reconcileEgressIP(nil, &egressIP); err != nil {
-					klog.Errorf("Re-assignment for EgressIP: %s failed, unable to update object, err: %v", egressIP.Name, err)
+					errors = append(errors, fmt.Errorf("Re-assignment for EgressIP: %s failed, unable to update object, err: %v", egressIP.Name, err))
 				}
 				break
 			}
 		}
+	}
+	if len(errors) > 0 {
+		return utilerrors.NewAggregate(errors)
 	}
 	return nil
 }
@@ -1907,12 +1919,12 @@ func (e *egressIPController) deletePerPodGRSNAT(pod *kapi.Pod, podIPs []*net.IPN
 func (e *egressIPController) getGatewayRouterJoinIP(node string, wantsIPv6 bool) (net.IP, error) {
 	gatewayIPs, err := util.GetLRPAddrs(e.nbClient, types.GWRouterToJoinSwitchPrefix+types.GWRouterPrefix+node)
 	if err != nil {
-		klog.Errorf("Attempt at finding node gateway router network information failed, err: %v", err)
+		return nil, fmt.Errorf("attempt at finding node gateway router network information failed, err: %v", err)
 	}
-	if gatewayIP, err := util.MatchIPNetFamily(wantsIPv6, gatewayIPs); gatewayIP != nil {
-		return gatewayIP.IP, nil
-	} else {
+	if gatewayIP, err := util.MatchIPNetFamily(wantsIPv6, gatewayIPs); err != nil {
 		return nil, fmt.Errorf("could not find node %s gateway router: %v", node, err)
+	} else {
+		return gatewayIP.IP, nil
 	}
 }
 
@@ -2193,11 +2205,12 @@ func (oc *Controller) createDefaultNoReroutePodPolicies(v4ClusterSubnet, v6Clust
 // createDefaultNoRerouteNodePolicies ensures egress pods east<->west traffic with hostNetwork pods,
 // i.e: ensuring that an egress pod can still communicate with a hostNetwork pod / service backed by hostNetwork pods
 func (oc *Controller) createDefaultNoRerouteNodePolicies(v4NodeAddr, v6NodeAddr net.IP, v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) error {
+	var errors []error
 	if v4NodeAddr != nil {
 		for _, v4Subnet := range v4ClusterSubnet {
 			match := fmt.Sprintf("ip4.src == %s && ip4.dst == %s/32", v4Subnet.String(), v4NodeAddr.String())
 			if err := oc.createLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
-				klog.Errorf("Unable to create IPv4 no-reroute node policies, err: %v", err)
+				errors = append(errors, fmt.Errorf("unable to create IPv4 no-reroute node policies, err: %v", err))
 			}
 		}
 	}
@@ -2205,9 +2218,13 @@ func (oc *Controller) createDefaultNoRerouteNodePolicies(v4NodeAddr, v6NodeAddr 
 		for _, v6Subnet := range v6ClusterSubnet {
 			match := fmt.Sprintf("ip6.src == %s && ip6.dst == %s/128", v6Subnet.String(), v6NodeAddr.String())
 			if err := oc.createLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
-				klog.Errorf("Unable to create IPv6 no-reroute node policies, err: %v", err)
+				errors = append(errors, fmt.Errorf("unable to create IPv6 no-reroute node policies, err: %v", err))
 			}
 		}
+	}
+
+	if len(errors) > 0 {
+		return utilerrors.NewAggregate(errors)
 	}
 	return nil
 }
