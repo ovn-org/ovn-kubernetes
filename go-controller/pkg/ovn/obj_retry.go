@@ -89,8 +89,16 @@ func (r *retryObjs) addRetryObj(obj interface{}) {
 		klog.Errorf("Could not get the key of %v %v: %v", r.oType, obj, err)
 		return
 	}
-	r.initRetryObjWithAdd(obj, key)
-	r.unSkipRetryObj(key)
+	r.retryMutex.Lock()
+	defer r.retryMutex.Unlock()
+	if entry, ok := r.entries[key]; ok {
+		entry.timeStamp = time.Now()
+		entry.newObj = obj
+		entry.ignore = false
+	} else {
+		r.entries[key] = &retryObjEntry{newObj: obj,
+			timeStamp: time.Now(), backoffSec: 1, ignore: false}
+	}
 }
 
 // initRetryObjWithAdd tracks an object that failed to be created to potentially retry later
