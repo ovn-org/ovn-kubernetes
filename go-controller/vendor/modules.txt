@@ -295,6 +295,9 @@ github.com/stretchr/testify/mock
 # github.com/urfave/cli/v2 v2.2.0
 ## explicit; go 1.11
 github.com/urfave/cli/v2
+# github.com/vburenin/nsync v0.0.0-20160822015540-9a75d1c80410
+## explicit
+github.com/vburenin/nsync
 # github.com/vishvananda/netlink v1.1.1-0.20210518155637-4cb3795f2ccb
 ## explicit; go 1.12
 github.com/vishvananda/netlink
