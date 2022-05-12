@@ -14,6 +14,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -41,7 +42,7 @@ func RunDBChecker(kclient kube.Interface, stopCh <-chan struct{}) {
 	go func() {
 		defer wg.Done()
 		if err := upgradeNBDBSchema(); err != nil {
-			klog.Fatalf("NBDB Upgrade failed: %w", err)
+			klog.Fatalf("NBDB Upgrade failed: %v", err)
 		}
 		ensureOvnDBState(util.OvnNbdbLocation, kclient, stopCh)
 	}()
@@ -50,7 +51,7 @@ func RunDBChecker(kclient kube.Interface, stopCh <-chan struct{}) {
 	go func() {
 		defer wg.Done()
 		if err := upgradeSBDBSchema(); err != nil {
-			klog.Fatalf("SBDB Upgrade failed: %w", err)
+			klog.Fatalf("SBDB Upgrade failed: %v", err)
 		}
 		ensureOvnDBState(util.OvnSbdbLocation, kclient, stopCh)
 	}()
@@ -338,11 +339,27 @@ func resetRaftDB(db *util.OvsDbProperties) error {
 }
 
 func upgradeNBDBSchema() error {
-	return upgradeDBSchema(nbdbSchema, nbdbServerSock, "OVN_Northbound")
+	return upgradeDBSchemaWithRetries(nbdbSchema, nbdbServerSock, "OVN_Northbound")
 }
 
 func upgradeSBDBSchema() error {
-	return upgradeDBSchema(sbdbSchema, sbdbServerSock, "OVN_Southbound")
+	return upgradeDBSchemaWithRetries(sbdbSchema, sbdbServerSock, "OVN_Southbound")
+}
+
+func upgradeDBSchemaWithRetries(schemaFile, serverSock, dbName string) error {
+	var lastMigrationErr error
+	if err := wait.PollImmediate(5*time.Second, 5*time.Minute, func() (bool, error) {
+		lastMigrationErr = upgradeDBSchema(schemaFile, serverSock, dbName)
+		if lastMigrationErr != nil {
+			klog.ErrorS(lastMigrationErr, dbName+" scheme upgrade failed")
+			return false, nil
+		}
+		return true, nil
+	}); err != nil {
+		return fmt.Errorf("failed to upgrade db schema: %v. Error from last attempt: %w", err, lastMigrationErr)
+	}
+
+	return nil
 }
 
 func upgradeDBSchema(schemaFile, serverSock, dbName string) error {
