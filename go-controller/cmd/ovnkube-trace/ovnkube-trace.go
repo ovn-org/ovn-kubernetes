@@ -303,7 +303,8 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 
 	var ovnkubePod *kapi.Pod
 	// Find ovnkube-node-xxx pod running on the same node as Pod
-	for _, podOvn := range podsOvn.Items {
+	for index := 0; index < len(podsOvn.Items); index++ {
+		podOvn := podsOvn.Items[index]
 		if podOvn.Spec.NodeName == node.Name {
 			if !strings.HasPrefix(podOvn.Name, "ovnkube-node-metrics") {
 				if strings.HasPrefix(podOvn.Name, "ovnkube-node") {

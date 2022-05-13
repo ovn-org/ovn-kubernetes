@@ -510,7 +510,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	if len(routingExternalGWs.gws) > 0 {
 		gateways = append(gateways, routingExternalGWs)
 	}
-	for _, gw := range routingPodGWs {
+	for key := range routingPodGWs {
+		gw := routingPodGWs[key]
 		if len(gw.gws) > 0 {
 			if err = validateRoutingPodGWs(routingPodGWs); err != nil {
 				klog.Error(err)
