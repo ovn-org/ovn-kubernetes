@@ -307,7 +307,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		loadBalancerGroupUUID:     "",
 		aclLoggingEnabled:         true,
 		joinSwIPManager:           nil,
-    podsMutex:                 podsMutex,
+		podsMutex:                 podsMutex,
 		retryPods:                 NewRetryObjs(factory.PodType, "", nil, nil, nil),
 		retryNetworkPolicies:      NewRetryObjs(factory.PolicyType, "", nil, nil, nil),
 		retryNodes:                NewRetryObjs(factory.NodeType, "", nil, nil, nil),
