@@ -509,7 +509,12 @@ func deleteMulticastAllowPolicy(nbClient libovsdbclient.Client, ns string, nsInf
 	ingressMatch := getACLMatch(portGroupName, getMulticastACLIgrMatch(nsInfo), knet.PolicyTypeIngress)
 	ingressACL := buildACL(ns, portGroupName, "MulticastAllowIngress", nbdb.ACLDirectionToLport, types.DefaultMcastAllowPriority, ingressMatch, nbdb.ACLActionAllow, "", knet.PolicyTypeIngress)
 
-	ops, err := libovsdbops.DeleteACLsFromPortGroupOps(nbClient, nil, portGroupName, egressACL, ingressACL)
+	matchAcls, err := libovsdbops.GetACLs(nbClient, egressACL, ingressACL)
+	if err != nil {
+		return err
+	}
+
+	ops, err := libovsdbops.DeleteACLsFromPortGroupOps(nbClient, nil, portGroupName, matchAcls...)
 	if err != nil {
 		return err
 	}
