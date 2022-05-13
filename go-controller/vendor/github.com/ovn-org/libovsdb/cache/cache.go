@@ -957,7 +957,10 @@ func (t *TableCache) ApplyModifications(tableName string, base model.Model, upda
 			// if NativeToOVS was successful, then simply assign
 			if nv.Type() == reflect.ValueOf(current).Type() {
 				err = info.SetField(k, nv.Interface())
-				return err
+				if err != nil {
+					return err
+				}
+				break
 			}
 			// With a pointer type, an update value could be a set with 2 elements [old, new]
 			if nv.Len() != 2 {
