@@ -27,6 +27,7 @@ import (
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	"github.com/vburenin/nsync"
 	utilnet "k8s.io/utils/net"
 
 	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
@@ -198,6 +199,9 @@ type Controller struct {
 	// v6HostSubnetsUsed keeps track of number of v6 subnets currently assigned to nodes
 	v6HostSubnetsUsed float64
 
+	// A mutex for concurrency execute ensurePod func
+	podsMutex *nsync.NamedMutex
+
 	// Objects for pods that need to be retried
 	retryPods *retryObjs
 
@@ -303,6 +307,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		loadBalancerGroupUUID:     "",
 		aclLoggingEnabled:         true,
 		joinSwIPManager:           nil,
+		podsMutex:                 nsync.NewNamedMutex(),
 		retryPods:                 NewRetryObjs(factory.PodType, "", nil, nil, nil),
 		retryNetworkPolicies:      NewRetryObjs(factory.PolicyType, "", nil, nil, nil),
 		retryNodes:                NewRetryObjs(factory.NodeType, "", nil, nil, nil),
@@ -511,6 +516,10 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
 		return nil
 	}
 
+	// prevent concurrent execution
+	lockName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+	oc.podsMutex.Lock(lockName)
+	defer oc.podsMutex.Unlock(lockName)
 	if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
 		// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
 		// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
