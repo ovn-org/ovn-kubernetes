@@ -105,6 +105,9 @@ type ovsdbClient struct {
 	handlerShutdown *sync.WaitGroup
 
 	logger *logr.Logger
+
+	// used to serialize transactions when validation is enabled
+	transactionLockCh chan struct{}
 }
 
 // database is everything needed to map between go types and an ovsdb Database
@@ -150,9 +153,10 @@ func newOVSDBClient(clientDBModel model.ClientDBModel, opts ...Option) (*ovsdbCl
 				deferredUpdates: make([]*bufferedUpdate, 0),
 			},
 		},
-		errorCh:         make(chan error),
-		handlerShutdown: &sync.WaitGroup{},
-		disconnect:      make(chan struct{}),
+		errorCh:           make(chan error),
+		handlerShutdown:   &sync.WaitGroup{},
+		disconnect:        make(chan struct{}),
+		transactionLockCh: make(chan struct{}, 1),
 	}
 	var err error
 	ovs.options, err = newOptions(opts...)
@@ -322,7 +326,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 // tryEndpoint connects to a single database endpoint. Returns the
 // server ID (if clustered) on success, or an error.
 func (o *ovsdbClient) tryEndpoint(ctx context.Context, u *url.URL) (string, error) {
-	o.logger.V(5).Info("trying to connect", "endpoint", fmt.Sprintf("%v", u))
+	o.logger.V(3).Info("trying to connect", "endpoint", fmt.Sprintf("%v", u))
 	var dialer net.Dialer
 	var err error
 	var c net.Conn
@@ -727,66 +731,6 @@ func (o *ovsdbClient) listDbs(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("listdbs failure - %v", err)
 	}
 	return dbs, err
-}
-
-// Transact performs the provided Operations on the database
-// RFC 7047 : transact
-func (o *ovsdbClient) Transact(ctx context.Context, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
-	o.rpcMutex.RLock()
-	if o.rpcClient == nil || !o.connected {
-		o.rpcMutex.RUnlock()
-		if o.options.reconnect {
-			o.logger.V(5).Info("blocking transaction until reconnected", "operations",
-				fmt.Sprintf("%+v", operation))
-			ticker := time.NewTicker(50 * time.Millisecond)
-			defer ticker.Stop()
-		ReconnectWaitLoop:
-			for {
-				select {
-				case <-ctx.Done():
-					return nil, fmt.Errorf("%w: while awaiting reconnection", ctx.Err())
-				case <-ticker.C:
-					o.rpcMutex.RLock()
-					if o.rpcClient != nil && o.connected {
-						break ReconnectWaitLoop
-					}
-					o.rpcMutex.RUnlock()
-				}
-			}
-		} else {
-			return nil, ErrNotConnected
-		}
-	}
-	defer o.rpcMutex.RUnlock()
-	return o.transact(ctx, o.primaryDBName, operation...)
-}
-
-func (o *ovsdbClient) transact(ctx context.Context, dbName string, operation ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
-	var reply []ovsdb.OperationResult
-	db := o.databases[dbName]
-	db.modelMutex.RLock()
-	schema := o.databases[dbName].model.Schema
-	db.modelMutex.RUnlock()
-	if reflect.DeepEqual(schema, ovsdb.DatabaseSchema{}) {
-		return nil, fmt.Errorf("cannot transact to database %s: schema unknown", dbName)
-	}
-	if ok := schema.ValidateOperations(operation...); !ok {
-		return nil, fmt.Errorf("validation failed for the operation")
-	}
-
-	args := ovsdb.NewTransactArgs(dbName, operation...)
-	if o.rpcClient == nil {
-		return nil, ErrNotConnected
-	}
-	o.logger.V(5).Info("transacting operations", "database", dbName, "operations", fmt.Sprintf("%+v", operation))
-	err := o.rpcClient.CallWithContext(ctx, "transact", args, &reply)
-	if err != nil {
-		if err == rpc2.ErrShutdown {
-			return nil, ErrNotConnected
-		}
-		return nil, err
-	}
-	return reply, nil
 }
 
 // MonitorAll is a convenience method to monitor every table/column

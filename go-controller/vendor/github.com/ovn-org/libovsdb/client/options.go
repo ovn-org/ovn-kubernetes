@@ -26,6 +26,7 @@ type options struct {
 	logger                *logr.Logger
 	registry              prometheus.Registerer
 	shouldRegisterMetrics bool // in case metrics are changed after-the-fact
+	validateTransactions  bool
 }
 
 type Option func(o *options) error
@@ -124,6 +125,17 @@ func WithMetricsRegistry(r prometheus.Registerer) Option {
 	return func(o *options) error {
 		o.registry = r
 		o.shouldRegisterMetrics = (r != nil)
+		return nil
+	}
+}
+
+// WithTransactionValidation enables transaction validation (i.e. check for
+// duplicate indexes) before it is sent to the server. In order to do this
+// consistently, transactions through this client are serialized. May incur in
+// performance impact, disabled by default.
+func WithTransactionValidation(validateTransactions bool) Option {
+	return func(o *options) error {
+		o.validateTransactions = validateTransactions
 		return nil
 	}
 }

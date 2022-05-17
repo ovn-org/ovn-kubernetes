@@ -8,10 +8,35 @@ import (
 	"github.com/ovn-org/libovsdb/ovsdb"
 )
 
+// ColumnKey addresses a column and optionally a key within a column
+type ColumnKey struct {
+	Column string
+	Key    interface{}
+}
+
+// IndexType is the type of client index
+type IndexType uint
+
+const (
+	// PrimaryIndexType are client indexes for which uniqueness is optionally
+	// enforced in the context of a specific client instance transaction before
+	// it is sent to the server.
+	PrimaryIndexType IndexType = iota
+	// SecondaryIndexType are indexes for which uniqueness is not enforced.
+	SecondaryIndexType
+)
+
+// ClientIndex defines a client index by a set of columns
+type ClientIndex struct {
+	Columns []ColumnKey
+	Type    IndexType
+}
+
 // ClientDBModel contains the client information needed to build a DatabaseModel
 type ClientDBModel struct {
-	name  string
-	types map[string]reflect.Type
+	name    string
+	types   map[string]reflect.Type
+	indexes map[string][]ClientIndex
 }
 
 // NewModel returns a new instance of a model from a specific string
@@ -29,6 +54,28 @@ func (db ClientDBModel) Name() string {
 	return db.name
 }
 
+// Indexes returns the client indexes for a model
+func (db ClientDBModel) Indexes(table string) []ClientIndex {
+	if len(db.indexes) == 0 {
+		return nil
+	}
+	if _, ok := db.indexes[table]; ok {
+		return copyIndexes(db.indexes)[table]
+	}
+	return nil
+}
+
+// SetIndexes sets the client indexes. Client indexes are optional, similar to
+// schema indexes and are only tracked in the specific client instances that are
+// provided with this client model. A client index may point to multiple models
+// as uniqueness is not enforced. They are defined per table and multiple
+// indexes can be defined for a table. Each index consists of a set of columns.
+// If the column is a map, specific keys of that map can be addressed for the
+// index.
+func (db *ClientDBModel) SetIndexes(indexes map[string][]ClientIndex) {
+	db.indexes = copyIndexes(indexes)
+}
+
 // Validate validates the DatabaseModel against the input schema
 // Returns all the errors detected
 func (db ClientDBModel) validate(schema ovsdb.DatabaseSchema) []error {
@@ -38,6 +85,7 @@ func (db ClientDBModel) validate(schema ovsdb.DatabaseSchema) []error {
 			db.name, schema.Name))
 	}
 
+	infos := make(map[string]*mapper.Info, len(db.types))
 	for tableName := range db.types {
 		tableSchema := schema.Table(tableName)
 		if tableSchema == nil {
@@ -49,8 +97,41 @@ func (db ClientDBModel) validate(schema ovsdb.DatabaseSchema) []error {
 			errors = append(errors, err)
 			continue
 		}
-		if _, err := mapper.NewInfo(tableName, tableSchema, model); err != nil {
+		info, err := mapper.NewInfo(tableName, tableSchema, model)
+		if err != nil {
 			errors = append(errors, err)
+			continue
+		}
+		infos[tableName] = info
+	}
+
+	for tableName, indexSets := range db.indexes {
+		info, ok := infos[tableName]
+		if !ok {
+			errors = append(errors, fmt.Errorf("database model contains a client index for table %s that does not exist in schema", tableName))
+			continue
+		}
+		for _, indexSet := range indexSets {
+			for _, indexColumn := range indexSet.Columns {
+				f, err := info.FieldByColumn(indexColumn.Column)
+				if err != nil {
+					errors = append(
+						errors,
+						fmt.Errorf("database model contains a client index for column %s that does not exist in table %s",
+							indexColumn.Column,
+							tableName))
+					continue
+				}
+				if indexColumn.Key != nil && reflect.ValueOf(f).Kind() != reflect.Map {
+					errors = append(
+						errors,
+						fmt.Errorf("database model contains a client index for key %s in column %s of table %s that is not a map",
+							indexColumn.Key,
+							indexColumn.Column,
+							tableName))
+					continue
+				}
+			}
 		}
 	}
 	return errors
@@ -82,4 +163,23 @@ func NewClientDBModel(name string, models map[string]Model) (ClientDBModel, erro
 		types: types,
 		name:  name,
 	}, nil
+}
+
+func copyIndexes(src map[string][]ClientIndex) map[string][]ClientIndex {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string][]ClientIndex, len(src))
+	for table, indexSets := range src {
+		dst[table] = make([]ClientIndex, 0, len(indexSets))
+		for _, indexSet := range indexSets {
+			indexSetCopy := ClientIndex{
+				Type:    indexSet.Type,
+				Columns: make([]ColumnKey, len(indexSet.Columns)),
+			}
+			copy(indexSetCopy.Columns, indexSet.Columns)
+			dst[table] = append(dst[table], indexSetCopy)
+		}
+	}
+	return dst
 }

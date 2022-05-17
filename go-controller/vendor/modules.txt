@@ -232,10 +232,11 @@ github.com/openshift/client-go/cloudnetwork/informers/externalversions/cloudnetw
 github.com/openshift/client-go/cloudnetwork/informers/externalversions/cloudnetwork/v1
 github.com/openshift/client-go/cloudnetwork/informers/externalversions/internalinterfaces
 github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1
-# github.com/ovn-org/libovsdb v0.6.1-0.20220513144310-50ec17900991
+# github.com/ovn-org/libovsdb v0.6.1-0.20220513144310-50ec17900991 => ../../libovsdb
 ## explicit; go 1.16
 github.com/ovn-org/libovsdb/cache
 github.com/ovn-org/libovsdb/client
+github.com/ovn-org/libovsdb/database
 github.com/ovn-org/libovsdb/mapper
 github.com/ovn-org/libovsdb/model
 github.com/ovn-org/libovsdb/ovsdb
@@ -844,6 +845,7 @@ sigs.k8s.io/structured-merge-diff/v4/value
 ## explicit; go 1.12
 sigs.k8s.io/yaml
 # github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
+# github.com/ovn-org/libovsdb => ../../libovsdb
 # k8s.io/api => k8s.io/api v0.23.3
 # k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.23.3
 # k8s.io/apimachinery => k8s.io/apimachinery v0.23.3

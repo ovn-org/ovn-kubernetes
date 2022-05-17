@@ -101,6 +101,7 @@ require (
 
 replace (
 	github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
+	github.com/ovn-org/libovsdb => ../../libovsdb
 	k8s.io/api => k8s.io/api v0.23.3
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.23.3
 	k8s.io/apimachinery => k8s.io/apimachinery v0.23.3

@@ -85,45 +85,53 @@ func (m Mapper) getData(ovsData ovsdb.Row, result *Info) error {
 // By default, default or null values are skipped. This behavior can be modified by specifying
 // a list of fields (pointers to fields in the struct) to be added to the row
 func (m Mapper) NewRow(data *Info, fields ...interface{}) (ovsdb.Row, error) {
-	columns := make(map[string]*ovsdb.ColumnSchema)
-	for k, v := range data.Metadata.TableSchema.Columns {
-		columns[k] = v
+	fieldsRequested := make(map[string]interface{}, len(fields))
+	for _, f := range fields {
+		col, err := data.ColumnByPtr(f)
+		if err != nil {
+			return nil, err
+		}
+		fieldsRequested[col] = f
 	}
-	columns["_uuid"] = &ovsdb.UUIDColumn
-	ovsRow := make(map[string]interface{}, len(columns))
-	for name, column := range columns {
+
+	ovsRow := make(map[string]interface{}, len(data.Metadata.TableSchema.Columns)+1)
+	setColumn := func(name string, column *ovsdb.ColumnSchema) error {
+		// ignore if field was not requested
+		_, fieldRequested := fieldsRequested[name]
+		if len(fieldsRequested) > 0 && !fieldRequested {
+			return nil
+		}
+
 		nativeElem, err := data.FieldByColumn(name)
 		if err != nil {
 			// If provided struct does not have a field to hold this value, skip it
-			continue
+			return nil
 		}
 
-		// add specific fields
-		if len(fields) > 0 {
-			found := false
-			for _, f := range fields {
-				col, err := data.ColumnByPtr(f)
-				if err != nil {
-					return nil, err
-				}
-				if col == name {
-					found = true
-					break
-				}
-			}
-			if !found {
-				continue
-			}
+		// ignore default values if not requested
+		if len(fieldsRequested) == 0 && ovsdb.IsDefaultValue(column, nativeElem) {
+			return nil
 		}
-		if len(fields) == 0 && ovsdb.IsDefaultValue(column, nativeElem) {
-			continue
-		}
+
 		ovsElem, err := ovsdb.NativeToOvs(column, nativeElem)
 		if err != nil {
-			return nil, fmt.Errorf("table %s, column %s: failed to generate ovs element. %s", data.Metadata.TableName, name, err.Error())
+			return fmt.Errorf("table %s, column %s: failed to generate ovs element. %s", data.Metadata.TableName, name, err.Error())
 		}
 		ovsRow[name] = ovsElem
+		return nil
 	}
+
+	err := setColumn("_uuid", &ovsdb.UUIDColumn)
+	if err != nil {
+		return nil, err
+	}
+	for name, column := range data.Metadata.TableSchema.Columns {
+		err := setColumn(name, column)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return ovsRow, nil
 }
 

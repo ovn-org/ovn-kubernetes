@@ -1,9 +1,7 @@
-package server
+package ovsdb
 
 import (
 	"reflect"
-
-	"github.com/ovn-org/libovsdb/ovsdb"
 )
 
 func removeFromSlice(a, b reflect.Value) (reflect.Value, bool) {
@@ -25,32 +23,32 @@ func insertToSlice(a, b reflect.Value) (reflect.Value, bool) {
 	return reflect.Append(a, b), true
 }
 
-func mutate(current interface{}, mutator ovsdb.Mutator, value interface{}) (interface{}, interface{}) {
+func Mutate(current interface{}, mutator Mutator, value interface{}) (interface{}, interface{}) {
 	switch current.(type) {
 	case bool, string:
 		return current, value
 	}
 	switch mutator {
-	case ovsdb.MutateOperationInsert:
+	case MutateOperationInsert:
 		// for insert, the delta will be the new value added
 		return mutateInsert(current, value)
-	case ovsdb.MutateOperationDelete:
+	case MutateOperationDelete:
 		return mutateDelete(current, value)
-	case ovsdb.MutateOperationAdd:
+	case MutateOperationAdd:
 		// for add, the delta is the new value
 		new := mutateAdd(current, value)
 		return new, new
-	case ovsdb.MutateOperationSubtract:
+	case MutateOperationSubtract:
 		// for subtract, the delta is the new value
 		new := mutateSubtract(current, value)
 		return new, new
-	case ovsdb.MutateOperationMultiply:
+	case MutateOperationMultiply:
 		new := mutateMultiply(current, value)
 		return new, new
-	case ovsdb.MutateOperationDivide:
+	case MutateOperationDivide:
 		new := mutateDivide(current, value)
 		return new, new
-	case ovsdb.MutateOperationModulo:
+	case MutateOperationModulo:
 		new := mutateModulo(current, value)
 		return new, new
 	}
