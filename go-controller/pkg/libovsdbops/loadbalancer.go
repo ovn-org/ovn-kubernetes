@@ -58,6 +58,25 @@ func BuildLoadBalancer(name string, protocol nbdb.LoadBalancerProtocol, selectio
 	}
 }
 
+// CreateLoadBalancersOps creates the provided load balancers returning the
+// corresponding ops
+func CreateLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
+	opModels := make([]operationModel, 0, len(lbs))
+	for i := range lbs {
+		lb := lbs[i]
+		opModel := operationModel{
+			Model:          lb,
+			OnModelUpdates: onModelUpdatesNone(),
+			ErrNotFound:    false,
+			BulkOp:         false,
+		}
+		opModels = append(opModels, opModel)
+	}
+
+	modelClient := newModelClient(nbClient)
+	return modelClient.CreateOrUpdateOps(ops, opModels...)
+}
+
 // CreateOrUpdateLoadBalancersOps creates or updates the provided load balancers
 // returning the corresponding ops
 func CreateOrUpdateLoadBalancersOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, lbs ...*nbdb.LoadBalancer) ([]libovsdb.Operation, error) {
