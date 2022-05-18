@@ -342,12 +342,13 @@ func onModels(models interface{}, do func(interface{}) error) error {
 // When no specific operation is required for the provided model, returns an empty
 // array for convenience.
 func buildFailOnDuplicateOps(c client.Client, m model.Model) ([]ovsdb.Operation, error) {
-	// Right now we only consider models with a "Name" field that is not an
+	// Right now we mostly consider models with a "Name" field that is not an
 	// index for which we don't expect duplicate names.
 	// A duplicate Name field that is an index will fail without the
 	// need of this wait operation.
-	// Models that require a complex condition to detect duplicates are not
-	// considered for the time being due to the performance hit (i.e ACLs).
+	// Some models that require a complex condition to detect duplicates are not
+	// considered for the time being due to the performance hit (e.g ACLs).
+	timeout := types.OVSDBWaitTimeout
 	var field interface{}
 	var value string
 	switch t := m.(type) {
@@ -360,11 +361,28 @@ func buildFailOnDuplicateOps(c client.Client, m model.Model) ([]ovsdb.Operation,
 	case *nbdb.LogicalSwitch:
 		field = &t.Name
 		value = t.Name
+	case *nbdb.LogicalRouterPolicy:
+		condPriority := model.Condition{
+			Field:    &t.Priority,
+			Function: ovsdb.ConditionEqual,
+			Value:    t.Priority,
+		}
+		condMatch := model.Condition{
+			Field:    &t.Match,
+			Function: ovsdb.ConditionEqual,
+			Value:    t.Match,
+		}
+		return c.WhereAll(t, condPriority, condMatch).Wait(
+			ovsdb.WaitConditionNotEqual,
+			&timeout,
+			t,
+			&t.Priority,
+			&t.Match,
+		)
 	default:
 		return []ovsdb.Operation{}, nil
 	}
 
-	timeout := types.OVSDBWaitTimeout
 	cond := model.Condition{
 		Field:    field,
 		Function: ovsdb.ConditionEqual,
