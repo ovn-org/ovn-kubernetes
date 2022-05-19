@@ -1077,11 +1077,10 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 
 	readableGroupName := fmt.Sprintf("%s_%s", policy.Namespace, policy.Name)
 	np.portGroupName = hashedPortGroup(readableGroupName)
-	ops := []ovsdb.Operation{}
 
 	// Build policy ACLs
 	acls := oc.buildNetworkPolicyACLs(np, aclLogAllow)
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, ops, acls...)
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, acls...)
 	if err != nil {
 		return fmt.Errorf("failed to create ACL ops: %v", err)
 	}
@@ -1098,13 +1097,23 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 		var errs []error
 		selectedPods = objs
 		policyPorts, ingressDenyPorts, egressDenyPorts := oc.processLocalPodSelectorSetPods(policy, np, selectedPods...)
-		pg.Ports = append(pg.Ports, policyPorts...)
-		ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, portGroupIngressDenyName, ingressDenyPorts...)
+		newOps, err := libovsdbops.AddPortsToPortGroupOps(oc.nbClient, nil, portGroupIngressDenyName, ingressDenyPorts...)
 		if err != nil {
 			oc.processLocalPodSelectorDelPods(np, selectedPods...)
 			errs = append(errs, err)
 		}
-		ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, portGroupEgressDenyName, egressDenyPorts...)
+		newOps, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, newOps, portGroupEgressDenyName, egressDenyPorts...)
+		if err != nil {
+			oc.processLocalPodSelectorDelPods(np, selectedPods...)
+			errs = append(errs, err)
+		}
+		pg.Ports = policyPorts
+		newOps, err = libovsdbops.CreateOrUpdatePortGroupsOps(oc.nbClient, newOps, pg)
+		if err != nil {
+			oc.processLocalPodSelectorDelPods(np, selectedPods...)
+			errs = append(errs, err)
+		}
+		_, err = libovsdbops.TransactAndCheck(oc.nbClient, append(ops, newOps...))
 		if err != nil {
 			oc.processLocalPodSelectorDelPods(np, selectedPods...)
 			errs = append(errs, err)
@@ -1123,20 +1132,12 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 		return nil
 	}
 
-	ops, err = libovsdbops.CreateOrUpdatePortGroupsOps(oc.nbClient, ops, pg)
-	if err != nil {
-		oc.processLocalPodSelectorDelPods(np, selectedPods...)
-		return fmt.Errorf("failed to create ops to add port to a port group: %v", err)
-	}
-
 	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.nbClient, "networkpolicy",
 		policy.Namespace, policy.Name)
 	if err != nil {
 		klog.Errorf("Failed to record config duration: %v", err)
 	}
-	ops = append(ops, recordOps...)
-
-	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+	_, err = libovsdbops.TransactAndCheck(oc.nbClient, recordOps)
 	if err != nil {
 		oc.processLocalPodSelectorDelPods(np, selectedPods...)
 		return fmt.Errorf("failed to run ovsdb txn to add ports to port group: %v", err)
