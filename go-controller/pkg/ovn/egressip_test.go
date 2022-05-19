@@ -24,7 +24,7 @@ import (
 
 type fakeEgressIPDialer struct{}
 
-func (f fakeEgressIPDialer) dial(ip net.IP) bool {
+func (f fakeEgressIPDialer) dial(ip net.IP, timeout time.Duration) bool {
 	return true
 }
 

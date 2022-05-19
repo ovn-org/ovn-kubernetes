@@ -297,6 +297,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			allocator:                         allocator{&sync.Mutex{}, make(map[string]*egressNode)},
 			nbClient:                          libovsdbOvnNBClient,
 			watchFactory:                      wf,
+			egressIPTotalTimeout:              config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout,
 		},
 		loadbalancerClusterCache:  make(map[kapi.Protocol]string),
 		multicastSupport:          config.EnableMulticast,
@@ -393,6 +394,9 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 			if err := oc.WatchCloudPrivateIPConfig(); err != nil {
 				return err
 			}
+		}
+		if config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout == 0 {
+			klog.V(2).Infof("EgressIP node reachability check disabled")
 		}
 	}
 
