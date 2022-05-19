@@ -84,13 +84,13 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				)
 
 				purgeACL := libovsdbops.BuildACL(
-					"",
+					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 					t.DirectionFromLPort,
 					t.EgressFirewallStartPriority,
 					"",
 					nbdb.ACLActionDrop,
-					"",
-					"",
+					t.OvnACLLoggingMeter,
+					defaultACLLoggingSeverity,
 					false,
 					map[string]string{"egressFirewall": "none"},
 					nil,
@@ -113,13 +113,13 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				// this ACL is not in the egress firewall priority range and should be untouched
 				otherACL := libovsdbops.BuildACL(
-					"",
+					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority-1),
 					t.DirectionFromLPort,
 					t.MinimumReservedEgressFirewallPriority-1,
 					"",
 					nbdb.ACLActionDrop,
-					"",
-					"",
+					t.OvnACLLoggingMeter,
+					defaultACLLoggingSeverity,
 					false,
 					map[string]string{"egressFirewall": "default"},
 					nil,
@@ -181,6 +181,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				// Direction of both ACLs will be converted to
 				keepACL.Direction = t.DirectionToLPort
+				newName := buildEgressFwAclName("default", t.EgressFirewallStartPriority-1)
+				meter := t.OvnACLLoggingMeter
+				severity := defaultACLLoggingSeverity
+				keepACL.Name = &newName
+				keepACL.Direction = t.DirectionToLPort
+				keepACL.Meter = &meter
+				keepACL.Severity = &severity
+				keepACL.Log = false
 
 				expectedDatabaseState := []libovsdb.TestData{
 					otherACL,
@@ -233,7 +241,11 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 							*egressFirewall,
 						},
 					},
-					&v1.NodeList{
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+						},
+					}, &v1.NodeList{
 						Items: []v1.Node{
 							{
 								Status: v1.NodeStatus{
@@ -244,19 +256,20 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 						},
 					})
 
+				fakeOVN.controller.WatchNamespaces()
 				fakeOVN.controller.WatchEgressFirewall()
 
 				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				ipv4ACL := libovsdbops.BuildACL(
-					"",
+					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 					t.DirectionToLPort,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionAllow,
-					"",
-					"",
+					t.OvnACLLoggingMeter,
+					defaultACLLoggingSeverity,
 					false,
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
@@ -342,13 +355,13 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				ipv6ACL := libovsdbops.BuildACL(
-					"",
+					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 					t.DirectionToLPort,
 					t.EgressFirewallStartPriority,
 					"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionAllow,
-					"",
-					"",
+					t.OvnACLLoggingMeter,
+					defaultACLLoggingSeverity,
 					false,
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
@@ -442,13 +455,13 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				fakeOVN.controller.WatchEgressFirewall()
 
 				udpACL := libovsdbops.BuildACL(
-					"",
+					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 					t.DirectionToLPort,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionDrop,
-					"",
-					"",
+					t.OvnACLLoggingMeter,
+					defaultACLLoggingSeverity,
 					false,
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
@@ -521,7 +534,11 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 							*egressFirewall,
 						},
 					},
-					&v1.NodeList{
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+						},
+					}, &v1.NodeList{
 						Items: []v1.Node{
 							{
 								Status: v1.NodeStatus{
@@ -538,16 +555,17 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 						},
 					})
 
+				fakeOVN.controller.WatchNamespaces()
 				fakeOVN.controller.WatchEgressFirewall()
 
 				ipv4ACL := libovsdbops.BuildACL(
-					"",
+					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 					t.DirectionToLPort,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.5/23) && ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionAllow,
-					"",
-					"",
+					t.OvnACLLoggingMeter,
+					defaultACLLoggingSeverity,
 					false,
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
@@ -650,13 +668,13 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				fakeOVN.controller.WatchEgressFirewall()
 
 				ipv4ACL := libovsdbops.BuildACL(
-					"",
+					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 					t.DirectionToLPort,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionAllow,
-					"",
-					"",
+					t.OvnACLLoggingMeter,
+					defaultACLLoggingSeverity,
 					false,
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
@@ -761,13 +779,13 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				fakeOVN.controller.WatchEgressFirewall()
 
 				ipv4ACL := libovsdbops.BuildACL(
-					"",
+					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 					t.DirectionToLPort,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.5/23) && ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionAllow,
-					"",
-					"",
+					t.OvnACLLoggingMeter,
+					defaultACLLoggingSeverity,
 					false,
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
@@ -897,13 +915,13 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				fakeOVN.controller.WatchEgressFirewall()
 
 				ipv4ACL := libovsdbops.BuildACL(
-					"",
+					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 					t.DirectionToLPort,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionAllow,
-					"",
-					"",
+					t.OvnACLLoggingMeter,
+					defaultACLLoggingSeverity,
 					false,
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
@@ -965,6 +983,112 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		})
+
+		ginkgo.It("correctly updates an egressfirewall's ACL logging", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const (
+					node1Name string = "node1"
+				)
+
+				InitialNodeSwitch := &nbdb.LogicalSwitch{
+					UUID: node1Name + "-UUID",
+					Name: node1Name,
+				}
+
+				dbSetup := libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						InitialNodeSwitch,
+						clusterRouter,
+					},
+				}
+
+				namespace1 := *newNamespace("namespace1")
+				egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
+					{
+						Type: "Allow",
+						To: egressfirewallapi.EgressFirewallDestination{
+							CIDRSelector: "1.2.3.4/23",
+						},
+					},
+				})
+
+				fakeOVN.startWithDBSetup(dbSetup,
+					&egressfirewallapi.EgressFirewallList{
+						Items: []egressfirewallapi.EgressFirewall{
+							*egressFirewall,
+						},
+					},
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							{
+								Status: v1.NodeStatus{
+									Phase: v1.NodeRunning,
+								},
+								ObjectMeta: newObjectMeta(node1Name, ""),
+							},
+						},
+					})
+
+				fakeOVN.controller.WatchNamespaces()
+				fakeOVN.controller.WatchEgressFirewall()
+
+				ipv4ACL := libovsdbops.BuildACL(
+					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
+					t.DirectionToLPort,
+					t.EgressFirewallStartPriority,
+					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14",
+					nbdb.ACLActionAllow,
+					t.OvnACLLoggingMeter,
+					defaultACLLoggingSeverity,
+					false,
+					map[string]string{"egressFirewall": "namespace1"},
+					nil,
+				)
+				ipv4ACL.UUID = "ipv4ACL-UUID"
+
+				// new ACL will be added to the switch
+				finalNodeSwitch := &nbdb.LogicalSwitch{
+					UUID: InitialNodeSwitch.UUID,
+					Name: InitialNodeSwitch.Name,
+					ACLs: []string{ipv4ACL.UUID},
+				}
+
+				// new ACL will be added to the switch
+				expectedDatabaseState := []libovsdb.TestData{
+					ipv4ACL,
+					finalNodeSwitch,
+					clusterRouter,
+				}
+
+				gomega.Expect(fakeOVN.nbClient).To(libovsdbtest.HaveData(expectedDatabaseState))
+
+				// get the current namespace
+				namespace, err := fakeOVN.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespace1.Name, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// enable ACL logging with severity alert, alert
+				logSeverity := "alert"
+				updatedLogSeverity := fmt.Sprintf(`{ "deny": "%s", "allow": "%s" }`, logSeverity, logSeverity)
+				namespace.Annotations[aclLoggingAnnotation] = updatedLogSeverity
+				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), namespace, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// eventually, we should see the changes in the namespace reflected in the database
+				ipv4ACL.Log = true
+				ipv4ACL.Severity = &logSeverity
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
 	})
 })
 
@@ -1004,13 +1128,13 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 		ginkgo.It("reconciles existing and non-existing egressfirewalls", func() {
 			app.Action = func(ctx *cli.Context) error {
 				purgeACL := libovsdbops.BuildACL(
-					"",
+					"purgeACL",
 					t.DirectionFromLPort,
 					t.EgressFirewallStartPriority,
 					"",
 					nbdb.ACLActionDrop,
-					"",
-					"",
+					t.OvnACLLoggingMeter,
+					defaultACLLoggingSeverity,
 					false,
 					map[string]string{"egressFirewall": "none"},
 					nil,
@@ -1033,13 +1157,13 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 
 				// this ACL is not in the egress firewall priority range and should be untouched
 				otherACL := libovsdbops.BuildACL(
-					"",
+					"otherACL",
 					t.DirectionFromLPort,
 					t.MinimumReservedEgressFirewallPriority-1,
 					"",
 					nbdb.ACLActionDrop,
-					"",
-					"",
+					t.OvnACLLoggingMeter,
+					defaultACLLoggingSeverity,
 					false,
 					map[string]string{"egressFirewall": "default"},
 					nil,
@@ -1101,6 +1225,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 
 				// Direction of both ACLs will be converted to
 				keepACL.Direction = t.DirectionToLPort
+				newName := buildEgressFwAclName("default", t.EgressFirewallStartPriority-1)
+				meter := t.OvnACLLoggingMeter
+				severity := defaultACLLoggingSeverity
+				keepACL.Name = &newName
+				keepACL.Direction = t.DirectionToLPort
+				keepACL.Meter = &meter
+				keepACL.Severity = &severity
+				keepACL.Log = false
 
 				expectedDatabaseState := []libovsdb.TestData{
 					otherACL,
@@ -1148,7 +1280,11 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 							*egressFirewall,
 						},
 					},
-					&v1.NodeList{
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+						},
+					}, &v1.NodeList{
 						Items: []v1.Node{
 							{
 								Status: v1.NodeStatus{
@@ -1159,19 +1295,20 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 						},
 					})
 
+				fakeOVN.controller.WatchNamespaces()
 				fakeOVN.controller.WatchEgressFirewall()
 
 				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				ipv4ACL := libovsdbops.BuildACL(
-					"",
+					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 					t.DirectionToLPort,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \""+t.JoinSwitchToGWRouterPrefix+t.OVNClusterRouter+"\"",
 					nbdb.ACLActionAllow,
-					"",
-					"",
+					t.OvnACLLoggingMeter,
+					defaultACLLoggingSeverity,
 					false,
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
@@ -1252,13 +1389,13 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				ipv6ACL := libovsdbops.BuildACL(
-					"",
+					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 					t.DirectionToLPort,
 					t.EgressFirewallStartPriority,
 					"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && inport == \""+t.JoinSwitchToGWRouterPrefix+t.OVNClusterRouter+"\"",
 					nbdb.ACLActionAllow,
-					"",
-					"",
+					t.OvnACLLoggingMeter,
+					defaultACLLoggingSeverity,
 					false,
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
@@ -1348,14 +1485,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				fakeOVN.controller.WatchEgressFirewall()
 
 				udpACL := libovsdbops.BuildACL(
-					"",
+					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 					t.DirectionToLPort,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && inport == \""+
 						t.JoinSwitchToGWRouterPrefix+t.OVNClusterRouter+"\"",
 					nbdb.ACLActionDrop,
-					"",
-					"",
+					t.OvnACLLoggingMeter,
+					defaultACLLoggingSeverity,
 					false,
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
@@ -1418,7 +1555,11 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 							*egressFirewall,
 						},
 					},
-					&v1.NodeList{
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+						},
+					}, &v1.NodeList{
 						Items: []v1.Node{
 							{
 								Status: v1.NodeStatus{
@@ -1429,17 +1570,18 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 						},
 					})
 
+				fakeOVN.controller.WatchNamespaces()
 				fakeOVN.controller.WatchEgressFirewall()
 
 				ipv4ACL := libovsdbops.BuildACL(
-					"",
+					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 					t.DirectionToLPort,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.5/23) && "+
 						"ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && inport == \""+t.JoinSwitchToGWRouterPrefix+t.OVNClusterRouter+"\"",
 					nbdb.ACLActionAllow,
-					"",
-					"",
+					t.OvnACLLoggingMeter,
+					defaultACLLoggingSeverity,
 					false,
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
@@ -1510,7 +1652,11 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 							*egressFirewall,
 						},
 					},
-					&v1.NodeList{
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+						},
+					}, &v1.NodeList{
 						Items: []v1.Node{
 							{
 								Status: v1.NodeStatus{
@@ -1521,16 +1667,17 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 						},
 					})
 
+				fakeOVN.controller.WatchNamespaces()
 				fakeOVN.controller.WatchEgressFirewall()
 
 				ipv4ACL := libovsdbops.BuildACL(
-					"",
+					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
 					t.DirectionToLPort,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \""+t.JoinSwitchToGWRouterPrefix+t.OVNClusterRouter+"\"",
 					nbdb.ACLActionAllow,
-					"",
-					"",
+					t.OvnACLLoggingMeter,
+					defaultACLLoggingSeverity,
 					false,
 					map[string]string{"egressFirewall": "namespace1"},
 					nil,
@@ -1567,6 +1714,105 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+		})
+
+		ginkgo.It("correctly updates an egressfirewall's ACL logging", func() {
+			app.Action = func(ctx *cli.Context) error {
+				initialJoinSwitch := &nbdb.LogicalSwitch{
+					UUID: "join-UUID",
+					Name: "join",
+				}
+
+				namespace1 := *newNamespace("namespace1")
+				egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
+					{
+						Type: "Allow",
+						To: egressfirewallapi.EgressFirewallDestination{
+							CIDRSelector: "1.2.3.4/23",
+						},
+					},
+				})
+
+				dbSetup := libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						initialJoinSwitch,
+						clusterRouter,
+					},
+				}
+				fakeOVN.startWithDBSetup(dbSetup,
+					&egressfirewallapi.EgressFirewallList{
+						Items: []egressfirewallapi.EgressFirewall{
+							*egressFirewall,
+						},
+					},
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+						},
+					}, &v1.NodeList{
+						Items: []v1.Node{
+							{
+								Status: v1.NodeStatus{
+									Phase: v1.NodeRunning,
+								},
+								ObjectMeta: newObjectMeta(node1Name, ""),
+							},
+						},
+					})
+
+				fakeOVN.controller.WatchNamespaces()
+				fakeOVN.controller.WatchEgressFirewall()
+
+				ipv4ACL := libovsdbops.BuildACL(
+					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
+					t.DirectionToLPort,
+					t.EgressFirewallStartPriority,
+					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \""+t.JoinSwitchToGWRouterPrefix+t.OVNClusterRouter+"\"",
+					nbdb.ACLActionAllow,
+					t.OvnACLLoggingMeter,
+					defaultACLLoggingSeverity,
+					false,
+					map[string]string{"egressFirewall": "namespace1"},
+					nil,
+				)
+				ipv4ACL.UUID = "ipv4ACL-UUID"
+
+				// new ACL will be added to the switch
+				finalJoinSwitch := &nbdb.LogicalSwitch{
+					UUID: initialJoinSwitch.UUID,
+					Name: initialJoinSwitch.Name,
+					ACLs: []string{ipv4ACL.UUID},
+				}
+
+				expectedDatabaseState := []libovsdb.TestData{
+					ipv4ACL,
+					finalJoinSwitch,
+					clusterRouter,
+				}
+
+				gomega.Expect(fakeOVN.nbClient).To(libovsdbtest.HaveData(expectedDatabaseState))
+
+				// get the current namespace
+				namespace, err := fakeOVN.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespace1.Name, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// enable ACL logging with severity alert, alert
+				logSeverity := "alert"
+				updatedLogSeverity := fmt.Sprintf(`{ "deny": "%s", "allow": "%s" }`, logSeverity, logSeverity)
+				namespace.Annotations[aclLoggingAnnotation] = updatedLogSeverity
+				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), namespace, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// eventually, we should see the changes in the namespace reflected in the database
+				ipv4ACL.Log = true
+				ipv4ACL.Severity = &logSeverity
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 	})
 

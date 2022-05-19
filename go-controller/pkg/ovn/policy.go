@@ -339,7 +339,7 @@ func (oc *Controller) updateACLLoggingForPolicy(np *networkPolicy, logLevel stri
 	return err
 }
 
-func (oc *Controller) setACLLoggingForNamespace(ns string, nsInfo *namespaceInfo) error {
+func (oc *Controller) setNetworkPolicyACLLoggingForNamespace(ns string, nsInfo *namespaceInfo) error {
 	var ovsDBOps []ovsdb.Operation
 	for _, policyType := range []knet.PolicyType{knet.PolicyTypeIngress, knet.PolicyTypeEgress} {
 		denyACL, _ := buildDenyACLs(ns, "", targetPortGroupName(nsInfo.portGroupIngressDenyName, nsInfo.portGroupEgressDenyName, policyType), nsInfo.aclLogging.Deny, policyType)
@@ -1204,7 +1204,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) error {
 	nsInfo.networkPolicies[policy.Name] = np
 	// there may have been a namespace update for ACL logging while we were creating the NP
 	// update it
-	if err := oc.setACLLoggingForNamespace(policy.Namespace, nsInfo); err != nil {
+	if err := oc.setNetworkPolicyACLLoggingForNamespace(policy.Namespace, nsInfo); err != nil {
 		klog.Warningf(err.Error())
 	} else {
 		klog.Infof("Namespace %s: ACL logging setting updated to deny=%s allow=%s",

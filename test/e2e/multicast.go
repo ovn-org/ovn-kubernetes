@@ -88,7 +88,7 @@ var _ = ginkgo.Describe("Multicast", func() {
 			iperf = iperf + " -V"
 		}
 		cmd := []string{"/bin/sh", "-c", iperf}
-		clientPod := newAgnhostPod(mcastSource, cmd...)
+		clientPod := newAgnhostPod(fr.Namespace.Name, mcastSource, cmd...)
 		clientPod.Spec.NodeName = clientNodeInfo.name
 		fr.PodClient().CreateSync(clientPod)
 
@@ -100,7 +100,7 @@ var _ = ginkgo.Describe("Multicast", func() {
 			iperf = iperf + " -V"
 		}
 		cmd = []string{"/bin/sh", "-c", iperf}
-		mcastServerPod1 := newAgnhostPod(mcastServer1, cmd...)
+		mcastServerPod1 := newAgnhostPod(fr.Namespace.Name, mcastServer1, cmd...)
 		mcastServerPod1.Spec.NodeName = serverNodeInfo.name
 		fr.PodClient().CreateSync(mcastServerPod1)
 
@@ -112,7 +112,7 @@ var _ = ginkgo.Describe("Multicast", func() {
 			iperf = iperf + " -V"
 		}
 		cmd = []string{"/bin/sh", "-c", iperf}
-		mcastServerPod2 := newAgnhostPod(mcastServer2, cmd...)
+		mcastServerPod2 := newAgnhostPod(fr.Namespace.Name, mcastServer2, cmd...)
 		mcastServerPod2.Spec.NodeName = serverNodeInfo.name
 		fr.PodClient().CreateSync(mcastServerPod2)
 
