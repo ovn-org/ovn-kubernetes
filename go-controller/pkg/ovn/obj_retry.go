@@ -2,13 +2,14 @@ package ovn
 
 import (
 	"fmt"
-	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	"math/rand"
 	"net"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
+
+	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
@@ -1154,7 +1155,6 @@ func (oc *Controller) periodicallyRetryResources(r *retryObjs) {
 	for {
 		select {
 		case <-time.After(retryObjInterval):
-			klog.V(5).Infof("%s s have elapsed, retrying failed objects of type %v", retryObjInterval, r.oType)
 			oc.iterateRetryResources(r, false)
 
 		case <-r.retryChan:
