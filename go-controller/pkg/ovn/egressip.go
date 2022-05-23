@@ -241,9 +241,9 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 			staleEgressIPs.Delete(toRemove.EgressIP)
 		}
 		for staleEgressIP := range staleEgressIPs {
-			if oc.deleteAllocatorEgressIPAssignmentIfExists(name, staleEgressIP) {
+			if nodeName := oc.deleteAllocatorEgressIPAssignmentIfExists(name, staleEgressIP); nodeName != "" {
 				statusToRemove = append(statusToRemove,
-					egressipv1.EgressIPStatusItem{EgressIP: staleEgressIP})
+					egressipv1.EgressIPStatusItem{EgressIP: staleEgressIP, Node: nodeName})
 			}
 		}
 
@@ -1029,17 +1029,17 @@ func (oc *Controller) addPodEgressIPAssignments(name string, statusAssignments [
 }
 
 // deleteAllocatorEgressIPAssignmentIfExists deletes egressIP config from node allocations map
-// if the entry is available and returns true, otherwise returns false.
-func (oc *Controller) deleteAllocatorEgressIPAssignmentIfExists(name, egressIP string) bool {
+// if the entry is available and returns assigned node name, otherwise returns empty string.
+func (oc *Controller) deleteAllocatorEgressIPAssignmentIfExists(name, egressIP string) string {
 	oc.eIPC.allocator.Lock()
 	defer oc.eIPC.allocator.Unlock()
-	for _, eNode := range oc.eIPC.allocator.cache {
+	for nodeName, eNode := range oc.eIPC.allocator.cache {
 		if egressIPName, exists := eNode.allocations[egressIP]; exists && egressIPName == name {
 			delete(eNode.allocations, egressIP)
-			return true
+			return nodeName
 		}
 	}
-	return false
+	return ""
 }
 
 // deleteAllocatorEgressIPAssignments deletes the allocation as to keep the
