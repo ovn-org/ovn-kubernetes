@@ -13,3 +13,10 @@ Measurement accuracy can be impacted by other parallel processing that might be 
 |--|--|--|
 |ovnkube_master_network_programming_duration_seconds | Histogram | The duration to apply network configuration for a kind (e.g. pod, service, networkpolicy). Configuration includes add, update and delete events for kinds. This includes OVN-Kubernetes master and OVN duration.
 |ovnkube_master_network_programming_ovn_duration_seconds| Histogram  | The duration for OVN to apply network configuration for a kind (e.g. pod, service, networkpolicy).
+
+## Change log
+This list is to help notify if there are additions, changes or removals to metrics.
+
+- Add `ovnkube_master_network_programming_duration_seconds` and `ovnkube_master_network_programming_ovn_duration_seconds` (https://github.com/ovn-org/ovn-kubernetes/pull/2878)
+- Remove `ovnkube_master_skipped_nbctl_daemon_total` (https://github.com/ovn-org/ovn-kubernetes/pull/2707)
+- Add `ovnkube_master_egress_routing_via_host` (https://github.com/ovn-org/ovn-kubernetes/pull/2833)
