@@ -8,7 +8,6 @@ import (
 
 	nbdb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/stretchr/testify/assert"
@@ -73,100 +72,65 @@ const (
 	portName  string = "test-pod"
 )
 
-func TestGetPortAddresses(t *testing.T) {
+func TestExtractPortAddresses(t *testing.T) {
 	tests := []struct {
 		desc       string
-		dbSetup    libovsdbtest.TestSetup
+		lsp        *nbdb.LogicalSwitchPort
 		errMatch   error
 		isNotFound bool
 		hasNoIP    bool
 	}{
 		{
-			desc:       "test path where client.Get(lsp) returns ErrNotFound",
-			dbSetup:    libovsdbtest.TestSetup{},
-			isNotFound: true,
-		},
-		{
 			desc: "test path where lsp.DynamicAddresses is a zero length string and len(addresses)==0",
-			dbSetup: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						Name:             "test-pod",
-						DynamicAddresses: stringPtr(hwAddr + " " + ipAddr),
-					},
-				},
+			lsp: &nbdb.LogicalSwitchPort{
+				Name:             "test-pod",
+				DynamicAddresses: stringPtr(hwAddr + " " + ipAddr),
 			},
 		},
 		{
 			desc: "test path where lsp.DynamicAddresses is non-zero length string and value of first address in addresses list is set to dynamic",
-			dbSetup: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						Name:             portName,
-						DynamicAddresses: stringPtr(hwAddr + " " + ipAddr),
-						Addresses:        []string{"dynamic"},
-					},
-				},
+			lsp: &nbdb.LogicalSwitchPort{
+				Name:             portName,
+				DynamicAddresses: stringPtr(hwAddr + " " + ipAddr),
+				Addresses:        []string{"dynamic"},
 			},
 		},
 		{
 			desc: "test code path where port has MAC but no IPs",
-			dbSetup: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						Name:             "test-pod",
-						DynamicAddresses: stringPtr(hwAddr),
-					},
-				},
+			lsp: &nbdb.LogicalSwitchPort{
+				Name:             "test-pod",
+				DynamicAddresses: stringPtr(hwAddr),
 			},
 			hasNoIP: true,
 		},
 		{
 			desc: "test the code path where ParseMAC fails",
-			dbSetup: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						Name:             portName,
-						DynamicAddresses: stringPtr(badHWAddr),
-					},
-				},
+			lsp: &nbdb.LogicalSwitchPort{
+				Name:             portName,
+				DynamicAddresses: stringPtr(badHWAddr),
 			},
 			errMatch: fmt.Errorf("failed to parse logical switch port \"%s\" MAC \"%s\": address %s: invalid MAC address", portName, badHWAddr, badHWAddr),
 		},
 		{
 			desc: "test code path where IP address parsing fails",
-			dbSetup: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						Name:      portName,
-						Addresses: []string{fmt.Sprintf("%s %s", hwAddr, badIPAddr)},
-					},
-				},
+			lsp: &nbdb.LogicalSwitchPort{
+				Name:      portName,
+				Addresses: []string{fmt.Sprintf("%s %s", hwAddr, badIPAddr)},
 			},
 			errMatch: fmt.Errorf("failed to parse logical switch port \"%s\" IP \"%s\" is not a valid ip address", portName, badIPAddr),
 		},
 		{
 			desc: "test success path with len(lsp.Addresses) > 0 and lsp.DynamicAddresses = nil",
-			dbSetup: libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitchPort{
-						Name:      portName,
-						Addresses: []string{fmt.Sprintf("%s %s", hwAddr, ipAddr)},
-					},
-				},
+			lsp: &nbdb.LogicalSwitchPort{
+				Name:      portName,
+				Addresses: []string{fmt.Sprintf("%s %s", hwAddr, ipAddr)},
 			},
 		},
 	}
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(tc.dbSetup, nil)
-			if err != nil {
-				t.Fatal(fmt.Errorf("test: \"%s\" failed to create test harness: %v", tc.desc, err))
-			}
-			t.Cleanup(cleanup.Cleanup)
-
-			hardwareAddr, ips, err := GetPortAddresses(portName, nbClient)
+			hardwareAddr, ips, err := ExtractPortAddresses(tc.lsp)
 			if tc.isNotFound {
 				assert.Nil(t, hardwareAddr)
 				assert.Nil(t, ips)
