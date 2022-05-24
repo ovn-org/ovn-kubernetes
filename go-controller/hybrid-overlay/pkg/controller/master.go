@@ -183,8 +183,12 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 		return nil
 	}
 
-	// retrieve port configuration. If port isn't set up, portMAC will be nil
-	portMAC, _, _ = util.GetPortAddresses(portName, m.nbClient)
+	// Retrieve port MAC address; if the port isn't set up, portMAC will be nil
+	lsp := &nbdb.LogicalSwitchPort{Name: portName}
+	lsp, err = libovsdbops.GetLogicalSwitchPort(m.nbClient, lsp)
+	if err == nil {
+		portMAC, _, _ = util.ExtractPortAddresses(lsp)
+	}
 
 	// compare port configuration to annotation MAC, reconcile as needed
 	lspOK := false
