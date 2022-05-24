@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"k8s.io/apimachinery/pkg/types"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -1265,6 +1267,154 @@ spec:
 		if err == nil {
 			framework.Failf("Failed to curl the remote host %s from container %s on node %s: %v", exFWPermitTcpWwwDest, ovnContainer, serverNodeInfo.name, err)
 		}
+	})
+	ginkgo.It("Should validate the egress firewall policy functionality against cluster nodes by using node selector", func() {
+		srcPodName := "e2e-egress-fw-src-pod"
+		frameworkNsFlag := fmt.Sprintf("--namespace=%s", f.Namespace.Name)
+		testContainer := fmt.Sprintf("%s-container", srcPodName)
+		testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
+		// use random labels in case test runs again since it's a pain to remove the label from the node
+		labelMatch := randStr(5)
+		// egress firewall crd yaml configuration
+		var egressFirewallConfig = fmt.Sprintf(`kind: EgressFirewall
+apiVersion: k8s.ovn.org/v1
+metadata:
+  name: default
+  namespace: %s
+spec:
+  egress:
+  - type: Allow
+    to:
+      cidrSelector: %s/%s
+  - type: Allow
+    to:
+      cidrSelector: %s
+    ports:
+      - protocol: TCP
+        port: 80
+  - type: Allow
+    to:
+      nodeSelector:
+        matchLabels:
+          %s: %s
+  - type: Deny
+    to:
+      cidrSelector: %s
+`, f.Namespace.Name, exFWPermitTcpDnsDest, singleIPMask, exFWPermitCIDR, f.Namespace.Name, labelMatch, exFWDenyCIDR)
+		framework.Logf("Egress Firewall CR generated: %s", egressFirewallConfig)
+		// write the config to a file for application and defer the removal
+		if err := ioutil.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
+			framework.Failf("Unable to write CRD config to disk: %v", err)
+		}
+		defer func() {
+			if err := os.Remove(egressFirewallYamlFile); err != nil {
+				framework.Logf("Unable to remove the CRD config from disk: %v", err)
+			}
+		}()
+		// create the CRD config parameters
+		applyArgs := []string{
+			"apply",
+			frameworkNsFlag,
+			"-f",
+			egressFirewallYamlFile,
+		}
+		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
+		// apply the egress firewall configuration
+		framework.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
+		// create the pod that will be used as the source for the connectivity test
+		createSrcPod(srcPodName, serverNodeInfo.name, retryInterval, retryTimeout, f)
+		// create host networked pod
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+		framework.ExpectNoError(err)
+
+		if len(nodes.Items) < 3 {
+			framework.Failf(
+				"Test requires >= 3 Ready nodes, but there are only %v nodes",
+				len(nodes.Items))
+		}
+		ginkgo.By("Creating host network pods on each node")
+		// get random port in case the test retries and port is already in use on host node
+		rand.Seed(time.Now().UnixNano())
+		min := 9900
+		max := 9999
+		hostNetworkPort := rand.Intn(max-min+1) + min
+		framework.Logf("Random host networked port chosen: %d", hostNetworkPort)
+		for _, node := range nodes.Items {
+			// this creates a udp / http netexec listener which is able to receive the "hostname"
+			// command. We use this to validate that each endpoint is received at least once
+			args := []string{
+				"netexec",
+				fmt.Sprintf("--http-port=%d", hostNetworkPort),
+				fmt.Sprintf("--udp-port=%d", hostNetworkPort),
+			}
+
+			// create host networked Pods
+			_, err := createPod(f, node.Name+"-hostnet-ep", node.Name, f.Namespace.Name, []string{}, map[string]string{}, func(p *v1.Pod) {
+				p.Spec.Containers[0].Args = args
+				p.Spec.HostNetwork = true
+			})
+
+			framework.ExpectNoError(err)
+
+		}
+
+		// Verify basic external connectivity to ensure egress firewall is working for normal conditions
+		ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host %s is permitted as defined by the external firewall policy", exFWPermitTcpDnsDest))
+		_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpDnsDest, "53")
+		if err != nil {
+			framework.Failf("Failed to connect to the remote host %s from container %s on node %s: %v", exFWPermitTcpDnsDest, ovnContainer, serverNodeInfo.name, err)
+		}
+		// Verify the remote host/port as implicitly denied by the firewall policy is not reachable
+		ginkgo.By(fmt.Sprintf("Verifying connectivity to an implicitly denied host %s is not permitted as defined by the external firewall policy", exFWDenyTcpDnsDest))
+		_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWDenyTcpDnsDest, "53")
+		if err == nil {
+			framework.Failf("Succeeded in connecting the implicitly denied remote host %s from container %s on node %s", exFWDenyTcpDnsDest, ovnContainer, serverNodeInfo.name)
+		}
+		// Verify the explicitly allowed host/port tcp port 80 rule is functional
+		ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host %s is permitted as defined by the external firewall policy", exFWPermitTcpWwwDest))
+		_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpWwwDest, "80")
+		if err != nil {
+			framework.Failf("Failed to curl the remote host %s from container %s on node %s: %v", exFWPermitTcpWwwDest, ovnContainer, serverNodeInfo.name, err)
+		}
+		// Verify the remote host/port 443 as implicitly denied by the firewall policy is not reachable
+		ginkgo.By(fmt.Sprintf("Verifying connectivity to an implicitly denied port on host %s is not permitted as defined by the external firewall policy", exFWPermitTcpWwwDest))
+		_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpWwwDest, "443")
+		if err == nil {
+			framework.Failf("Failed to curl the remote host %s from container %s on node %s: %v", exFWPermitTcpWwwDest, ovnContainer, serverNodeInfo.name, err)
+		}
+
+		ginkgo.By("Should NOT be able to reach each host networked pod via node selector")
+		for _, node := range nodes.Items {
+			path := fmt.Sprintf("http://%s:%d/hostname", node.Status.Addresses[0].Address, hostNetworkPort)
+			_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "curl", "-g", "--max-time", "2", path)
+			if err == nil {
+				framework.Failf("Was able to curl node %s from container %s on node %s with no allow rule for egress firewall", node.Name, srcPodName, serverNodeInfo.name)
+			}
+		}
+
+		ginkgo.By("Apply label to nodes " + f.Namespace.Name + ":" + labelMatch)
+		patch := struct {
+			Metadata map[string]interface{} `json:"metadata"`
+		}{
+			Metadata: map[string]interface{}{
+				"labels": map[string]string{f.Namespace.Name: labelMatch},
+			},
+		}
+		for _, node := range nodes.Items {
+			patchData, err := json.Marshal(&patch)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			f.ClientSet.CoreV1().Nodes().Patch(context.TODO(), node.Name, types.MergePatchType, patchData, metav1.PatchOptions{})
+		}
+
+		ginkgo.By("Should be able to reach each host networked pod via node selector")
+		for _, node := range nodes.Items {
+			path := fmt.Sprintf("http://%s:%d/hostname", node.Status.Addresses[0].Address, hostNetworkPort)
+			_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "curl", "-g", "--max-time", "2", path)
+			if err != nil {
+				framework.Failf("Failed to curl node %s from container %s on node %s: %v", node.Name, srcPodName, serverNodeInfo.name, err)
+			}
+		}
+
 	})
 	ginkgo.It("Should validate the egress firewall DNS does not deadlock when adding many dnsNames", func() {
 		frameworkNsFlag := fmt.Sprintf("--namespace=%s", f.Namespace.Name)

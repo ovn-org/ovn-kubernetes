@@ -192,6 +192,13 @@ func (oc *DefaultNetworkController) WatchEgressNodes() error {
 	return err
 }
 
+// WatchEgressFwNodes starts the watching of nodes for Egress Firewall where
+// firewall rules may match nodes using a node selector
+func (oc *DefaultNetworkController) WatchEgressFwNodes() error {
+	_, err := oc.retryEgressFwNodes.WatchResource()
+	return err
+}
+
 // WatchCloudPrivateIPConfig starts the watching of cloudprivateipconfigs
 // resource and calls back the appropriate handler logic.
 func (oc *DefaultNetworkController) WatchCloudPrivateIPConfig() error {
