@@ -94,7 +94,7 @@ func (c *FakeCloudPrivateIPConfigs) UpdateStatus(ctx context.Context, cloudPriva
 // Delete takes name of the cloudPrivateIPConfig and deletes it. Returns an error if one occurs.
 func (c *FakeCloudPrivateIPConfigs) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewRootDeleteAction(cloudprivateipconfigsResource, name), &cloudnetworkv1.CloudPrivateIPConfig{})
+		Invokes(testing.NewRootDeleteActionWithOptions(cloudprivateipconfigsResource, name, opts), &cloudnetworkv1.CloudPrivateIPConfig{})
 	return err
 }
 
