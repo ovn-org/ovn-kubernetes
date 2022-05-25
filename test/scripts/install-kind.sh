@@ -2,6 +2,7 @@
 
 set -ex
 
+# from https://github.com/kubernetes-sigs/kind/releases
 KIND_URL=https://kind.sigs.k8s.io/dl/v0.14.0/kind-linux-amd64
 KIND_SHA=af5e8331f2165feab52ec2ae07c427c7b66f4ad044d09f253004a20252524c8b
 KIND_DOWNLOAD_RETRIES=5
@@ -44,7 +45,7 @@ chmod +x ./kubectl
 sudo mv ./kubectl /usr/local/bin/kubectl
 
 # Install e2e test binary and ginkgo
-curl -L https://storage.googleapis.com/kubernetes-release/release/v1.23.0/kubernetes-test-linux-amd64.tar.gz -o kubernetes-test-linux-amd64.tar.gz
+curl -L https://storage.googleapis.com/kubernetes-release/release/v1.24.0/kubernetes-test-linux-amd64.tar.gz -o kubernetes-test-linux-amd64.tar.gz
 tar xvzf kubernetes-test-linux-amd64.tar.gz
 sudo mv kubernetes/test/bin/e2e.test /usr/local/bin/e2e.test
 sudo mv kubernetes/test/bin/ginkgo /usr/local/bin/ginkgo
