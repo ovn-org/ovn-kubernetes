@@ -155,18 +155,21 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) error {
 		}
 	}
 
-	// update existing egress network policies to use the updated ACLs
+	// Update existing egress network policies to use the updated ACLs
+	// Note that the default multicast egress acls were created with the correct direction, but
+	// we'd still need to update its apply-after-lb=true option, so that the ACL priorities can apply properly;
+	// If acl's option["apply-after-lb"] is already set to true, then its direction should be also correct.
 	p := func(item *nbdb.ACL) bool {
-		return item.ExternalIDs[policyTypeACLExtIdKey] == string(knet.PolicyTypeEgress) ||
-			item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(knet.PolicyTypeEgress)
+		return (item.ExternalIDs[policyTypeACLExtIdKey] == string(knet.PolicyTypeEgress) ||
+			item.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(knet.PolicyTypeEgress)) &&
+			item.Options["apply-after-lb"] != "true"
 	}
 	egressACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
 	if err != nil {
 		return fmt.Errorf("cannot find NetworkPolicy Egress ACLs: %v", err)
 	}
 
-	// if the first egress ACL is correct they should all be correct and not need to update
-	if len(egressACLs) > 0 && egressACLs[0].Direction != nbdb.ACLDirectionFromLport {
+	if len(egressACLs) > 0 {
 		for _, acl := range egressACLs {
 			acl.Direction = nbdb.ACLDirectionFromLport
 			if acl.Options == nil {
