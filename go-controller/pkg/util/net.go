@@ -35,16 +35,8 @@ func intToIP(i *big.Int) net.IP {
 	return net.IP(i.Bytes())
 }
 
-// GetPortAddresses returns the MAC and IPs of the given logical switch port
-func GetPortAddresses(portName string, nbClient client.Client) (net.HardwareAddr, []net.IP, error) {
-	lsp := &nbdb.LogicalSwitchPort{Name: portName}
-	lsp, err := libovsdbops.GetLogicalSwitchPort(nbClient, lsp)
-	if err == client.ErrNotFound {
-		return nil, nil, nil
-	} else if err != nil {
-		return nil, nil, err
-	}
-
+// ExtractPortAddresses returns the MAC and IPs of the given logical switch port
+func ExtractPortAddresses(lsp *nbdb.LogicalSwitchPort) (net.HardwareAddr, []net.IP, error) {
 	var addresses []string
 
 	if lsp.DynamicAddresses == nil {
@@ -63,13 +55,13 @@ func GetPortAddresses(portName string, nbClient client.Client) (net.HardwareAddr
 
 	mac, err := net.ParseMAC(addresses[0])
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to parse logical switch port %q MAC %q: %v", portName, addresses[0], err)
+		return nil, nil, fmt.Errorf("failed to parse logical switch port %q MAC %q: %v", lsp.Name, addresses[0], err)
 	}
 	var ips []net.IP
 	for _, addr := range addresses[1:] {
 		ip := net.ParseIP(addr)
 		if ip == nil {
-			return nil, nil, fmt.Errorf("failed to parse logical switch port %q IP %q is not a valid ip address", portName, addr)
+			return nil, nil, fmt.Errorf("failed to parse logical switch port %q IP %q is not a valid ip address", lsp.Name, addr)
 		}
 		ips = append(ips, ip)
 	}

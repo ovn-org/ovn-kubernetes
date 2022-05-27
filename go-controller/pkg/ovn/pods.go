@@ -441,13 +441,16 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	if needsIP {
-		// try to get the IP from existing port in OVN first
-		podMac, podIfAddrs, err = oc.getPortAddresses(logicalSwitch, portName)
-		if err != nil {
-			return fmt.Errorf("failed to get pod addresses for pod %s on node: %s, err: %v",
-				portName, logicalSwitch, err)
+		if existingLSP != nil {
+			// try to get the MAC and IPs from existing OVN port first
+			podMac, podIfAddrs, err = oc.getPortAddresses(logicalSwitch, existingLSP)
+			if err != nil {
+				return fmt.Errorf("failed to get pod addresses for pod %s on node: %s, err: %v",
+					portName, logicalSwitch, err)
+			}
 		}
 		needsNewAllocation := false
+
 		// ensure we have reserved the IPs found in OVN
 		if len(podIfAddrs) == 0 {
 			needsNewAllocation = true
@@ -553,15 +556,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		// namespace annotations to go through external egress router
 		if extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName); err != nil {
 			return err
-		} else if err = addOrUpdatePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, podIfAddrs); err != nil {
+		} else if ops, err = oc.addOrUpdatePerPodGRSNATReturnOps(pod.Spec.NodeName, extIPs, podIfAddrs, ops); err != nil {
 			return err
 		}
-	}
-
-	// check if this pod is serving as an external GW
-	err = oc.addPodExternalGW(pod)
-	if err != nil {
-		return fmt.Errorf("failed to handle external GW check: %v", err)
 	}
 
 	// set addresses on the port
@@ -599,6 +596,12 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	txOkCallBack()
 	oc.podRecorder.AddLSP(pod.UID)
+
+	// check if this pod is serving as an external GW
+	err = oc.addPodExternalGW(pod)
+	if err != nil {
+		return fmt.Errorf("failed to handle external GW check: %v", err)
+	}
 
 	// if somehow lspUUID is empty, there is a bug here with interpreting OVSDB results
 	if len(lsp.UUID) == 0 {
@@ -643,15 +646,13 @@ func (oc *Controller) assignPodAddresses(nodeName string) (net.HardwareAddr, []*
 	return podMAC, podCIDRs, nil
 }
 
-// Given a pod and the node on which it is scheduled, get all addresses currently assigned
-// to it from the nbdb.
-func (oc *Controller) getPortAddresses(nodeName, portName string) (net.HardwareAddr, []*net.IPNet, error) {
-	podMac, podIPs, err := util.GetPortAddresses(portName, oc.nbClient)
+// Given a logical switch port and the node on which it is scheduled, get all
+// addresses currently assigned to it including subnet masks.
+func (oc *Controller) getPortAddresses(nodeName string, existingLSP *nbdb.LogicalSwitchPort) (net.HardwareAddr, []*net.IPNet, error) {
+	podMac, podIPs, err := util.ExtractPortAddresses(existingLSP)
 	if err != nil {
 		return nil, nil, err
-	}
-
-	if podMac == nil || len(podIPs) == 0 {
+	} else if podMac == nil || len(podIPs) == 0 {
 		return nil, nil, nil
 	}
 
