@@ -18,7 +18,6 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -602,10 +601,8 @@ func (n *OvnNode) WatchEndpoints() error {
 
 // validateVTEPInterfaceMTU checks if the MTU of the interface that has ovn-encap-ip is big
 // enough to carry the `config.Default.MTU` and the Geneve header. If the MTU is not big
-// enough, it will taint the node with the value of `types.OvnK8sSmallMTUTaintKey`
+// enough, it will return an error
 func (n *OvnNode) validateVTEPInterfaceMTU() error {
-	tooSmallMTUTaint := &kapi.Taint{Key: types.OvnK8sSmallMTUTaintKey, Effect: kapi.TaintEffectNoSchedule}
-
 	ovnEncapIP := net.ParseIP(config.Default.EncapIP)
 	if ovnEncapIP == nil {
 		return fmt.Errorf("the set OVN Encap IP is invalid: (%s)", config.Default.EncapIP)
@@ -625,22 +622,12 @@ func (n *OvnNode) validateVTEPInterfaceMTU() error {
 		requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv6
 	}
 
-	// check if node needs to be tainted
 	if mtu < requiredMTU {
-		klog.V(2).Infof("MTU (%d) of network interface %s is not big enough to deal with Geneve "+
-			"header overhead (sum %d). Tainting node with %v...", mtu, interfaceName,
-			requiredMTU, tooSmallMTUTaint)
-
-		return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			return n.Kube.SetTaintOnNode(n.name, tooSmallMTUTaint)
-		})
+		return fmt.Errorf("interface MTU (%d) is too small for specified overlay MTU (%d)", mtu, requiredMTU)
 	}
-	klog.V(2).Infof("MTU (%d) of network interface %s is big enough to deal with Geneve header overhead (sum %d). "+
-		"Making sure node is not tainted with %v...", mtu, interfaceName, requiredMTU, tooSmallMTUTaint)
-
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return n.Kube.RemoveTaintFromNode(n.name, tooSmallMTUTaint)
-	})
+	klog.V(2).Infof("MTU (%d) of network interface %s is big enough to deal with Geneve header overhead (sum %d). ",
+		mtu, interfaceName, requiredMTU)
+	return nil
 }
 
 type epAddressItem struct {
