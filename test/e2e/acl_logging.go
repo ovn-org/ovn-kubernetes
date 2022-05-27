@@ -157,7 +157,8 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 		dstPort      = 8080
 	)
 
-	fr := framework.NewDefaultFramework(namespacePrefix)
+	// fr := framework.NewDefaultFramework(namespacePrefix)
+	fr := newPrivelegedTestFramework(namespacePrefix)
 
 	var (
 		nsName           string

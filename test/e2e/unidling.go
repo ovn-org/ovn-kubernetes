@@ -67,6 +67,7 @@ var _ = ginkgo.Describe("Unidling", func() {
 		// Add a backend pod to the service in one node
 		ginkgo.By("creating a backend pod for the service " + serviceName)
 		serverPod := e2epod.NewAgnhostPod(namespace, "pod-backend", nil, nil, []v1.ContainerPort{{ContainerPort: 9376}}, "serve-hostname")
+		// setSecurityContextOnPod(serverPod)
 		serverPod.Labels = jig.Labels
 		serverPod.Spec.NodeName = nodeName
 		f.PodClient().CreateSync(serverPod)
@@ -78,6 +79,7 @@ var _ = ginkgo.Describe("Unidling", func() {
 		ginkgo.By(fmt.Sprintf("creating %v on node %v", podName, nodeName))
 		execPod := e2epod.CreateExecPodOrFail(f.ClientSet, namespace, podName, func(pod *v1.Pod) {
 			pod.Spec.NodeName = nodeName
+			// setSecurityContextOnPod(pod)
 		})
 
 		serviceAddress := net.JoinHostPort(serviceName, strconv.Itoa(port))
@@ -142,6 +144,7 @@ var _ = ginkgo.Describe("Unidling", func() {
 			ginkgo.By(fmt.Sprintf("creating %v on node %v", podName, node))
 			clientPod = e2epod.CreateExecPodOrFail(f.ClientSet, namespace, podName, func(pod *v1.Pod) {
 				pod.Spec.NodeName = node
+				// setSecurityContextOnPod(pod)
 			})
 			serviceAddress := net.JoinHostPort(serviceName, strconv.Itoa(port))
 			framework.Logf("waiting up to %v to connect to %v", e2eservice.KubeProxyEndpointLagTimeout, serviceAddress)
@@ -231,6 +234,7 @@ var _ = ginkgo.Describe("Unidling", func() {
 			ginkgo.By(fmt.Sprintf("creating %v on node %v", podName, node))
 			clientPod = e2epod.CreateExecPodOrFail(f.ClientSet, namespace, podName, func(pod *v1.Pod) {
 				pod.Spec.NodeName = node
+				// setSecurityContextOnPod(pod)
 			})
 			serviceAddress := net.JoinHostPort(serviceName, strconv.Itoa(port))
 			framework.Logf("waiting up to %v to connect to %v", e2eservice.KubeProxyEndpointLagTimeout, serviceAddress)
@@ -295,7 +299,9 @@ var _ = ginkgo.Describe("Unidling", func() {
 
 func createBackend(f *framework.Framework, serviceName, namespace, node string, labels map[string]string, port int32) *v1.Pod {
 	ginkgo.By("creating a backend pod for the service " + serviceName)
-	serverPod := e2epod.NewAgnhostPod(namespace, "pod-backend", nil, nil, []v1.ContainerPort{{ContainerPort: port}}, "netexec", "--http-port=80")
+	serverPod := e2epod.NewAgnhostPod(namespace, "pod-backend", nil, nil,
+		[]v1.ContainerPort{{ContainerPort: port}}, "netexec", "--http-port=80")
+	// setSecurityContextOnPod(serverPod)
 	serverPod.Labels = labels
 	serverPod.Spec.NodeName = node
 	pod := f.PodClient().CreateSync(serverPod)

@@ -64,6 +64,7 @@ var _ = ginkgo.Describe("Services", func() {
 
 		serverPod := e2epod.NewAgnhostPod(namespace, "backend", nil, nil, []v1.ContainerPort{{ContainerPort: (udpPort)}, {ContainerPort: (udpPort), Protocol: "UDP"}},
 			"netexec", "--udp-port="+udpPortS)
+		// setSecurityContextOnPod(serverPod)
 		serverPod.Labels = jig.Labels
 		serverPod.Spec.HostNetwork = true
 
@@ -151,6 +152,7 @@ var _ = ginkgo.Describe("Services", func() {
 		// we use UDP here since agnhost lets us pick the listen address only for UDP
 		serverPod := e2epod.NewAgnhostPod(namespace, "backend", nil, nil, []v1.ContainerPort{{ContainerPort: (udpPort)}, {ContainerPort: (udpPort), Protocol: "UDP"}},
 			"netexec", "--udp-port="+udpPortS, "--udp-listen-addresses="+extraIP)
+		// setSecurityContextOnPod(serverPod)
 		serverPod.Labels = jig.Labels
 		serverPod.Spec.NodeName = nodeName
 		serverPod.Spec.HostNetwork = true
@@ -212,6 +214,7 @@ var _ = ginkgo.Describe("Services", func() {
 		// Now, spin up a pod-network pod on the same node, and ensure we can talk to the "local address" service
 		clientServerPod := e2epod.NewAgnhostPod(namespace, "client", nil, nil, []v1.ContainerPort{{ContainerPort: (udpPort)}, {ContainerPort: (udpPort), Protocol: "UDP"}},
 			"netexec")
+		// setSecurityContextOnPod(serverPod)
 		clientServerPod.Spec.NodeName = nodeName
 		f.PodClient().CreateSync(clientServerPod)
 		clientServerPod, err = f.PodClient().Get(context.TODO(), clientServerPod.Name, metav1.GetOptions{})

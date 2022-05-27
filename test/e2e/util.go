@@ -23,6 +23,7 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	testutils "k8s.io/kubernetes/test/utils"
+	admissionapi "k8s.io/pod-security-admission/api"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -82,7 +83,9 @@ type annotationNotSetError struct {
 // newAgnhostPod returns a pod that uses the agnhost image. The image's binary supports various subcommands
 // that behave the same, no matter the underlying OS.
 func newAgnhostPod(namespace, name string, command ...string) *v1.Pod {
-	return &v1.Pod{
+	// runAsNonRoot := false
+	// allowPrivilegeEscalation := false
+	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
@@ -93,11 +96,70 @@ func newAgnhostPod(namespace, name string, command ...string) *v1.Pod {
 					Name:    name,
 					Image:   agnhostImage,
 					Command: command,
+					// SecurityContext: e2epod.GetRestrictedContainerSecurityContext(),
+					// SecurityContext: &v1.SecurityContext{
+					// 	AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+					// 	Capabilities: &v1.Capabilities{
+					// 		Drop: []v1.Capability{"ALL"},
+					// 	},
+					// },
 				},
 			},
 			RestartPolicy: v1.RestartPolicyNever,
+			// SecurityContext: e2epod.GetRestrictedPodSecurityContext(),
+			// SecurityContext: &v1.PodSecurityContext{
+			// 	RunAsNonRoot: &runAsNonRoot,
+			// 	SeccompProfile: &v1.SeccompProfile{
+			// 		Type: v1.SeccompProfileTypeRuntimeDefault},
+			// },
 		},
 	}
+	// framework.Logf("[ newAgnhostPod] setSecurityContextOnPod: %v", pod.Spec.SecurityContext)
+	// framework.Logf("[ newAgnhostPod] setSecurityContextOnContainer: %v", pod.Spec.Containers[0].SecurityContext)
+	return pod
+}
+
+// func setSecurityContextOnPod(pod *v1.Pod) {
+// 	// runAsNonRoot := true
+// 	// allowPrivilegeEscalation := false
+
+// 	// // pod.Spec.SecurityContext = e2epod.GetRestrictedPodSecurityContext()
+// 	// pod.Spec.SecurityContext = &v1.PodSecurityContext{
+// 	// 	RunAsNonRoot: &runAsNonRoot,
+// 	// 	SeccompProfile: &v1.SeccompProfile{
+// 	// 		Type: v1.SeccompProfileTypeRuntimeDefault},
+// 	// }
+// 	// for i, container := range pod.Spec.Containers {
+// 	// 	// container.SecurityContext = e2epod.GetRestrictedContainerSecurityContext()
+// 	// 	container.SecurityContext = &v1.SecurityContext{
+// 	// 		AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+// 	// 		Capabilities: &v1.Capabilities{
+// 	// 			Drop: []v1.Capability{"ALL"},
+// 	// 		},
+// 	// 	}
+// 	// 	pod.Spec.Containers[i] = container
+// 	// }
+// 	// framework.Logf("pod %v, setSecurityContextOnPod: %v", pod.Name, pod.Spec.SecurityContext)
+// 	// framework.Logf("setSecurityContextOnContainer: %v", pod.Spec.Containers[0].SecurityContext)
+// }
+
+func readSecurityContext(pod *v1.Pod, i int) {
+	framework.Logf("[readSecurityContext %d] pod %v, setSecurityContextOnPod: %v",
+		i, pod.Name, pod.Spec.SecurityContext)
+	framework.Logf("[readSecurityContext %d] setSecurityContextOnContainer: %v",
+		i, pod.Spec.Containers[0].SecurityContext)
+}
+
+func patchNamespacePolicyViolations(fr *framework.Framework, namespaceToUpdate *v1.Namespace) error {
+	if namespaceToUpdate.ObjectMeta.Labels == nil {
+		namespaceToUpdate.ObjectMeta.Labels = map[string]string{}
+	}
+	namespaceToUpdate.ObjectMeta.Labels["pod-security.kubernetes.io/enforce"] = "privileged"
+	namespaceToUpdate.ObjectMeta.Labels["pod-security.kubernetes.io/audit"] = "privileged"
+	namespaceToUpdate.ObjectMeta.Labels["pod-security.kubernetes.io/warn"] = "privileged"
+	_, err := fr.ClientSet.CoreV1().Namespaces().Update(
+		context.TODO(), namespaceToUpdate, metav1.UpdateOptions{})
+	return err
 }
 
 // IsIPv6Cluster returns true if the kubernetes default service is IPv6
@@ -765,7 +827,17 @@ func isDualStackCluster(nodes *v1.NodeList) bool {
 
 // used to inject OVN specific test actions
 func wrappedTestFramework(basename string) *framework.Framework {
-	f := framework.NewDefaultFramework(basename)
+	// set privileged namespace
+	// ginkgo.BeforeEach(func() {
+	// 	nsName := f.Namespace.Name
+	// 	namespace, err := f.ClientSet.CoreV1().Namespaces().Get(
+	// 		context.Background(), nsName, metav1.GetOptions{})
+	// 	gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to retrieve the namespace")
+	// 	err = patchNamespacePolicyViolations(f, namespace)
+	// 	gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to patch namespace security level")
+	// })
+
+	f := newPrivelegedTestFramework(basename)
 	// inject dumping dbs on failure
 	ginkgo.JustAfterEach(func() {
 		if !ginkgo.CurrentGinkgoTestDescription().Failed {
@@ -814,6 +886,12 @@ func wrappedTestFramework(basename string) *framework.Framework {
 		}
 	})
 
+	return f
+}
+
+func newPrivelegedTestFramework(basename string) *framework.Framework {
+	f := framework.NewDefaultFramework(basename)
+	f.NamespacePodSecurityEnforceLevel = admissionapi.LevelPrivileged
 	return f
 }
 
