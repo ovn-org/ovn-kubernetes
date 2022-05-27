@@ -2,8 +2,8 @@
 
 set -ex
 
-KIND_URL=https://kind.sigs.k8s.io/dl/v0.11.1/kind-linux-amd64
-KIND_SHA=949f81b3c30ca03a3d4effdecda04f100fa3edc07a28b19400f72ede7c5f0491
+KIND_URL=https://kind.sigs.k8s.io/dl/v0.14.0/kind-linux-amd64
+KIND_SHA=af5e8331f2165feab52ec2ae07c427c7b66f4ad044d09f253004a20252524c8b
 KIND_DOWNLOAD_RETRIES=5
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
