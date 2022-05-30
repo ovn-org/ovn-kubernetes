@@ -334,9 +334,12 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 	doneWg.Add(1)
 	go func() {
 		defer doneWg.Done()
+		syncPeriod := 15 * time.Second
+		timer := time.NewTicker(syncPeriod)
+		defer timer.Stop()
 		for {
 			select {
-			case <-time.After(15 * time.Second):
+			case <-timer.C:
 				if err := checkPorts(c.defaultBridge.patchPort, c.defaultBridge.ofPortPatch,
 					c.defaultBridge.uplinkName, c.defaultBridge.ofPortPhys); err != nil {
 					klog.Errorf("Checkports failed %v", err)
@@ -353,6 +356,7 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 				c.syncFlows()
 			case <-c.flowChan:
 				c.syncFlows()
+				timer.Reset(syncPeriod)
 			case <-stopChan:
 				return
 			}

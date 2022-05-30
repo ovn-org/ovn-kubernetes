@@ -1151,15 +1151,18 @@ func (oc *Controller) iterateRetryResources(r *retryObjs, updateAll bool) {
 // periodicallyRetryResources tracks retryObjs and checks if any object needs to be retried for add or delete every
 // retryObjInterval seconds or when requested through retryChan.
 func (oc *Controller) periodicallyRetryResources(r *retryObjs) {
+	timer := time.NewTicker(retryObjInterval)
+	defer timer.Stop()
 	for {
 		select {
-		case <-time.After(retryObjInterval):
+		case <-timer.C:
 			klog.V(5).Infof("%s s have elapsed, retrying failed objects of type %v", retryObjInterval, r.oType)
 			oc.iterateRetryResources(r, false)
 
 		case <-r.retryChan:
 			klog.V(5).Infof("Retry channel got triggered: retrying failed objects of type %v", r.oType)
 			oc.iterateRetryResources(r, true)
+			timer.Reset(retryObjInterval)
 
 		case <-oc.stopChan:
 			klog.V(5).Infof("Stop channel got triggered: will stop retrying failed objects of type %v", r.oType)

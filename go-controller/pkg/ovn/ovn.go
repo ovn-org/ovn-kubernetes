@@ -471,6 +471,7 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 func (oc *Controller) syncPeriodic() {
 	go func() {
 		nodeSyncTicker := time.NewTicker(5 * time.Minute)
+		defer nodeSyncTicker.Stop()
 		for {
 			select {
 			case <-nodeSyncTicker.C:
