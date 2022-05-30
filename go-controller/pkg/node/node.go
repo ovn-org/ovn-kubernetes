@@ -210,7 +210,7 @@ func setupOVNNode(node *kapi.Node) error {
 
 	if config.Default.LFlowCacheLimitKb > 0 {
 		setExternalIdsCmd = append(setExternalIdsCmd,
-			fmt.Sprintf("external_ids:ovn-limit-lflow-cache-kb=%d", config.Default.LFlowCacheLimitKb),
+			fmt.Sprintf("external_ids:ovn-memlimit-lflow-cache-kb=%d", config.Default.LFlowCacheLimitKb),
 		)
 	}
 
