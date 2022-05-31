@@ -1149,20 +1149,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.controller.logicalPortCache.add("", util.GetLogicalPortName(egressPod.Namespace, egressPod.Name), "", nil, []*net.IPNet{n})
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod.Namespace).Create(context.TODO(), &egressPod, metav1.CreateOptions{})
 
-				err = fakeOvn.controller.gatewayCleanup(node1Name) // simulate an already deleted node
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), node1Name, metav1.DeleteOptions{})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				// E0608 09:42:53.781424  971577 egressip.go:881] Allocator error: EgressIP: egressip claims to have an allocation on a node which is unassignable for egress IP: node1
-				// E0608 09:42:53.781497  971577 obj_retry.go:1513] Failed to delete resource object node1 of type *factory.egressNode, error: Re-assignment for EgressIP: egressip failed, unable to update object, err: unable to retrieve gateway IP for node: node1, protocol is IPv6: false, err: attempt at finding node gateway router network information failed, err: unable to find router port rtoj-GR_node1: object not found
-				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
-				gomega.Eventually(nodeSwitch).Should(gomega.Equal(node1.Name)) // egressIP status stuck against a deleted node
-				egressIPs, _ = getEgressIPStatus(egressIPName)
-				gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP))
-
-				// NOTE that expected database objects are still towards node1 since reAssignment of egressIPs fails with the above error
 				expectedNatLogicalPort := "k8s-node1"
 				expectedDatabaseState := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
@@ -1181,14 +1167,117 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Priority: types.EgressIPReroutePriority,
 						Match:    fmt.Sprintf("ip4.src == %s", egressPod.Status.PodIP),
 						Action:   nbdb.LogicalRouterPolicyActionReroute,
-						Nexthops: nodeLogicalRouterIPv4, // stale re-route policy against a deleted node towards a router that doesn't exist
+						Nexthops: nodeLogicalRouterIPv4,
 						ExternalIDs: map[string]string{
 							"name": eIP.Name,
 						},
 						UUID: "reroute-UUID",
 					},
 					&nbdb.NAT{
-						UUID:       "egressip-nat-UUID", // stale NAT against a deleted node on a router that doesn't exist
+						UUID:       "egressip-nat-UUID",
+						LogicalIP:  podV4IP,
+						ExternalIP: egressIP,
+						ExternalIDs: map[string]string{
+							"name": egressIPName,
+						},
+						Type:        nbdb.NATTypeSNAT,
+						LogicalPort: &expectedNatLogicalPort,
+						Options: map[string]string{
+							"stateless": "false",
+						},
+					},
+					&nbdb.LogicalRouter{
+						Name: ovntypes.GWRouterPrefix + node1.Name,
+						UUID: ovntypes.GWRouterPrefix + node1.Name + "-UUID",
+						Nat:  []string{"egressip-nat-UUID"},
+					},
+					&nbdb.LogicalRouter{
+						Name: ovntypes.GWRouterPrefix + node2.Name,
+						UUID: ovntypes.GWRouterPrefix + node2.Name + "-UUID",
+						Nat:  []string{},
+					},
+					&nbdb.LogicalRouter{
+						Name:     ovntypes.OVNClusterRouter,
+						UUID:     ovntypes.OVNClusterRouter + "-UUID",
+						Policies: []string{"reroute-UUID", "default-no-reroute-UUID", "no-reroute-service-UUID"},
+					},
+					&nbdb.LogicalRouterPort{
+						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name + "-UUID",
+						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node1.Name,
+						Networks: []string{nodeLogicalRouterIfAddrV4},
+					},
+					&nbdb.LogicalRouterPort{
+						UUID:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2.Name + "-UUID",
+						Name:     ovntypes.GWRouterToJoinSwitchPrefix + ovntypes.GWRouterPrefix + node2.Name,
+						Networks: []string{node2LogicalRouterIfAddrV4},
+					},
+					&nbdb.LogicalSwitchPort{
+						UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name + "UUID",
+						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name,
+						Type: "router",
+						Options: map[string]string{
+							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node1Name,
+							"nat-addresses":             "router",
+							"exclude-lb-vips-from-garp": "true",
+						},
+					},
+					&nbdb.LogicalSwitchPort{
+						UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name + "UUID",
+						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node2Name,
+						Type: "router",
+						Options: map[string]string{
+							"router-port":               types.GWRouterToExtSwitchPrefix + "GR_" + node2Name,
+							"nat-addresses":             "router",
+							"exclude-lb-vips-from-garp": "true",
+						},
+					},
+					&nbdb.LogicalSwitch{
+						UUID: types.OVNJoinSwitch + "-UUID",
+						Name: types.OVNJoinSwitch,
+					},
+				}
+
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+				err = fakeOvn.controller.gatewayCleanup(node1Name) // simulate an already deleted node
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), node1Name, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// E0608 12:53:33.728155 1161455 egressip.go:882] Allocator error: EgressIP: egressip claims to have an allocation on a node which is unassignable for egress IP: node1
+				// W0608 12:53:33.728205 1161455 egressip.go:2030] Unable to retrieve gateway IP for node: node1, protocol is IPv6: false, err: attempt at finding node gateway router network information failed, err: unable to find router port rtoj-GR_node1: object not found
+				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
+				gomega.Eventually(nodeSwitch).Should(gomega.Equal(node2.Name)) // egressIP successfully reassigned to node2
+				egressIPs, _ = getEgressIPStatus(egressIPName)
+				gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP))
+
+				expectedNatLogicalPort = "k8s-node2"
+				expectedDatabaseState = []libovsdbtest.TestData{
+					&nbdb.LogicalRouterPolicy{
+						Priority: types.DefaultNoRereoutePriority,
+						Match:    "ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14",
+						Action:   nbdb.LogicalRouterPolicyActionAllow,
+						UUID:     "default-no-reroute-UUID",
+					},
+					&nbdb.LogicalRouterPolicy{
+						Priority: types.DefaultNoRereoutePriority,
+						Match:    fmt.Sprintf("ip4.src == 10.128.0.0/14 && ip4.dst == %s", config.Gateway.V4JoinSubnet),
+						Action:   nbdb.LogicalRouterPolicyActionAllow,
+						UUID:     "no-reroute-service-UUID",
+					},
+					&nbdb.LogicalRouterPolicy{
+						Priority: types.EgressIPReroutePriority,
+						Match:    fmt.Sprintf("ip4.src == %s", egressPod.Status.PodIP),
+						Action:   nbdb.LogicalRouterPolicyActionReroute,
+						Nexthops: node2LogicalRouterIPv4,
+						ExternalIDs: map[string]string{
+							"name": eIP.Name,
+						},
+						UUID: "reroute-UUID",
+					},
+					&nbdb.NAT{
+						UUID:       "egressip-nat-UUID",
 						LogicalIP:  podV4IP,
 						ExternalIP: egressIP,
 						ExternalIDs: map[string]string{
@@ -1203,7 +1292,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					&nbdb.LogicalRouter{
 						Name: ovntypes.GWRouterPrefix + node2.Name,
 						UUID: ovntypes.GWRouterPrefix + node2.Name + "-UUID",
-						Nat:  []string{},
+						Nat:  []string{"egressip-nat-UUID"},
 					},
 					&nbdb.LogicalRouter{
 						Name:     ovntypes.OVNClusterRouter,
