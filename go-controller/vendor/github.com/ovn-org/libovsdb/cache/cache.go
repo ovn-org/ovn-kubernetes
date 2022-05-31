@@ -936,8 +936,9 @@ func (t *TableCache) ApplyModifications(tableName string, base model.Model, upda
 				}
 				bv := reflect.ValueOf(baseValue)
 				var found bool
+				newVal := nv.Index(i).Interface()
 				for j := 0; j < bv.Len(); j++ {
-					if bv.Index(j).Interface() == nv.Index(i).Interface() {
+					if bv.Index(j).Interface() == newVal {
 						// found a match, delete from slice
 						found = true
 						newValue := reflect.AppendSlice(bv.Slice(0, j), bv.Slice(j+1, bv.Len()))
