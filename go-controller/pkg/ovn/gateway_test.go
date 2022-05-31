@@ -775,6 +775,17 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 						Match:    matchstr6,
 						Priority: nodeSubnetPriority,
 					},
+					// add a stale egressIP reroute policy with nexthop == node's joinIP
+					&nbdb.LogicalRouterPolicy{
+						Priority: types.EgressIPReroutePriority,
+						Match:    fmt.Sprintf("ip4.src == 10.224.0.5"),
+						Action:   nbdb.LogicalRouterPolicyActionReroute,
+						Nexthops: []string{"100.64.0.1"},
+						ExternalIDs: map[string]string{
+							"name": "egresip",
+						},
+						UUID: "reroute-UUID",
+					},
 					&nbdb.LogicalRouterStaticRoute{
 						Nexthop: "100.64.0.1",
 						UUID:    "static-route-1-UUID",
@@ -786,7 +797,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					&nbdb.LogicalRouter{
 						Name:         types.OVNClusterRouter,
 						UUID:         types.OVNClusterRouter + "-UUID",
-						Policies:     []string{"match2-UUID", "match3-UUID", "match6-UUID"},
+						Policies:     []string{"match2-UUID", "match3-UUID", "match6-UUID", "reroute-UUID"},
 						StaticRoutes: []string{"static-route-1-UUID", "static-route-2-UUID"},
 					},
 					&nbdb.LogicalSwitchPort{

@@ -35,6 +35,7 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 		nextHops = append(nextHops, gwIPAddr.IP)
 	}
 	oc.staticRouteCleanup(nextHops)
+	oc.policyRouteCleanup(nextHops)
 
 	// Remove the patch port that connects join switch to gateway router
 	portName := types.JoinSwitchToGWRouterPrefix + gatewayRouter
@@ -118,6 +119,30 @@ func (oc *Controller) staticRouteCleanup(nextHops []net.IP) {
 	}
 }
 
+// policyRouteCleanup cleansup all policies on cluster router that have a nextHop
+// in the provided list.
+// - if the LRP exists and has the len(nexthops) > 1: it removes
+// the specified gatewayRouterIP from nexthops
+// - if the LRP exists and has the len(nexthops) == 1: it removes
+// the LRP completely
+func (oc *Controller) policyRouteCleanup(nextHops []net.IP) {
+	for _, nextHop := range nextHops {
+		gwIP := nextHop.String()
+		policyPred := func(item *nbdb.LogicalRouterPolicy) bool {
+			for _, nexthop := range item.Nexthops {
+				if nexthop == gwIP {
+					return true
+				}
+			}
+			return false
+		}
+		err := libovsdbops.DeleteNextHopFromLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, policyPred, gwIP)
+		if err != nil {
+			klog.Errorf("Failed to delete policy route for nexthop %+v: %v", nextHop, err)
+		}
+	}
+}
+
 // multiJoinSwitchGatewayCleanup removes the OVN NB gateway logical entities that for
 // the obsoleted multiple join switch OVN topology.
 //
@@ -156,6 +181,7 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 	}
 
 	oc.staticRouteCleanup(nextHops)
+	oc.policyRouteCleanup(nextHops)
 
 	// Remove the join switch that connects ovn_cluster_router to gateway router
 	joinSwitchName := types.JoinSwitchPrefix + nodeName
