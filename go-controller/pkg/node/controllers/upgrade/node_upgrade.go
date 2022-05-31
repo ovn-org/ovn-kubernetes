@@ -81,8 +81,9 @@ func (uc *upgradeController) GetTopologyVersion(ctx context.Context) (int, error
 
 	// Masters not yet upgraded, check Node objects
 	klog.Infof("Could not determine TopologyVersion via configmap, falling back to Nodes")
-
-	masterNode, err := labels.NewRequirement("node-role.kubernetes.io/master", selection.Exists, nil)
+	// TODO (rr): this part should be tested since both node-role.kubernetes.io/control-plane
+	// and node-role.kubernetes.io/master labels co-exist in k8s 1.24
+	masterNode, err := labels.NewRequirement("node-role.kubernetes.io/control-plane", selection.Exists, nil)
 	if err != nil {
 		klog.Fatalf("Unable to create labels.NewRequirement: %v", err)
 	}
