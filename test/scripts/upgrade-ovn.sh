@@ -301,3 +301,32 @@ kubectl_wait_for_upgrade
 run_kubectl describe ds ovnkube-node -n ovn-kubernetes
 
 run_kubectl describe deployments.apps ovnkube-master -n ovn-kubernetes
+
+
+# OVN_HA=${OVN_HA:-false}
+KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
+KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
+# KIND_NUM_MASTER=1
+# if [ "$OVN_HA" == true ]; then
+#   KIND_NUM_MASTER=3
+#   KIND_NUM_WORKER=${KIND_NUM_WORKER:-0}
+# else
+#   KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
+# fi
+
+# [for debugging]
+# inspect nodes at this point, right before running shard-conformance tests
+kubectl get nodes -o yaml
+
+NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+# We want OVN HA not Kubernetes HA
+# leverage the kubeadm well-known label node-role.kubernetes.io/control-plane=
+# to choose the nodes where ovn master components will be placed
+for n in $NODES; do
+  # kubectl label node "$n" k8s.ovn.org/ovnkube-db=true node-role.kubernetes.io/control-plane="" --overwrite
+    if [ "$KIND_REMOVE_TAINT" == true ]; then
+      # do not error if it fails to remove the taint
+      # kubectl taint node "$n" node-role.kubernetes.io/master:NoSchedule- || true
+      kubectl taint node "$n" node-role.kubernetes.io/control-plane:NoSchedule- || true
+    fi
+  done
