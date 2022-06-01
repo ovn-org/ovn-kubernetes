@@ -50,6 +50,7 @@ const (
 	v4NodeSubnet    = "10.128.0.0/24"
 	podName         = "egress-pod"
 	egressIPName    = "egressip"
+	inspectTimeout  = 2 * time.Second // arbitrary, should avoid failures on github CI when inspecting retry entries
 )
 
 func newEgressIPMeta(name string) metav1.ObjectMeta {
@@ -613,7 +614,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				key1 := node1.Name
 				gomega.Eventually(func() *retryObjEntry {
 					return fakeOvn.controller.retryEgressNodes.getObjRetryEntry(key1)
-				}).ShouldNot(gomega.BeNil())
+				}, inspectTimeout).ShouldNot(gomega.BeNil())
 				retryEntry := fakeOvn.controller.retryEgressNodes.getObjRetryEntry(key1)
 				ginkgo.By("retry entry new obj be nil")
 				gomega.Expect(retryEntry.newObj).To(gomega.BeNil())
@@ -622,7 +623,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				key2 := node2.Name
 				gomega.Eventually(func() *retryObjEntry {
 					return fakeOvn.controller.retryEgressNodes.getObjRetryEntry(key2)
-				}).ShouldNot(gomega.BeNil())
+				}, inspectTimeout).ShouldNot(gomega.BeNil())
 				retryEntry = fakeOvn.controller.retryEgressNodes.getObjRetryEntry(key2)
 				ginkgo.By("retry entry new obj should not be nil")
 				gomega.Expect(retryEntry.newObj).NotTo(gomega.BeNil())
@@ -635,10 +636,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				// check the cache no longer has the entry
 				gomega.Eventually(func() *retryObjEntry {
 					return fakeOvn.controller.retryEgressNodes.getObjRetryEntry(key1)
-				}).Should(gomega.BeNil())
+				}, inspectTimeout).Should(gomega.BeNil())
 				gomega.Eventually(func() *retryObjEntry {
 					return fakeOvn.controller.retryEgressNodes.getObjRetryEntry(key2)
-				}).Should(gomega.BeNil())
+				}, inspectTimeout).Should(gomega.BeNil())
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 				gomega.Eventually(nodeSwitch).Should(gomega.Equal(node2.Name))
 				egressIPs, _ = getEgressIPStatus(egressIPName)
@@ -1295,7 +1296,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				key := getNamespacedName(podUpdate.Namespace, podUpdate.Name)
 				gomega.Eventually(func() *retryObjEntry {
 					return fakeOvn.controller.retryEgressIPPods.getObjRetryEntry(key)
-				}).ShouldNot(gomega.BeNil())
+				}, inspectTimeout).ShouldNot(gomega.BeNil())
 				retryEntry := fakeOvn.controller.retryEgressIPPods.getObjRetryEntry(key)
 				ginkgo.By("retry entry new obj should not be nil")
 				gomega.Expect(retryEntry.newObj).NotTo(gomega.BeNil())
@@ -1308,7 +1309,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				// check the cache no longer has the entry
 				gomega.Eventually(func() *retryObjEntry {
 					return fakeOvn.controller.retryEgressIPPods.getObjRetryEntry(key)
-				}).Should(gomega.BeNil())
+				}, inspectTimeout).Should(gomega.BeNil())
 				gomega.Eventually(getEgressIPStatusLen(eIP.Name)).Should(gomega.Equal(1))
 
 				return nil
@@ -1903,7 +1904,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				key := eIP.Name
 				gomega.Eventually(func() *retryObjEntry {
 					return fakeOvn.controller.retryEgressIPs.getObjRetryEntry(key)
-				}).ShouldNot(gomega.BeNil())
+				}, inspectTimeout).ShouldNot(gomega.BeNil())
 				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
@@ -1911,7 +1912,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				// check the cache no longer has the entry
 				gomega.Eventually(func() *retryObjEntry {
 					return fakeOvn.controller.retryEgressIPs.getObjRetryEntry(key)
-				}).Should(gomega.BeNil())
+				}, inspectTimeout).Should(gomega.BeNil())
 				gomega.Eventually(getEgressIPStatusLen(eIP.Name)).Should(gomega.Equal(1))
 
 				expectedNatLogicalPort := "k8s-node2"
