@@ -30,7 +30,6 @@ const (
 	ovsCommandTimeout  = 15
 	ovsVsctlCommand    = "ovs-vsctl"
 	ovsOfctlCommand    = "ovs-ofctl"
-	ovsDpctlCommand    = "ovs-dpctl"
 	ovsAppctlCommand   = "ovs-appctl"
 	ovnNbctlCommand    = "ovn-nbctl"
 	ovnSbctlCommand    = "ovn-sbctl"
@@ -156,7 +155,6 @@ type execHelper struct {
 	exec            kexec.Interface
 	ofctlPath       string
 	vsctlPath       string
-	dpctlPath       string
 	appctlPath      string
 	ovnappctlPath   string
 	nbctlPath       string
@@ -225,10 +223,6 @@ func SetExec(exec kexec.Interface) error {
 		return err
 	}
 	runner.vsctlPath, err = exec.LookPath(ovsVsctlCommand)
-	if err != nil {
-		return err
-	}
-	runner.dpctlPath, err = exec.LookPath(ovsDpctlCommand)
 	if err != nil {
 		return err
 	}
@@ -356,12 +350,6 @@ func runWithEnvVars(cmdPath string, envVars []string, args ...string) (*bytes.Bu
 func RunOVSOfctl(args ...string) (string, string, error) {
 	stdout, stderr, err := run(runner.ofctlPath, args...)
 	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
-}
-
-// RunOVSDpctl runs a command via ovs-dpctl.
-func RunOVSDpctl(args ...string) (string, string, error) {
-	stdout, stderr, err := run(runner.dpctlPath, args...)
-	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
 // RunOVSVsctl runs a command via ovs-vsctl.
