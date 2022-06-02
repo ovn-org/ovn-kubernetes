@@ -25,7 +25,7 @@ import (
 // newClient creates a new client object given the provided config
 // the stopCh is required to ensure the goroutine for ssl cert
 // update is not leaked
-func newClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-chan struct{}) (client.Client, error) {
+func newClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-chan struct{}, opts ...client.Option) (client.Client, error) {
 	const connectTimeout time.Duration = types.OVSDBTimeout * 2
 	logger := klogr.New()
 	options := []client.Option{
@@ -39,6 +39,7 @@ func newClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-c
 	for _, endpoint := range strings.Split(cfg.GetURL(), ",") {
 		options = append(options, client.WithEndpoint(endpoint))
 	}
+	options = append(options, opts...)
 	var updateFn func(client.Client, <-chan struct{})
 	if cfg.Scheme == config.OvnDBSchemeSSL {
 		tlsConfig, err := createTLSConfig(cfg.Cert, cfg.PrivKey, cfg.CACert, cfg.CertCommonName)
@@ -135,7 +136,7 @@ func NewNBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 
 	setNBClientIndexes(dbModel)
 
-	c, err := newClient(cfg, dbModel, stopCh)
+	c, err := newClient(cfg, dbModel, stopCh, client.WithTransactionValidation(true))
 	if err != nil {
 		return nil, err
 	}
