@@ -17,6 +17,7 @@ import (
 	guuid "github.com/google/uuid"
 	"github.com/mitchellh/copystructure"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/libovsdb/database"
 	"github.com/ovn-org/libovsdb/mapper"
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
@@ -187,7 +188,7 @@ func newNBServer(cfg config.OvnAuthConfig, data []TestData) (*server.OvsdbServer
 	return newOVSDBServer(cfg, dbModel, schema, data)
 }
 
-func updateData(db server.Database, dbModel model.ClientDBModel, schema ovsdb.DatabaseSchema, data []TestData) error {
+func updateData(db database.Database, dbModel model.ClientDBModel, schema ovsdb.DatabaseSchema, data []TestData) error {
 	dbName := dbModel.Name()
 	m := mapper.NewMapper(schema)
 	updates := ovsdb.TableUpdates2{}
@@ -263,7 +264,7 @@ func newOVSDBServer(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, schem
 	}
 	serverSchema := serverdb.Schema()
 
-	db := server.NewInMemoryDatabase(map[string]model.ClientDBModel{
+	db := database.NewInMemoryDatabase(map[string]model.ClientDBModel{
 		schema.Name:       dbModel,
 		serverSchema.Name: serverDBModel,
 	})
