@@ -133,6 +133,8 @@ func NewNBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 		return nil, err
 	}
 
+	setNBClientIndexes(dbModel)
+
 	c, err := newClient(cfg, dbModel, stopCh)
 	if err != nil {
 		return nil, err
@@ -219,4 +221,20 @@ func newSSLKeyPairWatcherFunc(certFile, privKeyFile string, tlsConfig *tls.Confi
 		}
 	}
 	return fn, nil
+}
+
+func setNBClientIndexes(dbModel model.ClientDBModel) {
+	dbModel.SetIndexes(
+		map[string][]model.ClientIndex{
+			"Load_Balancer": {
+				model.ClientIndex{
+					Type: model.PrimaryIndexType,
+					Columns: []model.ColumnKey{
+						{
+							Column: "name",
+						},
+					},
+				},
+			},
+		})
 }
