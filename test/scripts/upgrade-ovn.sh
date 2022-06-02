@@ -50,7 +50,7 @@ kubectl_wait_daemonset(){
       exit 1
     fi
   done
-  
+
 }
 
 kubectl_wait_deployment(){
@@ -59,7 +59,7 @@ kubectl_wait_deployment(){
   local attempts=30
   while true; do
     sleep 30
-    run_kubectl get deployments.apps $1 -n ovn-kubernetes 
+    run_kubectl get deployments.apps $1 -n ovn-kubernetes
     DESIRED_REPLICAS=$(run_kubectl get deployments.apps $1 -n ovn-kubernetes -o=jsonpath='{.status.replicas}')
     READY_REPLICAS=$(run_kubectl get deployments.apps $1 -n ovn-kubernetes -o=jsonpath='{.status.readyReplicas}')
     echo "CURRENT READY REPLICAS: $READY_REPLICAS, CURRENT DESIRED REPLICAS: $DESIRED_REPLICAS for the Deployment $1"
@@ -76,7 +76,7 @@ kubectl_wait_deployment(){
       exit 1
     fi
   done
-  
+
 }
 
 run_kubectl() {
@@ -147,11 +147,11 @@ create_ovn_kube_manifests() {
 
 set_default_ovn_manifest_params() {
   # Set default values
-  # kind configs 
+  # kind configs
   KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
   KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
   OVN_HA=${OVN_HA:-false}
-  # ovn configs 
+  # ovn configs
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
   OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-false}
@@ -245,9 +245,9 @@ set_cluster_cidr_ip_families() {
   fi
 }
 
-# This script is responsible for upgrading the ovn-kubernetes related resources 
-# within a running cluster built from master, to new resources buit from the 
-# checked-out branch.  
+# This script is responsible for upgrading the ovn-kubernetes related resources
+# within a running cluster built from master, to new resources buit from the
+# checked-out branch.
 
 KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn} # Set default values
 
@@ -263,7 +263,7 @@ install_ovn_image
 
 pushd ../dist/yaml
 
-# install updated ovnkube-node daemonset 
+# install updated ovnkube-node daemonset
 run_kubectl apply -f ovnkube-node.yaml
 
 kubectl_wait_daemonset ovnkube-node
@@ -272,7 +272,7 @@ run_kubectl get all -n ovn-kubernetes
 CURRENT_REPLICAS_OVNKUBE_DB=$(run_kubectl get deploy -n ovn-kubernetes ovnkube-db -o=jsonpath='{.spec.replicas}')
 run_kubectl scale deploy -n ovn-kubernetes ovnkube-db --replicas=0
 
-# install update ovnkube-db daemonset 
+# install update ovnkube-db daemonset
 if [ "$OVN_HA" == true ]; then
   run_kubectl apply -f ovnkube-db-raft.yaml
 else
@@ -330,3 +330,34 @@ for n in $NODES; do
       kubectl taint node "$n" node-role.kubernetes.io/control-plane:NoSchedule- || true
     fi
   done
+
+# redownload the e2e test binaries if ther version differs
+K8S_VERSION="v1.24.0" # TODO define this in a common file and source it
+E2E_VERSION=$(/usr/local/bin/e2e.test --version)
+if [[ "$E2E_VERSION" != "$K8S_VERSION" ]]; then
+   echo "found version $E2E_VERSION of e2e binary, need version $K8S_VERSION ; will download it."
+   # Install e2e test binary and ginkgo
+   curl -L https://storage.googleapis.com/kubernetes-release/release/${K8S_VERSION}/kubernetes-test-linux-amd64.tar.gz -o kubernetes-test-linux-amd64.tar.gz
+   tar xvzf kubernetes-test-linux-amd64.tar.gz
+   sudo mv kubernetes/test/bin/e2e.test /usr/local/bin/e2e.test
+   sudo mv kubernetes/test/bin/ginkgo /usr/local/bin/ginkgo
+   rm kubernetes-test-linux-amd64.tar.gz
+fi
+
+#### DEBUG #####
+# print some info on the state of the cluster
+kubectl get pods -A -o wide
+kubectl get svc -A -o wide
+kubectl get nodes -o wide
+
+get-ovn-k-master(){
+    OVNMASTER=$(kubectl get pods -n ovn-kubernetes | grep master | awk '{print $1}')
+    echo $OVNMASTER
+}
+
+ovnkmaster-logs(){
+    OVNMASTER=$(get-ovn-k-master)
+    kubectl logs -n ovn-kubernetes -c ovnkube-master $OVNMASTER
+}
+
+ovnkmaster-logs
