@@ -54,6 +54,25 @@ spec:
         type: infra
         kubernetes.io/os: "linux"
     spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/master
+                operator: Exists
+              - key: kubernetes.io/os
+                operator: In
+                values:
+                - "linux"
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: Exists
+              - key: kubernetes.io/os
+                operator: In
+                values:
+                - "linux"
       priorityClassName: "system-cluster-critical"
       # Requires fairly broad permissions - ability to read all services and network functions as well
       # as all pods.
@@ -200,9 +219,6 @@ spec:
 
       # end of container
 
-      nodeSelector:
-        node-role.kubernetes.io/master: ""
-        kubernetes.io/os: "linux"
       volumes:
       - name: host-var-lib-ovs
         hostPath:
