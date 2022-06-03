@@ -344,13 +344,13 @@ func getOvsDatapaths() (datapathsList []string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("recovering from a panic while parsing the "+
-				"ovs-dpctl dump-dps output : %v", r)
+				"ovs-appctl dpctl/dump-dps output : %v", r)
 		}
 	}()
 
-	stdout, stderr, err = util.RunOVSDpctl("dump-dps")
+	stdout, stderr, err = util.RunOVSAppctl("dpctl/dump-dps")
 	if err != nil {
-		return nil, fmt.Errorf("failed to get output of ovs-dpctl dump-dps "+
+		return nil, fmt.Errorf("failed to get output of ovs-appctl dpctl/dump-dps "+
 			"stderr(%s) :(%v)", stderr, err)
 	}
 	for _, kvPair := range strings.Split(stdout, "\n") {
@@ -374,13 +374,13 @@ func setOvsDatapathMetrics(datapaths []string) (err error) {
 
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("recovering from a panic while parsing the ovs-dpctl "+
+			err = fmt.Errorf("recovering from a panic while parsing the ovs-appctl dpctl/"+
 				"show %s output : %v", datapathName, r)
 		}
 	}()
 
 	for _, datapathName = range datapaths {
-		stdout, stderr, err = util.RunOVSDpctl("show", datapathName)
+		stdout, stderr, err = util.RunOVSAppctl("dpctl/show", datapathName)
 		if err != nil {
 			return fmt.Errorf("failed to get datapath stats for %s "+
 				"stderr(%s) :(%v)", datapathName, stderr, err)
