@@ -95,6 +95,15 @@ func (n tNode) gatewayConfig(gatewayMode config.GatewayMode, vlanID uint) *util.
 	}
 }
 
+func (n tNode) logicalSwitch(loadBalancerGroupUUID string) *nbdb.LogicalSwitch {
+	return &nbdb.LogicalSwitch{
+		UUID:              n.Name + "-UUID",
+		Name:              n.Name,
+		OtherConfig:       map[string]string{"subnet": n.NodeSubnet},
+		LoadBalancerGroup: []string{loadBalancerGroupUUID},
+	}
+}
+
 /*
 func cleanupGateway(fexec *ovntest.FakeExec, nodeName string, nodeSubnet string, clusterCIDR string, nextHop string) {
 	const (
@@ -941,40 +950,15 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
-				Name: types.ClusterLBGroupName,
-				UUID: types.ClusterLBGroupName + "-UUID",
-			}
-			expectedOVNClusterRouter := &nbdb.LogicalRouter{
-				UUID: types.OVNClusterRouter + "-UUID",
-				Name: types.OVNClusterRouter,
-			}
-			expectedNodeSwitch := &nbdb.LogicalSwitch{
-				UUID:              node1.Name + "-UUID",
-				Name:              node1.Name,
-				OtherConfig:       map[string]string{"subnet": node1.NodeSubnet},
-				LoadBalancerGroup: []string{expectedClusterLBGroup.UUID},
-			}
-			expectedClusterRouterPortGroup := &nbdb.PortGroup{
-				UUID: types.ClusterRtrPortGroupName + "-UUID",
-				Name: types.ClusterRtrPortGroupName,
-				ExternalIDs: map[string]string{
-					"name": types.ClusterRtrPortGroupName,
-				},
-			}
-			expectedClusterPortGroup := &nbdb.PortGroup{
-				UUID: types.ClusterPortGroupName + "-UUID",
-				Name: types.ClusterPortGroupName,
-				ExternalIDs: map[string]string{
-					"name": types.ClusterPortGroupName,
-				},
-			}
+			expectedClusterLBGroup := newLoadBalancerGroup()
+			expectedOVNClusterRouter := newOVNClusterRouter()
+			expectedNodeSwitch := node1.logicalSwitch(expectedClusterLBGroup.UUID)
+			expectedClusterRouterPortGroup := newRouterPortGroup()
+			expectedClusterPortGroup := newClusterPortGroup()
+
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						UUID: types.OVNJoinSwitch + "-UUID",
-						Name: types.OVNJoinSwitch,
-					},
+					newClusterJoinSwitch(),
 					expectedNodeSwitch,
 					expectedOVNClusterRouter,
 					expectedClusterRouterPortGroup,
@@ -1119,40 +1103,15 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
-				Name: types.ClusterLBGroupName,
-				UUID: types.ClusterLBGroupName + "-UUID",
-			}
-			expectedOVNClusterRouter := &nbdb.LogicalRouter{
-				UUID: types.OVNClusterRouter + "-UUID",
-				Name: types.OVNClusterRouter,
-			}
-			expectedNodeSwitch := &nbdb.LogicalSwitch{
-				UUID:              node1.Name + "-UUID",
-				Name:              node1.Name,
-				OtherConfig:       map[string]string{"subnet": node1.NodeSubnet},
-				LoadBalancerGroup: []string{expectedClusterLBGroup.UUID},
-			}
-			expectedClusterRouterPortGroup := &nbdb.PortGroup{
-				UUID: types.ClusterRtrPortGroupName + "-UUID",
-				Name: types.ClusterRtrPortGroupName,
-				ExternalIDs: map[string]string{
-					"name": types.ClusterRtrPortGroupName,
-				},
-			}
-			expectedClusterPortGroup := &nbdb.PortGroup{
-				UUID: types.ClusterPortGroupName + "-UUID",
-				Name: types.ClusterPortGroupName,
-				ExternalIDs: map[string]string{
-					"name": types.ClusterPortGroupName,
-				},
-			}
+			expectedClusterLBGroup := newLoadBalancerGroup()
+			expectedOVNClusterRouter := newOVNClusterRouter()
+			expectedNodeSwitch := node1.logicalSwitch(expectedClusterLBGroup.UUID)
+			expectedClusterRouterPortGroup := newRouterPortGroup()
+			expectedClusterPortGroup := newClusterPortGroup()
+
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						UUID: types.OVNJoinSwitch + "-UUID",
-						Name: types.OVNJoinSwitch,
-					},
+					newClusterJoinSwitch(),
 					expectedNodeSwitch,
 					expectedOVNClusterRouter,
 					expectedClusterRouterPortGroup,
@@ -1278,40 +1237,15 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
-				Name: types.ClusterLBGroupName,
-				UUID: types.ClusterLBGroupName + "-UUID",
-			}
-			expectedOVNClusterRouter := &nbdb.LogicalRouter{
-				UUID: types.OVNClusterRouter + "-UUID",
-				Name: types.OVNClusterRouter,
-			}
-			expectedNodeSwitch := &nbdb.LogicalSwitch{
-				UUID:              node1.Name + "-UUID",
-				Name:              node1.Name,
-				OtherConfig:       map[string]string{"subnet": node1.NodeSubnet},
-				LoadBalancerGroup: []string{expectedClusterLBGroup.UUID},
-			}
-			expectedClusterRouterPortGroup := &nbdb.PortGroup{
-				UUID: types.ClusterRtrPortGroupName + "-UUID",
-				Name: types.ClusterRtrPortGroupName,
-				ExternalIDs: map[string]string{
-					"name": types.ClusterRtrPortGroupName,
-				},
-			}
-			expectedClusterPortGroup := &nbdb.PortGroup{
-				UUID: types.ClusterPortGroupName + "-UUID",
-				Name: types.ClusterPortGroupName,
-				ExternalIDs: map[string]string{
-					"name": types.ClusterPortGroupName,
-				},
-			}
+			expectedClusterLBGroup := newLoadBalancerGroup()
+			expectedOVNClusterRouter := newOVNClusterRouter()
+			expectedNodeSwitch := node1.logicalSwitch(expectedClusterLBGroup.UUID)
+			expectedClusterRouterPortGroup := newRouterPortGroup()
+			expectedClusterPortGroup := newClusterPortGroup()
+
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						UUID: types.OVNJoinSwitch + "-UUID",
-						Name: types.OVNJoinSwitch,
-					},
+					newClusterJoinSwitch(),
 					expectedNodeSwitch,
 					expectedOVNClusterRouter,
 					expectedClusterRouterPortGroup,
@@ -1480,40 +1414,15 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
-				Name: types.ClusterLBGroupName,
-				UUID: types.ClusterLBGroupName + "-UUID",
-			}
-			expectedOVNClusterRouter := &nbdb.LogicalRouter{
-				UUID: types.OVNClusterRouter + "-UUID",
-				Name: types.OVNClusterRouter,
-			}
-			expectedNodeSwitch := &nbdb.LogicalSwitch{
-				UUID:              node1.Name + "-UUID",
-				Name:              node1.Name,
-				OtherConfig:       map[string]string{"subnet": node1.NodeSubnet},
-				LoadBalancerGroup: []string{expectedClusterLBGroup.UUID},
-			}
-			expectedClusterRouterPortGroup := &nbdb.PortGroup{
-				UUID: types.ClusterRtrPortGroupName + "-UUID",
-				Name: types.ClusterRtrPortGroupName,
-				ExternalIDs: map[string]string{
-					"name": types.ClusterRtrPortGroupName,
-				},
-			}
-			expectedClusterPortGroup := &nbdb.PortGroup{
-				UUID: types.ClusterPortGroupName + "-UUID",
-				Name: types.ClusterPortGroupName,
-				ExternalIDs: map[string]string{
-					"name": types.ClusterPortGroupName,
-				},
-			}
+			expectedClusterLBGroup := newLoadBalancerGroup()
+			expectedOVNClusterRouter := newOVNClusterRouter()
+			expectedNodeSwitch := node1.logicalSwitch(expectedClusterLBGroup.UUID)
+			expectedClusterRouterPortGroup := newRouterPortGroup()
+			expectedClusterPortGroup := newClusterPortGroup()
+
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
-					&nbdb.LogicalSwitch{
-						UUID: types.OVNJoinSwitch + "-UUID",
-						Name: types.OVNJoinSwitch,
-					},
+					newClusterJoinSwitch(),
 					expectedNodeSwitch,
 					expectedOVNClusterRouter,
 					expectedClusterRouterPortGroup,
@@ -1581,6 +1490,47 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 })
+
+func newClusterJoinSwitch() *nbdb.LogicalSwitch {
+	return &nbdb.LogicalSwitch{
+		UUID: types.OVNJoinSwitch + "-UUID",
+		Name: types.OVNJoinSwitch,
+	}
+}
+
+func newClusterPortGroup() *nbdb.PortGroup {
+	return &nbdb.PortGroup{
+		UUID: types.ClusterPortGroupName + "-UUID",
+		Name: types.ClusterPortGroupName,
+		ExternalIDs: map[string]string{
+			"name": types.ClusterPortGroupName,
+		},
+	}
+}
+
+func newRouterPortGroup() *nbdb.PortGroup {
+	return &nbdb.PortGroup{
+		UUID: types.ClusterRtrPortGroupName + "-UUID",
+		Name: types.ClusterRtrPortGroupName,
+		ExternalIDs: map[string]string{
+			"name": types.ClusterRtrPortGroupName,
+		},
+	}
+}
+
+func newOVNClusterRouter() *nbdb.LogicalRouter {
+	return &nbdb.LogicalRouter{
+		UUID: types.OVNClusterRouter + "-UUID",
+		Name: types.OVNClusterRouter,
+	}
+}
+
+func newLoadBalancerGroup() *nbdb.LoadBalancerGroup {
+	return &nbdb.LoadBalancerGroup{
+		Name: types.ClusterLBGroupName,
+		UUID: types.ClusterLBGroupName + "-UUID",
+	}
+}
 
 func TestController_allocateNodeSubnets(t *testing.T) {
 	tests := []struct {
@@ -1812,10 +1762,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 				t.Fatalf("Error starting master watch factory: %v", err)
 			}
 
-			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
-				Name: types.ClusterLBGroupName,
-				UUID: types.ClusterLBGroupName + "-UUID",
-			}
+			expectedClusterLBGroup := newLoadBalancerGroup()
 			dbSetup := libovsdbtest.TestSetup{
 				NBData: []libovsdbtest.TestData{
 					expectedClusterLBGroup,
