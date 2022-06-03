@@ -260,13 +260,13 @@ func getPodNamespacedName(pod *kapi.Pod) string {
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory,
-	libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
-	recorder record.EventRecorder) *Controller {
+func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, addressSetFactory addressset.AddressSetFactory,
+	eventBroadcaster record.EventBroadcaster, libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
+	stopChan <-chan struct{}) *Controller {
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
 	}
-	svcController, svcFactory := newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient)
+	svcController, svcFactory := newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient, eventBroadcaster)
 	return &Controller{
 		client: ovnClient.KubeClient,
 		kube: &kube.Kube{
@@ -312,7 +312,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		retryEgressIPPods:         NewRetryObjs(factory.EgressIPPodType, "", nil, nil, nil),
 		retryEgressNodes:          NewRetryObjs(factory.EgressNodeType, "", nil, nil, nil),
 		retryCloudPrivateIPConfig: NewRetryObjs(factory.CloudPrivateIPConfigType, "", nil, nil, nil),
-		recorder:                  recorder,
+		recorder:                  eventBroadcaster.NewRecorder(scheme.Scheme, kapi.EventSource{Component: "controlplane"}),
 		nbClient:                  libovsdbOvnNBClient,
 		sbClient:                  libovsdbOvnSBClient,
 		svcController:             svcController,
@@ -785,7 +785,8 @@ func shouldUpdate(node, oldNode *kapi.Node) (bool, error) {
 	return true, nil
 }
 
-func newServiceController(client clientset.Interface, nbClient libovsdbclient.Client) (*svccontroller.Controller, informers.SharedInformerFactory) {
+func newServiceController(client clientset.Interface, nbClient libovsdbclient.Client,
+	eventBroadcaster record.EventBroadcaster) (*svccontroller.Controller, informers.SharedInformerFactory) {
 	// Create our own informers to start compartmentalizing the code
 	// filter server side the things we don't care about
 	noProxyName, err := labels.NewRequirement("service.kubernetes.io/service-proxy-name", selection.DoesNotExist, nil)
@@ -809,6 +810,7 @@ func newServiceController(client clientset.Interface, nbClient libovsdbclient.Cl
 	controller := svccontroller.NewController(
 		client,
 		nbClient,
+		eventBroadcaster,
 		svcFactory.Core().V1().Services(),
 		svcFactory.Discovery().V1().EndpointSlices(),
 		svcFactory.Core().V1().Nodes(),

@@ -14,7 +14,10 @@ import (
 	"text/template"
 	"time"
 
+	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
+	kexec "k8s.io/utils/exec"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/urfave/cli/v2"
@@ -27,8 +30,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	kexec "k8s.io/utils/exec"
 )
 
 const (
@@ -219,8 +220,17 @@ func runOvnKube(ctx *cli.Context) error {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
 
+	eventBroadcaster := record.NewBroadcaster()
+	eventBroadcaster.StartLogging(klog.Infof)
+	eventBroadcaster.StartRecordingToSink(
+		&corev1.EventSinkImpl{
+			Interface: ovnClientset.KubeClient.CoreV1().Events(""),
+		})
+	defer eventBroadcaster.Shutdown()
+
 	var watchFactory factory.Shutdownable
 	var masterWatchFactory *factory.WatchFactory
+
 	if master != "" {
 		var err error
 		// create factory and start the controllers asked for
@@ -242,8 +252,8 @@ func runOvnKube(ctx *cli.Context) error {
 		// register prometheus metrics that do not depend on becoming ovnkube-master leader
 		metrics.RegisterMasterBase()
 
-		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil,
-			libovsdbOvnNBClient, libovsdbOvnSBClient, util.EventRecorder(ovnClientset.KubeClient))
+		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, nil,
+			eventBroadcaster, libovsdbOvnNBClient, libovsdbOvnSBClient, stopChan)
 		if err := ovnController.Start(master, wg, ctx.Context); err != nil {
 			return err
 		}
@@ -268,7 +278,7 @@ func runOvnKube(ctx *cli.Context) error {
 		// register ovnkube node specific prometheus metrics exported by the node
 		metrics.RegisterNodeMetrics()
 		start := time.Now()
-		n := ovnnode.NewNode(ovnClientset.KubeClient, nodeWatchFactory, node, stopChan, util.EventRecorder(ovnClientset.KubeClient))
+		n := ovnnode.NewNode(ovnClientset.KubeClient, nodeWatchFactory, node, eventBroadcaster, stopChan)
 		if err := n.Start(ctx.Context, wg); err != nil {
 			return err
 		}

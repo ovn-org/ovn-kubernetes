@@ -43,6 +43,7 @@ type FakeOVN struct {
 	stopChan     chan struct{}
 	asf          *addressset.FakeAddressSetFactory
 	fakeRecorder *record.FakeRecorder
+	broadcaster  record.EventBroadcaster
 	nbClient     libovsdbclient.Client
 	sbClient     libovsdbclient.Client
 	dbSetup      libovsdbtest.TestSetup
@@ -54,6 +55,7 @@ func NewFakeOVN() *FakeOVN {
 	return &FakeOVN{
 		asf:          addressset.NewFakeAddressSetFactory(),
 		fakeRecorder: record.NewFakeRecorder(10),
+		broadcaster:  record.NewBroadcaster(),
 		egressQoSWg:  &sync.WaitGroup{},
 	}
 }
@@ -95,6 +97,7 @@ func (o *FakeOVN) startWithDBSetup(dbSetup libovsdbtest.TestSetup, objects ...ru
 func (o *FakeOVN) shutdown() {
 	o.watcher.Shutdown()
 	close(o.stopChan)
+	o.broadcaster.Shutdown()
 	o.egressQoSWg.Wait()
 	o.nbsbCleanup.Cleanup()
 }
@@ -109,10 +112,9 @@ func (o *FakeOVN) init() {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	o.stopChan = make(chan struct{})
-	o.controller = NewOvnController(o.fakeClient, o.watcher,
-		o.stopChan, o.asf,
-		o.nbClient, o.sbClient,
-		o.fakeRecorder)
+	o.controller = NewOvnController(o.fakeClient, o.watcher, o.asf, o.broadcaster, o.nbClient, o.sbClient, o.stopChan)
+	// swap with fake recorder so we can inspect events emitted
+	o.controller.recorder = o.fakeRecorder
 	o.controller.multicastSupport = true
 	o.controller.loadBalancerGroupUUID = types.ClusterLBGroupName + "-UUID"
 }

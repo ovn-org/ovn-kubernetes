@@ -18,6 +18,7 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 	utilpointer "k8s.io/utils/pointer"
 )
 
@@ -31,30 +32,32 @@ type serviceController struct {
 	libovsdbCleanup    *libovsdbtest.Cleanup
 }
 
-func newController() (*serviceController, error) {
-	return newControllerWithDBSetup(libovsdbtest.TestSetup{})
-}
-
-func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceController, error) {
+func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceController, func(), error) {
 	nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(dbSetup, nil)
 	if err != nil {
-		return nil, err
+		return nil, func() {}, err
 	}
 	client := fake.NewSimpleClientset()
 	informerFactory := informers.NewSharedInformerFactory(client, 0)
+	broadcaster := record.NewBroadcaster()
 	controller := NewController(client,
 		nbClient,
+		broadcaster,
 		informerFactory.Core().V1().Services(),
 		informerFactory.Discovery().V1().EndpointSlices(),
 		informerFactory.Core().V1().Nodes(),
 	)
 	controller.servicesSynced = alwaysReady
 	controller.endpointSlicesSynced = alwaysReady
-	return &serviceController{
+	svcController := &serviceController{
 		controller,
 		informerFactory.Core().V1().Services().Informer().GetStore(),
 		informerFactory.Discovery().V1().EndpointSlices().Informer().GetStore(),
 		cleanup,
+	}
+	return svcController, func() {
+		svcController.close()
+		broadcaster.Shutdown()
 	}, nil
 }
 
@@ -611,11 +614,11 @@ func TestSyncServices(t *testing.T) {
 			}
 
 			ovnlb.TestOnlySetCache(nil)
-			controller, err := newControllerWithDBSetup(libovsdbtest.TestSetup{NBData: tt.initialDb})
+			controller, cleanup, err := newControllerWithDBSetup(libovsdbtest.TestSetup{NBData: tt.initialDb})
 			if err != nil {
 				t.Fatalf("Error creating controller: %v", err)
 			}
-			defer controller.close()
+			defer cleanup()
 			// Add objects to the Store
 			controller.endpointSliceStore.Add(tt.slice)
 			controller.serviceStore.Add(tt.service)

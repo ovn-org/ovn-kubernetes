@@ -18,13 +18,13 @@ import (
 var fakeNodeName = "node"
 
 type FakeOVNNode struct {
-	node       *OvnNode
-	watcher    factory.NodeWatchFactory
-	stopChan   chan struct{}
-	recorder   *record.FakeRecorder
-	fakeClient *util.OVNClientset
-	fakeExec   *ovntest.FakeExec
-	wg         *sync.WaitGroup
+	node        *OvnNode
+	watcher     factory.NodeWatchFactory
+	stopChan    chan struct{}
+	broadcaster record.EventBroadcaster
+	fakeClient  *util.OVNClientset
+	fakeExec    *ovntest.FakeExec
+	wg          *sync.WaitGroup
 }
 
 func NewFakeOVNNode(fexec *ovntest.FakeExec) *FakeOVNNode {
@@ -32,9 +32,9 @@ func NewFakeOVNNode(fexec *ovntest.FakeExec) *FakeOVNNode {
 	Expect(err).NotTo(HaveOccurred())
 
 	return &FakeOVNNode{
-		fakeExec: fexec,
-		recorder: record.NewFakeRecorder(1),
-		wg:       &sync.WaitGroup{},
+		fakeExec:    fexec,
+		broadcaster: record.NewBroadcaster(),
+		wg:          &sync.WaitGroup{},
 	}
 }
 
@@ -59,6 +59,7 @@ func (o *FakeOVNNode) restart() {
 
 func (o *FakeOVNNode) shutdown() {
 	close(o.stopChan)
+	o.broadcaster.Shutdown()
 	o.wg.Wait()
 }
 
@@ -70,6 +71,6 @@ func (o *FakeOVNNode) init() {
 	o.watcher, err = factory.NewNodeWatchFactory(o.fakeClient, fakeNodeName)
 	Expect(err).NotTo(HaveOccurred())
 
-	o.node = NewNode(o.fakeClient.KubeClient, o.watcher, fakeNodeName, o.stopChan, o.recorder)
+	o.node = NewNode(o.fakeClient.KubeClient, o.watcher, fakeNodeName, o.broadcaster, o.stopChan)
 	o.node.Start(context.TODO(), o.wg)
 }

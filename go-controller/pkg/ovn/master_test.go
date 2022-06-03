@@ -980,9 +980,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			expectedDatabaseState := []libovsdbtest.TestData{}
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+			broadcaster := record.NewBroadcaster()
+			defer broadcaster.Shutdown()
+			clusterController := NewOvnController(fakeClient, f, addressset.NewFakeAddressSetFactory(), broadcaster,
+				libovsdbOvnNBClient, libovsdbOvnSBClient, stopChan)
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 			clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
@@ -1181,9 +1182,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			expectedDatabaseState := []libovsdbtest.TestData{}
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+			broadcaster := record.NewBroadcaster()
+			defer broadcaster.Shutdown()
+			clusterController := NewOvnController(fakeClient, f, addressset.NewFakeAddressSetFactory(), broadcaster,
+				libovsdbOvnNBClient, libovsdbOvnSBClient, stopChan)
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 			clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
@@ -1363,9 +1365,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			expectedDatabaseState := []libovsdbtest.TestData{}
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+			broadcaster := record.NewBroadcaster()
+			defer broadcaster.Shutdown()
+			clusterController := NewOvnController(fakeClient, f, addressset.NewFakeAddressSetFactory(), broadcaster,
+				libovsdbOvnNBClient, libovsdbOvnSBClient, stopChan)
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 			clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
@@ -1597,9 +1600,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			expectedDatabaseState := []libovsdbtest.TestData{}
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+			broadcaster := record.NewBroadcaster()
+			defer broadcaster.Shutdown()
+			clusterController := NewOvnController(fakeClient, f, addressset.NewFakeAddressSetFactory(), broadcaster,
+				libovsdbOvnNBClient, libovsdbOvnSBClient, stopChan)
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 
@@ -1895,10 +1899,10 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 				t.Fatalf("Error creating libovsdb test harness %v", err)
 			}
 			t.Cleanup(libovsdbCleanup.Cleanup)
-
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+			broadcaster := record.NewBroadcaster()
+			defer broadcaster.Shutdown()
+			clusterController := NewOvnController(fakeClient, f, addressset.NewFakeAddressSetFactory(), broadcaster,
+				libovsdbOvnNBClient, libovsdbOvnSBClient, stopChan)
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 
 			// configure the cluster allocators
@@ -1988,15 +1992,16 @@ func TestController_syncNodesRetriable(t *testing.T) {
 				t.Fatalf("Error creating libovsdb test harness: %v", err)
 			}
 			t.Cleanup(libovsdbCleanup.Cleanup)
-
+			broadcaster := record.NewBroadcaster()
+			defer broadcaster.Shutdown()
 			controller := NewOvnController(
 				fakeClient,
 				f,
-				stopChan,
 				addressset.NewFakeAddressSetFactory(),
+				broadcaster,
 				nbClient,
 				sbClient,
-				record.NewFakeRecorder(0))
+				stopChan)
 
 			controller.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(nbClient, "", []string{})
 			if err != nil {
