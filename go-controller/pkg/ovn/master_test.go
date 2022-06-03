@@ -78,6 +78,10 @@ func (n tNode) k8sNode() v1.Node {
 	return node
 }
 
+func (n tNode) ifaceID() string {
+	return n.PhysicalBridgeName + "_" + n.Name
+}
+
 /*
 func cleanupGateway(fexec *ovntest.FakeExec, nodeName string, nodeSubnet string, clusterCIDR string, nextHop string) {
 	const (
@@ -899,12 +903,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			config.Kubernetes.HostNetworkNamespace = ""
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil}, testNode.Name)
-			ifaceID := node1.PhysicalBridgeName + "_" + node1.Name
 			vlanID := uint(1024)
 			l3Config := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
 				ChassisID:      node1.SystemID,
-				InterfaceID:    ifaceID,
+				InterfaceID:    node1.ifaceID(),
 				MACAddress:     ovntest.MustParseMAC(node1.PhysicalBridgeMAC),
 				IPAddresses:    ovntest.MustParseIPNets(node1.GatewayRouterIPMask),
 				NextHops:       ovntest.MustParseIPs(node1.GatewayRouterNextHop),
@@ -1088,12 +1091,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			config.Kubernetes.HostNetworkNamespace = ""
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil}, testNode.Name)
-			ifaceID := node1.PhysicalBridgeName + "_" + node1.Name
 			vlanID := uint(1024)
 			l3Config := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeShared,
 				ChassisID:      node1.SystemID,
-				InterfaceID:    ifaceID,
+				InterfaceID:    node1.ifaceID(),
 				MACAddress:     ovntest.MustParseMAC(node1.PhysicalBridgeMAC),
 				IPAddresses:    ovntest.MustParseIPNets(node1.GatewayRouterIPMask),
 				NextHops:       ovntest.MustParseIPs(node1.GatewayRouterNextHop),
@@ -1265,12 +1267,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			config.Kubernetes.HostNetworkNamespace = ""
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil}, testNode.Name)
-			ifaceID := node1.PhysicalBridgeName + "_" + node1.Name
 			vlanID := uint(1024)
 			l3Config := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeShared,
 				ChassisID:      node1.SystemID,
-				InterfaceID:    ifaceID,
+				InterfaceID:    node1.ifaceID(),
 				MACAddress:     ovntest.MustParseMAC(node1.PhysicalBridgeMAC),
 				IPAddresses:    ovntest.MustParseIPNets(node1.GatewayRouterIPMask),
 				NextHops:       ovntest.MustParseIPs(node1.GatewayRouterNextHop),
@@ -1388,7 +1389,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			l3Config = &util.L3GatewayConfig{
 				Mode:           config.GatewayModeShared,
 				ChassisID:      node1.SystemID,
-				InterfaceID:    ifaceID,
+				InterfaceID:    node1.ifaceID(),
 				MACAddress:     ovntest.MustParseMAC(node1.PhysicalBridgeMAC),
 				IPAddresses:    ovntest.MustParseIPNets(node1.GatewayRouterIPMask),
 				NextHops:       ovntest.MustParseIPs(node1.GatewayRouterNextHop),
@@ -1480,12 +1481,11 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			config.Kubernetes.HostNetworkNamespace = ""
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, egressIPFakeClient, egressFirewallFakeClient, nil}, testNode.Name)
-			ifaceID := node1.PhysicalBridgeName + "_" + node1.Name
 			vlanID := uint(1024)
 			l3Config := &util.L3GatewayConfig{
 				Mode:           config.GatewayModeShared,
 				ChassisID:      node1.SystemID,
-				InterfaceID:    ifaceID,
+				InterfaceID:    node1.ifaceID(),
 				MACAddress:     ovntest.MustParseMAC(node1.PhysicalBridgeMAC),
 				IPAddresses:    ovntest.MustParseIPNets(node1.GatewayRouterIPMask),
 				NextHops:       ovntest.MustParseIPs(node1.GatewayRouterNextHop),
