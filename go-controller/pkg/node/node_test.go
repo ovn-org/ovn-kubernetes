@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
 	"github.com/vishvananda/netlink"
 
@@ -64,8 +63,6 @@ var _ = Describe("Node", func() {
 			config.Default.MTU = configDefaultMTU
 			config.Default.EncapIP = "10.1.0.40"
 
-			kubeMock.On("SetTaintOnNode", nodeName, mock.AnythingOfType("*v1.Taint")).Return(nil)
-			kubeMock.On("RemoveTaintFromNode", nodeName, mock.AnythingOfType("*v1.Taint")).Return(nil)
 		})
 
 		AfterEach(func() {
@@ -88,9 +85,7 @@ var _ = Describe("Node", func() {
 					})
 
 					err := ovnNode.validateVTEPInterfaceMTU()
-					Expect(err).NotTo(HaveOccurred())
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "SetTaintOnNode", 1)
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "RemoveTaintFromNode", 0)
+					Expect(err).To(HaveOccurred())
 				})
 			})
 
@@ -104,8 +99,6 @@ var _ = Describe("Node", func() {
 
 					err := ovnNode.validateVTEPInterfaceMTU()
 					Expect(err).NotTo(HaveOccurred())
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "SetTaintOnNode", 0)
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "RemoveTaintFromNode", 1)
 				})
 			})
 		})
@@ -125,9 +118,7 @@ var _ = Describe("Node", func() {
 					})
 
 					err := ovnNode.validateVTEPInterfaceMTU()
-					Expect(err).NotTo(HaveOccurred())
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "SetTaintOnNode", 1)
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "RemoveTaintFromNode", 0)
+					Expect(err).To(HaveOccurred())
 				})
 			})
 
@@ -141,8 +132,6 @@ var _ = Describe("Node", func() {
 
 					err := ovnNode.validateVTEPInterfaceMTU()
 					Expect(err).NotTo(HaveOccurred())
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "SetTaintOnNode", 0)
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "RemoveTaintFromNode", 1)
 				})
 			})
 		})
@@ -162,9 +151,7 @@ var _ = Describe("Node", func() {
 					})
 
 					err := ovnNode.validateVTEPInterfaceMTU()
-					Expect(err).NotTo(HaveOccurred())
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "SetTaintOnNode", 1)
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "RemoveTaintFromNode", 0)
+					Expect(err).To(HaveOccurred())
 				})
 			})
 
@@ -178,8 +165,6 @@ var _ = Describe("Node", func() {
 
 					err := ovnNode.validateVTEPInterfaceMTU()
 					Expect(err).NotTo(HaveOccurred())
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "SetTaintOnNode", 0)
-					kubeMock.AssertNumberOfCalls(GinkgoT(), "RemoveTaintFromNode", 1)
 				})
 			})
 		})
