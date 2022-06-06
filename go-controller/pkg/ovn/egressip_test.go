@@ -50,7 +50,7 @@ const (
 	v4NodeSubnet    = "10.128.0.0/24"
 	podName         = "egress-pod"
 	egressIPName    = "egressip"
-	inspectTimeout  = 2 * time.Second // arbitrary, should avoid failures on github CI when inspecting retry entries
+	inspectTimeout  = 10 * time.Second // arbitrary, should avoid failures on github CI when inspecting retry entries
 )
 
 func newEgressIPMeta(name string) metav1.ObjectMeta {
