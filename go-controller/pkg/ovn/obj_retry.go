@@ -2,13 +2,14 @@ package ovn
 
 import (
 	"fmt"
-	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	"math/rand"
 	"net"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
+
+	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
@@ -755,7 +756,7 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 			oc.setNodeEgressReachable(node.Name, true)
 		}
 		if hasEgressLabel && isReachable && isReady {
-			if err := oc.addEgressNode(node); err != nil {
+			if err := oc.addEgressNode(node.Name); err != nil {
 				return err
 			}
 		}
@@ -863,7 +864,7 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 		if oldHadEgressLabel && !newHasEgressLabel {
 			klog.Infof("Node: %s has been un-labeled, deleting it from egress assignment", newNode.Name)
 			oc.setNodeEgressAssignable(oldNode.Name, false)
-			return oc.deleteEgressNode(oldNode)
+			return oc.deleteEgressNode(oldNode.Name)
 		}
 		isOldReady := oc.isEgressNodeReady(oldNode)
 		isNewReady := oc.isEgressNodeReady(newNode)
@@ -874,7 +875,7 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 			klog.Infof("Node: %s has been labeled, adding it for egress assignment", newNode.Name)
 			oc.setNodeEgressAssignable(newNode.Name, true)
 			if isNewReady && isNewReachable {
-				if err := oc.addEgressNode(newNode); err != nil {
+				if err := oc.addEgressNode(newNode.Name); err != nil {
 					return err
 				}
 			} else {
@@ -887,12 +888,12 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 		}
 		if !isNewReady {
 			klog.Warningf("Node: %s is not ready, deleting it from egress assignment", newNode.Name)
-			if err := oc.deleteEgressNode(newNode); err != nil {
+			if err := oc.deleteEgressNode(newNode.Name); err != nil {
 				return err
 			}
 		} else if isNewReady && isNewReachable {
 			klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
-			if err := oc.addEgressNode(newNode); err != nil {
+			if err := oc.addEgressNode(newNode.Name); err != nil {
 				return err
 			}
 		}
@@ -1031,7 +1032,7 @@ func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj i
 		nodeEgressLabel := util.GetNodeEgressLabel()
 		nodeLabels := node.GetLabels()
 		if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel {
-			if err := oc.deleteEgressNode(node); err != nil {
+			if err := oc.deleteEgressNode(node.Name); err != nil {
 				return err
 			}
 		}
