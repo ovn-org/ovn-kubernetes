@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
+	"github.com/safchain/ethtool"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -193,6 +194,25 @@ func (g *gateway) Start(stopChan <-chan struct{}, wg *sync.WaitGroup) {
 	}
 }
 
+// sets up an uplink interface for UDP Generic Receive Offload forwarding as part of
+// the EnableUDPAggregation feature.
+func setupUDPAggregationUplink(ifname string) error {
+	e, err := ethtool.NewEthtool()
+	if err != nil {
+		return fmt.Errorf("failed to initialize ethtool: %v", err)
+	}
+	defer e.Close()
+
+	err = e.Change(ifname, map[string]bool{
+		"rx-udp-gro-forwarding": true,
+	})
+	if err != nil {
+		return fmt.Errorf("could not enable UDP offload features on %q: %v", ifname, err)
+	}
+
+	return nil
+}
+
 func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops []net.IP, gwIPs []*net.IPNet, nodeAnnotator kube.Annotator) (
 	*bridgeConfiguration, *bridgeConfiguration, error) {
 	gatewayBridge, err := bridgeForInterface(gwIntf, nodeName, types.PhysicalNetworkName, gwIPs)
@@ -223,6 +243,17 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 				"will cause incoming packets destined to OVN and larger than pod MTU: %d to the node, being dropped "+
 				"without sending fragmentation needed", config.Default.MTU)
 			config.Gateway.DisablePacketMTUCheck = true
+		}
+	}
+
+	if config.Default.EnableUDPAggregation {
+		err = setupUDPAggregationUplink(gatewayBridge.uplinkName)
+		if err == nil && egressGWBridge != nil {
+			err = setupUDPAggregationUplink(egressGWBridge.uplinkName)
+		}
+		if err != nil {
+			klog.Warningf("Could not enable UDP packet aggregation on uplink interface (aggregation will be disabled): %v", err)
+			config.Default.EnableUDPAggregation = false
 		}
 	}
 
