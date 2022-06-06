@@ -269,7 +269,7 @@ github.com/prometheus/procfs/internal/util
 # github.com/russross/blackfriday/v2 v2.0.1
 ## explicit
 github.com/russross/blackfriday/v2
-# github.com/safchain/ethtool v0.0.0-20190326074333-42ed695e3de8
+# github.com/safchain/ethtool v0.0.0-20210803160452-9aa261dae9b1
 ## explicit
 github.com/safchain/ethtool
 # github.com/shurcooL/sanitized_anchor_name v1.0.0
