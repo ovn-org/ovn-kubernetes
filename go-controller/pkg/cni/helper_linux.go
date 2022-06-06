@@ -9,8 +9,10 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -21,6 +23,7 @@ import (
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/safchain/ethtool"
 	"github.com/vishvananda/netlink"
 )
 
@@ -47,6 +50,65 @@ func (defaultCNIPluginLibOps) AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Li
 
 func (defaultCNIPluginLibOps) SetupVeth(contVethName string, hostVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error) {
 	return ip.SetupVethWithName(contVethName, hostVethName, mtu, hostNS)
+}
+
+// This is a good value that allows fast streams of small packets to be aggregated,
+// without introducing noticeable latency in slower traffic.
+const udpPacketAggregationTimeout = 50 * time.Microsecond
+
+var udpPacketAggregationTimeoutBytes = []byte(fmt.Sprintf("%d\n", udpPacketAggregationTimeout.Nanoseconds()))
+
+// sets up the host side of a veth for UDP packet aggregation
+func setupVethUDPAggregationHost(ifname string) error {
+	e, err := ethtool.NewEthtool()
+	if err != nil {
+		return fmt.Errorf("failed to initialize ethtool: %v", err)
+	}
+	defer e.Close()
+
+	err = e.Change(ifname, map[string]bool{
+		"rx-gro":                true,
+		"rx-udp-gro-forwarding": true,
+	})
+	if err != nil {
+		return fmt.Errorf("could not enable interface features: %v", err)
+	}
+	channels, err := e.GetChannels(ifname)
+	if err == nil {
+		channels.RxCount = uint32(runtime.NumCPU())
+		_, err = e.SetChannels(ifname, channels)
+	}
+	if err != nil {
+		return fmt.Errorf("could not update channels: %v", err)
+	}
+
+	timeoutFile := fmt.Sprintf("/sys/class/net/%s/gro_flush_timeout", ifname)
+	err = os.WriteFile(timeoutFile, udpPacketAggregationTimeoutBytes, 0644)
+	if err != nil {
+		return fmt.Errorf("could not set flush timeout: %v", err)
+	}
+
+	return nil
+}
+
+// sets up the container side of a veth for UDP packet aggregation
+func setupVethUDPAggregationContainer(ifname string) error {
+	e, err := ethtool.NewEthtool()
+	if err != nil {
+		return fmt.Errorf("failed to initialize ethtool: %v", err)
+	}
+	defer e.Close()
+
+	channels, err := e.GetChannels(ifname)
+	if err == nil {
+		channels.TxCount = uint32(runtime.NumCPU())
+		_, err = e.SetChannels(ifname, channels)
+	}
+	if err != nil {
+		return fmt.Errorf("could not update channels: %v", err)
+	}
+
+	return nil
 }
 
 func renameLink(curName, newName string) error {
@@ -146,10 +208,24 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 		contIface.Mac = ifInfo.MAC.String()
 		contIface.Sandbox = netns.Path()
 
+		if ifInfo.EnableUDPAggregation {
+			err = setupVethUDPAggregationContainer(contIface.Name)
+			if err != nil {
+				return fmt.Errorf("could not enable UDP packet aggregation in container: %v", err)
+			}
+		}
+
 		return nil
 	})
 	if err != nil {
 		return nil, nil, err
+	}
+
+	if ifInfo.EnableUDPAggregation {
+		err = setupVethUDPAggregationHost(hostIface.Name)
+		if err != nil {
+			return nil, nil, fmt.Errorf("could not enable UDP packet aggregation on host veth interface %q: %v", hostIface.Name, err)
+		}
 	}
 
 	return hostIface, contIface, nil

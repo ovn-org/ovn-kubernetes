@@ -263,6 +263,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Default.LFlowCacheEnable).To(gomega.BeTrue())
 			gomega.Expect(Default.LFlowCacheLimit).To(gomega.Equal(uint(0)))
 			gomega.Expect(Default.LFlowCacheLimitKb).To(gomega.Equal(uint(0)))
+			gomega.Expect(Default.EnableUDPAggregation).To(gomega.BeFalse())
 			gomega.Expect(Logging.File).To(gomega.Equal(""))
 			gomega.Expect(Logging.Level).To(gomega.Equal(5))
 			gomega.Expect(Monitoring.RawNetFlowTargets).To(gomega.Equal(""))

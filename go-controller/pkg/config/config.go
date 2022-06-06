@@ -219,6 +219,11 @@ type DefaultConfig struct {
 	// ClusterSubnets holds parsed cluster subnet entries and may be used
 	// outside the config module.
 	ClusterSubnets []CIDRNetworkEntry
+	// EnableUDPAggregation is true if ovn-kubernetes should use UDP Generic Receive
+	// Offload forwarding to improve the performance of containers that transmit lots
+	// of small UDP packets by allowing them to be aggregated before passing through
+	// the kernel network stack. This requires a new-enough kernel (5.15 or RHEL 8.5).
+	EnableUDPAggregation bool `gcfg:"enable-udp-aggregation"`
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
