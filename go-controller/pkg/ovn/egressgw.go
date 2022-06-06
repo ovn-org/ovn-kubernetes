@@ -281,9 +281,11 @@ func (oc *Controller) createBFDStaticRoute(bfdEnabled bool, gw net.IP, podIP, gr
 		return item.IPPrefix == lrsr.IPPrefix &&
 			item.Nexthop == lrsr.Nexthop &&
 			item.OutputPort != nil &&
-			*item.OutputPort == *lrsr.OutputPort
+			*item.OutputPort == *lrsr.OutputPort &&
+			item.Policy == lrsr.Policy
 	}
-	ops, err = libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(oc.nbClient, ops, gr, &lrsr, p)
+	ops, err = libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(oc.nbClient, ops, gr, &lrsr, p,
+		&lrsr.Options)
 	if err != nil {
 		return fmt.Errorf("error creating or updating static route %+v on router %s: %v", lrsr, gr, err)
 	}
@@ -668,7 +670,8 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 		p := func(item *nbdb.LogicalRouterPolicy) bool {
 			return item.Priority == logicalRouterPolicy.Priority && strings.Contains(item.Match, matchSrcAS)
 		}
-		err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.nbClient, types.OVNClusterRouter, &logicalRouterPolicy, p)
+		err = libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.nbClient, types.OVNClusterRouter,
+			&logicalRouterPolicy, p, &logicalRouterPolicy.Nexthops, &logicalRouterPolicy.Match, &logicalRouterPolicy.Action)
 		if err != nil {
 			return fmt.Errorf("failed to add policy route %+v to %s: %v", logicalRouterPolicy, types.OVNClusterRouter, err)
 		}

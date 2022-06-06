@@ -38,7 +38,7 @@ func CreateOrUpdatePortGroupsOps(nbClient libovsdbclient.Client, ops []libovsdb.
 		pg := pgs[i]
 		opModel := operationModel{
 			Model:          pg,
-			OnModelUpdates: onModelUpdatesAll(),
+			OnModelUpdates: getAllUpdatableFields(pg),
 			ErrNotFound:    false,
 			BulkOp:         false,
 		}

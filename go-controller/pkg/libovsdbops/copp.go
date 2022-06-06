@@ -18,7 +18,7 @@ func CreateOrUpdateCOPPsOps(nbClient libovsdbclient.Client, ops []ovsdb.Operatio
 		copp := copps[i]
 		opModel := operationModel{
 			Model:          copp,
-			OnModelUpdates: onModelUpdatesAll(),
+			OnModelUpdates: onModelUpdatesAllNonDefault(),
 			ErrNotFound:    false,
 			BulkOp:         false,
 		}

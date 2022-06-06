@@ -402,6 +402,7 @@ func (oc *Controller) SetupMaster(existingNodeNames []string) error {
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name: types.OVNJoinSwitch,
 	}
+	// nothing is updated here, so no reason to pass fields
 	err = libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch)
 	if err != nil {
 		return fmt.Errorf("failed to create logical switch %+v: %v", logicalSwitch, err)
@@ -436,7 +437,8 @@ func (oc *Controller) SetupMaster(existingNodeNames []string) error {
 		Networks: gwLRPNetworks,
 	}
 
-	err = libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, &logicalRouter, &logicalRouterPort)
+	err = libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, &logicalRouter,
+		[]*nbdb.LogicalRouterPort{&logicalRouterPort}, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
 	if err != nil {
 		return fmt.Errorf("failed to add logical router port %+v on router %+v: %v", logicalRouterPort, logicalRouter, err)
 	}
@@ -501,7 +503,8 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 				return item.IPPrefix == lrsr.IPPrefix && item.Nexthop == lrsr.Nexthop && item.Policy != nil && *item.Policy == *lrsr.Policy
 			}
-			err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.nbClient, types.OVNClusterRouter, &lrsr, p)
+			err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.nbClient, types.OVNClusterRouter,
+				&lrsr, p)
 			if err != nil {
 				return fmt.Errorf("error creating static route %+v on router %s: %v", lrsr, types.OVNClusterRouter, err)
 			}
@@ -613,7 +616,8 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 	}
 	logicalRouter := nbdb.LogicalRouter{Name: types.OVNClusterRouter}
 
-	err = libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, &logicalRouter, &logicalRouterPort)
+	err = libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, &logicalRouter,
+		[]*nbdb.LogicalRouterPort{&logicalRouterPort}, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
 	if err != nil {
 		klog.Errorf("Failed to add logical router port %+v to router %s: %v", logicalRouterPort, types.OVNClusterRouter, err)
 		return err
@@ -626,7 +630,8 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 		Priority:    1,
 	}
 
-	err = libovsdbops.CreateOrUpdateGatewayChassis(oc.nbClient, &logicalRouterPort, &gatewayChassis)
+	err = libovsdbops.CreateOrUpdateGatewayChassis(oc.nbClient, &logicalRouterPort, &gatewayChassis,
+		&gatewayChassis.Name, &gatewayChassis.ChassisName, &gatewayChassis.Priority)
 	if err != nil {
 		klog.Errorf("Failed to add gateway chassis %s to logical router port %s, error: %v", chassisID, lrpName, err)
 		return err
@@ -692,12 +697,34 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	}
 	logicalRouter := nbdb.LogicalRouter{Name: types.OVNClusterRouter}
 
-	err := libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, &logicalRouter, &logicalRouterPort)
+	err := libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, &logicalRouter,
+		[]*nbdb.LogicalRouterPort{&logicalRouterPort}, &logicalRouterPort.Networks, &logicalRouterPort.MAC)
 	if err != nil {
 		return fmt.Errorf("failed to add logical router port %+v to router %s: %v", logicalRouterPort, types.OVNClusterRouter, err)
 	}
 
-	err = libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch)
+	// If supported, enable IGMP/MLD snooping and querier on the node.
+	if oc.multicastSupport {
+		logicalSwitch.OtherConfig["mcast_snoop"] = "true"
+
+		// Configure IGMP/MLD querier if the gateway IP address is known.
+		// Otherwise disable it.
+		if v4Gateway != nil || v6Gateway != nil {
+			logicalSwitch.OtherConfig["mcast_querier"] = "true"
+			logicalSwitch.OtherConfig["mcast_eth_src"] = nodeLRPMAC.String()
+			if v4Gateway != nil {
+				logicalSwitch.OtherConfig["mcast_ip4_src"] = v4Gateway.String()
+			}
+			if v6Gateway != nil {
+				logicalSwitch.OtherConfig["mcast_ip6_src"] = util.HWAddrToIPv6LLA(nodeLRPMAC).String()
+			}
+		} else {
+			logicalSwitch.OtherConfig["mcast_querier"] = "false"
+		}
+	}
+
+	err = libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch, &logicalSwitch.OtherConfig,
+		&logicalSwitch.LoadBalancerGroup)
 	if err != nil {
 		return fmt.Errorf("failed to add logical switch %+v: %v", logicalSwitch, err)
 	}
@@ -728,31 +755,6 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		return nil
 	}(); err != nil {
 		return err
-	}
-
-	// If supported, enable IGMP/MLD snooping and querier on the node.
-	if oc.multicastSupport {
-		logicalSwitch.OtherConfig["mcast_snoop"] = "true"
-
-		// Configure IGMP/MLD querier if the gateway IP address is known.
-		// Otherwise disable it.
-		if v4Gateway != nil || v6Gateway != nil {
-			logicalSwitch.OtherConfig["mcast_querier"] = "true"
-			logicalSwitch.OtherConfig["mcast_eth_src"] = nodeLRPMAC.String()
-			if v4Gateway != nil {
-				logicalSwitch.OtherConfig["mcast_ip4_src"] = v4Gateway.String()
-			}
-			if v6Gateway != nil {
-				logicalSwitch.OtherConfig["mcast_ip6_src"] = util.HWAddrToIPv6LLA(nodeLRPMAC).String()
-			}
-		} else {
-			logicalSwitch.OtherConfig["mcast_querier"] = "false"
-		}
-
-		err := libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch)
-		if err != nil {
-			return fmt.Errorf("failed to configure Multicast on logical switch %+v: %v", logicalSwitch, err)
-		}
 	}
 
 	// Connect the switch to the router.
@@ -1431,7 +1433,8 @@ func (oc *Controller) createACLLoggingMeter() error {
 		Fair: &meterFairness,
 		Unit: types.PacketsPerSecond,
 	}
-	ops, err = libovsdbops.CreateOrUpdateMeterOps(oc.nbClient, ops, meter, band)
+	ops, err = libovsdbops.CreateOrUpdateMeterOps(oc.nbClient, ops, meter, []*nbdb.MeterBand{band},
+		&meter.Bands, &meter.Fair, &meter.Unit)
 	if err != nil {
 		return fmt.Errorf("can't create meter %v: %v", meter, err)
 	}
