@@ -312,7 +312,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, ad
 		retryEgressIPPods:         NewRetryObjs(factory.EgressIPPodType, "", nil, nil, nil),
 		retryEgressNodes:          NewRetryObjs(factory.EgressNodeType, "", nil, nil, nil),
 		retryCloudPrivateIPConfig: NewRetryObjs(factory.CloudPrivateIPConfigType, "", nil, nil, nil),
-		recorder:                  eventBroadcaster.NewRecorder(scheme.Scheme, kapi.EventSource{Component: "controlplane"}),
+		recorder:                  eventBroadcaster.NewRecorder(scheme.Scheme, kapi.EventSource{Component: "ovn-master-controller"}),
 		nbClient:                  libovsdbOvnNBClient,
 		sbClient:                  libovsdbOvnSBClient,
 		svcController:             svcController,

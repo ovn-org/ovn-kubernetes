@@ -55,7 +55,7 @@ func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name s
 		Kube:         &kube.Kube{KClient: kubeClient},
 		watchFactory: wf,
 		stopChan:     stopChan,
-		recorder:     eventBroadcaster.NewRecorder(scheme.Scheme, kapi.EventSource{Component: "controlplane"}),
+		recorder:     eventBroadcaster.NewRecorder(scheme.Scheme, kapi.EventSource{Component: "ovn-node-controller"}),
 	}
 }
 
