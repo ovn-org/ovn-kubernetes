@@ -13,9 +13,10 @@ import (
 // CreateOrUpdateLoadBalancerGroup creates or updates the provided load balancer
 // group
 func CreateOrUpdateLoadBalancerGroup(nbClient libovsdbclient.Client, group *nbdb.LoadBalancerGroup) error {
+	// lb group has no fields other than name, safe to update just with non-default values
 	opModel := operationModel{
 		Model:          group,
-		OnModelUpdates: onModelUpdatesAll(),
+		OnModelUpdates: onModelUpdatesAllNonDefault(),
 		ErrNotFound:    false,
 		BulkOp:         false,
 	}

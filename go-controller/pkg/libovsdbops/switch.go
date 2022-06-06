@@ -45,12 +45,15 @@ func GetLogicalSwitch(nbClient libovsdbclient.Client, sw *nbdb.LogicalSwitch) (*
 	return found[0], nil
 }
 
-// CreateOrUpdateLogicalRouter creates or updates the provided logical switch
-func CreateOrUpdateLogicalSwitch(nbClient libovsdbclient.Client, sw *nbdb.LogicalSwitch) error {
+// CreateOrUpdateLogicalSwitch creates or updates the provided logical switch
+func CreateOrUpdateLogicalSwitch(nbClient libovsdbclient.Client, sw *nbdb.LogicalSwitch, fields ...interface{}) error {
+	if len(fields) == 0 {
+		fields = onModelUpdatesAllNonDefault()
+	}
 	opModel := operationModel{
 		Model:          sw,
 		ModelPredicate: func(item *nbdb.LogicalSwitch) bool { return item.Name == sw.Name },
-		OnModelUpdates: onModelUpdatesAll(),
+		OnModelUpdates: fields,
 		ErrNotFound:    false,
 		BulkOp:         false,
 	}
@@ -225,7 +228,7 @@ func createOrUpdateLogicalSwitchPortsOps(nbClient libovsdbclient.Client, ops []l
 		lsp := lsps[i]
 		opModel := operationModel{
 			Model:          lsp,
-			OnModelUpdates: onModelUpdatesAll(),
+			OnModelUpdates: getAllUpdatableFields(lsp),
 			DoAfter:        func() { sw.Ports = append(sw.Ports, lsp.UUID) },
 			ErrNotFound:    false,
 			BulkOp:         false,
