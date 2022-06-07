@@ -15,7 +15,7 @@
 # this image in any production environment.
 #
 
-FROM fedora:34 AS ovnbuilder
+FROM fedora:36 AS ovnbuilder
 
 USER root
 
@@ -26,7 +26,7 @@ RUN INSTALL_PKGS=" \
     python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
     libpcap hostname \
     python3-openvswitch python3-pyOpenSSL \
-    autoconf automake libtool g++ gcc fedora-packager rpmdevtools \
+    autoconf automake libtool g++ gcc fedora-packager rpmdevtools desktop-file-utils \
     unbound unbound-devel groff python3-sphinx graphviz openssl openssl-devel \
     checkpolicy libcap-ng-devel selinux-policy-devel" && \
     dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
@@ -63,7 +63,7 @@ RUN rm rpm/rpmbuild/RPMS/x86_64/*docker*
 RUN git log -n 1
 
 # Build the final image
-FROM fedora:34
+FROM fedora:36
 
 # Install needed dependencies.
 RUN INSTALL_PKGS=" \
