@@ -19,7 +19,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	ovnretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -27,8 +26,6 @@ import (
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/apimachinery/pkg/util/sets"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
@@ -357,33 +354,8 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	return bnc.lsManager.AddSwitch(logicalSwitch.Name, logicalSwitch.UUID, hostSubnets)
 }
 
-func (bnc *BaseNetworkController) allocateNodeSubnets(node *kapi.Node,
-	masterSubnetAllocator *subnetallocator.HostSubnetAllocator) ([]*net.IPNet, error) {
-	existingSubnets, err := util.ParseNodeHostSubnetAnnotation(node, bnc.GetNetworkName())
-	if err != nil && !util.IsAnnotationNotSetError(err) {
-		// Log the error and try to allocate new subnets
-		klog.Infof("Failed to get node %s host subnets annotations for network %s: %v", node.Name, bnc.GetNetworkName(), err)
-	}
-
-	hostSubnets, allocatedSubnets, err := masterSubnetAllocator.AllocateNodeSubnets(node.Name, existingSubnets, config.IPv4Mode, config.IPv6Mode)
-	if err != nil {
-		return nil, err
-	}
-	// Release the allocation on error
-	defer func() {
-		if err != nil {
-			if errR := masterSubnetAllocator.ReleaseNodeSubnets(node.Name, allocatedSubnets...); errR != nil {
-				klog.Warningf("Error releasing node %s subnets: %v", node.Name, errR)
-			}
-		}
-	}()
-
-	return hostSubnets, nil
-}
-
 // UpdateNodeHostSubnetAnnotationWithRetry update node's hostSubnet annotation (possibly for multiple networks) and the
-// other given node annotations.
-// May be used concurrently, since it retries update on version conflict.
+// other given node annotations
 func (cnci *CommonNetworkControllerInfo) UpdateNodeHostSubnetAnnotationWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet,
 	otherUpdatedNodeAnnotation map[string]string) error {
 	// Retry if it fails because of potential conflict which is transient. Return error in the
@@ -436,22 +408,6 @@ func (bnc *BaseNetworkController) deleteNodeLogicalNetwork(nodeName string) erro
 	}
 
 	return nil
-}
-
-// updates the list of nodes if the given node manages its hostSubnets; returns its hostSubnets if any
-func (bnc *BaseNetworkController) updateNodesManageHostSubnets(node *kapi.Node,
-	masterSubnetAllocator *subnetallocator.HostSubnetAllocator, foundNodes sets.String) []*net.IPNet {
-	if noHostSubnet(node) {
-		return []*net.IPNet{}
-	}
-	hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, bnc.GetNetworkName())
-	foundNodes.Insert(node.Name)
-
-	klog.V(5).Infof("Node %s contains subnets %v for network %s", node.Name, hostSubnets, bnc.GetNetworkName())
-	if err := masterSubnetAllocator.MarkSubnetsAllocated(node.Name, hostSubnets...); err != nil {
-		utilruntime.HandleError(err)
-	}
-	return hostSubnets
 }
 
 func (bnc *BaseNetworkController) addAllPodsOnNode(nodeName string) []error {

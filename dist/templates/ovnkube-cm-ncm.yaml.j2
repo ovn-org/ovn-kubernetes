@@ -1,6 +1,6 @@
 # ovnkube-master
 # daemonset version 3
-# starts master daemons (ovnkube-master and ovn-northd), each in a separate container
+# starts master daemons (ovnkube-cluster-manager, ovnkube-network-controller-manager and ovn-northd) each in a separate container
 # it is run on the master(s)
 kind: Deployment
 apiVersion: apps/v1
@@ -122,11 +122,12 @@ spec:
           periodSeconds: 60
       # end of container
 
-      - name: ovnkube-master
+      # network controller manager
+      - name: ovnkube-network-controller-manager
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
 
-        command: ["/root/ovnkube.sh", "ovn-master"]
+        command: ["/root/ovnkube.sh", "ovn-network-controller-manager"]
 
         securityContext:
           runAsUser: 0
@@ -197,6 +198,106 @@ spec:
           value: "{{ ovn_egress_ip_enable }}"
         - name: OVN_EGRESSIP_HEALTHCHECK_PORT
           value: "{{ ovn_egress_ip_healthcheck_port }}"
+        - name: OVN_EGRESSFIREWALL_ENABLE
+          value: "{{ ovn_egress_firewall_enable }}"
+        - name: OVN_EGRESSQOS_ENABLE
+          value: "{{ ovn_egress_qos_enable }}"
+        - name: OVN_MULTI_NETWORK_ENABLE
+          value: "{{ ovn_multi_network_enable }}"
+        - name: OVN_HYBRID_OVERLAY_NET_CIDR
+          value: "{{ ovn_hybrid_overlay_net_cidr }}"
+        - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
+          value: "{{ ovn_disable_snat_multiple_gws }}"
+        - name: OVN_EMPTY_LB_EVENTS
+          value: "{{ ovn_empty_lb_events }}"
+        - name: OVN_V4_JOIN_SUBNET
+          value: "{{ ovn_v4_join_subnet }}"
+        - name: OVN_V6_JOIN_SUBNET
+          value: "{{ ovn_v6_join_subnet }}"
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
+        - name: OVN_GATEWAY_MODE
+          value: "{{ ovn_gateway_mode }}"
+        - name: OVN_MULTICAST_ENABLE
+          value: "{{ ovn_multicast_enable }}"
+        - name: OVN_ACL_LOGGING_RATE_LIMIT
+          value: "{{ ovn_acl_logging_rate_limit }}"
+        - name: OVN_HOST_NETWORK_NAMESPACE
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: host_network_namespace
+      # end of container
+
+      # cluster manager
+      - name: ovnkube-cluster-manager
+        image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
+        imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
+
+        command: ["/root/ovnkube.sh", "ovn-cluster-manager"]
+
+        securityContext:
+          runAsUser: 0
+
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        # Run directories where we need to be able to access sockets
+        - mountPath: /var/log/ovn-kubernetes/
+          name: host-var-log-ovnkube
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "3"
+        - name: OVNKUBE_LOGLEVEL
+          value: "{{ ovnkube_master_loglevel }}"
+        - name: OVNKUBE_LOGFILE_MAXSIZE
+          value: "{{ ovnkube_logfile_maxsize }}"
+        - name: OVNKUBE_LOGFILE_MAXBACKUPS
+          value: "{{ ovnkube_logfile_maxbackups }}"
+        - name: OVNKUBE_LOGFILE_MAXAGE
+          value: "{{ ovnkube_logfile_maxage }}"
+        - name: OVN_NET_CIDR
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: net_cidr
+        - name: OVN_SVC_CIDR
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: svc_cidr
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
+        - name: K8S_NODE
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: OVN_KUBERNETES_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: OVN_HYBRID_OVERLAY_ENABLE
+          value: "{{ ovn_hybrid_overlay_enable }}"
+        - name: OVN_EGRESSIP_ENABLE
+          value: "{{ ovn_egress_ip_enable }}"
         - name: OVN_EGRESSFIREWALL_ENABLE
           value: "{{ ovn_egress_firewall_enable }}"
         - name: OVN_EGRESSQOS_ENABLE

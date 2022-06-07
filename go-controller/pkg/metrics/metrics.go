@@ -25,16 +25,17 @@ import (
 )
 
 const (
-	MetricOvnkubeNamespace       = "ovnkube"
-	MetricOvnkubeSubsystemMaster = "master"
-	MetricOvnkubeSubsystemNode   = "node"
-	MetricOvnNamespace           = "ovn"
-	MetricOvnSubsystemDB         = "db"
-	MetricOvnSubsystemNorthd     = "northd"
-	MetricOvnSubsystemController = "controller"
-	MetricOvsNamespace           = "ovs"
-	MetricOvsSubsystemVswitchd   = "vswitchd"
-	MetricOvsSubsystemDB         = "db"
+	MetricOvnkubeNamespace               = "ovnkube"
+	MetricOvnkubeSubsystemMaster         = "master"
+	MetricOvnkubeSubsystemClusterManager = "clustermanager"
+	MetricOvnkubeSubsystemNode           = "node"
+	MetricOvnNamespace                   = "ovn"
+	MetricOvnSubsystemDB                 = "db"
+	MetricOvnSubsystemNorthd             = "northd"
+	MetricOvnSubsystemController         = "controller"
+	MetricOvsNamespace                   = "ovs"
+	MetricOvsSubsystemVswitchd           = "vswitchd"
+	MetricOvsSubsystemDB                 = "db"
 
 	ovnNorthd     = "ovn-northd"
 	ovnController = "ovn-controller"

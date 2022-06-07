@@ -56,6 +56,10 @@ type OVNNodeClientset struct {
 	KubeClient kubernetes.Interface
 }
 
+type OVNClusterManagerClientset struct {
+	KubeClient kubernetes.Interface
+}
+
 func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 	return &OVNMasterClientset{
 		KubeClient:           cs.KubeClient,
@@ -63,6 +67,12 @@ func (cs *OVNClientset) GetMasterClientset() *OVNMasterClientset {
 		EgressFirewallClient: cs.EgressFirewallClient,
 		CloudNetworkClient:   cs.CloudNetworkClient,
 		EgressQoSClient:      cs.EgressQoSClient,
+	}
+}
+
+func (cs *OVNClientset) GetClusterManagerClientset() *OVNClusterManagerClientset {
+	return &OVNClusterManagerClientset{
+		KubeClient: cs.KubeClient,
 	}
 }
 

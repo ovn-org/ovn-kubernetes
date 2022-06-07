@@ -140,7 +140,8 @@ var (
 	ServiceForFakeNodePortWatcherType         reflect.Type = reflect.TypeOf(&serviceForFakeNodePortWatcher{}) // only for unit tests
 )
 
-// NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
+// NewMasterWatchFactory initializes a new watch factory for the network controller manager
+// or network controller manager+cluster manager or network controller manager+node processes.
 func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory, error) {
 	// resync time is 12 hours, none of the resources being watched in ovn-kubernetes have
 	// any race condition where a resync may be required e.g. cni executable on node watching for
@@ -370,6 +371,24 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 		return nil, err
 	}
 
+	return wf, nil
+}
+
+// NewClusterManagerWatchFactory initializes a watch factory with significantly fewer
+// informers to save memory + bandwidth. It is to be used by the cluster manager only
+// mode process.
+func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset) (*WatchFactory, error) {
+	wf := &WatchFactory{
+		iFactory:  informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		informers: make(map[reflect.Type]*informer),
+		stopChan:  make(chan struct{}),
+	}
+
+	var err error
+	wf.informers[NodeType], err = newInformer(NodeType, wf.iFactory.Core().V1().Nodes().Informer())
+	if err != nil {
+		return nil, err
+	}
 	return wf, nil
 }
 

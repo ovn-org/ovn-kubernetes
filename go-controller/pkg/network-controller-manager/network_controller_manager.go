@@ -238,6 +238,11 @@ func (cm *networkControllerManager) Start(ctx context.Context, cancel context.Ca
 				// Whenever the node transitions from leader to follower,
 				// we need to handle the transition properly like clearing
 				// the cache.
+				// Note: If cluster manager LE is also running, it will
+				// exit the cluster manager too.
+				// TODO: Remove the leader election from cluster-manager and have one single election
+				// when both cluster manager and network controller manager are running.
+				// See https://issues.redhat.com/browse/OCPBUGS-8080 for details
 				klog.Infof("No longer leader; exiting")
 				cancel()
 			},
