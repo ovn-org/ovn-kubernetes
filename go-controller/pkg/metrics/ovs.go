@@ -51,20 +51,6 @@ var metricOvsDpIfTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	},
 )
 
-var metricOvsDpIf = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: MetricOvsNamespace,
-	Subsystem: MetricOvsSubsystemVswitchd,
-	Name:      "dp_if",
-	Help: "A metric with a constant '1' value labeled by " +
-		"datapath name, port name, port type and datapath port number."},
-	[]string{
-		"datapath",
-		"port",
-		"type",
-		"ofPort",
-	},
-)
-
 var metricOvsDpFlowsTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: MetricOvsNamespace,
 	Subsystem: MetricOvsSubsystemVswitchd,
@@ -322,20 +308,6 @@ func ovsDatapathMasksMetrics(output, datapath string) {
 	}
 }
 
-// ovsDatapathPortMetrics obtains the ovs datapath port metrics
-// from ovs-appctl dpctl/show(portname, porttype, portnumber) and updates them.
-func ovsDatapathPortMetrics(output, datapath string) {
-	portFields := strings.Fields(output)
-	portType := "system"
-	if len(portFields) > 3 {
-		portType = strings.Trim(portFields[3], "():")
-	}
-
-	portName := strings.TrimSpace(portFields[2])
-	portNumber := strings.Trim(portFields[1], ":")
-	metricOvsDpIf.WithLabelValues(datapath, portName, portType, portNumber).Set(1)
-}
-
 // getOvsDatapaths gives list of datapaths
 // and updates the corresponding datapath metrics
 func getOvsDatapaths() (datapathsList []string, err error) {
@@ -397,7 +369,6 @@ func setOvsDatapathMetrics(datapaths []string) (err error) {
 			} else if strings.HasPrefix(output, "masks:") {
 				ovsDatapathMasksMetrics(output, datapathName)
 			} else if strings.HasPrefix(output, "port ") {
-				ovsDatapathPortMetrics(output, datapathName)
 				datapathPortCount++
 			} else if strings.HasPrefix(output, "flows:") {
 				flowFields := strings.Fields(output)
@@ -1229,7 +1200,6 @@ func registerOvsMetrics(registry prometheus.Registerer, stopChan <-chan struct{}
 		registry.MustRegister(metricOvsDpTotal)
 		registry.MustRegister(metricOvsDp)
 		registry.MustRegister(metricOvsDpIfTotal)
-		registry.MustRegister(metricOvsDpIf)
 		registry.MustRegister(metricOvsDpFlowsTotal)
 		registry.MustRegister(metricOvsDpFlowsLookupHit)
 		registry.MustRegister(metricOvsDpFlowsLookupMissed)
