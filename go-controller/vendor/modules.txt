@@ -232,7 +232,7 @@ github.com/openshift/client-go/cloudnetwork/informers/externalversions/cloudnetw
 github.com/openshift/client-go/cloudnetwork/informers/externalversions/cloudnetwork/v1
 github.com/openshift/client-go/cloudnetwork/informers/externalversions/internalinterfaces
 github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1
-# github.com/ovn-org/libovsdb v0.6.1-0.20220427123326-d7b273399db4
+# github.com/ovn-org/libovsdb v0.6.1-0.20220603151050-98c0bad3cff1
 ## explicit; go 1.16
 github.com/ovn-org/libovsdb/cache
 github.com/ovn-org/libovsdb/client
