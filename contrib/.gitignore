@@ -1,2 +1,2 @@
-kind.yaml
-
+# the j2 file will be converted to kind-${CLUSTER_NAME}.yaml which is ovn
+kind-ovn.yaml
