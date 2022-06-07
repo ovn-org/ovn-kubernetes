@@ -435,7 +435,7 @@ process_healthy() {
 check_health() {
   ctl_file=""
   case ${1} in
-  "ovnkube" | "ovnkube-master" | "ovn-dbchecker")
+  "ovnkube" | "ovnkube-master" | "ovn-dbchecker" | "ovnkube-cluster-manager")
     # just check for presence of pid
     ;;
   "ovnnb_db" | "ovnsb_db")
@@ -1008,6 +1008,77 @@ ovn-master() {
   exit 9
 }
 
+# run ovnkube --cluster-manager
+ovn-cluster-manager() {
+  trap 'kill $(jobs -p); exit 0' TERM
+  check_ovn_daemonset_version "3"
+
+  echo "=============== ovn-cluster-manager (wait for ready_to_start_node) ========== MASTER ONLY"
+  wait_for_event ready_to_start_node
+
+  hybrid_overlay_flags=
+  if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
+    hybrid_overlay_flags="--enable-hybrid-overlay"
+    if [[ -n "${ovn_hybrid_overlay_net_cidr}" ]]; then
+      hybrid_overlay_flags="${hybrid_overlay_flags} --hybrid-overlay-cluster-subnets=${ovn_hybrid_overlay_net_cidr}"
+    fi
+  fi
+  ovn_v4_join_subnet_opt=
+  if [[ -n ${ovn_v4_join_subnet} ]]; then
+      ovn_v4_join_subnet_opt="--gateway-v4-join-subnet=${ovn_v4_join_subnet}"
+  fi
+
+  ovn_v6_join_subnet_opt=
+  if [[ -n ${ovn_v6_join_subnet} ]]; then
+      ovn_v6_join_subnet_opt="--gateway-v6-join-subnet=${ovn_v6_join_subnet}"
+  fi
+
+  multicast_enabled_flag=
+  if [[ ${ovn_multicast_enable} == "true" ]]; then
+      multicast_enabled_flag="--enable-multicast"
+  fi
+
+  ovnkube_cluster_manager_metrics_bind_address="${metrics_endpoint_ip}:9411"
+  local ovnkube_metrics_tls_opts=""
+  if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
+    ovnkube_metrics_tls_opts="
+        --node-server-privkey ${OVNKUBE_METRICS_PK}
+        --node-server-cert ${OVNKUBE_METRICS_CERT}
+      "
+  fi
+
+  ovnkube_config_duration_enable_flag=
+  if [[ ${ovnkube_config_duration_enable} == "true" ]]; then
+    ovnkube_config_duration_enable_flag="--metrics-enable-config-duration"
+  fi
+  echo "ovnkube_config_duration_enable_flag: ${ovnkube_config_duration_enable_flag}"
+
+  echo "=============== ovn-cluster-manager ========== MASTER ONLY"
+  /usr/bin/ovnkube \
+    --init-cluster-manager ${K8S_NODE} \
+    --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
+    --loglevel=${ovnkube_loglevel} \
+    --logfile-maxsize=${ovnkube_logfile_maxsize} \
+    --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
+    --logfile-maxage=${ovnkube_logfile_maxage} \
+    ${hybrid_overlay_flags} \
+    ${ovn_v4_join_subnet_opt} \
+    ${ovn_v6_join_subnet_opt} \
+    --pidfile ${OVN_RUNDIR}/ovnkube-cluster-manager.pid \
+    --logfile /var/log/ovn-kubernetes/ovnkube-cluster-manager.log \
+    ${ovnkube_metrics_tls_opts} \
+    ${multicast_enabled_flag} \
+    ${ovnkube_config_duration_enable_flag} \
+    --metrics-bind-address ${ovnkube_cluster_manager_metrics_bind_address} \
+    --host-network-namespace ${ovn_host_network_namespace} &
+
+  echo "=============== ovn-cluster-manager ========== running"
+  wait_for_event attempts=3 process_ready ovnkube-cluster-manager
+
+  process_healthy ovnkube-cluster-manager
+  exit 9
+}
+
 # ovn-controller - all nodes
 ovn-controller() {
   check_ovn_daemonset_version "3"
@@ -1357,6 +1428,9 @@ case ${cmd} in
   ;;
 "ovn-master") # pod ovnkube-master container ovnkube-master
   ovn-master
+  ;;
+"ovn-cluster-manager") # pod ovnkube-master container ovnkube-cluster-manager
+  ovn-cluster-manager
   ;;
 "ovs-server") # pod ovnkube-node container ovs-daemons
   ovs-server

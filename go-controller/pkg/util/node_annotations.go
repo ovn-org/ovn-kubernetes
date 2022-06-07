@@ -8,6 +8,8 @@ import (
 	"strconv"
 
 	kapi "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -533,4 +535,15 @@ func ParseNodeHostAddresses(node *kapi.Node) (sets.String, error) {
 	}
 
 	return sets.NewString(cfg...), nil
+}
+
+// NoHostSubnet() compares the no-hostsubenet-nodes flag with node labels to see if the node is managing its
+// own network.
+func NoHostSubnet(node *kapi.Node) bool {
+	if config.Kubernetes.NoHostSubnetNodes == nil {
+		return false
+	}
+
+	nodeSelector, _ := metav1.LabelSelectorAsSelector(config.Kubernetes.NoHostSubnetNodes)
+	return nodeSelector.Matches(labels.Set(node.Labels))
 }

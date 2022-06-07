@@ -20,6 +20,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/urfave/cli/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
@@ -199,11 +200,12 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 
 	master := ctx.String("init-master")
 	node := ctx.String("init-node")
+	clusterManager := ctx.String("init-cluster-manager")
 
 	cleanupNode := ctx.String("cleanup-node")
 	if cleanupNode != "" {
-		if master != "" || node != "" {
-			return fmt.Errorf("cannot specify cleanup-node together with 'init-node or 'init-master'")
+		if master != "" || node != "" || clusterManager != "" {
+			return fmt.Errorf("cannot specify cleanup-node together with 'init-node or 'init-master or init-cluster-manager'")
 		}
 
 		if err = ovnnode.CleanupClusterNode(cleanupNode); err != nil {
@@ -212,8 +214,12 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		return nil
 	}
 
-	if master == "" && node == "" {
-		return fmt.Errorf("need to run ovnkube in either master and/or node mode")
+	if master == "" && node == "" && clusterManager == "" {
+		return fmt.Errorf("need to run ovnkube in  cluster manager and/or master, and/or node mode")
+	}
+
+	if clusterManager != "" && node != "" {
+		return fmt.Errorf("cannot run in both cluster manager and node mode")
 	}
 
 	stopChan := make(chan struct{})
@@ -229,6 +235,32 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 			return err
 		}
 		watchFactory = masterWatchFactory
+	}
+
+	if clusterManager != "" {
+		var clusterManagerWatchFactory *factory.WatchFactory
+		if masterWatchFactory == nil {
+			var err error
+			clusterManagerWatchFactory, err = factory.NewClusterManagerWatchFactory(ovnClientset)
+			if err != nil {
+				return err
+			}
+			watchFactory = clusterManagerWatchFactory
+		} else {
+			clusterManagerWatchFactory = masterWatchFactory
+		}
+
+		metrics.RegisterClusterManagerBase()
+
+		cm := clustermanager.NewClusterManager(ovnClientset, clusterManagerWatchFactory, stopChan,
+			util.EventRecorder(ovnClientset.KubeClient))
+		if err := cm.Start(clusterManager, wg, ctx.Context); err != nil {
+			return err
+		}
+	}
+
+	if master != "" {
+		var err error
 		var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
 
 		if libovsdbOvnNBClient, err = libovsdb.NewNBClient(stopChan); err != nil {

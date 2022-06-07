@@ -328,6 +328,23 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 	return wf, nil
 }
 
+// NewNodeWatchFactory initializes a watch factory with significantly fewer
+// informers to save memory + bandwidth. It is to be used by the node-only process.
+func NewClusterManagerWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, error) {
+	wf := &WatchFactory{
+		iFactory:  informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		informers: make(map[reflect.Type]*informer),
+		stopChan:  make(chan struct{}),
+	}
+
+	var err error
+	wf.informers[NodeType], err = newInformer(NodeType, wf.iFactory.Core().V1().Nodes().Informer())
+	if err != nil {
+		return nil, err
+	}
+	return wf, nil
+}
+
 func (wf *WatchFactory) Shutdown() {
 	close(wf.stopChan)
 

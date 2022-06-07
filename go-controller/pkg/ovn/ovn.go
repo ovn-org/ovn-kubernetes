@@ -23,7 +23,6 @@ import (
 	corev1listers "k8s.io/client-go/listers/core/v1"
 
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -100,9 +99,6 @@ type Controller struct {
 	kube         kube.Interface
 	watchFactory *factory.WatchFactory
 	stopChan     <-chan struct{}
-
-	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
-	masterSubnetAllocator *subnetallocator.SubnetAllocator
 
 	hoMaster *hocontroller.MasterController
 
@@ -192,12 +188,6 @@ type Controller struct {
 	// libovsdb southbound client interface
 	sbClient libovsdbclient.Client
 
-	// v4HostSubnetsUsed keeps track of number of v4 subnets currently assigned to nodes
-	v4HostSubnetsUsed float64
-
-	// v6HostSubnetsUsed keeps track of number of v6 subnets currently assigned to nodes
-	v6HostSubnetsUsed float64
-
 	// Objects for pods that need to be retried
 	retryPods *RetryObjs
 
@@ -277,19 +267,18 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,
 		},
-		watchFactory:          wf,
-		stopChan:              stopChan,
-		masterSubnetAllocator: subnetallocator.NewSubnetAllocator(),
-		lsManager:             lsm.NewLogicalSwitchManager(),
-		logicalPortCache:      newPortCache(stopChan),
-		namespaces:            make(map[string]*namespaceInfo),
-		namespacesMutex:       sync.Mutex{},
-		externalGWCache:       make(map[ktypes.NamespacedName]*externalRouteInfo),
-		exGWCacheMutex:        sync.RWMutex{},
-		addressSetFactory:     addressSetFactory,
-		lspIngressDenyCache:   make(map[string]int),
-		lspEgressDenyCache:    make(map[string]int),
-		lspMutex:              &sync.Mutex{},
+		watchFactory:        wf,
+		stopChan:            stopChan,
+		lsManager:           lsm.NewLogicalSwitchManager(),
+		logicalPortCache:    newPortCache(stopChan),
+		namespaces:          make(map[string]*namespaceInfo),
+		namespacesMutex:     sync.Mutex{},
+		externalGWCache:     make(map[ktypes.NamespacedName]*externalRouteInfo),
+		exGWCacheMutex:      sync.RWMutex{},
+		addressSetFactory:   addressSetFactory,
+		lspIngressDenyCache: make(map[string]int),
+		lspEgressDenyCache:  make(map[string]int),
+		lspMutex:            &sync.Mutex{},
 		eIPC: egressIPController{
 			egressIPAssignmentMutex:           &sync.Mutex{},
 			podAssignmentMutex:                &sync.Mutex{},
@@ -765,12 +754,7 @@ func nodeChassisChanged(oldNode, node *kapi.Node) bool {
 // noHostSubnet() compares the no-hostsubenet-nodes flag with node labels to see if the node is manageing its
 // own network.
 func noHostSubnet(node *kapi.Node) bool {
-	if config.Kubernetes.NoHostSubnetNodes == nil {
-		return false
-	}
-
-	nodeSelector, _ := metav1.LabelSelectorAsSelector(config.Kubernetes.NoHostSubnetNodes)
-	return nodeSelector.Matches(labels.Set(node.Labels))
+	return util.NoHostSubnet(node)
 }
 
 // shouldUpdate() determines if the ovn-kubernetes plugin should update the state of the node.

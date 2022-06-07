@@ -1,5 +1,5 @@
-# define ServiceMontior and Service resources for ovnkube-master, ovnkube-node,
-# and ovnkube-db (required for prometheus monitoring)
+# define ServiceMontior and Service resources for ovnkube-cluster-manager,
+# ovnkube-master, ovnkube-node and ovnkube-db (required for prometheus monitoring)
 
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -97,4 +97,45 @@ spec:
     port: 9310
     protocol: TCP
     targetPort: 9310
+---
 
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  labels:
+    k8s-app: ovnkube-cluster-manager
+  name: monitor-ovnkube-cluster-manager
+  namespace: ovn-kubernetes
+spec:
+  endpoints:
+  - interval: 30s
+    port: http-metrics
+    scheme: http
+    path: /metrics
+  jobLabel: k8s-app
+  namespaceSelector:
+    matchNames:
+    - ovn-kubernetes
+  selector:
+    matchLabels:
+      k8s-app: ovnkube-cluster-manager
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    k8s-app: ovnkube-cluster-manager
+  name: ovnkube-cluster-manager-prometheus-discovery
+  namespace: ovn-kubernetes
+spec:
+  selector:
+    name: ovnkube-cluster-manager
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+  - name: http-metrics
+    port: 9411
+    protocol: TCP
+    targetPort: 9411
+---

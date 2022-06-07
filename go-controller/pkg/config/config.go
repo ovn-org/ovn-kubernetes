@@ -607,6 +607,10 @@ var CommonFlags = []cli.Flag{
 		Usage: "initialize master, requires the hostname as argument",
 	},
 	&cli.StringFlag{
+		Name:  "init-cluster-manager",
+		Usage: "initialize cluster manager, requires the hostname as argument",
+	},
+	&cli.StringFlag{
 		Name:  "init-node",
 		Usage: "initialize node, requires the name that node is registered with in kubernetes cluster",
 	},
