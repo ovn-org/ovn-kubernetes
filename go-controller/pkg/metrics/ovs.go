@@ -18,7 +18,21 @@ import (
 )
 
 var (
-	ovsVersion string
+	ovsVersion     string
+	InterfaceStats = []string{
+		"rx_packets",
+		"rx_bytes",
+		"rx_dropped",
+		"rx_frame_err",
+		"rx_over_err",
+		"rx_crc_err",
+		"rx_errors",
+		"tx_packets",
+		"tx_bytes",
+		"tx_dropped",
+		"collisions",
+		"tx_errors",
+	}
 )
 
 // ovs datapath Metrics
@@ -546,6 +560,8 @@ func ovsBridgeMetricsUpdate(stopChan <-chan struct{}) {
 	for {
 		select {
 		case <-ticker.C:
+			// reset ovs interface metrics which helps to delete stale interface metrics
+			resetOvsInterfaceMetrics()
 			// set geneve interface metrics
 			if err := geneveInterfaceMetricsUpdate(); err != nil {
 				klog.Errorf("Updating geneve interface metrics failed: %s", err.Error())
@@ -650,20 +666,6 @@ func setOvsInterfaceMetrics(interfaceBridge, interfacePort, interfaceName, metri
 }
 
 func setOvsInterfaceStatistics(interfaceBridge, interfacePort, interfaceName, metricValue string) {
-	var InterfaceStats = []string{
-		"rx_packets",
-		"rx_bytes",
-		"rx_dropped",
-		"rx_frame_err",
-		"rx_over_err",
-		"rx_crc_err",
-		"rx_errors",
-		"tx_packets",
-		"tx_bytes",
-		"tx_dropped",
-		"collisions",
-		"tx_errors",
-	}
 	//metricValue will be of format:(rx_bytes=20566 rx_packets=213 tx_bytes=2940 tx_packets=70)
 	statsMap := make(map[string]float64)
 	for _, field := range strings.Fields(metricValue) {
@@ -753,6 +755,27 @@ func geneveInterfaceMetricsUpdate() error {
 		"none", "none", geneveInterfaceName).Set(float64(link.Attrs().Index))
 	setGeneveInterfaceStatistics(geneveInterfaceName, link)
 	return nil
+}
+
+// resetOvsInterfaceMetrics deletes all ovs interface metrics.
+func resetOvsInterfaceMetrics() {
+	ovsInterfaceMetricsDataMap["interface_duplex"].metric.Reset()
+	ovsInterfaceMetricsDataMap["interface_type"].metric.Reset()
+	ovsInterfaceMetricsDataMap["interface_admin_state"].metric.Reset()
+	ovsInterfaceMetricsDataMap["interface_link_state"].metric.Reset()
+	ovsInterfaceMetricsDataMap["interface_ifindex"].metric.Reset()
+	ovsInterfaceMetricsDataMap["interface_link_resets"].metric.Reset()
+	ovsInterfaceMetricsDataMap["interface_link_speed"].metric.Reset()
+	ovsInterfaceMetricsDataMap["interface_mtu"].metric.Reset()
+	ovsInterfaceMetricsDataMap["interface_of_port"].metric.Reset()
+	ovsInterfaceMetricsDataMap["interface_ingress_policing_burst"].metric.Reset()
+	ovsInterfaceMetricsDataMap["interface_ingress_policing_rate"].metric.Reset()
+	metricInterafceDriverName.Reset()
+	metricInterafceDriverVersion.Reset()
+	metricInterafceFirmwareVersion.Reset()
+	for _, stat := range InterfaceStats {
+		ovsInterfaceMetricsDataMap["interface_"+stat].metric.Reset()
+	}
 }
 
 // ovsInterfaceMetricsUpdate updates the ovs interface metrics
