@@ -45,6 +45,16 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 		return fmt.Errorf("failed to delete logical switch port %s from switch %s: %v", portName, types.OVNJoinSwitch, err)
 	}
 
+	// Remove the logical router port on the gateway router that connects to the join switch
+	logicalRouter := nbdb.LogicalRouter{Name: gatewayRouter}
+	logicalRouterPort := nbdb.LogicalRouterPort{
+		Name: types.GWRouterToJoinSwitchPrefix + gatewayRouter,
+	}
+	err = libovsdbops.DeleteLogicalRouterPorts(oc.nbClient, &logicalRouter, &logicalRouterPort)
+	if err != nil {
+		return fmt.Errorf("failed to delete port %s on router %s: %v", logicalRouterPort.Name, gatewayRouter, err)
+	}
+
 	// Remove router to lb associations from the LBCache before removing the router
 	lbCache, err := ovnlb.GetLBCache(oc.nbClient)
 	if err != nil {
@@ -53,7 +63,6 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 	lbCache.RemoveRouter(gatewayRouter)
 
 	// Remove the gateway router associated with nodeName
-	logicalRouter := nbdb.LogicalRouter{Name: gatewayRouter}
 	err = libovsdbops.DeleteLogicalRouter(oc.nbClient, &logicalRouter)
 	if err != nil {
 		return fmt.Errorf("failed to delete gateway router %s: %v", gatewayRouter, err)
@@ -172,7 +181,7 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 	}
 	err = libovsdbops.DeleteLogicalRouterPorts(oc.nbClient, &logicalRouter, &logicalRouterPort)
 	if err != nil {
-		return fmt.Errorf("failed to delete port %s on router %s: %v", logicalRouterPort.Name, types.OVNClusterRouter, err)
+		return fmt.Errorf("failed to delete port %s on router %s: %v", logicalRouterPort.Name, gatewayRouter, err)
 	}
 
 	if upgradeOnly {
