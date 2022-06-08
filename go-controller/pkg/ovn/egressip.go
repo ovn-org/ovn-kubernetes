@@ -1587,9 +1587,9 @@ func (oc *Controller) setNodeEgressReachable(nodeName string, isReachable bool) 
 	}
 }
 
-func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
+func (oc *Controller) addEgressNode(nodeName string) error {
 	var errors []error
-	klog.V(5).Infof("Egress node: %s about to be initialized", egressNode.Name)
+	klog.V(5).Infof("Egress node: %s about to be initialized", nodeName)
 	// This option will program OVN to start sending GARPs for all external IPS
 	// that the logical switch port has been configured to use. This is
 	// necessary for egress IP because if an egress IP is moved between two
@@ -1597,7 +1597,7 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 	// as to notify them the change. If this is not the case: packets will
 	// continue to be routed to the old node which hosted the egress IP before
 	// it was moved, and the connections will fail.
-	portName := types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + egressNode.Name
+	portName := types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName
 	lsp := nbdb.LogicalSwitchPort{
 		Name: portName,
 		// Setting nat-addresses to router will send out GARPs for all externalIPs and LB VIPs
@@ -1608,7 +1608,7 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 	err := libovsdbops.UpdateLogicalSwitchPortSetOptions(oc.nbClient, &lsp)
 	if err != nil {
 		errors = append(errors, fmt.Errorf("unable to configure GARP on external logical switch port for egress node: %s, "+
-			"this will result in packet drops during egress IP re-assignment,  err: %v", egressNode.Name, err))
+			"this will result in packet drops during egress IP re-assignment,  err: %v", nodeName, err))
 	}
 
 	// If a node has been labelled for egress IP we need to check if there are any
@@ -1639,20 +1639,20 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 	return nil
 }
 
-func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
+func (oc *Controller) deleteEgressNode(nodeName string) error {
 	var errors []error
-	klog.V(5).Infof("Egress node: %s about to be removed", egressNode.Name)
+	klog.V(5).Infof("Egress node: %s about to be removed", nodeName)
 	// This will remove the option described in addEgressNode from the logical
 	// switch port, since this node will not be used for egress IP assignments
 	// from now on.
-	portName := types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + egressNode.Name
+	portName := types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName
 	lsp := nbdb.LogicalSwitchPort{
 		Name:    portName,
 		Options: map[string]string{"nat-addresses": "", "exclude-lb-vips-from-garp": ""},
 	}
 	err := libovsdbops.UpdateLogicalSwitchPortSetOptions(oc.nbClient, &lsp)
 	if err != nil {
-		errors = append(errors, fmt.Errorf("unable to remove GARP configuration on external logical switch port for egress node: %s, err: %v", egressNode.Name, err))
+		errors = append(errors, fmt.Errorf("unable to remove GARP configuration on external logical switch port for egress node: %s, err: %v", nodeName, err))
 	}
 
 	// Since the node has been labelled as "not usable" for egress IP
@@ -1664,7 +1664,7 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 	}
 	for _, egressIP := range egressIPs.Items {
 		for _, status := range egressIP.Status.Items {
-			if status.Node == egressNode.Name {
+			if status.Node == nodeName {
 				// Send a "synthetic update" on all egress IPs which have an
 				// assignment to this node. The reconciliation loop for
 				// WatchEgressIP will see that the current assignment status to
@@ -2078,19 +2078,15 @@ func (oc *Controller) checkEgressNodesReachability() {
 		}
 		oc.eIPC.allocator.Unlock()
 		for nodeName, shouldDelete := range reAddOrDelete {
-			node, err := oc.watchFactory.GetNode(nodeName)
-			if err != nil {
-				klog.Errorf("Node: %s reachability changed, but could not retrieve node from cache, err: %v", nodeName, err)
-			}
 			if shouldDelete {
-				klog.Warningf("Node: %s is detected as unreachable, deleting it from egress assignment", node.Name)
-				if err := oc.deleteEgressNode(node); err != nil {
-					klog.Errorf("Node: %s is detected as unreachable, but could not re-assign egress IPs, err: %v", node.Name, err)
+				klog.Warningf("Node: %s is detected as unreachable, deleting it from egress assignment", nodeName)
+				if err := oc.deleteEgressNode(nodeName); err != nil {
+					klog.Errorf("Node: %s is detected as unreachable, but could not re-assign egress IPs, err: %v", nodeName, err)
 				}
 			} else {
-				klog.Infof("Node: %s is detected as reachable and ready again, adding it to egress assignment", node.Name)
-				if err := oc.addEgressNode(node); err != nil {
-					klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", node.Name, err)
+				klog.Infof("Node: %s is detected as reachable and ready again, adding it to egress assignment", nodeName)
+				if err := oc.addEgressNode(nodeName); err != nil {
+					klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", nodeName, err)
 				}
 			}
 		}
