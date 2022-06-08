@@ -111,6 +111,8 @@ func NewSBClientWithConfig(cfg config.OvnAuthConfig, stopCh <-chan struct{}) (cl
 			client.WithTable(&sbdb.PortBinding{}),
 			// used for hybrid-overlay
 			client.WithTable(&sbdb.DatapathBinding{}),
+			// used for dpu-host mode
+			client.WithTable(&sbdb.Encap{}),
 		),
 	)
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
@@ -25,7 +26,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/upgrade"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/vishvananda/netlink"
@@ -40,10 +43,11 @@ type OvnNode struct {
 	stopChan     chan struct{}
 	recorder     record.EventRecorder
 	gateway      Gateway
+	sbClient     libovsdbclient.Client
 }
 
 // NewNode creates a new controller for node management
-func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
+func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name string, dbclient libovsdbclient.Client, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
 	return &OvnNode{
 		name:         name,
 		client:       kubeClient,
@@ -51,6 +55,7 @@ func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name s
 		watchFactory: wf,
 		stopChan:     stopChan,
 		recorder:     eventRecorder,
+		sbClient:     dbclient,
 	}
 }
 
@@ -357,6 +362,11 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		}
 
 		err = setupOVNNode(node)
+		if err != nil {
+			return err
+		}
+	} else {
+		err = removeStaleChassisByNodeIP(n.sbClient, nodeAddr)
 		if err != nil {
 			return err
 		}
@@ -688,6 +698,27 @@ func upgradeServiceRoute(bridgeName string) error {
 		rules := getLocalGatewayNATRules(types.LocalnetGatewayNextHopPort, IPNet)
 		if err := delIptRules(rules); err != nil {
 			klog.Errorf("Failed to LocalGatewayNATRules: %v", err)
+		}
+	}
+	return nil
+}
+
+func removeStaleChassisByNodeIP(sbClient libovsdbclient.Client, ip net.IP) error {
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	encaps := []*sbdb.Encap{}
+	if err := sbClient.List(ctx, &encaps); err != nil {
+		return err
+	}
+
+	for _, encap := range encaps {
+		if encap.IP == ip.String() {
+			klog.V(2).Infof("Remove stale chassis: %s", encap.ChassisName)
+			if err := libovsdbops.DeleteChassisWithPredicate(sbClient, func(item *sbdb.Chassis) bool {
+				return item.Name == encap.ChassisName
+			}); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
