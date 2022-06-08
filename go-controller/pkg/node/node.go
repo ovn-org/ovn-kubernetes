@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -547,26 +545,23 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		}
 	}
 
-	if config.OvnKubeNode.Mode != types.NodeModeDPU {
-		// conditionally write cni config file
-		confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
-		_, err = os.Stat(confFile)
-		if os.IsNotExist(err) {
-			err = config.WriteCNIConfig()
-			if err != nil {
-				return err
-			}
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		if err := n.watchPodsDPU(isOvnUpEnabled); err != nil {
+			return err
+		}
+	} else {
+		// start the cni server
+		if err := cniServer.Start(cni.HandleCNIRequest); err != nil {
+			return err
+		}
+
+		// Write CNI config file if it doesn't already exist
+		if err := config.WriteCNIConfig(); err != nil {
+			return err
 		}
 	}
 
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		err = n.watchPodsDPU(isOvnUpEnabled)
-	} else {
-		// start the cni server
-		err = cniServer.Start(cni.HandleCNIRequest)
-	}
-
-	return err
+	return nil
 }
 
 func (n *OvnNode) WatchEndpoints() error {

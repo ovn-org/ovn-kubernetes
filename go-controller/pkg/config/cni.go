@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -14,6 +15,8 @@ import (
 )
 
 // WriteCNIConfig writes a CNI JSON config file to directory given by global config
+// if the file doesn't already exist, or is different than the content that would
+// be written.
 func WriteCNIConfig() error {
 	netConf := &ovntypes.NetConf{
 		NetConf: types.NetConf{
@@ -28,20 +31,24 @@ func WriteCNIConfig() error {
 		LogFileMaxAge:     Logging.LogFileMaxAge,
 	}
 
-	bytes, err := json.Marshal(netConf)
+	newBytes, err := json.Marshal(netConf)
 	if err != nil {
 		return fmt.Errorf("failed to marshal CNI config JSON: %v", err)
 	}
 
-	// Install the CNI config file after all initialization is done
-	// MkdirAll() returns no error if the path already exists
-	err = os.MkdirAll(CNI.ConfDir, os.ModeDir)
-	if err != nil {
-		return err
+	confFile := filepath.Join(CNI.ConfDir, CNIConfFileName)
+	if existingBytes, err := os.ReadFile(confFile); err == nil {
+		if bytes.Equal(newBytes, existingBytes) {
+			// No changes; do nothing
+			return nil
+		}
 	}
 
-	// Always create the CNI config for consistency.
-	confFile := filepath.Join(CNI.ConfDir, CNIConfFileName)
+	// Install the CNI config file after all initialization is done
+	// MkdirAll() returns no error if the path already exists
+	if err := os.MkdirAll(CNI.ConfDir, os.ModeDir); err != nil {
+		return err
+	}
 
 	var f *os.File
 	f, err = ioutil.TempFile(CNI.ConfDir, "ovnkube-")
@@ -49,12 +56,10 @@ func WriteCNIConfig() error {
 		return err
 	}
 
-	_, err = f.Write(bytes)
-	if err != nil {
+	if _, err := f.Write(newBytes); err != nil {
 		return err
 	}
-	err = f.Close()
-	if err != nil {
+	if err := f.Close(); err != nil {
 		return err
 	}
 
