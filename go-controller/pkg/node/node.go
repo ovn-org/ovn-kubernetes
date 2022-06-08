@@ -561,6 +561,7 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		}
 	}
 
+	klog.Infof("OVN Kube Node initialized and ready.")
 	return nil
 }
 
