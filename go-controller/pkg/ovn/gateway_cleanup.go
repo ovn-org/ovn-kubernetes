@@ -66,7 +66,7 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 		return fmt.Errorf("failed to delete external switch %s: %v", externalSwitch, err)
 	}
 
-	exGWexternalSwitch := types.ExternalSwitchPrefix + types.ExternalSwitchPrefix + nodeName
+	exGWexternalSwitch := types.EgressGWSwitchPrefix + types.ExternalSwitchPrefix + nodeName
 	err = libovsdbops.DeleteLogicalSwitch(oc.nbClient, exGWexternalSwitch)
 	if err != nil {
 		return fmt.Errorf("failed to delete external switch %s: %v", exGWexternalSwitch, err)
