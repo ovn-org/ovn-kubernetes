@@ -688,11 +688,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedDatabaseState := []libovsdbtest.TestData{
-				&nbdb.LogicalRouterPort{
-					Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName,
-					UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName + "-UUID",
-					Networks: []string{"100.64.0.1/16"},
-				},
 				&nbdb.LoadBalancer{
 					UUID:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 					Name:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
@@ -816,11 +811,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			expectedDatabaseState := []libovsdbtest.TestData{
-				&nbdb.LogicalRouterPort{
-					Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName,
-					UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName + "-UUID",
-					Networks: []string{"100.64.0.1/16", "fd98::1/64"},
-				},
 				&nbdb.LoadBalancer{
 					UUID:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
 					Name:     "Service_default/kubernetes_TCP_node_router_ovn-control-plane",
