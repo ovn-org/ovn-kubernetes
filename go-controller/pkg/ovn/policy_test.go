@@ -1609,6 +1609,133 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
+		ginkgo.It("deleting a network policy that was not added successfully panics", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespace1 := *newNamespace(namespaceName1)
+				nPodTest := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespace1.Name,
+				)
+				nPod := newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP)
+
+				const (
+					labelName string = "pod-name"
+					labelVal  string = "server"
+					portNum   int32  = 81
+				)
+				nPod.Labels[labelName] = labelVal
+
+				tcpProtocol := v1.Protocol(v1.ProtocolTCP)
+				networkPolicy := newNetworkPolicy("networkpolicy1", namespace1.Name,
+					metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							labelName: labelVal,
+						},
+					},
+					[]knet.NetworkPolicyIngressRule{{
+						Ports: []knet.NetworkPolicyPort{{
+							Port:     &intstr.IntOrString{IntVal: portNum},
+							Protocol: &tcpProtocol,
+						}},
+					}},
+					[]knet.NetworkPolicyEgressRule{{
+						Ports: []knet.NetworkPolicyPort{{
+							Port:     &intstr.IntOrString{IntVal: portNum},
+							Protocol: &tcpProtocol,
+						}},
+					}},
+				)
+
+				egressOptions := map[string]string{
+					"apply-after-lb": "true",
+				}
+				pgHash := hashedPortGroup(networkPolicy.Namespace)
+				leftOverACLFromUpgrade1 := libovsdbops.BuildACL(
+					networkPolicy.Namespace+"_ARPallowPolicy",
+					nbdb.ACLDirectionFromLport,
+					types.DefaultAllowPriority,
+					"inport == @"+pgHash+"_"+egressDenyPG+" && arp",
+					nbdb.ACLActionAllow,
+					types.OvnACLLoggingMeter,
+					nbdb.ACLSeverityInfo,
+					false,
+					map[string]string{
+						defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress),
+					},
+					egressOptions,
+				)
+				leftOverACLFromUpgrade1.UUID = *leftOverACLFromUpgrade1.Name + "-ingressAllowACL-UUID1"
+
+				leftOverACLFromUpgrade2 := libovsdbops.BuildACL(
+					networkPolicy.Namespace+"_ARPallowPolicy",
+					nbdb.ACLDirectionFromLport,
+					types.DefaultAllowPriority,
+					"inport == @"+pgHash+"_"+egressDenyPG+" && (arp || nd)",
+					nbdb.ACLActionAllow,
+					types.OvnACLLoggingMeter,
+					nbdb.ACLSeverityInfo,
+					false,
+					map[string]string{
+						defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress),
+					},
+					egressOptions,
+				)
+				leftOverACLFromUpgrade2.UUID = *leftOverACLFromUpgrade2.Name + "-ingressAllowACL-UUID2"
+
+				initialDB1 := libovsdb.TestSetup{
+					NBData: []libovsdb.TestData{
+						&nbdb.LogicalSwitch{
+							Name: "node1",
+						},
+						leftOverACLFromUpgrade1,
+						leftOverACLFromUpgrade2,
+					},
+				}
+
+				fakeOvn.startWithDBSetup(initialDB1,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{namespace1},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{*nPod},
+					},
+				)
+				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				err := fakeOvn.controller.WatchNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fakeOvn.controller.WatchPods()
+				fakeOvn.controller.WatchNetworkPolicy()
+
+				ginkgo.By("Creating a network policy that applies to a pod and ensuring creation fails")
+
+				err = fakeOvn.controller.addNetworkPolicy(networkPolicy)
+				gomega.Expect(err).To(gomega.HaveOccurred())
+				gomega.Expect(err.Error()).To(gomega.ContainSubstring("failed to create default port groups and acls for policy: namespace1/networkpolicy1, error: unexpectedly found multiple results for provided predicate"))
+
+				ginkgo.By("Deleting the network policy that failed to create and ensuring we panic")
+				gomega.Expect(func () {
+					fakeOvn.controller.deleteNetworkPolicy(networkPolicy, nil)
+				}).To(gomega.Panic())
+
+				expectedData := []libovsdb.TestData{}
+				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
+				expectedData = append(expectedData, leftOverACLFromUpgrade1)
+				expectedData = append(expectedData, leftOverACLFromUpgrade2)
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("reconciles a deleted namespace referenced by a networkpolicy with a local running pod", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespace1 := *newNamespace(namespaceName1)
