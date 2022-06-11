@@ -1609,7 +1609,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("deleting a network policy that was not added successfully panics", func() {
+		ginkgo.It("deleting a network policy that failed half-way through creation succeeds", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespace1 := *newNamespace(namespaceName1)
 				nPodTest := newTPod(
@@ -1718,16 +1718,18 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				gomega.Expect(err).To(gomega.HaveOccurred())
 				gomega.Expect(err.Error()).To(gomega.ContainSubstring("failed to create default port groups and acls for policy: namespace1/networkpolicy1, error: unexpectedly found multiple results for provided predicate"))
 
-				ginkgo.By("Deleting the network policy that failed to create and ensuring we panic")
-				gomega.Expect(func () {
-					fakeOvn.controller.deleteNetworkPolicy(networkPolicy, nil)
-				}).To(gomega.Panic())
-
+				//ensure the default PGs and ACLs were removed via rollback from add failure
 				expectedData := []libovsdb.TestData{}
 				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
-				expectedData = append(expectedData, leftOverACLFromUpgrade1)
-				expectedData = append(expectedData, leftOverACLFromUpgrade2)
+				// note stale leftovers from previous upgrades won't be cleanedup
+				expectedData = append(expectedData, leftOverACLFromUpgrade1, leftOverACLFromUpgrade2)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
+
+				ginkgo.By("Deleting the network policy that failed to create and ensuring we don't panic")
+				err = fakeOvn.controller.deleteNetworkPolicy(networkPolicy, nil)
+				// I0623 policy.go:1285] Deleting network policy networkpolicy1 in namespace namespace1, np is nil: true
+				// W0623 policy.go:1315] Unable to delete network policy: namespace1/networkpolicy1 since its not found in cache
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				return nil
 			}
