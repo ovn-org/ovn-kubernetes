@@ -111,6 +111,7 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 		defer doneWg.Done()
 
 		addressSyncTimer := time.NewTicker(30 * time.Second)
+		defer addressSyncTimer.Stop()
 
 		subscribed, err := subScribeFcn()
 		if err != nil {

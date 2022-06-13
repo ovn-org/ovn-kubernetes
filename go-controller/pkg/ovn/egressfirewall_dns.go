@@ -154,19 +154,21 @@ func (e *EgressDNS) addToDNS(dnsName string) {
 	}
 }
 
-// Run spawns a goroutine that handles updates to the dns entries for dnsNames used in
+// Run spawns a goroutine that handles updates to the dns entries for domain names used in
 // EgressFirewalls. The loop runs after receiving one of three signals:
-// 1. time.After(durationTillNextQuery) times out and the dnsName with the lowest ttl is checked
+// 1. time.NewTicker(durationTillNextQuery) times out and the dnsName with the lowest ttl is checked
 //    and the durationTillNextQuery is updated
 // 2. e.added is received and durationTillNextQuery is recomputed
 // 3. e.deleted is received and coincides with dnsName
 func (e *EgressDNS) Run(defaultInterval time.Duration) {
-	var dnsName, dnsNameDeleted string
+	var domainNameExpiringNext, domainNameDeleted string
 	var ttl time.Time
 	var timeSet bool
 	// initially the next DNS Query happens at the default interval
 	durationTillNextQuery := defaultInterval
 	go func() {
+		timer := time.NewTicker(durationTillNextQuery)
+		defer timer.Stop()
 		for {
 			// perform periodic updates on dnsNames as each ttl runs out, checking for updates at
 			// least every defaultInterval. Update durationTillNextQuery everytime a new DNS name gets
@@ -174,19 +176,20 @@ func (e *EgressDNS) Run(defaultInterval time.Duration) {
 			select {
 			case <-e.added:
 				//on update need to check if the GetNextQueryTime has changed
-			case <-time.After(durationTillNextQuery):
-				if len(dnsName) > 0 {
-					if _, err := e.Update(dnsName); err != nil {
+			case <-timer.C:
+				if len(domainNameExpiringNext) > 0 {
+					if _, err := e.Update(domainNameExpiringNext); err != nil {
 						utilruntime.HandleError(err)
 					}
-					if err := e.updateEntryForName(dnsName); err != nil {
+					if err := e.updateEntryForName(domainNameExpiringNext); err != nil {
 						utilruntime.HandleError(err)
 					}
 				}
-			case dnsNameDeleted = <-e.deleted:
-				// Break from the select and update dnsName only if dnsName
-				// appears in an EgressFirewall that has just been deleted.
-				if dnsName != dnsNameDeleted {
+			case domainNameDeleted = <-e.deleted:
+				// If domainNameExpiringNext we are waiting to update was deleted,
+				// recalculate durationTillNextQuery and domainNameExpiringNext.
+				// Otherwise, ignore this event
+				if domainNameExpiringNext != domainNameDeleted {
 					continue
 				}
 			case <-e.stopChan:
@@ -194,14 +197,15 @@ func (e *EgressDNS) Run(defaultInterval time.Duration) {
 			case <-e.controllerStop:
 				return
 			}
-
-			// before waiting on the signals get the next time this thread needs to wake up
-			ttl, dnsName, timeSet = e.dns.GetNextQueryTime()
+			// find the domain name whose DNS entry will expire first and calculate when it will expire,
+			// set timer to what's sooner: default update interval or next expiration time
+			ttl, domainNameExpiringNext, timeSet = e.dns.GetNextQueryTime()
 			if time.Until(ttl) > defaultInterval || !timeSet {
 				durationTillNextQuery = defaultInterval
 			} else {
 				durationTillNextQuery = time.Until(ttl)
 			}
+			timer.Reset(durationTillNextQuery)
 		}
 	}()
 

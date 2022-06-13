@@ -89,7 +89,7 @@ var ovnNorthdStopwatchShowMetricsMap = map[string]*stopwatchMetricDetails{
 	"ovnsb_db_run":     {},
 }
 
-func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string) {
+func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string, stopChan <-chan struct{}) {
 	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
 		return checkPodRunsOnGivenNode(clientset, []string{"app=ovnkube-master", "name=ovnkube-master"}, k8sNodeName, true)
 	})
@@ -147,10 +147,10 @@ func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string
 	// Register the ovn-northd coverage/show metrics with prometheus
 	componentCoverageShowMetricsMap[ovnNorthd] = ovnNorthdCoverageShowMetricsMap
 	registerCoverageShowMetrics(ovnNorthd, MetricOvnNamespace, MetricOvnSubsystemNorthd)
-	go coverageShowMetricsUpdater(ovnNorthd)
+	go coverageShowMetricsUpdater(ovnNorthd, stopChan)
 
 	// Register the ovn-northd stopwatch/show metrics with prometheus
 	componentStopwatchShowMetricsMap[ovnNorthd] = ovnNorthdStopwatchShowMetricsMap
 	registerStopwatchShowMetrics(ovnNorthd, MetricOvnNamespace, MetricOvnSubsystemNorthd)
-	go stopwatchShowMetricsUpdater(ovnNorthd)
+	go stopwatchShowMetricsUpdater(ovnNorthd, stopChan)
 }
