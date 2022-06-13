@@ -883,7 +883,7 @@ func (oc *Controller) allocateNodeSubnets(node *kapi.Node) ([]*net.IPNet, []*net
 		}
 		// this subnet is no longer needed
 		klog.V(5).Infof("Releasing subnet %v on node %s", subnet, node.Name)
-		err = oc.masterSubnetAllocator.ReleaseNetwork(subnet)
+		err = oc.masterSubnetAllocator.ReleaseNetworks(subnet)
 		if err != nil {
 			klog.Warningf("Error releasing subnet %v on node %s", subnet, node.Name)
 		}
@@ -905,7 +905,7 @@ func (oc *Controller) allocateNodeSubnets(node *kapi.Node) ([]*net.IPNet, []*net
 			defer func() {
 				if err != nil {
 					klog.Warningf("Releasing subnet %v on node %s: %v", allocatedHostSubnet, node.Name, err)
-					errR := oc.masterSubnetAllocator.ReleaseNetwork(allocatedHostSubnet)
+					errR := oc.masterSubnetAllocator.ReleaseNetworks(allocatedHostSubnet)
 					if errR != nil {
 						klog.Warningf("Error releasing subnet %v on node %s", allocatedHostSubnet, node.Name)
 					}
@@ -925,8 +925,8 @@ func (oc *Controller) allocateNodeSubnets(node *kapi.Node) ([]*net.IPNet, []*net
 			allocatedSubnets = append(allocatedSubnets, allocatedHostSubnet)
 		}
 	}
-	// check if we were able to allocate the new subnets require
-	// this can only happen if OVN is not configured correctly
+	// Check if we were able to allocate the new subnets required.
+	// This can only happen if OVN is not configured correctly
 	// so it will require a reconfiguration and restart.
 	wantedSubnets := expectedHostSubnets - currentHostSubnets
 	if wantedSubnets > 0 && len(allocatedSubnets) != wantedSubnets {
@@ -947,7 +947,7 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 		if err != nil {
 			for _, allocatedSubnet := range allocatedSubnets {
 				klog.Warningf("Releasing subnet %v on node %s: %v", allocatedSubnet, node.Name, err)
-				errR := oc.masterSubnetAllocator.ReleaseNetwork(allocatedSubnet)
+				errR := oc.masterSubnetAllocator.ReleaseNetworks(allocatedSubnet)
 				if errR != nil {
 					klog.Warningf("Error releasing subnet %v on node %s", allocatedSubnet, node.Name)
 				}
@@ -1031,7 +1031,7 @@ func (oc *Controller) deleteStaleNodeChassis(node *kapi.Node) error {
 }
 
 func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) error {
-	err := oc.masterSubnetAllocator.ReleaseNetwork(subnet)
+	err := oc.masterSubnetAllocator.ReleaseNetworks(subnet)
 	if err != nil {
 		return fmt.Errorf("error deleting subnet %v for node %q: %s", subnet, nodeName, err)
 	}
@@ -1207,7 +1207,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) error {
 				klog.Warning(err.Error())
 			} else if hostSubnet != nil {
 				klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnet)
-				if err := oc.hybridOverlaySubnetAllocator.MarkAllocatedNetwork(hostSubnet); err != nil {
+				if err := oc.hybridOverlaySubnetAllocator.MarkAllocatedNetworks(hostSubnet); err != nil {
 					utilruntime.HandleError(err)
 				}
 			}
@@ -1218,7 +1218,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) error {
 		foundNodes.Insert(node.Name)
 		klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnets)
 		for _, hostSubnet := range hostSubnets {
-			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostSubnet)
+			err := oc.masterSubnetAllocator.MarkAllocatedNetworks(hostSubnet)
 			if err != nil {
 				utilruntime.HandleError(err)
 			}

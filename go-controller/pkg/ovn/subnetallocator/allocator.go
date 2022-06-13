@@ -5,23 +5,57 @@ import (
 	"net"
 	"sync"
 
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilnet "k8s.io/utils/net"
 )
 
 var ErrSubnetAllocatorFull = fmt.Errorf("no subnets available.")
 
-type SubnetAllocator struct {
+type SubnetAllocator interface {
+	AddNetworkRange(network *net.IPNet, hostSubnetLen int) error
+	MarkAllocatedNetworks(...*net.IPNet) error
+	// Usage returns the number of available and used v4 subnets, and
+	// the number of available and used v6 subnets
+	Usage() (uint64, uint64, uint64, uint64)
+	AllocateNetworks() ([]*net.IPNet, error)
+	AllocateIPv4Network() (*net.IPNet, error)
+	AllocateIPv6Network() (*net.IPNet, error)
+	ReleaseNetworks(...*net.IPNet) error
+}
+
+type BaseSubnetAllocator struct {
 	sync.Mutex
 
 	v4ranges []*subnetAllocatorRange
 	v6ranges []*subnetAllocatorRange
 }
 
-func NewSubnetAllocator() *SubnetAllocator {
-	return &SubnetAllocator{}
+var _ SubnetAllocator = &BaseSubnetAllocator{}
+
+func NewSubnetAllocator() SubnetAllocator {
+	return &BaseSubnetAllocator{}
 }
 
-func (sna *SubnetAllocator) AddNetworkRange(network *net.IPNet, hostSubnetLen int) error {
+// Usage returns the number of allocated and used IPv4 subnets, and the number
+// of allocated and used IPv6 subnets.
+func (sna *BaseSubnetAllocator) Usage() (uint64, uint64, uint64, uint64) {
+	var v4count, v4used, v6count, v6used uint64
+	for _, snr := range sna.v4ranges {
+		c, u := snr.usage()
+		v4count = v4count + c
+		v4used = v4used + u
+	}
+	for _, snr := range sna.v6ranges {
+		c, u := snr.usage()
+		v6count = v6count + c
+		v6used = v6used + u
+	}
+	return v4count, v4used, v6count, v6used
+}
+
+// AddNetworkRange makes the given range available for allocation and returns
+// the number of IPv4 or IPv6 subnets in the range.
+func (sna *BaseSubnetAllocator) AddNetworkRange(network *net.IPNet, hostSubnetLen int) error {
 	sna.Lock()
 	defer sna.Unlock()
 
@@ -38,25 +72,39 @@ func (sna *SubnetAllocator) AddNetworkRange(network *net.IPNet, hostSubnetLen in
 	return nil
 }
 
-func (sna *SubnetAllocator) MarkAllocatedNetwork(subnet *net.IPNet) error {
+func (sna *BaseSubnetAllocator) MarkAllocatedNetworks(subnets ...*net.IPNet) error {
 	sna.Lock()
 	defer sna.Unlock()
 
-	for _, snr := range sna.v4ranges {
-		if snr.markAllocatedNetwork(subnet) {
-			return nil
+	releaseOnError := make([]*net.IPNet, 0, len(subnets))
+	for i := range subnets {
+		marked := false
+		for _, snr := range sna.v4ranges {
+			if snr.markAllocatedNetwork(subnets[i]) {
+				releaseOnError = append(releaseOnError, subnets[i])
+				marked = true
+				break
+			}
+		}
+		if !marked {
+			for _, snr := range sna.v6ranges {
+				if snr.markAllocatedNetwork(subnets[i]) {
+					releaseOnError = append(releaseOnError, subnets[i])
+					marked = true
+					break
+				}
+			}
+		}
+		if !marked {
+			_ = sna.releaseNetworks(releaseOnError...)
+			return fmt.Errorf("network %s does not belong to any known range", subnets[i].String())
 		}
 	}
-	for _, snr := range sna.v6ranges {
-		if snr.markAllocatedNetwork(subnet) {
-			return nil
-		}
-	}
-	return fmt.Errorf("network %s does not belong to any known range", subnet.String())
+	return nil
 }
 
 // AllocateNetworks tries to allocate networks in all the ranges available
-func (sna *SubnetAllocator) AllocateNetworks() ([]*net.IPNet, error) {
+func (sna *BaseSubnetAllocator) AllocateNetworks() ([]*net.IPNet, error) {
 	var networks []*net.IPNet
 	var err error
 	ipv4network, err := sna.AllocateIPv4Network()
@@ -68,6 +116,10 @@ func (sna *SubnetAllocator) AllocateNetworks() ([]*net.IPNet, error) {
 	}
 	ipv6network, err := sna.AllocateIPv6Network()
 	if err != nil {
+		// Release already allocated networks on error
+		if len(networks) > 0 {
+			_ = sna.ReleaseNetworks(networks...)
+		}
 		return nil, err
 	}
 	if ipv6network != nil {
@@ -77,7 +129,7 @@ func (sna *SubnetAllocator) AllocateNetworks() ([]*net.IPNet, error) {
 }
 
 // AllocateIPv4Network tries to allocate an IPv4 network if there are ranges available
-func (sna *SubnetAllocator) AllocateIPv4Network() (*net.IPNet, error) {
+func (sna *BaseSubnetAllocator) AllocateIPv4Network() (*net.IPNet, error) {
 	sna.Lock()
 	defer sna.Unlock()
 	if len(sna.v4ranges) == 0 {
@@ -93,7 +145,7 @@ func (sna *SubnetAllocator) AllocateIPv4Network() (*net.IPNet, error) {
 }
 
 // AllocateIPv6Network tries to allocate an IPv6 network if there are ranges available
-func (sna *SubnetAllocator) AllocateIPv6Network() (*net.IPNet, error) {
+func (sna *BaseSubnetAllocator) AllocateIPv6Network() (*net.IPNet, error) {
 	sna.Lock()
 	defer sna.Unlock()
 	if len(sna.v6ranges) == 0 {
@@ -108,21 +160,36 @@ func (sna *SubnetAllocator) AllocateIPv6Network() (*net.IPNet, error) {
 	return nil, ErrSubnetAllocatorFull
 }
 
-func (sna *SubnetAllocator) ReleaseNetwork(subnet *net.IPNet) error {
+func (sna *BaseSubnetAllocator) ReleaseNetworks(subnets ...*net.IPNet) error {
 	sna.Lock()
 	defer sna.Unlock()
+	return sna.releaseNetworks(subnets...)
+}
 
-	for _, snr := range sna.v4ranges {
-		if snr.releaseNetwork(subnet) {
-			return nil
+func (sna *BaseSubnetAllocator) releaseNetworks(subnets ...*net.IPNet) error {
+	var errorList []error
+	for _, subnet := range subnets {
+		released := false
+		for _, snr := range sna.v4ranges {
+			if snr.releaseNetwork(subnet) {
+				released = true
+				break
+			}
+		}
+		if !released {
+			for _, snr := range sna.v6ranges {
+				if snr.releaseNetwork(subnet) {
+					released = true
+					break
+				}
+			}
+		}
+		if !released {
+			errorList = append(errorList, fmt.Errorf("network %s does not belong to any known range", subnet.String()))
 		}
 	}
-	for _, snr := range sna.v6ranges {
-		if snr.releaseNetwork(subnet) {
-			return nil
-		}
-	}
-	return fmt.Errorf("network %s does not belong to any known range", subnet.String())
+
+	return utilerrors.NewAggregate(errorList)
 }
 
 // subnetAllocatorRange handles allocating subnets out of a single CIDR
@@ -132,6 +199,7 @@ type subnetAllocatorRange struct {
 	subnetBits uint32
 	next       uint32
 	allocMap   map[string]bool
+	used       uint32
 
 	// IPv4-only address-alignment hackery; see below
 	leftShift  uint32
@@ -189,12 +257,19 @@ func newSubnetAllocatorRange(network *net.IPNet, hostSubnetLen int) (*subnetAllo
 	return snr, nil
 }
 
+// usage returns the number of available subnets and the number of allocated subnets
+func (snr *subnetAllocatorRange) usage() (uint64, uint64) {
+	var one uint64 = 1
+	return one << snr.subnetBits, uint64(snr.used)
+}
+
 // markAllocatedNetwork marks network as being in use, if it is part of snr's range.
 // It returns whether the network was in snr's range.
 func (snr *subnetAllocatorRange) markAllocatedNetwork(network *net.IPNet) bool {
 	str := network.String()
 	if snr.network.Contains(network.IP) {
 		snr.allocMap[str] = true
+		snr.used++
 	}
 	return snr.allocMap[str]
 }
@@ -240,6 +315,7 @@ func (snr *subnetAllocatorRange) allocateNetwork() *net.IPNet {
 		if !snr.allocMap[genSubnet.String()] {
 			snr.allocMap[genSubnet.String()] = true
 			snr.next = n + 1
+			snr.used++
 			return genSubnet
 		}
 	}
@@ -256,5 +332,6 @@ func (snr *subnetAllocatorRange) releaseNetwork(network *net.IPNet) bool {
 	}
 
 	snr.allocMap[network.String()] = false
+	snr.used--
 	return true
 }

@@ -38,7 +38,7 @@ func (oc *Controller) hybridOverlayNodeEnsureSubnet(node *kapi.Node, annotator k
 	}
 
 	if err := annotator.Set(types.HybridOverlayNodeSubnet, hostsubnets[0].String()); err != nil {
-		_ = oc.hybridOverlaySubnetAllocator.ReleaseNetwork(hostsubnets[0])
+		_ = oc.hybridOverlaySubnetAllocator.ReleaseNetworks(hostsubnets[0])
 		return nil, err
 	}
 
@@ -52,7 +52,7 @@ func (oc *Controller) releaseHybridOverlayNodeSubnet(nodeName string, subnet *ne
 		return nil
 	}
 
-	if err := oc.hybridOverlaySubnetAllocator.ReleaseNetwork(subnet); err != nil {
+	if err := oc.hybridOverlaySubnetAllocator.ReleaseNetworks(subnet); err != nil {
 		return fmt.Errorf("error deleting hybrid overlay HostSubnet %s for node %q: %s", subnet, nodeName, err)
 	}
 	klog.Infof("Deleted hybrid overlay HostSubnet %s for node %s", subnet, nodeName)

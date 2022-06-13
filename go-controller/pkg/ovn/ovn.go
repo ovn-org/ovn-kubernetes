@@ -68,8 +68,8 @@ type Controller struct {
 	stopChan     <-chan struct{}
 
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
-	masterSubnetAllocator        *subnetallocator.SubnetAllocator
-	hybridOverlaySubnetAllocator *subnetallocator.SubnetAllocator
+	masterSubnetAllocator        subnetallocator.SubnetAllocator
+	hybridOverlaySubnetAllocator subnetallocator.SubnetAllocator
 
 	SCTPSupport bool
 
@@ -236,7 +236,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 	}
 	svcController, svcFactory := newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient, recorder)
 	egressSvcController := newEgressServiceController(ovnClient.KubeClient, libovsdbOvnNBClient, svcFactory, stopChan)
-	var hybridOverlaySubnetAllocator *subnetallocator.SubnetAllocator
+	var hybridOverlaySubnetAllocator subnetallocator.SubnetAllocator
 	if config.HybridOverlay.Enabled {
 		hybridOverlaySubnetAllocator = subnetallocator.NewSubnetAllocator()
 	}
