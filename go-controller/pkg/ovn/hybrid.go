@@ -32,18 +32,18 @@ func (oc *Controller) hybridOverlayNodeEnsureSubnet(node *kapi.Node, annotator k
 	}
 
 	// Allocate a new host subnet for this node
-	hostsubnets, err := oc.hybridOverlaySubnetAllocator.AllocateNetworks()
+	// FIXME: hybrid overlay is only IPv4 for now due to limitations on the Windows side
+	_, allocatedSubnets, err := oc.hybridOverlaySubnetAllocator.AllocateNodeSubnets(node, true, false)
 	if err != nil {
 		return nil, fmt.Errorf("error allocating hybrid overlay HostSubnet for node %s: %v", node.Name, err)
 	}
 
-	if err := annotator.Set(types.HybridOverlayNodeSubnet, hostsubnets[0].String()); err != nil {
-		_ = oc.hybridOverlaySubnetAllocator.ReleaseNetworks(hostsubnets[0])
+	if err := annotator.Set(types.HybridOverlayNodeSubnet, allocatedSubnets[0].String()); err != nil {
+		_ = oc.hybridOverlaySubnetAllocator.ReleaseNodeSubnets(node.Name, allocatedSubnets...)
 		return nil, err
 	}
 
-	klog.Infof("Allocated hybrid overlay HostSubnet %s for node %s", hostsubnets[0], node.Name)
-	return hostsubnets[0], nil
+	return allocatedSubnets[0], nil
 }
 
 func (oc *Controller) releaseHybridOverlayNodeSubnet(nodeName string, subnet *net.IPNet) error {
@@ -52,7 +52,7 @@ func (oc *Controller) releaseHybridOverlayNodeSubnet(nodeName string, subnet *ne
 		return nil
 	}
 
-	if err := oc.hybridOverlaySubnetAllocator.ReleaseNetworks(subnet); err != nil {
+	if err := oc.hybridOverlaySubnetAllocator.ReleaseNodeSubnets(nodeName, subnet); err != nil {
 		return fmt.Errorf("error deleting hybrid overlay HostSubnet %s for node %q: %s", subnet, nodeName, err)
 	}
 	klog.Infof("Deleted hybrid overlay HostSubnet %s for node %s", subnet, nodeName)
