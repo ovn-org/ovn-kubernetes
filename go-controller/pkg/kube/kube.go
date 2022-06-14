@@ -46,6 +46,7 @@ type Interface interface {
 	CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
 	UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
 	DeleteCloudPrivateIPConfig(name string) error
+	UpdatePod(pod *kapi.Pod) error
 	Events() kv1core.EventInterface
 }
 
@@ -81,6 +82,12 @@ func (k *Kube) SetAnnotationsOnPod(namespace, podName string, annotations map[st
 	if err != nil {
 		klog.Errorf("Error in setting annotation on pod %s: %v", podDesc, err)
 	}
+	return err
+}
+
+// UpdatePod updates the pod with the provided pod data
+func (k *Kube) UpdatePod(pod *kapi.Pod) error {
+	_, err := k.KClient.CoreV1().Pods(pod.Namespace).Update(context.TODO(), pod, metav1.UpdateOptions{})
 	return err
 }
 
