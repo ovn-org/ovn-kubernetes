@@ -24,6 +24,7 @@ should have ipv4 and ipv6 internal node ip
 # TESTS THAT ASSUME KUBE-PROXY
 kube-proxy
 should set TCP CLOSE_WAIT timeout
+\[Feature:ProxyTerminatingEndpoints\]
 
 # not implemented - OVN doesn't support time
 should have session affinity timeout work
