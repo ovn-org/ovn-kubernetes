@@ -95,7 +95,7 @@ func CreateOrUpdateACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 		opModel := operationModel{
 			Model:          acl,
 			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
-			OnModelUpdates: onModelUpdatesAll(),
+			OnModelUpdates: onModelUpdatesAllNonDefault(),
 			ErrNotFound:    false,
 			BulkOp:         false,
 		}

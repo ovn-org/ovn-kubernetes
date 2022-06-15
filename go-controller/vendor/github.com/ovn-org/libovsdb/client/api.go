@@ -29,7 +29,7 @@ type API interface {
 	// Create a ConditionalAPI from a Model's index data or a list of Conditions
 	// where operations apply to elements that match any of the conditions
 	// If no condition is given, it will match the values provided in model.Model according
-	// to the database index.
+	// to the indexes.
 	Where(model.Model, ...model.Condition) ConditionalAPI
 
 	// Create a ConditionalAPI from a Model's index data or a list of Conditions
@@ -147,35 +147,35 @@ func (a api) List(ctx context.Context, result interface{}) error {
 	}
 	i := resultVal.Len()
 
-	for _, row := range tableCache.RowsShallow() {
+	var rows map[string]model.Model
+	if a.cond != nil {
+		rows, err = a.cond.Matches()
+		if err != nil {
+			return err
+		}
+	} else {
+		rows = tableCache.Rows()
+	}
+
+	for _, row := range rows {
 		if i >= resultVal.Cap() {
 			break
 		}
-
-		if a.cond != nil {
-			if matches, err := a.cond.Matches(row); err != nil {
-				return err
-			} else if !matches {
-				continue
-			}
-		}
-		// clone only the models that match the predicate
-		m := model.Clone(row)
-
-		appendValue(reflect.ValueOf(m))
+		appendValue(reflect.ValueOf(row))
 		i++
 	}
+
 	return nil
 }
 
 // Where returns a conditionalAPI based on a Condition list
 func (a api) Where(model model.Model, cond ...model.Condition) ConditionalAPI {
-	return newConditionalAPI(a.cache, a.conditionFromModel(false, model, cond...), a.logger)
+	return newConditionalAPI(a.cache, a.conditionFromModel(false, false, model, cond...), a.logger)
 }
 
 // Where returns a conditionalAPI based on a Condition list
 func (a api) WhereAll(model model.Model, cond ...model.Condition) ConditionalAPI {
-	return newConditionalAPI(a.cache, a.conditionFromModel(true, model, cond...), a.logger)
+	return newConditionalAPI(a.cache, a.conditionFromModel(true, false, model, cond...), a.logger)
 }
 
 // Where returns a conditionalAPI based a Predicate
@@ -199,7 +199,7 @@ func (a api) conditionFromFunc(predicate interface{}) Conditional {
 }
 
 // FromModel returns a Condition from a model and a list of fields
-func (a api) conditionFromModel(any bool, model model.Model, cond ...model.Condition) Conditional {
+func (a api) conditionFromModel(any bool, cache bool, model model.Model, cond ...model.Condition) Conditional {
 	var conditional Conditional
 	var err error
 
@@ -209,13 +209,12 @@ func (a api) conditionFromModel(any bool, model model.Model, cond ...model.Condi
 	}
 
 	if len(cond) == 0 {
-		conditional, err = newEqualityConditional(a.cache.DatabaseModel(), tableName, any, model)
+		conditional, err = newEqualityConditional(tableName, a.cache, model)
 		if err != nil {
 			conditional = newErrorConditional(err)
 		}
-
 	} else {
-		conditional, err = newExplicitConditional(a.cache.DatabaseModel(), tableName, any, model, cond...)
+		conditional, err = newExplicitConditional(tableName, a.cache, any, model, cond...)
 		if err != nil {
 			conditional = newErrorConditional(err)
 		}
@@ -240,7 +239,7 @@ func (a api) Get(ctx context.Context, m model.Model) error {
 		return ErrNotFound
 	}
 
-	found := tableCache.RowByModel(m)
+	_, found := tableCache.RowByModel(m)
 	if found == nil {
 		return ErrNotFound
 	}

@@ -46,14 +46,17 @@ func CreateMeterBandOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, m
 
 // CreateOrUpdateMeterOps creates or updates the provided meter associated to
 // the provided meter bands and returns the corresponding ops
-func CreateOrUpdateMeterOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, meter *nbdb.Meter, meterBands ...*nbdb.MeterBand) ([]ovsdb.Operation, error) {
+func CreateOrUpdateMeterOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, meter *nbdb.Meter, meterBands []*nbdb.MeterBand, fields ...interface{}) ([]ovsdb.Operation, error) {
+	if len(fields) == 0 {
+		fields = onModelUpdatesAllNonDefault()
+	}
 	meter.Bands = make([]string, 0, len(meterBands))
 	for _, band := range meterBands {
 		meter.Bands = append(meter.Bands, band.UUID)
 	}
 	opModel := operationModel{
 		Model:          meter,
-		OnModelUpdates: onModelUpdatesAll(),
+		OnModelUpdates: fields,
 		ErrNotFound:    false,
 		BulkOp:         false,
 	}

@@ -1509,7 +1509,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 								// check old value for iface-id-ver will be updated to pod.UID
 								"iface-id-ver": "wrong_value",
 							},
-							PortSecurity: []string{t1.podMAC, t1.podIP},
+							PortSecurity: []string{fmt.Sprintf("%s %s", t1.podMAC, t1.podIP)},
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID:      t2.portUUID,
@@ -1523,7 +1523,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 								"requested-chassis": t2.nodeName,
 								//"iface-id-ver": is empty to check that it won't be set on update
 							},
-							PortSecurity: []string{t2.podMAC, t2.podIP},
+							PortSecurity: []string{fmt.Sprintf("%s %s", t2.podMAC, t2.podIP)},
 						},
 						&nbdb.LogicalSwitch{
 							Name:  "node1",

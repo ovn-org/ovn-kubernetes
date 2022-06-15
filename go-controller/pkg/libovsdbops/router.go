@@ -47,11 +47,14 @@ func FindLogicalRoutersWithPredicate(nbClient libovsdbclient.Client, p logicalRo
 }
 
 // CreateOrUpdateLogicalRouter creates or updates the provided logical router
-func CreateOrUpdateLogicalRouter(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) error {
+func CreateOrUpdateLogicalRouter(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter, fields ...interface{}) error {
+	if len(fields) == 0 {
+		fields = onModelUpdatesAllNonDefault()
+	}
 	opModel := operationModel{
 		Model:          router,
 		ModelPredicate: func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
-		OnModelUpdates: onModelUpdatesAll(),
+		OnModelUpdates: fields,
 		ErrNotFound:    false,
 		BulkOp:         false,
 	}
@@ -131,7 +134,11 @@ func GetLogicalRouterPort(nbClient libovsdbclient.Client, lrp *nbdb.LogicalRoute
 
 // CreateOrUpdateLogicalRouterPorts creates or updates the provided logical
 // router ports and adds them to the provided logical router
-func CreateOrUpdateLogicalRouterPorts(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter, lrps ...*nbdb.LogicalRouterPort) error {
+func CreateOrUpdateLogicalRouterPorts(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter,
+	lrps []*nbdb.LogicalRouterPort, fields ...interface{}) error {
+	if len(fields) == 0 {
+		fields = onModelUpdatesAllNonDefault()
+	}
 	originalPorts := router.Ports
 	router.Ports = make([]string, 0, len(lrps))
 	opModels := make([]operationModel, 0, len(lrps)+1)
@@ -139,7 +146,7 @@ func CreateOrUpdateLogicalRouterPorts(nbClient libovsdbclient.Client, router *nb
 		lrp := lrps[i]
 		opModel := operationModel{
 			Model:          lrp,
-			OnModelUpdates: onModelUpdatesAll(),
+			OnModelUpdates: fields,
 			DoAfter:        func() { router.Ports = append(router.Ports, lrp.UUID) },
 			ErrNotFound:    false,
 			BulkOp:         false,
@@ -233,16 +240,23 @@ func GetLogicalRouterPolicy(nbClient libovsdbclient.Client, policy *nbdb.Logical
 // policy from the cache based on a given predicate. If it does not exist, it
 // creates the provided logical router policy. If it does, it updates it. The
 // logical router policy is added to the provided logical router.
-func CreateOrUpdateLogicalRouterPolicyWithPredicate(nbClient libovsdbclient.Client, routerName string, lrp *nbdb.LogicalRouterPolicy, p logicalRouterPolicyPredicate) error {
+// fields determines which columns to updated. Passing no fields is assumes
+// all fields need to be updated. Passing a single nil field indicates no fields should be updated.
+// Otherwise a caller may pass as many individual fields as desired to specify which columsn need updating.
+func CreateOrUpdateLogicalRouterPolicyWithPredicate(nbClient libovsdbclient.Client, routerName string, lrp *nbdb.LogicalRouterPolicy, p logicalRouterPolicyPredicate, fields ...interface{}) error {
 	router := &nbdb.LogicalRouter{
 		Name: routerName,
+	}
+
+	if len(fields) == 0 {
+		fields = onModelUpdatesAllNonDefault()
 	}
 
 	opModels := []operationModel{
 		{
 			Model:          lrp,
 			ModelPredicate: p,
-			OnModelUpdates: onModelUpdatesAll(),
+			OnModelUpdates: fields,
 			DoAfter:        func() { router.Policies = []string{lrp.UUID} },
 			ErrNotFound:    false,
 			BulkOp:         false,
@@ -475,7 +489,11 @@ func FindLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Client, 
 // exist, it creates the provided logical router static route. If it does, it
 // updates it. The logical router static route is added to the provided logical
 // router. Returns the corresponding ops
-func CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, routerName string, lrsr *nbdb.LogicalRouterStaticRoute, p logicalRouterStaticRoutePredicate) ([]libovsdb.Operation, error) {
+func CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation,
+	routerName string, lrsr *nbdb.LogicalRouterStaticRoute, p logicalRouterStaticRoutePredicate, fields ...interface{}) ([]libovsdb.Operation, error) {
+	if len(fields) == 0 {
+		fields = onModelUpdatesAllNonDefault()
+	}
 	router := &nbdb.LogicalRouter{
 		Name: routerName,
 	}
@@ -484,7 +502,7 @@ func CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient libovsdbcl
 		{
 			Model:          lrsr,
 			ModelPredicate: p,
-			OnModelUpdates: onModelUpdatesAll(),
+			OnModelUpdates: fields,
 			DoAfter:        func() { router.StaticRoutes = []string{lrsr.UUID} },
 			ErrNotFound:    false,
 			BulkOp:         false,
@@ -507,8 +525,9 @@ func CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient libovsdbcl
 // exist, it creates the provided logical router static route. If it does, it
 // updates it. The logical router static route is added to the provided logical
 // router
-func CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Client, routerName string, lrsr *nbdb.LogicalRouterStaticRoute, p logicalRouterStaticRoutePredicate) error {
-	ops, err := CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient, nil, routerName, lrsr, p)
+func CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Client, routerName string,
+	lrsr *nbdb.LogicalRouterStaticRoute, p logicalRouterStaticRoutePredicate, fields ...interface{}) error {
+	ops, err := CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient, nil, routerName, lrsr, p, fields...)
 	if err != nil {
 		return err
 	}
@@ -589,7 +608,7 @@ func CreateOrUpdateBFDOps(nbClient libovsdbclient.Client, ops []libovsdb.Operati
 		bfd := bfds[i]
 		opModel := operationModel{
 			Model:          bfd,
-			OnModelUpdates: onModelUpdatesAll(),
+			OnModelUpdates: onModelUpdatesAllNonDefault(),
 			ErrNotFound:    false,
 			BulkOp:         false,
 		}
@@ -848,7 +867,7 @@ func CreateOrUpdateNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operat
 		}
 		opModel := operationModel{
 			Model:          inputNat,
-			OnModelUpdates: onModelUpdatesAll(),
+			OnModelUpdates: onModelUpdatesAllNonDefault(),
 			ErrNotFound:    false,
 			BulkOp:         false,
 			DoAfter:        func() { router.Nat = append(router.Nat, inputNat.UUID) },
@@ -972,11 +991,14 @@ func DeleteNATsWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 
 // CreateOrUpdateGatewayChassis creates or updates the provided gateway chassis
 // and sets it to the provided logical router port
-func CreateOrUpdateGatewayChassis(nbClient libovsdbclient.Client, port *nbdb.LogicalRouterPort, chassis *nbdb.GatewayChassis) error {
+func CreateOrUpdateGatewayChassis(nbClient libovsdbclient.Client, port *nbdb.LogicalRouterPort, chassis *nbdb.GatewayChassis, fields ...interface{}) error {
+	if len(fields) == 0 {
+		fields = onModelUpdatesAllNonDefault()
+	}
 	opModels := []operationModel{
 		{
 			Model:          chassis,
-			OnModelUpdates: onModelUpdatesAll(),
+			OnModelUpdates: fields,
 			DoAfter:        func() { port.GatewayChassis = []string{chassis.UUID} },
 			ErrNotFound:    false,
 			BulkOp:         false,

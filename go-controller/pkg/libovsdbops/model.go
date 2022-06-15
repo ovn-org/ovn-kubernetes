@@ -390,3 +390,15 @@ func buildFailOnDuplicateOps(c client.Client, m model.Model) ([]ovsdb.Operation,
 	}
 	return c.Where(m, cond).Wait(ovsdb.WaitConditionNotEqual, &timeout, m, field)
 }
+
+// getAllUpdatableFields returns a list of all of the columns/fields that can be updated for a model
+func getAllUpdatableFields(model model.Model) []interface{} {
+	switch t := model.(type) {
+	case *nbdb.LogicalSwitchPort:
+		return []interface{}{&t.Addresses, &t.Type, &t.TagRequest, &t.Options, &t.PortSecurity}
+	case *nbdb.PortGroup:
+		return []interface{}{&t.ACLs, &t.Ports, &t.ExternalIDs}
+	default:
+		panic(fmt.Sprintf("getAllUpdatableFields: unknown model %T", t))
+	}
+}
