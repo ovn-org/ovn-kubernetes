@@ -45,5 +45,6 @@ require (
 	k8s.io/kubectl v0.24.0 // indirect
 	k8s.io/kubelet v0.24.2 // indirect
 	k8s.io/kubernetes v1.24.0
+	k8s.io/pod-security-admission v0.24.0
 	k8s.io/utils v0.0.0-20220210201930-3a6ce19ff2f9
 )

@@ -38,7 +38,7 @@ var _ = ginkgo.Describe("e2e EgressQoS validation", func() {
 		srcNode     string
 	)
 
-	f := framework.NewDefaultFramework("egressqos")
+	f := newPrivelegedTestFramework("egressqos")
 
 	ginkgo.BeforeEach(func() {
 		clientSet := f.ClientSet
