@@ -522,7 +522,7 @@ func TestSyncServices(t *testing.T) {
 			if tt.nodeToDelete != nil {
 				controller.nodeTracker.removeNode(tt.nodeToDelete.name)
 				g.Expect(controller.syncService(namespacedServiceName(ns, serviceName))).To(gomega.Succeed())
-				g.Eventually(controller.nbClient).Should(libovsdbtest.HaveData(tt.dbStateAfterDeleting))
+				g.Eventually(controller.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(tt.dbStateAfterDeleting))
 			}
 		})
 	}
