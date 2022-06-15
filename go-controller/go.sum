@@ -400,8 +400,6 @@ github.com/openshift/build-machinery-go v0.0.0-20210712174854-1bb7fd1518d3/go.mo
 github.com/openshift/client-go v0.0.0-20211202194848-d3f186f2d366 h1:/llKlbXC7F6rqTkAl2GE//9GDR0iDsqJEFvvJ1kLJXg=
 github.com/openshift/client-go v0.0.0-20211202194848-d3f186f2d366/go.mod h1:HJeHsH6mPyrrOVS/2j1zcztGAJG9ETKbqtlyohs84yY=
 github.com/ory/dockertest/v3 v3.8.0/go.mod h1:9zPATATlWQru+ynXP+DytBQrsXV7Tmlx7K86H6fQaDo=
-github.com/ovn-org/libovsdb v0.6.1-0.20220427123326-d7b273399db4 h1:atUIOA34Cg9GVFn/8rmIsmnOIbi0D82x+xfhV2UuF1Q=
-github.com/ovn-org/libovsdb v0.6.1-0.20220427123326-d7b273399db4/go.mod h1:BQPdnSM2QOKxPwxl7wHJDSPP4B/CDKq3+vzgFW3J5gE=
 github.com/ovn-org/libovsdb v0.6.1-0.20220513144310-50ec17900991 h1:EsMLPWOIRgB9WFTt5+L99LaX4H1Nm6yL2S6zsx4TSzY=
 github.com/ovn-org/libovsdb v0.6.1-0.20220513144310-50ec17900991/go.mod h1:BQPdnSM2QOKxPwxl7wHJDSPP4B/CDKq3+vzgFW3J5gE=
 github.com/ovn-org/libovsdb v0.6.1-0.20220603151050-98c0bad3cff1 h1:ZXVHrW4b7RK/emoqTNL58IWUuK0dD8PVb93fbfh9cMs=
@@ -437,8 +435,9 @@ github.com/prometheus/procfs v0.6.0/go.mod h1:cz+aTbrPOrUb4q7XlbU9ygM+/jj0fzG6c1
 github.com/rogpeppe/go-internal v1.3.0/go.mod h1:M8bDsm7K2OlrFYOpmOWEs/qY81heoFRclV5y23lUDJ4=
 github.com/russross/blackfriday/v2 v2.0.1 h1:lPqVAte+HuHNfhJ/0LC98ESWRz8afy9tM/0RK8m9o+Q=
 github.com/russross/blackfriday/v2 v2.0.1/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
-github.com/safchain/ethtool v0.0.0-20190326074333-42ed695e3de8 h1:2c1EFnZHIPCW8qKWgHMH/fX2PkSabFc5mrVzfUNdg5U=
 github.com/safchain/ethtool v0.0.0-20190326074333-42ed695e3de8/go.mod h1:Z0q5wiBQGYcxhMZ6gUqHn6pYNLypFAvaL3UvgZLR0U4=
+github.com/safchain/ethtool v0.0.0-20210803160452-9aa261dae9b1 h1:ZFfeKAhIQiiOrQaI3/znw0gOmYpO28Tcu1YaqMa/jtQ=
+github.com/safchain/ethtool v0.0.0-20210803160452-9aa261dae9b1/go.mod h1:Z0q5wiBQGYcxhMZ6gUqHn6pYNLypFAvaL3UvgZLR0U4=
 github.com/seccomp/libseccomp-golang v0.9.1/go.mod h1:GbW5+tmTXfcxTToHLXlScSlAvWlF4P2Ca7zGrPiEpWo=
 github.com/sergi/go-diff v1.0.0/go.mod h1:0CfEIISq7TuYL3j771MWULgwwjU+GofnZX9QAmXWZgo=
 github.com/shurcooL/sanitized_anchor_name v1.0.0 h1:PdmoCO6wvbs+7yrJyMORt4/BmY5IYyJwS/kOiWx8mHo=
