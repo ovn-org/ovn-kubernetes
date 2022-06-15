@@ -14,40 +14,40 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-type managementPortDPU struct {
+type managementPortRepresentor struct {
 	nodeName    string
 	hostSubnets []*net.IPNet
-	vfRepName   string
+	repName     string
 }
 
-// newManagementPortDPU creates a new managementPortDPU
-func newManagementPortDPU(nodeName string, hostSubnets []*net.IPNet) ManagementPort {
-	return &managementPortDPU{
+// newManagementPortRepresentor creates a new managementPortRepresentor
+func newManagementPortRepresentor(nodeName string, hostSubnets []*net.IPNet) ManagementPort {
+	return &managementPortRepresentor{
 		nodeName:    nodeName,
 		hostSubnets: hostSubnets,
-		vfRepName:   config.OvnKubeNode.MgmtPortNetdev,
+		repName:     config.OvnKubeNode.MgmtPortNetdev,
 	}
 }
 
-func (mp *managementPortDPU) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
-	// Get management port representor name
-	link, err := util.GetNetLinkOps().LinkByName(mp.vfRepName)
+func (mp *managementPortRepresentor) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
+	// Get management port representor netdevice
+	link, err := util.GetNetLinkOps().LinkByName(mp.repName)
 	if err != nil {
 		// It may fail in case this is not the first run after reboot and management port has already been renamed.
 		link, err = util.GetNetLinkOps().LinkByName(types.K8sMgmtIntfName)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get link device for %s. %v", mp.vfRepName, err)
+			return nil, fmt.Errorf("failed to get link device for %s. %v", mp.repName, err)
 		}
 	}
 
 	// configure management port: rename, set MTU and set link up and connect representor port to br-int
-	klog.Infof("Create management port dpu: %s", link.Attrs().Name)
+	klog.Infof("Create representor management port: %s", link.Attrs().Name)
 	setName := link.Attrs().Name != types.K8sMgmtIntfName
 	setMTU := link.Attrs().MTU != config.Default.MTU
 
 	if setName || setMTU {
 		if err = util.GetNetLinkOps().LinkSetDown(link); err != nil {
-			return nil, fmt.Errorf("failed to set link down for device %s. %v", mp.vfRepName, err)
+			return nil, fmt.Errorf("failed to set link down for device %s. %v", mp.repName, err)
 		}
 
 		if setName {
@@ -56,7 +56,7 @@ func (mp *managementPortDPU) Create(nodeAnnotator kube.Annotator, waiter *startu
 				// ovn-k8s-mp0, this may happen if mgmt-port-netdev changes during deployment. ATM we are
 				// not handling it.
 				// TODO: handle mgmt-port-netdev change.
-				return nil, fmt.Errorf("failed to set link name for device %s. %v", mp.vfRepName, err)
+				return nil, fmt.Errorf("failed to set link name for device %s. %v", mp.repName, err)
 			}
 		}
 
@@ -71,7 +71,7 @@ func (mp *managementPortDPU) Create(nodeAnnotator kube.Annotator, waiter *startu
 		return nil, fmt.Errorf("failed to set link up for device %s. %v", link.Attrs().Name, err)
 	}
 
-	// Plug management port VF representor to OVS.
+	// Plug management port representor to OVS.
 	stdout, stderr, err := util.RunOVSVsctl(
 		"--", "--may-exist", "add-port", "br-int", types.K8sMgmtIntfName,
 		"--", "set", "interface", types.K8sMgmtIntfName,
@@ -95,23 +95,23 @@ func (mp *managementPortDPU) Create(nodeAnnotator kube.Annotator, waiter *startu
 	return mpcfg, nil
 }
 
-func (mp *managementPortDPU) checkRepresentorPortHealth(cfg *managementPortConfig) {
+func (mp *managementPortRepresentor) checkRepresentorPortHealth(cfg *managementPortConfig) {
 	// After host reboot, management port link name changes back to default name.
 	link, err := util.GetNetLinkOps().LinkByName(cfg.ifName)
 	if err != nil {
 		klog.Errorf("Failed to get link device %s, error: %v", cfg.ifName, err)
-		// Get management port representor name
-		link, err := util.GetNetLinkOps().LinkByName(mp.vfRepName)
+		// Get management port representor by name
+		link, err := util.GetNetLinkOps().LinkByName(mp.repName)
 		if err != nil {
-			klog.Errorf("Failed to get link device %s, error: %v", mp.vfRepName, err)
+			klog.Errorf("Failed to get link device %s, error: %v", mp.repName, err)
 			return
 		}
 		if err = util.GetNetLinkOps().LinkSetDown(link); err != nil {
-			klog.Errorf("Failed to set link down for device %s. %v", mp.vfRepName, err)
+			klog.Errorf("Failed to set link down for device %s. %v", mp.repName, err)
 			return
 		}
 		if err = util.GetNetLinkOps().LinkSetName(link, cfg.ifName); err != nil {
-			klog.Errorf("Rename link from %s to %s failed: %v", mp.vfRepName, cfg.ifName, err)
+			klog.Errorf("Rename link from %s to %s failed: %v", mp.repName, cfg.ifName, err)
 			return
 		}
 		if link.Attrs().MTU != config.Default.MTU {
@@ -130,7 +130,7 @@ func (mp *managementPortDPU) checkRepresentorPortHealth(cfg *managementPortConfi
 	}
 }
 
-func (mp *managementPortDPU) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
+func (mp *managementPortRepresentor) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
 	go wait.Until(
 		func() {
 			mp.checkRepresentorPortHealth(cfg)
@@ -139,20 +139,20 @@ func (mp *managementPortDPU) CheckManagementPortHealth(cfg *managementPortConfig
 		stopChan)
 }
 
-type managementPortDPUHost struct {
+type managementPortNetdev struct {
 	hostSubnets []*net.IPNet
 	netdevName  string
 }
 
-// newManagementPortDPUHost creates a new managementPortDPUHost
-func newManagementPortDPUHost(hostSubnets []*net.IPNet) ManagementPort {
-	return &managementPortDPUHost{
+// newManagementPortNetdev creates a new managementPortNetdev
+func newManagementPortNetdev(hostSubnets []*net.IPNet) ManagementPort {
+	return &managementPortNetdev{
 		hostSubnets: hostSubnets,
 		netdevName:  config.OvnKubeNode.MgmtPortNetdev,
 	}
 }
 
-func (mp *managementPortDPUHost) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
+func (mp *managementPortNetdev) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
 	// get Netdev that is used for management port.
 	link, err := util.GetNetLinkOps().LinkByName(mp.netdevName)
 	if err != nil {
@@ -218,7 +218,7 @@ func (mp *managementPortDPUHost) Create(nodeAnnotator kube.Annotator, waiter *st
 	return cfg, nil
 }
 
-func (mp *managementPortDPUHost) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
+func (mp *managementPortNetdev) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
 	go wait.Until(
 		func() {
 			checkManagementPortHealth(cfg)

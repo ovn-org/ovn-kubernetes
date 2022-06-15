@@ -19,15 +19,15 @@ var _ = Describe("Mananagement port tests", func() {
 			mgmtPort := NewManagementPort("worker-node", nil)
 			Expect(reflect.TypeOf(mgmtPort).String()).To(Equal(reflect.TypeOf(&managementPort{}).String()))
 		})
-		It("Creates managementPortDPU for Ovnkube Node mode dpu", func() {
+		It("Creates managementPortRepresentor for Ovnkube Node mode dpu", func() {
 			config.OvnKubeNode.Mode = types.NodeModeDPU
 			mgmtPort := NewManagementPort("worker-node", nil)
-			Expect(reflect.TypeOf(mgmtPort).String()).To(Equal(reflect.TypeOf(&managementPortDPU{}).String()))
+			Expect(reflect.TypeOf(mgmtPort).String()).To(Equal(reflect.TypeOf(&managementPortRepresentor{}).String()))
 		})
-		It("Creates managementPortDPUHost for Ovnkube Node mode dpu-host", func() {
+		It("Creates managementPortNetdev for Ovnkube Node mode dpu-host", func() {
 			config.OvnKubeNode.Mode = types.NodeModeDPUHost
 			mgmtPort := NewManagementPort("worker-node", nil)
-			Expect(reflect.TypeOf(mgmtPort).String()).To(Equal(reflect.TypeOf(&managementPortDPUHost{}).String()))
+			Expect(reflect.TypeOf(mgmtPort).String()).To(Equal(reflect.TypeOf(&managementPortNetdev{}).String()))
 		})
 	})
 })

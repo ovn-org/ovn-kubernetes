@@ -2,10 +2,11 @@ package node
 
 import (
 	"fmt"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"net"
 	"strings"
 	"time"
+
+	"k8s.io/apimachinery/pkg/util/wait"
 
 	"k8s.io/klog/v2"
 
@@ -39,9 +40,9 @@ func NewManagementPort(nodeName string, hostSubnets []*net.IPNet) ManagementPort
 
 	switch config.OvnKubeNode.Mode {
 	case types.NodeModeDPU:
-		return newManagementPortDPU(nodeName, hostSubnets)
+		return newManagementPortRepresentor(nodeName, hostSubnets)
 	case types.NodeModeDPUHost:
-		return newManagementPortDPUHost(hostSubnets)
+		return newManagementPortNetdev(hostSubnets)
 	default:
 		return newManagementPort(nodeName, hostSubnets)
 	}
