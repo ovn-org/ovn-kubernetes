@@ -115,7 +115,12 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 		// is not re-added into the cache. Delete logical switch port anyway.
 		annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 		if err != nil {
-			return fmt.Errorf("unable to unmarshal pod annocations for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+			if util.IsAnnotationNotSetError(err) {
+				// if the annotation doesn’t exist, that’s not an error. It means logical port does not need to be deleted.
+				klog.V(5).Infof("No annotations on pod %s/%s, no need to delete its logical port: %s", pod.Namespace, pod.Name, logicalPort)
+				return nil
+			}
+			return fmt.Errorf("unable to unmarshal pod annotations for pod %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
 		podIfAddrs = annotation.IPs
 	} else {
