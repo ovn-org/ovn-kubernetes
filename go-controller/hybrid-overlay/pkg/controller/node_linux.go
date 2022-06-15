@@ -13,6 +13,7 @@ import (
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -23,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
 	listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 )
 
@@ -55,6 +57,65 @@ type NodeController struct {
 	flowChan chan struct{}
 
 	nodeLister listers.NodeLister
+}
+
+// NewNode Returns a new Node
+func NewNode(
+	kube kube.Interface,
+	nodeName string,
+	nodeInformer cache.SharedIndexInformer,
+	podInformer cache.SharedIndexInformer,
+	eventHandlerCreateFunction informer.EventHandlerCreateFunction,
+) (*Node, error) {
+
+	nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
+
+	controller, err := newNodeController(kube, nodeName, nodeLister)
+	if err != nil {
+		return nil, err
+	}
+	n := &Node{controller: controller}
+	n.nodeEventHandler = eventHandlerCreateFunction("node", nodeInformer,
+		func(obj interface{}) error {
+			node, ok := obj.(*kapi.Node)
+			if !ok {
+				return fmt.Errorf("object is not a node")
+			}
+			return n.controller.AddNode(node)
+		},
+		func(obj interface{}) error {
+			node, ok := obj.(*kapi.Node)
+			if !ok {
+				return fmt.Errorf("object is not a node")
+			}
+			return n.controller.DeleteNode(node)
+		},
+		nodeChanged,
+	)
+	n.podEventHandler = eventHandlerCreateFunction("pod", podInformer,
+		func(obj interface{}) error {
+			pod, ok := obj.(*kapi.Pod)
+			if !ok {
+				return fmt.Errorf("object is not a pod")
+			}
+			if pod.Spec.NodeName != nodeName {
+				return nil
+			}
+			return n.controller.AddPod(pod)
+		},
+		func(obj interface{}) error {
+			pod, ok := obj.(*kapi.Pod)
+			if !ok {
+				return fmt.Errorf("object is not a pod")
+			}
+			if pod.Spec.NodeName != nodeName {
+				return nil
+			}
+			return n.controller.DeletePod(pod)
+		},
+		podChanged,
+	)
+	return n, nil
 }
 
 // newNodeController returns a node handler that listens for node events

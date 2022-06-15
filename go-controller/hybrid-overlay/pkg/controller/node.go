@@ -79,18 +79,17 @@ func podChanged(old, new interface{}) bool {
 	return false
 }
 
-// NewNode Returns a new Node
-func NewNode(
+// NewHONode Returns a new HO Node
+func NewHONode(
 	kube kube.Interface,
 	nodeName string,
 	nodeInformer cache.SharedIndexInformer,
 	podInformer cache.SharedIndexInformer,
 	eventHandlerCreateFunction informer.EventHandlerCreateFunction,
 ) (*Node, error) {
-
 	nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
 
-	controller, err := newNodeController(kube, nodeName, nodeLister)
+	controller, err := newHONodeController(kube, nodeName, nodeLister)
 	if err != nil {
 		return nil, err
 	}

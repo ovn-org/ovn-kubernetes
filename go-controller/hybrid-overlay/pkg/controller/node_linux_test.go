@@ -247,7 +247,7 @@ func addEnsureHybridOverlayBridgeMocks(nlMock *mocks.NetLinkOps) {
 	ovntest.ProcessMockFnList(&nlMock.Mock, nlMocks)
 }
 
-var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
+var _ = Describe("Non-Hybrid Overlay Node Linux Operations", func() {
 	var (
 		app        *cli.App
 		fexec      *ovntest.FakeExec

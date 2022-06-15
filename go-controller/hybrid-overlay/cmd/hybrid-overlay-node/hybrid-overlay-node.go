@@ -108,7 +108,7 @@ func runHybridOverlay(ctx *cli.Context) error {
 	defer close(stopChan)
 	f := informers.NewSharedInformerFactory(clientset, informer.DefaultResyncInterval)
 
-	n, err := controller.NewNode(
+	n, err := controller.NewHONode(
 		&kube.Kube{KClient: clientset},
 		nodeName,
 		f.Core().V1().Nodes().Informer(),
