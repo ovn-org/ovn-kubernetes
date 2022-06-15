@@ -8,6 +8,8 @@ import (
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 )
 
+const testNodeName string = "test"
+
 func newSubnetAllocator(clusterCIDR string, hostSubnetLen int) (SubnetAllocator, error) {
 	sna := NewSubnetAllocator()
 	return sna, sna.AddNetworkRange(ovntest.MustParseIPNet(clusterCIDR), hostSubnetLen)
@@ -21,8 +23,8 @@ func networkID(n int) string {
 	}
 }
 
-func allocateOneNetwork(sna SubnetAllocator) (*net.IPNet, error) {
-	sns, err := sna.AllocateNetworks()
+func allocateOneNetwork(sna SubnetAllocator, owner string) (*net.IPNet, error) {
+	sns, err := sna.AllocateNetworks(owner)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +40,7 @@ func allocateExpected(sna SubnetAllocator, n int, expected ...string) error {
 		expected[i] = ovntest.MustParseIPNet(str).String()
 	}
 
-	sns, err := sna.AllocateNetworks()
+	sns, err := sna.AllocateNetworks(testNodeName)
 	if err != nil {
 		return fmt.Errorf("failed to allocate %s (%s): %v", networkID(n), expected, err)
 	}
@@ -54,7 +56,7 @@ func allocateExpected(sna SubnetAllocator, n int, expected ...string) error {
 }
 
 func allocateNotExpected(sna SubnetAllocator, n int) error {
-	if sns, err := sna.AllocateNetworks(); err == nil {
+	if sns, err := sna.AllocateNetworks(testNodeName); err == nil {
 		return fmt.Errorf("unexpectedly succeeded in allocating %s (sns=%v)", networkID(n), sns)
 	} else if err != ErrSubnetAllocatorFull {
 		return fmt.Errorf("returned error was not ErrSubnetAllocatorFull (%v)", err)
@@ -333,30 +335,103 @@ func TestMarkAllocatedNetwork(t *testing.T) {
 
 	allocSubnets := make([]*net.IPNet, 4)
 	for i := 0; i < 4; i++ {
-		if allocSubnets[i], err = allocateOneNetwork(sna); err != nil {
+		if allocSubnets[i], err = allocateOneNetwork(sna, testNodeName); err != nil {
 			t.Fatal("Failed to allocate network: ", err)
 		}
 	}
 
-	if sn, err := allocateOneNetwork(sna); err == nil {
+	if sn, err := allocateOneNetwork(sna, testNodeName); err == nil {
 		t.Fatalf("Unexpectedly succeeded in allocating network (sn=%s)", sn.String())
 	}
-	if err := sna.ReleaseNetworks(allocSubnets[2]); err != nil {
+	if err := sna.ReleaseNetworks(testNodeName, allocSubnets[2]); err != nil {
 		t.Fatalf("Failed to release the subnet (allocSubnets[2]=%s): %v", allocSubnets[2].String(), err)
 	}
 	for i := 0; i < 2; i++ {
-		if err := sna.MarkAllocatedNetworks(allocSubnets[2]); err != nil {
+		if err := sna.MarkAllocatedNetworks(testNodeName, allocSubnets[2]); err != nil {
 			t.Fatalf("Failed to mark allocated subnet (allocSubnets[2]=%s): %v", allocSubnets[2].String(), err)
 		}
 	}
-	if sn, err := allocateOneNetwork(sna); err == nil {
+	if sn, err := allocateOneNetwork(sna, testNodeName); err == nil {
 		t.Fatalf("Unexpectedly succeeded in allocating network (sn=%s)", sn.String())
 	}
 
 	// Test subnet that does not belong to network
 	subnet := ovntest.MustParseIPNet("10.2.3.0/24")
-	if err := sna.MarkAllocatedNetworks(subnet); err == nil {
+	if err := sna.MarkAllocatedNetworks(testNodeName, subnet); err == nil {
 		t.Fatalf("Unexpectedly succeeded in marking allocated subnet that doesn't belong to network (sn=%s)", subnet.String())
+	}
+}
+
+func TestMarkAllocatedNetworkDifferentOwner(t *testing.T) {
+	sna, err := newSubnetAllocator("10.1.0.0/16", 18)
+	if err != nil {
+		t.Fatal("Failed to initialize subnet allocator: ", err)
+	}
+
+	allocSubnets := make([]*net.IPNet, 4)
+	for i := 0; i < 4; i++ {
+		if allocSubnets[i], err = allocateOneNetwork(sna, testNodeName); err != nil {
+			t.Fatal("Failed to allocate network: ", err)
+		}
+	}
+	if err := sna.ReleaseNetworks(testNodeName, allocSubnets[2]); err != nil {
+		t.Fatalf("Failed to release the subnet (allocSubnets[2]=%s): %v", allocSubnets[2].String(), err)
+	}
+
+	// Try to reserve two subnets, only one of which should be free
+	if err := sna.MarkAllocatedNetworks("thief", allocSubnets[2], allocSubnets[3]); err == nil {
+		t.Fatalf("Unexpectedly succeeded in marking already allocated subnets (sn[2]=%s, sn[3]=%s)",
+			allocSubnets[2].String(), allocSubnets[3].String())
+	}
+
+	// Ensure that the first requested subnet [2] was not allocated by attempting to
+	// mark it with a 3rd owner, which should succeed
+	if err := sna.MarkAllocatedNetworks("blah", allocSubnets[2]); err != nil {
+		t.Fatalf("Failed to mark allocated subnet (sn[2]=%s): %v", allocSubnets[2].String(), err)
+	}
+	// Undo the test allocation and original conflicting allocation
+	if err := sna.ReleaseNetworks("blah", allocSubnets[2]); err != nil {
+		t.Fatalf("Failed to release the subnet (allocSubnets[2]=%s): %v",
+			allocSubnets[2].String(), err)
+	}
+	if err := sna.ReleaseNetworks(testNodeName, allocSubnets[3]); err != nil {
+		t.Fatalf("Failed to release the subnet (allocSubnets[3]=%s): %v",
+			allocSubnets[3].String(), err)
+	}
+
+	// Try again
+	if err := sna.MarkAllocatedNetworks("thief", allocSubnets[2], allocSubnets[3]); err != nil {
+		t.Fatalf("Failed to mark allocated subnet (sn[2]=%s, sn[3]=%s): %v",
+			allocSubnets[2].String(), allocSubnets[3].String(), err)
+	}
+}
+
+func TestReleaseNetworks(t *testing.T) {
+	sna, err := newSubnetAllocator("10.1.0.0/16", 18)
+	if err != nil {
+		t.Fatal("Failed to initialize subnet allocator: ", err)
+	}
+
+	// Allocate and release for one node
+	sn, err := allocateOneNetwork(sna, testNodeName)
+	if err != nil {
+		t.Fatal("Failed to allocate network: ", err)
+	}
+	if err := sna.ReleaseNetworks(testNodeName, sn); err != nil {
+		t.Fatalf("Failed to release the subnet (allocSubnets[2]=%s): %v", sn.String(), err)
+	}
+
+	// Allocate but try to release from another owner
+	sn, err = allocateOneNetwork(sna, testNodeName)
+	if err != nil {
+		t.Fatal("Failed to allocate network: ", err)
+	}
+	if err := sna.ReleaseNetworks("thief", sn); err == nil {
+		t.Fatalf("Unexpectedly able to release other network %s", sn.String())
+	}
+	// Verify it's still allocated by original owner
+	if err := sna.MarkAllocatedNetworks("thief", sn); err == nil {
+		t.Fatalf("Unexpectedly able to mark other network %s", sn.String())
 	}
 }
 
@@ -369,7 +444,7 @@ func TestAllocateReleaseSubnet(t *testing.T) {
 	var releaseSn *net.IPNet
 
 	for i := 0; i < 4; i++ {
-		sn, err := allocateOneNetwork(sna)
+		sn, err := allocateOneNetwork(sna, testNodeName)
 		if err != nil {
 			t.Fatal("Failed to allocate network: ", err)
 		}
@@ -381,16 +456,16 @@ func TestAllocateReleaseSubnet(t *testing.T) {
 		}
 	}
 
-	sn, err := allocateOneNetwork(sna)
+	sn, err := allocateOneNetwork(sna, testNodeName)
 	if err == nil {
 		t.Fatalf("Unexpectedly succeeded in allocating network (sn=%s)", sn.String())
 	}
 
-	if err := sna.ReleaseNetworks(releaseSn); err != nil {
+	if err := sna.ReleaseNetworks(testNodeName, releaseSn); err != nil {
 		t.Fatalf("Failed to release the subnet (releaseSn=%s): %v", releaseSn, err)
 	}
 
-	sn, err = allocateOneNetwork(sna)
+	sn, err = allocateOneNetwork(sna, testNodeName)
 	if err != nil {
 		t.Fatal("Failed to allocate network: ", err)
 	}
@@ -398,7 +473,7 @@ func TestAllocateReleaseSubnet(t *testing.T) {
 		t.Fatalf("Did not get expected subnet (sn=%s)", sn.String())
 	}
 
-	sn, err = allocateOneNetwork(sna)
+	sn, err = allocateOneNetwork(sna, testNodeName)
 	if err == nil {
 		t.Fatalf("Unexpectedly succeeded in allocating network (sn=%s)", sn.String())
 	}
@@ -430,7 +505,7 @@ func TestMultipleSubnets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := sna.ReleaseNetworks(
+	if err := sna.ReleaseNetworks(testNodeName,
 		ovntest.MustParseIPNet("10.1.128.0/18"),
 		ovntest.MustParseIPNet("10.2.128.0/18"),
 	); err != nil {
@@ -484,7 +559,7 @@ func TestDualStack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := sna.ReleaseNetworks(
+	if err := sna.ReleaseNetworks(testNodeName,
 		ovntest.MustParseIPNet("10.1.128.0/18"),
 		ovntest.MustParseIPNet("fd01:0:0:3::/64"),
 		ovntest.MustParseIPNet("10.2.128.0/18"),

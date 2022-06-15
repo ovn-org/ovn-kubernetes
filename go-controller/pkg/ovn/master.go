@@ -819,7 +819,13 @@ func (oc *Controller) updateNodeAnnotationWithRetry(nodeName string, hostSubnets
 }
 
 func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
-	hostSubnets, allocatedSubnets, err := oc.masterSubnetAllocator.AllocateNodeSubnets(node, config.IPv4Mode, config.IPv6Mode)
+	existingSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+	if err != nil && !util.IsAnnotationNotSetError(err) {
+		// Log the error and try to allocate new subnets
+		klog.Infof("Failed to get node %s host subnets annotations: %v", node.Name, err)
+	}
+
+	hostSubnets, allocatedSubnets, err := oc.masterSubnetAllocator.AllocateNodeSubnets(node.Name, existingSubnets, config.IPv4Mode, config.IPv6Mode)
 	if err != nil {
 		return nil, err
 	}
@@ -925,10 +931,8 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	return nil
 }
 
-func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet) error {
-	if err := oc.masterSubnetAllocator.ReleaseNodeSubnets(nodeName, hostSubnets...); err != nil {
-		return fmt.Errorf("error releasing node %s subnets: %v", nodeName, err)
-	}
+func (oc *Controller) deleteNode(nodeName string) error {
+	oc.masterSubnetAllocator.ReleaseAllNodeSubnets(nodeName)
 
 	if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
 		return fmt.Errorf("error deleting node %s logical network: %v", nodeName, err)
@@ -1089,42 +1093,11 @@ func (oc *Controller) syncNodes(nodes []interface{}) error {
 	if err != nil {
 		return fmt.Errorf("failed to get node logical switches which have other-config set: %v", err)
 	}
-	if len(nodeSwitches) == 0 {
-		klog.Warning("Did not find any logical switches with other-config")
-	}
-
 	for _, nodeSwitch := range nodeSwitches {
-		if foundNodes.Has(nodeSwitch.Name) {
-			// node still exists, no cleanup to do
-			continue
-		}
-
-		var subnets []*net.IPNet
-		for key, value := range nodeSwitch.OtherConfig {
-			var subnet *net.IPNet
-			if key == "subnet" {
-				_, subnet, err = net.ParseCIDR(value)
-				if err != nil {
-					klog.Warningf("Unable to parse subnet CIDR %v", value)
-					continue
-				}
-			} else if key == "ipv6_prefix" {
-				_, subnet, err = net.ParseCIDR(value + "/64")
-				if err != nil {
-					klog.Warningf("Unable to parse ipv6_prefix CIDR %v/64", value)
-					continue
-				}
+		if !foundNodes.Has(nodeSwitch.Name) {
+			if err := oc.deleteNode(nodeSwitch.Name); err != nil {
+				return fmt.Errorf("failed to delete node:%s, err:%v", nodeSwitch.Name, err)
 			}
-			if subnet != nil {
-				subnets = append(subnets, subnet)
-			}
-		}
-		if len(subnets) == 0 {
-			continue
-		}
-
-		if err := oc.deleteNode(nodeSwitch.Name, subnets); err != nil {
-			return fmt.Errorf("failed to delete node:%s, err:%v", nodeSwitch.Name, err)
 		}
 	}
 
@@ -1191,15 +1164,11 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 		}
 		if config.HybridOverlay.Enabled && houtil.IsHybridOverlayNode(node) {
 			annotator := kube.NewNodeAnnotator(oc.kube, node.Name)
-			allocatedSubnet, err := oc.hybridOverlayNodeEnsureSubnet(node, annotator)
-			if err != nil {
+			if _, err := oc.hybridOverlayNodeEnsureSubnet(node, annotator); err != nil {
 				return fmt.Errorf("failed to update node %s hybrid overlay subnet annotation: %v", node.Name, err)
 			}
 			if err := annotator.Run(); err != nil {
-				// Release allocated subnet if any errors occurred
-				if allocatedSubnet != nil {
-					_ = oc.releaseHybridOverlayNodeSubnet(node.Name, allocatedSubnet)
-				}
+				oc.releaseHybridOverlayNodeSubnet(node.Name)
 				return fmt.Errorf(" failed to set hybrid overlay annotations for node %s: %v", node.Name, err)
 			}
 		}
@@ -1317,11 +1286,7 @@ func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
 		"various caches", node.Name)
 
 	if config.HybridOverlay.Enabled {
-		if subnet, _ := houtil.ParseHybridOverlayHostSubnet(node); subnet != nil {
-			if err := oc.releaseHybridOverlayNodeSubnet(node.Name, subnet); err != nil {
-				return err
-			}
-		}
+		oc.releaseHybridOverlayNodeSubnet(node.Name)
 		if _, ok := node.Annotations[hotypes.HybridOverlayDRMAC]; ok && !houtil.IsHybridOverlayNode(node) {
 			oc.deleteHybridOverlayPort(node)
 		}
@@ -1329,8 +1294,7 @@ func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
 			return err
 		}
 	}
-	nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
-	if err := oc.deleteNode(node.Name, nodeSubnets); err != nil {
+	if err := oc.deleteNode(node.Name); err != nil {
 		return err
 	}
 	oc.lsManager.DeleteNode(node.Name)

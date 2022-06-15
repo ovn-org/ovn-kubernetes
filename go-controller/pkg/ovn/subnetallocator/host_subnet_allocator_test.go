@@ -8,9 +8,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	kapi "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func rangesFromStrings(ranges []string, networkLens []int) ([]config.CIDRNetworkEntry, error) {
@@ -35,7 +32,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 		networkLens   []int
 		configIPv4    bool
 		configIPv6    bool
-		node          *kapi.Node
+		existingNets  []*net.IPNet
 		// to be converted during the test to []*net.IPNet
 		wantStr   []string
 		allocated int
@@ -47,15 +44,10 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			networkLens:   []int{24},
 			configIPv4:    true,
 			configIPv6:    false,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "testnode",
-					Annotations: map[string]string{},
-				},
-			},
-			wantStr:   []string{"172.16.0.0/24"},
-			allocated: 1,
-			wantErr:   false,
+			existingNets:  nil,
+			wantStr:       []string{"172.16.0.0/24"},
+			allocated:     1,
+			wantErr:       false,
 		},
 		{
 			name:          "new node, IPv6 only cluster",
@@ -63,15 +55,10 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			networkLens:   []int{64},
 			configIPv4:    false,
 			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "testnode",
-					Annotations: map[string]string{},
-				},
-			},
-			wantStr:   []string{"2001:db2::/64"},
-			allocated: 1,
-			wantErr:   false,
+			existingNets:  nil,
+			wantStr:       []string{"2001:db2::/64"},
+			allocated:     1,
+			wantErr:       false,
 		},
 		{
 			name:          "existing annotated node, IPv4 only cluster",
@@ -79,34 +66,21 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			networkLens:   []int{24},
 			configIPv4:    true,
 			configIPv6:    false,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": "172.16.8.0/24"}`,
-					},
-				},
-			},
-			wantStr:   []string{"172.16.8.0/24"},
-			allocated: 0,
-			wantErr:   false,
+			existingNets:  ovntest.MustParseIPNets("172.16.8.0/24"),
+			wantStr:       []string{"172.16.8.0/24"},
+			allocated:     0,
+			wantErr:       false,
 		},
 		{
 			name:          "existing annotated node, IPv6 only cluster",
-			networkRanges: []string{"2001:db2::/56"},
+			networkRanges: []string{"2001:db2::/32"},
 			networkLens:   []int{64},
 			configIPv4:    false,
 			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": "2001:db2:1:2:3:4::/64"}`,
-					}},
-			},
-			wantStr:   []string{"2001:db2:1:2:3:4::/64"},
-			allocated: 0,
-			wantErr:   false,
+			existingNets:  ovntest.MustParseIPNets("2001:db2:1::/64"),
+			wantStr:       []string{"2001:db2:1::/64"},
+			allocated:     0,
+			wantErr:       false,
 		},
 		{
 			name:          "new node, dual stack cluster",
@@ -114,33 +88,21 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			networkLens:   []int{24, 24},
 			configIPv4:    true,
 			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "testnode",
-					Annotations: map[string]string{},
-				},
-			},
-			wantStr:   []string{"172.16.0.0/24", "2000::/24"},
-			allocated: 2,
-			wantErr:   false,
+			existingNets:  nil,
+			wantStr:       []string{"172.16.0.0/24", "2000::/24"},
+			allocated:     2,
+			wantErr:       false,
 		},
 		{
-			name:          "annotated node, dual stack cluster",
+			name:          "existing annotated node, dual stack cluster",
 			networkRanges: []string{"172.16.0.0/16", "2000::/12"},
 			networkLens:   []int{24, 24},
 			configIPv4:    true,
 			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": ["172.16.5.0/24","2000:2::/24"]}`,
-					},
-				},
-			},
-			wantStr:   []string{"172.16.5.0/24", "2000:2::/24"},
-			allocated: 0,
-			wantErr:   false,
+			existingNets:  ovntest.MustParseIPNets("172.16.5.0/24", "2000::/24"),
+			wantStr:       []string{"172.16.5.0/24", "2000::/24"},
+			allocated:     0,
+			wantErr:       false,
 		},
 		{
 			name:          "single IPv4 to dual stack cluster",
@@ -148,35 +110,21 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			networkLens:   []int{24, 24},
 			configIPv4:    true,
 			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": "172.16.5.0/24"}`,
-					},
-				},
-			},
-			wantStr:   []string{"172.16.5.0/24", "2000::/24"},
-			allocated: 1,
-			wantErr:   false,
+			existingNets:  ovntest.MustParseIPNets("172.16.5.0/24"),
+			wantStr:       []string{"172.16.5.0/24", "2000::/24"},
+			allocated:     1,
+			wantErr:       false,
 		},
 		{
 			name:          "single IPv6 to dual stack cluster",
-			networkRanges: []string{"172.16.0.0/16", "2000:1::/12"},
-			networkLens:   []int{24, 24},
+			networkRanges: []string{"172.16.0.0/16", "2000::/16"},
+			networkLens:   []int{24, 32},
 			configIPv4:    true,
 			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": "2000:1::/24"}`,
-					},
-				},
-			},
-			wantStr:   []string{"2000::/24", "172.16.0.0/24"},
-			allocated: 1,
-			wantErr:   false,
+			existingNets:  ovntest.MustParseIPNets("2000:1::/32"),
+			wantStr:       []string{"2000:1::/32", "172.16.0.0/24"},
+			allocated:     1,
+			wantErr:       false,
 		},
 		{
 			name:          "dual stack cluster to single IPv4",
@@ -184,35 +132,21 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			networkLens:   []int{24},
 			configIPv4:    true,
 			configIPv6:    false,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": ["172.16.5.0/24","2000:2::/24"]}`,
-					},
-				},
-			},
-			wantStr:   []string{"172.16.5.0/24"},
-			allocated: 0,
-			wantErr:   false,
+			existingNets:  ovntest.MustParseIPNets("172.16.5.0/24", "2000:2::/24"),
+			wantStr:       []string{"172.16.5.0/24"},
+			allocated:     0,
+			wantErr:       false,
 		},
 		{
 			name:          "dual stack cluster to single IPv6",
-			networkRanges: []string{"2001:db2::/56"},
+			networkRanges: []string{"2001:db2:1::/56"},
 			networkLens:   []int{64},
 			configIPv4:    false,
 			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": ["172.16.5.0/24","2001:db2:1:2:3:4::/64"]}`,
-					},
-				},
-			},
-			wantStr:   []string{"2001:db2:1:2:3:4::/64"},
-			allocated: 0,
-			wantErr:   false,
+			existingNets:  ovntest.MustParseIPNets("172.16.5.0/24", "2001:db2:1:2::/64"),
+			wantStr:       []string{"2001:db2:1:2::/64"},
+			allocated:     0,
+			wantErr:       false,
 		},
 		{
 			name:          "new node, OVN wrong configuration: IPv4 only cluster but IPv6 range",
@@ -220,15 +154,30 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			networkLens:   []int{112},
 			configIPv4:    true,
 			configIPv6:    false,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "testnode",
-					Annotations: map[string]string{},
-				},
-			},
-			wantStr:   nil,
-			allocated: 0,
-			wantErr:   true,
+			existingNets:  nil,
+			wantStr:       nil,
+			allocated:     0,
+			wantErr:       true,
+		},
+		{
+			name:          "existing annotated node outside cluster CIDR",
+			networkRanges: []string{"172.16.0.0/16"},
+			networkLens:   []int{24},
+			configIPv4:    true,
+			configIPv6:    false,
+			existingNets:  ovntest.MustParseIPNets("10.1.0.0/24"),
+			wantStr:       []string{"172.16.0.0/24"},
+			allocated:     1,
+		},
+		{
+			name:          "existing annotated node with too many subnets",
+			networkRanges: []string{"172.16.0.0/16", "2001:db2:1::/56"},
+			networkLens:   []int{24, 64},
+			configIPv4:    true,
+			configIPv6:    true,
+			existingNets:  ovntest.MustParseIPNets("172.16.0.0/24", "172.16.1.0/24", "2001:db2:1:2::/64", "2001:db2:1:3::/64"),
+			wantStr:       []string{"172.16.0.0/24", "2001:db2:1:2::/64"},
+			allocated:     0,
 		},
 	}
 
@@ -245,7 +194,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			}
 
 			// test network allocation works correctly
-			got, allocated, err := sna.AllocateNodeSubnets(tt.node, tt.configIPv4, tt.configIPv6)
+			got, allocated, err := sna.AllocateNodeSubnets("testnode", tt.existingNets, tt.configIPv4, tt.configIPv6)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Controller.addNode() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -270,13 +219,6 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 }
 
 func TestController_allocateNodeSubnets_ReleaseOnError(t *testing.T) {
-	node := &v1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        "testnode",
-			Annotations: map[string]string{},
-		},
-	}
-
 	ranges, err := rangesFromStrings([]string{"172.16.0.0/16", "2000::/127"}, []int{24, 127})
 	if err != nil {
 		t.Fatal(err)
@@ -293,7 +235,7 @@ func TestController_allocateNodeSubnets_ReleaseOnError(t *testing.T) {
 
 	// test network allocation works correctly
 	_, v4usedBefore, _, v6usedBefore := sna.base.Usage()
-	got, allocated, err := sna.AllocateNodeSubnets(node, true, true)
+	got, allocated, err := sna.AllocateNodeSubnets("testNode", nil, true, true)
 	if err == nil {
 		t.Fatalf("AllocateNodeSubnets() expected error but got success")
 	}
@@ -310,5 +252,124 @@ func TestController_allocateNodeSubnets_ReleaseOnError(t *testing.T) {
 	}
 	if v6usedAfter != v6usedBefore {
 		t.Fatalf("Expected %d v6 allocated subnets, but got %d", v6usedBefore, v6usedAfter)
+	}
+}
+
+func ipnetStringsToSlice(strings []string) ([]*net.IPNet, error) {
+	slice := make([]*net.IPNet, 0, len(strings))
+	for _, s := range strings {
+		_, subnet, err := net.ParseCIDR(s)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing subnet %s", s)
+		}
+		slice = append(slice, subnet)
+	}
+	return slice, nil
+}
+
+func TestController_markSubnetsAllocated(t *testing.T) {
+	tests := []struct {
+		name          string
+		networkRanges []string
+		networkLens   []int
+		markedSubnets []string
+		secondSubnets []string
+		wantErr       bool
+	}{
+		{
+			name:          "IPv4 no conflict",
+			networkRanges: []string{"172.16.0.0/16"},
+			networkLens:   []int{24},
+			markedSubnets: []string{"172.16.0.0/24"},
+			secondSubnets: []string{"172.16.1.0/24"},
+			wantErr:       false,
+		},
+		{
+			name:          "IPv4 conflict",
+			networkRanges: []string{"172.16.0.0/16"},
+			networkLens:   []int{24},
+			markedSubnets: []string{"172.16.0.0/24"},
+			secondSubnets: []string{"172.16.0.0/24"},
+			wantErr:       true,
+		},
+		{
+			name:          "IPv6 no conflict",
+			networkRanges: []string{"2001:db2::/56"},
+			networkLens:   []int{64},
+			markedSubnets: []string{"2001:db2:0:1::/64"},
+			secondSubnets: []string{"2001:db2:0:2::/64"},
+			wantErr:       false,
+		},
+		{
+			name:          "IPv6 conflict",
+			networkRanges: []string{"2001:db2::/56"},
+			networkLens:   []int{64},
+			markedSubnets: []string{"2001:db2::/64"},
+			secondSubnets: []string{"2001:db2::/64"},
+			wantErr:       true,
+		},
+		{
+			name:          "dual-stack no conflict",
+			networkRanges: []string{"2001:db2::/56", "172.16.0.0/16"},
+			networkLens:   []int{64, 24},
+			markedSubnets: []string{"2001:db2:0:1::/64", "172.16.0.0/24"},
+			secondSubnets: []string{"2001:db2:0:2::/64", "172.16.1.0/24"},
+			wantErr:       false,
+		},
+		{
+			name:          "dual-stack v4 conflict",
+			networkRanges: []string{"2001:db2::/56", "172.16.0.0/16"},
+			networkLens:   []int{64, 24},
+			markedSubnets: []string{"2001:db2:0:1::/64", "172.16.0.0/24"},
+			secondSubnets: []string{"2001:db2:0:2::/64", "172.16.0.0/24"},
+			wantErr:       true,
+		},
+		{
+			name:          "dual-stack v6 conflict",
+			networkRanges: []string{"2001:db2::/56", "172.16.0.0/16"},
+			networkLens:   []int{64, 24},
+			markedSubnets: []string{"2001:db2:0:1::/64", "172.16.0.0/24"},
+			secondSubnets: []string{"2001:db2:0:1::/64", "172.16.1.0/24"},
+			wantErr:       true,
+		},
+		{
+			name:          "dual-stack both conflict",
+			networkRanges: []string{"2001:db2::/56", "172.16.0.0/16"},
+			networkLens:   []int{64, 24},
+			markedSubnets: []string{"2001:db2:0:1::/64", "172.16.0.0/24"},
+			secondSubnets: []string{"2001:db2:0:1::/64", "172.16.0.0/24"},
+			wantErr:       true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sna := NewHostSubnetAllocator()
+
+			ranges, err := rangesFromStrings(tt.networkRanges, tt.networkLens)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := sna.InitRanges(ranges); err != nil {
+				t.Fatalf("Failed to initialize network ranges: %v", err)
+			}
+
+			subnets, err := ipnetStringsToSlice(tt.markedSubnets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := sna.MarkSubnetsAllocated("node1", subnets...); err != nil {
+				t.Fatalf("Failed to mark allocated subnets: %v", err)
+			}
+
+			subnets, err = ipnetStringsToSlice(tt.secondSubnets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = sna.MarkSubnetsAllocated("node2", subnets...)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Mark second subnets allocated error %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }

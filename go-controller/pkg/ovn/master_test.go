@@ -856,20 +856,22 @@ subnet=%s
 
 var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	var (
-		app             *cli.App
-		f               *factory.WatchFactory
-		stopChan        chan struct{}
-		wg              *sync.WaitGroup
-		libovsdbCleanup *libovsdbtest.Cleanup
+		app      *cli.App
+		f        *factory.WatchFactory
+		stopChan chan struct{}
+		wg       *sync.WaitGroup
 
-		dbSetup                                  libovsdbtest.TestSetup
-		node1                                    tNode
-		testNode                                 v1.Node
-		fakeClient                               *util.OVNClientset
-		kubeFakeClient                           *fake.Clientset
-		clusterController                        *Controller
-		nodeAnnotator                            kube.Annotator
-		libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+		libovsdbOvnNBClient libovsdbclient.Client
+		libovsdbOvnSBClient libovsdbclient.Client
+		libovsdbCleanup     *libovsdbtest.Cleanup
+
+		dbSetup           libovsdbtest.TestSetup
+		node1             tNode
+		testNode          v1.Node
+		fakeClient        *util.OVNClientset
+		kubeFakeClient    *fake.Clientset
+		clusterController *Controller
+		nodeAnnotator     kube.Annotator
 	)
 
 	const (
@@ -1362,9 +1364,18 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+			// Delete the node's gateway Logical Router Port to force an error. But save
+			// it first so we can add it back to let the delete proceed after we know the
+			// retry was successful
+			gatewayRouter := types.GWRouterPrefix + node1.Name
+			lr := &nbdb.LogicalRouter{Name: gatewayRouter}
+			lrp := &nbdb.LogicalRouterPort{Name: types.GWRouterToJoinSwitchPrefix + gatewayRouter}
+			lrp, err = libovsdbops.GetLogicalRouterPort(libovsdbOvnNBClient, lrp)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = libovsdbops.DeleteLogicalRouterPorts(libovsdbOvnNBClient, lr, lrp)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 			// Node delete will fail with Failed to delete node node1,
-			// error: error deleting node node1 HostSubnet 10.1.1.0/24:
-			// error deleting subnet 10.1.1.0/24 for node "node1": network 10.1.1.0/24 does not belong to any known range
 			err = fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), testNode.Name, metav1.DeleteOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1377,10 +1388,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				gomega.BeNil(),             // newObj should be nil
 			)
 
-			// allocate subnet to allow delete to continue
-			gomega.Expect(clusterController.masterSubnetAllocator.InitRanges([]config.CIDRNetworkEntry{
-				{CIDR: subnet, HostSubnetLength: 24},
-			})).To(gomega.Succeed())
+			// Add the LRP back to allow the delete the continue
+			err = libovsdbops.CreateOrUpdateLogicalRouterPorts(libovsdbOvnNBClient,
+				lr, []*nbdb.LogicalRouterPort{lrp}, &lrp.MAC, &lrp.Networks, &lrp.ExternalIDs)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			retry.SetRetryObjWithNoBackoff(node1.Name, clusterController.retryNodes)
 			clusterController.retryNodes.RequestRetryObjs() // retry the failed entry
 
