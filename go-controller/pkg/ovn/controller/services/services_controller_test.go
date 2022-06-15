@@ -141,14 +141,8 @@ func TestSyncServices(t *testing.T) {
 			initialDb: []libovsdbtest.TestData{
 				nodeLogicalSwitch(nodeA),
 				nodeLogicalSwitch(nodeB),
-				&nbdb.LogicalRouter{
-					UUID: "gr-node-a",
-					Name: "gr-node-a",
-				},
-				&nbdb.LogicalRouter{
-					UUID: "gr-node-b",
-					Name: "gr-node-b",
-				},
+				nodeLogicalRouter(nodeA),
+				nodeLogicalRouter(nodeB),
 			},
 			expectedDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
@@ -170,16 +164,8 @@ func TestSyncServices(t *testing.T) {
 				},
 				nodeLogicalSwitch(nodeA, "Service_testns/foo_TCP_cluster"),
 				nodeLogicalSwitch(nodeB, "Service_testns/foo_TCP_cluster"),
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-a",
-					Name:         "gr-node-a",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-b",
-					Name:         "gr-node-b",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
+				nodeLogicalRouter(nodeA, "Service_testns/foo_TCP_cluster"),
+				nodeLogicalRouter(nodeB, "Service_testns/foo_TCP_cluster"),
 			},
 		},
 		{
@@ -229,20 +215,9 @@ func TestSyncServices(t *testing.T) {
 				nodeLogicalSwitch(nodeA),
 				nodeLogicalSwitch(nodeB),
 				nodeLogicalSwitch("wrong-switch", "Service_testns/foo_TCP_cluster"),
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-a",
-					Name:         "gr-node-a",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalRouter{
-					UUID: "gr-node-b",
-					Name: "gr-node-b",
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-c",
-					Name:         "gr-node-c",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
+				nodeLogicalRouter(nodeA, "Service_testns/foo_TCP_cluster"),
+				nodeLogicalRouter(nodeB, "Service_testns/foo_TCP_cluster"),
+				nodeLogicalRouter("node-c", "Service_testns/foo_TCP_cluster"),
 			},
 			expectedDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
@@ -265,20 +240,9 @@ func TestSyncServices(t *testing.T) {
 				nodeLogicalSwitch(nodeA, "Service_testns/foo_TCP_cluster"),
 				nodeLogicalSwitch(nodeB, "Service_testns/foo_TCP_cluster"),
 				nodeLogicalSwitch("wrong-switch"),
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-a",
-					Name:         "gr-node-a",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-b",
-					Name:         "gr-node-b",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalRouter{
-					UUID: "gr-node-c",
-					Name: "gr-node-c",
-				},
+				nodeLogicalRouter(nodeA, "Service_testns/foo_TCP_cluster"),
+				nodeLogicalRouter(nodeB, "Service_testns/foo_TCP_cluster"),
+				nodeLogicalRouter("node-c"),
 			},
 		},
 		{
@@ -337,16 +301,8 @@ func TestSyncServices(t *testing.T) {
 				},
 				nodeLogicalSwitch(nodeA, "Service_testns/foo_TCP_cluster"),
 				nodeLogicalSwitch(nodeB, "Service_testns/foo_TCP_cluster"),
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-a",
-					Name:         "gr-node-a",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-b",
-					Name:         "gr-node-b",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
+				nodeLogicalRouter(nodeA, "Service_testns/foo_TCP_cluster"),
+				nodeLogicalRouter(nodeB, "Service_testns/foo_TCP_cluster"),
 			},
 			expectedDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
@@ -375,16 +331,8 @@ func TestSyncServices(t *testing.T) {
 				},
 				nodeLogicalSwitch(nodeA, "Service_testns/foo_TCP_cluster"),
 				nodeLogicalSwitch(nodeB, "Service_testns/foo_TCP_cluster"),
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-a",
-					Name:         "gr-node-a",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-b",
-					Name:         "gr-node-b",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
+				nodeLogicalRouter(nodeA, "Service_testns/foo_TCP_cluster"),
+				nodeLogicalRouter(nodeB, "Service_testns/foo_TCP_cluster"),
 			},
 		},
 		{
@@ -446,16 +394,8 @@ func TestSyncServices(t *testing.T) {
 				},
 				nodeLogicalSwitch(nodeA, "Service_testns/foo_TCP_cluster"),
 				nodeLogicalSwitch(nodeB, "Service_testns/foo_TCP_cluster"),
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-a",
-					Name:         "gr-node-a",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
-				&nbdb.LogicalRouter{
-					UUID:         "gr-node-b",
-					Name:         "gr-node-b",
-					LoadBalancer: []string{"Service_testns/foo_TCP_cluster"},
-				},
+				nodeLogicalRouter(nodeA, "Service_testns/foo_TCP_cluster"),
+				nodeLogicalRouter(nodeB, "Service_testns/foo_TCP_cluster"),
 			},
 			expectedDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
@@ -515,22 +455,12 @@ func TestSyncServices(t *testing.T) {
 				nodeLogicalSwitch(nodeB,
 					"Service_testns/foo_TCP_cluster",
 					"Service_testns/foo_TCP_node_router+switch_node-b"),
-				&nbdb.LogicalRouter{
-					UUID: "gr-node-a",
-					Name: "gr-node-a",
-					LoadBalancer: []string{
-						"Service_testns/foo_TCP_cluster",
-						"Service_testns/foo_TCP_node_router+switch_node-a",
-					},
-				},
-				&nbdb.LogicalRouter{
-					UUID: "gr-node-b",
-					Name: "gr-node-b",
-					LoadBalancer: []string{
-						"Service_testns/foo_TCP_cluster",
-						"Service_testns/foo_TCP_node_router+switch_node-b",
-					},
-				},
+				nodeLogicalRouter(nodeA,
+					"Service_testns/foo_TCP_cluster",
+					"Service_testns/foo_TCP_node_router+switch_node-a"),
+				nodeLogicalRouter(nodeB,
+					"Service_testns/foo_TCP_cluster",
+					"Service_testns/foo_TCP_node_router+switch_node-b"),
 			},
 		},
 	}
@@ -578,6 +508,21 @@ func nodeLogicalSwitch(nodeName string, namespacedServiceNames ...string) *nbdb.
 	return ls
 }
 
+func nodeLogicalRouter(nodeName string, namespacedServiceNames ...string) *nbdb.LogicalRouter {
+	ls := &nbdb.LogicalRouter{
+		UUID: nodeGWRouterName(nodeName),
+		Name: nodeGWRouterName(nodeName),
+	}
+	if len(namespacedServiceNames) > 0 {
+		ls.LoadBalancer = namespacedServiceNames
+	}
+	return ls
+}
+
 func nodeSwitchName(nodeName string) string {
 	return fmt.Sprintf("switch-%s", nodeName)
+}
+
+func nodeGWRouterName(nodeName string) string {
+	return fmt.Sprintf("gr-%s", nodeName)
 }
