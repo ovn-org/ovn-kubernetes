@@ -153,10 +153,7 @@ func TestSyncServices(t *testing.T) {
 					Vips: map[string]string{
 						"192.168.1.1:80": "",
 					},
-					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "testns/foo",
-					},
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
 				},
 				nodeLogicalSwitch(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 				nodeLogicalSwitch(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
@@ -199,10 +196,7 @@ func TestSyncServices(t *testing.T) {
 					Vips: map[string]string{
 						"192.168.0.1:6443": "",
 					},
-					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "testns/foo",
-					},
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
 				},
 				nodeLogicalSwitch(nodeA),
 				nodeLogicalSwitch(nodeB),
@@ -220,10 +214,7 @@ func TestSyncServices(t *testing.T) {
 					Vips: map[string]string{
 						"192.168.1.1:80": "",
 					},
-					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "testns/foo",
-					},
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
 				},
 				nodeLogicalSwitch(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 				nodeLogicalSwitch(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
@@ -268,10 +259,7 @@ func TestSyncServices(t *testing.T) {
 					Vips: map[string]string{
 						"192.168.0.1:6443": "",
 					},
-					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "testns/foo",
-					},
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
 				},
 				&nbdb.LoadBalancer{
 					UUID:     "TCP_lb_gateway_router",
@@ -279,9 +267,7 @@ func TestSyncServices(t *testing.T) {
 					Vips: map[string]string{
 						"192.168.1.1:80": "",
 					},
-					ExternalIDs: map[string]string{
-						"TCP_lb_gateway_router": "",
-					},
+					ExternalIDs: tcpGatewayRouterExternalIDs(),
 				},
 				nodeLogicalSwitch(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 				nodeLogicalSwitch(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
@@ -297,17 +283,12 @@ func TestSyncServices(t *testing.T) {
 					Vips: map[string]string{
 						"192.168.1.1:80": "",
 					},
-					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "testns/foo",
-					},
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
 				},
 				&nbdb.LoadBalancer{
-					UUID:     "TCP_lb_gateway_router",
-					Protocol: &nbdb.LoadBalancerProtocolTCP,
-					ExternalIDs: map[string]string{
-						"TCP_lb_gateway_router": "",
-					},
+					UUID:        "TCP_lb_gateway_router",
+					Protocol:    &nbdb.LoadBalancerProtocolTCP,
+					ExternalIDs: tcpGatewayRouterExternalIDs(),
 				},
 				nodeLogicalSwitch(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 				nodeLogicalSwitch(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
@@ -363,10 +344,7 @@ func TestSyncServices(t *testing.T) {
 					Vips: map[string]string{
 						"192.168.0.1:6443": "",
 					},
-					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "testns/foo",
-					},
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
 				},
 				nodeLogicalSwitch(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 				nodeLogicalSwitch(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
@@ -382,10 +360,7 @@ func TestSyncServices(t *testing.T) {
 					Vips: map[string]string{
 						"192.168.1.1:80": "10.128.0.2:3456,10.128.1.2:3456",
 					},
-					ExternalIDs: map[string]string{
-						"k8s.ovn.org/kind":  "Service",
-						"k8s.ovn.org/owner": "testns/foo",
-					},
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
 				},
 				&nbdb.LoadBalancer{
 					UUID: nodeSwitchRouterLoadBalancerName(nodeA, ns, serviceName),
@@ -520,5 +495,18 @@ func servicesOptions() map[string]string {
 		"event":     "false",
 		"reject":    "true",
 		"skip_snat": "false",
+	}
+}
+
+func tcpGatewayRouterExternalIDs() map[string]string {
+	return map[string]string{
+		"TCP_lb_gateway_router": "",
+	}
+}
+
+func serviceExternalIDs(namespacedServiceName string) map[string]string {
+	return map[string]string{
+		"k8s.ovn.org/kind":  "Service",
+		"k8s.ovn.org/owner": namespacedServiceName,
 	}
 }
