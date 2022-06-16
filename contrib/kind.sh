@@ -91,7 +91,7 @@ usage() {
     echo "-lr  | --local-kind-registry        Configure kind to use a local docker registry rather than manually loading images"
     echo "-dd  | --dns-domain                 Configure a custom dnsDomain for k8s services, Defaults to 'cluster.local'"
     echo "-cn  | --cluster-name               Configure the kind cluster's name"
-    echo "-ric | --run-in-container           Configure the script to be run from a docker container, allowing it to still communcate with the kind controlplane" 
+    echo "-ric | --run-in-container           Configure the script to be run from a docker container, allowing it to still communicate with the kind controlplane" 
     echo "--delete                      	    Delete current cluster"
     echo ""
 }
@@ -332,7 +332,7 @@ set_default_params() {
   fi 
   RUN_IN_CONTAINER=${RUN_IN_CONTAINER:-false}
   KIND_IMAGE=${KIND_IMAGE:-kindest/node}
-  K8S_VERSION=${K8S_VERSION:-v1.23.3}
+  K8S_VERSION=${K8S_VERSION:-v1.24.0}
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   OVN_HA=${OVN_HA:-false}
