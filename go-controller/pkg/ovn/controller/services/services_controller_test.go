@@ -146,13 +146,9 @@ func TestSyncServices(t *testing.T) {
 			},
 			expectedDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: loadBalancerClusterWideTCPServiceName(ns, serviceName),
-					Name: loadBalancerClusterWideTCPServiceName(ns, serviceName),
-					Options: map[string]string{
-						"event":     "false",
-						"reject":    "true",
-						"skip_snat": "false",
-					},
+					UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Options:  servicesOptions(),
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					Vips: map[string]string{
 						"192.168.1.1:80": "",
@@ -196,13 +192,9 @@ func TestSyncServices(t *testing.T) {
 			},
 			initialDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: loadBalancerClusterWideTCPServiceName(ns, serviceName),
-					Name: loadBalancerClusterWideTCPServiceName(ns, serviceName),
-					Options: map[string]string{
-						"event":     "false",
-						"reject":    "true",
-						"skip_snat": "false",
-					},
+					UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Options:  servicesOptions(),
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					Vips: map[string]string{
 						"192.168.0.1:6443": "",
@@ -221,13 +213,9 @@ func TestSyncServices(t *testing.T) {
 			},
 			expectedDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: loadBalancerClusterWideTCPServiceName(ns, serviceName),
-					Name: loadBalancerClusterWideTCPServiceName(ns, serviceName),
-					Options: map[string]string{
-						"event":     "false",
-						"reject":    "true",
-						"skip_snat": "false",
-					},
+					UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Options:  servicesOptions(),
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					Vips: map[string]string{
 						"192.168.1.1:80": "",
@@ -273,13 +261,9 @@ func TestSyncServices(t *testing.T) {
 			},
 			initialDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: loadBalancerClusterWideTCPServiceName(ns, serviceName),
-					Name: loadBalancerClusterWideTCPServiceName(ns, serviceName),
-					Options: map[string]string{
-						"event":     "false",
-						"reject":    "true",
-						"skip_snat": "false",
-					},
+					UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Options:  servicesOptions(),
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					Vips: map[string]string{
 						"192.168.0.1:6443": "",
@@ -306,13 +290,9 @@ func TestSyncServices(t *testing.T) {
 			},
 			expectedDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: loadBalancerClusterWideTCPServiceName(ns, serviceName),
-					Name: loadBalancerClusterWideTCPServiceName(ns, serviceName),
-					Options: map[string]string{
-						"event":     "false",
-						"reject":    "true",
-						"skip_snat": "false",
-					},
+					UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Options:  servicesOptions(),
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					Vips: map[string]string{
 						"192.168.1.1:80": "",
@@ -376,13 +356,9 @@ func TestSyncServices(t *testing.T) {
 			},
 			initialDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: loadBalancerClusterWideTCPServiceName(ns, serviceName),
-					Name: loadBalancerClusterWideTCPServiceName(ns, serviceName),
-					Options: map[string]string{
-						"event":     "false",
-						"reject":    "true",
-						"skip_snat": "false",
-					},
+					UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Options:  servicesOptions(),
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					Vips: map[string]string{
 						"192.168.0.1:6443": "",
@@ -399,13 +375,9 @@ func TestSyncServices(t *testing.T) {
 			},
 			expectedDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: loadBalancerClusterWideTCPServiceName(ns, serviceName),
-					Name: loadBalancerClusterWideTCPServiceName(ns, serviceName),
-					Options: map[string]string{
-						"event":     "false",
-						"reject":    "true",
-						"skip_snat": "false",
-					},
+					UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Options:  servicesOptions(),
 					Protocol: &nbdb.LoadBalancerProtocolTCP,
 					Vips: map[string]string{
 						"192.168.1.1:80": "10.128.0.2:3456,10.128.1.2:3456",
@@ -541,4 +513,12 @@ func nodeSwitchRouterLoadBalancerName(nodeName string, serviceNamespace string, 
 		serviceNamespace,
 		serviceName,
 		nodeName)
+}
+
+func servicesOptions() map[string]string {
+	return map[string]string{
+		"event":     "false",
+		"reject":    "true",
+		"skip_snat": "false",
+	}
 }
