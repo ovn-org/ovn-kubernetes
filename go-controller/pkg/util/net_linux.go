@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"time"
 
 	kapi "k8s.io/api/core/v1"
 
+	"github.com/j-keck/arping"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
@@ -356,6 +358,18 @@ func LinkNeighAdd(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) 
 	return nil
 }
 
+func SetARPTimeout() {
+	arping.SetTimeout(50 * time.Millisecond) // hard-coded for now
+}
+
+func GetMACAddressFromARP(neighIP net.IP) (net.HardwareAddr, error) {
+	hwAddr, _, err := arping.Ping(neighIP)
+	if err != nil {
+		return nil, err
+	}
+	return hwAddr, nil
+}
+
 // LinkNeighExists checks to see if the given MAC/IP bindings exists
 func LinkNeighExists(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) (bool, error) {
 	neighs, err := netLinkOps.NeighList(link.Attrs().Index, getFamily(neighIP))
@@ -375,7 +389,7 @@ func LinkNeighExists(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAdd
 	return false, nil
 }
 
-func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType netlink.ConntrackFilterType) error {
+func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType netlink.ConntrackFilterType, labels [][]byte) error {
 	ipAddress := net.ParseIP(ip)
 	if ipAddress == nil {
 		return fmt.Errorf("value %q passed to DeleteConntrack is not an IP address", ipAddress)
@@ -406,6 +420,14 @@ func DeleteConntrack(ip string, port int32, protocol kapi.Protocol, ipFilterType
 	if err := filter.AddIP(ipFilterType, ipAddress); err != nil {
 		return fmt.Errorf("could not add IP: %s to conntrack filter: %v", ipAddress, err)
 	}
+
+	if len(labels) > 0 {
+		// for now we only need unmatch label, we can add match label later if needed
+		if err := filter.AddLabels(netlink.ConntrackUnmatchLabels, labels); err != nil {
+			return fmt.Errorf("could not add label %s to conntrack filter: %v", labels, err)
+		}
+	}
+
 	if ipAddress.To4() != nil {
 		if _, err := netLinkOps.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V4, filter); err != nil {
 			return err

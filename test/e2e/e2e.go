@@ -43,6 +43,7 @@ const (
 	retryTimeout         = 40 * time.Second // polling timeout
 	dsRestartTimeout     = 10 * time.Minute // ds restart timeout
 	agnhostImage         = "k8s.gcr.io/e2e-test-images/agnhost:2.26"
+	iperf3Image          = "quay.io/sronanrh/iperf"
 )
 
 type podCondition = func(pod *v1.Pod) (bool, error)
@@ -314,6 +315,11 @@ func deleteClusterExternalContainer(containerName string) {
 func updateNamespace(f *framework.Framework, namespace *v1.Namespace) {
 	_, err := f.ClientSet.CoreV1().Namespaces().Update(context.Background(), namespace, metav1.UpdateOptions{})
 	framework.ExpectNoError(err, fmt.Sprintf("unable to update namespace: %s, err: %v", namespace.Name, err))
+}
+func getNamespace(f *framework.Framework, name string) *v1.Namespace {
+	ns, err := f.ClientSet.CoreV1().Namespaces().Get(context.Background(), name, metav1.GetOptions{})
+	framework.ExpectNoError(err, fmt.Sprintf("unable to get namespace: %s, err: %v", name, err))
+	return ns
 }
 
 func updatePod(f *framework.Framework, pod *v1.Pod) {

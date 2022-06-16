@@ -42,9 +42,14 @@ type NodeWatchFactory interface {
 	AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
 	RemovePodHandler(handler *Handler)
 
+	AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error)
+	RemoveNamespaceHandler(handler *Handler)
+
 	NodeInformer() cache.SharedIndexInformer
 	LocalPodInformer() cache.SharedIndexInformer
 
+	GetPods(namespace string) ([]*kapi.Pod, error)
+	GetNamespaces() ([]*kapi.Namespace, error)
 	GetNode(name string) (*kapi.Node, error)
 	GetNodes() ([]*kapi.Node, error)
 	ListNodes(selector labels.Selector) ([]*kapi.Node, error)

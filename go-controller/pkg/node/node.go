@@ -539,7 +539,16 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		go wait.Until(func() {
 			checkForStaleOVSInterfaces(n.name, n.watchFactory.(*factory.WatchFactory))
 		}, time.Minute, n.stopChan)
-		err := n.WatchEndpoints()
+		util.SetARPTimeout()
+		err := n.WatchNamespaces()
+		if err != nil {
+			return fmt.Errorf("failed to watch namespaces: %w", err)
+		}
+		// every minute cleanup stale conntrack entries if any
+		go wait.Until(func() {
+			n.checkAndDeleteStaleConntrackEntries()
+		}, time.Minute*1, n.stopChan)
+		err = n.WatchEndpoints()
 		if err != nil {
 			return fmt.Errorf("failed to watch endpoints: %w", err)
 		}
@@ -573,7 +582,7 @@ func (n *OvnNode) WatchEndpoints() error {
 			newEpAddressMap := buildEndpointAddressMap(epNew.Subsets)
 			for item := range buildEndpointAddressMap(epOld.Subsets) {
 				if _, ok := newEpAddressMap[item]; !ok && item.protocol == kapi.ProtocolUDP { // flush conntrack only for UDP
-					err := util.DeleteConntrack(item.ip, item.port, item.protocol, netlink.ConntrackReplyAnyIP)
+					err := util.DeleteConntrack(item.ip, item.port, item.protocol, netlink.ConntrackReplyAnyIP, nil)
 					if err != nil {
 						klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
 					}
@@ -584,11 +593,116 @@ func (n *OvnNode) WatchEndpoints() error {
 			ep := obj.(*kapi.Endpoints)
 			for item := range buildEndpointAddressMap(ep.Subsets) {
 				if item.protocol == kapi.ProtocolUDP { // flush conntrack only for UDP
-					err := util.DeleteConntrack(item.ip, item.port, item.protocol, netlink.ConntrackReplyAnyIP)
+					err := util.DeleteConntrack(item.ip, item.port, item.protocol, netlink.ConntrackReplyAnyIP, nil)
 					if err != nil {
 						klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
 					}
 				}
+			}
+		},
+	}, nil)
+	return err
+}
+
+func exGatewayPodsAnnotationsChanged(oldNs, newNs *kapi.Namespace) bool {
+	// In reality we only care about exgw pod deletions, however since the list of IPs is not expected to change
+	// that often, let's check for *any* changes to these annotations compared to their previous state and trigger
+	// the logic for checking if we need to delete any conntrack entries
+	return (oldNs.Annotations[util.ExternalGatewayPodIPsAnnotation] != newNs.Annotations[util.ExternalGatewayPodIPsAnnotation]) ||
+		(oldNs.Annotations[util.RoutingExternalGWsAnnotation] != newNs.Annotations[util.RoutingExternalGWsAnnotation])
+}
+
+func (n *OvnNode) checkAndDeleteStaleConntrackEntries() {
+	namespaces, err := n.watchFactory.GetNamespaces()
+	if err != nil {
+		klog.Errorf("Unable to get pods from informer: %v", err)
+	}
+	for _, namespace := range namespaces {
+		_, foundRoutingExternalGWsAnnotation := namespace.Annotations[util.RoutingExternalGWsAnnotation]
+		_, foundExternalGatewayPodIPsAnnotation := namespace.Annotations[util.ExternalGatewayPodIPsAnnotation]
+		if foundRoutingExternalGWsAnnotation || foundExternalGatewayPodIPsAnnotation {
+			pods, err := n.watchFactory.GetPods(namespace.Name)
+			if err != nil {
+				klog.Warningf("Unable to get pods from informer for namespace %s: %v", namespace.Name, err)
+			}
+			if len(pods) > 0 || err != nil {
+				// we only need to proceed if there is at least one pod in this namespace on this node
+				// OR if we couldn't fetch the pods for some reason at this juncture
+				n.checkAndDeleteStaleConntrackEntriesForNamespace(namespace)
+			}
+		}
+	}
+}
+
+func (n *OvnNode) checkAndDeleteStaleConntrackEntriesForNamespace(newNs *kapi.Namespace) {
+	// loop through all the IPs on the annotations; ARP for their MACs and form an allowlist
+	gatewayIPs := strings.Split(newNs.Annotations[util.ExternalGatewayPodIPsAnnotation], ",")
+	gatewayIPs = append(gatewayIPs, strings.Split(newNs.Annotations[util.RoutingExternalGWsAnnotation], ",")...)
+	var wg sync.WaitGroup
+	wg.Add(len(gatewayIPs))
+	validMACs := sync.Map{}
+	for _, gwIP := range gatewayIPs {
+		go func(gwIP string) {
+			defer wg.Done()
+			if len(gwIP) > 0 {
+				if hwAddr, err := util.GetMACAddressFromARP(net.ParseIP(gwIP)); err != nil {
+					klog.Errorf("Failed to lookup hardware address for gatewayIP %s: %v", gwIP, err)
+				} else if len(hwAddr) > 0 {
+					// we need to reverse the mac before passing it to the conntrack filter since OVN saves the MAC in the following format
+					// +------------------------------------------------------------ +
+					// | 128 ...  112 ... 96 ... 80 ... 64 ... 48 ... 32 ... 16 ... 0|
+					// +------------------+-------+--------------------+-------------|
+					// |                  | UNUSED|    MAC ADDRESS     |   UNUSED    |
+					// +------------------+-------+--------------------+-------------+
+					for i, j := 0, len(hwAddr)-1; i < j; i, j = i+1, j-1 {
+						hwAddr[i], hwAddr[j] = hwAddr[j], hwAddr[i]
+					}
+					validMACs.Store(gwIP, []byte(hwAddr))
+				}
+			}
+		}(gwIP)
+	}
+	wg.Wait()
+
+	validNextHopMACs := [][]byte{}
+	validMACs.Range(func(key interface{}, value interface{}) bool {
+		validNextHopMACs = append(validNextHopMACs, value.([]byte))
+		return true
+	})
+	// Handle corner case where there are 0 IPs on the annotations OR none of the ARPs were successful; i.e allowMACList={empty}.
+	// This means we *need to* pass a label > 128 bits that will not match on any conntrack entry labels for these pods.
+	// That way any remaining entries with labels having MACs set will get purged.
+	if len(validNextHopMACs) == 0 {
+		validNextHopMACs = append(validNextHopMACs, []byte("does-not-contain-anything"))
+	}
+
+	pods, err := n.watchFactory.GetPods(newNs.Name)
+	if err != nil {
+		klog.Errorf("Unable to get pods from informer: %v", err)
+	}
+	for _, pod := range pods {
+		pod := pod
+		podIPs, err := util.GetAllPodIPs(pod)
+		if err != nil {
+			klog.Errorf("Unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		}
+		for _, podIP := range podIPs { // flush conntrack only for UDP
+			// for this pod, we check if the conntrack entry has a label that is not in the provided allowlist of MACs
+			// only caveat here is we assume egressGW served pods shouldn't have conntrack entries with other labels set
+			err := util.DeleteConntrack(podIP.String(), 0, kapi.ProtocolUDP, netlink.ConntrackOrigDstIP, validNextHopMACs)
+			if err != nil {
+				klog.Errorf("Failed to delete conntrack entry for pod %s: %v", podIP.String(), err)
+			}
+		}
+	}
+}
+
+func (n *OvnNode) WatchNamespaces() error {
+	_, err := n.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(old, new interface{}) {
+			oldNs, newNs := old.(*kapi.Namespace), new.(*kapi.Namespace)
+			if exGatewayPodsAnnotationsChanged(oldNs, newNs) {
+				n.checkAndDeleteStaleConntrackEntriesForNamespace(newNs)
 			}
 		},
 	}, nil)
