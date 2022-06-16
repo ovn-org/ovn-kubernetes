@@ -146,8 +146,8 @@ func TestSyncServices(t *testing.T) {
 			},
 			expectedDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: "Service_testns/foo_TCP_cluster",
-					Name: "Service_testns/foo_TCP_cluster",
+					UUID: loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name: loadBalancerClusterWideTCPServiceName(ns, serviceName),
 					Options: map[string]string{
 						"event":     "false",
 						"reject":    "true",
@@ -162,10 +162,10 @@ func TestSyncServices(t *testing.T) {
 						"k8s.ovn.org/owner": "testns/foo",
 					},
 				},
-				nodeLogicalSwitch(nodeA, "Service_testns/foo_TCP_cluster"),
-				nodeLogicalSwitch(nodeB, "Service_testns/foo_TCP_cluster"),
-				nodeLogicalRouter(nodeA, "Service_testns/foo_TCP_cluster"),
-				nodeLogicalRouter(nodeB, "Service_testns/foo_TCP_cluster"),
+				nodeLogicalSwitch(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalSwitch(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 			},
 		},
 		{
@@ -196,8 +196,8 @@ func TestSyncServices(t *testing.T) {
 			},
 			initialDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: "Service_testns/foo_TCP_cluster",
-					Name: "Service_testns/foo_TCP_cluster",
+					UUID: loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name: loadBalancerClusterWideTCPServiceName(ns, serviceName),
 					Options: map[string]string{
 						"event":     "false",
 						"reject":    "true",
@@ -214,15 +214,15 @@ func TestSyncServices(t *testing.T) {
 				},
 				nodeLogicalSwitch(nodeA),
 				nodeLogicalSwitch(nodeB),
-				nodeLogicalSwitch("wrong-switch", "Service_testns/foo_TCP_cluster"),
-				nodeLogicalRouter(nodeA, "Service_testns/foo_TCP_cluster"),
-				nodeLogicalRouter(nodeB, "Service_testns/foo_TCP_cluster"),
-				nodeLogicalRouter("node-c", "Service_testns/foo_TCP_cluster"),
+				nodeLogicalSwitch("wrong-switch", loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter("node-c", loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 			},
 			expectedDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: "Service_testns/foo_TCP_cluster",
-					Name: "Service_testns/foo_TCP_cluster",
+					UUID: loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name: loadBalancerClusterWideTCPServiceName(ns, serviceName),
 					Options: map[string]string{
 						"event":     "false",
 						"reject":    "true",
@@ -237,11 +237,11 @@ func TestSyncServices(t *testing.T) {
 						"k8s.ovn.org/owner": "testns/foo",
 					},
 				},
-				nodeLogicalSwitch(nodeA, "Service_testns/foo_TCP_cluster"),
-				nodeLogicalSwitch(nodeB, "Service_testns/foo_TCP_cluster"),
+				nodeLogicalSwitch(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalSwitch(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 				nodeLogicalSwitch("wrong-switch"),
-				nodeLogicalRouter(nodeA, "Service_testns/foo_TCP_cluster"),
-				nodeLogicalRouter(nodeB, "Service_testns/foo_TCP_cluster"),
+				nodeLogicalRouter(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 				nodeLogicalRouter("node-c"),
 			},
 		},
@@ -273,8 +273,8 @@ func TestSyncServices(t *testing.T) {
 			},
 			initialDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: "Service_testns/foo_TCP_cluster",
-					Name: "Service_testns/foo_TCP_cluster",
+					UUID: loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name: loadBalancerClusterWideTCPServiceName(ns, serviceName),
 					Options: map[string]string{
 						"event":     "false",
 						"reject":    "true",
@@ -299,15 +299,15 @@ func TestSyncServices(t *testing.T) {
 						"TCP_lb_gateway_router": "",
 					},
 				},
-				nodeLogicalSwitch(nodeA, "Service_testns/foo_TCP_cluster"),
-				nodeLogicalSwitch(nodeB, "Service_testns/foo_TCP_cluster"),
-				nodeLogicalRouter(nodeA, "Service_testns/foo_TCP_cluster"),
-				nodeLogicalRouter(nodeB, "Service_testns/foo_TCP_cluster"),
+				nodeLogicalSwitch(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalSwitch(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 			},
 			expectedDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: "Service_testns/foo_TCP_cluster",
-					Name: "Service_testns/foo_TCP_cluster",
+					UUID: loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name: loadBalancerClusterWideTCPServiceName(ns, serviceName),
 					Options: map[string]string{
 						"event":     "false",
 						"reject":    "true",
@@ -329,10 +329,10 @@ func TestSyncServices(t *testing.T) {
 						"TCP_lb_gateway_router": "",
 					},
 				},
-				nodeLogicalSwitch(nodeA, "Service_testns/foo_TCP_cluster"),
-				nodeLogicalSwitch(nodeB, "Service_testns/foo_TCP_cluster"),
-				nodeLogicalRouter(nodeA, "Service_testns/foo_TCP_cluster"),
-				nodeLogicalRouter(nodeB, "Service_testns/foo_TCP_cluster"),
+				nodeLogicalSwitch(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalSwitch(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 			},
 		},
 		{
@@ -376,8 +376,8 @@ func TestSyncServices(t *testing.T) {
 			},
 			initialDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: "Service_testns/foo_TCP_cluster",
-					Name: "Service_testns/foo_TCP_cluster",
+					UUID: loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name: loadBalancerClusterWideTCPServiceName(ns, serviceName),
 					Options: map[string]string{
 						"event":     "false",
 						"reject":    "true",
@@ -392,15 +392,15 @@ func TestSyncServices(t *testing.T) {
 						"k8s.ovn.org/owner": "testns/foo",
 					},
 				},
-				nodeLogicalSwitch(nodeA, "Service_testns/foo_TCP_cluster"),
-				nodeLogicalSwitch(nodeB, "Service_testns/foo_TCP_cluster"),
-				nodeLogicalRouter(nodeA, "Service_testns/foo_TCP_cluster"),
-				nodeLogicalRouter(nodeB, "Service_testns/foo_TCP_cluster"),
+				nodeLogicalSwitch(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalSwitch(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeA, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeB, loadBalancerClusterWideTCPServiceName(ns, serviceName)),
 			},
 			expectedDb: []libovsdbtest.TestData{
 				&nbdb.LoadBalancer{
-					UUID: "Service_testns/foo_TCP_cluster",
-					Name: "Service_testns/foo_TCP_cluster",
+					UUID: loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name: loadBalancerClusterWideTCPServiceName(ns, serviceName),
 					Options: map[string]string{
 						"event":     "false",
 						"reject":    "true",
@@ -416,8 +416,8 @@ func TestSyncServices(t *testing.T) {
 					},
 				},
 				&nbdb.LoadBalancer{
-					UUID: "Service_testns/foo_TCP_node_router+switch_node-a",
-					Name: "Service_testns/foo_TCP_node_router+switch_node-a",
+					UUID: nodeSwitchRouterLoadBalancerName(nodeA, ns, serviceName),
+					Name: nodeSwitchRouterLoadBalancerName(nodeA, ns, serviceName),
 					Options: map[string]string{
 						"event":     "false",
 						"reject":    "true",
@@ -433,8 +433,8 @@ func TestSyncServices(t *testing.T) {
 					},
 				},
 				&nbdb.LoadBalancer{
-					UUID: "Service_testns/foo_TCP_node_router+switch_node-b",
-					Name: "Service_testns/foo_TCP_node_router+switch_node-b",
+					UUID: nodeSwitchRouterLoadBalancerName(nodeB, ns, serviceName),
+					Name: nodeSwitchRouterLoadBalancerName(nodeB, ns, serviceName),
 					Options: map[string]string{
 						"event":     "false",
 						"reject":    "true",
@@ -450,17 +450,17 @@ func TestSyncServices(t *testing.T) {
 					},
 				},
 				nodeLogicalSwitch(nodeA,
-					"Service_testns/foo_TCP_cluster",
-					"Service_testns/foo_TCP_node_router+switch_node-a"),
+					loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					nodeSwitchRouterLoadBalancerName(nodeA, ns, serviceName)),
 				nodeLogicalSwitch(nodeB,
-					"Service_testns/foo_TCP_cluster",
-					"Service_testns/foo_TCP_node_router+switch_node-b"),
+					loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					nodeSwitchRouterLoadBalancerName(nodeB, ns, serviceName)),
 				nodeLogicalRouter(nodeA,
-					"Service_testns/foo_TCP_cluster",
-					"Service_testns/foo_TCP_node_router+switch_node-a"),
+					loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					nodeSwitchRouterLoadBalancerName(nodeA, ns, serviceName)),
 				nodeLogicalRouter(nodeB,
-					"Service_testns/foo_TCP_cluster",
-					"Service_testns/foo_TCP_node_router+switch_node-b"),
+					loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					nodeSwitchRouterLoadBalancerName(nodeB, ns, serviceName)),
 			},
 		},
 	}
@@ -525,4 +525,20 @@ func nodeSwitchName(nodeName string) string {
 
 func nodeGWRouterName(nodeName string) string {
 	return fmt.Sprintf("gr-%s", nodeName)
+}
+
+func loadBalancerClusterWideTCPServiceName(ns string, serviceName string) string {
+	return fmt.Sprintf("Service_%s_TCP_cluster", namespacedServiceName(ns, serviceName))
+}
+
+func namespacedServiceName(ns string, name string) string {
+	return fmt.Sprintf("%s/%s", ns, name)
+}
+
+func nodeSwitchRouterLoadBalancerName(nodeName string, serviceNamespace string, serviceName string) string {
+	return fmt.Sprintf(
+		"Service_%s/%s_TCP_node_router+switch_%s",
+		serviceNamespace,
+		serviceName,
+		nodeName)
 }
