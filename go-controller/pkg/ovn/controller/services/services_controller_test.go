@@ -84,15 +84,19 @@ func TestSyncServices(t *testing.T) {
 	outport := int32(3456)
 	tcp := v1.ProtocolTCP
 
+	const (
+		nodeA = "node-a"
+		nodeB = "node-b"
+	)
 	defaultNodes := map[string]nodeInfo{
-		"node-a": {
-			name:              "node-a",
+		nodeA: {
+			name:              nodeA,
 			nodeIPs:           []string{"10.0.0.1"},
 			gatewayRouterName: "gr-node-a",
 			switchName:        "switch-node-a",
 		},
-		"node-b": {
-			name:              "node-b",
+		nodeB: {
+			name:              nodeB,
 			nodeIPs:           []string{"10.0.0.2"},
 			gatewayRouterName: "gr-node-b",
 			switchName:        "switch-node-b",
