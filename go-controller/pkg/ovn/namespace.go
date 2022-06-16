@@ -14,6 +14,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
 
@@ -49,8 +50,7 @@ func (oc *Controller) getRoutingExternalGWs(nsInfo *namespaceInfo) *gatewayInfo 
 	// return a copy of the object so it can be handled without the
 	// namespace locked
 	res.bfdEnabled = nsInfo.routingExternalGWs.bfdEnabled
-	res.gws = make([]net.IP, len(nsInfo.routingExternalGWs.gws))
-	copy(res.gws, nsInfo.routingExternalGWs.gws)
+	res.gws = sets.NewString(nsInfo.routingExternalGWs.gws.UnsortedList()...)
 	return &res
 }
 
@@ -59,12 +59,12 @@ func validateRoutingPodGWs(podGWs map[string]gatewayInfo) error {
 	// map to hold IP/podName
 	ipTracker := make(map[string]string)
 	for podName, gwInfo := range podGWs {
-		for _, gwIP := range gwInfo.gws {
-			if foundPod, ok := ipTracker[gwIP.String()]; ok {
+		for _, gwIP := range gwInfo.gws.UnsortedList() {
+			if foundPod, ok := ipTracker[gwIP]; ok {
 				return fmt.Errorf("duplicate IP found in ECMP Pod route cache! IP: %q, first pod: %q, second "+
 					"pod: %q", gwIP, podName, foundPod)
 			}
-			ipTracker[gwIP.String()] = podName
+			ipTracker[gwIP] = podName
 		}
 	}
 	return nil
@@ -77,9 +77,8 @@ func (oc *Controller) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]gateway
 	for k, v := range nsInfo.routingExternalPodGWs {
 		item := gatewayInfo{
 			bfdEnabled: v.bfdEnabled,
-			gws:        make([]net.IP, len(v.gws)),
+			gws:        sets.NewString(v.gws.UnsortedList()...),
 		}
-		copy(item.gws, v.gws)
 		res[k] = item
 	}
 	return res
@@ -448,6 +447,7 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool, namespace 
 			networkPolicies:       make(map[string]*networkPolicy),
 			multicastEnabled:      false,
 			routingExternalPodGWs: make(map[string]gatewayInfo),
+			routingExternalGWs:    gatewayInfo{gws: sets.NewString(), bfdEnabled: false},
 		}
 		// we are creating nsInfo and going to set it in namespaces map
 		// so safe to hold the lock while we create and add it

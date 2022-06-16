@@ -913,6 +913,7 @@ func TestDeleteConntrack(t *testing.T) {
 		inputIPStr               string
 		inputPort                int32
 		inputProtocol            kapi.Protocol
+		labels                   [][]byte
 		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
 	}{
 		{
@@ -968,10 +969,11 @@ func TestDeleteConntrack(t *testing.T) {
 			},*/
 		},
 		{
-			desc:          "Valid IPv6 address input with valid port input and valid Layer 4 protocol",
+			desc:          "Valid IPv6 address input with valid port input and valid Layer 4 protocol and labels",
 			inputIPStr:    "fffb::1",
 			inputProtocol: kapi.ProtocolSCTP,
 			inputPort:     9999,
+			labels:        [][]byte{{3, 4, 61, 141, 207, 170}, {0x2}},
 			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "ConntrackDeleteFilter", OnCallMethodArgType: []string{"netlink.ConntrackTableType", "netlink.InetFamily", "*netlink.ConntrackFilter"}, RetArgList: []interface{}{uint(1), nil}},
 			},
@@ -981,7 +983,7 @@ func TestDeleteConntrack(t *testing.T) {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
 
-			err := DeleteConntrack(tc.inputIPStr, tc.inputPort, tc.inputProtocol, netlink.ConntrackReplyAnyIP)
+			err := DeleteConntrack(tc.inputIPStr, tc.inputPort, tc.inputProtocol, netlink.ConntrackReplyAnyIP, tc.labels)
 			if tc.errExp {
 				assert.Error(t, err)
 			} else {
@@ -994,7 +996,7 @@ func TestDeleteConntrack(t *testing.T) {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
 
-			err := DeleteConntrack(tc.inputIPStr, tc.inputPort, tc.inputProtocol, netlink.ConntrackOrigDstIP)
+			err := DeleteConntrack(tc.inputIPStr, tc.inputPort, tc.inputProtocol, netlink.ConntrackOrigDstIP, tc.labels)
 			if tc.errExp {
 				assert.Error(t, err)
 			} else {

@@ -528,6 +528,18 @@ func getContainerAddressesForNetwork(container, network string) (string, string)
 	return strings.TrimSuffix(ipv4, "\n"), strings.TrimSuffix(ipv6, "\n")
 }
 
+// Returns the container's MAC addresses
+// related to the given network.
+func getMACAddressesForNetwork(container, network string) string {
+	mac := fmt.Sprintf("{{.NetworkSettings.Networks.%s.MacAddress}}", network)
+
+	macAddr, err := runCommand("docker", "inspect", "-f", mac, container)
+	if err != nil {
+		framework.Failf("failed to inspect external test container for its MAC: %v", err)
+	}
+	return strings.TrimSuffix(macAddr, "\n")
+}
+
 // deletePodSyncNS deletes a pod and wait for its deletion.
 // accept the namespace as a parameter.
 func deletePodSyncNS(clientSet kubernetes.Interface, namespace, podName string) {

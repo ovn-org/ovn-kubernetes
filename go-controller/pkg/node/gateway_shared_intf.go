@@ -542,7 +542,7 @@ func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) {
 func deleteConntrackForServiceVIP(svcVIPs []string, svcPorts []kapi.ServicePort, ns, name string) error {
 	for _, svcVIP := range svcVIPs {
 		for _, svcPort := range svcPorts {
-			err := util.DeleteConntrack(svcVIP, svcPort.Port, svcPort.Protocol, netlink.ConntrackOrigDstIP)
+			err := util.DeleteConntrack(svcVIP, svcPort.Port, svcPort.Protocol, netlink.ConntrackOrigDstIP, nil)
 			if err != nil {
 				return fmt.Errorf("failed to delete conntrack entry for service %s/%s with svcVIP %s, svcPort %d, protocol %s: %v",
 					ns, name, svcVIP, svcPort.Port, svcPort.Protocol, err)
@@ -564,7 +564,7 @@ func (npw *nodePortWatcher) deleteConntrackForService(service *kapi.Service) err
 		nodeIPs := npw.nodeIPManager.ListAddresses()
 		for _, nodeIP := range nodeIPs {
 			for _, svcPort := range service.Spec.Ports {
-				err := util.DeleteConntrack(nodeIP.String(), svcPort.NodePort, svcPort.Protocol, netlink.ConntrackOrigDstIP)
+				err := util.DeleteConntrack(nodeIP.String(), svcPort.NodePort, svcPort.Protocol, netlink.ConntrackOrigDstIP, nil)
 				if err != nil {
 					return fmt.Errorf("failed to delete conntrack entry for service %s/%s with nodeIP %s, nodePort %d, protocol %s: %v",
 						service.Namespace, service.Name, nodeIP, svcPort.Port, svcPort.Protocol, err)
