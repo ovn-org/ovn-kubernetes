@@ -1198,7 +1198,8 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) error {
 		if err := oc.deleteNetworkPolicy(policy, np); err != nil {
 			// rollback failed, add to retry to cleanup
 			key := getPolicyNamespacedName(policy)
-			oc.retryNetworkPolicies.addDeleteToRetryObj(policy, key, np)
+			oc.retryNetworkPolicies.initRetryObjWithDelete(policy, key, np)
+			oc.retryNetworkPolicies.unSkipRetryObj(key)
 		}
 		return fmt.Errorf("unable to ensure namespace for network policy: %s, namespace: %s, error: %v",
 			policy.Name, policy.Namespace, err)
