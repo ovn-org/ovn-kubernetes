@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,6 +31,21 @@ var OvnConflictBackoff = wait.Backoff{
 	Duration: 10 * time.Millisecond,
 	Factor:   5.0,
 	Jitter:   0.1,
+}
+
+var (
+	rePciDeviceName = regexp.MustCompile(`^[0-9a-f]{4}:[0-9a-f]{2}:[01][0-9a-f]\.[0-7]$`)
+	reAuxDeviceName = regexp.MustCompile(`^\w+.\w+.\d+$`)
+)
+
+// IsPCIDeviceName check if passed device id is a PCI device name
+func IsPCIDeviceName(deviceID string) bool {
+	return rePciDeviceName.MatchString(deviceID)
+}
+
+// IsAuxDeviceName check if passed device id is a Auxiliary device name
+func IsAuxDeviceName(deviceID string) bool {
+	return reAuxDeviceName.MatchString(deviceID)
 }
 
 // StringArg gets the named command-line argument or returns an error if it is empty
