@@ -19,13 +19,18 @@ type OvsSet struct {
 
 // NewOvsSet creates a new OVSDB style set from a Go interface (object)
 func NewOvsSet(obj interface{}) (OvsSet, error) {
+	ovsSet := make([]interface{}, 0)
 	var v reflect.Value
 	if reflect.TypeOf(obj).Kind() == reflect.Ptr {
 		v = reflect.ValueOf(obj).Elem()
+		if v.Kind() == reflect.Invalid {
+			// must be a nil pointer, so just return an empty set
+			return OvsSet{ovsSet}, nil
+		}
 	} else {
 		v = reflect.ValueOf(obj)
 	}
-	ovsSet := make([]interface{}, 0)
+
 	switch v.Kind() {
 	case reflect.Slice, reflect.Array:
 		for i := 0; i < v.Len(); i++ {

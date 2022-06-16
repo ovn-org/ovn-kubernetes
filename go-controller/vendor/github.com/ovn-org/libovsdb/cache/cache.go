@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 
@@ -25,6 +26,7 @@ const (
 	deleteEvent     = "delete"
 	bufferSize      = 65536
 	columnDelimiter = ","
+	keyDelimiter    = "|"
 )
 
 // ErrCacheInconsistent is an error that can occur when an operation
@@ -68,32 +70,84 @@ func NewIndexExistsError(table string, value interface{}, index string, new, exi
 }
 
 // map of unique values to uuids
-type valueToUUID map[interface{}]string
+type valueToUUIDs map[interface{}]uuidset
 
-// map of column name(s) to a unique values, to UUIDs
-type columnToValue map[index]valueToUUID
+// map of column name(s) to unique values, to UUIDs
+type columnToValue map[index]valueToUUIDs
 
 // index is the type used to implement multiple cache indexes
 type index string
 
-// columns returns the columns that conform the index
-func (i index) columns() []string {
-	return strings.Split(string(i), columnDelimiter)
+// indexType is the type of index
+type indexType uint
+
+const (
+	schemaIndexType indexType = iota
+	clientIndexType
+)
+
+// indexSpec contains details about an index
+type indexSpec struct {
+	index     index
+	columns   []model.ColumnKey
+	indexType indexType
+}
+
+func (s indexSpec) isClientIndex() bool {
+	return s.indexType == clientIndexType
+}
+
+func (s indexSpec) isSchemaIndex() bool {
+	return s.indexType == schemaIndexType
 }
 
 // newIndex builds a index from a list of columns
-func newIndex(columns ...string) index {
+func newIndexFromColumns(columns ...string) index {
+	sort.Strings(columns)
 	return index(strings.Join(columns, columnDelimiter))
+}
+
+// newIndexFromColumnKeys builds a index from a list of column keys
+func newIndexFromColumnKeys(columnsKeys ...model.ColumnKey) index {
+	// RFC 7047 says that Indexes is a [<column-set>] and "Each <column-set> is a set of
+	// columns whose values, taken together within any given row, must be
+	// unique within the table". We'll store the column names, separated by comma
+	// as we'll assume (RFC is not clear), that comma isn't valid in a <id>
+	columns := make([]string, 0, len(columnsKeys))
+	columnsMap := map[string]struct{}{}
+	for _, columnKey := range columnsKeys {
+		var column string
+		if columnKey.Key != nil {
+			column = fmt.Sprintf("%s%s%v", columnKey.Column, keyDelimiter, columnKey.Key)
+		} else {
+			column = columnKey.Column
+		}
+		if _, found := columnsMap[column]; !found {
+			columns = append(columns, column)
+			columnsMap[column] = struct{}{}
+		}
+	}
+	return newIndexFromColumns(columns...)
+}
+
+// newColumnKeysFromColumns builds a list of column keys from a list of columns
+func newColumnKeysFromColumns(columns ...string) []model.ColumnKey {
+	columnKeys := make([]model.ColumnKey, len(columns))
+	for i, column := range columns {
+		columnKeys[i] = model.ColumnKey{Column: column}
+	}
+	return columnKeys
 }
 
 // RowCache is a collections of Models hashed by UUID
 type RowCache struct {
-	name     string
-	dbModel  model.DatabaseModel
-	dataType reflect.Type
-	cache    map[string]model.Model
-	indexes  columnToValue
-	mutex    sync.RWMutex
+	name       string
+	dbModel    model.DatabaseModel
+	dataType   reflect.Type
+	cache      map[string]model.Model
+	indexSpecs []indexSpec
+	indexes    columnToValue
+	mutex      sync.RWMutex
 }
 
 // rowByUUID returns one model from the cache by UUID. Caller must hold the row
@@ -112,31 +166,71 @@ func (r *RowCache) Row(uuid string) model.Model {
 	return r.rowByUUID(uuid)
 }
 
-// RowByModel searches the cache using a the indexes for a provided model
-func (r *RowCache) RowByModel(m model.Model) model.Model {
+func (r *RowCache) rowsByModel(m model.Model, useClientIndexes bool) map[string]model.Model {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 	if reflect.TypeOf(m) != r.dataType {
 		return nil
 	}
 	info, _ := r.dbModel.NewModelInfo(m)
-	uuid, err := info.FieldByColumn("_uuid")
+	field, err := info.FieldByColumn("_uuid")
 	if err != nil {
 		return nil
 	}
-	if uuid.(string) != "" {
-		return r.rowByUUID(uuid.(string))
+	uuid := field.(string)
+	if uuid != "" {
+		row := r.rowByUUID(uuid)
+		if row != nil {
+			return map[string]model.Model{uuid: row}
+		}
 	}
-	for index, vals := range r.indexes {
-		val, err := valueFromIndex(info, index)
+	// indexSpecs are ordered, schema indexes go first, then client indexes
+	for _, indexSpec := range r.indexSpecs {
+		if indexSpec.isClientIndex() && !useClientIndexes {
+			// Given the ordered indexSpecs, we can break here if we reach the
+			// first client index
+			break
+		}
+		val, err := valueFromIndex(info, indexSpec.columns)
 		if err != nil {
 			continue
 		}
-		if uuid, ok := vals[val]; ok {
-			return r.rowByUUID(uuid)
+		vals := r.indexes[indexSpec.index]
+		uuids, ok := vals[val]
+		if !ok || uuids.empty() {
+			continue
 		}
+		results := make(map[string]model.Model, len(uuids))
+		for uuid := range uuids {
+			results[uuid] = r.rowByUUID(uuid)
+		}
+		return results
 	}
 	return nil
+}
+
+// RowByModel searches the cache by UUID and schema indexes. UUID search is
+// performed first. Then schema indexes are evaluated in turn by the same order
+// with which they are defined in the schema. The model for the first matching
+// index is returned along with its UUID. An empty string and nil is returned if
+// no Model is found.
+func (r *RowCache) RowByModel(m model.Model) (string, model.Model) {
+	models := r.rowsByModel(m, false)
+	for uuid, model := range models {
+		return uuid, model
+	}
+	return "", nil
+}
+
+// RowsByModel searches the cache by UUID, schema indexes and client indexes.
+// UUID search is performed first. Schema indexes are evaluated next in turn by
+// the same order with which they are defined in the schema. Finally, client
+// indexes are evaluated in turn by the same order with which they are defined
+// in the client DB model. The models for the first matching index are returned,
+// which might be more than 1 if they were found through a client index since in
+// that case uniqueness is not enforced. Nil is returned if no Model is found.
+func (r *RowCache) RowsByModel(m model.Model) map[string]model.Model {
+	return r.rowsByModel(m, true)
 }
 
 // Create writes the provided content to the cache
@@ -153,25 +247,31 @@ func (r *RowCache) Create(uuid string, m model.Model, checkIndexes bool) error {
 	if err != nil {
 		return err
 	}
-	newIndexes := newColumnToValue(r.dbModel.Schema.Table(r.name).Indexes)
-	for index, vals := range r.indexes {
-		val, err := valueFromIndex(info, index)
+	newIndexes := r.newIndexes()
+	for _, indexSpec := range r.indexSpecs {
+		index := indexSpec.index
+		val, err := valueFromIndex(info, indexSpec.columns)
 		if err != nil {
 			return err
 		}
 
-		if existing, ok := vals[val]; ok && checkIndexes {
-			return NewIndexExistsError(r.name, val, string(index), uuid, existing)
+		vals := r.indexes[index]
+		if existing, ok := vals[val]; ok && !existing.empty() && checkIndexes && indexSpec.isSchemaIndex() {
+			return NewIndexExistsError(r.name, val, string(index), uuid, existing.getAny())
 		}
 
-		newIndexes[index][val] = uuid
+		uuidset := newUUIDSet(uuid)
+		if indexSpec.isSchemaIndex() {
+			newIndexes[index][val] = uuidset
+		} else {
+			newIndexes[index][val] = addUUIDSet(r.indexes[index][val], uuidset)
+		}
 	}
 
 	// write indexes
 	for k1, v1 := range newIndexes {
-		vals := r.indexes[k1]
 		for k2, v2 := range v1 {
-			vals[k2] = v2
+			r.indexes[k1][k2] = v2
 		}
 	}
 	r.cache[uuid] = model.Clone(m)
@@ -194,17 +294,16 @@ func (r *RowCache) Update(uuid string, m model.Model, checkIndexes bool) (model.
 	if err != nil {
 		return nil, err
 	}
-	indexes := r.dbModel.Schema.Table(r.name).Indexes
-	newIndexes := newColumnToValue(indexes)
-	oldIndexes := newColumnToValue(indexes)
+	newIndexes := r.newIndexes()
 	var errs []error
-	for index, vals := range r.indexes {
+	for _, indexSpec := range r.indexSpecs {
+		index := indexSpec.index
 		var err error
-		oldVal, err := valueFromIndex(oldInfo, index)
+		oldVal, err := valueFromIndex(oldInfo, indexSpec.columns)
 		if err != nil {
 			return nil, err
 		}
-		newVal, err := valueFromIndex(newInfo, index)
+		newVal, err := valueFromIndex(newInfo, indexSpec.columns)
 		if err != nil {
 			return nil, err
 		}
@@ -216,34 +315,37 @@ func (r *RowCache) Update(uuid string, m model.Model, checkIndexes bool) (model.
 		// old and new values are NOT the same
 
 		// check that there are no conflicts
-		if conflict, ok := vals[newVal]; ok && checkIndexes && conflict != uuid {
+		vals := r.indexes[index]
+		if existing, ok := vals[newVal]; ok && indexSpec.isSchemaIndex() && checkIndexes && !existing.empty() && !existing.has(uuid) {
 			errs = append(errs, NewIndexExistsError(
 				r.name,
 				newVal,
 				string(index),
 				uuid,
-				conflict,
+				existing.getAny(),
 			))
 		}
 
-		newIndexes[index][newVal] = uuid
-		oldIndexes[index][oldVal] = ""
+		uuidset := newUUIDSet(uuid)
+		if indexSpec.isSchemaIndex() {
+			newIndexes[index][newVal] = uuidset
+			newIndexes[index][oldVal] = nil
+		} else {
+			newIndexes[index][newVal] = addUUIDSet(r.indexes[index][newVal], uuidset)
+			newIndexes[index][oldVal] = substractUUIDSet(r.indexes[index][oldVal], uuidset)
+		}
 	}
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("%+v", errs)
 	}
 	// write indexes
 	for k1, v1 := range newIndexes {
-		vals := r.indexes[k1]
 		for k2, v2 := range v1 {
-			vals[k2] = v2
-		}
-	}
-	// delete old indexes
-	for k1, v1 := range oldIndexes {
-		vals := r.indexes[k1]
-		for k2 := range v1 {
-			delete(vals, k2)
+			if len(v2) == 0 {
+				delete(r.indexes[k1], k2)
+			} else {
+				r.indexes[k1][k2] = v2
+			}
 		}
 	}
 	r.cache[uuid] = model.Clone(m)
@@ -255,22 +357,30 @@ func (r *RowCache) IndexExists(row model.Model) error {
 	if err != nil {
 		return err
 	}
-	uuid, err := info.FieldByColumn("_uuid")
+	field, err := info.FieldByColumn("_uuid")
 	if err != nil {
 		return nil
 	}
-	for index, vals := range r.indexes {
-		val, err := valueFromIndex(info, index)
+	uuid := field.(string)
+	for _, indexSpec := range r.indexSpecs {
+		if !indexSpec.isSchemaIndex() {
+			// Given the ordered indexSpecs, we can break here if we reach the
+			// first non schema index
+			break
+		}
+		index := indexSpec.index
+		val, err := valueFromIndex(info, indexSpec.columns)
 		if err != nil {
 			continue
 		}
-		if existing, ok := vals[val]; ok && existing != uuid.(string) {
+		vals := r.indexes[index]
+		if existing := vals[val]; !existing.empty() && !existing.has(uuid) {
 			return NewIndexExistsError(
 				r.name,
 				val,
 				string(index),
-				uuid.(string),
-				existing,
+				uuid,
+				existing.getAny(),
 			)
 		}
 	}
@@ -289,16 +399,22 @@ func (r *RowCache) Delete(uuid string) error {
 	if err != nil {
 		return err
 	}
-	for index, vals := range r.indexes {
-		oldVal, err := valueFromIndex(oldInfo, index)
+	for _, indexSpec := range r.indexSpecs {
+		index := indexSpec.index
+		oldVal, err := valueFromIndex(oldInfo, indexSpec.columns)
 		if err != nil {
 			return err
 		}
 		// only remove the index if it is pointing to this uuid
 		// otherwise we can cause a consistency issue if we've processed
 		// updates out of order
-		if vals[oldVal] == uuid {
-			delete(vals, oldVal)
+		vals := r.indexes[index]
+		existing, ok := vals[oldVal]
+		if ok {
+			existing.remove(uuid)
+			if len(existing) == 0 {
+				delete(vals, oldVal)
+			}
 		}
 	}
 	delete(r.cache, uuid)
@@ -331,73 +447,277 @@ func (r *RowCache) RowsShallow() map[string]model.Model {
 	return result
 }
 
+// uuidsByConditionsAsIndexes checks possible indexes that can be built with a
+// subset of the provided conditions and returns the uuids for the models that
+// match that subset of conditions. If no conditions could be used as indexes,
+// returns nil. Note that this method does not necessarily match all the
+// provided conditions. Thus the caller is required to evaluate all the
+// conditions against the returned candidates. This is only useful to obtain, as
+// quick as possible, via indexes, a reduced list of candidate models that might
+// match all conditions, which should be better than just evaluating all
+// conditions against all rows of a table.
+//nolint:gocyclo // warns overall function is complex but ignores inner functions
+func (r *RowCache) uuidsByConditionsAsIndexes(conditions []ovsdb.Condition, nativeValues []interface{}) (uuidset, error) {
+	type indexableCondition struct {
+		column      string
+		keys        []interface{}
+		nativeValue interface{}
+	}
+
+	// build an indexable condition, more appropriate for our processing, from
+	// an ovsdb condition. Only equality based conditions can be used as indexes
+	// (or `includes` conditions on map values).
+	toIndexableCondition := func(condition ovsdb.Condition, nativeValue interface{}) *indexableCondition {
+		if condition.Column == "_uuid" {
+			return nil
+		}
+		if condition.Function != ovsdb.ConditionEqual && condition.Function != ovsdb.ConditionIncludes {
+			return nil
+		}
+		v := reflect.ValueOf(nativeValue)
+		if !v.IsValid() {
+			return nil
+		}
+		isSet := v.Kind() == reflect.Slice || v.Kind() == reflect.Array
+		if condition.Function == ovsdb.ConditionIncludes && isSet {
+			return nil
+		}
+		keys := []interface{}{}
+		if v.Kind() == reflect.Map && condition.Function == ovsdb.ConditionIncludes {
+			for _, key := range v.MapKeys() {
+				keys = append(keys, key.Interface())
+			}
+		}
+		return &indexableCondition{
+			column:      condition.Column,
+			keys:        keys,
+			nativeValue: nativeValue,
+		}
+	}
+
+	// for any given set of conditions, we need to check if an index uses the
+	// same fields as the conditions
+	indexMatchesConditions := func(spec indexSpec, conditions []*indexableCondition) bool {
+		columnKeys := []model.ColumnKey{}
+		for _, condition := range conditions {
+			if len(condition.keys) == 0 {
+				columnKeys = append(columnKeys, model.ColumnKey{Column: condition.column})
+				continue
+			}
+			for _, key := range condition.keys {
+				columnKeys = append(columnKeys, model.ColumnKey{Column: condition.column, Key: key})
+			}
+		}
+		index := newIndexFromColumnKeys(columnKeys...)
+		return index == spec.index
+	}
+
+	// for a specific set of conditions, check if an index can be built from
+	// them and return the associated UUIDs
+	evaluateConditionSetAsIndex := func(conditions []*indexableCondition) (uuidset, error) {
+		// build a model with the values from the conditions
+		m, err := r.dbModel.NewModel(r.name)
+		if err != nil {
+			return nil, err
+		}
+		info, err := r.dbModel.NewModelInfo(m)
+		if err != nil {
+			return nil, err
+		}
+		for _, conditions := range conditions {
+			err := info.SetField(conditions.column, conditions.nativeValue)
+			if err != nil {
+				return nil, err
+			}
+		}
+		for _, spec := range r.indexSpecs {
+			if !indexMatchesConditions(spec, conditions) {
+				continue
+			}
+			// if we have an index for those conditions, calculate the index
+			// value. The models mapped to that value match the conditions.
+			v, err := valueFromIndex(info, spec.columns)
+			if err != nil {
+				return nil, err
+			}
+			if v != nil {
+				uuids := r.indexes[spec.index][v]
+				if uuids == nil {
+					// this set of conditions was represented by an index but
+					// had no matches, return an empty set
+					uuids = uuidset{}
+				}
+				return uuids, nil
+			}
+		}
+		return nil, nil
+	}
+
+	// set of uuids that match the conditions as we evaluate them
+	var matching uuidset
+
+	// attempt to evaluate a set of conditions via indexes and intersect the
+	// results against matches of previous sets
+	intersectUUIDsFromConditionSet := func(indexableConditions []*indexableCondition) (bool, error) {
+		uuids, err := evaluateConditionSetAsIndex(indexableConditions)
+		if err != nil {
+			return true, err
+		}
+		if matching == nil {
+			matching = uuids
+		} else if uuids != nil {
+			matching = intersectUUIDSets(matching, uuids)
+		}
+		if matching != nil && len(matching) <= 1 {
+			// if we had no matches or a single match, no point in continuing
+			// searching for additional indexes. If we had a single match, it's
+			// cheaper to just evaluate all conditions on it.
+			return true, nil
+		}
+		return false, nil
+	}
+
+	// First, filter out conditions that cannot be matched against indexes. With
+	// the remaining conditions build all possible subsets (the power set of all
+	// conditions) and for any subset that is an index, intersect the obtained
+	// uuids with the ones obtained from previous subsets
+	matchUUIDsFromConditionsPowerSet := func() error {
+		ps := [][]*indexableCondition{}
+		// prime the power set with a first empty subset
+		ps = append(ps, []*indexableCondition{})
+		for i, condition := range conditions {
+			nativeValue := nativeValues[i]
+			iCondition := toIndexableCondition(condition, nativeValue)
+			// this is not a condition we can use as an index, skip it
+			if iCondition == nil {
+				continue
+			}
+			// the power set is built appending the subsets that result from
+			// adding each item to each of the previous subsets
+			ss := make([][]*indexableCondition, len(ps))
+			for j := range ss {
+				ss[j] = make([]*indexableCondition, len(ps[j]), len(ps[j])+1)
+				copy(ss[j], ps[j])
+				ss[j] = append(ss[j], iCondition)
+				// as we add them to the power set, attempt to evaluate this
+				// subset of conditions as indexes
+				stop, err := intersectUUIDsFromConditionSet(ss[j])
+				if stop || err != nil {
+					return err
+				}
+			}
+			ps = append(ps, ss...)
+		}
+		return nil
+	}
+
+	// finally
+	err := matchUUIDsFromConditionsPowerSet()
+	return matching, err
+}
+
+// RowsByCondition searches models in the cache that match all conditions
 func (r *RowCache) RowsByCondition(conditions []ovsdb.Condition) (map[string]model.Model, error) {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
 	results := make(map[string]model.Model)
 	schema := r.dbModel.Schema.Table(r.name)
+
+	// no conditions matches all rows
 	if len(conditions) == 0 {
-		for uuid, row := range r.Rows() {
-			results[uuid] = row
+		for uuid := range r.cache {
+			results[uuid] = r.rowByUUID(uuid)
 		}
 		return results, nil
 	}
 
+	// one pass to obtain the native values
+	nativeValues := make([]interface{}, 0, len(conditions))
 	for _, condition := range conditions {
-		if condition.Column == "_uuid" {
-			ovsdbUUID, ok := condition.Value.(ovsdb.UUID)
+		tSchema := schema.Column(condition.Column)
+		nativeValue, err := ovsdb.OvsToNative(tSchema, condition.Value)
+		if err != nil {
+			return nil, err
+		}
+		nativeValues = append(nativeValues, nativeValue)
+	}
+
+	// obtain all possible matches using conditions as indexes
+	matching, err := r.uuidsByConditionsAsIndexes(conditions, nativeValues)
+	if err != nil {
+		return nil, err
+	}
+
+	// From the matches obtained with indexes, which might have not used all
+	// conditions, continue trimming down the list explicitly evaluating the
+	// conditions.
+	for i, condition := range conditions {
+		matchingCondition := uuidset{}
+
+		if condition.Column == "_uuid" && (condition.Function == ovsdb.ConditionEqual || condition.Function == ovsdb.ConditionIncludes) {
+			uuid, ok := nativeValues[i].(string)
 			if !ok {
-				panic(fmt.Sprintf("%+v is not an ovsdb uuid", ovsdbUUID))
+				panic(fmt.Sprintf("%+v is not a uuid", nativeValues[i]))
 			}
-			uuid := ovsdbUUID.GoUUID
-			for rowUUID, row := range r.Rows() {
-				ok, err := condition.Function.Evaluate(rowUUID, uuid)
-				if err != nil {
-					return nil, err
-				}
-				if ok {
-					results[rowUUID] = row
-				}
-			}
-		} else if index, err := r.Index(condition.Column); err == nil {
-			for k, rowUUID := range index {
-				tSchema := schema.Columns[condition.Column]
-				nativeValue, err := ovsdb.OvsToNative(tSchema, condition.Value)
-				if err != nil {
-					return nil, err
-				}
-				ok, err := condition.Function.Evaluate(k, nativeValue)
-				if err != nil {
-					return nil, err
-				}
-				if ok {
-					row := r.Row(rowUUID)
-					results[rowUUID] = row
-				}
+			if _, found := r.cache[uuid]; found {
+				matchingCondition.add(uuid)
 			}
 		} else {
-			for uuid, row := range r.Rows() {
+			matchCondition := func(uuid string) error {
+				row := r.cache[uuid]
 				info, err := r.dbModel.NewModelInfo(row)
 				if err != nil {
-					return nil, err
+					return err
 				}
 				value, err := info.FieldByColumn(condition.Column)
 				if err != nil {
-					return nil, err
+					return err
 				}
-				tSchema := schema.Columns[condition.Column]
-				nativeValue, err := ovsdb.OvsToNative(tSchema, condition.Value)
+				ok, err := condition.Function.Evaluate(value, nativeValues[i])
 				if err != nil {
-					return nil, err
-				}
-				ok, err := condition.Function.Evaluate(value, nativeValue)
-				if err != nil {
-					return nil, err
+					return err
 				}
 				if ok {
-					results[uuid] = row
+					matchingCondition.add(uuid)
+				}
+				return nil
+			}
+			if matching != nil {
+				// we just need to consider rows that matched previous
+				// conditions
+				for uuid := range matching {
+					err = matchCondition(uuid)
+					if err != nil {
+						return nil, err
+					}
+				}
+			} else {
+				// If this is the first condition we are able to check, just run
+				// it by whole table
+				for uuid := range r.cache {
+					err = matchCondition(uuid)
+					if err != nil {
+						return nil, err
+					}
 				}
 			}
 		}
+		if matching == nil {
+			matching = matchingCondition
+		} else {
+			matching = intersectUUIDSets(matching, matchingCondition)
+		}
+		if matching.empty() {
+			// no models match the conditions checked up to now, no need to
+			// check remaining conditions
+			break
+		}
 	}
+
+	for uuid := range matching {
+		results[uuid] = r.rowByUUID(uuid)
+	}
+
 	return results, nil
 }
 
@@ -408,14 +728,19 @@ func (r *RowCache) Len() int {
 	return len(r.cache)
 }
 
-func (r *RowCache) Index(columns ...string) (map[interface{}]string, error) {
+func (r *RowCache) Index(columns ...string) (map[interface{}][]string, error) {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
-	index, ok := r.indexes[newIndex(columns...)]
+	spec := newIndexFromColumns(columns...)
+	index, ok := r.indexes[spec]
 	if !ok {
-		return nil, fmt.Errorf("%s is not an index", index)
+		return nil, fmt.Errorf("%v is not an index", columns)
 	}
-	return index, nil
+	dbIndex := make(map[interface{}][]string, len(index))
+	for k, v := range index {
+		dbIndex[k] = v.list()
+	}
+	return dbIndex, nil
 }
 
 // EventHandler can handle events when the contents of the cache changes
@@ -754,29 +1079,49 @@ func (t *TableCache) Run(stopCh <-chan struct{}) {
 // newRowCache creates a new row cache with the provided data
 // if the data is nil, and empty RowCache will be created
 func newRowCache(name string, dbModel model.DatabaseModel, dataType reflect.Type) *RowCache {
+	schemaIndexes := dbModel.Schema.Table(name).Indexes
+	clientIndexes := dbModel.Client().Indexes(name)
+
 	r := &RowCache{
-		name:     name,
-		dbModel:  dbModel,
-		indexes:  newColumnToValue(dbModel.Schema.Table(name).Indexes),
-		dataType: dataType,
-		cache:    make(map[string]model.Model),
-		mutex:    sync.RWMutex{},
+		name:       name,
+		dbModel:    dbModel,
+		indexSpecs: make([]indexSpec, 0, len(schemaIndexes)+len(clientIndexes)),
+		dataType:   dataType,
+		cache:      make(map[string]model.Model),
+		mutex:      sync.RWMutex{},
 	}
+
+	// respect the order of indexes, add first schema indexes, then client
+	// indexes
+	indexes := map[index]indexSpec{}
+	for _, columns := range schemaIndexes {
+		columnKeys := newColumnKeysFromColumns(columns...)
+		index := newIndexFromColumnKeys(columnKeys...)
+		spec := indexSpec{index: index, columns: columnKeys, indexType: schemaIndexType}
+		r.indexSpecs = append(r.indexSpecs, spec)
+		indexes[index] = spec
+	}
+	for _, clientIndex := range clientIndexes {
+		columnKeys := clientIndex.Columns
+		index := newIndexFromColumnKeys(columnKeys...)
+		// if this is already a DB index, ignore
+		if _, ok := indexes[index]; ok {
+			continue
+		}
+		spec := indexSpec{index: index, columns: columnKeys, indexType: clientIndexType}
+		r.indexSpecs = append(r.indexSpecs, spec)
+		indexes[index] = spec
+	}
+
+	r.indexes = r.newIndexes()
 	return r
 }
 
-func newColumnToValue(schemaIndexes [][]string) columnToValue {
-	// RFC 7047 says that Indexes is a [<column-set>] and "Each <column-set> is a set of
-	// columns whose values, taken together within any given row, must be
-	// unique within the table". We'll store the column names, separated by comma
-	// as we'll assume (RFC is not clear), that comma isn't valid in a <id>
-	var indexes []index
-	for i := range schemaIndexes {
-		indexes = append(indexes, newIndex(schemaIndexes[i]...))
-	}
+func (r *RowCache) newIndexes() columnToValue {
 	c := make(columnToValue)
-	for _, index := range indexes {
-		c[index] = make(valueToUUID)
+	for _, indexSpec := range r.indexSpecs {
+		index := indexSpec.index
+		c[index] = make(valueToUUIDs)
 	}
 	return c
 }
@@ -1061,13 +1406,12 @@ func (t *TableCache) ApplyModifications(tableName string, base model.Model, upda
 	return modified, nil
 }
 
-func valueFromIndex(info *mapper.Info, index index) (interface{}, error) {
-	columns := index.columns()
-	if len(columns) > 1 {
+func valueFromIndex(info *mapper.Info, columnKeys []model.ColumnKey) (interface{}, error) {
+	if len(columnKeys) > 1 {
 		var buf bytes.Buffer
 		enc := gob.NewEncoder(&buf)
-		for _, column := range columns {
-			val, err := info.FieldByColumn(column)
+		for _, columnKey := range columnKeys {
+			val, err := valueFromColumnKey(info, columnKey)
 			if err != nil {
 				return "", err
 			}
@@ -1080,9 +1424,37 @@ func valueFromIndex(info *mapper.Info, index index) (interface{}, error) {
 		val := hex.EncodeToString(h.Sum(buf.Bytes()))
 		return val, nil
 	}
-	val, err := info.FieldByColumn(columns[0])
+	val, err := valueFromColumnKey(info, columnKeys[0])
+	if err != nil {
+		return "", err
+	}
+	return val, err
+}
+
+func valueFromColumnKey(info *mapper.Info, columnKey model.ColumnKey) (interface{}, error) {
+	val, err := info.FieldByColumn(columnKey.Column)
 	if err != nil {
 		return nil, err
 	}
+	if columnKey.Key != nil {
+		val, err = valueFromMap(val, columnKey.Key)
+		if err != nil {
+			return "", fmt.Errorf("can't get key value from map: %v", err)
+		}
+	}
 	return val, err
+}
+
+func valueFromMap(aMap interface{}, key interface{}) (interface{}, error) {
+	m := reflect.ValueOf(aMap)
+	if m.Kind() != reflect.Map {
+		return nil, fmt.Errorf("expected map but got %s", m.Kind())
+	}
+	v := m.MapIndex(reflect.ValueOf(key))
+	if !v.IsValid() {
+		// return the zero value for the map value type
+		return reflect.Indirect(reflect.New(m.Type().Elem())).Interface(), nil
+	}
+
+	return v.Interface(), nil
 }

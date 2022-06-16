@@ -7,10 +7,14 @@ import (
 )
 
 // CreateOrUpdateMacBinding creates or updates the provided mac binding
-func CreateOrUpdateMacBinding(sbClient libovsdbclient.Client, mb *sbdb.MACBinding) error {
+func CreateOrUpdateMacBinding(sbClient libovsdbclient.Client, mb *sbdb.MACBinding, fields ...interface{}) error {
+	if len(fields) == 0 {
+		fields = onModelUpdatesAllNonDefault()
+	}
+
 	opModel := operationModel{
 		Model:          mb,
-		OnModelUpdates: onModelUpdatesAll(),
+		OnModelUpdates: fields,
 		ErrNotFound:    false,
 		BulkOp:         false,
 	}

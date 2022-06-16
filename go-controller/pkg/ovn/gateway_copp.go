@@ -73,7 +73,8 @@ func EnsureDefaultCOPP(nbClient libovsdbclient.Client) (string, error) {
 			Fair: &meterFairness,
 			Unit: types.PacketsPerSecond,
 		}
-		ops, err = libovsdbops.CreateOrUpdateMeterOps(nbClient, ops, meter, band)
+		ops, err = libovsdbops.CreateOrUpdateMeterOps(nbClient, ops, meter, []*nbdb.MeterBand{band},
+			&meter.Bands, &meter.Fair, &meter.Unit)
 		if err != nil {
 			return "", fmt.Errorf("can't create meter %v: %v", meter, err)
 		}
