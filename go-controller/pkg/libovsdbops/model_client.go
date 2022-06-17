@@ -327,7 +327,7 @@ func (m *modelClient) buildOps(ops []ovsdb.Operation, doWhenFound opModelToOpMap
 
 /*
  create does a bit more than just "create". create needs to set the generated
- UUID (because if this function is called we know the item does not exists yet)
+ UUID (because if this function is called we know the item does not exist yet)
  then create the item. Generates an until clause and uses a wait operation to avoid
  https://bugzilla.redhat.com/show_bug.cgi?id=2042001
 */

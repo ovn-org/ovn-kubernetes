@@ -187,6 +187,14 @@ OVN Kubernetes implements both External IPs and LoadBalancer Ingress IPs in the 
 OVN load balancers. It is the administrator's responsibility to route traffic to the Kubernetes nodes for
 both of these VIP types.
 
+[EgressQoS](./docs/egress-qos.md)
+The EgressQoS feature enables marking pods egress traffic with a valid QoS Differentiated Services Code Point (DSCP) value.
+The QoS markings will be consumed and acted upon by network appliances outside of the Kubernetes cluster
+to optimize traffic flow throughout their networks.
+
+[Metrics](./docs/metrics.md)
+includes a description of a selective set of metrics.
+
 ## Other
 [Unit test mocks](./docs/mocks-ut-faq.md)
 

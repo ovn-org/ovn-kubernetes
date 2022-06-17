@@ -320,7 +320,7 @@ func (as *ovnAddressSets) GetName() string {
 }
 
 // SetIPs replaces the address set's IP addresses with the given slice.
-// NOTE: this function is not thread-safe when when run concurrently with other
+// NOTE: this function is not thread-safe when run concurrently with other
 // IP add/delete operations.
 func (as *ovnAddressSets) SetIPs(ips []net.IP) error {
 	var err error

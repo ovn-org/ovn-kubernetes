@@ -60,61 +60,61 @@ spec:
 ```
 **OVN-Implementation:**
 
-Every new NetworkPolicy creates a port group named `FOO_bar` where `FOO` is the policy's Namespace and `bar` is the policy's name.  All pods that the policy's `podSelector` selects are added to the port group.
+Every new NetworkPolicy creates a port group named `<namespace>_<policyName>`.  All pods that the policy's `podSelector` selects are added to the port group.
 
-Additionally, two global deny PortGroups are also used, specifially: `IngressDefaultDeny` and `EgressDefaultDeny`.  Any pod selected by a NetworkPolicy in any Namespace is added to these PortGroups.
+Additionally, two deny PortGroups are created per-namespace, specifically: `<hashedNamespace>_IngressDefaultDeny` and `<hashedNamespace>_EgressDefaultDeny`.  Any pod selected by any NetworkPolicy in a Namespace is added to these PortGroups.
 
 subset of `ovn-nbctl find port-group`
 ```
-    _uuid               : 1deeac49-e87e-4e05-9324-beb8ef0dcef4
-    acls                : [3f864884-cdb7-44be-a60e-e4f743afc9d0, f174fcf1-a7c2-496d-9b96-136aaccc014f]
-    external_ids        : {name=ingressDefaultDeny}
-    name                : ingressDefaultDeny
-    ports               : [ce1bc4e5-0309-463f-9fd1-80f6e487e2d4]
+_uuid               : bfb3a7a9-fb30-4b94-afc5-8c28345cb8f4
+acls                : [10f1baf9-2b4f-4947-9597-8e7159932977, 25614d28-0138-40c4-b331-2098a29042b9]
+external_ids        : {name=a16982411286042166782_egressDefaultDeny}
+name                : a16982411286042166782_egressDefaultDeny
+ports               : []
 
-    _uuid               : 5249b7a2-36bf-4246-98ea-13d5c5e17c68
-    acls                : [36ed4154-71ab-4b8f-8119-5c4cc92708d9, c6663e29-99d0-4410-a2ff-f694a896a035]
-    external_ids        : {name=egressDefaultDeny}
-    name                : egressDefaultDeny
-    ports               : []
-
+_uuid               : dba665da-fb88-407c-837c-8b754ded2415
+acls                : [825f2270-3873-4478-aecb-8f28f49a6b92, 843fa1b7-8d59-4b2c-9a92-a4e7113492bf]
+external_ids        : {name=a16982411286042166782_ingressDefaultDeny}
+name                : a16982411286042166782_ingressDefaultDeny
+ports               : []
 ```
 
-Two ACLs (four total) are added to each PortGroup:
+Two ACLs (four total) are added to each DefaultDeny PortGroup:
 
-1. a drop policy with `priority=1000` and `direction=to-lport`
+1. a drop policy with `priority=9100`, `direction=to-lport`, and `name=<namespace>_<e/in>gressDefaultDeny`
 
 subset of `ovn-nbctl find ACL` 
 ```
-   _uuid               : f174fcf1-a7c2-496d-9b96-136aaccc014f
-    action              : drop
-    direction           : to-lport
-    external_ids        : {default-deny-policy-type=Ingress}
-    log                 : false
-    match               : "outport == @ingressDefaultDeny"
-    meter               : []
-    name                : []
-    priority            : 1000
-    severity            : []
-
-
+_uuid               : 825f2270-3873-4478-aecb-8f28f49a6b92
+action              : drop
+direction           : to-lport
+external_ids        : {default-deny-policy-type=Ingress}
+label               : 0
+log                 : false
+match               : "outport == @a16982411286042166782_ingressDefaultDeny"
+meter               : acl-logging
+name                : default_ingressDefaultDeny
+options             : {}
+priority            : 9100
+severity            : info
 ```
 
-2. an allow policy for ARP traffic with `priority=1001`, `direction=to-lport`, and `match=arp`
+2. an allow policy for ARP traffic with `priority=9101`, `direction=to-lport`, `match=arp`, and `name=<namespace>_ARPallowPolicy`
 
 subset of `ovn-nbctl find ACL` 
 ```
-_uuid               : 3f864884-cdb7-44be-a60e-e4f743afc9d0
+_uuid               : 843fa1b7-8d59-4b2c-9a92-a4e7113492bf
 action              : allow
 direction           : to-lport
 external_ids        : {default-deny-policy-type=Ingress}
+label               : 0
 log                 : false
-match               : "outport == @ingressDefaultDeny && arp"
-meter               : []
-name                : []
-priority            : 1001
-severity            : []
-
+match               : "outport == @a16982411286042166782_ingressDefaultDeny && (arp || nd)"
+meter               : acl-logging
+name                : default_ARPallowPolicy
+options             : {}
+priority            : 9101
+severity            : info
 ```
 
 ## **Applying the network policy to specific pods using `spec.podSelector`**
@@ -222,57 +222,57 @@ Rules defined in `spec.Egress` can match on two main sections, 1.`spec.Egress.to
 
   Notice the pod `client1` and Namespace `default` are labeled with `app=demo`
 
-  ```
-  [astoycos@localhost demo]$ kubectl get pods -o wide --show-labels --all-namespaces
-  NAMESPACE            NAME                                        READY   STATUS    RESTARTS   AGE     IP           NODE                NOMINATED NODE   READINESS GATES   LABELS
-  default              client1                                     1/1     Running   0          5m5s    10.244.2.5   ovn-worker          <none>           <none>            app=demo
-  default              client2                                     1/1     Running   0          4m59s   10.244.1.4   ovn-worker2         <none>           <none>            <none>
-  demo                 server                                      1/1     Running   0          42s     10.244.2.6   ovn-worker          <none>           <none>            <none>
-  ```
+```
+[astoycos@localhost demo]$ kubectl get pods -o wide --show-labels --all-namespaces
+NAMESPACE            NAME                                        READY   STATUS    RESTARTS   AGE   IP           NODE                NOMINATED NODE   READINESS GATES   LABELS
+default              client1                                     1/1     Running   0          24s   10.244.1.6   ovn-worker          <none>           <none>            app=demo
+default              client2                                     1/1     Running   0          24s   10.244.0.7   ovn-worker2         <none>           <none>            <none>
+demo                 server                                      1/1     Running   0          24s   10.244.1.7   ovn-worker          <none>           <none>            <none>
+```
 
-  ```
-  [astoycos@localhost demo]$ kubectl get namespace --show-labels
-  NAME                 STATUS   AGE   LABELS
-  default              Active   94m   ns=default
-  demo                 Active   66m   <none>
-  ```
+```
+[astoycos@localhost demo]$ kubectl get namespace --show-labels
+NAME                 STATUS   AGE   LABELS
+default              Active   40m   kubernetes.io/metadata.name=default
+demo                 Active   10m   kubernetes.io/metadata.name=demo
+```
 
   Before applying the following network policy both pods `client1` and `client2` can reach the `server` pod
 
-  ``` 
-  apiVersion: networking.k8s.io/v1
-  kind: NetworkPolicy
-  metadata:
-    name: allow-from-client
-  spec:
-    podSelector: {}
-    policyTypes:
-    - Ingress
-    ingress:
-    - from:
-      - namespaceSelector:
-          matchLabels:
-            ns: default
-        podSelector:
-          matchLabels:
-            app: demo
-  ```
+``` 
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+ name: allow-from-client
+spec:
+ podSelector: {}
+ policyTypes:
+ - Ingress
+ ingress:
+ - from:
+   - namespaceSelector:
+       matchLabels:
+         kubernetes.io/metadata.name: default
+     podSelector:
+       matchLabels:
+         app: demo
+```
 
-  after applying this Network policy in Namespace `demo` (`oc create -n demo -f policy.yaml`) only the pod `client1` can reach the `server` pod 
+  after applying this Network policy in Namespace `demo` only the pod `client1` can reach the `server` pod 
 
   NOTE: in the above definition there is only a single `from` element allowing connections from Pods labeled `app=demo` in Namespaces with the label `app=demo`
 
   if the from section was applied as follows 
 
-  ```
-  - from:
-      - namespaceSelector:
-          matchLabels:
-            ns: demo
-      - podSelector:
-          matchLabels:
-            app: demo
-  ``` 
+```
+- from:
+   - namespaceSelector:
+       matchLabels:
+         kubernetes.io/metadata.name: demo
+   - podSelector:
+       matchLabels:
+         app: demo
+``` 
   Then there would be two elements in the `from` array which allows connections from Pods labeled `app=demo` **OR** and Pod from Namespaces with the label `app=demo`
 
   Now let's have a look at some of the OVN resources that are created along with this Network Policy 
@@ -281,85 +281,71 @@ Rules defined in `spec.Egress` can match on two main sections, 1.`spec.Egress.to
 
   **ovn-worker**
 
-  ```
-  [root@ovn-control-plane ~]# ovn-nbctl lsp-list ovn-worker
-  edb290cf-b250-4699-b102-7acbb6300dc9 (default_client1)
-  c754a19d-1e8c-4415-99b9-66fdcdaed196 (demo_server)
-  24c789a2-fc4b-42a5-bb16-5b1c19490b50 (k8s-ovn-worker)
-  484b2004-a5c1-447c-b857-eb8e524a73f3 (kube-system_coredns-f9fd979d6-qp6xd)
-  45163af0-08c2-4d42-9fc7-7b0ddc935bd8 (local-path-storage_local-path-provisioner-78776bfc44-lgzdf)
-  0bb378f1-4e89-46a8-a455-7a891f64c7c8 (stor-ovn-worker)
-  ```
+```
+[root@ovn-control-plane ~]# ovn-nbctl lsp-list ovn-worker
+97ebaf37-aa18-4f0c-aeb2-e2a22deb5222 (default_client1)
+9f15cc4a-a6ff-47d8-97ae-ae3d1a229fc1 (demo_server)
+```
   **ovn-worker2**
 
-  ```
-  [root@ovn-control-plane ~]# ovn-nbctl lsp-list ovn-worker2
-  d5030b96-1163-4ed0-90f8-41b3831d2a0b (default_client2)
-  4da8fb64-0a43-4d76-a7ba-18941c078862 (k8s-ovn-worker2)
-  37f58eeb-8c1a-437b-8b21-bcc1337b2e3f (kube-system_coredns-f9fd979d6-628xd)
-  65019041-51b2-4599-913d-7f01c8eaa394 (stor-ovn-worker2)
-  ```
+```
+[root@ovn-control-plane ~]# ovn-nbctl lsp-list ovn-worker2
+5114f0d8-3e2b-452a-a860-1bcc3f049107 (default_client2)
+```
 
   **Port Groups** 
 
-  ```
-  [root@ovn-control-plane ~]# ovn-nbctl find port-group
-  _uuid               : 2b74086c-9986-4f4d-8c97-3388625230e9
-  acls                : []
-  external_ids        : {name=clusterPortGroup}
-  name                : clusterPortGroup
-  ports               : [24c789a2-fc4b-42a5-bb16-5b1c19490b50, 4da8fb64-0a43-4d76-a7ba-18941c078862, e556e329-d624-473a-8827-f022c17a8f60]
+```
+[root@ovn-control-plane ~]# ovn-nbctl find port-group
+_uuid               : 4d41cdb1-3b42-4f6a-bc12-df9929f1807c
+acls                : [6a4f872b-2878-42f0-8f43-141d75c36ea5, 8529af47-44c3-4cd5-b141-8c5ec05c9e8d]
+external_ids        : {name=a11953709441258804118_ingressDefaultDeny}
+name                : a11953709441258804118_ingressDefaultDeny
+ports               : [9f15cc4a-a6ff-47d8-97ae-ae3d1a229fc1]
 
-  _uuid               : a132ecce-dbca-4989-87f7-96e2f0b62a2c
-  acls                : [b4e57f83-8b8f-4b37-b5e5-1f82704c49c4]
-  external_ids        : {name=demo_allow-from-client}
-  name                : a13757631697825269621
-  ports               : [c754a19d-1e8c-4415-99b9-66fdcdaed196]
+_uuid               : bd02a185-3c0d-4859-8667-056e9abe973a
+acls                : [3a66eef8-295d-4927-95cf-202f4ac73fab]
+external_ids        : {name=demo_allow-from-client}
+name                : a13757631697825269621
+ports               : [9f15cc4a-a6ff-47d8-97ae-ae3d1a229fc1]
 
-  _uuid               : a32d9dda-d7fb-4ae8-b6a9-3af17d62aa7f
-  acls                : [510d797c-6302-4171-8a08-eeaab67063f4, f9079cce-29aa-4d1b-b36b-ca39933ad4e6]
-  external_ids        : {name=ingressDefaultDeny}
-  name                : ingressDefaultDeny
-  ports               : [c754a19d-1e8c-4415-99b9-66fdcdaed196]
+_uuid               : d28d207f-3599-4493-a63e-fd6b9ae1d58c
+acls                : [172625a3-fed8-4075-8d79-b1c79114bf56, 4bad07cf-9878-4dd9-8b1b-840a28f25db1]
+external_ids        : {name=a11953709441258804118_egressDefaultDeny}
+name                : a11953709441258804118_egressDefaultDeny
+ports               : []
 
-  _uuid               : 896a80ff-46f7-4837-a105-7b52cee0c625
-  acls                : [660b10ea-0f2e-49cb-b620-ca4218e87ac6, 9bb634ff-cb69-44b6-a64d-09147cf337b5]
-  external_ids        : {name=egressDefaultDeny}
-  name                : egressDefaultDeny
-  ports               : []
-  ```
+```
 
   Notice that the port corresponding to the pod `server` is included in the `ingressDefaultDeny` port group 
 
   To bypass the ingress default deny and allow traffic from pod `client1` in Namespace `demo` as specificed in the network policy, an address set is created containing the ip address for the pod `client1`  
 
   subset of `ovn-nbctl find address_set` 
-  ```
-
-  _uuid               : 7dc68ee9-9628-4a6a-83f0-a92bfa0970c6
-  addresses           : ["10.244.2.5"]
-  external_ids        : {name=demo.allow-from-client.ingress.0_v4}
-  name                : a14783882619065065142
-
-  ```
+```
+_uuid               : 70fca3fd-4b38-4c09-b39c-8c1ac345f9ca
+addresses           : ["10.244.1.6"]
+external_ids        : {name=demo.allow-from-client.ingress.0_v4}
+name                : a14783882619065065142
+```
 
   Finally we can see the ingress ACL that allows traffic to the `server` pod by allowing `ip4.src` traffic **FROM** the address's in the address set `a14783882619065065142` **TO** the port group `@a13757631697825269621` which contains the port `c754a19d-1e8c-4415-99b9-66fdcdaed196` (corresponding to the `server`'s logical port)
 
   subset of `ovn-nbctl find ACL`
-  ```
-
-  _uuid               : b4e57f83-8b8f-4b37-b5e5-1f82704c49c4
-  action              : allow-related
-  direction           : to-lport
-  external_ids        : {Ingress_num="0", ipblock_cidr="false", l4Match=None, namespace=demo, policy=allow-from-client, policy_type=Ingress}
-  log                 : false
-  match               : "ip4.src == {$a14783882619065065142} && outport == @a13757631697825269621"
-  meter               : []
-  name                : []
-  priority            : 1001
-  severity            : []
-
-  ```
+```
+_uuid               : 3a66eef8-295d-4927-95cf-202f4ac73fab
+action              : allow-related
+direction           : to-lport
+external_ids        : {Ingress_num="0", ipblock_cidr="false", l4Match=None, namespace=demo, policy=allow-from-client, policy_type=Ingress}
+label               : 0
+log                 : false
+match               : "ip4.src == {$a14783882619065065142} && outport == @a13757631697825269621"
+meter               : acl-logging
+name                : demo_allow-from-client_0
+options             : {}
+priority            : 9101
+severity            : info
+```
 
 TODO: Add more examples(good for first PRs), specifically replicate above scenario by matching on the pod's network(`ip_block`) rather than the pod itself 
 
