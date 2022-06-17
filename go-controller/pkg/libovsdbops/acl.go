@@ -54,7 +54,8 @@ func FindACLsWithPredicate(nbClient libovsdbclient.Client, p aclPredicate) ([]*n
 }
 
 // BuildACL builds an ACL with empty optional properties unset
-func BuildACL(name string, direction nbdb.ACLDirection, priority int, match string, action nbdb.ACLAction, meter string, severity nbdb.ACLSeverity, log bool, externalIds map[string]string, options map[string]string) *nbdb.ACL {
+func BuildACL(name string, direction nbdb.ACLDirection, priority int, match string, action nbdb.ACLAction, meter string,
+	severity nbdb.ACLSeverity, log bool, externalIds map[string]string, options map[string]string) *nbdb.ACL {
 	name = fmt.Sprintf("%.63s", name)
 
 	var realName *string
@@ -83,6 +84,15 @@ func BuildACL(name string, direction nbdb.ACLDirection, priority int, match stri
 	}
 
 	return acl
+}
+
+func UpdateACLLogging(acl *nbdb.ACL, severity nbdb.ACLSeverity, log bool) {
+	var realSeverity *string
+	if len(severity) != 0 {
+		realSeverity = &severity
+	}
+	acl.Severity = realSeverity
+	acl.Log = log
 }
 
 // CreateOrUpdateACLsOps creates or updates the provided ACLs returning the
@@ -138,8 +148,9 @@ func UpdateACLsLoggingOps(nbClient libovsdbclient.Client, ops []libovsdb.Operati
 	return modelClient.CreateOrUpdateOps(ops, opModels...)
 }
 
-// DeleteACLs deletes the provided ACLs
-func DeleteACLs(nbClient libovsdbclient.Client, acls ...*nbdb.ACL) error {
+// DeleteACLsOps deletes the provided ACLs and returns the
+// corresponding ops
+func DeleteACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, acls ...*nbdb.ACL) ([]libovsdb.Operation, error) {
 	opModels := make([]operationModel, 0, len(acls))
 	for i := range acls {
 		// can't use i in the predicate, for loop replaces it in-memory
@@ -154,5 +165,16 @@ func DeleteACLs(nbClient libovsdbclient.Client, acls ...*nbdb.ACL) error {
 	}
 
 	modelClient := newModelClient(nbClient)
-	return modelClient.Delete(opModels...)
+	return modelClient.DeleteOps(ops, opModels...)
+}
+
+// DeleteACLs deletes the provided ACLs
+func DeleteACLs(nbClient libovsdbclient.Client, acls ...*nbdb.ACL) error {
+	ops, err := DeleteACLsOps(nbClient, nil, acls...)
+	if err != nil {
+		return err
+	}
+
+	_, err = TransactAndCheck(nbClient, ops)
+	return err
 }

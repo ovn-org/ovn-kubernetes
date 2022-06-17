@@ -96,33 +96,37 @@ func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayIn
 	defer nsUnlock()
 
 	if ops, err = nsInfo.addressSet.AddIPsReturnOps(createIPAddressSlice(ips)); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("failed to get add ips to address set ops: %v", err)
 	}
-
 	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), ops, nil
 }
 
 func (oc *Controller) deletePodFromNamespace(ns string, podIfAddrs []*net.IPNet, portUUID string) ([]ovsdb.Operation, error) {
+	var ops []ovsdb.Operation
+	var op []ovsdb.Operation
+	var err error
+	ops, err = oc.podDeleteEgressFirewall(ns, portUUID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete port from egress firewall: %v", err)
+	}
 	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
 	if nsInfo == nil {
-		return nil, nil
+		return ops, nil
 	}
 	defer nsUnlock()
-	var ops []ovsdb.Operation
-	var err error
 	if nsInfo.addressSet != nil {
-		if ops, err = nsInfo.addressSet.DeleteIPsReturnOps(createIPAddressSlice(podIfAddrs)); err != nil {
-			return nil, err
+		op, err = nsInfo.addressSet.DeleteIPsReturnOps(createIPAddressSlice(podIfAddrs))
+		if err != nil {
+			return nil, fmt.Errorf("failed to delete port from namespace address set: %v", err)
 		}
+		ops = append(ops, op...)
 	}
-
 	// Remove the port from the multicast allow policy.
 	if oc.multicastSupport && nsInfo.multicastEnabled && len(portUUID) > 0 {
 		if err = podDeleteAllowMulticastPolicy(oc.nbClient, ns, portUUID); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to delete port from allow multicast policy: %v", err)
 		}
 	}
-
 	return ops, nil
 }
 
@@ -327,7 +331,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		}
 		// Trigger an egress fw logging update - this will only happen if an egress firewall exists for the NS, otherwise
 		// this will not do anything.
-		updated, err := oc.refreshEgressFirewallLogging(old.Name)
+		updated, err := oc.updateACLLoggingForEgressFirewall(old.Name, nsInfo)
 		if err != nil {
 			klog.Warningf(err.Error())
 		} else if updated {

@@ -84,32 +84,75 @@ func (e *EgressDNS) Add(namespace, dnsName string) (addressset.AddressSet, error
 
 }
 
-func (e *EgressDNS) Delete(namespace string) error {
+func (e *EgressDNS) deleteNamespace(namespace, dnsName string, dnsEntry *dnsEntry) (entryDeleted bool, err error) {
+	entryDeleted = false
+	// delete the dnsEntry
+	delete(dnsEntry.namespaces, namespace)
+	if len(dnsEntry.namespaces) == 0 {
+		// the dnsEntry appears in no other namespace, so delete the address_set
+		err = dnsEntry.dnsAddressSet.Destroy()
+		if err != nil {
+			return entryDeleted, fmt.Errorf("error deleting EgressFirewall AddressSet for dnsName: %s %v", dnsName, err)
+		}
+		// the dnsEntry is no longer needed because nothing references it, so delete it
+		delete(e.dnsEntries, dnsName)
+		entryDeleted = true
+	}
+	return entryDeleted, nil
+}
+
+func (e *EgressDNS) deleteDnsName(dnsName string) {
+	e.dns.Delete(dnsName)
+	// send a message to the "deleted" buffered channel so that Run() stops using
+	// the deleted domain name. (channel is buffered so that sending values to it
+	// blocks only if Run() is busy updating its internal values)
+	e.deleted <- dnsName
+}
+
+func (e *EgressDNS) DeleteNamespace(namespace string) error {
 	e.lock.Lock()
 	var dnsNamesToDelete []string
 
 	// go through all dnsNames for namespaces
 	for dnsName, dnsEntry := range e.dnsEntries {
-		// delete the dnsEntry
-		delete(dnsEntry.namespaces, namespace)
-		if len(dnsEntry.namespaces) == 0 {
-			// the dnsEntry appears in no other namespace, so delete the address_set
-			err := dnsEntry.dnsAddressSet.Destroy()
-			if err != nil {
-				return fmt.Errorf("error deleting EgressFirewall AddressSet for dnsName: %s %v", dnsName, err)
-			}
-			// the dnsEntry is no longer needed because nothing references it, so delete it
-			delete(e.dnsEntries, dnsName)
+		entryDeleted, err := e.deleteNamespace(namespace, dnsName, dnsEntry)
+		if err != nil {
+			e.lock.Unlock()
+			return err
+		}
+		if entryDeleted {
 			dnsNamesToDelete = append(dnsNamesToDelete, dnsName)
 		}
 	}
 	e.lock.Unlock()
 	for _, name := range dnsNamesToDelete {
-		e.dns.Delete(name)
-		// send a message to the "deleted" buffered channel so that Run() stops using
-		// the deleted domain name. (channel is buffered so that sending values to it
-		// blocks only if Run() is busy updating its internal values)
-		e.deleted <- name
+		e.deleteDnsName(name)
+	}
+	return nil
+}
+
+func (e *EgressDNS) UpdateNamespace(namespace string, dnsNames map[string]bool) error {
+	e.lock.Lock()
+	var dnsNamesToDelete []string
+
+	// go through all dnsNames for namespaces
+	for dnsName, dnsEntry := range e.dnsEntries {
+		if !dnsNames[dnsName] {
+			if _, ok := dnsEntry.namespaces[namespace]; ok {
+				entryDeleted, err := e.deleteNamespace(namespace, dnsName, dnsEntry)
+				if err != nil {
+					e.lock.Unlock()
+					return err
+				}
+				if entryDeleted {
+					dnsNamesToDelete = append(dnsNamesToDelete, dnsName)
+				}
+			}
+		}
+	}
+	e.lock.Unlock()
+	for _, name := range dnsNamesToDelete {
+		e.deleteDnsName(name)
 	}
 	return nil
 }

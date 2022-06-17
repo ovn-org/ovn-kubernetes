@@ -400,7 +400,7 @@ func TestDelete(t *testing.T) {
 				}
 			}
 			_, dnsResolves, _ := res.getDNSEntry(tc.dnsName)
-			res.Delete("addNamespace")
+			res.DeleteNamespace("addNamespace")
 			for stay, timeout := true, time.After(10*time.Second); stay; {
 				_, dnsResolves, _ = res.getDNSEntry(tc.dnsName)
 				if dnsResolves == nil {

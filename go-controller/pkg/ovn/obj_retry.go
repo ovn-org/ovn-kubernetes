@@ -802,7 +802,7 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 	case factory.EgressFirewallType:
 		var err error
 		egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
-		if err = oc.addEgressFirewall(egressFirewall); err != nil {
+		if err = oc.ensureEgressFirewall(egressFirewall); err != nil {
 			egressFirewall.Status.Status = egressFirewallAddError
 		} else {
 			egressFirewall.Status.Status = egressFirewallAppliedCorrectly
@@ -990,6 +990,9 @@ func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj i
 		oldCloudPrivateIPConfig := oldObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		newCloudPrivateIPConfig := newObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		return oc.reconcileCloudPrivateIPConfig(oldCloudPrivateIPConfig, newCloudPrivateIPConfig)
+	case factory.EgressFirewallType:
+		newEF := newObj.(*egressfirewall.EgressFirewall)
+		return oc.ensureEgressFirewall(newEF)
 	}
 
 	return fmt.Errorf("no update function for object type %s", objectsToRetry.oType)
@@ -1446,12 +1449,12 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 	addHandlerFunc, err := oc.watchFactory.GetResourceHandlerFunc(objectsToRetry.oType)
 	if err != nil {
 		return nil, fmt.Errorf("no resource handler function found for resource %v. "+
-			"Cannot watch this resource.", objectsToRetry.oType)
+			"Cannot watch this resource", objectsToRetry.oType)
 	}
 	syncFunc, err := oc.getSyncResourcesFunc(objectsToRetry)
 	if err != nil {
 		return nil, fmt.Errorf("no sync function found for resource %v. "+
-			"Cannot watch this resource.", objectsToRetry.oType)
+			"Cannot watch this resource", objectsToRetry.oType)
 	}
 
 	// create the actual watcher

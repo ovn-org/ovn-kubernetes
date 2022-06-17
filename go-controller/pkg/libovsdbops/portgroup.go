@@ -1,10 +1,46 @@
 package libovsdbops
 
 import (
+	"context"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
+
+type portGroupPredicate func(group *nbdb.PortGroup) bool
+
+// FindPortGroupsWithPredicate looks up port groups from the cache based on a
+// given predicate
+func FindPortGroupsWithPredicate(nbClient libovsdbclient.Client, p portGroupPredicate) ([]*nbdb.PortGroup, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	found := []*nbdb.PortGroup{}
+	err := nbClient.WhereCache(p).List(ctx, &found)
+	return found, err
+}
+
+// GetPortGroupACLsPred returns ACL predicate to filter objects referenced by given port groups.
+// aclPred can be additionally applied to the returned predicate, nil will be ignored
+func GetPortGroupACLsPred(portGroups []*nbdb.PortGroup, aclPred func(item *nbdb.ACL) bool) func(item *nbdb.ACL) bool {
+	aclUUIDs := map[string]bool{}
+	for _, pg := range portGroups {
+		for _, aclUUID := range pg.ACLs {
+			aclUUIDs[aclUUID] = true
+		}
+	}
+	var pgACLPred func(item *nbdb.ACL) bool
+	if aclPred == nil {
+		pgACLPred = func(item *nbdb.ACL) bool {
+			return aclUUIDs[item.UUID]
+		}
+	} else {
+		pgACLPred = func(item *nbdb.ACL) bool {
+			return aclUUIDs[item.UUID] && aclPred(item)
+		}
+	}
+	return pgACLPred
+}
 
 // BuildPortGroup builds a port group referencing the provided ports and ACLs
 func BuildPortGroup(hashName, name string, ports []*nbdb.LogicalSwitchPort, acls []*nbdb.ACL) *nbdb.PortGroup {
