@@ -74,7 +74,8 @@ func (uc *upgradeController) GetTopologyVersion(ctx context.Context) (int, error
 				klog.Infof("Detected cluster topology version %d from ConfigMap %s/%s", out, ns, name)
 				return out, nil
 			} else {
-				klog.Infof("ConfigMap %s/%s had invalid value in %s: %s %v", ns, name, ovntypes.OvnK8sStatusKeyTopoVersion, tv, err)
+				klog.Infof("ConfigMap %s/%s had invalid value in %s: %s %v",
+					ns, name, ovntypes.OvnK8sStatusKeyTopoVersion, tv, err)
 			}
 		}
 	}
@@ -82,6 +83,9 @@ func (uc *upgradeController) GetTopologyVersion(ctx context.Context) (int, error
 	// Masters not yet upgraded, check Node objects
 	klog.Infof("Could not determine TopologyVersion via configmap, falling back to Nodes")
 
+	// node-role.kubernetes.io/master label was renamed node-role.kubernetes.io/control-plane
+	// in kubernetes 1.24, so a KIND cluster will show the new label; however, Openshift 4.11
+	// still uses the old label. Let's check for both until we fully migrate.
 	masterNode, err := labels.NewRequirement("node-role.kubernetes.io/master", selection.Exists, nil)
 	if err != nil {
 		klog.Fatalf("Unable to create labels.NewRequirement: %v", err)
@@ -89,6 +93,21 @@ func (uc *upgradeController) GetTopologyVersion(ctx context.Context) (int, error
 	nodes, err := uc.wf.ListNodes(labels.NewSelector().Add(*masterNode))
 	if err != nil {
 		return -1, fmt.Errorf("unable to get nodes for checking topo version: %v", err)
+	}
+	if len(nodes) == 0 {
+		klog.Infof("No nodes found with old label node-role.kubernetes.io/master, " +
+			"now checking node-role.kubernetes.io/control-plane")
+		masterNode, err = labels.NewRequirement("node-role.kubernetes.io/control-plane",
+			selection.Exists, nil)
+		if err != nil {
+			klog.Fatalf("Unable to create labels.NewRequirement: %v", err)
+		}
+		nodes, err = uc.wf.ListNodes(labels.NewSelector().Add(*masterNode))
+		if err != nil {
+			return -1, fmt.Errorf("unable to get nodes for checking topo version: %v", err)
+		}
+		klog.Infof("%d nodes found with node-role.kubernetes.io/control-plane",
+			len(nodes))
 	}
 
 	ver := -1

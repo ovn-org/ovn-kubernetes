@@ -301,3 +301,15 @@ kubectl_wait_for_upgrade
 run_kubectl describe ds ovnkube-node -n ovn-kubernetes
 
 run_kubectl describe deployments.apps ovnkube-master -n ovn-kubernetes
+
+KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
+MASTER_NODES=$(kubectl get nodes -l node-role.kubernetes.io/control-plane -o name)
+# We want OVN HA not Kubernetes HA
+# leverage the kubeadm well-known label node-role.kubernetes.io/control-plane=
+# to choose the nodes where ovn master components will be placed
+for node in $MASTER_NODES; do
+  if [ "$KIND_REMOVE_TAINT" == true ]; then
+    # do not error if it fails to remove the taint
+    kubectl taint node "$node" node-role.kubernetes.io/control-plane:NoSchedule- || true
+  fi
+done

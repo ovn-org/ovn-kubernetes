@@ -304,7 +304,7 @@ For example:
 # make control-plane WHAT="should be able to send multicast UDP traffic between nodes"
 (...)
 + go test -timeout=0 -v . -ginkgo.v -ginkgo.focus 'should\sbe\sable\sto\ssend\smulticast\sUDP\straffic\sbetween\snodes' -ginkgo.flakeAttempts 2 '-ginkgo.skip=recovering from deleting db files while maintain connectivity|Should validate connectivity before and after deleting all the db-pods at once in HA mode|Should be allowed to node local cluster-networked endpoints by nodeport services with externalTrafficPolicy=local|e2e ingress to host-networked pods traffic validation|host to host-networked pods traffic validation' -provider skeleton -kubeconfig /root/ovn.conf --num-nodes=2 --report-dir=/root/ovn-kubernetes/test/_artifacts --report-prefix=control-plane_
-I0817 15:26:21.762483 1197731 test_context.go:457] Tolerating taints "node-role.kubernetes.io/master" when considering if nodes are ready
+I0817 15:26:21.762483 1197731 test_context.go:457] Tolerating taints "node-role.kubernetes.io/control-plane" when considering if nodes are ready
 === RUN   TestE2e
 I0817 15:26:21.762635 1197731 e2e_suite_test.go:67] Saving reports to /root/ovn-kubernetes/test/_artifacts
 Running Suite: E2e Suite

@@ -611,9 +611,12 @@ func main() {
 
 	klog.V(5).Infof(" Nodes: ")
 	for _, node := range nodes.Items {
+		// look for both labels until master label is removed in kubernetes 1.25
+		// https://github.com/kubernetes/kubernetes/pull/107533
+		_, foundMaster := node.Labels["node-role.kubernetes.io/master"]
+		_, foundControlPlane := node.Labels["node-role.kubernetes.io/control-plane"]
 
-		_, found := node.Labels["node-role.kubernetes.io/master"]
-		if found {
+		if foundMaster || foundControlPlane {
 			klog.V(5).Infof("  Name: %s is a master", node.Name)
 			for _, s := range node.Status.Addresses {
 				klog.V(5).Infof("  Address Type: %s - Address: %s", s.Type, s.Address)
