@@ -73,7 +73,7 @@ func GetLRPAddrs(nbClient client.Client, portName string) ([]*net.IPNet, error) 
 	lrp := &nbdb.LogicalRouterPort{Name: portName}
 	lrp, err := libovsdbops.GetLogicalRouterPort(nbClient, lrp)
 	if err != nil {
-		return nil, fmt.Errorf("unable to find router port %s: %v", portName, err)
+		return nil, fmt.Errorf("unable to find router port %s: %w", portName, err)
 	}
 	gwLRPIPs := []*net.IPNet{}
 	for _, network := range lrp.Networks {
