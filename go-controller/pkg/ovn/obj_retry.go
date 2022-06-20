@@ -1498,7 +1498,6 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 				// Execute the update function for this resource type; resort to add if no update
 				// function is available.
 				if hasUpdateFunc {
-					klog.Infof("Updating %s %s", objectsToRetry.oType, newKey)
 					// if this resource type has an update func, just call the update function
 					if err := oc.updateResource(objectsToRetry, old, newer); err != nil {
 						klog.Errorf("Failed to update %s, old=%s, new=%s, error: %v",
@@ -1514,7 +1513,6 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 						return
 					}
 				} else { // we previously deleted old object, now let's add the new one
-					klog.Infof("Adding new %s of type %s", newKey, objectsToRetry.oType)
 					if err := oc.addResource(objectsToRetry, newer, false); err != nil {
 						oc.recordErrorEvent(objectsToRetry.oType, newer, err)
 						objectsToRetry.initRetryObjWithAdd(newer, newKey)
