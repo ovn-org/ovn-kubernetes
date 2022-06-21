@@ -1,9 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -26,16 +26,9 @@ import (
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-type AddrInfo struct {
-	Family    string `json:"family,omitempty"`
-	Local     string `json:"local,omitempty"`
-	Prefixlen int    `json:"prefixlen,omitempty"`
-}
-type IpAddrReq struct {
-	IfIndex   int        `json:"ifindex,omitempty"`
-	IfName    string     `json:"ifname,omitempty"`
-	LinkIndex int        `json:"link_index,omitempty"`
-	AInfo     []AddrInfo `json:"addr_info,omitempty"`
+type OvsInterface struct {
+	Name   string
+	Ofport string
 }
 
 type SvcInfo struct {
@@ -160,6 +153,53 @@ func getPodMAC(client *corev1client.CoreV1Client, pod *kapi.Pod) (podMAC string,
 	return podMAC, nil
 }
 
+// getPodOvsInterfaceNameAndOfport searches the node's OVS database for information
+// about this pod's OVS interface and returns the name and ofport fields.
+// It will run `ovs-vsctl --columns name,ofport find interface external_ids:iface-id=%s` with the given `$namespace-$pod` tuple and it will then parse the
+// result into a map[string]string that maps the keys to their values.
+func getPodOvsInterfaceNameAndOfport(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, ovnNamespace, ovnkubePodName, fullyQualifiedPodName string) (*OvsInterface, error) {
+	var interfaceInfo OvsInterface
+
+	findInterfaceCmd := fmt.Sprintf("ovs-vsctl --columns name,ofport find interface external_ids:iface-id=%s", fullyQualifiedPodName)
+	findInterfaceStdout, findInterfaceStderr, err := execInPod(coreclient, restconfig, ovnNamespace, ovnkubePodName, "ovnkube-node", findInterfaceCmd, "")
+	if err != nil {
+		return nil, err
+	}
+
+	var key string
+	var value string
+	scanner := bufio.NewScanner(strings.NewReader(findInterfaceStdout))
+	for scanner.Scan() {
+		splitLine := strings.Split(scanner.Text(), ":")
+		if len(splitLine) != 2 {
+			continue
+		}
+		key = strings.TrimSpace(splitLine[0])
+		value = strings.TrimSpace(splitLine[1])
+		switch key {
+		case "name":
+			interfaceInfo.Name = strings.Trim(value, "\"")
+		case "ofport":
+			interfaceInfo.Ofport = value
+		default:
+		}
+	}
+
+	if interfaceInfo.Name == "" || interfaceInfo.Ofport == "" {
+		return nil, fmt.Errorf("could not find interface info for: "+
+			"fullyQualifiedPodName: %s, ovnNamespace: %s, ovnkubePodName: %s, cmd: %s. Got: %s, %s, parsed interface info: %v",
+			fullyQualifiedPodName,
+			ovnNamespace,
+			ovnkubePodName,
+			findInterfaceCmd,
+			findInterfaceStdout,
+			findInterfaceStderr,
+			interfaceInfo,
+		)
+	}
+	return &interfaceInfo, nil
+}
+
 func getSvcInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, svcName string, ovnNamespace string, namespace string, cmd string) (svcInfo *SvcInfo, err error) {
 
 	// Get service with the name supplied by svcName
@@ -252,48 +292,6 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 	podInfo.MAC = podMAC
 	podInfo.ContainerName = pod.Spec.Containers[0].Name
 
-	var linkIndex int
-
-	// The interface name used depends on what network namespasce the pod uses
-	if pod.Spec.HostNetwork {
-		ethName = util.GetLegacyK8sMgmtIntfName(node.Name)
-		podInfo.HostNetwork = true
-		linkIndex = 0
-	} else {
-		ethName = "eth0"
-		podInfo.HostNetwork = false
-
-		// Find index used for pod interface
-		klog.V(5).Infof("Reading interface index from /sys/class/net/...")
-
-		sysCmd := "cat /sys/class/net/" + ethName + "/iflink"
-		klog.V(5).Infof("The command is %s", sysCmd)
-
-		linkOutput, linkError, err := execInPod(coreclient, restconfig, namespace, podName, podInfo.ContainerName, sysCmd, "")
-		if err != nil {
-			klog.V(1).Infof("The command error %v stdOut: %s\n stdErr: %s", err, linkOutput, linkError)
-			// Give up, unknown error
-			return nil, err
-		}
-
-		linkIndex, err = strconv.Atoi(strings.TrimSuffix(linkOutput, "\n"))
-		if err != nil {
-			klog.Error("Error converting string to int", err)
-			return nil, err
-		}
-		klog.V(5).Infof("Using '%s' - linkIndex is %d", sysCmd, linkIndex)
-	}
-	klog.V(5).Infof("Using interface name of %s with MAC of %s", ethName, podMAC)
-
-	if !pod.Spec.HostNetwork && linkIndex == 0 {
-		klog.V(0).Infof("Fatal: Pod Network used and linkIndex is zero")
-		return nil, err
-	}
-	if pod.Spec.HostNetwork && linkIndex != 0 {
-		klog.V(1).Infof("Fatal: Host Network used and linkIndex is non-zero")
-		return nil, err
-	}
-
 	// Get pods in the openshift-ovn-kubernetes namespace
 	podsOvn, errOvn := coreclient.Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{})
 	if errOvn != nil {
@@ -324,6 +322,22 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 	podInfo.OvnKubeContainerPodName = ovnkubePod.Name
 	podInfo.NodeName = ovnkubePod.Spec.NodeName
 
+	// The interface name used depends on what network namespasce the pod uses
+	if pod.Spec.HostNetwork {
+		ethName = util.GetLegacyK8sMgmtIntfName(node.Name)
+		podInfo.HostNetwork = true
+	} else {
+		ethName = "eth0"
+		podInfo.HostNetwork = false
+		ovsInterfaceInformation, err := getPodOvsInterfaceNameAndOfport(coreclient, restconfig, ovnNamespace, podInfo.OvnKubeContainerPodName, namespace+"_"+podInfo.PodName)
+		if err != nil {
+			return nil, err
+		}
+		podInfo.VethName = ovsInterfaceInformation.Name
+		podInfo.PortNum = ovsInterfaceInformation.Ofport
+	}
+	klog.V(5).Infof("Using interface name of %s with MAC of %s", ethName, podMAC)
+
 	// Find rtos MAC
 	klog.V(5).Infof("Command is: %s", "ovn-nbctl "+cmd+" --bare --no-heading --column=mac list logical-router-port "+"rtos-"+ovnkubePod.Spec.NodeName)
 	lspCmd := "ovn-nbctl " + cmd + " --bare --no-heading --column=mac list logical-router-port " + "rtos-" + ovnkubePod.Spec.NodeName
@@ -340,44 +354,6 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 		podInfo.OVNName = types.K8sPrefix + ovnkubePod.Spec.NodeName
 		podInfo.VethName = "ovn-k8s-mp0"
 		klog.V(5).Infof("hostInterface on host stack OVN name is %s\n", podInfo.OVNName)
-	} else {
-
-		// obnkube-node-xxx uses host network.  Find host end of veth matching pod eth0 index
-
-		var hostInterface string
-
-		ipCmd := "ip -j addr show"
-		klog.V(5).Infof("Command is: %s", ipCmd)
-
-		hostOutput, hostError, err := execInPod(coreclient, restconfig, ovnNamespace, ovnkubePod.Name, "ovnkube-node", ipCmd, "")
-		if err != nil {
-			fmt.Printf("execInPod() failed with %s stderr %s stdout %s \n", err, hostError, hostOutput)
-			klog.V(5).Infof("execInPod() failed err %s - podInfo %v - ovnkubePod Name %s", err, podInfo, ovnkubePod.Name)
-			return nil, err
-		}
-
-		klog.V(5).Infof("==>ovnkubePod %s: ip addr show: %q", ovnkubePod.Name, hostOutput)
-
-		var data []IpAddrReq
-		hostOutput = strings.Replace(hostOutput, "\n", "", -1)
-		klog.V(5).Infof("==> host %s NOW: %s", ovnkubePod.Name, hostOutput)
-		err = json.Unmarshal([]byte(hostOutput), &data)
-		if err != nil {
-			klog.V(1).Infof("JSON ERR: couldn't get stuff from data %v; json parse error: %v", data, err)
-			return nil, err
-		}
-		klog.V(5).Infof("Size of IpAddrReq array: %v", len(data))
-		klog.V(5).Infof("IpAddrReq: %v", data)
-
-		for _, addr := range data {
-			if addr.IfIndex == linkIndex {
-				hostInterface = addr.IfName
-				klog.V(5).Infof("ifName: %v\n", addr.IfName)
-				break
-			}
-		}
-		klog.V(5).Infof("hostInterface name is %s\n", hostInterface)
-		podInfo.VethName = hostInterface
 	}
 
 	// ovs-vsctl get Interface [vethname] ofport
