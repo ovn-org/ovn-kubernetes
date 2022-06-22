@@ -158,6 +158,11 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 						namespaceT,
 					},
 				},
+				&v1.NodeList{
+					Items: []v1.Node{
+						*newNode("node1", "192.168.126.202/24"),
+					},
+				},
 				&v1.PodList{
 					Items: []v1.Pod{
 						*tPod,

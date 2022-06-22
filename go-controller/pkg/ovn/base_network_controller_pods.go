@@ -80,8 +80,8 @@ func (bnc *BaseNetworkController) deleteStaleLogicalSwitchPorts(expectedLogicalP
 	// get all switches that Pod logical port would be reside on.
 	topoType := bnc.TopologyType()
 	if !bnc.IsSecondary() || topoType == ovntypes.Layer3Topology {
-		// for default network and layer3 topology type networks, get all node switches.
-		nodes, err := bnc.watchFactory.GetNodes()
+		// for default network and layer3 topology type networks, get all local zone node switches
+		nodes, err := bnc.GetLocalZoneNodes()
 		if err != nil {
 			return fmt.Errorf("failed to get nodes: %v", err)
 		}
@@ -854,6 +854,25 @@ func (bnc *BaseNetworkController) deletePodFromNamespace(ns string, podIfAddrs [
 	}
 
 	return ops, nil
+}
+
+// isPodScheduledinLocalZone returns true if
+//   - bnc.localZoneNodes map is nil or
+//   - if the pod.Spec.NodeName is in the bnc.localZoneNodes map
+//
+// false otherwise.
+func (bnc *BaseNetworkController) isPodScheduledinLocalZone(pod *kapi.Pod) bool {
+	isLocalZonePod := true
+
+	if bnc.localZoneNodes != nil {
+		if util.PodScheduled(pod) {
+			_, isLocalZonePod = bnc.localZoneNodes.Load(pod.Spec.NodeName)
+		} else {
+			isLocalZonePod = false
+		}
+	}
+
+	return isLocalZonePod
 }
 
 // WatchPods starts the watching of the Pod resource and calls back the appropriate handler logic

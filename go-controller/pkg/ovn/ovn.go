@@ -126,6 +126,18 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort boo
 	if !util.PodScheduled(pod) {
 		return nil
 	}
+
+	if oc.isPodScheduledinLocalZone(pod) {
+		return oc.ensureLocalZonePod(oldPod, pod, addPort)
+	}
+
+	// TODO (numans): For remote zone pods add the pod ips to the namespace address set
+	return nil
+}
+
+// ensureLocalZonePod tries to set up a local zone pod. It returns nil on success and error on failure; failure
+// indicates the pod set up should be retried later.
+func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, addPort bool) error {
 	if config.Metrics.EnableScaleMetrics {
 		start := time.Now()
 		defer func() {
@@ -166,6 +178,20 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort boo
 // removePod tried to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
 func (oc *DefaultNetworkController) removePod(pod *kapi.Pod, portInfo *lpInfo) error {
+	if oc.isPodScheduledinLocalZone(pod) {
+		return oc.removeLocalZonePod(pod, portInfo)
+	}
+
+	// TODO (numans) When we add the remote pod ips to the namespace address set, remove them
+	// when the remote pod is deleted.
+	return nil
+}
+
+// removeLocalZonePod tries to tear down a local zone pod. It returns nil on success and error on failure;
+// failure indicates the pod tear down should be retried later.
+func (oc *DefaultNetworkController) removeLocalZonePod(pod *kapi.Pod, portInfo *lpInfo) error {
+	oc.logicalPortCache.remove(pod, ovntypes.DefaultNetworkName)
+
 	if config.Metrics.EnableScaleMetrics {
 		start := time.Now()
 		defer func() {

@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/onsi/ginkgo"
 	"sync"
+
+	"github.com/onsi/ginkgo"
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	mnpfake "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/fake"
@@ -23,6 +24,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -163,6 +165,13 @@ func (o *FakeOVN) init(nadList []*nettypes.NetworkAttachmentDefinition) {
 		err := o.NewSecondaryNetworkController(nad)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}
+
+	existingNodes, err := o.controller.kube.GetNodes()
+	if err == nil {
+		for _, node := range existingNodes.Items {
+			o.controller.localZoneNodes.Store(node.Name, true)
+		}
+	}
 }
 
 func resetNBClient(ctx context.Context, nbClient libovsdbclient.Client) {
@@ -193,6 +202,17 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 	}
 
 	podRecorder := metrics.NewPodRecorder()
+
+	nbZoneFailed := false
+	// Try to get the NBZone.  If there is an error, create NB_Global record.
+	// Otherwise NewCommonNetworkControllerInfo() will return error since it
+	// calls util.GetNBZone().
+	_, err := util.GetNBZone(libovsdbOvnNBClient)
+	if err != nil {
+		nbZoneFailed = true
+		err = createTestNBGlobal(libovsdbOvnNBClient, "global")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	}
 	cnci, err := NewCommonNetworkControllerInfo(
 		ovnClient.KubeClient,
 		&kube.KubeOVN{
@@ -215,7 +235,49 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 		return nil, err
 	}
 
-	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory)
+	dnc, err := newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory)
+
+	if nbZoneFailed {
+		// Delete the NBGlobal row as this function created it.  Otherwise many tests would fail while
+		// checking the expectedData in the NBDB.
+		err = deleteTestNBGlobal(libovsdbOvnNBClient, "global")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	}
+
+	return dnc, err
+}
+
+func createTestNBGlobal(nbClient libovsdbclient.Client, zone string) error {
+	nbGlobal := &nbdb.NBGlobal{Name: zone}
+	ops, err := nbClient.Create(nbGlobal)
+	if err != nil {
+		return err
+	}
+
+	_, err = nbClient.Transact(context.Background(), ops...)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func deleteTestNBGlobal(nbClient libovsdbclient.Client, zone string) error {
+	p := func(nbGlobal *nbdb.NBGlobal) bool {
+		return true
+	}
+
+	ops, err := nbClient.WhereCache(p).Delete()
+	if err != nil {
+		return err
+	}
+
+	_, err = nbClient.Transact(context.Background(), ops...)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func newNetworkAttachmentDefinition(namespace, name string, netconf ovncnitypes.NetConf) (*nettypes.NetworkAttachmentDefinition, error) {
@@ -245,6 +307,17 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 	topoType := netConfInfo.TopologyType()
 	ocInfo, ok = o.secondaryControllers[netName]
 	if !ok {
+		nbZoneFailed := false
+		// Try to get the NBZone.  If there is an error, create NB_Global record.
+		// Otherwise NewCommonNetworkControllerInfo() will return error since it
+		// calls util.GetNBZone().
+		_, err := util.GetNBZone(o.nbClient)
+		if err != nil {
+			nbZoneFailed = true
+			err = createTestNBGlobal(o.nbClient, "global")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		}
+
 		podRecorder := metrics.NewPodRecorder()
 		cnci, err := NewCommonNetworkControllerInfo(
 			o.fakeClient.KubeClient,
@@ -284,6 +357,13 @@ func (o *FakeOVN) NewSecondaryNetworkController(netattachdef *nettypes.NetworkAt
 		}
 		ocInfo = secondaryControllerInfo{bnc: secondaryController, asf: asf}
 		o.secondaryControllers[netName] = ocInfo
+
+		if nbZoneFailed {
+			// Delete the NBGlobal row as this function created it.  Otherwise many tests would fail while
+			// checking the expectedData in the NBDB.
+			err = deleteTestNBGlobal(o.nbClient, "global")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		}
 	} else {
 		secondaryController = ocInfo.bnc
 	}

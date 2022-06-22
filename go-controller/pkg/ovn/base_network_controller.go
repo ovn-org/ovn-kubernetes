@@ -63,6 +63,9 @@ type CommonNetworkControllerInfo struct {
 	svcTemplateSupport bool
 	// Is ACL logging enabled while configuring meters?
 	aclLoggingEnabled bool
+
+	// Northbound database zone name to which this Controller is connected to - aka local zone
+	zone string
 }
 
 // BaseNetworkController structure holds per-network fields and network specific configuration
@@ -133,6 +136,11 @@ type BaseNetworkController struct {
 	stopChan chan struct{}
 	// waitGroup per-Controller
 	wg *sync.WaitGroup
+
+	// List of nodes which belong to the local zone (stored as a sync map)
+	// If the map is nil, it means the controller is not tracking the node events
+	// and all the nodes are considered as local zone nodes.
+	localZoneNodes *sync.Map
 }
 
 // BaseSecondaryNetworkController structure holds per-network fields and network specific
@@ -147,6 +155,10 @@ type BaseSecondaryNetworkController struct {
 func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeOVN, wf *factory.WatchFactory,
 	recorder record.EventRecorder, nbClient libovsdbclient.Client, sbClient libovsdbclient.Client,
 	podRecorder *metrics.PodRecorder, SCTPSupport, multicastSupport, svcTemplateSupport, aclLoggingEnabled bool) (*CommonNetworkControllerInfo, error) {
+	zone, err := util.GetNBZone(nbClient)
+	if err != nil {
+		return nil, fmt.Errorf("error getting NB zone name : err - %w", err)
+	}
 	return &CommonNetworkControllerInfo{
 		client:             client,
 		kube:               kube,
@@ -159,6 +171,7 @@ func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeO
 		multicastSupport:   multicastSupport,
 		svcTemplateSupport: svcTemplateSupport,
 		aclLoggingEnabled:  aclLoggingEnabled,
+		zone:               zone,
 	}, nil
 }
 
@@ -725,4 +738,29 @@ func (bnc *BaseNetworkController) getClusterPortGroupName(base string) string {
 		return hashedPortGroup(bnc.GetNetworkName()) + "_" + base
 	}
 	return base
+}
+
+// GetLocalZoneNodes returns the list of local zone nodes
+// A node is considered a local zone node if the zone name
+// set in the node's annotation matches with the zone name
+// set in the OVN Northbound database (to which this controller is connected to).
+func (bnc *BaseNetworkController) GetLocalZoneNodes() ([]*kapi.Node, error) {
+	nodes, err := bnc.watchFactory.GetNodes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get nodes: %v", err)
+	}
+
+	var zoneNodes []*kapi.Node
+	for _, n := range nodes {
+		if bnc.isLocalZoneNode(n) {
+			zoneNodes = append(zoneNodes, n)
+		}
+	}
+
+	return zoneNodes, nil
+}
+
+// isLocalZoneNode returns true if the node is part of the local zone.
+func (bnc *BaseNetworkController) isLocalZoneNode(node *kapi.Node) bool {
+	return util.GetNodeZone(node) == bnc.zone
 }
