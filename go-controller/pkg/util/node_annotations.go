@@ -72,6 +72,9 @@ const (
 	// capacity for each node. It is set by
 	// openshift/cloud-network-config-controller
 	cloudEgressIPConfigAnnotationKey = "cloud.network.openshift.io/egress-ipconfig"
+
+	OvnNodeId               = "k8s.ovn.org/ovn-node-id"
+	ovnTransitSwitchPortIps = "k8s.ovn.org/ovn-node-transit-switch-port-ips"
 )
 
 type L3GatewayConfig struct {
@@ -546,4 +549,54 @@ func NoHostSubnet(node *kapi.Node) bool {
 
 	nodeSelector, _ := metav1.LabelSelectorAsSelector(config.Kubernetes.NoHostSubnetNodes)
 	return nodeSelector.Matches(labels.Set(node.Labels))
+}
+
+func GetNodeId(node *kapi.Node) int {
+	nodeId, ok := node.Annotations[OvnNodeId]
+	if !ok {
+		return -1
+	}
+
+	id, err := strconv.Atoi(nodeId)
+	if err != nil {
+		return -1
+	}
+	return id
+}
+
+// ParseNodeTransitSwitchPortAddresses returns the parsed transit switch node IPs.
+func ParseNodeTransitSwitchPortAddresses(node *kapi.Node) ([]*net.IPNet, error) {
+	transitSwitchIpsAnnotation, ok := node.Annotations[ovnTransitSwitchPortIps]
+	if !ok {
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeHostAddresses, node.Name)
+	}
+
+	var ipaddrStrs []string
+	if err := json.Unmarshal([]byte(transitSwitchIpsAnnotation), &ipaddrStrs); err != nil {
+		return nil, fmt.Errorf("error unmarshalling %q value: %v", ovnTransitSwitchPortIps, err)
+	}
+
+	var ips []*net.IPNet
+	for _, ipStr := range ipaddrStrs {
+		_, ip, err := net.ParseCIDR(ipStr)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing %q value: %v", ovnTransitSwitchPortIps, err)
+		}
+		ips = append(ips, ip)
+	}
+	return ips, nil
+}
+
+func CreateNodeTransitSwitchPortAddressesAnnotation(ips []*net.IPNet) (map[string]interface{}, error) {
+	ipaddrStrs := make([]string, len(ips))
+	for i, ip := range ips {
+		ipaddrStrs[i] = ip.String()
+	}
+	bytes, err := json.Marshal(ipaddrStrs)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		ovnTransitSwitchPortIps: string(bytes),
+	}, nil
 }
