@@ -679,7 +679,7 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 		}
 
 		if err = oc.addNetworkPolicy(np); err != nil {
-			klog.Infof("Network Policy retry delete failed for %s/%s, will try again later: %v",
+			klog.Infof("Network Policy add failed for %s/%s, will try again later: %v",
 				np.Namespace, np.Name, err)
 			return err
 		}
@@ -705,7 +705,7 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 		}
 
 		if err = oc.addUpdateNodeEvent(node, nodeParams); err != nil {
-			klog.Infof("Node retry delete failed for %s, will try again later: %v",
+			klog.Infof("Node add failed for %s, will try again later: %v",
 				node.Name, err)
 			return err
 		}
@@ -744,7 +744,7 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 		// on existing pods so we can't be holding the lock at this point
 		podHandler, err := oc.WatchResource(retryPeerPods)
 		if err != nil {
-			klog.Errorf("Failed WatchResource for PeerNamespaceAndPodSelectorTypeVar: %v", err)
+			klog.Errorf("Failed WatchResource for PeerNamespaceAndPodSelectorType: %v", err)
 			return err
 		}
 
