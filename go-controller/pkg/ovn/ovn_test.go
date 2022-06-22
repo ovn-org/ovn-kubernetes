@@ -39,7 +39,7 @@ const (
 type FakeOVN struct {
 	fakeClient   *util.OVNClientset
 	watcher      *factory.WatchFactory
-	controller   *Controller
+	controller   *Controller // default network controller
 	stopChan     chan struct{}
 	asf          *addressset.FakeAddressSetFactory
 	fakeRecorder *record.FakeRecorder
@@ -112,10 +112,11 @@ func (o *FakeOVN) init() {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	o.stopChan = make(chan struct{})
-	o.controller = NewOvnController(o.fakeClient, o.watcher,
-		o.stopChan, o.asf,
-		o.nbClient, o.sbClient,
-		o.fakeRecorder)
+	cm := NewControllerManager(o.fakeClient, "", o.watcher,
+		o.stopChan, o.nbClient, o.sbClient,
+		o.fakeRecorder, nil)
+	o.controller, err = cm.InitDefaultController(o.asf)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.controller.multicastSupport = true
 	o.controller.loadBalancerGroupUUID = types.ClusterLBGroupName + "-UUID"
 }

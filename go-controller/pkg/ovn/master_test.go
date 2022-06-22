@@ -878,6 +878,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		config.Default.RawClusterSubnets = clusterCIDR
 
 		app = cli.NewApp()
 		app.Name = "test"
@@ -962,9 +963,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		err = f.Start()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-		clusterController = NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-			libovsdbOvnNBClient, libovsdbOvnSBClient,
-			record.NewFakeRecorder(0))
+		cm := NewControllerManager(fakeClient, "", f,
+			stopChan, libovsdbOvnNBClient, libovsdbOvnSBClient,
+			record.NewFakeRecorder(0), nil)
+		clusterController, _ = cm.InitDefaultController(addressset.NewFakeAddressSetFactory())
 		clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 		gomega.Expect(clusterController).NotTo(gomega.BeNil())
 		clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
@@ -1642,9 +1644,10 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			}
 			t.Cleanup(libovsdbCleanup.Cleanup)
 
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+			cm := NewControllerManager(fakeClient, "", f,
+				stopChan, libovsdbOvnNBClient, libovsdbOvnSBClient,
+				record.NewFakeRecorder(0), nil)
+			clusterController, _ := cm.InitDefaultController(addressset.NewFakeAddressSetFactory())
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 
 			// configure the cluster allocators
@@ -1735,15 +1738,10 @@ func TestController_syncNodesRetriable(t *testing.T) {
 			}
 			t.Cleanup(libovsdbCleanup.Cleanup)
 
-			controller := NewOvnController(
-				fakeClient,
-				f,
-				stopChan,
-				addressset.NewFakeAddressSetFactory(),
-				nbClient,
-				sbClient,
-				record.NewFakeRecorder(0))
-
+			cm := NewControllerManager(fakeClient, "", f,
+				stopChan, nbClient, sbClient,
+				record.NewFakeRecorder(0), nil)
+			controller, _ := cm.InitDefaultController(addressset.NewFakeAddressSetFactory())
 			controller.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(nbClient, "", []string{})
 			if err != nil {
 				t.Fatalf("%s: Error creating joinSwIPManager: %v", tt.name, err)
@@ -1822,15 +1820,10 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 			}
 			t.Cleanup(libovsdbCleanup.Cleanup)
 
-			controller := NewOvnController(
-				fakeClient,
-				f,
-				stopChan,
-				addressset.NewFakeAddressSetFactory(),
-				nbClient,
-				sbClient,
-				record.NewFakeRecorder(0))
-
+			cm := NewControllerManager(fakeClient, "", f,
+				stopChan, nbClient, sbClient,
+				record.NewFakeRecorder(0), nil)
+			controller, _ := cm.InitDefaultController(addressset.NewFakeAddressSetFactory())
 			controller.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(nbClient, "", []string{})
 			if err != nil {
 				t.Fatalf("%s: Error creating joinSwIPManager: %v", tt.name, err)

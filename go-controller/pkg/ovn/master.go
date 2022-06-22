@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"sync"
 	"time"
 
 	kapi "k8s.io/api/core/v1"
@@ -60,7 +59,7 @@ func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.Swi
 }
 
 // Start waits until this process is the leader before starting master functions
-func (oc *Controller) Start(identity string, wg *sync.WaitGroup, ctx context.Context, cancel context.CancelFunc) error {
+func (cm *ControllerManager) Start(ctx context.Context, cancel context.CancelFunc) error {
 	// Set up leader election process first
 	rl, err := resourcelock.New(
 		// TODO (rravaiol) (bpickard)
@@ -73,11 +72,11 @@ func (oc *Controller) Start(identity string, wg *sync.WaitGroup, ctx context.Con
 		resourcelock.LeasesResourceLock,
 		config.Kubernetes.OVNConfigNamespace,
 		"ovn-kubernetes-master",
-		oc.client.CoreV1(),
-		oc.client.CoordinationV1(),
+		cm.client.CoreV1(),
+		cm.client.CoordinationV1(),
 		resourcelock.ResourceLockConfig{
-			Identity:      identity,
-			EventRecorder: oc.recorder,
+			Identity:      cm.identity,
+			EventRecorder: cm.recorder,
 		},
 	)
 	if err != nil {
@@ -93,19 +92,26 @@ func (oc *Controller) Start(identity string, wg *sync.WaitGroup, ctx context.Con
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				klog.Infof("Won leader election; in active mode")
-				// run the cluster controller to init the master
 				start := time.Now()
 				defer func() {
 					end := time.Since(start)
 					metrics.MetricMasterReadyDuration.Set(end.Seconds())
 				}()
 
-				if err := oc.StartClusterMaster(); err != nil {
+				if err := cm.Init(); err != nil {
 					klog.Error(err)
 					cancel()
 					return
 				}
-				if err := oc.Run(ctx, wg); err != nil {
+
+				if err = cm.Run(); err != nil {
+					klog.Error(err)
+					cancel()
+					return
+				}
+
+				// if no default network net-attach-def exists, we'd need to start it now
+				if err := cm.defaultController.Start(ctx); err != nil {
 					klog.Error(err)
 					cancel()
 					return
@@ -120,7 +126,7 @@ func (oc *Controller) Start(identity string, wg *sync.WaitGroup, ctx context.Con
 				cancel()
 			},
 			OnNewLeader: func(newLeaderName string) {
-				if newLeaderName != identity {
+				if newLeaderName != cm.identity {
 					klog.Infof("Lost the election to %s; in standby mode", newLeaderName)
 				}
 			},
@@ -133,11 +139,11 @@ func (oc *Controller) Start(identity string, wg *sync.WaitGroup, ctx context.Con
 		return err
 	}
 
-	wg.Add(1)
+	cm.defaultWg.Add(1)
 	go func() {
 		leaderElector.Run(ctx)
 		klog.Infof("Stopped leader election")
-		wg.Done()
+		cm.defaultWg.Done()
 	}()
 
 	return nil
@@ -230,28 +236,6 @@ func (oc *Controller) StartClusterMaster() error {
 
 	metrics.RegisterMasterPerformance(oc.nbClient)
 	metrics.RegisterMasterFunctional()
-	metrics.RunTimestamp(oc.stopChan, oc.sbClient, oc.nbClient)
-	metrics.MonitorIPSec(oc.nbClient)
-	if config.Metrics.EnableConfigDuration {
-		// with k=10,
-		//  for a cluster with 10 nodes, measurement of 1 in every 100 requests
-		//  for a cluster with 100 nodes, measurement of 1 in every 1000 requests
-		metrics.GetConfigDurationRecorder().Run(oc.nbClient, oc.kube, 10, time.Second*5, oc.stopChan)
-	}
-	oc.podRecorder.Run(oc.sbClient, oc.stopChan)
-
-	// enableOVNLogicalDataPathGroups sets an OVN flag to enable logical datapath
-	// groups on OVN 20.12 and later. The option is ignored if OVN doesn't
-	// understand it. Logical datapath groups reduce the size of the southbound
-	// database in large clusters. ovn-controllers should be upgraded to a version
-	// that supports them before the option is turned on by the master.
-	nbGlobal := nbdb.NBGlobal{
-		Options: map[string]string{"use_logical_dp_groups": "true"},
-	}
-	if err := libovsdbops.UpdateNBGlobalSetOptions(oc.nbClient, &nbGlobal); err != nil {
-		klog.Errorf("Failed to set NB global option to enable logical datapath groups: %v", err)
-		return err
-	}
 
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {
@@ -267,7 +251,7 @@ func (oc *Controller) StartClusterMaster() error {
 
 	klog.Infof("Allocating subnets")
 	var v4HostSubnetCount, v6HostSubnetCount float64
-	for _, clusterEntry := range config.Default.ClusterSubnets {
+	for _, clusterEntry := range oc.clusterSubnets {
 		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
 		if err != nil {
 			return err
@@ -352,18 +336,6 @@ func (oc *Controller) SetupMaster(existingNodeNames []string) error {
 	err := libovsdbops.CreateOrUpdateLogicalRouter(oc.nbClient, &logicalRouter)
 	if err != nil {
 		return fmt.Errorf("failed to create a single common distributed router for the cluster, error: %v", err)
-	}
-
-	// Determine SCTP support
-	hasSCTPSupport, err := util.DetectSCTPSupport()
-	if err != nil {
-		return err
-	}
-	oc.SCTPSupport = hasSCTPSupport
-	if !oc.SCTPSupport {
-		klog.Warningf("SCTP unsupported by this version of OVN. Kubernetes service creation with SCTP will not work ")
-	} else {
-		klog.Info("SCTP support detected in OVN")
 	}
 
 	// Create a cluster-wide port group that all logical switch ports are part of
@@ -545,7 +517,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	hostSubnets []*net.IPNet, hostAddrs sets.String) error {
 	var err error
 	var gwLRPIPs, clusterSubnets []*net.IPNet
-	for _, clusterSubnet := range config.Default.ClusterSubnets {
+	for _, clusterSubnet := range oc.clusterSubnets {
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
 	}
 

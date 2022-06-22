@@ -16,8 +16,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
@@ -62,20 +60,27 @@ type ACLLoggingLevels struct {
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
-	client       clientset.Interface
-	kube         kube.Interface
-	watchFactory *factory.WatchFactory
-	stopChan     <-chan struct{}
+	GenericController
+
+	// network configuration information
+	nadInfo    *util.NetAttachDefInfo
+	isStarted  bool
+	startMutex sync.Mutex
+
+	// watcher handlers that need to be removed for secondary networks
+	podHandler  *factory.Handler
+	nodeHandler *factory.Handler
+
+	// wg and stopChan per-Controller
+	wg       *sync.WaitGroup
+	stopChan chan struct{}
+
+	// configured cluster subnets
+	clusterSubnets []config.CIDRNetworkEntry
 
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
 	masterSubnetAllocator        *subnetallocator.SubnetAllocator
 	hybridOverlaySubnetAllocator *subnetallocator.SubnetAllocator
-
-	SCTPSupport bool
-
-	// For TCP, UDP, and SCTP type traffic, cache OVN load-balancers used for the
-	// cluster's east-west traffic.
-	loadbalancerClusterCache map[kapi.Protocol]string
 
 	// A cache of all logical switches seen by the watcher and their subnets
 	lsManager *lsm.LogicalSwitchManager
@@ -137,7 +142,7 @@ type Controller struct {
 	defaultGatewayCOPPUUID string
 
 	// Controller used for programming OVN for egress IP
-	eIPC egressIPController
+	eIPC *egressIPController
 
 	// Controller used to handle services
 	svcController *svccontroller.Controller
@@ -153,30 +158,26 @@ type Controller struct {
 
 	joinSwIPManager *lsm.JoinSwitchIPManager
 
-	// event recorder used to post events to k8s
-	recorder record.EventRecorder
-
-	// libovsdb northbound client interface
-	nbClient libovsdbclient.Client
-
-	// libovsdb southbound client interface
-	sbClient libovsdbclient.Client
-
 	// v4HostSubnetsUsed keeps track of number of v4 subnets currently assigned to nodes
+	// TBD, need to determine if this metrics is per-controller or global
 	v4HostSubnetsUsed float64
 
 	// v6HostSubnetsUsed keeps track of number of v6 subnets currently assigned to nodes
 	v6HostSubnetsUsed float64
 
+	// RetryObjs needed for both default and secondary networks
 	// Objects for pods that need to be retried
 	retryPods *RetryObjs
+	// Objects for nodes that need to be retried
+	retryNodes *RetryObjs
 
+	// RetryObjs needed for default network only
+	// Objects for namespaces that need to be retried
+	retryNamespaces *RetryObjs
 	// Objects for network policies that need to be retried
 	retryNetworkPolicies *RetryObjs
-
 	// Objects for egress firewall that need to be retried
 	retryEgressFirewalls *RetryObjs
-
 	// Objects for egress IP that need to be retried
 	retryEgressIPs *RetryObjs
 	// Objects for egress IP Namespaces that need to be retried
@@ -187,19 +188,14 @@ type Controller struct {
 	retryEgressNodes *RetryObjs
 	// EgressIP Node-specific syncMap used by egressip node event handler
 	addEgressNodeFailed sync.Map
-	// Objects for nodes that need to be retried
-	retryNodes *RetryObjs
 	// Objects for Cloud private IP config that need to be retried
 	retryCloudPrivateIPConfig *RetryObjs
-	// Objects for namespaces that need to be retried
-	retryNamespaces *RetryObjs
+
 	// Node-specific syncMap used by node event handler
 	gatewaysFailed              sync.Map
 	mgmtPortFailed              sync.Map
 	addNodeFailed               sync.Map
 	nodeClusterRouterPortFailed sync.Map
-
-	podRecorder metrics.PodRecorder
 }
 
 const (
@@ -227,90 +223,43 @@ func GetIPFullMask(ip string) string {
 	return IPv4FullMask
 }
 
+func (oc *Controller) Start(ctx context.Context) error {
+	oc.startMutex.Lock()
+	if oc.isStarted {
+		oc.startMutex.Unlock()
+		return nil
+	}
+	oc.isStarted = true
+	oc.startMutex.Unlock()
+	klog.Infof("The first Network Attachment Definition is added to network %s, create associated logical entities", oc.nadInfo.NetName)
+
+	if err := oc.StartClusterMaster(); err != nil {
+		return err
+	}
+
+	return oc.Run(ctx)
+}
+
+func (oc *Controller) Stop() {
+	oc.wg.Wait()
+	close(oc.stopChan)
+
+	if oc.podHandler != nil {
+		oc.watchFactory.RemovePodHandler(oc.podHandler)
+	}
+
+	if oc.nodeHandler != nil {
+		oc.watchFactory.RemoveNodeHandler(oc.nodeHandler)
+	}
+}
+
 // getPodNamespacedName returns <namespace>_<podname> for the provided pod
 func getPodNamespacedName(pod *kapi.Pod) string {
 	return util.GetLogicalPortName(pod.Namespace, pod.Name)
 }
 
-// NewOvnController creates a new OVN controller for creating logical network
-// infrastructure and policy
-func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory,
-	libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
-	recorder record.EventRecorder) *Controller {
-	if addressSetFactory == nil {
-		addressSetFactory = addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
-	}
-	svcController, svcFactory := newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient, recorder)
-	egressSvcController := newEgressServiceController(ovnClient.KubeClient, libovsdbOvnNBClient, svcFactory, stopChan)
-	var hybridOverlaySubnetAllocator *subnetallocator.SubnetAllocator
-	if config.HybridOverlay.Enabled {
-		hybridOverlaySubnetAllocator = subnetallocator.NewSubnetAllocator()
-	}
-	return &Controller{
-		client: ovnClient.KubeClient,
-		kube: &kube.Kube{
-			KClient:              ovnClient.KubeClient,
-			EIPClient:            ovnClient.EgressIPClient,
-			EgressFirewallClient: ovnClient.EgressFirewallClient,
-			CloudNetworkClient:   ovnClient.CloudNetworkClient,
-		},
-		watchFactory:                 wf,
-		stopChan:                     stopChan,
-		masterSubnetAllocator:        subnetallocator.NewSubnetAllocator(),
-		hybridOverlaySubnetAllocator: hybridOverlaySubnetAllocator,
-		lsManager:                    lsm.NewLogicalSwitchManager(),
-		logicalPortCache:             newPortCache(stopChan),
-		namespaces:                   make(map[string]*namespaceInfo),
-		namespacesMutex:              sync.Mutex{},
-		externalGWCache:              make(map[ktypes.NamespacedName]*externalRouteInfo),
-		exGWCacheMutex:               sync.RWMutex{},
-		addressSetFactory:            addressSetFactory,
-		networkPolicies:              syncmap.NewSyncMap[*networkPolicy](),
-		sharedNetpolPortGroups:       syncmap.NewSyncMap[*defaultDenyPortGroups](),
-		eIPC: egressIPController{
-			egressIPAssignmentMutex:           &sync.Mutex{},
-			podAssignmentMutex:                &sync.Mutex{},
-			podAssignment:                     make(map[string]*podAssignmentState),
-			pendingCloudPrivateIPConfigsMutex: &sync.Mutex{},
-			pendingCloudPrivateIPConfigsOps:   make(map[string]map[string]*cloudPrivateIPConfigOp),
-			allocator:                         allocator{&sync.Mutex{}, make(map[string]*egressNode)},
-			nbClient:                          libovsdbOvnNBClient,
-			watchFactory:                      wf,
-			egressIPTotalTimeout:              config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout,
-			egressIPNodeHealthCheckPort:       config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort,
-		},
-		loadbalancerClusterCache:  make(map[kapi.Protocol]string),
-		multicastSupport:          config.EnableMulticast,
-		loadBalancerGroupUUID:     "",
-		aclLoggingEnabled:         true,
-		joinSwIPManager:           nil,
-		retryPods:                 NewRetryObjs(factory.PodType, "", nil, nil, nil),
-		retryNetworkPolicies:      NewRetryObjs(factory.PolicyType, "", nil, nil, nil),
-		retryNodes:                NewRetryObjs(factory.NodeType, "", nil, nil, nil),
-		retryEgressFirewalls:      NewRetryObjs(factory.EgressFirewallType, "", nil, nil, nil),
-		retryEgressIPs:            NewRetryObjs(factory.EgressIPType, "", nil, nil, nil),
-		retryEgressIPNamespaces:   NewRetryObjs(factory.EgressIPNamespaceType, "", nil, nil, nil),
-		retryEgressIPPods:         NewRetryObjs(factory.EgressIPPodType, "", nil, nil, nil),
-		retryEgressNodes:          NewRetryObjs(factory.EgressNodeType, "", nil, nil, nil),
-		retryCloudPrivateIPConfig: NewRetryObjs(factory.CloudPrivateIPConfigType, "", nil, nil, nil),
-		retryNamespaces:           NewRetryObjs(factory.NamespaceType, "", nil, nil, nil),
-		recorder:                  recorder,
-		nbClient:                  libovsdbOvnNBClient,
-		sbClient:                  libovsdbOvnSBClient,
-		svcController:             svcController,
-		svcFactory:                svcFactory,
-		egressSvcController:       egressSvcController,
-		podRecorder:               metrics.NewPodRecorder(),
-	}
-}
-
 // Run starts the actual watching.
-func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
-	// Start and sync the watch factory to begin listening for events
-	if err := oc.watchFactory.Start(); err != nil {
-		return err
-	}
-
+func (oc *Controller) Run(ctx context.Context) error {
 	oc.syncPeriodic()
 	klog.Infof("Starting all the Watchers...")
 	start := time.Now()
@@ -336,7 +285,7 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 	oc.svcFactory.Start(oc.stopChan)
 
 	// Services should be started after nodes to prevent LB churn
-	if err := oc.StartServiceController(wg, true); err != nil {
+	if err := oc.StartServiceController(oc.wg, true); err != nil {
 		return err
 	}
 
@@ -403,16 +352,16 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 			oc.watchFactory.EgressQoSInformer(),
 			oc.watchFactory.PodCoreInformer(),
 			oc.watchFactory.NodeCoreInformer())
-		wg.Add(1)
+		oc.wg.Add(1)
 		go func() {
-			defer wg.Done()
+			defer oc.wg.Done()
 			oc.runEgressQoSController(1, oc.stopChan)
 		}()
 	}
 
-	wg.Add(1)
+	oc.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer oc.wg.Done()
 		oc.egressSvcController.Run(1)
 	}()
 
@@ -428,9 +377,9 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 		if err != nil {
 			return err
 		}
-		wg.Add(1)
+		oc.wg.Add(1)
 		go func() {
-			defer wg.Done()
+			defer oc.wg.Done()
 			unidlingController.Run(oc.stopChan)
 		}()
 	}
@@ -543,7 +492,10 @@ func (oc *Controller) removePod(pod *kapi.Pod, portInfo *lpInfo) error {
 
 // WatchPods starts the watching of the Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() error {
-	_, err := oc.WatchResource(oc.retryPods)
+	podHandler, err := oc.WatchResource(oc.retryPods)
+	if err == nil {
+		oc.podHandler = podHandler
+	}
 	return err
 }
 
@@ -639,7 +591,10 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNodes() error {
-	_, err := oc.WatchResource(oc.retryNodes)
+	nodeHandler, err := oc.WatchResource(oc.retryNodes)
+	if err == nil {
+		oc.nodeHandler = nodeHandler
+	}
 	return err
 }
 

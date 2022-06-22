@@ -390,7 +390,7 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 		}
 		var gatewayIP net.IP
 		if otherDefaultRoute {
-			for _, clusterSubnet := range config.Default.ClusterSubnets {
+			for _, clusterSubnet := range oc.clusterSubnets {
 				if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
 					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
 						Dest:    clusterSubnet.CIDR,
