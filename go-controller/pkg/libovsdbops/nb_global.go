@@ -4,6 +4,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // GetNBGlobal looks up the NB Global entry from the cache
@@ -61,4 +62,18 @@ func UpdateNBGlobalSetOptions(nbClient libovsdbclient.Client, nbGlobal *nbdb.NBG
 	m := newModelClient(nbClient)
 	_, err = m.CreateOrUpdate(opModel)
 	return err
+}
+
+func GetNBZone(nbClient libovsdbclient.Client) (string, error) {
+	nbGlobal := &nbdb.NBGlobal{}
+	nbGlobal, err := GetNBGlobal(nbClient, nbGlobal)
+	if err != nil {
+		return "", err
+	}
+
+	if nbGlobal.Name == "" {
+		return types.OvnDefaultZone, nil
+	}
+
+	return nbGlobal.Name, nil
 }

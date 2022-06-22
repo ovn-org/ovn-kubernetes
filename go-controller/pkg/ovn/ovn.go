@@ -218,6 +218,12 @@ type Controller struct {
 	nodeClusterRouterPortFailed sync.Map
 
 	podRecorder metrics.PodRecorder
+
+	// Northbounb database zone name to which this Controller is connected to - aka local zone
+	zone string
+
+	//List of nodes which belong to the local zone (stored as a sync map)
+	localZoneNodes sync.Map
 }
 
 const (
@@ -310,6 +316,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		svcController:             svcController,
 		svcFactory:                svcFactory,
 		podRecorder:               metrics.NewPodRecorder(),
+		zone:                      "global",
 	}
 }
 
@@ -499,11 +506,29 @@ func networkStatusAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
 	return oldPod.Annotations[nettypes.NetworkStatusAnnot] != newPod.Annotations[nettypes.NetworkStatusAnnot]
 }
 
+func (oc *Controller) isPodScheduledinLocalZone(pod *kapi.Pod) bool {
+	if !util.PodScheduled(pod) {
+		return false
+	}
+
+	_, isLocalZoneNode := oc.localZoneNodes.Load(pod.Spec.NodeName)
+	return isLocalZoneNode
+}
+
+func (oc *Controller) isPodScheduledinRemoteZone(pod *kapi.Pod) bool {
+	if !util.PodScheduled(pod) {
+		return false
+	}
+
+	_, isLocalZoneNode := oc.localZoneNodes.Load(pod.Spec.NodeName)
+	return !isLocalZoneNode
+}
+
 // ensurePod tries to set up a pod. It returns nil on success and error on failure; failure
 // indicates the pod set up should be retried later.
 func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
 	// Try unscheduled pods later
-	if !util.PodScheduled(pod) {
+	if !oc.isPodScheduledinLocalZone(pod) {
 		return nil
 	}
 
@@ -822,4 +847,20 @@ func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool)
 		}
 	}()
 	return nil
+}
+
+func (oc *Controller) GetLocalZoneNodes() ([]*kapi.Node, error) {
+	nodes, err := oc.watchFactory.GetNodes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get nodes: %v", err)
+	}
+
+	var zoneNodes []*kapi.Node
+	for _, n := range nodes {
+		if util.GetNodeZone(n) == oc.zone {
+			zoneNodes = append(zoneNodes, n)
+		}
+	}
+
+	return zoneNodes, nil
 }

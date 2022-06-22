@@ -60,6 +60,13 @@ func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.Swi
 
 // Start waits until this process is the leader before starting master functions
 func (oc *Controller) Start(identity string, wg *sync.WaitGroup, ctx context.Context, cancel context.CancelFunc) error {
+	// Get the zone name first.
+	zone, err := libovsdbops.GetNBZone(oc.nbClient)
+	if err != nil {
+		return fmt.Errorf("failed to get NB global Name: %v", err)
+	}
+	oc.zone = zone
+
 	// Set up leader election process first
 	rl, err := resourcelock.New(
 		// TODO (rravaiol)
@@ -71,7 +78,7 @@ func (oc *Controller) Start(identity string, wg *sync.WaitGroup, ctx context.Con
 		// This will have to be updated for the next two k8s bumps: to 1.25 and 1.26.
 		resourcelock.ConfigMapsLeasesResourceLock,
 		config.Kubernetes.OVNConfigNamespace,
-		"ovn-kubernetes-master",
+		"ovn-kubernetes-master-"+oc.zone,
 		oc.client.CoreV1(),
 		oc.client.CoordinationV1(),
 		resourcelock.ResourceLockConfig{
@@ -1039,13 +1046,18 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 		if !ok {
 			return fmt.Errorf("spurious object in syncNodes: %v", tmp)
 		}
-		foundNodes.Insert(node.Name)
 
-		// For each existing node, reserve its joinSwitch LRP IPs if they already exist.
-		_, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
-		if err != nil {
-			// TODO (flaviof): keep going even if EnsureJoinLRPIPs returned an error. Maybe we should not.
-			klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
+		// Add the node to the foundNodes only if it belongs to the local zone.
+		if oc.isLocalZoneNode(node) {
+			foundNodes.Insert(node.Name)
+			oc.localZoneNodes.Store(node.Name, true)
+
+			// For each existing node, reserve its joinSwitch LRP IPs if they already exist.
+			_, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
+			if err != nil {
+				// TODO (flaviof): keep going even if EnsureJoinLRPIPs returned an error. Maybe we should not.
+				klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
+			}
 		}
 	}
 
@@ -1145,10 +1157,15 @@ type nodeSyncs struct {
 	syncGw                bool
 }
 
-func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
+func (oc *Controller) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
 	var hostSubnets []*net.IPNet
 	var errs []error
 	var err error
+
+	_, present := oc.localZoneNodes.Load(node.Name)
+	if !present {
+		oc.localZoneNodes.Store(node.Name, true)
+	}
 
 	if noHostSubnet := noHostSubnet(node); noHostSubnet {
 		err := oc.lsManager.AddNoHostSubnetNode(node.Name)
@@ -1242,9 +1259,20 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 	return kerrors.NewAggregate(errs)
 }
 
+func (oc *Controller) addUpdateRemoteNodeEvent(node *kapi.Node) error {
+	_, present := oc.localZoneNodes.Load(node.Name)
+
+	if present {
+		_ = oc.deleteNodeEvent(node)
+	}
+	return nil
+}
+
 func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
 	klog.V(5).Infof("Deleting Node %q. Removing the node from "+
 		"various caches", node.Name)
+
+	oc.localZoneNodes.Delete(node.Name)
 
 	if err := oc.deleteNode(node.Name); err != nil {
 		return err
@@ -1285,4 +1313,13 @@ func (oc *Controller) createACLLoggingMeter() error {
 	}
 
 	return nil
+}
+
+// isLocalZoneNode returns true if the node is part of the local zone.
+func (oc *Controller) isLocalZoneNode(node *kapi.Node) bool {
+	return util.GetNodeZone(node) == oc.zone
+}
+
+func (oc *Controller) isRemoteZoneNode(node *kapi.Node) bool {
+	return util.GetNodeZone(node) != oc.zone
 }
