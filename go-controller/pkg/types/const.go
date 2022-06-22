@@ -151,4 +151,6 @@ const (
 	OVSDBWaitTimeout = 0
 
 	ClusterLBGroupName = "clusterLBGroup"
+
+	OvnDefaultZone = "global"
 )
