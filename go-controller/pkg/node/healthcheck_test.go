@@ -10,6 +10,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func genListStalePortsCmd() string {
@@ -85,7 +87,8 @@ var _ = Describe("Healthcheck tests", func() {
 
 	Describe("checkForStaleOVSRepresentorInterfaces", func() {
 		nodeName := "localNode"
-		podList := []*v1.Pod{
+		var fakeClient kubernetes.Interface
+		podList := []v1.Pod{
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "a-pod",
@@ -110,7 +113,7 @@ var _ = Describe("Healthcheck tests", func() {
 
 		BeforeEach(func() {
 			// setup kube output
-			factoryMock.On("GetPods", "").Return(podList, nil)
+			fakeClient = fake.NewSimpleClientset(&v1.PodList{Items: podList})
 		})
 
 		Context("bridge has stale representor ports", func() {
@@ -130,7 +133,7 @@ var _ = Describe("Healthcheck tests", func() {
 					Output: "",
 					Err:    nil,
 				})
-				checkForStaleOVSRepresentorInterfaces(nodeName, factoryMock)
+				checkForStaleOVSRepresentorInterfaces(nodeName, factoryMock, fakeClient)
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			})
 		})
@@ -144,7 +147,7 @@ var _ = Describe("Healthcheck tests", func() {
 						"pod-b-ifc,sandbox=123abcfaa iface-id=b-ns_b-pod\n",
 					Err: nil,
 				})
-				checkForStaleOVSRepresentorInterfaces(nodeName, factoryMock)
+				checkForStaleOVSRepresentorInterfaces(nodeName, factoryMock, fakeClient)
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
 			})
 		})

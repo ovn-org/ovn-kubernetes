@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"net"
 	"os"
 	"strings"
@@ -13,7 +14,9 @@ import (
 	"github.com/pkg/errors"
 
 	kapi "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 )
 
@@ -169,7 +172,7 @@ func checkForStaleOVSInternalPorts() {
 // checkForStaleOVSRepresentorInterfaces checks for stale OVS ports backed by Repreresentor interfaces,
 // derive iface-id from pod name and namespace then remove any interfaces assoicated with a sandbox that are
 // not scheduled to the node.
-func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCacheInterface) {
+func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCacheInterface, kclient kubernetes.Interface) {
 	// Get all ovn-kuberntes Pod interfaces. these are OVS interfaces that have their external_ids:sandbox set.
 	out, stderr, err := util.RunOVSVsctl("--columns=name,external_ids", "--data=bare", "--no-headings",
 		"--format=csv", "find", "Interface", "external_ids:sandbox!=\"\"")
@@ -214,13 +217,15 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 	// list Pods and calculate the expected iface-ids.
 	// Note: we do this after scanning ovs interfaces to avoid deleting ports of pods that where just scheduled
 	// on the node.
-	pods, err := wf.GetPods("")
+	pods, err := kclient.CoreV1().
+		Pods("").
+		List(context.TODO(), metav1.ListOptions{FieldSelector: "spec.nodeName=" + nodeName})
 	if err != nil {
 		klog.Errorf("Failed to list pods. %v", err)
 		return
 	}
 	expectedIfaceIds := make(map[string]bool)
-	for _, pod := range pods {
+	for _, pod := range pods.Items {
 		if pod.Spec.NodeName == nodeName {
 			// Note: wf (WatchFactory) *usually* returns pods assigned to this node, however we dont rely on it
 			// and add this check to filter out pods assigned to other nodes. (e.g when ovnkube master and node
@@ -254,9 +259,9 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 }
 
 // checkForStaleOVSInterfaces periodically checks for stale OVS interfaces
-func checkForStaleOVSInterfaces(nodeName string, wf factory.ObjectCacheInterface) {
+func checkForStaleOVSInterfaces(nodeName string, wf factory.ObjectCacheInterface, kclient kubernetes.Interface) {
 	checkForStaleOVSInternalPorts()
-	checkForStaleOVSRepresentorInterfaces(nodeName, wf)
+	checkForStaleOVSRepresentorInterfaces(nodeName, wf, kclient)
 }
 
 type openflowManager struct {

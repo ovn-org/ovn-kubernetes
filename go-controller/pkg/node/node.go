@@ -535,9 +535,13 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	mgmtPort.CheckManagementPortHealth(mgmtPortConfig, n.stopChan)
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		kclient, ok := n.Kube.(*kube.Kube)
+		if !ok {
+			return fmt.Errorf("cannot get kubeclient for starting check stale ovs interfaces")
+		}
 		// start health check to ensure there are no stale OVS internal ports
 		go wait.Until(func() {
-			checkForStaleOVSInterfaces(n.name, n.watchFactory.(*factory.WatchFactory))
+			checkForStaleOVSInterfaces(n.name, n.watchFactory.(*factory.WatchFactory), kclient.KClient)
 		}, time.Minute, n.stopChan)
 		err := n.WatchEndpoints()
 		if err != nil {
