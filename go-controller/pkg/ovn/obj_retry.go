@@ -29,6 +29,8 @@ import (
 
 const retryObjInterval = 30 * time.Second
 const maxFailedAttempts = 15 // same value used for the services level-driven controller
+const initialBackoff = 1
+const noBackoff = 0
 
 // retryObjEntry is a generic object caching with retry mechanism
 //that resources can use to eventually complete their intended operations.
@@ -91,14 +93,28 @@ func NewRetryObjs(
 	}
 }
 
-// addRetryObjWithAdd adds an object to be retried later for add
-func (r *retryObjs) addRetryObjWithAdd(obj interface{}) {
+// setRetryObjWithNoBackoff sets an object's backoff to be retried
+// immediately during the next retry iteration
+// Used only for testing right now
+func (r *retryObjs) setRetryObjWithNoBackoff(key string) {
+	r.retryMutex.Lock()
+	defer r.retryMutex.Unlock()
+	if entry, ok := r.entries[key]; ok {
+		entry.backoffSec = noBackoff
+		return
+	}
+
+	klog.Errorf("Unable to find entry with key %s", key)
+}
+
+// addRetryObjWithAddNoBackoff adds an object to be retried immediately for add
+func (r *retryObjs) addRetryObjWithAddNoBackoff(obj interface{}) {
 	key, err := getResourceKey(r.oType, obj)
 	if err != nil {
 		klog.Errorf("Could not get the key of %s %v: %v", r.oType, obj, err)
 		return
 	}
-	r.initRetryObjWithAdd(obj, key)
+	r.initRetryObjWithAddBackoff(obj, key, noBackoff)
 	r.unSkipRetryObj(key)
 }
 
@@ -106,11 +122,16 @@ func (r *retryObjs) addRetryObjWithAdd(obj interface{}) {
 // so that, if it fails, the add can be potentially retried later.
 // initially it is marked as skipped for the retry loop (ignore = true).
 func (r *retryObjs) initRetryObjWithAdd(obj interface{}, key string) {
+	r.initRetryObjWithAddBackoff(obj, key, initialBackoff)
+}
+
+func (r *retryObjs) initRetryObjWithAddBackoff(obj interface{}, key string, backoff time.Duration) {
 	entry := r.ensureRetryEntryLocked(key, &retryObjEntry{Mutex: sync.Mutex{}, newObj: obj,
-		timeStamp: time.Now(), backoffSec: 1, ignore: true})
+		timeStamp: time.Now(), backoffSec: backoff, ignore: true})
 	entry.timeStamp = time.Now()
 	entry.newObj = obj
 	entry.failedAttempts = 0
+	entry.backoffSec = backoff
 	entry.Unlock()
 }
 
@@ -118,7 +139,7 @@ func (r *retryObjs) initRetryObjWithAdd(obj interface{}, key string) {
 // initially it is marked as skipped for retry loop (ignore = true)
 func (r *retryObjs) initRetryObjWithUpdate(oldObj, newObj interface{}, key string) {
 	entry := r.ensureRetryEntryLocked(key, &retryObjEntry{Mutex: sync.Mutex{}, newObj: newObj, config: oldObj,
-		timeStamp: time.Now(), backoffSec: 1, ignore: true})
+		timeStamp: time.Now(), backoffSec: initialBackoff, ignore: true})
 	entry.timeStamp = time.Now()
 	entry.newObj = newObj
 	entry.config = oldObj
@@ -138,7 +159,7 @@ func (r *retryObjs) initRetryObjWithUpdate(oldObj, newObj interface{}, key strin
 // The noRetryAdd boolean argument is to indicate whether to retry for addition
 func (r *retryObjs) initRetryObjWithDelete(obj interface{}, key string, config interface{}, noRetryAdd bool) {
 	entry := r.ensureRetryEntryLocked(key, &retryObjEntry{Mutex: sync.Mutex{}, oldObj: obj, config: config,
-		timeStamp: time.Now(), backoffSec: 1, ignore: true})
+		timeStamp: time.Now(), backoffSec: initialBackoff, ignore: true})
 	entry.timeStamp = time.Now()
 	entry.oldObj = obj
 	if entry.config == nil {
@@ -1123,7 +1144,7 @@ type localRetryEntry struct {
 	kObj interface{}
 }
 
-func (oc *Controller) resourceRetry(r *retryObjs, lre *localRetryEntry, now time.Time, updateAll bool) {
+func (oc *Controller) resourceRetry(r *retryObjs, lre *localRetryEntry, now time.Time) {
 	objKey := lre.key
 	entry := r.ensureRetryEntryLocked(objKey, nil)
 	if entry == nil {
@@ -1140,15 +1161,23 @@ func (oc *Controller) resourceRetry(r *retryObjs, lre *localRetryEntry, now time
 		r.deleteRetryObj(objKey, false)
 		return
 	}
-	entry.backoffSec = entry.backoffSec * 2
-	if entry.backoffSec > 60 {
-		entry.backoffSec = 60
+	forceRetry := false
+	// check if immediate retry is requested
+	if entry.backoffSec == noBackoff {
+		entry.backoffSec = initialBackoff
+		forceRetry = true
 	}
 	backoff := (entry.backoffSec * time.Second) + (time.Duration(rand.Intn(500)) * time.Millisecond)
 	objTimer := entry.timeStamp.Add(backoff)
-	if !updateAll && now.Before(objTimer) {
+	if !forceRetry && now.Before(objTimer) {
 		klog.V(5).Infof("Attempting retry of %s %s before timer (time: %s): skip", r.oType, objKey, objTimer)
 		return
+	}
+
+	// update backoff for future attempts in case of failure
+	entry.backoffSec = entry.backoffSec * 2
+	if entry.backoffSec > 60 {
+		entry.backoffSec = 60
 	}
 
 	// storing original obj for metrics
@@ -1222,7 +1251,7 @@ func (oc *Controller) resourceRetry(r *retryObjs, lre *localRetryEntry, now time
 
 // iterateRetryResources checks if any outstanding resource objects exist and if so it tries to
 // re-add them. updateAll forces all objects to be attempted to be retried regardless.
-func (oc *Controller) iterateRetryResources(r *retryObjs, updateAll bool) {
+func (oc *Controller) iterateRetryResources(r *retryObjs) {
 	r.retryMutex.Lock()
 	now := time.Now()
 	localRetryEntries := make([]*localRetryEntry, 0, len(r.entries))
@@ -1259,7 +1288,7 @@ func (oc *Controller) iterateRetryResources(r *retryObjs, updateAll bool) {
 		wg.Add(1)
 		go func(lre *localRetryEntry) {
 			defer wg.Done()
-			oc.resourceRetry(r, lre, now, updateAll)
+			oc.resourceRetry(r, lre, now)
 		}(lre)
 	}
 	klog.V(5).Infof("Waiting for all the %s retry setup to complete in iterateRetryResources", r.oType)
@@ -1275,11 +1304,11 @@ func (oc *Controller) periodicallyRetryResources(r *retryObjs) {
 	for {
 		select {
 		case <-timer.C:
-			oc.iterateRetryResources(r, false)
+			oc.iterateRetryResources(r)
 
 		case <-r.retryChan:
 			klog.V(5).Infof("Retry channel got triggered: retrying failed objects of type %s", r.oType)
-			oc.iterateRetryResources(r, true)
+			oc.iterateRetryResources(r)
 			timer.Reset(retryObjInterval)
 
 		case <-oc.stopChan:

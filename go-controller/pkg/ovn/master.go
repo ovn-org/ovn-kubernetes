@@ -1401,7 +1401,7 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 					continue
 				}
 				klog.V(5).Infof("Adding pod %s/%s to retryPods", pod.Namespace, pod.Name)
-				oc.retryPods.addRetryObjWithAdd(&pod)
+				oc.retryPods.addRetryObjWithAddNoBackoff(&pod)
 			}
 			oc.retryPods.requestRetryObjs()
 		}

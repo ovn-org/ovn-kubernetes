@@ -1438,6 +1438,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
+				fakeOvn.controller.retryPods.setRetryObjWithNoBackoff(key)
 				fakeOvn.controller.retryNetworkPolicies.requestRetryObjs()
 
 				gressPolicy2ExpectedData := npTest.getPolicyData(networkPolicy2, []string{nPodTest.portUUID}, nil, []int32{portNum + 1}, nbdb.ACLSeverityInfo, false)
@@ -2445,6 +2446,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
+				fakeOvn.controller.retryPods.setRetryObjWithNoBackoff(key)
 				fakeOvn.controller.retryNetworkPolicies.requestRetryObjs()
 
 				eventuallyExpectNoAddressSets(fakeOvn, networkPolicy)

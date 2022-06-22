@@ -3,6 +3,7 @@ package ovn
 import (
 	"context"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"net"
 	"time"
 
@@ -830,6 +831,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				connCtx, cancel := context.WithTimeout(context.Background(), t.OVSDBTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOVN.controller.nbClient)
+				fakeOVN.controller.retryPods.setRetryObjWithNoBackoff(key)
 				fakeOVN.controller.retryEgressFirewalls.requestRetryObjs()
 
 				// ACL should be removed from switches after egfw is deleted
@@ -957,7 +959,8 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				// sleep long enough for TransactWithRetry to fail, causing egress firewall Add to fail
 				time.Sleep(t.OVSDBTimeout + time.Second)
 				// check to see if the retry cache has an entry for this egress firewall
-				key := getEgressFirewallNamespacedName(egressFirewall)
+				key, err := getResourceKey(factory.EgressFirewallType, egressFirewall)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(func() *retryObjEntry {
 					return fakeOVN.controller.retryEgressFirewalls.getObjRetryEntry(key)
 				}).ShouldNot(gomega.BeNil())
@@ -968,7 +971,9 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				gomega.Expect(retryEntry.oldObj).NotTo(gomega.BeNil())
 				connCtx, cancel := context.WithTimeout(context.Background(), t.OVSDBTimeout)
 				defer cancel()
+				ginkgo.By("bringing up NBDB and requesting retry of entry")
 				resetNBClient(connCtx, fakeOVN.controller.nbClient)
+				fakeOVN.controller.retryEgressFirewalls.setRetryObjWithNoBackoff(key)
 				fakeOVN.controller.retryEgressFirewalls.requestRetryObjs()
 				// check the cache no longer has the entry
 				gomega.Eventually(func() *retryObjEntry {

@@ -1292,6 +1292,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			defer cancel()
 			ginkgo.By("bring up NBDB")
 			resetNBClient(connCtx, clusterController.nbClient)
+			clusterController.retryNodes.setRetryObjWithNoBackoff(node1.Name)
 			clusterController.retryNodes.requestRetryObjs() // retry the failed entry
 			ginkgo.By("should be no retry entry after update completes")
 			gomega.Eventually(func() *retryObjEntry {
@@ -1440,6 +1441,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(retryEntry.oldObj).NotTo(gomega.BeNil())
 			// allocate subnet to allow delete to continue
 			gomega.Expect(clusterController.masterSubnetAllocator.AddNetworkRange(subnet, 24)).To(gomega.Succeed())
+			clusterController.retryNodes.setRetryObjWithNoBackoff(node1.Name)
 			clusterController.retryNodes.requestRetryObjs() // retry the failed entry
 
 			gomega.Eventually(func() *retryObjEntry {
