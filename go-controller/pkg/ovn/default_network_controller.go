@@ -156,6 +156,9 @@ type DefaultNetworkController struct {
 	// IP addresses of OVN Cluster logical router port ("GwRouterToJoinSwitchPrefix + OVNClusterRouter")
 	// connecting to the join switch
 	ovnClusterLRPToJoinIfAddrs []*net.IPNet
+
+	// List of nodes which belong to the local zone (stored as a sync map)
+	localZoneNodes sync.Map
 }
 
 // NewDefaultNetworkController creates a new OVN controller for creating logical network
@@ -724,27 +727,33 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *kapi.Node", obj)
 		}
-		var nodeParams *nodeSyncs
-		if fromRetryLoop {
-			_, nodeSync := h.oc.addNodeFailed.Load(node.Name)
-			_, clusterRtrSync := h.oc.nodeClusterRouterPortFailed.Load(node.Name)
-			_, mgmtSync := h.oc.mgmtPortFailed.Load(node.Name)
-			_, gwSync := h.oc.gatewaysFailed.Load(node.Name)
-			_, hoSync := h.oc.hybridOverlayFailed.Load(node.Name)
-			nodeParams = &nodeSyncs{
-				nodeSync,
-				clusterRtrSync,
-				mgmtSync,
-				gwSync,
-				hoSync}
-		} else {
-			nodeParams = &nodeSyncs{true, true, true, true, config.HybridOverlay.Enabled}
-		}
+		if h.oc.isLocalZoneNode(node) {
+			var nodeParams *nodeSyncs
+			if fromRetryLoop {
+				_, nodeSync := h.oc.addNodeFailed.Load(node.Name)
+				_, clusterRtrSync := h.oc.nodeClusterRouterPortFailed.Load(node.Name)
+				_, mgmtSync := h.oc.mgmtPortFailed.Load(node.Name)
+				_, gwSync := h.oc.gatewaysFailed.Load(node.Name)
+				_, hoSync := h.oc.hybridOverlayFailed.Load(node.Name)
+				nodeParams = &nodeSyncs{
+					nodeSync,
+					clusterRtrSync,
+					mgmtSync,
+					gwSync,
+					hoSync}
+			} else {
+				nodeParams = &nodeSyncs{true, true, true, true, config.HybridOverlay.Enabled}
+			}
 
-		if err = h.oc.addUpdateNodeEvent(node, nodeParams); err != nil {
-			klog.Infof("Node add failed for %s, will try again later: %v",
-				node.Name, err)
-			return err
+			if err = h.oc.addUpdateLocalNodeEvent(node, nodeParams); err != nil {
+				klog.Infof("Node add failed for %s, will try again later: %v",
+					node.Name, err)
+				return err
+			}
+		} else {
+			if err = h.oc.addUpdateRemoteNodeEvent(node); err != nil {
+				return err
+			}
 		}
 
 	case factory.AddressSetPodSelectorType:
@@ -863,19 +872,57 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		if !ok {
 			return fmt.Errorf("could not cast oldObj of type %T to *kapi.Node", oldObj)
 		}
-		// determine what actually changed in this update
-		_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
-		_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
-		clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
-		_, failed = h.oc.mgmtPortFailed.Load(newNode.Name)
-		mgmtSync := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
-		_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
-		gwSync := (failed || gatewayChanged(oldNode, newNode) ||
-			nodeSubnetChanged(oldNode, newNode) || hostAddressesChanged(oldNode, newNode) ||
-			nodeGatewayMTUSupportChanged(oldNode, newNode))
-		_, hoSync := h.oc.hybridOverlayFailed.Load(newNode.Name)
 
-		return h.oc.addUpdateNodeEvent(newNode, &nodeSyncs{nodeSync, clusterRtrSync, mgmtSync, gwSync, hoSync})
+		// +--------------------+-------------------+-------------------------------------------------+
+		// |    oldNode         |      newNode      |       Action                                    |
+		// |--------------------+-------------------+-------------------------------------------------+
+		// |                    |                   |     Node is remote.                             |
+		// |    local           |      remote       |     Call addUpdateRemoteNodeEvent()             |
+		// |                    |                   |                                                 |
+		// |--------------------+-------------------+-------------------------------------------------+
+		// |                    |                   |     Node is local                               |
+		// |    local           |      local        |     Call addUpdateLocalNodeEvent()              |
+		// |                    |                   |                                                 |
+		// |--------------------+-------------------+-------------------------------------------------+
+		// |                    |                   |     Node is local                               |
+		// |    remote          |      local        |     Call addUpdateLocalNodeEvent(full sync)     |
+		// |                    |                   |                                                 |
+		// |--------------------+-------------------+-------------------------------------------------+
+		// |                    |                   |     Node is remote                              |
+		// |    remote          |      remote       |     Call addUpdateRemoteNodeEvent()             |
+		// |                    |                   |                                                 |
+		// |--------------------+-------------------+-------------------------------------------------+
+		if h.oc.isLocalZoneNode(newNode) {
+			var nodeSyncsParam *nodeSyncs
+			if h.oc.isLocalZoneNode(oldNode) {
+				// determine what actually changed in this update
+				_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
+				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
+				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
+				_, failed = h.oc.mgmtPortFailed.Load(newNode.Name)
+				mgmtSync := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
+				_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
+				gwSync := (failed || gatewayChanged(oldNode, newNode) ||
+					nodeSubnetChanged(oldNode, newNode) || hostAddressesChanged(oldNode, newNode) ||
+					nodeGatewayMTUSupportChanged(oldNode, newNode))
+				_, hoSync := h.oc.hybridOverlayFailed.Load(newNode.Name)
+				nodeSyncsParam = &nodeSyncs{
+					nodeSync,
+					clusterRtrSync,
+					mgmtSync,
+					gwSync,
+					hoSync}
+			} else {
+				klog.Infof("Node %s moved from the remote zone %s to local zone.",
+					newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
+				// The node is now a local zone node.  Trigger a full node sync.
+				nodeSyncsParam = &nodeSyncs{true, true, true, true, true}
+			}
+
+			return h.oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam)
+		} else {
+			return h.oc.addUpdateRemoteNodeEvent(newNode)
+		}
 
 	case factory.AddressSetPodSelectorType:
 		peerAS := h.extraParameters.(*PodSelectorAddrSetHandlerInfo)
@@ -1008,7 +1055,6 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		if cachedObj != nil {
 			portInfo = cachedObj.(*lpInfo)
 		}
-		h.oc.logicalPortCache.remove(pod, ovntypes.DefaultNetworkName)
 		return h.oc.removePod(pod, portInfo)
 
 	case factory.PolicyType:

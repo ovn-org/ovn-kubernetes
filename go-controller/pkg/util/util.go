@@ -393,3 +393,20 @@ func NoHostSubnet(node *v1.Node) bool {
 	nodeSelector, _ := metav1.LabelSelectorAsSelector(config.Kubernetes.NoHostSubnetNodes)
 	return nodeSelector.Matches(labels.Set(node.Labels))
 }
+
+// GetNBZone returns the zone name configured in the OVN Northbound database.
+// If the zone name is not configured, it returns the default zone name - "global"
+// It retuns error if there is no NBGlobal row.
+func GetNBZone(nbClient libovsdbclient.Client) (string, error) {
+	nbGlobal := &nbdb.NBGlobal{}
+	nbGlobal, err := libovsdbops.GetNBGlobal(nbClient, nbGlobal)
+	if err != nil {
+		return "", fmt.Errorf("error in getting the NBGlobal row  from Northbound db : err - %w", err)
+	}
+
+	if nbGlobal.Name == "" {
+		return types.OvnDefaultZone, nil
+	}
+
+	return nbGlobal.Name, nil
+}

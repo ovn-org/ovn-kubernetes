@@ -581,8 +581,13 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 		if config.HybridOverlay.Enabled && houtil.IsHybridOverlayNode(node) {
 			continue
 		}
-		foundNodes.Insert(node.Name)
-		nodes = append(nodes, node)
+
+		// Add the node to the foundNodes only if it belongs to the local zone.
+		if oc.isLocalZoneNode(node) {
+			foundNodes.Insert(node.Name)
+			oc.localZoneNodes.Store(node.Name, true)
+			nodes = append(nodes, node)
+		}
 	}
 
 	defaultNetworkPredicate := func(item *nbdb.LogicalSwitch) bool {
@@ -694,10 +699,12 @@ type nodeSyncs struct {
 	syncHo                bool
 }
 
-func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
+func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
 	var hostSubnets []*net.IPNet
 	var errs []error
 	var err error
+
+	_, _ = oc.localZoneNodes.LoadOrStore(node.Name, true)
 
 	if noHostSubnet := util.NoHostSubnet(node); noHostSubnet {
 		err := oc.lsManager.AddNoHostSubnetSwitch(node.Name)
@@ -810,6 +817,21 @@ func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *
 	return err
 }
 
+func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node) error {
+	// Check if the remote node is present in the local zone nodes.  If its present
+	// it means it moved from this controller zone to other remote zone. Cleanup the node
+	// from the local zone cache.
+	_, present := oc.localZoneNodes.Load(node.Name)
+
+	if present {
+		klog.Infof("Node %q moved from the local zone %s to a remote zone %s. Deleting it locally", node.Name, oc.zone, util.GetNodeZone(node))
+		if err := oc.deleteNodeEvent(node); err != nil {
+			return fmt.Errorf("error deleting the remote node %s, err : %w", node.Name, err)
+		}
+	}
+	return nil
+}
+
 func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 	klog.V(5).Infof("Deleting Node %q. Removing the node from "+
 		"various caches", node.Name)
@@ -827,6 +849,7 @@ func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 			return err
 		}
 	}
+
 	if err := oc.deleteNode(node.Name); err != nil {
 		return err
 	}
@@ -836,6 +859,7 @@ func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 	oc.mgmtPortFailed.Delete(node.Name)
 	oc.gatewaysFailed.Delete(node.Name)
 	oc.nodeClusterRouterPortFailed.Delete(node.Name)
+	oc.localZoneNodes.Delete(node.Name)
 	return nil
 }
 
