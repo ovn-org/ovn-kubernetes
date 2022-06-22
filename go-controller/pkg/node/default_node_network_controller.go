@@ -484,6 +484,21 @@ func createNodeManagementPorts(name string, nodeAnnotator kube.Annotator, waiter
 	return mgmtPorts, mgmtPortConfig, nil
 }
 
+// getOVNSBZone returns the zone name stored in the Southbound db.
+// It returns the default zone name if "options:name" is not set in the SB_Global row
+func getOVNSBZone() (string, error) {
+	dbZone, stderr, err := util.RunOVNSbctl("get", "SB_Global", ".", "options:name")
+	if err != nil {
+		if strings.Contains(stderr, "ovn-sbctl: no key \"name\" in SB_Global record") {
+			// If the options:name is not present, assume default zone
+			return types.OvnDefaultZone, nil
+		}
+		return "", err
+	}
+
+	return dbZone, nil
+}
+
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
@@ -600,8 +615,16 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
+	sbZone, err := getOVNSBZone()
+	if err != nil {
+		return fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
+	}
+	if err := util.SetNodeZone(nodeAnnotator, sbZone); err != nil {
+		return fmt.Errorf("failed to set node zone annotation for node %s: %w", nc.name, err)
+	}
+
 	if err := nodeAnnotator.Run(); err != nil {
-		return fmt.Errorf("failed to set node %s annotations: %v", nc.name, err)
+		return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
 	}
 
 	// Wait for management port and gateway resources to be created by the master
