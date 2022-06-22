@@ -14,6 +14,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // This handles the annotations used by the node to pass information about its local
@@ -75,6 +76,10 @@ const (
 	// capacity for each node. It is set by
 	// openshift/cloud-network-config-controller
 	cloudEgressIPConfigAnnotationKey = "cloud.network.openshift.io/egress-ipconfig"
+
+	// ovnNodeZoneName is the zone to which the node belongs to. It is set by ovnkube-node.
+	// ovnkube-node gets the node's zone from the OVN Southbound database.
+	ovnNodeZoneName = "k8s.ovn.org/zone-name"
 
 	// ovnNodeID is the id (of type integer) of a node. It is set by cluster-manager.
 	ovnNodeID = "k8s.ovn.org/node-id"
@@ -598,4 +603,20 @@ func GetNodeID(node *kapi.Node) int {
 // NodeIDAnnotationChanged returns true if the ovnNodeID in the corev1.Nodes doesn't match
 func NodeIDAnnotationChanged(oldNode, newNode *corev1.Node) bool {
 	return oldNode.Annotations[ovnNodeID] != newNode.Annotations[ovnNodeID]
+}
+
+// SetNodeZone sets the node's zone in the 'ovnNodeZoneName' node annotation.
+func SetNodeZone(nodeAnnotator kube.Annotator, zoneName string) error {
+	return nodeAnnotator.Set(ovnNodeZoneName, zoneName)
+}
+
+// GetNodeZone returns the zone of the node set in the 'ovnNodeZoneName' node annotation.
+// If the annotation is not set, it returns the 'default' zone name.
+func GetNodeZone(node *kapi.Node) string {
+	zoneName, ok := node.Annotations[ovnNodeZoneName]
+	if !ok {
+		return types.OvnDefaultZone
+	}
+
+	return zoneName
 }
