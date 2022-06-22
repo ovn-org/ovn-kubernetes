@@ -429,7 +429,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				)
 
 				myPod2, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(),
-					newPod(t2.namespace, t2.podName, t2.nodeName, t2.podIP), metav1.CreateOptions{})
+					newPod(t2.namespace, t2.podName, t2.nodeName, ""), metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t2.namespace, t2.podName)
@@ -456,12 +456,12 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					return err != nil || !info.expires.IsZero()
 				}, 2).Should(gomega.BeTrue())
 
+				ginkgo.By("Freed IP should now allow mypod2 to come up")
+				fakeOvn.controller.retryPods.requestRetryObjs()
 				// there should also be no entry for this pod in the retry cache
 				gomega.Eventually(func() bool {
 					return fakeOvn.controller.retryPods.getObjRetryEntry(myPod2Key) == nil
 				}, retryObjInterval+time.Second).Should(gomega.BeTrue())
-				ginkgo.By("Freed IP should now allow mypod2 to come up")
-				fakeOvn.controller.retryPods.requestRetryObjs()
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t2.namespace, t2.podName)
 				}, 2).Should(gomega.MatchJSON(t2.getAnnotationsJson()))
@@ -533,7 +533,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				)
 
 				myPod2, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(),
-					newPod(t2.namespace, t2.podName, t2.nodeName, t2.podIP), metav1.CreateOptions{})
+					newPod(t2.namespace, t2.podName, t2.nodeName, ""), metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t2.namespace, t2.podName)
@@ -559,12 +559,13 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					return err != nil || !info.expires.IsZero()
 				}, 2).Should(gomega.BeTrue())
 
+				ginkgo.By("Freed IP should now allow mypod2 to come up")
+				fakeOvn.controller.retryPods.requestRetryObjs()
 				// there should also be no entry for this pod in the retry cache
 				gomega.Eventually(func() bool {
 					return fakeOvn.controller.retryPods.getObjRetryEntry(myPod2Key) == nil
 				}, retryObjInterval+time.Second).Should(gomega.BeTrue())
-				ginkgo.By("Freed IP should now allow mypod2 to come up")
-				fakeOvn.controller.retryPods.requestRetryObjs()
+
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t2.namespace, t2.podName)
 				}, 2).Should(gomega.MatchJSON(t2.getAnnotationsJson()))
@@ -574,7 +575,6 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				myPod2, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(),
 					t2.podName, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(myPod2.Status.PodIP).To(gomega.Equal(t2.podIP))
 
 				ginkgo.By("Updating the completed pod should not free the IP")
 				patch := struct {

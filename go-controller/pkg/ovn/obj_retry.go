@@ -1469,7 +1469,7 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 					// [step 1b] The object is in a terminal state: delete it from the cluster,
 					// delete its retry entry and return. This only applies to pod watchers
 					// (pods + dynamic network policy handlers watching pods).
-					oc.processObjectInTerminalState(objectsToRetry, old, oldKey, resourceEventUpdate)
+					oc.processObjectInTerminalState(objectsToRetry, newer, newKey, resourceEventUpdate)
 					return
 
 				} else if !hasUpdateFunc {
