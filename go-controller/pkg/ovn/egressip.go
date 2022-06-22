@@ -39,7 +39,7 @@ import (
 )
 
 type egressIPDialer interface {
-	dial(ip net.IP) bool
+	dial(ip net.IP, timeout time.Duration) bool
 }
 
 var dialer egressIPDialer = &egressIPDial{}
@@ -1839,6 +1839,8 @@ type egressIPController struct {
 	nbClient libovsdbclient.Client
 	// watchFactory watching k8s objects
 	watchFactory *factory.WatchFactory
+	// EgressIP Node reachability total timeout configuration
+	egressIPTotalTimeout int
 }
 
 // addPodEgressIPAssignment will program OVN with logical router policies
@@ -2108,11 +2110,41 @@ func (oc *Controller) checkEgressNodesReachability() {
 }
 
 func (oc *Controller) isReachable(node *egressNode) bool {
-	for _, ip := range node.mgmtIPs {
-		if dialer.dial(ip) {
-			return true
-		}
+	var retryTimeOut, initialRetryTimeOut time.Duration
+
+	numMgmtIPs := len(node.mgmtIPs)
+	if numMgmtIPs == 0 {
+		return false
 	}
+
+	switch oc.eIPC.egressIPTotalTimeout {
+	// Check if we need to do node reachability check
+	case 0:
+		return true
+	case 1:
+		// Using time duration for initial retry with 700/numIPs msec and retry of 100/numIPs msec
+		// to ensure total wait time will be in range with the configured value including a sleep of 100msec between attempts.
+		initialRetryTimeOut = time.Duration(700/numMgmtIPs) * time.Millisecond
+		retryTimeOut = time.Duration(100/numMgmtIPs) * time.Millisecond
+	default:
+		// Using time duration for initial retry with 900/numIPs msec
+		// to ensure total wait time will be in range with the configured value including a sleep of 100msec between attempts.
+		initialRetryTimeOut = time.Duration(900/numMgmtIPs) * time.Millisecond
+		retryTimeOut = initialRetryTimeOut
+	}
+
+	timeout := initialRetryTimeOut
+	endTime := time.Now().Add(time.Second * time.Duration(oc.eIPC.egressIPTotalTimeout))
+	for time.Now().Before(endTime) {
+		for _, ip := range node.mgmtIPs {
+			if dialer.dial(ip, timeout) {
+				return true
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+		timeout = retryTimeOut
+	}
+	klog.Errorf("Failed reachability check for %s", node.name)
 	return false
 }
 
@@ -2125,8 +2157,7 @@ type egressIPDial struct{}
 // we will return false). If the node is online then we presumably will get a "connection
 // refused" error; but the code below assumes that anything other than timeout or "no
 // route" indicates that the node is online.
-func (e *egressIPDial) dial(ip net.IP) bool {
-	timeout := time.Second
+func (e *egressIPDial) dial(ip net.IP, timeout time.Duration) bool {
 	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip.String(), "9"), timeout)
 	if conn != nil {
 		conn.Close()

@@ -115,7 +115,9 @@ var (
 	Metrics MetricsConfig
 
 	// OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
-	OVNKubernetesFeature OVNKubernetesFeatureConfig
+	OVNKubernetesFeature = OVNKubernetesFeatureConfig{
+		EgressIPReachabiltyTotalTimeout: 1,
+	}
 
 	// OvnNorth holds northbound OVN database client and server authentication and location details
 	OvnNorth OvnAuthConfig
@@ -328,9 +330,12 @@ type MetricsConfig struct {
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
 type OVNKubernetesFeatureConfig struct {
-	EnableEgressIP       bool `gcfg:"enable-egress-ip"`
-	EnableEgressFirewall bool `gcfg:"enable-egress-firewall"`
-	EnableEgressQoS      bool `gcfg:"enable-egress-qos"`
+	// EgressIP feature is enabled
+	EnableEgressIP bool `gcfg:"enable-egress-ip"`
+	// EgressIP node reachability total timeout in seconds
+	EgressIPReachabiltyTotalTimeout int  `gcfg:"egressip-reachability-total-timeout"`
+	EnableEgressFirewall            bool `gcfg:"enable-egress-firewall"`
+	EnableEgressQoS                 bool `gcfg:"enable-egress-qos"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -851,6 +856,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use EgressIP CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressIP,
 		Value:       OVNKubernetesFeature.EnableEgressIP,
+	},
+	&cli.IntFlag{
+		Name:        "egressip-reachability-total-timeout",
+		Usage:       "EgressIP node reachability total timeout in seconds (default: 1)",
+		Destination: &cliConfig.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout,
+		Value:       1,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-egress-firewall",

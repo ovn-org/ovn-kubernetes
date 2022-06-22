@@ -206,6 +206,9 @@ cluster-subnets=11.132.0.0/14/23
 
 [ovnkubenode]
 mode=full
+
+[ovnkubernetesfeature]
+egressip-reachability-total-timeout=3
 `
 
 	var newData string
@@ -293,6 +296,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeFull))
 			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal(""))
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal(""))
+			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(1))
 
 			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
 				gomega.Expect(a.Scheme).To(gomega.Equal(OvnDBSchemeUnix))
@@ -595,6 +599,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal("10.50.0.0/16"))
 
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(3))
 			gomega.Expect(HybridOverlay.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
@@ -674,6 +679,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal("10.55.0.0/16"))
 
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(5))
 			gomega.Expect(HybridOverlay.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
@@ -728,6 +734,7 @@ var _ = Describe("Config Operations", func() {
 			"-metrics-enable-pprof=false",
 			"-ofctrl-wait-before-clear=5000",
 			"-metrics-enable-config-duration=true",
+			"-egressip-reachability-total-timeout=5",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1063,7 +1070,7 @@ enable-pprof=true
 			gomega.Expect(OvnSouth.Address).To(
 				gomega.Equal("ssl:6.5.4.1:6652,ssl:6.5.4.2:6652,ssl:6.5.4.3:6652"))
 			gomega.Expect(OvnSouth.CertCommonName).To(gomega.Equal("testsbcommonname"))
-
+			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(3))
 			return nil
 		}
 		cliArgs := []string{
@@ -1099,6 +1106,7 @@ enable-pprof=true
 			"-sb-client-cert=/client/cert2",
 			"-sb-client-cacert=/client/cacert2",
 			"-sb-cert-common-name=testsbcommonname",
+			"-egressip-reachability-total-timeout=3",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
