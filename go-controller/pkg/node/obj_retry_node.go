@@ -233,4 +233,4 @@ func (h *nodeEventHandler) RecordDeleteEvent(obj interface{}) {}
 
 func (h *nodeEventHandler) RecordSuccessEvent(obj interface{}) {}
 
-func (h *nodeEventHandler) RecordErrorEvent(obj interface{}, err error) {}
+func (h *nodeEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {}

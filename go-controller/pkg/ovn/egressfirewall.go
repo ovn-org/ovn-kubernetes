@@ -100,7 +100,7 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 
 // NOTE: Utilize the fact that we know that all egress firewall related setup must have a priority: types.MinimumReservedEgressFirewallPriority <= priority <= types.EgressFirewallStartPriority
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.
-func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) error {
+func (oc *DefaultNetworkController) syncEgressFirewall(egressFirewalls []interface{}) error {
 	// Lookup all ACLs used for egress Firewalls
 	aclPred := func(item *nbdb.ACL) bool {
 		return item.Priority >= types.MinimumReservedEgressFirewallPriority && item.Priority <= types.EgressFirewallStartPriority
@@ -202,7 +202,7 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) error {
 	return nil
 }
 
-func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall) error {
+func (oc *DefaultNetworkController) addEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall) error {
 	klog.Infof("Adding egressFirewall %s in namespace %s", egressFirewall.Name, egressFirewall.Namespace)
 
 	ef := cloneEgressFirewall(egressFirewall)
@@ -251,7 +251,7 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	return nil
 }
 
-func (oc *Controller) deleteEgressFirewall(egressFirewallObj *egressfirewallapi.EgressFirewall) error {
+func (oc *DefaultNetworkController) deleteEgressFirewall(egressFirewallObj *egressfirewallapi.EgressFirewall) error {
 	klog.Infof("Deleting egress Firewall %s in namespace %s", egressFirewallObj.Name, egressFirewallObj.Namespace)
 	deleteDNS := false
 	obj, loaded := oc.egressFirewalls.Load(egressFirewallObj.Namespace)
@@ -288,7 +288,7 @@ func (oc *Controller) deleteEgressFirewall(egressFirewallObj *egressfirewallapi.
 	return nil
 }
 
-func (oc *Controller) updateEgressFirewallStatusWithRetry(egressfirewall *egressfirewallapi.EgressFirewall) error {
+func (oc *DefaultNetworkController) updateEgressFirewallStatusWithRetry(egressfirewall *egressfirewallapi.EgressFirewall) error {
 	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		return oc.kube.UpdateEgressFirewall(egressfirewall)
 	})
@@ -299,7 +299,7 @@ func (oc *Controller) updateEgressFirewallStatusWithRetry(egressfirewall *egress
 	return nil
 }
 
-func (oc *Controller) addEgressFirewallRules(ef *egressFirewall, hashedAddressSetNameIPv4, hashedAddressSetNameIPv6 string, efStartPriority int, aclLogging *ACLLoggingLevels) error {
+func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, hashedAddressSetNameIPv4, hashedAddressSetNameIPv6 string, efStartPriority int, aclLogging *ACLLoggingLevels) error {
 	for _, rule := range ef.egressRules {
 		var action string
 		var matchTargets []matchTarget
@@ -339,7 +339,7 @@ func (oc *Controller) addEgressFirewallRules(ef *egressFirewall, hashedAddressSe
 
 // createEgressFirewallRules uses the previously generated elements and creates the
 // logical_router_policy/join_switch_acl for a specific egressFirewallRouter
-func (oc *Controller) createEgressFirewallRules(priority int, match, action, externalID string, aclLogging *ACLLoggingLevels) error {
+func (oc *DefaultNetworkController) createEgressFirewallRules(priority int, match, action, externalID string, aclLogging *ACLLoggingLevels) error {
 	logicalSwitches := []string{}
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		// Find all node switches
@@ -393,7 +393,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 }
 
 // deleteEgressFirewallRules delete the specific logical router policy/join switch Acls
-func (oc *Controller) deleteEgressFirewallRules(externalID string) error {
+func (oc *DefaultNetworkController) deleteEgressFirewallRules(externalID string) error {
 	// Find ACLs for a given egressFirewall
 	pACL := func(item *nbdb.ACL) bool {
 		return item.ExternalIDs[egressFirewallACLExtIdKey] == externalID
@@ -590,7 +590,7 @@ func getEgressFirewallNamespacedName(egressFirewall *egressfirewallapi.EgressFir
 // namespace annotations change.
 // Return values are: bool - if the egressFirewall's ACL was updated or not, error in case of errors. If a namespace
 // does not contain an egress firewall ACL, then this returns false, nil instead of a NotFound error.
-func (oc *Controller) updateACLLoggingForEgressFirewall(egressFirewallNamespace string, nsInfo *namespaceInfo) (bool, error) {
+func (oc *DefaultNetworkController) updateACLLoggingForEgressFirewall(egressFirewallNamespace string, nsInfo *namespaceInfo) (bool, error) {
 	// Retrieve the egress firewall object from cache and lock it.
 	obj, loaded := oc.egressFirewalls.Load(egressFirewallNamespace)
 	if !loaded {
