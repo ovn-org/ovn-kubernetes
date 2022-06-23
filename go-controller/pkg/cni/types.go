@@ -40,14 +40,15 @@ type KubeAPIAuth struct {
 type PodInterfaceInfo struct {
 	util.PodAnnotation
 
-	MTU           int    `json:"mtu"`
-	RoutableMTU   int    `json:"routable-mtu"`
-	Ingress       int64  `json:"ingress"`
-	Egress        int64  `json:"egress"`
-	CheckExtIDs   bool   `json:"check-external-ids"`
-	IsDPUHostMode bool   `json:"is-dpu-host-mode"`
-	PodUID        string `json:"pod-uid"`
-	VfNetdevName  string `json:"vf-netdev-name"`
+	MTU                  int    `json:"mtu"`
+	RoutableMTU          int    `json:"routable-mtu"`
+	Ingress              int64  `json:"ingress"`
+	Egress               int64  `json:"egress"`
+	CheckExtIDs          bool   `json:"check-external-ids"`
+	IsDPUHostMode        bool   `json:"is-dpu-host-mode"`
+	PodUID               string `json:"pod-uid"`
+	VfNetdevName         string `json:"vf-netdev-name"`
+	EnableUDPAggregation bool   `json:"enable-udp-aggregation"`
 }
 
 // Explicit type for CNI commands the server handles

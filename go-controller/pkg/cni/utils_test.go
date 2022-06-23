@@ -243,5 +243,19 @@ var _ = Describe("CNI Utils tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pif.CheckExtIDs).To(BeTrue())
 		})
+
+		It("Creates PodInterfaceInfo with EnableUDPAggregation", func() {
+			config.Default.EnableUDPAggregation = true
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(pif.EnableUDPAggregation).To(BeTrue())
+		})
+
+		It("Creates PodInterfaceInfo without EnableUDPAggregation", func() {
+			config.Default.EnableUDPAggregation = false
+			pif, err := PodAnnotation2PodInfo(podAnnot, false, podUID, "")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(pif.EnableUDPAggregation).To(BeFalse())
+		})
 	})
 })
