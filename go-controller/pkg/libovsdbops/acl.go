@@ -148,7 +148,7 @@ func DeleteACLs(nbClient libovsdbclient.Client, acls ...*nbdb.ACL) error {
 			Model:          acl,
 			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
 			ErrNotFound:    false,
-			BulkOp:         false,
+			BulkOp:         true,
 		}
 		opModels = append(opModels, opModel)
 	}
