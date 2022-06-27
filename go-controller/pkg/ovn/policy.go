@@ -1272,7 +1272,7 @@ func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy, np *networ
 	}
 	isLastPolicyInNamespace := len(nsInfo.networkPolicies) == expectedLastPolicyNum
 	if err := oc.destroyNetworkPolicy(np, isLastPolicyInNamespace); err != nil {
-		return fmt.Errorf("failed to destroy network policy: %s/%s", policy.Namespace, policy.Name)
+		return fmt.Errorf("failed to destroy network policy: %s/%s, err: %q", policy.Namespace, policy.Name, err)
 	}
 
 	delete(nsInfo.networkPolicies, policy.Name)
@@ -1283,6 +1283,9 @@ func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy, np *networ
 // if nsInfo is provided, the entire port group will be deleted for ingress/egress directions
 // lastPolicy indicates if no other policies are using the respective portgroup anymore
 func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, lastPolicy bool) error {
+	if np == nil {
+		return fmt.Errorf("failed to run destroyNetworkPolicy, received a nil pointer")
+	}
 	np.Lock()
 	defer np.Unlock()
 	np.deleted = true
