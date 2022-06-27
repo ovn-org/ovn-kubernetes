@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -61,7 +60,7 @@ func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.Swi
 }
 
 // Start waits until this process is the leader before starting master functions
-func (oc *Controller) Start(identity string, wg *sync.WaitGroup, ctx context.Context) error {
+func (oc *Controller) Start(identity string, wg *sync.WaitGroup, ctx context.Context, cancel context.CancelFunc) error {
 	// Set up leader election process first
 	rl, err := resourcelock.New(
 		resourcelock.ConfigMapsResourceLock,
@@ -95,20 +94,23 @@ func (oc *Controller) Start(identity string, wg *sync.WaitGroup, ctx context.Con
 				}()
 
 				if err := oc.StartClusterMaster(); err != nil {
-					panic(err.Error())
+					klog.Error(err)
+					cancel()
+					return
 				}
 				if err := oc.Run(ctx, wg); err != nil {
-					panic(err.Error())
+					klog.Error(err)
+					cancel()
+					return
 				}
 			},
 			OnStoppedLeading: func() {
 				//This node was leader and it lost the election.
 				// Whenever the node transitions from leader to follower,
 				// we need to handle the transition properly like clearing
-				// the cache. It is better to exit for now.
-				// kube will restart and this will become a follower.
+				// the cache.
 				klog.Infof("No longer leader; exiting")
-				os.Exit(0)
+				cancel()
 			},
 			OnNewLeader: func(newLeaderName string) {
 				if newLeaderName != identity {
