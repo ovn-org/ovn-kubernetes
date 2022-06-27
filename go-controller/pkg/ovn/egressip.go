@@ -1007,6 +1007,16 @@ func (oc *Controller) addPodEgressIPAssignments(name string, statusAssignments [
 		if err != nil {
 			return nil
 		}
+		// Since the logical switch port cache removes entries only 60 seconds
+		// after deletion, its possible that when pod is recreated with the same name
+		// within the 60seconds timer, stale info gets used to create SNATs and reroutes
+		// for the eip pods. Checking if the expiry is set for the port or not can indicate
+		// if the port is scheduled for deletion.
+		if !logicalPort.expires.IsZero() {
+			klog.Warningf("Stale LSP %s for pod %s found in cache refetching",
+				logicalPort.name, podKey)
+			return nil
+		}
 		podState = &podAssignmentState{
 			egressStatuses: make(map[egressipv1.EgressIPStatusItem]string),
 			podIPs:         logicalPort.ips,
