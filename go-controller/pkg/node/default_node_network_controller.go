@@ -283,6 +283,9 @@ func setupOVNNode(node *kapi.Node) error {
 		fmt.Sprintf("other_config:bundle-idle-timeout=%d",
 			config.Default.OpenFlowProbe),
 		fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name),
+		// If Interconnect feature is enabled, we want to tell ovn-controller to
+		// make this node/chassis as an interconnect gateway.
+		fmt.Sprintf("external_ids:ovn-is-interconn=%s", strconv.FormatBool(config.OVNKubernetesFeature.EnableInterconnect)),
 		fmt.Sprintf("external_ids:ovn-monitor-all=%t", config.Default.MonitorAll),
 		fmt.Sprintf("external_ids:ovn-ofctrl-wait-before-clear=%d", config.Default.OfctrlWaitBeforeClear),
 		fmt.Sprintf("external_ids:ovn-enable-lflow-cache=%t", config.Default.LFlowCacheEnable),

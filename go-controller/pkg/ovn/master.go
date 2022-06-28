@@ -609,6 +609,17 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 	if err := oc.syncChassis(nodes); err != nil {
 		return fmt.Errorf("failed to sync chassis: error: %v", err)
 	}
+
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		if err := oc.zoneChassisHandler.SyncNodes(kNodes); err != nil {
+			return fmt.Errorf("zoneChassisHandler failed to sync nodes: error: %w", err)
+		}
+
+		if err := oc.zoneICHandler.SyncNodes(kNodes); err != nil {
+			return fmt.Errorf("zoneICHandler failed to sync nodes: error: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -697,6 +708,7 @@ type nodeSyncs struct {
 	syncMgmtPort          bool
 	syncGw                bool
 	syncHo                bool
+	syncZoneIC            bool
 }
 
 func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
@@ -730,6 +742,9 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 			oc.mgmtPortFailed.Store(node.Name, true)
 			oc.gatewaysFailed.Store(node.Name, true)
 			oc.hybridOverlayFailed.Store(node.Name, config.HybridOverlay.Enabled)
+			if nSyncs.syncZoneIC {
+				oc.syncZoneICFailed.Store(node.Name, true)
+			}
 			err = fmt.Errorf("nodeAdd: error adding node %q: %w", node.Name, err)
 			oc.recordNodeErrorEvent(node, err)
 			return err
@@ -810,14 +825,34 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *kapi.Node, nSy
 		}
 	}
 
+	if nSyncs.syncZoneIC && config.OVNKubernetesFeature.EnableInterconnect {
+		// Call zone chassis handler's AddLocalZoneNode function to mark
+		// this node's chassis record in Southbound db as a local zone chassis.
+		// This is required when a node moves from a remote zone to local zone
+		if err := oc.zoneChassisHandler.AddLocalZoneNode(node); err != nil {
+			errs = append(errs, err)
+			oc.syncZoneICFailed.Store(node.Name, true)
+		} else {
+			// Call zone IC handler's AddLocalZoneNode function to create
+			// interconnect resources in the OVN Northbound db for this local zone node.
+			if err := oc.zoneICHandler.AddLocalZoneNode(node); err != nil {
+				errs = append(errs, err)
+				oc.syncZoneICFailed.Store(node.Name, true)
+			} else {
+				oc.syncZoneICFailed.Delete(node.Name)
+			}
+		}
+	}
+
 	err = kerrors.NewAggregate(errs)
 	if err != nil {
 		oc.recordNodeErrorEvent(node, err)
 	}
+
 	return err
 }
 
-func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node) error {
+func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node, syncZoneIC bool) error {
 	// Check if the remote node is present in the local zone nodes.  If its present
 	// it means it moved from this controller zone to other remote zone. Cleanup the node
 	// from the local zone cache.
@@ -829,7 +864,28 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *kapi.Node) er
 			return fmt.Errorf("error deleting the remote node %s, err : %w", node.Name, err)
 		}
 	}
-	return nil
+
+	var err error
+	if syncZoneIC && config.OVNKubernetesFeature.EnableInterconnect {
+		// Call zone chassis handler's AddRemoteZoneNode function to creates
+		// the remote chassis for the remote zone node node in the SB DB or mark
+		// the entry as remote if it was local chassis earlier
+		if err = oc.zoneChassisHandler.AddRemoteZoneNode(node); err != nil {
+			err = fmt.Errorf("adding or updating remote node %s failed, err - %w", node.Name, err)
+			oc.syncZoneICFailed.Store(node.Name, true)
+		} else {
+			// Call zone IC handler's AddRemoteZoneNode function to create
+			// interconnect resources in the OVN Northbound db for this remote zone node.
+			if err = oc.zoneICHandler.AddRemoteZoneNode(node); err != nil {
+				err = fmt.Errorf("adding or updating remote node %s failed, err - %w", node.Name, err)
+				oc.syncZoneICFailed.Store(node.Name, true)
+			} else {
+				oc.syncZoneICFailed.Delete(node.Name)
+			}
+		}
+	}
+
+	return err
 }
 
 func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
@@ -854,12 +910,25 @@ func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 		return err
 	}
 
+	if config.OVNKubernetesFeature.EnableInterconnect {
+		if err := oc.zoneICHandler.DeleteNode(node); err != nil {
+			return err
+		}
+		if !oc.isLocalZoneNode(node) {
+			if err := oc.zoneChassisHandler.DeleteRemoteZoneNode(node); err != nil {
+				return err
+			}
+		}
+		oc.syncZoneICFailed.Delete(node.Name)
+	}
+
 	oc.lsManager.DeleteSwitch(node.Name)
 	oc.addNodeFailed.Delete(node.Name)
 	oc.mgmtPortFailed.Delete(node.Name)
 	oc.gatewaysFailed.Delete(node.Name)
 	oc.nodeClusterRouterPortFailed.Delete(node.Name)
 	oc.localZoneNodes.Delete(node.Name)
+
 	return nil
 }
 
