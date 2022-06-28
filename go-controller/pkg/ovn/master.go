@@ -587,6 +587,8 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		}
 	}
 
+	// Store node's GR IPs as annotations to be used by the interconnect
+	err = oc.addNodeGRIPsAnnotations(node, gwLRPIPs)
 	return err
 }
 
@@ -795,6 +797,29 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 
 	// Add the node to the logical switch cache
 	return oc.lsManager.AddNode(nodeName, logicalSwitch.UUID, hostSubnets)
+}
+
+// FIXME Copied from addNodeAnnotations (with the same issues).
+func (oc *Controller) addNodeGRIPsAnnotations(node *kapi.Node, grIPs []*net.IPNet) error {
+	nodeAnnotations, err := util.CreateNodeGRIPsAnnotation(grIPs)
+	if err != nil {
+		return fmt.Errorf("failed to marshal node %q annotation for GR IPs %s",
+			node.Name, util.JoinIPNets(grIPs, ","))
+	}
+	err = utilwait.PollImmediate(OvnNodeAnnotationRetryInterval, OvnNodeAnnotationRetryTimeout, func() (bool, error) {
+		err = oc.kube.SetAnnotationsOnNode(node.Name, nodeAnnotations)
+		if err != nil {
+			klog.Warningf("Failed to set node annotation, will retry for: %v",
+				OvnNodeAnnotationRetryTimeout)
+		}
+		return err == nil, nil
+	},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to set GR IPs annotation on node %s: %v",
+			node.Name, err)
+	}
+	return nil
 }
 
 func (oc *Controller) addNodeAnnotations(node *kapi.Node) error {

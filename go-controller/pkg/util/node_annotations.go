@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
+	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -77,6 +78,7 @@ const (
 	OvnNodeId               = "k8s.ovn.org/ovn-node-id"
 	ovnTransitSwitchPortIps = "k8s.ovn.org/ovn-node-transit-switch-port-ips"
 	ovnNodeZoneName         = "k8s.ovn.org/ovn-zone"
+	ovnGatewayRouterIPs     = "k8s.ovn.org/ovn-gr-ips"
 )
 
 type L3GatewayConfig struct {
@@ -566,27 +568,36 @@ func GetNodeId(node *kapi.Node) int {
 	return id
 }
 
-// ParseNodeTransitSwitchPortAddresses returns the parsed transit switch node IPs.
-func ParseNodeTransitSwitchPortAddresses(node *kapi.Node) ([]*net.IPNet, error) {
-	transitSwitchIpsAnnotation, ok := node.Annotations[ovnTransitSwitchPortIps]
+func parseNodeAnnotationAddresses(node *kapi.Node, annotation string, subnet bool) ([]*net.IPNet, error) {
+	annotationIps, ok := node.Annotations[annotation]
 	if !ok {
 		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeHostAddresses, node.Name)
 	}
 
 	var ipaddrStrs []string
-	if err := json.Unmarshal([]byte(transitSwitchIpsAnnotation), &ipaddrStrs); err != nil {
-		return nil, fmt.Errorf("error unmarshalling %q value: %v", ovnTransitSwitchPortIps, err)
+	if err := json.Unmarshal([]byte(annotationIps), &ipaddrStrs); err != nil {
+		return nil, fmt.Errorf("error unmarshalling %q value: %v", annotation, err)
 	}
 
 	var ips []*net.IPNet
 	for _, ipStr := range ipaddrStrs {
-		_, ip, err := net.ParseCIDR(ipStr)
+		ip, ipNet, err := net.ParseCIDR(ipStr)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing %q value: %v", ovnTransitSwitchPortIps, err)
+			return nil, fmt.Errorf("error parsing %q value: %v", annotation, err)
 		}
-		ips = append(ips, ip)
+
+		if subnet {
+			ips = append(ips, ipNet)
+		} else {
+			ips = append(ips, &net.IPNet{IP: ip, Mask: ipNet.Mask})
+		}
 	}
 	return ips, nil
+}
+
+// ParseNodeTransitSwitchPortAddresses returns the parsed transit switch node IPs.
+func ParseNodeTransitSwitchPortAddresses(node *kapi.Node) ([]*net.IPNet, error) {
+	return parseNodeAnnotationAddresses(node, ovnTransitSwitchPortIps, false)
 }
 
 func CreateNodeTransitSwitchPortAddressesAnnotation(ips []*net.IPNet) (map[string]interface{}, error) {
@@ -614,4 +625,28 @@ func GetNodeZone(node *kapi.Node) string {
 
 func SetNodeZone(nodeAnnotator kube.Annotator, zoneName string) error {
 	return nodeAnnotator.Set(ovnNodeZoneName, zoneName)
+}
+
+func CreateNodeGRIPsAnnotation(ips []*net.IPNet) (map[string]interface{}, error) {
+	ipaddrStrs := make([]string, len(ips))
+	for i, ip := range ips {
+		var prefixLen int
+		if utilnet.IsIPv6CIDR(ip) {
+			prefixLen = 128
+		} else {
+			prefixLen = 32
+		}
+		ipaddrStrs[i] = fmt.Sprintf("%s/%d", ip.IP, prefixLen)
+	}
+	bytes, err := json.Marshal(ipaddrStrs)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		ovnGatewayRouterIPs: string(bytes),
+	}, nil
+}
+
+func ParseNodeGRIPsAnnotation(node *kapi.Node) ([]*net.IPNet, error) {
+	return parseNodeAnnotationAddresses(node, ovnGatewayRouterIPs, true)
 }
