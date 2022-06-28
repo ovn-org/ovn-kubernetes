@@ -33,6 +33,7 @@ const maxFailedAttempts = 15 // same value used for the services level-driven co
 // retryObjEntry is a generic object caching with retry mechanism
 //that resources can use to eventually complete their intended operations.
 type retryObjEntry struct {
+	sync.Mutex
 	// newObj holds k8s resource failed during add operation
 	newObj interface{}
 	// oldObj holds k8s resource failed during delete operation
@@ -105,32 +106,24 @@ func (r *retryObjs) addRetryObjWithAdd(obj interface{}) {
 // so that, if it fails, the add can be potentially retried later.
 // initially it is marked as skipped for the retry loop (ignore = true).
 func (r *retryObjs) initRetryObjWithAdd(obj interface{}, key string) {
-	r.retryMutex.Lock()
-	defer r.retryMutex.Unlock()
-	if entry, ok := r.entries[key]; ok {
-		entry.timeStamp = time.Now()
-		entry.newObj = obj
-		entry.failedAttempts = 0
-	} else {
-		r.entries[key] = &retryObjEntry{newObj: obj,
-			timeStamp: time.Now(), backoffSec: 1, ignore: true}
-	}
+	entry := r.ensureRetryEntryLocked(key, &retryObjEntry{Mutex: sync.Mutex{}, newObj: obj,
+		timeStamp: time.Now(), backoffSec: 1, ignore: true})
+	entry.timeStamp = time.Now()
+	entry.newObj = obj
+	entry.failedAttempts = 0
+	entry.Unlock()
 }
 
 // initRetryObjWithUpdate tracks objects that failed to be updated to potentially retry later
 // initially it is marked as skipped for retry loop (ignore = true)
 func (r *retryObjs) initRetryObjWithUpdate(oldObj, newObj interface{}, key string) {
-	r.retryMutex.Lock()
-	defer r.retryMutex.Unlock()
-	if entry, ok := r.entries[key]; ok {
-		entry.timeStamp = time.Now()
-		entry.newObj = newObj
-		entry.config = oldObj
-		entry.failedAttempts = 0
-	} else {
-		r.entries[key] = &retryObjEntry{newObj: newObj, config: oldObj,
-			timeStamp: time.Now(), backoffSec: 1, ignore: true}
-	}
+	entry := r.ensureRetryEntryLocked(key, &retryObjEntry{Mutex: sync.Mutex{}, newObj: newObj, config: oldObj,
+		timeStamp: time.Now(), backoffSec: 1, ignore: true})
+	entry.timeStamp = time.Now()
+	entry.newObj = newObj
+	entry.config = oldObj
+	entry.failedAttempts = 0
+	entry.Unlock()
 }
 
 // initRetryWithDelete creates a retry entry for an object that is being deleted,
@@ -141,65 +134,110 @@ func (r *retryObjs) initRetryObjWithUpdate(oldObj, newObj interface{}, key strin
 // we include in config the networkPolicy struct used internally, for the same scenario where
 // a namespace is being deleted along with its network policies and, in case of a delete retry of
 // one such network policy, we wouldn't be able to get to the networkPolicy struct from nsInfo.
-func (r *retryObjs) initRetryObjWithDelete(obj interface{}, key string, config interface{}) {
-	r.retryMutex.Lock()
-	defer r.retryMutex.Unlock()
-	if entry, ok := r.entries[key]; ok {
-		entry.timeStamp = time.Now()
-		entry.oldObj = obj
-		if entry.config == nil {
-			entry.config = config
-		}
-		entry.failedAttempts = 0
-	} else {
-		r.entries[key] = &retryObjEntry{oldObj: obj, config: config,
-			timeStamp: time.Now(), backoffSec: 1, ignore: true}
+//
+// The noRetryAdd boolean argument is to indicate whether to retry for addition
+func (r *retryObjs) initRetryObjWithDelete(obj interface{}, key string, config interface{}, noRetryAdd bool) {
+	entry := r.ensureRetryEntryLocked(key, &retryObjEntry{Mutex: sync.Mutex{}, oldObj: obj, config: config,
+		timeStamp: time.Now(), backoffSec: 1, ignore: true})
+	entry.timeStamp = time.Now()
+	entry.oldObj = obj
+	if entry.config == nil {
+		entry.config = config
 	}
+	entry.failedAttempts = 0
+	if noRetryAdd {
+		// will not be retried for addition
+		entry.newObj = nil
+	}
+	entry.Unlock()
 }
 
 // removeDeleteFromRetryObj removes any old object from a retry entry
 func (r *retryObjs) removeDeleteFromRetryObj(key string) {
-	r.retryMutex.Lock()
-	defer r.retryMutex.Unlock()
-	if entry, ok := r.entries[key]; ok {
+	entry := r.ensureRetryEntryLocked(key, nil)
+	if entry != nil {
 		entry.oldObj = nil
 		entry.config = nil
+		entry.Unlock()
 	}
 }
 
 // unSkipRetryObj ensures an obj is no longer ignored for retry loop
 func (r *retryObjs) unSkipRetryObj(key string) {
-	r.retryMutex.Lock()
-	defer r.retryMutex.Unlock()
-	if entry, ok := r.entries[key]; ok {
+	entry := r.ensureRetryEntryLocked(key, nil)
+	if entry != nil {
 		entry.ignore = false
+		entry.Unlock()
 	}
 }
 
 // deleteRetryObj deletes a specific entry from the map
 func (r *retryObjs) deleteRetryObj(key string, withLock bool) {
 	if withLock {
-		r.retryMutex.Lock()
-		defer r.retryMutex.Unlock()
+		entry := r.ensureRetryEntryLocked(key, nil)
+		if entry != nil {
+			defer entry.Unlock()
+		}
 	}
+	r.retryMutex.Lock()
 	delete(r.entries, key)
+	r.retryMutex.Unlock()
 }
 
 // skipRetryObj sets a specific entry from the map to be ignored for subsequent retries
 func (r *retryObjs) skipRetryObj(key string) {
-	r.retryMutex.Lock()
-	defer r.retryMutex.Unlock()
-	if entry, ok := r.entries[key]; ok {
+	entry := r.ensureRetryEntryLocked(key, nil)
+	if entry != nil {
 		entry.ignore = true
+		entry.Unlock()
 	}
 }
 
 // checkRetryObj returns true if an entry with the given key exists, returns false otherwise.
 func (r *retryObjs) checkRetryObj(key string) bool {
+	entry := r.ensureRetryEntryLocked(key, nil)
+	if entry != nil {
+		entry.Unlock()
+		return true
+	}
+	return false
+}
+
+// returns the retryEntry structure with lock held on it. all users of retryEntry should call
+// this function. the mutex and the `ignore` field ensures that the pod add/update/delete do not
+// step on each other. if the map has no entry with the input key and if newRetryEntry is specified,
+// then the function will try to create a new retryEntry in the map if , otherwise it will return nil.
+func (r *retryObjs) ensureRetryEntryLocked(key string, newRetryEntry *retryObjEntry) *retryObjEntry {
 	r.retryMutex.Lock()
-	defer r.retryMutex.Unlock()
-	_, ok := r.entries[key]
-	return ok
+	entry := r.entries[key]
+	if entry != nil {
+		// do not hold on retryMutex while waiting on retryEntry to Lock
+		r.retryMutex.Unlock()
+
+		// take the lock now
+		entry.Lock()
+
+		// Check that the retryEntry wasn't deleted while we were waiting for its lock
+		r.retryMutex.Lock()
+		_, ok := r.entries[key]
+		if ok {
+			r.retryMutex.Unlock()
+			return entry
+		}
+		// since the entry went missing from the map, fallback below to assign the newRetryEntry
+		// with retryMutex locked from above
+		entry.Unlock()
+		entry = nil
+	}
+
+	if newRetryEntry != nil {
+		entry = newRetryEntry
+		r.entries[key] = entry
+		// this is fine since no one knows about this newRetryEntry yet
+		entry.Lock()
+	}
+	r.retryMutex.Unlock()
+	return entry
 }
 
 // requestRetryObjs allows a caller to immediately request to iterate through all objects that
@@ -215,11 +253,19 @@ func (r *retryObjs) requestRetryObjs() {
 
 // getObjRetryEntry returns a copy of the retry entry from the cache for the object selected by the key.
 func (r *retryObjs) getObjRetryEntry(key string) *retryObjEntry {
-	r.retryMutex.Lock()
-	defer r.retryMutex.Unlock()
-	if entry, ok := r.entries[key]; ok {
-		x := *entry
-		return &x
+	entry := r.ensureRetryEntryLocked(key, nil)
+	if entry != nil {
+		retryEntry := &retryObjEntry{
+			newObj:         entry.newObj,
+			oldObj:         entry.oldObj,
+			config:         entry.config,
+			timeStamp:      entry.timeStamp,
+			backoffSec:     entry.backoffSec,
+			ignore:         entry.ignore,
+			failedAttempts: entry.failedAttempts,
+		}
+		entry.Unlock()
+		return retryEntry
 	}
 	return nil
 }
@@ -227,20 +273,20 @@ func (r *retryObjs) getObjRetryEntry(key string) *retryObjEntry {
 // increaseFailedAttemptsCounter increases by one the counter of failed add/update/delete attempts
 // for the given key
 func (r *retryObjs) increaseFailedAttemptsCounter(key string) {
-	r.retryMutex.Lock()
-	defer r.retryMutex.Unlock()
-	if entry, ok := r.entries[key]; ok {
+	entry := r.ensureRetryEntryLocked(key, nil)
+	if entry != nil {
 		entry.failedAttempts++
+		entry.Unlock()
 	}
 }
 
 // setFailedAttemptsCounterForTestingOnly sets the failedAttempts counter in the retry entry selected
 // by the input key. Only used in unit tests.
 func (r *retryObjs) setFailedAttemptsCounterForTestingOnly(key string, val uint8) {
-	r.retryMutex.Lock()
-	defer r.retryMutex.Unlock()
-	if entry, ok := r.entries[key]; ok {
+	entry := r.ensureRetryEntryLocked(key, nil)
+	if entry != nil {
 		entry.failedAttempts = val
+		entry.Unlock()
 	}
 }
 
@@ -797,17 +843,14 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 
 // Given a *retryObjs instance, an old and a new object, updateResource updates the specified object in the cluster
 // to its version in newObj according to its type and returns the error, if any, yielded during the object update.
-func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj interface{}) error {
+// The inRetryCache boolean argument is to indicate if the given resource is in the retryCache or not.
+func (oc *Controller) updateResource(objectsToRetry *retryObjs, oldObj, newObj interface{}, inRetryCache bool) error {
 	switch objectsToRetry.oType {
 	case factory.PodType:
 		oldPod := oldObj.(*kapi.Pod)
 		newPod := newObj.(*kapi.Pod)
 
-		newKey, err := getResourceKey(objectsToRetry.oType, newObj)
-		if err != nil {
-			return err
-		}
-		return oc.ensurePod(oldPod, newPod, objectsToRetry.checkRetryObj(newKey) || util.PodScheduled(oldPod) != util.PodScheduled(newPod))
+		return oc.ensurePod(oldPod, newPod, inRetryCache || util.PodScheduled(oldPod) != util.PodScheduled(newPod))
 
 	case factory.NodeType:
 		newNode, ok := newObj.(*kapi.Node)
@@ -1070,116 +1113,158 @@ func (oc *Controller) deleteResource(objectsToRetry *retryObjs, obj, cachedObj i
 	}
 }
 
+type localRetryEntry struct {
+	key string // the key in the retryObjs map holding retryObjs value
+	// cached newObj holds k8s resource failed during add operation
+	newObj interface{}
+	// cached oldObj holds k8s resource failed during delete operation
+	oldObj interface{}
+	// resource retrieved from the K8s API Server
+	kObj interface{}
+}
+
+func (oc *Controller) resourceRetry(r *retryObjs, lre *localRetryEntry, now time.Time, updateAll bool) {
+	objKey := lre.key
+	entry := r.ensureRetryEntryLocked(objKey, nil)
+	if entry == nil {
+		klog.V(5).Infof("%v resource %s was not found in the iterateRetryResources map while retrying resource setup", r.oType, objKey)
+		return
+	}
+	defer entry.Unlock()
+	if entry.ignore {
+		klog.V(5).Infof("Skipping %v resource %s setup since ignore is set to true", r.oType, objKey)
+		return
+	} else if entry.failedAttempts >= maxFailedAttempts {
+		klog.Warningf("Dropping retry entry for %s %s: exceeded number of failed attempts",
+			r.oType, objKey)
+		r.deleteRetryObj(objKey, false)
+		return
+	}
+	entry.backoffSec = entry.backoffSec * 2
+	if entry.backoffSec > 60 {
+		entry.backoffSec = 60
+	}
+	backoff := (entry.backoffSec * time.Second) + (time.Duration(rand.Intn(500)) * time.Millisecond)
+	objTimer := entry.timeStamp.Add(backoff)
+	if !updateAll && now.Before(objTimer) {
+		klog.V(5).Infof("Attempting retry of %s %s before timer (time: %s): skip", r.oType, objKey, objTimer)
+		return
+	}
+
+	// storing original obj for metrics
+	var initObj interface{}
+	if entry.newObj != nil {
+		initObj = entry.newObj
+	} else if entry.oldObj != nil {
+		initObj = entry.oldObj
+	}
+
+	klog.Infof("Retry object setup: %s %s", r.oType, objKey)
+
+	if entry.newObj != nil {
+		entry.newObj = lre.kObj
+	}
+	if resourceNeedsUpdate(r.oType) && entry.config != nil && entry.newObj != nil {
+		klog.Infof("%v retry: updating object %s", r.oType, objKey)
+		if err := oc.updateResource(r, entry.config, entry.newObj, true); err != nil {
+			klog.Infof("%v retry update failed for %s, will try again later: %v", r.oType, objKey, err)
+			entry.timeStamp = time.Now()
+			entry.failedAttempts++
+			return
+		}
+		// successfully cleaned up new and old object, remove it from the retry cache
+		entry.newObj = nil
+		entry.config = nil
+	} else {
+		// delete old object if needed
+		if entry.oldObj != nil {
+			klog.Infof("Removing old object: %s %s", r.oType, objKey)
+			if !isResourceScheduled(r.oType, entry.oldObj) {
+				klog.V(5).Infof("Retry: %s %s not scheduled", r.oType, objKey)
+				entry.failedAttempts++
+				return
+			}
+			if err := oc.deleteResource(r, entry.oldObj, entry.config); err != nil {
+				klog.Infof("Retry delete failed for %s %s, will try again later: %v", r.oType, objKey, err)
+				entry.timeStamp = time.Now()
+				entry.failedAttempts++
+				return
+			}
+			// successfully cleaned up old object, remove it from the retry cache
+			entry.oldObj = nil
+		}
+
+		// create new object if needed
+		if entry.newObj != nil {
+			klog.Infof("Adding new object: %s %s", r.oType, objKey)
+			if !isResourceScheduled(r.oType, entry.newObj) {
+				klog.V(5).Infof("Retry: %s %s not scheduled", r.oType, objKey)
+				entry.failedAttempts++
+				return
+			}
+			if err := oc.addResource(r, entry.newObj, true); err != nil {
+				klog.Infof("Retry add failed for %s %s, will try again later: %v", r.oType, objKey, err)
+				entry.timeStamp = time.Now()
+				entry.failedAttempts++
+				return
+			}
+			// successfully cleaned up new object, remove it from the retry cache
+			entry.newObj = nil
+		}
+	}
+
+	klog.Infof("Retry successful for %s %s after %d failed attempt(s)", r.oType, objKey, entry.failedAttempts)
+	if initObj != nil {
+		oc.recordSuccessEvent(r.oType, initObj)
+	}
+	r.deleteRetryObj(objKey, false)
+}
+
 // iterateRetryResources checks if any outstanding resource objects exist and if so it tries to
 // re-add them. updateAll forces all objects to be attempted to be retried regardless.
 func (oc *Controller) iterateRetryResources(r *retryObjs, updateAll bool) {
 	r.retryMutex.Lock()
-	defer r.retryMutex.Unlock()
 	now := time.Now()
+	localRetryEntries := make([]*localRetryEntry, 0, len(r.entries))
+	var kObj interface{}
+	var err error
 	for objKey, entry := range r.entries {
-		if entry.ignore {
-			continue
-		} else if entry.failedAttempts >= maxFailedAttempts {
-			klog.Warningf("Dropping retry entry for %s %s: exceeded number of failed attempts",
-				r.oType, objKey)
-			r.deleteRetryObj(objKey, false)
-			continue
-		}
-		// storing original obj for metrics
-		var initObj interface{}
-		if entry.newObj != nil {
-			initObj = entry.newObj
-		} else if entry.oldObj != nil {
-			initObj = entry.oldObj
-		}
 		// check if we need to create the object
 		if entry.newObj != nil {
 			// get the latest version of the object from the informer;
 			// if it doesn't exist we are not going to create the new object.
-			obj, err := oc.getResourceFromInformerCache(r.oType, objKey)
+			kObj, err = oc.getResourceFromInformerCache(r.oType, objKey)
 			if err != nil {
 				if kerrors.IsNotFound(err) {
 					klog.Infof("%s %s not found in the informers cache,"+
 						" not going to retry object create", r.oType, objKey)
-					entry.newObj = nil
+					kObj = nil
 				} else {
 					klog.Errorf("Failed to look up %s %s in the informers cache,"+
 						" will retry later: %v", r.oType, objKey, err)
 					continue
 				}
-			} else {
-				entry.newObj = obj
 			}
 		}
-
-		entry.backoffSec = entry.backoffSec * 2
-		if entry.backoffSec > 60 {
-			entry.backoffSec = 60
-		}
-		backoff := (entry.backoffSec * time.Second) + (time.Duration(rand.Intn(500)) * time.Millisecond)
-		objTimer := entry.timeStamp.Add(backoff)
-		if !updateAll && now.Before(objTimer) {
-			klog.V(5).Infof("Attempting retry of %s %s before timer (time: %s): skip", r.oType, objKey, objTimer)
-			continue
-		}
-
-		klog.Infof("Retry object setup: %s %s", r.oType, objKey)
-
-		if resourceNeedsUpdate(r.oType) && entry.config != nil && entry.newObj != nil {
-			klog.Infof("%v retry: updating object %s", r.oType, objKey)
-			if err := oc.updateResource(r, entry.config, entry.newObj); err != nil {
-				klog.Infof("%v retry update failed for %s, will try again later: %v", r.oType, objKey, err)
-				entry.timeStamp = time.Now()
-				entry.failedAttempts++
-				continue
-			}
-			// successfully cleaned up new and old object, remove it from the retry cache
-			entry.newObj = nil
-			entry.config = nil
-		} else {
-			// delete old object if needed
-			if entry.oldObj != nil {
-				klog.Infof("Removing old object: %s %s", r.oType, objKey)
-				if !isResourceScheduled(r.oType, entry.oldObj) {
-					klog.V(5).Infof("Retry: %s %s not scheduled", r.oType, objKey)
-					entry.failedAttempts++
-					continue
-				}
-				if err := oc.deleteResource(r, entry.oldObj, entry.config); err != nil {
-					klog.Infof("Retry delete failed for %s %s, will try again later: %v", r.oType, objKey, err)
-					entry.timeStamp = time.Now()
-					entry.failedAttempts++
-					continue
-				}
-				// successfully cleaned up old object, remove it from the retry cache
-				entry.oldObj = nil
-			}
-
-			// create new object if needed
-			if entry.newObj != nil {
-				klog.Infof("Adding new object: %s %s", r.oType, objKey)
-				if !isResourceScheduled(r.oType, entry.newObj) {
-					klog.V(5).Infof("Retry: %s %s not scheduled", r.oType, objKey)
-					entry.failedAttempts++
-					continue
-				}
-				if err := oc.addResource(r, entry.newObj, true); err != nil {
-					klog.Infof("Retry add failed for %s %s, will try again later: %v", r.oType, objKey, err)
-					entry.timeStamp = time.Now()
-					entry.failedAttempts++
-					continue
-				}
-				// successfully cleaned up new object, remove it from the retry cache
-				entry.newObj = nil
-			}
-		}
-
-		klog.Infof("Retry successful for %s %s after %d failed attempt(s)", r.oType, objKey, entry.failedAttempts)
-		if initObj != nil {
-			oc.recordSuccessEvent(r.oType, initObj)
-		}
-		r.deleteRetryObj(objKey, false)
+		klog.Infof("Gathered %v resource %s for retry", r.oType, objKey)
+		localRetryEntries = append(localRetryEntries, &localRetryEntry{objKey, entry.newObj, entry.oldObj, kObj})
 	}
+	r.retryMutex.Unlock()
+
+	// Now process the above list of pods that need re-try by holding the lock for each one of them.
+	klog.V(5).Infof("Going to retry resource setup for %d number of resource", len(localRetryEntries))
+
+	wg := &sync.WaitGroup{}
+	for _, lre := range localRetryEntries {
+		wg.Add(1)
+		go func(lre *localRetryEntry) {
+			defer wg.Done()
+			oc.resourceRetry(r, lre, now, updateAll)
+		}(lre)
+	}
+	klog.V(5).Infof("Waiting for all the %s retry setup to complete in iterateRetryResources", r.oType)
+	wg.Wait()
+	klog.V(5).Infof("Function iterateRetryResources ended (in %v)", time.Since(now))
 }
 
 // periodicallyRetryResources tracks retryObjs and checks if any object needs to be retried for add or delete every
@@ -1309,11 +1394,7 @@ func (oc *Controller) processObjectInTerminalState(objectsToRetry *retryObjs, ob
 		" during %s event: will remove it", key, objectsToRetry.oType, event)
 
 	internalCacheEntry := oc.getInternalCacheEntry(objectsToRetry.oType, obj)
-	objectsToRetry.initRetryObjWithDelete(obj, key, internalCacheEntry) // set up the retry obj for deletion
-	if retryEntry := objectsToRetry.getObjRetryEntry(key); retryEntry != nil {
-		// retryEntry shouldn't be nil since we've just added the obj to objectsToRetry
-		retryEntry.newObj = nil // will not be retried for addition
-	}
+	objectsToRetry.initRetryObjWithDelete(obj, key, internalCacheEntry, true) // set up the retry obj for deletion
 
 	if err := oc.deleteResource(objectsToRetry, obj, internalCacheEntry); err != nil {
 		klog.Errorf("Failed to delete object %s of type %s in terminal state, during %s event: %v",
@@ -1372,6 +1453,10 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 				// If there is a delete entry with the same key, we got an add event for an object
 				// with the same name as a previous object that failed deletion.
 				// Destroy the old object before we add the new one.
+				//
+				// Note it is okay to access retryEntry without lock here, as the entry is either
+				// accessed by iterateRetryResources or in add/update/delete handler of this resource;
+				// the former is prevented as its ignore field is set to true, and the latter is serialized.
 				if retryEntry := objectsToRetry.getObjRetryEntry(key); retryEntry != nil && retryEntry.oldObj != nil {
 					klog.Infof("Detected stale object during new object"+
 						" add of type %s with the same key: %s",
@@ -1448,6 +1533,10 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 				// a) it has a retry entry marked for deletion and doesn't use update or
 				// b) the resource is in terminal state (e.g. pod is completed) or
 				// c) this resource type has no update function, so an update means delete old obj and add new one
+				//
+				// Note it is okay to access retryEntry without lock here, as the entry is either
+				// accessed by iterateRetryResources or in add/update/delete handler of this resource;
+				// the former is prevented as its ignore field is set to true, and the latter is serialized.
 				retryEntry := objectsToRetry.getObjRetryEntry(oldKey)
 				if retryEntry != nil && retryEntry.oldObj != nil {
 					// [step 1a] there is a retry entry marked for deletion
@@ -1484,7 +1573,7 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 						klog.Errorf("Failed to delete %s %s, during update: %v",
 							objectsToRetry.oType, oldKey, err)
 						oc.recordErrorEvent(objectsToRetry.oType, old, err)
-						objectsToRetry.initRetryObjWithDelete(old, oldKey, nil)
+						objectsToRetry.initRetryObjWithDelete(old, oldKey, nil, false)
 						objectsToRetry.initRetryObjWithAdd(newer, newKey)
 						objectsToRetry.unSkipRetryObj(oldKey)
 						objectsToRetry.increaseFailedAttemptsCounter(oldKey)
@@ -1499,7 +1588,7 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 				// function is available.
 				if hasUpdateFunc {
 					// if this resource type has an update func, just call the update function
-					if err := oc.updateResource(objectsToRetry, old, newer); err != nil {
+					if err := oc.updateResource(objectsToRetry, old, newer, objectsToRetry.checkRetryObj(newKey)); err != nil {
 						klog.Errorf("Failed to update %s, old=%s, new=%s, error: %v",
 							objectsToRetry.oType, oldKey, newKey, err)
 						oc.recordErrorEvent(objectsToRetry.oType, newer, err)
@@ -1544,7 +1633,7 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 				}
 				objectsToRetry.skipRetryObj(key)
 				internalCacheEntry := oc.getInternalCacheEntry(objectsToRetry.oType, obj)
-				objectsToRetry.initRetryObjWithDelete(obj, key, internalCacheEntry) // set up the retry obj for deletion
+				objectsToRetry.initRetryObjWithDelete(obj, key, internalCacheEntry, false) // set up the retry obj for deletion
 				if err := oc.deleteResource(objectsToRetry, obj, internalCacheEntry); err != nil {
 					objectsToRetry.unSkipRetryObj(key)
 					objectsToRetry.increaseFailedAttemptsCounter(key)

@@ -385,7 +385,7 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 		oc.retryNetworkPolicies.skipRetryObj(key)
 		// add the full np object to the retry entry, since the namespace is going to be removed
 		// along with any mappings of nsInfo -> network policies
-		oc.retryNetworkPolicies.initRetryObjWithDelete(np.policy, key, np)
+		oc.retryNetworkPolicies.initRetryObjWithDelete(np.policy, key, np, false)
 		isLastPolicyInNamespace := len(nsInfo.networkPolicies) == 1
 		if err := oc.destroyNetworkPolicy(np, isLastPolicyInNamespace); err != nil {
 			klog.Errorf("Failed to delete network policy: %s, error: %v", key, err)
