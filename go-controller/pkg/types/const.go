@@ -43,6 +43,10 @@ const (
 
 	NodeLocalSwitch = "node_local_switch"
 
+	TransitSwitch               = "transit_switch"
+	TransitSwitchToRouterPrefix = "tstor-"
+	RouterToTransitSwitchPrefix = "rtots-"
+
 	// ACL directions
 	DirectionToLPort   = "to-lport"
 	DirectionFromLPort = "from-lport"

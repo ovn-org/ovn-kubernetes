@@ -224,6 +224,9 @@ type Controller struct {
 
 	//List of nodes which belong to the local zone (stored as a sync map)
 	localZoneNodes sync.Map
+
+	// Enable interconnect support or not
+	interconnectSupport bool
 }
 
 const (
@@ -317,6 +320,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		svcFactory:                svcFactory,
 		podRecorder:               metrics.NewPodRecorder(),
 		zone:                      "global",
+		interconnectSupport:       config.EnableInterconnect,
 	}
 }
 

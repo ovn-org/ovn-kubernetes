@@ -163,6 +163,9 @@ var (
 	ClusterManager = ClusterManagerConfig{
 		RawZoneJoinSwitchSubnets: "100.64.0.0/16/19,fd98::/48/64",
 	}
+
+	// EnableInterconnect enables interconnecting multiple OVN zones.
+	EnableInterconnect bool
 )
 
 const (
@@ -806,6 +809,11 @@ var CommonFlags = []cli.Flag{
 		Usage:       "The largest number of messages per second that gets logged before drop (default 20)",
 		Destination: &cliConfig.Logging.ACLLoggingRateLimit,
 		Value:       20,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-interconnect",
+		Usage:       "Enables interconnecting multiple OVN zones.",
+		Destination: &EnableInterconnect,
 	},
 }
 
