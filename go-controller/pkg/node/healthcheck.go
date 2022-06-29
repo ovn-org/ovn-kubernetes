@@ -172,7 +172,7 @@ func checkForStaleOVSInternalPorts() {
 func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCacheInterface) {
 	// Get all ovn-kuberntes Pod interfaces. these are OVS interfaces that have their external_ids:sandbox set.
 	out, stderr, err := util.RunOVSVsctl("--columns=name,external_ids", "--data=bare", "--no-headings",
-		"--format=csv", "find", "Interface", "external_ids:sandbox!=\"\"")
+		"--format=csv", "find", "Interface", "external_ids:sandbox!=\"\"", "external_ids:vf-netdev-name!=\"\"")
 	if err != nil {
 		klog.Errorf("Failed to list ovn-k8s OVS interfaces:, stderr: %q, error: %v", stderr, err)
 		return
@@ -231,10 +231,6 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 
 	// Remove any stale representor ports
 	for _, ifaceInfo := range interfaceInfos {
-		// ignore non-vf representor ports
-		if _, ok := ifaceInfo.Attributes["vf-netdev-name"]; !ok {
-			continue
-		}
 		ifaceId, ok := ifaceInfo.Attributes["iface-id"]
 		if !ok {
 			klog.Warningf("iface-id attribute was not found for OVS interface %s. "+
