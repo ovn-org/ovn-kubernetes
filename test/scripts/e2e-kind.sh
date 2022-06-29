@@ -10,7 +10,7 @@ groomTestList() {
 
 SKIPPED_TESTS="
 # PERFORMANCE, DISRUPTIVE, OR UNRELATED TESTS: NOT WANTED FOR CI
-Networking IPerf IPv[46]
+\[Feature:Networking-Performance\]
 \[Feature:PerformanceDNS\]
 Disruptive
 DisruptionController
