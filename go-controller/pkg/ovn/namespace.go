@@ -171,7 +171,7 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 	if enabled {
 		err = oc.createMulticastAllowPolicy(ns.Name, nsInfo)
 	} else {
-		err = deleteMulticastAllowPolicy(oc.nbClient, ns.Name, nsInfo)
+		err = deleteMulticastAllowPolicy(oc.nbClient, ns.Name)
 	}
 	if err != nil {
 		klog.Errorf(err.Error())
@@ -184,7 +184,7 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) {
 	if nsInfo.multicastEnabled {
 		nsInfo.multicastEnabled = false
-		if err := deleteMulticastAllowPolicy(oc.nbClient, ns.Name, nsInfo); err != nil {
+		if err := deleteMulticastAllowPolicy(oc.nbClient, ns.Name); err != nil {
 			klog.Errorf(err.Error())
 		}
 	}

@@ -530,28 +530,12 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 	return nil
 }
 
-func deleteMulticastAllowPolicy(nbClient libovsdbclient.Client, ns string, nsInfo *namespaceInfo) error {
+func deleteMulticastAllowPolicy(nbClient libovsdbclient.Client, ns string) error {
 	portGroupName := hashedPortGroup(ns)
-
-	egressMatch := getACLMatch(portGroupName, getMulticastACLEgrMatch(), knet.PolicyTypeEgress)
-	egressACL := buildACL(ns, portGroupName, "MulticastAllowEgress", nbdb.ACLDirectionFromLport, types.DefaultMcastAllowPriority, egressMatch, nbdb.ACLActionAllow, "", knet.PolicyTypeEgress)
-
-	ingressMatch := getACLMatch(portGroupName, getMulticastACLIgrMatch(nsInfo), knet.PolicyTypeIngress)
-	ingressACL := buildACL(ns, portGroupName, "MulticastAllowIngress", nbdb.ACLDirectionToLport, types.DefaultMcastAllowPriority, ingressMatch, nbdb.ACLActionAllow, "", knet.PolicyTypeIngress)
-
-	ops, err := libovsdbops.DeleteACLsFromPortGroupOps(nbClient, nil, portGroupName, egressACL, ingressACL)
+	// ACLs referenced by the port group wil be deleted by db if there are no other references
+	err := libovsdbops.DeletePortGroups(nbClient, portGroupName)
 	if err != nil {
-		return err
-	}
-
-	ops, err = libovsdbops.DeletePortGroupsOps(nbClient, ops, portGroupName)
-	if err != nil {
-		return err
-	}
-
-	_, err = libovsdbops.TransactAndCheck(nbClient, ops)
-	if err != nil {
-		return err
+		return fmt.Errorf("failed deleting port group %s: %v", portGroupName, err)
 	}
 
 	return nil
