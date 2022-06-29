@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/onsi/gomega"
+	"github.com/onsi/gomega/format"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
@@ -65,6 +66,12 @@ func (c *serviceController) close() {
 
 // TestSyncServices - an end-to-end test for the services controller.
 func TestSyncServices(t *testing.T) {
+	initialMaxLength := format.MaxLength
+	temporarilyEnableGomegaMaxLengthFormat()
+	t.Cleanup(func() {
+		restoreGomegaMaxLengthFormat(initialMaxLength)
+	})
+
 	ns := "testns"
 	serviceName := "foo"
 
@@ -627,4 +634,12 @@ func nodeConfig(nodeName string, nodeIP string) *nodeInfo {
 		gatewayRouterName: nodeGWRouterName(nodeName),
 		switchName:        nodeSwitchName(nodeName),
 	}
+}
+
+func temporarilyEnableGomegaMaxLengthFormat() {
+	format.MaxLength = 0
+}
+
+func restoreGomegaMaxLengthFormat(originalLength int) {
+	format.MaxLength = originalLength
 }
