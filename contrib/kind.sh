@@ -91,7 +91,7 @@ usage() {
     echo "-lr  | --local-kind-registry        Configure kind to use a local docker registry rather than manually loading images"
     echo "-dd  | --dns-domain                 Configure a custom dnsDomain for k8s services, Defaults to 'cluster.local'"
     echo "-cn  | --cluster-name               Configure the kind cluster's name"
-    echo "-ric | --run-in-container           Configure the script to be run from a docker container, allowing it to still communcate with the kind controlplane" 
+    echo "-ric | --run-in-container           Configure the script to be run from a docker container, allowing it to still communicate with the kind controlplane" 
     echo "--delete                      	    Delete current cluster"
     echo ""
 }
@@ -209,12 +209,12 @@ parse_args() {
                                                 ;;
             -hns | --host-network-namespace )   OVN_HOST_NETWORK_NAMESPACE=$1
                                                 ;;
-            -lr | --local-kind-registry )       KIND_LOCAL_REGISTRY=true 
+            -lr | --local-kind-registry )       KIND_LOCAL_REGISTRY=true
                                                 ;;
             -dd | --dns-domain )                shift
                                                 KIND_DNS_DOMAIN=$1
                                                 ;;
-            -cn | --cluster-name )              shift 
+            -cn | --cluster-name )              shift
                                                 KIND_CLUSTER_NAME=$1
                                                 ;;
             -kc | --kubeconfig )                shift
@@ -298,19 +298,19 @@ check_dependencies() {
     exit 1
   fi
 
-  if ! command_exists jq ; then 
+  if ! command_exists jq ; then
     echo "Dependency not met: Command not found 'jq'"
     exit 1
-  fi 
+  fi
 
-  if ! command_exists j2 ; then 
-    if ! command_exists pip ; then 
+  if ! command_exists j2 ; then
+    if ! command_exists pip ; then
       echo "Dependency not met: 'j2' not installed and cannot install with 'pip'"
       exit 1
     fi
     echo "'j2' not found, installing with 'pip'"
     install_j2_renderer
-  fi 
+  fi
 
   if ! command_exists docker && ! command_exists podman; then
   	  echo "Dependency not met: Neither docker nor podman found"
@@ -320,19 +320,19 @@ check_dependencies() {
 
 set_default_params() {
   # Set default values
-  # Used for multi cluster setups 
+  # Used for multi cluster setups
   KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
-  # Setup KUBECONFIG patch based on cluster-name 
+  # Setup KUBECONFIG patch based on cluster-name
   export KUBECONFIG=${KUBECONFIG:-${HOME}/${KIND_CLUSTER_NAME}.conf}
-  # Scrub any existing kubeconfigs at the path 
+  # Scrub any existing kubeconfigs at the path
   rm -f ${KUBECONFIG}
   MANIFEST_OUTPUT_DIR=${MANIFEST_OUTPUT_DIR:-${DIR}/../dist/yaml}
-  if [ ${KIND_CLUSTER_NAME} != "ovn" ]; then 
+  if [ ${KIND_CLUSTER_NAME} != "ovn" ]; then
     MANIFEST_OUTPUT_DIR="${DIR}/../dist/yaml/${KIND_CLUSTER_NAME}"
-  fi 
+  fi
   RUN_IN_CONTAINER=${RUN_IN_CONTAINER:-false}
   KIND_IMAGE=${KIND_IMAGE:-kindest/node}
-  K8S_VERSION=${K8S_VERSION:-v1.23.3}
+  K8S_VERSION=${K8S_VERSION:-v1.24.0}
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   OVN_HA=${OVN_HA:-false}
@@ -527,11 +527,11 @@ coredns_patch() {
 build_ovn_image() {
   if [ "$OVN_IMAGE" == local ]; then
     # if we're using the local registry and still need to build, push to local registry
-    if [ "$KIND_LOCAL_REGISTRY" == true ];then 
+    if [ "$KIND_LOCAL_REGISTRY" == true ];then
       OVN_IMAGE="localhost:5000/ovn-daemonset-f:latest"
-    else 
+    else
       OVN_IMAGE="localhost/ovn-daemonset-f:dev"
-    fi 
+    fi
 
     # Build ovn docker image
     pushd ${DIR}/../go-controller
@@ -545,11 +545,11 @@ build_ovn_image() {
     echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
     $OCI_BIN build -t "${OVN_IMAGE}" -f Dockerfile.fedora .
 
-    # store in local registry 
-    if [ "$KIND_LOCAL_REGISTRY" == true ];then 
+    # store in local registry
+    if [ "$KIND_LOCAL_REGISTRY" == true ];then
       echo "Pushing built image to local docker registry"
       docker push "${OVN_IMAGE}"
-    fi  
+    fi
     popd
   fi
 }
@@ -588,7 +588,7 @@ create_ovn_kube_manifests() {
 }
 
 install_ovn_image() {
-  # If local registry is being used push image there for consumption by kind cluster 
+  # If local registry is being used push image there for consumption by kind cluster
   if [ "$KIND_LOCAL_REGISTRY" == true ]; then
     echo "OVN-K Image: ${OVN_IMAGE} should already be avaliable in local registry, not loading"
   else
@@ -600,25 +600,28 @@ install_ovn_image() {
     else
       kind load docker-image "${OVN_IMAGE}" --name "${KIND_CLUSTER_NAME}"
     fi
-  fi 
+  fi
 }
 
 install_ovn() {
   pushd ${MANIFEST_OUTPUT_DIR}
- 
+
   run_kubectl apply -f k8s.ovn.org_egressfirewalls.yaml
   run_kubectl apply -f k8s.ovn.org_egressips.yaml
   run_kubectl apply -f k8s.ovn.org_egressqoses.yaml
   run_kubectl apply -f ovn-setup.yaml
   MASTER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
   # We want OVN HA not Kubernetes HA
-  # leverage the kubeadm well-known label node-role.kubernetes.io/master=
+  # leverage the kubeadm well-known label node-role.kubernetes.io/control-plane=
   # to choose the nodes where ovn master components will be placed
   for n in $MASTER_NODES; do
-    kubectl label node "$n" k8s.ovn.org/ovnkube-db=true node-role.kubernetes.io/master="" --overwrite
+    kubectl label node "$n" k8s.ovn.org/ovnkube-db=true node-role.kubernetes.io/control-plane="" --overwrite
     if [ "$KIND_REMOVE_TAINT" == true ]; then
       # do not error if it fails to remove the taint
+      # remove both master and control-plane taints until master is removed from 1.25
+      # // https://github.com/kubernetes/kubernetes/pull/107533
       kubectl taint node "$n" node-role.kubernetes.io/master:NoSchedule- || true
+      kubectl taint node "$n" node-role.kubernetes.io/control-plane:NoSchedule- || true
     fi
   done
   if [ "$OVN_HA" == true ]; then
@@ -691,18 +694,18 @@ sleep_until_pods_settle() {
   sleep 30
 }
 
-# run_script_in_container should be used when kind.sh is run nested in a container 
-# and makes sure the control-plane node is rechable by substituting 127.0.0.1 
-# with the control-plane container's IP 
-run_script_in_container() { 
+# run_script_in_container should be used when kind.sh is run nested in a container
+# and makes sure the control-plane node is rechable by substituting 127.0.0.1
+# with the control-plane container's IP
+run_script_in_container() {
   local master_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' ${KIND_CLUSTER_NAME}-control-plane | head -n 1)
   sed -i -- "s/server: .*/server: https:\/\/$master_ip:6443/g" $KUBECONFIG
   chmod a+r $KUBECONFIG
 }
 
-# fixup_config_names should be used to ensure kind clusters are named based off 
+# fixup_config_names should be used to ensure kind clusters are named based off
 # provided values, essentially it removes the 'kind' prefix from the cluster names
-fixup_kubeconfig_names() { 
+fixup_kubeconfig_names() {
   sed -i -- "s/user: kind-.*/user: ${KIND_CLUSTER_NAME}/g" $KUBECONFIG
   sed -i -- "s/name: kind-.*/name: ${KIND_CLUSTER_NAME}/g" $KUBECONFIG
   sed -i -- "s/cluster: kind-.*/cluster: ${KIND_CLUSTER_NAME}/g" $KUBECONFIG
@@ -710,7 +713,7 @@ fixup_kubeconfig_names() {
 }
 
 check_dependencies
-# In order to allow providing arguments with spaces, e.g. "-vconsole:info -vfile:info" 
+# In order to allow providing arguments with spaces, e.g. "-vconsole:info -vfile:info"
 # the original command <parse_args $*> was replaced by <parse_args "$@">
 parse_args "$@"
 set_default_params
@@ -720,13 +723,13 @@ set -euxo pipefail
 check_ipv6
 set_cluster_cidr_ip_families
 create_kind_cluster
-if [ "$RUN_IN_CONTAINER" == true ]; then 
+if [ "$RUN_IN_CONTAINER" == true ]; then
   run_script_in_container
 fi
-# if cluster name is specified fixup kubeconfig 
-if [ "$KIND_CLUSTER_NAME"} != "ovn" ]; then 
+# if cluster name is specified fixup kubeconfig
+if [ "$KIND_CLUSTER_NAME"} != "ovn" ]; then
   fixup_kubeconfig_names
-fi 
+fi
 docker_disable_ipv6
 if [ "$OVN_ENABLE_EX_GW_NETWORK_BRIDGE" == true ]; then
   docker_create_second_interface

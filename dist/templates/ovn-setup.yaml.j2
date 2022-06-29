@@ -1,3 +1,4 @@
+{% if in_upgrade != "true" -%}
 ---
 # ovn-namespace.yaml
 #
@@ -30,7 +31,7 @@ kind: ServiceAccount
 metadata:
   name: ovn
   namespace: ovn-kubernetes
-
+{%- endif %}
 ---
 
 apiVersion: rbac.authorization.k8s.io/v1
@@ -115,6 +116,15 @@ rules:
 - apiGroups: [""]
   resources: ["configmaps"]
   verbs: ["get", "watch", "list"]
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - get
+  - list
+  - update
 
 ---
 
@@ -132,6 +142,7 @@ subjects:
   name: ovn
   namespace: ovn-kubernetes
 
+{% if in_upgrade != "true" -%}
 ---
 
 # The network cidr and service cidr are set in the ovn-config configmap
@@ -160,3 +171,4 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: "{{ host_network_namespace }}"
+{%- endif %}

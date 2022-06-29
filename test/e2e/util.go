@@ -23,6 +23,7 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	testutils "k8s.io/kubernetes/test/utils"
+	admissionapi "k8s.io/pod-security-admission/api"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -765,7 +766,7 @@ func isDualStackCluster(nodes *v1.NodeList) bool {
 
 // used to inject OVN specific test actions
 func wrappedTestFramework(basename string) *framework.Framework {
-	f := framework.NewDefaultFramework(basename)
+	f := newPrivelegedTestFramework(basename)
 	// inject dumping dbs on failure
 	ginkgo.JustAfterEach(func() {
 		if !ginkgo.CurrentGinkgoTestDescription().Failed {
@@ -814,6 +815,12 @@ func wrappedTestFramework(basename string) *framework.Framework {
 		}
 	})
 
+	return f
+}
+
+func newPrivelegedTestFramework(basename string) *framework.Framework {
+	f := framework.NewDefaultFramework(basename)
+	f.NamespacePodSecurityEnforceLevel = admissionapi.LevelPrivileged
 	return f
 }
 

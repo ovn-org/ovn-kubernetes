@@ -38,14 +38,14 @@ spec:
       hostNetwork: true
       dnsPolicy: Default
 
-      # required to be scheduled on a linux node with node-role.kubernetes.io/master label and
+      # required to be scheduled on a linux node with node-role.kubernetes.io/control-plane label and
       # only one instance of ovnkube-master pod per node
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
-                  - key: node-role.kubernetes.io/master
+                  - key: node-role.kubernetes.io/control-plane
                     operator: In
                     values:
                       - ""

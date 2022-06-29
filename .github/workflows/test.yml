@@ -8,7 +8,7 @@ on:
 
 env:
   GO_VERSION: "1.17.6"
-  K8S_VERSION: v1.23.3
+  K8S_VERSION: v1.24.0
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
   KIND_ALLOW_SYSTEM_WRITES: true
@@ -350,8 +350,8 @@ jobs:
     name: e2e
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    # 30 mins for kind, 150 mins for control-plane tests, 10 minutes for all other steps
-    timeout-minutes: 190
+    # 30 mins for kind, 180 mins for control-plane tests, 10 minutes for all other steps
+    timeout-minutes: 220
     strategy:
       fail-fast: false
       matrix:
@@ -433,9 +433,9 @@ jobs:
         make -C test install-kind
 
     - name: Run Tests
-      # e2e tests take ~60 minutes normally, 90 should be more than enough
+      # e2e tests take ~60 minutes normally, 120 should be more than enough
       # set 2 1/2 hours for control-plane tests as these might take a while
-      timeout-minutes: ${{ matrix.target == 'control-plane' && 150 || 90 }}
+      timeout-minutes: ${{ matrix.target == 'control-plane' && 180 || 120 }}
       run: |
         make -C test ${{ matrix.target }}
 

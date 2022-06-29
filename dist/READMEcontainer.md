@@ -1,7 +1,7 @@
 ovn container construction and operation
 
 NOTES/LIMITS:
-- Uses node-role.kubernetes.io/master and compute labels.
+- Uses node-role.kubernetes.io/control-plane and compute labels.
   Eventually there will be ovn specific labels.
 - When the ovn-master comes up it annotates each node with
   the subnet cidr for the node. This MUST be done before 
@@ -55,7 +55,7 @@ Configuration is passed in via environment variables.
     metadata:
       labels:
         app: ovnkube-master
-        node-role.kubernetes.io/master: "true"
+        node-role.kubernetes.io/control-plane: "true"
 
 - ovnkube.yaml
 

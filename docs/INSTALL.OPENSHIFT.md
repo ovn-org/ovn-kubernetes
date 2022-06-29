@@ -54,13 +54,13 @@ spec:
     matchLabels:
       node-role.kubernetes.io/compute: "true"
              or
-      node-role.kubernetes.io/master: "true"
+      node-role.kubernetes.io/control-plane: "true"
   template:
     spec:
       nodeSelector:
         node-role.kubernetes.io/compute: "true"
              or
-        node-role.kubernetes.io/master: "true"
+        node-role.kubernetes.io/control-plane: "true"
 
 ```
 The daemonset will start a pod on every nodes that has the desired labels.

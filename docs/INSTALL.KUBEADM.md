@@ -532,7 +532,7 @@ spec:
         app: fedora-pod
     spec:
       tolerations:
-      - key: "node-role.kubernetes.io/master"
+      - key: "node-role.kubernetes.io/control-plane"
         operator: "Exists"
       containers:
       - name: fedora
