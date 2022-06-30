@@ -34,7 +34,8 @@ import (
 
 const (
 	// ovnNodeSubnets is the constant string representing the node subnets annotation key
-	ovnNodeSubnets = "k8s.ovn.org/node-subnets"
+	ovnNodeSubnets     = "k8s.ovn.org/node-subnets"
+	ovnZoneJoinSubnets = "k8s.ovn.org/zone-join-subnets"
 )
 
 func createSubnetAnnotation(annotationName string, defaultSubnets []*net.IPNet) (map[string]interface{}, error) {
@@ -131,4 +132,16 @@ func DeleteNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator) {
 // on a node and returns the "default" host subnet.
 func ParseNodeHostSubnetAnnotation(node *kapi.Node) ([]*net.IPNet, error) {
 	return parseSubnetAnnotation(node, ovnNodeSubnets)
+}
+
+// CreateZoneSubnetAnnotation creates a "k8s.ovn.org/zone-join-subnets" annotation,
+// with a single "default" network, suitable for passing to kube.SetAnnotationsOnNode
+func CreateZoneJoinSubnetsAnnotation(defaultSubnets []*net.IPNet) (map[string]interface{}, error) {
+	return createSubnetAnnotation(ovnZoneJoinSubnets, defaultSubnets)
+}
+
+// ParseZoneJoinSubnetsAnnotation parses the "k8s.ovn.org/zone-join-subnets" annotation
+// on a node and returns the "default" join subnet.
+func ParseZoneJoinSubnetsAnnotation(node *kapi.Node) ([]*net.IPNet, error) {
+	return parseSubnetAnnotation(node, ovnZoneJoinSubnets)
 }

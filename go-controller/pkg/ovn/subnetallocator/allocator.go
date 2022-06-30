@@ -55,6 +55,24 @@ func (sna *SubnetAllocator) MarkAllocatedNetwork(subnet *net.IPNet) error {
 	return fmt.Errorf("network %s does not belong to any known range", subnet.String())
 }
 
+func (sna *SubnetAllocator) IsNetworkAllocated(network *net.IPNet) bool {
+	sna.Lock()
+	defer sna.Unlock()
+
+	for _, snr := range sna.v4ranges {
+		if snr.isNetworkAllocated(network) {
+			return true
+		}
+	}
+	for _, snr := range sna.v6ranges {
+		if snr.isNetworkAllocated(network) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // AllocateNetworks tries to allocate networks in all the ranges available
 func (sna *SubnetAllocator) AllocateNetworks() ([]*net.IPNet, error) {
 	var networks []*net.IPNet
@@ -257,4 +275,8 @@ func (snr *subnetAllocatorRange) releaseNetwork(network *net.IPNet) bool {
 
 	snr.allocMap[network.String()] = false
 	return true
+}
+
+func (snr *subnetAllocatorRange) isNetworkAllocated(network *net.IPNet) bool {
+	return snr.allocMap[network.String()]
 }
