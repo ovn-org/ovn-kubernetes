@@ -33,6 +33,7 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 		namespacePrefix         = "acl-logging-netpol"
 		pokerPodIndex           = 0
 		pokedPodIndex           = 1
+		egressDefaultDenySuffix = "egressDefaultDeny"
 	)
 
 	fr := wrappedTestFramework(namespacePrefix)
@@ -83,7 +84,7 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 	It("the logs have the expected log level", func() {
 		clientPodScheduledPodName := pods[pokerPodIndex].Spec.NodeName
 		// Retry here in the case where OVN acls have not been programmed yet
-		composedPolicyNameRegex := fmt.Sprintf("%s_%s", nsName, denyAllPolicyName)
+		composedPolicyNameRegex := fmt.Sprintf("%s_%s", nsName, egressDefaultDenySuffix)
 		Eventually(func() (bool, error) {
 			return assertAclLogs(
 				clientPodScheduledPodName,
@@ -123,7 +124,7 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 
 		It("the ACL logs are updated accordingly", func() {
 			clientPodScheduledPodName := pods[pokerPodIndex].Spec.NodeName
-			composedPolicyNameRegex := fmt.Sprintf("%s_%s", nsName, denyAllPolicyName)
+			composedPolicyNameRegex := fmt.Sprintf("%s_%s", nsName, egressDefaultDenySuffix)
 			Eventually(func() (bool, error) {
 				return assertAclLogs(
 					clientPodScheduledPodName,
