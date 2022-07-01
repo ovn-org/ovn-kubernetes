@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -8,15 +9,18 @@ import (
 
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	"github.com/pkg/errors"
 
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
@@ -472,24 +476,23 @@ func TestSyncServices(t *testing.T) {
 					nodeSwitchRouterLoadBalancerName(nodeB, ns, serviceName)),
 			},
 			nodeToDelete: nodeConfig(nodeA, nodeAHostIP),
-			dbStateAfterDeleting: []libovsdbtest.TestData{&nbdb.LoadBalancer{
-				UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
-				Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
-				Options:  servicesOptions(),
-				Protocol: &nbdb.LoadBalancerProtocolTCP,
-				Vips: map[string]string{
-					"192.168.1.1:80": "10.128.0.2:3456,10.128.1.2:3456",
+			dbStateAfterDeleting: []libovsdbtest.TestData{
+				&nbdb.LoadBalancer{
+					UUID:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Name:     loadBalancerClusterWideTCPServiceName(ns, serviceName),
+					Options:  servicesOptions(),
+					Protocol: &nbdb.LoadBalancerProtocolTCP,
+					Vips: map[string]string{
+						"192.168.1.1:80": "10.128.0.2:3456,10.128.1.2:3456",
+					},
+					ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
 				},
-				ExternalIDs: serviceExternalIDs(namespacedServiceName(ns, serviceName)),
-			},
 				nodeRouterLoadBalancer(secondNode, nodePort, serviceName, ns, outport, nodeAEndpointIP, nodeBEndpointIP),
-				nodeLogicalSwitch(nodeA,
-					loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalSwitch(nodeA),
 				nodeLogicalSwitch(nodeB,
 					loadBalancerClusterWideTCPServiceName(ns, serviceName),
 					nodeSwitchRouterLoadBalancerName(nodeB, ns, serviceName)),
-				nodeLogicalRouter(nodeA,
-					loadBalancerClusterWideTCPServiceName(ns, serviceName)),
+				nodeLogicalRouter(nodeA),
 				nodeLogicalRouter(nodeB,
 					loadBalancerClusterWideTCPServiceName(ns, serviceName),
 					nodeSwitchRouterLoadBalancerName(nodeB, ns, serviceName)),
@@ -528,8 +531,31 @@ func TestSyncServices(t *testing.T) {
 
 			if tt.nodeToDelete != nil {
 				controller.nodeTracker.removeNode(tt.nodeToDelete.name)
+
+				// we need to extract the deleted load balancer UUID, because
+				// of a test library limitation: it does not delete the weak
+				// references to the load balancers on the logical switches /
+				// logical routers.
+				nodeLoadBalancerUUID, err := extractLoadBalancerRealUUID(
+					controller.nbClient,
+					nodeSwitchRouterLoadBalancerName(nodeA, ns, serviceName))
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+				g.Expect(nodeLoadBalancerUUID).NotTo(gomega.BeEmpty())
+
 				g.Expect(controller.syncService(namespacedServiceName(ns, serviceName))).To(gomega.Succeed())
-				g.Eventually(controller.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(tt.dbStateAfterDeleting))
+
+				// here, we need to patch the original expected data with the
+				// real load balancer UUID, on the logical switch / GW router
+				// of the deleted node, since the test library will be unable
+				// to correlate the name of the load balancer with its UUID.
+				// This happens because the load balancer was deleted.
+				// Patching up the load balancer UUIDs allows us to use the
+				// `HaveData` matcher below, thus increasing the test
+				// accurateness.
+				expectedData := patchLogicalRouterAndSwitchLoadBalancerUUIDs(
+					nodeLoadBalancerUUID, tt.dbStateAfterDeleting, nodeSwitchName(nodeA), nodeGWRouterName(nodeA))
+
+				g.Eventually(controller.nbClient).Should(libovsdbtest.HaveData(expectedData))
 			}
 		})
 	}
@@ -642,4 +668,34 @@ func temporarilyEnableGomegaMaxLengthFormat() {
 
 func restoreGomegaMaxLengthFormat(originalLength int) {
 	format.MaxLength = originalLength
+}
+
+func extractLoadBalancerRealUUID(nbClient libovsdbclient.Client, lbName string) (string, error) {
+	var lbs []nbdb.LoadBalancer
+	predicate := func(lb *nbdb.LoadBalancer) bool {
+		return lb.Name == lbName
+	}
+	if err := nbClient.WhereCache(predicate).List(context.TODO(), &lbs); err != nil {
+		return "", errors.Wrapf(err, "failed to find load balancer %s", lbName)
+	}
+
+	return lbs[0].UUID, nil
+}
+
+func patchLogicalRouterAndSwitchLoadBalancerUUIDs(lbUUID string, testData []libovsdbtest.TestData, logicalEntityNames ...string) []libovsdbtest.TestData {
+	entitiesToPatchUUIDs := sets.NewString(logicalEntityNames...)
+	for _, ovnNBEntity := range testData {
+		if logicalRouter, isLogicalRouter := ovnNBEntity.(*nbdb.LogicalRouter); isLogicalRouter {
+			if entitiesToPatchUUIDs.Has(logicalRouter.Name) {
+				logicalRouter.LoadBalancer = []string{lbUUID}
+			}
+		} else if logicalSwitch, isLogicalSwitch := ovnNBEntity.(*nbdb.LogicalSwitch); isLogicalSwitch {
+			if entitiesToPatchUUIDs.Has(logicalSwitch.Name) {
+				logicalSwitch.LoadBalancer = []string{lbUUID}
+			}
+		} else {
+			continue
+		}
+	}
+	return testData
 }
