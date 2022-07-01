@@ -307,6 +307,9 @@ type KubernetesConfig struct {
 	HostNetworkNamespace string `gcfg:"host-network-namespace"`
 	PlatformType         string `gcfg:"platform-type"`
 
+	// SingeNode indicates the cluster only has one node
+	SingleNode bool `gcfg:"single-node"`
+
 	// CompatMetricsBindAddress is overridden by the corresponding option in MetricsConfig
 	CompatMetricsBindAddress string `gcfg:"metrics-bind-address"`
 	// CompatOVNMetricsBindAddress is overridden by the corresponding option in MetricsConfig
@@ -959,6 +962,12 @@ var K8sFlags = []cli.Flag{
 			"Valid values can be found in: https://github.com/ovn-org/ovn-kubernetes/blob/master/go-controller/vendor/github.com/openshift/api/config/v1/types_infrastructure.go#L130-L172",
 		Destination: &cliConfig.Kubernetes.PlatformType,
 		Value:       Kubernetes.PlatformType,
+	},
+	&cli.BoolFlag{
+		Name: "single-node",
+		Usage: "Enable single node optimizations. " +
+			"Single node indicates a one node cluster and simplifies ovn-kubernetes feature logic to reduce overall cpu and memory footprints which are required in small form factor deployment",
+		Destination: &cliConfig.Kubernetes.SingleNode,
 	},
 }
 
