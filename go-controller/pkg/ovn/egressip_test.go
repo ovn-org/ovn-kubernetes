@@ -575,10 +575,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Items: []v1.Namespace{*egressNamespace},
 					})
 
-				fakeOvn.controller.WatchEgressIPNamespaces()
-				fakeOvn.controller.WatchEgressIPPods()
-				fakeOvn.controller.WatchEgressNodes()
-				fakeOvn.controller.WatchEgressIP()
+				err := fakeOvn.controller.WatchEgressIPNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchEgressIPPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchEgressNodes()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchEgressIP()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
 				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node1.Name))
@@ -587,7 +591,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(isEgressAssignableNode(node2.Name)).Should(gomega.BeFalse())
 
 				lsp := &nbdb.LogicalSwitchPort{Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name}
-				fakeOvn.controller.nbClient.Get(context.Background(), lsp)
+				err = fakeOvn.controller.nbClient.Get(context.Background(), lsp)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(lsp.Options["nat-addresses"]).Should(gomega.Equal("router"))
 				gomega.Eventually(lsp.Options["exclude-lb-vips-from-garp"]).Should(gomega.Equal("true"))
 
@@ -607,7 +612,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(func() bool {
 					return fakeOvn.controller.nbClient.Connected()
 				}).Should(gomega.BeFalse())
-				err := fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), node1.Name, metav1.DeleteOptions{})
+				err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), node1.Name, metav1.DeleteOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -3676,22 +3681,33 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						},
 					},
 				}
-				fakeOvn.start(&v1.NodeList{
-					Items: []v1.Node{node},
-				})
+				fakeOvn.startWithDBSetup(
+					libovsdbtest.TestSetup{
+						NBData: []libovsdbtest.TestData{
+							&nbdb.LogicalRouter{
+								Name: ovntypes.OVNClusterRouter,
+								UUID: ovntypes.OVNClusterRouter + "-UUID",
+							},
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{node},
+					},
+				)
 
 				allocatorItems := func() int {
 					return len(fakeOvn.controller.eIPC.allocator.cache)
 				}
 
-				fakeOvn.controller.WatchEgressNodes()
+				err := fakeOvn.controller.WatchEgressNodes()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(allocatorItems).Should(gomega.Equal(0))
 
 				node.Labels = map[string]string{
 					"k8s.ovn.org/egress-assignable": "",
 				}
 
-				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node, metav1.UpdateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(allocatorItems).Should(gomega.Equal(0))
 
