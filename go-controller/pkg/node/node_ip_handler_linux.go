@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -146,6 +147,10 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 					c.OnChanged()
 				}
 			case <-addressSyncTimer.C:
+				// skip periodic sync since there is no egress or ingress IP rotation in single node
+				if config.Kubernetes.SingleNode {
+					continue
+				}
 				if subscribed {
 					klog.V(5).Info("Node IP manager calling sync() explicitly")
 					c.sync()
