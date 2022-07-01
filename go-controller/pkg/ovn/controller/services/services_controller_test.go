@@ -527,7 +527,7 @@ func TestSyncServices(t *testing.T) {
 				t.Errorf("syncServices error: %v", err)
 			}
 
-			g.Eventually(controller.nbClient).Should(libovsdbtest.HaveData(tt.expectedDb))
+			g.Expect(controller.nbClient).To(libovsdbtest.HaveData(tt.expectedDb))
 
 			if tt.nodeToDelete != nil {
 				controller.nodeTracker.removeNode(tt.nodeToDelete.name)
@@ -555,7 +555,7 @@ func TestSyncServices(t *testing.T) {
 				expectedData := patchLogicalRouterAndSwitchLoadBalancerUUIDs(
 					nodeLoadBalancerUUID, tt.dbStateAfterDeleting, nodeSwitchName(nodeA), nodeGWRouterName(nodeA))
 
-				g.Eventually(controller.nbClient).Should(libovsdbtest.HaveData(expectedData))
+				g.Expect(controller.nbClient).To(libovsdbtest.HaveData(expectedData))
 			}
 		})
 	}
