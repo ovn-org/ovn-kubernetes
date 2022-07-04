@@ -306,7 +306,21 @@ func (oc *Controller) StartClusterMaster() error {
 		oc.loadBalancerGroupUUID = loadBalancerGroup.UUID
 	}
 
-	if err := oc.SetupMaster(nodeNames); err != nil {
+	var zoneSubnets []*net.IPNet
+	for _, node := range existingNodes.Items {
+		if util.GetNodeZone(&node) == oc.zone {
+			zoneSubnets, err = util.ParseZoneJoinSubnetsAnnotation(&node)
+			if err == nil {
+				break
+			}
+		}
+	}
+
+	if len(zoneSubnets) < 1 {
+		return fmt.Errorf("failed to get the join subnets for the zone %s : (%v)", oc.zone, err)
+	}
+
+	if err := oc.SetupMaster(nodeNames, zoneSubnets); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
 	}
@@ -330,7 +344,7 @@ func (oc *Controller) StartClusterMaster() error {
 }
 
 // SetupMaster creates the central router and load-balancers for the network
-func (oc *Controller) SetupMaster(existingNodeNames []string) error {
+func (oc *Controller) SetupMaster(existingNodeNames []string, joinSubnets []*net.IPNet) error {
 	// Create a single common distributed router for the cluster.
 	logicalRouter := nbdb.LogicalRouter{
 		Name: types.OVNClusterRouter,
@@ -412,7 +426,7 @@ func (oc *Controller) SetupMaster(existingNodeNames []string) error {
 
 	// Initialize the OVNJoinSwitch switch IP manager
 	// The OVNJoinSwitch will be allocated IP addresses in the range 100.64.0.0/16 or fd98::/64.
-	oc.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(oc.nbClient, logicalSwitch.UUID, existingNodeNames)
+	oc.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(oc.nbClient, logicalSwitch.UUID, existingNodeNames, joinSubnets)
 	if err != nil {
 		return err
 	}
