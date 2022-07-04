@@ -112,7 +112,7 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer) *nodeTracker {
 					return
 				}
 			}
-			nt.removeNode(node.Name)
+			nt.removeNodeWithServiceReSync(node.Name)
 		},
 	})
 
@@ -147,6 +147,13 @@ func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName string, n
 
 	klog.Infof("Node %s switch + router changed, syncing services", nodeName)
 	// Resync all services
+	nt.resyncFn()
+}
+
+// removeNodeWithServiceReSync removes a node from the LB -> node mapper
+// *and* forces full reconciliation of services.
+func (nt *nodeTracker) removeNodeWithServiceReSync(nodeName string) {
+	nt.removeNode(nodeName)
 	nt.resyncFn()
 }
 
