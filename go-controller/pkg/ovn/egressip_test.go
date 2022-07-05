@@ -612,12 +612,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// sleep long enough for TransactWithRetry to fail, causing egressnode operations to fail
-				time.Sleep(types.OVSDBTimeout + time.Second)
+				// there is a chance that both egressnode events(node1 removal and node2 update) will end up in the same event queue
+				// sleep for double the time to allow for two consecutive TransactWithRetry timeouts
+				time.Sleep(2 * (types.OVSDBTimeout + time.Second))
 				// check to see if the retry cache has an entry
 				key1 := node1.Name
 				gomega.Eventually(func() *retryObjEntry {
 					return fakeOvn.controller.retryEgressNodes.getObjRetryEntry(key1)
-				}, inspectTimeout).ShouldNot(gomega.BeNil())
+				}).ShouldNot(gomega.BeNil())
 				retryEntry := fakeOvn.controller.retryEgressNodes.getObjRetryEntry(key1)
 				ginkgo.By("retry entry new obj be nil")
 				gomega.Expect(retryEntry.newObj).To(gomega.BeNil())
@@ -626,7 +628,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				key2 := node2.Name
 				gomega.Eventually(func() *retryObjEntry {
 					return fakeOvn.controller.retryEgressNodes.getObjRetryEntry(key2)
-				}, inspectTimeout).ShouldNot(gomega.BeNil())
+				}).ShouldNot(gomega.BeNil())
 				retryEntry = fakeOvn.controller.retryEgressNodes.getObjRetryEntry(key2)
 				ginkgo.By("retry entry new obj should not be nil")
 				gomega.Expect(retryEntry.newObj).NotTo(gomega.BeNil())
@@ -639,10 +641,10 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				// check the cache no longer has the entry
 				gomega.Eventually(func() *retryObjEntry {
 					return fakeOvn.controller.retryEgressNodes.getObjRetryEntry(key1)
-				}, inspectTimeout).Should(gomega.BeNil())
+				}).Should(gomega.BeNil())
 				gomega.Eventually(func() *retryObjEntry {
 					return fakeOvn.controller.retryEgressNodes.getObjRetryEntry(key2)
-				}, inspectTimeout).Should(gomega.BeNil())
+				}).Should(gomega.BeNil())
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 				gomega.Eventually(nodeSwitch).Should(gomega.Equal(node2.Name))
 				egressIPs, _ = getEgressIPStatus(egressIPName)

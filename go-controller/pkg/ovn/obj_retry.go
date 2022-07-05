@@ -1493,7 +1493,7 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 						objectsToRetry.oType, err)
 					return
 				}
-				klog.V(5).Infof("Update event received for resource %s, old object is equal to new: %s",
+				klog.V(5).Infof("Update event received for resource %s, old object is equal to new: %t",
 					objectsToRetry.oType, areEqual)
 				if areEqual {
 					return
