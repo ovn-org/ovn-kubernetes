@@ -101,15 +101,14 @@ func main() {
 	c.CustomAppHelpTemplate = CustomAppHelpTemplate
 	c.Flags = config.GetFlags(nil)
 
-	c.Action = func(c *cli.Context) error {
-		return runOvnKube(c)
-	}
-
 	ctx := context.Background()
+	ctx, cancel := context.WithCancel(ctx)
+	c.Action = func(ctx *cli.Context) error {
+		return runOvnKube(ctx, cancel)
+	}
 
 	// trap SIGHUP, SIGINT, SIGTERM, SIGQUIT and
 	// cancel the context
-	ctx, cancel := context.WithCancel(ctx)
 	exitCh := make(chan os.Signal, 1)
 	signal.Notify(exitCh,
 		syscall.SIGHUP,
@@ -173,7 +172,7 @@ func setupPIDFile(pidfile string) error {
 	return nil
 }
 
-func runOvnKube(ctx *cli.Context) error {
+func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	pidfile := ctx.String("pidfile")
 	if pidfile != "" {
 		defer delPidfile(pidfile)
@@ -218,7 +217,6 @@ func runOvnKube(ctx *cli.Context) error {
 
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-
 	var watchFactory factory.Shutdownable
 	var masterWatchFactory *factory.WatchFactory
 	if master != "" {
@@ -244,7 +242,7 @@ func runOvnKube(ctx *cli.Context) error {
 
 		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil,
 			libovsdbOvnNBClient, libovsdbOvnSBClient, util.EventRecorder(ovnClientset.KubeClient))
-		if err := ovnController.Start(master, wg, ctx.Context); err != nil {
+		if err := ovnController.Start(master, wg, ctx.Context, cancel); err != nil {
 			return err
 		}
 	}
