@@ -90,6 +90,14 @@ var _ = ginkgo.Describe("Services", func() {
 			FieldSelector: "spec.nodeName=" + nodeName,
 		})
 		framework.ExpectNoError(err)
+		if len(pods.Items) == 0 {
+			// check if single node zone interconnect deployment is running with ovnkube-local ds
+			pods, err = cs.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+				LabelSelector: "app=ovnkube-local",
+				FieldSelector: "spec.nodeName=" + nodeName,
+			})
+			framework.ExpectNoError(err)
+		}
 		gomega.Expect(pods.Items).To(gomega.HaveLen(1))
 		clientPod := pods.Items[0]
 
@@ -357,6 +365,13 @@ var _ = ginkgo.Describe("Services", func() {
 							if err != nil {
 								framework.Failf("could not get ovnkube-node pods: %v", err)
 							}
+							if len(ovnKubeNodePods.Items) == 0 {
+								// check if single node zone interconnect deployment is running with ovnkube-local ds
+								ovnKubeNodePods, err = cs.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+									LabelSelector: "name=ovnkube-local",
+								})
+								framework.ExpectNoError(err)
+							}
 							for _, ovnKubeNodePod := range ovnKubeNodePods.Items {
 								framework.Logf("Flushing the ip route cache on %s", ovnKubeNodePod.Name)
 								_, err := framework.RunHostCmdWithRetries(
@@ -384,11 +399,22 @@ var _ = ginkgo.Describe("Services", func() {
 		framework.ExpectNoError(err)
 		node := nodes.Items[0]
 		nodeName := node.Name
+		ovnkubeNodePod := "ovnkube-node"
 		pods, err := cs.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
 			LabelSelector: "app=ovnkube-node",
 			FieldSelector: "spec.nodeName=" + nodeName,
 		})
 		framework.ExpectNoError(err)
+
+		if len(pods.Items) == 0 {
+			// check if single node zone interconnect deployment is running with ovnkube-local ds
+			pods, err = cs.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+				LabelSelector: "app=ovnkube-local",
+				FieldSelector: "spec.nodeName=" + nodeName,
+			})
+			framework.ExpectNoError(err)
+			ovnkubeNodePod = "ovnkube-local"
+		}
 		gomega.Expect(pods.Items).To(gomega.HaveLen(1))
 		clientPod := &pods.Items[0]
 
@@ -425,7 +451,7 @@ var _ = ginkgo.Describe("Services", func() {
 		cleanupFn = func() {
 			// initial pod used for host command may be deleted at this point, refetch
 			pods, err := cs.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
-				LabelSelector: "app=ovnkube-node",
+				LabelSelector: "app=" + ovnkubeNodePod,
 				FieldSelector: "spec.nodeName=" + nodeName,
 			})
 			framework.ExpectNoError(err)

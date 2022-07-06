@@ -36,6 +36,7 @@ import (
 	e2edeployment "k8s.io/kubernetes/test/e2e/framework/deployment"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	testutils "k8s.io/kubernetes/test/utils"
 )
 
@@ -440,40 +441,40 @@ func runCommand(cmd ...string) (string, error) {
 	return string(output), nil
 }
 
-// restartOVNKubeNodePod restarts the ovnkube-node pod from namespace, running on nodeName
-func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nodeName string) error {
-	ovnKubeNodePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
-		LabelSelector: "name=ovnkube-node",
+// restartOVNKubePod restarts the ovnkube pod from namespace, running on nodeName
+func restartOVNKubePod(clientset kubernetes.Interface, namespace string, nodeName, podName string) error {
+	ovnKubePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
+		LabelSelector: "name=" + podName,
 		FieldSelector: "spec.nodeName=" + nodeName,
 	})
 	if err != nil {
-		return fmt.Errorf("could not get ovnkube-node pods: %w", err)
+		return fmt.Errorf("could not get %s pods: %w", podName, err)
 	}
 
-	if len(ovnKubeNodePods.Items) <= 0 {
-		return fmt.Errorf("could not find ovnkube-node pod running on node %s", nodeName)
+	if len(ovnKubePods.Items) <= 0 {
+		return fmt.Errorf("could not find %s pod running on node %s", podName, nodeName)
 	}
-	for _, pod := range ovnKubeNodePods.Items {
+	for _, pod := range ovnKubePods.Items {
 		if err := e2epod.DeletePodWithWait(clientset, &pod); err != nil {
-			return fmt.Errorf("could not delete ovnkube-node pod on node %s: %w", nodeName, err)
+			return fmt.Errorf("could not delete %s pod on node %s: %w", podName, nodeName, err)
 		}
 	}
 
-	framework.Logf("waiting for node %s to have running ovnkube-node pod", nodeName)
+	framework.Logf("waiting for node %s to have running %s pod", nodeName, podName)
 	wait.Poll(2*time.Second, 5*time.Minute, func() (bool, error) {
-		ovnKubeNodePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
-			LabelSelector: "name=ovnkube-node",
+		ovnKubePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
+			LabelSelector: "name=" + podName,
 			FieldSelector: "spec.nodeName=" + nodeName,
 		})
 		if err != nil {
-			return false, fmt.Errorf("could not get ovnkube-node pods: %w", err)
+			return false, fmt.Errorf("could not get %s pods: %w", podName, err)
 		}
 
-		if len(ovnKubeNodePods.Items) <= 0 {
-			framework.Logf("Node %s has no ovnkube-node pod yet", nodeName)
+		if len(ovnKubePods.Items) <= 0 {
+			framework.Logf("Node %s has no %s pod yet", podName, nodeName)
 			return false, nil
 		}
-		for _, pod := range ovnKubeNodePods.Items {
+		for _, pod := range ovnKubePods.Items {
 			if ready, err := testutils.PodRunningReady(&pod); !ready {
 				framework.Logf("%v", err)
 				return false, nil
@@ -513,8 +514,9 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 
 	f := newPrivelegedTestFramework(svcname)
 	var (
-		extDNSIP   string
-		numMasters int
+		extDNSIP       string
+		numMasters     int
+		ovnkubeNodePod string
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -536,6 +538,32 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		if IsIPv6Cluster(f.ClientSet) {
 			extDNSIP = "2001:4860:4860::8888"
 		}
+
+		// Check if ovnkube-node pod is running or ovnkube-local pod
+		ovnkubeNodePod = "ovnkube-node"
+		nodePods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+			LabelSelector: "name=ovnkube-node",
+		})
+		if err != nil {
+			framework.ExpectNoError(err, fmt.Sprintf("Unable to get neither ovnkube-node pod nor ovnkube-local pod %v", err))
+		}
+
+		if len(nodePods.Items) == 0 {
+			// ovnkube-node pod is not running check if ovnkube-local pod is runnng or not.
+			nodePods, err = f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+				LabelSelector: "name=ovnkube-local",
+			})
+			framework.ExpectNoError(err, fmt.Sprintf("Unable to get neither ovnkube-node pod nor ovnkube-local pod %v", err))
+
+			if len(nodePods.Items) == 0 {
+				framework.Fail("Unable to get ovnkube-node container pod info")
+			}
+			// ovnkube-node is running as a container in ovnkube-local pod
+			ovnkubeNodePod = "ovnkube-local"
+		}
+
+		framework.Logf("ovnkube-node container is running in the pod %q", ovnkubeNodePod)
+
 	})
 
 	ginkgo.It("should provide Internet connection continuously when ovnkube-node pod is killed", func() {
@@ -555,13 +583,13 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		framework.Logf("Test pod running on %q", nodeName)
 
 		ginkgo.By("Deleting ovn-kube pod on node " + nodeName)
-		err = restartOVNKubeNodePod(f.ClientSet, "ovn-kubernetes", nodeName)
+		err = restartOVNKubePod(f.ClientSet, "ovn-kubernetes", nodeName, ovnkubeNodePod)
 		framework.ExpectNoError(err)
 
 		ginkgo.By("Ensuring there were no connectivity errors")
 		framework.ExpectNoError(<-errChan)
 
-		err = waitClusterHealthy(f, numMasters)
+		err = waitClusterHealthy(f, numMasters, ovnkubeNodePod)
 		framework.ExpectNoError(err, "one or more nodes failed to go back ready, schedulable, and untainted")
 	})
 
@@ -606,7 +634,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		ginkgo.By("Ensring there were no connectivity errors")
 		framework.ExpectNoError(<-errChan)
 
-		err = waitClusterHealthy(f, numMasters)
+		err = waitClusterHealthy(f, numMasters, ovnkubeNodePod)
 		framework.ExpectNoError(err, "one or more nodes failed to go back ready, schedulable, and untainted")
 	})
 
@@ -730,11 +758,11 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			}
 
 			// restart ovnkube-node pod
-			if err := restartOVNKubeNodePod(f.ClientSet, ovnNamespace, testNodeName); err != nil {
+			if err := restartOVNKubePod(f.ClientSet, ovnNamespace, testNodeName, ovnkubeNodePod); err != nil {
 				framework.Failf("could not restart ovnkube-node pod: %s", err)
 			}
 
-			err = waitClusterHealthy(f, numMasters)
+			err = waitClusterHealthy(f, numMasters, ovnkubeNodePod)
 			framework.ExpectNoError(err, "one or more nodes failed to go back ready, schedulable, and untainted")
 		})
 
@@ -746,7 +774,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			}
 
 			// restart ovnkube-node pod to trigger mtu validation
-			if err := restartOVNKubeNodePod(f.ClientSet, ovnNamespace, testNodeName); err != nil {
+			if err := restartOVNKubePod(f.ClientSet, ovnNamespace, testNodeName, ovnkubeNodePod); err != nil {
 				framework.Failf("could not restart ovnkube-node pod: %s", err)
 			}
 			node, err := f.ClientSet.CoreV1().Nodes().Get(context.TODO(), testNodeName, metav1.GetOptions{ResourceVersion: "0"})
@@ -766,7 +794,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			}
 
 			// restart ovnkube-node pod to trigger mtu validation
-			if err := restartOVNKubeNodePod(f.ClientSet, ovnNamespace, testNodeName); err != nil {
+			if err := restartOVNKubePod(f.ClientSet, ovnNamespace, testNodeName, ovnkubeNodePod); err != nil {
 				framework.Failf("could not restart ovnkube-node pod: %s", err)
 			}
 
@@ -824,46 +852,15 @@ var _ = ginkgo.Describe("test e2e pod connectivity to host addresses", func() {
 // Test e2e inter-node connectivity over br-int
 var _ = ginkgo.Describe("test e2e inter-node connectivity between worker nodes", func() {
 	const (
-		svcname          string = "inter-node-e2e"
-		ovnNs            string = "ovn-kubernetes"
-		ovnWorkerNode    string = "ovn-worker"
-		ovnWorkerNode2   string = "ovn-worker2"
-		ovnHaWorkerNode2 string = "ovn-control-plane2"
-		ovnHaWorkerNode3 string = "ovn-control-plane3"
-		ovnContainer     string = "ovnkube-node"
-		jsonFlag         string = "-o=jsonpath='{.items..metadata.name}'"
-		getPodIPRetry    int    = 20
-	)
-
-	var (
-		haMode    bool
-		labelFlag = fmt.Sprintf("name=%s", ovnContainer)
+		svcname        string = "inter-node-e2e"
+		ovnNs          string = "ovn-kubernetes"
+		ovnWorkerNode  string = "ovn-worker"
+		ovnWorkerNode2 string = "ovn-worker2"
+		jsonFlag       string = "-o=jsonpath='{.items..metadata.name}'"
+		getPodIPRetry  int    = 20
 	)
 
 	f := newPrivelegedTestFramework(svcname)
-
-	// Determine which KIND environment is running by querying the running nodes
-	ginkgo.BeforeEach(func() {
-		fieldSelectorFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnWorkerNode)
-		fieldSelectorHaFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnHaWorkerNode2)
-
-		// Determine if the kind deployment is in HA mode or non-ha mode based on node naming
-		kubectlOut, err := framework.RunKubectl(ovnNs, "get", "pods", "-l", labelFlag, jsonFlag, fieldSelectorFlag)
-		if err != nil {
-			framework.Failf("Expected container %s running on %s error %v", ovnContainer, ovnWorkerNode, err)
-		}
-		if kubectlOut == "''" {
-			haMode = true
-			kubectlOut, err = framework.RunKubectl(ovnNs, "get", "pods", "-l", labelFlag, jsonFlag, fieldSelectorHaFlag)
-			if err != nil {
-				framework.Failf("Expected container %s running on %s error %v", ovnContainer, ovnHaWorkerNode2, err)
-			}
-		}
-		// Fail the test if no pod is matched within the specified node
-		if kubectlOut == "''" {
-			framework.Failf("Unable to locate container %s on any known nodes", ovnContainer)
-		}
-	})
 
 	ginkgo.It("Should validate connectivity within a namespace of pods on separate nodes", func() {
 		var validIP net.IP
@@ -875,12 +872,7 @@ var _ = ginkgo.Describe("test e2e inter-node connectivity between worker nodes",
 		// non-ha ci mode runs a named set of nodes with a prefix of ovn-worker
 		ciWorkerNodeSrc = ovnWorkerNode
 		ciWorkerNodeDst = ovnWorkerNode2
-		// ha ci mode runs a named set of nodes with a prefix of ovn-control-plane
-		if haMode {
-			framework.Logf("Detected a HA mode KIND environment")
-			ciWorkerNodeSrc = ovnHaWorkerNode2
-			ciWorkerNodeDst = ovnHaWorkerNode3
-		}
+
 		ginkgo.By(fmt.Sprintf("Creating a container on node %s and verifying connectivity to a pod on node %s", ciWorkerNodeSrc, ciWorkerNodeDst))
 
 		// Create the pod that will be used as the destination for the connectivity test
@@ -917,14 +909,12 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway and update validation", 
 		svcname             string = "multiple-novxlan-externalgw"
 		ovnNs               string = "ovn-kubernetes"
 		ovnWorkerNode       string = "ovn-worker"
-		ovnHaWorkerNode     string = "ovn-control-plane2"
 		ovnContainer        string = "ovnkube-node"
 		gwContainerNameAlt1 string = "gw-novxlan-test-container-alt1"
 		gwContainerNameAlt2 string = "gw-novxlan-test-container-alt2"
 		ovnControlNode      string = "ovn-control-plane"
 	)
 	var (
-		haMode           bool
 		exGWRemoteIpAlt1 string
 		exGWRemoteIpAlt2 string
 	)
@@ -932,30 +922,6 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway and update validation", 
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
-		labelFlag := fmt.Sprintf("name=%s", ovnContainer)
-		jsonFlag := "-o=jsonpath='{.items..metadata.name}'"
-		fieldSelectorFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnWorkerNode)
-		fieldSelectorHaFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnHaWorkerNode)
-		fieldSelectorControlFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnControlNode)
-		// retrieve pod names from the running cluster
-		kubectlOut, err := framework.RunKubectl(ovnNs, "get", "pods", "-l", labelFlag, jsonFlag, fieldSelectorControlFlag)
-		if err != nil {
-			framework.Failf("Expected container %s running on %s error %v", ovnContainer, ovnControlNode, err)
-		}
-		// attempt to retrieve the pod name that will source the test in non-HA mode
-		kubectlOut, err = framework.RunKubectl(ovnNs, "get", "pods", "-l", labelFlag, jsonFlag, fieldSelectorFlag)
-		if err != nil {
-			framework.Failf("Expected container %s running on %s error %v", ovnContainer, ovnWorkerNode, err)
-		}
-		// attempt to retrieve the pod name that will source the test in HA mode
-		if kubectlOut == "''" {
-			haMode = true
-			kubectlOut, err = framework.RunKubectl(ovnNs, "get", "pods", "-l", labelFlag, jsonFlag, fieldSelectorHaFlag)
-			if err != nil {
-				framework.Failf("Expected container %s running on %s error %v", ovnContainer, ovnHaWorkerNode, err)
-			}
-		}
-
 		exGWRemoteIpAlt1 = "10.249.3.1"
 		exGWRemoteIpAlt2 = "10.249.4.1"
 		if IsIPv6Cluster(f.ClientSet) {
@@ -990,10 +956,6 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway and update validation", 
 		testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
 		// non-ha ci mode runs a set of kind nodes prefixed with ovn-worker
 		ciWorkerNodeSrc := ovnWorkerNode
-		if haMode {
-			// ha ci mode runs a named set of nodes with a prefix of ovn-control-plane
-			ciWorkerNodeSrc = ovnHaWorkerNode
-		}
 
 		// start the container that will act as an external gateway
 		_, err := runCommand(containerRuntime, "run", "-itd", "--privileged", "--network", externalContainerNetwork, "--name", gwContainerNameAlt1, "centos")
@@ -2631,6 +2593,11 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 		netflow_v5: "NETFLOW_V5", ipfix: "IPFIX", sflow: "SFLOW_5"}
 
 	f := newPrivelegedTestFramework(svcname)
+
+	var (
+		ovnkubeNodeDaemonSet string
+	)
+
 	ginkgo.AfterEach(func() {
 		// tear down the collector container
 		if cid, _ := runCommand(containerRuntime, "ps", "-qaf", fmt.Sprintf("name=%s", collectorContainer)); cid != "" {
@@ -2672,9 +2639,28 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 			}
 			addressAndPort := net.JoinHostPort(collectorIP, strconv.Itoa(int(collectorPort)))
 
+			ovnkubeNodeDaemonSet = "daemonset/ovnkube-node"
+			ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNs).List(context.TODO(), metav1.ListOptions{
+				LabelSelector: "name=ovnkube-node",
+			})
+			if err != nil {
+				framework.Failf("could not get ovnkube-node pods: %v", err)
+			}
+
+			if len(ovnKubeNodePods.Items) == 0 {
+				// Its possible ovnkube-local pods are running
+				ovnKubeNodePods, err = f.ClientSet.CoreV1().Pods(ovnNs).List(context.TODO(), metav1.ListOptions{
+					LabelSelector: "name=ovnkube-local",
+				})
+				if err != nil {
+					framework.Failf("could not get ovnkube-local pods: %v", err)
+				}
+				ovnkubeNodeDaemonSet = "daemonset/ovnkube-local"
+			}
+
 			ginkgo.By(fmt.Sprintf("Configuring ovnkube-node to use the new %s collector target", protocolStr))
 			setEnv := map[string]string{ovnEnvVar: addressAndPort}
-			setUnsetTemplateContainerEnv(f.ClientSet, ovnNs, "daemonset/ovnkube-node", "ovnkube-node", setEnv)
+			setUnsetTemplateContainerEnv(f.ClientSet, ovnNs, ovnkubeNodeDaemonSet, "ovnkube-node", setEnv)
 
 			ginkgo.By(fmt.Sprintf("Checking that the collector container received %s data", protocolStr))
 			keyword := keywordInLogs[protocol]
@@ -2704,14 +2690,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 				protocolStr, keyword))
 
 			ginkgo.By(fmt.Sprintf("Unsetting %s variable in ovnkube-node daemonset", ovnEnvVar))
-			setUnsetTemplateContainerEnv(f.ClientSet, ovnNs, "daemonset/ovnkube-node", "ovnkube-node", nil, ovnEnvVar)
-
-			ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNs).List(context.TODO(), metav1.ListOptions{
-				LabelSelector: "name=ovnkube-node",
-			})
-			if err != nil {
-				framework.Failf("could not get ovnkube-node pods: %v", err)
-			}
+			setUnsetTemplateContainerEnv(f.ClientSet, ovnNs, ovnkubeNodeDaemonSet, "ovnkube-node", nil, ovnEnvVar)
 
 			for _, ovnKubeNodePod := range ovnKubeNodePods.Items {
 
@@ -3035,6 +3014,13 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 	)
 
 	ginkgo.It("Should validate connectivity before and after deleting all the db-pods at once in Non-HA mode", func() {
+		multiZonesSetup, _ := isMultipleZoneDeployment(f.ClientSet)
+		if multiZonesSetup {
+			e2eskipper.Skipf(
+				"No db pods in muliple zones deployment",
+			)
+		}
+
 		dbDeployment := getDeployment(f, ovnNs, "ovnkube-db")
 		dbPods, err := e2edeployment.GetPodsForDeployment(f.ClientSet, dbDeployment)
 		if err != nil {
