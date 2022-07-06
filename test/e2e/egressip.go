@@ -374,6 +374,7 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		if len(nodes.Items) < 3 {
 			framework.Failf("Test requires >= 3 Ready nodes, but there are only %v nodes", len(nodes.Items))
 		}
+
 		ips := e2enode.CollectAddresses(nodes, v1.NodeInternalIP)
 		egress1Node = node{
 			name:   nodes.Items[1].Name,
