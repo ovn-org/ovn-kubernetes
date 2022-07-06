@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
+	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -184,6 +185,7 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		pod1Name                                                                   = "e2e-egressip-pod-1"
 		pod2Name                                                                   = "e2e-egressip-pod-2"
 		usedEgressNodeAvailabilityHandler                                          egressNodeAvailabilityHandler
+		testsSkipped                                                               bool
 	)
 
 	targetPodAndTest := func(namespace, fromName, toName, toIP string) wait.ConditionFunc {
@@ -369,11 +371,23 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
+		testsSkipped = true
 		nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
 		framework.ExpectNoError(err)
 		if len(nodes.Items) < 3 {
 			framework.Failf("Test requires >= 3 Ready nodes, but there are only %v nodes", len(nodes.Items))
 		}
+
+		multiZones, err := isMultipleZoneDeployment(f.ClientSet)
+		if err != nil {
+			framework.Failf("Failed to get the node zones : %v", err)
+		}
+		if multiZones {
+			e2eskipper.Skipf(
+				"Egress IPs are not yet supported with multiple zones deployment",
+			)
+		}
+		testsSkipped = false
 		ips := e2enode.CollectAddresses(nodes, v1.NodeInternalIP)
 		egress1Node = node{
 			name:   nodes.Items[1].Name,
@@ -407,6 +421,9 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 	})
 
 	ginkgo.AfterEach(func() {
+		if testsSkipped {
+			return
+		}
 		framework.RunKubectlOrDie("default", "delete", "eip", egressIPName, "--ignore-not-found=true")
 		framework.RunKubectlOrDie("default", "delete", "eip", egressIPName2, "--ignore-not-found=true")
 		framework.RunKubectlOrDie("default", "label", "node", egress1Node.name, "k8s.ovn.org/egress-assignable-")

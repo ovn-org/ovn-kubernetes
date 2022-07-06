@@ -33,6 +33,8 @@ import (
 const (
 	ovnNamespace   = "ovn-kubernetes"
 	ovnNodeSubnets = "k8s.ovn.org/node-subnets"
+	// ovnNodeZoneNameAnnotation is the node annotation name to store the node zone name.
+	ovnNodeZoneNameAnnotation = "k8s.ovn.org/zone-name"
 )
 
 var containerRuntime = "docker"
@@ -582,7 +584,7 @@ func deletePodSyncNS(clientSet kubernetes.Interface, namespace, podName string) 
 
 // waitClusterHealthy ensures we have a given number of ovn-k worker and master nodes,
 // as well as all nodes are healthy
-func waitClusterHealthy(f *framework.Framework, numMasters int) error {
+func waitClusterHealthy(f *framework.Framework, numControlPlanePods int, controlPlanePodName string) error {
 	return wait.PollImmediate(2*time.Second, 120*time.Second, func() (bool, error) {
 		nodes, err := f.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 		if err != nil {
@@ -625,13 +627,13 @@ func waitClusterHealthy(f *framework.Framework, numMasters int) error {
 		}
 
 		podList, err = podClient.List(context.Background(), metav1.ListOptions{
-			LabelSelector: "name=ovnkube-master",
+			LabelSelector: "name=" + controlPlanePodName,
 		})
 		if err != nil {
-			return false, fmt.Errorf("failed to list ovn-kube node pods: %w", err)
+			return false, fmt.Errorf("failed to list ovn-kube master pods: %w", err)
 		}
-		if len(podList.Items) != numMasters {
-			framework.Logf("Not enough running ovnkube-master pods, want %d, have %d", numMasters, len(podList.Items))
+		if len(podList.Items) != numControlPlanePods {
+			framework.Logf("Not enough running %s pods, want %d, have %d", numControlPlanePods, numControlPlanePods, len(podList.Items))
 			return false, nil
 		}
 
@@ -1060,4 +1062,36 @@ func randStr(n int) string {
 		b[i] = charset[rand.Intn(len(charset))]
 	}
 	return string(b)
+}
+
+// getNodeZone returns the node's zone
+func getNodeZone(node *v1.Node) (string, error) {
+	nodeZone, ok := node.Annotations[ovnNodeZoneNameAnnotation]
+	if !ok {
+		return "", fmt.Errorf("zone for the node %s not set in the annotation %s", node.Name, ovnNodeZoneNameAnnotation)
+	}
+
+	return nodeZone, nil
+}
+
+// isMultipleZoneDeployment returns true if the deployment has multiple zones
+func isMultipleZoneDeployment(c clientset.Interface) (bool, error) {
+	nodes, err := c.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return false, err
+	}
+
+	foundZones := sets.NewString()
+
+	for _, node := range nodes.Items {
+		zone, err := getNodeZone(&node)
+		if err != nil {
+			return false, err
+		}
+		if !foundZones.Has(zone) {
+			foundZones.Insert(zone)
+		}
+	}
+
+	return len(foundZones) > 1, nil
 }

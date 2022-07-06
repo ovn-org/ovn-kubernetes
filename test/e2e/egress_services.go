@@ -18,6 +18,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
+	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -38,6 +39,7 @@ var _ = ginkgo.Describe("Egress Services", func() {
 		externalIPv4 string
 		externalIPv6 string
 		nodes        []v1.Node
+		testsSkipped bool
 	)
 
 	f := wrappedTestFramework("egress-services")
@@ -52,6 +54,17 @@ var _ = ginkgo.Describe("Egress Services", func() {
 				"Test requires >= 3 Ready nodes, but there are only %v nodes",
 				len(n.Items))
 		}
+		testsSkipped = true
+		multiZones, err := isMultipleZoneDeployment(f.ClientSet)
+		if err != nil {
+			framework.Failf("Failed to get the node zones : %v", err)
+		}
+		if multiZones {
+			e2eskipper.Skipf(
+				"Egress services are not yet supported with multiple zones deployment",
+			)
+		}
+		testsSkipped = false
 		nodes = n.Items
 		ginkgo.By("Creating an external container to send the traffic to/from")
 		externalIPv4, externalIPv6 = createClusterExternalContainer(externalContainerName, agnhostImage,
@@ -60,8 +73,10 @@ var _ = ginkgo.Describe("Egress Services", func() {
 	})
 
 	ginkgo.AfterEach(func() {
-		deleteClusterExternalContainer(externalContainerName)
-		flushCustomRoutingTableOnNodes(nodes, customRoutingTable)
+		if !testsSkipped {
+			deleteClusterExternalContainer(externalContainerName)
+			flushCustomRoutingTableOnNodes(nodes, customRoutingTable)
+		}
 	})
 
 	ginkgotable.DescribeTable("Should validate pods' egress is SNATed to the LB's ingress ip without selectors",

@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientset "k8s.io/client-go/kubernetes"
+	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	mnpclient "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1beta1"
@@ -56,6 +57,15 @@ var _ = Describe("Multi Homing", func() {
 
 	Context("A single pod with an OVN-K secondary network", func() {
 		table.DescribeTable("is able to get to the Running phase", func(netConfig networkAttachmentConfig, podConfig podConfiguration) {
+			if netConfig.topology != "layer3" {
+				multiZonesSetup, err := isMultipleZoneDeployment(cs)
+				Expect(err).NotTo(HaveOccurred())
+				if multiZonesSetup {
+					e2eskipper.Skipf(
+						"Secondary network with topology %s is not yet supported with multiple zones deployment", netConfig.topology,
+					)
+				}
+			}
 			netConfig.namespace = f.Namespace.Name
 			podConfig.namespace = f.Namespace.Name
 
@@ -262,6 +272,17 @@ var _ = Describe("Multi Homing", func() {
 		table.DescribeTable(
 			"can communicate over the secondary network",
 			func(netConfig networkAttachmentConfig, clientPodConfig podConfiguration, serverPodConfig podConfiguration) {
+				// Skip the test if the netConfig topology is not layer3 and the deployment is multi zone
+				if netConfig.topology != "layer3" {
+					multiZonesSetup, err := isMultipleZoneDeployment(cs)
+					Expect(err).NotTo(HaveOccurred())
+					if multiZonesSetup {
+						e2eskipper.Skipf(
+							"Secondary network with topology %s is not yet supported with multiple zones deployment", netConfig.topology,
+						)
+					}
+				}
+
 				netConfig.namespace = f.Namespace.Name
 				clientPodConfig.namespace = f.Namespace.Name
 				serverPodConfig.namespace = f.Namespace.Name
@@ -651,6 +672,16 @@ var _ = Describe("Multi Homing", func() {
 			table.DescribeTable(
 				"multi-network policies configure traffic allow lists",
 				func(netConfig networkAttachmentConfig, allowedClientPodConfig podConfiguration, blockedClientPodConfig podConfiguration, serverPodConfig podConfiguration, policy *mnpapi.MultiNetworkPolicy) {
+					// Skip the test if the netConfig topology is not layer3 and the deployment is multi zone
+					if netConfig.topology != "layer3" {
+						multiZonesSetup, err := isMultipleZoneDeployment(cs)
+						Expect(err).NotTo(HaveOccurred())
+						if multiZonesSetup {
+							e2eskipper.Skipf(
+								"Secondary network with topology %s is not yet supported with multiple zones deployment", netConfig.topology,
+							)
+						}
+					}
 					blockedClientPodNamespace := f.Namespace.Name
 					if blockedClientPodConfig.requiresExtraNamespace {
 						blockedClientPodNamespace = extraNamespace.Name
@@ -1030,10 +1061,20 @@ var _ = Describe("Multi Homing", func() {
 		var pod *v1.Pod
 
 		BeforeEach(func() {
+			// Skip the test if the netConfig topology is not layer3 and the deployment is multi zone
+			var err error
+			multiZonesSetup, err := isMultipleZoneDeployment(cs)
+			Expect(err).NotTo(HaveOccurred())
+			if multiZonesSetup {
+				e2eskipper.Skipf(
+					"Secondary network with layer2 topology is not yet supported with multiple zones deploymen",
+				)
+			}
 			netAttachDefs := []networkAttachmentConfig{
 				newAttachmentConfigWithOverriddenName(secondaryNetworkName, f.Namespace.Name, secondaryNetworkName, "layer2", secondaryFlatL2NetworkCIDR),
 				newAttachmentConfigWithOverriddenName(secondaryNetworkName+"-alias", f.Namespace.Name, secondaryNetworkName, "layer2", secondaryFlatL2NetworkCIDR),
 			}
+
 			for i := range netAttachDefs {
 				netConfig := netAttachDefs[i]
 				By("creating the attachment configuration")
@@ -1054,7 +1095,6 @@ var _ = Describe("Multi Homing", func() {
 				namespace: f.Namespace.Name,
 			}
 			By("creating the pod using a secondary network")
-			var err error
 			pod, err = cs.CoreV1().Pods(podConfig.namespace).Create(
 				context.Background(),
 				generatePodSpec(podConfig),
