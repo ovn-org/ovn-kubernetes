@@ -262,16 +262,7 @@ func (n *NodeController) AddNode(node *kapi.Node) error {
 		hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(subnet)
 		n.drIP = hybridOverlayIfAddr.IP
 	}
-	localNode, err := n.nodeLister.Get(n.nodeName)
-	if err != nil {
-		return fmt.Errorf("failed to get local node: %v", err)
-	}
-	if n.gwLRPIP == nil {
-		n.gwLRPIP, err = util.ParseNodeGatewayRouterLRPAddr(localNode)
-		if err != nil {
-			return fmt.Errorf("invalid Gateway Router LRP IP: %v", err)
-		}
-	}
+
 	if node.Name == n.nodeName {
 		// Retry hybrid overlay initialization if the master was
 		// slow to add the hybrid overlay logical network elements
@@ -363,6 +354,13 @@ func getIPAsHexString(ip net.IP) string {
 func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 	if n.initialized {
 		return nil
+	}
+	if n.gwLRPIP == nil {
+		gwLRPIP, err := util.ParseNodeGatewayRouterLRPAddr(node)
+		if err != nil {
+			return fmt.Errorf("invalid Gateway Router LRP IP: %v", err)
+		}
+		n.gwLRPIP = gwLRPIP
 	}
 
 	subnet, err := getLocalNodeSubnet(n.nodeName)
