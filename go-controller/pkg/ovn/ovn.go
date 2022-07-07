@@ -532,30 +532,69 @@ func (oc *Controller) isPodScheduledinRemoteZone(pod *kapi.Pod) bool {
 // indicates the pod set up should be retried later.
 func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
 	// Try unscheduled pods later
-	if !oc.isPodScheduledinLocalZone(pod) {
+	if !util.PodScheduled(pod) {
 		return nil
 	}
 
-	if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
-		// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
-		// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
-		// care of updating the exgw updates
-		if err := oc.deletePodExternalGW(oldPod); err != nil {
-			return fmt.Errorf("ensurePod failed %s/%s: %w", pod.Namespace, pod.Name, err)
-		}
-	}
-
-	if util.PodWantsNetwork(pod) && addPort {
-		if err := oc.addLogicalPort(pod); err != nil {
-			return fmt.Errorf("addLogicalPort failed for %s/%s: %w", pod.Namespace, pod.Name, err)
-		}
-	} else {
-		// either pod is host-networked or its an update for a normal pod (addPort=false case)
-		if oldPod == nil || exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod) {
-			if err := oc.addPodExternalGW(pod); err != nil {
-				return fmt.Errorf("addPodExternalGW failed for %s/%s: %w", pod.Namespace, pod.Name, err)
+	if oc.isPodScheduledinLocalZone(pod) {
+		if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
+			// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
+			// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
+			// care of updating the exgw updates
+			if err := oc.deletePodExternalGW(oldPod); err != nil {
+				return fmt.Errorf("ensurePod failed %s/%s: %w", pod.Namespace, pod.Name, err)
 			}
 		}
+
+		if util.PodWantsNetwork(pod) && addPort {
+			if err := oc.addLogicalPort(pod); err != nil {
+				return fmt.Errorf("addLogicalPort failed for %s/%s: %w", pod.Namespace, pod.Name, err)
+			}
+		} else {
+			// either pod is host-networked or its an update for a normal pod (addPort=false case)
+			if oldPod == nil || exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod) {
+				if err := oc.addPodExternalGW(pod); err != nil {
+					return fmt.Errorf("addPodExternalGW failed for %s/%s: %w", pod.Namespace, pod.Name, err)
+				}
+			}
+		}
+	} else {
+		// Track remote ovn networked pods too, for network policy, and egress gw.
+		if len(pod.Status.PodIPs) < 1 {
+			return fmt.Errorf("failed to get remote zone pod %s/%s IPs",
+				pod.Namespace, pod.Name)
+		} else {
+			var ips []*net.IPNet
+			for _, podIp := range pod.Status.PodIPs {
+				ip := net.ParseIP(podIp.IP)
+				if ip != nil {
+					ips = append(ips, &net.IPNet{IP: ip})
+				}
+
+			}
+			if addPort && util.PodWantsNetwork(pod) {
+				if err := oc.addRemotePodToNamespace(pod.Namespace, ips); err != nil {
+					return fmt.Errorf("failed to add non-local pod %s/%s to namespace: %v", pod.Namespace, pod.Name, err)
+				}
+			}
+
+			//FIXME: Update comments & reduce code duplication.
+			// check if this pod is serving as an external GW
+			if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
+				// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
+				// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
+				// care of updating the exgw updates
+				_ = oc.deletePodExternalGW(oldPod)
+			}
+
+			// either pod is host-networked or its an update for a normal pod (addPort=false case)
+			if oldPod == nil || exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod) {
+				if err := oc.addPodExternalGW(pod); err != nil {
+					return fmt.Errorf("addPodExternalGW failed %s/%s: %v", pod.Namespace, pod.Name, err)
+				}
+			}
+		}
+		return nil
 	}
 
 	return nil
