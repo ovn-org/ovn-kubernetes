@@ -502,9 +502,9 @@ func (oc *Controller) recordPodEvent(addErr error, pod *kapi.Pod) {
 }
 
 func exGatewayAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
-	return oldPod.Annotations[routingNamespaceAnnotation] != newPod.Annotations[routingNamespaceAnnotation] ||
-		oldPod.Annotations[routingNetworkAnnotation] != newPod.Annotations[routingNetworkAnnotation] ||
-		oldPod.Annotations[bfdAnnotation] != newPod.Annotations[bfdAnnotation]
+	return oldPod.Annotations[util.RoutingNamespaceAnnotation] != newPod.Annotations[util.RoutingNamespaceAnnotation] ||
+		oldPod.Annotations[util.RoutingNetworkAnnotation] != newPod.Annotations[util.RoutingNetworkAnnotation] ||
+		oldPod.Annotations[util.BfdAnnotation] != newPod.Annotations[util.BfdAnnotation]
 }
 
 func networkStatusAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {

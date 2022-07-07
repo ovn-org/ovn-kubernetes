@@ -142,12 +142,12 @@ func (oc *Controller) deleteRouteInfoLocked(name ktypes.NamespacedName) *externa
 // addPodExternalGW handles detecting if a pod is serving as an external gateway for namespace(s) and adding routes
 // to all pods in that namespace
 func (oc *Controller) addPodExternalGW(pod *kapi.Pod) error {
-	podRoutingNamespaceAnno := pod.Annotations[routingNamespaceAnnotation]
+	podRoutingNamespaceAnno := pod.Annotations[util.RoutingNamespaceAnnotation]
 	if podRoutingNamespaceAnno == "" {
 		return nil
 	}
 	enableBFD := false
-	if _, ok := pod.Annotations[bfdAnnotation]; ok {
+	if _, ok := pod.Annotations[util.BfdAnnotation]; ok {
 		enableBFD = true
 	}
 
@@ -348,7 +348,7 @@ func (oc *Controller) deletePodGWRoute(routeInfo *externalRouteInfo, podIP, gw, 
 // deletePodExternalGW detects if a given pod is acting as an external GW and removes all routes in all namespaces
 // associated with that pod
 func (oc *Controller) deletePodExternalGW(pod *kapi.Pod) (err error) {
-	podRoutingNamespaceAnno := pod.Annotations[routingNamespaceAnnotation]
+	podRoutingNamespaceAnno := pod.Annotations[util.RoutingNamespaceAnnotation]
 	if podRoutingNamespaceAnno == "" {
 		return nil
 	}
@@ -977,7 +977,7 @@ func (oc *Controller) cleanExGwECMPRoutes() {
 
 func getExGwPodIPs(gatewayPod *kapi.Pod) ([]net.IP, error) {
 	var foundGws []net.IP
-	if gatewayPod.Annotations[routingNetworkAnnotation] != "" {
+	if gatewayPod.Annotations[util.RoutingNetworkAnnotation] != "" {
 		var multusNetworks []nettypes.NetworkStatus
 		err := json.Unmarshal([]byte(gatewayPod.ObjectMeta.Annotations[nettypes.NetworkStatusAnnot]), &multusNetworks)
 		if err != nil {
@@ -985,7 +985,7 @@ func getExGwPodIPs(gatewayPod *kapi.Pod) ([]net.IP, error) {
 				gatewayPod.Name, err)
 		}
 		for _, multusNetwork := range multusNetworks {
-			if multusNetwork.Name == gatewayPod.Annotations[routingNetworkAnnotation] {
+			if multusNetwork.Name == gatewayPod.Annotations[util.RoutingNetworkAnnotation] {
 				for _, gwIP := range multusNetwork.IPs {
 					ip := net.ParseIP(gwIP)
 					if ip != nil {
@@ -1004,7 +1004,7 @@ func getExGwPodIPs(gatewayPod *kapi.Pod) ([]net.IP, error) {
 	} else {
 		return nil, fmt.Errorf("ignoring pod %s as an external gateway candidate. Invalid combination "+
 			"of host network: %t and routing-network annotation: %s", gatewayPod.Name, gatewayPod.Spec.HostNetwork,
-			gatewayPod.Annotations[routingNetworkAnnotation])
+			gatewayPod.Annotations[util.RoutingNetworkAnnotation])
 	}
 	return foundGws, nil
 }
@@ -1016,11 +1016,11 @@ func (oc *Controller) buildClusterECMPCacheFromNamespaces(clusterRouteCache map[
 		return
 	}
 	for _, namespace := range namespaces {
-		if _, ok := namespace.Annotations[routingExternalGWsAnnotation]; !ok {
+		if _, ok := namespace.Annotations[util.RoutingExternalGWsAnnotation]; !ok {
 			continue
 		}
 		// namespace has exgw routes, build cache
-		gwIPs, err := parseRoutingExternalGWAnnotation(namespace.Annotations[routingExternalGWsAnnotation])
+		gwIPs, err := util.ParseRoutingExternalGWAnnotation(namespace.Annotations[util.RoutingExternalGWsAnnotation])
 		if err != nil {
 			klog.Errorf("Unable to clean ExGw ECMP routes for namespace: %s, %v", namespace.Name, err)
 			continue
@@ -1071,7 +1071,7 @@ func (oc *Controller) buildClusterECMPCacheFromPods(clusterRouteCache map[string
 		return
 	}
 	for _, pod := range pods {
-		podRoutingNamespaceAnno := pod.Annotations[routingNamespaceAnnotation]
+		podRoutingNamespaceAnno := pod.Annotations[util.RoutingNamespaceAnnotation]
 		if podRoutingNamespaceAnno == "" {
 			continue
 		}
