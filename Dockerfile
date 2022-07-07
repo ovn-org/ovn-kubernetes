@@ -9,7 +9,7 @@
 # are built in this Dockerfile and included in the image (instead of the rpm)
 #
 
-FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.17-openshift-4.10 AS builder
+FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.18-openshift-4.12 AS builder
 
 WORKDIR /go/src/github.com/openshift/ovn-kubernetes
 COPY . .
@@ -18,9 +18,9 @@ COPY . .
 RUN cd go-controller; CGO_ENABLED=0 make
 RUN cd go-controller; CGO_ENABLED=0 make windows
 
-FROM registry.ci.openshift.org/ocp/4.10:cli AS cli
+FROM registry.ci.openshift.org/ocp/4.12:cli AS cli
 
-FROM registry.ci.openshift.org/ocp/4.10:base
+FROM registry.ci.openshift.org/ocp/4.12:base
 
 USER root
 
@@ -33,7 +33,7 @@ RUN yum install -y  \
 	yum clean all
 
 ARG ovsver=2.17.0-22.el8fdp
-ARG ovnver=22.06.0-preview.branched.38.el8fdp
+ARG ovnver=22.06.0-7.el8fdp
 
 RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
