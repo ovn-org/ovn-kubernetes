@@ -514,6 +514,10 @@ func (bnc *BaseNetworkController) getNewLocalPolicyPorts(np *networkPolicy,
 			continue
 		}
 
+		if !bnc.isPodScheduledinLocalZone(pod) {
+			continue
+		}
+
 		// Skip pods that will never be present in logicalPortCache,
 		// e.g. hostNetwork pods, overlay node pods, or completed pods
 		if !bnc.podExpectedInLogicalCache(pod) {
