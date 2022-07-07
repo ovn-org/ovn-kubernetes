@@ -214,7 +214,7 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 			cookie, cidr.String(), hotypes.HybridOverlayVNI, nodeIP.String(), drMAC.String()))
 
 	flows = append(flows,
-		fmt.Sprintf("cookie=0x%s,table=0,priority=101,ip,nw_dst=%s,nw_src=%s"+
+		fmt.Sprintf("cookie=0x%s,table=0,priority=101,ip,nw_dst=%s,nw_src=%s,"+
 			"actions=load:%d->NXM_NX_TUN_ID[0..31],"+
 			"set_field:%s->nw_src,"+
 			"set_field:%s->tun_dst,"+
@@ -262,16 +262,7 @@ func (n *NodeController) AddNode(node *kapi.Node) error {
 		hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(subnet)
 		n.drIP = hybridOverlayIfAddr.IP
 	}
-	localNode, err := n.nodeLister.Get(n.nodeName)
-	if err != nil {
-		return fmt.Errorf("failed to get local node: %v", err)
-	}
-	if n.gwLRPIP == nil {
-		n.gwLRPIP, err = util.ParseNodeGatewayRouterLRPAddr(localNode)
-		if err != nil {
-			return fmt.Errorf("invalid Gateway Router LRP IP: %v", err)
-		}
-	}
+
 	if node.Name == n.nodeName {
 		// Retry hybrid overlay initialization if the master was
 		// slow to add the hybrid overlay logical network elements
@@ -363,6 +354,13 @@ func getIPAsHexString(ip net.IP) string {
 func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 	if n.initialized {
 		return nil
+	}
+	if n.gwLRPIP == nil {
+		gwLRPIP, err := util.ParseNodeGatewayRouterLRPAddr(node)
+		if err != nil {
+			return fmt.Errorf("invalid Gateway Router LRP IP: %v", err)
+		}
+		n.gwLRPIP = gwLRPIP
 	}
 
 	subnet, err := getLocalNodeSubnet(n.nodeName)
@@ -629,9 +627,9 @@ func (n *NodeController) syncFlows() {
 			flows = append(flows, entry.learnedFlow)
 		}
 	}
-	_, _, err = util.ReplaceOFFlows(extBridgeName, flows)
+	_, stderr, err = util.ReplaceOFFlows(extBridgeName, flows)
 	if err != nil {
-		klog.Errorf("Failed to add flows, error: %v, flows: %s", err, flows)
+		klog.Errorf("Failed to add flows, error: %v, stderr: %s, flows: %s", err, stderr, flows)
 	}
 }
 
