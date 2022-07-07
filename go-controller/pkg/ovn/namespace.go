@@ -157,6 +157,33 @@ func (oc *DefaultNetworkController) addPodToNamespace(ns string, ips []*net.IPNe
 	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), ops, nil
 }
 
+func (oc *DefaultNetworkController) addRemotePodToNamespace(ns string, ips []*net.IPNet) error {
+	_, _, ops, err := oc.addPodToNamespace(ns, ips)
+
+	if err == nil {
+		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+		if err != nil {
+			return fmt.Errorf("could not add pod IPs to the namespace address set - %+v", err)
+		}
+	}
+	return err
+}
+
+func (oc *DefaultNetworkController) deleteRemotePodFromNamespace(ns string, ips []*net.IPNet) error {
+	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
+	if nsInfo == nil {
+		return nil
+	}
+	defer nsUnlock()
+
+	if nsInfo.addressSet != nil {
+		if err := nsInfo.addressSet.DeleteIPs(createIPAddressSlice(ips)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func createIPAddressSlice(ips []*net.IPNet) []net.IP {
 	ipAddrs := make([]net.IP, 0)
 	for _, ip := range ips {
@@ -292,6 +319,10 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 					errors = append(errors, fmt.Errorf("failed to get all the pods (%v)", err))
 				}
 				for _, pod := range existingPods {
+					if !oc.isPodScheduledinLocalZone(pod) {
+						continue
+					}
+
 					logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 					if util.PodWantsHostNetwork(pod) {
 						continue
@@ -336,6 +367,9 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 				errors = append(errors, fmt.Errorf("failed to get all the pods (%v)", err))
 			}
 			for _, pod := range existingPods {
+				if !oc.isPodScheduledinLocalZone(pod) {
+					continue
+				}
 				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, types.DefaultNetworkName)
 				if err != nil {
 					errors = append(errors, err)

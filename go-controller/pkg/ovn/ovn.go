@@ -19,6 +19,7 @@ import (
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -34,6 +35,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 )
 
 const (
@@ -143,8 +145,7 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort boo
 		return oc.ensureLocalZonePod(oldPod, pod, addPort)
 	}
 
-	// TODO (numans): For remote zone pods add the pod ips to the namespace address set
-	return nil
+	return oc.ensureRemoteZonePod(oldPod, pod, addPort)
 }
 
 // ensureLocalZonePod tries to set up a local zone pod. It returns nil on success and error on failure; failure
@@ -187,6 +188,49 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *kapi.Pod, ad
 	return nil
 }
 
+// ensureRemoteZonePod tries to set up remote zone pod bits required to interconnect it.
+//   - Adds the remote pod ips to the pod namespace address set for network policy and egress gw
+//
+// It returns nil on success and error on failure; failur indicates the pod set up should be retried later.
+func (oc *DefaultNetworkController) ensureRemoteZonePod(oldPod, pod *kapi.Pod, addPort bool) error {
+	if len(pod.Status.PodIPs) < 1 {
+		return nil
+	}
+	var ips []*net.IPNet
+	for _, podIP := range pod.Status.PodIPs {
+		ip := utilnet.ParseIPSloppy(podIP.IP)
+		if ip != nil {
+			ips = append(ips, &net.IPNet{IP: ip})
+		}
+
+	}
+
+	if (addPort || (oldPod != nil && len(pod.Status.PodIPs) != len(oldPod.Status.PodIPs))) && !util.PodWantsHostNetwork(pod) {
+		if err := oc.addRemotePodToNamespace(pod.Namespace, ips); err != nil {
+			return fmt.Errorf("failed to add remote pod %s/%s to namespace: %w", pod.Namespace, pod.Name, err)
+		}
+	}
+
+	//FIXME: Update comments & reduce code duplication.
+	// check if this remote pod is serving as an external GW.
+	if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
+		// Delete the routes in the namespace associated with this remote oldPod if its acting as an external GW
+		if err := oc.deletePodExternalGW(oldPod); err != nil {
+			return fmt.Errorf("deletePodExternalGW failed for remote pod %s/%s: %w", oldPod.Namespace, oldPod.Name, err)
+		}
+	}
+
+	// either pod is host-networked or its an update for a normal pod (addPort=false case)
+	if oldPod == nil || exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod) {
+		// check if this remote pod is serving as an external GW. If so add the routes in the namespace
+		// associated with this remote pod
+		if err := oc.addPodExternalGW(pod); err != nil {
+			return fmt.Errorf("addPodExternalGW failed for remote pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		}
+	}
+	return nil
+}
+
 // removePod tried to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
 func (oc *DefaultNetworkController) removePod(pod *kapi.Pod, portInfo *lpInfo) error {
@@ -194,9 +238,7 @@ func (oc *DefaultNetworkController) removePod(pod *kapi.Pod, portInfo *lpInfo) e
 		return oc.removeLocalZonePod(pod, portInfo)
 	}
 
-	// TODO (numans) When we add the remote pod ips to the namespace address set, remove them
-	// when the remote pod is deleted.
-	return nil
+	return oc.removeRemoteZonePod(pod)
 }
 
 // removeLocalZonePod tries to tear down a local zone pod. It returns nil on success and error on failure;
@@ -222,6 +264,59 @@ func (oc *DefaultNetworkController) removeLocalZonePod(pod *kapi.Pod, portInfo *
 		return fmt.Errorf("deleteLogicalPort failed for pod %s: %w",
 			getPodNamespacedName(pod), err)
 	}
+	return nil
+}
+
+// removeRemoteZonePod tries to tear down a remote zone pod bits. It returns nil on success and error on failure;
+// failure indicates the pod tear down should be retried later.
+// It removes the remote pod ips from the namespace address set and if its an external gw pod, removes
+// its routes.
+func (oc *DefaultNetworkController) removeRemoteZonePod(pod *kapi.Pod) error {
+	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, types.DefaultNetworkName)
+	podDesc := fmt.Sprintf("pod %s/%s/%s", types.DefaultNetworkName, pod.Namespace, pod.Name)
+	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			// if the annotation doesn’t exist, that’s not an error.
+			klog.V(5).Infof("No annotations on remote pod %s, no need to delete its ips from the namespace address set", podDesc)
+			return nil
+		}
+		return fmt.Errorf("unable to unmarshal pod annotations for %s: %w", podDesc, err)
+	}
+
+	podIfAddrs := annotation.IPs
+
+	// Remove the pod ips from the namespace address set. Before that check if its a completed pod and
+	// make sure that the ips are not colliding with other pod.
+	shouldRelease := true
+	if util.PodCompleted(pod) {
+		shouldRelease, err := oc.canReleasePodIPs(podIfAddrs)
+		if err != nil {
+			klog.Errorf("Unable to determine if completed remote pod IP is in use by another pod. "+
+				"Will not release pod %s/%s IP: %#v from namespace addressset. %w", pod.Namespace, pod.Name, podIfAddrs, err)
+			shouldRelease = false
+		}
+
+		if !shouldRelease {
+			klog.Infof("Cannot release IP address: %s for %s/%s from namespace address set. Detected another pod"+
+				" using this IP: %s/%s", util.JoinIPNetIPs(podIfAddrs, " "), pod.Namespace, pod.Name)
+		}
+	}
+
+	if shouldRelease {
+		if err := oc.deleteRemotePodFromNamespace(pod.Namespace, annotation.IPs); err != nil {
+			return fmt.Errorf("failed to delete remote pod %s's IP from namespace: %w", podDesc, err)
+		}
+	}
+
+	if util.PodWantsHostNetwork(pod) {
+		// Delete the routes in the namespace associated with this remote pod if it was acting as an external GW
+		if err := oc.deletePodExternalGW(pod); err != nil {
+			return fmt.Errorf("unable to delete external gateway routes for remote pod %s: %w",
+				getPodNamespacedName(pod), err)
+		}
+		return nil
+	}
+
 	return nil
 }
 

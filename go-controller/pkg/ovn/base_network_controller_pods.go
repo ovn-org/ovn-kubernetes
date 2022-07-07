@@ -220,20 +220,15 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *kapi.Pod, portInfo *
 				return true, nil
 			}
 
-			var needleIPs []net.IP
-			for _, podIPNet := range podIfAddrs {
-				needleIPs = append(needleIPs, podIPNet.IP)
-			}
-
-			collidingPod, err := bnc.findPodWithIPAddresses(needleIPs)
+			canRelease, err := bnc.canReleasePodIPs(podIfAddrs)
 			if err != nil {
 				return false, fmt.Errorf("unable to determine if completed pod IP is in use by another pod. "+
 					"Will not release pod %s/%s IP: %#v from allocator. %v", pod.Namespace, pod.Name, podIfAddrs, err)
 			}
 
-			if collidingPod != nil {
-				klog.Infof("Will not release IP address: %s for %s. Detected another pod"+
-					" using this IP: %s/%s", util.JoinIPNetIPs(podIfAddrs, " "), podDesc, collidingPod.Namespace, collidingPod.Name)
+			if !canRelease {
+				klog.Infof("Will not release IP address: %s for %s. Detected another pod using it."+
+					" using this IP: %s/%s", util.JoinIPNetIPs(podIfAddrs, " "), podDesc)
 				return false, nil
 			}
 
@@ -315,6 +310,27 @@ func (bnc *BaseNetworkController) findPodWithIPAddresses(needleIPs []net.IP) (*k
 	}
 
 	return nil, nil
+}
+
+// canReleasePodIPs checks if the podIPs can be released or not.
+func (bnc *BaseNetworkController) canReleasePodIPs(podIfAddrs []*net.IPNet) (bool, error) {
+	var needleIPs []net.IP
+	for _, podIPNet := range podIfAddrs {
+		needleIPs = append(needleIPs, podIPNet.IP)
+	}
+	collidingPod, err := bnc.findPodWithIPAddresses(needleIPs)
+	if err != nil {
+		return false, fmt.Errorf("unable to determine if pod IPs: %#v are in use by another pod :%w", podIfAddrs, err)
+
+	}
+
+	if collidingPod != nil {
+		klog.Infof("Should not release IP address: %s. Detected another pod"+
+			" using this IP: %s/%s", util.JoinIPNetIPs(podIfAddrs, " "), collidingPod.Namespace, collidingPod.Name)
+		return false, nil
+	}
+
+	return true, nil
 }
 
 func (bnc *BaseNetworkController) releasePodIPs(pInfo *lpInfo) error {

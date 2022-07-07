@@ -540,6 +540,10 @@ func (oc *DefaultNetworkController) getNewLocalPolicyPorts(np *networkPolicy,
 			continue
 		}
 
+		if !oc.isPodScheduledinLocalZone(pod) {
+			continue
+		}
+
 		// Skip pods that will never be present in logicalPortCache,
 		// e.g. hostNetwork pods, overlay node pods, or completed pods
 		if !oc.podExpectedInLogicalCache(pod) {
