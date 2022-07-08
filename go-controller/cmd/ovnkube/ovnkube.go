@@ -266,7 +266,11 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		// register ovnkube node specific prometheus metrics exported by the node
 		metrics.RegisterNodeMetrics()
 		start := time.Now()
-		n := ovnnode.NewNode(ovnClientset.KubeClient, nodeWatchFactory, node, stopChan, util.EventRecorder(ovnClientset.KubeClient))
+		sbClient, err := libovsdb.NewSBClient(stopChan)
+		if err != nil {
+			return fmt.Errorf("cannot initialize libovsdb SB client: %v", err)
+		}
+		n := ovnnode.NewNode(ovnClientset.KubeClient, nodeWatchFactory, node, sbClient, stopChan, util.EventRecorder(ovnClientset.KubeClient))
 		if err := n.Start(ctx.Context, wg); err != nil {
 			return err
 		}

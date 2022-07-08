@@ -7,10 +7,13 @@ import (
 	"github.com/urfave/cli/v2"
 	"github.com/vishvananda/netlink"
 
+	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	netlink_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -600,6 +603,58 @@ var _ = Describe("Node", func() {
 			}
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Describe("DPU host mode", func() {
+		var (
+			initialSBDB, expectedSBDB []libovsdbtest.TestData
+			hostIP                    net.IP
+			dpuIP                     net.IP
+			libovsdbCleanup           *libovsdbtest.Cleanup
+			err                       error
+			sbClient                  client.Client
+		)
+
+		BeforeEach(func() {
+			hostIP, _, _ = net.ParseCIDR("1.2.3.4/24")
+			dpuIP, _, _ = net.ParseCIDR("1.2.3.5/24")
+			initialSBDB = []libovsdbtest.TestData{
+				&sbdb.Chassis{Name: "chassis-node1-host", Hostname: "node1", Encaps: []string{"encap-node1-host"}},
+				&sbdb.Chassis{Name: "chassis-node1-dpu", Hostname: "node1", Encaps: []string{"encap-node1-dpu"}},
+				&sbdb.Encap{UUID: "encap-node1-host", ChassisName: "chassis-node1-host", IP: hostIP.String()},
+				&sbdb.Encap{UUID: "encap-node1-dpu", ChassisName: "chassis-node1-dpu", IP: dpuIP.String()},
+			}
+			expectedSBDB = []libovsdbtest.TestData{
+				&sbdb.Chassis{Name: "chassis-node1-dpu", Hostname: "node1", Encaps: []string{"encap-node1-dpu"}},
+				// OVN shall also remove the corresponding Encap when the chassis is deleted, but in the mock DB it will be still there
+				&sbdb.Encap{UUID: "encap-node1-host", ChassisName: "chassis-node1-host", IP: hostIP.String()},
+				&sbdb.Encap{UUID: "encap-node1-dpu", ChassisName: "chassis-node1-dpu", IP: dpuIP.String()},
+			}
+		})
+
+		AfterEach(func() {
+			if libovsdbCleanup != nil {
+				libovsdbCleanup.Cleanup()
+			}
+		})
+
+		It("remove stale host chassis", func() {
+
+			stopChan := make(chan struct{})
+			defer close(stopChan)
+
+			dbSetup := libovsdbtest.TestSetup{
+				SBData: initialSBDB,
+			}
+			_, sbClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			Expect(err).NotTo(HaveOccurred())
+			err = removeStaleChassisByNodeIP(sbClient, net.IP(hostIP))
+			Expect(err).NotTo(HaveOccurred())
+			matcher := libovsdbtest.HaveDataIgnoringUUIDs(expectedSBDB)
+			match, err := matcher.Match(sbClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(match).To(BeTrue())
 		})
 	})
 })
