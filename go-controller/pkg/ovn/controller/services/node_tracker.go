@@ -29,6 +29,9 @@ type nodeTracker struct {
 
 	// resyncFn is the function to call so that all service are resynced
 	resyncFn func(nodes []nodeInfo)
+
+	// zone in which this nodeTracker is tracking
+	zone string
 }
 
 type nodeInfo struct {
@@ -44,6 +47,9 @@ type nodeInfo struct {
 	switchName string
 	// The chassisID of the node (ovs.external-ids:system-id)
 	chassisID string
+
+	// The node's zone
+	zone string
 }
 
 func (ni *nodeInfo) nodeIPsStr() []string {
@@ -75,9 +81,10 @@ func (ni *nodeInfo) nodeSubnets() []net.IPNet {
 	return out
 }
 
-func newNodeTracker(nodeInformer coreinformers.NodeInformer) (*nodeTracker, error) {
+func newNodeTracker(nodeInformer coreinformers.NodeInformer, zone string) (*nodeTracker, error) {
 	nt := &nodeTracker{
 		nodes: map[string]nodeInfo{},
+		zone:  zone,
 	}
 
 	_, err := nodeInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
@@ -104,9 +111,10 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer) (*nodeTracker, erro
 
 			// updateNode needs to be called only when hostSubnet annotation has changed or
 			// if L3Gateway annotation's ip addresses have changed or the name of the node (very rare)
-			// has changed. No need to trigger update for any other field change.
+			// has changed or if the node changes its zone. No need to trigger update for any other field change.
 			if util.NodeSubnetAnnotationChanged(oldObj, newObj) || util.NodeL3GatewayAnnotationChanged(oldObj, newObj) ||
-				util.NodeChassisIDAnnotationChanged(oldObj, newObj) || oldObj.Name != newObj.Name {
+				util.NodeChassisIDAnnotationChanged(oldObj, newObj) || util.NodeZoneAnnotationChanged(oldObj, newObj) ||
+				oldObj.Name != newObj.Name {
 				nt.updateNode(newObj)
 			}
 		},
@@ -136,7 +144,7 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer) (*nodeTracker, erro
 
 // updateNodeInfo updates the node info cache, and syncs all services
 // if it changed.
-func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisID string, nodeIPs []net.IP, podSubnets []*net.IPNet) {
+func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisID string, nodeIPs []net.IP, podSubnets []*net.IPNet, zone string) {
 	ni := nodeInfo{
 		name:              nodeName,
 		nodeIPs:           nodeIPs,
@@ -144,6 +152,7 @@ func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisI
 		gatewayRouterName: routerName,
 		switchName:        switchName,
 		chassisID:         chassisID,
+		zone:              zone,
 	}
 	for i := range podSubnets {
 		ni.podSubnets = append(ni.podSubnets, *podSubnets[i]) // de-pointer
@@ -162,7 +171,7 @@ func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisI
 	nt.nodes[nodeName] = ni
 
 	// Resync all services
-	nt.resyncFn(nt.allNodes())
+	nt.resyncFn(nt.getZoneNodes())
 }
 
 // removeNodeWithServiceReSync removes a node from the LB -> node mapper
@@ -170,7 +179,7 @@ func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisI
 func (nt *nodeTracker) removeNodeWithServiceReSync(nodeName string) {
 	nt.removeNode(nodeName)
 	nt.Lock()
-	nt.resyncFn(nt.allNodes())
+	nt.resyncFn(nt.getZoneNodes())
 	nt.Unlock()
 }
 
@@ -224,14 +233,18 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 		chassisID,
 		ips,
 		hsn,
+		util.GetNodeZone(node),
 	)
 }
 
-// allNodes returns a list of all nodes (and their relevant information)
-func (nt *nodeTracker) allNodes() []nodeInfo {
+// getZoneNodes returns a list of all nodes (and their relevant information)
+// which belong to the nodeTracker 'zone'
+func (nt *nodeTracker) getZoneNodes() []nodeInfo {
 	out := make([]nodeInfo, 0, len(nt.nodes))
 	for _, node := range nt.nodes {
-		out = append(out, node)
+		if node.zone == nt.zone {
+			out = append(out, node)
+		}
 	}
 
 	// Sort the returned list of nodes
