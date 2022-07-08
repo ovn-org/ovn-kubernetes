@@ -40,6 +40,9 @@ type nodeInfo struct {
 	gatewayRouterName string
 	// The name of the node's switch - never empty
 	switchName string
+
+	//node's zone
+	zone string
 }
 
 // returns a list of all ip blocks "assigned" to this node
@@ -122,13 +125,14 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer) *nodeTracker {
 
 // updateNodeInfo updates the node info cache, and syncs all services
 // if it changed.
-func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName string, nodeIPs []string, podSubnets []*net.IPNet) {
+func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName string, nodeIPs []string, podSubnets []*net.IPNet, zone string) {
 	ni := nodeInfo{
 		name:              nodeName,
 		nodeIPs:           nodeIPs,
 		podSubnets:        make([]net.IPNet, 0, len(podSubnets)),
 		gatewayRouterName: routerName,
 		switchName:        switchName,
+		zone:              zone,
 	}
 	for i := range podSubnets {
 		ni.podSubnets = append(ni.podSubnets, *podSubnets[i]) // de-pointer
@@ -204,17 +208,21 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 		grName,
 		ips,
 		hsn,
+		util.GetNodeZone(node),
 	)
 }
 
-// allNodes returns a list of all nodes (and their relevant information)
-func (nt *nodeTracker) allNodes() []nodeInfo {
+// allZoneNodes returns a list of all nodes (and their relevant information)
+// which belong to a zone
+func (nt *nodeTracker) allZoneNodes(zone string) []nodeInfo {
 	nt.Lock()
 	defer nt.Unlock()
 
 	out := make([]nodeInfo, 0, len(nt.nodes))
 	for _, node := range nt.nodes {
-		out = append(out, node)
+		if node.zone == zone {
+			out = append(out, node)
+		}
 	}
 
 	// Sort the returned list of nodes
