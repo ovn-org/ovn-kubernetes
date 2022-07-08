@@ -693,3 +693,8 @@ func GetNodeZone(node *kapi.Node) string {
 
 	return zoneName
 }
+
+// NodeZoneAnnotationChanged returns true if the ovnNodeZoneName in the corev1.Nodes doesn't match
+func NodeZoneAnnotationChanged(oldNode, newNode *corev1.Node) bool {
+	return oldNode.Annotations[ovnNodeZoneName] != newNode.Annotations[ovnNodeZoneName]
+}
