@@ -213,13 +213,26 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 			}
 		}
 	} else {
-		// Delete all assignments that are to be removed from the allocator
-		// cache. If we don't do this we will occupy assignment positions for
-		// the ipsToAdd, even though statusToRemove will be removed afterwards
-		oc.deleteAllocatorEgressIPAssignments(statusToRemove)
-		// If running on a public cloud we should not program OVN just yet, we
-		// need confirmation from the cloud-network-config-controller that it
-		// can assign the IPs. reconcileCloudPrivateIPConfig will take care of
+		// Even when running on a public cloud, we must make sure that we unwire EgressIP
+		// configuration from OVN *before* we instruct the CloudNetworkConfigController
+		// to remove the CloudPrivateIPConfig object from the cloud.
+		// CloudPrivateIPConfig objects can be in the "Deleting" state for a long time,
+		// waiting for the underlying cloud to finish its action and to report success of the
+		// unattach operation. Some clouds such as Azure will remove the IP address nearly
+		// immediately, but then they will take a long time (seconds to minutes) to actually report
+		// success of the removal operation.
+		if len(statusToRemove) > 0 {
+			// Delete all assignments that are to be removed from the allocator
+			// cache. If we don't do this we will occupy assignment positions for
+			// the ipsToAdd, even though statusToRemove will be removed afterwards
+			oc.deleteAllocatorEgressIPAssignments(statusToRemove)
+			if err := oc.deleteEgressIPAssignments(name, statusToRemove); err != nil {
+				return err
+			}
+		}
+		// If running on a public cloud we should not program OVN just yet for assignment
+		// operations. We need confirmation from the cloud-network-config-controller that
+		// it can assign the IPs. reconcileCloudPrivateIPConfig will take care of
 		// processing the answer from the requests we make here, and update OVN
 		// accordingly when we know what the outcome is.
 		if len(ipsToAssign) > 0 {
@@ -590,6 +603,12 @@ func (oc *Controller) reconcileCloudPrivateIPConfig(old, new *ocpcloudnetworkapi
 			Node:     nodeToDelete,
 			EgressIP: egressIPString,
 		}
+		// In many cases, this here is likely redundant as we already run this inside
+		// reconcileEgressIP before instructing the CloudPrivateIP reconciler to delete
+		// it again. But running oc.deleteEgressIPAssignments twice shouldn't hurt, and
+		// this is also needed if someone manually deletes the CloudPrivateIP, but keeps
+		// the EgressIP. Therefore, for safe measure, better delete the flows twice. In
+		// the future, let's possibly reevaluate if this is needed.
 		if err := oc.deleteEgressIPAssignments(egressIPName, []egressipv1.EgressIPStatusItem{statusItem}); err != nil {
 			return err
 		}
