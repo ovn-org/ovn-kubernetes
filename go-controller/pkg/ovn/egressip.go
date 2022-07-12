@@ -861,11 +861,18 @@ func (oc *Controller) executeCloudPrivateIPConfigOps(egressIPName string, ops ma
 				oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "CloudAssignmentFailed", "egress IP: %s for object EgressIP: %s could not be created, err: %v", egressIP, egressIPName, err)
 				return fmt.Errorf("cloud add request failed for CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfigName, err)
 			}
-			// toDelete is non-empty, this indicates an DELETE for which
-			// the object **must** exist, if not: that's an error.
+			// toDelete is non-empty, this indicates a DELETE - if the object does not exist, log an Info message and continue with the next op.
+			// The reason for why we are not throwing an error here is that desired state (deleted) == isState (object not found).
+			// If for whatever reason we have a pending toDelete op for a deleted object, then this op should simply be silently ignored.
+			// Any other error, return an error to trigger a retry.
 		} else if op.toDelete != "" {
 			if err != nil {
-				return fmt.Errorf("cloud deletion request failed for CloudPrivateIPConfig: %s, could not get item, err: %v", cloudPrivateIPConfigName, err)
+				if apierrors.IsNotFound(err) {
+					klog.Infof("Cloud deletion request failed for CloudPrivateIPConfig: %s, item already deleted, err: %v", cloudPrivateIPConfigName, err)
+					continue
+				} else {
+					return fmt.Errorf("cloud deletion request failed for CloudPrivateIPConfig: %s, could not get item, err: %v", cloudPrivateIPConfigName, err)
+				}
 			}
 			if err := oc.kube.DeleteCloudPrivateIPConfig(cloudPrivateIPConfigName); err != nil {
 				eIPRef := kapi.ObjectReference{
