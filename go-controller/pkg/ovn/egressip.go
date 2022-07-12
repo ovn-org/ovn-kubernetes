@@ -772,8 +772,38 @@ func (oc *Controller) executeCloudPrivateIPConfigChange(egressIPName string, toA
 			}
 		}
 	}
+	// Merge ops into the existing pendingCloudPrivateIPConfigsOps.
+	// This allows us to:
+	// a) execute only the new ops
+	// b) keep track of any pending changes
 	if len(ops) > 0 {
-		oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName] = ops
+		if _, ok := oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName]; !ok {
+			// Set all operations for the EgressIP object if none are in the cache currently.
+			oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName] = ops
+		} else {
+			for cloudPrivateIP, op := range ops {
+				if _, ok := oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName][cloudPrivateIP]; !ok {
+					// If this specific EgressIP object's CloudPrivateIPConfig address currently has no
+					// op, simply set it.
+					oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName][cloudPrivateIP] = op
+				} else {
+					// If an existing operation for this CloudPrivateIP exists, then the following logic should
+					// apply:
+					// If toDelete is currently set: keep the current toDelete. Theoretically, the oldest toDelete
+					// is the good one. If toDelete if currently not set, overwrite it with the new value.
+					// If toAdd is currently set: overwrite with the new toAdd. Theoretically, the newest toAdd is
+					// the good one.
+					// Therefore, only replace toAdd over a previously existing op and only replace toDelete if
+					// it's unset.
+					if op.toAdd != "" {
+						oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName][cloudPrivateIP].toAdd = op.toAdd
+					}
+					if oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName][cloudPrivateIP].toDelete == "" {
+						oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName][cloudPrivateIP].toDelete = op.toDelete
+					}
+				}
+			}
+		}
 	}
 	return oc.executeCloudPrivateIPConfigOps(egressIPName, ops)
 }
