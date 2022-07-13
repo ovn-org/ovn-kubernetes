@@ -250,7 +250,7 @@ print_params() {
      echo "KIND_REMOVE_TAINT = $KIND_REMOVE_TAINT"
      echo "KIND_IPV4_SUPPORT = $KIND_IPV4_SUPPORT"
      echo "KIND_IPV6_SUPPORT = $KIND_IPV6_SUPPORT"
-     echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
+     echo "KIND_NUM_WORKER = $KIND_TOTAL_NUM_WORKER"
      echo "KIND_ALLOW_SYSTEM_WRITES = $KIND_ALLOW_SYSTEM_WRITES"
      echo "KIND_EXPERIMENTAL_PROVIDER = $KIND_EXPERIMENTAL_PROVIDER"
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
@@ -277,6 +277,8 @@ print_params() {
      echo "OVN_HOST_NETWORK_NAMESPACE = $OVN_HOST_NETWORK_NAMESPACE"
      echo "OVN_ENABLE_EX_GW_NETWORK_BRIDGE = $OVN_ENABLE_EX_GW_NETWORK_BRIDGE"
      echo "OVN_EX_GW_NETWORK_INTERFACE = $OVN_EX_GW_NETWORK_INTERFACE"
+     echo "KIND_NUM_ADDITIONAL_ZONES = $KIND_NUM_ADDITIONAL_ZONES"
+     echo "OVN_INTERCONNECT_ENABLE = $OVN_INTERCONNECT_ENABLE"
      echo ""
 }
 
@@ -375,12 +377,28 @@ set_default_params() {
   JOIN_SUBNET_IPV4=${JOIN_SUBNET_IPV4:-100.64.0.0/16}
   JOIN_SUBNET_IPV6=${JOIN_SUBNET_IPV6:-fd98::/64}
   KIND_NUM_MASTER=1
+  OVN_INTERCONNECT_ENABLE=${OVN_INTERCONNECT_ENABLE:-false}
+  KIND_NUM_ZONE_NODES=${KIND_NUM_ZONE_NODES:-1}
   if [ "$OVN_HA" == true ]; then
     KIND_NUM_MASTER=3
-    KIND_NUM_WORKER=${KIND_NUM_WORKER:-0}
+    NUM_WORKER=${KIND_NUM_WORKER:-0}
+    # Disabled interconnect if HA is enabled (for now)
+    # TODO: Support this.
+    OVN_INTERCONNECT_ENABLE="false"
   else
-    KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
+    NUM_WORKER=${KIND_NUM_WORKER:-2}
   fi
+
+  if [ "$OVN_INTERCONNECT_ENABLE" == false ]; then
+    KIND_NUM_ADDITIONAL_ZONES="0"
+  else
+    KIND_NUM_ADDITIONAL_ZONES=${KIND_NUM_ADDITIONAL_ZONES:-2}
+    NUM_WORKER=${KIND_NUM_WORKER:-0}
+  fi
+
+  KIND_NUM_WORKER=$NUM_WORKER
+  KIND_TOTAL_NUM_WORKER=$((KIND_NUM_ADDITIONAL_ZONES * KIND_NUM_ZONE_NODES + KIND_NUM_WORKER))
+
   OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
   OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
 }
@@ -465,7 +483,7 @@ create_kind_cluster() {
     use_local_registy=${KIND_LOCAL_REGISTRY} \
     dns_domain=${KIND_DNS_DOMAIN} \
     ovn_num_master=${KIND_NUM_MASTER} \
-    ovn_num_worker=${KIND_NUM_WORKER} \
+    ovn_num_worker=${KIND_TOTAL_NUM_WORKER} \
     cluster_log_level=${KIND_CLUSTER_LOGLEVEL:-4} \
     j2 "${KIND_CONFIG}" -o "${KIND_CONFIG_LCL}"
 
@@ -555,6 +573,12 @@ build_ovn_image() {
 }
 
 create_ovn_kube_manifests() {
+  zone_names="global"
+  for i in $(seq $KIND_NUM_ADDITIONAL_ZONES)
+  do
+    zone_names="$zone_names az$i"
+  done
+
   pushd ${DIR}/../dist/images
   ./daemonset.sh \
     --output-directory="${MANIFEST_OUTPUT_DIR}"\
@@ -583,6 +607,8 @@ create_ovn_kube_manifests() {
     --egress-qos-enable=true \
     --v4-join-subnet="${JOIN_SUBNET_IPV4}" \
     --v6-join-subnet="${JOIN_SUBNET_IPV6}" \
+    --ovn-zone-names="${zone_names}" \
+    --interconnect-enable="${OVN_INTERCONNECT_ENABLE}" \
     --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}"
   popd
 }
@@ -615,7 +641,7 @@ install_ovn() {
   # leverage the kubeadm well-known label node-role.kubernetes.io/control-plane=
   # to choose the nodes where ovn master components will be placed
   for n in $MASTER_NODES; do
-    kubectl label node "$n" k8s.ovn.org/ovnkube-db=true node-role.kubernetes.io/control-plane="" --overwrite
+    kubectl label node "$n" k8s.ovn.org/ovnkube-db=true k8s.ovn.org/ovn-zone=global node-role.kubernetes.io/control-plane="" --overwrite
     if [ "$KIND_REMOVE_TAINT" == true ]; then
       # do not error if it fails to remove the taint
       # remove both master and control-plane taints until master is removed from 1.25
@@ -624,14 +650,71 @@ install_ovn() {
       kubectl taint node "$n" node-role.kubernetes.io/control-plane:NoSchedule- || true
     fi
   done
+
+  if [ "$OVN_HA" == true ]; then
+    worker_idx=3
+  else
+    worker_idx=1
+  fi
+
+  for i in $(seq ${KIND_NUM_WORKER})
+  do
+    if [ "$worker_idx" == "1" ]; then
+      worker=ovn-worker
+    else
+      worker=ovn-worker${worker_idx}
+    fi
+    kubectl label node "$worker" k8s.ovn.org/ovn-zone=global --overwrite
+    worker_idx=$((worker_idx+1))
+  done
+
+  for i in $(seq $KIND_NUM_ADDITIONAL_ZONES)
+  do
+    az_name="az$i"
+    for j in $(seq ${KIND_NUM_ZONE_NODES})
+    do
+      if [ "$worker_idx" == "1" ]; then
+        worker=ovn-worker
+      else
+        worker=ovn-worker${worker_idx}
+      fi
+      kubectl label node "$worker" k8s.ovn.org/ovn-zone=${az_name} --overwrite
+      if [ "$j" == "1" ]; then
+        kubectl label node "$worker" k8s.ovn.org/ovnkube-db=true node-role.kubernetes.io/control-plane="" --overwrite
+        if [ "$KIND_REMOVE_TAINT" == true ]; then
+          # do not error if it fails to remove the taint
+          # remove both master and control-plane taints until master is removed from 1.25
+          # // https://github.com/kubernetes/kubernetes/pull/107533
+          kubectl taint node "$worker" node-role.kubernetes.io/master:NoSchedule- || true
+          kubectl taint node "$worker" node-role.kubernetes.io/control-plane:NoSchedule- || true
+        fi
+      fi
+      worker_idx=$((worker_idx+1))
+    done
+  done
+
   if [ "$OVN_HA" == true ]; then
     run_kubectl apply -f ovnkube-db-raft.yaml
   else
-    run_kubectl apply -f ovnkube-db.yaml
+    run_kubectl apply -f ovnkube-db-global.yaml
+    for i in $(seq $KIND_NUM_ADDITIONAL_ZONES)
+    do
+      run_kubectl apply -f ovnkube-db-az${i}.yaml
+    done
   fi
   run_kubectl apply -f ovs-node.yaml
-  run_kubectl apply -f ovnkube-master.yaml
-  run_kubectl apply -f ovnkube-node.yaml
+  run_kubectl apply -f ovnkube-master-global.yaml
+  for i in $(seq $KIND_NUM_ADDITIONAL_ZONES)
+  do
+    run_kubectl apply -f ovnkube-master-az${i}.yaml
+  done
+
+  run_kubectl apply -f ovnkube-node-global.yaml
+  for i in $(seq $KIND_NUM_ADDITIONAL_ZONES)
+  do
+    run_kubectl apply -f ovnkube-node-az${i}.yaml
+  done
+
   popd
 }
 

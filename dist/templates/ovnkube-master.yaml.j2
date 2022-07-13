@@ -5,7 +5,7 @@
 kind: Deployment
 apiVersion: apps/v1
 metadata:
-  name: ovnkube-master
+  name: ovnkube-master-{{ ovn_zone }}
   # namespace set up by install
   namespace: ovn-kubernetes
   annotations:
@@ -17,7 +17,7 @@ spec:
   revisionHistoryLimit: 10
   selector:
     matchLabels:
-      name: ovnkube-master
+      name: ovnkube-master-{{ ovn_zone }}
   strategy:
     rollingUpdate:
       maxSurge: 25%
@@ -26,7 +26,7 @@ spec:
   template:
     metadata:
       labels:
-        name: ovnkube-master
+        name: ovnkube-master-{{ ovn_zone }}
         component: network
         type: infra
         kubernetes.io/os: "linux"
@@ -53,6 +53,11 @@ spec:
                     operator: In
                     values:
                       - "linux"
+
+                  - key: k8s.ovn.org/ovn-zone
+                    operator: In
+                    values:
+                      - "{{ ovn_zone }}"
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             - labelSelector:
@@ -114,6 +119,8 @@ spec:
               fieldPath: metadata.namespace
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
+        - name: OVN_ZONE
+          value: "{{ ovn_zone }}"
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-northd"]
@@ -324,6 +331,10 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: host_network_namespace
+        - name: OVN_ZONE
+          value: "{{ ovn_zone }}"
+        - name: OVN_INTERCONNECT_ENABLE
+          value: "{{ ovn_interconnect_enable }}"
       # end of container
 
       volumes:

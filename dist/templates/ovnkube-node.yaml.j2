@@ -75,7 +75,7 @@ spec:
         - mountPath: /var/run/netns
           name: host-netns
           mountPropagation: Bidirectional
-       {%- if ovnkube_app_name=="ovnkube-node" %}
+       {%- if "ovnkube-node-zone" in ovnkube_app_name %}
         # ovnkube-node only mounts (non dpu related)
         - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
@@ -181,7 +181,7 @@ spec:
           value: "{{ ovn_unprivileged_mode }}"
         - name: OVN_EX_GW_NETWORK_INTERFACE
           value: "{{ ovn_ex_gw_networking_interface }}"
-        {% if ovnkube_app_name=="ovnkube-node" -%}
+        {% if "ovnkube-node-zone" in ovnkube_app_name -%}
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
         - name: OVN_DISABLE_OVN_IFACE_ID_VER
@@ -198,6 +198,10 @@ spec:
           value: "{{ ovn_lflow_cache_limit }}"
         - name: OVN_LFLOW_CACHE_LIMIT_KB
           value: "{{ ovn_lflow_cache_limit_kb }}"
+        - name: OVN_ZONE
+          value: "{{ ovn_zone }}"
+        - name: OVN_INTERCONNECT_ENABLE
+          value: "{{ ovn_interconnect_enable }}"
         {% endif -%}
         {% if ovnkube_app_name=="ovnkube-node-dpu-host" -%}
         - name: OVNKUBE_NODE_MODE
@@ -218,7 +222,7 @@ spec:
           timeoutSeconds: 30
           periodSeconds: 60
 
-      {% if ovnkube_app_name=="ovnkube-node" -%}
+      {% if "ovnkube-node-zone" in ovnkube_app_name -%}
       - name: ovn-controller
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
@@ -319,6 +323,7 @@ spec:
       {% else -%}
       nodeSelector:
         kubernetes.io/os: "linux"
+        k8s.ovn.org/ovn-zone: "{{ ovn_zone }}"
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -350,7 +355,7 @@ spec:
       - name: host-netns
         hostPath:
           path: /var/run/netns
-      {%- if ovnkube_app_name=="ovnkube-node" %}
+      {%- if "ovnkube-node-zone" in ovnkube_app_name %}
       # non DPU related volumes
       - name: host-var-log-ovs
         hostPath:

@@ -28,8 +28,10 @@ import (
 )
 
 const (
-	ovnNamespace   = "ovn-kubernetes"
-	ovnNodeSubnets = "k8s.ovn.org/node-subnets"
+	ovnNamespace    = "ovn-kubernetes"
+	ovnNodeSubnets  = "k8s.ovn.org/node-subnets"
+	ovnNodeZoneName = "k8s.ovn.org/ovn-zone"
+	OvnDefaultZone  = "global"
 )
 
 type IpNeighbor struct {
@@ -78,6 +80,12 @@ type podRoute struct {
 
 type annotationNotSetError struct {
 	msg string
+}
+
+type ovnZoneInfo struct {
+	name       string
+	numMasters int
+	numNodes   int //Including master nodes in the zone.
 }
 
 // newAgnhostPod returns a pod that uses the agnhost image. The image's binary supports various subcommands
@@ -557,7 +565,7 @@ func deletePodSyncNS(clientSet kubernetes.Interface, namespace, podName string) 
 
 // waitClusterHealthy ensures we have a given number of ovn-k worker and master nodes,
 // as well as all nodes are healthy
-func waitClusterHealthy(f *framework.Framework, numMasters int) error {
+func waitClusterHealthy(f *framework.Framework, zonesInfo map[string]ovnZoneInfo) error {
 	return wait.PollImmediate(2*time.Second, 120*time.Second, func() (bool, error) {
 		nodes, err := f.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 		if err != nil {
@@ -579,44 +587,45 @@ func waitClusterHealthy(f *framework.Framework, numMasters int) error {
 			return false, nil
 		}
 
-		podClient := f.ClientSet.CoreV1().Pods("ovn-kubernetes")
-		// Ensure all nodes are running and healthy
-		podList, err := podClient.List(context.Background(), metav1.ListOptions{
-			LabelSelector: "app=ovnkube-node",
-		})
-		if err != nil {
-			return false, fmt.Errorf("failed to list ovn-kube node pods: %w", err)
-		}
-		if len(podList.Items) != numNodes {
-			framework.Logf("Not enough running ovnkube-node pods, want %d, have %d", numNodes, len(podList.Items))
-			return false, nil
-		}
-
-		for _, pod := range podList.Items {
-			if ready, err := testutils.PodRunningReady(&pod); !ready {
-				framework.Logf("%v", err)
+		for zone, zInfo := range zonesInfo {
+			podClient := f.ClientSet.CoreV1().Pods("ovn-kubernetes")
+			// Ensure all nodes are running and healthy
+			podList, err := podClient.List(context.Background(), metav1.ListOptions{
+				LabelSelector: "app=ovnkube-node-zone-" + zone,
+			})
+			if err != nil {
+				return false, fmt.Errorf("failed to list ovn-kube node pods: %w", err)
+			}
+			if len(podList.Items) != zInfo.numNodes {
+				framework.Logf("Not enough running ovnkube-node-zone pods for zone - %s, want %d, have %d", zone, zInfo.numNodes, len(podList.Items))
 				return false, nil
 			}
-		}
 
-		podList, err = podClient.List(context.Background(), metav1.ListOptions{
-			LabelSelector: "name=ovnkube-master",
-		})
-		if err != nil {
-			return false, fmt.Errorf("failed to list ovn-kube node pods: %w", err)
-		}
-		if len(podList.Items) != numMasters {
-			framework.Logf("Not enough running ovnkube-master pods, want %d, have %d", numMasters, len(podList.Items))
-			return false, nil
-		}
+			for _, pod := range podList.Items {
+				if ready, err := testutils.PodRunningReady(&pod); !ready {
+					framework.Logf("%v", err)
+					return false, nil
+				}
+			}
 
-		for _, pod := range podList.Items {
-			if ready, err := testutils.PodRunningReady(&pod); !ready {
-				framework.Logf("%v", err)
+			podList, err = podClient.List(context.Background(), metav1.ListOptions{
+				LabelSelector: "name=ovnkube-master-" + zone,
+			})
+			if err != nil {
+				return false, fmt.Errorf("failed to list ovn-kube node pods: %w", err)
+			}
+			if len(podList.Items) != zInfo.numMasters {
+				framework.Logf("Not enough running ovnkube-master pods for zone %s, want %d, have %d", zone, zInfo.numMasters, len(podList.Items))
 				return false, nil
 			}
-		}
 
+			for _, pod := range podList.Items {
+				if ready, err := testutils.PodRunningReady(&pod); !ready {
+					framework.Logf("%v", err)
+					return false, nil
+				}
+			}
+		}
 		return true, nil
 	})
 }
@@ -866,4 +875,43 @@ func countAclLogs(targetNodeName string, policyNameRegex string, expectedAclVerd
 
 	framework.Logf("The audit log contains %d occurrences of: '%s'", count, stringToMatch)
 	return count, nil
+}
+
+func getZonesInfo(c kubernetes.Interface) (map[string]ovnZoneInfo, map[string]string, error) {
+	nodes, err := c.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	zonesInfo := make(map[string]ovnZoneInfo, len(nodes.Items))
+	nodeZones := make(map[string]string, len(nodes.Items))
+	for _, node := range nodes.Items {
+		zone, ok := node.Annotations[ovnNodeZoneName]
+		if !ok {
+			zone = OvnDefaultZone
+		}
+
+		nodeZones[node.Name] = zone
+		zoneInfo, found := zonesInfo[zone]
+		if !found {
+			zInfo := ovnZoneInfo{
+				name:     zone,
+				numNodes: 1,
+			}
+
+			masterPods, err := c.CoreV1().Pods("ovn-kubernetes").List(context.Background(), metav1.ListOptions{
+				LabelSelector: "name=ovnkube-master-" + zone,
+			})
+			if err != nil {
+				return nil, nil, err
+			}
+			zInfo.numMasters = len(masterPods.Items)
+			zonesInfo[zone] = zInfo
+		} else {
+			zoneInfo.numNodes++
+			zonesInfo[zone] = zoneInfo
+		}
+	}
+
+	return zonesInfo, nodeZones, nil
 }

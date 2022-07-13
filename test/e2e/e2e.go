@@ -426,9 +426,9 @@ func runCommand(cmd ...string) (string, error) {
 }
 
 // restartOVNKubeNodePod restarts the ovnkube-node pod from namespace, running on nodeName
-func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nodeName string) error {
+func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nodeName string, nodeZone string) error {
 	ovnKubeNodePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
-		LabelSelector: "name=ovnkube-node",
+		LabelSelector: "name=ovnkube-node-zone-" + nodeZone,
 		FieldSelector: "spec.nodeName=" + nodeName,
 	})
 	if err != nil {
@@ -447,7 +447,7 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 	framework.Logf("waiting for node %s to have running ovnkube-node pod", nodeName)
 	wait.Poll(2*time.Second, 5*time.Minute, func() (bool, error) {
 		ovnKubeNodePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
-			LabelSelector: "name=ovnkube-node",
+			LabelSelector: "name=ovnkube-node-zone-" + nodeZone,
 			FieldSelector: "spec.nodeName=" + nodeName,
 		})
 		if err != nil {
@@ -475,8 +475,9 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 
 	f := newPrivelegedTestFramework(svcname)
 	var (
-		extDNSIP   string
-		numMasters int
+		extDNSIP  string
+		zonesInfo map[string]ovnZoneInfo
+		nodeZones map[string]string
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -492,11 +493,9 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			framework.Failf("Unexpected error code, expected 200, got, %v (%v)", resp.StatusCode, resp)
 		}
 
-		masterPods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.Background(), metav1.ListOptions{
-			LabelSelector: "name=ovnkube-master",
-		})
+		zonesInfo, nodeZones, err = getZonesInfo(f.ClientSet)
 		framework.ExpectNoError(err)
-		numMasters = len(masterPods.Items)
+
 		extDNSIP = "8.8.8.8"
 		if IsIPv6Cluster(f.ClientSet) {
 			extDNSIP = "2001:4860:4860::8888"
@@ -517,13 +516,13 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		framework.Logf("Test pod running on %q", nodeName)
 
 		ginkgo.By("Deleting ovn-kube pod on node " + nodeName)
-		err := restartOVNKubeNodePod(f.ClientSet, "ovn-kubernetes", nodeName)
+		err := restartOVNKubeNodePod(f.ClientSet, "ovn-kubernetes", nodeName, nodeZones[nodeName])
 		framework.ExpectNoError(err)
 
 		ginkgo.By("Ensuring there were no connectivity errors")
 		framework.ExpectNoError(<-errChan)
 
-		err = waitClusterHealthy(f, numMasters)
+		err = waitClusterHealthy(f, zonesInfo)
 		framework.ExpectNoError(err, "one or more nodes failed to go back ready, schedulable, and untainted")
 	})
 
@@ -542,28 +541,31 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 
 		podClient := f.ClientSet.CoreV1().Pods("ovn-kubernetes")
 
-		podList, err := podClient.List(context.Background(), metav1.ListOptions{
-			LabelSelector: "name=ovnkube-master",
-		})
-		framework.ExpectNoError(err)
+		for zone, _ := range zonesInfo {
+			podList, err := podClient.List(context.Background(), metav1.ListOptions{
+				LabelSelector: "name=ovnkube-master-" + zone,
+			})
+			framework.ExpectNoError(err)
 
-		podName := ""
-		for _, pod := range podList.Items {
-			if strings.HasPrefix(pod.Name, "ovnkube-master") {
-				podName = pod.Name
-				break
+			podName := ""
+			for _, pod := range podList.Items {
+				if strings.HasPrefix(pod.Name, "ovnkube-master") {
+					podName = pod.Name
+					break
+				}
 			}
+
+			ginkgo.By("Deleting ovn-kube master pod " + podName)
+			e2epod.DeletePodWithWaitByName(f.ClientSet, podName, "ovn-kubernetes")
+			framework.Logf("Deleted ovnkube-master %q", podName)
 		}
-
-		ginkgo.By("Deleting ovn-kube master pod " + podName)
-		e2epod.DeletePodWithWaitByName(f.ClientSet, podName, "ovn-kubernetes")
-		framework.Logf("Deleted ovnkube-master %q", podName)
-
-		ginkgo.By("Ensring there were no connectivity errors")
+		ginkgo.By("Ensuring there were no connectivity errors")
 		framework.ExpectNoError(<-errChan)
 
-		err = waitClusterHealthy(f, numMasters)
+		err := waitClusterHealthy(f, zonesInfo)
+
 		framework.ExpectNoError(err, "one or more nodes failed to go back ready, schedulable, and untainted")
+
 	})
 
 	ginkgo.It("should provide connection to external host by DNS name from a pod", func() {
@@ -609,11 +611,11 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			}
 
 			// restart ovnkube-node pod
-			if err := restartOVNKubeNodePod(f.ClientSet, ovnNamespace, testNodeName); err != nil {
+			if err := restartOVNKubeNodePod(f.ClientSet, ovnNamespace, testNodeName, nodeZones[testNodeName]); err != nil {
 				framework.Failf("could not restart ovnkube-node pod: %s", err)
 			}
 
-			err = waitClusterHealthy(f, numMasters)
+			err = waitClusterHealthy(f, zonesInfo)
 			framework.ExpectNoError(err, "one or more nodes failed to go back ready, schedulable, and untainted")
 		})
 
@@ -625,7 +627,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			}
 
 			// restart ovnkube-node pod to trigger mtu validation
-			if err := restartOVNKubeNodePod(f.ClientSet, ovnNamespace, testNodeName); err != nil {
+			if err := restartOVNKubeNodePod(f.ClientSet, ovnNamespace, testNodeName, nodeZones[testNodeName]); err != nil {
 				framework.Failf("could not restart ovnkube-node pod: %s", err)
 			}
 			node, err := f.ClientSet.CoreV1().Nodes().Get(context.TODO(), testNodeName, metav1.GetOptions{ResourceVersion: "0"})
@@ -645,7 +647,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			}
 
 			// restart ovnkube-node pod to trigger mtu validation
-			if err := restartOVNKubeNodePod(f.ClientSet, ovnNamespace, testNodeName); err != nil {
+			if err := restartOVNKubeNodePod(f.ClientSet, ovnNamespace, testNodeName, nodeZones[testNodeName]); err != nil {
 				framework.Failf("could not restart ovnkube-node pod: %s", err)
 			}
 
@@ -703,46 +705,16 @@ var _ = ginkgo.Describe("test e2e pod connectivity to host addresses", func() {
 // Test e2e inter-node connectivity over br-int
 var _ = ginkgo.Describe("test e2e inter-node connectivity between worker nodes", func() {
 	const (
-		svcname          string = "inter-node-e2e"
-		ovnNs            string = "ovn-kubernetes"
-		ovnWorkerNode    string = "ovn-worker"
-		ovnWorkerNode2   string = "ovn-worker2"
-		ovnHaWorkerNode2 string = "ovn-control-plane2"
-		ovnHaWorkerNode3 string = "ovn-control-plane3"
-		ovnContainer     string = "ovnkube-node"
-		jsonFlag         string = "-o=jsonpath='{.items..metadata.name}'"
-		getPodIPRetry    int    = 20
-	)
-
-	var (
-		haMode    bool
-		labelFlag = fmt.Sprintf("name=%s", ovnContainer)
+		svcname        string = "inter-node-e2e"
+		ovnNs          string = "ovn-kubernetes"
+		ovnWorkerNode  string = "ovn-worker"
+		ovnWorkerNode2 string = "ovn-worker2"
+		ovnContainer   string = "ovnkube-node"
+		jsonFlag       string = "-o=jsonpath='{.items..metadata.name}'"
+		getPodIPRetry  int    = 20
 	)
 
 	f := newPrivelegedTestFramework(svcname)
-
-	// Determine which KIND environment is running by querying the running nodes
-	ginkgo.BeforeEach(func() {
-		fieldSelectorFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnWorkerNode)
-		fieldSelectorHaFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnHaWorkerNode2)
-
-		// Determine if the kind deployment is in HA mode or non-ha mode based on node naming
-		kubectlOut, err := framework.RunKubectl(ovnNs, "get", "pods", "-l", labelFlag, jsonFlag, fieldSelectorFlag)
-		if err != nil {
-			framework.Failf("Expected container %s running on %s error %v", ovnContainer, ovnWorkerNode, err)
-		}
-		if kubectlOut == "''" {
-			haMode = true
-			kubectlOut, err = framework.RunKubectl(ovnNs, "get", "pods", "-l", labelFlag, jsonFlag, fieldSelectorHaFlag)
-			if err != nil {
-				framework.Failf("Expected container %s running on %s error %v", ovnContainer, ovnHaWorkerNode2, err)
-			}
-		}
-		// Fail the test if no pod is matched within the specified node
-		if kubectlOut == "''" {
-			framework.Failf("Unable to locate container %s on any known nodes", ovnContainer)
-		}
-	})
 
 	ginkgo.It("Should validate connectivity within a namespace of pods on separate nodes", func() {
 		var validIP net.IP
@@ -751,15 +723,10 @@ var _ = ginkgo.Describe("test e2e inter-node connectivity between worker nodes",
 		var ciWorkerNodeDst string
 		dstPingPodName := "e2e-dst-ping-pod"
 		command := []string{"bash", "-c", "sleep 20000"}
-		// non-ha ci mode runs a named set of nodes with a prefix of ovn-worker
+
 		ciWorkerNodeSrc = ovnWorkerNode
 		ciWorkerNodeDst = ovnWorkerNode2
-		// ha ci mode runs a named set of nodes with a prefix of ovn-control-plane
-		if haMode {
-			framework.Logf("Detected a HA mode KIND environment")
-			ciWorkerNodeSrc = ovnHaWorkerNode2
-			ciWorkerNodeDst = ovnHaWorkerNode3
-		}
+
 		ginkgo.By(fmt.Sprintf("Creating a container on node %s and verifying connectivity to a pod on node %s", ciWorkerNodeSrc, ciWorkerNodeDst))
 
 		// Create the pod that will be used as the destination for the connectivity test
@@ -1501,14 +1468,11 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway and update validation", 
 		svcname             string = "multiple-novxlan-externalgw"
 		ovnNs               string = "ovn-kubernetes"
 		ovnWorkerNode       string = "ovn-worker"
-		ovnHaWorkerNode     string = "ovn-control-plane2"
 		ovnContainer        string = "ovnkube-node"
 		gwContainerNameAlt1 string = "gw-novxlan-test-container-alt1"
 		gwContainerNameAlt2 string = "gw-novxlan-test-container-alt2"
-		ovnControlNode      string = "ovn-control-plane"
 	)
 	var (
-		haMode           bool
 		exGWRemoteIpAlt1 string
 		exGWRemoteIpAlt2 string
 	)
@@ -1516,30 +1480,6 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway and update validation", 
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
-		labelFlag := fmt.Sprintf("name=%s", ovnContainer)
-		jsonFlag := "-o=jsonpath='{.items..metadata.name}'"
-		fieldSelectorFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnWorkerNode)
-		fieldSelectorHaFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnHaWorkerNode)
-		fieldSelectorControlFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnControlNode)
-		// retrieve pod names from the running cluster
-		kubectlOut, err := framework.RunKubectl(ovnNs, "get", "pods", "-l", labelFlag, jsonFlag, fieldSelectorControlFlag)
-		if err != nil {
-			framework.Failf("Expected container %s running on %s error %v", ovnContainer, ovnControlNode, err)
-		}
-		// attempt to retrieve the pod name that will source the test in non-HA mode
-		kubectlOut, err = framework.RunKubectl(ovnNs, "get", "pods", "-l", labelFlag, jsonFlag, fieldSelectorFlag)
-		if err != nil {
-			framework.Failf("Expected container %s running on %s error %v", ovnContainer, ovnWorkerNode, err)
-		}
-		// attempt to retrieve the pod name that will source the test in HA mode
-		if kubectlOut == "''" {
-			haMode = true
-			kubectlOut, err = framework.RunKubectl(ovnNs, "get", "pods", "-l", labelFlag, jsonFlag, fieldSelectorHaFlag)
-			if err != nil {
-				framework.Failf("Expected container %s running on %s error %v", ovnContainer, ovnHaWorkerNode, err)
-			}
-		}
-
 		exGWRemoteIpAlt1 = "10.249.3.1"
 		exGWRemoteIpAlt2 = "10.249.4.1"
 		if IsIPv6Cluster(f.ClientSet) {
@@ -1574,10 +1514,6 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway and update validation", 
 		testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
 		// non-ha ci mode runs a set of kind nodes prefixed with ovn-worker
 		ciWorkerNodeSrc := ovnWorkerNode
-		if haMode {
-			// ha ci mode runs a named set of nodes with a prefix of ovn-control-plane
-			ciWorkerNodeSrc = ovnHaWorkerNode
-		}
 
 		// start the container that will act as an external gateway
 		_, err := runCommand("docker", "run", "-itd", "--privileged", "--network", externalContainerNetwork, "--name", gwContainerNameAlt1, "centos")
@@ -2773,6 +2709,17 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 		netflow_v5: "NETFLOW_V5", ipfix: "IPFIX", sflow: "SFLOW_5"}
 
 	f := newPrivelegedTestFramework(svcname)
+
+	var (
+		zonesInfo map[string]ovnZoneInfo
+	)
+
+	ginkgo.BeforeEach(func() {
+		var err error
+		zonesInfo, _, err = getZonesInfo(f.ClientSet)
+		framework.ExpectNoError(err)
+	})
+
 	ginkgo.AfterEach(func() {
 		// tear down the collector container
 		if cid, _ := runCommand("docker", "ps", "-qaf", fmt.Sprintf("name=%s", collectorContainer)); cid != "" {
@@ -2817,13 +2764,16 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 			framework.Logf("Setting %s environment variable to %s",
 				ovnEnvVar, addressAndPort)
 
-			framework.RunKubectlOrDie(ovnNs, "set", "env", "daemonset/ovnkube-node", "-c", "ovnkube-node",
-				fmt.Sprintf("%s=%s", ovnEnvVar, addressAndPort))
+			for zone, _ := range zonesInfo {
+				dsName := "ovnkube-node-zone-" + zone
+				framework.RunKubectlOrDie(ovnNs, "set", "env", "daemonset/"+dsName, "-c", "ovnkube-node",
+					fmt.Sprintf("%s=%s", ovnEnvVar, addressAndPort))
 
-			// Make sure the updated daemonset has rolled out
-			// TODO (Change this to use the exported upstream function)
-			err = waitForDaemonSetUpdate(f.ClientSet, ovnNs, "ovnkube-node", 0, dsRestartTimeout)
-			framework.ExpectNoError(err)
+				// Make sure the updated daemonset has rolled out
+				// TODO (Change this to use the exported upstream function)
+				err = waitForDaemonSetUpdate(f.ClientSet, ovnNs, dsName, 0, dsRestartTimeout)
+				framework.ExpectNoError(err)
+			}
 			ginkgo.By(fmt.Sprintf("Checking that the collector container received %s data", protocolStr))
 			keyword := keywordInLogs[protocol]
 			collectorContainerLogsTest := func() wait.ConditionFunc {
@@ -2851,39 +2801,42 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 				"received %s data from br-int: string %s not found in logs",
 				protocolStr, keyword))
 
-			ginkgo.By(fmt.Sprintf("Unsetting %s variable in ovnkube-node daemonset", ovnEnvVar))
-			framework.RunKubectlOrDie(ovnNs, "set", "env", "daemonset/ovnkube-node", "-c", "ovnkube-node",
-				fmt.Sprintf("%s-", ovnEnvVar))
+			for zone, _ := range zonesInfo {
+				dsName := "ovnkube-node-zone-" + zone
+				ginkgo.By(fmt.Sprintf("Unsetting %s variable in ovnkube-node daemonset", ovnEnvVar))
+				framework.RunKubectlOrDie(ovnNs, "set", "env", "daemonset/"+dsName, "-c", "ovnkube-node",
+					fmt.Sprintf("%s-", ovnEnvVar))
 
-			// Make sure the updated daemonset has rolled out
-			// TODO (Change this to use the exported upstream function)
-			err = waitForDaemonSetUpdate(f.ClientSet, ovnNs, "ovnkube-node", 0, dsRestartTimeout)
-			framework.ExpectNoError(err)
+				// Make sure the updated daemonset has rolled out
+				// TODO (Change this to use the exported upstream function)
+				err = waitForDaemonSetUpdate(f.ClientSet, ovnNs, dsName, 0, dsRestartTimeout)
+				framework.ExpectNoError(err)
 
-			ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNs).List(context.TODO(), metav1.ListOptions{
-				LabelSelector: "name=ovnkube-node",
-			})
-			if err != nil {
-				framework.Failf("could not get ovnkube-node pods: %v", err)
-			}
-
-			for _, ovnKubeNodePod := range ovnKubeNodePods.Items {
-
-				execOptions := framework.ExecOptions{
-					Command:       []string{"ovs-vsctl", "find", strings.ToLower(protocolStr)},
-					Namespace:     ovnNs,
-					PodName:       ovnKubeNodePod.Name,
-					ContainerName: "ovnkube-node",
-					CaptureStdout: true,
-					CaptureStderr: true,
-				}
-
-				targets, stderr, _ := f.ExecWithOptions(execOptions)
-				framework.Logf("execOptions are %v", execOptions)
+				ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNs).List(context.TODO(), metav1.ListOptions{
+					LabelSelector: "name=ovnkube-node-zone-" + zone,
+				})
 				if err != nil {
-					framework.Failf("could not lookup ovs %s targets: %v", protocolStr, stderr)
+					framework.Failf("could not get ovnkube-node pods: %v", err)
 				}
-				framework.ExpectEmpty(targets)
+
+				for _, ovnKubeNodePod := range ovnKubeNodePods.Items {
+
+					execOptions := framework.ExecOptions{
+						Command:       []string{"ovs-vsctl", "find", strings.ToLower(protocolStr)},
+						Namespace:     ovnNs,
+						PodName:       ovnKubeNodePod.Name,
+						ContainerName: "ovnkube-node",
+						CaptureStdout: true,
+						CaptureStderr: true,
+					}
+
+					targets, stderr, _ := f.ExecWithOptions(execOptions)
+					framework.Logf("execOptions are %v", execOptions)
+					if err != nil {
+						framework.Failf("could not lookup ovs %s targets: %v", protocolStr, stderr)
+					}
+					framework.ExpectEmpty(targets)
+				}
 			}
 		},
 		// This is a long test (~5 minutes per run), so let's just validate netflow v5
@@ -2934,8 +2887,15 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 	)
 	var (
 		allDBFiles = []string{path.Join(dirDB, northDBFileName), path.Join(dirDB, southDBFileName)}
+		zonesInfo  map[string]ovnZoneInfo
 	)
 	f := newPrivelegedTestFramework(svcname)
+
+	ginkgo.BeforeEach(func() {
+		var err error
+		zonesInfo, _, err = getZonesInfo(f.ClientSet)
+		framework.ExpectNoError(err)
+	})
 
 	// WaitForPodConditionAllowNotFoundError is a wrapper for WaitForPodCondition that allows at most 6 times for the pod not to be found.
 	WaitForPodConditionAllowNotFoundErrors := func(f *framework.Framework, ns, podName, desc string, timeout time.Duration, condition podCondition) error {
@@ -3178,32 +3138,34 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 	)
 
 	ginkgo.It("Should validate connectivity before and after deleting all the db-pods at once in Non-HA mode", func() {
-		dbDeployment := getDeployment(f, ovnNs, "ovnkube-db")
-		dbPods, err := e2edeployment.GetPodsForDeployment(f.ClientSet, dbDeployment)
-		if err != nil {
-			framework.Failf("Error: Failed to get pods, err: %v", err)
-		}
-		if dbPods.Size() == 0 {
-			framework.Failf("Error: db pods not found")
-		}
-
 		framework.Logf("test simple connectivity from new pod to API server,before deleting db pods")
 		singlePodConnectivityTest(f, "before-delete-db-pods")
 
-		framework.Logf("deleting all the db pods")
+		for zone, _ := range zonesInfo {
+			dbDeployment := getDeployment(f, ovnNs, "ovnkube-db-"+zone)
+			dbPods, err := e2edeployment.GetPodsForDeployment(f.ClientSet, dbDeployment)
+			if err != nil {
+				framework.Failf("Error: Failed to get pods, err: %v", err)
+			}
+			if dbPods.Size() == 0 {
+				framework.Failf("Error: db pods not found")
+			}
 
-		for _, dbPod := range dbPods.Items {
-			dbPodName := dbPod.Name
-			framework.Logf("deleting db pod: %v", dbPodName)
-			// Delete the db-pod in order to emulate the pod restart
-			dbPod.Status.Message = "check"
-			deletePod(f, ovnNs, dbPodName)
+			framework.Logf("deleting all the db pods")
+
+			for _, dbPod := range dbPods.Items {
+				dbPodName := dbPod.Name
+				framework.Logf("deleting db pod: %v", dbPodName)
+				// Delete the db-pod in order to emulate the pod restart
+				dbPod.Status.Message = "check"
+				deletePod(f, ovnNs, dbPodName)
+			}
+
+			framework.Logf("wait for all the Deployment to become ready again after pod deletion")
+			e2edeployment.WaitForDeploymentComplete(f.ClientSet, dbDeployment)
+
+			framework.Logf("all the pods finish full restart")
 		}
-
-		framework.Logf("wait for all the Deployment to become ready again after pod deletion")
-		e2edeployment.WaitForDeploymentComplete(f.ClientSet, dbDeployment)
-
-		framework.Logf("all the pods finish full restart")
 
 		framework.Logf("test simple connectivity from new pod to API server,after recovery")
 		singlePodConnectivityTest(f, "after-delete-db-pods")
@@ -3264,9 +3226,9 @@ var _ = ginkgo.Describe("e2e IGMP validation", func() {
 	var (
 		tcpDumpCommand = []string{"bash", "-c",
 			fmt.Sprintf("apk update; apk add tcpdump ; tcpdump multicast > %s", tcpdumpFileName)}
-		// Multicast group (-c 224.1.1.1), UDP (-u), TTL (-T 2), during (-t 3000) seconds, report every (-i 5) seconds
+		// Multicast group (-c 224.1.1.1), UDP (-u), TTL (-T 4), during (-t 3000) seconds, report every (-i 5) seconds
 		multicastSourceCommand = []string{"bash", "-c",
-			fmt.Sprintf("iperf -c %s -u -T 2 -t 3000 -i 5", mcastGroup)}
+			fmt.Sprintf("iperf -c %s -u -T 4 -t 3000 -i 5", mcastGroup)}
 	)
 	f := newPrivelegedTestFramework(svcname)
 	ginkgo.It("can retrieve multicast IGMP query", func() {

@@ -28,12 +28,19 @@ var _ = ginkgo.Describe("Services", func() {
 	)
 
 	f := wrappedTestFramework("services")
+	var (
+		nodeZones map[string]string
+	)
 
 	var cs clientset.Interface
 
 	ginkgo.BeforeEach(func() {
 		cs = f.ClientSet
+		var err error
+		_, nodeZones, err = getZonesInfo(f.ClientSet)
+		framework.ExpectNoError(err)
 	})
+
 	cleanupFn := func() {}
 
 	ginkgo.AfterEach(func() {
@@ -73,7 +80,7 @@ var _ = ginkgo.Describe("Services", func() {
 		ginkgo.By("Connecting to the service from another host-network pod on node " + nodeName)
 		// find the ovn-kube node pod on this node
 		pods, err := cs.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
-			LabelSelector: "app=ovnkube-node",
+			LabelSelector: "app=ovnkube-node-zone-" + nodeZones[nodeName],
 			FieldSelector: "spec.nodeName=" + nodeName,
 		})
 		framework.ExpectNoError(err)
@@ -104,7 +111,7 @@ var _ = ginkgo.Describe("Services", func() {
 		node := nodes.Items[0]
 		nodeName := node.Name
 		pods, err := cs.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
-			LabelSelector: "app=ovnkube-node",
+			LabelSelector: "app=ovnkube-node-zone-" + nodeZones[nodeName],
 			FieldSelector: "spec.nodeName=" + nodeName,
 		})
 		framework.ExpectNoError(err)
