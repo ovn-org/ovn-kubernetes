@@ -316,7 +316,7 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	case runMode.networkControllerManager:
 		metrics.RegisterMasterBase()
 		haConfig = &config.MasterHA
-		name = "ovn-kubernetes-master"
+		name = "ovn-kubernetes-master-" + config.Default.Zone
 	case runMode.clusterManager:
 		metrics.RegisterClusterManagerBase()
 		haConfig = &config.ClusterMgrHA
