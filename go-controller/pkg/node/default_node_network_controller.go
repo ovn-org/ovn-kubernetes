@@ -539,6 +539,25 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to parse kubernetes node IP address. %v", err)
 	}
 
+	// Make sure that the node zone matches with the Southbound db zone.
+	// Wait for 300s before giving up
+	var sbZone string
+	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
+		sbZone, err = getOVNSBZone()
+		if err != nil {
+			return false, fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
+		}
+
+		if config.Default.Zone != sbZone {
+			return false, fmt.Errorf("node %s zone %s mismatch with the Southbound zone %s", nc.name, config.Default.Zone, sbZone)
+		}
+		return true, nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("timed out waiting for the node zone %s to match the OVN Southbound db zone, err : %w", config.Default.Zone, err)
+	}
+
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
 			if err := auth.SetDBAuth(); err != nil {
@@ -625,10 +644,6 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
-	sbZone, err := getOVNSBZone()
-	if err != nil {
-		return fmt.Errorf("failed to get the zone name from the OVN Southbound db server, err : %w", err)
-	}
 	if err := util.SetNodeZone(nodeAnnotator, sbZone); err != nil {
 		return fmt.Errorf("failed to set node zone annotation for node %s: %w", nc.name, err)
 	}
