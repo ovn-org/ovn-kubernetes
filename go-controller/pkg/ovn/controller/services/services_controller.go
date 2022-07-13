@@ -23,8 +23,6 @@ import (
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	discoveryinformers "k8s.io/client-go/informers/discovery/v1"
 	clientset "k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/scheme"
-	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	discoverylisters "k8s.io/client-go/listers/discovery/v1"
 	"k8s.io/client-go/tools/cache"
@@ -53,12 +51,9 @@ func NewController(client clientset.Interface,
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
 	nodeInformer coreinformers.NodeInformer,
+	recorder record.EventRecorder,
 ) *Controller {
 	klog.V(4).Info("Creating event broadcaster")
-	broadcaster := record.NewBroadcaster()
-	broadcaster.StartStructuredLogging(0)
-	broadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: client.CoreV1().Events("")})
-	recorder := broadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: controllerName})
 
 	c := &Controller{
 		client:           client,
@@ -89,7 +84,6 @@ func NewController(client clientset.Interface,
 	c.endpointSliceLister = endpointSliceInformer.Lister()
 	c.endpointSlicesSynced = endpointSliceInformer.Informer().HasSynced
 
-	c.eventBroadcaster = broadcaster
 	c.eventRecorder = recorder
 
 	// repair controller
@@ -109,9 +103,8 @@ type Controller struct {
 	client clientset.Interface
 
 	// libovsdb northbound client interface
-	nbClient         libovsdbclient.Client
-	eventBroadcaster record.EventBroadcaster
-	eventRecorder    record.EventRecorder
+	nbClient      libovsdbclient.Client
+	eventRecorder record.EventRecorder
 
 	// serviceLister is able to list/get services and is populated by the shared informer passed to
 	serviceLister corelisters.ServiceLister

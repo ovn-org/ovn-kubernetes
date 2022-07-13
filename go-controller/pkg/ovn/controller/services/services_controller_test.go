@@ -24,6 +24,7 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 	utilpointer "k8s.io/utils/pointer"
 )
 
@@ -48,11 +49,15 @@ func newControllerWithDBSetup(dbSetup libovsdbtest.TestSetup) (*serviceControlle
 	}
 	client := fake.NewSimpleClientset()
 	informerFactory := informers.NewSharedInformerFactory(client, 0)
+
+	recorder := record.NewFakeRecorder(10)
+
 	controller := NewController(client,
 		nbClient,
 		informerFactory.Core().V1().Services(),
 		informerFactory.Discovery().V1().EndpointSlices(),
 		informerFactory.Core().V1().Nodes(),
+		recorder,
 	)
 	controller.servicesSynced = alwaysReady
 	controller.endpointSlicesSynced = alwaysReady
