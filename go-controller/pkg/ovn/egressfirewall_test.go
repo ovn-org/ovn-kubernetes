@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -1074,7 +1075,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				// enable ACL logging with severity alert, alert
 				logSeverity := "alert"
 				updatedLogSeverity := fmt.Sprintf(`{ "deny": "%s", "allow": "%s" }`, logSeverity, logSeverity)
-				namespace.Annotations[aclLoggingAnnotation] = updatedLogSeverity
+				namespace.Annotations[util.AclLoggingAnnotation] = updatedLogSeverity
 				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), namespace, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1799,7 +1800,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				// enable ACL logging with severity alert, alert
 				logSeverity := "alert"
 				updatedLogSeverity := fmt.Sprintf(`{ "deny": "%s", "allow": "%s" }`, logSeverity, logSeverity)
-				namespace.Annotations[aclLoggingAnnotation] = updatedLogSeverity
+				namespace.Annotations[util.AclLoggingAnnotation] = updatedLogSeverity
 				_, err = fakeOVN.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), namespace, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 

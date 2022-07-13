@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -25,6 +26,12 @@ import (
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 )
+
+func getNamespaceAnnotations(fakeClient kubernetes.Interface, name string) map[string]string {
+	ns, err := fakeClient.CoreV1().Namespaces().Get(context.TODO(), name, metav1.GetOptions{})
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	return ns.Annotations
+}
 
 func newNamespaceMeta(namespace string, additionalLabels map[string]string) metav1.ObjectMeta {
 	labels := map[string]string{
