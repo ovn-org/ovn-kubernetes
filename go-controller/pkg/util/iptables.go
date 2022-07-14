@@ -29,6 +29,8 @@ type IPTablesHelper interface {
 	Exists(string, string, ...string) (bool, error)
 	// Insert inserts a rule into the specified table/chain
 	Insert(string, string, int, ...string) error
+	// Append appends rulespec to specified table/chain
+	Append(string, string, ...string) error
 	// Delete removes rulespec in specified table/chain
 	Delete(string, string, ...string) error
 }
@@ -217,6 +219,21 @@ func (f *FakeIPTables) Insert(tableName, chainName string, pos int, rulespec ...
 		last := append([]string{rule}, chain[pos-1:]...)
 		(*table)[chainName] = append(chain[:pos-1], last...)
 	}
+	return nil
+}
+
+// Append appends rulespec to specified table/chain
+func (f *FakeIPTables) Append(tableName, chainName string, rulespec ...string) error {
+	table, err := f.getTable(tableName)
+	if err != nil {
+		return err
+	}
+	rule := strings.Join(rulespec, " ")
+	chain, err := table.getChain(chainName)
+	if err != nil {
+		return err
+	}
+	(*table)[chainName] = append(chain, rule)
 	return nil
 }
 
