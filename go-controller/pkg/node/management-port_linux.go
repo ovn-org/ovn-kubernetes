@@ -231,7 +231,8 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 	if exists, err = cfg.ipt.Exists("nat", iptableMgmPortChain, rule...); err == nil && !exists {
 		warnings = append(warnings, fmt.Sprintf("missing management port nat rule in chain %s, adding it",
 			iptableMgmPortChain))
-		err = cfg.ipt.Insert("nat", iptableMgmPortChain, 1, rule...)
+		// NOTE: SNAT to mp0 rule should be the last in the chain, so append it
+		err = cfg.ipt.Append("nat", iptableMgmPortChain, rule...)
 	}
 	if err != nil {
 		return warnings, fmt.Errorf("could not insert iptable rule %q for management port: %v",
