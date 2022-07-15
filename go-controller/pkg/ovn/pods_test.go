@@ -457,6 +457,9 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				}, 2).Should(gomega.BeTrue())
 
 				ginkgo.By("Freed IP should now allow mypod2 to come up")
+				key, err := getResourceKey(factory.PodType, myPod2)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fakeOvn.controller.retryPods.setRetryObjWithNoBackoff(key)
 				fakeOvn.controller.retryPods.requestRetryObjs()
 				// there should also be no entry for this pod in the retry cache
 				gomega.Eventually(func() bool {
@@ -560,6 +563,9 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				}, 2).Should(gomega.BeTrue())
 
 				ginkgo.By("Freed IP should now allow mypod2 to come up")
+				key, err := getResourceKey(factory.PodType, myPod2)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fakeOvn.controller.retryPods.setRetryObjWithNoBackoff(key)
 				fakeOvn.controller.retryPods.requestRetryObjs()
 				// there should also be no entry for this pod in the retry cache
 				gomega.Eventually(func() bool {
@@ -805,6 +811,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
+				// reset backoff for immediate retry
+				fakeOvn.controller.retryPods.setRetryObjWithNoBackoff(key)
 				fakeOvn.controller.retryPods.requestRetryObjs() // retry the failed entry
 
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podTest.namespace).Get(context.TODO(), podTest.podName, metav1.GetOptions{})
@@ -881,6 +889,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
+				fakeOvn.controller.retryPods.setRetryObjWithNoBackoff(key)
 				fakeOvn.controller.retryPods.requestRetryObjs() // retry the failed entry
 
 				fakeOvn.asf.ExpectEmptyAddressSet(podTest.namespace)
@@ -958,6 +967,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				// set failedAttempts to maxFailedAttempts-1, trigger a retry (which will fail due to nbdb being down)
 				// and verify that failedAttempts is now equal to maxFailedAttempts
 				fakeOvn.controller.retryPods.setFailedAttemptsCounterForTestingOnly(key, maxFailedAttempts-1)
+				// reset backoff for immediate retry
+				fakeOvn.controller.retryPods.setRetryObjWithNoBackoff(key)
 				fakeOvn.controller.retryPods.requestRetryObjs()
 				gomega.Eventually(func() uint8 {
 					entry := fakeOvn.controller.retryPods.getObjRetryEntry(key)
