@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -507,19 +508,19 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 					gomega.Expect(ns).NotTo(gomega.BeNil())
 
 					// Multicast is denied by default.
-					_, ok := ns.Annotations[nsMulticastAnnotation]
+					_, ok := ns.Annotations[util.NsMulticastAnnotation]
 					gomega.Expect(ok).To(gomega.BeFalse())
 
 					// Enable multicast in the namespace.
 					mcastPolicy := multicastPolicy{}
 					expectedData := mcastPolicy.getMulticastPolicyExpectedData(namespace1.Name, nil)
-					ns.Annotations[nsMulticastAnnotation] = "true"
+					ns.Annotations[util.NsMulticastAnnotation] = "true"
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
 					// Disable multicast in the namespace.
-					ns.Annotations[nsMulticastAnnotation] = "false"
+					ns.Annotations[util.NsMulticastAnnotation] = "false"
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					acls := expectedData[:len(expectedData)-1]
@@ -602,7 +603,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 
 					expectedData := mcastPolicy.getMulticastPolicyExpectedData(namespace1.Name, ports)
 					expectedData = append(expectedData, getExpectedDataPodsAndSwitches(tPods, []string{"node1"})...)
-					ns.Annotations[nsMulticastAnnotation] = "true"
+					ns.Annotations[util.NsMulticastAnnotation] = "true"
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
@@ -671,7 +672,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 					// Enable multicast in the namespace.
 					mcastPolicy := multicastPolicy{}
 					expectedData := mcastPolicy.getMulticastPolicyExpectedData(namespace1.Name, nil)
-					ns.Annotations[nsMulticastAnnotation] = "true"
+					ns.Annotations[util.NsMulticastAnnotation] = "true"
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(expectedData, &nbdb.LogicalSwitch{
