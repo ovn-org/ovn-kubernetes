@@ -828,7 +828,7 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 
 	case factory.EgressNodeType:
 		node := obj.(*kapi.Node)
-		if err := oc.addNodeForEgress(node); err != nil {
+		if err := oc.setupNodeForEgress(node); err != nil {
 			return err
 		}
 		nodeEgressLabel := util.GetNodeEgressLabel()
