@@ -1823,6 +1823,13 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					egressOptions,
 				)
 				leftOverACL1FromUpgrade.UUID = *leftOverACL1FromUpgrade.Name + "-egressAllowACL-UUID"
+				testOnlyEgressDenyPG := libovsdbops.BuildPortGroup(
+					pgHash+"_"+egressDenyPG,
+					pgHash+"_"+egressDenyPG,
+					nil,
+					[]*nbdb.ACL{leftOverACL1FromUpgrade},
+				)
+				testOnlyEgressDenyPG.UUID = testOnlyEgressDenyPG.Name + "-UUID"
 				// ACL2: leftover arp allow ACL ingress with old match (arp)
 				leftOverACL2FromUpgrade := libovsdbops.BuildACL(
 					"leftover1"+"_"+arpAllowPolicySuffix,
@@ -1839,6 +1846,13 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					nil,
 				)
 				leftOverACL2FromUpgrade.UUID = *leftOverACL2FromUpgrade.Name + "-ingressAllowACL-UUID"
+				testOnlyIngressDenyPG := libovsdbops.BuildPortGroup(
+					pgHash+"_"+ingressDenyPG,
+					pgHash+"_"+ingressDenyPG,
+					nil,
+					[]*nbdb.ACL{leftOverACL2FromUpgrade},
+				)
+				testOnlyIngressDenyPG.UUID = testOnlyIngressDenyPG.Name + "-UUID"
 
 				// ACL3: leftover default deny ACL egress with old name (namespace_policyname)
 				leftOverACL3FromUpgrade := libovsdbops.BuildACL(
@@ -1883,6 +1897,8 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						leftOverACL2FromUpgrade,
 						leftOverACL3FromUpgrade,
 						leftOverACL4FromUpgrade,
+						testOnlyIngressDenyPG,
+						testOnlyEgressDenyPG,
 					},
 				}
 
@@ -1925,6 +1941,10 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				leftOverACL4FromUpgrade.Name = &newDefaultDenyIngressACLName
 				expectedData = append(expectedData, leftOverACL3FromUpgrade)
 				expectedData = append(expectedData, leftOverACL4FromUpgrade)
+				testOnlyIngressDenyPG.ACLs = nil // Sync Function should remove stale ACL from PGs and delete the ACL
+				testOnlyEgressDenyPG.ACLs = nil  // Sync Function should remove stale ACL from PGs and delete the ACL
+				expectedData = append(expectedData, testOnlyIngressDenyPG)
+				expectedData = append(expectedData, testOnlyEgressDenyPG)
 
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
