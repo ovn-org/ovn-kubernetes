@@ -322,9 +322,17 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	ifInfo *PodInterfaceInfo, sandboxID string, podLister corev1listers.PodLister,
 	kclient kubernetes.Interface) error {
-	klog.Infof("ConfigureOVS: namespace: %s, podName: %s", namespace, podName)
+
 	ifaceID := util.GetIfaceId(namespace, podName)
 	initialPodUID := ifInfo.PodUID
+
+	ipStrs := make([]string, len(ifInfo.IPs))
+	for i, ip := range ifInfo.IPs {
+		ipStrs[i] = ip.String()
+	}
+
+	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, SandboxID: %q, UID: %q, MAC: %s, IPs: %v",
+		namespace, podName, sandboxID, initialPodUID, ifInfo.MAC, ipStrs)
 
 	// Find and remove any existing OVS port with this iface-id. Pods can
 	// have multiple sandboxes if some are waiting for garbage collection,
@@ -335,10 +343,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 			klog.Warningf("Failed to clear stale OVS port %q iface-id %q: %v\n  %q", uuid, ifaceID, err, out)
 		}
 	}
-	ipStrs := make([]string, len(ifInfo.IPs))
-	for i, ip := range ifInfo.IPs {
-		ipStrs[i] = ip.String()
-	}
+
 	// Add the new sandbox's OVS port, tag the port as transient so stale
 	// pod ports are scrubbed on hard reboot
 	ovsArgs := []string{

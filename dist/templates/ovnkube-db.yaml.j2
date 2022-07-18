@@ -201,7 +201,7 @@ spec:
       # end of container
 
       nodeSelector:
-        node-role.kubernetes.io/master: ""
+        node-role.kubernetes.io/control-plane: ""
         kubernetes.io/os: "linux"
       volumes:
       - name: host-var-lib-ovs

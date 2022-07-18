@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	testutils "k8s.io/kubernetes/test/utils"
+	admissionapi "k8s.io/pod-security-admission/api"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -80,10 +82,11 @@ type annotationNotSetError struct {
 
 // newAgnhostPod returns a pod that uses the agnhost image. The image's binary supports various subcommands
 // that behave the same, no matter the underlying OS.
-func newAgnhostPod(name string, command ...string) *v1.Pod {
+func newAgnhostPod(namespace, name string, command ...string) *v1.Pod {
 	return &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
+			Name:      name,
+			Namespace: namespace,
 		},
 		Spec: v1.PodSpec{
 			Containers: []v1.Container{
@@ -668,17 +671,61 @@ func pokePod(fr *framework.Framework, srcPodName string, dstPodIP string) error 
 	return fmt.Errorf("http request failed; stdout: %s, err: %v", stdout+stderr, err)
 }
 
-func assertDenyLogs(targetNodeName string, namespace string, policyName string, expectedAclSeverity string) (bool, error) {
+func pokeExternalHostFromPod(fr *framework.Framework, namespace string, srcPodName, dstIp string, dstPort int) error {
+	stdout, stderr, err := ExecShellInPodWithFullOutput(
+		fr,
+		namespace,
+		srcPodName,
+		fmt.Sprintf("curl --output /dev/stdout -m 1 -I %s:%d | head -n1", dstIp, dstPort))
+	if err == nil && stdout == "HTTP/1.1 200 OK" {
+		return nil
+	}
+	return fmt.Errorf("http request failed; stdout: %s, err: %v", stdout+stderr, err)
+}
+
+// ExecShellInPodWithFullOutput is a shameless copy/paste from the framework methods so that we can specify the pod namespace.
+func ExecShellInPodWithFullOutput(f *framework.Framework, namespace, podName string, cmd string) (string, string, error) {
+	return execCommandInPodWithFullOutput(f, namespace, podName, "/bin/sh", "-c", cmd)
+}
+
+// execCommandInPodWithFullOutput is a shameless copy/paste from the framework methods so that we can specify the pod namespace.
+func execCommandInPodWithFullOutput(f *framework.Framework, namespace, podName string, cmd ...string) (string, string, error) {
+	pod, err := f.PodClientNS(namespace).Get(context.TODO(), podName, metav1.GetOptions{})
+	framework.ExpectNoError(err, "failed to get pod %v", podName)
+	gomega.Expect(pod.Spec.Containers).NotTo(gomega.BeEmpty())
+	return ExecCommandInContainerWithFullOutput(f, namespace, podName, pod.Spec.Containers[0].Name, cmd...)
+}
+
+// ExecCommandInContainerWithFullOutput is a shameless copy/paste from the framework methods so that we can specify the pod namespace.
+func ExecCommandInContainerWithFullOutput(f *framework.Framework, namespace, podName, containerName string, cmd ...string) (string, string, error) {
+	options := framework.ExecOptions{
+		Command:            cmd,
+		Namespace:          namespace,
+		PodName:            podName,
+		ContainerName:      containerName,
+		Stdin:              nil,
+		CaptureStdout:      true,
+		CaptureStderr:      true,
+		PreserveWhitespace: false,
+	}
+	return f.ExecWithOptions(options)
+}
+
+func assertAclLogs(targetNodeName string, policyNameRegex string, expectedAclVerdict string, expectedAclSeverity string) (bool, error) {
 	framework.Logf("collecting the ovn-controller logs for node: %s", targetNodeName)
 	targetNodeLog, err := runCommand([]string{"docker", "exec", targetNodeName, "grep", "acl_log", ovnControllerLogPath}...)
 	if err != nil {
 		return false, fmt.Errorf("error accessing logs in node %s: %v", targetNodeName, err)
 	}
 
-	composedPolicyName := fmt.Sprintf("%s_%s", namespace, policyName)
-	framework.Logf("Ensuring the *deny* audit log contains: '%s\", verdict=drop' AND 'severity=%s'", composedPolicyName, expectedAclSeverity)
+	framework.Logf("Ensuring the audit log contains: 'name=\"%s\"', 'verdict=%s' AND 'severity=%s'", policyNameRegex, expectedAclVerdict, expectedAclSeverity)
 	for _, logLine := range strings.Split(targetNodeLog, "\n") {
-		if strings.Contains(logLine, fmt.Sprintf("%s\", verdict=drop", composedPolicyName)) &&
+		matched, err := regexp.MatchString(fmt.Sprintf("name=\"%s\"", policyNameRegex), logLine)
+		if err != nil {
+			return false, err
+		}
+		if matched &&
+			strings.Contains(logLine, fmt.Sprintf("verdict=%s", expectedAclVerdict)) &&
 			strings.Contains(logLine, fmt.Sprintf("severity=%s", expectedAclSeverity)) {
 			return true, nil
 		}
@@ -730,11 +777,11 @@ func isDualStackCluster(nodes *v1.NodeList) bool {
 }
 
 // used to inject OVN specific test actions
-func wrappedTestFramework(basename string) *framework.Framework{
-	f := framework.NewDefaultFramework(basename)
+func wrappedTestFramework(basename string) *framework.Framework {
+	f := newPrivelegedTestFramework(basename)
 	// inject dumping dbs on failure
 	ginkgo.JustAfterEach(func() {
-		if ! ginkgo.CurrentGinkgoTestDescription().Failed {
+		if !ginkgo.CurrentGinkgoTestDescription().Failed {
 			return
 		}
 
@@ -746,7 +793,7 @@ func wrappedTestFramework(basename string) *framework.Framework{
 		dbs := []string{"ovnnb_db.db", "ovnsb_db.db"}
 		ovsdb := "conf.db"
 
-		testName :=  strings.Replace(ginkgo.CurrentGinkgoTestDescription().TestText, " ", "_", -1)
+		testName := strings.Replace(ginkgo.CurrentGinkgoTestDescription().TestText, " ", "_", -1)
 		logDir := fmt.Sprintf("%s/e2e-dbs/%s-%s", logLocation, testName, f.UniqueName)
 
 		var args []string
@@ -781,4 +828,42 @@ func wrappedTestFramework(basename string) *framework.Framework{
 	})
 
 	return f
+}
+
+func newPrivelegedTestFramework(basename string) *framework.Framework {
+	f := framework.NewDefaultFramework(basename)
+	f.NamespacePodSecurityEnforceLevel = admissionapi.LevelPrivileged
+	return f
+}
+
+// countAclLogs connects to <targetNodeName> (ovn-control-plane, ovn-worker or ovn-worker2 in kind environments) via the docker exec
+// command and it greps for the string "acl_log" inside the OVN controller logs. It then checks if the line contains name=<policyNameRegex>
+// and if it does, it increases the counter if both the verdict and the severity for this line match what's expected.
+func countAclLogs(targetNodeName string, policyNameRegex string, expectedAclVerdict string, expectedAclSeverity string) (int, error) {
+	count := 0
+
+	framework.Logf("collecting the ovn-controller logs for node: %s", targetNodeName)
+	targetNodeLog, err := runCommand([]string{"docker", "exec", targetNodeName, "cat", ovnControllerLogPath}...)
+	if err != nil {
+		return 0, fmt.Errorf("error accessing logs in node %s: %v", targetNodeName, err)
+	}
+
+	stringToMatch := fmt.Sprintf(
+		".*acl_log.*name=\"%s\".*verdict=%s.*severity=%s.*",
+		policyNameRegex,
+		expectedAclVerdict,
+		expectedAclSeverity)
+
+	for _, logLine := range strings.Split(targetNodeLog, "\n") {
+		matched, err := regexp.MatchString(stringToMatch, logLine)
+		if err != nil {
+			return 0, err
+		}
+		if matched {
+			count++
+		}
+	}
+
+	framework.Logf("The audit log contains %d occurrences of: '%s'", count, stringToMatch)
+	return count, nil
 }

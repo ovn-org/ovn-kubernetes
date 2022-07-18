@@ -13,3 +13,40 @@ Measurement accuracy can be impacted by other parallel processing that might be 
 |--|--|--|
 |ovnkube_master_network_programming_duration_seconds | Histogram | The duration to apply network configuration for a kind (e.g. pod, service, networkpolicy). Configuration includes add, update and delete events for kinds. This includes OVN-Kubernetes master and OVN duration.
 |ovnkube_master_network_programming_ovn_duration_seconds| Histogram  | The duration for OVN to apply network configuration for a kind (e.g. pod, service, networkpolicy).
+
+## Change log
+This list is to help notify if there are additions, changes or removals to metrics.
+
+- Rename (https://github.com/ovn-org/ovn-kubernetes/pull/3022):
+  - `ovs_vswitchd_interface_link_resets` -> `ovs_vswitchd_interface_resets_total`
+  - `ovs_vswitchd_interface_rx_dropped` -> `ovs_vswitchd_interface_rx_dropped_total`
+  - `ovs_vswitchd_interface_tx_dropped` -> `ovs_vswitchd_interface_tx_dropped_total`
+  - `ovs_vswitchd_interface_rx_errors` -> `ovs_vswitchd_interface_rx_errors_total`
+  - `ovs_vswitchd_interface_tx_errors` -> `ovs_vswitchd_interface_tx_errors_total`
+  - `ovs_vswitchd_interface_collisions` -> `ovs_vswitchd_interface_collisions_total`
+- Remove (https://github.com/ovn-org/ovn-kubernetes/pull/3022):
+  - `ovs_vswitchd_dp_if`
+  - `ovs_vswitchd_interface_driver_name`
+  - `ovs_vswitchd_interface_driver_version`
+  - `ovs_vswitchd_interface_firmware_version`
+  - `ovs_vswitchd_interface_rx_packets`
+  - `ovs_vswitchd_interface_tx_packets`
+  - `ovs_vswitchd_interface_rx_bytes`
+  - `ovs_vswitchd_interface_tx_bytes`
+  - `ovs_vswitchd_interface_rx_frame_err`
+  - `ovs_vswitchd_interface_rx_over_err`
+  - `ovs_vswitchd_interface_rx_crc_err`
+  - `ovs_vswitchd_interface_name`
+  - `ovs_vswitchd_interface_duplex`
+  - `ovs_vswitchd_interface_type`
+  - `ovs_vswitchd_interface_admin_state`
+  - `ovs_vswitchd_interface_link_state`
+  - `ovs_vswitchd_interface_ifindex`
+  - `ovs_vswitchd_interface_link_speed`
+  - `ovs_vswitchd_interface_mtu`
+  - `ovs_vswitchd_interface_ofport`
+  - `ovs_vswitchd_interface_ingress_policing_burst`
+  - `ovs_vswitchd_interface_ingress_policing_rate`
+- Add `ovnkube_master_network_programming_duration_seconds` and `ovnkube_master_network_programming_ovn_duration_seconds` (https://github.com/ovn-org/ovn-kubernetes/pull/2878)
+- Remove `ovnkube_master_skipped_nbctl_daemon_total` (https://github.com/ovn-org/ovn-kubernetes/pull/2707)
+- Add `ovnkube_master_egress_routing_via_host` (https://github.com/ovn-org/ovn-kubernetes/pull/2833)

@@ -12,7 +12,7 @@ FROM ubuntu:20.04
 
 USER root
 
-RUN apt-get update && apt-get install -y arping iproute2 curl software-properties-common util-linux
+RUN apt-get update && apt-get install -y iproute2 curl software-properties-common util-linux
 
 RUN echo "deb https://apt.kubernetes.io/ kubernetes-xenial main" | tee -a /etc/apt/sources.list.d/kubernetes.list
 RUN curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -

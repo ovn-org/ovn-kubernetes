@@ -158,7 +158,7 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 	if enabled {
 		err = oc.createMulticastAllowPolicy(ns.Name, nsInfo)
 	} else {
-		err = deleteMulticastAllowPolicy(oc.nbClient, ns.Name, nsInfo)
+		err = deleteMulticastAllowPolicy(oc.nbClient, ns.Name)
 	}
 	if err != nil {
 		klog.Errorf(err.Error())
@@ -171,7 +171,7 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) {
 	if nsInfo.multicastEnabled {
 		nsInfo.multicastEnabled = false
-		if err := deleteMulticastAllowPolicy(oc.nbClient, ns.Name, nsInfo); err != nil {
+		if err := deleteMulticastAllowPolicy(oc.nbClient, ns.Name); err != nil {
 			klog.Errorf(err.Error())
 		}
 	}
@@ -335,13 +335,23 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 	aclAnnotation := newer.Annotations[util.AclLoggingAnnotation]
 	oldACLAnnotation := old.Annotations[util.AclLoggingAnnotation]
 	// support for ACL logging update, if new annotation is empty, make sure we propagate new setting
-	if aclAnnotation != oldACLAnnotation && (oc.aclLoggingCanEnable(aclAnnotation, nsInfo) || aclAnnotation == "") &&
-		len(nsInfo.networkPolicies) > 0 {
-		// deny rules are all one per namespace
-		if err := oc.setACLLoggingForNamespace(old.Name, nsInfo); err != nil {
+	if aclAnnotation != oldACLAnnotation && (oc.aclLoggingCanEnable(aclAnnotation, nsInfo) || aclAnnotation == "") {
+		if len(nsInfo.networkPolicies) > 0 {
+			// deny rules are all one per namespace
+			if err := oc.setNetworkPolicyACLLoggingForNamespace(old.Name, nsInfo); err != nil {
+				klog.Warningf(err.Error())
+			} else {
+				klog.Infof("Namespace %s: NetworkPolicy ACL logging setting updated to deny=%s allow=%s",
+					old.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
+			}
+		}
+		// Trigger an egress fw logging update - this will only happen if an egress firewall exists for the NS, otherwise
+		// this will not do anything.
+		updated, err := oc.refreshEgressFirewallLogging(old.Name)
+		if err != nil {
 			klog.Warningf(err.Error())
-		} else {
-			klog.Infof("Namespace %s: ACL logging setting updated to deny=%s allow=%s",
+		} else if updated {
+			klog.Infof("Namespace %s: EgressFirewall ACL logging setting updated to deny=%s allow=%s",
 				old.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
 		}
 	}
@@ -386,7 +396,7 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 		oc.retryNetworkPolicies.skipRetryObj(key)
 		// add the full np object to the retry entry, since the namespace is going to be removed
 		// along with any mappings of nsInfo -> network policies
-		oc.retryNetworkPolicies.initRetryObjWithDelete(np.policy, key, np)
+		oc.retryNetworkPolicies.initRetryObjWithDelete(np.policy, key, np, false)
 		isLastPolicyInNamespace := len(nsInfo.networkPolicies) == 1
 		if err := oc.destroyNetworkPolicy(np, isLastPolicyInNamespace); err != nil {
 			klog.Errorf("Failed to delete network policy: %s, error: %v", key, err)

@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	. "github.com/onsi/gomega"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -25,9 +26,10 @@ type FakeOVNNode struct {
 	fakeClient *util.OVNClientset
 	fakeExec   *ovntest.FakeExec
 	wg         *sync.WaitGroup
+	sbClient   libovsdbclient.Client
 }
 
-func NewFakeOVNNode(fexec *ovntest.FakeExec) *FakeOVNNode {
+func NewFakeOVNNode(fexec *ovntest.FakeExec, sbclient libovsdbclient.Client) *FakeOVNNode {
 	err := util.SetExec(fexec)
 	Expect(err).NotTo(HaveOccurred())
 
@@ -35,6 +37,7 @@ func NewFakeOVNNode(fexec *ovntest.FakeExec) *FakeOVNNode {
 		fakeExec: fexec,
 		recorder: record.NewFakeRecorder(1),
 		wg:       &sync.WaitGroup{},
+		sbClient: sbclient,
 	}
 }
 
@@ -70,6 +73,6 @@ func (o *FakeOVNNode) init() {
 	o.watcher, err = factory.NewNodeWatchFactory(o.fakeClient, fakeNodeName)
 	Expect(err).NotTo(HaveOccurred())
 
-	o.node = NewNode(o.fakeClient.KubeClient, o.watcher, fakeNodeName, o.stopChan, o.recorder)
+	o.node = NewNode(o.fakeClient.KubeClient, o.watcher, fakeNodeName, o.sbClient, o.stopChan, o.recorder)
 	o.node.Start(context.TODO(), o.wg)
 }

@@ -63,11 +63,18 @@ func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.Swi
 func (oc *Controller) Start(identity string, wg *sync.WaitGroup, ctx context.Context, cancel context.CancelFunc) error {
 	// Set up leader election process first
 	rl, err := resourcelock.New(
-		resourcelock.ConfigMapsResourceLock,
+		// TODO (rravaiol)
+		// https://github.com/kubernetes/kubernetes/issues/107454
+		// leader election library no longer supports leader-election
+		// locks based solely on `endpoints` or `configmaps` resources.
+		// Slowly migrating to new API across three releases; with k8s 1.24
+		// we're now in the first step ('x+1' bullet from the link above).
+		// This will have to be updated for the next two k8s bumps: to 1.25 and 1.26.
+		resourcelock.ConfigMapsLeasesResourceLock,
 		config.Kubernetes.OVNConfigNamespace,
 		"ovn-kubernetes-master",
 		oc.client.CoreV1(),
-		nil,
+		oc.client.CoordinationV1(),
 		resourcelock.ResourceLockConfig{
 			Identity:      identity,
 			EventRecorder: oc.recorder,
@@ -1380,21 +1387,24 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 	}
 
 	// ensure pods that already exist on this node have their logical ports created
-	options := metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String()}
-	pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
-	if err != nil {
-		klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
-	} else if nSyncs.syncNode { // do this only if its a new node add
-		klog.V(5).Infof("When adding node %s, found %d pods to add to retryPods", node.Name, len(pods.Items))
-		for _, pod := range pods.Items {
-			pod := pod
-			if util.PodCompleted(&pod) {
-				continue
+	// if per pod SNAT is being used, then l3 gateway config is required to be able to add pods
+	if _, gwFailed := oc.gatewaysFailed.Load(node.Name); !gwFailed || !config.Gateway.DisableSNATMultipleGWs {
+		options := metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String()}
+		pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
+		if err != nil {
+			klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
+		} else if nSyncs.syncNode || nSyncs.syncGw { // do this only if it is a new node add or a gateway sync happened
+			klog.V(5).Infof("When adding node %s, found %d pods to add to retryPods", node.Name, len(pods.Items))
+			for _, pod := range pods.Items {
+				pod := pod
+				if util.PodCompleted(&pod) {
+					continue
+				}
+				klog.V(5).Infof("Adding pod %s/%s to retryPods", pod.Namespace, pod.Name)
+				oc.retryPods.addRetryObjWithAddNoBackoff(&pod)
 			}
-			klog.V(5).Infof("Adding pod %s/%s to retryPods", pod.Namespace, pod.Name)
-			oc.retryPods.addRetryObjWithAdd(&pod)
+			oc.retryPods.requestRetryObjs()
 		}
-		oc.retryPods.requestRetryObjs()
 	}
 
 	if len(errs) == 0 {

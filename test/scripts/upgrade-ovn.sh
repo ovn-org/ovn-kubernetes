@@ -141,7 +141,8 @@ create_ovn_kube_manifests() {
     --egress-firewall-enable=true \
     --v4-join-subnet="${JOIN_SUBNET_IPV4}" \
     --v6-join-subnet="${JOIN_SUBNET_IPV6}" \
-    --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}"
+    --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}" \
+    --in-upgrade
   popd
 }
 
@@ -257,13 +258,16 @@ set_default_ovn_manifest_params
 print_ovn_manifest_params
 
 # create upgraded OVN manifests from checked-out branch
-create_ovn_kube_manifests
 set_cluster_cidr_ip_families
+create_ovn_kube_manifests
 install_ovn_image
 
 pushd ../dist/yaml
 
-# install updated ovnkube-node daemonset 
+# install updated k8s configuration for ovn-k (useful in case of ClusterRole updates)
+run_kubectl apply -f ovn-setup.yaml
+
+# install updated ovnkube-node daemonset
 run_kubectl apply -f ovnkube-node.yaml
 
 kubectl_wait_daemonset ovnkube-node
@@ -272,7 +276,7 @@ run_kubectl get all -n ovn-kubernetes
 CURRENT_REPLICAS_OVNKUBE_DB=$(run_kubectl get deploy -n ovn-kubernetes ovnkube-db -o=jsonpath='{.spec.replicas}')
 run_kubectl scale deploy -n ovn-kubernetes ovnkube-db --replicas=0
 
-# install update ovnkube-db daemonset 
+# install updated ovnkube-db daemonset
 if [ "$OVN_HA" == true ]; then
   run_kubectl apply -f ovnkube-db-raft.yaml
 else
@@ -301,3 +305,28 @@ kubectl_wait_for_upgrade
 run_kubectl describe ds ovnkube-node -n ovn-kubernetes
 
 run_kubectl describe deployments.apps ovnkube-master -n ovn-kubernetes
+
+KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
+MASTER_NODES=$(kubectl get nodes -l node-role.kubernetes.io/control-plane -o name)
+# We want OVN HA not Kubernetes HA
+# leverage the kubeadm well-known label node-role.kubernetes.io/control-plane=
+# to choose the nodes where ovn master components will be placed
+for node in $MASTER_NODES; do
+  if [ "$KIND_REMOVE_TAINT" == true ]; then
+    # do not error if it fails to remove the taint
+    kubectl taint node "$node" node-role.kubernetes.io/control-plane:NoSchedule- || true
+  fi
+done
+
+# redownload the e2e test binaries if their version differs
+K8S_VERSION="v1.24.0"
+E2E_VERSION=$(/usr/local/bin/e2e.test --version)
+if [[ "$E2E_VERSION" != "$K8S_VERSION" ]]; then
+   echo "found version $E2E_VERSION of e2e binary, need version $K8S_VERSION ; will download it."
+   # Install e2e test binary and ginkgo
+   curl -L https://storage.googleapis.com/kubernetes-release/release/${K8S_VERSION}/kubernetes-test-linux-amd64.tar.gz -o kubernetes-test-linux-amd64.tar.gz
+   tar xvzf kubernetes-test-linux-amd64.tar.gz
+   sudo mv kubernetes/test/bin/e2e.test /usr/local/bin/e2e.test
+   sudo mv kubernetes/test/bin/ginkgo /usr/local/bin/ginkgo
+   rm kubernetes-test-linux-amd64.tar.gz
+fi
