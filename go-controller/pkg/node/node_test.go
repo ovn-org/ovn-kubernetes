@@ -29,7 +29,7 @@ var _ = Describe("Node", func() {
 
 	Describe("validateMTU", func() {
 		var (
-			kubeMock        *mocks.KubeInterface
+			kubeMock        *mocks.Interface
 			netlinkOpsMock  *utilMocks.NetLinkOps
 			netlinkLinkMock *netlink_mocks.Link
 
@@ -49,7 +49,7 @@ var _ = Describe("Node", func() {
 		)
 
 		BeforeEach(func() {
-			kubeMock = new(mocks.KubeInterface)
+			kubeMock = new(mocks.Interface)
 			netlinkOpsMock = new(utilMocks.NetLinkOps)
 			netlinkLinkMock = new(netlink_mocks.Link)
 
