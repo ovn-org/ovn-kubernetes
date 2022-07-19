@@ -456,7 +456,9 @@ var _ = ginkgo.Describe("e2e multiple external gateway stale conntrack entry del
 			setupIperf3Client(containerName, addresses.srcPodIP, 5201+i)
 			macAddressExtGW, err := net.ParseMAC(getMACAddressesForNetwork(containerName, externalContainerNetwork))
 			framework.ExpectNoError(err, "failed to parse MAC address for %s", containerName)
-			macAddressGW[i] = strings.Replace(macAddressExtGW.String(), ":", "", -1)
+			// Trim leading 0s because conntrack dumped labels are just integers
+			// in hex without leading 0s.
+			macAddressGW[i] = strings.TrimLeft(strings.Replace(macAddressExtGW.String(), ":", "", -1), "0")
 		}
 
 		ginkgo.By("Check if conntrack entries for ECMP routes are created for the 2 external gateways")
@@ -533,7 +535,9 @@ var _ = ginkgo.Describe("e2e multiple external gateway stale conntrack entry del
 			setupIperf3Client(containerName, addresses.srcPodIP, 5201+i)
 			macAddressExtGW, err := net.ParseMAC(getMACAddressesForNetwork(containerName, externalContainerNetwork))
 			framework.ExpectNoError(err, "failed to parse MAC address for %s", containerName)
-			macAddressGW[i] = strings.Replace(macAddressExtGW.String(), ":", "", -1)
+			// Trim leading 0s because conntrack dumped labels are just integers
+			// in hex without leading 0s.
+			macAddressGW[i] = strings.TrimLeft(strings.Replace(macAddressExtGW.String(), ":", "", -1), "0")
 		}
 
 		ginkgo.By("Check if conntrack entries for ECMP routes are created for the 2 external gateways")
