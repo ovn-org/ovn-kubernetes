@@ -1275,7 +1275,7 @@ func pokeConntrackEntries(nodeName, podIP, protocol string, patterns []string) i
 	args := []string{"get", "pods", "--selector=app=ovs-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", nodeName), "-o", "jsonpath={.items..metadata.name}"}
 	ovsPodName, err := framework.RunKubectl("ovn-kubernetes", args...)
 	framework.ExpectNoError(err, "failed to get the ovs pod on node %s", nodeName)
-	args = []string{"exec", ovsPodName, "--", "ovs-dpctl", "dump-conntrack"}
+	args = []string{"exec", ovsPodName, "--", "ovs-appctl", "dpctl/dump-conntrack"}
 	conntrackEntries, err := framework.RunKubectl("ovn-kubernetes", args...)
 	framework.ExpectNoError(err, "failed to get the conntrack entries from node %s", nodeName)
 	numOfConnEntries := 0
