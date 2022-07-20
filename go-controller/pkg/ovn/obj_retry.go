@@ -1258,6 +1258,7 @@ func (oc *Controller) iterateRetryResources(r *retryObjs) {
 	var kObj interface{}
 	var err error
 	for objKey, entry := range r.entries {
+		entry.Lock()
 		// check if we need to create the object
 		if entry.newObj != nil {
 			// get the latest version of the object from the informer;
@@ -1277,6 +1278,7 @@ func (oc *Controller) iterateRetryResources(r *retryObjs) {
 		}
 		klog.Infof("Gathered %v resource %s for retry", r.oType, objKey)
 		localRetryEntries = append(localRetryEntries, &localRetryEntry{objKey, entry.newObj, entry.oldObj, kObj})
+		entry.Unlock()
 	}
 	r.retryMutex.Unlock()
 
