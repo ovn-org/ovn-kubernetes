@@ -28,10 +28,10 @@ var _ = Describe("Mananagement port DPU tests", func() {
 	var nodeAnnotatorMock *kubeMocks.Annotator
 	var waiter *startupWaiter
 
-	config.PrepareTestConfig()
-	util.ResetRunner()
-
 	BeforeEach(func() {
+		Expect(config.PrepareTestConfig()).To(Succeed())
+		util.ResetRunner()
+
 		netlinkOpsMock = &utilMocks.NetLinkOps{}
 		nodeAnnotatorMock = &kubeMocks.Annotator{}
 		execMock = ovntest.NewFakeExec()
@@ -42,9 +42,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 	})
 
 	AfterEach(func() {
-		config.PrepareTestConfig()
 		util.SetNetLinkOpMockInst(origNetlinkOps)
-		util.ResetRunner()
 	})
 
 	Context("Create Management port DPU", func() {

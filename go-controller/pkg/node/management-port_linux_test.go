@@ -402,7 +402,7 @@ var _ = Describe("Management Port Operations", func() {
 	BeforeEach(func() {
 		var err error
 		// Restore global default values before each testcase
-		config.PrepareTestConfig()
+		Expect(config.PrepareTestConfig()).To(Succeed())
 
 		app = cli.NewApp()
 		app.Name = "test"
