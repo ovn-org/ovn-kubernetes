@@ -7,7 +7,7 @@ set -e
 install_j2_renderer() {
   # ensure j2 renderer installed
   pip install wheel --user
-  pip freeze | grep j2cli || pip install j2cli[yaml] --user
+  pip freeze | grep j2cli || pip install "j2cli[yaml]" --user
   export PATH=~/.local/bin:$PATH
 }
 
