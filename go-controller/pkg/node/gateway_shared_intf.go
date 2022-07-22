@@ -1367,8 +1367,11 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		}
 
 		if config.Gateway.NodeportEnable {
-			if err := initSvcViaMgmPortRoutingRules(subnets); err != nil {
-				return err
+			if config.OvnKubeNode.Mode == types.NodeModeFull {
+				// (TODO): Internal Traffic Policy is not supported in DPU mode
+				if err := initSvcViaMgmPortRoutingRules(subnets); err != nil {
+					return err
+				}
 			}
 			klog.Info("Creating Shared Gateway Node Port Watcher")
 			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge.patchPort, gwBridge.bridgeName, gwBridge.uplinkName, gwBridge.ips, gw.openflowManager, gw.nodeIPManager, watchFactory)

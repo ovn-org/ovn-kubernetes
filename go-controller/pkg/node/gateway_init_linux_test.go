@@ -412,18 +412,6 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			Cmd:    "ovs-vsctl --timeout=15 get interface " + hostRep + " ofport",
 			Output: "9",
 		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ip route replace table 7 172.16.1.0/24 via 10.1.1.1 dev ovn-k8s-mp0",
-			Output: "0",
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ip -4 rule",
-			Output: "0",
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ip -4 rule add fwmark 0x1745ec lookup 7 prio 30",
-			Output: "0",
-		})
 		// cleanup flows
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovs-ofctl -O OpenFlow13 --bundle replace-flows " + brphys + " -",

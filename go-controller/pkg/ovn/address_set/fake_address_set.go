@@ -1,6 +1,7 @@
 package addressset
 
 import (
+	"k8s.io/klog/v2"
 	"net"
 	"strings"
 	"sync"
@@ -149,7 +150,21 @@ func (f *FakeAddressSetFactory) ExpectAddressSetWithIPs(name string, ips []strin
 			gomega.Expect(as4.ips).To(gomega.HaveKey(ip))
 		}
 	}
+	if lenAddressSet != len(ips) {
+		var addrs []string
+		if as4 != nil {
+			for _, v := range as4.ips {
+				addrs = append(addrs, v.String())
+			}
+		}
+		if as6 != nil {
+			for _, v := range as6.ips {
+				addrs = append(addrs, v.String())
+			}
+		}
 
+		klog.Errorf("IPv4 addresses mismatch in cache: %#v, expected: %#v", addrs, ips)
+	}
 	gomega.Expect(lenAddressSet).To(gomega.Equal(len(ips)))
 }
 

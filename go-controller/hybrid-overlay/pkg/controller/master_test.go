@@ -55,6 +55,30 @@ func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Nod
 	}
 }
 
+func newTestWinNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Node {
+	annotations := make(map[string]string)
+	if ovnHostSubnet != "" {
+		subnetAnnotations, err := util.CreateNodeHostSubnetAnnotation(ovntest.MustParseIPNets(ovnHostSubnet))
+		Expect(err).NotTo(HaveOccurred())
+		for k, v := range subnetAnnotations {
+			annotations[k] = fmt.Sprintf("%s", v)
+		}
+	}
+	if hybridHostSubnet != "" {
+		annotations[hotypes.HybridOverlayNodeSubnet] = hybridHostSubnet
+	}
+	if drMAC != "" {
+		annotations[hotypes.HybridOverlayDRMAC] = drMAC
+	}
+	return v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Labels:      map[string]string{v1.LabelOSStable: os},
+			Annotations: annotations,
+		},
+	}
+}
+
 var _ = Describe("Hybrid SDN Master Operations", func() {
 	var (
 		app             *cli.App
@@ -594,6 +618,250 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			"-loglevel=5",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
+		})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("cluster handles a linux node when hybridOverlayClusterCIDR in unset but the HO annotations are available on windows nodes", func() {
+		app.Action = func(ctx *cli.Context) error {
+			const (
+				linNodeName   string = "node-linux"
+				winNodeName   string = "node-windows"
+				linNodeSubnet string = "10.1.2.0/24"
+				winNodeSubnet string = "10.1.3.0/24"
+				linNodeHOIP   string = "10.1.2.3"
+				linNodeHOMAC  string = "0a:58:0a:01:02:03"
+			)
+
+			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
+				Items: []v1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:   winNodeName,
+							Labels: map[string]string{v1.LabelOSStable: "windows"},
+							Annotations: map[string]string{
+								hotypes.HybridOverlayNodeSubnet: winNodeSubnet,
+							},
+						},
+					},
+					newTestNode(linNodeName, "linux", linNodeSubnet, "", ""),
+				},
+			})
+
+			_, err := config.InitConfig(ctx, fexec, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			// pre-existing nbdb objects
+			nodeSwitch := &nbdb.LogicalSwitch{
+				Name: linNodeName,
+				UUID: linNodeName + "-UUID",
+			}
+
+			ovnClusterRouter := &nbdb.LogicalRouter{
+				Name: types.OVNClusterRouter,
+				UUID: types.OVNClusterRouter + "-UUID",
+			}
+
+			ovnClusterRouterLRP := &nbdb.LogicalRouterPort{
+				Name:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
+				Networks: []string{"100.64.0.1/16"},
+				UUID:     types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter + "-UUID",
+			}
+			ovnClusterRouter.Ports = []string{ovnClusterRouterLRP.UUID}
+
+			nodeGWRouter := &nbdb.LogicalRouter{
+				Name: types.GWRouterPrefix + linNodeName,
+				UUID: types.GWRouterPrefix + linNodeName + "-UUID",
+			}
+
+			nodeGWLRP := &nbdb.LogicalRouterPort{
+				Name:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + linNodeName,
+				Networks: []string{"100.64.0.2/16"},
+				UUID:     types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + linNodeName + "-UUID",
+			}
+
+			nodeGWRouter.Ports = []string{nodeGWLRP.UUID}
+
+			initialNBDB := []libovsdbtest.TestData{
+				nodeSwitch,
+				ovnClusterRouter,
+				ovnClusterRouterLRP,
+				nodeGWRouter,
+				nodeGWLRP,
+			}
+
+			// pre-existing sbdb objects
+			clusterRouterDatapath := &sbdb.DatapathBinding{
+				UUID:        types.OVNClusterRouter + "-UUID",
+				ExternalIDs: map[string]string{"logical-router": ovnClusterRouter.UUID, "name": types.OVNClusterRouter},
+			}
+
+			initialSBDB := []libovsdbtest.TestData{
+				clusterRouterDatapath,
+			}
+
+			dbSetup := libovsdbtest.TestSetup{
+				NBData: initialNBDB,
+				SBData: initialSBDB,
+			}
+
+			var libovsdbOvnNBClient libovsdbclient.Client
+			var libovsdbOvnSBClient libovsdbclient.Client
+
+			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+			Expect(err).NotTo(HaveOccurred())
+
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
+			m, err := NewMaster(
+				&kube.Kube{KClient: fakeClient},
+				f.Core().V1().Nodes().Informer(),
+				f.Core().V1().Namespaces().Informer(),
+				f.Core().V1().Pods().Informer(),
+				libovsdbOvnNBClient,
+				libovsdbOvnSBClient,
+				informer.NewTestEventHandler,
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			// make sure the expected LSP is created and added to the node
+			expectedLSP := &nbdb.LogicalSwitchPort{
+				UUID:      types.HybridOverlayPrefix + linNodeName + "-UUID",
+				Name:      types.HybridOverlayPrefix + linNodeName,
+				Addresses: []string{linNodeHOMAC},
+			}
+
+			// make sure the expected LRP is created and added to cluster router
+			expectedLRP1 := &nbdb.LogicalRouterPolicy{
+				Priority: 1002,
+				ExternalIDs: map[string]string{
+					"name": "hybrid-subnet-node-linux-gr",
+				},
+				Action:   nbdb.LogicalRouterPolicyActionReroute,
+				Nexthops: []string{linNodeHOIP},
+				Match:    fmt.Sprintf("ip4.src == 100.64.0.2 && ip4.dst == %s", winNodeSubnet),
+				UUID:     "expectedLRP-1-UUID",
+			}
+
+			expectedLRP2 := &nbdb.LogicalRouterPolicy{
+				Priority: 1002,
+				ExternalIDs: map[string]string{
+					"name": "hybrid-subnet-node-linux",
+				},
+				Action:   nbdb.LogicalRouterPolicyActionReroute,
+				Nexthops: []string{linNodeHOIP},
+				Match:    fmt.Sprintf("inport == \"rtos-node-linux\" && ip4.dst == %s", winNodeSubnet),
+				UUID:     "expectedLRP-2-UUID",
+			}
+
+			expectedLRSR := &nbdb.LogicalRouterStaticRoute{
+				IPPrefix: winNodeSubnet,
+				Nexthop:  linNodeHOIP,
+				ExternalIDs: map[string]string{
+					"name": "hybrid-subnet-node-linux",
+				},
+				UUID: "expectedLRSR-UUID",
+			}
+
+			nodeSwitch.Ports = []string{expectedLSP.UUID}
+			ovnClusterRouter.Policies = []string{expectedLRP1.UUID, expectedLRP2.UUID}
+			ovnClusterRouter.StaticRoutes = []string{expectedLRSR.UUID}
+
+			expectedGRLRSR := &nbdb.LogicalRouterStaticRoute{
+				IPPrefix: winNodeSubnet,
+				Nexthop:  "100.64.0.1",
+				ExternalIDs: map[string]string{
+					"name": "hybrid-subnet-node-linux-gr",
+				},
+				UUID: "expectedGRLRSR-UUID",
+			}
+			nodeGWRouter.StaticRoutes = []string{expectedGRLRSR.UUID}
+
+			expectedMACBinding := &sbdb.MACBinding{
+				Datapath:    clusterRouterDatapath.UUID,
+				IP:          linNodeHOIP,
+				LogicalPort: types.RouterToSwitchPrefix + linNodeName,
+				MAC:         linNodeHOMAC,
+			}
+
+			f.Start(stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				m.Run(stopChan)
+			}()
+			f.WaitForCacheSync(stopChan)
+
+			Eventually(func() (map[string]string, error) {
+				updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), linNodeName, metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return updatedNode.Annotations, nil
+			}, 2).Should(HaveKeyWithValue(hotypes.HybridOverlayDRMAC, linNodeHOMAC))
+
+			nodeSwitch.OtherConfig = map[string]string{"exclude_ips": "10.1.2.2"}
+
+			expectedNBDatabaseState := []libovsdbtest.TestData{
+				nodeSwitch,
+				ovnClusterRouter,
+				ovnClusterRouterLRP,
+				nodeGWRouter,
+				nodeGWLRP,
+				expectedLSP,
+				expectedLRP1,
+				expectedLRP2,
+				expectedLRSR,
+				expectedGRLRSR,
+			}
+
+			expectedSBDatabaseState := []libovsdbtest.TestData{
+				clusterRouterDatapath,
+				expectedMACBinding,
+			}
+
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedNBDatabaseState))
+			Eventually(libovsdbOvnSBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedSBDatabaseState))
+
+			err = fakeClient.CoreV1().Nodes().Delete(context.TODO(), linNodeName, *metav1.NewDeleteOptions(0))
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+
+			// LRP should have been deleted and removed
+			ovnClusterRouter.Policies = []string{}
+
+			// LSP should have been deleted and removed
+			nodeSwitch.Ports = []string{}
+
+			// Static Route should have been deleted and removed
+			ovnClusterRouter.StaticRoutes = []string{}
+			nodeGWRouter.StaticRoutes = []string{}
+
+			expectedNBDatabaseState = []libovsdbtest.TestData{
+				ovnClusterRouter,
+				nodeSwitch,
+				nodeGWRouter,
+				nodeGWLRP,
+				ovnClusterRouterLRP,
+			}
+
+			// in a real db, deleting the HO LSP would result in the Mac Binding being removed as well
+			expectedSBDatabaseState = []libovsdbtest.TestData{
+				clusterRouterDatapath,
+				expectedMACBinding,
+			}
+
+			Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedNBDatabaseState))
+			Eventually(libovsdbOvnSBClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedSBDatabaseState))
+			return nil
+		}
+
+		err := app.Run([]string{
+			app.Name,
+			"-loglevel=5",
+			"-enable-hybrid-overlay",
+			"--no-hostsubnet-nodes=kubernetes.io/os=windows",
 		})
 		Expect(err).NotTo(HaveOccurred())
 	})

@@ -6,9 +6,11 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
@@ -142,7 +144,11 @@ var _ = Describe("Node Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 		fExec = ovntest.NewFakeExec()
-		fakeOvnNode = NewFakeOVNNode(fExec)
+		dbSetup := libovsdbtest.TestSetup{}
+		var libovsdbOvnSBClient libovsdbclient.Client
+		_, libovsdbOvnSBClient, _, err := libovsdbtest.NewNBSBTestHarness(dbSetup)
+		Expect(err).NotTo(HaveOccurred())
+		fakeOvnNode = NewFakeOVNNode(fExec, libovsdbOvnSBClient)
 
 		iptV4, iptV6 = util.SetFakeIPTablesHelpers()
 		_, nodeNet, err := net.ParseCIDR("10.1.1.0/24")
@@ -593,6 +599,14 @@ var _ = Describe("Node Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				externalIP := "1.1.1.1"
 				config.Gateway.Mode = config.GatewayModeLocal
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
+				})
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
+				})
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -693,6 +707,14 @@ var _ = Describe("Node Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				externalIP := "1.1.1.1"
 				config.Gateway.Mode = config.GatewayModeLocal
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
+				})
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
+				})
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{

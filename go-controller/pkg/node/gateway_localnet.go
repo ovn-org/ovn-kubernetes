@@ -117,8 +117,11 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		}
 
 		if config.Gateway.NodeportEnable {
-			if err := initSvcViaMgmPortRoutingRules(hostSubnets); err != nil {
-				return err
+			if config.OvnKubeNode.Mode == types.NodeModeFull {
+				// (TODO): Internal Traffic Policy is not supported in DPU mode
+				if err := initSvcViaMgmPortRoutingRules(hostSubnets); err != nil {
+					return err
+				}
 			}
 			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge.patchPort, gwBridge.bridgeName, gwBridge.uplinkName, gwBridge.ips, gw.openflowManager, gw.nodeIPManager, watchFactory)
 			if err != nil {

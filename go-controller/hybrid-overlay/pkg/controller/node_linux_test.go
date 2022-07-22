@@ -330,6 +330,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			annotations := createNodeAnnotationsForSubnet(thisSubnet)
 			annotations[hotypes.HybridOverlayDRMAC] = thisDrMAC
+			annotations["k8s.ovn.org/node-gateway-router-lrp-ifaddr"] = "{\"ipv4\":\"100.64.0.3/16\"}"
 			node := createNode(thisNode, "linux", "10.0.0.1", annotations)
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{*node},
@@ -377,6 +378,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			annotations := createNodeAnnotationsForSubnet(thisSubnet)
 			annotations[hotypes.HybridOverlayDRMAC] = thisDrMAC
+			annotations["k8s.ovn.org/node-gateway-router-lrp-ifaddr"] = "{\"ipv4\":\"100.64.0.3/16\"}"
 			node := createNode(thisNode, "linux", "10.0.0.1", annotations)
 			testPod := createPod("test", "pod1", thisNode, pod1CIDR, pod1MAC)
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{

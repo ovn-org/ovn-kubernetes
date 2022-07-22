@@ -473,7 +473,7 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 var _ = ginkgo.Describe("e2e control plane", func() {
 	var svcname = "nettest"
 
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 	var (
 		extDNSIP   string
 		numMasters int
@@ -672,7 +672,7 @@ var _ = ginkgo.Describe("test e2e pod connectivity to host addresses", func() {
 		singleIPMask string
 	)
 
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 
 	ginkgo.BeforeEach(func() {
 		targetIP = "123.123.123.123"
@@ -719,7 +719,7 @@ var _ = ginkgo.Describe("test e2e inter-node connectivity between worker nodes",
 		labelFlag = fmt.Sprintf("name=%s", ovnContainer)
 	)
 
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 
 	// Determine which KIND environment is running by querying the running nodes
 	ginkgo.BeforeEach(func() {
@@ -944,7 +944,7 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		return statuses
 	}
 
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
@@ -1290,7 +1290,7 @@ spec:
 		ginkgo.By("9. Check that the status is of length one and that it is assigned to egress2Node")
 		// There is sometimes a slight delay for the EIP fail over to happen,
 		// so let's use the pollimmediate struct to check if eventually egress2Node becomes the egress node
-		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) { 
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 			statuses := getEgressIPStatusItems()
 			return (len(statuses) == 1) && (statuses[0].Node == egress2Node.name), nil
 		})
@@ -1512,7 +1512,7 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway and update validation", 
 		exGWRemoteIpAlt1 string
 		exGWRemoteIpAlt2 string
 	)
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
@@ -1726,7 +1726,7 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 		exFWDenyCIDR         string
 	)
 
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
@@ -1948,7 +1948,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 		clientContainerName = "npclient"
 	)
 
-	f := framework.NewDefaultFramework("nodeport-ingress-test")
+	f := newPrivelegedTestFramework("nodeport-ingress-test")
 	endpointsSelector := map[string]string{"servicebackend": "true"}
 
 	var endPoints []*v1.Pod
@@ -2494,7 +2494,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 		clientContainerName = "npclient"
 	)
 
-	f := framework.NewDefaultFramework("nodeport-ingress-test")
+	f := newPrivelegedTestFramework("nodeport-ingress-test")
 	hostNetEndpointsSelector := map[string]string{"hostNetservicebackend": "true"}
 	var endPoints []*v1.Pod
 	var nodesHostnames sets.String
@@ -2632,7 +2632,7 @@ var _ = ginkgo.Describe("e2e ingress gateway traffic validation", func() {
 		gwContainer string = "gw-ingress-test-container"
 	)
 
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 
 	type nodeInfo struct {
 		name   string
@@ -2772,7 +2772,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 	keywordInLogs := map[flowMonitoringProtocol]string{
 		netflow_v5: "NETFLOW_V5", ipfix: "IPFIX", sflow: "SFLOW_5"}
 
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 	ginkgo.AfterEach(func() {
 		// tear down the collector container
 		if cid, _ := runCommand("docker", "ps", "-qaf", fmt.Sprintf("name=%s", collectorContainer)); cid != "" {
@@ -2935,7 +2935,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 	var (
 		allDBFiles = []string{path.Join(dirDB, northDBFileName), path.Join(dirDB, southDBFileName)}
 	)
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 
 	// WaitForPodConditionAllowNotFoundError is a wrapper for WaitForPodCondition that allows at most 6 times for the pod not to be found.
 	WaitForPodConditionAllowNotFoundErrors := func(f *framework.Framework, ns, podName, desc string, timeout time.Duration, condition podCondition) error {
@@ -3268,7 +3268,7 @@ var _ = ginkgo.Describe("e2e IGMP validation", func() {
 		multicastSourceCommand = []string{"bash", "-c",
 			fmt.Sprintf("iperf -c %s -u -T 2 -t 3000 -i 5", mcastGroup)}
 	)
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 	ginkgo.It("can retrieve multicast IGMP query", func() {
 		// Enable multicast of the test namespace annotation
 		ginkgo.By(fmt.Sprintf("annotating namespace: %s to enable multicast", f.Namespace.Name))

@@ -36,7 +36,6 @@ const (
 	ovnAppctlCommand   = "ovn-appctl"
 	ovsdbClientCommand = "ovsdb-client"
 	ovsdbToolCommand   = "ovsdb-tool"
-	arpingCommand      = "arping"
 	ipCommand          = "ip"
 	powershellCommand  = "powershell"
 	netshCommand       = "netsh"
@@ -164,7 +163,6 @@ type execHelper struct {
 	ovsdbToolPath   string
 	ovnRunDir       string
 	ipPath          string
-	arpingPath      string
 	powershellPath  string
 	netshPath       string
 	routePath       string
@@ -287,10 +285,6 @@ func SetExecWithoutOVS(exec kexec.Interface) error {
 		}
 	} else {
 		runner.ipPath, err = exec.LookPath(ipCommand)
-		if err != nil {
-			return err
-		}
-		runner.arpingPath, err = exec.LookPath(arpingCommand)
 		if err != nil {
 			return err
 		}
@@ -620,12 +614,6 @@ func RunOvsVswitchdAppCtl(args ...string) (string, string, error) {
 // RunIP runs a command via the iproute2 "ip" utility
 func RunIP(args ...string) (string, string, error) {
 	stdout, stderr, err := run(runner.ipPath, args...)
-	return strings.TrimSpace(stdout.String()), stderr.String(), err
-}
-
-// RunArping runs a command via the "arping" utility
-func RunArping(args ...string) (string, string, error) {
-	stdout, stderr, err := run(runner.arpingPath, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
