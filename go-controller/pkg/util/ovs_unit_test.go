@@ -527,13 +527,13 @@ func TestSetExec(t *testing.T) {
 		{
 			desc:         "positive, test when 'runner' is nil",
 			expectedErr:  nil,
-			onRetArgs:    &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ip", nil}, CallTimes: 9},
+			onRetArgs:    &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ip", nil}, CallTimes: 10},
 			setRunnerNil: true,
 		},
 		{
 			desc:         "positive, test when 'runner' is not nil",
 			expectedErr:  nil,
-			onRetArgs:    &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", nil}, CallTimes: 9},
+			onRetArgs:    &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", nil}, CallTimes: 10},
 			setRunnerNil: false,
 		},
 	}
@@ -562,12 +562,22 @@ func TestSetExecWithoutOVS(t *testing.T) {
 		{
 			desc:        "positive, ip path found",
 			expectedErr: nil,
-			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ip", nil}},
+			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ip", nil}, CallTimes: 2},
+		},
+		{
+			desc:        "positive, sysctl path found",
+			expectedErr: nil,
+			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"sysctl", nil}, CallTimes: 2},
 		},
 		{
 			desc:        "negative, ip path not found",
 			expectedErr: fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`),
 			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`)}},
+		},
+		{
+			desc:        "negative, sysctl path not found",
+			expectedErr: fmt.Errorf(`exec: \"sysctl:\" executable file not found in $PATH`),
+			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", fmt.Errorf(`exec: \"sysctl:\" executable file not found in $PATH`)}},
 		},
 	}
 
@@ -1540,6 +1550,41 @@ func TestRunIP(t *testing.T) {
 			ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgsKexecIface)
 
 			_, _, e := RunIP()
+
+			assert.Equal(t, e, tc.expectedErr)
+			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
+		})
+	}
+}
+
+func TestRunSysctl(t *testing.T) {
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockExecRunner := new(mocks.ExecRunner)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
+	// below is defined in ovs.go
+	runCmdExecRunner = mockExecRunner
+	// note runner is defined in ovs.go file
+	runner = &execHelper{exec: mockKexecIface}
+	tests := []struct {
+		desc                    string
+		expectedErr             error
+		onRetArgsExecUtilsIface *ovntest.TestifyMockHelper
+		onRetArgsKexecIface     *ovntest.TestifyMockHelper
+	}{
+		{
+			desc:                    "positive: run sysctl",
+			expectedErr:             nil,
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
+			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			ovntest.ProcessMockFn(&mockExecRunner.Mock, *tc.onRetArgsExecUtilsIface)
+			ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgsKexecIface)
+
+			_, _, e := RunSysctl("-w", "net.ipv4.conf.eth0.rp_filter=2")
 
 			assert.Equal(t, e, tc.expectedErr)
 			mockExecRunner.AssertExpectations(t)

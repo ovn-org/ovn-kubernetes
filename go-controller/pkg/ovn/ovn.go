@@ -218,6 +218,8 @@ type Controller struct {
 	retryEgressIPPods *retryObjs
 	// Objects for Egress nodes that need to be retried
 	retryEgressNodes *retryObjs
+	// EgressIP Node-specific syncMap used by egressip node event handler
+	addEgressNodeFailed sync.Map
 	// Objects for nodes that need to be retried
 	retryNodes *retryObjs
 	// Objects for Cloud private IP config that need to be retried

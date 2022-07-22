@@ -3596,6 +3596,135 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
+		ginkgo.It("using retry to create egress node with forced error followed by an update", func() {
+			app.Action = func(ctx *cli.Context) error {
+				nodeIPv4 := "192.168.126.51/24"
+				nodeIPv6 := "0:0:0:0:0:feff:c0a8:8e0c/64"
+				node := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node",
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4, nodeIPv6),
+							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
+						},
+					},
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
+					},
+				}
+				fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						&nbdb.LogicalRouter{
+							Name: ovntypes.OVNClusterRouter,
+							UUID: ovntypes.OVNClusterRouter + "-UUID",
+						},
+						&nbdb.LogicalRouter{
+							Name: ovntypes.GWRouterPrefix + node.Name,
+							UUID: ovntypes.GWRouterPrefix + node.Name + "-UUID",
+						},
+						&nbdb.LogicalSwitchPort{
+							UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName + "UUID",
+							Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName,
+							Type: "router",
+							Options: map[string]string{
+								"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + nodeName,
+							},
+						},
+					},
+				})
+				fakeOvn.controller.WatchEgressNodes()
+				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(0))
+
+				_, ipV4Sub, err := net.ParseCIDR(nodeIPv4)
+				_, ipV6Sub, err := net.ParseCIDR(nodeIPv6)
+				node.Labels = map[string]string{
+					"k8s.ovn.org/egress-assignable": "",
+				}
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &node, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				ginkgo.By("Bringing down NBDB")
+				// inject transient problem, nbdb is down
+				fakeOvn.controller.nbClient.Close()
+				gomega.Eventually(func() bool {
+					return fakeOvn.controller.nbClient.Connected()
+				}).Should(gomega.BeFalse())
+
+				// sleep long enough for TransactWithRetry to fail, causing egressnode operations to fail
+				// there is a chance that both egressnode events(node1 removal and node2 update) will end up in the same event queue
+				// sleep for double the time to allow for two consecutive TransactWithRetry timeouts
+				time.Sleep(2 * (types.OVSDBTimeout + time.Second))
+				// check to see if the retry cache has an entry
+				key := node.Name
+				gomega.Eventually(func() *retryObjEntry {
+					return fakeOvn.controller.retryEgressNodes.getObjRetryEntry(key)
+				}).ShouldNot(gomega.BeNil())
+				retryEntry := fakeOvn.controller.retryEgressNodes.getObjRetryEntry(key)
+				ginkgo.By("retry entry new obj should not be nil")
+				gomega.Expect(retryEntry.newObj).NotTo(gomega.BeNil())
+				ginkgo.By("retry entry old obj should be nil")
+				gomega.Expect(retryEntry.oldObj).To(gomega.BeNil())
+
+				node.Labels = map[string]string{}
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+				defer cancel()
+				resetNBClient(connCtx, fakeOvn.controller.nbClient)
+				fakeOvn.controller.retryEgressNodes.setRetryObjWithNoBackoff(key)
+				fakeOvn.controller.retryEgressNodes.requestRetryObjs()
+				// check the cache no longer has the entry
+				gomega.Eventually(func() *retryObjEntry {
+					return fakeOvn.controller.retryEgressNodes.getObjRetryEntry(key)
+				}).Should(gomega.BeNil())
+				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(1))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache).To(gomega.HaveKey(node.Name))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node.Name].egressIPConfig.V4.Net).To(gomega.Equal(ipV4Sub))
+				gomega.Expect(fakeOvn.controller.eIPC.allocator.cache[node.Name].egressIPConfig.V6.Net).To(gomega.Equal(ipV6Sub))
+
+				expectedDatabaseState := []libovsdbtest.TestData{
+					&nbdb.LogicalRouter{
+						Name:     ovntypes.OVNClusterRouter,
+						UUID:     ovntypes.OVNClusterRouter + "-UUID",
+						Policies: []string{"reroute-UUID", "no-reroute-service-UUID"},
+					},
+					&nbdb.LogicalRouterPolicy{
+						Priority: types.DefaultNoRereoutePriority,
+						Match:    "ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14",
+						Action:   nbdb.LogicalRouterPolicyActionAllow,
+						UUID:     "reroute-UUID",
+					},
+					&nbdb.LogicalRouterPolicy{
+						Priority: types.DefaultNoRereoutePriority,
+						Match:    fmt.Sprintf("ip4.src == 10.128.0.0/14 && ip4.dst == %s", config.Gateway.V4JoinSubnet),
+						Action:   nbdb.LogicalRouterPolicyActionAllow,
+						UUID:     "no-reroute-service-UUID",
+					},
+					&nbdb.LogicalRouter{
+						Name: ovntypes.GWRouterPrefix + node.Name,
+						UUID: ovntypes.GWRouterPrefix + node.Name + "-UUID",
+					},
+					&nbdb.LogicalSwitchPort{
+						UUID: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName + "UUID",
+						Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + nodeName,
+						Type: "router",
+						Options: map[string]string{
+							"router-port": types.GWRouterToExtSwitchPrefix + "GR_" + nodeName,
+						},
+					},
+				}
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("egressIP pod recreate with same name (stateful-sets) shouldn't use stale logicalPortCache entries", func() {
 			app.Action = func(ctx *cli.Context) error {
 

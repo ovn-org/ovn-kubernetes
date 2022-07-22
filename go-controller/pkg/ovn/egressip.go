@@ -1600,6 +1600,13 @@ func (oc *Controller) setNodeEgressReachable(nodeName string, isReachable bool) 
 
 func (oc *Controller) addEgressNode(nodeName string) error {
 	var errors []error
+	// Check if EgressIP node create failed and if does try adding it again
+	if node, ok := oc.addEgressNodeFailed.Load(nodeName); ok {
+		failedNode := node.(*kapi.Node)
+		if err := oc.setupNodeForEgress(failedNode); err != nil {
+			return err
+		}
+	}
 	klog.V(5).Infof("Egress node: %s about to be initialized", nodeName)
 	// This option will program OVN to start sending GARPs for all external IPS
 	// that the logical switch port has been configured to use. This is
@@ -1733,15 +1740,17 @@ func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
 	return nil
 }
 
-// addNodeForEgress sets up default logical router policy for every node and
+// setupNodeForEgress sets up default logical router policy for every node and
 // initiates the allocator cache for the node in question, if the node has the
 // necessary annotation.
-func (oc *Controller) addNodeForEgress(node *v1.Node) error {
+func (oc *Controller) setupNodeForEgress(node *v1.Node) error {
 	v4Addr, v6Addr := getNodeInternalAddrs(node)
 	v4ClusterSubnet, v6ClusterSubnet := getClusterSubnets()
 	if err := oc.createDefaultNoRerouteNodePolicies(v4Addr, v6Addr, v4ClusterSubnet, v6ClusterSubnet); err != nil {
+		oc.addEgressNodeFailed.Store(node.Name, node)
 		return err
 	}
+	oc.addEgressNodeFailed.Delete(node.Name)
 	if err := oc.initEgressIPAllocator(node); err != nil {
 		klog.V(5).Infof("Egress node initialization error: %v", err)
 	}
