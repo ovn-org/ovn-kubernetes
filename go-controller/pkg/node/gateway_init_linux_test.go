@@ -122,6 +122,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Cmd:    "ip -4 rule add fwmark 0x1745ec lookup 7 prio 30",
 			Output: "0",
 		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.rp_filter=2",
+			Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
+		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovs-ofctl -O OpenFlow13 --bundle replace-flows breth0 -",
 		})
@@ -695,6 +699,10 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ip -4 rule add fwmark 0x1745ec lookup 7 prio 30",
 			Output: "0",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.rp_filter=2",
+			Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-ofctl show breth0",

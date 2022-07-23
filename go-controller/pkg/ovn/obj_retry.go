@@ -828,7 +828,7 @@ func (oc *Controller) addResource(objectsToRetry *retryObjs, obj interface{}, fr
 
 	case factory.EgressNodeType:
 		node := obj.(*kapi.Node)
-		if err := oc.addNodeForEgress(node); err != nil {
+		if err := oc.setupNodeForEgress(node); err != nil {
 			return err
 		}
 		nodeEgressLabel := util.GetNodeEgressLabel()
@@ -1258,6 +1258,7 @@ func (oc *Controller) iterateRetryResources(r *retryObjs) {
 	var kObj interface{}
 	var err error
 	for objKey, entry := range r.entries {
+		entry.Lock()
 		// check if we need to create the object
 		if entry.newObj != nil {
 			// get the latest version of the object from the informer;
@@ -1277,6 +1278,7 @@ func (oc *Controller) iterateRetryResources(r *retryObjs) {
 		}
 		klog.Infof("Gathered %v resource %s for retry", r.oType, objKey)
 		localRetryEntries = append(localRetryEntries, &localRetryEntry{objKey, entry.newObj, entry.oldObj, kObj})
+		entry.Unlock()
 	}
 	r.retryMutex.Unlock()
 

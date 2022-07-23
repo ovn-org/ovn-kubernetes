@@ -1281,6 +1281,17 @@ func initSvcViaMgmPortRoutingRules(hostSubnets []*net.IPNet) error {
 		}
 	}
 
+	// lastly update the reverse path filtering options for ovn-k8s-mp0 interface to avoid dropping return packets
+	// NOTE: v6 doesn't have rp_filter strict mode block
+	rpFilterLooseMode := "2"
+	// TODO: Convert testing framework to mock golang module utilities. Example:
+	// result, err := sysctl.Sysctl(fmt.Sprintf("net/ipv4/conf/%s/rp_filter", types.K8sMgmtIntfName), rpFilterLooseMode)
+	stdout, stderr, err := util.RunSysctl("-w", fmt.Sprintf("net.ipv4.conf.%s.rp_filter=%s", types.K8sMgmtIntfName, rpFilterLooseMode))
+	if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", types.K8sMgmtIntfName, rpFilterLooseMode) {
+		return fmt.Errorf("could not set the correct rp_filter value for interface %s: stdout: %v, stderr: %v, err: %v",
+			types.K8sMgmtIntfName, stdout, stderr, err)
+	}
+
 	return nil
 }
 
