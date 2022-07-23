@@ -11,7 +11,7 @@ import (
 
 var _ = Describe("Mananagement port tests", func() {
 	BeforeEach(func() {
-		config.PrepareTestConfig()
+		Expect(config.PrepareTestConfig()).To(Succeed())
 	})
 
 	Context("NewManagementPort Creates Management port object according to config.OvnKubeNode.Mode", func() {

@@ -927,7 +927,7 @@ var _ = Describe("Gateway Init Operations", func() {
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
-		config.PrepareTestConfig()
+		Expect(config.PrepareTestConfig()).To(Succeed())
 
 		app = cli.NewApp()
 		app.Name = "test"
@@ -1065,7 +1065,7 @@ var _ = Describe("Gateway Operations DPU", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Restore global default values before each testcase
-		config.PrepareTestConfig()
+		Expect(config.PrepareTestConfig()).To(Succeed())
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
@@ -1172,7 +1172,7 @@ var _ = Describe("Gateway unit tests", func() {
 	origNetlinkInst := util.GetNetLinkOps()
 
 	BeforeEach(func() {
-		config.PrepareTestConfig()
+		Expect(config.PrepareTestConfig()).To(Succeed())
 		netlinkMock = &utilMock.NetLinkOps{}
 		util.SetNetLinkOpMockInst(netlinkMock)
 	})

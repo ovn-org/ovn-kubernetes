@@ -43,7 +43,7 @@ var _ = Describe("Healthcheck tests", func() {
 
 	BeforeEach(func() {
 		execMock = ovntest.NewFakeExec()
-		util.SetExec(execMock)
+		Expect(util.SetExec(execMock)).To(Succeed())
 		factoryMock = &factoryMocks.ObjectCacheInterface{}
 	})
 
