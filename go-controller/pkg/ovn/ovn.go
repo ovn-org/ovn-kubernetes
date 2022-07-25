@@ -681,19 +681,6 @@ func (oc *Controller) WatchNodes() error {
 	return err
 }
 
-// GetNetworkPolicyACLLogging retrieves ACL deny policy logging setting for the Namespace
-func (oc *Controller) GetNetworkPolicyACLLogging(ns string) *ACLLoggingLevels {
-	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
-	if nsInfo == nil {
-		return &ACLLoggingLevels{
-			Allow: "",
-			Deny:  "",
-		}
-	}
-	defer nsUnlock()
-	return &nsInfo.aclLogging
-}
-
 // Verify if controller can support ACL logging and validate annotation
 func (oc *Controller) aclLoggingCanEnable(annotation string, nsInfo *namespaceInfo) bool {
 	if !oc.aclLoggingEnabled || annotation == "" {
