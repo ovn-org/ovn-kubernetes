@@ -25,6 +25,8 @@ import (
 const (
 	egressFirewallAppliedCorrectly = "EgressFirewall Rules applied"
 	egressFirewallAddError         = "EgressFirewall Rules not correctly added"
+	// egressFirewallACLExtIdKey external ID key for egress firewall ACLs
+	egressFirewallACLExtIdKey = "egressFirewall"
 )
 
 type egressFirewall struct {
@@ -131,8 +133,8 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) error {
 	// Update the egressFirewallACL name if needed.
 	namespaceToACLs := map[string][]*nbdb.ACL{}
 	for i := range egressFirewallACLs {
-		egressFirewallACLs[i].Direction = types.DirectionToLPort
-		if namespace, ok := egressFirewallACLs[i].ExternalIDs["egressFirewall"]; ok && namespace != "" {
+		egressFirewallACLs[i].Direction = nbdb.ACLDirectionToLport
+		if namespace, ok := egressFirewallACLs[i].ExternalIDs[egressFirewallACLExtIdKey]; ok && namespace != "" {
 			aclName := buildEgressFwAclName(namespace, egressFirewallACLs[i].Priority)
 			egressFirewallACLs[i].Name = &aclName
 			meterName := types.OvnACLLoggingMeter
@@ -173,7 +175,7 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) error {
 	ovnEgressFirewalls := make(map[string]struct{})
 
 	for _, egressFirewallACL := range egressFirewallACLs {
-		if ns, ok := egressFirewallACL.ExternalIDs["egressFirewall"]; ok {
+		if ns, ok := egressFirewallACL.ExternalIDs[egressFirewallACLExtIdKey]; ok {
 			// Most egressFirewalls will have more then one ACL but we only need to know if there is one for the namespace
 			// so a map is fine and we will add an entry every iteration but because it is a map will overwrite the previous
 			// entry if it already existed
@@ -302,9 +304,9 @@ func (oc *Controller) addEgressFirewallRules(ef *egressFirewall, hashedAddressSe
 		var action string
 		var matchTargets []matchTarget
 		if rule.access == egressfirewallapi.EgressFirewallRuleAllow {
-			action = "allow"
+			action = nbdb.ACLActionAllow
 		} else {
-			action = "drop"
+			action = nbdb.ACLActionDrop
 		}
 		if rule.to.cidrSelector != "" {
 			if utilnet.IsIPv6CIDRString(rule.to.cidrSelector) {
@@ -362,12 +364,12 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 
 	egressFirewallACL := BuildACL(
 		aclName,
-		types.DirectionToLPort,
+		nbdb.ACLDirectionToLport,
 		priority,
 		match,
 		action,
 		aclLogging,
-		map[string]string{"egressFirewall": externalID},
+		map[string]string{egressFirewallACLExtIdKey: externalID},
 		nil,
 	)
 	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, egressFirewallACL)
@@ -394,7 +396,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 func (oc *Controller) deleteEgressFirewallRules(externalID string) error {
 	// Find ACLs for a given egressFirewall
 	pACL := func(item *nbdb.ACL) bool {
-		return item.ExternalIDs["egressFirewall"] == externalID
+		return item.ExternalIDs[egressFirewallACLExtIdKey] == externalID
 	}
 	egressFirewallACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, pACL)
 	if err != nil {
@@ -607,7 +609,7 @@ func (oc *Controller) updateACLLoggingForEgressFirewall(egressFirewallNamespace 
 
 	// Predicate for given egress firewall ACLs
 	p := func(item *nbdb.ACL) bool {
-		return item.ExternalIDs["egressFirewall"] == ef.namespace
+		return item.ExternalIDs[egressFirewallACLExtIdKey] == ef.namespace
 	}
 	if err := UpdateACLLoggingWithPredicate(oc.nbClient, p, &nsInfo.aclLogging); err != nil {
 		return false, fmt.Errorf("unable to update ACL logging in ns %s, err: %v", ef.namespace, err)
