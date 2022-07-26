@@ -586,17 +586,17 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) {
 
 	klog.V(5).Infof("Deleting service %s in namespace %s", service.Name, service.Namespace)
 	name := ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}
+	if svcConfig, exists := npw.getAndDeleteServiceInfo(name); exists {
+		delServiceRules(svcConfig.service, npw)
+	} else {
+		klog.Warningf("Deletion failed No service found in cache for endpoint %s in namespace %s", service.Name, service.Namespace)
+	}
 	// Remove all conntrack entries for the serviceVIPs of this service irrespective of protocol stack
 	// since service deletion is considered as unplugging the network cable and hence graceful termination
 	// is not guaranteed. See https://github.com/kubernetes/kubernetes/issues/108523#issuecomment-1074044415.
 	err := npw.deleteConntrackForService(service)
 	if err != nil {
 		klog.Errorf("Failed to delete conntrack entry for service %v: %v", name, err)
-	}
-	if svcConfig, exists := npw.getAndDeleteServiceInfo(name); exists {
-		delServiceRules(svcConfig.service, npw)
-	} else {
-		klog.Warningf("Deletion failed No service found in cache for endpoint %s in namespace %s", service.Name, service.Namespace)
 	}
 
 }
