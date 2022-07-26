@@ -97,13 +97,12 @@ func NewRetryObjs(
 // immediately during the next retry iteration
 // Used only for testing right now
 func (r *retryObjs) setRetryObjWithNoBackoff(key string) {
-	r.retryMutex.Lock()
-	defer r.retryMutex.Unlock()
-	if entry, ok := r.entries[key]; ok {
+	entry := r.ensureRetryEntryLocked(key, nil)
+	if entry != nil {
 		entry.backoffSec = noBackoff
+		entry.Unlock()
 		return
 	}
-
 	klog.Errorf("Unable to find entry with key %s", key)
 }
 

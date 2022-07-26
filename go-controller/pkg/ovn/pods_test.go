@@ -942,18 +942,20 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Eventually(fakeOvn.controller.nbClient).Should(
 					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{}, []string{"node1"})...))
 
-				// inject transient problem, nbdb is down
+				ginkgo.By("inject transient problem, nbdb is down")
 				fakeOvn.controller.nbClient.Close()
 				gomega.Eventually(func() bool {
 					return fakeOvn.controller.nbClient.Connected()
 				}).Should(gomega.BeFalse())
 
 				// trigger pod add, which will fail with "context deadline exceeded: while awaiting reconnection"
+				ginkgo.By("trigger pod add, which will fail")
 				fakeOvn.controller.WatchPods()
 				// sleep long enough for TransactWithRetry to fail, causing pod add to fail
 				time.Sleep(ovstypes.OVSDBTimeout + time.Second)
 
 				// wait until retry entry appears
+				ginkgo.By("retry entry for the pod should appear")
 				gomega.Eventually(func() *retryObjEntry {
 					return fakeOvn.controller.retryPods.getObjRetryEntry(key)
 				}).ShouldNot(gomega.BeNil())
@@ -964,23 +966,29 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(retryEntry.oldObj).To(gomega.BeNil())
 				gomega.Expect(retryEntry.newObj).ToNot(gomega.BeNil())
 				gomega.Expect(retryEntry.failedAttempts).To(gomega.Equal(uint8(1)))
+
+				ginkgo.By("increase failedAttempts to counter to max, trigger retry, and expect retry entry to disappear")
 				// set failedAttempts to maxFailedAttempts-1, trigger a retry (which will fail due to nbdb being down)
 				// and verify that failedAttempts is now equal to maxFailedAttempts
 				fakeOvn.controller.retryPods.setFailedAttemptsCounterForTestingOnly(key, maxFailedAttempts-1)
 				// reset backoff for immediate retry
 				fakeOvn.controller.retryPods.setRetryObjWithNoBackoff(key)
+
+				ginkgo.By("trigger retry")
 				fakeOvn.controller.retryPods.requestRetryObjs()
 				gomega.Eventually(func() uint8 {
 					entry := fakeOvn.controller.retryPods.getObjRetryEntry(key)
 					return entry.failedAttempts
 				}).Should(gomega.Equal(uint8(maxFailedAttempts))) // no more retries are allowed
 
+				ginkgo.By("restore nbdb connection")
 				// restore nbdb, trigger a retry and verify that the retry entry gets deleted
 				// because it reached maxFailedAttempts and the corresponding pod has NOT been added to OVN
 				connCtx, cancel := context.WithTimeout(context.Background(), ovstypes.OVSDBTimeout)
 				defer cancel()
 				resetNBClient(connCtx, fakeOvn.controller.nbClient)
 
+				ginkgo.By("trigger retry: too many failed attempts, retry entry should be deleted")
 				fakeOvn.controller.retryPods.requestRetryObjs()
 				// check that pod is in API server
 				pod, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podTest.namespace).Get(
