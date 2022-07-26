@@ -1,6 +1,7 @@
 #!/bin/bash
 set -e
 
+GO=${GO:-go}
 source "$(dirname "${BASH_SOURCE}")/init.sh"
 
 # Input:
@@ -23,7 +24,7 @@ build_binaries() {
     set -x
     for bin in "$@"; do
         binbase=$(basename ${bin})
-        env CGO_ENABLED=0 go build -v \
+        env CGO_ENABLED=0 "$GO" build -v \
             -mod vendor \
             -gcflags "${GCFLAGS}" \
             -ldflags "-B ${BUILDID} \
