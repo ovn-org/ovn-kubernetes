@@ -1272,6 +1272,7 @@ func (oc *Controller) iterateRetryResources(r *retryObjs) {
 				} else {
 					klog.Errorf("Failed to look up %s %s in the informers cache,"+
 						" will retry later: %v", r.oType, objKey, err)
+					entry.Unlock()
 					continue
 				}
 			}
