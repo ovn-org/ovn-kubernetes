@@ -195,6 +195,8 @@ spec:
           value: "{{ ovn_hybrid_overlay_enable }}"
         - name: OVN_EGRESSIP_ENABLE
           value: "{{ ovn_egress_ip_enable }}"
+        - name: OVN_EGRESSIP_HEALTHCHECK_PORT
+          value: "{{ ovn_egress_ip_healthcheck_port }}"
         - name: OVN_EGRESSFIREWALL_ENABLE
           value: "{{ ovn_egress_firewall_enable }}"
         - name: OVN_EGRESSQOS_ENABLE

@@ -73,6 +73,7 @@ fi
 # OVN_LFLOW_CACHE_LIMIT - maximum number of logical flow cache entries of ovn-controller
 # OVN_LFLOW_CACHE_LIMIT_KB - maximum size of the logical flow cache of ovn-controller
 # OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
+# OVN_EGRESSIP_HEALTHCHECK_PORT - egress IP node check to use grpc on this port (0 ==> dial to port 9 instead)
 # OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 # OVN_EGRESSQOS_ENABLE - enable egress QoS for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
@@ -211,6 +212,8 @@ ovn_lflow_cache_limit_kb=${OVN_LFLOW_CACHE_LIMIT_KB:-}
 ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 #OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
+#OVN_EGRESSIP_HEALTHCHECK_PORT - egress IP node check to use grpc on this port
+ovn_egress_ip_healthcheck_port=${OVN_EGRESSIP_HEALTHCHECK_PORT:-9107}
 #OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 ovn_egressfirewall_enable=${OVN_EGRESSFIREWALL_ENABLE:-false}
 #OVN_EGRESSQOS_ENABLE - enable egress QoS for ovn-kubernetes
@@ -948,6 +951,12 @@ ovn-master() {
   if [[ ${ovn_egressip_enable} == "true" ]]; then
       egressip_enabled_flag="--enable-egress-ip"
   fi
+
+  egressip_healthcheck_port_flag=
+  if [[ -n "${ovn_egress_ip_healthcheck_port}" ]]; then
+      egressip_healthcheck_port_flag="--egressip-node-healthcheck-port=${ovn_egress_ip_healthcheck_port}"
+  fi
+
   egressfirewall_enabled_flag=
   if [[ ${ovn_egressfirewall_enable} == "true" ]]; then
 	  egressfirewall_enabled_flag="--enable-egress-firewall"
@@ -995,6 +1004,7 @@ ovn-master() {
     ${multicast_enabled_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
     ${egressip_enabled_flag} \
+    ${egressip_healthcheck_port_flag} \
     ${egressfirewall_enabled_flag} \
     ${egressqos_enabled_flag} \
     ${ovnkube_config_duration_enable_flag} \
@@ -1102,6 +1112,11 @@ ovn-node() {
   egressip_enabled_flag=
   if [[ ${ovn_egressip_enable} == "true" ]]; then
       egressip_enabled_flag="--enable-egress-ip"
+  fi
+
+  egressip_healthcheck_port_flag=
+  if [[ -n "${ovn_egress_ip_healthcheck_port}" ]]; then
+      egressip_healthcheck_port_flag="--egressip-node-healthcheck-port=${ovn_egress_ip_healthcheck_port}"
   fi
 
   disable_ovn_iface_id_ver_flag=
@@ -1257,6 +1272,7 @@ ovn-node() {
     ${lflow_cache_limit_kb} \
     ${multicast_enabled_flag} \
     ${egressip_enabled_flag} \
+    ${egressip_healthcheck_port_flag} \
     ${disable_ovn_iface_id_ver_flag} \
     ${netflow_targets} \
     ${sflow_targets} \
