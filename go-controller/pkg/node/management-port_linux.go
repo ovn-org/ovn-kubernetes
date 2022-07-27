@@ -6,7 +6,6 @@ package node
 import (
 	"fmt"
 	"net"
-	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -216,27 +215,14 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 		return warnings, fmt.Errorf("could not create iptables nat chain %q for management port: %v",
 			iptableMgmPortChain, err)
 	}
-	rule := []string{"-o", mpcfg.ifName, "-j", iptableMgmPortChain}
-	if exists, err = cfg.ipt.Exists("nat", "POSTROUTING", rule...); err == nil && !exists {
-		warnings = append(warnings, fmt.Sprintf("missing iptables postrouting nat chain %s, adding it",
-			iptableMgmPortChain))
-		err = cfg.ipt.Insert("nat", "POSTROUTING", 1, rule...)
+
+	requiredRules := []iptRule{
+		generateNATPostRoutingJumpToMgmtPortChain(mpcfg.ifName, getIPTablesProtocol(cfg.gwIP.String())),
+		generateNATMgmtChainSNATRule(mpcfg.ifName, cfg.ifAddr.IP),
 	}
-	if err != nil {
-		return warnings, fmt.Errorf("could not insert iptables rule %q for management port: %v",
-			strings.Join(rule, " "), err)
-	}
-	rule = []string{"-o", mpcfg.ifName, "-j", "SNAT", "--to-source", cfg.ifAddr.IP.String(),
-		"-m", "comment", "--comment", "OVN SNAT to Management Port"}
-	if exists, err = cfg.ipt.Exists("nat", iptableMgmPortChain, rule...); err == nil && !exists {
-		warnings = append(warnings, fmt.Sprintf("missing management port nat rule in chain %s, adding it",
-			iptableMgmPortChain))
-		// NOTE: SNAT to mp0 rule should be the last in the chain, so append it
-		err = cfg.ipt.Append("nat", iptableMgmPortChain, rule...)
-	}
-	if err != nil {
-		return warnings, fmt.Errorf("could not insert iptable rule %q for management port: %v",
-			strings.Join(rule, " "), err)
+
+	if err := ensureIptRules(requiredRules); err != nil {
+		return warnings, err
 	}
 
 	return warnings, nil
@@ -311,5 +297,34 @@ func checkManagementPortHealth(cfg *managementPortConfig) {
 	}
 	if err != nil {
 		klog.Errorf(err.Error())
+	}
+}
+
+func generateNATPostRoutingJumpToMgmtPortChain(ifaceName string, proto iptables.Protocol) iptRule {
+	return iptRule{
+		table:    "nat",
+		chain:    "POSTROUTING",
+		args:     []string{"-o", ifaceName, "-j", iptableMgmPortChain},
+		protocol: proto,
+	}
+}
+
+func generateNATMgmtChainSNATRule(ifaceName string, snatIP net.IP) iptRule {
+	return iptRule{
+		table: "nat",
+		chain: iptableMgmPortChain,
+		args: []string{
+			"-o",
+			ifaceName,
+			"-j",
+			"SNAT",
+			"--to-source",
+			snatIP.String(),
+			"-m",
+			"comment",
+			"--comment",
+			"OVN SNAT to Management Port",
+		},
+		protocol: getIPTablesProtocol(snatIP.String()),
 	}
 }
