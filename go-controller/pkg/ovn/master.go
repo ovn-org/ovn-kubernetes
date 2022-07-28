@@ -321,9 +321,7 @@ func (oc *Controller) StartClusterMaster() error {
 	if config.HybridOverlay.Enabled {
 		oc.hoMaster, err = hocontroller.NewMaster(
 			oc.kube,
-			oc.watchFactory.NodeInformer(),
 			oc.watchFactory.NamespaceInformer(),
-			oc.watchFactory.PodInformer(),
 			oc.nbClient,
 			oc.sbClient,
 			informer.NewDefaultEventHandler,

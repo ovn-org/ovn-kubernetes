@@ -37,8 +37,6 @@ type MasterController struct {
 // NewMaster a new master controller that listens for node events
 func NewMaster(kube kube.Interface,
 	nodeInformer cache.SharedIndexInformer,
-	namespaceInformer cache.SharedIndexInformer,
-	podInformer cache.SharedIndexInformer,
 	libovsdbNBClient libovsdbclient.Client,
 	libovsdbSBClient libovsdbclient.Client,
 	eventHandlerCreateFunction informer.EventHandlerCreateFunction,

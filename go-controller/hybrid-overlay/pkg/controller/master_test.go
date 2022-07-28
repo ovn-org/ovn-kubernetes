@@ -138,8 +138,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
 				f.Core().V1().Nodes().Informer(),
-				f.Core().V1().Namespaces().Informer(),
-				f.Core().V1().Pods().Informer(),
 				libovsdbOvnNBClient,
 				libovsdbOvnSBClient,
 				informer.NewTestEventHandler,
@@ -274,8 +272,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
 				f.Core().V1().Nodes().Informer(),
-				f.Core().V1().Namespaces().Informer(),
-				f.Core().V1().Pods().Informer(),
 				libovsdbOvnNBClient,
 				libovsdbOvnSBClient,
 				informer.NewTestEventHandler,
@@ -577,8 +573,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
 				f.Core().V1().Nodes().Informer(),
-				f.Core().V1().Namespaces().Informer(),
-				f.Core().V1().Pods().Informer(),
 				libovsdbOvnNBClient,
 				libovsdbOvnSBClient,
 				informer.NewTestEventHandler,
@@ -712,8 +706,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
 				f.Core().V1().Nodes().Informer(),
-				f.Core().V1().Namespaces().Informer(),
-				f.Core().V1().Pods().Informer(),
 				libovsdbOvnNBClient,
 				libovsdbOvnSBClient,
 				informer.NewTestEventHandler,
@@ -926,8 +918,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
 				f.Core().V1().Nodes().Informer(),
-				f.Core().V1().Namespaces().Informer(),
-				f.Core().V1().Pods().Informer(),
 				libovsdbOvnNBClient,
 				libovsdbOvnSBClient,
 				informer.NewTestEventHandler,
