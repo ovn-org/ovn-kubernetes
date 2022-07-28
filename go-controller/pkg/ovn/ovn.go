@@ -304,6 +304,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			nbClient:                          libovsdbOvnNBClient,
 			watchFactory:                      wf,
 			egressIPTotalTimeout:              config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout,
+			egressIPNodeHealthCheckPort:       config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort,
 		},
 		loadbalancerClusterCache:  make(map[kapi.Protocol]string),
 		multicastSupport:          config.EnableMulticast,
@@ -403,6 +404,9 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 		}
 		if config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout == 0 {
 			klog.V(2).Infof("EgressIP node reachability check disabled")
+		} else if config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort != 0 {
+			klog.Infof("EgressIP node reachability enabled and using gRPC port %d",
+				config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort)
 		}
 	}
 

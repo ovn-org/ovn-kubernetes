@@ -337,6 +337,7 @@ type OVNKubernetesFeatureConfig struct {
 	EgressIPReachabiltyTotalTimeout int  `gcfg:"egressip-reachability-total-timeout"`
 	EnableEgressFirewall            bool `gcfg:"enable-egress-firewall"`
 	EnableEgressQoS                 bool `gcfg:"enable-egress-qos"`
+	EgressIPNodeHealthCheckPort     int  `gcfg:"egressip-node-healthcheck-port"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -875,6 +876,11 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use EgressQoS CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressQoS,
 		Value:       OVNKubernetesFeature.EnableEgressQoS,
+	},
+	&cli.IntFlag{
+		Name:        "egressip-node-healthcheck-port",
+		Usage:       "Configure EgressIP node reachability using gRPC on this TCP port.",
+		Destination: &cliConfig.OVNKubernetesFeature.EgressIPNodeHealthCheckPort,
 	},
 }
 
