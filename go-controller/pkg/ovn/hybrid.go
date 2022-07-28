@@ -1,137 +1,41 @@
-package controller
+package ovn
 
 import (
 	"fmt"
 	"net"
-	"sync"
 
-	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
-// MasterController is the master hybrid overlay controller
-type MasterController struct {
-	kube             kube.Interface
-	allocator        *subnetallocator.SubnetAllocator
-	nodeEventHandler informer.EventHandler
-	nbClient         libovsdbclient.Client
-	sbClient         libovsdbclient.Client
-}
-
-// NewMaster a new master controller that listens for node events
-func NewMaster(kube kube.Interface,
-	nodeInformer cache.SharedIndexInformer,
-	libovsdbNBClient libovsdbclient.Client,
-	libovsdbSBClient libovsdbclient.Client,
-	eventHandlerCreateFunction informer.EventHandlerCreateFunction,
-) (*MasterController, error) {
-
-	m := &MasterController{
-		kube:      kube,
-		allocator: subnetallocator.NewSubnetAllocator(),
-		nbClient:  libovsdbNBClient,
-		sbClient:  libovsdbSBClient,
-	}
-
-	m.nodeEventHandler = eventHandlerCreateFunction("node", nodeInformer,
-		func(obj interface{}) error {
-			node, ok := obj.(*kapi.Node)
-			if !ok {
-				return fmt.Errorf("object is not a node")
-			}
-			return m.AddNode(node)
-		},
-		func(obj interface{}) error {
-			node, ok := obj.(*kapi.Node)
-			if !ok {
-				return fmt.Errorf("object is not a node")
-			}
-			return m.DeleteNode(node)
-		},
-		informer.ReceiveAllUpdates,
-	)
-
-	// Add our hybrid overlay CIDRs to the subnetallocator
-	for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
-		err := m.allocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// Mark existing hostsubnets as already allocated
-	existingNodes, err := m.kube.GetNodes()
-	if err != nil {
-		return nil, fmt.Errorf("error in initializing/fetching subnets: %v", err)
-	}
-	for _, node := range existingNodes.Items {
-		hostsubnet, err := houtil.ParseHybridOverlayHostSubnet(&node)
-		if err != nil {
-			klog.Warningf(err.Error())
-		} else if hostsubnet != nil {
-			klog.V(5).Infof("Marking existing node %s hybrid overlay NodeSubnet %s as allocated", node.Name, hostsubnet)
-			if err := m.allocator.MarkAllocatedNetwork(hostsubnet); err != nil {
-				utilruntime.HandleError(err)
-			}
-		}
-	}
-
-	return m, nil
-}
-
-// Run starts the controller
-func (m *MasterController) Run(stopCh <-chan struct{}) {
-	defer utilruntime.HandleCrash()
-	klog.Info("Starting Hybrid Overlay Master Controller")
-
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		err := m.nodeEventHandler.Run(informer.DefaultNodeInformerThreadiness, stopCh)
-		if err != nil {
-			klog.Error(err)
-		}
-	}()
-	<-stopCh
-	klog.Info("Shutting down Hybrid Overlay Master workers")
-	wg.Wait()
-	klog.Info("Shut down Hybrid Overlay Master workers")
-}
-
 // hybridOverlayNodeEnsureSubnet allocates a subnet and sets the
 // hybrid overlay subnet annotation. It returns any newly allocated subnet
 // or an error. If an error occurs, the newly allocated subnet will be released.
-func (m *MasterController) hybridOverlayNodeEnsureSubnet(node *kapi.Node, annotator kube.Annotator) (*net.IPNet, error) {
+func (oc *Controller) hybridOverlayNodeEnsureSubnet(node *kapi.Node, annotator kube.Annotator) (*net.IPNet, error) {
 	// Do not allocate a subnet if the node already has one
 	if subnet, _ := houtil.ParseHybridOverlayHostSubnet(node); subnet != nil {
 		return nil, nil
 	}
 
 	// Allocate a new host subnet for this node
-	hostsubnets, err := m.allocator.AllocateNetworks()
+	hostsubnets, err := oc.hybridOverlaySubnetAllocator.AllocateNetworks()
 	if err != nil {
 		return nil, fmt.Errorf("error allocating hybrid overlay HostSubnet for node %s: %v", node.Name, err)
 	}
 
 	if err := annotator.Set(types.HybridOverlayNodeSubnet, hostsubnets[0].String()); err != nil {
-		_ = m.allocator.ReleaseNetwork(hostsubnets[0])
+		_ = oc.hybridOverlaySubnetAllocator.ReleaseNetwork(hostsubnets[0])
 		return nil, err
 	}
 
@@ -139,27 +43,27 @@ func (m *MasterController) hybridOverlayNodeEnsureSubnet(node *kapi.Node, annota
 	return hostsubnets[0], nil
 }
 
-func (m *MasterController) releaseNodeSubnet(nodeName string, subnet *net.IPNet) error {
+func (oc *Controller) releaseHybridOverlayNodeSubnet(nodeName string, subnet *net.IPNet) error {
 	if len(config.HybridOverlay.ClusterSubnets) == 0 {
 		// skip releasing node subnet if hybrid-overlay-cluster-subnets is unset.
 		return nil
 	}
 
-	if err := m.allocator.ReleaseNetwork(subnet); err != nil {
+	if err := oc.hybridOverlaySubnetAllocator.ReleaseNetwork(subnet); err != nil {
 		return fmt.Errorf("error deleting hybrid overlay HostSubnet %s for node %q: %s", subnet, nodeName, err)
 	}
 	klog.Infof("Deleted hybrid overlay HostSubnet %s for node %s", subnet, nodeName)
 	return nil
 }
 
-// handleOverlayPort reconciles the node's overlay port with OVN.
+// handleHybridOverlayPort reconciles the node's overlay port with OVN.
 // It needs to handle the following cases:
 //   - no subnet allocated: unset MAC annotation
 //   - no MAC annotation, no lsp: configure lsp, set annotation
 //   - annotation, no lsp: configure lsp
 //   - annotation, lsp: ensure lsp matches annotation
 //   - no annotation, lsp: set annotation from lsp
-func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Annotator) error {
+func (oc *Controller) handleHybridOverlayPort(node *kapi.Node, annotator kube.Annotator) error {
 	var err error
 	var annotationMAC, portMAC net.HardwareAddr
 	portName := util.GetHybridOverlayPortName(node.Name)
@@ -180,7 +84,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 		// No subnet allocated yet; clean up
 		klog.V(5).Infof("No subnet allocation yet for %s", node.Name)
 		if annotationOK {
-			m.deleteOverlayPort(node)
+			oc.deleteHybridOverlayPort(node)
 			annotator.Delete(types.HybridOverlayDRMAC)
 		}
 		return nil
@@ -188,7 +92,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 
 	// Retrieve port MAC address; if the port isn't set up, portMAC will be nil
 	lsp := &nbdb.LogicalSwitchPort{Name: portName}
-	lsp, err = libovsdbops.GetLogicalSwitchPort(m.nbClient, lsp)
+	lsp, err = libovsdbops.GetLogicalSwitchPort(oc.nbClient, lsp)
 	if err == nil {
 		portMAC, _, _ = util.ExtractPortAddresses(lsp)
 	}
@@ -223,7 +127,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 
 	// we need to setup a reroute policy for hybrid overlay subnet
 	// this is so hybrid pod -> service -> hybrid endpoint will reroute to the DR IP
-	if err := m.setupHybridLRPolicySharedGw(subnets, node.Name, portMAC); err != nil {
+	if err := oc.setupHybridLRPolicySharedGw(subnets, node.Name, portMAC); err != nil {
 		return fmt.Errorf("unable to setup Hybrid Subnet Logical Route Policy for node: %s, error: %v",
 			node.Name, err)
 	}
@@ -238,12 +142,12 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 		}
 		sw := nbdb.LogicalSwitch{Name: node.Name}
 
-		err := libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(m.nbClient, &sw, &lsp)
+		err := libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &lsp)
 		if err != nil {
 			return fmt.Errorf("failed to add hybrid overlay port %+v for node %s: %v", lsp, node.Name, err)
 		}
 		for _, subnet := range subnets {
-			if err := util.UpdateNodeSwitchExcludeIPs(m.nbClient, node.Name, subnet); err != nil {
+			if err := util.UpdateNodeSwitchExcludeIPs(oc.nbClient, node.Name, subnet); err != nil {
 				return err
 			}
 		}
@@ -259,65 +163,17 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 	return nil
 }
 
-func (m *MasterController) deleteOverlayPort(node *kapi.Node) {
+func (oc *Controller) deleteHybridOverlayPort(node *kapi.Node) {
 	klog.Infof("Removing node %s hybrid overlay port", node.Name)
 	portName := util.GetHybridOverlayPortName(node.Name)
 	lsp := nbdb.LogicalSwitchPort{Name: portName}
 	sw := nbdb.LogicalSwitch{Name: node.Name}
-	if err := libovsdbops.DeleteLogicalSwitchPorts(m.nbClient, &sw, &lsp); err != nil {
+	if err := libovsdbops.DeleteLogicalSwitchPorts(oc.nbClient, &sw, &lsp); err != nil {
 		klog.Errorf("Failed deleting hybrind overlay port %s for node %s err: %v", portName, node.Name, err)
 	}
 }
 
-// AddNode handles node additions
-func (m *MasterController) AddNode(node *kapi.Node) error {
-	klog.V(5).Infof("Processing add event for node %s", node.Name)
-	annotator := kube.NewNodeAnnotator(m.kube, node.Name)
-
-	var allocatedSubnet *net.IPNet
-	if houtil.IsHybridOverlayNode(node) {
-		var err error
-		allocatedSubnet, err = m.hybridOverlayNodeEnsureSubnet(node, annotator)
-		if err != nil {
-			return fmt.Errorf("failed to update node %q hybrid overlay subnet annotation: %v", node.Name, err)
-		}
-	} else {
-		if err := m.handleOverlayPort(node, annotator); err != nil {
-			return fmt.Errorf("failed to set up hybrid overlay logical switch port for %s: %v", node.Name, err)
-		}
-	}
-
-	if err := annotator.Run(); err != nil {
-		// Release allocated subnet if any errors occurred
-		if allocatedSubnet != nil {
-			_ = m.releaseNodeSubnet(node.Name, allocatedSubnet)
-		}
-		return fmt.Errorf("failed to set hybrid overlay annotations for %s: %v", node.Name, err)
-	}
-	return nil
-}
-
-// DeleteNode handles node deletions
-func (m *MasterController) DeleteNode(node *kapi.Node) error {
-	klog.V(5).Infof("Processing node delete for %s", node.Name)
-	if subnet, _ := houtil.ParseHybridOverlayHostSubnet(node); subnet != nil {
-		if err := m.releaseNodeSubnet(node.Name, subnet); err != nil {
-			return err
-		}
-	}
-
-	if _, ok := node.Annotations[types.HybridOverlayDRMAC]; ok && !houtil.IsHybridOverlayNode(node) {
-		m.deleteOverlayPort(node)
-	}
-
-	if err := m.removeHybridLRPolicySharedGW(node.Name); err != nil {
-		return err
-	}
-	klog.V(5).Infof("Node delete for %s completed", node.Name)
-	return nil
-}
-
-func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet, nodeName string, portMac net.HardwareAddr) error {
+func (oc *Controller) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet, nodeName string, portMac net.HardwareAddr) error {
 	klog.Infof("Setting up logical route policy for hybrid subnet on node: %s", nodeName)
 	var L3Prefix string
 	for _, nodeSubnet := range nodeSubnets {
@@ -335,7 +191,7 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 				}
 			}
 		} else {
-			nodes, err := m.kube.GetNodes()
+			nodes, err := oc.kube.GetNodes()
 			if err != nil {
 				return err
 			}
@@ -366,7 +222,7 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 				Match:    matchStr,
 			}
 
-			if err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(m.nbClient, ovntypes.OVNClusterRouter, &logicalRouterPolicy, func(item *nbdb.LogicalRouterPolicy) bool {
+			if err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.nbClient, ovntypes.OVNClusterRouter, &logicalRouterPolicy, func(item *nbdb.LogicalRouterPolicy) bool {
 				return item.Priority == logicalRouterPolicy.Priority &&
 					item.ExternalIDs["name"] == logicalRouterPolicy.ExternalIDs["name"]
 			}, &logicalRouterPolicy.Nexthops, &logicalRouterPolicy.Match, &logicalRouterPolicy.Action); err != nil {
@@ -374,12 +230,12 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 			}
 
 			logicalPort := ovntypes.RouterToSwitchPrefix + nodeName
-			if err := util.CreateMACBinding(m.sbClient, logicalPort, ovntypes.OVNClusterRouter, portMac, drIP); err != nil {
+			if err := util.CreateMACBinding(oc.sbClient, logicalPort, ovntypes.OVNClusterRouter, portMac, drIP); err != nil {
 				return fmt.Errorf("failed to create MAC Binding for hybrid overlay: %v", err)
 			}
 
 			// Logic route policy to steer packet from external to nodePort service backed by non-ovnkube pods to hybrid overlay nodes
-			gwLRPIfAddrs, err := util.GetLRPAddrs(m.nbClient, ovntypes.GWRouterToJoinSwitchPrefix+ovntypes.GWRouterPrefix+nodeName)
+			gwLRPIfAddrs, err := util.GetLRPAddrs(oc.nbClient, ovntypes.GWRouterToJoinSwitchPrefix+ovntypes.GWRouterPrefix+nodeName)
 			if err != nil {
 				return err
 			}
@@ -399,7 +255,7 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 				Match:    grMatchStr,
 			}
 
-			if err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(m.nbClient, ovntypes.OVNClusterRouter, &grLogicalRouterPolicy, func(item *nbdb.LogicalRouterPolicy) bool {
+			if err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.nbClient, ovntypes.OVNClusterRouter, &grLogicalRouterPolicy, func(item *nbdb.LogicalRouterPolicy) bool {
 				return item.Priority == grLogicalRouterPolicy.Priority &&
 					item.ExternalIDs["name"] == grLogicalRouterPolicy.ExternalIDs["name"]
 			}, &grLogicalRouterPolicy.Nexthops, &grLogicalRouterPolicy.Match, &grLogicalRouterPolicy.Action); err != nil {
@@ -416,7 +272,7 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 					"name": ovntypes.HybridSubnetPrefix + nodeName,
 				},
 			}
-			if err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(m.nbClient, ovntypes.OVNClusterRouter, &clutsterRouterStaticRoutes, func(item *nbdb.LogicalRouterStaticRoute) bool {
+			if err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.nbClient, ovntypes.OVNClusterRouter, &clutsterRouterStaticRoutes, func(item *nbdb.LogicalRouterStaticRoute) bool {
 				return item.IPPrefix == clutsterRouterStaticRoutes.IPPrefix && item.Nexthop == clutsterRouterStaticRoutes.Nexthop &&
 					item.ExternalIDs["name"] == clutsterRouterStaticRoutes.ExternalIDs["name"]
 			}); err != nil {
@@ -425,7 +281,7 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 			klog.Infof("Created hybrid overlay logical route static route at cluster router for node %s", nodeName)
 
 			// Static route to steer packets from external to nodePort service backed by pods on hybrid overlay node to cluster router.
-			drLRPIfAddrs, err := util.GetLRPAddrs(m.nbClient, ovntypes.GWRouterToJoinSwitchPrefix+ovntypes.OVNClusterRouter)
+			drLRPIfAddrs, err := util.GetLRPAddrs(oc.nbClient, ovntypes.GWRouterToJoinSwitchPrefix+ovntypes.OVNClusterRouter)
 			if err != nil {
 				return err
 			}
@@ -440,7 +296,7 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 					"name": ovntypes.HybridSubnetPrefix + nodeName + "-gr",
 				},
 			}
-			if err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(m.nbClient, ovntypes.GWRouterPrefix+nodeName, &nodeGWRouterStaticRoutes, func(item *nbdb.LogicalRouterStaticRoute) bool {
+			if err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.nbClient, ovntypes.GWRouterPrefix+nodeName, &nodeGWRouterStaticRoutes, func(item *nbdb.LogicalRouterStaticRoute) bool {
 				return item.IPPrefix == nodeGWRouterStaticRoutes.IPPrefix && item.Nexthop == nodeGWRouterStaticRoutes.Nexthop &&
 					item.ExternalIDs["name"] == nodeGWRouterStaticRoutes.ExternalIDs["name"]
 			}); err != nil {
@@ -452,21 +308,21 @@ func (m *MasterController) setupHybridLRPolicySharedGw(nodeSubnets []*net.IPNet,
 	return nil
 }
 
-func (m *MasterController) removeHybridLRPolicySharedGW(nodeName string) error {
+func (oc *Controller) removeHybridLRPolicySharedGW(nodeName string) error {
 	name := ovntypes.HybridSubnetPrefix + nodeName
 
-	if err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(m.nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterPolicy) bool {
+	if err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterPolicy) bool {
 		return item.ExternalIDs["name"] == ovntypes.HybridSubnetPrefix+nodeName || item.ExternalIDs["name"] == ovntypes.HybridSubnetPrefix+nodeName+"-gr"
 	}); err != nil {
 		return fmt.Errorf("failed to delete policy %s from %s, error: %v", name, ovntypes.OVNClusterRouter, err)
 	}
 
-	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(m.nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterStaticRoute) bool {
+	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterStaticRoute) bool {
 		return item.ExternalIDs["name"] == name
 	}); err != nil {
 		return fmt.Errorf("failed to delete static route %s from %s, error: %v", name, ovntypes.OVNClusterRouter, err)
 	}
-	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(m.nbClient, ovntypes.GWRouterPrefix+nodeName, func(item *nbdb.LogicalRouterStaticRoute) bool {
+	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(oc.nbClient, ovntypes.GWRouterPrefix+nodeName, func(item *nbdb.LogicalRouterStaticRoute) bool {
 		return item.ExternalIDs["name"] == name+"-gr"
 	}); err != nil {
 		return fmt.Errorf("failed to delete static route %s from %s, error: %v", name+"gr", ovntypes.GWRouterPrefix+nodeName, err)

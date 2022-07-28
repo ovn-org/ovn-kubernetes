@@ -21,14 +21,15 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 
+	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -223,7 +224,8 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 // Upon deletion of a node, the switch will be deleted
 //
 // TODO: Verify that the cluster was not already called with a different global subnet
-//  If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
+//
+//	If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
 func (oc *Controller) StartClusterMaster() error {
 	klog.Infof("Starting cluster master")
 
@@ -274,6 +276,15 @@ func (oc *Controller) StartClusterMaster() error {
 		klog.V(5).Infof("Added network range %s to the allocator", clusterEntry.CIDR)
 		util.CalculateHostSubnetsForClusterEntry(clusterEntry, &v4HostSubnetCount, &v6HostSubnetCount)
 	}
+	if config.HybridOverlay.Enabled {
+		for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
+			err := oc.hybridOverlaySubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
+			if err != nil {
+				return err
+			}
+			klog.V(5).Infof("Added network range %s to the hybrid overlay allocator", clusterEntry.CIDR)
+		}
+	}
 	nodeNames := []string{}
 	for _, node := range existingNodes.Items {
 		nodeNames = append(nodeNames, node.Name)
@@ -316,19 +327,6 @@ func (oc *Controller) StartClusterMaster() error {
 	if err := oc.SetupMaster(nodeNames); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
-	}
-
-	if config.HybridOverlay.Enabled {
-		oc.hoMaster, err = hocontroller.NewMaster(
-			oc.kube,
-			oc.watchFactory.NamespaceInformer(),
-			oc.nbClient,
-			oc.sbClient,
-			informer.NewDefaultEventHandler,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to set up hybrid overlay master: %v", err)
-		}
 	}
 
 	return nil
@@ -1205,9 +1203,23 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 		if !ok {
 			return fmt.Errorf("spurious object in syncNodes: %v", tmp)
 		}
-		foundNodes.Insert(node.Name)
-
 		hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
+		if config.HybridOverlay.Enabled && len(hostSubnets) == 0 && houtil.IsHybridOverlayNode(node) {
+			// this is a hybrid overlay node so mark as allocated from the hybrid overlay subnet allocator
+			hostSubnet, err := houtil.ParseHybridOverlayHostSubnet(node)
+			if err != nil {
+				klog.Warning(err.Error())
+			} else if hostSubnet != nil {
+				klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnet)
+				if err := oc.hybridOverlaySubnetAllocator.MarkAllocatedNetwork(hostSubnet); err != nil {
+					utilruntime.HandleError(err)
+				}
+			}
+			// there is nothing left to be done if this is a hybrid overlay node
+			continue
+		}
+
+		foundNodes.Insert(node.Name)
 		klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnets)
 		for _, hostSubnet := range hostSubnets {
 			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostSubnet)
@@ -1332,6 +1344,20 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 		if err != nil {
 			return fmt.Errorf("nodeAdd: error adding noHost subnet for node %s: %w", node.Name, err)
 		}
+		if config.HybridOverlay.Enabled && houtil.IsHybridOverlayNode(node) {
+			annotator := kube.NewNodeAnnotator(oc.kube, node.Name)
+			allocatedSubnet, err := oc.hybridOverlayNodeEnsureSubnet(node, annotator)
+			if err != nil {
+				return fmt.Errorf("failed to update node %s hybrid overlay subnet annotation: %v", node.Name, err)
+			}
+			if err := annotator.Run(); err != nil {
+				// Release allocated subnet if any errors occurred
+				if allocatedSubnet != nil {
+					_ = oc.releaseHybridOverlayNodeSubnet(node.Name, allocatedSubnet)
+				}
+				return fmt.Errorf(" failed to set hybrid overlay annotations for node %s: %v", node.Name, err)
+			}
+		}
 		oc.clearInitialNodeNetworkUnavailableCondition(node)
 		return nil
 	}
@@ -1370,6 +1396,17 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 	// delete stale chassis in SBDB if any
 	if err := oc.deleteStaleNodeChassis(node); err != nil {
 		errs = append(errs, err)
+	}
+
+	if config.HybridOverlay.Enabled {
+		annotator := kube.NewNodeAnnotator(oc.kube, node.Name)
+		if err := oc.handleHybridOverlayPort(node, annotator); err != nil {
+			errs = append(errs, fmt.Errorf("failed to set up hybrid overlay logical switch port for %s: %v", node.Name, err))
+		}
+		if err := annotator.Run(); err != nil {
+			errs = append(errs, fmt.Errorf("failed to set hybrid overlay annotations for node %s: %v", node.Name, err))
+		}
+
 	}
 
 	oc.clearInitialNodeNetworkUnavailableCondition(node)
@@ -1415,6 +1452,19 @@ func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
 	klog.V(5).Infof("Deleting Node %q. Removing the node from "+
 		"various caches", node.Name)
 
+	if config.HybridOverlay.Enabled {
+		if subnet, _ := houtil.ParseHybridOverlayHostSubnet(node); subnet != nil {
+			if err := oc.releaseHybridOverlayNodeSubnet(node.Name, subnet); err != nil {
+				return err
+			}
+		}
+		if _, ok := node.Annotations[hotypes.HybridOverlayDRMAC]; ok && !houtil.IsHybridOverlayNode(node) {
+			oc.deleteHybridOverlayPort(node)
+		}
+		if err := oc.removeHybridLRPolicySharedGW(node.Name); err != nil {
+			return err
+		}
+	}
 	nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
 	if err := oc.deleteNode(node.Name, nodeSubnets); err != nil {
 		return err
