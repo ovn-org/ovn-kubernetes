@@ -1,11 +1,13 @@
 package node
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/pkg/errors"
 
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -20,56 +22,39 @@ type iptRule struct {
 	protocol iptables.Protocol
 }
 
-//
-//
-//func addIptRules(rules []iptRule) error {
-//	var addErrors, err error
-//	var ipt util.IPTablesHelper
-//	for _, r := range rules {
-//		klog.V(5).Infof("Adding rule in table: %s, chain: %s with args: \"%s\" for protocol: %v ",
-//			r.table, r.chain, strings.Join(r.args, " "), r.protocol)
-//		if ipt, err = util.GetIPTablesHelper(r.protocol); err != nil {
-//			addErrors = errors.Wrapf(addErrors,
-//				"Failed to add iptables %s/%s rule %q: %v", r.table, r.chain, strings.Join(r.args, " "), err)
-//			continue
-//		}
-//		if err = ipt.NewChain(r.table, r.chain); err != nil {
-//			klog.V(5).Infof("Chain: \"%s\" in table: \"%s\" already exists, skipping creation: %v",
-//				r.chain, r.table, err)
-//		}
-//		exists, err := ipt.Exists(r.table, r.chain, r.args...)
-//		if !exists && err == nil {
-//			err = ipt.Insert(r.table, r.chain, 1, r.args...)
-//		}
-//		if err != nil {
-//			addErrors = errors.Wrapf(addErrors, "failed to add iptables %s/%s rule %q: %v",
-//				r.table, r.chain, strings.Join(r.args, " "), err)
-//		}
-//	}
-//	return addErrors
-//}
-//
-//func delIptRules(rules []iptRule) error {
-//	var delErrors, err error
-//	var ipt util.IPTablesHelper
-//	for _, r := range rules {
-//		klog.V(5).Infof("Deleting rule in table: %s, chain: %s with args: \"%s\" for protocol: %v ",
-//			r.table, r.chain, strings.Join(r.args, " "), r.protocol)
-//		if ipt, err = util.GetIPTablesHelper(r.protocol); err != nil {
-//			delErrors = errors.Wrapf(delErrors,
-//				"Failed to delete iptables %s/%s rule %q: %v", r.table, r.chain, strings.Join(r.args, " "), err)
-//			continue
-//		}
-//		if exists, err := ipt.Exists(r.table, r.chain, r.args...); err == nil && exists {
-//			err := ipt.Delete(r.table, r.chain, r.args...)
-//			if err != nil {
-//				delErrors = errors.Wrapf(delErrors, "failed to delete iptables %s/%s rule %q: %v",
-//					r.table, r.chain, strings.Join(r.args, " "), err)
-//			}
-//		}
-//	}
-//	return delErrors
-//}
+// IsEqual checks if 2 rules are equal. This func is useful to check if a
+// certain rule is already provisioned.
+func (r iptRule) IsEqual(rule string) bool {
+
+	leftBucket := sets.NewString(parseRule(rule)...)
+	rightBucket := sets.NewString(r.args...)
+	return leftBucket.Equal(rightBucket)
+}
+
+func shouldSkipRule(ruleSpec ...string) bool {
+	return len(ruleSpec) == 0
+}
+
+func parseRule(rule string) []string {
+	re := regexp.MustCompile(`"[^"]+"`)
+
+	ruleCopy := rule
+	var params []string
+	quotedParams := re.FindAllString(rule, -1)
+	for _, s := range quotedParams {
+		ruleCopy = strings.Replace(ruleCopy, s, "", -1)
+		params = append(params, s[1:len(s)-1])
+	}
+
+	space := regexp.MustCompile(`\s+`)
+	ruleCopy = space.ReplaceAllString(ruleCopy, " ")
+
+	return append(ruleSpec(ruleCopy), params...)
+}
+
+func ruleSpec(rule string) []string {
+	return strings.Split(rule, " ")[2:]
+}
 
 func addIptRules(rules []iptRule) error {
 	var addErrors error
