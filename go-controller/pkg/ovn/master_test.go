@@ -1004,7 +1004,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				gomega.Expect(retryEntry.oldObj).To(gomega.BeNil())
 				gomega.Expect(retryEntry.ignore).To(gomega.BeTrue())
 			}
-			clusterController.retryNodes.deleteRetryObj(testNode.Name, true)
+			clusterController.retryNodes.deleteRetryObj(testNode.Name, nil)
 			gomega.Expect(clusterController.retryNodes.entries[testNode.Name]).To(gomega.BeNil())
 			var clusterSubnets []*net.IPNet
 			for _, clusterSubnet := range config.Default.ClusterSubnets {

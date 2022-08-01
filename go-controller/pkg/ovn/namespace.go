@@ -359,7 +359,7 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 			klog.Errorf("Failed to delete network policy: %s, error: %v", key, err)
 			oc.retryNetworkPolicies.unSkipRetryObj(key)
 		} else {
-			oc.retryNetworkPolicies.deleteRetryObj(key, true)
+			oc.retryNetworkPolicies.deleteRetryObj(key, nil)
 			delete(nsInfo.networkPolicies, np.name)
 		}
 	}

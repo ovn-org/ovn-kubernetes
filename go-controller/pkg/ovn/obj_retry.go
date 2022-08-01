@@ -97,13 +97,12 @@ func NewRetryObjs(
 // immediately during the next retry iteration
 // Used only for testing right now
 func (r *retryObjs) setRetryObjWithNoBackoff(key string) {
-	r.retryMutex.Lock()
-	defer r.retryMutex.Unlock()
-	if entry, ok := r.entries[key]; ok {
+	entry := r.ensureRetryEntryLocked(key, nil)
+	if entry != nil {
 		entry.backoffSec = noBackoff
+		entry.Unlock()
 		return
 	}
-
 	klog.Errorf("Unable to find entry with key %s", key)
 }
 
@@ -193,16 +192,22 @@ func (r *retryObjs) unSkipRetryObj(key string) {
 }
 
 // deleteRetryObj deletes a specific entry from the map
-func (r *retryObjs) deleteRetryObj(key string, withLock bool) {
-	if withLock {
-		entry := r.ensureRetryEntryLocked(key, nil)
-		if entry != nil {
-			defer entry.Unlock()
-		}
+func (r *retryObjs) deleteRetryObj(key string, lockedEntry *retryObjEntry) {
+	if lockedEntry != nil {
+		// thread is already holding entry lock
+		// unlock, since retryMutex lock can't be taken with locked entry - to avoid deadlocks
+		lockedEntry.Unlock()
 	}
 	r.retryMutex.Lock()
-	delete(r.entries, key)
-	r.retryMutex.Unlock()
+	defer r.retryMutex.Unlock()
+	// entry here can be different from lockedEntry
+	// if a new object was created it will be deleted from the map instead
+	entry := r.entries[key]
+	if entry != nil {
+		entry.Lock()
+		delete(r.entries, key)
+		entry.Unlock()
+	}
 }
 
 // skipRetryObj sets a specific entry from the map to be ignored for subsequent retries
@@ -230,34 +235,17 @@ func (r *retryObjs) checkRetryObj(key string) bool {
 // then the function will try to create a new retryEntry in the map if , otherwise it will return nil.
 func (r *retryObjs) ensureRetryEntryLocked(key string, newRetryEntry *retryObjEntry) *retryObjEntry {
 	r.retryMutex.Lock()
+	defer r.retryMutex.Unlock()
 	entry := r.entries[key]
-	if entry != nil {
-		// do not hold on retryMutex while waiting on retryEntry to Lock
-		r.retryMutex.Unlock()
-
-		// take the lock now
-		entry.Lock()
-
-		// Check that the retryEntry wasn't deleted while we were waiting for its lock
-		r.retryMutex.Lock()
-		_, ok := r.entries[key]
-		if ok {
-			r.retryMutex.Unlock()
-			return entry
+	if entry == nil {
+		if newRetryEntry != nil {
+			entry = newRetryEntry
+			r.entries[key] = entry
+		} else {
+			return nil
 		}
-		// since the entry went missing from the map, fallback below to assign the newRetryEntry
-		// with retryMutex locked from above
-		entry.Unlock()
-		entry = nil
 	}
-
-	if newRetryEntry != nil {
-		entry = newRetryEntry
-		r.entries[key] = entry
-		// this is fine since no one knows about this newRetryEntry yet
-		entry.Lock()
-	}
-	r.retryMutex.Unlock()
+	entry.Lock()
 	return entry
 }
 
@@ -1151,14 +1139,17 @@ func (oc *Controller) resourceRetry(r *retryObjs, lre *localRetryEntry, now time
 		klog.V(5).Infof("%v resource %s was not found in the iterateRetryResources map while retrying resource setup", r.oType, objKey)
 		return
 	}
-	defer entry.Unlock()
+	// can't defer entry.Unlock(), since it needs to be manually unlocked if we call deleteRetryObj
+	// check entry.Unlock() is called before every return
 	if entry.ignore {
 		klog.V(5).Infof("Skipping %v resource %s setup since ignore is set to true", r.oType, objKey)
+		entry.Unlock()
 		return
 	} else if entry.failedAttempts >= maxFailedAttempts {
 		klog.Warningf("Dropping retry entry for %s %s: exceeded number of failed attempts",
 			r.oType, objKey)
-		r.deleteRetryObj(objKey, false)
+		r.deleteRetryObj(objKey, entry)
+		// deleteRetryObj will unlock entry
 		return
 	}
 	forceRetry := false
@@ -1171,6 +1162,7 @@ func (oc *Controller) resourceRetry(r *retryObjs, lre *localRetryEntry, now time
 	objTimer := entry.timeStamp.Add(backoff)
 	if !forceRetry && now.Before(objTimer) {
 		klog.V(5).Infof("Attempting retry of %s %s before timer (time: %s): skip", r.oType, objKey, objTimer)
+		entry.Unlock()
 		return
 	}
 
@@ -1199,6 +1191,7 @@ func (oc *Controller) resourceRetry(r *retryObjs, lre *localRetryEntry, now time
 			klog.Infof("%v retry update failed for %s, will try again later: %v", r.oType, objKey, err)
 			entry.timeStamp = time.Now()
 			entry.failedAttempts++
+			entry.Unlock()
 			return
 		}
 		// successfully cleaned up new and old object, remove it from the retry cache
@@ -1211,12 +1204,14 @@ func (oc *Controller) resourceRetry(r *retryObjs, lre *localRetryEntry, now time
 			if !isResourceScheduled(r.oType, entry.oldObj) {
 				klog.V(5).Infof("Retry: %s %s not scheduled", r.oType, objKey)
 				entry.failedAttempts++
+				entry.Unlock()
 				return
 			}
 			if err := oc.deleteResource(r, entry.oldObj, entry.config); err != nil {
 				klog.Infof("Retry delete failed for %s %s, will try again later: %v", r.oType, objKey, err)
 				entry.timeStamp = time.Now()
 				entry.failedAttempts++
+				entry.Unlock()
 				return
 			}
 			// successfully cleaned up old object, remove it from the retry cache
@@ -1229,12 +1224,14 @@ func (oc *Controller) resourceRetry(r *retryObjs, lre *localRetryEntry, now time
 			if !isResourceScheduled(r.oType, entry.newObj) {
 				klog.V(5).Infof("Retry: %s %s not scheduled", r.oType, objKey)
 				entry.failedAttempts++
+				entry.Unlock()
 				return
 			}
 			if err := oc.addResource(r, entry.newObj, true); err != nil {
 				klog.Infof("Retry add failed for %s %s, will try again later: %v", r.oType, objKey, err)
 				entry.timeStamp = time.Now()
 				entry.failedAttempts++
+				entry.Unlock()
 				return
 			}
 			// successfully cleaned up new object, remove it from the retry cache
@@ -1246,7 +1243,8 @@ func (oc *Controller) resourceRetry(r *retryObjs, lre *localRetryEntry, now time
 	if initObj != nil {
 		oc.recordSuccessEvent(r.oType, initObj)
 	}
-	r.deleteRetryObj(objKey, false)
+	r.deleteRetryObj(objKey, entry)
+	// deleteRetryObj will unlock entry
 }
 
 // iterateRetryResources checks if any outstanding resource objects exist and if so it tries to
@@ -1437,7 +1435,7 @@ func (oc *Controller) processObjectInTerminalState(objectsToRetry *retryObjs, ob
 		return
 	}
 	objectsToRetry.removeDeleteFromRetryObj(key)
-	objectsToRetry.deleteRetryObj(key, true)
+	objectsToRetry.deleteRetryObj(key, nil)
 }
 
 // WatchResource starts the watching of a resource type, manages its retry entries and calls
@@ -1513,7 +1511,7 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 					return
 				}
 				klog.Infof("Creating %s %s took: %v", objectsToRetry.oType, key, time.Since(start))
-				objectsToRetry.deleteRetryObj(key, true)
+				objectsToRetry.deleteRetryObj(key, nil)
 				oc.recordSuccessEvent(objectsToRetry.oType, obj)
 			},
 
@@ -1644,7 +1642,7 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 						return
 					}
 				}
-				objectsToRetry.deleteRetryObj(newKey, true)
+				objectsToRetry.deleteRetryObj(newKey, nil)
 				oc.recordSuccessEvent(objectsToRetry.oType, newer)
 
 			},
@@ -1672,7 +1670,7 @@ func (oc *Controller) WatchResource(objectsToRetry *retryObjs) (*factory.Handler
 					klog.Errorf("Failed to delete %s %s, error: %v", objectsToRetry.oType, key, err)
 					return
 				}
-				objectsToRetry.deleteRetryObj(key, true)
+				objectsToRetry.deleteRetryObj(key, nil)
 				oc.recordSuccessEvent(objectsToRetry.oType, obj)
 			},
 		},

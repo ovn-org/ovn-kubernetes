@@ -747,7 +747,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				fakeOvn.controller.retryPods.unSkipRetryObj(key)
 				gomega.Expect(fakeOvn.controller.retryPods.entries[key].ignore).To(gomega.BeFalse())
 
-				fakeOvn.controller.retryPods.deleteRetryObj(key, true)
+				fakeOvn.controller.retryPods.deleteRetryObj(key, nil)
 				gomega.Expect(fakeOvn.controller.retryPods.entries[key]).To(gomega.BeNil())
 				return nil
 			}
