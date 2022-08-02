@@ -791,8 +791,38 @@ func (oc *Controller) executeCloudPrivateIPConfigChange(egressIPName string, toA
 			}
 		}
 	}
+	// Merge ops into the existing pendingCloudPrivateIPConfigsOps.
+	// This allows us to:
+	// a) execute only the new ops
+	// b) keep track of any pending changes
 	if len(ops) > 0 {
-		oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName] = ops
+		if _, ok := oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName]; !ok {
+			// Set all operations for the EgressIP object if none are in the cache currently.
+			oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName] = ops
+		} else {
+			for cloudPrivateIP, op := range ops {
+				if _, ok := oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName][cloudPrivateIP]; !ok {
+					// If this specific EgressIP object's CloudPrivateIPConfig address currently has no
+					// op, simply set it.
+					oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName][cloudPrivateIP] = op
+				} else {
+					// If an existing operation for this CloudPrivateIP exists, then the following logic should
+					// apply:
+					// If toDelete is currently set: keep the current toDelete. Theoretically, the oldest toDelete
+					// is the good one. If toDelete if currently not set, overwrite it with the new value.
+					// If toAdd is currently set: overwrite with the new toAdd. Theoretically, the newest toAdd is
+					// the good one.
+					// Therefore, only replace toAdd over a previously existing op and only replace toDelete if
+					// it's unset.
+					if op.toAdd != "" {
+						oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName][cloudPrivateIP].toAdd = op.toAdd
+					}
+					if oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName][cloudPrivateIP].toDelete == "" {
+						oc.eIPC.pendingCloudPrivateIPConfigsOps[egressIPName][cloudPrivateIP].toDelete = op.toDelete
+					}
+				}
+			}
+		}
 	}
 	return oc.executeCloudPrivateIPConfigOps(egressIPName, ops)
 }
@@ -850,11 +880,18 @@ func (oc *Controller) executeCloudPrivateIPConfigOps(egressIPName string, ops ma
 				oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "CloudAssignmentFailed", "egress IP: %s for object EgressIP: %s could not be created, err: %v", egressIP, egressIPName, err)
 				return fmt.Errorf("cloud add request failed for CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfigName, err)
 			}
-			// toDelete is non-empty, this indicates an DELETE for which
-			// the object **must** exist, if not: that's an error.
+			// toDelete is non-empty, this indicates a DELETE - if the object does not exist, log an Info message and continue with the next op.
+			// The reason for why we are not throwing an error here is that desired state (deleted) == isState (object not found).
+			// If for whatever reason we have a pending toDelete op for a deleted object, then this op should simply be silently ignored.
+			// Any other error, return an error to trigger a retry.
 		} else if op.toDelete != "" {
 			if err != nil {
-				return fmt.Errorf("cloud deletion request failed for CloudPrivateIPConfig: %s, could not get item, err: %v", cloudPrivateIPConfigName, err)
+				if apierrors.IsNotFound(err) {
+					klog.Infof("Cloud deletion request failed for CloudPrivateIPConfig: %s, item already deleted, err: %v", cloudPrivateIPConfigName, err)
+					continue
+				} else {
+					return fmt.Errorf("cloud deletion request failed for CloudPrivateIPConfig: %s, could not get item, err: %v", cloudPrivateIPConfigName, err)
+				}
 			}
 			if err := oc.kube.DeleteCloudPrivateIPConfig(cloudPrivateIPConfigName); err != nil {
 				eIPRef := kapi.ObjectReference{
