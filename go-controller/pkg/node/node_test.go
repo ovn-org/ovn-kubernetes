@@ -178,7 +178,7 @@ var _ = Describe("Node", func() {
 
 		BeforeEach(func() {
 			// Restore global default values before each testcase
-			config.PrepareTestConfig()
+			Expect(config.PrepareTestConfig()).To(Succeed())
 
 			app = cli.NewApp()
 			app.Name = "test"
