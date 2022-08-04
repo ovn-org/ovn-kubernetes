@@ -1390,7 +1390,10 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 	// if per pod SNAT is being used, then l3 gateway config is required to be able to add pods
 	if _, gwFailed := oc.gatewaysFailed.Load(node.Name); !gwFailed || !config.Gateway.DisableSNATMultipleGWs {
 		if nSyncs.syncNode || nSyncs.syncGw { // do this only if it is a new node add or a gateway sync happened
-			options := metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String()}
+			options := metav1.ListOptions{
+				FieldSelector:   fields.OneTermEqualSelector("spec.nodeName", node.Name).String(),
+				ResourceVersion: "0",
+			}
 			pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
 			if err != nil {
 				errs = append(errs, err)
