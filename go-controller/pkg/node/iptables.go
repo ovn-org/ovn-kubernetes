@@ -134,3 +134,15 @@ func getIPTablesProtocol(ip string) iptables.Protocol {
 	}
 	return iptables.ProtocolIPv4
 }
+
+type rulesFilteringPredicate func(rule iptRule) bool
+
+func filterRulesByPredicate(p rulesFilteringPredicate, rules ...iptRule) []iptRule {
+	var filteredRules []iptRule
+	for _, rule := range rules {
+		if p(rule) {
+			filteredRules = append(filteredRules, rule)
+		}
+	}
+	return filteredRules
+}

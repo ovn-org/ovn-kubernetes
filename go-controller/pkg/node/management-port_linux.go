@@ -134,7 +134,7 @@ func newManagementPortConfig(interfaceName string, hostSubnets []*net.IPNet) (*m
 	return mpcfg, nil
 }
 
-func tearDownManagementPortConfig(mpcfg *managementPortConfig) error {
+func tearDownManagementPortConfig(mpcfg *managementPortConfig, desiredRules ...iptRule) error {
 	// for the initial setup we need to start from the clean slate, so flush
 	// all (non-LL) addresses on this link, routes through this link, and
 	// finally any IPtable rules for this link.
@@ -146,17 +146,47 @@ func tearDownManagementPortConfig(mpcfg *managementPortConfig) error {
 		return err
 	}
 	if mpcfg.ipv4 != nil {
-		if err := mpcfg.ipv4.ipt.ClearChain("nat", iptableMgmPortChain); err != nil {
-			return fmt.Errorf("could not clear the iptables chain for management port: %v", err)
+		if err := leaveOnlyTheseRules(
+			mpcfg.ipv4,
+			iptableMgmPortChain,
+			filterRulesByPredicate(func(rule iptRule) bool {
+				return rule.protocol == iptables.ProtocolIPv4
+			}, desiredRules...)...); err != nil {
+			return fmt.Errorf("could not stomp on all rules in the management chain for IPv4 protocol: %v", err)
 		}
 	}
 
 	if mpcfg.ipv6 != nil {
-		if err := mpcfg.ipv6.ipt.ClearChain("nat", iptableMgmPortChain); err != nil {
-			return fmt.Errorf("could not clear the iptables chain for management port: %v", err)
+		if err := leaveOnlyTheseRules(
+			mpcfg.ipv6,
+			iptableMgmPortChain,
+			filterRulesByPredicate(func(rule iptRule) bool {
+				return rule.protocol == iptables.ProtocolIPv6
+			}, desiredRules...)...); err != nil {
+			return fmt.Errorf("could not stomp on all rules in the management chain for IPv6 protocol: %v", err)
 		}
 	}
 
+	return nil
+}
+
+func leaveOnlyTheseRules(iptablesManager *managementPortIPFamilyConfig, chain string, desiredRules ...iptRule) error {
+	if rules, err := iptablesManager.ipt.List("nat", chain); err == nil {
+		for _, rule := range rules {
+			if shouldSkipRule(rule) {
+				continue
+			}
+			for _, desiredRule := range desiredRules {
+				if !desiredRule.IsEqual(rule) {
+					if err := iptablesManager.ipt.Delete("nat", chain, ruleSpec(rule)...); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	} else {
+		return err
+	}
 	return nil
 }
 
@@ -216,16 +246,18 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 			iptableMgmPortChain, err)
 	}
 
-	requiredRules := []iptRule{
-		generateNATPostRoutingJumpToMgmtPortChain(mpcfg.ifName, getIPTablesProtocol(cfg.gwIP.String())),
-		generateNATMgmtChainSNATRule(mpcfg.ifName, cfg.ifAddr.IP),
-	}
-
-	if err := ensureIptRules(requiredRules); err != nil {
+	if err := ensureIptRules(mngtPortRules(mpcfg, cfg)); err != nil {
 		return warnings, err
 	}
 
 	return warnings, nil
+}
+
+func mngtPortRules(mpcfg *managementPortConfig, cfg *managementPortIPFamilyConfig) []iptRule {
+	return []iptRule{
+		generateNATPostRoutingJumpToMgmtPortChain(mpcfg.ifName, getIPTablesProtocol(cfg.gwIP.String())),
+		generateNATMgmtChainSNATRule(mpcfg.ifName, cfg.ifAddr.IP),
+	}
 }
 
 func setupManagementPortConfig(cfg *managementPortConfig) ([]string, error) {
@@ -255,8 +287,15 @@ func createPlatformManagementPort(interfaceName string, localSubnets []*net.IPNe
 		return nil, err
 	}
 
-	if err = tearDownManagementPortConfig(cfg); err != nil {
-		return nil, err
+	if cfg.ipv4 != nil {
+		if err = tearDownManagementPortConfig(cfg, mngtPortRules(cfg, cfg.ipv4)...); err != nil {
+			return nil, err
+		}
+	}
+	if cfg.ipv6 != nil {
+		if err = tearDownManagementPortConfig(cfg, mngtPortRules(cfg, cfg.ipv6)...); err != nil {
+			return nil, err
+		}
 	}
 
 	if _, err = setupManagementPortConfig(cfg); err != nil {
