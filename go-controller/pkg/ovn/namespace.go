@@ -350,18 +350,18 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 	klog.V(5).Infof("Deleting Namespace's NetworkPolicy entities")
 	for _, np := range nsInfo.networkPolicies {
 		key := getPolicyNamespacedName(np.policy)
-		oc.retryNetworkPolicies.skipRetryObj(key)
-		// add the full np object to the retry entry, since the namespace is going to be removed
-		// along with any mappings of nsInfo -> network policies
-		oc.retryNetworkPolicies.initRetryObjWithDelete(np.policy, key, np, false)
-		isLastPolicyInNamespace := len(nsInfo.networkPolicies) == 1
-		if err := oc.destroyNetworkPolicy(np, isLastPolicyInNamespace); err != nil {
-			klog.Errorf("Failed to delete network policy: %s, error: %v", key, err)
-			oc.retryNetworkPolicies.unSkipRetryObj(key)
-		} else {
-			oc.retryNetworkPolicies.deleteRetryObj(key, true)
-			delete(nsInfo.networkPolicies, np.name)
-		}
+		oc.retryNetworkPolicies.DoWithLock(key, func(key string) {
+			// add the full np object to the retry entry, since the namespace is going to be removed
+			// along with any mappings of nsInfo -> network policies
+			oc.retryNetworkPolicies.initRetryObjWithDelete(np.policy, key, np, false)
+			isLastPolicyInNamespace := len(nsInfo.networkPolicies) == 1
+			if err := oc.destroyNetworkPolicy(np, isLastPolicyInNamespace); err != nil {
+				klog.Errorf("Failed to delete network policy: %s, error: %v", key, err)
+			} else {
+				oc.retryNetworkPolicies.deleteRetryObj(key)
+				delete(nsInfo.networkPolicies, np.name)
+			}
+		})
 	}
 	if err := oc.deleteGWRoutesForNamespace(ns.Name, nil); err != nil {
 		klog.Errorf("Failed to delete GW routes for namespace: %s, error: %v", ns.Name, err)
