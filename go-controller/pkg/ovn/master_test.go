@@ -2131,3 +2131,90 @@ func TestController_syncNodesRetriable(t *testing.T) {
 		})
 	}
 }
+
+func TestController_deleteStaleNodeChassis(t *testing.T) {
+	tests := []struct {
+		name         string
+		node         v1.Node
+		initialSBDB  []libovsdbtest.TestData
+		expectedSBDB []libovsdbtest.TestData
+	}{
+		{
+			node: v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node1",
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-chassis-id": "chassis-node1-dpu",
+					},
+				},
+			},
+			name: "removes stale chassis when ovn running on DPU",
+			initialSBDB: []libovsdbtest.TestData{
+				&sbdb.Chassis{Name: "chassis-node1-dpu", Hostname: "node1"},
+				&sbdb.ChassisPrivate{Name: "chassis-node1-dpu"},
+				&sbdb.Chassis{Name: "chassis-node1", Hostname: "node1"},
+				&sbdb.ChassisPrivate{Name: "chassis-node1"},
+			},
+			expectedSBDB: []libovsdbtest.TestData{
+				&sbdb.Chassis{Name: "chassis-node1-dpu", Hostname: "node1"},
+				&sbdb.ChassisPrivate{Name: "chassis-node1-dpu"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stopChan := make(chan struct{})
+			defer close(stopChan)
+
+			kubeFakeClient := fake.NewSimpleClientset()
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
+			egressIPFakeClient := &egressipfake.Clientset{}
+			fakeClient := &util.OVNClientset{
+				KubeClient:           kubeFakeClient,
+				EgressIPClient:       egressIPFakeClient,
+				EgressFirewallClient: egressFirewallFakeClient,
+			}
+			f, err := factory.NewMasterWatchFactory(fakeClient)
+			if err != nil {
+				t.Fatalf("%s: Error creating master watch factory: %v", tt.name, err)
+			}
+
+			dbSetup := libovsdbtest.TestSetup{
+				SBData: tt.initialSBDB,
+			}
+			nbClient, sbClient, libovsdbCleanup, err := libovsdbtest.NewNBSBTestHarness(dbSetup)
+			if err != nil {
+				t.Fatalf("Error creating libovsdb test harness: %v", err)
+			}
+			t.Cleanup(libovsdbCleanup.Cleanup)
+
+			controller := NewOvnController(
+				fakeClient,
+				f,
+				stopChan,
+				addressset.NewFakeAddressSetFactory(),
+				nbClient,
+				sbClient,
+				record.NewFakeRecorder(0))
+
+			controller.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(nbClient, "", []string{})
+			if err != nil {
+				t.Fatalf("%s: Error creating joinSwIPManager: %v", tt.name, err)
+			}
+
+			err = controller.deleteStaleNodeChassis(&tt.node)
+			if err != nil {
+				t.Fatalf("%s: Error on syncNodesRetriable: %v", tt.name, err)
+			}
+
+			matcher := libovsdbtest.HaveDataIgnoringUUIDs(tt.expectedSBDB)
+			match, err := matcher.Match(sbClient)
+			if err != nil {
+				t.Fatalf("%s: matcher error: %v", tt.name, err)
+			}
+			if !match {
+				t.Fatalf("%s: DB state did not match: %s", tt.name, matcher.FailureMessage(sbClient))
+			}
+		})
+	}
+}

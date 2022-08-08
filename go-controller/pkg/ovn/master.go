@@ -998,34 +998,34 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 }
 
 // check if any existing chassis entries in the SBDB mismatches with node's chassisID annotation
-func (oc *Controller) checkNodeChassisMismatch(node *kapi.Node) (bool, error) {
+func (oc *Controller) checkNodeChassisMismatch(node *kapi.Node) (string, error) {
 	chassisID, err := util.ParseNodeChassisIDAnnotation(node)
 	if err != nil {
-		return false, nil
+		return "", nil
 	}
 
 	chassisList, err := libovsdbops.ListChassis(oc.sbClient)
 	if err != nil {
-		return false, fmt.Errorf("failed to get chassis list for node %s: error: %v", node.Name, err)
+		return "", fmt.Errorf("failed to get chassis list for node %s: error: %v", node.Name, err)
 	}
 
 	for _, chassis := range chassisList {
-		if chassis.Name == chassisID {
-			return false, nil
+		if chassis.Hostname == node.Name && chassis.Name != chassisID {
+			return chassis.Name, nil
 		}
 	}
-	return true, nil
+	return "", nil
 }
 
 // delete stale chassis in SBDB if system-id of the specific node has changed.
 func (oc *Controller) deleteStaleNodeChassis(node *kapi.Node) error {
-	mismatch, err := oc.checkNodeChassisMismatch(node)
+	staleChassis, err := oc.checkNodeChassisMismatch(node)
 	if err != nil {
 		return fmt.Errorf("failed to check if there is any stale chassis for node %s in SBDB: %v", node.Name, err)
-	} else if mismatch {
-		klog.V(5).Infof("Node %s now has a new chassis ID, delete its stale chassis in SBDB", node.Name)
+	} else if staleChassis != "" {
+		klog.V(5).Infof("Node %s now has a new chassis ID, delete its stale chassis %s in SBDB", node.Name, staleChassis)
 		p := func(item *sbdb.Chassis) bool {
-			return item.Hostname == node.Name
+			return item.Name == staleChassis
 		}
 		if err = libovsdbops.DeleteChassisWithPredicate(oc.sbClient, p); err != nil {
 			// Send an event and Log on failure
