@@ -57,6 +57,7 @@ spec:
                         traffic heading to this CIDR will be marked with the DSCP
                         value. This field is optional, and in case it is not set the
                         rule is applied to all egress traffic regardless of the destination.
+                      format: cidr
                       type: string
                     podSelector:
                       description: PodSelector applies the QoS rule only to the pods

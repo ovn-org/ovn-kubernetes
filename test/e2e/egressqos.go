@@ -229,6 +229,64 @@ spec:
 		},
 		ginkgotable.Entry("ipv4 pod", tcpdumpIPv4, &dstPod1IPv4, "/32", &dstPod2IPv4, "/32"),
 		ginkgotable.Entry("ipv6 pod", tcpdumpIPv6, &dstPod1IPv6, "/128", &dstPod2IPv6, "/128"))
+
+	ginkgo.It("Should deny resources with bad values", func() {
+		ginkgo.By("Creating an EgressQoS not named default")
+		egressQoSConfig := fmt.Sprintf(`
+apiVersion: k8s.ovn.org/v1
+kind: EgressQoS
+metadata:
+  name: not-default
+  namespace: ` + f.Namespace.Name + `
+spec:
+  egress:
+  - dscp: 50
+`)
+
+		if err := ioutil.WriteFile(egressQoSYaml, []byte(egressQoSConfig), 0644); err != nil {
+			framework.Failf("Unable to write CRD config to disk: %v", err)
+		}
+
+		defer func() {
+			if err := os.Remove(egressQoSYaml); err != nil {
+				framework.Logf("Unable to remove the CRD config from disk: %v", err)
+			}
+		}()
+
+		_, err := framework.RunKubectl(f.Namespace.Name, "create", "-f", egressQoSYaml)
+		framework.ExpectError(err, "a resource not named default should be denied")
+		gomega.Expect(err.Error()).To(gomega.ContainSubstring("Invalid value: \"not-default\""))
+
+		ginkgo.By("Creating an EgressQoS with bad cidrs")
+		egressQoSConfig = fmt.Sprintf(`
+apiVersion: k8s.ovn.org/v1
+kind: EgressQoS
+metadata:
+  name: default
+  namespace: ` + f.Namespace.Name + `
+spec:
+  egress:
+  - dscp: 1
+    dstCIDR: 1.2.3.256/32
+  - dscp: 1
+    dstCIDR: 1.2.3.4/42
+  - dscp: 1
+    dstCIDR: abc&!ABC/24
+  - dscp: 1
+    dstCIDR: 2001:::::::7334/158
+`)
+
+		if err := ioutil.WriteFile(egressQoSYaml, []byte(egressQoSConfig), 0644); err != nil {
+			framework.Failf("Unable to write CRD config to disk: %v", err)
+		}
+
+		_, err = framework.RunKubectl(f.Namespace.Name, "create", "-f", egressQoSYaml)
+		framework.ExpectError(err, "a resource with bad cidrs should be denied")
+		gomega.Expect(err.Error()).To(gomega.ContainSubstring("Invalid value: \"1.2.3.256/32\""))
+		gomega.Expect(err.Error()).To(gomega.ContainSubstring("Invalid value: \"1.2.3.4/42\""))
+		gomega.Expect(err.Error()).To(gomega.ContainSubstring("Invalid value: \"abc&!ABC/24\""))
+		gomega.Expect(err.Error()).To(gomega.ContainSubstring("Invalid value: \"2001:::::::7334/158\""))
+	})
 })
 
 func pingAndCheckDSCP(f *framework.Framework, srcPod, dstPod1, dstPod1IP, dstPod2, dstPod2IP, tcpDumpTpl string, dscp1, dscp2 int) {
