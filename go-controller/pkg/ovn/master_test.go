@@ -62,6 +62,7 @@ type tNode struct {
 	GatewayRouterIP      string
 	GatewayRouterNextHop string
 	PhysicalBridgeName   string
+	NodeHostAddress      string
 	NodeGWIP             string
 	NodeMgmtPortIP       string
 	NodeMgmtPortMAC      string
@@ -326,7 +327,7 @@ func addNodeLogicalFlows(testData []libovsdbtest.TestData, expectedOVNClusterRou
 	expectedClusterPortGroup.Ports = []string{types.K8sPrefix + node.Name + "-UUID"}
 
 	matchStr1 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == %s /* %s */`, node.Name, node.GatewayRouterIP, node.Name)
-	matchStr2 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == 9.9.9.9 /* %s */`, node.Name, node.Name)
+	matchStr2 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == %s /* %s */`, node.Name, node.NodeHostAddress, node.Name)
 	intPriority, _ := strconv.Atoi(types.NodeSubnetPolicyPriority)
 	testData = append(testData, &nbdb.LogicalRouterPolicy{
 		UUID:     "policy-based-route-1-UUID",
@@ -905,6 +906,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				GatewayRouterIP:      "172.16.16.2",
 				GatewayRouterNextHop: "172.16.16.1",
 				PhysicalBridgeName:   "br-eth0",
+				NodeHostAddress:      "9.9.9.9",
 				NodeGWIP:             "10.1.1.1/24",
 				NodeMgmtPortIP:       "10.1.1.2",
 				NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
@@ -936,7 +938,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString("9.9.9.9"))
+			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString(node1.NodeHostAddress))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1046,6 +1048,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				GatewayRouterIP:      "172.16.16.2",
 				GatewayRouterNextHop: "172.16.16.1",
 				PhysicalBridgeName:   "br-eth0",
+				NodeHostAddress:      "9.9.9.9",
 				NodeGWIP:             "10.1.1.1/24",
 				NodeMgmtPortIP:       "10.1.1.2",
 				NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
@@ -1077,7 +1080,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString("9.9.9.9"))
+			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString(node1.NodeHostAddress))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1177,6 +1180,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				GatewayRouterIP:      "172.16.16.2",
 				GatewayRouterNextHop: "172.16.16.1",
 				PhysicalBridgeName:   "br-eth0",
+				NodeHostAddress:      "9.9.9.9",
 				NodeGWIP:             "10.1.1.1/24",
 				NodeMgmtPortIP:       "10.1.1.2",
 				NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
@@ -1206,7 +1210,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString("9.9.9.9"))
+			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString(node1.NodeHostAddress))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1314,6 +1318,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				GatewayRouterIP:      "172.16.16.2",
 				GatewayRouterNextHop: "172.16.16.1",
 				PhysicalBridgeName:   "br-eth0",
+				NodeHostAddress:      "9.9.9.9",
 				NodeGWIP:             "10.1.1.1/24",
 				NodeMgmtPortIP:       "10.1.1.2",
 				NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
@@ -1343,7 +1348,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString("9.9.9.9"))
+			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString(node1.NodeHostAddress))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1471,6 +1476,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				GatewayRouterIP:      "172.16.16.2",
 				GatewayRouterNextHop: "172.16.16.1",
 				PhysicalBridgeName:   "br-eth0",
+				NodeHostAddress:      "9.9.9.9",
 				NodeGWIP:             "10.1.1.1/24",
 				NodeMgmtPortIP:       "10.1.1.2",
 				NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
@@ -1500,7 +1506,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString("9.9.9.9"))
+			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString(node1.NodeHostAddress))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1607,6 +1613,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				GatewayRouterIP:      "172.16.16.2",
 				GatewayRouterNextHop: "172.16.16.1",
 				PhysicalBridgeName:   "br-eth0",
+				NodeHostAddress:      "9.9.9.9",
 				NodeGWIP:             "10.1.1.1/24",
 				NodeMgmtPortIP:       "10.1.1.2",
 				NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
@@ -1642,7 +1649,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 					nodeAnnotator,
 					ovntest.MustParseMAC(node1.NodeMgmtPortMAC))).To(gomega.Succeed())
 
-			gomega.Expect(util.SetNodeHostAddresses(nodeAnnotator, sets.NewString("9.9.9.9"))).To(gomega.Succeed())
+			gomega.Expect(util.SetNodeHostAddresses(nodeAnnotator, sets.NewString(node1.NodeHostAddress))).To(gomega.Succeed())
 			gomega.Expect(nodeAnnotator.Run()).To(gomega.Succeed())
 
 			f, err = factory.NewMasterWatchFactory(fakeClient)
