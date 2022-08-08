@@ -365,7 +365,8 @@ func checkPodRunsOnGivenNode(clientset kubernetes.Interface, labels []string, k8
 	keepTrying bool) (bool, error) {
 	for _, label := range labels {
 		pods, err := clientset.CoreV1().Pods(config.Kubernetes.OVNConfigNamespace).List(context.TODO(), metav1.ListOptions{
-			LabelSelector: label,
+			LabelSelector:   label,
+			ResourceVersion: "0",
 		})
 		if err != nil {
 			klog.V(5).Infof("Failed to list Pods with label %q: %v. Retrying..", label, err)

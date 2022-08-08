@@ -265,20 +265,24 @@ func (k *Kube) GetAnnotationsOnPod(namespace, name string) (map[string]string, e
 // GetNamespaces returns the list of all Namespace objects matching the labelSelector
 func (k *Kube) GetNamespaces(labelSelector metav1.LabelSelector) (*kapi.NamespaceList, error) {
 	return k.KClient.CoreV1().Namespaces().List(context.TODO(), metav1.ListOptions{
-		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
+		LabelSelector:   labels.Set(labelSelector.MatchLabels).String(),
+		ResourceVersion: "0",
 	})
 }
 
 // GetPods returns the list of all Pod objects in a namespace matching the labelSelector
 func (k *Kube) GetPods(namespace string, labelSelector metav1.LabelSelector) (*kapi.PodList, error) {
 	return k.KClient.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
-		LabelSelector: labels.Set(labelSelector.MatchLabels).String(),
+		LabelSelector:   labels.Set(labelSelector.MatchLabels).String(),
+		ResourceVersion: "0",
 	})
 }
 
 // GetNodes returns the list of all Node objects from kubernetes
 func (k *Kube) GetNodes() (*kapi.NodeList, error) {
-	return k.KClient.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+	return k.KClient.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{
+		ResourceVersion: "0",
+	})
 }
 
 // GetNode returns the Node resource from kubernetes apiserver, given its name
@@ -293,12 +297,16 @@ func (k *Kube) GetEgressIP(name string) (*egressipv1.EgressIP, error) {
 
 // GetEgressIPs returns the list of all EgressIP objects from kubernetes
 func (k *Kube) GetEgressIPs() (*egressipv1.EgressIPList, error) {
-	return k.EIPClient.K8sV1().EgressIPs().List(context.TODO(), metav1.ListOptions{})
+	return k.EIPClient.K8sV1().EgressIPs().List(context.TODO(), metav1.ListOptions{
+		ResourceVersion: "0",
+	})
 }
 
 // GetEgressFirewalls returns the list of all EgressFirewall objects from kubernetes
 func (k *Kube) GetEgressFirewalls() (*egressfirewall.EgressFirewallList, error) {
-	return k.EgressFirewallClient.K8sV1().EgressFirewalls(metav1.NamespaceAll).List(context.TODO(), metav1.ListOptions{})
+	return k.EgressFirewallClient.K8sV1().EgressFirewalls(metav1.NamespaceAll).List(context.TODO(), metav1.ListOptions{
+		ResourceVersion: "0",
+	})
 }
 
 func (k *Kube) CreateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {
