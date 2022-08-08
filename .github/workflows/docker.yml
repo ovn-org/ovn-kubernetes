@@ -5,7 +5,7 @@ on:
     branches: [ master ]
 
 env:
-  GO_VERSION: 1.17.6
+  GO_VERSION: 1.18.4
   REGISTRY: ghcr.io 
   OWNER: ovn-org
   REPOSITORY: ovn-kubernetes 
