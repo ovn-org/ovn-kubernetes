@@ -2909,7 +2909,11 @@ func buildExpectedACL(gp *gressPolicy, pgName string, as []string) *nbdb.ACL {
 		policyTypeACLExtIdKey:  gpDirection,
 		gpDirection + "_num":   fmt.Sprintf("%d", gp.idx),
 	}
-	acl := libovsdbops.BuildACL(name, nbdb.ACLDirectionToLport, types.DefaultAllowPriority, match, nbdb.ACLActionAllowRelated, types.OvnACLLoggingMeter, nbdb.ACLSeverityInfo, true, externalIds, nil)
+	action := nbdb.ACLActionAllowRelated
+	if gp.isACLStateless {
+		action = nbdb.ACLActionAllowStateless
+	}
+	acl := libovsdbops.BuildACL(name, nbdb.ACLDirectionToLport, types.DefaultAllowPriority, match, action, types.OvnACLLoggingMeter, nbdb.ACLSeverityInfo, true, externalIds, nil)
 	return acl
 }
 
@@ -2954,7 +2958,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 			},
 		}
 
-		gp := newGressPolicy(knet.PolicyTypeIngress, 0, policy.Namespace, policy.Name)
+		gp := newGressPolicy(knet.PolicyTypeIngress, 0, policy.Namespace, policy.Name, false)
 		err := gp.ensurePeerAddressSet(asFactory)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		asName := gp.peerAddressSet.GetName()
@@ -3040,6 +3044,52 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 
 		// deleting again is no-op
 		gomega.Expect(gp.delNamespaceAddressSet(four)).To(gomega.BeFalse())
+	})
+
+	ginkgo.It("creates stateless OVN ACLs based off of the annotation", func() {
+		const (
+			pgName string = "pg-name"
+		)
+		// Restore global default values before each testcase
+		config.PrepareTestConfig()
+
+		asFactory = addressset.NewFakeAddressSetFactory()
+		config.IPv4Mode = true
+		config.IPv6Mode = false
+
+		policy := &knet.NetworkPolicy{
+			ObjectMeta: metav1.ObjectMeta{
+				UID:       apimachinerytypes.UID("testing"),
+				Name:      "policy",
+				Namespace: "testing",
+				Annotations: map[string]string{
+					ovnStatelessACLAnnotationName: "true",
+				},
+			},
+		}
+
+		var statelessACL bool
+		val, ok := policy.Annotations[ovnStatelessACLAnnotationName]
+		if ok && val == "true" {
+			statelessACL = true
+		}
+		gp := newGressPolicy(knet.PolicyTypeIngress, 0, policy.Namespace, policy.Name, statelessACL)
+		err := gp.ensurePeerAddressSet(asFactory)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		asName := gp.peerAddressSet.GetName()
+
+		one := "testing.policy.ingress.1"
+		two := "testing.policy.ingress.2"
+
+		gomega.Expect(gp.addNamespaceAddressSet(one)).To(gomega.BeTrue())
+		expected := buildExpectedACL(gp, pgName, []string{asName, one})
+		actual := gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
+		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
+
+		gomega.Expect(gp.addNamespaceAddressSet(two)).To(gomega.BeTrue())
+		expected = buildExpectedACL(gp, pgName, []string{asName, one, two})
+		actual = gp.buildLocalPodACLs(pgName, defaultACLLoggingSeverity)
+		gomega.Expect(actual).To(libovsdb.ConsistOfIgnoringUUIDs(expected))
 	})
 
 	ginkgo.It("Tests AddAllowACLFromNode", func() {

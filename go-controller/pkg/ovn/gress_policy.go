@@ -43,6 +43,9 @@ type gressPolicy struct {
 	portPolicies []*portPolicy
 
 	ipBlock []*knet.IPBlock
+
+	// set to true for stateless acls otherwise set to false
+	isACLStateless bool
 }
 
 type portPolicy struct {
@@ -72,7 +75,7 @@ func (pp *portPolicy) getL4Match() (string, error) {
 	return foundProtocol, nil
 }
 
-func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string) *gressPolicy {
+func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string, isACLStatless bool) *gressPolicy {
 	return &gressPolicy{
 		policyNamespace:   namespace,
 		policyName:        name,
@@ -81,6 +84,7 @@ func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string)
 		peerV4AddressSets: sets.String{},
 		peerV6AddressSets: sets.String{},
 		portPolicies:      make([]*portPolicy, 0),
+		isACLStateless:    isACLStatless,
 	}
 }
 
@@ -370,6 +374,9 @@ func (gp *gressPolicy) buildACLAllow(match, l4Match string, ipBlockCIDR int, acl
 	}
 	priority := types.DefaultAllowPriority
 	action := nbdb.ACLActionAllowRelated
+	if gp.isACLStateless {
+		action = nbdb.ACLActionAllowStateless
+	}
 	aclName := fmt.Sprintf("%s_%s_%v", gp.policyNamespace, gp.policyName, gp.idx)
 
 	// For backward compatibility with existing ACLs, we use "ipblock_cidr=false" for
