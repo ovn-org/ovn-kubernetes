@@ -51,25 +51,64 @@ type portPolicy struct {
 	endPort  int32
 }
 
-func (pp *portPolicy) getL4Match() (string, error) {
+// for a given ingress/egress rule, captures all the provided port ranges and
+// individual ports
+type gressPolicyPorts struct {
+	portList  []string // list of provided ports as string
+	portRange []string // list of provided port ranges in OVN ACL format
+}
+
+func (gp *gressPolicy) getProtocolPortsMap() map[string]*gressPolicyPorts {
 	var supportedProtocols = []string{TCP, UDP, SCTP}
-	var foundProtocol string
-	for _, protocol := range supportedProtocols {
-		if protocol == pp.protocol {
-			foundProtocol = strings.ToLower(pp.protocol)
-			break
+	gressProtoPortsMap := make(map[string]*gressPolicyPorts)
+	for _, pp := range gp.portPolicies {
+		var found bool
+		for _, protocol := range supportedProtocols {
+			if protocol == pp.protocol {
+				found = true
+				break
+			}
+		}
+		if !found {
+			klog.Warningf("Unknown protocol %v, while processing network policy %s/%s",
+				pp.protocol, gp.policyNamespace, gp.policyName)
+			continue
+		}
+		protocol := strings.ToLower(pp.protocol)
+		gpp, ok := gressProtoPortsMap[protocol]
+		if !ok {
+			gpp = &gressPolicyPorts{portList: []string{}, portRange: []string{}}
+			gressProtoPortsMap[protocol] = gpp
+		}
+		if pp.endPort != 0 && pp.endPort != pp.port {
+			gpp.portRange = append(gpp.portRange, fmt.Sprintf("%d<=%s.dst<=%d", pp.port, protocol, pp.endPort))
+		} else if pp.port != 0 {
+			gpp.portList = append(gpp.portList, fmt.Sprintf("%d", pp.port))
 		}
 	}
-	if len(foundProtocol) == 0 {
-		return "", fmt.Errorf("unknown port protocol %v", pp.protocol)
-	}
-	if pp.endPort != 0 && pp.endPort != pp.port {
-		return fmt.Sprintf("%s && %d<=%s.dst<=%d", foundProtocol, pp.port, foundProtocol, pp.endPort), nil
+	return gressProtoPortsMap
+}
 
-	} else if pp.port != 0 {
-		return fmt.Sprintf("%s && %s.dst==%d", foundProtocol, foundProtocol, pp.port), nil
+func getL4Match(protocol string, ports *gressPolicyPorts) string {
+	allL4Matches := []string{}
+	if len(ports.portList) > 0 {
+		// if there is just one port, then don't use `{}`
+		template := "%s.dst==%s"
+		if len(ports.portList) > 1 {
+			template = "%s.dst=={%s}"
+		}
+		allL4Matches = append(allL4Matches, fmt.Sprintf(template, protocol, strings.Join(ports.portList, ",")))
 	}
-	return foundProtocol, nil
+	allL4Matches = append(allL4Matches, ports.portRange...)
+	l4Match := protocol
+	if len(allL4Matches) > 0 {
+		template := "%s && %s"
+		if len(allL4Matches) > 1 {
+			template = "%s && (%s)"
+		}
+		l4Match = fmt.Sprintf(template, protocol, strings.Join(allL4Matches, " || "))
+	}
+	return l4Match
 }
 
 func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string) *gressPolicy {
@@ -335,11 +374,8 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName, aclLogging string) []*nb
 			acls = append(acls, acl)
 		}
 	}
-	for _, port := range gp.portPolicies {
-		l4Match, err := port.getL4Match()
-		if err != nil {
-			continue
-		}
+	for protocol, ports := range gp.getProtocolPortsMap() {
+		l4Match := getL4Match(protocol, ports)
 		match := fmt.Sprintf("%s && %s && %s", l3Match, l4Match, lportMatch)
 		if len(gp.ipBlock) > 0 {
 			// Add ACL allow rule for IPBlock CIDR
@@ -395,6 +431,9 @@ func (gp *gressPolicy) buildACLAllow(match, l4Match string, ipBlockCIDR int, acl
 		policyACLExtIdKey:      gp.policyName,
 		policyTypeACLExtIdKey:  string(gp.policyType),
 		policyTypeNum:          policyTypeIndex,
+	}
+	if l4Match != noneMatch {
+		externalIds[l4MatchFusedExtIdKey] = "true"
 	}
 
 	acl := libovsdbops.BuildACL(aclName, direction, priority, match, action, types.OvnACLLoggingMeter, getACLLoggingSeverity(aclLogging), aclLogging != "", externalIds, options)

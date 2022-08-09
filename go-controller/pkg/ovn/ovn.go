@@ -16,7 +16,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
@@ -368,7 +370,8 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 	if err := oc.WatchNetworkPolicy(); err != nil {
 		return err
 	}
-
+	// Clean up stale L4 network policies
+	oc.CleanStaleNetworkPolicy()
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		// This is probably the best starting order for all egress IP handlers.
 		// WatchEgressIPNamespaces and WatchEgressIPPods only use the informer
@@ -564,6 +567,57 @@ func (oc *Controller) removePod(pod *kapi.Pod, portInfo *lpInfo) error {
 func (oc *Controller) WatchPods() error {
 	_, err := oc.WatchResource(oc.retryPods)
 	return err
+}
+
+// now that we have added all the OVN ACLs with optimization, it is time to remove the stale OVN
+// ACL entries from the database
+func (oc *Controller) CleanStaleNetworkPolicy() {
+	start := time.Now()
+	defer func() {
+		klog.V(5).Infof("Completed cleaning up stale OVN ACLs in %v", time.Since(start))
+	}()
+
+	klog.V(5).Infof("Cleaning up stale OVN ACLs that are left behind after L4 Port consolidation")
+	// want ACLs that don't have l4fused key and have l4Match set (but not to None)
+	pACL := func(item *nbdb.ACL) bool {
+		if _, ok := item.ExternalIDs[l4MatchFusedExtIdKey]; !ok {
+			if val, ok := item.ExternalIDs[l4MatchACLExtIdKey]; ok {
+				if val != noneMatch {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	staleACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, pACL)
+	if err != nil {
+		klog.Warningf("Failed to retrieve stale OVN ACL entries that were not optimized " +
+			"for L4 Ports consolidation: %v, err")
+		return
+	}
+	// it could be that delete all the acls in one go might fail for various reasons,
+	// so lets try to delete one at a time so that we can remove as many stale acls
+	// as possible.
+	klog.V(5).Infof("Number of stale ACLS to be cleaned is %d", len(staleACLs))
+	for _, staleACL := range staleACLs {
+		staleACL := staleACL
+		nsName := staleACL.ExternalIDs[namespaceACLExtIdKey]
+		policyName := staleACL.ExternalIDs[policyACLExtIdKey]
+		pgName := fmt.Sprintf("%s_%s", nsName, policyName)
+		pgName = hashedPortGroup(pgName)
+		aclDesc := fmt.Sprintf("stale ACL %s/%s/%s in port group %s", staleACL.UUID, nsName, policyName, pgName)
+		klog.V(5).Infof("About to delete %s", aclDesc)
+		ops, err := libovsdbops.DeleteACLsFromPortGroupOps(oc.nbClient, nil, pgName, staleACL)
+		if err != nil {
+			klog.Warningf("Failed to get ops to delete %s: %v", aclDesc, err)
+			continue
+		}
+		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+		if err != nil {
+			klog.Warningf("Failed to delete %s: %v", aclDesc, err)
+		}
+	}
 }
 
 // WatchNetworkPolicy starts the watching of the network policy resource and calls

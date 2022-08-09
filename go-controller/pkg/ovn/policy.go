@@ -33,6 +33,8 @@ const (
 	defaultDenyPolicyTypeACLExtIdKey = "default-deny-policy-type"
 	// l4MatchACLExtIdKey external ID key for L4 Match on 'gress policy ACLs
 	l4MatchACLExtIdKey = "l4Match"
+	// l4MatchFusedExtIdKey specifies whether the l4 OVN ACL was formed with ACL consolidation changes
+	l4MatchFusedExtIdKey = "l4Fused"
 	// ipBlockCIDRACLExtIdKey external ID key for IP block CIDR on 'gress policy ACLs
 	ipBlockCIDRACLExtIdKey = "ipblock_cidr"
 	// namespaceACLExtIdKey external ID key for namespace on 'gress policy ACLs
