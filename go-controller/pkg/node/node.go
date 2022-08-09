@@ -583,7 +583,7 @@ func (n *OvnNode) WatchEndpointSlices() error {
 			for _, port := range oldEndpointSlice.Ports {
 				for _, endpoint := range oldEndpointSlice.Endpoints {
 					for _, ip := range endpoint.Addresses {
-						if isEPSliceContainsEndpoint(newEndpointSlice, ip, *port.Port, *port.Protocol) {
+						if doesEPSliceContainEndpoint(newEndpointSlice, ip, *port.Port, *port.Protocol) {
 							continue
 						}
 						if *port.Protocol == kapi.ProtocolUDP { // flush conntrack only for UDP
@@ -751,9 +751,9 @@ func (n *OvnNode) validateVTEPInterfaceMTU() error {
 	return nil
 }
 
-// isEPSliceContainsEndpoint checks whether the endpointslice
+// doesEPSliceContainEndpoint checks whether the endpointslice
 // contains a specific endpoint with IP/Port/Protocol
-func isEPSliceContainsEndpoint(epSlice *discovery.EndpointSlice,
+func doesEPSliceContainEndpoint(epSlice *discovery.EndpointSlice,
 	epIP string, epPort int32, protocol kapi.Protocol) bool {
 	for _, port := range epSlice.Ports {
 		for _, endpoint := range epSlice.Endpoints {
