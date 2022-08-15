@@ -1088,6 +1088,70 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
+		ginkgo.It("correctly remove a LSP from a pod that has stale nodeName annotation", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespace1 := *newNamespace("namespace1")
+				podTest := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespace1.Name,
+				)
+				pod := newPod(podTest.namespace, podTest.podName, podTest.nodeName, podTest.podIP)
+				expectedData := []libovsdbtest.TestData{getExpectedDataPodsAndSwitches([]testPod{podTest}, []string{"node1"})}
+				key, err := getResourceKey(factory.PodType, pod)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{*pod},
+					},
+				)
+
+				podTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				err = fakeOvn.controller.WatchNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fakeOvn.controller.WatchPods()
+
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedData...))
+				fakeOvn.asf.ExpectAddressSetWithIPs(podTest.namespace, []string{podTest.podIP})
+
+				// Get pod from api with its metadata filled in
+				pod, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podTest.namespace).Get(context.TODO(), podTest.podName, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Fudge nodename from pod's spec, to ensure it is not used by deleteLogicalPort
+				pod.Spec.NodeName = "this_is_the_wrong_nodeName"
+
+				// Deleting port from a pod that has no portInfo and the wrong nodeName should still be okay!
+				err = fakeOvn.controller.deleteLogicalPort(pod, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// OVN db should be empty now
+				fakeOvn.asf.ExpectEmptyAddressSet(podTest.namespace)
+				gomega.Eventually(fakeOvn.controller.nbClient).Should(
+					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{}, []string{"node1"})...))
+
+				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(pod.Namespace).Delete(context.TODO(), pod.Name, *metav1.NewDeleteOptions(0))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// check the retry cache has no entry
+				checkRetryObjectEventually(key, false, fakeOvn.controller.retryPods)
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("remove a LSP from a pod that has no OVN annotations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *newNamespace("namespace1")
@@ -1561,6 +1625,84 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(annotations).To(gomega.MatchJSON(t1.getAnnotationsJson()))
 				annotations = getPodAnnotations(fakeOvn.fakeClient.KubeClient, t2.namespace, t2.podName)
 				gomega.Expect(annotations).To(gomega.MatchJSON(t2.getAnnotationsJson()))
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("Negative test: fails to add existing pod with an existing logical switch port on wrong node", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespaceT := *newNamespace("namespace1")
+				// use 2 pods for different test options
+				t1 := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod1",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+
+				initialDB = libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						&nbdb.LogicalSwitchPort{
+							UUID:      t1.portUUID,
+							Name:      util.GetLogicalPortName(t1.namespace, t1.podName),
+							Addresses: []string{t1.podMAC, t1.podIP},
+							ExternalIDs: map[string]string{
+								"pod":       "true",
+								"namespace": t1.namespace,
+							},
+							Options: map[string]string{
+								// check requested-chassis will be updated to correct t1.nodeName value
+								"requested-chassis": t1.nodeName,
+								// check old value for iface-id-ver will be updated to pod.UID
+								"iface-id-ver": "wrong_value",
+							},
+							PortSecurity: []string{fmt.Sprintf("%s %s", t1.podMAC, t1.podIP)},
+						},
+						&nbdb.LogicalSwitch{
+							Name:  "node1",
+							Ports: []string{},
+						},
+						&nbdb.LogicalSwitch{
+							Name:  "node2",
+							Ports: []string{t1.portUUID},
+						},
+					},
+				}
+
+				pod1 := newPod(t1.namespace, t1.podName, t1.nodeName, t1.podIP)
+				setPodAnnotations(pod1, t1)
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*pod1,
+						},
+					},
+				)
+				t1.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				// pod annotations and lsp exist now
+
+				err := fakeOvn.controller.WatchNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// should fail to update a port on the wrong switch
+				myPod1Key, err := getResourceKey(factory.PodType, pod1)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				checkRetryObjectEventually(myPod1Key, true, fakeOvn.controller.retryPods)
 
 				return nil
 			}

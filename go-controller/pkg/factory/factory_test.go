@@ -418,7 +418,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		})
 
 		It("is called for each existing endpointSlice", func() {
-			endpointSlices = append(endpointSlices, newEndpointSlice("myendpointSlice", "default"))
+			endpointSlices = append(endpointSlices, newEndpointSlice("myEndpointSlice", "default"))
 			testExisting(EndpointSliceType, "", nil)
 		})
 
@@ -509,8 +509,8 @@ var _ = Describe("Watch Factory Operations", func() {
 		})
 
 		It("calls ADD for each existing endpointSlices", func() {
-			endpointSlices = append(endpointSlices, newEndpointSlice("myendpointSlice", "default"))
-			endpointSlices = append(endpointSlices, newEndpointSlice("myendpointSlie2", "default"))
+			endpointSlices = append(endpointSlices, newEndpointSlice("myEndpointSlice", "default"))
+			endpointSlices = append(endpointSlices, newEndpointSlice("myEndpointSlice2", "default"))
 			testExisting(EndpointSliceType)
 		})
 
@@ -1088,7 +1088,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		added := newEndpointSlice("myendpointSlice", "default")
+		added := newEndpointSlice("myEndpointSlice", "default")
 		h, c := addHandler(wf, EndpointSliceType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				epSlice := obj.(*discovery.EndpointSlice)
