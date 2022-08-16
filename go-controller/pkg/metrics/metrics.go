@@ -347,11 +347,11 @@ func stopwatchShowMetricsUpdater(component string, stopChan <-chan struct{}) {
 				}
 
 				metricInfo.metrics.totalSamples.Set(totalSamplesMetricValue)
-				metricInfo.metrics.min.Set(minMetricValue)
-				metricInfo.metrics.max.Set(maxMetricValue)
-				metricInfo.metrics.percentile95th.Set(percentile95thMetricValue)
-				metricInfo.metrics.shortTermAvg.Set(shortTermAvgMetricValue)
-				metricInfo.metrics.longTermAvg.Set(longTermAvgMetricValue)
+				metricInfo.metrics.min.Set(minMetricValue / 1000)
+				metricInfo.metrics.max.Set(maxMetricValue / 1000)
+				metricInfo.metrics.percentile95th.Set(percentile95thMetricValue / 1000)
+				metricInfo.metrics.shortTermAvg.Set(shortTermAvgMetricValue / 1000)
+				metricInfo.metrics.longTermAvg.Set(longTermAvgMetricValue / 1000)
 			}
 		case <-stopChan:
 			return
