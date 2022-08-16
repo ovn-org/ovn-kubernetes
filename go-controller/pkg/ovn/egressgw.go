@@ -392,6 +392,9 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod *kapi.Pod, namespace str
 	if err := oc.deleteGWRoutesForNamespace(namespace, foundGws.gws); err != nil {
 		// add the entry back to nsInfo for retrying later
 		nsInfo, nsUnlock := oc.getNamespaceLocked(namespace, false)
+		if nsInfo == nil {
+			return fmt.Errorf("failed to get nsInfo %s to add back all the gw routes: %w", namespace, err)
+		}
 		// we add back all the gw routes as we don't know which specific route for which pod error-ed out
 		nsInfo.routingExternalPodGWs[podGWKey] = foundGws
 		nsUnlock()

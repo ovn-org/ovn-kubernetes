@@ -1390,11 +1390,15 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 	// if per pod SNAT is being used, then l3 gateway config is required to be able to add pods
 	if _, gwFailed := oc.gatewaysFailed.Load(node.Name); !gwFailed || !config.Gateway.DisableSNATMultipleGWs {
 		if nSyncs.syncNode || nSyncs.syncGw { // do this only if it is a new node add or a gateway sync happened
-			options := metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String()}
+			options := metav1.ListOptions{
+				FieldSelector:   fields.OneTermEqualSelector("spec.nodeName", node.Name).String(),
+				ResourceVersion: "0",
+			}
 			pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
 			if err != nil {
 				errs = append(errs, err)
-				klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
+				klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function",
+					node.Name)
 			} else {
 				klog.V(5).Infof("When adding node %s, found %d pods to add to retryPods", node.Name, len(pods.Items))
 				for _, pod := range pods.Items {
@@ -1403,10 +1407,14 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 						continue
 					}
 					klog.V(5).Infof("Adding pod %s/%s to retryPods", pod.Namespace, pod.Name)
-					oc.retryPods.addRetryObjWithAddNoBackoff(&pod)
+					err = oc.retryPods.AddRetryObjWithAddNoBackoff(&pod)
+					if err != nil {
+						errs = append(errs, err)
+						klog.Errorf("Failed to add pod %s/%s to retryPods: %v", pod.Namespace, pod.Name, err)
+					}
 				}
 			}
-			oc.retryPods.requestRetryObjs()
+			oc.retryPods.RequestRetryObjs()
 		}
 	}
 

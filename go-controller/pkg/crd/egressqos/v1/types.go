@@ -59,6 +59,7 @@ type EgressQoSRule struct {
 	// This field is optional, and in case it is not set the rule is applied
 	// to all egress traffic regardless of the destination.
 	// +optional
+	// +kubebuilder:validation:Format="cidr"
 	DstCIDR *string `json:"dstCIDR,omitempty"`
 
 	// PodSelector applies the QoS rule only to the pods in the namespace whose label
