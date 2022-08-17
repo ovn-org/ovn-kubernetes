@@ -2,7 +2,6 @@ package informer
 
 import (
 	kapi "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1"
 )
 
 type ServiceEventHandler interface {
@@ -12,13 +11,13 @@ type ServiceEventHandler interface {
 	SyncServices([]interface{}) error
 }
 
-type EndpointSliceEventHandler interface {
-	AddEndpointSlice(*discovery.EndpointSlice)
-	DeleteEndpointSlice(*discovery.EndpointSlice)
-	UpdateEndpointSlice(old, new *discovery.EndpointSlice)
+type EndpointsEventHandler interface {
+	AddEndpoints(*kapi.Endpoints)
+	DeleteEndpoints(*kapi.Endpoints)
+	UpdateEndpoints(old, new *kapi.Endpoints)
 }
 
 type ServiceAndEndpointsEventHandler interface {
 	ServiceEventHandler
-	EndpointSliceEventHandler
+	EndpointsEventHandler
 }
