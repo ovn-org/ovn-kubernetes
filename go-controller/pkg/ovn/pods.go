@@ -57,6 +57,32 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 				}
 			}
 		}
+		// delete the outdated hybrid overlay subnet route if it exists
+		if annotations != nil {
+			newRoutes := []util.PodRoute{}
+			for _, subnet := range oc.lsManager.GetSwitchSubnets(pod.Spec.NodeName) {
+				hybridOverlayIFAddr := util.GetNodeHybridOverlayIfAddr(subnet).IP
+				for _, route := range annotations.Routes {
+					if !route.NextHop.Equal(hybridOverlayIFAddr) {
+						newRoutes = append(newRoutes, route)
+					}
+				}
+			}
+			// checking the length because cannot compare the slices directly and if routes are removed
+			// the length will be different
+			if len(annotations.Routes) != len(newRoutes) {
+				annotations.Routes = newRoutes
+				var marshalledAnnotation map[string]interface{}
+				marshalledAnnotation, err = util.MarshalPodAnnotation(annotations)
+				if err != nil {
+					return fmt.Errorf("error updating pod %s annotations: %v", pod.Name, err)
+				}
+				err = oc.kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, marshalledAnnotation)
+				if err != nil {
+					return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
+				}
+			}
+		}
 	}
 
 	// get all the nodes from the watchFactory
@@ -352,19 +378,6 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 			gatewayIP = gatewayIPnet.IP
 		}
 
-		if len(config.HybridOverlay.ClusterSubnets) > 0 {
-			// Add a route for each hybrid overlay subnet via the hybrid
-			// overlay port on the pod's logical switch.
-			nextHop := util.GetNodeHybridOverlayIfAddr(nodeSubnet).IP
-			for _, clusterSubnet := range config.HybridOverlay.ClusterSubnets {
-				if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) == isIPv6 {
-					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
-						Dest:    clusterSubnet.CIDR,
-						NextHop: nextHop,
-					})
-				}
-			}
-		}
 		if gatewayIP != nil {
 			podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIP)
 		}
