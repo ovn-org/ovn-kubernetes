@@ -358,7 +358,7 @@ func ovnControllerSBDBConnectionCheckUpdater(stopCh <-chan struct{}, ovsAppctl o
 	retrySleep := 5 * time.Second
 	retryTotal := retrySleep * time.Duration(retry)
 
-	if retryTotal.Seconds() >= period.Seconds() {
+	if retryTotal >= period {
 		panic("period must be greater than retry total time")
 	}
 	// update metric to a good initial state
