@@ -58,7 +58,7 @@ var _ = Describe("Node DPU tests", func() {
 	var sriovnetOpsMock utilMocks.SriovnetOps
 	var netlinkOpsMock utilMocks.NetLinkOps
 	var execMock *ovntest.FakeExec
-	var kubeMock mocks.Interface
+	var kubeMock mocks.KubeInterface
 	var pod v1.Pod
 	var node OvnNode
 	var podLister v1mocks.PodLister
@@ -79,7 +79,7 @@ var _ = Describe("Node DPU tests", func() {
 		err = cni.SetExec(execMock)
 		Expect(err).NotTo(HaveOccurred())
 
-		kubeMock = mocks.Interface{}
+		kubeMock = mocks.KubeInterface{}
 		node = OvnNode{Kube: &kubeMock}
 
 		podNamespaceLister = v1mocks.PodNamespaceLister{}

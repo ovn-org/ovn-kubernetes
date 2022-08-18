@@ -14,7 +14,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/safchain/ethtool"
 	kapi "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 )
@@ -110,30 +109,30 @@ func (g *gateway) SyncServices(objs []interface{}) error {
 	return nil
 }
 
-func (g *gateway) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
+func (g *gateway) AddEndpoints(ep *kapi.Endpoints) {
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.AddEndpointSlice(epSlice)
+		g.loadBalancerHealthChecker.AddEndpoints(ep)
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.AddEndpointSlice(epSlice)
+		g.nodePortWatcher.AddEndpoints(ep)
 	}
 }
 
-func (g *gateway) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) {
+func (g *gateway) UpdateEndpoints(old, new *kapi.Endpoints) {
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.UpdateEndpointSlice(oldEpSlice, newEpSlice)
+		g.loadBalancerHealthChecker.UpdateEndpoints(old, new)
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.UpdateEndpointSlice(oldEpSlice, newEpSlice)
+		g.nodePortWatcher.UpdateEndpoints(old, new)
 	}
 }
 
-func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
+func (g *gateway) DeleteEndpoints(ep *kapi.Endpoints) {
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.DeleteEndpointSlice(epSlice)
+		g.loadBalancerHealthChecker.DeleteEndpoints(ep)
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.DeleteEndpointSlice(epSlice)
+		g.nodePortWatcher.DeleteEndpoints(ep)
 	}
 }
 
@@ -162,19 +161,19 @@ func (g *gateway) Init(wf factory.NodeWatchFactory) error {
 		return err
 	}
 
-	_, err = wf.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
+	_, err = wf.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			epSlice := obj.(*discovery.EndpointSlice)
-			g.AddEndpointSlice(epSlice)
+			ep := obj.(*kapi.Endpoints)
+			g.AddEndpoints(ep)
 		},
 		UpdateFunc: func(old, new interface{}) {
-			oldEpSlice := old.(*discovery.EndpointSlice)
-			newEpSlice := new.(*discovery.EndpointSlice)
-			g.UpdateEndpointSlice(oldEpSlice, newEpSlice)
+			oldEp := old.(*kapi.Endpoints)
+			newEp := new.(*kapi.Endpoints)
+			g.UpdateEndpoints(oldEp, newEp)
 		},
 		DeleteFunc: func(obj interface{}) {
-			epSlice := obj.(*discovery.EndpointSlice)
-			g.DeleteEndpointSlice(epSlice)
+			ep := obj.(*kapi.Endpoints)
+			g.DeleteEndpoints(ep)
 		},
 	}, nil)
 	if err != nil {
