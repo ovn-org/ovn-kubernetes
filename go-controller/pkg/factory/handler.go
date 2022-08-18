@@ -18,7 +18,6 @@ import (
 
 	ktypes "k8s.io/apimachinery/pkg/types"
 	listers "k8s.io/client-go/listers/core/v1"
-	discoverylisters "k8s.io/client-go/listers/discovery/v1"
 	netlisters "k8s.io/client-go/listers/networking/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -362,6 +361,8 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return listers.NewPodLister(sharedInformer.GetIndexer()), nil
 	case ServiceType:
 		return listers.NewServiceLister(sharedInformer.GetIndexer()), nil
+	case EndpointsType:
+		return listers.NewEndpointsLister(sharedInformer.GetIndexer()), nil
 	case NamespaceType:
 		return listers.NewNamespaceLister(sharedInformer.GetIndexer()), nil
 	case NodeType:
@@ -374,8 +375,6 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return egressiplister.NewEgressIPLister(sharedInformer.GetIndexer()), nil
 	case CloudPrivateIPConfigType:
 		return cloudprivateipconfiglister.NewCloudPrivateIPConfigLister(sharedInformer.GetIndexer()), nil
-	case EndpointSliceType:
-		return discoverylisters.NewEndpointSliceLister(sharedInformer.GetIndexer()), nil
 	case EgressQoSType:
 		return egressqoslister.NewEgressQoSLister(sharedInformer.GetIndexer()), nil
 	}

@@ -14,12 +14,12 @@ import (
 )
 
 var _ = Describe("cni_dpu tests", func() {
-	var fakeKubeInterface kubeMocks.Interface
+	var fakeKubeInterface kubeMocks.KubeInterface
 	var fakeSriovnetOps utilMocks.SriovnetOps
 	var pr PodRequest
 
 	BeforeEach(func() {
-		fakeKubeInterface = kubeMocks.Interface{}
+		fakeKubeInterface = kubeMocks.KubeInterface{}
 		fakeSriovnetOps = utilMocks.SriovnetOps{}
 		util.SetSriovnetOpsInst(&fakeSriovnetOps)
 		pr = PodRequest{
