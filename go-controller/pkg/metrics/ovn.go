@@ -86,6 +86,13 @@ var metricBridgeMappings = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	},
 )
 
+var metricOVNControllerSBDBConnection = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnNamespace,
+	Subsystem: MetricOvnSubsystemController,
+	Name:      "southbound_database_connected",
+	Help:      "Specifies if OVN controller is connected to OVN southbound database (1) or not (0)",
+})
+
 var (
 	ovnControllerVersion       string
 	ovnControllerOvsLibVersion string
@@ -342,6 +349,64 @@ func getPortCount(portType string) float64 {
 	return portCount
 }
 
+//ovnControllerSBDBConnectionCheckUpdater blocks until stopCh closed but before then polls ovn-controllers connection status with
+//southbound database periodically.
+func ovnControllerSBDBConnectionCheckUpdater(stopCh <-chan struct{}, ovsAppctl ovsClient, period time.Duration) {
+	// There maybe transient connection issues to SB DB. We want to minimise the risk of reporting this as the current state between
+	// long poll intervals.
+	retry := 5
+	retrySleep := 5 * time.Second
+	retryTotal := retrySleep * time.Duration(retry)
+
+	if retryTotal >= period {
+		panic("period must be greater than retry total time")
+	}
+	// update metric to a good initial state
+	updateSBDBConnectionMetric(ovsAppctl, retry, retrySleep)
+
+	ticker := time.NewTicker(period)
+	for {
+		select {
+		case <-ticker.C:
+			updateSBDBConnectionMetric(ovsAppctl, retry, retrySleep)
+		case <-stopCh:
+			ticker.Stop()
+			return
+		}
+	}
+}
+
+func updateSBDBConnectionMetric(ovsAppctl ovsClient, retry int, retrySleep time.Duration) {
+	var stdOut, stdErr string
+	var err error
+	var connected bool
+	connected = false
+	for i := 0; i < retry && !connected; i++ {
+		stdOut, stdErr, err = ovsAppctl("connection-status")
+		if err != nil {
+			klog.Errorf("Failed to get OVN controller southbound database connection status before utilizing "+
+				"client ovs-appctl: %v", err)
+		} else if stdErr != "" {
+			klog.Errorf("Failed to get OVN controller southbound database connection status because "+
+				"ovs-appctl command returned an error: %s", stdErr)
+		} else if stdOut == "" {
+			klog.Errorf("Unexpected blank output while attempting to retrieve OVN controller southbound " +
+				"database connection status")
+		} else if strings.HasPrefix(stdOut, "connected") {
+			connected = true
+		} else {
+			// sleep and retry
+			time.Sleep(retrySleep)
+		}
+	}
+
+	if connected {
+		metricOVNControllerSBDBConnection.Set(1)
+	} else {
+		metricOVNControllerSBDBConnection.Set(0)
+	}
+}
+
 func RegisterOvnControllerMetrics(stopChan <-chan struct{}) {
 	getOvnControllerVersionInfo()
 	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
@@ -360,6 +425,7 @@ func RegisterOvnControllerMetrics(stopChan <-chan struct{}) {
 	))
 
 	// ovn-controller metrics
+	ovnRegistry.MustRegister(metricOVNControllerSBDBConnection)
 	ovnRegistry.MustRegister(prometheus.NewCounterFunc(
 		prometheus.CounterOpts{
 			Namespace: MetricOvnNamespace,
@@ -426,4 +492,6 @@ func RegisterOvnControllerMetrics(stopChan <-chan struct{}) {
 	go coverageShowMetricsUpdater(ovnController, stopChan)
 	// ovn-controller stopwatch show metrics updater
 	go stopwatchShowMetricsUpdater(ovnController, stopChan)
+	// ovn-controller southbound database connection status updater
+	go ovnControllerSBDBConnectionCheckUpdater(stopChan, util.RunOVNControllerAppCtl, time.Minute*2)
 }
