@@ -757,12 +757,12 @@ func (wf *WatchFactory) EgressQoSInformer() egressqosinformer.EgressQoSInformer 
 	return wf.egressQoSFactory.K8s().V1().EgressQoSes()
 }
 
-// noServiceNameSelector is a LabelSelector added to the watcher for
-// EndpointSlices that excludes EndpointSlices that don't
-// have "kubernetes.io/service-name" label and also those
+// noServiceNameSelector is a LabelSelector added to the watch for
+// endpointslices that excludes endpointslices which doesn't
+// have "kubernetes.io/service-name" label and also the one's
 // that have "kubernetes.io/service-name" label value set to "".
 func noServiceNameSelector() func(options *metav1.ListOptions) {
-	// if the LabelServiceName label doesn't exist, skip it.
+	// if the LabelServiceName label doesn't exists, skip it.
 	svcNameLabel, err := labels.NewRequirement(discovery.LabelServiceName, selection.Exists, nil)
 	if err != nil {
 		// cannot occur

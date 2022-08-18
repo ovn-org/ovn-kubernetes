@@ -715,16 +715,17 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 	}
 
 	namespacedName := namespacedNameFromEPSlice(oldEpSlice)
-
+	// This case is to handle when we update from externalName service
+	// to nodeport service, update endpointslice handler is called and
+	// to have the nodeport IPtable rules installed.
 	if _, exists := npw.getServiceInfo(namespacedName); !exists {
-		// When a service is updated from externalName to nodeport type, it won't be
-		// in nodePortWatcher cache (npw): in this case, have the new nodeport IPtable rules
-		// installed.
 		npw.AddEndpointSlice(newEpSlice)
-	} else if len(newEpAddr) == 0 {
-		// With no endpoint addresses in new endpointslice, delete old endpoint rules
-		// and add normal ones back
-		npw.DeleteEndpointSlice(oldEpSlice)
+	}
+	// Delete old endpoint rules and add normal ones back
+	if len(newEpAddr) == 0 {
+		if _, exists := npw.getServiceInfo(namespacedName); exists {
+			npw.DeleteEndpointSlice(oldEpSlice)
+		}
 	}
 
 	klog.V(5).Infof("Updating endpointslice %s in namespace %s", oldEpSlice.Name, oldEpSlice.Namespace)
