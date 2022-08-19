@@ -449,7 +449,7 @@ func (oc *Controller) updateACLLoggingForPolicy(np *networkPolicy, aclLogging *A
 	return UpdateACLLoggingWithPredicate(oc.nbClient, p, aclLogging)
 }
 
-func (oc *Controller) setNetworkPolicyACLLoggingForNamespace(ns string, nsInfo *namespaceInfo) error {
+func (oc *Controller) updateACLLoggingForDefaultACLs(ns string, nsInfo *namespaceInfo) error {
 	// update namespace-scoped default deny ACLs
 	denyEgressACL, _ := buildDenyACLs(ns, "", defaultDenyPortGroup(ns, egressDefaultDenySuffix),
 		&nsInfo.aclLogging, knet.PolicyTypeEgress)
@@ -457,6 +457,13 @@ func (oc *Controller) setNetworkPolicyACLLoggingForNamespace(ns string, nsInfo *
 		&nsInfo.aclLogging, knet.PolicyTypeIngress)
 	if err := UpdateACLLogging(oc.nbClient, []*nbdb.ACL{denyIngressACL, denyEgressACL}, &nsInfo.aclLogging); err != nil {
 		return fmt.Errorf("unable to update ACL logging for namespace %s: %w", ns, err)
+	}
+	return nil
+}
+
+func (oc *Controller) setNetworkPolicyACLLoggingForNamespace(ns string, nsInfo *namespaceInfo) error {
+	if err := oc.updateACLLoggingForDefaultACLs(ns, nsInfo); err != nil {
+		return err
 	}
 
 	// now update network policy specific ACLs
@@ -1310,13 +1317,20 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) error {
 			policy.Name, policy.Namespace, err)
 	}
 	defer nsUnlock()
-	nsInfo.networkPolicies[policy.Name] = np
+	// Update default ACL log level, since namespace update will only affect namespace-wide ACLs if
+	// len(nsInfo.networkPolicies) > 0, which is not the case at this point
+	if nsInfo.aclLogging.Deny != aclLogging.Deny && len(nsInfo.networkPolicies) == 0 {
+		if err := oc.updateACLLoggingForDefaultACLs(policy.Namespace, nsInfo); err != nil {
+			klog.Warningf(err.Error())
+		} else {
+			klog.Infof("Policy %s: ACL logging setting updated to deny=%s allow=%s",
+				getPolicyNamespacedName(policy), nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
+		}
+	}
 	// The allow logging level was updated while we were creating the policy if
 	// the current allow logging level is different than the one we have from
-	// the first time we locked the namespace. If this is the case, update the
-	// policy logging level. We don't care about deny logging level as that only
-	// applies to the default deny ACLS which were created while the namespace
-	// was locked.
+	// the first time we locked the namespace.
+	// namespace update handler couldn't update this netpol, since it's not in the nsInfo.networkPolicies map yet.
 	if nsInfo.aclLogging.Allow != aclLogging.Allow {
 		if err := oc.updateACLLoggingForPolicy(np, &nsInfo.aclLogging); err != nil {
 			klog.Warningf(err.Error())
@@ -1325,6 +1339,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) error {
 				getPolicyNamespacedName(policy), nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
 		}
 	}
+	nsInfo.networkPolicies[policy.Name] = np
 	return nil
 }
 
