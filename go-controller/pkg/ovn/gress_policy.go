@@ -357,19 +357,16 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *ACLLo
 	return acls
 }
 
+func getGressPolicyACLName(ns, policyName string, idx int) string {
+	return joinACLName(ns, policyName, fmt.Sprintf("%v", idx))
+}
+
 // buildACLAllow builds an allow-related ACL for a given match
 func (gp *gressPolicy) buildACLAllow(match, l4Match string, ipBlockCIDR int, aclLogging *ACLLoggingLevels) *nbdb.ACL {
-	var direction string
-	var options map[string]string
-	if gp.policyType == knet.PolicyTypeIngress {
-		direction = nbdb.ACLDirectionToLport
-	} else {
-		direction = nbdb.ACLDirectionFromLport
-		options = map[string]string{"apply-after-lb": "true"}
-	}
+	aclT := policyTypeToAclType(gp.policyType)
 	priority := types.DefaultAllowPriority
 	action := nbdb.ACLActionAllowRelated
-	aclName := fmt.Sprintf("%s_%s_%v", gp.policyNamespace, gp.policyName, gp.idx)
+	aclName := getGressPolicyACLName(gp.policyNamespace, gp.policyName, gp.idx)
 
 	// For backward compatibility with existing ACLs, we use "ipblock_cidr=false" for
 	// non-ipblock ACLs and "ipblock_cidr=true" for the first ipblock ACL in a policy,
@@ -395,7 +392,7 @@ func (gp *gressPolicy) buildACLAllow(match, l4Match string, ipBlockCIDR int, acl
 		policyTypeACLExtIdKey:  string(gp.policyType),
 		policyTypeNum:          policyTypeIndex,
 	}
-	acl := BuildACL(aclName, direction, priority, match, action, aclLogging, externalIds, options)
+	acl := BuildACL(aclName, priority, match, action, aclLogging, aclT, externalIds)
 	return acl
 }
 
