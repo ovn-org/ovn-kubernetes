@@ -157,6 +157,7 @@ enable-pprof=true
 node-server-privkey=/path/to/node-metrics-private.key
 node-server-cert=/path/to/node-metrics.crt
 enable-config-duration=true
+enable-eip-scale-metrics=true
 
 [logging]
 loglevel=5
@@ -574,6 +575,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Metrics.NodeServerPrivKey).To(gomega.Equal("/path/to/node-metrics-private.key"))
 			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal("/path/to/node-metrics.crt"))
 			gomega.Expect(Metrics.EnableConfigDuration).To(gomega.Equal(true))
+			gomega.Expect(Metrics.EnableEIPScaleMetrics).To(gomega.Equal(true))
 
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeSSL))
 			gomega.Expect(OvnNorth.PrivKey).To(gomega.Equal("/path/to/nb-client-private.key"))
@@ -657,6 +659,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Metrics.NodeServerPrivKey).To(gomega.Equal("/tls/nodeprivkey"))
 			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal("/tls/nodecert"))
 			gomega.Expect(Metrics.EnableConfigDuration).To(gomega.Equal(true))
+			gomega.Expect(Metrics.EnableEIPScaleMetrics).To(gomega.Equal(true))
 
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeSSL))
 			gomega.Expect(OvnNorth.PrivKey).To(gomega.Equal("/client/privkey"))

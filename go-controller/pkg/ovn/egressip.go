@@ -138,6 +138,11 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 		}
 	}
 
+	invalidStatusLen := len(invalidStatus)
+	if invalidStatusLen > 0 {
+		metrics.RecordEgressIPRebalance(invalidStatusLen)
+	}
+
 	// Add only the diff between what is requested and valid and that which
 	// isn't already assigned.
 	ipsToAssign := validSpecIPs
@@ -148,7 +153,7 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 		statusToKeep = append(statusToKeep, status)
 		ipsToAssign.Delete(status.EgressIP)
 	}
-	statusToRemove := make([]egressipv1.EgressIPStatusItem, 0, len(invalidStatus))
+	statusToRemove := make([]egressipv1.EgressIPStatusItem, 0, invalidStatusLen)
 	for status := range invalidStatus {
 		statusToRemove = append(statusToRemove, status)
 		ipsToRemove.Insert(status.EgressIP)
@@ -1225,6 +1230,7 @@ func (oc *Controller) syncEgressIPs(eIPs []interface{}) error {
 	// - Egress IPs which have been deleted while ovnkube-master was down
 	// - pods/namespaces which have stopped matching on egress IPs while
 	//   ovnkube-master was down
+
 	egressIPCache, err := oc.generateCacheForEgressIP(eIPs)
 	if err != nil {
 		return fmt.Errorf("syncEgressIPs unable to generate cache for egressip: %v", err)
@@ -1922,13 +1928,24 @@ type egressIPController struct {
 // (routing pod traffic to the egress node) and NAT objects on the egress node
 // (SNAT-ing to the egress IP).
 func (e *egressIPController) addPodEgressIPAssignment(egressIPName string, status egressipv1.EgressIPStatusItem, pod *kapi.Pod, podIPs []*net.IPNet) (err error) {
-	if err := e.deletePerPodGRSNAT(pod, podIPs, status); err != nil {
+	if config.Metrics.EnableEIPScaleMetrics {
+		start := time.Now()
+		defer func() {
+			if err != nil {
+				return
+			}
+			duration := time.Since(start)
+			metrics.RecordEgressIPAssign(duration)
+		}()
+	}
+	if err = e.deletePerPodGRSNAT(pod, podIPs, status); err != nil {
 		return err
 	}
-	if err := e.handleEgressReroutePolicy(podIPs, status, egressIPName, e.createEgressReroutePolicy); err != nil {
+	if err = e.handleEgressReroutePolicy(podIPs, status, egressIPName, e.createEgressReroutePolicy); err != nil {
 		return fmt.Errorf("unable to create logical router policy, err: %v", err)
 	}
-	ops, err := createNATRuleOps(e.nbClient, podIPs, status, egressIPName)
+	var ops []ovsdb.Operation
+	ops, err = createNATRuleOps(e.nbClient, podIPs, status, egressIPName)
 	if err != nil {
 		return fmt.Errorf("unable to create NAT rule for status: %v, err: %v", status, err)
 	}
@@ -1938,14 +1955,25 @@ func (e *egressIPController) addPodEgressIPAssignment(egressIPName string, statu
 
 // deletePodEgressIPAssignment deletes the OVN programmed egress IP
 // configuration mentioned for addPodEgressIPAssignment.
-func (e *egressIPController) deletePodEgressIPAssignment(egressIPName string, status egressipv1.EgressIPStatusItem, podIPs []*net.IPNet) error {
-	if err := e.handleEgressReroutePolicy(podIPs, status, egressIPName, e.deleteEgressReroutePolicy); errors.Is(err, libovsdbclient.ErrNotFound) {
+func (e *egressIPController) deletePodEgressIPAssignment(egressIPName string, status egressipv1.EgressIPStatusItem, podIPs []*net.IPNet) (err error) {
+	if config.Metrics.EnableEIPScaleMetrics {
+		start := time.Now()
+		defer func() {
+			if err != nil {
+				return
+			}
+			duration := time.Since(start)
+			metrics.RecordEgressIPUnassign(duration)
+		}()
+	}
+	if err = e.handleEgressReroutePolicy(podIPs, status, egressIPName, e.deleteEgressReroutePolicy); errors.Is(err, libovsdbclient.ErrNotFound) {
 		// if the gateway router join IP setup is already gone, then don't count it as error.
 		klog.Warningf("Unable to delete logical router policy, err: %v", err)
 	} else if err != nil {
 		return fmt.Errorf("unable to delete logical router policy, err: %v", err)
 	}
-	ops, err := deleteNATRuleOps(e.nbClient, []ovsdb.Operation{}, podIPs, status, egressIPName)
+	var ops []ovsdb.Operation
+	ops, err = deleteNATRuleOps(e.nbClient, []ovsdb.Operation{}, podIPs, status, egressIPName)
 	if err != nil {
 		return fmt.Errorf("unable to delete NAT rule for status: %v, err: %v", status, err)
 	}
@@ -2169,6 +2197,7 @@ func (oc *Controller) checkEgressNodesReachability() {
 		oc.eIPC.allocator.Unlock()
 		for nodeName, shouldDelete := range reAddOrDelete {
 			if shouldDelete {
+				metrics.RecordEgressIPUnreachableNode()
 				klog.Warningf("Node: %s is detected as unreachable, deleting it from egress assignment", nodeName)
 				if err := oc.deleteEgressNode(nodeName); err != nil {
 					klog.Errorf("Node: %s is detected as unreachable, but could not re-assign egress IPs, err: %v", nodeName, err)
