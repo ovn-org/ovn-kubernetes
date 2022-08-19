@@ -113,7 +113,7 @@ func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, po
 		egressOptions = map[string]string{}
 	}
 	egressDenyACL := libovsdbops.BuildACL(
-		networkPolicy.Namespace+"_"+egressDefaultDenySuffix,
+		getDefaultDenyPolicyACLName(networkPolicy.Namespace, egressDefaultDenySuffix),
 		egressDirection,
 		types.DefaultDenyPriority,
 		"inport == @"+pgHash+"_"+egressDenyPG,
@@ -129,7 +129,7 @@ func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, po
 	egressDenyACL.UUID = *egressDenyACL.Name + "-egressDenyACL-UUID"
 
 	egressAllowACL := libovsdbops.BuildACL(
-		networkPolicy.Namespace+"_"+arpAllowPolicySuffix,
+		getARPAllowACLName(networkPolicy.Namespace),
 		egressDirection,
 		types.DefaultAllowPriority,
 		"inport == @"+pgHash+"_"+egressDenyPG+" && "+arpAllowPolicyMatch,
@@ -145,7 +145,7 @@ func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, po
 	egressAllowACL.UUID = *egressAllowACL.Name + "-egressAllowACL-UUID"
 
 	ingressDenyACL := libovsdbops.BuildACL(
-		networkPolicy.Namespace+"_"+ingressDefaultDenySuffix,
+		getDefaultDenyPolicyACLName(networkPolicy.Namespace, ingressDefaultDenySuffix),
 		nbdb.ACLDirectionToLport,
 		types.DefaultDenyPriority,
 		"outport == @"+pgHash+"_"+ingressDenyPG,
@@ -161,7 +161,7 @@ func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, po
 	ingressDenyACL.UUID = *ingressDenyACL.Name + "-ingressDenyACL-UUID"
 
 	ingressAllowACL := libovsdbops.BuildACL(
-		networkPolicy.Namespace+"_"+arpAllowPolicySuffix,
+		getARPAllowACLName(networkPolicy.Namespace),
 		nbdb.ACLDirectionToLport,
 		types.DefaultAllowPriority,
 		"outport == @"+pgHash+"_"+ingressDenyPG+" && "+arpAllowPolicyMatch,
@@ -222,7 +222,7 @@ func (n kNetworkPolicy) getPolicyData(networkPolicy *knet.NetworkPolicy, policyP
 
 	shouldBeLogged := logSeverity != ""
 	for i := range networkPolicy.Spec.Ingress {
-		aclName := networkPolicy.Namespace + "_" + networkPolicy.Name + "_" + strconv.Itoa(i)
+		aclName := getGressPolicyACLName(networkPolicy.Namespace, networkPolicy.Name, i)
 		policyType := string(knet.PolicyTypeIngress)
 		if peerNamespaces != nil {
 			ingressAsMatch := asMatch(append(peerNamespaces, getAddressSetName(networkPolicy.Namespace, networkPolicy.Name, knet.PolicyTypeIngress, i)))
@@ -282,7 +282,7 @@ func (n kNetworkPolicy) getPolicyData(networkPolicy *knet.NetworkPolicy, policyP
 			direction = nbdb.ACLDirectionToLport
 			options = map[string]string{}
 		}
-		aclName := networkPolicy.Namespace + "_" + networkPolicy.Name + "_" + strconv.Itoa(i)
+		aclName := getGressPolicyACLName(networkPolicy.Namespace, networkPolicy.Name, i)
 		policyType := string(knet.PolicyTypeEgress)
 		if peerNamespaces != nil {
 			egressAsMatch := asMatch(append(peerNamespaces, getAddressSetName(networkPolicy.Namespace, networkPolicy.Name, knet.PolicyTypeEgress, i)))
@@ -406,14 +406,14 @@ type multicastPolicy struct{}
 
 func (p multicastPolicy) getMulticastPolicyExpectedData(ns string, ports []string) []libovsdb.TestData {
 	pg_hash := hashedPortGroup(ns)
-	egressMatch := getACLMatch(pg_hash, getMulticastACLEgrMatch(), knet.PolicyTypeEgress)
+	egressMatch := getACLMatch(pg_hash, getMulticastACLEgrMatch(), lportEgressAfterLB)
 
 	ip4AddressSet, ip6AddressSet := addressset.MakeAddressSetHashNames(ns)
 	mcastMatch := getACLMatchAF(getMulticastACLIgrMatchV4(ip4AddressSet), getMulticastACLIgrMatchV6(ip6AddressSet))
-	ingressMatch := getACLMatch(pg_hash, mcastMatch, knet.PolicyTypeIngress)
+	ingressMatch := getACLMatch(pg_hash, mcastMatch, lportIngress)
 
 	egressACL := libovsdbops.BuildACL(
-		ns+"_MulticastAllowEgress",
+		getMcastACLName(ns, "MulticastAllowEgress"),
 		nbdb.ACLDirectionFromLport,
 		types.DefaultMcastAllowPriority,
 		egressMatch,
@@ -431,7 +431,7 @@ func (p multicastPolicy) getMulticastPolicyExpectedData(ns string, ports []strin
 	egressACL.UUID = *egressACL.Name + "-UUID"
 
 	ingressACL := libovsdbops.BuildACL(
-		ns+"_MulticastAllowIngress",
+		getMcastACLName(ns, "MulticastAllowIngress"),
 		nbdb.ACLDirectionToLport,
 		types.DefaultMcastAllowPriority,
 		ingressMatch,
@@ -1669,7 +1669,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				}
 				pgHash := hashedPortGroup(networkPolicy.Namespace)
 				leftOverACLFromUpgrade1 := libovsdbops.BuildACL(
-					networkPolicy.Namespace+"_"+arpAllowPolicySuffix,
+					getARPAllowACLName(networkPolicy.Namespace),
 					nbdb.ACLDirectionFromLport,
 					types.DefaultAllowPriority,
 					"inport == @"+pgHash+"_"+egressDenyPG+" && (arp)", // invalid ACL match; won't be cleaned up
@@ -1685,7 +1685,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				leftOverACLFromUpgrade1.UUID = *leftOverACLFromUpgrade1.Name + "-egressAllowACL-UUID1"
 
 				leftOverACLFromUpgrade2 := libovsdbops.BuildACL(
-					networkPolicy.Namespace+"_"+arpAllowPolicySuffix,
+					getARPAllowACLName(networkPolicy.Namespace),
 					nbdb.ACLDirectionFromLport,
 					types.DefaultAllowPriority,
 					"inport == @"+pgHash+"_"+egressDenyPG+" && "+arpAllowPolicyMatch,
@@ -1821,7 +1821,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				pgHash := hashedPortGroup("leftover1")
 				// ACL1: leftover arp allow ACL egress with old match (arp)
 				leftOverACL1FromUpgrade := libovsdbops.BuildACL(
-					"leftover1"+"_"+arpAllowPolicySuffix,
+					getARPAllowACLName("leftover1"),
 					nbdb.ACLDirectionFromLport,
 					types.DefaultAllowPriority,
 					"inport == @"+pgHash+"_"+egressDenyPG+" && "+staleArpAllowPolicyMatch,
@@ -1844,7 +1844,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				testOnlyEgressDenyPG.UUID = testOnlyEgressDenyPG.Name + "-UUID"
 				// ACL2: leftover arp allow ACL ingress with old match (arp)
 				leftOverACL2FromUpgrade := libovsdbops.BuildACL(
-					"leftover1"+"_"+arpAllowPolicySuffix,
+					getARPAllowACLName("leftover1"),
 					nbdb.ACLDirectionToLport,
 					types.DefaultAllowPriority,
 					"outport == @"+pgHash+"_"+ingressDenyPG+" && "+staleArpAllowPolicyMatch,
@@ -3389,7 +3389,7 @@ func asMatch(addressSets []string) string {
 }
 
 func buildExpectedACL(gp *gressPolicy, pgName string, as []string, aclLogging *ACLLoggingLevels) *nbdb.ACL {
-	name := gp.policyNamespace + "_" + gp.policyName + "_" + strconv.Itoa(gp.idx)
+	name := getGressPolicyACLName(gp.policyNamespace, gp.policyName, gp.idx)
 	asMatch := asMatch(as)
 	match := fmt.Sprintf("ip4.src == {%s} && outport == @%s", asMatch, pgName)
 	gpDirection := string(knet.PolicyTypeIngress)
@@ -3630,7 +3630,7 @@ func generateAllowFromNodeData(nodeName, mgmtIP string) (nodeSwitch *nbdb.Logica
 
 	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtIP)
 
-	nodeACL := libovsdbops.BuildACL("", nbdb.ACLDirectionToLport, types.DefaultAllowPriority, match, "allow-related", types.OvnACLLoggingMeter, "", false, nil, nil)
+	nodeACL := libovsdbops.BuildACL(getAllowFromNodeACLName(), nbdb.ACLDirectionToLport, types.DefaultAllowPriority, match, "allow-related", types.OvnACLLoggingMeter, "", false, nil, nil)
 	nodeACL.UUID = "nodeACL-UUID"
 
 	testNode := &nbdb.LogicalSwitch{
