@@ -22,6 +22,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -681,19 +682,6 @@ func (oc *Controller) WatchNodes() error {
 	return err
 }
 
-// GetNetworkPolicyACLLogging retrieves ACL deny policy logging setting for the Namespace
-func (oc *Controller) GetNetworkPolicyACLLogging(ns string) *ACLLoggingLevels {
-	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
-	if nsInfo == nil {
-		return &ACLLoggingLevels{
-			Allow: "",
-			Deny:  "",
-		}
-	}
-	defer nsUnlock()
-	return &nsInfo.aclLogging
-}
-
 // Verify if controller can support ACL logging and validate annotation
 func (oc *Controller) aclLoggingCanEnable(annotation string, nsInfo *namespaceInfo) bool {
 	if !oc.aclLoggingEnabled || annotation == "" {
@@ -714,7 +702,8 @@ func (oc *Controller) aclLoggingCanEnable(annotation string, nsInfo *namespaceIn
 	newDenyLoggingLevel := ""
 	newAllowLoggingLevel := ""
 	okCnt := 0
-	for _, s := range []string{"alert", "warning", "notice", "info", "debug"} {
+	for _, s := range []string{nbdb.ACLSeverityAlert, nbdb.ACLSeverityWarning, nbdb.ACLSeverityNotice,
+		nbdb.ACLSeverityInfo, nbdb.ACLSeverityDebug} {
 		if s == aclLevels.Deny {
 			newDenyLoggingLevel = aclLevels.Deny
 			okCnt++

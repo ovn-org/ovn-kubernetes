@@ -292,18 +292,18 @@ func (t *Transaction) Update(database, table string, where []ovsdb.Condition, ro
 				panic(err)
 			}
 
-			oldValue, err := ovsdb.NativeToOvs(colSchema, old)
-			if err != nil {
-				oldValue = nil
-			}
-
 			native, err := ovsdb.OvsToNative(colSchema, value)
 			if err != nil {
 				panic(err)
 			}
 
-			if oldValue == native {
+			if reflect.DeepEqual(old, native) {
 				continue
+			}
+
+			oldValue, err := ovsdb.NativeToOvs(colSchema, old)
+			if err != nil {
+				oldValue = nil
 			}
 
 			err = newInfo.SetField(column, native)
@@ -316,7 +316,7 @@ func (t *Transaction) Update(database, table string, where []ovsdb.Condition, ro
 			if err != nil {
 				panic(err)
 			}
-			diff := diff(oldValue, newValue)
+			diff := diff(colSchema, oldValue, newValue)
 			if diff != nil {
 				rowDelta[column] = diff
 			}
@@ -446,7 +446,7 @@ func (t *Transaction) Mutate(database, table string, where []ovsdb.Condition, mu
 				panic(err)
 			}
 
-			delta := diff(oldValue, newValue)
+			delta := diff(colSchema, oldValue, newValue)
 			if delta != nil {
 				rowDelta[changed] = delta
 			}
@@ -634,9 +634,13 @@ func (t *Transaction) Assert(database, table, lock string) ovsdb.OperationResult
 	return ovsdb.OperationResult{Error: e.Error()}
 }
 
-func diff(a interface{}, b interface{}) interface{} {
+func diff(column *ovsdb.ColumnSchema, a interface{}, b interface{}) interface{} {
 	switch a.(type) {
 	case ovsdb.OvsSet:
+		if column.TypeObj.Max() == 1 {
+			// sets with max size 1 are treated like single values
+			return b
+		}
 		// original value
 		original := a.(ovsdb.OvsSet)
 		// replacement value

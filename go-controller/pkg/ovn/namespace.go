@@ -327,7 +327,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		}
 		// Trigger an egress fw logging update - this will only happen if an egress firewall exists for the NS, otherwise
 		// this will not do anything.
-		updated, err := oc.refreshEgressFirewallLogging(old.Name)
+		updated, err := oc.updateACLLoggingForEgressFirewall(old.Name, nsInfo)
 		if err != nil {
 			klog.Warningf(err.Error())
 		} else if updated {
