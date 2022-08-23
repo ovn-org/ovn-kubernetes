@@ -4,6 +4,7 @@
 package node
 
 import (
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -28,24 +29,29 @@ type addressManager struct {
 	// information from netlink. Set to false for testcases.
 	useNetlink bool
 
+	// compare node primary IP change
+	nodePrimaryAddr net.IP
+	gatewayBridge   *bridgeConfiguration
+
 	OnChanged func()
 	sync.Mutex
 }
 
 // initializes a new address manager which will hold all the IPs on a node
-func newAddressManager(nodeName string, k kube.Interface, config *managementPortConfig, watchFactory factory.NodeWatchFactory) *addressManager {
-	return newAddressManagerInternal(nodeName, k, config, watchFactory, true)
+func newAddressManager(nodeName string, k kube.Interface, config *managementPortConfig, watchFactory factory.NodeWatchFactory, gwBridge *bridgeConfiguration) *addressManager {
+	return newAddressManagerInternal(nodeName, k, config, watchFactory, gwBridge, true)
 }
 
 // newAddressManagerInternal creates a new address manager; this function is
 // only expose for testcases to disable netlink subscription to ensure
 // reproducibility of unit tests.
-func newAddressManagerInternal(nodeName string, k kube.Interface, config *managementPortConfig, watchFactory factory.NodeWatchFactory, useNetlink bool) *addressManager {
+func newAddressManagerInternal(nodeName string, k kube.Interface, config *managementPortConfig, watchFactory factory.NodeWatchFactory, gwBridge *bridgeConfiguration, useNetlink bool) *addressManager {
 	mgr := &addressManager{
 		nodeName:       nodeName,
 		watchFactory:   watchFactory,
 		addresses:      sets.NewString(),
 		mgmtPortConfig: config,
+		gatewayBridge:  gwBridge,
 		OnChanged:      func() {},
 		useNetlink:     useNetlink,
 	}
@@ -153,15 +159,13 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 					addrChanged = c.delAddr(a.LinkAddress.IP)
 				}
 
+				if addrChanged && c.nodePrimaryAddrChanged() {
+					klog.Infof("Node primary address changed to %v. Updating OVN encap IP.", c.nodePrimaryAddr)
+					c.updateOVNEncapIP()
+				}
 				if addrChanged || !c.doesNodeHostAddressesMatch() {
-					if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
-						klog.Errorf("Failed to set node annotations: %v", err)
-						continue
-					}
-					if err := c.nodeAnnotator.Run(); err != nil {
-						klog.Errorf("Failed to set node annotations: %v", err)
-					}
-					c.OnChanged()
+					klog.Infof("Host addresses changed to %v. Updating node address annotation.", c.addresses)
+					c.updateNodeAddressAnnotations()
 				}
 			case <-addressSyncTimer.C:
 				if subscribed {
@@ -179,6 +183,57 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 	}()
 
 	klog.Info("Node IP manager is running")
+}
+
+// updateNodeAddressAnnotations updates all relevant annotations for the node including
+// k8s.ovn.org/host-addresses, k8s.ovn.org/node-primary-ifaddr, k8s.ovn.org/l3-gateway-config.
+func (c *addressManager) updateNodeAddressAnnotations() {
+	// Get node information
+	node, err := c.watchFactory.GetNode(c.nodeName)
+	if err != nil {
+		klog.Errorf("Unable to get node from informer: %v", err)
+		return
+	}
+
+	// get updated interface IP addresses for the gateway bridge
+	ifAddrs, err := getNetworkInterfaceIPAddresses(c.gatewayBridge.bridgeName)
+	if err != nil {
+		klog.Errorf("Failed to get gateway bridge IP addresses: %v", err)
+		return
+	}
+
+	// update k8s.ovn.org/host-addresses
+	if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
+		klog.Errorf("Failed to set node annotations: %v", err)
+		return
+	}
+
+	// sets both IPv4 and IPv6 primary IP addr in annotation k8s.ovn.org/node-primary-ifaddr
+	// Note: this is not the API node's internal interface, but the primary IP on the gateway
+	// bridge (cf. gateway_init.go)
+	if err := util.SetNodePrimaryIfAddrs(c.nodeAnnotator, ifAddrs); err != nil {
+		klog.Errorf("Unable to set primary IP net label on node, err: %v", err)
+		return
+	}
+
+	// update k8s.ovn.org/l3-gateway-config
+	gatewayCfg, err := util.ParseNodeL3GatewayAnnotation(node)
+	if err != nil {
+		klog.Errorf("Unable to get node L3 gateway annotation, err: %v", err)
+		return
+	}
+	gatewayCfg.IPAddresses = ifAddrs
+	err = util.SetL3GatewayConfig(c.nodeAnnotator, gatewayCfg)
+	if err != nil {
+		klog.Errorf("Unable to set L3 gateway config, err: %v", err)
+		return
+	}
+
+	// push all updates to the node
+	if err := c.nodeAnnotator.Run(); err != nil {
+		klog.Errorf("Failed to set node annotations, err: %v", err)
+	}
+	c.OnChanged()
 }
 
 func (c *addressManager) assignAddresses(nodeHostAddresses sets.String) bool {
@@ -201,14 +256,59 @@ func (c *addressManager) doesNodeHostAddressesMatch() bool {
 		klog.Errorf("Unable to get node from informer")
 		return false
 	}
-	// check to see if ips on the node differ from what we have
+	// check to see if ips on the node differ from what we stored
+	// in host-address annotation
 	nodeHostAddresses, err := util.ParseNodeHostAddresses(node)
 	if err != nil {
-		klog.Errorf("Unable to parse addresses from node host")
+		klog.Errorf("Unable to parse addresses from node host %s: %s", node.Name, err.Error())
 		return false
 	}
 
 	return nodeHostAddresses.Equal(c.addresses)
+}
+
+// nodePrimaryAddrChanged returns false if the node's primary API IP,
+// i.e. the first NodeInternalIP or NodeExternalIP from node.Status.Addresses
+// does not match the current address stored in c.nodePrimaryAddr.
+func (c *addressManager) nodePrimaryAddrChanged() bool {
+	node, err := c.watchFactory.GetNode(c.nodeName)
+	if err != nil {
+		klog.Errorf("Unable to get node from informer")
+		return false
+	}
+	// check to see if ips on the node differ from what we stored
+	// in addressManager
+	nodePrimaryAddrStr, err := util.GetNodePrimaryIP(node)
+	if err != nil {
+		klog.Errorf("Failed to get node primary IP", nodePrimaryAddrStr)
+		return false
+	}
+	nodePrimaryAddr := net.ParseIP(nodePrimaryAddrStr)
+	if nodePrimaryAddr == nil {
+		klog.Errorf("Failed to parse kubernetes node IP address, err: %v", err)
+		return false
+	}
+	if c.nodePrimaryAddr != nil && c.nodePrimaryAddr.Equal(nodePrimaryAddr) {
+		return false
+	}
+	c.nodePrimaryAddr = nodePrimaryAddr
+
+	return true
+}
+
+// updateOVNEncapIP updates encap IP to OVS when the node primary IP changed.
+func (c *addressManager) updateOVNEncapIP() {
+	cmd := []string{
+		"set",
+		"Open_vSwitch",
+		".",
+		fmt.Sprintf("external_ids:ovn-encap-ip=%s", c.nodePrimaryAddr),
+	}
+	_, stderr, err := util.RunOVSVsctl(cmd...)
+	if err != nil {
+		klog.Errorf("Error setting OVS encap IP: %v  %q", err, stderr)
+		return
+	}
 }
 
 // detects if the IP is valid for a node
@@ -264,12 +364,12 @@ func (c *addressManager) sync() {
 	}
 
 	addrChanged := c.assignAddresses(currAddresses)
+	if addrChanged && c.nodePrimaryAddrChanged() {
+		klog.Infof("Node primary address changed to %v. Updating OVN encap IP.", c.nodePrimaryAddr)
+		c.updateOVNEncapIP()
+	}
 	if addrChanged || !c.doesNodeHostAddressesMatch() {
-		klog.Infof("Node address annotation being set to: %v addrChanged: %v", currAddresses, addrChanged)
-		if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {
-			klog.Errorf("Failed to set node annotations: %v", err)
-		} else if err := c.nodeAnnotator.Run(); err != nil {
-			klog.Errorf("Failed to set node annotations: %v", err)
-		}
+		klog.Infof("Node address changed to %v. Updating annotations.", currAddresses)
+		c.updateNodeAddressAnnotations()
 	}
 }

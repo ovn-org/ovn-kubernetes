@@ -360,6 +360,7 @@ func (g *gateway) GetGatewayBridgeIface() string {
 }
 
 type bridgeConfiguration struct {
+	sync.Mutex
 	bridgeName  string
 	uplinkName  string
 	ips         []*net.IPNet
