@@ -235,21 +235,6 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 				return err
 			}
 		}
-		// If running on a public cloud we should not program OVN just yet for assignment
-		// operations. We need confirmation from the cloud-network-config-controller that
-		// it can assign the IPs. reconcileCloudPrivateIPConfig will take care of
-		// processing the answer from the requests we make here, and update OVN
-		// accordingly when we know what the outcome is.
-		if len(ipsToAssign) > 0 {
-			statusToAdd = oc.assignEgressIPs(name, ipsToAssign.UnsortedList())
-			statusToKeep = append(statusToKeep, statusToAdd...)
-		}
-		// Same as above: Add all assignments which are to be kept to the
-		// allocator cache, allowing us to track all assignments which have been
-		// performed and avoid incorrect future assignments due to a
-		// de-synchronized cache.
-		oc.addAllocatorEgressIPAssignments(name, statusToKeep)
-
 		// When egress IP is not fully assigned to a node, then statusToRemove may not
 		// have those entries, hence retrieve it from staleEgressIPs for removing
 		// the item from cloudprivateipconfig.
@@ -265,6 +250,20 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 					egressipv1.EgressIPStatusItem{EgressIP: staleEgressIP, Node: nodeName})
 			}
 		}
+		// If running on a public cloud we should not program OVN just yet for assignment
+		// operations. We need confirmation from the cloud-network-config-controller that
+		// it can assign the IPs. reconcileCloudPrivateIPConfig will take care of
+		// processing the answer from the requests we make here, and update OVN
+		// accordingly when we know what the outcome is.
+		if len(ipsToAssign) > 0 {
+			statusToAdd = oc.assignEgressIPs(name, ipsToAssign.UnsortedList())
+			statusToKeep = append(statusToKeep, statusToAdd...)
+		}
+		// Same as above: Add all assignments which are to be kept to the
+		// allocator cache, allowing us to track all assignments which have been
+		// performed and avoid incorrect future assignments due to a
+		// de-synchronized cache.
+		oc.addAllocatorEgressIPAssignments(name, statusToKeep)
 
 		// Execute CloudPrivateIPConfig changes for assignments which need to be
 		// added/removed, assignments which don't change do not require any
