@@ -164,7 +164,7 @@ func mutateDelete(current, value interface{}) (interface{}, interface{}) {
 			vvk := iter.Key()
 			vvv := iter.Value()
 			vcv := vc.MapIndex(vvk)
-			if reflect.DeepEqual(vcv.Interface(), vvv.Interface()) {
+			if vcv.IsValid() && reflect.DeepEqual(vcv.Interface(), vvv.Interface()) {
 				diff.SetMapIndex(vvk, vcv)
 				vc.SetMapIndex(vvk, reflect.Value{})
 			}

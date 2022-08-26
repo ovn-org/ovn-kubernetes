@@ -87,28 +87,28 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				purgeACL := libovsdbops.BuildACL(
 					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
-					t.DirectionFromLPort,
+					nbdb.ACLDirectionFromLport,
 					t.EgressFirewallStartPriority,
 					"",
 					nbdb.ACLActionDrop,
 					t.OvnACLLoggingMeter,
-					defaultACLLoggingSeverity,
+					"",
 					false,
-					map[string]string{"egressFirewall": "none"},
+					map[string]string{egressFirewallACLExtIdKey: "none"},
 					nil,
 				)
 				purgeACL.UUID = "purgeACL-UUID"
 
 				keepACL := libovsdbops.BuildACL(
 					"",
-					t.DirectionFromLPort,
+					nbdb.ACLDirectionFromLport,
 					t.EgressFirewallStartPriority-1,
 					"",
 					nbdb.ACLActionDrop,
-					"",
-					"",
+					t.OvnACLLoggingMeter,
+					nbdb.ACLSeverityInfo,
 					false,
-					map[string]string{"egressFirewall": "default"},
+					map[string]string{egressFirewallACLExtIdKey: "default"},
 					nil,
 				)
 				keepACL.UUID = "keepACL-UUID"
@@ -116,14 +116,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				// this ACL is not in the egress firewall priority range and should be untouched
 				otherACL := libovsdbops.BuildACL(
 					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority-1),
-					t.DirectionFromLPort,
+					nbdb.ACLDirectionFromLport,
 					t.MinimumReservedEgressFirewallPriority-1,
 					"",
 					nbdb.ACLActionDrop,
 					t.OvnACLLoggingMeter,
-					defaultACLLoggingSeverity,
+					"",
 					false,
-					map[string]string{"egressFirewall": "default"},
+					map[string]string{egressFirewallACLExtIdKey: "default"},
 					nil,
 				)
 				otherACL.UUID = "otherACL-UUID"
@@ -166,7 +166,8 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls("default").Create(context.TODO(), &egressfirewallapi.EgressFirewall{}, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				fakeOVN.controller.WatchEgressFirewall()
+				err = fakeOVN.controller.WatchEgressFirewall()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// Both ACLS will be removed from the join switch
 				finalJoinSwitch := &nbdb.LogicalSwitch{
@@ -182,15 +183,11 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				}
 
 				// Direction of both ACLs will be converted to
-				keepACL.Direction = t.DirectionToLPort
+				keepACL.Direction = nbdb.ACLDirectionToLport
 				newName := buildEgressFwAclName("default", t.EgressFirewallStartPriority-1)
-				meter := t.OvnACLLoggingMeter
-				severity := defaultACLLoggingSeverity
 				keepACL.Name = &newName
-				keepACL.Direction = t.DirectionToLPort
-				keepACL.Meter = &meter
-				keepACL.Severity = &severity
-				keepACL.Log = false
+				// check severity was reset from default to nil
+				keepACL.Severity = nil
 
 				expectedDatabaseState := []libovsdb.TestData{
 					otherACL,
@@ -266,14 +263,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				ipv4ACL := libovsdbops.BuildACL(
 					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionAllow,
 					t.OvnACLLoggingMeter,
-					defaultACLLoggingSeverity,
+					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -358,14 +355,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				ipv6ACL := libovsdbops.BuildACL(
 					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionAllow,
 					t.OvnACLLoggingMeter,
-					defaultACLLoggingSeverity,
+					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv6ACL.UUID = "ipv6ACL-UUID"
@@ -458,14 +455,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				udpACL := libovsdbops.BuildACL(
 					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionDrop,
 					t.OvnACLLoggingMeter,
-					defaultACLLoggingSeverity,
+					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				udpACL.UUID = "udpACL-UUID"
@@ -562,14 +559,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				ipv4ACL := libovsdbops.BuildACL(
 					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.5/23) && ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionAllow,
 					t.OvnACLLoggingMeter,
-					defaultACLLoggingSeverity,
+					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -672,14 +669,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				ipv4ACL := libovsdbops.BuildACL(
 					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionAllow,
 					t.OvnACLLoggingMeter,
-					defaultACLLoggingSeverity,
+					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -783,14 +780,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				ipv4ACL := libovsdbops.BuildACL(
 					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.5/23) && ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionAllow,
 					t.OvnACLLoggingMeter,
-					defaultACLLoggingSeverity,
+					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -917,14 +914,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				ipv4ACL := libovsdbops.BuildACL(
 					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionAllow,
 					t.OvnACLLoggingMeter,
-					defaultACLLoggingSeverity,
+					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -1043,14 +1040,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 
 				ipv4ACL := libovsdbops.BuildACL(
 					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14",
 					nbdb.ACLActionAllow,
 					t.OvnACLLoggingMeter,
-					defaultACLLoggingSeverity,
+					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -1133,28 +1130,28 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 			app.Action = func(ctx *cli.Context) error {
 				purgeACL := libovsdbops.BuildACL(
 					"purgeACL",
-					t.DirectionFromLPort,
+					nbdb.ACLDirectionFromLport,
 					t.EgressFirewallStartPriority,
 					"",
 					nbdb.ACLActionDrop,
 					t.OvnACLLoggingMeter,
-					defaultACLLoggingSeverity,
+					"",
 					false,
-					map[string]string{"egressFirewall": "none"},
+					map[string]string{egressFirewallACLExtIdKey: "none"},
 					nil,
 				)
 				purgeACL.UUID = "purgeACL-UUID"
 
 				keepACL := libovsdbops.BuildACL(
 					"",
-					t.DirectionFromLPort,
+					nbdb.ACLDirectionFromLport,
 					t.EgressFirewallStartPriority-1,
 					"",
 					nbdb.ACLActionDrop,
 					"",
 					"",
 					false,
-					map[string]string{"egressFirewall": "default"},
+					map[string]string{egressFirewallACLExtIdKey: "default"},
 					nil,
 				)
 				keepACL.UUID = "keepACL-UUID"
@@ -1162,14 +1159,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				// this ACL is not in the egress firewall priority range and should be untouched
 				otherACL := libovsdbops.BuildACL(
 					"otherACL",
-					t.DirectionFromLPort,
+					nbdb.ACLDirectionFromLport,
 					t.MinimumReservedEgressFirewallPriority-1,
 					"",
 					nbdb.ACLActionDrop,
 					t.OvnACLLoggingMeter,
-					defaultACLLoggingSeverity,
+					"",
 					false,
-					map[string]string{"egressFirewall": "default"},
+					map[string]string{egressFirewallACLExtIdKey: "default"},
 					nil,
 				)
 				otherACL.UUID = "otherACL-UUID"
@@ -1228,15 +1225,11 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				}
 
 				// Direction of both ACLs will be converted to
-				keepACL.Direction = t.DirectionToLPort
+				keepACL.Direction = nbdb.ACLDirectionToLport
 				newName := buildEgressFwAclName("default", t.EgressFirewallStartPriority-1)
 				meter := t.OvnACLLoggingMeter
-				severity := defaultACLLoggingSeverity
 				keepACL.Name = &newName
-				keepACL.Direction = t.DirectionToLPort
 				keepACL.Meter = &meter
-				keepACL.Severity = &severity
-				keepACL.Log = false
 
 				expectedDatabaseState := []libovsdb.TestData{
 					otherACL,
@@ -1307,14 +1300,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 
 				ipv4ACL := libovsdbops.BuildACL(
 					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \""+t.JoinSwitchToGWRouterPrefix+t.OVNClusterRouter+"\"",
 					nbdb.ACLActionAllow,
 					t.OvnACLLoggingMeter,
-					defaultACLLoggingSeverity,
+					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -1394,14 +1387,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 
 				ipv6ACL := libovsdbops.BuildACL(
 					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && inport == \""+t.JoinSwitchToGWRouterPrefix+t.OVNClusterRouter+"\"",
 					nbdb.ACLActionAllow,
 					t.OvnACLLoggingMeter,
-					defaultACLLoggingSeverity,
+					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv6ACL.UUID = "ipv6ACL-UUID"
@@ -1490,15 +1483,15 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 
 				udpACL := libovsdbops.BuildACL(
 					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && inport == \""+
 						t.JoinSwitchToGWRouterPrefix+t.OVNClusterRouter+"\"",
 					nbdb.ACLActionDrop,
 					t.OvnACLLoggingMeter,
-					defaultACLLoggingSeverity,
+					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 
@@ -1579,15 +1572,15 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 
 				ipv4ACL := libovsdbops.BuildACL(
 					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.5/23) && "+
 						"ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && inport == \""+t.JoinSwitchToGWRouterPrefix+t.OVNClusterRouter+"\"",
 					nbdb.ACLActionAllow,
 					t.OvnACLLoggingMeter,
-					defaultACLLoggingSeverity,
+					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -1676,14 +1669,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 
 				ipv4ACL := libovsdbops.BuildACL(
 					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \""+t.JoinSwitchToGWRouterPrefix+t.OVNClusterRouter+"\"",
 					nbdb.ACLActionAllow,
 					t.OvnACLLoggingMeter,
-					defaultACLLoggingSeverity,
+					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv4ACL.UUID = "ipv4ACL-UUID"
@@ -1769,14 +1762,14 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 
 				ipv4ACL := libovsdbops.BuildACL(
 					buildEgressFwAclName("namespace1", t.EgressFirewallStartPriority),
-					t.DirectionToLPort,
+					nbdb.ACLDirectionToLport,
 					t.EgressFirewallStartPriority,
 					"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \""+t.JoinSwitchToGWRouterPrefix+t.OVNClusterRouter+"\"",
 					nbdb.ACLActionAllow,
 					t.OvnACLLoggingMeter,
-					defaultACLLoggingSeverity,
+					"",
 					false,
-					map[string]string{"egressFirewall": "namespace1"},
+					map[string]string{egressFirewallACLExtIdKey: "namespace1"},
 					nil,
 				)
 				ipv4ACL.UUID = "ipv4ACL-UUID"

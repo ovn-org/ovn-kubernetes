@@ -17,6 +17,8 @@ Measurement accuracy can be impacted by other parallel processing that might be 
 ## Change log
 This list is to help notify if there are additions, changes or removals to metrics.
 
+- Add ovn_controller_southbound_database_connected metric (https://github.com/ovn-org/ovn-kubernetes/pull/3117).
+- Stopwatch metrics now report in seconds instead of milliseconds.
 - Rename (https://github.com/ovn-org/ovn-kubernetes/pull/3022):
   - `ovs_vswitchd_interface_link_resets` -> `ovs_vswitchd_interface_resets_total`
   - `ovs_vswitchd_interface_rx_dropped` -> `ovs_vswitchd_interface_rx_dropped_total`

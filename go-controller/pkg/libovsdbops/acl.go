@@ -13,9 +13,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
-// getACLName returns the ACL name if it has one otherwise returns
+// GetACLName returns the ACL name if it has one otherwise returns
 // an empty string.
-func getACLName(acl *nbdb.ACL) string {
+func GetACLName(acl *nbdb.ACL) string {
 	if acl.Name != nil {
 		return *acl.Name
 	}
@@ -30,8 +30,8 @@ func isEquivalentACL(existing *nbdb.ACL, searched *nbdb.ACL) bool {
 		return true
 	}
 
-	eName := getACLName(existing)
-	sName := getACLName(searched)
+	eName := GetACLName(existing)
+	sName := GetACLName(searched)
 	// TODO if we want to support adding/removing external ids,
 	// we need to compare them differently, perhaps just the common subset
 	if eName != "" && eName == sName && reflect.DeepEqual(existing.ExternalIDs, searched.ExternalIDs) {
@@ -55,7 +55,8 @@ func FindACLsWithPredicate(nbClient libovsdbclient.Client, p aclPredicate) ([]*n
 }
 
 // BuildACL builds an ACL with empty optional properties unset
-func BuildACL(name string, direction nbdb.ACLDirection, priority int, match string, action nbdb.ACLAction, meter string, severity nbdb.ACLSeverity, log bool, externalIds map[string]string, options map[string]string) *nbdb.ACL {
+func BuildACL(name string, direction nbdb.ACLDirection, priority int, match string, action nbdb.ACLAction, meter string,
+	severity nbdb.ACLSeverity, log bool, externalIds map[string]string, options map[string]string) *nbdb.ACL {
 	name = fmt.Sprintf("%.63s", name)
 
 	var realName *string
@@ -84,6 +85,15 @@ func BuildACL(name string, direction nbdb.ACLDirection, priority int, match stri
 	}
 
 	return acl
+}
+
+func SetACLLogging(acl *nbdb.ACL, severity nbdb.ACLSeverity, log bool) {
+	var realSeverity *string
+	if len(severity) != 0 {
+		realSeverity = &severity
+	}
+	acl.Severity = realSeverity
+	acl.Log = log
 }
 
 // CreateOrUpdateACLsOps creates or updates the provided ACLs returning the
