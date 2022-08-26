@@ -3,8 +3,8 @@
 github.com/Mellanox/sriovnet
 github.com/Mellanox/sriovnet/pkg/utils/filesystem
 github.com/Mellanox/sriovnet/pkg/utils/netlinkops
-# github.com/Microsoft/go-winio v0.5.0
-## explicit; go 1.12
+# github.com/Microsoft/go-winio v0.5.2
+## explicit; go 1.13
 github.com/Microsoft/go-winio
 github.com/Microsoft/go-winio/pkg/guid
 github.com/Microsoft/go-winio/vhd
@@ -45,7 +45,7 @@ github.com/beorn7/perks/quantile
 github.com/bhendo/go-powershell
 github.com/bhendo/go-powershell/backend
 github.com/bhendo/go-powershell/utils
-# github.com/cenkalti/backoff/v4 v4.1.1
+# github.com/cenkalti/backoff/v4 v4.1.3
 ## explicit; go 1.13
 github.com/cenkalti/backoff/v4
 # github.com/cenkalti/hub v1.0.1
@@ -267,7 +267,7 @@ github.com/openshift/client-go/cloudnetwork/informers/externalversions/cloudnetw
 github.com/openshift/client-go/cloudnetwork/informers/externalversions/cloudnetwork/v1
 github.com/openshift/client-go/cloudnetwork/informers/externalversions/internalinterfaces
 github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1
-# github.com/ovn-org/libovsdb v0.6.1-0.20220826133223-e4d2d8648be7
+# github.com/ovn-org/libovsdb v0.6.1-0.20220901025242-999ca1972a3a
 ## explicit; go 1.18
 github.com/ovn-org/libovsdb/cache
 github.com/ovn-org/libovsdb/client
