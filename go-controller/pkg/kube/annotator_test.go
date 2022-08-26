@@ -43,7 +43,7 @@ var _ = Describe("Annotator", func() {
 			nodeAnnot := NewNodeAnnotator(kube, nodeName)
 
 			It("should not run if there are no changes", func() {
-				fakeKubeInterface := kubeMocks.KubeInterface{}
+				fakeKubeInterface := kubeMocks.Interface{}
 				fakeKubeInterface.On("SetAnnotationsOnNode", mock.Anything, mock.Anything, mock.Anything).Return(fmt.Errorf("should not be called"))
 				nodeAnnot := NewNodeAnnotator(&fakeKubeInterface, "")
 				err := nodeAnnot.Run()
