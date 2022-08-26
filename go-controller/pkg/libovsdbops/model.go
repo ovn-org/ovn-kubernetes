@@ -388,7 +388,7 @@ func buildFailOnDuplicateOps(c client.Client, m model.Model) ([]ovsdb.Operation,
 		Function: ovsdb.ConditionEqual,
 		Value:    value,
 	}
-	return c.Where(m, cond).Wait(ovsdb.WaitConditionNotEqual, &timeout, m, field)
+	return c.WhereAny(m, cond).Wait(ovsdb.WaitConditionNotEqual, &timeout, m, field)
 }
 
 // getAllUpdatableFields returns a list of all of the columns/fields that can be updated for a model
