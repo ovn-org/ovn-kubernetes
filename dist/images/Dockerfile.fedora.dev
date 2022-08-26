@@ -15,7 +15,7 @@
 # this image in any production environment.
 #
 
-FROM fedora:34 AS ovnbuilder
+FROM fedora:36 AS ovnbuilder
 
 USER root
 
@@ -24,7 +24,7 @@ ENV PYTHONDONTWRITEBYTECODE yes
 # Install tools that are required for building ovs/ovn.
 RUN INSTALL_PKGS=" \
     python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
-    libpcap hostname \
+    libpcap hostname util-linux\
     python3-openvswitch python3-pyOpenSSL \
     autoconf automake libtool g++ gcc fedora-packager rpmdevtools \
     unbound unbound-devel groff python3-sphinx graphviz openssl openssl-devel \
@@ -63,7 +63,7 @@ RUN rm rpm/rpmbuild/RPMS/x86_64/*docker*
 RUN git log -n 1
 
 # Build the final image
-FROM fedora:34
+FROM fedora:36
 
 # Install needed dependencies.
 RUN INSTALL_PKGS=" \

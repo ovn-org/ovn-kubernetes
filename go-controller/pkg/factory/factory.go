@@ -294,7 +294,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 			kapi.NamespaceAll,
 			resyncPeriod,
 			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
-			noServiceNameSelector())
+			withServiceNameAndNoHeadlessServiceSelector())
 	})
 
 	var err error
@@ -757,27 +757,31 @@ func (wf *WatchFactory) EgressQoSInformer() egressqosinformer.EgressQoSInformer 
 	return wf.egressQoSFactory.K8s().V1().EgressQoSes()
 }
 
-// noServiceNameSelector is a LabelSelector added to the watcher for
-// EndpointSlices that excludes EndpointSlices that don't
-// have "kubernetes.io/service-name" label and also those
-// that have "kubernetes.io/service-name" label value set to "".
-func noServiceNameSelector() func(options *metav1.ListOptions) {
-	// if the LabelServiceName label doesn't exist, skip it.
+// withServiceNameAndNoHeadlessServiceSelector returns a LabelSelector (added to the
+// watcher for EndpointSlices) that will only choose EndpointSlices with a non-empty
+// "kubernetes.io/service-name" label and without "service.kubernetes.io/headless"
+// label.
+func withServiceNameAndNoHeadlessServiceSelector() func(options *metav1.ListOptions) {
+	// LabelServiceName must exist
 	svcNameLabel, err := labels.NewRequirement(discovery.LabelServiceName, selection.Exists, nil)
 	if err != nil {
 		// cannot occur
 		panic(err)
 	}
-
+	// LabelServiceName value must be non-empty
 	notEmptySvcName, err := labels.NewRequirement(discovery.LabelServiceName, selection.NotEquals, []string{""})
 	if err != nil {
 		// cannot occur
 		panic(err)
 	}
+	// headless service label must not be there
+	noHeadlessService, err := labels.NewRequirement(kapi.IsHeadlessService, selection.DoesNotExist, nil)
+	if err != nil {
+		// cannot occur
+		panic(err)
+	}
 
-	selector := labels.NewSelector()
-	selector.Add(*svcNameLabel)
-	selector.Add(*notEmptySvcName)
+	selector := labels.NewSelector().Add(*svcNameLabel, *notEmptySvcName, *noHeadlessService)
 
 	return func(options *metav1.ListOptions) {
 		options.LabelSelector = selector.String()

@@ -1136,7 +1136,7 @@ type event struct {
 
 // eventProcessor handles the queueing and processing of cache events
 type eventProcessor struct {
-	events chan event
+	events chan *event
 	// handlersMutex locks the handlers array when we add a handler or dispatch events
 	// we don't need a RWMutex in this case as we only have one thread reading and the write
 	// volume is very low (i.e only when AddEventHandler is called)
@@ -1147,7 +1147,7 @@ type eventProcessor struct {
 
 func newEventProcessor(capacity int, logger *logr.Logger) *eventProcessor {
 	return &eventProcessor{
-		events:   make(chan event, capacity),
+		events:   make(chan *event, capacity),
 		handlers: []EventHandler{},
 		logger:   logger,
 	}
@@ -1174,7 +1174,7 @@ func (e *eventProcessor) AddEvent(eventType string, table string, old model.Mode
 		new:       new,
 	}
 	select {
-	case e.events <- event:
+	case e.events <- &event:
 		// noop
 		return
 	default:

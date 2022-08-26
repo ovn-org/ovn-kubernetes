@@ -99,7 +99,7 @@ func (oc *Controller) lookupPortUUIDAndNodeName(logicalPort string) (portUUID st
 	lsp := &nbdb.LogicalSwitchPort{Name: logicalPort}
 	lsp, err = libovsdbops.GetLogicalSwitchPort(oc.nbClient, lsp)
 	if err != nil {
-		return "", "", fmt.Errorf("error getting logical port %+v: %w", lsp, err)
+		return "", "", err
 	}
 	p := func(item *nbdb.LogicalSwitch) bool {
 		for _, currPortUUID := range item.Ports {
@@ -153,7 +153,13 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 		// Since portInfo is not available, use ovn to locate the logical switch (named after the node name) for the logical port.
 		portUUID, nodeName, err = oc.lookupPortUUIDAndNodeName(logicalPort)
 		if err != nil {
-			return fmt.Errorf("unable to locate portUUID+nodeName for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+			if err != libovsdbclient.ErrNotFound {
+				return fmt.Errorf("unable to locate portUUID+nodeName for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+			}
+			// The logical port no longer exists in OVN. The caller expects this function to be idem-potent,
+			// so the proper action to take is to use an empty uuid and extract the node name from the pod spec.
+			portUUID = ""
+			nodeName = pod.Spec.NodeName
 		}
 		podIfAddrs = annotation.IPs
 
