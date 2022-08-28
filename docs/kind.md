@@ -26,7 +26,8 @@ For OVN kubernetes KIND deployment, use the `kind.sh` script.
 First Download and build the OVN-Kubernetes repo: 
 
 ```
-$ go get github.com/ovn-org/ovn-kubernetes; cd GOPATH/src/github.com/ovn-org/ovn-kubernetes
+$ go env -w GO111MODULE=auto
+$ go get github.com/ovn-org/ovn-kubernetes; cd $(go env GOPATH)/src/github.com/ovn-org/ovn-kubernetes
 ```
 
 The `kind.sh` script builds OVN-Kubernetes into a container image. To verify
