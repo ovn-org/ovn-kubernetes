@@ -1,8 +1,12 @@
 package client
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"sync"
 
-const namespace = "libovsdb"
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+const libovsdbName = "libovsdb"
 
 type metrics struct {
 	numUpdates      *prometheus.CounterVec
@@ -11,15 +15,23 @@ type metrics struct {
 	numMonitors     prometheus.Gauge
 }
 
-func (m *metrics) init(modelName string) {
+var regMetricsOnce sync.Once
+
+func (m *metrics) init(modelName string, namespace, subsystem string) {
 	// labels that are the same across all metrics
 	constLabels := prometheus.Labels{"primary_model": modelName}
+
+	if namespace == "" {
+		namespace = libovsdbName
+		subsystem = ""
+	}
 
 	m.numUpdates = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace:   namespace,
+			Subsystem:   subsystem,
 			Name:        "update_messages_total",
-			Help:        "Count of monitor update messages processed, partitioned by database",
+			Help:        "Count of libovsdb monitor update messages processed, partitioned by database",
 			ConstLabels: constLabels,
 		},
 		[]string{"database"},
@@ -28,8 +40,9 @@ func (m *metrics) init(modelName string) {
 	m.numTableUpdates = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace:   namespace,
+			Subsystem:   subsystem,
 			Name:        "table_updates_total",
-			Help:        "Count of monitor update messages per table",
+			Help:        "Count of libovsdb monitor update messages per table",
 			ConstLabels: constLabels,
 		},
 		[]string{"database", "table"},
@@ -38,8 +51,9 @@ func (m *metrics) init(modelName string) {
 	m.numDisconnects = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace:   namespace,
+			Subsystem:   subsystem,
 			Name:        "disconnects_total",
-			Help:        "Count of disconnects encountered",
+			Help:        "Count of libovsdb disconnects encountered",
 			ConstLabels: constLabels,
 		},
 	)
@@ -47,21 +61,23 @@ func (m *metrics) init(modelName string) {
 	m.numMonitors = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace:   namespace,
+			Subsystem:   subsystem,
 			Name:        "monitors",
-			Help:        "Number of running ovsdb monitors",
+			Help:        "Number of running libovsdb ovsdb monitors",
 			ConstLabels: constLabels,
 		},
 	)
-
 }
 
 func (m *metrics) register(r prometheus.Registerer) {
-	r.MustRegister(
-		m.numUpdates,
-		m.numTableUpdates,
-		m.numDisconnects,
-		m.numMonitors,
-	)
+	regMetricsOnce.Do(func() {
+		r.MustRegister(
+			m.numUpdates,
+			m.numTableUpdates,
+			m.numDisconnects,
+			m.numMonitors,
+		)
+	})
 }
 
 func (o *ovsdbClient) registerMetrics() {

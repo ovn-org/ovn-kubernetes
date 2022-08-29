@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/gob"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -166,47 +167,60 @@ func (r *RowCache) Row(uuid string) model.Model {
 	return r.rowByUUID(uuid)
 }
 
-func (r *RowCache) rowsByModel(m model.Model, useClientIndexes bool) map[string]model.Model {
+// rowsByModels searches the cache to find all rows matching any of the provided
+// models, either by UUID or indexes. An error is returned if the model schema
+// has no UUID field, or if the provided models are not all the same type.
+func (r *RowCache) rowsByModels(models []model.Model, useClientIndexes bool) (map[string]model.Model, error) {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
-	if reflect.TypeOf(m) != r.dataType {
-		return nil
-	}
-	info, _ := r.dbModel.NewModelInfo(m)
-	field, err := info.FieldByColumn("_uuid")
-	if err != nil {
-		return nil
-	}
-	uuid := field.(string)
-	if uuid != "" {
-		row := r.rowByUUID(uuid)
-		if row != nil {
-			return map[string]model.Model{uuid: row}
+
+	results := make(map[string]model.Model, len(models))
+	for _, m := range models {
+		if reflect.TypeOf(m) != r.dataType {
+			return nil, fmt.Errorf("model type %s didn't match expected row type %s", reflect.TypeOf(m), r.dataType)
 		}
-	}
-	// indexSpecs are ordered, schema indexes go first, then client indexes
-	for _, indexSpec := range r.indexSpecs {
-		if indexSpec.isClientIndex() && !useClientIndexes {
-			// Given the ordered indexSpecs, we can break here if we reach the
-			// first client index
-			break
-		}
-		val, err := valueFromIndex(info, indexSpec.columns)
+		info, _ := r.dbModel.NewModelInfo(m)
+		field, err := info.FieldByColumn("_uuid")
 		if err != nil {
-			continue
+			return nil, err
 		}
-		vals := r.indexes[indexSpec.index]
-		uuids, ok := vals[val]
-		if !ok || uuids.empty() {
-			continue
+		if uuid := field.(string); uuid != "" {
+			if _, ok := results[uuid]; !ok {
+				if row := r.rowByUUID(uuid); row != nil {
+					results[uuid] = row
+					continue
+				}
+			}
 		}
-		results := make(map[string]model.Model, len(uuids))
-		for uuid := range uuids {
-			results[uuid] = r.rowByUUID(uuid)
+
+		// indexSpecs are ordered, schema indexes go first, then client indexes
+		for _, indexSpec := range r.indexSpecs {
+			if indexSpec.isClientIndex() && !useClientIndexes {
+				// Given the ordered indexSpecs, we can break here if we reach the
+				// first client index
+				break
+			}
+			val, err := valueFromIndex(info, indexSpec.columns)
+			if err != nil {
+				continue
+			}
+			vals := r.indexes[indexSpec.index]
+			if uuids, ok := vals[val]; ok {
+				for uuid := range uuids {
+					if _, ok := results[uuid]; !ok {
+						results[uuid] = r.rowByUUID(uuid)
+					}
+				}
+				// Break after handling the first found index
+				// to ensure we preserve index order preference
+				break
+			}
 		}
-		return results
 	}
-	return nil
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return results, nil
 }
 
 // RowByModel searches the cache by UUID and schema indexes. UUID search is
@@ -214,23 +228,26 @@ func (r *RowCache) rowsByModel(m model.Model, useClientIndexes bool) map[string]
 // with which they are defined in the schema. The model for the first matching
 // index is returned along with its UUID. An empty string and nil is returned if
 // no Model is found.
-func (r *RowCache) RowByModel(m model.Model) (string, model.Model) {
-	models := r.rowsByModel(m, false)
-	for uuid, model := range models {
-		return uuid, model
+func (r *RowCache) RowByModel(m model.Model) (string, model.Model, error) {
+	models, err := r.rowsByModels([]model.Model{m}, false)
+	if err != nil {
+		return "", nil, err
 	}
-	return "", nil
+	for uuid, model := range models {
+		return uuid, model, nil
+	}
+	return "", nil, nil
 }
 
-// RowsByModel searches the cache by UUID, schema indexes and client indexes.
+// RowsByModels searches the cache by UUID, schema indexes and client indexes.
 // UUID search is performed first. Schema indexes are evaluated next in turn by
 // the same order with which they are defined in the schema. Finally, client
 // indexes are evaluated in turn by the same order with which they are defined
 // in the client DB model. The models for the first matching index are returned,
 // which might be more than 1 if they were found through a client index since in
 // that case uniqueness is not enforced. Nil is returned if no Model is found.
-func (r *RowCache) RowsByModel(m model.Model) map[string]model.Model {
-	return r.rowsByModel(m, true)
+func (r *RowCache) RowsByModels(models []model.Model) (map[string]model.Model, error) {
+	return r.rowsByModels(models, true)
 }
 
 // Create writes the provided content to the cache
@@ -1260,13 +1277,20 @@ func (t *TableCache) ApplyModifications(tableName string, base model.Model, upda
 		return false, err
 	}
 	modified := false
+	var uuid string
 	for k, v := range update {
 		if k == "_uuid" {
+			uuid = v.(string)
 			continue
 		}
 
 		current, err := info.FieldByColumn(k)
-		if err != nil {
+		var colNotFoundErr *mapper.ErrColumnNotFound
+		if errors.As(err, &colNotFoundErr) {
+			// Ignore missing columns
+			t.logger.V(2).Info("OVSDB row modification received with missing column", "name", k)
+			continue
+		} else if err != nil {
 			return modified, err
 		}
 
@@ -1321,33 +1345,27 @@ func (t *TableCache) ApplyModifications(tableName string, base model.Model, upda
 		case reflect.Ptr:
 			// if NativeToOVS was successful, then simply assign
 			bv := reflect.ValueOf(current)
-			if (nv.Type() == bv.Type()) && !reflect.DeepEqual(nv.Interface(), bv.Interface()) {
-				err = info.SetField(k, nv.Interface())
-				if err != nil {
-					return modified, err
+			if nv.Type() == bv.Type() {
+				if !reflect.DeepEqual(nv.Interface(), bv.Interface()) {
+					// If we get an update, and it's an empty set, value of the column will be set to nil
+					err = info.SetField(k, nv.Interface())
+					if err != nil {
+						return modified, err
+					}
+				} else {
+					// should not happen (at least client side) where we receive the same value we already have
+					t.logger.Error(nil, fmt.Sprintf("modification recevied with value already stored in cache!"+
+						" table: %s, uuid: %s, column: %s, row: %#v", tableName, uuid, k, update))
+					continue
 				}
 				modified = true
 				break
 			}
-			// With a pointer type, an update value could be a set with 2 elements [old, new]
-			if nv.Len() != 2 {
-				return modified, fmt.Errorf("expected a slice with 2 elements for update: %+v", update)
-			}
-			// the new value is the value in the slice which isn't equal to the existing string
-			for i := 0; i < nv.Len(); i++ {
-				baseValue, err := info.FieldByColumn(k)
-				if err != nil {
-					return modified, err
-				}
-				bv := reflect.ValueOf(baseValue)
-				if !reflect.DeepEqual(nv.Index(i).Addr().Interface(), bv.Interface()) {
-					err = info.SetField(k, nv.Index(i).Addr().Interface())
-					if err != nil {
-						return modified, err
-					}
-					modified = true
-				}
-			}
+
+			// catch all for unexpected values/cases
+			return modified, fmt.Errorf("unable to handle row modification for optional value: "+
+				"table: %s, uuid: %s, column: %s, row: %#v", tableName, uuid, k, update)
+
 		case reflect.Map:
 			// The difference between two maps are all key-value pairs whose keys appears in only one of the maps,
 			// plus the key-value pairs whose keys appear in both maps but with different values.

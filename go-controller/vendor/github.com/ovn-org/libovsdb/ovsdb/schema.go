@@ -321,9 +321,7 @@ func (b *BaseType) UnmarshalJSON(data []byte) error {
 			oSet := bt.Enum.([]interface{})
 			innerSet := oSet[1].([]interface{})
 			b.Enum = make([]interface{}, len(innerSet))
-			for k, val := range innerSet {
-				b.Enum[k] = val
-			}
+			copy(b.Enum, innerSet)
 		default:
 			b.Enum = []interface{}{bt.Enum}
 		}
