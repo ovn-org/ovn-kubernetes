@@ -2,6 +2,8 @@ package ovn
 
 import (
 	"context"
+	"fmt"
+
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
@@ -10,10 +12,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/urfave/cli/v2"
 
@@ -21,6 +22,31 @@ import (
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+type ipMode struct {
+	IPv4Mode bool
+	IPv6Mode bool
+}
+
+// FIXME DUAL-STACK: FakeOVN doesn't really support adding more than one
+// pod to the namespace. All logical ports would share the same fakeUUID.
+// When this is addressed we can add an entry for
+// IPv4Mode = true, IPv6Mode = true.
+func getIpModes() []ipMode {
+	return []ipMode{
+		{true, false},
+		{false, true},
+	}
+}
+
+func ipModeStr(m ipMode) string {
+	return fmt.Sprintf("(IPv4 %t IPv6 %t)", m.IPv4Mode, m.IPv6Mode)
+}
+
+func setIpMode(m ipMode) {
+	config.IPv4Mode = m.IPv4Mode
+	config.IPv6Mode = m.IPv6Mode
+}
 
 type multicastPolicy struct{}
 
