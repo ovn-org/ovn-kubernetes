@@ -34,7 +34,7 @@ const initialBackoff = 1
 const noBackoff = 0
 
 // retryObjEntry is a generic object caching with retry mechanism
-//that resources can use to eventually complete their intended operations.
+// that resources can use to eventually complete their intended operations.
 type retryObjEntry struct {
 	// newObj holds k8s resource failed during add operation
 	newObj interface{}
