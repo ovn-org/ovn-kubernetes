@@ -528,6 +528,16 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 			defer wg.Done()
 			nodeController.Run(n.stopChan)
 		}()
+	} else {
+		// attempt to cleanup the possibly stale bridge
+		_, stderr, err := util.RunOVSVsctl("--if-exists", "del-br", "br-ext")
+		if err != nil {
+			klog.Errorf("Deletion of bridge br-ext failed: %v (%v)", err, stderr)
+		}
+		_, stderr, err = util.RunOVSVsctl("--if-exists", "del-port", "br-int", "int")
+		if err != nil {
+			klog.Errorf("Deletion of port int on  br-int failed: %v (%v)", err, stderr)
+		}
 	}
 
 	if err := level.Set(strconv.Itoa(config.Logging.Level)); err != nil {

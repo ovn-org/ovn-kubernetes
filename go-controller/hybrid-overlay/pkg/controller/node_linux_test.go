@@ -125,7 +125,7 @@ func expectRouteForSubnet(routes []netlink.Route, subnet *net.IPNet, hoIfAddr ne
 	Expect(found).To(BeTrue(), fmt.Sprintf("failed to find hybrid overlay host route %s via %s", subnet, hoIfAddr))
 }
 
-func validateNetlinkState(nodeSubnet string) {
+func validateNetlinkState(nodeSubnet, hoDRIP string) {
 	link, err := netlink.LinkByName(extBridgeName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(link.Attrs().Flags & net.FlagUp).To(Equal(net.FlagUp))
@@ -137,14 +137,12 @@ func validateNetlinkState(nodeSubnet string) {
 	routes, err := netlink.RouteList(link, netlink.FAMILY_ALL)
 	Expect(err).NotTo(HaveOccurred())
 
-	// Expect a route to the hybrid overlay CIDR via the .3 address
+	// Expect a route to the hybrid overlay CIDR via the given hoDRIP
 	// through the management port
-	_, ipnet, err := net.ParseCIDR(nodeSubnet)
 	Expect(err).NotTo(HaveOccurred())
-	hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(ipnet)
 	Expect(len(config.HybridOverlay.ClusterSubnets)).ToNot(BeZero())
 	for _, hoSubnet := range config.HybridOverlay.ClusterSubnets {
-		expectRouteForSubnet(routes, hoSubnet.CIDR, hybridOverlayIfAddr.IP)
+		expectRouteForSubnet(routes, hoSubnet.CIDR, net.ParseIP(hoDRIP))
 	}
 }
 
@@ -331,6 +329,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			annotations := createNodeAnnotationsForSubnet(thisSubnet)
 			annotations[hotypes.HybridOverlayDRMAC] = thisDrMAC
 			annotations["k8s.ovn.org/node-gateway-router-lrp-ifaddr"] = "{\"ipv4\":\"100.64.0.3/16\"}"
+			annotations[hotypes.HybridOverlayDRIP] = "1.2.3.3"
 			node := createNode(thisNode, "linux", "10.0.0.1", annotations)
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{*node},
@@ -362,7 +361,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			// FIXME
 			// Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
-			validateNetlinkState(thisSubnet)
+			validateNetlinkState(thisSubnet, "1.2.3.3")
 			return nil
 		}
 		appRun(app, netns)
@@ -379,6 +378,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			annotations := createNodeAnnotationsForSubnet(thisSubnet)
 			annotations[hotypes.HybridOverlayDRMAC] = thisDrMAC
 			annotations["k8s.ovn.org/node-gateway-router-lrp-ifaddr"] = "{\"ipv4\":\"100.64.0.3/16\"}"
+			annotations[hotypes.HybridOverlayDRIP] = "1.2.3.3"
 			node := createNode(thisNode, "linux", "10.0.0.1", annotations)
 			testPod := createPod("test", "pod1", thisNode, pod1CIDR, pod1MAC)
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
@@ -412,7 +412,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			// FIXME
 			// Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
-			validateNetlinkState(thisSubnet)
+			validateNetlinkState(thisSubnet, "1.2.3.3")
 			err = n.controller.AddPod(testPod)
 			Expect(err).NotTo(HaveOccurred())
 			return nil
