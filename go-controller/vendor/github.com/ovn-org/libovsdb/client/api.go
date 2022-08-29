@@ -26,14 +26,21 @@ type API interface {
 	// ConditionFromFunc(func(l *LogicalSwitch) bool { return l.Enabled })
 	WhereCache(predicate interface{}) ConditionalAPI
 
-	// Create a ConditionalAPI from a Model's index data or a list of Conditions
-	// where operations apply to elements that match any of the conditions
-	// If no condition is given, it will match the values provided in model.Model according
-	// to the indexes.
-	Where(model.Model, ...model.Condition) ConditionalAPI
+	// Create a ConditionalAPI from a Model's index data, where operations
+	// apply to elements that match the values provided in one or more
+	// model.Models according to the indexes. All provided Models must be
+	// the same type or an error will be generated when operations are
+	// are performed on the ConditionalAPI.
+	Where(...model.Model) ConditionalAPI
 
-	// Create a ConditionalAPI from a Model's index data or a list of Conditions
-	// where operations apply to elements that match all the conditions
+	// WhereAny creates a ConditionalAPI from a list of Conditions where
+	// operations apply to elements that match any (eg, logical OR) of the
+	// conditions.
+	WhereAny(model.Model, ...model.Condition) ConditionalAPI
+
+	// WhereAll creates a ConditionalAPI from a list of Conditions where
+	// operations apply to elements that match all (eg, logical AND) of the
+	// conditions.
 	WhereAll(model.Model, ...model.Condition) ConditionalAPI
 
 	// Get retrieves a model from the cache
@@ -168,17 +175,25 @@ func (a api) List(ctx context.Context, result interface{}) error {
 	return nil
 }
 
-// Where returns a conditionalAPI based on a Condition list
-func (a api) Where(model model.Model, cond ...model.Condition) ConditionalAPI {
-	return newConditionalAPI(a.cache, a.conditionFromModel(false, false, model, cond...), a.logger)
+// Where returns a conditionalAPI based on model indexes. All provided models
+// must be the same type.
+func (a api) Where(models ...model.Model) ConditionalAPI {
+	return newConditionalAPI(a.cache, a.conditionFromModels(models), a.logger)
 }
 
-// Where returns a conditionalAPI based on a Condition list
-func (a api) WhereAll(model model.Model, cond ...model.Condition) ConditionalAPI {
-	return newConditionalAPI(a.cache, a.conditionFromModel(true, false, model, cond...), a.logger)
+// WhereAny returns a conditionalAPI based on a Condition list that matches any
+// of the conditions individually
+func (a api) WhereAny(m model.Model, cond ...model.Condition) ConditionalAPI {
+	return newConditionalAPI(a.cache, a.conditionFromExplicitConditions(false, m, cond...), a.logger)
 }
 
-// Where returns a conditionalAPI based a Predicate
+// WhereAll returns a conditionalAPI based on a Condition list that matches all
+// of the conditions together
+func (a api) WhereAll(m model.Model, cond ...model.Condition) ConditionalAPI {
+	return newConditionalAPI(a.cache, a.conditionFromExplicitConditions(true, m, cond...), a.logger)
+}
+
+// WhereCache returns a conditionalAPI based a Predicate
 func (a api) WhereCache(predicate interface{}) ConditionalAPI {
 	return newConditionalAPI(a.cache, a.conditionFromFunc(predicate), a.logger)
 }
@@ -198,26 +213,37 @@ func (a api) conditionFromFunc(predicate interface{}) Conditional {
 	return condition
 }
 
-// FromModel returns a Condition from a model and a list of fields
-func (a api) conditionFromModel(any bool, cache bool, model model.Model, cond ...model.Condition) Conditional {
-	var conditional Conditional
-	var err error
-
-	tableName, err := a.getTableFromModel(model)
+// conditionFromModels returns a Conditional from one or more models.
+func (a api) conditionFromModels(models []model.Model) Conditional {
+	if len(models) == 0 {
+		return newErrorConditional(fmt.Errorf("at least one model required"))
+	}
+	tableName, err := a.getTableFromModel(models[0])
 	if tableName == "" {
 		return newErrorConditional(err)
 	}
+	conditional, err := newEqualityConditional(tableName, a.cache, models)
+	if err != nil {
+		return newErrorConditional(err)
+	}
+	return conditional
+}
 
+// conditionFromExplicitConditions returns a Conditional from a model and a set
+// of explicit conditions. If matchAll is true, then models that match all the given
+// conditions are selected by the Conditional. If matchAll is false, then any model
+// that matches one of the conditions is selected.
+func (a api) conditionFromExplicitConditions(matchAll bool, m model.Model, cond ...model.Condition) Conditional {
 	if len(cond) == 0 {
-		conditional, err = newEqualityConditional(tableName, a.cache, model)
-		if err != nil {
-			conditional = newErrorConditional(err)
-		}
-	} else {
-		conditional, err = newExplicitConditional(tableName, a.cache, any, model, cond...)
-		if err != nil {
-			conditional = newErrorConditional(err)
-		}
+		return newErrorConditional(fmt.Errorf("at least one condition is required"))
+	}
+	tableName, err := a.getTableFromModel(m)
+	if tableName == "" {
+		return newErrorConditional(err)
+	}
+	conditional, err := newExplicitConditional(tableName, a.cache, matchAll, m, cond...)
+	if err != nil {
+		return newErrorConditional(err)
 	}
 	return conditional
 }
@@ -239,8 +265,10 @@ func (a api) Get(ctx context.Context, m model.Model) error {
 		return ErrNotFound
 	}
 
-	_, found := tableCache.RowByModel(m)
-	if found == nil {
+	_, found, err := tableCache.RowByModel(m)
+	if err != nil {
+		return err
+	} else if found == nil {
 		return ErrNotFound
 	}
 
