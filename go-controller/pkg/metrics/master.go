@@ -189,6 +189,36 @@ var metricEgressIPCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "The number of defined egress IP addresses",
 })
 
+var metricEgressIPAssignLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "egress_ips_assign_latency_seconds",
+	Help:      "The latency of egress IP assignment to ovn nb database",
+	Buckets:   prometheus.ExponentialBuckets(.001, 2, 15),
+})
+
+var metricEgressIPUnassignLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "egress_ips_unassign_latency_seconds",
+	Help:      "The latency of egress IP unassignment from ovn nb database",
+	Buckets:   prometheus.ExponentialBuckets(.001, 2, 15),
+})
+
+var metricEgressIPNodeUnreacheableCount = prometheus.NewCounter(prometheus.CounterOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "egress_ips_node_unreachable_total",
+	Help:      "The total number of times assigned egress IP(s) were unreachable"},
+)
+
+var metricEgressIPRebalanceCount = prometheus.NewCounter(prometheus.CounterOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "egress_ips_rebalance_total",
+	Help:      "The total number of times assigned egress IP(s) needed to be moved to a different node"},
+)
+
 var metricEgressFirewallRuleCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
@@ -344,6 +374,12 @@ func RegisterMasterFunctional() {
 	prometheus.MustRegister(metricV4AllocatedHostSubnetCount)
 	prometheus.MustRegister(metricV6AllocatedHostSubnetCount)
 	prometheus.MustRegister(metricEgressIPCount)
+	if config.Metrics.EnableEIPScaleMetrics {
+		prometheus.MustRegister(metricEgressIPAssignLatency)
+		prometheus.MustRegister(metricEgressIPUnassignLatency)
+	}
+	prometheus.MustRegister(metricEgressIPNodeUnreacheableCount)
+	prometheus.MustRegister(metricEgressIPRebalanceCount)
 	prometheus.MustRegister(metricEgressFirewallRuleCount)
 	prometheus.MustRegister(metricEgressFirewallCount)
 	prometheus.MustRegister(metricEgressRoutingViaHost)
@@ -431,6 +467,26 @@ func RecordSubnetCount(v4SubnetCount, v6SubnetCount float64) {
 // This total may include multiple Egress IPs per EgressIP CR.
 func RecordEgressIPCount(count float64) {
 	metricEgressIPCount.Set(count)
+}
+
+// RecordEgressIPAssign records how long it took EgressIP to configure OVN.
+func RecordEgressIPAssign(duration time.Duration) {
+	metricEgressIPAssignLatency.Observe(duration.Seconds())
+}
+
+// RecordEgressIPUnassign records how long it took EgressIP to unconfigure OVN.
+func RecordEgressIPUnassign(duration time.Duration) {
+	metricEgressIPUnassignLatency.Observe(duration.Seconds())
+}
+
+// RecordEgressIPReachableNode records how many times EgressIP detected an unuseable node.
+func RecordEgressIPUnreachableNode() {
+	metricEgressIPNodeUnreacheableCount.Inc()
+}
+
+// RecordEgressIPRebalance records how many EgressIPs had to move to a different egress node.
+func RecordEgressIPRebalance(count int) {
+	metricEgressIPRebalanceCount.Add(float64(count))
 }
 
 // UpdateEgressFirewallRuleCount records the number of Egress firewall rules.

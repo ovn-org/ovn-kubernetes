@@ -30,18 +30,17 @@ const (
 	ovsCommandTimeout  = 15
 	ovsVsctlCommand    = "ovs-vsctl"
 	ovsOfctlCommand    = "ovs-ofctl"
-	ovsDpctlCommand    = "ovs-dpctl"
 	ovsAppctlCommand   = "ovs-appctl"
 	ovnNbctlCommand    = "ovn-nbctl"
 	ovnSbctlCommand    = "ovn-sbctl"
 	ovnAppctlCommand   = "ovn-appctl"
 	ovsdbClientCommand = "ovsdb-client"
 	ovsdbToolCommand   = "ovsdb-tool"
-	arpingCommand      = "arping"
 	ipCommand          = "ip"
 	powershellCommand  = "powershell"
 	netshCommand       = "netsh"
 	routeCommand       = "route"
+	sysctlCommand      = "sysctl"
 	osRelease          = "/etc/os-release"
 	rhel               = "RHEL"
 	ubuntu             = "Ubuntu"
@@ -156,7 +155,6 @@ type execHelper struct {
 	exec            kexec.Interface
 	ofctlPath       string
 	vsctlPath       string
-	dpctlPath       string
 	appctlPath      string
 	ovnappctlPath   string
 	nbctlPath       string
@@ -166,10 +164,10 @@ type execHelper struct {
 	ovsdbToolPath   string
 	ovnRunDir       string
 	ipPath          string
-	arpingPath      string
 	powershellPath  string
 	netshPath       string
 	routePath       string
+	sysctlPath      string
 }
 
 var runner *execHelper
@@ -225,10 +223,6 @@ func SetExec(exec kexec.Interface) error {
 		return err
 	}
 	runner.vsctlPath, err = exec.LookPath(ovsVsctlCommand)
-	if err != nil {
-		return err
-	}
-	runner.dpctlPath, err = exec.LookPath(ovsDpctlCommand)
 	if err != nil {
 		return err
 	}
@@ -296,7 +290,7 @@ func SetExecWithoutOVS(exec kexec.Interface) error {
 		if err != nil {
 			return err
 		}
-		runner.arpingPath, err = exec.LookPath(arpingCommand)
+		runner.sysctlPath, err = exec.LookPath(sysctlCommand)
 		if err != nil {
 			return err
 		}
@@ -356,12 +350,6 @@ func runWithEnvVars(cmdPath string, envVars []string, args ...string) (*bytes.Bu
 func RunOVSOfctl(args ...string) (string, string, error) {
 	stdout, stderr, err := run(runner.ofctlPath, args...)
 	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
-}
-
-// RunOVSDpctl runs a command via ovs-dpctl.
-func RunOVSDpctl(args ...string) (string, string, error) {
-	stdout, stderr, err := run(runner.dpctlPath, args...)
-	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
 // RunOVSVsctl runs a command via ovs-vsctl.
@@ -635,9 +623,9 @@ func RunIP(args ...string) (string, string, error) {
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
-// RunArping runs a command via the "arping" utility
-func RunArping(args ...string) (string, string, error) {
-	stdout, stderr, err := run(runner.arpingPath, args...)
+// RunSysctl runs a command via the procps "sysctl" utility
+func RunSysctl(args ...string) (string, string, error) {
+	stdout, stderr, err := run(runner.sysctlPath, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 

@@ -157,6 +157,7 @@ enable-pprof=true
 node-server-privkey=/path/to/node-metrics-private.key
 node-server-cert=/path/to/node-metrics.crt
 enable-config-duration=true
+enable-eip-scale-metrics=true
 
 [logging]
 loglevel=5
@@ -206,6 +207,9 @@ cluster-subnets=11.132.0.0/14/23
 
 [ovnkubenode]
 mode=full
+
+[ovnkubernetesfeature]
+egressip-reachability-total-timeout=3
 `
 
 	var newData string
@@ -263,6 +267,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Default.LFlowCacheEnable).To(gomega.BeTrue())
 			gomega.Expect(Default.LFlowCacheLimit).To(gomega.Equal(uint(0)))
 			gomega.Expect(Default.LFlowCacheLimitKb).To(gomega.Equal(uint(0)))
+			gomega.Expect(Default.EnableUDPAggregation).To(gomega.BeFalse())
 			gomega.Expect(Logging.File).To(gomega.Equal(""))
 			gomega.Expect(Logging.Level).To(gomega.Equal(5))
 			gomega.Expect(Monitoring.RawNetFlowTargets).To(gomega.Equal(""))
@@ -292,13 +297,14 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeFull))
 			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal(""))
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal(""))
+			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(1))
 
 			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
 				gomega.Expect(a.Scheme).To(gomega.Equal(OvnDBSchemeUnix))
 				gomega.Expect(a.PrivKey).To(gomega.Equal(""))
 				gomega.Expect(a.Cert).To(gomega.Equal(""))
 				gomega.Expect(a.CACert).To(gomega.Equal(""))
-				gomega.Expect(a.Address).To(gomega.Equal(""))
+				gomega.Expect(a.Address).To(gomega.MatchRegexp("unix:/var/run/ovn/ovn[sn]b_db.sock"))
 				gomega.Expect(a.CertCommonName).To(gomega.Equal(""))
 			}
 			return nil
@@ -367,7 +373,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OvnSouth.PrivKey).To(gomega.Equal(""))
 			gomega.Expect(OvnSouth.Cert).To(gomega.Equal(""))
 			gomega.Expect(OvnSouth.CACert).To(gomega.Equal(""))
-			gomega.Expect(OvnSouth.Address).To(gomega.Equal(""))
+			gomega.Expect(OvnSouth.Address).To(gomega.Equal("unix:/var/run/ovn/ovnsb_db.sock"))
 			gomega.Expect(OvnSouth.CertCommonName).To(gomega.Equal(""))
 
 			return nil
@@ -442,7 +448,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OvnSouth.PrivKey).To(gomega.Equal(""))
 			gomega.Expect(OvnSouth.Cert).To(gomega.Equal(""))
 			gomega.Expect(OvnSouth.CACert).To(gomega.Equal(""))
-			gomega.Expect(OvnSouth.Address).To(gomega.Equal(""))
+			gomega.Expect(OvnSouth.Address).To(gomega.Equal("unix:/var/run/ovn/ovnsb_db.sock"))
 			gomega.Expect(OvnSouth.CertCommonName).To(gomega.Equal(""))
 
 			return nil
@@ -569,6 +575,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Metrics.NodeServerPrivKey).To(gomega.Equal("/path/to/node-metrics-private.key"))
 			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal("/path/to/node-metrics.crt"))
 			gomega.Expect(Metrics.EnableConfigDuration).To(gomega.Equal(true))
+			gomega.Expect(Metrics.EnableEIPScaleMetrics).To(gomega.Equal(true))
 
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeSSL))
 			gomega.Expect(OvnNorth.PrivKey).To(gomega.Equal("/path/to/nb-client-private.key"))
@@ -594,6 +601,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal("10.50.0.0/16"))
 
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(3))
 			gomega.Expect(HybridOverlay.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
@@ -651,6 +659,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Metrics.NodeServerPrivKey).To(gomega.Equal("/tls/nodeprivkey"))
 			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal("/tls/nodecert"))
 			gomega.Expect(Metrics.EnableConfigDuration).To(gomega.Equal(true))
+			gomega.Expect(Metrics.EnableEIPScaleMetrics).To(gomega.Equal(true))
 
 			gomega.Expect(OvnNorth.Scheme).To(gomega.Equal(OvnDBSchemeSSL))
 			gomega.Expect(OvnNorth.PrivKey).To(gomega.Equal("/client/privkey"))
@@ -673,6 +682,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal("10.55.0.0/16"))
 
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(5))
 			gomega.Expect(HybridOverlay.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
@@ -727,6 +737,7 @@ var _ = Describe("Config Operations", func() {
 			"-metrics-enable-pprof=false",
 			"-ofctrl-wait-before-clear=5000",
 			"-metrics-enable-config-duration=true",
+			"-egressip-reachability-total-timeout=5",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1062,7 +1073,7 @@ enable-pprof=true
 			gomega.Expect(OvnSouth.Address).To(
 				gomega.Equal("ssl:6.5.4.1:6652,ssl:6.5.4.2:6652,ssl:6.5.4.3:6652"))
 			gomega.Expect(OvnSouth.CertCommonName).To(gomega.Equal("testsbcommonname"))
-
+			gomega.Expect(OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout).To(gomega.Equal(3))
 			return nil
 		}
 		cliArgs := []string{
@@ -1098,6 +1109,7 @@ enable-pprof=true
 			"-sb-client-cert=/client/cert2",
 			"-sb-client-cacert=/client/cacert2",
 			"-sb-cert-common-name=testsbcommonname",
+			"-egressip-reachability-total-timeout=3",
 		}
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())

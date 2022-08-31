@@ -16,118 +16,159 @@ type Conditional interface {
 	// Generate returns a list of lists of conditions to be used in Operations
 	// Each element in the (outer) list corresponds to an operation
 	Generate() ([][]ovsdb.Condition, error)
-	// matches returns true if a model matches the condition
-	Matches(m model.Model) (bool, error)
+	// Returns the models that match the conditions
+	Matches() (map[string]model.Model, error)
 	// returns the table that this condition is associated with
 	Table() string
 }
 
-// equalityConditional uses the information available in a model to generate conditions
-// The conditions are based on the equality of the first available index.
-// The priority of indexes is: uuid, {schema index}
-type equalityConditional struct {
-	dbModel   model.DatabaseModel
-	tableName string
-	info      *mapper.Info
-	singleOp  bool
+func generateConditionsFromModels(dbModel model.DatabaseModel, models map[string]model.Model) ([][]ovsdb.Condition, error) {
+	anyConditions := make([][]ovsdb.Condition, 0, len(models))
+	for _, model := range models {
+		info, err := dbModel.NewModelInfo(model)
+		if err != nil {
+			return nil, err
+		}
+		allConditions, err := dbModel.Mapper.NewEqualityCondition(info)
+		if err != nil {
+			return nil, err
+		}
+		anyConditions = append(anyConditions, allConditions)
+	}
+	return anyConditions, nil
 }
 
-func (c *equalityConditional) Matches(m model.Model) (bool, error) {
-	info, err := c.dbModel.NewModelInfo(m)
-	if err != nil {
-		return false, err
+func generateOvsdbConditionsFromModelConditions(dbModel model.DatabaseModel, info *mapper.Info, conditions []model.Condition, singleOp bool) ([][]ovsdb.Condition, error) {
+	anyConditions := [][]ovsdb.Condition{}
+	if singleOp {
+		anyConditions = append(anyConditions, []ovsdb.Condition{})
 	}
-	return c.dbModel.Mapper.EqualFields(c.info, info)
+	for _, condition := range conditions {
+		ovsdbCond, err := dbModel.Mapper.NewCondition(info, condition.Field, condition.Function, condition.Value)
+		if err != nil {
+			return nil, err
+		}
+		allConditions := []ovsdb.Condition{*ovsdbCond}
+		if singleOp {
+			anyConditions[0] = append(anyConditions[0], allConditions...)
+		} else {
+			anyConditions = append(anyConditions, allConditions)
+		}
+	}
+	return anyConditions, nil
+}
+
+// equalityConditional uses the indexes available in a provided model to find a
+// matching model in the database.
+type equalityConditional struct {
+	tableName string
+	models    []model.Model
+	cache     *cache.TableCache
 }
 
 func (c *equalityConditional) Table() string {
 	return c.tableName
 }
 
-// Generate returns a condition based on the model and the field pointers
-func (c *equalityConditional) Generate() ([][]ovsdb.Condition, error) {
-	var result [][]ovsdb.Condition
+// Returns the models that match the indexes available through the provided
+// model.
+func (c *equalityConditional) Matches() (map[string]model.Model, error) {
+	tableCache := c.cache.Table(c.tableName)
+	if tableCache == nil {
+		return nil, ErrNotFound
+	}
+	return tableCache.RowsByModels(c.models)
+}
 
-	conds, err := c.dbModel.Mapper.NewEqualityCondition(c.info)
-	if err != nil {
+// Generate conditions based on the equality of the first available index. If
+// the index can be matched against a model in the cache, the condition will be
+// based on the UUID of the found model. Otherwise, the conditions will be based
+// on the index.
+func (c *equalityConditional) Generate() ([][]ovsdb.Condition, error) {
+	models, err := c.Matches()
+	if err != nil && err != ErrNotFound {
 		return nil, err
 	}
-	if c.singleOp {
-		result = append(result, conds)
-	} else {
-		for _, c := range conds {
-			result = append(result, []ovsdb.Condition{c})
+	if len(models) == 0 {
+		// no cache hits, generate condition from models we were given
+		modelMap := make(map[string]model.Model, len(c.models))
+		for i, m := range c.models {
+			// generateConditionsFromModels() ignores the map keys
+			// so just use the range index
+			modelMap[fmt.Sprintf("%d", i)] = m
 		}
+		return generateConditionsFromModels(c.cache.DatabaseModel(), modelMap)
 	}
-	return result, nil
+	return generateConditionsFromModels(c.cache.DatabaseModel(), models)
 }
 
 // NewEqualityCondition creates a new equalityConditional
-func newEqualityConditional(dbModel model.DatabaseModel, table string, all bool, model model.Model, fields ...interface{}) (Conditional, error) {
-	info, err := dbModel.NewModelInfo(model)
-	if err != nil {
-		return nil, err
-	}
+func newEqualityConditional(table string, cache *cache.TableCache, models []model.Model) (Conditional, error) {
 	return &equalityConditional{
-		dbModel:   dbModel,
 		tableName: table,
-		info:      info,
-		singleOp:  all,
+		models:    models,
+		cache:     cache,
 	}, nil
 }
 
 // explicitConditional generates conditions based on the provided Condition list
 type explicitConditional struct {
-	dbModel    model.DatabaseModel
-	tableName  string
-	info       *mapper.Info
-	conditions []model.Condition
-	singleOp   bool
-}
-
-func (c *explicitConditional) Matches(m model.Model) (bool, error) {
-	return false, fmt.Errorf("cannot perform cache comparisons using explicit conditions")
+	tableName     string
+	anyConditions [][]ovsdb.Condition
+	cache         *cache.TableCache
 }
 
 func (c *explicitConditional) Table() string {
 	return c.tableName
 }
 
-// Generate returns a condition based on the model and the field pointers
-func (c *explicitConditional) Generate() ([][]ovsdb.Condition, error) {
-	var result [][]ovsdb.Condition
-	var conds []ovsdb.Condition
-
-	for _, cond := range c.conditions {
-		ovsdbCond, err := c.dbModel.Mapper.NewCondition(c.info, cond.Field, cond.Function, cond.Value)
+// Returns the models that match the conditions
+func (c *explicitConditional) Matches() (map[string]model.Model, error) {
+	tableCache := c.cache.Table(c.tableName)
+	if tableCache == nil {
+		return nil, ErrNotFound
+	}
+	found := map[string]model.Model{}
+	for _, allConditions := range c.anyConditions {
+		models, err := tableCache.RowsByCondition(allConditions)
 		if err != nil {
 			return nil, err
 		}
-		if c.singleOp {
-			conds = append(conds, *ovsdbCond)
-		} else {
-			result = append(result, []ovsdb.Condition{*ovsdbCond})
+		for uuid, model := range models {
+			found[uuid] = model
 		}
-
 	}
-	if c.singleOp {
-		result = append(result, conds)
-	}
-	return result, nil
+	return found, nil
 }
 
-// newIndexCondition creates a new equalityConditional
-func newExplicitConditional(dbModel model.DatabaseModel, table string, all bool, model model.Model, cond ...model.Condition) (Conditional, error) {
+// Generate returns conditions based on the provided Condition list
+func (c *explicitConditional) Generate() ([][]ovsdb.Condition, error) {
+	models, err := c.Matches()
+	if err != nil && err != ErrNotFound {
+		return nil, err
+	}
+	if len(models) == 0 {
+		// no cache hits, return conditions we were given
+		return c.anyConditions, nil
+	}
+	return generateConditionsFromModels(c.cache.DatabaseModel(), models)
+}
+
+// newExplicitConditional creates a new explicitConditional
+func newExplicitConditional(table string, cache *cache.TableCache, matchAll bool, model model.Model, cond ...model.Condition) (Conditional, error) {
+	dbModel := cache.DatabaseModel()
 	info, err := dbModel.NewModelInfo(model)
 	if err != nil {
 		return nil, err
 	}
+	anyConditions, err := generateOvsdbConditionsFromModelConditions(dbModel, info, cond, matchAll)
+	if err != nil {
+		return nil, err
+	}
 	return &explicitConditional{
-		dbModel:    dbModel,
-		tableName:  table,
-		info:       info,
-		conditions: cond,
-		singleOp:   all,
+		tableName:     table,
+		anyConditions: anyConditions,
+		cache:         cache,
 	}, nil
 }
 
@@ -141,9 +182,22 @@ type predicateConditional struct {
 
 // matches returns the result of the execution of the predicate
 // Type verifications are not performed
-func (c *predicateConditional) Matches(model model.Model) (bool, error) {
-	ret := reflect.ValueOf(c.predicate).Call([]reflect.Value{reflect.ValueOf(model)})
-	return ret[0].Bool(), nil
+// Returns the models that match the conditions
+func (c *predicateConditional) Matches() (map[string]model.Model, error) {
+	tableCache := c.cache.Table(c.tableName)
+	if tableCache == nil {
+		return nil, ErrNotFound
+	}
+	found := map[string]model.Model{}
+	// run the predicate on a shallow copy of the models for speed and only
+	// clone the matches
+	for u, m := range tableCache.RowsShallow() {
+		ret := reflect.ValueOf(c.predicate).Call([]reflect.Value{reflect.ValueOf(m)})
+		if ret[0].Bool() {
+			found[u] = model.Clone(m)
+		}
+	}
+	return found, nil
 }
 
 func (c *predicateConditional) Table() string {
@@ -153,29 +207,11 @@ func (c *predicateConditional) Table() string {
 // generate returns a list of conditions that match, by _uuid equality, all the objects that
 // match the predicate
 func (c *predicateConditional) Generate() ([][]ovsdb.Condition, error) {
-	allConditions := make([][]ovsdb.Condition, 0)
-	tableCache := c.cache.Table(c.tableName)
-	if tableCache == nil {
-		return nil, ErrNotFound
+	models, err := c.Matches()
+	if err != nil {
+		return nil, err
 	}
-	for _, row := range tableCache.Rows() {
-		match, err := c.Matches(row)
-		if err != nil {
-			return nil, err
-		}
-		if match {
-			info, err := c.cache.DatabaseModel().NewModelInfo(row)
-			if err != nil {
-				return nil, err
-			}
-			elemCond, err := c.cache.Mapper().NewEqualityCondition(info)
-			if err != nil {
-				return nil, err
-			}
-			allConditions = append(allConditions, elemCond)
-		}
-	}
-	return allConditions, nil
+	return generateConditionsFromModels(c.cache.DatabaseModel(), models)
 }
 
 // newPredicateConditional creates a new predicateConditional
@@ -193,8 +229,8 @@ type errorConditional struct {
 	err error
 }
 
-func (e *errorConditional) Matches(model.Model) (bool, error) {
-	return false, e.err
+func (e *errorConditional) Matches() (map[string]model.Model, error) {
+	return nil, e.err
 }
 
 func (e *errorConditional) Table() string {

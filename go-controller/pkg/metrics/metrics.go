@@ -347,11 +347,11 @@ func stopwatchShowMetricsUpdater(component string, stopChan <-chan struct{}) {
 				}
 
 				metricInfo.metrics.totalSamples.Set(totalSamplesMetricValue)
-				metricInfo.metrics.min.Set(minMetricValue)
-				metricInfo.metrics.max.Set(maxMetricValue)
-				metricInfo.metrics.percentile95th.Set(percentile95thMetricValue)
-				metricInfo.metrics.shortTermAvg.Set(shortTermAvgMetricValue)
-				metricInfo.metrics.longTermAvg.Set(longTermAvgMetricValue)
+				metricInfo.metrics.min.Set(minMetricValue / 1000)
+				metricInfo.metrics.max.Set(maxMetricValue / 1000)
+				metricInfo.metrics.percentile95th.Set(percentile95thMetricValue / 1000)
+				metricInfo.metrics.shortTermAvg.Set(shortTermAvgMetricValue / 1000)
+				metricInfo.metrics.longTermAvg.Set(longTermAvgMetricValue / 1000)
 			}
 		case <-stopChan:
 			return
@@ -365,7 +365,8 @@ func checkPodRunsOnGivenNode(clientset kubernetes.Interface, labels []string, k8
 	keepTrying bool) (bool, error) {
 	for _, label := range labels {
 		pods, err := clientset.CoreV1().Pods(config.Kubernetes.OVNConfigNamespace).List(context.TODO(), metav1.ListOptions{
-			LabelSelector: label,
+			LabelSelector:   label,
+			ResourceVersion: "0",
 		})
 		if err != nil {
 			klog.V(5).Infof("Failed to list Pods with label %q: %v. Retrying..", label, err)

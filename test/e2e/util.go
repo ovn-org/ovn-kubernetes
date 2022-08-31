@@ -23,6 +23,7 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	testutils "k8s.io/kubernetes/test/utils"
+	admissionapi "k8s.io/pod-security-admission/api"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -530,6 +531,18 @@ func getContainerAddressesForNetwork(container, network string) (string, string)
 	return strings.TrimSuffix(ipv4, "\n"), strings.TrimSuffix(ipv6, "\n")
 }
 
+// Returns the container's MAC addresses
+// related to the given network.
+func getMACAddressesForNetwork(container, network string) string {
+	mac := fmt.Sprintf("{{.NetworkSettings.Networks.%s.MacAddress}}", network)
+
+	macAddr, err := runCommand("docker", "inspect", "-f", mac, container)
+	if err != nil {
+		framework.Failf("failed to inspect external test container for its MAC: %v", err)
+	}
+	return strings.TrimSuffix(macAddr, "\n")
+}
+
 // deletePodSyncNS deletes a pod and wait for its deletion.
 // accept the namespace as a parameter.
 func deletePodSyncNS(clientSet kubernetes.Interface, namespace, podName string) {
@@ -765,7 +778,7 @@ func isDualStackCluster(nodes *v1.NodeList) bool {
 
 // used to inject OVN specific test actions
 func wrappedTestFramework(basename string) *framework.Framework {
-	f := framework.NewDefaultFramework(basename)
+	f := newPrivelegedTestFramework(basename)
 	// inject dumping dbs on failure
 	ginkgo.JustAfterEach(func() {
 		if !ginkgo.CurrentGinkgoTestDescription().Failed {
@@ -814,6 +827,12 @@ func wrappedTestFramework(basename string) *framework.Framework {
 		}
 	})
 
+	return f
+}
+
+func newPrivelegedTestFramework(basename string) *framework.Framework {
+	f := framework.NewDefaultFramework(basename)
+	f.NamespacePodSecurityEnforceLevel = admissionapi.LevelPrivileged
 	return f
 }
 

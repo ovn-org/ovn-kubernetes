@@ -9,8 +9,10 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -21,6 +23,7 @@ import (
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/safchain/ethtool"
 	"github.com/vishvananda/netlink"
 )
 
@@ -47,6 +50,65 @@ func (defaultCNIPluginLibOps) AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Li
 
 func (defaultCNIPluginLibOps) SetupVeth(contVethName string, hostVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error) {
 	return ip.SetupVethWithName(contVethName, hostVethName, mtu, hostNS)
+}
+
+// This is a good value that allows fast streams of small packets to be aggregated,
+// without introducing noticeable latency in slower traffic.
+const udpPacketAggregationTimeout = 50 * time.Microsecond
+
+var udpPacketAggregationTimeoutBytes = []byte(fmt.Sprintf("%d\n", udpPacketAggregationTimeout.Nanoseconds()))
+
+// sets up the host side of a veth for UDP packet aggregation
+func setupVethUDPAggregationHost(ifname string) error {
+	e, err := ethtool.NewEthtool()
+	if err != nil {
+		return fmt.Errorf("failed to initialize ethtool: %v", err)
+	}
+	defer e.Close()
+
+	err = e.Change(ifname, map[string]bool{
+		"rx-gro":                true,
+		"rx-udp-gro-forwarding": true,
+	})
+	if err != nil {
+		return fmt.Errorf("could not enable interface features: %v", err)
+	}
+	channels, err := e.GetChannels(ifname)
+	if err == nil {
+		channels.RxCount = uint32(runtime.NumCPU())
+		_, err = e.SetChannels(ifname, channels)
+	}
+	if err != nil {
+		return fmt.Errorf("could not update channels: %v", err)
+	}
+
+	timeoutFile := fmt.Sprintf("/sys/class/net/%s/gro_flush_timeout", ifname)
+	err = os.WriteFile(timeoutFile, udpPacketAggregationTimeoutBytes, 0644)
+	if err != nil {
+		return fmt.Errorf("could not set flush timeout: %v", err)
+	}
+
+	return nil
+}
+
+// sets up the container side of a veth for UDP packet aggregation
+func setupVethUDPAggregationContainer(ifname string) error {
+	e, err := ethtool.NewEthtool()
+	if err != nil {
+		return fmt.Errorf("failed to initialize ethtool: %v", err)
+	}
+	defer e.Close()
+
+	channels, err := e.GetChannels(ifname)
+	if err == nil {
+		channels.TxCount = uint32(runtime.NumCPU())
+		_, err = e.SetChannels(ifname, channels)
+	}
+	if err != nil {
+		return fmt.Errorf("could not update channels: %v", err)
+	}
+
+	return nil
 }
 
 func renameLink(curName, newName string) error {
@@ -146,10 +208,24 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 		contIface.Mac = ifInfo.MAC.String()
 		contIface.Sandbox = netns.Path()
 
+		if ifInfo.EnableUDPAggregation {
+			err = setupVethUDPAggregationContainer(contIface.Name)
+			if err != nil {
+				return fmt.Errorf("could not enable UDP packet aggregation in container: %v", err)
+			}
+		}
+
 		return nil
 	})
 	if err != nil {
 		return nil, nil, err
+	}
+
+	if ifInfo.EnableUDPAggregation {
+		err = setupVethUDPAggregationHost(hostIface.Name)
+		if err != nil {
+			return nil, nil, fmt.Errorf("could not enable UDP packet aggregation on host veth interface %q: %v", hostIface.Name, err)
+		}
 	}
 
 	return hostIface, contIface, nil
@@ -246,9 +322,17 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 	ifInfo *PodInterfaceInfo, sandboxID string, podLister corev1listers.PodLister,
 	kclient kubernetes.Interface) error {
-	klog.Infof("ConfigureOVS: namespace: %s, podName: %s", namespace, podName)
+
 	ifaceID := util.GetIfaceId(namespace, podName)
 	initialPodUID := ifInfo.PodUID
+
+	ipStrs := make([]string, len(ifInfo.IPs))
+	for i, ip := range ifInfo.IPs {
+		ipStrs[i] = ip.String()
+	}
+
+	klog.Infof("ConfigureOVS: namespace: %s, podName: %s, SandboxID: %q, UID: %q, MAC: %s, IPs: %v",
+		namespace, podName, sandboxID, initialPodUID, ifInfo.MAC, ipStrs)
 
 	// Find and remove any existing OVS port with this iface-id. Pods can
 	// have multiple sandboxes if some are waiting for garbage collection,
@@ -259,10 +343,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 			klog.Warningf("Failed to clear stale OVS port %q iface-id %q: %v\n  %q", uuid, ifaceID, err, out)
 		}
 	}
-	ipStrs := make([]string, len(ifInfo.IPs))
-	for i, ip := range ifInfo.IPs {
-		ipStrs[i] = ip.String()
-	}
+
 	// Add the new sandbox's OVS port, tag the port as transient so stale
 	// pod ports are scrubbed on hard reboot
 	ovsArgs := []string{
@@ -347,28 +428,40 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 		}
 	}
 
-	err = netns.Do(func(hostNS ns.NetNS) error {
-		// deny IPv6 neighbor solicitations
-		dadSysctlIface := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/dad_transmits", contIface.Name)
-		if _, err := os.Stat(dadSysctlIface); !os.IsNotExist(err) {
-			err = setSysctl(dadSysctlIface, 0)
-			if err != nil {
-				klog.Warningf("Failed to disable IPv6 DAD: %q", err)
-			}
+	// Only configure IPv6 specific stuff and wait for addresses to become usable
+	// if there are any IPv6 addresses to assign. v4 doesn't have the concept
+	// of tentative addresses so it doesn't need any of this.
+	haveV6 := false
+	for _, ip := range ifInfo.IPs {
+		if ip.IP.To4() == nil {
+			haveV6 = true
+			break
 		}
-		// generate address based on EUI64
-		genSysctlIface := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/addr_gen_mode", contIface.Name)
-		if _, err := os.Stat(genSysctlIface); !os.IsNotExist(err) {
-			err = setSysctl(genSysctlIface, 0)
-			if err != nil {
-				klog.Warningf("Failed to set IPv6 address generation mode to EUI64: %q", err)
+	}
+	if haveV6 {
+		err = netns.Do(func(hostNS ns.NetNS) error {
+			// deny IPv6 neighbor solicitations
+			dadSysctlIface := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/dad_transmits", contIface.Name)
+			if _, err := os.Stat(dadSysctlIface); !os.IsNotExist(err) {
+				err = setSysctl(dadSysctlIface, 0)
+				if err != nil {
+					klog.Warningf("Failed to disable IPv6 DAD: %q", err)
+				}
 			}
-		}
+			// generate address based on EUI64
+			genSysctlIface := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/addr_gen_mode", contIface.Name)
+			if _, err := os.Stat(genSysctlIface); !os.IsNotExist(err) {
+				err = setSysctl(genSysctlIface, 0)
+				if err != nil {
+					klog.Warningf("Failed to set IPv6 address generation mode to EUI64: %q", err)
+				}
+			}
 
-		return ip.SettleAddresses(contIface.Name, 10)
-	})
-	if err != nil {
-		klog.Warningf("Failed to settle addresses: %q", err)
+			return ip.SettleAddresses(contIface.Name, 10)
+		})
+		if err != nil {
+			klog.Warningf("Failed to settle addresses: %q", err)
+		}
 	}
 
 	return []*current.Interface{hostIface, contIface}, nil
@@ -461,7 +554,7 @@ func (pr *PodRequest) deletePodConntrack() {
 				continue
 			}
 		}
-		err = util.DeleteConntrack(ip.Address.IP.String(), 0, "", netlink.ConntrackReplyAnyIP)
+		err = util.DeleteConntrack(ip.Address.IP.String(), 0, "", netlink.ConntrackReplyAnyIP, nil)
 		if err != nil {
 			klog.Errorf("Failed to delete Conntrack Entry for %s: %v", ip.Address.IP.String(), err)
 			continue

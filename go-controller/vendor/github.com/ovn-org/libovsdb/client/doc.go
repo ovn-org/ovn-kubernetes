@@ -61,9 +61,8 @@ Conditions must refer to fields of the provided Model (via pointer to fields). E
 		Value: []string{"portUUID"},
 	    })
 
-If no client.Condition is provided, the client will create a default Condition based on the Model's data.
-The first non-null field that corresponds to a database index will be used. Therefore the following
-two statements are equivalent:
+If no client.Condition is provided, the client will use any of fields that correspond to indexes to
+generate an appropriate condition. Therefore the following two statements are equivalent:
 
 	ls = &MyLogicalSwitch {UUID:"myUUID"}
 
@@ -92,8 +91,11 @@ For example, the following operation will delete all the Logical Switches named 
 
 To create a Condition that matches all of the conditions simultaneously (i.e: AND semantics), use WhereAll().
 
-Where() and WhereAll() inject conditions into operations that will be evaluated by the server.
-However, to perform searches on the local cache, a more flexible mechanism is available: WhereCache()
+Where() or WhereAll() evaluate the provided index values or explicit conditions against the cache and generate
+conditions based on the UUIDs of matching models. If no matches are found in the cache, the generated conditions
+will be based on the index or condition fields themselves.
+
+A more flexible mechanism to search the cache is available: WhereCache()
 
 WhereCache() accepts a function that takes any Model as argument and returns a boolean.
 It is used to search the cache so commonly used with List() function. For example:
@@ -111,7 +113,7 @@ same condition using Where() or WhereAll() which will be more efficient.
 
 Get
 
-Get() operation is a simple operation capable of retrieving one Model based on some of its indexes. E.g:
+Get() operation is a simple operation capable of retrieving one Model based on some of its schema indexes. E.g:
 
 	ls := &LogicalSwitch{UUID:"myUUID"}
 	err := ovs.Get(ls)

@@ -14,6 +14,7 @@ import (
 	"github.com/urfave/cli/v2"
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -64,7 +65,7 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNClientset, fak
 	ip, _, _ := net.ParseCIDR(localHostNetEp)
 	n.nodeIPManager.addAddr(ip)
 
-	n.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+	_, err := n.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			svc := obj.(*kapi.Service)
 			n.AddService(svc)
@@ -79,7 +80,8 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNClientset, fak
 			n.DeleteService(svc)
 		},
 	}, n.SyncServices)
-	return nil
+
+	return err
 }
 
 func newObjectMeta(name, namespace string) metav1.ObjectMeta {
@@ -117,10 +119,16 @@ func newService(name, namespace, ip string, ports []v1.ServicePort, serviceType 
 	}
 }
 
-func newEndpoints(name, namespace string, eps []v1.EndpointSubset) *v1.Endpoints {
-	return &v1.Endpoints{
-		ObjectMeta: newObjectMeta(name, namespace),
-		Subsets:    eps,
+func newEndpointSlice(svcName, namespace string, endpoints []discovery.Endpoint, endpointPort []discovery.EndpointPort) *discovery.EndpointSlice {
+	return &discovery.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      svcName + "ab23",
+			Namespace: namespace,
+			Labels:    map[string]string{discovery.LabelServiceName: svcName},
+		},
+		Ports:       endpointPort,
+		AddressType: discovery.AddressTypeIPv4,
+		Endpoints:   endpoints,
 	}
 }
 
@@ -136,7 +144,7 @@ var _ = Describe("Node Operations", func() {
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
-		config.PrepareTestConfig()
+		Expect(config.PrepareTestConfig()).To(Succeed())
 
 		app = cli.NewApp()
 		app.Name = "test"
@@ -187,7 +195,7 @@ var _ = Describe("Node Operations", func() {
 				)
 
 				fakeRules := getExternalIPTRules(service.Spec.Ports[0], externalIP, service.Spec.ClusterIP, false, false)
-				addIptRules(fakeRules)
+				Expect(addIptRules(fakeRules)).To(Succeed())
 				fakeRules = getExternalIPTRules(
 					v1.ServicePort{
 						Port:     27000,
@@ -199,7 +207,7 @@ var _ = Describe("Node Operations", func() {
 					false,
 					false,
 				)
-				addIptRules(fakeRules)
+				Expect(addIptRules(fakeRules)).To(Succeed())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -225,7 +233,7 @@ var _ = Describe("Node Operations", func() {
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables = map[string]util.FakeTable{
@@ -298,7 +306,7 @@ var _ = Describe("Node Operations", func() {
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				fNPW.AddService(&service)
 
 				expectedTables := map[string]util.FakeTable{
@@ -356,7 +364,11 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					false, false,
 				)
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{},
+					[]discovery.EndpointPort{})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -364,11 +376,11 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				fNPW.AddService(&service)
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
@@ -414,6 +426,8 @@ var _ = Describe("Node Operations", func() {
 		It("inits iptables rules and openflows with NodePort where ETP=local, LGW", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeLocal
+				epPortName := "https"
+				epPortValue := int32(443)
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -427,23 +441,20 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true, false,
 				)
-				addr := v1.EndpointAddress{
-					IP: "10.244.0.3",
+				ep1 := discovery.Endpoint{
+					Addresses: []string{"10.244.0.3"},
 				}
-				port := v1.EndpointPort{
-					Name: "https",
-					Port: int32(443),
+				epPort1 := discovery.EndpointPort{
+					Name: &epPortName,
+					Port: &epPortValue,
 				}
-				ep := v1.EndpointSubset{
-					Addresses: []v1.EndpointAddress{
-						addr,
-					},
-					Ports: []v1.EndpointPort{
-						port,
-					},
-				}
-				// endpoints.Subset is ovn-networked so this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{ep})
+				// endpointSlice.Endpoints is ovn-networked so this will
+				// come under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{ep1},
+					[]discovery.EndpointPort{epPort1})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -451,11 +462,11 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				fNPW.AddService(&service)
 
 				expectedTables := map[string]util.FakeTable{
@@ -531,7 +542,11 @@ var _ = Describe("Node Operations", func() {
 					},
 					false, false,
 				)
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{},
+					[]discovery.EndpointPort{})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -539,11 +554,11 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				fNPW.AddService(&service)
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
@@ -593,6 +608,14 @@ var _ = Describe("Node Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				externalIP := "1.1.1.1"
 				config.Gateway.Mode = config.GatewayModeLocal
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
+				})
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
+				})
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -612,8 +635,13 @@ var _ = Describe("Node Operations", func() {
 					},
 					true, false,
 				)
-				// endpoints.Subset is empty and yet this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+				// endpointSlice.Endpoints is empty and yet this will come under
+				// !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{},
+					[]discovery.EndpointPort{})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -621,11 +649,11 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				fNPW.AddService(&service)
 
 				expectedTables := map[string]util.FakeTable{
@@ -693,6 +721,14 @@ var _ = Describe("Node Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				externalIP := "1.1.1.1"
 				config.Gateway.Mode = config.GatewayModeLocal
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
+				})
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+					Err: fmt.Errorf("deliberate error to fall back to output:LOCAL"),
+				})
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -712,8 +748,13 @@ var _ = Describe("Node Operations", func() {
 					},
 					false, false, // ETP=cluster
 				)
-				// endpoints.Subset is empty and yet this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+				// endpointSlice.Endpoints is empty and yet this will come under
+				// !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{},
+					[]discovery.EndpointPort{})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -721,11 +762,11 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				fNPW.AddService(&service)
 
 				expectedTables := map[string]util.FakeTable{
@@ -815,8 +856,13 @@ var _ = Describe("Node Operations", func() {
 					},
 					true, false,
 				)
-				// endpoints.Subset is empty and yet this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+				// endpointSlice.Endpoints is empty and yet this will come
+				// under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{},
+					[]discovery.EndpointPort{})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -824,11 +870,11 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				fNPW.AddService(&service)
 
 				expectedTables := map[string]util.FakeTable{
@@ -920,7 +966,11 @@ var _ = Describe("Node Operations", func() {
 					false, false,
 				)
 				service.Spec.ClusterIPs = []string{"10.129.0.2", "fd00:10:96::10"}
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{},
+					[]discovery.EndpointPort{})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -928,11 +978,11 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				fNPW.AddService(&service)
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
@@ -1025,7 +1075,7 @@ var _ = Describe("Node Operations", func() {
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				fNPW.AddService(&service)
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
@@ -1113,7 +1163,7 @@ var _ = Describe("Node Operations", func() {
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				fNPW.DeleteService(&service)
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
@@ -1188,7 +1238,7 @@ var _ = Describe("Node Operations", func() {
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				fNPW.DeleteService(&service)
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
@@ -1269,7 +1319,7 @@ var _ = Describe("Node Operations", func() {
 					},
 				)
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				fNPW.AddService(&service)
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
@@ -1371,7 +1421,7 @@ var _ = Describe("Node Operations", func() {
 					},
 				)
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				fNPW.AddService(&service)
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
@@ -1450,6 +1500,8 @@ var _ = Describe("Node Operations", func() {
 		It("manages iptables rules and openflows for NodePort backed by ovn-k pods where ETP=local, LGW", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeLocal
+				epPortName := "https"
+				epPortValue := int32(443)
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -1463,23 +1515,20 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true, false,
 				)
-				addr := v1.EndpointAddress{
-					IP: "10.244.0.3",
+				ep1 := discovery.Endpoint{
+					Addresses: []string{"10.244.0.3"},
 				}
-				port := v1.EndpointPort{
-					Name: "https",
-					Port: int32(443),
+				epPort1 := discovery.EndpointPort{
+					Name: &epPortName,
+					Port: &epPortValue,
 				}
-				ep := v1.EndpointSubset{
-					Addresses: []v1.EndpointAddress{
-						addr,
-					},
-					Ports: []v1.EndpointPort{
-						port,
-					},
-				}
-				// endpoints.Subset is ovn-networked so this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{ep})
+				// endpointSlice.Endpoints is ovn-networked so this will come
+				// under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{ep1},
+					[]discovery.EndpointPort{epPort1})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -1487,11 +1536,11 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				fNPW.AddService(&service)
 
 				expectedTables := map[string]util.FakeTable{
@@ -1579,6 +1628,8 @@ var _ = Describe("Node Operations", func() {
 		It("manages iptables rules and openflows for NodePort backed by ovn-k pods where ETP=local, SGW", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeShared
+				epPortName := "https"
+				epPortValue := int32(443)
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -1592,23 +1643,21 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true, false,
 				)
-				addr := v1.EndpointAddress{
-					IP: "10.244.0.3",
+
+				ep1 := discovery.Endpoint{
+					Addresses: []string{"10.244.0.3"},
 				}
-				port := v1.EndpointPort{
-					Name: "https",
-					Port: int32(443),
+				epPort1 := discovery.EndpointPort{
+					Name: &epPortName,
+					Port: &epPortValue,
 				}
-				ep := v1.EndpointSubset{
-					Addresses: []v1.EndpointAddress{
-						addr,
-					},
-					Ports: []v1.EndpointPort{
-						port,
-					},
-				}
-				// endpoints.Subset is ovn-networked so this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{ep})
+				// endpointSlice.Endpoints is ovn-networked so this will come
+				// under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{ep1},
+					[]discovery.EndpointPort{epPort1})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -1616,11 +1665,11 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				fNPW.AddService(&service)
 
 				expectedTables := map[string]util.FakeTable{
@@ -1714,6 +1763,8 @@ var _ = Describe("Node Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeLocal
 				outport := int32(443)
+				epPortName := "https"
+				epPortValue := int32(443)
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -1728,23 +1779,21 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true, false,
 				)
-				addr := v1.EndpointAddress{
-					IP: "192.168.18.15", // host-networked endpoint local to this node
+
+				ep1 := discovery.Endpoint{
+					Addresses: []string{"192.168.18.15"}, // host-networked endpoint local to this node
 				}
-				port := v1.EndpointPort{
-					Name: "https",
-					Port: int32(443),
+				epPort1 := discovery.EndpointPort{
+					Name: &epPortName,
+					Port: &epPortValue,
 				}
-				ep := v1.EndpointSubset{
-					Addresses: []v1.EndpointAddress{
-						addr,
-					},
-					Ports: []v1.EndpointPort{
-						port,
-					},
-				}
-				// endpoints.Subset is ovn-networked so this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{ep})
+				// endpointSlice.Endpoints is ovn-networked so this will
+				// come under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{ep1},
+					[]discovery.EndpointPort{epPort1})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -1752,13 +1801,13 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				// to ensure the endpoint is local-host-networked
-				res := fNPW.nodeIPManager.addresses.Has(ep.Addresses[0].IP)
+				res := fNPW.nodeIPManager.addresses.Has(ep1.Addresses[0])
 				Expect(res).To(BeTrue())
 				fNPW.AddService(&service)
 
@@ -1849,6 +1898,8 @@ var _ = Describe("Node Operations", func() {
 		It("manages iptables rules and openflows for NodePort backed by ovn-k pods where ITP=local and ETP=local", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeShared
+				epPortName := "https"
+				epPortValue := int32(443)
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
@@ -1862,23 +1913,20 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true, true,
 				)
-				addr := v1.EndpointAddress{
-					IP: "10.244.0.3",
+				ep1 := discovery.Endpoint{
+					Addresses: []string{"10.244.0.3"},
 				}
-				port := v1.EndpointPort{
-					Name: "https",
-					Port: int32(443),
+				epPort1 := discovery.EndpointPort{
+					Name: &epPortName,
+					Port: &epPortValue,
 				}
-				ep := v1.EndpointSubset{
-					Addresses: []v1.EndpointAddress{
-						addr,
-					},
-					Ports: []v1.EndpointPort{
-						port,
-					},
-				}
-				// endpoints.Subset is ovn-networked so this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{ep})
+				// endpointSlice.Endpoints is ovn-networked so this will
+				// come under !hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{ep1},
+					[]discovery.EndpointPort{epPort1})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -1886,11 +1934,11 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				fNPW.AddService(&service)
 
 				expectedTables := map[string]util.FakeTable{
@@ -1985,6 +2033,7 @@ var _ = Describe("Node Operations", func() {
 		It("manages iptables rules and openflows for NodePort backed by local-host-networked pods where ETP=local and ITP=local", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.Mode = config.GatewayModeLocal
+				epPortName := "https"
 				outport := int32(443)
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
@@ -2000,23 +2049,20 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					true, true,
 				)
-				addr := v1.EndpointAddress{
-					IP: "192.168.18.15", // host-networked endpoint local to this node
+				ep1 := discovery.Endpoint{
+					Addresses: []string{"192.168.18.15"}, // host-networked endpoint local to this node
 				}
-				port := v1.EndpointPort{
-					Name: "https",
-					Port: int32(443),
+				epPort1 := discovery.EndpointPort{
+					Name: &epPortName,
+					Port: &outport,
 				}
-				ep := v1.EndpointSubset{
-					Addresses: []v1.EndpointAddress{
-						addr,
-					},
-					Ports: []v1.EndpointPort{
-						port,
-					},
-				}
-				// endpoints.Subset is ovn-networked so this will come under !hasLocalHostNetEp case
-				endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{ep})
+				// endpointSlice.Endpoints is host-networked so this will
+				// come under hasLocalHostNetEp case
+				endpointSlice := *newEndpointSlice(
+					"service1",
+					"namespace1",
+					[]discovery.Endpoint{ep1},
+					[]discovery.EndpointPort{epPort1})
 
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
@@ -2024,13 +2070,13 @@ var _ = Describe("Node Operations", func() {
 							service,
 						},
 					},
-					&endpoints,
+					&endpointSlice,
 				)
 
 				fNPW.watchFactory = fakeOvnNode.watcher
-				startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)
+				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
 				// to ensure the endpoint is local-host-networked
-				res := fNPW.nodeIPManager.addresses.Has(ep.Addresses[0].IP)
+				res := fNPW.nodeIPManager.addresses.Has(endpointSlice.Endpoints[0].Addresses[0])
 				Expect(res).To(BeTrue())
 				fNPW.AddService(&service)
 				expectedTables := map[string]util.FakeTable{

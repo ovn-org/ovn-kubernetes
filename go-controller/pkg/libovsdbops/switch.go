@@ -45,12 +45,15 @@ func GetLogicalSwitch(nbClient libovsdbclient.Client, sw *nbdb.LogicalSwitch) (*
 	return found[0], nil
 }
 
-// CreateOrUpdateLogicalRouter creates or updates the provided logical switch
-func CreateOrUpdateLogicalSwitch(nbClient libovsdbclient.Client, sw *nbdb.LogicalSwitch) error {
+// CreateOrUpdateLogicalSwitch creates or updates the provided logical switch
+func CreateOrUpdateLogicalSwitch(nbClient libovsdbclient.Client, sw *nbdb.LogicalSwitch, fields ...interface{}) error {
+	if len(fields) == 0 {
+		fields = onModelUpdatesAllNonDefault()
+	}
 	opModel := operationModel{
 		Model:          sw,
 		ModelPredicate: func(item *nbdb.LogicalSwitch) bool { return item.Name == sw.Name },
-		OnModelUpdates: onModelUpdatesAll(),
+		OnModelUpdates: fields,
 		ErrNotFound:    false,
 		BulkOp:         false,
 	}
@@ -141,9 +144,11 @@ func AddACLsToLogicalSwitchOps(nbClient libovsdbclient.Client, ops []libovsdb.Op
 	return m.CreateOrUpdateOps(ops, opModels)
 }
 
-// RemoveACLsFromLogicalSwitchesWithPredicate looks up logical switches from the cache
-// based on a given predicate and removes from them the provided ACLs
-func RemoveACLsFromLogicalSwitchesWithPredicate(nbClient libovsdbclient.Client, p switchPredicate, acls ...*nbdb.ACL) error {
+// RemoveACLsFromLogicalSwitchesWithPredicateOps looks up logical switches from the cache
+// based on a given predicate, removes from them the provided ACLs, and returns the
+// corresponding ops
+func RemoveACLsFromLogicalSwitchesWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation,
+	p switchPredicate, acls ...*nbdb.ACL) ([]libovsdb.Operation, error) {
 	sw := nbdb.LogicalSwitch{
 		ACLs: make([]string, 0, len(acls)),
 	}
@@ -159,7 +164,18 @@ func RemoveACLsFromLogicalSwitchesWithPredicate(nbClient libovsdbclient.Client, 
 	}
 
 	m := newModelClient(nbClient)
-	return m.Delete(opModel)
+	return m.DeleteOps(ops, opModel)
+}
+
+// RemoveACLsFromLogicalSwitchesWithPredicate looks up logical switches from the cache
+// based on a given predicate and removes from them the provided ACLs
+func RemoveACLsFromLogicalSwitchesWithPredicate(nbClient libovsdbclient.Client, p switchPredicate, acls ...*nbdb.ACL) error {
+	ops, err := RemoveACLsFromLogicalSwitchesWithPredicateOps(nbClient, nil, p, acls...)
+	if err != nil {
+		return err
+	}
+	_, err = TransactAndCheck(nbClient, ops)
+	return err
 }
 
 // UpdateLogicalSwitchSetOtherConfig sets other config on the provided logical
@@ -225,7 +241,7 @@ func createOrUpdateLogicalSwitchPortsOps(nbClient libovsdbclient.Client, ops []l
 		lsp := lsps[i]
 		opModel := operationModel{
 			Model:          lsp,
-			OnModelUpdates: onModelUpdatesAll(),
+			OnModelUpdates: getAllUpdatableFields(lsp),
 			DoAfter:        func() { sw.Ports = append(sw.Ports, lsp.UUID) },
 			ErrNotFound:    false,
 			BulkOp:         false,

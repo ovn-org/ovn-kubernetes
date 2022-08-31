@@ -12,7 +12,6 @@ import (
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -22,6 +21,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -102,9 +102,8 @@ type Controller struct {
 	stopChan     <-chan struct{}
 
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
-	masterSubnetAllocator *subnetallocator.SubnetAllocator
-
-	hoMaster *hocontroller.MasterController
+	masterSubnetAllocator        *subnetallocator.SubnetAllocator
+	hybridOverlaySubnetAllocator *subnetallocator.SubnetAllocator
 
 	SCTPSupport bool
 
@@ -199,26 +198,28 @@ type Controller struct {
 	v6HostSubnetsUsed float64
 
 	// Objects for pods that need to be retried
-	retryPods *retryObjs
+	retryPods *RetryObjs
 
 	// Objects for network policies that need to be retried
-	retryNetworkPolicies *retryObjs
+	retryNetworkPolicies *RetryObjs
 
 	// Objects for egress firewall that need to be retried
-	retryEgressFirewalls *retryObjs
+	retryEgressFirewalls *RetryObjs
 
 	// Objects for egress IP that need to be retried
-	retryEgressIPs *retryObjs
+	retryEgressIPs *RetryObjs
 	// Objects for egress IP Namespaces that need to be retried
-	retryEgressIPNamespaces *retryObjs
+	retryEgressIPNamespaces *RetryObjs
 	// Objects for egress IP Pods that need to be retried
-	retryEgressIPPods *retryObjs
+	retryEgressIPPods *RetryObjs
 	// Objects for Egress nodes that need to be retried
-	retryEgressNodes *retryObjs
+	retryEgressNodes *RetryObjs
+	// EgressIP Node-specific syncMap used by egressip node event handler
+	addEgressNodeFailed sync.Map
 	// Objects for nodes that need to be retried
-	retryNodes *retryObjs
+	retryNodes *RetryObjs
 	// Objects for Cloud private IP config that need to be retried
-	retryCloudPrivateIPConfig *retryObjs
+	retryCloudPrivateIPConfig *RetryObjs
 	// Node-specific syncMap used by node event handler
 	gatewaysFailed              sync.Map
 	mgmtPortFailed              sync.Map
@@ -266,7 +267,11 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
 	}
-	svcController, svcFactory := newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient)
+	svcController, svcFactory := newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient, recorder)
+	var hybridOverlaySubnetAllocator *subnetallocator.SubnetAllocator
+	if config.HybridOverlay.Enabled {
+		hybridOverlaySubnetAllocator = subnetallocator.NewSubnetAllocator()
+	}
 	return &Controller{
 		client: ovnClient.KubeClient,
 		kube: &kube.Kube{
@@ -275,19 +280,20 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,
 		},
-		watchFactory:          wf,
-		stopChan:              stopChan,
-		masterSubnetAllocator: subnetallocator.NewSubnetAllocator(),
-		lsManager:             lsm.NewLogicalSwitchManager(),
-		logicalPortCache:      newPortCache(stopChan),
-		namespaces:            make(map[string]*namespaceInfo),
-		namespacesMutex:       sync.Mutex{},
-		externalGWCache:       make(map[ktypes.NamespacedName]*externalRouteInfo),
-		exGWCacheMutex:        sync.RWMutex{},
-		addressSetFactory:     addressSetFactory,
-		lspIngressDenyCache:   make(map[string]int),
-		lspEgressDenyCache:    make(map[string]int),
-		lspMutex:              &sync.Mutex{},
+		watchFactory:                 wf,
+		stopChan:                     stopChan,
+		masterSubnetAllocator:        subnetallocator.NewSubnetAllocator(),
+		hybridOverlaySubnetAllocator: hybridOverlaySubnetAllocator,
+		lsManager:                    lsm.NewLogicalSwitchManager(),
+		logicalPortCache:             newPortCache(stopChan),
+		namespaces:                   make(map[string]*namespaceInfo),
+		namespacesMutex:              sync.Mutex{},
+		externalGWCache:              make(map[ktypes.NamespacedName]*externalRouteInfo),
+		exGWCacheMutex:               sync.RWMutex{},
+		addressSetFactory:            addressSetFactory,
+		lspIngressDenyCache:          make(map[string]int),
+		lspEgressDenyCache:           make(map[string]int),
+		lspMutex:                     &sync.Mutex{},
 		eIPC: egressIPController{
 			egressIPAssignmentMutex:           &sync.Mutex{},
 			podAssignmentMutex:                &sync.Mutex{},
@@ -297,6 +303,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			allocator:                         allocator{&sync.Mutex{}, make(map[string]*egressNode)},
 			nbClient:                          libovsdbOvnNBClient,
 			watchFactory:                      wf,
+			egressIPTotalTimeout:              config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout,
 		},
 		loadbalancerClusterCache:  make(map[kapi.Protocol]string),
 		multicastSupport:          config.EnableMulticast,
@@ -394,6 +401,9 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 				return err
 			}
 		}
+		if config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout == 0 {
+			klog.V(2).Infof("EgressIP node reachability check disabled")
+		}
 	}
 
 	if config.OVNKubernetesFeature.EnableEgressFirewall {
@@ -437,14 +447,6 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 		go func() {
 			defer wg.Done()
 			unidlingController.Run(oc.stopChan)
-		}()
-	}
-
-	if oc.hoMaster != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			oc.hoMaster.Run(oc.stopChan)
 		}()
 	}
 
@@ -495,9 +497,9 @@ func (oc *Controller) recordPodEvent(addErr error, pod *kapi.Pod) {
 }
 
 func exGatewayAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
-	return oldPod.Annotations[routingNamespaceAnnotation] != newPod.Annotations[routingNamespaceAnnotation] ||
-		oldPod.Annotations[routingNetworkAnnotation] != newPod.Annotations[routingNetworkAnnotation] ||
-		oldPod.Annotations[bfdAnnotation] != newPod.Annotations[bfdAnnotation]
+	return oldPod.Annotations[util.RoutingNamespaceAnnotation] != newPod.Annotations[util.RoutingNamespaceAnnotation] ||
+		oldPod.Annotations[util.RoutingNetworkAnnotation] != newPod.Annotations[util.RoutingNetworkAnnotation] ||
+		oldPod.Annotations[util.BfdAnnotation] != newPod.Annotations[util.BfdAnnotation]
 }
 
 func networkStatusAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
@@ -675,19 +677,6 @@ func (oc *Controller) WatchNodes() error {
 	return err
 }
 
-// GetNetworkPolicyACLLogging retrieves ACL deny policy logging setting for the Namespace
-func (oc *Controller) GetNetworkPolicyACLLogging(ns string) *ACLLoggingLevels {
-	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
-	if nsInfo == nil {
-		return &ACLLoggingLevels{
-			Allow: "",
-			Deny:  "",
-		}
-	}
-	defer nsUnlock()
-	return &nsInfo.aclLogging
-}
-
 // Verify if controller can support ACL logging and validate annotation
 func (oc *Controller) aclLoggingCanEnable(annotation string, nsInfo *namespaceInfo) bool {
 	if !oc.aclLoggingEnabled || annotation == "" {
@@ -708,7 +697,8 @@ func (oc *Controller) aclLoggingCanEnable(annotation string, nsInfo *namespaceIn
 	newDenyLoggingLevel := ""
 	newAllowLoggingLevel := ""
 	okCnt := 0
-	for _, s := range []string{"alert", "warning", "notice", "info", "debug"} {
+	for _, s := range []string{nbdb.ACLSeverityAlert, nbdb.ACLSeverityWarning, nbdb.ACLSeverityNotice,
+		nbdb.ACLSeverityInfo, nbdb.ACLSeverityDebug} {
 		if s == aclLevels.Deny {
 			newDenyLoggingLevel = aclLevels.Deny
 			okCnt++
@@ -785,7 +775,7 @@ func shouldUpdate(node, oldNode *kapi.Node) (bool, error) {
 	return true, nil
 }
 
-func newServiceController(client clientset.Interface, nbClient libovsdbclient.Client) (*svccontroller.Controller, informers.SharedInformerFactory) {
+func newServiceController(client clientset.Interface, nbClient libovsdbclient.Client, recorder record.EventRecorder) (*svccontroller.Controller, informers.SharedInformerFactory) {
 	// Create our own informers to start compartmentalizing the code
 	// filter server side the things we don't care about
 	noProxyName, err := labels.NewRequirement("service.kubernetes.io/service-proxy-name", selection.DoesNotExist, nil)
@@ -812,6 +802,7 @@ func newServiceController(client clientset.Interface, nbClient libovsdbclient.Cl
 		svcFactory.Core().V1().Services(),
 		svcFactory.Discovery().V1().EndpointSlices(),
 		svcFactory.Core().V1().Nodes(),
+		recorder,
 	)
 
 	return controller, svcFactory

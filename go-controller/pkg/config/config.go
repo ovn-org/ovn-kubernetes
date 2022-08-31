@@ -115,7 +115,9 @@ var (
 	Metrics MetricsConfig
 
 	// OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
-	OVNKubernetesFeature OVNKubernetesFeatureConfig
+	OVNKubernetesFeature = OVNKubernetesFeatureConfig{
+		EgressIPReachabiltyTotalTimeout: 1,
+	}
 
 	// OvnNorth holds northbound OVN database client and server authentication and location details
 	OvnNorth OvnAuthConfig
@@ -219,6 +221,11 @@ type DefaultConfig struct {
 	// ClusterSubnets holds parsed cluster subnet entries and may be used
 	// outside the config module.
 	ClusterSubnets []CIDRNetworkEntry
+	// EnableUDPAggregation is true if ovn-kubernetes should use UDP Generic Receive
+	// Offload forwarding to improve the performance of containers that transmit lots
+	// of small UDP packets by allowing them to be aggregated before passing through
+	// the kernel network stack. This requires a new-enough kernel (5.15 or RHEL 8.5).
+	EnableUDPAggregation bool `gcfg:"enable-udp-aggregation"`
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -318,14 +325,18 @@ type MetricsConfig struct {
 	NodeServerCert        string `gcfg:"node-server-cert"`
 	// EnableConfigDuration holds the boolean flag to enable OVN-Kubernetes master to monitor OVN-Kubernetes master
 	// configuration duration and optionally, its application to all nodes
-	EnableConfigDuration bool `gcfg:"enable-config-duration"`
+	EnableConfigDuration  bool `gcfg:"enable-config-duration"`
+	EnableEIPScaleMetrics bool `gcfg:"enable-eip-scale-metrics"`
 }
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
 type OVNKubernetesFeatureConfig struct {
-	EnableEgressIP       bool `gcfg:"enable-egress-ip"`
-	EnableEgressFirewall bool `gcfg:"enable-egress-firewall"`
-	EnableEgressQoS      bool `gcfg:"enable-egress-qos"`
+	// EgressIP feature is enabled
+	EnableEgressIP bool `gcfg:"enable-egress-ip"`
+	// EgressIP node reachability total timeout in seconds
+	EgressIPReachabiltyTotalTimeout int  `gcfg:"egressip-reachability-total-timeout"`
+	EnableEgressFirewall            bool `gcfg:"enable-egress-firewall"`
+	EnableEgressQoS                 bool `gcfg:"enable-egress-qos"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -847,6 +858,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressIP,
 		Value:       OVNKubernetesFeature.EnableEgressIP,
 	},
+	&cli.IntFlag{
+		Name:        "egressip-reachability-total-timeout",
+		Usage:       "EgressIP node reachability total timeout in seconds (default: 1)",
+		Destination: &cliConfig.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout,
+		Value:       1,
+	},
 	&cli.BoolFlag{
 		Name:        "enable-egress-firewall",
 		Usage:       "Configure to use EgressFirewall CRD feature with ovn-kubernetes.",
@@ -983,6 +1000,11 @@ var MetricsFlags = []cli.Flag{
 		Name:        "metrics-enable-config-duration",
 		Usage:       "Enables monitoring OVN-Kubernetes master and OVN configuration duration",
 		Destination: &cliConfig.Metrics.EnableConfigDuration,
+	},
+	&cli.BoolFlag{
+		Name:        "metrics-enable-eip-scale",
+		Usage:       "Enables metrics related to Egress IP scaling",
+		Destination: &cliConfig.Metrics.EnableEIPScaleMetrics,
 	},
 }
 
@@ -1953,16 +1975,23 @@ func parseAddress(urlString string) (string, OvnDBScheme, error) {
 				urlString)
 		}
 
-		host, port, err := net.SplitHostPort(splits[1])
-		if err != nil {
-			return "", "", fmt.Errorf("failed to parse OVN DB host/port %q: %v",
-				splits[1], err)
-		}
+		if scheme == "unix" {
+			if parsedAddress != "" {
+				parsedAddress += ","
+			}
+			parsedAddress += ovnAddress
+		} else {
+			host, port, err := net.SplitHostPort(splits[1])
+			if err != nil {
+				return "", "", fmt.Errorf("failed to parse OVN DB host/port %q: %v",
+					splits[1], err)
+			}
 
-		if parsedAddress != "" {
-			parsedAddress += ","
+			if parsedAddress != "" {
+				parsedAddress += ","
+			}
+			parsedAddress += fmt.Sprintf("%s:%s", scheme, net.JoinHostPort(host, port))
 		}
-		parsedAddress += fmt.Sprintf("%s:%s", scheme, net.JoinHostPort(host, port))
 	}
 
 	switch {
@@ -1970,6 +1999,8 @@ func parseAddress(urlString string) (string, OvnDBScheme, error) {
 		parsedScheme = OvnDBSchemeSSL
 	case scheme == "tcp":
 		parsedScheme = OvnDBSchemeTCP
+	case scheme == "unix":
+		parsedScheme = OvnDBSchemeUnix
 	default:
 		return "", "", fmt.Errorf("unknown OVN DB scheme %q", scheme)
 	}
@@ -2023,6 +2054,7 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 			return nil, fmt.Errorf("certificate or key given; perhaps you mean to use the 'ssl' scheme?")
 		}
 		auth.Scheme = OvnDBSchemeUnix
+		auth.Address = fmt.Sprintf("unix:/var/run/ovn/ovn%s_db.sock", direction)
 		return auth, nil
 	}
 
@@ -2038,6 +2070,10 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 			return nil, fmt.Errorf("must specify private key, certificate, CA certificate, and common name used in the certificate for 'ssl' scheme")
 		}
 	case auth.Scheme == OvnDBSchemeTCP:
+		if auth.PrivKey != "" || auth.Cert != "" || auth.CACert != "" {
+			return nil, fmt.Errorf("certificate or key given; perhaps you mean to use the 'ssl' scheme?")
+		}
+	case auth.Scheme == OvnDBSchemeUnix:
 		if auth.PrivKey != "" || auth.Cert != "" || auth.CACert != "" {
 			return nil, fmt.Errorf("certificate or key given; perhaps you mean to use the 'ssl' scheme?")
 		}
@@ -2083,10 +2119,7 @@ func (a *OvnAuthConfig) GetURL() string {
 // SetDBAuth sets the authentication configuration and connection method
 // for the OVN northbound or southbound database server or client
 func (a *OvnAuthConfig) SetDBAuth() error {
-	if a.Scheme == OvnDBSchemeUnix {
-		// Nothing to do
-		return nil
-	} else if a.Scheme == OvnDBSchemeSSL {
+	if a.Scheme == OvnDBSchemeSSL {
 		// Both server and client SSL schemes require privkey and cert
 		if !pathExists(a.PrivKey) {
 			return fmt.Errorf("private key file %s not found", a.PrivKey)
@@ -2094,9 +2127,7 @@ func (a *OvnAuthConfig) SetDBAuth() error {
 		if !pathExists(a.Cert) {
 			return fmt.Errorf("certificate file %s not found", a.Cert)
 		}
-	}
 
-	if a.Scheme == OvnDBSchemeSSL {
 		// Client can bootstrap the CA cert from the DB
 		if err := a.ensureCACert(); err != nil {
 			return err

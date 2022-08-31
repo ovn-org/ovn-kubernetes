@@ -25,6 +25,8 @@ import (
 const (
 	egressFirewallAppliedCorrectly = "EgressFirewall Rules applied"
 	egressFirewallAddError         = "EgressFirewall Rules not correctly added"
+	// egressFirewallACLExtIdKey external ID key for egress firewall ACLs
+	egressFirewallACLExtIdKey = "egressFirewall"
 )
 
 type egressFirewall struct {
@@ -129,16 +131,15 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) error {
 
 	// Update the direction of each egressFirewallACL if needed.
 	// Update the egressFirewallACL name if needed.
-	// Update logging related information if needed.
+	namespaceToACLs := map[string][]*nbdb.ACL{}
 	for i := range egressFirewallACLs {
-		egressFirewallACLs[i].Direction = types.DirectionToLPort
-		if namespace, ok := egressFirewallACLs[i].ExternalIDs["egressFirewall"]; ok && namespace != "" {
+		egressFirewallACLs[i].Direction = nbdb.ACLDirectionToLport
+		if namespace, ok := egressFirewallACLs[i].ExternalIDs[egressFirewallACLExtIdKey]; ok && namespace != "" {
 			aclName := buildEgressFwAclName(namespace, egressFirewallACLs[i].Priority)
-			log, meterName, logSeverity := oc.getLogMeterSeverity(namespace, egressFirewallACLs[i].Action)
-			egressFirewallACLs[i].Meter = &meterName
 			egressFirewallACLs[i].Name = &aclName
-			egressFirewallACLs[i].Log = log
-			egressFirewallACLs[i].Severity = &logSeverity
+			meterName := types.OvnACLLoggingMeter
+			egressFirewallACLs[i].Meter = &meterName
+			namespaceToACLs[namespace] = append(namespaceToACLs[namespace], egressFirewallACLs[i])
 		} else {
 			klog.Warningf("Could not find namespace for egress firewall ACL during refresh operation: %v", egressFirewallACLs[i])
 		}
@@ -146,6 +147,17 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) error {
 	err = libovsdbops.CreateOrUpdateACLs(oc.nbClient, egressFirewallACLs...)
 	if err != nil {
 		return fmt.Errorf("unable to update ACL information (direction and logging) during resync operation, err: %v", err)
+	}
+
+	// Update logging related information if needed.
+	for namespace, nsACLs := range namespaceToACLs {
+		// access nsInfo with lock
+		aclLogging := oc.GetNamespaceACLLogging(namespace)
+		// Update acl logging based on namespace logLevels
+		err = UpdateACLLogging(oc.nbClient, nsACLs, aclLogging)
+		if err != nil {
+			return fmt.Errorf("failed to update egress firewall ACL logging for namespace %s: %v", namespace, err)
+		}
 	}
 
 	// In any gateway mode, make sure to delete all LRPs on ovn_cluster_router.
@@ -163,7 +175,7 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) error {
 	ovnEgressFirewalls := make(map[string]struct{})
 
 	for _, egressFirewallACL := range egressFirewallACLs {
-		if ns, ok := egressFirewallACL.ExternalIDs["egressFirewall"]; ok {
+		if ns, ok := egressFirewallACL.ExternalIDs[egressFirewallACLExtIdKey]; ok {
 			// Most egressFirewalls will have more then one ACL but we only need to know if there is one for the namespace
 			// so a map is fine and we will add an entry every iteration but because it is a map will overwrite the previous
 			// entry if it already existed
@@ -231,7 +243,8 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 		return fmt.Errorf("cannot Ensure that addressSet for namespace %s exists %v", egressFirewall.Namespace, err)
 	}
 	ipv4HashedAS, ipv6HashedAS := addressset.MakeAddressSetHashNames(egressFirewall.Namespace)
-	if err := oc.addEgressFirewallRules(ef, ipv4HashedAS, ipv6HashedAS, types.EgressFirewallStartPriority); err != nil {
+	aclLoggingLevels := oc.GetNamespaceACLLogging(ef.namespace)
+	if err := oc.addEgressFirewallRules(ef, ipv4HashedAS, ipv6HashedAS, types.EgressFirewallStartPriority, aclLoggingLevels); err != nil {
 		return err
 	}
 	oc.egressFirewalls.Store(egressFirewall.Namespace, ef)
@@ -286,14 +299,14 @@ func (oc *Controller) updateEgressFirewallStatusWithRetry(egressfirewall *egress
 	return nil
 }
 
-func (oc *Controller) addEgressFirewallRules(ef *egressFirewall, hashedAddressSetNameIPv4, hashedAddressSetNameIPv6 string, efStartPriority int) error {
+func (oc *Controller) addEgressFirewallRules(ef *egressFirewall, hashedAddressSetNameIPv4, hashedAddressSetNameIPv6 string, efStartPriority int, aclLogging *ACLLoggingLevels) error {
 	for _, rule := range ef.egressRules {
 		var action string
 		var matchTargets []matchTarget
 		if rule.access == egressfirewallapi.EgressFirewallRuleAllow {
-			action = "allow"
+			action = nbdb.ACLActionAllow
 		} else {
-			action = "drop"
+			action = nbdb.ACLActionDrop
 		}
 		if rule.to.cidrSelector != "" {
 			if utilnet.IsIPv6CIDRString(rule.to.cidrSelector) {
@@ -316,7 +329,7 @@ func (oc *Controller) addEgressFirewallRules(ef *egressFirewall, hashedAddressSe
 			}
 		}
 		match := generateMatch(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6, matchTargets, rule.ports)
-		err := oc.createEgressFirewallRules(efStartPriority-rule.id, match, action, ef.namespace)
+		err := oc.createEgressFirewallRules(efStartPriority-rule.id, match, action, ef.namespace, aclLogging)
 		if err != nil {
 			return err
 		}
@@ -326,7 +339,7 @@ func (oc *Controller) addEgressFirewallRules(ef *egressFirewall, hashedAddressSe
 
 // createEgressFirewallRules uses the previously generated elements and creates the
 // logical_router_policy/join_switch_acl for a specific egressFirewallRouter
-func (oc *Controller) createEgressFirewallRules(priority int, match, action, externalID string) error {
+func (oc *Controller) createEgressFirewallRules(priority int, match, action, externalID string, aclLogging *ACLLoggingLevels) error {
 	logicalSwitches := []string{}
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		// Find all node switches
@@ -348,18 +361,15 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 	// a name is needed for logging purposes - the name must be unique, so make it
 	// egressFirewall_<namespace name>_<priority>
 	aclName := buildEgressFwAclName(externalID, priority)
-	log, meter, severity := oc.getLogMeterSeverity(externalID, action)
 
-	egressFirewallACL := libovsdbops.BuildACL(
+	egressFirewallACL := BuildACL(
 		aclName,
-		types.DirectionToLPort,
+		nbdb.ACLDirectionToLport,
 		priority,
 		match,
 		action,
-		meter,
-		severity,
-		log,
-		map[string]string{"egressFirewall": externalID},
+		aclLogging,
+		map[string]string{egressFirewallACLExtIdKey: externalID},
 		nil,
 	)
 	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, egressFirewallACL)
@@ -386,7 +396,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 func (oc *Controller) deleteEgressFirewallRules(externalID string) error {
 	// Find ACLs for a given egressFirewall
 	pACL := func(item *nbdb.ACL) bool {
-		return item.ExternalIDs["egressFirewall"] == externalID
+		return item.ExternalIDs[egressFirewallACLExtIdKey] == externalID
 	}
 	egressFirewallACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, pACL)
 	if err != nil {
@@ -398,15 +408,10 @@ func (oc *Controller) deleteEgressFirewallRules(externalID string) error {
 		return nil
 	}
 
-	// delete egress firewall acls off any logical switch which has it
+	// delete egress firewall acls off any logical switch which has it,
+	// then manually remove the egressFirewall ACLs instead of relying on ovsdb garbage collection to do so
 	pSwitch := func(item *nbdb.LogicalSwitch) bool { return true }
-	err = libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(oc.nbClient, pSwitch, egressFirewallACLs...)
-	if err != nil {
-		return fmt.Errorf("failed to remove reject acl from logical switches: %v", err)
-	}
-
-	// Manually remove the egressFirewall ACLs instead of relying on ovsdb garbage collection to do so
-	err = libovsdbops.DeleteACLs(oc.nbClient, egressFirewallACLs...)
+	err = libovsdbops.DeleteACLs(oc.nbClient, nil, pSwitch, egressFirewallACLs...)
 	if err != nil {
 		return err
 	}
@@ -580,34 +585,12 @@ func getEgressFirewallNamespacedName(egressFirewall *egressfirewallapi.EgressFir
 	return fmt.Sprintf("%v/%v", egressFirewall.Namespace, egressFirewall.Name)
 }
 
-// getLogMeterSeverity determines if logging shall be enabled for a given ACL, what the name of the meter is and the
-// severity level for logging.
-func (oc *Controller) getLogMeterSeverity(namespaceName, action string) (log bool, meter string, severity string) {
-	aclLogging := ""
-	// ok should always be true. However, to avoid nil pointer derefence panics here, it's
-	// best to add this verification and in the worst case to resort to sane default values.
-	if nsInfo, ok := oc.namespaces[namespaceName]; ok {
-		if action == "allow" || action == "allow-related" {
-			aclLogging = nsInfo.aclLogging.Allow
-		} else if action == "drop" || action == "drop-related" {
-			aclLogging = nsInfo.aclLogging.Deny
-		}
-	} else {
-		klog.Warningf("No nsInfo object found for namespace %s", namespaceName)
-	}
-	log = aclLogging != ""
-	severity = getACLLoggingSeverity(aclLogging)
-	meter = types.OvnACLLoggingMeter
-
-	return
-}
-
-// refreshEgressFirewallLogging updates logging related configuration for all rules of this specific firewall in OVN.
+// updateACLLoggingForEgressFirewall updates logging related configuration for all rules of this specific firewall in OVN.
 // This method can be called for example from the Namespaces Watcher methods to reload firewall rules' logging  when
 // namespace annotations change.
 // Return values are: bool - if the egressFirewall's ACL was updated or not, error in case of errors. If a namespace
 // does not contain an egress firewall ACL, then this returns false, nil instead of a NotFound error.
-func (oc *Controller) refreshEgressFirewallLogging(egressFirewallNamespace string) (bool, error) {
+func (oc *Controller) updateACLLoggingForEgressFirewall(egressFirewallNamespace string, nsInfo *namespaceInfo) (bool, error) {
 	// Retrieve the egress firewall object from cache and lock it.
 	obj, loaded := oc.egressFirewalls.Load(egressFirewallNamespace)
 	if !loaded {
@@ -616,7 +599,7 @@ func (oc *Controller) refreshEgressFirewallLogging(egressFirewallNamespace strin
 
 	ef, ok := obj.(*egressFirewall)
 	if !ok {
-		return false, fmt.Errorf("refreshEgressFirewallLogging failed: type assertion to *egressFirewall"+
+		return false, fmt.Errorf("updateACLLoggingForEgressFirewall failed: type assertion to *egressFirewall"+
 			" failed for EgressFirewall of type %T in namespace %s",
 			obj, ef.namespace)
 	}
@@ -624,32 +607,13 @@ func (oc *Controller) refreshEgressFirewallLogging(egressFirewallNamespace strin
 	ef.Lock()
 	defer ef.Unlock()
 
-	// Find ACLs for a given egressFirewall
+	// Predicate for given egress firewall ACLs
 	p := func(item *nbdb.ACL) bool {
-		return item.ExternalIDs["egressFirewall"] == ef.namespace
+		return item.ExternalIDs[egressFirewallACLExtIdKey] == ef.namespace
 	}
-	egressFirewallACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
-	if err != nil {
-		return false, fmt.Errorf("unable to list egress firewall ACLs, err: %v", err)
-	}
-	if len(egressFirewallACLs) == 0 {
-		klog.Warningf("No egressFirewall ACLs to update in ns: %s", ef.namespace)
-		return false, nil
-	}
-
-	for i := range egressFirewallACLs {
-		// Set logging and severity
-		log, meterName, logSeverity := oc.getLogMeterSeverity(ef.namespace, egressFirewallACLs[i].Action)
-		egressFirewallACLs[i].Log = log
-		egressFirewallACLs[i].Severity = &logSeverity
-		egressFirewallACLs[i].Meter = &meterName
-	}
-	// CreateOrUpdateACLs will update all provided (non zero value) fields
-	err = libovsdbops.CreateOrUpdateACLs(oc.nbClient, egressFirewallACLs...)
-	if err != nil {
+	if err := UpdateACLLoggingWithPredicate(oc.nbClient, p, &nsInfo.aclLogging); err != nil {
 		return false, fmt.Errorf("unable to update ACL logging in ns %s, err: %v", ef.namespace, err)
 	}
-
 	return true, nil
 }
 

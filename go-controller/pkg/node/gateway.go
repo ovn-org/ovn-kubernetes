@@ -12,7 +12,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
+	"github.com/safchain/ethtool"
 	kapi "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 )
@@ -108,30 +110,30 @@ func (g *gateway) SyncServices(objs []interface{}) error {
 	return nil
 }
 
-func (g *gateway) AddEndpoints(ep *kapi.Endpoints) {
+func (g *gateway) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.AddEndpoints(ep)
+		g.loadBalancerHealthChecker.AddEndpointSlice(epSlice)
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.AddEndpoints(ep)
+		g.nodePortWatcher.AddEndpointSlice(epSlice)
 	}
 }
 
-func (g *gateway) UpdateEndpoints(old, new *kapi.Endpoints) {
+func (g *gateway) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) {
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.UpdateEndpoints(old, new)
+		g.loadBalancerHealthChecker.UpdateEndpointSlice(oldEpSlice, newEpSlice)
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.UpdateEndpoints(old, new)
+		g.nodePortWatcher.UpdateEndpointSlice(oldEpSlice, newEpSlice)
 	}
 }
 
-func (g *gateway) DeleteEndpoints(ep *kapi.Endpoints) {
+func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.DeleteEndpoints(ep)
+		g.loadBalancerHealthChecker.DeleteEndpointSlice(epSlice)
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.DeleteEndpoints(ep)
+		g.nodePortWatcher.DeleteEndpointSlice(epSlice)
 	}
 }
 
@@ -160,19 +162,19 @@ func (g *gateway) Init(wf factory.NodeWatchFactory) error {
 		return err
 	}
 
-	_, err = wf.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
+	_, err = wf.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			ep := obj.(*kapi.Endpoints)
-			g.AddEndpoints(ep)
+			epSlice := obj.(*discovery.EndpointSlice)
+			g.AddEndpointSlice(epSlice)
 		},
 		UpdateFunc: func(old, new interface{}) {
-			oldEp := old.(*kapi.Endpoints)
-			newEp := new.(*kapi.Endpoints)
-			g.UpdateEndpoints(oldEp, newEp)
+			oldEpSlice := old.(*discovery.EndpointSlice)
+			newEpSlice := new.(*discovery.EndpointSlice)
+			g.UpdateEndpointSlice(oldEpSlice, newEpSlice)
 		},
 		DeleteFunc: func(obj interface{}) {
-			ep := obj.(*kapi.Endpoints)
-			g.DeleteEndpoints(ep)
+			epSlice := obj.(*discovery.EndpointSlice)
+			g.DeleteEndpointSlice(epSlice)
 		},
 	}, nil)
 	if err != nil {
@@ -191,6 +193,25 @@ func (g *gateway) Start(stopChan <-chan struct{}, wg *sync.WaitGroup) {
 		klog.Info("Spawning Conntrack Rule Check Thread")
 		g.openflowManager.Run(stopChan, wg)
 	}
+}
+
+// sets up an uplink interface for UDP Generic Receive Offload forwarding as part of
+// the EnableUDPAggregation feature.
+func setupUDPAggregationUplink(ifname string) error {
+	e, err := ethtool.NewEthtool()
+	if err != nil {
+		return fmt.Errorf("failed to initialize ethtool: %v", err)
+	}
+	defer e.Close()
+
+	err = e.Change(ifname, map[string]bool{
+		"rx-udp-gro-forwarding": true,
+	})
+	if err != nil {
+		return fmt.Errorf("could not enable UDP offload features on %q: %v", ifname, err)
+	}
+
+	return nil
 }
 
 func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops []net.IP, gwIPs []*net.IPNet, nodeAnnotator kube.Annotator) (
@@ -223,6 +244,17 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 				"will cause incoming packets destined to OVN and larger than pod MTU: %d to the node, being dropped "+
 				"without sending fragmentation needed", config.Default.MTU)
 			config.Gateway.DisablePacketMTUCheck = true
+		}
+	}
+
+	if config.Default.EnableUDPAggregation {
+		err = setupUDPAggregationUplink(gatewayBridge.uplinkName)
+		if err == nil && egressGWBridge != nil {
+			err = setupUDPAggregationUplink(egressGWBridge.uplinkName)
+		}
+		if err != nil {
+			klog.Warningf("Could not enable UDP packet aggregation on uplink interface (aggregation will be disabled): %v", err)
+			config.Default.EnableUDPAggregation = false
 		}
 	}
 

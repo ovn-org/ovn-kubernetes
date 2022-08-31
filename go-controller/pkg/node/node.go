@@ -6,19 +6,17 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	kapi "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -542,56 +540,73 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		go wait.Until(func() {
 			checkForStaleOVSInterfaces(n.name, n.watchFactory.(*factory.WatchFactory))
 		}, time.Minute, n.stopChan)
-		err := n.WatchEndpoints()
+		util.SetARPTimeout()
+		err := n.WatchNamespaces()
 		if err != nil {
-			return fmt.Errorf("failed to watch endpoints: %w", err)
+			return fmt.Errorf("failed to watch namespaces: %w", err)
 		}
-	}
-
-	if config.OvnKubeNode.Mode != types.NodeModeDPU {
-		// conditionally write cni config file
-		confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
-		_, err = os.Stat(confFile)
-		if os.IsNotExist(err) {
-			err = config.WriteCNIConfig()
-			if err != nil {
-				return err
-			}
+		// every minute cleanup stale conntrack entries if any
+		go wait.Until(func() {
+			n.checkAndDeleteStaleConntrackEntries()
+		}, time.Minute*1, n.stopChan)
+		err = n.WatchEndpointSlices()
+		if err != nil {
+			return fmt.Errorf("failed to watch endpointSlices: %w", err)
 		}
 	}
 
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		err = n.watchPodsDPU(isOvnUpEnabled)
+		if err := n.watchPodsDPU(isOvnUpEnabled); err != nil {
+			return err
+		}
 	} else {
 		// start the cni server
-		err = cniServer.Start(cni.HandleCNIRequest)
+		if err := cniServer.Start(cni.HandleCNIRequest); err != nil {
+			return err
+		}
+
+		// Write CNI config file if it doesn't already exist
+		if err := config.WriteCNIConfig(); err != nil {
+			return err
+		}
 	}
 
-	return err
+	klog.Infof("OVN Kube Node initialized and ready.")
+	return nil
 }
 
-func (n *OvnNode) WatchEndpoints() error {
-	_, err := n.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
+func (n *OvnNode) WatchEndpointSlices() error {
+	_, err := n.watchFactory.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(old, new interface{}) {
-			epNew := new.(*kapi.Endpoints)
-			epOld := old.(*kapi.Endpoints)
-			newEpAddressMap := buildEndpointAddressMap(epNew.Subsets)
-			for item := range buildEndpointAddressMap(epOld.Subsets) {
-				if _, ok := newEpAddressMap[item]; !ok && item.protocol == kapi.ProtocolUDP { // flush conntrack only for UDP
-					err := util.DeleteConntrack(item.ip, item.port, item.protocol, netlink.ConntrackReplyAnyIP)
-					if err != nil {
-						klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
+			newEndpointSlice := new.(*discovery.EndpointSlice)
+			oldEndpointSlice := old.(*discovery.EndpointSlice)
+			for _, port := range oldEndpointSlice.Ports {
+				for _, endpoint := range oldEndpointSlice.Endpoints {
+					for _, ip := range endpoint.Addresses {
+						if doesEPSliceContainEndpoint(newEndpointSlice, ip, *port.Port, *port.Protocol) {
+							continue
+						}
+						if *port.Protocol == kapi.ProtocolUDP { // flush conntrack only for UDP
+							err := util.DeleteConntrack(ip, *port.Port, *port.Protocol, netlink.ConntrackReplyAnyIP, nil)
+							if err != nil {
+								klog.Errorf("Failed to delete conntrack entry for %s: %v", ip, err)
+							}
+						}
 					}
 				}
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
-			ep := obj.(*kapi.Endpoints)
-			for item := range buildEndpointAddressMap(ep.Subsets) {
-				if item.protocol == kapi.ProtocolUDP { // flush conntrack only for UDP
-					err := util.DeleteConntrack(item.ip, item.port, item.protocol, netlink.ConntrackReplyAnyIP)
-					if err != nil {
-						klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
+			endpointSlice := obj.(*discovery.EndpointSlice)
+			for _, port := range endpointSlice.Ports {
+				for _, endpoint := range endpointSlice.Endpoints {
+					for _, ip := range endpoint.Addresses {
+						if *port.Protocol == kapi.ProtocolUDP { // flush conntrack only for UDP
+							err := util.DeleteConntrack(ip, *port.Port, *port.Protocol, netlink.ConntrackReplyAnyIP, nil)
+							if err != nil {
+								klog.Errorf("Failed to delete conntrack entry for %s: %v", ip, err)
+							}
+						}
 					}
 				}
 			}
@@ -600,12 +615,115 @@ func (n *OvnNode) WatchEndpoints() error {
 	return err
 }
 
+func exGatewayPodsAnnotationsChanged(oldNs, newNs *kapi.Namespace) bool {
+	// In reality we only care about exgw pod deletions, however since the list of IPs is not expected to change
+	// that often, let's check for *any* changes to these annotations compared to their previous state and trigger
+	// the logic for checking if we need to delete any conntrack entries
+	return (oldNs.Annotations[util.ExternalGatewayPodIPsAnnotation] != newNs.Annotations[util.ExternalGatewayPodIPsAnnotation]) ||
+		(oldNs.Annotations[util.RoutingExternalGWsAnnotation] != newNs.Annotations[util.RoutingExternalGWsAnnotation])
+}
+
+func (n *OvnNode) checkAndDeleteStaleConntrackEntries() {
+	namespaces, err := n.watchFactory.GetNamespaces()
+	if err != nil {
+		klog.Errorf("Unable to get pods from informer: %v", err)
+	}
+	for _, namespace := range namespaces {
+		_, foundRoutingExternalGWsAnnotation := namespace.Annotations[util.RoutingExternalGWsAnnotation]
+		_, foundExternalGatewayPodIPsAnnotation := namespace.Annotations[util.ExternalGatewayPodIPsAnnotation]
+		if foundRoutingExternalGWsAnnotation || foundExternalGatewayPodIPsAnnotation {
+			pods, err := n.watchFactory.GetPods(namespace.Name)
+			if err != nil {
+				klog.Warningf("Unable to get pods from informer for namespace %s: %v", namespace.Name, err)
+			}
+			if len(pods) > 0 || err != nil {
+				// we only need to proceed if there is at least one pod in this namespace on this node
+				// OR if we couldn't fetch the pods for some reason at this juncture
+				n.checkAndDeleteStaleConntrackEntriesForNamespace(namespace)
+			}
+		}
+	}
+}
+
+func (n *OvnNode) checkAndDeleteStaleConntrackEntriesForNamespace(newNs *kapi.Namespace) {
+	// loop through all the IPs on the annotations; ARP for their MACs and form an allowlist
+	gatewayIPs := strings.Split(newNs.Annotations[util.ExternalGatewayPodIPsAnnotation], ",")
+	gatewayIPs = append(gatewayIPs, strings.Split(newNs.Annotations[util.RoutingExternalGWsAnnotation], ",")...)
+	var wg sync.WaitGroup
+	wg.Add(len(gatewayIPs))
+	validMACs := sync.Map{}
+	for _, gwIP := range gatewayIPs {
+		go func(gwIP string) {
+			defer wg.Done()
+			if len(gwIP) > 0 {
+				if hwAddr, err := util.GetMACAddressFromARP(net.ParseIP(gwIP)); err != nil {
+					klog.Errorf("Failed to lookup hardware address for gatewayIP %s: %v", gwIP, err)
+				} else if len(hwAddr) > 0 {
+					// we need to reverse the mac before passing it to the conntrack filter since OVN saves the MAC in the following format
+					// +------------------------------------------------------------ +
+					// | 128 ...  112 ... 96 ... 80 ... 64 ... 48 ... 32 ... 16 ... 0|
+					// +------------------+-------+--------------------+-------------|
+					// |                  | UNUSED|    MAC ADDRESS     |   UNUSED    |
+					// +------------------+-------+--------------------+-------------+
+					for i, j := 0, len(hwAddr)-1; i < j; i, j = i+1, j-1 {
+						hwAddr[i], hwAddr[j] = hwAddr[j], hwAddr[i]
+					}
+					validMACs.Store(gwIP, []byte(hwAddr))
+				}
+			}
+		}(gwIP)
+	}
+	wg.Wait()
+
+	validNextHopMACs := [][]byte{}
+	validMACs.Range(func(key interface{}, value interface{}) bool {
+		validNextHopMACs = append(validNextHopMACs, value.([]byte))
+		return true
+	})
+	// Handle corner case where there are 0 IPs on the annotations OR none of the ARPs were successful; i.e allowMACList={empty}.
+	// This means we *need to* pass a label > 128 bits that will not match on any conntrack entry labels for these pods.
+	// That way any remaining entries with labels having MACs set will get purged.
+	if len(validNextHopMACs) == 0 {
+		validNextHopMACs = append(validNextHopMACs, []byte("does-not-contain-anything"))
+	}
+
+	pods, err := n.watchFactory.GetPods(newNs.Name)
+	if err != nil {
+		klog.Errorf("Unable to get pods from informer: %v", err)
+	}
+	for _, pod := range pods {
+		pod := pod
+		podIPs, err := util.GetAllPodIPs(pod)
+		if err != nil {
+			klog.Errorf("Unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		}
+		for _, podIP := range podIPs { // flush conntrack only for UDP
+			// for this pod, we check if the conntrack entry has a label that is not in the provided allowlist of MACs
+			// only caveat here is we assume egressGW served pods shouldn't have conntrack entries with other labels set
+			err := util.DeleteConntrack(podIP.String(), 0, kapi.ProtocolUDP, netlink.ConntrackOrigDstIP, validNextHopMACs)
+			if err != nil {
+				klog.Errorf("Failed to delete conntrack entry for pod %s: %v", podIP.String(), err)
+			}
+		}
+	}
+}
+
+func (n *OvnNode) WatchNamespaces() error {
+	_, err := n.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(old, new interface{}) {
+			oldNs, newNs := old.(*kapi.Namespace), new.(*kapi.Namespace)
+			if exGatewayPodsAnnotationsChanged(oldNs, newNs) {
+				n.checkAndDeleteStaleConntrackEntriesForNamespace(newNs)
+			}
+		},
+	}, nil)
+	return err
+}
+
 // validateVTEPInterfaceMTU checks if the MTU of the interface that has ovn-encap-ip is big
 // enough to carry the `config.Default.MTU` and the Geneve header. If the MTU is not big
-// enough, it will taint the node with the value of `types.OvnK8sSmallMTUTaintKey`
+// enough, it will return an error
 func (n *OvnNode) validateVTEPInterfaceMTU() error {
-	tooSmallMTUTaint := &kapi.Taint{Key: types.OvnK8sSmallMTUTaintKey, Effect: kapi.TaintEffectNoSchedule}
-
 	ovnEncapIP := net.ParseIP(config.Default.EncapIP)
 	if ovnEncapIP == nil {
 		return fmt.Errorf("the set OVN Encap IP is invalid: (%s)", config.Default.EncapIP)
@@ -625,48 +743,28 @@ func (n *OvnNode) validateVTEPInterfaceMTU() error {
 		requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv6
 	}
 
-	// check if node needs to be tainted
 	if mtu < requiredMTU {
-		klog.V(2).Infof("MTU (%d) of network interface %s is not big enough to deal with Geneve "+
-			"header overhead (sum %d). Tainting node with %v...", mtu, interfaceName,
-			requiredMTU, tooSmallMTUTaint)
-
-		return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			return n.Kube.SetTaintOnNode(n.name, tooSmallMTUTaint)
-		})
+		return fmt.Errorf("interface MTU (%d) is too small for specified overlay MTU (%d)", mtu, requiredMTU)
 	}
-	klog.V(2).Infof("MTU (%d) of network interface %s is big enough to deal with Geneve header overhead (sum %d). "+
-		"Making sure node is not tainted with %v...", mtu, interfaceName, requiredMTU, tooSmallMTUTaint)
-
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return n.Kube.RemoveTaintFromNode(n.name, tooSmallMTUTaint)
-	})
+	klog.V(2).Infof("MTU (%d) of network interface %s is big enough to deal with Geneve header overhead (sum %d). ",
+		mtu, interfaceName, requiredMTU)
+	return nil
 }
 
-type epAddressItem struct {
-	ip       string
-	port     int32
-	protocol kapi.Protocol
-}
-
-//buildEndpointAddressMap builds a map of all UDP and SCTP ports in the endpoint subset along with that port's IP address
-func buildEndpointAddressMap(epSubsets []kapi.EndpointSubset) map[epAddressItem]struct{} {
-	epMap := make(map[epAddressItem]struct{})
-	for _, subset := range epSubsets {
-		for _, address := range subset.Addresses {
-			for _, port := range subset.Ports {
-				if port.Protocol == kapi.ProtocolUDP || port.Protocol == kapi.ProtocolSCTP {
-					epMap[epAddressItem{
-						ip:       address.IP,
-						port:     port.Port,
-						protocol: port.Protocol,
-					}] = struct{}{}
+// doesEPSliceContainEndpoint checks whether the endpointslice
+// contains a specific endpoint with IP/Port/Protocol
+func doesEPSliceContainEndpoint(epSlice *discovery.EndpointSlice,
+	epIP string, epPort int32, protocol kapi.Protocol) bool {
+	for _, port := range epSlice.Ports {
+		for _, endpoint := range epSlice.Endpoints {
+			for _, ip := range endpoint.Addresses {
+				if ip == epIP && *port.Port == epPort && *port.Protocol == protocol {
+					return true
 				}
 			}
 		}
 	}
-
-	return epMap
+	return false
 }
 
 func configureSvcRouteViaBridge(bridge string) error {

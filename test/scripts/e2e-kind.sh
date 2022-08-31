@@ -10,7 +10,7 @@ groomTestList() {
 
 SKIPPED_TESTS="
 # PERFORMANCE, DISRUPTIVE, OR UNRELATED TESTS: NOT WANTED FOR CI
-Networking IPerf IPv[46]
+\[Feature:Networking-Performance\]
 \[Feature:PerformanceDNS\]
 Disruptive
 DisruptionController
@@ -24,6 +24,7 @@ should have ipv4 and ipv6 internal node ip
 # TESTS THAT ASSUME KUBE-PROXY
 kube-proxy
 should set TCP CLOSE_WAIT timeout
+\[Feature:ProxyTerminatingEndpoints\]
 
 # not implemented - OVN doesn't support time
 should have session affinity timeout work
@@ -123,7 +124,7 @@ SKIPPED_TESTS="$(groomTestList "${SKIPPED_TESTS}")"
 # if we set PARALLEL=true, skip serial test
 if [ "${PARALLEL:-false}" = "true" ]; then
   export GINKGO_PARALLEL=y
-  export GINKGO_PARALLEL_NODES=20
+  export GINKGO_PARALLEL_NODES=10
   SKIPPED_TESTS="${SKIPPED_TESTS}|\\[Serial\\]"
 fi
 
@@ -153,7 +154,7 @@ export KUBE_CONTAINER_RUNTIME_NAME=containerd
 # but until then, we retry the test in the same job
 # to stop PR retriggers for totally broken code
 export FLAKE_ATTEMPTS=5
-export NUM_NODES=20
+export NUM_NODES=10  # number of parallel (ginkgo) test nodes to run
 # Kind clusters are three node clusters
 export NUM_WORKER_NODES=3
 ginkgo --nodes=${NUM_NODES} \

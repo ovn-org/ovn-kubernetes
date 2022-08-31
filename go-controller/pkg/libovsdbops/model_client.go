@@ -156,7 +156,7 @@ func onModelUpdatesNone() []interface{} {
 	return nil
 }
 
-func onModelUpdatesAll() []interface{} {
+func onModelUpdatesAllNonDefault() []interface{} {
 	return []interface{}{}
 }
 
@@ -198,6 +198,7 @@ func (m *modelClient) createOrUpdateOps(ops []ovsdb.Operation, opModels ...opera
 	hasGuardOp := len(ops) > 0 && isGuardOp(&ops[0])
 	guardOp := []ovsdb.Operation{}
 	doWhenFound := func(model interface{}, opModel *operationModel) ([]ovsdb.Operation, error) {
+		// nil represents onModelUpdatesNone
 		if opModel.OnModelUpdates != nil {
 			return m.update(model, opModel)
 		} else if opModel.OnModelMutations != nil {

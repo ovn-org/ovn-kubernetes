@@ -178,6 +178,7 @@ func newOVSDBClient(clientDBModel model.ClientDBModel, opts ...Option) (*ovsdbCl
 		)
 		ovs.logger = &l
 	}
+	ovs.metrics.init(clientDBModel.Name(), ovs.options.metricNamespace, ovs.options.metricSubsystem)
 	ovs.registerMetrics()
 
 	// if we should only connect to the leader, then add the special "_Server" database as well
@@ -191,7 +192,6 @@ func newOVSDBClient(clientDBModel model.ClientDBModel, opts ...Option) (*ovsdbCl
 			monitors: make(map[string]*Monitor),
 		}
 	}
-	ovs.metrics.init(clientDBModel.Name())
 
 	return ovs, nil
 }
@@ -322,7 +322,7 @@ func (o *ovsdbClient) connect(ctx context.Context, reconnect bool) error {
 // tryEndpoint connects to a single database endpoint. Returns the
 // server ID (if clustered) on success, or an error.
 func (o *ovsdbClient) tryEndpoint(ctx context.Context, u *url.URL) (string, error) {
-	o.logger.V(5).Info("trying to connect", "endpoint", fmt.Sprintf("%v", u))
+	o.logger.V(3).Info("trying to connect", "endpoint", fmt.Sprintf("%v", u))
 	var dialer net.Dialer
 	var err error
 	var c net.Conn
@@ -778,7 +778,7 @@ func (o *ovsdbClient) transact(ctx context.Context, dbName string, operation ...
 	if o.rpcClient == nil {
 		return nil, ErrNotConnected
 	}
-	o.logger.V(5).Info("transacting operations", "database", dbName, "operations", fmt.Sprintf("%+v", operation))
+	o.logger.V(4).Info("transacting operations", "database", dbName, "operations", fmt.Sprintf("%+v", operation))
 	err := o.rpcClient.CallWithContext(ctx, "transact", args, &reply)
 	if err != nil {
 		if err == rpc2.ErrShutdown {
@@ -1312,9 +1312,14 @@ func (o *ovsdbClient) List(ctx context.Context, result interface{}) error {
 	return primaryDB.api.List(ctx, result)
 }
 
-//Where implements the API interface's Where function
-func (o *ovsdbClient) Where(m model.Model, conditions ...model.Condition) ConditionalAPI {
-	return o.primaryDB().api.Where(m, conditions...)
+// Where implements the API interface's Where function
+func (o *ovsdbClient) Where(models ...model.Model) ConditionalAPI {
+	return o.primaryDB().api.Where(models...)
+}
+
+// WhereAny implements the API interface's WhereAny function
+func (o *ovsdbClient) WhereAny(m model.Model, conditions ...model.Condition) ConditionalAPI {
+	return o.primaryDB().api.WhereAny(m, conditions...)
 }
 
 //WhereAll implements the API interface's WhereAll function

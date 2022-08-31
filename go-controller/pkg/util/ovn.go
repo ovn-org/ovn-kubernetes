@@ -34,7 +34,7 @@ func CreateMACBinding(sbClient libovsdbclient.Client, logicalPort, datapathName 
 		IP:          nextHop.String(),
 	}
 
-	err = libovsdbops.CreateOrUpdateMacBinding(sbClient, &mb)
+	err = libovsdbops.CreateOrUpdateMacBinding(sbClient, &mb, &mb.Datapath, &mb.LogicalPort, &mb.IP, &mb.MAC)
 	if err != nil {
 		return fmt.Errorf("failed to create mac binding %+v: %v", mb, err)
 	}
@@ -45,5 +45,6 @@ func CreateMACBinding(sbClient libovsdbclient.Client, logicalPort, datapathName 
 func PlatformTypeIsEgressIPCloudProvider() bool {
 	return config.Kubernetes.PlatformType == string(ocpconfigapi.AWSPlatformType) ||
 		config.Kubernetes.PlatformType == string(ocpconfigapi.GCPPlatformType) ||
-		config.Kubernetes.PlatformType == string(ocpconfigapi.AzurePlatformType)
+		config.Kubernetes.PlatformType == string(ocpconfigapi.AzurePlatformType) ||
+		config.Kubernetes.PlatformType == string(ocpconfigapi.OpenStackPlatformType)
 }

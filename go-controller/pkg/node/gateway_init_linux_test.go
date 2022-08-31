@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -121,6 +122,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ip -4 rule add fwmark 0x1745ec lookup 7 prio 30",
 			Output: "0",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.rp_filter=2",
+			Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovs-ofctl -O OpenFlow13 --bundle replace-flows breth0 -",
@@ -403,18 +408,6 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 get interface " + hostRep + " ofport",
 			Output: "9",
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ip route replace table 7 172.16.1.0/24 via 10.1.1.1 dev ovn-k8s-mp0",
-			Output: "0",
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ip -4 rule",
-			Output: "0",
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ip -4 rule add fwmark 0x1745ec lookup 7 prio 30",
-			Output: "0",
 		})
 		// cleanup flows
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -701,6 +694,10 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: "0",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.rp_filter=2",
+			Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-ofctl show breth0",
 			Output: `
 OFPT_FEATURES_REPLY (xid=0x2): dpid:00000242ac120002
@@ -759,7 +756,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 			v1.ServiceStatus{},
 			false, false,
 		)
-		endpoints := *newEndpoints("service1", "namespace1", []v1.EndpointSubset{})
+		endpointSlice := *newEndpointSlice("service1", "namespace1", []discovery.Endpoint{}, []discovery.EndpointPort{})
 
 		_, nodeNet, err := net.ParseCIDR(nodeSubnet)
 		Expect(err).NotTo(HaveOccurred())
@@ -785,7 +782,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 				Items: []v1.Node{existingNode},
 			},
 			&service,
-			&endpoints,
+			&endpointSlice,
 		)
 		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 		egressIPFakeClient := &egressipfake.Clientset{}
@@ -931,7 +928,7 @@ var _ = Describe("Gateway Init Operations", func() {
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
-		config.PrepareTestConfig()
+		Expect(config.PrepareTestConfig()).To(Succeed())
 
 		app = cli.NewApp()
 		app.Name = "test"
@@ -1069,7 +1066,7 @@ var _ = Describe("Gateway Operations DPU", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Restore global default values before each testcase
-		config.PrepareTestConfig()
+		Expect(config.PrepareTestConfig()).To(Succeed())
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
@@ -1176,7 +1173,7 @@ var _ = Describe("Gateway unit tests", func() {
 	origNetlinkInst := util.GetNetLinkOps()
 
 	BeforeEach(func() {
-		config.PrepareTestConfig()
+		Expect(config.PrepareTestConfig()).To(Succeed())
 		netlinkMock = &utilMock.NetLinkOps{}
 		util.SetNetLinkOpMockInst(netlinkMock)
 	})

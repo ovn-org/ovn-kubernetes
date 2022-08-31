@@ -43,6 +43,7 @@ const (
 	retryTimeout         = 40 * time.Second // polling timeout
 	dsRestartTimeout     = 10 * time.Minute // ds restart timeout
 	agnhostImage         = "k8s.gcr.io/e2e-test-images/agnhost:2.26"
+	iperf3Image          = "quay.io/sronanrh/iperf"
 )
 
 type podCondition = func(pod *v1.Pod) (bool, error)
@@ -315,6 +316,11 @@ func updateNamespace(f *framework.Framework, namespace *v1.Namespace) {
 	_, err := f.ClientSet.CoreV1().Namespaces().Update(context.Background(), namespace, metav1.UpdateOptions{})
 	framework.ExpectNoError(err, fmt.Sprintf("unable to update namespace: %s, err: %v", namespace.Name, err))
 }
+func getNamespace(f *framework.Framework, name string) *v1.Namespace {
+	ns, err := f.ClientSet.CoreV1().Namespaces().Get(context.Background(), name, metav1.GetOptions{})
+	framework.ExpectNoError(err, fmt.Sprintf("unable to get namespace: %s, err: %v", name, err))
+	return ns
+}
 
 func updatePod(f *framework.Framework, pod *v1.Pod) {
 	_, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Update(context.Background(), pod, metav1.UpdateOptions{})
@@ -467,7 +473,7 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 var _ = ginkgo.Describe("e2e control plane", func() {
 	var svcname = "nettest"
 
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 	var (
 		extDNSIP   string
 		numMasters int
@@ -577,9 +583,8 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		framework.ExpectNoError(<-errChan)
 	})
 
-	ginkgo.Describe("test tainting a node according to its defaults interface MTU size", func() {
+	ginkgo.Describe("test node readiness according to its defaults interface MTU size", func() {
 		const testNodeName = "ovn-worker"
-		var tooSmallMTUTaint = v1.Taint{Key: "k8s.ovn.org/mtu-too-small", Effect: v1.TaintEffectNoSchedule}
 		var originalMTU int
 
 		ginkgo.BeforeEach(func() {
@@ -594,10 +599,6 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			if err != nil {
 				framework.Failf("could not convert MTU to integer: %s", err)
 			}
-
-			// make sure node is not already tainted
-			e2enode.RemoveTaintOffNode(f.ClientSet, testNodeName, tooSmallMTUTaint)
-
 		})
 
 		ginkgo.AfterEach(func() {
@@ -616,7 +617,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			framework.ExpectNoError(err, "one or more nodes failed to go back ready, schedulable, and untainted")
 		})
 
-		ginkgo.It("should taint the node with a too small MTU", func() {
+		ginkgo.It("should get node not ready with a too small MTU", func() {
 			// set the defaults interface MTU very low
 			_, err := runCommand("docker", "exec", testNodeName, "ip", "link", "set", "breth0", "mtu", "1000")
 			if err != nil {
@@ -627,11 +628,16 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			if err := restartOVNKubeNodePod(f.ClientSet, ovnNamespace, testNodeName); err != nil {
 				framework.Failf("could not restart ovnkube-node pod: %s", err)
 			}
-
-			framework.ExpectNodeHasTaint(f.ClientSet, testNodeName, &tooSmallMTUTaint)
+			node, err := f.ClientSet.CoreV1().Nodes().Get(context.TODO(), testNodeName, metav1.GetOptions{ResourceVersion: "0"})
+			if err != nil {
+				framework.Failf("could not find node resource: %s", err)
+			}
+			gomega.Eventually(func() bool {
+				return e2enode.IsNodeReady(node)
+			}, 30*time.Second).Should(gomega.BeFalse())
 		})
 
-		ginkgo.It("should not taint the node with a big enough MTU", func() {
+		ginkgo.It("should get node ready with a big enough MTU", func() {
 			// set the defaults interface MTU big enough
 			_, err := runCommand("docker", "exec", testNodeName, "ip", "link", "set", "breth0", "mtu", "2000")
 			if err != nil {
@@ -643,41 +649,14 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 				framework.Failf("could not restart ovnkube-node pod: %s", err)
 			}
 
-			// validate that node does not have taint
-			nodeHasTaint, err := framework.NodeHasTaint(f.ClientSet, testNodeName, &tooSmallMTUTaint)
+			// validate that node is in Ready state
+			node, err := f.ClientSet.CoreV1().Nodes().Get(context.TODO(), testNodeName, metav1.GetOptions{ResourceVersion: "0"})
 			if err != nil {
-				framework.Failf("could not check if node has taint: %s", err)
+				framework.Failf("could not find node resource: %s", err)
 			}
-
-			if nodeHasTaint {
-				framework.Failf("node should not have %v taint", &tooSmallMTUTaint)
-			}
-		})
-
-		ginkgo.It("should untain a node if it has taint but MTU of interface is big enough", func() {
-			//taint node
-			e2enode.AddOrUpdateTaintOnNode(f.ClientSet, testNodeName, tooSmallMTUTaint)
-
-			// set the defaults interface MTU big enough
-			_, err := runCommand("docker", "exec", testNodeName, "ip", "link", "set", "breth0", "mtu", "2000")
-			if err != nil {
-				framework.Failf("could not set MTU of interface: %s", err)
-			}
-
-			// restart ovnkube-node pod to trigger mtu validation
-			if err := restartOVNKubeNodePod(f.ClientSet, ovnNamespace, testNodeName); err != nil {
-				framework.Failf("could not restart ovnkube-node pod: %s", err)
-			}
-
-			// validate that node does not have taint
-			nodeHasTaint, err := framework.NodeHasTaint(f.ClientSet, testNodeName, &tooSmallMTUTaint)
-			if err != nil {
-				framework.Failf("could not check if node has taint: %s", err)
-			}
-
-			if nodeHasTaint {
-				framework.Failf("node should not have %v taint", &tooSmallMTUTaint)
-			}
+			gomega.Eventually(func() bool {
+				return e2enode.IsNodeReady(node)
+			}, 30*time.Second).Should(gomega.BeTrue())
 		})
 	})
 })
@@ -693,7 +672,7 @@ var _ = ginkgo.Describe("test e2e pod connectivity to host addresses", func() {
 		singleIPMask string
 	)
 
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 
 	ginkgo.BeforeEach(func() {
 		targetIP = "123.123.123.123"
@@ -740,7 +719,7 @@ var _ = ginkgo.Describe("test e2e inter-node connectivity between worker nodes",
 		labelFlag = fmt.Sprintf("name=%s", ovnContainer)
 	)
 
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 
 	// Determine which KIND environment is running by querying the running nodes
 	ginkgo.BeforeEach(func() {
@@ -965,7 +944,7 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		return statuses
 	}
 
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
@@ -1311,7 +1290,7 @@ spec:
 		ginkgo.By("9. Check that the status is of length one and that it is assigned to egress2Node")
 		// There is sometimes a slight delay for the EIP fail over to happen,
 		// so let's use the pollimmediate struct to check if eventually egress2Node becomes the egress node
-		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) { 
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 			statuses := getEgressIPStatusItems()
 			return (len(statuses) == 1) && (statuses[0].Node == egress2Node.name), nil
 		})
@@ -1533,7 +1512,7 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway and update validation", 
 		exGWRemoteIpAlt1 string
 		exGWRemoteIpAlt2 string
 	)
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
@@ -1747,7 +1726,7 @@ var _ = ginkgo.Describe("e2e egress firewall policy validation", func() {
 		exFWDenyCIDR         string
 	)
 
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	ginkgo.BeforeEach(func() {
@@ -1969,7 +1948,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 		clientContainerName = "npclient"
 	)
 
-	f := framework.NewDefaultFramework("nodeport-ingress-test")
+	f := newPrivelegedTestFramework("nodeport-ingress-test")
 	endpointsSelector := map[string]string{"servicebackend": "true"}
 
 	var endPoints []*v1.Pod
@@ -2515,7 +2494,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 		clientContainerName = "npclient"
 	)
 
-	f := framework.NewDefaultFramework("nodeport-ingress-test")
+	f := newPrivelegedTestFramework("nodeport-ingress-test")
 	hostNetEndpointsSelector := map[string]string{"hostNetservicebackend": "true"}
 	var endPoints []*v1.Pod
 	var nodesHostnames sets.String
@@ -2653,7 +2632,7 @@ var _ = ginkgo.Describe("e2e ingress gateway traffic validation", func() {
 		gwContainer string = "gw-ingress-test-container"
 	)
 
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 
 	type nodeInfo struct {
 		name   string
@@ -2793,7 +2772,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 	keywordInLogs := map[flowMonitoringProtocol]string{
 		netflow_v5: "NETFLOW_V5", ipfix: "IPFIX", sflow: "SFLOW_5"}
 
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 	ginkgo.AfterEach(func() {
 		// tear down the collector container
 		if cid, _ := runCommand("docker", "ps", "-qaf", fmt.Sprintf("name=%s", collectorContainer)); cid != "" {
@@ -2956,7 +2935,7 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 	var (
 		allDBFiles = []string{path.Join(dirDB, northDBFileName), path.Join(dirDB, southDBFileName)}
 	)
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 
 	// WaitForPodConditionAllowNotFoundError is a wrapper for WaitForPodCondition that allows at most 6 times for the pod not to be found.
 	WaitForPodConditionAllowNotFoundErrors := func(f *framework.Framework, ns, podName, desc string, timeout time.Duration, condition podCondition) error {
@@ -3289,7 +3268,7 @@ var _ = ginkgo.Describe("e2e IGMP validation", func() {
 		multicastSourceCommand = []string{"bash", "-c",
 			fmt.Sprintf("iperf -c %s -u -T 2 -t 3000 -i 5", mcastGroup)}
 	)
-	f := framework.NewDefaultFramework(svcname)
+	f := newPrivelegedTestFramework(svcname)
 	ginkgo.It("can retrieve multicast IGMP query", func() {
 		// Enable multicast of the test namespace annotation
 		ginkgo.By(fmt.Sprintf("annotating namespace: %s to enable multicast", f.Namespace.Name))

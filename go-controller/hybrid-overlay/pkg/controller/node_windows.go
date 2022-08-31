@@ -141,6 +141,11 @@ func ensureBaseNetwork() error {
 	if err = DuplicatePersistentIPRoutes(); err != nil {
 		return fmt.Errorf("unable to refresh the persistent IP routes, error: %v", err)
 	}
+	// Duplicate link-local addresses to the newly created host vNIC
+	klog.Infof("Forwarding routes associated with link-local addresses in the physical interface to the vNIC")
+	if err = DuplicateLinkLocalIPRoutes(); err != nil {
+		return fmt.Errorf("unable to refresh the link-local IP routes, error: %v", err)
+	}
 
 	return nil
 }

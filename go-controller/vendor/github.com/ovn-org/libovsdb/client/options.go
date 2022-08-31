@@ -25,7 +25,9 @@ type options struct {
 	backoff               backoff.BackOff
 	logger                *logr.Logger
 	registry              prometheus.Registerer
-	shouldRegisterMetrics bool // in case metrics are changed after-the-fact
+	shouldRegisterMetrics bool   // in case metrics are changed after-the-fact
+	metricNamespace       string // prometheus metric namespace
+	metricSubsystem       string // prometheus metric subsystem
 }
 
 type Option func(o *options) error
@@ -124,6 +126,22 @@ func WithMetricsRegistry(r prometheus.Registerer) Option {
 	return func(o *options) error {
 		o.registry = r
 		o.shouldRegisterMetrics = (r != nil)
+		return nil
+	}
+}
+
+// WithMetricsRegistryNamespaceSubsystem allows the user to specify a Prometheus metrics registry
+// and Prometheus metric namespace and subsystem of the component utilizing libovsdb.
+// If supplied, the metrics as defined in metrics.go will be registered.
+func WithMetricsRegistryNamespaceSubsystem(r prometheus.Registerer, namespace, subsystem string) Option {
+	if namespace == "" || subsystem == "" {
+		panic("libovsdb function WithMetricsRegistryNamespaceSubsystem arguments 'namespace' and 'subsystem' must not be empty")
+	}
+	return func(o *options) error {
+		o.registry = r
+		o.shouldRegisterMetrics = (r != nil)
+		o.metricNamespace = namespace
+		o.metricSubsystem = subsystem
 		return nil
 	}
 }
