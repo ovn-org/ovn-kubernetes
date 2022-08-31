@@ -119,6 +119,7 @@ require (
 replace (
 	github.com/Microsoft/hcsshim => github.com/Microsoft/hcsshim v0.8.20
 	github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
+	github.com/vishvananda/netlink => github.com/jcaamano/netlink v1.1.1-0.20220831114501-3a761ed61db6
 	k8s.io/api => k8s.io/api v0.24.0
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.24.0
 	k8s.io/apimachinery => k8s.io/apimachinery v0.24.0
