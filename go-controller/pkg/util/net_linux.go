@@ -40,6 +40,7 @@ type NetLinkOps interface {
 	RouteReplace(route *netlink.Route) error
 	RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error)
 	NeighAdd(neigh *netlink.Neigh) error
+	NeighDel(neigh *netlink.Neigh) error
 	NeighList(linkIndex, family int) ([]netlink.Neigh, error)
 	ConntrackDeleteFilter(table netlink.ConntrackTableType, family netlink.InetFamily, filter netlink.CustomConntrackFilter) (uint, error)
 }
@@ -142,6 +143,10 @@ func (defaultNetLinkOps) RouteListFiltered(family int, filter *netlink.Route, fi
 
 func (defaultNetLinkOps) NeighAdd(neigh *netlink.Neigh) error {
 	return netlink.NeighAdd(neigh)
+}
+
+func (defaultNetLinkOps) NeighDel(neigh *netlink.Neigh) error {
+	return netlink.NeighDel(neigh)
 }
 
 func (defaultNetLinkOps) NeighList(linkIndex, family int) ([]netlink.Neigh, error) {
@@ -282,9 +287,6 @@ func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int
 			Scope:     netlink.SCOPE_UNIVERSE,
 			Gw:        gwIP,
 		}
-		if len(gwIP) > 0 {
-			route.Gw = gwIP
-		}
 		if len(src) > 0 {
 			route.Src = src
 		}
@@ -355,6 +357,20 @@ func LinkRouteGet(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (*netlink.R
 func LinkRouteExists(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (bool, error) {
 	route, err := LinkRouteGet(link, gwIP, subnet)
 	return route != nil, err
+}
+
+// LinkNeighDel deletes an ip binding for a given link
+func LinkNeighDel(link netlink.Link, neighIP net.IP) error {
+	neigh := &netlink.Neigh{
+		LinkIndex: link.Attrs().Index,
+		Family:    getFamily(neighIP),
+		IP:        neighIP,
+	}
+	err := netLinkOps.NeighDel(neigh)
+	if err != nil {
+		return fmt.Errorf("failed to delete neighbour entry %+v: %v", neigh, err)
+	}
+	return nil
 }
 
 // LinkNeighAdd adds MAC/IP bindings for the given link

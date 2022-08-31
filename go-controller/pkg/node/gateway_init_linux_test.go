@@ -147,9 +147,14 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		_, err = config.InitConfig(ctx, fexec, nil)
 		Expect(err).NotTo(HaveOccurred())
 
+		expectedAddr, err := netlink.ParseAddr(eth0CIDR)
+		Expect(err).NotTo(HaveOccurred())
+		nodeAddr := v1.NodeAddress{Type: v1.NodeInternalIP, Address: expectedAddr.IP.String()}
 		existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
-		}}
+		},
+			Status: v1.NodeStatus{Addresses: []v1.NodeAddress{nodeAddr}},
+		}
 
 		_, nodeNet, err := net.ParseCIDR(nodeSubnet)
 		Expect(err).NotTo(HaveOccurred())
@@ -301,7 +306,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 }
 
 func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
-	brphys, hostMAC, hostCIDR string) {
+	brphys, hostMAC, hostCIDR, dpuIP string) {
 	const mtu string = "1400"
 	const clusterCIDR string = "10.1.0.0/16"
 	app.Action = func(ctx *cli.Context) error {
@@ -434,9 +439,12 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		_, err = config.InitConfig(ctx, fexec, nil)
 		Expect(err).NotTo(HaveOccurred())
 
+		nodeAddr := v1.NodeAddress{Type: v1.NodeInternalIP, Address: dpuIP}
 		existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
-		}}
+		},
+			Status: v1.NodeStatus{Addresses: []v1.NodeAddress{nodeAddr}},
+		}
 
 		kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{existingNode},
@@ -550,9 +558,12 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		_, err = config.InitConfig(ctx, fexec, nil)
 		Expect(err).NotTo(HaveOccurred())
 
+		nodeAddr := v1.NodeAddress{Type: v1.NodeInternalIP, Address: hostIP}
 		existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
-		}}
+		},
+			Status: v1.NodeStatus{Addresses: []v1.NodeAddress{nodeAddr}},
+		}
 
 		kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{existingNode},
@@ -573,7 +584,10 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		n := OvnNode{watchFactory: wf}
+		n := OvnNode{
+			watchFactory: wf,
+			name:         nodeName,
+		}
 
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
@@ -743,9 +757,14 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		_, err = config.InitConfig(ctx, fexec, nil)
 		Expect(err).NotTo(HaveOccurred())
 
+		expectedAddr, err := netlink.ParseAddr(eth0CIDR)
+		Expect(err).NotTo(HaveOccurred())
+		nodeAddr := v1.NodeAddress{Type: v1.NodeInternalIP, Address: expectedAddr.IP.String()}
 		existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
-		}}
+		},
+			Status: v1.NodeStatus{Addresses: []v1.NodeAddress{nodeAddr}},
+		}
 		externalIP := "1.1.1.1"
 		externalIPPort := int32(8032)
 		service := *newService("service1", "namespace1", "10.129.0.2",
@@ -1126,7 +1145,7 @@ var _ = Describe("Gateway Operations DPU", func() {
 		})
 
 		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway DPU", func() {
-			shareGatewayInterfaceDPUTest(app, testNS, brphys, hostMAC, hostCIDR)
+			shareGatewayInterfaceDPUTest(app, testNS, brphys, hostMAC, hostCIDR, dpuIP)
 		})
 	})
 

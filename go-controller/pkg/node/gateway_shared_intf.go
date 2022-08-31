@@ -1457,6 +1457,11 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 			// no service OpenFlows, request to sync flows now.
 			gw.openflowManager.requestFlowSync()
 		}
+
+		if err := addHostMACBindings(gwBridge.bridgeName); err != nil {
+			return fmt.Errorf("failed to add MAC bindings for service routing")
+		}
+
 		return nil
 	}
 
@@ -1619,12 +1624,12 @@ func addMasqueradeRoute(netIfaceName, nodeName string, watchFactory factory.Node
 	}
 
 	if config.IPv4Mode && !v4Found {
-		return fmt.Errorf("could not find node IPv4 address to configure OVN masqurade route, addresses: %+v",
+		return fmt.Errorf("could not find node IPv4 address to configure OVN masquerade route, addresses: %+v",
 			node.Status.Addresses)
 	}
 
 	if config.IPv6Mode && !v6Found {
-		return fmt.Errorf("could not find node IPv6 address to configure OVN masqurade route, addresses: %+v",
+		return fmt.Errorf("could not find node IPv6 address to configure OVN masquerade route, addresses: %+v",
 			node.Status.Addresses)
 	}
 	return nil
@@ -1660,5 +1665,45 @@ func setNodeMasqueradeIPOnExtBridge(extBridgeName string) error {
 		}
 	}
 
+	return nil
+}
+
+func addHostMACBindings(bridgeName string) error {
+	// Add a neighbour entry on the K8s node to map dummy next-hop masquerade
+	// addresses with MACs. This is required because these addresses do not
+	// exist on the network and will not respond to an ARP/ND, so to route them
+	// we need an entry.
+	// Additionally, the OVN Masquerade IP is not assigned to its interface, so
+	// we also need a fake entry for that.
+	link, err := util.LinkSetUp(bridgeName)
+	if err != nil {
+		return fmt.Errorf("unable to get link for %s, error: %v", bridgeName, err)
+	}
+
+	var neighborIPs []string
+	if config.IPv4Mode {
+		neighborIPs = append(neighborIPs, types.V4OVNMasqueradeIP, types.V4DummyNextHopMasqueradeIP)
+	}
+	if config.IPv6Mode {
+		neighborIPs = append(neighborIPs, types.V6OVNMasqueradeIP, types.V6DummyNextHopMasqueradeIP)
+	}
+	for _, ip := range neighborIPs {
+		klog.Infof("Ensuring IP Neighbor entry for: %s", ip)
+		dummyNextHopMAC := util.IPAddrToHWAddr(net.ParseIP(ip))
+		if exists, err := util.LinkNeighExists(link, net.ParseIP(ip), dummyNextHopMAC); err == nil && !exists {
+			// LinkNeighExists checks if the mac also matches, but it is possible there is a stale entry
+			// still in the neighbor cache which would prevent add. Therefore execute a delete first.
+			if err = util.LinkNeighDel(link, net.ParseIP(ip)); err != nil {
+				klog.Warningf("Failed to remove IP neighbor entry for ip %s, on iface %s: %v",
+					ip, bridgeName, err)
+			}
+			if err = util.LinkNeighAdd(link, net.ParseIP(ip), dummyNextHopMAC); err != nil {
+				return fmt.Errorf("failed to configure neighbor: %s, on iface %s: %v",
+					ip, bridgeName, err)
+			}
+		} else if err != nil {
+			return fmt.Errorf("failed to configure neighbor:%s, on iface %s: %v", ip, bridgeName, err)
+		}
+	}
 	return nil
 }

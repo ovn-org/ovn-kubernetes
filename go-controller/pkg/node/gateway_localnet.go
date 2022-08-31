@@ -117,6 +117,11 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 			// no service OpenFlows, request to sync flows now.
 			gw.openflowManager.requestFlowSync()
 		}
+
+		if err := addHostMACBindings(gwBridge.bridgeName); err != nil {
+			return fmt.Errorf("failed to add MAC bindings for service routing")
+		}
+
 		return nil
 	}
 

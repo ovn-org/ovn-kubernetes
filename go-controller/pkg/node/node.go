@@ -808,11 +808,7 @@ func doesEPSliceContainEndpoint(epSlice *discovery.EndpointSlice,
 }
 
 func configureSvcRouteViaBridge(bridge string) error {
-	gwIPs, _, err := getGatewayNextHops()
-	if err != nil {
-		return fmt.Errorf("unable to get the gateway next hops, error: %v", err)
-	}
-	return configureSvcRouteViaInterface(bridge, gwIPs)
+	return configureSvcRouteViaInterface(bridge, DummyNextHopIPs())
 }
 
 func upgradeServiceRoute(bridgeName string) error {
@@ -846,4 +842,19 @@ func upgradeServiceRoute(bridgeName string) error {
 		}
 	}
 	return nil
+}
+
+// DummyNextHopIPs returns the fake next hops used for service traffic routing.
+// It is used in:
+// - br-ex, where we don't really care about the next hop GW in use as traffic is always routed to OVN
+// - OVN, only when there is no default GW as it wouldn't matter since there is no external traffic
+func DummyNextHopIPs() []net.IP {
+	var nextHops []net.IP
+	if config.IPv4Mode {
+		nextHops = append(nextHops, net.ParseIP(types.V4DummyNextHopMasqueradeIP))
+	}
+	if config.IPv6Mode {
+		nextHops = append(nextHops, net.ParseIP(types.V6DummyNextHopMasqueradeIP))
+	}
+	return nextHops
 }

@@ -86,6 +86,8 @@ const (
 	V6OVNMasqueradeIP          = "fd69::1"
 	V4HostETPLocalMasqueradeIP = "169.254.169.3"
 	V6HostETPLocalMasqueradeIP = "fd69::3"
+	V4DummyNextHopMasqueradeIP = "169.254.169.4"
+	V6DummyNextHopMasqueradeIP = "fd69::4"
 
 	// OpenFlow and Networking constants
 	RouteAdvertisementICMPType    = 134

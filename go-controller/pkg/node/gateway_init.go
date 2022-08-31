@@ -435,6 +435,10 @@ func (n *OvnNode) initGatewayDPUHost(kubeNodeIP net.IP) error {
 		gw.portClaimWatcher = portClaimWatcher
 	}
 
+	if err := addHostMACBindings(gwIntf); err != nil {
+		return fmt.Errorf("failed to add MAC bindings for service routing")
+	}
+
 	err = gw.Init(n.watchFactory)
 	n.gateway = gw
 	return err
