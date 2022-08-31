@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
@@ -48,7 +49,7 @@ import (
 // started.
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
-func NewCNIServer(factory factory.NodeWatchFactory, kclient kubernetes.Interface) (*Server, error) {
+func NewCNIServer(factory factory.NodeWatchFactory, kclient kubernetes.Interface, vsClient libovsdbclient.Client) (*Server, error) {
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		return nil, fmt.Errorf("unsupported ovnkube-node mode for CNI server: %s", config.OvnKubeNode.Mode)
 	}
@@ -69,6 +70,7 @@ func NewCNIServer(factory factory.NodeWatchFactory, kclient kubernetes.Interface
 			KubeAPITokenFile: config.Kubernetes.TokenFile,
 		},
 		handlePodRequestFunc: HandlePodRequest,
+		vsClient:             vsClient,
 	}
 
 	if len(config.Kubernetes.CAData) > 0 {
@@ -115,14 +117,15 @@ func gatherCNIArgs(env map[string]string) (map[string]string, error) {
 	return mapArgs, nil
 }
 
-func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
+func cniRequestToPodRequest(cr *Request, vsClient libovsdbclient.Client) (*PodRequest, error) {
 	cmd, ok := cr.Env["CNI_COMMAND"]
 	if !ok {
 		return nil, fmt.Errorf("unexpected or missing CNI_COMMAND")
 	}
 
 	req := &PodRequest{
-		Command: command(cmd),
+		Command:  command(cmd),
+		vsClient: vsClient,
 	}
 
 	req.SandboxID, ok = cr.Env["CNI_CONTAINERID"]
@@ -206,7 +209,7 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 	if err := json.Unmarshal(b, &cr); err != nil {
 		return nil, err
 	}
-	req, err := cniRequestToPodRequest(&cr)
+	req, err := cniRequestToPodRequest(&cr, s.vsClient)
 	if err != nil {
 		return nil, err
 	}

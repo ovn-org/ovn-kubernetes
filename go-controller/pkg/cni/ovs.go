@@ -5,12 +5,14 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
+	"github.com/ovn-org/libovsdb/client"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog/v2"
@@ -50,27 +52,6 @@ func ovsExec(args ...string) (string, error) {
 	}
 
 	return strings.TrimSuffix(string(output), "\n"), nil
-}
-
-// ovsGetMultiOutput allows running get command with multiple columns
-// returns a slice of requested fields
-// if row doesn't exist command output will be a slice with an empty string
-// empty ovsdb value [] will be replaced with an empty string
-func ovsGetMultiOutput(table, record string, columns []string) ([]string, error) {
-	args := []string{"--if-exists", "get", table, record}
-	args = append(args, columns...)
-	output, err := ovsExec(args...)
-	var result []string
-	// columns are separated with \n
-	// remove \" as with --data=bare formatting
-	for _, column := range strings.Split(strings.ReplaceAll(output, "\"", ""), "\n") {
-		if column == "[]" {
-			result = append(result, "")
-		} else {
-			result = append(result, column)
-		}
-	}
-	return result, err
 }
 
 func ovsCreate(table string, values ...string) (string, error) {
@@ -147,20 +128,6 @@ func ofctlExec(args ...string) (string, error) {
 		stdoutStr = trimmed
 	}
 	return stdoutStr, nil
-}
-
-// getIfaceOFPort returns the of port number for an interface
-func getIfaceOFPort(ifaceName string) (int, error) {
-	port, err := ovsGet("Interface", ifaceName, "ofport", "")
-	if err == nil && port == "" {
-		return -1, fmt.Errorf("cannot find OpenFlow port for OVS interface: %s, error: %v ", ifaceName, err)
-	}
-
-	iPort, err := strconv.Atoi(port)
-	if err != nil {
-		return -1, fmt.Errorf("unable to parse OpenFlow port %s, error: %v", port, err)
-	}
-	return iPort, nil
 }
 
 func doPodFlowsExist(mac string, ifAddrs []*net.IPNet, ofPort int) bool {
@@ -247,7 +214,7 @@ func checkCancelSandbox(mac string, getter PodInfoGetter, namespace, name, nadNa
 
 	ovnAnnot, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 	if err != nil {
-		return fmt.Errorf("pod OVN annotations deleted or invalid")
+		return fmt.Errorf("pod OVN annotations deleted or invalid (%v)", err)
 	}
 
 	// Pod OVN annotation changed and this sandbox should
@@ -260,12 +227,13 @@ func checkCancelSandbox(mac string, getter PodInfoGetter, namespace, name, nadNa
 	return nil
 }
 
-func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
-	ifaceName, ifaceID string, getter PodInfoGetter,
+func waitForPodInterface(vsClient client.Client, ctx context.Context,
+	ifInfo *PodInterfaceInfo, ifaceName, ifaceID string, getter PodInfoGetter,
 	namespace, name, initialPodUID string) error {
 	var detail string
 	var ofPort int
-	var err error
+
+	waitTime := 20 * time.Millisecond
 
 	// DPUHost mode can't use OVS external IDs for port-up detection because
 	// there is no ovn-controller running in DPUHost mode to set port-up
@@ -273,10 +241,14 @@ func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 	if checkExternalIDs {
 		detail = " (ovn-installed)"
 	} else {
-		ofPort, err = getIfaceOFPort(ifaceName)
+		waitTime = 200 * time.Millisecond
+		ovsIface, err := libovsdbops.FindInterfaceByName(vsClient, ifaceName)
 		if err != nil {
 			return err
+		} else if ovsIface.Ofport == nil {
+			return fmt.Errorf("ovs interface %q ofport not set", ifaceName)
 		}
+		ofPort = *ovsIface.Ofport
 	}
 
 	mac := ifInfo.MAC.String()
@@ -290,22 +262,23 @@ func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 			}
 			return fmt.Errorf("%s waiting for OVS port binding%s for %s %v", errDetail, detail, mac, ifAddrs)
 		default:
-			columns := []string{"external-ids:iface-id"}
-			if checkExternalIDs {
-				// get ovn-installed flag in the same request
-				columns = append(columns, "external-ids:ovn-installed")
-			}
-			output, err := ovsGetMultiOutput("Interface", ifaceName, columns)
+			ovsIface, err := libovsdbops.FindInterfaceByName(vsClient, ifaceName)
 			// check to see if the interface has its external id set, which indicates if it is active
 			// It may have been cleared by a subsequent CNI ADD and if so, there's no need to keep checking for flows
-			if err == nil && len(output) > 0 && output[0] != ifaceID {
-				return fmt.Errorf("OVS sandbox port %s is no longer active (probably due to a subsequent "+
-					"CNI ADD)", ifaceName)
+			if err == nil {
+				foundIfaceID, ok := ovsIface.ExternalIDs["iface-id"]
+				if ok && foundIfaceID != ifaceID {
+					return fmt.Errorf("OVS sandbox port %s is no longer active (probably due to a subsequent "+
+						"CNI ADD)", ifaceName)
+				}
 			}
 			if checkExternalIDs {
-				if err == nil && len(output) == 2 && output[1] == "true" {
-					klog.V(5).Infof("Interface %s has ovn-installed=true", ifaceName)
-					return nil
+				if err == nil {
+					foundInstalled, ok := ovsIface.ExternalIDs["ovn-installed"]
+					if ok && foundInstalled == "true" {
+						klog.V(5).Infof("Interface %s has ovn-installed=true", ifaceName)
+						return nil
+					}
 				}
 				klog.V(5).Infof("Still waiting for OVS port %s to have ovn-installed=true", ifaceName)
 			} else {
@@ -320,7 +293,6 @@ func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 			}
 
 			// try again later
-			waitTime := 200 * time.Millisecond
 			time.Sleep(waitTime)
 			metrics.MetricOvsInterfaceUpWait.Add(waitTime.Seconds())
 		}

@@ -7,14 +7,14 @@ import (
 	"time"
 
 	current "github.com/containernetworking/cni/pkg/types/100"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	kapi "k8s.io/api/core/v1"
 )
 
 // ServerRunDir is the default directory for CNIServer runtime files
@@ -157,6 +157,9 @@ type PodRequest struct {
 	// also, need to find the pod annotation, dpu pod connection/status annotations of the given NAD ("default"
 	// for default network).
 	nadName string
+
+	// OVS vswitchd database client for requests to use when configuring OVS
+	vsClient libovsdbclient.Client
 }
 
 type podRequestFunc func(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth) ([]byte, error)
@@ -185,4 +188,5 @@ type Server struct {
 	handlePodRequestFunc podRequestFunc
 	clientSet            *ClientSet
 	kubeAuth             *KubeAPIAuth
+	vsClient             libovsdbclient.Client
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
 	current "github.com/containernetworking/cni/pkg/types/100"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,6 +31,7 @@ import (
 
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -176,6 +178,29 @@ func (c *shimClientset) getPod(namespace, name string) (*kapi.Pod, error) {
 	return c.kclient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 }
 
+func initPodRequestUnprivilegedMode(req *Request, isDPUHostMode bool) (*PodRequest, error) {
+	var vsClient libovsdbclient.Client
+
+	if !isDPUHostMode {
+		// Initialize OVS exec runner; find binaries that the CNI code uses.
+		if err := SetExec(kexec.New()); err != nil {
+			return nil, fmt.Errorf("failed to initialize OVS exec runner: %w", err)
+		}
+	}
+
+	vsClient, err := libovsdb.NewVSwitchClient(make(chan struct{}))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create vswitchd database client: %w", err)
+	}
+
+	pr, err := cniRequestToPodRequest(req, vsClient)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create pod request: %w", err)
+	}
+
+	return pr, nil
+}
+
 // CmdAdd is the callback for 'add' cni calls from skel
 func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 	var err error
@@ -223,25 +248,15 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		// The onvkube-node is running in un-privileged mode. The responsibility of
 		// plugging an interface into Pod is on the Shim.
 
-		// Use the IPAM details from ovnkube-node to configure the pod interface
-		pr, err := cniRequestToPodRequest(req)
+		pr, err := initPodRequestUnprivilegedMode(req, response.PodIFInfo.IsDPUHostMode)
 		if err != nil {
-			err = fmt.Errorf("failed to create pod request: %v", err)
 			klog.Error(err.Error())
 			return err
 		}
 		defer pr.cancel()
 
-		if !response.PodIFInfo.IsDPUHostMode {
-			// Initialize OVS exec runner; find OVS binaries that the CNI code uses.
-			if err := SetExec(kexec.New()); err != nil {
-				err = fmt.Errorf("failed to initialize OVS exec runner: %v", err)
-				klog.Error(err.Error())
-				return err
-			}
-		}
-
-		// In the case where ovnkube-node is running in Unprivileged mode, all the work
+		// In the case where ovnkube-node is running in Unprivileged mode,
+		// use the IPAM details from ovnkube-node to configure the pod interface
 		result, err = pr.getCNIResult(clientset, response.PodIFInfo)
 		if err != nil {
 			err = fmt.Errorf("failed to get CNI Result from pod interface info %v: %v", response.PodIFInfo, err)
@@ -257,7 +272,6 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 	var err error
 	var body []byte
-	var pr *PodRequest
 	var conf *ovntypes.NetConf
 
 	startTime := time.Now()
@@ -290,21 +304,12 @@ func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 
 	// if Result is nil, then ovnkube-node is running in unprivileged mode so unconfigure the Interface from here.
 	if response.Result == nil {
-		pr, err = cniRequestToPodRequest(req)
+		pr, err := initPodRequestUnprivilegedMode(req, response.PodIFInfo.IsDPUHostMode)
 		if err != nil {
-			err = fmt.Errorf("failed to create pod request: %v", err)
+			klog.Error(err.Error())
 			return err
 		}
 		defer pr.cancel()
-
-		if !response.PodIFInfo.IsDPUHostMode {
-			// Initialize OVS exec runner; find OVS binaries that the CNI code uses.
-			if err := SetExec(kexec.New()); err != nil {
-				err = fmt.Errorf("failed to initialize OVS exec runner: %v", err)
-				klog.Error(err.Error())
-				return err
-			}
-		}
 
 		err = pr.UnconfigureInterface(response.PodIFInfo)
 	}
