@@ -348,8 +348,7 @@ check_dependencies() {
   fi
 
   if ! command_exists kubectl ; then
-    echo "Dependency not met: Command not found 'kubectl'"
-    echo "Downloading kubectl..'"
+    echo "'kubectl' not found, installing"
     setup_kubectl_bin
   fi
 
