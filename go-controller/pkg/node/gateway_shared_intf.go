@@ -1383,14 +1383,6 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		return nil, err
 	}
 
-	if config.OvnKubeNode.Mode == types.NodeModeFull {
-		// add masquerade subnet route to avoid zeroconf routes
-		err = addMasqueradeRoute(gwBridge.bridgeName, gwNextHops)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	if exGwBridge != nil {
 		gw.readyFunc = func() (bool, error) {
 			ready, err := gatewayReady(gwBridge.patchPort)
@@ -1425,6 +1417,14 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		}
 		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory)
 		nodeIPs := gw.nodeIPManager.ListAddresses()
+
+		if err := setNodeMasqueradeIPOnExtBridge(gwBridge.bridgeName); err != nil {
+			return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwBridge.bridgeName, err)
+		}
+
+		if err := addMasqueradeRoute(gwBridge.bridgeName, nodeName, watchFactory); err != nil {
+			return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
+		}
 
 		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, nodeIPs)
 		if err != nil {
@@ -1581,23 +1581,84 @@ func svcToCookie(namespace string, name string, token string, port int32) (strin
 	return fmt.Sprintf("0x%x", h.Sum64()), nil
 }
 
-func addMasqueradeRoute(netIfaceName string, nextHops []net.IP) error {
-	// only apply when ipv4mode is enabled
-	if !config.IPv4Mode {
-		return nil
+func addMasqueradeRoute(netIfaceName, nodeName string, watchFactory factory.NodeWatchFactory) error {
+	node, err := watchFactory.GetNode(nodeName)
+	if err != nil {
+		return err
 	}
 	netIfaceLink, err := util.LinkSetUp(netIfaceName)
 	if err != nil {
 		return fmt.Errorf("unable to find shared gw bridge interface: %s", netIfaceName)
 	}
-	v4nextHops, err := util.MatchIPFamily(false, nextHops)
-	if err != nil {
-		return fmt.Errorf("no valid ipv4 next hop exists: %v", err)
+	var v4Found, v6Found bool
+	for _, nodeAddr := range node.Status.Addresses {
+		if nodeAddr.Type != kapi.NodeInternalIP {
+			continue
+		}
+		var masqIPNet *net.IPNet
+		nodeIP := net.ParseIP(nodeAddr.Address)
+		if utilnet.IsIPv6(nodeIP) && !v6Found {
+			_, masqIPNet, _ = net.ParseCIDR(fmt.Sprintf("%s/128", types.V6OVNMasqueradeIP))
+			v6Found = true
+		} else if !v4Found {
+			_, masqIPNet, _ = net.ParseCIDR(fmt.Sprintf("%s/32", types.V4OVNMasqueradeIP))
+			v4Found = true
+		}
+		mtu := config.Default.MTU
+		if config.Default.RoutableMTU != 0 {
+			mtu = config.Default.RoutableMTU
+		}
+		if masqIPNet != nil {
+			klog.Infof("Setting OVN Masquerade route with source: %s", nodeIP)
+			err = util.LinkRoutesAddOrUpdateSourceOrMTU(netIfaceLink, nil, []*net.IPNet{masqIPNet},
+				mtu, nodeIP)
+			if err != nil {
+				return fmt.Errorf("unable to add OVN masquerade route to host, error: %v", err)
+			}
+		}
 	}
-	_, masqIPNet, _ := net.ParseCIDR(types.V4MasqueradeSubnet)
-	err = util.LinkRoutesAddOrUpdateMTU(netIfaceLink, v4nextHops[0], []*net.IPNet{masqIPNet}, config.Default.RoutableMTU)
-	if err != nil {
-		return fmt.Errorf("unable to add OVN masquerade route to host, error: %v", err)
+
+	if config.IPv4Mode && !v4Found {
+		return fmt.Errorf("could not find node IPv4 address to configure OVN masqurade route, addresses: %+v",
+			node.Status.Addresses)
 	}
+
+	if config.IPv6Mode && !v6Found {
+		return fmt.Errorf("could not find node IPv6 address to configure OVN masqurade route, addresses: %+v",
+			node.Status.Addresses)
+	}
+	return nil
+}
+
+func setNodeMasqueradeIPOnExtBridge(extBridgeName string) error {
+	extBridge, err := util.LinkSetUp(extBridgeName)
+	if err != nil {
+		return err
+	}
+
+	var bridgeCIDRs []*net.IPNet
+	if config.IPv4Mode {
+		_, masqIPNet, _ := net.ParseCIDR(types.V4MasqueradeSubnet)
+		masqIPNet.IP = net.ParseIP(types.V4HostMasqueradeIP)
+		bridgeCIDRs = append(bridgeCIDRs, masqIPNet)
+	}
+
+	if config.IPv6Mode {
+		_, masqIPNet, _ := net.ParseCIDR(types.V6MasqueradeSubnet)
+		masqIPNet.IP = net.ParseIP(types.V6HostMasqueradeIP)
+		bridgeCIDRs = append(bridgeCIDRs, masqIPNet)
+	}
+
+	for _, bridgeCIDR := range bridgeCIDRs {
+		if exists, err := util.LinkAddrExist(extBridge, bridgeCIDR); err == nil && !exists {
+			if err := util.LinkAddrAdd(extBridge, bridgeCIDR); err != nil {
+				return err
+			}
+		} else if err != nil {
+			return fmt.Errorf(
+				"failed to check existence of addr %s in bridge %s: %v", bridgeCIDR, extBridgeName, err)
+		}
+	}
+
 	return nil
 }

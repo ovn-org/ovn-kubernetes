@@ -581,8 +581,8 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 			err := n.initGatewayDPUHost(net.ParseIP(hostIP))
 			Expect(err).NotTo(HaveOccurred())
 
-			// Check svc and masquerade routes added towards eth0GWIP
-			expectedRoutes := []string{svcCIDR, types.V4MasqueradeSubnet}
+			// Check svc routes added towards eth0GWIP
+			expectedRoutes := []string{svcCIDR}
 			link, err := netlink.LinkByName(uplinkName)
 			Expect(err).NotTo(HaveOccurred())
 			routes, err := netlink.RouteList(link, netlink.FAMILY_ALL)

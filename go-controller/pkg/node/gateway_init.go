@@ -248,7 +248,7 @@ func configureSvcRouteViaInterface(iface string, gwIPs []net.IP) error {
 			mtu = config.Default.RoutableMTU
 		}
 
-		err = util.LinkRoutesAddOrUpdateMTU(link, gwIP[0], []*net.IPNet{subnet}, mtu)
+		err = util.LinkRoutesAddOrUpdateSourceOrMTU(link, gwIP[0], []*net.IPNet{subnet}, mtu, nil)
 		if err != nil {
 			return fmt.Errorf("unable to add/update route for service via %s, error: %v", iface, err)
 		}
@@ -402,9 +402,12 @@ func (n *OvnNode) initGatewayDPUHost(kubeNodeIP net.IP) error {
 		return err
 	}
 
-	err = addMasqueradeRoute(gatewayIntf, gatewayNextHops)
-	if err != nil {
-		return err
+	if err := setNodeMasqueradeIPOnExtBridge(gwIntf); err != nil {
+		return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwIntf, err)
+	}
+
+	if err := addMasqueradeRoute(gwIntf, n.name, n.watchFactory); err != nil {
+		return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
 	}
 
 	err = configureSvcRouteViaInterface(gatewayIntf, gatewayNextHops)
