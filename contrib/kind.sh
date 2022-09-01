@@ -3,6 +3,55 @@
 # Returns the full directory name of the script
 DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
+function if_error_exit {
+    ###########################################################################
+    # Description:                                                            #
+    # Validate if previous command failed and show an error msg (if provided) #
+    #                                                                         #
+    # Arguments:                                                              #
+    #   $1 - error message if not provided, it will just exit                 #
+    ###########################################################################
+    if [ "$?" != "0" ]; then
+        if [ -n "$1" ]; then
+            RED="\e[31m"
+            ENDCOLOR="\e[0m"
+            echo -e "[ ${RED}FAILED${ENDCOLOR} ] ${1}"
+        fi
+        exit 1
+    fi
+}
+
+function setup_kubectl_bin() {
+    ###########################################################################
+    # Description:                                                            #
+    # setup kubectl for querying the cluster                                  #
+    #                                                                         #
+    # Arguments:                                                              #
+    #   $1 - error message if not provided, it will just exit                 #
+    ###########################################################################
+    if [ ! -d "./bin" ]
+    then
+        mkdir -p ./bin
+        if_error_exit "Failed to create bin dir!"
+    fi
+
+    if [[ "$OSTYPE" == "linux-gnu" ]]; then
+        OS_TYPE="linux"
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        OS_TYPE="darwin"
+    fi
+
+    pushd ./bin
+       if [ ! -f ./kubectl ]; then
+           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/${OS_TYPE}/amd64/kubectl"
+           if_error_exit "Failed to download kubectl failed!"
+       fi
+    popd
+
+    chmod +x ./bin/kubectl
+    export PATH=${PATH}:$(pwd)/bin
+}
+
 run_kubectl() {
   local retries=0
   local attempts=10
@@ -293,6 +342,16 @@ install_j2_renderer() {
 }
 
 check_dependencies() {
+  if ! command_exists curl ; then
+    echo "Dependency not met: Command not found 'curl'"
+    exit 1
+  fi
+
+  if ! command_exists kubectl ; then
+    echo "'kubectl' not found, installing"
+    setup_kubectl_bin
+  fi
+
   if ! command_exists kind ; then
     echo "Dependency not met: Command not found 'kind'"
     exit 1
