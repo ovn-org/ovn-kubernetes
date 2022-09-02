@@ -99,6 +99,7 @@ usage() {
     echo "                 [-dd |--dns-domain |"
     echo "                 [-ric | --run-in-container |"
     echo "                 [-cn | --cluster-name |"
+    echo "                 [-ehp|--egress-ip-healthcheck-port <num>]"
     echo "                 [-h]]"
     echo ""
     echo "-cf  | --config-file                Name of the KIND J2 configuration file."
@@ -141,6 +142,7 @@ usage() {
     echo "-dd  | --dns-domain                 Configure a custom dnsDomain for k8s services, Defaults to 'cluster.local'"
     echo "-cn  | --cluster-name               Configure the kind cluster's name"
     echo "-ric | --run-in-container           Configure the script to be run from a docker container, allowing it to still communicate with the kind controlplane" 
+    echo "-ehp | --egress-ip-healthcheck-port TCP port used for gRPC session by egress IP node check. DEFAULT: 9107 (Use "0" for legacy dial to port 9)."
     echo "--delete                      	    Delete current cluster"
     echo ""
 }
@@ -271,6 +273,14 @@ parse_args() {
                                                 ;;
             -ric | --run-in-container )         RUN_IN_CONTAINER=true
                                                 ;;
+            -ehp | --egress-ip-healthcheck-port ) shift
+                                                if ! [[ "$1" =~ ^[0-9]+$ ]]; then
+                                                    echo "Invalid egress-ip-healthcheck-port: $1"
+                                                    usage
+                                                    exit 1
+                                                fi
+                                                OVN_EGRESSIP_HEALTHCHECK_PORT=$1
+                                                ;;
             --delete )                          delete
                                                 exit
                                                 ;;
@@ -326,6 +336,7 @@ print_params() {
      echo "OVN_HOST_NETWORK_NAMESPACE = $OVN_HOST_NETWORK_NAMESPACE"
      echo "OVN_ENABLE_EX_GW_NETWORK_BRIDGE = $OVN_ENABLE_EX_GW_NETWORK_BRIDGE"
      echo "OVN_EX_GW_NETWORK_INTERFACE = $OVN_EX_GW_NETWORK_INTERFACE"
+     echo "OVN_EGRESSIP_HEALTHCHECK_PORT = $OVN_EGRESSIP_HEALTHCHECK_PORT"
      echo ""
 }
 
@@ -441,6 +452,7 @@ set_default_params() {
     KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
   fi
   OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
+  OVN_EGRESSIP_HEALTHCHECK_PORT=${OVN_EGRESSIP_HEALTHCHECK_PORT:-9107}
   OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
 }
 
@@ -638,6 +650,7 @@ create_ovn_kube_manifests() {
     --ovn-loglevel-controller="${OVN_LOG_LEVEL_CONTROLLER}" \
     --ovnkube-config-duration-enable=true \
     --egress-ip-enable=true \
+    --egress-ip-healthcheck-port="${OVN_EGRESSIP_HEALTHCHECK_PORT}" \
     --egress-firewall-enable=true \
     --egress-qos-enable=true \
     --v4-join-subnet="${JOIN_SUBNET_IPV4}" \
