@@ -178,6 +178,7 @@ func newOVSDBClient(clientDBModel model.ClientDBModel, opts ...Option) (*ovsdbCl
 		)
 		ovs.logger = &l
 	}
+	ovs.metrics.init(clientDBModel.Name(), ovs.options.metricNamespace, ovs.options.metricSubsystem)
 	ovs.registerMetrics()
 
 	// if we should only connect to the leader, then add the special "_Server" database as well
@@ -191,7 +192,6 @@ func newOVSDBClient(clientDBModel model.ClientDBModel, opts ...Option) (*ovsdbCl
 			monitors: make(map[string]*Monitor),
 		}
 	}
-	ovs.metrics.init(clientDBModel.Name())
 
 	return ovs, nil
 }
@@ -1312,9 +1312,14 @@ func (o *ovsdbClient) List(ctx context.Context, result interface{}) error {
 	return primaryDB.api.List(ctx, result)
 }
 
-//Where implements the API interface's Where function
-func (o *ovsdbClient) Where(m model.Model, conditions ...model.Condition) ConditionalAPI {
-	return o.primaryDB().api.Where(m, conditions...)
+// Where implements the API interface's Where function
+func (o *ovsdbClient) Where(models ...model.Model) ConditionalAPI {
+	return o.primaryDB().api.Where(models...)
+}
+
+// WhereAny implements the API interface's WhereAny function
+func (o *ovsdbClient) WhereAny(m model.Model, conditions ...model.Condition) ConditionalAPI {
+	return o.primaryDB().api.WhereAny(m, conditions...)
 }
 
 //WhereAll implements the API interface's WhereAll function
