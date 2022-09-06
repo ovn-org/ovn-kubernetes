@@ -218,9 +218,14 @@ func ServiceTypeHasClusterIP(service *kapi.Service) bool {
 	return service.Spec.Type == kapi.ServiceTypeClusterIP || service.Spec.Type == kapi.ServiceTypeNodePort || service.Spec.Type == kapi.ServiceTypeLoadBalancer
 }
 
+func LoadBalancerServiceHasNodePortAllocation(service *kapi.Service) bool {
+	return service.Spec.AllocateLoadBalancerNodePorts == nil || *service.Spec.AllocateLoadBalancerNodePorts
+}
+
 // ServiceTypeHasNodePort checks if the service has an associated NodePort or not
 func ServiceTypeHasNodePort(service *kapi.Service) bool {
-	return service.Spec.Type == kapi.ServiceTypeNodePort || service.Spec.Type == kapi.ServiceTypeLoadBalancer
+	return service.Spec.Type == kapi.ServiceTypeNodePort ||
+		(service.Spec.Type == kapi.ServiceTypeLoadBalancer && LoadBalancerServiceHasNodePortAllocation(service))
 }
 
 // ServiceTypeHasLoadBalancer checks if the service has an associated LoadBalancer or not
