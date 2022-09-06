@@ -1858,7 +1858,9 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 						Items: []v1.Pod{},
 					},
 				)
-				fakeOvn.controller.lsManager.AddNode("node1", "ls-uuid", []*net.IPNet{ovntest.MustParseIPNet("10.128.1.0/24")})
+				// we don't know the real switch UUID in the db, but it can be found by name
+				swUUID := getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1")
+				fakeOvn.controller.lsManager.AddNode("node1", swUUID, []*net.IPNet{ovntest.MustParseIPNet("10.128.1.0/24")})
 
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1922,7 +1924,9 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 						Items: []v1.Pod{},
 					},
 				)
-				fakeOvn.controller.lsManager.AddNode("node1", "ls-uuid", []*net.IPNet{ovntest.MustParseIPNet("10.128.1.0/24")})
+				// we don't know the real switch UUID in the db, but it can be found by name
+				swUUID := getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1")
+				fakeOvn.controller.lsManager.AddNode("node1", swUUID, []*net.IPNet{ovntest.MustParseIPNet("10.128.1.0/24")})
 
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())

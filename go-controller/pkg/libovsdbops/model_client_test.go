@@ -2,6 +2,7 @@ package libovsdbops
 
 import (
 	"fmt"
+	"github.com/onsi/ginkgo"
 	"reflect"
 	"testing"
 
@@ -40,6 +41,7 @@ type OperationModelTestCase struct {
 }
 
 func runTestCase(t *testing.T, tCase OperationModelTestCase) error {
+	ginkgo.By(tCase.name)
 	dbSetup := libovsdbtest.TestSetup{
 		NBData: tCase.initialDB,
 	}
@@ -1223,7 +1225,7 @@ func TestLookup(t *testing.T) {
 			},
 		},
 		{
-			name: "Test lookup by predicate fallback",
+			name: "Test lookup with index provided doesn't use predicate",
 			op:   "Lookup",
 			generateOp: func() []operationModel {
 				return []operationModel{
@@ -1244,14 +1246,7 @@ func TestLookup(t *testing.T) {
 					Addresses: []string{adressSetTestAdress},
 				},
 			},
-			expectedRes: [][]libovsdbtest.TestData{
-				{
-					&nbdb.AddressSet{
-						Name:      adressSetTestName,
-						Addresses: []string{adressSetTestAdress},
-					},
-				},
-			},
+			expectedOpsErr: client.ErrNotFound,
 		},
 		{
 			name: "Test lookup by predicate not found error",
@@ -1296,7 +1291,7 @@ func TestLookup(t *testing.T) {
 			expectedRes: [][]libovsdbtest.TestData{{}},
 		},
 		{
-			name: "Test lookup by predicate over index when bulk op",
+			name: "Test lookup by index when bulk op",
 			op:   "Lookup",
 			generateOp: func() []operationModel {
 				return []operationModel{
@@ -1318,7 +1313,46 @@ func TestLookup(t *testing.T) {
 					Addresses: []string{adressSetTestAdress},
 				},
 			},
-			expectedOpsErr: client.ErrNotFound,
+			expectedRes: [][]libovsdbtest.TestData{
+				{
+					&nbdb.AddressSet{
+						UUID:      adressSetTestUUID,
+						Name:      adressSetTestName,
+						Addresses: []string{adressSetTestAdress},
+					},
+				},
+			},
+		},
+		{
+			name: "Test lookup by predicate when bulk op",
+			op:   "Lookup",
+			generateOp: func() []operationModel {
+				return []operationModel{
+					{
+						Model:          &nbdb.AddressSet{},
+						ModelPredicate: func(item *nbdb.AddressSet) bool { return item.Name == adressSetTestName },
+						ExistingResult: &[]*nbdb.AddressSet{},
+						ErrNotFound:    true,
+						BulkOp:         true,
+					},
+				}
+			},
+			initialDB: []libovsdbtest.TestData{
+				&nbdb.AddressSet{
+					UUID:      adressSetTestUUID,
+					Name:      adressSetTestName,
+					Addresses: []string{adressSetTestAdress},
+				},
+			},
+			expectedRes: [][]libovsdbtest.TestData{
+				{
+					&nbdb.AddressSet{
+						UUID:      adressSetTestUUID,
+						Name:      adressSetTestName,
+						Addresses: []string{adressSetTestAdress},
+					},
+				},
+			},
 		},
 		{
 			name: "Test lookup by predicate bulk op multiple results",
