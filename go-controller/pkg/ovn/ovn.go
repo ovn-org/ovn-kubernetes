@@ -12,7 +12,6 @@ import (
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
-	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -106,9 +105,8 @@ type Controller struct {
 	stopChan     <-chan struct{}
 
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
-	masterSubnetAllocator *subnetallocator.SubnetAllocator
-
-	hoMaster *hocontroller.MasterController
+	masterSubnetAllocator        *subnetallocator.SubnetAllocator
+	hybridOverlaySubnetAllocator *subnetallocator.SubnetAllocator
 
 	SCTPSupport bool
 
@@ -273,6 +271,10 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		addressSetFactory = addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
 	}
 	svcController, svcFactory := newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient, recorder)
+	var hybridOverlaySubnetAllocator *subnetallocator.SubnetAllocator
+	if config.HybridOverlay.Enabled {
+		hybridOverlaySubnetAllocator = subnetallocator.NewSubnetAllocator()
+	}
 	return &Controller{
 		client: ovnClient.KubeClient,
 		kube: &kube.Kube{
@@ -281,19 +283,20 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,
 		},
-		watchFactory:          wf,
-		stopChan:              stopChan,
-		masterSubnetAllocator: subnetallocator.NewSubnetAllocator(),
-		lsManager:             lsm.NewLogicalSwitchManager(),
-		logicalPortCache:      newPortCache(stopChan),
-		namespaces:            make(map[string]*namespaceInfo),
-		namespacesMutex:       sync.Mutex{},
-		externalGWCache:       make(map[ktypes.NamespacedName]*externalRouteInfo),
-		exGWCacheMutex:        sync.RWMutex{},
-		addressSetFactory:     addressSetFactory,
-		lspIngressDenyCache:   make(map[string]int),
-		lspEgressDenyCache:    make(map[string]int),
-		lspMutex:              &sync.Mutex{},
+		watchFactory:                 wf,
+		stopChan:                     stopChan,
+		masterSubnetAllocator:        subnetallocator.NewSubnetAllocator(),
+		hybridOverlaySubnetAllocator: hybridOverlaySubnetAllocator,
+		lsManager:                    lsm.NewLogicalSwitchManager(),
+		logicalPortCache:             newPortCache(stopChan),
+		namespaces:                   make(map[string]*namespaceInfo),
+		namespacesMutex:              sync.Mutex{},
+		externalGWCache:              make(map[ktypes.NamespacedName]*externalRouteInfo),
+		exGWCacheMutex:               sync.RWMutex{},
+		addressSetFactory:            addressSetFactory,
+		lspIngressDenyCache:          make(map[string]int),
+		lspEgressDenyCache:           make(map[string]int),
+		lspMutex:                     &sync.Mutex{},
 		eIPC: egressIPController{
 			egressIPAssignmentMutex:           &sync.Mutex{},
 			podAssignmentMutex:                &sync.Mutex{},
@@ -304,6 +307,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			nbClient:                          libovsdbOvnNBClient,
 			watchFactory:                      wf,
 			egressIPTotalTimeout:              config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout,
+			egressIPNodeHealthCheckPort:       config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort,
 		},
 		loadbalancerClusterCache:  make(map[kapi.Protocol]string),
 		multicastSupport:          config.EnableMulticast,
@@ -403,6 +407,9 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 		}
 		if config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout == 0 {
 			klog.V(2).Infof("EgressIP node reachability check disabled")
+		} else if config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort != 0 {
+			klog.Infof("EgressIP node reachability enabled and using gRPC port %d",
+				config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort)
 		}
 	}
 
@@ -447,14 +454,6 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 		go func() {
 			defer wg.Done()
 			unidlingController.Run(oc.stopChan)
-		}()
-	}
-
-	if oc.hoMaster != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			oc.hoMaster.Run(oc.stopChan)
 		}()
 	}
 
@@ -623,10 +622,22 @@ func (oc *Controller) WatchNamespaces() error {
 	_, err := oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ns := obj.(*kapi.Namespace)
+			if config.HybridOverlay.Enabled && hasHybridAnnotation(ns) {
+				if err := oc.addNamespaceICNIv1(ns); err != nil {
+					klog.Errorf("Unable to handle legacy ICNIv1 check for namespace %q add, error: %v",
+						ns.Name, err)
+				}
+			}
 			oc.AddNamespace(ns)
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			oldNs, newNs := old.(*kapi.Namespace), newer.(*kapi.Namespace)
+			if config.HybridOverlay.Enabled && nsHybridAnnotationChanged(oldNs, newNs) {
+				if err := oc.addNamespaceICNIv1(newNs); err != nil {
+					klog.Errorf("Unable to handle legacy ICNIv1 check for namespace %q during update, error: %v",
+						newNs.Name, err)
+				}
+			}
 			oc.updateNamespace(oldNs, newNs)
 		},
 		DeleteFunc: func(obj interface{}) {

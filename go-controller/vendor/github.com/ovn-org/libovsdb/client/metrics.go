@@ -13,9 +13,8 @@ type metrics struct {
 	numTableUpdates *prometheus.CounterVec
 	numDisconnects  prometheus.Counter
 	numMonitors     prometheus.Gauge
+	registerOnce    sync.Once
 }
-
-var regMetricsOnce sync.Once
 
 func (m *metrics) init(modelName string, namespace, subsystem string) {
 	// labels that are the same across all metrics
@@ -70,7 +69,7 @@ func (m *metrics) init(modelName string, namespace, subsystem string) {
 }
 
 func (m *metrics) register(r prometheus.Registerer) {
-	regMetricsOnce.Do(func() {
+	m.registerOnce.Do(func() {
 		r.MustRegister(
 			m.numUpdates,
 			m.numTableUpdates,

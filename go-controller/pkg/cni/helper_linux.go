@@ -435,28 +435,40 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 	}
 	// END OCP HACK
 
-	err = netns.Do(func(hostNS ns.NetNS) error {
-		// deny IPv6 neighbor solicitations
-		dadSysctlIface := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/dad_transmits", contIface.Name)
-		if _, err := os.Stat(dadSysctlIface); !os.IsNotExist(err) {
-			err = setSysctl(dadSysctlIface, 0)
-			if err != nil {
-				klog.Warningf("Failed to disable IPv6 DAD: %q", err)
-			}
+	// Only configure IPv6 specific stuff and wait for addresses to become usable
+	// if there are any IPv6 addresses to assign. v4 doesn't have the concept
+	// of tentative addresses so it doesn't need any of this.
+	haveV6 := false
+	for _, ip := range ifInfo.IPs {
+		if ip.IP.To4() == nil {
+			haveV6 = true
+			break
 		}
-		// generate address based on EUI64
-		genSysctlIface := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/addr_gen_mode", contIface.Name)
-		if _, err := os.Stat(genSysctlIface); !os.IsNotExist(err) {
-			err = setSysctl(genSysctlIface, 0)
-			if err != nil {
-				klog.Warningf("Failed to set IPv6 address generation mode to EUI64: %q", err)
+	}
+	if haveV6 {
+		err = netns.Do(func(hostNS ns.NetNS) error {
+			// deny IPv6 neighbor solicitations
+			dadSysctlIface := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/dad_transmits", contIface.Name)
+			if _, err := os.Stat(dadSysctlIface); !os.IsNotExist(err) {
+				err = setSysctl(dadSysctlIface, 0)
+				if err != nil {
+					klog.Warningf("Failed to disable IPv6 DAD: %q", err)
+				}
 			}
-		}
+			// generate address based on EUI64
+			genSysctlIface := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/addr_gen_mode", contIface.Name)
+			if _, err := os.Stat(genSysctlIface); !os.IsNotExist(err) {
+				err = setSysctl(genSysctlIface, 0)
+				if err != nil {
+					klog.Warningf("Failed to set IPv6 address generation mode to EUI64: %q", err)
+				}
+			}
 
-		return ip.SettleAddresses(contIface.Name, 10)
-	})
-	if err != nil {
-		klog.Warningf("Failed to settle addresses: %q", err)
+			return ip.SettleAddresses(contIface.Name, 10)
+		})
+		if err != nil {
+			klog.Warningf("Failed to settle addresses: %q", err)
+		}
 	}
 
 	return []*current.Interface{hostIface, contIface}, nil

@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"math/rand"
 	"net"
 	"reflect"
@@ -34,7 +35,7 @@ const initialBackoff = 1
 const noBackoff = 0
 
 // retryObjEntry is a generic object caching with retry mechanism
-//that resources can use to eventually complete their intended operations.
+// that resources can use to eventually complete their intended operations.
 type retryObjEntry struct {
 	// newObj holds k8s resource failed during add operation
 	newObj interface{}
@@ -576,6 +577,11 @@ func (oc *Controller) addResource(objectsToRetry *RetryObjs, obj interface{}, fr
 		if !ok {
 			return fmt.Errorf("could not cast %T object to *knet.Pod", obj)
 		}
+		if config.HybridOverlay.Enabled {
+			if err := oc.addPodICNIv1(pod); err != nil {
+				return err
+			}
+		}
 		return oc.ensurePod(nil, pod, true)
 
 	case factory.PolicyType:
@@ -755,7 +761,11 @@ func (oc *Controller) updateResource(objectsToRetry *RetryObjs, oldObj, newObj i
 	case factory.PodType:
 		oldPod := oldObj.(*kapi.Pod)
 		newPod := newObj.(*kapi.Pod)
-
+		if config.HybridOverlay.Enabled {
+			if err := oc.addPodICNIv1(newPod); err != nil {
+				return err
+			}
+		}
 		return oc.ensurePod(oldPod, newPod, inRetryCache || util.PodScheduled(oldPod) != util.PodScheduled(newPod))
 
 	case factory.NodeType:
