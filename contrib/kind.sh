@@ -586,7 +586,8 @@ create_ovn_kube_manifests() {
     --egress-firewall-enable=true \
     --v4-join-subnet="${JOIN_SUBNET_IPV4}" \
     --v6-join-subnet="${JOIN_SUBNET_IPV6}" \
-    --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}"
+    --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}" \
+    --multi-network-enable=true
   popd
 }
 
@@ -738,6 +739,7 @@ build_ovn_image
 detect_apiserver_url
 create_ovn_kube_manifests
 install_ovn_image
+kubectl apply -f https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml
 install_ovn
 if [ "$KIND_INSTALL_INGRESS" == true ]; then
   install_ingress
