@@ -825,8 +825,8 @@ func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
 		logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 		var portInfo *lpInfo
 
-		// Get the logical port info from the cache, if that fails, retry
-		// if the gotten LSP is Scheduled for removal, retry (stateful-sets)
+		// Get the logical port info from the cache, if that fails, retry.
+		// If the gotten LSP is scheduled for removal, retry (stateful-sets).
 		//
 		// 24ms is chosen because gomega.Eventually default timeout is 50ms
 		// libovsdb transactions take less than 50ms usually as well so pod create
@@ -857,7 +857,7 @@ func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
 		})
 		if retryErr != nil {
 			// Failed to get an up to date version of the LSP from the cache
-			klog.Warning("Failed to get LSP after multiple retries for pod %s/%s for networkPolicy %s err: %v",
+			klog.Warningf("Failed to get LSP after multiple retries for pod %s/%s for networkPolicy %s err: %v",
 				pod.Namespace, pod.Name, policy.Name, retryErr)
 			return
 		}
