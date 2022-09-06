@@ -226,7 +226,8 @@ func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 		factory.EgressIPPodType,
 		factory.EgressNodeType,
 		factory.CloudPrivateIPConfigType,
-		factory.LocalPodSelectorType:
+		factory.LocalPodSelectorType,
+		factory.NamespaceType:
 		return true
 	}
 	return false
@@ -316,6 +317,9 @@ func areResourcesEqual(objType reflect.Type, obj1, obj2 interface{}) (bool, erro
 		// force update path for EgressIP resource.
 		return false, nil
 
+	case factory.NamespaceType:
+		// force update path for Namespace resource.
+		return false, nil
 	}
 
 	return false, fmt.Errorf("no object comparison for type %s", objType)
@@ -361,7 +365,8 @@ func getResourceKey(objType reflect.Type, obj interface{}) (string, error) {
 
 	case factory.PeerNamespaceAndPodSelectorType,
 		factory.PeerNamespaceSelectorType,
-		factory.EgressIPNamespaceType:
+		factory.EgressIPNamespaceType,
+		factory.NamespaceType:
 		namespace, ok := obj.(*kapi.Namespace)
 		if !ok {
 			return "", fmt.Errorf("could not cast %T object to *kapi.Namespace", obj)
@@ -452,7 +457,8 @@ func (oc *Controller) getResourceFromInformerCache(objType reflect.Type, key str
 
 	case factory.PeerNamespaceAndPodSelectorType,
 		factory.PeerNamespaceSelectorType,
-		factory.EgressIPNamespaceType:
+		factory.EgressIPNamespaceType,
+		factory.NamespaceType:
 		obj, err = oc.watchFactory.GetNamespace(key)
 
 	case factory.EgressFirewallType:
@@ -558,7 +564,8 @@ func resourceNeedsUpdate(objType reflect.Type) bool {
 		factory.EgressIPType,
 		factory.EgressIPPodType,
 		factory.EgressIPNamespaceType,
-		factory.CloudPrivateIPConfigType:
+		factory.CloudPrivateIPConfigType,
+		factory.NamespaceType:
 		return true
 	}
 	return false
@@ -740,6 +747,13 @@ func (oc *Controller) addResource(objectsToRetry *RetryObjs, obj interface{}, fr
 		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		return oc.reconcileCloudPrivateIPConfig(nil, cloudPrivateIPConfig)
 
+	case factory.NamespaceType:
+		ns, ok := obj.(*kapi.Namespace)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *kapi.Namespace", obj)
+		}
+		return oc.AddNamespace(ns)
+
 	default:
 		return fmt.Errorf("no add function for object type %s", objectsToRetry.oType)
 	}
@@ -875,6 +889,10 @@ func (oc *Controller) updateResource(objectsToRetry *RetryObjs, oldObj, newObj i
 		oldCloudPrivateIPConfig := oldObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		newCloudPrivateIPConfig := newObj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		return oc.reconcileCloudPrivateIPConfig(oldCloudPrivateIPConfig, newCloudPrivateIPConfig)
+
+	case factory.NamespaceType:
+		oldNs, newNs := oldObj.(*kapi.Namespace), newObj.(*kapi.Namespace)
+		return oc.updateNamespace(oldNs, newNs)
 	}
 
 	return fmt.Errorf("no update function for object type %s", objectsToRetry.oType)
@@ -1013,6 +1031,10 @@ func (oc *Controller) deleteResource(objectsToRetry *RetryObjs, obj, cachedObj i
 	case factory.CloudPrivateIPConfigType:
 		cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 		return oc.reconcileCloudPrivateIPConfig(cloudPrivateIPConfig, nil)
+
+	case factory.NamespaceType:
+		ns := obj.(*kapi.Namespace)
+		return oc.deleteNamespace(ns)
 
 	default:
 		return fmt.Errorf("object type %s not supported", objectsToRetry.oType)
@@ -1248,6 +1270,9 @@ func (oc *Controller) getSyncResourcesFunc(r *RetryObjs) (func([]interface{}) er
 		factory.EgressIPNamespaceType,
 		factory.CloudPrivateIPConfigType:
 		syncFunc = nil
+
+	case factory.NamespaceType:
+		syncFunc = oc.syncNamespaces
 
 	default:
 		return nil, fmt.Errorf("no sync function for object type %s", r.oType)
