@@ -3,6 +3,7 @@ package ovn
 import (
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -59,9 +60,9 @@ func nsHybridAnnotationChanged(oldNs, newNs *kapi.Namespace) bool {
 }
 
 // hasHybridAnnotation returns true if namespace has ICNIv1 annotations
-func hasHybridAnnotation(ns *kapi.Namespace) bool {
-	nsExGw := ns.GetAnnotations()[hotypes.HybridOverlayExternalGw]
-	nsVTEP := ns.GetAnnotations()[hotypes.HybridOverlayVTEP]
+func hasHybridAnnotation(obj v1.ObjectMeta) bool {
+	nsExGw := obj.GetAnnotations()[hotypes.HybridOverlayExternalGw]
+	nsVTEP := obj.GetAnnotations()[hotypes.HybridOverlayVTEP]
 
 	if len(nsExGw) > 0 || len(nsVTEP) > 0 {
 		return true

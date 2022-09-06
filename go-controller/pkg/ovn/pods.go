@@ -57,8 +57,11 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 				}
 			}
 		}
+		// OCP HACK
+		// Do not try to remove hybrid overlay subnet route on pods using ICNIv1
 		// delete the outdated hybrid overlay subnet route if it exists
-		if annotations != nil {
+		if annotations != nil && !hasHybridAnnotation(pod.ObjectMeta) {
+			// END OCP HACK
 			newRoutes := []util.PodRoute{}
 			for _, subnet := range oc.lsManager.GetSwitchSubnets(pod.Spec.NodeName) {
 				hybridOverlayIFAddr := util.GetNodeHybridOverlayIfAddr(subnet).IP

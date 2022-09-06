@@ -622,7 +622,7 @@ func (oc *Controller) WatchNamespaces() error {
 	_, err := oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ns := obj.(*kapi.Namespace)
-			if config.HybridOverlay.Enabled && hasHybridAnnotation(ns) {
+			if config.HybridOverlay.Enabled && hasHybridAnnotation(ns.ObjectMeta) {
 				if err := oc.addNamespaceICNIv1(ns); err != nil {
 					klog.Errorf("Unable to handle legacy ICNIv1 check for namespace %q add, error: %v",
 						ns.Name, err)
