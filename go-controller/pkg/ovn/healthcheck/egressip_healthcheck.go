@@ -2,16 +2,16 @@ package healthcheck
 
 import (
 	"crypto/tls"
-	"net"
-	"strconv"
-	"sync"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"golang.org/x/net/context"
+	"golang.org/x/net/proxy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"k8s.io/klog/v2"
+	"net"
+	"strconv"
+	"sync"
 )
 
 const (
@@ -136,6 +136,9 @@ func (ehc *egressIPHealthClient) Connect(dialCtx context.Context, mgmtIPs []net.
 
 	opts := []grpc.DialOption{
 		grpc.WithBlock(),
+		grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
+			return proxy.Dial(ctx, "tcp", s)
+		}),
 	}
 	cfg := &config.OvnNorth
 	if cfg.CACert == "" || cfg.CertCommonName == "" {
