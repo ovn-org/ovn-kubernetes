@@ -77,7 +77,6 @@ go test -timeout=0 -v . \
         -ginkgo.skip="${SKIPPED_TESTS}" \
         -provider skeleton \
         -kubeconfig ${KUBECONFIG} \
-        ${CONTAINER_RUNTIME:+"--container-runtime=${CONTAINER_RUNTIME}"} \
         ${NUM_NODES:+"--num-nodes=${NUM_NODES}"} \
         ${E2E_REPORT_DIR:+"--report-dir=${E2E_REPORT_DIR}"} \
         ${E2E_REPORT_PREFIX:+"--report-prefix=${E2E_REPORT_PREFIX}"}

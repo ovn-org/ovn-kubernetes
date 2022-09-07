@@ -7,13 +7,17 @@ github.com/Mellanox/sriovnet/pkg/utils/netlinkops
 ## explicit; go 1.13
 github.com/Microsoft/go-winio
 github.com/Microsoft/go-winio/pkg/guid
+github.com/Microsoft/go-winio/pkg/security
 github.com/Microsoft/go-winio/vhd
-# github.com/Microsoft/hcsshim v0.8.10-0.20200715222032-5eafd1556990
+# github.com/Microsoft/hcsshim v0.8.20 => github.com/Microsoft/hcsshim v0.8.20
 ## explicit; go 1.13
+github.com/Microsoft/hcsshim/computestorage
 github.com/Microsoft/hcsshim/hcn
 github.com/Microsoft/hcsshim/internal/cni
 github.com/Microsoft/hcsshim/internal/cow
 github.com/Microsoft/hcsshim/internal/hcs
+github.com/Microsoft/hcsshim/internal/hcs/schema1
+github.com/Microsoft/hcsshim/internal/hcs/schema2
 github.com/Microsoft/hcsshim/internal/hcserror
 github.com/Microsoft/hcsshim/internal/interop
 github.com/Microsoft/hcsshim/internal/log
@@ -21,18 +25,17 @@ github.com/Microsoft/hcsshim/internal/logfields
 github.com/Microsoft/hcsshim/internal/oc
 github.com/Microsoft/hcsshim/internal/regstate
 github.com/Microsoft/hcsshim/internal/runhcs
-github.com/Microsoft/hcsshim/internal/schema1
-github.com/Microsoft/hcsshim/internal/schema2
 github.com/Microsoft/hcsshim/internal/timeout
 github.com/Microsoft/hcsshim/internal/vmcompute
+github.com/Microsoft/hcsshim/osversion
 # github.com/PuerkitoBio/purell v1.1.1
 ## explicit
 github.com/PuerkitoBio/purell
 # github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578
 ## explicit
 github.com/PuerkitoBio/urlesc
-# github.com/alexflint/go-filemutex v0.0.0-20171022225611-72bdc8eae2ae
-## explicit
+# github.com/alexflint/go-filemutex v1.1.0
+## explicit; go 1.13
 github.com/alexflint/go-filemutex
 # github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d
 ## explicit; go 1.13
@@ -58,32 +61,34 @@ github.com/cenkalti/rpc2/jsonrpc
 # github.com/cespare/xxhash/v2 v2.1.2
 ## explicit; go 1.11
 github.com/cespare/xxhash/v2
-# github.com/containerd/cgroups v0.0.0-20200531161412-0dbf7f05ba59
+# github.com/containerd/cgroups v1.0.1
 ## explicit; go 1.13
 github.com/containerd/cgroups/stats/v1
-# github.com/containernetworking/cni v0.8.1
-## explicit
+# github.com/containernetworking/cni v1.0.1
+## explicit; go 1.14
 github.com/containernetworking/cni/libcni
 github.com/containernetworking/cni/pkg/invoke
 github.com/containernetworking/cni/pkg/skel
 github.com/containernetworking/cni/pkg/types
 github.com/containernetworking/cni/pkg/types/020
-github.com/containernetworking/cni/pkg/types/current
+github.com/containernetworking/cni/pkg/types/040
+github.com/containernetworking/cni/pkg/types/100
+github.com/containernetworking/cni/pkg/types/create
+github.com/containernetworking/cni/pkg/types/internal
 github.com/containernetworking/cni/pkg/utils
 github.com/containernetworking/cni/pkg/version
-# github.com/containernetworking/plugins v0.8.7
-## explicit; go 1.14
+# github.com/containernetworking/plugins v1.1.1
+## explicit; go 1.17
 github.com/containernetworking/plugins/pkg/ip
 github.com/containernetworking/plugins/pkg/ns
 github.com/containernetworking/plugins/pkg/testutils
 github.com/containernetworking/plugins/pkg/utils/buildversion
-github.com/containernetworking/plugins/pkg/utils/hwaddr
 github.com/containernetworking/plugins/pkg/utils/sysctl
-# github.com/coreos/go-iptables v0.4.5
-## explicit
+# github.com/coreos/go-iptables v0.6.0
+## explicit; go 1.16
 github.com/coreos/go-iptables/iptables
-# github.com/cpuguy83/go-md2man/v2 v2.0.0
-## explicit; go 1.12
+# github.com/cpuguy83/go-md2man/v2 v2.0.1
+## explicit; go 1.11
 github.com/cpuguy83/go-md2man/v2/md2man
 # github.com/davecgh/go-spew v1.1.1
 ## explicit
@@ -172,8 +177,8 @@ github.com/json-iterator/go
 github.com/juju/errors
 # github.com/juju/testing v0.0.0-20200706033705-4c23f9c453cd
 ## explicit; go 1.14
-# github.com/k8snetworkplumbingwg/network-attachment-definition-client v0.0.0-20200626054723-37f83d1996bc
-## explicit; go 1.12
+# github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.3.0
+## explicit; go 1.17
 github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io
 github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1
 github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils
@@ -214,8 +219,8 @@ github.com/nxadm/tail/ratelimiter
 github.com/nxadm/tail/util
 github.com/nxadm/tail/watch
 github.com/nxadm/tail/winfile
-# github.com/onsi/ginkgo v1.16.4
-## explicit; go 1.15
+# github.com/onsi/ginkgo v1.16.5
+## explicit; go 1.16
 github.com/onsi/ginkgo
 github.com/onsi/ginkgo/config
 github.com/onsi/ginkgo/extensions/table
@@ -237,15 +242,11 @@ github.com/onsi/ginkgo/reporters/stenographer
 github.com/onsi/ginkgo/reporters/stenographer/support/go-colorable
 github.com/onsi/ginkgo/reporters/stenographer/support/go-isatty
 github.com/onsi/ginkgo/types
-# github.com/onsi/gomega v1.14.0
+# github.com/onsi/gomega v1.15.0
 ## explicit; go 1.14
 github.com/onsi/gomega
 github.com/onsi/gomega/format
-github.com/onsi/gomega/internal/assertion
-github.com/onsi/gomega/internal/asyncassertion
-github.com/onsi/gomega/internal/defaults
-github.com/onsi/gomega/internal/oraclematcher
-github.com/onsi/gomega/internal/testingtsupport
+github.com/onsi/gomega/internal
 github.com/onsi/gomega/matchers
 github.com/onsi/gomega/matchers/support/goraph/bipartitegraph
 github.com/onsi/gomega/matchers/support/goraph/edge
@@ -302,7 +303,7 @@ github.com/prometheus/common/model
 github.com/prometheus/procfs
 github.com/prometheus/procfs/internal/fs
 github.com/prometheus/procfs/internal/util
-# github.com/russross/blackfriday/v2 v2.0.1
+# github.com/russross/blackfriday/v2 v2.1.0
 ## explicit
 github.com/russross/blackfriday/v2
 # github.com/safchain/ethtool v0.0.0-20210803160452-9aa261dae9b1
@@ -310,11 +311,10 @@ github.com/russross/blackfriday/v2
 github.com/safchain/ethtool
 # github.com/shurcooL/sanitized_anchor_name v1.0.0
 ## explicit
-github.com/shurcooL/sanitized_anchor_name
 # github.com/sirupsen/logrus v1.9.0
 ## explicit; go 1.13
 github.com/sirupsen/logrus
-# github.com/spf13/afero v1.4.1
+# github.com/spf13/afero v1.6.0
 ## explicit; go 1.13
 github.com/spf13/afero
 github.com/spf13/afero/mem
@@ -331,11 +331,11 @@ github.com/stretchr/testify/mock
 # github.com/urfave/cli/v2 v2.2.0
 ## explicit; go 1.11
 github.com/urfave/cli/v2
-# github.com/vishvananda/netlink v1.1.1-0.20210518155637-4cb3795f2ccb
+# github.com/vishvananda/netlink v1.1.1-0.20210518155637-4cb3795f2ccb => github.com/jcaamano/netlink v1.1.1-0.20220831114501-3a761ed61db6
 ## explicit; go 1.12
 github.com/vishvananda/netlink
 github.com/vishvananda/netlink/nl
-# github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae
+# github.com/vishvananda/netns v0.0.0-20210104183010-2eb08e3e575f
 ## explicit; go 1.12
 github.com/vishvananda/netns
 # go.opencensus.io v0.23.0
@@ -348,6 +348,8 @@ go.opencensus.io/trace/tracestate
 # golang.org/x/crypto v0.0.0-20220214200702-86341886e292
 ## explicit; go 1.17
 golang.org/x/crypto/ed25519
+# golang.org/x/mod v0.6.0-dev.0.20220106191415-9b9b3d81d5e3
+## explicit; go 1.17
 # golang.org/x/net v0.0.0-20220526153639-5463443f8c37
 ## explicit; go 1.17
 golang.org/x/net/bpf
@@ -409,6 +411,10 @@ golang.org/x/text/width
 # golang.org/x/time v0.0.0-20220210224613-90d013bbcef8
 ## explicit
 golang.org/x/time/rate
+# golang.org/x/tools v0.1.10-0.20220218145154-897bd77cd717
+## explicit; go 1.17
+# golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1
+## explicit; go 1.11
 # google.golang.org/appengine v1.6.7
 ## explicit; go 1.11
 google.golang.org/appengine/internal
@@ -418,7 +424,7 @@ google.golang.org/appengine/internal/log
 google.golang.org/appengine/internal/remote_api
 google.golang.org/appengine/internal/urlfetch
 google.golang.org/appengine/urlfetch
-# google.golang.org/genproto v0.0.0-20210402141018-6c239bbf2bb1
+# google.golang.org/genproto v0.0.0-20220107163113-42d7afdf6368
 ## explicit; go 1.11
 google.golang.org/genproto/googleapis/rpc/status
 # google.golang.org/grpc v1.49.0
@@ -905,6 +911,10 @@ k8s.io/client-go/util/keyutil
 k8s.io/client-go/util/retry
 k8s.io/client-go/util/testing
 k8s.io/client-go/util/workqueue
+# k8s.io/code-generator v0.24.0 => k8s.io/code-generator v0.24.0
+## explicit; go 1.16
+# k8s.io/gengo v0.0.0-20211129171323-c02415ce4185
+## explicit; go 1.13
 # k8s.io/klog/v2 v2.60.1
 ## explicit; go 1.13
 k8s.io/klog/v2
@@ -951,7 +961,9 @@ sigs.k8s.io/structured-merge-diff/v4/value
 # sigs.k8s.io/yaml v1.2.0
 ## explicit; go 1.12
 sigs.k8s.io/yaml
+# github.com/Microsoft/hcsshim => github.com/Microsoft/hcsshim v0.8.20
 # github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
+# github.com/vishvananda/netlink => github.com/jcaamano/netlink v1.1.1-0.20220831114501-3a761ed61db6
 # k8s.io/api => k8s.io/api v0.24.0
 # k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.24.0
 # k8s.io/apimachinery => k8s.io/apimachinery v0.24.0
