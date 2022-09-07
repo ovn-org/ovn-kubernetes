@@ -127,7 +127,7 @@ func (f *FakeAddressSetFactory) removeAddressSet(name string) {
 }
 
 // ExpectAddressSetWithIPs ensures the named address set exists with the given set of IPs
-func (f *FakeAddressSetFactory) ExpectAddressSetWithIPs(name string, ips []string) {
+func (f *FakeAddressSetFactory) expectAddressSetWithIPs(g gomega.Gomega, name string, ips []string) {
 	var lenAddressSet int
 	name4, name6 := MakeAddressSetName(name)
 	as4 := f.getAddressSet(name4)
@@ -143,11 +143,11 @@ func (f *FakeAddressSetFactory) ExpectAddressSetWithIPs(name string, ips []strin
 
 	for _, ip := range ips {
 		if utilnet.IsIPv6(net.ParseIP(ip)) {
-			gomega.Expect(as6).NotTo(gomega.BeNil())
-			gomega.Expect(as6.ips).To(gomega.HaveKey(ip))
+			g.Expect(as6).NotTo(gomega.BeNil())
+			g.Expect(as6.ips).To(gomega.HaveKey(ip))
 		} else {
-			gomega.Expect(as4).NotTo(gomega.BeNil())
-			gomega.Expect(as4.ips).To(gomega.HaveKey(ip))
+			g.Expect(as4).NotTo(gomega.BeNil())
+			g.Expect(as4.ips).To(gomega.HaveKey(ip))
 		}
 	}
 	if lenAddressSet != len(ips) {
@@ -165,12 +165,18 @@ func (f *FakeAddressSetFactory) ExpectAddressSetWithIPs(name string, ips []strin
 
 		klog.Errorf("IPv4 addresses mismatch in cache: %#v, expected: %#v", addrs, ips)
 	}
-	gomega.Expect(lenAddressSet).To(gomega.Equal(len(ips)))
+
+	g.Expect(lenAddressSet).To(gomega.Equal(len(ips)))
+}
+
+func (f *FakeAddressSetFactory) ExpectAddressSetWithIPs(name string, ips []string) {
+	g := gomega.Default
+	f.expectAddressSetWithIPs(g, name, ips)
 }
 
 func (f *FakeAddressSetFactory) EventuallyExpectAddressSetWithIPs(name string, ips []string) {
-	gomega.Eventually(func() {
-		f.ExpectAddressSetWithIPs(name, ips)
+	gomega.Eventually(func(g gomega.Gomega) {
+		f.expectAddressSetWithIPs(g, name, ips)
 	}).Should(gomega.Succeed())
 }
 
@@ -184,21 +190,25 @@ func (f *FakeAddressSetFactory) EventuallyExpectEmptyAddressSetExist(name string
 	f.EventuallyExpectAddressSetWithIPs(name, nil)
 }
 
+func (f *FakeAddressSetFactory) addressSetExists(name string) bool {
+	f.Lock()
+	defer f.Unlock()
+	_, ok := f.sets[name]
+	return ok
+}
+
 // ExpectAddressSetExist ensures the named address set eventually exiss
-func (f *FakeAddressSetFactory) ExpectAddressSetExist(name string) {
+func (f *FakeAddressSetFactory) EventuallyExpectAddressSet(name string) {
 	gomega.Eventually(func() bool {
-		f.Lock()
-		defer f.Unlock()
-		_, ok := f.sets[name]
-		return ok
+		return f.addressSetExists(name)
 	}).Should(gomega.BeTrue())
 }
 
 // EventuallyExpectNoAddressSet ensures the named address set eventually does not exist
 func (f *FakeAddressSetFactory) EventuallyExpectNoAddressSet(name string) {
-	gomega.Eventually(func() {
-		f.ExpectAddressSetExist(name)
-	}).ShouldNot(gomega.Succeed())
+	gomega.Eventually(func() bool {
+		return f.addressSetExists(name)
+	}).Should(gomega.BeFalse())
 }
 
 type removeFunc func(string)
