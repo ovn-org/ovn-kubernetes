@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -23,6 +24,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -43,6 +45,12 @@ type egressIPDialer interface {
 }
 
 var dialer egressIPDialer = &egressIPDial{}
+
+type healthcheckClientAllocator interface {
+	allocate(nodeName string) healthcheck.EgressIPHealthClient
+}
+
+var hccAllocator healthcheckClientAllocator = &egressIPHealthcheckClientAllocator{}
 
 func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err error) {
 	// Lock the assignment, this is needed because this function can end up
@@ -1796,6 +1804,7 @@ func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
 			egressIPConfig: parsedEgressIPConfig,
 			mgmtIPs:        mgmtIPs,
 			allocations:    make(map[string]string),
+			healthClient:   hccAllocator.allocate(node.Name),
 		}
 	}
 	return nil
@@ -1827,6 +1836,9 @@ func (oc *Controller) deleteNodeForEgress(node *v1.Node) error {
 		return err
 	}
 	oc.eIPC.allocator.Lock()
+	if eNode, exists := oc.eIPC.allocator.cache[node.Name]; exists {
+		eNode.healthClient.Disconnect()
+	}
 	delete(oc.eIPC.allocator.cache, node.Name)
 	oc.eIPC.allocator.Unlock()
 	return nil
@@ -1848,7 +1860,6 @@ func (oc *Controller) initClusterEgressPolicies(nodes []interface{}) error {
 	if err := oc.createDefaultNoRerouteServicePolicies(v4ClusterSubnet, v6ClusterSubnet); err != nil {
 		return err
 	}
-	// TODO(FF): Make go routine below use oc.stopChan
 	go oc.checkEgressNodesReachability()
 	return nil
 }
@@ -1858,6 +1869,7 @@ type egressNode struct {
 	egressIPConfig     *util.ParsedNodeEgressIPConfiguration
 	mgmtIPs            []net.IP
 	allocations        map[string]string
+	healthClient       healthcheck.EgressIPHealthClient
 	isReady            bool
 	isReachable        bool
 	isEgressAssignable bool
@@ -1921,6 +1933,8 @@ type egressIPController struct {
 	watchFactory *factory.WatchFactory
 	// EgressIP Node reachability total timeout configuration
 	egressIPTotalTimeout int
+	// EgressIP Node reachability gRPC port (0 means it should use dial instead)
+	egressIPNodeHealthCheckPort int
 }
 
 // addPodEgressIPAssignment will program OVN with logical router policies
@@ -2178,41 +2192,70 @@ func (e *egressIPController) deleteEgressIPStatusSetup(name string, status egres
 // is important because egress IP is based upon routing traffic to these nodes,
 // and if they aren't reachable we shouldn't be using them for egress IP.
 func (oc *Controller) checkEgressNodesReachability() {
+	timer := time.NewTicker(5 * time.Second)
+	defer timer.Stop()
 	for {
-		reAddOrDelete := map[string]bool{}
-		oc.eIPC.allocator.Lock()
-		for _, eNode := range oc.eIPC.allocator.cache {
-			if eNode.isEgressAssignable && eNode.isReady {
-				wasReachable := eNode.isReachable
-				isReachable := oc.isReachable(eNode)
-				if wasReachable && !isReachable {
-					reAddOrDelete[eNode.name] = true
-				} else if !wasReachable && isReachable {
-					reAddOrDelete[eNode.name] = false
-				}
-				eNode.isReachable = isReachable
+		select {
+		case <-timer.C:
+			checkEgressNodesReachabilityIterate(oc)
+		case <-oc.stopChan:
+			klog.V(5).Infof("Stop channel got triggered: will stop checkEgressNodesReachability")
+			return
+		}
+	}
+}
+
+func checkEgressNodesReachabilityIterate(oc *Controller) {
+	reAddOrDelete := map[string]bool{}
+	oc.eIPC.allocator.Lock()
+	for _, eNode := range oc.eIPC.allocator.cache {
+		if eNode.isEgressAssignable && eNode.isReady {
+			wasReachable := eNode.isReachable
+			isReachable := oc.isReachable(eNode)
+			if wasReachable && !isReachable {
+				reAddOrDelete[eNode.name] = true
+			} else if !wasReachable && isReachable {
+				reAddOrDelete[eNode.name] = false
+			}
+			eNode.isReachable = isReachable
+		} else {
+			// End connection (if there is one). This is important because
+			// it accounts for cases where node is not labelled with
+			// egress-assignable, so connection is no longer needed. Calling
+			// this on a already disconnected node is expected to be cheap.
+			eNode.healthClient.Disconnect()
+		}
+	}
+	oc.eIPC.allocator.Unlock()
+	for nodeName, shouldDelete := range reAddOrDelete {
+		if shouldDelete {
+			metrics.RecordEgressIPUnreachableNode()
+			klog.Warningf("Node: %s is detected as unreachable, deleting it from egress assignment", nodeName)
+			if err := oc.deleteEgressNode(nodeName); err != nil {
+				klog.Errorf("Node: %s is detected as unreachable, but could not re-assign egress IPs, err: %v", nodeName, err)
+			}
+		} else {
+			klog.Infof("Node: %s is detected as reachable and ready again, adding it to egress assignment", nodeName)
+			if err := oc.addEgressNode(nodeName); err != nil {
+				klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", nodeName, err)
 			}
 		}
-		oc.eIPC.allocator.Unlock()
-		for nodeName, shouldDelete := range reAddOrDelete {
-			if shouldDelete {
-				metrics.RecordEgressIPUnreachableNode()
-				klog.Warningf("Node: %s is detected as unreachable, deleting it from egress assignment", nodeName)
-				if err := oc.deleteEgressNode(nodeName); err != nil {
-					klog.Errorf("Node: %s is detected as unreachable, but could not re-assign egress IPs, err: %v", nodeName, err)
-				}
-			} else {
-				klog.Infof("Node: %s is detected as reachable and ready again, adding it to egress assignment", nodeName)
-				if err := oc.addEgressNode(nodeName); err != nil {
-					klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", nodeName, err)
-				}
-			}
-		}
-		time.Sleep(5 * time.Second)
 	}
 }
 
 func (oc *Controller) isReachable(node *egressNode) bool {
+	// Check if we need to do node reachability check
+	if oc.eIPC.egressIPTotalTimeout == 0 {
+		return true
+	}
+
+	if oc.eIPC.egressIPNodeHealthCheckPort == 0 {
+		return oc.isReachableLegacy(node)
+	}
+	return oc.isReachableViaGRPC(node, oc.eIPC.egressIPNodeHealthCheckPort)
+}
+
+func (oc *Controller) isReachableLegacy(node *egressNode) bool {
 	var retryTimeOut, initialRetryTimeOut time.Duration
 
 	numMgmtIPs := len(node.mgmtIPs)
@@ -2274,6 +2317,25 @@ func (e *egressIPDial) dial(ip net.IP, timeout time.Duration) bool {
 		}
 	}
 	return true
+}
+
+type egressIPHealthcheckClientAllocator struct{}
+
+func (hccAlloc *egressIPHealthcheckClientAllocator) allocate(nodeName string) healthcheck.EgressIPHealthClient {
+	return healthcheck.NewEgressIPHealthClient(nodeName)
+}
+
+func (oc *Controller) isReachableViaGRPC(node *egressNode, healthCheckPort int) bool {
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), time.Duration(oc.eIPC.egressIPTotalTimeout)*time.Second)
+	defer dialCancel()
+
+	if !node.healthClient.IsConnected() {
+		// gRPC session is not up. Attempt to connect and if that suceeds, we will declare node as reacheable.
+		return node.healthClient.Connect(dialCtx, node.mgmtIPs, healthCheckPort)
+	}
+
+	// gRPC session is already established. Send a probe, which will succeed, or close the session.
+	return node.healthClient.Probe(dialCtx)
 }
 
 func getClusterSubnets() ([]*net.IPNet, []*net.IPNet) {

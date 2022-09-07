@@ -3,6 +3,55 @@
 # Returns the full directory name of the script
 DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
+function if_error_exit {
+    ###########################################################################
+    # Description:                                                            #
+    # Validate if previous command failed and show an error msg (if provided) #
+    #                                                                         #
+    # Arguments:                                                              #
+    #   $1 - error message if not provided, it will just exit                 #
+    ###########################################################################
+    if [ "$?" != "0" ]; then
+        if [ -n "$1" ]; then
+            RED="\e[31m"
+            ENDCOLOR="\e[0m"
+            echo -e "[ ${RED}FAILED${ENDCOLOR} ] ${1}"
+        fi
+        exit 1
+    fi
+}
+
+function setup_kubectl_bin() {
+    ###########################################################################
+    # Description:                                                            #
+    # setup kubectl for querying the cluster                                  #
+    #                                                                         #
+    # Arguments:                                                              #
+    #   $1 - error message if not provided, it will just exit                 #
+    ###########################################################################
+    if [ ! -d "./bin" ]
+    then
+        mkdir -p ./bin
+        if_error_exit "Failed to create bin dir!"
+    fi
+
+    if [[ "$OSTYPE" == "linux-gnu" ]]; then
+        OS_TYPE="linux"
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        OS_TYPE="darwin"
+    fi
+
+    pushd ./bin
+       if [ ! -f ./kubectl ]; then
+           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/${OS_TYPE}/amd64/kubectl"
+           if_error_exit "Failed to download kubectl failed!"
+       fi
+    popd
+
+    chmod +x ./bin/kubectl
+    export PATH=${PATH}:$(pwd)/bin
+}
+
 run_kubectl() {
   local retries=0
   local attempts=10
@@ -50,6 +99,7 @@ usage() {
     echo "                 [-dd |--dns-domain |"
     echo "                 [-ric | --run-in-container |"
     echo "                 [-cn | --cluster-name |"
+    echo "                 [-ehp|--egress-ip-healthcheck-port <num>]"
     echo "                 [-h]]"
     echo ""
     echo "-cf  | --config-file                Name of the KIND J2 configuration file."
@@ -92,6 +142,7 @@ usage() {
     echo "-dd  | --dns-domain                 Configure a custom dnsDomain for k8s services, Defaults to 'cluster.local'"
     echo "-cn  | --cluster-name               Configure the kind cluster's name"
     echo "-ric | --run-in-container           Configure the script to be run from a docker container, allowing it to still communicate with the kind controlplane" 
+    echo "-ehp | --egress-ip-healthcheck-port TCP port used for gRPC session by egress IP node check. DEFAULT: 9107 (Use "0" for legacy dial to port 9)."
     echo "--delete                      	    Delete current cluster"
     echo ""
 }
@@ -222,6 +273,14 @@ parse_args() {
                                                 ;;
             -ric | --run-in-container )         RUN_IN_CONTAINER=true
                                                 ;;
+            -ehp | --egress-ip-healthcheck-port ) shift
+                                                if ! [[ "$1" =~ ^[0-9]+$ ]]; then
+                                                    echo "Invalid egress-ip-healthcheck-port: $1"
+                                                    usage
+                                                    exit 1
+                                                fi
+                                                OVN_EGRESSIP_HEALTHCHECK_PORT=$1
+                                                ;;
             --delete )                          delete
                                                 exit
                                                 ;;
@@ -277,6 +336,7 @@ print_params() {
      echo "OVN_HOST_NETWORK_NAMESPACE = $OVN_HOST_NETWORK_NAMESPACE"
      echo "OVN_ENABLE_EX_GW_NETWORK_BRIDGE = $OVN_ENABLE_EX_GW_NETWORK_BRIDGE"
      echo "OVN_EX_GW_NETWORK_INTERFACE = $OVN_EX_GW_NETWORK_INTERFACE"
+     echo "OVN_EGRESSIP_HEALTHCHECK_PORT = $OVN_EGRESSIP_HEALTHCHECK_PORT"
      echo ""
 }
 
@@ -293,6 +353,16 @@ install_j2_renderer() {
 }
 
 check_dependencies() {
+  if ! command_exists curl ; then
+    echo "Dependency not met: Command not found 'curl'"
+    exit 1
+  fi
+
+  if ! command_exists kubectl ; then
+    echo "'kubectl' not found, installing"
+    setup_kubectl_bin
+  fi
+
   if ! command_exists kind ; then
     echo "Dependency not met: Command not found 'kind'"
     exit 1
@@ -382,6 +452,7 @@ set_default_params() {
     KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
   fi
   OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
+  OVN_EGRESSIP_HEALTHCHECK_PORT=${OVN_EGRESSIP_HEALTHCHECK_PORT:-9107}
   OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
 }
 
@@ -579,6 +650,7 @@ create_ovn_kube_manifests() {
     --ovn-loglevel-controller="${OVN_LOG_LEVEL_CONTROLLER}" \
     --ovnkube-config-duration-enable=true \
     --egress-ip-enable=true \
+    --egress-ip-healthcheck-port="${OVN_EGRESSIP_HEALTHCHECK_PORT}" \
     --egress-firewall-enable=true \
     --egress-qos-enable=true \
     --v4-join-subnet="${JOIN_SUBNET_IPV4}" \

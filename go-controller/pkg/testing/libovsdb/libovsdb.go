@@ -22,6 +22,7 @@ import (
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/libovsdb/ovsdb/serverdb"
 	"github.com/ovn-org/libovsdb/server"
+	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -139,7 +140,7 @@ func newOVSDBTestHarness(serverData []TestData, newServer serverBuilderFn, newCl
 
 func newNBClient(cfg config.OvnAuthConfig, cleanup *Cleanup) (libovsdbclient.Client, error) {
 	stopChan := make(chan struct{})
-	libovsdbOvnNBClient, err := libovsdb.NewNBClientWithConfig(cfg, stopChan)
+	libovsdbOvnNBClient, err := libovsdb.NewNBClientWithConfig(cfg, prometheus.NewRegistry(), stopChan)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +156,7 @@ func newNBClient(cfg config.OvnAuthConfig, cleanup *Cleanup) (libovsdbclient.Cli
 
 func newSBClient(cfg config.OvnAuthConfig, cleanup *Cleanup) (libovsdbclient.Client, error) {
 	stopChan := make(chan struct{})
-	libovsdbOvnSBClient, err := libovsdb.NewSBClientWithConfig(cfg, stopChan)
+	libovsdbOvnSBClient, err := libovsdb.NewSBClientWithConfig(cfg, prometheus.NewRegistry(), stopChan)
 	if err != nil {
 		return nil, err
 	}
