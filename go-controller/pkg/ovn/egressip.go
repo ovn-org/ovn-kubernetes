@@ -1218,7 +1218,7 @@ func (oc *Controller) isEgressNodeReachable(egressNode *kapi.Node) bool {
 	oc.eIPC.allocator.Lock()
 	defer oc.eIPC.allocator.Unlock()
 	if eNode, exists := oc.eIPC.allocator.cache[egressNode.Name]; exists {
-		return eNode.isReachable || oc.isReachable(eNode)
+		return eNode.isReachable || oc.isReachable(eNode.name, eNode.mgmtIPs, eNode.healthClient)
 	}
 	return false
 }
@@ -2222,7 +2222,7 @@ func checkEgressNodesReachabilityIterate(oc *Controller) {
 	for _, eNode := range oc.eIPC.allocator.cache {
 		if eNode.isEgressAssignable && eNode.isReady {
 			wasReachable := eNode.isReachable
-			isReachable := oc.isReachable(eNode)
+			isReachable := oc.isReachable(eNode.name, eNode.mgmtIPs, eNode.healthClient)
 			if wasReachable && !isReachable {
 				reAddOrDelete[eNode.name] = true
 			} else if !wasReachable && isReachable {
@@ -2254,27 +2254,27 @@ func checkEgressNodesReachabilityIterate(oc *Controller) {
 	}
 }
 
-func (oc *Controller) isReachable(node *egressNode) bool {
+func (oc *Controller) isReachable(nodeName string, mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient) bool {
 	// Check if we need to do node reachability check
 	if oc.eIPC.egressIPTotalTimeout == 0 {
 		return true
 	}
 
 	if oc.eIPC.egressIPNodeHealthCheckPort == 0 {
-		return oc.isReachableLegacy(node)
+		return isReachableLegacy(nodeName, mgmtIPs, oc.eIPC.egressIPTotalTimeout)
 	}
-	return oc.isReachableViaGRPC(node, oc.eIPC.egressIPNodeHealthCheckPort)
+	return isReachableViaGRPC(mgmtIPs, healthClient, oc.eIPC.egressIPNodeHealthCheckPort, oc.eIPC.egressIPTotalTimeout)
 }
 
-func (oc *Controller) isReachableLegacy(node *egressNode) bool {
+func isReachableLegacy(node string, mgmtIPs []net.IP, totalTimeout int) bool {
 	var retryTimeOut, initialRetryTimeOut time.Duration
 
-	numMgmtIPs := len(node.mgmtIPs)
+	numMgmtIPs := len(mgmtIPs)
 	if numMgmtIPs == 0 {
 		return false
 	}
 
-	switch oc.eIPC.egressIPTotalTimeout {
+	switch totalTimeout {
 	// Check if we need to do node reachability check
 	case 0:
 		return true
@@ -2291,9 +2291,9 @@ func (oc *Controller) isReachableLegacy(node *egressNode) bool {
 	}
 
 	timeout := initialRetryTimeOut
-	endTime := time.Now().Add(time.Second * time.Duration(oc.eIPC.egressIPTotalTimeout))
+	endTime := time.Now().Add(time.Second * time.Duration(totalTimeout))
 	for time.Now().Before(endTime) {
-		for _, ip := range node.mgmtIPs {
+		for _, ip := range mgmtIPs {
 			if dialer.dial(ip, timeout) {
 				return true
 			}
@@ -2301,7 +2301,7 @@ func (oc *Controller) isReachableLegacy(node *egressNode) bool {
 		time.Sleep(100 * time.Millisecond)
 		timeout = retryTimeOut
 	}
-	klog.Errorf("Failed reachability check for %s", node.name)
+	klog.Errorf("Failed reachability check for %s", node)
 	return false
 }
 
@@ -2336,17 +2336,17 @@ func (hccAlloc *egressIPHealthcheckClientAllocator) allocate(nodeName string) he
 	return healthcheck.NewEgressIPHealthClient(nodeName)
 }
 
-func (oc *Controller) isReachableViaGRPC(node *egressNode, healthCheckPort int) bool {
-	dialCtx, dialCancel := context.WithTimeout(context.Background(), time.Duration(oc.eIPC.egressIPTotalTimeout)*time.Second)
+func isReachableViaGRPC(mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient, healthCheckPort, totalTimeout int) bool {
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), time.Duration(totalTimeout)*time.Second)
 	defer dialCancel()
 
-	if !node.healthClient.IsConnected() {
+	if !healthClient.IsConnected() {
 		// gRPC session is not up. Attempt to connect and if that suceeds, we will declare node as reacheable.
-		return node.healthClient.Connect(dialCtx, node.mgmtIPs, healthCheckPort)
+		return healthClient.Connect(dialCtx, mgmtIPs, healthCheckPort)
 	}
 
 	// gRPC session is already established. Send a probe, which will succeed, or close the session.
-	return node.healthClient.Probe(dialCtx)
+	return healthClient.Probe(dialCtx)
 }
 
 func getClusterSubnets() ([]*net.IPNet, []*net.IPNet) {
