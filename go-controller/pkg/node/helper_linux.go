@@ -45,9 +45,6 @@ func getDefaultGatewayInterfaceDetails(gwIface string) (string, []net.IP, error)
 		gatewayIPs = append(gatewayIPs, gw)
 	}
 
-	if len(gatewayIPs) == 0 {
-		return "", nil, fmt.Errorf("failed to get default gateway interface")
-	}
 	return intfName, gatewayIPs, nil
 }
 
@@ -129,7 +126,7 @@ func getDefaultGatewayInterfaceByFamily(family int, gwIface string) (string, net
 			return foundIfName, nh.Gw, nil
 		}
 	}
-	return "", net.IP{}, fmt.Errorf("failed to get default gateway interface")
+	return "", net.IP{}, nil
 }
 
 func getIntfName(gatewayIntf string) (string, error) {

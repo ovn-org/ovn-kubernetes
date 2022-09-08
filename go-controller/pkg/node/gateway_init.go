@@ -146,17 +146,15 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 			for _, defaultGatewayNextHop := range defaultGatewayNextHops {
 				if needIPv4NextHop && !utilnet.IsIPv6(defaultGatewayNextHop) {
 					gatewayNextHops = append(gatewayNextHops, defaultGatewayNextHop)
-					needIPv4NextHop = false
 				} else if needIPv6NextHop && utilnet.IsIPv6(defaultGatewayNextHop) {
 					gatewayNextHops = append(gatewayNextHops, defaultGatewayNextHop)
-					needIPv6NextHop = false
 				}
-			}
-			if needIPv4NextHop || needIPv6NextHop {
-				return nil, "", fmt.Errorf("failed to get next-hop: IPv4=%v IPv6=%v", needIPv4NextHop, needIPv6NextHop)
 			}
 		}
 		if gatewayIntf == "" {
+			if defaultGatewayIntf == "" {
+				return nil, "", fmt.Errorf("unable to find default gateway and none provided via config")
+			}
 			gatewayIntf = defaultGatewayIntf
 		}
 	}
