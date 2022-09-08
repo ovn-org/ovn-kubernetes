@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -23,6 +24,7 @@ const (
 	iptableExternalIPChain = "OVN-KUBE-EXTERNALIP" // called from nat-PREROUTING and nat-OUTPUT
 	iptableETPChain        = "OVN-KUBE-ETP"        // called from nat-PREROUTING only
 	iptableITPChain        = "OVN-KUBE-ITP"        // called from mangle-OUTPUT and nat-OUTPUT
+	iptableESVCChain       = "OVN-KUBE-EGRESS-SVC" // called from nat-POSTROUTING
 )
 
 func clusterIPTablesProtocols() []iptables.Protocol {
@@ -97,6 +99,16 @@ func delIptRules(rules []iptRule) error {
 
 func getGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
 	iptRules := []iptRule{}
+	if chain == iptableESVCChain {
+		return []iptRule{
+			{
+				table:    "nat",
+				chain:    "POSTROUTING",
+				args:     []string{"-j", chain},
+				protocol: proto,
+			},
+		}
+	}
 	if chain == iptableITPChain {
 		iptRules = append(iptRules,
 			iptRule{
@@ -338,7 +350,7 @@ func addChaintoTable(ipt util.IPTablesHelper, tableName, chain string) {
 func handleGatewayIPTables(iptCallback func(rules []iptRule) error, genGatewayChainRules func(chain string, proto iptables.Protocol) []iptRule) error {
 	rules := make([]iptRule, 0)
 	// (NOTE: Order is important, add jump to iptableETPChain before jump to NP/EIP chains)
-	for _, chain := range []string{iptableITPChain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain} {
+	for _, chain := range []string{iptableITPChain, iptableESVCChain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain} {
 		for _, proto := range clusterIPTablesProtocols() {
 			ipt, err := util.GetIPTablesHelper(proto)
 			if err != nil {
@@ -473,5 +485,35 @@ func getGatewayIPTRules(service *kapi.Service, svcHasLocalHostNetEndPnt bool) []
 			}
 		}
 	}
+	return rules
+}
+
+// Returns all of the SNAT rules that should be created for an egress service with the given endpoints.
+func egressSVCIPTRulesForEndpoints(svc *kapi.Service, v4Eps, v6Eps []string) []iptRule {
+	rules := []iptRule{}
+
+	comment, _ := cache.MetaNamespaceKeyFunc(svc)
+	for _, lb := range svc.Status.LoadBalancer.Ingress {
+		lbProto := getIPTablesProtocol(lb.IP)
+		epsForProto := v4Eps
+		if lbProto == iptables.ProtocolIPv6 {
+			epsForProto = v6Eps
+		}
+
+		for _, ep := range epsForProto {
+			rules = append(rules, iptRule{
+				table: "nat",
+				chain: iptableESVCChain,
+				args: []string{
+					"-s", ep,
+					"-m", "comment", "--comment", comment,
+					"-j", "SNAT",
+					"--to-source", lb.IP,
+				},
+				protocol: lbProto,
+			})
+		}
+	}
+
 	return rules
 }
