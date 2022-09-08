@@ -208,8 +208,8 @@ var _ = Describe("Node DPU tests", func() {
 		})
 
 		It("Fails if configure OVS fails (with netdev external-ids)", func() {
-			// set vfRep netdev name
-			ifInfo.VfNetdevName = "netdev-vf9"
+			// set representor netdev name
+			ifInfo.NetdevName = "netdev-vf9"
 
 			// set ovs CMD output
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -217,7 +217,7 @@ var _ = Describe("Node DPU tests", func() {
 					"external-ids:iface-id="+genIfaceID(pod.Namespace, pod.Name)),
 			})
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: genOVSAddPortCmdWithNetdev(vfRep, ifInfo.VfNetdevName, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
+				Cmd: genOVSAddPortCmdWithNetdev(vfRep, ifInfo.NetdevName, genIfaceID(pod.Namespace, pod.Name), "", "", "a8d09931", string(pod.UID)),
 				Err: fmt.Errorf("failed to run ovs command"),
 			})
 			// Mock netlink/ovs calls for cleanup
