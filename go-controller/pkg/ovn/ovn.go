@@ -37,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
@@ -693,40 +694,59 @@ func (oc *Controller) WatchNodes() error {
 	return err
 }
 
-// Verify if controller can support ACL logging and validate annotation
-func (oc *Controller) aclLoggingCanEnable(annotation string, nsInfo *namespaceInfo) bool {
-	if !oc.aclLoggingEnabled || annotation == "" {
-		nsInfo.aclLogging.Deny = ""
-		nsInfo.aclLogging.Allow = ""
-		return false
-	}
+// aclLoggingUpdateNsInfo parses the provided annotation values and sets nsInfo.aclLogging.Deny and
+// nsInfo.aclLogging.Allow. If errors are encountered parsing the annotation, disable logging completely. If either
+// value contains invalid input, disable logging for the respective key. This is needed to ensure idempotency.
+// More details:
+// *) If the provided annotation cannot be unmarshaled: Disable both Deny and Allow logging. Return an error.
+// *) Valid values for "allow" and "deny" are  "alert", "warning", "notice", "info", "debug", "".
+// *) Invalid values will return an error, and logging will be disabled for the respective key.
+// *) In the following special cases, nsInfo.aclLogging.Deny and nsInfo.aclLogging.Allow. will both be reset to ""
+//    without logging an error, meaning that logging will be switched off:
+//    i) oc.aclLoggingEnabled == false
+//    ii) annotation == ""
+//    iii) annotation == "{}"
+// *) If one of "allow" or "deny" can be parsed and has a valid value, but the other key is not present in the
+//    annotation, then assume that this key should be disabled by setting its nsInfo value to "".
+func (oc *Controller) aclLoggingUpdateNsInfo(annotation string, nsInfo *namespaceInfo) error {
 	var aclLevels ACLLoggingLevels
-	err := json.Unmarshal([]byte(annotation), &aclLevels)
-	if err != nil {
-		return false
+	var errors []error
+
+	// If logging is disabled or if the annotation is "" or "{}", use empty strings. Otherwise, parse the annotation.
+	if oc.aclLoggingEnabled && annotation != "" && annotation != "{}" {
+		err := json.Unmarshal([]byte(annotation), &aclLevels)
+		if err != nil {
+			// Disable Allow and Deny logging to ensure idempotency.
+			nsInfo.aclLogging.Allow = ""
+			nsInfo.aclLogging.Deny = ""
+			return fmt.Errorf("could not unmarshal namespace ACL annotation '%s', disabling logging, err: %q",
+				annotation, err)
+		}
 	}
 
-	// Using newDenyLoggingLevel and newAllowLoggingLevel allows resetting nsinfo state.
-	// This is important if a user sets either the allow level or the deny level flag to an
-	// invalid value or after they remove either the allow or the deny annotation.
-	// If either of the 2 (allow or deny logging level) is set with a valid level, return true.
-	newDenyLoggingLevel := ""
-	newAllowLoggingLevel := ""
-	okCnt := 0
-	for _, s := range []string{nbdb.ACLSeverityAlert, nbdb.ACLSeverityWarning, nbdb.ACLSeverityNotice,
-		nbdb.ACLSeverityInfo, nbdb.ACLSeverityDebug} {
-		if s == aclLevels.Deny {
-			newDenyLoggingLevel = aclLevels.Deny
-			okCnt++
-		}
-		if s == aclLevels.Allow {
-			newAllowLoggingLevel = aclLevels.Allow
-			okCnt++
-		}
+	// Valid log levels are the various preestablished levels or the empty string.
+	validLogLevels := sets.NewString(nbdb.ACLSeverityAlert, nbdb.ACLSeverityWarning, nbdb.ACLSeverityNotice,
+		nbdb.ACLSeverityInfo, nbdb.ACLSeverityDebug, "")
+
+	// Set Deny logging.
+	if validLogLevels.Has(aclLevels.Deny) {
+		nsInfo.aclLogging.Deny = aclLevels.Deny
+	} else {
+		errors = append(errors, fmt.Errorf("disabling deny logging due to invalid deny annotation. "+
+			"%q is not a valid log severity", aclLevels.Deny))
+		nsInfo.aclLogging.Deny = ""
 	}
-	nsInfo.aclLogging.Deny = newDenyLoggingLevel
-	nsInfo.aclLogging.Allow = newAllowLoggingLevel
-	return okCnt > 0
+
+	// Set Allow logging.
+	if validLogLevels.Has(aclLevels.Allow) {
+		nsInfo.aclLogging.Allow = aclLevels.Allow
+	} else {
+		errors = append(errors, fmt.Errorf("disabling allow logging due to an invalid allow annotation. "+
+			"%q is not a valid log severity", aclLevels.Allow))
+		nsInfo.aclLogging.Allow = ""
+	}
+
+	return apierrors.NewAggregate(errors)
 }
 
 // gatewayChanged() compares old annotations to new and returns true if something has changed.

@@ -213,12 +213,13 @@ func (oc *Controller) configureNamespace(nsInfo *namespaceInfo, ns *kapi.Namespa
 		}
 	}
 
-	annotation := ns.Annotations[util.AclLoggingAnnotation]
-	if annotation != "" {
-		if oc.aclLoggingCanEnable(annotation, nsInfo) {
+	if annotation, ok := ns.Annotations[util.AclLoggingAnnotation]; ok {
+		if err := oc.aclLoggingUpdateNsInfo(annotation, nsInfo); err == nil {
 			klog.Infof("Namespace %s: ACL logging is set to deny=%s allow=%s", ns.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
 		} else {
-			klog.Warningf("Namespace %s: ACL logging is not enabled due to malformed annotation", ns.Name)
+			klog.Warningf("Namespace %s: ACL logging contained malformed annotation, "+
+				"ACL logging is set to deny=%s allow=%s, err: %q",
+				ns.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow, err)
 		}
 	}
 
@@ -315,7 +316,14 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 	aclAnnotation := newer.Annotations[util.AclLoggingAnnotation]
 	oldACLAnnotation := old.Annotations[util.AclLoggingAnnotation]
 	// support for ACL logging update, if new annotation is empty, make sure we propagate new setting
-	if aclAnnotation != oldACLAnnotation && (oc.aclLoggingCanEnable(aclAnnotation, nsInfo) || aclAnnotation == "") {
+	if aclAnnotation != oldACLAnnotation {
+		// When input cannot be parsed correctly, aclLoggingUpdateNsInfo disables logging and returns an error. Hence,
+		// log a warning to make users aware of issues with the annotation. See aclLoggingUpdateNsInfo for more details.
+		if err := oc.aclLoggingUpdateNsInfo(aclAnnotation, nsInfo); err != nil {
+			klog.Warningf("Namespace %s: ACL logging contained malformed annotation, "+
+				"ACL logging is set to deny=%s allow=%s, err: %q",
+				newer.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow, err)
+		}
 		if len(nsInfo.networkPolicies) > 0 {
 			// deny rules are all one per namespace
 			if err := oc.setNetworkPolicyACLLoggingForNamespace(old.Name, nsInfo); err != nil {
