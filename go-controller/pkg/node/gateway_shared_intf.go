@@ -376,8 +376,12 @@ func (npw *nodePortWatcher) getAndSetServiceInfo(index ktypes.NamespacedName, se
 	defer npw.serviceInfoLock.Unlock()
 
 	old, exists = npw.serviceInfo[index]
+	var ptrCopy serviceConfig
+	if exists {
+		ptrCopy = *old
+	}
 	npw.serviceInfo[index] = &serviceConfig{service: service, hasLocalHostNetworkEp: hasLocalHostNetworkEp}
-	return old, exists
+	return &ptrCopy, exists
 }
 
 // addOrSetServiceInfo creates and sets the serviceConfig if it doesn't exist
@@ -405,7 +409,7 @@ func (npw *nodePortWatcher) updateServiceInfo(index ktypes.NamespacedName, servi
 		klog.V(5).Infof("No serviceConfig found for service %s in namespace %s", index.Name, index.Namespace)
 		return nil, exists
 	}
-
+	ptrCopy := *old
 	if service != nil {
 		npw.serviceInfo[index].service = service
 	}
@@ -414,7 +418,7 @@ func (npw *nodePortWatcher) updateServiceInfo(index ktypes.NamespacedName, servi
 		npw.serviceInfo[index].hasLocalHostNetworkEp = *hasLocalHostNetworkEp
 	}
 
-	return old, exists
+	return &ptrCopy, exists
 }
 
 // addServiceRules ensures the correct iptables rules and OpenFlow physical
