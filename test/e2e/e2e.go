@@ -48,6 +48,12 @@ const (
 
 type podCondition = func(pod *v1.Pod) (bool, error)
 
+// checkContinuousConnectivity creates a pod and checks that it can connect to the given host over tries*2 seconds.
+// The created pod object is sent to the podChan while any errors along the way are sent to the errChan.
+// Callers are expected to read the errChan and verify that they received a nil before fetching
+// the pod from the podChan to be sure that the pod was created successfully.
+// TODO: this approach with the channels is a bit ugly, it might be worth to refactor this and the other
+// functions that use it similarly in this file.
 func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host string, port, tries, timeout int, podChan chan *v1.Pod, errChan chan error) {
 	contName := fmt.Sprintf("%s-container", podName)
 
@@ -81,7 +87,7 @@ func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host
 	}
 
 	// Wait for pod network setup to be almost ready
-	wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
+	err = wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
 		pod, err := podClient.Get(context.Background(), podName, metav1.GetOptions{})
 		if err != nil {
 			return false, nil
@@ -89,6 +95,10 @@ func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host
 		_, ok := pod.Annotations[podNetworkAnnotation]
 		return ok, nil
 	})
+	if err != nil {
+		errChan <- err
+		return
+	}
 
 	err = e2epod.WaitForPodNotPending(f.ClientSet, f.Namespace.Name, podName)
 	if err != nil {
@@ -102,6 +112,7 @@ func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host
 		return
 	}
 
+	errChan <- nil
 	podChan <- podGet
 
 	err = e2epod.WaitForPodSuccessInNamespace(f.ClientSet, podName, f.Namespace.Name)
@@ -512,12 +523,15 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			checkContinuousConnectivity(f, "", "connectivity-test-continuous", extDNSIP, 53, 30, 30, podChan, errChan)
 		}()
 
+		err := <-errChan
+		framework.ExpectNoError(err)
+
 		testPod := <-podChan
 		nodeName := testPod.Spec.NodeName
 		framework.Logf("Test pod running on %q", nodeName)
 
 		ginkgo.By("Deleting ovn-kube pod on node " + nodeName)
-		err := restartOVNKubeNodePod(f.ClientSet, "ovn-kubernetes", nodeName)
+		err = restartOVNKubeNodePod(f.ClientSet, "ovn-kubernetes", nodeName)
 		framework.ExpectNoError(err)
 
 		ginkgo.By("Ensuring there were no connectivity errors")
@@ -535,6 +549,10 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			defer ginkgo.GinkgoRecover()
 			checkContinuousConnectivity(f, "", "connectivity-test-continuous", extDNSIP, 53, 30, 30, podChan, errChan)
 		}()
+
+		err := <-errChan
+		framework.ExpectNoError(err)
+
 		testPod := <-podChan
 		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
 
@@ -574,6 +592,9 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			defer ginkgo.GinkgoRecover()
 			checkContinuousConnectivity(f, "", "connectivity-test-continuous", "www.google.com.", 443, 10, 30, podChan, errChan)
 		}()
+
+		err := <-errChan
+		framework.ExpectNoError(err)
 
 		testPod := <-podChan
 		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
@@ -3035,12 +3056,16 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 
 	singlePodConnectivityTest := func(f *framework.Framework, podName string) {
 		framework.Logf("Running container which tries to connect to API server in a loop")
-		podChan, errChan := make(chan *v1.Pod), make(chan error)
 
+		podChan, errChan := make(chan *v1.Pod), make(chan error)
 		go func() {
 			defer ginkgo.GinkgoRecover()
 			checkContinuousConnectivity(f, "", podName, getApiAddress(), 443, 10, 30, podChan, errChan)
 		}()
+
+		err := <-errChan
+		framework.ExpectNoError(err)
+
 		testPod := <-podChan
 
 		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
