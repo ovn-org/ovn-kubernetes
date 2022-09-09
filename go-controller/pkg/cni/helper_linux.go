@@ -20,7 +20,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	"github.com/containernetworking/cni/pkg/types/current"
+	current "github.com/containernetworking/cni/pkg/types/100"
 	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/safchain/ethtool"
@@ -29,7 +29,7 @@ import (
 
 type CNIPluginLibOps interface {
 	AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Link, mtu int) error
-	SetupVeth(contVethName string, hostVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error)
+	SetupVeth(contVethName string, hostVethName string, mtu int, contVethMac string, hostNS ns.NetNS) (net.Interface, net.Interface, error)
 }
 
 type defaultCNIPluginLibOps struct{}
@@ -48,8 +48,8 @@ func (defaultCNIPluginLibOps) AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Li
 	return util.GetNetLinkOps().RouteAdd(route)
 }
 
-func (defaultCNIPluginLibOps) SetupVeth(contVethName string, hostVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error) {
-	return ip.SetupVethWithName(contVethName, hostVethName, mtu, hostNS)
+func (defaultCNIPluginLibOps) SetupVeth(contVethName string, hostVethName string, mtu int, contVethMac string, hostNS ns.NetNS) (net.Interface, net.Interface, error) {
+	return ip.SetupVethWithName(contVethName, hostVethName, mtu, contVethMac, hostNS)
 }
 
 // This is a good value that allows fast streams of small packets to be aggregated,
@@ -149,16 +149,11 @@ func moveIfToNetns(ifname string, netns ns.NetNS) error {
 }
 
 func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
-	// set the mac addresss, set down the interface before changing the mac
-	// so the EUI64 link local address generated uses the new MAC when we set it up again
-	if err := util.GetNetLinkOps().LinkSetDown(link); err != nil {
-		return fmt.Errorf("failed to set down interface %s: %v", link.Attrs().Name, err)
-	}
-	if err := util.GetNetLinkOps().LinkSetHardwareAddr(link, ifInfo.MAC); err != nil {
-		return fmt.Errorf("failed to add mac address %s to %s: %v", ifInfo.MAC, link.Attrs().Name, err)
-	}
-	if err := util.GetNetLinkOps().LinkSetUp(link); err != nil {
-		return fmt.Errorf("failed to set up interface %s: %v", link.Attrs().Name, err)
+	// make sure link is up
+	if link.Attrs().Flags&net.FlagUp == 0 {
+		if err := util.GetNetLinkOps().LinkSetUp(link); err != nil {
+			return fmt.Errorf("failed to set up interface %s: %v", link.Attrs().Name, err)
+		}
 	}
 
 	// set the IP address
@@ -189,7 +184,8 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 	err := netns.Do(func(hostNS ns.NetNS) error {
 		// create the veth pair in the container and move host end into host netns
 		hostIface.Name = containerID[:15]
-		hostVeth, containerVeth, err := cniPluginLibOps.SetupVeth(ifName, hostIface.Name, ifInfo.MTU, hostNS)
+		contIface.Mac = ifInfo.MAC.String()
+		hostVeth, containerVeth, err := cniPluginLibOps.SetupVeth(ifName, hostIface.Name, ifInfo.MTU, contIface.Mac, hostNS)
 		if err != nil {
 			return err
 		}
@@ -205,7 +201,6 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 		if err != nil {
 			return err
 		}
-		contIface.Mac = ifInfo.MAC.String()
 		contIface.Sandbox = netns.Path()
 
 		if ifInfo.EnableUDPAggregation {

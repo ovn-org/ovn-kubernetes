@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -31,6 +32,14 @@ const (
 	ovnNamespace   = "ovn-kubernetes"
 	ovnNodeSubnets = "k8s.ovn.org/node-subnets"
 )
+
+var containerRuntime = "docker"
+
+func init() {
+	if cr, found := os.LookupEnv("CONTAINER_RUNTIME"); found {
+		containerRuntime = cr
+	}
+}
 
 type IpNeighbor struct {
 	Dst    string `dst`
@@ -247,7 +256,7 @@ func externalIPServiceSpecFrom(svcName string, httpPort, updPort, clusterHTTPPor
 // Returns the name of backend pod.
 func pokeEndpointHostname(clientContainer, protocol, targetHost string, targetPort int32) string {
 	ipPort := net.JoinHostPort("localhost", "80")
-	cmd := []string{"docker", "exec", clientContainer}
+	cmd := []string{containerRuntime, "exec", clientContainer}
 
 	// we leverage the dial command from netexec, that is already supporting multiple protocols
 	curlCommand := strings.Split(fmt.Sprintf("curl -g -q -s http://%s/dial?request=hostname&protocol=%s&host=%s&port=%d&tries=1",
@@ -291,7 +300,7 @@ func pokeExternalIpService(clientContainerName, protocol, externalAddress string
 // we will always run iterations + 1 in the loop to make sure that we have values
 // to compare
 func isNeighborEntryStable(clientContainer, targetHost string, iterations int) bool {
-	cmd := []string{"docker", "exec", clientContainer}
+	cmd := []string{containerRuntime, "exec", clientContainer}
 	var hwAddrOld string
 	var hwAddrNew string
 	// used for reporting only
@@ -380,7 +389,7 @@ func isNeighborEntryStable(clientContainer, targetHost string, iterations int) b
 // Returns the src ip of the packet.
 func pokeEndpointClientIP(clientContainer, protocol, targetHost string, targetPort int32) string {
 	ipPort := net.JoinHostPort("localhost", "80")
-	cmd := []string{"docker", "exec", clientContainer}
+	cmd := []string{containerRuntime, "exec", clientContainer}
 
 	// we leverage the dial command from netexec, that is already supporting multiple protocols
 	curlCommand := strings.Split(fmt.Sprintf("curl -g -q -s http://%s/dial?request=clientip&protocol=%s&host=%s&port=%d&tries=1",
@@ -408,7 +417,7 @@ func pokeEndpointClientIP(clientContainer, protocol, targetHost string, targetPo
 // netexec on the given target host / protocol / port.
 // Returns a pair of either result, nil or "", error in case of an error.
 func curlInContainer(clientContainer, protocol, targetHost string, targetPort int32, endPoint string, maxTime int) (string, error) {
-	cmd := []string{"docker", "exec", clientContainer}
+	cmd := []string{containerRuntime, "exec", clientContainer}
 	if utilnet.IsIPv6String(targetHost) {
 		targetHost = fmt.Sprintf("[%s]", targetHost)
 	}
@@ -520,11 +529,11 @@ func getContainerAddressesForNetwork(container, network string) (string, string)
 	ipv4Format := fmt.Sprintf("{{.NetworkSettings.Networks.%s.IPAddress}}", network)
 	ipv6Format := fmt.Sprintf("{{.NetworkSettings.Networks.%s.GlobalIPv6Address}}", network)
 
-	ipv4, err := runCommand("docker", "inspect", "-f", ipv4Format, container)
+	ipv4, err := runCommand(containerRuntime, "inspect", "-f", ipv4Format, container)
 	if err != nil {
 		framework.Failf("failed to inspect external test container for its IPv4: %v", err)
 	}
-	ipv6, err := runCommand("docker", "inspect", "-f", ipv6Format, container)
+	ipv6, err := runCommand(containerRuntime, "inspect", "-f", ipv6Format, container)
 	if err != nil {
 		framework.Failf("failed to inspect external test container for its IPv4: %v", err)
 	}
@@ -536,7 +545,7 @@ func getContainerAddressesForNetwork(container, network string) (string, string)
 func getMACAddressesForNetwork(container, network string) string {
 	mac := fmt.Sprintf("{{.NetworkSettings.Networks.%s.MacAddress}}", network)
 
-	macAddr, err := runCommand("docker", "inspect", "-f", mac, container)
+	macAddr, err := runCommand(containerRuntime, "inspect", "-f", mac, container)
 	if err != nil {
 		framework.Failf("failed to inspect external test container for its MAC: %v", err)
 	}
@@ -713,7 +722,7 @@ func ExecCommandInContainerWithFullOutput(f *framework.Framework, namespace, pod
 
 func assertAclLogs(targetNodeName string, policyNameRegex string, expectedAclVerdict string, expectedAclSeverity string) (bool, error) {
 	framework.Logf("collecting the ovn-controller logs for node: %s", targetNodeName)
-	targetNodeLog, err := runCommand([]string{"docker", "exec", targetNodeName, "grep", "acl_log", ovnControllerLogPath}...)
+	targetNodeLog, err := runCommand([]string{containerRuntime, "exec", targetNodeName, "grep", "acl_log", ovnControllerLogPath}...)
 	if err != nil {
 		return false, fmt.Errorf("error accessing logs in node %s: %v", targetNodeName, err)
 	}
@@ -803,24 +812,24 @@ func wrappedTestFramework(basename string) *framework.Framework {
 		framework.ExpectNoError(err)
 		for _, node := range nodes.Items {
 			// ensure e2e-dbs directory with test case exists
-			args = []string{"docker", "exec", node.Name, "mkdir", "-p", logDir}
+			args = []string{containerRuntime, "exec", node.Name, "mkdir", "-p", logDir}
 			_, err = runCommand(args...)
 			framework.ExpectNoError(err)
 
 			// node name is the same in kapi and docker
-			args = []string{"docker", "exec", node.Name, "cp", "-f", fmt.Sprintf("%s/%s", ovsdbLocation, ovsdb),
+			args = []string{containerRuntime, "exec", node.Name, "cp", "-f", fmt.Sprintf("%s/%s", ovsdbLocation, ovsdb),
 				fmt.Sprintf("%s/%s", logDir, fmt.Sprintf("%s-%s", node.Name, ovsdb))}
 			_, err = runCommand(args...)
 			framework.ExpectNoError(err)
 		}
 
-		args = []string{"docker", "exec", ovnDocker, "stat", fmt.Sprintf("%s/%s", dbLocation, dbs[0])}
+		args = []string{containerRuntime, "exec", ovnDocker, "stat", fmt.Sprintf("%s/%s", dbLocation, dbs[0])}
 		_, err = runCommand(args...)
 		framework.ExpectNoError(err)
 
 		// grab the OVN dbs
 		for _, db := range dbs {
-			args = []string{"docker", "exec", ovnDocker, "cp", "-f", fmt.Sprintf("%s/%s", dbLocation, db),
+			args = []string{containerRuntime, "exec", ovnDocker, "cp", "-f", fmt.Sprintf("%s/%s", dbLocation, db),
 				fmt.Sprintf("%s/%s", logDir, db)}
 			_, err = runCommand(args...)
 			framework.ExpectNoError(err)
@@ -843,7 +852,7 @@ func countAclLogs(targetNodeName string, policyNameRegex string, expectedAclVerd
 	count := 0
 
 	framework.Logf("collecting the ovn-controller logs for node: %s", targetNodeName)
-	targetNodeLog, err := runCommand([]string{"docker", "exec", targetNodeName, "cat", ovnControllerLogPath}...)
+	targetNodeLog, err := runCommand([]string{containerRuntime, "exec", targetNodeName, "cat", ovnControllerLogPath}...)
 	if err != nil {
 		return 0, fmt.Errorf("error accessing logs in node %s: %v", targetNodeName, err)
 	}

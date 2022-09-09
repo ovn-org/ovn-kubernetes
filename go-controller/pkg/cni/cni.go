@@ -10,7 +10,7 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/containernetworking/cni/pkg/types/current"
+	current "github.com/containernetworking/cni/pkg/types/100"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -278,12 +278,13 @@ func (pr *PodRequest) getCNIResult(podLister corev1listers.PodLister, kclient ku
 			Interface: current.Int(1),
 			Address:   *ipcidr,
 		}
+		var ipVersion string
 		if utilnet.IsIPv6CIDR(ipcidr) {
-			ip.Version = "6"
+			ipVersion = "6"
 		} else {
-			ip.Version = "4"
+			ipVersion = "4"
 		}
-		ip.Gateway = gateways[ip.Version]
+		ip.Gateway = gateways[ipVersion]
 		ips = append(ips, ip)
 	}
 

@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 // Copyright 2016 CNI authors
@@ -21,7 +22,7 @@ import (
 	"net"
 
 	"github.com/containernetworking/cni/pkg/types"
-	"github.com/containernetworking/cni/pkg/types/current"
+	current "github.com/containernetworking/cni/pkg/types/100"
 	"github.com/vishvananda/netlink"
 )
 
@@ -57,15 +58,10 @@ func ValidateExpectedInterfaceIPs(ifName string, resultIPs []*current.IPConfig) 
 
 		findGwy := &netlink.Route{Dst: ourPrefix}
 		routeFilter := netlink.RT_FILTER_DST
-		var family int
 
-		switch {
-		case ips.Version == "4":
+		family := netlink.FAMILY_V6
+		if ips.Address.IP.To4() != nil {
 			family = netlink.FAMILY_V4
-		case ips.Version == "6":
-			family = netlink.FAMILY_V6
-		default:
-			return fmt.Errorf("Invalid IP Version %v for interface %v", ips.Version, ifName)
 		}
 
 		gwy, err := netlink.RouteListFiltered(family, findGwy, routeFilter)
