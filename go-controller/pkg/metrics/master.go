@@ -843,7 +843,12 @@ type ConfigDurationRecorder struct {
 // global variable is needed because this functionality is accessed in many functions
 var cdr *ConfigDurationRecorder
 
+// lock for accessing the cdr global variable
+var cdrMutex sync.Mutex
+
 func GetConfigDurationRecorder() *ConfigDurationRecorder {
+	cdrMutex.Lock()
+	defer cdrMutex.Unlock()
 	if cdr == nil {
 		cdr = &ConfigDurationRecorder{}
 	}
