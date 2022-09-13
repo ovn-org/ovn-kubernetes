@@ -47,6 +47,7 @@ kubectl_wait_daemonset(){
     ((retries += 1))
     if [[ "${retries}" -gt ${attempts} ]]; then
       echo "error: daemonset did not succeed, failing"
+      kubectl describe po -A
       exit 1
     fi
   done
@@ -73,6 +74,7 @@ kubectl_wait_deployment(){
     ((retries += 1))
     if [[ "${retries}" -gt ${attempts} ]]; then
       echo "error: deployment did not succeed, failing"
+      kubectl describe po -A
       exit 1
     fi
   done
