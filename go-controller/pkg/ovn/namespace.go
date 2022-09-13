@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/ovn-org/libovsdb/ovsdb"
@@ -17,6 +18,42 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
+
+// namespaceInfo contains information related to a Namespace. Use oc.getNamespaceLocked()
+// or oc.waitForNamespaceLocked() to get a locked namespaceInfo for a Namespace, and call
+// nsInfo.Unlock() on it when you are done with it. (No code outside of the code that
+// manages the oc.namespaces map is ever allowed to hold an unlocked namespaceInfo.)
+type namespaceInfo struct {
+	sync.RWMutex
+
+	// addressSet is an address set object that holds the IP addresses
+	// of all pods in the namespace.
+	addressSet addressset.AddressSet
+
+	// map from NetworkPolicy name to networkPolicy. You must hold the
+	// namespaceInfo's mutex to add/delete/lookup policies, but must hold the
+	// networkPolicy's mutex (and not necessarily the namespaceInfo's) to work with
+	// the policy itself.
+	networkPolicies map[string]*networkPolicy
+
+	// routingExternalGWs is a slice of net.IP containing the values parsed from
+	// annotation k8s.ovn.org/routing-external-gws
+	routingExternalGWs gatewayInfo
+
+	// routingExternalPodGWs contains a map of all pods serving as exgws as well as their
+	// exgw IPs
+	// key is <namespace>_<pod name>
+	routingExternalPodGWs map[string]gatewayInfo
+
+	multicastEnabled bool
+
+	// If not empty, then it has to be set to a logging a severity level, e.g. "notice", "alert", etc
+	aclLogging ACLLoggingLevels
+
+	// Per-namespace port group default deny UUIDs
+	portGroupIngressDenyName string // Port group Name for ingress deny rule
+	portGroupEgressDenyName  string // Port group Name for egress deny rule
+}
 
 // This function implements the main body of work of syncNamespaces.
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.

@@ -646,11 +646,14 @@ func (oc *Controller) addResource(objectsToRetry *RetryObjs, obj interface{}, fr
 		}
 
 		// start watching pods in this namespace and selected by the label selector in extraParameters.podSelector
+		syncFunc := func(objs []interface{}) error {
+			return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, objs...)
+		}
 		retryPeerPods := NewRetryObjs(
 			factory.PeerPodForNamespaceAndPodSelectorType,
 			namespace.Name,
 			extraParameters.podSelector,
-			nil,
+			syncFunc,
 			&NetworkPolicyExtraParameters{gp: extraParameters.gp},
 		)
 		// The AddFilteredPodHandler call might call handlePeerPodSelectorAddUpdate
@@ -1213,39 +1216,12 @@ func (oc *Controller) getSyncResourcesFunc(r *RetryObjs) (func([]interface{}) er
 	case factory.NodeType:
 		syncFunc = oc.syncNodesRetriable
 
-	case factory.PeerServiceType,
-		factory.PeerNamespaceAndPodSelectorType:
-		syncFunc = nil
-
-	case factory.PeerPodSelectorType:
-		extraParameters := r.extraParameters.(*NetworkPolicyExtraParameters)
-		syncFunc = func(objs []interface{}) error {
-			return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, objs...)
-		}
-
-	case factory.PeerPodForNamespaceAndPodSelectorType:
-		extraParameters := r.extraParameters.(*NetworkPolicyExtraParameters)
-		syncFunc = func(objs []interface{}) error {
-			return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, objs...)
-		}
-
-	case factory.PeerNamespaceSelectorType:
-		extraParameters := r.extraParameters.(*NetworkPolicyExtraParameters)
-		// the function below will never fail, so there's no point in making it retriable...
-		syncFunc = func(i []interface{}) error {
-			// This needs to be a write lock because there's no locking around 'gress policies
-			extraParameters.np.Lock()
-			defer extraParameters.np.Unlock()
-			// We load the existing address set into the 'gress policy.
-			// Notice that this will make the AddFunc for this initial
-			// address set a noop.
-			// The ACL must be set explicitly after setting up this handler
-			// for the address set to be considered.
-			extraParameters.gp.addNamespaceAddressSets(i)
-			return nil
-		}
-
-	case factory.LocalPodSelectorType:
+	case factory.LocalPodSelectorType,
+		factory.PeerServiceType,
+		factory.PeerNamespaceAndPodSelectorType,
+		factory.PeerPodSelectorType,
+		factory.PeerPodForNamespaceAndPodSelectorType,
+		factory.PeerNamespaceSelectorType:
 		syncFunc = r.syncFunc
 
 	case factory.EgressFirewallType:
