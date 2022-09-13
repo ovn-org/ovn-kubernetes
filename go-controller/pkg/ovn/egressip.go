@@ -1218,7 +1218,7 @@ func (oc *Controller) isEgressNodeReachable(egressNode *kapi.Node) bool {
 	oc.eIPC.allocator.Lock()
 	defer oc.eIPC.allocator.Unlock()
 	if eNode, exists := oc.eIPC.allocator.cache[egressNode.Name]; exists {
-		return eNode.isReachable || oc.isReachable(eNode)
+		return eNode.isReachable || oc.isReachable(eNode.name, eNode.mgmtIPs, eNode.healthClient)
 	}
 	return false
 }
@@ -1814,9 +1814,7 @@ func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
 // initiates the allocator cache for the node in question, if the node has the
 // necessary annotation.
 func (oc *Controller) setupNodeForEgress(node *v1.Node) error {
-	v4Addr, v6Addr := getNodeInternalAddrs(node)
-	v4ClusterSubnet, v6ClusterSubnet := getClusterSubnets()
-	if err := oc.createDefaultNoRerouteNodePolicies(v4Addr, v6Addr, v4ClusterSubnet, v6ClusterSubnet); err != nil {
+	if err := CreateDefaultNoRerouteNodePolicies(oc.nbClient, node); err != nil {
 		oc.addEgressNodeFailed.Store(node.Name, node)
 		return err
 	}
@@ -1827,12 +1825,16 @@ func (oc *Controller) setupNodeForEgress(node *v1.Node) error {
 	return nil
 }
 
+func CreateDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, node *v1.Node) error {
+	v4Addr, v6Addr := getNodeInternalAddrs(node)
+	v4ClusterSubnet, v6ClusterSubnet := getClusterSubnets()
+	return createDefaultNoRerouteNodePolicies(nbClient, v4Addr, v6Addr, v4ClusterSubnet, v6ClusterSubnet, node.Name)
+}
+
 // deleteNodeForEgress remove the default allow logical router policies for the
 // node and removes the node from the allocator cache.
 func (oc *Controller) deleteNodeForEgress(node *v1.Node) error {
-	v4Addr, v6Addr := getNodeInternalAddrs(node)
-	v4ClusterSubnet, v6ClusterSubnet := getClusterSubnets()
-	if err := oc.deleteDefaultNoRerouteNodePolicies(v4Addr, v6Addr, v4ClusterSubnet, v6ClusterSubnet); err != nil {
+	if err := DeleteDefaultNoRerouteNodePolicies(oc.nbClient, node.Name); err != nil {
 		return err
 	}
 	oc.eIPC.allocator.Lock()
@@ -1853,14 +1855,23 @@ func (oc *Controller) deleteNodeForEgress(node *v1.Node) error {
 // away from that node elsewhere so that the pods using the egress IP can
 // continue to do so without any issues.
 func (oc *Controller) initClusterEgressPolicies(nodes []interface{}) error {
-	v4ClusterSubnet, v6ClusterSubnet := getClusterSubnets()
-	if err := oc.createDefaultNoReroutePodPolicies(v4ClusterSubnet, v6ClusterSubnet); err != nil {
+	if err := InitClusterEgressPolicies(oc.nbClient); err != nil {
 		return err
 	}
-	if err := oc.createDefaultNoRerouteServicePolicies(v4ClusterSubnet, v6ClusterSubnet); err != nil {
-		return err
-	}
+
 	go oc.checkEgressNodesReachability()
+	return nil
+}
+
+func InitClusterEgressPolicies(nbClient libovsdbclient.Client) error {
+	v4ClusterSubnet, v6ClusterSubnet := getClusterSubnets()
+	if err := createDefaultNoReroutePodPolicies(nbClient, v4ClusterSubnet, v6ClusterSubnet); err != nil {
+		return err
+	}
+	if err := createDefaultNoRerouteServicePolicies(nbClient, v4ClusterSubnet, v6ClusterSubnet); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -2211,7 +2222,7 @@ func checkEgressNodesReachabilityIterate(oc *Controller) {
 	for _, eNode := range oc.eIPC.allocator.cache {
 		if eNode.isEgressAssignable && eNode.isReady {
 			wasReachable := eNode.isReachable
-			isReachable := oc.isReachable(eNode)
+			isReachable := oc.isReachable(eNode.name, eNode.mgmtIPs, eNode.healthClient)
 			if wasReachable && !isReachable {
 				reAddOrDelete[eNode.name] = true
 			} else if !wasReachable && isReachable {
@@ -2243,27 +2254,27 @@ func checkEgressNodesReachabilityIterate(oc *Controller) {
 	}
 }
 
-func (oc *Controller) isReachable(node *egressNode) bool {
+func (oc *Controller) isReachable(nodeName string, mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient) bool {
 	// Check if we need to do node reachability check
 	if oc.eIPC.egressIPTotalTimeout == 0 {
 		return true
 	}
 
 	if oc.eIPC.egressIPNodeHealthCheckPort == 0 {
-		return oc.isReachableLegacy(node)
+		return isReachableLegacy(nodeName, mgmtIPs, oc.eIPC.egressIPTotalTimeout)
 	}
-	return oc.isReachableViaGRPC(node, oc.eIPC.egressIPNodeHealthCheckPort)
+	return isReachableViaGRPC(mgmtIPs, healthClient, oc.eIPC.egressIPNodeHealthCheckPort, oc.eIPC.egressIPTotalTimeout)
 }
 
-func (oc *Controller) isReachableLegacy(node *egressNode) bool {
+func isReachableLegacy(node string, mgmtIPs []net.IP, totalTimeout int) bool {
 	var retryTimeOut, initialRetryTimeOut time.Duration
 
-	numMgmtIPs := len(node.mgmtIPs)
+	numMgmtIPs := len(mgmtIPs)
 	if numMgmtIPs == 0 {
 		return false
 	}
 
-	switch oc.eIPC.egressIPTotalTimeout {
+	switch totalTimeout {
 	// Check if we need to do node reachability check
 	case 0:
 		return true
@@ -2280,9 +2291,9 @@ func (oc *Controller) isReachableLegacy(node *egressNode) bool {
 	}
 
 	timeout := initialRetryTimeOut
-	endTime := time.Now().Add(time.Second * time.Duration(oc.eIPC.egressIPTotalTimeout))
+	endTime := time.Now().Add(time.Second * time.Duration(totalTimeout))
 	for time.Now().Before(endTime) {
-		for _, ip := range node.mgmtIPs {
+		for _, ip := range mgmtIPs {
 			if dialer.dial(ip, timeout) {
 				return true
 			}
@@ -2290,7 +2301,7 @@ func (oc *Controller) isReachableLegacy(node *egressNode) bool {
 		time.Sleep(100 * time.Millisecond)
 		timeout = retryTimeOut
 	}
-	klog.Errorf("Failed reachability check for %s", node.name)
+	klog.Errorf("Failed reachability check for %s", node)
 	return false
 }
 
@@ -2325,17 +2336,17 @@ func (hccAlloc *egressIPHealthcheckClientAllocator) allocate(nodeName string) he
 	return healthcheck.NewEgressIPHealthClient(nodeName)
 }
 
-func (oc *Controller) isReachableViaGRPC(node *egressNode, healthCheckPort int) bool {
-	dialCtx, dialCancel := context.WithTimeout(context.Background(), time.Duration(oc.eIPC.egressIPTotalTimeout)*time.Second)
+func isReachableViaGRPC(mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient, healthCheckPort, totalTimeout int) bool {
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), time.Duration(totalTimeout)*time.Second)
 	defer dialCancel()
 
-	if !node.healthClient.IsConnected() {
+	if !healthClient.IsConnected() {
 		// gRPC session is not up. Attempt to connect and if that suceeds, we will declare node as reacheable.
-		return node.healthClient.Connect(dialCtx, node.mgmtIPs, healthCheckPort)
+		return healthClient.Connect(dialCtx, mgmtIPs, healthCheckPort)
 	}
 
 	// gRPC session is already established. Send a probe, which will succeed, or close the session.
-	return node.healthClient.Probe(dialCtx)
+	return healthClient.Probe(dialCtx)
 }
 
 func getClusterSubnets() ([]*net.IPNet, []*net.IPNet) {
@@ -2373,16 +2384,16 @@ func getNodeInternalAddrs(node *v1.Node) (net.IP, net.IP) {
 
 // createDefaultNoRerouteServicePolicies ensures service reachability from the
 // host network to any service backed by egress IP matching pods
-func (oc *Controller) createDefaultNoRerouteServicePolicies(v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) error {
+func createDefaultNoRerouteServicePolicies(nbClient libovsdbclient.Client, v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) error {
 	for _, v4Subnet := range v4ClusterSubnet {
 		match := fmt.Sprintf("ip4.src == %s && ip4.dst == %s", v4Subnet.String(), config.Gateway.V4JoinSubnet)
-		if err := oc.createLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
+		if err := createLogicalRouterPolicy(nbClient, match, types.DefaultNoRereoutePriority, nil); err != nil {
 			return fmt.Errorf("unable to create IPv4 no-reroute service policies, err: %v", err)
 		}
 	}
 	for _, v6Subnet := range v6ClusterSubnet {
 		match := fmt.Sprintf("ip6.src == %s && ip6.dst == %s", v6Subnet.String(), config.Gateway.V6JoinSubnet)
-		if err := oc.createLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
+		if err := createLogicalRouterPolicy(nbClient, match, types.DefaultNoRereoutePriority, nil); err != nil {
 			return fmt.Errorf("unable to create IPv6 no-reroute service policies, err: %v", err)
 		}
 	}
@@ -2391,16 +2402,16 @@ func (oc *Controller) createDefaultNoRerouteServicePolicies(v4ClusterSubnet, v6C
 
 // createDefaultNoReroutePodPolicies ensures egress pods east<->west traffic with regular pods,
 // i.e: ensuring that an egress pod can still communicate with a regular pod / service backed by regular pods
-func (oc *Controller) createDefaultNoReroutePodPolicies(v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) error {
+func createDefaultNoReroutePodPolicies(nbClient libovsdbclient.Client, v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) error {
 	for _, v4Subnet := range v4ClusterSubnet {
 		match := fmt.Sprintf("ip4.src == %s && ip4.dst == %s", v4Subnet.String(), v4Subnet.String())
-		if err := oc.createLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
+		if err := createLogicalRouterPolicy(nbClient, match, types.DefaultNoRereoutePriority, nil); err != nil {
 			return fmt.Errorf("unable to create IPv4 no-reroute pod policies, err: %v", err)
 		}
 	}
 	for _, v6Subnet := range v6ClusterSubnet {
 		match := fmt.Sprintf("ip6.src == %s && ip6.dst == %s", v6Subnet.String(), v6Subnet.String())
-		if err := oc.createLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
+		if err := createLogicalRouterPolicy(nbClient, match, types.DefaultNoRereoutePriority, nil); err != nil {
 			return fmt.Errorf("unable to create IPv6 no-reroute pod policies, err: %v", err)
 		}
 	}
@@ -2409,12 +2420,13 @@ func (oc *Controller) createDefaultNoReroutePodPolicies(v4ClusterSubnet, v6Clust
 
 // createDefaultNoRerouteNodePolicies ensures egress pods east<->west traffic with hostNetwork pods,
 // i.e: ensuring that an egress pod can still communicate with a hostNetwork pod / service backed by hostNetwork pods
-func (oc *Controller) createDefaultNoRerouteNodePolicies(v4NodeAddr, v6NodeAddr net.IP, v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) error {
+func createDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, v4NodeAddr, v6NodeAddr net.IP, v4ClusterSubnet, v6ClusterSubnet []*net.IPNet, nodeName string) error {
 	var errors []error
+	externalIDs := map[string]string{"node": nodeName}
 	if v4NodeAddr != nil {
 		for _, v4Subnet := range v4ClusterSubnet {
 			match := fmt.Sprintf("ip4.src == %s && ip4.dst == %s/32", v4Subnet.String(), v4NodeAddr.String())
-			if err := oc.createLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
+			if err := createLogicalRouterPolicy(nbClient, match, types.DefaultNoRereoutePriority, externalIDs); err != nil {
 				errors = append(errors, fmt.Errorf("unable to create IPv4 no-reroute node policies, err: %v", err))
 			}
 		}
@@ -2422,7 +2434,7 @@ func (oc *Controller) createDefaultNoRerouteNodePolicies(v4NodeAddr, v6NodeAddr 
 	if v6NodeAddr != nil {
 		for _, v6Subnet := range v6ClusterSubnet {
 			match := fmt.Sprintf("ip6.src == %s && ip6.dst == %s/128", v6Subnet.String(), v6NodeAddr.String())
-			if err := oc.createLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
+			if err := createLogicalRouterPolicy(nbClient, match, types.DefaultNoRereoutePriority, externalIDs); err != nil {
 				errors = append(errors, fmt.Errorf("unable to create IPv6 no-reroute node policies, err: %v", err))
 			}
 		}
@@ -2434,52 +2446,35 @@ func (oc *Controller) createDefaultNoRerouteNodePolicies(v4NodeAddr, v6NodeAddr 
 	return nil
 }
 
-func (oc *Controller) createLogicalRouterPolicy(match string, priority int) error {
+func createLogicalRouterPolicy(nbClient libovsdbclient.Client, match string, priority int, externalIDs map[string]string) error {
 	lrp := nbdb.LogicalRouterPolicy{
-		Priority: priority,
-		Action:   nbdb.LogicalRouterPolicyActionAllow,
-		Match:    match,
+		Priority:    priority,
+		Action:      nbdb.LogicalRouterPolicyActionAllow,
+		Match:       match,
+		ExternalIDs: externalIDs,
 	}
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
 		return item.Match == lrp.Match && item.Priority == lrp.Priority
 	}
-	err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.nbClient, types.OVNClusterRouter, &lrp, p)
+	err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(nbClient, types.OVNClusterRouter, &lrp, p)
 	if err != nil {
 		return fmt.Errorf("error creating logical router policy %+v on router %s: %v", lrp, types.OVNClusterRouter, err)
 	}
 	return nil
 }
 
-func (oc *Controller) deleteLogicalRouterPolicy(match string, priority int) error {
+func DeleteDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, node string) error {
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
-		return item.Match == match && item.Priority == priority
-	}
-	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
-	if err != nil {
-		return fmt.Errorf("error deleting router policy with priotity %d and match %s: %v", priority, match, err)
-	}
-
-	return nil
-}
-
-func (oc *Controller) deleteDefaultNoRerouteNodePolicies(v4NodeAddr, v6NodeAddr net.IP, v4ClusterSubnet, v6ClusterSubnet []*net.IPNet) error {
-	if v4NodeAddr != nil {
-		for _, v4Subnet := range v4ClusterSubnet {
-			match := fmt.Sprintf("ip4.src == %s && ip4.dst == %s/32", v4Subnet.String(), v4NodeAddr.String())
-			if err := oc.deleteLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
-				return fmt.Errorf("unable to delete IPv4 no-reroute node policies, err: %v", err)
-			}
+		if item.Priority != types.DefaultNoRereoutePriority {
+			return false
 		}
-	}
-	if v6NodeAddr != nil {
-		for _, v6Subnet := range v6ClusterSubnet {
-			match := fmt.Sprintf("ip6.src == %s && ip6.dst == %s/128", v6Subnet.String(), v6NodeAddr.String())
-			if err := oc.deleteLogicalRouterPolicy(match, types.DefaultNoRereoutePriority); err != nil {
-				return fmt.Errorf("unable to delete IPv6 no-reroute node policies, err: %v", err)
-			}
+		nodeName, ok := item.ExternalIDs["node"]
+		if !ok {
+			return false
 		}
+		return nodeName == node
 	}
-	return nil
+	return libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(nbClient, types.OVNClusterRouter, p)
 }
 
 func buildSNATFromEgressIPStatus(podIP net.IP, status egressipv1.EgressIPStatusItem, egressIPName string) (*nbdb.NAT, error) {

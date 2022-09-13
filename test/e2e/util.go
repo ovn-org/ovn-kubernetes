@@ -720,22 +720,22 @@ func ExecCommandInContainerWithFullOutput(f *framework.Framework, namespace, pod
 	return f.ExecWithOptions(options)
 }
 
-func assertAclLogs(targetNodeName string, policyNameRegex string, expectedAclVerdict string, expectedAclSeverity string) (bool, error) {
+func assertACLLogs(targetNodeName string, policyNameRegex string, expectedACLVerdict string, expectedACLSeverity string) (bool, error) {
 	framework.Logf("collecting the ovn-controller logs for node: %s", targetNodeName)
 	targetNodeLog, err := runCommand([]string{containerRuntime, "exec", targetNodeName, "grep", "acl_log", ovnControllerLogPath}...)
 	if err != nil {
 		return false, fmt.Errorf("error accessing logs in node %s: %v", targetNodeName, err)
 	}
 
-	framework.Logf("Ensuring the audit log contains: 'name=\"%s\"', 'verdict=%s' AND 'severity=%s'", policyNameRegex, expectedAclVerdict, expectedAclSeverity)
+	framework.Logf("Ensuring the audit log contains: 'name=\"%s\"', 'verdict=%s' AND 'severity=%s'", policyNameRegex, expectedACLVerdict, expectedACLSeverity)
 	for _, logLine := range strings.Split(targetNodeLog, "\n") {
 		matched, err := regexp.MatchString(fmt.Sprintf("name=\"%s\"", policyNameRegex), logLine)
 		if err != nil {
 			return false, err
 		}
 		if matched &&
-			strings.Contains(logLine, fmt.Sprintf("verdict=%s", expectedAclVerdict)) &&
-			strings.Contains(logLine, fmt.Sprintf("severity=%s", expectedAclSeverity)) {
+			strings.Contains(logLine, fmt.Sprintf("verdict=%s", expectedACLVerdict)) &&
+			strings.Contains(logLine, fmt.Sprintf("severity=%s", expectedACLSeverity)) {
 			return true, nil
 		}
 	}
@@ -845,10 +845,10 @@ func newPrivelegedTestFramework(basename string) *framework.Framework {
 	return f
 }
 
-// countAclLogs connects to <targetNodeName> (ovn-control-plane, ovn-worker or ovn-worker2 in kind environments) via the docker exec
+// countACLLogs connects to <targetNodeName> (ovn-control-plane, ovn-worker or ovn-worker2 in kind environments) via the docker exec
 // command and it greps for the string "acl_log" inside the OVN controller logs. It then checks if the line contains name=<policyNameRegex>
 // and if it does, it increases the counter if both the verdict and the severity for this line match what's expected.
-func countAclLogs(targetNodeName string, policyNameRegex string, expectedAclVerdict string, expectedAclSeverity string) (int, error) {
+func countACLLogs(targetNodeName string, policyNameRegex string, expectedACLVerdict string, expectedACLSeverity string) (int, error) {
 	count := 0
 
 	framework.Logf("collecting the ovn-controller logs for node: %s", targetNodeName)
@@ -860,8 +860,8 @@ func countAclLogs(targetNodeName string, policyNameRegex string, expectedAclVerd
 	stringToMatch := fmt.Sprintf(
 		".*acl_log.*name=\"%s\".*verdict=%s.*severity=%s.*",
 		policyNameRegex,
-		expectedAclVerdict,
-		expectedAclSeverity)
+		expectedACLVerdict,
+		expectedACLSeverity)
 
 	for _, logLine := range strings.Split(targetNodeLog, "\n") {
 		matched, err := regexp.MatchString(stringToMatch, logLine)

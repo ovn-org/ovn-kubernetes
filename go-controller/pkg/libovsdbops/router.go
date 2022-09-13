@@ -244,12 +244,27 @@ func GetLogicalRouterPolicy(nbClient libovsdbclient.Client, policy *nbdb.Logical
 // all fields need to be updated. Passing a single nil field indicates no fields should be updated.
 // Otherwise a caller may pass as many individual fields as desired to specify which columsn need updating.
 func CreateOrUpdateLogicalRouterPolicyWithPredicate(nbClient libovsdbclient.Client, routerName string, lrp *nbdb.LogicalRouterPolicy, p logicalRouterPolicyPredicate, fields ...interface{}) error {
-	router := &nbdb.LogicalRouter{
-		Name: routerName,
+	ops, err := CreateOrUpdateLogicalRouterPolicyWithPredicateOps(nbClient, nil, routerName, lrp, p, fields...)
+	if err != nil {
+		return err
 	}
 
+	_, err = TransactAndCheck(nbClient, ops)
+	return err
+}
+
+// CreateOrUpdateLogicalRouterPolicyWithPredicateOps looks up a logical
+// router policy from the cache based on a given predicate. If it does not
+// exist, it creates the provided logical router policy. If it does, it
+// updates it. The logical router policy is added to the provided logical
+// router. Returns the corresponding ops
+func CreateOrUpdateLogicalRouterPolicyWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation,
+	routerName string, lrp *nbdb.LogicalRouterPolicy, p logicalRouterPolicyPredicate, fields ...interface{}) ([]libovsdb.Operation, error) {
 	if len(fields) == 0 {
 		fields = onModelUpdatesAllNonDefault()
+	}
+	router := &nbdb.LogicalRouter{
+		Name: routerName,
 	}
 
 	opModels := []operationModel{
@@ -271,14 +286,13 @@ func CreateOrUpdateLogicalRouterPolicyWithPredicate(nbClient libovsdbclient.Clie
 	}
 
 	m := newModelClient(nbClient)
-	_, err := m.CreateOrUpdate(opModels...)
-	return err
+	return m.CreateOrUpdateOps(ops, opModels...)
 }
 
-// DeleteLogicalRouterPoliciesWithPredicate looks up logical router policies
-// from the cache based on a given predicate, deletes them and removes them from
-// the provided logical router
-func DeleteLogicalRouterPoliciesWithPredicate(nbClient libovsdbclient.Client, routerName string, p logicalRouterPolicyPredicate) error {
+// DeleteLogicalRouterPolicyWithPredicateOps looks up a logical
+// router policy from the cache based on a given predicate and returns the
+// corresponding ops to delete it and remove it from the provided router.
+func DeleteLogicalRouterPolicyWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, routerName string, p logicalRouterPolicyPredicate) ([]libovsdb.Operation, error) {
 	router := &nbdb.LogicalRouter{
 		Name: routerName,
 	}
@@ -302,7 +316,20 @@ func DeleteLogicalRouterPoliciesWithPredicate(nbClient libovsdbclient.Client, ro
 	}
 
 	m := newModelClient(nbClient)
-	return m.Delete(opModels...)
+	return m.DeleteOps(ops, opModels...)
+}
+
+// DeleteLogicalRouterPoliciesWithPredicate looks up logical router policies
+// from the cache based on a given predicate, deletes them and removes them from
+// the provided logical router
+func DeleteLogicalRouterPoliciesWithPredicate(nbClient libovsdbclient.Client, routerName string, p logicalRouterPolicyPredicate) error {
+	ops, err := DeleteLogicalRouterPolicyWithPredicateOps(nbClient, nil, routerName, p)
+	if err != nil {
+		return err
+	}
+
+	_, err = TransactAndCheck(nbClient, ops)
+	return err
 }
 
 // CreateOrAddNextHopsToLogicalRouterPolicyWithPredicate looks up a logical

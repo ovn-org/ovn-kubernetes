@@ -447,7 +447,7 @@ func (c *Controller) onEndpointSliceDelete(obj interface{}) {
 // queueServiceForEndpointSlice attempts to queue the corresponding Service for
 // the provided EndpointSlice.
 func (c *Controller) queueServiceForEndpointSlice(endpointSlice *discovery.EndpointSlice) {
-	key, err := serviceControllerKey(endpointSlice)
+	key, err := ServiceControllerKey(endpointSlice)
 	if err != nil {
 		// Do not log endpointsSlices missing service labels as errors.
 		// Once the service label is eventually added, we will get this event
@@ -465,7 +465,7 @@ func (c *Controller) queueServiceForEndpointSlice(endpointSlice *discovery.Endpo
 
 // serviceControllerKey returns a controller key for a Service but derived from
 // an EndpointSlice.
-func serviceControllerKey(endpointSlice *discovery.EndpointSlice) (string, error) {
+func ServiceControllerKey(endpointSlice *discovery.EndpointSlice) (string, error) {
 	if endpointSlice == nil {
 		return "", fmt.Errorf("nil EndpointSlice passed to serviceControllerKey()")
 	}

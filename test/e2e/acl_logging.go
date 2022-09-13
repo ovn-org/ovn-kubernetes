@@ -9,6 +9,7 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"k8s.io/client-go/util/retry"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 
 	v1 "k8s.io/api/core/v1"
@@ -46,12 +47,10 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 	BeforeEach(func() {
 		By("configuring the ACL logging level within the namespace")
 		nsName = fr.Namespace.Name
-		namespace, err := fr.ClientSet.CoreV1().Namespaces().Get(context.Background(), nsName, metav1.GetOptions{})
-		Expect(err).NotTo(HaveOccurred(), "failed to retrieve the namespace")
-		Expect(setNamespaceACLLogSeverity(fr, namespace, initialDenyACLSeverity, initialAllowACLSeverity)).To(Succeed())
+		Expect(setNamespaceACLLogSeverity(fr, nsName, initialDenyACLSeverity, initialAllowACLSeverity, aclRemoveOptionDelete)).To(Succeed())
 
 		By("creating a \"default deny\" network policy")
-		_, err = makeDenyAllPolicy(fr, nsName, denyAllPolicyName)
+		_, err := makeDenyAllPolicy(fr, nsName, denyAllPolicyName)
 		Expect(err).NotTo(HaveOccurred())
 
 		By("creating pods")
@@ -86,7 +85,7 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 		// Retry here in the case where OVN acls have not been programmed yet
 		composedPolicyNameRegex := fmt.Sprintf("%s_%s", nsName, egressDefaultDenySuffix)
 		Eventually(func() (bool, error) {
-			return assertAclLogs(
+			return assertACLLogs(
 				clientPodScheduledPodName,
 				composedPolicyNameRegex,
 				denyACLVerdict,
@@ -99,11 +98,7 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 
 		BeforeEach(func() {
 			By(fmt.Sprintf("updating the namespace's ACL logging level to %s", updatedAllowACLLogSeverity))
-
-			namespace, err := fr.ClientSet.CoreV1().Namespaces().Get(context.Background(), nsName, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred(), "failed to retrieve the namespace")
-			Expect(setNamespaceACLLogSeverity(fr, namespace, updatedAllowACLLogSeverity, updatedAllowACLLogSeverity)).To(Succeed())
-			namespace, err = fr.ClientSet.CoreV1().Namespaces().Get(context.Background(), nsName, metav1.GetOptions{})
+			Expect(setNamespaceACLLogSeverity(fr, nsName, updatedAllowACLLogSeverity, updatedAllowACLLogSeverity, aclRemoveOptionDelete)).To(Succeed())
 		})
 
 		BeforeEach(func() {
@@ -126,12 +121,44 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 			clientPodScheduledPodName := pods[pokerPodIndex].Spec.NodeName
 			composedPolicyNameRegex := fmt.Sprintf("%s_%s", nsName, egressDefaultDenySuffix)
 			Eventually(func() (bool, error) {
-				return assertAclLogs(
+				return assertACLLogs(
 					clientPodScheduledPodName,
 					composedPolicyNameRegex,
 					denyACLVerdict,
 					updatedAllowACLLogSeverity)
 			}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+		})
+	})
+
+	When("the namespace's ACL logging annotation is removed", func() {
+		BeforeEach(func() {
+			By("removing the ACL logging annotation")
+			Expect(setNamespaceACLLogSeverity(fr, nsName, "", "", aclRemoveOptionDelete)).To(Succeed())
+		})
+
+		It("ACL logging is disabled", func() {
+			clientPod := pods[pokerPodIndex]
+			pokedPod := pods[pokedPodIndex]
+			composedPolicyNameRegex := fmt.Sprintf("%s_%s", nsName, egressDefaultDenySuffix)
+			Consistently(func() (bool, error) {
+				return isCountUpdatedAfterPokePod(fr, &clientPod, &pokedPod, composedPolicyNameRegex, denyACLVerdict, "")
+			}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
+		})
+	})
+
+	When("the namespace's ACL allow and deny logging annotations are set to invalid values", func() {
+		BeforeEach(func() {
+			By("setting invalid values for ACL logging annotation")
+			Expect(setNamespaceACLLogSeverity(fr, nsName, "invalid", "invalid", aclRemoveOptionDelete)).To(Succeed())
+		})
+
+		It("ACL logging is disabled", func() {
+			clientPod := pods[pokerPodIndex]
+			pokedPod := pods[pokedPodIndex]
+			composedPolicyNameRegex := fmt.Sprintf("%s_%s", nsName, egressDefaultDenySuffix)
+			Consistently(func() (bool, error) {
+				return isCountUpdatedAfterPokePod(fr, &clientPod, &pokedPod, composedPolicyNameRegex, denyACLVerdict, "")
+			}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
 		})
 	})
 })
@@ -153,8 +180,8 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 		// "As a cluster administrator, you can create an egress firewall for a project that restricts egress traffic leaving
 		// your OpenShift Container Platform cluster."
 		// Because the egress firewall feature only affects traffic leaving the cluster, we will not log for on-cluster targets.
-		allowedDstIp = "172.18.0.1"
-		deniedDstIp  = "172.19.0.10"
+		allowedDstIP = "172.18.0.1"
+		deniedDstIP  = "172.19.0.10"
 		dstPort      = 8080
 	)
 
@@ -170,12 +197,10 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 	BeforeEach(func() {
 		By("configuring the ACL logging level within the namespace")
 		nsName = fr.Namespace.Name
-		namespace, err := fr.ClientSet.CoreV1().Namespaces().Get(context.Background(), nsName, metav1.GetOptions{})
-		Expect(err).NotTo(HaveOccurred(), "failed to retrieve the namespace")
-		Expect(setNamespaceACLLogSeverity(fr, namespace, initialDenyACLSeverity, initialAllowACLSeverity)).To(Succeed())
+		Expect(setNamespaceACLLogSeverity(fr, nsName, initialDenyACLSeverity, initialAllowACLSeverity, aclRemoveOptionDelete)).To(Succeed())
 
 		By("creating a \"default deny\" Egress Firewall")
-		err = makeEgressFirewall(nsName)
+		err := makeEgressFirewall(nsName)
 		Expect(err).NotTo(HaveOccurred())
 
 		By("creating a pod running agnhost netexec")
@@ -193,7 +218,7 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 
 		By("configuring the ACL logging level within the secondary namespace")
 		nsNameSecondary = ns2.Name
-		Expect(setNamespaceACLLogSeverity(fr, ns2, initialDenyACLSeverity, initialAllowACLSeverity)).To(Succeed())
+		Expect(setNamespaceACLLogSeverity(fr, nsNameSecondary, initialDenyACLSeverity, initialAllowACLSeverity, aclRemoveOptionDelete)).To(Succeed())
 
 		By("creating a \"default deny\" Egress Firewall inside the secondary namespace")
 		err = makeEgressFirewall(nsNameSecondary)
@@ -226,12 +251,12 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 				// Make sure that we see an increment in count
 				By("testing the primary namespace")
 				Eventually(func() (bool, error) {
-					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, deniedDstIp, dstPort, denyACLVerdict, initialDenyACLSeverity)
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, deniedDstIP, dstPort, denyACLVerdict, initialDenyACLSeverity)
 				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
 
 				By("making sure that the secondary namespace logs as expected")
 				Eventually(func() (bool, error) {
-					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, deniedDstIp, dstPort, denyACLVerdict, initialDenyACLSeverity)
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, deniedDstIP, dstPort, denyACLVerdict, initialDenyACLSeverity)
 				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
 			})
 		})
@@ -242,12 +267,12 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 				// Make sure that we see an increment in count
 				By("testing the primary namespace")
 				Eventually(func() (bool, error) {
-					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, allowedDstIp, dstPort, allowACLVerdict, initialAllowACLSeverity)
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, allowedDstIP, dstPort, allowACLVerdict, initialAllowACLSeverity)
 				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
 
 				By("making sure that the secondary namespace logs as expected")
 				Eventually(func() (bool, error) {
-					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, allowedDstIp, dstPort, allowACLVerdict, initialAllowACLSeverity)
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, allowedDstIP, dstPort, allowACLVerdict, initialAllowACLSeverity)
 				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
 			})
 		})
@@ -256,11 +281,7 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 	When("the namespace's ACL logging annotation is updated", func() {
 		BeforeEach(func() {
 			By(fmt.Sprintf("updating the namespace's ACL logging level to %s for deny and %s for allow", updatedDenyACLSeverity, updatedAllowACLSeverity))
-
-			namespace, err := fr.ClientSet.CoreV1().Namespaces().Get(context.Background(), nsName, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred(), "failed to retrieve the namespace")
-			Expect(setNamespaceACLLogSeverity(fr, namespace, updatedDenyACLSeverity, updatedAllowACLSeverity)).To(Succeed())
-			namespace, err = fr.ClientSet.CoreV1().Namespaces().Get(context.Background(), nsName, metav1.GetOptions{})
+			Expect(setNamespaceACLLogSeverity(fr, nsName, updatedDenyACLSeverity, updatedAllowACLSeverity, aclRemoveOptionDelete)).To(Succeed())
 		})
 
 		When("the denied destination is poked", func() {
@@ -269,12 +290,12 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 				// Make sure that we see an increment in count
 				By("testing the primary namespace")
 				Eventually(func() (bool, error) {
-					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, deniedDstIp, dstPort, denyACLVerdict, updatedDenyACLSeverity)
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, deniedDstIP, dstPort, denyACLVerdict, updatedDenyACLSeverity)
 				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
 
 				By("making sure that the secondary namespace logs as expected")
 				Eventually(func() (bool, error) {
-					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, deniedDstIp, dstPort, denyACLVerdict, initialDenyACLSeverity)
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, deniedDstIP, dstPort, denyACLVerdict, initialDenyACLSeverity)
 				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
 			})
 		})
@@ -285,12 +306,12 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 				// Make sure that we see an increment in count
 				By("testing the primary namespace")
 				Eventually(func() (bool, error) {
-					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, allowedDstIp, dstPort, allowACLVerdict, updatedAllowACLSeverity)
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, allowedDstIP, dstPort, allowACLVerdict, updatedAllowACLSeverity)
 				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
 
 				By("making sure that the secondary namespace logs as expected")
 				Eventually(func() (bool, error) {
-					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, allowedDstIp, dstPort, allowACLVerdict, initialAllowACLSeverity)
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, allowedDstIP, dstPort, allowACLVerdict, initialAllowACLSeverity)
 				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
 			})
 		})
@@ -299,11 +320,7 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 	When("the namespace's ACL logging allow annotation is removed", func() {
 		BeforeEach(func() {
 			By("removing the namespace's ACL logging allow configuration")
-
-			namespace, err := fr.ClientSet.CoreV1().Namespaces().Get(context.Background(), nsName, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred(), "failed to retrieve the namespace")
-			Expect(setNamespaceACLLogSeverity(fr, namespace, initialDenyACLSeverity, "")).To(Succeed())
-			namespace, err = fr.ClientSet.CoreV1().Namespaces().Get(context.Background(), nsName, metav1.GetOptions{})
+			Expect(setNamespaceACLLogSeverity(fr, nsName, initialDenyACLSeverity, "", aclRemoveOptionDelete)).To(Succeed())
 		})
 
 		When("the denied destination is poked", func() {
@@ -312,12 +329,12 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 				// Make sure that we see an increment in count
 				By("testing the primary namespace")
 				Eventually(func() (bool, error) {
-					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, deniedDstIp, dstPort, denyACLVerdict, initialDenyACLSeverity)
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, deniedDstIP, dstPort, denyACLVerdict, initialDenyACLSeverity)
 				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
 
 				By("making sure that the secondary namespace logs as expected")
 				Eventually(func() (bool, error) {
-					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, deniedDstIp, dstPort, denyACLVerdict, initialDenyACLSeverity)
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, deniedDstIP, dstPort, denyACLVerdict, initialDenyACLSeverity)
 				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
 			})
 		})
@@ -328,12 +345,261 @@ var _ = Describe("ACL Logging for EgressFirewall", func() {
 				// Make sure that we see no increment in count
 				By("testing the primary namespace")
 				Consistently(func() (bool, error) {
-					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, allowedDstIp, dstPort, allowACLVerdict, initialAllowACLSeverity)
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, allowedDstIP, dstPort, allowACLVerdict, initialAllowACLSeverity)
 				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
 
 				By("making sure that the secondary namespace logs as expected")
 				Eventually(func() (bool, error) {
-					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, allowedDstIp, dstPort, allowACLVerdict, initialAllowACLSeverity)
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, allowedDstIP, dstPort, allowACLVerdict, initialAllowACLSeverity)
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+			})
+		})
+	})
+
+	When("the namespace's entire ACL logging annotation is removed", func() {
+		BeforeEach(func() {
+			By("removing the namespace's entire ACL logging configuration")
+			Expect(setNamespaceACLLogSeverity(fr, nsName, "", "", aclRemoveOptionDelete)).To(Succeed())
+		})
+
+		When("the denied destination is poked", func() {
+			It("there should be no trace in the ACL logs", func() {
+				// Retry here until timeout is reached
+				// Make sure that we see no increment in count
+				By("testing the primary namespace")
+				Consistently(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, deniedDstIP, dstPort, denyACLVerdict, "")
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
+
+				By("making sure that the secondary namespace logs as expected")
+				Eventually(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, deniedDstIP, dstPort, denyACLVerdict, initialDenyACLSeverity)
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+			})
+		})
+
+		When("the allowed destination is poked", func() {
+			It("there should be no trace in the ACL logs", func() {
+				// Retry here until timeout is reached
+				// Make sure that we see no increment in count
+				By("testing the primary namespace")
+				Consistently(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, allowedDstIP, dstPort, allowACLVerdict, "")
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
+
+				By("making sure that the secondary namespace logs as expected")
+				Eventually(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, allowedDstIP, dstPort, allowACLVerdict, initialAllowACLSeverity)
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+			})
+		})
+	})
+
+	When("the namespace's entire ACL logging annotation is set to {}", func() {
+		BeforeEach(func() {
+			By("setting the namespace's entire ACL logging configuration to {}")
+			Expect(setNamespaceACLLogSeverity(fr, nsName, "", "", aclRemoveOptionEmptyMap)).To(Succeed())
+		})
+
+		When("the denied destination is poked", func() {
+			It("there should be no trace in the ACL logs", func() {
+				// Retry here until timeout is reached
+				// Make sure that we see no increment in count
+				By("testing the primary namespace")
+				Consistently(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, deniedDstIP, dstPort, denyACLVerdict, "")
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
+
+				By("making sure that the secondary namespace logs as expected")
+				Eventually(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, deniedDstIP, dstPort, denyACLVerdict, initialDenyACLSeverity)
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+			})
+		})
+
+		When("the allowed destination is poked", func() {
+			It("there should be no trace in the ACL logs", func() {
+				// Retry here until timeout is reached
+				// Make sure that we see no increment in count
+				By("testing the primary namespace")
+				Consistently(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, allowedDstIP, dstPort, allowACLVerdict, "")
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
+
+				By("making sure that the secondary namespace logs as expected")
+				Eventually(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, allowedDstIP, dstPort, allowACLVerdict, initialAllowACLSeverity)
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+			})
+		})
+	})
+
+	When("both the namespace's ACL logging deny and allow annotation are set to \"\"", func() {
+		BeforeEach(func() {
+			By("setting the namespace's deny annotation to \"\" and the allow annotation to \"\"")
+			Expect(setNamespaceACLLogSeverity(fr, nsName, "", "", aclRemoveOptionEmptyString)).To(Succeed())
+		})
+
+		When("the denied destination is poked", func() {
+			It("there should be no trace in the ACL logs", func() {
+				// Retry here until timeout is reached
+				// Make sure that we see no increment in count
+				By("testing the primary namespace")
+				Consistently(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, deniedDstIP, dstPort, denyACLVerdict, "")
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
+
+				By("making sure that the secondary namespace logs as expected")
+				Eventually(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, deniedDstIP, dstPort, denyACLVerdict, initialDenyACLSeverity)
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+			})
+		})
+
+		When("the allowed destination is poked", func() {
+			It("there should be no trace in the ACL logs", func() {
+				// Retry here until timeout is reached
+				// Make sure that we see no increment in count
+				By("testing the primary namespace")
+				Consistently(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, allowedDstIP, dstPort, allowACLVerdict, "")
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
+
+				By("making sure that the secondary namespace logs as expected")
+				Eventually(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, allowedDstIP, dstPort, allowACLVerdict, initialAllowACLSeverity)
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+			})
+		})
+	})
+
+	When("an invalid value is provided to the allow rule", func() {
+		BeforeEach(func() {
+			By(fmt.Sprintf("setting the namespace's allow annotation to \"%s\" and the allow annotation to \"invalid\"",
+				initialDenyACLSeverity))
+			Expect(setNamespaceACLLogSeverity(fr, nsName, initialDenyACLSeverity, "invalid", aclRemoveOptionDelete)).To(Succeed())
+		})
+
+		When("the denied destination is poked", func() {
+			It("the logs should have the expected log level", func() {
+				// Retry here in the case where OVN acls have not been programmed yet
+				// Make sure that we see an increment in count
+				By("testing the primary namespace")
+				Eventually(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, deniedDstIP, dstPort, denyACLVerdict, initialDenyACLSeverity)
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+
+				By("making sure that the secondary namespace logs as expected")
+				Eventually(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, deniedDstIP, dstPort, denyACLVerdict, initialDenyACLSeverity)
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+			})
+		})
+
+		When("the allowed destination is poked", func() {
+			It("there should be no trace in the ACL logs", func() {
+				// Retry here until timeout is reached
+				// Make sure that we see no increment in count
+				By("testing the primary namespace")
+				Consistently(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, allowedDstIP, dstPort, allowACLVerdict, initialAllowACLSeverity)
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
+
+				By("making sure that the secondary namespace logs as expected")
+				Eventually(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, allowedDstIP, dstPort, allowACLVerdict, initialAllowACLSeverity)
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+			})
+		})
+	})
+
+	When("both the namespace's ACL logging deny and allow annotation are set to \"invalid\"", func() {
+		BeforeEach(func() {
+			By("setting the namespace's deny annotation to \"invalid\" and the allow annotation to \"invalid\"")
+			Expect(setNamespaceACLLogSeverity(fr, nsName, "invalid", "invalid", aclRemoveOptionEmptyString)).To(Succeed())
+		})
+
+		When("the denied destination is poked", func() {
+			It("there should be no trace in the ACL logs", func() {
+				// Retry here until timeout is reached
+				// Make sure that we see no increment in count
+				By("testing the primary namespace")
+				Consistently(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, deniedDstIP, dstPort, denyACLVerdict, "")
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
+
+				By("making sure that the secondary namespace logs as expected")
+				Eventually(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, deniedDstIP, dstPort, denyACLVerdict, initialDenyACLSeverity)
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+			})
+		})
+
+		When("the allowed destination is poked", func() {
+			It("there should be no trace in the ACL logs", func() {
+				// Retry here until timeout is reached
+				// Make sure that we see no increment in count
+				By("testing the primary namespace")
+				Consistently(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, allowedDstIP, dstPort, allowACLVerdict, "")
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
+
+				By("making sure that the secondary namespace logs as expected")
+				Eventually(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, allowedDstIP, dstPort, allowACLVerdict, initialAllowACLSeverity)
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+			})
+		})
+	})
+
+	When("the namespace's ACL logging annotation cannot be parsed", func() {
+		BeforeEach(func() {
+			By("setting the namespace's annotation to value \"cannot-be-parsed\"")
+			Expect(setNamespaceACLLogSeverity(fr, nsName, "invalid", "invalid", aclRemoveOptionEmptyString)).To(Succeed())
+			Expect(retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				namespaceToUpdate, err := fr.ClientSet.CoreV1().Namespaces().Get(context.Background(), nsName, metav1.GetOptions{})
+				if err != nil {
+					return err
+				}
+
+				if namespaceToUpdate.ObjectMeta.Annotations == nil {
+					namespaceToUpdate.ObjectMeta.Annotations = map[string]string{}
+				}
+
+				namespaceToUpdate.Annotations[logSeverityNamespaceAnnotation] = "cannot-be-parsed"
+				_, err = fr.ClientSet.CoreV1().Namespaces().Update(context.TODO(), namespaceToUpdate, metav1.UpdateOptions{})
+				return err
+			})).To(Succeed())
+		})
+
+		When("the denied destination is poked", func() {
+			It("there should be no trace in the ACL logs", func() {
+				// Retry here until timeout is reached
+				// Make sure that we see no increment in count
+				By("testing the primary namespace")
+				Consistently(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, deniedDstIP, dstPort, denyACLVerdict, "")
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
+
+				By("making sure that the secondary namespace logs as expected")
+				Eventually(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, deniedDstIP, dstPort, denyACLVerdict, initialDenyACLSeverity)
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
+			})
+		})
+
+		When("the allowed destination is poked", func() {
+			It("there should be no trace in the ACL logs", func() {
+				// Retry here until timeout is reached
+				// Make sure that we see no increment in count
+				By("testing the primary namespace")
+				Consistently(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePod, nsName, allowedDstIP, dstPort, allowACLVerdict, "")
+				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeFalse())
+
+				By("making sure that the secondary namespace logs as expected")
+				Eventually(func() (bool, error) {
+					return isCountUpdatedAfterPokeExternalHost(fr, pokePodSecondary, nsNameSecondary, allowedDstIP, dstPort, allowACLVerdict, initialAllowACLSeverity)
 				}, maxPokeRetries*pokeInterval, pokeInterval).Should(BeTrue())
 			})
 		})
@@ -393,8 +659,8 @@ func waitForACLLoggingPod(f *framework.Framework, namespace string, podName stri
 	})
 }
 
-func isCountUpdatedAfterPokeExternalHost(fr *framework.Framework, pokePod *v1.Pod, nsName, dstIp string, dstPort int, aclVerdict, aclSeverity string) (bool, error) {
-	startCount, err := countAclLogs(
+func isCountUpdatedAfterPokeExternalHost(fr *framework.Framework, pokePod *v1.Pod, nsName, dstIP string, dstPort int, aclVerdict, aclSeverity string) (bool, error) {
+	startCount, err := countACLLogs(
 		pokePod.Spec.NodeName,
 		generateEgressFwRegex(pokePod.Namespace),
 		aclVerdict,
@@ -402,10 +668,31 @@ func isCountUpdatedAfterPokeExternalHost(fr *framework.Framework, pokePod *v1.Po
 	if err != nil {
 		return false, err
 	}
-	pokeExternalHost(fr, pokePod, dstIp, dstPort)
-	endCount, _ := countAclLogs(
+	pokeExternalHost(fr, pokePod, dstIP, dstPort)
+	endCount, _ := countACLLogs(
 		pokePod.Spec.NodeName,
 		generateEgressFwRegex(pokePod.Namespace),
+		aclVerdict,
+		aclSeverity)
+	if err != nil {
+		return false, err
+	}
+	return startCount < endCount, nil
+}
+
+func isCountUpdatedAfterPokePod(fr *framework.Framework, clientPod, pokedPod *v1.Pod, regex, aclVerdict, aclSeverity string) (bool, error) {
+	startCount, err := countACLLogs(
+		clientPod.Spec.NodeName,
+		regex,
+		aclVerdict,
+		aclSeverity)
+	if err != nil {
+		return false, err
+	}
+	pokePod(fr, clientPod.GetName(), pokedPod.Status.PodIP)
+	endCount, _ := countACLLogs(
+		clientPod.Spec.NodeName,
+		regex,
 		aclVerdict,
 		aclSeverity)
 	if err != nil {
@@ -418,43 +705,62 @@ func generateEgressFwRegex(nsName string) string {
 	return fmt.Sprintf("egressFirewall_%s_.*", nsName)
 }
 
-func pokeExternalHost(fr *framework.Framework, pokePod *v1.Pod, dstIp string, dstPort int) {
+func pokeExternalHost(fr *framework.Framework, pokePod *v1.Pod, dstIP string, dstPort int) {
 	framework.Logf("sending traffic outside to test triggering ACL logging")
 	framework.Logf(
 		"Poke destination %s:%d from pod %s/%s (on node %s)",
-		dstIp,
+		dstIP,
 		dstPort,
 		pokePod.Namespace,
 		pokePod.GetName(),
 		pokePod.Spec.NodeName,
 	)
-	pokeExternalHostFromPod(fr, pokePod.Namespace, pokePod.GetName(), dstIp, dstPort)
+	pokeExternalHostFromPod(fr, pokePod.Namespace, pokePod.GetName(), dstIP, dstPort)
 }
 
+const (
+	aclRemoveOptionEmptyMap    = "empty-map"    // Set the annotation to "{}" if both allow and deny are "".
+	aclRemoveOptionEmptyString = "empty-string" // Set the field's value to "".
+	aclRemoveOptionDelete      = ""             // Delete the field entry if it's value is "".
+)
+
 // setNamespaceACLLogSeverity updates namespaceToUpdate with the deny and allow annotations, e.g. k8s.ovn.org/acl-logging={ "deny": "%s", "allow": "%s" }.
-func setNamespaceACLLogSeverity(fr *framework.Framework, namespaceToUpdate *v1.Namespace, desiredDenyLogLevel string, desiredAllowLogLevel string) error {
-	if namespaceToUpdate.ObjectMeta.Annotations == nil {
-		namespaceToUpdate.ObjectMeta.Annotations = map[string]string{}
-	}
+func setNamespaceACLLogSeverity(fr *framework.Framework, nsName string, desiredDenyLogLevel string, desiredAllowLogLevel string, removeOption string) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		namespaceToUpdate, err := fr.ClientSet.CoreV1().Namespaces().Get(context.Background(), nsName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
 
-	aclLogSeverity := ""
-	if desiredDenyLogLevel != "" && desiredAllowLogLevel != "" {
-		aclLogSeverity = fmt.Sprintf(`{ "deny": "%s", "allow": "%s" }`, desiredDenyLogLevel, desiredAllowLogLevel)
-		By(fmt.Sprintf("updating the namespace's ACL logging severity to %s", aclLogSeverity))
-		namespaceToUpdate.Annotations[logSeverityNamespaceAnnotation] = aclLogSeverity
-	} else if desiredDenyLogLevel != "" {
-		aclLogSeverity = fmt.Sprintf(`{ "deny": "%s" }`, desiredDenyLogLevel)
-		By(fmt.Sprintf("updating the namespace's ACL logging severity to %s", aclLogSeverity))
-		namespaceToUpdate.Annotations[logSeverityNamespaceAnnotation] = aclLogSeverity
-	} else if desiredAllowLogLevel != "" {
-		aclLogSeverity = fmt.Sprintf(`{ "allow": "%s" }`, desiredAllowLogLevel)
-		By(fmt.Sprintf("updating the namespace's ACL logging severity to %s", aclLogSeverity))
-		namespaceToUpdate.Annotations[logSeverityNamespaceAnnotation] = aclLogSeverity
-	} else {
-		By("removing the namespace's ACL logging severity annotation if it exists")
-		delete(namespaceToUpdate.Annotations, logSeverityNamespaceAnnotation)
-	}
+		if namespaceToUpdate.ObjectMeta.Annotations == nil {
+			namespaceToUpdate.ObjectMeta.Annotations = map[string]string{}
+		}
 
-	_, err := fr.ClientSet.CoreV1().Namespaces().Update(context.TODO(), namespaceToUpdate, metav1.UpdateOptions{})
-	return err
+		aclLogSeverity := ""
+		if removeOption == aclRemoveOptionEmptyString || desiredDenyLogLevel != "" && desiredAllowLogLevel != "" {
+			aclLogSeverity = fmt.Sprintf(`{ "deny": "%s", "allow": "%s" }`, desiredDenyLogLevel, desiredAllowLogLevel)
+			By(fmt.Sprintf("updating the namespace's ACL logging severity to %s", aclLogSeverity))
+			namespaceToUpdate.Annotations[logSeverityNamespaceAnnotation] = aclLogSeverity
+		} else if removeOption == aclRemoveOptionEmptyMap && desiredDenyLogLevel == "" && desiredAllowLogLevel == "" {
+			aclLogSeverity = "{}"
+			By(fmt.Sprintf("updating the namespace's ACL logging severity to %s", aclLogSeverity))
+			namespaceToUpdate.Annotations[logSeverityNamespaceAnnotation] = aclLogSeverity
+		} else {
+			if desiredDenyLogLevel != "" {
+				aclLogSeverity = fmt.Sprintf(`{ "deny": "%s" }`, desiredDenyLogLevel)
+				By(fmt.Sprintf("updating the namespace's ACL logging severity to %s", aclLogSeverity))
+				namespaceToUpdate.Annotations[logSeverityNamespaceAnnotation] = aclLogSeverity
+			} else if desiredAllowLogLevel != "" {
+				aclLogSeverity = fmt.Sprintf(`{ "allow": "%s" }`, desiredAllowLogLevel)
+				By(fmt.Sprintf("updating the namespace's ACL logging severity to %s", aclLogSeverity))
+				namespaceToUpdate.Annotations[logSeverityNamespaceAnnotation] = aclLogSeverity
+			} else {
+				By("removing the namespace's ACL logging severity annotation if it exists")
+				delete(namespaceToUpdate.Annotations, logSeverityNamespaceAnnotation)
+			}
+		}
+
+		_, err = fr.ClientSet.CoreV1().Namespaces().Update(context.TODO(), namespaceToUpdate, metav1.UpdateOptions{})
+		return err
+	})
 }

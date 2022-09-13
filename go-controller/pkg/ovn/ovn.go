@@ -17,8 +17,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -35,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
@@ -175,6 +178,8 @@ type Controller struct {
 
 	// Controller used to handle services
 	svcController *svccontroller.Controller
+	// Controller used to handle egress services
+	egressSvcController *egresssvc.Controller
 	// svcFactory used to handle service related events
 	svcFactory informers.SharedInformerFactory
 
@@ -271,6 +276,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		addressSetFactory = addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
 	}
 	svcController, svcFactory := newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient, recorder)
+	egressSvcController := newEgressServiceController(ovnClient.KubeClient, libovsdbOvnNBClient, svcFactory, stopChan)
 	var hybridOverlaySubnetAllocator *subnetallocator.SubnetAllocator
 	if config.HybridOverlay.Enabled {
 		hybridOverlaySubnetAllocator = subnetallocator.NewSubnetAllocator()
@@ -328,6 +334,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		sbClient:                  libovsdbOvnSBClient,
 		svcController:             svcController,
 		svcFactory:                svcFactory,
+		egressSvcController:       egressSvcController,
 		podRecorder:               metrics.NewPodRecorder(),
 	}
 }
@@ -437,6 +444,12 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 			oc.runEgressQoSController(1, oc.stopChan)
 		}()
 	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		oc.egressSvcController.Run(1)
+	}()
 
 	klog.Infof("Completing all the Watchers took %v", time.Since(start))
 
@@ -696,40 +709,59 @@ func (oc *Controller) WatchNodes() error {
 	return err
 }
 
-// Verify if controller can support ACL logging and validate annotation
-func (oc *Controller) aclLoggingCanEnable(annotation string, nsInfo *namespaceInfo) bool {
-	if !oc.aclLoggingEnabled || annotation == "" {
-		nsInfo.aclLogging.Deny = ""
-		nsInfo.aclLogging.Allow = ""
-		return false
-	}
+// aclLoggingUpdateNsInfo parses the provided annotation values and sets nsInfo.aclLogging.Deny and
+// nsInfo.aclLogging.Allow. If errors are encountered parsing the annotation, disable logging completely. If either
+// value contains invalid input, disable logging for the respective key. This is needed to ensure idempotency.
+// More details:
+// *) If the provided annotation cannot be unmarshaled: Disable both Deny and Allow logging. Return an error.
+// *) Valid values for "allow" and "deny" are  "alert", "warning", "notice", "info", "debug", "".
+// *) Invalid values will return an error, and logging will be disabled for the respective key.
+// *) In the following special cases, nsInfo.aclLogging.Deny and nsInfo.aclLogging.Allow. will both be reset to ""
+//    without logging an error, meaning that logging will be switched off:
+//    i) oc.aclLoggingEnabled == false
+//    ii) annotation == ""
+//    iii) annotation == "{}"
+// *) If one of "allow" or "deny" can be parsed and has a valid value, but the other key is not present in the
+//    annotation, then assume that this key should be disabled by setting its nsInfo value to "".
+func (oc *Controller) aclLoggingUpdateNsInfo(annotation string, nsInfo *namespaceInfo) error {
 	var aclLevels ACLLoggingLevels
-	err := json.Unmarshal([]byte(annotation), &aclLevels)
-	if err != nil {
-		return false
+	var errors []error
+
+	// If logging is disabled or if the annotation is "" or "{}", use empty strings. Otherwise, parse the annotation.
+	if oc.aclLoggingEnabled && annotation != "" && annotation != "{}" {
+		err := json.Unmarshal([]byte(annotation), &aclLevels)
+		if err != nil {
+			// Disable Allow and Deny logging to ensure idempotency.
+			nsInfo.aclLogging.Allow = ""
+			nsInfo.aclLogging.Deny = ""
+			return fmt.Errorf("could not unmarshal namespace ACL annotation '%s', disabling logging, err: %q",
+				annotation, err)
+		}
 	}
 
-	// Using newDenyLoggingLevel and newAllowLoggingLevel allows resetting nsinfo state.
-	// This is important if a user sets either the allow level or the deny level flag to an
-	// invalid value or after they remove either the allow or the deny annotation.
-	// If either of the 2 (allow or deny logging level) is set with a valid level, return true.
-	newDenyLoggingLevel := ""
-	newAllowLoggingLevel := ""
-	okCnt := 0
-	for _, s := range []string{nbdb.ACLSeverityAlert, nbdb.ACLSeverityWarning, nbdb.ACLSeverityNotice,
-		nbdb.ACLSeverityInfo, nbdb.ACLSeverityDebug} {
-		if s == aclLevels.Deny {
-			newDenyLoggingLevel = aclLevels.Deny
-			okCnt++
-		}
-		if s == aclLevels.Allow {
-			newAllowLoggingLevel = aclLevels.Allow
-			okCnt++
-		}
+	// Valid log levels are the various preestablished levels or the empty string.
+	validLogLevels := sets.NewString(nbdb.ACLSeverityAlert, nbdb.ACLSeverityWarning, nbdb.ACLSeverityNotice,
+		nbdb.ACLSeverityInfo, nbdb.ACLSeverityDebug, "")
+
+	// Set Deny logging.
+	if validLogLevels.Has(aclLevels.Deny) {
+		nsInfo.aclLogging.Deny = aclLevels.Deny
+	} else {
+		errors = append(errors, fmt.Errorf("disabling deny logging due to invalid deny annotation. "+
+			"%q is not a valid log severity", aclLevels.Deny))
+		nsInfo.aclLogging.Deny = ""
 	}
-	nsInfo.aclLogging.Deny = newDenyLoggingLevel
-	nsInfo.aclLogging.Allow = newAllowLoggingLevel
-	return okCnt > 0
+
+	// Set Allow logging.
+	if validLogLevels.Has(aclLevels.Allow) {
+		nsInfo.aclLogging.Allow = aclLevels.Allow
+	} else {
+		errors = append(errors, fmt.Errorf("disabling allow logging due to an invalid allow annotation. "+
+			"%q is not a valid log severity", aclLevels.Allow))
+		nsInfo.aclLogging.Allow = ""
+	}
+
+	return apierrors.NewAggregate(errors)
 }
 
 // gatewayChanged() compares old annotations to new and returns true if something has changed.
@@ -841,4 +873,45 @@ func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool)
 		}
 	}()
 	return nil
+}
+
+func newEgressServiceController(client clientset.Interface, nbClient libovsdbclient.Client,
+	svcFactory informers.SharedInformerFactory, stopCh <-chan struct{}) *egresssvc.Controller {
+
+	// If the EgressIP controller is enabled it will take care of creating the
+	// "no reroute" policies - we can pass "noop" functions to the egress service controller.
+	initClusterEgressPolicies := func(libovsdbclient.Client) error { return nil }
+	createNodeNoReroutePolicies := func(libovsdbclient.Client, *kapi.Node) error { return nil }
+	deleteNodeNoReroutePolicies := func(libovsdbclient.Client, string) error { return nil }
+
+	if !config.OVNKubernetesFeature.EnableEgressIP {
+		initClusterEgressPolicies = InitClusterEgressPolicies
+		createNodeNoReroutePolicies = CreateDefaultNoRerouteNodePolicies
+		deleteNodeNoReroutePolicies = DeleteDefaultNoRerouteNodePolicies
+	}
+
+	// TODO: currently an ugly hack to pass the (copied) isReachable func to the egress service controller
+	// without touching the egressIP controller code too much before the Controller object is created.
+	// This will be removed once we consolidate all of the healthchecks to a different place and have
+	// the controllers query a universal cache instead of creating multiple goroutines that do the same thing.
+	timeout := config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout
+	hcPort := config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort
+	isReachable := func(nodeName string, mgmtIPs []net.IP, healthClient healthcheck.EgressIPHealthClient) bool {
+		// Check if we need to do node reachability check
+		if timeout == 0 {
+			return true
+		}
+
+		if hcPort == 0 {
+			return isReachableLegacy(nodeName, mgmtIPs, timeout)
+		}
+
+		return isReachableViaGRPC(mgmtIPs, healthClient, hcPort, timeout)
+	}
+
+	return egresssvc.NewController(client, nbClient,
+		initClusterEgressPolicies, createNodeNoReroutePolicies, deleteNodeNoReroutePolicies, isReachable,
+		stopCh, svcFactory.Core().V1().Services(),
+		svcFactory.Discovery().V1().EndpointSlices(),
+		svcFactory.Core().V1().Nodes())
 }
