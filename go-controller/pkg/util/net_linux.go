@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"fmt"
 	"net"
-	"os"
 	"time"
 
 	kapi "k8s.io/api/core/v1"
@@ -295,9 +294,6 @@ func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int
 		}
 		err := netLinkOps.RouteAdd(route)
 		if err != nil {
-			if os.IsExist(err) {
-				return err
-			}
 			return fmt.Errorf("failed to add route for subnet %s via gateway %s with mtu %d and src: %s: %v",
 				subnet.String(), gwIP.String(), mtu, src, err)
 		}
