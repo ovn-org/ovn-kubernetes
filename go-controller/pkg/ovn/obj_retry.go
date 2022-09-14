@@ -17,7 +17,6 @@ import (
 	knet "k8s.io/api/networking/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
-	kerrorsutil "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/cache"
 
 	"k8s.io/klog/v2"
@@ -643,40 +642,8 @@ func (oc *Controller) addResource(objectsToRetry *RetryObjs, obj interface{}, fr
 
 	case factory.PeerNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		namespace := obj.(*kapi.Namespace)
-		extraParameters.np.RLock()
-		alreadyDeleted := extraParameters.np.deleted
-		extraParameters.np.RUnlock()
-		if alreadyDeleted {
-			return nil
-		}
-
-		// start watching pods in this namespace and selected by the label selector in extraParameters.podSelector
-		syncFunc := func(objs []interface{}) error {
-			return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, objs...)
-		}
-		retryPeerPods := NewRetryObjs(
-			factory.PeerPodForNamespaceAndPodSelectorType,
-			namespace.Name,
-			extraParameters.podSelector,
-			syncFunc,
-			&NetworkPolicyExtraParameters{gp: extraParameters.gp},
-		)
-		// The AddFilteredPodHandler call might call handlePeerPodSelectorAddUpdate
-		// on existing pods so we can't be holding the lock at this point
-		podHandler, err := oc.WatchResource(retryPeerPods)
-		if err != nil {
-			klog.Errorf("Failed WatchResource for PeerNamespaceAndPodSelectorType: %v", err)
-			return err
-		}
-
-		extraParameters.np.Lock()
-		defer extraParameters.np.Unlock()
-		if extraParameters.np.deleted {
-			oc.watchFactory.RemovePodHandler(podHandler)
-			return nil
-		}
-		extraParameters.np.podHandlerList = append(extraParameters.np.podHandlerList, podHandler)
+		return oc.handlePeerNamespaceAndPodAdd(extraParameters.np, extraParameters.gp,
+			extraParameters.podSelector, obj)
 
 	case factory.PeerPodForNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
@@ -684,12 +651,7 @@ func (oc *Controller) addResource(objectsToRetry *RetryObjs, obj interface{}, fr
 
 	case factory.PeerNamespaceSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		namespace := obj.(*kapi.Namespace)
-		// Update the ACL ...
-		return oc.handlePeerNamespaceSelectorOnUpdate(extraParameters.np, extraParameters.gp, func() bool {
-			// ... on condition that the added address set was not already in the 'gress policy
-			return extraParameters.gp.addNamespaceAddressSet(namespace.Name)
-		})
+		return oc.handlePeerNamespaceSelectorAdd(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
@@ -967,18 +929,7 @@ func (oc *Controller) deleteResource(objectsToRetry *RetryObjs, obj, cachedObj i
 
 	case factory.PeerNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		// when the namespace labels no longer apply
-		// remove the namespaces pods from the address_set
-		var errs []error
-		namespace := obj.(*kapi.Namespace)
-		pods, _ := oc.watchFactory.GetPods(namespace.Name)
-
-		for _, pod := range pods {
-			if err := oc.handlePeerPodSelectorDelete(extraParameters.gp, pod); err != nil {
-				errs = append(errs, err)
-			}
-		}
-		return kerrorsutil.NewAggregate(errs)
+		return oc.handlePeerNamespaceAndPodDel(extraParameters.gp, obj)
 
 	case factory.PeerPodForNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
@@ -986,13 +937,7 @@ func (oc *Controller) deleteResource(objectsToRetry *RetryObjs, obj, cachedObj i
 
 	case factory.PeerNamespaceSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		namespace := obj.(*kapi.Namespace)
-		// Remove namespace address set from the *gress policy in cache
-		// (done in gress.delNamespaceAddressSet()), and then update ACLs
-		return oc.handlePeerNamespaceSelectorOnUpdate(extraParameters.np, extraParameters.gp, func() bool {
-			// ... on condition that the removed address set was in the 'gress policy
-			return extraParameters.gp.delNamespaceAddressSet(namespace.Name)
-		})
+		return oc.handlePeerNamespaceSelectorDel(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)

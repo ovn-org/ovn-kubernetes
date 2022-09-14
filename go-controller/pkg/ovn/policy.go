@@ -21,6 +21,7 @@ import (
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	kerrorsutil "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -1689,6 +1690,60 @@ func (oc *Controller) addPeerPodHandler(
 	return nil
 }
 
+func (oc *Controller) handlePeerNamespaceAndPodAdd(np *networkPolicy, gp *gressPolicy,
+	podSelector labels.Selector, obj interface{}) error {
+	namespace := obj.(*kapi.Namespace)
+	np.RLock()
+	alreadyDeleted := np.deleted
+	np.RUnlock()
+	if alreadyDeleted {
+		return nil
+	}
+
+	// start watching pods in this namespace and selected by the label selector in extraParameters.podSelector
+	syncFunc := func(objs []interface{}) error {
+		return oc.handlePeerPodSelectorAddUpdate(gp, objs...)
+	}
+	retryPeerPods := NewRetryObjs(
+		factory.PeerPodForNamespaceAndPodSelectorType,
+		namespace.Name,
+		podSelector,
+		syncFunc,
+		&NetworkPolicyExtraParameters{gp: gp},
+	)
+	// The AddFilteredPodHandler call might call handlePeerPodSelectorAddUpdate
+	// on existing pods so we can't be holding the lock at this point
+	podHandler, err := oc.WatchResource(retryPeerPods)
+	if err != nil {
+		klog.Errorf("Failed WatchResource for PeerNamespaceAndPodSelectorType: %v", err)
+		return err
+	}
+
+	np.Lock()
+	defer np.Unlock()
+	if np.deleted {
+		oc.watchFactory.RemovePodHandler(podHandler)
+		return nil
+	}
+	np.podHandlerList = append(np.podHandlerList, podHandler)
+	return nil
+}
+
+func (oc *Controller) handlePeerNamespaceAndPodDel(gp *gressPolicy, obj interface{}) error {
+	// when the namespace labels no longer apply
+	// remove the namespaces pods from the address_set
+	var errs []error
+	namespace := obj.(*kapi.Namespace)
+	pods, _ := oc.watchFactory.GetPods(namespace.Name)
+
+	for _, pod := range pods {
+		if err := oc.handlePeerPodSelectorDelete(gp, pod); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return kerrorsutil.NewAggregate(errs)
+}
+
 func (oc *Controller) addPeerNamespaceAndPodHandler(
 	namespaceSelector *metav1.LabelSelector,
 	podSelector *metav1.LabelSelector,
@@ -1721,12 +1776,36 @@ func (oc *Controller) addPeerNamespaceAndPodHandler(
 	return nil
 }
 
-func (oc *Controller) handlePeerNamespaceSelectorOnUpdate(np *networkPolicy, gp *gressPolicy, doUpdate func() bool) error {
+func (oc *Controller) handlePeerNamespaceSelectorAdd(np *networkPolicy, gp *gressPolicy, obj interface{}) error {
+	namespace := obj.(*kapi.Namespace)
+	np.Lock()
+	updated := gp.addNamespaceAddressSet(namespace.Name)
+	np.Unlock()
+	// unlock networkPolicy, before calling peerNamespaceUpdate
+	if updated {
+		return oc.peerNamespaceUpdate(np, gp)
+	}
+	return nil
+}
+
+func (oc *Controller) handlePeerNamespaceSelectorDel(np *networkPolicy, gp *gressPolicy, obj interface{}) error {
+	namespace := obj.(*kapi.Namespace)
+	np.Lock()
+	updated := gp.delNamespaceAddressSet(namespace.Name)
+	np.Unlock()
+	// unlock networkPolicy, before calling peerNamespaceUpdate
+	if updated {
+		return oc.peerNamespaceUpdate(np, gp)
+	}
+	return nil
+}
+
+func (oc *Controller) peerNamespaceUpdate(np *networkPolicy, gp *gressPolicy) error {
 	aclLoggingLevels := oc.GetNamespaceACLLogging(np.namespace)
 	np.Lock()
 	defer np.Unlock()
 	// This needs to be a write lock because there's no locking around 'gress policies
-	if !np.deleted && doUpdate() {
+	if !np.deleted {
 		acls := gp.buildLocalPodACLs(np.portGroupName, aclLoggingLevels)
 		ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, acls...)
 		if err != nil {
