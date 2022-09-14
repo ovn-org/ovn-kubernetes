@@ -303,7 +303,7 @@ func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int
 
 func LinkRoutesAddOrUpdateSourceOrMTU(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int, src net.IP) error {
 	for _, subnet := range subnets {
-		route, err := LinkRouteGet(link, gwIP, subnet)
+		route, err := LinkRouteGetFilteredRoute(filterRouteByDst(link, subnet))
 		if err != nil {
 			return err
 		}
@@ -332,26 +332,23 @@ func LinkRoutesAddOrUpdateSourceOrMTU(link netlink.Link, gwIP net.IP, subnets []
 	return nil
 }
 
-// LinkRouteGet gets a route for the given subnet with the specified gwIPStr
+// LinkRouteGetFilteredRoute gets a route for the given route filter.
 // returns nil if route is not found
-func LinkRouteGet(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (*netlink.Route, error) {
-	routeFilter := &netlink.Route{Dst: subnet, LinkIndex: link.Attrs().Index}
-	filterMask := netlink.RT_FILTER_DST | netlink.RT_FILTER_OIF
-	routes, err := netLinkOps.RouteListFiltered(getFamily(gwIP), routeFilter, filterMask)
+func LinkRouteGetFilteredRoute(routeFilter *netlink.Route, filterMask uint64) (*netlink.Route, error) {
+	routes, err := netLinkOps.RouteListFiltered(getFamily(routeFilter.Dst.IP), routeFilter, filterMask)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get routes for subnet %s", subnet.String())
+		return nil, fmt.Errorf(
+			"failed to get routes for filter %v with mask %d: %v", *routeFilter, filterMask, err)
 	}
-	for _, route := range routes {
-		if route.Gw.Equal(gwIP) {
-			return &route, nil
-		}
+	if len(routes) == 0 {
+		return nil, nil
 	}
-	return nil, nil
+	return &routes[0], nil
 }
 
 // LinkRouteExists checks for existence of routes for the given subnet through gwIPStr
 func LinkRouteExists(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (bool, error) {
-	route, err := LinkRouteGet(link, gwIP, subnet)
+	route, err := LinkRouteGetFilteredRoute(filterRouteByDstAndGw(link, subnet, gwIP))
 	return route != nil, err
 }
 
@@ -551,4 +548,21 @@ func GetIFNameAndMTUForAddress(ifAddress net.IP) (string, int, error) {
 	}
 
 	return "", 0, fmt.Errorf("couldn't not find a link associated with the given OVN Encap IP (%s)", ifAddress)
+}
+
+func filterRouteByDst(link netlink.Link, subnet *net.IPNet) (*netlink.Route, uint64) {
+	return &netlink.Route{
+			Dst:       subnet,
+			LinkIndex: link.Attrs().Index,
+		},
+		netlink.RT_FILTER_DST | netlink.RT_FILTER_OIF
+}
+
+func filterRouteByDstAndGw(link netlink.Link, subnet *net.IPNet, gw net.IP) (*netlink.Route, uint64) {
+	return &netlink.Route{
+			Dst:       subnet,
+			LinkIndex: link.Attrs().Index,
+			Gw:        gw,
+		},
+		netlink.RT_FILTER_DST | netlink.RT_FILTER_OIF | netlink.RT_FILTER_GW
 }

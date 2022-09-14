@@ -547,6 +547,7 @@ func TestLinkRoutesAddOrUpdateMTU(t *testing.T) {
 		inputGwIP                net.IP
 		inputSubnets             []*net.IPNet
 		inputMTU                 int
+		inputSrc                 net.IP
 		errExp                   bool
 		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
 		onRetArgsLinkIfaceOpers  []ovntest.TestifyMockHelper
@@ -590,6 +591,7 @@ func TestLinkRoutesAddOrUpdateMTU(t *testing.T) {
 				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
 					{
 						Gw:  ovntest.MustParseIP("192.168.0.1"),
+						Dst: ovntest.MustParseIPNet("10.18.20.0/24"),
 						MTU: 1400,
 					},
 				}, nil}},
@@ -607,7 +609,10 @@ func TestLinkRoutesAddOrUpdateMTU(t *testing.T) {
 			errExp:       false,
 			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
-					{Gw: ovntest.MustParseIP("192.168.0.1")},
+					{
+						Gw:  ovntest.MustParseIP("192.168.0.1"),
+						Dst: ovntest.MustParseIPNet("10.18.20.0/24"),
+					},
 				}, nil}},
 				{OnCallMethodName: "RouteReplace", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil}},
 			},
@@ -616,7 +621,52 @@ func TestLinkRoutesAddOrUpdateMTU(t *testing.T) {
 			},
 		},
 		{
-			desc: "LinkRoutesAddOrUpdateSourceOrMTU() returns NO error when subnets input list is empty",
+			desc:         "Route exists, has different source and is updated",
+			inputLink:    mockLink,
+			inputGwIP:    nil,
+			inputSubnets: ovntest.MustParseIPNets("10.18.20.0/24"),
+			inputMTU:     1400,
+			inputSrc:     ovntest.MustParseIP("192.168.0.8"),
+			errExp:       false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
+					{
+						Gw:  ovntest.MustParseIP("192.168.0.1"),
+						Dst: ovntest.MustParseIPNet("10.18.20.0/24"),
+						MTU: 1400,
+						Src: ovntest.MustParseIP("192.168.0.10"),
+					},
+				}, nil}},
+				{OnCallMethodName: "RouteReplace", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
+		},
+		{
+			desc:         "Route exists, has the same (mtu and source) and is not updated",
+			inputLink:    mockLink,
+			inputGwIP:    nil,
+			inputSubnets: ovntest.MustParseIPNets("10.18.20.0/24"),
+			inputMTU:     1400,
+			inputSrc:     ovntest.MustParseIP("192.168.0.10"),
+			errExp:       false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
+					{
+						Gw:  ovntest.MustParseIP("192.168.0.1"),
+						Dst: ovntest.MustParseIPNet("10.18.20.0/24"),
+						MTU: 1400,
+						Src: ovntest.MustParseIP("192.168.0.10"),
+					},
+				}, nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
+		},
+		{
+			desc: "LinkRoutesAddOrUpdateSrcOrMTU() returns NO error when subnets input list is empty",
 		},
 	}
 	for i, tc := range tests {
@@ -625,8 +675,7 @@ func TestLinkRoutesAddOrUpdateMTU(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
 			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
 
-			// FIXME(trozet) add some tests around setting src and not setting gw ip
-			err := LinkRoutesAddOrUpdateSourceOrMTU(tc.inputLink, tc.inputGwIP, tc.inputSubnets, tc.inputMTU, nil)
+			err := LinkRoutesAddOrUpdateSourceOrMTU(tc.inputLink, tc.inputGwIP, tc.inputSubnets, tc.inputMTU, tc.inputSrc)
 			t.Log(err)
 			if tc.errExp {
 				assert.Error(t, err)
