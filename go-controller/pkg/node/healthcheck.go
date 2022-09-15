@@ -16,6 +16,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 )
 
@@ -24,18 +25,20 @@ import (
 
 type loadBalancerHealthChecker struct {
 	sync.Mutex
-	nodeName  string
-	server    healthcheck.Server
-	services  map[ktypes.NamespacedName]uint16
-	endpoints map[ktypes.NamespacedName]int
+	nodeName     string
+	server       healthcheck.Server
+	services     map[ktypes.NamespacedName]uint16
+	endpoints    map[ktypes.NamespacedName]int
+	watchFactory factory.NodeWatchFactory
 }
 
-func newLoadBalancerHealthChecker(nodeName string) *loadBalancerHealthChecker {
+func newLoadBalancerHealthChecker(nodeName string, watchFactory factory.NodeWatchFactory) *loadBalancerHealthChecker {
 	return &loadBalancerHealthChecker{
-		nodeName:  nodeName,
-		server:    healthcheck.NewServer(nodeName, nil, nil, nil),
-		services:  make(map[ktypes.NamespacedName]uint16),
-		endpoints: make(map[ktypes.NamespacedName]int),
+		nodeName:     nodeName,
+		server:       healthcheck.NewServer(nodeName, nil, nil, nil),
+		services:     make(map[ktypes.NamespacedName]uint16),
+		endpoints:    make(map[ktypes.NamespacedName]int),
+		watchFactory: watchFactory,
 	}
 }
 
@@ -50,7 +53,26 @@ func (l *loadBalancerHealthChecker) AddService(svc *kapi.Service) {
 }
 
 func (l *loadBalancerHealthChecker) UpdateService(old, new *kapi.Service) {
-	// HealthCheckNodePort can't be changed on update
+	// if the ETP values have changed between local and cluster,
+	// we need to update health checks accordingly
+	// HealthCheckNodePort is used only in ETP=local mode
+	if old.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeCluster &&
+		new.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeLocal {
+		l.AddService(new)
+		epSlices, err := l.watchFactory.GetEndpointSlices(new.Namespace, new.Name)
+		if err != nil {
+			klog.V(4).Infof("Could not fetch endpointslices for service %s/%s during health check update service", new.Namespace, new.Name)
+		}
+		namespacedName := ktypes.NamespacedName{Namespace: new.Namespace, Name: new.Name}
+		l.Lock()
+		l.endpoints[namespacedName] = l.GetLocalEndpointAddressesCount(epSlices)
+		_ = l.server.SyncEndpoints(l.endpoints)
+		l.Unlock()
+	}
+	if old.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeLocal &&
+		new.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeCluster {
+		l.DeleteService(old)
+	}
 }
 
 func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) {
@@ -68,13 +90,28 @@ func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) error {
 	return nil
 }
 
+func (l *loadBalancerHealthChecker) SyncEndPointSlices(epSlice *discovery.EndpointSlice) {
+	namespacedName := namespacedNameFromEPSlice(epSlice)
+	epSlices, err := l.watchFactory.GetEndpointSlices(epSlice.Namespace, epSlice.Labels[discovery.LabelServiceName])
+	if err != nil {
+		// should be a rare occurence
+		klog.V(4).Infof("Could not fetch endpointslices for %v during health check", namespacedName)
+	}
+	if len(epSlices) == 0 {
+		// let's delete it from cache and wait for the next update; this will show as 0 endpoints for health checks
+		delete(l.endpoints, namespacedName)
+	} else {
+		l.endpoints[namespacedName] = l.GetLocalEndpointAddressesCount(epSlices)
+	}
+	_ = l.server.SyncEndpoints(l.endpoints)
+}
+
 func (l *loadBalancerHealthChecker) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
 	namespacedName := namespacedNameFromEPSlice(epSlice)
 	l.Lock()
 	defer l.Unlock()
 	if _, exists := l.services[namespacedName]; exists {
-		l.endpoints[namespacedName] = countLocalEndpoints(epSlice, l.nodeName)
-		_ = l.server.SyncEndpoints(l.endpoints)
+		l.SyncEndPointSlices(epSlice)
 	}
 }
 
@@ -83,27 +120,27 @@ func (l *loadBalancerHealthChecker) UpdateEndpointSlice(oldEpSlice, newEpSlice *
 	l.Lock()
 	defer l.Unlock()
 	if _, exists := l.services[namespacedName]; exists {
-		l.endpoints[namespacedName] = countLocalEndpoints(newEpSlice, l.nodeName)
-		_ = l.server.SyncEndpoints(l.endpoints)
+		l.SyncEndPointSlices(newEpSlice)
 	}
 }
 
 func (l *loadBalancerHealthChecker) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
-	namespacedName := namespacedNameFromEPSlice(epSlice)
 	l.Lock()
 	defer l.Unlock()
-	delete(l.endpoints, namespacedName)
-	_ = l.server.SyncEndpoints(l.endpoints)
+	l.SyncEndPointSlices(epSlice)
 }
 
-func countLocalEndpoints(epSlice *discovery.EndpointSlice, nodeName string) int {
-	var num int
-	for _, endpoint := range epSlice.Endpoints {
-		if endpoint.NodeName != nil && *endpoint.NodeName == nodeName {
-			num++
+// GetLocalEndpointAddresses returns the number of endpoints that are local to the node for a service
+func (l *loadBalancerHealthChecker) GetLocalEndpointAddressesCount(endpointSlices []*discovery.EndpointSlice) int {
+	localEndpoints := sets.NewString()
+	for _, endpointSlice := range endpointSlices {
+		for _, endpoint := range endpointSlice.Endpoints {
+			if endpoint.NodeName != nil && *endpoint.NodeName == l.nodeName {
+				localEndpoints.Insert(endpoint.Addresses...)
+			}
 		}
 	}
-	return num
+	return len(localEndpoints)
 }
 
 // hasLocalHostNetworkEndpoints returns true if there is at least one host-networked endpoint
