@@ -172,7 +172,7 @@ var _ = ginkgo.Describe("Services", func() {
 		framework.ExpectNoError(err)
 
 		ginkgo.By("Adding this IP as a manual endpoint")
-		f.ClientSet.CoreV1().Endpoints(namespace).Create(context.TODO(),
+		_, err = f.ClientSet.CoreV1().Endpoints(namespace).Create(context.TODO(),
 			&v1.Endpoints{
 				ObjectMeta: metav1.ObjectMeta{Name: service.Name},
 				Subsets: []v1.EndpointSubset{
