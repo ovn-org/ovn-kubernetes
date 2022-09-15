@@ -625,11 +625,11 @@ func (oc *Controller) addResource(objectsToRetry *RetryObjs, obj interface{}, fr
 			return fmt.Errorf("could not cast peer service of type %T to *kapi.Service", obj)
 		}
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerServiceAdd(extraParameters.gp, service)
+		return oc.handlePeerServiceAdd(extraParameters.np, extraParameters.gp, service)
 
 	case factory.PeerPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, obj)
+		return oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
@@ -638,7 +638,7 @@ func (oc *Controller) addResource(objectsToRetry *RetryObjs, obj interface{}, fr
 
 	case factory.PeerPodForNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, obj)
+		return oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerNamespaceSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
@@ -648,7 +648,6 @@ func (oc *Controller) addResource(objectsToRetry *RetryObjs, obj interface{}, fr
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorAddFunc(
 			extraParameters.np,
-			false,
 			obj)
 
 	case factory.EgressFirewallType:
@@ -755,17 +754,16 @@ func (oc *Controller) updateResource(objectsToRetry *RetryObjs, oldObj, newObj i
 
 	case factory.PeerPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, newObj)
+		return oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, newObj)
 
 	case factory.PeerPodForNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, newObj)
+		return oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, newObj)
 
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorAddFunc(
 			extraParameters.np,
-			false,
 			newObj)
 
 	case factory.EgressIPType:
@@ -891,19 +889,19 @@ func (oc *Controller) deleteResource(objectsToRetry *RetryObjs, obj, cachedObj i
 			return fmt.Errorf("could not cast peer service of type %T to *kapi.Service", obj)
 		}
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerServiceDelete(extraParameters.gp, service)
+		return oc.handlePeerServiceDelete(extraParameters.np, extraParameters.gp, service)
 
 	case factory.PeerPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorDelete(extraParameters.gp, obj)
+		return oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerNamespaceAndPodDel(extraParameters.gp, obj)
+		return oc.handlePeerNamespaceAndPodDel(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerPodForNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorDelete(extraParameters.gp, obj)
+		return oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerNamespaceSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
@@ -1103,7 +1101,7 @@ func (oc *Controller) iterateRetryResources(r *RetryObjs) {
 	}
 	klog.V(5).Infof("Waiting for all the %s retry setup to complete in iterateRetryResources", r.oType)
 	wg.Wait()
-	klog.V(5).Infof("Function iterateRetryResources ended (in %v)", time.Since(now))
+	klog.V(5).Infof("Function iterateRetryResources for %s ended (in %v)", r.oType, time.Since(now))
 }
 
 // periodicallyRetryResources tracks RetryObjs and checks if any object needs to be retried for add or delete every
@@ -1251,7 +1249,7 @@ func (oc *Controller) WatchResource(objectsToRetry *RetryObjs) (*factory.Handler
 					klog.Errorf("Upon add event: %v", err)
 					return
 				}
-				klog.V(5).Infof("Add event received for %s, key=%s", objectsToRetry.oType, key)
+				klog.V(5).Infof("Add event received for %s %s", objectsToRetry.oType, key)
 
 				objectsToRetry.DoWithLock(key, func(key string) {
 					// This only applies to pod watchers (pods + dynamic network policy handlers watching pods):

@@ -3,8 +3,10 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -17,7 +19,6 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -28,14 +29,20 @@ type gressPolicy struct {
 	policyType      knet.PolicyType
 	idx             int
 
-	// peerAddressSet points to the addressSet that holds all peer pod
+	// peerAddressSet points to the addressSet that holds all peer pod or peer service
 	// IP addresess.
+	// used for pod, pod with namespace, and svc peer selectors
+	// This addressSet is synced by networkPolicy lock:
+	// ensurePeerAddressSet and destroy functions need to hold networkPolicy write lock,
+	// and function that modify addressSet need to hold networkPolicy read lock.
+	// Adding/deleting ips to/from address set is safe for concurrent use.
 	peerAddressSet addressset.AddressSet
 
+	// peerVxAddressSets includes gressPolicy.peerAddressSet, and address sets for selected namespaces
 	// peerV4AddressSets has Address sets for all namespaces and pod selectors for IPv4
-	peerV4AddressSets sets.String
+	peerV4AddressSets *sync.Map
 	// peerV6AddressSets has Address sets for all namespaces and pod selectors for IPv6
-	peerV6AddressSets sets.String
+	peerV6AddressSets *sync.Map
 
 	// portPolicies represents all the ports to which traffic is allowed for
 	// the rule in question.
@@ -77,12 +84,38 @@ func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string)
 		policyName:        name,
 		policyType:        policyType,
 		idx:               idx,
-		peerV4AddressSets: sets.String{},
-		peerV6AddressSets: sets.String{},
+		peerV4AddressSets: &sync.Map{},
+		peerV6AddressSets: &sync.Map{},
 		portPolicies:      make([]*portPolicy, 0),
 	}
 }
 
+type sortableSlice []string
+
+func (s sortableSlice) Len() int           { return len(s) }
+func (s sortableSlice) Less(i, j int) bool { return s[i] < s[j] }
+func (s sortableSlice) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+
+func syncMapToSortedList(m *sync.Map) []string {
+	result := sortableSlice{}
+	m.Range(func(key, _ interface{}) bool {
+		result = append(result, key.(string))
+		return true
+	})
+	sort.Sort(result)
+	return result
+}
+
+func syncMapLen(m *sync.Map) int {
+	result := 0
+	m.Range(func(_, _ interface{}) bool {
+		result++
+		return true
+	})
+	return result
+}
+
+// must be called with network policy write lock
 func (gp *gressPolicy) ensurePeerAddressSet(factory addressset.AddressSetFactory) error {
 	if gp.peerAddressSet != nil {
 		return nil
@@ -98,14 +131,15 @@ func (gp *gressPolicy) ensurePeerAddressSet(factory addressset.AddressSetFactory
 	gp.peerAddressSet = as
 	ipv4HashedAS, ipv6HashedAS := as.GetASHashNames()
 	if ipv4HashedAS != "" {
-		gp.peerV4AddressSets.Insert("$" + ipv4HashedAS)
+		gp.peerV4AddressSets.Store("$"+ipv4HashedAS, true)
 	}
 	if ipv6HashedAS != "" {
-		gp.peerV6AddressSets.Insert("$" + ipv6HashedAS)
+		gp.peerV6AddressSets.Store("$"+ipv6HashedAS, true)
 	}
 	return nil
 }
 
+// must be called with network policy read lock
 func (gp *gressPolicy) addPeerSvcVip(nbClient client.Client, service *v1.Service) error {
 	if gp.peerAddressSet == nil {
 		return fmt.Errorf("peer AddressSet is nil, cannot add peer Service: %s for gressPolicy: %s",
@@ -119,6 +153,7 @@ func (gp *gressPolicy) addPeerSvcVip(nbClient client.Client, service *v1.Service
 	return gp.peerAddressSet.AddIPs(ips)
 }
 
+// must be called with network policy read lock
 func (gp *gressPolicy) deletePeerSvcVip(nbClient client.Client, service *v1.Service) error {
 	if gp.peerAddressSet == nil {
 		return fmt.Errorf("peer AddressSet is nil, cannot add peer Service: %s for gressPolicy: %s",
@@ -132,6 +167,9 @@ func (gp *gressPolicy) deletePeerSvcVip(nbClient client.Client, service *v1.Serv
 	return gp.peerAddressSet.DeleteIPs(ips)
 }
 
+// addPeerPods will get all currently assigned ips for given pods, and add them to the address set.
+// If pod ips change, this function should be called again.
+// must be called with network policy read lock
 func (gp *gressPolicy) addPeerPods(pods ...*v1.Pod) error {
 	if gp.peerAddressSet == nil {
 		return fmt.Errorf("peer AddressSet is nil, cannot add peer pod(s): for gressPolicy: %s",
@@ -154,6 +192,7 @@ func (gp *gressPolicy) addPeerPods(pods ...*v1.Pod) error {
 	return gp.peerAddressSet.AddIPs(ips)
 }
 
+// must be called with network policy read lock
 func (gp *gressPolicy) deletePeerPod(pod *v1.Pod) error {
 	ips, err := util.GetAllPodIPs(pod)
 	if err != nil {
@@ -183,12 +222,15 @@ func (gp *gressPolicy) addIPBlock(ipblockJSON *knet.IPBlock) {
 
 func (gp *gressPolicy) getL3MatchFromAddressSet() string {
 	var l3Match string
-	if len(gp.peerV4AddressSets) == 0 && len(gp.peerV6AddressSets) == 0 {
+	v4List := syncMapToSortedList(gp.peerV4AddressSets)
+	v6List := syncMapToSortedList(gp.peerV6AddressSets)
+
+	if len(v4List) == 0 && len(v6List) == 0 {
 		l3Match = constructEmptyMatchString()
 	} else {
-		// List() method on the set will return the sorted strings
-		// Hence we'll be constructing the sorted adress set string here
-		l3Match = gp.constructMatchString(gp.peerV4AddressSets.List(), gp.peerV6AddressSets.List())
+		// We sort address slice,
+		// Hence we'll be constructing the sorted address set string here
+		l3Match = gp.constructMatchString(v4List, v6List)
 	}
 	return l3Match
 }
@@ -232,7 +274,7 @@ func (gp *gressPolicy) constructMatchString(v4AddressSets, v6AddressSets []strin
 }
 
 func (gp *gressPolicy) sizeOfAddressSet() int {
-	return gp.peerV4AddressSets.Len() + gp.peerV6AddressSets.Len()
+	return syncMapLen(gp.peerV4AddressSets) + syncMapLen(gp.peerV6AddressSets)
 }
 
 func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) []string {
@@ -248,62 +290,57 @@ func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) []string 
 // addNamespaceAddressSet adds a namespace address set to the gress policy
 // if the address set does not exist and returns `true`;  if the address set already exists,
 // it returns `false`.
+// This function is safe for concurrent use, doesn't require additional synchronization
 func (gp *gressPolicy) addNamespaceAddressSet(name string) bool {
 	v4HashName, v6HashName := addressset.MakeAddressSetHashNames(name)
 	v4HashName = "$" + v4HashName
 	v6HashName = "$" + v6HashName
 
-	if gp.peerV4AddressSets.Has(v4HashName) || gp.peerV6AddressSets.Has(v6HashName) {
-		return false
-	}
+	v4NoUpdate := true
+	v6NoUpdate := true
+	// only update vXNoUpdate if value was stored and not loaded
 	if config.IPv4Mode {
-		gp.peerV4AddressSets.Insert(v4HashName)
+		_, v4NoUpdate = gp.peerV4AddressSets.LoadOrStore(v4HashName, true)
 	}
 	if config.IPv6Mode {
-		gp.peerV6AddressSets.Insert(v6HashName)
+		_, v6NoUpdate = gp.peerV6AddressSets.LoadOrStore(v6HashName, true)
 	}
-
+	if v4NoUpdate && v6NoUpdate {
+		// no changes were applied, return false
+		return false
+	}
 	return true
-}
-
-// addNamespaceAddressSets adds namespace address sets to the gress policy.
-func (gp *gressPolicy) addNamespaceAddressSets(namespaces []interface{}) {
-	if len(namespaces) <= 0 {
-		return
-	}
-	for _, nsInterface := range namespaces {
-		namespace, ok := nsInterface.(*v1.Namespace)
-		if !ok {
-			klog.Errorf("Spurious object in addNamespaceAddressSets: %v", nsInterface)
-			continue
-		}
-		gp.addNamespaceAddressSet(namespace.Name)
-	}
 }
 
 // delNamespaceAddressSet removes a namespace address set from the gress policy
 // and returns whether the address set was in the policy or not.
+// This function is safe for concurrent use, doesn't require additional synchronization
 func (gp *gressPolicy) delNamespaceAddressSet(name string) bool {
 	v4HashName, v6HashName := addressset.MakeAddressSetHashNames(name)
 	v4HashName = "$" + v4HashName
 	v6HashName = "$" + v6HashName
 
-	if !gp.peerV4AddressSets.Has(v4HashName) && !gp.peerV6AddressSets.Has(v6HashName) {
-		return false
-	}
+	v4Update := false
+	v6Update := false
+	// only update vXUpdate if value was loaded
 	if config.IPv4Mode {
-		gp.peerV4AddressSets.Delete(v4HashName)
+		_, v4Update = gp.peerV4AddressSets.LoadAndDelete(v4HashName)
 	}
 	if config.IPv6Mode {
-		gp.peerV6AddressSets.Delete(v6HashName)
+		_, v6Update = gp.peerV6AddressSets.LoadAndDelete(v6HashName)
 	}
-
-	return true
+	if v4Update || v6Update {
+		// at least 1 address set was updated, return true
+		return true
+	}
+	return false
 }
 
 // buildLocalPodACLs builds the ACLs that implement the gress policy's rules to the
 // given Port Group (which should contain all pod logical switch ports selected
 // by the parent NetworkPolicy)
+// buildLocalPodACLs is safe for concurrent use, since it only uses gressPolicy fields that don't change
+// since creation, or are safe for concurrent use like peerVXAddressSets
 func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *ACLLoggingLevels) []*nbdb.ACL {
 	l3Match := gp.getL3MatchFromAddressSet()
 	var lportMatch string
@@ -425,11 +462,13 @@ func constructIPBlockStringsForACL(direction string, ipBlocks []*knet.IPBlock, l
 	return matchStrings
 }
 
+// must be called with network policy write lock
 func (gp *gressPolicy) destroy() error {
 	if gp.peerAddressSet != nil {
 		if err := gp.peerAddressSet.Destroy(); err != nil {
 			return err
 		}
+		gp.peerAddressSet = nil
 	}
 	return nil
 }
