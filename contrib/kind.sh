@@ -682,6 +682,12 @@ install_ovn() {
   run_kubectl apply -f k8s.ovn.org_egressips.yaml
   run_kubectl apply -f k8s.ovn.org_egressqoses.yaml
   run_kubectl apply -f ovn-setup.yaml
+  if [[ "${KIND_NUM_WORKER}" -ne 0 ]]; then
+    WORKER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | tail -n "${KIND_NUM_WORKER}")
+    for n in $WORKER_NODES; do
+      kubectl label node "$n" node-role.kubernetes.io/worker="" --overwrite
+    done
+  fi
   MASTER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
   # We want OVN HA not Kubernetes HA
   # leverage the kubeadm well-known label node-role.kubernetes.io/control-plane=

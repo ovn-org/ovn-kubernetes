@@ -389,6 +389,7 @@ jobs:
       OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target == 'control-plane' }}"
       OVN_MULTICAST_ENABLE:  "${{ matrix.target == 'control-plane' }}"
       OVN_EMPTY_LB_EVENTS: "${{ matrix.target == 'control-plane' }}"
+      KIND_REMOVE_TAINT: "${{ !(matrix.target == 'shard-conformance' && matrix.ha == 'noHA') }}"
       OVN_HA: "${{ matrix.ha == 'HA' }}"
       OVN_DISABLE_SNAT_MULTIPLE_GWS: "${{ matrix.disable-snat-multiple-gws == 'noSnatGW' }}"
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"

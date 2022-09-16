@@ -60,6 +60,12 @@ nodes:
  - role: worker
 {%- endfor %}
 {%- endif %}
-{%- for _ in range(ovn_num_worker | int) %}
+{%- for i in range(ovn_num_worker | int) %}
  - role: worker
+   kubeadmConfigPatches:
+   - |
+     kind: JoinConfiguration
+     nodeRegistration:
+       kubeletExtraArgs:
+         node-labels: "{{ "topology.kubernetes.io/zone=zone-" + i|string }}"
 {%- endfor %}
