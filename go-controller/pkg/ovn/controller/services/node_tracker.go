@@ -34,6 +34,8 @@ type nodeInfo struct {
 	name string
 	// The list of physical IPs the node has, as reported by the gatewayconf annotation
 	nodeIPs []string
+	// The list of labels on the node (service creation cares about the topology label)
+	nodeLabels map[string]string
 	// The pod network subnet(s)
 	podSubnets []net.IPNet
 	// the name of the node's GatewayRouter, or "" of non-existent
@@ -122,10 +124,11 @@ func newNodeTracker(nodeInformer coreinformers.NodeInformer) *nodeTracker {
 
 // updateNodeInfo updates the node info cache, and syncs all services
 // if it changed.
-func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName string, nodeIPs []string, podSubnets []*net.IPNet) {
+func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName string, nodeIPs []string, podSubnets []*net.IPNet, nodeLabels map[string]string) {
 	ni := nodeInfo{
 		name:              nodeName,
 		nodeIPs:           nodeIPs,
+		nodeLabels:        nodeLabels,
 		podSubnets:        make([]net.IPNet, 0, len(podSubnets)),
 		gatewayRouterName: routerName,
 		switchName:        switchName,
@@ -204,6 +207,7 @@ func (nt *nodeTracker) updateNode(node *v1.Node) {
 		grName,
 		ips,
 		hsn,
+		node.Labels,
 	)
 }
 

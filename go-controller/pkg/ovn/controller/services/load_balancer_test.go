@@ -14,6 +14,7 @@ import (
 	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/sets"
 	utilpointer "k8s.io/utils/pointer"
 )
 
@@ -38,7 +39,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 	inport1 := int32(81)
 	outport1 := int32(8081)
 	outportstr := intstr.FromInt(int(outport))
-	emptyEPs := util.LbEndpoints{V4IPs: []string{}, V6IPs: []string{}, Port: 0}
+	emptyEPs := util.LbEndpoints{V4IPs: []string{}, V6IPs: []string{}, Port: 0, ZoneHints: make(map[string]util.PerZoneEPs)}
 	tcp := v1.ProtocolTCP
 	udp := v1.ProtocolUDP
 
@@ -185,9 +186,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				protocol: v1.ProtocolTCP,
 				inport:   inport,
 				eps: util.LbEndpoints{
-					V4IPs: []string{"10.128.0.2"},
-					V6IPs: []string{},
-					Port:  outport,
+					V4IPs:     []string{"10.128.0.2"},
+					V6IPs:     []string{},
+					Port:      outport,
+					ZoneHints: make(map[string]util.PerZoneEPs),
 				},
 			}},
 			resultsSame: true,
@@ -254,9 +256,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
-						V6IPs: []string{},
-						Port:  outport,
+						V4IPs:     []string{"10.128.0.2", "10.128.1.2"},
+						V6IPs:     []string{},
+						Port:      outport,
+						ZoneHints: make(map[string]util.PerZoneEPs),
 					},
 				},
 				{
@@ -264,9 +267,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport1,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
-						V6IPs: []string{},
-						Port:  outport1,
+						V4IPs:     []string{"10.128.0.2", "10.128.1.2"},
+						V6IPs:     []string{},
+						Port:      outport1,
+						ZoneHints: make(map[string]util.PerZoneEPs),
 					},
 				},
 			},
@@ -333,9 +337,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
-						V6IPs: []string{},
-						Port:  outport,
+						V4IPs:     []string{"10.128.0.2", "10.128.1.2"},
+						V6IPs:     []string{},
+						Port:      outport,
+						ZoneHints: make(map[string]util.PerZoneEPs),
 					},
 				},
 				{
@@ -343,9 +348,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolUDP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
-						V6IPs: []string{},
-						Port:  outport,
+						V4IPs:     []string{"10.128.0.2", "10.128.1.2"},
+						V6IPs:     []string{},
+						Port:      outport,
+						ZoneHints: make(map[string]util.PerZoneEPs),
 					},
 				},
 			},
@@ -374,9 +380,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				protocol: v1.ProtocolTCP,
 				inport:   inport,
 				eps: util.LbEndpoints{
-					V4IPs: []string{"10.128.0.2"},
-					V6IPs: []string{"fe00::1:1"},
-					Port:  outport,
+					V4IPs:     []string{"10.128.0.2"},
+					V6IPs:     []string{"fe00::1:1"},
+					Port:      outport,
+					ZoneHints: make(map[string]util.PerZoneEPs),
 				},
 			}},
 		},
@@ -412,9 +419,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				protocol: v1.ProtocolTCP,
 				inport:   inport,
 				eps: util.LbEndpoints{
-					V4IPs: []string{"10.128.0.2"},
-					V6IPs: []string{"fe00::1:1"},
-					Port:  outport,
+					V4IPs:     []string{"10.128.0.2"},
+					V6IPs:     []string{"fe00::1:1"},
+					Port:      outport,
+					ZoneHints: make(map[string]util.PerZoneEPs),
 				},
 			}},
 		},
@@ -452,9 +460,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.0.2"},
-						V6IPs: []string{"fe00::1:1"},
-						Port:  outport,
+						V4IPs:     []string{"10.128.0.2"},
+						V6IPs:     []string{"fe00::1:1"},
+						Port:      outport,
+						ZoneHints: make(map[string]util.PerZoneEPs),
 					},
 				},
 			},
@@ -465,9 +474,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					inport:               inport,
 					externalTrafficLocal: true,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"10.128.0.2"},
-						V6IPs: []string{"fe00::1:1"},
-						Port:  outport,
+						V4IPs:     []string{"10.128.0.2"},
+						V6IPs:     []string{"fe00::1:1"},
+						Port:      outport,
+						ZoneHints: make(map[string]util.PerZoneEPs),
 					},
 				},
 			},
@@ -497,9 +507,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				protocol: v1.ProtocolTCP,
 				inport:   inport,
 				eps: util.LbEndpoints{
-					V4IPs: []string{"10.128.0.2"},
-					V6IPs: []string{"fe00::1:1"},
-					Port:  outport,
+					V4IPs:     []string{"10.128.0.2"},
+					V6IPs:     []string{"fe00::1:1"},
+					Port:      outport,
+					ZoneHints: make(map[string]util.PerZoneEPs),
 				},
 			}},
 			resultSharedGatewayNode: []lbConfig{{
@@ -507,9 +518,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				protocol: v1.ProtocolTCP,
 				inport:   5,
 				eps: util.LbEndpoints{
-					V4IPs: []string{"10.128.0.2"},
-					V6IPs: []string{"fe00::1:1"},
-					Port:  outport,
+					V4IPs:     []string{"10.128.0.2"},
+					V6IPs:     []string{"fe00::1:1"},
+					Port:      outport,
+					ZoneHints: make(map[string]util.PerZoneEPs),
 				},
 				hasNodePort: true,
 			}},
@@ -541,9 +553,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   5,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						V4IPs:     []string{"192.168.0.1"},
+						V6IPs:     []string{"2001::1"},
+						Port:      outport,
+						ZoneHints: make(map[string]util.PerZoneEPs),
 					},
 					hasNodePort: true,
 				},
@@ -552,9 +565,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						V4IPs:     []string{"192.168.0.1"},
+						V6IPs:     []string{"2001::1"},
+						Port:      outport,
+						ZoneHints: make(map[string]util.PerZoneEPs),
 					},
 				},
 			},
@@ -565,9 +579,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   5,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						V4IPs:     []string{"192.168.0.1"},
+						V6IPs:     []string{"2001::1"},
+						Port:      outport,
+						ZoneHints: make(map[string]util.PerZoneEPs),
 					},
 					hasNodePort: true,
 				},
@@ -576,9 +591,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						V4IPs:     []string{"192.168.0.1"},
+						V6IPs:     []string{"2001::1"},
+						Port:      outport,
+						ZoneHints: make(map[string]util.PerZoneEPs),
 					},
 				},
 			},
@@ -611,9 +627,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   5,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						V4IPs:     []string{"192.168.0.1"},
+						V6IPs:     []string{"2001::1"},
+						Port:      outport,
+						ZoneHints: make(map[string]util.PerZoneEPs),
 					},
 					externalTrafficLocal: true,
 					hasNodePort:          true,
@@ -623,9 +640,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						V4IPs:     []string{"192.168.0.1"},
+						V6IPs:     []string{"2001::1"},
+						Port:      outport,
+						ZoneHints: make(map[string]util.PerZoneEPs),
 					},
 				},
 			},
@@ -635,9 +653,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   5,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						V4IPs:     []string{"192.168.0.1"},
+						V6IPs:     []string{"2001::1"},
+						Port:      outport,
+						ZoneHints: make(map[string]util.PerZoneEPs),
 					},
 					externalTrafficLocal: true,
 					hasNodePort:          true,
@@ -647,9 +666,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						V4IPs:     []string{"192.168.0.1"},
+						V6IPs:     []string{"2001::1"},
+						Port:      outport,
+						ZoneHints: make(map[string]util.PerZoneEPs),
 					},
 				},
 			},
@@ -680,9 +700,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						V4IPs:     []string{"192.168.0.1"},
+						V6IPs:     []string{"2001::1"},
+						Port:      outport,
+						ZoneHints: make(map[string]util.PerZoneEPs),
 					},
 				},
 			},
@@ -692,9 +713,10 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 					protocol: v1.ProtocolTCP,
 					inport:   inport,
 					eps: util.LbEndpoints{
-						V4IPs: []string{"192.168.0.1"},
-						V6IPs: []string{"2001::1"},
-						Port:  outport,
+						V4IPs:     []string{"192.168.0.1"},
+						V6IPs:     []string{"2001::1"},
+						Port:      outport,
+						ZoneHints: make(map[string]util.PerZoneEPs),
 					},
 				},
 			},
@@ -968,6 +990,9 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			gatewayRouterName: "gr-node-a",
 			switchName:        "switch-node-a",
 			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.0.0"), Mask: net.CIDRMask(24, 32)}},
+			nodeLabels: map[string]string{
+				v1.LabelTopologyZone: "zone-a",
+			},
 		},
 		{
 			name:              "node-b",
@@ -975,6 +1000,9 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			gatewayRouterName: "gr-node-b",
 			switchName:        "switch-node-b",
 			podSubnets:        []net.IPNet{{IP: net.ParseIP("10.128.1.0"), Mask: net.CIDRMask(24, 32)}},
+			nodeLabels: map[string]string{
+				v1.LabelTopologyZone: "zone-b",
+			},
 		},
 	}
 
@@ -992,6 +1020,7 @@ func Test_buildPerNodeLBs(t *testing.T) {
 		configs        []lbConfig
 		expectedShared []ovnlb.LB
 		expectedLocal  []ovnlb.LB
+		resultsSame    bool //if true, then just use the SharedGateway results for the LGW test
 	}{
 		{
 			name:    "host-network pod",
@@ -1477,6 +1506,119 @@ func Test_buildPerNodeLBs(t *testing.T) {
 			},
 		},
 		{
+			name:    "clusterIP + nodePort + externalIP service, standard pods, InternalTrafficPolicy=local, ExternalTrafficPolicy=cluster, TopologyAwareRouting=true",
+			service: defaultService,
+			configs: []lbConfig{
+				{
+					vips:                 []string{"192.168.0.1"}, // clusterIP config
+					protocol:             v1.ProtocolTCP,
+					inport:               80,
+					internalTrafficLocal: true,
+					topologyAwareRouting: true,
+					eps: util.LbEndpoints{
+						V4IPs: []string{"10.128.0.1", "10.128.1.1"}, // 1 ep on node-a and 1 ep on node-b
+						Port:  8080,
+						ZoneHints: map[string]util.PerZoneEPs{
+							"zone-a": {
+								V4IPs: sets.NewString("10.128.0.1"),
+								V6IPs: sets.NewString(),
+							},
+							"zone-b": {
+								V4IPs: sets.NewString("10.128.1.1"),
+								V6IPs: sets.NewString(),
+							},
+						},
+					},
+				},
+				{
+					vips:                 []string{"node"},
+					protocol:             v1.ProtocolTCP,
+					inport:               80,
+					topologyAwareRouting: true,
+					hasNodePort:          true,
+					eps: util.LbEndpoints{
+						V4IPs: []string{"10.128.0.1", "10.128.1.1"},
+						Port:  8080,
+						ZoneHints: map[string]util.PerZoneEPs{
+							"zone-a": {
+								V4IPs: sets.NewString("10.128.0.1"),
+								V6IPs: sets.NewString(),
+							},
+							"zone-b": {
+								V4IPs: sets.NewString("10.128.1.1"),
+								V6IPs: sets.NewString(),
+							},
+						},
+					},
+				},
+				{
+					vips:                 []string{"1.2.3.4"}, // externalIP config
+					protocol:             v1.ProtocolTCP,
+					inport:               80,
+					topologyAwareRouting: true,
+					eps: util.LbEndpoints{
+						V4IPs: []string{"10.128.0.1", "10.128.1.1"},
+						Port:  8080,
+						ZoneHints: map[string]util.PerZoneEPs{
+							"zone-a": {
+								V4IPs: sets.NewString("10.128.0.1"),
+								V6IPs: sets.NewString(),
+							},
+							"zone-b": {
+								V4IPs: sets.NewString("10.128.1.1"),
+								V6IPs: sets.NewString(),
+							},
+						},
+					},
+				},
+			},
+			expectedShared: []ovnlb.LB{
+				{
+					Name:        "Service_testns/foo_TCP_node_router+switch_node-a",
+					ExternalIDs: defaultExternalIDs,
+					Switches:    []string{"switch-node-a"},
+					Routers:     []string{"gr-node-a"},
+					Protocol:    "TCP",
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"192.168.0.1", 80},
+							Targets: []ovnlb.Addr{{"10.128.0.1", 8080}}, // filters out the ep present only on node-a for ITP, clusterIP
+						},
+						{
+							Source:  ovnlb.Addr{"10.0.0.1", 80},
+							Targets: []ovnlb.Addr{{"10.128.0.1", 8080}}, // ITP is only applicable for clusterIPs but we have topologyAwareRouting enabled so it filters out endpoints on zone-a for nodePorts.
+						},
+						{
+							Source:  ovnlb.Addr{"1.2.3.4", 80},
+							Targets: []ovnlb.Addr{{"10.128.0.1", 8080}}, // ITP is only applicable for clusterIPs but we have topologyAwareRouting enabled so it filters out endpoints on zone-a for externalIPs.
+						},
+					},
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_router+switch_node-b",
+					ExternalIDs: defaultExternalIDs,
+					Switches:    []string{"switch-node-b"},
+					Routers:     []string{"gr-node-b"},
+					Protocol:    "TCP",
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"192.168.0.1", 80},
+							Targets: []ovnlb.Addr{{"10.128.1.1", 8080}}, // filters out the ep present only on node-b for ITP, clusterIP
+						},
+						{
+							Source:  ovnlb.Addr{"10.0.0.2", 80},
+							Targets: []ovnlb.Addr{{"10.128.1.1", 8080}}, // ITP is only applicable for clusterIPs but we have topologyAwareRouting enabled so it filters out endpoints on zone-b for nodePorts.
+						},
+						{
+							Source:  ovnlb.Addr{"1.2.3.4", 80},
+							Targets: []ovnlb.Addr{{"10.128.1.1", 8080}}, // ITP is only applicable for clusterIPs but we have topologyAwareRouting enabled so it filters out endpoints on zone-b for externalIPs.
+						},
+					},
+				},
+			},
+			resultsSame: true,
+		},
+		{
 			name:    "clusterIP + externalIP service, host-networked pods, InternalTrafficPolicy=local",
 			service: defaultService,
 			configs: []lbConfig{
@@ -1829,6 +1971,338 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				},
 			},
 		},
+		{
+			// topology aware routing will have no effect here since ETP and ITP are both local
+			name:    "clusterIP + nodeport + externalIP service, host-network pod, ExternalTrafficPolicy=local, InternalTrafficPolicy=local, TopologyAwareRouting=true",
+			service: defaultService,
+			configs: []lbConfig{
+				{
+					vips:                 []string{"192.168.0.1"}, // clusterIP config
+					protocol:             v1.ProtocolTCP,
+					inport:               80,
+					internalTrafficLocal: true,
+					externalTrafficLocal: false, // ETP is applicable only to nodePorts and LBs
+					topologyAwareRouting: true,
+					eps: util.LbEndpoints{
+						V4IPs: []string{"10.0.0.1"}, // only one ep on node-a
+						Port:  8080,
+						ZoneHints: map[string]util.PerZoneEPs{
+							"zone-a": {
+								V4IPs: sets.NewString("10.0.0.1"),
+								V6IPs: sets.NewString(),
+							},
+						},
+					},
+				},
+				{
+					vips:                 []string{"node"}, // nodePort config
+					protocol:             v1.ProtocolTCP,
+					inport:               34345,
+					externalTrafficLocal: true,
+					internalTrafficLocal: false, // ITP is applicable only to clusterIPs
+					topologyAwareRouting: true,
+					hasNodePort:          true,
+					eps: util.LbEndpoints{
+						V4IPs: []string{"10.0.0.1"}, // only one ep on node-a
+						Port:  8080,
+						ZoneHints: map[string]util.PerZoneEPs{
+							"zone-a": {
+								V4IPs: sets.NewString("10.0.0.1"),
+								V6IPs: sets.NewString(),
+							},
+						},
+					},
+				},
+				{
+					vips:                 []string{"1.2.3.4"}, // externalIP config
+					protocol:             v1.ProtocolTCP,
+					inport:               80,
+					externalTrafficLocal: true,
+					internalTrafficLocal: false, // ITP is applicable only to clusterIPs
+					topologyAwareRouting: true,
+					eps: util.LbEndpoints{
+						V4IPs: []string{"10.0.0.1"}, // only one ep on node-a
+						Port:  8080,
+						ZoneHints: map[string]util.PerZoneEPs{
+							"zone-a": {
+								V4IPs: sets.NewString("10.0.0.1"),
+								V6IPs: sets.NewString(),
+							},
+						},
+					},
+				},
+			},
+			expectedShared: []ovnlb.LB{
+				{
+					Name:        "Service_testns/foo_TCP_node_router_node-a",
+					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-a"},
+					Protocol:    "TCP",
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"192.168.0.1", 80},
+							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
+						},
+					},
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_local_router_node-a",
+					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-a"},
+					Opts:        ovnlb.LBOpts{SkipSNAT: true},
+					Protocol:    "TCP",
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"10.0.0.1", 34345},
+							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}}, // special skip_snat=true LB for ETP=local; used in SGW mode
+						},
+						{
+							Source:  ovnlb.Addr{"1.2.3.4", 80},
+							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}}, // special skip_snat=true LB for ETP=local; used in SGW mode
+						},
+					},
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_switch_node-a",
+					ExternalIDs: defaultExternalIDs,
+					Switches:    []string{"switch-node-a"},
+					Protocol:    "TCP",
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"192.168.0.1", 80},
+							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}}, // filter out eps only on node-a for clusterIP
+						},
+						{
+							Source:  ovnlb.Addr{"169.254.169.3", 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
+							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},   // filter out eps only on node-a for nodePorts
+						},
+						{
+							Source:  ovnlb.Addr{"10.0.0.1", 34345},
+							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
+						},
+						{
+							Source:  ovnlb.Addr{"1.2.3.4", 80},
+							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}}, // don't filter out eps for externalIPs on switches when ETP=local
+						},
+					},
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_router_node-b",
+					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-b"},
+					Protocol:    "TCP",
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"192.168.0.1", 80},
+							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}}, // we don't filter clusterIPs at GR for ETP/ITP=local
+						},
+						{
+							Source:  ovnlb.Addr{"10.0.0.2", 34345},
+							Targets: []ovnlb.Addr{}, // filter out eps only on node-b for nodePort on GR when ETP=local
+						},
+						{
+							Source:  ovnlb.Addr{"1.2.3.4", 80},
+							Targets: []ovnlb.Addr{}, // filter out eps only on node-b for nodePort on GR when ETP=local
+						},
+					},
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_switch_node-b",
+					ExternalIDs: defaultExternalIDs,
+					Switches:    []string{"switch-node-b"},
+					Protocol:    "TCP",
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"192.168.0.1", 80},
+							Targets: []ovnlb.Addr{}, // filter out eps only on node-b for clusterIP
+						},
+						{
+							Source:  ovnlb.Addr{"169.254.169.3", 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
+							Targets: []ovnlb.Addr{},                     // filter out eps only on node-b for nodePorts
+						},
+						{
+							Source:  ovnlb.Addr{"10.0.0.2", 34345},
+							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
+						},
+						{
+							Source:  ovnlb.Addr{"1.2.3.4", 80},
+							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}}, // don't filter out eps for externalIPs on switches when ETP=local
+						},
+					},
+				},
+			},
+			resultsSame: true,
+		},
+		{
+			name:    "clusterIP + nodeport + externalIP service, host-network pod, ExternalTrafficPolicy=local, InternalTrafficPolicy=cluster, TopologyAwareRouting=true",
+			service: defaultService,
+			configs: []lbConfig{
+				{
+					vips:                 []string{"192.168.0.1"}, // clusterIP config
+					protocol:             v1.ProtocolTCP,
+					inport:               80,
+					internalTrafficLocal: true,
+					externalTrafficLocal: false, // ETP is applicable only to nodePorts and LBs
+					topologyAwareRouting: true,
+					eps: util.LbEndpoints{
+						V4IPs: []string{"10.0.0.1", "10.0.0.2"},
+						Port:  8080,
+						ZoneHints: map[string]util.PerZoneEPs{
+							"zone-a": {
+								V4IPs: sets.NewString("10.0.0.1"),
+								V6IPs: sets.NewString(),
+							},
+							"zone-b": {
+								V4IPs: sets.NewString("10.0.0.2"),
+								V6IPs: sets.NewString(),
+							},
+						},
+					},
+				},
+				{
+					vips:                 []string{"node"}, // nodePort config
+					protocol:             v1.ProtocolTCP,
+					inport:               34345,
+					externalTrafficLocal: true,
+					internalTrafficLocal: false, // ITP is applicable only to clusterIPs
+					topologyAwareRouting: true,
+					hasNodePort:          true,
+					eps: util.LbEndpoints{
+						V4IPs: []string{"10.0.0.1", "10.0.0.2"},
+						Port:  8080,
+						ZoneHints: map[string]util.PerZoneEPs{
+							"zone-a": {
+								V4IPs: sets.NewString("10.0.0.1"),
+								V6IPs: sets.NewString(),
+							},
+							"zone-b": {
+								V4IPs: sets.NewString("10.0.0.2"),
+								V6IPs: sets.NewString(),
+							},
+						},
+					},
+				},
+				{
+					vips:                 []string{"1.2.3.4"}, // externalIP config
+					protocol:             v1.ProtocolTCP,
+					inport:               80,
+					externalTrafficLocal: true,
+					internalTrafficLocal: false, // ITP is applicable only to clusterIPs
+					topologyAwareRouting: true,
+					eps: util.LbEndpoints{
+						V4IPs: []string{"10.0.0.1", "10.0.0.2"},
+						Port:  8080,
+						ZoneHints: map[string]util.PerZoneEPs{
+							"zone-a": {
+								V4IPs: sets.NewString("10.0.0.1"),
+								V6IPs: sets.NewString(),
+							},
+							"zone-b": {
+								V4IPs: sets.NewString("10.0.0.2"),
+								V6IPs: sets.NewString(),
+							},
+						},
+					},
+				},
+			},
+			expectedShared: []ovnlb.LB{
+				{
+					Name:        "Service_testns/foo_TCP_node_router_node-a_merged",
+					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-a", "gr-node-b"},
+					Protocol:    "TCP",
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"192.168.0.1", 80},
+							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}}, // we filter out eps in node zone for clusterIP
+						},
+					},
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_local_router_node-a",
+					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-a"},
+					Opts:        ovnlb.LBOpts{SkipSNAT: true},
+					Protocol:    "TCP",
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"10.0.0.1", 34345},
+							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}}, // special skip_snat=true LB for ETP=local; used in SGW mode
+						},
+						{
+							Source:  ovnlb.Addr{"1.2.3.4", 80},
+							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}}, // special skip_snat=true LB for ETP=local; used in SGW mode
+						},
+					},
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_switch_node-a",
+					ExternalIDs: defaultExternalIDs,
+					Switches:    []string{"switch-node-a"},
+					Protocol:    "TCP",
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"192.168.0.1", 80},
+							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}}, // filter out eps only on zone-a for clusterIP (TAH)
+						},
+						{
+							Source:  ovnlb.Addr{"169.254.169.3", 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
+							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}},   // filter out eps only on node-a for nodePorts
+						},
+						{
+							Source:  ovnlb.Addr{"10.0.0.1", 34345},
+							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
+						},
+						{
+							Source:  ovnlb.Addr{"1.2.3.4", 80},
+							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // don't filter out eps for externalIPs on switches when ETP=local
+						},
+					},
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_local_router_node-b",
+					ExternalIDs: defaultExternalIDs,
+					Routers:     []string{"gr-node-b"},
+					Opts:        ovnlb.LBOpts{SkipSNAT: true},
+					Protocol:    "TCP",
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"10.0.0.2", 34345},
+							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}}, // special skip_snat=true LB for ETP=local; used in SGW mode
+						},
+						{
+							Source:  ovnlb.Addr{"1.2.3.4", 80},
+							Targets: []ovnlb.Addr{{"169.254.169.2", 8080}}, // special skip_snat=true LB for ETP=local; used in SGW mode
+						},
+					},
+				},
+				{
+					Name:        "Service_testns/foo_TCP_node_switch_node-b",
+					ExternalIDs: defaultExternalIDs,
+					Switches:    []string{"switch-node-b"},
+					Protocol:    "TCP",
+					Rules: []ovnlb.LBRule{
+						{
+							Source:  ovnlb.Addr{"192.168.0.1", 80},
+							Targets: []ovnlb.Addr{{"10.0.0.2", 8080}}, // filter out eps only on zone-b for clusterIP (TAH)
+						},
+						{
+							Source:  ovnlb.Addr{"169.254.169.3", 34345}, // add special masqueradeIP VIP for nodePort/LB traffic coming from node via mp0 when ETP=local
+							Targets: []ovnlb.Addr{{"10.0.0.2", 8080}},   // filter out eps only on node-b for nodePorts
+						},
+						{
+							Source:  ovnlb.Addr{"10.0.0.2", 34345},
+							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // don't filter out eps for nodePorts on switches when ETP=local
+						},
+						{
+							Source:  ovnlb.Addr{"1.2.3.4", 80},
+							Targets: []ovnlb.Addr{{"10.0.0.1", 8080}, {"10.0.0.2", 8080}}, // don't filter out eps for externalIPs on switches when ETP=local
+						},
+					},
+				},
+			},
+			resultsSame: true,
+		},
 	}
 
 	for i, tt := range tc {
@@ -1844,6 +2318,12 @@ func Test_buildPerNodeLBs(t *testing.T) {
 				globalconfig.Gateway.Mode = globalconfig.GatewayModeLocal
 				actual := buildPerNodeLBs(tt.service, tt.configs, defaultNodes)
 				assert.Equal(t, tt.expectedLocal, actual, "local gateway mode not as expected")
+			}
+
+			if tt.resultsSame {
+				globalconfig.Gateway.Mode = globalconfig.GatewayModeLocal
+				actual := buildPerNodeLBs(tt.service, tt.configs, defaultNodes)
+				assert.Equal(t, tt.expectedShared, actual, "local gateway mode not as expected")
 			}
 
 		})

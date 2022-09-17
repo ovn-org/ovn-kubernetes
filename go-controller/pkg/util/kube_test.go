@@ -11,6 +11,7 @@ import (
 	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/sets"
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
 	utilpointer "k8s.io/utils/pointer"
 )
@@ -470,7 +471,7 @@ func Test_getLbEndpoints(t *testing.T) {
 					Protocol:   v1.ProtocolTCP,
 				},
 			},
-			want: LbEndpoints{[]string{"10.0.0.2"}, []string{}, 80},
+			want: LbEndpoints{[]string{"10.0.0.2"}, []string{}, 80, make(map[string]PerZoneEPs)},
 		},
 		{
 			name: "slices with different port name",
@@ -506,7 +507,7 @@ func Test_getLbEndpoints(t *testing.T) {
 					Protocol:   v1.ProtocolTCP,
 				},
 			},
-			want: LbEndpoints{[]string{}, []string{}, 0},
+			want: LbEndpoints{[]string{}, []string{}, 0, map[string]PerZoneEPs{}},
 		},
 		{
 			name: "slices and service without port name",
@@ -540,7 +541,7 @@ func Test_getLbEndpoints(t *testing.T) {
 					Protocol:   v1.ProtocolTCP,
 				},
 			},
-			want: LbEndpoints{[]string{"10.0.0.2"}, []string{}, 8080},
+			want: LbEndpoints{[]string{"10.0.0.2"}, []string{}, 8080, make(map[string]PerZoneEPs)},
 		},
 		{
 			name: "slices with different IP family",
@@ -576,7 +577,7 @@ func Test_getLbEndpoints(t *testing.T) {
 					Protocol:   v1.ProtocolTCP,
 				},
 			},
-			want: LbEndpoints{[]string{}, []string{"2001:db2::2"}, 80},
+			want: LbEndpoints{[]string{}, []string{"2001:db2::2"}, 80, make(map[string]PerZoneEPs)},
 		},
 		{
 			name: "multiples slices with duplicate endpoints",
@@ -602,6 +603,14 @@ func Test_getLbEndpoints(t *testing.T) {
 									Ready: utilpointer.BoolPtr(true),
 								},
 								Addresses: []string{"10.0.0.2", "10.1.1.2"},
+								Zone:      utilpointer.StringPtr("zone-a"),
+								Hints: &discovery.EndpointHints{
+									ForZones: []discovery.ForZone{
+										{
+											Name: "zone-b",
+										},
+									},
+								},
 							},
 						},
 					},
@@ -624,7 +633,15 @@ func Test_getLbEndpoints(t *testing.T) {
 								Conditions: discovery.EndpointConditions{
 									Ready: utilpointer.BoolPtr(true),
 								},
-								Addresses: []string{"10.0.0.2", "10.2.2.2"},
+								Addresses: []string{"10.0.0.2", "10.2.2.2"}, // unreal test case where same IP is in different zones, shouldn't happen per epSlice controller logic
+								Zone:      utilpointer.StringPtr("zone-b"),
+								Hints: &discovery.EndpointHints{
+									ForZones: []discovery.ForZone{
+										{
+											Name: "zone-a",
+										},
+									},
+								},
 							},
 						},
 					},
@@ -635,7 +652,19 @@ func Test_getLbEndpoints(t *testing.T) {
 					Protocol:   v1.ProtocolTCP,
 				},
 			},
-			want: LbEndpoints{[]string{"10.0.0.2", "10.1.1.2", "10.2.2.2"}, []string{}, 80},
+			want: LbEndpoints{
+				[]string{"10.0.0.2", "10.1.1.2", "10.2.2.2"},
+				[]string{}, 80,
+				map[string]PerZoneEPs{
+					"zone-a": {
+						V4IPs: sets.NewString("10.0.0.2", "10.2.2.2"),
+						V6IPs: sets.NewString(),
+					},
+					"zone-b": {
+						V4IPs: sets.NewString("10.0.0.2", "10.1.1.2"),
+						V6IPs: sets.NewString(),
+					},
+				}},
 		},
 	}
 	for _, tt := range tests {

@@ -34,6 +34,11 @@ type lbConfig struct {
 	// if true, then vips added on the switch are in "local" mode
 	// that means, remove any non-local endpoints.
 	internalTrafficLocal bool
+	// true if the "service.kubernetes.io/topology-aware-hints" annotation
+	// on this Service is set to "Auto" or "auto" && all endpoints have hints
+	// set on them. Special filtering of endpoints needs to be done on the per
+	// node lb creation if the node side requirements are fulfilled
+	topologyAwareRouting bool
 	// indicates if this LB is configuring service of type NodePort.
 	hasNodePort bool
 }
@@ -60,6 +65,7 @@ var protos = []v1.Protocol{
 // - services with host-network endpoints
 // - services with ExternalTrafficPolicy=Local
 // - services with InternalTrafficPolicy=Local
+// - services with Topology Aware Hints enabled
 func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.EndpointSlice) (perNodeConfigs []lbConfig, clusterConfigs []lbConfig) {
 	// For each svcPort, determine if it will be applied per-node or cluster-wide
 	for _, svcPort := range service.Spec.Ports {
@@ -68,6 +74,7 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 		// if ExternalTrafficPolicy or InternalTrafficPolicy is local, then we need to do things a bit differently
 		externalTrafficLocal := (service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal)
 		internalTrafficLocal := (service.Spec.InternalTrafficPolicy != nil) && (*service.Spec.InternalTrafficPolicy == v1.ServiceInternalTrafficPolicyLocal)
+		topologyAwareRouting := topologyAwareRoutingIsEnabledForService(service, endpointSlices)
 
 		// NodePort services get a per-node load balancer, but with the node's physical IP as the vip
 		// Thus, the vip "node" will be expanded later.
@@ -80,6 +87,7 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 				eps:                  eps,
 				externalTrafficLocal: externalTrafficLocal,
 				internalTrafficLocal: false, // always false for non-ClusterIPs
+				topologyAwareRouting: topologyAwareRouting,
 				hasNodePort:          true,
 			}
 			perNodeConfigs = append(perNodeConfigs, nodePortLBConfig)
@@ -103,7 +111,7 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 
 		// if ETP=Local, then treat ExternalIPs and LoadBalancer IPs specially
 		// otherwise, they're just cluster IPs
-		// This is NEVER influenced by InternalTrafficPolicy
+		// This is NEVER influenced by InternalTrafficPolicy or topologyAwareRouting
 		if externalTrafficLocal && len(externalVips) > 0 {
 			externalIPConfig := lbConfig{
 				protocol:             svcPort.Protocol,
@@ -112,6 +120,7 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 				eps:                  eps,
 				externalTrafficLocal: true,
 				internalTrafficLocal: false, // always false for non-ClusterIPs
+				topologyAwareRouting: topologyAwareRouting,
 				hasNodePort:          false,
 			}
 			perNodeConfigs = append(perNodeConfigs, externalIPConfig)
@@ -128,6 +137,7 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 			eps:                  eps,
 			externalTrafficLocal: false, // always false for ClusterIPs
 			internalTrafficLocal: internalTrafficLocal,
+			topologyAwareRouting: topologyAwareRouting,
 			hasNodePort:          false,
 		}
 
@@ -135,9 +145,11 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 		// unless any of the following are true:
 		// - Any of the endpoints are host-network
 		// - ETP=local service backed by non-local-host-networked endpoints
+		// - internal traffic policy is local
+		// - topology aware routing is enabled
 		//
 		// In that case, we need to create per-node LBs.
-		if hasHostEndpoints(eps.V4IPs) || hasHostEndpoints(eps.V6IPs) || internalTrafficLocal {
+		if hasHostEndpoints(eps.V4IPs) || hasHostEndpoints(eps.V6IPs) || internalTrafficLocal || topologyAwareRouting {
 			perNodeConfigs = append(perNodeConfigs, clusterIPConfig)
 		} else {
 			clusterConfigs = append(clusterConfigs, clusterIPConfig)
@@ -296,36 +308,50 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 			for _, config := range configs {
 				vips := config.vips
 
+				// we start with the default case: all endpoints are equally probable targets
 				routerV4targetips := config.eps.V4IPs
 				routerV6targetips := config.eps.V6IPs
 				switchV4targetips := config.eps.V4IPs
 				switchV6targetips := config.eps.V6IPs
 
+				// construct switch targets for all the endpoints
+				switchV4Targets := ovnlb.JoinHostsPort(switchV4targetips, config.eps.Port)
+				switchV6Targets := ovnlb.JoinHostsPort(switchV6targetips, config.eps.Port)
+
+				if config.topologyAwareRouting {
+					if topologyAwareRoutingIsEnabledForLBConfig(config.eps, node) {
+						// filter out endpoints for this node's zone on both switches and routers.
+						routerV4targetips = config.eps.ZoneHints[node.nodeLabels[v1.LabelTopologyZone]].V4IPs.List()
+						routerV6targetips = config.eps.ZoneHints[node.nodeLabels[v1.LabelTopologyZone]].V6IPs.List()
+						switchV4Targets = ovnlb.JoinHostsPort(config.eps.ZoneHints[node.nodeLabels[v1.LabelTopologyZone]].V4IPs.List(), config.eps.Port)
+						switchV6Targets = ovnlb.JoinHostsPort(config.eps.ZoneHints[node.nodeLabels[v1.LabelTopologyZone]].V6IPs.List(), config.eps.Port)
+					}
+				}
 				if config.externalTrafficLocal {
-					// for ExternalTrafficPolicy=Local, remove non-local endpoints from the router/switch targets
-					// NOTE: on the switches, filtered eps are used only by masqueradeVIP
-					routerV4targetips = util.FilterIPsSlice(routerV4targetips, node.nodeSubnets(), true)
-					routerV6targetips = util.FilterIPsSlice(routerV6targetips, node.nodeSubnets(), true)
+					// NOTE1: on the routers, we need to redo the filtering done by topologyAwareHints since ETP=local takes precendence
+					routerV4targetips = util.FilterIPsSlice(config.eps.V4IPs, node.nodeSubnets(), true)
+					routerV6targetips = util.FilterIPsSlice(config.eps.V6IPs, node.nodeSubnets(), true)
+					// NOTE1: on the switches, filtered eps are used only by masqueradeVIP
 					switchV4targetips = util.FilterIPsSlice(switchV4targetips, node.nodeSubnets(), true)
 					switchV6targetips = util.FilterIPsSlice(switchV6targetips, node.nodeSubnets(), true)
+					// NOTE3: on the switches, we need to reset the filtering done by topologyAwareHints since ETP=local takes precendence
+					switchV4Targets = ovnlb.JoinHostsPort(config.eps.V4IPs, config.eps.Port)
+					switchV6Targets = ovnlb.JoinHostsPort(config.eps.V6IPs, config.eps.Port)
 				}
 				if config.internalTrafficLocal {
 					// for InternalTrafficPolicy=Local, remove non-local endpoints from the switch targets only
 					switchV4targetips = util.FilterIPsSlice(switchV4targetips, node.nodeSubnets(), true)
 					switchV6targetips = util.FilterIPsSlice(switchV6targetips, node.nodeSubnets(), true)
 				}
-				// at this point, the targets may be empty
+				// at this point, the targets may be empty which is a probable scenario
 
-				// any targets local to the node need to have a special
+				// any targets local to the node (host-networked endpoints) need to have a special
 				// harpin IP added, but only for the router LB
 				routerV4targetips = util.UpdateIPsSlice(routerV4targetips, node.nodeIPs, []string{types.V4HostMasqueradeIP})
 				routerV6targetips = util.UpdateIPsSlice(routerV6targetips, node.nodeIPs, []string{types.V6HostMasqueradeIP})
 
 				routerV4targets := ovnlb.JoinHostsPort(routerV4targetips, config.eps.Port)
 				routerV6targets := ovnlb.JoinHostsPort(routerV6targetips, config.eps.Port)
-
-				switchV4Targets := ovnlb.JoinHostsPort(config.eps.V4IPs, config.eps.Port)
-				switchV6Targets := ovnlb.JoinHostsPort(config.eps.V6IPs, config.eps.Port)
 
 				// Substitute the special vip "node" for the node's physical ips
 				// This is used for nodeport

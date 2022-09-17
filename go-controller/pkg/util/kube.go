@@ -282,10 +282,16 @@ func UseEndpointSlices(kubeClient kubernetes.Interface) bool {
 	return false
 }
 
+type PerZoneEPs struct {
+	V4IPs sets.String
+	V6IPs sets.String
+}
+
 type LbEndpoints struct {
-	V4IPs []string
-	V6IPs []string
-	Port  int32
+	V4IPs     []string
+	V6IPs     []string
+	Port      int32
+	ZoneHints map[string]PerZoneEPs
 }
 
 // GetLbEndpoints return the endpoints that belong to the IPFamily as a slice of IPs
@@ -298,6 +304,7 @@ func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort)
 	if len(slices) == 0 {
 		return out
 	}
+	out.ZoneHints = make(map[string]PerZoneEPs)
 
 	for _, slice := range slices {
 		klog.V(4).Infof("Getting endpoints for slice %s/%s", slice.Namespace, slice.Name)
@@ -335,6 +342,28 @@ func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort)
 						v6ips.Insert(ip)
 					default:
 						klog.V(5).Infof("Skipping FQDN slice %s/%s", slice.Namespace, slice.Name)
+					}
+				}
+				if endpoint.Hints.Size() != 0 {
+					// Used for topology Aware Routing
+					for _, zone := range endpoint.Hints.ForZones {
+						_, ok := out.ZoneHints[zone.Name]
+						if !ok {
+							out.ZoneHints[zone.Name] = PerZoneEPs{
+								V4IPs: sets.NewString(),
+								V6IPs: sets.NewString(),
+							}
+						}
+						for _, ip := range endpoint.Addresses {
+							switch slice.AddressType {
+							case discovery.AddressTypeIPv4:
+								out.ZoneHints[zone.Name].V4IPs.Insert(ip)
+							case discovery.AddressTypeIPv6:
+								out.ZoneHints[zone.Name].V6IPs.Insert(ip)
+							default:
+								klog.V(5).Infof("Skipping FQDN slice %s/%s", slice.Namespace, slice.Name)
+							}
+						}
 					}
 				}
 			}
