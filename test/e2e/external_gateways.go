@@ -126,19 +126,10 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 			}
 
 			tcpDumpSync := sync.WaitGroup{}
-			checkPingOnContainer := func(container string) error {
-				defer ginkgo.GinkgoRecover()
-				defer tcpDumpSync.Done()
-				_, err := runCommand(containerRuntime, "exec", container, "timeout", "60", "tcpdump", "-c", "1", "-i", "any", icmpCommand)
-				framework.ExpectNoError(err, "Failed to detect icmp messages from %s on gateway %s", srcPingPodName, container)
-				framework.Logf("ICMP packet successfully detected on gateway %s", container)
-				return nil
-			}
-
 			tcpDumpSync.Add(len(gwContainers))
 
 			for _, gwContainer := range gwContainers {
-				go checkPingOnContainer(gwContainer)
+				go checkPingOnContainer(gwContainer, srcPingPodName, icmpCommand, &tcpDumpSync)
 			}
 
 			pingSync := sync.WaitGroup{}
@@ -306,19 +297,9 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 		// If an ICMP packet is never detected, return the error via the specified chanel.
 
 		tcpDumpSync := sync.WaitGroup{}
-
-		checkPingOnContainer := func(container string) error {
-			defer ginkgo.GinkgoRecover()
-			defer tcpDumpSync.Done()
-			_, err := runCommand(containerRuntime, "exec", container, "timeout", "60", "tcpdump", "-c", "1", "-i", "any", icmpToDump)
-			framework.ExpectNoError(err, "Failed to detect icmp messages from %s on gateway %s", srcPodName, container)
-			framework.Logf("ICMP packet successfully detected on gateway %s", container)
-			return nil
-		}
-
 		tcpDumpSync.Add(len(gwContainers))
 		for _, gwContainer := range gwContainers {
-			go checkPingOnContainer(gwContainer)
+			go checkPingOnContainer(gwContainer, srcPodName, icmpToDump, &tcpDumpSync)
 		}
 
 		pingSync := sync.WaitGroup{}
@@ -683,18 +664,9 @@ var _ = ginkgo.Context("BFD", func() {
 				}
 
 				tcpDumpSync := sync.WaitGroup{}
-				checkPingOnContainer := func(container string, wg *sync.WaitGroup) error {
-					defer ginkgo.GinkgoRecover()
-					defer tcpDumpSync.Done()
-					_, err := runCommand(containerRuntime, "exec", container, "timeout", "60", "tcpdump", "-c", "1", "-i", "any", icmpCommand)
-					framework.ExpectNoError(err, "Failed to detect icmp messages from %s on gateway %s", srcPingPodName, container)
-					framework.Logf("ICMP packet successfully detected on gateway %s", container)
-					return nil
-				}
-
 				tcpDumpSync.Add(len(gwContainers))
 				for _, gwContainer := range gwContainers {
-					go checkPingOnContainer(gwContainer, &tcpDumpSync)
+					go checkPingOnContainer(gwContainer, srcPingPodName, icmpCommand, &tcpDumpSync)
 				}
 
 				// Verify the external gateway loopback address running on the external container is reachable and
@@ -726,7 +698,7 @@ var _ = ginkgo.Context("BFD", func() {
 
 					tcpDumpSync = sync.WaitGroup{}
 					tcpDumpSync.Add(1)
-					go checkPingOnContainer(gwContainers[0], &tcpDumpSync)
+					go checkPingOnContainer(gwContainers[0], srcPingPodName, icmpCommand, &tcpDumpSync)
 
 					// Verify the external gateway loopback address running on the external container is reachable and
 					// that traffic from the source ping pod is proxied through the pod in the default namespace
@@ -904,18 +876,9 @@ var _ = ginkgo.Context("BFD", func() {
 			// If an ICMP packet is never detected, return the error via the specified chanel.
 
 			tcpDumpSync := sync.WaitGroup{}
-			checkPingOnContainer := func(container string, wg *sync.WaitGroup) error {
-				defer ginkgo.GinkgoRecover()
-				defer tcpDumpSync.Done()
-				_, err := runCommand(containerRuntime, "exec", container, "timeout", "60", "tcpdump", "-c", "1", "-i", "any", icmpToDump)
-				framework.ExpectNoError(err, "Failed to detect icmp messages from %s on gateway %s", srcPodName, container)
-				framework.Logf("ICMP packet successfully detected on gateway %s", container)
-				return nil
-			}
-
 			tcpDumpSync.Add(len(gwContainers))
 			for _, gwContainer := range gwContainers {
-				go checkPingOnContainer(gwContainer, &tcpDumpSync)
+				go checkPingOnContainer(gwContainer, srcPodName, icmpToDump, &tcpDumpSync)
 			}
 
 			// spawn a goroutine to asynchronously (to speed up the test)
@@ -948,7 +911,7 @@ var _ = ginkgo.Context("BFD", func() {
 			tcpDumpSync = sync.WaitGroup{}
 
 			tcpDumpSync.Add(1)
-			go checkPingOnContainer(gwContainers[0], &tcpDumpSync)
+			go checkPingOnContainer(gwContainers[0], srcPodName, icmpToDump, &tcpDumpSync)
 
 			// spawn a goroutine to asynchronously (to speed up the test)
 			// to ping the gateway loopbacks on both containers via ECMP.
@@ -1468,4 +1431,12 @@ func cleanRoutesAndIPsForFamily(containerName string, family int, addresses gate
 	ginkgo.By(fmt.Sprintf("Removing the route from %s to the src pod (IPv%d)", containerName, family))
 	_, err = runCommand(containerRuntime, "exec", containerName, "ip", addressSelector, "route", "del", addresses.srcPodIP, "via", addresses.nodeIP)
 	framework.ExpectNoError(err, "failed to del the pod host route on the test container %s", containerName)
+}
+
+func checkPingOnContainer(container string, srcPodName string, icmpCmd string, wg *sync.WaitGroup) {
+	defer ginkgo.GinkgoRecover()
+	defer wg.Done()
+	_, err := runCommand(containerRuntime, "exec", container, "timeout", "60", "tcpdump", "-c", "1", "-i", "any", icmpCmd)
+	framework.ExpectNoError(err, "Failed to detect icmp messages from %s on gateway %s", srcPodName, container)
+	framework.Logf("ICMP packet successfully detected on gateway %s", container)
 }
