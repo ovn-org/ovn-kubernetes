@@ -225,6 +225,8 @@ type Controller struct {
 	retryNodes *RetryObjs
 	// Objects for Cloud private IP config that need to be retried
 	retryCloudPrivateIPConfig *RetryObjs
+	// Objects for namespaces that need to be retried
+	retryNamespaces *RetryObjs
 	// Node-specific syncMap used by node event handler
 	gatewaysFailed              sync.Map
 	mgmtPortFailed              sync.Map
@@ -326,6 +328,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		retryEgressIPPods:         NewRetryObjs(factory.EgressIPPodType, "", nil, nil, nil),
 		retryEgressNodes:          NewRetryObjs(factory.EgressNodeType, "", nil, nil, nil),
 		retryCloudPrivateIPConfig: NewRetryObjs(factory.CloudPrivateIPConfigType, "", nil, nil, nil),
+		retryNamespaces:           NewRetryObjs(factory.NamespaceType, "", nil, nil, nil),
 		recorder:                  recorder,
 		nbClient:                  libovsdbOvnNBClient,
 		sbClient:                  libovsdbOvnSBClient,
@@ -628,27 +631,8 @@ func (oc *Controller) WatchEgressIPPods() error {
 // WatchNamespaces starts the watching of namespace resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNamespaces() error {
-	start := time.Now()
-	_, err := oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			ns := obj.(*kapi.Namespace)
-			oc.AddNamespace(ns)
-		},
-		UpdateFunc: func(old, newer interface{}) {
-			oldNs, newNs := old.(*kapi.Namespace), newer.(*kapi.Namespace)
-			oc.updateNamespace(oldNs, newNs)
-		},
-		DeleteFunc: func(obj interface{}) {
-			ns := obj.(*kapi.Namespace)
-			oc.deleteNamespace(ns)
-		},
-	}, oc.syncNamespaces)
-	klog.Infof("Bootstrapping existing namespaces and cleaning stale namespaces took %v", time.Since(start))
-	if err != nil {
-		klog.Errorf("Failed to watch namespaces err: %v", err)
-		return err
-	}
-	return nil
+	_, err := oc.WatchResource(oc.retryNamespaces)
+	return err
 }
 
 // syncNodeGateway ensures a node's gateway router is configured
