@@ -32,7 +32,7 @@ RUN yum install -y  \
 	selinux-policy && \
 	yum clean all
 
-ARG ovsver=2.17.0-22.el8fdp
+ARG ovsver=2.17.0-37.4.el8fdp
 ARG ovnver=22.06.0-27.el8fdp
 
 RUN INSTALL_PKGS=" \
