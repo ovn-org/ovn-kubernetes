@@ -478,10 +478,12 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				key, err := retry.GetResourceKey(myPod2)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				retry.SetRetryObjWithNoBackoff(key, fakeOvn.controller.retryPods)
-				fakeOvn.controller.retryPods.RequestRetryObjs()
-
-				retry.CheckRetryObjectEventually(myPod2Key, false, fakeOvn.controller.retryPods)
+				// let the retry logic run until the IP from myPod is released and myPod2 is added
+				gomega.Eventually(func(g gomega.Gomega) {
+					retry.SetRetryObjWithNoBackoff(key, fakeOvn.controller.retryPods)
+					fakeOvn.controller.retryPods.RequestRetryObjs()
+					retry.CheckRetryObjectEventuallyWrapped(g, myPod2Key, false, fakeOvn.controller.retryPods)
+				}, 60*time.Second, 500*time.Millisecond).Should(gomega.Succeed())
 
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t2.namespace, t2.podName)
@@ -584,10 +586,13 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				key, err := retry.GetResourceKey(myPod2)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				retry.SetRetryObjWithNoBackoff(key, fakeOvn.controller.retryPods)
-				fakeOvn.controller.retryPods.RequestRetryObjs()
-				// there should be no entry for this pod in the retry cache
-				retry.CheckRetryObjectEventually(myPod2Key, false, fakeOvn.controller.retryPods)
+				// let the retry logic run until the IP from myPod is released and myPod2 is added
+				gomega.Eventually(func(g gomega.Gomega) {
+					retry.SetRetryObjWithNoBackoff(key, fakeOvn.controller.retryPods)
+					fakeOvn.controller.retryPods.RequestRetryObjs()
+					// there should be no entry for this pod in the retry cache
+					retry.CheckRetryObjectEventuallyWrapped(g, myPod2Key, false, fakeOvn.controller.retryPods)
+				}, 60*time.Second, 500*time.Millisecond).Should(gomega.Succeed())
 
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t2.namespace, t2.podName)

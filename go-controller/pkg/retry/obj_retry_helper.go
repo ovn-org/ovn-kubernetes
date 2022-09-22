@@ -96,6 +96,18 @@ func CheckRetryObjectEventually(key string, shouldExist bool, r *RetryFramework)
 	}, inspectTimeout).Should(expectedValue)
 }
 
+// same as CheckRetryObjectEventually, but takes an input gomega argument from which
+// the assertion is made. This is to be used from within an Eventually block.
+func CheckRetryObjectEventuallyWrapped(g gomega.Gomega, key string, shouldExist bool, r *RetryFramework) {
+	expectedValue := gomega.BeTrue()
+	if !shouldExist {
+		expectedValue = gomega.BeFalse()
+	}
+	g.Eventually(func() bool {
+		return CheckRetryObj(key, r)
+	}, inspectTimeout).Should(expectedValue)
+}
+
 // CheckRetryObjectMultipleFieldsEventually verifies that eventually the oldObj, newObj, config and
 // failedAttemptsfields fields all satisfy the input conditions expectedParams, given in
 // the same order. In order not to check any of these four fields, the corresponding input
