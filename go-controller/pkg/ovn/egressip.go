@@ -1147,12 +1147,16 @@ func (oc *Controller) deleteEgressIPAssignments(name string, statusesToRemove []
 			return err
 		}
 		for podKey, podStatus := range oc.eIPC.podAssignment {
-			delete(podStatus.egressStatuses, statusToRemove)
-			podNamespace, podName := getPodNamespaceAndNameFromKey(podKey)
-			if err := oc.eIPC.addPerPodGRSNAT(podNamespace, podName, podStatus.podIPs); err != nil {
-				return err
+			if _, ok := podStatus.egressStatuses[statusToRemove]; ok {
+				delete(podStatus.egressStatuses, statusToRemove)
+				if len(podStatus.egressStatuses) == 0 {
+					podNamespace, podName := getPodNamespaceAndNameFromKey(podKey)
+					if err := oc.eIPC.addPerPodGRSNAT(podNamespace, podName, podStatus.podIPs); err != nil {
+						return err
+					}
+					delete(oc.eIPC.podAssignment, podKey)
+				}
 			}
-			delete(oc.eIPC.podAssignment, podKey)
 		}
 	}
 	return nil
