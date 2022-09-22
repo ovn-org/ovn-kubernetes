@@ -51,8 +51,6 @@ const (
 	arpAllowPolicySuffix = "ARPallowPolicy"
 )
 
-var NetworkPolicyNotCreated error
-
 type networkPolicy struct {
 	// RWMutex synchronizes operations on the policy.
 	// Operations that change local and peer pods take a RLock,
@@ -74,7 +72,6 @@ type networkPolicy struct {
 
 	portGroupName string
 	deleted       bool //deleted policy
-	created       bool
 }
 
 func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
@@ -439,9 +436,6 @@ func (oc *Controller) updateACLLoggingForPolicy(np *networkPolicy, aclLogging *A
 		return nil
 	}
 
-	if !np.created {
-		return NetworkPolicyNotCreated
-	}
 	// Predicate for given network policy ACLs
 	p := func(item *nbdb.ACL) bool {
 		return item.ExternalIDs[namespaceACLExtIdKey] == np.namespace && item.ExternalIDs[policyACLExtIdKey] == np.name
@@ -469,22 +463,8 @@ func (oc *Controller) setNetworkPolicyACLLoggingForNamespace(ns string, nsInfo *
 	// now update network policy specific ACLs
 	klog.V(5).Infof("Setting network policy ACLs for ns: %s", ns)
 	for name, policy := range nsInfo.networkPolicies {
-		// REMOVEME(trozet): once we can hold the np lock for the duration of the np create
-		// there is no reason to do this loop
-		// 24ms is chosen because gomega.Eventually default timeout is 50ms
-		// libovsdb transactions take less than 50ms usually as well so pod create
-		// should be done within a couple iterations
-		retryErr := wait.PollImmediate(24*time.Millisecond, 1*time.Second, func() (bool, error) {
-			if err := oc.updateACLLoggingForPolicy(policy, &nsInfo.aclLogging); err == nil {
-				return true, nil
-			} else if errors.Is(err, NetworkPolicyNotCreated) {
-				return false, nil
-			} else {
-				return false, fmt.Errorf("unable to update ACL for network policy: %v", err)
-			}
-		})
-		if retryErr != nil {
-			return retryErr
+		if err := oc.updateACLLoggingForPolicy(policy, &nsInfo.aclLogging); err != nil {
+			return fmt.Errorf("unable to update ACL for network policy: %v", err)
 		}
 		klog.Infof("ACL for network policy: %s, updated to new log level: %s", name, nsInfo.aclLogging.Allow)
 	}
@@ -1236,7 +1216,6 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 		return fmt.Errorf("failed to run ovsdb txn to add ports to port group: %v", err)
 	}
 	txOkCallBack()
-	np.created = true
 	return nil
 }
 
