@@ -1189,7 +1189,7 @@ func (oc *Controller) syncNodesPeriodic() {
 // watchNodes() will be called for all existing nodes at startup anyway.
 // Note that this list will include the 'join' cluster switch, which we
 // do not want to delete.
-func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
+func (oc *Controller) syncNodes(nodes []interface{}) error {
 	foundNodes := sets.NewString()
 	for _, tmp := range nodes {
 		node, ok := tmp.(*kapi.Node)

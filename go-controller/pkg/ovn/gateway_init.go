@@ -1,11 +1,14 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/sets"
 	utilnet "k8s.io/utils/net"
 
@@ -20,6 +23,63 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
+
+// syncPodSNATs removes SNATs against nodeIP for the given node if the SNAT.logicalIP isn't an active podIP on this node
+// We don't have to worry about missing SNATs that should be added because addLogicalPort takes care of this for all pods
+// when RequestRetryObjs is called for each node add. This is called only when disableSNATMultipleGateways = true
+//
+// NOTE: On startup libovsdb adds back all the pods and this should normally update all existing SNATs
+// accordingly. Due to a stale egressIP cache bug https://issues.redhat.com/browse/OCPBUGS-1520 we ended up adding
+// wrong pod->nodeSNATs which won't get cleared up unless explicitly deleted.
+func (oc *Controller) syncPodSNATs(nodeName string, nodeIPs []*net.IPNet) error {
+	options := metav1.ListOptions{
+		FieldSelector:   fields.OneTermEqualSelector("spec.nodeName", nodeName).String(),
+		ResourceVersion: "0",
+	}
+	pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
+	if err != nil {
+		return fmt.Errorf("unable to list existing pods on node: %s, %w",
+			nodeName, err)
+	}
+	gatewayRouter := nbdb.LogicalRouter{
+		Name: types.GWRouterPrefix + nodeName,
+	}
+	routerNats, err := libovsdbops.GetRouterNATs(oc.nbClient, &gatewayRouter)
+	if err != nil {
+		return fmt.Errorf("unable to get NAT entries for router on node %s: %w", nodeName, err)
+	}
+	podIPsOnNode := sets.NewString() // collects all podIPs on node
+	for _, pod := range pods.Items {
+		pod := pod
+		podIPs, err := util.GetPodIPs(&pod)
+		if err != nil {
+			return fmt.Errorf("unable to fetch podIPs for pod %s/%s", pod.Namespace, pod.Name)
+		}
+		for _, podIP := range podIPs {
+			podIPsOnNode.Insert(podIP.IP.String())
+		}
+	}
+	natsToDelete := []*nbdb.NAT{}
+	for _, routerNat := range routerNats {
+		routerNat := routerNat
+		if routerNat.Type == nbdb.NATTypeSNAT {
+			for _, nodeIP := range nodeIPs {
+				if routerNat.ExternalIP == nodeIP.IP.String() {
+					if !podIPsOnNode.Has(routerNat.LogicalIP) {
+						natsToDelete = append(natsToDelete, routerNat)
+					}
+				}
+			}
+		}
+	}
+	if len(natsToDelete) > 0 {
+		err := libovsdbops.DeleteNATs(oc.nbClient, &gatewayRouter, natsToDelete...)
+		if err != nil {
+			return fmt.Errorf("unable to delete NATs %+v from node %s", natsToDelete, nodeName)
+		}
+	}
+	return nil
+}
 
 // gatewayInit creates a gateway router for the local chassis.
 func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*net.IPNet,
@@ -338,6 +398,13 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		err := libovsdbops.DeleteNATs(oc.nbClient, &logicalRouter, nats...)
 		if err != nil {
 			return fmt.Errorf("failed to delete GW SNAT rule for pod on router %s error: %v", gatewayRouter, err)
+		}
+	}
+
+	if config.Gateway.DisableSNATMultipleGWs {
+		// sync stale SNAT's for the pods on this node; NOTE: egressIP SNATs are sycned in EIP controller.
+		if err := oc.syncPodSNATs(nodeName, l3GatewayConfig.IPAddresses); err != nil {
+			return fmt.Errorf("failed to sync stale SNATs on node %s: %v", nodeName, err)
 		}
 	}
 
