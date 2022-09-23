@@ -1151,7 +1151,7 @@ func (oc *Controller) deleteEgressIPAssignments(name string, statusesToRemove []
 				// this pod was managed by statusToRemove.EgressIP; we need to try and add its SNAT back towards nodeIP
 				delete(podStatus.egressStatuses, statusToRemove)
 				podNamespace, podName := getPodNamespaceAndNameFromKey(podKey)
-				if err := oc.eIPC.addPerPodGRSNAT(podNamespace, podName, podStatus.podIPs, statusToRemove); err != nil {
+				if err := oc.eIPC.addExternalGWPodSNAT(podNamespace, podName, podStatus.podIPs, statusToRemove); err != nil {
 					return err
 				}
 				delete(oc.eIPC.podAssignment, podKey)
@@ -1198,7 +1198,7 @@ func (oc *Controller) deletePodEgressIPAssignments(name string, statusesToRemove
 			return err
 		}
 		delete(podStatus.egressStatuses, statusToRemove)
-		if err := oc.eIPC.addPerPodGRSNAT(pod.Namespace, pod.Name, podStatus.podIPs, statusToRemove); err != nil {
+		if err := oc.eIPC.addExternalGWPodSNAT(pod.Namespace, pod.Name, podStatus.podIPs, statusToRemove); err != nil {
 			return err
 		}
 	}
@@ -1965,7 +1965,7 @@ func (e *egressIPController) addPodEgressIPAssignment(egressIPName string, statu
 			metrics.RecordEgressIPAssign(duration)
 		}()
 	}
-	if err = e.deletePerPodGRSNAT(pod, podIPs, status); err != nil {
+	if err = e.deleteExternalGWPodSNAT(pod, podIPs, status); err != nil {
 		return err
 	}
 	if err = e.handleEgressReroutePolicy(podIPs, status, egressIPName, e.createEgressReroutePolicy); err != nil {
@@ -2008,7 +2008,7 @@ func (e *egressIPController) deletePodEgressIPAssignment(egressIPName string, st
 	return err
 }
 
-// addPerPodGRSNAT performs the required external GW setup in two particular
+// addExternalGWPodSNAT performs the required external GW setup in two particular
 // cases:
 // - An egress IP matching pod stops matching by means of EgressIP object
 // deletion
@@ -2019,16 +2019,16 @@ func (e *egressIPController) deletePodEgressIPAssignment(egressIPName string, st
 // check the informer cache since on pod deletion the event handlers are
 // triggered after the update to the informer cache. We should not re-add the
 // external GW setup in those cases.
-func (e *egressIPController) addPerPodGRSNAT(podNamespace, podName string, podIPs []*net.IPNet, status egressipv1.EgressIPStatusItem) error {
+func (e *egressIPController) addExternalGWPodSNAT(podNamespace, podName string, podIPs []*net.IPNet, status egressipv1.EgressIPStatusItem) error {
 	if config.Gateway.DisableSNATMultipleGWs {
 		if pod, err := e.watchFactory.GetPod(podNamespace, podName); err == nil && pod.Spec.NodeName == status.Node {
 			// if the pod still exists, add snats to->nodeIP (on the node where the pod exists) for these podIPs after deleting the snat to->egressIP
 			// NOTE: This needs to be done only if the pod was on the same node as egressNode
-			extIPs, err := getExternalIPsGRSNAT(e.watchFactory, pod.Spec.NodeName)
+			extIPs, err := getExternalIPsGR(e.watchFactory, pod.Spec.NodeName)
 			if err != nil {
 				return err
 			}
-			err = addOrUpdatePerPodGRSNAT(e.nbClient, pod.Spec.NodeName, extIPs, podIPs)
+			err = addOrUpdatePodSNAT(e.nbClient, pod.Spec.NodeName, extIPs, podIPs)
 			if err != nil {
 				return err
 			}
@@ -2038,15 +2038,16 @@ func (e *egressIPController) addPerPodGRSNAT(podNamespace, podName string, podIP
 	return nil
 }
 
-func (e *egressIPController) deletePerPodGRSNAT(pod *kapi.Pod, podIPs []*net.IPNet, status egressipv1.EgressIPStatusItem) error {
+// deleteExternalGWPodSNAT performs the required external GW teardown for the given pod
+func (e *egressIPController) deleteExternalGWPodSNAT(pod *kapi.Pod, podIPs []*net.IPNet, status egressipv1.EgressIPStatusItem) error {
 	if config.Gateway.DisableSNATMultipleGWs && status.Node == pod.Spec.NodeName {
 		// remove snats to->nodeIP (from the node where pod exists if that node is also serving
 		// as an egress node for this pod) for these podIPs before adding the snat to->egressIP
-		extIPs, err := getExternalIPsGRSNAT(e.watchFactory, pod.Spec.NodeName)
+		extIPs, err := getExternalIPsGR(e.watchFactory, pod.Spec.NodeName)
 		if err != nil {
 			return err
 		}
-		err = deletePerPodGRSNAT(e.nbClient, pod.Spec.NodeName, extIPs, podIPs)
+		err = deletePodSNAT(e.nbClient, pod.Spec.NodeName, extIPs, podIPs)
 		if err != nil {
 			return err
 		}
