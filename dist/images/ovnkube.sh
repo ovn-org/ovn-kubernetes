@@ -88,10 +88,10 @@ fi
 cmd=${1:-""}
 
 # ovn daemon log levels
-ovn_loglevel_northd=${OVN_LOGLEVEL_NORTHD:-"-vconsole:info"}
-ovn_loglevel_nb=${OVN_LOGLEVEL_NB:-"-vconsole:info"}
-ovn_loglevel_sb=${OVN_LOGLEVEL_SB:-"-vconsole:info"}
-ovn_loglevel_controller=${OVN_LOGLEVEL_CONTROLLER:-"-vconsole:info"}
+ovn_loglevel_northd=${OVN_LOGLEVEL_NORTHD:-"-vconsole:dbg"}
+ovn_loglevel_nb=${OVN_LOGLEVEL_NB:-"-vconsole:dbg"}
+ovn_loglevel_sb=${OVN_LOGLEVEL_SB:-"-vconsole:dbg"}
+ovn_loglevel_controller=${OVN_LOGLEVEL_CONTROLLER:-"-vconsole:dbg"}
 
 ovnkubelogdir=/var/log/ovn-kubernetes
 
