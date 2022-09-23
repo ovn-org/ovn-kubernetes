@@ -41,6 +41,20 @@ func StringArg(context *cli.Context, name string) (string, error) {
 	return val, nil
 }
 
+func GetIPFullMask(ip string) string {
+	const (
+		// IPv4FullMask is the maximum prefix mask for an IPv4 address
+		IPv4FullMask = "/32"
+		// IPv6FullMask is the maxiumum prefix mask for an IPv6 address
+		IPv6FullMask = "/128"
+	)
+
+	if utilnet.IsIPv6(net.ParseIP(ip)) {
+		return IPv6FullMask
+	}
+	return IPv4FullMask
+}
+
 // GetLegacyK8sMgmtIntfName returns legacy management ovs-port name
 func GetLegacyK8sMgmtIntfName(nodeName string) string {
 	if len(nodeName) > 11 {

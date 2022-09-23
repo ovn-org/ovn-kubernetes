@@ -230,7 +230,7 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 		}
 		podIPs := make([]*net.IPNet, 0)
 		for _, podIP := range pod.Status.PodIPs {
-			cidr := podIP.IP + GetIPFullMask(podIP.IP)
+			cidr := podIP.IP + util.GetIPFullMask(podIP.IP)
 			_, ipNet, err := net.ParseCIDR(cidr)
 			if err != nil {
 				return fmt.Errorf("failed to parse CIDR: %s, error: %v", cidr, err)
@@ -324,7 +324,7 @@ func (oc *Controller) deletePodGWRoute(routeInfo *externalRouteInfo, podIP, gw, 
 		return nil
 	}
 
-	mask := GetIPFullMask(podIP)
+	mask := util.GetIPFullMask(podIP)
 	if err := oc.deleteLogicalRouterStaticRoute(podIP, mask, gw, gr); err != nil {
 		return fmt.Errorf("unable to delete pod %s ECMP route to GR %s, GW: %s: %w",
 			routeInfo.podName, gr, gw, err)
@@ -494,7 +494,7 @@ func (oc *Controller) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddrs []*n
 						routesAdded++
 						continue
 					}
-					mask := GetIPFullMask(podIP)
+					mask := util.GetIPFullMask(podIP)
 
 					if err := oc.createBFDStaticRoute(gateway.bfdEnabled, gw, podIP, gr, port, mask); err != nil {
 						return err
@@ -531,7 +531,7 @@ func buildPodSNAT(extIPs, podIPNets []*net.IPNet) ([]*nbdb.NAT, error) {
 
 	for _, podIPNet := range podIPNets {
 		podIP := podIPNet.IP.String()
-		mask := GetIPFullMask(podIP)
+		mask := util.GetIPFullMask(podIP)
 		_, fullMaskPodNet, err := net.ParseCIDR(podIP + mask)
 		if err != nil {
 			return nil, fmt.Errorf("invalid IP: %s and mask: %s combination, error: %v", podIP, mask, err)

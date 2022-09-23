@@ -73,7 +73,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 			oldExternalIPs := strings.Split(physicalIPs, ",")
 			oldExtIPs = make([]net.IP, len(oldExternalIPs))
 			for i, oldExternalIP := range oldExternalIPs {
-				cidr := oldExternalIP + GetIPFullMask(oldExternalIP)
+				cidr := oldExternalIP + util.GetIPFullMask(oldExternalIP)
 				ip, _, err := net.ParseCIDR(cidr)
 				if err != nil {
 					return fmt.Errorf("invalid cidr:%s error: %v", cidr, err)

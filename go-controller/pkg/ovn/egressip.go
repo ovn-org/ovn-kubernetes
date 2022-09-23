@@ -1062,32 +1062,31 @@ func (oc *Controller) addPodEgressIPAssignments(name string, statusAssignments [
 	}
 	var remainingAssignments []egressipv1.EgressIPStatusItem
 	podKey := getPodKey(pod)
+	// Retrieve the pod's networking configuration from the
+	// logicalPortCache. The reason for doing this: a) only normal network
+	// pods are placed in this cache, b) once the pod is placed here we know
+	// addLogicalPort has finished successfully setting up networking for
+	// the pod, so we can proceed with retrieving its IP and deleting the
+	// external GW configuration created in addLogicalPort for the pod.
+	logicalPort, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name))
+	if err != nil {
+		return nil
+	}
+	// Since the logical switch port cache removes entries only 60 seconds
+	// after deletion, its possible that when pod is recreated with the same name
+	// within the 60seconds timer, stale info gets used to create SNATs and reroutes
+	// for the eip pods. Checking if the expiry is set for the port or not can indicate
+	// if the port is scheduled for deletion.
+	if !logicalPort.expires.IsZero() {
+		klog.Warningf("Stale LSP %s for pod %s found in cache refetching",
+			logicalPort.name, podKey)
+		return nil
+	}
 	podState, exists := oc.eIPC.podAssignment[podKey]
 	if !exists {
 		remainingAssignments = statusAssignments
-		// Retrieve the pod's networking configuration from the
-		// logicalPortCache. The reason for doing this: a) only normal network
-		// pods are placed in this cache, b) once the pod is placed here we know
-		// addLogicalPort has finished successfully setting up networking for
-		// the pod, so we can proceed with retrieving its IP and deleting the
-		// external GW configuration created in addLogicalPort for the pod.
-		logicalPort, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name))
-		if err != nil {
-			return nil
-		}
-		// Since the logical switch port cache removes entries only 60 seconds
-		// after deletion, its possible that when pod is recreated with the same name
-		// within the 60seconds timer, stale info gets used to create SNATs and reroutes
-		// for the eip pods. Checking if the expiry is set for the port or not can indicate
-		// if the port is scheduled for deletion.
-		if !logicalPort.expires.IsZero() {
-			klog.Warningf("Stale LSP %s for pod %s found in cache refetching",
-				logicalPort.name, podKey)
-			return nil
-		}
 		podState = &podAssignmentState{
 			egressStatuses: make(map[egressipv1.EgressIPStatusItem]string),
-			podIPs:         logicalPort.ips,
 		}
 		oc.eIPC.podAssignment[podKey] = podState
 	} else {
@@ -1099,7 +1098,7 @@ func (oc *Controller) addPodEgressIPAssignments(name string, statusAssignments [
 	}
 	for _, status := range remainingAssignments {
 		klog.V(5).Infof("Adding pod egress IP status: %v for EgressIP: %s and pod: %s/%s", status, name, pod.Name, pod.Namespace)
-		if err := oc.eIPC.addPodEgressIPAssignment(name, status, pod, podState.podIPs); err != nil {
+		if err := oc.eIPC.addPodEgressIPAssignment(name, status, pod, logicalPort.ips); err != nil {
 			return err
 		}
 		podState.egressStatuses[status] = ""
@@ -1151,7 +1150,7 @@ func (oc *Controller) deleteEgressIPAssignments(name string, statusesToRemove []
 				// this pod was managed by statusToRemove.EgressIP; we need to try and add its SNAT back towards nodeIP
 				delete(podStatus.egressStatuses, statusToRemove)
 				podNamespace, podName := getPodNamespaceAndNameFromKey(podKey)
-				if err := oc.eIPC.addExternalGWPodSNAT(podNamespace, podName, podStatus.podIPs, statusToRemove); err != nil {
+				if err := oc.eIPC.addExternalGWPodSNAT(podNamespace, podName, statusToRemove); err != nil {
 					return err
 				}
 				delete(oc.eIPC.podAssignment, podKey)
@@ -1192,13 +1191,17 @@ func (oc *Controller) deletePodEgressIPAssignments(name string, statusesToRemove
 	if !exists {
 		return nil
 	}
+	podIPs, err := util.GetPodIPs(pod)
+	if err != nil {
+		return err
+	}
 	for _, statusToRemove := range statusesToRemove {
 		klog.V(5).Infof("Deleting pod egress IP status: %v for EgressIP: %s and pod: %s/%s", statusToRemove, name, pod.Name, pod.Namespace)
-		if err := oc.eIPC.deletePodEgressIPAssignment(name, statusToRemove, podStatus.podIPs); err != nil {
+		if err := oc.eIPC.deletePodEgressIPAssignment(name, statusToRemove, podIPs); err != nil {
 			return err
 		}
 		delete(podStatus.egressStatuses, statusToRemove)
-		if err := oc.eIPC.addExternalGWPodSNAT(pod.Namespace, pod.Name, podStatus.podIPs, statusToRemove); err != nil {
+		if err := oc.eIPC.addExternalGWPodSNAT(pod.Namespace, pod.Name, statusToRemove); err != nil {
 			return err
 		}
 	}
@@ -1901,7 +1904,6 @@ func (e *egressNode) getAllocationCountForEgressIP(name string) (count int) {
 
 type podAssignmentState struct {
 	egressStatuses map[egressipv1.EgressIPStatusItem]string
-	podIPs         []*net.IPNet
 }
 
 type allocator struct {
@@ -2019,12 +2021,16 @@ func (e *egressIPController) deletePodEgressIPAssignment(egressIPName string, st
 // check the informer cache since on pod deletion the event handlers are
 // triggered after the update to the informer cache. We should not re-add the
 // external GW setup in those cases.
-func (e *egressIPController) addExternalGWPodSNAT(podNamespace, podName string, podIPs []*net.IPNet, status egressipv1.EgressIPStatusItem) error {
+func (e *egressIPController) addExternalGWPodSNAT(podNamespace, podName string, status egressipv1.EgressIPStatusItem) error {
 	if config.Gateway.DisableSNATMultipleGWs {
 		if pod, err := e.watchFactory.GetPod(podNamespace, podName); err == nil && pod.Spec.NodeName == status.Node {
 			// if the pod still exists, add snats to->nodeIP (on the node where the pod exists) for these podIPs after deleting the snat to->egressIP
 			// NOTE: This needs to be done only if the pod was on the same node as egressNode
 			extIPs, err := getExternalIPsGR(e.watchFactory, pod.Spec.NodeName)
+			if err != nil {
+				return err
+			}
+			podIPs, err := util.GetPodIPs(pod)
 			if err != nil {
 				return err
 			}
@@ -2485,7 +2491,7 @@ func DeleteDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, node str
 
 func buildSNATFromEgressIPStatus(podIP net.IP, status egressipv1.EgressIPStatusItem, egressIPName string) (*nbdb.NAT, error) {
 	podIPStr := podIP.String()
-	mask := GetIPFullMask(podIPStr)
+	mask := util.GetIPFullMask(podIPStr)
 	_, logicalIP, err := net.ParseCIDR(podIPStr + mask)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse podIP: %s, error: %v", podIP.String(), err)
