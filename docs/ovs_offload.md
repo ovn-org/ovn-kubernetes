@@ -210,3 +210,19 @@ tcpdump: verbose output suppressed, use -v or -vv for full protocol decode
 17:12:56.106705 IP 0.0.0.0.68 > 255.255.255.255.67: BOOTP/DHCP, Request from 62:21:f0:89:40:73, length 30
 ```
 
+## OVS hardware offload DPU support
+
+[Data Processing Units](https://blogs.nvidia.com/blog/2020/05/20/whats-a-dpu-data-processing-unit/) (DPU) combine the advanced capabilities
+of a Smart-NIC (such as Mellanox ConnectX-6DX NIC) with a general purpose embedded CPU and a high-speed memory controller.
+
+Similarly to Smart-NICs, a DPU follows the kernel switchdev model.
+In this model, every VF/PF net-device on the host has a corresponding representor net-device existing on
+the embedded CPU.
+
+### Supported DPUs
+
+The following manufacturers are known to work:
+
+- [Mellanox Bluefield-2](https://www.mellanox.com/products/bluefield2-overview)
+
+Deployment guide can be found [here](https://docs.google.com/document/d/1hRke0cOCY84Ef8OU283iPg_PHiJ6O17aUkb9Vv-fWPQ/edit?usp=sharing).
