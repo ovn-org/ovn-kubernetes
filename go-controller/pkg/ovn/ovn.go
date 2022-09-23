@@ -29,8 +29,6 @@ import (
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	utilnet "k8s.io/utils/net"
-
 	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -249,20 +247,6 @@ const (
 	// SCTP is the constant string for the string "SCTP"
 	SCTP = "SCTP"
 )
-
-func GetIPFullMask(ip string) string {
-	const (
-		// IPv4FullMask is the maximum prefix mask for an IPv4 address
-		IPv4FullMask = "/32"
-		// IPv6FullMask is the maxiumum prefix mask for an IPv6 address
-		IPv6FullMask = "/128"
-	)
-
-	if utilnet.IsIPv6(net.ParseIP(ip)) {
-		return IPv6FullMask
-	}
-	return IPv4FullMask
-}
 
 // getPodNamespacedName returns <namespace>_<podname> for the provided pod
 func getPodNamespacedName(pod *kapi.Pod) string {
