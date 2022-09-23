@@ -24,7 +24,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
 
-func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
+func (oc *Controller) syncPods(pods []interface{}) error {
 	// get the list of logical switch ports (equivalent to pods). Reserve all existing Pod IPs to
 	// avoid subsequent new Pods getting the same duplicate Pod IP.
 	//
@@ -54,7 +54,7 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 						util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
 						pod.Spec.NodeName)
 				} else {
-					return fmt.Errorf("Couldn't allocate IPs: %s for pod: %s on node: %s"+
+					return fmt.Errorf("couldn't allocate IPs: %s for pod: %s on node: %s"+
 						" error: %v", util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
 						pod.Spec.NodeName, err)
 				}

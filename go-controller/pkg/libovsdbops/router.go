@@ -853,9 +853,9 @@ func FindNATsWithPredicate(nbClient libovsdbclient.Client, predicate natPredicat
 	return nats, err
 }
 
-// getRouterNATs looks up NATs associated to the provided logical router from
+// GetRouterNATs looks up NATs associated to the provided logical router from
 // the cache
-func getRouterNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) ([]*nbdb.NAT, error) {
+func GetRouterNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) ([]*nbdb.NAT, error) {
 	router, err := GetLogicalRouter(nbClient, router)
 	if err != nil {
 		return nil, err
@@ -876,7 +876,7 @@ func getRouterNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) (
 // CreateOrUpdateNATsOps creates or updates the provided NATs, adds them to
 // the provided logical router and returns the corresponding ops
 func CreateOrUpdateNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, nats ...*nbdb.NAT) ([]libovsdb.Operation, error) {
-	routerNats, err := getRouterNATs(nbClient, router)
+	routerNats, err := GetRouterNATs(nbClient, router)
 	if err != nil {
 		return ops, fmt.Errorf("unable to get NAT entries for router %+v: %w", router, err)
 	}
@@ -930,7 +930,7 @@ func CreateOrUpdateNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRout
 // DeleteNATsOps deletes the provided NATs, removes them from the provided
 // logical router and returns the corresponding ops
 func DeleteNATsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, router *nbdb.LogicalRouter, nats ...*nbdb.NAT) ([]libovsdb.Operation, error) {
-	routerNats, err := getRouterNATs(nbClient, router)
+	routerNats, err := GetRouterNATs(nbClient, router)
 	if err == libovsdbclient.ErrNotFound {
 		return ops, nil
 	}

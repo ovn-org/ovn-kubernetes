@@ -1232,13 +1232,13 @@ func (oc *Controller) getSyncResourcesFunc(r *RetryObjs) (func([]interface{}) er
 
 	switch r.oType {
 	case factory.PodType:
-		syncFunc = oc.syncPodsRetriable
+		syncFunc = oc.syncPods
 
 	case factory.PolicyType:
 		syncFunc = oc.syncNetworkPolicies
 
 	case factory.NodeType:
-		syncFunc = oc.syncNodesRetriable
+		syncFunc = oc.syncNodes
 
 	case factory.PeerServiceType,
 		factory.PeerNamespaceAndPodSelectorType:
