@@ -146,17 +146,15 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 			for _, defaultGatewayNextHop := range defaultGatewayNextHops {
 				if needIPv4NextHop && !utilnet.IsIPv6(defaultGatewayNextHop) {
 					gatewayNextHops = append(gatewayNextHops, defaultGatewayNextHop)
-					needIPv4NextHop = false
 				} else if needIPv6NextHop && utilnet.IsIPv6(defaultGatewayNextHop) {
 					gatewayNextHops = append(gatewayNextHops, defaultGatewayNextHop)
-					needIPv6NextHop = false
 				}
-			}
-			if needIPv4NextHop || needIPv6NextHop {
-				return nil, "", fmt.Errorf("failed to get next-hop: IPv4=%v IPv6=%v", needIPv4NextHop, needIPv6NextHop)
 			}
 		}
 		if gatewayIntf == "" {
+			if defaultGatewayIntf == "" {
+				return nil, "", fmt.Errorf("unable to find default gateway and none provided via config")
+			}
 			gatewayIntf = defaultGatewayIntf
 		}
 	}
@@ -248,9 +246,9 @@ func configureSvcRouteViaInterface(iface string, gwIPs []net.IP) error {
 			mtu = config.Default.RoutableMTU
 		}
 
-		err = util.LinkRoutesAddOrUpdateMTU(link, gwIP[0], []*net.IPNet{subnet}, mtu)
+		err = util.LinkRoutesAddOrUpdateSourceOrMTU(link, gwIP[0], []*net.IPNet{subnet}, mtu, nil)
 		if err != nil {
-			return fmt.Errorf("unable to add/update route for service via %s, error: %v", iface, err)
+			return fmt.Errorf("unable to add/update route for service via %s for gwIP %s, error: %v", iface, gwIP[0].String(), err)
 		}
 	}
 	return nil
@@ -402,9 +400,12 @@ func (n *OvnNode) initGatewayDPUHost(kubeNodeIP net.IP) error {
 		return err
 	}
 
-	err = addMasqueradeRoute(gatewayIntf, gatewayNextHops)
-	if err != nil {
-		return err
+	if err := setNodeMasqueradeIPOnExtBridge(gwIntf); err != nil {
+		return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwIntf, err)
+	}
+
+	if err := addMasqueradeRoute(gwIntf, n.name, n.watchFactory); err != nil {
+		return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
 	}
 
 	err = configureSvcRouteViaInterface(gatewayIntf, gatewayNextHops)
@@ -430,6 +431,10 @@ func (n *OvnNode) initGatewayDPUHost(kubeNodeIP net.IP) error {
 			return err
 		}
 		gw.portClaimWatcher = portClaimWatcher
+	}
+
+	if err := addHostMACBindings(gwIntf); err != nil {
+		return fmt.Errorf("failed to add MAC bindings for service routing")
 	}
 
 	err = gw.Init(n.watchFactory)
