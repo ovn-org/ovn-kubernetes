@@ -1142,17 +1142,25 @@ func (oc *Controller) deleteEgressIPAssignments(name string, statusesToRemove []
 	oc.eIPC.podAssignmentMutex.Lock()
 	defer oc.eIPC.podAssignmentMutex.Unlock()
 	for _, statusToRemove := range statusesToRemove {
-		klog.V(5).Infof("Deleting pod egress IP status: %v for EgressIP: %s", statusToRemove, name)
+		klog.V(2).Infof("Deleting pod egress IP status: %v for EgressIP: %s", statusToRemove, name)
 		if err := oc.eIPC.deleteEgressIPStatusSetup(name, statusToRemove); err != nil {
 			return err
 		}
 		for podKey, podStatus := range oc.eIPC.podAssignment {
-			delete(podStatus.egressStatuses, statusToRemove)
-			podNamespace, podName := getPodNamespaceAndNameFromKey(podKey)
-			if err := oc.eIPC.addPerPodGRSNAT(podNamespace, podName, podStatus.podIPs); err != nil {
-				return err
+			if _, ok := podStatus.egressStatuses[statusToRemove]; ok {
+				// this pod was managed by statusToRemove.EgressIP; we need to try and add its SNAT back towards nodeIP
+				podNamespace, podName := getPodNamespaceAndNameFromKey(podKey)
+				if err := oc.eIPC.addPerPodGRSNAT(podNamespace, podName, podStatus.podIPs, statusToRemove); err != nil {
+					return err
+				}
+				delete(podStatus.egressStatuses, statusToRemove)
+				if len(podStatus.egressStatuses) == 0 {
+					// pod could be managed by more than one egressIP
+					// so remove the podKey from cache only if we are sure
+					// there are no more egressStatuses managing this pod
+					delete(oc.eIPC.podAssignment, podKey)
+				}
 			}
-			delete(oc.eIPC.podAssignment, podKey)
 		}
 	}
 	return nil
@@ -1195,9 +1203,9 @@ func (oc *Controller) deletePodEgressIPAssignments(name string, statusesToRemove
 			return err
 		}
 		delete(podStatus.egressStatuses, statusToRemove)
-	}
-	if err := oc.eIPC.addPerPodGRSNAT(pod.Namespace, pod.Name, podStatus.podIPs); err != nil {
-		return err
+		if err := oc.eIPC.addPerPodGRSNAT(pod.Namespace, pod.Name, podStatus.podIPs, statusToRemove); err != nil {
+			return err
+		}
 	}
 	// Delete the key if there are no more status assignments to keep
 	// for the pod.
@@ -2016,10 +2024,11 @@ func (e *egressIPController) deletePodEgressIPAssignment(egressIPName string, st
 // check the informer cache since on pod deletion the event handlers are
 // triggered after the update to the informer cache. We should not re-add the
 // external GW setup in those cases.
-func (e *egressIPController) addPerPodGRSNAT(podNamespace, podName string, podIPs []*net.IPNet) error {
+func (e *egressIPController) addPerPodGRSNAT(podNamespace, podName string, podIPs []*net.IPNet, status egressipv1.EgressIPStatusItem) error {
 	if config.Gateway.DisableSNATMultipleGWs {
-		if pod, err := e.watchFactory.GetPod(podNamespace, podName); err == nil {
+		if pod, err := e.watchFactory.GetPod(podNamespace, podName); err == nil && pod.Spec.NodeName == status.Node {
 			// if the pod still exists, add snats to->nodeIP (on the node where the pod exists) for these podIPs after deleting the snat to->egressIP
+			// NOTE: This needs to be done only if the pod was on the same node as egressNode
 			extIPs, err := getExternalIPsGRSNAT(e.watchFactory, pod.Spec.NodeName)
 			if err != nil {
 				return err
@@ -2028,6 +2037,7 @@ func (e *egressIPController) addPerPodGRSNAT(podNamespace, podName string, podIP
 			if err != nil {
 				return err
 			}
+			klog.V(5).Infof("Adding SNAT on %s since egress node managing %s/%s was the same: %s", pod.Spec.NodeName, pod.Namespace, pod.Name, status.Node)
 		}
 	}
 	return nil
