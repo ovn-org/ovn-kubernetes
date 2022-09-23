@@ -768,13 +768,13 @@ func (h *masterEventHandler) SyncFunc(objs []interface{}) error {
 	} else {
 		switch h.objType {
 		case factory.PodType:
-			syncFunc = h.oc.syncPodsRetriable
+			syncFunc = h.oc.syncPods
 
 		case factory.PolicyType:
 			syncFunc = h.oc.syncNetworkPolicies
 
 		case factory.NodeType:
-			syncFunc = h.oc.syncNodesRetriable
+			syncFunc = h.oc.syncNodes
 
 		case factory.LocalPodSelectorType,
 			factory.PeerServiceType,
