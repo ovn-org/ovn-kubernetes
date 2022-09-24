@@ -229,11 +229,17 @@ func (gp *gressPolicy) constructMatchString(v4AddressSets, v6AddressSets []strin
 	if len(v4AddressSets) > 0 {
 		v4AddressSetStr := strings.Join(v4AddressSets, ", ")
 		v4MatchStr = fmt.Sprintf("%s.%s == {%s}", "ip4", direction, v4AddressSetStr)
+		if gp.policyType == knet.PolicyTypeIngress {
+			v4MatchStr = fmt.Sprintf("(%s || (%s.src == %s && %s.dst == {%s}))", v4MatchStr, "ip4", types.V4OVNServiceHairpinMasqueradeIP, "ip4", v4AddressSetStr)
+		}
 		matchStr = v4MatchStr
 	}
 	if len(v6AddressSets) > 0 {
 		v6AddressSetStr := strings.Join(v6AddressSets, ", ")
 		v6MatchStr = fmt.Sprintf("%s.%s == {%s}", "ip6", direction, v6AddressSetStr)
+		if gp.policyType == knet.PolicyTypeIngress {
+			v6MatchStr = fmt.Sprintf("(%s || (%s.src == %s && %s.dst == {%s}))", v6MatchStr, "ip6", types.V6OVNServiceHairpinMasqueradeIP, "ip6", v6AddressSetStr)
+		}
 		matchStr = v6MatchStr
 	}
 	if len(v4AddressSets) > 0 && len(v6AddressSets) > 0 {

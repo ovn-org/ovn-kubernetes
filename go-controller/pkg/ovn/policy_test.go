@@ -219,11 +219,16 @@ func getGressACLs(i int, namespace, policyName string, peerNamespaces []string, 
 	}
 	if peerNamespaces != nil {
 		gressAsMatch := asMatch(append(peerNamespaces, getAddressSetName(namespace, policyName, policyType, i)))
+		match := fmt.Sprintf("ip4.%s == {%s}", ipDir, gressAsMatch)
+		if policyType == knet.PolicyTypeIngress {
+			match = fmt.Sprintf("(%s || (ip4.src == %s && ip4.dst == {%s}))", match, types.V4OVNServiceHairpinMasqueradeIP, gressAsMatch)
+		}
+		match += fmt.Sprintf(" && %s == @%s", portDir, pgName)
 		acl := libovsdbops.BuildACL(
 			aclName,
 			direction,
 			types.DefaultAllowPriority,
-			fmt.Sprintf("ip4.%s == {%s} && %s == @%s", ipDir, gressAsMatch, portDir, pgName),
+			match,
 			nbdb.ACLActionAllowRelated,
 			types.OvnACLLoggingMeter,
 			logSeverity,
@@ -1882,7 +1887,11 @@ func asMatch(addressSets []string) string {
 func buildExpectedACL(gp *gressPolicy, pgName string, as []string, aclLogging *ACLLoggingLevels) *nbdb.ACL {
 	name := getGressPolicyACLName(gp.policyNamespace, gp.policyName, gp.idx)
 	asMatch := asMatch(as)
-	match := fmt.Sprintf("ip4.src == {%s} && outport == @%s", asMatch, pgName)
+	match := fmt.Sprintf("ip4.src == {%s}", asMatch)
+	if gp.policyType == knet.PolicyTypeIngress {
+		match = fmt.Sprintf("(%s || (%s.src == %s && %s.dst == {%s}))", match, "ip4", types.V4OVNServiceHairpinMasqueradeIP, "ip4", asMatch)
+	}
+	match += fmt.Sprintf(" && outport == @%s", pgName)
 	gpDirection := string(knet.PolicyTypeIngress)
 	externalIds := map[string]string{
 		l4MatchACLExtIdKey:     "None",
