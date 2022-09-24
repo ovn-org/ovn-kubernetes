@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
+	utilnet "k8s.io/utils/net"
 
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
@@ -233,4 +235,103 @@ var _ = ginkgo.Describe("Services", func() {
 		})
 		framework.ExpectNoError(err)
 	})
+})
+
+// This test ensures that - when a pod that's a backend for a service curls the
+// service ip; if the traffic was DNAT-ed to the same src pod (hairpin/loopback case) -
+// the srcIP of reply traffic is SNATed to the special masqurade IP 169.254.169.5
+// or "fd69::5"
+var _ = ginkgo.Describe("Service Hairpin SNAT", func() {
+	const (
+		svcName                 = "service-hairpin-test"
+		backendName             = "hairpin-backend-pod"
+		endpointHTTPPort        = "80"
+		serviceHTTPPort         = 6666
+		nodeHTTPPort            = 32766
+		V4LBHairpinMasqueradeIP = "169.254.169.5"
+		V6LBHairpinMasqueradeIP = "fd69::5"
+	)
+
+	var (
+		svcIP           string
+		isIpv6          bool
+		namespaceName   string
+		backendNodeName string
+		nodeIP          string
+	)
+
+	f := newPrivelegedTestFramework(svcName)
+	hairpinPodSel := map[string]string{"hairpinbackend": "true"}
+
+	ginkgo.BeforeEach(func() {
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 2)
+		framework.ExpectNoError(err)
+		if len(nodes.Items) < 2 {
+			framework.Failf("Test requires >= 2 Ready nodes, but there are only %v nodes", len(nodes.Items))
+		}
+		ips := e2enode.CollectAddresses(nodes, v1.NodeInternalIP)
+		namespaceName = f.Namespace.Name
+		backendNodeName = nodes.Items[0].Name
+		nodeIP = ips[1]
+	})
+
+	ginkgo.It("Should ensure service hairpin traffic is SNATed to hairpin masquerade IP; Switch LB", func() {
+
+		ginkgo.By("creating an ovn-network backend pod")
+		_, err := createGenericPodWithLabel(f, backendName, backendNodeName, namespaceName, []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%s", endpointHTTPPort)}, hairpinPodSel)
+		framework.ExpectNoError(err, fmt.Sprintf("unable to create backend pod: %s, err: %v", backendName, err))
+
+		ginkgo.By("creating a TCP service service-for-pods with type=ClusterIP in namespace " + namespaceName)
+
+		svcIP, err = createServiceForPodsWithLabel(f, namespaceName, serviceHTTPPort, endpointHTTPPort, 0, "ClusterIP", hairpinPodSel)
+		framework.ExpectNoError(err, fmt.Sprintf("unable to create service: service-for-pods, err: %v", err))
+
+		err = framework.WaitForServiceEndpointsNum(f.ClientSet, namespaceName, "service-for-pods", 1, time.Second, wait.ForeverTestTimeout)
+		framework.ExpectNoError(err, fmt.Sprintf("service: service-for-pods never had an enpoint, err: %v", err))
+
+		ginkgo.By("by sending a TCP packet to service service-for-pods with type=ClusterIP in namespace " + namespaceName + " from backend pod " + backendName)
+
+		if utilnet.IsIPv6String(svcIP) {
+			framework.Logf("service: service-for-pods is ipv6")
+			isIpv6 = true
+		}
+
+		clientIP := pokeEndpoint(namespaceName, backendName, "http", svcIP, serviceHTTPPort, "clientip")
+		clientIP, _, err = net.SplitHostPort(clientIP)
+		framework.ExpectNoError(err, "failed to parse client ip:port")
+
+		if isIpv6 {
+			framework.ExpectEqual(clientIP, V6LBHairpinMasqueradeIP, fmt.Sprintf("returned client ipv6: %v was not correct", clientIP))
+		} else {
+			framework.ExpectEqual(clientIP, V4LBHairpinMasqueradeIP, fmt.Sprintf("returned client ipv4: %v was not correct", clientIP))
+		}
+	})
+
+	ginkgo.It("Should ensure service hairpin traffic is NOT SNATed to hairpin masquerade IP; GR LB", func() {
+
+		ginkgo.By("creating an host-network backend pod on " + backendNodeName)
+		// create hostNeworkedPods
+		_, err := createPod(f, backendName, backendNodeName, namespaceName, []string{}, hairpinPodSel, func(p *v1.Pod) {
+			p.Spec.Containers[0].Command = []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%s", endpointHTTPPort)}
+			p.Spec.HostNetwork = true
+		})
+		framework.ExpectNoError(err, fmt.Sprintf("unable to create backend pod: %s, err: %v", backendName, err))
+
+		ginkgo.By("creating a TCP service service-for-pods with type=NodePort in namespace " + namespaceName)
+
+		svcIP, err = createServiceForPodsWithLabel(f, namespaceName, serviceHTTPPort, endpointHTTPPort, nodeHTTPPort, "NodePort", hairpinPodSel)
+		framework.ExpectNoError(err, fmt.Sprintf("unable to create service: service-for-pods, err: %v", err))
+
+		err = framework.WaitForServiceEndpointsNum(f.ClientSet, namespaceName, "service-for-pods", 1, time.Second, wait.ForeverTestTimeout)
+		framework.ExpectNoError(err, fmt.Sprintf("service: service-for-pods never had an enpoint, err: %v", err))
+
+		ginkgo.By("by sending a TCP packet to service service-for-pods with type=NodePort(" + nodeIP + ":" + strconv.Itoa(nodeHTTPPort) + ") in namespace " + namespaceName + " from node " + backendNodeName)
+
+		clientIP := pokeEndpoint("", backendNodeName, "http", nodeIP, nodeHTTPPort, "clientip")
+		clientIP, _, err = net.SplitHostPort(clientIP)
+		framework.ExpectNoError(err, "failed to parse client ip:port")
+
+		framework.ExpectEqual(clientIP, nodeIP, fmt.Sprintf("returned client: %v was not correct", clientIP))
+	})
+
 })
