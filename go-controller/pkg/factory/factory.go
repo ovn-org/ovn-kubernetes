@@ -88,7 +88,6 @@ const (
 )
 
 // types for dynamic handlers created when adding a network policy
-type peerService struct{}
 type peerNamespaceAndPodSelector struct{}
 type peerPodForNamespaceAndPodSelector struct{} // created during the add function of peerNamespaceAndPodSelectorType
 type peerNamespaceSelector struct{}
@@ -122,7 +121,6 @@ var (
 	EgressNodeType                        reflect.Type = reflect.TypeOf(&egressNode{})
 	CloudPrivateIPConfigType              reflect.Type = reflect.TypeOf(&ocpcloudnetworkapi.CloudPrivateIPConfig{})
 	EgressQoSType                         reflect.Type = reflect.TypeOf(&egressqosapi.EgressQoS{})
-	PeerServiceType                       reflect.Type = reflect.TypeOf(&peerService{})
 	PeerNamespaceAndPodSelectorType       reflect.Type = reflect.TypeOf(&peerNamespaceAndPodSelector{})
 	PeerPodForNamespaceAndPodSelectorType reflect.Type = reflect.TypeOf(&peerPodForNamespaceAndPodSelector{})
 	PeerNamespaceSelectorType             reflect.Type = reflect.TypeOf(&peerNamespaceSelector{})
@@ -478,7 +476,7 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 			return wf.AddNodeHandler(funcs, processExisting, priority)
 		}, nil
 
-	case PeerServiceType, ServiceForGatewayType, ServiceForFakeNodePortWatcherType:
+	case ServiceForGatewayType, ServiceForFakeNodePortWatcherType:
 		return func(namespace string, sel labels.Selector,
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredServiceHandler(namespace, funcs, processExisting)

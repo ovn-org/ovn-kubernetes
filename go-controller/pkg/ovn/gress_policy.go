@@ -8,18 +8,15 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
-	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -137,34 +134,6 @@ func (gp *gressPolicy) ensurePeerAddressSet(factory addressset.AddressSetFactory
 		gp.peerV6AddressSets.Store("$"+ipv6HashedAS, true)
 	}
 	return nil
-}
-
-// must be called with network policy read lock
-func (gp *gressPolicy) addPeerSvcVip(nbClient client.Client, service *v1.Service) error {
-	if gp.peerAddressSet == nil {
-		return fmt.Errorf("peer AddressSet is nil, cannot add peer Service: %s for gressPolicy: %s",
-			service.ObjectMeta.Name, gp.policyName)
-	}
-
-	klog.V(5).Infof("Service %s is applied to same namespace as network Policy, finding Service VIPs", service.Name)
-	ips := getSvcVips(nbClient, service)
-
-	klog.V(5).Infof("Adding SVC clusterIP to gressPolicy's Address Set: %v", ips)
-	return gp.peerAddressSet.AddIPs(ips)
-}
-
-// must be called with network policy read lock
-func (gp *gressPolicy) deletePeerSvcVip(nbClient client.Client, service *v1.Service) error {
-	if gp.peerAddressSet == nil {
-		return fmt.Errorf("peer AddressSet is nil, cannot add peer Service: %s for gressPolicy: %s",
-			service.ObjectMeta.Name, gp.policyName)
-	}
-
-	klog.V(5).Infof("Service %s is applied to same namespace as network Policy, finding cluster IPs", service.Name)
-	ips := getSvcVips(nbClient, service)
-
-	klog.Infof("Deleting service %s, possible VIPs: %v from gressPolicy's %s Address Set", service.Name, ips, gp.policyName)
-	return gp.peerAddressSet.DeleteIPs(ips)
 }
 
 // addPeerPods will get all currently assigned ips for given pods, and add them to the address set.
@@ -468,73 +437,4 @@ func (gp *gressPolicy) destroy() error {
 		gp.peerAddressSet = nil
 	}
 	return nil
-}
-
-// SVC can be of types 1. clusterIP, 2. NodePort, 3. LoadBalancer,
-// or 4.ExternalIP
-// TODO adjust for upstream patch when it lands:
-// https://bugzilla.redhat.com/show_bug.cgi?id=1908540
-func getSvcVips(nbClient client.Client, service *v1.Service) []net.IP {
-	ips := make([]net.IP, 0)
-
-	if util.ServiceTypeHasNodePort(service) {
-		gatewayRouters, err := gateway.GetOvnGateways(nbClient)
-		if err != nil {
-			klog.Errorf("Cannot get gateways: %s", err)
-		}
-		for _, gatewayRouter := range gatewayRouters {
-			// VIPs would be the physical IPS of the GRs(IPs of the node) in this case
-			physicalIPs, err := gateway.GetGatewayPhysicalIPs(nbClient, gatewayRouter)
-			if err != nil {
-				klog.Errorf("Unable to get gateway router %s physical ip, error: %v", gatewayRouter, err)
-				continue
-			}
-
-			for _, physicalIP := range physicalIPs {
-				ip := net.ParseIP(physicalIP)
-				if ip == nil {
-					klog.Errorf("Failed to parse physical IP %q", physicalIP)
-					continue
-				}
-				ips = append(ips, ip)
-			}
-		}
-	}
-	if util.ServiceTypeHasClusterIP(service) {
-		ipStrs := util.GetClusterIPs(service)
-		for _, ipStr := range ipStrs {
-			ip := net.ParseIP(ipStr)
-			if ip == nil {
-				klog.Errorf("Failed to parse cluster IP %q", ipStr)
-				continue
-			}
-			ips = append(ips, ip)
-		}
-
-		for _, ing := range service.Status.LoadBalancer.Ingress {
-			if ing.IP != "" {
-				klog.V(5).Infof("Adding ingress IPs: %s from Service: %s to VIP set", ing.IP, service.Name)
-				ips = append(ips, utilnet.ParseIPSloppy(ing.IP))
-			}
-		}
-
-		if len(service.Spec.ExternalIPs) > 0 {
-			for _, extIP := range service.Spec.ExternalIPs {
-				ip := utilnet.ParseIPSloppy(extIP)
-				if ip == nil {
-					klog.Errorf("Failed to parse external IP %q", extIP)
-					continue
-				}
-				klog.V(5).Infof("Adding external IP: %s, from Service: %s to VIP set",
-					ip, service.Name)
-				ips = append(ips, ip)
-			}
-		}
-	}
-	if len(ips) == 0 {
-		klog.V(5).Infof("Service has no VIPs")
-		return nil
-	}
-
-	return ips
 }

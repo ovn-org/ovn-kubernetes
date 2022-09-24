@@ -41,7 +41,7 @@ type masterEventHandler struct {
 // In order to create a retry framework for most resource types, newRetryFrameworkMaster is
 // to be preferred, as it calls newRetryFrameworkMasterWithParameters with all optional parameters unset.
 // newRetryFrameworkMasterWithParameters is instead called directly by the watchers that are
-// dynamically created when a network policy is added: PeerServiceType, PeerNamespaceAndPodSelectorType,
+// dynamically created when a network policy is added: PeerNamespaceAndPodSelectorType,
 // PeerPodForNamespaceAndPodSelectorType, PeerNamespaceSelectorType, PeerPodSelectorType.
 func (oc *Controller) newRetryFrameworkMasterWithParameters(
 	objectType reflect.Type,
@@ -131,22 +131,6 @@ func (h *masterEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, er
 			klog.Errorf(err.Error())
 		}
 		return !shouldUpdate, nil
-
-	case factory.PeerServiceType:
-		service1, ok := obj1.(*kapi.Service)
-		if !ok {
-			return false, fmt.Errorf("could not cast obj1 of type %T to *kapi.Service", obj1)
-		}
-		service2, ok := obj2.(*kapi.Service)
-		if !ok {
-			return false, fmt.Errorf("could not cast obj2 of type %T to *kapi.Service", obj2)
-		}
-		areEqual := reflect.DeepEqual(service1.Spec.ExternalIPs, service2.Spec.ExternalIPs) &&
-			reflect.DeepEqual(service1.Spec.ClusterIP, service2.Spec.ClusterIP) &&
-			reflect.DeepEqual(service1.Spec.ClusterIPs, service2.Spec.ClusterIPs) &&
-			reflect.DeepEqual(service1.Spec.Type, service2.Spec.Type) &&
-			reflect.DeepEqual(service1.Status.LoadBalancer.Ingress, service2.Status.LoadBalancer.Ingress)
-		return areEqual, nil
 
 	case factory.PodType,
 		factory.EgressIPPodType,
@@ -239,9 +223,6 @@ func (h *masterEventHandler) GetResourceFromInformerCache(key string) (interface
 	case factory.NodeType,
 		factory.EgressNodeType:
 		obj, err = h.oc.watchFactory.GetNode(name)
-
-	case factory.PeerServiceType:
-		obj, err = h.oc.watchFactory.GetService(namespace, name)
 
 	case factory.PodType,
 		factory.PeerPodSelectorType,
@@ -417,14 +398,6 @@ func (h *masterEventHandler) AddResource(obj interface{}, fromRetryLoop bool) er
 				node.Name, err)
 			return err
 		}
-
-	case factory.PeerServiceType:
-		service, ok := obj.(*kapi.Service)
-		if !ok {
-			return fmt.Errorf("could not cast peer service of type %T to *kapi.Service", obj)
-		}
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerServiceAdd(extraParameters.np, extraParameters.gp, service)
 
 	case factory.PeerPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
@@ -684,14 +657,6 @@ func (h *masterEventHandler) DeleteResource(obj, cachedObj interface{}) error {
 		}
 		return h.oc.deleteNodeEvent(node)
 
-	case factory.PeerServiceType:
-		service, ok := obj.(*kapi.Service)
-		if !ok {
-			return fmt.Errorf("could not cast peer service of type %T to *kapi.Service", obj)
-		}
-		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handlePeerServiceDelete(extraParameters.np, extraParameters.gp, service)
-
 	case factory.PeerPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
 		return h.oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, obj)
@@ -780,7 +745,6 @@ func (h *masterEventHandler) SyncFunc(objs []interface{}) error {
 			syncFunc = h.oc.syncNodes
 
 		case factory.LocalPodSelectorType,
-			factory.PeerServiceType,
 			factory.PeerNamespaceAndPodSelectorType,
 			factory.PeerPodSelectorType,
 			factory.PeerPodForNamespaceAndPodSelectorType,
