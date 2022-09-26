@@ -241,13 +241,14 @@ func TestAdd(t *testing.T) {
 				call.Once()
 			}
 			res, err := NewEgressDNS(mockAddressSetFactoryOps, testCh)
+			assert.NoError(t, err)
 
-			t.Log(res, err)
-			addResult, err := res.Add("addNamespace", test1DNSName)
+			res.Run(tc.syncTime)
+
+			_, err = res.Add("addNamespace", test1DNSName)
 			if tc.errExp {
 				assert.Error(t, err)
 			} else {
-				res.Run(tc.syncTime)
 				assert.Nil(t, err)
 				for stay, timeout := true, time.After(10*time.Second); stay; {
 					_, dnsResolves, _ := res.getDNSEntry(tc.dnsName)
@@ -263,6 +264,7 @@ func TestAdd(t *testing.T) {
 
 				}
 			}
+
 			if tc.testingUpdateOnQueryTime {
 				for stay, timeout := true, time.After(15*time.Second); stay; {
 					_, dnsResolves, _ := res.getDNSEntry(tc.dnsName)
@@ -282,10 +284,13 @@ func TestAdd(t *testing.T) {
 			}
 
 			close(testCh)
-			t.Log(addResult, err)
 			mockDnsOps.AssertExpectations(t)
 			mockAddressSetFactoryOps.AssertExpectations(t)
 			mockAddressSetOps.AssertExpectations(t)
+
+			mockDnsOps.ExpectedCalls = nil
+			mockAddressSetFactoryOps.ExpectedCalls = nil
+			mockAddressSetOps.ExpectedCalls = nil
 		})
 	}
 }
@@ -377,13 +382,15 @@ func TestDelete(t *testing.T) {
 				call.Once()
 			}
 			res, err := NewEgressDNS(mockAddressSetFactoryOps, testCh)
+			assert.NoError(t, err)
 
-			t.Log(res, err)
-			addResult, err := res.Add("addNamespace", test1DNSName)
+			res.Run(tc.syncTime)
+
+			_, err = res.Add("addNamespace", test1DNSName)
 			if tc.errExp {
 				assert.Error(t, err)
 			} else {
-				res.Run(tc.syncTime)
+
 				assert.Nil(t, err)
 				for stay, timeout := true, time.After(10*time.Second); stay; {
 					_, dnsResolves, _ := res.getDNSEntry(tc.dnsName)
@@ -417,10 +424,13 @@ func TestDelete(t *testing.T) {
 			assert.Nil(t, dnsResolves)
 
 			close(testCh)
-			t.Log(addResult, err)
 			mockDnsOps.AssertExpectations(t)
 			mockAddressSetFactoryOps.AssertExpectations(t)
 			mockAddressSetOps.AssertExpectations(t)
+
+			mockDnsOps.ExpectedCalls = nil
+			mockAddressSetFactoryOps.ExpectedCalls = nil
+			mockAddressSetOps.ExpectedCalls = nil
 		})
 	}
 }
