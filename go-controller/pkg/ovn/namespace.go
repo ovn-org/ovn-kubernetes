@@ -49,10 +49,6 @@ type namespaceInfo struct {
 
 	// If not empty, then it has to be set to a logging a severity level, e.g. "notice", "alert", etc
 	aclLogging ACLLoggingLevels
-
-	// Per-namespace port group default deny UUIDs
-	portGroupIngressDenyName string // Port group Name for ingress deny rule
-	portGroupEgressDenyName  string // Port group Name for egress deny rule
 }
 
 // This function implements the main body of work of syncNamespaces.
@@ -404,13 +400,12 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) error {
 
 	klog.V(5).Infof("Deleting Namespace's NetworkPolicy entities")
 	for _, np := range nsInfo.networkPolicies {
-		key := getPolicyNamespacedName(np.policy)
+		key := getPolicyKey(np.policy)
 		oc.retryNetworkPolicies.DoWithLock(key, func(key string) {
 			// add the full np object to the retry entry, since the namespace is going to be removed
 			// along with any mappings of nsInfo -> network policies
 			oc.retryNetworkPolicies.initRetryObjWithDelete(np.policy, key, np, false)
-			isLastPolicyInNamespace := len(nsInfo.networkPolicies) == 1
-			if err := oc.destroyNetworkPolicy(np, isLastPolicyInNamespace); err != nil {
+			if err := oc.destroyNetworkPolicy(np); err != nil {
 				klog.Errorf("Failed to delete network policy: %s, error: %v", key, err)
 			} else {
 				oc.retryNetworkPolicies.deleteRetryObj(key)

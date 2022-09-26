@@ -95,7 +95,7 @@ func (r *RetryObjs) DoWithLock(key string, f func(key string)) {
 
 func (r *RetryObjs) initRetryObjWithAddBackoff(obj interface{}, lockedKey string, backoff time.Duration) *retryObjEntry {
 	// even if the object was loaded and changed before with the same lock, LoadOrStore will return reference to the same object
-	entry := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{backoffSec: backoff})
+	entry, _ := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{backoffSec: backoff})
 	entry.timeStamp = time.Now()
 	entry.newObj = obj
 	entry.failedAttempts = 0
@@ -111,7 +111,7 @@ func (r *RetryObjs) initRetryObjWithAdd(obj interface{}, lockedKey string) *retr
 
 // initRetryObjWithUpdate tracks objects that failed to be updated to potentially retry later
 func (r *RetryObjs) initRetryObjWithUpdate(oldObj, newObj interface{}, lockedKey string) *retryObjEntry {
-	entry := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: oldObj, backoffSec: initialBackoff})
+	entry, _ := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: oldObj, backoffSec: initialBackoff})
 	// even if the object was loaded and changed before with the same lock, LoadOrStore will return reference to the same object
 	entry.timeStamp = time.Now()
 	entry.newObj = newObj
@@ -131,7 +131,7 @@ func (r *RetryObjs) initRetryObjWithUpdate(oldObj, newObj interface{}, lockedKey
 // The noRetryAdd boolean argument is to indicate whether to retry for addition
 func (r *RetryObjs) initRetryObjWithDelete(obj interface{}, lockedKey string, config interface{}, noRetryAdd bool) *retryObjEntry {
 	// even if the object was loaded and changed before with the same lock, LoadOrStore will return reference to the same object
-	entry := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: config, backoffSec: initialBackoff})
+	entry, _ := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: config, backoffSec: initialBackoff})
 	entry.timeStamp = time.Now()
 	entry.oldObj = obj
 	if entry.config == nil {
@@ -335,7 +335,7 @@ func getResourceKey(objType reflect.Type, obj interface{}) (string, error) {
 		if !ok {
 			return "", fmt.Errorf("could not cast %T object to *knet.NetworkPolicy", obj)
 		}
-		return getPolicyNamespacedName(np), nil
+		return getPolicyKey(np), nil
 
 	case factory.NodeType,
 		factory.EgressNodeType:
@@ -688,10 +688,8 @@ func (oc *Controller) addResource(objectsToRetry *RetryObjs, obj interface{}, fr
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorAddFunc(
-			extraParameters.policy,
 			extraParameters.np,
-			extraParameters.portGroupIngressDenyName,
-			extraParameters.portGroupEgressDenyName,
+			false,
 			obj)
 
 	case factory.EgressFirewallType:
@@ -807,10 +805,8 @@ func (oc *Controller) updateResource(objectsToRetry *RetryObjs, oldObj, newObj i
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorAddFunc(
-			extraParameters.policy,
 			extraParameters.np,
-			extraParameters.portGroupIngressDenyName,
-			extraParameters.portGroupEgressDenyName,
+			false,
 			newObj)
 
 	case factory.EgressIPType:
@@ -981,10 +977,7 @@ func (oc *Controller) deleteResource(objectsToRetry *RetryObjs, obj, cachedObj i
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorDelFunc(
-			extraParameters.policy,
 			extraParameters.np,
-			extraParameters.portGroupIngressDenyName,
-			extraParameters.portGroupEgressDenyName,
 			obj)
 
 	case factory.EgressFirewallType:

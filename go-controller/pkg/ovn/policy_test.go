@@ -101,7 +101,7 @@ const (
 
 func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, ports []string, logSeverity nbdb.ACLSeverity, oldEgress bool) []libovsdb.TestData {
 	pgHash := hashedPortGroup(networkPolicy.Namespace)
-	policyTypeIngress, policyTypeEgress := policyType(networkPolicy)
+	policyTypeIngress, policyTypeEgress := getPolicyType(networkPolicy)
 	shouldBeLogged := logSeverity != ""
 	egressDirection := nbdb.ACLDirectionFromLport
 	egressOptions := map[string]string{
@@ -1330,7 +1330,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				acls := []libovsdb.TestData{}
 				acls = append(acls, gressPolicy1ExpectedData[:len(gressPolicy1ExpectedData)-1]...)
 				acls = append(acls, gressPolicy2ExpectedData[:len(gressPolicy2ExpectedData)-1]...)
-				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)))
 
 				return nil
@@ -1450,7 +1449,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				// sleep long enough for TransactWithRetry to fail, causing NP Add to fail
 				time.Sleep(types.OVSDBTimeout + time.Second)
 				// check to see if the retry cache has an entry for this policy
-				key := getPolicyNamespacedName(networkPolicy2)
+				key := getPolicyKey(networkPolicy2)
 				checkRetryObjectEventually(key, true, fakeOvn.controller.retryNetworkPolicies)
 
 				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
@@ -1581,7 +1580,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				// sleep long enough for TransactWithRetry to fail, causing NP Add to fail
 				time.Sleep(types.OVSDBTimeout + time.Second)
 				// check to see if the retry cache has an entry for this policy
-				key := getPolicyNamespacedName(networkPolicy2)
+				key := getPolicyKey(networkPolicy2)
 				checkRetryObjectEventually(key, true, fakeOvn.controller.retryNetworkPolicies)
 				if retryEntry, found := getRetryObj(key, fakeOvn.controller.retryNetworkPolicies); found {
 					ginkgo.By("retry entry new policy should be nil")
@@ -1611,7 +1610,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 				// check the cache no longer has the entry
-				key = getPolicyNamespacedName(networkPolicy)
+				key = getPolicyKey(networkPolicy)
 				checkRetryObjectEventually(key, false, fakeOvn.controller.retryNetworkPolicies)
 				return nil
 			}
@@ -1727,7 +1726,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				err = fakeOvn.controller.addNetworkPolicy(networkPolicy)
 				gomega.Expect(err).To(gomega.HaveOccurred())
-				gomega.Expect(err.Error()).To(gomega.ContainSubstring("failed to create default port groups and acls for policy: namespace1/networkpolicy1, error: unexpectedly found multiple results for provided predicate"))
+				gomega.Expect(err.Error()).To(gomega.ContainSubstring("adding network policy namespace1/networkpolicy1 failed: failed to create default deny port groups: unexpectedly found multiple results for provided predicate"))
 
 				//ensure the default PGs and ACLs were removed via rollback from add failure
 				expectedData := []libovsdb.TestData{}
@@ -2568,7 +2567,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				acls := []libovsdb.TestData{}
 				acls = append(acls, gressPolicyExpectedData[:len(gressPolicyExpectedData)-1]...)
-				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)))
 
 				return nil
@@ -2672,7 +2670,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				// sleep long enough for TransactWithRetry to fail, causing NP Add to fail
 				time.Sleep(types.OVSDBTimeout + time.Second)
 				// check to see if the retry cache has an entry for this policy
-				key := getPolicyNamespacedName(networkPolicy)
+				key := getPolicyKey(networkPolicy)
 				checkRetryObjectEventually(key, true, fakeOvn.controller.retryNetworkPolicies)
 				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 				defer cancel()
@@ -2684,7 +2682,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				acls := []libovsdb.TestData{}
 				acls = append(acls, gressPolicyExpectedData[:len(gressPolicyExpectedData)-1]...)
-				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
 				gomega.Eventually(fakeOvn.controller.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)))
 
 				// check the cache no longer has the entry
@@ -2778,7 +2775,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				// TODO: test server does not garbage collect ACLs, so we just expect policy & deny portgroups to be removed
 				acls := []libovsdb.TestData{}
 				acls = append(acls, gressPolicy1ExpectedData[:len(gressPolicy1ExpectedData)-1]...)
-				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)))
 
 				return nil
@@ -2870,7 +2866,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				// TODO: test server does not garbage collect ACLs, so we just expect policy & deny portgroups to be removed
 				acls := []libovsdb.TestData{}
 				acls = append(acls, gressPolicy1ExpectedData[:len(gressPolicy1ExpectedData)-1]...)
-				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)))
 
 				return nil

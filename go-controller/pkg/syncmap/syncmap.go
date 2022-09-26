@@ -127,15 +127,16 @@ func (c *SyncMap[T]) Load(lockedKey string) (value T, loaded bool) {
 	return entry, ok
 }
 
-// LoadOrStore gets the key value if it's present or creates a new one if it isn't.
-func (c *SyncMap[T]) LoadOrStore(lockedKey string, newEntry T) T {
+// LoadOrStore gets the key value if it's present or creates a new one if it isn't,
+// loaded return value signals if the object was present.
+func (c *SyncMap[T]) LoadOrStore(lockedKey string, newEntry T) (value T, loaded bool) {
 	c.entriesMutex.Lock()
 	defer c.entriesMutex.Unlock()
 	if entry, ok := c.entries[lockedKey]; ok {
-		return entry
+		return entry, true
 	} else {
 		c.entries[lockedKey] = newEntry
-		return newEntry
+		return newEntry, false
 	}
 }
 
@@ -158,4 +159,11 @@ func (c *SyncMap[T]) GetKeys() []string {
 		i++
 	}
 	return keys
+}
+
+// DoWithLock takes care of locking and unlocking key.
+func (c *SyncMap[T]) DoWithLock(key string, f func(key string) error) error {
+	c.LockKey(key)
+	defer c.UnlockKey(key)
+	return f(key)
 }
