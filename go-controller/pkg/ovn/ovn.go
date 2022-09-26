@@ -12,24 +12,24 @@ import (
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
-	corev1listers "k8s.io/client-go/listers/core/v1"
-
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -40,11 +40,11 @@ import (
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/client-go/util/workqueue"
-
 	"k8s.io/klog/v2"
 )
 
@@ -112,16 +112,12 @@ type Controller struct {
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
 
-	// For each logical port, the number of network policies that want
-	// to add an ingress deny rule.
-	lspIngressDenyCache map[string]int
-
-	// For each logical port, the number of network policies that want
-	// to add an egress deny rule.
-	lspEgressDenyCache map[string]int
-
-	// A mutex for lspIngressDenyCache and lspEgressDenyCache
-	lspMutex *sync.Mutex
+	// map of existing shared port groups for network policies
+	// port group exists in the db if and only if port group key is present in this map
+	// key is namespace
+	// allowed locking order is namespace Lock -> networkPolicy.Lock -> sharedNetpolPortGroups key Lock
+	// make sure to keep this order to avoid deadlocks
+	sharedNetpolPortGroups *syncmap.SyncMap[*defaultDenyPortGroups]
 
 	// Supports multicast?
 	multicastSupport bool
@@ -252,9 +248,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		externalGWCache:              make(map[ktypes.NamespacedName]*externalRouteInfo),
 		exGWCacheMutex:               sync.RWMutex{},
 		addressSetFactory:            addressSetFactory,
-		lspIngressDenyCache:          make(map[string]int),
-		lspEgressDenyCache:           make(map[string]int),
-		lspMutex:                     &sync.Mutex{},
+		sharedNetpolPortGroups:       syncmap.NewSyncMap[*defaultDenyPortGroups](),
 		eIPC: egressIPController{
 			egressIPAssignmentMutex:           &sync.Mutex{},
 			podAssignmentMutex:                &sync.Mutex{},
