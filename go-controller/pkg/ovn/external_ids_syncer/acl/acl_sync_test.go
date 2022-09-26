@@ -30,7 +30,7 @@ type aclSync struct {
 }
 
 func testSyncerWithData(data []aclSync, controllerName string, initialDbState, finalDbState []libovsdbtest.TestData,
-	existingNodes []v1.Node) {
+	existingNodes []*v1.Node) {
 	// create initial db setup
 	dbSetup := libovsdbtest.TestSetup{NBData: initialDbState}
 	for _, asSync := range data {
@@ -61,7 +61,7 @@ func testSyncerWithData(data []aclSync, controllerName string, initialDbState, f
 	}
 	// run sync
 	syncer := NewACLSyncer(libovsdbOvnNBClient, controllerName)
-	err = syncer.SyncACLs(&v1.NodeList{Items: existingNodes})
+	err = syncer.SyncACLs(existingNodes)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	// check results
 	gomega.Eventually(libovsdbOvnNBClient).Should(libovsdbtest.HaveData(expectedDbState))
@@ -292,7 +292,7 @@ var _ = ginkgo.Describe("OVN ACL Syncer", func() {
 		hostSubnets := map[string][]string{types.DefaultNetworkName: {"10.244.0.0/24", "fd02:0:0:2::2895/64"}}
 		bytes, err := json.Marshal(hostSubnets)
 		gomega.Expect(err).ToNot(gomega.HaveOccurred())
-		existingNodes := []v1.Node{{
+		existingNodes := []*v1.Node{{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        nodeName,
 				Annotations: map[string]string{"k8s.ovn.org/node-subnets": string(bytes)},

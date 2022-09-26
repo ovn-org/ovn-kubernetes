@@ -878,7 +878,8 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 					err1 = fmt.Errorf("upgrade hack: error retrieving node %s: %v", nc.name, err)
 					return false, nil
 				}
-				for _, node := range nodes.Items {
+				for _, node := range nodes {
+					node := *node
 					if nc.name != node.Name && util.GetNodeZone(&node) != config.Default.Zone && !util.NoHostSubnet(&node) {
 						nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(&node, types.DefaultNetworkName)
 						if err != nil {

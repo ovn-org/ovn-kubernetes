@@ -1,7 +1,6 @@
 package ovn
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"strconv"
@@ -42,11 +41,9 @@ func (oc *DefaultNetworkController) cleanupStalePodSNATs(nodeName string, nodeIP
 	if !config.Gateway.DisableSNATMultipleGWs {
 		return nil
 	}
-	options := metav1.ListOptions{
-		FieldSelector:   fields.OneTermEqualSelector("spec.nodeName", nodeName).String(),
-		ResourceVersion: "0",
-	}
-	pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
+	pods, err := oc.kube.GetPods(metav1.NamespaceAll, metav1.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String(),
+	})
 	if err != nil {
 		return fmt.Errorf("unable to list existing pods on node: %s, %w",
 			nodeName, err)
@@ -59,8 +56,8 @@ func (oc *DefaultNetworkController) cleanupStalePodSNATs(nodeName string, nodeIP
 		return fmt.Errorf("unable to get NAT entries for router on node %s: %w", nodeName, err)
 	}
 	podIPsOnNode := sets.NewString() // collects all podIPs on node
-	for _, pod := range pods.Items {
-		pod := pod
+	for _, pod := range pods {
+		pod := *pod
 		if !util.PodScheduled(&pod) { //if the pod is not scheduled we should not remove the nat
 			continue
 		}
