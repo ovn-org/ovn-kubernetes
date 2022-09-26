@@ -9,6 +9,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/pkg/errors"
 	kapi "k8s.io/api/core/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -251,7 +252,8 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 		allOps = append(allOps, ops...)
 	}
 	ops, err = oc.delLSPOps(logicalPort, nodeName, portUUID)
-	if err != nil {
+	// Tolerate cases where logical switch of the logical port no longer exist in OVN.
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf("failed to create delete ops for the lsp: %s: %s", logicalPort, err)
 	}
 	allOps = append(allOps, ops...)
@@ -756,7 +758,7 @@ func (oc *Controller) delLSPOps(logicalPort, logicalSwitch, lspUUID string) ([]o
 	}
 	ops, err := libovsdbops.DeleteLogicalSwitchPortsOps(oc.nbClient, nil, &lsw, &lsp)
 	if err != nil {
-		return nil, fmt.Errorf("error deleting logical switch port %+v from switch %+v: %v", lsp, lsw, err)
+		return nil, fmt.Errorf("error deleting logical switch port %+v from switch %+v: %w", lsp, lsw, err)
 	}
 
 	return ops, nil
