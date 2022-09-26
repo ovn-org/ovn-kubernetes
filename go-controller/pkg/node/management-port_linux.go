@@ -187,7 +187,7 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 			return warnings, err
 		}
 
-		err = util.LinkRoutesAddOrUpdateMTU(mpcfg.link, cfg.gwIP, []*net.IPNet{subnet}, config.Default.RoutableMTU)
+		err = util.LinkRoutesAddOrUpdateSourceOrMTU(mpcfg.link, cfg.gwIP, []*net.IPNet{subnet}, config.Default.RoutableMTU, nil)
 		if err != nil {
 			return warnings, err
 		}

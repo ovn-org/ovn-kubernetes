@@ -46,6 +46,42 @@ OVN masquerade IPs are 169.254.169.1, and fd69::1
 
 Another worker node exists, ovn-worker2 at 172.18.0.4.
 
+### OVN masquerade addresses
+- IPv4
+  - 169.254.169.1: OVN masquerade address
+  - 169.254.169.2: host masquerade address
+  - 169.254.169.3: local ETP masquerade address (not used for shared GW, kept for parity)
+  - 169.254.169.4: dummy next-hop masquerade address
+- IPv6
+  - fd69::1: OVN masquerade address
+  - fd69::2: host masquerade address
+  - fd69::3: local ETP masquerade address (not used for shared GW, kept for parity)
+  - fd69::4: dummy next-hop masquerade address
+
+### Nodes without a default GW
+For scenarios where the nodes do not have a known next-hop (microshift, for instance), we rely on a dummy next-hop
+masquerade IP address.
+
+We need to provision this (fake) neighbor in OVN, enabling ARP / ND replies for this fake masquerade IP address.
+
+OVN is also provisioned with a static route specifying this dummy next-hop masquerade IP as its default route.
+
+Finally, to enable the hairpin scenario, we need to provision a route specifying traffic originating from the host
+must be routed to the OVN masquerade address (i.e. `169.254.169.1`).
+This route looks like: `169.254.169.1/32 dev breth0 mtu 1400 src <node IP address>`
+
+### Node masquerade IPs / routes
+In order to enable the host to services, we set the host masquerade IP (169.254.169.2) on the br-ext bridge.
+As a result, a subnet route - `169.254.169.0/29 dev breth0 proto kernel scope link src 169.254.169.2` is also
+provisioned by the kernel.
+
+The masquerade subnet netmask consists of 29 bits - to accomodate 4 (four) IPs - other than the `.0` address.
+
+The services will now be reached from the nodes via this dummy next hop masquerade IP (i.e. `169.254.169.4`).
+
+The SNAT / unSNAT priority=500 openflow flows will be kept to enable use cases where packets are sent from the node
+having a different source IP address.
+
 ### OpenFlow Flows
 
 With the new implementation comes new OpenFlow rules in the shared gateway bridge. The following flows are added and used:

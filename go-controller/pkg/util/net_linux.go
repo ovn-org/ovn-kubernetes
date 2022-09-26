@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"fmt"
 	"net"
-	"os"
 	"time"
 
 	kapi "k8s.io/api/core/v1"
@@ -40,6 +39,7 @@ type NetLinkOps interface {
 	RouteReplace(route *netlink.Route) error
 	RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error)
 	NeighAdd(neigh *netlink.Neigh) error
+	NeighDel(neigh *netlink.Neigh) error
 	NeighList(linkIndex, family int) ([]netlink.Neigh, error)
 	ConntrackDeleteFilter(table netlink.ConntrackTableType, family netlink.InetFamily, filter netlink.CustomConntrackFilter) (uint, error)
 }
@@ -142,6 +142,10 @@ func (defaultNetLinkOps) RouteListFiltered(family int, filter *netlink.Route, fi
 
 func (defaultNetLinkOps) NeighAdd(neigh *netlink.Neigh) error {
 	return netlink.NeighAdd(neigh)
+}
+
+func (defaultNetLinkOps) NeighDel(neigh *netlink.Neigh) error {
+	return netlink.NeighDel(neigh)
 }
 
 func (defaultNetLinkOps) NeighList(linkIndex, family int) ([]netlink.Neigh, error) {
@@ -274,7 +278,7 @@ func LinkRoutesDel(link netlink.Link, subnets []*net.IPNet) error {
 }
 
 // LinkRoutesAdd adds a new route for given subnets through the gwIPstr
-func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int) error {
+func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int, src net.IP) error {
 	for _, subnet := range subnets {
 		route := &netlink.Route{
 			Dst:       subnet,
@@ -282,64 +286,84 @@ func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int
 			Scope:     netlink.SCOPE_UNIVERSE,
 			Gw:        gwIP,
 		}
+		if len(src) > 0 {
+			route.Src = src
+		}
 		if mtu != 0 {
 			route.MTU = mtu
 		}
 		err := netLinkOps.RouteAdd(route)
 		if err != nil {
-			if os.IsExist(err) {
-				return err
-			}
-			return fmt.Errorf("failed to add route for subnet %s via gateway %s with mtu %d: %v",
-				subnet.String(), gwIP.String(), mtu, err)
+			return fmt.Errorf("failed to add route for subnet %s via gateway %s with mtu %d and src: %s: %v",
+				subnet.String(), gwIP.String(), mtu, src, err)
 		}
 	}
 	return nil
 }
 
-func LinkRoutesAddOrUpdateMTU(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int) error {
+func LinkRoutesAddOrUpdateSourceOrMTU(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int, src net.IP) error {
 	for _, subnet := range subnets {
-		route, err := LinkRouteGet(link, gwIP, subnet)
+		route, err := LinkRouteGetFilteredRoute(filterRouteByDst(link, subnet))
 		if err != nil {
 			return err
 		}
 		if route != nil {
-			if route.MTU == mtu {
-				return nil
+			var changed bool
+			if route.MTU != mtu {
+				route.MTU = mtu
+				changed = true
 			}
-			route.MTU = mtu
-			err = netLinkOps.RouteReplace(route)
-			if err != nil {
-				return fmt.Errorf("failed to replace route for subnet %s via gateway %s with mtu %d: %v", subnet.String(), gwIP.String(), mtu, err)
+			if !src.Equal(route.Src) {
+				route.Src = src
+				changed = true
+			}
+
+			if changed {
+				err = netLinkOps.RouteReplace(route)
+				if err != nil {
+					return fmt.Errorf("failed to replace route for subnet %s via gateway %s with mtu %d: %v",
+						subnet.String(), gwIP.String(), mtu, err)
+				}
 			}
 		} else {
-			return LinkRoutesAdd(link, gwIP, []*net.IPNet{subnet}, mtu)
+			return LinkRoutesAdd(link, gwIP, []*net.IPNet{subnet}, mtu, src)
 		}
 	}
 	return nil
 }
 
-// LinkRouteGet gets a route for the given subnet with the specified gwIPStr
+// LinkRouteGetFilteredRoute gets a route for the given route filter.
 // returns nil if route is not found
-func LinkRouteGet(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (*netlink.Route, error) {
-	routeFilter := &netlink.Route{Dst: subnet, LinkIndex: link.Attrs().Index}
-	filterMask := netlink.RT_FILTER_DST | netlink.RT_FILTER_OIF
-	routes, err := netLinkOps.RouteListFiltered(getFamily(gwIP), routeFilter, filterMask)
+func LinkRouteGetFilteredRoute(routeFilter *netlink.Route, filterMask uint64) (*netlink.Route, error) {
+	routes, err := netLinkOps.RouteListFiltered(getFamily(routeFilter.Dst.IP), routeFilter, filterMask)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get routes for subnet %s", subnet.String())
+		return nil, fmt.Errorf(
+			"failed to get routes for filter %v with mask %d: %v", *routeFilter, filterMask, err)
 	}
-	for _, route := range routes {
-		if route.Gw.Equal(gwIP) {
-			return &route, nil
-		}
+	if len(routes) == 0 {
+		return nil, nil
 	}
-	return nil, nil
+	return &routes[0], nil
 }
 
 // LinkRouteExists checks for existence of routes for the given subnet through gwIPStr
 func LinkRouteExists(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (bool, error) {
-	route, err := LinkRouteGet(link, gwIP, subnet)
+	route, err := LinkRouteGetFilteredRoute(filterRouteByDstAndGw(link, subnet, gwIP))
 	return route != nil, err
+}
+
+// LinkNeighDel deletes an ip binding for a given link
+func LinkNeighDel(link netlink.Link, neighIP net.IP) error {
+	neigh := &netlink.Neigh{
+		LinkIndex: link.Attrs().Index,
+		Family:    getFamily(neighIP),
+		IP:        neighIP,
+	}
+	err := netLinkOps.NeighDel(neigh)
+	if err != nil {
+		return fmt.Errorf("failed to delete neighbour entry %+v: %v", neigh, err)
+	}
+	return nil
 }
 
 // LinkNeighAdd adds MAC/IP bindings for the given link
@@ -524,4 +548,21 @@ func GetIFNameAndMTUForAddress(ifAddress net.IP) (string, int, error) {
 	}
 
 	return "", 0, fmt.Errorf("couldn't not find a link associated with the given OVN Encap IP (%s)", ifAddress)
+}
+
+func filterRouteByDst(link netlink.Link, subnet *net.IPNet) (*netlink.Route, uint64) {
+	return &netlink.Route{
+			Dst:       subnet,
+			LinkIndex: link.Attrs().Index,
+		},
+		netlink.RT_FILTER_DST | netlink.RT_FILTER_OIF
+}
+
+func filterRouteByDstAndGw(link netlink.Link, subnet *net.IPNet, gw net.IP) (*netlink.Route, uint64) {
+	return &netlink.Route{
+			Dst:       subnet,
+			LinkIndex: link.Attrs().Index,
+			Gw:        gw,
+		},
+		netlink.RT_FILTER_DST | netlink.RT_FILTER_OIF | netlink.RT_FILTER_GW
 }

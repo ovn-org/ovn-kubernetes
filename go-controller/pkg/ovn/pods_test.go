@@ -12,6 +12,7 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	ovstypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
@@ -1161,7 +1162,6 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				pod, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podTest.namespace).Get(context.TODO(), podTest.podName, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				// Deleting port that no longer exists should be okay!
 				gomega.Expect(fakeOvn.controller.deleteLogicalPort(pod, nil)).To(gomega.Succeed(), "Deleting port that no longer exists should be okay")
 
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(pod.Namespace).Delete(context.TODO(), pod.Name, *metav1.NewDeleteOptions(0))
@@ -1169,6 +1169,12 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				// check the retry cache has no entry
 				checkRetryObjectEventually(key, false, fakeOvn.controller.retryPods)
+
+				// Remove Logical Switch created on behalf of node and make sure deleteLogicalPort will not fail
+				err = libovsdbops.DeleteLogicalSwitch(fakeOvn.controller.nbClient, pod.Spec.NodeName)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(fakeOvn.controller.deleteLogicalPort(pod, nil)).To(gomega.Succeed(), "Deleting port from switch that no longer exists should be okay")
+
 				return nil
 			}
 

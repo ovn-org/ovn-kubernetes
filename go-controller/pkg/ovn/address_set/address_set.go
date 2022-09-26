@@ -295,7 +295,13 @@ func newOvnAddressSet(nbClient libovsdbclient.Client, name string, ips []net.IP)
 	err := libovsdbops.CreateOrUpdateAddressSets(nbClient, &addrSet)
 	// UUID should always be set if no error, check anyway
 	if err != nil || addrSet.UUID == "" {
-		return nil, fmt.Errorf("failed to create or update address set %+v: %v", addrSet, err)
+		// NOTE: While ovsdb transactions get serialized by libovsdb, the decision to create vs. update
+		// the address set takes place before that serialization is done. Because of that, it is feasible
+		// that one of the go threads attempting to call this routine at the same time will fail.
+		// This is described in https://bugzilla.redhat.com/show_bug.cgi?id=2108026 . While we could
+		// handle that failure here by retrying, a higher level retry (see retry_obj.go) is already
+		// present in the codepath, so no additional handling for that condition has been added here.
+		return nil, fmt.Errorf("failed to create or update address set %+v: %w", addrSet, err)
 	}
 
 	as.uuid = addrSet.UUID
