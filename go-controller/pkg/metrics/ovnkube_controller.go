@@ -1328,7 +1328,7 @@ func getNodeCount(kube kube.Interface) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("unable to retrieve node list: %v", err)
 	}
-	return len(nodes.Items), nil
+	return len(nodes), nil
 }
 
 // setNbE2eTimestamp return true if setting timestamp to NB global options is successful

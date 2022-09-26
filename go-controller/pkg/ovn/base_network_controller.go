@@ -1,7 +1,6 @@
 package ovn
 
 import (
-	"context"
 	"fmt"
 	"math"
 	"net"
@@ -446,19 +445,17 @@ func (bnc *BaseNetworkController) deleteNodeLogicalNetwork(nodeName string) erro
 
 func (bnc *BaseNetworkController) addAllPodsOnNode(nodeName string) []error {
 	errs := []error{}
-	options := metav1.ListOptions{
-		FieldSelector:   fields.OneTermEqualSelector("spec.nodeName", nodeName).String(),
-		ResourceVersion: "0",
-	}
-	pods, err := bnc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
+	pods, err := bnc.kube.GetPods(metav1.NamespaceAll, metav1.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String(),
+	})
 	if err != nil {
 		errs = append(errs, err)
 		klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function",
 			nodeName)
 	} else {
-		klog.V(5).Infof("When adding node %s for network %s, found %d pods to add to retryPods", nodeName, bnc.GetNetworkName(), len(pods.Items))
-		for _, pod := range pods.Items {
-			pod := pod
+		klog.V(5).Infof("When adding node %s for network %s, found %d pods to add to retryPods", nodeName, bnc.GetNetworkName(), len(pods))
+		for _, pod := range pods {
+			pod := *pod
 			if util.PodCompleted(&pod) {
 				continue
 			}
