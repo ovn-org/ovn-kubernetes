@@ -975,15 +975,6 @@ func (oc *Controller) deleteResource(objectsToRetry *RetryObjs, obj, cachedObj i
 			return extraParameters.gp.delNamespaceAddressSet(namespace.Name)
 		})
 
-	case factory.PeerPodForNamespaceAndPodSelectorType:
-		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handleLocalPodSelectorDelFunc(
-			extraParameters.policy,
-			extraParameters.np,
-			extraParameters.portGroupIngressDenyName,
-			extraParameters.portGroupEgressDenyName,
-			obj)
-
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorDelFunc(
