@@ -254,13 +254,14 @@ func (n *NodeController) AddNode(node *kapi.Node) error {
 	klog.Info("Add Node ", node.Name)
 	var err error
 	if n.drIP == nil {
-		subnet, err := getLocalNodeSubnet(n.nodeName)
-		if err != nil {
-			return err
+		hybridOverlayDRIP, ok := node.Annotations[hotypes.HybridOverlayDRIP]
+		if !ok {
+			return fmt.Errorf("hybrid overlay not initialized on %s, it was not assigned an interface address", node.Name)
 		}
-		// n.drIP is always 3rd address in the subnet
-		hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(subnet)
-		n.drIP = hybridOverlayIfAddr.IP
+		n.drIP = net.ParseIP(hybridOverlayDRIP)
+		if n.drIP == nil {
+			return fmt.Errorf("hybrid overlay not initialized on %s, the the annotation %s = %s is not an IP address", node.Name, hotypes.HybridOverlayDRIP, hybridOverlayDRIP)
+		}
 	}
 
 	if node.Name == n.nodeName {
@@ -383,9 +384,14 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 	}
 	n.drMAC = portMAC
 
-	// n.drIP is always 3rd address in the subnet
-	hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(subnet)
-	n.drIP = hybridOverlayIfAddr.IP
+	hybridOverlayDRIP, ok := node.Annotations[hotypes.HybridOverlayDRIP]
+	if !ok {
+		return fmt.Errorf("hybrid overlay not initialized on %s, it was not assigned an interface address", node.Name)
+	}
+	n.drIP = net.ParseIP(hybridOverlayDRIP)
+	if n.drIP == nil {
+		return fmt.Errorf("hybrid overlay not initialized on %s, the the annotation %s = %s is not an IP address", node.Name, hotypes.HybridOverlayDRIP, hybridOverlayDRIP)
+	}
 
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br", extBridgeName,
 		"--", "set", "Bridge", extBridgeName, "fail_mode=secure",

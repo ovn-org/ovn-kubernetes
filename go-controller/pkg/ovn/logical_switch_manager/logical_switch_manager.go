@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 )
 
 // logicalSwitchInfo contains information corresponding to the node. It holds the
@@ -79,16 +80,6 @@ func reserveIPs(subnet *net.IPNet, ipam ipam.Interface) error {
 		klog.Errorf("Unable to allocate subnet's management IP: %s", mgmtIfAddr.IP)
 		return err
 	}
-	if config.HybridOverlay.Enabled {
-		hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(subnet)
-
-		err = ipam.Allocate(hybridOverlayIfAddr.IP)
-		if err != nil {
-			klog.Errorf("Unable to allocate subnet's hybrid overlay interface IP: %s", hybridOverlayIfAddr.IP)
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -290,6 +281,60 @@ func (manager *LogicalSwitchManager) AllocateNextIPs(nodeName string) ([]*net.IP
 		ipnets = append(ipnets, ipnet)
 	}
 	return ipnets, nil
+}
+
+func (manager *LogicalSwitchManager) AllocateHybridOverlay(nodeName string, hybridOverlayAnnotation []string) ([]*net.IPNet, error) {
+	if len(hybridOverlayAnnotation) > 0 {
+		var allocateAddresses []*net.IPNet
+		for _, ip := range hybridOverlayAnnotation {
+			allocateAddresses = append(allocateAddresses, &net.IPNet{IP: net.ParseIP(ip).To4(), Mask: net.CIDRMask(32, 32)})
+		}
+		err := manager.AllocateIPs(nodeName, allocateAddresses)
+		if err != nil {
+			return nil, err
+		}
+		return allocateAddresses, nil
+	}
+	// if we are not provided with any addresses
+	manager.RLock()
+	defer manager.RUnlock()
+
+	lsi, ok := manager.cache[nodeName]
+	if !ok {
+		return nil, fmt.Errorf("node %s not found in the logical switch manager cache", nodeName)
+	}
+	// determine if ipams are ipv4
+	var ipv4IPAMS []ipam.Interface
+	for _, ipam := range lsi.ipams {
+		if utilnet.IsIPv4(ipam.CIDR().IP) {
+			ipv4IPAMS = append(ipv4IPAMS, ipam)
+		}
+	}
+	var allocatedAddresses []*net.IPNet
+	for _, ipv4IPAM := range ipv4IPAMS {
+		hostSubnet := ipv4IPAM.CIDR()
+		potentialHybridIFAddress := util.GetNodeHybridOverlayIfAddr(&hostSubnet)
+		err := ipv4IPAM.Allocate(potentialHybridIFAddress.IP)
+		if err == ipam.ErrAllocated {
+			// allocate NextIP
+			allocatedipv4, err := ipv4IPAM.AllocateNext()
+			if err != nil {
+				_ = manager.ReleaseIPs(nodeName, allocatedAddresses)
+				return nil, fmt.Errorf("cannot allocate hybrid overlay interface address for node/subnet %s/%s (%+v)", nodeName, hostSubnet, err)
+
+			}
+			if err == nil {
+				allocatedAddresses = append(allocatedAddresses, &net.IPNet{IP: allocatedipv4.To4(), Mask: net.CIDRMask(32, 32)})
+
+			}
+		} else if err != nil {
+			_ = manager.ReleaseIPs(nodeName, allocatedAddresses)
+			return nil, fmt.Errorf("cannot allocate hybrid overlay interface address for node/subnet %s/%s (%+v)", nodeName, hostSubnet, err)
+		} else {
+			allocatedAddresses = append(allocatedAddresses, &net.IPNet{IP: potentialHybridIFAddress.IP.To4(), Mask: net.CIDRMask(32, 32)})
+		}
+	}
+	return allocatedAddresses, nil
 }
 
 // Mark the IPs in ipnets slice as available for allocation

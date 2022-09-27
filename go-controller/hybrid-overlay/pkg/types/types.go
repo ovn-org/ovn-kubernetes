@@ -11,6 +11,8 @@ const (
 	HybridOverlayNodeSubnet = HybridOverlayAnnotationBase + "node-subnet"
 	// HybridOverlayDRMAC holds the MAC address of the Distributed Router/gateway
 	HybridOverlayDRMAC = HybridOverlayAnnotationBase + "distributed-router-gateway-mac"
+	// HybridOverlayDRIP holds the port address to redirect traffic to get to the hybrid overlay
+	HybridOverlayDRIP = HybridOverlayAnnotationBase + "distributed-router-gateway-ip"
 	// HybridOverlayVNI is the VNI for VXLAN tunnels between nodes/endpoints
 	HybridOverlayVNI = 4097
 )
