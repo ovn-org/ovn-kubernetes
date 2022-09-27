@@ -152,6 +152,15 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 			noAlternateProxySelector())
 	})
 
+	wf.iFactory.InformerFor(&discovery.EndpointSlice{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+		return discoveryinformers.NewFilteredEndpointSliceInformer(
+			c,
+			kapi.NamespaceAll,
+			resyncPeriod,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			withServiceNameAndNoHeadlessServiceSelector())
+	})
+
 	var err error
 	// Create our informer-wrapper informer (and underlying shared informer) for types we need
 	wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
@@ -174,6 +183,10 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	}
 	wf.informers[NodeType], err = newQueuedInformer(NodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan,
 		defaultNumEventQueues)
+	if err != nil {
+		return nil, err
+	}
+	wf.informers[EndpointSliceType], err = newInformer(EndpointSliceType, wf.iFactory.Discovery().V1().EndpointSlices().Informer())
 	if err != nil {
 		return nil, err
 	}
