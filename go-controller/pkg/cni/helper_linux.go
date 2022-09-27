@@ -287,6 +287,10 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		if err != nil {
 			return err
 		}
+		err = util.GetNetLinkOps().LinkSetHardwareAddr(link, ifInfo.MAC)
+		if err != nil {
+			return err
+		}
 		err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU)
 		if err != nil {
 			return err
