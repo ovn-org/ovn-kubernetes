@@ -1865,7 +1865,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				// ACL3: leftover default deny ACL egress with old name (namespace_policyname)
 				leftOverACL3FromUpgrade := libovsdbops.BuildACL(
-					"leftover1"+"_"+networkPolicy2.Name,
+					"youknownothingjonsnowyouknownothingjonsnowyouknownothingjonsnow"+"_"+networkPolicy2.Name,
 					nbdb.ACLDirectionFromLport,
 					types.DefaultDenyPriority,
 					"inport == @"+pgHash+"_"+egressDenyPG,
@@ -1948,7 +1948,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					"apply-after-lb": "true",
 				}
 				leftOverACL3FromUpgrade.Options = egressOptions
-				newDefaultDenyEgressACLName := "leftover1_" + egressDefaultDenySuffix
+				newDefaultDenyEgressACLName := "youknownothingjonsnowyouknownothingjonsnowyouknownothingjonsnow" // trims it according to RFC1123
 				newDefaultDenyIngressACLName := "leftover1_" + ingressDefaultDenySuffix
 				leftOverACL3FromUpgrade.Name = &newDefaultDenyEgressACLName
 				leftOverACL4FromUpgrade.Name = &newDefaultDenyIngressACLName
