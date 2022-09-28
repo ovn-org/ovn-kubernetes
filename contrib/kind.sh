@@ -112,6 +112,8 @@ usage() {
     echo "                 [-ehp|--egress-ip-healthcheck-port <num>]"
     echo "                 [-is | --ipsec]"
     echo "                 [-cm | --compact-mode]"
+    echo "                 [-naz| --num-additinal-zones]"
+    echo "                 [-nnz| --num-nodes-per-zones]"
     echo "                 [--isolated]"
     echo "                 [-h]]"
     echo ""
@@ -237,6 +239,22 @@ parse_args() {
                                                 fi
                                                 KIND_NUM_WORKER=$1
                                                 ;;
+            -naz | --num-additinal-zones )               shift
+                                                if ! [[ "$1" =~ ^[0-9]+$ ]]; then
+                                                    echo "Invalid num-additional-zones: $1"
+                                                    usage
+                                                    exit 1
+                                                fi
+                                                KIND_NUM_ADDITIONAL_ZONES=$1
+                                                ;;
+            -nnz | --num-nodes-per-zones )               shift
+                                                if ! [[ "$1" =~ ^[0-9]+$ ]]; then
+                                                    echo "Invalid num-nodes-per-zones: $1"
+                                                    usage
+                                                    exit 1
+                                                fi
+                                                KIND_NUM_NODES_PER_ZONE=$1
+                                                ;;
             -sw | --allow-system-writes )       KIND_ALLOW_SYSTEM_WRITES=true
                                                 ;;
             -scm | --separate-cluster-manager)  OVN_SEPARATE_CLUSTER_MANAGER=true
@@ -357,7 +375,7 @@ print_params() {
      echo "KIND_IPV4_SUPPORT = $KIND_IPV4_SUPPORT"
      echo "KIND_IPV6_SUPPORT = $KIND_IPV6_SUPPORT"
      echo "ENABLE_IPSEC = $ENABLE_IPSEC"
-     echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
+     echo "KIND_NUM_WORKER = $KIND_TOTAL_NUM_WORKER"
      echo "KIND_ALLOW_SYSTEM_WRITES = $KIND_ALLOW_SYSTEM_WRITES"
      echo "KIND_EXPERIMENTAL_PROVIDER = $KIND_EXPERIMENTAL_PROVIDER"
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
@@ -391,6 +409,8 @@ print_params() {
      echo "OVN_ISOLATED = $OVN_ISOLATED"
      echo "ENABLE_MULTI_NET = $ENABLE_MULTI_NET"
      echo "OVN_SEPARATE_CLUSTER_MANAGER = $OVN_SEPARATE_CLUSTER_MANAGER"
+     echo "KIND_NUM_ADDITIONAL_ZONES = $KIND_NUM_ADDITIONAL_ZONES"
+     echo "OVN_INTERCONNECT_ENABLE = $OVN_INTERCONNECT_ENABLE"
      echo ""
 }
 
@@ -531,12 +551,27 @@ set_default_params() {
   JOIN_SUBNET_IPV4=${JOIN_SUBNET_IPV4:-100.64.0.0/16}
   JOIN_SUBNET_IPV6=${JOIN_SUBNET_IPV6:-fd98::/64}
   KIND_NUM_MASTER=1
+  OVN_INTERCONNECT_ENABLE=${OVN_INTERCONNECT_ENABLE:-false}
+  KIND_NUM_NODES_PER_ZONE=${KIND_NUM_NODES_PER_ZONE:-2}
   if [ "$OVN_HA" == true ]; then
     KIND_NUM_MASTER=3
-    KIND_NUM_WORKER=${KIND_NUM_WORKER:-0}
+    NUM_WORKER=${KIND_NUM_WORKER:-0}
+    # Disabled interconnect if HA is enabled (for now)
+    OVN_INTERCONNECT_ENABLE="false"
   else
-    KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
+    NUM_WORKER=${KIND_NUM_WORKER:-2}
   fi
+
+  if [ "$OVN_INTERCONNECT_ENABLE" == false ]; then
+    KIND_NUM_ADDITIONAL_ZONES="0"
+  else
+    KIND_NUM_ADDITIONAL_ZONES=${KIND_NUM_ADDITIONAL_ZONES:-2}
+    NUM_WORKER=${KIND_NUM_WORKER:-0}
+  fi
+
+  KIND_NUM_WORKER=$NUM_WORKER
+  KIND_TOTAL_NUM_WORKER=$((KIND_NUM_ADDITIONAL_ZONES * KIND_NUM_NODES_PER_ZONE + KIND_NUM_WORKER))
+
   OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
   OVN_EGRESSIP_HEALTHCHECK_PORT=${OVN_EGRESSIP_HEALTHCHECK_PORT:-9107}
   OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
@@ -551,7 +586,9 @@ set_default_params() {
   OVN_SEPARATE_CLUSTER_MANAGER=${OVN_SEPARATE_CLUSTER_MANAGER:-false}
   OVN_COMPACT_MODE=${OVN_COMPACT_MODE:-false}
   if [ "$OVN_COMPACT_MODE" == true ]; then
+    KIND_TOTAL_NUM_WORKER=0
     KIND_NUM_WORKER=0
+    OVN_INTERCONNECT_ENABLE=false
   fi
 }
 
@@ -667,7 +704,7 @@ create_kind_cluster() {
   use_local_registy=${KIND_LOCAL_REGISTRY} \
   dns_domain=${KIND_DNS_DOMAIN} \
   ovn_num_master=${KIND_NUM_MASTER} \
-  ovn_num_worker=${KIND_NUM_WORKER} \
+  ovn_num_worker=${KIND_TOTAL_NUM_WORKER} \
   cluster_log_level=${KIND_CLUSTER_LOGLEVEL:-4} \
   kind_local_registry_port=${KIND_LOCAL_REGISTRY_PORT} \
   kind_local_registry_name=${KIND_LOCAL_REGISTRY_NAME} \
@@ -805,6 +842,7 @@ create_ovn_kube_manifests() {
     --egress-qos-enable=true \
     --v4-join-subnet="${JOIN_SUBNET_IPV4}" \
     --v6-join-subnet="${JOIN_SUBNET_IPV6}" \
+    --interconnect-enable="${OVN_INTERCONNECT_ENABLE}" \
     --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}" \
     --multi-network-enable="${ENABLE_MULTI_NET}" \
     --ovnkube-metrics-scale-enable="${OVN_METRICS_SCALE_ENABLE}" \
@@ -840,7 +878,8 @@ install_ovn() {
   # leverage the kubeadm well-known label node-role.kubernetes.io/control-plane=
   # to choose the nodes where ovn master components will be placed
   for n in $MASTER_NODES; do
-    kubectl label node "$n" k8s.ovn.org/ovnkube-db=true node-role.kubernetes.io/control-plane="" --overwrite
+    kubectl label node "$n" k8s.ovn.org/ovnkube-db=true k8s.ovn.org/zone-name=global node-role.kubernetes.io/control-plane="" k8s.ovn.org/ovnkube-master="" k8s.ovn.org/ovnkube-zone-ncm="" --overwrite
+
     if [ "$KIND_REMOVE_TAINT" == true ]; then
       # do not error if it fails to remove the taint
       # remove both master and control-plane taints until master is removed from 1.25
@@ -849,17 +888,74 @@ install_ovn() {
       kubectl taint node "$n" node-role.kubernetes.io/control-plane:NoSchedule- || true
     fi
   done
+
+  if [ "$OVN_HA" == true ]; then
+    worker_idx=3
+  else
+    worker_idx=1
+  fi
+
+
+  for i in $(seq ${KIND_NUM_WORKER})
+  do
+    if [ "$worker_idx" == "1" ]; then
+      worker=ovn-worker
+    else
+      worker=ovn-worker${worker_idx}
+    fi
+    kubectl label node "$worker" k8s.ovn.org/zone-name=global --overwrite
+    worker_idx=$((worker_idx+1))
+  done
+
+  for i in $(seq $KIND_NUM_ADDITIONAL_ZONES)
+  do
+    az_name="az$i"
+    for j in $(seq ${KIND_NUM_NODES_PER_ZONE})
+    do
+      if [ "$worker_idx" == "1" ]; then
+        worker=ovn-worker
+      else
+        worker=ovn-worker${worker_idx}
+      fi
+      kubectl label node "$worker" k8s.ovn.org/zone-name=${az_name} --overwrite
+      if [ "$j" == "1" ]; then
+        kubectl label node "$worker" k8s.ovn.org/ovnkube-db=true node-role.kubernetes.io/control-plane="" k8s.ovn.org/ovnkube-zone-ncm="" --overwrite
+        if [ "$KIND_REMOVE_TAINT" == true ]; then
+          # do not error if it fails to remove the taint
+          # remove both master and control-plane taints until master is removed from 1.25
+          # // https://github.com/kubernetes/kubernetes/pull/107533
+          kubectl taint node "$worker" node-role.kubernetes.io/master:NoSchedule- || true
+          kubectl taint node "$worker" node-role.kubernetes.io/control-plane:NoSchedule- || true
+        fi
+      fi
+      worker_idx=$((worker_idx+1))
+    done
+  done
+
+
   if [ "$OVN_HA" == true ]; then
     run_kubectl apply -f ovnkube-db-raft.yaml
   else
-    run_kubectl apply -f ovnkube-db.yaml
+    if [ "$OVN_INTERCONNECT_ENABLE" == false ]; then
+      run_kubectl apply -f ovnkube-db.yaml
+    else
+      run_kubectl apply -f ovnkube-zone-db.yaml
+    fi
   fi
   run_kubectl apply -f ovs-node.yaml
-  if [ "$OVN_SEPARATE_CLUSTER_MANAGER" ==  true ]; then
-    run_kubectl apply -f ovnkube-cm-ncm.yaml
+
+  if [ "$OVN_INTERCONNECT_ENABLE" == false ]; then
+    if [ "$OVN_SEPARATE_CLUSTER_MANAGER" ==  true ]; then
+      run_kubectl apply -f ovnkube-cm-ncm.yaml
+    else
+      run_kubectl apply -f ovnkube-master.yaml
+    fi
   else
-    run_kubectl apply -f ovnkube-master.yaml
+    # Interconnect is true.
+    run_kubectl apply -f ovnkube-cluster-manager.yaml
+    run_kubectl apply -f ovnkube-zone-ncm.yaml
   fi
+
   run_kubectl apply -f ovnkube-node.yaml
 
   popd

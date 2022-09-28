@@ -24,7 +24,7 @@ spec:
 # daemonset version 3
 # starts ovn NB/SB ovsdb daemons, each in a separate container
 # it is running on master for now, but does not need to be the case
-kind: Deployment
+kind: DaemonSet
 apiVersion: apps/v1
 metadata:
   name: ovnkube-db
@@ -34,16 +34,10 @@ metadata:
     kubernetes.io/description: |
       This daemonset launches the OVN NB/SB ovsdb service components.
 spec:
-  progressDeadlineSeconds: 600
-  replicas: 1
-  revisionHistoryLimit: 10
   selector:
     matchLabels:
       name: ovnkube-db
-  strategy:
-    rollingUpdate:
-      maxSurge: 25%
-      maxUnavailable: 25%
+  updateStrategy:
     type: RollingUpdate
   template:
     metadata:
@@ -128,8 +122,6 @@ spec:
           value: "{{ ovn_ssl_en }}"
         - name: OVN_NB_PORT
           value: "{{ ovn_nb_port }}"
-        - name: ENABLE_IPSEC
-          value: "{{ enable_ipsec }}"
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnnb-db"]
@@ -210,9 +202,20 @@ spec:
 
       # end of container
 
-      nodeSelector:
-        node-role.kubernetes.io/control-plane: ""
-        kubernetes.io/os: "linux"
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - "linux"
+
+                  - key: k8s.ovn.org/ovnkube-db
+                    operator: In
+                    values:
+                      - "true"
       volumes:
       - name: host-var-lib-ovs
         hostPath:
