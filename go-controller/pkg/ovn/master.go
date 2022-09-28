@@ -14,7 +14,6 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
-	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/util/retry"
@@ -479,7 +478,7 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 	}
 
 	if hostSubnets == nil {
-		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node)
+		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 		if err != nil {
 			return err
 		}
@@ -592,7 +591,7 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 	}
 
 	if hostSubnets == nil {
-		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node)
+		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 		if err != nil {
 			return err
 		}
@@ -784,10 +783,10 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	return oc.lsManager.AddNode(nodeName, logicalSwitch.UUID, hostSubnets)
 }
 
-func (oc *Controller) addNodeAnnotations(node *kapi.Node, hostSubnets []*net.IPNet) error {
-	gwLRPIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
+func (oc *Controller) updateNodeAnnotationWithRetry(nodeName string, hostSubnets []*net.IPNet) error {
+	gwLRPIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(nodeName)
 	if err != nil {
-		return fmt.Errorf("failed to allocate join switch port IP address for node %s: %v", node.Name, err)
+		return fmt.Errorf("failed to allocate join switch port IP address for node %s: %v", nodeName, err)
 	}
 	var v4Addr, v6Addr *net.IPNet
 	for _, ip := range gwLRPIPs {
@@ -797,42 +796,38 @@ func (oc *Controller) addNodeAnnotations(node *kapi.Node, hostSubnets []*net.IPN
 			v6Addr = ip
 		}
 	}
-	gwLPRAnnotations, err := util.CreateNodeGateRouterLRPAddrAnnotation(v4Addr, v6Addr)
-	if err != nil {
-		return fmt.Errorf("failed to marshal node %q annotation for Gateway LRP IP %v",
-			node.Name, gwLRPIPs)
-	}
 
-	nodeAnnotations, err := util.CreateNodeHostSubnetAnnotation(hostSubnets)
-	if err != nil {
-		return fmt.Errorf("failed to marshal node %q annotation for subnet %s",
-			node.Name, util.JoinIPNets(hostSubnets, ","))
-	}
-
-	for k, v := range gwLPRAnnotations {
-		nodeAnnotations[k] = v
-	}
-	// FIXME: the real solution is to reconcile the node object. Once we have a work-queue based
-	// implementation where we can add the item back to the work queue when it fails to
-	// reconcile, we can get rid of the PollImmediate.
-	err = utilwait.PollImmediate(OvnNodeAnnotationRetryInterval, OvnNodeAnnotationRetryTimeout, func() (bool, error) {
-		err = oc.kube.SetAnnotationsOnNode(node.Name, nodeAnnotations)
+	// Retry if it fails because of potential conflict which is transient. Return error in the
+	// case of other errors (say temporary API server down), and it will be taken care of by the
+	// retry mechanism.
+	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		// Informer cache should not be mutated, so get a copy of the object
+		node, err := oc.watchFactory.GetNode(nodeName)
 		if err != nil {
-			klog.Warningf("Failed to set node annotation, will retry for: %v",
-				OvnNodeAnnotationRetryTimeout)
+			return err
 		}
-		return err == nil, nil
-	},
-	)
-	if err != nil {
-		return fmt.Errorf("failed to set node-subnets annotation on node %s: %v",
-			node.Name, err)
+
+		cnode := node.DeepCopy()
+		cnode.Annotations, err = util.CreateNodeGateRouterLRPAddrAnnotation(cnode.Annotations, v4Addr, v6Addr)
+		if err != nil {
+			return fmt.Errorf("failed to marshal node %q annotation for Gateway LRP IP %v",
+				node.Name, gwLRPIPs)
+		}
+		cnode.Annotations, err = util.UpdateNodeHostSubnetAnnotation(cnode.Annotations, hostSubnets, types.DefaultNetworkName)
+		if err != nil {
+			return fmt.Errorf("failed to update node %q annotation subnet %s",
+				node.Name, util.JoinIPNets(hostSubnets, ","))
+		}
+		return oc.kube.UpdateNode(cnode)
+	})
+	if resultErr != nil {
+		return fmt.Errorf("failed to update node %s annotation", nodeName)
 	}
 	return nil
 }
 
 func (oc *Controller) allocateNodeSubnets(node *kapi.Node) ([]*net.IPNet, []*net.IPNet, error) {
-	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node)
+	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 	if err != nil {
 		// Log the error and try to allocate new subnets
 		klog.Infof("Failed to get node %s host subnets annotations: %v", node.Name, err)
@@ -960,7 +955,7 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 	// Set the HostSubnet annotation on the node object to signal
 	// to nodes that their logical infrastructure is set up and they can
 	// proceed with their initialization
-	err = oc.addNodeAnnotations(node, hostSubnets)
+	err = oc.updateNodeAnnotationWithRetry(node.Name, hostSubnets)
 	if err != nil {
 		return nil, err
 	}
@@ -1116,7 +1111,7 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode *kapi
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		var err error
 
-		oldNode, err := oc.kube.GetNode(origNode.Name)
+		oldNode, err := oc.watchFactory.GetNode(origNode.Name)
 		if err != nil {
 			return err
 		}
@@ -1201,7 +1196,7 @@ func (oc *Controller) syncNodesRetriable(nodes []interface{}) error {
 		if !ok {
 			return fmt.Errorf("spurious object in syncNodes: %v", tmp)
 		}
-		hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
+		hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 		if config.HybridOverlay.Enabled && len(hostSubnets) == 0 && houtil.IsHybridOverlayNode(node) {
 			// this is a hybrid overlay node so mark as allocated from the hybrid overlay subnet allocator
 			hostSubnet, err := houtil.ParseHybridOverlayHostSubnet(node)
@@ -1471,7 +1466,7 @@ func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
 			return err
 		}
 	}
-	nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
+	nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 	if err := oc.deleteNode(node.Name, nodeSubnets); err != nil {
 		return err
 	}

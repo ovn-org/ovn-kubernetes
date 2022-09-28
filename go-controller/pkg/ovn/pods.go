@@ -10,11 +10,13 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 	kapi "k8s.io/api/core/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -35,7 +37,7 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 		if !ok {
 			return fmt.Errorf("spurious object in syncPods: %v", podInterface)
 		}
-		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations)
+		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
 		if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && !util.PodCompleted(pod) && err == nil {
 			// skip nodes that are not running ovnk (inferred from host subnets)
 			if oc.lsManager.IsNonHostSubnetSwitch(pod.Spec.NodeName) {
@@ -75,12 +77,7 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 			// the length will be different
 			if len(annotations.Routes) != len(newRoutes) {
 				annotations.Routes = newRoutes
-				var marshalledAnnotation map[string]interface{}
-				marshalledAnnotation, err = util.MarshalPodAnnotation(annotations)
-				if err != nil {
-					return fmt.Errorf("error updating pod %s annotations: %v", pod.Name, err)
-				}
-				err = oc.kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, marshalledAnnotation)
+				err = oc.updatePodAnnotationWithRetry(pod, annotations)
 				if err != nil {
 					return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 				}
@@ -194,7 +191,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 	if portInfo == nil {
 		// If ovnkube-master restarts, it is also possible the Pod's logical switch port
 		// is not re-added into the cache. Delete logical switch port anyway.
-		annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
+		annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
 		if err != nil {
 			if util.IsAnnotationNotSetError(err) {
 				// if the annotation doesn’t exist, that’s not an error. It means logical port does not need to be deleted.
@@ -504,7 +501,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// rescheduled.
 	lsp.Options["requested-chassis"] = pod.Spec.NodeName
 
-	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
+	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
 
 	// the IPs we allocate in this function need to be released back to the
 	// IPAM pool if there is some error in any step of addLogicalPort past
@@ -601,19 +598,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		if err != nil {
 			return err
 		}
-		var marshalledAnnotation map[string]interface{}
-		marshalledAnnotation, err = util.MarshalPodAnnotation(&podAnnotation)
-		if err != nil {
-			return fmt.Errorf("error creating pod network annotation: %v", err)
-		}
 
-		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s\nAnnotation=%s",
-			podIfAddrs, podMac, podAnnotation.Gateways, marshalledAnnotation)
+		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s",
+			podIfAddrs, podMac, podAnnotation.Gateways)
 		annoStart := time.Now()
-		err = oc.kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, marshalledAnnotation)
+		err = oc.updatePodAnnotationWithRetry(pod, &podAnnotation)
 		podAnnoTime = time.Since(annoStart)
 		if err != nil {
-			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
+			return err
 		}
 		releaseIPs = false
 	}
@@ -722,6 +714,27 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	// observe the pod creation latency metric.
 	metrics.RecordPodCreated(pod)
+	return nil
+}
+
+func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *util.PodAnnotation) error {
+	resultErr := retry.RetryOnConflict(util.OvnConflictBackoff, func() error {
+		// Informer cache should not be mutated, so get a copy of the object
+		pod, err := oc.watchFactory.GetPod(origPod.Namespace, origPod.Name)
+		if err != nil {
+			return err
+		}
+
+		cpod := pod.DeepCopy()
+		cpod.Annotations, err = util.MarshalPodAnnotation(cpod.Annotations, podInfo, ovntypes.DefaultNetworkName)
+		if err != nil {
+			return err
+		}
+		return oc.kube.UpdatePod(cpod)
+	})
+	if resultErr != nil {
+		return fmt.Errorf("failed to update annotation on pod %s/%s: %v", origPod.Namespace, origPod.Name, resultErr)
+	}
 	return nil
 }
 

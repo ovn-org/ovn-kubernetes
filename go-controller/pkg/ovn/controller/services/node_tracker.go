@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	globalconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
@@ -172,7 +173,7 @@ func (nt *nodeTracker) removeNode(nodeName string) {
 // The gateway router will exist sometime after the L3Gateway annotation is set.
 func (nt *nodeTracker) updateNode(node *v1.Node) {
 	klog.V(2).Infof("Processing possible switch / router updates for node %s", node.Name)
-	hsn, err := util.ParseNodeHostSubnetAnnotation(node)
+	hsn, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 	if err != nil || hsn == nil {
 		// usually normal; means the node's gateway hasn't been initialized yet
 		klog.Infof("Node %s has invalid / no HostSubnet annotations (probably waiting on initialization): %v", node.Name, err)

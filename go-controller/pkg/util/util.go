@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
@@ -18,9 +19,18 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
+
+// OvnConflictBackoff is the backoff used for pod annotation update conflict
+var OvnConflictBackoff = wait.Backoff{
+	Steps:    2,
+	Duration: 10 * time.Millisecond,
+	Factor:   5.0,
+	Jitter:   0.1,
+}
 
 // StringArg gets the named command-line argument or returns an error if it is empty
 func StringArg(context *cli.Context, name string) (string, error) {

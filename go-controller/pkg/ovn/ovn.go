@@ -600,7 +600,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 	}
 
 	if hostSubnets == nil {
-		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node)
+		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
 		if err != nil {
 			return err
 		}
@@ -712,8 +712,8 @@ func macAddressChanged(oldNode, node *kapi.Node) bool {
 }
 
 func nodeSubnetChanged(oldNode, node *kapi.Node) bool {
-	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode)
-	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
+	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode, ovntypes.DefaultNetworkName)
+	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
 	return !reflect.DeepEqual(oldSubnets, newSubnets)
 }
 
