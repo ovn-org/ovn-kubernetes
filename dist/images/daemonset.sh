@@ -80,6 +80,7 @@ OVNKUBE_NODE_MGMT_PORT_NETDEV=""
 OVNKUBE_CONFIG_DURATION_ENABLE=
 OVNKUBE_METRICS_SCALE_ENABLE=
 OVN_STATELESS_NETPOL_ENABLE="false"
+OVN_INTERCONNECT_ENABLE=
 # IN_UPGRADE is true only if called by upgrade-ovn.sh during the upgrade test,
 # it will render only the parts in ovn-setup.yaml related to RBAC permissions.
 IN_UPGRADE=
@@ -287,7 +288,9 @@ while [ "$1" != "" ]; do
   --compact-mode)
     COMPACT_MODE=$VALUE
     ;;
-
+  --interconnect-enable)
+    OVN_INTERCONNECT_ENABLE=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -437,6 +440,8 @@ ovn_stateless_netpol_enable=${OVN_STATELESS_NETPOL_ENABLE}
 echo "ovn_stateless_netpol_enable: ${ovn_stateless_netpol_enable}"
 ovnkube_compact_mode_enable=${COMPACT_MODE:-"false"}
 echo "ovnkube_compact_mode_enable: ${ovnkube_compact_mode_enable}"
+ovn_interconnect_enable=${OVN_INTERCONNECT_ENABLE}
+echo "ovn_interconnect_enable: ${ovn_interconnect_enable}"
 
 ovn_image=${ovnkube_image} \
   ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
@@ -477,6 +482,7 @@ ovn_image=${ovnkube_image} \
   ovn_disable_ovn_iface_id_ver=${ovn_disable_ovn_iface_id_ver} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
   ovnkube_app_name=ovnkube-node \
+  ovn_interconnect_enable=${ovn_interconnect_enable} \
   j2 ../templates/ovnkube-node.yaml.j2 -o ${output_dir}/ovnkube-node.yaml
 
 # ovnkube node for dpu-host daemonset
@@ -545,6 +551,7 @@ ovn_image=${ovnkube_image} \
   ovn_stateless_netpol_enable=${ovn_netpol_acl_enable} \
   ovnkube_compact_mode_enable=${ovnkube_compact_mode_enable} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
+  ovn_interconnect_enable=${ovn_interconnect_enable} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ${output_dir}/ovnkube-master.yaml
 
 ovn_image=${image} \
@@ -555,6 +562,7 @@ ovn_image=${image} \
   ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
   ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
+  ovnkube_metrics_scale_enable=${ovnkube_metrics_scale_enable} \
   ovn_acl_logging_rate_limit=${ovn_acl_logging_rate_limit} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
@@ -573,7 +581,68 @@ ovn_image=${image} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovn_interconnect_enable=${ovn_interconnect_enable} \
   j2 ../templates/ovnkube-cm-ncm.yaml.j2 -o ${output_dir}/ovnkube-cm-ncm.yaml
+
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovnkube_master_loglevel=${master_loglevel} \
+  ovn_loglevel_northd=${ovn_loglevel_northd} \
+  ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
+  ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
+  ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
+  ovnkube_metrics_scale_enable=${ovnkube_metrics_scale_enable} \
+  ovn_acl_logging_rate_limit=${ovn_acl_logging_rate_limit} \
+  ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
+  ovn_empty_lb_events=${ovn_empty_lb_events} \
+  ovn_v4_join_subnet=${ovn_v4_join_subnet} \
+  ovn_v6_join_subnet=${ovn_v6_join_subnet} \
+  ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
+  ovn_egress_firewall_enable=${ovn_egress_firewall_enable} \
+  ovn_egress_qos_enable=${ovn_egress_qos_enable} \
+  ovn_multi_network_enable=${ovn_multi_network_enable} \
+  ovn_ssl_en=${ovn_ssl_en} \
+  ovn_master_count=${ovn_master_count} \
+  ovn_gateway_mode=${ovn_gateway_mode} \
+  ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovn_interconnect_enable=${ovn_interconnect_enable} \
+  j2 ../templates/ovnkube-cluster-manager.yaml.j2 -o ${output_dir}/ovnkube-cluster-manager.yaml
+
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovnkube_master_loglevel=${master_loglevel} \
+  ovn_loglevel_northd=${ovn_loglevel_northd} \
+  ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
+  ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
+  ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovnkube_config_duration_enable=${ovnkube_config_duration_enable} \
+  ovnkube_metrics_scale_enable=${ovnkube_metrics_scale_enable} \
+  ovn_acl_logging_rate_limit=${ovn_acl_logging_rate_limit} \
+  ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_disable_pkt_mtu_check=${ovn_disable_pkt_mtu_check} \
+  ovn_empty_lb_events=${ovn_empty_lb_events} \
+  ovn_v4_join_subnet=${ovn_v4_join_subnet} \
+  ovn_v6_join_subnet=${ovn_v6_join_subnet} \
+  ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_egress_ip_healthcheck_port=${ovn_egress_ip_healthcheck_port} \
+  ovn_egress_firewall_enable=${ovn_egress_firewall_enable} \
+  ovn_egress_qos_enable=${ovn_egress_qos_enable} \
+  ovn_multi_network_enable=${ovn_multi_network_enable} \
+  ovn_ssl_en=${ovn_ssl_en} \
+  ovn_master_count=${ovn_master_count} \
+  ovn_gateway_mode=${ovn_gateway_mode} \
+  ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
+  ovn_interconnect_enable=${ovn_interconnect_enable} \
+  j2 ../templates/ovnkube-zone-ncm.yaml.j2 -o ${output_dir}/ovnkube-zone-ncm.yaml
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -584,6 +653,15 @@ ovn_image=${image} \
   ovn_sb_port=${ovn_sb_port} \
   enable_ipsec=${enable_ipsec} \
   j2 ../templates/ovnkube-db.yaml.j2 -o ${output_dir}/ovnkube-db.yaml
+
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovn_loglevel_nb=${ovn_loglevel_nb} \
+  ovn_loglevel_sb=${ovn_loglevel_sb} \
+  ovn_ssl_en=${ovn_ssl_en} \
+  ovn_nb_port=${ovn_nb_port} \
+  ovn_sb_port=${ovn_sb_port} \
+  j2 ../templates/ovnkube-zone-db.yaml.j2 -o ${output_dir}/ovnkube-zone-db.yaml
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
