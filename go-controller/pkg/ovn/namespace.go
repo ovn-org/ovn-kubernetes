@@ -535,6 +535,7 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool, namespace 
 	if namespace != nil {
 		// if we have the namespace, attempt to configure nsInfo with it
 		if err := oc.configureNamespace(nsInfo, namespace); err != nil {
+			unlockFunc()
 			return nil, nil, fmt.Errorf("failed to configure namespace %s: %v", ns, err)
 		}
 	}

@@ -1,8 +1,11 @@
 package logicalswitchmanager
 
 import (
+	"net"
+
 	"github.com/urfave/cli/v2"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -10,6 +13,46 @@ import (
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 )
+
+// test function that returns if an IP address is allocated
+func (manager *LogicalSwitchManager) isAllocatedIP(nodeName, ip string) bool {
+	manager.RLock()
+	defer manager.RUnlock()
+
+	lsi, ok := manager.cache[nodeName]
+	if !ok {
+		return false
+	}
+	for _, ipam := range lsi.ipams {
+		if ipam.Has(net.ParseIP(ip)) {
+			return true
+		}
+	}
+	return false
+}
+
+// AllocateNextIPv4s will allocate the next IPv4 addresses from each of the host subnets
+// for a given switch
+func (manager *LogicalSwitchManager) AllocateNextIPv4s(nodeName string) ([]*net.IPNet, error) {
+	ips, err := manager.AllocateNextIPs(nodeName)
+	if err != nil {
+		return nil, err
+	}
+	var ipv4s []*net.IPNet
+	var ipv6s []*net.IPNet
+	for _, ip := range ips {
+		if utilnet.IsIPv6(ip.IP) {
+			ipv6s = append(ipv6s, ip)
+		} else {
+			ipv4s = append(ipv4s, ip)
+		}
+	}
+	err = manager.ReleaseIPs(nodeName, ipv6s)
+	if err != nil {
+		return nil, err
+	}
+	return ipv4s, nil
+}
 
 type testNodeSubnetData struct {
 	nodeName string
@@ -58,24 +101,87 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 					gomega.Expect(ip.IP.String()).To(gomega.Equal(expectedIPs[i]))
 				}
 
-				// run the test for hybrid overlay enabled case
-				testHONode := testNodeSubnetData{
-					nodeName: "testNode2",
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+		ginkgo.It("creates IPAM for each subnet and reserves IPs correctly when HybridOverlay is enabled and address is passed", func() {
+			app.Action = func(ctx *cli.Context) error {
+				_, err := config.InitConfig(ctx, fexec, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				testNode := testNodeSubnetData{
+					nodeName: "testNode1",
 					subnets: []string{
 						"10.1.1.0/24",
 						"2000::/64",
 					},
 				}
-				config.HybridOverlay.Enabled = true
-				expectedIPs = []string{"10.1.1.4", "2000::4"}
-				err = lsManager.AddNode(testHONode.nodeName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				err = lsManager.AddNode(testNode.nodeName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				allocatedHybridOverlayDRIP, err := lsManager.AllocateHybridOverlay(testNode.nodeName, []string{"10.1.1.53"})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(net.ParseIP("10.1.1.53").To4()).To(gomega.Equal(allocatedHybridOverlayDRIP[0].IP))
+				gomega.Expect(true).To(gomega.Equal(lsManager.isAllocatedIP(testNode.nodeName, "10.1.1.53")))
+
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+		ginkgo.It("creates IPAM for each subnet and reserves the .3 address for Hybrid Overlay by default", func() {
+			app.Action = func(ctx *cli.Context) error {
+				_, err := config.InitConfig(ctx, fexec, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				ips, err = lsManager.AllocateNextIPs(testHONode.nodeName)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				for i, ip := range ips {
-					gomega.Expect(ip.IP.String()).To(gomega.Equal(expectedIPs[i]))
+				testNode := testNodeSubnetData{
+					nodeName: "testNode1",
+					subnets: []string{
+						"10.1.1.0/24",
+						"2000::/64",
+					},
 				}
+
+				err = lsManager.AddNode(testNode.nodeName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				allocatedHybridOverlayDRIP, err := lsManager.AllocateHybridOverlay(testNode.nodeName, []string{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(net.ParseIP("10.1.1.3").To4()).To(gomega.Equal(allocatedHybridOverlayDRIP[0].IP))
+
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(true).To(gomega.Equal(lsManager.isAllocatedIP(testNode.nodeName, "10.1.1.3")))
+
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+		ginkgo.It("creates IPAM for each subnet and reserves a non-default IP address for hybrid overlay", func() {
+			app.Action = func(ctx *cli.Context) error {
+				_, err := config.InitConfig(ctx, fexec, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				testNode := testNodeSubnetData{
+					nodeName: "testNode1",
+					subnets: []string{
+						"10.1.1.0/24",
+						"2000::/64",
+					},
+				}
+
+				err = lsManager.AddNode(testNode.nodeName, "", ovntest.MustParseIPNets(testNode.subnets...))
+				err = lsManager.AllocateIPs(testNode.nodeName, []*net.IPNet{
+					{net.ParseIP("10.1.1.3").To4(), net.CIDRMask(32, 32)},
+				})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				allocatedHybridOverlayDRIP, err := lsManager.AllocateHybridOverlay(testNode.nodeName, []string{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// 10.1.1.4 is the next ip address
+				gomega.Expect(net.ParseIP("10.1.1.4").To4()).To(gomega.Equal(allocatedHybridOverlayDRIP[0].IP))
+
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(true).To(gomega.Equal(lsManager.isAllocatedIP(testNode.nodeName, "10.1.1.3")))
 
 				return nil
 			}
@@ -222,9 +328,9 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 				}
 				config.HybridOverlay.Enabled = true
 				expectedIPAllocations := [][]string{
+					{"10.1.1.3", "10.1.2.3"},
 					{"10.1.1.4", "10.1.2.4"},
 					{"10.1.1.5", "10.1.2.5"},
-					{"10.1.1.6", "10.1.2.6"},
 				}
 
 				err = lsManager.AddNode(testNode.nodeName, "", ovntest.MustParseIPNets(testNode.subnets...))
@@ -237,8 +343,19 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 						gomega.Expect(ip.IP.String()).To(gomega.Equal(expectedIPs[i]))
 					}
 				}
+				ips, err := lsManager.AllocateNextIPv4s(testNode.nodeName)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				expectedIPAllocation := [][]string{
+					{"10.1.1.6", "10.1.2.6"},
+				}
+				for _, expectedIPs := range expectedIPAllocation {
+					for i, ip := range ips {
+						gomega.Expect(ip.IP.String()).To(gomega.Equal(expectedIPs[i]))
+					}
+				}
+
 				// now try one more allocation and expect it to fail
-				ips, err := lsManager.AllocateNextIPs(testNode.nodeName)
+				ips, err = lsManager.AllocateNextIPs(testNode.nodeName)
 				gomega.Expect(err).To(gomega.HaveOccurred())
 				gomega.Expect(len(ips)).To(gomega.Equal(0))
 				return nil
