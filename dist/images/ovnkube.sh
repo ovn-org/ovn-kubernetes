@@ -336,6 +336,11 @@ wait_for_event() {
 # The ovnkube-db kubernetes service must be populated with OVN DB service endpoints
 # before various OVN K8s containers can come up. This functions checks for that.
 ready_to_start_node() {
+  get_ovn_db_vars
+  if [[ $ovn_nbdb == "local" ]]; then
+    return 0
+  fi
+
   ovn_zone=$(get_node_zone)
   echo "Getting the ovnkube-db-${ovn_zone} ep"
   # See if ep is available ...
@@ -869,6 +874,61 @@ ovn-dbchecker() {
   exit 11
 }
 
+# v3 - run local_nb_ovsdb in a separate container
+local-nb-ovsdb() {
+  trap 'ovsdb_cleanup nb' TERM
+  check_ovn_daemonset_version "3"
+  rm -f ${OVN_RUNDIR}/ovnnb_db.pid
+
+  if [[ ${ovn_db_host} == "" ]]; then
+    echo "The IP address of the host $(hostname) could not be determined. Exiting..."
+    exit 1
+  fi
+
+  echo "=============== run local_nb_ovsdb =========="
+  run_as_ovs_user_if_needed \
+    ${OVNCTL_PATH} run_nb_ovsdb --no-monitor \
+    --ovn-nb-log="${ovn_loglevel_nb}" &
+
+  wait_for_event attempts=3 process_ready ovnnb_db
+  echo "=============== local-nb-ovsdb ========== RUNNING"
+
+  ovn-nbctl set NB_Global . name=${K8S_NODE}
+  ovn-nbctl set NB_Global . options:name=${K8S_NODE}
+
+  tail --follow=name ${OVN_LOGDIR}/ovsdb-server-nb.log &
+  ovn_tail_pid=$!
+
+  process_healthy ovnnb_db ${ovn_tail_pid}
+  echo "=============== run local_nb_ovsdb ========== terminated"
+}
+
+# v3 - run local_sb_ovsdb in a separate container
+local-sb-ovsdb() {
+  trap 'ovsdb_cleanup sb' TERM
+  check_ovn_daemonset_version "3"
+  rm -f ${OVN_RUNDIR}/ovnsb_db.pid
+
+  if [[ ${ovn_db_host} == "" ]]; then
+    echo "The IP address of the host $(hostname) could not be determined. Exiting..."
+    exit 1
+  fi
+
+  echo "=============== run local_sb_ovsdb ========== "
+  run_as_ovs_user_if_needed \
+    ${OVNCTL_PATH} run_sb_ovsdb --no-monitor \
+    --ovn-sb-log="${ovn_loglevel_sb}" &
+
+  wait_for_event attempts=3 process_ready ovnsb_db
+  echo "=============== local-sb-ovsdb ========== RUNNING"
+
+  tail --follow=name ${OVN_LOGDIR}/ovsdb-server-sb.log &
+  ovn_tail_pid=$!
+
+  process_healthy ovnsb_db ${ovn_tail_pid}
+  echo "=============== run local_sb_ovsdb ========== terminated"
+}
+
 # v3 - Runs northd on master. Does not run nb_ovsdb, and sb_ovsdb
 run-ovn-northd() {
   trap 'ovs-appctl -t ovn-northd exit >/dev/null 2>&1; exit 0' TERM
@@ -895,10 +955,18 @@ run-ovn-northd() {
      "
   }
 
+  ovn_dbs=""
+  if [[ $ovn_nbdb != "local" ]]; then
+      ovn_dbs="--ovn-northd-nb-db=${ovn_nbdb_conn}"
+  fi
+  if [[ $ovn_sbdb != "local" ]]; then
+      ovn_dbs="${ovn_dbs} --ovn-northd-sb-db=${ovn_sbdb_conn}"
+  fi
+
   run_as_ovs_user_if_needed \
     ${OVNCTL_PATH} start_northd \
     --no-monitor --ovn-manage-ovsdb=no \
-    --ovn-northd-nb-db=${ovn_nbdb_conn} --ovn-northd-sb-db=${ovn_sbdb_conn} \
+    ${ovn_dbs} \
     ${ovn_northd_ssl_opts} \
     --ovn-northd-log="${ovn_loglevel_northd}" \
     ${ovn_northd_opts}
@@ -920,9 +988,6 @@ ovn-master() {
   rm -f ${OVN_RUNDIR}/ovnkube-master.pid
 
   echo "=============== ovn-master (wait for ready_to_start_node) ========== MASTER ONLY"
-  wait_for_event ready_to_start_node
-  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
-
   # wait for northd to start
   wait_for_event process_ready ovn-northd
 
@@ -1249,11 +1314,19 @@ ovn-network-controller-manager() {
   ovn_zone=$(get_node_zone)
   echo "ovn-network-controller-manager's configured zone is ${ovn_zone}"
 
+  ovn_dbs=""
+  if [[ $ovn_nbdb != "local" ]]; then
+      ovn_dbs="--nb-address=${ovn_nbdb}"
+  fi
+  if [[ $ovn_sbdb != "local" ]]; then
+      ovn_dbs="${ovn_dbs} --sb-address=${ovn_sbdb}"
+  fi
+
   echo "=============== ovn-network-controller-manager ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-network-controller-manager ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
-    --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
+    ${ovn_dbs} \
     --gateway-mode=${ovn_gateway_mode} \
     --loglevel=${ovnkube_loglevel} \
     --logfile-maxsize=${ovnkube_logfile_maxsize} \
@@ -1295,7 +1368,7 @@ ovn-cluster-manager() {
   check_ovn_daemonset_version "3"
 
   echo "=============== ovn-cluster-manager (wait for ready_to_start_node) ========== MASTER ONLY"
-  wait_for_event ready_to_start_node
+  #wait_for_event ready_to_start_node
 
   hybrid_overlay_flags=
   if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
@@ -1430,8 +1503,6 @@ ovn-node() {
 
   echo "=============== ovn-node - (wait for ready_to_start_node)"
   wait_for_event ready_to_start_node
-
-  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_conn ${ovn_nbdb_conn}"
 
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
     echo "=============== ovn-node - (ovn-node  wait for ovn-controller.pid)"
@@ -1621,10 +1692,17 @@ ovn-node() {
   ovn_zone=$(get_node_zone)
   echo "ovnkube-node's configured zone is ${ovn_zone}"
 
+  if [[ $ovn_nbdb != "local" ]]; then
+      ovn_dbs="--nb-address=${ovn_nbdb}"
+  fi
+  if [[ $ovn_sbdb != "local" ]]; then
+      ovn_dbs="${ovn_dbs} --sb-address=${ovn_sbdb}"
+  fi
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
-    --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
+    $ovn_dbs \
     ${ovn_unprivileged_flag} \
     --nodeport \
     --mtu=${mtu} \
@@ -1750,6 +1828,12 @@ case ${cmd} in
   ;;
 "ovn-dbchecker") # pod ovnkube-db container ovn-dbchecker
   ovn-dbchecker
+  ;;
+"local-nb-ovsdb")
+  local-nb-ovsdb
+  ;;
+"local-sb-ovsdb")
+  local-sb-ovsdb
   ;;
 "run-ovn-northd") # pod ovnkube-master container run-ovn-northd
   run-ovn-northd

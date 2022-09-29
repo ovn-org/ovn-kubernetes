@@ -1,12 +1,11 @@
 ---
-# {{ ovnkube_app_name }}
+# ovnkube-local
 # daemonset version 3
-# starts node daemons for ovn, each in a separate container
-# it is run on all nodes
+# starts node daemons for local ovn stack, each in a separate container
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
-  name: {{ ovnkube_app_name }}
+  name: ovnkube-local
   # namespace set up by install
   namespace: ovn-kubernetes
   annotations:
@@ -15,19 +14,20 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app: {{ ovnkube_app_name }}
+      app: ovnkube-local
   updateStrategy:
     type: RollingUpdate
   template:
     metadata:
       labels:
-        app: {{ ovnkube_app_name }}
-        name: {{ ovnkube_app_name }}
+        app: ovnkube-local
+        name: ovnkube-local
         component: network
         type: infra
         kubernetes.io/os: "linux"
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
-      priorityClassName: "system-cluster-critical"
       # Requires fairly broad permissions - ability to read all services and network functions as well
       # as all pods.
       serviceAccountName: ovn
@@ -35,7 +35,320 @@ spec:
       dnsPolicy: Default
       {{ "hostPID: true" if ovn_unprivileged_mode=="no" }}
       containers:
-      {% if ovnkube_compact_mode_enable=="false" %}
+
+      # local-nb-ovsdb - v3
+      - name: local-nb-ovsdb
+        image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
+        imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
+
+        command: ["/root/ovnkube.sh", "local-nb-ovsdb"]
+
+        securityContext:
+          runAsUser: 0
+          capabilities:
+            add: ["NET_ADMIN"]
+
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        # ovn db is stored in the pod in /etc/openvswitch
+        # (or in /etc/ovn if OVN from new repository is used)
+        # and on the host in /var/lib/openvswitch/
+        - mountPath: /etc/openvswitch/
+          name: host-var-lib-ovs
+        - mountPath: /etc/ovn/
+          name: host-var-lib-ovs
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
+        - mountPath: /var/log/ovn/
+          name: host-var-log-ovs
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "3"
+        - name: OVN_LOGLEVEL_NB
+          value: "{{ ovn_loglevel_nb }}"
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
+        - name: OVN_KUBERNETES_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: K8S_NODE
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnnb-db"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
+      # end of container
+
+      # local-sb-ovsdb - v3
+      - name: local-sb-ovsdb
+        image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
+        imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
+
+        command: ["/root/ovnkube.sh", "local-sb-ovsdb"]
+
+        securityContext:
+          runAsUser: 0
+          capabilities:
+            add: ["NET_ADMIN"]
+
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        # ovn db is stored in the pod in /etc/openvswitch
+        # (or in /etc/ovn if OVN from new repository is used)
+        # and on the host in /var/lib/openvswitch/
+        - mountPath: /etc/openvswitch/
+          name: host-var-lib-ovs
+        - mountPath: /etc/ovn/
+          name: host-var-lib-ovs
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
+        - mountPath: /var/log/ovn/
+          name: host-var-log-ovs
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "3"
+        - name: OVN_LOGLEVEL_SB
+          value: "{{ ovn_loglevel_sb }}"
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
+        - name: OVN_KUBERNETES_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: K8S_NODE
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnsb-db"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
+
+      # end of container
+
+      # local-ovn-northd - v3
+      - name: local-ovn-northd
+        image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
+        imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
+
+        command: ["/root/ovnkube.sh", "run-ovn-northd"]
+
+        securityContext:
+          runAsUser: 0
+          capabilities:
+            add: ["SYS_NICE"]
+
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        # Run directories where we need to be able to access sockets
+        - mountPath: /var/run/dbus/
+          name: host-var-run-dbus
+          readOnly: true
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
+        - mountPath: /var/log/ovn/
+          name: host-var-log-ovs
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "3"
+        - name: OVN_LOGLEVEL_NORTHD
+          value: "{{ ovn_loglevel_northd }}"
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
+        - name: OVN_KUBERNETES_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
+        - name: OVN_NORTH
+          value: "local"
+        - name: OVN_SOUTH
+          value: "local"
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-northd"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
+      # end of container
+
+      # network controller manager
+      - name: ovnkube-network-controller-manager
+        image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
+        imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
+
+        command: ["/root/ovnkube.sh", "ovn-network-controller-manager"]
+
+        securityContext:
+          runAsUser: 0
+
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+        # Run directories where we need to be able to access sockets
+        - mountPath: /var/run/dbus/
+          name: host-var-run-dbus
+          readOnly: true
+        - mountPath: /var/log/ovn-kubernetes/
+          name: host-var-log-ovnkube
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "3"
+        - name: OVNKUBE_LOGLEVEL
+          value: "{{ ovnkube_local_loglevel }}"
+        - name: OVNKUBE_LOGFILE_MAXSIZE
+          value: "{{ ovnkube_logfile_maxsize }}"
+        - name: OVNKUBE_LOGFILE_MAXBACKUPS
+          value: "{{ ovnkube_logfile_maxbackups }}"
+        - name: OVNKUBE_LOGFILE_MAXAGE
+          value: "{{ ovnkube_logfile_maxage }}"
+        - name: OVNKUBE_CONFIG_DURATION_ENABLE
+          value: "{{ ovnkube_config_duration_enable }}"
+        - name: OVN_NET_CIDR
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: net_cidr
+        - name: OVN_SVC_CIDR
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: svc_cidr
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
+        - name: K8S_NODE
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: OVN_KUBERNETES_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: OVN_HYBRID_OVERLAY_ENABLE
+          value: "{{ ovn_hybrid_overlay_enable }}"
+        - name: OVN_EGRESSIP_ENABLE
+          value: "{{ ovn_egress_ip_enable }}"
+        - name: OVN_EGRESSIP_HEALTHCHECK_PORT
+          value: "{{ ovn_egress_ip_healthcheck_port }}"
+        - name: OVN_EGRESSFIREWALL_ENABLE
+          value: "{{ ovn_egress_firewall_enable }}"
+        - name: OVN_EGRESSQOS_ENABLE
+          value: "{{ ovn_egress_qos_enable }}"
+        - name: OVN_MULTI_NETWORK_ENABLE
+          value: "{{ ovn_multi_network_enable }}"
+        - name: OVN_HYBRID_OVERLAY_NET_CIDR
+          value: "{{ ovn_hybrid_overlay_net_cidr }}"
+        - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
+          value: "{{ ovn_disable_snat_multiple_gws }}"
+        - name: OVN_EMPTY_LB_EVENTS
+          value: "{{ ovn_empty_lb_events }}"
+        - name: OVN_V4_JOIN_SUBNET
+          value: "{{ ovn_v4_join_subnet }}"
+        - name: OVN_V6_JOIN_SUBNET
+          value: "{{ ovn_v6_join_subnet }}"
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
+        - name: OVN_GATEWAY_MODE
+          value: "{{ ovn_gateway_mode }}"
+        - name: OVN_MULTICAST_ENABLE
+          value: "{{ ovn_multicast_enable }}"
+        - name: OVN_ACL_LOGGING_RATE_LIMIT
+          value: "{{ ovn_acl_logging_rate_limit }}"
+        - name: OVN_HOST_NETWORK_NAMESPACE
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: host_network_namespace
+        - name: OVN_NORTH
+          value: "local"
+        - name: OVN_SOUTH
+          value: "local"
+        - name: OVN_INTERCONNECT_ENABLE
+          value: "{{ ovn_interconnect_enable }}"
+      # end of container
+
       - name: ovnkube-node
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
@@ -75,8 +388,6 @@ spec:
         - mountPath: /var/run/netns
           name: host-netns
           mountPropagation: Bidirectional
-       {%- if ovnkube_app_name=="ovnkube-node" %}
-        # ovnkube-node only mounts (non dpu related)
         - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
         - mountPath: /var/run/ovn/
@@ -90,11 +401,6 @@ spec:
         - mountPath: /etc/ovn/
           name: host-var-lib-ovs
           readOnly: true
-        {%- elif ovnkube_app_name=="ovnkube-node-dpu-host" %}
-        # ovnkube-node dpu-host mounts
-        - mountPath: /var/run/ovn
-          name: var-run-ovn
-        {%- endif %}
 
         resources:
           requests:
@@ -159,8 +465,6 @@ spec:
           value: "{{ ovn_hybrid_overlay_net_cidr }}"
         - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
           value: "{{ ovn_disable_snat_multiple_gws }}"
-        - name: OVN_DISABLE_FORWARDING
-          value: "{{ ovn_disable_forwarding }}"
         - name: OVN_DISABLE_PKT_MTU_CHECK
           value: "{{ ovn_disable_pkt_mtu_check }}"
         - name: OVN_NETFLOW_TARGETS
@@ -185,7 +489,6 @@ spec:
           value: "{{ ovn_unprivileged_mode }}"
         - name: OVN_EX_GW_NETWORK_INTERFACE
           value: "{{ ovn_ex_gw_networking_interface }}"
-        {% if ovnkube_app_name=="ovnkube-node" -%}
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
         - name: OVN_DISABLE_OVN_IFACE_ID_VER
@@ -204,13 +507,6 @@ spec:
           value: "{{ ovn_lflow_cache_limit_kb }}"
         - name: OVN_MULTI_NETWORK_ENABLE
           value: "{{ ovn_multi_network_enable }}"
-        - name: OVN_INTERCONNECT_ENABLE
-          value: "{{ ovn_interconnect_enable }}"
-        {% endif -%}
-        {% if ovnkube_app_name=="ovnkube-node-dpu-host" -%}
-        - name: OVNKUBE_NODE_MODE
-          value: "dpu-host"
-        {% endif -%}
         - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
           value: "{{ ovnkube_node_mgmt_port_netdev }}"
         - name: OVN_HOST_NETWORK_NAMESPACE
@@ -218,11 +514,12 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: host_network_namespace
-        - name: POD_NAME
-          valueFrom:
-            fieldRef:
-              apiVersion: v1
-              fieldPath: metadata.name
+        - name: OVN_NORTH
+          value: "local"
+        - name: OVN_SOUTH
+          value: "local"
+        - name: OVN_INTERCONNECT_ENABLE
+          value: "{{ ovn_interconnect_enable }}"
 
         readinessProbe:
           exec:
@@ -230,8 +527,7 @@ spec:
           initialDelaySeconds: 30
           timeoutSeconds: 30
           periodSeconds: 60
-      {% endif %}
-      {% if ovnkube_app_name=="ovnkube-node" -%}
+
       - name: ovn-controller
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
@@ -274,16 +570,17 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
-        - name: K8S_NODE
-          valueFrom:
-            fieldRef:
-              fieldPath: spec.nodeName
         - name: OVN_KUBERNETES_NAMESPACE
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
+
+        - name: OVN_NORTH
+          value: "local"
+        - name: OVN_SOUTH
+          value: "local"
 
         readinessProbe:
           exec:
@@ -326,14 +623,12 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
+        - name: OVN_NORTH
+          value: "local"
+        - name: OVN_SOUTH
+          value: "local"
         # end of container
-      {% endif -%}
 
-      {% if ovnkube_app_name=="ovnkube-node-dpu-host" -%}
-      nodeSelector:
-        kubernetes.io/os: "linux"
-        k8s.ovn.org/dpu-host: ""
-      {% else -%}
       nodeSelector:
         kubernetes.io/os: "linux"
       affinity:
@@ -341,13 +636,10 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
             - matchExpressions:
-              - key: k8s.ovn.org/dpu-host
-                operator: DoesNotExist
               - key: k8s.ovn.org/ovn-zone-mode
-                operator: NotIn
+                operator: In
                 values:
                 - local
-      {% endif -%}
       volumes:
       # Common volumes
       - name: host-var-run-dbus
@@ -371,8 +663,6 @@ spec:
       - name: host-netns
         hostPath:
           path: /var/run/netns
-      {%- if ovnkube_app_name=="ovnkube-node" %}
-      # non DPU related volumes
       - name: host-var-log-ovs
         hostPath:
           path: /var/log/openvswitch
@@ -389,10 +679,7 @@ spec:
       - name: host-var-lib-ovs
         hostPath:
           path: /var/lib/openvswitch
-      {%- elif ovnkube_app_name=="ovnkube-node-dpu-host" %}
-      - name: var-run-ovn
-        emptyDir: {}
-      {%- endif %}
 
       tolerations:
       - operator: "Exists"
+
