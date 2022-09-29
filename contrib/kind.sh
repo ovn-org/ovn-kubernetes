@@ -116,6 +116,7 @@ usage() {
     echo "                 [-nnz| --num-nodes-per-zones]"
     echo "                 [--isolated]"
     echo "                 [-ic | --interconnect-enable]"
+    echo "                 [-lz | --enable-local-zone]"
     echo "                 [-h]]"
     echo ""
     echo "-cf  | --config-file                Name of the KIND J2 configuration file."
@@ -167,6 +168,7 @@ usage() {
     echo "-sm  | --scale-metrics              Enable scale metrics"
     echo "-cm  | --compact-mode               Enable compact mode, ovnkube master and node run in the same process."
     echo "-ic  | --interconnect-enable        Enable OVN-IC (cluster-manager + network-cluster-manager)"
+    echo "-lz  | --enable-local-zone          If OVN-IC is enabled, then make each node as an independent zone"
     echo "--isolated                          Deploy with an isolated environment (no default gateway)"
     echo "--delete                            Delete current cluster"
     echo "--deploy                            Deploy ovn kubernetes without restarting kind"
@@ -345,6 +347,9 @@ parse_args() {
             -ic | --interconnect-enable )       shift
                                                 OVN_INTERCONNECT_ENABLE=true
                                                 ;;
+            -lz | --enable-local-zone )       shift
+                                                OVN_ENABLE_LOCAL_ZONE=true
+                                                ;;
             --delete )                          delete
                                                 exit
                                                 ;;
@@ -416,6 +421,7 @@ print_params() {
      echo "OVN_SEPARATE_CLUSTER_MANAGER = $OVN_SEPARATE_CLUSTER_MANAGER"
      echo "KIND_NUM_ADDITIONAL_ZONES = $KIND_NUM_ADDITIONAL_ZONES"
      echo "OVN_INTERCONNECT_ENABLE = $OVN_INTERCONNECT_ENABLE"
+     echo "OVN_ENABLE_LOCAL_ZONE = $OVN_ENABLE_LOCAL_ZONE"
      echo ""
 }
 
@@ -558,6 +564,7 @@ set_default_params() {
   KIND_NUM_MASTER=1
   OVN_INTERCONNECT_ENABLE=${OVN_INTERCONNECT_ENABLE:-false}
   KIND_NUM_NODES_PER_ZONE=${KIND_NUM_NODES_PER_ZONE:-2}
+  OVN_ENABLE_LOCAL_ZONE=${OVN_ENABLE_LOCAL_ZONE:-false}
   if [ "$OVN_HA" == true ]; then
     KIND_NUM_MASTER=3
     NUM_WORKER=${KIND_NUM_WORKER:-0}
@@ -569,9 +576,15 @@ set_default_params() {
 
   if [ "$OVN_INTERCONNECT_ENABLE" == false ]; then
     KIND_NUM_ADDITIONAL_ZONES="0"
+    OVN_ENABLE_LOCAL_ZONE="false"
   else
     KIND_NUM_ADDITIONAL_ZONES=${KIND_NUM_ADDITIONAL_ZONES:-2}
     NUM_WORKER=${KIND_NUM_WORKER:-0}
+
+    if [ "$OVN_ENABLE_LOCAL_ZONE" == true ]; then
+      # Each node is a zone. So there can only be one node per zone.
+      KIND_NUM_NODES_PER_ZONE=1
+    fi
   fi
 
   KIND_NUM_WORKER=$NUM_WORKER
@@ -912,30 +925,37 @@ install_ovn() {
     worker_idx=$((worker_idx+1))
   done
 
-  for i in $(seq $KIND_NUM_ADDITIONAL_ZONES)
-  do
-    az_name="az$i"
-    for j in $(seq ${KIND_NUM_NODES_PER_ZONE})
+  if [ "$OVN_ENABLE_LOCAL_ZONE" == false ]; then
+    for i in $(seq $KIND_NUM_ADDITIONAL_ZONES)
     do
-      if [ "$worker_idx" == "1" ]; then
-        worker=ovn-worker
-      else
-        worker=ovn-worker${worker_idx}
-      fi
-      kubectl label node "$worker" k8s.ovn.org/zone-name=${az_name} --overwrite
-      if [ "$j" == "1" ]; then
-        kubectl label node "$worker" k8s.ovn.org/ovnkube-db=true node-role.kubernetes.io/control-plane="" k8s.ovn.org/ovnkube-zone-ncm="" --overwrite
-        if [ "$KIND_REMOVE_TAINT" == true ]; then
-          # do not error if it fails to remove the taint
-          # remove both master and control-plane taints until master is removed from 1.25
-          # // https://github.com/kubernetes/kubernetes/pull/107533
-          kubectl taint node "$worker" node-role.kubernetes.io/master:NoSchedule- || true
-          kubectl taint node "$worker" node-role.kubernetes.io/control-plane:NoSchedule- || true
+      az_name="az$i"
+      for j in $(seq ${KIND_NUM_NODES_PER_ZONE})
+      do
+        if [ "$worker_idx" == "1" ]; then
+          worker=ovn-worker
+        else
+          worker=ovn-worker${worker_idx}
         fi
-      fi
-      worker_idx=$((worker_idx+1))
+        kubectl label node "$worker" k8s.ovn.org/zone-name=${az_name} --overwrite
+        if [ "$j" == "1" ]; then
+          kubectl label node "$worker" k8s.ovn.org/ovnkube-db=true node-role.kubernetes.io/control-plane="" k8s.ovn.org/ovnkube-zone-ncm="" --overwrite
+          if [ "$KIND_REMOVE_TAINT" == true ]; then
+            # do not error if it fails to remove the taint
+            # remove both master and control-plane taints until master is removed from 1.25
+            # // https://github.com/kubernetes/kubernetes/pull/107533
+            kubectl taint node "$worker" node-role.kubernetes.io/master:NoSchedule- || true
+            kubectl taint node "$worker" node-role.kubernetes.io/control-plane:NoSchedule- || true
+          fi
+        fi
+        worker_idx=$((worker_idx+1))
+      done
     done
-  done
+  else
+    KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+    for n in $KIND_NODES; do
+      kubectl label node "${n}" k8s.ovn.org/zone-name=${n} k8s.ovn.org/zone-mode=local --overwrite
+    done
+  fi
 
 
   if [ "$OVN_HA" == true ]; then
@@ -944,7 +964,11 @@ install_ovn() {
     if [ "$OVN_INTERCONNECT_ENABLE" == false ]; then
       run_kubectl apply -f ovnkube-db.yaml
     else
-      run_kubectl apply -f ovnkube-zone-db.yaml
+      if [ "$OVN_ENABLE_LOCAL_ZONE" == true ]; then
+        run_kubectl apply -f ovnkube-local.yaml
+      else
+        run_kubectl apply -f ovnkube-zone-db.yaml
+      fi
     fi
   fi
   run_kubectl apply -f ovs-node.yaml
@@ -958,7 +982,9 @@ install_ovn() {
   else
     # Interconnect is true.
     run_kubectl apply -f ovnkube-cluster-manager.yaml
-    run_kubectl apply -f ovnkube-zone-ncm.yaml
+    if [ "$OVN_ENABLE_LOCAL_ZONE" == false ]; then
+      run_kubectl apply -f ovnkube-zone-ncm.yaml
+    fi
   fi
 
   run_kubectl apply -f ovnkube-node.yaml
@@ -1071,17 +1097,28 @@ kubectl_wait_pods() {
   # We will make sure that we timeout all commands at current seconds + the desired timeout.
   endtime=$(( SECONDS + OVN_TIMEOUT ))
 
-  for ds in ovnkube-node ovs-node; do
-    timeout=$(calculate_timeout ${endtime})
-    echo "Waiting for k8s to launch all ${ds} pods (timeout ${timeout})..."
-    kubectl rollout status daemonset -n ovn-kubernetes ${ds} --timeout ${timeout}s
-  done
+  if [ "$OVN_INTERCONNECT_ENABLE" == true ] && [ "$OVN_ENABLE_LOCAL_ZONE" == true ]; then
+    for ds in ovnkube-local ovs-node; do
+        timeout=$(calculate_timeout ${endtime})
+        echo "Waiting for k8s to launch all ${ds} pods (timeout ${timeout})..."
+        kubectl rollout status daemonset -n ovn-kubernetes ${ds} --timeout ${timeout}s
+      done
 
-  for name in ovnkube-db ovnkube-master; do
-    timeout=$(calculate_timeout ${endtime})
-    echo "Waiting for k8s to create ${name} pods (timeout ${timeout})..."
-    kubectl wait pods -n ovn-kubernetes -l name=${name} --for condition=Ready --timeout=${timeout}s
-  done
+      timeout=$(calculate_timeout ${endtime})
+      echo "Waiting for k8s to create ovnkube-local pods (timeout ${timeout})..."
+      kubectl wait pods -n ovn-kubernetes -l name=ovnkube-local --for condition=Ready --timeout=${timeout}s
+  else
+    for ds in ovnkube-node ovs-node; do
+      timeout=$(calculate_timeout ${endtime})
+      echo "Waiting for k8s to launch all ${ds} pods (timeout ${timeout})..."
+      kubectl rollout status daemonset -n ovn-kubernetes ${ds} --timeout ${timeout}s
+    done
+    for name in ovnkube-db ovnkube-master; do
+      timeout=$(calculate_timeout ${endtime})
+      echo "Waiting for k8s to create ${name} pods (timeout ${timeout})..."
+      kubectl wait pods -n ovn-kubernetes -l name=${name} --for condition=Ready --timeout=${timeout}s
+    done
+  fi
 
   timeout=$(calculate_timeout ${endtime})
   if ! kubectl wait -n kube-system --for=condition=ready pods --all --timeout=${timeout}s ; then
