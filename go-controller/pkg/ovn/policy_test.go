@@ -1728,8 +1728,8 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				err = fakeOvn.controller.addNetworkPolicy(networkPolicy)
 				gomega.Expect(err).To(gomega.HaveOccurred())
-				gomega.Expect(err.Error()).To(gomega.ContainSubstring("adding network policy " +
-					"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijk/networkpolicy1 failed: " +
+				gomega.Expect(err.Error()).To(gomega.ContainSubstring("failed to create Network Policy " +
+					"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijk/networkpolicy1: " +
 					"failed to create default deny port groups: unexpectedly found multiple results for provided predicate"))
 
 				//ensure the default PGs and ACLs were removed via rollback from add failure
@@ -1740,7 +1740,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
 				ginkgo.By("Deleting the network policy that failed to create and ensuring we don't panic")
-				err = fakeOvn.controller.deleteNetworkPolicy(networkPolicy, nil)
+				err = fakeOvn.controller.deleteNetworkPolicy(networkPolicy)
 				// I0623 policy.go:1285] Deleting network policy networkpolicy1 in namespace namespace1, np is nil: true
 				// W0623 policy.go:1315] Unable to delete network policy: namespace1/networkpolicy1 since its not found in cache
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -2239,16 +2239,13 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
 				ginkgo.By("Simulate the initial re-add of all network policies during upgrade and ensure we are stable")
-				nsInfo, nsUnlock, err := fakeOvn.controller.ensureNamespaceLocked(networkPolicy1.Namespace, false, nil)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				nsInfo.networkPolicies = map[string]*networkPolicy{} // reset cache so that we simulate the add that happens during upgrades
-				nsUnlock()
-				fakeOvn.controller.sharedNetpolPortGroups.Delete(networkPolicy1.Namespace)
+				fakeOvn.controller.networkPolicies.Delete(getPolicyKey(networkPolicy1))
+				fakeOvn.controller.sharedNetpolPortGroups.Delete(networkPolicy1.Namespace) // reset cache so that we simulate the add that happens during upgrades
 				err = fakeOvn.controller.addNetworkPolicy(networkPolicy1)
 				// TODO: FIX ME
 				gomega.Expect(err).To(gomega.HaveOccurred())
-				gomega.Expect(err.Error()).To(gomega.ContainSubstring("adding network policy " +
-					"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijk/networkpolicy1 failed: " +
+				gomega.Expect(err.Error()).To(gomega.ContainSubstring("failed to create Network Policy " +
+					"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijk/networkpolicy1: " +
 					"failed to create default deny port groups: unexpectedly found multiple results for provided predicate"))
 
 				return nil
