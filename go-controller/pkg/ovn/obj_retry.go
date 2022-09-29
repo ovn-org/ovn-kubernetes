@@ -123,10 +123,7 @@ func (r *RetryObjs) initRetryObjWithUpdate(oldObj, newObj interface{}, lockedKey
 // initRetryObjWithDelete creates a retry entry for an object that is being deleted,
 // so that, if it fails, the delete can be potentially retried later.
 // When applied to pods, we include the config object as well in case the namespace is removed
-// and the object is orphaned from the namespace. Similarly, when applied to network policies,
-// we include in config the networkPolicy struct used internally, for the same scenario where
-// a namespace is being deleted along with its network policies and, in case of a delete retry of
-// one such network policy, we wouldn't be able to get to the networkPolicy struct from nsInfo.
+// and the object is orphaned from the namespace.
 //
 // The noRetryAdd boolean argument is to indicate whether to retry for addition
 func (r *RetryObjs) initRetryObjWithDelete(obj interface{}, lockedKey string, config interface{}, noRetryAdd bool) *retryObjEntry {
@@ -899,7 +896,7 @@ func (oc *Controller) updateResource(objectsToRetry *RetryObjs, oldObj, newObj i
 
 // Given a *RetryObjs instance, an object and optionally a cachedObj, deleteResource deletes the object from the cluster
 // according to the delete logic of its resource type. cachedObj is the internal cache entry for this object,
-// used for now for pods and network policies.
+// used for now only for pods.
 func (oc *Controller) deleteResource(objectsToRetry *RetryObjs, obj, cachedObj interface{}) error {
 	switch objectsToRetry.oType {
 	case factory.PodType:
@@ -913,18 +910,11 @@ func (oc *Controller) deleteResource(objectsToRetry *RetryObjs, obj, cachedObj i
 		return oc.removePod(pod, portInfo)
 
 	case factory.PolicyType:
-		var cachedNP *networkPolicy
 		knp, ok := obj.(*knet.NetworkPolicy)
 		if !ok {
 			return fmt.Errorf("could not cast obj of type %T to *knet.NetworkPolicy", obj)
 		}
-
-		if cachedObj != nil {
-			if cachedNP, ok = cachedObj.(*networkPolicy); !ok {
-				cachedNP = nil
-			}
-		}
-		return oc.deleteNetworkPolicy(knp, cachedNP)
+		return oc.deleteNetworkPolicy(knp)
 
 	case factory.NodeType:
 		node, ok := obj.(*kapi.Node)
