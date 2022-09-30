@@ -104,7 +104,7 @@ func (o *FakeOVN) shutdown() {
 
 func (o *FakeOVN) init() {
 	var err error
-	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
+	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient, "")
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	err = o.watcher.Start()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())

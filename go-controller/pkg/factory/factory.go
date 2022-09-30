@@ -114,7 +114,7 @@ var (
 )
 
 // NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
-func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, error) {
+func NewMasterWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*WatchFactory, error) {
 	// resync time is 12 hours, none of the resources being watched in ovn-kubernetes have
 	// any race condition where a resync may be required e.g. cni executable on node watching for
 	// events on pods and assuming that an 'ADD' event will contain the annotations put in by
@@ -152,15 +152,6 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 			noAlternateProxySelector())
 	})
 
-	wf.iFactory.InformerFor(&discovery.EndpointSlice{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-		return discoveryinformers.NewFilteredEndpointSliceInformer(
-			c,
-			kapi.NamespaceAll,
-			resyncPeriod,
-			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
-			withServiceNameAndNoHeadlessServiceSelector())
-	})
-
 	var err error
 	// Create our informer-wrapper informer (and underlying shared informer) for types we need
 	wf.informers[PodType], err = newQueuedInformer(PodType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan,
@@ -186,10 +177,7 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[EndpointSliceType], err = newInformer(EndpointSliceType, wf.iFactory.Discovery().V1().EndpointSlices().Informer())
-	if err != nil {
-		return nil, err
-	}
+
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		wf.informers[EgressIPType], err = newInformer(EgressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer())
 		if err != nil {
@@ -210,6 +198,22 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 	}
 	if config.OVNKubernetesFeature.EnableEgressQoS {
 		wf.informers[EgressQoSType], err = newInformer(EgressQoSType, wf.egressQoSFactory.K8s().V1().EgressQoSes().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Enable endpointSlice watch only for combined mode master+node
+	if nodeName != "" {
+		wf.iFactory.InformerFor(&discovery.EndpointSlice{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+			return discoveryinformers.NewFilteredEndpointSliceInformer(
+				c,
+				kapi.NamespaceAll,
+				resyncPeriod,
+				cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+				withServiceNameAndNoHeadlessServiceSelector())
+		})
+		wf.informers[EndpointSliceType], err = newInformer(EndpointSliceType, wf.iFactory.Discovery().V1().EndpointSlices().Informer())
 		if err != nil {
 			return nil, err
 		}

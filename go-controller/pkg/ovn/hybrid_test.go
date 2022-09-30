@@ -215,7 +215,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				EgressQoSClient:      egressQoSFakeClient,
 			}
 
-			f, err = factory.NewMasterWatchFactory(fakeClient)
+			f, err = factory.NewMasterWatchFactory(fakeClient, "")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -339,7 +339,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			hostAddrs, err := util.ParseNodeHostAddresses(updatedNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			f, err = factory.NewMasterWatchFactory(fakeClient)
+			f, err = factory.NewMasterWatchFactory(fakeClient, "")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -597,7 +597,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			hostAddrs, err := util.ParseNodeHostAddresses(updatedNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			f, err = factory.NewMasterWatchFactory(fakeClient)
+			f, err = factory.NewMasterWatchFactory(fakeClient, "")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -790,7 +790,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			hostAddrs, err := util.ParseNodeHostAddresses(updatedNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			f, err = factory.NewMasterWatchFactory(fakeClient)
+			f, err = factory.NewMasterWatchFactory(fakeClient, "")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1048,7 +1048,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			hostAddrs, err := util.ParseNodeHostAddresses(updatedNode)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			f, err = factory.NewMasterWatchFactory(fakeClient)
+			f, err = factory.NewMasterWatchFactory(fakeClient, "")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())

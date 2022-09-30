@@ -383,7 +383,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			if objType == EndpointSliceType {
 				wf, err = NewNodeWatchFactory(ovnClientset, nodeName)
 			} else {
-				wf, err = NewMasterWatchFactory(ovnClientset)
+				wf, err = NewMasterWatchFactory(ovnClientset, "")
 			}
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
@@ -468,7 +468,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			if objType == EndpointSliceType {
 				wf, err = NewNodeWatchFactory(ovnClientset, nodeName)
 			} else {
-				wf, err = NewMasterWatchFactory(ovnClientset)
+				wf, err = NewMasterWatchFactory(ovnClientset, "")
 			}
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
@@ -547,7 +547,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	Context("when EgressIP is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewMasterWatchFactory(ovnClientset)
+			wf, err = NewMasterWatchFactory(ovnClientset, "")
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -560,7 +560,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 	Context("when EgressFirewall is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewMasterWatchFactory(ovnClientset)
+			wf, err = NewMasterWatchFactory(ovnClientset, "")
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -573,7 +573,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 	Context("when EgressQoS is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewMasterWatchFactory(ovnClientset)
+			wf, err = NewMasterWatchFactory(ovnClientset, "")
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -614,7 +614,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	}
 
 	It("responds to pod add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewMasterWatchFactory(ovnClientset, "")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -650,7 +650,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to multiple pod add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewMasterWatchFactory(ovnClientset, "")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -733,7 +733,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to namespace add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewMasterWatchFactory(ovnClientset, "")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -769,7 +769,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to node add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewMasterWatchFactory(ovnClientset, "")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -805,7 +805,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to multiple node add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewMasterWatchFactory(ovnClientset, "")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -903,7 +903,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			nodes = append(nodes, node)
 		}
 
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewMasterWatchFactory(ovnClientset, "")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -982,7 +982,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			namespaces = append(namespaces, namespace)
 		}
 
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewMasterWatchFactory(ovnClientset, "")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1050,7 +1050,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to policy add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewMasterWatchFactory(ovnClientset, "")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1085,7 +1085,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemovePolicyHandler(h)
 	})
 
-	It("responds to endpointslices add/update/delete events", func() {
+	It("(node) responds to endpointslices add/update/delete events", func() {
 		wf, err = NewNodeWatchFactory(ovnClientset, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
@@ -1123,8 +1123,46 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveEndpointSliceHandler(h)
 	})
 
+	It("(master) responds to endpointslices add/update/delete events", func() {
+		wf, err = NewMasterWatchFactory(ovnClientset, nodeName)
+		Expect(err).NotTo(HaveOccurred())
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
+
+		added := newEndpointSlice("myEndpointSlice", "default", "myService")
+		h, c := addHandler(wf, EndpointSliceType, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				epSlice := obj.(*discovery.EndpointSlice)
+				Expect(reflect.DeepEqual(epSlice, added)).To(BeTrue())
+			},
+			UpdateFunc: func(old, new interface{}) {
+				newEpSlice := new.(*discovery.EndpointSlice)
+				Expect(reflect.DeepEqual(newEpSlice, added)).To(BeTrue())
+				Expect(len(newEpSlice.Endpoints)).To(Equal(1))
+			},
+			DeleteFunc: func(obj interface{}) {
+				epSlice := obj.(*discovery.EndpointSlice)
+				Expect(reflect.DeepEqual(epSlice, added)).To(BeTrue())
+			},
+		})
+
+		endpointSlices = append(endpointSlices, added)
+		endpointSliceWatch.Add(added)
+		Eventually(c.getAdded, 2).Should(Equal(1))
+		added.Endpoints = append(added.Endpoints, discovery.Endpoint{
+			Addresses: []string{"1.1.1.1"},
+		})
+		endpointSliceWatch.Modify(added)
+		Eventually(c.getUpdated, 2).Should(Equal(1))
+		endpointSlices = endpointSlices[:0]
+		endpointSliceWatch.Delete(added)
+		Eventually(c.getDeleted, 2).Should(Equal(1))
+
+		wf.RemoveEndpointSliceHandler(h)
+	})
+
 	It("responds to service add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewMasterWatchFactory(ovnClientset, "")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1160,7 +1198,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to egressFirewall add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewMasterWatchFactory(ovnClientset, "")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1195,7 +1233,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveEgressFirewallHandler(h)
 	})
 	It("responds to egressIP add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewMasterWatchFactory(ovnClientset, "")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1230,7 +1268,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveEgressIPHandler(h)
 	})
 	It("responds to cloudPrivateIPConfig add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewMasterWatchFactory(ovnClientset, "")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1265,7 +1303,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveCloudPrivateIPConfigHandler(h)
 	})
 	It("responds to egressQoS add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewMasterWatchFactory(ovnClientset, "")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1300,7 +1338,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveEgressQoSHandler(h)
 	})
 	It("stops processing events after the handler is removed", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewMasterWatchFactory(ovnClientset, "")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1331,7 +1369,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("filters correctly by label and namespace", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewMasterWatchFactory(ovnClientset, "")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1402,7 +1440,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("correctly handles object updates that cause filter changes", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewMasterWatchFactory(ovnClientset, "")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())

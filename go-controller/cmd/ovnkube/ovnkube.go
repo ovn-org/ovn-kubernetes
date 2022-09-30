@@ -224,7 +224,7 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	if master != "" {
 		var err error
 		// create factory and start the controllers asked for
-		masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset)
+		masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset, node)
 		if err != nil {
 			return err
 		}

@@ -445,7 +445,7 @@ var _ = ginkgo.Describe("Master Operations", func() {
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			f, err = factory.NewMasterWatchFactory(fakeClient)
+			f, err = factory.NewMasterWatchFactory(fakeClient, "")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -551,7 +551,7 @@ var _ = ginkgo.Describe("Master Operations", func() {
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			f, err = factory.NewMasterWatchFactory(fakeClient)
+			f, err = factory.NewMasterWatchFactory(fakeClient, "")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -656,7 +656,7 @@ var _ = ginkgo.Describe("Master Operations", func() {
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			f, err = factory.NewMasterWatchFactory(fakeClient)
+			f, err = factory.NewMasterWatchFactory(fakeClient, "")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -817,7 +817,7 @@ subnet=%s
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			f, err = factory.NewMasterWatchFactory(fakeClient)
+			f, err = factory.NewMasterWatchFactory(fakeClient, "")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -957,7 +957,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-		f, err = factory.NewMasterWatchFactory(fakeClient)
+		f, err = factory.NewMasterWatchFactory(fakeClient, "")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = f.Start()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1622,7 +1622,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 				EgressFirewallClient: egressFirewallFakeClient,
 				EgressQoSClient:      egressQoSFakeClient,
 			}
-			f, err := factory.NewMasterWatchFactory(fakeClient)
+			f, err := factory.NewMasterWatchFactory(fakeClient, "")
 			if err != nil {
 				t.Fatalf("Error creating master watch factory: %v", err)
 			}
@@ -1721,7 +1721,7 @@ func TestController_syncNodesRetriable(t *testing.T) {
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
 			}
-			f, err := factory.NewMasterWatchFactory(fakeClient)
+			f, err := factory.NewMasterWatchFactory(fakeClient, "")
 			if err != nil {
 				t.Fatalf("%s: Error creating master watch factory: %v", tt.name, err)
 			}
@@ -1808,7 +1808,7 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
 			}
-			f, err := factory.NewMasterWatchFactory(fakeClient)
+			f, err := factory.NewMasterWatchFactory(fakeClient, "")
 			if err != nil {
 				t.Fatalf("%s: Error creating master watch factory: %v", tt.name, err)
 			}
