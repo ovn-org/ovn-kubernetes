@@ -630,42 +630,74 @@ func waitClusterHealthy(f *framework.Framework, numMasters int) error {
 	})
 }
 
-// waitForDaemonSetUpdate waits for the daemon set in a given namespace to be
+// waitForRollout waits for the daemon set in a given namespace to be
 // successfully rolled out following an update.
 //
 // If allowedNotReadyNodes is -1, this method returns immediately without waiting.
-func waitForDaemonSetUpdate(c clientset.Interface, ns string, dsName string, allowedNotReadyNodes int32, timeout time.Duration) error {
+func waitForRollout(c clientset.Interface, ns string, resource string, allowedNotReadyNodes int32, timeout time.Duration) error {
 	if allowedNotReadyNodes == -1 {
 		return nil
 	}
 
+	resourceAtoms := strings.Split(resource, "/")
+	if len(resourceAtoms) != 2 {
+		return fmt.Errorf("invalid resource format, expected <type>/<name>, got %s", resource)
+	}
+	resourceType := resourceAtoms[0]
+	resourceName := resourceAtoms[1]
+
 	start := time.Now()
 	framework.Logf("Waiting up to %v for daemonset %s in namespace %s to update",
-		timeout, dsName, ns)
+		timeout, resource, ns)
 
 	return wait.Poll(framework.Poll, timeout, func() (bool, error) {
-		ds, err := c.AppsV1().DaemonSets(ns).Get(context.TODO(), dsName, metav1.GetOptions{})
-		if err != nil {
-			framework.Logf("Error getting daemonset: %s in namespace: %s: %v", dsName, ns, err)
-			return false, err
+		var generation, observedGeneration int64
+		var updated, desired, available int32
+		switch resourceType {
+		case "daemonset", "daemonsets", "ds":
+			ds, err := c.AppsV1().DaemonSets(ns).Get(context.TODO(), resourceName, metav1.GetOptions{})
+			if err != nil {
+				framework.Logf("Error getting resource %s in namespace: %s: %v", resource, ns, err)
+				return false, err
+			}
+			generation = ds.Generation
+			observedGeneration = ds.Status.ObservedGeneration
+			updated = ds.Status.UpdatedNumberScheduled
+			desired = ds.Status.DesiredNumberScheduled
+			available = ds.Status.NumberAvailable
+
+		case "deployment", "deployments", "deploy":
+			dp, err := c.AppsV1().Deployments(ns).Get(context.TODO(), resourceName, metav1.GetOptions{})
+			if err != nil {
+				framework.Logf("Error getting resource %s in namespace: %s: %v", resource, ns, err)
+				return false, err
+			}
+			generation = dp.Generation
+			observedGeneration = dp.Status.ObservedGeneration
+			updated = dp.Status.UpdatedReplicas
+			desired = dp.Status.Replicas
+			available = dp.Status.AvailableReplicas
+
+		default:
+			return false, fmt.Errorf("unsupported resource type %s", resourceType)
 		}
 
-		if ds.Generation <= ds.Status.ObservedGeneration {
-			if ds.Status.UpdatedNumberScheduled < ds.Status.DesiredNumberScheduled {
-				framework.Logf("Waiting for daemon set %q rollout to finish: %d out of %d new pods have been updated (%d seconds elapsed)", ds.Name,
-					ds.Status.UpdatedNumberScheduled, ds.Status.DesiredNumberScheduled, int(time.Since(start).Seconds()))
+		if generation <= observedGeneration {
+			if updated < desired {
+				framework.Logf("Waiting for %s rollout to finish: %d out of %d new pods have been updated (%d seconds elapsed)", resource,
+					updated, desired, int(time.Since(start).Seconds()))
 				return false, nil
 			}
-			if ds.Status.NumberAvailable < ds.Status.DesiredNumberScheduled {
-				framework.Logf("Waiting for daemon set %q rollout to finish: %d of %d updated pods are available (%d seconds elapsed)", ds.Name,
-					ds.Status.NumberAvailable, ds.Status.DesiredNumberScheduled, int(time.Since(start).Seconds()))
+			if available < desired {
+				framework.Logf("Waiting for %s rollout to finish: %d of %d updated pods are available (%d seconds elapsed)", resource,
+					available, desired, int(time.Since(start).Seconds()))
 				return false, nil
 			}
-			framework.Logf("daemon set %q successfully rolled out", ds.Name)
+			framework.Logf("resource %q successfully rolled out", resource)
 			return true, nil
 		}
 
-		framework.Logf("Waiting for daemon set: %s spec update to be observed...", dsName)
+		framework.Logf("Waiting for %s spec update to be observed...", resource)
 		return false, nil
 	})
 }
@@ -875,4 +907,73 @@ func countACLLogs(targetNodeName string, policyNameRegex string, expectedACLVerd
 
 	framework.Logf("The audit log contains %d occurrences of: '%s'", count, stringToMatch)
 	return count, nil
+}
+
+// getTemplateContainerEnv gets the value of an environment variable in a container template
+func getTemplateContainerEnv(namespace, resource, container, key string) string {
+	args := []string{"get", resource,
+		"-o=jsonpath='{.spec.template.spec.containers[?(@.name==\"" + container + "\")].env[?(@.name==\"" + key + "\")].value}'"}
+	value := framework.RunKubectlOrDie(ovnNamespace, args...)
+	return strings.Trim(value, "'")
+}
+
+// setUnsetTemplateContainerEnv sets and unsets environment variables in a container
+// template and waits for the rollout
+func setUnsetTemplateContainerEnv(c kubernetes.Interface, namespace, resource, container string, set map[string]string, unset ...string) {
+	args := []string{"set", "env", resource, "-c", container}
+	env := make([]string, 0, len(set)+len(unset))
+	for k, v := range set {
+		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+	for _, k := range unset {
+		env = append(env, fmt.Sprintf("%s-", k))
+	}
+	framework.Logf("Setting environment in %s container %s of namespace %s to %v", resource, container, namespace, env)
+	framework.RunKubectlOrDie(namespace, append(args, env...)...)
+
+	// Make sure the change has rolled out
+	// TODO (Change this to use the exported upstream function)
+	err := waitForRollout(c, namespace, resource, 0, rolloutTimeout)
+	framework.ExpectNoError(err)
+}
+
+// allowOrDropNodeInputTrafficOnPort ensures or deletes a drop iptables
+// input rule for the specified node, protocol and port
+func allowOrDropNodeInputTrafficOnPort(op, nodeName, protocol, port string) {
+	switch op {
+	case "Allow":
+		op = "delete"
+	case "Drop":
+		op = "insert"
+	default:
+		framework.Failf("unsupported op %s", op)
+	}
+
+	args := []string{"get", "pods", "--selector=app=ovnkube-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", nodeName), "-o", "jsonpath={.items..metadata.name}"}
+	ovnKubePodName := framework.RunKubectlOrDie(ovnNamespace, args...)
+
+	ipTablesArgs := []string{"INPUT", "-p", protocol, "--dport", port, "-j", "DROP"}
+
+	args = []string{"exec", ovnKubePodName, "-c", "ovnkube-node", "--", "iptables", "--check"}
+	_, err := framework.RunKubectl(ovnNamespace, append(args, ipTablesArgs...)...)
+
+	// errors known to be equivalent to not found
+	notFound1 := "No chain/target/match by that name"
+	notFound2 := "does a matching rule exist in that chain?"
+	notFound := err != nil && (strings.Contains(err.Error(), notFound1) || strings.Contains(err.Error(), notFound2))
+	if err != nil && !notFound {
+		framework.Failf("failed to check existance of iptables rule on node %s: %v", nodeName, err)
+	}
+
+	if op == "delete" && notFound {
+		// rule is not there
+		return
+	} else if op == "append" && err == nil {
+		// rule is already there
+		return
+	}
+
+	args = []string{"exec", ovnKubePodName, "-c", "ovnkube-node", "--", "iptables", "--" + op}
+	framework.Logf("%s iptables input rule for protocol %s port %s action DROP on node %s", op, protocol, port, nodeName)
+	framework.RunKubectlOrDie(ovnNamespace, append(args, ipTablesArgs...)...)
 }

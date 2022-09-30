@@ -41,7 +41,7 @@ const (
 	podNetworkAnnotation = "k8s.ovn.org/pod-networks"
 	retryInterval        = 1 * time.Second  // polling interval timer
 	retryTimeout         = 40 * time.Second // polling timeout
-	dsRestartTimeout     = 10 * time.Minute // ds restart timeout
+	rolloutTimeout       = 10 * time.Minute
 	agnhostImage         = "k8s.gcr.io/e2e-test-images/agnhost:2.26"
 	iperf3Image          = "quay.io/sronanrh/iperf"
 )
@@ -808,6 +808,142 @@ var _ = ginkgo.Describe("test e2e inter-node connectivity between worker nodes",
 	})
 })
 
+const (
+	OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME     = "OVN_EGRESSIP_HEALTHCHECK_PORT"
+	DEFAULT_OVN_EGRESSIP_GRPC_HEALTHCHECK_PORT = "9107"
+	OVN_EGRESSIP_LEGACY_HEALTHCHECK_PORT_ENV   = "0" // the env value to enable legacy health check
+	OVN_EGRESSIP_LEGACY_HEALTHCHECK_PORT       = "9" // the actual port used by legacy health check
+)
+
+func labelNodeForEgress(f *framework.Framework, nodeName string) {
+	framework.Logf("Labeling node %s with k8s.ovn.org/egress-assignable", nodeName)
+	framework.AddOrUpdateLabelOnNode(f.ClientSet, nodeName, "k8s.ovn.org/egress-assignable", "dummy")
+}
+
+func unlabelNodeForEgress(f *framework.Framework, nodeName string) {
+	framework.Logf("Removing label k8s.ovn.org/egress-assignable from node %s", nodeName)
+	framework.RemoveLabelOffNode(f.ClientSet, nodeName, "k8s.ovn.org/egress-assignable")
+}
+
+type egressNodeAvailabilityHandler interface {
+	// Enable node availability for egress
+	Enable(nodeName string)
+	// Disable node availability for egress
+	Disable(nodeName string)
+	// Restore a node to its original availability for egress
+	Restore(nodeName string)
+}
+
+type egressNodeAvailabilityHandlerViaLabel struct {
+	F *framework.Framework
+}
+
+func (h *egressNodeAvailabilityHandlerViaLabel) Enable(nodeName string) {
+	labelNodeForEgress(h.F, nodeName)
+}
+
+func (h *egressNodeAvailabilityHandlerViaLabel) Disable(nodeName string) {
+	unlabelNodeForEgress(h.F, nodeName)
+}
+
+func (h *egressNodeAvailabilityHandlerViaLabel) Restore(nodeName string) {
+	gomega.Expect(h.F.ClientSet).NotTo(gomega.BeNil())
+	unlabelNodeForEgress(h.F, nodeName)
+}
+
+type egressNodeAvailabilityHandlerViaHealthCheck struct {
+	F              *framework.Framework
+	Legacy         bool
+	modeWasLegacy  bool
+	modeWasChecked bool
+	oldGRPCPort    string
+}
+
+// checkMode checks what kind of update this handler needs to do to set the
+// egress ip health check working in the mode we want or back to the mode it was
+// originally working at. Returns the port the health check environment value
+// needs to be set at, the actual port the health check needs to be running on
+// and whether a value change is needed in the environment to change the mode.
+func (h *egressNodeAvailabilityHandlerViaHealthCheck) checkMode(restore bool) (string, string, bool) {
+	if restore && !h.modeWasChecked {
+		// we havent checked what was the original mode yet so there is nothing
+		// to restore to.
+		return "", "", false
+	}
+	framework.Logf("Checking the ovnkube-node and ovnkube-master healthcheck ports in use")
+	portNode := getTemplateContainerEnv(ovnNamespace, "daemonset/ovnkube-node", "ovnkube-node", OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME)
+	portMaster := getTemplateContainerEnv(ovnNamespace, "deployment/ovnkube-master", "ovnkube-master", OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME)
+
+	wantLegacy := (h.Legacy && !restore) || (h.modeWasLegacy && restore)
+	isLegacy := portNode == "" || portNode == OVN_EGRESSIP_LEGACY_HEALTHCHECK_PORT_ENV
+	outOfSync := portNode != portMaster
+
+	if !h.modeWasChecked {
+		h.modeWasChecked = true
+		h.modeWasLegacy = isLegacy
+		h.oldGRPCPort = portNode
+	}
+
+	if wantLegacy {
+		// we want to change to legacy health check if we are not already in
+		// that mode or if node and master are out of sync
+		return OVN_EGRESSIP_LEGACY_HEALTHCHECK_PORT_ENV, OVN_EGRESSIP_LEGACY_HEALTHCHECK_PORT, !isLegacy || outOfSync
+	}
+	if !wantLegacy && !isLegacy {
+		// we are is GRPC health check mode as we want but reset if node and
+		// master are out of sync
+		return portNode, portNode, outOfSync
+	}
+	// we are in legacy health check mode and we want to change to GRPC mode.
+	// use the original GRPC port if restoring
+	var port string
+	if restore {
+		port = h.oldGRPCPort
+	} else {
+		port = DEFAULT_OVN_EGRESSIP_GRPC_HEALTHCHECK_PORT
+	}
+	return port, port, true
+}
+
+// setMode reconfigures ovnkube, if needed, to use the health check type, either
+// GRPC or Legacy, as indicated by the h.Legacy setting. Additionaly it can
+// configure an iptables rule to drop the health check traffic on the given
+// node. If restore is true, it will restore the configuration to the one first
+// observed.
+func (h *egressNodeAvailabilityHandlerViaHealthCheck) setMode(nodeName string, reject, restore bool) {
+	portEnv, port, changeEnv := h.checkMode(restore)
+	if changeEnv {
+		framework.Logf("Updating ovnkube to use health check on port %s (0 is legacy, non 0 is GRPC)", portEnv)
+		setEnv := map[string]string{OVN_EGRESSIP_HEALTHCHECK_PORT_ENV_NAME: portEnv}
+		setUnsetTemplateContainerEnv(h.F.ClientSet, ovnNamespace, "daemonset/ovnkube-node", "ovnkube-node", setEnv)
+		setUnsetTemplateContainerEnv(h.F.ClientSet, ovnNamespace, "deployment/ovnkube-master", "ovnkube-master", setEnv)
+	}
+	if port != "" {
+		op := "Allow"
+		if reject {
+			op = "Drop"
+		}
+		framework.Logf("%s health check traffic on port %s on node %s", op, port, nodeName)
+		allowOrDropNodeInputTrafficOnPort(op, nodeName, "tcp", port)
+	}
+}
+
+func (h *egressNodeAvailabilityHandlerViaHealthCheck) Enable(nodeName string) {
+	labelNodeForEgress(h.F, nodeName)
+	h.setMode(nodeName, false, false)
+}
+
+func (h *egressNodeAvailabilityHandlerViaHealthCheck) Restore(nodeName string) {
+	h.setMode(nodeName, false, true)
+	unlabelNodeForEgress(h.F, nodeName)
+	h.modeWasChecked = false
+}
+
+func (h *egressNodeAvailabilityHandlerViaHealthCheck) Disable(nodeName string) {
+	// keep the node labeled but block helath check traffic
+	h.setMode(nodeName, true, false)
+}
+
 var _ = ginkgo.Describe("e2e egress IP validation", func() {
 	const (
 		servicePort          int32  = 9999
@@ -834,6 +970,7 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		egress1Node, egress2Node, pod1Node, pod2Node, targetNode, deniedTargetNode node
 		pod1Name                                                                   = "e2e-egressip-pod-1"
 		pod2Name                                                                   = "e2e-egressip-pod-2"
+		usedEgressNodeAvailabilityHandler                                          egressNodeAvailabilityHandler
 	)
 
 	targetPodAndTest := func(namespace, fromName, toName, toIP string) wait.ConditionFunc {
@@ -1017,9 +1154,12 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 	// Validate the egress IP by creating a httpd container on the kind networking
 	// (effectively seen as "outside" the cluster) and curl it from a pod in the cluster
 	// which matches the egress IP stanza.
+	// Do this using different methods to disable a node for egress:
+	// - removing the egress-assignable label
+	// - impeding traffic for the GRPC health check
 
 	/* This test does the following:
-	   0. Add the "k8s.ovn.org/egress-assignable" label to two nodes
+	   0. Set two nodes as available for egress
 	   1. Create an EgressIP object with two egress IPs defined
 	   2. Check that the status is of length two and both are assigned to different nodes
 	   3. Create two pods matching the EgressIP: one running on each of the egress nodes
@@ -1029,46 +1169,54 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 	   7. Update one of the pods, unmatching the EgressIP
 	   8. Check connectivity from that one to an external "node" and verify that the IP is the node IP.
 	   9. Check connectivity from the other one to an external "node"  and verify that the IPs are both of the above
-	   10. Remove the node label off one of the egress node
+	   10. Set one node as unavailable for egress
 	   11. Check that the status is of length one
 	   12. Check connectivity from the remaining pod to an external "node" and verify that the IP is the remaining egress IP
-	   13. Remove the node label off the last egress node
+	   13. Set the other node as unavailable for egress
 	   14. Check that the status is of length zero
 	   15. Check connectivity from the remaining pod to an external "node" and verify that the IP is the node IP.
-	   16. Re-add the label to one of the egress nodes
+	   16. Set one node back as available for egress
 	   17. Check that the status is of length one
 	   18. Check connectivity from the remaining pod to an external "node" and verify that the IP is the remaining egress IP
 	*/
-	ginkgo.It("Should validate the egress IP functionality against remote hosts", func() {
+	ginkgo.Describe("Using different methods to disable a node's availability for egress", func() {
+		ginkgo.AfterEach(func() {
+			usedEgressNodeAvailabilityHandler.Restore(egress1Node.name)
+			usedEgressNodeAvailabilityHandler.Restore(egress2Node.name)
+		})
 
-		command := []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%s", podHTTPPort)}
+		table.DescribeTable("Should validate the egress IP functionality against remote hosts",
+			func(egressNodeAvailabilityHandler egressNodeAvailabilityHandler) {
+				// set the egressNodeAvailabilityHandler that we are using so that
+				// we can restore in AfterEach
+				usedEgressNodeAvailabilityHandler = egressNodeAvailabilityHandler
 
-		ginkgo.By("0. Add the \"k8s.ovn.org/egress-assignable\" label to two nodes")
-		framework.AddOrUpdateLabelOnNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
-		framework.AddOrUpdateLabelOnNode(f.ClientSet, egress2Node.name, "k8s.ovn.org/egress-assignable", "dummy")
+				ginkgo.By("0. Setting two nodes as available for egress")
+				usedEgressNodeAvailabilityHandler.Enable(egress1Node.name)
+				usedEgressNodeAvailabilityHandler.Enable(egress2Node.name)
 
-		podNamespace := f.Namespace
-		podNamespace.Labels = map[string]string{
-			"name": f.Namespace.Name,
-		}
-		updateNamespace(f, podNamespace)
+				podNamespace := f.Namespace
+				podNamespace.Labels = map[string]string{
+					"name": f.Namespace.Name,
+				}
+				updateNamespace(f, podNamespace)
 
-		ginkgo.By("1. Create an EgressIP object with two egress IPs defined")
-		dupIP := func(ip net.IP) net.IP {
-			dup := make(net.IP, len(ip))
-			copy(dup, ip)
-			return dup
-		}
-		// Assign the egress IP without conflicting with any node IP,
-		// the kind subnet is /16 or /64 so the following should be fine.
-		egressNodeIP := net.ParseIP(egress1Node.nodeIP)
-		egressIP1 := dupIP(egressNodeIP)
-		egressIP1[len(egressIP1)-2]++
-		egressIP2 := dupIP(egressNodeIP)
-		egressIP2[len(egressIP2)-2]++
-		egressIP2[len(egressIP2)-1]++
+				ginkgo.By("1. Create an EgressIP object with two egress IPs defined")
+				dupIP := func(ip net.IP) net.IP {
+					dup := make(net.IP, len(ip))
+					copy(dup, ip)
+					return dup
+				}
+				// Assign the egress IP without conflicting with any node IP,
+				// the kind subnet is /16 or /64 so the following should be fine.
+				egressNodeIP := net.ParseIP(egress1Node.nodeIP)
+				egressIP1 := dupIP(egressNodeIP)
+				egressIP1[len(egressIP1)-2]++
+				egressIP2 := dupIP(egressNodeIP)
+				egressIP2[len(egressIP2)-2]++
+				egressIP2[len(egressIP2)-1]++
 
-		var egressIPConfig = fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
+				var egressIPConfig = fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
 kind: EgressIP
 metadata:
     name: ` + svcname + `
@@ -1083,97 +1231,104 @@ spec:
         matchLabels:
             name: ` + f.Namespace.Name + `
 `)
-		if err := ioutil.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
-			framework.Failf("Unable to write CRD config to disk: %v", err)
-		}
-		defer func() {
-			if err := os.Remove(egressIPYaml); err != nil {
-				framework.Logf("Unable to remove the CRD config from disk: %v", err)
-			}
-		}()
 
-		framework.Logf("Create the EgressIP configuration")
-		framework.RunKubectlOrDie("default", "create", "-f", egressIPYaml)
-
-		ginkgo.By("2. Check that the status is of length two and both are assigned to different nodes")
-		statuses := verifyEgressIPStatusLengthEquals(2)
-		if statuses[0].Node == statuses[1].Node {
-			framework.Failf("Step 2. Check that the status is of length two and both are assigned to different nodess, failed, err: both egress IPs have been assigned to the same node")
-		}
-
-		ginkgo.By("3. Create two pods matching the EgressIP: one running on each of the egress nodes")
-		createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
-		createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
-
-		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			for _, podName := range []string{pod1Name, pod2Name} {
-				kubectlOut := getPodAddress(podName, f.Namespace.Name)
-				srcIP := net.ParseIP(kubectlOut)
-				if srcIP == nil {
-					return false, nil
+				if err := ioutil.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
+					framework.Failf("Unable to write CRD config to disk: %v", err)
 				}
-			}
-			return true, nil
-		})
-		framework.ExpectNoError(err, "Step 3. Create two pods matching the EgressIP: one running on each of the egress nodes, failed, err: %v", err)
+				defer func() {
+					if err := os.Remove(egressIPYaml); err != nil {
+						framework.Logf("Unable to remove the CRD config from disk: %v", err)
+					}
+				}()
 
-		pod2IP := getPodAddress(pod2Name, f.Namespace.Name)
-		ginkgo.By("4. Check connectivity from both to an external \"node\" and verify that the IPs are both of the above")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{egressIP1.String(), egressIP2.String()}))
-		framework.ExpectNoError(err, "Step 4. Check connectivity from first to an external \"node\" and verify that the IPs are both of the above, failed: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod2Name, podNamespace.Name, true, []string{egressIP1.String(), egressIP2.String()}))
-		framework.ExpectNoError(err, "Step 4. Check connectivity from second to an external \"node\" and verify that the IPs are both of the above, failed: %v", err)
+				framework.Logf("Create the EgressIP configuration")
+				framework.RunKubectlOrDie("default", "create", "-f", egressIPYaml)
 
-		ginkgo.By("5. Check connectivity from one pod to the other and verify that the connection is achieved")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetPodAndTest(f.Namespace.Name, pod1Name, pod2Name, pod2IP))
-		framework.ExpectNoError(err, "Step 5. Check connectivity from one pod to the other and verify that the connection is achieved, failed, err: %v", err)
+				ginkgo.By("2. Check that the status is of length two and both are assigned to different nodes")
+				statuses := verifyEgressIPStatusLengthEquals(2)
+				if statuses[0].Node == statuses[1].Node {
+					framework.Failf("Step 2. Check that the status is of length two and both are assigned to different nodess, failed, err: both egress IPs have been assigned to the same node")
+				}
 
-		ginkgo.By("6. Check connectivity from both pods to the api-server (running hostNetwork:true) and verifying that the connection is achieved")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetDestinationAndTest(podNamespace.Name, fmt.Sprintf("https://%s/version", net.JoinHostPort(getApiAddress(), "443")), []string{pod1Name, pod2Name}))
-		framework.ExpectNoError(err, "Step 6. Check connectivity from both pods to the api-server (running hostNetwork:true) and verifying that the connection is achieved, failed, err: %v", err)
+				ginkgo.By("3. Create two pods matching the EgressIP: one running on each of the egress nodes")
+				command := []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%s", podHTTPPort)}
+				createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
+				createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
 
-		ginkgo.By("7. Update one of the pods, unmatching the EgressIP")
-		pod2 := getPod(f, pod2Name)
-		pod2.Labels = map[string]string{}
-		updatePod(f, pod2)
+				err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+					for _, podName := range []string{pod1Name, pod2Name} {
+						kubectlOut := getPodAddress(podName, f.Namespace.Name)
+						srcIP := net.ParseIP(kubectlOut)
+						if srcIP == nil {
+							return false, nil
+						}
+					}
+					return true, nil
+				})
+				framework.ExpectNoError(err, "Step 3. Create two pods matching the EgressIP: one running on each of the egress nodes, failed, err: %v", err)
 
-		ginkgo.By("8. Check connectivity from that one to an external \"node\" and verify that the IP is the node IP.")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod2Name, podNamespace.Name, true, []string{pod2Node.nodeIP}))
-		framework.ExpectNoError(err, "Step 8. Check connectivity from that one to an external \"node\" and verify that the IP is the node IP, failed, err: %v", err)
+				pod2IP := getPodAddress(pod2Name, f.Namespace.Name)
+				ginkgo.By("4. Check connectivity from both to an external \"node\" and verify that the IPs are both of the above")
+				err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{egressIP1.String(), egressIP2.String()}))
+				framework.ExpectNoError(err, "Step 4. Check connectivity from first to an external \"node\" and verify that the IPs are both of the above, failed: %v", err)
+				err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod2Name, podNamespace.Name, true, []string{egressIP1.String(), egressIP2.String()}))
+				framework.ExpectNoError(err, "Step 4. Check connectivity from second to an external \"node\" and verify that the IPs are both of the above, failed: %v", err)
 
-		ginkgo.By("9. Check connectivity from the other one to an external \"node\" and verify that the IPs are both of the above")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{egressIP1.String(), egressIP2.String()}))
-		framework.ExpectNoError(err, "Step 9. Check connectivity from the other one to an external \"node\" and verify that the IP is one of the egress IPs, failed, err: %v", err)
+				ginkgo.By("5. Check connectivity from one pod to the other and verify that the connection is achieved")
+				err = wait.PollImmediate(retryInterval, retryTimeout, targetPodAndTest(f.Namespace.Name, pod1Name, pod2Name, pod2IP))
+				framework.ExpectNoError(err, "Step 5. Check connectivity from one pod to the other and verify that the connection is achieved, failed, err: %v", err)
 
-		ginkgo.By("10. Remove the node label off one of the egress node")
-		framework.RemoveLabelOffNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable")
+				ginkgo.By("6. Check connectivity from both pods to the api-server (running hostNetwork:true) and verifying that the connection is achieved")
+				err = wait.PollImmediate(retryInterval, retryTimeout, targetDestinationAndTest(podNamespace.Name, fmt.Sprintf("https://%s/version", net.JoinHostPort(getApiAddress(), "443")), []string{pod1Name, pod2Name}))
+				framework.ExpectNoError(err, "Step 6. Check connectivity from both pods to the api-server (running hostNetwork:true) and verifying that the connection is achieved, failed, err: %v", err)
 
-		ginkgo.By("11. Check that the status is of length one")
-		statuses = verifyEgressIPStatusLengthEquals(1)
+				ginkgo.By("7. Update one of the pods, unmatching the EgressIP")
+				pod2 := getPod(f, pod2Name)
+				pod2.Labels = map[string]string{}
+				updatePod(f, pod2)
 
-		ginkgo.By("12. Check connectivity from the remaining pod to an external \"node\" and verify that the IP is the remaining egress IP")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{statuses[0].EgressIP}))
-		framework.ExpectNoError(err, "Step 12. Check connectivity from the remaining pod to an external \"node\" and verify that the IP is the remaining egress IP, failed, err: %v", err)
+				ginkgo.By("8. Check connectivity from that one to an external \"node\" and verify that the IP is the node IP.")
+				err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod2Name, podNamespace.Name, true, []string{pod2Node.nodeIP}))
+				framework.ExpectNoError(err, "Step 8. Check connectivity from that one to an external \"node\" and verify that the IP is the node IP, failed, err: %v", err)
 
-		ginkgo.By("13. Remove the node label off the last egress node")
-		framework.RemoveLabelOffNode(f.ClientSet, egress2Node.name, "k8s.ovn.org/egress-assignable")
+				ginkgo.By("9. Check connectivity from the other one to an external \"node\" and verify that the IPs are both of the above")
+				err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{egressIP1.String(), egressIP2.String()}))
+				framework.ExpectNoError(err, "Step 9. Check connectivity from the other one to an external \"node\" and verify that the IP is one of the egress IPs, failed, err: %v", err)
 
-		ginkgo.By("14. Check that the status is of length zero")
-		statuses = verifyEgressIPStatusLengthEquals(0)
+				ginkgo.By("10. Setting one node as unavailable for egress")
+				usedEgressNodeAvailabilityHandler.Disable(egress1Node.name)
 
-		ginkgo.By("15. Check connectivity from the remaining pod to an external \"node\" and verify that the IP is the node IP.")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{pod1Node.nodeIP}))
-		framework.ExpectNoError(err, "Step  15. Check connectivity from the remaining pod to an external \"node\" and verify that the IP is the node IP, failed, err: %v", err)
+				ginkgo.By("11. Check that the status is of length one")
+				statuses = verifyEgressIPStatusLengthEquals(1)
 
-		ginkgo.By("16. Re-add the label to one of the egress nodes")
-		framework.AddOrUpdateLabelOnNode(f.ClientSet, egress2Node.name, "k8s.ovn.org/egress-assignable", "dummy")
+				ginkgo.By("12. Check connectivity from the remaining pod to an external \"node\" and verify that the IP is the remaining egress IP")
+				err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{statuses[0].EgressIP}))
+				framework.ExpectNoError(err, "Step 12. Check connectivity from the remaining pod to an external \"node\" and verify that the IP is the remaining egress IP, failed, err: %v", err)
 
-		ginkgo.By("17. Check that the status is of length one")
-		statuses = verifyEgressIPStatusLengthEquals(1)
+				ginkgo.By("13. Setting the other node as unavailable for egress")
+				usedEgressNodeAvailabilityHandler.Disable(egress2Node.name)
 
-		ginkgo.By("18. Check connectivity from the remaining pod to an external \"node\" and verify that the IP is the remaining egress IP")
-		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{statuses[0].EgressIP}))
-		framework.ExpectNoError(err, "Step 18. Check connectivity from the remaining pod to an external \"node\" and verify that the IP is the remaining egress IP, failed, err: %v", err)
+				ginkgo.By("14. Check that the status is of length zero")
+				statuses = verifyEgressIPStatusLengthEquals(0)
+
+				ginkgo.By("15. Check connectivity from the remaining pod to an external \"node\" and verify that the IP is the node IP.")
+				err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{pod1Node.nodeIP}))
+				framework.ExpectNoError(err, "Step  15. Check connectivity from the remaining pod to an external \"node\" and verify that the IP is the node IP, failed, err: %v", err)
+
+				ginkgo.By("16. Setting one node as available for egress")
+				usedEgressNodeAvailabilityHandler.Enable(egress2Node.name)
+
+				ginkgo.By("17. Check that the status is of length one")
+				statuses = verifyEgressIPStatusLengthEquals(1)
+
+				ginkgo.By("18. Check connectivity from the remaining pod to an external \"node\" and verify that the IP is the remaining egress IP")
+				err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{statuses[0].EgressIP}))
+				framework.ExpectNoError(err, "Step 18. Check connectivity from the remaining pod to an external \"node\" and verify that the IP is the remaining egress IP, failed, err: %v", err)
+			},
+			table.Entry("disabling egress nodes with egress-assignable label", &egressNodeAvailabilityHandlerViaLabel{f}),
+			table.Entry("disabling egress nodes impeding GRCP health check", &egressNodeAvailabilityHandlerViaHealthCheck{F: f, Legacy: false}),
+			table.Entry("disabling egress nodes impeding Legacy health check", &egressNodeAvailabilityHandlerViaHealthCheck{F: f, Legacy: true}),
+		)
 	})
 
 	// Validate the egress IP by creating a httpd container on the kind networking
@@ -2834,17 +2989,11 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 					collectorContainer, collectorIP)
 			}
 			addressAndPort := net.JoinHostPort(collectorIP, strconv.Itoa(int(collectorPort)))
+
 			ginkgo.By(fmt.Sprintf("Configuring ovnkube-node to use the new %s collector target", protocolStr))
-			framework.Logf("Setting %s environment variable to %s",
-				ovnEnvVar, addressAndPort)
+			setEnv := map[string]string{ovnEnvVar: addressAndPort}
+			setUnsetTemplateContainerEnv(f.ClientSet, ovnNs, "daemonset/ovnkube-node", "ovnkube-node", setEnv)
 
-			framework.RunKubectlOrDie(ovnNs, "set", "env", "daemonset/ovnkube-node", "-c", "ovnkube-node",
-				fmt.Sprintf("%s=%s", ovnEnvVar, addressAndPort))
-
-			// Make sure the updated daemonset has rolled out
-			// TODO (Change this to use the exported upstream function)
-			err = waitForDaemonSetUpdate(f.ClientSet, ovnNs, "ovnkube-node", 0, dsRestartTimeout)
-			framework.ExpectNoError(err)
 			ginkgo.By(fmt.Sprintf("Checking that the collector container received %s data", protocolStr))
 			keyword := keywordInLogs[protocol]
 			collectorContainerLogsTest := func() wait.ConditionFunc {
@@ -2873,13 +3022,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 				protocolStr, keyword))
 
 			ginkgo.By(fmt.Sprintf("Unsetting %s variable in ovnkube-node daemonset", ovnEnvVar))
-			framework.RunKubectlOrDie(ovnNs, "set", "env", "daemonset/ovnkube-node", "-c", "ovnkube-node",
-				fmt.Sprintf("%s-", ovnEnvVar))
-
-			// Make sure the updated daemonset has rolled out
-			// TODO (Change this to use the exported upstream function)
-			err = waitForDaemonSetUpdate(f.ClientSet, ovnNs, "ovnkube-node", 0, dsRestartTimeout)
-			framework.ExpectNoError(err)
+			setUnsetTemplateContainerEnv(f.ClientSet, ovnNs, "daemonset/ovnkube-node", "ovnkube-node", nil, ovnEnvVar)
 
 			ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNs).List(context.TODO(), metav1.ListOptions{
 				LabelSelector: "name=ovnkube-node",
