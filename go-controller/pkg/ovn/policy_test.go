@@ -112,7 +112,7 @@ func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, po
 		egressOptions = map[string]string{}
 	}
 	egressDenyACL := libovsdbops.BuildACL(
-		networkPolicy.Namespace+"_"+egressDefaultDenySuffix,
+		networkPolicy.Namespace+"_"+networkPolicy.Name,
 		egressDirection,
 		types.DefaultDenyPriority,
 		"inport == @"+pgHash+"_"+egressDenyPG,
@@ -128,7 +128,7 @@ func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, po
 	egressDenyACL.UUID = *egressDenyACL.Name + "-egressDenyACL-UUID"
 
 	egressAllowACL := libovsdbops.BuildACL(
-		networkPolicy.Namespace+"_"+arpAllowPolicySuffix,
+		networkPolicy.Namespace+"_ARPallowPolicy",
 		egressDirection,
 		types.DefaultAllowPriority,
 		"inport == @"+pgHash+"_"+egressDenyPG+" && (arp || nd)",
@@ -144,7 +144,7 @@ func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, po
 	egressAllowACL.UUID = *egressAllowACL.Name + "-egressAllowACL-UUID"
 
 	ingressDenyACL := libovsdbops.BuildACL(
-		networkPolicy.Namespace+"_"+ingressDefaultDenySuffix,
+		networkPolicy.Namespace+"_"+networkPolicy.Name,
 		nbdb.ACLDirectionToLport,
 		types.DefaultDenyPriority,
 		"outport == @"+pgHash+"_"+ingressDenyPG,
@@ -160,7 +160,7 @@ func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, po
 	ingressDenyACL.UUID = *ingressDenyACL.Name + "-ingressDenyACL-UUID"
 
 	ingressAllowACL := libovsdbops.BuildACL(
-		networkPolicy.Namespace+"_"+arpAllowPolicySuffix,
+		networkPolicy.Namespace+"_ARPallowPolicy",
 		nbdb.ACLDirectionToLport,
 		types.DefaultAllowPriority,
 		"outport == @"+pgHash+"_"+ingressDenyPG+" && (arp || nd)",
@@ -1667,10 +1667,10 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				}
 				pgHash := hashedPortGroup(networkPolicy.Namespace)
 				leftOverACLFromUpgrade1 := libovsdbops.BuildACL(
-					networkPolicy.Namespace+"_"+arpAllowPolicySuffix,
+					networkPolicy.Namespace+"_ARPallowPolicy",
 					nbdb.ACLDirectionFromLport,
 					types.DefaultAllowPriority,
-					"inport == @"+pgHash+"_"+egressDenyPG+" && (arp)", // invalid ACL match; won't be cleaned up
+					"inport == @"+pgHash+"_"+egressDenyPG+" && arp",
 					nbdb.ACLActionAllow,
 					types.OvnACLLoggingMeter,
 					nbdb.ACLSeverityInfo,
@@ -1680,10 +1680,10 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					},
 					egressOptions,
 				)
-				leftOverACLFromUpgrade1.UUID = *leftOverACLFromUpgrade1.Name + "-egressAllowACL-UUID1"
+				leftOverACLFromUpgrade1.UUID = *leftOverACLFromUpgrade1.Name + "-ingressAllowACL-UUID1"
 
 				leftOverACLFromUpgrade2 := libovsdbops.BuildACL(
-					networkPolicy.Namespace+"_"+arpAllowPolicySuffix,
+					networkPolicy.Namespace+"_ARPallowPolicy",
 					nbdb.ACLDirectionFromLport,
 					types.DefaultAllowPriority,
 					"inport == @"+pgHash+"_"+egressDenyPG+" && (arp || nd)",
@@ -1696,7 +1696,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					},
 					egressOptions,
 				)
-				leftOverACLFromUpgrade2.UUID = *leftOverACLFromUpgrade2.Name + "-egressAllowACL-UUID2"
+				leftOverACLFromUpgrade2.UUID = *leftOverACLFromUpgrade2.Name + "-ingressAllowACL-UUID2"
 
 				initialDB1 := libovsdb.TestSetup{
 					NBData: []libovsdb.TestData{
@@ -1740,226 +1740,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				// I0623 policy.go:1285] Deleting network policy networkpolicy1 in namespace namespace1, np is nil: true
 				// W0623 policy.go:1315] Unable to delete network policy: namespace1/networkpolicy1 since its not found in cache
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				return nil
-			}
-
-			err := app.Run([]string{app.Name})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		})
-
-		ginkgo.It("older stale ACLs should be cleaned up or updated at startup via syncNetworkPolicies", func() {
-			app.Action = func(ctx *cli.Context) error {
-				namespace1 := *newNamespace(namespaceName1)
-				nPodTest := newTPod(
-					"node1",
-					"10.128.1.0/24",
-					"10.128.1.2",
-					"10.128.1.1",
-					"myPod",
-					"10.128.1.3",
-					"0a:58:0a:80:01:03",
-					namespace1.Name,
-				)
-				nPod := newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP)
-
-				const (
-					labelName string = "pod-name"
-					labelVal  string = "server"
-					portNum   int32  = 81
-				)
-				nPod.Labels[labelName] = labelVal
-
-				tcpProtocol := v1.Protocol(v1.ProtocolTCP)
-				networkPolicy1 := newNetworkPolicy("networkpolicy1", namespace1.Name,
-					metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							labelName: labelVal,
-						},
-					},
-					[]knet.NetworkPolicyIngressRule{{
-						Ports: []knet.NetworkPolicyPort{{
-							Port:     &intstr.IntOrString{IntVal: portNum},
-							Protocol: &tcpProtocol,
-						}},
-					}},
-					[]knet.NetworkPolicyEgressRule{{
-						Ports: []knet.NetworkPolicyPort{{
-							Port:     &intstr.IntOrString{IntVal: portNum},
-							Protocol: &tcpProtocol,
-						}},
-					}},
-				)
-				networkPolicy2 := newNetworkPolicy("networkpolicy2", namespace1.Name,
-					metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							labelName: labelVal,
-						},
-					},
-					[]knet.NetworkPolicyIngressRule{{
-						Ports: []knet.NetworkPolicyPort{{
-							Port:     &intstr.IntOrString{IntVal: portNum + 1},
-							Protocol: &tcpProtocol,
-						}},
-					}},
-					[]knet.NetworkPolicyEgressRule{{
-						Ports: []knet.NetworkPolicyPort{{
-							Port:     &intstr.IntOrString{IntVal: portNum + 1},
-							Protocol: &tcpProtocol,
-						}},
-					}},
-				)
-
-				egressOptions := map[string]string{
-					// older versions of ACLs don't have, should be added by syncNetworkPolicies on startup
-					//	"apply-after-lb": "true",
-				}
-				pgHash := hashedPortGroup("leftover1")
-				// ACL1: leftover arp allow ACL egress with old match (arp)
-				leftOverACL1FromUpgrade := libovsdbops.BuildACL(
-					"leftover1"+"_"+arpAllowPolicySuffix,
-					nbdb.ACLDirectionFromLport,
-					types.DefaultAllowPriority,
-					"inport == @"+pgHash+"_"+egressDenyPG+" && arp",
-					nbdb.ACLActionAllow,
-					types.OvnACLLoggingMeter,
-					nbdb.ACLSeverityInfo,
-					false,
-					map[string]string{
-						defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress),
-					},
-					egressOptions,
-				)
-				leftOverACL1FromUpgrade.UUID = *leftOverACL1FromUpgrade.Name + "-egressAllowACL-UUID"
-				testOnlyEgressDenyPG := libovsdbops.BuildPortGroup(
-					pgHash+"_"+egressDenyPG,
-					pgHash+"_"+egressDenyPG,
-					nil,
-					[]*nbdb.ACL{leftOverACL1FromUpgrade},
-				)
-				testOnlyEgressDenyPG.UUID = testOnlyEgressDenyPG.Name + "-UUID"
-				// ACL2: leftover arp allow ACL ingress with old match (arp)
-				leftOverACL2FromUpgrade := libovsdbops.BuildACL(
-					"leftover1"+"_"+arpAllowPolicySuffix,
-					nbdb.ACLDirectionToLport,
-					types.DefaultAllowPriority,
-					"outport == @"+pgHash+"_"+ingressDenyPG+" && arp",
-					nbdb.ACLActionAllow,
-					types.OvnACLLoggingMeter,
-					nbdb.ACLSeverityInfo,
-					false,
-					map[string]string{
-						defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeIngress),
-					},
-					nil,
-				)
-				leftOverACL2FromUpgrade.UUID = *leftOverACL2FromUpgrade.Name + "-ingressAllowACL-UUID"
-				testOnlyIngressDenyPG := libovsdbops.BuildPortGroup(
-					pgHash+"_"+ingressDenyPG,
-					pgHash+"_"+ingressDenyPG,
-					nil,
-					[]*nbdb.ACL{leftOverACL2FromUpgrade},
-				)
-				testOnlyIngressDenyPG.UUID = testOnlyIngressDenyPG.Name + "-UUID"
-
-				// ACL3: leftover default deny ACL egress with old name (namespace_policyname)
-				leftOverACL3FromUpgrade := libovsdbops.BuildACL(
-					"leftover1"+"_"+networkPolicy2.Name,
-					nbdb.ACLDirectionFromLport,
-					types.DefaultDenyPriority,
-					"inport == @"+pgHash+"_"+egressDenyPG,
-					nbdb.ACLActionDrop,
-					types.OvnACLLoggingMeter,
-					nbdb.ACLSeverityInfo,
-					false,
-					map[string]string{
-						defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeEgress),
-					},
-					egressOptions,
-				)
-				leftOverACL3FromUpgrade.UUID = *leftOverACL3FromUpgrade.Name + "-egressDenyACL-UUID"
-
-				// ACL4: leftover default deny ACL ingress with old name (namespace_policyname)
-				leftOverACL4FromUpgrade := libovsdbops.BuildACL(
-					"leftover1"+"_"+networkPolicy2.Name,
-					nbdb.ACLDirectionToLport,
-					types.DefaultDenyPriority,
-					"outport == @"+pgHash+"_"+ingressDenyPG,
-					nbdb.ACLActionDrop,
-					types.OvnACLLoggingMeter,
-					nbdb.ACLSeverityInfo,
-					false,
-					map[string]string{
-						defaultDenyPolicyTypeACLExtIdKey: string(knet.PolicyTypeIngress),
-					},
-					nil,
-				)
-				leftOverACL4FromUpgrade.UUID = *leftOverACL4FromUpgrade.Name + "-ingressDenyACL-UUID"
-
-				initialDB1 := libovsdb.TestSetup{
-					NBData: []libovsdb.TestData{
-						&nbdb.LogicalSwitch{
-							Name: "node1",
-						},
-						leftOverACL1FromUpgrade,
-						leftOverACL2FromUpgrade,
-						leftOverACL3FromUpgrade,
-						leftOverACL4FromUpgrade,
-						testOnlyIngressDenyPG,
-						testOnlyEgressDenyPG,
-					},
-				}
-
-				fakeOvn.startWithDBSetup(initialDB1,
-					&v1.NamespaceList{
-						Items: []v1.Namespace{namespace1},
-					},
-					&v1.PodList{
-						Items: []v1.Pod{*nPod},
-					},
-					&knet.NetworkPolicyList{
-						Items: []knet.NetworkPolicy{*networkPolicy1},
-					},
-				)
-				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
-				err := fakeOvn.controller.WatchNamespaces()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				fakeOvn.controller.WatchPods()
-				fakeOvn.controller.WatchNetworkPolicy()
-
-				_, err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy1.Namespace).
-					Create(context.TODO(), networkPolicy2, metav1.CreateOptions{})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				npTest := kNetworkPolicy{}
-				expectedData := []libovsdb.TestData{}
-				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
-				gressPolicy1ExpectedData := npTest.getPolicyData(networkPolicy1, []string{nPodTest.portUUID},
-					nil, []int32{portNum}, "", false)
-				defaultDeny1ExpectedData := npTest.getDefaultDenyData(networkPolicy1, []string{nPodTest.portUUID},
-					"", false)
-				expectedData = append(expectedData, gressPolicy1ExpectedData...)
-				expectedData = append(expectedData, defaultDeny1ExpectedData...)
-				gressPolicy2ExpectedData := npTest.getPolicyData(networkPolicy2, []string{nPodTest.portUUID},
-					nil, []int32{portNum + 1}, "", false)
-				expectedData = append(expectedData, gressPolicy2ExpectedData...)
-				egressOptions = map[string]string{
-					"apply-after-lb": "true",
-				}
-				leftOverACL3FromUpgrade.Options = egressOptions
-				newDefaultDenyEgressACLName := "leftover1_" + egressDefaultDenySuffix
-				newDefaultDenyIngressACLName := "leftover1_" + ingressDefaultDenySuffix
-				leftOverACL3FromUpgrade.Name = &newDefaultDenyEgressACLName
-				leftOverACL4FromUpgrade.Name = &newDefaultDenyIngressACLName
-				expectedData = append(expectedData, leftOverACL3FromUpgrade)
-				expectedData = append(expectedData, leftOverACL4FromUpgrade)
-				testOnlyIngressDenyPG.ACLs = nil // Sync Function should remove stale ACL from PGs and delete the ACL
-				testOnlyEgressDenyPG.ACLs = nil  // Sync Function should remove stale ACL from PGs and delete the ACL
-				expectedData = append(expectedData, testOnlyIngressDenyPG)
-				expectedData = append(expectedData, testOnlyEgressDenyPG)
-
-				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
 				return nil
 			}
