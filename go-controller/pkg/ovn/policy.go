@@ -346,12 +346,12 @@ func buildDenyACLs(namespace, policy, pg string, aclLogging *ACLLoggingLevels, p
 	if policyType == knet.PolicyTypeIngress {
 		denyACL = buildACL(namespace, pg, ingressDefaultDenySuffix, nbdb.ACLDirectionToLport,
 			types.DefaultDenyPriority, denyMatch, nbdb.ACLActionDrop, aclLogging, policyType)
-		allowACL = buildACL(namespace, pg, arpAllowPolicySuffix, nbdb.ACLDirectionToLport,
+		allowACL = buildACL(namespace, pg, "ARPallowPolicy", nbdb.ACLDirectionToLport,
 			types.DefaultAllowPriority, allowMatch, nbdb.ACLActionAllow, nil, policyType)
 	} else {
 		denyACL = buildACL(namespace, pg, egressDefaultDenySuffix, nbdb.ACLDirectionFromLport,
 			types.DefaultDenyPriority, denyMatch, nbdb.ACLActionDrop, aclLogging, policyType)
-		allowACL = buildACL(namespace, pg, arpAllowPolicySuffix, nbdb.ACLDirectionFromLport,
+		allowACL = buildACL(namespace, pg, "ARPallowPolicy", nbdb.ACLDirectionFromLport,
 			types.DefaultAllowPriority, allowMatch, nbdb.ACLActionAllow, nil, policyType)
 	}
 	return
