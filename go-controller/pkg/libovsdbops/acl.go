@@ -30,17 +30,11 @@ func isEquivalentACL(existing *nbdb.ACL, searched *nbdb.ACL) bool {
 		return true
 	}
 
-	eName := GetACLName(existing)
-	sName := GetACLName(searched)
-	// TODO if we want to support adding/removing external ids,
-	// we need to compare them differently, perhaps just the common subset
-	if eName != "" && eName == sName && reflect.DeepEqual(existing.ExternalIDs, searched.ExternalIDs) {
-		return true
-	}
 	return existing.Priority == searched.Priority &&
 		existing.Direction == searched.Direction &&
 		existing.Match == searched.Match &&
-		existing.Action == searched.Action
+		existing.Action == searched.Action &&
+		reflect.DeepEqual(existing.ExternalIDs, searched.ExternalIDs)
 }
 
 type aclPredicate func(*nbdb.ACL) bool
