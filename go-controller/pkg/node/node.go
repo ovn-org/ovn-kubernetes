@@ -705,7 +705,8 @@ func (n *OvnNode) checkAndDeleteStaleConntrackEntriesForNamespace(newNs *kapi.Na
 	for _, gwIP := range gatewayIPs {
 		go func(gwIP string) {
 			defer wg.Done()
-			if len(gwIP) > 0 {
+			if len(gwIP) > 0 && !utilnet.IsIPv6String(gwIP) {
+				// TODO: Add support for IPv6 external gateways
 				if hwAddr, err := util.GetMACAddressFromARP(net.ParseIP(gwIP)); err != nil {
 					klog.Errorf("Failed to lookup hardware address for gatewayIP %s: %v", gwIP, err)
 				} else if len(hwAddr) > 0 {
