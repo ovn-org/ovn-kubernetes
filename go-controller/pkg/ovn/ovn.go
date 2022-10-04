@@ -113,6 +113,13 @@ type Controller struct {
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
 
+	// network policies map, key should be retrieved with getPolicyKey(policy *knet.NetworkPolicy).
+	// network policies that failed to be created will also be added here, and can be retried or cleaned up later.
+	// network policy is only deleted from this map after successful cleanup.
+	// Allowed order of locking is namespace Lock -> oc.networkPolicies key Lock -> networkPolicy.Lock
+	// Don't take namespace Lock while holding networkPolicy key lock to avoid deadlock.
+	networkPolicies *syncmap.SyncMap[*networkPolicy]
+
 	// map of existing shared port groups for network policies
 	// port group exists in the db if and only if port group key is present in this map
 	// key is namespace
@@ -258,6 +265,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		externalGWCache:              make(map[ktypes.NamespacedName]*externalRouteInfo),
 		exGWCacheMutex:               sync.RWMutex{},
 		addressSetFactory:            addressSetFactory,
+		networkPolicies:              syncmap.NewSyncMap[*networkPolicy](),
 		sharedNetpolPortGroups:       syncmap.NewSyncMap[*defaultDenyPortGroups](),
 		eIPC: egressIPController{
 			egressIPAssignmentMutex:           &sync.Mutex{},

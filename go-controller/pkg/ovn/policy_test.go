@@ -1726,7 +1726,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				err = fakeOvn.controller.addNetworkPolicy(networkPolicy)
 				gomega.Expect(err).To(gomega.HaveOccurred())
-				gomega.Expect(err.Error()).To(gomega.ContainSubstring("adding network policy namespace1/networkpolicy1 failed: failed to create default deny port groups: unexpectedly found multiple results for provided predicate"))
+				gomega.Expect(err.Error()).To(gomega.ContainSubstring("failed to create Network Policy namespace1/networkpolicy1: failed to create default deny port groups: unexpectedly found multiple results for provided predicate"))
 
 				//ensure the default PGs and ACLs were removed via rollback from add failure
 				expectedData := []libovsdb.TestData{}
@@ -1736,7 +1736,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
 				ginkgo.By("Deleting the network policy that failed to create and ensuring we don't panic")
-				err = fakeOvn.controller.deleteNetworkPolicy(networkPolicy, nil)
+				err = fakeOvn.controller.deleteNetworkPolicy(networkPolicy)
 				// I0623 policy.go:1285] Deleting network policy networkpolicy1 in namespace namespace1, np is nil: true
 				// W0623 policy.go:1315] Unable to delete network policy: namespace1/networkpolicy1 since its not found in cache
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
