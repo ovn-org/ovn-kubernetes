@@ -135,6 +135,29 @@ func (_m *NodeWatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHa
 	return r0, r1
 }
 
+// GetEndpointSlice provides a mock function with given fields: namespace, name
+func (_m *NodeWatchFactory) GetEndpointSlice(namespace string, name string) (*v1.EndpointSlice, error) {
+	ret := _m.Called(namespace, name)
+
+	var r0 *v1.EndpointSlice
+	if rf, ok := ret.Get(0).(func(string, string) *v1.EndpointSlice); ok {
+		r0 = rf(namespace, name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.EndpointSlice)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(namespace, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetEndpointSlices provides a mock function with given fields: namespace, svcName
 func (_m *NodeWatchFactory) GetEndpointSlices(namespace string, svcName string) ([]*v1.EndpointSlice, error) {
 	ret := _m.Called(namespace, svcName)
@@ -151,6 +174,29 @@ func (_m *NodeWatchFactory) GetEndpointSlices(namespace string, svcName string) 
 	var r1 error
 	if rf, ok := ret.Get(1).(func(string, string) error); ok {
 		r1 = rf(namespace, svcName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetNamespace provides a mock function with given fields: name
+func (_m *NodeWatchFactory) GetNamespace(name string) (*corev1.Namespace, error) {
+	ret := _m.Called(name)
+
+	var r0 *corev1.Namespace
+	if rf, ok := ret.Get(0).(func(string) *corev1.Namespace); ok {
+		r0 = rf(name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*corev1.Namespace)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(name)
 	} else {
 		r1 = ret.Error(1)
 	}
