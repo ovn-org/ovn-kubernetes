@@ -187,6 +187,10 @@ OVN Kubernetes implements both External IPs and LoadBalancer Ingress IPs in the 
 OVN load balancers. It is the administrator's responsibility to route traffic to the Kubernetes nodes for
 both of these VIP types.
 
+[Egress IP](./docs/egress-ip.md). The egress IP address feature allows you to ensure that the traffic
+from one or more pods in one or more namespaces has a consistent source IP address for services outside the
+cluster network.
+
 ## Other
 [Unit test mocks](./docs/mocks-ut-faq.md)
 
