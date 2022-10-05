@@ -159,9 +159,9 @@ func (ehc *egressIPHealthClient) Connect(dialCtx context.Context, mgmtIPs []net.
 		if err == nil && conn != nil {
 			break
 		}
+		klog.Warningf("Could not connect to %s (%s): %v", ehc.nodeName, nodeAddr, err)
 	}
 	if conn == nil {
-		klog.Warningf("Could not connect to %s (%s): %v", ehc.nodeName, nodeAddr, err)
 		return false
 	}
 
