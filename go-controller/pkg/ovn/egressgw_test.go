@@ -42,7 +42,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
-		config.PrepareTestConfig()
+		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 
 		app = cli.NewApp()
 		app.Name = "test"
@@ -2477,7 +2477,9 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				_, fullMaskPodNet, _ := net.ParseCIDR("10.128.1.3/32")
-				addOrUpdatePerPodGRSNAT(fakeOvn.controller.nbClient, pod[0].Spec.NodeName, extIPs, []*net.IPNet{fullMaskPodNet})
+				gomega.Expect(
+					addOrUpdatePerPodGRSNAT(fakeOvn.controller.nbClient, pod[0].Spec.NodeName, extIPs, []*net.IPNet{fullMaskPodNet}),
+				).To(gomega.Succeed())
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				finalNB = []libovsdbtest.TestData{
 					&nbdb.LogicalRouter{
@@ -2519,5 +2521,5 @@ func injectNode(fakeOvn *FakeOVN) {
 			},
 		},
 	}
-	fakeOvn.controller.watchFactory.NodeInformer().GetStore().Add(node)
+	gomega.ExpectWithOffset(1, fakeOvn.controller.watchFactory.NodeInformer().GetStore().Add(node)).To(gomega.Succeed())
 }
