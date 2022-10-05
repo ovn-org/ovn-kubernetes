@@ -954,6 +954,11 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 				continue
 			}
 
+			// not needed for special masquerade IP
+			if ip.Equal(net.ParseIP(types.V4HostMasqueradeIP)) {
+				continue
+			}
+
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=500, in_port=%s, ip, ip_dst=%s, ip_src=%s,"+
 					"actions=ct(commit,zone=%d,table=4)",
@@ -1002,6 +1007,11 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 			}
 			// not needed for the physical IP
 			if ip.Equal(physicalIP.IP) {
+				continue
+			}
+
+			// not needed for special masquerade IP
+			if ip.Equal(net.ParseIP(types.V6HostMasqueradeIP)) {
 				continue
 			}
 
