@@ -7,11 +7,11 @@ import (
 	"net"
 	"time"
 
-	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
-
 	"github.com/urfave/cli/v2"
 
+	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	ovstypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
@@ -1161,7 +1161,6 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				pod, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podTest.namespace).Get(context.TODO(), podTest.podName, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				// Deleting port that no longer exists should be okay!
 				gomega.Expect(fakeOvn.controller.deleteLogicalPort(pod, nil)).To(gomega.Succeed(), "Deleting port that no longer exists should be okay")
 
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(pod.Namespace).Delete(context.TODO(), pod.Name, *metav1.NewDeleteOptions(0))
@@ -1169,6 +1168,12 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				// check the retry cache has no entry
 				checkRetryObjectEventually(key, false, fakeOvn.controller.retryPods)
+
+				// Remove Logical Switch created on behalf of node and make sure deleteLogicalPort will not fail
+				err = libovsdbops.DeleteLogicalSwitch(fakeOvn.controller.nbClient, pod.Spec.NodeName)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(fakeOvn.controller.deleteLogicalPort(pod, nil)).To(gomega.Succeed(), "Deleting port from switch that no longer exists should be okay")
+
 				return nil
 			}
 
@@ -1773,6 +1778,224 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+		ginkgo.It("correctly configures hybridOverlay: allocates the address on the node annotation", func() {
+			app.Action = func(ctx *cli.Context) error {
+				config.HybridOverlay.Enabled = true
+				namespaceT := *newNamespace("namespace1")
+				initialDB = libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						&nbdb.LogicalSwitch{
+							UUID:  "ls-uuid",
+							Name:  "node1",
+							Ports: []string{},
+						},
+					},
+				}
+
+				testNode := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+						Annotations: map[string]string{
+							hotypes.HybridOverlayDRIP: "10.128.1.53"},
+					},
+				}
+
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							testNode,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{},
+					},
+				)
+				fakeOvn.controller.lsManager.AddNode("node1", "ls-uuid", []*net.IPNet{ovntest.MustParseIPNet("10.128.1.0/24")})
+
+				err := fakeOvn.controller.WatchNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				expectData := []libovsdbtest.TestData{
+					&nbdb.LogicalSwitch{
+						UUID:  "ls-uuid",
+						Name:  "node1",
+						Ports: []string{},
+					},
+				}
+
+				gomega.Eventually(fakeOvn.nbClient).Should(
+					libovsdbtest.HaveData(expectData))
+				err = fakeOvn.controller.lsManager.AllocateIPs("node1", []*net.IPNet{ovntest.MustParseIPNet("10.128.1.53/32")})
+				gomega.Expect(err).To(gomega.Equal(ipallocator.ErrAllocated))
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			node, err := fakeOvn.controller.kube.GetNode("node1")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(node.Annotations[hotypes.HybridOverlayDRIP]).To(gomega.Equal("10.128.1.53"))
+
+		})
+		ginkgo.It("correctly configures hybridOverlay: allocates the .3 address because it is available", func() {
+			app.Action = func(ctx *cli.Context) error {
+				config.HybridOverlay.Enabled = true
+				namespaceT := *newNamespace("namespace1")
+				initialDB = libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						&nbdb.LogicalSwitch{
+							UUID:  "ls-uuid",
+							Name:  "node1",
+							Ports: []string{},
+						},
+					},
+				}
+
+				testNode := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+					},
+				}
+
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							testNode,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{},
+					},
+				)
+				fakeOvn.controller.lsManager.AddNode("node1", "ls-uuid", []*net.IPNet{ovntest.MustParseIPNet("10.128.1.0/24")})
+
+				err := fakeOvn.controller.WatchNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				expectData := []libovsdbtest.TestData{
+					&nbdb.LogicalSwitch{
+						UUID:  "ls-uuid",
+						Name:  "node1",
+						Ports: []string{},
+					},
+				}
+
+				gomega.Eventually(fakeOvn.nbClient).Should(
+					libovsdbtest.HaveData(expectData))
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			node, err := fakeOvn.controller.kube.GetNode("node1")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(node.Annotations[hotypes.HybridOverlayDRIP]).To(gomega.Equal("10.128.1.3"))
+			err = fakeOvn.controller.lsManager.AllocateIPs("node1", []*net.IPNet{ovntest.MustParseIPNet("10.128.1.3/32")})
+			gomega.Expect(err).To(gomega.Equal(ipallocator.ErrAllocated))
+
+		})
+		ginkgo.It("correctly configures hybridOverlay: allocates an address because the .3 is not available", func() {
+			app.Action = func(ctx *cli.Context) error {
+				config.HybridOverlay.Enabled = true
+				namespaceT := *newNamespace("namespace1")
+				t1 := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod1",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+				testNode := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+					},
+				}
+				initialDB = libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						&nbdb.LogicalSwitchPort{
+							UUID:      t1.portUUID,
+							Name:      util.GetLogicalPortName(t1.namespace, t1.podName),
+							Addresses: []string{t1.podMAC, t1.podIP},
+							ExternalIDs: map[string]string{
+								"pod":       "true",
+								"namespace": t1.namespace,
+							},
+							Options: map[string]string{
+								"requested-chassis": t1.nodeName,
+							},
+							PortSecurity: []string{fmt.Sprintf("%s %s", t1.podMAC, t1.podIP)},
+						},
+						&nbdb.LogicalSwitch{
+							Name:  "node1",
+							Ports: []string{t1.portUUID},
+						},
+					},
+				}
+				// update TestPod to check nbdb lsp later
+				t1.noIfaceIdVer = true
+
+				pod1 := newPod(t1.namespace, t1.podName, t1.nodeName, t1.podIP)
+				setPodAnnotations(pod1, t1)
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*pod1,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							testNode,
+						},
+					},
+				)
+				t1.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				// pod annotations and lsp exist now
+
+				err := fakeOvn.controller.WatchNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				fakeOvn.controller.WatchPods()
+
+				// check db values are updated to correlate with test pods settings
+				gomega.Eventually(fakeOvn.nbClient).Should(
+					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t1}, []string{"node1"})))
+				// check annotations are preserved
+				// makes sense only when handling is finished, therefore check after nbdb is updated
+				annotations := getPodAnnotations(fakeOvn.fakeClient.KubeClient, t1.namespace, t1.podName)
+				gomega.Expect(annotations).To(gomega.MatchJSON(t1.getAnnotationsJson()))
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			node, err := fakeOvn.controller.kube.GetNode("node1")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(node.Annotations[hotypes.HybridOverlayDRIP]).To(gomega.Equal("10.128.1.4"))
+			err = fakeOvn.controller.lsManager.AllocateIPs("node1", []*net.IPNet{ovntest.MustParseIPNet("10.128.1.4/32")})
+			gomega.Expect(err).To(gomega.Equal(ipallocator.ErrAllocated))
 		})
 	})
 

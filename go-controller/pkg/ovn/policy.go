@@ -51,8 +51,6 @@ const (
 	arpAllowPolicySuffix = "ARPallowPolicy"
 )
 
-var NetworkPolicyNotCreated error
-
 type networkPolicy struct {
 	// RWMutex synchronizes operations on the policy.
 	// Operations that change local and peer pods take a RLock,
@@ -74,7 +72,6 @@ type networkPolicy struct {
 
 	portGroupName string
 	deleted       bool //deleted policy
-	created       bool
 }
 
 func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
@@ -448,9 +445,6 @@ func (oc *Controller) updateACLLoggingForPolicy(np *networkPolicy, aclLogging *A
 		return nil
 	}
 
-	if !np.created {
-		return NetworkPolicyNotCreated
-	}
 	// Predicate for given network policy ACLs
 	p := func(item *nbdb.ACL) bool {
 		return item.ExternalIDs[namespaceACLExtIdKey] == np.namespace && item.ExternalIDs[policyACLExtIdKey] == np.name
@@ -478,22 +472,8 @@ func (oc *Controller) setNetworkPolicyACLLoggingForNamespace(ns string, nsInfo *
 	// now update network policy specific ACLs
 	klog.V(5).Infof("Setting network policy ACLs for ns: %s", ns)
 	for name, policy := range nsInfo.networkPolicies {
-		// REMOVEME(trozet): once we can hold the np lock for the duration of the np create
-		// there is no reason to do this loop
-		// 24ms is chosen because gomega.Eventually default timeout is 50ms
-		// libovsdb transactions take less than 50ms usually as well so pod create
-		// should be done within a couple iterations
-		retryErr := wait.PollImmediate(24*time.Millisecond, 1*time.Second, func() (bool, error) {
-			if err := oc.updateACLLoggingForPolicy(policy, &nsInfo.aclLogging); err == nil {
-				return true, nil
-			} else if errors.Is(err, NetworkPolicyNotCreated) {
-				return false, nil
-			} else {
-				return false, fmt.Errorf("unable to update ACL for network policy: %v", err)
-			}
-		})
-		if retryErr != nil {
-			return retryErr
+		if err := oc.updateACLLoggingForPolicy(policy, &nsInfo.aclLogging); err != nil {
+			return fmt.Errorf("unable to update ACL for network policy: %v", err)
 		}
 		klog.Infof("ACL for network policy: %s, updated to new log level: %s", name, nsInfo.aclLogging.Allow)
 	}
@@ -714,6 +694,22 @@ func podDeleteAllowMulticastPolicy(nbClient libovsdbclient.Client, ns string, po
 	return libovsdbops.DeletePortsFromPortGroup(nbClient, hashedPortGroup(ns), portUUID)
 }
 
+// policyType returns whether the policy is of type ingress and/or egress
+func policyType(policy *knet.NetworkPolicy) (bool, bool) {
+	var policyTypeIngress bool
+	var policyTypeEgress bool
+
+	for _, policyType := range policy.Spec.PolicyTypes {
+		if policyType == knet.PolicyTypeIngress {
+			policyTypeIngress = true
+		} else if policyType == knet.PolicyTypeEgress {
+			policyTypeEgress = true
+		}
+	}
+
+	return policyTypeIngress, policyTypeEgress
+}
+
 // localPodAddDefaultDeny ensures ports (i.e. pods) are in the correct
 // default-deny portgroups. Whether or not pods are in default-deny depends
 // on whether or not any policies select this pod, so there is a reference
@@ -722,22 +718,12 @@ func (oc *Controller) localPodAddDefaultDeny(policy *knet.NetworkPolicy,
 	ports ...*lpInfo) (ingressDenyPorts, egressDenyPorts []string) {
 	oc.lspMutex.Lock()
 
-	// Default deny rule.
-	// 1. Any pod that matches a network policy should get a default
-	// ingress deny rule.  This is irrespective of whether there
-	// is a ingress section in the network policy. But, if
-	// PolicyTypes in the policy has only "egress" in it, then
-	// it is a 'egress' only network policy and we should not
-	// add any default deny rule for ingress.
-	// 2. If there is any "egress" section in the policy or
-	// the PolicyTypes has 'egress' in it, we add a default
-	// egress deny rule.
-
 	ingressDenyPorts = []string{}
 	egressDenyPorts = []string{}
 
-	// Handle condition 1 above.
-	if !(len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) {
+	policyTypeIngress, policyTypeEgress := policyType(policy)
+
+	if policyTypeIngress {
 		for _, portInfo := range ports {
 			// if this is the first NP referencing this pod, then we
 			// need to add it to the port group.
@@ -751,8 +737,7 @@ func (oc *Controller) localPodAddDefaultDeny(policy *knet.NetworkPolicy,
 	}
 
 	// Handle condition 2 above.
-	if (len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) ||
-		len(policy.Spec.Egress) > 0 || len(policy.Spec.PolicyTypes) == 2 {
+	if policyTypeEgress {
 		for _, portInfo := range ports {
 			if oc.lspEgressDenyCache[portInfo.name] == 0 {
 				// again, reference count is 0, so add to port
@@ -777,9 +762,11 @@ func (oc *Controller) localPodDelDefaultDeny(
 	ingressDenyPorts = []string{}
 	egressDenyPorts = []string{}
 
+	policyTypeIngress, policyTypeEgress := policyType(np.policy)
+
 	// Remove port from ingress deny port-group for [Ingress] and [ingress,egress] PolicyTypes
 	// If NOT [egress] PolicyType
-	if !(len(np.policy.Spec.PolicyTypes) == 1 && np.policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) {
+	if policyTypeIngress {
 		for _, portInfo := range ports {
 			if oc.lspIngressDenyCache[portInfo.name] > 0 {
 				oc.lspIngressDenyCache[portInfo.name]--
@@ -793,8 +780,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 
 	// Remove port from egress deny port group for [egress] and [ingress,egress] PolicyTypes
 	// if [egress] PolicyType OR there are any egress rules OR [ingress,egress] PolicyType
-	if (len(np.policy.Spec.PolicyTypes) == 1 && np.policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) ||
-		len(np.egressPolicies) > 0 || len(np.policy.Spec.PolicyTypes) == 2 {
+	if policyTypeEgress {
 		for _, portInfo := range ports {
 			if oc.lspEgressDenyCache[portInfo.name] > 0 {
 				oc.lspEgressDenyCache[portInfo.name]--
@@ -1080,6 +1066,15 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 		podSelector       *metav1.LabelSelector
 	}
 	var policyHandlers []policyHandler
+
+	// Consider both ingress and egress rules of the policy regardless of this
+	// policy type. A pod is isolated as long as as it is selected by any
+	// namespace policy. Since we don't process all namespace policies on a
+	// given policy update that might change the isolation status of a selected
+	// pod, we have create the allow ACLs derived from the policy rules in case
+	// the selected pods become isolated in the future even if that is not their
+	// current status.
+
 	// Go through each ingress rule.  For each ingress rule, create an
 	// addressSet for the peer pods.
 	for i, ingressJSON := range policy.Spec.Ingress {
@@ -1154,6 +1149,7 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 		}
 		np.egressPolicies = append(np.egressPolicies, egress)
 	}
+
 	np.Unlock()
 
 	for _, handler := range policyHandlers {
@@ -1245,7 +1241,6 @@ func (oc *Controller) createNetworkPolicy(np *networkPolicy, policy *knet.Networ
 		return fmt.Errorf("failed to run ovsdb txn to add ports to port group: %v", err)
 	}
 	txOkCallBack()
-	np.created = true
 	return nil
 }
 

@@ -3,12 +3,15 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
+	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/pkg/errors"
 	kapi "k8s.io/api/core/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -111,6 +114,31 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 		ops, err = libovsdbops.DeleteLogicalSwitchPortsWithPredicateOps(oc.nbClient, ops, &sw, p)
 		if err != nil {
 			return fmt.Errorf("could not generate ops to delete stale ports from logical switch %s (%+v)", n.Name, err)
+		}
+
+		// have to set up the hybrid Overlay interface address here because all the pod IPs have been allocated above
+		if config.HybridOverlay.Enabled {
+			// check the annotation
+			nodeHybridOverlayDRIP := n.Annotations[hotypes.HybridOverlayDRIP]
+			var hybridOverlayDRIP []string
+			if len(nodeHybridOverlayDRIP) > 0 {
+				hybridOverlayDRIP = strings.Split(nodeHybridOverlayDRIP, ",")
+
+			}
+			AllocatedHybridOverlayDRIPes, err := oc.lsManager.AllocateHybridOverlay(n.Name, hybridOverlayDRIP)
+			if err != nil {
+				return fmt.Errorf("cannot allocate hybrid overlay interface addresses: %v", err)
+			}
+			var sliceHybridOverlayDRIP []string
+			for _, ip := range AllocatedHybridOverlayDRIPes {
+				sliceHybridOverlayDRIP = append(sliceHybridOverlayDRIP, ip.IP.String())
+			}
+			err = oc.kube.SetAnnotationsOnNode(n.Name, map[string]interface{}{hotypes.HybridOverlayDRIP: strings.Join(sliceHybridOverlayDRIP, ",")})
+			if err != nil {
+				return fmt.Errorf("cannot set hybrid annotations on node %s - %v", n.Name, err)
+
+			}
+
 		}
 	}
 
@@ -254,7 +282,8 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 		allOps = append(allOps, ops...)
 	}
 	ops, err = oc.delLSPOps(logicalPort, nodeName, portUUID)
-	if err != nil {
+	// Tolerate cases where logical switch of the logical port no longer exist in OVN.
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf("failed to create delete ops for the lsp: %s: %s", logicalPort, err)
 	}
 	allOps = append(allOps, ops...)
@@ -779,7 +808,7 @@ func (oc *Controller) delLSPOps(logicalPort, logicalSwitch, lspUUID string) ([]o
 	}
 	ops, err := libovsdbops.DeleteLogicalSwitchPortsOps(oc.nbClient, nil, &lsw, &lsp)
 	if err != nil {
-		return nil, fmt.Errorf("error deleting logical switch port %+v from switch %+v: %v", lsp, lsw, err)
+		return nil, fmt.Errorf("error deleting logical switch port %+v from switch %+v: %w", lsp, lsw, err)
 	}
 
 	return ops, nil

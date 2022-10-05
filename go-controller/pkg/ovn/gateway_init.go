@@ -6,17 +6,19 @@ import (
 	"strconv"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/util/sets"
+	utilnet "k8s.io/utils/net"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	"k8s.io/apimachinery/pkg/util/sets"
-	utilnet "k8s.io/utils/net"
 )
 
 // gatewayInit creates a gateway router for the local chassis.
@@ -183,8 +185,16 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 
 	externalRouterPort := types.GWRouterToExtSwitchPrefix + gatewayRouter
 
-	// Add static routes in GR with gateway router as the default next hop.
-	for _, nextHop := range l3GatewayConfig.NextHops {
+	nextHops := l3GatewayConfig.NextHops
+	if len(l3GatewayConfig.NextHops) == 0 {
+		nextHops = node.DummyNextHopIPs()
+		if err := gateway.CreateDummyGWMacBinding(oc.sbClient, nodeName); err != nil {
+			return err
+		}
+	}
+
+	// Add default gateway routes in GR
+	for _, nextHop := range nextHops {
 		var allIPs string
 		if utilnet.IsIPv6(nextHop) {
 			allIPs = "::/0"
@@ -371,7 +381,7 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 	// and add external interface as a logical port to external_switch.
 	// This is a learning switch port with "unknown" address. The external
 	// world is accessed via this port.
-	externalSwitch := fmt.Sprintf("%s%s%s", prefix, types.ExternalSwitchPrefix, nodeName)
+	externalSwitch := externalSwitchName(prefix, nodeName)
 	externalLogicalSwitchPort := nbdb.LogicalSwitchPort{
 		Addresses: []string{"unknown"},
 		Type:      "localnet",
@@ -562,4 +572,8 @@ func (oc *Controller) deletePolicyBasedRoutes(policyID, priority string) error {
 	}
 
 	return nil
+}
+
+func externalSwitchName(prefix string, nodeName string) string {
+	return fmt.Sprintf("%s%s%s", prefix, types.ExternalSwitchPrefix, nodeName)
 }
