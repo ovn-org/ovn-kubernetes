@@ -251,7 +251,13 @@ func (oc *Controller) updateStaleDefaultDenyACLNames(npType knet.PolicyType, gre
 	}
 	// loop through the cleanUp map and per namespace update the first ACL's name and delete the rest
 	for namespace, aclList := range cleanUpDefaultDeny {
-		newName := getDefaultDenyPolicyACLName(namespace, gressSuffix)
+		var aclT aclType
+		if aclList[0].Direction == nbdb.ACLDirectionToLport {
+			aclT = lportIngress
+		} else {
+			aclT = lportEgressAfterLB
+		}
+		newName := getDefaultDenyPolicyACLName(namespace, aclT)
 		if len(aclList) > 1 {
 			// this should never be the case but delete everything except 1st ACL
 			ingressPGName := defaultDenyPortGroupName(namespace, ingressDefaultDenySuffix)
@@ -260,12 +266,6 @@ func (oc *Controller) updateStaleDefaultDenyACLNames(npType knet.PolicyType, gre
 			if err != nil {
 				return err
 			}
-		}
-		var aclT aclType
-		if aclList[0].Direction == nbdb.ACLDirectionToLport {
-			aclT = lportIngress
-		} else {
-			aclT = lportEgressAfterLB
 		}
 		newACL := BuildACL(
 			newName, // this is the only thing we need to change, keep the rest same
@@ -438,7 +438,16 @@ func addAllowACLFromNode(nodeName string, mgmtPortIP net.IP, nbClient libovsdbcl
 	return nil
 }
 
-func getDefaultDenyPolicyACLName(ns, defaultDenySuffix string) string {
+func getDefaultDenyPolicyACLName(ns string, aclT aclType) string {
+	var defaultDenySuffix string
+	switch aclT {
+	case lportIngress:
+		defaultDenySuffix = ingressDefaultDenySuffix
+	case lportEgressAfterLB:
+		defaultDenySuffix = egressDefaultDenySuffix
+	default:
+		panic(fmt.Sprintf("Unknown acl type %s", aclT))
+	}
 	return joinACLName(ns, defaultDenySuffix)
 }
 
@@ -457,13 +466,7 @@ func defaultDenyPortGroupName(namespace, gressSuffix string) string {
 func buildDenyACLs(namespace, pg string, aclLogging *ACLLoggingLevels, aclT aclType) (denyACL, allowACL *nbdb.ACL) {
 	denyMatch := getACLMatch(pg, "", aclT)
 	allowMatch := getACLMatch(pg, arpAllowPolicyMatch, aclT)
-	var defaultDenySuffix string
-	if aclT == lportIngress {
-		defaultDenySuffix = ingressDefaultDenySuffix
-	} else {
-		defaultDenySuffix = egressDefaultDenySuffix
-	}
-	denyACL = BuildACL(getDefaultDenyPolicyACLName(namespace, defaultDenySuffix), types.DefaultDenyPriority, denyMatch,
+	denyACL = BuildACL(getDefaultDenyPolicyACLName(namespace, aclT), types.DefaultDenyPriority, denyMatch,
 		nbdb.ACLActionDrop, aclLogging, aclT, getDefaultDenyPolicyExternalIDs(aclT))
 	allowACL = BuildACL(getARPAllowACLName(namespace), types.DefaultAllowPriority, allowMatch,
 		nbdb.ACLActionAllow, nil, aclT, getDefaultDenyPolicyExternalIDs(aclT))
@@ -958,6 +961,11 @@ func hasAnyLabelSelector(peers []knet.NetworkPolicyPeer) bool {
 	return false
 }
 
+func getNetworkPolicyPGName(namespace, name string) (pgName, readablePGName string) {
+	readableGroupName := fmt.Sprintf("%s_%s", namespace, name)
+	return hashedPortGroup(readableGroupName), readableGroupName
+}
+
 type policyHandler struct {
 	gress             *gressPolicy
 	namespaceSelector *metav1.LabelSelector
@@ -1112,8 +1120,8 @@ func (oc *Controller) createNetworkPolicy(policy *knet.NetworkPolicy, aclLogging
 
 		// 4. Build policy ACLs and port group. All the local pods that this policy
 		// selects will be eventually added to this port group.
-		readableGroupName := fmt.Sprintf("%s_%s", policy.Namespace, policy.Name)
-		np.portGroupName = hashedPortGroup(readableGroupName)
+		portGroupName, readableGroupName := getNetworkPolicyPGName(policy.Namespace, policy.Name)
+		np.portGroupName = portGroupName
 		ops := []ovsdb.Operation{}
 
 		acls := oc.buildNetworkPolicyACLs(np, aclLogging)

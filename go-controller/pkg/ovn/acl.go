@@ -90,16 +90,17 @@ func BuildACL(aclName string, priority int, match, action string,
 
 func getACLMatch(portGroupName, match string, aclT aclType) string {
 	var aclMatch string
-	if aclT == lportIngress {
+	switch aclT {
+	case lportIngress:
 		aclMatch = "outport == @" + portGroupName
-	} else {
+	case lportEgressAfterLB:
 		aclMatch = "inport == @" + portGroupName
+	default:
+		panic(fmt.Sprintf("Unknown acl type %s", aclT))
 	}
-
 	if match != "" {
 		aclMatch += " && " + match
 	}
-
 	return aclMatch
 }
 
