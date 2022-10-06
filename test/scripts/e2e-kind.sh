@@ -121,12 +121,13 @@ fi
 
 SKIPPED_TESTS="$(groomTestList "${SKIPPED_TESTS}")"
 
-# if we set PARALLEL=true, skip serial test
+NUM_NODES=1  # number of parallel (ginkgo) test nodes to run
 if [ "${PARALLEL:-false}" = "true" ]; then
-  export GINKGO_PARALLEL=y
-  export GINKGO_PARALLEL_NODES=10
+  NUM_NODES=10
+  # if we set PARALLEL=true, skip serial test
   SKIPPED_TESTS="${SKIPPED_TESTS}|\\[Serial\\]"
 fi
+export NUM_NODES
 
 case "$SHARD" in
 	shard-network)
@@ -154,7 +155,6 @@ export KUBE_CONTAINER_RUNTIME_NAME=containerd
 # but until then, we retry the test in the same job
 # to stop PR retriggers for totally broken code
 export FLAKE_ATTEMPTS=5
-export NUM_NODES=10  # number of parallel (ginkgo) test nodes to run
 # Kind clusters are three node clusters
 export NUM_WORKER_NODES=3
 ginkgo --nodes=${NUM_NODES} \

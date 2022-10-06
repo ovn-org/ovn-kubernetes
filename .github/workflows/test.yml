@@ -471,7 +471,7 @@ jobs:
     name: e2e-dual-conversion
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -485,6 +485,7 @@ jobs:
       OVN_HYBRID_OVERLAY_ENABLE: "false"
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
       OVN_MULTICAST_ENABLE:  "false"
+      PARALLEL: false
     steps:
 
     - name: Set up Go
