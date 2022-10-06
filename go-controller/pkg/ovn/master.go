@@ -63,14 +63,14 @@ func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.Swi
 func (oc *Controller) Start(identity string, wg *sync.WaitGroup, ctx context.Context, cancel context.CancelFunc) error {
 	// Set up leader election process first
 	rl, err := resourcelock.New(
-		// TODO (rravaiol)
+		// TODO (rravaiol) (bpickard)
 		// https://github.com/kubernetes/kubernetes/issues/107454
 		// leader election library no longer supports leader-election
 		// locks based solely on `endpoints` or `configmaps` resources.
 		// Slowly migrating to new API across three releases; with k8s 1.24
-		// we're now in the first step ('x+1' bullet from the link above).
-		// This will have to be updated for the next two k8s bumps: to 1.25 and 1.26.
-		resourcelock.ConfigMapsLeasesResourceLock,
+		// we're now in the second step ('x+2') bullet from the link above).
+		// This will have to be updated for the next k8s bump: to 1.26.
+		resourcelock.LeasesResourceLock,
 		config.Kubernetes.OVNConfigNamespace,
 		"ovn-kubernetes-master",
 		oc.client.CoreV1(),
