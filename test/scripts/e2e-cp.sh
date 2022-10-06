@@ -59,6 +59,11 @@ if [ "$OVN_DISABLE_SNAT_MULTIPLE_GWS" == false ]; then
   SKIPPED_TESTS+="e2e multiple external gateway stale conntrack entry deletion validation"
 fi
 
+# skipping the egress ip legacy health check test because it requires two
+# sequenced rollouts of both ovnkube-node and ovnkube-master that take a lot of
+# time.
+SKIPPED_TESTS+="${SKIPPED_TESTS:+|}disabling egress nodes impeding Legacy health check"
+
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote
 export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock

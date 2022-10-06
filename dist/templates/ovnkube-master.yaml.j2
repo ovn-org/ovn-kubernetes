@@ -20,8 +20,8 @@ spec:
       name: ovnkube-master
   strategy:
     rollingUpdate:
-      maxSurge: 25%
-      maxUnavailable: 25%
+      maxSurge: 0
+      maxUnavailable: 1
     type: RollingUpdate
   template:
     metadata:
