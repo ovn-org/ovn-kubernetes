@@ -199,8 +199,9 @@ func handleService(svc *kapi.Service, handler handler) []error {
 // LocalPorts allows to add an arbitrary description, which can be used to distinguish LocalPorts instances having the
 // same networking parameters by created for different services.
 // kube-proxy and this implementation use the following format of the description: "
-//        for NodePort services            - "nodePort for namespace/name[:portName]
-//        for services with External IPs   - "externalIP for namespace/name[:portName]
+//
+//	for NodePort services            - "nodePort for namespace/name[:portName]
+//	for services with External IPs   - "externalIP for namespace/name[:portName]
 func getDescription(portName string, svc *kapi.Service, nodePort bool) string {
 	svcName := types.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
 	prefix := externalPortDescr

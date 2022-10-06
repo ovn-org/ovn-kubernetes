@@ -156,10 +156,10 @@ func (e *EgressDNS) addToDNS(dnsName string) {
 
 // Run spawns a goroutine that handles updates to the dns entries for domain names used in
 // EgressFirewalls. The loop runs after receiving one of three signals:
-// 1. time.NewTicker(durationTillNextQuery) times out and the dnsName with the lowest ttl is checked
-//    and the durationTillNextQuery is updated
-// 2. e.added is received and durationTillNextQuery is recomputed
-// 3. e.deleted is received and coincides with dnsName
+//  1. time.NewTicker(durationTillNextQuery) times out and the dnsName with the lowest ttl is checked
+//     and the durationTillNextQuery is updated
+//  2. e.added is received and durationTillNextQuery is recomputed
+//  3. e.deleted is received and coincides with dnsName
 func (e *EgressDNS) Run(defaultInterval time.Duration) {
 	var domainNameExpiringNext, domainNameDeleted string
 	var ttl time.Time

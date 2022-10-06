@@ -27,7 +27,7 @@ import (
 // For example, you might want to ensure that service ns/foo has the
 // correct set of load balancers. You would call it with something like
 //
-//     EnsureLBs( { kind: Service, owner: ns/foo}, { {Name: Service_ns/foo_cluster_tcp, ...}})
+//	EnsureLBs( { kind: Service, owner: ns/foo}, { {Name: Service_ns/foo_cluster_tcp, ...}})
 //
 // This will ensure that, for this example, only that one LB exists and
 // has the desired configuration.

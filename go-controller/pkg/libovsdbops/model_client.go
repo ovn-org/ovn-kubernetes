@@ -27,9 +27,9 @@ func newModelClient(client client.Client) modelClient {
 }
 
 /*
- extractUUIDsFromModels is a helper function which constructs a mutation
- for the specified field and mutator extracting the UUIDs of the provided
- models as the value for the mutation.
+extractUUIDsFromModels is a helper function which constructs a mutation
+for the specified field and mutator extracting the UUIDs of the provided
+models as the value for the mutation.
 */
 func extractUUIDsFromModels(models interface{}) []string {
 	ids := []string{}
@@ -121,8 +121,8 @@ func buildMutationsFromFields(fields []interface{}, mutator ovsdb.Mutator) ([]mo
 }
 
 /*
- operationModel is a struct which uses reflection to determine and perform
- idempotent operations against OVS DB (NB DB by default).
+operationModel is a struct which uses reflection to determine and perform
+idempotent operations against OVS DB (NB DB by default).
 */
 type operationModel struct {
 	// Model specifies the model to be created, or to look up in the cache
@@ -161,25 +161,25 @@ func onModelUpdatesAllNonDefault() []interface{} {
 }
 
 /*
- CreateOrUpdate performs idempotent operations against libovsdb according to the
- following logic:
+CreateOrUpdate performs idempotent operations against libovsdb according to the
+following logic:
 
- a) performs a lookup of the models in the cache by ModelPredicate if provided,
- or by Model otherwise. If the models do not exist and ErrNotFound is set,
- it returns ErrNotFound
+a) performs a lookup of the models in the cache by ModelPredicate if provided,
+or by Model otherwise. If the models do not exist and ErrNotFound is set,
+it returns ErrNotFound
 
- b) if OnModelUpdates is specified; it performs a direct update of the model if
- it exists.
+b) if OnModelUpdates is specified; it performs a direct update of the model if
+it exists.
 
- c) if b) is not true, but OnModelMutations is specified; it performs a direct
- mutation (insert) of the Model if it exists.
+c) if b) is not true, but OnModelMutations is specified; it performs a direct
+mutation (insert) of the Model if it exists.
 
- d) if b) and c) are not true, but Model is provided, it creates the Model
- if it does not exist.
+d) if b) and c) are not true, but Model is provided, it creates the Model
+if it does not exist.
 
- e) if none of the above are true, ErrNotFound is returned.
+e) if none of the above are true, ErrNotFound is returned.
 
- If BulkOp is set, update or mutate can happen accross multiple models found.
+If BulkOp is set, update or mutate can happen accross multiple models found.
 */
 func (m *modelClient) CreateOrUpdate(opModels ...operationModel) ([]ovsdb.OperationResult, error) {
 	created, ops, err := m.createOrUpdateOps(nil, opModels...)
@@ -229,19 +229,19 @@ func (m *modelClient) createOrUpdateOps(ops []ovsdb.Operation, opModels ...opera
 }
 
 /*
- Delete performs idempotent delete operations against libovsdb according to the
- following logic:
+Delete performs idempotent delete operations against libovsdb according to the
+following logic:
 
- a) performs a lookup of the models in the cache by ModelPredicate if provided,
- or by Model otherwise. If the models do not exist and ErrNotFound is set
- it returns ErrNotFound.
+a) performs a lookup of the models in the cache by ModelPredicate if provided,
+or by Model otherwise. If the models do not exist and ErrNotFound is set
+it returns ErrNotFound.
 
- b) if OnModelMutations is specified; it performs a direct mutation (delete) of the
- Model if it exists.
+b) if OnModelMutations is specified; it performs a direct mutation (delete) of the
+Model if it exists.
 
- c) if b) is not true; it performs a direct delete of the Model if it exists.
+c) if b) is not true; it performs a direct delete of the Model if it exists.
 
- If BulkOp is set, delete or mutate can happen accross multiple models found.
+If BulkOp is set, delete or mutate can happen accross multiple models found.
 */
 func (m *modelClient) Delete(opModels ...operationModel) error {
 	ops, err := m.DeleteOps(nil, opModels...)
@@ -326,10 +326,10 @@ func (m *modelClient) buildOps(ops []ovsdb.Operation, doWhenFound opModelToOpMap
 }
 
 /*
- create does a bit more than just "create". create needs to set the generated
- UUID (because if this function is called we know the item does not exists yet)
- then create the item. Generates an until clause and uses a wait operation to avoid
- https://bugzilla.redhat.com/show_bug.cgi?id=2042001
+create does a bit more than just "create". create needs to set the generated
+UUID (because if this function is called we know the item does not exists yet)
+then create the item. Generates an until clause and uses a wait operation to avoid
+https://bugzilla.redhat.com/show_bug.cgi?id=2042001
 */
 func (m *modelClient) create(opModel *operationModel) ([]ovsdb.Operation, error) {
 	uuid := getUUID(opModel.Model)
@@ -410,11 +410,11 @@ func (m *modelClient) lookup(opModel *operationModel) error {
 }
 
 /*
- get copies the model, since this function ends up being called from update /
- mutate, and Get'ing the model will modify the object to the one currently
- existing in the DB, thus overridding all new fields we are trying to set. Do
- return the retrived object though, in case the caller needs to act on the
- object's UUID
+get copies the model, since this function ends up being called from update /
+mutate, and Get'ing the model will modify the object to the one currently
+existing in the DB, thus overridding all new fields we are trying to set. Do
+return the retrived object though, in case the caller needs to act on the
+object's UUID
 */
 func (m *modelClient) get(opModel *operationModel) error {
 	copy := copyIndexes(opModel.Model)
