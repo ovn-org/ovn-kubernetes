@@ -975,9 +975,9 @@ func (oc *Controller) getExistingLocalPolicyPorts(np *networkPolicy,
 }
 
 // denyPGAddPorts adds ports to default deny port groups.
-func (oc *Controller) denyPGAddPorts(np *networkPolicy, portNamesToUUIDs map[string]string) error {
+// It also can take existing ops e.g. to add port to network policy port group and transact it.
+func (oc *Controller) denyPGAddPorts(np *networkPolicy, portNamesToUUIDs map[string]string, ops []ovsdb.Operation) error {
 	var err error
-	var ops []ovsdb.Operation
 	ingressDenyPGName := defaultDenyPortGroupName(np.namespace, ingressDefaultDenySuffix)
 	egressDenyPGName := defaultDenyPortGroupName(np.namespace, egressDefaultDenySuffix)
 
@@ -1011,20 +1011,20 @@ func (oc *Controller) denyPGAddPorts(np *networkPolicy, portNamesToUUIDs map[str
 		if err != nil {
 			return fmt.Errorf("unable to get add ports to %s port group ops: %v", egressDenyPGName, err)
 		}
-
-		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-		if err != nil {
-			return fmt.Errorf("unable to transact add ports to default deny port groups: %v", err)
-		}
+	}
+	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+	if err != nil {
+		return fmt.Errorf("unable to transact add ports to default deny port groups: %v", err)
 	}
 	return nil
 }
 
 // denyPGDeletePorts deletes ports from default deny port groups.
 // Set useLocalPods = true, when deleting networkPolicy to remove all its ports from defaultDeny port groups.
-func (oc *Controller) denyPGDeletePorts(np *networkPolicy, portNamesToUUIDs map[string]string, useLocalPods bool) error {
+// It also can take existing ops e.g. to delete ports from network policy port group and transact it.
+func (oc *Controller) denyPGDeletePorts(np *networkPolicy, portNamesToUUIDs map[string]string, useLocalPods bool,
+	ops []ovsdb.Operation) error {
 	var err error
-	var ops []ovsdb.Operation
 	if useLocalPods {
 		portNamesToUUIDs = map[string]string{}
 		np.localPods.Range(func(key, value interface{}) bool {
@@ -1032,49 +1032,47 @@ func (oc *Controller) denyPGDeletePorts(np *networkPolicy, portNamesToUUIDs map[
 			return true
 		})
 	}
-	if len(portNamesToUUIDs) == 0 {
-		return nil
-	}
+	if len(portNamesToUUIDs) != 0 {
+		ingressDenyPGName := defaultDenyPortGroupName(np.namespace, ingressDefaultDenySuffix)
+		egressDenyPGName := defaultDenyPortGroupName(np.namespace, egressDefaultDenySuffix)
 
-	ingressDenyPGName := defaultDenyPortGroupName(np.namespace, ingressDefaultDenySuffix)
-	egressDenyPGName := defaultDenyPortGroupName(np.namespace, egressDefaultDenySuffix)
+		pgKey := np.namespace
+		// this lock guarantees that sharedPortGroup counters will be updated atomically
+		// with adding port to port group in db.
+		oc.sharedNetpolPortGroups.LockKey(pgKey)
+		defer oc.sharedNetpolPortGroups.UnlockKey(pgKey)
+		sharedPGs, ok := oc.sharedNetpolPortGroups.Load(pgKey)
+		if !ok {
+			// Port group doesn't exist, nothing to clean up
+			klog.Infof("Skip delete ports from default deny port group: port group doesn't exist")
+		} else {
+			ingressDenyPorts, egressDenyPorts := sharedPGs.deletePortsForPolicy(np, portNamesToUUIDs)
+			// counters were updated, update back to initial values on error
+			defer func() {
+				if err != nil {
+					sharedPGs.addPortsForPolicy(np, portNamesToUUIDs)
+				}
+			}()
 
-	pgKey := np.namespace
-	// this lock guarantees that sharedPortGroup counters will be updated atomically
-	// with adding port to port group in db.
-	oc.sharedNetpolPortGroups.LockKey(pgKey)
-	defer oc.sharedNetpolPortGroups.UnlockKey(pgKey)
-	sharedPGs, ok := oc.sharedNetpolPortGroups.Load(pgKey)
-	if !ok {
-		// Port group doesn't exist, nothing to clean up
-		klog.Infof("Skip delete ports from default deny port group: port group doesn't exist")
-		return nil
-	}
+			if len(ingressDenyPorts) != 0 || len(egressDenyPorts) != 0 {
+				// db changes required
+				ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.nbClient, ops, ingressDenyPGName, ingressDenyPorts...)
+				if err != nil {
+					return fmt.Errorf("unable to get del ports from %s port group ops: %v", ingressDenyPGName, err)
+				}
 
-	ingressDenyPorts, egressDenyPorts := sharedPGs.deletePortsForPolicy(np, portNamesToUUIDs)
-	// counters were updated, update back to initial values on error
-	defer func() {
-		if err != nil {
-			sharedPGs.addPortsForPolicy(np, portNamesToUUIDs)
-		}
-	}()
-
-	if len(ingressDenyPorts) != 0 || len(egressDenyPorts) != 0 {
-		// db changes required
-		ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.nbClient, ops, ingressDenyPGName, ingressDenyPorts...)
-		if err != nil {
-			return fmt.Errorf("unable to get del ports from %s port group ops: %v", ingressDenyPGName, err)
-		}
-
-		ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.nbClient, ops, egressDenyPGName, egressDenyPorts...)
-		if err != nil {
-			return fmt.Errorf("unable to get del ports from %s port group ops: %v", egressDenyPGName, err)
-		}
-		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-		if err != nil {
-			return fmt.Errorf("unable to transact del ports from default deny port groups: %v", err)
+				ops, err = libovsdbops.DeletePortsFromPortGroupOps(oc.nbClient, ops, egressDenyPGName, egressDenyPorts...)
+				if err != nil {
+					return fmt.Errorf("unable to get del ports from %s port group ops: %v", egressDenyPGName, err)
+				}
+			}
 		}
 	}
+	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+	if err != nil {
+		return fmt.Errorf("unable to transact del ports from default deny port groups: %v", err)
+	}
+
 	return nil
 }
 
@@ -1097,15 +1095,10 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(np *networkPolicy, objs ...i
 		if err != nil {
 			return fmt.Errorf("unable to get ops to add new pod to policy port group: %v", err)
 		}
-		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-		if err != nil {
-			return fmt.Errorf("unable to transact add new pod to policy port group: %v", err)
-		}
 		// add pods to default deny port group
 		// make sure to only pass newly added pods
-		if err = oc.denyPGAddPorts(np, portNamesToUUIDs); err != nil {
-			// we don't need to delete policy ports from policy port group,
-			// because adding ports to port group is idempotent and can be retried
+		// ops will be transacted by denyPGAddPorts
+		if err = oc.denyPGAddPorts(np, portNamesToUUIDs, ops); err != nil {
 			return fmt.Errorf("unable to add new pod to default deny port group: %v", err)
 		}
 		// all operations were successful, update np.localPods
@@ -1143,14 +1136,8 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(np *networkPolicy, objs ...i
 		if err != nil {
 			return fmt.Errorf("unable to get ops to add new pod to policy port group: %v", err)
 		}
-		_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-		if err != nil {
-			return fmt.Errorf("unable to transact add new pod to policy port group: %v", err)
-		}
 		// delete pods from default deny port group
-		if err = oc.denyPGDeletePorts(np, portNamesToUUIDs, false); err != nil {
-			// we don't need to add policy ports back to policy port group,
-			// because delete ports from port group is idempotent and can be retried
+		if err = oc.denyPGDeletePorts(np, portNamesToUUIDs, false, ops); err != nil {
 			return fmt.Errorf("unable to add new pod to default deny port group: %v", err)
 		}
 		// all operations were successful, update np.localPods
@@ -1587,16 +1574,6 @@ func (oc *Controller) cleanupNetworkPolicy(np *networkPolicy) error {
 	oc.shutdownHandlers(np)
 	var err error
 
-	err = oc.denyPGDeletePorts(np, nil, true)
-	if err != nil {
-		return fmt.Errorf("unable to delete ports from defaultDeny port group: %v", err)
-	}
-
-	err = oc.delPolicyFromDefaultPortGroups(np)
-	if err != nil {
-		return fmt.Errorf("unable to delete policy from default deny port groups: %v", err)
-	}
-
 	// Delete the port group, idempotent
 	ops, err := libovsdbops.DeletePortGroupsOps(oc.nbClient, nil, np.portGroupName)
 	if err != nil {
@@ -1609,12 +1586,19 @@ func (oc *Controller) cleanupNetworkPolicy(np *networkPolicy) error {
 	}
 	ops = append(ops, recordOps...)
 
-	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+	err = oc.denyPGDeletePorts(np, nil, true, ops)
 	if err != nil {
-		return fmt.Errorf("failed to execute ovsdb txn to delete network policy: %s/%s, error: %v",
-			np.namespace, np.name, err)
+		return fmt.Errorf("unable to delete ports from defaultDeny port group: %v", err)
 	}
+	// transaction was successful, exec callback
 	txOkCallBack()
+	// cleanup local pods, since they were deleted from port groups
+	np.localPods = sync.Map{}
+
+	err = oc.delPolicyFromDefaultPortGroups(np)
+	if err != nil {
+		return fmt.Errorf("unable to delete policy from default deny port groups: %v", err)
+	}
 
 	// Delete ingress/egress address sets, idempotent
 	for i, policy := range np.ingressPolicies {
