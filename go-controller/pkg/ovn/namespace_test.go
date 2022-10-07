@@ -191,7 +191,6 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				Name:                 "node1",
 				NodeIP:               "1.2.3.4",
 				NodeLRPMAC:           "0a:58:0a:01:01:01",
-				LrpMAC:               "0a:58:64:40:00:02",
 				LrpIP:                "100.64.0.2",
 				LrpIPv6:              "fd98::2",
 				DrLrpIP:              "100.64.0.1",

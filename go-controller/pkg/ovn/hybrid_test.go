@@ -3,12 +3,13 @@ package ovn
 import (
 	"context"
 	"fmt"
-	"k8s.io/apimachinery/pkg/runtime"
-	k8stypes "k8s.io/apimachinery/pkg/types"
 	"net"
 	"reflect"
 	"sync"
 	"sync/atomic"
+
+	"k8s.io/apimachinery/pkg/runtime"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 
 	"github.com/urfave/cli/v2"
 
@@ -284,7 +285,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				Name:                 "node1",
 				NodeIP:               "1.2.3.4",
 				NodeLRPMAC:           "0a:58:0a:01:01:01",
-				LrpMAC:               "0a:58:64:40:00:03",
 				LrpIP:                "100.64.0.2",
 				DrLrpIP:              "100.64.0.1",
 				PhysicalBridgeMAC:    "11:22:33:44:55:66",
@@ -554,7 +554,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				Name:                 "node1",
 				NodeIP:               "1.2.3.4",
 				NodeLRPMAC:           "0a:58:0a:01:01:01",
-				LrpMAC:               "0a:58:64:40:00:02",
 				LrpIP:                "100.64.0.2",
 				DrLrpIP:              "100.64.0.1",
 				PhysicalBridgeMAC:    "11:22:33:44:55:66",
@@ -742,7 +741,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				Name:                 "node1",
 				NodeIP:               "1.2.3.4",
 				NodeLRPMAC:           "0a:58:0a:01:01:01",
-				LrpMAC:               "0a:58:64:40:00:02",
 				LrpIP:                "100.64.0.2",
 				DrLrpIP:              "100.64.0.1",
 				PhysicalBridgeMAC:    "11:22:33:44:55:66",
@@ -1016,7 +1014,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				Name:                 "node1",
 				NodeIP:               "1.2.3.4",
 				NodeLRPMAC:           "0a:58:0a:01:01:01",
-				LrpMAC:               "0a:58:64:40:00:03",
 				LrpIP:                "100.64.0.2",
 				DrLrpIP:              "100.64.0.1",
 				PhysicalBridgeMAC:    "11:22:33:44:55:66",
@@ -1251,7 +1248,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				Name:                 "node1",
 				NodeIP:               "1.2.3.4",
 				NodeLRPMAC:           "0a:58:0a:01:01:01",
-				LrpMAC:               "0a:58:64:40:00:03",
 				LrpIP:                "100.64.0.2",
 				DrLrpIP:              "100.64.0.1",
 				PhysicalBridgeMAC:    "11:22:33:44:55:66",
@@ -1400,7 +1396,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				Name:                 "node1",
 				NodeIP:               "1.2.3.4",
 				NodeLRPMAC:           "0a:58:0a:01:01:01",
-				LrpMAC:               "0a:58:64:40:00:03",
 				LrpIP:                "100.64.0.2",
 				DrLrpIP:              "100.64.0.1",
 				PhysicalBridgeMAC:    "11:22:33:44:55:66",
