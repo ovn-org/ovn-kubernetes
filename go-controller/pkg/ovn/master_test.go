@@ -947,7 +947,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		var err error
 
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		config.Kubernetes.HostNetworkNamespace = ""
 		nodeAnnotator = kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, fakeClient.EgressIPClient, fakeClient.EgressFirewallClient, nil}, testNode.Name)
 		l3Config := node1.gatewayConfig(config.GatewayModeLocal, uint(vlanID))
 		err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
@@ -1082,7 +1081,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			config.Kubernetes.HostNetworkNamespace = ""
 
 			updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1138,7 +1136,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			config.Kubernetes.HostNetworkNamespace = ""
 			config.Gateway.DisableSNATMultipleGWs = true
 
 			updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
@@ -1227,7 +1224,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		app.Action = func(ctx *cli.Context) error {
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			config.Kubernetes.HostNetworkNamespace = ""
 
 			expectedClusterLBGroup := newLoadBalancerGroup()
 			expectedOVNClusterRouter := newOVNClusterRouter()
@@ -1292,7 +1288,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			config.Kubernetes.HostNetworkNamespace = ""
 
 			expectedClusterLBGroup := newLoadBalancerGroup()
 			expectedOVNClusterRouter := newOVNClusterRouter()
@@ -1387,7 +1382,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		app.Action = func(ctx *cli.Context) error {
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			config.Kubernetes.HostNetworkNamespace = ""
 
 			updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1464,7 +1458,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			// that has no ranges, to force a node add failure and retry
 			oc.masterSubnetAllocator = subnetallocator.NewHostSubnetAllocator()
 
-			config.Kubernetes.HostNetworkNamespace = ""
 			config.Kubernetes.NoHostSubnetNodes = &metav1.LabelSelector{
 				MatchLabels: nodeNoHostSubnetAnnotation(),
 			}
