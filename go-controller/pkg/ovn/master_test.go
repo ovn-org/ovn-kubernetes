@@ -880,6 +880,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		expectedOVNClusterRouter       *nbdb.LogicalRouter
 		expectedClusterRouterPortGroup *nbdb.PortGroup
 		expectedClusterPortGroup       *nbdb.PortGroup
+		expectedDatabaseState          []libovsdbtest.TestData
 		l3GatewayConfig                *util.L3GatewayConfig
 		nodeHostAddrs                  sets.String
 	)
@@ -1010,6 +1011,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		oc.SCTPSupport = true
 		oc.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(oc.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
 		_, _ = oc.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
+
+		expectedDatabaseState = addNodeLogicalFlows(nil, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 	})
 
 	ginkgo.AfterEach(func() {
@@ -1026,9 +1029,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			expectedDatabaseState := []libovsdbtest.TestData{}
-			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
 			// Let the real code run and ensure OVN database sync
 			gomega.Expect(oc.WatchNodes()).To(gomega.Succeed())
@@ -1082,9 +1082,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			expectedDatabaseState := []libovsdbtest.TestData{}
-			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
-
 			// Let the real code run and ensure OVN database sync
 			gomega.Expect(oc.WatchNodes()).To(gomega.Succeed())
 
@@ -1124,9 +1121,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			config.Gateway.DisableSNATMultipleGWs = true
-
-			expectedDatabaseState := []libovsdbtest.TestData{}
-			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
 			// create a pod on this node
 			ns := newNamespace("namespace-1")
@@ -1199,9 +1193,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			expectedDatabaseState := []libovsdbtest.TestData{}
-			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
-
 			// Let the real code run and ensure OVN database sync
 			gomega.Expect(oc.WatchNodes()).To(gomega.Succeed())
 			// ensure db is consistent
@@ -1255,9 +1246,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			expectedDatabaseState := []libovsdbtest.TestData{}
-			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
 			// Let the real code run and ensure OVN database sync
 			gomega.Expect(oc.WatchNodes()).To(gomega.Succeed())
@@ -1344,9 +1332,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			expectedDatabaseState := []libovsdbtest.TestData{}
-			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
-
 			// Let the real code run and ensure OVN database sync
 			gomega.Expect(oc.WatchNodes()).To(gomega.Succeed())
 			gomega.Expect(oc.StartServiceController(wg, false)).To(gomega.Succeed())
@@ -1409,9 +1394,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			config.Kubernetes.NoHostSubnetNodes = &metav1.LabelSelector{
 				MatchLabels: nodeNoHostSubnetAnnotation(),
 			}
-
-			expectedDatabaseState := []libovsdbtest.TestData{}
-			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
 			gomega.Expect(
 				oc.retryNodes.ResourceHandler.AddResource(
