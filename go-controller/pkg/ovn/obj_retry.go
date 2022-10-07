@@ -1388,16 +1388,12 @@ func (oc *Controller) WatchResource(objectsToRetry *RetryObjs) (*factory.Handler
 					// If there is a delete entry with the same key, we got an add event for an object
 					// with the same name as a previous object that failed deletion.
 					// Destroy the old object before we add the new one.
-					//
-					// Note it is okay to access retryEntry without lock here, as the entry is either
-					// accessed by iterateRetryResources or in add/update/delete handler of this resource;
-					// the former is prevented as its ignore field is set to true, and the latter is serialized.
 					if retryObj.oldObj != nil {
 						klog.Infof("Detected stale object during new object"+
 							" add of type %s with the same key: %s",
 							objectsToRetry.oType, key)
 						internalCacheEntry := oc.getInternalCacheEntry(objectsToRetry.oType, obj)
-						if err := oc.deleteResource(objectsToRetry, obj, internalCacheEntry); err != nil {
+						if err := oc.deleteResource(objectsToRetry, retryObj.oldObj, internalCacheEntry); err != nil {
 							klog.Errorf("Failed to delete old object %s of type %s,"+
 								" during add event: %v", key, objectsToRetry.oType, err)
 							oc.recordErrorEvent(objectsToRetry.oType, obj, err)
