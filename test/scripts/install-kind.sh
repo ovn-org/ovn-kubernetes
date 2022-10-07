@@ -50,9 +50,15 @@ sudo mv ./kubectl /usr/local/bin/kubectl
 # Install e2e test binary and ginkgo
 curl -L https://storage.googleapis.com/kubernetes-release/release/${K8S_VERSION}/kubernetes-test-linux-amd64.tar.gz -o kubernetes-test-linux-amd64.tar.gz
 tar xvzf kubernetes-test-linux-amd64.tar.gz
-sudo mv kubernetes/test/bin/e2e.test /usr/local/bin/e2e.test
+#sudo mv kubernetes/test/bin/e2e.test /usr/local/bin/e2e.test
 sudo mv kubernetes/test/bin/ginkgo /usr/local/bin/ginkgo
 rm kubernetes-test-linux-amd64.tar.gz
+
+# hack: use my own e2e tests
+curl -L https://github.com/jcaamano/kubernetes/raw/hack-e2e-test/e2e.test.tgz -o e2e.test.tgz
+tar xvzf e2e.test.tgz
+sudo mv e2e.test /usr/local/bin/e2e.test
+rm e2e.test.tgz
 
 install_kind
 popd # go out of $TMP_DIR

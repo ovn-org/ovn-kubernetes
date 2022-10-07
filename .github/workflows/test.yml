@@ -27,6 +27,7 @@ jobs:
   # separate job for parallelism
   lint:
     name: Lint
+    if: false
     runs-on: ubuntu-latest
     steps:
     - name: Check out code
@@ -135,6 +136,7 @@ jobs:
 
   build-pr:
     name: Build-PR
+    if: false
     runs-on: ubuntu-latest
     steps:
     # Create a cache for the build PR image
@@ -242,7 +244,8 @@ jobs:
 
   ovn-upgrade-e2e:
     name: Upgrade OVN from Master to PR branch based image
-    if: github.event_name != 'schedule'
+    #if: github.event_name != 'schedule'
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 120
     needs:
@@ -356,7 +359,8 @@ jobs:
 
   e2e:
     name: e2e
-    if: github.event_name != 'schedule'
+    #if: github.event_name != 'schedule'
+    if: false
     runs-on: ubuntu-latest
     # 30 mins for kind, 180 mins for control-plane tests, 10 minutes for all other steps
     timeout-minutes: 220
@@ -471,12 +475,13 @@ jobs:
     name: e2e-dual-conversion
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
         gateway-mode: [local, shared]
-    needs: [ build-pr ]
+    # needs: [ build-pr ]
+    needs: [ build-master ]
     env:
       JOB_NAME: "DualStack-conversion-${{ matrix.gateway-mode }}"
       OVN_HA: "true"
@@ -487,7 +492,6 @@ jobs:
       OVN_MULTICAST_ENABLE:  "false"
       PARALLEL: false
     steps:
-
     - name: Set up Go
       uses: actions/setup-go@v2
       with:
@@ -509,23 +513,31 @@ jobs:
       run: |
         sudo ufw disable
 
-    - name: Download test-image-pr
+    # - name: Download test-image-pr
+    - name: Download test-image-master
       uses: actions/download-artifact@v2
       with:
-        name: test-image-pr
+        name: test-image-master
 
     - name: Load docker image
       run: |
-        docker load --input ${CI_IMAGE_PR_TAR}
+        docker load --input ${CI_IMAGE_MASTER_TAR}
 
     - name: kind IPv4 setup
       run: |
-        export OVN_IMAGE="ovn-daemonset-f:pr"
+        # export OVN_IMAGE="ovn-daemonset-f:pr"
+        export OVN_IMAGE="ovn-daemonset-f:dev"
         make -C test install-kind
 
     - name: Run Single-Stack Tests
       run: |
         make -C test shard-test WHAT="Networking Granular Checks"
+      
+    - name: Setup tmate session
+      uses: mxschmitt/action-tmate@v3
+      timeout-minutes: 15
+      with:
+        limit-access-to-actor: true
 
     - name: Convert IPv4 cluster to Dual Stack
       run: |
@@ -538,6 +550,7 @@ jobs:
         make -C test shard-test WHAT="Networking Granular Checks\|DualStack"
 
     - name: Run Dual-Stack Control-Plane Tests
+      if: false
       run: |
         KIND_IPV4_SUPPORT="true"
         KIND_IPV6_SUPPORT="true"
