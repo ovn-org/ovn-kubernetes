@@ -1039,7 +1039,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	})
 
 	ginkgo.It("sets up a local gateway", func() {
-
 		app.Action = func(ctx *cli.Context) error {
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1082,7 +1081,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	})
 
 	ginkgo.It("sets up a shared gateway", func() {
-
 		app.Action = func(ctx *cli.Context) error {
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1110,6 +1108,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
+
 	ginkgo.It("clear stale pod SNATs from syncGateway", func() {
 
 		app.Action = func(ctx *cli.Context) error {
@@ -1184,6 +1183,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
+
 	ginkgo.It("does not list node's pods when updating node after successfully adding the node", func() {
 		app.Action = func(ctx *cli.Context) error {
 			_, err := config.InitConfig(ctx, nil, nil)
@@ -1228,10 +1228,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
+
 	ginkgo.It("use node retry with updating a node", func() {
-
 		app.Action = func(ctx *cli.Context) error {
-
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			clusterSubnets := startFakeController(oc, wg)
@@ -1361,6 +1360,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
+
 	ginkgo.It("use node retry for a node without a host subnet", func() {
 		app.Action = func(ctx *cli.Context) error {
 			_, err := config.InitConfig(ctx, nil, nil)
