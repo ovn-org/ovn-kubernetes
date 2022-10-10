@@ -25,6 +25,11 @@ func rangesFromStrings(ranges []string, networkLens []int) ([]config.CIDRNetwork
 	return entries, nil
 }
 
+type existingAllocation struct {
+	subnet string
+	owner  string
+}
+
 func TestController_allocateNodeSubnets(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -33,6 +38,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 		configIPv4    bool
 		configIPv6    bool
 		existingNets  []*net.IPNet
+		alreadyOwned  *existingAllocation
 		// to be converted during the test to []*net.IPNet
 		wantStr   []string
 		allocated int
@@ -179,6 +185,20 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			wantStr:       []string{"172.16.0.0/24", "2001:db2:1:2::/64"},
 			allocated:     0,
 		},
+		{
+			name:          "existing annotated node with too many subnets, one of which is already owned",
+			networkRanges: []string{"172.16.0.0/16", "2001:db2:1::/56"},
+			networkLens:   []int{24, 64},
+			configIPv4:    true,
+			configIPv6:    true,
+			existingNets:  ovntest.MustParseIPNets("172.16.0.0/24", "172.16.1.0/24", "2001:db2:1:2::/64", "2001:db2:1:3::/64"),
+			alreadyOwned: &existingAllocation{
+				owner:  "another-node",
+				subnet: "172.16.1.0/24",
+			},
+			wantStr:   []string{"172.16.0.0/24", "2001:db2:1:2::/64"},
+			allocated: 0,
+		},
 	}
 
 	for _, tt := range tests {
@@ -191,6 +211,13 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			}
 			if err := sna.InitRanges(ranges); err != nil {
 				t.Fatalf("Failed to initialize network ranges: %v", err)
+			}
+
+			if tt.alreadyOwned != nil {
+				err = sna.MarkSubnetsAllocated(tt.alreadyOwned.owner, ovntest.MustParseIPNets(tt.alreadyOwned.subnet)...)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 
 			// test network allocation works correctly
@@ -213,6 +240,14 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 
 			if len(allocated) != tt.allocated {
 				t.Fatalf("Expected %d subnets allocated, received %d", tt.allocated, len(allocated))
+			}
+
+			// Ensure an already owned subnet isn't touched
+			if tt.alreadyOwned != nil {
+				err = sna.MarkSubnetsAllocated("blahblah", ovntest.MustParseIPNets(tt.alreadyOwned.subnet)...)
+				if err == nil {
+					t.Fatal("Expected subnet to already be allocated by a different node")
+				}
 			}
 		})
 	}

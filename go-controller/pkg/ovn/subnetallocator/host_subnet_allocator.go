@@ -49,60 +49,57 @@ func (sna *HostSubnetAllocator) MarkSubnetsAllocated(nodeName string, subnets ..
 	return nil
 }
 
+// AllocateNodeSubnets either validates existing node subnets against the allocators
+// ranges, or allocates new subnets if the node doesn't have any yet, or returns an error
 func (sna *HostSubnetAllocator) AllocateNodeSubnets(nodeName string, existingSubnets []*net.IPNet, ipv4Mode, ipv6Mode bool) ([]*net.IPNet, []*net.IPNet, error) {
 	allocatedSubnets := []*net.IPNet{}
 
 	// OVN can work in single-stack or dual-stack only.
-	currentHostSubnets := len(existingSubnets)
 	expectedHostSubnets := 1
 	// if dual-stack mode we expect one subnet per each IP family
 	if ipv4Mode && ipv6Mode {
 		expectedHostSubnets = 2
 	}
 
-	// node already has the expected subnets annotated
-	// assume IP families match, i.e. no IPv6 config and node annotation IPv4
-	if expectedHostSubnets == currentHostSubnets {
-		klog.Infof("Allocated Subnets %v on Node %s", existingSubnets, nodeName)
-		return existingSubnets, nil, nil
-	}
+	klog.Infof("Expected %d subnets on node %s, found %d: %v", expectedHostSubnets, nodeName, len(existingSubnets), existingSubnets)
 
-	// Node doesn't have the expected subnets annotated
-	// it may happen it has more subnets assigned that configured in OVN
-	// like in a dual-stack to single-stack conversion
-	// or that it needs to allocate new subnet because it is a new node
-	// or has been converted from single-stack to dual-stack
-	klog.Infof("Expected %d subnets on node %s, found %d: %v", expectedHostSubnets, nodeName, currentHostSubnets, existingSubnets)
-	// release unexpected subnets
+	// If any existing subnets the node has are valid, mark them as reserved.
+	// The node might have invalid or already-reserved subnets, or it might
+	// have more subnets than configured in OVN (like for dual-stack to/from
+	// single-stack conversion).
 	// filter in place slice
 	// https://github.com/golang/go/wiki/SliceTricks#filter-in-place
 	foundIPv4 := false
 	foundIPv6 := false
 	n := 0
 	for _, subnet := range existingSubnets {
-		// if the subnet is not going to be reused release it
-		if ipv4Mode && utilnet.IsIPv4CIDR(subnet) && !foundIPv4 {
-			klog.V(5).Infof("Valid IPv4 allocated subnet %v on node %s", subnet, nodeName)
-			existingSubnets[n] = subnet
-			n++
-			foundIPv4 = true
-			continue
+		if (ipv4Mode && utilnet.IsIPv4CIDR(subnet) && !foundIPv4) || (ipv6Mode && utilnet.IsIPv6CIDR(subnet) && !foundIPv6) {
+			if err := sna.MarkSubnetsAllocated(nodeName, subnet); err == nil {
+				klog.Infof("Valid subnet %v allocated on node %s", subnet, nodeName)
+				existingSubnets[n] = subnet
+				n++
+				if utilnet.IsIPv4CIDR(subnet) {
+					foundIPv4 = true
+				} else if utilnet.IsIPv6CIDR(subnet) {
+					foundIPv6 = true
+				}
+				continue
+			}
 		}
-		if ipv6Mode && utilnet.IsIPv6CIDR(subnet) && !foundIPv6 {
-			klog.V(5).Infof("Valid IPv6 allocated subnet %v on node %s", subnet, nodeName)
-			existingSubnets[n] = subnet
-			n++
-			foundIPv6 = true
-			continue
-		}
-		// this subnet is no longer needed
-		klog.V(5).Infof("Releasing subnet %v on node %s", subnet, nodeName)
+		// this subnet is no longer needed; release it
+		klog.Infof("Releasing unused or invalid subnet %v on node %s", subnet, nodeName)
 		if err := sna.base.ReleaseNetworks(nodeName, subnet); err != nil {
-			klog.Warningf("Error releasing subnet %v on node %s", subnet, nodeName)
+			klog.Warningf("Failed to release subnet %v on node %s: %v", subnet, nodeName, err)
 		}
 	}
 	// recreate existingSubnets with the valid subnets
 	existingSubnets = existingSubnets[:n]
+
+	// Node has enough valid subnets already allocated
+	if len(existingSubnets) == expectedHostSubnets {
+		klog.Infof("Allowed existing subnets %v on node %s", existingSubnets, nodeName)
+		return existingSubnets, allocatedSubnets, nil
+	}
 
 	// Release allocated subnets on error
 	releaseAllocatedSubnets := true
@@ -146,7 +143,7 @@ func (sna *HostSubnetAllocator) AllocateNodeSubnets(nodeName string, existingSub
 	// check if we were able to allocate the new subnets require
 	// this can only happen if OVN is not configured correctly
 	// so it will require a reconfiguration and restart.
-	wantedSubnets := expectedHostSubnets - currentHostSubnets
+	wantedSubnets := expectedHostSubnets - len(existingSubnets)
 	if wantedSubnets > 0 && len(allocatedSubnets) != wantedSubnets {
 		return nil, nil, fmt.Errorf("error allocating networks for node %s: %d subnets expected only new %d subnets allocated",
 			nodeName, expectedHostSubnets, len(allocatedSubnets))
