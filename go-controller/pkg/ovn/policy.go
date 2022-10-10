@@ -954,22 +954,15 @@ func (oc *Controller) getExistingLocalPolicyPorts(np *networkPolicy,
 		pod := obj.(*kapi.Pod)
 
 		logicalPortName := util.GetLogicalPortName(pod.Namespace, pod.Name)
-		if _, ok := np.localPods.Load(logicalPortName); !ok {
+		loadedPortUUID, ok := np.localPods.Load(logicalPortName)
+		if !ok {
 			// port is already deleted for this policy
 			continue
 		}
-		// lsp is deleted from oc.logicalPortCache with 60 sec delay to make sure all other handlers
-		// were able to get required information
-		portInfo, err := oc.logicalPortCache.get(logicalPortName)
-		if err != nil {
-			klog.Warningf("Failed to get LSP for pod %s/%s for networkPolicy %s refetching err: %v",
-				pod.Namespace, pod.Name, np.name, err)
-			errObjs = append(errObjs, pod)
-			return
-		}
+		portUUID := loadedPortUUID.(string)
 
-		policyPortsToUUIDs[portInfo.name] = portInfo.uuid
-		policyPortUUIDs = append(policyPortUUIDs, portInfo.uuid)
+		policyPortsToUUIDs[logicalPortName] = portUUID
+		policyPortUUIDs = append(policyPortUUIDs, portUUID)
 	}
 	return
 }
