@@ -70,7 +70,7 @@ func (c *portCache) remove(logicalPort string) {
 	info.expires = time.Now().Add(time.Minute)
 	klog.V(5).Infof("port-cache(%s): scheduling port for removal at %v", logicalPort, info.expires)
 
-	// Removal must be deferred since, for example, NetworkPolicy pod handlers
+	// Removal must be deferred, since some handlers
 	// may run after the main pod handler and look for items in the cache
 	// on delete events.
 	go func() {
