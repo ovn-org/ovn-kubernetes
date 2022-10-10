@@ -64,7 +64,6 @@ type tNode struct {
 	GatewayRouterIP      string
 	GatewayRouterNextHop string
 	PhysicalBridgeName   string
-	NodeHostAddress      []string
 	NodeGWIP             string
 	NodeMgmtPortIP       string
 	NodeMgmtPortMAC      string
@@ -328,8 +327,7 @@ func addNodeLogicalFlows(testData []libovsdbtest.TestData, expectedOVNClusterRou
 	expectedClusterPortGroup.Ports = []string{types.K8sPrefix + node.Name + "-UUID"}
 
 	matchStr1 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == %s /* %s */`, node.Name, node.GatewayRouterIP, node.Name)
-	gomega.Expect(node.NodeHostAddress).To(gomega.HaveLen(1))
-	matchStr2 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == %s /* %s */`, node.Name, node.NodeHostAddress[0], node.Name)
+	matchStr2 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == %s /* %s */`, node.Name, node.NodeIP, node.Name)
 	intPriority, _ := strconv.Atoi(types.NodeSubnetPolicyPriority)
 	testData = append(testData, &nbdb.LogicalRouterPolicy{
 		UUID:     "policy-based-route-1-UUID",
@@ -932,7 +930,6 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			GatewayRouterIP:      "172.16.16.2",
 			GatewayRouterNextHop: "172.16.16.1",
 			PhysicalBridgeName:   "br-eth0",
-			NodeHostAddress:      []string{"9.9.9.9"},
 			NodeGWIP:             "10.1.1.1/24",
 			NodeMgmtPortIP:       "10.1.1.2",
 			NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
@@ -980,7 +977,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		nodeHostAddrs = sets.NewString(node1.NodeHostAddress...)
+		nodeHostAddrs = sets.NewString(node1.NodeIP)
 		err = util.SetNodeHostAddresses(nodeAnnotator, nodeHostAddrs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = nodeAnnotator.Run()
