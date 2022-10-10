@@ -414,6 +414,9 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 	return nil
 }
 
+// podExpectedInLogicalCache returns true if pod should be added to oc.logicalPortCache.
+// For some pods, like hostNetwork pods, overlay node pods, or completed pods waiting for them to be added
+// to oc.logicalPortCache will never succeed.
 func (oc *Controller) podExpectedInLogicalCache(pod *kapi.Pod) bool {
 	return util.PodWantsNetwork(pod) && !oc.lsManager.IsNonHostSubnetSwitch(pod.Spec.NodeName) && !util.PodCompleted(pod)
 }
