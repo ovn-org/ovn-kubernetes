@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"reflect"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,6 +36,27 @@ type Handler struct {
 	// tombstone should only be set using atomic operations since it is
 	// used from multiple goroutines.
 	tombstone uint32
+	// priority is used to track the handler's priority of being invoked.
+	// example: a handler with priority 0 will process the received event first
+	// before a handler with priority 1.
+	priority uint32
+}
+
+type handlerSlice []*Handler
+
+// Len is part of sort.Interface.
+func (h handlerSlice) Len() int {
+	return len(h)
+}
+
+// Swap is part of sort.Interface.
+func (h handlerSlice) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+// Less is part of sort.Interface. We use count as the value to sort by
+func (h handlerSlice) Less(i, j int) bool {
+	return h[i].priority < h[j].priority
 }
 
 func (h *Handler) OnAdd(obj interface{}) {
@@ -92,7 +114,12 @@ type informer struct {
 func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
 	i.RLock()
 	defer i.RUnlock()
+	sortHandlers := make(handlerSlice, 0, len(i.handlers))
 	for _, handler := range i.handlers {
+		sortHandlers = append(sortHandlers, handler)
+	}
+	sort.Sort(sortHandlers)
+	for _, handler := range sortHandlers {
 		f(handler)
 	}
 }
@@ -107,12 +134,17 @@ func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
 		return
 	}
 
+	sortHandlers := make(handlerSlice, 0, len(i.handlers))
 	for _, handler := range i.handlers {
+		sortHandlers = append(sortHandlers, handler)
+	}
+	sort.Sort(sortHandlers)
+	for _, handler := range sortHandlers {
 		f(handler)
 	}
 }
 
-func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
+func (i *informer) addHandler(id uint64, priority uint32, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
 	handler := &Handler{
 		cache.FilteringResourceEventHandler{
 			FilterFunc: filterFunc,
@@ -120,6 +152,7 @@ func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, 
 		},
 		id,
 		handlerAlive,
+		priority,
 	}
 
 	// Send existing items to the handler's add function; informers usually
