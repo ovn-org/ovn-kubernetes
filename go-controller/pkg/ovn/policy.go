@@ -1509,7 +1509,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) error {
 	// Run handleNetPolNamespaceUpdate sequence, but only for 1 newly added policy.
 	if nsInfo.aclLogging.Deny != aclLogging.Deny {
 		if err := oc.updateACLLoggingForDefaultACLs(policy.Namespace, nsInfo); err != nil {
-			klog.Warningf(err.Error())
+			return fmt.Errorf("network policy %s failed to be created: update default deny ACLs failed: %v", npKey, err)
 		} else {
 			klog.Infof("Policy %s: ACL logging setting updated to deny=%s allow=%s",
 				npKey, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
@@ -1517,7 +1517,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) error {
 	}
 	if nsInfo.aclLogging.Allow != aclLogging.Allow {
 		if err := oc.updateACLLoggingForPolicy(np, &nsInfo.aclLogging); err != nil {
-			klog.Warningf(err.Error())
+			return fmt.Errorf("network policy %s failed to be created: update policy ACLs failed: %v", npKey, err)
 		} else {
 			klog.Infof("Policy %s: ACL logging setting updated to deny=%s allow=%s",
 				npKey, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
