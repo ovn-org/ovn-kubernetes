@@ -4,8 +4,11 @@ package fake
 
 import (
 	"context"
+	json "encoding/json"
+	"fmt"
 
 	cloudnetworkv1 "github.com/openshift/api/cloudnetwork/v1"
+	applyconfigurationscloudnetworkv1 "github.com/openshift/client-go/cloudnetwork/applyconfigurations/cloudnetwork/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	labels "k8s.io/apimachinery/pkg/labels"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
@@ -110,6 +113,49 @@ func (c *FakeCloudPrivateIPConfigs) DeleteCollection(ctx context.Context, opts v
 func (c *FakeCloudPrivateIPConfigs) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *cloudnetworkv1.CloudPrivateIPConfig, err error) {
 	obj, err := c.Fake.
 		Invokes(testing.NewRootPatchSubresourceAction(cloudprivateipconfigsResource, name, pt, data, subresources...), &cloudnetworkv1.CloudPrivateIPConfig{})
+	if obj == nil {
+		return nil, err
+	}
+	return obj.(*cloudnetworkv1.CloudPrivateIPConfig), err
+}
+
+// Apply takes the given apply declarative configuration, applies it and returns the applied cloudPrivateIPConfig.
+func (c *FakeCloudPrivateIPConfigs) Apply(ctx context.Context, cloudPrivateIPConfig *applyconfigurationscloudnetworkv1.CloudPrivateIPConfigApplyConfiguration, opts v1.ApplyOptions) (result *cloudnetworkv1.CloudPrivateIPConfig, err error) {
+	if cloudPrivateIPConfig == nil {
+		return nil, fmt.Errorf("cloudPrivateIPConfig provided to Apply must not be nil")
+	}
+	data, err := json.Marshal(cloudPrivateIPConfig)
+	if err != nil {
+		return nil, err
+	}
+	name := cloudPrivateIPConfig.Name
+	if name == nil {
+		return nil, fmt.Errorf("cloudPrivateIPConfig.Name must be provided to Apply")
+	}
+	obj, err := c.Fake.
+		Invokes(testing.NewRootPatchSubresourceAction(cloudprivateipconfigsResource, *name, types.ApplyPatchType, data), &cloudnetworkv1.CloudPrivateIPConfig{})
+	if obj == nil {
+		return nil, err
+	}
+	return obj.(*cloudnetworkv1.CloudPrivateIPConfig), err
+}
+
+// ApplyStatus was generated because the type contains a Status member.
+// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+func (c *FakeCloudPrivateIPConfigs) ApplyStatus(ctx context.Context, cloudPrivateIPConfig *applyconfigurationscloudnetworkv1.CloudPrivateIPConfigApplyConfiguration, opts v1.ApplyOptions) (result *cloudnetworkv1.CloudPrivateIPConfig, err error) {
+	if cloudPrivateIPConfig == nil {
+		return nil, fmt.Errorf("cloudPrivateIPConfig provided to Apply must not be nil")
+	}
+	data, err := json.Marshal(cloudPrivateIPConfig)
+	if err != nil {
+		return nil, err
+	}
+	name := cloudPrivateIPConfig.Name
+	if name == nil {
+		return nil, fmt.Errorf("cloudPrivateIPConfig.Name must be provided to Apply")
+	}
+	obj, err := c.Fake.
+		Invokes(testing.NewRootPatchSubresourceAction(cloudprivateipconfigsResource, *name, types.ApplyPatchType, data, "status"), &cloudnetworkv1.CloudPrivateIPConfig{})
 	if obj == nil {
 		return nil, err
 	}
