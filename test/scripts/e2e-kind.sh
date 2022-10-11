@@ -153,7 +153,7 @@ export KUBE_CONTAINER_RUNTIME_NAME=containerd
 # FIXME we should not tolerate flakes
 # but until then, we retry the test in the same job
 # to stop PR retriggers for totally broken code
-export FLAKE_ATTEMPTS=5
+export FLAKE_ATTEMPTS=1
 export NUM_NODES=10  # number of parallel (ginkgo) test nodes to run
 # Kind clusters are three node clusters
 export NUM_WORKER_NODES=3

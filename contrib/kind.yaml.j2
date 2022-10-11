@@ -55,6 +55,7 @@ nodes:
        kubeletExtraArgs:
          node-labels: "ingress-ready=true"
          authorization-mode: "AlwaysAllow"
+         container-log-max-files: "15"
 {%- if ovn_ha is equalto "true" %}
 {%- for _ in range(1, ovn_num_master | int) %}
  - role: worker
@@ -62,4 +63,10 @@ nodes:
 {%- endif %}
 {%- for _ in range(ovn_num_worker | int) %}
  - role: worker
+   kubeadmConfigPatches:
+   - |
+     kind: JoinConfiguration
+     nodeRegistration:
+       kubeletExtraArgs:
+         container-log-max-files: "15"
 {%- endfor %}
