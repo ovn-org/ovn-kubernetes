@@ -1471,7 +1471,7 @@ func (oc *Controller) WatchResource(objectsToRetry *RetryObjs) (*factory.Handler
 		return nil, fmt.Errorf("watchResource for resource %v. "+
 			"Failed addHandlerFunc: %v", objectsToRetry.oType, err)
 	}
-
+	klog.Infof("Start periodic retry for %+v", objectsToRetry)
 	// track the retry entries and every 30 seconds (or upon explicit request) check if any objects
 	// need to be retried
 	go oc.periodicallyRetryResources(objectsToRetry)

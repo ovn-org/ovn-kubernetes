@@ -1178,8 +1178,11 @@ func (oc *Controller) addLocalPodHandler(policy *knet.NetworkPolicy, np *network
 		klog.Errorf("Failed WatchResource for addLocalPodHandler: %v", err)
 		return err
 	}
+	klog.Infof("Handler for %s added", np.getKey())
 
 	np.podHandlerList = append(np.podHandlerList, podHandler)
+	klog.Infof("Local pod Handler added")
+
 	return nil
 }
 
@@ -1411,6 +1414,7 @@ func (oc *Controller) createNetworkPolicy(policy *knet.NetworkPolicy, aclLogging
 		if err != nil {
 			return fmt.Errorf("failed to start local pod handler: %v", err)
 		}
+		klog.Infof("Finish creating netpol %s", npKey)
 
 		return nil
 	})
@@ -1465,6 +1469,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) error {
 		}
 	}()
 	if err != nil {
+		klog.Errorf("Failed to create Network Policy %s: %v", npKey, err)
 		return fmt.Errorf("failed to create Network Policy %s: %v", npKey, err)
 	}
 	klog.Infof("Create network policy %s resources completed, update namespace loglevel", npKey)
