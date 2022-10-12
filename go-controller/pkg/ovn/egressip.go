@@ -1150,7 +1150,12 @@ func (oc *Controller) deleteEgressIPAssignments(name string, statusesToRemove []
 				// this pod was managed by statusToRemove.EgressIP; we need to try and add its SNAT back towards nodeIP
 				delete(podStatus.egressStatuses, statusToRemove)
 				podNamespace, podName := getPodNamespaceAndNameFromKey(podKey)
-				if err := oc.eIPC.addExternalGWPodSNAT(podNamespace, podName, statusToRemove); err != nil {
+				// TODO: fix this to take the corner case into consideration
+				var nodeToEIP map[string]string
+				for status, _ := range podStatus.egressStatuses {
+					nodeToEIP[status.Node] = ""
+				}
+				if err := oc.eIPC.addExternalGWPodSNAT(podNamespace, podName, statusToRemove, nodeToEIP); err != nil {
 					return err
 				}
 				delete(oc.eIPC.podAssignment, podKey)
@@ -1201,7 +1206,7 @@ func (oc *Controller) deletePodEgressIPAssignments(name string, statusesToRemove
 			return err
 		}
 		delete(podStatus.egressStatuses, statusToRemove)
-		if err := oc.eIPC.addExternalGWPodSNAT(pod.Namespace, pod.Name, statusToRemove); err != nil {
+		if err := oc.eIPC.addExternalGWPodSNAT(pod.Namespace, pod.Name, statusToRemove, nil); err != nil {
 			return err
 		}
 	}
@@ -2021,9 +2026,9 @@ func (e *egressIPController) deletePodEgressIPAssignment(egressIPName string, st
 // check the informer cache since on pod deletion the event handlers are
 // triggered after the update to the informer cache. We should not re-add the
 // external GW setup in those cases.
-func (e *egressIPController) addExternalGWPodSNAT(podNamespace, podName string, status egressipv1.EgressIPStatusItem) error {
+func (e *egressIPController) addExternalGWPodSNAT(podNamespace, podName string, status egressipv1.EgressIPStatusItem, nodeToEIP map[string]string) error {
 	if config.Gateway.DisableSNATMultipleGWs {
-		if pod, err := e.watchFactory.GetPod(podNamespace, podName); err == nil && pod.Spec.NodeName == status.Node {
+		if pod, err := e.watchFactory.GetPod(podNamespace, podName); err == nil && pod.Spec.NodeName == status.Node && len(nodeToEIP[pod.Spec.NodeName]) == 0 {
 			// if the pod still exists, add snats to->nodeIP (on the node where the pod exists) for these podIPs after deleting the snat to->egressIP
 			// NOTE: This needs to be done only if the pod was on the same node as egressNode
 			extIPs, err := getExternalIPsGR(e.watchFactory, pod.Spec.NodeName)
