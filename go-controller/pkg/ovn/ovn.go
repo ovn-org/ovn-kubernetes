@@ -651,12 +651,15 @@ func (oc *Controller) WatchNodes() error {
 // *) Valid values for "allow" and "deny" are  "alert", "warning", "notice", "info", "debug", "".
 // *) Invalid values will return an error, and logging will be disabled for the respective key.
 // *) In the following special cases, nsInfo.aclLogging.Deny and nsInfo.aclLogging.Allow. will both be reset to ""
-//    without logging an error, meaning that logging will be switched off:
-//    i) oc.aclLoggingEnabled == false
-//    ii) annotation == ""
-//    iii) annotation == "{}"
+//
+//	without logging an error, meaning that logging will be switched off:
+//	i) oc.aclLoggingEnabled == false
+//	ii) annotation == ""
+//	iii) annotation == "{}"
+//
 // *) If one of "allow" or "deny" can be parsed and has a valid value, but the other key is not present in the
-//    annotation, then assume that this key should be disabled by setting its nsInfo value to "".
+//
+//	annotation, then assume that this key should be disabled by setting its nsInfo value to "".
 func (oc *Controller) aclLoggingUpdateNsInfo(annotation string, nsInfo *namespaceInfo) error {
 	var aclLevels ACLLoggingLevels
 	var errors []error

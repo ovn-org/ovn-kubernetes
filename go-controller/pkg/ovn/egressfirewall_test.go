@@ -2020,7 +2020,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 // To make it easier to mock EgressFirewall functionality create an egressFirewall
 // without the go routine of the sync function
 
-//GetDNSEntryForTest Gets a dnsEntry from a EgressDNS object for testing
+// GetDNSEntryForTest Gets a dnsEntry from a EgressDNS object for testing
 func (e *EgressDNS) GetDNSEntryForTest(dnsName string) (map[string]struct{}, []net.IP, addressset.AddressSet, error) {
 	if e.dnsEntries[dnsName] == nil {
 		return nil, nil, nil, fmt.Errorf("there is no dnsEntry for dnsName: %s", dnsName)

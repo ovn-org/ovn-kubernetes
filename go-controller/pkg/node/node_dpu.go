@@ -20,7 +20,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
-//watchPodsDPU watch updates for pod dpu annotations
+// watchPodsDPU watch updates for pod dpu annotations
 func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) error {
 	var retryPods sync.Map
 	// servedPods tracks the pods that got a VF

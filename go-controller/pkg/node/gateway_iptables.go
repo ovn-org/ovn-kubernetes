@@ -173,8 +173,10 @@ func getLegacySharedGatewayInitRules(chain string, proto iptables.Protocol) []ip
 // `svcPort` corresponds to port details for this service as specified in the service object
 // `targetIP` is clusterIP towards which the DNAT of nodePort service is to be added
 // `targetPort` is the port towards which the DNAT of the nodePort service is to be added
-//     case1: if svcHasLocalHostNetEndPnt=false + isETPLocal=true targetIP=types.HostETPLocalMasqueradeIP and targetPort=svcPort.NodePort
-//     case2: default: targetIP=clusterIP and targetPort=svcPort.Port
+//
+//	case1: if svcHasLocalHostNetEndPnt=false + isETPLocal=true targetIP=types.HostETPLocalMasqueradeIP and targetPort=svcPort.NodePort
+//	case2: default: targetIP=clusterIP and targetPort=svcPort.Port
+//
 // `svcHasLocalHostNetEndPnt` is true if this service has at least one host-networked endpoint that is local to this node
 // `isETPLocal` is true if the svc.Spec.ExternalTrafficPolicy=Local
 func getNodePortIPTRules(svcPort kapi.ServicePort, targetIP string, targetPort int32, svcHasLocalHostNetEndPnt, isETPLocal bool) []iptRule {
@@ -262,8 +264,10 @@ func getNodePortETPLocalIPTRules(svcPort kapi.ServicePort, targetIP string) []ip
 // `svcPort` corresponds to port details for this service as specified in the service object
 // `externalIP` can either be the externalIP or LB.status.ingressIP
 // `dstIP` corresponds to the IP to which the provided externalIP needs to be DNAT-ed to
-//     case1: if svcHasLocalHostNetEndPnt=false + isETPLocal=true, dstIP=types.HostETPLocalMasqueradeIP
-//     case2: default: dstIP=clusterIP
+//
+//	case1: if svcHasLocalHostNetEndPnt=false + isETPLocal=true, dstIP=types.HostETPLocalMasqueradeIP
+//	case2: default: dstIP=clusterIP
+//
 // `svcHasLocalHostNetEndPnt` is true if this service has at least one host-networked endpoint that is local to this node
 // `isETPLocal` is true if the svc.Spec.ExternalTrafficPolicy=Local
 func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string, svcHasLocalHostNetEndPnt, isETPLocal bool) []iptRule {
@@ -422,8 +426,8 @@ func recreateIPTRules(table, chain string, keepIPTRules []iptRule) {
 // case2: (default) A DNAT rule towards clusterIP svc is added ALWAYS.
 //
 // case3: if svcHasLocalHostNetEndPnt and svcTypeIsITPLocal, rule that redirects clusterIP traffic to host targetPort is added.
-//        if !svcHasLocalHostNetEndPnt and svcTypeIsITPLocal, rule that marks clusterIP traffic to steer it to ovn-k8s-mp0 is added.
 //
+//	if !svcHasLocalHostNetEndPnt and svcTypeIsITPLocal, rule that marks clusterIP traffic to steer it to ovn-k8s-mp0 is added.
 func getGatewayIPTRules(service *kapi.Service, svcHasLocalHostNetEndPnt bool) []iptRule {
 	rules := make([]iptRule, 0)
 	clusterIPs := util.GetClusterIPs(service)

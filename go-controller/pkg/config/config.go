@@ -602,7 +602,7 @@ func overrideFields(dst, src, defaults interface{}) error {
 
 var cliConfig config
 
-//CommonFlags capture general options.
+// CommonFlags capture general options.
 var CommonFlags = []cli.Flag{
 	// Mode flags
 	&cli.StringFlag{
@@ -1057,7 +1057,7 @@ var OvnNBFlags = []cli.Flag{
 	},
 }
 
-//OvnSBFlags capture OVN southbound database options
+// OvnSBFlags capture OVN southbound database options
 var OvnSBFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name: "sb-address",
@@ -1099,7 +1099,7 @@ var OvnSBFlags = []cli.Flag{
 	},
 }
 
-//OVNGatewayFlags capture L3 Gateway related flags
+// OVNGatewayFlags capture L3 Gateway related flags
 var OVNGatewayFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name: "gateway-mode",
