@@ -425,7 +425,8 @@ type HybridOverlayConfig struct {
 type OvnKubeNodeConfig struct {
 	Mode                 string `gcfg:"mode"`
 	MgmtPortNetdev       string `gcfg:"mgmt-port-netdev"`
-	DisableOVNIfaceIdVer bool   `gcfg:"disable-ovn-iface-id-ver"`
+	MgmtPortRepresentor  string
+	DisableOVNIfaceIdVer bool `gcfg:"disable-ovn-iface-id-ver"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -2224,11 +2225,6 @@ func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
 	if OvnKubeNode.Mode == types.NodeModeDPU || OvnKubeNode.Mode == types.NodeModeDPUHost {
 		if OvnKubeNode.MgmtPortNetdev == "" {
 			return fmt.Errorf("ovnkube-node-mgmt-port-netdev must be provided")
-		}
-	} else {
-		if OvnKubeNode.MgmtPortNetdev != "" {
-			return fmt.Errorf("ovnkube-node-mgmt-port-netdev is not supported with ovnkube-node mode %s",
-				OvnKubeNode.Mode)
 		}
 	}
 	return nil

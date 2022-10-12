@@ -2,10 +2,11 @@ package node
 
 import (
 	"fmt"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"net"
 	"strings"
 	"time"
+
+	"k8s.io/apimachinery/pkg/util/wait"
 
 	"k8s.io/klog/v2"
 
@@ -25,8 +26,8 @@ type ManagementPort interface {
 	CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{})
 }
 
-// NewManagementPort creates a new ManagementPort
-func NewManagementPort(nodeName string, hostSubnets []*net.IPNet) ManagementPort {
+// NewManagementPorts creates a new ManagementPorts
+func NewManagementPorts(nodeName string, hostSubnets []*net.IPNet) []ManagementPort {
 	// Kubernetes emits events when pods are created. The event will contain
 	// only lowercase letters of the hostname even though the kubelet is
 	// started with a hostname that contains lowercase and uppercase letters.
@@ -39,11 +40,19 @@ func NewManagementPort(nodeName string, hostSubnets []*net.IPNet) ManagementPort
 
 	switch config.OvnKubeNode.Mode {
 	case types.NodeModeDPU:
-		return newManagementPortDPU(nodeName, hostSubnets)
+		return []ManagementPort{newManagementPortRepresentor(nodeName, hostSubnets)}
 	case types.NodeModeDPUHost:
-		return newManagementPortDPUHost(hostSubnets)
+		return []ManagementPort{newManagementPortNetdev(hostSubnets)}
 	default:
-		return newManagementPort(nodeName, hostSubnets)
+		// create OVS internal port or configure netdevice and its representor
+		if config.OvnKubeNode.MgmtPortNetdev == "" {
+			return []ManagementPort{newManagementPort(nodeName, hostSubnets)}
+		} else {
+			return []ManagementPort{
+				newManagementPortNetdev(hostSubnets),
+				newManagementPortRepresentor(nodeName, hostSubnets),
+			}
+		}
 	}
 }
 
@@ -100,7 +109,7 @@ func (mp *managementPort) Create(nodeAnnotator kube.Annotator, waiter *startupWa
 	return cfg, nil
 }
 
-func (mpc *managementPort) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
+func (mp *managementPort) CheckManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
 	go wait.Until(
 		func() {
 			checkManagementPortHealth(cfg)
@@ -110,8 +119,12 @@ func (mpc *managementPort) CheckManagementPortHealth(cfg *managementPortConfig, 
 }
 
 func managementPortReady() (bool, error) {
+	k8sMgmtIntfName := types.K8sMgmtIntfName
+	if config.OvnKubeNode.MgmtPortRepresentor != "" {
+		k8sMgmtIntfName += "_0"
+	}
 	// Get the OVS interface name for the Management Port
-	ofport, _, err := util.RunOVSVsctl("--if-exists", "get", "interface", types.K8sMgmtIntfName, "ofport")
+	ofport, _, err := util.RunOVSVsctl("--if-exists", "get", "interface", k8sMgmtIntfName, "ofport")
 	if err != nil {
 		return false, nil
 	}
@@ -127,6 +140,6 @@ func managementPortReady() (bool, error) {
 	if !strings.Contains(stdout, "actions=output:"+ofport) {
 		return false, nil
 	}
-	klog.Info("Management port is ready")
+	klog.Info("Management port %s is ready", k8sMgmtIntfName)
 	return true, nil
 }
