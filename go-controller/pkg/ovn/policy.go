@@ -1179,7 +1179,9 @@ func (oc *Controller) addLocalPodHandler(policy *knet.NetworkPolicy, np *network
 		return err
 	}
 	klog.Infof("Handler for %s added", np.getKey())
-
+	np.Lock()
+	klog.Infof("Netpol %s locked", np.getKey())
+	defer np.Unlock()
 	np.podHandlerList = append(np.podHandlerList, podHandler)
 	klog.Infof("Local pod Handler added")
 
