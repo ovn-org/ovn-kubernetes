@@ -16,6 +16,7 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/coreos/go-iptables/iptables"
+	"github.com/stretchr/testify/mock"
 	"github.com/urfave/cli/v2"
 	"github.com/vishvananda/netlink"
 
@@ -23,8 +24,10 @@ import (
 	egressipv1fake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -189,6 +192,14 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	)
 
 	// generic setup
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgtPort,
+		Output: "internal," + mgtPort,
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgtPort + "_0",
+		Output: "internal," + mgtPort + "_0",
+	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovs-vsctl --timeout=15 -- --if-exists del-port br-int " + legacyMgtPort + " -- --may-exist add-port br-int " + mgtPort + " -- set interface " + mgtPort + " type=internal mtu_request=" + mtu + " external-ids:iface-id=" + legacyMgtPort,
 	})
@@ -265,7 +276,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 }
 
 func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.NetNS,
-	configs []managementPortTestConfig) {
+	configs []managementPortTestConfig, mgmtPortNetdev string) {
 	const (
 		nodeName   string = "node1"
 		mgtPortMAC string = "0a:58:0a:01:01:02"
@@ -274,9 +285,11 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 	)
 
 	// OVS cmd setup
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    fmt.Sprintf("ovs-vsctl --timeout=15 -- --may-exist add-port br-int %s -- set interface %s external-ids:iface-id=%s", mgtPort, mgtPort, "k8s-"+nodeName),
-		Output: "",
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgtPort,
+		fmt.Sprintf("ovs-vsctl --timeout=15 -- --may-exist add-port br-int %s -- set interface %s "+
+			"external-ids:iface-id=%s external-ids:ovn-orig-mgmt-port-rep-name=%s",
+			mgtPort, mgtPort, "k8s-"+nodeName, mgmtPortNetdev),
 	})
 
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -389,235 +402,492 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 }
 
 var _ = Describe("Management Port Operations", func() {
-	var tmpErr error
-	var app *cli.App
-	var testNS ns.NetNS
-	var fexec *ovntest.FakeExec
+	Describe("Syncing management port", func() {
+		var netlinkOpsMock *utilMocks.NetLinkOps
+		var execMock *ovntest.FakeExec
 
-	tmpDir, tmpErr = ioutil.TempDir("", "clusternodetest_certdir")
-	if tmpErr != nil {
-		GinkgoT().Errorf("failed to create tempdir: %v", tmpErr)
-	}
+		const (
+			repName    = "enp3s0f0_0"
+			netdevName = "enp3s0f0v0"
+		)
 
-	BeforeEach(func() {
-		var err error
-		// Restore global default values before each testcase
-		Expect(config.PrepareTestConfig()).To(Succeed())
+		t := GinkgoT()
+		origNetlinkOps := util.GetNetLinkOps()
+		mgmtPortName := types.K8sMgmtIntfName
+		netlinkMockErr := fmt.Errorf("netlink mock error")
+		fakeExecErr := fmt.Errorf("face exec error")
+		hostSubnets := []*net.IPNet{}
+		linkMock := &mocks.Link{}
 
-		app = cli.NewApp()
-		app.Name = "test"
-		app.Flags = config.Flags
+		BeforeEach(func() {
+			Expect(config.PrepareTestConfig()).To(Succeed())
+			util.ResetRunner()
 
-		testNS, err = testutils.NewNS()
-		Expect(err).NotTo(HaveOccurred())
-		fexec = ovntest.NewFakeExec()
+			netlinkOpsMock = &utilMocks.NetLinkOps{}
+			execMock = ovntest.NewFakeExec()
+			err := util.SetExec(execMock)
+			Expect(err).NotTo(HaveOccurred())
+			util.SetNetLinkOpMockInst(netlinkOpsMock)
+		})
+
+		AfterEach(func() {
+			netlinkOpsMock.AssertExpectations(t)
+			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
+			util.SetNetLinkOpMockInst(origNetlinkOps)
+		})
+
+		Context("Syncing netdevice interface", func() {
+			It("Fails to lookup netdevice link", func() {
+				execMock.AddFakeCmdsNoOutputNoError([]string{
+					"ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgmtPortName,
+				})
+				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(nil, netlinkMockErr)
+				netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(false)
+
+				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("Fails to teardown IP configuration", func() {
+				execMock.AddFakeCmdsNoOutputNoError([]string{
+					"ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgmtPortName,
+				})
+				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(linkMock, nil)
+				netlinkOpsMock.On("AddrList", linkMock, netlink.FAMILY_ALL).Return([]netlink.Addr{}, netlinkMockErr)
+				linkMock.On("Attrs").Return(&netlink.LinkAttrs{Name: netdevName})
+
+				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("Fails to set netdevice link down", func() {
+				execMock.AddFakeCmdsNoOutputNoError([]string{
+					"ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgmtPortName,
+				})
+				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(linkMock, nil)
+				netlinkOpsMock.On("AddrList", linkMock, netlink.FAMILY_ALL).Return([]netlink.Addr{}, nil)
+				netlinkOpsMock.On("RouteList", linkMock, netlink.FAMILY_ALL).Return([]netlink.Route{}, nil)
+				netlinkOpsMock.On("LinkSetDown", linkMock).Return(netlinkMockErr)
+
+				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("Fails to rename netdevice link", func() {
+				execMock.AddFakeCmdsNoOutputNoError([]string{
+					"ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgmtPortName,
+				})
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external-ids:ovn-orig-mgmt-port-netdev-name",
+					Output: netdevName,
+				})
+				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(linkMock, nil)
+				netlinkOpsMock.On("AddrList", linkMock, netlink.FAMILY_ALL).Return([]netlink.Addr{}, nil)
+				netlinkOpsMock.On("RouteList", linkMock, netlink.FAMILY_ALL).Return([]netlink.Route{}, nil)
+				netlinkOpsMock.On("LinkSetDown", linkMock).Return(nil)
+				netlinkOpsMock.On("LinkSetName", linkMock, netdevName).Return(netlinkMockErr)
+
+				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				Expect(err).To(HaveOccurred())
+			})
+			It("Unconfigures old management port netdevice", func() {
+				execMock.AddFakeCmdsNoOutputNoError([]string{
+					"ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgmtPortName,
+				})
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external-ids:ovn-orig-mgmt-port-netdev-name",
+					Output: netdevName,
+				})
+				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(linkMock, nil)
+				netlinkOpsMock.On("AddrList", linkMock, netlink.FAMILY_ALL).Return([]netlink.Addr{}, nil)
+				netlinkOpsMock.On("RouteList", linkMock, netlink.FAMILY_ALL).Return([]netlink.Route{}, nil)
+				netlinkOpsMock.On("LinkSetDown", linkMock).Return(nil)
+				netlinkOpsMock.On("LinkSetName", linkMock, netdevName).Return(nil)
+
+				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				Expect(err).ToNot(HaveOccurred())
+			})
+		})
+
+		Context("Syncing when old management port is OVS internal port", func() {
+			It("Internal port found, but new one supposed to be an internal port", func() {
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgmtPortName,
+					Output: "internal," + mgmtPortName,
+				})
+
+				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, true)
+				Expect(err).ToNot(HaveOccurred())
+			})
+			It("Fails to remove port from the bridge", func() {
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgmtPortName,
+					Output: "internal," + mgmtPortName,
+				})
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 del-port br-int " + mgmtPortName,
+					Err: fakeExecErr,
+				})
+
+				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("Removes internal port from the bridge", func() {
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgmtPortName,
+					Output: "internal," + mgmtPortName,
+				})
+				execMock.AddFakeCmdsNoOutputNoError([]string{
+					"ovs-vsctl --timeout=15 del-port br-int " + mgmtPortName,
+				})
+
+				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				Expect(err).ToNot(HaveOccurred())
+			})
+		})
+
+		Context("Syncing representor interface", func() {
+			It("Fails to delete representor from the bridge", func() {
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgmtPortName,
+					Output: "," + mgmtPortName,
+				})
+				execMock.AddFakeCmdsNoOutputNoError([]string{
+					"ovs-vsctl --timeout=15 --if-exists get Interface " + mgmtPortName + " external-ids:ovn-orig-mgmt-port-rep-name",
+				})
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 --if-exists del-port br-int " + mgmtPortName,
+					Err: fakeExecErr,
+				})
+
+				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("Fails to get representor original name and fallback to generic one", func() {
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgmtPortName,
+					Output: "," + mgmtPortName,
+				})
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-vsctl --timeout=15 --if-exists get Interface " + mgmtPortName + " external-ids:ovn-orig-mgmt-port-rep-name",
+					Err: fakeExecErr,
+				})
+				execMock.AddFakeCmdsNoOutputNoError([]string{
+					"ovs-vsctl --timeout=15 --if-exists del-port br-int " + mgmtPortName,
+				})
+
+				// Return error here, so we know that function didn't returned earlier
+				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(nil, netlinkMockErr)
+				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("Fails to get representor link", func() {
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgmtPortName,
+					Output: "," + mgmtPortName,
+				})
+				execMock.AddFakeCmdsNoOutputNoError([]string{
+					"ovs-vsctl --timeout=15 --if-exists get Interface " + mgmtPortName + " external-ids:ovn-orig-mgmt-port-rep-name",
+					"ovs-vsctl --timeout=15 --if-exists del-port br-int " + mgmtPortName,
+				})
+				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(nil, netlinkMockErr)
+
+				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("Fails to set representor link down", func() {
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgmtPortName,
+					Output: "," + mgmtPortName,
+				})
+				execMock.AddFakeCmdsNoOutputNoError([]string{
+					"ovs-vsctl --timeout=15 --if-exists get Interface " + mgmtPortName + " external-ids:ovn-orig-mgmt-port-rep-name",
+					"ovs-vsctl --timeout=15 --if-exists del-port br-int " + mgmtPortName,
+				})
+				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(linkMock, nil)
+				netlinkOpsMock.On("LinkSetDown", linkMock).Return(netlinkMockErr)
+
+				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("Fails to rename representor link", func() {
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgmtPortName,
+					Output: "," + mgmtPortName,
+				})
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --if-exists get Interface " + mgmtPortName + " external-ids:ovn-orig-mgmt-port-rep-name",
+					Output: repName,
+				})
+				execMock.AddFakeCmdsNoOutputNoError([]string{
+					"ovs-vsctl --timeout=15 --if-exists del-port br-int " + mgmtPortName,
+				})
+				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(linkMock, nil)
+				netlinkOpsMock.On("LinkSetDown", linkMock).Return(nil)
+				netlinkOpsMock.On("LinkSetName", linkMock, repName).Return(netlinkMockErr)
+
+				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("Removes representor from the bridge", func() {
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgmtPortName,
+					Output: "," + mgmtPortName,
+				})
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --if-exists get Interface " + mgmtPortName + " external-ids:ovn-orig-mgmt-port-rep-name",
+					Output: repName,
+				})
+				execMock.AddFakeCmdsNoOutputNoError([]string{
+					"ovs-vsctl --timeout=15 --if-exists del-port br-int " + mgmtPortName,
+				})
+				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(linkMock, nil)
+				netlinkOpsMock.On("LinkSetDown", linkMock).Return(nil)
+				netlinkOpsMock.On("LinkSetName", linkMock, repName).Return(nil)
+
+				err := syncMgmtPortInterface(hostSubnets, mgmtPortName, false)
+				Expect(err).ToNot(HaveOccurred())
+			})
+
+		})
 	})
 
-	AfterEach(func() {
-		Expect(testNS.Close()).To(Succeed())
-		Expect(testutils.UnmountNS(testNS)).To(Succeed())
-	})
+	Describe("Port creation", func() {
+		var tmpErr error
+		var app *cli.App
+		var testNS ns.NetNS
+		var fexec *ovntest.FakeExec
 
-	const (
-		v4clusterCIDR string = "10.1.0.0/16"
-		v4nodeSubnet  string = "10.1.1.0/24"
-		v4gwIP        string = "10.1.1.1"
-		v4mgtPortIP   string = "10.1.1.2"
-		v4serviceCIDR string = "172.16.1.0/24"
-		v4lrpMAC      string = "0a:58:0a:01:01:01"
-
-		v6clusterCIDR string = "fda6::/48"
-		v6nodeSubnet  string = "fda6:0:0:1::/64"
-		v6gwIP        string = "fda6:0:0:1::1"
-		v6mgtPortIP   string = "fda6:0:0:1::2"
-		v6serviceCIDR string = "fc95::/64"
-		// generated from util.IPAddrToHWAddr(net.ParseIP("fda6:0:0:1::1")).String()
-		v6lrpMAC string = "0a:58:23:5a:40:f1"
-
-		mgmtPortNetdev string = "pf0vf0"
-	)
-
-	Context("Management Port, ovnkube node mode full", func() {
+		tmpDir, tmpErr = ioutil.TempDir("", "clusternodetest_certdir")
+		if tmpErr != nil {
+			GinkgoT().Errorf("failed to create tempdir: %v", tmpErr)
+		}
 
 		BeforeEach(func() {
 			var err error
-			// Set up a fake k8sMgmt interface
-			err = testNS.Do(func(ns.NetNS) error {
-				defer GinkgoRecover()
-				ovntest.AddLink(types.K8sMgmtIntfName)
-				return nil
-			})
+			// Restore global default values before each testcase
+			Expect(config.PrepareTestConfig()).To(Succeed())
+
+			app = cli.NewApp()
+			app.Name = "test"
+			app.Flags = config.Flags
+
+			testNS, err = testutils.NewNS()
 			Expect(err).NotTo(HaveOccurred())
+			fexec = ovntest.NewFakeExec()
 		})
 
-		ovntest.OnSupportedPlatformsIt("sets up the management port for IPv4 clusters", func() {
-			app.Action = func(ctx *cli.Context) error {
-				testManagementPort(ctx, fexec, testNS,
-					[]managementPortTestConfig{
-						{
-							family:   netlink.FAMILY_V4,
-							protocol: iptables.ProtocolIPv4,
-
-							clusterCIDR: v4clusterCIDR,
-							nodeSubnet:  v4nodeSubnet,
-
-							expectedManagementPortIP: v4mgtPortIP,
-							expectedGatewayIP:        v4gwIP,
-						},
-					}, v4lrpMAC)
-				return nil
-			}
-			err := app.Run([]string{
-				app.Name,
-				"--cluster-subnets=" + v4clusterCIDR,
-			})
-			Expect(err).NotTo(HaveOccurred())
+		AfterEach(func() {
+			Expect(testNS.Close()).To(Succeed())
+			Expect(testutils.UnmountNS(testNS)).To(Succeed())
 		})
 
-		ovntest.OnSupportedPlatformsIt("sets up the management port for IPv6 clusters", func() {
-			app.Action = func(ctx *cli.Context) error {
-				testManagementPort(ctx, fexec, testNS,
-					[]managementPortTestConfig{
-						{
-							family:   netlink.FAMILY_V6,
-							protocol: iptables.ProtocolIPv6,
+		const (
+			v4clusterCIDR string = "10.1.0.0/16"
+			v4nodeSubnet  string = "10.1.1.0/24"
+			v4gwIP        string = "10.1.1.1"
+			v4mgtPortIP   string = "10.1.1.2"
+			v4serviceCIDR string = "172.16.1.0/24"
+			v4lrpMAC      string = "0a:58:0a:01:01:01"
 
-							clusterCIDR: v6clusterCIDR,
-							serviceCIDR: v6serviceCIDR,
-							nodeSubnet:  v6nodeSubnet,
+			v6clusterCIDR string = "fda6::/48"
+			v6nodeSubnet  string = "fda6:0:0:1::/64"
+			v6gwIP        string = "fda6:0:0:1::1"
+			v6mgtPortIP   string = "fda6:0:0:1::2"
+			v6serviceCIDR string = "fc95::/64"
+			// generated from util.IPAddrToHWAddr(net.ParseIP("fda6:0:0:1::1")).String()
+			v6lrpMAC string = "0a:58:23:5a:40:f1"
 
-							expectedManagementPortIP: v6mgtPortIP,
-							expectedGatewayIP:        v6gwIP,
-						},
-					}, v6lrpMAC)
-				return nil
-			}
-			err := app.Run([]string{
-				app.Name,
-				"--cluster-subnets=" + v6clusterCIDR,
-				"--k8s-service-cidr=" + v6serviceCIDR,
+			mgmtPortNetdev string = "pf0vf0"
+		)
+
+		Context("Management Port, ovnkube node mode full", func() {
+
+			BeforeEach(func() {
+				// Set up a fake k8sMgmt interface
+				err := testNS.Do(func(ns.NetNS) error {
+					defer GinkgoRecover()
+					ovntest.AddLink(types.K8sMgmtIntfName)
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
 			})
-			Expect(err).NotTo(HaveOccurred())
+
+			ovntest.OnSupportedPlatformsIt("sets up the management port for IPv4 clusters", func() {
+				app.Action = func(ctx *cli.Context) error {
+					testManagementPort(ctx, fexec, testNS,
+						[]managementPortTestConfig{
+							{
+								family:   netlink.FAMILY_V4,
+								protocol: iptables.ProtocolIPv4,
+
+								clusterCIDR: v4clusterCIDR,
+								nodeSubnet:  v4nodeSubnet,
+
+								expectedManagementPortIP: v4mgtPortIP,
+								expectedGatewayIP:        v4gwIP,
+							},
+						}, v4lrpMAC)
+					return nil
+				}
+				err := app.Run([]string{
+					app.Name,
+					"--cluster-subnets=" + v4clusterCIDR,
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			ovntest.OnSupportedPlatformsIt("sets up the management port for IPv6 clusters", func() {
+				app.Action = func(ctx *cli.Context) error {
+					testManagementPort(ctx, fexec, testNS,
+						[]managementPortTestConfig{
+							{
+								family:   netlink.FAMILY_V6,
+								protocol: iptables.ProtocolIPv6,
+
+								clusterCIDR: v6clusterCIDR,
+								serviceCIDR: v6serviceCIDR,
+								nodeSubnet:  v6nodeSubnet,
+
+								expectedManagementPortIP: v6mgtPortIP,
+								expectedGatewayIP:        v6gwIP,
+							},
+						}, v6lrpMAC)
+					return nil
+				}
+				err := app.Run([]string{
+					app.Name,
+					"--cluster-subnets=" + v6clusterCIDR,
+					"--k8s-service-cidr=" + v6serviceCIDR,
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			ovntest.OnSupportedPlatformsIt("sets up the management port for dual-stack clusters", func() {
+				app.Action = func(ctx *cli.Context) error {
+					testManagementPort(ctx, fexec, testNS,
+						[]managementPortTestConfig{
+							{
+								family:   netlink.FAMILY_V4,
+								protocol: iptables.ProtocolIPv4,
+
+								clusterCIDR: v4clusterCIDR,
+								serviceCIDR: v4serviceCIDR,
+								nodeSubnet:  v4nodeSubnet,
+
+								expectedManagementPortIP: v4mgtPortIP,
+								expectedGatewayIP:        v4gwIP,
+							},
+							{
+								family:   netlink.FAMILY_V6,
+								protocol: iptables.ProtocolIPv6,
+
+								clusterCIDR: v6clusterCIDR,
+								serviceCIDR: v6serviceCIDR,
+								nodeSubnet:  v6nodeSubnet,
+
+								expectedManagementPortIP: v6mgtPortIP,
+								expectedGatewayIP:        v6gwIP,
+							},
+						}, v4lrpMAC)
+					return nil
+				}
+				err := app.Run([]string{
+					app.Name,
+					"--cluster-subnets=" + v4clusterCIDR + "," + v6clusterCIDR,
+					"--k8s-service-cidr=" + v4serviceCIDR + "," + v6serviceCIDR,
+				})
+				Expect(err).NotTo(HaveOccurred())
+			})
 		})
 
-		ovntest.OnSupportedPlatformsIt("sets up the management port for dual-stack clusters", func() {
-			app.Action = func(ctx *cli.Context) error {
-				testManagementPort(ctx, fexec, testNS,
-					[]managementPortTestConfig{
-						{
-							family:   netlink.FAMILY_V4,
-							protocol: iptables.ProtocolIPv4,
+		Context("Management Port, ovnkube node mode dpu", func() {
 
-							clusterCIDR: v4clusterCIDR,
-							serviceCIDR: v4serviceCIDR,
-							nodeSubnet:  v4nodeSubnet,
-
-							expectedManagementPortIP: v4mgtPortIP,
-							expectedGatewayIP:        v4gwIP,
-						},
-						{
-							family:   netlink.FAMILY_V6,
-							protocol: iptables.ProtocolIPv6,
-
-							clusterCIDR: v6clusterCIDR,
-							serviceCIDR: v6serviceCIDR,
-							nodeSubnet:  v6nodeSubnet,
-
-							expectedManagementPortIP: v6mgtPortIP,
-							expectedGatewayIP:        v6gwIP,
-						},
-					}, v4lrpMAC)
-				return nil
-			}
-			err := app.Run([]string{
-				app.Name,
-				"--cluster-subnets=" + v4clusterCIDR + "," + v6clusterCIDR,
-				"--k8s-service-cidr=" + v4serviceCIDR + "," + v6serviceCIDR,
+			BeforeEach(func() {
+				var err error
+				// Set up a fake k8sMgmt interface
+				err = testNS.Do(func(ns.NetNS) error {
+					defer GinkgoRecover()
+					ovntest.AddLink(mgmtPortNetdev)
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
 			})
-			Expect(err).NotTo(HaveOccurred())
-		})
-	})
 
-	Context("Management Port, ovnkube node mode dpu", func() {
+			ovntest.OnSupportedPlatformsIt("sets up the management port for IPv4 dpu clusters", func() {
+				app.Action = func(ctx *cli.Context) error {
+					testManagementPortDPU(ctx, fexec, testNS,
+						[]managementPortTestConfig{
+							{
+								family:   netlink.FAMILY_V4,
+								protocol: iptables.ProtocolIPv4,
 
-		BeforeEach(func() {
-			var err error
-			// Set up a fake k8sMgmt interface
-			err = testNS.Do(func(ns.NetNS) error {
-				defer GinkgoRecover()
-				ovntest.AddLink(mgmtPortNetdev)
-				return nil
+								clusterCIDR: v4clusterCIDR,
+								serviceCIDR: v4serviceCIDR,
+								nodeSubnet:  v4nodeSubnet,
+
+								expectedManagementPortIP: v4mgtPortIP,
+								expectedGatewayIP:        v4gwIP,
+							},
+						}, mgmtPortNetdev)
+					return nil
+				}
+				err := app.Run([]string{
+					app.Name,
+					"--cluster-subnets=" + v4clusterCIDR,
+					"--k8s-service-cidr=" + v4serviceCIDR,
+					"--ovnkube-node-mode=" + types.NodeModeDPU,
+					"--ovnkube-node-mgmt-port-netdev=" + mgmtPortNetdev,
+				})
+				Expect(err).NotTo(HaveOccurred())
 			})
-			Expect(err).NotTo(HaveOccurred())
 		})
 
-		ovntest.OnSupportedPlatformsIt("sets up the management port for IPv4 dpu clusters", func() {
-			app.Action = func(ctx *cli.Context) error {
-				testManagementPortDPU(ctx, fexec, testNS,
-					[]managementPortTestConfig{
-						{
-							family:   netlink.FAMILY_V4,
-							protocol: iptables.ProtocolIPv4,
-
-							clusterCIDR: v4clusterCIDR,
-							serviceCIDR: v4serviceCIDR,
-							nodeSubnet:  v4nodeSubnet,
-
-							expectedManagementPortIP: v4mgtPortIP,
-							expectedGatewayIP:        v4gwIP,
-						},
-					})
-				return nil
-			}
-			err := app.Run([]string{
-				app.Name,
-				"--cluster-subnets=" + v4clusterCIDR,
-				"--k8s-service-cidr=" + v4serviceCIDR,
-				"--ovnkube-node-mode=" + types.NodeModeDPU,
-				"--ovnkube-node-mgmt-port-netdev=" + mgmtPortNetdev,
+		Context("Management Port, ovnkube node mode dpu-host", func() {
+			BeforeEach(func() {
+				var err error
+				// Set up a fake k8sMgmt interface
+				err = testNS.Do(func(ns.NetNS) error {
+					defer GinkgoRecover()
+					ovntest.AddLink(mgmtPortNetdev)
+					return nil
+				})
+				Expect(err).NotTo(HaveOccurred())
 			})
-			Expect(err).NotTo(HaveOccurred())
-		})
-	})
 
-	Context("Management Port, ovnkube node mode dpu-host", func() {
-		BeforeEach(func() {
-			var err error
-			// Set up a fake k8sMgmt interface
-			err = testNS.Do(func(ns.NetNS) error {
-				defer GinkgoRecover()
-				ovntest.AddLink(mgmtPortNetdev)
-				return nil
+			ovntest.OnSupportedPlatformsIt("sets up the management port for IPv4 dpu-host clusters", func() {
+				app.Action = func(ctx *cli.Context) error {
+					testManagementPortDPUHost(ctx, fexec, testNS,
+						[]managementPortTestConfig{
+							{
+								family:   netlink.FAMILY_V4,
+								protocol: iptables.ProtocolIPv4,
+
+								clusterCIDR: v4clusterCIDR,
+								serviceCIDR: v4serviceCIDR,
+								nodeSubnet:  v4nodeSubnet,
+
+								expectedManagementPortIP: v4mgtPortIP,
+								expectedGatewayIP:        v4gwIP,
+							},
+						}, v4lrpMAC)
+					return nil
+				}
+				err := app.Run([]string{
+					app.Name,
+					"--cluster-subnets=" + v4clusterCIDR,
+					"--k8s-service-cidr=" + v4serviceCIDR,
+					"--ovnkube-node-mode=" + types.NodeModeDPUHost,
+					"--ovnkube-node-mgmt-port-netdev=" + mgmtPortNetdev,
+				})
+				Expect(err).NotTo(HaveOccurred())
 			})
-			Expect(err).NotTo(HaveOccurred())
-		})
-
-		ovntest.OnSupportedPlatformsIt("sets up the management port for IPv4 dpu-host clusters", func() {
-			app.Action = func(ctx *cli.Context) error {
-				testManagementPortDPUHost(ctx, fexec, testNS,
-					[]managementPortTestConfig{
-						{
-							family:   netlink.FAMILY_V4,
-							protocol: iptables.ProtocolIPv4,
-
-							clusterCIDR: v4clusterCIDR,
-							serviceCIDR: v4serviceCIDR,
-							nodeSubnet:  v4nodeSubnet,
-
-							expectedManagementPortIP: v4mgtPortIP,
-							expectedGatewayIP:        v4gwIP,
-						},
-					}, v4lrpMAC)
-				return nil
-			}
-			err := app.Run([]string{
-				app.Name,
-				"--cluster-subnets=" + v4clusterCIDR,
-				"--k8s-service-cidr=" + v4serviceCIDR,
-				"--ovnkube-node-mode=" + types.NodeModeDPUHost,
-				"--ovnkube-node-mgmt-port-netdev=" + mgmtPortNetdev,
-			})
-			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 })

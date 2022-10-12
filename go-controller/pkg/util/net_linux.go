@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"reflect"
 	"time"
 
 	kapi "k8s.io/api/core/v1"
@@ -30,6 +31,7 @@ type NetLinkOps interface {
 	LinkSetHardwareAddr(link netlink.Link, hwaddr net.HardwareAddr) error
 	LinkSetMTU(link netlink.Link, mtu int) error
 	LinkSetTxQLen(link netlink.Link, qlen int) error
+	IsLinkNotFoundError(err error) bool
 	AddrList(link netlink.Link, family int) ([]netlink.Addr, error)
 	AddrDel(link netlink.Link, addr *netlink.Addr) error
 	AddrAdd(link netlink.Link, addr *netlink.Addr) error
@@ -106,6 +108,10 @@ func (defaultNetLinkOps) LinkSetMTU(link netlink.Link, mtu int) error {
 
 func (defaultNetLinkOps) LinkSetTxQLen(link netlink.Link, qlen int) error {
 	return netlink.LinkSetTxQLen(link, qlen)
+}
+
+func (defaultNetLinkOps) IsLinkNotFoundError(err error) bool {
+	return reflect.TypeOf(err) == reflect.TypeOf(netlink.LinkNotFoundError{})
 }
 
 func (defaultNetLinkOps) AddrList(link netlink.Link, family int) ([]netlink.Addr, error) {
