@@ -787,14 +787,14 @@ func (h *masterEventHandler) SyncFunc(objs []interface{}) error {
 		case factory.EgressFirewallType:
 			syncFunc = h.oc.syncEgressFirewall
 
-		case factory.EgressIPType:
+		case factory.EgressIPNamespaceType:
 			syncFunc = h.oc.syncEgressIPs
 
 		case factory.EgressNodeType:
 			syncFunc = h.oc.initClusterEgressPolicies
 
 		case factory.EgressIPPodType,
-			factory.EgressIPNamespaceType,
+			factory.EgressIPType,
 			factory.CloudPrivateIPConfigType:
 			syncFunc = nil
 
