@@ -15,7 +15,6 @@ import (
 	knet "k8s.io/api/networking/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
-	kerrorsutil "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/cache"
 
 	"k8s.io/klog/v2"
@@ -479,13 +478,13 @@ func (oc *Controller) getResourceFromInformerCache(objType reflect.Type, key str
 func (oc *Controller) recordAddEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
 	case factory.PodType:
-		klog.V(5).Infof("Recording add event on pod")
 		pod := obj.(*kapi.Pod)
+		klog.V(5).Infof("Recording add event on pod %s/%s", pod.Namespace, pod.Name)
 		oc.podRecorder.AddPod(pod.UID)
 		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
-		klog.V(5).Infof("Recording add event on network policy")
 		np := obj.(*knet.NetworkPolicy)
+		klog.V(5).Infof("Recording add event on network policy %s/%s", np.Namespace, np.Name)
 		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
 	}
 }
@@ -494,12 +493,12 @@ func (oc *Controller) recordAddEvent(objType reflect.Type, obj interface{}) {
 func (oc *Controller) recordUpdateEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
 	case factory.PodType:
-		klog.V(5).Infof("Recording update event on pod")
 		pod := obj.(*kapi.Pod)
+		klog.V(5).Infof("Recording update event on pod %s/%s", pod.Namespace, pod.Name)
 		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
-		klog.V(5).Infof("Recording update event on network policy")
 		np := obj.(*knet.NetworkPolicy)
+		klog.V(5).Infof("Recording update event on network policy %s/%s", np.Namespace, np.Name)
 		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
 	}
 }
@@ -508,13 +507,13 @@ func (oc *Controller) recordUpdateEvent(objType reflect.Type, obj interface{}) {
 func (oc *Controller) recordDeleteEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
 	case factory.PodType:
-		klog.V(5).Infof("Recording delete event on pod")
 		pod := obj.(*kapi.Pod)
+		klog.V(5).Infof("Recording delete event on pod %s/%s", pod.Namespace, pod.Name)
 		oc.podRecorder.CleanPod(pod.UID)
 		metrics.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
-		klog.V(5).Infof("Recording delete event on network policy")
 		np := obj.(*knet.NetworkPolicy)
+		klog.V(5).Infof("Recording delete event on network policy %s/%s", np.Namespace, np.Name)
 		metrics.GetConfigDurationRecorder().Start("networkpolicy", np.Namespace, np.Name)
 	}
 }
@@ -522,12 +521,12 @@ func (oc *Controller) recordDeleteEvent(objType reflect.Type, obj interface{}) {
 func (oc *Controller) recordSuccessEvent(objType reflect.Type, obj interface{}) {
 	switch objType {
 	case factory.PodType:
-		klog.V(5).Infof("Recording success event on pod")
 		pod := obj.(*kapi.Pod)
+		klog.V(5).Infof("Recording success event on pod %s/%s", pod.Namespace, pod.Name)
 		metrics.GetConfigDurationRecorder().End("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
-		klog.V(5).Infof("Recording success event on network policy")
 		np := obj.(*knet.NetworkPolicy)
+		klog.V(5).Infof("Recording success event on network policy %s/%s", np.Namespace, np.Name)
 		metrics.GetConfigDurationRecorder().End("networkpolicy", np.Namespace, np.Name)
 	}
 }
@@ -537,8 +536,8 @@ func (oc *Controller) recordSuccessEvent(objType reflect.Type, obj interface{}) 
 func (oc *Controller) recordErrorEvent(objType reflect.Type, obj interface{}, err error) {
 	switch objType {
 	case factory.PodType:
-		klog.V(5).Infof("Recording error event on pod")
 		pod := obj.(*kapi.Pod)
+		klog.V(5).Infof("Recording error event on pod %s/%s", pod.Namespace, pod.Name)
 		oc.recordPodEvent(err, pod)
 	}
 }
@@ -626,67 +625,29 @@ func (oc *Controller) addResource(objectsToRetry *RetryObjs, obj interface{}, fr
 			return fmt.Errorf("could not cast peer service of type %T to *kapi.Service", obj)
 		}
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerServiceAdd(extraParameters.gp, service)
+		return oc.handlePeerServiceAdd(extraParameters.np, extraParameters.gp, service)
 
 	case factory.PeerPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, obj)
+		return oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		namespace := obj.(*kapi.Namespace)
-		extraParameters.np.RLock()
-		alreadyDeleted := extraParameters.np.deleted
-		extraParameters.np.RUnlock()
-		if alreadyDeleted {
-			return nil
-		}
-
-		// start watching pods in this namespace and selected by the label selector in extraParameters.podSelector
-		syncFunc := func(objs []interface{}) error {
-			return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, objs...)
-		}
-		retryPeerPods := NewRetryObjs(
-			factory.PeerPodForNamespaceAndPodSelectorType,
-			namespace.Name,
-			extraParameters.podSelector,
-			syncFunc,
-			&NetworkPolicyExtraParameters{gp: extraParameters.gp},
-		)
-		// The AddFilteredPodHandler call might call handlePeerPodSelectorAddUpdate
-		// on existing pods so we can't be holding the lock at this point
-		podHandler, err := oc.WatchResource(retryPeerPods)
-		if err != nil {
-			klog.Errorf("Failed WatchResource for PeerNamespaceAndPodSelectorType: %v", err)
-			return err
-		}
-
-		extraParameters.np.Lock()
-		defer extraParameters.np.Unlock()
-		if extraParameters.np.deleted {
-			oc.watchFactory.RemovePodHandler(podHandler)
-			return nil
-		}
-		extraParameters.np.podHandlerList = append(extraParameters.np.podHandlerList, podHandler)
+		return oc.handlePeerNamespaceAndPodAdd(extraParameters.np, extraParameters.gp,
+			extraParameters.podSelector, obj)
 
 	case factory.PeerPodForNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, obj)
+		return oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerNamespaceSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		namespace := obj.(*kapi.Namespace)
-		// Update the ACL ...
-		return oc.handlePeerNamespaceSelectorOnUpdate(extraParameters.np, extraParameters.gp, func() bool {
-			// ... on condition that the added address set was not already in the 'gress policy
-			return extraParameters.gp.addNamespaceAddressSet(namespace.Name)
-		})
+		return oc.handlePeerNamespaceSelectorAdd(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorAddFunc(
 			extraParameters.np,
-			false,
 			obj)
 
 	case factory.EgressFirewallType:
@@ -793,17 +754,16 @@ func (oc *Controller) updateResource(objectsToRetry *RetryObjs, oldObj, newObj i
 
 	case factory.PeerPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, newObj)
+		return oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, newObj)
 
 	case factory.PeerPodForNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, newObj)
+		return oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, newObj)
 
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorAddFunc(
 			extraParameters.np,
-			false,
 			newObj)
 
 	case factory.EgressIPType:
@@ -929,40 +889,23 @@ func (oc *Controller) deleteResource(objectsToRetry *RetryObjs, obj, cachedObj i
 			return fmt.Errorf("could not cast peer service of type %T to *kapi.Service", obj)
 		}
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerServiceDelete(extraParameters.gp, service)
+		return oc.handlePeerServiceDelete(extraParameters.np, extraParameters.gp, service)
 
 	case factory.PeerPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorDelete(extraParameters.gp, obj)
+		return oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		// when the namespace labels no longer apply
-		// remove the namespaces pods from the address_set
-		var errs []error
-		namespace := obj.(*kapi.Namespace)
-		pods, _ := oc.watchFactory.GetPods(namespace.Name)
-
-		for _, pod := range pods {
-			if err := oc.handlePeerPodSelectorDelete(extraParameters.gp, pod); err != nil {
-				errs = append(errs, err)
-			}
-		}
-		return kerrorsutil.NewAggregate(errs)
+		return oc.handlePeerNamespaceAndPodDel(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerPodForNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorDelete(extraParameters.gp, obj)
+		return oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerNamespaceSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		namespace := obj.(*kapi.Namespace)
-		// Remove namespace address set from the *gress policy in cache
-		// (done in gress.delNamespaceAddressSet()), and then update ACLs
-		return oc.handlePeerNamespaceSelectorOnUpdate(extraParameters.np, extraParameters.gp, func() bool {
-			// ... on condition that the removed address set was in the 'gress policy
-			return extraParameters.gp.delNamespaceAddressSet(namespace.Name)
-		})
+		return oc.handlePeerNamespaceSelectorDel(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
@@ -1158,7 +1101,7 @@ func (oc *Controller) iterateRetryResources(r *RetryObjs) {
 	}
 	klog.V(5).Infof("Waiting for all the %s retry setup to complete in iterateRetryResources", r.oType)
 	wg.Wait()
-	klog.V(5).Infof("Function iterateRetryResources ended (in %v)", time.Since(now))
+	klog.V(5).Infof("Function iterateRetryResources for %s ended (in %v)", r.oType, time.Since(now))
 }
 
 // periodicallyRetryResources tracks RetryObjs and checks if any object needs to be retried for add or delete every
@@ -1306,7 +1249,7 @@ func (oc *Controller) WatchResource(objectsToRetry *RetryObjs) (*factory.Handler
 					klog.Errorf("Upon add event: %v", err)
 					return
 				}
-				klog.V(5).Infof("Add event received for %s, key=%s", objectsToRetry.oType, key)
+				klog.V(5).Infof("Add event received for %s %s", objectsToRetry.oType, key)
 
 				objectsToRetry.DoWithLock(key, func(key string) {
 					// This only applies to pod watchers (pods + dynamic network policy handlers watching pods):
