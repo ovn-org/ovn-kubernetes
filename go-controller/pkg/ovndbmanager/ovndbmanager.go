@@ -252,7 +252,7 @@ func ensureClusterRaftMembership(db *util.OvsDbProperties, kclient kube.Interfac
 		if !memberFound {
 			for _, dbPod := range dbPods.Items {
 				for _, ip := range dbPod.Status.PodIPs {
-					if ip.IP == matchedServer {
+					if ip.IP == matchedServer || utilnet.ParseIPSloppy(ip.IP).String() == matchedServer {
 						memberFound = true
 						break
 					}

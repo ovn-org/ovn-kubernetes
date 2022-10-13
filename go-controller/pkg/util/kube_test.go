@@ -296,12 +296,12 @@ func TestGetNodePrimaryIP(t *testing.T) {
 				Status: v1.NodeStatus{
 					Addresses: []v1.NodeAddress{
 						{Type: v1.NodeHostName, Address: "HN"},
-						{Type: v1.NodeInternalIP, Address: "IntIP"},
-						{Type: v1.NodeExternalIP, Address: "ExtIP"},
+						{Type: v1.NodeInternalIP, Address: "192.168.1.1"},
+						{Type: v1.NodeExternalIP, Address: "90.90.90.90"},
 					},
 				},
 			},
-			expOut: "IntIP",
+			expOut: "192.168.1.1",
 		},
 		{
 			desc: "success: node's external IP returned",
@@ -309,11 +309,11 @@ func TestGetNodePrimaryIP(t *testing.T) {
 				Status: v1.NodeStatus{
 					Addresses: []v1.NodeAddress{
 						{Type: v1.NodeHostName, Address: "HN"},
-						{Type: v1.NodeExternalIP, Address: "ExtIP"},
+						{Type: v1.NodeExternalIP, Address: "90.90.90.90"},
 					},
 				},
 			},
-			expOut: "ExtIP",
+			expOut: "90.90.90.90",
 		},
 	}
 	for i, tc := range tests {

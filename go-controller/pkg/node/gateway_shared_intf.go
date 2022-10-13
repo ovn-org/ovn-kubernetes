@@ -201,7 +201,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 		// NodePort/Ingress access in the OVS bridge will only ever come from outside of the host
 		for _, ing := range service.Status.LoadBalancer.Ingress {
 			if len(ing.IP) > 0 {
-				err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, hasLocalHostNetworkEp, protocol, actions, ing.IP, "Ingress")
+				err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, hasLocalHostNetworkEp, protocol, actions, utilnet.ParseIPSloppy(ing.IP).String(), "Ingress")
 				if err != nil {
 					klog.Errorf(err.Error())
 				}
@@ -209,7 +209,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 		}
 		// flows for externalIPs
 		for _, externalIP := range service.Spec.ExternalIPs {
-			err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, hasLocalHostNetworkEp, protocol, actions, externalIP, "External")
+			err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, hasLocalHostNetworkEp, protocol, actions, utilnet.ParseIPSloppy(externalIP).String(), "External")
 			if err != nil {
 				klog.Errorf(err.Error())
 			}
@@ -659,8 +659,9 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 
 				for _, ep := range epSlice.Endpoints {
 					for _, ip := range ep.Addresses {
-						if !isHostEndpoint(ip) {
-							epsToInsert.Insert(ip)
+						ipStr := utilnet.ParseIPSloppy(ip).String()
+						if !isHostEndpoint(ipStr) {
+							epsToInsert.Insert(ipStr)
 						}
 					}
 				}
@@ -754,7 +755,9 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 func getEndpointAddresses(endpointSlice *discovery.EndpointSlice) []string {
 	endpointsAddress := make([]string, 0)
 	for _, endpoint := range endpointSlice.Endpoints {
-		endpointsAddress = append(endpointsAddress, endpoint.Addresses...)
+		for _, ip := range endpoint.Addresses {
+			endpointsAddress = append(endpointsAddress, utilnet.ParseIPSloppy(ip).String())
+		}
 	}
 	return endpointsAddress
 }

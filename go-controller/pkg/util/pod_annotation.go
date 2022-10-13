@@ -258,7 +258,7 @@ func GetAllPodIPs(pod *v1.Pod) ([]net.IP, error) {
 	// Otherwise if the annotation is not valid try to use Kube API pod IPs
 	ips := make([]net.IP, 0, len(pod.Status.PodIPs))
 	for _, podIP := range pod.Status.PodIPs {
-		ip := net.ParseIP(podIP.IP)
+		ip := utilnet.ParseIPSloppy(podIP.IP)
 		if ip == nil {
 			klog.Warningf("Failed to parse pod IP %q", podIP)
 			continue
@@ -272,7 +272,7 @@ func GetAllPodIPs(pod *v1.Pod) ([]net.IP, error) {
 
 	// Fallback check pod.Status.PodIP
 	// Kubelet < 1.16 only set podIP
-	ip := net.ParseIP(pod.Status.PodIP)
+	ip := utilnet.ParseIPSloppy(pod.Status.PodIP)
 	if ip == nil {
 		return nil, fmt.Errorf("pod %s/%s: %w ", pod.Namespace, pod.Name, ErrNoPodIPFound)
 	}

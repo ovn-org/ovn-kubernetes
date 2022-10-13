@@ -387,7 +387,7 @@ func Test_buildServiceLBConfigs(t *testing.T) {
 				service: &v1.Service{
 					ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
 					Spec: v1.ServiceSpec{
-						Type:       v1.ServiceTypeClusterIP,
+						Type:       v1.ServiceTypeLoadBalancer,
 						ClusterIP:  "192.168.1.1",
 						ClusterIPs: []string{"192.168.1.1", "2002::1"},
 						Ports: []v1.ServicePort{{

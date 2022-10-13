@@ -19,6 +19,7 @@ import (
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 )
 
 // initLoadBalancerHealthChecker initializes the health check server for
@@ -152,7 +153,7 @@ func hasLocalHostNetworkEndpoints(epSlices []*discovery.EndpointSlice, nodeAddre
 		for _, endpoint := range epSlice.Endpoints {
 			for _, ip := range endpoint.Addresses {
 				for _, nodeIP := range nodeAddresses {
-					if nodeIP.String() == ip {
+					if nodeIP.String() == utilnet.ParseIPSloppy(ip).String() {
 						return true
 					}
 				}
