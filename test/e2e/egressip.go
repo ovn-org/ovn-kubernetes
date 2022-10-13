@@ -161,6 +161,7 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		servicePort          int32  = 9999
 		podHTTPPort          string = "8080"
 		egressIPName         string = "egressip"
+		egressIPName2        string = "egressip-2"
 		targetNodeName       string = "egressTargetNode-allowed"
 		deniedTargetNodeName string = "egressTargetNode-denied"
 		egressIPYaml         string = "egressip.yaml"
@@ -406,7 +407,8 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 	})
 
 	ginkgo.AfterEach(func() {
-		framework.RunKubectlOrDie("default", "delete", "eip", egressIPName)
+		framework.RunKubectlOrDie("default", "delete", "eip", egressIPName, "--ignore-not-found=true")
+		framework.RunKubectlOrDie("default", "delete", "eip", egressIPName2, "--ignore-not-found=true")
 		framework.RunKubectlOrDie("default", "label", "node", egress1Node.name, "k8s.ovn.org/egress-assignable-")
 		framework.RunKubectlOrDie("default", "label", "node", egress2Node.name, "k8s.ovn.org/egress-assignable-")
 		deleteClusterExternalContainer(targetNode.name)
@@ -869,6 +871,323 @@ spec:
 			err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{egressIP1.String()}))
 			framework.ExpectNoError(err, "Step 6. Run %d: Check connectivity from pod to an external container and verify that the srcIP is the expected egressIP, failed: %v", i, err)
 		}
+	})
+
+	// Validate the egress IP when a pod is managed by more than one egressIP object
+	/* This test does the following:
+	   0. Add the "k8s.ovn.org/egress-assignable" label to node2 (pod2Node/egress1Node)
+	   1. Create one pod matching the EgressIP: running on node2 (pod2Node/egress1Node)
+	   2. Create an EgressIP object1 with two egress IP's - egressIP1 and egressIP2 defined
+	   3. Check that the status is of length one and that one of them is assigned to node2 (pod2Node/egress1Node) while other is pending
+	   4. Check connectivity from pod to an external container and verify that the srcIP is the expected egressIP from object1
+	   ----
+	   5. Create an EgressIP object2 with one egressIP3 defined (standby egressIP)
+	   6. Check that the second egressIP object is assigned to node2 (pod2Node/egress1Node)
+	   7. Check the OVN DB to ensure no SNATs are added for the standby egressIP
+	   8. Check connectivity from pod to an external container and verify that the srcIP is the expected egressIP from object1
+	   ----
+	   9. Delete assigned egressIP1 from egressIP object1
+	   10. Check that the status is of length one and that standby egressIP3 of egressIP object2 is assigned to node2 (pod2Node/egress1Node)
+	   11. Check connectivity from pod to an external container and verify that the srcIP is the expected standby egressIP3 from object2
+	   12. Check the OVN DB to ensure SNATs are added for only the standby egressIP3
+	   ----
+	   13. Mark egress2Node (node1) as assignable and egress1Node (node2/pod2Node) as unassignable
+	   14. Ensure egressIP1 from egressIP object1 and egressIP3 from object2 is correctly transferred to egress2Node
+	   15. Check the OVN DB to ensure SNATs are added for either egressIP1 or egressIP3
+	   16. Check connectivity from pod to an external container and verify that the srcIP is either egressIP1 or egressIP3 - no guarantee which is picked
+	   ----
+	   17. Delete EgressIP object that was serving the pod before in Step 16
+	   18. Check connectivity from pod to an external container and verify that the srcIP is the expected egressIP which was the one not serving before
+	   19. Delete the remaining egressIP object
+	   20. Check connectivity from pod to an external container and verify that the srcIP is the expected nodeIP
+	*/
+	ginkgo.It("Should validate egress IP logic when one pod is managed by more than one egressIP object", func() {
+
+		command := []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%s", podHTTPPort)}
+
+		ginkgo.By("0. Add the \"k8s.ovn.org/egress-assignable\" label to egress1Node node")
+		framework.AddOrUpdateLabelOnNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
+		framework.Logf("Added egress-assignable label to node %s", egress1Node.name)
+		framework.ExpectNodeHasLabel(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
+
+		podNamespace := f.Namespace
+		podNamespace.Labels = map[string]string{
+			"name": f.Namespace.Name,
+		}
+		updateNamespace(f, podNamespace)
+
+		ginkgo.By("1. Create one pod matching the EgressIP: running on node2 (pod2Node, egress1Node)")
+		createGenericPodWithLabel(f, pod1Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
+
+		var srcPodIP net.IP
+		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			kubectlOut := getPodAddress(pod1Name, f.Namespace.Name)
+			srcPodIP = net.ParseIP(kubectlOut)
+			if srcPodIP == nil {
+				return false, nil
+			}
+			return true, nil
+		})
+		framework.ExpectNoError(err, "Step 1. Create one pod matching the EgressIP: running on node2 (pod2Node, egress1Node), failed, err: %v", err)
+		framework.Logf("Created pod %s on node %s", pod1Name, pod2Node.name)
+
+		ginkgo.By("2. Create an EgressIP object1 with two egress IP's - egressIP1 and egressIP2 defined")
+		// Assign the egress IP without conflicting with any node IP,
+		// the kind subnet is /16 or /64 so the following should be fine.
+		egressNodeIP := net.ParseIP(egress1Node.nodeIP)
+		egressIP1 := dupIP(egressNodeIP)
+		egressIP1[len(egressIP1)-2]++
+		egressIP2 := dupIP(egressNodeIP)
+		egressIP2[len(egressIP2)-2]++
+		egressIP2[len(egressIP2)-1]++
+
+		var egressIPConfig = fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
+kind: EgressIP
+metadata:
+    name: ` + egressIPName + `
+spec:
+    egressIPs:
+    - ` + egressIP1.String() + `
+    - ` + egressIP2.String() + `
+    podSelector:
+        matchLabels:
+            wants: egress
+    namespaceSelector:
+        matchLabels:
+            name: ` + f.Namespace.Name + `
+`)
+		if err := ioutil.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
+			framework.Failf("Unable to write CRD config to disk: %v", err)
+		}
+		defer func() {
+			if err := os.Remove(egressIPYaml); err != nil {
+				framework.Logf("Unable to remove the CRD config from disk: %v", err)
+			}
+		}()
+
+		framework.Logf("Create the EgressIP configuration")
+		framework.RunKubectlOrDie("default", "create", "-f", egressIPYaml)
+
+		// NOTE: Load balancing algorithm never assigns the secondIP to any node; it waits for another node to become assignable
+		ginkgo.By("3. Check that the status is of length one and that one of them is assigned to node2 (pod2Node/egress1Node) while other is pending")
+		statuses := verifyEgressIPStatusLengthEquals(1, nil)
+		if statuses[0].Node != egress1Node.name {
+			framework.Failf("Step 3. Check that the status is of length two and that one of them is assigned to node2 (pod2Node/egress1Node) while other is pending, failed")
+		}
+		assignedEIP := statuses[0].EgressIP
+		var toKeepEIP string
+		if assignedEIP == egressIP1.String() {
+			toKeepEIP = egressIP2.String()
+		} else {
+			toKeepEIP = egressIP1.String()
+		}
+
+		ginkgo.By("4. Check connectivity from pod to an external container and verify that the srcIP is the expected egressIP from object1")
+		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{assignedEIP}))
+		framework.ExpectNoError(err, "Step 4. Check connectivity from pod to an zexternal container and verify that the srcIP is the expected egressIP from object1, failed: %v", err)
+
+		ginkgo.By("5. Create an EgressIP object2 with one egress IP3 defined (standby egressIP)")
+		// Assign the egress IP without conflicting with any node IP,
+		// the kind subnet is /16 or /64 so the following should be fine.
+		egressIP3 := dupIP(egressNodeIP)
+		egressIP3[len(egressIP3)-2]++
+		egressIP3[len(egressIP3)-1]++
+		egressIP3[len(egressIP3)-1]++
+
+		var egressIPConfig2 = fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
+kind: EgressIP
+metadata:
+    name: ` + egressIPName2 + `
+spec:
+    egressIPs:
+    - ` + egressIP3.String() + `
+    podSelector:
+        matchLabels:
+            wants: egress
+    namespaceSelector:
+        matchLabels:
+            name: ` + f.Namespace.Name + `
+`)
+		if err := ioutil.WriteFile(egressIPYaml, []byte(egressIPConfig2), 0644); err != nil {
+			framework.Failf("Unable to write CRD config to disk: %v", err)
+		}
+		defer func() {
+			if err := os.Remove(egressIPYaml); err != nil {
+				framework.Logf("Unable to remove the CRD config from disk: %v", err)
+			}
+		}()
+
+		framework.Logf("Create the EgressIP configuration")
+		framework.RunKubectlOrDie("default", "create", "-f", egressIPYaml)
+
+		ginkgo.By("6. Check that the second egressIP object is assigned to node2 (pod2Node/egress1Node)")
+		egressIPs := egressIPs{}
+		var egressIPStdout string
+		var statusEIP1, statusEIP2 []egressIPStatus
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			egressIPStdout, err = framework.RunKubectl("default", "get", "eip", "-o", "json")
+			if err != nil {
+				return false, err
+			}
+			json.Unmarshal([]byte(egressIPStdout), &egressIPs)
+			if len(egressIPs.Items) != 2 {
+				return false, nil
+			}
+			statusEIP1 = egressIPs.Items[0].Status.Items
+			statusEIP2 = egressIPs.Items[1].Status.Items
+			if len(statusEIP1) != 1 || len(statusEIP2) != 1 {
+				return false, nil
+			}
+			return statusEIP1[0].Node == egress1Node.name && statusEIP2[0].Node == egress1Node.name, nil
+		})
+		framework.ExpectNoError(err, "Step 6. Check that the second egressIP object is assigned to node2 (pod2Node/egress1Node), failed: %v", err)
+
+		ginkgo.By("7. Check the OVN DB to ensure no SNATs are added for the standby egressIP")
+		dbPods, err := framework.RunKubectl("ovn-kubernetes", "get", "pods", "-l", "name=ovnkube-db", "-o=jsonpath='{.items..metadata.name}'")
+		if err != nil || len(dbPods) == 0 {
+			framework.Failf("Error: Check the OVN DB to ensure no SNATs are added for the standby egressIP, err: %v", err)
+		}
+		dbPod := strings.Split(dbPods, " ")[0]
+		dbPod = strings.TrimPrefix(dbPod, "'")
+		dbPod = strings.TrimSuffix(dbPod, "'")
+		logicalIP := fmt.Sprintf("logical_ip=%s", srcPodIP.String())
+		snats, err := framework.RunKubectl("ovn-kubernetes", "exec", dbPod, "-c", "nb-ovsdb", "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
+		if err != nil {
+			framework.Failf("Error: Check the OVN DB to ensure no SNATs are added for the standby egressIP, err: %v", err)
+		}
+		if !strings.Contains(snats, statuses[0].EgressIP) || strings.Contains(snats, egressIP3.String()) {
+			framework.Failf("Step 7. Check that the second egressIP object is assigned to node2 (pod2Node/egress1Node), failed")
+		}
+
+		ginkgo.By("8. Check connectivity from pod to an external container and verify that the srcIP is the expected egressIP from object1")
+		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{assignedEIP}))
+		framework.ExpectNoError(err, "Step 8. Check connectivity from pod to an external container and verify that the srcIP is the expected egressIP from object1, failed: %v", err)
+
+		ginkgo.By("9. Delete assigned egressIP1 from egressIP object1")
+		egressIPConfig = fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
+kind: EgressIP
+metadata:
+    name: ` + egressIPName + `
+spec:
+    egressIPs:
+    - ` + toKeepEIP + `
+    podSelector:
+        matchLabels:
+            wants: egress
+    namespaceSelector:
+        matchLabels:
+            name: ` + f.Namespace.Name + `
+`)
+		if err := ioutil.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
+			framework.Failf("Unable to write CRD config to disk: %v", err)
+		}
+		defer func() {
+			if err := os.Remove(egressIPYaml); err != nil {
+				framework.Logf("Unable to remove the CRD config from disk: %v", err)
+			}
+		}()
+
+		framework.Logf("Apply the EgressIP configuration")
+		framework.RunKubectlOrDie("default", "apply", "-f", egressIPYaml)
+
+		ginkgo.By("10. Check that the status is of length one and that standby egressIP3 of egressIP object2 is assigned to node2 (pod2Node/egress1Node)")
+
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			egressIPStdout, err = framework.RunKubectl("default", "get", "eip", "-o", "json")
+			if err != nil {
+				return false, err
+			}
+			json.Unmarshal([]byte(egressIPStdout), &egressIPs)
+			if len(egressIPs.Items) != 2 {
+				return false, nil
+			}
+			statusEIP1 = egressIPs.Items[0].Status.Items
+			statusEIP2 = egressIPs.Items[1].Status.Items
+			if len(statusEIP1) != 1 || len(statusEIP2) != 1 {
+				return false, nil
+			}
+			return statusEIP1[0].Node == egress1Node.name && statusEIP2[0].Node == egress1Node.name, nil
+		})
+		framework.ExpectNoError(err, "Step 10. Check that the status is of length one and that standby egressIP3 of egressIP object2 is assigned to node2 (pod2Node/egress1Node), failed: %v", err)
+
+		ginkgo.By("11. Check connectivity from pod to an external container and verify that the srcIP is the expected standby egressIP3 from object2")
+		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{egressIP3.String()}))
+		framework.ExpectNoError(err, "Step 11. Check connectivity from pod to an external container and verify that the srcIP is the expected standby egressIP3 from object2, failed: %v", err)
+
+		ginkgo.By("12. Check the OVN DB to ensure SNATs are added for only the standby egressIP")
+		snats, err = framework.RunKubectl("ovn-kubernetes", "exec", dbPod, "-c", "nb-ovsdb", "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
+		if err != nil {
+			framework.Failf("Error: Check the OVN DB to ensure SNATs are added for only the standby egressIP, err: %v", err)
+		}
+		if !strings.Contains(snats, egressIP3.String()) || strings.Contains(snats, egressIP1.String()) || strings.Contains(snats, egressIP2.String()) || strings.Contains(snats, egress1Node.nodeIP) {
+			framework.Failf("Step 12. Check the OVN DB to ensure SNATs are added for only the standby egressIP, failed")
+		}
+
+		ginkgo.By("13. Mark egress2Node as assignable and egress1Node as unassignable")
+		framework.AddOrUpdateLabelOnNode(f.ClientSet, egress2Node.name, "k8s.ovn.org/egress-assignable", "dummy")
+		framework.Logf("Added egress-assignable label to node %s", egress2Node.name)
+		framework.ExpectNodeHasLabel(f.ClientSet, egress2Node.name, "k8s.ovn.org/egress-assignable", "dummy")
+		framework.RemoveLabelOffNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable")
+		framework.Logf("Removed egress-assignable label from node %s", egress1Node.name)
+
+		ginkgo.By("14. Ensure egressIP1 from egressIP object1 and egressIP3 from object2 is correctly transferred to egress2Node")
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			egressIPStdout, err = framework.RunKubectl("default", "get", "eip", "-o", "json")
+			if err != nil {
+				return false, err
+			}
+			json.Unmarshal([]byte(egressIPStdout), &egressIPs)
+			if len(egressIPs.Items) != 2 {
+				return false, nil
+			}
+			statusEIP1 = egressIPs.Items[0].Status.Items
+			statusEIP2 = egressIPs.Items[1].Status.Items
+			if len(statusEIP1) != 1 || len(statusEIP2) != 1 {
+				return false, nil
+			}
+			return statusEIP1[0].Node == egress2Node.name && statusEIP2[0].Node == egress2Node.name, nil
+		})
+		framework.ExpectNoError(err, "Step 14. Ensure egressIP1 from egressIP object1 and egressIP3 from object2 is correctly transferred to egress2Node, failed: %v", err)
+
+		ginkgo.By("15. Check the OVN DB to ensure SNATs are added for either egressIP1 or egressIP3")
+		snats, err = framework.RunKubectl("ovn-kubernetes", "exec", dbPod, "-c", "nb-ovsdb", "--", "ovn-nbctl", "--no-leader-only", "--columns=external_ip", "find", "nat", logicalIP)
+		if err != nil {
+			framework.Failf("Error: Check the OVN DB to ensure SNATs are added for either egressIP1 or egressIP3, err: %v", err)
+		}
+		if !(strings.Contains(snats, egressIP3.String()) || strings.Contains(snats, toKeepEIP)) {
+			framework.Failf("Step 15. Check the OVN DB to ensure SNATs are added for either egressIP1 or egressIP3, failed")
+		}
+		var toDelete, unassignedEIP string
+		if strings.Contains(snats, egressIP3.String()) {
+			assignedEIP = egressIP3.String()
+			unassignedEIP = toKeepEIP
+			toDelete = egressIPName2
+			toKeepEIP = egressIPName
+		} else {
+			assignedEIP = toKeepEIP
+			unassignedEIP = egressIP3.String()
+			toDelete = egressIPName
+			toKeepEIP = egressIPName2
+		}
+
+		ginkgo.By("16. Check connectivity from pod to an external container and verify that the srcIP is either egressIP1 or egressIP3")
+		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{assignedEIP}))
+		framework.ExpectNoError(err, "Step 16. Check connectivity from pod to an external container and verify that the srcIP is either egressIP1 or egressIP3, failed: %v", err)
+
+		ginkgo.By("17. Delete EgressIP object that was serving the pod before in Step 16")
+		framework.RunKubectlOrDie("default", "delete", "eip", toDelete)
+
+		ginkgo.By("18.  Check connectivity from pod to an external container and verify that the srcIP is the expected standby egressIP")
+		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{unassignedEIP}))
+		framework.ExpectNoError(err, "Step 18.  Check connectivity from pod to an external container and verify that the srcIP is the expected standby egressIP, failed: %v", err)
+
+		ginkgo.By("19. Delete the remaining egressIP object")
+		framework.RunKubectlOrDie("default", "delete", "eip", toKeepEIP)
+
+		ginkgo.By("20. Check connectivity from pod to an external container and verify that the srcIP is the expected nodeIP")
+		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{pod2Node.nodeIP}))
+		framework.ExpectNoError(err, "Step 20. Check connectivity from pod to an external container and verify that the srcIP is the expected nodeIP, failed: %v", err)
+
 	})
 
 	/* This test does the following:
