@@ -239,10 +239,30 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 			return nil, nil, err
 		}
 
+		ovsHardwareOffloadEnabled, err := util.IsOvsHwOffloadEnabled()
+		if err != nil {
+			return nil, nil, err
+		}
+
+		reason := ""
 		if !chkPktLengthSupported {
-			klog.Warningf("OVS on this node does not support check packet length action in kernel datapath. This "+
-				"will cause incoming packets destined to OVN and larger than pod MTU: %d to the node, being dropped "+
-				"without sending fragmentation needed", config.Default.MTU)
+			reason += "OVS on this node does not support check packet length action in kernel datapath. "
+		}
+		/* This is a work around. In order to have the most optimal performance, the packet MTU check should be
+		 * disabled when OVS HW Offload is enabled on the node. The reason is that OVS HW Offload does not support
+		 * packet MTU checks properly without the offload support for sFlow.
+		 * The patches for sFlow in OvS: https://patchwork.ozlabs.org/project/openvswitch/list/?series=290804
+		 * As of writing these offload support patches for sFlow are in review.
+		 * TODO: This workaround should be removed once the offload support for sFlow patches are merged upstream OvS.
+		 */
+		if ovsHardwareOffloadEnabled {
+			reason += "OVS Hardware Offload, enabled on this node, does not support check packet length action offloading. "
+		}
+
+		if !chkPktLengthSupported || ovsHardwareOffloadEnabled {
+			klog.Warningf("Disable Packet MTU Check will be forced true. %sThis will cause incoming packets "+
+				"destined to OVN and larger than pod MTU: %d to the node, being dropped "+
+				"without sending fragmentation needed", reason, config.Default.MTU)
 			config.Gateway.DisablePacketMTUCheck = true
 		}
 	}
