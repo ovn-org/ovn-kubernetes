@@ -161,6 +161,12 @@ how to override the default values for some config options.
 administrator to limit the external hosts that a pod in a project can access. 
 The EgressFirewall object rules apply to all pods that share the namespace with the egressfirewall object.
 
+[Egress QoS](./docs/egress-qos.md) The EgressQoS feature enables marking pods egress traffic
+with a valid QoS Differentiated Services Code Point (DSCP) value.
+
+[Egress Service](./docs/egress-service.md) The Egress Service feature enables the egress traffic
+of pods backing a LoadBalancer service to exit the cluster using its ingress IP.
+
 [Hybrid Overlay](./docs/hybrid-overlay.md) feature creates VXLAN tunnels to nodes in the cluster that
 have been excluded from the ovn-kubernetes overlay using the no-hostsubnet-nodes config option.
 These tunnels allow pods on ovn-kubernetes nodes to communicate directly with other pods on nodes
