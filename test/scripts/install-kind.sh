@@ -59,6 +59,7 @@ curl -L https://www.dropbox.com/s/7g34u9yp3ffmupt/e2e.test?dl=0 -o e2e.test
 #curl -L https://github.com/jcaamano/kubernetes/raw/hack-e2e-test/e2e.test.tgz -o e2e.test.tgz
 #tar xvzf e2e.test.tgz
 sudo mv e2e.test /usr/local/bin/e2e.test
+sudo chmod +x /usr/local/bin/e2e.test
 #rm e2e.test.tgz
 
 install_kind
