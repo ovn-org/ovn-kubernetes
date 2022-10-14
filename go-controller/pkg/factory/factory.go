@@ -3,6 +3,7 @@ package factory
 import (
 	"fmt"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -60,6 +61,7 @@ type WatchFactory struct {
 	informers        map[reflect.Type]*informer
 
 	stopChan chan struct{}
+	Wg       sync.WaitGroup
 }
 
 // WatchFactory implements the ObjectCacheInterface interface.
@@ -346,6 +348,11 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 	return wf, nil
 }
 
+func (wf *WatchFactory) WaitForWatchFactoryStopChannel(stopChan chan struct{}) {
+	<-wf.stopChan
+	close(stopChan)
+}
+
 func (wf *WatchFactory) Shutdown() {
 	close(wf.stopChan)
 
@@ -353,6 +360,8 @@ func (wf *WatchFactory) Shutdown() {
 	for _, inf := range wf.informers {
 		inf.shutdown()
 	}
+
+	wf.Wg.Wait() //waiting for periodicallyRetry to return
 }
 
 func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, error) {

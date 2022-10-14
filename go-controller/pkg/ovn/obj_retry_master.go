@@ -59,7 +59,6 @@ func (oc *Controller) newRetryFrameworkMasterWithParameters(
 		},
 	}
 	r := retry.NewRetryFramework(
-		oc.stopChan,
 		oc.watchFactory,
 		resourceHandler,
 	)
