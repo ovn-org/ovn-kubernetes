@@ -43,17 +43,21 @@ type OvnNode struct {
 	stopChan     chan struct{}
 	recorder     record.EventRecorder
 	gateway      Gateway
+	ovnUpEnabled bool
+
+	allNodeControllers map[string]*ovnNodeController
 }
 
 // NewNode creates a new controller for node management
 func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
 	return &OvnNode{
-		name:         name,
-		client:       kubeClient,
-		Kube:         &kube.Kube{KClient: kubeClient},
-		watchFactory: wf,
-		stopChan:     stopChan,
-		recorder:     eventRecorder,
+		name:               name,
+		client:             kubeClient,
+		Kube:               &kube.Kube{KClient: kubeClient},
+		watchFactory:       wf,
+		stopChan:           stopChan,
+		recorder:           eventRecorder,
+		allNodeControllers: make(map[string]*ovnNodeController),
 	}
 }
 
@@ -367,7 +371,6 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	var node *kapi.Node
 	var subnets []*net.IPNet
 	var cniServer *cni.Server
-	var isOvnUpEnabled bool
 
 	klog.Infof("OVN Kube Node initialization, Mode: %s", config.OvnKubeNode.Mode)
 
@@ -428,7 +431,7 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, util.JoinIPNets(subnets, ","))
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-		isOvnUpEnabled, err = getOVNIfUpCheckMode()
+		n.ovnUpEnabled, err = getOVNIfUpCheckMode()
 		if err != nil {
 			return err
 		}
@@ -440,7 +443,7 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer("", isOvnUpEnabled, n.watchFactory, kclient.KClient)
+		cniServer, err = cni.NewCNIServer("", n.ovnUpEnabled, n.watchFactory, kclient.KClient)
 		if err != nil {
 			return err
 		}
@@ -541,12 +544,12 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 					}
 				}
 				// ensure CNI support for port binding built into OVN, as masters have been upgraded
-				if initialTopoVersion < types.OvnPortBindingTopoVersion && cniServer != nil && !isOvnUpEnabled {
-					isOvnUpEnabled, err = getOVNIfUpCheckMode()
+				if initialTopoVersion < types.OvnPortBindingTopoVersion && cniServer != nil && !n.ovnUpEnabled {
+					n.ovnUpEnabled, err = getOVNIfUpCheckMode()
 					if err != nil {
 						klog.Errorf("%v", err)
 					}
-					if isOvnUpEnabled {
+					if n.ovnUpEnabled {
 						cniServer.EnableOVNPortUpSupport()
 					}
 				}
@@ -598,26 +601,42 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		go wait.Until(func() {
 			checkForStaleOVSInterfaces(n.name, n.watchFactory.(*factory.WatchFactory))
 		}, time.Minute, n.stopChan)
+
+		defNodeController := n.initDefaultController()
+
+		if config.OVNKubernetesFeature.EnableMultiNetwork {
+			err = n.watchNetworkAttachmentDefinitions()
+			if err != nil {
+				return fmt.Errorf("failed to watch network attachment definitions: %w", err)
+			}
+		}
+
+		// default network only:
+		// Only start default network Pod watcher after other default net-attach-defs are added.
+		// This is needed to correctly determine if a pod is scheduled on the default network
+		// if the pod's default network is defined by v1.multus-cni.io/default-network annotation.
+		if config.OvnKubeNode.Mode == types.NodeModeDPU {
+			if err := defNodeController.watchPodsDPU(n.ovnUpEnabled); err != nil {
+				return err
+			}
+		}
+
 		util.SetARPTimeout()
-		err := n.WatchNamespaces()
+		err := defNodeController.WatchNamespaces()
 		if err != nil {
 			return fmt.Errorf("failed to watch namespaces: %w", err)
 		}
 		// every minute cleanup stale conntrack entries if any
 		go wait.Until(func() {
-			n.checkAndDeleteStaleConntrackEntries()
+			defNodeController.checkAndDeleteStaleConntrackEntries()
 		}, time.Minute*1, n.stopChan)
-		err = n.WatchEndpointSlices()
+		err = defNodeController.WatchEndpointSlices()
 		if err != nil {
 			return fmt.Errorf("failed to watch endpointSlices: %w", err)
 		}
 	}
 
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		if err := n.watchPodsDPU(isOvnUpEnabled); err != nil {
-			return err
-		}
-	} else {
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
 		// start the cni server
 		if err := cniServer.Start(cni.HandleCNIRequest); err != nil {
 			return err
@@ -671,8 +690,9 @@ func (n *OvnNode) startEgressIPHealthCheckingServer(wg *sync.WaitGroup, mgmtPort
 	return nil
 }
 
-func (n *OvnNode) WatchEndpointSlices() error {
-	_, err := n.watchFactory.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
+// default network controller only
+func (nc *ovnNodeController) WatchEndpointSlices() error {
+	_, err := nc.watchFactory.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(old, new interface{}) {
 			newEndpointSlice := new.(*discovery.EndpointSlice)
 			oldEndpointSlice := old.(*discovery.EndpointSlice)
@@ -721,8 +741,9 @@ func exGatewayPodsAnnotationsChanged(oldNs, newNs *kapi.Namespace) bool {
 		(oldNs.Annotations[util.RoutingExternalGWsAnnotation] != newNs.Annotations[util.RoutingExternalGWsAnnotation])
 }
 
-func (n *OvnNode) checkAndDeleteStaleConntrackEntries() {
-	namespaces, err := n.watchFactory.GetNamespaces()
+// default network controller only
+func (nc *ovnNodeController) checkAndDeleteStaleConntrackEntries() {
+	namespaces, err := nc.watchFactory.GetNamespaces()
 	if err != nil {
 		klog.Errorf("Unable to get pods from informer: %v", err)
 	}
@@ -730,20 +751,21 @@ func (n *OvnNode) checkAndDeleteStaleConntrackEntries() {
 		_, foundRoutingExternalGWsAnnotation := namespace.Annotations[util.RoutingExternalGWsAnnotation]
 		_, foundExternalGatewayPodIPsAnnotation := namespace.Annotations[util.ExternalGatewayPodIPsAnnotation]
 		if foundRoutingExternalGWsAnnotation || foundExternalGatewayPodIPsAnnotation {
-			pods, err := n.watchFactory.GetPods(namespace.Name)
+			pods, err := nc.watchFactory.GetPods(namespace.Name)
 			if err != nil {
 				klog.Warningf("Unable to get pods from informer for namespace %s: %v", namespace.Name, err)
 			}
 			if len(pods) > 0 || err != nil {
 				// we only need to proceed if there is at least one pod in this namespace on this node
 				// OR if we couldn't fetch the pods for some reason at this juncture
-				n.checkAndDeleteStaleConntrackEntriesForNamespace(namespace)
+				nc.checkAndDeleteStaleConntrackEntriesForNamespace(namespace)
 			}
 		}
 	}
 }
 
-func (n *OvnNode) checkAndDeleteStaleConntrackEntriesForNamespace(newNs *kapi.Namespace) {
+// default network controller only
+func (nc *ovnNodeController) checkAndDeleteStaleConntrackEntriesForNamespace(newNs *kapi.Namespace) {
 	// loop through all the IPs on the annotations; ARP for their MACs and form an allowlist
 	gatewayIPs := strings.Split(newNs.Annotations[util.ExternalGatewayPodIPsAnnotation], ",")
 	gatewayIPs = append(gatewayIPs, strings.Split(newNs.Annotations[util.RoutingExternalGWsAnnotation], ",")...)
@@ -786,13 +808,13 @@ func (n *OvnNode) checkAndDeleteStaleConntrackEntriesForNamespace(newNs *kapi.Na
 		validNextHopMACs = append(validNextHopMACs, []byte("does-not-contain-anything"))
 	}
 
-	pods, err := n.watchFactory.GetPods(newNs.Name)
+	pods, err := nc.watchFactory.GetPods(newNs.Name)
 	if err != nil {
 		klog.Errorf("Unable to get pods from informer: %v", err)
 	}
 	for _, pod := range pods {
 		pod := pod
-		podIPs, err := util.GetAllPodIPs(pod)
+		podIPs, err := util.GetAllPodIPs(pod, nc.nadInfo)
 		if err != nil {
 			klog.Errorf("Unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err)
 		}
@@ -807,12 +829,13 @@ func (n *OvnNode) checkAndDeleteStaleConntrackEntriesForNamespace(newNs *kapi.Na
 	}
 }
 
-func (n *OvnNode) WatchNamespaces() error {
-	_, err := n.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
+// default network controller only
+func (nc *ovnNodeController) WatchNamespaces() error {
+	_, err := nc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(old, new interface{}) {
 			oldNs, newNs := old.(*kapi.Namespace), new.(*kapi.Namespace)
 			if exGatewayPodsAnnotationsChanged(oldNs, newNs) {
-				n.checkAndDeleteStaleConntrackEntriesForNamespace(newNs)
+				nc.checkAndDeleteStaleConntrackEntriesForNamespace(newNs)
 			}
 		},
 	}, nil)

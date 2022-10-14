@@ -98,17 +98,30 @@ func UpdateLogicalRouterSetExternalIDs(nbClient libovsdbclient.Client, router *n
 	return err
 }
 
-// DeleteLogicalRouter deletes the provided logical router
-func DeleteLogicalRouter(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) error {
+// DeleteLogicalRoutersWithPredicateOps looks up deletes the provided logical router and returns the corresponding ops
+func DeleteLogicalRoutersWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation,
+	p logicalRouterPredicate) ([]libovsdb.Operation, error) {
 	opModel := operationModel{
-		Model:          router,
-		ModelPredicate: func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
+		Model:          &nbdb.LogicalRouter{},
+		ModelPredicate: p,
 		ErrNotFound:    false,
-		BulkOp:         false,
+		BulkOp:         true,
 	}
 
 	m := newModelClient(nbClient)
-	return m.Delete(opModel)
+	return m.DeleteOps(ops, opModel)
+}
+
+// DeleteLogicalRouter deletes the provided logical router
+func DeleteLogicalRouter(nbClient libovsdbclient.Client, routerName string) error {
+	ops, err := DeleteLogicalRoutersWithPredicateOps(nbClient, nil,
+		func(item *nbdb.LogicalRouter) bool { return item.Name == routerName })
+	if err != nil {
+		return err
+	}
+	_, err = TransactAndCheck(nbClient, ops)
+	return err
+
 }
 
 // LOGICAL ROUTER PORT OPs

@@ -20,6 +20,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -241,12 +242,16 @@ func IsClusterIP(svcVIP string) bool {
 	return false
 }
 
-func GetLogicalPortName(podNamespace, podName string) string {
-	return composePortName(podNamespace, podName)
+func GetLogicalPortName(podNamespace, podName, nadName string, netNameInfo NetNameInfo) string {
+	netPrefix := ""
+	if netNameInfo.IsSecondary {
+		netPrefix = GetSecondaryNetworkPrefix(nadName)
+	}
+	return composePortName(podNamespace, podName, netPrefix)
 }
 
-func GetIfaceId(podNamespace, podName string) string {
-	return composePortName(podNamespace, podName)
+func GetIfaceId(podNamespace, podName, prefix string) string {
+	return composePortName(podNamespace, podName, prefix)
 }
 
 // composePortName should be called both for LogicalPortName and iface-id
@@ -255,8 +260,24 @@ func GetIfaceId(podNamespace, podName string) string {
 // in the Open_vSwitch database’s Interface table,
 // because hypervisors use external_ids:iface-id as a lookup key to
 // identify the network interface of that entity.
-func composePortName(podNamespace, podName string) string {
-	return podNamespace + "_" + podName
+func composePortName(podNamespace, podName, netPrefix string) string {
+	return netPrefix + podNamespace + "_" + podName
+}
+
+// Get all possible logical ports name of this network
+func GetAllLogicalPortNames(pod *kapi.Pod, nadInfo *NetAttachDefInfo) []string {
+	ports := []string{}
+	on, networkMap, err := IsNetworkOnPod(pod, nadInfo)
+	if err != nil {
+		klog.Errorf(err.Error())
+	} else if on {
+		// the pod is attached to this specific network
+		for nadName := range networkMap {
+			portName := GetLogicalPortName(pod.Namespace, pod.Name, nadName, nadInfo.NetNameInfo)
+			ports = append(ports, portName)
+		}
+	}
+	return ports
 }
 
 func SliceHasStringItem(slice []string, item string) bool {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // This handles the annotations used by the node to pass information about its local
@@ -44,9 +45,6 @@ import (
 const (
 	// ovnNodeL3GatewayConfig is the constant string representing the l3 gateway annotation key
 	ovnNodeL3GatewayConfig = "k8s.ovn.org/l3-gateway-config"
-
-	// OvnDefaultNetworkGateway captures L3 gateway config for default OVN network interface
-	ovnDefaultNetworkGateway = "default"
 
 	// ovnNodeManagementPortMacAddress is the constant string representing the annotation key
 	ovnNodeManagementPortMacAddress = "k8s.ovn.org/node-mgmt-port-mac-address"
@@ -245,7 +243,7 @@ func (cfg *L3GatewayConfig) UnmarshalJSON(bytes []byte) error {
 }
 
 func SetL3GatewayConfig(nodeAnnotator kube.Annotator, cfg *L3GatewayConfig) error {
-	gatewayAnnotation := map[string]*L3GatewayConfig{ovnDefaultNetworkGateway: cfg}
+	gatewayAnnotation := map[string]*L3GatewayConfig{types.DefaultNetworkName: cfg}
 	if err := nodeAnnotator.Set(ovnNodeL3GatewayConfig, gatewayAnnotation); err != nil {
 		return err
 	}
@@ -269,9 +267,9 @@ func ParseNodeL3GatewayAnnotation(node *kapi.Node) (*L3GatewayConfig, error) {
 		return nil, fmt.Errorf("failed to unmarshal l3 gateway config annotation %s for node %q: %v", l3GatewayAnnotation, node.Name, err)
 	}
 
-	cfg, ok := cfgs[ovnDefaultNetworkGateway]
+	cfg, ok := cfgs[types.DefaultNetworkName]
 	if !ok {
-		return nil, fmt.Errorf("%s annotation for %s network not found", ovnNodeL3GatewayConfig, ovnDefaultNetworkGateway)
+		return nil, fmt.Errorf("%s annotation for %s network not found", ovnNodeL3GatewayConfig, types.DefaultNetworkName)
 	}
 
 	if cfg.Mode != config.GatewayModeDisabled {

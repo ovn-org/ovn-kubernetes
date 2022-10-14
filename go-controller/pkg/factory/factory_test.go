@@ -35,6 +35,9 @@ import (
 	ocpconfigapi "github.com/openshift/api/config/v1"
 	ocpcloudnetworkclientsetfake "github.com/openshift/client-go/cloudnetwork/clientset/versioned/fake"
 
+	networkattachmentdefinitionapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	networkattachmentdefinitionfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -174,6 +177,15 @@ func newEgressQoS(name, namespace string) *egressqos.EgressQoS {
 	}
 }
 
+func newNetworkAttchDef(name, namespace string) *networkattachmentdefinitionapi.NetworkAttachmentDefinition {
+	return &networkattachmentdefinitionapi.NetworkAttachmentDefinition{
+		ObjectMeta: newObjectMeta(name, namespace),
+		Spec: networkattachmentdefinitionapi.NetworkAttachmentDefinitionSpec{
+			Config: "{\"cniVersion\": \"0.3.0\", \"type\": \"macvlan\"}",
+		},
+	}
+}
+
 func objSetup(c *fake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
 	w := watch.NewFake()
 	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
@@ -209,6 +221,13 @@ func egressQoSObjSetup(c *egressqosfake.Clientset, objType string, listFn func(c
 	return w
 }
 
+func networkAttchDefObjSetup(c *networkattachmentdefinitionfake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
+	w := watch.NewFake()
+	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
+	c.AddReactor("list", objType, listFn)
+	return w
+}
+
 type handlerCalls struct {
 	added   int32
 	updated int32
@@ -236,12 +255,14 @@ var _ = Describe("Watch Factory Operations", func() {
 		cloudNetworkFakeClient              *ocpcloudnetworkclientsetfake.Clientset
 		egressQoSFakeClient                 *egressqosfake.Clientset
 		podWatch, namespaceWatch, nodeWatch *watch.FakeWatcher
+		networkAttchDefClient               *networkattachmentdefinitionfake.Clientset
 		policyWatch, serviceWatch           *watch.FakeWatcher
 		endpointSliceWatch                  *watch.FakeWatcher
 		egressFirewallWatch                 *watch.FakeWatcher
 		egressIPWatch                       *watch.FakeWatcher
 		cloudPrivateIPConfigWatch           *watch.FakeWatcher
 		egressQoSWatch                      *watch.FakeWatcher
+		networkAttchDefWatch                *watch.FakeWatcher
 		pods                                []*v1.Pod
 		namespaces                          []*v1.Namespace
 		nodes                               []*v1.Node
@@ -253,6 +274,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf                                  *WatchFactory
 		egressFirewalls                     []*egressfirewall.EgressFirewall
 		egressQoSes                         []*egressqos.EgressQoS
+		netAttchDefs                        []*networkattachmentdefinitionapi.NetworkAttachmentDefinition
 		err                                 error
 	)
 
@@ -267,6 +289,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		config.OVNKubernetesFeature.EnableEgressIP = true
 		config.OVNKubernetesFeature.EnableEgressFirewall = true
 		config.OVNKubernetesFeature.EnableEgressQoS = true
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
 		config.Kubernetes.PlatformType = string(ocpconfigapi.AWSPlatformType)
 
 		fakeClient = &fake.Clientset{}
@@ -274,13 +297,15 @@ var _ = Describe("Watch Factory Operations", func() {
 		egressIPFakeClient = &egressipfake.Clientset{}
 		cloudNetworkFakeClient = &ocpcloudnetworkclientsetfake.Clientset{}
 		egressQoSFakeClient = &egressqosfake.Clientset{}
+		networkAttchDefClient = &networkattachmentdefinitionfake.Clientset{}
 
 		ovnClientset = &util.OVNClientset{
-			KubeClient:           fakeClient,
-			EgressIPClient:       egressIPFakeClient,
-			EgressFirewallClient: egressFirewallFakeClient,
-			CloudNetworkClient:   cloudNetworkFakeClient,
-			EgressQoSClient:      egressQoSFakeClient,
+			KubeClient:            fakeClient,
+			EgressIPClient:        egressIPFakeClient,
+			EgressFirewallClient:  egressFirewallFakeClient,
+			CloudNetworkClient:    cloudNetworkFakeClient,
+			EgressQoSClient:       egressQoSFakeClient,
+			NetworkAttchDefClient: networkAttchDefClient,
 		}
 
 		pods = make([]*v1.Pod, 0)
@@ -372,6 +397,15 @@ var _ = Describe("Watch Factory Operations", func() {
 			}
 			return true, obj, nil
 		})
+
+		netAttchDefs = make([]*networkattachmentdefinitionapi.NetworkAttachmentDefinition, 0)
+		networkAttchDefWatch = networkAttchDefObjSetup(networkAttchDefClient, "network-attachment-definitions", func(core.Action) (bool, runtime.Object, error) {
+			obj := &networkattachmentdefinitionapi.NetworkAttachmentDefinitionList{}
+			for _, p := range netAttchDefs {
+				obj.Items = append(obj.Items, *p)
+			}
+			return true, obj, nil
+		})
 	})
 
 	AfterEach(func() {
@@ -445,6 +479,11 @@ var _ = Describe("Watch Factory Operations", func() {
 		It("is called for each existing egressQoS", func() {
 			egressQoSes = append(egressQoSes, newEgressQoS("myEgressQoS", "default"))
 			testExisting(EgressQoSType, "", nil)
+		})
+
+		It("is called for each existing net-attach-def", func() {
+			netAttchDefs = append(netAttchDefs, newNetworkAttchDef("myNetworkAttachmentDefinition", "default"))
+			testExisting(NetworkattachmentdefinitionType, "", nil)
 		})
 
 		It("is called for each existing pod that matches a given namespace and label", func() {
@@ -542,6 +581,11 @@ var _ = Describe("Watch Factory Operations", func() {
 			egressQoSes = append(egressQoSes, newEgressQoS("myEgressQoS", "default"))
 			egressQoSes = append(egressQoSes, newEgressQoS("myEgressQoS1", "default"))
 			testExisting(EgressQoSType)
+		})
+		It("calls ADD for each existing net-attach-def", func() {
+			netAttchDefs = append(netAttchDefs, newNetworkAttchDef("myNetAttachDef", "default"))
+			netAttchDefs = append(netAttchDefs, newNetworkAttchDef("myNetAttachDef1", "default"))
+			testExisting(NetworkattachmentdefinitionType)
 		})
 	})
 
@@ -1299,6 +1343,43 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		wf.RemoveEgressQoSHandler(h)
 	})
+
+	It("responds to networkAttachmentDefinition add/update/delete events", func() {
+		wf, err = NewMasterWatchFactory(ovnClientset)
+		Expect(err).NotTo(HaveOccurred())
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
+
+		added := newNetworkAttchDef("myNetworkAttachmentDefinition", "default")
+		h, c := addHandler(wf, NetworkattachmentdefinitionType, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				netAttchDef := obj.(*networkattachmentdefinitionapi.NetworkAttachmentDefinition)
+				Expect(reflect.DeepEqual(netAttchDef, added)).To(BeTrue())
+			},
+			UpdateFunc: func(old, new interface{}) {
+				newNetAttchDef := new.(*networkattachmentdefinitionapi.NetworkAttachmentDefinition)
+				Expect(reflect.DeepEqual(newNetAttchDef, added)).To(BeTrue())
+				Expect(newNetAttchDef.Spec.Config).To(Equal("{\"cniVersion\": \"0.3.0\", \"type\": \"macvlan\"}"))
+			},
+			DeleteFunc: func(obj interface{}) {
+				newNetAttchDef := obj.(*networkattachmentdefinitionapi.NetworkAttachmentDefinition)
+				Expect(reflect.DeepEqual(newNetAttchDef, added)).To(BeTrue())
+			},
+		})
+
+		netAttchDefs = append(netAttchDefs, added)
+		networkAttchDefWatch.Add(added)
+		Eventually(c.getAdded, 2).Should(Equal(1))
+		added.Spec.Config = "{\"cniVersion\": \"0.3.0\", \"type\": \"macvlan\"}"
+		networkAttchDefWatch.Modify(added)
+		Eventually(c.getUpdated, 2).Should(Equal(1))
+		netAttchDefs = netAttchDefs[:0]
+		networkAttchDefWatch.Delete(added)
+		Eventually(c.getDeleted, 2).Should(Equal(1))
+
+		wf.RemoveNetworkattachmentdefinitionHandler(h)
+	})
+
 	It("stops processing events after the handler is removed", func() {
 		wf, err = NewMasterWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())

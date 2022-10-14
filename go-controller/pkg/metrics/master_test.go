@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics/mocks"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
@@ -63,6 +64,7 @@ var _ = ginkgo.Describe("Config Duration Operations", func() {
 		nbClient       client.Client
 		cleanup        *libovsdbtest.Cleanup
 		stop           chan struct{}
+		netNameInfo    util.NetNameInfo
 		testNamespaceA = "testnamespacea"
 		testPodNameA   = "testpoda"
 		testNamespaceB = "testnamespaceb"
@@ -76,6 +78,7 @@ var _ = ginkgo.Describe("Config Duration Operations", func() {
 		stop = make(chan struct{})
 		_, nbClient, cleanup = setupOvn(libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{&nbdb.NBGlobal{UUID: "cd-op-uuid"}}})
+		netNameInfo = util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", IsSecondary: false}
 	})
 
 	ginkgo.AfterEach(func() {
@@ -88,10 +91,10 @@ var _ = ginkgo.Describe("Config Duration Operations", func() {
 			instance.Run(nbClient, k, 0, time.Millisecond, stop)
 			histoMock := mocks.NewHistogramVecMock()
 			metricNetworkProgramming = histoMock
-			startTimestamp, ok := instance.Start("pod", testNamespaceA, testPodNameA)
+			startTimestamp, ok := instance.Start("pod", testNamespaceA, testPodNameA, netNameInfo)
 			gomega.Expect(ok).To(gomega.BeTrue())
 			gomega.Expect(startTimestamp.IsZero()).Should(gomega.BeFalse())
-			endTimestamp := instance.End("pod", testNamespaceA, testPodNameA)
+			endTimestamp := instance.End("pod", testNamespaceA, testPodNameA, netNameInfo)
 			var histoValue float64
 			gomega.Eventually(func() bool {
 				select {
@@ -110,16 +113,16 @@ var _ = ginkgo.Describe("Config Duration Operations", func() {
 			instance.Run(nbClient, k, 0, time.Millisecond, stop)
 			histoMock := mocks.NewHistogramVecMock()
 			metricNetworkProgramming = histoMock
-			startTimestamp, ok := instance.Start("pod", testNamespaceA, testPodNameA)
+			startTimestamp, ok := instance.Start("pod", testNamespaceA, testPodNameA, netNameInfo)
 			gomega.Expect(ok).To(gomega.BeTrue())
 			gomega.Expect(startTimestamp.IsZero()).Should(gomega.BeFalse())
-			ops, txOkCallback, startOVNTimestamp, err := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA)
+			ops, txOkCallback, startOVNTimestamp, err := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA, netNameInfo)
 			gomega.Expect(ops).Should(gomega.HaveLen(1))
 			gomega.Expect(err).Should(gomega.BeNil())
 			_, err = libovsdbops.TransactAndCheck(nbClient, ops)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			txOkCallback()
-			endTimestamp := instance.End("pod", testNamespaceA, testPodNameA)
+			endTimestamp := instance.End("pod", testNamespaceA, testPodNameA, netNameInfo)
 			endOVNTimestamp := startOVNTimestamp.Add(10 * time.Second)
 			setHvCfg(nbClient, 1, endOVNTimestamp)
 			delta := endOVNTimestamp.Sub(startOVNTimestamp).Seconds() + startTimestamp.Sub(endTimestamp).Seconds()
@@ -141,30 +144,30 @@ var _ = ginkgo.Describe("Config Duration Operations", func() {
 			histoMock := mocks.NewHistogramVecMock()
 			metricNetworkProgramming = histoMock
 			// recording 1
-			startTimestamp, ok := instance.Start("pod", testNamespaceA, testPodNameA)
+			startTimestamp, ok := instance.Start("pod", testNamespaceA, testPodNameA, netNameInfo)
 			gomega.Expect(ok).To(gomega.BeTrue())
 			gomega.Expect(startTimestamp.IsZero()).Should(gomega.BeFalse())
-			ops, txOkCallback, startOVNTimestamp, err := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA)
+			ops, txOkCallback, startOVNTimestamp, err := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA, netNameInfo)
 			gomega.Expect(ops).Should(gomega.HaveLen(1))
 			gomega.Expect(err).Should(gomega.BeNil())
 			_, err = libovsdbops.TransactAndCheck(nbClient, ops)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			txOkCallback()
-			endTimestamp := instance.End("pod", testNamespaceA, testPodNameA)
+			endTimestamp := instance.End("pod", testNamespaceA, testPodNameA, netNameInfo)
 			endOVNTimestamp := startOVNTimestamp.Add(10 * time.Second)
 			setHvCfg(nbClient, 1, endOVNTimestamp)
 			deltaFirstObj := endOVNTimestamp.Sub(startOVNTimestamp).Seconds() + startTimestamp.Sub(endTimestamp).Seconds()
 			// recording 2 with different obj
-			startTimestamp, ok = instance.Start("networkpolicy", testNamespaceB, testPodNameB)
+			startTimestamp, ok = instance.Start("networkpolicy", testNamespaceB, testPodNameB, netNameInfo)
 			gomega.Expect(ok).To(gomega.BeTrue())
 			gomega.Expect(startTimestamp.IsZero()).Should(gomega.BeFalse())
-			ops, txOkCallback, startOVNTimestamp, err = instance.AddOVN(nbClient, "networkpolicy", testNamespaceB, testPodNameB)
+			ops, txOkCallback, startOVNTimestamp, err = instance.AddOVN(nbClient, "networkpolicy", testNamespaceB, testPodNameB, netNameInfo)
 			gomega.Expect(ops).Should(gomega.HaveLen(1))
 			gomega.Expect(err).Should(gomega.BeNil())
 			_, err = libovsdbops.TransactAndCheck(nbClient, ops)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			txOkCallback()
-			endTimestamp = instance.End("networkpolicy", testNamespaceB, testPodNameB)
+			endTimestamp = instance.End("networkpolicy", testNamespaceB, testPodNameB, netNameInfo)
 			endOVNTimestamp = startOVNTimestamp.Add(10 * time.Second)
 			setHvCfg(nbClient, 2, endOVNTimestamp)
 			deltaSecondObj := endOVNTimestamp.Sub(startOVNTimestamp).Seconds() + startTimestamp.Sub(endTimestamp).Seconds()
@@ -190,7 +193,7 @@ var _ = ginkgo.Describe("Config Duration Operations", func() {
 
 		ginkgo.It("denies recording when no start called", func() {
 			instance.Run(nbClient, k, 0, time.Millisecond, stop)
-			ops, _, _, _ := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA)
+			ops, _, _, _ := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA, netNameInfo)
 			gomega.Expect(ops).Should(gomega.HaveLen(0))
 		})
 
@@ -199,24 +202,24 @@ var _ = ginkgo.Describe("Config Duration Operations", func() {
 			histoMock := mocks.NewHistogramVecMock()
 			metricNetworkProgramming = histoMock
 			// recording 1
-			startTimestamp, ok := instance.Start("pod", testNamespaceA, testPodNameA)
+			startTimestamp, ok := instance.Start("pod", testNamespaceA, testPodNameA, netNameInfo)
 			gomega.Expect(ok).To(gomega.BeTrue())
 			gomega.Expect(startTimestamp.IsZero()).Should(gomega.BeFalse())
 			// first addOVN
-			ops, txOkCallback, firstStartOVNTimestamp, err := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA)
+			ops, txOkCallback, firstStartOVNTimestamp, err := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA, netNameInfo)
 			gomega.Expect(ops).Should(gomega.HaveLen(1))
 			gomega.Expect(err).Should(gomega.BeNil())
 			_, err = libovsdbops.TransactAndCheck(nbClient, ops)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			txOkCallback()
 			// second addOVN
-			ops, txOkCallback, secondStartOVNTimestamp, err := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA)
+			ops, txOkCallback, secondStartOVNTimestamp, err := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA, netNameInfo)
 			gomega.Expect(ops).Should(gomega.HaveLen(1))
 			gomega.Expect(err).Should(gomega.BeNil())
 			_, err = libovsdbops.TransactAndCheck(nbClient, ops)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			txOkCallback()
-			endTimestamp := instance.End("pod", testNamespaceA, testPodNameA)
+			endTimestamp := instance.End("pod", testNamespaceA, testPodNameA, netNameInfo)
 			endOVNTimestamp := secondStartOVNTimestamp.Add(10 * time.Second)
 			setHvCfg(nbClient, 2, endOVNTimestamp)
 			firstOVNDelta := endOVNTimestamp.Sub(firstStartOVNTimestamp).Seconds()

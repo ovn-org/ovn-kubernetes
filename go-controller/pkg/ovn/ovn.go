@@ -253,17 +253,12 @@ func (oc *Controller) Stop() {
 	}
 }
 
-// getPodNamespacedName returns <namespace>_<podname> for the provided pod
-func getPodNamespacedName(pod *kapi.Pod) string {
-	return util.GetLogicalPortName(pod.Namespace, pod.Name)
-}
-
 // Run starts the actual watching.
 func (oc *Controller) Run(ctx context.Context) error {
 	if !oc.nadInfo.IsSecondary {
 		oc.syncPeriodic()
 	}
-	klog.Infof("Starting all the Watchers...")
+	klog.Infof("Starting all the Watchers for network %s...", oc.nadInfo.NetName)
 	start := time.Now()
 
 	if !oc.nadInfo.IsSecondary {
@@ -392,6 +387,8 @@ func (oc *Controller) Run(ctx context.Context) error {
 				unidlingController.Run(oc.stopChan)
 			}()
 		}
+	} else {
+		klog.Infof("Completing all the Watchers for network %s took %v", oc.nadInfo.NetName, time.Since(start))
 	}
 
 	// Final step to cleanup after resource handlers have synced
@@ -439,7 +436,7 @@ func (oc *Controller) recordPodEvent(addErr error, pod *kapi.Pod) {
 		klog.Errorf("Couldn't get a reference to pod %s/%s to post an event: '%v'",
 			pod.Namespace, pod.Name, err)
 	} else {
-		klog.V(5).Infof("Posting a %s event for Pod %s/%s", kapi.EventTypeWarning, pod.Namespace, pod.Name)
+		klog.V(5).Infof("Posting a %s event for Pod %s/%s on network %s", kapi.EventTypeWarning, pod.Namespace, pod.Name, oc.nadInfo.NetName)
 		oc.recorder.Eventf(podRef, kapi.EventTypeWarning, "ErrorAddingLogicalPort", addErr.Error())
 	}
 }
@@ -475,7 +472,7 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
 
 	if util.PodWantsNetwork(pod) && addPort {
 		if err := oc.addLogicalPort(pod); err != nil {
-			return fmt.Errorf("addLogicalPort failed for %s/%s: %w", pod.Namespace, pod.Name, err)
+			return fmt.Errorf("addLogicalPort failed for %s/%s network %s: %w", pod.Namespace, pod.Name, oc.nadInfo.NetName, err)
 		}
 	} else {
 		if oc.nadInfo.IsSecondary {
@@ -495,17 +492,17 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
 
 // removePod tried to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
-func (oc *Controller) removePod(pod *kapi.Pod, portInfo *lpInfo) error {
+func (oc *Controller) removePod(pod *kapi.Pod, portInfoMap map[string]*lpInfo) error {
 	if !util.PodWantsNetwork(pod) && !oc.nadInfo.IsSecondary {
 		if err := oc.deletePodExternalGW(pod); err != nil {
-			return fmt.Errorf("unable to delete external gateway routes for pod %s: %w",
-				getPodNamespacedName(pod), err)
+			return fmt.Errorf("unable to delete external gateway routes for pod %s/%s: %w",
+				pod.Namespace, pod.Name, err)
 		}
 		return nil
 	}
-	if err := oc.deleteLogicalPort(pod, portInfo); err != nil {
-		return fmt.Errorf("deleteLogicalPort failed for pod %s: %w",
-			getPodNamespacedName(pod), err)
+	if err := oc.deleteLogicalPort(pod, portInfoMap); err != nil {
+		return fmt.Errorf("deleteLogicalPort failed for pod %s/%s on network %s: %w",
+			pod.Namespace, pod.Name, oc.nadInfo.NetName, err)
 	}
 	return nil
 }

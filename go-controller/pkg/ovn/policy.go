@@ -559,7 +559,7 @@ func (oc *Controller) createDefaultDenyPGAndACLs(namespace, policy string, aclLo
 	}
 
 	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.nbClient, "networkpolicy",
-		namespace, policy)
+		namespace, policy, oc.nadInfo.NetNameInfo)
 	if err != nil {
 		klog.Errorf("Failed to record config duration: %v", err)
 	}
@@ -758,11 +758,13 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 		if util.PodCompleted(pod) {
 			continue
 		}
-		portName := util.GetLogicalPortName(pod.Namespace, pod.Name)
-		if portInfo, err := oc.logicalPortCache.get(portName); err != nil {
-			klog.Errorf(err.Error())
-		} else {
-			ports = append(ports, &nbdb.LogicalSwitchPort{UUID: portInfo.uuid})
+		portNames := util.GetAllLogicalPortNames(pod, oc.nadInfo)
+		for _, portName := range portNames {
+			if portInfo, err := oc.logicalPortCache.get(portName); err != nil {
+				klog.Errorf(err.Error())
+			} else {
+				ports = append(ports, &nbdb.LogicalSwitchPort{UUID: portInfo.uuid})
+			}
 		}
 	}
 
@@ -920,7 +922,7 @@ func (oc *Controller) getNewLocalPolicyPorts(np *networkPolicy,
 	for _, obj := range objs {
 		pod := obj.(*kapi.Pod)
 
-		logicalPortName := util.GetLogicalPortName(pod.Namespace, pod.Name)
+		logicalPortName := util.GetLogicalPortName(pod.Namespace, pod.Name, "", oc.nadInfo.NetNameInfo)
 		if _, ok := np.localPods.Load(logicalPortName); ok {
 			// port is already added for this policy
 			continue
@@ -977,7 +979,7 @@ func (oc *Controller) getExistingLocalPolicyPorts(np *networkPolicy,
 	for _, obj := range objs {
 		pod := obj.(*kapi.Pod)
 
-		logicalPortName := util.GetLogicalPortName(pod.Namespace, pod.Name)
+		logicalPortName := util.GetLogicalPortName(pod.Namespace, pod.Name, "", oc.nadInfo.NetNameInfo)
 		loadedPortUUID, ok := np.localPods.Load(logicalPortName)
 		if !ok {
 			// port is already deleted for this policy
@@ -1293,7 +1295,7 @@ func (oc *Controller) createNetworkPolicy(policy *knet.NetworkPolicy, aclLogging
 		for i, ingressJSON := range policy.Spec.Ingress {
 			klog.V(5).Infof("Network policy ingress is %+v", ingressJSON)
 
-			ingress := newGressPolicy(knet.PolicyTypeIngress, i, policy.Namespace, policy.Name)
+			ingress := newGressPolicy(knet.PolicyTypeIngress, i, policy.Namespace, policy.Name, oc.nadInfo)
 			// append ingress policy to be able to cleanup created address set
 			// see cleanupNetworkPolicy for details
 			np.ingressPolicies = append(np.ingressPolicies, ingress)
@@ -1332,7 +1334,7 @@ func (oc *Controller) createNetworkPolicy(policy *knet.NetworkPolicy, aclLogging
 		for i, egressJSON := range policy.Spec.Egress {
 			klog.V(5).Infof("Network policy egress is %+v", egressJSON)
 
-			egress := newGressPolicy(knet.PolicyTypeEgress, i, policy.Namespace, policy.Name)
+			egress := newGressPolicy(knet.PolicyTypeEgress, i, policy.Namespace, policy.Name, oc.nadInfo)
 			// append ingress policy to be able to cleanup created address set
 			// see cleanupNetworkPolicy for details
 			np.egressPolicies = append(np.egressPolicies, egress)
@@ -1390,7 +1392,7 @@ func (oc *Controller) createNetworkPolicy(policy *knet.NetworkPolicy, aclLogging
 		var recordOps []ovsdb.Operation
 		var txOkCallBack func()
 		recordOps, txOkCallBack, _, err = metrics.GetConfigDurationRecorder().AddOVN(oc.nbClient, "networkpolicy",
-			policy.Namespace, policy.Name)
+			policy.Namespace, policy.Name, oc.nadInfo.NetNameInfo)
 		if err != nil {
 			klog.Errorf("Failed to record config duration: %v", err)
 		}
@@ -1597,7 +1599,7 @@ func (oc *Controller) cleanupNetworkPolicy(np *networkPolicy) error {
 		return fmt.Errorf("failed to get delete network policy port group %s ops: %v", np.portGroupName, err)
 	}
 	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.nbClient, "networkpolicy",
-		np.namespace, np.name)
+		np.namespace, np.name, oc.nadInfo.NetNameInfo)
 	if err != nil {
 		klog.Errorf("Failed to record config duration: %v", err)
 	}

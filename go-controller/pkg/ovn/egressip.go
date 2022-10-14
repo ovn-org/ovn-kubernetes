@@ -1071,7 +1071,7 @@ func (oc *Controller) addPodEgressIPAssignments(name string, statusAssignments [
 		// addLogicalPort has finished successfully setting up networking for
 		// the pod, so we can proceed with retrieving its IP and deleting the
 		// external GW configuration created in addLogicalPort for the pod.
-		logicalPort, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name))
+		logicalPort, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name, types.DefaultNetworkName, oc.nadInfo.NetNameInfo))
 		if err != nil {
 			return nil
 		}
@@ -1413,9 +1413,10 @@ func (oc *Controller) generateCacheForEgressIP(eIPs []interface{}) (map[string]e
 					continue
 				}
 				// FIXME(trozet): potential race where pod is not yet added in the cache by the pod handler
-				logicalPort, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name))
+				lpName := util.GetLogicalPortName(pod.Namespace, pod.Name, types.DefaultNetworkName, oc.nadInfo.NetNameInfo)
+				logicalPort, err := oc.logicalPortCache.get(lpName)
 				if err != nil {
-					klog.Errorf("Error getting logical port %s, err: %v", util.GetLogicalPortName(pod.Namespace, pod.Name), err)
+					klog.Errorf("Error getting logical port %s, err: %v", lpName, err)
 					continue
 				}
 				for _, ipNet := range logicalPort.ips {
@@ -1791,7 +1792,7 @@ func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
 				return fmt.Errorf("unable to use node for egress assignment, err: %v", err)
 			}
 		}
-		nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
+		nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 		if err != nil {
 			return fmt.Errorf("failed to parse node %s subnets annotation %v", node.Name, err)
 		}

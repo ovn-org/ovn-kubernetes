@@ -72,6 +72,9 @@ func ReadCNIConfig(bytes []byte) (*ovntypes.NetConf, error) {
 	if err := json.Unmarshal(bytes, conf); err != nil {
 		return nil, err
 	}
+	if conf.IsSecondary && conf.NetCidr == "" {
+		return nil, fmt.Errorf("netCIDR must be specified in Network Attachment Definition for secondary network")
+	}
 	if conf.RawPrevResult != nil {
 		if err := version.ParsePrevResult(&conf.NetConf); err != nil {
 			return nil, err

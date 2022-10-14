@@ -37,8 +37,9 @@ func newEgressQoSObject(name, namespace string, egressRules []egressqosapi.Egres
 
 var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 	var (
-		app     *cli.App
-		fakeOVN *FakeOVN
+		app                *cli.App
+		fakeOVN            *FakeOVN
+		defaultNetNameInfo util.NetNameInfo
 	)
 	const (
 		node1Name string = "node1"
@@ -53,6 +54,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
+		defaultNetNameInfo = util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", IsSecondary: false}
 
 		fakeOVN = NewFakeOVN()
 	})
@@ -298,7 +300,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 
 				i, n, _ := net.ParseCIDR(podIP + "/23")
 				n.IP = i
-				fakeOVN.controller.logicalPortCache.add("", util.GetLogicalPortName(podT.Namespace, podT.Name), "", nil, []*net.IPNet{n})
+				fakeOVN.controller.logicalPortCache.add("", util.GetLogicalPortName(podT.Namespace, podT.Name, "", defaultNetNameInfo), "", nil, []*net.IPNet{n})
 
 				// Create one EgressQoS
 				eq := newEgressQoSObject("default", namespaceT.Name, []egressqosapi.EgressQoSRule{
@@ -569,7 +571,7 @@ var _ = ginkgo.Describe("OVN EgressQoS Operations", func() {
 
 			i, n, _ := net.ParseCIDR("10.128.1.3" + "/23")
 			n.IP = i
-			fakeOVN.controller.logicalPortCache.add("", util.GetLogicalPortName(podT.Namespace, podT.Name), "", nil, []*net.IPNet{n})
+			fakeOVN.controller.logicalPortCache.add("", util.GetLogicalPortName(podT.Namespace, podT.Name, "", defaultNetNameInfo), "", nil, []*net.IPNet{n})
 
 			eq := newEgressQoSObject("default", namespaceT.Name, []egressqosapi.EgressQoSRule{
 				{

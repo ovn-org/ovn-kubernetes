@@ -11,6 +11,7 @@ import (
 	egressfirewallscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
 	egressfirewallinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions"
 	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -26,6 +27,10 @@ import (
 	egressqosscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/scheme"
 	egressqosinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions"
 	egressqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
+
+	networkattachmentdefinitionapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	networkattachmentdefinitionscheme "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/scheme"
+	networkattachmentdefinitioninformerfactory "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions"
 
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -57,6 +62,7 @@ type WatchFactory struct {
 	efFactory        egressfirewallinformerfactory.SharedInformerFactory
 	cpipcFactory     ocpcloudnetworkinformerfactory.SharedInformerFactory
 	egressQoSFactory egressqosinformerfactory.SharedInformerFactory
+	nadFactory       networkattachmentdefinitioninformerfactory.SharedInformerFactory
 	informers        map[reflect.Type]*informer
 
 	stopChan chan struct{}
@@ -111,6 +117,7 @@ var (
 	PeerNamespaceSelectorType             reflect.Type = reflect.TypeOf(&peerNamespaceSelector{})
 	PeerPodSelectorType                   reflect.Type = reflect.TypeOf(&peerPodSelector{})
 	LocalPodSelectorType                  reflect.Type = reflect.TypeOf(&localPodSelector{})
+	NetworkattachmentdefinitionType       reflect.Type = reflect.TypeOf(&networkattachmentdefinitionapi.NetworkAttachmentDefinition{})
 )
 
 // NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
@@ -127,6 +134,7 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		efFactory:        egressfirewallinformerfactory.NewSharedInformerFactory(ovnClientset.EgressFirewallClient, resyncInterval),
 		cpipcFactory:     ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval),
 		egressQoSFactory: egressqosinformerfactory.NewSharedInformerFactory(ovnClientset.EgressQoSClient, resyncInterval),
+		nadFactory:       networkattachmentdefinitioninformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval),
 		informers:        make(map[reflect.Type]*informer),
 		stopChan:         make(chan struct{}),
 	}
@@ -138,6 +146,9 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		return nil, err
 	}
 	if err := egressqosapi.AddToScheme(egressqosscheme.Scheme); err != nil {
+		return nil, err
+	}
+	if err := networkattachmentdefinitionapi.AddToScheme(networkattachmentdefinitionscheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -214,6 +225,13 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 			return nil, err
 		}
 	}
+	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		wf.informers[NetworkattachmentdefinitionType], err = newInformer(NetworkattachmentdefinitionType,
+			wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	return wf, nil
 }
@@ -258,6 +276,14 @@ func (wf *WatchFactory) Start() error {
 			}
 		}
 	}
+	if config.OVNKubernetesFeature.EnableMultiNetwork && wf.nadFactory != nil {
+		wf.nadFactory.Start(wf.stopChan)
+		for oType, synced := range wf.nadFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
+		}
+	}
 
 	return nil
 }
@@ -270,6 +296,13 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 		informers: make(map[reflect.Type]*informer),
 		stopChan:  make(chan struct{}),
 	}
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.OVNKubernetesFeature.EnableMultiNetwork {
+		wf.nadFactory = networkattachmentdefinitioninformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
+		if err := networkattachmentdefinitionapi.AddToScheme(networkattachmentdefinitionscheme.Scheme); err != nil {
+			return nil, err
+		}
+	}
+
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
 	wf.iFactory.InformerFor(&kapi.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
@@ -338,6 +371,14 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 		return nil, err
 	}
 
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.OVNKubernetesFeature.EnableMultiNetwork {
+		wf.informers[NetworkattachmentdefinitionType], err = newInformer(NetworkattachmentdefinitionType,
+			wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return wf, nil
 }
 
@@ -387,6 +428,10 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 	case EndpointSliceType:
 		if endpointSlice, ok := obj.(*discovery.EndpointSlice); ok {
 			return &endpointSlice.ObjectMeta, nil
+		}
+	case NetworkattachmentdefinitionType:
+		if networkattachmentdefinition, ok := obj.(*networkattachmentdefinitionapi.NetworkAttachmentDefinition); ok {
+			return &networkattachmentdefinition.ObjectMeta, nil
 		}
 	}
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
@@ -582,6 +627,16 @@ func (wf *WatchFactory) RemoveEgressFirewallHandler(handler *Handler) {
 // RemoveEgressQoSHandler removes an EgressQoS object event handler function
 func (wf *WatchFactory) RemoveEgressQoSHandler(handler *Handler) {
 	wf.removeHandler(EgressQoSType, handler)
+}
+
+// AddNetworkattachmentdefinitionHandler adds a handler function that will be executed on Networkattachmentdefinition object changes
+func (wf *WatchFactory) AddNetworkattachmentdefinitionHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+	return wf.addHandler(NetworkattachmentdefinitionType, "", nil, handlerFuncs, processExisting)
+}
+
+// RemoveNetworkattachmentdefinitionHandler removes an Networkattachmentdefinition object event handler function
+func (wf *WatchFactory) RemoveNetworkattachmentdefinitionHandler(handler *Handler) {
+	wf.removeHandler(NetworkattachmentdefinitionType, handler)
 }
 
 // AddEgressIPHandler adds a handler function that will be executed on EgressIP object changes

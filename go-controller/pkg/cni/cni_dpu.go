@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -13,6 +12,7 @@ import (
 
 // updatePodDPUConnDetailsWithRetry update the pod annotion with the givin connection details
 func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, podLister corev1listers.PodLister, dpuConnDetails *util.DPUConnectionDetails) error {
+	annoNadKeyName := util.GetAnnotationKeyFromNadName(pr.effectiveNADName, !pr.isSecondary)
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
 		pod, err := podLister.Pods(pr.PodNamespace).Get(pr.PodName)
@@ -21,15 +21,15 @@ func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, podL
 		}
 
 		cpod := pod.DeepCopy()
-		cpod.Annotations, err = util.MarshalPodDPUConnDetails(cpod.Annotations, dpuConnDetails, types.DefaultNetworkName)
+		cpod.Annotations, err = util.MarshalPodDPUConnDetails(cpod.Annotations, dpuConnDetails, annoNadKeyName)
 		if err != nil {
 			return err
 		}
 		return kube.UpdatePod(cpod)
 	})
 	if resultErr != nil {
-		return fmt.Errorf("failed to update %s annotation on pod %s/%s: %v",
-			util.DPUConnectionDetailsAnnot, pr.PodNamespace, pr.PodName, resultErr)
+		return fmt.Errorf("failed to update %s annotation on pod %s/%s for nad %s: %v",
+			util.DPUConnectionDetailsAnnot, pr.PodNamespace, pr.PodName, pr.effectiveNADName, resultErr)
 	}
 	return nil
 }

@@ -89,6 +89,29 @@ func (_m *NodeWatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEvent
 	return r0, r1
 }
 
+// AddNetworkattachmentdefinitionHandler provides a mock function with given fields: handlerFuncs, processExisting
+func (_m *NodeWatchFactory) AddNetworkattachmentdefinitionHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*factory.Handler, error) {
+	ret := _m.Called(handlerFuncs, processExisting)
+
+	var r0 *factory.Handler
+	if rf, ok := ret.Get(0).(func(cache.ResourceEventHandler, func([]interface{}) error) *factory.Handler); ok {
+		r0 = rf(handlerFuncs, processExisting)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*factory.Handler)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(cache.ResourceEventHandler, func([]interface{}) error) error); ok {
+		r1 = rf(handlerFuncs, processExisting)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // AddPodHandler provides a mock function with given fields: handlerFuncs, processExisting
 func (_m *NodeWatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*factory.Handler, error) {
 	ret := _m.Called(handlerFuncs, processExisting)
@@ -358,6 +381,11 @@ func (_m *NodeWatchFactory) RemoveEndpointSliceHandler(handler *factory.Handler)
 
 // RemoveNamespaceHandler provides a mock function with given fields: handler
 func (_m *NodeWatchFactory) RemoveNamespaceHandler(handler *factory.Handler) {
+	_m.Called(handler)
+}
+
+// RemoveNetworkattachmentdefinitionHandler provides a mock function with given fields: handler
+func (_m *NodeWatchFactory) RemoveNetworkattachmentdefinitionHandler(handler *factory.Handler) {
 	_m.Called(handler)
 }
 

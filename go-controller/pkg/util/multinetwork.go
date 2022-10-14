@@ -9,6 +9,7 @@ import (
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	types "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	kapi "k8s.io/api/core/v1"
 	"strings"
 	"sync"
 )
@@ -130,4 +131,52 @@ func GetNADNamesFromMap(netAttachDefs *sync.Map) []string {
 		return true
 	})
 	return nadNames
+}
+
+// See if this pod needs to plumb over this given network specified by netconf,
+// and return all the matching NetworkSelectionElement map if any exists.
+//
+// Return value:
+//    bool: if this Pod is on this Network; true or false
+//    map[string]*networkattachmentdefinitionapi.NetworkSelectionElement: map of NetworkSelectionElement that pod is requested
+//    error:  error in case of failure
+// Note that the same network could exist in the same Pod more than once, but with different net-attach-def name
+// The NetworkSelectionElement map is in the form of map{net_attach_def_name]*networkattachmentdefinitionapi.NetworkSelectionElement
+func IsNetworkOnPod(pod *kapi.Pod, netAttachInfo *NetAttachDefInfo) (bool,
+	map[string]*nettypes.NetworkSelectionElement, error) {
+	nseMap := map[string]*nettypes.NetworkSelectionElement{}
+
+	podDesc := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+	if !netAttachInfo.IsSecondary {
+		defaultNetwork, err := GetK8sPodDefaultNetwork(pod)
+		if err != nil {
+			// multus won't add this Pod if this fails, should never happen
+			return false, nil, fmt.Errorf("failed to get default network for pod %s: %v", podDesc, err)
+		}
+		if defaultNetwork == nil {
+			nseMap[types.DefaultNetworkName] = nil
+			return true, nseMap, nil
+		}
+		nadKeyName := GetNadKeyName(defaultNetwork.Namespace, defaultNetwork.Name)
+		_, ok := netAttachInfo.NetAttachDefs.Load(nadKeyName)
+		if !ok {
+			return false, nil, nil
+		}
+		nseMap[nadKeyName] = defaultNetwork
+		return true, nseMap, nil
+	}
+
+	// For non-default network controller, try to see if its name exists in the Pod's k8s.v1.cni.cncf.io/networks, if no,
+	// return false;
+	allNetworks, err := GetK8sPodAllNetworks(pod)
+	if err != nil {
+		return false, nil, err
+	}
+	for _, network := range allNetworks {
+		nadKeyName := GetNadKeyName(network.Namespace, network.Name)
+		if _, ok := netAttachInfo.NetAttachDefs.Load(nadKeyName); ok {
+			nseMap[nadKeyName] = network
+		}
+	}
+	return len(nseMap) != 0, nseMap, nil
 }

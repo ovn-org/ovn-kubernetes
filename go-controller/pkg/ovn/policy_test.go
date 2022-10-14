@@ -18,12 +18,12 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/urfave/cli/v2"
 
@@ -3447,7 +3447,8 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 			},
 		}
 
-		gp := newGressPolicy(knet.PolicyTypeIngress, 0, policy.Namespace, policy.Name)
+		netAttachInfo := &util.NetAttachDefInfo{NetNameInfo: util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", IsSecondary: false}}
+		gp := newGressPolicy(knet.PolicyTypeIngress, 0, policy.Namespace, policy.Name, netAttachInfo)
 		err := gp.ensurePeerAddressSet(asFactory)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		asName := gp.peerAddressSet.GetName()

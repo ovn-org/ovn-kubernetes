@@ -226,7 +226,7 @@ func checkForStaleOVSInternalPorts() {
 // derive iface-id from pod name and namespace then remove any interfaces assoicated with a sandbox that are
 // not scheduled to the node.
 func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCacheInterface) {
-	// Get all ovn-kuberntes Pod interfaces. these are OVS interfaces that have their external_ids:sandbox set.
+	// Get all ovn-kubernetes Pod interfaces. these are OVS interfaces that have their external_ids:sandbox set.
 	out, stderr, err := util.RunOVSVsctl("--columns=name,external_ids", "--data=bare", "--no-headings",
 		"--format=csv", "find", "Interface", "external_ids:sandbox!=\"\"", "external_ids:vf-netdev-name!=\"\"")
 	if err != nil {
@@ -275,13 +275,13 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 		klog.Errorf("Failed to list pods. %v", err)
 		return
 	}
-	expectedIfaceIds := make(map[string]bool)
+	expectedIfaceIdsWithoutPrefix := make(map[string]bool)
 	for _, pod := range pods {
-		if pod.Spec.NodeName == nodeName {
+		if pod.Spec.NodeName == nodeName && util.PodWantsNetwork(pod) {
 			// Note: wf (WatchFactory) *usually* returns pods assigned to this node, however we dont rely on it
 			// and add this check to filter out pods assigned to other nodes. (e.g when ovnkube master and node
 			// share the same process)
-			expectedIfaceIds[util.GetIfaceId(pod.Namespace, pod.Name)] = true
+			expectedIfaceIdsWithoutPrefix[util.GetIfaceId(pod.Namespace, pod.Name, "")] = true
 		}
 	}
 
@@ -293,7 +293,18 @@ func checkForStaleOVSRepresentorInterfaces(nodeName string, wf factory.ObjectCac
 				"skipping cleanup check for interface", ifaceInfo.Name)
 			continue
 		}
-		if _, ok := expectedIfaceIds[ifaceId]; !ok {
+		prefix := ""
+		nadName, ok := ifaceInfo.Attributes["network_name"]
+		if ok {
+			prefix = util.GetSecondaryNetworkPrefix(nadName)
+			if !strings.HasPrefix(ifaceId, prefix) {
+				klog.Warningf("iface-id of OVS interface %s for network %s is invalid: %s", ifaceInfo.Name,
+					nadName, ifaceId)
+				continue
+			}
+			ifaceId = strings.TrimPrefix(ifaceId, prefix)
+		}
+		if _, ok := expectedIfaceIdsWithoutPrefix[ifaceId]; !ok {
 			klog.Warningf("Found stale OVS Interface, deleting OVS Port with interface %s", ifaceInfo.Name)
 			_, stderr, err := util.RunOVSVsctl("--if-exists", "--with-iface", "del-port", ifaceInfo.Name)
 			if err != nil {

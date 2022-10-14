@@ -6,7 +6,6 @@ import (
 	"net"
 
 	kapi "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -135,7 +134,7 @@ func parseSubnetAnnotation(nodeAnnotations map[string]string, annotationName str
 	return subnetMap, nil
 }
 
-func NodeSubnetAnnotationChanged(oldNode, newNode *v1.Node) bool {
+func NodeSubnetAnnotationChanged(oldNode, newNode *kapi.Node) bool {
 	return oldNode.Annotations[ovnNodeSubnets] != newNode.Annotations[ovnNodeSubnets]
 }
 

@@ -278,7 +278,8 @@ func TestGetAllPodIPs(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, e := GetAllPodIPs(tc.inpPod)
+			netAttachInfo := &NetAttachDefInfo{NetNameInfo: NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", IsSecondary: false}}
+			res, e := GetAllPodIPs(tc.inpPod, netAttachInfo)
 			t.Log(res, e)
 			if tc.errAssert {
 				assert.Error(t, e)

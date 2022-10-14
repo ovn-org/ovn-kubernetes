@@ -63,20 +63,32 @@ func CreateOrUpdateLogicalSwitch(nbClient libovsdbclient.Client, sw *nbdb.Logica
 	return err
 }
 
-// DeleteLogicalSwitch deletes the provided logical switch
-func DeleteLogicalSwitch(nbClient libovsdbclient.Client, swName string) error {
-	sw := nbdb.LogicalSwitch{
-		Name: swName,
-	}
+type logicalSwitchPredicate func(*nbdb.LogicalSwitch) bool
+
+// DeleteLogicalSwitchesWithPredicateOps looks up logical switch based on a given predicate, then deletes
+// and returns the corresponding ops
+func DeleteLogicalSwitchesWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation,
+	p logicalSwitchPredicate) ([]libovsdb.Operation, error) {
 	opModel := operationModel{
-		Model:          &sw,
-		ModelPredicate: func(item *nbdb.LogicalSwitch) bool { return item.Name == sw.Name },
+		Model:          &nbdb.LogicalSwitch{},
+		ModelPredicate: p,
 		ErrNotFound:    false,
-		BulkOp:         false,
+		BulkOp:         true,
 	}
 
 	m := newModelClient(nbClient)
-	return m.Delete(opModel)
+	return m.DeleteOps(ops, opModel)
+}
+
+// DeleteLogicalSwitch deletes the provided logical switch
+func DeleteLogicalSwitch(nbClient libovsdbclient.Client, swName string) error {
+	ops, err := DeleteLogicalSwitchesWithPredicateOps(nbClient, nil,
+		func(item *nbdb.LogicalSwitch) bool { return item.Name == swName })
+	if err != nil {
+		return err
+	}
+	_, err = TransactAndCheck(nbClient, ops)
+	return err
 }
 
 // LB ops

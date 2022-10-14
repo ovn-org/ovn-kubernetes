@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	annotatorMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -290,7 +291,7 @@ func TestParseNodeL3GatewayAnnotation(t *testing.T) {
 				},
 			},
 			errAssert: true,
-			errMatch:  fmt.Errorf("%s annotation for %s network not found", ovnNodeL3GatewayConfig, ovnDefaultNetworkGateway),
+			errMatch:  fmt.Errorf("%s annotation for %s network not found", ovnNodeL3GatewayConfig, types.DefaultNetworkName),
 		},
 		{
 			desc: "error: nod chassis ID annotation not found",

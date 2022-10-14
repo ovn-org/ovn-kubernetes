@@ -119,7 +119,8 @@ type testPod struct {
 }
 
 func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, namespace string) (to testPod) {
-	portName := util.GetLogicalPortName(namespace, podName)
+	portName := util.GetLogicalPortName(namespace, podName, "",
+		util.NetNameInfo{NetName: ovntypes.DefaultNetworkName, Prefix: "", IsSecondary: false})
 	to = testPod{
 		nodeName:   nodeName,
 		nodeSubnet: nodeSubnet,
@@ -186,7 +187,8 @@ func getExpectedDataPodsAndSwitches(pods []testPod, nodes []string) []libovsdbte
 	nodeslsps := make(map[string][]string)
 	var logicalSwitchPorts []*nbdb.LogicalSwitchPort
 	for _, pod := range pods {
-		portName := util.GetLogicalPortName(pod.namespace, pod.podName)
+		portName := util.GetLogicalPortName(pod.namespace, pod.podName, "",
+			util.NetNameInfo{NetName: ovntypes.DefaultNetworkName, Prefix: "", IsSecondary: false})
 		var lspUUID string
 		if len(pod.portUUID) == 0 {
 			lspUUID = portName + "-UUID"
@@ -239,6 +241,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 		app       *cli.App
 		fakeOvn   *FakeOVN
 		initialDB libovsdbtest.TestSetup
+
+		defaultNetNameInfo util.NetNameInfo
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -248,6 +252,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
+		defaultNetNameInfo = util.NetNameInfo{NetName: ovntypes.DefaultNetworkName, Prefix: "", IsSecondary: false}
 
 		fakeOvn = NewFakeOVN()
 		initialDB = libovsdbtest.TestSetup{
@@ -318,7 +323,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				// Assign it and perform the update
 				t.nodeName = "node1"
-				t.portName = util.GetLogicalPortName(t.namespace, t.podName)
+				t.portName = util.GetLogicalPortName(t.namespace, t.podName, "", defaultNetNameInfo)
 				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
 
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Update(context.TODO(),
@@ -466,7 +471,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// port should be gone or marked for removal in logical port cache
-				logicalPort := util.GetLogicalPortName(myPod.Namespace, myPod.Name)
+				logicalPort := util.GetLogicalPortName(myPod.Namespace, myPod.Name, "", defaultNetNameInfo)
 				gomega.Eventually(func() bool {
 					info, err := fakeOvn.controller.logicalPortCache.get(logicalPort)
 					return err != nil || !info.expires.IsZero()
@@ -571,7 +576,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// port should be gone or marked for removal in logical port cache
-				logicalPort := util.GetLogicalPortName(myPod.Namespace, myPod.Name)
+				logicalPort := util.GetLogicalPortName(myPod.Namespace, myPod.Name, "", defaultNetNameInfo)
 				gomega.Eventually(func() bool {
 					info, err := fakeOvn.controller.logicalPortCache.get(logicalPort)
 					return err != nil || !info.expires.IsZero()
@@ -1595,7 +1600,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					NBData: []libovsdbtest.TestData{
 						&nbdb.LogicalSwitchPort{
 							UUID:      t1.portUUID,
-							Name:      util.GetLogicalPortName(t1.namespace, t1.podName),
+							Name:      util.GetLogicalPortName(t1.namespace, t1.podName, "", defaultNetNameInfo),
 							Addresses: []string{t1.podMAC, t1.podIP},
 							ExternalIDs: map[string]string{
 								"pod":       "true",
@@ -1611,7 +1616,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID:      t2.portUUID,
-							Name:      util.GetLogicalPortName(t2.namespace, t2.podName),
+							Name:      util.GetLogicalPortName(t2.namespace, t2.podName, "", defaultNetNameInfo),
 							Addresses: []string{t2.podMAC, t2.podIP},
 							ExternalIDs: map[string]string{
 								"pod":       "true",
@@ -1625,7 +1630,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID:      t3.portUUID,
-							Name:      util.GetLogicalPortName(t3.namespace, t3.podName),
+							Name:      util.GetLogicalPortName(t3.namespace, t3.podName, "", defaultNetNameInfo),
 							Addresses: []string{t3.podMAC, t3.podIP},
 							ExternalIDs: map[string]string{
 								"pod":       "true",
@@ -1721,7 +1726,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					NBData: []libovsdbtest.TestData{
 						&nbdb.LogicalSwitchPort{
 							UUID:      t1.portUUID,
-							Name:      util.GetLogicalPortName(t1.namespace, t1.podName),
+							Name:      util.GetLogicalPortName(t1.namespace, t1.podName, "", defaultNetNameInfo),
 							Addresses: []string{t1.podMAC, t1.podIP},
 							ExternalIDs: map[string]string{
 								"pod":       "true",
@@ -1932,7 +1937,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					NBData: []libovsdbtest.TestData{
 						&nbdb.LogicalSwitchPort{
 							UUID:      t1.portUUID,
-							Name:      util.GetLogicalPortName(t1.namespace, t1.podName),
+							Name:      util.GetLogicalPortName(t1.namespace, t1.podName, "", defaultNetNameInfo),
 							Addresses: []string{t1.podMAC, t1.podIP},
 							ExternalIDs: map[string]string{
 								"pod":       "true",
