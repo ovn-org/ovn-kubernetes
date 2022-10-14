@@ -39,7 +39,7 @@ install_kind() {
 }
 
 pushd $TMP_DIR
-K8S_VERSION="v1.24.0"
+K8S_VERSION="v1.25.0"
 
 # Install kubectl for K8S_VERSION in use
 # (to get latest stable version: $(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt )
@@ -55,10 +55,11 @@ sudo mv kubernetes/test/bin/ginkgo /usr/local/bin/ginkgo
 rm kubernetes-test-linux-amd64.tar.gz
 
 # hack: use my own e2e tests
-curl -L https://github.com/jcaamano/kubernetes/raw/hack-e2e-test/e2e.test.tgz -o e2e.test.tgz
-tar xvzf e2e.test.tgz
+curl -L https://www.dropbox.com/s/7g34u9yp3ffmupt/e2e.test?dl=0 -o e2e.test
+#curl -L https://github.com/jcaamano/kubernetes/raw/hack-e2e-test/e2e.test.tgz -o e2e.test.tgz
+#tar xvzf e2e.test.tgz
 sudo mv e2e.test /usr/local/bin/e2e.test
-rm e2e.test.tgz
+#rm e2e.test.tgz
 
 install_kind
 popd # go out of $TMP_DIR
