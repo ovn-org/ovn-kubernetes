@@ -421,7 +421,7 @@ func (oc *DefaultNetworkController) syncNodeClusterRouterPort(node *kapi.Node, h
 func (oc *DefaultNetworkController) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
 	var nodeLRPMAC net.HardwareAddr
-	nodeName := node.Name
+	switchName := node.Name
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		nodeLRPMAC = util.IPAddrToHWAddr(gwIfAddr.IP)
@@ -431,7 +431,7 @@ func (oc *DefaultNetworkController) ensureNodeLogicalNetwork(node *kapi.Node, ho
 	}
 
 	logicalSwitch := nbdb.LogicalSwitch{
-		Name: nodeName,
+		Name: switchName,
 	}
 
 	var v4Gateway, v6Gateway net.IP
@@ -465,7 +465,7 @@ func (oc *DefaultNetworkController) ensureNodeLogicalNetwork(node *kapi.Node, ho
 		logicalSwitch.LoadBalancerGroup = []string{oc.loadBalancerGroupUUID}
 	}
 
-	logicalRouterPortName := types.RouterToSwitchPrefix + nodeName
+	logicalRouterPortName := types.RouterToSwitchPrefix + switchName
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name:     logicalRouterPortName,
 		MAC:      nodeLRPMAC.String(),
@@ -506,9 +506,9 @@ func (oc *DefaultNetworkController) ensureNodeLogicalNetwork(node *kapi.Node, ho
 	}
 
 	// also add the join switch IPs for this node - needed in shared gateway mode
-	lrpIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(nodeName)
+	lrpIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(switchName)
 	if err != nil {
-		return fmt.Errorf("failed to get join switch port IP address for node %s: %v", nodeName, err)
+		return fmt.Errorf("failed to get join switch port IP address for switch %s: %v", switchName, err)
 	}
 
 	for _, lrpIP := range lrpIPs {
@@ -535,15 +535,15 @@ func (oc *DefaultNetworkController) ensureNodeLogicalNetwork(node *kapi.Node, ho
 
 	// Connect the switch to the router.
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name:      types.SwitchToRouterPrefix + nodeName,
+		Name:      types.SwitchToRouterPrefix + switchName,
 		Type:      "router",
 		Addresses: []string{"router"},
-		Options:   map[string]string{"router-port": types.RouterToSwitchPrefix + nodeName},
+		Options:   map[string]string{"router-port": types.RouterToSwitchPrefix + switchName},
 	}
-	sw := nbdb.LogicalSwitch{Name: nodeName}
+	sw := nbdb.LogicalSwitch{Name: switchName}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
 	if err != nil {
-		klog.Errorf("Failed to add logical port %+v to switch %s: %v", logicalSwitchPort, nodeName, err)
+		klog.Errorf("Failed to add logical port %+v to switch %s: %v", logicalSwitchPort, switchName, err)
 		return err
 	}
 
@@ -553,8 +553,8 @@ func (oc *DefaultNetworkController) ensureNodeLogicalNetwork(node *kapi.Node, ho
 		return err
 	}
 
-	// Add the node to the logical switch cache
-	return oc.lsManager.AddNode(nodeName, logicalSwitch.UUID, hostSubnets)
+	// Add the switch to the logical switch cache
+	return oc.lsManager.AddSwitch(switchName, logicalSwitch.UUID, hostSubnets)
 }
 
 func (oc *DefaultNetworkController) updateNodeAnnotationWithRetry(nodeName string, hostSubnets []*net.IPNet) error {
@@ -940,9 +940,9 @@ func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *
 	var err error
 
 	if noHostSubnet := noHostSubnet(node); noHostSubnet {
-		err := oc.lsManager.AddNoHostSubnetNode(node.Name)
+		err := oc.lsManager.AddNoHostSubnetSwitch(node.Name)
 		if err != nil {
-			return fmt.Errorf("nodeAdd: error adding noHost subnet for node %s: %w", node.Name, err)
+			return fmt.Errorf("nodeAdd: error adding noHost subnet for switch %s: %w", node.Name, err)
 		}
 		if config.HybridOverlay.Enabled && houtil.IsHybridOverlayNode(node) {
 			annotator := kube.NewNodeAnnotator(oc.kube, node.Name)
@@ -1096,7 +1096,7 @@ func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 	if err := oc.deleteNode(node.Name); err != nil {
 		return err
 	}
-	oc.lsManager.DeleteNode(node.Name)
+	oc.lsManager.DeleteSwitch(node.Name)
 	oc.addNodeFailed.Delete(node.Name)
 	oc.mgmtPortFailed.Delete(node.Name)
 	oc.gatewaysFailed.Delete(node.Name)
