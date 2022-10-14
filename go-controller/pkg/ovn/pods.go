@@ -37,35 +37,36 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 		if !ok {
 			return fmt.Errorf("spurious object in syncPods: %v", podInterface)
 		}
+		switchName := pod.Spec.NodeName
 		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
 		if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && !util.PodCompleted(pod) && err == nil {
 			// skip nodes that are not running ovnk (inferred from host subnets)
-			if oc.lsManager.IsNonHostSubnetSwitch(pod.Spec.NodeName) {
+			if oc.lsManager.IsNonHostSubnetSwitch(switchName) {
 				continue
 			}
 			logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 			expectedLogicalPorts[logicalPort] = true
-			if err = oc.waitForNodeLogicalSwitchInCache(pod.Spec.NodeName); err != nil {
-				return fmt.Errorf("failed to wait for node %s to be added to cache. IP allocation may fail!",
-					pod.Spec.NodeName)
+			if err = oc.waitForNodeLogicalSwitchInCache(switchName); err != nil {
+				return fmt.Errorf("failed to wait for switch %s to be added to cache. IP allocation may fail!",
+					switchName)
 			}
-			if err = oc.lsManager.AllocateIPs(pod.Spec.NodeName, annotations.IPs); err != nil {
+			if err = oc.lsManager.AllocateIPs(switchName, annotations.IPs); err != nil {
 				if err == ipallocator.ErrAllocated {
 					// already allocated: log an error but not stop syncPod from continuing
-					klog.Errorf("Already allocated IPs: %s for pod: %s on node: %s",
+					klog.Errorf("Already allocated IPs: %s for pod: %s on switchName: %s",
 						util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
-						pod.Spec.NodeName)
+						switchName)
 				} else {
-					return fmt.Errorf("Couldn't allocate IPs: %s for pod: %s on node: %s"+
+					return fmt.Errorf("Couldn't allocate IPs: %s for pod: %s on switchName: %s"+
 						" error: %v", util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
-						pod.Spec.NodeName, err)
+						switchName, err)
 				}
 			}
 		}
 		// delete the outdated hybrid overlay subnet route if it exists
 		if annotations != nil {
 			newRoutes := []util.PodRoute{}
-			for _, subnet := range oc.lsManager.GetSwitchSubnets(pod.Spec.NodeName) {
+			for _, subnet := range oc.lsManager.GetSwitchSubnets(switchName) {
 				hybridOverlayIFAddr := util.GetNodeHybridOverlayIfAddr(subnet).IP
 				for _, route := range annotations.Routes {
 					if !route.NextHop.Equal(hybridOverlayIFAddr) {
@@ -94,16 +95,17 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 	var ops []ovsdb.Operation
 	for _, n := range nodes {
 		// skip nodes that are not running ovnk (inferred from host subnets)
-		if oc.lsManager.IsNonHostSubnetSwitch(n.Name) {
+		switchName := n.Name
+		if oc.lsManager.IsNonHostSubnetSwitch(switchName) {
 			continue
 		}
 		p := func(item *nbdb.LogicalSwitchPort) bool {
 			return item.ExternalIDs["pod"] == "true" && !expectedLogicalPorts[item.Name]
 		}
 		sw := nbdb.LogicalSwitch{
-			Name: n.Name,
+			Name: switchName,
 		}
-		sw.UUID, _ = oc.lsManager.GetUUID(n.Name)
+		sw.UUID, _ = oc.lsManager.GetUUID(switchName)
 
 		ops, err = libovsdbops.DeleteLogicalSwitchPortsWithPredicateOps(oc.nbClient, ops, &sw, p)
 		if err != nil {
@@ -119,7 +121,7 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 				hybridOverlayDRIP = strings.Split(nodeHybridOverlayDRIP, ",")
 
 			}
-			AllocatedHybridOverlayDRIPes, err := oc.lsManager.AllocateHybridOverlay(n.Name, hybridOverlayDRIP)
+			AllocatedHybridOverlayDRIPes, err := oc.lsManager.AllocateHybridOverlay(switchName, hybridOverlayDRIP)
 			if err != nil {
 				return fmt.Errorf("cannot allocate hybrid overlay interface addresses: %v", err)
 			}
@@ -144,9 +146,9 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 	return nil
 }
 
-// lookupPortUUIDAndNodeName will use libovsdb to locate the logical switch port uuid as well as the logical switch
+// lookupPortUUIDAndSwitchName will use libovsdb to locate the logical switch port uuid as well as the logical switch
 // that owns such port (aka nodeName), based on the logical port name.
-func (oc *Controller) lookupPortUUIDAndNodeName(logicalPort string) (portUUID string, logicalSwitch string, err error) {
+func (oc *Controller) lookupPortUUIDAndSwitchName(logicalPort string) (portUUID string, logicalSwitch string, err error) {
 	lsp := &nbdb.LogicalSwitchPort{Name: logicalPort}
 	lsp, err = libovsdbops.GetLogicalSwitchPort(oc.nbClient, lsp)
 	if err != nil {
@@ -186,7 +188,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 
 	logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 	var portUUID string
-	var nodeName string
+	var switchName string
 	var podIfAddrs []*net.IPNet
 	if portInfo == nil {
 		// If ovnkube-master restarts, it is also possible the Pod's logical switch port
@@ -202,44 +204,44 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 		}
 
 		// Since portInfo is not available, use ovn to locate the logical switch (named after the node name) for the logical port.
-		portUUID, nodeName, err = oc.lookupPortUUIDAndNodeName(logicalPort)
+		portUUID, switchName, err = oc.lookupPortUUIDAndSwitchName(logicalPort)
 		if err != nil {
 			if err != libovsdbclient.ErrNotFound {
-				return fmt.Errorf("unable to locate portUUID+nodeName for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+				return fmt.Errorf("unable to locate portUUID+switchName for pod %s/%s: %w", pod.Namespace, pod.Name, err)
 			}
 			// The logical port no longer exists in OVN. The caller expects this function to be idem-potent,
 			// so the proper action to take is to use an empty uuid and extract the node name from the pod spec.
 			portUUID = ""
-			nodeName = pod.Spec.NodeName
+			switchName = pod.Spec.NodeName
 		}
 		podIfAddrs = annotation.IPs
 
 		klog.Warningf("No cached port info for deleting pod: %s. Using logical switch %s port uuid %s and addrs %v",
-			podDesc, nodeName, portUUID, podIfAddrs)
+			podDesc, switchName, portUUID, podIfAddrs)
 	} else {
 		portUUID = portInfo.uuid
-		nodeName = portInfo.logicalSwitch // ls <==> nodeName
+		switchName = portInfo.logicalSwitch // ls <==> nodeName
 		podIfAddrs = portInfo.ips
 	}
 
 	// Sanity check. The nodeName from pod spec is expected to be the same as the logical switch obtained from the port.
-	if nodeName != pod.Spec.NodeName {
-		klog.Errorf("Deleting pod %s has an unexpected node name in spec: %s, ovn expects it to be %s for port uuid %s",
-			podDesc, pod.Spec.NodeName, nodeName, portUUID)
+	if switchName != pod.Spec.NodeName {
+		klog.Errorf("Deleting pod %s has an unexpected switch name in spec: %s, ovn expects it to be %s for port uuid %s",
+			podDesc, pod.Spec.NodeName, switchName, portUUID)
 	}
 
 	shouldRelease := true
 	// check to make sure no other pods are using this IP before we try to release it if this is a completed pod.
 	if util.PodCompleted(pod) {
-		if shouldRelease, err = oc.lsManager.ConditionalIPRelease(nodeName, podIfAddrs, func() (bool, error) {
+		if shouldRelease, err = oc.lsManager.ConditionalIPRelease(switchName, podIfAddrs, func() (bool, error) {
 			pods, err := oc.watchFactory.GetAllPods()
 			if err != nil {
 				return false, fmt.Errorf("unable to get pods to determine if completed pod IP is in use by another pod. "+
 					"Will not release pod %s/%s IP: %#v from allocator", pod.Namespace, pod.Name, podIfAddrs)
 			}
-			// iterate through all pods, ignore pods on other nodes
+			// iterate through all pods, ignore pods on other switches
 			for _, p := range pods {
-				if util.PodCompleted(p) || !util.PodWantsNetwork(p) || !util.PodScheduled(p) || p.Spec.NodeName != nodeName {
+				if util.PodCompleted(p) || !util.PodWantsNetwork(p) || !util.PodScheduled(p) || p.Spec.NodeName != switchName {
 					continue
 				}
 				// check if the pod addresses match in the OVN annotation
@@ -275,7 +277,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 		}
 		allOps = append(allOps, ops...)
 	}
-	ops, err = oc.delLSPOps(logicalPort, nodeName, portUUID)
+	ops, err = oc.delLSPOps(logicalPort, switchName, portUUID)
 	// Tolerate cases where logical switch of the logical port no longer exist in OVN.
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf("failed to create delete ops for the lsp: %s: %s", logicalPort, err)
@@ -300,7 +302,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 	}
 
 	if config.Gateway.DisableSNATMultipleGWs {
-		if err := deletePerPodGRSNAT(oc.nbClient, nodeName, []*net.IPNet{}, podIfAddrs); err != nil {
+		if err := deletePerPodGRSNAT(oc.nbClient, switchName, []*net.IPNet{}, podIfAddrs); err != nil {
 			return fmt.Errorf("cannot delete GR SNAT for pod %s: %w", podDesc, err)
 		}
 	}
@@ -315,41 +317,41 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 	// while it is now on another pod
 	klog.Infof("Attempting to release IPs for pod: %s/%s, ips: %s", pod.Namespace, pod.Name,
 		util.JoinIPNetIPs(podIfAddrs, " "))
-	if err := oc.lsManager.ReleaseIPs(nodeName, podIfAddrs); err != nil {
+	if err := oc.lsManager.ReleaseIPs(switchName, podIfAddrs); err != nil {
 		return fmt.Errorf("cannot release IPs for pod %s: %w", podDesc, err)
 	}
 
 	return nil
 }
 
-func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (*nbdb.LogicalSwitch, error) {
+func (oc *Controller) waitForNodeLogicalSwitch(switchName string) (*nbdb.LogicalSwitch, error) {
 	// Wait for the node logical switch to be created by the ClusterController and be present
 	// in libovsdb's cache. The node switch will be created when the node's logical network infrastructure
 	// is created by the node watch
-	ls := &nbdb.LogicalSwitch{Name: nodeName}
+	ls := &nbdb.LogicalSwitch{Name: switchName}
 	if err := wait.PollImmediate(30*time.Millisecond, 30*time.Second, func() (bool, error) {
-		if lsUUID, ok := oc.lsManager.GetUUID(nodeName); !ok {
-			return false, fmt.Errorf("error getting logical switch for node %s: %s", nodeName, "switch not in logical switch cache")
+		if lsUUID, ok := oc.lsManager.GetUUID(switchName); !ok {
+			return false, fmt.Errorf("error getting logical switch %s: %s", switchName, "switch not in logical switch cache")
 		} else {
 			ls.UUID = lsUUID
 			return true, nil
 		}
 	}); err != nil {
-		return nil, fmt.Errorf("timed out waiting for logical switch in logical switch cache %q subnet: %v", nodeName, err)
+		return nil, fmt.Errorf("timed out waiting for logical switch in logical switch cache %q subnet: %v", switchName, err)
 	}
 	return ls, nil
 }
 
-func (oc *Controller) waitForNodeLogicalSwitchInCache(nodeName string) error {
+func (oc *Controller) waitForNodeLogicalSwitchInCache(switchName string) error {
 	// Wait for the node logical switch to be created by the ClusterController.
 	// The node switch will be created when the node's logical network infrastructure
 	// is created by the node watch.
 	var subnets []*net.IPNet
 	if err := wait.PollImmediate(30*time.Millisecond, 30*time.Second, func() (bool, error) {
-		subnets = oc.lsManager.GetSwitchSubnets(nodeName)
+		subnets = oc.lsManager.GetSwitchSubnets(switchName)
 		return subnets != nil, nil
 	}); err != nil {
-		return fmt.Errorf("timed out waiting for logical switch %q subnet: %v", nodeName, err)
+		return fmt.Errorf("timed out waiting for logical switch %q subnet: %v", switchName, err)
 	}
 	return nil
 }
@@ -426,7 +428,8 @@ func (oc *Controller) podExpectedInLogicalCache(pod *kapi.Pod) bool {
 
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// If a node does node have an assigned hostsubnet don't wait for the logical switch to appear
-	if oc.lsManager.IsNonHostSubnetSwitch(pod.Spec.NodeName) {
+	logicalSwitch := pod.Spec.NodeName
+	if oc.lsManager.IsNonHostSubnetSwitch(logicalSwitch) {
 		return nil
 	}
 
@@ -439,7 +442,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			pod.Namespace, pod.Name, time.Since(start), libovsdbExecuteTime, podAnnoTime)
 	}()
 
-	logicalSwitch := pod.Spec.NodeName
 	ls, err := oc.waitForNodeLogicalSwitch(logicalSwitch)
 	if err != nil {
 		return err
@@ -521,10 +523,10 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	defer func() {
 		if releaseIPs && err != nil {
 			if relErr := oc.lsManager.ReleaseIPs(logicalSwitch, podIfAddrs); relErr != nil {
-				klog.Errorf("Error when releasing IPs for node: %s, err: %q",
+				klog.Errorf("Error when releasing IPs for switch: %s, err: %q",
 					logicalSwitch, relErr)
 			} else {
-				klog.Infof("Released IPs: %s for node: %s", util.JoinIPNetIPs(podIfAddrs, " "), logicalSwitch)
+				klog.Infof("Released IPs: %s for switch: %s", util.JoinIPNetIPs(podIfAddrs, " "), logicalSwitch)
 			}
 		}
 	}()
@@ -551,7 +553,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			// try to get the MAC and IPs from existing OVN port first
 			podMac, podIfAddrs, err = oc.getPortAddresses(logicalSwitch, existingLSP)
 			if err != nil {
-				return fmt.Errorf("failed to get pod addresses for pod %s on node: %s, err: %v",
+				return fmt.Errorf("failed to get pod addresses for pod %s on switch: %s, err: %v",
 					portName, logicalSwitch, err)
 			}
 		}
@@ -561,7 +563,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		if len(podIfAddrs) == 0 {
 			needsNewAllocation = true
 		} else if err = oc.lsManager.AllocateIPs(logicalSwitch, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
-			klog.Warningf("Unable to allocate IPs found on existing OVN port: %s, for pod %s on node: %s"+
+			klog.Warningf("Unable to allocate IPs found on existing OVN port: %s, for pod %s on switch: %s"+
 				" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), portName, logicalSwitch, err)
 
 			needsNewAllocation = true
@@ -570,7 +572,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			// Previous attempts to use already configured IPs failed, need to assign new
 			podMac, podIfAddrs, err = oc.assignPodAddresses(logicalSwitch)
 			if err != nil {
-				return fmt.Errorf("failed to assign pod addresses for pod %s on node: %s, err: %v",
+				return fmt.Errorf("failed to assign pod addresses for pod %s on switch: %s, err: %v",
 					portName, logicalSwitch, err)
 			}
 		}
@@ -745,15 +747,15 @@ func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *u
 	return nil
 }
 
-// Given a node, gets the next set of addresses (from the IPAM) for each of the node's
+// Given a switch, gets the next set of addresses (from the IPAM) for each of the node's
 // subnets to assign to the new pod
-func (oc *Controller) assignPodAddresses(nodeName string) (net.HardwareAddr, []*net.IPNet, error) {
+func (oc *Controller) assignPodAddresses(switchName string) (net.HardwareAddr, []*net.IPNet, error) {
 	var (
 		podMAC   net.HardwareAddr
 		podCIDRs []*net.IPNet
 		err      error
 	)
-	podCIDRs, err = oc.lsManager.AllocateNextIPs(nodeName)
+	podCIDRs, err = oc.lsManager.AllocateNextIPs(switchName)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -763,9 +765,9 @@ func (oc *Controller) assignPodAddresses(nodeName string) (net.HardwareAddr, []*
 	return podMAC, podCIDRs, nil
 }
 
-// Given a logical switch port and the node on which it is scheduled, get all
+// Given a logical switch port and the switch on which it is scheduled, get all
 // addresses currently assigned to it including subnet masks.
-func (oc *Controller) getPortAddresses(nodeName string, existingLSP *nbdb.LogicalSwitchPort) (net.HardwareAddr, []*net.IPNet, error) {
+func (oc *Controller) getPortAddresses(switchName string, existingLSP *nbdb.LogicalSwitchPort) (net.HardwareAddr, []*net.IPNet, error) {
 	podMac, podIPs, err := util.ExtractPortAddresses(existingLSP)
 	if err != nil {
 		return nil, nil, err
@@ -775,7 +777,7 @@ func (oc *Controller) getPortAddresses(nodeName string, existingLSP *nbdb.Logica
 
 	var podIPNets []*net.IPNet
 
-	nodeSubnets := oc.lsManager.GetSwitchSubnets(nodeName)
+	nodeSubnets := oc.lsManager.GetSwitchSubnets(switchName)
 
 	for _, ip := range podIPs {
 		for _, subnet := range nodeSubnets {
