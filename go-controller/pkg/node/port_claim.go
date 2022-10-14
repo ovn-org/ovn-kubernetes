@@ -188,7 +188,7 @@ func handleService(svc *kapi.Service, handler handler) []error {
 		}
 		for _, externalIP := range svc.Spec.ExternalIPs {
 			klog.V(5).Infof("Handle ExternalIPs service %s external IP %s port %d", svc.Name, externalIP, svcPort.Port)
-			if err := handlePort(getDescription(svcPort.Name, svc, false), svc, externalIP, svcPort.Port, svcPort.Protocol, handler); err != nil {
+			if err := handlePort(getDescription(svcPort.Name, svc, false), svc, utilnet.ParseIPSloppy(externalIP).String(), svcPort.Port, svcPort.Protocol, handler); err != nil {
 				errors = append(errors, err)
 			}
 		}

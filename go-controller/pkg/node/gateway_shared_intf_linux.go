@@ -15,6 +15,7 @@ import (
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 )
 
 // deletes the local bridge used for DGP and removes the corresponding iface, as well as OVS bridge mappings
@@ -109,8 +110,9 @@ func updateEgressSVCIptRules(svc *kapi.Service, npw *nodePortWatcher) {
 
 		for _, ep := range epSlice.Endpoints {
 			for _, ip := range ep.Addresses {
-				if !isHostEndpoint(ip) {
-					epsToInsert.Insert(ip)
+				ipStr := utilnet.ParseIPSloppy(ip).String()
+				if !isHostEndpoint(ipStr) {
+					epsToInsert.Insert(ipStr)
 				}
 			}
 		}

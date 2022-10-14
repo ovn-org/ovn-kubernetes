@@ -2371,7 +2371,7 @@ func getNodeInternalAddrs(node *v1.Node) (net.IP, net.IP) {
 	var v4Addr, v6Addr net.IP
 	for _, nodeAddr := range node.Status.Addresses {
 		if nodeAddr.Type == v1.NodeInternalIP {
-			ip := net.ParseIP(nodeAddr.Address)
+			ip := utilnet.ParseIPSloppy(nodeAddr.Address)
 			if !utilnet.IsIPv6(ip) && v4Addr == nil {
 				v4Addr = ip
 			} else if utilnet.IsIPv6(ip) && v6Addr == nil {

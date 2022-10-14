@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 )
 
 func (c *Controller) onServiceAdd(obj interface{}) {
@@ -408,8 +409,9 @@ func (c *Controller) allEndpointsFor(svc *corev1.Service) (sets.String, sets.Str
 
 		for _, ep := range eps.Endpoints {
 			for _, ip := range ep.Addresses {
-				if !services.IsHostEndpoint(ip) {
-					epsToInsert.Insert(ip)
+				ipStr := utilnet.ParseIPSloppy(ip).String()
+				if !services.IsHostEndpoint(ipStr) {
+					epsToInsert.Insert(ipStr)
 				}
 			}
 			if ep.NodeName != nil {
