@@ -50,16 +50,18 @@ func (oc *Controller) reportTopologyVersion(ctx context.Context) error {
 
 	// Report topology version in a ConfigMap
 	// (we used to report this via annotations on our Node)
-	cm := corev1apply.ConfigMap(ovntypes.OvnK8sStatusCMName, globalconfig.Kubernetes.OVNConfigNamespace)
-	cm.Data = map[string]string{ovntypes.OvnK8sStatusKeyTopoVersion: currentTopologyVersion}
-	if _, err := oc.client.CoreV1().ConfigMaps(globalconfig.Kubernetes.OVNConfigNamespace).Apply(ctx, cm, metav1.ApplyOptions{
-		Force:        true,
-		FieldManager: "ovn-kubernetes",
-	}); err != nil {
-		return err
-	}
+	if !oc.nadInfo.IsSecondary {
+		cm := corev1apply.ConfigMap(ovntypes.OvnK8sStatusCMName, globalconfig.Kubernetes.OVNConfigNamespace)
+		cm.Data = map[string]string{ovntypes.OvnK8sStatusKeyTopoVersion: currentTopologyVersion}
+		if _, err := oc.client.CoreV1().ConfigMaps(globalconfig.Kubernetes.OVNConfigNamespace).Apply(ctx, cm, metav1.ApplyOptions{
+			Force:        true,
+			FieldManager: "ovn-kubernetes",
+		}); err != nil {
+			return err
+		}
 
-	klog.Infof("Updated ConfigMap %s/%s topology version to %s", *cm.Namespace, *cm.Name, currentTopologyVersion)
+		klog.Infof("Updated ConfigMap %s/%s topology version to %s", *cm.Namespace, *cm.Name, currentTopologyVersion)
+	}
 
 	return oc.cleanTopologyAnnotation()
 }

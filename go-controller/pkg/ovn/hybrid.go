@@ -79,7 +79,7 @@ func (oc *Controller) handleHybridOverlayPort(node *kapi.Node, annotator kube.An
 	}
 
 	// no subnet allocated? unset mac annotation, be done.
-	subnets, err := util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
+	subnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
 	if subnets == nil || err != nil {
 		// No subnet allocated yet; clean up
 		klog.V(5).Infof("No subnet allocation yet for %s", node.Name)

@@ -1791,7 +1791,7 @@ func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
 				return fmt.Errorf("unable to use node for egress assignment, err: %v", err)
 			}
 		}
-		nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+		nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
 		if err != nil {
 			return fmt.Errorf("failed to parse node %s subnets annotation %v", node.Name, err)
 		}

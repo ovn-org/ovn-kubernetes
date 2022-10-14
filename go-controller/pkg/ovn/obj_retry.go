@@ -610,7 +610,8 @@ func (oc *Controller) addResource(objectsToRetry *RetryObjs, obj interface{}, fr
 				mgmtSync,
 				gwSync}
 		} else {
-			nodeParams = &nodeSyncs{true, true, true, true}
+			// syncMgmtPort and syncGw are false for secondary networks
+			nodeParams = &nodeSyncs{true, true, !oc.nadInfo.IsSecondary, !oc.nadInfo.IsSecondary}
 		}
 
 		if err = oc.addUpdateNodeEvent(node, nodeParams); err != nil {
@@ -743,12 +744,14 @@ func (oc *Controller) updateResource(objectsToRetry *RetryObjs, oldObj, newObj i
 		// determine what actually changed in this update
 		_, nodeSync := oc.addNodeFailed.Load(newNode.Name)
 		_, failed := oc.nodeClusterRouterPortFailed.Load(newNode.Name)
-		clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
+		chassisChanged := nodeChassisChanged(oldNode, newNode)
+		subnetChanged := nodeSubnetChanged(oldNode, newNode, oc.nadInfo.NetName)
+		clusterRtrSync := failed || chassisChanged || subnetChanged
 		_, failed = oc.mgmtPortFailed.Load(newNode.Name)
-		mgmtSync := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
+		mgmtSync := !oc.nadInfo.IsSecondary && (failed || macAddressChanged(oldNode, newNode) || subnetChanged)
 		_, failed = oc.gatewaysFailed.Load(newNode.Name)
-		gwSync := (failed || gatewayChanged(oldNode, newNode) ||
-			nodeSubnetChanged(oldNode, newNode) || hostAddressesChanged(oldNode, newNode))
+		gwSync := !oc.nadInfo.IsSecondary && (failed || gatewayChanged(oldNode, newNode) ||
+			subnetChanged || hostAddressesChanged(oldNode, newNode))
 
 		return oc.addUpdateNodeEvent(newNode, &nodeSyncs{nodeSync, clusterRtrSync, mgmtSync, gwSync})
 

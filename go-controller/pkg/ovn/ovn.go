@@ -260,18 +260,24 @@ func getPodNamespacedName(pod *kapi.Pod) string {
 
 // Run starts the actual watching.
 func (oc *Controller) Run(ctx context.Context) error {
-	oc.syncPeriodic()
+	if !oc.nadInfo.IsSecondary {
+		oc.syncPeriodic()
+	}
 	klog.Infof("Starting all the Watchers...")
 	start := time.Now()
 
-	// Sync external gateway routes. External gateway may be set in namespaces
-	// or via pods. So execute an individual sync method at startup
-	oc.cleanExGwECMPRoutes()
+	if !oc.nadInfo.IsSecondary {
+		// Sync external gateway routes. External gateway may be set in namespaces
+		// or via pods. So execute an individual sync method at startup
+		oc.cleanExGwECMPRoutes()
+	}
 
 	// WatchNamespaces() should be started first because it has no other
 	// dependencies, and WatchNodes() depends on it
-	if err := oc.WatchNamespaces(); err != nil {
-		return err
+	if !oc.nadInfo.IsSecondary {
+		if err := oc.WatchNamespaces(); err != nil {
+			return err
+		}
 	}
 
 	// WatchNodes must be started next because it creates the node switch
@@ -281,107 +287,111 @@ func (oc *Controller) Run(ctx context.Context) error {
 		return err
 	}
 
-	// Start service watch factory and sync services
-	oc.svcFactory.Start(oc.stopChan)
+	if !oc.nadInfo.IsSecondary {
+		// Start service watch factory and sync services
+		oc.svcFactory.Start(oc.stopChan)
 
-	// Services should be started after nodes to prevent LB churn
-	if err := oc.StartServiceController(oc.wg, true); err != nil {
-		return err
+		// Services should be started after nodes to prevent LB churn
+		if err := oc.StartServiceController(oc.wg, true); err != nil {
+			return err
+		}
 	}
 
 	if err := oc.WatchPods(); err != nil {
 		return err
 	}
 
-	// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
-	if err := oc.WatchNetworkPolicy(); err != nil {
-		return err
-	}
+	if !oc.nadInfo.IsSecondary {
+		// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
+		if err := oc.WatchNetworkPolicy(); err != nil {
+			return err
+		}
 
-	if config.OVNKubernetesFeature.EnableEgressIP {
-		// This is probably the best starting order for all egress IP handlers.
-		// WatchEgressIPNamespaces and WatchEgressIPPods only use the informer
-		// cache to retrieve the egress IPs when determining if namespace/pods
-		// match. It is thus better if we initialize them first and allow
-		// WatchEgressNodes / WatchEgressIP to initialize after. Those handlers
-		// might change the assignments of the existing objects. If we do the
-		// inverse and start WatchEgressIPNamespaces / WatchEgressIPPod last, we
-		// risk performing a bunch of modifications on the EgressIP objects when
-		// we restart and then have these handlers act on stale data when they
-		// sync.
-		if err := oc.WatchEgressIPNamespaces(); err != nil {
-			return err
+		if config.OVNKubernetesFeature.EnableEgressIP {
+			// This is probably the best starting order for all egress IP handlers.
+			// WatchEgressIPNamespaces and WatchEgressIPPods only use the informer
+			// cache to retrieve the egress IPs when determining if namespace/pods
+			// match. It is thus better if we initialize them first and allow
+			// WatchEgressNodes / WatchEgressIP to initialize after. Those handlers
+			// might change the assignments of the existing objects. If we do the
+			// inverse and start WatchEgressIPNamespaces / WatchEgressIPPod last, we
+			// risk performing a bunch of modifications on the EgressIP objects when
+			// we restart and then have these handlers act on stale data when they
+			// sync.
+			if err := oc.WatchEgressIPNamespaces(); err != nil {
+				return err
+			}
+			if err := oc.WatchEgressIPPods(); err != nil {
+				return err
+			}
+			if err := oc.WatchEgressNodes(); err != nil {
+				return err
+			}
+			if err := oc.WatchEgressIP(); err != nil {
+				return err
+			}
+			if util.PlatformTypeIsEgressIPCloudProvider() {
+				if err := oc.WatchCloudPrivateIPConfig(); err != nil {
+					return err
+				}
+			}
+			if config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout == 0 {
+				klog.V(2).Infof("EgressIP node reachability check disabled")
+			} else if config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort != 0 {
+				klog.Infof("EgressIP node reachability enabled and using gRPC port %d",
+					config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort)
+			}
 		}
-		if err := oc.WatchEgressIPPods(); err != nil {
-			return err
-		}
-		if err := oc.WatchEgressNodes(); err != nil {
-			return err
-		}
-		if err := oc.WatchEgressIP(); err != nil {
-			return err
-		}
-		if util.PlatformTypeIsEgressIPCloudProvider() {
-			if err := oc.WatchCloudPrivateIPConfig(); err != nil {
+
+		if config.OVNKubernetesFeature.EnableEgressFirewall {
+			var err error
+			oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.stopChan)
+			if err != nil {
+				return err
+			}
+			oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
+			err = oc.WatchEgressFirewall()
+			if err != nil {
 				return err
 			}
 		}
-		if config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout == 0 {
-			klog.V(2).Infof("EgressIP node reachability check disabled")
-		} else if config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort != 0 {
-			klog.Infof("EgressIP node reachability enabled and using gRPC port %d",
-				config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort)
-		}
-	}
 
-	if config.OVNKubernetesFeature.EnableEgressFirewall {
-		var err error
-		oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.stopChan)
-		if err != nil {
-			return err
+		if config.OVNKubernetesFeature.EnableEgressQoS {
+			oc.initEgressQoSController(
+				oc.watchFactory.EgressQoSInformer(),
+				oc.watchFactory.PodCoreInformer(),
+				oc.watchFactory.NodeCoreInformer())
+			oc.wg.Add(1)
+			go func() {
+				defer oc.wg.Done()
+				oc.runEgressQoSController(1, oc.stopChan)
+			}()
 		}
-		oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
-		err = oc.WatchEgressFirewall()
-		if err != nil {
-			return err
-		}
-	}
 
-	if config.OVNKubernetesFeature.EnableEgressQoS {
-		oc.initEgressQoSController(
-			oc.watchFactory.EgressQoSInformer(),
-			oc.watchFactory.PodCoreInformer(),
-			oc.watchFactory.NodeCoreInformer())
 		oc.wg.Add(1)
 		go func() {
 			defer oc.wg.Done()
-			oc.runEgressQoSController(1, oc.stopChan)
+			oc.egressSvcController.Run(1)
 		}()
-	}
 
-	oc.wg.Add(1)
-	go func() {
-		defer oc.wg.Done()
-		oc.egressSvcController.Run(1)
-	}()
+		klog.Infof("Completing all the Watchers took %v", time.Since(start))
 
-	klog.Infof("Completing all the Watchers took %v", time.Since(start))
-
-	if config.Kubernetes.OVNEmptyLbEvents {
-		klog.Infof("Starting unidling controller")
-		unidlingController, err := unidling.NewController(
-			oc.recorder,
-			oc.watchFactory.ServiceInformer(),
-			oc.sbClient,
-		)
-		if err != nil {
-			return err
+		if config.Kubernetes.OVNEmptyLbEvents {
+			klog.Infof("Starting unidling controller")
+			unidlingController, err := unidling.NewController(
+				oc.recorder,
+				oc.watchFactory.ServiceInformer(),
+				oc.sbClient,
+			)
+			if err != nil {
+				return err
+			}
+			oc.wg.Add(1)
+			go func() {
+				defer oc.wg.Done()
+				unidlingController.Run(oc.stopChan)
+			}()
 		}
-		oc.wg.Add(1)
-		go func() {
-			defer oc.wg.Done()
-			unidlingController.Run(oc.stopChan)
-		}()
 	}
 
 	// Final step to cleanup after resource handlers have synced
@@ -405,6 +415,10 @@ func (oc *Controller) Run(ctx context.Context) error {
 // for syncNodesPeriodic which deletes chassis records from the sbdb
 // every 5 minutes
 func (oc *Controller) syncPeriodic() {
+	if oc.nadInfo.IsSecondary {
+		return
+	}
+
 	go func() {
 		nodeSyncTicker := time.NewTicker(5 * time.Minute)
 		defer nodeSyncTicker.Stop()
@@ -448,12 +462,14 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
 		return nil
 	}
 
-	if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
-		// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
-		// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
-		// care of updating the exgw updates
-		if err := oc.deletePodExternalGW(oldPod); err != nil {
-			return fmt.Errorf("ensurePod failed %s/%s: %w", pod.Namespace, pod.Name, err)
+	if !oc.nadInfo.IsSecondary {
+		if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
+			// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
+			// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
+			// care of updating the exgw updates
+			if err := oc.deletePodExternalGW(oldPod); err != nil {
+				return fmt.Errorf("ensurePod failed %s/%s: %w", pod.Namespace, pod.Name, err)
+			}
 		}
 	}
 
@@ -462,6 +478,10 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
 			return fmt.Errorf("addLogicalPort failed for %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
 	} else {
+		if oc.nadInfo.IsSecondary {
+			return nil
+		}
+
 		// either pod is host-networked or its an update for a normal pod (addPort=false case)
 		if oldPod == nil || exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod) {
 			if err := oc.addPodExternalGW(pod); err != nil {
@@ -476,7 +496,7 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
 // removePod tried to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
 func (oc *Controller) removePod(pod *kapi.Pod, portInfo *lpInfo) error {
-	if !util.PodWantsNetwork(pod) {
+	if !util.PodWantsNetwork(pod) && !oc.nadInfo.IsSecondary {
 		if err := oc.deletePodExternalGW(pod); err != nil {
 			return fmt.Errorf("unable to delete external gateway routes for pod %s: %w",
 				getPodNamespacedName(pod), err)
@@ -502,6 +522,9 @@ func (oc *Controller) WatchPods() error {
 // WatchNetworkPolicy starts the watching of the network policy resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNetworkPolicy() error {
+	if oc.nadInfo.IsSecondary {
+		return nil
+	}
 	_, err := oc.WatchResource(oc.retryNetworkPolicies)
 	return err
 }
@@ -509,6 +532,9 @@ func (oc *Controller) WatchNetworkPolicy() error {
 // WatchEgressFirewall starts the watching of egressfirewall resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchEgressFirewall() error {
+	if oc.nadInfo.IsSecondary {
+		return nil
+	}
 	_, err := oc.WatchResource(oc.retryEgressFirewalls)
 	return err
 }
@@ -516,6 +542,9 @@ func (oc *Controller) WatchEgressFirewall() error {
 // WatchEgressNodes starts the watching of egress assignable nodes and calls
 // back the appropriate handler logic.
 func (oc *Controller) WatchEgressNodes() error {
+	if oc.nadInfo.IsSecondary {
+		return nil
+	}
 	_, err := oc.WatchResource(oc.retryEgressNodes)
 	return err
 }
@@ -523,6 +552,9 @@ func (oc *Controller) WatchEgressNodes() error {
 // WatchCloudPrivateIPConfig starts the watching of cloudprivateipconfigs
 // resource and calls back the appropriate handler logic.
 func (oc *Controller) WatchCloudPrivateIPConfig() error {
+	if oc.nadInfo.IsSecondary {
+		return nil
+	}
 	_, err := oc.WatchResource(oc.retryCloudPrivateIPConfig)
 	return err
 }
@@ -531,16 +563,25 @@ func (oc *Controller) WatchCloudPrivateIPConfig() error {
 // appropriate handler logic. It also initiates the other dedicated resource
 // handlers for egress IP setup: namespaces, pods.
 func (oc *Controller) WatchEgressIP() error {
+	if oc.nadInfo.IsSecondary {
+		return nil
+	}
 	_, err := oc.WatchResource(oc.retryEgressIPs)
 	return err
 }
 
 func (oc *Controller) WatchEgressIPNamespaces() error {
+	if oc.nadInfo.IsSecondary {
+		return nil
+	}
 	_, err := oc.WatchResource(oc.retryEgressIPNamespaces)
 	return err
 }
 
 func (oc *Controller) WatchEgressIPPods() error {
+	if oc.nadInfo.IsSecondary {
+		return nil
+	}
 	_, err := oc.WatchResource(oc.retryEgressIPPods)
 	return err
 }
@@ -548,19 +589,25 @@ func (oc *Controller) WatchEgressIPPods() error {
 // WatchNamespaces starts the watching of namespace resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNamespaces() error {
+	if oc.nadInfo.IsSecondary {
+		return nil
+	}
 	_, err := oc.WatchResource(oc.retryNamespaces)
 	return err
 }
 
 // syncNodeGateway ensures a node's gateway router is configured
 func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet) error {
+	if oc.nadInfo.IsSecondary {
+		return nil
+	}
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return err
 	}
 
 	if hostSubnets == nil {
-		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
+		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
 		if err != nil {
 			return err
 		}
@@ -677,9 +724,9 @@ func macAddressChanged(oldNode, node *kapi.Node) bool {
 	return !bytes.Equal(oldMacAddress, macAddress)
 }
 
-func nodeSubnetChanged(oldNode, node *kapi.Node) bool {
-	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode, ovntypes.DefaultNetworkName)
-	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
+func nodeSubnetChanged(oldNode, node *kapi.Node, netName string) bool {
+	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode, netName)
+	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, netName)
 	return !reflect.DeepEqual(oldSubnets, newSubnets)
 }
 
@@ -752,6 +799,9 @@ func newServiceController(client clientset.Interface, nbClient libovsdbclient.Cl
 }
 
 func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
+	if oc.nadInfo.IsSecondary {
+		return nil
+	}
 	klog.Infof("Starting OVN Service Controller: Using Endpoint Slices")
 	wg.Add(1)
 	go func() {
