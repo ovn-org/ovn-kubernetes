@@ -968,7 +968,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			record.NewFakeRecorder(0))
 		clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 		gomega.Expect(clusterController).NotTo(gomega.BeNil())
-		clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
+		clusterController.defaultCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		clusterController.SCTPSupport = true
