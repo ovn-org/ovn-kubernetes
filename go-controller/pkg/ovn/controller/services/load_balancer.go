@@ -453,13 +453,29 @@ func configsByProto(configs []lbConfig) map[v1.Protocol][]lbConfig {
 	return out
 }
 
+func getSessionAffinityTimeOut(service *v1.Service) int32 {
+	// NOTE: This if condition is actually not needed, present only for protection against nil value as good coding practice,
+	// The API always puts the default value of 10800 whenever sessionAffinity == ClientIP if timeout is not explicitly set
+	// There is no ClientIP session affinity without a timeout set.
+	if service.Spec.SessionAffinityConfig == nil ||
+		service.Spec.SessionAffinityConfig.ClientIP == nil ||
+		service.Spec.SessionAffinityConfig.ClientIP.TimeoutSeconds == nil {
+		return 10800 // default value
+	}
+	return *service.Spec.SessionAffinityConfig.ClientIP.TimeoutSeconds
+}
+
 // lbOpts generates the OVN load balancer options from the kubernetes Service.
 func lbOpts(service *v1.Service) ovnlb.LBOpts {
-	return ovnlb.LBOpts{
+	affinity := service.Spec.SessionAffinity == v1.ServiceAffinityClientIP
+	lbOptions := ovnlb.LBOpts{
 		Unidling: svcNeedsIdling(service.GetAnnotations()),
-		Affinity: service.Spec.SessionAffinity == v1.ServiceAffinityClientIP,
 		SkipSNAT: false, // never service-wide, ExternalTrafficPolicy-specific
 	}
+	if affinity {
+		lbOptions.AffinityTimeOut = getSessionAffinityTimeOut(service)
+	}
+	return lbOptions
 }
 
 // mergeLBs joins two LBs together if it is safe to do so.

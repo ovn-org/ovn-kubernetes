@@ -260,20 +260,16 @@ func buildLB(lb *LB) *nbdb.LoadBalancer {
 	}
 
 	// Session affinity
-	// If enabled, then bucket flows by 3-tuple (proto, srcip, dstip)
+	// If enabled, then bucket flows by 3-tuple (proto, srcip, dstip) for the specific timeout value
 	// otherwise, use default ovn value
-	selectionFields := []nbdb.LoadBalancerSelectionFields{}
-	if lb.Opts.Affinity {
-		selectionFields = []string{
-			nbdb.LoadBalancerSelectionFieldsIPSrc,
-			nbdb.LoadBalancerSelectionFieldsIPDst,
-		}
+	if lb.Opts.AffinityTimeOut > 0 {
+		options["affinity_timeout"] = fmt.Sprintf("%d", lb.Opts.AffinityTimeOut)
 	}
 
 	// vipMap
 	vips := buildVipMap(lb.Rules)
 
-	return libovsdbops.BuildLoadBalancer(lb.Name, strings.ToLower(lb.Protocol), selectionFields, vips, options, lb.ExternalIDs)
+	return libovsdbops.BuildLoadBalancer(lb.Name, strings.ToLower(lb.Protocol), vips, options, lb.ExternalIDs)
 }
 
 // buildVipMap returns a viups map from a set of rules

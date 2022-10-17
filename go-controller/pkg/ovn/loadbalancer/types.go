@@ -22,8 +22,8 @@ type LBOpts struct {
 	// if true, then enable unidling. Otherwise, generate reject
 	Unidling bool
 
-	// If true, then enable per-client-IP affinity.
-	Affinity bool
+	// If greater than 0, then enable per-client-IP affinity.
+	AffinityTimeOut int32
 
 	// If true, then disable SNAT entirely
 	SkipSNAT bool
