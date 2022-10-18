@@ -225,19 +225,11 @@ func (cfg *L3GatewayConfig) UnmarshalJSON(bytes []byte) error {
 		}
 	}
 
-	if len(cfgjson.NextHops) == 0 {
-		cfg.NextHops = make([]net.IP, 1)
-		cfg.NextHops[0] = net.ParseIP(cfgjson.NextHop)
-		if cfg.NextHops[0] == nil {
-			return fmt.Errorf("bad 'next-hop' value %q", cfgjson.NextHop)
-		}
-	} else {
-		cfg.NextHops = make([]net.IP, len(cfgjson.NextHops))
-		for i, nextHopStr := range cfgjson.NextHops {
-			cfg.NextHops[i] = net.ParseIP(nextHopStr)
-			if cfg.NextHops[i] == nil {
-				return fmt.Errorf("bad 'next-hops' value %q", nextHopStr)
-			}
+	cfg.NextHops = make([]net.IP, len(cfgjson.NextHops))
+	for i, nextHopStr := range cfgjson.NextHops {
+		cfg.NextHops[i] = net.ParseIP(nextHopStr)
+		if cfg.NextHops[i] == nil {
+			return fmt.Errorf("bad 'next-hops' value %q", nextHopStr)
 		}
 	}
 
