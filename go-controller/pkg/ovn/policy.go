@@ -932,18 +932,16 @@ func (oc *Controller) addLocalPodHandler(policy *knet.NetworkPolicy, np *network
 		_ = oc.handleLocalPodSelectorAddFunc(np, objs...)
 		return nil
 	}
-	retryLocalPods := NewRetryObjs(
+	retryLocalPods := oc.newRetryFrameworkMasterWithParameters(
 		factory.LocalPodSelectorType,
-		policy.Namespace,
-		sel,
 		syncFunc,
 		&NetworkPolicyExtraParameters{
 			np: np,
 		})
 
-	podHandler, err := oc.WatchResource(retryLocalPods)
+	podHandler, err := retryLocalPods.WatchResourceFiltered(policy.Namespace, sel)
 	if err != nil {
-		klog.Errorf("Failed WatchResource for addLocalPodHandler: %v", err)
+		klog.Errorf("WatchResource failed for addLocalPodHandler: %v", err)
 		return err
 	}
 
@@ -1474,16 +1472,15 @@ type NetworkPolicyExtraParameters struct {
 func (oc *Controller) addPeerServiceHandler(
 	policy *knet.NetworkPolicy, gp *gressPolicy, np *networkPolicy) error {
 	// start watching services in the same namespace as the network policy
-	retryPeerServices := NewRetryObjs(
+	retryPeerServices := oc.newRetryFrameworkMasterWithParameters(
 		factory.PeerServiceType,
-		policy.Namespace,
-		nil, nil,
+		nil,
 		&NetworkPolicyExtraParameters{
 			gp: gp,
 			np: np,
 		})
 
-	serviceHandler, err := oc.WatchResource(retryPeerServices)
+	serviceHandler, err := retryPeerServices.WatchResourceFiltered(policy.Namespace, nil)
 	if err != nil {
 		klog.Errorf("Failed WatchResource for addPeerServiceHandler: %v", err)
 		return err
@@ -1511,16 +1508,15 @@ func (oc *Controller) addPeerPodHandler(podSelector *metav1.LabelSelector,
 		_ = oc.handlePeerPodSelectorAddUpdate(np, gp, objs...)
 		return nil
 	}
-	retryPeerPods := NewRetryObjs(
+	retryPeerPods := oc.newRetryFrameworkMasterWithParameters(
 		factory.PeerPodSelectorType,
-		np.namespace,
-		sel, syncFunc,
+		syncFunc,
 		&NetworkPolicyExtraParameters{
 			np: np,
 			gp: gp,
 		})
 
-	podHandler, err := oc.WatchResource(retryPeerPods)
+	podHandler, err := retryPeerPods.WatchResourceFiltered(np.namespace, sel)
 	if err != nil {
 		klog.Errorf("Failed WatchResource for addPeerPodHandler: %v", err)
 		return err
@@ -1550,10 +1546,8 @@ func (oc *Controller) handlePeerNamespaceAndPodAdd(np *networkPolicy, gp *gressP
 		_ = oc.handlePeerPodSelectorAddUpdate(np, gp, objs...)
 		return nil
 	}
-	retryPeerPods := NewRetryObjs(
+	retryPeerPods := oc.newRetryFrameworkMasterWithParameters(
 		factory.PeerPodForNamespaceAndPodSelectorType,
-		namespace.Name,
-		podSelector,
 		syncFunc,
 		&NetworkPolicyExtraParameters{
 			gp: gp,
@@ -1565,7 +1559,7 @@ func (oc *Controller) handlePeerNamespaceAndPodAdd(np *networkPolicy, gp *gressP
 	// unlock
 	np.RUnlock()
 	locked = false
-	podHandler, err := oc.WatchResource(retryPeerPods)
+	podHandler, err := retryPeerPods.WatchResourceFiltered(namespace.Name, podSelector)
 	if err != nil {
 		klog.Errorf("Failed WatchResource for PeerNamespaceAndPodSelectorType: %v", err)
 		return err
@@ -1627,16 +1621,16 @@ func (oc *Controller) addPeerNamespaceAndPodHandler(namespaceSelector *metav1.La
 	// start watching namespaces selected by the namespace selector nsSel;
 	// upon namespace add event, start watching pods in that namespace selected
 	// by the label selector podSel
-	retryPeerNamespaces := NewRetryObjs(
+	retryPeerNamespaces := oc.newRetryFrameworkMasterWithParameters(
 		factory.PeerNamespaceAndPodSelectorType,
-		"", nsSel, nil,
+		nil,
 		&NetworkPolicyExtraParameters{
 			gp:          gp,
 			np:          np,
 			podSelector: podSel}, // will be used in the addFunc to create a pod handler
 	)
 
-	namespaceHandler, err := oc.WatchResource(retryPeerNamespaces)
+	namespaceHandler, err := retryPeerNamespaces.WatchResourceFiltered("", nsSel)
 	if err != nil {
 		klog.Errorf("Failed WatchResource for addPeerNamespaceAndPodHandler: %v", err)
 		return err
@@ -1744,15 +1738,15 @@ func (oc *Controller) addPeerNamespaceHandler(
 		_ = oc.handlePeerNamespaceSelectorAdd(np, gress, objs...)
 		return nil
 	}
-	retryPeerNamespaces := NewRetryObjs(
+	retryPeerNamespaces := oc.newRetryFrameworkMasterWithParameters(
 		factory.PeerNamespaceSelectorType,
-		"", sel, syncFunc,
+		syncFunc,
 		&NetworkPolicyExtraParameters{gp: gress, np: np},
 	)
 
-	namespaceHandler, err := oc.WatchResource(retryPeerNamespaces)
+	namespaceHandler, err := retryPeerNamespaces.WatchResourceFiltered("", sel)
 	if err != nil {
-		klog.Errorf("Failed WatchResource for addPeerNamespaceHandler: %v", err)
+		klog.Errorf("WatchResource failed for addPeerNamespaceHandler: %v", err)
 		return err
 	}
 
