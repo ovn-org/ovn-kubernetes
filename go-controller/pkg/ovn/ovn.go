@@ -235,8 +235,13 @@ type Controller struct {
 	mgmtPortFailed              sync.Map
 	addNodeFailed               sync.Map
 	nodeClusterRouterPortFailed sync.Map
+	hybridOverlayFailed         sync.Map
 
 	podRecorder metrics.PodRecorder
+
+	// variable to determine if all pods present on the node during startup has been processed
+	// updated atomically
+	allInitialPodsProcessed uint32
 }
 
 const (
