@@ -309,11 +309,6 @@ func (oc *DefaultNetworkController) initRetryFrameworkForMaster() {
 
 // Run starts the actual watching.
 func (oc *DefaultNetworkController) Run(ctx context.Context) error {
-	// Start and sync the watch factory to begin listening for events
-	if err := oc.watchFactory.Start(); err != nil {
-		return err
-	}
-
 	oc.syncPeriodic()
 	klog.Infof("Starting all the Watchers...")
 	start := time.Now()

@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/client-go/tools/leaderelection"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/tools/record"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -89,12 +91,7 @@ func NewControllerManager(ovnClient *util.OVNClientset, identity string, wf *fac
 	}, nil
 }
 
-func (cm *ControllerManager) Init() error {
-	defaultNetworkController, err := cm.DefaultNetworkController()
-	if err != nil {
-		return fmt.Errorf("failed to initialize the default network controller: %v", err)
-	}
-
+func (cm *ControllerManager) Start() error {
 	if err := cm.compressSBDatabase(); err != nil {
 		return err
 	}
@@ -102,15 +99,13 @@ func (cm *ControllerManager) Init() error {
 	cm.PodRecorder().Run(cm.SBClient(), cm.defaultStopChan)
 
 	// Start and sync the watch factory to begin listening for events
-	//if err := cm.WatchFactory().Start(); err != nil {
-	//	return err
-	//}
-	ctx, cancelFn := context.WithCancel(context.Background())
-	return defaultNetworkController.Start(cm.identity, ctx, cancelFn)
-	//if err := defaultNetworkController.Start(cm.identity, ctx, cancelFn); err != nil {
-	//	return fmt.Errorf("failed to start the default network controller: %v", err)
-	//}
-	//return defaultNetworkController.Run(context.Background())
+	if err := cm.WatchFactory().Start(); err != nil {
+		return err
+	}
+
+	// TODO: start the net-attach-def watchers
+
+	return nil
 }
 
 func (cm *ControllerManager) compressSBDatabase() error {
@@ -158,4 +153,101 @@ func (cm *ControllerManager) DefaultNetworkController() (Controller, error) {
 		return defaultNetworkOVNController, nil
 	}
 	return defaultNetworkController, nil
+}
+
+// ControlPlaneLeaderEntryPoint waits until this process is the leader before starting master functions
+func (cm *ControllerManager) ControlPlaneLeaderEntryPoint(ctx context.Context, cancel context.CancelFunc) error {
+	// Set up leader election process first
+	rl, err := resourcelock.New(
+		// TODO (rravaiol) (bpickard)
+		// https://github.com/kubernetes/kubernetes/issues/107454
+		// leader election library no longer supports leader-election
+		// locks based solely on `endpoints` or `configmaps` resources.
+		// Slowly migrating to new API across three releases; with k8s 1.24
+		// we're now in the second step ('x+2') bullet from the link above).
+		// This will have to be updated for the next k8s bump: to 1.26.
+		resourcelock.LeasesResourceLock,
+		config.Kubernetes.OVNConfigNamespace,
+		"ovn-kubernetes-master",
+		cm.K8sClient().CoreV1(),
+		cm.K8sClient().CoordinationV1(),
+		resourcelock.ResourceLockConfig{
+			Identity:      cm.identity,
+			EventRecorder: cm.EventRecorder(),
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	lec := leaderelection.LeaderElectionConfig{
+		Lock:            rl,
+		LeaseDuration:   time.Duration(config.MasterHA.ElectionLeaseDuration) * time.Second,
+		RenewDeadline:   time.Duration(config.MasterHA.ElectionRenewDeadline) * time.Second,
+		RetryPeriod:     time.Duration(config.MasterHA.ElectionRetryPeriod) * time.Second,
+		ReleaseOnCancel: true,
+		Callbacks: leaderelection.LeaderCallbacks{
+			OnStartedLeading: func(ctx context.Context) {
+				klog.Infof("Won leader election; in active mode")
+				// run the cluster controller to init the master
+				start := time.Now()
+				defer func() {
+					end := time.Since(start)
+					metrics.MetricMasterReadyDuration.Set(end.Seconds())
+				}()
+
+				defaultNetworkController, err := cm.DefaultNetworkController()
+				if err != nil {
+					klog.Error(err)
+					cancel()
+					return
+				}
+
+				if err := cm.Start(); err != nil {
+					klog.Error(err)
+					cancel()
+					return
+				}
+
+				if err := defaultNetworkController.StartClusterMaster(); err != nil {
+					klog.Error(err)
+					cancel()
+					return
+				}
+				if err := defaultNetworkController.Run(ctx); err != nil {
+					klog.Error(err)
+					cancel()
+					return
+				}
+			},
+			OnStoppedLeading: func() {
+				//This node was leader and it lost the election.
+				// Whenever the node transitions from leader to follower,
+				// we need to handle the transition properly like clearing
+				// the cache.
+				klog.Infof("No longer leader; exiting")
+				cancel()
+			},
+			OnNewLeader: func(newLeaderName string) {
+				if newLeaderName != cm.identity {
+					klog.Infof("Lost the election to %s; in standby mode", newLeaderName)
+				}
+			},
+		},
+	}
+
+	leaderelection.SetProvider(metrics.OvnkubeMasterLeaderMetricsProvider{})
+	leaderElector, err := leaderelection.NewLeaderElector(lec)
+	if err != nil {
+		return err
+	}
+
+	cm.defaultWg.Add(1)
+	go func() {
+		leaderElector.Run(ctx)
+		klog.Infof("Stopped leader election")
+		cm.defaultWg.Done()
+	}()
+
+	return nil
 }

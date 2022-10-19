@@ -24,6 +24,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	kapimtypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/util/workqueue"
 	klog "k8s.io/klog/v2"
 )
@@ -1348,4 +1349,20 @@ func getGlobalOptionsValue(client libovsdbclient.Client, field string) float64 {
 			return value
 		}
 	}
+}
+
+type OvnkubeMasterLeaderMetrics struct{}
+
+func (OvnkubeMasterLeaderMetrics) On(string) {
+	MetricMasterLeader.Set(1)
+}
+
+func (OvnkubeMasterLeaderMetrics) Off(string) {
+	MetricMasterLeader.Set(0)
+}
+
+type OvnkubeMasterLeaderMetricsProvider struct{}
+
+func (_ OvnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.SwitchMetric {
+	return OvnkubeMasterLeaderMetrics{}
 }

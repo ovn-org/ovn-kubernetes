@@ -24,8 +24,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	multihoming "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/multi-homing"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -243,9 +243,20 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		metrics.RegisterMasterBase()
 
 		masterEventRecorder = util.EventRecorder(ovnClientset.KubeClient)
-		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil,
-			libovsdbOvnNBClient, libovsdbOvnSBClient, masterEventRecorder, wg)
-		if err := ovnController.Start(master, ctx.Context, cancel); err != nil {
+		megaController, err := multihoming.NewControllerManager(
+			ovnClientset,
+			master,
+			masterWatchFactory,
+			stopChan,
+			libovsdbOvnNBClient,
+			libovsdbOvnSBClient,
+			masterEventRecorder,
+			wg,
+		)
+		if err != nil {
+			return err
+		}
+		if err := megaController.ControlPlaneLeaderEntryPoint(ctx.Context, cancel); err != nil {
 			return err
 		}
 	}

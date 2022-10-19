@@ -13,8 +13,6 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/tools/leaderelection"
-	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -41,106 +39,6 @@ const (
 	OvnNodeAnnotationRetryInterval = 100 * time.Millisecond
 	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
 )
-
-type ovnkubeMasterLeaderMetrics struct{}
-
-func (ovnkubeMasterLeaderMetrics) On(string) {
-	metrics.MetricMasterLeader.Set(1)
-}
-
-func (ovnkubeMasterLeaderMetrics) Off(string) {
-	metrics.MetricMasterLeader.Set(0)
-}
-
-type ovnkubeMasterLeaderMetricsProvider struct{}
-
-func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.SwitchMetric {
-	return ovnkubeMasterLeaderMetrics{}
-}
-
-// Start waits until this process is the leader before starting master functions
-func (oc *DefaultNetworkController) Start(identity string, ctx context.Context, cancel context.CancelFunc) error {
-	// Set up leader election process first
-	rl, err := resourcelock.New(
-		// TODO (rravaiol) (bpickard)
-		// https://github.com/kubernetes/kubernetes/issues/107454
-		// leader election library no longer supports leader-election
-		// locks based solely on `endpoints` or `configmaps` resources.
-		// Slowly migrating to new API across three releases; with k8s 1.24
-		// we're now in the second step ('x+2') bullet from the link above).
-		// This will have to be updated for the next k8s bump: to 1.26.
-		resourcelock.LeasesResourceLock,
-		config.Kubernetes.OVNConfigNamespace,
-		"ovn-kubernetes-master",
-		oc.client.CoreV1(),
-		oc.client.CoordinationV1(),
-		resourcelock.ResourceLockConfig{
-			Identity:      identity,
-			EventRecorder: oc.recorder,
-		},
-	)
-	if err != nil {
-		return err
-	}
-
-	lec := leaderelection.LeaderElectionConfig{
-		Lock:            rl,
-		LeaseDuration:   time.Duration(config.MasterHA.ElectionLeaseDuration) * time.Second,
-		RenewDeadline:   time.Duration(config.MasterHA.ElectionRenewDeadline) * time.Second,
-		RetryPeriod:     time.Duration(config.MasterHA.ElectionRetryPeriod) * time.Second,
-		ReleaseOnCancel: true,
-		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(ctx context.Context) {
-				klog.Infof("Won leader election; in active mode")
-				// run the cluster controller to init the master
-				start := time.Now()
-				defer func() {
-					end := time.Since(start)
-					metrics.MetricMasterReadyDuration.Set(end.Seconds())
-				}()
-
-				if err := oc.StartClusterMaster(); err != nil {
-					klog.Error(err)
-					cancel()
-					return
-				}
-				if err := oc.Run(ctx); err != nil {
-					klog.Error(err)
-					cancel()
-					return
-				}
-			},
-			OnStoppedLeading: func() {
-				//This node was leader and it lost the election.
-				// Whenever the node transitions from leader to follower,
-				// we need to handle the transition properly like clearing
-				// the cache.
-				klog.Infof("No longer leader; exiting")
-				cancel()
-			},
-			OnNewLeader: func(newLeaderName string) {
-				if newLeaderName != identity {
-					klog.Infof("Lost the election to %s; in standby mode", newLeaderName)
-				}
-			},
-		},
-	}
-
-	leaderelection.SetProvider(ovnkubeMasterLeaderMetricsProvider{})
-	leaderElector, err := leaderelection.NewLeaderElector(lec)
-	if err != nil {
-		return err
-	}
-
-	oc.wg.Add(1)
-	go func() {
-		leaderElector.Run(ctx)
-		klog.Infof("Stopped leader election")
-		oc.wg.Done()
-	}()
-
-	return nil
-}
 
 // cleanup obsolete *gressDefaultDeny port groups
 func (oc *DefaultNetworkController) upgradeToNamespacedDenyPGOVNTopology(existingNodeList *kapi.NodeList) error {
