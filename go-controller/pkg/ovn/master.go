@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"sync"
 	"time"
 
 	kapi "k8s.io/api/core/v1"
@@ -60,7 +59,7 @@ func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.Swi
 }
 
 // Start waits until this process is the leader before starting master functions
-func (oc *Controller) Start(identity string, wg *sync.WaitGroup, ctx context.Context, cancel context.CancelFunc) error {
+func (oc *DefaultNetworkController) Start(identity string, ctx context.Context, cancel context.CancelFunc) error {
 	// Set up leader election process first
 	rl, err := resourcelock.New(
 		// TODO (rravaiol) (bpickard)
@@ -105,7 +104,7 @@ func (oc *Controller) Start(identity string, wg *sync.WaitGroup, ctx context.Con
 					cancel()
 					return
 				}
-				if err := oc.Run(ctx, wg); err != nil {
+				if err := oc.Run(ctx); err != nil {
 					klog.Error(err)
 					cancel()
 					return
@@ -133,18 +132,18 @@ func (oc *Controller) Start(identity string, wg *sync.WaitGroup, ctx context.Con
 		return err
 	}
 
-	wg.Add(1)
+	oc.wg.Add(1)
 	go func() {
 		leaderElector.Run(ctx)
 		klog.Infof("Stopped leader election")
-		wg.Done()
+		oc.wg.Done()
 	}()
 
 	return nil
 }
 
 // cleanup obsolete *gressDefaultDeny port groups
-func (oc *Controller) upgradeToNamespacedDenyPGOVNTopology(existingNodeList *kapi.NodeList) error {
+func (oc *DefaultNetworkController) upgradeToNamespacedDenyPGOVNTopology(existingNodeList *kapi.NodeList) error {
 	err := libovsdbops.DeletePortGroups(oc.nbClient, "ingressDefaultDeny", "egressDefaultDeny")
 	if err != nil {
 		klog.Errorf("%v", err)
@@ -154,7 +153,7 @@ func (oc *Controller) upgradeToNamespacedDenyPGOVNTopology(existingNodeList *kap
 
 // delete obsoleted logical OVN entities that are specific for Multiple join switches OVN topology. Also cleanup
 // OVN entities for deleted nodes (similar to syncNodes() but for obsoleted Multiple join switches OVN topology)
-func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.NodeList) error {
+func (oc *DefaultNetworkController) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.NodeList) error {
 	existingNodes := make(map[string]bool)
 	for _, node := range existingNodeList.Items {
 		existingNodes[node.Name] = true
@@ -193,7 +192,7 @@ func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.No
 	return nil
 }
 
-func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
+func (oc *DefaultNetworkController) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 	ver, err := oc.determineOVNTopoVersionFromOVN()
 	if err != nil {
 		return err
@@ -225,7 +224,7 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 // TODO: Verify that the cluster was not already called with a different global subnet
 //
 //	If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
-func (oc *Controller) StartClusterMaster() error {
+func (oc *DefaultNetworkController) StartClusterMaster() error {
 	klog.Infof("Starting cluster master")
 
 	metrics.RegisterMasterPerformance(oc.nbClient)
@@ -332,7 +331,7 @@ func (oc *Controller) StartClusterMaster() error {
 }
 
 // SetupMaster creates the central router and load-balancers for the network
-func (oc *Controller) SetupMaster(existingNodeNames []string) error {
+func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) error {
 	// Create default Control Plane Protection (COPP) entry for routers
 	var err error
 	oc.defaultCOPPUUID, err = EnsureDefaultCOPP(oc.nbClient)
@@ -474,7 +473,7 @@ func (oc *Controller) SetupMaster(existingNodeNames []string) error {
 	return nil
 }
 
-func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
+func (oc *DefaultNetworkController) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	macAddress, err := util.ParseNodeManagementPortMACAddress(node)
 	if err != nil {
 		return err
@@ -544,7 +543,7 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 	return nil
 }
 
-func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig,
+func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig,
 	hostSubnets []*net.IPNet, hostAddrs sets.String) error {
 	var err error
 	var gwLRPIPs, clusterSubnets []*net.IPNet
@@ -587,7 +586,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 // gateway-chassis, which in effect pins the logical switch to the current node in OVN.
 // Otherwise, ovn-controller will flood-fill unrelated datapaths unnecessarily, causing scale
 // problems.
-func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
+func (oc *DefaultNetworkController) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	chassisID, err := util.ParseNodeChassisIDAnnotation(node)
 	if err != nil {
 		return err
@@ -647,7 +646,7 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 	return nil
 }
 
-func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*net.IPNet) error {
+func (oc *DefaultNetworkController) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
 	var nodeLRPMAC net.HardwareAddr
 	nodeName := node.Name
@@ -786,7 +785,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 	return oc.lsManager.AddNode(nodeName, logicalSwitch.UUID, hostSubnets)
 }
 
-func (oc *Controller) updateNodeAnnotationWithRetry(nodeName string, hostSubnets []*net.IPNet) error {
+func (oc *DefaultNetworkController) updateNodeAnnotationWithRetry(nodeName string, hostSubnets []*net.IPNet) error {
 	gwLRPIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(nodeName)
 	if err != nil {
 		return fmt.Errorf("failed to allocate join switch port IP address for node %s: %v", nodeName, err)
@@ -829,7 +828,7 @@ func (oc *Controller) updateNodeAnnotationWithRetry(nodeName string, hostSubnets
 	return nil
 }
 
-func (oc *Controller) allocateNodeSubnets(node *kapi.Node) ([]*net.IPNet, []*net.IPNet, error) {
+func (oc *DefaultNetworkController) allocateNodeSubnets(node *kapi.Node) ([]*net.IPNet, []*net.IPNet, error) {
 	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 	if err != nil {
 		// Log the error and try to allocate new subnets
@@ -937,7 +936,7 @@ func (oc *Controller) allocateNodeSubnets(node *kapi.Node) ([]*net.IPNet, []*net
 	return hostSubnets, allocatedSubnets, nil
 }
 
-func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
+func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 	hostSubnets, allocatedSubnets, err := oc.allocateNodeSubnets(node)
 	if err != nil {
 		return nil, err
@@ -990,7 +989,7 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 }
 
 // check if any existing chassis entries in the SBDB mismatches with node's chassisID annotation
-func (oc *Controller) checkNodeChassisMismatch(node *kapi.Node) (string, error) {
+func (oc *DefaultNetworkController) checkNodeChassisMismatch(node *kapi.Node) (string, error) {
 	chassisID, err := util.ParseNodeChassisIDAnnotation(node)
 	if err != nil {
 		return "", nil
@@ -1010,7 +1009,7 @@ func (oc *Controller) checkNodeChassisMismatch(node *kapi.Node) (string, error) 
 }
 
 // delete stale chassis in SBDB if system-id of the specific node has changed.
-func (oc *Controller) deleteStaleNodeChassis(node *kapi.Node) error {
+func (oc *DefaultNetworkController) deleteStaleNodeChassis(node *kapi.Node) error {
 	staleChassis, err := oc.checkNodeChassisMismatch(node)
 	if err != nil {
 		return fmt.Errorf("failed to check if there is any stale chassis for node %s in SBDB: %v", node.Name, err)
@@ -1030,7 +1029,7 @@ func (oc *Controller) deleteStaleNodeChassis(node *kapi.Node) error {
 	return nil
 }
 
-func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) error {
+func (oc *DefaultNetworkController) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) error {
 	err := oc.masterSubnetAllocator.ReleaseNetwork(subnet)
 	if err != nil {
 		return fmt.Errorf("error deleting subnet %v for node %q: %s", subnet, nodeName, err)
@@ -1040,7 +1039,7 @@ func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) e
 }
 
 // deleteNodeLogicalNetwork removes the logical switch and logical router port associated with the node
-func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
+func (oc *DefaultNetworkController) deleteNodeLogicalNetwork(nodeName string) error {
 	// Remove switch to lb associations from the LBCache before removing the switch
 	lbCache, err := ovnlb.GetLBCache(oc.nbClient)
 	if err != nil {
@@ -1066,7 +1065,7 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	return nil
 }
 
-func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet) error {
+func (oc *DefaultNetworkController) deleteNode(nodeName string, hostSubnets []*net.IPNet) error {
 	for _, hostSubnet := range hostSubnets {
 		if err := oc.deleteNodeHostSubnet(nodeName, hostSubnet); err != nil {
 			return fmt.Errorf("error deleting node %s HostSubnet %v: %v", nodeName, hostSubnet, err)
@@ -1104,7 +1103,7 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet) erro
 // TODO: make upstream kubelet more flexible with overlays and GCE so this
 // condition doesn't get added for network plugins that don't want it, and then
 // we can remove this function.
-func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode *kapi.Node) {
+func (oc *DefaultNetworkController) clearInitialNodeNetworkUnavailableCondition(origNode *kapi.Node) {
 	// If it is not a Cloud Provider node, then nothing to do.
 	if origNode.Spec.ProviderID == "" {
 		return
@@ -1147,7 +1146,7 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode *kapi
 
 // this is the worker function that does the periodic sync of nodes from kube API
 // and sbdb and deletes chassis that are stale
-func (oc *Controller) syncNodesPeriodic() {
+func (oc *DefaultNetworkController) syncNodesPeriodic() {
 	//node names is a slice of all node names
 	nodes, err := oc.kube.GetNodes()
 	if err != nil {
@@ -1192,7 +1191,7 @@ func (oc *Controller) syncNodesPeriodic() {
 // watchNodes() will be called for all existing nodes at startup anyway.
 // Note that this list will include the 'join' cluster switch, which we
 // do not want to delete.
-func (oc *Controller) syncNodes(nodes []interface{}) error {
+func (oc *DefaultNetworkController) syncNodes(nodes []interface{}) error {
 	foundNodes := sets.NewString()
 	for _, tmp := range nodes {
 		node, ok := tmp.(*kapi.Node)
@@ -1331,7 +1330,7 @@ type nodeSyncs struct {
 	syncHo                bool
 }
 
-func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
+func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
 	var hostSubnets []*net.IPNet
 	var errs []error
 	var err error
@@ -1464,7 +1463,7 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 	return kerrors.NewAggregate(errs)
 }
 
-func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
+func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 	klog.V(5).Infof("Deleting Node %q. Removing the node from "+
 		"various caches", node.Name)
 
@@ -1493,7 +1492,7 @@ func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
 	return nil
 }
 
-func (oc *Controller) createACLLoggingMeter() error {
+func (oc *DefaultNetworkController) createACLLoggingMeter() error {
 	band := &nbdb.MeterBand{
 		Action: types.MeterAction,
 		Rate:   config.Logging.ACLLoggingRateLimit,

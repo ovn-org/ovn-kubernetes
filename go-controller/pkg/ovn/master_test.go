@@ -867,7 +867,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		testNode                                 v1.Node
 		fakeClient                               *util.OVNClientset
 		kubeFakeClient                           *fake.Clientset
-		clusterController                        *Controller
+		clusterController                        *DefaultNetworkController
 		nodeAnnotator                            kube.Annotator
 		libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
 	)
@@ -966,7 +966,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 		clusterController = NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 			libovsdbOvnNBClient, libovsdbOvnSBClient,
-			record.NewFakeRecorder(0))
+			record.NewFakeRecorder(0), wg)
 		clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 		gomega.Expect(clusterController).NotTo(gomega.BeNil())
 		clusterController.defaultCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
@@ -1010,7 +1010,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			// Let the real code run and ensure OVN database sync
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 
-			gomega.Expect(clusterController.StartServiceController(wg, false)).To(gomega.Succeed())
+			gomega.Expect(clusterController.StartServiceController(false)).To(gomega.Succeed())
 
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
@@ -1076,7 +1076,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			// Let the real code run and ensure OVN database sync
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 
-			gomega.Expect(clusterController.StartServiceController(wg, false)).To(gomega.Succeed())
+			gomega.Expect(clusterController.StartServiceController(false)).To(gomega.Succeed())
 
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
@@ -1161,7 +1161,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// ensure the stale SNAT's are cleaned up
-			gomega.Expect(clusterController.StartServiceController(wg, false)).To(gomega.Succeed())
+			gomega.Expect(clusterController.StartServiceController(false)).To(gomega.Succeed())
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1356,7 +1356,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			// Let the real code run and ensure OVN database sync
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
-			gomega.Expect(clusterController.StartServiceController(wg, false)).To(gomega.Succeed())
+			gomega.Expect(clusterController.StartServiceController(false)).To(gomega.Succeed())
 
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
@@ -1747,9 +1747,10 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			}
 			t.Cleanup(libovsdbCleanup.Cleanup)
 
+			wg := &sync.WaitGroup{}
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+				record.NewFakeRecorder(0), wg)
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 
 			// configure the cluster allocators
@@ -1763,7 +1764,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			// test network allocation works correctly
 			got, allocated, err := clusterController.allocateNodeSubnets(tt.node)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("Controller.addNode() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("DefaultNetworkController.addNode() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
@@ -1776,7 +1777,7 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 				want = append(want, ipnet)
 			}
 			if !reflect.DeepEqual(got, want) {
-				t.Errorf("Controller.allocateNodeSubnets() = %v, want %v", got, want)
+				t.Errorf("DefaultNetworkController.allocateNodeSubnets() = %v, want %v", got, want)
 			}
 
 			if len(allocated) != tt.allocated {
@@ -1840,6 +1841,7 @@ func TestController_syncNodes(t *testing.T) {
 			}
 			t.Cleanup(libovsdbCleanup.Cleanup)
 
+			wg := &sync.WaitGroup{}
 			controller := NewOvnController(
 				fakeClient,
 				f,
@@ -1847,7 +1849,7 @@ func TestController_syncNodes(t *testing.T) {
 				addressset.NewFakeAddressSetFactory(),
 				nbClient,
 				sbClient,
-				record.NewFakeRecorder(0))
+				record.NewFakeRecorder(0), wg)
 
 			controller.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(nbClient, "", []string{})
 			if err != nil {
@@ -1927,6 +1929,7 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 			}
 			t.Cleanup(libovsdbCleanup.Cleanup)
 
+			wg := &sync.WaitGroup{}
 			controller := NewOvnController(
 				fakeClient,
 				f,
@@ -1934,7 +1937,7 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 				addressset.NewFakeAddressSetFactory(),
 				nbClient,
 				sbClient,
-				record.NewFakeRecorder(0))
+				record.NewFakeRecorder(0), wg)
 
 			controller.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(nbClient, "", []string{})
 			if err != nil {

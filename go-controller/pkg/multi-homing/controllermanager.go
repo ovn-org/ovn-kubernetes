@@ -33,13 +33,10 @@ type ControllerManager struct {
 	// used for leader election
 	identity string
 
-	// the default controller
-	defaultController *ovn.Controller
-
-	// controller for all networks, key is netName of net-attach-def, value is *Controller
+	// controller for all networks, key is netName of net-attach-def, value is *DefaultNetworkController
 	// this map is updated either at the very beginning of ovnkube-master when initializing the default controller
 	// or when net-attach-def is added/deleted. All these are serialized and no lock protection is needed
-	allOvnControllers map[string]*ovn.Controller
+	ovnControllers map[string]Controller
 }
 
 func NewControllerManager(ovnClient *util.OVNClientset, identity string, wf *factory.WatchFactory,
@@ -86,17 +83,11 @@ func NewControllerManager(ovnClient *util.OVNClientset, identity string, wf *fac
 		defaultWg:             wg,
 		defaultStopChan:       stopChan,
 		identity:              identity,
-		allOvnControllers:     make(map[string]*ovn.Controller),
+		ovnControllers:        make(map[string]Controller),
 	}, nil
 }
 
 func (cm *ControllerManager) Init() error {
-	// the default network net_attach_def may not exist; we'd need to create default OVN Controller based on config.
-	//_, err := cm.InitDefaultController(nil)
-	//if err != nil {
-	//	return err
-	//}
-
 	if err := cm.compressSBDatabase(); err != nil {
 		return err
 	}

@@ -244,8 +244,8 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 
 		masterEventRecorder = util.EventRecorder(ovnClientset.KubeClient)
 		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil,
-			libovsdbOvnNBClient, libovsdbOvnSBClient, masterEventRecorder)
-		if err := ovnController.Start(master, wg, ctx.Context, cancel); err != nil {
+			libovsdbOvnNBClient, libovsdbOvnSBClient, masterEventRecorder, wg)
+		if err := ovnController.Start(master, ctx.Context, cancel); err != nil {
 			return err
 		}
 	}

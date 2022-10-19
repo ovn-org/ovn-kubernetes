@@ -302,7 +302,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 			fakeOvn.controller.WatchNodes()
 
-			fakeOvn.controller.StartServiceController(wg, false)
+			fakeOvn.controller.StartServiceController(false)
 
 			nodeSubnet := ovntest.MustParseIPNet(node1.NodeSubnet)
 			var clusterSubnets []*net.IPNet

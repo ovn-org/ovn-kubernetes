@@ -39,7 +39,7 @@ const (
 type FakeOVN struct {
 	fakeClient   *util.OVNClientset
 	watcher      *factory.WatchFactory
-	controller   *Controller
+	controller   *DefaultNetworkController
 	stopChan     chan struct{}
 	asf          *addressset.FakeAddressSetFactory
 	fakeRecorder *record.FakeRecorder
@@ -115,7 +115,7 @@ func (o *FakeOVN) init() {
 	o.controller = NewOvnController(o.fakeClient, o.watcher,
 		o.stopChan, o.asf,
 		o.nbClient, o.sbClient,
-		o.fakeRecorder)
+		o.fakeRecorder, &sync.WaitGroup{})
 	o.controller.multicastSupport = true
 	o.controller.loadBalancerGroupUUID = types.ClusterLBGroupName + "-UUID"
 }

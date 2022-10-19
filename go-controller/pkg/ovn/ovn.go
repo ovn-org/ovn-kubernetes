@@ -60,9 +60,13 @@ type ACLLoggingLevels struct {
 }
 
 // Controller structure is the object which holds the controls for starting
+
+// DefaultNetworkController structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
-type Controller struct {
+type DefaultNetworkController struct {
 	ControllerConnections
+
+	wg       *sync.WaitGroup
 	stopChan <-chan struct{}
 
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
@@ -132,12 +136,12 @@ type Controller struct {
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
 
-	// Controller used for programming OVN for egress IP
+	// DefaultNetworkController used for programming OVN for egress IP
 	eIPC egressIPController
 
-	// Controller used to handle services
+	// DefaultNetworkController used to handle services
 	svcController *svccontroller.Controller
-	// Controller used to handle egress services
+	// DefaultNetworkController used to handle egress services
 	egressSvcController *egresssvc.Controller
 	// svcFactory used to handle service related events
 	svcFactory informers.SharedInformerFactory
@@ -217,7 +221,7 @@ func getPodNamespacedName(pod *kapi.Pod) string {
 // infrastructure and policy
 func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory,
 	libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
-	recorder record.EventRecorder) *Controller {
+	recorder record.EventRecorder, wg *sync.WaitGroup) *DefaultNetworkController {
 	if addressSetFactory == nil {
 		addressSetFactory = addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
 	}
@@ -243,7 +247,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		nbClient:     libovsdbOvnNBClient,
 		sbClient:     libovsdbOvnSBClient,
 	}
-	oc := &Controller{
+	oc := &DefaultNetworkController{
 		ControllerConnections:        ovnControllerConnections,
 		stopChan:                     stopChan,
 		masterSubnetAllocator:        subnetallocator.NewSubnetAllocator(),
@@ -278,14 +282,14 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		svcFactory:               svcFactory,
 		egressSvcController:      egressSvcController,
 		podRecorder:              metrics.NewPodRecorder(),
+		wg:                       wg,
 	}
-
 	oc.initRetryFrameworkForMaster()
 
 	return oc
 }
 
-func (oc *Controller) initRetryFrameworkForMaster() {
+func (oc *DefaultNetworkController) initRetryFrameworkForMaster() {
 	// Init the retry framework for pods, namespaces, nodes, network policies, egress firewalls,
 	// egress IP (and dependent namespaces, pods, nodes), cloud private ip config.
 	oc.retryPods = oc.newRetryFrameworkMaster(factory.PodType)
@@ -301,7 +305,7 @@ func (oc *Controller) initRetryFrameworkForMaster() {
 }
 
 // Run starts the actual watching.
-func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
+func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	// Start and sync the watch factory to begin listening for events
 	if err := oc.watchFactory.Start(); err != nil {
 		return err
@@ -332,7 +336,7 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 	oc.svcFactory.Start(oc.stopChan)
 
 	// Services should be started after nodes to prevent LB churn
-	if err := oc.StartServiceController(wg, true); err != nil {
+	if err := oc.StartServiceController(true); err != nil {
 		return err
 	}
 
@@ -399,16 +403,16 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 			oc.watchFactory.EgressQoSInformer(),
 			oc.watchFactory.PodCoreInformer(),
 			oc.watchFactory.NodeCoreInformer())
-		wg.Add(1)
+		oc.wg.Add(1)
 		go func() {
-			defer wg.Done()
+			defer oc.wg.Done()
 			oc.runEgressQoSController(1, oc.stopChan)
 		}()
 	}
 
-	wg.Add(1)
+	oc.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer oc.wg.Done()
 		oc.egressSvcController.Run(1)
 	}()
 
@@ -424,9 +428,9 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 		if err != nil {
 			return err
 		}
-		wg.Add(1)
+		oc.wg.Add(1)
 		go func() {
-			defer wg.Done()
+			defer oc.wg.Done()
 			unidlingController.Run(oc.stopChan)
 		}()
 	}
@@ -451,7 +455,7 @@ func (oc *Controller) Run(ctx context.Context, wg *sync.WaitGroup) error {
 // right now there is only one ticker registered
 // for syncNodesPeriodic which deletes chassis records from the sbdb
 // every 5 minutes
-func (oc *Controller) syncPeriodic() {
+func (oc *DefaultNetworkController) syncPeriodic() {
 	go func() {
 		nodeSyncTicker := time.NewTicker(5 * time.Minute)
 		defer nodeSyncTicker.Stop()
@@ -466,7 +470,7 @@ func (oc *Controller) syncPeriodic() {
 	}()
 }
 
-func (oc *Controller) recordPodEvent(addErr error, pod *kapi.Pod) {
+func (oc *DefaultNetworkController) recordPodEvent(addErr error, pod *kapi.Pod) {
 	podRef, err := ref.GetReference(scheme.Scheme, pod)
 	if err != nil {
 		klog.Errorf("Couldn't get a reference to pod %s/%s to post an event: '%v'",
@@ -489,7 +493,7 @@ func networkStatusAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
 
 // ensurePod tries to set up a pod. It returns nil on success and error on failure; failure
 // indicates the pod set up should be retried later.
-func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
+func (oc *DefaultNetworkController) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
 	// Try unscheduled pods later
 	if !util.PodScheduled(pod) {
 		return nil
@@ -522,7 +526,7 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) error {
 
 // removePod tried to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
-func (oc *Controller) removePod(pod *kapi.Pod, portInfo *lpInfo) error {
+func (oc *DefaultNetworkController) removePod(pod *kapi.Pod, portInfo *lpInfo) error {
 	if !util.PodWantsNetwork(pod) {
 		if err := oc.deletePodExternalGW(pod); err != nil {
 			return fmt.Errorf("unable to delete external gateway routes for pod %s: %w",
@@ -538,35 +542,35 @@ func (oc *Controller) removePod(pod *kapi.Pod, portInfo *lpInfo) error {
 }
 
 // WatchPods starts the watching of the Pod resource and calls back the appropriate handler logic
-func (oc *Controller) WatchPods() error {
+func (oc *DefaultNetworkController) WatchPods() error {
 	_, err := oc.retryPods.WatchResource()
 	return err
 }
 
 // WatchNetworkPolicy starts the watching of the network policy resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchNetworkPolicy() error {
+func (oc *DefaultNetworkController) WatchNetworkPolicy() error {
 	_, err := oc.retryNetworkPolicies.WatchResource()
 	return err
 }
 
 // WatchEgressFirewall starts the watching of egressfirewall resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchEgressFirewall() error {
+func (oc *DefaultNetworkController) WatchEgressFirewall() error {
 	_, err := oc.retryEgressFirewalls.WatchResource()
 	return err
 }
 
 // WatchEgressNodes starts the watching of egress assignable nodes and calls
 // back the appropriate handler logic.
-func (oc *Controller) WatchEgressNodes() error {
+func (oc *DefaultNetworkController) WatchEgressNodes() error {
 	_, err := oc.retryEgressNodes.WatchResource()
 	return err
 }
 
 // WatchCloudPrivateIPConfig starts the watching of cloudprivateipconfigs
 // resource and calls back the appropriate handler logic.
-func (oc *Controller) WatchCloudPrivateIPConfig() error {
+func (oc *DefaultNetworkController) WatchCloudPrivateIPConfig() error {
 	_, err := oc.retryCloudPrivateIPConfig.WatchResource()
 	return err
 }
@@ -574,30 +578,30 @@ func (oc *Controller) WatchCloudPrivateIPConfig() error {
 // WatchEgressIP starts the watching of egressip resource and calls back the
 // appropriate handler logic. It also initiates the other dedicated resource
 // handlers for egress IP setup: namespaces, pods.
-func (oc *Controller) WatchEgressIP() error {
+func (oc *DefaultNetworkController) WatchEgressIP() error {
 	_, err := oc.retryEgressIPs.WatchResource()
 	return err
 }
 
-func (oc *Controller) WatchEgressIPNamespaces() error {
+func (oc *DefaultNetworkController) WatchEgressIPNamespaces() error {
 	_, err := oc.retryEgressIPNamespaces.WatchResource()
 	return err
 }
 
-func (oc *Controller) WatchEgressIPPods() error {
+func (oc *DefaultNetworkController) WatchEgressIPPods() error {
 	_, err := oc.retryEgressIPPods.WatchResource()
 	return err
 }
 
 // WatchNamespaces starts the watching of namespace resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchNamespaces() error {
+func (oc *DefaultNetworkController) WatchNamespaces() error {
 	_, err := oc.retryNamespaces.WatchResource()
 	return err
 }
 
 // syncNodeGateway ensures a node's gateway router is configured
-func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet) error {
+func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return err
@@ -634,7 +638,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchNodes() error {
+func (oc *DefaultNetworkController) WatchNodes() error {
 	_, err := oc.retryNodes.WatchResource()
 	return err
 }
@@ -656,7 +660,7 @@ func (oc *Controller) WatchNodes() error {
 // *) If one of "allow" or "deny" can be parsed and has a valid value, but the other key is not present in the
 //
 //	annotation, then assume that this key should be disabled by setting its nsInfo value to "".
-func (oc *Controller) aclLoggingUpdateNsInfo(annotation string, nsInfo *namespaceInfo) error {
+func (oc *DefaultNetworkController) aclLoggingUpdateNsInfo(annotation string, nsInfo *namespaceInfo) error {
 	var aclLevels ACLLoggingLevels
 	var errors []error
 
@@ -792,11 +796,11 @@ func newServiceController(client clientset.Interface, nbClient libovsdbclient.Cl
 	return controller, svcFactory
 }
 
-func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
-	klog.Infof("Starting OVN Service Controller: Using Endpoint Slices")
-	wg.Add(1)
+func (oc *DefaultNetworkController) StartServiceController(runRepair bool) error {
+	klog.Infof("Starting OVN Service DefaultNetworkController: Using Endpoint Slices")
+	oc.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer oc.wg.Done()
 		useLBGroups := oc.loadBalancerGroupUUID != ""
 		// use 5 workers like most of the kubernetes controllers in the
 		// kubernetes controller-manager
@@ -824,7 +828,7 @@ func newEgressServiceController(client clientset.Interface, nbClient libovsdbcli
 	}
 
 	// TODO: currently an ugly hack to pass the (copied) isReachable func to the egress service controller
-	// without touching the egressIP controller code too much before the Controller object is created.
+	// without touching the egressIP controller code too much before the DefaultNetworkController object is created.
 	// This will be removed once we consolidate all of the healthchecks to a different place and have
 	// the controllers query a universal cache instead of creating multiple goroutines that do the same thing.
 	timeout := config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout

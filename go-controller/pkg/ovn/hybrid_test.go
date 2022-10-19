@@ -128,7 +128,7 @@ func setupHybridOverlayOVNObjects(node tNode, hoSubnet, nodeHOIP, nodeHOMAC stri
 
 }
 
-func setupClusterController(clusterController *Controller, clusterLBUUID, expectedNodeSwitchUUID, node1Name string) {
+func setupClusterController(clusterController *DefaultNetworkController, clusterLBUUID, expectedNodeSwitchUUID, node1Name string) {
 	var err error
 	for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
 		clusterController.hybridOverlaySubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
@@ -227,7 +227,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+				record.NewFakeRecorder(0), wg)
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 			for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
 				clusterController.hybridOverlaySubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
@@ -385,7 +385,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+				record.NewFakeRecorder(0), wg)
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
@@ -682,7 +682,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+				record.NewFakeRecorder(0), wg)
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
@@ -846,7 +846,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+				record.NewFakeRecorder(0), wg)
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
@@ -1104,7 +1104,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+				record.NewFakeRecorder(0), wg)
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 

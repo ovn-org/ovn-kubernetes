@@ -25,7 +25,7 @@ type masterEventHandler struct {
 	retry.EventHandler
 
 	objType         reflect.Type
-	oc              *Controller
+	oc              *DefaultNetworkController
 	extraParameters interface{}
 	syncFunc        func([]interface{}) error
 }
@@ -43,7 +43,7 @@ type masterEventHandler struct {
 // newRetryFrameworkMasterWithParameters is instead called directly by the watchers that are
 // dynamically created when a network policy is added: PeerServiceType, PeerNamespaceAndPodSelectorType,
 // PeerPodForNamespaceAndPodSelectorType, PeerNamespaceSelectorType, PeerPodSelectorType.
-func (oc *Controller) newRetryFrameworkMasterWithParameters(
+func (oc *DefaultNetworkController) newRetryFrameworkMasterWithParameters(
 	objectType reflect.Type,
 	syncFunc func([]interface{}) error,
 	extraParameters interface{}) *retry.RetryFramework {
@@ -73,7 +73,7 @@ func (oc *Controller) newRetryFrameworkMasterWithParameters(
 // configuration parameters (extraParameters field).
 // This is true for all resource types except for those that are dynamically created when
 // adding a network policy.
-func (oc *Controller) newRetryFrameworkMaster(objectType reflect.Type) *retry.RetryFramework {
+func (oc *DefaultNetworkController) newRetryFrameworkMaster(objectType reflect.Type) *retry.RetryFramework {
 	return oc.newRetryFrameworkMasterWithParameters(objectType, nil, nil)
 }
 
@@ -190,7 +190,7 @@ func (h *masterEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, er
 	return false, fmt.Errorf("no object comparison for type %s", h.objType)
 }
 
-func (oc *Controller) getPortInfo(pod *kapi.Pod) *lpInfo {
+func (oc *DefaultNetworkController) getPortInfo(pod *kapi.Pod) *lpInfo {
 	var portInfo *lpInfo
 	key := util.GetLogicalPortName(pod.Namespace, pod.Name)
 	if !util.PodWantsNetwork(pod) {

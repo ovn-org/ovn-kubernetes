@@ -55,7 +55,7 @@ type egressQoSRule struct {
 }
 
 // shallow copies the EgressQoS object provided.
-func (oc *Controller) cloneEgressQoS(raw *egressqosapi.EgressQoS) (*egressQoS, error) {
+func (oc *DefaultNetworkController) cloneEgressQoS(raw *egressqosapi.EgressQoS) (*egressQoS, error) {
 	eq := &egressQoS{
 		name:      raw.Name,
 		namespace: raw.Namespace,
@@ -89,7 +89,7 @@ func (oc *Controller) cloneEgressQoS(raw *egressqosapi.EgressQoS) (*egressQoS, e
 }
 
 // shallow copies the EgressQoSRule object provided.
-func (oc *Controller) cloneEgressQoSRule(raw egressqosapi.EgressQoSRule, priority int) (*egressQoSRule, error) {
+func (oc *DefaultNetworkController) cloneEgressQoSRule(raw egressqosapi.EgressQoSRule, priority int) (*egressQoSRule, error) {
 	dst := ""
 	if raw.DstCIDR != nil {
 		_, _, err := net.ParseCIDR(*raw.DstCIDR)
@@ -114,7 +114,7 @@ func (oc *Controller) cloneEgressQoSRule(raw egressqosapi.EgressQoSRule, priorit
 	return eqr, nil
 }
 
-func (oc *Controller) createASForEgressQoSRule(podSelector metav1.LabelSelector, namespace string, priority int) (addressset.AddressSet, *sync.Map, error) {
+func (oc *DefaultNetworkController) createASForEgressQoSRule(podSelector metav1.LabelSelector, namespace string, priority int) (addressset.AddressSet, *sync.Map, error) {
 	var addrSet addressset.AddressSet
 
 	selector, _ := metav1.LabelSelectorAsSelector(&podSelector)
@@ -159,7 +159,7 @@ func (oc *Controller) createASForEgressQoSRule(podSelector metav1.LabelSelector,
 }
 
 // initEgressQoSController initializes the EgressQoS controller.
-func (oc *Controller) initEgressQoSController(
+func (oc *DefaultNetworkController) initEgressQoSController(
 	eqInformer egressqosinformer.EgressQoSInformer,
 	podInformer v1coreinformers.PodInformer,
 	nodeInformer v1coreinformers.NodeInformer) {
@@ -201,10 +201,10 @@ func (oc *Controller) initEgressQoSController(
 	})
 }
 
-func (oc *Controller) runEgressQoSController(threadiness int, stopCh <-chan struct{}) {
+func (oc *DefaultNetworkController) runEgressQoSController(threadiness int, stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 
-	klog.Infof("Starting EgressQoS Controller")
+	klog.Infof("Starting EgressQoS DefaultNetworkController")
 
 	if !cache.WaitForNamedCacheSync("egressqosnodes", stopCh, oc.egressQoSNodeSynced) {
 		utilruntime.HandleError(fmt.Errorf("timed out waiting for caches to sync"))
@@ -273,7 +273,7 @@ func (oc *Controller) runEgressQoSController(threadiness int, stopCh <-chan stru
 }
 
 // onEgressQoSAdd queues the EgressQoS for processing.
-func (oc *Controller) onEgressQoSAdd(obj interface{}) {
+func (oc *DefaultNetworkController) onEgressQoSAdd(obj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
@@ -283,7 +283,7 @@ func (oc *Controller) onEgressQoSAdd(obj interface{}) {
 }
 
 // onEgressQoSUpdate queues the EgressQoS for processing.
-func (oc *Controller) onEgressQoSUpdate(oldObj, newObj interface{}) {
+func (oc *DefaultNetworkController) onEgressQoSUpdate(oldObj, newObj interface{}) {
 	oldEQ := oldObj.(*egressqosapi.EgressQoS)
 	newEQ := newObj.(*egressqosapi.EgressQoS)
 
@@ -299,7 +299,7 @@ func (oc *Controller) onEgressQoSUpdate(oldObj, newObj interface{}) {
 }
 
 // onEgressQoSDelete queues the EgressQoS for processing.
-func (oc *Controller) onEgressQoSDelete(obj interface{}) {
+func (oc *DefaultNetworkController) onEgressQoSDelete(obj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
@@ -308,12 +308,12 @@ func (oc *Controller) onEgressQoSDelete(obj interface{}) {
 	oc.egressQoSQueue.Add(key)
 }
 
-func (oc *Controller) runEgressQoSWorker(wg *sync.WaitGroup) {
+func (oc *DefaultNetworkController) runEgressQoSWorker(wg *sync.WaitGroup) {
 	for oc.processNextEgressQoSWorkItem(wg) {
 	}
 }
 
-func (oc *Controller) processNextEgressQoSWorkItem(wg *sync.WaitGroup) bool {
+func (oc *DefaultNetworkController) processNextEgressQoSWorkItem(wg *sync.WaitGroup) bool {
 	wg.Add(1)
 	defer wg.Done()
 
@@ -344,7 +344,7 @@ func (oc *Controller) processNextEgressQoSWorkItem(wg *sync.WaitGroup) bool {
 // This takes care of syncing stale data which we might have in OVN if
 // there's no ovnkube-master running for a while.
 // It deletes all QoSes and Address Sets from OVN that belong to deleted EgressQoSes.
-func (oc *Controller) repairEgressQoSes() error {
+func (oc *DefaultNetworkController) repairEgressQoSes() error {
 	startTime := time.Now()
 	klog.V(4).Infof("Starting repairing loop for egressqos")
 	defer func() {
@@ -419,7 +419,7 @@ func (oc *Controller) repairEgressQoSes() error {
 	return nil
 }
 
-func (oc *Controller) syncEgressQoS(key string) error {
+func (oc *DefaultNetworkController) syncEgressQoS(key string) error {
 	startTime := time.Now()
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
@@ -457,7 +457,7 @@ func (oc *Controller) syncEgressQoS(key string) error {
 	return oc.addEgressQoS(eq)
 }
 
-func (oc *Controller) cleanEgressQoSNS(namespace string) error {
+func (oc *DefaultNetworkController) cleanEgressQoSNS(namespace string) error {
 	obj, loaded := oc.egressQoSCache.Load(namespace)
 	if !loaded {
 		// the namespace is clean
@@ -525,7 +525,7 @@ func (oc *Controller) cleanEgressQoSNS(namespace string) error {
 	return nil
 }
 
-func (oc *Controller) addEgressQoS(eqObj *egressqosapi.EgressQoS) error {
+func (oc *DefaultNetworkController) addEgressQoS(eqObj *egressqosapi.EgressQoS) error {
 	eq, err := oc.cloneEgressQoS(eqObj)
 	if err != nil {
 		return err
@@ -615,7 +615,7 @@ func generateEgressQoSMatch(eq *egressQoSRule, hashedAddressSetNameIPv4, hashedA
 	return fmt.Sprintf("(%s) && %s", dst, src)
 }
 
-func (oc *Controller) egressQoSSwitches() ([]string, error) {
+func (oc *DefaultNetworkController) egressQoSSwitches() ([]string, error) {
 	logicalSwitches := []string{}
 
 	// Find all node switches
@@ -648,7 +648,7 @@ type mapAndOp struct {
 	op mapOp
 }
 
-func (oc *Controller) syncEgressQoSPod(key string) error {
+func (oc *DefaultNetworkController) syncEgressQoSPod(key string) error {
 	startTime := time.Now()
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
@@ -766,7 +766,7 @@ func (oc *Controller) syncEgressQoSPod(key string) error {
 }
 
 // onEgressQoSPodAdd queues the pod for processing.
-func (oc *Controller) onEgressQoSPodAdd(obj interface{}) {
+func (oc *DefaultNetworkController) onEgressQoSPodAdd(obj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
@@ -776,7 +776,7 @@ func (oc *Controller) onEgressQoSPodAdd(obj interface{}) {
 }
 
 // onEgressQoSPodUpdate queues the pod for processing.
-func (oc *Controller) onEgressQoSPodUpdate(oldObj, newObj interface{}) {
+func (oc *DefaultNetworkController) onEgressQoSPodUpdate(oldObj, newObj interface{}) {
 	oldPod := oldObj.(*kapi.Pod)
 	newPod := newObj.(*kapi.Pod)
 
@@ -803,7 +803,7 @@ func (oc *Controller) onEgressQoSPodUpdate(oldObj, newObj interface{}) {
 	oc.egressQoSPodQueue.Add(key)
 }
 
-func (oc *Controller) onEgressQoSPodDelete(obj interface{}) {
+func (oc *DefaultNetworkController) onEgressQoSPodDelete(obj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
@@ -812,12 +812,12 @@ func (oc *Controller) onEgressQoSPodDelete(obj interface{}) {
 	oc.egressQoSPodQueue.Add(key)
 }
 
-func (oc *Controller) runEgressQoSPodWorker(wg *sync.WaitGroup) {
+func (oc *DefaultNetworkController) runEgressQoSPodWorker(wg *sync.WaitGroup) {
 	for oc.processNextEgressQoSPodWorkItem(wg) {
 	}
 }
 
-func (oc *Controller) processNextEgressQoSPodWorkItem(wg *sync.WaitGroup) bool {
+func (oc *DefaultNetworkController) processNextEgressQoSPodWorkItem(wg *sync.WaitGroup) bool {
 	wg.Add(1)
 	defer wg.Done()
 	key, quit := oc.egressQoSPodQueue.Get()
@@ -844,7 +844,7 @@ func (oc *Controller) processNextEgressQoSPodWorkItem(wg *sync.WaitGroup) bool {
 }
 
 // onEgressQoSAdd queues the node for processing.
-func (oc *Controller) onEgressQoSNodeAdd(obj interface{}) {
+func (oc *DefaultNetworkController) onEgressQoSNodeAdd(obj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
@@ -853,12 +853,12 @@ func (oc *Controller) onEgressQoSNodeAdd(obj interface{}) {
 	oc.egressQoSNodeQueue.Add(key)
 }
 
-func (oc *Controller) runEgressQoSNodeWorker(wg *sync.WaitGroup) {
+func (oc *DefaultNetworkController) runEgressQoSNodeWorker(wg *sync.WaitGroup) {
 	for oc.processNextEgressQoSNodeWorkItem(wg) {
 	}
 }
 
-func (oc *Controller) processNextEgressQoSNodeWorkItem(wg *sync.WaitGroup) bool {
+func (oc *DefaultNetworkController) processNextEgressQoSNodeWorkItem(wg *sync.WaitGroup) bool {
 	wg.Add(1)
 	defer wg.Done()
 	key, quit := oc.egressQoSNodeQueue.Get()
@@ -884,7 +884,7 @@ func (oc *Controller) processNextEgressQoSNodeWorkItem(wg *sync.WaitGroup) bool 
 	return true
 }
 
-func (oc *Controller) syncEgressQoSNode(key string) error {
+func (oc *DefaultNetworkController) syncEgressQoSNode(key string) error {
 	startTime := time.Now()
 	_, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {

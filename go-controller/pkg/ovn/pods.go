@@ -25,7 +25,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
 
-func (oc *Controller) syncPods(pods []interface{}) error {
+func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 	// get the list of logical switch ports (equivalent to pods). Reserve all existing Pod IPs to
 	// avoid subsequent new Pods getting the same duplicate Pod IP.
 	//
@@ -121,7 +121,7 @@ func (oc *Controller) syncPods(pods []interface{}) error {
 
 // lookupPortUUIDAndNodeName will use libovsdb to locate the logical switch port uuid as well as the logical switch
 // that owns such port (aka nodeName), based on the logical port name.
-func (oc *Controller) lookupPortUUIDAndNodeName(logicalPort string) (portUUID string, logicalSwitch string, err error) {
+func (oc *DefaultNetworkController) lookupPortUUIDAndNodeName(logicalPort string) (portUUID string, logicalSwitch string, err error) {
 	lsp := &nbdb.LogicalSwitchPort{Name: logicalPort}
 	lsp, err = libovsdbops.GetLogicalSwitchPort(oc.nbClient, lsp)
 	if err != nil {
@@ -145,7 +145,7 @@ func (oc *Controller) lookupPortUUIDAndNodeName(logicalPort string) (portUUID st
 	return lsp.UUID, nodeSwitches[0].Name, nil
 }
 
-func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err error) {
+func (oc *DefaultNetworkController) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err error) {
 	podDesc := pod.Namespace + "/" + pod.Name
 	klog.Infof("Deleting pod: %s", podDesc)
 
@@ -297,7 +297,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 	return nil
 }
 
-func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (*nbdb.LogicalSwitch, error) {
+func (oc *DefaultNetworkController) waitForNodeLogicalSwitch(nodeName string) (*nbdb.LogicalSwitch, error) {
 	// Wait for the node logical switch to be created by the ClusterController and be present
 	// in libovsdb's cache. The node switch will be created when the node's logical network infrastructure
 	// is created by the node watch
@@ -315,7 +315,7 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (*nbdb.LogicalSw
 	return ls, nil
 }
 
-func (oc *Controller) waitForNodeLogicalSwitchInCache(nodeName string) error {
+func (oc *DefaultNetworkController) waitForNodeLogicalSwitchInCache(nodeName string) error {
 	// Wait for the node logical switch to be created by the ClusterController.
 	// The node switch will be created when the node's logical network infrastructure
 	// is created by the node watch.
@@ -329,7 +329,7 @@ func (oc *Controller) waitForNodeLogicalSwitchInCache(nodeName string) error {
 	return nil
 }
 
-func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet) error {
+func (oc *DefaultNetworkController) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet) error {
 	// if there are other network attachments for the pod, then check if those network-attachment's
 	// annotation has default-route key. If present, then we need to skip adding default route for
 	// OVN interface
@@ -395,11 +395,11 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 // podExpectedInLogicalCache returns true if pod should be added to oc.logicalPortCache.
 // For some pods, like hostNetwork pods, overlay node pods, or completed pods waiting for them to be added
 // to oc.logicalPortCache will never succeed.
-func (oc *Controller) podExpectedInLogicalCache(pod *kapi.Pod) bool {
+func (oc *DefaultNetworkController) podExpectedInLogicalCache(pod *kapi.Pod) bool {
 	return util.PodWantsNetwork(pod) && !oc.lsManager.IsNonHostSubnetSwitch(pod.Spec.NodeName) && !util.PodCompleted(pod)
 }
 
-func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
+func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	// If a node does node have an assigned hostsubnet don't wait for the logical switch to appear
 	if oc.lsManager.IsNonHostSubnetSwitch(pod.Spec.NodeName) {
 		return nil
@@ -699,7 +699,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	return nil
 }
 
-func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *util.PodAnnotation) error {
+func (oc *DefaultNetworkController) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *util.PodAnnotation) error {
 	resultErr := retry.RetryOnConflict(util.OvnConflictBackoff, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
 		pod, err := oc.watchFactory.GetPod(origPod.Namespace, origPod.Name)
@@ -722,7 +722,7 @@ func (oc *Controller) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *u
 
 // Given a node, gets the next set of addresses (from the IPAM) for each of the node's
 // subnets to assign to the new pod
-func (oc *Controller) assignPodAddresses(nodeName string) (net.HardwareAddr, []*net.IPNet, error) {
+func (oc *DefaultNetworkController) assignPodAddresses(nodeName string) (net.HardwareAddr, []*net.IPNet, error) {
 	var (
 		podMAC   net.HardwareAddr
 		podCIDRs []*net.IPNet
@@ -740,7 +740,7 @@ func (oc *Controller) assignPodAddresses(nodeName string) (net.HardwareAddr, []*
 
 // Given a logical switch port and the node on which it is scheduled, get all
 // addresses currently assigned to it including subnet masks.
-func (oc *Controller) getPortAddresses(nodeName string, existingLSP *nbdb.LogicalSwitchPort) (net.HardwareAddr, []*net.IPNet, error) {
+func (oc *DefaultNetworkController) getPortAddresses(nodeName string, existingLSP *nbdb.LogicalSwitchPort) (net.HardwareAddr, []*net.IPNet, error) {
 	podMac, podIPs, err := util.ExtractPortAddresses(existingLSP)
 	if err != nil {
 		return nil, nil, err
@@ -768,7 +768,7 @@ func (oc *Controller) getPortAddresses(nodeName string, existingLSP *nbdb.Logica
 }
 
 // delLSPOps returns the ovsdb operations required to delete the given logical switch port (LSP)
-func (oc *Controller) delLSPOps(logicalPort, logicalSwitch, lspUUID string) ([]ovsdb.Operation, error) {
+func (oc *DefaultNetworkController) delLSPOps(logicalPort, logicalSwitch, lspUUID string) ([]ovsdb.Operation, error) {
 	lsUUID, _ := oc.lsManager.GetUUID(logicalSwitch)
 	lsw := nbdb.LogicalSwitch{
 		UUID: lsUUID,
