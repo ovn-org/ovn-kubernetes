@@ -1328,6 +1328,7 @@ type nodeSyncs struct {
 	syncClusterRouterPort bool
 	syncMgmtPort          bool
 	syncGw                bool
+	syncHo                bool
 }
 
 func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) error {
@@ -1365,9 +1366,20 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 			oc.nodeClusterRouterPortFailed.Store(node.Name, true)
 			oc.mgmtPortFailed.Store(node.Name, true)
 			oc.gatewaysFailed.Store(node.Name, true)
+			oc.hybridOverlayFailed.Store(node.Name, config.HybridOverlay.Enabled)
 			return fmt.Errorf("nodeAdd: error creating subnet for node %s: %w", node.Name, err)
 		}
 		oc.addNodeFailed.Delete(node.Name)
+	}
+
+	// since the nodeSync objects are created knowing if hybridOverlay is enabled this should work
+	if nSyncs.syncHo {
+		if err = oc.allocateHybridOverlayDRIP(node); err != nil {
+			errs = append(errs, err)
+			oc.hybridOverlayFailed.Store(node.Name, true)
+		} else {
+			oc.hybridOverlayFailed.Delete(node.Name)
+		}
 	}
 
 	if nSyncs.syncClusterRouterPort {

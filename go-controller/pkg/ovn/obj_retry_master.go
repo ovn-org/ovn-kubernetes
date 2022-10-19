@@ -12,6 +12,7 @@ import (
 	"k8s.io/klog/v2"
 
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -401,13 +402,15 @@ func (h *masterEventHandler) AddResource(obj interface{}, fromRetryLoop bool) er
 			_, clusterRtrSync := h.oc.nodeClusterRouterPortFailed.Load(node.Name)
 			_, mgmtSync := h.oc.mgmtPortFailed.Load(node.Name)
 			_, gwSync := h.oc.gatewaysFailed.Load(node.Name)
+			_, hoSync := h.oc.hybridOverlayFailed.Load(node.Name)
 			nodeParams = &nodeSyncs{
 				nodeSync,
 				clusterRtrSync,
 				mgmtSync,
-				gwSync}
+				gwSync,
+				hoSync}
 		} else {
-			nodeParams = &nodeSyncs{true, true, true, true}
+			nodeParams = &nodeSyncs{true, true, true, true, config.HybridOverlay.Enabled}
 		}
 
 		if err = h.oc.addUpdateNodeEvent(node, nodeParams); err != nil {
@@ -547,8 +550,9 @@ func (h *masterEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryC
 		_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
 		gwSync := (failed || gatewayChanged(oldNode, newNode) ||
 			nodeSubnetChanged(oldNode, newNode) || hostAddressesChanged(oldNode, newNode))
+		_, hoSync := h.oc.hybridOverlayFailed.Load(newNode.Name)
 
-		return h.oc.addUpdateNodeEvent(newNode, &nodeSyncs{nodeSync, clusterRtrSync, mgmtSync, gwSync})
+		return h.oc.addUpdateNodeEvent(newNode, &nodeSyncs{nodeSync, clusterRtrSync, mgmtSync, gwSync, hoSync})
 
 	case factory.PeerPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)

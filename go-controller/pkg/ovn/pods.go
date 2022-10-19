@@ -3,10 +3,9 @@ package ovn
 import (
 	"fmt"
 	"net"
-	"strings"
+	"sync/atomic"
 	"time"
 
-	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
@@ -84,6 +83,8 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 			}
 		}
 	}
+	// all pods present before ovn-kube startup have been processed
+	atomic.StoreUint32(&oc.allInitialPodsProcessed, 1)
 
 	// get all the nodes from the watchFactory
 	nodes, err := oc.watchFactory.GetNodes()
@@ -109,38 +110,12 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 		if err != nil {
 			return fmt.Errorf("could not generate ops to delete stale ports from logical switch %s (%+v)", n.Name, err)
 		}
-
-		// have to set up the hybrid Overlay interface address here because all the pod IPs have been allocated above
-		if config.HybridOverlay.Enabled {
-			// check the annotation
-			nodeHybridOverlayDRIP := n.Annotations[hotypes.HybridOverlayDRIP]
-			var hybridOverlayDRIP []string
-			if len(nodeHybridOverlayDRIP) > 0 {
-				hybridOverlayDRIP = strings.Split(nodeHybridOverlayDRIP, ",")
-
-			}
-			AllocatedHybridOverlayDRIPes, err := oc.lsManager.AllocateHybridOverlay(n.Name, hybridOverlayDRIP)
-			if err != nil {
-				return fmt.Errorf("cannot allocate hybrid overlay interface addresses: %v", err)
-			}
-			var sliceHybridOverlayDRIP []string
-			for _, ip := range AllocatedHybridOverlayDRIPes {
-				sliceHybridOverlayDRIP = append(sliceHybridOverlayDRIP, ip.IP.String())
-			}
-			err = oc.kube.SetAnnotationsOnNode(n.Name, map[string]interface{}{hotypes.HybridOverlayDRIP: strings.Join(sliceHybridOverlayDRIP, ",")})
-			if err != nil {
-				return fmt.Errorf("cannot set hybrid annotations on node %s - %v", n.Name, err)
-
-			}
-
-		}
 	}
 
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
 		return fmt.Errorf("could not remove stale logicalPorts from switches (%+v)", err)
 	}
-
 	return nil
 }
 
