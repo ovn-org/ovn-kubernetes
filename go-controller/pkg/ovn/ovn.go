@@ -62,16 +62,12 @@ type ACLLoggingLevels struct {
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
-	client       clientset.Interface
-	kube         kube.Interface
-	watchFactory *factory.WatchFactory
-	stopChan     <-chan struct{}
+	ControllerConnections
+	stopChan <-chan struct{}
 
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
 	masterSubnetAllocator        *subnetallocator.SubnetAllocator
 	hybridOverlaySubnetAllocator *subnetallocator.SubnetAllocator
-
-	SCTPSupport bool
 
 	// For TCP, UDP, and SCTP type traffic, cache OVN load-balancers used for the
 	// cluster's east-west traffic.
@@ -153,15 +149,6 @@ type Controller struct {
 
 	joinSwIPManager *lsm.JoinSwitchIPManager
 
-	// event recorder used to post events to k8s
-	recorder record.EventRecorder
-
-	// libovsdb northbound client interface
-	nbClient libovsdbclient.Client
-
-	// libovsdb southbound client interface
-	sbClient libovsdbclient.Client
-
 	// v4HostSubnetsUsed keeps track of number of v4 subnets currently assigned to nodes
 	v4HostSubnetsUsed float64
 
@@ -240,7 +227,9 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 	if config.HybridOverlay.Enabled {
 		hybridOverlaySubnetAllocator = subnetallocator.NewSubnetAllocator()
 	}
-	oc := &Controller{
+
+	podRecorder := metrics.NewPodRecorder()
+	ovnControllerConnections := ControllerConnections{
 		client: ovnClient.KubeClient,
 		kube: &kube.Kube{
 			KClient:              ovnClient.KubeClient,
@@ -248,7 +237,14 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,
 		},
-		watchFactory:                 wf,
+		watchFactory: wf,
+		podRecorder:  &podRecorder,
+		recorder:     recorder,
+		nbClient:     libovsdbOvnNBClient,
+		sbClient:     libovsdbOvnSBClient,
+	}
+	oc := &Controller{
+		ControllerConnections:        ovnControllerConnections,
 		stopChan:                     stopChan,
 		masterSubnetAllocator:        subnetallocator.NewSubnetAllocator(),
 		hybridOverlaySubnetAllocator: hybridOverlaySubnetAllocator,
@@ -278,9 +274,6 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		loadBalancerGroupUUID:    "",
 		aclLoggingEnabled:        true,
 		joinSwIPManager:          nil,
-		recorder:                 recorder,
-		nbClient:                 libovsdbOvnNBClient,
-		sbClient:                 libovsdbOvnSBClient,
 		svcController:            svcController,
 		svcFactory:               svcFactory,
 		egressSvcController:      egressSvcController,
