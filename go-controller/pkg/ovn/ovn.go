@@ -69,6 +69,9 @@ type DefaultNetworkController struct {
 	wg       *sync.WaitGroup
 	stopChan <-chan struct{}
 
+	// configured cluster subnets
+	clusterSubnets []config.CIDRNetworkEntry
+
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
 	masterSubnetAllocator        *subnetallocator.SubnetAllocator
 	hybridOverlaySubnetAllocator *subnetallocator.SubnetAllocator
@@ -851,4 +854,80 @@ func newEgressServiceController(client clientset.Interface, nbClient libovsdbcli
 		stopCh, svcFactory.Core().V1().Services(),
 		svcFactory.Discovery().V1().EndpointSlices(),
 		svcFactory.Core().V1().Nodes())
+}
+
+func NewDefaultNetworkOVNController(
+	connector ControllerConnections,
+	stopChannel <-chan struct{},
+	waitGroup *sync.WaitGroup,
+	netCIDR string,
+) (*DefaultNetworkController, error) {
+	clusterIPNet, err := config.ParseClusterSubnetEntries(netCIDR)
+	if err != nil {
+		return nil, fmt.Errorf("cluster subnet %s for network %s is invalid: %v", netCIDR, "default", err)
+	}
+
+	svcController, svcFactory := newServiceController(connector.client, connector.nbClient, connector.recorder)
+	return &DefaultNetworkController{
+		ControllerConnections:        connector,
+		wg:                           waitGroup,
+		stopChan:                     stopChannel,
+		clusterSubnets:               clusterIPNet,
+		masterSubnetAllocator:        subnetallocator.NewSubnetAllocator(),
+		hybridOverlaySubnetAllocator: subnetAllocatorIfConfigured(),
+		lsManager:                    lsm.NewLogicalSwitchManager(),
+		logicalPortCache:             newPortCache(stopChannel),
+		namespaces:                   make(map[string]*namespaceInfo),
+		namespacesMutex:              sync.Mutex{},
+		externalGWCache:              make(map[ktypes.NamespacedName]*externalRouteInfo),
+		exGWCacheMutex:               sync.RWMutex{},
+		egressFirewalls:              sync.Map{},
+		egressQoSCache:               sync.Map{},
+		addressSetFactory:            addressset.NewOvnAddressSetFactory(connector.nbClient),
+		networkPolicies:              syncmap.NewSyncMap[*networkPolicy](),
+		sharedNetpolPortGroups:       syncmap.NewSyncMap[*defaultDenyPortGroups](),
+		multicastSupport:             config.EnableMulticast,
+		eIPC:                         generateEgressIPController(connector.nbClient, connector.watchFactory),
+		svcController:                svcController,
+		egressSvcController:          newEgressServiceController(connector.client, connector.nbClient, svcFactory, stopChannel),
+		svcFactory:                   svcFactory,
+		aclLoggingEnabled:            true,
+		retryPods:                    NewRetryObjs(factory.PodType, "", nil, nil, nil),
+		retryNetworkPolicies:         NewRetryObjs(factory.PolicyType, "", nil, nil, nil),
+		retryEgressFirewalls:         NewRetryObjs(factory.EgressFirewallType, "", nil, nil, nil),
+		retryEgressIPs:               NewRetryObjs(factory.EgressIPType, "", nil, nil, nil),
+		retryEgressIPNamespaces:      NewRetryObjs(factory.EgressIPNamespaceType, "", nil, nil, nil),
+		retryEgressIPPods:            NewRetryObjs(factory.EgressIPPodType, "", nil, nil, nil),
+		retryEgressNodes:             NewRetryObjs(factory.EgressNodeType, "", nil, nil, nil),
+		addEgressNodeFailed:          sync.Map{},
+		retryNodes:                   NewRetryObjs(factory.NodeType, "", nil, nil, nil),
+		retryCloudPrivateIPConfig:    NewRetryObjs(factory.CloudPrivateIPConfigType, "", nil, nil, nil),
+		retryNamespaces:              NewRetryObjs(factory.NamespaceType, "", nil, nil, nil),
+		gatewaysFailed:               sync.Map{},
+		mgmtPortFailed:               sync.Map{},
+		addNodeFailed:                sync.Map{},
+		nodeClusterRouterPortFailed:  sync.Map{},
+	}, nil
+}
+
+func subnetAllocatorIfConfigured() *subnetallocator.SubnetAllocator {
+	if config.HybridOverlay.Enabled {
+		return subnetallocator.NewSubnetAllocator()
+	}
+	return nil
+}
+
+func generateEgressIPController(ncCLient libovsdbclient.Client, watchFactory *factory.WatchFactory) egressIPController {
+	return egressIPController{
+		egressIPAssignmentMutex:           &sync.Mutex{},
+		podAssignmentMutex:                &sync.Mutex{},
+		podAssignment:                     make(map[string]*podAssignmentState),
+		pendingCloudPrivateIPConfigsMutex: &sync.Mutex{},
+		pendingCloudPrivateIPConfigsOps:   make(map[string]map[string]*cloudPrivateIPConfigOp),
+		allocator:                         allocator{Mutex: &sync.Mutex{}, cache: make(map[string]*egressNode)},
+		nbClient:                          ncCLient,
+		watchFactory:                      watchFactory,
+		egressIPTotalTimeout:              config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout,
+		egressIPNodeHealthCheckPort:       config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort,
+	}
 }

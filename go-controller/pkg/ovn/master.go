@@ -229,28 +229,6 @@ func (oc *DefaultNetworkController) StartClusterMaster() error {
 
 	metrics.RegisterMasterPerformance(oc.nbClient)
 	metrics.RegisterMasterFunctional()
-	metrics.RunTimestamp(oc.stopChan, oc.sbClient, oc.nbClient)
-	metrics.MonitorIPSec(oc.nbClient)
-	if config.Metrics.EnableConfigDuration {
-		// with k=10,
-		//  for a cluster with 10 nodes, measurement of 1 in every 100 requests
-		//  for a cluster with 100 nodes, measurement of 1 in every 1000 requests
-		metrics.GetConfigDurationRecorder().Run(oc.nbClient, oc.kube, 10, time.Second*5, oc.stopChan)
-	}
-	oc.podRecorder.Run(oc.sbClient, oc.stopChan)
-
-	// enableOVNLogicalDataPathGroups sets an OVN flag to enable logical datapath
-	// groups on OVN 20.12 and later. The option is ignored if OVN doesn't
-	// understand it. Logical datapath groups reduce the size of the southbound
-	// database in large clusters. ovn-controllers should be upgraded to a version
-	// that supports them before the option is turned on by the master.
-	nbGlobal := nbdb.NBGlobal{
-		Options: map[string]string{"use_logical_dp_groups": "true"},
-	}
-	if err := libovsdbops.UpdateNBGlobalSetOptions(oc.nbClient, &nbGlobal); err != nil {
-		klog.Errorf("Failed to set NB global option to enable logical datapath groups: %v", err)
-		return err
-	}
 
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {

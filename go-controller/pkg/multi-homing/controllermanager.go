@@ -1,6 +1,7 @@
 package multi_homing
 
 import (
+	"context"
 	"fmt"
 
 	"k8s.io/klog/v2"
@@ -33,9 +34,10 @@ type ControllerManager struct {
 	// used for leader election
 	identity string
 
-	// controller for all networks, key is netName of net-attach-def, value is *DefaultNetworkController
-	// this map is updated either at the very beginning of ovnkube-master when initializing the default controller
-	// or when net-attach-def is added/deleted. All these are serialized and no lock protection is needed
+	// indexed bag of holding for the Controller for all networks
+	// This map is initially provisioned with the default network controller
+	// and afterwards updated whenever a net-attach-def is added/deleted.
+	// All these are serialized and no lock protection is needed.
 	ovnControllers map[string]Controller
 }
 
@@ -88,6 +90,11 @@ func NewControllerManager(ovnClient *util.OVNClientset, identity string, wf *fac
 }
 
 func (cm *ControllerManager) Init() error {
+	defaultNetworkController, err := cm.DefaultNetworkController()
+	if err != nil {
+		return fmt.Errorf("failed to initialize the default network controller: %v", err)
+	}
+
 	if err := cm.compressSBDatabase(); err != nil {
 		return err
 	}
@@ -95,10 +102,15 @@ func (cm *ControllerManager) Init() error {
 	cm.PodRecorder().Run(cm.SBClient(), cm.defaultStopChan)
 
 	// Start and sync the watch factory to begin listening for events
-	if err := cm.WatchFactory().Start(); err != nil {
-		return err
-	}
-	return nil
+	//if err := cm.WatchFactory().Start(); err != nil {
+	//	return err
+	//}
+	ctx, cancelFn := context.WithCancel(context.Background())
+	return defaultNetworkController.Start(cm.identity, ctx, cancelFn)
+	//if err := defaultNetworkController.Start(cm.identity, ctx, cancelFn); err != nil {
+	//	return fmt.Errorf("failed to start the default network controller: %v", err)
+	//}
+	//return defaultNetworkController.Run(context.Background())
 }
 
 func (cm *ControllerManager) compressSBDatabase() error {
@@ -127,4 +139,23 @@ func (cm *ControllerManager) configureMetrics() {
 		//  for a cluster with 100 nodes, measurement of 1 in every 1000 requests
 		metrics.GetConfigDurationRecorder().Run(cm.NBClient(), cm.OvnkClient(), 10, time.Second*5, cm.defaultStopChan)
 	}
+}
+
+func (cm *ControllerManager) DefaultNetworkController() (Controller, error) {
+	const defaultControllerKey = "default"
+	defaultNetworkController, isDefaultNetworkControllerReady := cm.ovnControllers[defaultControllerKey]
+	if !isDefaultNetworkControllerReady {
+		defaultNetworkOVNController, err := ovn.NewDefaultNetworkOVNController(
+			cm.ControllerConnections,
+			cm.defaultStopChan,
+			cm.defaultWg,
+			config.Default.RawClusterSubnets,
+		)
+		if err != nil {
+			return nil, err
+		}
+		cm.ovnControllers[defaultControllerKey] = defaultNetworkOVNController
+		return defaultNetworkOVNController, nil
+	}
+	return defaultNetworkController, nil
 }
