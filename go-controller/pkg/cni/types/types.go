@@ -5,11 +5,31 @@ import (
 	"net"
 )
 
+type Topology string
+
+const (
+	Routed   Topology = "routed"
+	Switched Topology = "switched"
+	Underlay Topology = "underlay"
+)
+
 // NetConf is CNI NetConf with DeviceID
 type NetConf struct {
 	types.NetConf
 	// PciAddrs in case of using sriov
 	DeviceID string `json:"deviceID,omitempty"`
+
+	// Network Cidr
+	NetCidr string `json:"netCIDR,omitempty"`
+	// Network MTU
+	MTU int `json:"mtu,omitempty"`
+	// captures net-attach-def name in the form of namespace/name
+	NadName string `json:"netAttachDefName,omitempty"`
+	// set to true if it is a secondary networkattachmentdefintion
+	IsSecondary bool `json:"isSecondary,omitempty"`
+	// specifies the OVN topology for this network configuration
+	Topology Topology `json:"topology,omitempty"`
+
 	// LogFile to log all the messages from cni shim binary to
 	LogFile string `json:"logFile,omitempty"`
 	// Level is the logging verbosity level
