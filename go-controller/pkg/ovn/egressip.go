@@ -212,6 +212,7 @@ func (oc *Controller) reconcileEgressIP(old, new *egressipv1.EgressIP) (err erro
 		// for things which exists because the libovsdb operations use
 		// modelClient which is idempotent.
 		if err := oc.addEgressIPAssignments(name, statusToKeep, newEIP.Spec.NamespaceSelector, newEIP.Spec.PodSelector); err != nil {
+			klog.Infof("SURYA %v", name)
 			return err
 		}
 		// Add all assignments which are to be kept to the allocator cache,
@@ -1057,13 +1058,16 @@ func (oc *Controller) addPodEgressIPAssignments(name string, statusAssignments [
 	// If statusAssignments is empty just return, not doing this will delete the
 	// external GW set up, even though there might be no egress IP set up to
 	// perform.
+	klog.Infof("SURYA %v", name)
 	if len(statusAssignments) == 0 {
 		return nil
 	}
+	klog.Infof("SURYA %v:%v", name, statusAssignments)
 	var remainingAssignments []egressipv1.EgressIPStatusItem
 	podKey := getPodKey(pod)
 	podState, exists := oc.eIPC.podAssignment[podKey]
 	if !exists {
+		klog.Infof("SURYA %v:%v", name, statusAssignments)
 		remainingAssignments = statusAssignments
 		// Retrieve the pod's networking configuration from the
 		// logicalPortCache. The reason for doing this: a) only normal network
