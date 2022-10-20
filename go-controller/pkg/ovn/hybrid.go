@@ -3,8 +3,11 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"strings"
+	"sync/atomic"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -327,5 +330,36 @@ func (oc *Controller) removeHybridLRPolicySharedGW(nodeName string) error {
 	}); err != nil {
 		return fmt.Errorf("failed to delete static route %s from %s, error: %v", name+"gr", ovntypes.GWRouterPrefix+nodeName, err)
 	}
+	return nil
+}
+
+// takes the node name and allocates the hybrid overlay distributed router ip address
+func (oc *Controller) allocateHybridOverlayDRIP(node *kapi.Node) error {
+	if atomic.LoadUint32(&oc.allInitialPodsProcessed) == 0 {
+		return fmt.Errorf("cannot allocate hybrid overlay distributed router ip for nodes until all initial pods are processed")
+	}
+
+	var ips []string
+	// check if there is a hybrid distributed router IP set as an annotation
+	nodeHybridOverlayDRIP := node.Annotations[hotypes.HybridOverlayDRIP]
+	if len(nodeHybridOverlayDRIP) > 0 {
+		ips = strings.Split(nodeHybridOverlayDRIP, ",")
+	}
+
+	allocatedHybridOverlayDRIPs, err := oc.lsManager.AllocateHybridOverlay(node.Name, ips)
+	if err != nil {
+		return fmt.Errorf("cannot allocate hybrid overlay interface addresses on node %s: %v", node.Name, err)
+	}
+
+	var sliceHybridOverlayDRIP []string
+	for _, ip := range allocatedHybridOverlayDRIPs {
+		sliceHybridOverlayDRIP = append(sliceHybridOverlayDRIP, ip.IP.String())
+	}
+
+	err = oc.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{hotypes.HybridOverlayDRIP: strings.Join(sliceHybridOverlayDRIP, ",")})
+	if err != nil {
+		return fmt.Errorf("cannot set hybrid annotation on node %s: %v", node.Name, err)
+	}
+
 	return nil
 }

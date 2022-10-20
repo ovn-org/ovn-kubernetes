@@ -196,6 +196,7 @@ type Controller struct {
 	mgmtPortFailed              sync.Map
 	addNodeFailed               sync.Map
 	nodeClusterRouterPortFailed sync.Map
+	hybridOverlayFailed         sync.Map
 
 	// retry framework for Cloud private IP config
 	retryCloudPrivateIPConfig *retry.RetryFramework
@@ -204,6 +205,10 @@ type Controller struct {
 	retryNamespaces *retry.RetryFramework
 
 	podRecorder metrics.PodRecorder
+
+	// variable to determine if all pods present on the node during startup have been processed
+	// updated atomically
+	allInitialPodsProcessed uint32
 }
 
 const (

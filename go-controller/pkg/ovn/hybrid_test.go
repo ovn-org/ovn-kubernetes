@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"sync"
+	"sync/atomic"
 
 	"github.com/urfave/cli/v2"
 
@@ -390,6 +391,8 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
+			//assuming all the pods have finished processing
+			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
 			// Let the real code run and ensure OVN database sync
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
 
@@ -400,6 +403,14 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				}
 				return updatedNode.Annotations, nil
 			}, 2).Should(gomega.HaveKeyWithValue(hotypes.HybridOverlayDRMAC, nodeHOMAC))
+
+			gomega.Eventually(func() (map[string]string, error) {
+				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return updatedNode.Annotations, nil
+			}, 2).Should(gomega.HaveKeyWithValue(hotypes.HybridOverlayDRIP, nodeHOIP))
 
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
