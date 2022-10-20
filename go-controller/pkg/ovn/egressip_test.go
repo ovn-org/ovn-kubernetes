@@ -3576,8 +3576,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 						Items: []v1.Pod{egressPod1},
 					},
 				)
-
-				fakeOvn.controller.lsManager.AddNode(node1.Name, node1.Name+"-UUID", []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
+				// we don't know the real switch UUID in the db, but it can be found by name
+				swUUID := getLogicalSwitchUUID(fakeOvn.controller.nbClient, node1.Name)
+				fakeOvn.controller.lsManager.AddNode(node1.Name, swUUID, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
 
 				err := fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
