@@ -59,8 +59,6 @@ type ACLLoggingLevels struct {
 	Deny  string `json:"deny,omitempty"`
 }
 
-// Controller structure is the object which holds the controls for starting
-
 // DefaultNetworkController structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type DefaultNetworkController struct {
@@ -863,7 +861,7 @@ func NewDefaultNetworkOVNController(
 	}
 
 	svcController, svcFactory := newServiceController(connector.client, connector.nbClient, connector.recorder)
-	return &DefaultNetworkController{
+	defaultNetworkController := &DefaultNetworkController{
 		ControllerConnections:        connector,
 		wg:                           waitGroup,
 		stopChan:                     stopChannel,
@@ -887,22 +885,14 @@ func NewDefaultNetworkOVNController(
 		egressSvcController:          newEgressServiceController(connector.client, connector.nbClient, svcFactory, stopChannel),
 		svcFactory:                   svcFactory,
 		aclLoggingEnabled:            true,
-		retryPods:                    NewRetryObjs(factory.PodType, "", nil, nil, nil),
-		retryNetworkPolicies:         NewRetryObjs(factory.PolicyType, "", nil, nil, nil),
-		retryEgressFirewalls:         NewRetryObjs(factory.EgressFirewallType, "", nil, nil, nil),
-		retryEgressIPs:               NewRetryObjs(factory.EgressIPType, "", nil, nil, nil),
-		retryEgressIPNamespaces:      NewRetryObjs(factory.EgressIPNamespaceType, "", nil, nil, nil),
-		retryEgressIPPods:            NewRetryObjs(factory.EgressIPPodType, "", nil, nil, nil),
-		retryEgressNodes:             NewRetryObjs(factory.EgressNodeType, "", nil, nil, nil),
 		addEgressNodeFailed:          sync.Map{},
-		retryNodes:                   NewRetryObjs(factory.NodeType, "", nil, nil, nil),
-		retryCloudPrivateIPConfig:    NewRetryObjs(factory.CloudPrivateIPConfigType, "", nil, nil, nil),
-		retryNamespaces:              NewRetryObjs(factory.NamespaceType, "", nil, nil, nil),
 		gatewaysFailed:               sync.Map{},
 		mgmtPortFailed:               sync.Map{},
 		addNodeFailed:                sync.Map{},
 		nodeClusterRouterPortFailed:  sync.Map{},
-	}, nil
+	}
+	defaultNetworkController.initRetryFrameworkForMaster()
+	return defaultNetworkController, nil
 }
 
 func subnetAllocatorIfConfigured() *subnetallocator.SubnetAllocator {

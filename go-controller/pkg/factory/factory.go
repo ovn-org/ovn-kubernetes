@@ -667,7 +667,7 @@ func (wf *WatchFactory) RemoveEgressQoSHandler(handler *Handler) {
 
 // AddNetworkattachmentdefinitionHandler adds a handler function that will be executed on Networkattachmentdefinition object changes
 func (wf *WatchFactory) AddNetworkattachmentdefinitionHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
-	return wf.addHandler(NetworkattachmentdefinitionType, "", nil, handlerFuncs, processExisting)
+	return wf.addHandler(NetworkattachmentdefinitionType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
 }
 
 // RemoveNetworkattachmentdefinitionHandler removes an Networkattachmentdefinition object event handler function

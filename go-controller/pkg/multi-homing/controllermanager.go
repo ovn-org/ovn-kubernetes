@@ -3,14 +3,16 @@ package multi_homing
 import (
 	"context"
 	"fmt"
-
-	"k8s.io/klog/v2"
 	"sync"
 	"time"
 
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/klog/v2"
+
+	netattachdefinformers "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
@@ -63,6 +65,7 @@ func NewControllerManager(ovnClient *util.OVNClientset, identity string, wf *fac
 		klog.Info("SCTP support detected in OVN")
 		controllerConnections = ovn.NewOvnControllerConnectionManagerWithSCTPSupport(
 			ovnClient.KubeClient,
+			ovnClient.NetworkAttchDefClient,
 			ovnkKubeClient,
 			wf,
 			recorder,
@@ -74,6 +77,7 @@ func NewControllerManager(ovnClient *util.OVNClientset, identity string, wf *fac
 		klog.Warningf("SCTP unsupported by this version of OVN. Kubernetes service creation with SCTP will not work ")
 		controllerConnections = ovn.NewOvnControllerConnectionManager(
 			ovnClient.KubeClient,
+			ovnClient.NetworkAttchDefClient,
 			ovnkKubeClient,
 			wf,
 			recorder,
@@ -102,8 +106,6 @@ func (cm *ControllerManager) Start() error {
 	if err := cm.WatchFactory().Start(); err != nil {
 		return err
 	}
-
-	// TODO: start the net-attach-def watchers
 
 	return nil
 }
@@ -219,6 +221,12 @@ func (cm *ControllerManager) ControlPlaneLeaderEntryPoint(ctx context.Context, c
 					cancel()
 					return
 				}
+
+				if err := cm.ConfigureSecondaryNetworksHandlers(); err != nil {
+					klog.Error(err)
+					cancel()
+					return
+				}
 			},
 			OnStoppedLeading: func() {
 				//This node was leader and it lost the election.
@@ -249,5 +257,35 @@ func (cm *ControllerManager) ControlPlaneLeaderEntryPoint(ctx context.Context, c
 		cm.defaultWg.Done()
 	}()
 
+	return nil
+}
+
+func (cm *ControllerManager) ConfigureSecondaryNetworksHandlers() error {
+	if config.OVNKubernetesFeature.EnableMultiNetwork {
+		const (
+			avoidResync     = 0
+			numberOfWorkers = 2 // TODO: should we make this configurable ?
+		)
+
+		netAttachDefInformerFact := netattachdefinformers.NewSharedInformerFactoryWithOptions(
+			cm.MultiNetClient(),
+			avoidResync,
+		)
+		nodeInformerFact := informers.NewSharedInformerFactoryWithOptions(cm.K8sClient(), avoidResync)
+		secondaryNetworksController := NewNetAttachDefController(
+			cm.K8sClient(),
+			cm.EventRecorder(),
+			netAttachDefInformerFact.K8sCniCncfIo().V1().NetworkAttachmentDefinitions(),
+			nodeInformerFact.Core().V1().Nodes(),
+		)
+
+		netAttachDefInformerFact.Start(cm.defaultStopChan)
+		nodeInformerFact.Start(cm.defaultStopChan)
+		if err := secondaryNetworksController.Run(numberOfWorkers, cm.defaultStopChan); err != nil {
+			return err
+		}
+
+		return nil
+	}
 	return nil
 }
