@@ -2492,12 +2492,12 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				err = fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				extIPs, err := getExternalIPsGRSNAT(fakeOvn.controller.watchFactory, pod[0].Spec.NodeName)
+				extIPs, err := getExternalIPsGR(fakeOvn.controller.watchFactory, pod[0].Spec.NodeName)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				_, fullMaskPodNet, _ := net.ParseCIDR("10.128.1.3/32")
 				gomega.Expect(
-					addOrUpdatePerPodGRSNAT(fakeOvn.controller.nbClient, pod[0].Spec.NodeName, extIPs, []*net.IPNet{fullMaskPodNet}),
+					addOrUpdatePodSNAT(fakeOvn.controller.nbClient, pod[0].Spec.NodeName, extIPs, []*net.IPNet{fullMaskPodNet}),
 				).To(gomega.Succeed())
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				finalNB = []libovsdbtest.TestData{
@@ -2516,7 +2516,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Name: "node1",
 					},
 				}
-				err = deletePerPodGRSNAT(fakeOvn.controller.nbClient, nodeName, extIPs, []*net.IPNet{fullMaskPodNet})
+				err = deletePodSNAT(fakeOvn.controller.nbClient, nodeName, extIPs, []*net.IPNet{fullMaskPodNet})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				return nil

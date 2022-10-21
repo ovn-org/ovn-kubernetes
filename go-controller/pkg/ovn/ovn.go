@@ -47,7 +47,6 @@ import (
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
 )
 
 const (
@@ -221,20 +220,6 @@ const (
 	// SCTP is the constant string for the string "SCTP"
 	SCTP = "SCTP"
 )
-
-func GetIPFullMask(ip string) string {
-	const (
-		// IPv4FullMask is the maximum prefix mask for an IPv4 address
-		IPv4FullMask = "/32"
-		// IPv6FullMask is the maxiumum prefix mask for an IPv6 address
-		IPv6FullMask = "/128"
-	)
-
-	if utilnet.IsIPv6(net.ParseIP(ip)) {
-		return IPv6FullMask
-	}
-	return IPv4FullMask
-}
 
 // getPodNamespacedName returns <namespace>_<podname> for the provided pod
 func getPodNamespacedName(pod *kapi.Pod) string {

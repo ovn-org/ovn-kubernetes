@@ -772,13 +772,13 @@ func (h *masterEventHandler) SyncFunc(objs []interface{}) error {
 	} else {
 		switch h.objType {
 		case factory.PodType:
-			syncFunc = h.oc.syncPodsRetriable
+			syncFunc = h.oc.syncPods
 
 		case factory.PolicyType:
 			syncFunc = h.oc.syncNetworkPolicies
 
 		case factory.NodeType:
-			syncFunc = h.oc.syncNodesRetriable
+			syncFunc = h.oc.syncNodes
 
 		case factory.LocalPodSelectorType,
 			factory.PeerServiceType,
@@ -791,14 +791,14 @@ func (h *masterEventHandler) SyncFunc(objs []interface{}) error {
 		case factory.EgressFirewallType:
 			syncFunc = h.oc.syncEgressFirewall
 
-		case factory.EgressIPType:
+		case factory.EgressIPNamespaceType:
 			syncFunc = h.oc.syncEgressIPs
 
 		case factory.EgressNodeType:
 			syncFunc = h.oc.initClusterEgressPolicies
 
 		case factory.EgressIPPodType,
-			factory.EgressIPNamespaceType,
+			factory.EgressIPType,
 			factory.CloudPrivateIPConfigType:
 			syncFunc = nil
 

@@ -523,6 +523,14 @@ func getNodeAddresses(node *v1.Node) (string, string) {
 	return ipv4Res, ipv6Res
 }
 
+func getNodeStatus(node string) string {
+	status, err := framework.RunKubectl("default", "get", "node", "-o", "jsonpath={.status.conditions[?(@.type==\"Ready\")].status}", node)
+	if err != nil {
+		framework.Failf("Unable to retrieve the status for node: %s %v", node, err)
+	}
+	return status
+}
+
 // Returns the container's ipv4 and ipv6 addresses IN ORDER
 // related to the given network.
 func getContainerAddressesForNetwork(container, network string) (string, string) {

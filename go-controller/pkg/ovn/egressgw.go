@@ -231,7 +231,7 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 		podIPs := make([]*net.IPNet, 0)
 		for _, podIP := range pod.Status.PodIPs {
 			podIPStr := utilnet.ParseIPSloppy(podIP.IP).String()
-			cidr := podIPStr + GetIPFullMask(podIPStr)
+			cidr := podIPStr + util.GetIPFullMask(podIPStr)
 			_, ipNet, err := net.ParseCIDR(cidr)
 			if err != nil {
 				return fmt.Errorf("failed to parse CIDR: %s, error: %v", cidr, err)
@@ -245,7 +245,7 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 		if config.Gateway.DisableSNATMultipleGWs {
 			// delete all perPodSNATs (if this pod was controlled by egressIP controller, it will stop working since
 			// a pod cannot be used for multiple-external-gateways and egressIPs at the same time)
-			if err = deletePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, []*net.IPNet{}, podIPs); err != nil {
+			if err = deletePodSNAT(oc.nbClient, pod.Spec.NodeName, []*net.IPNet{}, podIPs); err != nil {
 				klog.Error(err.Error())
 			}
 		}
@@ -325,7 +325,7 @@ func (oc *Controller) deletePodGWRoute(routeInfo *externalRouteInfo, podIP, gw, 
 		return nil
 	}
 
-	mask := GetIPFullMask(podIP)
+	mask := util.GetIPFullMask(podIP)
 	if err := oc.deleteLogicalRouterStaticRoute(podIP, mask, gw, gr); err != nil {
 		return fmt.Errorf("unable to delete pod %s ECMP route to GR %s, GW: %s: %w",
 			routeInfo.podName, gr, gw, err)
@@ -495,7 +495,7 @@ func (oc *Controller) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddrs []*n
 						routesAdded++
 						continue
 					}
-					mask := GetIPFullMask(podIP)
+					mask := util.GetIPFullMask(podIP)
 
 					if err := oc.createBFDStaticRoute(gateway.bfdEnabled, gw, podIP, gr, port, mask); err != nil {
 						return err
@@ -524,15 +524,15 @@ func (oc *Controller) addGWRoutesForPod(gateways []*gatewayInfo, podIfAddrs []*n
 	return nil
 }
 
-// buildPerPodGRSNAT builds per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
+// buildPodSNAT builds per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
 // if allSNATs flag is set, then all the SNATs (including against egressIPs if any) for that pod will be returned
-func buildPerPodGRSNAT(extIPs, podIPNets []*net.IPNet) ([]*nbdb.NAT, error) {
+func buildPodSNAT(extIPs, podIPNets []*net.IPNet) ([]*nbdb.NAT, error) {
 	nats := make([]*nbdb.NAT, 0, len(extIPs)*len(podIPNets))
 	var nat *nbdb.NAT
 
 	for _, podIPNet := range podIPNets {
 		podIP := podIPNet.IP.String()
-		mask := GetIPFullMask(podIP)
+		mask := util.GetIPFullMask(podIP)
 		_, fullMaskPodNet, err := net.ParseCIDR(podIP + mask)
 		if err != nil {
 			return nil, fmt.Errorf("invalid IP: %s and mask: %s combination, error: %v", podIP, mask, err)
@@ -553,8 +553,8 @@ func buildPerPodGRSNAT(extIPs, podIPNets []*net.IPNet) ([]*nbdb.NAT, error) {
 	return nats, nil
 }
 
-// getExternalIPsGRSNAT returns all the externalIPs for a node(GR) from its l3 gateway annotation
-func getExternalIPsGRSNAT(watchFactory *factory.WatchFactory, nodeName string) ([]*net.IPNet, error) {
+// getExternalIPsGR returns all the externalIPs for a node(GR) from its l3 gateway annotation
+func getExternalIPsGR(watchFactory *factory.WatchFactory, nodeName string) ([]*net.IPNet, error) {
 	var err error
 	node, err := watchFactory.GetNode(nodeName)
 	if err != nil {
@@ -567,11 +567,11 @@ func getExternalIPsGRSNAT(watchFactory *factory.WatchFactory, nodeName string) (
 	return l3GWConfig.IPAddresses, nil
 }
 
-// deletePerPodGRSNAT removes per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
+// deletePodSNAT removes per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
 // if allSNATs flag is set, then all the SNATs (including against egressIPs if any) for that pod will be deleted
 // used when disableSNATMultipleGWs=true
-func deletePerPodGRSNAT(nbClient libovsdbclient.Client, nodeName string, extIPs, podIPNets []*net.IPNet) error {
-	nats, err := buildPerPodGRSNAT(extIPs, podIPNets)
+func deletePodSNAT(nbClient libovsdbclient.Client, nodeName string, extIPs, podIPNets []*net.IPNet) error {
+	nats, err := buildPodSNAT(extIPs, podIPNets)
 	if err != nil {
 		return err
 	}
@@ -585,10 +585,10 @@ func deletePerPodGRSNAT(nbClient libovsdbclient.Client, nodeName string, extIPs,
 	return nil
 }
 
-// addOrUpdatePerPodGRSNAT adds or updates per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
+// addOrUpdatePodSNAT adds or updates per pod SNAT rules towards the nodeIP that are applied to the GR where the pod resides
 // used when disableSNATMultipleGWs=true
-func addOrUpdatePerPodGRSNAT(nbClient libovsdbclient.Client, nodeName string, extIPs, podIfAddrs []*net.IPNet) error {
-	nats, err := buildPerPodGRSNAT(extIPs, podIfAddrs)
+func addOrUpdatePodSNAT(nbClient libovsdbclient.Client, nodeName string, extIPs, podIfAddrs []*net.IPNet) error {
+	nats, err := buildPodSNAT(extIPs, podIfAddrs)
 	if err != nil {
 		return err
 	}
@@ -601,13 +601,13 @@ func addOrUpdatePerPodGRSNAT(nbClient libovsdbclient.Client, nodeName string, ex
 	return nil
 }
 
-// addOrUpdatePerPodGRSNATReturnOps returns the operation that adds or updates per pod SNAT rules towards the nodeIP that are
+// addOrUpdatePodSNATReturnOps returns the operation that adds or updates per pod SNAT rules towards the nodeIP that are
 // applied to the GR where the pod resides
 // used when disableSNATMultipleGWs=true
-func (oc *Controller) addOrUpdatePerPodGRSNATReturnOps(nodeName string, extIPs, podIfAddrs []*net.IPNet, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
+func (oc *Controller) addOrUpdatePodSNATReturnOps(nodeName string, extIPs, podIfAddrs []*net.IPNet, ops []ovsdb.Operation) ([]ovsdb.Operation, error) {
 	gr := types.GWRouterPrefix + nodeName
 	router := &nbdb.LogicalRouter{Name: gr}
-	nats, err := buildPerPodGRSNAT(extIPs, podIfAddrs)
+	nats, err := buildPodSNAT(extIPs, podIfAddrs)
 	if err != nil {
 		return nil, err
 	}

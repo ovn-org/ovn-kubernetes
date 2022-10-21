@@ -25,7 +25,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
 
-func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
+func (oc *Controller) syncPods(pods []interface{}) error {
 	// get the list of logical switch ports (equivalent to pods). Reserve all existing Pod IPs to
 	// avoid subsequent new Pods getting the same duplicate Pod IP.
 	//
@@ -55,7 +55,7 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 						util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
 						pod.Spec.NodeName)
 				} else {
-					return fmt.Errorf("Couldn't allocate IPs: %s for pod: %s on node: %s"+
+					return fmt.Errorf("couldn't allocate IPs: %s for pod: %s on node: %s"+
 						" error: %v", util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
 						pod.Spec.NodeName, err)
 				}
@@ -275,7 +275,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 	}
 
 	if config.Gateway.DisableSNATMultipleGWs {
-		if err := deletePerPodGRSNAT(oc.nbClient, nodeName, []*net.IPNet{}, podIfAddrs); err != nil {
+		if err := deletePodSNAT(oc.nbClient, nodeName, []*net.IPNet{}, podIfAddrs); err != nil {
 			return fmt.Errorf("cannot delete GR SNAT for pod %s: %w", podDesc, err)
 		}
 	}
@@ -625,9 +625,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	} else if config.Gateway.DisableSNATMultipleGWs {
 		// Add NAT rules to pods if disable SNAT is set and does not have
 		// namespace annotations to go through external egress router
-		if extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName); err != nil {
+		if extIPs, err := getExternalIPsGR(oc.watchFactory, pod.Spec.NodeName); err != nil {
 			return err
-		} else if ops, err = oc.addOrUpdatePerPodGRSNATReturnOps(pod.Spec.NodeName, extIPs, podIfAddrs, ops); err != nil {
+		} else if ops, err = oc.addOrUpdatePodSNATReturnOps(pod.Spec.NodeName, extIPs, podIfAddrs, ops); err != nil {
 			return err
 		}
 	}

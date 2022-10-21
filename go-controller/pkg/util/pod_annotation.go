@@ -10,7 +10,7 @@ import (
 	netattachdefutils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -234,6 +234,28 @@ func unmarshalPodAnnotationAllNetworks(annotations map[string]string) (map[strin
 		}
 	}
 	return podNetworks, nil
+}
+
+// GetPodCIDRsWithFullMask returns the pod's IP addresses in a CIDR with FullMask format
+// Internally it calls GetAllPodIPs
+func GetPodCIDRsWithFullMask(pod *v1.Pod) ([]*net.IPNet, error) {
+	podIPs, err := GetAllPodIPs(pod)
+	if err != nil {
+		return nil, err
+	}
+	ips := make([]*net.IPNet, 0, len(podIPs))
+	for _, podIP := range podIPs {
+		podIPStr := podIP.String()
+		mask := GetIPFullMask(podIPStr)
+		_, ipnet, err := net.ParseCIDR(podIPStr + mask)
+		if err != nil {
+			// this should not happen;
+			klog.Warningf("Failed to parse pod IP %v err: %v", podIP, err)
+			continue
+		}
+		ips = append(ips, ipnet)
+	}
+	return ips, nil
 }
 
 // GetAllPodIPs returns the pod's IP addresses, first from the OVN annotation

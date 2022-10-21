@@ -312,9 +312,9 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 						ips = append(ips, &net.IPNet{IP: podIP})
 					}
 					if len(ips) > 0 {
-						if extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName); err != nil {
+						if extIPs, err := getExternalIPsGR(oc.watchFactory, pod.Spec.NodeName); err != nil {
 							errors = append(errors, err)
-						} else if err = deletePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, ips); err != nil {
+						} else if err = deletePodSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, ips); err != nil {
 							errors = append(errors, err)
 						}
 					}
@@ -347,9 +347,9 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 				if err != nil {
 					errors = append(errors, err)
 				} else {
-					if extIPs, err := getExternalIPsGRSNAT(oc.watchFactory, pod.Spec.NodeName); err != nil {
+					if extIPs, err := getExternalIPsGR(oc.watchFactory, pod.Spec.NodeName); err != nil {
 						errors = append(errors, err)
-					} else if err = addOrUpdatePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, podAnnotation.IPs); err != nil {
+					} else if err = addOrUpdatePodSNAT(oc.nbClient, pod.Spec.NodeName, extIPs, podAnnotation.IPs); err != nil {
 						errors = append(errors, err)
 					}
 				}
