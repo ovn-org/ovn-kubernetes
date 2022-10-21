@@ -615,13 +615,15 @@ func (oc *Controller) addResource(objectsToRetry *RetryObjs, obj interface{}, fr
 			_, clusterRtrSync := oc.nodeClusterRouterPortFailed.Load(node.Name)
 			_, mgmtSync := oc.mgmtPortFailed.Load(node.Name)
 			_, gwSync := oc.gatewaysFailed.Load(node.Name)
+			_, hoSync := oc.hybridOverlayFailed.Load(node.Name)
 			nodeParams = &nodeSyncs{
 				nodeSync,
 				clusterRtrSync,
 				mgmtSync,
-				gwSync}
+				gwSync,
+				hoSync}
 		} else {
-			nodeParams = &nodeSyncs{true, true, true, true}
+			nodeParams = &nodeSyncs{true, true, true, true, config.HybridOverlay.Enabled}
 		}
 
 		if err = oc.addUpdateNodeEvent(node, nodeParams); err != nil {
@@ -809,8 +811,9 @@ func (oc *Controller) updateResource(objectsToRetry *RetryObjs, oldObj, newObj i
 		_, failed = oc.gatewaysFailed.Load(newNode.Name)
 		gwSync := (failed || gatewayChanged(oldNode, newNode) ||
 			nodeSubnetChanged(oldNode, newNode) || hostAddressesChanged(oldNode, newNode))
+		_, hoSync := oc.hybridOverlayFailed.Load(newNode.Name)
 
-		return oc.addUpdateNodeEvent(newNode, &nodeSyncs{nodeSync, clusterRtrSync, mgmtSync, gwSync})
+		return oc.addUpdateNodeEvent(newNode, &nodeSyncs{nodeSync, clusterRtrSync, mgmtSync, gwSync, hoSync})
 
 	case factory.PeerPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
