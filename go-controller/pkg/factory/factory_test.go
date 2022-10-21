@@ -1124,20 +1124,17 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	It("correctly orders add events across prioritized handlers sharing the same object type", func() {
 		type opTest struct {
-			mu                            sync.Mutex
-			namespace                     *v1.Namespace
-			added                         int
-			updated                       int
-			initialupdateBeforeEIPAdd     bool
-			initialupdateBeforePeerAdd    bool
-			initialupdateBeforePeerPodAdd bool
+			mu        sync.Mutex
+			namespace *v1.Namespace
+			added     int
+			updated   int
 		}
 		testNamespaces := make(map[string]*opTest)
 
 		for i := 0; i < 998; i++ {
 			name := fmt.Sprintf("mynamespace-%d", i)
 			namespace := newNamespace(name)
-			testNamespaces[name] = &opTest{namespace: namespace, initialupdateBeforeEIPAdd: false, initialupdateBeforePeerAdd: false, initialupdateBeforePeerPodAdd: false}
+			testNamespaces[name] = &opTest{namespace: namespace}
 			// Add all namespaces to the initial list
 			namespaces = append(namespaces, namespace)
 		}
@@ -1146,21 +1143,6 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
-
-		startWg := sync.WaitGroup{}
-		startWg.Add(1)
-		doneWg := sync.WaitGroup{}
-		doneWg.Add(1)
-		go func() {
-			startWg.Done()
-			// Send an update event for each namespace
-			for _, n := range namespaces {
-				n.Status.Phase = v1.NamespaceTerminating
-				namespaceWatch.Modify(n)
-			}
-			doneWg.Done()
-		}()
-		startWg.Wait()
 
 		nsh, c1 := addPriorityHandler(wf, NamespaceType, NamespaceType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
@@ -1181,14 +1163,7 @@ var _ = Describe("Watch Factory Operations", func() {
 				// Expect updates to be processed after Add
 				ot.mu.Lock()
 				defer ot.mu.Unlock()
-				if ot.added == 1 {
-					// we don't have control over order of update v/s add between the different priority handlers
-					ot.initialupdateBeforeEIPAdd = true
-				} else if ot.added == 10 {
-					ot.initialupdateBeforePeerAdd = true
-				} else if ot.added == 8 {
-					ot.initialupdateBeforePeerPodAdd = true
-				}
+				Expect(ot.added).To(Equal(4), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
 				Expect(ot.updated).To(Equal(0))
 				ot.updated++
 				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceTerminating))
@@ -1215,6 +1190,7 @@ var _ = Describe("Watch Factory Operations", func() {
 				// Expect updates to be processed after Add
 				ot.mu.Lock()
 				defer ot.mu.Unlock()
+				Expect(ot.added).To(Equal(4), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
 				Expect(ot.updated).To(Equal(1), "update for EIP namespace %s processed before initial namespace update!", newNamespace.Name)
 				ot.updated = ot.updated * 10
 				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceTerminating))
@@ -1240,11 +1216,8 @@ var _ = Describe("Watch Factory Operations", func() {
 				// Expect updates to be processed after Add
 				ot.mu.Lock()
 				defer ot.mu.Unlock()
-				if ot.initialupdateBeforeEIPAdd {
-					Expect(ot.updated).To(Equal(1), "update for peer namespace %s processed before initial namespace update!", newNamespace.Name)
-				} else {
-					Expect(ot.updated).To(Equal(10), "update for peer namespace %s processed before EIP namespace update!", newNamespace.Name)
-				}
+				Expect(ot.added).To(Equal(4), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
+				Expect(ot.updated).To(Equal(10), "update for peer namespace %s processed before EIP namespace update!", newNamespace.Name)
 				ot.updated = ot.updated - 2
 				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceTerminating))
 			},
@@ -1270,19 +1243,22 @@ var _ = Describe("Watch Factory Operations", func() {
 				ot.mu.Lock()
 				defer ot.mu.Unlock()
 				Expect(ot.added).To(Equal(4), "update for peerPod namespace %s processed before peerPod namespace add!", newNamespace.Name)
-				if ot.initialupdateBeforeEIPAdd {
-					Expect(ot.updated).To(Equal(1), "update for peerPod namespace %s processed before initial namespace update!", newNamespace.Name)
-				} else if ot.initialupdateBeforePeerAdd {
-					Expect(ot.updated).To(Equal(10), "update for peerPod namespace %s processed before EIP namespace update!", newNamespace.Name)
-				} else {
-					Expect(ot.updated).To(Equal(8), "update for peerPod namespace %s processed before peer namespace update!", newNamespace.Name)
-				}
+				Expect(ot.updated).To(Equal(8), "update for peerPod namespace %s processed before peer namespace update!", newNamespace.Name)
 				ot.updated = ot.updated / 2
 				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceTerminating))
 			},
 			DeleteFunc: func(obj interface{}) {},
 		})
-		doneWg.Wait()
+		done := make(chan bool)
+		go func() {
+			// Send an update event for each namespace
+			for _, n := range namespaces {
+				n.Status.Phase = v1.NamespaceTerminating
+				namespaceWatch.Modify(n)
+			}
+			done <- true
+		}()
+
 		// Adds are done synchronously at handler addition time
 		for _, ot := range testNamespaces {
 			ot.mu.Lock()
@@ -1291,34 +1267,22 @@ var _ = Describe("Watch Factory Operations", func() {
 			ot.mu.Unlock()
 		}
 		Expect(c1.getAdded()).To(Equal(len(testNamespaces)))
-		Eventually(c2.getAdded, 10).Should(Equal(len(testNamespaces)))
-		Eventually(c3.getAdded, 10).Should(Equal(len(testNamespaces)))
-
+		Expect(c2.getAdded()).To(Equal(len(testNamespaces)))
+		Expect(c3.getAdded()).To(Equal(len(testNamespaces)))
+		Expect(c4.getAdded()).To(Equal(len(testNamespaces)))
+		<-done
 		// Updates are async and may take a bit longer to finish
 		Eventually(c1.getUpdated, 10).Should(Equal(len(testNamespaces)))
-		eipUpdateCount := 0
-		peerUpdateCount := 0
-		peerPodUpdateCount := 0
+		Eventually(c2.getUpdated, 10).Should(Equal(len(testNamespaces)))
+		Eventually(c3.getUpdated, 10).Should(Equal(len(testNamespaces)))
+		Eventually(c4.getUpdated, 10).Should(Equal(len(testNamespaces)))
+
 		for _, ot := range testNamespaces {
 			ot.mu.Lock()
-			if !ot.initialupdateBeforePeerAdd && !ot.initialupdateBeforeEIPAdd && !ot.initialupdateBeforePeerPodAdd {
-				peerUpdateCount++
-				eipUpdateCount++
-				peerPodUpdateCount++
-				Expect(ot.updated).To(Equal(4), "missing update for namespace %s", ot.namespace.Name)
-			} else if !ot.initialupdateBeforePeerAdd && !ot.initialupdateBeforeEIPAdd {
-				peerUpdateCount++
-				eipUpdateCount++
-				Expect(ot.updated).To(Equal(8), "missing update for namespace %s", ot.namespace.Name)
-			} else if !ot.initialupdateBeforeEIPAdd {
-				eipUpdateCount++
-				Expect(ot.updated).To(Equal(10), "missing update for namespace %s", ot.namespace.Name)
-			}
+			// ((((0 + 1) * 10) - 2) / 2) = 4
+			Expect(ot.updated).To(Equal(4), "missing update for namespace %s", ot.namespace.Name)
 			ot.mu.Unlock()
 		}
-		Eventually(c2.getUpdated, 10).Should(Equal(eipUpdateCount))
-		Eventually(c3.getUpdated, 10).Should(Equal(peerUpdateCount))
-		Eventually(c4.getUpdated, 10).Should(Equal(peerPodUpdateCount))
 
 		wf.RemoveNamespaceHandler(nsh)
 		wf.RemoveNamespaceHandler(eipnsh)
