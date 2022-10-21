@@ -338,6 +338,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableEgressFirewall            bool `gcfg:"enable-egress-firewall"`
 	EnableEgressQoS                 bool `gcfg:"enable-egress-qos"`
 	EgressIPNodeHealthCheckPort     int  `gcfg:"egressip-node-healthcheck-port"`
+	EnableMultiNetwork              bool `gcfg:"enable-multi-network"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -884,6 +885,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Name:        "egressip-node-healthcheck-port",
 		Usage:       "Configure EgressIP node reachability using gRPC on this TCP port.",
 		Destination: &cliConfig.OVNKubernetesFeature.EgressIPNodeHealthCheckPort,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-multi-network",
+		Usage:       "Configure to use multiple NetworkAttachmentDefinition CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableMultiNetwork,
+		Value:       OVNKubernetesFeature.EnableMultiNetwork,
 	},
 }
 
