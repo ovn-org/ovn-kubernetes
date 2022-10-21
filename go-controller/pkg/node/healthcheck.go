@@ -65,7 +65,7 @@ func (l *loadBalancerHealthChecker) UpdateService(old, new *kapi.Service) {
 		}
 		namespacedName := ktypes.NamespacedName{Namespace: new.Namespace, Name: new.Name}
 		l.Lock()
-		l.endpoints[namespacedName] = l.GetLocalEndpointAddressesCount(epSlices)
+		_, l.endpoints[namespacedName] = l.CountReadyEndpointsAndLocalAddresses(epSlices)
 		_ = l.server.SyncEndpoints(l.endpoints)
 		l.Unlock()
 	}
@@ -91,18 +91,29 @@ func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) error {
 }
 
 func (l *loadBalancerHealthChecker) SyncEndPointSlices(epSlice *discovery.EndpointSlice) {
+	// Get all endpointslices for the service that corresponds to this epSlice
+	// Count the # of local endpoints for these endpoint slices
+	// Call SyncEndpoints on all endpoints stored in cache l.endpoints
 	namespacedName := namespacedNameFromEPSlice(epSlice)
 	epSlices, err := l.watchFactory.GetEndpointSlices(epSlice.Namespace, epSlice.Labels[discovery.LabelServiceName])
 	if err != nil {
 		// should be a rare occurence
-		klog.V(4).Infof("Could not fetch endpointslices for %v during health check", namespacedName)
+		klog.V(4).Infof("Could not fetch endpointslices for %s during health check", namespacedName.String())
 	}
-	if len(epSlices) == 0 {
+
+	readyCount, localEndpointAddressCount := l.CountReadyEndpointsAndLocalAddresses(epSlices)
+	if len(epSlices) == 0 || readyCount == 0 {
+		klog.Infof("[SyncEndPointSlices]  delete ep %s from cache ( len(epSlices) == %d, readyCount=%d ", namespacedName.String(), len(epSlices) == 0, readyCount)
 		// let's delete it from cache and wait for the next update; this will show as 0 endpoints for health checks
 		delete(l.endpoints, namespacedName)
 	} else {
-		l.endpoints[namespacedName] = l.GetLocalEndpointAddressesCount(epSlices)
+		l.endpoints[namespacedName] = localEndpointAddressCount
 	}
+	klog.Infof("[SyncEndPointSlices]  epSlice=%s/%s, service %s, ready=%v, local=%v, all epSlices: %v",
+		epSlice.Namespace, epSlice.Name, namespacedName.String(), readyCount, localEndpointAddressCount, epSlices)
+
+	klog.Infof("[SyncEndPointSlices, REAL RUN]   epSlice=%s/%s, for svc %s, calling SyncEndpoints on l.endpoints=%v",
+		epSlice.Namespace, epSlice.Name, namespacedName.String(), l.endpoints)
 	_ = l.server.SyncEndpoints(l.endpoints)
 }
 
@@ -130,17 +141,56 @@ func (l *loadBalancerHealthChecker) DeleteEndpointSlice(epSlice *discovery.Endpo
 	l.SyncEndPointSlices(epSlice)
 }
 
-// GetLocalEndpointAddresses returns the number of endpoints that are local to the node for a service
-func (l *loadBalancerHealthChecker) GetLocalEndpointAddressesCount(endpointSlices []*discovery.EndpointSlice) int {
-	localEndpoints := sets.NewString()
+// CountReadyEndpointsAndLocalReadyEndpointAddresses returns two non-negative integers:
+// - the number of ready endpoints in the given list of endpointslices
+// - the number of ready endpoint addresses that are local to the node for a service
+func (l *loadBalancerHealthChecker) CountReadyEndpointsAndLocalAddresses(endpointSlices []*discovery.EndpointSlice) (int, int) {
+	localEndpointAddresses := sets.NewString()
+	readyEndpointAddresses := sets.NewString()
+	readyEndpointsCount := 0
 	for _, endpointSlice := range endpointSlices {
 		for _, endpoint := range endpointSlice.Endpoints {
+			// Skip endpoints that are not ready
+			if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
+				klog.Infof("[GetReadyEndpointsAndLocalReadyEndpointAddresses, epslice ] SKIP non-ready endpoint %v", endpoint)
+				continue
+			}
+			readyEndpointsCount++
+			readyEndpointAddresses.Insert(endpoint.Addresses...)
+
 			if endpoint.NodeName != nil && *endpoint.NodeName == l.nodeName {
-				localEndpoints.Insert(endpoint.Addresses...)
+				klog.Infof("[GetReadyEndpointsAndLocalReadyEndpointAddresses, epslice]  found local endpoint %v (node=%s)",
+					endpoint, l.nodeName)
+				localEndpointAddresses.Insert(endpoint.Addresses...)
 			}
 		}
 	}
-	return len(localEndpoints)
+	klog.Infof("[GetReadyEndpointsAndLocalReadyEndpointAddresses, epslice  readyEndpointsCount=%d, len(readyEndpointAddresses)=%d, len(localEndpointAddresses)=%d for endpointSlices=%v",
+		readyEndpointsCount, len(readyEndpointAddresses), len(localEndpointAddresses), endpointSlices)
+	return readyEndpointsCount, len(localEndpointAddresses)
+}
+
+// hasLocalHostNetworkEndpoints_old returns true if there is at least one host-networked endpoint
+// in the provided list that is local to this node.
+// It returns false if none of the endpoints are local host-networked endpoints or if ep.Subsets is nil.
+func hasLocalHostNetworkEndpoints_old(ep *kapi.Endpoints, nodeAddresses []net.IP) bool {
+	for i := range ep.Subsets {
+		ss := &ep.Subsets[i]
+		for i := range ss.Addresses {
+			addr := &ss.Addresses[i]
+			for _, nodeIP := range nodeAddresses {
+				if nodeIP.String() == addr.IP {
+					klog.Infof("[hasLocalHostNetworkEndpoints_old]  %v : true, ep=%v, nodeAddresses=%v",
+						addr.IP, ep, nodeAddresses)
+					return true
+				}
+			}
+		}
+	}
+	klog.Infof("[hasLocalHostNetworkEndpoints_old]  false (ep=%v, nodeAddresses=%v)",
+		ep, nodeAddresses)
+
+	return false
 }
 
 // hasLocalHostNetworkEndpoints returns true if there is at least one host-networked endpoint
