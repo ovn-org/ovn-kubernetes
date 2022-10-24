@@ -271,6 +271,9 @@ parse_args() {
             -kc | --kubeconfig )                shift
                                                 KUBECONFIG=$1
                                                 ;;
+            -mne | --multi-network-enable )     shift
+                                                MULTIPLE_NETWORKS=true
+                                                ;;
             -ric | --run-in-container )         RUN_IN_CONTAINER=true
                                                 ;;
             -ehp | --egress-ip-healthcheck-port ) shift
@@ -337,6 +340,7 @@ print_params() {
      echo "OVN_ENABLE_EX_GW_NETWORK_BRIDGE = $OVN_ENABLE_EX_GW_NETWORK_BRIDGE"
      echo "OVN_EX_GW_NETWORK_INTERFACE = $OVN_EX_GW_NETWORK_INTERFACE"
      echo "OVN_EGRESSIP_HEALTHCHECK_PORT = $OVN_EGRESSIP_HEALTHCHECK_PORT"
+     echo "ENABLE_MULTI_NET = $MULTIPLE_NETWORKS"
      echo ""
 }
 
@@ -454,6 +458,7 @@ set_default_params() {
   OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
   OVN_EGRESSIP_HEALTHCHECK_PORT=${OVN_EGRESSIP_HEALTHCHECK_PORT:-9107}
   OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
+  ENABLE_MULTI_NET=${MULTIPLE_NETWORKS:-false}
 }
 
 detect_apiserver_url() {
@@ -655,7 +660,8 @@ create_ovn_kube_manifests() {
     --egress-qos-enable=true \
     --v4-join-subnet="${JOIN_SUBNET_IPV4}" \
     --v6-join-subnet="${JOIN_SUBNET_IPV6}" \
-    --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}"
+    --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}" \
+    --multi-network-enable=${ENABLE_MULTI_NET}
   popd
 }
 
@@ -710,6 +716,12 @@ install_ovn() {
 install_ingress() {
   run_kubectl apply -f ingress/mandatory.yaml
   run_kubectl apply -f ingress/service-nodeport.yaml
+}
+
+install_multus() {
+  echo "Installing multus-cni daemonset ..."
+  multus_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml"
+  run_kubectl apply -f "$multus_manifest"
 }
 
 kubectl_wait_pods() {
@@ -812,6 +824,9 @@ detect_apiserver_url
 create_ovn_kube_manifests
 install_ovn_image
 install_ovn
+if [ "$ENABLE_MULTI_NET" == true ]; then
+  install_multus
+fi
 if [ "$KIND_INSTALL_INGRESS" == true ]; then
   install_ingress
 fi
