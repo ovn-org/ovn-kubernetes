@@ -676,17 +676,17 @@ func (n *OvnNode) WatchEndpointSlices() error {
 		UpdateFunc: func(old, new interface{}) {
 			newEndpointSlice := new.(*discovery.EndpointSlice)
 			oldEndpointSlice := old.(*discovery.EndpointSlice)
-			for _, port := range oldEndpointSlice.Ports {
-				for _, endpoint := range oldEndpointSlice.Endpoints {
-					for _, ip := range endpoint.Addresses {
-						ipStr := utilnet.ParseIPSloppy(ip).String()
-						if doesEPSliceContainEndpoint(newEndpointSlice, ipStr, *port.Port, *port.Protocol) {
+			for _, oldPort := range oldEndpointSlice.Ports {
+				for _, oldEndpoint := range oldEndpointSlice.Endpoints {
+					for _, oldIP := range oldEndpoint.Addresses {
+						oldIPStr := utilnet.ParseIPSloppy(oldIP).String()
+						if doesEPSliceContainReadyEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol) {
 							continue
 						}
-						if *port.Protocol == kapi.ProtocolUDP { // flush conntrack only for UDP
-							err := util.DeleteConntrack(ipStr, *port.Port, *port.Protocol, netlink.ConntrackReplyAnyIP, nil)
+						if *oldPort.Protocol == kapi.ProtocolUDP { // flush conntrack only for UDP
+							err := util.DeleteConntrack(oldIPStr, *oldPort.Port, *oldPort.Protocol, netlink.ConntrackReplyAnyIP, nil)
 							if err != nil {
-								klog.Errorf("Failed to delete conntrack entry for %s: %v", ipStr, err)
+								klog.Errorf("Failed to delete conntrack entry for %s: %v", oldIPStr, err)
 							}
 						}
 					}
@@ -851,11 +851,14 @@ func (n *OvnNode) validateVTEPInterfaceMTU() error {
 }
 
 // doesEPSliceContainEndpoint checks whether the endpointslice
-// contains a specific endpoint with IP/Port/Protocol
-func doesEPSliceContainEndpoint(epSlice *discovery.EndpointSlice,
+// contains a specific endpoint with IP/Port/Protocol and this endpoint is ready
+func doesEPSliceContainReadyEndpoint(epSlice *discovery.EndpointSlice,
 	epIP string, epPort int32, protocol kapi.Protocol) bool {
 	for _, port := range epSlice.Ports {
 		for _, endpoint := range epSlice.Endpoints {
+			if !isEndpointReady(endpoint) {
+				continue
+			}
 			for _, ip := range endpoint.Addresses {
 				if utilnet.ParseIPSloppy(ip).String() == epIP && *port.Port == epPort && *port.Protocol == protocol {
 					return true
