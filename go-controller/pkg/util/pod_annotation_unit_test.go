@@ -275,8 +275,8 @@ func TestGetAllPodIPs(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, e := GetAllPodIPs(tc.inpPod)
-			t.Log(res, e)
+			res1, e := GetAllPodIPs(tc.inpPod)
+			t.Log(res1, e)
 			if tc.errAssert {
 				assert.Error(t, e)
 			} else if tc.errMatch != nil {
@@ -286,7 +286,23 @@ func TestGetAllPodIPs(t *testing.T) {
 					assert.Contains(t, e.Error(), tc.errMatch.Error())
 				}
 			} else {
-				assert.Equal(t, tc.outExp, res)
+				assert.Equal(t, tc.outExp, res1)
+			}
+			res2, e := GetPodCIDRsWithFullMask(tc.inpPod)
+			t.Log(res2, e)
+			if tc.errAssert {
+				assert.Error(t, e)
+			} else if tc.errMatch != nil {
+				if errors.Is(tc.errMatch, ErrNoPodIPFound) {
+					assert.ErrorIs(t, e, ErrNoPodIPFound)
+				} else {
+					assert.Contains(t, e.Error(), tc.errMatch.Error())
+				}
+			} else {
+				podIPStr := tc.outExp[0].String()
+				mask := GetIPFullMask(podIPStr)
+				_, ipnet, _ := net.ParseCIDR(podIPStr + mask)
+				assert.Equal(t, []*net.IPNet{ipnet}, res2)
 			}
 		})
 	}
