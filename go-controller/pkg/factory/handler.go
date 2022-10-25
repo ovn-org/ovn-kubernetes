@@ -35,6 +35,10 @@ type Handler struct {
 	// tombstone should only be set using atomic operations since it is
 	// used from multiple goroutines.
 	tombstone uint32
+	// priority is used to track the handler's priority of being invoked.
+	// example: a handler with priority 0 will process the received event first
+	// before a handler with priority 1.
+	priority uint32
 }
 
 func (h *Handler) OnAdd(obj interface{}) {
@@ -76,9 +80,14 @@ type queueMapEntry struct {
 
 type informer struct {
 	sync.RWMutex
-	oType    reflect.Type
-	inf      cache.SharedIndexInformer
-	handlers map[uint64]*Handler
+	oType reflect.Type
+	inf   cache.SharedIndexInformer
+	// keyed by priority - used to track the handler's priority of being invoked.
+	// example: a handler with priority 0 will process the received event first
+	// before a handler with priority 1, 0 being the higest priority.
+	// NOTE: we can have multiple handlers with the same priority hence the value
+	// is a map of handlers keyed by its unique id.
+	handlers map[uint32]map[uint64]*Handler
 	events   []chan *event
 	lister   listerInterface
 	// initialAddFunc will be called to deliver the initial list of objects
@@ -92,8 +101,11 @@ type informer struct {
 func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
 	i.RLock()
 	defer i.RUnlock()
-	for _, handler := range i.handlers {
-		f(handler)
+
+	for priority := 0; uint32(priority) <= minHandlerPriority; priority++ { // loop over priority higest to lowest
+		for _, handler := range i.handlers[uint32(priority)] {
+			f(handler)
+		}
 	}
 }
 
@@ -107,12 +119,14 @@ func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
 		return
 	}
 
-	for _, handler := range i.handlers {
-		f(handler)
+	for priority := 0; uint32(priority) <= minHandlerPriority; priority++ { // loop over priority higest to lowest
+		for _, handler := range i.handlers[uint32(priority)] {
+			f(handler)
+		}
 	}
 }
 
-func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
+func (i *informer) addHandler(id uint64, priority uint32, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
 	handler := &Handler{
 		cache.FilteringResourceEventHandler{
 			FilterFunc: filterFunc,
@@ -120,6 +134,7 @@ func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, 
 		},
 		id,
 		handlerAlive,
+		priority,
 	}
 
 	// Send existing items to the handler's add function; informers usually
@@ -127,7 +142,12 @@ func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, 
 	// we must emulate that here
 	i.initialAddFunc(handler, existingItems)
 
-	i.handlers[id] = handler
+	_, ok := i.handlers[priority]
+	if !ok {
+		i.handlers[priority] = make(map[uint64]*Handler)
+	}
+	i.handlers[priority][id] = handler
+
 	return handler
 }
 
@@ -142,11 +162,19 @@ func (i *informer) removeHandler(handler *Handler) {
 	go func() {
 		i.Lock()
 		defer i.Unlock()
-		if _, ok := i.handlers[handler.id]; ok {
-			// Remove the handler
-			delete(i.handlers, handler.id)
-			klog.V(5).Infof("Removed %v event handler %d", i.oType, handler.id)
-		} else {
+		removed := 0
+		for priority := range i.handlers { // loop over priority
+			if _, ok := i.handlers[priority]; !ok {
+				continue // protection against nil map as value
+			}
+			if _, ok := i.handlers[priority][handler.id]; ok {
+				// Remove the handler
+				delete(i.handlers[priority], handler.id)
+				removed = 1
+				klog.V(5).Infof("Removed %v event handler %d", i.oType, handler.id)
+			}
+		}
+		if removed == 0 {
 			klog.Warningf("Tried to remove unknown object type %v event handler %d", i.oType, handler.id)
 		}
 	}()
@@ -344,8 +372,10 @@ func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
 func (i *informer) removeAllHandlers() {
 	i.Lock()
 	defer i.Unlock()
-	for _, handler := range i.handlers {
-		i.removeHandler(handler)
+	for _, handlers := range i.handlers {
+		for _, handler := range handlers {
+			i.removeHandler(handler)
+		}
 	}
 }
 
@@ -394,7 +424,7 @@ func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInforme
 		oType:    oType,
 		inf:      sharedInformer,
 		lister:   lister,
-		handlers: make(map[uint64]*Handler),
+		handlers: make(map[uint32]map[uint64]*Handler),
 		queueMap: make(map[ktypes.NamespacedName]*queueMapEntry),
 	}, nil
 }
