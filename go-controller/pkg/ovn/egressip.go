@@ -2047,6 +2047,19 @@ type podAssignmentState struct {
 	standbyEgressIPNames sets.String
 }
 
+// Clone deep-copies and returns the copied podAssignmentState
+func (pas *podAssignmentState) Clone() *podAssignmentState {
+	clone := &podAssignmentState{
+		egressIPName:         pas.egressIPName,
+		standbyEgressIPNames: pas.standbyEgressIPNames.Clone(),
+	}
+	clone.egressStatuses = make(map[egressipv1.EgressIPStatusItem]string, len(pas.egressStatuses))
+	for k, v := range pas.egressStatuses {
+		clone.egressStatuses[k] = v
+	}
+	return clone
+}
+
 type allocator struct {
 	*sync.Mutex
 	// A cache used for egress IP assignments containing data for all cluster nodes
