@@ -196,6 +196,11 @@ func setupOVNNode(node *kapi.Node) error {
 			config.Default.InactivityProbe),
 		fmt.Sprintf("external_ids:ovn-openflow-probe-interval=%d",
 			config.Default.OpenFlowProbe),
+		// bundle-idle-timeout default value is 10s, it should be set
+		// as high as the ovn-openflow-probe-interval to allow ovn-controller
+		// to finish computation specially with complex acl configuration with port range.
+		fmt.Sprintf("other_config:bundle-idle-timeout=%d",
+			config.Default.OpenFlowProbe),
 		fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name),
 		fmt.Sprintf("external_ids:ovn-monitor-all=%t", config.Default.MonitorAll),
 		fmt.Sprintf("external_ids:ovn-ofctrl-wait-before-clear=%d", config.Default.OfctrlWaitBeforeClear),
