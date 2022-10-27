@@ -252,6 +252,15 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		fakeOvn.shutdown()
 	})
 
+	getPodAssignmentState := func(pod *kapi.Pod) *podAssignmentState {
+		fakeOvn.controller.eIPC.podAssignmentMutex.Lock()
+		defer fakeOvn.controller.eIPC.podAssignmentMutex.Unlock()
+		if pas := fakeOvn.controller.eIPC.podAssignment[getPodKey(pod)]; pas != nil {
+			return pas.Clone()
+		}
+		return nil
+	}
+
 	ginkgo.Context("On node UPDATE", func() {
 
 		ginkgo.It("should re-assign EgressIPs and perform proper OVN transactions when pod is created after node egress label switch", func() {
@@ -3991,9 +4000,9 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				// even the LSP sticks around for 60 seconds
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDatabaseStatewithPod))
 				// egressIP cache is stale in the sense the podKey has not been deleted since deletion failed
-				status, exists := fakeOvn.controller.eIPC.podAssignment[getPodKey(&egressPod1)]
-				gomega.Expect(exists).To(gomega.BeTrue())
-				gomega.Expect(status.egressStatuses).To(gomega.Equal(map[egressipv1.EgressIPStatusItem]string{
+				pas := getPodAssignmentState(&egressPod1)
+				gomega.Expect(pas).NotTo(gomega.BeNil())
+				gomega.Expect(pas.egressStatuses).To(gomega.Equal(map[egressipv1.EgressIPStatusItem]string{
 					{
 						Node:     "node1",
 						EgressIP: "192.168.126.101",
@@ -4278,31 +4287,23 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(egressIPs2[0]).To(gomega.Equal(egressIP3))
 				recordedEvent = <-fakeOvn.fakeRecorder.Events
 				gomega.Expect(recordedEvent).To(gomega.ContainSubstring("EgressIP object egressip-2 will not be configured for pod egressip-namespace_egress-pod since another egressIP object egressip is serving it, this is undefined"))
-				podCache := make(map[string]*podAssignmentState)
-				fakeOvn.controller.eIPC.podAssignmentMutex.Lock()
-				for k, v := range fakeOvn.controller.eIPC.podAssignment {
-					value := *v
-					podCache[k] = &value // deep copy to avoid map reference issues
-				}
-				fakeOvn.controller.eIPC.podAssignmentMutex.Unlock()
 
-				assginedEIPName := podCache[getPodKey(&egressPod1)].egressIPName
-				standByEIPNames := podCache[getPodKey(&egressPod1)].standbyEgressIPNames
-				assginedStatuses := podCache[getPodKey(&egressPod1)].egressStatuses
+				pas := getPodAssignmentState(&egressPod1)
+				gomega.Expect(pas).NotTo(gomega.BeNil())
 
 				assginedEIP := egressIPs1[0]
-				gomega.Expect(assginedEIPName).To(gomega.Equal(egressIPName))
+				gomega.Expect(pas.egressIPName).To(gomega.Equal(egressIPName))
 				eip1Obj, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), eIP1.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(assginedStatuses[eip1Obj.Status.Items[0]]).To(gomega.Equal(""))
-				gomega.Expect(standByEIPNames.Has(egressIPName2)).To(gomega.BeTrue())
+				gomega.Expect(pas.egressStatuses[eip1Obj.Status.Items[0]]).To(gomega.Equal(""))
+				gomega.Expect(pas.standbyEgressIPNames.Has(egressIPName2)).To(gomega.BeTrue())
 
 				podEIPSNAT := &nbdb.NAT{
 					UUID:       "egressip-nat-UUID1",
 					LogicalIP:  egressPodIP[0].String(),
 					ExternalIP: assginedEIP,
 					ExternalIDs: map[string]string{
-						"name": assginedEIPName,
+						"name": pas.egressIPName,
 					},
 					Type:        nbdb.NATTypeSNAT,
 					LogicalPort: utilpointer.StringPtr("k8s-node1"),
@@ -4316,7 +4317,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					Action:   nbdb.LogicalRouterPolicyActionReroute,
 					Nexthops: nodeLogicalRouterIPv4,
 					ExternalIDs: map[string]string{
-						"name": assginedEIPName,
+						"name": pas.egressIPName,
 					},
 					UUID: "reroute-UUID1",
 				}
@@ -4402,7 +4403,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 					LogicalIP:  egressPodIP[0].String(),
 					ExternalIP: egressIPs1[1],
 					ExternalIDs: map[string]string{
-						"name": assginedEIPName,
+						"name": pas.egressIPName,
 					},
 					Type:        nbdb.NATTypeSNAT,
 					LogicalPort: utilpointer.StringPtr("k8s-node2"),
@@ -4422,22 +4423,15 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDatabaseStatewithPod))
 
 				// check the state of the cache for podKey
-				fakeOvn.controller.eIPC.podAssignmentMutex.Lock()
-				for k, v := range fakeOvn.controller.eIPC.podAssignment {
-					value := *v
-					podCache[k] = &value // deep copy to avoid map reference issues
-				}
-				fakeOvn.controller.eIPC.podAssignmentMutex.Unlock()
-				assginedEIPName = podCache[getPodKey(&egressPod1)].egressIPName
-				standByEIPNames = podCache[getPodKey(&egressPod1)].standbyEgressIPNames
-				assginedStatuses = podCache[getPodKey(&egressPod1)].egressStatuses
+				pas = getPodAssignmentState(&egressPod1)
+				gomega.Expect(pas).NotTo(gomega.BeNil())
 
-				gomega.Expect(assginedEIPName).To(gomega.Equal(egressIPName))
+				gomega.Expect(pas.egressIPName).To(gomega.Equal(egressIPName))
 				eip1Obj, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), eIP1.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(assginedStatuses[eip1Obj.Status.Items[0]]).To(gomega.Equal(""))
-				gomega.Expect(assginedStatuses[eip1Obj.Status.Items[1]]).To(gomega.Equal(""))
-				gomega.Expect(standByEIPNames.Has(egressIPName2)).To(gomega.BeTrue())
+				gomega.Expect(pas.egressStatuses[eip1Obj.Status.Items[0]]).To(gomega.Equal(""))
+				gomega.Expect(pas.egressStatuses[eip1Obj.Status.Items[1]]).To(gomega.Equal(""))
+				gomega.Expect(pas.standbyEgressIPNames.Has(egressIPName2)).To(gomega.BeTrue())
 
 				// let's test syncPodAssignmentCache works as expected! Nuke the podAssignment cache first
 				fakeOvn.controller.eIPC.podAssignmentMutex.Lock()
@@ -4449,21 +4443,13 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				err = fakeOvn.controller.syncPodAssignmentCache(egressIPCache)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				fakeOvn.controller.eIPC.podAssignmentMutex.Lock()
-				for k, v := range fakeOvn.controller.eIPC.podAssignment {
-					value := *v
-					podCache[k] = &value // deep copy to avoid map reference issues
-				}
-				fakeOvn.controller.eIPC.podAssignmentMutex.Unlock()
-				assginedEIPName = podCache[getPodKey(&egressPod1)].egressIPName
-				standByEIPNames = podCache[getPodKey(&egressPod1)].standbyEgressIPNames
-				assginedStatuses = podCache[getPodKey(&egressPod1)].egressStatuses
+				pas = getPodAssignmentState(&egressPod1)
+				gomega.Expect(pas).NotTo(gomega.BeNil())
+				gomega.Expect(pas.egressIPName).To(gomega.Equal(egressIPName))
+				gomega.Expect(pas.egressStatuses).To(gomega.Equal(map[egressipv1.EgressIPStatusItem]string{}))
+				gomega.Expect(pas.standbyEgressIPNames.Has(egressIPName2)).To(gomega.BeTrue())
 
-				gomega.Expect(assginedEIPName).To(gomega.Equal(egressIPName))
-				gomega.Expect(assginedStatuses).To(gomega.Equal(map[egressipv1.EgressIPStatusItem]string{}))
-				gomega.Expect(standByEIPNames.Has(egressIPName2)).To(gomega.BeTrue())
-
-				//reset assginedStatuses for rest of the test to progress correctly
+				// reset egressStatuses for rest of the test to progress correctly
 				fakeOvn.controller.eIPC.podAssignmentMutex.Lock()
 				fakeOvn.controller.eIPC.podAssignment[getPodKey(&egressPod1)].egressStatuses[eip1Obj.Status.Items[0]] = ""
 				fakeOvn.controller.eIPC.podAssignment[getPodKey(&egressPod1)].egressStatuses[eip1Obj.Status.Items[1]] = ""
@@ -4473,29 +4459,23 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Delete(context.TODO(), egressIPName2, metav1.DeleteOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				getStandByEgressIPs := func() bool {
-					fakeOvn.controller.eIPC.podAssignmentMutex.Lock()
-					defer fakeOvn.controller.eIPC.podAssignmentMutex.Unlock()
-					for k, v := range fakeOvn.controller.eIPC.podAssignment {
-						value := *v
-						podCache[k] = &value // deep copy to avoid map reference issues
-					}
-					hasStandBy := podCache[getPodKey(&egressPod1)].standbyEgressIPNames.Has(egressIPName2)
-					return hasStandBy
-				}
 				gomega.Eventually(func() bool {
-					return getStandByEgressIPs()
+					pas := getPodAssignmentState(&egressPod1)
+					gomega.Expect(pas).NotTo(gomega.BeNil())
+					return pas.standbyEgressIPNames.Has(egressIPName2)
 				}).Should(gomega.BeFalse())
-				gomega.Expect(podCache[getPodKey(&egressPod1)].egressIPName).To(gomega.Equal(egressIPName))
+				gomega.Expect(getPodAssignmentState(&egressPod1).egressIPName).To(gomega.Equal(egressIPName))
 
 				// add back the standby egressIP object
 				_, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP2, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				gomega.Eventually(func() bool {
-					return getStandByEgressIPs()
+					pas := getPodAssignmentState(&egressPod1)
+					gomega.Expect(pas).NotTo(gomega.BeNil())
+					return pas.standbyEgressIPNames.Has(egressIPName2)
 				}).Should(gomega.BeTrue())
-				gomega.Expect(podCache[getPodKey(&egressPod1)].egressIPName).To(gomega.Equal(egressIPName))
+				gomega.Expect(getPodAssignmentState(&egressPod1).egressIPName).To(gomega.Equal(egressIPName))
 				gomega.Eventually(func() string {
 					return <-fakeOvn.fakeRecorder.Events
 				}).Should(gomega.ContainSubstring("EgressIP object egressip-2 will not be configured for pod egressip-namespace_egress-pod since another egressIP object egressip is serving it, this is undefined"))
@@ -4541,9 +4521,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDatabaseStatewithPod[1:]))
 
 				gomega.Eventually(func() bool {
-					return getStandByEgressIPs()
+					pas := getPodAssignmentState(&egressPod1)
+					gomega.Expect(pas).NotTo(gomega.BeNil())
+					return pas.standbyEgressIPNames.Has(egressIPName2)
 				}).Should(gomega.BeTrue())
-				gomega.Expect(podCache[getPodKey(&egressPod1)].egressIPName).To(gomega.Equal(egressIPName))
+				gomega.Expect(getPodAssignmentState(&egressPod1).egressIPName).To(gomega.Equal(egressIPName))
 
 				// delete the first egressIP object and make sure the cache is updated
 				err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Delete(context.TODO(), egressIPName, metav1.DeleteOptions{})
@@ -4551,9 +4533,11 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				// ensure standby takes over and we do the setup for it in OVN DB
 				gomega.Eventually(func() bool {
-					return getStandByEgressIPs()
+					pas := getPodAssignmentState(&egressPod1)
+					gomega.Expect(pas).NotTo(gomega.BeNil())
+					return pas.standbyEgressIPNames.Has(egressIPName2)
 				}).Should(gomega.BeFalse())
-				gomega.Expect(podCache[getPodKey(&egressPod1)].egressIPName).To(gomega.Equal(egressIPName2))
+				gomega.Expect(getPodAssignmentState(&egressPod1).egressIPName).To(gomega.Equal(egressIPName2))
 
 				finalDatabaseStatewithPod = expectedDatabaseStatewithPod
 				finalDatabaseStatewithPod = append(expectedDatabaseStatewithPod, podLSP)
@@ -4582,10 +4566,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				gomega.Eventually(func() bool {
-					fakeOvn.controller.eIPC.podAssignmentMutex.Lock()
-					_, ok := fakeOvn.controller.eIPC.podAssignment[getPodKey(&egressPod1)]
-					fakeOvn.controller.eIPC.podAssignmentMutex.Unlock()
-					return ok
+					return getPodAssignmentState(&egressPod1) != nil
 				}).Should(gomega.BeFalse())
 
 				// let's test syncPodAssignmentCache works as expected! Nuke the podAssignment cache first
@@ -4600,10 +4581,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 
 				// we don't have any egressIPs, so cache is nil
 				gomega.Eventually(func() bool {
-					fakeOvn.controller.eIPC.podAssignmentMutex.Lock()
-					_, ok := fakeOvn.controller.eIPC.podAssignment[getPodKey(&egressPod1)]
-					fakeOvn.controller.eIPC.podAssignmentMutex.Unlock()
-					return ok
+					return getPodAssignmentState(&egressPod1) != nil
 				}).Should(gomega.BeFalse())
 
 				return nil
