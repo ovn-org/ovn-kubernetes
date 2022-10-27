@@ -176,7 +176,7 @@ func (c *Controller) syncService(key string) error {
 		return c.clearServiceResources(key, state)
 	}
 
-	conf, err := util.ParseEgressSVCAnnotation(svc)
+	conf, err := util.ParseEgressSVCAnnotation(svc.Annotations)
 	if err != nil && !util.IsAnnotationNotSetError(err) {
 		return err
 	}
@@ -213,7 +213,11 @@ func (c *Controller) syncService(key string) error {
 		nodeSelector.MatchExpressions = append(nodeSelector.MatchExpressions, matchEpsNodes)
 	}
 
-	selector, _ := metav1.LabelSelectorAsSelector(nodeSelector)
+	selector, err := metav1.LabelSelectorAsSelector(nodeSelector)
+	if err != nil {
+		return err
+	}
+
 	totalEps := len(v4Endpoints) + len(v6Endpoints)
 
 	// We don't want to select a node for a service without endpoints to not "waste" an

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"time"
 
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
@@ -913,6 +914,97 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 
 					return nil
 				}).ShouldNot(gomega.HaveOccurred())
+
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("should do nothing when an invalid nodeSelector is specified", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespaceT := *newNamespace("testns")
+				node1 := nodeFor(node1Name, node1IPv4, node1IPv6, node1IPv4Subnet, node1IPv6Subnet)
+
+				clusterRouter := &nbdb.LogicalRouter{
+					Name: types.OVNClusterRouter,
+					UUID: types.OVNClusterRouter + "-UUID",
+				}
+
+				dbSetup := libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						clusterRouter,
+					},
+				}
+
+				svc1 := svcFor("testns", "svc1", map[string]string{
+					// ":", "&" not allowed in labels
+					util.EgressSVCAnnotation: "{\"nodeSelector\":{\"matchLabels\":{\"a:b\": \"c&\"}}}",
+				})
+				svc1EpSlice := discovery.EndpointSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "svc1-epslice",
+						Namespace: "testns",
+						Labels: map[string]string{
+							discovery.LabelServiceName: "svc1",
+						},
+					},
+					Endpoints: []discovery.Endpoint{
+						{
+							Addresses: []string{"10.128.1.5"},
+						},
+					},
+				}
+
+				fakeOVN.startWithDBSetup(dbSetup,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							*node1,
+						},
+					},
+					&v1.ServiceList{
+						Items: []v1.Service{
+							svc1,
+						},
+					},
+					&discovery.EndpointSliceList{
+						Items: []discovery.EndpointSlice{
+							svc1EpSlice,
+						},
+					},
+				)
+
+				fakeOVN.InitAndRunEgressSVCController()
+
+				gomega.Consistently(func() error {
+					svc, err := fakeOVN.fakeClient.KubeClient.CoreV1().Services("testns").Get(context.TODO(), svc1.Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					val, ok := svc.Annotations[util.EgressSVCHostAnnotation]
+					if ok {
+						return fmt.Errorf("expected svc1 to not have a host annotation, got a value of %v", val)
+					}
+
+					node1, err := fakeOVN.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+
+					_, ok = node1.Labels[fmt.Sprintf("%s/testns-svc1", util.EgressSVCLabelPrefix)]
+
+					if ok {
+						return fmt.Errorf("expected node1 to not have the egress service label, got %v", node1.Labels)
+					}
+
+					return nil
+				}, 1*time.Second).ShouldNot(gomega.HaveOccurred())
 
 				return nil
 			}
