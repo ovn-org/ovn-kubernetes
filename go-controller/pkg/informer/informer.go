@@ -101,6 +101,13 @@ func NewDefaultEventHandler(
 		UpdateFunc: func(old, new interface{}) {
 			oldObj := old.(metav1.Object)
 			newObj := new.(metav1.Object)
+			if oldObj.GetUID() != newObj.GetUID() {
+				// This occurs not so often, so log this occurance.
+				klog.Infof("Object %s/%s is replaced, invoking delete followed by add handler", newObj.GetNamespace(), newObj.GetName())
+				e.enqueueDelete(oldObj)
+				e.enqueue(newObj)
+				return
+			}
 			// Make sure object was actually changed.
 			if oldObj.GetResourceVersion() == newObj.GetResourceVersion() {
 				return
@@ -142,7 +149,15 @@ func NewTestEventHandler(
 			e.enqueue(obj)
 		},
 		UpdateFunc: func(old, new interface{}) {
+			oldObj := old.(metav1.Object)
 			newObj := new.(metav1.Object)
+			if oldObj.GetUID() != newObj.GetUID() {
+				// This occurs not so often, so log this occurance.
+				klog.Infof("Object %s/%s is replaced, invoking delete followed by add handler", newObj.GetNamespace(), newObj.GetName())
+				e.enqueueDelete(oldObj)
+				e.enqueue(newObj)
+				return
+			}
 			// check the update aginst the predicate functions
 			if e.updateFilter(old, new) {
 				// enqueue if it matches
