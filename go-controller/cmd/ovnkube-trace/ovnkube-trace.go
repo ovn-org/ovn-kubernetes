@@ -770,8 +770,9 @@ func runOvnTraceToPod(coreclient *corev1client.CoreV1Client, restconfig *rest.Co
 
 // runOfprotoTraceToPod runs an ofproto/trace command from the src to the destination pod.
 func runOfprotoTraceToPod(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, direction string, srcPodInfo, dstPodInfo *PodInfo, ovnNamespace, protocol, dstPort string) string {
+	protocolSelector, nwSrc, nwDst := getOfprotoIPFamilyArgs(protocol, net.ParseIP(dstPodInfo.IP))
 	cmd := fmt.Sprintf(`ovs-appctl ofproto/trace br-int `+
-		`"in_port=%[1]s, %[2]s, dl_src=%[3]s, dl_dst=%[4]s, nw_src=%[5]s, nw_dst=%[6]s, nw_ttl=64, %[7]s_dst=%[8]s, %[7]s_src=12345"`,
+		`"in_port=%[1]s, %[9]s, dl_src=%[3]s, dl_dst=%[4]s, %[10]s=%[5]s, %[11]s=%[6]s, nw_ttl=64, %[7]s_dst=%[8]s, %[7]s_src=12345"`,
 		srcPodInfo.VethName, // 1
 		protocol,            // 2
 		srcPodInfo.MAC,      // 3
@@ -780,6 +781,9 @@ func runOfprotoTraceToPod(coreclient *corev1client.CoreV1Client, restconfig *res
 		dstPodInfo.IP,       // 6
 		protocol,            // 7
 		dstPort,             // 8
+		protocolSelector,    // 9
+		nwSrc,               // 10
+		nwDst,               // 11
 	)
 	klog.V(4).Infof("ovs-appctl ofproto/trace command from %s is %s", direction, cmd)
 
@@ -814,8 +818,9 @@ func runOfprotoTraceToPod(coreclient *corev1client.CoreV1Client, restconfig *res
 // egressBridgeName is the name of the exit bridge (for EgressIPs, EgressGW and also for routingViaOVN mode).
 // If egressBridgeName == "", then this is routingViaHost Gateway mode without an EgressIP / EgressGW.
 func runOfprotoTraceToIP(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, srcPodInfo *PodInfo, dstIP net.IP, ovnNamespace, protocol, dstPort, egressNodeName, egressBridgeName string) string {
+	protocolSelector, nwSrc, nwDst := getOfprotoIPFamilyArgs(protocol, dstIP)
 	cmd := fmt.Sprintf(`ovs-appctl ofproto/trace br-int `+
-		`"in_port=%[1]s, %[2]s, dl_src=%[3]s, dl_dst=%[4]s, nw_src=%[5]s, nw_dst=%[6]s, nw_ttl=64, %[2]s_dst=%[7]s, %[2]s_src=12345"`,
+		`"in_port=%[1]s, %[8]s, dl_src=%[3]s, dl_dst=%[4]s, %[9]s=%[5]s, %[10]s=%[6]s, nw_ttl=64, %[2]s_dst=%[7]s, %[2]s_src=12345"`,
 		srcPodInfo.VethName, // 1
 		protocol,            // 2
 		srcPodInfo.MAC,      // 3
@@ -823,6 +828,9 @@ func runOfprotoTraceToIP(coreclient *corev1client.CoreV1Client, restconfig *rest
 		srcPodInfo.IP,       // 5
 		dstIP.String(),      // 6
 		dstPort,             // 7
+		protocolSelector,    // 8
+		nwSrc,               // 9
+		nwDst,               // 10
 	)
 	direction := "pod to IP"
 	klog.V(4).Infof("ovs-appctl ofproto/trace command from %s is %s", direction, cmd)
@@ -846,6 +854,20 @@ func runOfprotoTraceToIP(coreclient *corev1client.CoreV1Client, restconfig *rest
 	printSuccessOrFailure(fmt.Sprintf("ovs-appctl ofproto/trace %s", direction), srcPodInfo.PodName, dstIP.String(), appSrcDstOut, appSrcDstErr, err, successString)
 
 	return appSrcDstOut
+}
+
+// getOfprotoIPFamilyArgs generates the protocol parameter name and the src and dst parameter names.
+// We must do this as syntax for ofproto/trace with IPv6 is slightly different.
+func getOfprotoIPFamilyArgs(protocol string, ip net.IP) (string, string, string) {
+	protocolSelector := protocol
+	nwSrc := "nw_src"
+	nwDst := "nw_dst"
+	if ip.To4() == nil {
+		protocolSelector += "6"
+		nwSrc = "ipv6_src"
+		nwDst = "ipv6_dst"
+	}
+	return protocolSelector, nwSrc, nwDst
 }
 
 // installOvnDetraceDependencies installs dependencies for ovn-detrace with pip3 in case they are missing (for older images).
