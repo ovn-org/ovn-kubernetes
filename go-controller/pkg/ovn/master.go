@@ -14,8 +14,10 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
+	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -266,31 +268,16 @@ func (oc *Controller) StartClusterMaster() error {
 	}
 
 	klog.Infof("Allocating subnets")
-	var v4HostSubnetCount, v6HostSubnetCount float64
-	for _, clusterEntry := range config.Default.ClusterSubnets {
-		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
-		if err != nil {
-			return err
-		}
-		klog.V(5).Infof("Added network range %s to the allocator", clusterEntry.CIDR)
-		util.CalculateHostSubnetsForClusterEntry(clusterEntry, &v4HostSubnetCount, &v6HostSubnetCount)
+	if err := oc.masterSubnetAllocator.InitRanges(config.Default.ClusterSubnets); err != nil {
+		klog.Errorf("Failed to initialize host subnet allocator ranges: %v", err)
+		return err
 	}
 	if config.HybridOverlay.Enabled {
-		for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
-			err := oc.hybridOverlaySubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
-			if err != nil {
-				return err
-			}
-			klog.V(5).Infof("Added network range %s to the hybrid overlay allocator", clusterEntry.CIDR)
+		if err := oc.hybridOverlaySubnetAllocator.InitRanges(config.HybridOverlay.ClusterSubnets); err != nil {
+			klog.Errorf("Failed to initialize hybrid overlay subnet allocator ranges: %v", err)
+			return err
 		}
 	}
-	nodeNames := []string{}
-	for _, node := range existingNodes.Items {
-		nodeNames = append(nodeNames, node.Name)
-	}
-
-	// update metrics for host subnets
-	metrics.RecordSubnetCount(v4HostSubnetCount, v6HostSubnetCount)
 
 	if oc.multicastSupport {
 		if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err != nil {
@@ -323,6 +310,10 @@ func (oc *Controller) StartClusterMaster() error {
 		oc.loadBalancerGroupUUID = loadBalancerGroup.UUID
 	}
 
+	nodeNames := []string{}
+	for _, node := range existingNodes.Items {
+		nodeNames = append(nodeNames, node.Name)
+	}
 	if err := oc.SetupMaster(nodeNames); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
@@ -829,128 +820,22 @@ func (oc *Controller) updateNodeAnnotationWithRetry(nodeName string, hostSubnets
 	return nil
 }
 
-func (oc *Controller) allocateNodeSubnets(node *kapi.Node) ([]*net.IPNet, []*net.IPNet, error) {
-	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
-	if err != nil {
+func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
+	existingSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+	if err != nil && !util.IsAnnotationNotSetError(err) {
 		// Log the error and try to allocate new subnets
 		klog.Infof("Failed to get node %s host subnets annotations: %v", node.Name, err)
 	}
-	allocatedSubnets := []*net.IPNet{}
 
-	// OVN can work in single-stack or dual-stack only.
-	currentHostSubnets := len(hostSubnets)
-	expectedHostSubnets := 1
-	// if dual-stack mode we expect one subnet per each IP family
-	if config.IPv4Mode && config.IPv6Mode {
-		expectedHostSubnets = 2
-	}
-
-	// node already has the expected subnets annotated
-	// assume IP families match, i.e. no IPv6 config and node annotation IPv4
-	if expectedHostSubnets == currentHostSubnets {
-		klog.Infof("Allocated Subnets %v on Node %s", hostSubnets, node.Name)
-		return hostSubnets, allocatedSubnets, nil
-	}
-
-	// Node doesn't have the expected subnets annotated
-	// it may happen it has more subnets assigned that configured in OVN
-	// like in a dual-stack to single-stack conversion
-	// or that it needs to allocate new subnet because it is a new node
-	// or has been converted from single-stack to dual-stack
-	klog.Infof("Expected %d subnets on node %s, found %d: %v",
-		expectedHostSubnets, node.Name, currentHostSubnets, hostSubnets)
-	// release unexpected subnets
-	// filter in place slice
-	// https://github.com/golang/go/wiki/SliceTricks#filter-in-place
-	foundIPv4 := false
-	foundIPv6 := false
-	n := 0
-	for _, subnet := range hostSubnets {
-		// if the subnet is not going to be reused release it
-		if config.IPv4Mode && utilnet.IsIPv4CIDR(subnet) && !foundIPv4 {
-			klog.V(5).Infof("Valid IPv4 allocated subnet %v on node %s", subnet, node.Name)
-			hostSubnets[n] = subnet
-			n++
-			foundIPv4 = true
-			continue
-		}
-		if config.IPv6Mode && utilnet.IsIPv6CIDR(subnet) && !foundIPv6 {
-			klog.V(5).Infof("Valid IPv6 allocated subnet %v on node %s", subnet, node.Name)
-			hostSubnets[n] = subnet
-			n++
-			foundIPv6 = true
-			continue
-		}
-		// this subnet is no longer needed
-		klog.V(5).Infof("Releasing subnet %v on node %s", subnet, node.Name)
-		err = oc.masterSubnetAllocator.ReleaseNetwork(subnet)
-		if err != nil {
-			klog.Warningf("Error releasing subnet %v on node %s", subnet, node.Name)
-		}
-	}
-	// recreate hostSubnets with the valid subnets
-	hostSubnets = hostSubnets[:n]
-	// allocate new subnets if needed
-	if config.IPv4Mode && !foundIPv4 {
-		allocatedHostSubnet, err := oc.masterSubnetAllocator.AllocateIPv4Network()
-		if err != nil {
-			return nil, nil, fmt.Errorf("error allocating network for node %s: %v", node.Name, err)
-		}
-		// the allocator returns nil if it can't provide a subnet
-		// we should filter them out or they will be appended to the slice
-		if allocatedHostSubnet != nil {
-			klog.V(5).Infof("Allocating subnet %v on node %s", allocatedHostSubnet, node.Name)
-			allocatedSubnets = append(allocatedSubnets, allocatedHostSubnet)
-			// Release the allocation on error
-			defer func() {
-				if err != nil {
-					klog.Warningf("Releasing subnet %v on node %s: %v", allocatedHostSubnet, node.Name, err)
-					errR := oc.masterSubnetAllocator.ReleaseNetwork(allocatedHostSubnet)
-					if errR != nil {
-						klog.Warningf("Error releasing subnet %v on node %s", allocatedHostSubnet, node.Name)
-					}
-				}
-			}()
-		}
-	}
-	if config.IPv6Mode && !foundIPv6 {
-		allocatedHostSubnet, err := oc.masterSubnetAllocator.AllocateIPv6Network()
-		if err != nil {
-			return nil, nil, fmt.Errorf("error allocating network for node %s: %v", node.Name, err)
-		}
-		// the allocator returns nil if it can't provide a subnet
-		// we should filter them out or they will be appended to the slice
-		if allocatedHostSubnet != nil {
-			klog.V(5).Infof("Allocating subnet %v on node %s", allocatedHostSubnet, node.Name)
-			allocatedSubnets = append(allocatedSubnets, allocatedHostSubnet)
-		}
-	}
-	// check if we were able to allocate the new subnets require
-	// this can only happen if OVN is not configured correctly
-	// so it will require a reconfiguration and restart.
-	wantedSubnets := expectedHostSubnets - currentHostSubnets
-	if wantedSubnets > 0 && len(allocatedSubnets) != wantedSubnets {
-		return nil, nil, fmt.Errorf("error allocating networks for node %s: %d subnets expected only new %d subnets allocated", node.Name, expectedHostSubnets, len(allocatedSubnets))
-	}
-	hostSubnets = append(hostSubnets, allocatedSubnets...)
-	klog.Infof("Allocated Subnets %v on Node %s", hostSubnets, node.Name)
-	return hostSubnets, allocatedSubnets, nil
-}
-
-func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
-	hostSubnets, allocatedSubnets, err := oc.allocateNodeSubnets(node)
+	hostSubnets, allocatedSubnets, err := oc.masterSubnetAllocator.AllocateNodeSubnets(node.Name, existingSubnets, config.IPv4Mode, config.IPv6Mode)
 	if err != nil {
 		return nil, err
 	}
 	// Release the allocation on error
 	defer func() {
 		if err != nil {
-			for _, allocatedSubnet := range allocatedSubnets {
-				klog.Warningf("Releasing subnet %v on node %s: %v", allocatedSubnet, node.Name, err)
-				errR := oc.masterSubnetAllocator.ReleaseNetwork(allocatedSubnet)
-				if errR != nil {
-					klog.Warningf("Error releasing subnet %v on node %s", allocatedSubnet, node.Name)
-				}
+			if errR := oc.masterSubnetAllocator.ReleaseNodeSubnets(node.Name, allocatedSubnets...); errR != nil {
+				klog.Warningf("Error releasing node %s subnets: %v", node.Name, errR)
 			}
 		}
 	}()
@@ -977,15 +862,6 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 		return nil, err
 	}
 
-	// If node annotation succeeds and subnets were allocated, update the used subnet count
-	if len(allocatedSubnets) > 0 {
-		for _, hostSubnet := range hostSubnets {
-			util.UpdateUsedHostSubnetsCount(hostSubnet,
-				&oc.v4HostSubnetsUsed,
-				&oc.v6HostSubnetsUsed, true)
-		}
-		metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
-	}
 	return hostSubnets, nil
 }
 
@@ -1030,15 +906,6 @@ func (oc *Controller) deleteStaleNodeChassis(node *kapi.Node) error {
 	return nil
 }
 
-func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) error {
-	err := oc.masterSubnetAllocator.ReleaseNetwork(subnet)
-	if err != nil {
-		return fmt.Errorf("error deleting subnet %v for node %q: %s", subnet, nodeName, err)
-	}
-	klog.Infof("Deleted HostSubnet %v for node %s", subnet, nodeName)
-	return nil
-}
-
 // deleteNodeLogicalNetwork removes the logical switch and logical router port associated with the node
 func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	// Remove switch to lb associations from the LBCache before removing the switch
@@ -1066,15 +933,8 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	return nil
 }
 
-func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet) error {
-	for _, hostSubnet := range hostSubnets {
-		if err := oc.deleteNodeHostSubnet(nodeName, hostSubnet); err != nil {
-			return fmt.Errorf("error deleting node %s HostSubnet %v: %v", nodeName, hostSubnet, err)
-		}
-		util.UpdateUsedHostSubnetsCount(hostSubnet, &oc.v4HostSubnetsUsed, &oc.v6HostSubnetsUsed, false)
-	}
-	// update metrics
-	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
+func (oc *Controller) deleteNode(nodeName string) error {
+	oc.masterSubnetAllocator.ReleaseAllNodeSubnets(nodeName)
 
 	if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
 		return fmt.Errorf("error deleting node %s logical network: %v", nodeName, err)
@@ -1207,7 +1067,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) error {
 				klog.Warning(err.Error())
 			} else if hostSubnet != nil {
 				klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnet)
-				if err := oc.hybridOverlaySubnetAllocator.MarkAllocatedNetwork(hostSubnet); err != nil {
+				if err := oc.hybridOverlaySubnetAllocator.MarkSubnetsAllocated(node.Name, hostSubnet); err != nil {
 					utilruntime.HandleError(err)
 				}
 			}
@@ -1217,22 +1077,16 @@ func (oc *Controller) syncNodes(nodes []interface{}) error {
 
 		foundNodes.Insert(node.Name)
 		klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnets)
-		for _, hostSubnet := range hostSubnets {
-			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostSubnet)
-			if err != nil {
-				utilruntime.HandleError(err)
-			}
-			util.UpdateUsedHostSubnetsCount(hostSubnet, &oc.v4HostSubnetsUsed, &oc.v6HostSubnetsUsed, true)
+		if err := oc.masterSubnetAllocator.MarkSubnetsAllocated(node.Name, hostSubnets...); err != nil {
+			utilruntime.HandleError(err)
 		}
 
 		// For each existing node, reserve its joinSwitch LRP IPs if they already exist.
-		_, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
-		if err != nil {
+		if _, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name); err != nil {
 			// TODO (flaviof): keep going even if EnsureJoinLRPIPs returned an error. Maybe we should not.
 			klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
 		}
 	}
-	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
 
 	p := func(item *nbdb.LogicalSwitch) bool {
 		return len(item.OtherConfig) > 0
@@ -1241,42 +1095,11 @@ func (oc *Controller) syncNodes(nodes []interface{}) error {
 	if err != nil {
 		return fmt.Errorf("failed to get node logical switches which have other-config set: %v", err)
 	}
-	if len(nodeSwitches) == 0 {
-		klog.Warning("Did not find any logical switches with other-config")
-	}
-
 	for _, nodeSwitch := range nodeSwitches {
-		if foundNodes.Has(nodeSwitch.Name) {
-			// node still exists, no cleanup to do
-			continue
-		}
-
-		var subnets []*net.IPNet
-		for key, value := range nodeSwitch.OtherConfig {
-			var subnet *net.IPNet
-			if key == "subnet" {
-				_, subnet, err = net.ParseCIDR(value)
-				if err != nil {
-					klog.Warningf("Unable to parse subnet CIDR %v", value)
-					continue
-				}
-			} else if key == "ipv6_prefix" {
-				_, subnet, err = net.ParseCIDR(value + "/64")
-				if err != nil {
-					klog.Warningf("Unable to parse ipv6_prefix CIDR %v/64", value)
-					continue
-				}
+		if !foundNodes.Has(nodeSwitch.Name) {
+			if err := oc.deleteNode(nodeSwitch.Name); err != nil {
+				return fmt.Errorf("failed to delete node:%s, err:%v", nodeSwitch.Name, err)
 			}
-			if subnet != nil {
-				subnets = append(subnets, subnet)
-			}
-		}
-		if len(subnets) == 0 {
-			continue
-		}
-
-		if err := oc.deleteNode(nodeSwitch.Name, subnets); err != nil {
-			return fmt.Errorf("failed to delete node:%s, err:%v", nodeSwitch.Name, err)
 		}
 	}
 
@@ -1343,15 +1166,11 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 		}
 		if config.HybridOverlay.Enabled && houtil.IsHybridOverlayNode(node) {
 			annotator := kube.NewNodeAnnotator(oc.kube, node.Name)
-			allocatedSubnet, err := oc.hybridOverlayNodeEnsureSubnet(node, annotator)
-			if err != nil {
+			if _, err := oc.hybridOverlayNodeEnsureSubnet(node, annotator); err != nil {
 				return fmt.Errorf("failed to update node %s hybrid overlay subnet annotation: %v", node.Name, err)
 			}
 			if err := annotator.Run(); err != nil {
-				// Release allocated subnet if any errors occurred
-				if allocatedSubnet != nil {
-					_ = oc.releaseHybridOverlayNodeSubnet(node.Name, allocatedSubnet)
-				}
+				oc.releaseHybridOverlayNodeSubnet(node.Name)
 				return fmt.Errorf(" failed to set hybrid overlay annotations for node %s: %v", node.Name, err)
 			}
 		}
@@ -1367,7 +1186,9 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 			oc.mgmtPortFailed.Store(node.Name, true)
 			oc.gatewaysFailed.Store(node.Name, true)
 			oc.hybridOverlayFailed.Store(node.Name, config.HybridOverlay.Enabled)
-			return fmt.Errorf("nodeAdd: error creating subnet for node %s: %w", node.Name, err)
+			err = fmt.Errorf("nodeAdd: error adding node %q: %w", node.Name, err)
+			oc.recordNodeErrorEvent(node, err)
+			return err
 		}
 		oc.addNodeFailed.Delete(node.Name)
 	}
@@ -1461,7 +1282,22 @@ func (oc *Controller) addUpdateNodeEvent(node *kapi.Node, nSyncs *nodeSyncs) err
 		}
 	}
 
-	return kerrors.NewAggregate(errs)
+	err = kerrors.NewAggregate(errs)
+	if err != nil {
+		oc.recordNodeErrorEvent(node, err)
+	}
+	return err
+}
+
+func (oc *Controller) recordNodeErrorEvent(node *kapi.Node, nodeErr error) {
+	nodeRef, err := ref.GetReference(scheme.Scheme, node)
+	if err != nil {
+		klog.Errorf("Couldn't get a reference to node %s to post an event: %v", node.Name, err)
+		return
+	}
+
+	klog.V(5).Infof("Posting %s event for Node %s: %v", kapi.EventTypeWarning, node.Name, nodeErr)
+	oc.recorder.Eventf(nodeRef, kapi.EventTypeWarning, "ErrorReconcilingNode", nodeErr.Error())
 }
 
 func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
@@ -1469,11 +1305,7 @@ func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
 		"various caches", node.Name)
 
 	if config.HybridOverlay.Enabled {
-		if subnet, _ := houtil.ParseHybridOverlayHostSubnet(node); subnet != nil {
-			if err := oc.releaseHybridOverlayNodeSubnet(node.Name, subnet); err != nil {
-				return err
-			}
-		}
+		oc.releaseHybridOverlayNodeSubnet(node.Name)
 		if _, ok := node.Annotations[hotypes.HybridOverlayDRMAC]; ok && !houtil.IsHybridOverlayNode(node) {
 			oc.deleteHybridOverlayPort(node)
 		}
@@ -1481,8 +1313,7 @@ func (oc *Controller) deleteNodeEvent(node *kapi.Node) error {
 			return err
 		}
 	}
-	nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
-	if err := oc.deleteNode(node.Name, nodeSubnets); err != nil {
+	if err := oc.deleteNode(node.Name); err != nil {
 		return err
 	}
 	oc.lsManager.DeleteNode(node.Name)

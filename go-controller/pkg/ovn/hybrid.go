@@ -26,37 +26,35 @@ import (
 // hybrid overlay subnet annotation. It returns any newly allocated subnet
 // or an error. If an error occurs, the newly allocated subnet will be released.
 func (oc *Controller) hybridOverlayNodeEnsureSubnet(node *kapi.Node, annotator kube.Annotator) (*net.IPNet, error) {
+	var existingSubnets []*net.IPNet
+
 	// Do not allocate a subnet if the node already has one
-	if subnet, _ := houtil.ParseHybridOverlayHostSubnet(node); subnet != nil {
-		return nil, nil
+	subnet, err := houtil.ParseHybridOverlayHostSubnet(node)
+	if err != nil {
+		// Log the error and try to allocate new subnets
+		klog.Infof("Failed to get node %s hybrid overlay subnet annotation: %v", node.Name, err)
+	} else if subnet != nil {
+		existingSubnets = []*net.IPNet{subnet}
 	}
 
 	// Allocate a new host subnet for this node
-	hostsubnets, err := oc.hybridOverlaySubnetAllocator.AllocateNetworks()
+	// FIXME: hybrid overlay is only IPv4 for now due to limitations on the Windows side
+	hostSubnets, allocatedSubnets, err := oc.hybridOverlaySubnetAllocator.AllocateNodeSubnets(node.Name, existingSubnets, true, false)
 	if err != nil {
 		return nil, fmt.Errorf("error allocating hybrid overlay HostSubnet for node %s: %v", node.Name, err)
 	}
 
-	if err := annotator.Set(types.HybridOverlayNodeSubnet, hostsubnets[0].String()); err != nil {
-		_ = oc.hybridOverlaySubnetAllocator.ReleaseNetwork(hostsubnets[0])
+	if err := annotator.Set(types.HybridOverlayNodeSubnet, hostSubnets[0].String()); err != nil {
+		_ = oc.hybridOverlaySubnetAllocator.ReleaseNodeSubnets(node.Name, allocatedSubnets...)
 		return nil, err
 	}
 
-	klog.Infof("Allocated hybrid overlay HostSubnet %s for node %s", hostsubnets[0], node.Name)
-	return hostsubnets[0], nil
+	return hostSubnets[0], nil
 }
 
-func (oc *Controller) releaseHybridOverlayNodeSubnet(nodeName string, subnet *net.IPNet) error {
-	if len(config.HybridOverlay.ClusterSubnets) == 0 {
-		// skip releasing node subnet if hybrid-overlay-cluster-subnets is unset.
-		return nil
-	}
-
-	if err := oc.hybridOverlaySubnetAllocator.ReleaseNetwork(subnet); err != nil {
-		return fmt.Errorf("error deleting hybrid overlay HostSubnet %s for node %q: %s", subnet, nodeName, err)
-	}
-	klog.Infof("Deleted hybrid overlay HostSubnet %s for node %s", subnet, nodeName)
-	return nil
+func (oc *Controller) releaseHybridOverlayNodeSubnet(nodeName string) {
+	oc.hybridOverlaySubnetAllocator.ReleaseAllNodeSubnets(nodeName)
+	klog.Infof("Deleted hybrid overlay HostSubnets for node %s", nodeName)
 }
 
 // handleHybridOverlayPort reconciles the node's overlay port with OVN.
