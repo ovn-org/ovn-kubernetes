@@ -317,7 +317,6 @@ func addNodeLogicalFlows(testData []libovsdbtest.TestData, expectedOVNClusterRou
 		Addresses: []string{"router"},
 	})
 	expectedNodeSwitch.Ports = append(expectedNodeSwitch.Ports, types.SwitchToRouterPrefix+node.Name+"-UUID")
-	expectedClusterRouterPortGroup.Ports = []string{types.SwitchToRouterPrefix + node.Name + "-UUID"}
 
 	testData = append(testData, &nbdb.LogicalSwitchPort{
 		Name:      types.K8sPrefix + node.Name,
