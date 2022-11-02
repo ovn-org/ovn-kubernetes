@@ -100,6 +100,9 @@ while [ "$1" != "" ]; do
   --gateway-options)
     OVN_GATEWAY_OPTS=$VALUE
     ;;
+  --enable-ipsec)
+    ENABLE_IPSEC=$VALUE
+    ;;
   --ovn-monitor-all)
     OVN_MONITOR_ALL=$VALUE
     ;;
@@ -292,6 +295,9 @@ echo "ovn_gateway_mode: ${ovn_gateway_mode}"
 
 ovn_gateway_opts=${OVN_GATEWAY_OPTS}
 echo "ovn_gateway_opts: ${ovn_gateway_opts}"
+
+enable_ipsec=${ENABLE_IPSEC:-false}
+echo "enable_ipsec: ${enable_ipsec}"
 
 ovn_db_replicas=${OVN_DB_REPLICAS:-3}
 echo "ovn_db_replicas: ${ovn_db_replicas}"
@@ -499,6 +505,7 @@ ovn_image=${image} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_nb_port=${ovn_nb_port} \
   ovn_sb_port=${ovn_sb_port} \
+  enable_ipsec=${enable_ipsec} \
   j2 ../templates/ovnkube-db.yaml.j2 -o ${output_dir}/ovnkube-db.yaml
 
 ovn_image=${image} \
@@ -517,12 +524,18 @@ ovn_image=${image} \
   ovn_sb_port=${ovn_sb_port} \
   ovn_nb_raft_port=${ovn_nb_raft_port} \
   ovn_sb_raft_port=${ovn_sb_raft_port} \
+  enable_ipsec=${enable_ipsec} \
   j2 ../templates/ovnkube-db-raft.yaml.j2 -o ${output_dir}/ovnkube-db-raft.yaml
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   j2 ../templates/ovs-node.yaml.j2 -o ${output_dir}/ovs-node.yaml
+
+if ${enable_ipsec}; then
+  ovn_image=${image} \
+    j2 ../templates/ovn-ipsec.yaml.j2 -o ${output_dir}/ovn-ipsec.yaml
+fi
 
 # ovn-setup.yaml
 net_cidr=${OVN_NET_CIDR:-"10.128.0.0/14/23"}

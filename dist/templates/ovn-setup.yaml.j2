@@ -91,6 +91,16 @@ rules:
   resources:
   - customresourcedefinitions
   verbs: ["list", "get", "watch"]
+- apiGroups:
+  - certificates.k8s.io
+  resources:
+  - certificatesigningrequests
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+  - delete
 
 
 ---

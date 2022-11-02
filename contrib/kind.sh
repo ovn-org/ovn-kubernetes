@@ -199,6 +199,8 @@ parse_args() {
                                                 ;;
             -i6 | --ipv6 )                      KIND_IPV6_SUPPORT=true
                                                 ;;
+            -is | --ipsec )                     ENABLE_IPSEC=true
+                                                ;;
             -wk | --num-workers )               shift
                                                 if ! [[ "$1" =~ ^[0-9]+$ ]]; then
                                                     echo "Invalid num-workers: $1"
@@ -309,6 +311,7 @@ print_params() {
      echo "KIND_REMOVE_TAINT = $KIND_REMOVE_TAINT"
      echo "KIND_IPV4_SUPPORT = $KIND_IPV4_SUPPORT"
      echo "KIND_IPV6_SUPPORT = $KIND_IPV6_SUPPORT"
+     echo "ENABLE_IPSEC = $ENABLE_IPSEC"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
      echo "KIND_ALLOW_SYSTEM_WRITES = $KIND_ALLOW_SYSTEM_WRITES"
      echo "KIND_EXPERIMENTAL_PROVIDER = $KIND_EXPERIMENTAL_PROVIDER"
@@ -386,6 +389,12 @@ check_dependencies() {
   	  echo "Dependency not met: Neither docker nor podman found"
   	  exit 1
   fi
+
+  if [ "${ENABLE_IPSEC}" == true ]; then
+      if ! command_exists openssl3 ; then
+        echo "Dependency not met: 'openssl3' not installed"
+      fi
+  fi
 }
 
 set_default_params() {
@@ -412,6 +421,7 @@ set_default_params() {
   KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
   KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
   KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
+  ENABLE_IPSEC=${ENABLE_IPSEC:-false}
   OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
   OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-false}
   OVN_DISABLE_PKT_MTU_CHECK=${OVN_DISABLE_PKT_MTU_CHECK:-false}
@@ -633,6 +643,7 @@ create_ovn_kube_manifests() {
     --net-cidr="${NET_CIDR}" \
     --svc-cidr="${SVC_CIDR}" \
     --gateway-mode="${OVN_GATEWAY_MODE}" \
+    --enable-ipsec="${ENABLE_IPSEC}" \
     --hybrid-enabled="${OVN_HYBRID_OVERLAY_ENABLE}" \
     --disable-snat-multiple-gws="${OVN_DISABLE_SNAT_MULTIPLE_GWS}" \
     --disable-pkt-mtu-check="${OVN_DISABLE_PKT_MTU_CHECK}" \
@@ -757,6 +768,45 @@ calculate_timeout() {
   echo ${timeout}
 }
 
+# install_ipsec will apply the IPsec DaemonSet, spawn the csr_signer in the background and wait for the DS to roll out.
+# Make sure to install the IPsec DaemonSet at the very end of the setup process.
+install_ipsec() {
+  pushd ${MANIFEST_OUTPUT_DIR}
+  run_kubectl apply -f ovn-ipsec.yaml
+  popd
+  trap 'kill $(jobs -p)' EXIT SIGINT SIGTERM
+  csr_signer &
+  kubectl rollout status daemonset -n ovn-kubernetes ovn-ipsec --timeout 300s
+}
+
+# csr_signer will create a CA that can be used by the IPsec pods. It will then add it to configmap
+# -n ovn-kubernetes signer-ca. After that, it will monitor all CSRs that are pending and it will sign those with
+# the CA cert. To be run in the background while waiting for the IPsec pods to roll out and to be killed at
+# exit.
+csr_signer() {
+  ca_dir=$(mktemp -d)
+  pushd ${ca_dir}
+  openssl3 genrsa -out ca-bundle.key 4096
+  openssl3 req -x509 -new -nodes -key ca-bundle.key -sha256 -days 10240 -out ca-bundle.crt \
+      -subj "/C=CA/ST=Arctica/L=Northpole/O=Acme Inc/OU=DevOps/CN=www.example.com/emailAddress=dev@www.example.com"
+  kubectl create configmap -n ovn-kubernetes signer-ca --from-file ca-bundle.crt
+  for i in {1..300}; do
+    sleep 1
+    csrs=$(oc get csr -o go-template='{{range .items}}{{if not .status}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}')
+    for csr in ${csrs}; do
+      kubectl get csr ${csr} -o jsonpath='{.spec.request}' | base64 --decode | \
+          sed -n '/BEGIN CERTIFICATE REQUEST/,$p' > ${csr}
+      openssl3 x509 -req -in ${csr} -CA ca-bundle.crt -CAkey ca-bundle.key -CAcreateserial -out ${csr}.crt -days 3650  \
+          -sha256 -extensions v3_req -copy_extensions copy
+      kubectl get csr ${csr} -o json | \
+          jq '.status.certificate = "'$(base64 ${csr}.crt | tr -d '\n')'"' | \
+          kubectl replace --raw /apis/certificates.k8s.io/v1/certificatesigningrequests/${csr}/status -f -
+    done
+  done
+  popd
+  rm -Rf ${ca_dir}
+}
+
 docker_create_second_interface() {
   echo "adding second interfaces to nodes"
 
@@ -825,3 +875,9 @@ if [ "$KIND_INSTALL_INGRESS" == true ]; then
 fi
 kubectl_wait_pods
 sleep_until_pods_settle
+# Launch IPsec pods last to make sure that CSR signing logic works
+# Launch csr_signer in background
+# Wait for DaemonSet to rollout
+if [ "${ENABLE_IPSEC}" == true ]; then
+  install_ipsec
+fi
