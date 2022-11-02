@@ -633,8 +633,8 @@ github.com/openshift/api v0.0.0-20221004161420-ef2c62cf20d0/go.mod h1:JRz+ZvTqu9
 github.com/openshift/client-go v0.0.0-20220915152853-9dfefb19db2e h1:ab+BJg7h50pi2/rbMkDSXfYx8w80HLmr7NBs8H1hEvU=
 github.com/openshift/client-go v0.0.0-20220915152853-9dfefb19db2e/go.mod h1:e+TTiBDGWB3O3p3iAzl054x3cZDWhrZ5+jxJRCdEFkA=
 github.com/opentracing/opentracing-go v1.1.0/go.mod h1:UkNAQd3GIcIGf0SeVgPpRdFStlNbqXla1AfSYxPUl2o=
-github.com/ovn-org/libovsdb v0.6.1-0.20220901025242-999ca1972a3a h1:fcKT5QPXQfNURcy4QddDFnI8f2GTNVlJrQMwJ+pZbI8=
-github.com/ovn-org/libovsdb v0.6.1-0.20220901025242-999ca1972a3a/go.mod h1:S/+Hux9//oB7yLaPsUKnXTzZc6S1C4a9HP0UifXfKz0=
+github.com/ovn-org/libovsdb v0.6.1-0.20221101143603-8f21d188c3a5 h1:Cw0JXIHSGp8etz5/P7zNQ0tCMmTljBGBr8Rn2P1PuzQ=
+github.com/ovn-org/libovsdb v0.6.1-0.20221101143603-8f21d188c3a5/go.mod h1:S/+Hux9//oB7yLaPsUKnXTzZc6S1C4a9HP0UifXfKz0=
 github.com/pascaldekloe/goe v0.0.0-20180627143212-57f6aae5913c/go.mod h1:lzWF7FIEvWOWxwDKqyGYQf6ZUaNfKdP144TG7ZOy1lc=
 github.com/pelletier/go-toml v1.2.0/go.mod h1:5z9KED0ma1S8pY6P1sdut58dfprrGBbd/94hg7ilaic=
 github.com/pelletier/go-toml v1.8.1/go.mod h1:T2/BmBdy8dvIRq1a/8aqjN41wvWlN4lrapLU/GW4pbc=

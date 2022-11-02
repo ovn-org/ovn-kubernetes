@@ -5,6 +5,8 @@ package serverdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const DatabaseTable = "Database"
+
 type (
 	DatabaseModel = string
 )
