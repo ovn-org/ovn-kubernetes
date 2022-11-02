@@ -44,6 +44,7 @@ const (
 	rolloutTimeout       = 10 * time.Minute
 	agnhostImage         = "k8s.gcr.io/e2e-test-images/agnhost:2.26"
 	iperf3Image          = "quay.io/sronanrh/iperf"
+	ovnNs      = "ovn-kubernetes" //OVN kubernetes namespace
 )
 
 type podCondition = func(pod *v1.Pod) (bool, error)
@@ -481,6 +482,18 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 	return nil
 }
 
+func findOvnKubeMasterNode() (string, error) {
+
+	ovnkubeMasterNode, err := framework.RunKubectl(ovnNs,"get", "leases", "ovn-kubernetes-master",
+		"-o", "jsonpath='{.spec.holderIdentity}'")
+
+	framework.ExpectNoError(err, fmt.Sprintf("Unable to retrieve leases (ovn-kubernetes-master)" +
+		"from %s %v", ovnNs, err))
+
+	framework.Logf(fmt.Sprintf("master instance of ovnkube-master is running on node %s", ovnkubeMasterNode))
+	return ovnkubeMasterNode, nil
+}
+
 var _ = ginkgo.Describe("e2e control plane", func() {
 	var svcname = "nettest"
 
@@ -514,7 +527,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		}
 	})
 
-	ginkgo.It("should provide Internet connection continuously when ovn-k8s pod is killed", func() {
+	ginkgo.It("should provide Internet connection continuously when ovnkube-node pod is killed", func() {
 		ginkgo.By(fmt.Sprintf("Running container which tries to connect to %s in a loop", extDNSIP))
 
 		podChan, errChan := make(chan *v1.Pod), make(chan error)
@@ -541,7 +554,93 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		framework.ExpectNoError(err, "one or more nodes failed to go back ready, schedulable, and untainted")
 	})
 
-	ginkgo.It("should provide Internet connection continuously when master is killed", func() {
+	ginkgo.It("should provide Internet connection continuously when pod running master instance of ovnkube-master is killed\"", func() {
+		ginkgo.By(fmt.Sprintf("Running container which tries to connect to %s in a loop", extDNSIP))
+
+		ovnKubeMasterNode, err := findOvnKubeMasterNode()
+		framework.ExpectNoError(err, fmt.Sprintf("unable to find current master of ovnkuber-master cluster %v", err))
+		podChan, errChan := make(chan *v1.Pod), make(chan error)
+		go func() {
+			defer ginkgo.GinkgoRecover()
+			checkContinuousConnectivity(f, "", "connectivity-test-continuous", extDNSIP, 53, 30, 30, podChan, errChan)
+		}()
+
+		err = <-errChan
+		framework.ExpectNoError(err)
+
+		testPod := <-podChan
+		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
+
+		time.Sleep(5 * time.Second)
+
+		podClient := f.ClientSet.CoreV1().Pods(ovnNs)
+
+		podList, err := podClient.List(context.Background(), metav1.ListOptions{
+			LabelSelector: "name=ovnkube-master",
+		})
+		framework.ExpectNoError(err)
+
+		podName := ""
+		for _, pod := range podList.Items {
+			if strings.HasPrefix(pod.Name, "ovnkube-master") && pod.Spec.NodeName == ovnKubeMasterNode {
+				podName = pod.Name
+				break
+			}
+		}
+
+		ginkgo.By("Deleting ovn-kube master pod " + podName)
+		e2epod.DeletePodWithWaitByName(f.ClientSet, podName, ovnNs)
+		framework.Logf("Deleted ovnkube-master %q", podName)
+
+		ginkgo.By("Ensring there were no connectivity errors")
+		framework.ExpectNoError(<-errChan)
+
+		err = waitClusterHealthy(f, numMasters)
+		framework.ExpectNoError(err, "one or more nodes failed to go back ready, schedulable, and untainted")
+	})
+
+	ginkgo.It("should provide Internet connection continuously when all pods are killed on node running master instance of ovnkube-master.", func() {
+		ginkgo.By(fmt.Sprintf("Running container which tries to connect to %s in a loop", extDNSIP))
+
+		ovnKubeMasterNode, err := findOvnKubeMasterNode()
+		framework.ExpectNoError(err, fmt.Sprintf("unable to find current master of ovnkuber-master cluster %v", err))
+
+		podChan, errChan := make(chan *v1.Pod), make(chan error)
+		go func() {
+			defer ginkgo.GinkgoRecover()
+			checkContinuousConnectivity(f, "", "connectivity-test-continuous", extDNSIP, 53, 30, 30, podChan, errChan)
+		}()
+
+		err = <-errChan
+		framework.ExpectNoError(err)
+
+		testPod := <-podChan
+		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
+
+		time.Sleep(5 * time.Second)
+
+		podClient := f.ClientSet.CoreV1().Pods("")
+
+		podList, _ := podClient.List(context.Background(), metav1.ListOptions{})
+		for _, pod := range podList.Items {
+			// deleting the ovs-node pod tears down all the node networking and the restarting pod
+			// does not build it back up, thus breaking that node entirely. We can't delete it for
+			// this test case.
+			if pod.Spec.NodeName == ovnKubeMasterNode && pod.Name != "connectivity-test-continuous" &&
+			                                             pod.Name != "etcd-ovn-control-plane" &&
+				                                         !strings.HasPrefix(pod.Name, "ovs-node") {
+				framework.Logf("%q", pod.Namespace)
+				e2epod.DeletePodWithWaitByName(f.ClientSet, pod.Name, ovnNs)
+				framework.Logf("Deleted control plane pod %q", pod.Name)
+			}
+		}
+
+		framework.Logf(fmt.Sprintf("Killed all pods running on node %s", ovnKubeMasterNode))
+
+		framework.ExpectNoError(<-errChan)
+	})
+
+	ginkgo.It("should provide Internet connection continuously when all ovnkube-master pods are killed.", func() {
 		ginkgo.By(fmt.Sprintf("Running container which tries to connect to %s in a loop", extDNSIP))
 
 		podChan, errChan := make(chan *v1.Pod), make(chan error)
@@ -558,30 +657,20 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 
 		time.Sleep(5 * time.Second)
 
-		podClient := f.ClientSet.CoreV1().Pods("ovn-kubernetes")
+		podClient := f.ClientSet.CoreV1().Pods("")
 
-		podList, err := podClient.List(context.Background(), metav1.ListOptions{
-			LabelSelector: "name=ovnkube-master",
-		})
-		framework.ExpectNoError(err)
-
-		podName := ""
+		podList, _ := podClient.List(context.Background(), metav1.ListOptions{})
 		for _, pod := range podList.Items {
-			if strings.HasPrefix(pod.Name, "ovnkube-master") {
-				podName = pod.Name
-				break
+			if strings.HasPrefix(pod.Name, "ovnkube-master") && !strings.HasPrefix(pod.Name, "ovs-node"){
+				framework.Logf("%q", pod.Namespace)
+				e2epod.DeletePodWithWaitByName(f.ClientSet, pod.Name, ovnNs)
+				framework.Logf("Deleted control plane pod %q", pod.Name)
 			}
 		}
 
-		ginkgo.By("Deleting ovn-kube master pod " + podName)
-		e2epod.DeletePodWithWaitByName(f.ClientSet, podName, "ovn-kubernetes")
-		framework.Logf("Deleted ovnkube-master %q", podName)
+		framework.Logf("Killed all the ovnkube-master pods.")
 
-		ginkgo.By("Ensring there were no connectivity errors")
 		framework.ExpectNoError(<-errChan)
-
-		err = waitClusterHealthy(f, numMasters)
-		framework.ExpectNoError(err, "one or more nodes failed to go back ready, schedulable, and untainted")
 	})
 
 	ginkgo.It("should provide connection to external host by DNS name from a pod", func() {
