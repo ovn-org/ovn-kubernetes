@@ -28,5 +28,10 @@ func GetVdpaOps() VdpaOps {
 }
 
 func (v *defaultVdpaOps) GetVdpaDeviceByPci(pciAddress string) (kvdpa.VdpaDevice, error) {
-	return kvdpa.GetVdpaDeviceByPci(pciAddress)
+	// the PCI prefix is required by the govdpa library
+	vdpaDevices, err := kvdpa.GetVdpaDevicesByPciAddress("pci/" + pciAddress)
+	if len(vdpaDevices) > 0 {
+		return vdpaDevices[0], nil
+	}
+	return nil, err
 }

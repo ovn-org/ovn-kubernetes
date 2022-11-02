@@ -15,7 +15,7 @@ require (
 	github.com/google/uuid v1.2.0
 	github.com/gorilla/mux v1.8.0
 	github.com/j-keck/arping v1.0.2
-	github.com/k8snetworkplumbingwg/govdpa v0.1.3
+	github.com/k8snetworkplumbingwg/govdpa v0.1.4
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.3.0
 	github.com/miekg/dns v1.1.31
 	github.com/mitchellh/copystructure v1.2.0
