@@ -102,7 +102,7 @@ const (
 
 func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, ports []string, logSeverity nbdb.ACLSeverity, oldEgress bool) []libovsdb.TestData {
 	pgHash := hashedPortGroup(networkPolicy.Namespace)
-	policyTypeIngress, policyTypeEgress := policyType(networkPolicy)
+	policyTypeIngress, policyTypeEgress := getPolicyType(networkPolicy)
 	shouldBeLogged := logSeverity != ""
 	egressDirection := nbdb.ACLDirectionFromLport
 	egressOptions := map[string]string{
@@ -113,7 +113,7 @@ func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, po
 		egressOptions = map[string]string{}
 	}
 	egressDenyACL := libovsdbops.BuildACL(
-		networkPolicy.Namespace+"_"+egressDefaultDenySuffix,
+		getDefaultDenyPolicyACLName(networkPolicy.Namespace, egressDefaultDenySuffix),
 		egressDirection,
 		types.DefaultDenyPriority,
 		"inport == @"+pgHash+"_"+egressDenyPG,
@@ -129,7 +129,7 @@ func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, po
 	egressDenyACL.UUID = *egressDenyACL.Name + "-egressDenyACL-UUID"
 
 	egressAllowACL := libovsdbops.BuildACL(
-		networkPolicy.Namespace+"_"+arpAllowPolicySuffix,
+		getARPAllowACLName(networkPolicy.Namespace),
 		egressDirection,
 		types.DefaultAllowPriority,
 		"inport == @"+pgHash+"_"+egressDenyPG+" && "+arpAllowPolicyMatch,
@@ -145,7 +145,7 @@ func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, po
 	egressAllowACL.UUID = *egressAllowACL.Name + "-egressAllowACL-UUID"
 
 	ingressDenyACL := libovsdbops.BuildACL(
-		networkPolicy.Namespace+"_"+ingressDefaultDenySuffix,
+		getDefaultDenyPolicyACLName(networkPolicy.Namespace, ingressDefaultDenySuffix),
 		nbdb.ACLDirectionToLport,
 		types.DefaultDenyPriority,
 		"outport == @"+pgHash+"_"+ingressDenyPG,
@@ -161,7 +161,7 @@ func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, po
 	ingressDenyACL.UUID = *ingressDenyACL.Name + "-ingressDenyACL-UUID"
 
 	ingressAllowACL := libovsdbops.BuildACL(
-		networkPolicy.Namespace+"_"+arpAllowPolicySuffix,
+		getARPAllowACLName(networkPolicy.Namespace),
 		nbdb.ACLDirectionToLport,
 		types.DefaultAllowPriority,
 		"outport == @"+pgHash+"_"+ingressDenyPG+" && "+arpAllowPolicyMatch,
@@ -222,7 +222,7 @@ func (n kNetworkPolicy) getPolicyData(networkPolicy *knet.NetworkPolicy, policyP
 
 	shouldBeLogged := logSeverity != ""
 	for i := range networkPolicy.Spec.Ingress {
-		aclName := networkPolicy.Namespace + "_" + networkPolicy.Name + "_" + strconv.Itoa(i)
+		aclName := getGressPolicyACLName(networkPolicy.Namespace, networkPolicy.Name, i)
 		policyType := string(knet.PolicyTypeIngress)
 		if peerNamespaces != nil {
 			ingressAsMatch := asMatch(append(peerNamespaces, getAddressSetName(networkPolicy.Namespace, networkPolicy.Name, knet.PolicyTypeIngress, i)))
@@ -282,7 +282,7 @@ func (n kNetworkPolicy) getPolicyData(networkPolicy *knet.NetworkPolicy, policyP
 			direction = nbdb.ACLDirectionToLport
 			options = map[string]string{}
 		}
-		aclName := networkPolicy.Namespace + "_" + networkPolicy.Name + "_" + strconv.Itoa(i)
+		aclName := getGressPolicyACLName(networkPolicy.Namespace, networkPolicy.Name, i)
 		policyType := string(knet.PolicyTypeEgress)
 		if peerNamespaces != nil {
 			egressAsMatch := asMatch(append(peerNamespaces, getAddressSetName(networkPolicy.Namespace, networkPolicy.Name, knet.PolicyTypeEgress, i)))
@@ -406,14 +406,14 @@ type multicastPolicy struct{}
 
 func (p multicastPolicy) getMulticastPolicyExpectedData(ns string, ports []string) []libovsdb.TestData {
 	pg_hash := hashedPortGroup(ns)
-	egressMatch := getACLMatch(pg_hash, getMulticastACLEgrMatch(), knet.PolicyTypeEgress)
+	egressMatch := getACLMatch(pg_hash, getMulticastACLEgrMatch(), lportEgressAfterLB)
 
 	ip4AddressSet, ip6AddressSet := addressset.MakeAddressSetHashNames(ns)
 	mcastMatch := getACLMatchAF(getMulticastACLIgrMatchV4(ip4AddressSet), getMulticastACLIgrMatchV6(ip6AddressSet))
-	ingressMatch := getACLMatch(pg_hash, mcastMatch, knet.PolicyTypeIngress)
+	ingressMatch := getACLMatch(pg_hash, mcastMatch, lportIngress)
 
 	egressACL := libovsdbops.BuildACL(
-		ns+"_MulticastAllowEgress",
+		getMcastACLName(ns, "MulticastAllowEgress"),
 		nbdb.ACLDirectionFromLport,
 		types.DefaultMcastAllowPriority,
 		egressMatch,
@@ -431,7 +431,7 @@ func (p multicastPolicy) getMulticastPolicyExpectedData(ns string, ports []strin
 	egressACL.UUID = *egressACL.Name + "-UUID"
 
 	ingressACL := libovsdbops.BuildACL(
-		ns+"_MulticastAllowIngress",
+		getMcastACLName(ns, "MulticastAllowIngress"),
 		nbdb.ACLDirectionToLport,
 		types.DefaultMcastAllowPriority,
 		ingressMatch,
@@ -1331,7 +1331,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				acls := []libovsdb.TestData{}
 				acls = append(acls, gressPolicy1ExpectedData[:len(gressPolicy1ExpectedData)-1]...)
 				acls = append(acls, gressPolicy2ExpectedData[:len(gressPolicy2ExpectedData)-1]...)
-				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)))
 
 				return nil
@@ -1451,7 +1450,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				// sleep long enough for TransactWithRetry to fail, causing NP Add to fail
 				time.Sleep(types.OVSDBTimeout + time.Second)
 				// check to see if the retry cache has an entry for this policy
-				key := getPolicyNamespacedName(networkPolicy2)
+				key := getPolicyKey(networkPolicy2)
 				checkRetryObjectEventually(key, true, fakeOvn.controller.retryNetworkPolicies)
 
 				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
@@ -1582,7 +1581,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				// sleep long enough for TransactWithRetry to fail, causing NP Add to fail
 				time.Sleep(types.OVSDBTimeout + time.Second)
 				// check to see if the retry cache has an entry for this policy
-				key := getPolicyNamespacedName(networkPolicy2)
+				key := getPolicyKey(networkPolicy2)
 				checkRetryObjectEventually(key, true, fakeOvn.controller.retryNetworkPolicies)
 				if retryEntry, found := getRetryObj(key, fakeOvn.controller.retryNetworkPolicies); found {
 					ginkgo.By("retry entry new policy should be nil")
@@ -1612,7 +1611,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				expectedData = append(expectedData, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 				// check the cache no longer has the entry
-				key = getPolicyNamespacedName(networkPolicy)
+				key = getPolicyKey(networkPolicy)
 				checkRetryObjectEventually(key, false, fakeOvn.controller.retryNetworkPolicies)
 				return nil
 			}
@@ -1670,7 +1669,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				}
 				pgHash := hashedPortGroup(networkPolicy.Namespace)
 				leftOverACLFromUpgrade1 := libovsdbops.BuildACL(
-					networkPolicy.Namespace+"_"+arpAllowPolicySuffix,
+					getARPAllowACLName(networkPolicy.Namespace),
 					nbdb.ACLDirectionFromLport,
 					types.DefaultAllowPriority,
 					"inport == @"+pgHash+"_"+egressDenyPG+" && (arp)", // invalid ACL match; won't be cleaned up
@@ -1686,7 +1685,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				leftOverACLFromUpgrade1.UUID = *leftOverACLFromUpgrade1.Name + "-egressAllowACL-UUID1"
 
 				leftOverACLFromUpgrade2 := libovsdbops.BuildACL(
-					networkPolicy.Namespace+"_"+arpAllowPolicySuffix,
+					getARPAllowACLName(networkPolicy.Namespace),
 					nbdb.ACLDirectionFromLport,
 					types.DefaultAllowPriority,
 					"inport == @"+pgHash+"_"+egressDenyPG+" && "+arpAllowPolicyMatch,
@@ -1729,9 +1728,9 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				err = fakeOvn.controller.addNetworkPolicy(networkPolicy)
 				gomega.Expect(err).To(gomega.HaveOccurred())
-				gomega.Expect(err.Error()).To(gomega.ContainSubstring("failed to create default port groups and acls " +
-					"for policy: abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijk/networkpolicy1, " +
-					"error: unexpectedly found multiple results for provided predicate"))
+				gomega.Expect(err.Error()).To(gomega.ContainSubstring("failed to create Network Policy " +
+					"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijk/networkpolicy1: " +
+					"failed to create default deny port groups: unexpectedly found multiple results for provided predicate"))
 
 				//ensure the default PGs and ACLs were removed via rollback from add failure
 				expectedData := []libovsdb.TestData{}
@@ -1741,7 +1740,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
 				ginkgo.By("Deleting the network policy that failed to create and ensuring we don't panic")
-				err = fakeOvn.controller.deleteNetworkPolicy(networkPolicy, nil)
+				err = fakeOvn.controller.deleteNetworkPolicy(networkPolicy)
 				// I0623 policy.go:1285] Deleting network policy networkpolicy1 in namespace namespace1, np is nil: true
 				// W0623 policy.go:1315] Unable to delete network policy: namespace1/networkpolicy1 since its not found in cache
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1822,7 +1821,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				pgHash := hashedPortGroup("leftover1")
 				// ACL1: leftover arp allow ACL egress with old match (arp)
 				leftOverACL1FromUpgrade := libovsdbops.BuildACL(
-					"leftover1"+"_"+arpAllowPolicySuffix,
+					getARPAllowACLName("leftover1"),
 					nbdb.ACLDirectionFromLport,
 					types.DefaultAllowPriority,
 					"inport == @"+pgHash+"_"+egressDenyPG+" && "+staleArpAllowPolicyMatch,
@@ -1845,7 +1844,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				testOnlyEgressDenyPG.UUID = testOnlyEgressDenyPG.Name + "-UUID"
 				// ACL2: leftover arp allow ACL ingress with old match (arp)
 				leftOverACL2FromUpgrade := libovsdbops.BuildACL(
-					"leftover1"+"_"+arpAllowPolicySuffix,
+					getARPAllowACLName("leftover1"),
 					nbdb.ACLDirectionToLport,
 					types.DefaultAllowPriority,
 					"outport == @"+pgHash+"_"+ingressDenyPG+" && "+staleArpAllowPolicyMatch,
@@ -2240,16 +2239,14 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
 
 				ginkgo.By("Simulate the initial re-add of all network policies during upgrade and ensure we are stable")
-				nsInfo, nsUnlock, err := fakeOvn.controller.ensureNamespaceLocked(networkPolicy1.Namespace, false, nil)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				nsInfo.networkPolicies = map[string]*networkPolicy{} // reset cache so that we simulate the add that happens during upgrades
-				nsUnlock()
+				fakeOvn.controller.networkPolicies.Delete(getPolicyKey(networkPolicy1))
+				fakeOvn.controller.sharedNetpolPortGroups.Delete(networkPolicy1.Namespace) // reset cache so that we simulate the add that happens during upgrades
 				err = fakeOvn.controller.addNetworkPolicy(networkPolicy1)
 				// TODO: FIX ME
 				gomega.Expect(err).To(gomega.HaveOccurred())
-				gomega.Expect(err.Error()).To(gomega.ContainSubstring("failed to create default port groups and acls " +
-					"for policy: abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijk/networkpolicy1, " +
-					"error: unexpectedly found multiple results for provided predicate"))
+				gomega.Expect(err.Error()).To(gomega.ContainSubstring("failed to create Network Policy " +
+					"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijk/networkpolicy1: " +
+					"failed to create default deny port groups: unexpectedly found multiple results for provided predicate"))
 
 				return nil
 			}
@@ -2857,7 +2854,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				acls := []libovsdb.TestData{}
 				acls = append(acls, gressPolicyExpectedData[:len(gressPolicyExpectedData)-1]...)
-				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)))
 
 				return nil
@@ -2961,7 +2957,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				// sleep long enough for TransactWithRetry to fail, causing NP Add to fail
 				time.Sleep(types.OVSDBTimeout + time.Second)
 				// check to see if the retry cache has an entry for this policy
-				key := getPolicyNamespacedName(networkPolicy)
+				key := getPolicyKey(networkPolicy)
 				checkRetryObjectEventually(key, true, fakeOvn.controller.retryNetworkPolicies)
 				connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 				defer cancel()
@@ -2973,7 +2969,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				acls := []libovsdb.TestData{}
 				acls = append(acls, gressPolicyExpectedData[:len(gressPolicyExpectedData)-1]...)
-				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
 				gomega.Eventually(fakeOvn.controller.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)))
 
 				// check the cache no longer has the entry
@@ -3067,7 +3062,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				// TODO: test server does not garbage collect ACLs, so we just expect policy & deny portgroups to be removed
 				acls := []libovsdb.TestData{}
 				acls = append(acls, gressPolicy1ExpectedData[:len(gressPolicy1ExpectedData)-1]...)
-				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)))
 
 				return nil
@@ -3159,7 +3153,6 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				// TODO: test server does not garbage collect ACLs, so we just expect policy & deny portgroups to be removed
 				acls := []libovsdb.TestData{}
 				acls = append(acls, gressPolicy1ExpectedData[:len(gressPolicy1ExpectedData)-1]...)
-				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)))
 
 				return nil
@@ -3396,7 +3389,7 @@ func asMatch(addressSets []string) string {
 }
 
 func buildExpectedACL(gp *gressPolicy, pgName string, as []string, aclLogging *ACLLoggingLevels) *nbdb.ACL {
-	name := gp.policyNamespace + "_" + gp.policyName + "_" + strconv.Itoa(gp.idx)
+	name := getGressPolicyACLName(gp.policyNamespace, gp.policyName, gp.idx)
 	asMatch := asMatch(as)
 	match := fmt.Sprintf("ip4.src == {%s} && outport == @%s", asMatch, pgName)
 	gpDirection := string(knet.PolicyTypeIngress)
@@ -3637,7 +3630,7 @@ func generateAllowFromNodeData(nodeName, mgmtIP string) (nodeSwitch *nbdb.Logica
 
 	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtIP)
 
-	nodeACL := libovsdbops.BuildACL("", nbdb.ACLDirectionToLport, types.DefaultAllowPriority, match, "allow-related", types.OvnACLLoggingMeter, "", false, nil, nil)
+	nodeACL := libovsdbops.BuildACL(getAllowFromNodeACLName(), nbdb.ACLDirectionToLport, types.DefaultAllowPriority, match, "allow-related", types.OvnACLLoggingMeter, "", false, nil, nil)
 	nodeACL.UUID = "nodeACL-UUID"
 
 	testNode := &nbdb.LogicalSwitch{

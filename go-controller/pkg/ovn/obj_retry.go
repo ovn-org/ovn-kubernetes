@@ -17,7 +17,6 @@ import (
 	knet "k8s.io/api/networking/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
-	kerrorsutil "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/cache"
 
 	"k8s.io/klog/v2"
@@ -97,7 +96,7 @@ func (r *RetryObjs) DoWithLock(key string, f func(key string)) {
 
 func (r *RetryObjs) initRetryObjWithAddBackoff(obj interface{}, lockedKey string, backoff time.Duration) *retryObjEntry {
 	// even if the object was loaded and changed before with the same lock, LoadOrStore will return reference to the same object
-	entry := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{backoffSec: backoff})
+	entry, _ := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{backoffSec: backoff})
 	entry.timeStamp = time.Now()
 	entry.newObj = obj
 	entry.failedAttempts = 0
@@ -113,7 +112,7 @@ func (r *RetryObjs) initRetryObjWithAdd(obj interface{}, lockedKey string) *retr
 
 // initRetryObjWithUpdate tracks objects that failed to be updated to potentially retry later
 func (r *RetryObjs) initRetryObjWithUpdate(oldObj, newObj interface{}, lockedKey string) *retryObjEntry {
-	entry := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: oldObj, backoffSec: initialBackoff})
+	entry, _ := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: oldObj, backoffSec: initialBackoff})
 	// even if the object was loaded and changed before with the same lock, LoadOrStore will return reference to the same object
 	entry.timeStamp = time.Now()
 	entry.newObj = newObj
@@ -125,15 +124,12 @@ func (r *RetryObjs) initRetryObjWithUpdate(oldObj, newObj interface{}, lockedKey
 // initRetryObjWithDelete creates a retry entry for an object that is being deleted,
 // so that, if it fails, the delete can be potentially retried later.
 // When applied to pods, we include the config object as well in case the namespace is removed
-// and the object is orphaned from the namespace. Similarly, when applied to network policies,
-// we include in config the networkPolicy struct used internally, for the same scenario where
-// a namespace is being deleted along with its network policies and, in case of a delete retry of
-// one such network policy, we wouldn't be able to get to the networkPolicy struct from nsInfo.
+// and the object is orphaned from the namespace.
 //
 // The noRetryAdd boolean argument is to indicate whether to retry for addition
 func (r *RetryObjs) initRetryObjWithDelete(obj interface{}, lockedKey string, config interface{}, noRetryAdd bool) *retryObjEntry {
 	// even if the object was loaded and changed before with the same lock, LoadOrStore will return reference to the same object
-	entry := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: config, backoffSec: initialBackoff})
+	entry, _ := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: config, backoffSec: initialBackoff})
 	entry.timeStamp = time.Now()
 	entry.oldObj = obj
 	if entry.config == nil {
@@ -337,7 +333,7 @@ func getResourceKey(objType reflect.Type, obj interface{}) (string, error) {
 		if !ok {
 			return "", fmt.Errorf("could not cast %T object to *knet.NetworkPolicy", obj)
 		}
-		return getPolicyNamespacedName(np), nil
+		return getPolicyKey(np), nil
 
 	case factory.NodeType,
 		factory.EgressNodeType:
@@ -638,66 +634,29 @@ func (oc *Controller) addResource(objectsToRetry *RetryObjs, obj interface{}, fr
 			return fmt.Errorf("could not cast peer service of type %T to *kapi.Service", obj)
 		}
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerServiceAdd(extraParameters.gp, service)
+		return oc.handlePeerServiceAdd(extraParameters.np, extraParameters.gp, service)
 
 	case factory.PeerPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, obj)
+		return oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		namespace := obj.(*kapi.Namespace)
-		extraParameters.np.RLock()
-		alreadyDeleted := extraParameters.np.deleted
-		extraParameters.np.RUnlock()
-		if alreadyDeleted {
-			return nil
-		}
-
-		// start watching pods in this namespace and selected by the label selector in extraParameters.podSelector
-		retryPeerPods := NewRetryObjs(
-			factory.PeerPodForNamespaceAndPodSelectorType,
-			namespace.Name,
-			extraParameters.podSelector,
-			nil,
-			&NetworkPolicyExtraParameters{gp: extraParameters.gp},
-		)
-		// The AddFilteredPodHandler call might call handlePeerPodSelectorAddUpdate
-		// on existing pods so we can't be holding the lock at this point
-		podHandler, err := oc.WatchResource(retryPeerPods)
-		if err != nil {
-			klog.Errorf("Failed WatchResource for PeerNamespaceAndPodSelectorType: %v", err)
-			return err
-		}
-
-		extraParameters.np.Lock()
-		defer extraParameters.np.Unlock()
-		if extraParameters.np.deleted {
-			oc.watchFactory.RemovePodHandler(podHandler)
-			return nil
-		}
-		extraParameters.np.podHandlerList = append(extraParameters.np.podHandlerList, podHandler)
+		return oc.handlePeerNamespaceAndPodAdd(extraParameters.np, extraParameters.gp,
+			extraParameters.podSelector, obj)
 
 	case factory.PeerPodForNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, obj)
+		return oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerNamespaceSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		namespace := obj.(*kapi.Namespace)
-		// Update the ACL ...
-		return oc.handlePeerNamespaceSelectorOnUpdate(extraParameters.np, extraParameters.gp, func() bool {
-			// ... on condition that the added address set was not already in the 'gress policy
-			return extraParameters.gp.addNamespaceAddressSet(namespace.Name)
-		})
+		return oc.handlePeerNamespaceSelectorAdd(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorAddFunc(
-			extraParameters.policy,
 			extraParameters.np,
-			extraParameters.portGroupIngressDenyName,
-			extraParameters.portGroupEgressDenyName,
 			obj)
 
 	case factory.EgressFirewallType:
@@ -817,19 +776,16 @@ func (oc *Controller) updateResource(objectsToRetry *RetryObjs, oldObj, newObj i
 
 	case factory.PeerPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, newObj)
+		return oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, newObj)
 
 	case factory.PeerPodForNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, newObj)
+		return oc.handlePeerPodSelectorAddUpdate(extraParameters.np, extraParameters.gp, newObj)
 
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorAddFunc(
-			extraParameters.policy,
 			extraParameters.np,
-			extraParameters.portGroupIngressDenyName,
-			extraParameters.portGroupEgressDenyName,
 			newObj)
 
 	case factory.EgressIPType:
@@ -930,7 +886,7 @@ func (oc *Controller) updateResource(objectsToRetry *RetryObjs, oldObj, newObj i
 
 // Given a *RetryObjs instance, an object and optionally a cachedObj, deleteResource deletes the object from the cluster
 // according to the delete logic of its resource type. cachedObj is the internal cache entry for this object,
-// used for now for pods and network policies.
+// used for now only for pods.
 func (oc *Controller) deleteResource(objectsToRetry *RetryObjs, obj, cachedObj interface{}) error {
 	switch objectsToRetry.oType {
 	case factory.PodType:
@@ -944,18 +900,11 @@ func (oc *Controller) deleteResource(objectsToRetry *RetryObjs, obj, cachedObj i
 		return oc.removePod(pod, portInfo)
 
 	case factory.PolicyType:
-		var cachedNP *networkPolicy
 		knp, ok := obj.(*knet.NetworkPolicy)
 		if !ok {
 			return fmt.Errorf("could not cast obj of type %T to *knet.NetworkPolicy", obj)
 		}
-
-		if cachedObj != nil {
-			if cachedNP, ok = cachedObj.(*networkPolicy); !ok {
-				cachedNP = nil
-			}
-		}
-		return oc.deleteNetworkPolicy(knp, cachedNP)
+		return oc.deleteNetworkPolicy(knp)
 
 	case factory.NodeType:
 		node, ok := obj.(*kapi.Node)
@@ -970,48 +919,28 @@ func (oc *Controller) deleteResource(objectsToRetry *RetryObjs, obj, cachedObj i
 			return fmt.Errorf("could not cast peer service of type %T to *kapi.Service", obj)
 		}
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerServiceDelete(extraParameters.gp, service)
+		return oc.handlePeerServiceDelete(extraParameters.np, extraParameters.gp, service)
 
 	case factory.PeerPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorDelete(extraParameters.gp, obj)
+		return oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		// when the namespace labels no longer apply
-		// remove the namespaces pods from the address_set
-		var errs []error
-		namespace := obj.(*kapi.Namespace)
-		pods, _ := oc.watchFactory.GetPods(namespace.Name)
-
-		for _, pod := range pods {
-			if err := oc.handlePeerPodSelectorDelete(extraParameters.gp, pod); err != nil {
-				errs = append(errs, err)
-			}
-		}
-		return kerrorsutil.NewAggregate(errs)
+		return oc.handlePeerNamespaceAndPodDel(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerPodForNamespaceAndPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		return oc.handlePeerPodSelectorDelete(extraParameters.gp, obj)
+		return oc.handlePeerPodSelectorDelete(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.PeerNamespaceSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
-		namespace := obj.(*kapi.Namespace)
-		// Remove namespace address set from the *gress policy in cache
-		// (done in gress.delNamespaceAddressSet()), and then update ACLs
-		return oc.handlePeerNamespaceSelectorOnUpdate(extraParameters.np, extraParameters.gp, func() bool {
-			// ... on condition that the removed address set was in the 'gress policy
-			return extraParameters.gp.delNamespaceAddressSet(namespace.Name)
-		})
+		return oc.handlePeerNamespaceSelectorDel(extraParameters.np, extraParameters.gp, obj)
 
 	case factory.LocalPodSelectorType:
 		extraParameters := objectsToRetry.extraParameters.(*NetworkPolicyExtraParameters)
 		return oc.handleLocalPodSelectorDelFunc(
-			extraParameters.policy,
 			extraParameters.np,
-			extraParameters.portGroupIngressDenyName,
-			extraParameters.portGroupEgressDenyName,
 			obj)
 
 	case factory.EgressFirewallType:
@@ -1202,7 +1131,7 @@ func (oc *Controller) iterateRetryResources(r *RetryObjs) {
 	}
 	klog.V(5).Infof("Waiting for all the %s retry setup to complete in iterateRetryResources", r.oType)
 	wg.Wait()
-	klog.V(5).Infof("Function iterateRetryResources ended (in %v)", time.Since(now))
+	klog.V(5).Infof("Function iterateRetryResources for %s ended (in %v)", r.oType, time.Since(now))
 }
 
 // periodicallyRetryResources tracks RetryObjs and checks if any object needs to be retried for add or delete every
@@ -1243,39 +1172,12 @@ func (oc *Controller) getSyncResourcesFunc(r *RetryObjs) (func([]interface{}) er
 	case factory.NodeType:
 		syncFunc = oc.syncNodes
 
-	case factory.PeerServiceType,
-		factory.PeerNamespaceAndPodSelectorType:
-		syncFunc = nil
-
-	case factory.PeerPodSelectorType:
-		extraParameters := r.extraParameters.(*NetworkPolicyExtraParameters)
-		syncFunc = func(objs []interface{}) error {
-			return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, objs...)
-		}
-
-	case factory.PeerPodForNamespaceAndPodSelectorType:
-		extraParameters := r.extraParameters.(*NetworkPolicyExtraParameters)
-		syncFunc = func(objs []interface{}) error {
-			return oc.handlePeerPodSelectorAddUpdate(extraParameters.gp, objs...)
-		}
-
-	case factory.PeerNamespaceSelectorType:
-		extraParameters := r.extraParameters.(*NetworkPolicyExtraParameters)
-		// the function below will never fail, so there's no point in making it retriable...
-		syncFunc = func(i []interface{}) error {
-			// This needs to be a write lock because there's no locking around 'gress policies
-			extraParameters.np.Lock()
-			defer extraParameters.np.Unlock()
-			// We load the existing address set into the 'gress policy.
-			// Notice that this will make the AddFunc for this initial
-			// address set a noop.
-			// The ACL must be set explicitly after setting up this handler
-			// for the address set to be considered.
-			extraParameters.gp.addNamespaceAddressSets(i)
-			return nil
-		}
-
-	case factory.LocalPodSelectorType:
+	case factory.LocalPodSelectorType,
+		factory.PeerServiceType,
+		factory.PeerNamespaceAndPodSelectorType,
+		factory.PeerPodSelectorType,
+		factory.PeerPodForNamespaceAndPodSelectorType,
+		factory.PeerNamespaceSelectorType:
 		syncFunc = r.syncFunc
 
 	case factory.EgressFirewallType:
@@ -1377,7 +1279,7 @@ func (oc *Controller) WatchResource(objectsToRetry *RetryObjs) (*factory.Handler
 					klog.Errorf("Upon add event: %v", err)
 					return
 				}
-				klog.V(5).Infof("Add event received for %s, key=%s", objectsToRetry.oType, key)
+				klog.V(5).Infof("Add event received for %s %s", objectsToRetry.oType, key)
 
 				objectsToRetry.DoWithLock(key, func(key string) {
 					// This only applies to pod watchers (pods + dynamic network policy handlers watching pods):

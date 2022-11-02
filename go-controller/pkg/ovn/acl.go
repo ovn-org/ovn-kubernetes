@@ -2,11 +2,85 @@ package ovn
 
 import (
 	"fmt"
+	"strings"
+
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+
+	knet "k8s.io/api/networking/v1"
 )
+
+func joinACLName(substrings ...string) string {
+	return strings.Join(substrings, "_")
+}
+
+// aclType defines when ACLs will be applied (direction and pipeline stage).
+// All acls of the same type will be sorted by priority, priorities for different types are independent.
+type aclType string
+
+const (
+	// lportIngress will be converted to direction="to-lport" ACL
+	lportIngress aclType = "to-lport"
+	// lportEgressAfterLB will be converted to direction="from-lport", options={"apply-after-lb": "true"} ACL
+	lportEgressAfterLB aclType = "from-lport-after-lb"
+)
+
+func aclTypeToPolicyType(aclT aclType) knet.PolicyType {
+	switch aclT {
+	case lportEgressAfterLB:
+		return knet.PolicyTypeEgress
+	case lportIngress:
+		return knet.PolicyTypeIngress
+	default:
+		panic(fmt.Sprintf("Failed to convert aclType to PolicyType: unknown acl type %s", aclT))
+	}
+}
+
+func policyTypeToAclType(policyType knet.PolicyType) aclType {
+	switch policyType {
+	case knet.PolicyTypeEgress:
+		return lportEgressAfterLB
+	case knet.PolicyTypeIngress:
+		return lportIngress
+	default:
+		panic(fmt.Sprintf("Failed to convert PolicyType to aclType: unknown policyType type %s", policyType))
+	}
+}
+
+// BuildACL should be used to build ACL instead of directly calling libovsdbops.BuildACL.
+// It can properly set and reset log settings for ACL based on ACLLoggingLevels
+func BuildACL(aclName string, priority int, match, action string,
+	logLevels *ACLLoggingLevels, aclT aclType, externalIDs map[string]string) *nbdb.ACL {
+	var options map[string]string
+	var direction string
+	switch aclT {
+	case lportEgressAfterLB:
+		direction = nbdb.ACLDirectionFromLport
+		options = map[string]string{
+			"apply-after-lb": "true",
+		}
+	case lportIngress:
+		direction = nbdb.ACLDirectionToLport
+	default:
+		panic(fmt.Sprintf("Failed to build ACL: unknown acl type %s", aclT))
+	}
+	log, logSeverity := getLogSeverity(action, logLevels)
+	ACL := libovsdbops.BuildACL(
+		aclName,
+		direction,
+		priority,
+		match,
+		action,
+		types.OvnACLLoggingMeter,
+		logSeverity,
+		log,
+		externalIDs,
+		options,
+	)
+	return ACL
+}
 
 // GetNamespaceACLLogging retrieves ACLLoggingLevels for the Namespace.
 // nsInfo will be locked (and unlocked at the end) for given namespace if it exists.
@@ -61,24 +135,4 @@ func UpdateACLLogging(nbClient libovsdbclient.Client, ACLs []*nbdb.ACL, aclLoggi
 		return fmt.Errorf("unable to update ACL logging: %v", err)
 	}
 	return nil
-}
-
-// BuildACL should be used to build ACL instead of directly calling libovsdbops.BuildACL.
-// It can properly set and reset log settings for ACL based on ACLLoggingLevels
-func BuildACL(name string, direction nbdb.ACLDirection, priority int, match string, action nbdb.ACLAction,
-	logLevels *ACLLoggingLevels, externalIds map[string]string, options map[string]string) *nbdb.ACL {
-	log, logSeverity := getLogSeverity(action, logLevels)
-	ACL := libovsdbops.BuildACL(
-		name,
-		direction,
-		priority,
-		match,
-		action,
-		types.OvnACLLoggingMeter,
-		logSeverity,
-		log,
-		externalIds,
-		options,
-	)
-	return ACL
 }

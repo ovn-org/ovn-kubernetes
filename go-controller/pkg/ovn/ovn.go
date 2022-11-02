@@ -12,24 +12,24 @@ import (
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
-	corev1listers "k8s.io/client-go/listers/core/v1"
-
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -40,11 +40,11 @@ import (
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/client-go/util/workqueue"
-
 	"k8s.io/klog/v2"
 )
 
@@ -56,45 +56,6 @@ const (
 type ACLLoggingLevels struct {
 	Allow string `json:"allow,omitempty"`
 	Deny  string `json:"deny,omitempty"`
-}
-
-// namespaceInfo contains information related to a Namespace. Use oc.getNamespaceLocked()
-// or oc.waitForNamespaceLocked() to get a locked namespaceInfo for a Namespace, and call
-// nsInfo.Unlock() on it when you are done with it. (No code outside of the code that
-// manages the oc.namespaces map is ever allowed to hold an unlocked namespaceInfo.)
-type namespaceInfo struct {
-	sync.RWMutex
-
-	// addressSet is an address set object that holds the IP addresses
-	// of all pods in the namespace.
-	addressSet addressset.AddressSet
-
-	// map from NetworkPolicy name to networkPolicy. You must hold the
-	// namespaceInfo's mutex to add/delete/lookup policies, but must hold the
-	// networkPolicy's mutex (and not necessarily the namespaceInfo's) to work with
-	// the policy itself.
-	networkPolicies map[string]*networkPolicy
-
-	hybridOverlayExternalGW net.IP
-	hybridOverlayVTEP       net.IP
-
-	// routingExternalGWs is a slice of net.IP containing the values parsed from
-	// annotation k8s.ovn.org/routing-external-gws
-	routingExternalGWs gatewayInfo
-
-	// routingExternalPodGWs contains a map of all pods serving as exgws as well as their
-	// exgw IPs
-	// key is <namespace>_<pod name>
-	routingExternalPodGWs map[string]gatewayInfo
-
-	multicastEnabled bool
-
-	// If not empty, then it has to be set to a logging a severity level, e.g. "notice", "alert", etc
-	aclLogging ACLLoggingLevels
-
-	// Per-namespace port group default deny UUIDs
-	portGroupIngressDenyName string // Port group Name for ingress deny rule
-	portGroupEgressDenyName  string // Port group Name for egress deny rule
 }
 
 // Controller structure is the object which holds the controls for starting
@@ -151,16 +112,19 @@ type Controller struct {
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
 
-	// For each logical port, the number of network policies that want
-	// to add an ingress deny rule.
-	lspIngressDenyCache map[string]int
+	// network policies map, key should be retrieved with getPolicyKey(policy *knet.NetworkPolicy).
+	// network policies that failed to be created will also be added here, and can be retried or cleaned up later.
+	// network policy is only deleted from this map after successful cleanup.
+	// Allowed order of locking is namespace Lock -> oc.networkPolicies key Lock -> networkPolicy.Lock
+	// Don't take namespace Lock while holding networkPolicy key lock to avoid deadlock.
+	networkPolicies *syncmap.SyncMap[*networkPolicy]
 
-	// For each logical port, the number of network policies that want
-	// to add an egress deny rule.
-	lspEgressDenyCache map[string]int
-
-	// A mutex for lspIngressDenyCache and lspEgressDenyCache
-	lspMutex *sync.Mutex
+	// map of existing shared port groups for network policies
+	// port group exists in the db if and only if port group key is present in this map
+	// key is namespace
+	// allowed locking order is namespace Lock -> networkPolicy.Lock -> sharedNetpolPortGroups key Lock
+	// make sure to keep this order to avoid deadlocks
+	sharedNetpolPortGroups *syncmap.SyncMap[*defaultDenyPortGroups]
 
 	// Supports multicast?
 	multicastSupport bool
@@ -291,9 +255,8 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		externalGWCache:              make(map[ktypes.NamespacedName]*externalRouteInfo),
 		exGWCacheMutex:               sync.RWMutex{},
 		addressSetFactory:            addressSetFactory,
-		lspIngressDenyCache:          make(map[string]int),
-		lspEgressDenyCache:           make(map[string]int),
-		lspMutex:                     &sync.Mutex{},
+		networkPolicies:              syncmap.NewSyncMap[*networkPolicy](),
+		sharedNetpolPortGroups:       syncmap.NewSyncMap[*defaultDenyPortGroups](),
 		eIPC: egressIPController{
 			egressIPAssignmentMutex:           &sync.Mutex{},
 			podAssignmentMutex:                &sync.Mutex{},
