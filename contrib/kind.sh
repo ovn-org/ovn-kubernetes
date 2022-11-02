@@ -712,41 +712,49 @@ install_ingress() {
   run_kubectl apply -f ingress/service-nodeport.yaml
 }
 
+# kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6. It will first wait for all
+# DaemonSets to complete with kubectl rollout. This command will block until all pods of the DS are actually up.
+# Next, it iterates over all pods with name=ovnkube-db and ovnkube-master and waits for them to post "Ready".
+# Last, it will do the same with all pods in the kube-system namespace.
 kubectl_wait_pods() {
-  echo "Waiting for k8s to create ovn-kubernetes pod resources..."
-  local PODS_CREATED=false
-  for i in {1..10}; do
-    local NUM_PODS=$(kubectl -n ovn-kubernetes get pods -o json 2> /dev/null | jq '.items | length')
-    if [[ "${NUM_PODS}" -ne 0 ]]; then
-      echo "ovn-kubernetes pods created."
-      PODS_CREATED=true
-      break
-    fi
-    sleep 1
+  # IPv6 cluster seems to take a little longer to come up, so extend the wait time.
+  OVN_TIMEOUT=300
+  if [ "$KIND_IPV6_SUPPORT" == true ]; then
+    OVN_TIMEOUT=480
+  fi
+
+  # We will make sure that we timeout all commands at current seconds + the desired timeout.
+  endtime=$(( SECONDS + OVN_TIMEOUT ))
+
+  for ds in ovnkube-node ovs-node; do
+    timeout=$(calculate_timeout ${endtime})
+    echo "Waiting for k8s to launch all ${ds} pods (timeout ${timeout})..."
+    kubectl rollout status daemonset -n ovn-kubernetes ${ds} --timeout ${timeout}s
+  done
+  for name in ovnkube-db ovnkube-master; do
+    timeout=$(calculate_timeout ${endtime})
+    echo "Waiting for k8s to create ${name} pods (timeout ${timeout})..."
+    kubectl wait pods -n ovn-kubernetes -l name=${name} --for condition=Ready --timeout=${timeout}s
   done
 
-  if [[ "$PODS_CREATED" == false ]]; then
-    echo "ovn-kubernetes pods were not created."
-    exit 1
-  fi
-  echo "ovn-kubernetes pods created."
-
-  # Check that everything is fine and running. IPv6 cluster seems to take a little
-  # longer to come up, so extend the wait time.
-  OVN_TIMEOUT=300s
-  if [ "$KIND_IPV6_SUPPORT" == true ]; then
-    OVN_TIMEOUT=480s
-  fi
-  if ! kubectl wait -n ovn-kubernetes --for=condition=ready pods --all --timeout=${OVN_TIMEOUT} ; then
-    echo "some pods in OVN Kubernetes are not running"
-    kubectl get pods -A -o wide || true
-    exit 1
-  fi
-  if ! kubectl wait -n kube-system --for=condition=ready pods --all --timeout=300s ; then
+  timeout=$(calculate_timeout ${endtime})
+  if ! kubectl wait -n kube-system --for=condition=ready pods --all --timeout=${timeout}s ; then
     echo "some pods in the system are not running"
     kubectl get pods -A -o wide || true
     exit 1
   fi
+}
+
+# calculate_timeout takes an absolute endtime in seconds (based on bash script runtime, see
+# variable $SECONDS) and calculates a relative timeout value. Should the calculated timeout
+# be <= 0, return one second.
+calculate_timeout() {
+  endtime=$1
+  timeout=$(( endtime - SECONDS ))
+  if [ ${timeout} -le 0 ]; then
+      timeout=1
+  fi
+  echo ${timeout}
 }
 
 docker_create_second_interface() {
