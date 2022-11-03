@@ -1558,38 +1558,6 @@ func newNodeSNAT(uuid, logicalIP, externalIP string) *nbdb.NAT {
 	}
 }
 
-func TestController_allocateNodeSubnets(t *testing.T) {
-	tests := []struct {
-		name          string
-		networkRanges []string
-		networkLen    int
-		configIPv4    bool
-		configIPv6    bool
-		node          *kapi.Node
-		// to be converted during the test to []*net.IPNet
-		wantStr   []string
-		allocated int
-		wantErr   bool
-	}{
-		{
-			name:          "new node, IPv4 only cluster",
-			networkRanges: []string{"172.16.0.0/16"},
-			networkLen:    24,
-			configIPv4:    true,
-			configIPv6:    false,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "testnode",
-					Annotations: map[string]string{},
-				},
-			},
-			wantStr:   []string{"172.16.0.0/24"},
-			allocated: 1,
-			wantErr:   false,
-		},
-	}
-}
-
 func TestController_syncNodes(t *testing.T) {
 	tests := []struct {
 		name         string
