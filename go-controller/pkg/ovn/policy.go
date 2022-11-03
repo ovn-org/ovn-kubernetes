@@ -267,7 +267,6 @@ func (oc *Controller) updateStaleDefaultDenyACLNames(npType knet.PolicyType, gre
 				return err
 			}
 		}
-		var aclT aclType
 		if aclList[0].Direction == nbdb.ACLDirectionToLport {
 			aclT = lportIngress
 		} else {

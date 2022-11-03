@@ -41,6 +41,9 @@ type namespaceInfo struct {
 	// Namespace can take oc.networkPolicies key Lock while holding nsInfo lock, the opposite should never happen.
 	relatedNetworkPolicies map[string]bool
 
+	hybridOverlayExternalGW net.IP
+	hybridOverlayVTEP       net.IP
+
 	// routingExternalGWs is a slice of net.IP containing the values parsed from
 	// annotation k8s.ovn.org/routing-external-gws
 	routingExternalGWs gatewayInfo
