@@ -339,7 +339,7 @@ func getPodOvsInterfaceNameAndOfport(coreclient *corev1client.CoreV1Client, rest
 }
 
 // getSvcInfo builds the SvcInfo object for this service. PodName/PodNamespace/PodIP are for the first valid endpoint pod that can be found for this service.
-func getSvcInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, svcName string, ovnNamespace string, namespace string, cmd string) (svcInfo *SvcInfo, err error) {
+func getSvcInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, svcName string, ovnNamespace string, namespace string) (svcInfo *SvcInfo, err error) {
 	// Get service with the name supplied by svcName
 	svc, err := coreclient.Services(namespace).Get(context.TODO(), svcName, metav1.GetOptions{})
 	if err != nil {
@@ -462,12 +462,16 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 	}
 
 	// Find rtos MAC (this is the pod's first hop router).
-	lspCmd := "ovn-nbctl " + cmd + " --bare --no-heading --column=mac list logical-router-port " + types.RouterToSwitchPrefix + podInfo.NodeName
+	lspCmd := "ovn-sbctl " + cmd + " --bare --no-heading --column=mac list Port_Binding " + types.RouterToSwitchPrefix + podInfo.NodeName
 	ipOutput, ipError, err := execInPod(coreclient, restconfig, ovnNamespace, podInfo.OvnKubePodName, "ovnkube-node", lspCmd, "")
 	if err != nil {
 		return nil, fmt.Errorf("execInPod() failed. err: %s, stderr: %s, stdout: %s, podInfo: %v", err, ipError, ipOutput, podInfo)
 	}
-	podInfo.RtosMAC = strings.Replace(ipOutput, "\n", "", -1)
+	macIP := strings.Split(strings.Replace(ipOutput, "\n", "", -1), " ")
+	if len(macIP) != 2 {
+		return nil, fmt.Errorf("invalid output %s", ipOutput)
+	}
+	podInfo.RtosMAC = macIP[0]
 
 	// Set information specific to ovn-k8s-mp0. This info is required for routingViaHost gateway mode traffic to an external IP
 	// destination.
@@ -505,8 +509,8 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 }
 
 // getNodeExternalBridgeName gets the name of the external bridge of this node, e.g. breth0 or br-ex.
-func getNodeExternalBridgeName(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, ovnNamespace, podName, nbcmd, nodeName string) (string, error) {
-	cmd := "ovn-nbctl " + nbcmd + " --bare --no-heading --column=name find Logical_Switch_Port options:network_name=" + types.PhysicalNetworkName
+func getNodeExternalBridgeName(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, ovnNamespace, podName, sbcmd, nodeName string) (string, error) {
+	cmd := "ovn-sbctl " + sbcmd + " --bare --no-heading --column=logical_port find Port_Binding options:network_name=" + types.PhysicalNetworkName
 	stdout, stderr, err := execInPod(coreclient, restconfig, ovnNamespace, podName, "ovnkube-node", cmd, "")
 	if err != nil {
 		return "", fmt.Errorf("execInPod() failed with %s stderr %s stdout %s", err, stderr, stdout)
@@ -543,10 +547,10 @@ func getOvnNamespace(coreclient *corev1client.CoreV1Client, override string) (st
 	return pods.Items[0].Namespace, nil
 }
 
-// Get the OVN Database URIs from the first container found in any pod in the ovn-kubernetes namespace with name "ovnkube-master"
+// Get the OVN Database URIs from the first container found in any pod in the ovn-kubernetes namespace with name "ovnkube-node"
 // Returns nbAddress, sbAddress, protocol == "ssl", nil
 func getDatabaseURIs(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, ovnNamespace string) (string, string, bool, error) {
-	containerName := "ovnkube-master"
+	containerName := "ovnkube-node"
 	var err error
 
 	found := false
@@ -1090,7 +1094,7 @@ func main() {
 	klog.V(5).Infof("The sbcmd is %s", sbcmd)
 
 	// Get info needed for the src Pod
-	srcPodInfo, err := getPodInfo(coreclient, restconfig, *srcPodName, ovnNamespace, *srcNamespace, nbcmd)
+	srcPodInfo, err := getPodInfo(coreclient, restconfig, *srcPodName, ovnNamespace, *srcNamespace, sbcmd)
 	if err != nil {
 		klog.Exitf("Failed to get information from pod %s: %v", *srcPodName, err)
 	}
@@ -1111,7 +1115,7 @@ func main() {
 	var dstSvcInfo *SvcInfo
 	if *dstSvcName != "" {
 		// Get dst service
-		dstSvcInfo, err = getSvcInfo(coreclient, restconfig, *dstSvcName, ovnNamespace, *dstNamespace, nbcmd)
+		dstSvcInfo, err = getSvcInfo(coreclient, restconfig, *dstSvcName, ovnNamespace, *dstNamespace)
 		if err != nil {
 			klog.Exitf("Failed to get information from service %s: %v", *dstSvcName, err)
 		}
@@ -1122,7 +1126,7 @@ func main() {
 	}
 
 	// Now get info needed for the dst Pod
-	dstPodInfo, err := getPodInfo(coreclient, restconfig, *dstPodName, ovnNamespace, *dstNamespace, nbcmd)
+	dstPodInfo, err := getPodInfo(coreclient, restconfig, *dstPodName, ovnNamespace, *dstNamespace, sbcmd)
 	if err != nil {
 		klog.Exitf("Failed to get information from pod %s: %v", *dstPodName, err)
 	}
@@ -1144,6 +1148,12 @@ func main() {
 	appSrcDstOut := runOfprotoTraceToPod(coreclient, restconfig, "source pod to destination pod", srcPodInfo, dstPodInfo, ovnNamespace, protocol, *dstPort)
 	appDstSrcOut := runOfprotoTraceToPod(coreclient, restconfig, "destination pod to source pod", dstPodInfo, srcPodInfo, ovnNamespace, protocol, *dstPort)
 
+	// If NBDB connectivity is not available do not run ovn-dtrace
+	_, stdErr, err := execInPod(coreclient, restconfig, ovnNamespace, srcPodInfo.OvnKubePodName, "ovnkube-node", fmt.Sprintf("ovn-nbctl %s get-connection", nbcmd), "")
+	if err != nil {
+		klog.V(4).Infof("Skip ovn-dtrace, nbdb is not available %s", stdErr)
+		return
+	}
 	// ovn-detrace commands below
 	// Install dependencies with pip3 in case they are missing (for older images)
 	installOvnDetraceDependencies(coreclient, restconfig, srcPodInfo.OvnKubePodName, ovnNamespace)
