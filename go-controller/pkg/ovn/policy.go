@@ -8,7 +8,6 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	ovsdb "github.com/ovn-org/libovsdb/ovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -221,20 +220,6 @@ func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
 	return np
 }
 
-const (
-	noneMatch = "None"
-	// IPv6 multicast traffic destined to dynamic groups must have the "T" bit
-	// set to 1: https://tools.ietf.org/html/rfc3307#section-4.3
-	ipv6DynamicMulticastMatch = "(ip6.dst[120..127] == 0xff && ip6.dst[116] == 1)"
-	// Legacy multicastDefaultDeny port group removed by commit 40a90f0
-	legacyMulticastDefaultDenyPortGroup = "mcastPortGroupDeny"
-)
-
-// hash the provided input to make it a valid portGroup name.
-func hashedPortGroup(s string) string {
-	return util.HashForOVN(s)
-}
-
 // updateStaleDefaultDenyACLNames updates the naming of the default ingress and egress deny ACLs per namespace
 // oldName: <namespace>_<policyname> (lucky winner will be first policy created in the namespace)
 // newName: <namespace>_egressDefaultDeny OR <namespace>_ingressDefaultDeny
@@ -266,7 +251,13 @@ func (oc *Controller) updateStaleDefaultDenyACLNames(npType knet.PolicyType, gre
 	}
 	// loop through the cleanUp map and per namespace update the first ACL's name and delete the rest
 	for namespace, aclList := range cleanUpDefaultDeny {
-		newName := getDefaultDenyPolicyACLName(namespace, gressSuffix)
+		var aclT aclType
+		if aclList[0].Direction == nbdb.ACLDirectionToLport {
+			aclT = lportIngress
+		} else {
+			aclT = lportEgressAfterLB
+		}
+		newName := getDefaultDenyPolicyACLName(namespace, aclT)
 		if len(aclList) > 1 {
 			// this should never be the case but delete everything except 1st ACL
 			ingressPGName := defaultDenyPortGroupName(namespace, ingressDefaultDenySuffix)
@@ -453,22 +444,16 @@ func addAllowACLFromNode(nodeName string, mgmtPortIP net.IP, nbClient libovsdbcl
 	return nil
 }
 
-func getACLMatch(portGroupName, match string, aclT aclType) string {
-	var aclMatch string
-	if aclT == lportIngress {
-		aclMatch = "outport == @" + portGroupName
-	} else {
-		aclMatch = "inport == @" + portGroupName
+func getDefaultDenyPolicyACLName(ns string, aclT aclType) string {
+	var defaultDenySuffix string
+	switch aclT {
+	case lportIngress:
+		defaultDenySuffix = ingressDefaultDenySuffix
+	case lportEgressAfterLB:
+		defaultDenySuffix = egressDefaultDenySuffix
+	default:
+		panic(fmt.Sprintf("Unknown acl type %s", aclT))
 	}
-
-	if match != "" {
-		aclMatch += " && " + match
-	}
-
-	return aclMatch
-}
-
-func getDefaultDenyPolicyACLName(ns, defaultDenySuffix string) string {
 	return joinACLName(ns, defaultDenySuffix)
 }
 
@@ -487,13 +472,7 @@ func defaultDenyPortGroupName(namespace, gressSuffix string) string {
 func buildDenyACLs(namespace, pg string, aclLogging *ACLLoggingLevels, aclT aclType) (denyACL, allowACL *nbdb.ACL) {
 	denyMatch := getACLMatch(pg, "", aclT)
 	allowMatch := getACLMatch(pg, arpAllowPolicyMatch, aclT)
-	var defaultDenySuffix string
-	if aclT == lportIngress {
-		defaultDenySuffix = ingressDefaultDenySuffix
-	} else {
-		defaultDenySuffix = egressDefaultDenySuffix
-	}
-	denyACL = BuildACL(getDefaultDenyPolicyACLName(namespace, defaultDenySuffix), types.DefaultDenyPriority, denyMatch,
+	denyACL = BuildACL(getDefaultDenyPolicyACLName(namespace, aclT), types.DefaultDenyPriority, denyMatch,
 		nbdb.ACLActionDrop, aclLogging, aclT, getDefaultDenyPolicyExternalIDs(aclT))
 	allowACL = BuildACL(getARPAllowACLName(namespace), types.DefaultAllowPriority, allowMatch,
 		nbdb.ACLActionAllow, nil, aclT, getDefaultDenyPolicyExternalIDs(aclT))
@@ -660,234 +639,6 @@ func (oc *Controller) handleNetPolNamespaceUpdate(namespace string, nsInfo *name
 		klog.Infof("ACL for network policy: %s, updated to new log level: %s", npKey, nsInfo.aclLogging.Allow)
 	}
 	return nil
-}
-
-func getACLMatchAF(ipv4Match, ipv6Match string) string {
-	if config.IPv4Mode && config.IPv6Mode {
-		return "(" + ipv4Match + " || " + ipv6Match + ")"
-	} else if config.IPv4Mode {
-		return ipv4Match
-	} else {
-		return ipv6Match
-	}
-}
-
-// Creates the match string used for ACLs matching on multicast traffic.
-func getMulticastACLMatch() string {
-	return "(ip4.mcast || mldv1 || mldv2 || " + ipv6DynamicMulticastMatch + ")"
-}
-
-// Allow IGMP traffic (e.g., IGMP queries) and namespace multicast traffic
-// towards pods.
-func getMulticastACLIgrMatchV4(addrSetName string) string {
-	return "(igmp || (ip4.src == $" + addrSetName + " && ip4.mcast))"
-}
-
-// Allow MLD traffic (e.g., MLD queries) and namespace multicast traffic
-// towards pods.
-func getMulticastACLIgrMatchV6(addrSetName string) string {
-	return "(mldv1 || mldv2 || (ip6.src == $" + addrSetName + " && " + ipv6DynamicMulticastMatch + "))"
-}
-
-// Creates the match string used for ACLs allowing incoming multicast into a
-// namespace, that is, from IPs that are in the namespace's address set.
-func getMulticastACLIgrMatch(nsInfo *namespaceInfo) string {
-	var ipv4Match, ipv6Match string
-	addrSetNameV4, addrSetNameV6 := nsInfo.addressSet.GetASHashNames()
-	if config.IPv4Mode {
-		ipv4Match = getMulticastACLIgrMatchV4(addrSetNameV4)
-	}
-	if config.IPv6Mode {
-		ipv6Match = getMulticastACLIgrMatchV6(addrSetNameV6)
-	}
-	return getACLMatchAF(ipv4Match, ipv6Match)
-}
-
-// Creates the match string used for ACLs allowing outgoing multicast from a
-// namespace.
-func getMulticastACLEgrMatch() string {
-	var ipv4Match, ipv6Match string
-	if config.IPv4Mode {
-		ipv4Match = "ip4.mcast"
-	}
-	if config.IPv6Mode {
-		ipv6Match = "(mldv1 || mldv2 || " + ipv6DynamicMulticastMatch + ")"
-	}
-	return getACLMatchAF(ipv4Match, ipv6Match)
-}
-
-func getMcastACLName(nsORpg, mcastSuffix string) string {
-	return joinACLName(nsORpg, mcastSuffix)
-}
-
-// Creates a policy to allow multicast traffic within 'ns':
-// - a port group containing all logical ports associated with 'ns'
-// - one "from-lport" ACL allowing egress multicast traffic from the pods
-//   in 'ns'
-// - one "to-lport" ACL allowing ingress multicast traffic to pods in 'ns'.
-//   This matches only traffic originated by pods in 'ns' (based on the
-//   namespace address set).
-func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInfo) error {
-	portGroupName := hashedPortGroup(ns)
-
-	aclT := lportEgressAfterLB
-	egressMatch := getACLMatch(portGroupName, getMulticastACLEgrMatch(), aclT)
-	egressACL := BuildACL(getMcastACLName(ns, "MulticastAllowEgress"),
-		types.DefaultMcastAllowPriority, egressMatch, nbdb.ACLActionAllow, nil, aclT,
-		getDefaultDenyPolicyExternalIDs(aclT))
-
-	aclT = lportIngress
-	ingressMatch := getACLMatch(portGroupName, getMulticastACLIgrMatch(nsInfo), aclT)
-	ingressACL := BuildACL(getMcastACLName(ns, "MulticastAllowIngress"),
-		types.DefaultMcastAllowPriority, ingressMatch, nbdb.ACLActionAllow, nil, aclT,
-		getDefaultDenyPolicyExternalIDs(aclT))
-
-	acls := []*nbdb.ACL{egressACL, ingressACL}
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, acls...)
-	if err != nil {
-		return err
-	}
-
-	// Add all ports from this namespace to the multicast allow group.
-	ports := []*nbdb.LogicalSwitchPort{}
-	pods, err := oc.watchFactory.GetPods(ns)
-	if err != nil {
-		klog.Warningf("Failed to get pods for namespace %q: %v", ns, err)
-	}
-	for _, pod := range pods {
-		if util.PodCompleted(pod) {
-			continue
-		}
-		portName := util.GetLogicalPortName(pod.Namespace, pod.Name)
-		if portInfo, err := oc.logicalPortCache.get(portName); err != nil {
-			klog.Errorf(err.Error())
-		} else {
-			ports = append(ports, &nbdb.LogicalSwitchPort{UUID: portInfo.uuid})
-		}
-	}
-
-	pg := libovsdbops.BuildPortGroup(portGroupName, ns, ports, acls)
-	ops, err = libovsdbops.CreateOrUpdatePortGroupsOps(oc.nbClient, ops, pg)
-	if err != nil {
-		return err
-	}
-
-	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func deleteMulticastAllowPolicy(nbClient libovsdbclient.Client, ns string) error {
-	portGroupName := hashedPortGroup(ns)
-	// ACLs referenced by the port group wil be deleted by db if there are no other references
-	err := libovsdbops.DeletePortGroups(nbClient, portGroupName)
-	if err != nil {
-		return fmt.Errorf("failed deleting port group %s: %v", portGroupName, err)
-	}
-
-	return nil
-}
-
-// Creates a global default deny multicast policy:
-// - one ACL dropping egress multicast traffic from all pods: this is to
-//   protect OVN controller from processing IP multicast reports from nodes
-//   that are not allowed to receive multicast traffic.
-// - one ACL dropping ingress multicast traffic to all pods.
-// Caller must hold the namespace's namespaceInfo object lock.
-func (oc *Controller) createDefaultDenyMulticastPolicy() error {
-	match := getMulticastACLMatch()
-
-	// By default deny any egress multicast traffic from any pod. This drops
-	// IP multicast membership reports therefore denying any multicast traffic
-	// to be forwarded to pods.
-	aclT := lportEgressAfterLB
-	egressACL := BuildACL(getMcastACLName(types.ClusterPortGroupName, "DefaultDenyMulticastEgress"),
-		types.DefaultMcastDenyPriority, match, nbdb.ACLActionDrop, nil,
-		aclT, getDefaultDenyPolicyExternalIDs(aclT))
-
-	// By default deny any ingress multicast traffic to any pod.
-	aclT = lportIngress
-	ingressACL := BuildACL(getMcastACLName(types.ClusterPortGroupName, "DefaultDenyMulticastIngress"),
-		types.DefaultMcastDenyPriority, match, nbdb.ACLActionDrop, nil,
-		aclT, getDefaultDenyPolicyExternalIDs(aclT))
-
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, egressACL, ingressACL)
-	if err != nil {
-		return err
-	}
-
-	ops, err = libovsdbops.AddACLsToPortGroupOps(oc.nbClient, ops, types.ClusterPortGroupName, egressACL, ingressACL)
-	if err != nil {
-		return err
-	}
-
-	// Remove old multicastDefaultDeny port group now that all ports
-	// have been added to the clusterPortGroup by WatchPods()
-	ops, err = libovsdbops.DeletePortGroupsOps(oc.nbClient, ops, legacyMulticastDefaultDenyPortGroup)
-	if err != nil {
-		return err
-	}
-
-	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// Creates a global default allow multicast policy:
-// - one ACL allowing multicast traffic from cluster router ports
-// - one ACL allowing multicast traffic to cluster router ports.
-// Caller must hold the namespace's namespaceInfo object lock.
-func (oc *Controller) createDefaultAllowMulticastPolicy() error {
-	mcastMatch := getMulticastACLMatch()
-
-	aclT := lportEgressAfterLB
-	egressMatch := getACLMatch(types.ClusterRtrPortGroupName, mcastMatch, aclT)
-	egressACL := BuildACL(getMcastACLName(types.ClusterRtrPortGroupName, "DefaultAllowMulticastEgress"),
-		types.DefaultMcastAllowPriority, egressMatch, nbdb.ACLActionAllow, nil,
-		aclT, getDefaultDenyPolicyExternalIDs(aclT))
-
-	aclT = lportIngress
-	ingressMatch := getACLMatch(types.ClusterRtrPortGroupName, mcastMatch, aclT)
-	ingressACL := BuildACL(getMcastACLName(types.ClusterRtrPortGroupName, "DefaultAllowMulticastIngress"),
-		types.DefaultMcastAllowPriority, ingressMatch, nbdb.ACLActionAllow, nil,
-		aclT, getDefaultDenyPolicyExternalIDs(aclT))
-
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, egressACL, ingressACL)
-	if err != nil {
-		return err
-	}
-
-	ops, err = libovsdbops.AddACLsToPortGroupOps(oc.nbClient, ops, types.ClusterRtrPortGroupName, egressACL, ingressACL)
-	if err != nil {
-		return err
-	}
-
-	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// podAddAllowMulticastPolicy adds the pod's logical switch port to the namespace's
-// multicast port group. Caller must hold the namespace's namespaceInfo object
-// lock.
-func podAddAllowMulticastPolicy(nbClient libovsdbclient.Client, ns string, portInfo *lpInfo) error {
-	return libovsdbops.AddPortsToPortGroup(nbClient, hashedPortGroup(ns), portInfo.uuid)
-}
-
-// podDeleteAllowMulticastPolicy removes the pod's logical switch port from the
-// namespace's multicast port group. Caller must hold the namespace's
-// namespaceInfo object lock.
-func podDeleteAllowMulticastPolicy(nbClient libovsdbclient.Client, ns string, portUUID string) error {
-	return libovsdbops.DeletePortsFromPortGroup(nbClient, hashedPortGroup(ns), portUUID)
 }
 
 // getPolicyType returns whether the policy is of type ingress and/or egress
@@ -1187,18 +938,16 @@ func (oc *Controller) addLocalPodHandler(policy *knet.NetworkPolicy, np *network
 		_ = oc.handleLocalPodSelectorAddFunc(np, objs...)
 		return nil
 	}
-	retryLocalPods := NewRetryObjs(
+	retryLocalPods := oc.newRetryFrameworkMasterWithParameters(
 		factory.LocalPodSelectorType,
-		policy.Namespace,
-		sel,
 		syncFunc,
 		&NetworkPolicyExtraParameters{
 			np: np,
 		})
 
-	podHandler, err := oc.WatchResource(retryLocalPods)
+	podHandler, err := retryLocalPods.WatchResourceFiltered(policy.Namespace, sel)
 	if err != nil {
-		klog.Errorf("Failed WatchResource for addLocalPodHandler: %v", err)
+		klog.Errorf("WatchResource failed for addLocalPodHandler: %v", err)
 		return err
 	}
 
@@ -1214,6 +963,11 @@ func hasAnyLabelSelector(peers []knet.NetworkPolicyPeer) bool {
 		}
 	}
 	return false
+}
+
+func getNetworkPolicyPGName(namespace, name string) (pgName, readablePGName string) {
+	readableGroupName := fmt.Sprintf("%s_%s", namespace, name)
+	return hashedPortGroup(readableGroupName), readableGroupName
 }
 
 type policyHandler struct {
@@ -1370,8 +1124,8 @@ func (oc *Controller) createNetworkPolicy(policy *knet.NetworkPolicy, aclLogging
 
 		// 4. Build policy ACLs and port group. All the local pods that this policy
 		// selects will be eventually added to this port group.
-		readableGroupName := fmt.Sprintf("%s_%s", policy.Namespace, policy.Name)
-		np.portGroupName = hashedPortGroup(readableGroupName)
+		portGroupName, readableGroupName := getNetworkPolicyPGName(policy.Namespace, policy.Name)
+		np.portGroupName = portGroupName
 		ops := []ovsdb.Operation{}
 
 		acls := oc.buildNetworkPolicyACLs(np, aclLogging)
@@ -1724,16 +1478,15 @@ type NetworkPolicyExtraParameters struct {
 func (oc *Controller) addPeerServiceHandler(
 	policy *knet.NetworkPolicy, gp *gressPolicy, np *networkPolicy) error {
 	// start watching services in the same namespace as the network policy
-	retryPeerServices := NewRetryObjs(
+	retryPeerServices := oc.newRetryFrameworkMasterWithParameters(
 		factory.PeerServiceType,
-		policy.Namespace,
-		nil, nil,
+		nil,
 		&NetworkPolicyExtraParameters{
 			gp: gp,
 			np: np,
 		})
 
-	serviceHandler, err := oc.WatchResource(retryPeerServices)
+	serviceHandler, err := retryPeerServices.WatchResourceFiltered(policy.Namespace, nil)
 	if err != nil {
 		klog.Errorf("Failed WatchResource for addPeerServiceHandler: %v", err)
 		return err
@@ -1761,16 +1514,15 @@ func (oc *Controller) addPeerPodHandler(podSelector *metav1.LabelSelector,
 		_ = oc.handlePeerPodSelectorAddUpdate(np, gp, objs...)
 		return nil
 	}
-	retryPeerPods := NewRetryObjs(
+	retryPeerPods := oc.newRetryFrameworkMasterWithParameters(
 		factory.PeerPodSelectorType,
-		np.namespace,
-		sel, syncFunc,
+		syncFunc,
 		&NetworkPolicyExtraParameters{
 			np: np,
 			gp: gp,
 		})
 
-	podHandler, err := oc.WatchResource(retryPeerPods)
+	podHandler, err := retryPeerPods.WatchResourceFiltered(np.namespace, sel)
 	if err != nil {
 		klog.Errorf("Failed WatchResource for addPeerPodHandler: %v", err)
 		return err
@@ -1800,10 +1552,8 @@ func (oc *Controller) handlePeerNamespaceAndPodAdd(np *networkPolicy, gp *gressP
 		_ = oc.handlePeerPodSelectorAddUpdate(np, gp, objs...)
 		return nil
 	}
-	retryPeerPods := NewRetryObjs(
+	retryPeerPods := oc.newRetryFrameworkMasterWithParameters(
 		factory.PeerPodForNamespaceAndPodSelectorType,
-		namespace.Name,
-		podSelector,
 		syncFunc,
 		&NetworkPolicyExtraParameters{
 			gp: gp,
@@ -1815,7 +1565,7 @@ func (oc *Controller) handlePeerNamespaceAndPodAdd(np *networkPolicy, gp *gressP
 	// unlock
 	np.RUnlock()
 	locked = false
-	podHandler, err := oc.WatchResource(retryPeerPods)
+	podHandler, err := retryPeerPods.WatchResourceFiltered(namespace.Name, podSelector)
 	if err != nil {
 		klog.Errorf("Failed WatchResource for PeerNamespaceAndPodSelectorType: %v", err)
 		return err
@@ -1877,16 +1627,16 @@ func (oc *Controller) addPeerNamespaceAndPodHandler(namespaceSelector *metav1.La
 	// start watching namespaces selected by the namespace selector nsSel;
 	// upon namespace add event, start watching pods in that namespace selected
 	// by the label selector podSel
-	retryPeerNamespaces := NewRetryObjs(
+	retryPeerNamespaces := oc.newRetryFrameworkMasterWithParameters(
 		factory.PeerNamespaceAndPodSelectorType,
-		"", nsSel, nil,
+		nil,
 		&NetworkPolicyExtraParameters{
 			gp:          gp,
 			np:          np,
 			podSelector: podSel}, // will be used in the addFunc to create a pod handler
 	)
 
-	namespaceHandler, err := oc.WatchResource(retryPeerNamespaces)
+	namespaceHandler, err := retryPeerNamespaces.WatchResourceFiltered("", nsSel)
 	if err != nil {
 		klog.Errorf("Failed WatchResource for addPeerNamespaceAndPodHandler: %v", err)
 		return err
@@ -1994,15 +1744,15 @@ func (oc *Controller) addPeerNamespaceHandler(
 		_ = oc.handlePeerNamespaceSelectorAdd(np, gress, objs...)
 		return nil
 	}
-	retryPeerNamespaces := NewRetryObjs(
+	retryPeerNamespaces := oc.newRetryFrameworkMasterWithParameters(
 		factory.PeerNamespaceSelectorType,
-		"", sel, syncFunc,
+		syncFunc,
 		&NetworkPolicyExtraParameters{gp: gress, np: np},
 	)
 
-	namespaceHandler, err := oc.WatchResource(retryPeerNamespaces)
+	namespaceHandler, err := retryPeerNamespaces.WatchResourceFiltered("", sel)
 	if err != nil {
-		klog.Errorf("Failed WatchResource for addPeerNamespaceHandler: %v", err)
+		klog.Errorf("WatchResource failed for addPeerNamespaceHandler: %v", err)
 		return err
 	}
 

@@ -120,7 +120,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		Name:        gatewayRouter,
 		Options:     logicalRouterOptions,
 		ExternalIDs: logicalRouterExternalIDs,
-		Copp:        &oc.defaultGatewayCOPPUUID,
+		Copp:        &oc.defaultCOPPUUID,
 	}
 
 	if oc.loadBalancerGroupUUID != "" {

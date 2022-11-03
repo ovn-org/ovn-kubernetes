@@ -48,6 +48,7 @@ type NodeWatchFactory interface {
 	LocalPodInformer() cache.SharedIndexInformer
 
 	GetPods(namespace string) ([]*kapi.Pod, error)
+	GetPod(namespace, name string) (*kapi.Pod, error)
 	GetNamespaces() ([]*kapi.Namespace, error)
 	GetNode(name string) (*kapi.Node, error)
 	GetNodes() ([]*kapi.Node, error)

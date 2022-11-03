@@ -22,6 +22,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/cert"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
@@ -162,10 +163,14 @@ func IsClusterIPSet(service *kapi.Service) bool {
 // we need to handle the case where only ClusterIP exist
 func GetClusterIPs(service *kapi.Service) []string {
 	if len(service.Spec.ClusterIPs) > 0 {
-		return service.Spec.ClusterIPs
+		clusterIPs := []string{}
+		for _, clusterIP := range service.Spec.ClusterIPs {
+			clusterIPs = append(clusterIPs, utilnet.ParseIPSloppy(clusterIP).String())
+		}
+		return clusterIPs
 	}
 	if len(service.Spec.ClusterIP) > 0 && service.Spec.ClusterIP != kapi.ClusterIPNone {
-		return []string{service.Spec.ClusterIP}
+		return []string{utilnet.ParseIPSloppy(service.Spec.ClusterIP).String()}
 	}
 	return []string{}
 }
@@ -173,11 +178,13 @@ func GetClusterIPs(service *kapi.Service) []string {
 // GetExternalAndLBIPs returns an array with the ExternalIPs and LoadBalancer IPs present in the service
 func GetExternalAndLBIPs(service *kapi.Service) []string {
 	svcVIPs := []string{}
-	svcVIPs = append(svcVIPs, service.Spec.ExternalIPs...)
+	for _, externalIP := range service.Spec.ExternalIPs {
+		svcVIPs = append(svcVIPs, utilnet.ParseIPSloppy(externalIP).String())
+	}
 	if ServiceTypeHasLoadBalancer(service) {
 		for _, ingressVIP := range service.Status.LoadBalancer.Ingress {
 			if len(ingressVIP.IP) > 0 {
-				svcVIPs = append(svcVIPs, ingressVIP.IP)
+				svcVIPs = append(svcVIPs, utilnet.ParseIPSloppy(ingressVIP.IP).String())
 			}
 		}
 	}
@@ -230,12 +237,12 @@ func GetNodePrimaryIP(node *kapi.Node) (string, error) {
 	}
 	for _, addr := range node.Status.Addresses {
 		if addr.Type == kapi.NodeInternalIP {
-			return addr.Address, nil
+			return utilnet.ParseIPSloppy(addr.Address).String(), nil
 		}
 	}
 	for _, addr := range node.Status.Addresses {
 		if addr.Type == kapi.NodeExternalIP {
-			return addr.Address, nil
+			return utilnet.ParseIPSloppy(addr.Address).String(), nil
 		}
 	}
 	return "", fmt.Errorf("%s doesn't have an address with type %s or %s", node.GetName(),
@@ -328,11 +335,12 @@ func GetLbEndpoints(slices []*discovery.EndpointSlice, svcPort kapi.ServicePort)
 				}
 				for _, ip := range endpoint.Addresses {
 					klog.V(4).Infof("Adding slice %s endpoints: %v, port: %d", slice.Name, endpoint.Addresses, *port.Port)
+					ipStr := utilnet.ParseIPSloppy(ip).String()
 					switch slice.AddressType {
 					case discovery.AddressTypeIPv4:
-						v4ips.Insert(ip)
+						v4ips.Insert(ipStr)
 					case discovery.AddressTypeIPv6:
-						v6ips.Insert(ip)
+						v6ips.Insert(ipStr)
 					default:
 						klog.V(5).Infof("Skipping FQDN slice %s/%s", slice.Namespace, slice.Name)
 					}

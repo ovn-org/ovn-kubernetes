@@ -19,15 +19,20 @@ type EgressSVCConfig struct {
 }
 
 // ParseEgressSVCAnnotation returns the parsed egress-service annotation.
-func ParseEgressSVCAnnotation(svc *kapi.Service) (*EgressSVCConfig, error) {
-	annotation, ok := svc.Annotations[EgressSVCAnnotation]
+func ParseEgressSVCAnnotation(annotations map[string]string) (*EgressSVCConfig, error) {
+	anno, ok := annotations[EgressSVCAnnotation]
 	if !ok {
-		return nil, newAnnotationNotSetError("%s annotation not found for service %s/%s", EgressSVCAnnotation, svc.Namespace, svc.Name)
+		return nil, newAnnotationNotSetError("%s annotation not found", EgressSVCAnnotation)
 	}
 
 	cfg := &EgressSVCConfig{}
-	if err := json.Unmarshal([]byte(annotation), &cfg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal egress svc config annotation %s for service %s/%s: %v", annotation, svc.Namespace, svc.Name, err)
+	if err := json.Unmarshal([]byte(anno), &cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal egress svc config annotation value %s: %v", anno, err)
+	}
+
+	_, err := metav1.LabelSelectorAsSelector(&cfg.NodeSelector)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse the nodeSelector: %v", err)
 	}
 
 	return cfg, nil

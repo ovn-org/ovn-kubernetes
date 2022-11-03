@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	utilnet "k8s.io/utils/net"
@@ -288,7 +289,7 @@ func (c *Controller) nodeStateFor(name string) (*nodeState, error) {
 		return nil, err
 	}
 
-	nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(node)
+	nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse node %s subnets annotation %v", node.Name, err)
 	}

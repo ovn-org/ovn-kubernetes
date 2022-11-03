@@ -114,11 +114,11 @@ func matchAndReplaceNamedUUIDs(actual, expected []TestData) {
 }
 
 // testDataEqual tests for equality assuming input libovsdb models, as follows:
-// - Expects input to be pointers to struct and only its ovsdb fields are tested.
-// - If ignoreUUIDs, strings, slices or maps that contain UUIDs are ignored. Slices
-//   and maps lengths are still checked to match.
-// - Slices are compared as an unordered set
-// - Otherwise reflect.DeepEqual is used.
+//   - Expects input to be pointers to struct and only its ovsdb fields are tested.
+//   - If ignoreUUIDs, strings, slices or maps that contain UUIDs are ignored. Slices
+//     and maps lengths are still checked to match.
+//   - Slices are compared as an unordered set
+//   - Otherwise reflect.DeepEqual is used.
 func testDataEqual(x, y TestData, ignoreUUIDs bool) bool {
 	if x == nil || y == nil {
 		return x == y

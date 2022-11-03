@@ -161,6 +161,12 @@ how to override the default values for some config options.
 administrator to limit the external hosts that a pod in a project can access. 
 The EgressFirewall object rules apply to all pods that share the namespace with the egressfirewall object.
 
+[Egress QoS](./docs/egress-qos.md) The EgressQoS feature enables marking pods egress traffic
+with a valid QoS Differentiated Services Code Point (DSCP) value.
+
+[Egress Service](./docs/egress-service.md) The Egress Service feature enables the egress traffic
+of pods backing a LoadBalancer service to exit the cluster using its ingress IP.
+
 [Hybrid Overlay](./docs/hybrid-overlay.md) feature creates VXLAN tunnels to nodes in the cluster that
 have been excluded from the ovn-kubernetes overlay using the no-hostsubnet-nodes config option.
 These tunnels allow pods on ovn-kubernetes nodes to communicate directly with other pods on nodes
@@ -186,6 +192,10 @@ cluster them and start various daemons for the ovn-kubernetes integration.
 OVN Kubernetes implements both External IPs and LoadBalancer Ingress IPs in the form of highly available
 OVN load balancers. It is the administrator's responsibility to route traffic to the Kubernetes nodes for
 both of these VIP types.
+
+[Egress IP](./docs/egress-ip.md). The egress IP address feature allows you to ensure that the traffic
+from one or more pods in one or more namespaces has a consistent source IP address for services outside the
+cluster network.
 
 ## Other
 [Unit test mocks](./docs/mocks-ut-faq.md)

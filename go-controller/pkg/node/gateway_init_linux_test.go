@@ -120,6 +120,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: "Check pkt length action: Yes",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . other_config:hw-offload",
+			Output: "false",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 get Interface patch-breth0_node1-to-br-int ofport",
 			Output: "5",
 		})
@@ -401,6 +405,11 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-appctl --timeout=15 dpif/show-dp-features " + brphys,
 			Output: "Check pkt length action: Yes",
+		})
+		// IsOvsHwOffloadEnabled
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . other_config:hw-offload",
+			Output: "false",
 		})
 		// GetDPUHostInterface
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -731,6 +740,10 @@ func localGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: "Check pkt length action: Yes",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . other_config:hw-offload",
+			Output: "false",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 get Interface patch-breth0_node1-to-br-int ofport",
 			Output: "5",
 		})
@@ -832,7 +845,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 		}
 
 		fakeMgmtPortConfig := managementPortConfig{
-			ifName:    nodeName,
+			ifName:    types.K8sMgmtIntfName,
 			link:      nil,
 			routerMAC: nil,
 			ipv4:      &fakeMgmtPortIPFamilyConfig,

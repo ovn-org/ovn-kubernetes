@@ -2,9 +2,6 @@ package ovn
 
 import (
 	"context"
-	"fmt"
-	"k8s.io/apimachinery/pkg/runtime"
-	k8stypes "k8s.io/apimachinery/pkg/types"
 	"net"
 	"reflect"
 	"sync"
@@ -43,13 +40,11 @@ import (
 )
 
 func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Node {
+	var err error
 	annotations := make(map[string]string)
 	if ovnHostSubnet != "" {
-		subnetAnnotations, err := util.CreateNodeHostSubnetAnnotation(ovntest.MustParseIPNets(ovnHostSubnet))
+		annotations, err = util.UpdateNodeHostSubnetAnnotation(annotations, ovntest.MustParseIPNets(ovnHostSubnet), types.DefaultNetworkName)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		for k, v := range subnetAnnotations {
-			annotations[k] = fmt.Sprintf("%s", v)
-		}
 	}
 	if hybridHostSubnet != "" {
 		annotations[hotypes.HybridOverlayNodeSubnet] = hybridHostSubnet
@@ -67,13 +62,11 @@ func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Nod
 }
 
 func newTestWinNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Node {
+	var err error
 	annotations := make(map[string]string)
 	if ovnHostSubnet != "" {
-		subnetAnnotations, err := util.CreateNodeHostSubnetAnnotation(ovntest.MustParseIPNets(ovnHostSubnet))
+		annotations, err = util.UpdateNodeHostSubnetAnnotation(annotations, ovntest.MustParseIPNets(ovnHostSubnet), types.DefaultNetworkName)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		for k, v := range subnetAnnotations {
-			annotations[k] = fmt.Sprintf("%s", v)
-		}
 	}
 	if hybridHostSubnet != "" {
 		annotations[hotypes.HybridOverlayNodeSubnet] = hybridHostSubnet
@@ -137,17 +130,14 @@ func setupHybridOverlayOVNObjects(node tNode, hoSubnet, nodeHOIP, nodeHOMAC stri
 }
 
 func setupClusterController(clusterController *Controller, clusterLBUUID, expectedNodeSwitchUUID, node1Name string) {
-	var err error
-	for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
-		clusterController.hybridOverlaySubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
-	}
+	err := clusterController.hybridOverlaySubnetAllocator.InitRanges(config.HybridOverlay.ClusterSubnets)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	err = clusterController.masterSubnetAllocator.InitRanges(config.Default.ClusterSubnets)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-	for _, clusterEntry := range config.Default.ClusterSubnets {
-		clusterController.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
-	}
 	clusterController.SCTPSupport = true
 	clusterController.loadBalancerGroupUUID = clusterLBUUID
-	clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(clusterController.nbClient)
+	clusterController.defaultCOPPUUID, err = EnsureDefaultCOPP(clusterController.nbClient)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitchUUID, []string{node1Name})
 
@@ -235,11 +225,10 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+				record.NewFakeRecorder(10))
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
-			for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
-				clusterController.hybridOverlaySubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
-			}
+			err = clusterController.hybridOverlaySubnetAllocator.InitRanges(config.HybridOverlay.ClusterSubnets)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// Let the real code run and ensure OVN database sync
 			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
@@ -258,9 +247,9 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				if err != nil {
 					return err
 				}
-				_, err = util.ParseNodeHostSubnetAnnotation(updatedNode)
+				_, err = util.ParseNodeHostSubnetAnnotation(updatedNode, types.DefaultNetworkName)
 				return err
-			}, 2).Should(gomega.MatchError(fmt.Sprintf("node %q has no \"k8s.ovn.org/node-subnets\" annotation", nodeName)))
+			}, 2).Should(gomega.MatchError("could not find \"k8s.ovn.org/node-subnets\" annotation"))
 
 			gomega.Eventually(fexec.CalledMatchesExpected, 2).Should(gomega.BeTrue(), fexec.ErrorDesc)
 
@@ -393,7 +382,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+				record.NewFakeRecorder(10))
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
@@ -690,7 +679,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+				record.NewFakeRecorder(10))
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
@@ -854,7 +843,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+				record.NewFakeRecorder(10))
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 
@@ -1112,7 +1101,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
 				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+				record.NewFakeRecorder(10))
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 			setupClusterController(clusterController, expectedClusterLBGroup.UUID, expectedNodeSwitch.UUID, node1.Name)
 

@@ -880,6 +880,23 @@ func DetectCheckPktLengthSupport(bridge string) (bool, error) {
 	return false, nil
 }
 
+// IsOvsHwOffloadEnabled checks if OvS Hardware Offload is enabled.
+func IsOvsHwOffloadEnabled() (bool, error) {
+	stdout, stderr, err := RunOVSVsctl("--if-exists", "get",
+		"Open_vSwitch", ".", "other_config:hw-offload")
+	if err != nil {
+		klog.Errorf("Failed to get output from ovs-vsctl --if-exists get Open_vSwitch . "+
+			"other_config:hw-offload stderr(%s) : %v", stderr, err)
+		return false, err
+	}
+
+	// For the case if the hw-offload key doesn't exist, we check for empty output.
+	if len(stdout) == 0 || stdout == "false" {
+		return false, nil
+	}
+	return true, nil
+}
+
 type OvsDbProperties struct {
 	AppCtl        func(timeout int, args ...string) (string, string, error)
 	DbAlias       string

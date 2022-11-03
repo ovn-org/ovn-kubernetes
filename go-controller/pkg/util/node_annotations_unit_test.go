@@ -141,6 +141,16 @@ func TestL3GatewayConfig_UnmarshalJSON(t *testing.T) {
 			errMatch:   fmt.Errorf("bad 'ip-address' value"),
 		},
 		{
+			desc:       "test valid 'IP address' value",
+			inputParam: []byte(`{"mode":"local","mac-address":"11:22:33:44:55:66","ip-address":"192.168.1.5/24"}`),
+			expOut: L3GatewayConfig{
+				Mode:        "local",
+				MACAddress:  ovntest.MustParseMAC("11:22:33:44:55:66"),
+				IPAddresses: ovntest.MustParseIPNets("192.168.1.5/24"),
+				NextHops:    []net.IP{},
+			},
+		},
+		{
 			desc:       "test bad 'IP addresses' value",
 			inputParam: []byte(`{"mode":"local","mac-address":"11:22:33:44:55:66","ip-addresses":["192.168.1/24","fd01::1234/64"]}`),
 			errMatch:   fmt.Errorf("bad 'ip-addresses' value"),
@@ -149,29 +159,33 @@ func TestL3GatewayConfig_UnmarshalJSON(t *testing.T) {
 			desc:       "test valid 'IP addresses' value",
 			inputParam: []byte(`{"mode":"local","mac-address":"11:22:33:44:55:66","ip-addresses":["192.168.1.5/24","fd01::1234/64"]}`),
 			expOut: L3GatewayConfig{
-				Mode:           "local",
-				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
-				NodePortEnable: false,
-				IPAddresses:    ovntest.MustParseIPNets("192.168.1.5/24", "fd01::1234/64"),
-				NextHops:       []net.IP{nil},
+				Mode:        "local",
+				MACAddress:  ovntest.MustParseMAC("11:22:33:44:55:66"),
+				IPAddresses: ovntest.MustParseIPNets("192.168.1.5/24", "fd01::1234/64"),
+				NextHops:    []net.IP{},
 			},
-		},
-		{
-			desc:       "test bad 'next-hop' value",
-			inputParam: []byte(`{"mode":"local","mac-address":"11:22:33:44:55:66","ip-address":"192.168.1.5/24","next-hop":"192.168.11"}`),
-			errMatch:   fmt.Errorf("bad 'next-hop' value"),
 		},
 		{
 			desc:       "test bad 'next-hops' value",
 			inputParam: []byte(`{"mode":"local","mac-address":"11:22:33:44:55:66","ip-address":"192.168.1.5/24", "next-hops":["192.168.1.","fd01::1"]}`),
 			errMatch:   fmt.Errorf("bad 'next-hops' value"),
 		},
+		{
+			desc:       "test valid 'next-hops' value",
+			inputParam: []byte(`{"mode":"local","mac-address":"11:22:33:44:55:66","ip-address":"192.168.1.5/24", "next-hops":["192.168.1.1","fd01::1"]}`),
+			expOut: L3GatewayConfig{
+				Mode:        "local",
+				MACAddress:  ovntest.MustParseMAC("11:22:33:44:55:66"),
+				IPAddresses: ovntest.MustParseIPNets("192.168.1.5/24"),
+				NextHops: []net.IP{
+					ovntest.MustParseIP("192.168.1.1"),
+					ovntest.MustParseIP("fd01::1"),
+				},
+			},
+		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			if tc.desc != "success: test host gateway bridge parsing" {
-				return
-			}
 			l3GwCfg := L3GatewayConfig{}
 			e := l3GwCfg.UnmarshalJSON(tc.inputParam)
 			if tc.errAssert {

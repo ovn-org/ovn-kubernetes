@@ -3,8 +3,7 @@ package util
 import (
 	"encoding/json"
 	"fmt"
-
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 /*
@@ -18,10 +17,12 @@ Used for: convey the required information to setup network plubming on DPU for a
 Example:
     annotations:
         k8s.ovn.org/dpu.connection-details: |
-            {
-                "pfId": "0",
-                "vfId": "3",
-                "sandboxId": "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a"
+            {"default":
+				{
+                	"pfId": “0”,
+                	“vfId”: "3",
+                	"sandboxId": "35b82dbe2c39768d9874861aee38cf569766d4855b525ae02bff2bfbda73392a"
+				}
             }
 
 Annotation: "k8s.ovn.org/dpu.connection-status"
@@ -30,10 +31,12 @@ Used for: convey the DPU connection status for a given Pod
 Example:
     annotations:
         k8s.ovn.org/dpu.connection-status: |
-            {
-                "status": "Ready",
-                "reason": ""
-            }
+            {"default":
+				{
+					"status": “Ready”,
+					"reason": ""
+				}
+			}
 */
 
 const (
@@ -56,75 +59,117 @@ type DPUConnectionStatus struct {
 	Reason string `json:"Reason,omitempty"`
 }
 
-func (scd *DPUConnectionDetails) FromPodAnnotation(podAnnot map[string]string) error {
-	if annot, ok := podAnnot[DPUConnectionDetailsAnnot]; ok {
-		if err := json.Unmarshal([]byte(annot), scd); err != nil {
-			return fmt.Errorf("failed to unmarshal DPUConnectionDetails. %v", err)
+// UnmarshalPodDPUConnDetailsAllNetworks returns the DPUConnectionDetails map of all networks from the given Pod annotation
+func UnmarshalPodDPUConnDetailsAllNetworks(annotations map[string]string) (map[string]DPUConnectionDetails, error) {
+	podDcds := make(map[string]DPUConnectionDetails)
+	ovnAnnotation, ok := annotations[DPUConnectionDetailsAnnot]
+	if ok {
+		if err := json.Unmarshal([]byte(ovnAnnotation), &podDcds); err != nil {
+			// DPU connection details annotation could be in the legacy format
+			var legacyScd DPUConnectionDetails
+			if err := json.Unmarshal([]byte(ovnAnnotation), &legacyScd); err == nil {
+				podDcds[types.DefaultNetworkName] = legacyScd
+			} else {
+				return nil, fmt.Errorf("failed to unmarshal OVN pod %s annotation %q: %v",
+					DPUConnectionDetailsAnnot, annotations, err)
+			}
 		}
-		return nil
 	}
-	return fmt.Errorf("failed to get DPUConnectionDetails, pod annotation \"%s\" does not exist",
-		DPUConnectionDetailsAnnot)
+	return podDcds, nil
 }
 
-func (scd *DPUConnectionDetails) SetPodAnnotation(podAnnotator kube.Annotator) error {
-	data, err := json.Marshal(scd)
-	if err != nil {
-		// We should not get here
-		return fmt.Errorf("failed to set annotation. %v", err)
+// MarshalPodDPUConnDetails adds the pod's connection details of the specified network to the corresponding pod annotation.
+func MarshalPodDPUConnDetails(annotations map[string]string, dcd *DPUConnectionDetails, netName string) (map[string]string, error) {
+	if annotations == nil {
+		annotations = make(map[string]string)
 	}
-	err = podAnnotator.Set(DPUConnectionDetailsAnnot, string(data))
+	podDcds, err := UnmarshalPodDPUConnDetailsAllNetworks(annotations)
 	if err != nil {
-		// We should not get here
-		return fmt.Errorf("failed to set annotation. %v", err)
+		return nil, err
 	}
-	return nil
+	podDcds[netName] = *dcd
+
+	bytes, err := json.Marshal(podDcds)
+	if err != nil {
+		return nil, fmt.Errorf("failed marshaling pod annotation map %v: %v", podDcds, err)
+	}
+	annotations[DPUConnectionDetailsAnnot] = string(bytes)
+	return annotations, nil
 }
 
-func (scd *DPUConnectionDetails) AsAnnotation() (map[string]string, error) {
-	data, err := json.Marshal(scd)
-	if err != nil {
-		// We should not get here
-		return nil, fmt.Errorf("failed to set annotation. %v", err)
+// UnmarshalPodDPUConnDetails returns dpu connection details for the specified network
+func UnmarshalPodDPUConnDetails(annotations map[string]string, netName string) (*DPUConnectionDetails, error) {
+	ovnAnnotation, ok := annotations[DPUConnectionDetailsAnnot]
+	if !ok {
+		return nil, newAnnotationNotSetError("could not find OVN pod %s annotation in %v",
+			DPUConnectionDetailsAnnot, annotations)
 	}
-	annot := make(map[string]string)
-	annot[DPUConnectionDetailsAnnot] = string(data)
-	return annot, nil
+
+	podDcds, err := UnmarshalPodDPUConnDetailsAllNetworks(annotations)
+	if err != nil {
+		return nil, err
+	}
+
+	dcd, ok := podDcds[netName]
+	if !ok {
+		return nil, newAnnotationNotSetError("no OVN %s annotation for network %s: %q",
+			DPUConnectionDetailsAnnot, netName, ovnAnnotation)
+	}
+	return &dcd, nil
 }
 
-func (scs *DPUConnectionStatus) FromPodAnnotation(podAnnot map[string]string) error {
-	if annot, ok := podAnnot[DPUConnetionStatusAnnot]; ok {
-		if err := json.Unmarshal([]byte(annot), scs); err != nil {
-			return fmt.Errorf("failed to unmarshal DPUConnectionStatus. %v", err)
+// UnmarshalPodDPUConnStatusAllNetworks returns the DPUConnectionStatus map of all networks from the given Pod annotation
+func UnmarshalPodDPUConnStatusAllNetworks(annotations map[string]string) (map[string]DPUConnectionStatus, error) {
+	podDcss := make(map[string]DPUConnectionStatus)
+	ovnAnnotation, ok := annotations[DPUConnetionStatusAnnot]
+	if ok {
+		if err := json.Unmarshal([]byte(ovnAnnotation), &podDcss); err != nil {
+			// DPU connection status annotation could be in the legacy format
+			var legacyScs DPUConnectionStatus
+			if err := json.Unmarshal([]byte(ovnAnnotation), &legacyScs); err == nil {
+				podDcss[types.DefaultNetworkName] = legacyScs
+			} else {
+				return nil, fmt.Errorf("failed to unmarshal OVN pod %s annotation %q: %v",
+					DPUConnetionStatusAnnot, annotations, err)
+			}
 		}
-		return nil
 	}
-	return fmt.Errorf("failed to get DPUConnectionStatus pod annotation \"%s\" does not exist",
-		DPUConnetionStatusAnnot)
+	return podDcss, nil
 }
 
-func (scs *DPUConnectionStatus) SetPodAnnotation(podAnnotator kube.Annotator) error {
-	data, err := json.Marshal(scs)
-	if err != nil {
-		// We should not get here
-		return fmt.Errorf("failed to set annotation. %v", err)
+// MarshalPodDPUConnStatus adds the pod's connection status of the specified network to the corresponding pod annotation.
+func MarshalPodDPUConnStatus(annotations map[string]string, scs *DPUConnectionStatus, netName string) (map[string]string, error) {
+	if annotations == nil {
+		annotations = make(map[string]string)
 	}
-	err = podAnnotator.Set(DPUConnetionStatusAnnot, string(data))
+	podScss, err := UnmarshalPodDPUConnStatusAllNetworks(annotations)
 	if err != nil {
-		// We should not get here
-		return fmt.Errorf("failed to set annotation. %v", err)
+		return nil, err
 	}
-	return nil
+	podScss[netName] = *scs
+	bytes, err := json.Marshal(podScss)
+	if err != nil {
+		return nil, fmt.Errorf("failed marshaling pod annotation map %v: %v", podScss, err)
+	}
+	annotations[DPUConnetionStatusAnnot] = string(bytes)
+	return annotations, nil
 }
 
-func (scs *DPUConnectionStatus) AsAnnotation() (map[string]string, error) {
-	data, err := json.Marshal(scs)
-	if err != nil {
-		// We should not get here
-		return nil, fmt.Errorf("failed to set annotation. %v", err)
+// UnmarshalPodDPUConnStatus returns DPU connection status for the specified network
+func UnmarshalPodDPUConnStatus(annotations map[string]string, netName string) (*DPUConnectionStatus, error) {
+	ovnAnnotation, ok := annotations[DPUConnetionStatusAnnot]
+	if !ok {
+		return nil, newAnnotationNotSetError("could not find OVN pod annotation in %v", annotations)
 	}
 
-	annot := make(map[string]string)
-	annot[DPUConnetionStatusAnnot] = string(data)
-	return annot, nil
+	podScss, err := UnmarshalPodDPUConnStatusAllNetworks(annotations)
+	if err != nil {
+		return nil, err
+	}
+	scs, ok := podScss[netName]
+	if !ok {
+		return nil, newAnnotationNotSetError("no OVN %s annotation for network %s: %q",
+			DPUConnetionStatusAnnot, netName, ovnAnnotation)
+	}
+	return &scs, nil
 }

@@ -196,6 +196,11 @@ func setupOVNNode(node *kapi.Node) error {
 			config.Default.InactivityProbe),
 		fmt.Sprintf("external_ids:ovn-openflow-probe-interval=%d",
 			config.Default.OpenFlowProbe),
+		// bundle-idle-timeout default value is 10s, it should be set
+		// as high as the ovn-openflow-probe-interval to allow ovn-controller
+		// to finish computation specially with complex acl configuration with port range.
+		fmt.Sprintf("other_config:bundle-idle-timeout=%d",
+			config.Default.OpenFlowProbe),
 		fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name),
 		fmt.Sprintf("external_ids:ovn-monitor-all=%t", config.Default.MonitorAll),
 		fmt.Sprintf("external_ids:ovn-ofctrl-wait-before-clear=%d", config.Default.OfctrlWaitBeforeClear),
@@ -314,14 +319,58 @@ func getOVNIfUpCheckMode() (bool, error) {
 	return true, nil
 }
 
+type managementPortEntry struct {
+	port   ManagementPort
+	config *managementPortConfig
+}
+
+func createNodeManagementPorts(name string, nodeAnnotator kube.Annotator, waiter *startupWaiter,
+	subnets []*net.IPNet) ([]managementPortEntry, *managementPortConfig, error) {
+	// If netdevice name is not provided in the full mode then management port backed by OVS internal port.
+	// If it is provided then it is backed by VF or SF and need to determine its representor name to plug
+	// into OVS integrational bridge
+	if config.OvnKubeNode.Mode == types.NodeModeFull && config.OvnKubeNode.MgmtPortNetdev != "" {
+		deviceID, err := util.GetDeviceIDFromNetdevice(config.OvnKubeNode.MgmtPortNetdev)
+		if err != nil {
+			// Device might had been already renamed to types.K8sMgmtIntfName
+			config.OvnKubeNode.MgmtPortNetdev = types.K8sMgmtIntfName
+			if deviceID, err = util.GetDeviceIDFromNetdevice(config.OvnKubeNode.MgmtPortNetdev); err != nil {
+				return nil, nil, fmt.Errorf("failed to get device id for %s or %s: %v",
+					config.OvnKubeNode.MgmtPortNetdev, types.K8sMgmtIntfName, err)
+			}
+		}
+		rep, err := util.GetFunctionRepresentorName(deviceID)
+		if err != nil {
+			return nil, nil, err
+		}
+		config.OvnKubeNode.MgmtPortRepresentor = rep
+	}
+	ports := NewManagementPorts(name, subnets)
+
+	var mgmtPortConfig *managementPortConfig
+	mgmtPorts := make([]managementPortEntry, 0)
+	for _, port := range ports {
+		config, err := port.Create(nodeAnnotator, waiter)
+		if err != nil {
+			return nil, nil, err
+		}
+		mgmtPorts = append(mgmtPorts, managementPortEntry{port: port, config: config})
+		// Save this management port config for later usage.
+		// Since only one OVS internal port / Representor config may exist it is fine just to overwrite it
+		if _, ok := port.(*managementPortNetdev); !ok {
+			mgmtPortConfig = config
+		}
+	}
+
+	return mgmtPorts, mgmtPortConfig, nil
+}
+
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	var err error
 	var node *kapi.Node
 	var subnets []*net.IPNet
-	var mgmtPort ManagementPort
-	var mgmtPortConfig *managementPortConfig
 	var cniServer *cni.Server
 	var isOvnUpEnabled bool
 
@@ -371,7 +420,7 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 			klog.Infof("Waiting to retrieve node %s: %v", n.name, err)
 			return false, nil
 		}
-		subnets, err = util.ParseNodeHostSubnetAnnotation(node)
+		subnets, err = util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 		if err != nil {
 			klog.Infof("Waiting for node %s to start, no annotation found on node for subnet: %v", n.name, err)
 			return false, nil
@@ -402,12 +451,11 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		}
 	}
 
-	// Setup Management port and gateway
-	mgmtPort = NewManagementPort(n.name, subnets)
 	nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node.Name)
 	waiter := newStartupWaiter()
 
-	mgmtPortConfig, err = mgmtPort.Create(nodeAnnotator, waiter)
+	// Setup management ports
+	mgmtPorts, mgmtPortConfig, err := createNodeManagementPorts(n.name, nodeAnnotator, waiter, subnets)
 	if err != nil {
 		return err
 	}
@@ -419,6 +467,7 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 			return err
 		}
 	} else {
+		// Initialize gateway for OVS internal port or representor management port
 		if err := n.initGateway(subnets, nodeAnnotator, waiter, mgmtPortConfig, nodeAddr); err != nil {
 			return err
 		}
@@ -464,8 +513,8 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		// Determine if we need to run upgrade checks
 		if initialTopoVersion != types.OvnCurrentTopologyVersion {
 			if needLegacySvcRoute {
-				klog.Info("System may be upgrading, falling back to to legacy K8S Service via mp0")
-				// add back legacy route for service via mp0
+				klog.Info("System may be upgrading, falling back to legacy K8S Service via management port")
+				// add back legacy route for service via management port
 				link, err := util.LinkSetUp(types.K8sMgmtIntfName)
 				if err != nil {
 					return fmt.Errorf("unable to get link for %s, error: %v", types.K8sMgmtIntfName, err)
@@ -544,8 +593,10 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		klog.Errorf("Reset of initial klog \"loglevel\" failed, err: %v", err)
 	}
 
-	// start management port health check
-	mgmtPort.CheckManagementPortHealth(mgmtPortConfig, n.stopChan)
+	// start management ports health check
+	for _, mgmtPort := range mgmtPorts {
+		mgmtPort.port.CheckManagementPortHealth(mgmtPort.config, n.stopChan)
+	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		// start health check to ensure there are no stale OVS internal ports
@@ -633,13 +684,14 @@ func (n *OvnNode) WatchEndpointSlices() error {
 			for _, oldPort := range oldEndpointSlice.Ports {
 				for _, oldEndpoint := range oldEndpointSlice.Endpoints {
 					for _, oldIP := range oldEndpoint.Addresses {
-						if doesEPSliceContainReadyEndpoint(newEndpointSlice, oldIP, *oldPort.Port, *oldPort.Protocol) {
+						oldIPStr := utilnet.ParseIPSloppy(oldIP).String()
+						if doesEPSliceContainReadyEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol) {
 							continue
 						}
 						if *oldPort.Protocol == kapi.ProtocolUDP { // flush conntrack only for UDP
-							err := util.DeleteConntrack(oldIP, *oldPort.Port, *oldPort.Protocol, netlink.ConntrackReplyAnyIP, nil)
+							err := util.DeleteConntrack(oldIPStr, *oldPort.Port, *oldPort.Protocol, netlink.ConntrackReplyAnyIP, nil)
 							if err != nil {
-								klog.Errorf("Failed to delete conntrack entry for %s: %v", oldIP, err)
+								klog.Errorf("Failed to delete conntrack entry for %s: %v", oldIPStr, err)
 							}
 						}
 					}
@@ -651,10 +703,11 @@ func (n *OvnNode) WatchEndpointSlices() error {
 			for _, port := range endpointSlice.Ports {
 				for _, endpoint := range endpointSlice.Endpoints {
 					for _, ip := range endpoint.Addresses {
+						ipStr := utilnet.ParseIPSloppy(ip).String()
 						if *port.Protocol == kapi.ProtocolUDP { // flush conntrack only for UDP
-							err := util.DeleteConntrack(ip, *port.Port, *port.Protocol, netlink.ConntrackReplyAnyIP, nil)
+							err := util.DeleteConntrack(ipStr, *port.Port, *port.Protocol, netlink.ConntrackReplyAnyIP, nil)
 							if err != nil {
-								klog.Errorf("Failed to delete conntrack entry for %s: %v", ip, err)
+								klog.Errorf("Failed to delete conntrack entry for %s: %v", ipStr, err)
 							}
 						}
 					}
@@ -705,7 +758,8 @@ func (n *OvnNode) checkAndDeleteStaleConntrackEntriesForNamespace(newNs *kapi.Na
 	for _, gwIP := range gatewayIPs {
 		go func(gwIP string) {
 			defer wg.Done()
-			if len(gwIP) > 0 {
+			if len(gwIP) > 0 && !utilnet.IsIPv6String(gwIP) {
+				// TODO: Add support for IPv6 external gateways
 				if hwAddr, err := util.GetMACAddressFromARP(net.ParseIP(gwIP)); err != nil {
 					klog.Errorf("Failed to lookup hardware address for gatewayIP %s: %v", gwIP, err)
 				} else if len(hwAddr) > 0 {
@@ -811,7 +865,7 @@ func doesEPSliceContainReadyEndpoint(epSlice *discovery.EndpointSlice,
 				continue
 			}
 			for _, ip := range endpoint.Addresses {
-				if ip == epIP && *port.Port == epPort && *port.Protocol == protocol {
+				if utilnet.ParseIPSloppy(ip).String() == epIP && *port.Port == epPort && *port.Protocol == protocol {
 					return true
 				}
 			}

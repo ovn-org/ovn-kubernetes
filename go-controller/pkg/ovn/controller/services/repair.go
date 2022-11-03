@@ -27,7 +27,8 @@ import (
 // It has two phases:
 //
 // Pre-Sync: Delete any ovn Load_Balancer rows that are "owned" by a Kubernetes Service
-//   that doesn't exist anymore
+//
+//	that doesn't exist anymore
 //
 // Post-sync: After every service has been synced at least once, delete any legacy load-balancers
 //

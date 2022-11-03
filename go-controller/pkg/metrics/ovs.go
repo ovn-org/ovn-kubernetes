@@ -176,7 +176,7 @@ var metricOvsBridgeFlowsTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	},
 )
 
-//ovs interface metrics
+// ovs interface metrics
 var metricOvsInterfaceResetsTotal = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvsNamespace,
 	Subsystem: MetricOvsSubsystemVswitchd,

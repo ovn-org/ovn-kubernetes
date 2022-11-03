@@ -11,6 +11,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	utilnet "k8s.io/utils/net"
 )
 
 // ParseHybridOverlayHostSubnet returns the parsed hybrid overlay hostsubnet if
@@ -54,7 +55,7 @@ func SameIPNet(a, b *net.IPNet) bool {
 func GetNodeInternalIP(node *kapi.Node) (string, error) {
 	for _, addr := range node.Status.Addresses {
 		if addr.Type == kapi.NodeInternalIP {
-			return addr.Address, nil
+			return utilnet.ParseIPSloppy(addr.Address).String(), nil
 		}
 	}
 	return "", fmt.Errorf("failed to read node %q InternalIP", node.Name)

@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 )
 
 func (c *Controller) onServiceAdd(obj interface{}) {
@@ -175,7 +176,7 @@ func (c *Controller) syncService(key string) error {
 		return c.clearServiceResources(key, state)
 	}
 
-	conf, err := util.ParseEgressSVCAnnotation(svc)
+	conf, err := util.ParseEgressSVCAnnotation(svc.Annotations)
 	if err != nil && !util.IsAnnotationNotSetError(err) {
 		return err
 	}
@@ -212,7 +213,11 @@ func (c *Controller) syncService(key string) error {
 		nodeSelector.MatchExpressions = append(nodeSelector.MatchExpressions, matchEpsNodes)
 	}
 
-	selector, _ := metav1.LabelSelectorAsSelector(nodeSelector)
+	selector, err := metav1.LabelSelectorAsSelector(nodeSelector)
+	if err != nil {
+		return err
+	}
+
 	totalEps := len(v4Endpoints) + len(v6Endpoints)
 
 	// We don't want to select a node for a service without endpoints to not "waste" an
@@ -408,8 +413,9 @@ func (c *Controller) allEndpointsFor(svc *corev1.Service) (sets.String, sets.Str
 
 		for _, ep := range eps.Endpoints {
 			for _, ip := range ep.Addresses {
-				if !services.IsHostEndpoint(ip) {
-					epsToInsert.Insert(ip)
+				ipStr := utilnet.ParseIPSloppy(ip).String()
+				if !services.IsHostEndpoint(ipStr) {
+					epsToInsert.Insert(ipStr)
 				}
 			}
 			if ep.NodeName != nil {

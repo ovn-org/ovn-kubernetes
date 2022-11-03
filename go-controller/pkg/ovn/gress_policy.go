@@ -505,7 +505,7 @@ func getSvcVips(nbClient client.Client, service *v1.Service) []net.IP {
 		for _, ipStr := range ipStrs {
 			ip := net.ParseIP(ipStr)
 			if ip == nil {
-				klog.Errorf("Failed to parse cluster IP %q", service.Spec.ClusterIP)
+				klog.Errorf("Failed to parse cluster IP %q", ipStr)
 				continue
 			}
 			ips = append(ips, ip)
@@ -514,13 +514,13 @@ func getSvcVips(nbClient client.Client, service *v1.Service) []net.IP {
 		for _, ing := range service.Status.LoadBalancer.Ingress {
 			if ing.IP != "" {
 				klog.V(5).Infof("Adding ingress IPs: %s from Service: %s to VIP set", ing.IP, service.Name)
-				ips = append(ips, net.ParseIP(ing.IP))
+				ips = append(ips, utilnet.ParseIPSloppy(ing.IP))
 			}
 		}
 
 		if len(service.Spec.ExternalIPs) > 0 {
 			for _, extIP := range service.Spec.ExternalIPs {
-				ip := net.ParseIP(extIP)
+				ip := utilnet.ParseIPSloppy(extIP)
 				if ip == nil {
 					klog.Errorf("Failed to parse external IP %q", extIP)
 					continue

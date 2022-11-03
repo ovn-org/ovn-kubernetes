@@ -85,21 +85,9 @@ func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.Endp
 			perNodeConfigs = append(perNodeConfigs, nodePortLBConfig)
 		}
 
-		// Build up list of vips
-		vips := append([]string{}, service.Spec.ClusterIPs...)
-		// Handle old clusters w/o v6 support
-		if len(vips) == 0 {
-			vips = []string{service.Spec.ClusterIP}
-		}
-		externalVips := []string{}
-		// ExternalIP
-		externalVips = append(externalVips, service.Spec.ExternalIPs...)
-		// LoadBalancer status
-		for _, ingress := range service.Status.LoadBalancer.Ingress {
-			if ingress.IP != "" {
-				externalVips = append(externalVips, ingress.IP)
-			}
-		}
+		// Build up list of vips and externalVips
+		vips := util.GetClusterIPs(service)
+		externalVips := util.GetExternalAndLBIPs(service)
 
 		// if ETP=Local, then treat ExternalIPs and LoadBalancer IPs specially
 		// otherwise, they're just cluster IPs
