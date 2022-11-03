@@ -238,7 +238,7 @@ func (c *Controller) repair() error {
 			util.ServiceTypeHasLoadBalancer(svc) && len(svc.Status.LoadBalancer.Ingress) > 0 {
 			var err error
 			key, _ := cache.MetaNamespaceKeyFunc(svc)
-			conf, err := util.ParseEgressSVCAnnotation(svc)
+			conf, err := util.ParseEgressSVCAnnotation(svc.Annotations)
 			if err != nil && !util.IsAnnotationNotSetError(err) {
 				klog.Errorf("can't parse %s egress service configuration, err: %v", key, err)
 				continue
@@ -280,7 +280,11 @@ func (c *Controller) repair() error {
 				nodeSelector.MatchExpressions = append(nodeSelector.MatchExpressions, matchEpsNodes)
 			}
 
-			selector, _ := metav1.LabelSelectorAsSelector(nodeSelector)
+			selector, err := metav1.LabelSelectorAsSelector(nodeSelector)
+			if err != nil {
+				klog.Errorf("Selector is invalid, err: %v", err)
+				continue
+			}
 
 			if !selector.Matches(labels.Set(node.Labels)) {
 				klog.Errorf("Node %s does no longer match service %s selectors %s", svcHost, key, selector.String())
