@@ -722,6 +722,49 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemovePodHandler(h)
 	})
 
+	It("responds to pod replace with create/update/delete events", func() {
+		wf, err = NewMasterWatchFactory(ovnClientset)
+		Expect(err).NotTo(HaveOccurred())
+		err = wf.Start()
+		Expect(err).NotTo(HaveOccurred())
+
+		added := newPod("pod1", "default")
+		added.UID = "mybar"
+		h, c := addHandler(wf, PodType, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				pod := obj.(*v1.Pod)
+				Expect(pod.Spec.NodeName).To(Equal("mynode"))
+			},
+			UpdateFunc: func(old, new interface{}) {
+				newPod := new.(*v1.Pod)
+				Expect(newPod.UID).To(Equal(types.UID("mybar")))
+				Expect(newPod.Spec.NodeName).To(Equal("foobar"))
+			},
+			DeleteFunc: func(obj interface{}) {
+			},
+		})
+
+		pods = append(pods, added)
+		podWatch.Add(added)
+		Eventually(c.getAdded, 2).Should(Equal(1))
+		podCopy := added.DeepCopy()
+		podCopy.Spec.NodeName = "foobar"
+		podWatch.Modify(podCopy)
+		Eventually(c.getUpdated, 2).Should(Equal(1))
+		podCopy = added.DeepCopy()
+		podCopy.UID = "foobar"
+		podCopy.Spec.NodeName = "mynode"
+		podWatch.Modify(podCopy)
+		Eventually(c.getDeleted, 2).Should(Equal(1))
+		Eventually(c.getAdded, 2).Should(Equal(2))
+		Eventually(c.getUpdated, 2).Should(Equal(1))
+		pods = pods[:0]
+		podWatch.Delete(added)
+		Eventually(c.getDeleted, 2).Should(Equal(2))
+
+		wf.RemovePodHandler(h)
+	})
+
 	It("responds to multiple pod add/update/delete events", func() {
 		wf, err = NewMasterWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
