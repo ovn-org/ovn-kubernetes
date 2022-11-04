@@ -267,11 +267,6 @@ func (oc *Controller) updateStaleDefaultDenyACLNames(npType knet.PolicyType, gre
 				return err
 			}
 		}
-		if aclList[0].Direction == nbdb.ACLDirectionToLport {
-			aclT = lportIngress
-		} else {
-			aclT = lportEgressAfterLB
-		}
 		newACL := BuildACL(
 			newName, // this is the only thing we need to change, keep the rest same
 			aclList[0].Priority,

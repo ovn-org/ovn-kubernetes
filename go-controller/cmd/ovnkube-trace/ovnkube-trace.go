@@ -464,7 +464,6 @@ func getPodInfo(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, 
 	// Find rtos MAC (this is the pod's first hop router).
 	lspCmd := "ovn-sbctl " + cmd + " --bare --no-heading --column=mac list Port_Binding " + types.RouterToSwitchPrefix + podInfo.NodeName
 	ipOutput, ipError, err := execInPod(coreclient, restconfig, ovnNamespace, podInfo.OvnKubePodName, "ovnkube-node", lspCmd, "")
-
 	if err != nil {
 		return nil, fmt.Errorf("execInPod() failed. err: %s, stderr: %s, stdout: %s, podInfo: %v", err, ipError, ipOutput, podInfo)
 	}
