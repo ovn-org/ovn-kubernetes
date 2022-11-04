@@ -94,11 +94,17 @@ type peerPodForNamespaceAndPodSelector struct{} // created during the add functi
 type peerNamespaceSelector struct{}
 type peerPodSelector struct{}
 type localPodSelector struct{}
+
+// types for handlers related to egress IP
 type egressIPPod struct{}
 type egressIPNamespace struct{}
 type egressNode struct{}
 
+// types for handlers in use by ovn-k node
+type namespaceExGw struct{}
+
 var (
+	// Resource types used in ovnk master
 	PodType                               reflect.Type = reflect.TypeOf(&kapi.Pod{})
 	ServiceType                           reflect.Type = reflect.TypeOf(&kapi.Service{})
 	EndpointSliceType                     reflect.Type = reflect.TypeOf(&discovery.EndpointSlice{})
@@ -118,6 +124,9 @@ var (
 	PeerNamespaceSelectorType             reflect.Type = reflect.TypeOf(&peerNamespaceSelector{})
 	PeerPodSelectorType                   reflect.Type = reflect.TypeOf(&peerPodSelector{})
 	LocalPodSelectorType                  reflect.Type = reflect.TypeOf(&localPodSelector{})
+
+	// Resource types used in ovnk node
+	NamespaceExGwType reflect.Type = reflect.TypeOf(&namespaceExGw{})
 )
 
 // NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
@@ -443,7 +452,7 @@ func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority uint3
 func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandlerFuncType, error) {
 	priority := wf.GetHandlerPriority(objType)
 	switch objType {
-	case NamespaceType:
+	case NamespaceType, NamespaceExGwType:
 		return func(namespace string, sel labels.Selector,
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddNamespaceHandler(funcs, processExisting)

@@ -29,9 +29,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/upgrade"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
+	retry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/vishvananda/netlink"
+	apierrors "k8s.io/apimachinery/pkg/util/errors"
 )
 
 // OvnNode is the object holder for utilities meant for node management
@@ -43,11 +45,14 @@ type OvnNode struct {
 	stopChan     chan struct{}
 	recorder     record.EventRecorder
 	gateway      Gateway
+
+	// retry framework for namespaces, used for removal of stale conntrack entries
+	retryNamespaces *retry.RetryFramework
 }
 
 // NewNode creates a new controller for node management
 func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
-	return &OvnNode{
+	n := &OvnNode{
 		name:         name,
 		client:       kubeClient,
 		Kube:         &kube.Kube{KClient: kubeClient},
@@ -55,6 +60,13 @@ func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name s
 		stopChan:     stopChan,
 		recorder:     eventRecorder,
 	}
+	n.initRetryFrameworkForNode()
+
+	return n
+}
+
+func (n *OvnNode) initRetryFrameworkForNode() {
+	n.retryNamespaces = n.newRetryFrameworkNode(factory.NamespaceExGwType)
 }
 
 func clearOVSFlowTargets() error {
@@ -742,13 +754,13 @@ func (n *OvnNode) checkAndDeleteStaleConntrackEntries() {
 			if len(pods) > 0 || err != nil {
 				// we only need to proceed if there is at least one pod in this namespace on this node
 				// OR if we couldn't fetch the pods for some reason at this juncture
-				n.checkAndDeleteStaleConntrackEntriesForNamespace(namespace)
+				_ = n.syncConntrackForExternalGateways(namespace)
 			}
 		}
 	}
 }
 
-func (n *OvnNode) checkAndDeleteStaleConntrackEntriesForNamespace(newNs *kapi.Namespace) {
+func (n *OvnNode) syncConntrackForExternalGateways(newNs *kapi.Namespace) error {
 	// loop through all the IPs on the annotations; ARP for their MACs and form an allowlist
 	gatewayIPs := strings.Split(newNs.Annotations[util.ExternalGatewayPodIPsAnnotation], ",")
 	gatewayIPs = append(gatewayIPs, strings.Split(newNs.Annotations[util.RoutingExternalGWsAnnotation], ",")...)
@@ -793,34 +805,30 @@ func (n *OvnNode) checkAndDeleteStaleConntrackEntriesForNamespace(newNs *kapi.Na
 
 	pods, err := n.watchFactory.GetPods(newNs.Name)
 	if err != nil {
-		klog.Errorf("Unable to get pods from informer: %v", err)
+		return fmt.Errorf("unable to get pods from informer: %v", err)
 	}
+
+	var errors []error
 	for _, pod := range pods {
 		pod := pod
 		podIPs, err := util.GetAllPodIPs(pod)
 		if err != nil {
-			klog.Errorf("Unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+			errors = append(errors, fmt.Errorf("unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err))
 		}
 		for _, podIP := range podIPs { // flush conntrack only for UDP
 			// for this pod, we check if the conntrack entry has a label that is not in the provided allowlist of MACs
 			// only caveat here is we assume egressGW served pods shouldn't have conntrack entries with other labels set
 			err := util.DeleteConntrack(podIP.String(), 0, kapi.ProtocolUDP, netlink.ConntrackOrigDstIP, validNextHopMACs)
 			if err != nil {
-				klog.Errorf("Failed to delete conntrack entry for pod %s: %v", podIP.String(), err)
+				errors = append(errors, fmt.Errorf("failed to delete conntrack entry for pod %s: %v", podIP.String(), err))
 			}
 		}
 	}
+	return apierrors.NewAggregate(errors)
 }
 
 func (n *OvnNode) WatchNamespaces() error {
-	_, err := n.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
-		UpdateFunc: func(old, new interface{}) {
-			oldNs, newNs := old.(*kapi.Namespace), new.(*kapi.Namespace)
-			if exGatewayPodsAnnotationsChanged(oldNs, newNs) {
-				n.checkAndDeleteStaleConntrackEntriesForNamespace(newNs)
-			}
-		},
-	}, nil)
+	_, err := n.retryNamespaces.WatchResource()
 	return err
 }
 
