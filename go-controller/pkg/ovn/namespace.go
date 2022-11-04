@@ -221,6 +221,7 @@ func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *names
 
 // AddNamespace creates corresponding addressset in ovn db
 func (oc *Controller) AddNamespace(ns *kapi.Namespace) error {
+	var errors []error
 	klog.Infof("[%s] adding namespace", ns.Name)
 	// Keep track of how long syncs take.
 	start := time.Now()
@@ -230,7 +231,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) error {
 
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns.Name, false, ns)
 	if err != nil {
-		return fmt.Errorf("failed to ensure namespace locked: %v", err)
+		errors = append(errors, fmt.Errorf("failed to ensure namespace locked: %v", err))
 	}
 	defer nsUnlock()
 
@@ -239,7 +240,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) error {
 	if annotation != "" {
 		parsedAnnotation := net.ParseIP(annotation)
 		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay external gw annotation")
+			errors = append(errors, fmt.Errorf("could not parse hybrid overlay external gw annotation"))
 		} else {
 			nsInfo.hybridOverlayExternalGW = parsedAnnotation
 		}
@@ -248,13 +249,13 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) error {
 	if annotation != "" {
 		parsedAnnotation := net.ParseIP(annotation)
 		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay VTEP annotation")
+			errors = append(errors, fmt.Errorf("could not parse hybrid overlay VTEP annotation"))
 		} else {
 			nsInfo.hybridOverlayVTEP = parsedAnnotation
 		}
 	}
 	// END OCP HACK
-	return nil
+	return kerrors.NewAggregate(errors)
 }
 
 // configureNamespace ensures internal structures are updated based on namespace
@@ -414,7 +415,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 	if annotation != "" {
 		parsedAnnotation := net.ParseIP(annotation)
 		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay external gw annotation")
+			errors = append(errors, fmt.Errorf("could not parse hybrid overlay external gw annotation"))
 		} else {
 			nsInfo.hybridOverlayExternalGW = parsedAnnotation
 		}
@@ -425,7 +426,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 	if annotation != "" {
 		parsedAnnotation := net.ParseIP(annotation)
 		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay VTEP annotation")
+			errors = append(errors, fmt.Errorf("could not parse hybrid overlay VTEP annotation"))
 		} else {
 			nsInfo.hybridOverlayVTEP = parsedAnnotation
 		}
