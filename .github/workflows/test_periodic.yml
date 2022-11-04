@@ -140,13 +140,6 @@ jobs:
       run: |
         make -C test ${{ matrix.target }}
 
-    - name: Upload Junit Reports
-      if: always()
-      uses: actions/upload-artifact@v2
-      with:
-        name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
-        path: './test/_artifacts/*.xml'
-
     - name: Export logs
       if: always()
       run: |
