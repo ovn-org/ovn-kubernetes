@@ -99,7 +99,7 @@ func (h *nodeEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, erro
 		return !exGatewayPodsAnnotationsChanged(ns1, ns2), nil
 
 	case factory.EndpointSliceForStaleConntrackRemovalType:
-		// will compare ip addresses of corresponding endpoints in update code
+		// always run update code
 		return false, nil
 
 	default:
@@ -112,7 +112,7 @@ func (h *nodeEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, erro
 // from the informers cache.
 func (h *nodeEventHandler) GetResourceFromInformerCache(key string) (interface{}, error) {
 	var obj interface{}
-	var name, namespace string
+	var namespace, name string
 	var err error
 
 	namespace, name, err = cache.SplitMetaNamespaceKey(key)

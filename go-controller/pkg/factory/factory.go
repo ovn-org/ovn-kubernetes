@@ -103,6 +103,8 @@ type egressNode struct{}
 // types for handlers in use by ovn-k node
 type namespaceExGw struct{}
 type endpointSliceForStaleConntrackRemoval struct{}
+type serviceForGateway struct{}
+type endpointSliceForGateway struct{}
 
 var (
 	// Resource types used in ovnk master
@@ -129,6 +131,8 @@ var (
 	// Resource types used in ovnk node
 	NamespaceExGwType                         reflect.Type = reflect.TypeOf(&namespaceExGw{})
 	EndpointSliceForStaleConntrackRemovalType reflect.Type = reflect.TypeOf(&endpointSliceForStaleConntrackRemoval{})
+	ServiceForGatewayType                     reflect.Type = reflect.TypeOf(&serviceForGateway{})
+	EndpointSliceForGatewayType               reflect.Type = reflect.TypeOf(&endpointSliceForGateway{})
 )
 
 // NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
@@ -472,7 +476,7 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 			return wf.AddNodeHandler(funcs, processExisting, priority)
 		}, nil
 
-	case PeerServiceType:
+	case PeerServiceType, ServiceForGatewayType:
 		return func(namespace string, sel labels.Selector,
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredServiceHandler(namespace, funcs, processExisting)
@@ -508,7 +512,7 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 			return wf.AddCloudPrivateIPConfigHandler(funcs, processExisting)
 		}, nil
 
-	case EndpointSliceForStaleConntrackRemovalType:
+	case EndpointSliceForStaleConntrackRemovalType, EndpointSliceForGatewayType:
 		return func(namespace string, sel labels.Selector,
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddEndpointSliceHandler(funcs, processExisting)

@@ -314,7 +314,8 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				fNPW.AddService(&service)
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -350,7 +351,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 				fakeOvnNode.shutdown()
 				return nil
@@ -392,7 +393,8 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				fNPW.AddService(&service)
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
@@ -429,7 +431,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 				fakeOvnNode.shutdown()
 				return nil
@@ -482,7 +484,8 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				fNPW.AddService(&service)
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -522,7 +525,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
@@ -578,7 +581,8 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				fNPW.AddService(&service)
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
@@ -618,7 +622,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 				fakeOvnNode.shutdown()
 				return nil
@@ -677,7 +681,8 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				fNPW.AddService(&service)
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -728,7 +733,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
@@ -794,7 +799,8 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				fNPW.AddService(&service)
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -840,7 +846,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
@@ -906,7 +912,8 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				fNPW.AddService(&service)
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -965,7 +972,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(Equal(expectedNodePortFlows))
@@ -1018,7 +1025,8 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				fNPW.AddService(&service)
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables4 := map[string]util.FakeTable{
@@ -1055,7 +1063,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables4)
+				err = f4.MatchState(expectedTables4)
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables6 := map[string]util.FakeTable{
@@ -1115,7 +1123,8 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				fNPW.AddService(&service)
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables4 := map[string]util.FakeTable{
@@ -1152,7 +1161,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables4)
+				err = f4.MatchState(expectedTables4)
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables6 := map[string]util.FakeTable{
@@ -1207,7 +1216,8 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				fNPW.DeleteService(&service)
+				err := fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
@@ -1242,7 +1252,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 				expectedTables = map[string]util.FakeTable{
 					"nat":    {},
@@ -1286,7 +1296,8 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				fNPW.DeleteService(&service)
+				err := fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
@@ -1321,7 +1332,7 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
@@ -1371,7 +1382,8 @@ var _ = Describe("Node Operations", func() {
 				)
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				fNPW.AddService(&service)
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
@@ -1408,10 +1420,11 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
-				fNPW.DeleteService(&service)
+				err = fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -1481,7 +1494,8 @@ var _ = Describe("Node Operations", func() {
 				)
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				fNPW.AddService(&service)
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables := map[string]util.FakeTable{
@@ -1518,10 +1532,11 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
-				fNPW.DeleteService(&service)
+				err = fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -1608,7 +1623,8 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				fNPW.AddService(&service)
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -1648,12 +1664,13 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
 
-				fNPW.DeleteService(&service)
+				err = fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -1745,7 +1762,8 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				fNPW.AddService(&service)
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -1790,12 +1808,13 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(Equal(expectedFlows))
 
-				fNPW.DeleteService(&service)
+				err = fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -1892,7 +1911,8 @@ var _ = Describe("Node Operations", func() {
 				// to ensure the endpoint is local-host-networked
 				res := fNPW.nodeIPManager.addresses.Has(ep1.Addresses[0])
 				Expect(res).To(BeTrue())
-				fNPW.AddService(&service)
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -1934,12 +1954,13 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(Equal(expectedFlows))
 
-				fNPW.DeleteService(&service)
+				err = fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -2030,7 +2051,8 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				fNPW.AddService(&service)
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -2077,12 +2099,13 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(Equal(expectedFlows))
 
-				fNPW.DeleteService(&service)
+				err = fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -2177,7 +2200,8 @@ var _ = Describe("Node Operations", func() {
 				// to ensure the endpoint is local-host-networked
 				res := fNPW.nodeIPManager.addresses.Has(endpointSlice.Endpoints[0].Addresses[0])
 				Expect(res).To(BeTrue())
-				fNPW.AddService(&service)
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
 						"PREROUTING": []string{
@@ -2220,12 +2244,13 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(Equal(expectedFlows))
 
-				fNPW.DeleteService(&service)
+				err = fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
@@ -2341,7 +2366,8 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
-				fNPW.AddService(&service)
+				err := fNPW.AddService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables := map[string]util.FakeTable{
 					"nat": {
@@ -2381,10 +2407,11 @@ var _ = Describe("Node Operations", func() {
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
-				fNPW.DeleteService(&service)
+				err = fNPW.DeleteService(&service)
+				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
 					"nat": {
