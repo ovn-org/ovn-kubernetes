@@ -15,7 +15,6 @@ import (
 	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -46,8 +45,10 @@ type OvnNode struct {
 	recorder     record.EventRecorder
 	gateway      Gateway
 
-	// retry framework for namespaces, used for removal of stale conntrack entries
+	// retry framework for namespaces, used for the removal of stale conntrack entries for external gateways
 	retryNamespaces *retry.RetryFramework
+	// retry framework for endpoint slices, used for the removal of stale conntrack entries for services
+	retryEndpointSlices *retry.RetryFramework
 }
 
 // NewNode creates a new controller for node management
@@ -67,6 +68,8 @@ func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name s
 
 func (n *OvnNode) initRetryFrameworkForNode() {
 	n.retryNamespaces = n.newRetryFrameworkNode(factory.NamespaceExGwType)
+	n.retryEndpointSlices = n.newRetryFrameworkNode(factory.EndpointSliceForStaleConntrackRemovalType)
+
 }
 
 func clearOVSFlowTargets() error {
@@ -688,45 +691,38 @@ func (n *OvnNode) startEgressIPHealthCheckingServer(wg *sync.WaitGroup, mgmtPort
 	return nil
 }
 
+func (n *OvnNode) reconcileConntrackUponEndpointSliceEvents(oldEndpointSlice, newEndpointSlice *discovery.EndpointSlice) error {
+	var errors []error
+	if oldEndpointSlice == nil {
+		// nothing to do upon an add event
+		return nil
+	}
+
+	for _, oldPort := range oldEndpointSlice.Ports {
+		if *oldPort.Protocol != kapi.ProtocolUDP { // flush conntrack only for UDP
+			continue
+		}
+		for _, oldEndpoint := range oldEndpointSlice.Endpoints {
+			for _, oldIP := range oldEndpoint.Addresses {
+				oldIPStr := utilnet.ParseIPSloppy(oldIP).String()
+				// upon an update event, remove conntrack entries for IP addresses that are no longer
+				// in the endpointslice, skip otherwise
+				if newEndpointSlice != nil && doesEPSliceContainReadyEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol) {
+					continue
+				}
+				// upon update and delete events, flush conntrack only for UDP
+				err := util.DeleteConntrack(oldIPStr, *oldPort.Port, *oldPort.Protocol, netlink.ConntrackReplyAnyIP, nil)
+				if err != nil {
+					klog.Errorf("Failed to delete conntrack entry for %s: %v", oldIPStr, err)
+				}
+			}
+		}
+	}
+	return apierrors.NewAggregate(errors)
+
+}
 func (n *OvnNode) WatchEndpointSlices() error {
-	_, err := n.watchFactory.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
-		UpdateFunc: func(old, new interface{}) {
-			newEndpointSlice := new.(*discovery.EndpointSlice)
-			oldEndpointSlice := old.(*discovery.EndpointSlice)
-			for _, oldPort := range oldEndpointSlice.Ports {
-				for _, oldEndpoint := range oldEndpointSlice.Endpoints {
-					for _, oldIP := range oldEndpoint.Addresses {
-						oldIPStr := utilnet.ParseIPSloppy(oldIP).String()
-						if doesEPSliceContainReadyEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol) {
-							continue
-						}
-						if *oldPort.Protocol == kapi.ProtocolUDP { // flush conntrack only for UDP
-							err := util.DeleteConntrack(oldIPStr, *oldPort.Port, *oldPort.Protocol, netlink.ConntrackReplyAnyIP, nil)
-							if err != nil {
-								klog.Errorf("Failed to delete conntrack entry for %s: %v", oldIPStr, err)
-							}
-						}
-					}
-				}
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			endpointSlice := obj.(*discovery.EndpointSlice)
-			for _, port := range endpointSlice.Ports {
-				for _, endpoint := range endpointSlice.Endpoints {
-					for _, ip := range endpoint.Addresses {
-						ipStr := utilnet.ParseIPSloppy(ip).String()
-						if *port.Protocol == kapi.ProtocolUDP { // flush conntrack only for UDP
-							err := util.DeleteConntrack(ipStr, *port.Port, *port.Protocol, netlink.ConntrackReplyAnyIP, nil)
-							if err != nil {
-								klog.Errorf("Failed to delete conntrack entry for %s: %v", ipStr, err)
-							}
-						}
-					}
-				}
-			}
-		},
-	}, nil)
+	_, err := n.retryEndpointSlices.WatchResource()
 	return err
 }
 

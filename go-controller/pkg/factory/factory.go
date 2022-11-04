@@ -102,6 +102,7 @@ type egressNode struct{}
 
 // types for handlers in use by ovn-k node
 type namespaceExGw struct{}
+type endpointSliceForStaleConntrackRemoval struct{}
 
 var (
 	// Resource types used in ovnk master
@@ -126,7 +127,8 @@ var (
 	LocalPodSelectorType                  reflect.Type = reflect.TypeOf(&localPodSelector{})
 
 	// Resource types used in ovnk node
-	NamespaceExGwType reflect.Type = reflect.TypeOf(&namespaceExGw{})
+	NamespaceExGwType                         reflect.Type = reflect.TypeOf(&namespaceExGw{})
+	EndpointSliceForStaleConntrackRemovalType reflect.Type = reflect.TypeOf(&endpointSliceForStaleConntrackRemoval{})
 )
 
 // NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
@@ -505,6 +507,13 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddCloudPrivateIPConfigHandler(funcs, processExisting)
 		}, nil
+
+	case EndpointSliceForStaleConntrackRemovalType:
+		return func(namespace string, sel labels.Selector,
+			funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+			return wf.AddEndpointSliceHandler(funcs, processExisting)
+		}, nil
+
 	}
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
 }
@@ -754,6 +763,12 @@ func (wf *WatchFactory) GetEgressIPs() ([]*egressipapi.EgressIP, error) {
 func (wf *WatchFactory) GetNamespace(name string) (*kapi.Namespace, error) {
 	namespaceLister := wf.informers[NamespaceType].lister.(listers.NamespaceLister)
 	return namespaceLister.Get(name)
+}
+
+// GetEndpointSlice returns the endpointSlice indexed by the given namespace and name
+func (wf *WatchFactory) GetEndpointSlice(namespace, name string) (*discovery.EndpointSlice, error) {
+	endpointSliceLister := wf.informers[EndpointSliceType].lister.(discoverylisters.EndpointSliceLister)
+	return endpointSliceLister.EndpointSlices(namespace).Get(name)
 }
 
 // GetServiceEndpointSlice returns the endpointSlice associated with a service

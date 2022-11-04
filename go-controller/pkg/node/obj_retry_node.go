@@ -5,6 +5,7 @@ import (
 	"reflect"
 
 	kapi "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1"
 	cache "k8s.io/client-go/tools/cache"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -43,10 +44,7 @@ func (n *OvnNode) newRetryFrameworkNodeWithParameters(
 		},
 	}
 
-	r := retry.NewRetryFramework(
-		n.watchFactory.(*factory.WatchFactory),
-		resourceHandler,
-	)
+	r := retry.NewRetryFramework(n.watchFactory.(*factory.WatchFactory), resourceHandler)
 
 	return r
 }
@@ -64,7 +62,8 @@ func (n *OvnNode) newRetryFrameworkNode(objectType reflect.Type) *retry.RetryFra
 // object and then add the new one.
 func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 	switch objType {
-	case factory.NamespaceExGwType:
+	case factory.NamespaceExGwType,
+		factory.EndpointSliceForStaleConntrackRemovalType:
 		return true
 	}
 	return false
@@ -73,13 +72,14 @@ func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 // Given an object type, needsUpdateDuringRetry returns true if the object needs to invoke update during iterate retry.
 func needsUpdateDuringRetry(objType reflect.Type) bool {
 	switch objType {
-	case factory.NamespaceExGwType:
+	case factory.NamespaceExGwType,
+		factory.EndpointSliceForStaleConntrackRemovalType:
 		return true
 	}
 	return false
 }
 
-// areResourcesEqual returns true if, given two objects of a known resource type, the update logic for this resource
+// AreResourcesEqual returns true if, given two objects of a known resource type, the update logic for this resource
 // type considers them equal and therefore no update is needed. It returns false when the two objects are not considered
 // equal and an update needs be executed. This is regardless of how the update is carried out (whether with a dedicated update
 // function or with a delete on the old obj followed by an add on the new obj).
@@ -98,43 +98,52 @@ func (h *nodeEventHandler) AreResourcesEqual(obj1, obj2 interface{}) (bool, erro
 
 		return !exGatewayPodsAnnotationsChanged(ns1, ns2), nil
 
+	case factory.EndpointSliceForStaleConntrackRemovalType:
+		// will compare ip addresses of corresponding endpoints in update code
+		return false, nil
+
 	default:
 		return false, fmt.Errorf("no object comparison for type %s", h.objType)
 	}
 
 }
 
-// Given an object key and its type, getResourceFromInformerCache returns the latest state of the object
+// Given an object key and its type, GetResourceFromInformerCache returns the latest state of the object
 // from the informers cache.
-func (h *nodeEventHandler) getResourceFromInformerCache(objType reflect.Type, key string) (interface{}, error) {
+func (h *nodeEventHandler) GetResourceFromInformerCache(key string) (interface{}, error) {
 	var obj interface{}
-	var name string
+	var name, namespace string
 	var err error
 
-	_, name, err = cache.SplitMetaNamespaceKey(key)
+	namespace, name, err = cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to split key %s: %v", key, err)
 	}
 
-	switch objType {
+	switch h.objType {
 
 	case factory.NamespaceExGwType:
 		obj, err = h.ovnNode.watchFactory.GetNamespace(name)
 
+	case factory.EndpointSliceForStaleConntrackRemovalType:
+		obj, err = h.ovnNode.watchFactory.GetEndpointSlice(namespace, name)
+
 	default:
 		err = fmt.Errorf("object type %s not supported, cannot retrieve it from informers cache",
-			objType)
+			h.objType)
 	}
 
 	return obj, err
 }
 
-// Given a *RetryFramework instance, an object to add and a boolean specifying if the function was executed from
-// iterateRetryResources, addResource adds the specified object to the cluster according to its type and
-// returns the error, if any, yielded during object creation.
+// Given a *RetryFramework instance, an object to add and a boolean specifying if
+// the function was executed from iterateRetryResources, AddResource adds the
+// specified object to the cluster according to its type and returns the error,
+// if any, yielded during object creation.
 func (h *nodeEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
 	switch h.objType {
-	case factory.NamespaceExGwType:
+	case factory.NamespaceExGwType,
+		factory.EndpointSliceForStaleConntrackRemovalType:
 		// no action needed upon add event
 		return nil
 
@@ -143,28 +152,40 @@ func (h *nodeEventHandler) AddResource(obj interface{}, fromRetryLoop bool) erro
 	}
 }
 
-// Given a *RetryFramework instance, an old and a new object, updateResource updates the specified object in the cluster
-// to its version in newObj according to its type and returns the error, if any, yielded during the object update.
-// The inRetryCache boolean argument is to indicate if the given resource is in the retryCache or not.
+// Given a *RetryFramework instance, an old and a new object, UpdateResource updates
+// the specified object in the cluster to its version in newObj according to its type
+// and returns the error, if any, yielded during the object update. The inRetryCache
+// boolean argument is to indicate if the given resource is in the retryCache or not.
 func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
 	switch h.objType {
 	case factory.NamespaceExGwType:
 		newNs := newObj.(*kapi.Namespace)
 		return h.ovnNode.syncConntrackForExternalGateways(newNs)
 
+	case factory.EndpointSliceForStaleConntrackRemovalType:
+		oldEndpointSlice := oldObj.(*discovery.EndpointSlice)
+		newEndpointSlice := newObj.(*discovery.EndpointSlice)
+		return h.ovnNode.reconcileConntrackUponEndpointSliceEvents(
+			oldEndpointSlice, newEndpointSlice)
+
 	default:
 		return fmt.Errorf("no update function for object type %s", h.objType)
 	}
 }
 
-// Given a *RetryFramework instance, an object and optionally a cachedObj, deleteResource deletes the object from the cluster
-// according to the delete logic of its resource type. cachedObj is the internal cache entry for this object,
-// used for now for pods and network policies.
+// Given a *RetryFramework instance, an object and optionally a cachedObj, DeleteResource
+// deletes the object from the cluster according to the delete logic of its resource type.
+// cachedObj is the internal cache entry for this object, used for now for pods and network
+// policies.
 func (h *nodeEventHandler) DeleteResource(obj, cachedObj interface{}) error {
 	switch h.objType {
 	case factory.NamespaceExGwType:
 		// no action needed upon delete event
 		return nil
+
+	case factory.EndpointSliceForStaleConntrackRemovalType:
+		endpointslice := obj.(*discovery.EndpointSlice)
+		return h.ovnNode.reconcileConntrackUponEndpointSliceEvents(endpointslice, nil)
 
 	default:
 		return fmt.Errorf("no delete function for object type %s", h.objType)
@@ -180,7 +201,8 @@ func (h *nodeEventHandler) SyncFunc(objs []interface{}) error {
 	} else {
 
 		switch h.objType {
-		case factory.NamespaceExGwType:
+		case factory.NamespaceExGwType,
+			factory.EndpointSliceForStaleConntrackRemovalType:
 			// no sync needed
 			syncFunc = nil
 
