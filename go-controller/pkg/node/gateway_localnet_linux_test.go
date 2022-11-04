@@ -1,13 +1,16 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"net"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -67,6 +70,8 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNClientset, fak
 	ip, _, _ := net.ParseCIDR(localHostNetEp)
 	n.nodeIPManager.addAddr(ip)
 
+	// set up a controller to handle events on services to mock the nodeportwatcher bits
+	// in gateway.go and trigger code in gateway_shared_intf.go
 	_, err := n.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			svc := obj.(*kapi.Service)
@@ -84,6 +89,24 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNClientset, fak
 	}, n.SyncServices)
 
 	return err
+}
+
+func startNodePortWatcherWithRetry(n *nodePortWatcher, fakeClient *util.OVNClientset, fakeMgmtPortConfig *managementPortConfig, stopChan chan struct{}) (*retry.RetryFramework, error) {
+	if err := initLocalGatewayIPTables(); err != nil {
+		return nil, err
+	}
+
+	k := &kube.Kube{fakeClient.KubeClient, nil, nil, nil}
+	n.nodeIPManager = newAddressManager(fakeNodeName, k, fakeMgmtPortConfig, n.watchFactory)
+	localHostNetEp := "192.168.18.15/32"
+	ip, _, _ := net.ParseCIDR(localHostNetEp)
+	n.nodeIPManager.addAddr(ip)
+
+	nodePortWatcherRetry := n.newRetryFrameworkForTests(factory.ServiceForFakeNodePortWatcherType)
+	if _, err := nodePortWatcherRetry.WatchResource(); err != nil {
+		return nil, fmt.Errorf("failed to start watching services with retry framework: %v", err)
+	}
+	return nodePortWatcherRetry, nil
 }
 
 func newObjectMeta(name, namespace string) metav1.ObjectMeta {
@@ -1372,7 +1395,6 @@ var _ = Describe("Node Operations", func() {
 					v1.ServiceStatus{},
 					false, false,
 				)
-
 				fakeOvnNode.start(ctx,
 					&v1.ServiceList{
 						Items: []v1.Service{
@@ -1402,7 +1424,9 @@ var _ = Describe("Node Operations", func() {
 							"-j OVN-KUBE-EGRESS-SVC",
 						},
 						"OVN-KUBE-EXTERNALIP": []string{
-							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v",
+								service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port,
+								service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 						"OVN-KUBE-NODEPORT":      []string{},
 						"OVN-KUBE-SNAT-MGMTPORT": []string{},
@@ -1460,6 +1484,123 @@ var _ = Describe("Node Operations", func() {
 				f4 = iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
+				fakeOvnNode.shutdown()
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+
+		})
+
+		It("manages iptables rules with ExternalIP through retry logic", func() {
+			app.Action = func(ctx *cli.Context) error {
+				var nodePortWatcherRetry *retry.RetryFramework
+				var err error
+				badExternalIP := "10.10.10.aa"
+				goodExternalIP := "10.10.10.1"
+				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd: "ovs-ofctl show ",
+				})
+
+				externalIPPort := int32(8034)
+				service_ns := "namespace1"
+				service_name := "service1"
+				service := *newService(service_name, service_ns, "10.129.0.2",
+					[]v1.ServicePort{
+						{
+							Port:     externalIPPort,
+							Protocol: v1.ProtocolTCP,
+						},
+					},
+					v1.ServiceTypeClusterIP,
+					[]string{badExternalIP}, // first use an incorrect IP
+					v1.ServiceStatus{},
+					false, false,
+				)
+
+				fakeOvnNode.start(ctx)
+
+				By("starting node port watcher retry framework")
+				fNPW.watchFactory = fakeOvnNode.watcher
+				nodePortWatcherRetry, err = startNodePortWatcherWithRetry(
+					fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig, fakeOvnNode.stopChan)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(nodePortWatcherRetry).NotTo(BeNil())
+
+				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeFalse(), fExec.ErrorDesc) // no command is executed
+
+				By("add service with incorrect external IP")
+				_, err = fakeOvnNode.fakeClient.KubeClient.CoreV1().Services(service_ns).Create(
+					context.TODO(), &service, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				// expected ip tables with no external IP set
+				expectedTables := map[string]util.FakeTable{
+					"nat": {
+						"PREROUTING": []string{
+							"-j OVN-KUBE-ETP",
+							"-j OVN-KUBE-EXTERNALIP",
+							"-j OVN-KUBE-NODEPORT",
+						},
+						"OUTPUT": []string{
+							"-j OVN-KUBE-EXTERNALIP",
+							"-j OVN-KUBE-NODEPORT",
+							"-j OVN-KUBE-ITP",
+						},
+						"POSTROUTING": []string{
+							"-j OVN-KUBE-EGRESS-SVC",
+						},
+						"OVN-KUBE-EXTERNALIP": []string{},
+						"OVN-KUBE-NODEPORT":   []string{},
+						"OVN-KUBE-ETP":        []string{},
+						"OVN-KUBE-ITP":        []string{},
+						"OVN-KUBE-EGRESS-SVC": []string{},
+					},
+					"filter": {},
+					"mangle": {
+						"OUTPUT": []string{
+							"-j OVN-KUBE-ITP",
+						},
+						"OVN-KUBE-ITP": []string{},
+					},
+				}
+				By("verify that a new retry entry for this service exists")
+				key, err := retry.GetResourceKey(&service)
+				Expect(err).NotTo(HaveOccurred())
+				retry.CheckRetryObjectEventually(key, true, nodePortWatcherRetry)
+
+				// check iptables
+				f4 := iptV4.(*util.FakeIPTables)
+				err = f4.MatchState(expectedTables)
+				Expect(err).NotTo(HaveOccurred())
+
+				// HACK: Fix the service by setting a correct external IP address in newObj field
+				// of the retry entry
+				newObj := retry.GetNewObjFieldFromRetryObj(key, nodePortWatcherRetry)
+				Expect(newObj).ToNot(BeNil())
+				svc := newObj.(*v1.Service)
+				svc.Spec.ExternalIPs = []string{goodExternalIP}
+				ok := retry.SetNewObjFieldInRetryObj(key, nodePortWatcherRetry, svc)
+				Expect(ok).To(BeTrue())
+
+				By("trigger immediate retry")
+				retry.SetRetryObjWithNoBackoff(key, nodePortWatcherRetry)
+				nodePortWatcherRetry.RequestRetryObjs()
+				retry.CheckRetryObjectEventually(key, false, nodePortWatcherRetry) // entry should be gone
+
+				// now expect ip tables to show the external IP
+				ovn_kube_external_ip_field := []string{
+					fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v",
+						service.Spec.Ports[0].Protocol, goodExternalIP, service.Spec.Ports[0].Port,
+						service.Spec.ClusterIP, service.Spec.Ports[0].Port)}
+				expectedTables["nat"]["OVN-KUBE-EXTERNALIP"] = ovn_kube_external_ip_field
+				Eventually(func(g Gomega) {
+					f4 := iptV4.(*util.FakeIPTables)
+					err = f4.MatchState(expectedTables)
+					g.Expect(err).NotTo(HaveOccurred())
+				})
+
+				// TODO Make delete operation fail, check retry entry, run a successful delete
 				fakeOvnNode.shutdown()
 				return nil
 			}
