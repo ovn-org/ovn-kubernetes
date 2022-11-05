@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
@@ -18,9 +20,33 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
+
+// OvnConflictBackoff is the backoff used for pod annotation update conflict
+var OvnConflictBackoff = wait.Backoff{
+	Steps:    2,
+	Duration: 10 * time.Millisecond,
+	Factor:   5.0,
+	Jitter:   0.1,
+}
+
+var (
+	rePciDeviceName = regexp.MustCompile(`^[0-9a-f]{4}:[0-9a-f]{2}:[01][0-9a-f]\.[0-7]$`)
+	reAuxDeviceName = regexp.MustCompile(`^\w+.\w+.\d+$`)
+)
+
+// IsPCIDeviceName check if passed device id is a PCI device name
+func IsPCIDeviceName(deviceID string) bool {
+	return rePciDeviceName.MatchString(deviceID)
+}
+
+// IsAuxDeviceName check if passed device id is a Auxiliary device name
+func IsAuxDeviceName(deviceID string) bool {
+	return reAuxDeviceName.MatchString(deviceID)
+}
 
 // StringArg gets the named command-line argument or returns an error if it is empty
 func StringArg(context *cli.Context, name string) (string, error) {
@@ -103,40 +129,6 @@ func newAnnotationNotSetError(format string, args ...interface{}) error {
 func IsAnnotationNotSetError(err error) bool {
 	_, ok := err.(annotationNotSetError)
 	return ok
-}
-
-// CalculateHostSubnetsForClusterEntry calculates the host subnets
-// available in a CIDR entry
-func CalculateHostSubnetsForClusterEntry(cidrEntry config.CIDRNetworkEntry,
-	v4HostSubnetCount, v6HostSubnetCount *float64) {
-	prefixLength, _ := cidrEntry.CIDR.Mask.Size()
-	var one uint64 = 1
-	if prefixLength > cidrEntry.HostSubnetLength {
-		klog.Warningf("Invalid cidr entry: %+v found while calculating subnet count",
-			cidrEntry)
-		return
-	}
-	if !utilnet.IsIPv6CIDR(cidrEntry.CIDR) {
-		*v4HostSubnetCount = *v4HostSubnetCount + float64(one<<(cidrEntry.HostSubnetLength-prefixLength))
-	} else {
-		*v6HostSubnetCount = *v6HostSubnetCount + float64(one<<(cidrEntry.HostSubnetLength-prefixLength))
-
-	}
-}
-
-// UpdateUsedHostSubnetsCount increments the v4/v6 host subnets count based on
-// the subnet being visited
-func UpdateUsedHostSubnetsCount(subnet *net.IPNet,
-	v4SubnetsAllocated, v6SubnetsAllocated *float64, isAdd bool) {
-	op := -1
-	if isAdd {
-		op = 1
-	}
-	if !utilnet.IsIPv6CIDR(subnet) {
-		*v4SubnetsAllocated = *v4SubnetsAllocated + float64(1*op)
-	} else {
-		*v6SubnetsAllocated = *v6SubnetsAllocated + float64(1*op)
-	}
 }
 
 // HashforOVN hashes the provided input to make it a valid addressSet or portGroup name.

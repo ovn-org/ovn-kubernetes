@@ -24,7 +24,10 @@ const (
 	ibEncapType    = "infiniband"
 )
 
-var virtFnRe = regexp.MustCompile(`virtfn(\d+)`)
+var (
+	virtFnRe     = regexp.MustCompile(`virtfn(\d+)`)
+	pciAddressRe = regexp.MustCompile(`^[0-9a-f]{4}:[0-9a-f]{2}:[01][0-9a-f].[0-7]$`)
+)
 
 type VfObj struct {
 	Index      int
@@ -429,27 +432,6 @@ func GetVfIndexByPciAddress(vfPciAddress string) (int, error) {
 	return -1, fmt.Errorf("vf index for %s not found", vfPciAddress)
 }
 
-// GetNetDevicesFromPci gets a PCI address (e.g '0000:03:00.1') and
-// returns the correlate list of netdevices
-func GetNetDevicesFromPci(pciAddress string) ([]string, error) {
-	pciDir := filepath.Join(PciSysDir, pciAddress, "net")
-	_, err := utilfs.Fs.Stat(pciDir)
-	if err != nil {
-		return nil, fmt.Errorf("cannot get a network device with pci address %v %v", pciAddress, err)
-	}
-
-	netDevicesFiles, err := utilfs.Fs.ReadDir(pciDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get network device name in %v %v", pciDir, err)
-	}
-
-	netDevices := make([]string, 0, len(netDevicesFiles))
-	for _, netDeviceFile := range netDevicesFiles {
-		netDevices = append(netDevices, strings.TrimSpace(netDeviceFile.Name()))
-	}
-	return netDevices, nil
-}
-
 // GetPfPciFromVfPci retrieves the parent PF PCI address of the provided VF PCI address in D:B:D.f format
 func GetPfPciFromVfPci(vfPciAddress string) (string, error) {
 	pfPath := filepath.Join(PciSysDir, vfPciAddress, "physfn")
@@ -463,4 +445,11 @@ func GetPfPciFromVfPci(vfPciAddress string) (string, error) {
 		return pf, fmt.Errorf("could not find PF PCI Address")
 	}
 	return pf, err
+}
+
+// GetNetDevicesFromPci gets a PCI address (e.g '0000:03:00.1') and
+// returns the correlate list of netdevices
+func GetNetDevicesFromPci(pciAddress string) ([]string, error) {
+	pciDir := filepath.Join(PciSysDir, pciAddress, "net")
+	return getFileNamesFromPath(pciDir)
 }

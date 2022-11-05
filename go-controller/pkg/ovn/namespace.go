@@ -11,6 +11,7 @@ import (
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -220,6 +221,7 @@ func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *names
 
 // AddNamespace creates corresponding addressset in ovn db
 func (oc *Controller) AddNamespace(ns *kapi.Namespace) error {
+	var errors []error
 	klog.Infof("[%s] adding namespace", ns.Name)
 	// Keep track of how long syncs take.
 	start := time.Now()
@@ -229,7 +231,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) error {
 
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns.Name, false, ns)
 	if err != nil {
-		return fmt.Errorf("failed to ensure namespace locked: %v", err)
+		errors = append(errors, fmt.Errorf("failed to ensure namespace locked: %v", err))
 	}
 	defer nsUnlock()
 
@@ -238,7 +240,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) error {
 	if annotation != "" {
 		parsedAnnotation := net.ParseIP(annotation)
 		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay external gw annotation")
+			errors = append(errors, fmt.Errorf("could not parse hybrid overlay external gw annotation"))
 		} else {
 			nsInfo.hybridOverlayExternalGW = parsedAnnotation
 		}
@@ -247,13 +249,13 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) error {
 	if annotation != "" {
 		parsedAnnotation := net.ParseIP(annotation)
 		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay VTEP annotation")
+			errors = append(errors, fmt.Errorf("could not parse hybrid overlay VTEP annotation"))
 		} else {
 			nsInfo.hybridOverlayVTEP = parsedAnnotation
 		}
 	}
 	// END OCP HACK
-	return nil
+	return kerrors.NewAggregate(errors)
 }
 
 // configureNamespace ensures internal structures are updated based on namespace
@@ -367,7 +369,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 				errors = append(errors, fmt.Errorf("failed to get all the pods (%v)", err))
 			}
 			for _, pod := range existingPods {
-				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
+				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, types.DefaultNetworkName)
 				if err != nil {
 					errors = append(errors, err)
 				} else {
@@ -413,7 +415,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 	if annotation != "" {
 		parsedAnnotation := net.ParseIP(annotation)
 		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay external gw annotation")
+			errors = append(errors, fmt.Errorf("could not parse hybrid overlay external gw annotation"))
 		} else {
 			nsInfo.hybridOverlayExternalGW = parsedAnnotation
 		}
@@ -424,7 +426,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 	if annotation != "" {
 		parsedAnnotation := net.ParseIP(annotation)
 		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay VTEP annotation")
+			errors = append(errors, fmt.Errorf("could not parse hybrid overlay VTEP annotation"))
 		} else {
 			nsInfo.hybridOverlayVTEP = parsedAnnotation
 		}
@@ -632,7 +634,7 @@ func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (addressset.Addre
 		} else {
 			ips = make([]net.IP, 0, len(existingNodes))
 			for _, node := range existingNodes {
-				hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node)
+				hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 				if err != nil {
 					klog.Warningf("Error parsing host subnet annotation for node %s (%v)",
 						node.Name, err)

@@ -23,6 +23,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -476,7 +478,7 @@ var _ = ginkgo.Describe("Master Operations", func() {
 			updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			subnetsFromAnnotation, err := util.ParseNodeHostSubnetAnnotation(updatedNode)
+			subnetsFromAnnotation, err := util.ParseNodeHostSubnetAnnotation(updatedNode, types.DefaultNetworkName)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(subnetsFromAnnotation[0].String()).To(gomega.Equal(nodeSubnet))
 
@@ -581,7 +583,7 @@ var _ = ginkgo.Describe("Master Operations", func() {
 			updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			subnetsFromAnnotation, err := util.ParseNodeHostSubnetAnnotation(updatedNode)
+			subnetsFromAnnotation, err := util.ParseNodeHostSubnetAnnotation(updatedNode, types.DefaultNetworkName)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(subnetsFromAnnotation[0].String()).To(gomega.Equal(nodeSubnet))
 
@@ -684,7 +686,7 @@ var _ = ginkgo.Describe("Master Operations", func() {
 			updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			subnetsFromAnnotation, err := util.ParseNodeHostSubnetAnnotation(updatedNode)
+			subnetsFromAnnotation, err := util.ParseNodeHostSubnetAnnotation(updatedNode, types.DefaultNetworkName)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(subnetsFromAnnotation[0].String()).To(gomega.Equal(nodeSubnet))
 
@@ -855,20 +857,25 @@ subnet=%s
 
 var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	var (
-		app             *cli.App
-		f               *factory.WatchFactory
-		stopChan        chan struct{}
-		wg              *sync.WaitGroup
-		libovsdbCleanup *libovsdbtest.Cleanup
+		app      *cli.App
+		f        *factory.WatchFactory
+		stopChan chan struct{}
+		wg       *sync.WaitGroup
 
-		dbSetup                                  libovsdbtest.TestSetup
-		node1                                    tNode
-		testNode                                 v1.Node
-		fakeClient                               *util.OVNClientset
-		kubeFakeClient                           *fake.Clientset
-		clusterController                        *Controller
-		nodeAnnotator                            kube.Annotator
-		libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+		libovsdbOvnNBClient libovsdbclient.Client
+		libovsdbOvnSBClient libovsdbclient.Client
+		libovsdbCleanup     *libovsdbtest.Cleanup
+
+		dbSetup           libovsdbtest.TestSetup
+		node1             tNode
+		testNode          v1.Node
+		fakeClient        *util.OVNClientset
+		kubeFakeClient    *fake.Clientset
+		clusterController *Controller
+		nodeAnnotator     kube.Annotator
+		events            []string
+		eventsLock        sync.Mutex
+		recorder          *record.FakeRecorder
 	)
 
 	const (
@@ -886,6 +893,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		app.Flags = config.Flags
 		stopChan = make(chan struct{})
 		wg = &sync.WaitGroup{}
+		events = make([]string, 0)
 
 		libovsdbCleanup = nil
 
@@ -963,13 +971,32 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		err = f.Start()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+		recorder = record.NewFakeRecorder(10)
 		clusterController = NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-			libovsdbOvnNBClient, libovsdbOvnSBClient,
-			record.NewFakeRecorder(0))
+			libovsdbOvnNBClient, libovsdbOvnSBClient, recorder)
 		clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 		gomega.Expect(clusterController).NotTo(gomega.BeNil())
-		clusterController.defaultGatewayCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
+		clusterController.defaultCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		subnets, err := config.ParseClusterSubnetEntries(clusterCIDR)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		err = clusterController.masterSubnetAllocator.InitRanges(subnets)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		// record events for testcases to check
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				event, ok := <-recorder.Events
+				if !ok {
+					return
+				}
+				eventsLock.Lock()
+				events = append(events, event)
+				eventsLock.Unlock()
+			}
+		}()
 
 		clusterController.SCTPSupport = true
 		clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, expectedNodeSwitch.UUID, []string{node1.Name})
@@ -980,6 +1007,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		libovsdbCleanup.Cleanup()
 		close(stopChan)
 		f.Shutdown()
+		close(recorder.Events)
 		wg.Wait()
 	})
 
@@ -1014,15 +1042,18 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			initRetryObjWithAdd(testNode, testNode.Name, clusterController.retryNodes)
-			gomega.Expect(retryObjsLen(clusterController.retryNodes)).To(gomega.Equal(1))
-			if retryEntry, found := getRetryObj(testNode.Name, clusterController.retryNodes); found {
-				gomega.Expect(retryEntry).ToNot(gomega.BeNil())
-				gomega.Expect(retryEntry.newObj).ToNot(gomega.BeNil())
-				gomega.Expect(retryEntry.oldObj).To(gomega.BeNil())
-			}
-			deleteRetryObj(testNode.Name, clusterController.retryNodes)
-			gomega.Expect(checkRetryObj(testNode.Name, clusterController.retryNodes)).To(gomega.BeFalse())
+			retry.InitRetryObjWithAdd(testNode, testNode.Name, clusterController.retryNodes)
+			gomega.Expect(retry.RetryObjsLen(clusterController.retryNodes)).To(gomega.Equal(1))
+
+			retry.CheckRetryObjectMultipleFieldsEventually(
+				testNode.Name,
+				clusterController.retryNodes,
+				gomega.BeNil(),             // oldObj should be nil
+				gomega.Not(gomega.BeNil()), // newObj should not be nil
+			)
+
+			retry.DeleteRetryObj(testNode.Name, clusterController.retryNodes)
+			gomega.Expect(retry.CheckRetryObj(testNode.Name, clusterController.retryNodes)).To(gomega.BeFalse())
 			var clusterSubnets []*net.IPNet
 			for _, clusterSubnet := range config.Default.ClusterSubnets {
 				clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
@@ -1292,24 +1323,35 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			ginkgo.By("update should have failed with a retry present")
+			ginkgo.By("update should have failed with a retry being present")
 			// check to see if the retry cache has an entry for this node
-			checkRetryObjectEventually(testNode.Name, true, clusterController.retryNodes)
-			retryEntry, found := getRetryObj(testNode.Name, clusterController.retryNodes)
-			gomega.Expect(found).To(gomega.BeTrue())
-			ginkgo.By("retry entry new obj should not be nil")
-			gomega.Expect(retryEntry.newObj).NotTo(gomega.BeNil())
-			ginkgo.By("retry entry old obj should be nil")
-			gomega.Expect(retryEntry.oldObj).To(gomega.BeNil())
+			// In the retry entry, old obj should be nil, new obj should not be nil
+			retry.CheckRetryObjectMultipleFieldsEventually(
+				testNode.Name,
+				clusterController.retryNodes,
+				gomega.BeNil(),             // oldObj should be nil
+				gomega.Not(gomega.BeNil()), // newObj should not be nil
+			)
+
+			// check that a node event was posted
+			gomega.Eventually(func() []string {
+				eventsLock.Lock()
+				defer eventsLock.Unlock()
+				eventsCopy := make([]string, 0, len(events))
+				for _, e := range events {
+					eventsCopy = append(eventsCopy, e)
+				}
+				return eventsCopy
+			}, 10).Should(gomega.ContainElement(gomega.ContainSubstring("Warning ErrorReconcilingNode error creating gateway for node node1")))
 
 			connCtx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 			defer cancel()
 			ginkgo.By("bring up NBDB")
 			resetNBClient(connCtx, clusterController.nbClient)
-			setRetryObjWithNoBackoff(node1.Name, clusterController.retryNodes)
+			retry.SetRetryObjWithNoBackoff(node1.Name, clusterController.retryNodes)
 			clusterController.retryNodes.RequestRetryObjs() // retry the failed entry
 			ginkgo.By("should be no retry entry after update completes")
-			checkRetryObjectEventually(testNode.Name, false, clusterController.retryNodes)
+			retry.CheckRetryObjectEventually(testNode.Name, false, clusterController.retryNodes)
 			for _, data := range expectedDatabaseState {
 				if route, ok := data.(*nbdb.LogicalRouterStaticRoute); ok {
 					if route.Nexthop == "172.16.16.1" {
@@ -1359,26 +1401,38 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet}, hostAddrs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+			// Delete the node's gateway Logical Router Port to force an error. But save
+			// it first so we can add it back to let the delete proceed after we know the
+			// retry was successful
+			gatewayRouter := types.GWRouterPrefix + node1.Name
+			lr := &nbdb.LogicalRouter{Name: gatewayRouter}
+			lrp := &nbdb.LogicalRouterPort{Name: types.GWRouterToJoinSwitchPrefix + gatewayRouter}
+			lrp, err = libovsdbops.GetLogicalRouterPort(libovsdbOvnNBClient, lrp)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			err = libovsdbops.DeleteLogicalRouterPorts(libovsdbOvnNBClient, lr, lrp)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 			// Node delete will fail with Failed to delete node node1,
-			// error: error deleting node node1 HostSubnet 10.1.1.0/24:
-			// error deleting subnet 10.1.1.0/24 for node "node1": network 10.1.1.0/24 does not belong to any known range
 			err = fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), testNode.Name, metav1.DeleteOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			// check to see if the retry cache has an entry for this node
-			checkRetryObjectEventually(testNode.Name, true, clusterController.retryNodes)
-			retryEntry, found := getRetryObj(testNode.Name, clusterController.retryNodes)
-			gomega.Expect(found).To(gomega.BeTrue())
-			ginkgo.By("retry entry new obj should be nil")
-			gomega.Expect(retryEntry.newObj).To(gomega.BeNil())
-			ginkgo.By("retry entry old obj should not be nil")
-			gomega.Expect(retryEntry.oldObj).NotTo(gomega.BeNil())
-			// allocate subnet to allow delete to continue
-			gomega.Expect(clusterController.masterSubnetAllocator.AddNetworkRange(subnet, 24)).To(gomega.Succeed())
-			setRetryObjWithNoBackoff(node1.Name, clusterController.retryNodes)
+			// check the retry entry for this node
+			ginkgo.By("retry entry: old obj should not be nil, new obj should be nil")
+			retry.CheckRetryObjectMultipleFieldsEventually(
+				testNode.Name,
+				clusterController.retryNodes,
+				gomega.Not(gomega.BeNil()), // oldObj should not be nil
+				gomega.BeNil(),             // newObj should be nil
+			)
+
+			// Add the LRP back to allow the delete the continue
+			err = libovsdbops.CreateOrUpdateLogicalRouterPorts(libovsdbOvnNBClient,
+				lr, []*nbdb.LogicalRouterPort{lrp}, &lrp.MAC, &lrp.Networks, &lrp.ExternalIDs)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			retry.SetRetryObjWithNoBackoff(node1.Name, clusterController.retryNodes)
 			clusterController.retryNodes.RequestRetryObjs() // retry the failed entry
 
-			checkRetryObjectEventually(testNode.Name, false, clusterController.retryNodes)
+			retry.CheckRetryObjectEventually(testNode.Name, false, clusterController.retryNodes)
 			return nil
 		}
 
@@ -1394,6 +1448,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		app.Action = func(ctx *cli.Context) error {
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			// Override the default subnet allocator with a new one
+			// that has no ranges, to force a node add failure and retry
+			clusterController.masterSubnetAllocator = subnetallocator.NewHostSubnetAllocator()
 
 			config.Kubernetes.HostNetworkNamespace = ""
 			config.Kubernetes.NoHostSubnetNodes = &metav1.LabelSelector{
@@ -1410,10 +1467,10 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1)
 
 			gomega.Expect(
-				clusterController.addResource(
-					clusterController.retryNodes, &testNode, false)).To(
+				clusterController.retryNodes.ResourceHandler.AddResource(
+					&testNode, false)).To(
 				gomega.MatchError(
-					"nodeAdd: error creating subnet for node node1: error allocating networks for node node1: 1 subnets expected only new 0 subnets allocated"))
+					"nodeAdd: error adding node \"node1\": error allocating networks for node node1: 1 subnets expected only new 0 subnets allocated"))
 
 			ginkgo.By("annotating the node with no host subnet")
 			testNode.Labels = nodeNoHostSubnetAnnotation()
@@ -1421,7 +1478,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			ginkgo.By("adding the node becomes possible")
-			gomega.Expect(clusterController.addResource(clusterController.retryNodes, &testNode, false)).To(gomega.Succeed())
+			gomega.Expect(clusterController.retryNodes.ResourceHandler.AddResource(&testNode, false)).To(gomega.Succeed())
 
 			return nil
 		}
@@ -1498,287 +1555,6 @@ func newNodeSNAT(uuid, logicalIP, externalIP string) *nbdb.NAT {
 		Options: map[string]string{
 			"stateless": "false",
 		},
-	}
-}
-
-func TestController_allocateNodeSubnets(t *testing.T) {
-	tests := []struct {
-		name          string
-		networkRanges []string
-		networkLen    int
-		configIPv4    bool
-		configIPv6    bool
-		node          *kapi.Node
-		// to be converted during the test to []*net.IPNet
-		wantStr   []string
-		allocated int
-		wantErr   bool
-	}{
-		{
-			name:          "new node, IPv4 only cluster",
-			networkRanges: []string{"172.16.0.0/16"},
-			networkLen:    24,
-			configIPv4:    true,
-			configIPv6:    false,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "testnode",
-					Annotations: map[string]string{},
-				},
-			},
-			wantStr:   []string{"172.16.0.0/24"},
-			allocated: 1,
-			wantErr:   false,
-		},
-		{
-			name:          "new node, IPv6 only cluster",
-			networkRanges: []string{"2001:db2::/56"},
-			networkLen:    64,
-			configIPv4:    false,
-			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "testnode",
-					Annotations: map[string]string{},
-				},
-			},
-			wantStr:   []string{"2001:db2::/64"},
-			allocated: 1,
-			wantErr:   false,
-		},
-		{
-			name:          "existing annotated node, IPv4 only cluster",
-			networkRanges: []string{"172.16.0.0/16"},
-			networkLen:    24,
-			configIPv4:    true,
-			configIPv6:    false,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": "172.16.8.0/24"}`,
-					},
-				},
-			},
-			wantStr:   []string{"172.16.8.0/24"},
-			allocated: 0,
-			wantErr:   false,
-		},
-		{
-			name:          "existing annotated node, IPv6 only cluster",
-			networkRanges: []string{"2001:db2::/56"},
-			networkLen:    64,
-			configIPv4:    false,
-			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": "2001:db2:1:2:3:4::/64"}`,
-					}},
-			},
-			wantStr:   []string{"2001:db2:1:2:3:4::/64"},
-			allocated: 0,
-			wantErr:   false,
-		},
-		{
-			name:          "new node, dual stack cluster",
-			networkRanges: []string{"172.16.0.0/16", "2000::/12"},
-			networkLen:    24,
-			configIPv4:    true,
-			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "testnode",
-					Annotations: map[string]string{},
-				},
-			},
-			wantStr:   []string{"172.16.0.0/24", "2000::/24"},
-			allocated: 2,
-			wantErr:   false,
-		},
-		{
-			name:          "annotated node, dual stack cluster",
-			networkRanges: []string{"172.16.0.0/16", "2000::/12"},
-			networkLen:    24,
-			configIPv4:    true,
-			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": ["172.16.5.0/24","2000:2::/24"]}`,
-					},
-				},
-			},
-			wantStr:   []string{"172.16.5.0/24", "2000:2::/24"},
-			allocated: 0,
-			wantErr:   false,
-		},
-		{
-			name:          "single IPv4 to dual stack cluster",
-			networkRanges: []string{"172.16.0.0/16", "2000::/12"},
-			networkLen:    24,
-			configIPv4:    true,
-			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": "172.16.5.0/24"}`,
-					},
-				},
-			},
-			wantStr:   []string{"172.16.5.0/24", "2000::/24"},
-			allocated: 1,
-			wantErr:   false,
-		},
-		{
-			name:          "single IPv6 to dual stack cluster",
-			networkRanges: []string{"172.16.0.0/16", "2000:1::/12"},
-			networkLen:    24,
-			configIPv4:    true,
-			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": "2000:1::/24"}`,
-					},
-				},
-			},
-			wantStr:   []string{"2000::/24", "172.16.0.0/24"},
-			allocated: 1,
-			wantErr:   false,
-		},
-		{
-			name:          "dual stack cluster to single IPv4",
-			networkRanges: []string{"172.16.0.0/16"},
-			networkLen:    24,
-			configIPv4:    true,
-			configIPv6:    false,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": ["172.16.5.0/24","2000:2::/24"]}`,
-					},
-				},
-			},
-			wantStr:   []string{"172.16.5.0/24"},
-			allocated: 0,
-			wantErr:   false,
-		},
-		{
-			name:          "dual stack cluster to single IPv6",
-			networkRanges: []string{"2001:db2::/56"},
-			networkLen:    64,
-			configIPv4:    false,
-			configIPv6:    true,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testnode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets": `{"default": ["172.16.5.0/24","2001:db2:1:2:3:4::/64"]}`,
-					},
-				},
-			},
-			wantStr:   []string{"2001:db2:1:2:3:4::/64"},
-			allocated: 0,
-			wantErr:   false,
-		},
-		{
-			name:          "new node, OVN wrong configuration: IPv4 only cluster but IPv6 range",
-			networkRanges: []string{"2001:db2::/64"},
-			networkLen:    112,
-			configIPv4:    true,
-			configIPv6:    false,
-			node: &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "testnode",
-					Annotations: map[string]string{},
-				},
-			},
-			wantStr:   nil,
-			allocated: 0,
-			wantErr:   true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// create cluster config
-			config.IPv4Mode = tt.configIPv4
-			config.IPv6Mode = tt.configIPv6
-			// create fake OVN controller
-			stopChan := make(chan struct{})
-			defer close(stopChan)
-			kubeFakeClient := fake.NewSimpleClientset()
-			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
-			egressIPFakeClient := &egressipfake.Clientset{}
-			egressQoSFakeClient := &egressqosfake.Clientset{}
-			fakeClient := &util.OVNClientset{
-				KubeClient:           kubeFakeClient,
-				EgressIPClient:       egressIPFakeClient,
-				EgressFirewallClient: egressFirewallFakeClient,
-				EgressQoSClient:      egressQoSFakeClient,
-			}
-			f, err := factory.NewMasterWatchFactory(fakeClient)
-			if err != nil {
-				t.Fatalf("Error creating master watch factory: %v", err)
-			}
-			if err := f.Start(); err != nil {
-				t.Fatalf("Error starting master watch factory: %v", err)
-			}
-
-			expectedClusterLBGroup := newLoadBalancerGroup()
-			dbSetup := libovsdbtest.TestSetup{
-				NBData: []libovsdbtest.TestData{
-					expectedClusterLBGroup,
-				},
-			}
-			libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err := libovsdbtest.NewNBSBTestHarness(dbSetup)
-			if err != nil {
-				t.Fatalf("Error creating libovsdb test harness %v", err)
-			}
-			t.Cleanup(libovsdbCleanup.Cleanup)
-
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
-			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
-
-			// configure the cluster allocators
-			for _, subnetString := range tt.networkRanges {
-				_, subnet, err := net.ParseCIDR(subnetString)
-				if err != nil {
-					t.Fatalf("Error parsing subnet %s", subnetString)
-				}
-				clusterController.masterSubnetAllocator.AddNetworkRange(subnet, tt.networkLen)
-			}
-			// test network allocation works correctly
-			got, allocated, err := clusterController.allocateNodeSubnets(tt.node)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Controller.addNode() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			var want []*net.IPNet
-			for _, netStr := range tt.wantStr {
-				_, ipnet, err := net.ParseCIDR(netStr)
-				if err != nil {
-					t.Fatalf("Error parsing subnet %s", netStr)
-				}
-				want = append(want, ipnet)
-			}
-			if !reflect.DeepEqual(got, want) {
-				t.Errorf("Controller.allocateNodeSubnets() = %v, want %v", got, want)
-			}
-
-			if len(allocated) != tt.allocated {
-				t.Errorf("Expected %d subnets allocated, received %d", tt.allocated, len(allocated))
-			}
-		})
 	}
 }
 

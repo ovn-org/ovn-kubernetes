@@ -23,14 +23,8 @@ func deleteServiceFromLegacyLBs(nbClient libovsdbclient.Client, service *v1.Serv
 	vipPortsPerProtocol := map[v1.Protocol]sets.String{}
 
 	// Generate list of vip:port by proto
-	ips := append([]string{}, service.Spec.ClusterIPs...)
-	if len(ips) == 0 {
-		ips = append(ips, service.Spec.ClusterIP)
-	}
-	ips = append(ips, service.Spec.ExternalIPs...)
-	for _, ingress := range service.Status.LoadBalancer.Ingress {
-		ips = append(ips, ingress.IP)
-	}
+	ips := util.GetClusterIPs(service)
+	ips = append(ips, util.GetExternalAndLBIPs(service)...)
 	for _, svcPort := range service.Spec.Ports {
 		proto := svcPort.Protocol
 		ipPorts := make([]string, 0, len(ips))

@@ -1929,7 +1929,7 @@ func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
 				return fmt.Errorf("unable to use node for egress assignment, err: %v", err)
 			}
 		}
-		nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(node)
+		nodeSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
 		if err != nil {
 			return fmt.Errorf("failed to parse node %s subnets annotation %v", node.Name, err)
 		}
@@ -2045,6 +2045,19 @@ type podAssignmentState struct {
 	egressStatuses map[egressipv1.EgressIPStatusItem]string
 	// list of other egressIP object names that also match this pod but are on standby
 	standbyEgressIPNames sets.String
+}
+
+// Clone deep-copies and returns the copied podAssignmentState
+func (pas *podAssignmentState) Clone() *podAssignmentState {
+	clone := &podAssignmentState{
+		egressIPName:         pas.egressIPName,
+		standbyEgressIPNames: pas.standbyEgressIPNames.Clone(),
+	}
+	clone.egressStatuses = make(map[egressipv1.EgressIPStatusItem]string, len(pas.egressStatuses))
+	for k, v := range pas.egressStatuses {
+		clone.egressStatuses[k] = v
+	}
+	return clone
 }
 
 type allocator struct {
@@ -2566,7 +2579,7 @@ func getNodeInternalAddrs(node *v1.Node) (net.IP, net.IP) {
 	var v4Addr, v6Addr net.IP
 	for _, nodeAddr := range node.Status.Addresses {
 		if nodeAddr.Type == v1.NodeInternalIP {
-			ip := net.ParseIP(nodeAddr.Address)
+			ip := utilnet.ParseIPSloppy(nodeAddr.Address)
 			if !utilnet.IsIPv6(ip) && v4Addr == nil {
 				v4Addr = ip
 			} else if utilnet.IsIPv6(ip) && v6Addr == nil {

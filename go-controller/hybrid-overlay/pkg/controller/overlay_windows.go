@@ -241,7 +241,7 @@ func GetGatewayAddress(subnet *hcn.Subnet) string {
 	return ""
 }
 
-//EnsureExistingNetworkIsValid returns the existing network defined by the given network name is valid, if there is a network with the
+// EnsureExistingNetworkIsValid returns the existing network defined by the given network name is valid, if there is a network with the
 // given name that is invalid the network is deleted
 func EnsureExistingNetworkIsValid(networkName string, expectedAddressPrefix string, expectedGW string) *hcn.HostComputeNetwork {
 	existingNetwork, err := hcn.GetNetworkByName(networkName)

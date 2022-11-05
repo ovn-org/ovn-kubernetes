@@ -8,6 +8,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	knet "k8s.io/api/networking/v1"
 )
@@ -49,6 +50,11 @@ func policyTypeToAclType(policyType knet.PolicyType) aclType {
 	}
 }
 
+// hash the provided input to make it a valid portGroup name.
+func hashedPortGroup(s string) string {
+	return util.HashForOVN(s)
+}
+
 // BuildACL should be used to build ACL instead of directly calling libovsdbops.BuildACL.
 // It can properly set and reset log settings for ACL based on ACLLoggingLevels
 func BuildACL(aclName string, priority int, match, action string,
@@ -80,6 +86,22 @@ func BuildACL(aclName string, priority int, match, action string,
 		options,
 	)
 	return ACL
+}
+
+func getACLMatch(portGroupName, match string, aclT aclType) string {
+	var aclMatch string
+	switch aclT {
+	case lportIngress:
+		aclMatch = "outport == @" + portGroupName
+	case lportEgressAfterLB:
+		aclMatch = "inport == @" + portGroupName
+	default:
+		panic(fmt.Sprintf("Unknown acl type %s", aclT))
+	}
+	if match != "" {
+		aclMatch += " && " + match
+	}
+	return aclMatch
 }
 
 // GetNamespaceACLLogging retrieves ACLLoggingLevels for the Namespace.

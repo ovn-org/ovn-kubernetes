@@ -239,8 +239,8 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	err = testNS.Do(func(ns.NetNS) error {
 		defer GinkgoRecover()
 
-		mgmtPort := NewManagementPort(nodeName, nodeSubnetCIDRs)
-		_, err = mgmtPort.Create(nodeAnnotator, waiter)
+		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs)
+		_, err = mgmtPorts[0].Create(nodeAnnotator, waiter)
 		Expect(err).NotTo(HaveOccurred())
 		checkMgmtTestPortIpsAndRoutes(configs, mgtPort, mgtPortAddrs, expectedLRPMAC)
 		return nil
@@ -314,8 +314,8 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 	err = testNS.Do(func(ns.NetNS) error {
 		defer GinkgoRecover()
 
-		mgmtPort := NewManagementPort(nodeName, nodeSubnetCIDRs)
-		_, err = mgmtPort.Create(nodeAnnotator, waiter)
+		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs)
+		_, err = mgmtPorts[0].Create(nodeAnnotator, waiter)
 		Expect(err).NotTo(HaveOccurred())
 		// make sure interface was renamed and mtu was set
 		l, err := netlink.LinkByName(mgtPort)
@@ -369,8 +369,8 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 	err = testNS.Do(func(ns.NetNS) error {
 		defer GinkgoRecover()
 
-		mgmtPort := NewManagementPort(nodeName, nodeSubnetCIDRs)
-		_, err = mgmtPort.Create(nil, nil)
+		mgmtPorts := NewManagementPorts(nodeName, nodeSubnetCIDRs)
+		_, err = mgmtPorts[0].Create(nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 		checkMgmtTestPortIpsAndRoutes(configs, mgtPort, mgtPortAddrs, expectedLRPMAC)
 		// check mgmt port MAC, mtu and link state

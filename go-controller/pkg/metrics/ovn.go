@@ -349,8 +349,8 @@ func getPortCount(portType string) float64 {
 	return portCount
 }
 
-//ovnControllerSBDBConnectionCheckUpdater blocks until stopCh closed but before then polls ovn-controllers connection status with
-//southbound database periodically.
+// ovnControllerSBDBConnectionCheckUpdater blocks until stopCh closed but before then polls ovn-controllers connection status with
+// southbound database periodically.
 func ovnControllerSBDBConnectionCheckUpdater(stopCh <-chan struct{}, ovsAppctl ovsClient, period time.Duration) {
 	// There maybe transient connection issues to SB DB. We want to minimise the risk of reporting this as the current state between
 	// long poll intervals.

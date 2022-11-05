@@ -188,7 +188,7 @@ func handleService(svc *kapi.Service, handler handler) []error {
 		}
 		for _, externalIP := range svc.Spec.ExternalIPs {
 			klog.V(5).Infof("Handle ExternalIPs service %s external IP %s port %d", svc.Name, externalIP, svcPort.Port)
-			if err := handlePort(getDescription(svcPort.Name, svc, false), svc, externalIP, svcPort.Port, svcPort.Protocol, handler); err != nil {
+			if err := handlePort(getDescription(svcPort.Name, svc, false), svc, utilnet.ParseIPSloppy(externalIP).String(), svcPort.Port, svcPort.Protocol, handler); err != nil {
 				errors = append(errors, err)
 			}
 		}
@@ -199,8 +199,9 @@ func handleService(svc *kapi.Service, handler handler) []error {
 // LocalPorts allows to add an arbitrary description, which can be used to distinguish LocalPorts instances having the
 // same networking parameters by created for different services.
 // kube-proxy and this implementation use the following format of the description: "
-//        for NodePort services            - "nodePort for namespace/name[:portName]
-//        for services with External IPs   - "externalIP for namespace/name[:portName]
+//
+//	for NodePort services            - "nodePort for namespace/name[:portName]
+//	for services with External IPs   - "externalIP for namespace/name[:portName]
 func getDescription(portName string, svc *kapi.Service, nodePort bool) string {
 	svcName := types.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
 	prefix := externalPortDescr

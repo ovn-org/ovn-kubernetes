@@ -425,7 +425,8 @@ type HybridOverlayConfig struct {
 type OvnKubeNodeConfig struct {
 	Mode                 string `gcfg:"mode"`
 	MgmtPortNetdev       string `gcfg:"mgmt-port-netdev"`
-	DisableOVNIfaceIdVer bool   `gcfg:"disable-ovn-iface-id-ver"`
+	MgmtPortRepresentor  string
+	DisableOVNIfaceIdVer bool `gcfg:"disable-ovn-iface-id-ver"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -601,7 +602,7 @@ func overrideFields(dst, src, defaults interface{}) error {
 
 var cliConfig config
 
-//CommonFlags capture general options.
+// CommonFlags capture general options.
 var CommonFlags = []cli.Flag{
 	// Mode flags
 	&cli.StringFlag{
@@ -1056,7 +1057,7 @@ var OvnNBFlags = []cli.Flag{
 	},
 }
 
-//OvnSBFlags capture OVN southbound database options
+// OvnSBFlags capture OVN southbound database options
 var OvnSBFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name: "sb-address",
@@ -1098,7 +1099,7 @@ var OvnSBFlags = []cli.Flag{
 	},
 }
 
-//OVNGatewayFlags capture L3 Gateway related flags
+// OVNGatewayFlags capture L3 Gateway related flags
 var OVNGatewayFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name: "gateway-mode",
@@ -2224,11 +2225,6 @@ func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
 	if OvnKubeNode.Mode == types.NodeModeDPU || OvnKubeNode.Mode == types.NodeModeDPUHost {
 		if OvnKubeNode.MgmtPortNetdev == "" {
 			return fmt.Errorf("ovnkube-node-mgmt-port-netdev must be provided")
-		}
-	} else {
-		if OvnKubeNode.MgmtPortNetdev != "" {
-			return fmt.Errorf("ovnkube-node-mgmt-port-netdev is not supported with ovnkube-node mode %s",
-				OvnKubeNode.Mode)
 		}
 	}
 	return nil

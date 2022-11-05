@@ -101,8 +101,9 @@ type serviceEps struct {
 // traffic instead will be steered directly into the host and DNAT-ed to the targetPort on the host.
 //
 // case2: All other types of services in SGW mode i.e:
-//        case2a: if externalTrafficPolicy=cluster + SGW mode, traffic will be steered into OVN via GR.
-//        case2b: if externalTrafficPolicy=local + !hasLocalHostNetworkEp + SGW mode, traffic will be steered into OVN via GR.
+//
+//	case2a: if externalTrafficPolicy=cluster + SGW mode, traffic will be steered into OVN via GR.
+//	case2b: if externalTrafficPolicy=local + !hasLocalHostNetworkEp + SGW mode, traffic will be steered into OVN via GR.
 //
 // NOTE: If LGW mode, the default flow will take care of sending traffic to host irrespective of service flow type.
 //
@@ -201,7 +202,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 		// NodePort/Ingress access in the OVS bridge will only ever come from outside of the host
 		for _, ing := range service.Status.LoadBalancer.Ingress {
 			if len(ing.IP) > 0 {
-				err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, hasLocalHostNetworkEp, protocol, actions, ing.IP, "Ingress")
+				err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, hasLocalHostNetworkEp, protocol, actions, utilnet.ParseIPSloppy(ing.IP).String(), "Ingress")
 				if err != nil {
 					klog.Errorf(err.Error())
 				}
@@ -209,7 +210,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 		}
 		// flows for externalIPs
 		for _, externalIP := range service.Spec.ExternalIPs {
-			err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, hasLocalHostNetworkEp, protocol, actions, externalIP, "External")
+			err = npw.createLbAndExternalSvcFlows(service, &svcPort, add, hasLocalHostNetworkEp, protocol, actions, utilnet.ParseIPSloppy(externalIP).String(), "External")
 			if err != nil {
 				klog.Errorf(err.Error())
 			}
@@ -224,8 +225,9 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 // traffic instead will be steered directly into the host and DNAT-ed to the targetPort on the host.
 //
 // case2: All other types of services in SGW mode i.e:
-//        case2a: if externalTrafficPolicy=cluster + SGW mode, traffic will be steered into OVN via GR.
-//        case2b: if externalTrafficPolicy=local + !hasLocalHostNetworkEp + SGW mode, traffic will be steered into OVN via GR.
+//
+//	case2a: if externalTrafficPolicy=cluster + SGW mode, traffic will be steered into OVN via GR.
+//	case2b: if externalTrafficPolicy=local + !hasLocalHostNetworkEp + SGW mode, traffic will be steered into OVN via GR.
 //
 // NOTE: If LGW mode, the default flow will take care of sending traffic to host irrespective of service flow type.
 //
@@ -658,8 +660,9 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 
 				for _, ep := range epSlice.Endpoints {
 					for _, ip := range ep.Addresses {
-						if !isHostEndpoint(ip) {
-							epsToInsert.Insert(ip)
+						ipStr := utilnet.ParseIPSloppy(ip).String()
+						if !isHostEndpoint(ipStr) {
+							epsToInsert.Insert(ipStr)
 						}
 					}
 				}
@@ -762,7 +765,9 @@ func getEndpointAddresses(endpointSlice *discovery.EndpointSlice) []string {
 	endpointsAddress := make([]string, 0)
 	for _, endpoint := range endpointSlice.Endpoints {
 		if isEndpointReady(endpoint) {
-			endpointsAddress = append(endpointsAddress, endpoint.Addresses...)
+			for _, ip := range endpoint.Addresses {
+				endpointsAddress = append(endpointsAddress, utilnet.ParseIPSloppy(ip).String())
+			}
 		}
 	}
 	return endpointsAddress
@@ -875,7 +880,9 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 // since we share the host's k8s node IP, add OpenFlow flows
 // -- to steer the NodePort traffic arriving on the host to the OVN logical topology and
 // -- to also connection track the outbound north-south traffic through l3 gateway so that
-//    the return traffic can be steered back to OVN logical topology
+//
+//	the return traffic can be steered back to OVN logical topology
+//
 // -- to handle host -> service access, via masquerading from the host to OVN GR
 // -- to handle external -> service(ExternalTrafficPolicy: Local) -> host access without SNAT
 func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeConfiguration, extraIPs []net.IP) (*openflowManager, error) {

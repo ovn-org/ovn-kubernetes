@@ -150,11 +150,15 @@ func getIntfName(gatewayIntf string) (string, error) {
 // if they match the provided index. This used to be implemented with netlink.RT_FILTER_OIF,
 // however the problem is that this filtered out MultiPath IPv6 routes which have a LinkIndex of 0.
 // filterRoutesByIfIndex will return:
-//   a) if ifidx <= 0: routesUnfiltered
-//   b) else: a filtered list of routes
+//
+//	a) if ifidx <= 0: routesUnfiltered
+//	b) else: a filtered list of routes
+//
 // The filter works as follows:
-//   i)  return routes with LinkIndex == ifIdx
-//   ii) return routes with LinkIndex == 0 and where *all* MultiPaths have LinkIndex == ifIdx
+//
+//	i)  return routes with LinkIndex == ifIdx
+//	ii) return routes with LinkIndex == 0 and where *all* MultiPaths have LinkIndex == ifIdx
+//
 // That also means: If a MultiPath route points out different interfaces, then skip that route and
 // do not return it.
 func filterRoutesByIfIndex(routesUnfiltered []netlink.Route, ifIdx int) []netlink.Route {

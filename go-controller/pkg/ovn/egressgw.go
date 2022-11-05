@@ -230,7 +230,8 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 		}
 		podIPs := make([]*net.IPNet, 0)
 		for _, podIP := range pod.Status.PodIPs {
-			cidr := podIP.IP + util.GetIPFullMask(podIP.IP)
+			podIPStr := utilnet.ParseIPSloppy(podIP.IP).String()
+			cidr := podIPStr + util.GetIPFullMask(podIPStr)
 			_, ipNet, err := net.ParseCIDR(cidr)
 			if err != nil {
 				return fmt.Errorf("failed to parse CIDR: %s, error: %v", cidr, err)
@@ -1006,7 +1007,7 @@ func getExGwPodIPs(gatewayPod *kapi.Pod) (sets.String, error) {
 		}
 	} else if gatewayPod.Spec.HostNetwork {
 		for _, podIP := range gatewayPod.Status.PodIPs {
-			ip := net.ParseIP(podIP.IP)
+			ip := utilnet.ParseIPSloppy(podIP.IP)
 			if ip != nil {
 				foundGws.Insert(ip.String())
 			}
@@ -1049,10 +1050,11 @@ func (oc *Controller) buildClusterECMPCacheFromNamespaces(clusterRouteCache map[
 					continue
 				}
 				for _, podIP := range nsPod.Status.PodIPs {
-					if utilnet.IsIPv6String(gwIP) != utilnet.IsIPv6String(podIP.IP) {
+					podIPStr := utilnet.ParseIPSloppy(podIP.IP).String()
+					if utilnet.IsIPv6String(gwIP) != utilnet.IsIPv6String(podIPStr) {
 						continue
 					}
-					if val, ok := clusterRouteCache[podIP.IP]; ok {
+					if val, ok := clusterRouteCache[podIPStr]; ok {
 						// add gwIP to cache only if buildClusterECMPCacheFromPods hasn't already added it
 						gwIPexists := false
 						for _, existingGwIP := range val {
@@ -1062,10 +1064,10 @@ func (oc *Controller) buildClusterECMPCacheFromNamespaces(clusterRouteCache map[
 							}
 						}
 						if !gwIPexists {
-							clusterRouteCache[podIP.IP] = append(clusterRouteCache[podIP.IP], gwIP)
+							clusterRouteCache[podIPStr] = append(clusterRouteCache[podIPStr], gwIP)
 						}
 					} else {
-						clusterRouteCache[podIP.IP] = []string{gwIP}
+						clusterRouteCache[podIPStr] = []string{gwIP}
 					}
 				}
 			}
@@ -1106,10 +1108,11 @@ func (oc *Controller) buildClusterECMPCacheFromPods(clusterRouteCache map[string
 					continue
 				}
 				for _, podIP := range nsPod.Status.PodIPs {
-					if utilnet.IsIPv6String(gwIP) != utilnet.IsIPv6String(podIP.IP) {
+					podIPStr := utilnet.ParseIPSloppy(podIP.IP).String()
+					if utilnet.IsIPv6String(gwIP) != utilnet.IsIPv6String(podIPStr) {
 						continue
 					}
-					clusterRouteCache[podIP.IP] = append(clusterRouteCache[podIP.IP], gwIP)
+					clusterRouteCache[podIPStr] = append(clusterRouteCache[podIPStr], gwIP)
 				}
 			}
 		}

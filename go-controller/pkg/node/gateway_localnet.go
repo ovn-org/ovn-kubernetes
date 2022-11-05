@@ -36,9 +36,9 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		// add iptables masquerading for mp0 to exit the host for egress
 		cidr := nextHop.IP.Mask(nextHop.Mask)
 		cidrNet := &net.IPNet{IP: cidr, Mask: nextHop.Mask}
-		err := initLocalGatewayNATRules(types.K8sMgmtIntfName, cidrNet)
+		err := initLocalGatewayNATRules(cfg.ifName, cidrNet)
 		if err != nil {
-			return nil, fmt.Errorf("failed to add local NAT rules for: %s, err: %v", types.K8sMgmtIntfName, err)
+			return nil, fmt.Errorf("failed to add local NAT rules for: %s, err: %v", cfg.ifName, err)
 		}
 	}
 

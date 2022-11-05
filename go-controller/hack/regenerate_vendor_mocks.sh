@@ -21,7 +21,7 @@ then
   GOBINPATH=${gocmd_result//GOPATH=/}/bin
   echo $GOBINPATH
   echo "mockery not installed, installing mockery ...."
-  VER=2.2.1
+  VER=2.14.0
   wget https://github.com/vektra/mockery/releases/download/v${VER}/mockery_${VER}_Linux_x86_64.tar.gz -P $GOBINPATH
   tar -xf $GOBINPATH/mockery_${VER}_Linux_x86_64.tar.gz -C $GOBINPATH
   mockery --version
@@ -50,6 +50,6 @@ do
 
   # Step 3: regenerate the mock for the interface
   #docker run -v $workdir -w /src vektra/mockery --name $interface_name --dir $mock_src_dir --output $mock_dest_dir
-  mockery -name $interface_name --dir $workdir/$mock_src_dir --output $workdir/$mock_dest_dir
+  mockery --name $interface_name --dir $workdir/$mock_src_dir --output $workdir/$mock_dest_dir
 
 done

@@ -15,6 +15,7 @@ import (
 )
 
 var errMultipleResults = errors.New("unexpectedly found multiple results for provided predicate")
+var errNoIndexes = errors.New("no indexes found for given model")
 
 type modelClient struct {
 	client client.Client
@@ -27,9 +28,9 @@ func newModelClient(client client.Client) modelClient {
 }
 
 /*
- extractUUIDsFromModels is a helper function which constructs a mutation
- for the specified field and mutator extracting the UUIDs of the provided
- models as the value for the mutation.
+extractUUIDsFromModels is a helper function which constructs a mutation
+for the specified field and mutator extracting the UUIDs of the provided
+models as the value for the mutation.
 */
 func extractUUIDsFromModels(models interface{}) []string {
 	ids := []string{}
@@ -121,8 +122,8 @@ func buildMutationsFromFields(fields []interface{}, mutator ovsdb.Mutator) ([]mo
 }
 
 /*
- operationModel is a struct which uses reflection to determine and perform
- idempotent operations against OVS DB (NB DB by default).
+operationModel is a struct which uses reflection to determine and perform
+idempotent operations against OVS DB (NB DB by default).
 */
 type operationModel struct {
 	// Model specifies the model to be created, or to look up in the cache
@@ -149,6 +150,9 @@ type operationModel struct {
 	BulkOp bool
 	// DoAfter is invoked at the end of the operation and allows to setup a
 	// subsequent operation with values obtained from this one.
+	// If model lookup was successful, or a new db entry was created,
+	// Model will have UUID set, and it can be used in DoAfter. This only works
+	// if BulkOp is false and Model != nil.
 	DoAfter func()
 }
 
@@ -161,25 +165,25 @@ func onModelUpdatesAllNonDefault() []interface{} {
 }
 
 /*
- CreateOrUpdate performs idempotent operations against libovsdb according to the
- following logic:
+CreateOrUpdate performs idempotent operations against libovsdb according to the
+following logic:
 
- a) performs a lookup of the models in the cache by ModelPredicate if provided,
- or by Model otherwise. If the models do not exist and ErrNotFound is set,
- it returns ErrNotFound
+a) performs a lookup of the models in the cache by ModelPredicate if provided,
+or by Model otherwise. If the models do not exist and ErrNotFound is set,
+it returns ErrNotFound
 
- b) if OnModelUpdates is specified; it performs a direct update of the model if
- it exists.
+b) if OnModelUpdates is specified; it performs a direct update of the model if
+it exists.
 
- c) if b) is not true, but OnModelMutations is specified; it performs a direct
- mutation (insert) of the Model if it exists.
+c) if b) is not true, but OnModelMutations is specified; it performs a direct
+mutation (insert) of the Model if it exists.
 
- d) if b) and c) are not true, but Model is provided, it creates the Model
- if it does not exist.
+d) if b) and c) are not true, but Model is provided, it creates the Model
+if it does not exist.
 
- e) if none of the above are true, ErrNotFound is returned.
+e) if none of the above are true, ErrNotFound is returned.
 
- If BulkOp is set, update or mutate can happen accross multiple models found.
+If BulkOp is set, update or mutate can happen accross multiple models found.
 */
 func (m *modelClient) CreateOrUpdate(opModels ...operationModel) ([]ovsdb.OperationResult, error) {
 	created, ops, err := m.createOrUpdateOps(nil, opModels...)
@@ -229,19 +233,19 @@ func (m *modelClient) createOrUpdateOps(ops []ovsdb.Operation, opModels ...opera
 }
 
 /*
- Delete performs idempotent delete operations against libovsdb according to the
- following logic:
+Delete performs idempotent delete operations against libovsdb according to the
+following logic:
 
- a) performs a lookup of the models in the cache by ModelPredicate if provided,
- or by Model otherwise. If the models do not exist and ErrNotFound is set
- it returns ErrNotFound.
+a) performs a lookup of the models in the cache by ModelPredicate if provided,
+or by Model otherwise. If the models do not exist and ErrNotFound is set
+it returns ErrNotFound.
 
- b) if OnModelMutations is specified; it performs a direct mutation (delete) of the
- Model if it exists.
+b) if OnModelMutations is specified; it performs a direct mutation (delete) of the
+Model if it exists.
 
- c) if b) is not true; it performs a direct delete of the Model if it exists.
+c) if b) is not true; it performs a direct delete of the Model if it exists.
 
- If BulkOp is set, delete or mutate can happen accross multiple models found.
+If BulkOp is set, delete or mutate can happen accross multiple models found.
 */
 func (m *modelClient) Delete(opModels ...operationModel) error {
 	ops, err := m.DeleteOps(nil, opModels...)
@@ -326,10 +330,10 @@ func (m *modelClient) buildOps(ops []ovsdb.Operation, doWhenFound opModelToOpMap
 }
 
 /*
- create does a bit more than just "create". create needs to set the generated
- UUID (because if this function is called we know the item does not exists yet)
- then create the item. Generates an until clause and uses a wait operation to avoid
- https://bugzilla.redhat.com/show_bug.cgi?id=2042001
+create does a bit more than just "create". create needs to set the generated
+UUID (because if this function is called we know the item does not exists yet)
+then create the item. Generates an until clause and uses a wait operation to avoid
+https://bugzilla.redhat.com/show_bug.cgi?id=2042001
 */
 func (m *modelClient) create(opModel *operationModel) ([]ovsdb.Operation, error) {
 	uuid := getUUID(opModel.Model)
@@ -385,53 +389,75 @@ func (m *modelClient) Lookup(opModels ...operationModel) error {
 	return err
 }
 
+// CreateOrUpdate, Delete and Lookup can be called to
+// 1. create or update a single model
+// Model should be set, bulkOp = false, errNotfound = false
+// 2. update/delete/lookup 0..n models (create can't be done for multiple models at the same time)
+// Model index or predicate should be set
+//
+// The allowed combination of operationModel fields is different for these cases.
+// Both Model db index, and ModelPredicate can only be empty for the first case
+func lookupRequired(opModel *operationModel) bool {
+	// we know create is not supposed to be performed, if these fields are set
+	if opModel.BulkOp || opModel.ErrNotFound {
+		return true
+	}
+	return false
+}
+
 // lookup the model in the cache prioritizing provided indexes over a
-// predicate unless bulkop is set
+// predicate
+// If lookup was successful, opModel.Model will have UUID set,
+// so that further user operations with the same model are indexed by UUID
 func (m *modelClient) lookup(opModel *operationModel) error {
 	if opModel.ExistingResult == nil && opModel.Model != nil {
 		opModel.ExistingResult = getListFromModel(opModel.Model)
 	}
 
 	var err error
-	if opModel.Model != nil && !opModel.BulkOp {
-		err = m.get(opModel)
-		if err == nil || err != client.ErrNotFound {
+	if opModel.Model != nil {
+		err = m.where(opModel)
+		if err != errNoIndexes {
+			// if index wasn't provided by the Model, try predicate search
+			// otherwise return where result
 			return err
 		}
 	}
-
+	// if index wasn't provided by the Model (errNoIndexes) or Model == nil, try predicate search
 	if opModel.ModelPredicate != nil {
-		err = m.whereCache(opModel)
-	} else if opModel.BulkOp {
-		panic("Expected a ModelPredicate with BulkOp==true")
+		return m.whereCache(opModel)
 	}
-
-	return err
+	// the only operation that can be performed without a lookup (it can have no db indexes and no ModelPredicate set)
+	// is Create.
+	if lookupRequired(opModel) {
+		return fmt.Errorf("missing model indixes or predicate when a lookup was required")
+	}
+	return nil
 }
 
-/*
- get copies the model, since this function ends up being called from update /
- mutate, and Get'ing the model will modify the object to the one currently
- existing in the DB, thus overridding all new fields we are trying to set. Do
- return the retrived object though, in case the caller needs to act on the
- object's UUID
-*/
-func (m *modelClient) get(opModel *operationModel) error {
-	copy := copyIndexes(opModel.Model)
-	if reflect.ValueOf(copy).Elem().IsZero() {
+func (m *modelClient) where(opModel *operationModel) error {
+	copyModel := copyIndexes(opModel.Model)
+	if reflect.ValueOf(copyModel).Elem().IsZero() {
 		// no indexes available
-		return client.ErrNotFound
+		return errNoIndexes
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	defer cancel()
-	if err := m.client.Get(ctx, copy); err != nil {
+	var err error
+	if err = m.client.Where(copyModel).List(ctx, opModel.ExistingResult); err != nil {
 		return err
 	}
-	uuid := getUUID(opModel.Model)
-	if uuid == "" || isNamedUUID(uuid) {
-		setUUID(opModel.Model, getUUID(copy))
+	if opModel.Model == nil || opModel.BulkOp {
+		return nil
 	}
-	return addToExistingResult(copy, opModel.ExistingResult)
+	// for non-bulk op cases, copy (the one) uuid found to model provided.
+	// so that further user operations with the same model are indexed by UUID
+	err = onModels(opModel.ExistingResult, func(model interface{}) error {
+		uuid := getUUID(model)
+		setUUID(opModel.Model, uuid)
+		return nil
+	})
+	return err
 }
 
 func (m *modelClient) whereCache(opModel *operationModel) error {
@@ -446,40 +472,14 @@ func (m *modelClient) whereCache(opModel *operationModel) error {
 		return nil
 	}
 
-	// for non-bulk op cases, copy (the one) uuid found to model provided, for convenience
+	// for non-bulk op cases, copy (the one) uuid found to model provided.
+	// so that further user operations with the same model are indexed by UUID
 	err = onModels(opModel.ExistingResult, func(model interface{}) error {
 		uuid := getUUID(model)
 		setUUID(opModel.Model, uuid)
 		return nil
 	})
 	return err
-}
-
-func addToExistingResult(model interface{}, existingResult interface{}) error {
-	resultPtr := reflect.ValueOf(existingResult)
-	if resultPtr.Type().Kind() != reflect.Ptr {
-		return fmt.Errorf("expected existingResult as a pointer but got %s", resultPtr.Type().Kind())
-	}
-
-	resultVal := reflect.Indirect(resultPtr)
-	if resultVal.Type().Kind() != reflect.Slice {
-		return fmt.Errorf("expected existingResult as a pointer to a slice but got %s", resultVal.Type().Kind())
-	}
-
-	var v reflect.Value
-	if resultVal.Type().Elem().Kind() == reflect.Ptr {
-		v = reflect.ValueOf(model)
-	} else {
-		v = reflect.Indirect(reflect.ValueOf(model))
-	}
-
-	if v.Type() != resultVal.Type().Elem() {
-		return fmt.Errorf("expected existingResult as a pointer to a slice of %s but got %s", v.Type(), resultVal.Type().Elem())
-	}
-
-	resultVal.Set(reflect.Append(resultVal, v))
-
-	return nil
 }
 
 func isGuardOp(op *ovsdb.Operation) bool {

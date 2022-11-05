@@ -42,7 +42,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
-		config.PrepareTestConfig()
+		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 
 		app = cli.NewApp()
 		app.Name = "test"
@@ -60,7 +60,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		table.DescribeTable("reconciles an new pod with namespace single exgw annotation already set", func(bfd bool, finalNB []libovsdbtest.TestData) {
 			app.Action = func(ctx *cli.Context) error {
 
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *newNamespace(namespaceName)
 				namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1"}
 				if bfd {
 					namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
@@ -106,7 +106,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				fakeOvn.controller.WatchPods()
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
@@ -121,7 +122,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				ExternalIDs: map[string]string{
 					"pod":       "true",
-					"namespace": "namespace1",
+					"namespace": namespaceName,
 				},
 				Name: "namespace1_myPod",
 				Options: map[string]string{
@@ -157,7 +158,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					ExternalIDs: map[string]string{
 						"pod":       "true",
-						"namespace": "namespace1",
+						"namespace": namespaceName,
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
@@ -197,7 +198,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		table.DescribeTable("reconciles an new pod with namespace single exgw annotation already set with pod event first", func(bfd bool, finalNB []libovsdbtest.TestData) {
 			app.Action = func(ctx *cli.Context) error {
 
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *newNamespace(namespaceName)
 				namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1"}
 				if bfd {
 					namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
@@ -237,7 +238,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				fakeOvn.controller.WatchPods()
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Create(context.TODO(), &namespaceT, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -255,7 +257,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				ExternalIDs: map[string]string{
 					"pod":       "true",
-					"namespace": "namespace1",
+					"namespace": namespaceName,
 				},
 				Name: "namespace1_myPod",
 				Options: map[string]string{
@@ -291,7 +293,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					ExternalIDs: map[string]string{
 						"pod":       "true",
-						"namespace": "namespace1",
+						"namespace": namespaceName,
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
@@ -332,7 +334,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 
 			app.Action = func(ctx *cli.Context) error {
 
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *newNamespace(namespaceName)
 				namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1,9.0.0.2"}
 				if bfd {
 					namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
@@ -377,7 +379,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				fakeOvn.controller.WatchPods()
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
@@ -393,7 +396,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					ExternalIDs: map[string]string{
 						"pod":       "true",
-						"namespace": "namespace1",
+						"namespace": namespaceName,
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
@@ -439,7 +442,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					ExternalIDs: map[string]string{
 						"pod":       "true",
-						"namespace": "namespace1",
+						"namespace": namespaceName,
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
@@ -500,7 +503,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			) {
 				app.Action = func(ctx *cli.Context) error {
 
-					namespaceT := *newNamespace("namespace1")
+					namespaceT := *newNamespace(namespaceName)
 					namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1,9.0.0.2"}
 					if bfd {
 						namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
@@ -536,7 +539,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					injectNode(fakeOvn)
 					err := fakeOvn.controller.WatchNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					fakeOvn.controller.WatchPods()
+					err = fakeOvn.controller.WatchPods()
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 
@@ -655,7 +659,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				initNB []libovsdbtest.TestData,
 				finalNB []libovsdbtest.TestData) {
 				app.Action = func(ctx *cli.Context) error {
-					namespaceT := *newNamespace("namespace1")
+					namespaceT := *newNamespace(namespaceName)
 					namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "fd2e:6f44:5dd8::89,fd2e:6f44:5dd8::76"}
 					if bfd {
 						namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
@@ -691,7 +695,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					injectNode(fakeOvn)
 					err := fakeOvn.controller.WatchNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					fakeOvn.controller.WatchPods()
+					err = fakeOvn.controller.WatchPods()
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/64"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/64", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 
@@ -766,7 +771,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			) {
 				app.Action = func(ctx *cli.Context) error {
 
-					namespaceT := *newNamespace("namespace1")
+					namespaceT := *newNamespace(namespaceName)
 					namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1,9.0.0.2"}
 					if bfd {
 						namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
@@ -802,7 +807,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					injectNode(fakeOvn)
 					err := fakeOvn.controller.WatchNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					fakeOvn.controller.WatchPods()
+					err = fakeOvn.controller.WatchPods()
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 
@@ -853,7 +859,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 						ExternalIDs: map[string]string{
 							"pod":       "true",
-							"namespace": "namespace1",
+							"namespace": namespaceName,
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
@@ -924,7 +930,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 						ExternalIDs: map[string]string{
 							"pod":       "true",
-							"namespace": "namespace1",
+							"namespace": namespaceName,
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
@@ -951,7 +957,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		table.DescribeTable("reconciles a host networked pod acting as a exgw for another namespace for new pod", func(bfd bool, finalNB []libovsdbtest.TestData) {
 			app.Action = func(ctx *cli.Context) error {
 
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *newNamespace(namespaceName)
 				namespaceX := *newNamespace("namespace2")
 				t := newTPod(
 					"node1",
@@ -997,7 +1003,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				fakeOvn.controller.WatchPods()
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1017,7 +1024,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				ExternalIDs: map[string]string{
 					"pod":       "true",
-					"namespace": "namespace1",
+					"namespace": namespaceName,
 				},
 				Name: "namespace1_myPod",
 				Options: map[string]string{
@@ -1053,7 +1060,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					ExternalIDs: map[string]string{
 						"pod":       "true",
-						"namespace": "namespace1",
+						"namespace": namespaceName,
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
@@ -1093,7 +1100,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		table.DescribeTable("reconciles a host networked pod acting as a exgw for another namespace for existing pod", func(bfd bool, finalNB []libovsdbtest.TestData) {
 			app.Action = func(ctx *cli.Context) error {
 
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *newNamespace(namespaceName)
 				namespaceX := *newNamespace("namespace2")
 				t := newTPod(
 					"node1",
@@ -1139,7 +1146,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				fakeOvn.controller.WatchPods()
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1158,7 +1166,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				ExternalIDs: map[string]string{
 					"pod":       "true",
-					"namespace": "namespace1",
+					"namespace": namespaceName,
 				},
 				Name: "namespace1_myPod",
 				Options: map[string]string{
@@ -1194,7 +1202,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					ExternalIDs: map[string]string{
 						"pod":       "true",
-						"namespace": "namespace1",
+						"namespace": namespaceName,
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
@@ -1238,7 +1246,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				nsEncoded, err := json.Marshal(networkStatuses)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *newNamespace(namespaceName)
 				namespaceX := *newNamespace("namespace2")
 				t := newTPod(
 					"node1",
@@ -1288,7 +1296,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				injectNode(fakeOvn)
 				err = fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				fakeOvn.controller.WatchPods()
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1308,7 +1317,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 				ExternalIDs: map[string]string{
 					"pod":       "true",
-					"namespace": "namespace1",
+					"namespace": namespaceName,
 				},
 				Name: "namespace1_myPod",
 				Options: map[string]string{
@@ -1344,7 +1353,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					ExternalIDs: map[string]string{
 						"pod":       "true",
-						"namespace": "namespace1",
+						"namespace": namespaceName,
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
@@ -1387,7 +1396,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				afterDeleteNB []libovsdbtest.TestData) {
 				app.Action = func(ctx *cli.Context) error {
 
-					namespaceT := *newNamespace("namespace1")
+					namespaceT := *newNamespace(namespaceName)
 					namespaceX := *newNamespace("namespace2")
 					t := newTPod(
 						"node1",
@@ -1433,7 +1442,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					injectNode(fakeOvn)
 					err := fakeOvn.controller.WatchNamespaces()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					fakeOvn.controller.WatchPods()
+					err = fakeOvn.controller.WatchPods()
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1461,7 +1471,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 						ExternalIDs: map[string]string{
 							"pod":       "true",
-							"namespace": "namespace1",
+							"namespace": namespaceName,
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
@@ -1497,7 +1507,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 						ExternalIDs: map[string]string{
 							"pod":       "true",
-							"namespace": "namespace1",
+							"namespace": namespaceName,
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
@@ -1524,7 +1534,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 					Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 					ExternalIDs: map[string]string{
 						"pod":       "true",
-						"namespace": "namespace1",
+						"namespace": namespaceName,
 					},
 					Name: "namespace1_myPod",
 					Options: map[string]string{
@@ -1566,7 +1576,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 						ExternalIDs: map[string]string{
 							"pod":       "true",
-							"namespace": "namespace1",
+							"namespace": namespaceName,
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
@@ -1593,7 +1603,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		ginkgo.It("should enable bfd only on the namespace gw when set", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *newNamespace(namespaceName)
 				namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1"}
 				namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
 				namespaceX := *newNamespace("namespace2")
@@ -1640,7 +1650,9 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				fakeOvn.controller.WatchPods()
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1650,7 +1662,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 						ExternalIDs: map[string]string{
 							"pod":       "true",
-							"namespace": "namespace1",
+							"namespace": namespaceName,
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
@@ -1709,7 +1721,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		ginkgo.It("should enable bfd only on the gw pod when set", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *newNamespace(namespaceName)
 				namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1"}
 				namespaceX := *newNamespace("namespace2")
 
@@ -1757,7 +1769,9 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				fakeOvn.controller.WatchPods()
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1767,7 +1781,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 						ExternalIDs: map[string]string{
 							"pod":       "true",
-							"namespace": "namespace1",
+							"namespace": namespaceName,
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
@@ -1825,7 +1839,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 		})
 		ginkgo.It("should disable bfd when removing the annotation from the namespace", func() {
 			app.Action = func(ctx *cli.Context) error {
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *newNamespace(namespaceName)
 				namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1"}
 				namespaceT.Annotations["k8s.ovn.org/bfd-enabled"] = ""
 
@@ -1886,7 +1900,9 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				fakeOvn.controller.WatchPods()
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 				namespaceT.Annotations = map[string]string{"k8s.ovn.org/routing-external-gws": "9.0.0.1"}
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.Background(), &namespaceT, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1897,7 +1913,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 						Addresses: []string{"0a:58:0a:80:01:03 10.128.1.3"},
 						ExternalIDs: map[string]string{
 							"pod":       "true",
-							"namespace": "namespace1",
+							"namespace": namespaceName,
 						},
 						Name: "namespace1_myPod",
 						Options: map[string]string{
@@ -2042,7 +2058,8 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				fakeOvn.controller.WatchPods()
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				nbWithLRP := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
@@ -2403,7 +2420,7 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				config.Gateway.DisableSNATMultipleGWs = true
 
 				nodeName := "node1"
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *newNamespace(namespaceName)
 				t := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -2472,12 +2489,16 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 				injectNode(fakeOvn)
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				fakeOvn.controller.WatchPods()
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 				extIPs, err := getExternalIPsGR(fakeOvn.controller.watchFactory, pod[0].Spec.NodeName)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				_, fullMaskPodNet, _ := net.ParseCIDR("10.128.1.3/32")
-				addOrUpdatePodSNAT(fakeOvn.controller.nbClient, pod[0].Spec.NodeName, extIPs, []*net.IPNet{fullMaskPodNet})
+				gomega.Expect(
+					addOrUpdatePodSNAT(fakeOvn.controller.nbClient, pod[0].Spec.NodeName, extIPs, []*net.IPNet{fullMaskPodNet}),
+				).To(gomega.Succeed())
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
 				finalNB = []libovsdbtest.TestData{
 					&nbdb.LogicalRouter{
@@ -2519,5 +2540,5 @@ func injectNode(fakeOvn *FakeOVN) {
 			},
 		},
 	}
-	fakeOvn.controller.watchFactory.NodeInformer().GetStore().Add(node)
+	gomega.ExpectWithOffset(1, fakeOvn.controller.watchFactory.NodeInformer().GetStore().Add(node)).To(gomega.Succeed())
 }

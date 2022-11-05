@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/healthcheck"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 
@@ -19,6 +20,7 @@ import (
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 )
 
 // initLoadBalancerHealthChecker initializes the health check server for
@@ -171,7 +173,7 @@ func hasLocalHostNetworkEndpoints(epSlices []*discovery.EndpointSlice, nodeAddre
 			}
 			for _, ip := range endpoint.Addresses {
 				for _, nodeIP := range nodeAddresses {
-					if nodeIP.String() == ip {
+					if nodeIP.String() == utilnet.ParseIPSloppy(ip).String() {
 						return true
 					}
 				}
@@ -222,12 +224,22 @@ func checkForStaleOVSInternalPorts() {
 	staleInterfaceArgs := []string{}
 	values := strings.Split(stdout, "\n\n")
 	for _, val := range values {
+		if val == types.K8sMgmtIntfName || val == types.K8sMgmtIntfName+"_0" {
+			klog.Errorf("Management port %s is missing. Perhaps the host rebooted "+
+				"or SR-IOV VFs were disabled on the host.", val)
+			continue
+		}
 		klog.Warningf("Found stale interface %s, so queuing it to be deleted", val)
 		if len(staleInterfaceArgs) > 0 {
 			staleInterfaceArgs = append(staleInterfaceArgs, "--")
 		}
 
 		staleInterfaceArgs = append(staleInterfaceArgs, "--if-exists", "--with-iface", "del-port", val)
+	}
+
+	// Don't call ovs if all interfaces were skipped in the loop above
+	if len(staleInterfaceArgs) == 0 {
+		return
 	}
 
 	_, stderr, err := util.RunOVSVsctl(staleInterfaceArgs...)
