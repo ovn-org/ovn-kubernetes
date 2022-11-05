@@ -33,7 +33,7 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 		if err != nil {
 			continue
 		}
-		expectedLogicalPortName, err := oc.allocatePodIPs(pod, annotations)
+		expectedLogicalPortName, err := oc.allocatePodIPs(pod, annotations, ovntypes.DefaultNetworkName)
 		if err != nil {
 			return err
 		}
@@ -97,7 +97,7 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *kapi.Pod, portInfo *l
 		return nil
 	}
 
-	pInfo, err := oc.deletePodLogicalPort(pod, portInfo)
+	pInfo, err := oc.deletePodLogicalPort(pod, portInfo, ovntypes.DefaultNetworkName)
 	if err != nil {
 		return err
 	}
@@ -134,9 +134,10 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 		return nil
 	}
 
-	network, err := util.GetK8sPodDefaultNetwork(pod)
+	_, network, err := util.PodWantsMultiNetwork(pod, oc.NetInfo)
 	if err != nil {
-		return fmt.Errorf("error getting default-network's network-attachment: %v", err)
+		// multus won't add this Pod if this fails, should never happen
+		return fmt.Errorf("error getting default-network's network-attachment for pod %s/%s: %v", pod.Namespace, pod.Name, err)
 	}
 
 	var libovsdbExecuteTime time.Duration
@@ -151,7 +152,8 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 			pod.Namespace, pod.Name, time.Since(start), libovsdbExecuteTime)
 	}()
 
-	ops, lsp, podAnnotation, newlyCreatedPort, err = oc.addLogicalPortToNetwork(pod, network)
+	nadName := ovntypes.DefaultNetworkName
+	ops, lsp, podAnnotation, newlyCreatedPort, err = oc.addLogicalPortToNetwork(pod, nadName, network)
 	if err != nil {
 		return err
 	}
@@ -197,8 +199,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 	}
 
-	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.nbClient, "pod", pod.Namespace,
-		pod.Name)
+	recordOps, txOkCallBack, _, err := oc.AddConfigDurationRecord("pod", pod.Namespace, pod.Name)
 	if err != nil {
 		klog.Errorf("Config duration recorder: %v", err)
 	}
@@ -211,7 +212,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("error transacting operations %+v: %v", ops, err)
 	}
 	txOkCallBack()
-	oc.podRecorder.AddLSP(pod.UID)
+	oc.podRecorder.AddLSP(pod.UID, oc.NetInfo)
 
 	// check if this pod is serving as an external GW
 	err = oc.addPodExternalGW(pod)
@@ -225,7 +226,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	// Add the pod's logical switch port to the port cache
-	portInfo := oc.logicalPortCache.add(switchName, lsp.Name, lsp.UUID, podAnnotation.MAC, podAnnotation.IPs)
+	portInfo := oc.logicalPortCache.add(pod, switchName, ovntypes.DefaultNetworkName, lsp.UUID, podAnnotation.MAC, podAnnotation.IPs)
 
 	// If multicast is allowed and enabled for the namespace, add the port to the allow policy.
 	// FIXME: there's a race here with the Namespace multicastUpdateNamespace() handler, but
@@ -241,7 +242,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	//observe the pod creation latency metric for newly created pods only
 	if newlyCreatedPort {
-		metrics.RecordPodCreated(pod)
+		metrics.RecordPodCreated(pod, oc.NetInfo)
 	}
 	return nil
 }

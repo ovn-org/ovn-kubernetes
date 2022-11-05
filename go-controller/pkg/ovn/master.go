@@ -11,8 +11,6 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/kubernetes/scheme"
-	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -395,7 +393,7 @@ func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, erro
 		return nil, err
 	}
 
-	hostSubnetsMap := map[string][]*net.IPNet{types.DefaultNetworkName: hostSubnets}
+	hostSubnetsMap := map[string][]*net.IPNet{oc.GetNetworkName(): hostSubnets}
 	err = oc.UpdateNodeAnnotationWithRetry(node.Name, hostSubnetsMap, updatedNodeAnnotation)
 	if err != nil {
 		return nil, err
@@ -607,10 +605,11 @@ func (oc *DefaultNetworkController) syncNodes(nodes []interface{}) error {
 		}
 	}
 
-	p := func(item *nbdb.LogicalSwitch) bool {
-		return len(item.OtherConfig) > 0
+	defaultNetworkPredicate := func(item *nbdb.LogicalSwitch) bool {
+		_, ok := item.ExternalIDs[types.NetworkExternalID]
+		return len(item.OtherConfig) > 0 && !ok
 	}
-	nodeSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(oc.nbClient, p)
+	nodeSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(oc.nbClient, defaultNetworkPredicate)
 	if err != nil {
 		return fmt.Errorf("failed to get node logical switches which have other-config set: %v", err)
 	}
@@ -783,17 +782,6 @@ func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *
 		oc.recordNodeErrorEvent(node, err)
 	}
 	return err
-}
-
-func (oc *DefaultNetworkController) recordNodeErrorEvent(node *kapi.Node, nodeErr error) {
-	nodeRef, err := ref.GetReference(scheme.Scheme, node)
-	if err != nil {
-		klog.Errorf("Couldn't get a reference to node %s to post an event: %v", node.Name, err)
-		return
-	}
-
-	klog.V(5).Infof("Posting %s event for Node %s: %v", kapi.EventTypeWarning, node.Name, nodeErr)
-	oc.recorder.Eventf(nodeRef, kapi.EventTypeWarning, "ErrorReconcilingNode", nodeErr.Error())
 }
 
 func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {

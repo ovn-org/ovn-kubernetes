@@ -143,7 +143,7 @@ func (oc *DefaultNetworkController) createASForEgressQoSRule(podSelector metav1.
 	for _, pod := range pods {
 		// we don't handle HostNetworked or completed pods
 		if util.PodWantsNetwork(pod) && !util.PodCompleted(pod) {
-			podIPs, err := util.GetAllPodIPs(pod)
+			podIPs, err := util.GetPodIPsOfNetwork(pod, oc.NetInfo)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -715,7 +715,7 @@ func (oc *DefaultNetworkController) syncEgressQoSPod(key string) error {
 		return nil
 	}
 
-	podIPs, err := util.GetAllPodIPs(pod)
+	podIPs, err := util.GetPodIPsOfNetwork(pod, oc.NetInfo)
 	if errors.Is(err, util.ErrNoPodIPFound) {
 		return nil // reprocess it when it is updated with an IP
 	}
@@ -788,8 +788,8 @@ func (oc *DefaultNetworkController) onEgressQoSPodUpdate(oldObj, newObj interfac
 
 	oldPodLabels := labels.Set(oldPod.Labels)
 	newPodLabels := labels.Set(newPod.Labels)
-	oldPodIPs, _ := util.GetAllPodIPs(oldPod)
-	newPodIPs, _ := util.GetAllPodIPs(newPod)
+	oldPodIPs, _ := util.GetPodIPsOfNetwork(oldPod, oc.NetInfo)
+	newPodIPs, _ := util.GetPodIPsOfNetwork(newPod, oc.NetInfo)
 	if labels.Equals(oldPodLabels, newPodLabels) &&
 		len(oldPodIPs) == len(newPodIPs) {
 		return
