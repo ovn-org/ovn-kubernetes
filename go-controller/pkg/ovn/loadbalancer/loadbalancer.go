@@ -186,7 +186,7 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, LBs []LB
 	}
 
 	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(nbClient, "service",
-		service.Namespace, service.Name)
+		service.Namespace, service.Name, (*util.NetNameInfo)(nil))
 	if err != nil {
 		klog.Errorf("Failed to record config duration: %v", err)
 	}

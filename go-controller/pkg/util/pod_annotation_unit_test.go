@@ -278,7 +278,7 @@ func TestGetAllPodIPs(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res1, e := GetAllPodIPs(tc.inpPod)
+			res1, e := GetAllPodIPs(tc.inpPod, (*NetNameInfo)(nil))
 			t.Log(res1, e)
 			if tc.errAssert {
 				assert.Error(t, e)

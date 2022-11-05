@@ -433,7 +433,11 @@ func RunTimestamp(stopChan <-chan struct{}, sbClient, nbClient libovsdbclient.Cl
 
 // RecordPodCreated extracts the scheduled timestamp and records how long it took
 // us to notice this and set up the pod's scheduling.
-func RecordPodCreated(pod *kapi.Pod) {
+func RecordPodCreated(pod *kapi.Pod, netInfo util.NetInfo) {
+	if netInfo.IsSecondary() {
+		// TBD: no op for secondary network for now, TBD
+		return
+	}
 	t := time.Now()
 
 	// Find the scheduled timestamp
@@ -663,7 +667,11 @@ func (pr *PodRecorder) CleanPod(podUID kapimtypes.UID) {
 	}
 }
 
-func (pr *PodRecorder) AddLSP(podUID kapimtypes.UID) {
+func (pr *PodRecorder) AddLSP(podUID kapimtypes.UID, netInfo util.NetInfo) {
+	if netInfo.IsSecondary() {
+		// TBD: no op for secondary network for now, TBD
+		return
+	}
 	if pr.queue != nil && !pr.queueFull() {
 		pr.queue.Add(item{op: addLogicalSwitchPort, uid: podUID, timestamp: time.Now()})
 	}
@@ -1022,8 +1030,12 @@ func (cr *ConfigDurationRecorder) End(kind, namespace, name string) time.Time {
 // If multiple AddOVN is called between Start and End for the same kind/namespace/name, then the
 // OVN durations will be summed and added to the total. There is an assumption that processing of kind/namespace/name is
 // sequential
-func (cr *ConfigDurationRecorder) AddOVN(nbClient libovsdbclient.Client, kind, namespace, name string) (
+func (cr *ConfigDurationRecorder) AddOVN(nbClient libovsdbclient.Client, kind, namespace, name string, netInfo util.NetInfo) (
 	[]ovsdb.Operation, func(), time.Time, error) {
+	if netInfo.IsSecondary() {
+		// TBD: no op for secondary network for now
+		return []ovsdb.Operation{}, func() {}, time.Time{}, nil
+	}
 	if !cr.enabled {
 		return []ovsdb.Operation{}, func() {}, time.Time{}, nil
 	}

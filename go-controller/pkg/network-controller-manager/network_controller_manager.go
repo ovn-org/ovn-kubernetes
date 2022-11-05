@@ -42,7 +42,8 @@ func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.Swi
 
 type NetworkController interface {
 	Start(ctx context.Context) error
-	Stop()
+	Stop(deleteLogicalEntities bool) error
+	GetNetworkName() string
 }
 
 // NetworkControllerManager structure is the object manages all controllers for all networks
@@ -289,10 +290,16 @@ func (cm *NetworkControllerManager) Run(ctx context.Context) error {
 
 // Stop gracefully stops all managed controllers
 func (cm *NetworkControllerManager) Stop() {
+	var err error
+
+	close(cm.stopChan)
+
 	// stop the net-attach-def controller
 	// and for each Controller of secondary network, call oc.Stop()
 	for _, oc := range cm.ovnControllers {
-		oc.Stop()
+		err = oc.Stop(false)
+		if err != nil {
+			klog.Errorf("Failed to stop controller of network %s", oc.GetNetworkName())
+		}
 	}
-	close(cm.stopChan)
 }

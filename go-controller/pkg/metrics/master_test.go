@@ -113,7 +113,7 @@ var _ = ginkgo.Describe("Config Duration Operations", func() {
 			startTimestamp, ok := instance.Start("pod", testNamespaceA, testPodNameA)
 			gomega.Expect(ok).To(gomega.BeTrue())
 			gomega.Expect(startTimestamp.IsZero()).Should(gomega.BeFalse())
-			ops, txOkCallback, startOVNTimestamp, err := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA)
+			ops, txOkCallback, startOVNTimestamp, err := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA, (*util.NetNameInfo)(nil))
 			gomega.Expect(ops).Should(gomega.HaveLen(1))
 			gomega.Expect(err).Should(gomega.BeNil())
 			_, err = libovsdbops.TransactAndCheck(nbClient, ops)
@@ -144,7 +144,7 @@ var _ = ginkgo.Describe("Config Duration Operations", func() {
 			startTimestamp, ok := instance.Start("pod", testNamespaceA, testPodNameA)
 			gomega.Expect(ok).To(gomega.BeTrue())
 			gomega.Expect(startTimestamp.IsZero()).Should(gomega.BeFalse())
-			ops, txOkCallback, startOVNTimestamp, err := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA)
+			ops, txOkCallback, startOVNTimestamp, err := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA, (*util.NetNameInfo)(nil))
 			gomega.Expect(ops).Should(gomega.HaveLen(1))
 			gomega.Expect(err).Should(gomega.BeNil())
 			_, err = libovsdbops.TransactAndCheck(nbClient, ops)
@@ -158,7 +158,7 @@ var _ = ginkgo.Describe("Config Duration Operations", func() {
 			startTimestamp, ok = instance.Start("networkpolicy", testNamespaceB, testPodNameB)
 			gomega.Expect(ok).To(gomega.BeTrue())
 			gomega.Expect(startTimestamp.IsZero()).Should(gomega.BeFalse())
-			ops, txOkCallback, startOVNTimestamp, err = instance.AddOVN(nbClient, "networkpolicy", testNamespaceB, testPodNameB)
+			ops, txOkCallback, startOVNTimestamp, err = instance.AddOVN(nbClient, "networkpolicy", testNamespaceB, testPodNameB, (*util.NetNameInfo)(nil))
 			gomega.Expect(ops).Should(gomega.HaveLen(1))
 			gomega.Expect(err).Should(gomega.BeNil())
 			_, err = libovsdbops.TransactAndCheck(nbClient, ops)
@@ -190,7 +190,7 @@ var _ = ginkgo.Describe("Config Duration Operations", func() {
 
 		ginkgo.It("denies recording when no start called", func() {
 			instance.Run(nbClient, k, 0, time.Millisecond, stop)
-			ops, _, _, _ := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA)
+			ops, _, _, _ := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA, (*util.NetNameInfo)(nil))
 			gomega.Expect(ops).Should(gomega.HaveLen(0))
 		})
 
@@ -203,14 +203,14 @@ var _ = ginkgo.Describe("Config Duration Operations", func() {
 			gomega.Expect(ok).To(gomega.BeTrue())
 			gomega.Expect(startTimestamp.IsZero()).Should(gomega.BeFalse())
 			// first addOVN
-			ops, txOkCallback, firstStartOVNTimestamp, err := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA)
+			ops, txOkCallback, firstStartOVNTimestamp, err := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA, (*util.NetNameInfo)(nil))
 			gomega.Expect(ops).Should(gomega.HaveLen(1))
 			gomega.Expect(err).Should(gomega.BeNil())
 			_, err = libovsdbops.TransactAndCheck(nbClient, ops)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			txOkCallback()
 			// second addOVN
-			ops, txOkCallback, secondStartOVNTimestamp, err := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA)
+			ops, txOkCallback, secondStartOVNTimestamp, err := instance.AddOVN(nbClient, "pod", testNamespaceA, testPodNameA, (*util.NetNameInfo)(nil))
 			gomega.Expect(ops).Should(gomega.HaveLen(1))
 			gomega.Expect(err).Should(gomega.BeNil())
 			_, err = libovsdbops.TransactAndCheck(nbClient, ops)

@@ -529,7 +529,7 @@ func (oc *DefaultNetworkController) createDefaultDenyPGAndACLs(namespace, policy
 	}
 
 	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.nbClient, "networkpolicy",
-		namespace, policy)
+		namespace, policy, oc.NetInfo)
 	if err != nil {
 		klog.Errorf("Failed to record config duration: %v", err)
 	}
@@ -1116,7 +1116,7 @@ func (oc *DefaultNetworkController) createNetworkPolicy(policy *knet.NetworkPoli
 		var recordOps []ovsdb.Operation
 		var txOkCallBack func()
 		recordOps, txOkCallBack, _, err = metrics.GetConfigDurationRecorder().AddOVN(oc.nbClient, "networkpolicy",
-			policy.Namespace, policy.Name)
+			policy.Namespace, policy.Name, oc.NetInfo)
 		if err != nil {
 			klog.Errorf("Failed to record config duration: %v", err)
 		}
@@ -1321,7 +1321,7 @@ func (oc *DefaultNetworkController) cleanupNetworkPolicy(np *networkPolicy) erro
 		return fmt.Errorf("failed to get delete network policy port group %s ops: %v", np.portGroupName, err)
 	}
 	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.nbClient, "networkpolicy",
-		np.namespace, np.name)
+		np.namespace, np.name, oc.NetInfo)
 	if err != nil {
 		klog.Errorf("Failed to record config duration: %v", err)
 	}

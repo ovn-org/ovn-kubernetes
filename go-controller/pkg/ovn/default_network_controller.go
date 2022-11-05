@@ -169,6 +169,8 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	oc := &DefaultNetworkController{
 		BaseNetworkController: BaseNetworkController{
 			CommonNetworkControllerInfo: *cnci,
+			NetConfInfo:                 nil,
+			NetInfo:                     (*util.NetNameInfo)(nil),
 			lsManager:                   lsm.NewLogicalSwitchManager(),
 			logicalPortCache:            newPortCache(defaultStopChan),
 			namespaces:                  make(map[string]*namespaceInfo),
@@ -273,10 +275,11 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 	return oc.Run(ctx)
 }
 
-// Stop gracefully stops the controller
-func (oc *DefaultNetworkController) Stop() {
+// Stop gracefully stops the controller; deleteLogicalEntities will never be true for default network
+func (oc *DefaultNetworkController) Stop(deleteLogicalEntities bool) error {
 	close(oc.stopChan)
 	oc.wg.Wait()
+	return nil
 }
 
 // Init runs a subnet IPAM and a controller that watches arrival/departure

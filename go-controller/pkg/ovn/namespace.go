@@ -279,7 +279,7 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 					if !util.PodWantsNetwork(pod) {
 						continue
 					}
-					podIPs, err := util.GetAllPodIPs(pod)
+					podIPs, err := util.GetAllPodIPs(pod, oc.NetInfo)
 					if err != nil {
 						errors = append(errors, fmt.Errorf("unable to get pod %q IPs for SNAT rule removal err (%v)", logicalPort, err))
 					}
@@ -501,7 +501,7 @@ func (oc *DefaultNetworkController) createNamespaceAddrSetAllPods(ns string) (ad
 		ips = make([]net.IP, 0, len(existingPods))
 		for _, pod := range existingPods {
 			if util.PodWantsNetwork(pod) && !util.PodCompleted(pod) && util.PodScheduled(pod) {
-				podIPs, err := util.GetAllPodIPs(pod)
+				podIPs, err := util.GetAllPodIPs(pod, oc.NetInfo)
 				if err != nil {
 					klog.Warningf(err.Error())
 					continue

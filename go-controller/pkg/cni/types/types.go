@@ -8,6 +8,18 @@ import (
 // NetConf is CNI NetConf with DeviceID
 type NetConf struct {
 	types.NetConf
+
+	// Network Cidr
+	NetCidr string `json:"netCIDR,omitempty"`
+	// Network MTU
+	MTU int `json:"mtu,omitempty"`
+	// captures net-attach-def name in the form of namespace/name
+	NadName string `json:"netAttachDefName,omitempty"`
+	// set to true if it is a secondary networkattachmentdefintion
+	IsSecondary bool `json:"isSecondary,omitempty"`
+	// specifies the OVN topology for this network configuration
+	Topology string `json:"topology,omitempty"`
+
 	// PciAddrs in case of using sriov
 	DeviceID string `json:"deviceID,omitempty"`
 	// LogFile to log all the messages from cni shim binary to
