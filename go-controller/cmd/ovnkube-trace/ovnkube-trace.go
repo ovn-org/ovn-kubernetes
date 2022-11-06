@@ -1008,6 +1008,7 @@ func main() {
 	dstPort := flag.String("dst-port", "80", "dst-port: destination port")
 	tcp := flag.Bool("tcp", false, "use tcp transport protocol")
 	udp := flag.Bool("udp", false, "use udp transport protocol")
+	skipOvnDetrace := flag.Bool("skip-detrace", false, "skip ovn-detrace command")
 	loglevel := flag.String("loglevel", "0", "loglevel: klog level")
 	flag.Parse()
 
@@ -1122,6 +1123,9 @@ func main() {
 		klog.V(5).Infof("Running a trace to an IP address")
 		egressNodeName, egressBridgeName := runOvnTraceToIP(coreclient, restconfig, srcPodInfo, parsedDstIP, sbcmd, ovnNamespace, protocol, *dstPort)
 		appSrcDstOut := runOfprotoTraceToIP(coreclient, restconfig, srcPodInfo, parsedDstIP, ovnNamespace, protocol, *dstPort, egressNodeName, egressBridgeName)
+		if *skipOvnDetrace {
+			return
+		}
 		err = runOvnDetrace(coreclient, restconfig, "pod to external IP", srcPodInfo, parsedDstIP.String(), appSrcDstOut, ovnNamespace, nbURI, sbURI, sslCertKeys, nbcmd)
 		if err != nil {
 			klog.Infof("Skipped ovn-detrace due to: %q", err)
@@ -1169,6 +1173,9 @@ func main() {
 	appDstSrcOut := runOfprotoTraceToPod(coreclient, restconfig, "destination pod to source pod", dstPodInfo, srcPodInfo, ovnNamespace, protocol, *dstPort)
 
 	// ovn-detrace commands below
+	if *skipOvnDetrace {
+		return
+	}
 	err = runOvnDetrace(coreclient, restconfig, "source pod to destination pod", srcPodInfo, dstPodInfo.PodName, appSrcDstOut, ovnNamespace, nbURI, sbURI, sslCertKeys, nbcmd)
 	if err != nil {
 		klog.Infof("Skipped ovn-detrace due to: %q", err)
