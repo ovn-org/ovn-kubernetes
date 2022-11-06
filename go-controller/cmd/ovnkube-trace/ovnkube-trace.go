@@ -882,7 +882,8 @@ func getOfprotoIPFamilyArgs(protocol string, ip net.IP) (string, string, string)
 }
 
 // installOvnDetraceDependencies installs dependencies for ovn-detrace with pip3 in case they are missing (for older images).
-func installOvnDetraceDependencies(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, podName, ovnNamespace string) {
+// Returns error if dependencies are missing but cannot be installed.
+func installOvnDetraceDependencies(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, podName, ovnNamespace string) error {
 	dependencies := map[string]string{
 		"ovs":       "if type -p ovn-detrace >/dev/null 2>&1; then echo 'true' ; fi",
 		"pyOpenSSL": "if rpm -qa | egrep -q python3-pyOpenSSL; then echo 'true'; fi",
@@ -890,7 +891,8 @@ func installOvnDetraceDependencies(coreclient *corev1client.CoreV1Client, restco
 	for dependency, dependencyCmd := range dependencies {
 		depVerifyOut, depVerifyErr, err := execInPod(coreclient, restconfig, ovnNamespace, podName, "ovnkube-node", dependencyCmd, "")
 		if err != nil {
-			klog.Exitf("Dependency verification error in pod %s, container %s. Error '%v', stdOut: '%s'\n stdErr: %s", podName, "ovnkube-node", err, depVerifyOut, depVerifyErr)
+			return fmt.Errorf("dependency verification error in pod %s, container %s. Error '%v', stdOut: '%s'\n stdErr: %s",
+				podName, "ovnkube-node", err, depVerifyOut, depVerifyErr)
 		}
 		trueFalse := strings.TrimSuffix(depVerifyOut, "\n")
 		klog.V(10).Infof("Dependency check '%s' in pod '%s', container '%s' yielded '%s'", dependencyCmd, podName, "ovnkube-node", trueFalse)
@@ -898,15 +900,28 @@ func installOvnDetraceDependencies(coreclient *corev1client.CoreV1Client, restco
 			installCmd := "pip3 install " + dependency
 			depInstallOut, depInstallErr, err := execInPod(coreclient, restconfig, ovnNamespace, podName, "ovnkube-node", installCmd, "")
 			if err != nil {
-				klog.Exitf("ovn-detrace error in pod %s, container %s. Error '%v', stdOut: '%s'\n stdErr: %s", podName, "ovnkube-node", err, depInstallOut, depInstallErr)
+				return fmt.Errorf("ovn-detrace error in pod %s, container %s. Error '%v', stdOut: '%s'\n stdErr: %s",
+					podName, "ovnkube-node", err, depInstallOut, depInstallErr)
 			}
-			klog.V(1).Infof("Install ovn-detrace Output: %s\n", depInstallOut)
+			klog.V(1).Infof("Install ovn-detrace dependencies output: %s\n", depInstallOut)
 		}
 	}
+	return nil
 }
 
 // runOvnDetrace runs an ovn-detrace command for the given input.
-func runOvnDetrace(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, direction string, srcPodInfo *PodInfo, dstName string, appSrcDstOut, ovnNamespace, nbURI, sbURI, sslCertKeys string) {
+// Returns error if dependencies are not met (allows for graceful handling of those issues).
+func runOvnDetrace(coreclient *corev1client.CoreV1Client, restconfig *rest.Config, direction string, srcPodInfo *PodInfo,
+	dstName string, appSrcDstOut, ovnNamespace, nbURI, sbURI, sslCertKeys, nbcmd string) error {
+	// If NBDB connectivity is not available do not run ovn-detrace.
+	if _, stdErr, err := execInPod(coreclient, restconfig, ovnNamespace, srcPodInfo.OvnKubePodName, "ovnkube-node", fmt.Sprintf("ovn-nbctl %s get-connection", nbcmd), ""); err != nil {
+		return fmt.Errorf("nbdb is not available %q", stdErr)
+	}
+	// If dependencies aren't satisfied do not run ovn-detrace.
+	if err := installOvnDetraceDependencies(coreclient, restconfig, srcPodInfo.OvnKubePodName, ovnNamespace); err != nil {
+		return fmt.Errorf("dependencies check failed: %q", err)
+	}
+
 	cmd := fmt.Sprintf(`ovn-detrace --ovnnb=%[1]s --ovnsb=%[2]s %[3]s --ovsdb=unix:/var/run/openvswitch/db.sock`,
 		nbURI,       // 1
 		sbURI,       // 2
@@ -916,6 +931,8 @@ func runOvnDetrace(coreclient *corev1client.CoreV1Client, restconfig *rest.Confi
 
 	dtraceSrcDstOut, dtraceSrcDstErr, err := execInPod(coreclient, restconfig, ovnNamespace, srcPodInfo.OvnKubePodName, "ovnkube-node", cmd, appSrcDstOut)
 	printSuccessOrFailure("ovn-detrace "+direction, srcPodInfo.PodName, dstName, dtraceSrcDstOut, dtraceSrcDstErr, err, "")
+
+	return nil
 }
 
 // displayNodeInfo shows a summary about nodes in this cluster.
@@ -1105,7 +1122,10 @@ func main() {
 		klog.V(5).Infof("Running a trace to an IP address")
 		egressNodeName, egressBridgeName := runOvnTraceToIP(coreclient, restconfig, srcPodInfo, parsedDstIP, sbcmd, ovnNamespace, protocol, *dstPort)
 		appSrcDstOut := runOfprotoTraceToIP(coreclient, restconfig, srcPodInfo, parsedDstIP, ovnNamespace, protocol, *dstPort, egressNodeName, egressBridgeName)
-		runOvnDetrace(coreclient, restconfig, "pod to external IP", srcPodInfo, parsedDstIP.String(), appSrcDstOut, ovnNamespace, nbURI, sbURI, sslCertKeys)
+		err = runOvnDetrace(coreclient, restconfig, "pod to external IP", srcPodInfo, parsedDstIP.String(), appSrcDstOut, ovnNamespace, nbURI, sbURI, sslCertKeys, nbcmd)
+		if err != nil {
+			klog.Infof("Skipped ovn-detrace due to: %q", err)
+		}
 		return
 	}
 
@@ -1148,16 +1168,15 @@ func main() {
 	appSrcDstOut := runOfprotoTraceToPod(coreclient, restconfig, "source pod to destination pod", srcPodInfo, dstPodInfo, ovnNamespace, protocol, *dstPort)
 	appDstSrcOut := runOfprotoTraceToPod(coreclient, restconfig, "destination pod to source pod", dstPodInfo, srcPodInfo, ovnNamespace, protocol, *dstPort)
 
-	// If NBDB connectivity is not available do not run ovn-dtrace
-	_, stdErr, err := execInPod(coreclient, restconfig, ovnNamespace, srcPodInfo.OvnKubePodName, "ovnkube-node", fmt.Sprintf("ovn-nbctl %s get-connection", nbcmd), "")
+	// ovn-detrace commands below
+	err = runOvnDetrace(coreclient, restconfig, "source pod to destination pod", srcPodInfo, dstPodInfo.PodName, appSrcDstOut, ovnNamespace, nbURI, sbURI, sslCertKeys, nbcmd)
 	if err != nil {
-		klog.V(4).Infof("Skip ovn-dtrace, nbdb is not available %s", stdErr)
+		klog.Infof("Skipped ovn-detrace due to: %q", err)
 		return
 	}
-	// ovn-detrace commands below
-	// Install dependencies with pip3 in case they are missing (for older images)
-	installOvnDetraceDependencies(coreclient, restconfig, srcPodInfo.OvnKubePodName, ovnNamespace)
-	installOvnDetraceDependencies(coreclient, restconfig, dstPodInfo.OvnKubePodName, ovnNamespace)
-	runOvnDetrace(coreclient, restconfig, "source pod to destination pod", srcPodInfo, dstPodInfo.PodName, appSrcDstOut, ovnNamespace, nbURI, sbURI, sslCertKeys)
-	runOvnDetrace(coreclient, restconfig, "destination pod to source pod", dstPodInfo, srcPodInfo.PodName, appDstSrcOut, ovnNamespace, nbURI, sbURI, sslCertKeys)
+	err = runOvnDetrace(coreclient, restconfig, "destination pod to source pod", dstPodInfo, srcPodInfo.PodName, appDstSrcOut, ovnNamespace, nbURI, sbURI, sslCertKeys, nbcmd)
+	if err != nil {
+		klog.Infof("Skipped ovn-detrace due to: %q", err)
+		return
+	}
 }
