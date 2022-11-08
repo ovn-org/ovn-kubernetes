@@ -2,17 +2,23 @@ package config
 
 import (
 	"net"
+	"strings"
 	"testing"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"k8s.io/klog/v2"
+	"k8s.io/klog/v2/ktesting"
 )
 
 func TestParseClusterSubnetEntries(t *testing.T) {
+	logger, _ := ktesting.NewTestContext(t)
+	klog.SetLogger(logger)
 	tests := []struct {
 		name            string
 		cmdLineArg      string
 		clusterNetworks []CIDRNetworkEntry
 		expectedErr     bool
+		expectedLog     string
 	}{
 		{
 			name:            "Single CIDR correctly formatted",
@@ -107,6 +113,13 @@ func TestParseClusterSubnetEntries(t *testing.T) {
 			clusterNetworks: nil,
 			expectedErr:     true,
 		},
+		{
+			name:            "IP must not be in the middle of the range",
+			cmdLineArg:      "10.131.0.0/14/23",
+			clusterNetworks: []CIDRNetworkEntry{{CIDR: ovntest.MustParseIPNet("10.128.0.0/14"), HostSubnetLength: 23}},
+			expectedErr:     false,
+			expectedLog:     "Cluster subnet 10.131.0.0/14 at the middle of the range, correct value should be 10.128.0.0/14",
+		},
 	}
 
 	for _, tc := range tests {
@@ -125,6 +138,19 @@ func TestParseClusterSubnetEntries(t *testing.T) {
 				if entry.HostSubnetLength != tc.clusterNetworks[index].HostSubnetLength {
 					t.Errorf("Test case \"%s\" expected entry[%d].HostSubnetLength: %d to equal tc.clusterNetworks[%d].HostSubnetLength: %d", tc.name, index, entry.HostSubnetLength, index, tc.clusterNetworks[index].HostSubnetLength)
 				}
+			}
+		}
+		if tc.expectedLog != "" {
+			underlier, ok := logger.GetSink().(ktesting.Underlier)
+			if !ok {
+				t.Fatalf("Should have had a ktesting LogSink, got %T", logger.GetSink())
+			}
+
+			log := underlier.GetBuffer().String()
+			if !strings.Contains(log, tc.expectedLog) {
+				// Log will be shown on failure. To see it
+				// during a successful run use "go test -v".
+				t.Errorf("Should have logged %s, see actual output above.", tc.expectedLog)
 			}
 		}
 	}

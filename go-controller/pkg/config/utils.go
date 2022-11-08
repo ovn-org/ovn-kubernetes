@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -50,10 +51,18 @@ func ParseClusterSubnetEntries(clusterSubnetCmd string) ([]CIDRNetworkEntry, err
 			return nil, fmt.Errorf("CIDR %q not properly formatted", clusterEntry)
 		}
 
-		var err error
-		_, parsedClusterEntry.CIDR, err = net.ParseCIDR(fmt.Sprintf("%s/%s", splitClusterEntry[0], splitClusterEntry[1]))
+		rawClusterCIDR := fmt.Sprintf("%s/%s", splitClusterEntry[0], splitClusterEntry[1])
+		var (
+			err    error
+			cidrIP net.IP
+		)
+		cidrIP, parsedClusterEntry.CIDR, err = net.ParseCIDR(rawClusterCIDR)
 		if err != nil {
 			return nil, err
+		}
+
+		if !cidrIP.Equal(parsedClusterEntry.CIDR.IP) {
+			klog.Warningf("Cluster subnet %s at the middle of the range, correct value should be %s", rawClusterCIDR, parsedClusterEntry.CIDR)
 		}
 
 		ipv6 := utilnet.IsIPv6(parsedClusterEntry.CIDR.IP)
