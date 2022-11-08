@@ -16,6 +16,7 @@ import (
 	cloudprivateipconfiglister "github.com/openshift/client-go/cloudnetwork/listers/cloudnetwork/v1"
 	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	listers "k8s.io/client-go/listers/core/v1"
 	discoverylisters "k8s.io/client-go/listers/discovery/v1"
@@ -308,7 +309,16 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
 				start := time.Now()
 				i.forEachQueuedHandler(func(h *Handler) {
-					h.OnUpdate(e.oldObj, e.obj)
+					old := oldObj.(metav1.Object)
+					new := newObj.(metav1.Object)
+					if old.GetUID() != new.GetUID() {
+						// This occurs not so often, so log this occurance.
+						klog.Infof("Object %s/%s is replaced, invoking delete followed by add handler", new.GetNamespace(), new.GetName())
+						h.OnDelete(e.oldObj)
+						h.OnAdd(e.obj)
+					} else {
+						h.OnUpdate(e.oldObj, e.obj)
+					}
 				})
 				metrics.MetricResourceUpdateLatency.Observe(time.Since(start).Seconds())
 				i.unrefQueueEntry(key, entry, false)
@@ -349,7 +359,16 @@ func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
 			metrics.MetricResourceUpdateCount.WithLabelValues(name, "update").Inc()
 			start := time.Now()
 			i.forEachHandler(newObj, func(h *Handler) {
-				h.OnUpdate(oldObj, newObj)
+				old := oldObj.(metav1.Object)
+				new := newObj.(metav1.Object)
+				if old.GetUID() != new.GetUID() {
+					// This occurs not so often, so log this occurance.
+					klog.Infof("Object %s/%s is replaced, invoking delete followed by add handler", new.GetNamespace(), new.GetName())
+					h.OnDelete(oldObj)
+					h.OnAdd(newObj)
+				} else {
+					h.OnUpdate(oldObj, newObj)
+				}
 			})
 			metrics.MetricResourceUpdateLatency.Observe(time.Since(start).Seconds())
 		},

@@ -866,3 +866,29 @@ func noAlternateProxySelector() func(options *metav1.ListOptions) {
 		options.LabelSelector = labelSelector.String()
 	}
 }
+
+// WithUpdateHandlingForObjReplace decorates given cache.ResourceEventHandler with checking object
+// replace case in the update event. when old and new object have different UIDs, then consider it
+// as a replace and invoke delete handler for old object followed by add handler for new object.
+func WithUpdateHandlingForObjReplace(funcs cache.ResourceEventHandler) cache.ResourceEventHandlerFuncs {
+	return cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			funcs.OnAdd(obj)
+		},
+		UpdateFunc: func(old, new interface{}) {
+			oldObj := old.(metav1.Object)
+			newObj := new.(metav1.Object)
+			if oldObj.GetUID() == newObj.GetUID() {
+				funcs.OnUpdate(old, new)
+				return
+			}
+			// This occurs not so often, so log this occurance.
+			klog.Infof("Object %s/%s is replaced, invoking delete followed by add handler", newObj.GetNamespace(), newObj.GetName())
+			funcs.OnDelete(old)
+			funcs.OnAdd(new)
+		},
+		DeleteFunc: func(obj interface{}) {
+			funcs.OnDelete(obj)
+		},
+	}
+}

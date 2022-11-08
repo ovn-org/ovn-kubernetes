@@ -193,14 +193,6 @@ jobs:
           docker save ovn-daemonset-f:pr > _output/${CI_IMAGE_PR_TAR}
         popd
 
-    - name: Upload Junit Reports
-      if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && always()
-      continue-on-error: true
-      uses: actions/upload-artifact@v2
-      with:
-        name: junit-unit
-        path: '**/_artifacts/**.xml'
-
     - name: Submit code coverage to Coveralls
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
       continue-on-error: true
@@ -447,13 +439,6 @@ jobs:
       run: |
         make -C test ${{ matrix.target }}
 
-    - name: Upload Junit Reports
-      if: always()
-      uses: actions/upload-artifact@v2
-      with:
-        name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
-        path: './test/_artifacts/*.xml'
-
     - name: Export kind logs
       if: always()
       run: |
@@ -542,13 +527,6 @@ jobs:
         KIND_IPV6_SUPPORT="true"
         make -C test control-plane WHAT="DualStack"
 
-    - name: Upload Junit Reports
-      if: always()
-      uses: actions/upload-artifact@v2
-      with:
-        name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
-        path: './test/_artifacts/*.xml'
-
     - name: Export kind logs
       if: always()
       run: |
@@ -619,13 +597,6 @@ jobs:
       - name: Run Tests
         run: |
           make -C test ${{ matrix.target }}
-      - name: Upload Junit Reports
-        if: always()
-        uses: actions/upload-artifact@v2
-        with:
-          name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
-          path: './test/_artifacts/*.xml'
-
       - name: Export logs
         if: always()
         run: |
