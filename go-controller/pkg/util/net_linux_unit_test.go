@@ -9,6 +9,7 @@ import (
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	netlink_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/vishvananda/netlink"
@@ -1247,6 +1248,42 @@ func TestGetMTUOfInterfaceWithAddress(t *testing.T) {
 			assert.Equal(t, mtu, tc.wantMTU)
 			mockNetLinkOps.AssertExpectations(t)
 			exisitngMockLink.AssertExpectations(t)
+		})
+	}
+}
+
+func TestIsAddressReservedForInternalUse(t *testing.T) {
+	tests := []struct {
+		desc   string
+		input  net.IP
+		outExp bool
+	}{
+		{
+			desc:   "non-reserved IPv4 address",
+			input:  ovntest.MustParseIP("1.1.1.1"),
+			outExp: false,
+		},
+		{
+			desc:   "non-reserved IPv6 address",
+			input:  ovntest.MustParseIP("abcd::1"),
+			outExp: false,
+		},
+		{
+			desc:   "reserved IPv4 address",
+			input:  ovntest.MustParseIP(types.V4HostMasqueradeIP),
+			outExp: true,
+		},
+		{
+			desc:   "reserved IPv6 address",
+			input:  ovntest.MustParseIP(types.V6HostMasqueradeIP),
+			outExp: true,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			res := isAddressReservedForInternalUse(tc.input)
+			t.Log(res)
+			assert.Equal(t, res, tc.outExp)
 		})
 	}
 }
