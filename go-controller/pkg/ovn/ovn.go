@@ -38,7 +38,8 @@ import (
 )
 
 const (
-	egressFirewallDNSDefaultDuration time.Duration = 30 * time.Minute
+	egressFirewallDNSDefaultDuration  = 30 * time.Minute
+	egressIPReachabilityCheckInterval = 5 * time.Second
 )
 
 // ACL logging severity levels
