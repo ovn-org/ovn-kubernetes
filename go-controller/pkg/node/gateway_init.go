@@ -9,6 +9,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -316,8 +317,9 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 		var chassisID string
 		klog.Info("Gateway Mode is disabled")
 		gw = &gateway{
-			initFunc:  func() error { return nil },
-			readyFunc: func() (bool, error) { return true, nil },
+			initFunc:     func() error { return nil },
+			readyFunc:    func() (bool, error) { return true, nil },
+			watchFactory: n.watchFactory.(*factory.WatchFactory),
 		}
 		chassisID, err = util.GetNodeChassisID()
 		if err != nil {
@@ -414,8 +416,9 @@ func (n *OvnNode) initGatewayDPUHost(kubeNodeIP net.IP) error {
 	}
 
 	gw := &gateway{
-		initFunc:  func() error { return nil },
-		readyFunc: func() (bool, error) { return true, nil },
+		initFunc:     func() error { return nil },
+		readyFunc:    func() (bool, error) { return true, nil },
+		watchFactory: n.watchFactory.(*factory.WatchFactory),
 	}
 
 	// TODO(adrianc): revisit if support for nodeIPManager is needed.

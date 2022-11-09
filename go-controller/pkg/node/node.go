@@ -15,7 +15,6 @@ import (
 	discovery "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -29,9 +28,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/upgrade"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
+	retry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/vishvananda/netlink"
+	apierrors "k8s.io/apimachinery/pkg/util/errors"
 )
 
 // OvnNode is the object holder for utilities meant for node management
@@ -43,11 +44,16 @@ type OvnNode struct {
 	stopChan     chan struct{}
 	recorder     record.EventRecorder
 	gateway      Gateway
+
+	// retry framework for namespaces, used for the removal of stale conntrack entries for external gateways
+	retryNamespaces *retry.RetryFramework
+	// retry framework for endpoint slices, used for the removal of stale conntrack entries for services
+	retryEndpointSlices *retry.RetryFramework
 }
 
 // NewNode creates a new controller for node management
 func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
-	return &OvnNode{
+	n := &OvnNode{
 		name:         name,
 		client:       kubeClient,
 		Kube:         &kube.Kube{KClient: kubeClient},
@@ -55,6 +61,15 @@ func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name s
 		stopChan:     stopChan,
 		recorder:     eventRecorder,
 	}
+	n.initRetryFrameworkForNode()
+
+	return n
+}
+
+func (n *OvnNode) initRetryFrameworkForNode() {
+	n.retryNamespaces = n.newRetryFrameworkNode(factory.NamespaceExGwType)
+	n.retryEndpointSlices = n.newRetryFrameworkNode(factory.EndpointSliceForStaleConntrackRemovalType)
+
 }
 
 func clearOVSFlowTargets() error {
@@ -676,45 +691,38 @@ func (n *OvnNode) startEgressIPHealthCheckingServer(wg *sync.WaitGroup, mgmtPort
 	return nil
 }
 
+func (n *OvnNode) reconcileConntrackUponEndpointSliceEvents(oldEndpointSlice, newEndpointSlice *discovery.EndpointSlice) error {
+	var errors []error
+	if oldEndpointSlice == nil {
+		// nothing to do upon an add event
+		return nil
+	}
+
+	for _, oldPort := range oldEndpointSlice.Ports {
+		if *oldPort.Protocol != kapi.ProtocolUDP { // flush conntrack only for UDP
+			continue
+		}
+		for _, oldEndpoint := range oldEndpointSlice.Endpoints {
+			for _, oldIP := range oldEndpoint.Addresses {
+				oldIPStr := utilnet.ParseIPSloppy(oldIP).String()
+				// upon an update event, remove conntrack entries for IP addresses that are no longer
+				// in the endpointslice, skip otherwise
+				if newEndpointSlice != nil && doesEPSliceContainReadyEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol) {
+					continue
+				}
+				// upon update and delete events, flush conntrack only for UDP
+				err := util.DeleteConntrack(oldIPStr, *oldPort.Port, *oldPort.Protocol, netlink.ConntrackReplyAnyIP, nil)
+				if err != nil {
+					klog.Errorf("Failed to delete conntrack entry for %s: %v", oldIPStr, err)
+				}
+			}
+		}
+	}
+	return apierrors.NewAggregate(errors)
+
+}
 func (n *OvnNode) WatchEndpointSlices() error {
-	_, err := n.watchFactory.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
-		UpdateFunc: func(old, new interface{}) {
-			newEndpointSlice := new.(*discovery.EndpointSlice)
-			oldEndpointSlice := old.(*discovery.EndpointSlice)
-			for _, oldPort := range oldEndpointSlice.Ports {
-				for _, oldEndpoint := range oldEndpointSlice.Endpoints {
-					for _, oldIP := range oldEndpoint.Addresses {
-						oldIPStr := utilnet.ParseIPSloppy(oldIP).String()
-						if doesEPSliceContainReadyEndpoint(newEndpointSlice, oldIPStr, *oldPort.Port, *oldPort.Protocol) {
-							continue
-						}
-						if *oldPort.Protocol == kapi.ProtocolUDP { // flush conntrack only for UDP
-							err := util.DeleteConntrack(oldIPStr, *oldPort.Port, *oldPort.Protocol, netlink.ConntrackReplyAnyIP, nil)
-							if err != nil {
-								klog.Errorf("Failed to delete conntrack entry for %s: %v", oldIPStr, err)
-							}
-						}
-					}
-				}
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			endpointSlice := obj.(*discovery.EndpointSlice)
-			for _, port := range endpointSlice.Ports {
-				for _, endpoint := range endpointSlice.Endpoints {
-					for _, ip := range endpoint.Addresses {
-						ipStr := utilnet.ParseIPSloppy(ip).String()
-						if *port.Protocol == kapi.ProtocolUDP { // flush conntrack only for UDP
-							err := util.DeleteConntrack(ipStr, *port.Port, *port.Protocol, netlink.ConntrackReplyAnyIP, nil)
-							if err != nil {
-								klog.Errorf("Failed to delete conntrack entry for %s: %v", ipStr, err)
-							}
-						}
-					}
-				}
-			}
-		},
-	}, nil)
+	_, err := n.retryEndpointSlices.WatchResource()
 	return err
 }
 
@@ -742,13 +750,13 @@ func (n *OvnNode) checkAndDeleteStaleConntrackEntries() {
 			if len(pods) > 0 || err != nil {
 				// we only need to proceed if there is at least one pod in this namespace on this node
 				// OR if we couldn't fetch the pods for some reason at this juncture
-				n.checkAndDeleteStaleConntrackEntriesForNamespace(namespace)
+				_ = n.syncConntrackForExternalGateways(namespace)
 			}
 		}
 	}
 }
 
-func (n *OvnNode) checkAndDeleteStaleConntrackEntriesForNamespace(newNs *kapi.Namespace) {
+func (n *OvnNode) syncConntrackForExternalGateways(newNs *kapi.Namespace) error {
 	// loop through all the IPs on the annotations; ARP for their MACs and form an allowlist
 	gatewayIPs := strings.Split(newNs.Annotations[util.ExternalGatewayPodIPsAnnotation], ",")
 	gatewayIPs = append(gatewayIPs, strings.Split(newNs.Annotations[util.RoutingExternalGWsAnnotation], ",")...)
@@ -793,34 +801,30 @@ func (n *OvnNode) checkAndDeleteStaleConntrackEntriesForNamespace(newNs *kapi.Na
 
 	pods, err := n.watchFactory.GetPods(newNs.Name)
 	if err != nil {
-		klog.Errorf("Unable to get pods from informer: %v", err)
+		return fmt.Errorf("unable to get pods from informer: %v", err)
 	}
+
+	var errors []error
 	for _, pod := range pods {
 		pod := pod
 		podIPs, err := util.GetAllPodIPs(pod)
 		if err != nil {
-			klog.Errorf("Unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+			errors = append(errors, fmt.Errorf("unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err))
 		}
 		for _, podIP := range podIPs { // flush conntrack only for UDP
 			// for this pod, we check if the conntrack entry has a label that is not in the provided allowlist of MACs
 			// only caveat here is we assume egressGW served pods shouldn't have conntrack entries with other labels set
 			err := util.DeleteConntrack(podIP.String(), 0, kapi.ProtocolUDP, netlink.ConntrackOrigDstIP, validNextHopMACs)
 			if err != nil {
-				klog.Errorf("Failed to delete conntrack entry for pod %s: %v", podIP.String(), err)
+				errors = append(errors, fmt.Errorf("failed to delete conntrack entry for pod %s: %v", podIP.String(), err))
 			}
 		}
 	}
+	return apierrors.NewAggregate(errors)
 }
 
 func (n *OvnNode) WatchNamespaces() error {
-	_, err := n.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
-		UpdateFunc: func(old, new interface{}) {
-			oldNs, newNs := old.(*kapi.Namespace), new.(*kapi.Namespace)
-			if exGatewayPodsAnnotationsChanged(oldNs, newNs) {
-				n.checkAndDeleteStaleConntrackEntriesForNamespace(newNs)
-			}
-		},
-	}, nil)
+	_, err := n.retryNamespaces.WatchResource()
 	return err
 }
 

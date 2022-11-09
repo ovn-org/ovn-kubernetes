@@ -10,6 +10,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -65,7 +66,10 @@ func (p *localPortManager) open(desc string, ip string, port int32, protocol kap
 	defer p.activeSocketsLock.Unlock()
 
 	if _, exists := p.portsMap[*localPort]; exists {
-		return fmt.Errorf("error try to open socket for svc: %s/%s on port: %v again", svc.Namespace, svc.Name, port)
+		// If the port already exists in the map, we've already opened it.
+		// Don't consider this as an error, since we've reached the desired state.
+		klog.Infof("Svc %s/%s: port %v is already open, no action needed", svc.Namespace, svc.Name, port)
+		return nil
 	} else {
 		closeable, err := p.portOpener.OpenLocalPort(localPort)
 		if err != nil {
@@ -105,7 +109,10 @@ func (p *localPortManager) close(desc string, ip string, port int32, protocol ka
 		delete(p.portsMap, *localPort)
 		return nil
 	}
-	return fmt.Errorf("error closing socket for svc: %s/%s on port: %v, port was never opened...?", svc.Namespace, svc.Name, port)
+	// If the port doesn't exist in the map, we've already closed it.
+	// Don't consider this as an error, since we've reached the desired state.
+	klog.Infof("Svc %s/%s: port %v is already closed, no action needed", svc.Namespace, svc.Name, port)
+	return nil
 }
 
 func (p *localPortManager) emitPortClaimEvent(svc *kapi.Service, port int32, err error) {
@@ -139,34 +146,40 @@ func newPortClaimWatcher(recorder record.EventRecorder) (*portClaimWatcher, erro
 	}, nil
 }
 
-func (p *portClaimWatcher) AddService(svc *kapi.Service) {
-	if errors := handleService(svc, p.port.open); len(errors) > 0 {
-		for _, err := range errors {
-			klog.Errorf("Error claiming port for service: %s/%s: %v", svc.Namespace, svc.Name, err)
+func (p *portClaimWatcher) AddService(svc *kapi.Service) error {
+	var errors []error
+	if raw_errors := handleService(svc, p.port.open); len(errors) > 0 {
+		for _, err := range raw_errors {
+			errors = append(errors, fmt.Errorf("error claiming port for service: %s/%s: %v", svc.Namespace, svc.Name, err))
 		}
 	}
+	return apierrors.NewAggregate(errors)
 }
 
-func (p *portClaimWatcher) UpdateService(old, new *kapi.Service) {
+func (p *portClaimWatcher) UpdateService(old, new *kapi.Service) error {
 	if reflect.DeepEqual(old.Spec.ExternalIPs, new.Spec.ExternalIPs) && reflect.DeepEqual(old.Spec.Ports, new.Spec.Ports) {
-		return
+		return nil
 	}
-	errors := []error{}
-	errors = append(errors, handleService(old, p.port.close)...)
-	errors = append(errors, handleService(new, p.port.open)...)
-	if len(errors) > 0 {
-		for _, err := range errors {
-			klog.Errorf("Error updating port claim for service: %s/%s: %v", old.Namespace, old.Name, err)
+	var errors, raw_errors []error
+	raw_errors = append(raw_errors, handleService(old, p.port.close)...)
+	raw_errors = append(raw_errors, handleService(new, p.port.open)...)
+	if len(raw_errors) > 0 {
+		for _, err := range raw_errors {
+			errors = append(errors, fmt.Errorf("error updating port claim for service: %s/%s: %v", old.Namespace, old.Name, err))
 		}
 	}
+	return apierrors.NewAggregate(errors)
 }
 
-func (p *portClaimWatcher) DeleteService(svc *kapi.Service) {
-	if errors := handleService(svc, p.port.close); len(errors) > 0 {
-		for _, err := range errors {
-			klog.Errorf("Error removing port claim for service: %s/%s: %v", svc.Namespace, svc.Name, err)
+func (p *portClaimWatcher) DeleteService(svc *kapi.Service) error {
+	var errors []error
+	if raw_errors := handleService(svc, p.port.close); len(raw_errors) > 0 {
+		for _, err := range raw_errors {
+			errors = append(errors, fmt.Errorf("error removing port claim for service: %s/%s: %v", svc.Namespace, svc.Name, err))
 		}
+		return apierrors.NewAggregate(errors)
 	}
+	return nil
 }
 
 func (p *portClaimWatcher) SyncServices(objs []interface{}) error {

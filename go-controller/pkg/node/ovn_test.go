@@ -49,7 +49,7 @@ func (o *FakeOVNNode) start(ctx *cli.Context, objects ...runtime.Object) {
 	o.fakeClient = &util.OVNClientset{
 		KubeClient: fake.NewSimpleClientset(v1Objects...),
 	}
-	o.init()
+	o.init() // initializes the node
 }
 
 func (o *FakeOVNNode) restart() {

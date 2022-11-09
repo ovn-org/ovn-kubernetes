@@ -24,8 +24,9 @@ import (
 
 	"k8s.io/klog/v2"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/record"
 )
 
@@ -120,13 +121,15 @@ type server struct {
 func (hcs *server) SyncServices(newServices map[types.NamespacedName]uint16) error {
 	hcs.lock.Lock()
 	defer hcs.lock.Unlock()
-
+	var err error
+	var errors []error
 	// Remove any that are not needed any more.
 	for nsn, svc := range hcs.services {
 		if port, found := newServices[nsn]; !found || port != svc.port {
 			klog.Infof("Closing healthcheck %q on port %d", nsn.String(), svc.port)
-			if err := svc.listener.Close(); err != nil {
-				klog.Errorf("Close(%v): %v", svc.listener.Addr(), err)
+			if err = svc.listener.Close(); err != nil {
+				errors = append(errors, fmt.Errorf("Close(%v): %v", svc.listener.Addr(), err))
+				continue
 			}
 			delete(hcs.services, nsn)
 		}
@@ -143,7 +146,6 @@ func (hcs *server) SyncServices(newServices map[types.NamespacedName]uint16) err
 		svc := &hcInstance{port: port}
 		addr := fmt.Sprintf(":%d", port)
 		svc.server = hcs.httpFactory.New(addr, hcHandler{name: nsn, hcs: hcs})
-		var err error
 		svc.listener, err = hcs.listener.Listen(addr)
 		if err != nil {
 			msg := fmt.Sprintf("node %s failed to start healthcheck %q on port %d: %v", hcs.hostname, nsn.String(), port, err)
@@ -157,7 +159,7 @@ func (hcs *server) SyncServices(newServices map[types.NamespacedName]uint16) err
 						UID:       types.UID(nsn.String()),
 					}, v1.EventTypeWarning, "FailedToStartServiceHealthcheck", msg)
 			}
-			klog.Error(msg)
+			errors = append(errors, fmt.Errorf(msg))
 			continue
 		}
 		hcs.services[nsn] = svc
@@ -172,7 +174,7 @@ func (hcs *server) SyncServices(newServices map[types.NamespacedName]uint16) err
 			klog.V(5).Infof("Healthcheck %q closed", nsn.String())
 		}(nsn, svc)
 	}
-	return nil
+	return apierrors.NewAggregate(errors)
 }
 
 type hcInstance struct {

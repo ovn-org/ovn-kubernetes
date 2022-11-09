@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 	kapi "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -62,12 +63,19 @@ type iptRule struct {
 }
 
 func addIptRules(rules []iptRule) error {
-	var addErrors error
+	var addErrors, err error
+	var ipt util.IPTablesHelper
 	for _, r := range rules {
-		klog.V(5).Infof("Adding rule in table: %s, chain: %s with args: \"%s\" for protocol: %v ", r.table, r.chain, strings.Join(r.args, " "), r.protocol)
-		ipt, _ := util.GetIPTablesHelper(r.protocol)
-		if err := ipt.NewChain(r.table, r.chain); err != nil {
-			klog.V(5).Infof("Chain: \"%s\" in table: \"%s\" already exists, skipping creation: %v", r.chain, r.table, err)
+		klog.V(5).Infof("Adding rule in table: %s, chain: %s with args: \"%s\" for protocol: %v ",
+			r.table, r.chain, strings.Join(r.args, " "), r.protocol)
+		if ipt, err = util.GetIPTablesHelper(r.protocol); err != nil {
+			addErrors = errors.Wrapf(addErrors,
+				"Failed to add iptables %s/%s rule %q: %v", r.table, r.chain, strings.Join(r.args, " "), err)
+			continue
+		}
+		if err = ipt.NewChain(r.table, r.chain); err != nil {
+			klog.V(5).Infof("Chain: \"%s\" in table: \"%s\" already exists, skipping creation: %v",
+				r.chain, r.table, err)
 		}
 		exists, err := ipt.Exists(r.table, r.chain, r.args...)
 		if !exists && err == nil {
@@ -82,10 +90,16 @@ func addIptRules(rules []iptRule) error {
 }
 
 func delIptRules(rules []iptRule) error {
-	var delErrors error
+	var delErrors, err error
+	var ipt util.IPTablesHelper
 	for _, r := range rules {
-		klog.V(5).Infof("Deleting rule in table: %s, chain: %s with args: \"%s\" for protocol: %v ", r.table, r.chain, strings.Join(r.args, " "), r.protocol)
-		ipt, _ := util.GetIPTablesHelper(r.protocol)
+		klog.V(5).Infof("Deleting rule in table: %s, chain: %s with args: \"%s\" for protocol: %v ",
+			r.table, r.chain, strings.Join(r.args, " "), r.protocol)
+		if ipt, err = util.GetIPTablesHelper(r.protocol); err != nil {
+			delErrors = errors.Wrapf(delErrors,
+				"Failed to delete iptables %s/%s rule %q: %v", r.table, r.chain, strings.Join(r.args, " "), err)
+			continue
+		}
 		if exists, err := ipt.Exists(r.table, r.chain, r.args...); err == nil && exists {
 			err := ipt.Delete(r.table, r.chain, r.args...)
 			if err != nil {
@@ -407,16 +421,23 @@ func cleanupSharedGatewayIPTChains() {
 	}
 }
 
-func recreateIPTRules(table, chain string, keepIPTRules []iptRule) {
+func recreateIPTRules(table, chain string, keepIPTRules []iptRule) error {
+	var errors []error
+	var err error
+	var ipt util.IPTablesHelper
 	for _, proto := range clusterIPTablesProtocols() {
-		ipt, _ := util.GetIPTablesHelper(proto)
-		if err := ipt.ClearChain(table, chain); err != nil {
-			klog.Errorf("Error clearing chain: %s in table: %s, err: %v", chain, table, err)
+		if ipt, err = util.GetIPTablesHelper(proto); err != nil {
+			errors = append(errors, err)
+			continue
+		}
+		if err = ipt.ClearChain(table, chain); err != nil {
+			errors = append(errors, fmt.Errorf("error clearing chain: %s in table: %s, err: %v", chain, table, err))
 		}
 	}
-	if err := addIptRules(keepIPTRules); err != nil {
-		klog.Error(err)
+	if err = addIptRules(keepIPTRules); err != nil {
+		errors = append(errors, err)
 	}
+	return apierrors.NewAggregate(errors)
 }
 
 // getGatewayIPTRules returns ClusterIP, NodePort, ExternalIP and LoadBalancer iptables rules for service.

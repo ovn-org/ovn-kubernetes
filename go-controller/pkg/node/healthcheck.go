@@ -18,6 +18,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -45,106 +46,121 @@ func newLoadBalancerHealthChecker(nodeName string, watchFactory factory.NodeWatc
 	}
 }
 
-func (l *loadBalancerHealthChecker) AddService(svc *kapi.Service) {
+func (l *loadBalancerHealthChecker) AddService(svc *kapi.Service) error {
 	if svc.Spec.HealthCheckNodePort != 0 {
 		l.Lock()
 		defer l.Unlock()
 		name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
 		l.services[name] = uint16(svc.Spec.HealthCheckNodePort)
-		_ = l.server.SyncServices(l.services)
+		return l.server.SyncServices(l.services)
 	}
+	return nil
 }
 
-func (l *loadBalancerHealthChecker) UpdateService(old, new *kapi.Service) {
+func (l *loadBalancerHealthChecker) UpdateService(old, new *kapi.Service) error {
 	// if the ETP values have changed between local and cluster,
 	// we need to update health checks accordingly
 	// HealthCheckNodePort is used only in ETP=local mode
+	var err error
+	var errors []error
 	if old.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeCluster &&
 		new.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeLocal {
-		l.AddService(new)
+		if err = l.AddService(new); err != nil {
+			errors = append(errors, err)
+		}
 		epSlices, err := l.watchFactory.GetEndpointSlices(new.Namespace, new.Name)
 		if err != nil {
-			klog.V(4).Infof("Could not fetch endpointslices for service %s/%s during health check update service", new.Namespace, new.Name)
+			errors = append(errors, fmt.Errorf("could not fetch endpointslices "+
+				"for service %s/%s during health check update service: %v",
+				new.Namespace, new.Name, err))
+			return apierrors.NewAggregate(errors)
 		}
 		namespacedName := ktypes.NamespacedName{Namespace: new.Namespace, Name: new.Name}
 		l.Lock()
 		l.endpoints[namespacedName] = l.CountLocalEndpointAddresses(epSlices)
-		_ = l.server.SyncEndpoints(l.endpoints)
+		if err = l.server.SyncEndpoints(l.endpoints); err != nil {
+			errors = append(errors, err)
+		}
 		l.Unlock()
 	}
 	if old.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeLocal &&
 		new.Spec.ExternalTrafficPolicy == kapi.ServiceExternalTrafficPolicyTypeCluster {
-		l.DeleteService(old)
+		if err = l.DeleteService(old); err != nil {
+			errors = append(errors, err)
+		}
 	}
+	return apierrors.NewAggregate(errors)
 }
 
-func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) {
+func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) error {
 	if svc.Spec.HealthCheckNodePort != 0 {
 		l.Lock()
 		defer l.Unlock()
 		name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
 		delete(l.services, name)
 		delete(l.endpoints, name)
-		_ = l.server.SyncServices(l.services)
+		return l.server.SyncServices(l.services)
 	}
+	return nil
 }
 
 func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) error {
 	return nil
 }
 
-func (l *loadBalancerHealthChecker) SyncEndPointSlices(epSlice *discovery.EndpointSlice) {
+func (l *loadBalancerHealthChecker) SyncEndPointSlices(epSlice *discovery.EndpointSlice) error {
 	namespacedName, err := namespacedNameFromEPSlice(epSlice)
 	if err != nil {
-		klog.Errorf("Skipping %s/%s: %v", epSlice.Namespace, epSlice.Name, err)
-		return
+		return fmt.Errorf("skipping %s/%s: %v", epSlice.Namespace, epSlice.Name, err)
 	}
 	epSlices, err := l.watchFactory.GetEndpointSlices(epSlice.Namespace, epSlice.Labels[discovery.LabelServiceName])
 	if err != nil {
 		// should be a rare occurence
-		klog.V(4).Infof("Could not fetch endpointslices for %s during health check", namespacedName.String())
+		return fmt.Errorf("could not fetch all endpointslices for service %s during health check", namespacedName.String())
 	}
 
 	localEndpointAddressCount := l.CountLocalEndpointAddresses(epSlices)
 	if len(epSlices) == 0 {
-		// let's delete it from cache and wait for the next update; this will show as 0 endpoints for health checks
+		// let's delete it from cache and wait for the next update;
+		// this will show as 0 endpoints for health checks
 		delete(l.endpoints, namespacedName)
 	} else {
 		l.endpoints[namespacedName] = localEndpointAddressCount
 	}
-	_ = l.server.SyncEndpoints(l.endpoints)
+	return l.server.SyncEndpoints(l.endpoints)
 }
 
-func (l *loadBalancerHealthChecker) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
+func (l *loadBalancerHealthChecker) AddEndpointSlice(epSlice *discovery.EndpointSlice) error {
 	namespacedName, err := namespacedNameFromEPSlice(epSlice)
 	if err != nil {
-		klog.Errorf("Skipping %s/%s: %v", epSlice.Namespace, epSlice.Name, err)
-		return
+		return fmt.Errorf("cannot add %s/%s to loadBalancerHealthChecker: %v", epSlice.Namespace, epSlice.Name, err)
 	}
 	l.Lock()
 	defer l.Unlock()
 	if _, exists := l.services[namespacedName]; exists {
-		l.SyncEndPointSlices(epSlice)
+		return l.SyncEndPointSlices(epSlice)
 	}
+	return nil
 }
 
-func (l *loadBalancerHealthChecker) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) {
+func (l *loadBalancerHealthChecker) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) error {
 	namespacedName, err := namespacedNameFromEPSlice(newEpSlice)
 	if err != nil {
-		klog.Errorf("Skipping %s/%s: %v", newEpSlice.Namespace, newEpSlice.Name, err)
-		return
+		return fmt.Errorf("cannot update %s/%s in loadBalancerHealthChecker: %v",
+			newEpSlice.Namespace, newEpSlice.Name, err)
 	}
 	l.Lock()
 	defer l.Unlock()
 	if _, exists := l.services[namespacedName]; exists {
-		l.SyncEndPointSlices(newEpSlice)
+		return l.SyncEndPointSlices(newEpSlice)
 	}
+	return nil
 }
 
-func (l *loadBalancerHealthChecker) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
+func (l *loadBalancerHealthChecker) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) error {
 	l.Lock()
 	defer l.Unlock()
-	l.SyncEndPointSlices(epSlice)
+	return l.SyncEndPointSlices(epSlice)
 }
 
 // CountLocalEndpointAddresses returns the number of IP addresses from ready endpoints that are local
