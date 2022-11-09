@@ -13,6 +13,7 @@ import (
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 	kapi "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
@@ -21,7 +22,7 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
 
@@ -44,8 +45,23 @@ func (oc *Controller) syncPods(pods []interface{}) error {
 			}
 			logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 			expectedLogicalPorts[logicalPort] = true
+			// it is possible to try to add a pod here that has no node. For example if a pod was deleted with
+			// a finalizer, and then the node was removed. In this case the pod will still exist in a running state.
+			// Terminating pods should still have network connectivity for pre-stop hooks or termination grace period
+			if _, err := oc.watchFactory.GetNode(pod.Spec.NodeName); kerrors.IsNotFound(err) &&
+				oc.lsManager.GetSwitchSubnets(pod.Spec.NodeName) == nil {
+				if util.PodTerminating(pod) {
+					klog.Infof("Ignoring IP allocation for terminating pod: %s/%s, on deleted "+
+						"node: %s", pod.Namespace, pod.Name, pod.Spec.NodeName)
+					continue
+				} else {
+					// unknown condition how we are getting a non-terminating pod without a node here
+					klog.Errorf("Pod IP allocation found for a non-existent node in API with unknown "+
+						"condition. Pod: %s/%s, node: %s", pod.Namespace, pod.Name, pod.Spec.NodeName)
+				}
+			}
 			if err = oc.waitForNodeLogicalSwitchInCache(pod.Spec.NodeName); err != nil {
-				return fmt.Errorf("failed to wait for node %s to be added to cache. IP allocation may fail!",
+				return fmt.Errorf("failed to wait for node %s to be added to cache. IP allocation may fail",
 					pod.Spec.NodeName)
 			}
 			if err = oc.lsManager.AllocateIPs(pod.Spec.NodeName, annotations.IPs); err != nil {
@@ -413,6 +429,20 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		klog.Infof("[%s/%s] addLogicalPort took %v, libovsdb time %v, annotation time: %v",
 			pod.Namespace, pod.Name, time.Since(start), libovsdbExecuteTime, podAnnoTime)
 	}()
+
+	// it is possible to try to add a pod here that has no node. For example if a pod was deleted with
+	// a finalizer, and then the node was removed. In this case the pod will still exist in a running state.
+	// Terminating pods should still have network connectivity for pre-stop hooks or termination grace period
+	// We cannot wire a pod that has no node/switch, so retry again later
+	if _, err := oc.watchFactory.GetNode(pod.Spec.NodeName); kerrors.IsNotFound(err) &&
+		oc.lsManager.GetSwitchSubnets(pod.Spec.NodeName) == nil {
+		podState := "unknown"
+		if util.PodTerminating(pod) {
+			podState = "terminating"
+		}
+		return fmt.Errorf("[%s/%s] Non-existent node: %s in API for pod with %s state",
+			pod.Namespace, pod.Name, pod.Spec.NodeName, podState)
+	}
 
 	logicalSwitch := pod.Spec.NodeName
 	ls, err := oc.waitForNodeLogicalSwitch(logicalSwitch)
