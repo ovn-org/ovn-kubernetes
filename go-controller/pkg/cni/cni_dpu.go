@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -21,15 +20,15 @@ func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, podL
 		}
 
 		cpod := pod.DeepCopy()
-		cpod.Annotations, err = util.MarshalPodDPUConnDetails(cpod.Annotations, dpuConnDetails, types.DefaultNetworkName)
+		cpod.Annotations, err = util.MarshalPodDPUConnDetails(cpod.Annotations, dpuConnDetails, pr.nadName)
 		if err != nil {
 			return err
 		}
 		return kube.UpdatePod(cpod)
 	})
 	if resultErr != nil {
-		return fmt.Errorf("failed to update %s annotation on pod %s/%s: %v",
-			util.DPUConnectionDetailsAnnot, pr.PodNamespace, pr.PodName, resultErr)
+		return fmt.Errorf("failed to update %s annotation on pod %s/%s for NAD %s: %v",
+			util.DPUConnectionDetailsAnnot, pr.PodNamespace, pr.PodName, pr.nadName, resultErr)
 	}
 	return nil
 }

@@ -108,9 +108,14 @@ func (pr *PodRequest) getVFNetdevName() (string, error) {
 }
 
 func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface) (*Response, error) {
+	namespace := pr.PodNamespace
+	podName := pr.PodName
+	if namespace == "" || podName == "" {
+		return nil, fmt.Errorf("required CNI variable missing")
+	}
+
 	kubecli := &kube.Kube{KClient: kclient}
 	annotCondFn := isOvnReady
-
 	vfNetdevName := ""
 	if pr.CNIConf.DeviceID != "" {
 		var err error
@@ -132,15 +137,16 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 	}
 	// Get the IP address and MAC address of the pod
 	// for DPU, ensure connection-details is present
-	podUID, annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, pr.PodNamespace, pr.PodName, annotCondFn)
+	podUID, annotations, podNADAnnotation, err := GetPodAnnotations(pr.ctx, podLister, kclient, namespace, podName,
+		pr.nadName, annotCondFn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
 	if err := pr.checkOrUpdatePodUID(podUID); err != nil {
 		return nil, err
 	}
-
-	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.PodUID, vfNetdevName)
+	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, podNADAnnotation, useOVSExternalIDs, pr.PodUID, vfNetdevName,
+		pr.nadName, pr.netName, pr.CNIConf.MTU)
 	if err != nil {
 		return nil, err
 	}
@@ -163,6 +169,12 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 	response := &Response{}
 	response.Result = &current.Result{}
 
+	namespace := pr.PodNamespace
+	podName := pr.PodName
+	if namespace == "" || podName == "" {
+		return nil, fmt.Errorf("required CNI variable missing")
+	}
+
 	vfNetdevName := ""
 	if pr.CNIConf.DeviceID != "" {
 		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
@@ -171,21 +183,34 @@ func (pr *PodRequest) cmdDel(podLister corev1listers.PodLister, kclient kubernet
 				klog.Warningf("Failed to get pod %s/%s: %v", pr.PodNamespace, pr.PodName, err)
 				return response, nil
 			}
-			dpuCD, err := util.UnmarshalPodDPUConnDetails(pod.Annotations, types.DefaultNetworkName)
+			dpuCD, err := util.UnmarshalPodDPUConnDetails(pod.Annotations, pr.nadName)
 			if err != nil {
-				klog.Warningf("Failed to get DPU connection details annotation for pod %s/%s: %v", pr.PodNamespace,
-					pr.PodName, err)
+				klog.Warningf("Failed to get DPU connection details annotation for pod %s/%s NAD %s: %v", pr.PodNamespace,
+					pr.PodName, pr.nadName, err)
 				return response, nil
 			}
 			vfNetdevName = dpuCD.VfNetdevName
 		} else {
-			ovsIfName := pr.SandboxID[:15]
-			out, err := ovsGet("interface", ovsIfName, "external_ids", "vf-netdev-name")
-			if err != nil {
-				klog.Warningf("Couldn't find the original VF Netdev name from OVS interface %s for pod %s/%s: %v",
-					ovsIfName, pr.PodNamespace, pr.PodName, err)
+			// Find the the hostInterface name
+			condString := "external-ids:sandbox=" + pr.SandboxID
+			if pr.netName != types.DefaultNetworkName {
+				condString += fmt.Sprintf(" external_ids:%s=%s", types.NADExternalID, pr.nadName)
 			} else {
-				vfNetdevName = out
+				condString += fmt.Sprintf(" external_ids:%s{=}[]", types.NADExternalID)
+			}
+			ovsIfNames, err := ovsFind("Interface", "name", condString)
+			if err != nil || len(ovsIfNames) != 1 {
+				klog.Warningf("Couldn't find the OVS interface for pod %s/%s NAD %s: %v",
+					pr.PodNamespace, pr.PodName, pr.nadName, err)
+			} else {
+				ovsIfName := ovsIfNames[0]
+				out, err := ovsGet("interface", ovsIfName, "external_ids", "vf-netdev-name")
+				if err != nil {
+					klog.Warningf("Couldn't find the original VF Netdev name from OVS interface %s for pod %s/%s: %v",
+						ovsIfName, pr.PodNamespace, pr.PodName, err)
+				} else {
+					vfNetdevName = out
+				}
 			}
 		}
 	}
