@@ -338,10 +338,13 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 // Deleted entries will be ignored, and all the updates will be reflected with key Lock.
 // Keys added after the snapshot was done won't be retried during this run.
 func (r *RetryFramework) iterateRetryResources() {
+	entriesKeys := r.retryEntries.GetKeys()
+	if len(entriesKeys) == 0 {
+		return
+	}
 	now := time.Now()
 	wg := &sync.WaitGroup{}
 
-	entriesKeys := r.retryEntries.GetKeys()
 	// Process the above list of objects that need retry by holding the lock for each one of them.
 	klog.V(5).Infof("Going to retry %v resource setup for %d objects: %s", r.ResourceHandler.ObjType, len(entriesKeys), entriesKeys)
 
