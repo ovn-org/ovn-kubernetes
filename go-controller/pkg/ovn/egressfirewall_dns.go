@@ -200,10 +200,14 @@ func (e *EgressDNS) Run(defaultInterval time.Duration) {
 			// find the domain name whose DNS entry will expire first and calculate when it will expire,
 			// set timer to what's sooner: default update interval or next expiration time
 			ttl, domainNameExpiringNext, timeSet = e.dns.GetNextQueryTime()
-			if time.Until(ttl) > defaultInterval || !timeSet {
+			ttlDuration := time.Until(ttl)
+			if ttlDuration > defaultInterval || !timeSet {
 				durationTillNextQuery = defaultInterval
+			} else if ttlDuration.Seconds() > 0 {
+				durationTillNextQuery = ttlDuration
 			} else {
-				durationTillNextQuery = time.Until(ttl)
+				// DNS entry is already expired, so trigger tick as soon as possible.
+				durationTillNextQuery = 1 * time.Millisecond
 			}
 			timer.Reset(durationTillNextQuery)
 		}
