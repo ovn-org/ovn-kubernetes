@@ -12,7 +12,7 @@
 # openvswitch-devel, openvswitch-ipsec, libpcap, iproute etc
 # ovn-kube-util, hybrid-overlay-node.exe, ovndbchecker and ovnkube-trace
 
-FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.18-openshift-4.12 AS builder
+FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.19-openshift-4.12 AS builder
 
 WORKDIR /go/src/github.com/openshift/ovn-kubernetes
 COPY . .
@@ -29,7 +29,7 @@ ENV PYTHONDONTWRITEBYTECODE yes
 RUN export ovsver=$(cat /ovs-version) && \
 	export ovnver=$(cat /ovn-version) && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.17 = $ovsver" "python3-openvswitch2.17 = $ovsver" && \
-        yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn22.06 = $ovnver" "ovn22.06-central = $ovnver" "ovn22.06-host = $ovnver" && \
+        yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn22.09 = $ovnver" "ovn22.09-central = $ovnver" "ovn22.09-host = $ovnver" && \
         yum clean all && rm -rf /var/cache/*
 
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube /usr/bin/
