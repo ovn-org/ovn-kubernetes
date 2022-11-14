@@ -258,7 +258,7 @@ func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableMultiNetwork {
+	if util.IsMultiNetworkPoliciesSupportEnabled() {
 		wf.informers[MultiNetworkPolicyType], err = newInformer(MultiNetworkPolicyType, wf.mnpFactory.K8sCniCncfIo().V1beta1().MultiNetworkPolicies().Informer())
 		if err != nil {
 			return nil, err
@@ -309,7 +309,7 @@ func (wf *WatchFactory) Start() error {
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableMultiNetwork && wf.mnpFactory != nil {
+	if util.IsMultiNetworkPoliciesSupportEnabled() && wf.mnpFactory != nil {
 		wf.mnpFactory.Start(wf.stopChan)
 		for oType, synced := range wf.mnpFactory.WaitForCacheSync(wf.stopChan) {
 			if !synced {

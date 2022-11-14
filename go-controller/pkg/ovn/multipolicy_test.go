@@ -257,6 +257,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		config.OVNKubernetesFeature.EnableMultiNetworkPolicy = true
 
 		app = cli.NewApp()
 		app.Name = "test"
