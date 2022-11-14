@@ -1469,7 +1469,7 @@ spec:
 		ginkgo.By("3. Create two pods, and matching service, matching both egress firewall and egress IP")
 		createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
 		createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
-		serviceIP, err := createServiceForPodsWithLabel(f, f.Namespace.Name, servicePort, podHTTPPort, "ClusterIP", podEgressLabel)
+		serviceIP, err := createServiceForPodsWithLabel(f, f.Namespace.Name, servicePort, podHTTPPort, 0, "ClusterIP", podEgressLabel)
 		framework.ExpectNoError(err, "Step 3. Create two pods, and matching service, matching both egress firewall and egress IP, failed creating service, err: %v", err)
 
 		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {

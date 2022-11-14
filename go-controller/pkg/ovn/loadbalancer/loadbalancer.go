@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/klog/v2"
@@ -252,9 +253,10 @@ func buildLB(lb *LB) *nbdb.LoadBalancer {
 	}
 
 	options := map[string]string{
-		"reject":    reject,
-		"event":     event,
-		"skip_snat": skipSNAT,
+		"reject":          reject,
+		"event":           event,
+		"skip_snat":       skipSNAT,
+		"hairpin_snat_ip": fmt.Sprintf("%s %s", types.V4OVNServiceHairpinMasqueradeIP, types.V6OVNServiceHairpinMasqueradeIP),
 	}
 
 	// Session affinity
