@@ -301,8 +301,13 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 func (oc *SecondaryLayer3NetworkController) initRetryFramework() {
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
-	oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
-	oc.retryNetworkPolicies = oc.newRetryFramework(factory.MultiNetworkPolicyType)
+
+	// For secondary networks, we don't have to watch namespace events if
+	// multi-network policy support is not enabled.
+	if util.IsMultiNetworkPoliciesSupportEnabled() {
+		oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
+		oc.retryNetworkPolicies = oc.newRetryFramework(factory.MultiNetworkPolicyType)
+	}
 }
 
 // newRetryFramework builds and returns a retry framework for the input resource type;

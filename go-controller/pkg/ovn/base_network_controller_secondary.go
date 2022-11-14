@@ -288,7 +288,7 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 		return err
 	}
 
-	if bsnc.doesNetworkRequireIPAM() {
+	if bsnc.doesNetworkRequireIPAM() && util.IsMultiNetworkPoliciesSupportEnabled() {
 		// Ensure the namespace/nsInfo exists
 		addOps, err := bsnc.addPodToNamespaceForSecondaryNetwork(pod.Namespace, podAnnotation.IPs)
 		if err != nil {
@@ -517,6 +517,10 @@ func (bsnc *BaseSecondaryNetworkController) deleteNamespace4SecondaryNetwork(ns 
 // WatchMultiNetworkPolicy starts the watching of multinetworkpolicy resource and calls
 // back the appropriate handler logic
 func (bsnc *BaseSecondaryNetworkController) WatchMultiNetworkPolicy() error {
+	if !util.IsMultiNetworkPoliciesSupportEnabled() {
+		return nil
+	}
+
 	// if this network does not have ipam, network policy is not supported.
 	if !bsnc.doesNetworkRequireIPAM() {
 		klog.Infof("Network policy is not supported on network %s", bsnc.GetNetworkName())

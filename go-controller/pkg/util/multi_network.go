@@ -635,3 +635,7 @@ func GetPodNADToNetworkMapping(pod *kapi.Pod, nInfo NetInfo) (bool, map[string]*
 	}
 	return true, networkSelections, nil
 }
+
+func IsMultiNetworkPoliciesSupportEnabled() bool {
+	return config.OVNKubernetesFeature.EnableMultiNetwork && config.OVNKubernetesFeature.EnableMultiNetworkPolicy
+}
