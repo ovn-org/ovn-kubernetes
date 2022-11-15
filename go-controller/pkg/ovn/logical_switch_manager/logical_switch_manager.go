@@ -283,19 +283,7 @@ func (manager *LogicalSwitchManager) AllocateNextIPs(nodeName string) ([]*net.IP
 	return ipnets, nil
 }
 
-func (manager *LogicalSwitchManager) AllocateHybridOverlay(nodeName string, hybridOverlayAnnotation []string) ([]*net.IPNet, error) {
-	if len(hybridOverlayAnnotation) > 0 {
-		var allocateAddresses []*net.IPNet
-		for _, ip := range hybridOverlayAnnotation {
-			allocateAddresses = append(allocateAddresses, &net.IPNet{IP: net.ParseIP(ip).To4(), Mask: net.CIDRMask(32, 32)})
-		}
-		err := manager.AllocateIPs(nodeName, allocateAddresses)
-		if err != nil {
-			return nil, err
-		}
-		return allocateAddresses, nil
-	}
-	// if we are not provided with any addresses
+func (manager *LogicalSwitchManager) AllocateHybridOverlay(nodeName string) ([]*net.IPNet, error) {
 	manager.RLock()
 	defer manager.RUnlock()
 
@@ -313,6 +301,7 @@ func (manager *LogicalSwitchManager) AllocateHybridOverlay(nodeName string, hybr
 	var allocatedAddresses []*net.IPNet
 	for _, ipv4IPAM := range ipv4IPAMS {
 		hostSubnet := ipv4IPAM.CIDR()
+		// try the .3 address of the hostSubnet as that was the old default
 		potentialHybridIFAddress := util.GetNodeHybridOverlayIfAddr(&hostSubnet)
 		err := ipv4IPAM.Allocate(potentialHybridIFAddress.IP)
 		if err == ipam.ErrAllocated {

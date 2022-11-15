@@ -335,17 +335,19 @@ func (oc *Controller) allocateHybridOverlayDRIP(node *kapi.Node) error {
 		return fmt.Errorf("cannot allocate hybrid overlay distributed router ip for nodes until all initial pods are processed")
 	}
 
-	var ips []string
-	// check if there is a hybrid distributed router IP set as an annotation
-	nodeHybridOverlayDRIP := node.Annotations[hotypes.HybridOverlayDRIP]
-	if len(nodeHybridOverlayDRIP) > 0 {
-		ips = strings.Split(nodeHybridOverlayDRIP, ",")
-	}
-
-	allocatedHybridOverlayDRIPs, err := oc.lsManager.AllocateHybridOverlay(node.Name, ips)
+	allocatedHybridOverlayDRIPs, err := oc.lsManager.AllocateHybridOverlay(node.Name)
 	if err != nil {
 		return fmt.Errorf("cannot allocate hybrid overlay interface addresses on node %s: %v", node.Name, err)
 	}
+	defer func() {
+		if err != nil {
+			err = oc.lsManager.ReleaseIPs(node.Name, allocatedHybridOverlayDRIPs)
+			if err != nil {
+				klog.Infof("Failed to cleanup hybrid overlay address for node %s on error (%v)", node.Name, err)
+
+			}
+		}
+	}()
 
 	var sliceHybridOverlayDRIP []string
 	for _, ip := range allocatedHybridOverlayDRIPs {

@@ -106,30 +106,6 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
-		ginkgo.It("creates IPAM for each subnet and reserves IPs correctly when HybridOverlay is enabled and address is passed", func() {
-			app.Action = func(ctx *cli.Context) error {
-				_, err := config.InitConfig(ctx, fexec, nil)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				testNode := testNodeSubnetData{
-					nodeName: "testNode1",
-					subnets: []string{
-						"10.1.1.0/24",
-						"2000::/64",
-					},
-				}
-				err = lsManager.AddNode(testNode.nodeName, "", ovntest.MustParseIPNets(testNode.subnets...))
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				allocatedHybridOverlayDRIP, err := lsManager.AllocateHybridOverlay(testNode.nodeName, []string{"10.1.1.53"})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				gomega.Expect(net.ParseIP("10.1.1.53").To4()).To(gomega.Equal(allocatedHybridOverlayDRIP[0].IP))
-				gomega.Expect(true).To(gomega.Equal(lsManager.isAllocatedIP(testNode.nodeName, "10.1.1.53")))
-
-				return nil
-			}
-			err := app.Run([]string{app.Name})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		})
 		ginkgo.It("creates IPAM for each subnet and reserves the .3 address for Hybrid Overlay by default", func() {
 			app.Action = func(ctx *cli.Context) error {
 				_, err := config.InitConfig(ctx, fexec, nil)
@@ -145,7 +121,7 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 
 				err = lsManager.AddNode(testNode.nodeName, "", ovntest.MustParseIPNets(testNode.subnets...))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				allocatedHybridOverlayDRIP, err := lsManager.AllocateHybridOverlay(testNode.nodeName, []string{})
+				allocatedHybridOverlayDRIP, err := lsManager.AllocateHybridOverlay(testNode.nodeName)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(net.ParseIP("10.1.1.3").To4()).To(gomega.Equal(allocatedHybridOverlayDRIP[0].IP))
 
@@ -175,7 +151,7 @@ var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 					{net.ParseIP("10.1.1.3").To4(), net.CIDRMask(32, 32)},
 				})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				allocatedHybridOverlayDRIP, err := lsManager.AllocateHybridOverlay(testNode.nodeName, []string{})
+				allocatedHybridOverlayDRIP, err := lsManager.AllocateHybridOverlay(testNode.nodeName)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// 10.1.1.4 is the next ip address
 				gomega.Expect(net.ParseIP("10.1.1.4").To4()).To(gomega.Equal(allocatedHybridOverlayDRIP[0].IP))
