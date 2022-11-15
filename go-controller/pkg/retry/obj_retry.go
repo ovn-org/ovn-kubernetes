@@ -528,7 +528,9 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 					if kerrors.IsNotFound(err) && r.ResourceHandler.IsObjectInTerminalState(newer) {
 						klog.Warningf("%s %s is in terminal state but no longer exists in informer cache, removing",
 							r.ResourceHandler.ObjType, newKey)
-						r.processObjectInTerminalState(newer, newKey, resourceEventUpdate)
+						r.DoWithLock(newKey, func(key string) {
+							r.processObjectInTerminalState(newer, newKey, resourceEventUpdate)
+						})
 					} else {
 						klog.Warningf("Unable to get %s %s from informer cache (perhaps it was already"+
 							" deleted?), skipping update: %v", r.ResourceHandler.ObjType, newKey, err)
