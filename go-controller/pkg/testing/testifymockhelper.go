@@ -15,6 +15,9 @@ type TestifyMockHelper struct {
 	// OnCallMethodArgType - argument types of the method that will be called.
 	// Refer the `Arguments` field at https://godoc.org/github.com/stretchr/testify/mock#Call
 	OnCallMethodArgType []string
+	// OnCallMethodArgs - argument values we expect to be passed to the method.
+	// Refer the `Arguments` field at https://godoc.org/github.com/stretchr/testify/mock#Call
+	OnCallMethodArgs []interface{}
 	// RetArgList - arguments returned by mock method when called.
 	// Refer the `ReturnArguments` field at https://godoc.org/github.com/stretchr/testify/mock#Call
 	RetArgList []interface{}
@@ -41,12 +44,16 @@ func ProcessMockFn(mockObj *mock.Mock, mArgs TestifyMockHelper) {
 		panic("mock object missing")
 	}
 	call := mockObj.On(mArgs.OnCallMethodName)
-	for _, arg := range mArgs.OnCallMethodArgType {
-		call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-	}
-	// append the repetitive arg types of `string` at the end
-	for i := 0; i < mArgs.OnCallMethodsArgsStrTypeAppendCount; i++ {
-		call.Arguments = append(call.Arguments, mock.AnythingOfType("string"))
+	if len(mArgs.OnCallMethodArgs) > 0 {
+		call.Arguments = mArgs.OnCallMethodArgs
+	} else {
+		for _, arg := range mArgs.OnCallMethodArgType {
+			call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
+		}
+		// append the repetitive arg types of `string` at the end
+		for i := 0; i < mArgs.OnCallMethodsArgsStrTypeAppendCount; i++ {
+			call.Arguments = append(call.Arguments, mock.AnythingOfType("string"))
+		}
 	}
 	for _, ret := range mArgs.RetArgList {
 		call.ReturnArguments = append(call.ReturnArguments, ret)

@@ -14,7 +14,10 @@ import (
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/urfave/cli/v2"
+	"github.com/vishvananda/netlink"
+
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -65,7 +68,7 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNClientset, fak
 	}
 
 	k := &kube.Kube{fakeClient.KubeClient, nil, nil, nil}
-	n.nodeIPManager = newAddressManager(fakeNodeName, k, fakeMgmtPortConfig, n.watchFactory)
+	n.nodeIPManager = newAddressManagerInternal(fakeNodeName, k, fakeMgmtPortConfig, n.watchFactory, false)
 	localHostNetEp := "192.168.18.15/32"
 	ip, _, _ := net.ParseCIDR(localHostNetEp)
 	n.nodeIPManager.addAddr(ip)
@@ -97,7 +100,7 @@ func startNodePortWatcherWithRetry(n *nodePortWatcher, fakeClient *util.OVNClien
 	}
 
 	k := &kube.Kube{fakeClient.KubeClient, nil, nil, nil}
-	n.nodeIPManager = newAddressManager(fakeNodeName, k, fakeMgmtPortConfig, n.watchFactory)
+	n.nodeIPManager = newAddressManagerInternal(fakeNodeName, k, fakeMgmtPortConfig, n.watchFactory, false)
 	localHostNetEp := "192.168.18.15/32"
 	ip, _, _ := net.ParseCIDR(localHostNetEp)
 	n.nodeIPManager.addAddr(ip)
@@ -158,6 +161,52 @@ func newEndpointSlice(svcName, namespace string, endpoints []discovery.Endpoint,
 	}
 }
 
+func makeConntrackFilter(ip string, port int, protocol kapi.Protocol) *netlink.ConntrackFilter {
+	filter := &netlink.ConntrackFilter{}
+
+	var err error
+	if protocol == kapi.ProtocolUDP {
+		err = filter.AddProtocol(17)
+	} else if protocol == kapi.ProtocolTCP {
+		err = filter.AddProtocol(6)
+	} else if protocol == kapi.ProtocolSCTP {
+		err = filter.AddProtocol(132)
+	}
+	Expect(err).NotTo(HaveOccurred())
+
+	if port > 0 {
+		err = filter.AddPort(netlink.ConntrackOrigDstPort, uint16(port))
+		Expect(err).NotTo(HaveOccurred())
+	}
+	ipAddress := net.ParseIP(ip)
+	Expect(ipAddress).NotTo(BeNil())
+	err = filter.AddIP(netlink.ConntrackOrigDstIP, ipAddress)
+	Expect(err).NotTo(HaveOccurred())
+
+	return filter
+}
+
+type ctFilterDesc struct {
+	ip   string
+	port int
+}
+
+func addConntrackMocks(nlMock *mocks.NetLinkOps, filterDescs []ctFilterDesc) {
+	ctMocks := make([]ovntest.TestifyMockHelper, 0, len(filterDescs))
+	for _, ctf := range filterDescs {
+		ctMocks = append(ctMocks, ovntest.TestifyMockHelper{
+			OnCallMethodName: "ConntrackDeleteFilter",
+			OnCallMethodArgs: []interface{}{
+				netlink.ConntrackTableType(netlink.ConntrackTable),
+				netlink.InetFamily(netlink.FAMILY_V4),
+				makeConntrackFilter(ctf.ip, ctf.port, kapi.ProtocolTCP),
+			},
+			RetArgList: []interface{}{uint(1), nil},
+		})
+	}
+	ovntest.ProcessMockFnList(&nlMock.Mock, ctMocks)
+}
+
 var _ = Describe("Node Operations", func() {
 	var (
 		app                *cli.App
@@ -166,11 +215,16 @@ var _ = Describe("Node Operations", func() {
 		iptV4, iptV6       util.IPTablesHelper
 		fNPW               *nodePortWatcher
 		fakeMgmtPortConfig managementPortConfig
+		netlinkMock        *mocks.NetLinkOps
 	)
+
+	origNetlinkInst := util.GetNetLinkOps()
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
 		Expect(config.PrepareTestConfig()).To(Succeed())
+		netlinkMock = &mocks.NetLinkOps{}
+		util.SetNetLinkOpMockInst(netlinkMock)
 
 		app = cli.NewApp()
 		app.Name = "test"
@@ -196,6 +250,10 @@ var _ = Describe("Node Operations", func() {
 			ipv6:      nil,
 		}
 		fNPW = initFakeNodePortWatcher(iptV4, iptV6)
+	})
+
+	AfterEach(func() {
+		util.SetNetLinkOpMockInst(origNetlinkInst)
 	})
 
 	Context("on startup", func() {
@@ -1239,6 +1297,8 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"1.1.1.1", 8032}, {"10.129.0.2", 8032}})
 				err := fNPW.DeleteService(&service)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
@@ -1319,6 +1379,8 @@ var _ = Describe("Node Operations", func() {
 
 				fNPW.watchFactory = fakeOvnNode.watcher
 				Expect(startNodePortWatcher(fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig)).To(Succeed())
+
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 0}, {"192.168.18.15", 31111}})
 				err := fNPW.DeleteService(&service)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
@@ -1447,6 +1509,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.10.10.1", 8034}, {"10.129.0.2", 8034}})
 				err = fNPW.DeleteService(&service)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -1676,6 +1739,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 38034}})
 				err = fNPW.DeleteService(&service)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -1810,6 +1874,7 @@ var _ = Describe("Node Operations", func() {
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
 
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
 				err = fNPW.DeleteService(&service)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -1954,6 +2019,7 @@ var _ = Describe("Node Operations", func() {
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(Equal(expectedFlows))
 
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
 				err = fNPW.DeleteService(&service)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -2100,6 +2166,7 @@ var _ = Describe("Node Operations", func() {
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(Equal(expectedFlows))
 
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
 				err = fNPW.DeleteService(&service)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -2245,6 +2312,7 @@ var _ = Describe("Node Operations", func() {
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(Equal(expectedFlows))
 
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
 				err = fNPW.DeleteService(&service)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -2390,6 +2458,7 @@ var _ = Describe("Node Operations", func() {
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(Equal(expectedFlows))
 
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
 				err = fNPW.DeleteService(&service)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -2551,6 +2620,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"5.5.5.5", 8080}, {"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
 				err = fNPW.DeleteService(&service)
 				Expect(err).NotTo(HaveOccurred())
 
