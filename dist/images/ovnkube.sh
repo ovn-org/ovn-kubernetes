@@ -726,6 +726,10 @@ nb-ovsdb() {
     ovn-nbctl set-ssl ${ovn_nb_pk} ${ovn_nb_cert} ${ovn_ca_cert}
     echo "=============== nb-ovsdb ========== reconfigured for SSL"
   }
+ [[ "true" == "${ENABLE_IPSEC}" ]] && {
+    ovn-nbctl set nb_global . ipsec=true
+    echo "=============== nb-ovsdb ========== reconfigured for ipsec"
+  }
   ovn-nbctl --inactivity-probe=0 set-connection p${transport}:${ovn_nb_port}:$(bracketify ${ovn_db_host})
   if memory_trim_on_compaction_supported "nbdb"
   then
