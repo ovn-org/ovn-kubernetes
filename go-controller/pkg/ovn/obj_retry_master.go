@@ -778,7 +778,7 @@ func (h *masterEventHandler) SyncFunc(objs []interface{}) error {
 	return syncFunc(objs)
 }
 
-// Given an object and its type, IsObjectInTerminalState returns true if the object is a in terminal state.
+// IsObjectInTerminalState returns true if the object is in a terminal state.
 // This is used now for pods that are either in a PodSucceeded or in a PodFailed state.
 func (h *masterEventHandler) IsObjectInTerminalState(obj interface{}) bool {
 	switch h.objType {
