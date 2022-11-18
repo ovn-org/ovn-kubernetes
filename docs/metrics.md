@@ -17,6 +17,7 @@ Measurement accuracy can be impacted by other parallel processing that might be 
 ## Change log
 This list is to help notify if there are additions, changes or removals to metrics.
 
+- Update description of ovnkube_master_pod_creation_latency_seconds
 - Add libovsdb metrics - ovnkube_master_libovsdb_disconnects_total and ovnkube_master_libovsdb_monitors.
 - Add ovn_controller_southbound_database_connected metric (https://github.com/ovn-org/ovn-kubernetes/pull/3117).
 - Stopwatch metrics now report in seconds instead of milliseconds.
