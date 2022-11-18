@@ -46,6 +46,17 @@ func GetNewObjFieldFromRetryObj(key string, r *RetryFramework) interface{} {
 	return nil
 }
 
+func SetNewObjFieldInRetryObj(key string, r *RetryFramework, newObj interface{}) bool {
+	r.retryEntries.LockKey(key)
+	defer r.retryEntries.UnlockKey(key)
+	obj, exists := r.getRetryObj(key)
+	if exists && obj != nil {
+		obj.newObj = newObj
+		return true
+	}
+	return false
+}
+
 func GetConfigFromRetryObj(key string, r *RetryFramework) interface{} {
 	r.retryEntries.LockKey(key)
 	defer r.retryEntries.UnlockKey(key)

@@ -15,7 +15,7 @@ import (
 	"github.com/safchain/ethtool"
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
-	"k8s.io/client-go/tools/cache"
+	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 )
 
@@ -43,51 +43,89 @@ type gateway struct {
 	nodeIPManager   *addressManager
 	initFunc        func() error
 	readyFunc       func() (bool, error)
+
+	watchFactory *factory.WatchFactory // used for retry
 }
 
-func (g *gateway) AddService(svc *kapi.Service) {
+func (g *gateway) AddService(svc *kapi.Service) error {
+	var err error
+	var errors []error
+
 	if g.portClaimWatcher != nil {
-		g.portClaimWatcher.AddService(svc)
+		if err = g.portClaimWatcher.AddService(svc); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.AddService(svc)
+		if err = g.loadBalancerHealthChecker.AddService(svc); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.AddService(svc)
+		if err = g.nodePortWatcher.AddService(svc); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.nodePortWatcherIptables != nil {
-		g.nodePortWatcherIptables.AddService(svc)
+		if err = g.nodePortWatcherIptables.AddService(svc); err != nil {
+			errors = append(errors, err)
+		}
 	}
+	return apierrors.NewAggregate(errors)
 }
 
-func (g *gateway) UpdateService(old, new *kapi.Service) {
+func (g *gateway) UpdateService(old, new *kapi.Service) error {
+	var err error
+	var errors []error
+
 	if g.portClaimWatcher != nil {
-		g.portClaimWatcher.UpdateService(old, new)
+		if err = g.portClaimWatcher.UpdateService(old, new); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.UpdateService(old, new)
+		if err = g.loadBalancerHealthChecker.UpdateService(old, new); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.UpdateService(old, new)
+		if err = g.nodePortWatcher.UpdateService(old, new); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.nodePortWatcherIptables != nil {
-		g.nodePortWatcherIptables.UpdateService(old, new)
+		if err = g.nodePortWatcherIptables.UpdateService(old, new); err != nil {
+			errors = append(errors, err)
+		}
 	}
+	return apierrors.NewAggregate(errors)
 }
 
-func (g *gateway) DeleteService(svc *kapi.Service) {
+func (g *gateway) DeleteService(svc *kapi.Service) error {
+	var err error
+	var errors []error
+
 	if g.portClaimWatcher != nil {
-		g.portClaimWatcher.DeleteService(svc)
+		if err = g.portClaimWatcher.DeleteService(svc); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.DeleteService(svc)
+		if err = g.loadBalancerHealthChecker.DeleteService(svc); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.DeleteService(svc)
+		if err = g.nodePortWatcher.DeleteService(svc); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.nodePortWatcherIptables != nil {
-		g.nodePortWatcherIptables.DeleteService(svc)
+		if err = g.nodePortWatcherIptables.DeleteService(svc); err != nil {
+			errors = append(errors, err)
+		}
 	}
+	return apierrors.NewAggregate(errors)
 }
 
 func (g *gateway) SyncServices(objs []interface{}) error {
@@ -110,76 +148,73 @@ func (g *gateway) SyncServices(objs []interface{}) error {
 	return nil
 }
 
-func (g *gateway) AddEndpointSlice(epSlice *discovery.EndpointSlice) {
+func (g *gateway) AddEndpointSlice(epSlice *discovery.EndpointSlice) error {
+	var err error
+	var errors []error
+
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.AddEndpointSlice(epSlice)
+		if err = g.loadBalancerHealthChecker.AddEndpointSlice(epSlice); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.AddEndpointSlice(epSlice)
+		if err = g.nodePortWatcher.AddEndpointSlice(epSlice); err != nil {
+			errors = append(errors, err)
+		}
 	}
+	return apierrors.NewAggregate(errors)
+
 }
 
-func (g *gateway) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) {
+func (g *gateway) UpdateEndpointSlice(oldEpSlice, newEpSlice *discovery.EndpointSlice) error {
+	var err error
+	var errors []error
+
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.UpdateEndpointSlice(oldEpSlice, newEpSlice)
+		if err = g.loadBalancerHealthChecker.UpdateEndpointSlice(oldEpSlice, newEpSlice); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.UpdateEndpointSlice(oldEpSlice, newEpSlice)
+		if err = g.nodePortWatcher.UpdateEndpointSlice(oldEpSlice, newEpSlice); err != nil {
+			errors = append(errors, err)
+		}
 	}
+	return apierrors.NewAggregate(errors)
+
 }
 
-func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) {
+func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) error {
+	var err error
+	var errors []error
+
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.DeleteEndpointSlice(epSlice)
+		if err = g.loadBalancerHealthChecker.DeleteEndpointSlice(epSlice); err != nil {
+			errors = append(errors, err)
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.DeleteEndpointSlice(epSlice)
+		if err = g.nodePortWatcher.DeleteEndpointSlice(epSlice); err != nil {
+			errors = append(errors, err)
+		}
 	}
+	return apierrors.NewAggregate(errors)
+
 }
 
 func (g *gateway) Init(wf factory.NodeWatchFactory) error {
-	err := g.initFunc()
-	if err != nil {
+	var err error
+	if err = g.initFunc(); err != nil {
 		return err
 	}
-	_, err = wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			svc := obj.(*kapi.Service)
-			g.AddService(svc)
-		},
-		UpdateFunc: func(old, new interface{}) {
-			oldSvc := old.(*kapi.Service)
-			newSvc := new.(*kapi.Service)
-			g.UpdateService(oldSvc, newSvc)
-		},
-		DeleteFunc: func(obj interface{}) {
-			svc := obj.(*kapi.Service)
-			g.DeleteService(svc)
-		},
-	}, g.SyncServices)
-	if err != nil {
-		klog.Errorf("Gateway init failed to add service handler: %v", err)
-		return err
+	servicesRetryFramework := g.newRetryFrameworkNode(factory.ServiceForGatewayType)
+	if _, err = servicesRetryFramework.WatchResource(); err != nil {
+		return fmt.Errorf("gateway init failed to start watching services: %v", err)
 	}
 
-	_, err = wf.AddEndpointSliceHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			epSlice := obj.(*discovery.EndpointSlice)
-			g.AddEndpointSlice(epSlice)
-		},
-		UpdateFunc: func(old, new interface{}) {
-			oldEpSlice := old.(*discovery.EndpointSlice)
-			newEpSlice := new.(*discovery.EndpointSlice)
-			g.UpdateEndpointSlice(oldEpSlice, newEpSlice)
-		},
-		DeleteFunc: func(obj interface{}) {
-			epSlice := obj.(*discovery.EndpointSlice)
-			g.DeleteEndpointSlice(epSlice)
-		},
-	}, nil)
-	if err != nil {
-		klog.Errorf("Gateway init failed to add endpoints handler: %v", err)
-		return err
+	endpointSlicesRetryFramework := g.newRetryFrameworkNode(factory.EndpointSliceForGatewayType)
+	if _, err = endpointSlicesRetryFramework.WatchResource(); err != nil {
+		return fmt.Errorf("gateway init failed to start watching endpointslices: %v", err)
 	}
 	return nil
 }

@@ -179,12 +179,18 @@ func GetClusterIPs(service *kapi.Service) []string {
 func GetExternalAndLBIPs(service *kapi.Service) []string {
 	svcVIPs := []string{}
 	for _, externalIP := range service.Spec.ExternalIPs {
-		svcVIPs = append(svcVIPs, utilnet.ParseIPSloppy(externalIP).String())
+		parsedExternalIP := utilnet.ParseIPSloppy(externalIP)
+		if parsedExternalIP != nil {
+			svcVIPs = append(svcVIPs, parsedExternalIP.String())
+		}
 	}
 	if ServiceTypeHasLoadBalancer(service) {
 		for _, ingressVIP := range service.Status.LoadBalancer.Ingress {
 			if len(ingressVIP.IP) > 0 {
-				svcVIPs = append(svcVIPs, utilnet.ParseIPSloppy(ingressVIP.IP).String())
+				parsedIngressVIP := utilnet.ParseIPSloppy(ingressVIP.IP)
+				if parsedIngressVIP != nil {
+					svcVIPs = append(svcVIPs, parsedIngressVIP.String())
+				}
 			}
 		}
 	}

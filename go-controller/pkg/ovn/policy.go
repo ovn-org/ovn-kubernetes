@@ -174,8 +174,6 @@ type networkPolicy struct {
 	// handlers that don't require synchronization, since they are updated sequentially during network policy creation.
 	// local and peer pod handlers
 	podHandlerList []*factory.Handler
-	// peer service handlers
-	svcHandlerList []*factory.Handler
 	// peer namespace handlers
 	nsHandlerList []*factory.Handler
 	// peer namespaced pod handlers, the only type of handler that can be dynamically deleted without deleting the whole
@@ -212,7 +210,6 @@ func NewNetworkPolicy(policy *knet.NetworkPolicy) *networkPolicy {
 		isIngress:             policyTypeIngress,
 		isEgress:              policyTypeEgress,
 		podHandlerList:        make([]*factory.Handler, 0),
-		svcHandlerList:        make([]*factory.Handler, 0),
 		nsHandlerList:         make([]*factory.Handler, 0),
 		namespacedPodHandlers: sync.Map{},
 		localPods:             sync.Map{},
@@ -968,8 +965,6 @@ type policyHandler struct {
 	gress             *gressPolicy
 	namespaceSelector *metav1.LabelSelector
 	podSelector       *metav1.LabelSelector
-	// service handlers don't use selectors
-	serviceSelector bool
 }
 
 // createNetworkPolicy creates a network policy, should be retriable.
@@ -1054,11 +1049,6 @@ func (oc *Controller) createNetworkPolicy(policy *knet.NetworkPolicy, aclLogging
 				if err = ingress.ensurePeerAddressSet(oc.addressSetFactory); err != nil {
 					return err
 				}
-				// Start service handlers ONLY if there's an ingress Address Set
-				policyHandlers = append(policyHandlers, policyHandler{
-					gress:           ingress,
-					serviceSelector: true,
-				})
 			}
 			for _, fromJSON := range ingressJSON.From {
 				// Add IPBlock to ingress network policy
@@ -1169,8 +1159,6 @@ func (oc *Controller) createNetworkPolicy(policy *knet.NetworkPolicy, aclLogging
 				// For each peer pod selector, we create a watcher that
 				// populates the addressSet
 				err = oc.addPeerPodHandler(handler.podSelector, handler.gress, np)
-			} else if handler.serviceSelector {
-				err = oc.addPeerServiceHandler(policy, handler.gress, np)
 			}
 			if err != nil {
 				return fmt.Errorf("failed to start peer handler: %v", err)
@@ -1433,61 +1421,10 @@ func (oc *Controller) handlePeerPodSelectorDelete(np *networkPolicy, gp *gressPo
 	return nil
 }
 
-// handlePeerServiceSelectorAddUpdate adds the VIP of a service that selects
-// pods that are selected by the Network Policy
-func (oc *Controller) handlePeerServiceAdd(np *networkPolicy, gp *gressPolicy, service *kapi.Service) error {
-	klog.V(5).Infof("A Service: %s matches the namespace as the gress policy: %s", service.Name, gp.policyName)
-	np.RLock()
-	defer np.RUnlock()
-	if np.deleted {
-		return nil
-	}
-	// gressPolicy.addPeerSvcVip must be called with networkPolicy RLock.
-	return gp.addPeerSvcVip(oc.nbClient, service)
-}
-
-// handlePeerServiceDelete removes the VIP of a service that selects
-// pods that are selected by the Network Policy
-func (oc *Controller) handlePeerServiceDelete(np *networkPolicy, gp *gressPolicy, service *kapi.Service) error {
-	np.RLock()
-	defer np.RUnlock()
-	if np.deleted {
-		return nil
-	}
-	// gressPolicy.deletePeerSvcVip must be called with networkPolicy RLock.
-	return gp.deletePeerSvcVip(oc.nbClient, service)
-}
-
 type NetworkPolicyExtraParameters struct {
 	np          *networkPolicy
 	gp          *gressPolicy
 	podSelector labels.Selector
-}
-
-// addPeerServiceHandler starts a watcher for PeerServiceType.
-// It watches services that are in the same Namespace as the NP to account for hairpinned traffic
-// Add event for every existing namespace will be executed sequentially first, and an error will be
-// returned if something fails.
-// PeerServiceType uses handlePeerServiceAdd on Add, and handlePeerServiceDelete on Delete.
-func (oc *Controller) addPeerServiceHandler(
-	policy *knet.NetworkPolicy, gp *gressPolicy, np *networkPolicy) error {
-	// start watching services in the same namespace as the network policy
-	retryPeerServices := oc.newRetryFrameworkMasterWithParameters(
-		factory.PeerServiceType,
-		nil,
-		&NetworkPolicyExtraParameters{
-			gp: gp,
-			np: np,
-		})
-
-	serviceHandler, err := retryPeerServices.WatchResourceFiltered(policy.Namespace, nil)
-	if err != nil {
-		klog.Errorf("Failed WatchResource for addPeerServiceHandler: %v", err)
-		return err
-	}
-
-	np.svcHandlerList = append(np.svcHandlerList, serviceHandler)
-	return nil
 }
 
 // addPeerPodHandler starts a watcher for PeerPodSelectorType.
@@ -1763,10 +1700,6 @@ func (oc *Controller) shutdownHandlers(np *networkPolicy) {
 		oc.watchFactory.RemoveNamespaceHandler(handler)
 	}
 	np.nsHandlerList = make([]*factory.Handler, 0)
-	for _, handler := range np.svcHandlerList {
-		oc.watchFactory.RemoveServiceHandler(handler)
-	}
-	np.svcHandlerList = make([]*factory.Handler, 0)
 	np.namespacedPodHandlers.Range(func(_, value interface{}) bool {
 		oc.watchFactory.RemovePodHandler(value.(*factory.Handler))
 		return true
