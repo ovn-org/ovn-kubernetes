@@ -24,7 +24,7 @@ function testrun {
     local ginkgoargs=
     # enable go race detector
     # FIXME race detector fails with hybrid-overlay tests
-    if [[ ! -z "${RACE:-}" && "${pkg}" != "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller" ]]; then
+    if [[ ! -z "${RACE:-}" ]]; then
         args="-race "
     fi
     if [[ "$USER" != root && " ${root_pkgs[@]} " =~ " $pkg " && -z "${DOCKER_TEST:-}" ]]; then
