@@ -201,6 +201,11 @@ func addEnsureHybridOverlayBridgeMocks(nlMock *mocks.NetLinkOps) {
 			Index: 555,
 		},
 	}
+	mockVxlan := &fakeLink{
+		attrs: &netlink.LinkAttrs{
+			Index: 556,
+		},
+	}
 	mockMp0 := &fakeLink{
 		attrs: &netlink.LinkAttrs{
 			Index:        777,
@@ -228,6 +233,16 @@ func addEnsureHybridOverlayBridgeMocks(nlMock *mocks.NetLinkOps) {
 			OnCallMethodName: "LinkByName",
 			OnCallMethodArgs: []interface{}{"ovn-k8s-mp0"},
 			RetArgList:       []interface{}{mockMp0, nil},
+		},
+		{
+			OnCallMethodName: "LinkByName",
+			OnCallMethodArgs: []interface{}{fmt.Sprintf(OVSVXLANDeviceTemplate, config.HybridOverlay.VXLANPort)},
+			RetArgList:       []interface{}{mockVxlan, nil},
+		},
+		{
+			OnCallMethodName: "LinkSetUp",
+			OnCallMethodArgs: []interface{}{mockVxlan},
+			RetArgList:       []interface{}{nil},
 		},
 		{
 			OnCallMethodName: "RouteAdd",

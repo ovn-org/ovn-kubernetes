@@ -26,8 +26,9 @@ import (
 )
 
 const (
-	extBridgeName string = "br-ext"
-	extVXLANName  string = "ext-vxlan"
+	extBridgeName          string = "br-ext"
+	extVXLANName           string = "ext-vxlan"
+	OVSVXLANDeviceTemplate string = "vxlan_sys_%d"
 )
 
 type flowCacheEntry struct {
@@ -437,6 +438,13 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 	if err != nil {
 		return fmt.Errorf("failed to add VXLAN port for ovs bridge %s"+
 			", stderr:%s: %v", extBridgeName, stderr, err)
+	}
+
+	// bring VXLAN interface up if ever it was brought down by multiple network manager restarts
+	// in ovs-configure.sh
+	vxlan_interface := fmt.Sprintf(OVSVXLANDeviceTemplate, n.vxlanPort)
+	if _, err = util.LinkSetUpWithPolling(vxlan_interface, 50*time.Millisecond, time.Second); err != nil {
+		return fmt.Errorf("failed to bring up VXLAN interface %s: %v", vxlan_interface, err)
 	}
 
 	flows := make([]string, 0, 10)

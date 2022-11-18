@@ -15,6 +15,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -171,6 +172,28 @@ func LinkSetUp(interfaceName string) (netlink.Link, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to lookup link %s: %v", interfaceName, err)
 	}
+	err = netLinkOps.LinkSetUp(link)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set the link %s up: %v", interfaceName, err)
+	}
+	return link, nil
+}
+
+// LinkSetUpWithPolling polls netlink with the specifed interval and timeout
+// until the interface given as input exists and then returns the netlink device
+// with its state marked up
+func LinkSetUpWithPolling(interfaceName string, interval, timeout time.Duration) (netlink.Link, error) {
+	var link netlink.Link
+	var err error
+	if err = wait.PollImmediate(interval, timeout, func() (bool, error) {
+		if link, err = netLinkOps.LinkByName(interfaceName); err != nil {
+			return false, nil
+		}
+		return true, nil
+	}); err != nil {
+		return nil, fmt.Errorf("timed out waiting for %s to be created: %v", interfaceName, err)
+	}
+
 	err = netLinkOps.LinkSetUp(link)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set the link %s up: %v", interfaceName, err)
