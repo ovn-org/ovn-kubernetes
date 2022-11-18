@@ -87,7 +87,7 @@ func getMcastACLName(nsORpg, mcastSuffix string) string {
 // - one "to-lport" ACL allowing ingress multicast traffic to pods in 'ns'.
 //   This matches only traffic originated by pods in 'ns' (based on the
 //   namespace address set).
-func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInfo) error {
+func (oc *DefaultNetworkController) createMulticastAllowPolicy(ns string, nsInfo *namespaceInfo) error {
 	portGroupName := hashedPortGroup(ns)
 
 	aclT := lportEgressAfterLB
@@ -157,7 +157,7 @@ func deleteMulticastAllowPolicy(nbClient libovsdbclient.Client, ns string) error
 //   that are not allowed to receive multicast traffic.
 // - one ACL dropping ingress multicast traffic to all pods.
 // Caller must hold the namespace's namespaceInfo object lock.
-func (oc *Controller) createDefaultDenyMulticastPolicy() error {
+func (oc *DefaultNetworkController) createDefaultDenyMulticastPolicy() error {
 	match := getMulticastACLMatch()
 
 	// By default deny any egress multicast traffic from any pod. This drops
@@ -203,7 +203,7 @@ func (oc *Controller) createDefaultDenyMulticastPolicy() error {
 // - one ACL allowing multicast traffic from cluster router ports
 // - one ACL allowing multicast traffic to cluster router ports.
 // Caller must hold the namespace's namespaceInfo object lock.
-func (oc *Controller) createDefaultAllowMulticastPolicy() error {
+func (oc *DefaultNetworkController) createDefaultAllowMulticastPolicy() error {
 	mcastMatch := getMulticastACLMatch()
 
 	aclT := lportEgressAfterLB

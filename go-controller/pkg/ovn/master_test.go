@@ -871,7 +871,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		testNode          v1.Node
 		fakeClient        *util.OVNClientset
 		kubeFakeClient    *fake.Clientset
-		clusterController *Controller
+		clusterController *DefaultNetworkController
 		nodeAnnotator     kube.Annotator
 		events            []string
 		eventsLock        sync.Mutex
@@ -973,7 +973,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 		recorder = record.NewFakeRecorder(10)
 		clusterController = NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-			libovsdbOvnNBClient, libovsdbOvnSBClient, recorder)
+			libovsdbOvnNBClient, libovsdbOvnSBClient,
+			recorder, wg)
 		clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 		gomega.Expect(clusterController).NotTo(gomega.BeNil())
 		clusterController.defaultCOPPUUID, err = EnsureDefaultCOPP(libovsdbOvnNBClient)
@@ -1619,8 +1620,8 @@ func TestController_syncNodes(t *testing.T) {
 				addressset.NewFakeAddressSetFactory(),
 				nbClient,
 				sbClient,
-				record.NewFakeRecorder(0))
-
+				record.NewFakeRecorder(0),
+				&sync.WaitGroup{})
 			controller.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(nbClient, "", []string{})
 			if err != nil {
 				t.Fatalf("%s: Error creating joinSwIPManager: %v", tt.name, err)
@@ -1706,8 +1707,8 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 				addressset.NewFakeAddressSetFactory(),
 				nbClient,
 				sbClient,
-				record.NewFakeRecorder(0))
-
+				record.NewFakeRecorder(0),
+				&sync.WaitGroup{})
 			controller.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(nbClient, "", []string{})
 			if err != nil {
 				t.Fatalf("%s: Error creating joinSwIPManager: %v", tt.name, err)

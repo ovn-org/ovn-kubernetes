@@ -57,7 +57,7 @@ type namespaceInfo struct {
 
 // This function implements the main body of work of syncNamespaces.
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.
-func (oc *Controller) syncNamespaces(namespaces []interface{}) error {
+func (oc *DefaultNetworkController) syncNamespaces(namespaces []interface{}) error {
 	expectedNs := make(map[string]bool)
 	for _, nsInterface := range namespaces {
 		ns, ok := nsInterface.(*kapi.Namespace)
@@ -82,7 +82,7 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) error {
 	return nil
 }
 
-func (oc *Controller) getRoutingExternalGWs(nsInfo *namespaceInfo) *gatewayInfo {
+func (oc *DefaultNetworkController) getRoutingExternalGWs(nsInfo *namespaceInfo) *gatewayInfo {
 	res := gatewayInfo{}
 	// return a copy of the object so it can be handled without the
 	// namespace locked
@@ -107,7 +107,7 @@ func validateRoutingPodGWs(podGWs map[string]gatewayInfo) error {
 	return nil
 }
 
-func (oc *Controller) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]gatewayInfo {
+func (oc *DefaultNetworkController) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]gatewayInfo {
 	// return a copy of the object so it can be handled without the
 	// namespace locked
 	res := make(map[string]gatewayInfo)
@@ -123,7 +123,7 @@ func (oc *Controller) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]gateway
 
 // addPodToNamespace returns pod's routing gateway info and the ops needed
 // to add pod's IP to the namespace's address set.
-func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]gatewayInfo, []ovsdb.Operation, error) {
+func (oc *DefaultNetworkController) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayInfo, map[string]gatewayInfo, []ovsdb.Operation, error) {
 	var ops []ovsdb.Operation
 	var err error
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns, true, nil)
@@ -140,7 +140,7 @@ func (oc *Controller) addPodToNamespace(ns string, ips []*net.IPNet) (*gatewayIn
 	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), ops, nil
 }
 
-func (oc *Controller) deletePodFromNamespace(ns string, podIfAddrs []*net.IPNet, portUUID string) ([]ovsdb.Operation, error) {
+func (oc *DefaultNetworkController) deletePodFromNamespace(ns string, podIfAddrs []*net.IPNet, portUUID string) ([]ovsdb.Operation, error) {
 	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
 	if nsInfo == nil {
 		return nil, nil
@@ -179,7 +179,7 @@ func isNamespaceMulticastEnabled(annotations map[string]string) bool {
 // Creates an explicit "allow" policy for multicast traffic within the
 // namespace if multicast is enabled. Otherwise, removes the "allow" policy.
 // Traffic will be dropped by the default multicast deny ACL.
-func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) error {
+func (oc *DefaultNetworkController) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) error {
 	if !oc.multicastSupport {
 		return nil
 	}
@@ -205,7 +205,7 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 
 // Cleans up the multicast policy for this namespace if multicast was
 // previously allowed.
-func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) error {
+func (oc *DefaultNetworkController) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) error {
 	if nsInfo.multicastEnabled {
 		nsInfo.multicastEnabled = false
 		if err := deleteMulticastAllowPolicy(oc.nbClient, ns.Name); err != nil {
@@ -216,7 +216,7 @@ func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *names
 }
 
 // AddNamespace creates corresponding addressset in ovn db
-func (oc *Controller) AddNamespace(ns *kapi.Namespace) error {
+func (oc *DefaultNetworkController) AddNamespace(ns *kapi.Namespace) error {
 	klog.Infof("[%s] adding namespace", ns.Name)
 	// Keep track of how long syncs take.
 	start := time.Now()
@@ -234,7 +234,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) error {
 
 // configureNamespace ensures internal structures are updated based on namespace
 // must be called with nsInfo lock
-func (oc *Controller) configureNamespace(nsInfo *namespaceInfo, ns *kapi.Namespace) error {
+func (oc *DefaultNetworkController) configureNamespace(nsInfo *namespaceInfo, ns *kapi.Namespace) error {
 	var errors []error
 	if annotation, ok := ns.Annotations[util.RoutingExternalGWsAnnotation]; ok {
 		exGateways, err := util.ParseRoutingExternalGWAnnotation(annotation)
@@ -274,7 +274,7 @@ func (oc *Controller) configureNamespace(nsInfo *namespaceInfo, ns *kapi.Namespa
 	return kerrors.NewAggregate(errors)
 }
 
-func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
+func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) error {
 	var errors []error
 	klog.Infof("[%s] updating namespace", old.Name)
 
@@ -390,7 +390,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) error {
 	return kerrors.NewAggregate(errors)
 }
 
-func (oc *Controller) deleteNamespace(ns *kapi.Namespace) error {
+func (oc *DefaultNetworkController) deleteNamespace(ns *kapi.Namespace) error {
 	klog.Infof("[%s] deleting namespace", ns.Name)
 
 	nsInfo := oc.deleteNamespaceLocked(ns.Name)
@@ -410,7 +410,7 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) error {
 
 // getNamespaceLocked locks namespacesMutex, looks up ns, and (if found), returns it with
 // its mutex locked. If ns is not known, nil will be returned
-func (oc *Controller) getNamespaceLocked(ns string, readOnly bool) (*namespaceInfo, func()) {
+func (oc *DefaultNetworkController) getNamespaceLocked(ns string, readOnly bool) (*namespaceInfo, func()) {
 	// Only hold namespacesMutex while reading/modifying oc.namespaces. In particular,
 	// we drop namespacesMutex while trying to claim nsInfo.Mutex, because something
 	// else might have locked the nsInfo and be doing something slow with it, and we
@@ -444,7 +444,7 @@ func (oc *Controller) getNamespaceLocked(ns string, readOnly bool) (*namespaceIn
 // with its mutex locked.
 // ns is the name of the namespace, while namespace is the optional k8s namespace object
 // if no k8s namespace object is provided, this function will attempt to find it via informer cache
-func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool, namespace *kapi.Namespace) (*namespaceInfo, func(), error) {
+func (oc *DefaultNetworkController) ensureNamespaceLocked(ns string, readOnly bool, namespace *kapi.Namespace) (*namespaceInfo, func(), error) {
 	oc.namespacesMutex.Lock()
 	nsInfo := oc.namespaces[ns]
 	nsInfoExisted := false
@@ -517,7 +517,7 @@ func (oc *Controller) ensureNamespaceLocked(ns string, readOnly bool, namespace 
 
 // deleteNamespaceLocked locks namespacesMutex, finds and deletes ns, and returns the
 // namespace, locked.
-func (oc *Controller) deleteNamespaceLocked(ns string) *namespaceInfo {
+func (oc *DefaultNetworkController) deleteNamespaceLocked(ns string) *namespaceInfo {
 	// The locking here is the same as in getNamespaceLocked
 
 	oc.namespacesMutex.Lock()
@@ -572,7 +572,7 @@ func (oc *Controller) deleteNamespaceLocked(ns string) *namespaceInfo {
 	return nsInfo
 }
 
-func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (addressset.AddressSet, error) {
+func (oc *DefaultNetworkController) createNamespaceAddrSetAllPods(ns string) (addressset.AddressSet, error) {
 	var ips []net.IP
 	// special handling of host network namespace
 	if config.Kubernetes.HostNetworkNamespace != "" &&

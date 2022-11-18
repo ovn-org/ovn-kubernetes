@@ -135,7 +135,7 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, 
 
 func (p testPod) populateLogicalSwitchCache(fakeOvn *FakeOVN, uuid string) {
 	gomega.Expect(p.nodeName).NotTo(gomega.Equal(""))
-	err := fakeOvn.controller.lsManager.AddNode(p.nodeName, uuid, []*net.IPNet{ovntest.MustParseIPNet(p.nodeSubnet)})
+	err := fakeOvn.controller.lsManager.AddSwitch(p.nodeName, uuid, []*net.IPNet{ovntest.MustParseIPNet(p.nodeSubnet)})
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
