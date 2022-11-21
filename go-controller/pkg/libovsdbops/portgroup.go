@@ -196,6 +196,19 @@ func DeleteACLsFromPortGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.O
 	return m.DeleteOps(ops, opModel)
 }
 
+func DeleteACLsFromPortGroups(nbClient libovsdbclient.Client, names []string, acls ...*nbdb.ACL) error {
+	var err error
+	var ops []libovsdb.Operation
+	for _, pgName := range names {
+		ops, err = DeleteACLsFromPortGroupOps(nbClient, ops, pgName, acls...)
+		if err != nil {
+			return err
+		}
+	}
+	_, err = TransactAndCheck(nbClient, ops)
+	return err
+}
+
 // DeletePortGroupsOps deletes the provided port groups and returns the
 // corresponding ops
 func DeletePortGroupsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, names ...string) ([]libovsdb.Operation, error) {
