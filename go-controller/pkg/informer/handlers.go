@@ -6,16 +6,16 @@ import (
 )
 
 type ServiceEventHandler interface {
-	AddService(*kapi.Service)
-	DeleteService(*kapi.Service)
-	UpdateService(old, new *kapi.Service)
+	AddService(*kapi.Service) error
+	DeleteService(*kapi.Service) error
+	UpdateService(old, new *kapi.Service) error
 	SyncServices([]interface{}) error
 }
 
 type EndpointSliceEventHandler interface {
-	AddEndpointSlice(*discovery.EndpointSlice)
-	DeleteEndpointSlice(*discovery.EndpointSlice)
-	UpdateEndpointSlice(old, new *discovery.EndpointSlice)
+	AddEndpointSlice(*discovery.EndpointSlice) error
+	DeleteEndpointSlice(*discovery.EndpointSlice) error
+	UpdateEndpointSlice(old, new *discovery.EndpointSlice) error
 }
 
 type ServiceAndEndpointsEventHandler interface {

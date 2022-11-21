@@ -124,6 +124,8 @@ spec:
           value: "{{ ovn_ssl_en }}"
         - name: OVN_NB_PORT
           value: "{{ ovn_nb_port }}"
+        - name: ENABLE_IPSEC
+          value: "{{ enable_ipsec }}"
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnnb-db"]

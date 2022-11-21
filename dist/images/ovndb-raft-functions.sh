@@ -370,6 +370,9 @@ ovsdb-raft() {
       set_election_timer ${db} ${election_timer}
       if [[ ${db} == "nb" ]]; then
         set_northd_probe_interval
+        [[ "true" == "${ENABLE_IPSEC}" ]] && {
+          ovn-nbctl set nb_global . ipsec=true
+        }
       fi
       # set the connection and disable inactivity probe, this deletes the old connection if any
       # this will unblock pod-1 and pod-2 waiters

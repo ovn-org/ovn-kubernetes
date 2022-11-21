@@ -48,7 +48,8 @@ func GetIPTablesHelper(proto iptables.Protocol) (IPTablesHelper, error) {
 	if helpers[proto] == nil {
 		ipt, err := iptables.NewWithProtocol(proto)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to create IPTablesHelper for proto %v: %v",
+				proto, err)
 		}
 		SetIPTablesHelper(proto, ipt)
 	}

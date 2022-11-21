@@ -44,7 +44,7 @@ const (
 	rolloutTimeout       = 10 * time.Minute
 	agnhostImage         = "k8s.gcr.io/e2e-test-images/agnhost:2.26"
 	iperf3Image          = "quay.io/sronanrh/iperf"
-	ovnNs      = "ovn-kubernetes" //OVN kubernetes namespace
+	ovnNs                = "ovn-kubernetes" //OVN kubernetes namespace
 )
 
 type podCondition = func(pod *v1.Pod) (bool, error)
@@ -264,7 +264,7 @@ func createGenericPodWithLabel(f *framework.Framework, podName, nodeSelector, na
 	return createPod(f, podName, nodeSelector, namespace, command, labels)
 }
 
-func createServiceForPodsWithLabel(f *framework.Framework, namespace string, servicePort int32, targetPort string, serviceType string, labels map[string]string) (string, error) {
+func createServiceForPodsWithLabel(f *framework.Framework, namespace string, servicePort int32, targetPort string, nodePort int32, serviceType string, labels map[string]string) (string, error) {
 	service := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "service-for-pods",
@@ -281,6 +281,9 @@ func createServiceForPodsWithLabel(f *framework.Framework, namespace string, ser
 			Type:     v1.ServiceType(serviceType),
 			Selector: labels,
 		},
+	}
+	if serviceType == "NodePort" {
+		service.Spec.Ports[0].NodePort = nodePort
 	}
 	serviceClient := f.ClientSet.CoreV1().Services(namespace)
 	res, err := serviceClient.Create(context.Background(), service, metav1.CreateOptions{})
@@ -484,10 +487,10 @@ func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nod
 
 func findOvnKubeMasterNode() (string, error) {
 
-	ovnkubeMasterNode, err := framework.RunKubectl(ovnNs,"get", "leases", "ovn-kubernetes-master",
+	ovnkubeMasterNode, err := framework.RunKubectl(ovnNs, "get", "leases", "ovn-kubernetes-master",
 		"-o", "jsonpath='{.spec.holderIdentity}'")
 
-	framework.ExpectNoError(err, fmt.Sprintf("Unable to retrieve leases (ovn-kubernetes-master)" +
+	framework.ExpectNoError(err, fmt.Sprintf("Unable to retrieve leases (ovn-kubernetes-master)"+
 		"from %s %v", ovnNs, err))
 
 	framework.Logf(fmt.Sprintf("master instance of ovnkube-master is running on node %s", ovnkubeMasterNode))
@@ -627,8 +630,8 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			// does not build it back up, thus breaking that node entirely. We can't delete it for
 			// this test case.
 			if pod.Spec.NodeName == ovnKubeMasterNode && pod.Name != "connectivity-test-continuous" &&
-			                                             pod.Name != "etcd-ovn-control-plane" &&
-				                                         !strings.HasPrefix(pod.Name, "ovs-node") {
+				pod.Name != "etcd-ovn-control-plane" &&
+				!strings.HasPrefix(pod.Name, "ovs-node") {
 				framework.Logf("%q", pod.Namespace)
 				e2epod.DeletePodWithWaitByName(f.ClientSet, pod.Name, ovnNs)
 				framework.Logf("Deleted control plane pod %q", pod.Name)
@@ -661,7 +664,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 
 		podList, _ := podClient.List(context.Background(), metav1.ListOptions{})
 		for _, pod := range podList.Items {
-			if strings.HasPrefix(pod.Name, "ovnkube-master") && !strings.HasPrefix(pod.Name, "ovs-node"){
+			if strings.HasPrefix(pod.Name, "ovnkube-master") && !strings.HasPrefix(pod.Name, "ovs-node") {
 				framework.Logf("%q", pod.Namespace)
 				e2epod.DeletePodWithWaitByName(f.ClientSet, pod.Name, ovnNs)
 				framework.Logf("Deleted control plane pod %q", pod.Name)
@@ -1451,7 +1454,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 
 						ginkgo.By("Hitting the nodeport on " + node.Name + " and reaching all the endpoints " + protocol)
 						for i := 0; i < maxTries; i++ {
-							epHostname := pokeEndpointHostname(clientContainerName, protocol, nodeAddress.Address, nodePort)
+							epHostname := pokeEndpoint("", clientContainerName, protocol, nodeAddress.Address, nodePort, "hostname")
 							responses.Insert(epHostname)
 
 							// each endpoint returns its hostname. By doing this, we validate that each ep was reached at least once.
@@ -1603,7 +1606,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 								responses := sets.NewString()
 								valid := false
 								for i := 0; i < maxTries; i++ {
-									epHostname := pokeEndpointHostname(clientContainerName, protocol, address, port)
+									epHostname := pokeEndpoint("", clientContainerName, protocol, address, port, "hostname")
 									responses.Insert(epHostname)
 
 									// each endpoint returns its hostname. By doing this, we validate that each ep was reached at least once.
@@ -1670,8 +1673,10 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 						ginkgo.By("Hitting the nodeport on " + node.Name + " and trying to reach only the local endpoint with protocol " + protocol)
 
 						for i := 0; i < maxTries; i++ {
-							epHostname := pokeEndpointHostname(clientContainerName, protocol, nodeAddress.Address, nodePort)
-							epClientIP := pokeEndpointClientIP(clientContainerName, protocol, nodeAddress.Address, nodePort)
+							epHostname := pokeEndpoint("", clientContainerName, protocol, nodeAddress.Address, nodePort, "hostname")
+							epClientIP := pokeEndpoint("", clientContainerName, protocol, nodeAddress.Address, nodePort, "clientip")
+							epClientIP, _, err = net.SplitHostPort(epClientIP)
+							framework.ExpectNoError(err, "failed to parse client ip:port")
 							responses.Insert(epHostname, epClientIP)
 
 							if responses.Equal(expectedResponses) {
@@ -1872,7 +1877,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 
 					ginkgo.By("Hitting the external service on " + externalAddress + " and reaching all the endpoints " + protocol)
 					for i := 0; i < maxTries; i++ {
-						epHostname := pokeEndpointHostname(clientContainerName, protocol, externalAddress, externalPort)
+						epHostname := pokeEndpoint("", clientContainerName, protocol, externalAddress, externalPort, "hostname")
 						responses.Insert(epHostname)
 
 						// each endpoint returns its hostname. By doing this, we validate that each ep was reached at least once.
@@ -2007,8 +2012,10 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 
 						ginkgo.By("Hitting the nodeport on " + node.Name + " and trying to reach only the local endpoint with protocol " + protocol)
 						for i := 0; i < maxTries; i++ {
-							epHostname := pokeEndpointHostname(clientContainerName, protocol, nodeAddress.Address, nodePort)
-							epClientIP := pokeEndpointClientIP(clientContainerName, protocol, nodeAddress.Address, nodePort)
+							epHostname := pokeEndpoint("", clientContainerName, protocol, nodeAddress.Address, nodePort, "hostname")
+							epClientIP := pokeEndpoint("", clientContainerName, protocol, nodeAddress.Address, nodePort, "clientip")
+							epClientIP, _, err = net.SplitHostPort(epClientIP)
+							framework.ExpectNoError(err, "failed to parse client ip:port")
 							responses.Insert(epHostname, epClientIP)
 
 							if responses.Equal(expectedResponses) {

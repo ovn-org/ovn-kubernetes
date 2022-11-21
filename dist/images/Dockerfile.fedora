@@ -28,9 +28,11 @@ RUN INSTALL_PKGS=" \
 	libpcap hostname kubernetes-client util-linux \
         ovn ovn-central ovn-host python3-openvswitch tcpdump openvswitch-test python3-pyOpenSSL \
 	iptables iproute iputils strace socat koji \
+        libreswan openvswitch-ipsec \
         " && \
 	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/dnf/*
+RUN ln -s /usr/bin/python3 /usr/libexec/platform-python
 
 RUN mkdir -p /var/run/openvswitch
 

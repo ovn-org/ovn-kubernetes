@@ -161,6 +161,8 @@ spec:
               fieldPath: status.hostIP
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
+        - name: ENABLE_IPSEC
+          value: "{{ enable_ipsec }}"
         - name: OVN_NB_RAFT_ELECTION_TIMER
           value: "{{ ovn_nb_raft_election_timer }}"
         - name: OVN_NB_PORT

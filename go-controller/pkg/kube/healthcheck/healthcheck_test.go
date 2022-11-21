@@ -112,6 +112,7 @@ type healthzPayload struct {
 }
 
 func TestServer(t *testing.T) {
+	var err error
 	listener := newFakeListener()
 	httpFactory := newFakeHTTPServerFactory()
 
@@ -122,24 +123,36 @@ func TestServer(t *testing.T) {
 	}
 
 	// sync nothing
-	hcs.SyncServices(nil)
+	err = hcs.SyncServices(nil)
+	if err != nil {
+		t.Errorf("unexpected error while syncing services: %v", err)
+	}
 	if len(hcs.services) != 0 {
 		t.Errorf("expected 0 services, got %d", len(hcs.services))
 	}
-	hcs.SyncEndpoints(nil)
+	err = hcs.SyncEndpoints(nil)
+	if err != nil {
+		t.Errorf("unexpected error while syncing endpoints: %v", err)
+	}
 	if len(hcs.services) != 0 {
 		t.Errorf("expected 0 services, got %d", len(hcs.services))
 	}
 
 	// sync unknown endpoints, should be dropped
-	hcs.SyncEndpoints(map[types.NamespacedName]int{mknsn("a", "b"): 93})
+	err = hcs.SyncEndpoints(map[types.NamespacedName]int{mknsn("a", "b"): 93})
+	if err != nil {
+		t.Errorf("unexpected error while syncing endpoints: %v", err)
+	}
 	if len(hcs.services) != 0 {
 		t.Errorf("expected 0 services, got %d", len(hcs.services))
 	}
 
 	// sync a real service
 	nsn := mknsn("a", "b")
-	hcs.SyncServices(map[types.NamespacedName]uint16{nsn: 9376})
+	err = hcs.SyncServices(map[types.NamespacedName]uint16{nsn: 9376})
+	if err != nil {
+		t.Errorf("unexpected error while syncing services: %v", err)
+	}
 	if len(hcs.services) != 1 {
 		t.Errorf("expected 1 service, got %d", len(hcs.services))
 	}
@@ -156,7 +169,10 @@ func TestServer(t *testing.T) {
 	testHandler(hcs, nsn, http.StatusServiceUnavailable, 0, t)
 
 	// sync an endpoint
-	hcs.SyncEndpoints(map[types.NamespacedName]int{nsn: 18})
+	err = hcs.SyncEndpoints(map[types.NamespacedName]int{nsn: 18})
+	if err != nil {
+		t.Errorf("unexpected error while syncing endpoints: %v", err)
+	}
 	if len(hcs.services) != 1 {
 		t.Errorf("expected 1 service, got %d", len(hcs.services))
 	}
@@ -167,7 +183,10 @@ func TestServer(t *testing.T) {
 	testHandler(hcs, nsn, http.StatusOK, 18, t)
 
 	// sync zero endpoints
-	hcs.SyncEndpoints(map[types.NamespacedName]int{nsn: 0})
+	err = hcs.SyncEndpoints(map[types.NamespacedName]int{nsn: 0})
+	if err != nil {
+		t.Errorf("unexpected error while syncing endpoints: %v", err)
+	}
 	if len(hcs.services) != 1 {
 		t.Errorf("expected 1 service, got %d", len(hcs.services))
 	}
@@ -178,7 +197,10 @@ func TestServer(t *testing.T) {
 	testHandler(hcs, nsn, http.StatusServiceUnavailable, 0, t)
 
 	// put the endpoint back
-	hcs.SyncEndpoints(map[types.NamespacedName]int{nsn: 11})
+	err = hcs.SyncEndpoints(map[types.NamespacedName]int{nsn: 11})
+	if err != nil {
+		t.Errorf("unexpected error while syncing endpoints: %v", err)
+	}
 	if len(hcs.services) != 1 {
 		t.Errorf("expected 1 service, got %d", len(hcs.services))
 	}
@@ -186,7 +208,10 @@ func TestServer(t *testing.T) {
 		t.Errorf("expected 18 endpoints, got %d", hcs.services[nsn].endpoints)
 	}
 	// sync nil endpoints
-	hcs.SyncEndpoints(nil)
+	err = hcs.SyncEndpoints(nil)
+	if err != nil {
+		t.Errorf("unexpected error while syncing endpoints: %v", err)
+	}
 	if len(hcs.services) != 1 {
 		t.Errorf("expected 1 service, got %d", len(hcs.services))
 	}
@@ -197,7 +222,10 @@ func TestServer(t *testing.T) {
 	testHandler(hcs, nsn, http.StatusServiceUnavailable, 0, t)
 
 	// put the endpoint back
-	hcs.SyncEndpoints(map[types.NamespacedName]int{nsn: 18})
+	err = hcs.SyncEndpoints(map[types.NamespacedName]int{nsn: 18})
+	if err != nil {
+		t.Errorf("unexpected error while syncing endpoints: %v", err)
+	}
 	if len(hcs.services) != 1 {
 		t.Errorf("expected 1 service, got %d", len(hcs.services))
 	}
@@ -205,7 +233,10 @@ func TestServer(t *testing.T) {
 		t.Errorf("expected 18 endpoints, got %d", hcs.services[nsn].endpoints)
 	}
 	// delete the service
-	hcs.SyncServices(nil)
+	err = hcs.SyncServices(nil)
+	if err != nil {
+		t.Errorf("unexpected error while syncing services: %v", err)
+	}
 	if len(hcs.services) != 0 {
 		t.Errorf("expected 0 services, got %d", len(hcs.services))
 	}
@@ -215,11 +246,14 @@ func TestServer(t *testing.T) {
 	nsn2 := mknsn("c", "d")
 	nsn3 := mknsn("e", "f")
 	nsn4 := mknsn("g", "h")
-	hcs.SyncServices(map[types.NamespacedName]uint16{
+	err = hcs.SyncServices(map[types.NamespacedName]uint16{
 		nsn1: 9376,
 		nsn2: 12909,
 		nsn3: 11113,
 	})
+	if err != nil {
+		t.Errorf("unexpected error while syncing services: %v", err)
+	}
 	if len(hcs.services) != 3 {
 		t.Errorf("expected 3 service, got %d", len(hcs.services))
 	}
@@ -241,11 +275,14 @@ func TestServer(t *testing.T) {
 	testHandler(hcs, nsn3, http.StatusServiceUnavailable, 0, t)
 
 	// sync endpoints
-	hcs.SyncEndpoints(map[types.NamespacedName]int{
+	err = hcs.SyncEndpoints(map[types.NamespacedName]int{
 		nsn1: 9,
 		nsn2: 3,
 		nsn3: 7,
 	})
+	if err != nil {
+		t.Errorf("unexpected error while syncing endpoints: %v", err)
+	}
 	if len(hcs.services) != 3 {
 		t.Errorf("expected 3 services, got %d", len(hcs.services))
 	}
@@ -264,12 +301,15 @@ func TestServer(t *testing.T) {
 	testHandler(hcs, nsn3, http.StatusOK, 7, t)
 
 	// sync new services
-	hcs.SyncServices(map[types.NamespacedName]uint16{
+	err = hcs.SyncServices(map[types.NamespacedName]uint16{
 		//nsn1: 9376, // remove it
 		nsn2: 12909, // leave it
 		nsn3: 11114, // change it
 		nsn4: 11878, // add it
 	})
+	if err != nil {
+		t.Errorf("unexpected error while syncing services: %v", err)
+	}
 	if len(hcs.services) != 3 {
 		t.Errorf("expected 3 service, got %d", len(hcs.services))
 	}
@@ -288,12 +328,15 @@ func TestServer(t *testing.T) {
 	testHandler(hcs, nsn4, http.StatusServiceUnavailable, 0, t)
 
 	// sync endpoints
-	hcs.SyncEndpoints(map[types.NamespacedName]int{
+	err = hcs.SyncEndpoints(map[types.NamespacedName]int{
 		nsn1: 9,
 		nsn2: 3,
 		nsn3: 7,
 		nsn4: 6,
 	})
+	if err != nil {
+		t.Errorf("unexpected error while syncing endpoints: %v", err)
+	}
 	if len(hcs.services) != 3 {
 		t.Errorf("expected 3 services, got %d", len(hcs.services))
 	}
@@ -312,10 +355,13 @@ func TestServer(t *testing.T) {
 	testHandler(hcs, nsn4, http.StatusOK, 6, t)
 
 	// sync endpoints, missing nsn2
-	hcs.SyncEndpoints(map[types.NamespacedName]int{
+	err = hcs.SyncEndpoints(map[types.NamespacedName]int{
 		nsn3: 7,
 		nsn4: 6,
 	})
+	if err != nil {
+		t.Errorf("unexpected error while syncing endpoints: %v", err)
+	}
 	if len(hcs.services) != 3 {
 		t.Errorf("expected 3 services, got %d", len(hcs.services))
 	}

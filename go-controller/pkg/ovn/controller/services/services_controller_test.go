@@ -614,9 +614,10 @@ func nodeSwitchRouterLoadBalancerName(nodeName string, serviceNamespace string, 
 
 func servicesOptions() map[string]string {
 	return map[string]string{
-		"event":     "false",
-		"reject":    "true",
-		"skip_snat": "false",
+		"event":           "false",
+		"reject":          "true",
+		"skip_snat":       "false",
+		"hairpin_snat_ip": "169.254.169.5 fd69::5",
 	}
 }
 

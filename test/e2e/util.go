@@ -251,40 +251,52 @@ func externalIPServiceSpecFrom(svcName string, httpPort, updPort, clusterHTTPPor
 	return res
 }
 
-// pokeEndpointHostname leverages a container running the netexec command to send a "hostname" request to a target running
+// pokeEndpoint leverages a container running the netexec command to send a "request" to a target running
 // netexec on the given target host / protocol / port.
-// Returns the name of backend pod.
-func pokeEndpointHostname(clientContainer, protocol, targetHost string, targetPort int32) string {
+// Returns the response based on the provided "request".
+func pokeEndpoint(namespace, clientContainer, protocol, targetHost string, targetPort int32, request string) string {
 	ipPort := net.JoinHostPort("localhost", "80")
 	cmd := []string{containerRuntime, "exec", clientContainer}
+	if len(namespace) != 0 {
+		// command is to be run inside a pod, not containerRuntime
+		cmd = []string{"exec", clientContainer, "--"}
+	}
 
 	// we leverage the dial command from netexec, that is already supporting multiple protocols
-	curlCommand := strings.Split(fmt.Sprintf("curl -g -q -s http://%s/dial?request=hostname&protocol=%s&host=%s&port=%d&tries=1",
+	curlCommand := strings.Split(fmt.Sprintf("curl -g -q -s http://%s/dial?request=%s&protocol=%s&host=%s&port=%d&tries=1",
 		ipPort,
+		request,
 		protocol,
 		targetHost,
 		targetPort), " ")
 
 	cmd = append(cmd, curlCommand...)
-	res, err := runCommand(cmd...)
+	var res string
+	var err error
+	if len(namespace) != 0 {
+		res, err = framework.RunKubectl(namespace, cmd...)
+	} else {
+		// command is to be run inside runtime container
+		res, err = runCommand(cmd...)
+	}
 	framework.ExpectNoError(err, "failed to run command on external container")
-	hostName, err := parseNetexecResponse(res)
+	response, err := parseNetexecResponse(res)
 	if err != nil {
 		framework.Logf("FAILED Command was %s", curlCommand)
 		framework.Logf("FAILED Response was %v", res)
 	}
 	framework.ExpectNoError(err)
 
-	return hostName
+	return response
 }
 
-// wrapper logic around pokeEndpointHostname
+// wrapper logic around pokeEndpoint
 // contact the ExternalIP service until each endpoint returns its hostname and return true, or false otherwise
 func pokeExternalIpService(clientContainerName, protocol, externalAddress string, externalPort int32, maxTries int, nodesHostnames sets.String) bool {
 	responses := sets.NewString()
 
 	for i := 0; i < maxTries; i++ {
-		epHostname := pokeEndpointHostname(clientContainerName, protocol, externalAddress, externalPort)
+		epHostname := pokeEndpoint("", clientContainerName, protocol, externalAddress, externalPort, "hostname")
 		responses.Insert(epHostname)
 
 		// each endpoint returns its hostname. By doing this, we validate that each ep was reached at least once.
@@ -382,35 +394,6 @@ func isNeighborEntryStable(clientContainer, targetHost string, iterations int) b
 	framework.Logf("hwAddr is stable after %d iterations: %s", iterations, strings.Join(hwAddrList, ","))
 
 	return true
-}
-
-// pokeEndpointClientIP leverages a container running the netexec command to send a "clientip" request to a target running
-// netexec on the given target host / protocol / port.
-// Returns the src ip of the packet.
-func pokeEndpointClientIP(clientContainer, protocol, targetHost string, targetPort int32) string {
-	ipPort := net.JoinHostPort("localhost", "80")
-	cmd := []string{containerRuntime, "exec", clientContainer}
-
-	// we leverage the dial command from netexec, that is already supporting multiple protocols
-	curlCommand := strings.Split(fmt.Sprintf("curl -g -q -s http://%s/dial?request=clientip&protocol=%s&host=%s&port=%d&tries=1",
-		ipPort,
-		protocol,
-		targetHost,
-		targetPort), " ")
-
-	cmd = append(cmd, curlCommand...)
-	res, err := runCommand(cmd...)
-	framework.ExpectNoError(err, "failed to run command on external container")
-	clientIP, err := parseNetexecResponse(res)
-	framework.ExpectNoError(err)
-	ip, _, err := net.SplitHostPort(clientIP)
-	if err != nil {
-		framework.Logf("FAILED Command was %s", curlCommand)
-		framework.Logf("FAILED Response was %v", res)
-	}
-	framework.ExpectNoError(err, "failed to parse client ip:port")
-
-	return ip
 }
 
 // curlInContainer leverages a container running the netexec command to send a request to a target running

@@ -59,26 +59,29 @@ func deleteLocalNodeAccessBridge() error {
 }
 
 // addGatewayIptRules adds the necessary iptable rules for a service on the node
-func addGatewayIptRules(service *kapi.Service, svcHasLocalHostNetEndPnt bool) {
+func addGatewayIptRules(service *kapi.Service, svcHasLocalHostNetEndPnt bool) error {
 	rules := getGatewayIPTRules(service, svcHasLocalHostNetEndPnt)
 
 	if err := addIptRules(rules); err != nil {
-		klog.Errorf("Failed to add iptables rules for service %s/%s: %v", service.Namespace, service.Name, err)
+		return fmt.Errorf("failed to add iptables rules for service %s/%s: %v",
+			service.Namespace, service.Name, err)
 	}
+	return nil
 }
 
 // delGatewayIptRules removes the iptable rules for a service from the node
-func delGatewayIptRules(service *kapi.Service, svcHasLocalHostNetEndPnt bool) {
+func delGatewayIptRules(service *kapi.Service, svcHasLocalHostNetEndPnt bool) error {
 	rules := getGatewayIPTRules(service, svcHasLocalHostNetEndPnt)
 
 	if err := delIptRules(rules); err != nil {
-		klog.Errorf("Failed to delete iptables rules for service %s/%s: %v", service.Namespace, service.Name, err)
+		return fmt.Errorf("failed to delete iptables rules for service %s/%s: %v", service.Namespace, service.Name, err)
 	}
+	return nil
 }
 
-func updateEgressSVCIptRules(svc *kapi.Service, npw *nodePortWatcher) {
+func updateEgressSVCIptRules(svc *kapi.Service, npw *nodePortWatcher) error {
 	if !shouldConfigureEgressSVC(svc, npw) {
-		return
+		return nil
 	}
 
 	npw.egressServiceInfoLock.Lock()
@@ -93,8 +96,8 @@ func updateEgressSVCIptRules(svc *kapi.Service, npw *nodePortWatcher) {
 
 	epSlices, err := npw.watchFactory.GetEndpointSlices(svc.Namespace, svc.Name)
 	if err != nil {
-		klog.V(5).Infof("No endpointslice found for egress service %s in namespace %s during update", svc.Name, svc.Namespace)
-		return
+		return fmt.Errorf("failed to get endpointslices for egress service %s/%s during update: %v",
+			svc.Namespace, svc.Name, err)
 	}
 
 	v4Eps := sets.NewString() // All current v4 eps
@@ -126,8 +129,8 @@ func updateEgressSVCIptRules(svc *kapi.Service, npw *nodePortWatcher) {
 	// Add rules for endpoints without one.
 	addRules := egressSVCIPTRulesForEndpoints(svc, v4ToAdd, v6ToAdd)
 	if err := addIptRules(addRules); err != nil {
-		klog.Errorf("Failed to add iptables rules for service %s/%s: %v", svc.Namespace, svc.Name, err)
-		return
+		return fmt.Errorf("failed to add iptables rules for service %s/%s during update: %v",
+			svc.Namespace, svc.Name, err)
 	}
 
 	// Update the cache with the added endpoints.
@@ -137,22 +140,23 @@ func updateEgressSVCIptRules(svc *kapi.Service, npw *nodePortWatcher) {
 	// Delete rules for endpoints that should not have one.
 	delRules := egressSVCIPTRulesForEndpoints(svc, v4ToDelete, v6ToDelete)
 	if err := delIptRules(delRules); err != nil {
-		klog.Errorf("Failed to delete iptables rules for service %s/%s: %v", svc.Namespace, svc.Name, err)
-		return
+		return fmt.Errorf("failed to delete iptables rules for service %s/%s during update: %v",
+			svc.Namespace, svc.Name, err)
 	}
 
 	// Update the cache with the deleted endpoints.
 	cachedEps.v4.Delete(v4ToDelete...)
 	cachedEps.v6.Delete(v6ToDelete...)
+	return nil
 }
 
-func delAllEgressSVCIptRules(svc *kapi.Service, npw *nodePortWatcher) {
+func delAllEgressSVCIptRules(svc *kapi.Service, npw *nodePortWatcher) error {
 	npw.egressServiceInfoLock.Lock()
 	defer npw.egressServiceInfoLock.Unlock()
 	key := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
 	allEps, found := npw.egressServiceInfo[key]
 	if !found {
-		return
+		return nil
 	}
 
 	v4ToDelete := make([]string, len(allEps.v4))
@@ -166,11 +170,11 @@ func delAllEgressSVCIptRules(svc *kapi.Service, npw *nodePortWatcher) {
 
 	delRules := egressSVCIPTRulesForEndpoints(svc, v4ToDelete, v6ToDelete)
 	if err := delIptRules(delRules); err != nil {
-		klog.Errorf("Failed to delete iptables rules for service %s/%s: %v", svc.Namespace, svc.Name, err)
-		return
+		return fmt.Errorf("failed to delete iptables rules for service %s/%s: %v", svc.Namespace, svc.Name, err)
 	}
 
 	delete(npw.egressServiceInfo, key)
+	return nil
 }
 
 func shouldConfigureEgressSVC(svc *kapi.Service, npw *nodePortWatcher) bool {

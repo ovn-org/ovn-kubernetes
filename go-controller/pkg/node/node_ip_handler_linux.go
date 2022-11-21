@@ -24,6 +24,9 @@ type addressManager struct {
 	addresses      sets.String
 	nodeAnnotator  kube.Annotator
 	mgmtPortConfig *managementPortConfig
+	// useNetlink indicates the addressManager should use machine
+	// information from netlink. Set to false for testcases.
+	useNetlink bool
 
 	OnChanged func()
 	sync.Mutex
@@ -31,12 +34,20 @@ type addressManager struct {
 
 // initializes a new address manager which will hold all the IPs on a node
 func newAddressManager(nodeName string, k kube.Interface, config *managementPortConfig, watchFactory factory.NodeWatchFactory) *addressManager {
+	return newAddressManagerInternal(nodeName, k, config, watchFactory, true)
+}
+
+// newAddressManagerInternal creates a new address manager; this function is
+// only expose for testcases to disable netlink subscription to ensure
+// reproducibility of unit tests.
+func newAddressManagerInternal(nodeName string, k kube.Interface, config *managementPortConfig, watchFactory factory.NodeWatchFactory, useNetlink bool) *addressManager {
 	mgr := &addressManager{
 		nodeName:       nodeName,
 		watchFactory:   watchFactory,
 		addresses:      sets.NewString(),
 		mgmtPortConfig: config,
 		OnChanged:      func() {},
+		useNetlink:     useNetlink,
 	}
 	mgr.nodeAnnotator = kube.NewNodeAnnotator(k, nodeName)
 	mgr.sync()
@@ -88,6 +99,13 @@ func (c *addressManager) ListAddresses() []net.IP {
 }
 
 func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
+	if !c.useNetlink {
+		// For testcases just return; we don't want to talk to
+		// netlink since that pollutes the testcases with the local
+		// CI machine configuration.
+		return
+	}
+
 	var addrChan chan netlink.AddrUpdate
 	addrSubscribeOptions := netlink.AddrSubscribeOptions{
 		ErrorCallback: func(err error) {
@@ -220,10 +238,15 @@ func (c *addressManager) isValidNodeIP(addr net.IP) bool {
 }
 
 func (c *addressManager) sync() {
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		klog.Errorf("Failed to sync Node IP Manager: unable list all IPs on the node, error: %v", err)
-		return
+	var err error
+	var addrs []net.Addr
+
+	if c.useNetlink {
+		addrs, err = net.InterfaceAddrs()
+		if err != nil {
+			klog.Errorf("Failed to sync Node IP Manager: unable list all IPs on the node, error: %v", err)
+			return
+		}
 	}
 
 	currAddresses := sets.NewString()

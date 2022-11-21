@@ -41,13 +41,13 @@ func TestNewEgressDNS(t *testing.T) {
 			desc:   "fails to read the /etc/resolv.conf file",
 			errExp: true,
 			dnsOpsMockHelper: []ovntest.TestifyMockHelper{
-				{"ClientConfigFromFile", []string{"string"}, []interface{}{nil, fmt.Errorf("mock error")}, 0, 1},
+				{"ClientConfigFromFile", []string{"string"}, []interface{}{}, []interface{}{nil, fmt.Errorf("mock error")}, 0, 1},
 			},
 		},
 		{
 			desc: "positive tests case",
 			dnsOpsMockHelper: []ovntest.TestifyMockHelper{
-				{"ClientConfigFromFile", []string{"string"}, []interface{}{&dns.ClientConfig{}, nil}, 0, 1},
+				{"ClientConfigFromFile", []string{"string"}, []interface{}{}, []interface{}{&dns.ClientConfig{}, nil}, 0, 1},
 			},
 		},
 	}
@@ -112,12 +112,12 @@ func TestAdd(t *testing.T) {
 			errExp:   true,
 			syncTime: 5 * time.Minute,
 			dnsOpsMockHelper: []ovntest.TestifyMockHelper{
-				{"ClientConfigFromFile", []string{"string"}, []interface{}{&dns.ClientConfig{
+				{"ClientConfigFromFile", []string{"string"}, []interface{}{}, []interface{}{&dns.ClientConfig{
 					Servers: []string{"1.1.1.1"},
 					Port:    "1234"}, nil}, 0, 1},
 			},
 			addressSetFactoryOpsHelper: []ovntest.TestifyMockHelper{
-				{"NewAddressSet", []string{"string", "[]net.IP"}, []interface{}{nil, fmt.Errorf("mock error")}, 0, 1},
+				{"NewAddressSet", []string{"string", "[]net.IP"}, []interface{}{}, []interface{}{nil, fmt.Errorf("mock error")}, 0, 1},
 			},
 		},
 		{
@@ -129,19 +129,19 @@ func TestAdd(t *testing.T) {
 			configIPv6: false,
 
 			dnsOpsMockHelper: []ovntest.TestifyMockHelper{
-				{"ClientConfigFromFile", []string{"string"}, []interface{}{&dns.ClientConfig{
+				{"ClientConfigFromFile", []string{"string"}, []interface{}{}, []interface{}{&dns.ClientConfig{
 					Servers: []string{"1.1.1.1"},
 					Port:    "1234"}, nil}, 0, 1},
-				{"Fqdn", []string{"string"}, []interface{}{test1DNSName}, 0, 1},
+				{"Fqdn", []string{"string"}, []interface{}{}, []interface{}{test1DNSName}, 0, 1},
 
-				{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{&dns.Msg{}}, 0, 1},
-				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv4, "300")}}, 500 * time.Second, nil}, 0, 1},
+				{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{}, []interface{}{&dns.Msg{}}, 0, 1},
+				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv4, "300")}}, 500 * time.Second, nil}, 0, 1},
 			},
 			addressSetFactoryOpsHelper: []ovntest.TestifyMockHelper{
-				{"NewAddressSet", []string{"string", "[]net.IP"}, []interface{}{mockAddressSetOps, nil}, 0, 1},
+				{"NewAddressSet", []string{"string", "[]net.IP"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
 			},
 			addressSetOpsHelper: []ovntest.TestifyMockHelper{
-				{"SetIPs", []string{"[]net.IP"}, []interface{}{nil}, 0, 1},
+				{"SetIPs", []string{"[]net.IP"}, []interface{}{}, []interface{}{nil}, 0, 1},
 			},
 		},
 
@@ -155,21 +155,21 @@ func TestAdd(t *testing.T) {
 			configIPv6:               true,
 
 			dnsOpsMockHelper: []ovntest.TestifyMockHelper{
-				{"ClientConfigFromFile", []string{"string"}, []interface{}{&dns.ClientConfig{
+				{"ClientConfigFromFile", []string{"string"}, []interface{}{}, []interface{}{&dns.ClientConfig{
 					Servers: []string{"1.1.1.1"},
 					Port:    "1234"}, nil}, 0, 1},
-				{"Fqdn", []string{"string"}, []interface{}{test1DNSName}, 0, 1},
-				{"Fqdn", []string{"string"}, []interface{}{test1DNSName}, 0, 1},
-				{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{&dns.Msg{}}, 0, 1},
-				{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{&dns.Msg{}}, 0, 1},
-				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv4, "300")}}, 500 * time.Second, nil}, 0, 1},
-				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv6, "300")}}, 500 * time.Second, nil}, 0, 1},
+				{"Fqdn", []string{"string"}, []interface{}{}, []interface{}{test1DNSName}, 0, 1},
+				{"Fqdn", []string{"string"}, []interface{}{}, []interface{}{test1DNSName}, 0, 1},
+				{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{}, []interface{}{&dns.Msg{}}, 0, 1},
+				{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{}, []interface{}{&dns.Msg{}}, 0, 1},
+				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv4, "300")}}, 500 * time.Second, nil}, 0, 1},
+				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv6, "300")}}, 500 * time.Second, nil}, 0, 1},
 			},
 			addressSetFactoryOpsHelper: []ovntest.TestifyMockHelper{
-				{"NewAddressSet", []string{"string", "[]net.IP"}, []interface{}{mockAddressSetOps, nil}, 0, 1},
+				{"NewAddressSet", []string{"string", "[]net.IP"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
 			},
 			addressSetOpsHelper: []ovntest.TestifyMockHelper{
-				{"SetIPs", []string{"[]net.IP"}, []interface{}{nil}, 0, 1},
+				{"SetIPs", []string{"[]net.IP"}, []interface{}{}, []interface{}{nil}, 0, 1},
 			},
 		},
 		{
@@ -182,25 +182,25 @@ func TestAdd(t *testing.T) {
 			configIPv6:               false,
 
 			dnsOpsMockHelper: []ovntest.TestifyMockHelper{
-				{"ClientConfigFromFile", []string{"string"}, []interface{}{&dns.ClientConfig{
+				{"ClientConfigFromFile", []string{"string"}, []interface{}{}, []interface{}{&dns.ClientConfig{
 					Servers: []string{"1.1.1.1"},
 					Port:    "1234"}, nil}, 0, 1},
-				{"Fqdn", []string{"string"}, []interface{}{test1DNSName}, 0, 1},
+				{"Fqdn", []string{"string"}, []interface{}{}, []interface{}{test1DNSName}, 0, 1},
 
-				{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{&dns.Msg{}}, 0, 1},
+				{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{}, []interface{}{&dns.Msg{}}, 0, 1},
 				// return a very low ttl so that the update based on ttl timeout occurs
-				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv4, "4")}}, 1 * time.Second, nil}, 0, 1},
-				{"Fqdn", []string{"string"}, []interface{}{test1DNSName}, 0, 1},
+				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv4, "4")}}, 1 * time.Second, nil}, 0, 1},
+				{"Fqdn", []string{"string"}, []interface{}{}, []interface{}{test1DNSName}, 0, 1},
 
-				{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{&dns.Msg{}}, 0, 1},
-				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv4Update, "300")}}, 1 * time.Second, nil}, 0, 1},
+				{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{}, []interface{}{&dns.Msg{}}, 0, 1},
+				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv4Update, "300")}}, 1 * time.Second, nil}, 0, 1},
 			},
 			addressSetFactoryOpsHelper: []ovntest.TestifyMockHelper{
-				{"NewAddressSet", []string{"string", "[]net.IP"}, []interface{}{mockAddressSetOps, nil}, 0, 1},
+				{"NewAddressSet", []string{"string", "[]net.IP"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
 			},
 			addressSetOpsHelper: []ovntest.TestifyMockHelper{
-				{"SetIPs", []string{"[]net.IP"}, []interface{}{nil}, 0, 1},
-				{"SetIPs", []string{"[]net.IP"}, []interface{}{nil}, 0, 1},
+				{"SetIPs", []string{"[]net.IP"}, []interface{}{}, []interface{}{nil}, 0, 1},
+				{"SetIPs", []string{"[]net.IP"}, []interface{}{}, []interface{}{nil}, 0, 1},
 			},
 		},
 	}
@@ -326,22 +326,22 @@ func TestDelete(t *testing.T) {
 			configIPv6:               true,
 
 			dnsOpsMockHelper: []ovntest.TestifyMockHelper{
-				{"ClientConfigFromFile", []string{"string"}, []interface{}{&dns.ClientConfig{
+				{"ClientConfigFromFile", []string{"string"}, []interface{}{}, []interface{}{&dns.ClientConfig{
 					Servers: []string{"1.1.1.1"},
 					Port:    "1234"}, nil}, 0, 1},
-				{"Fqdn", []string{"string"}, []interface{}{test1DNSName}, 0, 1},
-				{"Fqdn", []string{"string"}, []interface{}{test1DNSName}, 0, 1},
-				{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{&dns.Msg{}}, 0, 1},
-				{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{&dns.Msg{}}, 0, 1},
-				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv4, "300")}}, 500 * time.Second, nil}, 0, 1},
-				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv6, "300")}}, 500 * time.Second, nil}, 0, 1},
+				{"Fqdn", []string{"string"}, []interface{}{}, []interface{}{test1DNSName}, 0, 1},
+				{"Fqdn", []string{"string"}, []interface{}{}, []interface{}{test1DNSName}, 0, 1},
+				{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{}, []interface{}{&dns.Msg{}}, 0, 1},
+				{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{}, []interface{}{&dns.Msg{}}, 0, 1},
+				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv4, "300")}}, 500 * time.Second, nil}, 0, 1},
+				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{}, []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv6, "300")}}, 500 * time.Second, nil}, 0, 1},
 			},
 			addressSetFactoryOpsHelper: []ovntest.TestifyMockHelper{
-				{"NewAddressSet", []string{"string", "[]net.IP"}, []interface{}{mockAddressSetOps, nil}, 0, 1},
+				{"NewAddressSet", []string{"string", "[]net.IP"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
 			},
 			addressSetOpsHelper: []ovntest.TestifyMockHelper{
-				{"SetIPs", []string{"[]net.IP"}, []interface{}{nil}, 0, 1},
-				{"Destroy", []string{}, []interface{}{nil}, 0, 1},
+				{"SetIPs", []string{"[]net.IP"}, []interface{}{}, []interface{}{nil}, 0, 1},
+				{"Destroy", []string{}, []interface{}{}, []interface{}{nil}, 0, 1},
 			},
 		},
 	}
