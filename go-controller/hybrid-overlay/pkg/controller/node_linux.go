@@ -226,7 +226,7 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 		// No static cluster subnet is provided in config. Try to detect the hybrid overlay node subnet dynamically
 		// Add a route via the hybrid overlay port IP through the management port
 		// interface for each hybrid overlay cluster subnet
-		mgmtPortLink, err := netlink.LinkByName(types.K8sMgmtIntfName)
+		mgmtPortLink, err := util.GetNetLinkOps().LinkByName(types.K8sMgmtIntfName)
 		if err != nil {
 			return fmt.Errorf("failed to lookup link %s: %v", types.K8sMgmtIntfName, err)
 		}
@@ -237,7 +237,7 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 			Scope:     netlink.SCOPE_UNIVERSE,
 			Gw:        n.drIP,
 		}
-		err = netlink.RouteAdd(route)
+		err = util.GetNetLinkOps().RouteAdd(route)
 		if err != nil && !os.IsExist(err) {
 			return fmt.Errorf("failed to add route for subnet %s via gateway %s: %v",
 				route.Dst, route.Gw, err)
@@ -297,7 +297,7 @@ func (n *NodeController) DeleteNode(node *kapi.Node) error {
 		// No static cluster subnet is provided in config. Try to detect the hybrid overlay node subnet dynamically
 		// Add a route via the hybrid overlay port IP through the management port
 		// interface for each hybrid overlay cluster subnet
-		mgmtPortLink, err := netlink.LinkByName(types.K8sMgmtIntfName)
+		mgmtPortLink, err := util.GetNetLinkOps().LinkByName(types.K8sMgmtIntfName)
 		if err != nil {
 			return fmt.Errorf("failed to lookup link %s: %v", types.K8sMgmtIntfName, err)
 		}
@@ -308,7 +308,7 @@ func (n *NodeController) DeleteNode(node *kapi.Node) error {
 			Scope:     netlink.SCOPE_UNIVERSE,
 			Gw:        n.drIP,
 		}
-		err = netlink.RouteDel(route)
+		err = util.GetNetLinkOps().RouteDel(route)
 		if err != nil && !os.IsExist(err) {
 			return fmt.Errorf("failed to delete route for subnet %s via gateway %s: %v",
 				route.Dst, route.Gw, err)
@@ -493,7 +493,7 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 
 	// Add a route via the hybrid overlay port IP through the management port
 	// interface for each hybrid overlay cluster subnet
-	mgmtPortLink, err := netlink.LinkByName(types.K8sMgmtIntfName)
+	mgmtPortLink, err := util.GetNetLinkOps().LinkByName(types.K8sMgmtIntfName)
 	if err != nil {
 		return fmt.Errorf("failed to lookup link %s: %v", types.K8sMgmtIntfName, err)
 	}
@@ -506,7 +506,7 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 				Scope:     netlink.SCOPE_UNIVERSE,
 				Gw:        n.drIP,
 			}
-			err := netlink.RouteAdd(route)
+			err := util.GetNetLinkOps().RouteAdd(route)
 			if err != nil && !os.IsExist(err) {
 				return fmt.Errorf("failed to add route for subnet %s via gateway %s: %v",
 					route.Dst, route.Gw, err)
@@ -525,7 +525,7 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 					Scope:     netlink.SCOPE_UNIVERSE,
 					Gw:        n.drIP,
 				}
-				err := netlink.RouteAdd(route)
+				err := util.GetNetLinkOps().RouteAdd(route)
 				if err != nil && !os.IsExist(err) {
 					return fmt.Errorf("failed to add route for subnet %s via gateway %s: %v",
 						route.Dst, route.Gw, err)
