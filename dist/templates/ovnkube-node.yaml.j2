@@ -56,8 +56,33 @@ spec:
         volumeMounts:
         # Common mounts
         # for the iptables wrapper
-        - mountPath: /host
-          name: host-slash
+        # ubuntu iptables symlink
+        - name: host-etc-alts
+          mountPath: /host/etc/alternatives
+          readOnly: true
+        # centos iptables/nftables symlink & binary
+        - name: host-sbin
+          mountPath: /host/sbin
+          readOnly: true
+        # ubuntu iptables binary
+        - name: host-usr-sbin
+          mountPath: /host/usr/sbin
+          readOnly: true
+        # iptables modules
+        - mountPath: /host/usr/lib
+          name: host-usr-lib
+          readOnly: true
+        # arm lib
+        - name: host-lib
+          mountPath: /host/lib
+          readOnly: true
+        # x86_64 lib
+        - name: host-lib64
+          mountPath: /host/lib64
+          readOnly: true
+        # run
+        - name: host-run
+          mountPath: /host/run
           readOnly: true
         - mountPath: /var/run/dbus/
           name: host-var-run-dbus
@@ -346,12 +371,37 @@ spec:
       - name: host-etc-cni-netd
         hostPath:
           path: /etc/cni/net.d
-      - name: host-slash
-        hostPath:
-          path: /
       - name: host-netns
         hostPath:
           path: /var/run/netns
+      # ubuntu iptables symlink
+      - name: host-etc-alts
+        hostPath:
+          path: /etc/alternatives
+      # centos iptables/nftables symlink & binary
+      - name: host-sbin
+        hostPath:
+          path: /sbin
+      # ubuntu iptables binary
+      - name: host-usr-sbin
+        hostPath:
+          path: /usr/sbin
+      # iptables modules
+      - hostPath:
+          path: /usr/lib
+        name: host-usr-lib
+      # amd64 libc
+      - name: host-lib64
+        hostPath:
+          path: /lib64
+      # arm libc
+      - name: host-lib
+        hostPath:
+          path: /lib
+      # /run
+      - name: host-run
+        hostPath:
+          path: /run
       {%- if ovnkube_app_name=="ovnkube-node" %}
       # non DPU related volumes
       - name: host-var-log-ovs
