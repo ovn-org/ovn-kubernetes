@@ -57,8 +57,10 @@ func generateGatewayInitExpectedSB(testData []libovsdbtest.TestData, nodeName st
 	return testData
 }
 
-func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter, expectedNodeSwitch *nbdb.LogicalSwitch, nodeName string, clusterIPSubnets []*net.IPNet, hostSubnets []*net.IPNet,
-	l3GatewayConfig *util.L3GatewayConfig, joinLRPIPs, defLRPIPs []*net.IPNet, skipSnat bool, nodeMgmtPortIP string) []libovsdb.TestData {
+func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter,
+	expectedNodeSwitch *nbdb.LogicalSwitch, nodeName string, clusterIPSubnets []*net.IPNet, hostSubnets []*net.IPNet,
+	l3GatewayConfig *util.L3GatewayConfig, joinLRPIPs, defLRPIPs []*net.IPNet, skipSnat bool, nodeMgmtPortIP,
+	gatewayMTU string) []libovsdb.TestData {
 
 	GRName := "GR_" + nodeName
 	gwSwitchPort := types.JoinSwitchToGWRouterPrefix + GRName
@@ -79,11 +81,18 @@ func generateGatewayInitExpectedNB(testData []libovsdb.TestData, expectedOVNClus
 			Nexthop:  joinLRPIP.IP.String(),
 		})
 	}
+	var options map[string]string
+	if gatewayMTU != "" {
+		options = map[string]string{
+			"gateway_mtu": gatewayMTU,
+		}
+	}
 	testData = append(testData, &nbdb.LogicalRouterPort{
 		UUID:     gwRouterPort + "-UUID",
 		Name:     gwRouterPort,
 		MAC:      util.IPAddrToHWAddr(joinLRPIPs[0].IP).String(),
 		Networks: networks,
+		Options:  options,
 	})
 	grStaticRoutes := []string{}
 	var hasIPv4, hasIPv6 bool
@@ -379,7 +388,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+			err = fakeOvn.controller.gatewayInit(
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			testData := []libovsdb.TestData{}
@@ -387,7 +397,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			expectedOVNClusterRouter.StaticRoutes = []string{} // the leftover LGW route should have got deleted
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
-			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP)
+			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch,
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
+				"1400")
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		})
 
@@ -450,7 +462,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+			err = fakeOvn.controller.gatewayInit(
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			testData := []libovsdb.TestData{}
@@ -458,12 +471,86 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			expectedOVNClusterRouter.StaticRoutes = []string{} // the leftover LGW route should have got deleted
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
-			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP)
+			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch,
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
+				"1400")
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 			testData = []libovsdb.TestData{datapath}
 			expectedSBDatabaseState := generateGatewayInitExpectedSB(testData, nodeName, true, false)
 			gomega.Eventually(fakeOvn.sbClient).Should(libovsdbtest.HaveData(expectedSBDatabaseState))
+		})
+
+		ginkgo.It("updates options:gateway_mtu for GR LRP", func() {
+			expectedOVNClusterRouter := &nbdb.LogicalRouter{
+				UUID:         types.OVNClusterRouter + "-UUID",
+				Name:         types.OVNClusterRouter,
+				StaticRoutes: []string{},
+			}
+			expectedNodeSwitch := &nbdb.LogicalSwitch{
+				UUID: nodeName + "-UUID",
+				Name: nodeName,
+			}
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterLBGroupName + "-UUID",
+				Name: types.ClusterLBGroupName,
+			}
+			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					&nbdb.LogicalSwitch{
+						UUID: types.OVNJoinSwitch + "-UUID",
+						Name: types.OVNJoinSwitch,
+					},
+					expectedOVNClusterRouter,
+					expectedNodeSwitch,
+					expectedClusterLBGroup,
+				},
+			})
+
+			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
+			hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23")
+			joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16")
+			defLRPIPs := ovntest.MustParseIPNets("100.64.0.1/16")
+			l3GatewayConfig := &util.L3GatewayConfig{
+				Mode:           config.GatewayModeLocal,
+				ChassisID:      "SYSTEM-ID",
+				InterfaceID:    "INTERFACE-ID",
+				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
+				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
+				NextHops:       ovntest.MustParseIPs("169.254.33.1"),
+				NodePortEnable: true,
+			}
+			sctpSupport := false
+
+			var err error
+			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			testData := []libovsdb.TestData{}
+			skipSnat := false
+			expectedOVNClusterRouter.StaticRoutes = []string{}
+			// We don't set up the Allow from mgmt port ACL here
+			mgmtPortIP := ""
+
+			// Disable option:gateway_mtu.
+			err = fakeOvn.controller.gatewayInit(
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, false)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch,
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
+				"")
+			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+
+			// Enable option:gateway_mtu.
+			expectedOVNClusterRouter.StaticRoutes = []string{}
+			err = fakeOvn.controller.gatewayInit(
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			expectedDatabaseState = generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch,
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
+				"1400")
+			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		})
 
 		ginkgo.It("creates an IPv6 gateway in OVN", func() {
@@ -511,14 +598,17 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+			err = fakeOvn.controller.gatewayInit(
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			testData := []libovsdb.TestData{}
 			skipSnat := false
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
-			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP)
+			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch,
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
+				"1400")
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		})
 
@@ -576,14 +666,17 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 
 			config.IPv4Mode = false
 			config.IPv6Mode = true
-			err = fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+			err = fakeOvn.controller.gatewayInit(
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			testData := []libovsdb.TestData{}
 			skipSnat := false
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
-			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP)
+			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch,
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
+				"1400")
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 
 			testData = []libovsdb.TestData{datapath}
@@ -636,14 +729,17 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+			err = fakeOvn.controller.gatewayInit(
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			testData := []libovsdb.TestData{}
 			skipSnat := false
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
-			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP)
+			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch,
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
+				"1400")
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		})
 
@@ -693,14 +789,17 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+			err = fakeOvn.controller.gatewayInit(
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			testData := []libovsdb.TestData{}
 			skipSnat := true
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
-			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP)
+			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch,
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
+				"1400")
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		})
 	})
@@ -775,7 +874,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = fakeOvn.controller.gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
+			err = fakeOvn.controller.gatewayInit(
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			testData := []libovsdb.TestData{}
@@ -783,7 +883,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			expectedOVNClusterRouter.StaticRoutes = []string{} // the leftover SGW route should have got deleted
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
-			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch, nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP)
+			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch,
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
+				"1400")
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		})
 
