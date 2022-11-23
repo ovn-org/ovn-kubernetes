@@ -9,13 +9,16 @@ import (
 	"sync"
 	"time"
 
+	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -55,18 +58,42 @@ func (h *secondaryLayer3NetworkControllerEventHandler) GetResourceFromInformerCa
 
 // RecordAddEvent records the add event on this given object.
 func (h *secondaryLayer3NetworkControllerEventHandler) RecordAddEvent(obj interface{}) {
+	switch h.objType {
+	case factory.MultiNetworkPolicyType:
+		mnp := obj.(*mnpapi.MultiNetworkPolicy)
+		klog.V(5).Infof("Recording add event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
+		metrics.GetConfigDurationRecorder().Start("multinetworkpolicy", mnp.Namespace, mnp.Name)
+	}
 }
 
 // RecordUpdateEvent records the udpate event on this given object.
 func (h *secondaryLayer3NetworkControllerEventHandler) RecordUpdateEvent(obj interface{}) {
+	switch h.objType {
+	case factory.MultiNetworkPolicyType:
+		mnp := obj.(*mnpapi.MultiNetworkPolicy)
+		klog.V(5).Infof("Recording update event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
+		metrics.GetConfigDurationRecorder().Start("multinetworkpolicy", mnp.Namespace, mnp.Name)
+	}
 }
 
 // RecordDeleteEvent records the delete event on this given object.
 func (h *secondaryLayer3NetworkControllerEventHandler) RecordDeleteEvent(obj interface{}) {
+	switch h.objType {
+	case factory.MultiNetworkPolicyType:
+		mnp := obj.(*mnpapi.MultiNetworkPolicy)
+		klog.V(5).Infof("Recording delete event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
+		metrics.GetConfigDurationRecorder().Start("multinetworkpolicy", mnp.Namespace, mnp.Name)
+	}
 }
 
 // RecordSuccessEvent records the success event on this given object.
 func (h *secondaryLayer3NetworkControllerEventHandler) RecordSuccessEvent(obj interface{}) {
+	switch h.objType {
+	case factory.MultiNetworkPolicyType:
+		mnp := obj.(*mnpapi.MultiNetworkPolicy)
+		klog.V(5).Infof("Recording success event on multinetwork policy %s/%s", mnp.Namespace, mnp.Name)
+		metrics.GetConfigDurationRecorder().End("multinetworkpolicy", mnp.Namespace, mnp.Name)
+	}
 }
 
 // RecordErrorEvent records the error event on this given object.
@@ -167,6 +194,12 @@ func (h *secondaryLayer3NetworkControllerEventHandler) SyncFunc(objs []interface
 		case factory.NodeType:
 			syncFunc = h.oc.syncNodes
 
+		case factory.NamespaceType:
+			syncFunc = h.oc.syncNamespaces
+
+		case factory.MultiNetworkPolicyType:
+			syncFunc = h.oc.syncMultiNetworkPolicies
+
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
 		}
@@ -197,6 +230,7 @@ type SecondaryLayer3NetworkController struct {
 func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netInfo util.NetInfo,
 	netconfInfo util.NetConfInfo) *SecondaryLayer3NetworkController {
 	stopChan := make(chan struct{})
+	ipv4Mode, ipv6Mode := netconfInfo.IPMode()
 	// controllerName must be unique to identify db object owned by given controller
 	oc := &SecondaryLayer3NetworkController{
 		BaseSecondaryNetworkController: BaseSecondaryNetworkController{
@@ -209,7 +243,10 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 				logicalPortCache:            newPortCache(stopChan),
 				namespaces:                  make(map[string]*namespaceInfo),
 				namespacesMutex:             sync.Mutex{},
-				addressSetFactory:           addressset.NewOvnAddressSetFactory(cnci.nbClient),
+				addressSetFactory:           addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode),
+				networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
+				sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
+				podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),
 				stopChan:                    stopChan,
 				wg:                          &sync.WaitGroup{},
 			},
@@ -218,6 +255,7 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 		nodeClusterRouterPortFailed: sync.Map{},
 	}
 	// disable multicast support for secondary networks
+	// TBD: changes needs to be made to support multicast in secondary networks
 	oc.multicastSupport = false
 
 	oc.initRetryFramework()
@@ -227,6 +265,8 @@ func NewSecondaryLayer3NetworkController(cnci *CommonNetworkControllerInfo, netI
 func (oc *SecondaryLayer3NetworkController) initRetryFramework() {
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
 	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
+	oc.retryNamespaces = oc.newRetryFramework(factory.NamespaceType)
+	oc.retryNetworkPolicies = oc.newRetryFramework(factory.MultiNetworkPolicyType)
 }
 
 // newRetryFramework builds and returns a retry framework for the input resource type;
@@ -269,12 +309,17 @@ func (oc *SecondaryLayer3NetworkController) Stop() {
 	close(oc.stopChan)
 	oc.wg.Wait()
 
+	if oc.policyHandler != nil {
+		oc.watchFactory.RemoveMultiNetworkPolicyHandler(oc.policyHandler)
+	}
 	if oc.podHandler != nil {
 		oc.watchFactory.RemovePodHandler(oc.podHandler)
 	}
-
 	if oc.nodeHandler != nil {
 		oc.watchFactory.RemoveNodeHandler(oc.nodeHandler)
+	}
+	if oc.namespaceHandler != nil {
+		oc.watchFactory.RemoveNamespaceHandler(oc.namespaceHandler)
 	}
 }
 
@@ -306,6 +351,11 @@ func (oc *SecondaryLayer3NetworkController) Cleanup(netName string) error {
 		return fmt.Errorf("failed to get ops for deleting routers of network %s: %v", netName, err)
 	}
 
+	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, netName)
+	if err != nil {
+		return err
+	}
+
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
 		return fmt.Errorf("failed to deleting routers/switches of network %s: %v", netName, err)
@@ -317,11 +367,22 @@ func (oc *SecondaryLayer3NetworkController) Run() error {
 	klog.Infof("Starting all the Watchers for network %s ...", oc.GetNetworkName())
 	start := time.Now()
 
+	// WatchNamespaces() should be started first because it has no other
+	// dependencies, and WatchNodes() depends on it
+	if err := oc.WatchNamespaces(); err != nil {
+		return err
+	}
+
 	if err := oc.WatchNodes(); err != nil {
 		return err
 	}
 
 	if err := oc.WatchPods(); err != nil {
+		return err
+	}
+
+	// WatchMultiNetworkPolicy depends on WatchPods and WatchNamespaces
+	if err := oc.WatchMultiNetworkPolicy(); err != nil {
 		return err
 	}
 

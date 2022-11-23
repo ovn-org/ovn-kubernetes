@@ -29,7 +29,7 @@ func TestNewEgressDNS(t *testing.T) {
 	assert.Nil(t, err)
 	t.Cleanup(libovsdbCleanup.Cleanup)
 
-	testOvnAddFtry := addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
+	testOvnAddFtry := addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient, config.IPv4Mode, config.IPv6Mode)
 	mockDnsOps := new(util_mocks.DNSOps)
 	util.SetDNSLibOpsMockInst(mockDnsOps)
 	tests := []struct {

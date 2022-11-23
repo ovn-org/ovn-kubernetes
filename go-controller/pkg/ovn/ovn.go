@@ -2,7 +2,6 @@ package ovn
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"net"
 	"reflect"
@@ -14,7 +13,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
@@ -26,7 +24,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
-	apierrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
@@ -190,13 +187,6 @@ func (oc *DefaultNetworkController) removePod(pod *kapi.Pod, portInfo *lpInfo) e
 	return nil
 }
 
-// WatchNetworkPolicy starts the watching of the network policy resource and calls
-// back the appropriate handler logic
-func (oc *DefaultNetworkController) WatchNetworkPolicy() error {
-	_, err := oc.retryNetworkPolicies.WatchResource()
-	return err
-}
-
 // WatchEgressFirewall starts the watching of egressfirewall resource and calls
 // back the appropriate handler logic
 func (oc *DefaultNetworkController) WatchEgressFirewall() error {
@@ -243,13 +233,6 @@ func (oc *DefaultNetworkController) WatchEgressIPPods() error {
 	return err
 }
 
-// WatchNamespaces starts the watching of namespace resource and calls
-// back the appropriate handler logic
-func (oc *DefaultNetworkController) WatchNamespaces() error {
-	_, err := oc.retryNamespaces.WatchResource()
-	return err
-}
-
 // syncNodeGateway ensures a node's gateway router is configured
 func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
@@ -284,64 +267,6 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets
 		}
 	}
 	return nil
-}
-
-// aclLoggingUpdateNsInfo parses the provided annotation values and sets nsInfo.aclLogging.Deny and
-// nsInfo.aclLogging.Allow. If errors are encountered parsing the annotation, disable logging completely. If either
-// value contains invalid input, disable logging for the respective key. This is needed to ensure idempotency.
-// More details:
-// *) If the provided annotation cannot be unmarshaled: Disable both Deny and Allow logging. Return an error.
-// *) Valid values for "allow" and "deny" are  "alert", "warning", "notice", "info", "debug", "".
-// *) Invalid values will return an error, and logging will be disabled for the respective key.
-// *) In the following special cases, nsInfo.aclLogging.Deny and nsInfo.aclLogging.Allow. will both be reset to ""
-//
-//	without logging an error, meaning that logging will be switched off:
-//	i) oc.aclLoggingEnabled == false
-//	ii) annotation == ""
-//	iii) annotation == "{}"
-//
-// *) If one of "allow" or "deny" can be parsed and has a valid value, but the other key is not present in the
-//
-//	annotation, then assume that this key should be disabled by setting its nsInfo value to "".
-func (oc *DefaultNetworkController) aclLoggingUpdateNsInfo(annotation string, nsInfo *namespaceInfo) error {
-	var aclLevels ACLLoggingLevels
-	var errors []error
-
-	// If logging is disabled or if the annotation is "" or "{}", use empty strings. Otherwise, parse the annotation.
-	if oc.aclLoggingEnabled && annotation != "" && annotation != "{}" {
-		err := json.Unmarshal([]byte(annotation), &aclLevels)
-		if err != nil {
-			// Disable Allow and Deny logging to ensure idempotency.
-			nsInfo.aclLogging.Allow = ""
-			nsInfo.aclLogging.Deny = ""
-			return fmt.Errorf("could not unmarshal namespace ACL annotation '%s', disabling logging, err: %q",
-				annotation, err)
-		}
-	}
-
-	// Valid log levels are the various preestablished levels or the empty string.
-	validLogLevels := sets.NewString(nbdb.ACLSeverityAlert, nbdb.ACLSeverityWarning, nbdb.ACLSeverityNotice,
-		nbdb.ACLSeverityInfo, nbdb.ACLSeverityDebug, "")
-
-	// Set Deny logging.
-	if validLogLevels.Has(aclLevels.Deny) {
-		nsInfo.aclLogging.Deny = aclLevels.Deny
-	} else {
-		errors = append(errors, fmt.Errorf("disabling deny logging due to invalid deny annotation. "+
-			"%q is not a valid log severity", aclLevels.Deny))
-		nsInfo.aclLogging.Deny = ""
-	}
-
-	// Set Allow logging.
-	if validLogLevels.Has(aclLevels.Allow) {
-		nsInfo.aclLogging.Allow = aclLevels.Allow
-	} else {
-		errors = append(errors, fmt.Errorf("disabling allow logging due to an invalid allow annotation. "+
-			"%q is not a valid log severity", aclLevels.Allow))
-		nsInfo.aclLogging.Allow = ""
-	}
-
-	return apierrors.NewAggregate(errors)
 }
 
 // gatewayChanged() compares old annotations to new and returns true if something has changed.

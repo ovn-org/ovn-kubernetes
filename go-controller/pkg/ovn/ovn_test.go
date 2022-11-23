@@ -6,6 +6,7 @@ import (
 
 	"github.com/onsi/gomega"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -157,7 +158,7 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 
 	fakeAddr, ok := addressSetFactory.(*addressset.FakeAddressSetFactory)
 	if addressSetFactory == nil || (ok && fakeAddr == nil) {
-		addressSetFactory = addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
+		addressSetFactory = addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient, config.IPv4Mode, config.IPv6Mode)
 	}
 
 	podRecorder := metrics.NewPodRecorder()
@@ -177,6 +178,7 @@ func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFacto
 		false, // sctp support
 		false, // multicast support
 		true,  // templates support
+		true,  // acl logging enabled
 	)
 	if err != nil {
 		return nil, err

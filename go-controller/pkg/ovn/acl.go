@@ -135,20 +135,6 @@ func getACLMatch(portGroupName, match string, aclDir aclDirection) string {
 	return aclMatch
 }
 
-// GetNamespaceACLLogging retrieves ACLLoggingLevels for the Namespace.
-// nsInfo will be locked (and unlocked at the end) for given namespace if it exists.
-func (oc *DefaultNetworkController) GetNamespaceACLLogging(ns string) *ACLLoggingLevels {
-	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
-	if nsInfo == nil {
-		return &ACLLoggingLevels{
-			Allow: "",
-			Deny:  "",
-		}
-	}
-	defer nsUnlock()
-	return &nsInfo.aclLogging
-}
-
 func getLogSeverity(action string, aclLogging *ACLLoggingLevels) (log bool, severity string) {
 	severity = ""
 	if aclLogging != nil {

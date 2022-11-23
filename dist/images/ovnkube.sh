@@ -985,10 +985,12 @@ ovn-master() {
 	  egressfirewall_enabled_flag="--enable-egress-firewall"
   fi
   echo "egressfirewall_enabled_flag=${egressfirewall_enabled_flag}"
+
   egressqos_enabled_flag=
   if [[ ${ovn_egressqos_enable} == "true" ]]; then
 	  egressqos_enabled_flag="--enable-egress-qos"
   fi
+
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
 	  multi_network_enabled_flag="--enable-multi-network"

@@ -2,17 +2,23 @@ package ovn
 
 import (
 	"fmt"
+	"net"
 	"reflect"
 	"time"
 
+	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/errors"
+	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 )
 
@@ -47,9 +53,34 @@ func (bsnc *BaseSecondaryNetworkController) AddSecondaryNetworkResourceCommon(ob
 		}
 		return bsnc.ensurePodForSecondaryNetwork(pod, true)
 
+	case factory.NamespaceType:
+		ns, ok := obj.(*kapi.Namespace)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *kapi.Namespace", obj)
+		}
+		return bsnc.AddNamespaceForSecondaryNetwork(ns)
+
+	case factory.MultiNetworkPolicyType:
+		mp, ok := obj.(*mnpapi.MultiNetworkPolicy)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *multinetworkpolicyapi.MultiNetworkPolicy", obj)
+		}
+
+		if !bsnc.shouldApplyMultiPolicy(mp) {
+			return nil
+		}
+
+		np := convertMultiNetPolicyToNetPolicy(mp)
+		if err := bsnc.addNetworkPolicy(np); err != nil {
+			klog.Infof("MultiNetworkPolicy add failed for %s/%s, will try again later: %v",
+				mp.Namespace, mp.Name, err)
+			return err
+		}
+
 	default:
 		return fmt.Errorf("object type %s not supported", objType)
 	}
+	return nil
 }
 
 // UpdateSecondaryNetworkResourceCommon updates the specified object in the cluster to its version in newObj
@@ -65,9 +96,45 @@ func (bsnc *BaseSecondaryNetworkController) UpdateSecondaryNetworkResourceCommon
 
 		return bsnc.ensurePodForSecondaryNetwork(newPod, inRetryCache || util.PodScheduled(oldPod) != util.PodScheduled(newPod))
 
+	case factory.NamespaceType:
+		oldNs, newNs := oldObj.(*kapi.Namespace), newObj.(*kapi.Namespace)
+		return bsnc.updateNamespaceForSecondaryNetwork(oldNs, newNs)
+
+	case factory.MultiNetworkPolicyType:
+		oldMp, ok := oldObj.(*mnpapi.MultiNetworkPolicy)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *multinetworkpolicyapi.MultiNetworkPolicy", oldObj)
+		}
+		newMp, ok := newObj.(*mnpapi.MultiNetworkPolicy)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *multinetworkpolicyapi.MultiNetworkPolicy", newObj)
+		}
+
+		oldShouldApply := bsnc.shouldApplyMultiPolicy(oldMp)
+		newShouldApply := bsnc.shouldApplyMultiPolicy(newMp)
+		if oldShouldApply {
+			// this multi-netpol no longer applies to this network controller, delete it
+			np := convertMultiNetPolicyToNetPolicy(oldMp)
+			if err := bsnc.deleteNetworkPolicy(np); err != nil {
+				klog.Infof("MultiNetworkPolicy delete failed for %s/%s, will try again later: %v",
+					oldMp.Namespace, oldMp.Name, err)
+				return err
+			}
+		}
+		if newShouldApply {
+			// now this multi-netpol applies to this network controller
+			np := convertMultiNetPolicyToNetPolicy(newMp)
+			if err := bsnc.addNetworkPolicy(np); err != nil {
+				klog.Infof("MultiNetworkPolicy add failed for %s/%s, will try again later: %v",
+					newMp.Namespace, newMp.Name, err)
+				return err
+			}
+		}
+
 	default:
 		return fmt.Errorf("object type %s not supported", objType)
 	}
+	return nil
 }
 
 // DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
@@ -85,9 +152,27 @@ func (bsnc *BaseSecondaryNetworkController) DeleteSecondaryNetworkResourceCommon
 		}
 		return bsnc.removePodForSecondaryNetwork(pod, portInfoMap)
 
+	case factory.NamespaceType:
+		ns := obj.(*kapi.Namespace)
+		return bsnc.deleteNamespace4SecondaryNetwork(ns)
+
+	case factory.MultiNetworkPolicyType:
+		mp, ok := obj.(*mnpapi.MultiNetworkPolicy)
+		if !ok {
+			return fmt.Errorf("could not cast %T object to *multinetworkpolicyapi.MultiNetworkPolicy", obj)
+		}
+		np := convertMultiNetPolicyToNetPolicy(mp)
+		// delete this policy regardless it applies to this network controller, in case of missing update event
+		if err := bsnc.deleteNetworkPolicy(np); err != nil {
+			klog.Infof("MultiNetworkPolicy delete failed for %s/%s, will try again later: %v",
+				mp.Namespace, mp.Name, err)
+			return err
+		}
+
 	default:
 		return fmt.Errorf("object type %s not supported", objType)
 	}
+	return nil
 }
 
 // ensurePodForSecondaryNetwork tries to set up secondary network for a pod. It returns nil on success and error
@@ -141,7 +226,7 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 		}
 	}
 	if len(errs) != 0 {
-		return errors.NewAggregate(errs)
+		return kerrors.NewAggregate(errs)
 	}
 	return nil
 }
@@ -159,6 +244,15 @@ func (bsnc *BaseSecondaryNetworkController) addLogicalPortToNetworkForNAD(pod *k
 	ops, lsp, podAnnotation, newlyCreated, err := bsnc.addLogicalPortToNetwork(pod, nadName, network)
 	if err != nil {
 		return err
+	}
+
+	if bsnc.doesNetworkRequireIPAM() {
+		// Ensure the namespace/nsInfo exists
+		addOps, err := bsnc.addPodToNamespaceForSecondaryNetwork(pod.Namespace, podAnnotation.IPs)
+		if err != nil {
+			return err
+		}
+		ops = append(ops, addOps...)
 	}
 
 	recordOps, txOkCallBack, _, err := bsnc.AddConfigDurationRecord("pod", pod.Namespace, pod.Name)
@@ -281,4 +375,129 @@ func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []i
 		}
 	}
 	return bsnc.deleteStaleLogicalSwitchPorts(expectedLogicalPorts)
+}
+
+// addPodToNamespaceForSecondaryNetwork returns the ops needed to add pod's IP to the namespace's address set.
+func (bsnc *BaseSecondaryNetworkController) addPodToNamespaceForSecondaryNetwork(ns string, ips []*net.IPNet) ([]ovsdb.Operation, error) {
+	var ops []ovsdb.Operation
+	var err error
+	nsInfo, nsUnlock, err := bsnc.ensureNamespaceLockedForSecondaryNetwork(ns, true, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to ensure namespace locked: %v", err)
+	}
+
+	defer nsUnlock()
+
+	if ops, err = nsInfo.addressSet.AddIPsReturnOps(createIPAddressSlice(ips)); err != nil {
+		return nil, err
+	}
+
+	return ops, nil
+}
+
+// AddNamespaceForSecondaryNetwork creates corresponding addressset in ovn db for secondary network
+func (bsnc *BaseSecondaryNetworkController) AddNamespaceForSecondaryNetwork(ns *kapi.Namespace) error {
+	klog.Infof("[%s] adding namespace for network %s", ns.Name, bsnc.GetNetworkName())
+	// Keep track of how long syncs take.
+	start := time.Now()
+	defer func() {
+		klog.Infof("[%s] adding namespace took %v for network %s", ns.Name, time.Since(start), bsnc.GetNetworkName())
+	}()
+
+	_, nsUnlock, err := bsnc.ensureNamespaceLockedForSecondaryNetwork(ns.Name, false, ns)
+	if err != nil {
+		return fmt.Errorf("failed to ensure namespace locked: %v", err)
+	}
+	defer nsUnlock()
+	return nil
+}
+
+// ensureNamespaceLockedForSecondaryNetwork locks namespacesMutex, gets/creates an entry for ns, configures OVN nsInfo,
+// and returns it with its mutex locked.
+// ns is the name of the namespace, while namespace is the optional k8s namespace object
+func (bsnc *BaseSecondaryNetworkController) ensureNamespaceLockedForSecondaryNetwork(ns string, readOnly bool, namespace *kapi.Namespace) (*namespaceInfo, func(), error) {
+	ips := bsnc.getAllNamespacePodAddresses(ns)
+	return bsnc.ensureNamespaceLockedCommon(ns, readOnly, namespace, ips, bsnc.configureNamespaceCommon)
+}
+
+func (bsnc *BaseSecondaryNetworkController) updateNamespaceForSecondaryNetwork(old, newer *kapi.Namespace) error {
+	var errors []error
+	klog.Infof("[%s] updating namespace for network %s", old.Name, bsnc.GetNetworkName())
+
+	nsInfo, nsUnlock := bsnc.getNamespaceLocked(old.Name, false)
+	if nsInfo == nil {
+		klog.Warningf("Update event for unknown namespace %q", old.Name)
+		return nil
+	}
+	defer nsUnlock()
+
+	aclAnnotation := newer.Annotations[util.AclLoggingAnnotation]
+	oldACLAnnotation := old.Annotations[util.AclLoggingAnnotation]
+	// support for ACL logging update, if new annotation is empty, make sure we propagate new setting
+	if aclAnnotation != oldACLAnnotation {
+		if err := bsnc.updateNamespaceAclLogging(old.Name, aclAnnotation, nsInfo); err != nil {
+			errors = append(errors, err)
+		}
+	}
+
+	if err := bsnc.multicastUpdateNamespace(newer, nsInfo); err != nil {
+		errors = append(errors, err)
+	}
+	return kerrors.NewAggregate(errors)
+}
+
+func (bsnc *BaseSecondaryNetworkController) deleteNamespace4SecondaryNetwork(ns *kapi.Namespace) error {
+	klog.Infof("[%s] deleting namespace for network %s", ns.Name, bsnc.GetNetworkName())
+
+	nsInfo := bsnc.deleteNamespaceLocked(ns.Name)
+	if nsInfo == nil {
+		return nil
+	}
+	defer nsInfo.Unlock()
+
+	if err := bsnc.multicastDeleteNamespace(ns, nsInfo); err != nil {
+		return fmt.Errorf("failed to delete multicast namespace error %v", err)
+	}
+	return nil
+}
+
+// WatchMultiNetworkPolicy starts the watching of multinetworkpolicy resource and calls
+// back the appropriate handler logic
+func (bsnc *BaseSecondaryNetworkController) WatchMultiNetworkPolicy() error {
+	// if this network does not have ipam, network policy is not supported.
+	if !bsnc.doesNetworkRequireIPAM() {
+		klog.Infof("Network policy is not supported on network %s", bsnc.GetNetworkName())
+		return nil
+	}
+
+	if bsnc.policyHandler != nil {
+		return nil
+	}
+	handler, err := bsnc.retryNetworkPolicies.WatchResource()
+	if err != nil {
+		bsnc.policyHandler = handler
+	}
+	return err
+}
+
+// cleanupPolicyLogicalEntities cleans up all the port groups and addressset belongs to the given network
+func cleanupPolicyLogicalEntities(nbClient libovsdbclient.Client, ops []ovsdb.Operation, netName string) ([]ovsdb.Operation, error) {
+	var err error
+	portGroupPredicate := func(item *nbdb.PortGroup) bool {
+		return item.ExternalIDs[types.NetworkExternalID] == netName
+	}
+	ops, err = libovsdbops.DeletePortGroupsWithPredicateOps(nbClient, ops, portGroupPredicate)
+	if err != nil {
+		return ops, fmt.Errorf("failed to get ops to delete port group of network %s", netName)
+	}
+
+	controllerName := netName + "-network-controller"
+	asPredicate := func(item *nbdb.AddressSet) bool {
+		return item.ExternalIDs[libovsdbops.OwnerControllerKey.String()] == controllerName
+	}
+	ops, err = libovsdbops.DeleteAddressSetsWithPredicateOps(nbClient, ops, asPredicate)
+	if err != nil {
+		return ops, fmt.Errorf("failed to get ops to delete address set of network %s", netName)
+	}
+	return ops, nil
 }

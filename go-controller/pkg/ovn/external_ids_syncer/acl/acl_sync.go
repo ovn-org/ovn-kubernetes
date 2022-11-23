@@ -174,7 +174,7 @@ func (syncer *aclSyncer) updateStaleMulticastACLsDbIDs(legacyACLs []*nbdb.ACL) [
 			if acl.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(knet.PolicyTypeIngress) {
 				// ingress allow acl
 				// either default of namespaced
-				if strings.Contains(acl.Match, types.ClusterRtrPortGroupName) {
+				if strings.Contains(acl.Match, types.ClusterRtrPortGroupNameBase) {
 					// default allow ingress
 					dbIDs = syncer.getDefaultMcastACLDbIDs(mcastAllowInterNodeID, string(knet.PolicyTypeIngress))
 				} else {
@@ -187,7 +187,7 @@ func (syncer *aclSyncer) updateStaleMulticastACLsDbIDs(legacyACLs []*nbdb.ACL) [
 			} else if acl.ExternalIDs[defaultDenyPolicyTypeACLExtIdKey] == string(knet.PolicyTypeEgress) {
 				// egress allow acl
 				// either default of namespaced
-				if strings.Contains(acl.Match, types.ClusterRtrPortGroupName) {
+				if strings.Contains(acl.Match, types.ClusterRtrPortGroupNameBase) {
 					// default allow egress
 					dbIDs = syncer.getDefaultMcastACLDbIDs(mcastAllowInterNodeID, string(knet.PolicyTypeEgress))
 				} else {

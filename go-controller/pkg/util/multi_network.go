@@ -27,6 +27,7 @@ type NetInfo interface {
 	GetNetworkName() string
 	IsSecondary() bool
 	GetPrefix() string
+	GetNetworkScopedName(string) string
 	AddNAD(nadName string)
 	DeleteNAD(nadName string)
 	HasNAD(nadName string) bool
@@ -47,6 +48,11 @@ func (nInfo *DefaultNetInfo) IsSecondary() bool {
 // GetPrefix returns if the logical entities prefix for this network
 func (nInfo *DefaultNetInfo) GetPrefix() string {
 	return ""
+}
+
+// GetNetworkScopedName returns network scope name in this network for the give name
+func (nInfo *DefaultNetInfo) GetNetworkScopedName(name string) string {
+	return name
 }
 
 // AddNAD adds the specified NAD, no op for default network
@@ -87,6 +93,11 @@ func (nInfo *SecondaryNetInfo) IsSecondary() bool {
 // GetPrefix returns if the logical entities prefix for this network
 func (nInfo *SecondaryNetInfo) GetPrefix() string {
 	return GetSecondaryNetworkPrefix(nInfo.netName)
+}
+
+// GetNetworkScopedName returns network scope name in this network for the give name
+func (nInfo *SecondaryNetInfo) GetNetworkScopedName(name string) string {
+	return fmt.Sprintf("%s%s", nInfo.GetPrefix(), name)
 }
 
 // AddNAD adds the specified NAD
