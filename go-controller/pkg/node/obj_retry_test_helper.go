@@ -154,4 +154,4 @@ func (h *nodePortWatcherEventHandler) RecordDeleteEvent(obj interface{}) {}
 
 func (h *nodePortWatcherEventHandler) RecordSuccessEvent(obj interface{}) {}
 
-func (h *nodePortWatcherEventHandler) RecordErrorEvent(obj interface{}, err error) {}
+func (h *nodePortWatcherEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {}

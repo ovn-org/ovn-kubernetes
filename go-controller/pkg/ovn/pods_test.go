@@ -135,7 +135,7 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, 
 
 func (p testPod) populateLogicalSwitchCache(fakeOvn *FakeOVN, uuid string) {
 	gomega.Expect(p.nodeName).NotTo(gomega.Equal(""))
-	err := fakeOvn.controller.lsManager.AddNode(p.nodeName, uuid, []*net.IPNet{ovntest.MustParseIPNet(p.nodeSubnet)})
+	err := fakeOvn.controller.lsManager.AddSwitch(p.nodeName, uuid, []*net.IPNet{ovntest.MustParseIPNet(p.nodeSubnet)})
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
@@ -1814,6 +1814,61 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				retry.CheckRetryObjectEventually(myPod1Key, true, fakeOvn.controller.retryPods)
 
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("reconciles a terminating pod with no node", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				namespaceT := *newNamespace("namespace1")
+				t := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+
+				p := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				now := metav1.Now()
+				p.SetDeletionTimestamp(&now)
+
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*p,
+						},
+					},
+				)
+				// pod exists, networks annotations don't
+				pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				_, ok := pod.Annotations[util.OvnPodAnnotationName]
+				gomega.Expect(ok).To(gomega.BeFalse())
+
+				err = fakeOvn.controller.WatchNamespaces()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// port should not be in cache, because it should never have been added
+				logicalPort := util.GetLogicalPortName(t.namespace, t.podName)
+				_, err = fakeOvn.controller.logicalPortCache.get(logicalPort)
+				gomega.Expect(err).NotTo(gomega.BeNil())
+				myPod1Key, err := retry.GetResourceKey(pod)
+				retry.CheckRetryObjectEventually(myPod1Key, true, fakeOvn.controller.retryPods)
 				return nil
 			}
 

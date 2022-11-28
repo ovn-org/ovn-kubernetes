@@ -24,8 +24,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	controllerManager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/network-controller-manager"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -218,7 +218,10 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	var watchFactory factory.Shutdownable
+	defer func() {
+		close(stopChan)
+		wg.Wait()
+	}()
 	var masterWatchFactory *factory.WatchFactory
 	var masterEventRecorder record.EventRecorder
 	if master != "" {
@@ -228,7 +231,8 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		if err != nil {
 			return err
 		}
-		watchFactory = masterWatchFactory
+		defer masterWatchFactory.Shutdown()
+
 		var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
 
 		if libovsdbOvnNBClient, err = libovsdb.NewNBClient(stopChan); err != nil {
@@ -243,9 +247,11 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		metrics.RegisterMasterBase()
 
 		masterEventRecorder = util.EventRecorder(ovnClientset.KubeClient)
-		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil,
-			libovsdbOvnNBClient, libovsdbOvnSBClient, masterEventRecorder)
-		if err := ovnController.Start(master, wg, ctx.Context, cancel); err != nil {
+		cm := controllerManager.NewNetworkControllerManager(ovnClientset, master, masterWatchFactory,
+			libovsdbOvnNBClient, libovsdbOvnSBClient, masterEventRecorder, wg)
+		err = cm.Start(ctx.Context, cancel)
+		defer cm.Stop()
+		if err != nil {
 			return err
 		}
 	}
@@ -260,7 +266,7 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 			if err != nil {
 				return err
 			}
-			watchFactory = nodeWatchFactory
+			defer nodeWatchFactory.Shutdown()
 		} else {
 			nodeWatchFactory = masterWatchFactory
 		}
@@ -305,8 +311,5 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 
 	// run until cancelled
 	<-ctx.Context.Done()
-	close(stopChan)
-	watchFactory.Shutdown()
-	wg.Wait()
 	return nil
 }

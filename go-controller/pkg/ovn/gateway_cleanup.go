@@ -20,7 +20,7 @@ import (
 )
 
 // gatewayCleanup removes all the NB DB objects created for a node's gateway
-func (oc *Controller) gatewayCleanup(nodeName string) error {
+func (oc *DefaultNetworkController) gatewayCleanup(nodeName string) error {
 	gatewayRouter := types.GWRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
@@ -87,7 +87,7 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 	return nil
 }
 
-func (oc *Controller) delPbrAndNatRules(nodeName string, lrpTypes []string) {
+func (oc *DefaultNetworkController) delPbrAndNatRules(nodeName string, lrpTypes []string) {
 	// delete the dnat_and_snat entry that we added for the management port IP
 	// Note: we don't need to delete any MAC bindings that are dynamically learned from OVN SB DB
 	// because there will be none since this NAT is only for outbound traffic and not for inbound
@@ -105,7 +105,7 @@ func (oc *Controller) delPbrAndNatRules(nodeName string, lrpTypes []string) {
 	oc.removeLRPolicies(nodeName, lrpTypes)
 }
 
-func (oc *Controller) staticRouteCleanup(nextHops []net.IP) {
+func (oc *DefaultNetworkController) staticRouteCleanup(nextHops []net.IP) {
 	ips := sets.String{}
 	for _, nextHop := range nextHops {
 		ips.Insert(nextHop.String())
@@ -125,7 +125,7 @@ func (oc *Controller) staticRouteCleanup(nextHops []net.IP) {
 // the specified gatewayRouterIP from nexthops
 // - if the LRP exists and has the len(nexthops) == 1: it removes
 // the LRP completely
-func (oc *Controller) policyRouteCleanup(nextHops []net.IP) {
+func (oc *DefaultNetworkController) policyRouteCleanup(nextHops []net.IP) {
 	for _, nextHop := range nextHops {
 		gwIP := nextHop.String()
 		policyPred := func(item *nbdb.LogicalRouterPolicy) bool {
@@ -155,7 +155,7 @@ func (oc *Controller) policyRouteCleanup(nextHops []net.IP) {
 // the single join switch versions; this is to cleanup the logical entities for the
 // specified node if the node was deleted when the ovnkube-master pod was brought down
 // to do the version upgrade.
-func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly bool) error {
+func (oc *DefaultNetworkController) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly bool) error {
 	gatewayRouter := types.GWRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
@@ -241,7 +241,7 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 
 // remove Logical Router Policy on ovn_cluster_router for a specific node.
 // Specify priorities to only delete specific types
-func (oc *Controller) removeLRPolicies(nodeName string, priorities []string) {
+func (oc *DefaultNetworkController) removeLRPolicies(nodeName string, priorities []string) {
 	if len(priorities) == 0 {
 		priorities = []string{types.NodeSubnetPolicyPriority}
 	}
@@ -262,7 +262,7 @@ func (oc *Controller) removeLRPolicies(nodeName string, priorities []string) {
 }
 
 // removes DGP, snat_and_dnat entries, and LRPs
-func (oc *Controller) cleanupDGP(nodes *kapi.NodeList) error {
+func (oc *DefaultNetworkController) cleanupDGP(nodes *kapi.NodeList) error {
 	klog.Infof("Removing DGP %v", nodes)
 	// remove dnat_snat entries as well as LRPs
 	for _, node := range nodes.Items {
