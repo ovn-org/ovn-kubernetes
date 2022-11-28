@@ -674,6 +674,9 @@ func (n *OvnNode) startEgressIPHealthCheckingServer(wg *sync.WaitGroup, mgmtPort
 		if err := ip.SettleAddresses(mgmtPortConfig.ifName, 10); err != nil {
 			return fmt.Errorf("failed start health checking server due to unsettled IPv6: %w", err)
 		}
+	} else if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		klog.Info("Skipping Egress IP health checking server for node in DPU mode: no mgmt ip")
+		return nil
 	} else {
 		return fmt.Errorf("unable to start health checking server: no mgmt ip")
 	}
