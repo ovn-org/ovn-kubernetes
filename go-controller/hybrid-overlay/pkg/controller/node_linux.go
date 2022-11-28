@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
@@ -40,8 +41,9 @@ type flowCacheEntry struct {
 
 // NodeController is the node hybrid overlay controller
 type NodeController struct {
-	nodeName    string
-	initialized bool
+	nodeName string
+	// an atomic uint32 for testing purposes 0 = uninitialized and 1 = initialized
+	initialized uint32
 	drMAC       net.HardwareAddr
 	drIP        net.IP
 	gwLRPIP     net.IP
@@ -106,7 +108,7 @@ func (n *NodeController) AddPod(pod *kapi.Pod) error {
 	// if the IP/MAC or Annotations have changed
 	ignoreLearn := true
 
-	if !n.initialized {
+	if atomic.LoadUint32(&n.initialized) == 0 {
 		node, err := n.nodeLister.Get(n.nodeName)
 		if err != nil {
 			return fmt.Errorf("hybrid overlay not initialized on %s, and failed to get node data: %v",
@@ -353,7 +355,7 @@ func getIPAsHexString(ip net.IP) string {
 
 // EnsureHybridOverlayBridge sets up the hybrid overlay bridge
 func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
-	if n.initialized {
+	if atomic.LoadUint32(&n.initialized) == 1 {
 		return nil
 	}
 	if n.gwLRPIP == nil {
@@ -550,7 +552,7 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 
 	n.updateFlowCacheEntry("0x0", flows, false)
 	n.requestFlowSync()
-	n.initialized = true
+	atomic.StoreUint32(&n.initialized, 1)
 	klog.Infof("Hybrid overlay setup complete for node %s", node.Name)
 	return nil
 }
