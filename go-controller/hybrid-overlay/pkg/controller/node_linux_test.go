@@ -113,10 +113,10 @@ func addNodeSetupCmds(fexec *ovntest.FakeExec, nodeName string) {
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface br-ext mac_in_use",
-		Output: thisNodeDRMAC,
+		Output: "10:11:12:13:14:15",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 set bridge br-ext other-config:hwaddr=" + thisNodeDRMAC,
+		"ovs-vsctl --timeout=15 set bridge br-ext other-config:hwaddr=10:11:12:13:14:15",
 		"ovs-vsctl --timeout=15 --may-exist add-port br-int int -- --may-exist add-port br-ext ext -- set Interface int type=patch options:peer=ext external-ids:iface-id=int-" + nodeName + " -- set Interface ext type=patch options:peer=int",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
