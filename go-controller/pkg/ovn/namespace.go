@@ -231,7 +231,7 @@ func (oc *DefaultNetworkController) AddNamespace(ns *kapi.Namespace) error {
 
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns.Name, false, ns)
 	if err != nil {
-		errors = append(errors, fmt.Errorf("failed to ensure namespace locked: %v", err))
+		return fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
 	defer nsUnlock()
 
