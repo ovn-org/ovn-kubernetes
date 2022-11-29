@@ -297,8 +297,8 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 
 // Stop gracefully stops the controller
 func (oc *DefaultNetworkController) Stop() {
-	oc.wg.Wait()
 	close(oc.stopChan)
+	oc.wg.Wait()
 }
 
 // Init runs a subnet IPAM and the network controller that watches arrival/departure

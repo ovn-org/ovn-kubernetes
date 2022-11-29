@@ -189,8 +189,16 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				// check severity was reset from default to nil
 				keepACL.Severity = nil
 
+				// purgeACL ACL will be deleted when test server starts deleting dereferenced ACLs
+				// for now we need to update its fields, since it is present in the db
+				purgeACL.Direction = nbdb.ACLDirectionToLport
+				newName2 := buildEgressFwAclName("none", t.EgressFirewallStartPriority)
+				purgeACL.Name = &newName2
+				purgeACL.Severity = nil
+
 				expectedDatabaseState := []libovsdb.TestData{
 					otherACL,
+					purgeACL,
 					keepACL,
 					finalNodeSwitch,
 					finalJoinSwitch,
@@ -597,6 +605,8 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				nodeSwitch1.ACLs = []string{}
 				nodeSwitch2.ACLs = []string{}
 				expectedDatabaseState = []libovsdb.TestData{
+					// this ACL will be deleted when test server starts deleting dereferenced ACLs
+					ipv4ACL,
 					nodeSwitch1,
 					nodeSwitch2,
 					clusterRouter,
@@ -842,6 +852,8 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", 
 				nodeSwitch1.ACLs = []string{}
 				nodeSwitch2.ACLs = []string{}
 				expectedDatabaseState = []libovsdb.TestData{
+					// this ACL will be deleted when test server starts deleting dereferenced ACLs
+					ipv4ACL,
 					nodeSwitch1,
 					nodeSwitch2,
 					clusterRouter,
@@ -1242,8 +1254,16 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				keepACL.Name = &newName
 				keepACL.Meter = &meter
 
+				// purgeACL ACL will be deleted when test server starts deleting dereferenced ACLs
+				// for now we need to update its fields, since it is present in the db
+				purgeACL.Direction = nbdb.ACLDirectionToLport
+				newName2 := buildEgressFwAclName("none", t.EgressFirewallStartPriority)
+				purgeACL.Name = &newName2
+				purgeACL.Meter = &meter
+
 				expectedDatabaseState := []libovsdb.TestData{
 					otherACL,
+					purgeACL,
 					keepACL,
 					finalNodeSwitch,
 					finalJoinSwitch,
@@ -1621,7 +1641,9 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode",
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// join switch should return to orignal state, egfw was deleted
-				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(fakeOVN.dbSetup.NBData))
+				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveData(append(fakeOVN.dbSetup.NBData,
+					// this ACL will be deleted when test server starts deleting dereferenced ACLs
+					ipv4ACL)))
 
 				return nil
 			}
