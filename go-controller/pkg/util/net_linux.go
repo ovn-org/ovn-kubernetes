@@ -226,8 +226,8 @@ func LinkAddrExist(link netlink.Link, address *net.IPNet) (bool, error) {
 }
 
 // LinkAddrAdd removes existing addresses on the link and adds the new address
-func LinkAddrAdd(link netlink.Link, address *net.IPNet) error {
-	err := netLinkOps.AddrAdd(link, &netlink.Addr{IPNet: address})
+func LinkAddrAdd(link netlink.Link, address *net.IPNet, flags int) error {
+	err := netLinkOps.AddrAdd(link, &netlink.Addr{IPNet: address, Flags: flags})
 	if err != nil {
 		return fmt.Errorf("failed to add address %s on link %s: %v", address, link.Attrs().Name, err)
 	}

@@ -171,7 +171,7 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 		// disappearing
 		warnings = append(warnings, fmt.Sprintf("missing IP address %s on the interface %s, adding it...",
 			cfg.ifAddr, mpcfg.ifName))
-		err = util.LinkAddrAdd(mpcfg.link, cfg.ifAddr)
+		err = util.LinkAddrAdd(mpcfg.link, cfg.ifAddr, 0)
 	}
 	if err != nil {
 		return warnings, err
