@@ -78,7 +78,7 @@ func compareFlowCacheEntry(returnedEntry, expectedEntry *flowCacheEntry) error {
 	return nil
 }
 
-func generateInitialFlowCacheEntry(mgmtInterfaceAddr string) *flowCacheEntry {
+func generateInitialFlowCacheEntry(mgmtInterfaceAddr, drIP string) *flowCacheEntry {
 	_, ipNet, err := net.ParseCIDR(thisNodeSubnet)
 	Expect(err).NotTo(HaveOccurred())
 	gwIfAddr := util.GetNodeGatewayIfAddr(ipNet)
@@ -91,12 +91,12 @@ func generateInitialFlowCacheEntry(mgmtInterfaceAddr string) *flowCacheEntry {
 			"table=2,priority=0,actions=drop",
 			"table=10,priority=0,actions=drop",
 			"table=20,priority=0,actions=drop",
-			"table=0,priority=100,in_port=ext,arp_op=1,arp,arp_tpa=" + thisNodeDRIP + ",actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:" + thisNodeDRMAC + ",load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],load:0x" + thisNodeDRMACRaw + "->NXM_NX_ARP_SHA[],load:0x" + getIPAsHexString(net.ParseIP(thisNodeDRIP)) + "->NXM_OF_ARP_SPA[],IN_PORT,resubmit(,1)",
+			"table=0,priority=100,in_port=ext,arp_op=1,arp,arp_tpa=" + drIP + ",actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:" + thisNodeDRMAC + ",load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],load:0x" + thisNodeDRMACRaw + "->NXM_NX_ARP_SHA[],load:0x" + getIPAsHexString(net.ParseIP(drIP)) + "->NXM_OF_ARP_SPA[],IN_PORT,resubmit(,1)",
 			"table=0,priority=100,in_port=ext-vxlan,ip,nw_dst=" + thisNodeSubnet + ",dl_dst=" + thisNodeDRMAC + ",actions=goto_table:10",
 			"table=0,priority=10,arp,in_port=ext-vxlan,arp_op=1,arp_tpa=" + thisNodeSubnet + ",actions=resubmit(,2)",
 			"table=2,priority=100,arp,in_port=ext-vxlan,arp_op=1,arp_tpa=" + thisNodeSubnet + ",actions=move:tun_src->tun_dst,load:4097->NXM_NX_TUN_ID[0..31],move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:" + thisNodeDRMAC + ",load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],load:0x" + thisNodeDRMACRaw + "->NXM_NX_ARP_SHA[],move:NXM_OF_ARP_TPA[]->NXM_NX_REG0[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],move:NXM_NX_REG0[]->NXM_OF_ARP_SPA[],IN_PORT",
 			"table=10,priority=100,ip,nw_dst=" + mgmtInterfaceAddr + ",actions=mod_dl_src:" + thisNodeDRMAC + ",mod_dl_dst:" + testMgmtMAC + ",output:ext",
-			"table=10,priority=100,ip,nw_dst=" + thisNodeDRIP + ",actions=mod_nw_dst:100.64.0.3,mod_dl_src:" + thisNodeDRMAC + ",mod_dl_dst:" + gwPortMAC.String() + ",output:ext",
+			"table=10,priority=100,ip,nw_dst=" + drIP + ",actions=mod_nw_dst:100.64.0.3,mod_dl_src:" + thisNodeDRMAC + ",mod_dl_dst:" + gwPortMAC.String() + ",output:ext",
 		},
 	}
 
@@ -204,7 +204,7 @@ func (fl *fakeLink) Type() string {
 	return "fakeLink"
 }
 
-func addEnsureHybridOverlayBridgeMocks(nlMock *mocks.NetLinkOps) {
+func addEnsureHybridOverlayBridgeMocks(nlMock *mocks.NetLinkOps, drIP string) {
 	mockBrExt := &fakeLink{
 		attrs: &netlink.LinkAttrs{
 			Index: 555,
@@ -219,7 +219,7 @@ func addEnsureHybridOverlayBridgeMocks(nlMock *mocks.NetLinkOps) {
 	mockRoute := &netlink.Route{
 		LinkIndex: 777,
 		Dst:       ovntest.MustParseIPNet("10.0.0.0/16"),
-		Gw:        ovntest.MustParseIP(thisNodeDRIP),
+		Gw:        ovntest.MustParseIP(drIP),
 	}
 
 	nlMocks := []ovntest.TestifyMockHelper{
@@ -394,7 +394,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			)
 			Expect(err).NotTo(HaveOccurred())
 
-			addEnsureHybridOverlayBridgeMocks(nlMock)
+			addEnsureHybridOverlayBridgeMocks(nlMock, thisNodeDRIP)
 
 			// initial flowSync
 			addSyncFlows(fexec)
@@ -453,7 +453,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			)
 			Expect(err).NotTo(HaveOccurred())
 
-			addEnsureHybridOverlayBridgeMocks(nlMock)
+			addEnsureHybridOverlayBridgeMocks(nlMock, thisNodeDRIP)
 			// initial flowSync
 			addSyncFlows(fexec)
 			// flowsync after EnsureHybridOverlayBridge()
@@ -474,7 +474,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			initialFlowCache := map[string]*flowCacheEntry{
-				"0x0": generateInitialFlowCacheEntry(mgmtIfAddr.IP.String()),
+				"0x0": generateInitialFlowCacheEntry(mgmtIfAddr.IP.String(), thisNodeDRIP),
 			}
 
 			Eventually(func() error {
@@ -539,7 +539,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			)
 			Expect(err).NotTo(HaveOccurred())
 
-			addEnsureHybridOverlayBridgeMocks(nlMock)
+			addEnsureHybridOverlayBridgeMocks(nlMock, thisNodeDRIP)
 			// initial flowSync
 			addSyncFlows(fexec)
 			// flowsync after EnsureHybridOverlayBridge()
@@ -560,7 +560,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			initialFlowCache := map[string]*flowCacheEntry{
-				"0x0": generateInitialFlowCacheEntry(mgmtIfAddr.IP.String()),
+				"0x0": generateInitialFlowCacheEntry(mgmtIfAddr.IP.String(), thisNodeDRIP),
 			}
 			Eventually(func() error {
 				linuxNode.flowMutex.Lock()
