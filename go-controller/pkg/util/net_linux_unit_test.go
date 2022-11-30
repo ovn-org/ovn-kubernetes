@@ -671,7 +671,7 @@ func TestLinkRoutesAddOrUpdateMTU(t *testing.T) {
 			},
 		},
 		{
-			desc: "LinkRoutesAddOrUpdateSrcOrMTU() returns NO error when subnets input list is empty",
+			desc: "LinkRoutesApply() returns NO error when subnets input list is empty",
 		},
 	}
 	for i, tc := range tests {
@@ -680,7 +680,7 @@ func TestLinkRoutesAddOrUpdateMTU(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
 			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
 
-			err := LinkRoutesAddOrUpdateSourceOrMTU(tc.inputLink, tc.inputGwIP, tc.inputSubnets, tc.inputMTU, tc.inputSrc)
+			err := LinkRoutesApply(tc.inputLink, tc.inputGwIP, tc.inputSubnets, tc.inputMTU, tc.inputSrc)
 			t.Log(err)
 			if tc.errExp {
 				assert.Error(t, err)

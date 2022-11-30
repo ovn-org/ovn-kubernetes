@@ -302,7 +302,7 @@ func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int
 	return nil
 }
 
-func LinkRoutesAddOrUpdateSourceOrMTU(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int, src net.IP) error {
+func LinkRoutesApply(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int, src net.IP) error {
 	for _, subnet := range subnets {
 		route, err := LinkRouteGetFilteredRoute(filterRouteByDst(link, subnet))
 		if err != nil {
