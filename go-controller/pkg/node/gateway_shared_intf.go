@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -92,6 +93,11 @@ type serviceConfig struct {
 type serviceEps struct {
 	v4 sets.String
 	v6 sets.String
+}
+
+type cidrAndFlags struct {
+	ipNet *net.IPNet
+	flags int
 }
 
 // updateServiceFlowCache handles managing breth0 gateway flows for ingress traffic towards kubernetes services
@@ -1783,27 +1789,27 @@ func setNodeMasqueradeIPOnExtBridge(extBridgeName string) error {
 		return err
 	}
 
-	var bridgeCIDRs []*net.IPNet
+	var bridgeCIDRs []cidrAndFlags
 	if config.IPv4Mode {
 		_, masqIPNet, _ := net.ParseCIDR(types.V4MasqueradeSubnet)
 		masqIPNet.IP = net.ParseIP(types.V4HostMasqueradeIP)
-		bridgeCIDRs = append(bridgeCIDRs, masqIPNet)
+		bridgeCIDRs = append(bridgeCIDRs, cidrAndFlags{ipNet: masqIPNet, flags: 0})
 	}
 
 	if config.IPv6Mode {
 		_, masqIPNet, _ := net.ParseCIDR(types.V6MasqueradeSubnet)
 		masqIPNet.IP = net.ParseIP(types.V6HostMasqueradeIP)
-		bridgeCIDRs = append(bridgeCIDRs, masqIPNet)
+		bridgeCIDRs = append(bridgeCIDRs, cidrAndFlags{ipNet: masqIPNet, flags: unix.IFA_F_NODAD})
 	}
 
 	for _, bridgeCIDR := range bridgeCIDRs {
-		if exists, err := util.LinkAddrExist(extBridge, bridgeCIDR); err == nil && !exists {
-			if err := util.LinkAddrAdd(extBridge, bridgeCIDR); err != nil {
+		if exists, err := util.LinkAddrExist(extBridge, bridgeCIDR.ipNet); err == nil && !exists {
+			if err := util.LinkAddrAdd(extBridge, bridgeCIDR.ipNet, bridgeCIDR.flags); err != nil {
 				return err
 			}
 		} else if err != nil {
 			return fmt.Errorf(
-				"failed to check existence of addr %s in bridge %s: %v", bridgeCIDR, extBridgeName, err)
+				"failed to check existence of addr %s in bridge %s: %v", bridgeCIDR.ipNet, extBridgeName, err)
 		}
 	}
 

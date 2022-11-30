@@ -280,6 +280,7 @@ func TestLinkAddrAdd(t *testing.T) {
 		desc                     string
 		inputLink                netlink.Link
 		inputNewAddr             *net.IPNet
+		inputFlags               int
 		errExp                   bool
 		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
 		onRetArgsLinkIfaceOpers  []ovntest.TestifyMockHelper
@@ -288,6 +289,7 @@ func TestLinkAddrAdd(t *testing.T) {
 			desc:         "setting <nil> address on link errors out",
 			inputLink:    mockLink,
 			inputNewAddr: nil,
+			inputFlags:   0,
 			errExp:       true,
 			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "AddrAdd", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
@@ -300,6 +302,7 @@ func TestLinkAddrAdd(t *testing.T) {
 			desc:         "test code path where error is returned when attempting to set new address on link",
 			inputLink:    mockLink,
 			inputNewAddr: ovntest.MustParseIPNet("192.168.1.15/24"),
+			inputFlags:   0,
 			errExp:       true,
 			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "AddrAdd", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
@@ -312,6 +315,7 @@ func TestLinkAddrAdd(t *testing.T) {
 			desc:         "setting new address on link succeeds",
 			inputLink:    mockLink,
 			inputNewAddr: ovntest.MustParseIPNet("192.168.1.15/24"),
+			inputFlags:   2,
 			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "AddrAdd", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
 			},
@@ -322,7 +326,7 @@ func TestLinkAddrAdd(t *testing.T) {
 
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
 			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
-			err := LinkAddrAdd(tc.inputLink, tc.inputNewAddr)
+			err := LinkAddrAdd(tc.inputLink, tc.inputNewAddr, tc.inputFlags)
 			t.Log(err)
 			if tc.errExp {
 				assert.Error(t, err)
