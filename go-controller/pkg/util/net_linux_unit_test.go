@@ -636,7 +636,7 @@ func TestLinkRoutesAddOrUpdateMTU(t *testing.T) {
 			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
 					{
-						Gw:  ovntest.MustParseIP("192.168.0.1"),
+						Gw:  nil,
 						Dst: ovntest.MustParseIPNet("10.18.20.0/24"),
 						MTU: 1400,
 						Src: ovntest.MustParseIP("192.168.0.10"),
@@ -649,9 +649,32 @@ func TestLinkRoutesAddOrUpdateMTU(t *testing.T) {
 			},
 		},
 		{
-			desc:         "Route exists, has the same (mtu and source) and is not updated",
+			desc:         "Route exists, has different gw and is updated",
 			inputLink:    mockLink,
-			inputGwIP:    nil,
+			inputGwIP:    ovntest.MustParseIP("192.168.0.1"),
+			inputSubnets: ovntest.MustParseIPNets("10.18.20.0/24"),
+			inputMTU:     1400,
+			inputSrc:     ovntest.MustParseIP("192.168.0.8"),
+			errExp:       false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
+					{
+						Gw:  ovntest.MustParseIP("192.168.0.2"),
+						Dst: ovntest.MustParseIPNet("10.18.20.0/24"),
+						MTU: 1400,
+						Src: ovntest.MustParseIP("192.168.0.8"),
+					},
+				}, nil}},
+				{OnCallMethodName: "RouteReplace", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil}},
+			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
+		},
+		{
+			desc:         "Route exists, has the same (mtu, source and gw) and is not updated",
+			inputLink:    mockLink,
+			inputGwIP:    ovntest.MustParseIP("192.168.0.1"),
 			inputSubnets: ovntest.MustParseIPNets("10.18.20.0/24"),
 			inputMTU:     1400,
 			inputSrc:     ovntest.MustParseIP("192.168.0.10"),

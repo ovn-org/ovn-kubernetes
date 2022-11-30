@@ -302,6 +302,10 @@ func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int
 	return nil
 }
 
+// LinkRoutesApply applies routes for given subnets.
+// For each subnet it searches for an existing route by destination(subnet) on link:
+// * if found and gwIP, mtu or src changed the route will be updated
+// * if not found it adds a new route
 func LinkRoutesApply(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu int, src net.IP) error {
 	for _, subnet := range subnets {
 		route, err := LinkRouteGetFilteredRoute(filterRouteByDst(link, subnet))
@@ -309,17 +313,11 @@ func LinkRoutesApply(link netlink.Link, gwIP net.IP, subnets []*net.IPNet, mtu i
 			return err
 		}
 		if route != nil {
-			var changed bool
-			if route.MTU != mtu {
+			if route.MTU != mtu || !src.Equal(route.Src) || !gwIP.Equal(route.Gw) {
 				route.MTU = mtu
-				changed = true
-			}
-			if !src.Equal(route.Src) {
 				route.Src = src
-				changed = true
-			}
+				route.Gw = gwIP
 
-			if changed {
 				err = netLinkOps.RouteReplace(route)
 				if err != nil {
 					return fmt.Errorf("failed to replace route for subnet %s via gateway %s with mtu %d: %v",
