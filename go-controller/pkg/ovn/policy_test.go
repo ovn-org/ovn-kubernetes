@@ -748,6 +748,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				acls := []libovsdb.TestData{}
 				acls = append(acls, gressPolicy1ExpectedData[:len(gressPolicy1ExpectedData)-1]...)
 				acls = append(acls, gressPolicy2ExpectedData[:len(gressPolicy2ExpectedData)-1]...)
+				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(acls,
 					getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{nodeName})...)))
 
@@ -1052,7 +1053,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				// ACL4: leftover default deny ACL ingress with old name (namespace_policyname)
 				leftOverACL4FromUpgrade := libovsdbops.BuildACL(
-					"leftover1"+"_"+networkPolicy2.Name,
+					"shortName"+"_"+networkPolicy2.Name,
 					nbdb.ACLDirectionToLport,
 					types.DefaultDenyPriority,
 					"outport == @"+ingressPGName,
@@ -1099,14 +1100,28 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				}
 				leftOverACL3FromUpgrade.Options = egressOptions
 				newDefaultDenyEgressACLName := "youknownothingjonsnowyouknownothingjonsnowyouknownothingjonsnow" // trims it according to RFC1123
-				newDefaultDenyIngressACLName := getDefaultDenyPolicyACLName("leftover1", lportIngress)
+				newDefaultDenyIngressACLName := getDefaultDenyPolicyACLName("shortName", lportIngress)
 				leftOverACL3FromUpgrade.Name = &newDefaultDenyEgressACLName
 				leftOverACL4FromUpgrade.Name = &newDefaultDenyIngressACLName
 				expectedData = append(expectedData, leftOverACL3FromUpgrade)
 				expectedData = append(expectedData, leftOverACL4FromUpgrade)
-				testOnlyIngressDenyPG.ACLs = nil // Sync Function should remove stale ACL from PGs and delete the ACL
-				testOnlyEgressDenyPG.ACLs = nil  // Sync Function should remove stale ACL from PGs and delete the ACL
+				testOnlyIngressDenyPG.ACLs = nil // Sync Function should remove stale ACL from PGs
+				testOnlyEgressDenyPG.ACLs = nil  // Sync Function should remove stale ACL from PGs
 				expectedData = append(expectedData, testOnlyIngressDenyPG)
+				// since test server doesn't garbage collect dereferenced acls, they will stay in the test db after they
+				// were deleted. Even though they are derefenced from the port group at this point, they will be updated
+				// as all the other ACLs.
+				// Update deleted leftOverACL1FromUpgrade and leftOverACL2FromUpgrade to match on expected data
+				// Once our test server can delete such acls, this part should be deleted
+				// start of db hack
+				newDefaultDenyLeftoverIngressACLName := getDefaultDenyPolicyACLName("leftover1", lportIngress)
+				newDefaultDenyLeftoverEgressACLName := getDefaultDenyPolicyACLName("leftover1", lportEgressAfterLB)
+				leftOverACL2FromUpgrade.Name = &newDefaultDenyLeftoverIngressACLName
+				leftOverACL1FromUpgrade.Name = &newDefaultDenyLeftoverEgressACLName
+				leftOverACL1FromUpgrade.Options = egressOptions
+				expectedData = append(expectedData, leftOverACL2FromUpgrade)
+				expectedData = append(expectedData, leftOverACL1FromUpgrade)
+				// end of db hack
 				expectedData = append(expectedData, testOnlyEgressDenyPG)
 
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
@@ -1127,7 +1142,8 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				networkPolicy1 := getPortNetworkPolicy(netPolicyName1, longNamespace.Name, labelName, labelVal, portNum)
 				networkPolicy2 := getPortNetworkPolicy(netPolicyName2, longNamespace.Name, labelName, labelVal, portNum+1)
 
-				longLeftOverNameSpaceName := "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz" // namespace is >45 characters long
+				longLeftOverNameSpaceName := "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"  // namespace is >45 characters long
+				longLeftOverNameSpaceName2 := "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxy1" // namespace is >45 characters long
 				egressPGName := defaultDenyPortGroupName(longLeftOverNameSpaceName, egressDefaultDenySuffix)
 				ingressPGName := defaultDenyPortGroupName(longLeftOverNameSpaceName, ingressDefaultDenySuffix)
 				// ACL1: leftover arp allow ACL egress with old match (arp)
@@ -1196,7 +1212,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				// ACL4: leftover default deny ACL egress with old name (namespace_policyname)
 				leftOverACL4FromUpgrade := libovsdbops.BuildACL(
-					longLeftOverNameSpaceName+"_"+networkPolicy2.Name, // we are ok here because test server doesn't impose restrictions
+					longLeftOverNameSpaceName2+"_"+networkPolicy2.Name, // we are ok here because test server doesn't impose restrictions
 					nbdb.ACLDirectionFromLport,
 					types.DefaultDenyPriority,
 					"inport == @"+egressPGName,
@@ -1213,7 +1229,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				// ACL5: leftover default deny ACL ingress with old name (namespace_policyname)
 				leftOverACL5FromUpgrade := libovsdbops.BuildACL(
-					longLeftOverNameSpaceName+"_"+networkPolicy2.Name, // we are ok here because test server doesn't impose restrictions
+					longLeftOverNameSpaceName2+"_"+networkPolicy2.Name, // we are ok here because test server doesn't impose restrictions
 					nbdb.ACLDirectionToLport,
 					types.DefaultDenyPriority,
 					"outport == @"+ingressPGName,
@@ -1290,16 +1306,31 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					"apply-after-lb": "true",
 				}
 				leftOverACL4FromUpgrade.Options = egressOptions
-				leftOverACL3FromUpgrade.Name = utilpointer.StringPtr(longLeftOverNameSpaceName + "blah_ARPall") // trims it according to RFC1123
-				leftOverACL4FromUpgrade.Name = utilpointer.StringPtr(longLeftOverNameSpaceName + "_egressDefa") // trims it according to RFC1123
-				leftOverACL5FromUpgrade.Name = utilpointer.StringPtr(longLeftOverNameSpaceName + "_ingressDef") // trims it according to RFC1123
-				leftOverACL6FromUpgrade.Name = utilpointer.StringPtr(longLeftOverNameSpaceName62 + "_")         // name stays the same here since its no-op
+				leftOverACL3FromUpgrade.Name = utilpointer.StringPtr(longLeftOverNameSpaceName + "blah_ARPall")  // trims it according to RFC1123
+				leftOverACL4FromUpgrade.Name = utilpointer.StringPtr(longLeftOverNameSpaceName2 + "_egressDefa") // trims it according to RFC1123
+				leftOverACL5FromUpgrade.Name = utilpointer.StringPtr(longLeftOverNameSpaceName2 + "_ingressDef") // trims it according to RFC1123
+				leftOverACL6FromUpgrade.Name = utilpointer.StringPtr(longLeftOverNameSpaceName62 + "_")          // name stays the same here since its no-op
 				expectedData = append(expectedData, leftOverACL3FromUpgrade)
 				expectedData = append(expectedData, leftOverACL4FromUpgrade)
 				expectedData = append(expectedData, leftOverACL5FromUpgrade)
 				expectedData = append(expectedData, leftOverACL6FromUpgrade)
-				testOnlyIngressDenyPG.ACLs = []string{leftOverACL3FromUpgrade.UUID} // Sync Function should remove stale ACL from PGs and delete the ACL
-				testOnlyEgressDenyPG.ACLs = nil                                     // Sync Function should remove stale ACL from PGs and delete the ACL
+				testOnlyIngressDenyPG.ACLs = []string{leftOverACL3FromUpgrade.UUID} // Sync Function should remove stale ACL from PGs
+				testOnlyEgressDenyPG.ACLs = nil                                     // Sync Function should remove stale ACL from PGs
+
+				// since test server doesn't garbage collect dereferenced acls, they will stay in the test db after they
+				// were deleted. Even though they are derefenced from the port group at this point, they will be updated
+				// as all the other ACLs.
+				// Update deleted leftOverACL1FromUpgrade and leftOverACL2FromUpgrade to match on expected data
+				// Once our test server can delete such acls, this part should be deleted
+				// start of db hack
+				longLeftOverIngressName := longLeftOverNameSpaceName + "_ingressDef"
+				longLeftOverEgressName := longLeftOverNameSpaceName + "_egressDefa"
+				leftOverACL2FromUpgrade.Name = &longLeftOverIngressName
+				leftOverACL1FromUpgrade.Name = &longLeftOverEgressName
+				leftOverACL1FromUpgrade.Options = egressOptions
+				expectedData = append(expectedData, leftOverACL2FromUpgrade)
+				expectedData = append(expectedData, leftOverACL1FromUpgrade)
+				// end of db hack
 				expectedData = append(expectedData, testOnlyIngressDenyPG)
 				expectedData = append(expectedData, testOnlyEgressDenyPG)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
@@ -1575,6 +1606,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				acls := []libovsdb.TestData{}
 				acls = append(acls, gressPolicyExpectedData[:len(gressPolicyExpectedData)-1]...)
+				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{nodeName})...)))
 
 				return nil
@@ -1636,6 +1668,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				acls := []libovsdb.TestData{}
 				acls = append(acls, gressPolicyExpectedData[:len(gressPolicyExpectedData)-1]...)
+				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
 				gomega.Eventually(fakeOvn.controller.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{nodeName})...)))
 
 				// check the cache no longer has the entry
@@ -1695,6 +1728,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				// TODO: test server does not garbage collect ACLs, so we just expect policy & deny portgroups to be removed
 				acls := []libovsdb.TestData{}
 				acls = append(acls, gressPolicy1ExpectedData[:len(gressPolicy1ExpectedData)-1]...)
+				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{nodeName})...)))
 
 				return nil
@@ -1753,6 +1787,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				// TODO: test server does not garbage collect ACLs, so we just expect policy & deny portgroups to be removed
 				acls := []libovsdb.TestData{}
 				acls = append(acls, gressPolicy1ExpectedData[:len(gressPolicy1ExpectedData)-1]...)
+				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{nodeName})...)))
 
 				return nil

@@ -24,13 +24,13 @@ function testrun {
     local ginkgoargs=
     # enable go race detector
     # FIXME race detector fails with hybrid-overlay tests
-    if [[ ! -z "${RACE:-}" && "${pkg}" != "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller" ]]; then
+    if [[ ! -z "${RACE:-}" ]]; then
         args="-race "
     fi
     if [[ "$USER" != root && " ${root_pkgs[@]} " =~ " $pkg " && -z "${DOCKER_TEST:-}" ]]; then
         testfile=$(mktemp --tmpdir ovn-test.XXXXXXXX)
         echo "sudo required for ${pkg}, compiling test to ${testfile}"
-        if [[ ! -z "${RACE:-}" && "${pkg}" != "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller" ]]; then
+        if [[ ! -z "${RACE:-}" ]]; then
             go test -mod=vendor -race -covermode atomic -c "${pkg}" -o "${testfile}"
         else
             go test -mod=vendor -covermode set -c "${pkg}" -o "${testfile}"
@@ -62,7 +62,7 @@ function testrun {
 }
 
 # These packages requires root for network namespace manipulation in unit tests
-root_pkgs=("github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node" "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller")
+root_pkgs=("github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node")
 
 i=0
 for pkg in ${PKGS}; do

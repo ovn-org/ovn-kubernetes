@@ -14,7 +14,7 @@ import (
 // addPodICNIv1 ensures that hybrid overlay annotations are copied to a
 // pod when it's created. This allows the nodes to set up the appropriate
 // flows
-func (oc *Controller) addPodICNIv1(pod *kapi.Pod) error {
+func (oc *DefaultNetworkController) addPodICNIv1(pod *kapi.Pod) error {
 	namespace, err := oc.watchFactory.GetNamespace(pod.Namespace)
 	if err != nil {
 		return err
@@ -34,7 +34,7 @@ func (oc *Controller) addPodICNIv1(pod *kapi.Pod) error {
 }
 
 // addNamespaceICNIv1 copies namespace annotations to all pods in the namespace
-func (oc *Controller) addNamespaceICNIv1(ns *kapi.Namespace) error {
+func (oc *DefaultNetworkController) addNamespaceICNIv1(ns *kapi.Namespace) error {
 	pods, err := oc.watchFactory.GetPods(ns.Name)
 	if err != nil {
 		return err

@@ -187,4 +187,4 @@ func (h *gwEventHandler) RecordDeleteEvent(obj interface{}) {}
 
 func (h *gwEventHandler) RecordSuccessEvent(obj interface{}) {}
 
-func (h *gwEventHandler) RecordErrorEvent(obj interface{}, err error) {}
+func (h *gwEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {}

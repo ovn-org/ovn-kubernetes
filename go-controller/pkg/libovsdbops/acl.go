@@ -2,7 +2,6 @@ package libovsdbops
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reflect"
 
@@ -147,52 +146,4 @@ func UpdateACLsLoggingOps(nbClient libovsdbclient.Client, ops []libovsdb.Operati
 
 	modelClient := newModelClient(nbClient)
 	return modelClient.CreateOrUpdateOps(ops, opModels...)
-}
-
-// DeleteACLsOps deletes the provided ACLs and returns the corresponding ops
-// portGroupNames and switchPred reminds to delete ACL references for port groups or switches
-// in case port group or switch is not completely deleted
-func DeleteACLsOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation,
-	portGroupNames []string, switchPred switchPredicate, acls ...*nbdb.ACL) ([]libovsdb.Operation, error) {
-	var err error
-	for _, portGroupName := range portGroupNames {
-		ops, err = DeleteACLsFromPortGroupOps(nbClient, ops, portGroupName, acls...)
-		if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
-			return ops, fmt.Errorf("deleting ACLs from port group %s failed: %v", portGroupName, err)
-		}
-	}
-	if switchPred != nil {
-		ops, err = RemoveACLsFromLogicalSwitchesWithPredicateOps(nbClient, ops, switchPred, acls...)
-		if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
-			return ops, fmt.Errorf("deleting ACLs from switch with predicate failed: %v", err)
-		}
-	}
-	opModels := make([]operationModel, 0, len(acls))
-	for i := range acls {
-		// can't use i in the predicate, for loop replaces it in-memory
-		acl := acls[i]
-		opModel := operationModel{
-			Model:          acl,
-			ModelPredicate: func(item *nbdb.ACL) bool { return isEquivalentACL(item, acl) },
-			ErrNotFound:    false,
-			BulkOp:         true,
-		}
-		opModels = append(opModels, opModel)
-	}
-
-	modelClient := newModelClient(nbClient)
-	return modelClient.DeleteOps(ops, opModels...)
-}
-
-// DeleteACLs deletes the provided ACLs
-// portGroupNames and switchPred reminds to delete ACL references for port groups or switches
-// in case port group or switch is not completely deleted
-func DeleteACLs(nbClient libovsdbclient.Client, portGroupNames []string, switchPred switchPredicate, acls ...*nbdb.ACL) error {
-	ops, err := DeleteACLsOps(nbClient, nil, portGroupNames, switchPred, acls...)
-	if err != nil {
-		return err
-	}
-
-	_, err = TransactAndCheck(nbClient, ops)
-	return err
 }
