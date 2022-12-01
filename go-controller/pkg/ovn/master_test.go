@@ -1583,7 +1583,11 @@ func TestController_syncNodes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stopChan := make(chan struct{})
-			defer close(stopChan)
+			wg := &sync.WaitGroup{}
+			defer func() {
+				close(stopChan)
+				wg.Wait()
+			}()
 
 			testNode := v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1621,7 +1625,7 @@ func TestController_syncNodes(t *testing.T) {
 				nbClient,
 				sbClient,
 				record.NewFakeRecorder(0),
-				&sync.WaitGroup{})
+				wg)
 			controller.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(nbClient, "", []string{})
 			if err != nil {
 				t.Fatalf("%s: Error creating joinSwIPManager: %v", tt.name, err)
@@ -1676,7 +1680,11 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stopChan := make(chan struct{})
-			defer close(stopChan)
+			wg := &sync.WaitGroup{}
+			defer func() {
+				close(stopChan)
+				wg.Wait()
+			}()
 
 			kubeFakeClient := fake.NewSimpleClientset()
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
@@ -1708,7 +1716,7 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 				nbClient,
 				sbClient,
 				record.NewFakeRecorder(0),
-				&sync.WaitGroup{})
+				wg)
 			controller.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(nbClient, "", []string{})
 			if err != nil {
 				t.Fatalf("%s: Error creating joinSwIPManager: %v", tt.name, err)

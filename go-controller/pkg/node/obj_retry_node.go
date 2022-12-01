@@ -44,7 +44,7 @@ func (n *OvnNode) newRetryFrameworkNodeWithParameters(
 		},
 	}
 
-	r := retry.NewRetryFramework(n.watchFactory.(*factory.WatchFactory), resourceHandler)
+	r := retry.NewRetryFramework(n.stopChan, n.wg, n.watchFactory.(*factory.WatchFactory), resourceHandler)
 
 	return r
 }
