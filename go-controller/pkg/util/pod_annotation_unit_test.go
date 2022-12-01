@@ -17,70 +17,45 @@ import (
 
 func TestMarshalPodAnnotation(t *testing.T) {
 	tests := []struct {
-		desc           string
-		inpPodAnnot    PodAnnotation
-		errAssert      bool  // used when an error string CANNOT be matched or sub-matched
-		errMatch       error //used when an error string CAN be matched or sub-matched
-		expectedOutput map[string]string
+		desc            string
+		inpPodAnnot     PodAnnotation
+		errAssert       bool   // used when an error string CANNOT be matched or sub-matched
+		errMatch        string //used when an error string CAN be matched or sub-matched
+		expectedOutput  map[string]string
+		existingAnnot   map[string]string
+		replaceExisting bool
 	}{
 		{
-			desc:           "PodAnnotation instance with no fields set",
-			inpPodAnnot:    PodAnnotation{},
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":""}}`},
+			desc:        "error when no fields are set",
+			errAssert:   true,
+			inpPodAnnot: PodAnnotation{},
 		},
 		{
-			desc: "single IP assigned to pod with MAC, Gateway, Routes NOT SPECIFIED",
+			desc: "error when single IP assigned to pod with MAC with gateway and routes not specified",
 			inpPodAnnot: PodAnnotation{
-				IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/24")},
+				IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/32")},
 			},
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"","ip_address":"192.168.0.5/24"}}`},
+			errMatch: "unable to determine any valid MAC",
 		},
 		{
-			desc: "multiple IPs assigned to pod with MAC, Gateway, Routes NOT SPECIFIED",
+			desc: "verify no error when single IP, MAC and gateway assigned to pod with no routes specified",
 			inpPodAnnot: PodAnnotation{
-				IPs: []*net.IPNet{
-					ovntest.MustParseIPNet("192.168.0.5/24"),
-					ovntest.MustParseIPNet("fd01::1234/64"),
-				},
-			},
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24","fd01::1234/64"],"mac_address":""}}`},
-		},
-		{
-			desc: "test code path when podInfo.Gateways count is equal to ONE",
-			inpPodAnnot: PodAnnotation{
-				IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/24")},
+				IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/32")},
+				MAC: ovntest.MustParseMAC("00:00:5e:00:53:af"),
 				Gateways: []net.IP{
 					net.ParseIP("192.168.0.1"),
 				},
 			},
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"","gateway_ips":["192.168.0.1"],"ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1"}}`},
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/32"],"mac_address":"00:00:5e:00:53:af","gateway_ips":["192.168.0.1"],"ip_address":"192.168.0.5/32","gateway_ip":"192.168.0.1"}}`},
 		},
 		{
-			desc:     "verify error thrown when number of gateways greater than one for a single-stack network",
-			errMatch: fmt.Errorf("bad podNetwork data: single-stack network can only have a single gateway"),
+			desc: "verify no error when single IP, MAC, gateway and a route assigned to pod",
 			inpPodAnnot: PodAnnotation{
-				IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/24")},
+				IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/32")},
+				MAC: ovntest.MustParseMAC("00:00:5e:00:53:af"),
 				Gateways: []net.IP{
-					net.ParseIP("192.168.1.0"),
-					net.ParseIP("fd01::1"),
+					net.ParseIP("192.168.0.1"),
 				},
-			},
-		},
-		{
-			desc:      "verify error thrown when destination IP not specified as part of Route",
-			errAssert: true,
-			inpPodAnnot: PodAnnotation{
-				Routes: []PodRoute{
-					{
-						Dest:    ovntest.MustParseIPNet("0.0.0.0/0"),
-						NextHop: net.ParseIP("192.168.1.1"),
-					},
-				},
-			},
-		},
-		{
-			desc: "test code path when destination IP is specified as part of Route",
-			inpPodAnnot: PodAnnotation{
 				Routes: []PodRoute{
 					{
 						Dest:    ovntest.MustParseIPNet("192.168.1.0/24"),
@@ -88,31 +63,133 @@ func TestMarshalPodAnnotation(t *testing.T) {
 					},
 				},
 			},
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}]}}`},
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/32"],"mac_address":"00:00:5e:00:53:af","gateway_ips":["192.168.0.1"],"routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}],"ip_address":"192.168.0.5/32","gateway_ip":"192.168.0.1"}}`},
 		},
 		{
-			desc: "next hop not set for route",
+			desc: "verify error when number of gateways greater than one for a single-stack network",
 			inpPodAnnot: PodAnnotation{
+				IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/32")},
+				MAC: ovntest.MustParseMAC("00:00:5e:00:53:af"),
+				Gateways: []net.IP{
+					net.ParseIP("192.168.0.1"),
+					net.ParseIP("fd01::1"),
+				},
+			},
+			errMatch: "single-stack network can only have a single gateway",
+		},
+		{
+			desc: "verify multiple gateways when using dual-stack network",
+			inpPodAnnot: PodAnnotation{
+				IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/32"), ovntest.MustParseIPNet("2001:0db8:3c4d:0015::1a2f:1a2b/128")},
+				MAC: ovntest.MustParseMAC("00:00:5e:00:53:af"),
+				Gateways: []net.IP{
+					net.ParseIP("192.168.0.1"),
+					net.ParseIP("fd01::1"),
+				},
+			},
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/32","2001:db8:3c4d:15::1a2f:1a2b/128"],"mac_address":"00:00:5e:00:53:af","gateway_ips":["192.168.0.1","fd01::1"]}}`},
+		},
+		{
+			desc: "verify error thrown when destination IP not specified as part of Route",
+			inpPodAnnot: PodAnnotation{
+				IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/32")},
+				MAC: ovntest.MustParseMAC("00:00:5e:00:53:af"),
+				Routes: []PodRoute{
+					{
+						Dest:    ovntest.MustParseIPNet("0.0.0.0/0"),
+						NextHop: net.ParseIP("192.168.1.1"),
+					},
+				},
+			},
+			errMatch: "should have valid destination",
+		},
+		{
+			desc: "verify multiple routes",
+			inpPodAnnot: PodAnnotation{
+				IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/32")},
+				MAC: ovntest.MustParseMAC("00:00:5e:00:53:af"),
+				Routes: []PodRoute{
+					{
+						Dest:    ovntest.MustParseIPNet("192.168.1.0/24"),
+						NextHop: net.ParseIP("192.168.1.1"),
+					},
+					{
+						Dest:    ovntest.MustParseIPNet("192.168.2.0/24"),
+						NextHop: net.ParseIP("192.168.2.1"),
+					},
+				},
+			},
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/32"],"mac_address":"00:00:5e:00:53:af","routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"},{"dest":"192.168.2.0/24","nextHop":"192.168.2.1"}],"ip_address":"192.168.0.5/32"}}`},
+		},
+		{
+			desc: "verify no error when next hop not set for route",
+			inpPodAnnot: PodAnnotation{
+				IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/32")},
+				MAC: ovntest.MustParseMAC("00:00:5e:00:53:af"),
 				Routes: []PodRoute{
 					{
 						Dest: ovntest.MustParseIPNet("192.168.1.0/24"),
 					},
 				},
 			},
-			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":null,"mac_address":"","routes":[{"dest":"192.168.1.0/24","nextHop":""}]}}`},
+			expectedOutput: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/32"],"mac_address":"00:00:5e:00:53:af","routes":[{"dest":"192.168.1.0/24","nextHop":""}],"ip_address":"192.168.0.5/32"}}`},
+		},
+		{
+			desc: "should not replace existing IP and MAC address",
+			inpPodAnnot: PodAnnotation{
+				IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.6/32")},
+				MAC: ovntest.MustParseMAC("00:00:5e:00:53:ff"),
+			},
+			errAssert:     true,
+			existingAnnot: map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/32"],"mac_address":"00:00:5e:00:53:af","ip_address":"192.168.0.5/32"}}`},
+		},
+		{
+			desc: "should replace existing IP and MAC address when forced",
+			inpPodAnnot: PodAnnotation{
+				IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.6/32")},
+				MAC: ovntest.MustParseMAC("00:00:5e:00:53:ff"),
+			},
+			replaceExisting: true,
+			existingAnnot:   map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/32"],"mac_address":"00:00:5e:00:53:af","ip_address":"192.168.0.5/32"}}`},
+			expectedOutput:  map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.6/32"],"mac_address":"00:00:5e:00:53:ff","ip_address":"192.168.0.6/32"}}`},
+		},
+		{
+			desc: "should update existing routes when forced",
+			inpPodAnnot: PodAnnotation{
+				IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/32")},
+				MAC: ovntest.MustParseMAC("00:00:5e:00:53:ff"),
+				Gateways: []net.IP{
+					net.ParseIP("192.168.0.2"),
+				},
+				Routes: []PodRoute{
+					{
+						Dest: ovntest.MustParseIPNet("192.168.1.0/24"),
+					},
+				},
+			},
+			replaceExisting: true,
+			existingAnnot:   map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/32"],"mac_address":"00:00:5e:00:53:af","gateway_ips":["192.168.0.1"],"routes":[{"dest":"192.168.1.100/24","nextHop":""}],"ip_address":"192.168.0.5/32","gateway_ip":"192.168.0.1"}}`},
+			expectedOutput:  map[string]string{"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/32"],"mac_address":"00:00:5e:00:53:ff","gateway_ips":["192.168.0.2"],"routes":[{"dest":"192.168.1.0/24","nextHop":""}],"ip_address":"192.168.0.5/32","gateway_ip":"192.168.0.2"}}`},
 		},
 	}
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			var e error
-			res := map[string]string{}
-			res, e = MarshalPodAnnotation(res, &tc.inpPodAnnot, types.DefaultNetworkName)
+			var (
+				e                  error
+				existingAnnot, res map[string]string
+			)
+			if len(tc.existingAnnot) > 0 {
+				existingAnnot = tc.existingAnnot
+			} else {
+				existingAnnot = make(map[string]string)
+			}
+			res, e = MarshalPodAnnotation(existingAnnot, &tc.inpPodAnnot, types.DefaultNetworkName, tc.replaceExisting)
 			t.Log(res, e)
 			if tc.errAssert {
 				assert.Error(t, e)
-			} else if tc.errMatch != nil {
-				assert.Contains(t, e.Error(), tc.errMatch.Error())
+			} else if tc.errMatch != "" {
+				assert.Contains(t, e.Error(), tc.errMatch)
 			} else {
 				assert.True(t, reflect.DeepEqual(res, tc.expectedOutput))
 			}

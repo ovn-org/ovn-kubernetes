@@ -67,6 +67,13 @@ type PodAnnotation struct {
 	Routes []PodRoute
 }
 
+func (pa *PodAnnotation) ensureSingleStackSingleGW() error {
+	if len(pa.IPs) == 1 && len(pa.Gateways) > 1 {
+		return fmt.Errorf("single-stack network can only have a single gateway")
+	}
+	return nil
+}
+
 // PodRoute describes any routes to be added to the pod's network namespace
 type PodRoute struct {
 	// Dest is the route destination
@@ -86,6 +93,116 @@ type podAnnotation struct {
 	Gateway string `json:"gateway_ip,omitempty"`
 }
 
+func (pa *podAnnotation) setMAC(newMAC string) error {
+	if pa.MAC != "" {
+		return fmt.Errorf("update of MAC not allowed")
+	}
+	if _, err := net.ParseMAC(newMAC); err != nil {
+		return fmt.Errorf("unable to determine any valid MAC: %v", err)
+	}
+	pa.MAC = newMAC
+	return nil
+}
+
+func (pa *podAnnotation) setIP(newIPs []*net.IPNet) error {
+	if pa.IP != "" {
+		return fmt.Errorf("update of IP not allowed")
+	}
+	if len(newIPs) == 1 {
+		pa.IP = newIPs[0].String()
+	}
+	return nil
+}
+
+func (pa *podAnnotation) setGateway(newPA *PodAnnotation) error {
+	if pa.Gateway != "" {
+		return fmt.Errorf("update of gateway not allowed")
+	}
+	if len(newPA.IPs) == 1 && len(newPA.Gateways) == 1 {
+		newGateway := newPA.Gateways[0]
+		if newGateway.IsUnspecified() {
+			return fmt.Errorf("gateway must be valid")
+		}
+		pa.Gateway = newPA.Gateways[0].String()
+	}
+	return nil
+}
+
+func (pa *podAnnotation) setIPs(newIPs []*net.IPNet) error {
+	if len(pa.IPs) != 0 {
+		return fmt.Errorf("update of IPs not allowed")
+	}
+	for _, ip := range newIPs {
+		pa.IPs = append(pa.IPs, ip.String())
+	}
+	return nil
+}
+
+func (pa *podAnnotation) setGateways(newGateways []net.IP) error {
+	if len(pa.Gateways) > 0 {
+		return fmt.Errorf("update of gateways not allowed")
+	}
+	for _, gateway := range newGateways {
+		pa.Gateways = append(pa.Gateways, gateway.String())
+	}
+	return nil
+}
+
+func (pa *podAnnotation) setRoutes(newRoutes []PodRoute) error {
+	if len(pa.Routes) != 0 {
+		return nil
+	}
+	for _, candidateRoute := range newRoutes {
+		if candidateRoute.Dest == nil {
+			klog.Errorf("Route %v should have destination specified", candidateRoute)
+			continue
+		}
+		if candidateRoute.Dest.IP.IsUnspecified() {
+			return fmt.Errorf("route %+v should have valid destination", candidateRoute)
+		}
+		var nh string
+		if candidateRoute.NextHop != nil {
+			nh = candidateRoute.NextHop.String()
+		}
+		routeDestStr := candidateRoute.Dest.String()
+		newPodRoute := podRoute{
+			Dest:    routeDestStr,
+			NextHop: nh,
+		}
+		pa.Routes = append(pa.Routes, newPodRoute)
+	}
+	return nil
+}
+
+func (pa *podAnnotation) ValidateAndMerge(newPA *PodAnnotation) error {
+	if newPA == nil {
+		return fmt.Errorf("nil pod network annotation is not allowed")
+	}
+	var err error
+	if err = newPA.ensureSingleStackSingleGW(); err != nil {
+		return err
+	}
+	if err = pa.setMAC(newPA.MAC.String()); err != nil {
+		return err
+	}
+	if err = pa.setIP(newPA.IPs); err != nil {
+		return err
+	}
+	if err = pa.setGateway(newPA); err != nil {
+		return err
+	}
+	if err = pa.setIPs(newPA.IPs); err != nil {
+		return err
+	}
+	if err = pa.setGateways(newPA.Gateways); err != nil {
+		return err
+	}
+	if err = pa.setRoutes(newPA.Routes); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Internal struct used to marshal PodRoute to the pod annotation
 type podRoute struct {
 	Dest    string `json:"dest"`
@@ -93,7 +210,7 @@ type podRoute struct {
 }
 
 // MarshalPodAnnotation adds the pod's network details of the specified network to the corresponding pod annotation.
-func MarshalPodAnnotation(annotations map[string]string, podInfo *PodAnnotation, netName string) (map[string]string, error) {
+func MarshalPodAnnotation(annotations map[string]string, podInfo *PodAnnotation, netName string, replaceExisting bool) (map[string]string, error) {
 	if annotations == nil {
 		annotations = make(map[string]string)
 	}
@@ -101,42 +218,18 @@ func MarshalPodAnnotation(annotations map[string]string, podInfo *PodAnnotation,
 	if err != nil {
 		return nil, err
 	}
-	pa := podAnnotation{
-		MAC: podInfo.MAC.String(),
+	network, ok := podNetworks[netName]
+	if !ok || replaceExisting {
+		network = podAnnotation{}
 	}
-
-	if len(podInfo.IPs) == 1 {
-		pa.IP = podInfo.IPs[0].String()
-		if len(podInfo.Gateways) == 1 {
-			pa.Gateway = podInfo.Gateways[0].String()
-		} else if len(podInfo.Gateways) > 1 {
-			return nil, fmt.Errorf("bad podNetwork data: single-stack network can only have a single gateway")
-		}
+	if err = network.ValidateAndMerge(podInfo); err != nil {
+		return nil, fmt.Errorf("failed merging pod network annotation (%+v) with new pod network "+
+			"annotation (%+v) for network %s: %v", network, podInfo, netName, err)
 	}
-	for _, ip := range podInfo.IPs {
-		pa.IPs = append(pa.IPs, ip.String())
-	}
-	for _, gw := range podInfo.Gateways {
-		pa.Gateways = append(pa.Gateways, gw.String())
-	}
-
-	for _, r := range podInfo.Routes {
-		if r.Dest.IP.IsUnspecified() {
-			return nil, fmt.Errorf("bad podNetwork data: default route %v should be specified as gateway", r)
-		}
-		var nh string
-		if r.NextHop != nil {
-			nh = r.NextHop.String()
-		}
-		pa.Routes = append(pa.Routes, podRoute{
-			Dest:    r.Dest.String(),
-			NextHop: nh,
-		})
-	}
-	podNetworks[netName] = pa
+	podNetworks[netName] = network
 	bytes, err := json.Marshal(podNetworks)
 	if err != nil {
-		return nil, fmt.Errorf("failed marshaling podNetworks map %v", podNetworks)
+		return nil, fmt.Errorf("failed marshaling pod networks map %v", podNetworks)
 	}
 	annotations[OvnPodAnnotationName] = string(bytes)
 	return annotations, nil

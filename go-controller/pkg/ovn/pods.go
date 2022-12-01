@@ -93,7 +93,7 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 			// the length will be different
 			if len(annotations.Routes) != len(newRoutes) {
 				annotations.Routes = newRoutes
-				err = oc.updatePodAnnotationWithRetry(pod, annotations)
+				err = oc.updatePodAnnotationWithRetry(pod, annotations, true)
 				if err != nil {
 					return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 				}
@@ -617,7 +617,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s",
 			podIfAddrs, podMac, podAnnotation.Gateways)
 		annoStart := time.Now()
-		err = oc.updatePodAnnotationWithRetry(pod, &podAnnotation)
+		err = oc.updatePodAnnotationWithRetry(pod, &podAnnotation, false)
 		podAnnoTime = time.Since(annoStart)
 		if err != nil {
 			return err
@@ -734,20 +734,20 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	return nil
 }
 
-func (oc *DefaultNetworkController) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *util.PodAnnotation) error {
+func (oc *DefaultNetworkController) updatePodAnnotationWithRetry(origPod *kapi.Pod, podInfo *util.PodAnnotation, replaceExistingNet bool) error {
 	resultErr := retry.RetryOnConflict(util.OvnConflictBackoff, func() error {
-		// Informer cache should not be mutated, so get a copy of the object
-		pod, err := oc.watchFactory.GetPod(origPod.Namespace, origPod.Name)
+		// We don't retrieve the pod from the pod informer cache because if the pod informer cache is not up-to-date,
+		// we risk replacing or overwriting an existing network specified within an annotation.
+		pod, err := oc.kube.GetPod(origPod.Namespace, origPod.Name)
 		if err != nil {
 			return err
 		}
 
-		cpod := pod.DeepCopy()
-		cpod.Annotations, err = util.MarshalPodAnnotation(cpod.Annotations, podInfo, ovntypes.DefaultNetworkName)
+		pod.Annotations, err = util.MarshalPodAnnotation(pod.Annotations, podInfo, ovntypes.DefaultNetworkName, replaceExistingNet)
 		if err != nil {
 			return err
 		}
-		return oc.kube.UpdatePod(cpod)
+		return oc.kube.UpdatePod(pod)
 	})
 	if resultErr != nil {
 		return fmt.Errorf("failed to update annotation on pod %s/%s: %v", origPod.Namespace, origPod.Name, resultErr)
