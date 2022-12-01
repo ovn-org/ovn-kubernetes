@@ -25,8 +25,8 @@ import (
 // are kept in sync
 type Gateway interface {
 	informer.ServiceAndEndpointsEventHandler
-	Init(factory.NodeWatchFactory) error
-	Start(<-chan struct{}, *sync.WaitGroup)
+	Init(factory.NodeWatchFactory, <-chan struct{}, *sync.WaitGroup) error
+	Start()
 	GetGatewayBridgeIface() string
 }
 
@@ -45,6 +45,8 @@ type gateway struct {
 	readyFunc       func() (bool, error)
 
 	watchFactory *factory.WatchFactory // used for retry
+	stopChan     <-chan struct{}
+	wg           *sync.WaitGroup
 }
 
 func (g *gateway) AddService(svc *kapi.Service) error {
@@ -202,7 +204,10 @@ func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) error {
 
 }
 
-func (g *gateway) Init(wf factory.NodeWatchFactory) error {
+func (g *gateway) Init(wf factory.NodeWatchFactory, stopChan <-chan struct{}, wg *sync.WaitGroup) error {
+	g.stopChan = stopChan
+	g.wg = wg
+
 	var err error
 	if err = g.initFunc(); err != nil {
 		return err
@@ -219,14 +224,14 @@ func (g *gateway) Init(wf factory.NodeWatchFactory) error {
 	return nil
 }
 
-func (g *gateway) Start(stopChan <-chan struct{}, wg *sync.WaitGroup) {
+func (g *gateway) Start() {
 	if g.nodeIPManager != nil {
-		g.nodeIPManager.Run(stopChan, wg)
+		g.nodeIPManager.Run(g.stopChan, g.wg)
 	}
 
 	if g.openflowManager != nil {
 		klog.Info("Spawning Conntrack Rule Check Thread")
-		g.openflowManager.Run(stopChan, wg)
+		g.openflowManager.Run(g.stopChan, g.wg)
 	}
 }
 

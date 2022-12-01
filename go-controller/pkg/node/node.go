@@ -42,6 +42,7 @@ type OvnNode struct {
 	Kube         kube.Interface
 	watchFactory factory.NodeWatchFactory
 	stopChan     chan struct{}
+	wg           *sync.WaitGroup
 	recorder     record.EventRecorder
 	gateway      Gateway
 
@@ -52,13 +53,15 @@ type OvnNode struct {
 }
 
 // NewNode creates a new controller for node management
-func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
+func NewNode(kubeClient clientset.Interface, wf factory.NodeWatchFactory, name string,
+	stopChan chan struct{}, wg *sync.WaitGroup, eventRecorder record.EventRecorder) *OvnNode {
 	n := &OvnNode{
 		name:         name,
 		client:       kubeClient,
 		Kube:         &kube.Kube{KClient: kubeClient},
 		watchFactory: wf,
 		stopChan:     stopChan,
+		wg:           wg,
 		recorder:     eventRecorder,
 	}
 	n.initRetryFrameworkForNode()
@@ -382,7 +385,7 @@ func createNodeManagementPorts(name string, nodeAnnotator kube.Annotator, waiter
 
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
-func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
+func (n *OvnNode) Start(ctx context.Context) error {
 	var err error
 	var node *kapi.Node
 	var subnets []*net.IPNet
@@ -498,7 +501,7 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	if err := waiter.Wait(); err != nil {
 		return err
 	}
-	n.gateway.Start(n.stopChan, wg)
+	n.gateway.Start()
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
 	// Note(adrianc): DPU deployments are expected to support the new shared gateway changes, upgrade flow
@@ -587,9 +590,9 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 		if err != nil {
 			return err
 		}
-		wg.Add(1)
+		n.wg.Add(1)
 		go func() {
-			defer wg.Done()
+			defer n.wg.Done()
 			nodeController.Run(n.stopChan)
 		}()
 	} else {
@@ -650,7 +653,7 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	}
 
 	// Start the health checking server used by egressip, if EgressIPNodeHealthCheckPort is specified
-	if err := n.startEgressIPHealthCheckingServer(wg, mgmtPortConfig); err != nil {
+	if err := n.startEgressIPHealthCheckingServer(mgmtPortConfig); err != nil {
 		return err
 	}
 
@@ -658,7 +661,7 @@ func (n *OvnNode) Start(ctx context.Context, wg *sync.WaitGroup) error {
 	return nil
 }
 
-func (n *OvnNode) startEgressIPHealthCheckingServer(wg *sync.WaitGroup, mgmtPortConfig *managementPortConfig) error {
+func (n *OvnNode) startEgressIPHealthCheckingServer(mgmtPortConfig *managementPortConfig) error {
 	healthCheckPort := config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort
 	if healthCheckPort == 0 {
 		klog.Infof("Egress IP health check server skipped: no port specified")
@@ -683,9 +686,9 @@ func (n *OvnNode) startEgressIPHealthCheckingServer(wg *sync.WaitGroup, mgmtPort
 		return fmt.Errorf("unable to allocate health checking server: %v", err)
 	}
 
-	wg.Add(1)
+	n.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer n.wg.Done()
 		healthServer.Run(n.stopChan)
 	}()
 	return nil

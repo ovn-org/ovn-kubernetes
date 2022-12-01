@@ -283,8 +283,8 @@ func runOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		// register ovnkube node specific prometheus metrics exported by the node
 		metrics.RegisterNodeMetrics()
 		start := time.Now()
-		n := ovnnode.NewNode(ovnClientset.KubeClient, nodeWatchFactory, node, stopChan, nodeEventRecorder)
-		if err := n.Start(ctx.Context, wg); err != nil {
+		n := ovnnode.NewNode(ovnClientset.KubeClient, nodeWatchFactory, node, stopChan, wg, nodeEventRecorder)
+		if err := n.Start(ctx.Context); err != nil {
 			return err
 		}
 		end := time.Since(start)

@@ -346,7 +346,7 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	}
 
 	initGwFunc := func() error {
-		return gw.Init(n.watchFactory)
+		return gw.Init(n.watchFactory, n.stopChan, n.wg)
 	}
 
 	readyGwFunc := func() (bool, error) {
@@ -440,7 +440,7 @@ func (n *OvnNode) initGatewayDPUHost(kubeNodeIP net.IP) error {
 		return fmt.Errorf("failed to add MAC bindings for service routing")
 	}
 
-	err = gw.Init(n.watchFactory)
+	err = gw.Init(n.watchFactory, n.stopChan, n.wg)
 	n.gateway = gw
 	return err
 }

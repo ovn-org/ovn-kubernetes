@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -94,7 +95,7 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNClientset, fak
 	return err
 }
 
-func startNodePortWatcherWithRetry(n *nodePortWatcher, fakeClient *util.OVNClientset, fakeMgmtPortConfig *managementPortConfig, stopChan chan struct{}) (*retry.RetryFramework, error) {
+func startNodePortWatcherWithRetry(n *nodePortWatcher, fakeClient *util.OVNClientset, fakeMgmtPortConfig *managementPortConfig, stopChan chan struct{}, wg *sync.WaitGroup) (*retry.RetryFramework, error) {
 	if err := initLocalGatewayIPTables(); err != nil {
 		return nil, err
 	}
@@ -105,7 +106,7 @@ func startNodePortWatcherWithRetry(n *nodePortWatcher, fakeClient *util.OVNClien
 	ip, _, _ := net.ParseCIDR(localHostNetEp)
 	n.nodeIPManager.addAddr(ip)
 
-	nodePortWatcherRetry := n.newRetryFrameworkForTests(factory.ServiceForFakeNodePortWatcherType)
+	nodePortWatcherRetry := n.newRetryFrameworkForTests(factory.ServiceForFakeNodePortWatcherType, stopChan, wg)
 	if _, err := nodePortWatcherRetry.WatchResource(); err != nil {
 		return nil, fmt.Errorf("failed to start watching services with retry framework: %v", err)
 	}
@@ -253,6 +254,7 @@ var _ = Describe("Node Operations", func() {
 	})
 
 	AfterEach(func() {
+		fakeOvnNode.shutdown()
 		util.SetNetLinkOpMockInst(origNetlinkInst)
 	})
 
@@ -357,7 +359,6 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -434,7 +435,6 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -514,7 +514,6 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -610,7 +609,6 @@ var _ = Describe("Node Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 				flows := fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -705,7 +703,6 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -823,7 +820,6 @@ var _ = Describe("Node Operations", func() {
 				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
 				Expect(flows).To(Equal(expectedLBExternalIPFlows))
 
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -936,7 +932,6 @@ var _ = Describe("Node Operations", func() {
 				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
 				Expect(flows).To(Equal(expectedLBExternalIPFlows))
 
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1062,7 +1057,6 @@ var _ = Describe("Node Operations", func() {
 				flows = fNPW.ofm.flowCache["External_namespace1_service1_1.1.1.1_8080"]
 				Expect(flows).To(Equal(expectedLBExternalIPFlows))
 
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1159,7 +1153,6 @@ var _ = Describe("Node Operations", func() {
 				f6 := iptV6.(*util.FakeIPTables)
 				err = f6.MatchState(expectedTables6)
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1258,7 +1251,6 @@ var _ = Describe("Node Operations", func() {
 				f6 := iptV6.(*util.FakeIPTables)
 				err = f6.MatchState(expectedTables6)
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1345,7 +1337,6 @@ var _ = Describe("Node Operations", func() {
 				f6 := iptV6.(*util.FakeIPTables)
 				err = f6.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1429,7 +1420,6 @@ var _ = Describe("Node Operations", func() {
 				f6 := iptV6.(*util.FakeIPTables)
 				err = f6.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1547,7 +1537,6 @@ var _ = Describe("Node Operations", func() {
 				f4 = iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1586,7 +1575,7 @@ var _ = Describe("Node Operations", func() {
 				By("starting node port watcher retry framework")
 				fNPW.watchFactory = fakeOvnNode.watcher
 				nodePortWatcherRetry, err = startNodePortWatcherWithRetry(
-					fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig, fakeOvnNode.stopChan)
+					fNPW, fakeOvnNode.fakeClient, &fakeMgmtPortConfig, fakeOvnNode.stopChan, fakeOvnNode.wg)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(nodePortWatcherRetry).NotTo(BeNil())
 
@@ -1664,7 +1653,6 @@ var _ = Describe("Node Operations", func() {
 				})
 
 				// TODO Make delete operation fail, check retry entry, run a successful delete
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -1916,7 +1904,6 @@ var _ = Describe("Node Operations", func() {
 				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
 
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -2061,7 +2048,6 @@ var _ = Describe("Node Operations", func() {
 				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
 
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -2208,7 +2194,6 @@ var _ = Describe("Node Operations", func() {
 				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
 
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -2354,7 +2339,6 @@ var _ = Describe("Node Operations", func() {
 				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
 
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -2500,7 +2484,6 @@ var _ = Describe("Node Operations", func() {
 				flows = fNPW.ofm.flowCache["NodePort_namespace1_service1_tcp_31111"]
 				Expect(flows).To(BeNil())
 
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})
@@ -2659,7 +2642,6 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
-				fakeOvnNode.shutdown()
 				return nil
 			}
 			err := app.Run([]string{app.Name})

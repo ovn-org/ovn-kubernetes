@@ -238,13 +238,13 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", nil, nodeAnnotator, k,
 				&fakeMgmtPortConfig, wf)
 			Expect(err).NotTo(HaveOccurred())
-			err = sharedGw.Init(wf)
+			err = sharedGw.Init(wf, stop, wg)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			sharedGw.Start(stop, wg)
+			sharedGw.Start()
 
 			// Verify the code moved eth0's IP address, MAC, and routes
 			// over to breth0
@@ -556,13 +556,13 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 				gatewayIntf, "", gwIPs, nodeAnnotator, k, &fakeMgmtPortConfig, wf)
 
 			Expect(err).NotTo(HaveOccurred())
-			err = sharedGw.Init(wf)
+			err = sharedGw.Init(wf, stop, wg)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			sharedGw.Start(stop, wg)
+			sharedGw.Start()
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -626,8 +626,10 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		stop := make(chan struct{})
 		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
 		Expect(err).NotTo(HaveOccurred())
+		wg := &sync.WaitGroup{}
 		defer func() {
 			close(stop)
+			wg.Wait()
 			wf.Shutdown()
 		}()
 		err = wf.Start()
@@ -636,6 +638,8 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		n := OvnNode{
 			watchFactory: wf,
 			name:         nodeName,
+			stopChan:     stop,
+			wg:           wg,
 		}
 
 		err = testNS.Do(func(ns.NetNS) error {
@@ -917,13 +921,13 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 			localGw, err := newLocalGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", nil,
 				nodeAnnotator, &fakeMgmtPortConfig, k, wf)
 			Expect(err).NotTo(HaveOccurred())
-			err = localGw.Init(wf)
+			err = localGw.Init(wf, stop, wg)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			localGw.Start(stop, wg)
+			localGw.Start()
 
 			// Verify the code moved eth0's IP address, MAC, and routes
 			// over to breth0

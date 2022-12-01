@@ -3,6 +3,7 @@ package node
 import (
 	"fmt"
 	"reflect"
+	"sync"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -21,7 +22,7 @@ type nodePortWatcherEventHandler struct {
 
 // used only in unit tests to narrow the scope to just the nodeport iptables changes and not all the other parts that
 // go along with the gateway type (port claim, openflow, healthchecker)
-func (n *nodePortWatcher) newRetryFrameworkForTests(objectType reflect.Type) *retry.RetryFramework {
+func (n *nodePortWatcher) newRetryFrameworkForTests(objectType reflect.Type, stopChan <-chan struct{}, wg *sync.WaitGroup) *retry.RetryFramework {
 	resourceHandler := &retry.ResourceHandler{
 		HasUpdateFunc:          true,
 		NeedsUpdateDuringRetry: false,
@@ -31,7 +32,7 @@ func (n *nodePortWatcher) newRetryFrameworkForTests(objectType reflect.Type) *re
 			n:       n,
 		},
 	}
-	r := retry.NewRetryFramework(n.watchFactory.(*factory.WatchFactory), resourceHandler)
+	r := retry.NewRetryFramework(stopChan, wg, n.watchFactory.(*factory.WatchFactory), resourceHandler)
 
 	return r
 }
