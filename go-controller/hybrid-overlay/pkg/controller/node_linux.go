@@ -233,12 +233,7 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 			return fmt.Errorf("failed to lookup link %s: %v", types.K8sMgmtIntfName, err)
 		}
 
-		route := &netlink.Route{
-			Dst:       cidr,
-			LinkIndex: mgmtPortLink.Attrs().Index,
-			Scope:     netlink.SCOPE_UNIVERSE,
-			Gw:        n.drIP,
-		}
+		route := makeRoute(cidr, n.drIP, mgmtPortLink)
 		err = util.GetNetLinkOps().RouteAdd(route)
 		if err != nil && !os.IsExist(err) {
 			return fmt.Errorf("failed to add route for subnet %s via gateway %s: %v",
@@ -304,12 +299,7 @@ func (n *NodeController) DeleteNode(node *kapi.Node) error {
 			return fmt.Errorf("failed to lookup link %s: %v", types.K8sMgmtIntfName, err)
 		}
 
-		route := &netlink.Route{
-			Dst:       cidr,
-			LinkIndex: mgmtPortLink.Attrs().Index,
-			Scope:     netlink.SCOPE_UNIVERSE,
-			Gw:        n.drIP,
-		}
+		route := makeRoute(cidr, n.drIP, mgmtPortLink)
 		err = util.GetNetLinkOps().RouteDel(route)
 		if err != nil && !os.IsExist(err) {
 			return fmt.Errorf("failed to delete route for subnet %s via gateway %s: %v",
@@ -353,9 +343,146 @@ func getIPAsHexString(ip net.IP) string {
 	return asHex
 }
 
+// swaps out the new values of drIP and drMAC
+func (n *NodeController) recalculateFlowCache(oldDRIP net.IP, oldDRMAC net.HardwareAddr) {
+	n.flowMutex.Lock()
+	defer n.flowMutex.Unlock()
+
+	var ipReplace, macReplace int
+
+	if oldDRIP != nil {
+		ipReplace = -1
+	}
+	if oldDRMAC != nil {
+		macReplace = -1
+	}
+	oldDRMACRaw := strings.Replace(oldDRMAC.String(), ":", "", -1)
+	newDRMACRaw := strings.Replace(n.drMAC.String(), ":", "", -1)
+
+	portIPRawOld := getIPAsHexString(oldDRIP)
+	portIPRawNew := getIPAsHexString(n.drIP)
+
+	for _, entry := range n.flowCache {
+		for i, flow := range entry.flows {
+			replacementFlow := flow
+			replacementFlow = strings.Replace(replacementFlow, oldDRIP.String(), n.drIP.String(), ipReplace)
+			replacementFlow = strings.Replace(replacementFlow, portIPRawOld, portIPRawNew, ipReplace)
+
+			replacementFlow = strings.Replace(replacementFlow, oldDRMACRaw, newDRMACRaw, macReplace)
+			replacementFlow = strings.Replace(replacementFlow, oldDRMAC.String(), n.drMAC.String(), macReplace)
+			entry.flows[i] = replacementFlow
+
+		}
+	}
+}
+
+func (n *NodeController) createOrReplaceRoutes(mgmtPortLink netlink.Link, oldDRIP net.IP) error {
+	// hybridOverlay has been initialized and will needs to delete the old routes
+	if oldDRIP != nil {
+		if len(config.HybridOverlay.ClusterSubnets) > 0 {
+			for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
+				route := makeRoute(clusterEntry.CIDR, oldDRIP, mgmtPortLink)
+				err := util.GetNetLinkOps().RouteDel(route)
+				if err != nil && !os.IsExist(err) {
+					return fmt.Errorf("failed to add route for subnet %s via gateway %s: %v",
+						route.Dst, route.Gw, err)
+				}
+			}
+		} else {
+			nodes, err := n.nodeLister.List(labels.Everything())
+			if err != nil {
+				return err
+			}
+			for _, node := range nodes {
+				if subnet, _ := houtil.ParseHybridOverlayHostSubnet(node); subnet != nil {
+					route := makeRoute(subnet, n.drIP, mgmtPortLink)
+					err := util.GetNetLinkOps().RouteDel(route)
+					if err != nil && !os.IsExist(err) {
+						return fmt.Errorf("failed to add route for subnet %s via gateway %s: %v",
+							route.Dst, route.Gw, err)
+					}
+				}
+			}
+		}
+	}
+	// Add a route via the hybrid overlay port IP through the management port
+	// interface for each hybrid overlay cluster subnet
+	if len(config.HybridOverlay.ClusterSubnets) > 0 {
+		for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
+			route := makeRoute(clusterEntry.CIDR, n.drIP, mgmtPortLink)
+			err := util.GetNetLinkOps().RouteAdd(route)
+			if err != nil && !os.IsExist(err) {
+				return fmt.Errorf("failed to add route for subnet %s via gateway %s: %v",
+					route.Dst, route.Gw, err)
+			}
+		}
+	} else {
+		nodes, err := n.nodeLister.List(labels.Everything())
+		if err != nil {
+			return err
+		}
+		for _, node := range nodes {
+			if subnet, _ := houtil.ParseHybridOverlayHostSubnet(node); subnet != nil {
+				route := makeRoute(subnet, n.drIP, mgmtPortLink)
+				err := util.GetNetLinkOps().RouteAdd(route)
+				if err != nil && !os.IsExist(err) {
+					return fmt.Errorf("failed to add route for subnet %s via gateway %s: %v",
+						route.Dst, route.Gw, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// handleHybridOverlayMACIPChange make the required changes if the nodes HybridOverlayDRIP or HybridOverlayMAC changes
+func (n *NodeController) handleHybridOverlayMACIPChange(node *kapi.Node) error {
+	var oldDRIP net.IP
+	var oldMAC net.HardwareAddr
+
+	newDRIPStr := node.Annotations[hotypes.HybridOverlayDRIP]
+	newDRMACStr := node.Annotations[hotypes.HybridOverlayDRMAC]
+
+	if newDRIPStr != n.drIP.String() {
+		oldDRIP = n.drIP
+		newDRIP := net.ParseIP(node.Annotations[hotypes.HybridOverlayDRIP])
+		if newDRIP == nil {
+			return fmt.Errorf("updated Hybrid Overlay Dristributed router IP annotation not a valid IP address %s", node.Annotations[hotypes.HybridOverlayDRIP])
+		}
+		n.drIP = newDRIP
+		mgmtPortLink, err := util.GetNetLinkOps().LinkByName(types.K8sMgmtIntfName)
+		if err != nil {
+			return fmt.Errorf("failed to lookup link %s: %v", types.K8sMgmtIntfName, err)
+		}
+		err = n.createOrReplaceRoutes(mgmtPortLink, oldDRIP)
+		if err != nil {
+			return err
+		}
+	}
+
+	if newDRMACStr != n.drMAC.String() {
+		newPortMAC, err := net.ParseMAC(newDRMACStr)
+		if err != nil {
+			return fmt.Errorf("updated Hybrid Overlay Distributed MAC address annotation not valid %s: %v", node.Annotations[hotypes.HybridOverlayDRMAC], err)
+		}
+		oldMAC = n.drMAC
+		n.drMAC = newPortMAC
+	}
+
+	n.recalculateFlowCache(oldDRIP, oldMAC)
+	n.requestFlowSync()
+	return nil
+}
+
 // EnsureHybridOverlayBridge sets up the hybrid overlay bridge
 func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 	if atomic.LoadUint32(&n.initialized) == 1 {
+		if node.Annotations[hotypes.HybridOverlayDRIP] != n.drIP.String() ||
+			node.Annotations[hotypes.HybridOverlayDRMAC] != n.drMAC.String() {
+			if err := n.handleHybridOverlayMACIPChange(node); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 	if n.gwLRPIP == nil {
@@ -493,48 +620,16 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 			"IN_PORT",
 			extVXLANName, subnet.String(), hotypes.HybridOverlayVNI, n.drMAC.String(), portMACRaw))
 
-	// Add a route via the hybrid overlay port IP through the management port
-	// interface for each hybrid overlay cluster subnet
 	mgmtPortLink, err := util.GetNetLinkOps().LinkByName(types.K8sMgmtIntfName)
 	if err != nil {
 		return fmt.Errorf("failed to lookup link %s: %v", types.K8sMgmtIntfName, err)
 	}
-	mgmtPortMAC := mgmtPortLink.Attrs().HardwareAddr
-	if len(config.HybridOverlay.ClusterSubnets) > 0 {
-		for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
-			route := &netlink.Route{
-				Dst:       clusterEntry.CIDR,
-				LinkIndex: mgmtPortLink.Attrs().Index,
-				Scope:     netlink.SCOPE_UNIVERSE,
-				Gw:        n.drIP,
-			}
-			err := util.GetNetLinkOps().RouteAdd(route)
-			if err != nil && !os.IsExist(err) {
-				return fmt.Errorf("failed to add route for subnet %s via gateway %s: %v",
-					route.Dst, route.Gw, err)
-			}
-		}
-	} else {
-		nodes, err := n.nodeLister.List(labels.Everything())
-		if err != nil {
-			return err
-		}
-		for _, node := range nodes {
-			if subnet, _ := houtil.ParseHybridOverlayHostSubnet(node); subnet != nil {
-				route := &netlink.Route{
-					Dst:       subnet,
-					LinkIndex: mgmtPortLink.Attrs().Index,
-					Scope:     netlink.SCOPE_UNIVERSE,
-					Gw:        n.drIP,
-				}
-				err := util.GetNetLinkOps().RouteAdd(route)
-				if err != nil && !os.IsExist(err) {
-					return fmt.Errorf("failed to add route for subnet %s via gateway %s: %v",
-						route.Dst, route.Gw, err)
-				}
-			}
-		}
+
+	err = n.createOrReplaceRoutes(mgmtPortLink, nil)
+	if err != nil {
+		return err
 	}
+	mgmtPortMAC := mgmtPortLink.Attrs().HardwareAddr
 
 	// Add a rule to fix up return host-network traffic
 	mgmtIfAddr := util.GetNodeManagementIfAddr(subnet)
@@ -655,4 +750,13 @@ func (n *NodeController) updateFlowCacheEntry(cookie string, flows []string, ign
 	defer n.flowMutex.Unlock()
 	n.flowCache[cookie] = &flowCacheEntry{flows: flows}
 	n.flowCache[cookie].ignoreLearn = ignoreLearn
+}
+
+func makeRoute(dstSubnet *net.IPNet, drIP net.IP, mgmtPortLink netlink.Link) *netlink.Route {
+	return &netlink.Route{
+		Dst:       dstSubnet,
+		LinkIndex: mgmtPortLink.Attrs().Index,
+		Scope:     netlink.SCOPE_UNIVERSE,
+		Gw:        drIP,
+	}
 }
