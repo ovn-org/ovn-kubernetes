@@ -41,7 +41,7 @@ import (
 )
 
 func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
-	eth0Name, eth0MAC, eth0GWIP, eth0CIDR string, gatewayVLANID uint, l netlink.Link) {
+	eth0Name, eth0MAC, eth0GWIP, eth0CIDR string, gatewayVLANID uint, l netlink.Link, hwOffload bool) {
 	const mtu string = "1234"
 	const clusterCIDR string = "10.1.0.0/16"
 
@@ -121,7 +121,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . other_config:hw-offload",
-			Output: "false",
+			Output: fmt.Sprintf("%t", hwOffload),
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 get Interface patch-breth0_node1-to-br-int ofport",
@@ -234,6 +234,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			defer GinkgoRecover()
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			Expect(err).NotTo(HaveOccurred())
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", nil, nodeAnnotator, k,
 				&fakeMgmtPortConfig, wf)
 			Expect(err).NotTo(HaveOccurred())
@@ -265,8 +266,29 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Expect(l.Attrs().HardwareAddr.String()).To(Equal(eth0MAC))
 			return nil
 		})
+		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(fexec.CalledMatchesExpected, 5).Should(BeTrue(), fexec.ErrorDesc)
+		// Make sure that annotation 'k8s.ovn.org/gateway-mtu-support' is set to "false" (because hw-offload is true).
+		if hwOffload {
+			Eventually(func() bool {
+				node, err := kubeFakeClient.CoreV1().Nodes().Get(context.TODO(), existingNode.Name, metav1.GetOptions{})
+				if err != nil {
+					return false
+				}
+				return node.Annotations["k8s.ovn.org/gateway-mtu-support"] == "false"
+			}, 5).Should(BeTrue(), "invalid annotation, hw-offload is enabled but annotation "+
+				"'k8s.ovn.org/gateway-mtu-support' != \"false\"")
+		} else {
+			Consistently(func() bool {
+				node, err := kubeFakeClient.CoreV1().Nodes().Get(context.TODO(), existingNode.Name, metav1.GetOptions{})
+				if err != nil {
+					return false
+				}
+				return node.Annotations["k8s.ovn.org/gateway-mtu-support"] != "false"
+			}, 5).Should(BeTrue(), "invalid annotation, hw-offload is disabled but found annotation "+
+				"'k8s.ovn.org/gateway-mtu-support' with value == \"false\"")
+		}
 
 		expectedTables := map[string]util.FakeTable{
 			"nat": {
@@ -527,6 +549,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			defer GinkgoRecover()
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			Expect(err).NotTo(HaveOccurred())
 			// provide host IP as GR IP
 			gwIPs := []*net.IPNet{ovntest.MustParseIPNet(hostCIDR)}
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
@@ -542,6 +565,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			sharedGw.Start(stop, wg)
 			return nil
 		})
+		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(fexec.CalledMatchesExpected, 5).Should(BeTrue(), fexec.ErrorDesc)
 
@@ -625,6 +649,7 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 			link, err := netlink.LinkByName(uplinkName)
 			Expect(err).NotTo(HaveOccurred())
 			routes, err := netlink.RouteList(link, netlink.FAMILY_ALL)
+			Expect(err).NotTo(HaveOccurred())
 			for _, expRoute := range expectedRoutes {
 				found := false
 				for _, route := range routes {
@@ -638,6 +663,7 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 			}
 			return nil
 		})
+		Expect(err).NotTo(HaveOccurred())
 		return nil
 	}
 
@@ -887,6 +913,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 			defer GinkgoRecover()
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			Expect(err).NotTo(HaveOccurred())
 			localGw, err := newLocalGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", nil,
 				nodeAnnotator, &fakeMgmtPortConfig, k, wf)
 			Expect(err).NotTo(HaveOccurred())
@@ -918,6 +945,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 			Expect(l.Attrs().HardwareAddr.String()).To(Equal(eth0MAC))
 			return nil
 		})
+		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(fexec.CalledMatchesExpected, 5).Should(BeTrue(), fexec.ErrorDesc)
 
@@ -1058,24 +1086,28 @@ var _ = Describe("Gateway Init Operations", func() {
 		})
 
 		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway", func() {
-			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 0, link)
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 0, link, false)
+		})
+
+		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with hw-offloading", func() {
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 0, link, true)
 		})
 
 		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with tagged VLAN", func() {
-			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 3000, link)
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 3000, link, false)
 		})
 
 		config.Gateway.Interface = eth0Name
 		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with predetermined gateway interface", func() {
-			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 0, link)
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 0, link, false)
 		})
 
 		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with tagged VLAN + predetermined gateway interface", func() {
-			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 3000, link)
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 3000, link, false)
 		})
 
 		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with predetermined gateway interface and no default route", func() {
-			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, "", eth0CIDR, 0, link)
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, "", eth0CIDR, 0, link, false)
 		})
 	})
 })
