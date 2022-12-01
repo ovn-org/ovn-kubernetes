@@ -1205,6 +1205,10 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(fakeOvn.controller.deleteLogicalPort(pod, nil)).To(gomega.Succeed(), "Deleting port from switch that no longer exists should be okay")
 
+				// Delete cache from lsManager and make sure deleteLogicalPort will not fail
+				fakeOvn.controller.lsManager.DeleteSwitch(pod.Spec.NodeName)
+				gomega.Expect(fakeOvn.controller.deleteLogicalPort(pod, nil)).To(gomega.Succeed(), "Deleting port from node that no longer exists should be okay")
+
 				return nil
 			}
 
