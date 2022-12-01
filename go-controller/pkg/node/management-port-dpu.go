@@ -151,6 +151,11 @@ func (mp *managementPortRepresentor) CheckManagementPortHealth(cfg *managementPo
 		stopChan)
 }
 
+// Port representors should not have any IP address assignable to them, thus always return false.
+func (mp *managementPortRepresentor) HasIpAddr() bool {
+	return false
+}
+
 type managementPortNetdev struct {
 	hostSubnets []*net.IPNet
 	netdevName  string
@@ -237,4 +242,9 @@ func (mp *managementPortNetdev) CheckManagementPortHealth(cfg *managementPortCon
 		},
 		30*time.Second,
 		stopChan)
+}
+
+// Management port Netdev should have IP addresses assignable to them.
+func (mp *managementPortNetdev) HasIpAddr() bool {
+	return true
 }
