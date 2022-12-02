@@ -9,6 +9,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
+	logicalswitchmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
@@ -308,11 +309,15 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *kapi.Pod, portInfo *l
 	// Releasing IPs needs to happen last so that we can deterministically know that if delete failed that
 	// the IP of the pod needs to be released. Otherwise we could have a completed pod failed to be removed
 	// and we dont know if the IP was released or not, and subsequently could accidentally release the IP
-	// while it is now on another pod
+	// while it is now on another pod. Releasing IPs may fail at this point if cache knows nothing about it,
+	// which is okay since node may have been deleted.
 	klog.Infof("Attempting to release IPs for pod: %s/%s, ips: %s", pod.Namespace, pod.Name,
 		util.JoinIPNetIPs(podIfAddrs, " "))
 	if err := oc.lsManager.ReleaseIPs(switchName, podIfAddrs); err != nil {
-		return fmt.Errorf("cannot release IPs for pod %s: %w", podDesc, err)
+		if !errors.Is(err, logicalswitchmanager.SwitchNotFound) {
+			return fmt.Errorf("cannot release IPs for pod %s on node %s: %w", podDesc, switchName, err)
+		}
+		klog.Warningf("Ignoring release IPs failure for pod %s on node %s: %w", podDesc, switchName, err)
 	}
 
 	return nil

@@ -75,6 +75,9 @@ type RetryFramework struct {
 	// channel to indicate we need to retry objs immediately
 	retryChan chan struct{}
 
+	stopChan <-chan struct{}
+	doneWg   *sync.WaitGroup
+
 	watchFactory    *factory.WatchFactory
 	ResourceHandler *ResourceHandler
 }
@@ -85,12 +88,15 @@ type RetryFramework struct {
 // ovnk node) will have to override the functions in the returned struct with the desired
 // per-resource logic.
 func NewRetryFramework(
+	stopChan <-chan struct{}, doneWg *sync.WaitGroup,
 	watchFactory *factory.WatchFactory,
 	resourceHandler *ResourceHandler) *RetryFramework {
 	return &RetryFramework{
 		retryEntries:    syncmap.NewSyncMap[*retryObjEntry](),
 		retryChan:       make(chan struct{}, 1),
 		watchFactory:    watchFactory,
+		stopChan:        stopChan,
+		doneWg:          doneWg,
 		ResourceHandler: resourceHandler,
 	}
 }
@@ -363,12 +369,7 @@ func (r *RetryFramework) iterateRetryResources() {
 // periodicallyRetryResources tracks RetryFramework and checks if any object needs to be retried for add or delete every
 // RetryObjInterval seconds or when requested through retryChan.
 func (r *RetryFramework) periodicallyRetryResources() {
-	defer r.watchFactory.Wg.Done()
 	timer := time.NewTicker(RetryObjInterval)
-	waitCh := make(chan struct{})
-	go func() {
-		r.watchFactory.WaitForWatchFactoryStopChannel(waitCh)
-	}()
 	defer timer.Stop()
 	for {
 		select {
@@ -380,7 +381,7 @@ func (r *RetryFramework) periodicallyRetryResources() {
 			r.iterateRetryResources()
 			timer.Reset(RetryObjInterval)
 
-		case <-waitCh:
+		case <-r.stopChan:
 			klog.V(5).Infof("Stop channel got triggered: will stop retrying failed objects of type %s", r.ResourceHandler.ObjType)
 			return
 		}
@@ -664,8 +665,11 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 
 	// track the retry entries and every 30 seconds (or upon explicit request) check if any objects
 	// need to be retried
-	r.watchFactory.Wg.Add(1) //add to the watchFactory waitgroup, the waitgroup done is inside the periodicRetryResources
-	go r.periodicallyRetryResources()
+	r.doneWg.Add(1)
+	go func() {
+		defer r.doneWg.Done()
+		r.periodicallyRetryResources()
+	}()
 
 	return handler, nil
 }
