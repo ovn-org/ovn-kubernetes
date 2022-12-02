@@ -1176,7 +1176,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 
 		// table 0, Host -> OVN towards SVC, SNAT to special IP
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=500, in_port=%s, %s, %s_dst=%s,"+
+			fmt.Sprintf("cookie=%s, priority=500, table=100, in_port=%s, %s, ct_state=+trk-rel, %s_dst=%s,"+
 				"actions=ct(commit,zone=%d,nat(src=%s),table=2)",
 				defaultOpenFlowCookie, ofPortHost, protoPrefix, protoPrefix, svcCIDR, HostMasqCTZone, masqIP))
 
@@ -1186,6 +1186,20 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 				"actions=ct(zone=%d,nat,table=3)",
 				defaultOpenFlowCookie, ofPortPatch, protoPrefix, protoPrefix, svcCIDR,
 				protoPrefix, masqIP, HostMasqCTZone))
+
+		// new dumitru/ales flows for icmp related traffic:
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=650, in_port=%s, %s, %s_dst=%s,"+
+				"actions=ct(zone=%d,nat,table=100)",
+				defaultOpenFlowCookie, ofPortHost, protoPrefix, protoPrefix, svcCIDR, HostMasqCTZone))
+		/*dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=650, table=100, in_port=%s, ct_state=-trk, %s, %s_dst=%s,"+
+				"actions=ct(zone=%d,nat,table=0)",
+				defaultOpenFlowCookie, ofPortHost, protoPrefix, protoPrefix, svcCIDR, HostMasqCTZone))*/
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=600, table=100, in_port=%s, ct_state=+trk+rel, %s, %s_dst=%s,"+
+				"actions=ct(commit,zone=%d,nat,table=2)",
+				defaultOpenFlowCookie, ofPortHost, protoPrefix, protoPrefix, svcCIDR, HostMasqCTZone))
 	}
 
 	var actions string
