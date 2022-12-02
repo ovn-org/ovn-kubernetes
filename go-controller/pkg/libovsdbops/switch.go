@@ -2,6 +2,7 @@ package libovsdbops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -346,23 +347,28 @@ type logicalSwitchPortPredicate func(*nbdb.LogicalSwitchPort) bool
 // the cache based on a given predicate and removes from them the provided
 // logical switch
 func DeleteLogicalSwitchPortsWithPredicateOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, sw *nbdb.LogicalSwitch, p logicalSwitchPortPredicate) ([]libovsdb.Operation, error) {
+	swName := sw.Name
 	sw, err := GetLogicalSwitch(nbClient, sw)
 	if err != nil {
-		return nil, fmt.Errorf("error getting switch %+v: %v", sw, err)
+		if errors.Is(err, libovsdbclient.ErrNotFound) {
+			return ops, nil
+		}
+		return nil, fmt.Errorf("error retrieving logical switch %s from libovsdb cache: %w", swName, err)
 	}
 
-	lsps := []*nbdb.LogicalSwitchPort{}
+	var lsps []*nbdb.LogicalSwitchPort
 	for _, port := range sw.Ports {
 		lsp := &nbdb.LogicalSwitchPort{UUID: port}
-		lsp, err := GetLogicalSwitchPort(nbClient, lsp)
+		lsp, err = GetLogicalSwitchPort(nbClient, lsp)
 		if err != nil {
-			return nil, fmt.Errorf("error getting port %+v: %v", lsp, err)
+			if errors.Is(err, libovsdbclient.ErrNotFound) {
+				continue
+			}
+			return nil, fmt.Errorf("error retrieving logical switch port with UUID %s associated with logical"+
+				" switch %s from libovsdb cache: %w", port, swName, err)
 		}
 		if p(lsp) {
 			lsps = append(lsps, lsp)
-			if err != nil {
-				return nil, fmt.Errorf("error deleting port %+v: %v", lsp, err)
-			}
 		}
 	}
 
