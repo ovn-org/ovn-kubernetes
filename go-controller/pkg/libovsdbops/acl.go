@@ -53,6 +53,21 @@ func FindACLsWithPredicate(nbClient libovsdbclient.Client, p aclPredicate) ([]*n
 	return acls, err
 }
 
+// FindACLsWithUUID looks up ACLs from the cache equivalent with any given acl
+func FindACLsWithUUID(nbClient libovsdbclient.Client, acls []*nbdb.ACL) ([]*nbdb.ACL, error) {
+	pACL := func(item *nbdb.ACL) bool {
+		for index := range acls {
+			if isEquivalentACL(item, acls[index]) {
+				return true
+			}
+		}
+		return false
+	}
+
+	matchAcls, err := FindACLsWithPredicate(nbClient, pACL)
+	return matchAcls, err
+}
+
 // BuildACL builds an ACL with empty optional properties unset
 func BuildACL(name string, direction nbdb.ACLDirection, priority int, match string, action nbdb.ACLAction, meter string,
 	severity nbdb.ACLSeverity, log bool, externalIds map[string]string, options map[string]string) *nbdb.ACL {

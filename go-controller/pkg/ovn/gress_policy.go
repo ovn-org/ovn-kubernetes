@@ -399,7 +399,7 @@ func (gp *gressPolicy) buildACLAllow(match, l4Match string, ipBlockCIDR int, acl
 	externalIds := map[string]string{
 		l4MatchACLExtIdKey:     l4Match,
 		ipBlockCIDRACLExtIdKey: ipBlockCIDRString,
-		namespaceACLExtIdKey:   gp.policyNamespace,
+		namespaceExtIdKey:      gp.policyNamespace,
 		policyACLExtIdKey:      gp.policyName,
 		policyTypeACLExtIdKey:  string(gp.policyType),
 		policyTypeNum:          policyTypeIndex,

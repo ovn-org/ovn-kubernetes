@@ -29,6 +29,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -80,12 +81,11 @@ type DefaultNetworkController struct {
 	// Don't take namespace Lock while holding networkPolicy key lock to avoid deadlock.
 	networkPolicies *syncmap.SyncMap[*networkPolicy]
 
-	// map of existing shared port groups for network policies
-	// port group exists in the db if and only if port group key is present in this map
-	// key is namespace
-	// allowed locking order is namespace Lock -> networkPolicy.Lock -> sharedNetpolPortGroups key Lock
-	// make sure to keep this order to avoid deadlocks
-	sharedNetpolPortGroups *syncmap.SyncMap[*defaultDenyPortGroups]
+	// map of the localPodSelectors that share the same port groups, key is namespace
+	// value is localPodSelector map, whose key is the readable shared port group name used for specific localPodSelector
+	localPodSelectorsPerNamespace *syncmap.SyncMap[map[string]*metav1.LabelSelector]
+	// map of the sharedPortGroupInfo, key is hashed shared port group name
+	sharedPortGroupInfos *syncmap.SyncMap[*sharedPortGroupInfo]
 
 	// Cluster wide Load_Balancer_Group UUID.
 	loadBalancerGroupUUID string
@@ -176,13 +176,14 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 			addressSetFactory:           addressSetFactory,
 			stopChan:                    defaultStopChan,
 		},
-		wg:                           defaultWg,
-		masterSubnetAllocator:        subnetallocator.NewHostSubnetAllocator(),
-		hybridOverlaySubnetAllocator: hybridOverlaySubnetAllocator,
-		externalGWCache:              make(map[ktypes.NamespacedName]*externalRouteInfo),
-		exGWCacheMutex:               sync.RWMutex{},
-		networkPolicies:              syncmap.NewSyncMap[*networkPolicy](),
-		sharedNetpolPortGroups:       syncmap.NewSyncMap[*defaultDenyPortGroups](),
+		wg:                            defaultWg,
+		masterSubnetAllocator:         subnetallocator.NewHostSubnetAllocator(),
+		hybridOverlaySubnetAllocator:  hybridOverlaySubnetAllocator,
+		externalGWCache:               make(map[ktypes.NamespacedName]*externalRouteInfo),
+		exGWCacheMutex:                sync.RWMutex{},
+		networkPolicies:               syncmap.NewSyncMap[*networkPolicy](),
+		localPodSelectorsPerNamespace: syncmap.NewSyncMap[map[string]*metav1.LabelSelector](),
+		sharedPortGroupInfos:          syncmap.NewSyncMap[*sharedPortGroupInfo](),
 		eIPC: egressIPController{
 			egressIPAssignmentMutex:           &sync.Mutex{},
 			podAssignmentMutex:                &sync.Mutex{},
@@ -673,9 +674,7 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 
 	case factory.LocalPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handleLocalPodSelectorAddFunc(
-			extraParameters.np,
-			obj)
+		return h.oc.handleLocalPodSelectorAddFunc(extraParameters.spgInfo, nil, nil, obj)
 
 	case factory.EgressFirewallType:
 		var err error
@@ -791,9 +790,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 
 	case factory.LocalPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handleLocalPodSelectorAddFunc(
-			extraParameters.np,
-			newObj)
+		return h.oc.handleLocalPodSelectorAddFunc(extraParameters.spgInfo, nil, nil, newObj)
 
 	case factory.EgressIPType:
 		oldEIP := oldObj.(*egressipv1.EgressIP)
@@ -931,9 +928,7 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 
 	case factory.LocalPodSelectorType:
 		extraParameters := h.extraParameters.(*NetworkPolicyExtraParameters)
-		return h.oc.handleLocalPodSelectorDelFunc(
-			extraParameters.np,
-			obj)
+		return h.oc.handleLocalPodSelectorDelFunc(extraParameters.spgInfo, obj)
 
 	case factory.EgressFirewallType:
 		egressFirewall := obj.(*egressfirewall.EgressFirewall)
