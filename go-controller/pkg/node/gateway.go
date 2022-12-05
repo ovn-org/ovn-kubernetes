@@ -25,8 +25,8 @@ import (
 // are kept in sync
 type Gateway interface {
 	informer.ServiceAndEndpointsEventHandler
-	Init(factory.NodeWatchFactory) error
-	Start(<-chan struct{}, *sync.WaitGroup)
+	Init(factory.NodeWatchFactory, <-chan struct{}, *sync.WaitGroup) error
+	Start()
 	GetGatewayBridgeIface() string
 }
 
@@ -45,6 +45,8 @@ type gateway struct {
 	readyFunc       func() (bool, error)
 
 	watchFactory *factory.WatchFactory // used for retry
+	stopChan     <-chan struct{}
+	wg           *sync.WaitGroup
 }
 
 func (g *gateway) AddService(svc *kapi.Service) error {
@@ -202,7 +204,10 @@ func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) error {
 
 }
 
-func (g *gateway) Init(wf factory.NodeWatchFactory) error {
+func (g *gateway) Init(wf factory.NodeWatchFactory, stopChan <-chan struct{}, wg *sync.WaitGroup) error {
+	g.stopChan = stopChan
+	g.wg = wg
+
 	var err error
 	if err = g.initFunc(); err != nil {
 		return err
@@ -219,14 +224,14 @@ func (g *gateway) Init(wf factory.NodeWatchFactory) error {
 	return nil
 }
 
-func (g *gateway) Start(stopChan <-chan struct{}, wg *sync.WaitGroup) {
+func (g *gateway) Start() {
 	if g.nodeIPManager != nil {
-		g.nodeIPManager.Run(stopChan, wg)
+		g.nodeIPManager.Run(g.stopChan, g.wg)
 	}
 
 	if g.openflowManager != nil {
 		klog.Info("Spawning Conntrack Rule Check Thread")
-		g.openflowManager.Run(stopChan, wg)
+		g.openflowManager.Run(g.stopChan, g.wg)
 	}
 }
 
@@ -268,38 +273,45 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 		return nil, nil, err
 	}
 
-	if !config.Gateway.DisablePacketMTUCheck {
+	// Set annotation that determines if options:gateway_mtu shall be set for this node.
+	enableGatewayMTU := true
+	if config.Gateway.DisablePacketMTUCheck {
+		klog.Warningf("Config option disable-pkt-mtu-check is set to true. " +
+			"options:gateway_mtu will be disabled on gateway routers. " +
+			"IP fragmentation or large TCP/UDP payloads may not be forwarded correctly.")
+		enableGatewayMTU = false
+	} else {
 		chkPktLengthSupported, err := util.DetectCheckPktLengthSupport(gatewayBridge.bridgeName)
 		if err != nil {
 			return nil, nil, err
 		}
-
-		ovsHardwareOffloadEnabled, err := util.IsOvsHwOffloadEnabled()
-		if err != nil {
-			return nil, nil, err
-		}
-
-		reason := ""
 		if !chkPktLengthSupported {
-			reason += "OVS on this node does not support check packet length action in kernel datapath. "
+			klog.Warningf("OVS does not support check_packet_length action. " +
+				"options:gateway_mtu will be disabled on gateway routers. " +
+				"IP fragmentation or large TCP/UDP payloads may not be forwarded correctly.")
+			enableGatewayMTU = false
+		} else {
+			/* This is a work around. In order to have the most optimal performance, the packet MTU check should be
+			 * disabled when OVS HW Offload is enabled on the node. The reason is that OVS HW Offload does not support
+			 * packet MTU checks properly without the offload support for sFlow.
+			 * The patches for sFlow in OvS: https://patchwork.ozlabs.org/project/openvswitch/list/?series=290804
+			 * As of writing these offload support patches for sFlow are in review.
+			 * TODO: This workaround should be removed once the offload support for sFlow patches are merged upstream OvS.
+			 */
+			ovsHardwareOffloadEnabled, err := util.IsOvsHwOffloadEnabled()
+			if err != nil {
+				return nil, nil, err
+			}
+			if ovsHardwareOffloadEnabled {
+				klog.Warningf("OVS hardware offloading is enabled. " +
+					"options:gateway_mtu will be disabled on gateway routers for performance reasons. " +
+					"IP fragmentation or large TCP/UDP payloads may not be forwarded correctly.")
+				enableGatewayMTU = false
+			}
 		}
-		/* This is a work around. In order to have the most optimal performance, the packet MTU check should be
-		 * disabled when OVS HW Offload is enabled on the node. The reason is that OVS HW Offload does not support
-		 * packet MTU checks properly without the offload support for sFlow.
-		 * The patches for sFlow in OvS: https://patchwork.ozlabs.org/project/openvswitch/list/?series=290804
-		 * As of writing these offload support patches for sFlow are in review.
-		 * TODO: This workaround should be removed once the offload support for sFlow patches are merged upstream OvS.
-		 */
-		if ovsHardwareOffloadEnabled {
-			reason += "OVS Hardware Offload, enabled on this node, does not support check packet length action offloading. "
-		}
-
-		if !chkPktLengthSupported || ovsHardwareOffloadEnabled {
-			klog.Warningf("Disable Packet MTU Check will be forced true. %sThis will cause incoming packets "+
-				"destined to OVN and larger than pod MTU: %d to the node, being dropped "+
-				"without sending fragmentation needed", reason, config.Default.MTU)
-			config.Gateway.DisablePacketMTUCheck = true
-		}
+	}
+	if err := util.SetGatewayMTUSupport(nodeAnnotator, enableGatewayMTU); err != nil {
+		return nil, nil, err
 	}
 
 	if config.Default.EnableUDPAggregation {
@@ -345,11 +357,6 @@ func gatewayReady(patchPort string) (bool, error) {
 
 func (g *gateway) GetGatewayBridgeIface() string {
 	return g.openflowManager.defaultBridge.bridgeName
-}
-
-// getMaxFrameLength returns the maximum frame size (ignoring VLAN header) that a gateway can handle
-func getMaxFrameLength() int {
-	return config.Default.MTU + 14
 }
 
 type bridgeConfiguration struct {

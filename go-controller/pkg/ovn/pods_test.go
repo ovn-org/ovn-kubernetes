@@ -1205,6 +1205,10 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Expect(fakeOvn.controller.deleteLogicalPort(pod, nil)).To(gomega.Succeed(), "Deleting port from switch that no longer exists should be okay")
 
+				// Delete cache from lsManager and make sure deleteLogicalPort will not fail
+				fakeOvn.controller.lsManager.DeleteSwitch(pod.Spec.NodeName)
+				gomega.Expect(fakeOvn.controller.deleteLogicalPort(pod, nil)).To(gomega.Succeed(), "Deleting port from node that no longer exists should be okay")
+
 				return nil
 			}
 
@@ -1565,6 +1569,9 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					},
 				)
 
+				// we don't know the real switch UUID in the db, but it can be found by name
+				swUUID := getLogicalSwitchUUID(fakeOvn.controller.nbClient, testNode.Name)
+				fakeOvn.controller.lsManager.AddSwitch(testNode.Name, swUUID, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchPods()
@@ -1736,6 +1743,74 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				t3.routes = []util.PodRoute{}
 				gomega.Expect(annotations).To(gomega.MatchJSON(t3.getAnnotationsJson()))
 
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("cleans stale LSPs and ignore cleanup of stale ports on nodes with no LS", func() {
+			// may occur if sync nodes runs out of host subnets to assign therefore a logical switch for a node never gets created.
+			// expect reconciliation not to fail and to continue reconciliation for existing pods.
+			// this test proves reconciliation continues for existing pods by checking a pod that doesn't exist in kapi
+			// is cleaned up in OVN.
+			app.Action = func(ctx *cli.Context) error {
+				initialDB := libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						&nbdb.LogicalSwitchPort{
+							UUID:      "namespace1_non-existing-pod-UUID",
+							Name:      "namespace1_non-existing-pod",
+							Addresses: []string{"0a:58:0a:80:02:03", "10.128.2.3"},
+							ExternalIDs: map[string]string{
+								"pod": "true",
+							},
+						},
+						&nbdb.LogicalSwitch{
+							UUID:  "ls-uuid",
+							Name:  "node1",
+							Ports: []string{"namespace1_non-existing-pod-UUID"},
+						},
+					},
+				}
+				testNodeWithLS := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+					},
+				}
+				testNodeWithoutLS := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node2",
+					},
+				}
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NodeList{
+						Items: []v1.Node{
+							testNodeWithLS,
+							testNodeWithoutLS,
+						},
+					},
+					// no pods - we want to test that cleanup of pod LSP is successful within OVN DB despite one node having
+					// no logical switch
+					&v1.PodList{
+						Items: []v1.Pod{},
+					},
+				)
+				// we don't know the real switch UUID in the db, but it can be found by name
+				swUUID := getLogicalSwitchUUID(fakeOvn.controller.nbClient, testNodeWithLS.Name)
+				fakeOvn.controller.lsManager.AddSwitch(testNodeWithLS.Name, swUUID, []*net.IPNet{ovntest.MustParseIPNet(v4NodeSubnet)})
+				err := fakeOvn.controller.WatchPods()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// expect stale logical switch port removed if reconciliation is successful
+				expectData := []libovsdbtest.TestData{
+					&nbdb.LogicalSwitch{
+						UUID:  "ls-uuid",
+						Name:  testNodeWithLS.Name,
+						Ports: []string{},
+					},
+				}
+				gomega.Eventually(fakeOvn.nbClient).Should(
+					libovsdbtest.HaveData(expectData))
 				return nil
 			}
 

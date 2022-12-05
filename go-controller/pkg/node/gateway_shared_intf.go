@@ -121,18 +121,9 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 	var err error
 	var errors []error
 
-	// 14 bytes of overhead for ethernet header (does not include VLAN)
-	maxPktLength := getMaxFrameLength()
 	isServiceTypeETPLocal := util.ServiceExternalTrafficPolicyLocal(service)
 
-	var actions string
-	if config.Gateway.DisablePacketMTUCheck {
-		actions = fmt.Sprintf("output:%s", npw.ofportPatch)
-	} else {
-		// check packet length larger than MTU + eth header - vlan overhead
-		// send to table 11 to check if it needs to go to kernel for ICMP needs frag
-		actions = fmt.Sprintf("check_pkt_larger(%d)->reg0[0],resubmit(,11)", maxPktLength)
-	}
+	actions := fmt.Sprintf("output:%s", npw.ofportPatch)
 
 	// cookie is only used for debugging purpose. so it is not fatal error if cookie is failed to be generated.
 	for _, svcPort := range service.Spec.Ports {
@@ -242,7 +233,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *kapi.Service, add, h
 // `add` parameter indicates if the flows should exist or be removed from the cache
 // `hasLocalHostNetworkEp` indicates if at least one host networked endpoint exists for this service which is local to this node.
 // `protocol` is TCP/UDP/SCTP as set in the svc.Port
-// `actions`: based on config.Gateway.DisablePacketMTUCheck, this will either be "send to patchport" or "send to table11 for checking if it needs to go to kernel for ICMP needs frag"
+// `actions`: "send to patchport"
 // `externalIPOrLBIngressIP` is either externalIP.IP or LB.status.ingress.IP
 // `ipType` is either "External" or "Ingress"
 func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *kapi.Service, svcPort *kapi.ServicePort, add bool, hasLocalHostNetworkEp bool, protocol string, actions string, externalIPOrLBIngressIP string, ipType string) error {
@@ -1052,8 +1043,6 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 	bridgeIPs := bridge.ips
 
 	var dftFlows []string
-	// 14 bytes of overhead for ethernet header (does not include VLAN)
-	maxPktLength := getMaxFrameLength()
 
 	if config.IPv4Mode {
 		// table0, Geneve packets coming from external. Skip conntrack and go directly to host
@@ -1195,14 +1184,7 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 				protoPrefix, masqIP, HostMasqCTZone))
 	}
 
-	var actions string
-	if config.Gateway.DisablePacketMTUCheck {
-		actions = fmt.Sprintf("output:%s", ofPortPatch)
-	} else {
-		// check packet length larger than MTU + eth header - vlan overhead
-		// send to table 11 to check if it needs to go to kernel for ICMP needs frag
-		actions = fmt.Sprintf("check_pkt_larger(%d)->reg0[0],resubmit(,11)", maxPktLength)
-	}
+	actions := fmt.Sprintf("output:%s", ofPortPatch)
 
 	if config.IPv4Mode {
 		// table 1, established and related connections in zone 64000 with ct_mark ctMarkOVN go to OVN
@@ -1305,7 +1287,6 @@ func commonFlows(bridge *bridgeConfiguration) []string {
 	ofPortHost := bridge.ofPortHost
 
 	var dftFlows []string
-	maxPktLength := getMaxFrameLength()
 
 	// table 0, we check to see if this dest mac is the shared mac, if so flood to both ports
 	dftFlows = append(dftFlows,
@@ -1355,19 +1336,10 @@ func commonFlows(bridge *bridgeConfiguration) []string {
 				"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, ofPortPhys, config.Default.ConntrackZone))
 	}
 
-	var actions string
-	if config.Gateway.DisablePacketMTUCheck {
-		actions = fmt.Sprintf("output:%s", ofPortPatch)
-	} else {
-		// check packet length larger than MTU + eth header - vlan overhead
-		// send to table 11 to check if it needs to go to kernel for ICMP needs frag
-		actions = fmt.Sprintf("check_pkt_larger(%d)->reg0[0],resubmit(,11)", maxPktLength)
-	}
+	actions := fmt.Sprintf("output:%s", ofPortPatch)
 
 	if config.Gateway.DisableSNATMultipleGWs {
 		// table 1, traffic to pod subnet go directly to OVN
-		// check packet length larger than MTU + eth header - vlan overhead
-		// send to table 11 to check if it needs to go to kernel for ICMP needs frag/packet too big
 		for _, clusterEntry := range config.Default.ClusterSubnets {
 			cidr := clusterEntry.CIDR
 			var ipPrefix string
@@ -1410,17 +1382,6 @@ func commonFlows(bridge *bridgeConfiguration) []string {
 				defaultOpenFlowCookie, ofPortPhys, ofPortPatch, ofPortHost))
 	}
 
-	// New dispatch table 11
-	// packets larger than known acceptable MTU need to go to kernel to create ICMP frag needed
-	if !config.Gateway.DisablePacketMTUCheck {
-		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=10, table=11, reg0=0x1, "+
-				"actions=output:%s", defaultOpenFlowCookie, ofPortHost))
-		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=1, table=11, "+
-				"actions=output:%s", defaultOpenFlowCookie, ofPortPatch))
-
-	}
 	// table 1, all other connections do normal processing
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=output:NORMAL", defaultOpenFlowCookie))

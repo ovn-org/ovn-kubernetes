@@ -513,3 +513,106 @@ func TestParseNodeGatewayRouterLRPAddr(t *testing.T) {
 		})
 	}
 }
+
+func TestSetGatewayMTUSupport(t *testing.T) {
+	mockAnnotator := new(annotatorMock.Annotator)
+
+	tests := []struct {
+		desc                   string
+		inpNodeAnnotator       kube.Annotator
+		inputSet               bool
+		errExpected            bool
+		onRetArgsAnnotatorList []ovntest.TestifyMockHelper
+	}{
+		{
+			desc:             "success: set true should delete annotation on node",
+			inpNodeAnnotator: mockAnnotator,
+			inputSet:         true,
+			onRetArgsAnnotatorList: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Delete", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{nil}},
+			},
+		},
+		{
+			desc:             "success: set false should create annotation with value 'false'",
+			inpNodeAnnotator: mockAnnotator,
+			inputSet:         false,
+			onRetArgsAnnotatorList: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Set", OnCallMethodArgType: []string{"string", "string"}, RetArgList: []interface{}{nil}},
+			},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			for _, item := range tc.onRetArgsAnnotatorList {
+				call := mockAnnotator.On(item.OnCallMethodName)
+				for range item.OnCallMethodArgType {
+					call.Arguments = append(call.Arguments, mock.Anything)
+				}
+
+				for _, e := range item.RetArgList {
+					call.ReturnArguments = append(call.ReturnArguments, e)
+				}
+				call.Once()
+			}
+			e := SetGatewayMTUSupport(tc.inpNodeAnnotator, tc.inputSet)
+			if tc.errExpected {
+				t.Log(e)
+				assert.Error(t, e)
+			}
+			mockAnnotator.AssertExpectations(t)
+		})
+	}
+}
+
+func TestParseNodeGatewayMTUSupport(t *testing.T) {
+	tests := []struct {
+		desc    string
+		inpNode *v1.Node
+		res     bool
+	}{
+		{
+			desc:    "annotation not found for node and true",
+			inpNode: &v1.Node{},
+			res:     true,
+		},
+		{
+			desc: "parse completed and true",
+			inpNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/gateway-mtu-support": "true",
+					},
+				},
+			},
+			res: true,
+		},
+		{
+			desc: "parse completed and false",
+			inpNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/gateway-mtu-support": "false",
+					},
+				},
+			},
+			res: false,
+		},
+		{
+			desc: "parse invalid value completed and true",
+			inpNode: &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"k8s.ovn.org/gateway-mtu-support": "tru",
+					},
+				},
+			},
+			res: true,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			res := ParseNodeGatewayMTUSupport(tc.inpNode)
+			assert.Equal(t, tc.res, res)
+		})
+	}
+}

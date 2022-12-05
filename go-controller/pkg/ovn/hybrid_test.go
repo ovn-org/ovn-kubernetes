@@ -422,7 +422,10 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			}
 
 			skipSnat := false
-			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config, []*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)}, skipSnat, node1.NodeMgmtPortIP)
+			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter,
+				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config,
+				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)}, skipSnat,
+				node1.NodeMgmtPortIP, "1400")
 
 			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, hoSubnet, nodeHOIP, nodeHOMAC)
 
@@ -641,7 +644,10 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			}
 
 			skipSnat := false
-			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config, []*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)}, skipSnat, node1.NodeMgmtPortIP)
+			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter,
+				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config,
+				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)}, skipSnat,
+				node1.NodeMgmtPortIP, "1400")
 
 			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, hoSubnet, nodeHOIP, nodeHOMAC)
 
@@ -877,7 +883,10 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			}
 
 			skipSnat := false
-			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config, []*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)}, skipSnat, node1.NodeMgmtPortIP)
+			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter,
+				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config,
+				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)}, skipSnat,
+				node1.NodeMgmtPortIP, "1400")
 
 			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, winNodeSubnet, nodeHOIP, nodeHOMAC)
 
@@ -1137,7 +1146,10 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			}
 
 			skipSnat := false
-			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config, []*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)}, skipSnat, node1.NodeMgmtPortIP)
+			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter,
+				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3Config,
+				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)}, skipSnat,
+				node1.NodeMgmtPortIP, "1400")
 
 			hybridSubnetStaticRoute1, hybridLogicalRouterStaticRoute, hybridSubnetLRP1, hybridSubnetLRP2, hybridLogicalSwitchPort := setupHybridOverlayOVNObjects(node1, hoSubnet, nodeHOIP, nodeHOMAC)
 

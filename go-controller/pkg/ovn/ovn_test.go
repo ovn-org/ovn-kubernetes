@@ -43,6 +43,7 @@ type FakeOVN struct {
 	watcher      *factory.WatchFactory
 	controller   *DefaultNetworkController
 	stopChan     chan struct{}
+	wg           *sync.WaitGroup
 	asf          *addressset.FakeAddressSetFactory
 	fakeRecorder *record.FakeRecorder
 	nbClient     libovsdbclient.Client
@@ -99,6 +100,7 @@ func (o *FakeOVN) startWithDBSetup(dbSetup libovsdbtest.TestSetup, objects ...ru
 func (o *FakeOVN) shutdown() {
 	o.watcher.Shutdown()
 	close(o.stopChan)
+	o.wg.Wait()
 	o.egressQoSWg.Wait()
 	o.egressSVCWg.Wait()
 	o.nbsbCleanup.Cleanup()
@@ -114,10 +116,11 @@ func (o *FakeOVN) init() {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	o.stopChan = make(chan struct{})
+	o.wg = &sync.WaitGroup{}
 	o.controller = NewOvnController(o.fakeClient, o.watcher,
 		o.stopChan, o.asf,
 		o.nbClient, o.sbClient,
-		o.fakeRecorder, nil)
+		o.fakeRecorder, o.wg)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.controller.multicastSupport = true
 	o.controller.loadBalancerGroupUUID = types.ClusterLBGroupName + "-UUID"

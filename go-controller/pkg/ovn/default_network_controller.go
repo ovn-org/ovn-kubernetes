@@ -280,6 +280,8 @@ func (oc *DefaultNetworkController) newRetryFrameworkWithParameters(
 		EventHandler:           eventHandler,
 	}
 	r := retry.NewRetryFramework(
+		oc.stopChan,
+		oc.wg,
 		oc.watchFactory,
 		resourceHandler,
 	)
@@ -292,7 +294,7 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 		return err
 	}
 
-	return oc.Run(ctx, oc.wg)
+	return oc.Run(ctx)
 }
 
 // Stop gracefully stops the controller
@@ -379,7 +381,7 @@ func (oc *DefaultNetworkController) Init() error {
 }
 
 // Run starts the actual watching.
-func (oc *DefaultNetworkController) Run(ctx context.Context, wg *sync.WaitGroup) error {
+func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	oc.syncPeriodic()
 	klog.Infof("Starting all the Watchers...")
 	start := time.Now()
@@ -405,7 +407,7 @@ func (oc *DefaultNetworkController) Run(ctx context.Context, wg *sync.WaitGroup)
 	oc.svcFactory.Start(oc.stopChan)
 
 	// Services should be started after nodes to prevent LB churn
-	if err := oc.StartServiceController(wg, true); err != nil {
+	if err := oc.StartServiceController(oc.wg, true); err != nil {
 		return err
 	}
 
@@ -472,16 +474,16 @@ func (oc *DefaultNetworkController) Run(ctx context.Context, wg *sync.WaitGroup)
 			oc.watchFactory.EgressQoSInformer(),
 			oc.watchFactory.PodCoreInformer(),
 			oc.watchFactory.NodeCoreInformer())
-		wg.Add(1)
+		oc.wg.Add(1)
 		go func() {
-			defer wg.Done()
+			defer oc.wg.Done()
 			oc.runEgressQoSController(1, oc.stopChan)
 		}()
 	}
 
-	wg.Add(1)
+	oc.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer oc.wg.Done()
 		oc.egressSvcController.Run(1)
 	}()
 
@@ -497,9 +499,9 @@ func (oc *DefaultNetworkController) Run(ctx context.Context, wg *sync.WaitGroup)
 		if err != nil {
 			return err
 		}
-		wg.Add(1)
+		oc.wg.Add(1)
 		go func() {
-			defer wg.Done()
+			defer oc.wg.Done()
 			unidlingController.Run(oc.stopChan)
 		}()
 	}
@@ -826,7 +828,8 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		mgmtSync := failed || macAddressChanged(oldNode, newNode) || nodeSubnetChanged(oldNode, newNode)
 		_, failed = h.oc.gatewaysFailed.Load(newNode.Name)
 		gwSync := (failed || gatewayChanged(oldNode, newNode) ||
-			nodeSubnetChanged(oldNode, newNode) || hostAddressesChanged(oldNode, newNode))
+			nodeSubnetChanged(oldNode, newNode) || hostAddressesChanged(oldNode, newNode) ||
+			nodeGatewayMTUSupportChanged(oldNode, newNode))
 		_, hoSync := h.oc.hybridOverlayFailed.Load(newNode.Name)
 
 		return h.oc.addUpdateNodeEvent(newNode, &nodeSyncs{nodeSync, clusterRtrSync, mgmtSync, gwSync, hoSync})
