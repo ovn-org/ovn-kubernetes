@@ -47,14 +47,13 @@ func getNonZeroLoadBalancerMutableFields(lb *nbdb.LoadBalancer) []interface{} {
 }
 
 // BuildLoadBalancer builds a load balancer
-func BuildLoadBalancer(name string, protocol nbdb.LoadBalancerProtocol, selectionFields []nbdb.LoadBalancerSelectionFields, vips, options, externalIds map[string]string) *nbdb.LoadBalancer {
+func BuildLoadBalancer(name string, protocol nbdb.LoadBalancerProtocol, vips, options, externalIds map[string]string) *nbdb.LoadBalancer {
 	return &nbdb.LoadBalancer{
-		Name:            name,
-		Protocol:        &protocol,
-		SelectionFields: selectionFields,
-		Vips:            vips,
-		Options:         options,
-		ExternalIDs:     externalIds,
+		Name:        name,
+		Protocol:    &protocol,
+		Vips:        vips,
+		Options:     options,
+		ExternalIDs: externalIds,
 	}
 }
 
