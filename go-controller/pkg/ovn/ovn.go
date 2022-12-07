@@ -9,15 +9,10 @@ import (
 	"sync"
 	"time"
 
-	ref "k8s.io/client-go/tools/reference"
-
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egress_services"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
@@ -35,6 +30,7 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
+	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
 )
 
@@ -47,26 +43,6 @@ const (
 type ACLLoggingLevels struct {
 	Allow string `json:"allow,omitempty"`
 	Deny  string `json:"deny,omitempty"`
-}
-
-// BaseNetworkController structure is place holder for all fields shared among controllers.
-type BaseNetworkController struct {
-	client       clientset.Interface
-	kube         kube.Interface
-	watchFactory *factory.WatchFactory
-	podRecorder  *metrics.PodRecorder
-
-	// event recorder used to post events to k8s
-	recorder record.EventRecorder
-
-	// libovsdb northbound client interface
-	nbClient libovsdbclient.Client
-
-	// libovsdb southbound client interface
-	sbClient libovsdbclient.Client
-
-	// has SCTP support
-	SCTPSupport bool
 }
 
 const (
@@ -83,22 +59,6 @@ const (
 // getPodNamespacedName returns <namespace>_<podname> for the provided pod
 func getPodNamespacedName(pod *kapi.Pod) string {
 	return util.GetLogicalPortName(pod.Namespace, pod.Name)
-}
-
-// NewBaseNetworkController creates BaseNetworkController shared by controllers
-func NewBaseNetworkController(client clientset.Interface, kube kube.Interface, wf *factory.WatchFactory,
-	recorder record.EventRecorder, nbClient libovsdbclient.Client,
-	sbClient libovsdbclient.Client, podRecorder *metrics.PodRecorder, SCTPSupport bool) *BaseNetworkController {
-	return &BaseNetworkController{
-		client:       client,
-		kube:         kube,
-		watchFactory: wf,
-		recorder:     recorder,
-		nbClient:     nbClient,
-		sbClient:     sbClient,
-		podRecorder:  podRecorder,
-		SCTPSupport:  SCTPSupport,
-	}
 }
 
 // syncPeriodic adds a goroutine that periodically does some work
@@ -134,7 +94,7 @@ func (oc *DefaultNetworkController) getPortInfo(pod *kapi.Pod) *lpInfo {
 			mac:           mac,
 		}
 	} else {
-		portInfo, _ = oc.logicalPortCache.get(key)
+		portInfo = oc.BaseNetworkController.getPortInfo(pod)
 	}
 	return portInfo
 }
@@ -208,12 +168,6 @@ func (oc *DefaultNetworkController) removePod(pod *kapi.Pod, portInfo *lpInfo) e
 			getPodNamespacedName(pod), err)
 	}
 	return nil
-}
-
-// WatchPods starts the watching of the Pod resource and calls back the appropriate handler logic
-func (oc *DefaultNetworkController) WatchPods() error {
-	_, err := oc.retryPods.WatchResource()
-	return err
 }
 
 // WatchNetworkPolicy starts the watching of the network policy resource and calls
@@ -303,13 +257,6 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *kapi.Node, hostSubnets
 		}
 	}
 	return nil
-}
-
-// WatchNodes starts the watching of node resource and calls
-// back the appropriate handler logic
-func (oc *DefaultNetworkController) WatchNodes() error {
-	_, err := oc.retryNodes.WatchResource()
-	return err
 }
 
 // aclLoggingUpdateNsInfo parses the provided annotation values and sets nsInfo.aclLogging.Deny and

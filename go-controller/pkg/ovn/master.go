@@ -1,7 +1,6 @@
 package ovn
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -9,7 +8,6 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -27,7 +25,6 @@ import (
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
-	ovnlb "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -117,33 +114,11 @@ func (oc *DefaultNetworkController) upgradeOVNTopology(existingNodes *kapi.NodeL
 // SetupMaster creates the central router and load-balancers for the network
 func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) error {
 	// Create default Control Plane Protection (COPP) entry for routers
-	var err error
-	oc.defaultCOPPUUID, err = EnsureDefaultCOPP(oc.nbClient)
+	logicalRouter, err := oc.createOvnClusterRouter()
 	if err != nil {
-		return fmt.Errorf("unable to create router control plane protection: %w", err)
+		return err
 	}
-
-	// Create a single common distributed router for the cluster.
-	logicalRouter := nbdb.LogicalRouter{
-		Name: types.OVNClusterRouter,
-		ExternalIDs: map[string]string{
-			"k8s-cluster-router": "yes",
-		},
-		Options: map[string]string{
-			"always_learn_from_arp_request": "false",
-		},
-		Copp: &oc.defaultCOPPUUID,
-	}
-	if oc.multicastSupport {
-		logicalRouter.Options = map[string]string{
-			"mcast_relay": "true",
-		}
-	}
-
-	err = libovsdbops.CreateOrUpdateLogicalRouter(oc.nbClient, &logicalRouter)
-	if err != nil {
-		return fmt.Errorf("failed to create a single common distributed router for the cluster, error: %v", err)
-	}
+	oc.defaultCOPPUUID = *(logicalRouter.Copp)
 
 	// Create a cluster-wide port group that all logical switch ports are part of
 	pg := libovsdbops.BuildPortGroup(types.ClusterPortGroupName, types.ClusterPortGroupName, nil, nil)
@@ -220,10 +195,10 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 		Networks: gwLRPNetworks,
 	}
 
-	err = libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, &logicalRouter,
+	err = libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, logicalRouter,
 		[]*nbdb.LogicalRouterPort{&logicalRouterPort}, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
 	if err != nil {
-		return fmt.Errorf("failed to add logical router port %+v on router %+v: %v", logicalRouterPort, logicalRouter, err)
+		return fmt.Errorf("failed to add logical router port %+v on router %s: %v", logicalRouterPort, logicalRouter.Name, err)
 	}
 
 	// Create OVNJoinSwitch that will be used to connect gateway routers to the
@@ -356,157 +331,13 @@ func (oc *DefaultNetworkController) syncGatewayLogicalNetwork(node *kapi.Node, l
 	return err
 }
 
-// syncNodeClusterRouterPort ensures a node's LS to the cluster router's LRP is created.
-// NOTE: We could have created the router port in ensureNodeLogicalNetwork() instead of here,
-// but chassis ID is not available at that moment. We need the chassis ID to set the
-// gateway-chassis, which in effect pins the logical switch to the current node in OVN.
-// Otherwise, ovn-controller will flood-fill unrelated datapaths unnecessarily, causing scale
-// problems.
-func (oc *DefaultNetworkController) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
-	chassisID, err := util.ParseNodeChassisIDAnnotation(node)
-	if err != nil {
-		return err
-	}
-
-	if hostSubnets == nil {
-		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
-		if err != nil {
-			return err
-		}
-	}
-
-	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
-	var nodeLRPMAC net.HardwareAddr
-	for _, hostSubnet := range hostSubnets {
-		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
-		nodeLRPMAC = util.IPAddrToHWAddr(gwIfAddr.IP)
-		if !utilnet.IsIPv6CIDR(hostSubnet) {
-			break
-		}
-	}
-
-	lrpName := types.RouterToSwitchPrefix + node.Name
-	lrpNetworks := []string{}
-	for _, hostSubnet := range hostSubnets {
-		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
-		lrpNetworks = append(lrpNetworks, gwIfAddr.String())
-	}
-	logicalRouterPort := nbdb.LogicalRouterPort{
-		Name:     lrpName,
-		MAC:      nodeLRPMAC.String(),
-		Networks: lrpNetworks,
-	}
-	logicalRouter := nbdb.LogicalRouter{Name: types.OVNClusterRouter}
-
-	err = libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, &logicalRouter,
-		[]*nbdb.LogicalRouterPort{&logicalRouterPort}, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
-	if err != nil {
-		klog.Errorf("Failed to add logical router port %+v to router %s: %v", logicalRouterPort, types.OVNClusterRouter, err)
-		return err
-	}
-
-	gatewayChassisName := lrpName + "-" + chassisID
-	gatewayChassis := nbdb.GatewayChassis{
-		Name:        gatewayChassisName,
-		ChassisName: chassisID,
-		Priority:    1,
-	}
-
-	err = libovsdbops.CreateOrUpdateGatewayChassis(oc.nbClient, &logicalRouterPort, &gatewayChassis,
-		&gatewayChassis.Name, &gatewayChassis.ChassisName, &gatewayChassis.Priority)
-	if err != nil {
-		klog.Errorf("Failed to add gateway chassis %s to logical router port %s, error: %v", chassisID, lrpName, err)
-		return err
-	}
-
-	return nil
-}
-
 func (oc *DefaultNetworkController) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*net.IPNet) error {
-	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
-	var nodeLRPMAC net.HardwareAddr
+	var hostNetworkPolicyIPs []net.IP
+
 	switchName := node.Name
 	for _, hostSubnet := range hostSubnets {
-		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
-		nodeLRPMAC = util.IPAddrToHWAddr(gwIfAddr.IP)
-		if !utilnet.IsIPv6CIDR(hostSubnet) {
-			break
-		}
-	}
-
-	logicalSwitch := nbdb.LogicalSwitch{
-		Name: switchName,
-	}
-
-	var v4Gateway, v6Gateway net.IP
-	var hostNetworkPolicyIPs []net.IP
-	logicalRouterPortNetwork := []string{}
-	logicalSwitch.OtherConfig = map[string]string{}
-	for _, hostSubnet := range hostSubnets {
-		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
-		logicalRouterPortNetwork = append(logicalRouterPortNetwork, gwIfAddr.String())
 		hostNetworkPolicyIPs = append(hostNetworkPolicyIPs, mgmtIfAddr.IP)
-
-		if utilnet.IsIPv6CIDR(hostSubnet) {
-			v6Gateway = gwIfAddr.IP
-
-			logicalSwitch.OtherConfig["ipv6_prefix"] =
-				hostSubnet.IP.String()
-		} else {
-			v4Gateway = gwIfAddr.IP
-			excludeIPs := mgmtIfAddr.IP.String()
-			if config.HybridOverlay.Enabled {
-				hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(hostSubnet)
-				excludeIPs += ".." + hybridOverlayIfAddr.IP.String()
-			}
-			logicalSwitch.OtherConfig["subnet"] = hostSubnet.String()
-			logicalSwitch.OtherConfig["exclude_ips"] = excludeIPs
-		}
-	}
-
-	if oc.loadBalancerGroupUUID != "" {
-		logicalSwitch.LoadBalancerGroup = []string{oc.loadBalancerGroupUUID}
-	}
-
-	logicalRouterPortName := types.RouterToSwitchPrefix + switchName
-	logicalRouterPort := nbdb.LogicalRouterPort{
-		Name:     logicalRouterPortName,
-		MAC:      nodeLRPMAC.String(),
-		Networks: logicalRouterPortNetwork,
-	}
-	logicalRouter := nbdb.LogicalRouter{Name: types.OVNClusterRouter}
-
-	err := libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, &logicalRouter,
-		[]*nbdb.LogicalRouterPort{&logicalRouterPort}, &logicalRouterPort.Networks, &logicalRouterPort.MAC)
-	if err != nil {
-		return fmt.Errorf("failed to add logical router port %+v to router %s: %v", logicalRouterPort, types.OVNClusterRouter, err)
-	}
-
-	// If supported, enable IGMP/MLD snooping and querier on the node.
-	if oc.multicastSupport {
-		logicalSwitch.OtherConfig["mcast_snoop"] = "true"
-
-		// Configure IGMP/MLD querier if the gateway IP address is known.
-		// Otherwise disable it.
-		if v4Gateway != nil || v6Gateway != nil {
-			logicalSwitch.OtherConfig["mcast_querier"] = "true"
-			logicalSwitch.OtherConfig["mcast_eth_src"] = nodeLRPMAC.String()
-			if v4Gateway != nil {
-				logicalSwitch.OtherConfig["mcast_ip4_src"] = v4Gateway.String()
-			}
-			if v6Gateway != nil {
-				logicalSwitch.OtherConfig["mcast_ip6_src"] = util.HWAddrToIPv6LLA(nodeLRPMAC).String()
-			}
-		} else {
-			logicalSwitch.OtherConfig["mcast_querier"] = "false"
-		}
-	}
-
-	err = libovsdbops.CreateOrUpdateLogicalSwitch(oc.nbClient, &logicalSwitch, &logicalSwitch.OtherConfig,
-		&logicalSwitch.LoadBalancerGroup)
-	if err != nil {
-		return fmt.Errorf("failed to add logical switch %+v: %v", logicalSwitch, err)
 	}
 
 	// also add the join switch IPs for this node - needed in shared gateway mode
@@ -537,34 +368,13 @@ func (oc *DefaultNetworkController) ensureNodeLogicalNetwork(node *kapi.Node, ho
 		return err
 	}
 
-	// Connect the switch to the router.
-	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name:      types.SwitchToRouterPrefix + switchName,
-		Type:      "router",
-		Addresses: []string{"router"},
-		Options:   map[string]string{"router-port": types.RouterToSwitchPrefix + switchName},
-	}
-	sw := nbdb.LogicalSwitch{Name: switchName}
-	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
-	if err != nil {
-		klog.Errorf("Failed to add logical port %+v to switch %s: %v", logicalSwitchPort, switchName, err)
-		return err
-	}
-
-	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, types.ClusterRtrPortGroupName, logicalSwitchPort.UUID)
-	if err != nil {
-		klog.Errorf(err.Error())
-		return err
-	}
-
-	// Add the switch to the logical switch cache
-	return oc.lsManager.AddSwitch(switchName, logicalSwitch.UUID, hostSubnets)
+	return oc.createNodeLogicalSwitch(node.Name, hostSubnets, oc.loadBalancerGroupUUID)
 }
 
-func (oc *DefaultNetworkController) updateNodeAnnotationWithRetry(nodeName string, hostSubnets []*net.IPNet) error {
-	gwLRPIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(nodeName)
+func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, error) {
+	gwLRPIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name)
 	if err != nil {
-		return fmt.Errorf("failed to allocate join switch port IP address for node %s: %v", nodeName, err)
+		return nil, fmt.Errorf("failed to allocate join switch port IP address for node %s: %v", node.Name, err)
 	}
 	var v4Addr, v6Addr *net.IPNet
 	for _, ip := range gwLRPIPs {
@@ -574,60 +384,19 @@ func (oc *DefaultNetworkController) updateNodeAnnotationWithRetry(nodeName strin
 			v6Addr = ip
 		}
 	}
-
-	// Retry if it fails because of potential conflict which is transient. Return error in the
-	// case of other errors (say temporary API server down), and it will be taken care of by the
-	// retry mechanism.
-	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		// Informer cache should not be mutated, so get a copy of the object
-		node, err := oc.watchFactory.GetNode(nodeName)
-		if err != nil {
-			return err
-		}
-
-		cnode := node.DeepCopy()
-		cnode.Annotations, err = util.CreateNodeGateRouterLRPAddrAnnotation(cnode.Annotations, v4Addr, v6Addr)
-		if err != nil {
-			return fmt.Errorf("failed to marshal node %q annotation for Gateway LRP IP %v",
-				node.Name, gwLRPIPs)
-		}
-		cnode.Annotations, err = util.UpdateNodeHostSubnetAnnotation(cnode.Annotations, hostSubnets, types.DefaultNetworkName)
-		if err != nil {
-			return fmt.Errorf("failed to update node %q annotation subnet %s",
-				node.Name, util.JoinIPNets(hostSubnets, ","))
-		}
-		return oc.kube.UpdateNode(cnode)
-	})
-	if resultErr != nil {
-		return fmt.Errorf("failed to update node %s annotation", nodeName)
-	}
-	return nil
-}
-
-func (oc *DefaultNetworkController) addNode(node *kapi.Node) ([]*net.IPNet, error) {
-	existingSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
-	if err != nil && !util.IsAnnotationNotSetError(err) {
-		// Log the error and try to allocate new subnets
-		klog.Infof("Failed to get node %s host subnets annotations: %v", node.Name, err)
+	updatedNodeAnnotation, err := util.CreateNodeGatewayRouterLRPAddrAnnotation(nil, v4Addr, v6Addr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal node %q annotation for Gateway LRP IP %v",
+			node.Name, gwLRPIPs)
 	}
 
-	hostSubnets, allocatedSubnets, err := oc.masterSubnetAllocator.AllocateNodeSubnets(node.Name, existingSubnets, config.IPv4Mode, config.IPv6Mode)
+	hostSubnets, err := oc.allocateNodeSubnets(node, oc.masterSubnetAllocator)
 	if err != nil {
 		return nil, err
 	}
-	// Release the allocation on error
-	defer func() {
-		if err != nil {
-			if errR := oc.masterSubnetAllocator.ReleaseNodeSubnets(node.Name, allocatedSubnets...); errR != nil {
-				klog.Warningf("Error releasing node %s subnets: %v", node.Name, errR)
-			}
-		}
-	}()
 
-	// Set the HostSubnet annotation on the node object to signal
-	// to nodes that their logical infrastructure is set up and they can
-	// proceed with their initialization
-	err = oc.updateNodeAnnotationWithRetry(node.Name, hostSubnets)
+	hostSubnetsMap := map[string][]*net.IPNet{types.DefaultNetworkName: hostSubnets}
+	err = oc.UpdateNodeAnnotationWithRetry(node.Name, hostSubnetsMap, updatedNodeAnnotation)
 	if err != nil {
 		return nil, err
 	}
@@ -687,33 +456,6 @@ func (oc *DefaultNetworkController) deleteStaleNodeChassis(node *kapi.Node) erro
 			return fmt.Errorf("node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB", node.Name)
 		}
 	}
-	return nil
-}
-
-// deleteNodeLogicalNetwork removes the logical switch and logical router port associated with the node
-func (oc *DefaultNetworkController) deleteNodeLogicalNetwork(nodeName string) error {
-	// Remove switch to lb associations from the LBCache before removing the switch
-	lbCache, err := ovnlb.GetLBCache(oc.nbClient)
-	if err != nil {
-		return fmt.Errorf("failed to get load_balancer cache for node %s: %v", nodeName, err)
-	}
-	lbCache.RemoveSwitch(nodeName)
-
-	// Remove the logical switch associated with the node
-	err = libovsdbops.DeleteLogicalSwitch(oc.nbClient, nodeName)
-	if err != nil {
-		return fmt.Errorf("failed to delete logical switch %s: %v", nodeName, err)
-	}
-
-	logiccalRouter := nbdb.LogicalRouter{Name: types.OVNClusterRouter}
-	logicalRouterPort := nbdb.LogicalRouterPort{
-		Name: types.RouterToSwitchPrefix + nodeName,
-	}
-	err = libovsdbops.DeleteLogicalRouterPorts(oc.nbClient, &logiccalRouter, &logicalRouterPort)
-	if err != nil {
-		return fmt.Errorf("failed to delete router port %s: %v", logicalRouterPort.Name, err)
-	}
-
 	return nil
 }
 
@@ -843,7 +585,7 @@ func (oc *DefaultNetworkController) syncNodes(nodes []interface{}) error {
 		if !ok {
 			return fmt.Errorf("spurious object in syncNodes: %v", tmp)
 		}
-		hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+		hostSubnets := oc.updateNodesManageHostSubnets(node, oc.masterSubnetAllocator, foundNodes)
 		if config.HybridOverlay.Enabled && len(hostSubnets) == 0 && houtil.IsHybridOverlayNode(node) {
 			// this is a hybrid overlay node so mark as allocated from the hybrid overlay subnet allocator
 			hostSubnet, err := houtil.ParseHybridOverlayHostSubnet(node)
@@ -858,13 +600,6 @@ func (oc *DefaultNetworkController) syncNodes(nodes []interface{}) error {
 			// there is nothing left to be done if this is a hybrid overlay node
 			continue
 		}
-
-		foundNodes.Insert(node.Name)
-		klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnets)
-		if err := oc.masterSubnetAllocator.MarkSubnetsAllocated(node.Name, hostSubnets...); err != nil {
-			utilruntime.HandleError(err)
-		}
-
 		// For each existing node, reserve its joinSwitch LRP IPs if they already exist.
 		if _, err := oc.joinSwIPManager.EnsureJoinLRPIPs(node.Name); err != nil {
 			// TODO (flaviof): keep going even if EnsureJoinLRPIPs returned an error. Maybe we should not.
@@ -1038,31 +773,8 @@ func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *
 	// if per pod SNAT is being used, then l3 gateway config is required to be able to add pods
 	if _, gwFailed := oc.gatewaysFailed.Load(node.Name); !gwFailed || !config.Gateway.DisableSNATMultipleGWs {
 		if nSyncs.syncNode || nSyncs.syncGw { // do this only if it is a new node add or a gateway sync happened
-			options := metav1.ListOptions{
-				FieldSelector:   fields.OneTermEqualSelector("spec.nodeName", node.Name).String(),
-				ResourceVersion: "0",
-			}
-			pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
-			if err != nil {
-				errs = append(errs, err)
-				klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function",
-					node.Name)
-			} else {
-				klog.V(5).Infof("When adding node %s, found %d pods to add to retryPods", node.Name, len(pods.Items))
-				for _, pod := range pods.Items {
-					pod := pod
-					if util.PodCompleted(&pod) {
-						continue
-					}
-					klog.V(5).Infof("Adding pod %s/%s to retryPods", pod.Namespace, pod.Name)
-					err = oc.retryPods.AddRetryObjWithAddNoBackoff(&pod)
-					if err != nil {
-						errs = append(errs, err)
-						klog.Errorf("Failed to add pod %s/%s to retryPods: %v", pod.Namespace, pod.Name, err)
-					}
-				}
-			}
-			oc.retryPods.RequestRetryObjs()
+			errors := oc.addAllPodsOnNode(node.Name)
+			errs = append(errs, errors...)
 		}
 	}
 

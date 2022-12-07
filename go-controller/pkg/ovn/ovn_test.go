@@ -152,7 +152,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 	}
 
 	podRecorder := metrics.NewPodRecorder()
-	bnc := NewBaseNetworkController(
+	cnci := NewCommonNetworkControllerInfo(
 		ovnClient.KubeClient,
 		&kube.Kube{
 			KClient:              ovnClient.KubeClient,
@@ -166,7 +166,8 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		libovsdbOvnSBClient,
 		&podRecorder,
 		false,
+		false,
 	)
 
-	return newDefaultNetworkControllerCommon(bnc, stopChan, wg, addressSetFactory)
+	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory)
 }
