@@ -26,9 +26,6 @@ kube-proxy
 should set TCP CLOSE_WAIT timeout
 \[Feature:ProxyTerminatingEndpoints\]
 
-# not implemented - OVN doesn't support time
-should have session affinity timeout work
-
 # NOT IMPLEMENTED; SEE DISCUSSION IN https://github.com/ovn-org/ovn-kubernetes/pull/1225
 named port.+\[Feature:NetworkPolicy\]
 
