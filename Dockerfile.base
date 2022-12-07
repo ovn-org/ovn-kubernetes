@@ -13,7 +13,7 @@ RUN yum install -y  \
 	yum clean all
 
 ARG ovsver=2.17.0-62.el8fdp
-ARG ovnver=22.09.0-22.el8fdp
+ARG ovnver=22.09.0-25.el8fdp
 
 RUN \
     yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.17 = $ovsver" "python3-openvswitch2.17 = $ovsver" && \
