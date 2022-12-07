@@ -104,7 +104,7 @@ spec:
             counter=0
             until [ ! -z $(kubectl get csr/$(hostname) -o jsonpath='{.status.certificate}' 2>/dev/null) ]
             do
-              counter=$[counter+1]
+              counter=$((counter+1))
               sleep 1
               if [ $counter -gt 60 ];
               then
@@ -180,7 +180,7 @@ spec:
           counter=0
           until [ -f /etc/cni/net.d/10-ovn-kubernetes.conf ]
           do
-            counter=$[counter+1]
+            counter=$((counter+1))
             sleep 1
             if [ $counter -gt 300 ];
             then

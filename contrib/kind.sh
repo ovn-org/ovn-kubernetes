@@ -100,6 +100,7 @@ usage() {
     echo "                 [-ric | --run-in-container |"
     echo "                 [-cn | --cluster-name |"
     echo "                 [-ehp|--egress-ip-healthcheck-port <num>]"
+    echo "                 [-is | --ipsec]"
     echo "                 [-h]]"
     echo ""
     echo "-cf  | --config-file                Name of the KIND J2 configuration file."
@@ -143,6 +144,7 @@ usage() {
     echo "-cn  | --cluster-name               Configure the kind cluster's name"
     echo "-ric | --run-in-container           Configure the script to be run from a docker container, allowing it to still communicate with the kind controlplane" 
     echo "-ehp | --egress-ip-healthcheck-port TCP port used for gRPC session by egress IP node check. DEFAULT: 9107 (Use "0" for legacy dial to port 9)."
+    echo "-is  | --ipsec                      Enable IPsec encryption (spawns ovn-ipsec pods)"
     echo "--delete                      	    Delete current cluster"
     echo ""
 }
@@ -376,6 +378,11 @@ check_dependencies() {
     exit 1
   fi
 
+  if ! command_exists awk ; then
+    echo "Dependency not met: Command not found 'awk'"
+    exit 1
+  fi
+
   if ! command_exists j2 ; then
     if ! command_exists pip ; then
       echo "Dependency not met: 'j2' not installed and cannot install with 'pip'"
@@ -389,11 +396,23 @@ check_dependencies() {
   	  echo "Dependency not met: Neither docker nor podman found"
   	  exit 1
   fi
+}
 
-  if [ "${ENABLE_IPSEC}" == true ]; then
-      if ! command_exists openssl3 ; then
-        echo "Dependency not met: 'openssl3' not installed"
+OPENSSL=""
+set_openssl_binary() {
+  for s in openssl openssl3; do
+      if ! command_exists "${s}" ; then
+          continue
       fi
+      if [ "$(${s} version | awk -F '[ |.]' '{print $2}')" == "3" ]; then
+          OPENSSL="${s}"
+          echo "Found OpenSSL version 3 in binary ${OPENSSL}"
+          break
+      fi
+  done
+  if [ "${OPENSSL}" == "" ] ; then
+    echo "Dependency not met: Cannot find openssl version 3 (searched for openssl and openssl3)"
+    exit 1
   fi
 }
 
@@ -768,43 +787,53 @@ calculate_timeout() {
   echo ${timeout}
 }
 
-# install_ipsec will apply the IPsec DaemonSet, spawn the csr_signer in the background and wait for the DS to roll out.
-# Make sure to install the IPsec DaemonSet at the very end of the setup process.
+# install_ipsec will apply the IPsec DaemonSet, create a CA that can be used by the IPsec pods. It will then add it to
+# configmap -n ovn-kubernetes signer-ca. After that, it will monitor all CSRs that are pending and it will sign those
+# with the CA cert. After each iteration, it will check if the ovn-ipsec DaemonSet pods rolled out successfully.
+# Make sure to run this at the very end of the setup process.
 install_ipsec() {
-  pushd ${MANIFEST_OUTPUT_DIR}
+  pushd "${MANIFEST_OUTPUT_DIR}"
   run_kubectl apply -f ovn-ipsec.yaml
   popd
-  trap 'kill $(jobs -p)' EXIT SIGINT SIGTERM
-  csr_signer &
-  kubectl rollout status daemonset -n ovn-kubernetes ovn-ipsec --timeout 300s
-}
 
-# csr_signer will create a CA that can be used by the IPsec pods. It will then add it to configmap
-# -n ovn-kubernetes signer-ca. After that, it will monitor all CSRs that are pending and it will sign those with
-# the CA cert. To be run in the background while waiting for the IPsec pods to roll out and to be killed at
-# exit.
-csr_signer() {
+  # Create the CA (stored inside the signer-ca ConfigMap) that the IPsec pods use to sign their certificates
   ca_dir=$(mktemp -d)
-  pushd ${ca_dir}
-  openssl3 genrsa -out ca-bundle.key 4096
-  openssl3 req -x509 -new -nodes -key ca-bundle.key -sha256 -days 10240 -out ca-bundle.crt \
+  pushd "${ca_dir}"
+  ${OPENSSL} genrsa -out ca-bundle.key 4096
+  ${OPENSSL} req -x509 -new -nodes -key ca-bundle.key -sha256 -days 10240 -out ca-bundle.crt \
       -subj "/C=CA/ST=Arctica/L=Northpole/O=Acme Inc/OU=DevOps/CN=www.example.com/emailAddress=dev@www.example.com"
   kubectl create configmap -n ovn-kubernetes signer-ca --from-file ca-bundle.crt
-  for i in {1..300}; do
-    sleep 1
+
+  # For ca. 5 minutes max (60 * 5 seconds + overhead) ...
+  success=false
+  for i in {1..60}; do
+    # ... try to get all CSRs and sign them
     csrs=$(oc get csr -o go-template='{{range .items}}{{if not .status}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}')
     for csr in ${csrs}; do
-      kubectl get csr ${csr} -o jsonpath='{.spec.request}' | base64 --decode | \
-          sed -n '/BEGIN CERTIFICATE REQUEST/,$p' > ${csr}
-      openssl3 x509 -req -in ${csr} -CA ca-bundle.crt -CAkey ca-bundle.key -CAcreateserial -out ${csr}.crt -days 3650  \
+      kubectl get csr "${csr}" -o jsonpath='{.spec.request}' | base64 --decode | \
+          sed -n '/BEGIN CERTIFICATE REQUEST/,$p' > "${csr}"
+      ${OPENSSL} x509 -req -in ${csr} -CA ca-bundle.crt -CAkey ca-bundle.key -CAcreateserial -out "${csr}.crt" -days 3650  \
           -sha256 -extensions v3_req -copy_extensions copy
-      kubectl get csr ${csr} -o json | \
-          jq '.status.certificate = "'$(base64 ${csr}.crt | tr -d '\n')'"' | \
+      kubectl get csr "${csr}" -o json | \
+          jq '.status.certificate = "'$(base64 "${csr}.crt" | tr -d '\n')'"' | \
           kubectl replace --raw /apis/certificates.k8s.io/v1/certificatesigningrequests/${csr}/status -f -
     done
+
+    # ... and then check if the ovn-ipsec DaemonSet rolled out completely (wait for 5 seconds)
+    if kubectl rollout status daemonset -n ovn-kubernetes ovn-ipsec --timeout 5s; then
+        echo "All IPsec pods rolled out successfully"
+        success=true
+        break
+    fi
+    echo "IPsec pods did not roll out successfully yet"
   done
   popd
-  rm -Rf ${ca_dir}
+  rm -Rf "${ca_dir}"
+
+  if ! ${success}; then
+      echo "IPsec pods did not roll out successfully"
+      exit 1
+  fi
 }
 
 docker_create_second_interface() {
@@ -848,6 +877,9 @@ check_dependencies
 parse_args "$@"
 set_default_params
 print_params
+if [ "${ENABLE_IPSEC}" == true ]; then
+  set_openssl_binary
+fi
 
 set -euxo pipefail
 check_ipv6
