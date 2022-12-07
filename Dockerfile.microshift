@@ -26,11 +26,5 @@ USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
-RUN export ovsver=$(cat /ovs-version) && \
-	export ovnver=$(cat /ovn-version) && \
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.17 = $ovsver" "python3-openvswitch2.17 = $ovsver" && \
-        yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn22.09 = $ovnver" "ovn22.09-central = $ovnver" "ovn22.09-host = $ovnver" && \
-        yum clean all && rm -rf /var/cache/*
-
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-k8s-cni-overlay /usr/libexec/cni/
