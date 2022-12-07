@@ -64,7 +64,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 	})
 
 	ginkgo.Context("when iterating address sets", func() {
-		ginkgo.It("calls the iterator function for each address set with the given prefix", func() {
+		ginkgo.It("calls the iterator function for each address set", func() {
 			app.Action = func(ctx *cli.Context) error {
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
@@ -91,33 +91,17 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 
 				_, err = config.InitConfig(ctx, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				namespaces := []testAddressSetName{
-					{
-						namespace: "ns1",
-						suffix:    []string{"foo", "bar"},
-					},
-					{
-						namespace: "ns2",
-						suffix:    []string{"test", "test2"},
-					},
-					{
-						namespace: "ns3",
-					},
+				namespaces := map[string]bool{
+					"ns1.foo.bar":    true,
+					"ns2.test.test2": true,
+					"ns3":            true,
 				}
-
-				err = asFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) error {
-					found := false
-					for _, n := range namespaces {
-						name := n.makeNames()
-						if addrSetName == name {
-							found = true
-							gomega.Expect(namespaceName).To(gomega.Equal(n.namespace))
-						}
-					}
-					gomega.Expect(found).To(gomega.BeTrue())
+				err = asFactory.ProcessEachAddressSet(func(hashedName, addrSetName string) error {
+					gomega.Expect(namespaces[addrSetName]).To(gomega.BeTrue())
+					delete(namespaces, addrSetName)
 					return nil
 				})
+				gomega.Expect(len(namespaces)).To(gomega.Equal(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				return nil
 			}

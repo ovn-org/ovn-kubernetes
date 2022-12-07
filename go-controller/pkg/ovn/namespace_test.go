@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"context"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"net"
 	"sync"
 
@@ -88,6 +89,44 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 	})
 
 	ginkgo.Context("on startup", func() {
+		ginkgo.It("only cleans up address sets owned by namespace", func() {
+			namespace1 := newNamespace(namespaceName)
+			// namespace-owned address set for existing namespace, should stay
+			fakeOvn.asf.NewAddressSet(namespaceName, []net.IP{net.ParseIP("1.1.1.1")})
+			// namespace-owned address set for stale namespace, should be deleted
+			fakeOvn.asf.NewAddressSet("namespace2", []net.IP{net.ParseIP("1.1.1.2")})
+			// netpol-owned address set for existing netpol, should stay
+			fakeOvn.asf.NewAddressSet("namespace1.netpol1.egress.0", []net.IP{net.ParseIP("1.1.1.3")})
+			// egressQoS-owned address set, should stay
+			fakeOvn.asf.NewAddressSet(ovntypes.EgressQoSRulePrefix+"namespace", []net.IP{net.ParseIP("1.1.1.4")})
+			// hybridNode-owned address set, should stay
+			fakeOvn.asf.NewAddressSet(ovntypes.HybridRoutePolicyPrefix+"node", []net.IP{net.ParseIP("1.1.1.5")})
+			// egress firewall-owned address set, should stay
+			// needs exiting ACL to distinguish from namespace-owned
+			dnsAS, err := fakeOvn.asf.NewAddressSet("dnsname", []net.IP{net.ParseIP("1.1.1.6")})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			dnsHashName, _ := dnsAS.GetASHashNames()
+			egressFirewallACL := BuildACL(
+				"aclName",
+				1,
+				"ip4.dst == $"+dnsHashName,
+				nbdb.ACLActionAllow,
+				nil,
+				lportIngress,
+				map[string]string{egressFirewallACLExtIdKey: "egressfirewall1"},
+			)
+
+			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{NBData: []libovsdbtest.TestData{egressFirewallACL}})
+			err = fakeOvn.controller.syncNamespaces([]interface{}{namespace1})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName, []string{"1.1.1.1"})
+			fakeOvn.asf.EventuallyExpectNoAddressSet("namespace2")
+			fakeOvn.asf.ExpectAddressSetWithIPs("namespace1.netpol1.egress.0", []string{"1.1.1.3"})
+			fakeOvn.asf.ExpectAddressSetWithIPs(ovntypes.EgressQoSRulePrefix+"namespace", []string{"1.1.1.4"})
+			fakeOvn.asf.ExpectAddressSetWithIPs(ovntypes.HybridRoutePolicyPrefix+"node", []string{"1.1.1.5"})
+			fakeOvn.asf.ExpectAddressSetWithIPs("dnsname", []string{"1.1.1.6"})
+		})
 
 		ginkgo.It("reconciles an existing namespace with pods", func() {
 			namespaceT := *newNamespace(namespaceName)
