@@ -135,6 +135,8 @@ func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) (AddressSet, erro
 	return &ovnAddressSets{nbClient: asf.nbClient, name: name, ipv4: v4set, ipv6: v6set}, nil
 }
 
+// forEachAddressSet executes a do function on each address set found to have ExternalIDs["name"].
+// do function should take parameters: hashed addr set name, real name
 func forEachAddressSet(nbClient libovsdbclient.Client, do func(string, string) error) error {
 	p := func(addrSet *nbdb.AddressSet) bool {
 		_, exists := addrSet.ExternalIDs["name"]

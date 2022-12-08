@@ -70,16 +70,16 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 					NBData: []libovsdbtest.TestData{
 						&nbdb.AddressSet{
 							Name:        "1",
-							ExternalIDs: map[string]string{"name": "ns1.foo.bar"},
+							ExternalIDs: map[string]string{"name": "foo.bar"},
 						},
 						&nbdb.AddressSet{
 							Name:        "2",
-							ExternalIDs: map[string]string{"name": "ns2.test.test2"},
+							ExternalIDs: map[string]string{"name": "test.test2"},
 						},
 
 						&nbdb.AddressSet{
 							Name:        "3",
-							ExternalIDs: map[string]string{"name": "ns3"},
+							ExternalIDs: map[string]string{"name": "test3"},
 						},
 					},
 				}
@@ -91,17 +91,17 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 
 				_, err = config.InitConfig(ctx, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				namespaces := map[string]bool{
-					"ns1.foo.bar":    true,
-					"ns2.test.test2": true,
-					"ns3":            true,
+				expectedAddressSets := map[string]bool{
+					"foo.bar":    true,
+					"test.test2": true,
+					"test3":      true,
 				}
 				err = asFactory.ProcessEachAddressSet(func(hashedName, addrSetName string) error {
-					gomega.Expect(namespaces[addrSetName]).To(gomega.BeTrue())
-					delete(namespaces, addrSetName)
+					gomega.Expect(expectedAddressSets[addrSetName]).To(gomega.BeTrue())
+					delete(expectedAddressSets, addrSetName)
 					return nil
 				})
-				gomega.Expect(len(namespaces)).To(gomega.Equal(0))
+				gomega.Expect(len(expectedAddressSets)).To(gomega.Equal(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				return nil
 			}
