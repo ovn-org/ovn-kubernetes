@@ -730,7 +730,12 @@ func (oc *DefaultNetworkController) denyPGAddPorts(np *networkPolicy, portNamesT
 	// this lock guarantees that sharedPortGroup counters will be updated atomically
 	// with adding port to port group in db.
 	oc.sharedNetpolPortGroups.LockKey(pgKey)
-	defer oc.sharedNetpolPortGroups.UnlockKey(pgKey)
+	pgLocked := true
+	defer func() {
+		if pgLocked {
+			oc.sharedNetpolPortGroups.UnlockKey(pgKey)
+		}
+	}()
 	sharedPGs, ok := oc.sharedNetpolPortGroups.Load(pgKey)
 	if !ok {
 		// Port group doesn't exist
@@ -756,6 +761,10 @@ func (oc *DefaultNetworkController) denyPGAddPorts(np *networkPolicy, portNamesT
 		if err != nil {
 			return fmt.Errorf("unable to get add ports to %s port group ops: %v", egressDenyPGName, err)
 		}
+	} else {
+		// shared pg was updated and doesn't require db changes, no need to hold the lock
+		oc.sharedNetpolPortGroups.UnlockKey(pgKey)
+		pgLocked = false
 	}
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
@@ -785,7 +794,12 @@ func (oc *DefaultNetworkController) denyPGDeletePorts(np *networkPolicy, portNam
 		// this lock guarantees that sharedPortGroup counters will be updated atomically
 		// with adding port to port group in db.
 		oc.sharedNetpolPortGroups.LockKey(pgKey)
-		defer oc.sharedNetpolPortGroups.UnlockKey(pgKey)
+		pgLocked := true
+		defer func() {
+			if pgLocked {
+				oc.sharedNetpolPortGroups.UnlockKey(pgKey)
+			}
+		}()
 		sharedPGs, ok := oc.sharedNetpolPortGroups.Load(pgKey)
 		if !ok {
 			// Port group doesn't exist, nothing to clean up
@@ -810,6 +824,10 @@ func (oc *DefaultNetworkController) denyPGDeletePorts(np *networkPolicy, portNam
 				if err != nil {
 					return fmt.Errorf("unable to get del ports from %s port group ops: %v", egressDenyPGName, err)
 				}
+			} else {
+				// shared pg was updated and doesn't require db changes, no need to hold the lock
+				oc.sharedNetpolPortGroups.UnlockKey(pgKey)
+				pgLocked = false
 			}
 		}
 	}
