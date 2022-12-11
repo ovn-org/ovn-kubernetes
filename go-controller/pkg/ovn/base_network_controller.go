@@ -190,23 +190,14 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *kapi.Node, hos
 		Networks: lrpNetworks,
 	}
 	logicalRouter := nbdb.LogicalRouter{Name: logicalRouterName}
-
-	err = libovsdbops.CreateOrUpdateLogicalRouterPorts(bnc.nbClient, &logicalRouter,
-		[]*nbdb.LogicalRouterPort{&logicalRouterPort}, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
-	if err != nil {
-		klog.Errorf("Failed to add logical router port %+v to router %s: %v", logicalRouterPort, logicalRouterName, err)
-		return err
-	}
-
-	gatewayChassisName := lrpName + "-" + chassisID
 	gatewayChassis := nbdb.GatewayChassis{
-		Name:        gatewayChassisName,
+		Name:        lrpName + "-" + chassisID,
 		ChassisName: chassisID,
 		Priority:    1,
 	}
 
-	err = libovsdbops.CreateOrUpdateGatewayChassis(bnc.nbClient, &logicalRouterPort, &gatewayChassis,
-		&gatewayChassis.Name, &gatewayChassis.ChassisName, &gatewayChassis.Priority)
+	err = libovsdbops.CreateOrUpdateLogicalRouterPort(bnc.nbClient, &logicalRouter, &logicalRouterPort,
+		&gatewayChassis, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
 	if err != nil {
 		klog.Errorf("Failed to add gateway chassis %s to logical router port %s, error: %v", chassisID, lrpName, err)
 		return err
@@ -233,12 +224,10 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	}
 
 	var v4Gateway, v6Gateway net.IP
-	logicalRouterPortNetwork := []string{}
 	logicalSwitch.OtherConfig = map[string]string{}
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
-		logicalRouterPortNetwork = append(logicalRouterPortNetwork, gwIfAddr.String())
 
 		if utilnet.IsIPv6CIDR(hostSubnet) {
 			v6Gateway = gwIfAddr.IP
@@ -261,21 +250,6 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 		logicalSwitch.LoadBalancerGroup = []string{loadBalancerGroupUUID}
 	}
 
-	logicalRouterPortName := types.RouterToSwitchPrefix + switchName
-	logicalRouterPort := nbdb.LogicalRouterPort{
-		Name:     logicalRouterPortName,
-		MAC:      nodeLRPMAC.String(),
-		Networks: logicalRouterPortNetwork,
-	}
-	logicalRouterName := types.OVNClusterRouter
-	logicalRouter := nbdb.LogicalRouter{Name: logicalRouterName}
-
-	err := libovsdbops.CreateOrUpdateLogicalRouterPorts(bnc.nbClient, &logicalRouter,
-		[]*nbdb.LogicalRouterPort{&logicalRouterPort}, &logicalRouterPort.Networks, &logicalRouterPort.MAC)
-	if err != nil {
-		return fmt.Errorf("failed to add logical router port %+v to router %s: %v", logicalRouterPort, logicalRouterName, err)
-	}
-
 	// If supported, enable IGMP/MLD snooping and querier on the node.
 	if bnc.multicastSupport {
 		logicalSwitch.OtherConfig["mcast_snoop"] = "true"
@@ -296,7 +270,7 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 		}
 	}
 
-	err = libovsdbops.CreateOrUpdateLogicalSwitch(bnc.nbClient, &logicalSwitch, &logicalSwitch.OtherConfig,
+	err := libovsdbops.CreateOrUpdateLogicalSwitch(bnc.nbClient, &logicalSwitch, &logicalSwitch.OtherConfig,
 		&logicalSwitch.LoadBalancerGroup)
 	if err != nil {
 		return fmt.Errorf("failed to add logical switch %+v: %v", logicalSwitch, err)

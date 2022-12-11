@@ -195,8 +195,8 @@ func (oc *DefaultNetworkController) SetupMaster(existingNodeNames []string) erro
 		Networks: gwLRPNetworks,
 	}
 
-	err = libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, logicalRouter,
-		[]*nbdb.LogicalRouterPort{&logicalRouterPort}, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
+	err = libovsdbops.CreateOrUpdateLogicalRouterPort(oc.nbClient, logicalRouter,
+		&logicalRouterPort, nil, &logicalRouterPort.MAC, &logicalRouterPort.Networks)
 	if err != nil {
 		return fmt.Errorf("failed to add logical router port %+v on router %s: %v", logicalRouterPort, logicalRouter.Name, err)
 	}

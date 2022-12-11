@@ -194,8 +194,8 @@ func (oc *DefaultNetworkController) gatewayInit(nodeName string, clusterIPSubnet
 		Options:  options,
 	}
 
-	err = libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, &logicalRouter,
-		[]*nbdb.LogicalRouterPort{&logicalRouterPort}, &logicalRouterPort.MAC, &logicalRouterPort.Networks,
+	err = libovsdbops.CreateOrUpdateLogicalRouterPort(oc.nbClient, &logicalRouter,
+		&logicalRouterPort, nil, &logicalRouterPort.MAC, &logicalRouterPort.Networks,
 		&logicalRouterPort.Options)
 	if err != nil {
 		return fmt.Errorf("failed to create port %+v on router %+v: %v", logicalRouterPort, logicalRouter, err)
@@ -451,8 +451,8 @@ func (oc *DefaultNetworkController) addExternalSwitch(prefix, interfaceID, nodeN
 	}
 	logicalRouter := nbdb.LogicalRouter{Name: gatewayRouter}
 
-	err := libovsdbops.CreateOrUpdateLogicalRouterPorts(oc.nbClient, &logicalRouter,
-		[]*nbdb.LogicalRouterPort{&externalLogicalRouterPort}, &externalLogicalRouterPort.MAC,
+	err := libovsdbops.CreateOrUpdateLogicalRouterPort(oc.nbClient, &logicalRouter,
+		&externalLogicalRouterPort, nil, &externalLogicalRouterPort.MAC,
 		&externalLogicalRouterPort.Networks, &externalLogicalRouterPort.ExternalIDs)
 	if err != nil {
 		return fmt.Errorf("failed to add logical router port %+v to router %s: %v", externalLogicalRouterPort, gatewayRouter, err)
