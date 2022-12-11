@@ -75,6 +75,25 @@ func CreateOrUpdatePortGroups(nbClient libovsdbclient.Client, pgs ...*nbdb.PortG
 	return err
 }
 
+// GetPortGroup looks up a port group from the cache
+func GetPortGroup(nbClient libovsdbclient.Client, pg *nbdb.PortGroup) (*nbdb.PortGroup, error) {
+	found := []*nbdb.PortGroup{}
+	opModel := operationModel{
+		Model:          pg,
+		ExistingResult: &found,
+		ErrNotFound:    true,
+		BulkOp:         false,
+	}
+
+	m := newModelClient(nbClient)
+	err := m.Lookup(opModel)
+	if err != nil {
+		return nil, err
+	}
+
+	return found[0], nil
+}
+
 func AddPortsToPortGroupOps(nbClient libovsdbclient.Client, ops []libovsdb.Operation, name string, ports ...string) ([]libovsdb.Operation, error) {
 	if len(ports) == 0 {
 		return ops, nil
