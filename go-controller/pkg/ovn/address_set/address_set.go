@@ -24,7 +24,7 @@ const (
 	ipv6AddressSetSuffix = "_v6"
 )
 
-type AddressSetIterFunc func(hashedName, namespace, suffix string) error
+type AddressSetIterFunc func(hashedName, name string) error
 type AddressSetDoFunc func(as AddressSet) error
 
 // AddressSetFactory is an interface for managing address set objects
@@ -135,7 +135,9 @@ func (asf *ovnAddressSetFactory) EnsureAddressSet(name string) (AddressSet, erro
 	return &ovnAddressSets{nbClient: asf.nbClient, name: name, ipv4: v4set, ipv6: v6set}, nil
 }
 
-func forEachAddressSet(nbClient libovsdbclient.Client, do func(string) error) error {
+// forEachAddressSet executes a do function on each address set found to have ExternalIDs["name"].
+// do function should take parameters: hashed addr set name, real name
+func forEachAddressSet(nbClient libovsdbclient.Client, do func(string, string) error) error {
 	p := func(addrSet *nbdb.AddressSet) bool {
 		_, exists := addrSet.ExternalIDs["name"]
 		return exists
@@ -147,7 +149,7 @@ func forEachAddressSet(nbClient libovsdbclient.Client, do func(string) error) er
 
 	var errors []error
 	for _, addrSet := range addrSetList {
-		if err := do(addrSet.ExternalIDs["name"]); err != nil {
+		if err := do(addrSet.Name, addrSet.ExternalIDs["name"]); err != nil {
 			errors = append(errors, err)
 		}
 	}
@@ -159,12 +161,10 @@ func forEachAddressSet(nbClient libovsdbclient.Client, do func(string) error) er
 	return nil
 }
 
-// ProcessEachAddressSet will pass the unhashed address set name, namespace name
-// and the first suffix in the name to the 'iteratorFn' for every address_set in
-// OVN. (Unhashed address set names are of the form namespaceName[.suffix1.suffix2. .suffixN])
+// ProcessEachAddressSet will pass the hashed and unhashed address set name to iteratorFn for every address set.
 func (asf *ovnAddressSetFactory) ProcessEachAddressSet(iteratorFn AddressSetIterFunc) error {
 	processedAddressSets := sets.String{}
-	return forEachAddressSet(asf.nbClient, func(name string) error {
+	return forEachAddressSet(asf.nbClient, func(hashedName, name string) error {
 		// Remove the suffix from the address set name and normalize
 		addrSetName := truncateSuffixFromAddressSet(name)
 		if processedAddressSets.Has(addrSetName) {
@@ -174,13 +174,7 @@ func (asf *ovnAddressSetFactory) ProcessEachAddressSet(iteratorFn AddressSetIter
 			return nil
 		}
 		processedAddressSets.Insert(addrSetName)
-		names := strings.Split(addrSetName, ".")
-		addrSetNamespace := names[0]
-		nameSuffix := ""
-		if len(names) >= 2 {
-			nameSuffix = names[1]
-		}
-		return iteratorFn(addrSetName, addrSetNamespace, nameSuffix)
+		return iteratorFn(hashedName, addrSetName)
 	})
 }
 

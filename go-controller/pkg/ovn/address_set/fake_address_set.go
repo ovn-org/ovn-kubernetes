@@ -3,14 +3,12 @@ package addressset
 import (
 	"k8s.io/klog/v2"
 	"net"
-	"strings"
 	"sync"
 	"sync/atomic"
 
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 
-	"k8s.io/apimachinery/pkg/util/sets"
 	utilnet "k8s.io/utils/net"
 
 	"github.com/onsi/gomega"
@@ -73,21 +71,17 @@ func (f *FakeAddressSetFactory) EnsureAddressSet(name string) (AddressSet, error
 
 func (f *FakeAddressSetFactory) ProcessEachAddressSet(iteratorFn AddressSetIterFunc) error {
 	f.Lock()
-	defer f.Unlock()
-	asNames := sets.String{}
+	asNames := map[string]string{}
 	for _, set := range f.sets {
 		asName := truncateSuffixFromAddressSet(set.getName())
-		if asNames.Has(asName) {
+		if _, ok := asNames[asName]; ok {
 			continue
 		}
-		asNames.Insert(asName)
-		parts := strings.Split(asName, ".")
-		addrSetNamespace := parts[0]
-		nameSuffix := ""
-		if len(parts) >= 2 {
-			nameSuffix = parts[1]
-		}
-		if err := iteratorFn(asName, addrSetNamespace, nameSuffix); err != nil {
+		asNames[asName] = set.hashName
+	}
+	f.Unlock()
+	for asName, hashName := range asNames {
+		if err := iteratorFn(hashName, asName); err != nil {
 			return err
 		}
 	}

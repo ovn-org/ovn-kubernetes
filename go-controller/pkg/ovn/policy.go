@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -300,15 +301,29 @@ func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interf
 	}
 
 	stalePGs := []string{}
-	err := oc.addressSetFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, policyName string) error {
-		if policyName != "" && !expectedPolicies[namespaceName][policyName] {
+	err := oc.addressSetFactory.ProcessEachAddressSet(func(_, addrSetName string) error {
+		// netpol name has format fmt.Sprintf("%s.%s.%s.%d", gp.policyNamespace, gp.policyName, direction, gp.idx)
+		s := strings.Split(addrSetName, ".")
+		sLen := len(s)
+		// priority should be a number
+		_, numErr := strconv.Atoi(s[sLen-1])
+		if sLen < 4 || (s[sLen-2] != "ingress" && s[sLen-2] != "egress") || numErr != nil {
+			// address set name is not formatted by network policy
+			return nil
+		}
+
+		// address set is owned by network policy
+		// namespace doesn't have dots
+		namespaceName := s[0]
+		// policyName may have dots, join in that case
+		policyName := strings.Join(s[1:sLen-2], ".")
+		if !expectedPolicies[namespaceName][policyName] {
 			// policy doesn't exist on k8s. Delete the port group
 			portGroupName := fmt.Sprintf("%s_%s", namespaceName, policyName)
 			hashedLocalPortGroup := hashedPortGroup(portGroupName)
 			stalePGs = append(stalePGs, hashedLocalPortGroup)
 			// delete the address sets for this old policy from OVN
 			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
-				klog.Errorf(err.Error())
 				return err
 			}
 		}

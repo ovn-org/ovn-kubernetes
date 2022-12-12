@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -67,13 +70,43 @@ func (oc *DefaultNetworkController) syncNamespaces(namespaces []interface{}) err
 		expectedNs[ns.Name] = true
 	}
 
-	err := oc.addressSetFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) error {
-		if nameSuffix == "" && !expectedNs[namespaceName] {
-			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
-				klog.Errorf(err.Error())
+	err := oc.addressSetFactory.ProcessEachAddressSet(func(hashedName, addrSetName string) error {
+		// filter out address sets owned by HybridRoutePolicy and EgressQoS by prefix.
+		// network policy-owned address set would have a dot in the address set name due to the format
+		// (namespace can't have dots in its name, and their address sets too).
+		// the only left address sets may be owned by egress firewall dns or namespace
+		if strings.HasPrefix(addrSetName, types.HybridRoutePolicyPrefix) ||
+			strings.HasPrefix(addrSetName, types.EgressQoSRulePrefix) ||
+			strings.Contains(addrSetName, ".") {
+			return nil
+		}
+
+		// make sure address set is not owned by egress firewall dns
+		// find ACLs referencing given address set (by hashName)
+		aclPred := func(acl *nbdb.ACL) bool {
+			return strings.Contains(acl.Match, "$"+hashedName)
+		}
+		acls, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, aclPred)
+		if err != nil {
+			return fmt.Errorf("failed to find referencing acls for address set %s: %v", addrSetName, err)
+		}
+		if len(acls) > 0 {
+			// if given address set is owned by egress firewall, all ACLs will be owned by the same object
+			acl := acls[0]
+			// check if egress firewall dns is the owner
+			// the only address set that may be referenced in egress firewall destination is dns address set
+			if acl.ExternalIDs[egressFirewallACLExtIdKey] != "" && strings.Contains(acl.Match, ".dst == $"+hashedName) {
+				// address set is owned by egress firewall, skip
+				return nil
+			}
+		}
+		// address set is owned by namespace, namespace name = address set name
+		if !expectedNs[addrSetName] {
+			if err = oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
 				return err
 			}
 		}
+
 		return nil
 	})
 	if err != nil {
