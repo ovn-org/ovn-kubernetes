@@ -1139,7 +1139,13 @@ func (oc *DefaultNetworkController) createNetworkPolicy(policy *knet.NetworkPoli
 				// For each rule that contains both peer namespace selector and
 				// peer pod selector, we create a watcher for each matching namespace
 				// that populates the addressSet
-				err = oc.addPeerNamespaceAndPodHandler(handler.namespaceSelector, handler.podSelector, handler.gress, np)
+				nsSel, _ := metav1.LabelSelectorAsSelector(handler.namespaceSelector)
+				if nsSel.Empty() {
+					// namespace is not limited by a selector, just use pod selector with empty namespace
+					err = oc.addPeerPodHandler(handler.podSelector, handler.gress, np, "")
+				} else {
+					err = oc.addPeerNamespaceAndPodHandler(handler.namespaceSelector, handler.podSelector, handler.gress, np)
+				}
 			} else if handler.namespaceSelector != nil {
 				// For each peer namespace selector, we create a watcher that
 				// populates ingress.peerAddressSets
@@ -1147,7 +1153,7 @@ func (oc *DefaultNetworkController) createNetworkPolicy(policy *knet.NetworkPoli
 			} else if handler.podSelector != nil {
 				// For each peer pod selector, we create a watcher that
 				// populates the addressSet
-				err = oc.addPeerPodHandler(handler.podSelector, handler.gress, np)
+				err = oc.addPeerPodHandler(handler.podSelector, handler.gress, np, np.namespace)
 			}
 			if err != nil {
 				return fmt.Errorf("failed to start peer handler: %v", err)
@@ -1422,7 +1428,7 @@ type NetworkPolicyExtraParameters struct {
 // PeerPodSelectorType uses handlePeerPodSelectorAddUpdate on Add and Update,
 // and handlePeerPodSelectorDelete on Delete.
 func (oc *DefaultNetworkController) addPeerPodHandler(podSelector *metav1.LabelSelector,
-	gp *gressPolicy, np *networkPolicy) error {
+	gp *gressPolicy, np *networkPolicy, namespace string) error {
 
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	sel, _ := metav1.LabelSelectorAsSelector(podSelector)
@@ -1442,7 +1448,7 @@ func (oc *DefaultNetworkController) addPeerPodHandler(podSelector *metav1.LabelS
 			gp: gp,
 		})
 
-	podHandler, err := retryPeerPods.WatchResourceFiltered(np.namespace, sel)
+	podHandler, err := retryPeerPods.WatchResourceFiltered(namespace, sel)
 	if err != nil {
 		klog.Errorf("Failed WatchResource for addPeerPodHandler: %v", err)
 		return err
