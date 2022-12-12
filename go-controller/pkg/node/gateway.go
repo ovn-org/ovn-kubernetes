@@ -372,6 +372,17 @@ type bridgeConfiguration struct {
 	ofPortHost  string
 }
 
+// updateInterfaceIPAddresses sets and returns the bridge's current ips
+func (b *bridgeConfiguration) updateInterfaceIPAddresses() ([]*net.IPNet, error) {
+	b.Lock()
+	defer b.Unlock()
+	ifAddrs, err := getNetworkInterfaceIPAddresses(b.bridgeName)
+	if err == nil {
+		b.ips = ifAddrs
+	}
+	return ifAddrs, err
+}
+
 func bridgeForInterface(intfName, nodeName, physicalNetworkName string, gwIPs []*net.IPNet) (*bridgeConfiguration, error) {
 	res := bridgeConfiguration{}
 	gwIntf := intfName

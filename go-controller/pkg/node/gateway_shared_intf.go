@@ -101,6 +101,18 @@ type cidrAndFlags struct {
 	flags int
 }
 
+func (npw *nodePortWatcher) updateGatewayIPs(addressManager *addressManager) {
+	// Get Physical IPs of Node, Can be IPV4 IPV6 or both
+	addressManager.gatewayBridge.Lock()
+	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(addressManager.gatewayBridge.ips)
+	addressManager.gatewayBridge.Unlock()
+
+	npw.gatewayIPLock.Lock()
+	defer npw.gatewayIPLock.Unlock()
+	npw.gatewayIPv4 = gatewayIPv4
+	npw.gatewayIPv6 = gatewayIPv6
+}
+
 // updateServiceFlowCache handles managing breth0 gateway flows for ingress traffic towards kubernetes services
 // (nodeport, external, ingress). By default incoming traffic into the node is steered directly into OVN (case3 below).
 //
@@ -522,18 +534,6 @@ func serviceUpdateNotNeeded(old, new *kapi.Service) bool {
 		(new.Spec.InternalTrafficPolicy != nil && old.Spec.InternalTrafficPolicy != nil &&
 			reflect.DeepEqual(*new.Spec.InternalTrafficPolicy, *old.Spec.InternalTrafficPolicy)) &&
 		!util.EgressSVCHostChanged(old, new)
-}
-
-func updateNodePortWatcher(nodePortWatcher *nodePortWatcher, addressManager *addressManager) {
-	// Get Physical IPs of Node, Can be IPV4 IPV6 or both
-	addressManager.gatewayBridge.Lock()
-	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(addressManager.gatewayBridge.ips)
-	addressManager.gatewayBridge.Unlock()
-
-	nodePortWatcher.gatewayIPLock.Lock()
-	defer nodePortWatcher.gatewayIPLock.Unlock()
-	nodePortWatcher.gatewayIPv4 = gatewayIPv4
-	nodePortWatcher.gatewayIPv6 = gatewayIPv6
 }
 
 // AddService handles configuring shared gateway bridge flows to steer External IP, Node Port, Ingress LB traffic into OVN
@@ -1567,7 +1567,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 				klog.Errorf("Failed to re-generate gateway flows after address change: %v", err)
 			}
 			npw, _ := gw.nodePortWatcher.(*nodePortWatcher)
-			updateNodePortWatcher(npw, gw.nodeIPManager)
+			npw.updateGatewayIPs(gw.nodeIPManager)
 			gw.openflowManager.requestFlowSync()
 		}
 

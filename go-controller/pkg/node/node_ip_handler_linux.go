@@ -196,15 +196,11 @@ func (c *addressManager) updateNodeAddressAnnotations() {
 	}
 
 	// get updated interface IP addresses for the gateway bridge
-	c.gatewayBridge.Lock()
-	ifAddrs, err := getNetworkInterfaceIPAddresses(c.gatewayBridge.bridgeName)
+	ifAddrs, err := c.gatewayBridge.updateInterfaceIPAddresses()
 	if err != nil {
 		klog.Errorf("Failed to get gateway bridge IP addresses: %v", err)
-		c.gatewayBridge.Unlock()
 		return
 	}
-	c.gatewayBridge.ips = ifAddrs
-	c.gatewayBridge.Unlock()
 
 	// update k8s.ovn.org/host-addresses
 	if err := util.SetNodeHostAddresses(c.nodeAnnotator, c.addresses); err != nil {

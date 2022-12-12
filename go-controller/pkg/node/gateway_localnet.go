@@ -101,7 +101,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 			}
 			// update gateway IPs for service openflows programmed by nodePortWatcher interface
 			npw, _ := gw.nodePortWatcher.(*nodePortWatcher)
-			updateNodePortWatcher(npw, gw.nodeIPManager)
+			npw.updateGatewayIPs(gw.nodeIPManager)
 			gw.openflowManager.requestFlowSync()
 		}
 
