@@ -64,22 +64,22 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 	})
 
 	ginkgo.Context("when iterating address sets", func() {
-		ginkgo.It("calls the iterator function for each address set with the given prefix", func() {
+		ginkgo.It("calls the iterator function for each address set", func() {
 			app.Action = func(ctx *cli.Context) error {
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						&nbdb.AddressSet{
 							Name:        "1",
-							ExternalIDs: map[string]string{"name": "ns1.foo.bar"},
+							ExternalIDs: map[string]string{"name": "foo.bar"},
 						},
 						&nbdb.AddressSet{
 							Name:        "2",
-							ExternalIDs: map[string]string{"name": "ns2.test.test2"},
+							ExternalIDs: map[string]string{"name": "test.test2"},
 						},
 
 						&nbdb.AddressSet{
 							Name:        "3",
-							ExternalIDs: map[string]string{"name": "ns3"},
+							ExternalIDs: map[string]string{"name": "test3"},
 						},
 					},
 				}
@@ -91,33 +91,17 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 
 				_, err = config.InitConfig(ctx, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				namespaces := []testAddressSetName{
-					{
-						namespace: "ns1",
-						suffix:    []string{"foo", "bar"},
-					},
-					{
-						namespace: "ns2",
-						suffix:    []string{"test", "test2"},
-					},
-					{
-						namespace: "ns3",
-					},
+				expectedAddressSets := map[string]bool{
+					"foo.bar":    true,
+					"test.test2": true,
+					"test3":      true,
 				}
-
-				err = asFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) error {
-					found := false
-					for _, n := range namespaces {
-						name := n.makeNames()
-						if addrSetName == name {
-							found = true
-							gomega.Expect(namespaceName).To(gomega.Equal(n.namespace))
-						}
-					}
-					gomega.Expect(found).To(gomega.BeTrue())
+				err = asFactory.ProcessEachAddressSet(func(hashedName, addrSetName string) error {
+					gomega.Expect(expectedAddressSets[addrSetName]).To(gomega.BeTrue())
+					delete(expectedAddressSets, addrSetName)
 					return nil
 				})
+				gomega.Expect(len(expectedAddressSets)).To(gomega.Equal(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				return nil
 			}

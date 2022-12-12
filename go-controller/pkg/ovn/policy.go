@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -300,15 +301,29 @@ func (oc *DefaultNetworkController) syncNetworkPolicies(networkPolicies []interf
 	}
 
 	stalePGs := []string{}
-	err := oc.addressSetFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, policyName string) error {
-		if policyName != "" && !expectedPolicies[namespaceName][policyName] {
+	err := oc.addressSetFactory.ProcessEachAddressSet(func(_, addrSetName string) error {
+		// netpol name has format fmt.Sprintf("%s.%s.%s.%d", gp.policyNamespace, gp.policyName, direction, gp.idx)
+		s := strings.Split(addrSetName, ".")
+		sLen := len(s)
+		// priority should be a number
+		_, numErr := strconv.Atoi(s[sLen-1])
+		if sLen < 4 || (s[sLen-2] != "ingress" && s[sLen-2] != "egress") || numErr != nil {
+			// address set name is not formatted by network policy
+			return nil
+		}
+
+		// address set is owned by network policy
+		// namespace doesn't have dots
+		namespaceName := s[0]
+		// policyName may have dots, join in that case
+		policyName := strings.Join(s[1:sLen-2], ".")
+		if !expectedPolicies[namespaceName][policyName] {
 			// policy doesn't exist on k8s. Delete the port group
 			portGroupName := fmt.Sprintf("%s_%s", namespaceName, policyName)
 			hashedLocalPortGroup := hashedPortGroup(portGroupName)
 			stalePGs = append(stalePGs, hashedLocalPortGroup)
 			// delete the address sets for this old policy from OVN
 			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
-				klog.Errorf(err.Error())
 				return err
 			}
 		}
@@ -723,6 +738,7 @@ func (oc *DefaultNetworkController) getExistingLocalPolicyPorts(np *networkPolic
 
 // denyPGAddPorts adds ports to default deny port groups.
 // It also can take existing ops e.g. to add port to network policy port group and transact it.
+// It only adds new ports that do not already exist in the deny port groups.
 func (oc *DefaultNetworkController) denyPGAddPorts(np *networkPolicy, portNamesToUUIDs map[string]string, ops []ovsdb.Operation) error {
 	var err error
 	ingressDenyPGName := defaultDenyPortGroupName(np.namespace, ingressDefaultDenySuffix)
@@ -838,9 +854,11 @@ func (oc *DefaultNetworkController) handleLocalPodSelectorAddFunc(np *networkPol
 		var err error
 		// add pods to policy port group
 		var ops []ovsdb.Operation
-		ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, nil, np.portGroupName, policyPortUUIDs...)
-		if err != nil {
-			return fmt.Errorf("unable to get ops to add new pod to policy port group: %v", err)
+		if !PortGroupHasPorts(oc.nbClient, np.portGroupName, policyPortUUIDs) {
+			ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, nil, np.portGroupName, policyPortUUIDs...)
+			if err != nil {
+				return fmt.Errorf("unable to get ops to add new pod to policy port group: %v", err)
+			}
 		}
 		// add pods to default deny port group
 		// make sure to only pass newly added pods
@@ -1139,7 +1157,13 @@ func (oc *DefaultNetworkController) createNetworkPolicy(policy *knet.NetworkPoli
 				// For each rule that contains both peer namespace selector and
 				// peer pod selector, we create a watcher for each matching namespace
 				// that populates the addressSet
-				err = oc.addPeerNamespaceAndPodHandler(handler.namespaceSelector, handler.podSelector, handler.gress, np)
+				nsSel, _ := metav1.LabelSelectorAsSelector(handler.namespaceSelector)
+				if nsSel.Empty() {
+					// namespace is not limited by a selector, just use pod selector with empty namespace
+					err = oc.addPeerPodHandler(handler.podSelector, handler.gress, np, "")
+				} else {
+					err = oc.addPeerNamespaceAndPodHandler(handler.namespaceSelector, handler.podSelector, handler.gress, np)
+				}
 			} else if handler.namespaceSelector != nil {
 				// For each peer namespace selector, we create a watcher that
 				// populates ingress.peerAddressSets
@@ -1147,7 +1171,7 @@ func (oc *DefaultNetworkController) createNetworkPolicy(policy *knet.NetworkPoli
 			} else if handler.podSelector != nil {
 				// For each peer pod selector, we create a watcher that
 				// populates the addressSet
-				err = oc.addPeerPodHandler(handler.podSelector, handler.gress, np)
+				err = oc.addPeerPodHandler(handler.podSelector, handler.gress, np, np.namespace)
 			}
 			if err != nil {
 				return fmt.Errorf("failed to start peer handler: %v", err)
@@ -1422,7 +1446,7 @@ type NetworkPolicyExtraParameters struct {
 // PeerPodSelectorType uses handlePeerPodSelectorAddUpdate on Add and Update,
 // and handlePeerPodSelectorDelete on Delete.
 func (oc *DefaultNetworkController) addPeerPodHandler(podSelector *metav1.LabelSelector,
-	gp *gressPolicy, np *networkPolicy) error {
+	gp *gressPolicy, np *networkPolicy, namespace string) error {
 
 	// NetworkPolicy is validated by the apiserver; this can't fail.
 	sel, _ := metav1.LabelSelectorAsSelector(podSelector)
@@ -1442,7 +1466,7 @@ func (oc *DefaultNetworkController) addPeerPodHandler(podSelector *metav1.LabelS
 			gp: gp,
 		})
 
-	podHandler, err := retryPeerPods.WatchResourceFiltered(np.namespace, sel)
+	podHandler, err := retryPeerPods.WatchResourceFiltered(namespace, sel)
 	if err != nil {
 		klog.Errorf("Failed WatchResource for addPeerPodHandler: %v", err)
 		return err
@@ -1703,4 +1727,17 @@ func getPolicyKey(policy *knet.NetworkPolicy) string {
 
 func (np *networkPolicy) getKey() string {
 	return fmt.Sprintf("%v/%v", np.namespace, np.name)
+}
+
+// PortGroupHasPorts returns true if a port group contains all given ports
+func PortGroupHasPorts(nbClient libovsdbclient.Client, pgName string, portUUIDs []string) bool {
+	pg := &nbdb.PortGroup{
+		Name: pgName,
+	}
+	pg, err := libovsdbops.GetPortGroup(nbClient, pg)
+	if err != nil {
+		return false
+	}
+
+	return sets.NewString(pg.Ports...).HasAll(portUUIDs...)
 }

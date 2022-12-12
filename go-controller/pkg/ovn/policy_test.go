@@ -3,6 +3,7 @@ package ovn
 import (
 	"context"
 	"fmt"
+	"net"
 	"sort"
 	"strconv"
 	"strings"
@@ -513,6 +514,42 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 	}
 
 	ginkgo.Context("on startup", func() {
+		ginkgo.It("only cleans up address sets owned by network policy", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespace1 := *newNamespace(namespaceName1)
+				namespace2 := *newNamespace(namespaceName2)
+				networkPolicy := getMatchLabelsNetworkPolicy(netPolicyName1, namespace1.Name,
+					namespace2.Name, "", true, true)
+				// namespace-owned address set, should stay
+				fakeOvn.asf.NewAddressSet("namespace", []net.IP{net.ParseIP("1.1.1.1")})
+				// netpol-owned address set for existing netpol, should stay
+				fakeOvn.asf.NewAddressSet(fmt.Sprintf("namespace1.%s.egress.0", netPolicyName1), []net.IP{net.ParseIP("1.1.1.2")})
+				// netpol-owned address set for non-exisitng netpol, should be deleted
+				fakeOvn.asf.NewAddressSet("namespace1.not-existing.egress.0", []net.IP{net.ParseIP("1.1.1.3")})
+				// egressQoS-owned address set, should stay
+				fakeOvn.asf.NewAddressSet(types.EgressQoSRulePrefix+"namespace", []net.IP{net.ParseIP("1.1.1.4")})
+				// hybridNode-owned address set, should stay
+				fakeOvn.asf.NewAddressSet(types.HybridRoutePolicyPrefix+"node", []net.IP{net.ParseIP("1.1.1.5")})
+				// egress firewall-owned address set, should stay
+				fakeOvn.asf.NewAddressSet("test.dns.name", []net.IP{net.ParseIP("1.1.1.6")})
+
+				fakeOvn.start()
+				err := fakeOvn.controller.syncNetworkPolicies([]interface{}{networkPolicy})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				fakeOvn.asf.ExpectAddressSetWithIPs("namespace", []string{"1.1.1.1"})
+				fakeOvn.asf.ExpectAddressSetWithIPs(fmt.Sprintf("namespace1.%s.egress.0", netPolicyName1), []string{"1.1.1.2"})
+				fakeOvn.asf.EventuallyExpectNoAddressSet("namespace1.not-existing.egress.0")
+				fakeOvn.asf.ExpectAddressSetWithIPs(types.EgressQoSRulePrefix+"namespace", []string{"1.1.1.4"})
+				fakeOvn.asf.ExpectAddressSetWithIPs(types.HybridRoutePolicyPrefix+"node", []string{"1.1.1.5"})
+				fakeOvn.asf.ExpectAddressSetWithIPs("test.dns.name", []string{"1.1.1.6"})
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("reconciles an existing networkPolicy with empty db", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespace1 := *newNamespace(namespaceName1)
