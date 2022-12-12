@@ -61,5 +61,6 @@ func RegisterNodeMetrics() {
 			func() float64 { return 1 },
 		))
 		registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemNode)
+		prometheus.MustRegister(MetricResourceRetryFailuresCount)
 	})
 }
