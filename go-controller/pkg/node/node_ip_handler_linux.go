@@ -267,7 +267,7 @@ func (c *addressManager) doesNodeHostAddressesMatch() bool {
 	return nodeHostAddresses.Equal(c.addresses)
 }
 
-// nodePrimaryAddrChanged returns false if the node's primary API IP,
+// nodePrimaryAddrChanged returns true if the node's primary API IP,
 // i.e. the first NodeInternalIP or NodeExternalIP from node.Status.Addresses
 // does not match the current address stored in c.nodePrimaryAddr.
 func (c *addressManager) nodePrimaryAddrChanged() bool {
