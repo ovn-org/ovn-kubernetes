@@ -1738,7 +1738,7 @@ func addMasqueradeRoute(netIfaceName, nodeName string, watchFactory factory.Node
 		}
 		if masqIPNet != nil {
 			klog.Infof("Setting OVN Masquerade route with source: %s", nodeIP)
-			err = util.LinkRoutesAddOrUpdateSourceOrMTU(netIfaceLink, nil, []*net.IPNet{masqIPNet},
+			err = util.LinkRoutesApply(netIfaceLink, nil, []*net.IPNet{masqIPNet},
 				mtu, nodeIP)
 			if err != nil {
 				return fmt.Errorf("unable to add OVN masquerade route to host, error: %v", err)

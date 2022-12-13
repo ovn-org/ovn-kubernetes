@@ -59,6 +59,8 @@ type NetworkControllerManager struct {
 	sbClient libovsdbclient.Client
 	// has SCTP support
 	SCTPSupport bool
+	// Supports multicast?
+	multicastSupport bool
 
 	stopChan chan struct{}
 	wg       *sync.WaitGroup
@@ -194,6 +196,8 @@ func (cm *NetworkControllerManager) Init() error {
 		return err
 	}
 
+	cm.configureMulticastSupport()
+
 	err = cm.enableOVNLogicalDataPathGroups()
 	if err != nil {
 		return err
@@ -216,6 +220,17 @@ func (cm *NetworkControllerManager) configureSCTPSupport() error {
 	}
 	cm.SCTPSupport = hasSCTPSupport
 	return nil
+}
+
+func (cm *NetworkControllerManager) configureMulticastSupport() {
+	cm.multicastSupport = config.EnableMulticast
+	if cm.multicastSupport {
+		if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err != nil {
+			klog.Warningf("Multicast support enabled, however version of OVN in use does not support IGMP Group. " +
+				"Disabling Multicast Support")
+			cm.multicastSupport = false
+		}
+	}
 }
 
 // enableOVNLogicalDataPathGroups sets an OVN flag to enable logical datapath
@@ -242,9 +257,9 @@ func (cm *NetworkControllerManager) configureMetrics(stopChan <-chan struct{}) {
 
 // NewDefaultNetworkController creates and returns the controller for default network
 func (cm *NetworkControllerManager) NewDefaultNetworkController() {
-	bnc := ovn.NewBaseNetworkController(cm.client, cm.kube, cm.watchFactory, cm.recorder, cm.nbClient,
-		cm.sbClient, cm.podRecorder, cm.SCTPSupport)
-	defaultController := ovn.NewDefaultNetworkController(bnc)
+	cnci := ovn.NewCommonNetworkControllerInfo(cm.client, cm.kube, cm.watchFactory, cm.recorder, cm.nbClient,
+		cm.sbClient, cm.podRecorder, cm.SCTPSupport, cm.multicastSupport)
+	defaultController := ovn.NewDefaultNetworkController(cnci)
 	cm.ovnControllers[ovntypes.DefaultNetworkName] = defaultController
 }
 

@@ -42,9 +42,8 @@ import (
 type DefaultNetworkController struct {
 	BaseNetworkController
 
-	// wg and stopChan per-Controller
-	wg       *sync.WaitGroup
-	stopChan chan struct{}
+	// waitGroup per-Controller
+	wg *sync.WaitGroup
 
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
 	masterSubnetAllocator        *subnetallocator.HostSubnetAllocator
@@ -53,19 +52,6 @@ type DefaultNetworkController struct {
 	// For TCP, UDP, and SCTP type traffic, cache OVN load-balancers used for the
 	// cluster's east-west traffic.
 	loadbalancerClusterCache map[kapi.Protocol]string
-
-	// A cache of all logical switches seen by the watcher and their subnets
-	lsManager *lsm.LogicalSwitchManager
-
-	// A cache of all logical ports known to the controller
-	logicalPortCache *portCache
-
-	// Info about known namespaces. You must use oc.getNamespaceLocked() or
-	// oc.waitForNamespaceLocked() to read this map, and oc.createNamespaceLocked()
-	// or oc.deleteNamespaceLocked() to modify it. namespacesMutex is only held
-	// from inside those functions.
-	namespaces      map[string]*namespaceInfo
-	namespacesMutex sync.Mutex
 
 	externalGWCache map[ktypes.NamespacedName]*externalRouteInfo
 	exGWCacheMutex  sync.RWMutex
@@ -87,9 +73,6 @@ type DefaultNetworkController struct {
 	egressQoSNodeSynced cache.InformerSynced
 	egressQoSNodeQueue  workqueue.RateLimitingInterface
 
-	// An address set factory that creates address sets
-	addressSetFactory addressset.AddressSetFactory
-
 	// network policies map, key should be retrieved with getPolicyKey(policy *knet.NetworkPolicy).
 	// network policies that failed to be created will also be added here, and can be retried or cleaned up later.
 	// network policy is only deleted from this map after successful cleanup.
@@ -103,9 +86,6 @@ type DefaultNetworkController struct {
 	// allowed locking order is namespace Lock -> networkPolicy.Lock -> sharedNetpolPortGroups key Lock
 	// make sure to keep this order to avoid deadlocks
 	sharedNetpolPortGroups *syncmap.SyncMap[*defaultDenyPortGroups]
-
-	// Supports multicast?
-	multicastSupport bool
 
 	// Cluster wide Load_Balancer_Group UUID.
 	loadBalancerGroupUUID string
@@ -130,9 +110,6 @@ type DefaultNetworkController struct {
 
 	joinSwIPManager *lsm.JoinSwitchIPManager
 
-	// retry framework for pods
-	retryPods *retry.RetryFramework
-
 	// retry framework for network policies
 	retryNetworkPolicies *retry.RetryFramework
 
@@ -150,8 +127,6 @@ type DefaultNetworkController struct {
 	// EgressIP Node-specific syncMap used by egressip node event handler
 	addEgressNodeFailed sync.Map
 
-	// retry framework for nodes
-	retryNodes *retry.RetryFramework
 	// Node-specific syncMaps used by node event handler
 	gatewaysFailed              sync.Map
 	mgmtPortFailed              sync.Map
@@ -172,38 +147,40 @@ type DefaultNetworkController struct {
 
 // NewDefaultNetworkController creates a new OVN controller for creating logical network
 // infrastructure and policy for default l3 network
-func NewDefaultNetworkController(bnc *BaseNetworkController) *DefaultNetworkController {
+func NewDefaultNetworkController(cnci *CommonNetworkControllerInfo) *DefaultNetworkController {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	return newDefaultNetworkControllerCommon(bnc, stopChan, wg, nil)
+	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil)
 }
 
-func newDefaultNetworkControllerCommon(bnc *BaseNetworkController,
+func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	defaultStopChan chan struct{}, defaultWg *sync.WaitGroup,
 	addressSetFactory addressset.AddressSetFactory) *DefaultNetworkController {
 
 	if addressSetFactory == nil {
-		addressSetFactory = addressset.NewOvnAddressSetFactory(bnc.nbClient)
+		addressSetFactory = addressset.NewOvnAddressSetFactory(cnci.nbClient)
 	}
-	svcController, svcFactory := newServiceController(bnc.client, bnc.nbClient, bnc.recorder)
-	egressSvcController := newEgressServiceController(bnc.client, bnc.nbClient, svcFactory, defaultStopChan)
+	svcController, svcFactory := newServiceController(cnci.client, cnci.nbClient, cnci.recorder)
+	egressSvcController := newEgressServiceController(cnci.client, cnci.nbClient, svcFactory, defaultStopChan)
 	var hybridOverlaySubnetAllocator *subnetallocator.HostSubnetAllocator
 	if config.HybridOverlay.Enabled {
 		hybridOverlaySubnetAllocator = subnetallocator.NewHostSubnetAllocator()
 	}
 	oc := &DefaultNetworkController{
-		BaseNetworkController:        *bnc,
-		stopChan:                     defaultStopChan,
+		BaseNetworkController: BaseNetworkController{
+			CommonNetworkControllerInfo: *cnci,
+			lsManager:                   lsm.NewLogicalSwitchManager(),
+			logicalPortCache:            newPortCache(defaultStopChan),
+			namespaces:                  make(map[string]*namespaceInfo),
+			namespacesMutex:             sync.Mutex{},
+			addressSetFactory:           addressSetFactory,
+			stopChan:                    defaultStopChan,
+		},
 		wg:                           defaultWg,
 		masterSubnetAllocator:        subnetallocator.NewHostSubnetAllocator(),
 		hybridOverlaySubnetAllocator: hybridOverlaySubnetAllocator,
-		lsManager:                    lsm.NewLogicalSwitchManager(),
-		logicalPortCache:             newPortCache(defaultStopChan),
-		namespaces:                   make(map[string]*namespaceInfo),
-		namespacesMutex:              sync.Mutex{},
 		externalGWCache:              make(map[ktypes.NamespacedName]*externalRouteInfo),
 		exGWCacheMutex:               sync.RWMutex{},
-		addressSetFactory:            addressSetFactory,
 		networkPolicies:              syncmap.NewSyncMap[*networkPolicy](),
 		sharedNetpolPortGroups:       syncmap.NewSyncMap[*defaultDenyPortGroups](),
 		eIPC: egressIPController{
@@ -213,14 +190,13 @@ func newDefaultNetworkControllerCommon(bnc *BaseNetworkController,
 			pendingCloudPrivateIPConfigsMutex: &sync.Mutex{},
 			pendingCloudPrivateIPConfigsOps:   make(map[string]map[string]*cloudPrivateIPConfigOp),
 			allocator:                         allocator{&sync.Mutex{}, make(map[string]*egressNode)},
-			nbClient:                          bnc.nbClient,
-			watchFactory:                      bnc.watchFactory,
+			nbClient:                          cnci.nbClient,
+			watchFactory:                      cnci.watchFactory,
 			egressIPTotalTimeout:              config.OVNKubernetesFeature.EgressIPReachabiltyTotalTimeout,
 			reachabilityCheckInterval:         egressIPReachabilityCheckInterval,
 			egressIPNodeHealthCheckPort:       config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort,
 		},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
-		multicastSupport:         config.EnableMulticast,
 		loadBalancerGroupUUID:    "",
 		aclLoggingEnabled:        true,
 		joinSwIPManager:          nil,
@@ -303,7 +279,7 @@ func (oc *DefaultNetworkController) Stop() {
 	oc.wg.Wait()
 }
 
-// Init runs a subnet IPAM and the network controller that watches arrival/departure
+// Init runs a subnet IPAM and a controller that watches arrival/departure
 // of nodes in the cluster
 // On an addition to the cluster (node create), a new subnet is created for it that will translate
 // to creation of a logical switch (done by the node, but could be created here at the master process too)
@@ -334,14 +310,6 @@ func (oc *DefaultNetworkController) Init() error {
 		if err := oc.hybridOverlaySubnetAllocator.InitRanges(config.HybridOverlay.ClusterSubnets); err != nil {
 			klog.Errorf("Failed to initialize hybrid overlay subnet allocator ranges: %v", err)
 			return err
-		}
-	}
-
-	if oc.multicastSupport {
-		if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err != nil {
-			klog.Warningf("Multicast support enabled, however version of OVN in use does not support IGMP Group. " +
-				"Disabling Multicast Support")
-			oc.multicastSupport = false
 		}
 	}
 
@@ -634,7 +602,7 @@ func (h *defaultNetworkControllerEventHandler) IsResourceScheduled(obj interface
 
 // AddResource adds the specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation.
-// Given an object to add and a boolean specifying if the function was executed from iterateRetryResources,
+// Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
 func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
 	var err error
 

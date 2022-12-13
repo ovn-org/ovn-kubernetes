@@ -544,7 +544,7 @@ func (n *OvnNode) Start(ctx context.Context) error {
 					} else {
 						gwIP = mgmtPortConfig.ipv6.gwIP
 					}
-					err := util.LinkRoutesAddOrUpdateSourceOrMTU(link, gwIP, []*net.IPNet{subnet}, config.Default.RoutableMTU, nil)
+					err := util.LinkRoutesApply(link, gwIP, []*net.IPNet{subnet}, config.Default.RoutableMTU, nil)
 					if err != nil {
 						return fmt.Errorf("unable to add legacy route for services via mp0, error: %v", err)
 					}

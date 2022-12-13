@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/ovn-org/libovsdb/ovsdb"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -71,13 +74,43 @@ func (oc *DefaultNetworkController) syncNamespaces(namespaces []interface{}) err
 		expectedNs[ns.Name] = true
 	}
 
-	err := oc.addressSetFactory.ProcessEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) error {
-		if nameSuffix == "" && !expectedNs[namespaceName] {
-			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
-				klog.Errorf(err.Error())
+	err := oc.addressSetFactory.ProcessEachAddressSet(func(hashedName, addrSetName string) error {
+		// filter out address sets owned by HybridRoutePolicy and EgressQoS by prefix.
+		// network policy-owned address set would have a dot in the address set name due to the format
+		// (namespace can't have dots in its name, and their address sets too).
+		// the only left address sets may be owned by egress firewall dns or namespace
+		if strings.HasPrefix(addrSetName, types.HybridRoutePolicyPrefix) ||
+			strings.HasPrefix(addrSetName, types.EgressQoSRulePrefix) ||
+			strings.Contains(addrSetName, ".") {
+			return nil
+		}
+
+		// make sure address set is not owned by egress firewall dns
+		// find ACLs referencing given address set (by hashName)
+		aclPred := func(acl *nbdb.ACL) bool {
+			return strings.Contains(acl.Match, "$"+hashedName)
+		}
+		acls, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, aclPred)
+		if err != nil {
+			return fmt.Errorf("failed to find referencing acls for address set %s: %v", addrSetName, err)
+		}
+		if len(acls) > 0 {
+			// if given address set is owned by egress firewall, all ACLs will be owned by the same object
+			acl := acls[0]
+			// check if egress firewall dns is the owner
+			// the only address set that may be referenced in egress firewall destination is dns address set
+			if acl.ExternalIDs[egressFirewallACLExtIdKey] != "" && strings.Contains(acl.Match, ".dst == $"+hashedName) {
+				// address set is owned by egress firewall, skip
+				return nil
+			}
+		}
+		// address set is owned by namespace, namespace name = address set name
+		if !expectedNs[addrSetName] {
+			if err = oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
 				return err
 			}
 		}
+
 		return nil
 	})
 	if err != nil {
@@ -142,30 +175,6 @@ func (oc *DefaultNetworkController) addPodToNamespace(ns string, ips []*net.IPNe
 	}
 
 	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), nsInfo.hybridOverlayExternalGW, ops, nil
-}
-
-func (oc *DefaultNetworkController) deletePodFromNamespace(ns string, podIfAddrs []*net.IPNet, portUUID string) ([]ovsdb.Operation, error) {
-	nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
-	if nsInfo == nil {
-		return nil, nil
-	}
-	defer nsUnlock()
-	var ops []ovsdb.Operation
-	var err error
-	if nsInfo.addressSet != nil {
-		if ops, err = nsInfo.addressSet.DeleteIPsReturnOps(createIPAddressSlice(podIfAddrs)); err != nil {
-			return nil, err
-		}
-	}
-
-	// Remove the port from the multicast allow policy.
-	if oc.multicastSupport && nsInfo.multicastEnabled && len(portUUID) > 0 {
-		if err = podDeleteAllowMulticastPolicy(oc.nbClient, ns, portUUID); err != nil {
-			return nil, err
-		}
-	}
-
-	return ops, nil
 }
 
 func createIPAddressSlice(ips []*net.IPNet) []net.IP {
@@ -458,38 +467,6 @@ func (oc *DefaultNetworkController) deleteNamespace(ns *kapi.Namespace) error {
 	return nil
 }
 
-// getNamespaceLocked locks namespacesMutex, looks up ns, and (if found), returns it with
-// its mutex locked. If ns is not known, nil will be returned
-func (oc *DefaultNetworkController) getNamespaceLocked(ns string, readOnly bool) (*namespaceInfo, func()) {
-	// Only hold namespacesMutex while reading/modifying oc.namespaces. In particular,
-	// we drop namespacesMutex while trying to claim nsInfo.Mutex, because something
-	// else might have locked the nsInfo and be doing something slow with it, and we
-	// don't want to block all access to oc.namespaces while that's happening.
-	oc.namespacesMutex.Lock()
-	nsInfo := oc.namespaces[ns]
-	oc.namespacesMutex.Unlock()
-
-	if nsInfo == nil {
-		return nil, nil
-	}
-	var unlockFunc func()
-	if readOnly {
-		unlockFunc = func() { nsInfo.RUnlock() }
-		nsInfo.RLock()
-	} else {
-		unlockFunc = func() { nsInfo.Unlock() }
-		nsInfo.Lock()
-	}
-	// Check that the namespace wasn't deleted while we were waiting for the lock
-	oc.namespacesMutex.Lock()
-	defer oc.namespacesMutex.Unlock()
-	if nsInfo != oc.namespaces[ns] {
-		unlockFunc()
-		return nil, nil
-	}
-	return nsInfo, unlockFunc
-}
-
 // ensureNamespaceLocked locks namespacesMutex, gets/creates an entry for ns, configures OVN nsInfo, and returns it
 // with its mutex locked.
 // ns is the name of the namespace, while namespace is the optional k8s namespace object
@@ -563,63 +540,6 @@ func (oc *DefaultNetworkController) ensureNamespaceLocked(ns string, readOnly bo
 	}
 
 	return nsInfo, unlockFunc, nil
-}
-
-// deleteNamespaceLocked locks namespacesMutex, finds and deletes ns, and returns the
-// namespace, locked.
-func (oc *DefaultNetworkController) deleteNamespaceLocked(ns string) *namespaceInfo {
-	// The locking here is the same as in getNamespaceLocked
-
-	oc.namespacesMutex.Lock()
-	nsInfo := oc.namespaces[ns]
-	oc.namespacesMutex.Unlock()
-
-	if nsInfo == nil {
-		return nil
-	}
-	nsInfo.Lock()
-
-	oc.namespacesMutex.Lock()
-	defer oc.namespacesMutex.Unlock()
-	if nsInfo != oc.namespaces[ns] {
-		nsInfo.Unlock()
-		return nil
-	}
-	if nsInfo.addressSet != nil {
-		// Empty the address set, then delete it after an interval.
-		if err := nsInfo.addressSet.SetIPs(nil); err != nil {
-			klog.Errorf("Warning: failed to empty address set for deleted NS %s: %v", ns, err)
-		}
-
-		// Delete the address set after a short delay.
-		// This is so NetworkPolicy handlers can converge and stop referencing it.
-		addressSet := nsInfo.addressSet
-		go func() {
-			select {
-			case <-oc.stopChan:
-				return
-			case <-time.After(20 * time.Second):
-				// Check to see if the NS was re-added in the meanwhile. If so,
-				// only delete if the new NS's AddressSet shouldn't exist.
-				nsInfo, nsUnlock := oc.getNamespaceLocked(ns, true)
-				if nsInfo != nil {
-					defer nsUnlock()
-					if nsInfo.addressSet != nil {
-						klog.V(5).Infof("Skipping deferred deletion of AddressSet for NS %s: re-created", ns)
-						return
-					}
-				}
-
-				klog.V(5).Infof("Finishing deferred deletion of AddressSet for NS %s", ns)
-				if err := addressSet.Destroy(); err != nil {
-					klog.Errorf("Failed to delete AddressSet for NS %s: %v", ns, err.Error())
-				}
-			}
-		}()
-	}
-	delete(oc.namespaces, ns)
-
-	return nsInfo
 }
 
 func (oc *DefaultNetworkController) createNamespaceAddrSetAllPods(ns string) (addressset.AddressSet, error) {
