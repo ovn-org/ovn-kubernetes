@@ -56,7 +56,7 @@ var metricPodCreationLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "pod_creation_latency_seconds",
-	Help:      "The latency between pod creation and setting the OVN annotations",
+	Help:      "The duration between a pod being scheduled and completing its logical switch port configuration",
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15),
 })
 
