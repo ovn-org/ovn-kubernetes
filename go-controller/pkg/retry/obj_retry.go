@@ -526,15 +526,22 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 					// When processing an object in terminal state there is a chance that it was already removed from
 					// the API server. Since delete events for objects in terminal state are skipped delete it here.
 					// This only applies to pod watchers (pods + dynamic network policy handlers watching pods).
-					if kerrors.IsNotFound(err) && r.ResourceHandler.IsObjectInTerminalState(newer) {
-						klog.Warningf("%s %s is in terminal state but no longer exists in informer cache, removing",
-							r.ResourceHandler.ObjType, newKey)
-						r.DoWithLock(newKey, func(key string) {
-							r.processObjectInTerminalState(newer, newKey, resourceEventUpdate)
-						})
+					if kerrors.IsNotFound(err) {
+						if r.ResourceHandler.IsObjectInTerminalState(newer) {
+							klog.Warningf("%s %s is in terminal state but no longer exists in informer cache, removing",
+								r.ResourceHandler.ObjType, newKey)
+							r.DoWithLock(newKey, func(key string) {
+								r.processObjectInTerminalState(newer, newKey, resourceEventUpdate)
+							})
+						} else {
+							klog.V(5).Infof("Ignoring update event for %s %s as it was not found in"+
+								" informer cache and is not in a terminal state", r.ResourceHandler.ObjType, newKey)
+						}
 					} else {
-						klog.Warningf("Unable to get %s %s from informer cache (perhaps it was already"+
-							" deleted?), skipping update: %v", r.ResourceHandler.ObjType, newKey, err)
+						// This should never happen. The cache storage backend type cannot return any error
+						// other than not found
+						klog.Errorf("Unhandled error while trying to retrieve %s %s from informer cache: %v",
+							r.ResourceHandler.ObjType, newKey, err)
 					}
 					return
 				}
