@@ -5,7 +5,7 @@
 # The standard name for this image is ovn-kubernetes-base
 
 # build base image shared by both OpenShift and MicroShift
-FROM registry.ci.openshift.org/ocp/4.12:base
+FROM registry.ci.openshift.org/ocp/4.13:base
 
 # install selinux-policy first to avoid a race
 RUN yum install -y  \
