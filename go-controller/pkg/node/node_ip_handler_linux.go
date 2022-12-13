@@ -14,7 +14,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/vishvananda/netlink"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -130,6 +132,16 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 		return true, nil
 	}
 
+	// Add an event handler to the node informer. This is needed for cases where users first update the node's IP
+	// address but only later update kubelet configuration and restart kubelet (which in turn will update the reported
+	// IP address inside the node's status field).
+	nodeInformer := c.watchFactory.NodeInformer()
+	nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(old, new interface{}) {
+			c.handleNodeChanges(new)
+		},
+	})
+
 	doneWg.Add(1)
 	go func() {
 		defer doneWg.Done()
@@ -183,6 +195,21 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 	}()
 
 	klog.Info("Node IP manager is running")
+}
+
+// handleNodeChanges takes a node obj, extracts its name and determines if the node's address changed. If so, it
+// updates the node's OVS encapsulation IP.
+func (c *addressManager) handleNodeChanges(obj interface{}) {
+	var key string
+	var err error
+	if key, err = cache.MetaNamespaceKeyFunc(obj); err != nil {
+		utilruntime.HandleError(err)
+		return
+	}
+	if key == c.nodeName && c.nodePrimaryAddrChanged() {
+		klog.Infof("Node primary address changed to %v. Updating OVN encap IP.", c.nodePrimaryAddr)
+		c.updateOVNEncapIP()
+	}
 }
 
 // updateNodeAddressAnnotations updates all relevant annotations for the node including
