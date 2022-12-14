@@ -50,8 +50,8 @@ var metricDbTimestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	},
 )
 
-// metricPodCreationLatency is the time between a pod being scheduled and the
-// ovn controller setting the network annotations.
+// metricPodCreationLatency is the time between a pod being scheduled and
+// completing its logical switch port configuration.
 var metricPodCreationLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
@@ -60,8 +60,7 @@ var metricPodCreationLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15),
 })
 
-// metricOvnCliLatency is the time between a pod being scheduled and the
-// ovn controller setting the network annotations.
+// metricOvnCliLatency is the duration to execute OVN commands using CLI tools ovn-nbctl or ovn-sbctl.
 var metricOvnCliLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
