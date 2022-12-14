@@ -1621,6 +1621,7 @@ func TestController_syncNodes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s: Error creating master watch factory: %v", tt.name, err)
 			}
+			defer f.Shutdown()
 
 			dbSetup := libovsdbtest.TestSetup{
 				SBData: tt.initialSBDB,
@@ -1712,6 +1713,7 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s: Error creating master watch factory: %v", tt.name, err)
 			}
+			defer f.Shutdown()
 
 			dbSetup := libovsdbtest.TestSetup{
 				SBData: tt.initialSBDB,
