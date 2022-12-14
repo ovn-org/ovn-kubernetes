@@ -78,8 +78,9 @@ type RetryFramework struct {
 	stopChan <-chan struct{}
 	doneWg   *sync.WaitGroup
 
-	watchFactory    *factory.WatchFactory
-	ResourceHandler *ResourceHandler
+	watchFactory      *factory.WatchFactory
+	ResourceHandler   *ResourceHandler
+	terminatedObjects sync.Map
 }
 
 // NewRetryFramework returns a new RetryFramework instance, essential for the whole retry logic.
@@ -92,12 +93,13 @@ func NewRetryFramework(
 	watchFactory *factory.WatchFactory,
 	resourceHandler *ResourceHandler) *RetryFramework {
 	return &RetryFramework{
-		retryEntries:    syncmap.NewSyncMap[*retryObjEntry](),
-		retryChan:       make(chan struct{}, 1),
-		watchFactory:    watchFactory,
-		stopChan:        stopChan,
-		doneWg:          doneWg,
-		ResourceHandler: resourceHandler,
+		retryEntries:      syncmap.NewSyncMap[*retryObjEntry](),
+		retryChan:         make(chan struct{}, 1),
+		watchFactory:      watchFactory,
+		stopChan:          stopChan,
+		doneWg:            doneWg,
+		ResourceHandler:   resourceHandler,
+		terminatedObjects: sync.Map{},
 	}
 }
 
@@ -400,10 +402,17 @@ var (
 // free its resources. (for now, this applies to completed pods)
 // processObjectInTerminalState doesn't unlock key
 func (r *RetryFramework) processObjectInTerminalState(obj interface{}, lockedKey string, event resourceEvent) {
+	_, loaded := r.terminatedObjects.LoadOrStore(lockedKey, true)
+	if loaded {
+		// object was already terminated
+		klog.Infof("Detected object %s of type %s in terminal state (e.g. completed) will be " +
+			"ignored as it has already been processed")
+		return
+	}
+
 	// The object is in a terminal state: delete it from the cluster, delete its retry entry and return.
 	klog.Infof("Detected object %s of type %s in terminal state (e.g. completed)"+
 		" during %s event: will remove it", lockedKey, r.ResourceHandler.ObjType, event)
-
 	internalCacheEntry := r.ResourceHandler.GetInternalCacheEntry(obj)
 	retryEntry := r.InitRetryObjWithDelete(obj, lockedKey, internalCacheEntry, true) // set up the retry obj for deletion
 	if err := r.ResourceHandler.DeleteResource(obj, internalCacheEntry); err != nil {
@@ -646,9 +655,16 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 				// If object is in terminal state, we would have already deleted it during update.
 				// No reason to attempt to delete it here again.
 				if r.ResourceHandler.IsObjectInTerminalState(obj) {
-					klog.Infof("Ignoring delete event for resource in terminal state %s %s",
-						r.ResourceHandler.ObjType, key)
-					return
+					// If object is in terminal state, check if we have already processed it in a previous update.
+					// We cannot blindly handle multiple delete operations for the same pod currently. There can be races
+					// where other pod handlers are removing IP addresses from address sets when they shouldn't be, etc.
+					// See: https://github.com/ovn-org/ovn-kubernetes/pull/3318#issuecomment-1349804450
+					if _, loaded := r.terminatedObjects.LoadAndDelete(key); loaded {
+						// object was already terminated
+						klog.Infof("Ignoring delete event for resource in terminal state %s %s",
+							r.ResourceHandler.ObjType, key)
+						return
+					}
 				}
 				r.DoWithLock(key, func(key string) {
 					internalCacheEntry := r.ResourceHandler.GetInternalCacheEntry(obj)
