@@ -1441,8 +1441,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			)
 
 			// Add the LRP back to allow the delete the continue
-			err = libovsdbops.CreateOrUpdateLogicalRouterPorts(libovsdbOvnNBClient,
-				lr, []*nbdb.LogicalRouterPort{lrp}, &lrp.MAC, &lrp.Networks, &lrp.ExternalIDs)
+			err = libovsdbops.CreateOrUpdateLogicalRouterPort(libovsdbOvnNBClient,
+				lr, lrp, nil, &lrp.MAC, &lrp.Networks, &lrp.ExternalIDs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			retry.SetRetryObjWithNoBackoff(node1.Name, clusterController.retryNodes)
 			clusterController.retryNodes.RequestRetryObjs() // retry the failed entry
