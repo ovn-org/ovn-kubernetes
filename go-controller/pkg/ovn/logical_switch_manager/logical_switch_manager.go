@@ -9,7 +9,6 @@ import (
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator/allocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -293,10 +292,8 @@ func (manager *LogicalSwitchManager) AllocateHybridOverlay(switchName string, hy
 		for _, ip := range hybridOverlayAnnotation {
 			allocateAddresses = append(allocateAddresses, &net.IPNet{IP: net.ParseIP(ip).To4(), Mask: net.CIDRMask(32, 32)})
 		}
-		// attempt to allocate the IP address that is annotated on the node. The only way there would be a collision is if the annotations of podIP or hybridOverlayDRIP
-		// where manually edited and we do not support that
 		err := manager.AllocateIPs(switchName, allocateAddresses)
-		if err != nil && err != ipallocator.ErrAllocated {
+		if err != nil {
 			return nil, err
 		}
 		return allocateAddresses, nil
