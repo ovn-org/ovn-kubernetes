@@ -62,21 +62,6 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 			}
 		}
 	}
-
-	if config.HybridOverlay.Enabled {
-		// allocate all previously annoted hybridOverlay Distributed Router IP addresses. Allocation needs to happen here
-		// before a Pod Add event can be processed and be allocated a previously assigned hybridOverlay Distributed Router IP address.
-		// we do not support manually setting the hybrid overlay DRIP address
-		nodes, err := oc.watchFactory.GetNodes()
-		if err != nil {
-			return fmt.Errorf("failed to get nodes: %v", err)
-		}
-		for _, node := range nodes {
-			if err := oc.allocateHybridOverlayDRIP(node); err != nil {
-				return fmt.Errorf("cannot allocate hybridOverlay DRIP on node %s (%v)", node.Name, err)
-			}
-		}
-	}
 	// all pods present before ovn-kube startup have been processed
 	atomic.StoreUint32(&oc.allInitialPodsProcessed, 1)
 
