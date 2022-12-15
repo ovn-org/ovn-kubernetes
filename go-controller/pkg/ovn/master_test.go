@@ -1441,8 +1441,8 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			)
 
 			// Add the LRP back to allow the delete the continue
-			err = libovsdbops.CreateOrUpdateLogicalRouterPorts(libovsdbOvnNBClient,
-				lr, []*nbdb.LogicalRouterPort{lrp}, &lrp.MAC, &lrp.Networks, &lrp.ExternalIDs)
+			err = libovsdbops.CreateOrUpdateLogicalRouterPort(libovsdbOvnNBClient,
+				lr, lrp, nil, &lrp.MAC, &lrp.Networks, &lrp.ExternalIDs)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			retry.SetRetryObjWithNoBackoff(node1.Name, clusterController.retryNodes)
 			clusterController.retryNodes.RequestRetryObjs() // retry the failed entry
@@ -1621,6 +1621,7 @@ func TestController_syncNodes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s: Error creating master watch factory: %v", tt.name, err)
 			}
+			defer f.Shutdown()
 
 			dbSetup := libovsdbtest.TestSetup{
 				SBData: tt.initialSBDB,
@@ -1712,6 +1713,7 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s: Error creating master watch factory: %v", tt.name, err)
 			}
+			defer f.Shutdown()
 
 			dbSetup := libovsdbtest.TestSetup{
 				SBData: tt.initialSBDB,
