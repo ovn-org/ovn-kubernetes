@@ -19,9 +19,9 @@ package allocator
 import (
 	"errors"
 	"math/big"
-	"math/rand"
 	"sync"
-	"time"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cryptorand"
 )
 
 // AllocationBitmap is a contiguous block of resources that can be allocated atomically.
@@ -61,9 +61,7 @@ type bitAllocator interface {
 // NewAllocationMap creates an allocation bitmap using the random scan strategy.
 func NewAllocationMap(max int, rangeSpec string) *AllocationBitmap {
 	a := AllocationBitmap{
-		strategy: randomScanStrategy{
-			rand: rand.New(rand.NewSource(time.Now().UnixNano())),
-		},
+		strategy:  randomScanStrategy{},
 		allocated: big.NewInt(0),
 		count:     0,
 		max:       max,
@@ -211,14 +209,13 @@ func (r *AllocationBitmap) Restore(rangeSpec string, data []byte) error {
 // scans forward looking for the next available address (it will wrap the range if
 // necessary).
 type randomScanStrategy struct {
-	rand *rand.Rand
 }
 
 func (rss randomScanStrategy) AllocateBit(allocated *big.Int, max, count int) (int, bool) {
 	if count >= max {
 		return 0, false
 	}
-	offset := rss.rand.Intn(max)
+	offset := int(cryptorand.Intn(int64(max)))
 	for i := 0; i < max; i++ {
 		at := (offset + i) % max
 		if allocated.Bit(at) == 0 {

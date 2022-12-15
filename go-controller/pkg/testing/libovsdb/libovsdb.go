@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -27,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cryptorand"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
@@ -286,7 +286,7 @@ func newOVSDBServer(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, schem
 	}
 
 	// Populate the _Server database table
-	sid := fmt.Sprintf("%04x", rand.Uint32())
+	sid := fmt.Sprintf("%04x", cryptorand.Uint32())
 	serverData := []TestData{
 		&serverdb.Database{
 			Name:      dbModel.Name(),
@@ -336,11 +336,9 @@ func newOVSDBServer(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, schem
 	return s, nil
 }
 
-var random = rand.New(rand.NewSource(time.Now().UnixNano()))
-
 func tempOVSDBSocketFileName() string {
 	randBytes := make([]byte, 16)
-	random.Read(randBytes)
+	cryptorand.Read(randBytes)
 	return filepath.Join(os.TempDir(), "ovsdb-"+hex.EncodeToString(randBytes))
 }
 
