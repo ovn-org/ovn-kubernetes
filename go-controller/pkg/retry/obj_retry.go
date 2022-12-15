@@ -405,8 +405,8 @@ func (r *RetryFramework) processObjectInTerminalState(obj interface{}, lockedKey
 	_, loaded := r.terminatedObjects.LoadOrStore(lockedKey, true)
 	if loaded {
 		// object was already terminated
-		klog.Infof("Detected object %s of type %s in terminal state (e.g. completed) will be " +
-			"ignored as it has already been processed")
+		klog.Infof("Detected object %s of type %s in terminal state (e.g. completed) will be "+
+			"ignored as it has already been processed", lockedKey, r.ResourceHandler.ObjType)
 		return
 	}
 
