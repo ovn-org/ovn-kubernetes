@@ -4,7 +4,7 @@
 #
 # The standard name for this image is ovn-kube
 
-FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.19-openshift-4.12 AS builder
+FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.19-openshift-4.13 AS builder
 
 WORKDIR /go/src/github.com/openshift/ovn-kubernetes
 COPY . .
@@ -13,7 +13,7 @@ COPY . .
 RUN cd go-controller; CGO_ENABLED=0 make
 RUN cd go-controller; CGO_ENABLED=0 make windows
 
-FROM registry.ci.openshift.org/ocp/4.12:cli AS cli
+FROM registry.ci.openshift.org/ocp/4.13:cli AS cli
 
 # ovn-kubernetes-base image is built from Dockerfile.base
 # The following changes are included in ovn-kubernetes-base
@@ -24,7 +24,7 @@ FROM registry.ci.openshift.org/ocp/4.12:cli AS cli
 # - git commit number
 # - ovnkube.sh script
 # - iptables wrappers
-FROM registry.ci.openshift.org/ocp/4.12:ovn-kubernetes-base
+FROM registry.ci.openshift.org/ocp/4.13:ovn-kubernetes-base
 
 USER root
 
