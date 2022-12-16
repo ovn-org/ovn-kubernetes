@@ -706,7 +706,6 @@ func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *
 			oc.gatewaysFailed.Store(node.Name, true)
 			oc.hybridOverlayFailed.Store(node.Name, config.HybridOverlay.Enabled)
 			err = fmt.Errorf("nodeAdd: error adding node %q: %w", node.Name, err)
-			oc.recordNodeErrorEvent(node, err)
 			return err
 		}
 		oc.addNodeFailed.Delete(node.Name)
@@ -778,11 +777,7 @@ func (oc *DefaultNetworkController) addUpdateNodeEvent(node *kapi.Node, nSyncs *
 		}
 	}
 
-	err = kerrors.NewAggregate(errs)
-	if err != nil {
-		oc.recordNodeErrorEvent(node, err)
-	}
-	return err
+	return kerrors.NewAggregate(errs)
 }
 
 func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {

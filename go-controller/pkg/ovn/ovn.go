@@ -28,9 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
-	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
 )
 
@@ -97,17 +95,6 @@ func (oc *DefaultNetworkController) getPortInfo(pod *kapi.Pod) *lpInfo {
 		portInfo, _ = oc.logicalPortCache.get(pod, ovntypes.DefaultNetworkName)
 	}
 	return portInfo
-}
-
-func (oc *DefaultNetworkController) recordPodEvent(reason string, addErr error, pod *kapi.Pod) {
-	podRef, err := ref.GetReference(scheme.Scheme, pod)
-	if err != nil {
-		klog.Errorf("Couldn't get a reference to pod %s/%s to post an event: '%v'",
-			pod.Namespace, pod.Name, err)
-	} else {
-		klog.V(5).Infof("Posting a %s event for Pod %s/%s", kapi.EventTypeWarning, pod.Namespace, pod.Name)
-		oc.recorder.Eventf(podRef, kapi.EventTypeWarning, reason, addErr.Error())
-	}
 }
 
 func exGatewayAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {

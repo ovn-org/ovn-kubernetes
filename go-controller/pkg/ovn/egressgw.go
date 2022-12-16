@@ -156,7 +156,6 @@ func (oc *DefaultNetworkController) addPodExternalGW(pod *kapi.Pod) error {
 	foundGws, err := getExGwPodIPs(pod)
 	if err != nil {
 		klog.Errorf("Error getting exgw IPs for pod: %s, error: %v", pod.Name, err)
-		oc.recordPodEvent("ErrorAddingLogicalPort", err, pod)
 		return nil
 	}
 

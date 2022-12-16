@@ -29,10 +29,13 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes/scheme"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 )
@@ -588,11 +591,26 @@ func (h *defaultNetworkControllerEventHandler) RecordSuccessEvent(obj interface{
 // RecordErrorEvent records an error event on the given object.
 // Only used for pods now.
 func (h *defaultNetworkControllerEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {
+	rtObj, ok := obj.(runtime.Object)
+	if !ok {
+		klog.Errorf("Object %v not a kube runtime.Object", obj)
+		return
+	}
+	objRef, refErr := ref.GetReference(scheme.Scheme, rtObj)
+	if refErr != nil {
+		klog.Errorf("Couldn't get a reference to %v to post an event: %v", rtObj, refErr)
+		return
+	}
+
 	switch h.objType {
 	case factory.PodType:
 		pod := obj.(*kapi.Pod)
-		klog.V(5).Infof("Recording error event on pod %s/%s", pod.Namespace, pod.Name)
-		h.oc.recordPodEvent(reason, err, pod)
+		klog.V(5).Infof("Recording pod %s/%s error event %q: %v", pod.Namespace, pod.Name, reason, err)
+		h.oc.recorder.Eventf(objRef, kapi.EventTypeWarning, reason, err.Error())
+	case factory.NodeType:
+		node := obj.(*kapi.Node)
+		klog.V(5).Infof("Recording node %s error event %q: %v", node.Name, reason, err)
+		h.oc.recorder.Eventf(objRef, kapi.EventTypeWarning, reason, err.Error())
 	}
 }
 
