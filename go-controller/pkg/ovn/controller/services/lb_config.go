@@ -74,7 +74,7 @@ func (c *lbConfig) makeNodeRouterTargetIPs(node *nodeInfo, epIPs []string, hostM
 
 	// any targets local to the node need to have a special
 	// harpin IP added, but only for the router LB
-	targetIPs, updated := util.UpdateIPsSlice(targetIPs, node.nodeIPsStr(), []string{hostMasqueradeIP})
+	targetIPs, updated := util.UpdateIPsSlice(targetIPs, node.l3gatewayAddressesStr(), []string{hostMasqueradeIP})
 
 	// We either only removed stuff from the original slice, or updated some IPs.
 	if len(targetIPs) != len(epIPs) || updated {
@@ -108,8 +108,8 @@ var protos = []v1.Protocol{
 // - services with InternalTrafficPolicy=Local
 //
 // Template LBs will be created for
-// - services with NodePort set but *without* ExternalTrafficPolicy=Local or
-//   affinity timeout set.
+//   - services with NodePort set but *without* ExternalTrafficPolicy=Local or
+//     affinity timeout set.
 func buildServiceLBConfigs(service *v1.Service, endpointSlices []*discovery.EndpointSlice, useLBGroup, useTemplates bool) (perNodeConfigs, templateConfigs, clusterConfigs []lbConfig) {
 	needsAffinityTimeout := hasSessionAffinityTimeOut(service)
 
@@ -573,7 +573,7 @@ func buildPerNodeLBs(service *v1.Service, configs []lbConfig, nodes []nodeInfo) 
 				vips := make([]string, 0, len(config.vips))
 				for _, vip := range config.vips {
 					if vip == placeholderNodeIPs {
-						vips = append(vips, node.nodeIPsStr()...)
+						vips = append(vips, node.hostAddressesStr()...)
 					} else {
 						vips = append(vips, vip)
 					}

@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	kapi "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -538,6 +539,10 @@ func GetNodeEgressLabel() string {
 
 func SetNodeHostAddresses(nodeAnnotator kube.Annotator, addresses sets.Set[string]) error {
 	return nodeAnnotator.Set(ovnNodeHostAddresses, addresses.UnsortedList())
+}
+
+func NodeHostAddressesAnnotationChanged(oldNode, newNode *v1.Node) bool {
+	return oldNode.Annotations[ovnNodeHostAddresses] != newNode.Annotations[ovnNodeHostAddresses]
 }
 
 // ParseNodeHostAddresses returns the parsed host addresses living on a node
