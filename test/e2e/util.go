@@ -308,6 +308,7 @@ func pokeEndpoint(namespace, clientContainer, protocol, targetHost string, targe
 	if err != nil {
 		framework.Logf("FAILED Command was %s", curlCommand)
 		framework.Logf("FAILED Response was %v", res)
+		return ""
 	}
 	framework.ExpectNoError(err)
 
