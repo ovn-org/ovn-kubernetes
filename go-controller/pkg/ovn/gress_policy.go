@@ -2,33 +2,19 @@ package ovn
 
 import (
 	"fmt"
-	"net"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
-	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
-
-func getNetpolAddrSetDbIDs(policyNamespace, policyName, direction, idx, controller string) *libovsdbops.DbObjectIDs {
-	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetNetworkPolicy, controller, map[libovsdbops.ExternalIDKey]string{
-		libovsdbops.ObjectNameKey: buildAddrSetName(policyNamespace, policyName),
-		// direction and idx uniquely identify address set (= gress policy rule)
-		libovsdbops.PolicyDirectionKey: direction,
-		libovsdbops.GressIdxKey:        idx,
-	})
-}
 
 type gressPolicy struct {
 	controllerName  string
@@ -37,16 +23,7 @@ type gressPolicy struct {
 	policyType      knet.PolicyType
 	idx             int
 
-	// peerAddressSet points to the addressSet that holds all peer pod or peer service
-	// IP addresess.
-	// used for pod, pod with namespace, and svc peer selectors
-	// This addressSet is synced by networkPolicy lock:
-	// ensurePeerAddressSet and destroy functions need to hold networkPolicy write lock,
-	// and function that modify addressSet need to hold networkPolicy read lock.
-	// Adding/deleting ips to/from address set is safe for concurrent use.
-	peerAddressSet addressset.AddressSet
-
-	// peerVxAddressSets includes gressPolicy.peerAddressSet, and address sets for selected namespaces
+	// peerVxAddressSets include PodSelectorAddressSet names, and address sets for selected namespaces
 	// peerV4AddressSets has Address sets for all namespaces and pod selectors for IPv4
 	peerV4AddressSets *sync.Map
 	// peerV6AddressSets has Address sets for all namespaces and pod selectors for IPv6
@@ -56,8 +33,7 @@ type gressPolicy struct {
 	// the rule in question.
 	portPolicies []*portPolicy
 
-	ipBlock      []*knet.IPBlock
-	addrSetDbIDs *libovsdbops.DbObjectIDs
+	ipBlock []*knet.IPBlock
 }
 
 type portPolicy struct {
@@ -97,7 +73,6 @@ func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name, contro
 		peerV4AddressSets: &sync.Map{},
 		peerV6AddressSets: &sync.Map{},
 		portPolicies:      make([]*portPolicy, 0),
-		addrSetDbIDs:      getNetpolAddrSetDbIDs(namespace, name, strings.ToLower(string(policyType)), strconv.Itoa(idx), controllerName),
 	}
 }
 
@@ -126,67 +101,13 @@ func syncMapLen(m *sync.Map) int {
 	return result
 }
 
-func buildAddrSetName(policyNamespace, policyName string) string {
-	return policyNamespace + "_" + policyName
-}
-
-// must be called with network policy write lock
-func (gp *gressPolicy) ensurePeerAddressSet(factory addressset.AddressSetFactory) error {
-	if gp.peerAddressSet != nil {
-		return nil
+func (gp *gressPolicy) addPeerAddressSets(asHashNameV4, asHashNameV6 string) {
+	if config.IPv4Mode && asHashNameV4 != "" {
+		gp.peerV4AddressSets.Store("$"+asHashNameV4, true)
 	}
-
-	as, err := factory.NewAddressSet(gp.addrSetDbIDs, nil)
-	if err != nil {
-		return err
+	if config.IPv6Mode && asHashNameV6 != "" {
+		gp.peerV6AddressSets.Store("$"+asHashNameV6, true)
 	}
-
-	gp.peerAddressSet = as
-	ipv4HashedAS, ipv6HashedAS := as.GetASHashNames()
-	if ipv4HashedAS != "" {
-		gp.peerV4AddressSets.Store("$"+ipv4HashedAS, true)
-	}
-	if ipv6HashedAS != "" {
-		gp.peerV6AddressSets.Store("$"+ipv6HashedAS, true)
-	}
-	return nil
-}
-
-// addPeerPods will get all currently assigned ips for given pods, and add them to the address set.
-// If pod ips change, this function should be called again.
-// must be called with network policy read lock
-func (gp *gressPolicy) addPeerPods(pods ...*v1.Pod) error {
-	if gp.peerAddressSet == nil {
-		return fmt.Errorf("peer AddressSet is nil, cannot add peer pod(s): for gressPolicy: %s",
-			gp.policyName)
-	}
-
-	podIPFactor := 1
-	if config.IPv4Mode && config.IPv6Mode {
-		podIPFactor = 2
-	}
-	ips := make([]net.IP, 0, len(pods)*podIPFactor)
-	for _, pod := range pods {
-		podIPs, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
-		if err != nil {
-			return err
-		}
-		ips = append(ips, podIPs...)
-	}
-
-	return gp.peerAddressSet.AddIPs(ips)
-}
-
-// must be called with network policy read lock
-func (gp *gressPolicy) deletePeerPod(pod *v1.Pod) error {
-	ips, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
-	if err != nil {
-		// if pod ips can't be fetched on delete, we don't expect that information about ips will ever be updated,
-		// therefore just log the error and return.
-		klog.Infof("Failed to get pod IPs %s/%s to delete from network policy peers: %w", pod.Namespace, pod.Name, err)
-		return nil
-	}
-	return gp.peerAddressSet.DeleteIPs(ips)
 }
 
 // If the port is not specified, it implies all ports for that protocol
@@ -218,7 +139,7 @@ func (gp *gressPolicy) getL3MatchFromAddressSet() string {
 	} else {
 		// We sort address slice,
 		// Hence we'll be constructing the sorted address set string here
-		l3Match = gp.constructMatchString(v4List, v6List)
+		l3Match = gp.constructPeerASMatchString(v4List, v6List)
 	}
 	return l3Match
 }
@@ -234,7 +155,7 @@ func constructEmptyMatchString() string {
 	}
 }
 
-func (gp *gressPolicy) constructMatchString(v4AddressSets, v6AddressSets []string) string {
+func (gp *gressPolicy) constructPeerASMatchString(v4AddressSets, v6AddressSets []string) string {
 	var direction, v4MatchStr, v6MatchStr, matchStr string
 	if gp.policyType == knet.PolicyTypeIngress {
 		direction = "src"
@@ -457,15 +378,4 @@ func constructIPBlockStringsForACL(direction string, ipBlocks []*knet.IPBlock, l
 		matchStrings = append(matchStrings, matchStr)
 	}
 	return matchStrings
-}
-
-// must be called with network policy write lock
-func (gp *gressPolicy) destroy() error {
-	if gp.peerAddressSet != nil {
-		if err := gp.peerAddressSet.Destroy(); err != nil {
-			return err
-		}
-		gp.peerAddressSet = nil
-	}
-	return nil
 }

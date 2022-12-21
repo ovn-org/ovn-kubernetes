@@ -24,8 +24,7 @@ func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 	switch objType {
 	case factory.PodType,
 		factory.NodeType,
-		factory.PeerPodSelectorType,
-		factory.PeerPodForNamespaceAndPodSelectorType,
+		factory.AddressSetPodSelectorType,
 		factory.EgressIPType,
 		factory.EgressIPNamespaceType,
 		factory.EgressIPPodType,
@@ -76,15 +75,14 @@ func (h *baseNetworkControllerEventHandler) areResourcesEqual(objType reflect.Ty
 
 	case factory.PodType,
 		factory.EgressIPPodType,
-		factory.PeerPodSelectorType,
-		factory.PeerPodForNamespaceAndPodSelectorType,
+		factory.AddressSetPodSelectorType,
 		factory.LocalPodSelectorType:
 		// For these types, there was no old vs new obj comparison in the original update code,
 		// so pretend they're always different so that the update code gets executed
 		return false, nil
 
 	case factory.PeerNamespaceSelectorType,
-		factory.PeerNamespaceAndPodSelectorType:
+		factory.AddressSetNamespaceAndPodSelectorType:
 		// For these types there is no update code, so pretend old and new
 		// objs are always equivalent and stop processing the update event.
 		return true, nil
@@ -153,13 +151,12 @@ func (h *baseNetworkControllerEventHandler) getResourceFromInformerCache(objType
 		obj, err = watchFactory.GetNode(name)
 
 	case factory.PodType,
-		factory.PeerPodSelectorType,
-		factory.PeerPodForNamespaceAndPodSelectorType,
+		factory.AddressSetPodSelectorType,
 		factory.LocalPodSelectorType,
 		factory.EgressIPPodType:
 		obj, err = watchFactory.GetPod(namespace, name)
 
-	case factory.PeerNamespaceAndPodSelectorType,
+	case factory.AddressSetNamespaceAndPodSelectorType,
 		factory.PeerNamespaceSelectorType,
 		factory.EgressIPNamespaceType,
 		factory.NamespaceType:
@@ -210,8 +207,7 @@ func needsUpdateDuringRetry(objType reflect.Type) bool {
 func (h *baseNetworkControllerEventHandler) isObjectInTerminalState(objType reflect.Type, obj interface{}) bool {
 	switch objType {
 	case factory.PodType,
-		factory.PeerPodSelectorType,
-		factory.PeerPodForNamespaceAndPodSelectorType,
+		factory.AddressSetPodSelectorType,
 		factory.LocalPodSelectorType,
 		factory.EgressIPPodType:
 		pod := obj.(*kapi.Pod)
