@@ -80,9 +80,9 @@ const (
 	defaultNumEventQueues uint32 = 15
 
 	// default priorities for various handlers (also the highest priority)
-	defaultHandlerPriority uint32 = 0
+	defaultHandlerPriority int = 0
 	// lowest priority among various handlers (See GetHandlerPriority for more information)
-	minHandlerPriority uint32 = 4
+	minHandlerPriority int = 4
 )
 
 // types for dynamic handlers created when adding a network policy
@@ -423,7 +423,7 @@ type AddHandlerFuncType func(namespace string, sel labels.Selector, funcs cache.
 // By default handlers get the defaultHandlerPriority which is 0 (highest priority). Higher the number, lower the priority to get an event.
 // Example: EgressIPPodType will always get the pod event after PodType and PeerPodSelectorType will always get the event after PodType and EgressIPPodType
 // NOTE: If you are touching this function to add a new object type that uses shared objects, please make sure to update `minHandlerPriority` if needed
-func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority uint32) {
+func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority int) {
 	switch objType {
 	case EgressIPPodType:
 		return 1
@@ -513,7 +513,7 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
 }
 
-func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority uint32) (*Handler, error) {
+func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority int) (*Handler, error) {
 	inf, ok := wf.informers[objType]
 	if !ok {
 		klog.Fatalf("Tried to add handler of unknown object type %v", objType)
@@ -579,7 +579,7 @@ func (wf *WatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandler, p
 }
 
 // AddFilteredPodHandler adds a handler function that will be executed when Pod objects that match the given filters change
-func (wf *WatchFactory) AddFilteredPodHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority uint32) (*Handler, error) {
+func (wf *WatchFactory) AddFilteredPodHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority int) (*Handler, error) {
 	return wf.addHandler(PodType, namespace, sel, handlerFuncs, processExisting, priority)
 }
 
@@ -664,7 +664,7 @@ func (wf *WatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEventHand
 }
 
 // AddFilteredNamespaceHandler adds a handler function that will be executed when Namespace objects that match the given filters change
-func (wf *WatchFactory) AddFilteredNamespaceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority uint32) (*Handler, error) {
+func (wf *WatchFactory) AddFilteredNamespaceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority int) (*Handler, error) {
 	return wf.addHandler(NamespaceType, namespace, sel, handlerFuncs, processExisting, priority)
 }
 
@@ -674,7 +674,7 @@ func (wf *WatchFactory) RemoveNamespaceHandler(handler *Handler) {
 }
 
 // AddNodeHandler adds a handler function that will be executed on Node object changes
-func (wf *WatchFactory) AddNodeHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority uint32) (*Handler, error) {
+func (wf *WatchFactory) AddNodeHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority int) (*Handler, error) {
 	return wf.addHandler(NodeType, "", nil, handlerFuncs, processExisting, priority)
 }
 
