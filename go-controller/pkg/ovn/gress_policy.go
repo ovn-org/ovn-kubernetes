@@ -28,6 +28,11 @@ type gressPolicy struct {
 	peerV4AddressSets *sync.Map
 	// peerV6AddressSets has Address sets for all namespaces and pod selectors for IPv6
 	peerV6AddressSets *sync.Map
+	// if gressPolicy has at least 1 rule with selector, set this field to true.
+	// This is required to distinguish gress that doesn't have any peerAddressSets added yet
+	// (e.g. because there are no namespaces matching label selector) and should allow nothing,
+	// from empty gress, which should allow all.
+	hasPeerSelector bool
 
 	// portPolicies represents all the ports to which traffic is allowed for
 	// the rule in question.
@@ -92,15 +97,6 @@ func syncMapToSortedList(m *sync.Map) []string {
 	return result
 }
 
-func syncMapLen(m *sync.Map) int {
-	result := 0
-	m.Range(func(_, _ interface{}) bool {
-		result++
-		return true
-	})
-	return result
-}
-
 func (gp *gressPolicy) addPeerAddressSets(asHashNameV4, asHashNameV6 string) {
 	if config.IPv4Mode && asHashNameV4 != "" {
 		gp.peerV4AddressSets.Store("$"+asHashNameV4, true)
@@ -130,18 +126,43 @@ func (gp *gressPolicy) addIPBlock(ipblockJSON *knet.IPBlock) {
 }
 
 func (gp *gressPolicy) getL3MatchFromAddressSet() string {
-	var l3Match string
-	v4List := syncMapToSortedList(gp.peerV4AddressSets)
-	v6List := syncMapToSortedList(gp.peerV6AddressSets)
+	v4AddressSets := syncMapToSortedList(gp.peerV4AddressSets)
+	v6AddressSets := syncMapToSortedList(gp.peerV6AddressSets)
 
-	if len(v4List) == 0 && len(v6List) == 0 {
-		l3Match = constructEmptyMatchString()
+	// We sort address slice,
+	// Hence we'll be constructing the sorted address set string here
+	var direction, v4Match, v6Match, match string
+	if gp.policyType == knet.PolicyTypeIngress {
+		direction = "src"
 	} else {
-		// We sort address slice,
-		// Hence we'll be constructing the sorted address set string here
-		l3Match = gp.constructPeerASMatchString(v4List, v6List)
+		direction = "dst"
 	}
-	return l3Match
+
+	//  At this point there will be address sets in one or both of them.
+	//  Contents in both address sets mean dual stack, else one will be empty because we will only populate
+	//  entries for enabled stacks
+	if config.IPv4Mode {
+		v4AddressSetStr := strings.Join(v4AddressSets, ", ")
+		v4Match = fmt.Sprintf("%s.%s == {%s}", "ip4", direction, v4AddressSetStr)
+		if gp.policyType == knet.PolicyTypeIngress {
+			v4Match = fmt.Sprintf("(%s || (%s.src == %s && %s.dst == {%s}))", v4Match, "ip4",
+				types.V4OVNServiceHairpinMasqueradeIP, "ip4", v4AddressSetStr)
+		}
+		match = v4Match
+	}
+	if config.IPv6Mode {
+		v6AddressSetStr := strings.Join(v6AddressSets, ", ")
+		v6Match = fmt.Sprintf("%s.%s == {%s}", "ip6", direction, v6AddressSetStr)
+		if gp.policyType == knet.PolicyTypeIngress {
+			v6Match = fmt.Sprintf("(%s || (%s.src == %s && %s.dst == {%s}))", v6Match, "ip6",
+				types.V6OVNServiceHairpinMasqueradeIP, "ip6", v6AddressSetStr)
+		}
+		match = v6Match
+	}
+	if config.IPv4Mode && config.IPv6Mode {
+		match = fmt.Sprintf("(%s || %s)", v4Match, v6Match)
+	}
+	return match
 }
 
 func constructEmptyMatchString() string {
@@ -153,43 +174,6 @@ func constructEmptyMatchString() string {
 	default:
 		return "ip4"
 	}
-}
-
-func (gp *gressPolicy) constructPeerASMatchString(v4AddressSets, v6AddressSets []string) string {
-	var direction, v4MatchStr, v6MatchStr, matchStr string
-	if gp.policyType == knet.PolicyTypeIngress {
-		direction = "src"
-	} else {
-		direction = "dst"
-	}
-
-	//  At this point there will be address sets in one or both of them.
-	//  Contents in both address sets mean dual stack, else one will be empty because we will only populate
-	//  entries for enabled stacks
-	if len(v4AddressSets) > 0 {
-		v4AddressSetStr := strings.Join(v4AddressSets, ", ")
-		v4MatchStr = fmt.Sprintf("%s.%s == {%s}", "ip4", direction, v4AddressSetStr)
-		if gp.policyType == knet.PolicyTypeIngress {
-			v4MatchStr = fmt.Sprintf("(%s || (%s.src == %s && %s.dst == {%s}))", v4MatchStr, "ip4", types.V4OVNServiceHairpinMasqueradeIP, "ip4", v4AddressSetStr)
-		}
-		matchStr = v4MatchStr
-	}
-	if len(v6AddressSets) > 0 {
-		v6AddressSetStr := strings.Join(v6AddressSets, ", ")
-		v6MatchStr = fmt.Sprintf("%s.%s == {%s}", "ip6", direction, v6AddressSetStr)
-		if gp.policyType == knet.PolicyTypeIngress {
-			v6MatchStr = fmt.Sprintf("(%s || (%s.src == %s && %s.dst == {%s}))", v6MatchStr, "ip6", types.V6OVNServiceHairpinMasqueradeIP, "ip6", v6AddressSetStr)
-		}
-		matchStr = v6MatchStr
-	}
-	if len(v4AddressSets) > 0 && len(v6AddressSets) > 0 {
-		matchStr = fmt.Sprintf("(%s || %s)", v4MatchStr, v6MatchStr)
-	}
-	return matchStr
-}
-
-func (gp *gressPolicy) sizeOfAddressSet() int {
-	return syncMapLen(gp.peerV4AddressSets) + syncMapLen(gp.peerV6AddressSets)
 }
 
 func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) []string {
@@ -257,29 +241,42 @@ func (gp *gressPolicy) delNamespaceAddressSet(name string) bool {
 	return false
 }
 
+func (gp *gressPolicy) isEmpty() bool {
+	// empty gress allows all, it is empty if there are no ipBlocks and no peerSelectors
+	return !gp.hasPeerSelector && len(gp.ipBlock) == 0
+}
+
 // buildLocalPodACLs builds the ACLs that implement the gress policy's rules to the
 // given Port Group (which should contain all pod logical switch ports selected
 // by the parent NetworkPolicy)
 // buildLocalPodACLs is safe for concurrent use, since it only uses gressPolicy fields that don't change
 // since creation, or are safe for concurrent use like peerVXAddressSets
 func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *ACLLoggingLevels) []*nbdb.ACL {
-	l3Match := gp.getL3MatchFromAddressSet()
-	var lportMatch string
-	var cidrMatches []string
+	var lportMatch, match, l3Match string
 	if gp.policyType == knet.PolicyTypeIngress {
 		lportMatch = fmt.Sprintf("outport == @%s", portGroupName)
 	} else {
 		lportMatch = fmt.Sprintf("inport == @%s", portGroupName)
 	}
 
-	acls := []*nbdb.ACL{}
+	var l4Matches []string
 	if len(gp.portPolicies) == 0 {
-		match := fmt.Sprintf("%s && %s", l3Match, lportMatch)
-		l4Match := noneMatch
-
+		l4Matches = append(l4Matches, noneMatch)
+	} else {
+		l4Matches = make([]string, 0, len(gp.portPolicies))
+		for _, port := range gp.portPolicies {
+			l4Match, err := port.getL4Match()
+			if err != nil {
+				continue
+			}
+			l4Matches = append(l4Matches, l4Match)
+		}
+	}
+	acls := []*nbdb.ACL{}
+	for _, l4Match := range l4Matches {
 		if len(gp.ipBlock) > 0 {
 			// Add ACL allow rule for IPBlock CIDR
-			cidrMatches = gp.getMatchFromIPBlock(lportMatch, l4Match)
+			cidrMatches := gp.getMatchFromIPBlock(lportMatch, l4Match)
 			for i, cidrMatch := range cidrMatches {
 				acl := gp.buildACLAllow(cidrMatch, l4Match, i+1, aclLogging)
 				acls = append(acls, acl)
@@ -287,31 +284,22 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *ACLLo
 		}
 		// if there are pod/namespace selector, then allow packets from/to that address_set or
 		// if the NetworkPolicyPeer is empty, then allow from all sources or to all destinations.
-		if gp.sizeOfAddressSet() > 0 || len(gp.ipBlock) == 0 {
-			acl := gp.buildACLAllow(match, l4Match, 0, aclLogging)
-			acls = append(acls, acl)
-		}
-	}
-	for _, port := range gp.portPolicies {
-		l4Match, err := port.getL4Match()
-		if err != nil {
-			continue
-		}
-		match := fmt.Sprintf("%s && %s && %s", l3Match, l4Match, lportMatch)
-		if len(gp.ipBlock) > 0 {
-			// Add ACL allow rule for IPBlock CIDR
-			cidrMatches = gp.getMatchFromIPBlock(lportMatch, l4Match)
-			for i, cidrMatch := range cidrMatches {
-				acl := gp.buildACLAllow(cidrMatch, l4Match, i+1, aclLogging)
-				acls = append(acls, acl)
+		if gp.hasPeerSelector || gp.isEmpty() {
+			if gp.isEmpty() {
+				l3Match = constructEmptyMatchString()
+			} else {
+				l3Match = gp.getL3MatchFromAddressSet()
 			}
-		}
-		if gp.sizeOfAddressSet() > 0 || len(gp.ipBlock) == 0 {
+
+			if l4Match == noneMatch {
+				match = fmt.Sprintf("%s && %s", l3Match, lportMatch)
+			} else {
+				match = fmt.Sprintf("%s && %s && %s", l3Match, l4Match, lportMatch)
+			}
 			acl := gp.buildACLAllow(match, l4Match, 0, aclLogging)
 			acls = append(acls, acl)
 		}
 	}
-
 	return acls
 }
 

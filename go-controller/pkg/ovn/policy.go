@@ -1186,6 +1186,7 @@ func (oc *DefaultNetworkController) setupGressPolicy(np *networkPolicy, gp *gres
 		klog.Errorf("setupGressPolicy failed: all fields unset")
 		return nil, nil
 	}
+	gp.hasPeerSelector = true
 
 	podSelector := peer.PodSelector
 	if podSelector == nil {
