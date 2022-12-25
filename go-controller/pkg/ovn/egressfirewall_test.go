@@ -13,7 +13,6 @@ import (
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -2056,17 +2055,3 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 		}
 	})
 })
-
-//helper functions to help test egressfirewallDNS
-
-// Create an EgressDNS object without the Sync function
-// To make it easier to mock EgressFirewall functionality create an egressFirewall
-// without the go routine of the sync function
-
-// GetDNSEntryForTest Gets a dnsEntry from a EgressDNS object for testing
-func (e *EgressDNS) GetDNSEntryForTest(dnsName string) (map[string]struct{}, []net.IP, addressset.AddressSet, error) {
-	if e.dnsEntries[dnsName] == nil {
-		return nil, nil, nil, fmt.Errorf("there is no dnsEntry for dnsName: %s", dnsName)
-	}
-	return e.dnsEntries[dnsName].namespaces, e.dnsEntries[dnsName].dnsResolves, e.dnsEntries[dnsName].dnsAddressSet, nil
-}

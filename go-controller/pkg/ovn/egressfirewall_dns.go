@@ -30,12 +30,17 @@ type EgressDNS struct {
 	controllerStop <-chan struct{}
 }
 
+type dnsTimedEntry struct {
+	ip net.IP
+	ts time.Time
+}
+
 type dnsEntry struct {
 	// this map holds all the namespaces that a dnsName appears in
 	namespaces map[string]struct{}
 	// the current IP addresses the dnsName resolves to
 	// NOTE: used for testing
-	dnsResolves []net.IP
+	dnsResolves map[string]dnsTimedEntry
 	// the addressSet that contains the current IPs
 	dnsAddressSet addressset.AddressSet
 }
@@ -118,6 +123,39 @@ func (e *EgressDNS) Update(dns string) (bool, error) {
 	return e.dns.Update(dns)
 }
 
+// serve stale entries for this duration
+const dnsEntryTimeout = 7200 * time.Second
+
+// maximum number of entries to keep for one DNS name
+const maxDnsEntry = 4000
+
+// merge the IPs the DNS server answered with the existing IPs we know
+// about for a DNS entry
+func (e *EgressDNS) merge(dnsName string, ips []net.IP) []net.IP {
+	tsNow := time.Now()
+	tsUntil := tsNow.Add(dnsEntryTimeout).Round(10 * time.Minute)
+
+	if e.dnsEntries[dnsName].dnsResolves == nil {
+		e.dnsEntries[dnsName].dnsResolves = make(map[string]dnsTimedEntry)
+	}
+
+	// merge new ips into existing entries
+	for _, ip := range ips {
+		e.dnsEntries[dnsName].dnsResolves[ip.String()] = dnsTimedEntry{ip, tsUntil}
+	}
+
+	actualIps := make([]net.IP, 0, len(ips))
+	// clean-up expired entries
+	for key, entry := range e.dnsEntries[dnsName].dnsResolves {
+		if entry.ts.Before(tsNow) || len(actualIps) > maxDnsEntry {
+			delete(e.dnsEntries[dnsName].dnsResolves, key)
+		} else {
+			actualIps = append(actualIps, entry.ip)
+		}
+	}
+	return actualIps
+}
+
 func (e *EgressDNS) updateEntryForName(dnsName string) error {
 	e.lock.Lock()
 	defer e.lock.Unlock()
@@ -126,9 +164,9 @@ func (e *EgressDNS) updateEntryForName(dnsName string) error {
 		return fmt.Errorf("cannot update DNS record for %s: no entry found. "+
 			"Was the EgressFirewall deleted?", dnsName)
 	}
-	e.dnsEntries[dnsName].dnsResolves = ips
+	mergedIps := e.merge(dnsName, ips)
 
-	if err := e.dnsEntries[dnsName].dnsAddressSet.SetIPs(ips); err != nil {
+	if err := e.dnsEntries[dnsName].dnsAddressSet.SetIPs(mergedIps); err != nil {
 		return fmt.Errorf("cannot add IPs from EgressFirewall AddressSet %s: %v", dnsName, err)
 	}
 	return nil

@@ -269,7 +269,7 @@ func TestAdd(t *testing.T) {
 				for stay, timeout := true, time.After(15*time.Second); stay; {
 					_, dnsResolves, _ := res.getDNSEntry(tc.dnsName)
 					if dnsResolves != nil {
-						if len(dnsResolves) == 1 && dnsResolves[0].String() == test1IPv4Update {
+						if len(dnsResolves) == 2 /* && dnsResolves[0].String() == test1IPv4Update */ {
 							break
 						}
 					}
@@ -439,7 +439,14 @@ func (e *EgressDNS) getDNSEntry(dnsName string) (map[string]struct{}, []net.IP, 
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	if dnsEntry, exists := e.dnsEntries[dnsName]; exists {
-		return dnsEntry.namespaces, dnsEntry.dnsResolves, dnsEntry.dnsAddressSet
+		if dnsEntry.dnsResolves == nil {
+			return dnsEntry.namespaces, nil, dnsEntry.dnsAddressSet
+		}
+		ips := make([]net.IP, 0, len(dnsEntry.dnsResolves))
+		for _, val := range dnsEntry.dnsResolves {
+			ips = append(ips, val.ip)
+		}
+		return dnsEntry.namespaces, ips, dnsEntry.dnsAddressSet
 	}
 
 	return nil, nil, nil
