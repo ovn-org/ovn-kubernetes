@@ -8,7 +8,6 @@ import (
 
 	"github.com/miekg/dns"
 
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 
@@ -16,8 +15,11 @@ import (
 )
 
 const (
-	// defaultTTL is used if an invalid or zero TTL is provided.
+	// defaultTTL is used when the resolution fails
 	defaultTTL = 30 * time.Minute
+
+	// minimalTTL is used when a 0 TTL is answered
+	minimalTTL = 10 * time.Second
 )
 
 type dnsValue struct {
@@ -127,8 +129,6 @@ func (d *DNS) updateOne(dns string) (bool, error) {
 
 func (d *DNS) getIPsAndMinTTL(domain string) ([]net.IP, time.Duration, error) {
 	ips := []net.IP{}
-	ttlSet := false
-	var ttlSeconds uint32
 	var minTTL uint32
 	var recordTypes []uint16
 
@@ -162,13 +162,7 @@ func (d *DNS) getIPsAndMinTTL(domain string) ([]net.IP, time.Duration, error) {
 
 			if in != nil && len(in.Answer) > 0 {
 				for _, a := range in.Answer {
-					if !ttlSet || a.Header().Ttl < ttlSeconds {
-						ttlSeconds = a.Header().Ttl
-						ttlSet = true
-						if minTTL == 0 {
-							minTTL = ttlSeconds
-						}
-					}
+					ttlSeconds := a.Header().Ttl
 
 					switch t := a.(type) {
 					case *dns.A:
@@ -176,25 +170,23 @@ func (d *DNS) getIPsAndMinTTL(domain string) ([]net.IP, time.Duration, error) {
 					case *dns.AAAA:
 						ips = append(ips, t.AAAA)
 					}
-				}
-				if ttlSeconds < minTTL {
-					minTTL = ttlSeconds
+
+					if ttlSeconds < minTTL {
+						minTTL = ttlSeconds
+					}
 				}
 			}
 		}
 	}
 
-	if !ttlSet || (len(ips) == 0) {
-		return nil, defaultTTL, fmt.Errorf("IPv4 or IPv6 addr not found for domain: %q, nameservers: %v", domain, d.nameservers)
+	if len(ips) == 0 {
+		return nil, 0, fmt.Errorf("IPv4 or IPv6 addr not found for domain: %q, nameservers: %v", domain, d.nameservers)
 	}
 
-	ttl, err := time.ParseDuration(fmt.Sprintf("%ds", minTTL))
-	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("invalid TTL value for domain: %q, err: %v, defaulting ttl=%s", domain, err, defaultTTL.String()))
-		ttl = defaultTTL
-	}
+	ttl := time.Duration(minTTL) * time.Second
+
 	if ttl == 0 {
-		ttl = defaultTTL
+		ttl = minimalTTL
 	}
 
 	return removeDuplicateIPs(ips), ttl, nil
