@@ -28,17 +28,6 @@ const (
 	lportEgressAfterLB aclPipelineType = "from-lport-after-lb"
 )
 
-func aclTypeToPolicyType(aclT aclPipelineType) knet.PolicyType {
-	switch aclT {
-	case lportEgressAfterLB:
-		return knet.PolicyTypeEgress
-	case lportIngress:
-		return knet.PolicyTypeIngress
-	default:
-		panic(fmt.Sprintf("Failed to convert aclPipelineType to PolicyType: unknown acl type %s", aclT))
-	}
-}
-
 func policyTypeToAclPipeline(policyType knet.PolicyType) aclPipelineType {
 	switch policyType {
 	case knet.PolicyTypeEgress:
@@ -95,42 +84,9 @@ func getACLName(dbIDs *libovsdbops.DbObjectIDs) string {
 }
 
 // BuildACL should be used to build ACL instead of directly calling libovsdbops.BuildACL.
-// It can properly set and reset log settings for ACL based on ACLLoggingLevels
-func BuildACL(aclName string, priority int, match, action string,
-	logLevels *ACLLoggingLevels, aclT aclPipelineType, externalIDs map[string]string) *nbdb.ACL {
-	var options map[string]string
-	var direction string
-	switch aclT {
-	case lportEgressAfterLB:
-		direction = nbdb.ACLDirectionFromLport
-		options = map[string]string{
-			"apply-after-lb": "true",
-		}
-	case lportIngress:
-		direction = nbdb.ACLDirectionToLport
-	default:
-		panic(fmt.Sprintf("Failed to build ACL: unknown acl type %s", aclT))
-	}
-	log, logSeverity := getLogSeverity(action, logLevels)
-	ACL := libovsdbops.BuildACL(
-		aclName,
-		direction,
-		priority,
-		match,
-		action,
-		types.OvnACLLoggingMeter,
-		logSeverity,
-		log,
-		externalIDs,
-		options,
-	)
-	return ACL
-}
-
-// BuildACLFromDbIDs should be used to build ACL instead of directly calling libovsdbops.BuildACL.
 // It can properly set and reset log settings for ACL based on ACLLoggingLevels, and
 // set acl.Name and acl.ExternalIDs based on given DbIDs
-func BuildACLFromDbIDs(dbIDs *libovsdbops.DbObjectIDs, priority int, match, action string, logLevels *ACLLoggingLevels,
+func BuildACL(dbIDs *libovsdbops.DbObjectIDs, priority int, match, action string, logLevels *ACLLoggingLevels,
 	aclT aclPipelineType) *nbdb.ACL {
 	var options map[string]string
 	var direction string
@@ -163,23 +119,7 @@ func BuildACLFromDbIDs(dbIDs *libovsdbops.DbObjectIDs, priority int, match, acti
 	return ACL
 }
 
-func getACLMatch(portGroupName, match string, aclT aclPipelineType) string {
-	var aclMatch string
-	switch aclT {
-	case lportIngress:
-		aclMatch = "outport == @" + portGroupName
-	case lportEgressAfterLB:
-		aclMatch = "inport == @" + portGroupName
-	default:
-		panic(fmt.Sprintf("Unknown acl type %s", aclT))
-	}
-	if match != "" {
-		aclMatch += " && " + match
-	}
-	return aclMatch
-}
-
-func getACLMatchFromACLDir(portGroupName, match string, aclDir aclDirection) string {
+func getACLMatch(portGroupName, match string, aclDir aclDirection) string {
 	var aclMatch string
 	switch aclDir {
 	case aclIngress:

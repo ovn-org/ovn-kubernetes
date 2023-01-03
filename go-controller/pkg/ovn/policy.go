@@ -294,7 +294,7 @@ func (oc *DefaultNetworkController) addAllowACLFromNode(nodeName string, mgmtPor
 	}
 	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtPortIP.String())
 	dbIDs := getAllowFromNodeACLDbIDs(nodeName, mgmtPortIP.String(), oc.controllerName)
-	nodeACL := BuildACLFromDbIDs(dbIDs, types.DefaultAllowPriority, match,
+	nodeACL := BuildACL(dbIDs, types.DefaultAllowPriority, match,
 		nbdb.ACLActionAllowRelated, nil, lportIngress)
 
 	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, nodeACL)
@@ -333,13 +333,13 @@ func defaultDenyPortGroupName(namespace, gressSuffix string) string {
 
 func (oc *DefaultNetworkController) buildDenyACLs(namespace, pg string, aclLogging *ACLLoggingLevels,
 	aclDir aclDirection) (denyACL, allowACL *nbdb.ACL) {
-	denyMatch := getACLMatchFromACLDir(pg, "", aclDir)
-	allowMatch := getACLMatchFromACLDir(pg, arpAllowPolicyMatch, aclDir)
+	denyMatch := getACLMatch(pg, "", aclDir)
+	allowMatch := getACLMatch(pg, arpAllowPolicyMatch, aclDir)
 	aclPipeline := aclDirectionToACLPipeline(aclDir)
 
-	denyACL = BuildACLFromDbIDs(oc.getDefaultDenyPolicyACLIDs(namespace, aclDir, defaultDenyACL),
+	denyACL = BuildACL(oc.getDefaultDenyPolicyACLIDs(namespace, aclDir, defaultDenyACL),
 		types.DefaultDenyPriority, denyMatch, nbdb.ACLActionDrop, aclLogging, aclPipeline)
-	allowACL = BuildACLFromDbIDs(oc.getDefaultDenyPolicyACLIDs(namespace, aclDir, arpAllowACL),
+	allowACL = BuildACL(oc.getDefaultDenyPolicyACLIDs(namespace, aclDir, arpAllowACL),
 		types.DefaultAllowPriority, allowMatch, nbdb.ACLActionAllow, nil, aclPipeline)
 	return
 }
@@ -1535,12 +1535,12 @@ func (oc *DefaultNetworkController) addHairpinAllowACL() error {
 	}
 
 	ingressACLIDs := oc.getNetpolDefaultACLDbIDs(string(knet.PolicyTypeIngress))
-	ingressACL := BuildACL("", types.DefaultAllowPriority, match,
-		nbdb.ACLActionAllowRelated, nil, lportIngress, ingressACLIDs.GetExternalIDs())
+	ingressACL := BuildACL(ingressACLIDs, types.DefaultAllowPriority, match,
+		nbdb.ACLActionAllowRelated, nil, lportIngress)
 
 	egressACLIDs := oc.getNetpolDefaultACLDbIDs(string(knet.PolicyTypeEgress))
-	egressACL := BuildACL("", types.DefaultAllowPriority, match,
-		nbdb.ACLActionAllowRelated, nil, lportEgressAfterLB, egressACLIDs.GetExternalIDs())
+	egressACL := BuildACL(egressACLIDs, types.DefaultAllowPriority, match,
+		nbdb.ACLActionAllowRelated, nil, lportEgressAfterLB)
 
 	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, ingressACL, egressACL)
 	if err != nil {

@@ -120,16 +120,16 @@ func (oc *DefaultNetworkController) createMulticastAllowPolicy(ns string, nsInfo
 	portGroupName := getMulticastPortGroupName(ns)
 
 	aclDir := aclEgress
-	egressMatch := getACLMatchFromACLDir(portGroupName, getMulticastACLEgrMatch(), aclDir)
+	egressMatch := getACLMatch(portGroupName, getMulticastACLEgrMatch(), aclDir)
 	dbIDs := getNamespaceMcastACLDbIDs(ns, aclDir, oc.controllerName)
 	aclPipeline := aclDirectionToACLPipeline(aclDir)
-	egressACL := BuildACLFromDbIDs(dbIDs, types.DefaultMcastAllowPriority, egressMatch, nbdb.ACLActionAllow, nil, aclPipeline)
+	egressACL := BuildACL(dbIDs, types.DefaultMcastAllowPriority, egressMatch, nbdb.ACLActionAllow, nil, aclPipeline)
 
 	aclDir = aclIngress
-	ingressMatch := getACLMatchFromACLDir(portGroupName, getMulticastACLIgrMatch(nsInfo), aclDir)
+	ingressMatch := getACLMatch(portGroupName, getMulticastACLIgrMatch(nsInfo), aclDir)
 	dbIDs = getNamespaceMcastACLDbIDs(ns, aclDir, oc.controllerName)
 	aclPipeline = aclDirectionToACLPipeline(aclDir)
-	ingressACL := BuildACLFromDbIDs(dbIDs, types.DefaultMcastAllowPriority, ingressMatch, nbdb.ACLActionAllow, nil, aclPipeline)
+	ingressACL := BuildACL(dbIDs, types.DefaultMcastAllowPriority, ingressMatch, nbdb.ACLActionAllow, nil, aclPipeline)
 
 	acls := []*nbdb.ACL{egressACL, ingressACL}
 	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, acls...)
@@ -196,7 +196,7 @@ func (oc *DefaultNetworkController) createDefaultDenyMulticastPolicy() error {
 	for _, aclDir := range []aclDirection{aclEgress, aclIngress} {
 		dbIDs := getDefaultMcastACLDbIDs(mcastDefaultDenyID, aclDir, oc.controllerName)
 		aclPipeline := aclDirectionToACLPipeline(aclDir)
-		acl := BuildACLFromDbIDs(dbIDs, types.DefaultMcastDenyPriority, match, nbdb.ACLActionDrop, nil, aclPipeline)
+		acl := BuildACL(dbIDs, types.DefaultMcastDenyPriority, match, nbdb.ACLActionDrop, nil, aclPipeline)
 		acls = append(acls, acl)
 	}
 	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, acls...)
@@ -232,10 +232,10 @@ func (oc *DefaultNetworkController) createDefaultAllowMulticastPolicy() error {
 	mcastMatch := getMulticastACLMatch()
 	acls := make([]*nbdb.ACL, 0, 2)
 	for _, aclDir := range []aclDirection{aclEgress, aclIngress} {
-		match := getACLMatchFromACLDir(types.ClusterRtrPortGroupName, mcastMatch, aclDir)
+		match := getACLMatch(types.ClusterRtrPortGroupName, mcastMatch, aclDir)
 		dbIDs := getDefaultMcastACLDbIDs(mcastAllowInterNodeID, aclDir, oc.controllerName)
 		aclPipeline := aclDirectionToACLPipeline(aclDir)
-		acl := BuildACLFromDbIDs(dbIDs, types.DefaultMcastAllowPriority, match, nbdb.ACLActionAllow, nil, aclPipeline)
+		acl := BuildACL(dbIDs, types.DefaultMcastAllowPriority, match, nbdb.ACLActionAllow, nil, aclPipeline)
 		acls = append(acls, acl)
 	}
 

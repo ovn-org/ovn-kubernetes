@@ -319,7 +319,7 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *ACLLo
 			ipBlockMatches := gp.getMatchFromIPBlock(lportMatch, l4Match)
 			for ipBlockIdx, ipBlockMatch := range ipBlockMatches {
 				aclIDs := gp.getNetpolACLDbIDs(portPolIdx, ipBlockIdx)
-				acl := BuildACLFromDbIDs(aclIDs, types.DefaultAllowPriority, ipBlockMatch, action,
+				acl := BuildACL(aclIDs, types.DefaultAllowPriority, ipBlockMatch, action,
 					aclLogging, gp.aclPipeline)
 				createdACLs = append(createdACLs, acl)
 			}
@@ -340,7 +340,7 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *ACLLo
 				addrSetMatch = fmt.Sprintf("%s && %s && %s", l3Match, l4Match, lportMatch)
 			}
 			aclIDs := gp.getNetpolACLDbIDs(portPolIdx, emptyIdx)
-			acl := BuildACLFromDbIDs(aclIDs, types.DefaultAllowPriority, addrSetMatch, action,
+			acl := BuildACL(aclIDs, types.DefaultAllowPriority, addrSetMatch, action,
 				aclLogging, gp.aclPipeline)
 			if l3Match == "" {
 				// if l3Match is empty, then no address sets are selected for a given gressPolicy.

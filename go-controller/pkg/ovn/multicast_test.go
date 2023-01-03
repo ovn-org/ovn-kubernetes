@@ -91,7 +91,7 @@ func getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup *nbdb
 
 	aclIDs = getDefaultMcastACLDbIDs(mcastAllowInterNodeID, aclEgress, DefaultNetworkControllerName)
 	aclName = getACLName(aclIDs)
-	egressMatch := getACLMatchFromACLDir(types.ClusterRtrPortGroupName, match, aclEgress)
+	egressMatch := getACLMatch(types.ClusterRtrPortGroupName, match, aclEgress)
 	defaultAllowEgressACL := libovsdbops.BuildACL(
 		aclName,
 		nbdb.ACLDirectionFromLport,
@@ -110,7 +110,7 @@ func getMulticastDefaultExpectedData(clusterPortGroup, clusterRtrPortGroup *nbdb
 
 	aclIDs = getDefaultMcastACLDbIDs(mcastAllowInterNodeID, aclIngress, DefaultNetworkControllerName)
 	aclName = getACLName(aclIDs)
-	ingressMatch := getACLMatchFromACLDir(types.ClusterRtrPortGroupName, match, aclIngress)
+	ingressMatch := getACLMatch(types.ClusterRtrPortGroupName, match, aclIngress)
 	defaultAllowIngressACL := libovsdbops.BuildACL(
 		aclName,
 		nbdb.ACLDirectionToLport,
@@ -187,11 +187,11 @@ func getDefaultPortGroups() (clusterPortGroup, clusterRtrPortGroup *nbdb.PortGro
 
 func getMulticastPolicyExpectedData(ns string, ports []string) []libovsdb.TestData {
 	pg_hash := getMulticastPortGroupName(ns)
-	egressMatch := getACLMatchFromACLDir(pg_hash, getMulticastACLEgrMatch(), aclEgress)
+	egressMatch := getACLMatch(pg_hash, getMulticastACLEgrMatch(), aclEgress)
 
 	ip4AddressSet, ip6AddressSet := getNsAddrSetHashNames(ns)
 	mcastMatch := getACLMatchAF(getMulticastACLIgrMatchV4(ip4AddressSet), getMulticastACLIgrMatchV6(ip6AddressSet))
-	ingressMatch := getACLMatchFromACLDir(pg_hash, mcastMatch, aclIngress)
+	ingressMatch := getACLMatch(pg_hash, mcastMatch, aclIngress)
 
 	aclIDs := getNamespaceMcastACLDbIDs(ns, aclEgress, DefaultNetworkControllerName)
 	aclName := getACLName(aclIDs)

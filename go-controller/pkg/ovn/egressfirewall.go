@@ -368,7 +368,7 @@ func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, h
 func (oc *DefaultNetworkController) createEgressFirewallRules(ruleIdx int, match, action, namespace string, aclLogging *ACLLoggingLevels) error {
 	aclIDs := oc.getEgressFirewallACLDbIDs(namespace, ruleIdx)
 	priority := types.EgressFirewallStartPriority - ruleIdx
-	egressFirewallACL := BuildACLFromDbIDs(
+	egressFirewallACL := BuildACL(
 		aclIDs,
 		priority,
 		match,
