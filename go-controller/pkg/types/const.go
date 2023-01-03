@@ -120,6 +120,9 @@ const (
 	// OVN-K8S Address Sets Names
 	HybridRoutePolicyPrefix = "hybrid-route-pods-"
 	EgressQoSRulePrefix     = "egress-qos-pods-"
+	ClusterNodeIP           = "cluster-node-ips"
+	EgressIPServedPods      = "egressip-served-pods"
+	EgressServiceServedPods = "egresssvc-served-pods"
 
 	// OVN-K8S Topology Versions
 	OvnSingleJoinSwitchTopoVersion = 1

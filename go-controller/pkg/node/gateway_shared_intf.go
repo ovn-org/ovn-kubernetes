@@ -46,6 +46,9 @@ const (
 	// ovnkubeSvcViaMgmPortRT is the number of the custom routing table used to steer host->service
 	// traffic packets into OVN via ovn-k8s-mp0. Currently only used for ITP=local traffic.
 	ovnkubeSvcViaMgmPortRT = "7"
+	// ovnKubeNodeSNATMark is used to mark packets that need to be SNAT-ed to nodeIP for
+	// traffic originating from egressIP and egressService controlled pods towards other nodes in the cluster.
+	ovnKubeNodeSNATMark = "0x3f0"
 )
 
 var (
@@ -744,6 +747,9 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 			npw.egressServiceInfoLock.Unlock()
 		}
 	}
+	if !npw.dpuMode {
+		keepIPTRules = append(keepIPTRules, egressSVCIPTDefaultReturnRule())
+	}
 	// sync OF rules once
 	npw.ofm.requestFlowSync()
 	// sync IPtables rules once only for Full mode
@@ -1067,7 +1073,10 @@ func (ofm *openflowManager) updateBridgeFlowCache(extraIPs []net.IP) error {
 	if err != nil {
 		return err
 	}
-	dftCommonFlows := commonFlows(ofm.defaultBridge)
+	dftCommonFlows, err := commonFlows(ofm.defaultBridge)
+	if err != nil {
+		return err
+	}
 	dftFlows = append(dftFlows, dftCommonFlows...)
 
 	ofm.updateFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
@@ -1076,7 +1085,10 @@ func (ofm *openflowManager) updateBridgeFlowCache(extraIPs []net.IP) error {
 	// we consume ex gw bridge flows only if that is enabled
 	if ofm.externalGatewayBridge != nil {
 		ofm.updateExBridgeFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
-		exGWBridgeDftFlows := commonFlows(ofm.externalGatewayBridge)
+		exGWBridgeDftFlows, err := commonFlows(ofm.externalGatewayBridge)
+		if err != nil {
+			return err
+		}
 		ofm.updateExBridgeFlowCacheEntry("DEFAULT", exGWBridgeDftFlows)
 	}
 	return nil
@@ -1334,11 +1346,12 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 	return dftFlows, nil
 }
 
-func commonFlows(bridge *bridgeConfiguration) []string {
+func commonFlows(bridge *bridgeConfiguration) ([]string, error) {
 	ofPortPhys := bridge.ofPortPhys
 	bridgeMacAddress := bridge.macAddress.String()
 	ofPortPatch := bridge.ofPortPatch
 	ofPortHost := bridge.ofPortHost
+	bridgeIPs := bridge.ips
 
 	var dftFlows []string
 
@@ -1348,6 +1361,19 @@ func commonFlows(bridge *bridgeConfiguration) []string {
 			defaultOpenFlowCookie, ofPortPhys, bridgeMacAddress, ofPortPatch, ofPortHost))
 
 	if config.IPv4Mode {
+		physicalIP, err := util.MatchIPNetFamily(false, bridgeIPs)
+		if err != nil {
+			return nil, fmt.Errorf("unable to determine IPv4 physical IP of host: %v", err)
+		}
+		// table0, packets coming from egressIP pods that have mark 1008 on them
+		// will be DNAT-ed a final time into nodeIP to maintain consistency in traffic even if the GR
+		// DNATs these into egressIP prior to reaching external bridge.
+		// egressService pods will also undergo this SNAT to nodeIP since these features are tied
+		// together at the OVN policy level on the distributed router.
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=105, in_port=%s, ip, pkt_mark=%s "+
+				"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)),output:%s",
+				defaultOpenFlowCookie, ofPortPatch, ovnKubeNodeSNATMark, config.Default.ConntrackZone, physicalIP.IP, ctMarkOVN, ofPortPhys))
 		// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
 		// so that reverse direction goes back to the pods.
 		dftFlows = append(dftFlows,
@@ -1366,9 +1392,22 @@ func commonFlows(bridge *bridgeConfiguration) []string {
 		// resubmit to table 1 to know the state and mark of the connection.
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=50, in_port=%s, ip, "+
-				"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, ofPortPhys, config.Default.ConntrackZone))
+				"actions=ct(commit,zone=%d,nat, table=1)", defaultOpenFlowCookie, ofPortPhys, config.Default.ConntrackZone))
 	}
 	if config.IPv6Mode {
+		physicalIP, err := util.MatchIPNetFamily(true, bridgeIPs)
+		if err != nil {
+			return nil, fmt.Errorf("unable to determine IPv6 physical IP of host: %v", err)
+		}
+		// table0, packets coming from egressIP pods that have mark 1008 on them
+		// will be DNAT-ed a final time into nodeIP to maintain consistency in traffic even if the GR
+		// DNATs these into egressIP prior to reaching external bridge.
+		// egressService pods will also undergo this SNAT to nodeIP since these features are tied
+		// together at the OVN policy level on the distributed router.
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=105, in_port=%s, ipv6, pkt_mark=%s "+
+				"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)),output:%s",
+				defaultOpenFlowCookie, ofPortPatch, ovnKubeNodeSNATMark, config.Default.ConntrackZone, physicalIP.IP, ctMarkOVN, ofPortPhys))
 		// table 0, packets coming from pods headed externally. Commit connections with ct_mark ctMarkOVN
 		// so that reverse direction goes back to the pods.
 		dftFlows = append(dftFlows,
@@ -1387,7 +1426,7 @@ func commonFlows(bridge *bridgeConfiguration) []string {
 		// resubmit to table 1 to know the state and mark of the connection.
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=50, in_port=%s, ipv6, "+
-				"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, ofPortPhys, config.Default.ConntrackZone))
+				"actions=ct(commit,zone=%d,nat, table=1)", defaultOpenFlowCookie, ofPortPhys, config.Default.ConntrackZone))
 	}
 
 	actions := fmt.Sprintf("output:%s", ofPortPatch)
@@ -1440,7 +1479,7 @@ func commonFlows(bridge *bridgeConfiguration) []string {
 	dftFlows = append(dftFlows,
 		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=output:NORMAL", defaultOpenFlowCookie))
 
-	return dftFlows
+	return dftFlows, nil
 }
 
 func setBridgeOfPorts(bridge *bridgeConfiguration) error {

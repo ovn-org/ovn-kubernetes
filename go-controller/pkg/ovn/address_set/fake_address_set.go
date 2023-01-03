@@ -1,10 +1,11 @@
 package addressset
 
 import (
-	"k8s.io/klog/v2"
 	"net"
 	"sync"
 	"sync/atomic"
+
+	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -51,6 +52,26 @@ func (f *FakeAddressSetFactory) NewAddressSet(name string, ips []net.IP) (Addres
 
 // EnsureAddressSet returns set object
 func (f *FakeAddressSetFactory) EnsureAddressSet(name string) (AddressSet, error) {
+	f.Lock()
+	defer f.Unlock()
+	_, ok := f.sets[name]
+	gomega.Expect(ok).To(gomega.BeFalse())
+	set, err := newFakeAddressSets(name, []net.IP{}, f.removeAddressSet)
+	if err != nil {
+		return nil, err
+	}
+	ip4ASName, ip6ASName := MakeAddressSetName(name)
+	if set.ipv4 != nil {
+		f.sets[ip4ASName] = set.ipv4
+	}
+	if set.ipv6 != nil {
+		f.sets[ip6ASName] = set.ipv6
+	}
+	return set, nil
+}
+
+// GetAddressSet returns set object
+func (f *FakeAddressSetFactory) GetAddressSet(name string) (AddressSet, error) {
 	f.Lock()
 	defer f.Unlock()
 	_, ok := f.sets[name]
@@ -290,9 +311,9 @@ func (as *fakeAddressSets) AddIPsReturnOps(ips []net.IP) ([]ovsdb.Operation, err
 	var err error
 
 	for _, ip := range ips {
-		if utilnet.IsIPv6(ip) {
+		if as.ipv6 != nil && utilnet.IsIPv6(ip) {
 			ops, err = as.ipv6.addIP(ip)
-		} else {
+		} else if as.ipv4 != nil && !utilnet.IsIPv6(ip) {
 			ops, err = as.ipv4.addIP(ip)
 		}
 		if err != nil {
@@ -355,9 +376,9 @@ func (as *fakeAddressSets) DeleteIPsReturnOps(ips []net.IP) ([]ovsdb.Operation, 
 	var err error
 
 	for _, ip := range ips {
-		if utilnet.IsIPv6(ip) {
+		if as.ipv6 != nil && utilnet.IsIPv6(ip) {
 			ops, err = as.ipv6.deleteIP(ip)
-		} else {
+		} else if as.ipv4 != nil && !utilnet.IsIPv6(ip) {
 			ops, err = as.ipv4.deleteIP(ip)
 		}
 		if err != nil {

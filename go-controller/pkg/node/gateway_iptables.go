@@ -146,6 +146,7 @@ func getGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
 				args:     []string{"-j", chain},
 				protocol: proto,
 			},
+			egressSVCIPTDefaultReturnRule(),
 		}
 	}
 	if chain == iptableITPChain {
@@ -577,4 +578,16 @@ func egressSVCIPTRulesForEndpoints(svc *kapi.Service, v4Eps, v6Eps []string) []i
 	}
 
 	return rules
+}
+
+func egressSVCIPTDefaultReturnRule() iptRule {
+	return iptRule{
+		table: "nat",
+		chain: iptableESVCChain,
+		args: []string{
+			"-m", "mark", "--mark", string(ovnKubeNodeSNATMark),
+			"-m", "comment", "--comment", "Do not SNAT to SVC VIP",
+			"-j", "RETURN",
+		},
+	}
 }

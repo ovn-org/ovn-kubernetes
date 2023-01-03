@@ -69,6 +69,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				namespaceT := *newNamespace("testns")
 				node1 := nodeFor(node1Name, node1IPv4, node1IPv6, node1IPv4Subnet, node1IPv6Subnet)
 				node2 := nodeFor(node2Name, node2IPv4, node2IPv6, node2IPv4Subnet, node2IPv6Subnet)
+				config.IPv6Mode = true
 
 				nolongeregresssvc := v1.Service{
 					ObjectMeta: metav1.ObjectMeta{Name: "nolongeregresssvc", Namespace: "testns"},
@@ -196,7 +197,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					Policies: []string{"staleLRP1-UUID", "staleLRP2-UUID", "staleLRP3-UUID", "staleLRP4-UUID", "toKeepLRP1-UUID", "toKeepLRP2-UUID"},
 				}
 
-				noRerouteLRPS := getDefaultNoReroutePolicies(*node1, *node2)
+				noRerouteLRPS := getDefaultNoReroutePolicies()
 
 				dbSetup := libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
@@ -598,6 +599,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 		ginkgo.It("should create/update/delete logical router policies", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *newNamespace("testns")
+				config.IPv6Mode = true
 				node1 := nodeFor(node1Name, node1IPv4, node1IPv6, node1IPv4Subnet, node1IPv6Subnet)
 				node1.Labels = map[string]string{"house": "Gryffindor"}
 				node2 := nodeFor(node2Name, node2IPv4, node2IPv6, node2IPv4Subnet, node2IPv6Subnet)
@@ -697,7 +699,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					v6lrp2,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies(*node1, *node2) {
+				for _, lrp := range getDefaultNoReroutePolicies() {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -724,7 +726,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					v6lrp2,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies(*node1, *node2) {
+				for _, lrp := range getDefaultNoReroutePolicies() {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -737,7 +739,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				gomega.Expect(err).ToNot(gomega.HaveOccurred())
 				clusterRouter.Policies = []string{}
 				expectedDatabaseState = []libovsdbtest.TestData{clusterRouter}
-				for _, lrp := range getDefaultNoReroutePolicies(*node1, *node2) {
+				for _, lrp := range getDefaultNoReroutePolicies() {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1017,6 +1019,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 		ginkgo.It("should create/update/delete logical router policies", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *newNamespace("testns")
+				config.IPv6Mode = true
 				node1 := nodeFor(node1Name, node1IPv4, node1IPv6, node1IPv4Subnet, node1IPv6Subnet)
 
 				clusterRouter := &nbdb.LogicalRouter{
@@ -1109,7 +1112,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					v4lrp2,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies(*node1) {
+				for _, lrp := range getDefaultNoReroutePolicies() {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1130,7 +1133,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					v6lrp1,
 					v6lrp2,
 				}
-				for _, lrp := range getDefaultNoReroutePolicies(*node1) {
+				for _, lrp := range getDefaultNoReroutePolicies() {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1157,7 +1160,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					v6lrp1,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies(*node1) {
+				for _, lrp := range getDefaultNoReroutePolicies() {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1172,7 +1175,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					v6lrp1,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies(*node1) {
+				for _, lrp := range getDefaultNoReroutePolicies() {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1186,7 +1189,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies(*node1) {
+				for _, lrp := range getDefaultNoReroutePolicies() {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1201,6 +1204,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 		ginkgo.It("should create/update/delete logical router policies for ETP=Local Service", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *newNamespace("testns")
+				config.IPv6Mode = true
 				node1 := nodeFor(node1Name, node1IPv4, node1IPv6, node1IPv4Subnet, node1IPv6Subnet)
 				node1.Labels["square"] = "pants"
 				node2 := nodeFor(node2Name, node2IPv4, node2IPv6, node2IPv4Subnet, node2IPv6Subnet)
@@ -1269,7 +1273,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies(*node1) {
+				for _, lrp := range getDefaultNoReroutePolicies() {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1293,7 +1297,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					v4lrp1,
 					v4lrp2,
 				}
-				for _, lrp := range getDefaultNoReroutePolicies(*node1) {
+				for _, lrp := range getDefaultNoReroutePolicies() {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1320,7 +1324,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					clusterRouter,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies(*node1) {
+				for _, lrp := range getDefaultNoReroutePolicies() {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1337,6 +1341,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 		ginkgo.It("should create/update/delete logical router policies, labels and annotations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *newNamespace("testns")
+				config.IPv6Mode = true
 				node1 := nodeFor(node1Name, node1IPv4, node1IPv6, node1IPv4Subnet, node1IPv6Subnet)
 				node1.Labels = map[string]string{"home": "pineapple"}
 				node2 := nodeFor(node2Name, node2IPv4, node2IPv6, node2IPv4Subnet, node2IPv6Subnet)
@@ -1517,7 +1522,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					svc1v6lrp1,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies(*node1, *node2) {
+				for _, lrp := range getDefaultNoReroutePolicies() {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1603,7 +1608,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					svc2v4lrp1,
 					svc2v6lrp1,
 				}
-				for _, lrp := range getDefaultNoReroutePolicies(*node1, *node2) {
+				for _, lrp := range getDefaultNoReroutePolicies() {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1617,7 +1622,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				expectedDatabaseState = []libovsdbtest.TestData{
 					clusterRouter,
 				}
-				for _, lrp := range getDefaultNoReroutePolicies(*node1) {
+				for _, lrp := range getDefaultNoReroutePolicies() {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1632,6 +1637,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 		ginkgo.It("should update logical router policies, labels and annotations on reachability failure", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *newNamespace("testns")
+				config.IPv6Mode = true
 				node1 := nodeFor(node1Name, node1IPv4, node1IPv6, node1IPv4Subnet, node1IPv6Subnet)
 
 				clusterRouter := &nbdb.LogicalRouter{
@@ -1750,7 +1756,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					svc1v6lrp1,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies(*node1) {
+				for _, lrp := range getDefaultNoReroutePolicies() {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1786,7 +1792,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 				}).ShouldNot(gomega.HaveOccurred())
 				clusterRouter.Policies = []string{}
 				expectedDatabaseState = []libovsdbtest.TestData{clusterRouter}
-				for _, lrp := range getDefaultNoReroutePolicies(*node1) {
+				for _, lrp := range getDefaultNoReroutePolicies() {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1829,7 +1835,7 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 					svc1v6lrp1,
 				}
 
-				for _, lrp := range getDefaultNoReroutePolicies(*node1) {
+				for _, lrp := range getDefaultNoReroutePolicies() {
 					expectedDatabaseState = append(expectedDatabaseState, lrp)
 					clusterRouter.Policies = append(clusterRouter.Policies, lrp.UUID)
 				}
@@ -1867,28 +1873,24 @@ func lrpForEgressSvcEndpoint(uuid, key, addr, nexthop string) *nbdb.LogicalRoute
 	}
 }
 
-func getDefaultNoReroutePolicies(nodes ...v1.Node) []*nbdb.LogicalRouterPolicy {
+func getDefaultNoReroutePolicies() []*nbdb.LogicalRouterPolicy {
 	allLRPS := []*nbdb.LogicalRouterPolicy{}
-	for _, node := range nodes {
-		ipv4 := node.Status.Addresses[0].Address
-		ipv6 := node.Status.Addresses[1].Address
-		allLRPS = append(allLRPS,
-			&nbdb.LogicalRouterPolicy{
-				Priority:    types.DefaultNoRereoutePriority,
-				Match:       fmt.Sprintf("ip4.src == 10.128.0.0/16 && ip4.dst == %s/32", ipv4),
-				Action:      nbdb.LogicalRouterPolicyActionAllow,
-				ExternalIDs: map[string]string{"node": node.Name},
-				UUID:        fmt.Sprintf("default-no-reroute-node-%s-UUID", node.Name),
-			},
-			&nbdb.LogicalRouterPolicy{
-				Priority:    types.DefaultNoRereoutePriority,
-				Match:       fmt.Sprintf("ip6.src == fe00::/16 && ip6.dst == %s/128", ipv6),
-				Action:      nbdb.LogicalRouterPolicyActionAllow,
-				ExternalIDs: map[string]string{"node": node.Name},
-				UUID:        fmt.Sprintf("default-v6-no-reroute-node-%s-UUID", node.Name),
-			},
-		)
-	}
+	allLRPS = append(allLRPS,
+		&nbdb.LogicalRouterPolicy{
+			Priority: types.DefaultNoRereoutePriority,
+			Match:    "(ip4.src == $a12749576804119081385 || ip4.src == $a16335301576733828072) && ip4.dst == $a11079093880111560446",
+			Action:   nbdb.LogicalRouterPolicyActionAllow,
+			UUID:     "default-no-reroute-node-UUID",
+			Options:  map[string]string{"pkt_mark": "1008"},
+		},
+		&nbdb.LogicalRouterPolicy{
+			Priority: types.DefaultNoRereoutePriority,
+			Match:    "(ip6.src == $a12749574605095824963 || ip6.src == $a16335303775757084494) && ip6.dst == $a11079091681088304024",
+			Action:   nbdb.LogicalRouterPolicyActionAllow,
+			UUID:     "default-v6-no-reroute-node-UUID",
+			Options:  map[string]string{"pkt_mark": "1008"},
+		},
+	)
 
 	allLRPS = append(allLRPS,
 		&nbdb.LogicalRouterPolicy{

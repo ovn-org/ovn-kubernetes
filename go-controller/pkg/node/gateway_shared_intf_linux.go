@@ -128,7 +128,7 @@ func updateEgressSVCIptRules(svc *kapi.Service, npw *nodePortWatcher) error {
 
 	// Add rules for endpoints without one.
 	addRules := egressSVCIPTRulesForEndpoints(svc, v4ToAdd, v6ToAdd)
-	if err := insertIptRules(addRules); err != nil {
+	if err := appendIptRules(addRules); err != nil {
 		return fmt.Errorf("failed to add iptables rules for service %s/%s during update: %v",
 			svc.Namespace, svc.Name, err)
 	}
