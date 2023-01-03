@@ -801,7 +801,12 @@ func (oc *DefaultNetworkController) deleteNodeEvent(node *kapi.Node) error {
 		"various caches", node.Name)
 
 	if config.HybridOverlay.Enabled {
-		oc.releaseHybridOverlayNodeSubnet(node.Name)
+		if noHostSubnet := noHostSubnet(node); noHostSubnet {
+			// noHostSubnet nodes are different, only remove the switch and delete the hybrid overlay subnet
+			oc.lsManager.DeleteSwitch(node.Name)
+			oc.releaseHybridOverlayNodeSubnet(node.Name)
+			return nil
+		}
 		if _, ok := node.Annotations[hotypes.HybridOverlayDRMAC]; ok && !houtil.IsHybridOverlayNode(node) {
 			oc.deleteHybridOverlayPort(node)
 		}
