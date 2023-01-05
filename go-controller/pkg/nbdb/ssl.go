@@ -5,6 +5,8 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const SSLTable = "SSL"
+
 // SSL defines an object in SSL table
 type SSL struct {
 	UUID            string            `ovsdb:"_uuid"`
@@ -15,6 +17,26 @@ type SSL struct {
 	PrivateKey      string            `ovsdb:"private_key"`
 	SSLCiphers      string            `ovsdb:"ssl_ciphers"`
 	SSLProtocols    string            `ovsdb:"ssl_protocols"`
+}
+
+func (a *SSL) GetUUID() string {
+	return a.UUID
+}
+
+func (a *SSL) GetBootstrapCaCert() bool {
+	return a.BootstrapCaCert
+}
+
+func (a *SSL) GetCaCert() string {
+	return a.CaCert
+}
+
+func (a *SSL) GetCertificate() string {
+	return a.Certificate
+}
+
+func (a *SSL) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copySSLExternalIDs(a map[string]string) map[string]string {
@@ -41,6 +63,18 @@ func equalSSLExternalIDs(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *SSL) GetPrivateKey() string {
+	return a.PrivateKey
+}
+
+func (a *SSL) GetSSLCiphers() string {
+	return a.SSLCiphers
+}
+
+func (a *SSL) GetSSLProtocols() string {
+	return a.SSLProtocols
 }
 
 func (a *SSL) DeepCopyInto(b *SSL) {

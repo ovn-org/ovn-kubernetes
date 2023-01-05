@@ -5,6 +5,8 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const QoSTable = "QoS"
+
 type (
 	QoSAction    = string
 	QoSBandwidth = string
@@ -28,6 +30,14 @@ type QoS struct {
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
 	Match       string            `ovsdb:"match"`
 	Priority    int               `ovsdb:"priority"`
+}
+
+func (a *QoS) GetUUID() string {
+	return a.UUID
+}
+
+func (a *QoS) GetAction() map[string]int {
+	return a.Action
 }
 
 func copyQoSAction(a map[string]int) map[string]int {
@@ -56,6 +66,10 @@ func equalQoSAction(a, b map[string]int) bool {
 	return true
 }
 
+func (a *QoS) GetBandwidth() map[string]int {
+	return a.Bandwidth
+}
+
 func copyQoSBandwidth(a map[string]int) map[string]int {
 	if a == nil {
 		return nil
@@ -82,6 +96,14 @@ func equalQoSBandwidth(a, b map[string]int) bool {
 	return true
 }
 
+func (a *QoS) GetDirection() QoSDirection {
+	return a.Direction
+}
+
+func (a *QoS) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
+}
+
 func copyQoSExternalIDs(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -106,6 +128,14 @@ func equalQoSExternalIDs(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *QoS) GetMatch() string {
+	return a.Match
+}
+
+func (a *QoS) GetPriority() int {
+	return a.Priority
 }
 
 func (a *QoS) DeepCopyInto(b *QoS) {

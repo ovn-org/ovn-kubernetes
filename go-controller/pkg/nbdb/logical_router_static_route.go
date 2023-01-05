@@ -5,6 +5,8 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const LogicalRouterStaticRouteTable = "Logical_Router_Static_Route"
+
 type (
 	LogicalRouterStaticRoutePolicy = string
 )
@@ -27,6 +29,14 @@ type LogicalRouterStaticRoute struct {
 	RouteTable  string                          `ovsdb:"route_table"`
 }
 
+func (a *LogicalRouterStaticRoute) GetUUID() string {
+	return a.UUID
+}
+
+func (a *LogicalRouterStaticRoute) GetBFD() *string {
+	return a.BFD
+}
+
 func copyLogicalRouterStaticRouteBFD(a *string) *string {
 	if a == nil {
 		return nil
@@ -43,6 +53,10 @@ func equalLogicalRouterStaticRouteBFD(a, b *string) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *LogicalRouterStaticRoute) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyLogicalRouterStaticRouteExternalIDs(a map[string]string) map[string]string {
@@ -71,6 +85,18 @@ func equalLogicalRouterStaticRouteExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *LogicalRouterStaticRoute) GetIPPrefix() string {
+	return a.IPPrefix
+}
+
+func (a *LogicalRouterStaticRoute) GetNexthop() string {
+	return a.Nexthop
+}
+
+func (a *LogicalRouterStaticRoute) GetOptions() map[string]string {
+	return a.Options
+}
+
 func copyLogicalRouterStaticRouteOptions(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -97,6 +123,10 @@ func equalLogicalRouterStaticRouteOptions(a, b map[string]string) bool {
 	return true
 }
 
+func (a *LogicalRouterStaticRoute) GetOutputPort() *string {
+	return a.OutputPort
+}
+
 func copyLogicalRouterStaticRouteOutputPort(a *string) *string {
 	if a == nil {
 		return nil
@@ -115,6 +145,10 @@ func equalLogicalRouterStaticRouteOutputPort(a, b *string) bool {
 	return *a == *b
 }
 
+func (a *LogicalRouterStaticRoute) GetPolicy() *LogicalRouterStaticRoutePolicy {
+	return a.Policy
+}
+
 func copyLogicalRouterStaticRoutePolicy(a *LogicalRouterStaticRoutePolicy) *LogicalRouterStaticRoutePolicy {
 	if a == nil {
 		return nil
@@ -131,6 +165,10 @@ func equalLogicalRouterStaticRoutePolicy(a, b *LogicalRouterStaticRoutePolicy) b
 		return true
 	}
 	return *a == *b
+}
+
+func (a *LogicalRouterStaticRoute) GetRouteTable() string {
+	return a.RouteTable
 }
 
 func (a *LogicalRouterStaticRoute) DeepCopyInto(b *LogicalRouterStaticRoute) {

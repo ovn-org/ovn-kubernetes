@@ -5,6 +5,8 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const IGMPGroupTable = "IGMP_Group"
+
 // IGMPGroup defines an object in IGMP_Group table
 type IGMPGroup struct {
 	UUID     string   `ovsdb:"_uuid"`
@@ -12,6 +14,18 @@ type IGMPGroup struct {
 	Chassis  *string  `ovsdb:"chassis"`
 	Datapath *string  `ovsdb:"datapath"`
 	Ports    []string `ovsdb:"ports"`
+}
+
+func (a *IGMPGroup) GetUUID() string {
+	return a.UUID
+}
+
+func (a *IGMPGroup) GetAddress() string {
+	return a.Address
+}
+
+func (a *IGMPGroup) GetChassis() *string {
+	return a.Chassis
 }
 
 func copyIGMPGroupChassis(a *string) *string {
@@ -32,6 +46,10 @@ func equalIGMPGroupChassis(a, b *string) bool {
 	return *a == *b
 }
 
+func (a *IGMPGroup) GetDatapath() *string {
+	return a.Datapath
+}
+
 func copyIGMPGroupDatapath(a *string) *string {
 	if a == nil {
 		return nil
@@ -48,6 +66,10 @@ func equalIGMPGroupDatapath(a, b *string) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *IGMPGroup) GetPorts() []string {
+	return a.Ports
 }
 
 func copyIGMPGroupPorts(a []string) []string {

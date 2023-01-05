@@ -5,12 +5,22 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const DatapathBindingTable = "Datapath_Binding"
+
 // DatapathBinding defines an object in Datapath_Binding table
 type DatapathBinding struct {
 	UUID          string            `ovsdb:"_uuid"`
 	ExternalIDs   map[string]string `ovsdb:"external_ids"`
 	LoadBalancers []string          `ovsdb:"load_balancers"`
 	TunnelKey     int               `ovsdb:"tunnel_key"`
+}
+
+func (a *DatapathBinding) GetUUID() string {
+	return a.UUID
+}
+
+func (a *DatapathBinding) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyDatapathBindingExternalIDs(a map[string]string) map[string]string {
@@ -39,6 +49,10 @@ func equalDatapathBindingExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *DatapathBinding) GetLoadBalancers() []string {
+	return a.LoadBalancers
+}
+
 func copyDatapathBindingLoadBalancers(a []string) []string {
 	if a == nil {
 		return nil
@@ -61,6 +75,10 @@ func equalDatapathBindingLoadBalancers(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *DatapathBinding) GetTunnelKey() int {
+	return a.TunnelKey
 }
 
 func (a *DatapathBinding) DeepCopyInto(b *DatapathBinding) {

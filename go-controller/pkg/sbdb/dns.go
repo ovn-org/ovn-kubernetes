@@ -5,12 +5,22 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const DNSTable = "DNS"
+
 // DNS defines an object in DNS table
 type DNS struct {
 	UUID        string            `ovsdb:"_uuid"`
 	Datapaths   []string          `ovsdb:"datapaths"`
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
 	Records     map[string]string `ovsdb:"records"`
+}
+
+func (a *DNS) GetUUID() string {
+	return a.UUID
+}
+
+func (a *DNS) GetDatapaths() []string {
+	return a.Datapaths
 }
 
 func copyDNSDatapaths(a []string) []string {
@@ -37,6 +47,10 @@ func equalDNSDatapaths(a, b []string) bool {
 	return true
 }
 
+func (a *DNS) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
+}
+
 func copyDNSExternalIDs(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -61,6 +75,10 @@ func equalDNSExternalIDs(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *DNS) GetRecords() map[string]string {
+	return a.Records
 }
 
 func copyDNSRecords(a map[string]string) map[string]string {

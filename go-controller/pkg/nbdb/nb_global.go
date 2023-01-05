@@ -5,6 +5,8 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const NBGlobalTable = "NB_Global"
+
 // NBGlobal defines an object in NB_Global table
 type NBGlobal struct {
 	UUID           string            `ovsdb:"_uuid"`
@@ -20,6 +22,14 @@ type NBGlobal struct {
 	SbCfg          int               `ovsdb:"sb_cfg"`
 	SbCfgTimestamp int               `ovsdb:"sb_cfg_timestamp"`
 	SSL            *string           `ovsdb:"ssl"`
+}
+
+func (a *NBGlobal) GetUUID() string {
+	return a.UUID
+}
+
+func (a *NBGlobal) GetConnections() []string {
+	return a.Connections
 }
 
 func copyNBGlobalConnections(a []string) []string {
@@ -44,6 +54,10 @@ func equalNBGlobalConnections(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *NBGlobal) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyNBGlobalExternalIDs(a map[string]string) map[string]string {
@@ -72,6 +86,34 @@ func equalNBGlobalExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *NBGlobal) GetHvCfg() int {
+	return a.HvCfg
+}
+
+func (a *NBGlobal) GetHvCfgTimestamp() int {
+	return a.HvCfgTimestamp
+}
+
+func (a *NBGlobal) GetIpsec() bool {
+	return a.Ipsec
+}
+
+func (a *NBGlobal) GetName() string {
+	return a.Name
+}
+
+func (a *NBGlobal) GetNbCfg() int {
+	return a.NbCfg
+}
+
+func (a *NBGlobal) GetNbCfgTimestamp() int {
+	return a.NbCfgTimestamp
+}
+
+func (a *NBGlobal) GetOptions() map[string]string {
+	return a.Options
+}
+
 func copyNBGlobalOptions(a map[string]string) map[string]string {
 	if a == nil {
 		return nil
@@ -96,6 +138,18 @@ func equalNBGlobalOptions(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *NBGlobal) GetSbCfg() int {
+	return a.SbCfg
+}
+
+func (a *NBGlobal) GetSbCfgTimestamp() int {
+	return a.SbCfgTimestamp
+}
+
+func (a *NBGlobal) GetSSL() *string {
+	return a.SSL
 }
 
 func copyNBGlobalSSL(a *string) *string {

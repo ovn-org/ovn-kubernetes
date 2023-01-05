@@ -5,6 +5,8 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const LogicalRouterPortTable = "Logical_Router_Port"
+
 // LogicalRouterPort defines an object in Logical_Router_Port table
 type LogicalRouterPort struct {
 	UUID           string            `ovsdb:"_uuid"`
@@ -19,6 +21,14 @@ type LogicalRouterPort struct {
 	Networks       []string          `ovsdb:"networks"`
 	Options        map[string]string `ovsdb:"options"`
 	Peer           *string           `ovsdb:"peer"`
+}
+
+func (a *LogicalRouterPort) GetUUID() string {
+	return a.UUID
+}
+
+func (a *LogicalRouterPort) GetEnabled() *bool {
+	return a.Enabled
 }
 
 func copyLogicalRouterPortEnabled(a *bool) *bool {
@@ -37,6 +47,10 @@ func equalLogicalRouterPortEnabled(a, b *bool) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *LogicalRouterPort) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyLogicalRouterPortExternalIDs(a map[string]string) map[string]string {
@@ -65,6 +79,10 @@ func equalLogicalRouterPortExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *LogicalRouterPort) GetGatewayChassis() []string {
+	return a.GatewayChassis
+}
+
 func copyLogicalRouterPortGatewayChassis(a []string) []string {
 	if a == nil {
 		return nil
@@ -89,6 +107,10 @@ func equalLogicalRouterPortGatewayChassis(a, b []string) bool {
 	return true
 }
 
+func (a *LogicalRouterPort) GetHaChassisGroup() *string {
+	return a.HaChassisGroup
+}
+
 func copyLogicalRouterPortHaChassisGroup(a *string) *string {
 	if a == nil {
 		return nil
@@ -105,6 +127,10 @@ func equalLogicalRouterPortHaChassisGroup(a, b *string) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *LogicalRouterPort) GetIpv6Prefix() []string {
+	return a.Ipv6Prefix
 }
 
 func copyLogicalRouterPortIpv6Prefix(a []string) []string {
@@ -129,6 +155,10 @@ func equalLogicalRouterPortIpv6Prefix(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *LogicalRouterPort) GetIpv6RaConfigs() map[string]string {
+	return a.Ipv6RaConfigs
 }
 
 func copyLogicalRouterPortIpv6RaConfigs(a map[string]string) map[string]string {
@@ -157,6 +187,18 @@ func equalLogicalRouterPortIpv6RaConfigs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *LogicalRouterPort) GetMAC() string {
+	return a.MAC
+}
+
+func (a *LogicalRouterPort) GetName() string {
+	return a.Name
+}
+
+func (a *LogicalRouterPort) GetNetworks() []string {
+	return a.Networks
+}
+
 func copyLogicalRouterPortNetworks(a []string) []string {
 	if a == nil {
 		return nil
@@ -179,6 +221,10 @@ func equalLogicalRouterPortNetworks(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *LogicalRouterPort) GetOptions() map[string]string {
+	return a.Options
 }
 
 func copyLogicalRouterPortOptions(a map[string]string) map[string]string {
@@ -205,6 +251,10 @@ func equalLogicalRouterPortOptions(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *LogicalRouterPort) GetPeer() *string {
+	return a.Peer
 }
 
 func copyLogicalRouterPortPeer(a *string) *string {

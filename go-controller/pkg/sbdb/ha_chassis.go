@@ -5,12 +5,22 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const HAChassisTable = "HA_Chassis"
+
 // HAChassis defines an object in HA_Chassis table
 type HAChassis struct {
 	UUID        string            `ovsdb:"_uuid"`
 	Chassis     *string           `ovsdb:"chassis"`
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
 	Priority    int               `ovsdb:"priority"`
+}
+
+func (a *HAChassis) GetUUID() string {
+	return a.UUID
+}
+
+func (a *HAChassis) GetChassis() *string {
+	return a.Chassis
 }
 
 func copyHAChassisChassis(a *string) *string {
@@ -29,6 +39,10 @@ func equalHAChassisChassis(a, b *string) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *HAChassis) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyHAChassisExternalIDs(a map[string]string) map[string]string {
@@ -55,6 +69,10 @@ func equalHAChassisExternalIDs(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *HAChassis) GetPriority() int {
+	return a.Priority
 }
 
 func (a *HAChassis) DeepCopyInto(b *HAChassis) {

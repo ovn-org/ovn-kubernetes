@@ -5,6 +5,8 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const MeterBandTable = "Meter_Band"
+
 type (
 	MeterBandAction = string
 )
@@ -20,6 +22,22 @@ type MeterBand struct {
 	BurstSize   int               `ovsdb:"burst_size"`
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
 	Rate        int               `ovsdb:"rate"`
+}
+
+func (a *MeterBand) GetUUID() string {
+	return a.UUID
+}
+
+func (a *MeterBand) GetAction() MeterBandAction {
+	return a.Action
+}
+
+func (a *MeterBand) GetBurstSize() int {
+	return a.BurstSize
+}
+
+func (a *MeterBand) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyMeterBandExternalIDs(a map[string]string) map[string]string {
@@ -46,6 +64,10 @@ func equalMeterBandExternalIDs(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *MeterBand) GetRate() int {
+	return a.Rate
 }
 
 func (a *MeterBand) DeepCopyInto(b *MeterBand) {

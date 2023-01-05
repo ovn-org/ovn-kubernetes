@@ -5,6 +5,8 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const LogicalSwitchTable = "Logical_Switch"
+
 // LogicalSwitch defines an object in Logical_Switch table
 type LogicalSwitch struct {
 	UUID              string            `ovsdb:"_uuid"`
@@ -19,6 +21,14 @@ type LogicalSwitch struct {
 	OtherConfig       map[string]string `ovsdb:"other_config"`
 	Ports             []string          `ovsdb:"ports"`
 	QOSRules          []string          `ovsdb:"qos_rules"`
+}
+
+func (a *LogicalSwitch) GetUUID() string {
+	return a.UUID
+}
+
+func (a *LogicalSwitch) GetACLs() []string {
+	return a.ACLs
 }
 
 func copyLogicalSwitchACLs(a []string) []string {
@@ -45,6 +55,10 @@ func equalLogicalSwitchACLs(a, b []string) bool {
 	return true
 }
 
+func (a *LogicalSwitch) GetCopp() *string {
+	return a.Copp
+}
+
 func copyLogicalSwitchCopp(a *string) *string {
 	if a == nil {
 		return nil
@@ -61,6 +75,10 @@ func equalLogicalSwitchCopp(a, b *string) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *LogicalSwitch) GetDNSRecords() []string {
+	return a.DNSRecords
 }
 
 func copyLogicalSwitchDNSRecords(a []string) []string {
@@ -85,6 +103,10 @@ func equalLogicalSwitchDNSRecords(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *LogicalSwitch) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyLogicalSwitchExternalIDs(a map[string]string) map[string]string {
@@ -113,6 +135,10 @@ func equalLogicalSwitchExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *LogicalSwitch) GetForwardingGroups() []string {
+	return a.ForwardingGroups
+}
+
 func copyLogicalSwitchForwardingGroups(a []string) []string {
 	if a == nil {
 		return nil
@@ -135,6 +161,10 @@ func equalLogicalSwitchForwardingGroups(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *LogicalSwitch) GetLoadBalancer() []string {
+	return a.LoadBalancer
 }
 
 func copyLogicalSwitchLoadBalancer(a []string) []string {
@@ -161,6 +191,10 @@ func equalLogicalSwitchLoadBalancer(a, b []string) bool {
 	return true
 }
 
+func (a *LogicalSwitch) GetLoadBalancerGroup() []string {
+	return a.LoadBalancerGroup
+}
+
 func copyLogicalSwitchLoadBalancerGroup(a []string) []string {
 	if a == nil {
 		return nil
@@ -183,6 +217,14 @@ func equalLogicalSwitchLoadBalancerGroup(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *LogicalSwitch) GetName() string {
+	return a.Name
+}
+
+func (a *LogicalSwitch) GetOtherConfig() map[string]string {
+	return a.OtherConfig
 }
 
 func copyLogicalSwitchOtherConfig(a map[string]string) map[string]string {
@@ -211,6 +253,10 @@ func equalLogicalSwitchOtherConfig(a, b map[string]string) bool {
 	return true
 }
 
+func (a *LogicalSwitch) GetPorts() []string {
+	return a.Ports
+}
+
 func copyLogicalSwitchPorts(a []string) []string {
 	if a == nil {
 		return nil
@@ -233,6 +279,10 @@ func equalLogicalSwitchPorts(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *LogicalSwitch) GetQOSRules() []string {
+	return a.QOSRules
 }
 
 func copyLogicalSwitchQOSRules(a []string) []string {

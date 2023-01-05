@@ -5,12 +5,26 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const HAChassisTable = "HA_Chassis"
+
 // HAChassis defines an object in HA_Chassis table
 type HAChassis struct {
 	UUID        string            `ovsdb:"_uuid"`
 	ChassisName string            `ovsdb:"chassis_name"`
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
 	Priority    int               `ovsdb:"priority"`
+}
+
+func (a *HAChassis) GetUUID() string {
+	return a.UUID
+}
+
+func (a *HAChassis) GetChassisName() string {
+	return a.ChassisName
+}
+
+func (a *HAChassis) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyHAChassisExternalIDs(a map[string]string) map[string]string {
@@ -37,6 +51,10 @@ func equalHAChassisExternalIDs(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *HAChassis) GetPriority() int {
+	return a.Priority
 }
 
 func (a *HAChassis) DeepCopyInto(b *HAChassis) {

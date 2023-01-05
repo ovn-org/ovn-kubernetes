@@ -5,6 +5,8 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const MeterTable = "Meter"
+
 type (
 	MeterUnit = string
 )
@@ -20,6 +22,14 @@ type Meter struct {
 	Bands []string  `ovsdb:"bands"`
 	Name  string    `ovsdb:"name"`
 	Unit  MeterUnit `ovsdb:"unit"`
+}
+
+func (a *Meter) GetUUID() string {
+	return a.UUID
+}
+
+func (a *Meter) GetBands() []string {
+	return a.Bands
 }
 
 func copyMeterBands(a []string) []string {
@@ -44,6 +54,14 @@ func equalMeterBands(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *Meter) GetName() string {
+	return a.Name
+}
+
+func (a *Meter) GetUnit() MeterUnit {
+	return a.Unit
 }
 
 func (a *Meter) DeepCopyInto(b *Meter) {

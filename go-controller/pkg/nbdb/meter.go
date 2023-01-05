@@ -5,6 +5,8 @@ package nbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const MeterTable = "Meter"
+
 type (
 	MeterUnit = string
 )
@@ -22,6 +24,14 @@ type Meter struct {
 	Fair        *bool             `ovsdb:"fair"`
 	Name        string            `ovsdb:"name"`
 	Unit        MeterUnit         `ovsdb:"unit"`
+}
+
+func (a *Meter) GetUUID() string {
+	return a.UUID
+}
+
+func (a *Meter) GetBands() []string {
+	return a.Bands
 }
 
 func copyMeterBands(a []string) []string {
@@ -46,6 +56,10 @@ func equalMeterBands(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func (a *Meter) GetExternalIDs() map[string]string {
+	return a.ExternalIDs
 }
 
 func copyMeterExternalIDs(a map[string]string) map[string]string {
@@ -74,6 +88,10 @@ func equalMeterExternalIDs(a, b map[string]string) bool {
 	return true
 }
 
+func (a *Meter) GetFair() *bool {
+	return a.Fair
+}
+
 func copyMeterFair(a *bool) *bool {
 	if a == nil {
 		return nil
@@ -90,6 +108,14 @@ func equalMeterFair(a, b *bool) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *Meter) GetName() string {
+	return a.Name
+}
+
+func (a *Meter) GetUnit() MeterUnit {
+	return a.Unit
 }
 
 func (a *Meter) DeepCopyInto(b *Meter) {

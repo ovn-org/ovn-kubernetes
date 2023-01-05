@@ -5,6 +5,8 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const EncapTable = "Encap"
+
 type (
 	EncapType = string
 )
@@ -22,6 +24,22 @@ type Encap struct {
 	IP          string            `ovsdb:"ip"`
 	Options     map[string]string `ovsdb:"options"`
 	Type        EncapType         `ovsdb:"type"`
+}
+
+func (a *Encap) GetUUID() string {
+	return a.UUID
+}
+
+func (a *Encap) GetChassisName() string {
+	return a.ChassisName
+}
+
+func (a *Encap) GetIP() string {
+	return a.IP
+}
+
+func (a *Encap) GetOptions() map[string]string {
+	return a.Options
 }
 
 func copyEncapOptions(a map[string]string) map[string]string {
@@ -48,6 +66,10 @@ func equalEncapOptions(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *Encap) GetType() EncapType {
+	return a.Type
 }
 
 func (a *Encap) DeepCopyInto(b *Encap) {

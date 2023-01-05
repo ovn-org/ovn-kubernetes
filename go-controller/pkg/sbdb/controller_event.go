@@ -5,6 +5,8 @@ package sbdb
 
 import "github.com/ovn-org/libovsdb/model"
 
+const ControllerEventTable = "Controller_Event"
+
 type (
 	ControllerEventEventType = string
 )
@@ -20,6 +22,14 @@ type ControllerEvent struct {
 	EventInfo map[string]string        `ovsdb:"event_info"`
 	EventType ControllerEventEventType `ovsdb:"event_type"`
 	SeqNum    int                      `ovsdb:"seq_num"`
+}
+
+func (a *ControllerEvent) GetUUID() string {
+	return a.UUID
+}
+
+func (a *ControllerEvent) GetChassis() *string {
+	return a.Chassis
 }
 
 func copyControllerEventChassis(a *string) *string {
@@ -38,6 +48,10 @@ func equalControllerEventChassis(a, b *string) bool {
 		return true
 	}
 	return *a == *b
+}
+
+func (a *ControllerEvent) GetEventInfo() map[string]string {
+	return a.EventInfo
 }
 
 func copyControllerEventEventInfo(a map[string]string) map[string]string {
@@ -64,6 +78,14 @@ func equalControllerEventEventInfo(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func (a *ControllerEvent) GetEventType() ControllerEventEventType {
+	return a.EventType
+}
+
+func (a *ControllerEvent) GetSeqNum() int {
+	return a.SeqNum
 }
 
 func (a *ControllerEvent) DeepCopyInto(b *ControllerEvent) {
