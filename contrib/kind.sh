@@ -145,7 +145,8 @@ usage() {
     echo "-ric | --run-in-container           Configure the script to be run from a docker container, allowing it to still communicate with the kind controlplane" 
     echo "-ehp | --egress-ip-healthcheck-port TCP port used for gRPC session by egress IP node check. DEFAULT: 9107 (Use "0" for legacy dial to port 9)."
     echo "-is  | --ipsec                      Enable IPsec encryption (spawns ovn-ipsec pods)"
-    echo "--delete                      	    Delete current cluster"
+    echo "--delete                      	  Delete current cluster"
+    echo "--deploy                            Deploy ovn kubernetes without restarting kind"
     echo ""
 }
 
@@ -288,6 +289,8 @@ parse_args() {
             --delete )                          delete
                                                 exit
                                                 ;;
+            --deploy)                           KIND_CREATE=false
+                                                ;;
             -h | --help )                       usage
                                                 exit
                                                 ;;
@@ -342,6 +345,7 @@ print_params() {
      echo "OVN_ENABLE_EX_GW_NETWORK_BRIDGE = $OVN_ENABLE_EX_GW_NETWORK_BRIDGE"
      echo "OVN_EX_GW_NETWORK_INTERFACE = $OVN_EX_GW_NETWORK_INTERFACE"
      echo "OVN_EGRESSIP_HEALTHCHECK_PORT = $OVN_EGRESSIP_HEALTHCHECK_PORT"
+     echo "OVN_DEPLOY_PODS = $OVN_DEPLOY_PODS"
      echo ""
 }
 
@@ -419,11 +423,14 @@ set_openssl_binary() {
 set_default_params() {
   # Set default values
   # Used for multi cluster setups
+  KIND_CREATE=${KIND_CREATE:-true}
   KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
   # Setup KUBECONFIG patch based on cluster-name
   export KUBECONFIG=${KUBECONFIG:-${HOME}/${KIND_CLUSTER_NAME}.conf}
   # Scrub any existing kubeconfigs at the path
-  rm -f ${KUBECONFIG}
+  if [ "${KIND_CREATE}" == true ]; then
+    rm -f ${KUBECONFIG}
+  fi
   MANIFEST_OUTPUT_DIR=${MANIFEST_OUTPUT_DIR:-${DIR}/../dist/yaml}
   if [ ${KIND_CLUSTER_NAME} != "ovn" ]; then
     MANIFEST_OUTPUT_DIR="${DIR}/../dist/yaml/${KIND_CLUSTER_NAME}"
@@ -483,6 +490,7 @@ set_default_params() {
   OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
   OVN_EGRESSIP_HEALTHCHECK_PORT=${OVN_EGRESSIP_HEALTHCHECK_PORT:-9107}
   OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
+  OVN_DEPLOY_PODS=${OVN_DEPLOY_PODS:-"ovnkube-master ovnkube-node"}
 }
 
 detect_apiserver_url() {
@@ -655,7 +663,7 @@ build_ovn_image() {
 }
 
 create_ovn_kube_manifests() {
-  pushd ${DIR}/../dist/images
+    pushd ${DIR}/../dist/images
   ./daemonset.sh \
     --output-directory="${MANIFEST_OUTPUT_DIR}"\
     --image="${OVN_IMAGE}" \
@@ -735,6 +743,13 @@ install_ovn() {
   run_kubectl apply -f ovnkube-master.yaml
   run_kubectl apply -f ovnkube-node.yaml
   popd
+
+  # Force pod reload just the ones with golang containers
+  if [ "${KIND_CREATE}" == false ]; then
+    for pod in ${OVN_DEPLOY_PODS}; do
+        run_kubectl delete pod -n ovn-kubernetes -l name=$pod
+    done
+  fi
 }
 
 install_ingress() {
@@ -884,19 +899,21 @@ fi
 set -euxo pipefail
 check_ipv6
 set_cluster_cidr_ip_families
-create_kind_cluster
-if [ "$RUN_IN_CONTAINER" == true ]; then
-  run_script_in_container
+if [ "$KIND_CREATE" == true ]; then
+    create_kind_cluster
+    if [ "$RUN_IN_CONTAINER" == true ]; then
+      run_script_in_container
+    fi
+    # if cluster name is specified fixup kubeconfig
+    if [ "$KIND_CLUSTER_NAME"} != "ovn" ]; then
+      fixup_kubeconfig_names
+    fi
+    docker_disable_ipv6
+    if [ "$OVN_ENABLE_EX_GW_NETWORK_BRIDGE" == true ]; then
+      docker_create_second_interface
+    fi
+    coredns_patch
 fi
-# if cluster name is specified fixup kubeconfig
-if [ "$KIND_CLUSTER_NAME"} != "ovn" ]; then
-  fixup_kubeconfig_names
-fi
-docker_disable_ipv6
-if [ "$OVN_ENABLE_EX_GW_NETWORK_BRIDGE" == true ]; then
-  docker_create_second_interface
-fi
-coredns_patch
 build_ovn_image
 detect_apiserver_url
 create_ovn_kube_manifests
