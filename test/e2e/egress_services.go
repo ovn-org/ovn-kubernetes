@@ -24,8 +24,6 @@ import (
 var _ = ginkgo.Describe("Egress Services", func() {
 	const (
 		externalContainerName = "external-container-for-egress-service"
-		serviceV4IP           = "5.5.5.5"
-		serviceV6IP           = "5555:5555:5555:5555:5555:5555:5555:5555"
 		podHTTPPort           = 8080
 		serviceName           = "test-egress-service"
 	)
@@ -63,7 +61,7 @@ var _ = ginkgo.Describe("Egress Services", func() {
 	})
 
 	ginkgotable.DescribeTable("Should validate pods' egress is SNATed to the LB's ingress ip without selectors",
-		func(svcIP string, dstIP *string) {
+		func(protocol v1.IPFamily, dstIP *string) {
 			ginkgo.By("Creating the backend pods")
 			podsCreateSync := errgroup.Group{}
 			for i, name := range pods {
@@ -80,8 +78,9 @@ var _ = ginkgo.Describe("Egress Services", func() {
 			framework.ExpectNoError(err, "failed to create backend pods")
 
 			ginkgo.By("Creating an egress service without node selectors")
-			createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, svcIP,
+			svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol,
 				map[string]string{"k8s.ovn.org/egress-service": "{}"}, podsLabels, podHTTPPort)
+			svcIP := svc.Status.LoadBalancer.Ingress[0].IP
 
 			ginkgo.By("Getting the IPs of the node in charge of the service")
 			_, egressHostV4IP, egressHostV6IP := getEgressSVCHost(f.ClientSet, f.Namespace.Name, serviceName)
@@ -110,7 +109,7 @@ var _ = ginkgo.Describe("Egress Services", func() {
 			reachAllServiceBackendsFromExternalContainer(externalContainerName, svcIP, podHTTPPort, pods)
 
 			ginkgo.By("Resetting the service's annotations the backend pods should exit with their node's IP")
-			svc, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Get(context.TODO(), serviceName, metav1.GetOptions{})
+			svc, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Get(context.TODO(), serviceName, metav1.GetOptions{})
 			framework.ExpectNoError(err, "failed to get service")
 			svc.Annotations = map[string]string{}
 			_, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Update(context.TODO(), svc, metav1.UpdateOptions{})
@@ -133,12 +132,12 @@ var _ = ginkgo.Describe("Egress Services", func() {
 				}, 1*time.Second, 200*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "failed to reach external container with node's ip")
 			}
 		},
-		ginkgotable.Entry("ipv4 pods", serviceV4IP, &externalIPv4),
-		ginkgotable.Entry("ipv6 pods", serviceV6IP, &externalIPv6),
+		ginkgotable.Entry("ipv4 pods", v1.IPv4Protocol, &externalIPv4),
+		ginkgotable.Entry("ipv6 pods", v1.IPv6Protocol, &externalIPv6),
 	)
 
 	ginkgotable.DescribeTable("Should validate pods' egress is SNATed to the LB's ingress ip with selectors",
-		func(svcIP string, dstIP *string) {
+		func(protocol v1.IPFamily, dstIP *string) {
 			ginkgo.By("Creating the backend pods")
 			podsCreateSync := errgroup.Group{}
 			index := 0
@@ -157,8 +156,9 @@ var _ = ginkgo.Describe("Egress Services", func() {
 
 			ginkgo.By("Creating an egress service selecting the first node")
 			firstNode := nodes[0].Name
-			createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, svcIP,
+			svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol,
 				map[string]string{"k8s.ovn.org/egress-service": fmt.Sprintf("{\"nodeSelector\":{\"matchLabels\":{\"kubernetes.io/hostname\": \"%s\"}}}", firstNode)}, podsLabels, podHTTPPort)
+			svcIP := svc.Status.LoadBalancer.Ingress[0].IP
 
 			ginkgo.By("Verifying the first node was picked for handling the service's egress traffic")
 			node, egressHostV4IP, egressHostV6IP := getEgressSVCHost(f.ClientSet, f.Namespace.Name, serviceName)
@@ -189,7 +189,7 @@ var _ = ginkgo.Describe("Egress Services", func() {
 
 			ginkgo.By("Updating the service to select the second node")
 			secondNode := nodes[1].Name
-			svc, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Get(context.TODO(), serviceName, metav1.GetOptions{})
+			svc, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Get(context.TODO(), serviceName, metav1.GetOptions{})
 			framework.ExpectNoError(err, "failed to get service")
 			svc.Annotations = map[string]string{"k8s.ovn.org/egress-service": fmt.Sprintf("{\"nodeSelector\":{\"matchLabels\":{\"kubernetes.io/hostname\": \"%s\"}}}", secondNode)}
 			_, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Update(context.TODO(), svc, metav1.UpdateOptions{})
@@ -306,12 +306,12 @@ var _ = ginkgo.Describe("Egress Services", func() {
 
 			reachAllServiceBackendsFromExternalContainer(externalContainerName, svcIP, podHTTPPort, pods)
 		},
-		ginkgotable.Entry("ipv4 pods", serviceV4IP, &externalIPv4),
-		ginkgotable.Entry("ipv6 pods", serviceV6IP, &externalIPv6),
+		ginkgotable.Entry("ipv4 pods", v1.IPv4Protocol, &externalIPv4),
+		ginkgotable.Entry("ipv6 pods", v1.IPv6Protocol, &externalIPv6),
 	)
 
 	ginkgotable.DescribeTable("Should validate egress service has higher priority than EgressIP",
-		func(svcIP string, dstIP *string) {
+		func(protocol v1.IPFamily, dstIP *string) {
 			labels := map[string]string{"wants": "egress"}
 			ginkgo.By("Creating the backend pods")
 			podsCreateSync := errgroup.Group{}
@@ -329,8 +329,9 @@ var _ = ginkgo.Describe("Egress Services", func() {
 			framework.ExpectNoError(err, "failed to create backend pods")
 
 			ginkgo.By("Creating an egress service without node selectors")
-			createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, svcIP,
+			svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol,
 				map[string]string{"k8s.ovn.org/egress-service": "{}"}, labels, podHTTPPort)
+			svcIP := svc.Status.LoadBalancer.Ingress[0].IP
 
 			ginkgo.By("Getting the IPs of the node in charge of the service")
 			_, egressHostV4IP, egressHostV6IP := getEgressSVCHost(f.ClientSet, f.Namespace.Name, serviceName)
@@ -406,7 +407,7 @@ spec:
 			reachAllServiceBackendsFromExternalContainer(externalContainerName, svcIP, podHTTPPort, pods)
 
 			ginkgo.By("Resetting the service's annotations the backend pods should exit with the EgressIP")
-			svc, err := f.ClientSet.CoreV1().Services(f.Namespace.Name).Get(context.TODO(), serviceName, metav1.GetOptions{})
+			svc, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Get(context.TODO(), serviceName, metav1.GetOptions{})
 			framework.ExpectNoError(err, "failed to get service")
 			svc.Annotations = map[string]string{}
 			_, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Update(context.TODO(), svc, metav1.UpdateOptions{})
@@ -421,12 +422,12 @@ spec:
 				}, 1*time.Second, 200*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "failed to reach external container with eip")
 			}
 		},
-		ginkgotable.Entry("ipv4 pods", serviceV4IP, &externalIPv4),
-		ginkgotable.Entry("ipv6 pods", serviceV6IP, &externalIPv6),
+		ginkgotable.Entry("ipv4 pods", v1.IPv4Protocol, &externalIPv4),
+		ginkgotable.Entry("ipv6 pods", v1.IPv6Protocol, &externalIPv6),
 	)
 
 	ginkgotable.DescribeTable("Should validate a node with a local ep is selected when ETP=Local",
-		func(svcIP string, dstIP *string) {
+		func(protocol v1.IPFamily, dstIP *string) {
 			ginkgo.By("Creating two backend pods on the second node")
 			firstNode := nodes[0].Name
 			secondNode := nodes[1].Name
@@ -445,11 +446,12 @@ spec:
 			framework.ExpectNoError(err, "failed to create backend pods")
 
 			ginkgo.By("Creating an ETP=Local egress service selecting the first node")
-			svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, svcIP,
+			svc := createLBServiceWithIngressIP(f.ClientSet, f.Namespace.Name, serviceName, protocol,
 				map[string]string{"k8s.ovn.org/egress-service": fmt.Sprintf("{\"nodeSelector\":{\"matchLabels\":{\"kubernetes.io/hostname\": \"%s\"}}}", firstNode)},
 				podsLabels, podHTTPPort, func(svc *v1.Service) {
 					svc.Spec.ExternalTrafficPolicy = v1.ServiceExternalTrafficPolicyTypeLocal
 				})
+			svcIP := svc.Status.LoadBalancer.Ingress[0].IP
 
 			gomega.Consistently(func() error {
 				nodeList, err := f.ClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{LabelSelector: fmt.Sprintf("egress-service.k8s.ovn.org/%s-%s=", svc.Namespace, svc.Name)})
@@ -545,17 +547,13 @@ spec:
 				}, 1*time.Second, 200*time.Millisecond).ShouldNot(gomega.HaveOccurred(), "failed to reach external container with node's ip")
 			}
 		},
-		ginkgotable.Entry("ipv4 pods", serviceV4IP, &externalIPv4),
-		ginkgotable.Entry("ipv6 pods", serviceV6IP, &externalIPv6),
+		ginkgotable.Entry("ipv4 pods", v1.IPv4Protocol, &externalIPv4),
+		ginkgotable.Entry("ipv6 pods", v1.IPv6Protocol, &externalIPv6),
 	)
 })
 
 // Creates a LoadBalancer service with the given IP and verifies it was set correctly.
-func createLBServiceWithIngressIP(cs kubernetes.Interface, namespace, name, ip string, annotations, selector map[string]string, port int32, tweak ...func(svc *v1.Service)) *v1.Service {
-	ipFamily := v1.IPv4Protocol
-	if utilnet.IsIPv6String(ip) {
-		ipFamily = v1.IPv6Protocol
-	}
+func createLBServiceWithIngressIP(cs kubernetes.Interface, namespace, name string, protocol v1.IPFamily, annotations, selector map[string]string, port int32, tweak ...func(svc *v1.Service)) *v1.Service {
 	svc := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace:   namespace,
@@ -571,7 +569,7 @@ func createLBServiceWithIngressIP(cs kubernetes.Interface, namespace, name, ip s
 				},
 			},
 			Type:       v1.ServiceTypeLoadBalancer,
-			IPFamilies: []v1.IPFamily{ipFamily},
+			IPFamilies: []v1.IPFamily{protocol},
 		},
 	}
 
@@ -581,10 +579,6 @@ func createLBServiceWithIngressIP(cs kubernetes.Interface, namespace, name, ip s
 
 	svc, err := cs.CoreV1().Services(namespace).Create(context.TODO(), svc, metav1.CreateOptions{})
 	framework.ExpectNoError(err, "failed to create loadbalancer service")
-
-	svc.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{{IP: ip}}
-	_, err = cs.CoreV1().Services(namespace).UpdateStatus(context.TODO(), svc, metav1.UpdateOptions{})
-	framework.ExpectNoError(err, "failed to set loadbalancer's ip")
 
 	gomega.Eventually(func() error {
 		svc, err = cs.CoreV1().Services(namespace).Get(context.TODO(), name, metav1.GetOptions{})
@@ -596,8 +590,8 @@ func createLBServiceWithIngressIP(cs kubernetes.Interface, namespace, name, ip s
 			return fmt.Errorf("expected 1 lb ingress ip, got %v as ips", svc.Status.LoadBalancer.Ingress)
 		}
 
-		if svc.Status.LoadBalancer.Ingress[0].IP != ip {
-			return fmt.Errorf("expected lb ingress to be %s, got %v", ip, svc.Status.LoadBalancer.Ingress[0].IP)
+		if len(svc.Status.LoadBalancer.Ingress[0].IP) == 0 {
+			return fmt.Errorf("expected lb ingress to be set")
 		}
 
 		return nil
