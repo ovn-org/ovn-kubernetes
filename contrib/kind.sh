@@ -295,6 +295,9 @@ parse_args() {
                                                 ;;
             --isolated )                        OVN_ISOLATED=true
                                                 ;;
+            -mne | --multi-network-enable )     shift
+                                                ENABLE_MULTI_NET=true
+                                                ;;
             --delete )                          delete
                                                 exit
                                                 ;;
@@ -357,6 +360,7 @@ print_params() {
      echo "OVN_EGRESSIP_HEALTHCHECK_PORT = $OVN_EGRESSIP_HEALTHCHECK_PORT"
      echo "OVN_DEPLOY_PODS = $OVN_DEPLOY_PODS"
      echo "OVN_ISOLATED = $OVN_ISOLATED"
+     echo "ENABLE_MULTI_NET = $ENABLE_MULTI_NET"
      echo ""
 }
 
@@ -508,6 +512,7 @@ set_default_params() {
   if [ "$OVN_ISOLATED" == true ]; then
     OVN_GATEWAY_OPTS="--gateway-interface=eth0"
   fi
+  ENABLE_MULTI_NET=${ENABLE_MULTI_NET:-false}
 }
 
 detect_apiserver_url() {
@@ -711,7 +716,8 @@ create_ovn_kube_manifests() {
     --egress-qos-enable=true \
     --v4-join-subnet="${JOIN_SUBNET_IPV4}" \
     --v6-join-subnet="${JOIN_SUBNET_IPV6}" \
-    --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}"
+    --ex-gw-network-interface="${OVN_EX_GW_NETWORK_INTERFACE}" \
+    --multi-network-enable=${ENABLE_MULTI_NET}
   popd
 }
 
@@ -820,6 +826,12 @@ destroy_metallb() {
   docker stop lbclient || true # its possible the lbclient doesn't exist which is fine, ignore error
   docker stop frr || true # its possible the lbclient doesn't exist which is fine, ignore error
   docker network rm clientnet || true # its possible the clientnet network doesn't exist which is fine, ignore error
+}
+
+install_multus() {
+  echo "Installing multus-cni daemonset ..."
+  multus_manifest="https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml"
+  run_kubectl apply -f "$multus_manifest"
 }
 
 # kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6. It will first wait for all
@@ -1016,6 +1028,9 @@ install_ovn_image
 install_ovn
 if [ "$KIND_INSTALL_INGRESS" == true ]; then
   install_ingress
+fi
+if [ "$ENABLE_MULTI_NET" == true ]; then
+  install_multus
 fi
 kubectl_wait_pods
 sleep_until_pods_settle
