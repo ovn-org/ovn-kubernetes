@@ -1,8 +1,9 @@
 package types
 
 import (
-	"github.com/containernetworking/cni/pkg/types"
 	"net"
+
+	"github.com/containernetworking/cni/pkg/types"
 )
 
 // NetConf is CNI NetConf with DeviceID
@@ -23,6 +24,9 @@ type NetConf struct {
 	// list of IPs, expressed with prefix length, to be excluded from being allocated for Pod
 	// valid for localnet or layer 2 network topology
 	ExcludeCIDRs []string `json:"excludeCIDRs,omitempty"`
+	// DHCP if true the address from Subnet will be deliver
+	// using DHCP
+	DHCP bool `json:"dhcp,omitempty"`
 
 	// PciAddrs in case of using sriov
 	DeviceID string `json:"deviceID,omitempty"`

@@ -157,6 +157,12 @@ func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
 		}
 	}
 
+	// don't configure pod's network if DHCP, ovn-k will just answer to a
+	// DHCP request who ever is asking of it on the LSP (pod or VM).
+	if ifInfo.DHCP {
+		return nil
+	}
+
 	// set the IP address
 	for _, ip := range ifInfo.IPs {
 		addr := &netlink.Addr{IPNet: ip}

@@ -104,7 +104,7 @@ func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, k
 
 // PodAnnotation2PodInfo creates PodInterfaceInfo from Pod annotations and additional attributes
 func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *util.PodAnnotation, checkExtIDs bool, podUID,
-	vfNetdevname, nadName string, netName string, mtu int) (*PodInterfaceInfo, error) {
+	vfNetdevname, nadName string, netName string, mtu int, dhcp bool) (*PodInterfaceInfo, error) {
 	var err error
 	// get pod's annotation of the given NAD if it is not available
 	if podNADAnnotation == nil {
@@ -135,6 +135,7 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *ut
 		NetName:              netName,
 		NADName:              nadName,
 		EnableUDPAggregation: config.Default.EnableUDPAggregation,
+		DHCP:                 dhcp,
 	}
 	return podInterfaceInfo, nil
 }

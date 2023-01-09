@@ -53,7 +53,7 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) error {
 					return
 				}
 				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, nil, isOvnUpEnabled, string(pod.UID),
-					"", nadName, netName, config.Default.MTU)
+					"", nadName, netName, config.Default.MTU, false /*DHCP*/)
 				if err != nil {
 					retryPods.Store(pod.UID, true)
 					return
@@ -90,7 +90,7 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) error {
 					return
 				}
 				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations, nil, isOvnUpEnabled, string(pod.UID),
-					"", nadName, netName, config.Default.MTU)
+					"", nadName, netName, config.Default.MTU, false /*DHCP*/)
 				if err != nil {
 					return
 				}

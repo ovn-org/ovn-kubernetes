@@ -146,7 +146,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, podLister corev1listers.PodL
 		return nil, err
 	}
 	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, podNADAnnotation, useOVSExternalIDs, pr.PodUID, vfNetdevName,
-		pr.nadName, pr.netName, pr.CNIConf.MTU)
+		pr.nadName, pr.netName, pr.CNIConf.MTU, pr.CNIConf.DHCP)
 	if err != nil {
 		return nil, err
 	}

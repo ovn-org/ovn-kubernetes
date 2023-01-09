@@ -2,12 +2,14 @@ package ovn
 
 import (
 	"fmt"
+	"net"
 	"reflect"
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/dhcp"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -165,6 +167,23 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 
 	if newlyCreated {
 		metrics.RecordPodCreated(pod, bsnc.NetInfo)
+	}
+
+	if bsnc.IsDHCP() {
+		var switchSubnets []*net.IPNet
+		if switchSubnets = bsnc.lsManager.GetSwitchSubnets(switchName); switchSubnets == nil {
+			return fmt.Errorf("cannot retrieve subnet for assigning gateway routes switch: %s", switchName)
+		}
+		router := util.GetNodeGatewayIfAddr(switchSubnets[0]).IP.String()
+		cidr := switchSubnets[0].String()
+		dhcpOptions, err := dhcp.ComposeOptionsWithKubeDNS(bsnc.client, cidr, router)
+		if err != nil {
+			return fmt.Errorf("failed composing DHCP options: %v", err)
+		}
+		err = libovsdbops.CreateOrUpdateDhcpv4Options(bsnc.nbClient, lsp, dhcpOptions)
+		if err != nil {
+			return fmt.Errorf("failed adding ovn operations to add DHCP v4 options: %v", err)
+		}
 	}
 	return nil
 }

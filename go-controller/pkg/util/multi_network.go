@@ -111,6 +111,7 @@ type NetConfInfo interface {
 	CompareNetConf(NetConfInfo) bool
 	TopologyType() string
 	MTU() int
+	IsDHCP() bool
 }
 
 // DefaultNetConfInfo is structure which holds specific default network information
@@ -135,6 +136,10 @@ func (defaultNetConfInfo *DefaultNetConfInfo) TopologyType() string {
 // MTU returns the defaultNetConfInfo's MTU value
 func (defaultNetConfInfo *DefaultNetConfInfo) MTU() int {
 	return config.Default.MTU
+}
+
+func (*DefaultNetConfInfo) IsDHCP() bool {
+	return false
 }
 
 // Layer3NetConfInfo is structure which holds specific secondary layer3 network information
@@ -215,11 +220,16 @@ func (layer3NetConfInfo *Layer3NetConfInfo) MTU() int {
 	return layer3NetConfInfo.mtu
 }
 
+func (layer3NetConfInfo *Layer3NetConfInfo) IsDHCP() bool {
+	return false
+}
+
 // Layer2NetConfInfo is structure which holds specific secondary layer2 network information
 type Layer2NetConfInfo struct {
 	subnets      string
 	mtu          int
 	excludeCIDRs []string
+	DHCP         bool
 
 	ClusterSubnets []config.CIDRNetworkEntry
 	ExcludeIPs     []net.IP
@@ -268,6 +278,7 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (*Layer2NetConfInfo, err
 		mtu:            netconf.MTU,
 		excludeCIDRs:   netconf.ExcludeCIDRs,
 		ClusterSubnets: clusterSubnets,
+		DHCP:           netconf.DHCP,
 		ExcludeIPs:     excludeIPs,
 	}, nil
 }
@@ -310,6 +321,9 @@ func (layer2NetConfInfo *Layer2NetConfInfo) TopologyType() string {
 
 func (layer2NetConfInfo *Layer2NetConfInfo) MTU() int {
 	return layer2NetConfInfo.mtu
+}
+func (layer2NetConfInfo *Layer2NetConfInfo) IsDHCP() bool {
+	return layer2NetConfInfo.DHCP
 }
 
 // GetNADName returns key of NetAttachDefInfo.NetAttachDefs map, also used as Pod annotation key
@@ -396,9 +410,10 @@ func ParseNetConf(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovncnity
 // and return the matching NetworkSelectionElement if any exists.
 //
 // Return value:
-//    bool: if this Pod is on this Network; true or false
-//    *nettypes.NetworkSelectionElement: all NetworkSelectionElement that pod is requested for the specified network
-//    error:  error in case of failure
+//
+//	bool: if this Pod is on this Network; true or false
+//	*nettypes.NetworkSelectionElement: all NetworkSelectionElement that pod is requested for the specified network
+//	error:  error in case of failure
 func PodWantsMultiNetwork(pod *kapi.Pod, nInfo NetInfo) (bool, *nettypes.NetworkSelectionElement, error) {
 	var validNADName string
 
