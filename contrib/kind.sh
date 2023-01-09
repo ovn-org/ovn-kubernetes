@@ -75,6 +75,9 @@ run_kubectl() {
 # The root cause is unknown, this also can not be reproduced in Ubuntu 20.04 or
 # with Fedora32 Cloud, but it does not happen if we clean first the ovn-kubernetes resources.
 delete() {
+  if [ "$KIND_INSTALL_METALLB" == true ]; then
+    destroy_metallb
+  fi
   timeout 5 kubectl --kubeconfig "${KUBECONFIG}" delete namespace ovn-kubernetes || true
   sleep 5
   kind delete cluster --name "${KIND_CLUSTER_NAME:-ovn}"
@@ -162,6 +165,8 @@ parse_args() {
                                                 KIND_CONFIG=$1
                                                 ;;
             -ii | --install-ingress )           KIND_INSTALL_INGRESS=true
+                                                ;;
+            -mlb | --install-metallb )          KIND_INSTALL_METALLB=true
                                                 ;;
             -ha | --ha-enabled )                OVN_HA=true
                                                 ;;
@@ -307,6 +312,7 @@ print_params() {
      echo "KUBECONFIG = $KUBECONFIG"
      echo "MANIFEST_OUTPUT_DIR = $MANIFEST_OUTPUT_DIR"
      echo "KIND_INSTALL_INGRESS = $KIND_INSTALL_INGRESS"
+     echo "KIND_INSTALL_METALLB = $KIND_INSTALL_METALLB"
      echo "OVN_HA = $OVN_HA"
      echo "RUN_IN_CONTAINER = $RUN_IN_CONTAINER"
      echo "KIND_CLUSTER_NAME = $KIND_CLUSTER_NAME"
@@ -440,6 +446,7 @@ set_default_params() {
   K8S_VERSION=${K8S_VERSION:-v1.24.0}
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
+  KIND_INSTALL_METALLB=${KIND_INSTALL_METALLB:-false}
   OVN_HA=${OVN_HA:-false}
   KIND_LOCAL_REGISTRY=${KIND_LOCAL_REGISTRY:-false}
   KIND_DNS_DOMAIN=${KIND_DNS_DOMAIN:-"cluster.local"}
@@ -757,6 +764,53 @@ install_ingress() {
   run_kubectl apply -f ingress/service-nodeport.yaml
 }
 
+install_metallb() {
+  if  ! ( command -v controller-gen > /dev/null ); then
+    echo "controller-gen not found, installing sigs.k8s.io/controller-tools"
+    olddir="${PWD}"
+    builddir="$(mktemp -d)"
+    cd "${builddir}"
+    GO111MODULE=on go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
+    cd "${olddir}"
+    if [[ "${builddir}" == /tmp/* ]]; then #paranoia
+        rm -rf "${builddir}"
+    fi
+  fi
+  git clone https://github.com/metallb/metallb.git
+  pushd metallb
+  pip install -r dev-env/requirements.txt
+  inv dev-env -n ovn -b frr -p bgp
+  docker network create --driver bridge clientnet
+  docker network connect clientnet frr
+  docker run  --cap-add NET_ADMIN --user 0  -d --network clientnet  --rm  --name lbclient  quay.io/itssurya/dev-images:metallb-lbservice
+  popd
+  sudo rm -rf metallb
+  local frr_ips=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}#{{end}}' frr)
+  echo $frr_ips
+  local kind_network=$(echo $frr_ips | cut -d '#' -f 2)
+  echo $kind_network
+  local client_network=$(echo $frr_ips | cut -d '#' -f 1)
+  echo $client_network
+  local subnet=$(echo ${client_network%?}0)
+  echo $subnet
+  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  for n in $KIND_NODES; do
+    docker exec "$n" ip route add $subnet/16 via $kind_network
+  done
+  # TODO(tssurya): expand this to be more dynamic in the future when needed.
+  # for now, we only run one test with metalLB load balancer for which this
+  # one svcVIP (192.168.10.0) is more than enough since at a time we will only
+  # have one load balancer service
+  docker exec lbclient ip route add 192.168.10.0 via $client_network dev eth0
+  sleep 30
+}
+
+destroy_metallb() {
+  docker stop lbclient || true # its possible the lbclient doesn't exist which is fine, ignore error
+  docker stop frr || true # its possible the lbclient doesn't exist which is fine, ignore error
+  docker network rm clientnet || true # its possible the clientnet network doesn't exist which is fine, ignore error
+}
+
 # kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6. It will first wait for all
 # DaemonSets to complete with kubectl rollout. This command will block until all pods of the DS are actually up.
 # Next, it iterates over all pods with name=ovnkube-db and ovnkube-master and waits for them to post "Ready".
@@ -905,7 +959,7 @@ if [ "$KIND_CREATE" == true ]; then
       run_script_in_container
     fi
     # if cluster name is specified fixup kubeconfig
-    if [ "$KIND_CLUSTER_NAME"} != "ovn" ]; then
+    if [ "$KIND_CLUSTER_NAME" != "ovn" ]; then
       fixup_kubeconfig_names
     fi
     docker_disable_ipv6
@@ -929,4 +983,7 @@ sleep_until_pods_settle
 # Wait for DaemonSet to rollout
 if [ "${ENABLE_IPSEC}" == true ]; then
   install_ipsec
+fi
+if [ "$KIND_INSTALL_METALLB" == true ]; then
+  install_metallb
 fi

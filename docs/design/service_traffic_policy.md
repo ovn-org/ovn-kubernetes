@@ -158,6 +158,39 @@ The conntrack state looks like this:
  [UPDATE] tcp      6 120 TIME_WAIT src=172.18.0.1 dst=172.18.0.3 sport=36366 dport=31746 src=169.254.169.3 dst=172.18.0.1 sport=31746 dport=36366 [ASSURED]
 ```
 
+##### AllocateLoadBalancerNodePorts=False
+
+If AllocateLoadBalancerNodePorts=False then we cannot follow the same path as above since there won't be any node ports to DNAT to. Thus, for this special case which is only applicable to services of type LoadBalancer, we directly DNAT to the endpoints. Steps 1 & 2 are same as above i.e packet arrives into the host via openflows on `breth0`.
+
+3. In the host, we introduce IPtable rules in the PREROUTING chain that DNATs this packet matched on externalIP or load balancer ingress VIP directly to the pod backend using random probability mode algorithm
+
+```
+[0:0] -A OVN-KUBE-ETP -d 172.18.0.10/32 -p tcp -m tcp --dport 80 -m statistic --mode random --probability 0.50000000000 -j DNAT --to-destination 10.244.0.3:8080
+[3:180] -A OVN-KUBE-ETP -d 172.18.0.10/32 -p tcp -m tcp --dport 80 -m statistic --mode random --probability 1.00000000000 -j DNAT --to-destination 10.244.0.4:8080
+```
+
+4. The pod subnet route in the host sends this packet into OVN via the management port.
+
+```
+10.244.0.0/24 dev ovn-k8s-mp0 proto kernel scope link src 10.244.0.2 
+```
+
+5. Since by default, all traffic into `ovn-k8s-mp0` gets SNAT-ed, we add an IPtable rule to `OVN-KUBE-SNAT-MGMTPORT` chain to ensure it doesn't get SNAT-ed to preserve its source-ip.
+
+```
+[0:0] -A OVN-KUBE-SNAT-MGMTPORT -d 10.244.0.3/32 -p tcp -m tcp --dport 8080 -j RETURN
+[3:180] -A OVN-KUBE-SNAT-MGMTPORT -d 10.244.0.4/32 -p tcp -m tcp --dport 8080 -j RETURN
+```
+
+6. Traffic hits the switch and enters the destination pod. OVN load balancers play no role in this traffic flow.
+
+Here are conntrack entries for this traffic:
+```
+tcp,orig=(src=172.18.0.5,dst=10.244.0.4,sport=50134,dport=8080),reply=(src=10.244.0.4,dst=172.18.0.5,sport=8080,dport=50134),zone=11,protoinfo=(state=TIME_WAIT)
+tcp,orig=(src=172.18.0.5,dst=172.18.0.10,sport=50134,dport=80),reply=(src=10.244.0.4,dst=172.18.0.5,sport=8080,dport=50134),protoinfo=(state=TIME_WAIT)
+tcp,orig=(src=172.18.0.10,dst=172.18.0.5,sport=80,dport=50134),reply=(src=172.18.0.5,dst=172.18.0.10,sport=50134,dport=80),zone=64000,mark=2,protoinfo=(state=TIME_WAIT)
+tcp,orig=(src=172.18.0.5,dst=10.244.0.4,sport=50134,dport=8080),reply=(src=10.244.0.4,dst=172.18.0.5,sport=8080,dport=50134),zone=10,protoinfo=(state=TIME_WAIT)
+```
 
 ### External Source -> Service -> Host Networked pod
 
