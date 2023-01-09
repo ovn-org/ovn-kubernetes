@@ -163,34 +163,6 @@ func getGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
 	return iptRules
 }
 
-func getLegacyLocalGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
-	return []iptRule{
-		{
-			table:    "filter",
-			chain:    "FORWARD",
-			args:     []string{"-j", chain},
-			protocol: proto,
-		},
-	}
-}
-
-func getLegacySharedGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
-	return []iptRule{
-		{
-			table:    "filter",
-			chain:    "OUTPUT",
-			args:     []string{"-j", chain},
-			protocol: proto,
-		},
-		{
-			table:    "filter",
-			chain:    "FORWARD",
-			args:     []string{"-j", chain},
-			protocol: proto,
-		},
-	}
-}
-
 // getNodePortIPTRules returns the IPTable DNAT rules for a service of type nodePort
 // `svcPort` corresponds to port details for this service as specified in the service object
 // `targetIP` is clusterIP towards which the DNAT of nodePort service is to be added
@@ -444,17 +416,11 @@ func initSharedGatewayIPTables() error {
 	if err := handleGatewayIPTables(addIptRules, getGatewayInitRules); err != nil {
 		return err
 	}
-	if err := handleGatewayIPTables(delIptRules, getLegacySharedGatewayInitRules); err != nil {
-		return err
-	}
 	return nil
 }
 
 func initLocalGatewayIPTables() error {
 	if err := handleGatewayIPTables(addIptRules, getGatewayInitRules); err != nil {
-		return err
-	}
-	if err := handleGatewayIPTables(delIptRules, getLegacyLocalGatewayInitRules); err != nil {
 		return err
 	}
 	return nil
