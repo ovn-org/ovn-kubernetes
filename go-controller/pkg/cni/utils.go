@@ -133,3 +133,28 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *ut
 	}
 	return podInterfaceInfo, nil
 }
+
+//START taken from https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/types/pod_update.go
+const (
+	ConfigSourceAnnotationKey = "kubernetes.io/config.source"
+	// ApiserverSource identifies updates from Kubernetes API Server.
+	ApiserverSource = "api"
+)
+
+// GetPodSource returns the source of the pod based on the annotation.
+func GetPodSource(pod *kapi.Pod) (string, error) {
+	if pod.Annotations != nil {
+		if source, ok := pod.Annotations[ConfigSourceAnnotationKey]; ok {
+			return source, nil
+		}
+	}
+	return "", fmt.Errorf("cannot get source of pod %q", pod.UID)
+}
+
+// IsStaticPod returns true if the pod is a static pod.
+func IsStaticPod(pod *kapi.Pod) bool {
+	source, err := GetPodSource(pod)
+	return err == nil && source != ApiserverSource
+}
+
+//END taken from https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/types/pod_update.go
