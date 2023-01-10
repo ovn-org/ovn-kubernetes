@@ -3,8 +3,10 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"io/ioutil"
 	"os"
+	"strconv"
 	"time"
 
 	. "github.com/onsi/ginkgo"
@@ -40,8 +42,9 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 	fr := wrappedTestFramework(namespacePrefix)
 
 	var (
-		nsName string
-		pods   []v1.Pod
+		nsName          string
+		pods            []v1.Pod
+		sharedPortGroup string
 	)
 
 	BeforeEach(func() {
@@ -50,8 +53,9 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 		Expect(setNamespaceACLLogSeverity(fr, nsName, initialDenyACLSeverity, initialAllowACLSeverity, aclRemoveOptionDelete)).To(Succeed())
 
 		By("creating a \"default deny\" network policy")
-		_, err := makeDenyAllPolicy(fr, nsName, denyAllPolicyName)
+		policy, err := makeDenyAllPolicy(fr, nsName, denyAllPolicyName)
 		Expect(err).NotTo(HaveOccurred())
+		sharedPortGroup = getSharedPortGroupName(policy)
 
 		By("creating pods")
 		cmd := []string{"/bin/bash", "-c", "/agnhost netexec --http-port 8000"}
@@ -83,7 +87,7 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 	It("the logs have the expected log level", func() {
 		clientPodScheduledPodName := pods[pokerPodIndex].Spec.NodeName
 		// Retry here in the case where OVN acls have not been programmed yet
-		composedPolicyNameRegex := fmt.Sprintf("%s_%s", nsName, egressDefaultDenySuffix)
+		composedPolicyNameRegex := fmt.Sprintf("%s_%s", sharedPortGroup, egressDefaultDenySuffix)
 		Eventually(func() (bool, error) {
 			return assertACLLogs(
 				clientPodScheduledPodName,
@@ -119,7 +123,7 @@ var _ = Describe("ACL Logging for NetworkPolicy", func() {
 
 		It("the ACL logs are updated accordingly", func() {
 			clientPodScheduledPodName := pods[pokerPodIndex].Spec.NodeName
-			composedPolicyNameRegex := fmt.Sprintf("%s_%s", nsName, egressDefaultDenySuffix)
+			composedPolicyNameRegex := fmt.Sprintf("%s_%s", sharedPortGroup, egressDefaultDenySuffix)
 			Eventually(func() (bool, error) {
 				return assertACLLogs(
 					clientPodScheduledPodName,
@@ -763,4 +767,21 @@ func setNamespaceACLLogSeverity(fr *framework.Framework, nsName string, desiredD
 		_, err = fr.ClientSet.CoreV1().Namespaces().Update(context.TODO(), namespaceToUpdate, metav1.UpdateOptions{})
 		return err
 	})
+}
+
+// now we only support portGroup sharing if the policy's local pod selector is empty.
+func getSharedPortGroupName(policy *knet.NetworkPolicy) string {
+	sel, _ := metav1.LabelSelectorAsSelector(&policy.Spec.PodSelector)
+	return HashForOVN(policy.Namespace + "_" + "shared_port_group" + "_" + sel.String())
+}
+
+// HashforOVN hashes the provided input to make it a valid addressSet or portGroup name.
+func HashForOVN(s string) string {
+	h := fnv.New64a()
+	_, err := h.Write([]byte(s))
+	if err != nil {
+		return ""
+	}
+	hashString := strconv.FormatUint(h.Sum64(), 10)
+	return fmt.Sprintf("a%s", hashString)
 }
