@@ -45,6 +45,10 @@ type egressFirewallRule struct {
 type destination struct {
 	cidrSelector string
 	dnsName      string
+	// clusterSubnetIntersection is true, if egress firewall rule CIDRSelector intersects with clusterSubnet.
+	// Based on this flag we can omit clusterSubnet exclusion from the related ACL.
+	// For dns-based rules, EgressDNS won't add ips from clusterSubnet to the address set.
+	clusterSubnetIntersection bool
 }
 
 // cloneEgressFirewall shallow copies the egressfirewallapi.EgressFirewall object provided.
@@ -71,11 +75,19 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 		efr.to.dnsName = rawEgressFirewallRule.To.DNSName
 	} else {
 
-		_, _, err := net.ParseCIDR(rawEgressFirewallRule.To.CIDRSelector)
+		_, ipNet, err := net.ParseCIDR(rawEgressFirewallRule.To.CIDRSelector)
 		if err != nil {
 			return nil, err
 		}
 		efr.to.cidrSelector = rawEgressFirewallRule.To.CIDRSelector
+		intersect := false
+		for _, clusterSubnet := range config.Default.ClusterSubnets {
+			if clusterSubnet.CIDR.Contains(ipNet.IP) || ipNet.Contains(clusterSubnet.CIDR.IP) {
+				intersect = true
+				break
+			}
+		}
+		efr.to.clusterSubnetIntersection = intersect
 	}
 	efr.ports = rawEgressFirewallRule.Ports
 
@@ -293,9 +305,9 @@ func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, h
 		}
 		if rule.to.cidrSelector != "" {
 			if utilnet.IsIPv6CIDRString(rule.to.cidrSelector) {
-				matchTargets = []matchTarget{{matchKindV6CIDR, rule.to.cidrSelector}}
+				matchTargets = []matchTarget{{matchKindV6CIDR, rule.to.cidrSelector, rule.to.clusterSubnetIntersection}}
 			} else {
-				matchTargets = []matchTarget{{matchKindV4CIDR, rule.to.cidrSelector}}
+				matchTargets = []matchTarget{{matchKindV4CIDR, rule.to.cidrSelector, rule.to.clusterSubnetIntersection}}
 			}
 		} else {
 			// rule based on DNS NAME
@@ -305,10 +317,10 @@ func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, h
 			}
 			dnsNameIPv4ASHashName, dnsNameIPv6ASHashName := dnsNameAddressSets.GetASHashNames()
 			if dnsNameIPv4ASHashName != "" {
-				matchTargets = append(matchTargets, matchTarget{matchKindV4AddressSet, dnsNameIPv4ASHashName})
+				matchTargets = append(matchTargets, matchTarget{matchKindV4AddressSet, dnsNameIPv4ASHashName, rule.to.clusterSubnetIntersection})
 			}
 			if dnsNameIPv6ASHashName != "" {
-				matchTargets = append(matchTargets, matchTarget{matchKindV6AddressSet, dnsNameIPv6ASHashName})
+				matchTargets = append(matchTargets, matchTarget{matchKindV6AddressSet, dnsNameIPv6ASHashName, rule.to.clusterSubnetIntersection})
 			}
 		}
 		match := generateMatch(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6, matchTargets, rule.ports)
@@ -384,6 +396,11 @@ func (oc *DefaultNetworkController) deleteEgressFirewallRules(externalID string)
 type matchTarget struct {
 	kind  matchKind
 	value string
+	// clusterSubnetIntersection is inherited from the egressFirewallRule destination.
+	// clusterSubnetIntersection is true, if egress firewall rule CIDRSelector intersects with clusterSubnet.
+	// Based on this flag we can omit clusterSubnet exclusion from the related ACL.
+	// For dns-based rules, EgressDNS won't add ips from clusterSubnet to the address set.
+	clusterSubnetIntersection bool
 }
 
 type matchKind int
@@ -432,6 +449,7 @@ func generateMatch(ipv4Source, ipv6Source string, destinations []matchTarget, ds
 		src = fmt.Sprintf("ip6.src == $%s", ipv6Source)
 	}
 
+	subnetExclusionRequired := false
 	for _, entry := range destinations {
 		if entry.value == "" {
 			continue
@@ -446,16 +464,20 @@ func generateMatch(ipv4Source, ipv6Source string, destinations []matchTarget, ds
 		} else {
 			dst = strings.Join([]string{dst, ipDst}, " || ")
 		}
+		if entry.clusterSubnetIntersection {
+			subnetExclusionRequired = true
+		}
 	}
-
 	match := fmt.Sprintf("(%s) && %s", dst, src)
 	if len(dstPorts) > 0 {
 		match = fmt.Sprintf("%s && %s", match, egressGetL4Match(dstPorts))
 	}
-
-	// TODO only add exclusion when egress firewall rule subnet intersects with cluster subnet
-	extraMatch = getClusterSubnetsExclusion()
-	return fmt.Sprintf("%s && %s", match, extraMatch)
+	// only add clusterSubnet exclusion if dst CIDR intersects with one of the clusterSubnets
+	if subnetExclusionRequired {
+		extraMatch = getClusterSubnetsExclusion()
+		match = fmt.Sprintf("%s && %s", match, extraMatch)
+	}
+	return match
 }
 
 // egressGetL4Match generates the rules for when ports are specified in an egressFirewall Rule

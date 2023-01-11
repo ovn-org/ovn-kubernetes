@@ -1111,7 +1111,7 @@ func createSrcPod(podName, nodeName string, ipCheckInterval, ipCheckTimeout time
 	if err != nil {
 		framework.Failf("Failed to create src pod %s: %v", podName, err)
 	}
-	// Wait for pod exgw setup to be almost ready
+	// Wait for pod setup to be almost ready
 	err = wait.PollImmediate(ipCheckInterval, ipCheckTimeout, func() (bool, error) {
 		kubectlOut := getPodAddress(podName, f.Namespace.Name)
 		validIP := net.ParseIP(kubectlOut)

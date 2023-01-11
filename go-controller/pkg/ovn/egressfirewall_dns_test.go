@@ -94,6 +94,9 @@ func TestAdd(t *testing.T) {
 	test1IPv4 := "2.2.2.2"
 	test1IPv4Update := "3.3.3.3"
 	test1IPv6 := "2001:0db8:85a3:0000:0000:8a2e:0370:7334"
+	clusterSubnetStr := "10.128.0.0/14"
+	_, clusterSubnet, _ := net.ParseCIDR(clusterSubnetStr)
+	clusterSubnetIP := "10.128.0.1"
 	tests := []struct {
 		desc                       string
 		errExp                     bool
@@ -141,10 +144,71 @@ func TestAdd(t *testing.T) {
 				{"NewAddressSet", []string{"string", "[]net.IP"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
 			},
 			addressSetOpsHelper: []ovntest.TestifyMockHelper{
-				{"SetIPs", []string{"[]net.IP"}, []interface{}{}, []interface{}{nil}, 0, 1},
+				{
+					OnCallMethodName: "SetIPs",
+					OnCallMethodArgs: []interface{}{[]net.IP{net.ParseIP(test1IPv4)}},
+					RetArgList:       []interface{}{nil},
+				},
 			},
 		},
+		{
+			desc:       "EgressFirewall Add(dnsName) ignores ips from clusterSubnet",
+			errExp:     false,
+			syncTime:   5 * time.Minute,
+			dnsName:    test1DNSName,
+			configIPv4: true,
+			configIPv6: false,
 
+			dnsOpsMockHelper: []ovntest.TestifyMockHelper{
+				{"ClientConfigFromFile", []string{"string"}, []interface{}{}, []interface{}{&dns.ClientConfig{
+					Servers: []string{"1.1.1.1"},
+					Port:    "1234"}, nil}, 0, 1},
+				{"Fqdn", []string{"string"}, []interface{}{}, []interface{}{test1DNSName}, 0, 1},
+
+				{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{}, []interface{}{&dns.Msg{}}, 0, 1},
+				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{},
+					[]interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, clusterSubnetIP, "300")}}, 500 * time.Second, nil}, 0, 1},
+			},
+			addressSetFactoryOpsHelper: []ovntest.TestifyMockHelper{
+				{"NewAddressSet", []string{"string", "[]net.IP"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
+			},
+			addressSetOpsHelper: []ovntest.TestifyMockHelper{
+				{
+					OnCallMethodName: "SetIPs",
+					OnCallMethodArgs: []interface{}{[]net.IP{}},
+					RetArgList:       []interface{}{nil},
+				},
+			},
+		},
+		{
+			desc:       "EgressFirewall Add(dnsName) ignores ips from clusterSubnet leaving other ips",
+			errExp:     false,
+			syncTime:   5 * time.Minute,
+			dnsName:    test1DNSName,
+			configIPv4: true,
+			configIPv6: false,
+
+			dnsOpsMockHelper: []ovntest.TestifyMockHelper{
+				{"ClientConfigFromFile", []string{"string"}, []interface{}{}, []interface{}{&dns.ClientConfig{
+					Servers: []string{"1.1.1.1"},
+					Port:    "1234"}, nil}, 0, 1},
+				{"Fqdn", []string{"string"}, []interface{}{}, []interface{}{test1DNSName}, 0, 1},
+
+				{"SetQuestion", []string{"*dns.Msg", "string", "uint16"}, []interface{}{}, []interface{}{&dns.Msg{}}, 0, 1},
+				{"Exchange", []string{"*dns.Client", "*dns.Msg", "string"}, []interface{}{},
+					[]interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv4, "300"), generateRR(test1DNSName, clusterSubnetIP, "300")}}, 500 * time.Second, nil}, 0, 1},
+			},
+			addressSetFactoryOpsHelper: []ovntest.TestifyMockHelper{
+				{"NewAddressSet", []string{"string", "[]net.IP"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
+			},
+			addressSetOpsHelper: []ovntest.TestifyMockHelper{
+				{
+					OnCallMethodName: "SetIPs",
+					OnCallMethodArgs: []interface{}{[]net.IP{net.ParseIP(test1IPv4)}},
+					RetArgList:       []interface{}{nil},
+				},
+			},
+		},
 		{
 			desc:                     "EgressFirewall Add(dnsName) succeeds dual stack",
 			errExp:                   false,
@@ -169,7 +233,11 @@ func TestAdd(t *testing.T) {
 				{"NewAddressSet", []string{"string", "[]net.IP"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
 			},
 			addressSetOpsHelper: []ovntest.TestifyMockHelper{
-				{"SetIPs", []string{"[]net.IP"}, []interface{}{}, []interface{}{nil}, 0, 1},
+				{
+					OnCallMethodName: "SetIPs",
+					OnCallMethodArgs: []interface{}{[]net.IP{net.ParseIP(test1IPv4), net.ParseIP(test1IPv6)}},
+					RetArgList:       []interface{}{nil},
+				},
 			},
 		},
 		{
@@ -199,8 +267,16 @@ func TestAdd(t *testing.T) {
 				{"NewAddressSet", []string{"string", "[]net.IP"}, []interface{}{}, []interface{}{mockAddressSetOps, nil}, 0, 1},
 			},
 			addressSetOpsHelper: []ovntest.TestifyMockHelper{
-				{"SetIPs", []string{"[]net.IP"}, []interface{}{}, []interface{}{nil}, 0, 1},
-				{"SetIPs", []string{"[]net.IP"}, []interface{}{}, []interface{}{nil}, 0, 1},
+				{
+					OnCallMethodName: "SetIPs",
+					OnCallMethodArgs: []interface{}{[]net.IP{net.ParseIP(test1IPv4)}},
+					RetArgList:       []interface{}{nil},
+				},
+				{
+					OnCallMethodName: "SetIPs",
+					OnCallMethodArgs: []interface{}{[]net.IP{net.ParseIP(test1IPv4Update)}},
+					RetArgList:       []interface{}{nil},
+				},
 			},
 		},
 	}
@@ -209,6 +285,7 @@ func TestAdd(t *testing.T) {
 			testCh := make(chan struct{})
 			config.IPv4Mode = tc.configIPv4
 			config.IPv6Mode = tc.configIPv6
+			config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{CIDR: clusterSubnet}}
 
 			for _, item := range tc.dnsOpsMockHelper {
 				call := mockDnsOps.On(item.OnCallMethodName)
@@ -232,9 +309,8 @@ func TestAdd(t *testing.T) {
 			}
 			for _, item := range tc.addressSetOpsHelper {
 				call := mockAddressSetOps.On(item.OnCallMethodName)
-				for _, arg := range item.OnCallMethodArgType {
-					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-				}
+				// use exact arguments for AddressSet call to match ips
+				call.Arguments = item.OnCallMethodArgs
 				for _, ret := range item.RetArgList {
 					call.ReturnArguments = append(call.ReturnArguments, ret)
 				}
