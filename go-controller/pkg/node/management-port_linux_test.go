@@ -244,7 +244,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	_, err = config.InitConfig(ctx, fexec, nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressipv1fake.NewSimpleClientset(), &egressfirewallfake.Clientset{}, nil}, existingNode.Name)
+	nodeAnnotator := kube.NewNodeAnnotator(&kube.KubeOVN{kube.Kube{fakeClient}, egressipv1fake.NewSimpleClientset(), &egressfirewallfake.Clientset{}, nil}, existingNode.Name)
 	waiter := newStartupWaiter()
 
 	err = testNS.Do(func(ns.NetNS) error {
@@ -321,7 +321,7 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 	_, err = config.InitConfig(ctx, fexec, nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressipv1fake.NewSimpleClientset(), &egressfirewallfake.Clientset{}, nil}, existingNode.Name)
+	nodeAnnotator := kube.NewNodeAnnotator(&kube.KubeOVN{kube.Kube{fakeClient}, egressipv1fake.NewSimpleClientset(), &egressfirewallfake.Clientset{}, nil}, existingNode.Name)
 	waiter := newStartupWaiter()
 
 	err = testNS.Do(func(ns.NetNS) error {

@@ -184,11 +184,7 @@ func runOvnKubeDBChecker(ctx *cli.Context) error {
 
 	stopChan := make(chan struct{})
 	go ovndbmanager.RunDBChecker(
-		&kube.Kube{
-			KClient:              ovnClientset.KubeClient,
-			EIPClient:            ovnClientset.EgressIPClient,
-			EgressFirewallClient: ovnClientset.EgressFirewallClient,
-		},
+		&kube.Kube{KClient: ovnClientset.KubeClient},
 		stopChan)
 	// run until cancelled
 	<-ctx.Context.Done()

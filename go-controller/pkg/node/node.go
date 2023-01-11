@@ -463,7 +463,7 @@ func (n *OvnNode) Start(ctx context.Context) error {
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer("", isOvnUpEnabled, n.watchFactory, kclient.KClient)
+		cniServer, err = cni.NewCNIServer(isOvnUpEnabled, n.watchFactory, kclient.KClient)
 		if err != nil {
 			return err
 		}
@@ -646,7 +646,7 @@ func (n *OvnNode) Start(ctx context.Context) error {
 		}
 	} else {
 		// start the cni server
-		if err := cniServer.Start(cni.HandleCNIRequest); err != nil {
+		if err := cniServer.Start(cni.ServerRunDir); err != nil {
 			return err
 		}
 

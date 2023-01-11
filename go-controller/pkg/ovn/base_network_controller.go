@@ -42,7 +42,7 @@ import (
 // CommonNetworkControllerInfo structure is place holder for all fields shared among controllers.
 type CommonNetworkControllerInfo struct {
 	client       clientset.Interface
-	kube         kube.Interface
+	kube         *kube.KubeOVN
 	watchFactory *factory.WatchFactory
 	podRecorder  *metrics.PodRecorder
 
@@ -112,7 +112,7 @@ type BaseSecondaryNetworkController struct {
 }
 
 // NewCommonNetworkControllerInfo creates CommonNetworkControllerInfo shared by controllers
-func NewCommonNetworkControllerInfo(client clientset.Interface, kube kube.Interface, wf *factory.WatchFactory,
+func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeOVN, wf *factory.WatchFactory,
 	recorder record.EventRecorder, nbClient libovsdbclient.Client, sbClient libovsdbclient.Client,
 	podRecorder *metrics.PodRecorder, SCTPSupport, multicastSupport bool) *CommonNetworkControllerInfo {
 	return &CommonNetworkControllerInfo{

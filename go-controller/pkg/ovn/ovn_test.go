@@ -154,8 +154,8 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 	podRecorder := metrics.NewPodRecorder()
 	cnci := NewCommonNetworkControllerInfo(
 		ovnClient.KubeClient,
-		&kube.Kube{
-			KClient:              ovnClient.KubeClient,
+		&kube.KubeOVN{
+			Kube:                 kube.Kube{KClient: ovnClient.KubeClient},
 			EIPClient:            ovnClient.EgressIPClient,
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,

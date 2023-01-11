@@ -969,7 +969,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 		var err error
 
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		nodeAnnotator = kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient, fakeClient.EgressIPClient, fakeClient.EgressFirewallClient, nil}, testNode.Name)
+		nodeAnnotator = kube.NewNodeAnnotator(&kube.Kube{kubeFakeClient}, testNode.Name)
 		l3GatewayConfig = node1.gatewayConfig(config.GatewayModeLocal, uint(vlanID))
 		err = util.SetL3GatewayConfig(nodeAnnotator, l3GatewayConfig)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())

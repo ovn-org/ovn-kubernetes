@@ -46,7 +46,7 @@ func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.Swi
 type networkControllerManager struct {
 	ovnClientset *util.OVNClientset
 	client       clientset.Interface
-	kube         kube.Interface
+	kube         *kube.KubeOVN
 	watchFactory *factory.WatchFactory
 	podRecorder  *metrics.PodRecorder
 	// event recorder used to post events to k8s
@@ -271,8 +271,8 @@ func NewNetworkControllerManager(ovnClient *util.OVNClientset, identity string, 
 	cm := &networkControllerManager{
 		ovnClientset: ovnClient,
 		client:       ovnClient.KubeClient,
-		kube: &kube.Kube{
-			KClient:              ovnClient.KubeClient,
+		kube: &kube.KubeOVN{
+			Kube:                 kube.Kube{KClient: ovnClient.KubeClient},
 			EIPClient:            ovnClient.EgressIPClient,
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,

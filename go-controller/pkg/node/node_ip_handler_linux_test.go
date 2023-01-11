@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
+	podnetworkfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/podnetwork/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -81,7 +82,8 @@ var _ = Describe("Node IP Handler tests", func() {
 
 		var err error
 		fakeClientset := &util.OVNClientset{
-			KubeClient: tc.fakeClient,
+			KubeClient:       tc.fakeClient,
+			PodNetworkClient: &podnetworkfake.Clientset{},
 		}
 		tc.watchFactory, err = factory.NewNodeWatchFactory(fakeClientset, nodeName)
 		Expect(err).NotTo(HaveOccurred())
@@ -106,7 +108,7 @@ var _ = Describe("Node IP Handler tests", func() {
 			},
 		}
 
-		k := &kube.Kube{tc.fakeClient, nil, nil, nil}
+		k := &kube.Kube{tc.fakeClient}
 		tc.ipManager = newAddressManagerInternal(nodeName, k, fakeMgmtPortConfig, tc.watchFactory, false)
 
 		// We need to wait until the ipManager's goroutine runs the subscribe

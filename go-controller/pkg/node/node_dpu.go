@@ -8,7 +8,6 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/retry"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -27,8 +25,7 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) error {
 	// servedPods tracks the pods that got a VF
 	var servedPods sync.Map
 
-	podLister := corev1listers.NewPodLister(n.watchFactory.LocalPodInformer().GetIndexer())
-	kclient := n.Kube.(*kube.Kube)
+	clientSet := cni.NewClientSet(n.client, corev1listers.NewPodLister(n.watchFactory.LocalPodInformer().GetIndexer()))
 
 	// Support default network for now
 	nadName := types.DefaultNetworkName
@@ -58,7 +55,7 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) error {
 					retryPods.Store(pod.UID, true)
 					return
 				}
-				err = n.addRepPort(pod, vfRepName, podInterfaceInfo, podLister, kclient.KClient)
+				err = n.addRepPort(pod, vfRepName, podInterfaceInfo, clientSet)
 				if err != nil {
 					klog.Infof("Failed to add rep port, %s. retrying", err)
 					retryPods.Store(pod.UID, true)
@@ -94,7 +91,7 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) error {
 				if err != nil {
 					return
 				}
-				err = n.addRepPort(pod, vfRepName, podInterfaceInfo, podLister, kclient.KClient)
+				err = n.addRepPort(pod, vfRepName, podInterfaceInfo, clientSet)
 				if err != nil {
 					klog.Infof("Failed to add rep port, %s. retrying", err)
 				} else {
@@ -158,14 +155,14 @@ func (n *OvnNode) updatePodDPUConnStatusWithRetry(origPod *kapi.Pod,
 }
 
 // addRepPort adds the representor of the VF to the ovs bridge
-func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInterfaceInfo, podLister corev1listers.PodLister, kclient kubernetes.Interface) error {
+func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInterfaceInfo, getter cni.PodInfoGetter) error {
 	klog.Infof("Adding VF representor %s", vfRepName)
 	dpuCD, err := util.UnmarshalPodDPUConnDetails(pod.Annotations, types.DefaultNetworkName)
 	if err != nil {
 		return fmt.Errorf("failed to get dpu annotation. %v", err)
 	}
 
-	err = cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, dpuCD.SandboxId, podLister, kclient)
+	err = cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, vfRepName, ifInfo, dpuCD.SandboxId, getter)
 	if err != nil {
 		// Note(adrianc): we are lenient with cleanup in this method as pod is going to be retried anyway.
 		_ = n.delRepPort(vfRepName)

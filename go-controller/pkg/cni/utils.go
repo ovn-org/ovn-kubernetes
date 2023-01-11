@@ -13,8 +13,6 @@ import (
 	kapi "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	corev1listers "k8s.io/client-go/listers/core/v1"
 )
 
 // wait on a certain pod annotation related condition
@@ -44,28 +42,25 @@ func isDPUReady(podAnnotation map[string]string, nadName string) (*util.PodAnnot
 // getPod tries to read a Pod object from the informer cache, or if the pod
 // doesn't exist there, the apiserver. If neither a list or a kube client is
 // given, returns no pod and no error
-func getPod(podLister corev1listers.PodLister, kclient kubernetes.Interface, namespace, name string) (*kapi.Pod, error) {
+func (c *ClientSet) getPod(namespace, name string) (*kapi.Pod, error) {
 	var pod *kapi.Pod
 	var err error
 
-	if podLister != nil {
-		pod, err = podLister.Pods(namespace).Get(name)
-		if err != nil && !apierrors.IsNotFound(err) {
-			return nil, err
-		}
-		// drop through
+	pod, err = c.podLister.Pods(namespace).Get(name)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return nil, err
 	}
 
-	if pod == nil && kclient != nil {
+	if pod == nil {
 		// If the pod wasn't in our local cache, ask for it directly
-		pod, err = kclient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+		pod, err = c.kclient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	}
 
 	return pod, err
 }
 
 // GetPodAnnotations obtains the pod UID and annotation from the cache or apiserver
-func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, kclient kubernetes.Interface,
+func GetPodAnnotations(ctx context.Context, getter PodInfoGetter,
 	namespace, name, nadName string, annotCond podAnnotWaitCond) (string, map[string]string, *util.PodAnnotation, error) {
 	var notFoundCount uint
 
@@ -78,7 +73,7 @@ func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, k
 			}
 			return "", nil, nil, fmt.Errorf("%s waiting for annotations: %w", detail, ctx.Err())
 		default:
-			pod, err := getPod(podLister, kclient, namespace, name)
+			pod, err := getter.getPod(namespace, name)
 			if err != nil {
 				if !apierrors.IsNotFound(err) {
 					return "", nil, nil, fmt.Errorf("failed to get pod for annotations: %v", err)
