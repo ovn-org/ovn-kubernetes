@@ -75,6 +75,9 @@ run_kubectl() {
 # The root cause is unknown, this also can not be reproduced in Ubuntu 20.04 or
 # with Fedora32 Cloud, but it does not happen if we clean first the ovn-kubernetes resources.
 delete() {
+  if [ "$KIND_INSTALL_METALLB" == true ]; then
+    destroy_metallb
+  fi
   timeout 5 kubectl --kubeconfig "${KUBECONFIG}" delete namespace ovn-kubernetes || true
   sleep 5
   kind delete cluster --name "${KIND_CLUSTER_NAME:-ovn}"
@@ -145,7 +148,8 @@ usage() {
     echo "-ric | --run-in-container           Configure the script to be run from a docker container, allowing it to still communicate with the kind controlplane" 
     echo "-ehp | --egress-ip-healthcheck-port TCP port used for gRPC session by egress IP node check. DEFAULT: 9107 (Use "0" for legacy dial to port 9)."
     echo "-is  | --ipsec                      Enable IPsec encryption (spawns ovn-ipsec pods)"
-    echo "--delete                      	    Delete current cluster"
+    echo "--delete                      	  Delete current cluster"
+    echo "--deploy                            Deploy ovn kubernetes without restarting kind"
     echo ""
 }
 
@@ -161,6 +165,8 @@ parse_args() {
                                                 KIND_CONFIG=$1
                                                 ;;
             -ii | --install-ingress )           KIND_INSTALL_INGRESS=true
+                                                ;;
+            -mlb | --install-metallb )          KIND_INSTALL_METALLB=true
                                                 ;;
             -ha | --ha-enabled )                OVN_HA=true
                                                 ;;
@@ -288,6 +294,8 @@ parse_args() {
             --delete )                          delete
                                                 exit
                                                 ;;
+            --deploy)                           KIND_CREATE=false
+                                                ;;
             -h | --help )                       usage
                                                 exit
                                                 ;;
@@ -304,6 +312,7 @@ print_params() {
      echo "KUBECONFIG = $KUBECONFIG"
      echo "MANIFEST_OUTPUT_DIR = $MANIFEST_OUTPUT_DIR"
      echo "KIND_INSTALL_INGRESS = $KIND_INSTALL_INGRESS"
+     echo "KIND_INSTALL_METALLB = $KIND_INSTALL_METALLB"
      echo "OVN_HA = $OVN_HA"
      echo "RUN_IN_CONTAINER = $RUN_IN_CONTAINER"
      echo "KIND_CLUSTER_NAME = $KIND_CLUSTER_NAME"
@@ -342,6 +351,7 @@ print_params() {
      echo "OVN_ENABLE_EX_GW_NETWORK_BRIDGE = $OVN_ENABLE_EX_GW_NETWORK_BRIDGE"
      echo "OVN_EX_GW_NETWORK_INTERFACE = $OVN_EX_GW_NETWORK_INTERFACE"
      echo "OVN_EGRESSIP_HEALTHCHECK_PORT = $OVN_EGRESSIP_HEALTHCHECK_PORT"
+     echo "OVN_DEPLOY_PODS = $OVN_DEPLOY_PODS"
      echo ""
 }
 
@@ -419,11 +429,14 @@ set_openssl_binary() {
 set_default_params() {
   # Set default values
   # Used for multi cluster setups
+  KIND_CREATE=${KIND_CREATE:-true}
   KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
   # Setup KUBECONFIG patch based on cluster-name
   export KUBECONFIG=${KUBECONFIG:-${HOME}/${KIND_CLUSTER_NAME}.conf}
   # Scrub any existing kubeconfigs at the path
-  rm -f ${KUBECONFIG}
+  if [ "${KIND_CREATE}" == true ]; then
+    rm -f ${KUBECONFIG}
+  fi
   MANIFEST_OUTPUT_DIR=${MANIFEST_OUTPUT_DIR:-${DIR}/../dist/yaml}
   if [ ${KIND_CLUSTER_NAME} != "ovn" ]; then
     MANIFEST_OUTPUT_DIR="${DIR}/../dist/yaml/${KIND_CLUSTER_NAME}"
@@ -433,6 +446,7 @@ set_default_params() {
   K8S_VERSION=${K8S_VERSION:-v1.24.0}
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
+  KIND_INSTALL_METALLB=${KIND_INSTALL_METALLB:-false}
   OVN_HA=${OVN_HA:-false}
   KIND_LOCAL_REGISTRY=${KIND_LOCAL_REGISTRY:-false}
   KIND_DNS_DOMAIN=${KIND_DNS_DOMAIN:-"cluster.local"}
@@ -483,6 +497,7 @@ set_default_params() {
   OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
   OVN_EGRESSIP_HEALTHCHECK_PORT=${OVN_EGRESSIP_HEALTHCHECK_PORT:-9107}
   OCI_BIN=${KIND_EXPERIMENTAL_PROVIDER:-docker}
+  OVN_DEPLOY_PODS=${OVN_DEPLOY_PODS:-"ovnkube-master ovnkube-node"}
 }
 
 detect_apiserver_url() {
@@ -655,7 +670,7 @@ build_ovn_image() {
 }
 
 create_ovn_kube_manifests() {
-  pushd ${DIR}/../dist/images
+    pushd ${DIR}/../dist/images
   ./daemonset.sh \
     --output-directory="${MANIFEST_OUTPUT_DIR}"\
     --image="${OVN_IMAGE}" \
@@ -735,11 +750,65 @@ install_ovn() {
   run_kubectl apply -f ovnkube-master.yaml
   run_kubectl apply -f ovnkube-node.yaml
   popd
+
+  # Force pod reload just the ones with golang containers
+  if [ "${KIND_CREATE}" == false ]; then
+    for pod in ${OVN_DEPLOY_PODS}; do
+        run_kubectl delete pod -n ovn-kubernetes -l name=$pod
+    done
+  fi
 }
 
 install_ingress() {
   run_kubectl apply -f ingress/mandatory.yaml
   run_kubectl apply -f ingress/service-nodeport.yaml
+}
+
+install_metallb() {
+  if  ! ( command -v controller-gen > /dev/null ); then
+    echo "controller-gen not found, installing sigs.k8s.io/controller-tools"
+    olddir="${PWD}"
+    builddir="$(mktemp -d)"
+    cd "${builddir}"
+    GO111MODULE=on go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
+    cd "${olddir}"
+    if [[ "${builddir}" == /tmp/* ]]; then #paranoia
+        rm -rf "${builddir}"
+    fi
+  fi
+  git clone https://github.com/metallb/metallb.git
+  pushd metallb
+  pip install -r dev-env/requirements.txt
+  inv dev-env -n ovn -b frr -p bgp
+  docker network create --driver bridge clientnet
+  docker network connect clientnet frr
+  docker run  --cap-add NET_ADMIN --user 0  -d --network clientnet  --rm  --name lbclient  quay.io/itssurya/dev-images:metallb-lbservice
+  popd
+  sudo rm -rf metallb
+  local frr_ips=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}#{{end}}' frr)
+  echo $frr_ips
+  local kind_network=$(echo $frr_ips | cut -d '#' -f 2)
+  echo $kind_network
+  local client_network=$(echo $frr_ips | cut -d '#' -f 1)
+  echo $client_network
+  local subnet=$(echo ${client_network%?}0)
+  echo $subnet
+  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  for n in $KIND_NODES; do
+    docker exec "$n" ip route add $subnet/16 via $kind_network
+  done
+  # TODO(tssurya): expand this to be more dynamic in the future when needed.
+  # for now, we only run one test with metalLB load balancer for which this
+  # one svcVIP (192.168.10.0) is more than enough since at a time we will only
+  # have one load balancer service
+  docker exec lbclient ip route add 192.168.10.0 via $client_network dev eth0
+  sleep 30
+}
+
+destroy_metallb() {
+  docker stop lbclient || true # its possible the lbclient doesn't exist which is fine, ignore error
+  docker stop frr || true # its possible the lbclient doesn't exist which is fine, ignore error
+  docker network rm clientnet || true # its possible the clientnet network doesn't exist which is fine, ignore error
 }
 
 # kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6. It will first wait for all
@@ -884,19 +953,21 @@ fi
 set -euxo pipefail
 check_ipv6
 set_cluster_cidr_ip_families
-create_kind_cluster
-if [ "$RUN_IN_CONTAINER" == true ]; then
-  run_script_in_container
+if [ "$KIND_CREATE" == true ]; then
+    create_kind_cluster
+    if [ "$RUN_IN_CONTAINER" == true ]; then
+      run_script_in_container
+    fi
+    # if cluster name is specified fixup kubeconfig
+    if [ "$KIND_CLUSTER_NAME" != "ovn" ]; then
+      fixup_kubeconfig_names
+    fi
+    docker_disable_ipv6
+    if [ "$OVN_ENABLE_EX_GW_NETWORK_BRIDGE" == true ]; then
+      docker_create_second_interface
+    fi
+    coredns_patch
 fi
-# if cluster name is specified fixup kubeconfig
-if [ "$KIND_CLUSTER_NAME"} != "ovn" ]; then
-  fixup_kubeconfig_names
-fi
-docker_disable_ipv6
-if [ "$OVN_ENABLE_EX_GW_NETWORK_BRIDGE" == true ]; then
-  docker_create_second_interface
-fi
-coredns_patch
 build_ovn_image
 detect_apiserver_url
 create_ovn_kube_manifests
@@ -912,4 +983,7 @@ sleep_until_pods_settle
 # Wait for DaemonSet to rollout
 if [ "${ENABLE_IPSEC}" == true ]; then
   install_ipsec
+fi
+if [ "$KIND_INSTALL_METALLB" == true ]; then
+  install_metallb
 fi

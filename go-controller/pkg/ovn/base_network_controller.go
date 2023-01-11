@@ -352,7 +352,7 @@ func (bnc *BaseNetworkController) UpdateNodeAnnotationWithRetry(nodeName string,
 		for k, v := range otherUpdatedNodeAnnotation {
 			cnode.Annotations[k] = v
 		}
-		return bnc.kube.UpdateNode(cnode)
+		return bnc.kube.PatchNode(node, cnode)
 	})
 	if resultErr != nil {
 		return fmt.Errorf("failed to update node %s annotation", nodeName)

@@ -152,7 +152,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
-		klog.Infof("[%s/%s] addLogicalPort took %v, libovsdb time %v: %v",
+		klog.Infof("[%s/%s] addLogicalPort took %v, libovsdb time %v",
 			pod.Namespace, pod.Name, time.Since(start), libovsdbExecuteTime)
 	}()
 
