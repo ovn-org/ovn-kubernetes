@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-
+# make sure you added GOPATH/bin to your PATH
+# this is required to find apps installed with 'go install'
 set -o errexit
 set -o nounset
 set -o pipefail
@@ -30,7 +31,19 @@ if  ! ( command -v controller-gen > /dev/null ); then
   olddir="${PWD}"
   builddir="$(mktemp -d)"
   cd "${builddir}"
-  GO111MODULE=on go get -u sigs.k8s.io/controller-tools/cmd/controller-gen
+  GO111MODULE=on go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
+  cd "${olddir}"
+  if [[ "${builddir}" == /tmp/* ]]; then #paranoia
+      rm -rf "${builddir}"
+  fi
+fi
+
+if  ! ( command -v deepcopy-gen > /dev/null ); then
+  echo "deepcopy-gen not found, installing k8s.io/code-generator/cmd/{client-gen,lister-gen,informer-gen,deepcopy-gen}"
+  olddir="${PWD}"
+  builddir="$(mktemp -d)"
+  cd "${builddir}"
+  GO111MODULE=on go install k8s.io/code-generator/cmd/{client-gen,lister-gen,informer-gen,deepcopy-gen}@latest
   cd "${olddir}"
   if [[ "${builddir}" == /tmp/* ]]; then #paranoia
       rm -rf "${builddir}"
@@ -44,7 +57,6 @@ for crd in ${crds}; do
     --input-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/$crd/v1 \
     -O zz_generated.deepcopy \
     --bounding-dirs github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd
-
 
   echo "Generating clientset for $crd"
   client-gen \
