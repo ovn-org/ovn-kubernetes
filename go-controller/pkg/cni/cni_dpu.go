@@ -10,7 +10,7 @@ import (
 	"k8s.io/client-go/util/retry"
 )
 
-// updatePodDPUConnDetailsWithRetry update the pod annotion with the givin connection details
+// updatePodDPUConnDetailsWithRetry update the pod annotation with the given connection details
 func (pr *PodRequest) updatePodDPUConnDetailsWithRetry(kube kube.Interface, podLister corev1listers.PodLister, dpuConnDetails *util.DPUConnectionDetails) error {
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		// Informer cache should not be mutated, so get a copy of the object

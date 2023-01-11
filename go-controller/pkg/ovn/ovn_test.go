@@ -39,7 +39,7 @@ const (
 )
 
 type FakeOVN struct {
-	fakeClient   *util.OVNClientset
+	fakeClient   *util.OVNMasterClientset
 	watcher      *factory.WatchFactory
 	controller   *DefaultNetworkController
 	stopChan     chan struct{}
@@ -83,7 +83,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			v1Objects = append(v1Objects, object)
 		}
 	}
-	o.fakeClient = &util.OVNClientset{
+	o.fakeClient = &util.OVNMasterClientset{
 		KubeClient:           fake.NewSimpleClientset(v1Objects...),
 		EgressIPClient:       egressipfake.NewSimpleClientset(egressIPObjects...),
 		EgressFirewallClient: egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
@@ -144,7 +144,7 @@ func resetNBClient(ctx context.Context, nbClient libovsdbclient.Client) {
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, stopChan chan struct{},
+func NewOvnController(ovnClient *util.OVNMasterClientset, wf *factory.WatchFactory, stopChan chan struct{},
 	addressSetFactory addressset.AddressSetFactory, libovsdbOvnNBClient libovsdbclient.Client,
 	libovsdbOvnSBClient libovsdbclient.Client, recorder record.EventRecorder, wg *sync.WaitGroup) *DefaultNetworkController {
 	if addressSetFactory == nil {
@@ -154,8 +154,8 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 	podRecorder := metrics.NewPodRecorder()
 	cnci := NewCommonNetworkControllerInfo(
 		ovnClient.KubeClient,
-		&kube.Kube{
-			KClient:              ovnClient.KubeClient,
+		&kube.KubeOVN{
+			Kube:                 kube.Kube{KClient: ovnClient.KubeClient},
 			EIPClient:            ovnClient.EgressIPClient,
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,

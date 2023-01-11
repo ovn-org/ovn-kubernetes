@@ -84,7 +84,7 @@ var _ = Describe("Node IP Handler tests", func() {
 		}
 
 		var err error
-		fakeClientset := &util.OVNClientset{
+		fakeClientset := &util.OVNNodeClientset{
 			KubeClient: tc.fakeClient,
 		}
 		tc.watchFactory, err = factory.NewNodeWatchFactory(fakeClientset, nodeName)
@@ -112,7 +112,7 @@ var _ = Describe("Node IP Handler tests", func() {
 
 		fakeBridgeConfiguration := &bridgeConfiguration{}
 
-		k := &kube.Kube{tc.fakeClient, nil, nil, nil}
+		k := &kube.Kube{tc.fakeClient}
 		tc.ipManager = newAddressManagerInternal(nodeName, k, fakeMgmtPortConfig, tc.watchFactory, fakeBridgeConfiguration, false)
 
 		// We need to wait until the ipManager's goroutine runs the subscribe
