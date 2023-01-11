@@ -3,10 +3,11 @@ package cni
 import (
 	"context"
 	"fmt"
+	"time"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
-	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -113,7 +114,7 @@ var _ = Describe("CNI Utils tests", func() {
 		})
 	})
 
-	Context("GetPodAnnotations", func() {
+	Context("GetPodWithAnnotations", func() {
 		var podNamespaceLister mocks.PodNamespaceLister
 		var pod *v1.Pod
 
@@ -143,10 +144,10 @@ var _ = Describe("CNI Utils tests", func() {
 			clientset := newFakeClientSet(pod, &podNamespaceLister)
 
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
-			uid, annot, _, err := GetPodAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
+			returnedPod, annot, _, err := GetPodWithAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(annot).To(Equal(podAnnot))
-			Expect(uid).To(Equal(string(pod.UID)))
+			Expect(string(returnedPod.UID)).To(Equal(string(pod.UID)))
 		})
 
 		It("Returns with Error if context is canceled", func() {
@@ -164,7 +165,7 @@ var _ = Describe("CNI Utils tests", func() {
 			clientset := newFakeClientSet(pod, &podNamespaceLister)
 
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
-			_, _, _, err := GetPodAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
+			_, _, _, err := GetPodWithAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
 			Expect(err).To(HaveOccurred())
 		})
 
@@ -184,7 +185,7 @@ var _ = Describe("CNI Utils tests", func() {
 			clientset := newFakeClientSet(pod, &podNamespaceLister)
 
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
-			_, _, _, err := GetPodAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
+			_, _, _, err := GetPodWithAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -199,7 +200,7 @@ var _ = Describe("CNI Utils tests", func() {
 			clientset := newFakeClientSet(pod, &podNamespaceLister)
 
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(nil, fmt.Errorf("failed to list pods"))
-			_, _, _, err := GetPodAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
+			_, _, _, err := GetPodWithAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to list pods"))
 		})
@@ -220,7 +221,7 @@ var _ = Describe("CNI Utils tests", func() {
 			clientset := newFakeClientSet(pod, &podNamespaceLister)
 
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(nil, errors.NewNotFound(v1.Resource("pod"), name))
-			_, _, _, err := GetPodAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
+			_, _, _, err := GetPodWithAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -235,7 +236,7 @@ var _ = Describe("CNI Utils tests", func() {
 			clientset := newFakeClientSet(nil, &podNamespaceLister)
 
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(nil, errors.NewNotFound(v1.Resource("pod"), name))
-			_, _, _, err := GetPodAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
+			_, _, _, err := GetPodWithAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("timed out waiting for pod after 1s"))
 		})
