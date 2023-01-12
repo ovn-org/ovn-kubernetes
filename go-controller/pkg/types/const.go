@@ -46,6 +46,9 @@ const (
 
 	NodeLocalSwitch = "node_local_switch"
 
+	// types.OVNLayer2Switch is the name of layer2 topology switch
+	OVNLayer2Switch = "ovn_layer2_switch"
+
 	// ACL Priorities
 
 	// Default routed multicast allow acl rule priority
@@ -166,4 +169,5 @@ const (
 
 	// different secondary network topology type defined in CNI netconf
 	Layer3Topology = "layer3"
+	Layer2Topology = "layer2"
 )

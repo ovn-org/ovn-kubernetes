@@ -111,7 +111,7 @@ func TestParseClusterSubnetEntries(t *testing.T) {
 
 	for _, tc := range tests {
 
-		parsedList, err := ParseClusterSubnetEntries(tc.cmdLineArg)
+		parsedList, err := ParseClusterSubnetEntries(tc.cmdLineArg, true)
 		if err != nil && !tc.expectedErr {
 			t.Errorf("Test case \"%s\" expected no errors, got %v", tc.name, err)
 		}

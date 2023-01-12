@@ -64,6 +64,40 @@ func CreateOrUpdateLogicalSwitch(nbClient libovsdbclient.Client, sw *nbdb.Logica
 	return err
 }
 
+// UpdateLogicalSwitchSetExternalIDs sets external IDs on the provided logical
+// switch adding any missing, removing the ones set to an empty value and
+// updating existing
+func UpdateLogicalSwitchSetExternalIDs(nbClient libovsdbclient.Client, logicalSwitch *nbdb.LogicalSwitch) error {
+	externalIds := logicalSwitch.ExternalIDs
+	logicalSwitch, err := GetLogicalSwitch(nbClient, logicalSwitch)
+	if err != nil {
+		return err
+	}
+
+	if logicalSwitch.ExternalIDs == nil {
+		logicalSwitch.ExternalIDs = map[string]string{}
+	}
+
+	for k, v := range externalIds {
+		if v == "" {
+			delete(logicalSwitch.ExternalIDs, k)
+		} else {
+			logicalSwitch.ExternalIDs[k] = v
+		}
+	}
+
+	opModel := operationModel{
+		Model:          logicalSwitch,
+		OnModelUpdates: []interface{}{&logicalSwitch.ExternalIDs},
+		ErrNotFound:    true,
+		BulkOp:         false,
+	}
+
+	m := newModelClient(nbClient)
+	_, err = m.CreateOrUpdate(opModel)
+	return err
+}
+
 type logicalSwitchPredicate func(*nbdb.LogicalSwitch) bool
 
 // DeleteLogicalSwitchesWithPredicateOps returns the operations to delete the logical switches matching the provided predicate

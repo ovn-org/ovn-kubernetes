@@ -18,7 +18,11 @@ type NetConf struct {
 	MTU int `json:"mtu,omitempty"`
 	// comma-seperated subnet cidr
 	// for secondary layer3 network, eg. 10.128.0.0/14/23
+	// for layer2 network, eg. 10.1.130.0/24
 	Subnets string `json:"subnets,omitempty"`
+	// list of IPs, expressed with prefix length, to be excluded from being allocated for Pod
+	// valid for localnet or layer 2 network topology
+	ExcludeCIDRs []string `json:"excludeCIDRs,omitempty"`
 
 	// PciAddrs in case of using sriov
 	DeviceID string `json:"deviceID,omitempty"`

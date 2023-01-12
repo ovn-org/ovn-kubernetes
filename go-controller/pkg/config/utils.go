@@ -37,7 +37,8 @@ type CIDRNetworkEntry struct {
 // ParseClusterSubnetEntries returns the parsed set of CIDRNetworkEntries passed by the user on the command line
 // These entries define the clusters network space by specifying a set of CIDR and netmasks the SDN can allocate
 // addresses from.
-func ParseClusterSubnetEntries(clusterSubnetCmd string) ([]CIDRNetworkEntry, error) {
+// For layer2 CIDRs, not to check subnet length
+func ParseClusterSubnetEntries(clusterSubnetCmd string, checkHostSubnetLength bool) ([]CIDRNetworkEntry, error) {
 	var parsedClusterList []CIDRNetworkEntry
 	clusterEntriesList := strings.Split(clusterSubnetCmd, ",")
 
@@ -77,7 +78,7 @@ func ParseClusterSubnetEntries(clusterSubnetCmd string) ([]CIDRNetworkEntry, err
 			}
 		}
 
-		if parsedClusterEntry.HostSubnetLength <= entryMaskLength {
+		if checkHostSubnetLength && parsedClusterEntry.HostSubnetLength <= entryMaskLength {
 			return nil, fmt.Errorf("cannot use a host subnet length mask shorter than or equal to the cluster subnet mask. "+
 				"host subnet length: %d, cluster subnet length: %d", parsedClusterEntry.HostSubnetLength, entryMaskLength)
 		}
