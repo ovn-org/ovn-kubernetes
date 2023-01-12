@@ -66,8 +66,8 @@ const (
 	sandboxID    string = "adsfadsfasfdasdfasf"
 	namespace    string = "awesome-namespace"
 	name         string = "awesome-name"
-	cniConfig    string = "{\"cniVersion\": \"0.1.0\",\"name\": \"ovnkube\",\"type\": \"ovnkube\"}"
-	cniConfig_40 string = "{\"cniVersion\": \"0.4.0\",\"name\": \"ovnkube\",\"type\": \"ovnkube\"}"
+	cniConfig    string = "{\"cniVersion\": \"0.1.0\",\"name\": \"ovnkube\",\"type\": \"ovn-k8s-cni-overlay\"}"
+	cniConfig_40 string = "{\"cniVersion\": \"0.4.0\",\"name\": \"ovnkube\",\"type\": \"ovn-k8s-cni-overlay\"}"
 	nodeName     string = "mynode"
 )
 

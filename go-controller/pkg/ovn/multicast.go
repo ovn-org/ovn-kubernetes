@@ -118,8 +118,7 @@ func (oc *DefaultNetworkController) createMulticastAllowPolicy(ns string, nsInfo
 		if util.PodCompleted(pod) {
 			continue
 		}
-		portName := util.GetLogicalPortName(pod.Namespace, pod.Name)
-		if portInfo, err := oc.logicalPortCache.get(portName); err != nil {
+		if portInfo, err := oc.logicalPortCache.get(pod, types.DefaultNetworkName); err != nil {
 			klog.Errorf(err.Error())
 		} else {
 			ports = append(ports, &nbdb.LogicalSwitchPort{UUID: portInfo.uuid})

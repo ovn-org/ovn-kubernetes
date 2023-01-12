@@ -1084,7 +1084,7 @@ func (oc *DefaultNetworkController) addPodEgressIPAssignments(name string, statu
 	// addLogicalPort has finished successfully setting up networking for
 	// the pod, so we can proceed with retrieving its IP and deleting the
 	// external GW configuration created in addLogicalPort for the pod.
-	logicalPort, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name))
+	logicalPort, err := oc.logicalPortCache.get(pod, types.DefaultNetworkName)
 	if err != nil {
 		return nil
 	}
@@ -1558,7 +1558,7 @@ func (oc *DefaultNetworkController) generateCacheForEgressIP() (map[string]egres
 					continue
 				}
 				// FIXME(trozet): potential race where pod is not yet added in the cache by the pod handler
-				logicalPort, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name))
+				logicalPort, err := oc.logicalPortCache.get(pod, types.DefaultNetworkName)
 				if err != nil {
 					klog.Errorf("Error getting logical port %s, err: %v", util.GetLogicalPortName(pod.Namespace, pod.Name), err)
 					continue

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -30,7 +31,9 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
+	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -64,6 +67,9 @@ type CommonNetworkControllerInfo struct {
 // by more than one type of network controllers.
 type BaseNetworkController struct {
 	CommonNetworkControllerInfo
+	// per controller NAD/netconf name information
+	util.NetInfo
+	util.NetConfInfo
 
 	// retry framework for pods
 	retryPods *ovnretry.RetryFramework
@@ -95,6 +101,12 @@ type BaseNetworkController struct {
 	stopChan chan struct{}
 }
 
+// BaseSecondaryNetworkController structure holds per-network fields and network specific
+// configuration for secondary network controller
+type BaseSecondaryNetworkController struct {
+	BaseNetworkController
+}
+
 // NewCommonNetworkControllerInfo creates CommonNetworkControllerInfo shared by controllers
 func NewCommonNetworkControllerInfo(client clientset.Interface, kube kube.Interface, wf *factory.WatchFactory,
 	recorder record.EventRecorder, nbClient libovsdbclient.Client, sbClient libovsdbclient.Client,
@@ -112,6 +124,27 @@ func NewCommonNetworkControllerInfo(client clientset.Interface, kube kube.Interf
 	}
 }
 
+func (bnc *BaseNetworkController) GetNetworkScopedName(name string) string {
+	return fmt.Sprintf("%s%s", bnc.GetPrefix(), name)
+}
+
+func (bnc *BaseNetworkController) GetLogicalPortName(pod *kapi.Pod, nadName string) string {
+	if !bnc.IsSecondary() {
+		return util.GetLogicalPortName(pod.Namespace, pod.Name)
+	} else {
+		return util.GetSecondaryNetworkLogicalPortName(pod.Namespace, pod.Name, nadName)
+	}
+}
+
+func (bnc *BaseNetworkController) AddConfigDurationRecord(kind, namespace, name string) (
+	[]ovsdb.Operation, func(), time.Time, error) {
+	if !bnc.IsSecondary() {
+		return metrics.GetConfigDurationRecorder().AddOVN(bnc.nbClient, kind, namespace, name)
+	}
+	// TBD: no op for secondary network for now
+	return []ovsdb.Operation{}, func() {}, time.Time{}, nil
+}
+
 // createOvnClusterRouter creates the central router for the network
 func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter, error) {
 	// Create default Control Plane Protection (COPP) entry for routers
@@ -121,7 +154,7 @@ func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter,
 	}
 
 	// Create a single common distributed router for the cluster.
-	logicalRouterName := types.OVNClusterRouter
+	logicalRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
 	logicalRouter := nbdb.LogicalRouter{
 		Name: logicalRouterName,
 		ExternalIDs: map[string]string{
@@ -131,6 +164,10 @@ func (bnc *BaseNetworkController) createOvnClusterRouter() (*nbdb.LogicalRouter,
 			"always_learn_from_arp_request": "false",
 		},
 		Copp: &defaultCOPPUUID,
+	}
+	if bnc.IsSecondary() {
+		logicalRouter.ExternalIDs[types.NetworkExternalID] = bnc.GetNetworkName()
+		logicalRouter.ExternalIDs[types.TopologyExternalID] = bnc.TopologyType()
 	}
 	if bnc.multicastSupport {
 		logicalRouter.Options = map[string]string{
@@ -160,7 +197,7 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *kapi.Node, hos
 	}
 
 	if len(hostSubnets) == 0 {
-		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, bnc.GetNetworkName())
 		if err != nil {
 			return err
 		}
@@ -176,8 +213,8 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *kapi.Node, hos
 		}
 	}
 
-	switchName := node.Name
-	logicalRouterName := types.OVNClusterRouter
+	switchName := bnc.GetNetworkScopedName(node.Name)
+	logicalRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
 	lrpName := types.RouterToSwitchPrefix + switchName
 	lrpNetworks := []string{}
 	for _, hostSubnet := range hostSubnets {
@@ -210,7 +247,7 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	loadBalancerGroupUUID string) error {
 	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
 	var nodeLRPMAC net.HardwareAddr
-	switchName := nodeName
+	switchName := bnc.GetNetworkScopedName(nodeName)
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		nodeLRPMAC = util.IPAddrToHWAddr(gwIfAddr.IP)
@@ -221,6 +258,12 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 
 	logicalSwitch := nbdb.LogicalSwitch{
 		Name: switchName,
+	}
+	if bnc.IsSecondary() {
+		logicalSwitch.ExternalIDs = map[string]string{
+			types.NetworkExternalID:  bnc.GetNetworkName(),
+			types.TopologyExternalID: bnc.TopologyType(),
+		}
 	}
 
 	var v4Gateway, v6Gateway net.IP
@@ -305,10 +348,10 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 
 func (bnc *BaseNetworkController) allocateNodeSubnets(node *kapi.Node,
 	masterSubnetAllocator *subnetallocator.HostSubnetAllocator) ([]*net.IPNet, error) {
-	existingSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+	existingSubnets, err := util.ParseNodeHostSubnetAnnotation(node, bnc.GetNetworkName())
 	if err != nil && !util.IsAnnotationNotSetError(err) {
 		// Log the error and try to allocate new subnets
-		klog.Infof("Failed to get node %s host subnets annotations: %v", node.Name, err)
+		klog.Infof("Failed to get node %s host subnets annotations for network %s: %v", node.Name, bnc.GetNetworkName(), err)
 	}
 
 	hostSubnets, allocatedSubnets, err := masterSubnetAllocator.AllocateNodeSubnets(node.Name, existingSubnets, config.IPv4Mode, config.IPv6Mode)
@@ -329,14 +372,14 @@ func (bnc *BaseNetworkController) allocateNodeSubnets(node *kapi.Node,
 
 // UpdateNodeAnnotationWithRetry update node's hostSubnet annotation (possibly for multiple networks) and the
 // other given node annotations
-func (bnc *BaseNetworkController) UpdateNodeAnnotationWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet,
+func (cnci *CommonNetworkControllerInfo) UpdateNodeAnnotationWithRetry(nodeName string, hostSubnetsMap map[string][]*net.IPNet,
 	otherUpdatedNodeAnnotation map[string]string) error {
 	// Retry if it fails because of potential conflict which is transient. Return error in the
 	// case of other errors (say temporary API server down), and it will be taken care of by the
 	// retry mechanism.
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
-		node, err := bnc.watchFactory.GetNode(nodeName)
+		node, err := cnci.watchFactory.GetNode(nodeName)
 		if err != nil {
 			return err
 		}
@@ -352,7 +395,7 @@ func (bnc *BaseNetworkController) UpdateNodeAnnotationWithRetry(nodeName string,
 		for k, v := range otherUpdatedNodeAnnotation {
 			cnode.Annotations[k] = v
 		}
-		return bnc.kube.PatchNode(node, cnode)
+		return cnci.kube.PatchNode(node, cnode)
 	})
 	if resultErr != nil {
 		return fmt.Errorf("failed to update node %s annotation", nodeName)
@@ -362,7 +405,7 @@ func (bnc *BaseNetworkController) UpdateNodeAnnotationWithRetry(nodeName string,
 
 // deleteNodeLogicalNetwork removes the logical switch and logical router port associated with the node
 func (bnc *BaseNetworkController) deleteNodeLogicalNetwork(nodeName string) error {
-	switchName := nodeName
+	switchName := bnc.GetNetworkScopedName(nodeName)
 	// Remove switch to lb associations from the LBCache before removing the switch
 	lbCache, err := ovnlb.GetLBCache(bnc.nbClient)
 	if err != nil {
@@ -376,7 +419,7 @@ func (bnc *BaseNetworkController) deleteNodeLogicalNetwork(nodeName string) erro
 		return fmt.Errorf("failed to delete logical switch %s: %v", switchName, err)
 	}
 
-	logicalRouterName := types.OVNClusterRouter
+	logicalRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
 	logicalRouter := nbdb.LogicalRouter{Name: logicalRouterName}
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name: types.RouterToSwitchPrefix + switchName,
@@ -395,10 +438,10 @@ func (bnc *BaseNetworkController) updateNodesManageHostSubnets(node *kapi.Node,
 	if noHostSubnet(node) {
 		return []*net.IPNet{}
 	}
-	hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+	hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, bnc.GetNetworkName())
 	foundNodes.Insert(node.Name)
 
-	klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnets)
+	klog.V(5).Infof("Node %s contains subnets %v for network %s", node.Name, hostSubnets, bnc.GetNetworkName())
 	if err := masterSubnetAllocator.MarkSubnetsAllocated(node.Name, hostSubnets...); err != nil {
 		utilruntime.HandleError(err)
 	}
@@ -417,17 +460,17 @@ func (bnc *BaseNetworkController) addAllPodsOnNode(nodeName string) []error {
 		klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function",
 			nodeName)
 	} else {
-		klog.V(5).Infof("When adding node %s, found %d pods to add to retryPods", nodeName, len(pods.Items))
+		klog.V(5).Infof("When adding node %s for network %s, found %d pods to add to retryPods", nodeName, bnc.GetNetworkName(), len(pods.Items))
 		for _, pod := range pods.Items {
 			pod := pod
 			if util.PodCompleted(&pod) {
 				continue
 			}
-			klog.V(5).Infof("Adding pod %s/%s to retryPods", pod.Namespace, pod.Name)
+			klog.V(5).Infof("Adding pod %s/%s to retryPods for network %s", pod.Namespace, pod.Name, bnc.GetNetworkName())
 			err = bnc.retryPods.AddRetryObjWithAddNoBackoff(&pod)
 			if err != nil {
 				errs = append(errs, err)
-				klog.Errorf("Failed to add pod %s/%s to retryPods: %v", pod.Namespace, pod.Name, err)
+				klog.Errorf("Failed to add pod %s/%s to retryPods for network %s: %v", pod.Namespace, pod.Name, bnc.GetNetworkName(), err)
 			}
 		}
 	}
@@ -437,7 +480,7 @@ func (bnc *BaseNetworkController) addAllPodsOnNode(nodeName string) []error {
 
 func (bnc *BaseNetworkController) updateL3TopologyVersion() error {
 	currentTopologyVersion := strconv.Itoa(types.OvnCurrentTopologyVersion)
-	clusterRouterName := types.OVNClusterRouter
+	clusterRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
 	logicalRouter := nbdb.LogicalRouter{
 		Name:        clusterRouterName,
 		ExternalIDs: map[string]string{"k8s-ovn-topo-version": currentTopologyVersion},
@@ -454,7 +497,7 @@ func (bnc *BaseNetworkController) updateL3TopologyVersion() error {
 // If "k8s-ovn-topo-version" key in external_ids column does not exist, it is prior to OVN topology versioning
 // and therefore set version number to OvnCurrentTopologyVersion
 func (bnc *BaseNetworkController) determineOVNTopoVersionFromOVN() (int, error) {
-	clusterRouterName := types.OVNClusterRouter
+	clusterRouterName := bnc.GetNetworkScopedName(types.OVNClusterRouter)
 	logicalRouter := &nbdb.LogicalRouter{Name: clusterRouterName}
 	logicalRouter, err := libovsdbops.GetLogicalRouter(bnc.nbClient, logicalRouter)
 	if err != nil && err != libovsdbclient.ErrNotFound {
@@ -576,4 +619,19 @@ func (bnc *BaseNetworkController) WatchNodes() error {
 		bnc.nodeHandler = handler
 	}
 	return err
+}
+
+func (bnc *BaseNetworkController) recordNodeErrorEvent(node *kapi.Node, nodeErr error) {
+	if bnc.IsSecondary() {
+		// TBD, no op for secondary network for now
+		return
+	}
+	nodeRef, err := ref.GetReference(scheme.Scheme, node)
+	if err != nil {
+		klog.Errorf("Couldn't get a reference to node %s to post an event: %v", node.Name, err)
+		return
+	}
+
+	klog.V(5).Infof("Posting %s event for Node %s: %v", kapi.EventTypeWarning, node.Name, nodeErr)
+	bnc.recorder.Eventf(nodeRef, kapi.EventTypeWarning, "ErrorReconcilingNode", nodeErr.Error())
 }

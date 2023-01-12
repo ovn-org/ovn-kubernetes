@@ -177,6 +177,14 @@ func cniRequestToPodRequest(cr *Request, podLister corev1listers.PodLister, kcli
 		return nil, fmt.Errorf("broken stdin args")
 	}
 
+	// the first network to the Pod is always named as `default`,
+	// capture the effective NAD Name here
+	req.netName = conf.Name
+	if req.netName == types.DefaultNetworkName {
+		req.nadName = types.DefaultNetworkName
+	} else {
+		req.nadName = conf.NADName
+	}
 	req.CNIConf = conf
 	req.timestamp = time.Now()
 	// Match the Kubelet default CRI operation timeout of 2m

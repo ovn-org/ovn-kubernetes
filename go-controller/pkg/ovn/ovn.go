@@ -94,7 +94,7 @@ func (oc *DefaultNetworkController) getPortInfo(pod *kapi.Pod) *lpInfo {
 			mac:           mac,
 		}
 	} else {
-		portInfo = oc.BaseNetworkController.getPortInfo(pod)
+		portInfo, _ = oc.logicalPortCache.get(pod, ovntypes.DefaultNetworkName)
 	}
 	return portInfo
 }

@@ -49,6 +49,11 @@ type PodInterfaceInfo struct {
 	PodUID               string `json:"pod-uid"`
 	VfNetdevName         string `json:"vf-netdev-name"`
 	EnableUDPAggregation bool   `json:"enable-udp-aggregation"`
+
+	// network name, for default network, it is "default", otherwise it is net-attach-def's netconf spec name
+	NetName string `json:"netName"`
+	// NADName, for default network, it is "default", otherwise, in the form of net-attach-def's <Namespace>/<Name>
+	NADName string `json:"nadName"`
 }
 
 // Explicit type for CNI commands the server handles
@@ -142,6 +147,14 @@ type PodRequest struct {
 	ctx context.Context
 	// cancel should be called to cancel this request
 	cancel context.CancelFunc
+
+	// network name, for default network, this will be types.DefaultNetworkName
+	netName string
+
+	// for ovs interfaces plumbed for secondary networks, their iface-id's prefix is derived from the specific nadName;
+	// also, need to find the pod annotation, dpu pod connection/status annotations of the given NAD ("default"
+	// for default network).
+	nadName string
 }
 
 type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface, kubeAuth *KubeAPIAuth) ([]byte, error)

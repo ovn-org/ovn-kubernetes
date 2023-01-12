@@ -8,6 +8,18 @@ import (
 // NetConf is CNI NetConf with DeviceID
 type NetConf struct {
 	types.NetConf
+
+	// specifies the OVN topology for this network configuration
+	// when not specified, by default it is Layer3AttachDefTopoType
+	Topology string `json:"topology,omitempty"`
+	// captures net-attach-def name in the form of namespace/name
+	NADName string `json:"netAttachDefName,omitempty"`
+	// Network MTU
+	MTU int `json:"mtu,omitempty"`
+	// comma-seperated subnet cidr
+	// for secondary layer3 network, eg. 10.128.0.0/14/23
+	Subnets string `json:"subnets,omitempty"`
+
 	// PciAddrs in case of using sriov
 	DeviceID string `json:"deviceID,omitempty"`
 	// LogFile to log all the messages from cni shim binary to

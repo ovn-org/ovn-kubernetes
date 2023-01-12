@@ -816,7 +816,7 @@ func (n *OvnNode) syncConntrackForExternalGateways(newNs *kapi.Namespace) error 
 	var errors []error
 	for _, pod := range pods {
 		pod := pod
-		podIPs, err := util.GetAllPodIPs(pod)
+		podIPs, err := util.GetPodIPsOfNetwork(pod, &util.DefaultNetInfo{})
 		if err != nil {
 			errors = append(errors, fmt.Errorf("unable to fetch IP for pod %s/%s: %v", pod.Namespace, pod.Name, err))
 		}
