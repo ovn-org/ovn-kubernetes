@@ -500,3 +500,56 @@ func TestJoinIPNetIPs(t *testing.T) {
 		})
 	}
 }
+
+func TestContainsCIDR(t *testing.T) {
+	tests := []struct {
+		desc      string
+		inpIPNet1 *net.IPNet
+		inpIPNet2 *net.IPNet
+		outExp    bool
+	}{
+		{
+			desc:      "positive case, ipnet1 contains ipnet2",
+			inpIPNet1: ovntest.MustParseIPNet("192.168.1.1/24"),
+			inpIPNet2: ovntest.MustParseIPNet("192.168.1.16/28"),
+			outExp:    true,
+		},
+		{
+			desc:      "positive case, ipnet1 is the same as ipnet2",
+			inpIPNet1: ovntest.MustParseIPNet("192.168.1.1/24"),
+			inpIPNet2: ovntest.MustParseIPNet("192.168.1.1/24"),
+			outExp:    true,
+		},
+		{
+			desc:      "negative case, ipnet1 does not contain ipnet2",
+			inpIPNet1: ovntest.MustParseIPNet("192.168.1.1/25"),
+			inpIPNet2: ovntest.MustParseIPNet("192.168.1.1/24"),
+			outExp:    false,
+		},
+		{
+			desc:      "negative case, ipnet1 and ipnet2 does not overlap",
+			inpIPNet1: ovntest.MustParseIPNet("192.168.1.1/24"),
+			inpIPNet2: ovntest.MustParseIPNet("192.168.2.1/24"),
+			outExp:    false,
+		},
+		{
+			desc:      "positive case, ipnet1 contains ipnet2, IPv6 case",
+			inpIPNet1: ovntest.MustParseIPNet("2001:db8:3c4d::/48"),
+			inpIPNet2: ovntest.MustParseIPNet("2001:db8:3c4d:15::/64"),
+			outExp:    true,
+		},
+		{
+			desc:      "negative case, ipv4 compare with ipv6",
+			inpIPNet1: ovntest.MustParseIPNet("2001:db8:3c4d::/48"),
+			inpIPNet2: ovntest.MustParseIPNet("192.168.2.1/24"),
+			outExp:    false,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			res := ContainsCIDR(tc.inpIPNet1, tc.inpIPNet2)
+			t.Log(res)
+			assert.Equal(t, res, tc.outExp)
+		})
+	}
+}
