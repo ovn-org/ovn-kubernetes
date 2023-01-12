@@ -1229,6 +1229,13 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 				"actions=ct(zone=%d,nat,table=3)",
 				defaultOpenFlowCookie, ofPortPatch, protoPrefix, protoPrefix, svcCIDR,
 				protoPrefix, masqIP, HostMasqCTZone))
+
+		// table 0, Reply traffic coming from OVN to outside, drop it if the DNAT wasn't done either
+		// at the GR load balancer or switch load balancer. It means the correct port wasn't provided.
+		// nodeCIDR->serviceCIDR traffic flow is internal and it shouldn't be carried to outside the cluster
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=105, in_port=%s, %s, %s_dst=%s,"+
+				"actions=drop", defaultOpenFlowCookie, ofPortPatch, protoPrefix, protoPrefix, svcCIDR))
 	}
 
 	actions := fmt.Sprintf("output:%s", ofPortPatch)
