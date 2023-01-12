@@ -13,7 +13,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	kapi "k8s.io/api/core/v1"
@@ -46,6 +45,10 @@ type egressFirewallRule struct {
 type destination struct {
 	cidrSelector string
 	dnsName      string
+	// clusterSubnetIntersection is true, if egress firewall rule CIDRSelector intersects with clusterSubnet.
+	// Based on this flag we can omit clusterSubnet exclusion from the related ACL.
+	// For dns-based rules, EgressDNS won't add ips from clusterSubnet to the address set.
+	clusterSubnetIntersection bool
 }
 
 // cloneEgressFirewall shallow copies the egressfirewallapi.EgressFirewall object provided.
@@ -72,31 +75,34 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 		efr.to.dnsName = rawEgressFirewallRule.To.DNSName
 	} else {
 
-		_, _, err := net.ParseCIDR(rawEgressFirewallRule.To.CIDRSelector)
+		_, ipNet, err := net.ParseCIDR(rawEgressFirewallRule.To.CIDRSelector)
 		if err != nil {
 			return nil, err
 		}
 		efr.to.cidrSelector = rawEgressFirewallRule.To.CIDRSelector
+		intersect := false
+		for _, clusterSubnet := range config.Default.ClusterSubnets {
+			if clusterSubnet.CIDR.Contains(ipNet.IP) || ipNet.Contains(clusterSubnet.CIDR.IP) {
+				intersect = true
+				break
+			}
+		}
+		efr.to.clusterSubnetIntersection = intersect
 	}
 	efr.ports = rawEgressFirewallRule.Ports
 
 	return efr, nil
 }
 
-// This function is used to sync egress firewall setup. It does three "cleanups"
-
-// - 	Cleanup the old implementation (using LRP) in local GW mode -> new implementation (using ACLs) local GW mode
+// This function is used to sync egress firewall setup. Egress firewall implementation had many versions,
+// the latest one makes no difference for gateway modes, and creates ACLs on types.ClusterPortGroupName.
+// The following cleanups are needed from the previous versions:
+// - 	Cleanup the old implementation (using LRP) in local GW mode
 //  	For this it just deletes all LRP setup done for egress firewall
 //  	And also convert all old ACLs which specifed from-lport to specifying to-lport
 
-// -	Cleanup the new local GW mode implementation (using ACLs on the node switch) -> shared GW mode implementation (using ACLs on the join switch)
-//  	For this it just deletes all ACL setup done for egress firewall on the node switches
-
-// -	Cleanup the old implementation (using LRP) in local GW mode -> shared GW mode implementation (using ACLs on the join switch)
-//  	For this it just deletes all LRP setup done for egress firewall
-
-// -    Cleanup for migration from shared GW mode -> local GW mode
-//      For this it just deletes all the ACLs on the distributed join switch
+// -	Cleanup the old implementation (using ACLs on the join and node switches)
+//  	For this it deletes all the ACLs on the join and node switches, they will be created from scratch later.
 
 // NOTE: Utilize the fact that we know that all egress firewall related setup must have a priority: types.MinimumReservedEgressFirewallPriority <= priority <= types.EgressFirewallStartPriority
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.
@@ -108,25 +114,6 @@ func (oc *DefaultNetworkController) syncEgressFirewall(egressFirewalls []interfa
 	egressFirewallACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, aclPred)
 	if err != nil {
 		return fmt.Errorf("unable to list egress firewall ACLs, cannot cleanup old stale data, err: %v", err)
-	}
-
-	if len(egressFirewallACLs) != 0 {
-		var p func(item *nbdb.LogicalSwitch) bool
-		if config.Gateway.Mode == config.GatewayModeShared {
-			p = func(item *nbdb.LogicalSwitch) bool {
-				// Ignore external and Join switches(both legacy and current)
-				return !(strings.HasPrefix(item.Name, types.JoinSwitchPrefix) || item.Name == "join" || strings.HasPrefix(item.Name, types.ExternalSwitchPrefix))
-			}
-		} else if config.Gateway.Mode == config.GatewayModeLocal {
-			p = func(item *nbdb.LogicalSwitch) bool {
-				// Return only join switch (the per node ones if its old topology & distributed one if its new topology)
-				return (strings.HasPrefix(item.Name, types.JoinSwitchPrefix) || item.Name == "join")
-			}
-		}
-		err = libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(oc.nbClient, p, egressFirewallACLs...)
-		if err != nil {
-			return fmt.Errorf("failed to remove reject acl from node logical switches: %v", err)
-		}
 	}
 
 	// Update the direction of each egressFirewallACL if needed.
@@ -161,13 +148,21 @@ func (oc *DefaultNetworkController) syncEgressFirewall(egressFirewalls []interfa
 	}
 
 	// In any gateway mode, make sure to delete all LRPs on ovn_cluster_router.
-	// This covers migration from LGW mode that used LRPs for EFW to using ACLs in SGW/LGW modes
 	p := func(item *nbdb.LogicalRouterPolicy) bool {
 		return item.Priority <= types.EgressFirewallStartPriority && item.Priority >= types.MinimumReservedEgressFirewallPriority
 	}
 	err = libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
 	if err != nil {
 		return fmt.Errorf("error deleting egress firewall policies on router %s: %v", types.OVNClusterRouter, err)
+	}
+
+	// delete acls from all switches, they reside on the port group now
+	if len(egressFirewallACLs) != 0 {
+		err = libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(oc.nbClient, func(item *nbdb.LogicalSwitch) bool { return true },
+			egressFirewallACLs...)
+		if err != nil {
+			return fmt.Errorf("failed to remove reject acl from node logical switches: %v", err)
+		}
 	}
 
 	// sync the ovn and k8s egressFirewall states
@@ -310,9 +305,9 @@ func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, h
 		}
 		if rule.to.cidrSelector != "" {
 			if utilnet.IsIPv6CIDRString(rule.to.cidrSelector) {
-				matchTargets = []matchTarget{{matchKindV6CIDR, rule.to.cidrSelector}}
+				matchTargets = []matchTarget{{matchKindV6CIDR, rule.to.cidrSelector, rule.to.clusterSubnetIntersection}}
 			} else {
-				matchTargets = []matchTarget{{matchKindV4CIDR, rule.to.cidrSelector}}
+				matchTargets = []matchTarget{{matchKindV4CIDR, rule.to.cidrSelector, rule.to.clusterSubnetIntersection}}
 			}
 		} else {
 			// rule based on DNS NAME
@@ -322,10 +317,10 @@ func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, h
 			}
 			dnsNameIPv4ASHashName, dnsNameIPv6ASHashName := dnsNameAddressSets.GetASHashNames()
 			if dnsNameIPv4ASHashName != "" {
-				matchTargets = append(matchTargets, matchTarget{matchKindV4AddressSet, dnsNameIPv4ASHashName})
+				matchTargets = append(matchTargets, matchTarget{matchKindV4AddressSet, dnsNameIPv4ASHashName, rule.to.clusterSubnetIntersection})
 			}
 			if dnsNameIPv6ASHashName != "" {
-				matchTargets = append(matchTargets, matchTarget{matchKindV6AddressSet, dnsNameIPv6ASHashName})
+				matchTargets = append(matchTargets, matchTarget{matchKindV6AddressSet, dnsNameIPv6ASHashName, rule.to.clusterSubnetIntersection})
 			}
 		}
 		match := generateMatch(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6, matchTargets, rule.ports)
@@ -338,26 +333,8 @@ func (oc *DefaultNetworkController) addEgressFirewallRules(ef *egressFirewall, h
 }
 
 // createEgressFirewallRules uses the previously generated elements and creates the
-// logical_router_policy/join_switch_acl for a specific egressFirewallRouter
+// acls for all node switches
 func (oc *DefaultNetworkController) createEgressFirewallRules(priority int, match, action, externalID string, aclLogging *ACLLoggingLevels) error {
-	logicalSwitches := []string{}
-	if config.Gateway.Mode == config.GatewayModeLocal {
-		// Find all node switches
-		p := func(item *nbdb.LogicalSwitch) bool {
-			// Ignore external and Join switches(both legacy and current)
-			return !(strings.HasPrefix(item.Name, types.JoinSwitchPrefix) || item.Name == "join" || strings.HasPrefix(item.Name, types.ExternalSwitchPrefix))
-		}
-		nodeLocalSwitches, err := libovsdbops.FindLogicalSwitchesWithPredicate(oc.nbClient, p)
-		if err != nil {
-			return fmt.Errorf("unable to setup egress firewall ACLs on cluster nodes, err: %v", err)
-		}
-		for _, nodeLocalSwitch := range nodeLocalSwitches {
-			logicalSwitches = append(logicalSwitches, nodeLocalSwitch.Name)
-		}
-	} else {
-		logicalSwitches = append(logicalSwitches, types.OVNJoinSwitch)
-	}
-
 	// a name is needed for logging purposes - the name must be unique, so make it
 	// egressFirewall_<namespace name>_<priority>
 	aclName := buildEgressFwAclName(externalID, priority)
@@ -377,13 +354,13 @@ func (oc *DefaultNetworkController) createEgressFirewallRules(priority int, matc
 		return fmt.Errorf("failed to create egressFirewall ACL %v: %v", egressFirewallACL, err)
 	}
 
-	for _, logicalSwitchName := range logicalSwitches {
-		ops, err = libovsdbops.AddACLsToLogicalSwitchOps(oc.nbClient, ops, logicalSwitchName, egressFirewallACL)
-		if err != nil {
-			return fmt.Errorf("failed to add egressFirewall ACL %v to switch %s: %v", egressFirewallACL, logicalSwitchName, err)
-		}
+	// Applying ACLs on types.ClusterPortGroupName is equivalent to applying on every node switch, since
+	// types.ClusterPortGroupName contains management port from every switch.
+	ops, err = libovsdbops.AddACLsToPortGroupOps(oc.nbClient, ops, types.ClusterPortGroupName, egressFirewallACL)
+	if err != nil {
+		return fmt.Errorf("failed to add egressFirewall ACL %v to port group %s: %v",
+			egressFirewallACL, types.ClusterPortGroupName, err)
 	}
-
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
 		return fmt.Errorf("failed to transact egressFirewall ACL: %v", err)
@@ -392,7 +369,7 @@ func (oc *DefaultNetworkController) createEgressFirewallRules(priority int, matc
 	return nil
 }
 
-// deleteEgressFirewallRules delete the specific logical router policy/join switch Acls
+// deleteEgressFirewallRules delete egress firewall Acls
 func (oc *DefaultNetworkController) deleteEgressFirewallRules(externalID string) error {
 	// Find ACLs for a given egressFirewall
 	pACL := func(item *nbdb.ACL) bool {
@@ -408,10 +385,7 @@ func (oc *DefaultNetworkController) deleteEgressFirewallRules(externalID string)
 		return nil
 	}
 
-	// delete egress firewall acls off any logical switch which has it,
-	// then manually remove the egressFirewall ACLs instead of relying on ovsdb garbage collection to do so
-	pSwitch := func(item *nbdb.LogicalSwitch) bool { return true }
-	err = libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(oc.nbClient, pSwitch, egressFirewallACLs...)
+	err = libovsdbops.DeleteACLsFromPortGroups(oc.nbClient, []string{types.ClusterPortGroupName}, egressFirewallACLs...)
 	if err != nil {
 		return err
 	}
@@ -422,6 +396,11 @@ func (oc *DefaultNetworkController) deleteEgressFirewallRules(externalID string)
 type matchTarget struct {
 	kind  matchKind
 	value string
+	// clusterSubnetIntersection is inherited from the egressFirewallRule destination.
+	// clusterSubnetIntersection is true, if egress firewall rule CIDRSelector intersects with clusterSubnet.
+	// Based on this flag we can omit clusterSubnet exclusion from the related ACL.
+	// For dns-based rules, EgressDNS won't add ips from clusterSubnet to the address set.
+	clusterSubnetIntersection bool
 }
 
 type matchKind int
@@ -470,6 +449,7 @@ func generateMatch(ipv4Source, ipv6Source string, destinations []matchTarget, ds
 		src = fmt.Sprintf("ip6.src == $%s", ipv6Source)
 	}
 
+	subnetExclusionRequired := false
 	for _, entry := range destinations {
 		if entry.value == "" {
 			continue
@@ -484,19 +464,20 @@ func generateMatch(ipv4Source, ipv6Source string, destinations []matchTarget, ds
 		} else {
 			dst = strings.Join([]string{dst, ipDst}, " || ")
 		}
+		if entry.clusterSubnetIntersection {
+			subnetExclusionRequired = true
+		}
 	}
-
 	match := fmt.Sprintf("(%s) && %s", dst, src)
 	if len(dstPorts) > 0 {
 		match = fmt.Sprintf("%s && %s", match, egressGetL4Match(dstPorts))
 	}
-
-	if config.Gateway.Mode == config.GatewayModeLocal {
+	// only add clusterSubnet exclusion if dst CIDR intersects with one of the clusterSubnets
+	if subnetExclusionRequired {
 		extraMatch = getClusterSubnetsExclusion()
-	} else {
-		extraMatch = fmt.Sprintf("inport == \"%s%s\"", types.JoinSwitchToGWRouterPrefix, types.OVNClusterRouter)
+		match = fmt.Sprintf("%s && %s", match, extraMatch)
 	}
-	return fmt.Sprintf("%s && %s", match, extraMatch)
+	return match
 }
 
 // egressGetL4Match generates the rules for when ports are specified in an egressFirewall Rule

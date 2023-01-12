@@ -403,6 +403,14 @@ var _ = ginkgo.Describe("Services", func() {
 		_, err = framework.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
 		framework.ExpectNoError(err)
 		cleanupFn = func() {
+			// initial pod used for host command may be deleted at this point, refetch
+			pods, err := cs.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+				LabelSelector: "app=ovnkube-node",
+				FieldSelector: "spec.nodeName=" + nodeName,
+			})
+			framework.ExpectNoError(err)
+			gomega.Expect(pods.Items).To(gomega.HaveLen(1))
+			clientPod := &pods.Items[0]
 			cmd := fmt.Sprintf(`ip addr del %s dev lo || true`, extraCIDR)
 			_, err = framework.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
 		}
