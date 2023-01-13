@@ -18,28 +18,27 @@ import (
 )
 
 // wait on a certain pod annotation related condition
-type podAnnotWaitCond func(podAnnotation map[string]string) bool
+type podAnnotWaitCond func(map[string]string, string) (*util.PodAnnotation, bool)
 
 // isOvnReady is a wait condition for OVN master to set pod-networks annotation
-func isOvnReady(podAnnotation map[string]string) bool {
-	if _, ok := podAnnotation[util.OvnPodAnnotationName]; ok {
-		return true
-	}
-	return false
+func isOvnReady(podAnnotation map[string]string, nadName string) (*util.PodAnnotation, bool) {
+	podNADAnnotation, err := util.UnmarshalPodAnnotation(podAnnotation, nadName)
+	return podNADAnnotation, err == nil
 }
 
 // isDPUReady is a wait condition which waits for OVN master to set pod-networks annotation and
 // ovnkube running on DPU to set connection-status pod annotation and its status is Ready
-func isDPUReady(podAnnotation map[string]string) bool {
-	if isOvnReady(podAnnotation) {
+func isDPUReady(podAnnotation map[string]string, nadName string) (*util.PodAnnotation, bool) {
+	podNADAnnotation, ready := isOvnReady(podAnnotation, nadName)
+	if ready {
 		// check DPU connection status
-		if status, err := util.UnmarshalPodDPUConnStatus(podAnnotation, types.DefaultNetworkName); err == nil {
+		if status, err := util.UnmarshalPodDPUConnStatus(podAnnotation, nadName); err == nil {
 			if status.Status == util.DPUConnectionStatusReady {
-				return true
+				return podNADAnnotation, true
 			}
 		}
 	}
-	return false
+	return nil, false
 }
 
 // getPod tries to read a Pod object from the informer cache, or if the pod
@@ -66,7 +65,8 @@ func getPod(podLister corev1listers.PodLister, kclient kubernetes.Interface, nam
 }
 
 // GetPodAnnotations obtains the pod UID and annotation from the cache or apiserver
-func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, kclient kubernetes.Interface, namespace, name string, annotCond podAnnotWaitCond) (string, map[string]string, error) {
+func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, kclient kubernetes.Interface,
+	namespace, name, nadName string, annotCond podAnnotWaitCond) (string, map[string]string, *util.PodAnnotation, error) {
 	var notFoundCount uint
 
 	for {
@@ -76,22 +76,23 @@ func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, k
 			if ctx.Err() == context.Canceled {
 				detail = "canceled while"
 			}
-			return "", nil, fmt.Errorf("%s waiting for annotations: %w", detail, ctx.Err())
+			return "", nil, nil, fmt.Errorf("%s waiting for annotations: %w", detail, ctx.Err())
 		default:
 			pod, err := getPod(podLister, kclient, namespace, name)
 			if err != nil {
 				if !apierrors.IsNotFound(err) {
-					return "", nil, fmt.Errorf("failed to get pod for annotations: %v", err)
+					return "", nil, nil, fmt.Errorf("failed to get pod for annotations: %v", err)
 				}
 				// Allow up to 1 second for pod to be found
 				notFoundCount++
 				if notFoundCount >= 5 {
-					return "", nil, fmt.Errorf("timed out waiting for pod after 1s: %v", err)
+					return "", nil, nil, fmt.Errorf("timed out waiting for pod after 1s: %v", err)
 				}
 				// drop through to try again
 			} else if pod != nil {
-				if annotCond(pod.Annotations) {
-					return string(pod.UID), pod.Annotations, nil
+				podNADAnnotation, ready := annotCond(pod.Annotations, nadName)
+				if ready {
+					return string(pod.UID), pod.Annotations, podNADAnnotation, nil
 				}
 			}
 
@@ -102,11 +103,15 @@ func GetPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, k
 }
 
 // PodAnnotation2PodInfo creates PodInterfaceInfo from Pod annotations and additional attributes
-func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, podUID, vfNetdevname string) (
-	*PodInterfaceInfo, error) {
-	podAnnotSt, err := util.UnmarshalPodAnnotation(podAnnotation, types.DefaultNetworkName)
-	if err != nil {
-		return nil, err
+func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *util.PodAnnotation, checkExtIDs bool, podUID,
+	vfNetdevname, nadName string, netName string, mtu int) (*PodInterfaceInfo, error) {
+	var err error
+	// get pod's annotation of the given NAD if it is not available
+	if podNADAnnotation == nil {
+		podNADAnnotation, err = util.UnmarshalPodAnnotation(podAnnotation, nadName)
+		if err != nil {
+			return nil, err
+		}
 	}
 	ingress, err := extractPodBandwidth(podAnnotation, Ingress)
 	if err != nil && !errors.Is(err, BandwidthNotFound) {
@@ -118,15 +123,17 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, checkExtIDs bool, po
 	}
 
 	podInterfaceInfo := &PodInterfaceInfo{
-		PodAnnotation:        *podAnnotSt,
-		MTU:                  config.Default.MTU,
-		RoutableMTU:          config.Default.RoutableMTU,
+		PodAnnotation:        *podNADAnnotation,
+		MTU:                  mtu,
+		RoutableMTU:          config.Default.RoutableMTU, // TBD, configurable for secondary network?
 		Ingress:              ingress,
 		Egress:               egress,
 		CheckExtIDs:          checkExtIDs,
 		IsDPUHostMode:        config.OvnKubeNode.Mode == types.NodeModeDPUHost,
 		PodUID:               podUID,
 		VfNetdevName:         vfNetdevname,
+		NetName:              netName,
+		NADName:              nadName,
 		EnableUDPAggregation: config.Default.EnableUDPAggregation,
 	}
 	return podInterfaceInfo, nil

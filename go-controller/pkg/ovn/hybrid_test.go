@@ -284,7 +284,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				Name:                 "node1",
 				NodeIP:               "1.2.3.4",
 				NodeLRPMAC:           "0a:58:0a:01:01:01",
-				LrpMAC:               "0a:58:64:40:00:03",
 				LrpIP:                "100.64.0.2",
 				DrLrpIP:              "100.64.0.1",
 				PhysicalBridgeMAC:    "11:22:33:44:55:66",
@@ -295,7 +294,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				GatewayRouterIP:      "172.16.16.2",
 				GatewayRouterNextHop: "172.16.16.1",
 				PhysicalBridgeName:   "br-eth0",
-				NodeHostAddress:      []string{"9.9.9.9"},
 				NodeGWIP:             "10.1.1.1/24",
 				NodeMgmtPortIP:       "10.1.1.2",
 				//NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
@@ -328,7 +326,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString("9.9.9.9"))
+			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString(node1.NodeIP))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -554,7 +552,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				Name:                 "node1",
 				NodeIP:               "1.2.3.4",
 				NodeLRPMAC:           "0a:58:0a:01:01:01",
-				LrpMAC:               "0a:58:64:40:00:02",
 				LrpIP:                "100.64.0.2",
 				DrLrpIP:              "100.64.0.1",
 				PhysicalBridgeMAC:    "11:22:33:44:55:66",
@@ -565,7 +562,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				GatewayRouterIP:      "172.16.16.2",
 				GatewayRouterNextHop: "172.16.16.1",
 				PhysicalBridgeName:   "br-eth0",
-				NodeHostAddress:      []string{"9.9.9.9"},
 				NodeGWIP:             "10.1.1.1/24",
 				NodeMgmtPortIP:       "10.1.1.2",
 				NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
@@ -599,7 +595,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString("9.9.9.9"))
+			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString(node1.NodeIP))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -742,7 +738,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				Name:                 "node1",
 				NodeIP:               "1.2.3.4",
 				NodeLRPMAC:           "0a:58:0a:01:01:01",
-				LrpMAC:               "0a:58:64:40:00:02",
 				LrpIP:                "100.64.0.2",
 				DrLrpIP:              "100.64.0.1",
 				PhysicalBridgeMAC:    "11:22:33:44:55:66",
@@ -753,7 +748,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				GatewayRouterIP:      "172.16.16.2",
 				GatewayRouterNextHop: "172.16.16.1",
 				PhysicalBridgeName:   "br-eth0",
-				NodeHostAddress:      []string{"9.9.9.9"},
 				NodeGWIP:             "10.1.1.1/24",
 				NodeMgmtPortIP:       "10.1.1.2",
 				NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
@@ -797,7 +791,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString("9.9.9.9"))
+			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString(node1.NodeIP))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1016,7 +1010,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				Name:                 "node1",
 				NodeIP:               "1.2.3.4",
 				NodeLRPMAC:           "0a:58:0a:01:01:01",
-				LrpMAC:               "0a:58:64:40:00:03",
 				LrpIP:                "100.64.0.2",
 				DrLrpIP:              "100.64.0.1",
 				PhysicalBridgeMAC:    "11:22:33:44:55:66",
@@ -1027,7 +1020,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				GatewayRouterIP:      "172.16.16.2",
 				GatewayRouterNextHop: "172.16.16.1",
 				PhysicalBridgeName:   "br-eth0",
-				NodeHostAddress:      []string{"9.9.9.9"},
 				NodeGWIP:             "10.1.1.1/24",
 				NodeMgmtPortIP:       "10.1.1.2",
 				//NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
@@ -1060,7 +1052,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString("9.9.9.9"))
+			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString(node1.NodeIP))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())

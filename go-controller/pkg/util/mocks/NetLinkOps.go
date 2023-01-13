@@ -87,6 +87,20 @@ func (_m *NetLinkOps) ConntrackDeleteFilter(table netlink.ConntrackTableType, fa
 	return r0, r1
 }
 
+// IsLinkNotFoundError provides a mock function with given fields: err
+func (_m *NetLinkOps) IsLinkNotFoundError(err error) bool {
+	ret := _m.Called(err)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(error) bool); ok {
+		r0 = rf(err)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
 // LinkByIndex provides a mock function with given fields: index
 func (_m *NetLinkOps) LinkByIndex(index int) (netlink.Link, error) {
 	ret := _m.Called(index)

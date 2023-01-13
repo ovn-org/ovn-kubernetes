@@ -338,6 +338,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableEgressFirewall            bool `gcfg:"enable-egress-firewall"`
 	EnableEgressQoS                 bool `gcfg:"enable-egress-qos"`
 	EgressIPNodeHealthCheckPort     int  `gcfg:"egressip-node-healthcheck-port"`
+	EnableMultiNetwork              bool `gcfg:"enable-multi-network"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -380,6 +381,8 @@ type GatewayConfig struct {
 	// RouterSubnet is the subnet to be used for the GR external port. auto-detected if not given.
 	// Must match the the kube node IP address. Currently valid for DPU only.
 	RouterSubnet string `gcfg:"router-subnet"`
+	// SingeNode indicates the cluster has only one node
+	SingleNode bool `gcfg:"single-node"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -883,6 +886,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure EgressIP node reachability using gRPC on this TCP port.",
 		Destination: &cliConfig.OVNKubernetesFeature.EgressIPNodeHealthCheckPort,
 	},
+	&cli.BoolFlag{
+		Name:        "enable-multi-network",
+		Usage:       "Configure to use multiple NetworkAttachmentDefinition CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableMultiNetwork,
+		Value:       OVNKubernetesFeature.EnableMultiNetwork,
+	},
 }
 
 // K8sFlags capture Kubernetes-related options
@@ -1169,6 +1178,12 @@ var OVNGatewayFlags = []cli.Flag{
 			"Currently valid for DPUs only",
 		Destination: &cliConfig.Gateway.RouterSubnet,
 		Value:       Gateway.RouterSubnet,
+	},
+	&cli.BoolFlag{
+		Name: "single-node",
+		Usage: "Enable single node optimizations. " +
+			"Single node indicates a one node cluster and allows to simplify ovn-kubernetes gateway logic",
+		Destination: &cliConfig.Gateway.SingleNode,
 	},
 	// Deprecated CLI options
 	&cli.BoolFlag{

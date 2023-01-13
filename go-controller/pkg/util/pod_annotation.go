@@ -93,11 +93,11 @@ type podRoute struct {
 }
 
 // MarshalPodAnnotation adds the pod's network details of the specified network to the corresponding pod annotation.
-func MarshalPodAnnotation(annotations map[string]string, podInfo *PodAnnotation, netName string) (map[string]string, error) {
+func MarshalPodAnnotation(annotations map[string]string, podInfo *PodAnnotation, nadName string) (map[string]string, error) {
 	if annotations == nil {
 		annotations = make(map[string]string)
 	}
-	podNetworks, err := unmarshalPodAnnotationAllNetworks(annotations)
+	podNetworks, err := UnmarshalPodAnnotationAllNetworks(annotations)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +133,7 @@ func MarshalPodAnnotation(annotations map[string]string, podInfo *PodAnnotation,
 			NextHop: nh,
 		})
 	}
-	podNetworks[netName] = pa
+	podNetworks[nadName] = pa
 	bytes, err := json.Marshal(podNetworks)
 	if err != nil {
 		return nil, fmt.Errorf("failed marshaling podNetworks map %v", podNetworks)
@@ -143,22 +143,22 @@ func MarshalPodAnnotation(annotations map[string]string, podInfo *PodAnnotation,
 }
 
 // UnmarshalPodAnnotation returns the Pod's network info of the given network from pod.Annotations
-func UnmarshalPodAnnotation(annotations map[string]string, netName string) (*PodAnnotation, error) {
+func UnmarshalPodAnnotation(annotations map[string]string, nadName string) (*PodAnnotation, error) {
 	var err error
 	ovnAnnotation, ok := annotations[OvnPodAnnotationName]
 	if !ok {
 		return nil, newAnnotationNotSetError("could not find OVN pod annotation in %v", annotations)
 	}
 
-	podNetworks, err := unmarshalPodAnnotationAllNetworks(annotations)
+	podNetworks, err := UnmarshalPodAnnotationAllNetworks(annotations)
 	if err != nil {
 		return nil, err
 	}
 
-	tempA, ok := podNetworks[netName]
+	tempA, ok := podNetworks[nadName]
 	if !ok {
 		return nil, fmt.Errorf("no ovn pod annotation for network %s: %q",
-			netName, ovnAnnotation)
+			nadName, ovnAnnotation)
 	}
 
 	a := &tempA
@@ -224,7 +224,7 @@ func UnmarshalPodAnnotation(annotations map[string]string, netName string) (*Pod
 	return podAnnotation, nil
 }
 
-func unmarshalPodAnnotationAllNetworks(annotations map[string]string) (map[string]podAnnotation, error) {
+func UnmarshalPodAnnotationAllNetworks(annotations map[string]string) (map[string]podAnnotation, error) {
 	podNetworks := make(map[string]podAnnotation)
 	ovnAnnotation, ok := annotations[OvnPodAnnotationName]
 	if ok {
@@ -237,9 +237,9 @@ func unmarshalPodAnnotationAllNetworks(annotations map[string]string) (map[strin
 }
 
 // GetPodCIDRsWithFullMask returns the pod's IP addresses in a CIDR with FullMask format
-// Internally it calls GetAllPodIPs
+// Internally it calls GetPodIPsOfNetwork
 func GetPodCIDRsWithFullMask(pod *v1.Pod) ([]*net.IPNet, error) {
-	podIPs, err := GetAllPodIPs(pod)
+	podIPs, err := GetPodIPsOfNetwork(pod, &DefaultNetInfo{})
 	if err != nil {
 		return nil, err
 	}
@@ -258,27 +258,46 @@ func GetPodCIDRsWithFullMask(pod *v1.Pod) ([]*net.IPNet, error) {
 	return ips, nil
 }
 
-// GetAllPodIPs returns the pod's IP addresses, first from the OVN annotation
+// GetPodIPsOfNetwork returns the pod's IP addresses, first from the OVN annotation
 // and then falling back to the Pod Status IPs. This function is intended to
 // also return IPs for HostNetwork and other non-OVN-IPAM-ed pods.
-func GetAllPodIPs(pod *v1.Pod) ([]net.IP, error) {
-	annotation, err := UnmarshalPodAnnotation(pod.Annotations, types.DefaultNetworkName)
-	if err == nil && annotation != nil {
+func GetPodIPsOfNetwork(pod *v1.Pod, nInfo NetInfo) ([]net.IP, error) {
+	// if netInfo is nil, this is called fro default network
+	ips := []net.IP{}
+	nadName := types.DefaultNetworkName
+	if nInfo.IsSecondary() {
+		on, network, err := PodWantsMultiNetwork(pod, nInfo)
+		if err != nil {
+			return nil, err
+		} else if !on {
+			// the pod is not attached to this specific network, don't return error
+			return []net.IP{}, nil
+		}
+		nadName = GetNADName(network.Namespace, network.Name)
+	}
+	annotation, _ := UnmarshalPodAnnotation(pod.Annotations, nadName)
+	if annotation != nil {
 		// Use the OVN annotation if valid
-		ips := make([]net.IP, 0, len(annotation.IPs))
 		for _, ip := range annotation.IPs {
 			ips = append(ips, ip.IP)
 		}
 		// An OVN annotation should never have empty IPs, but just in case
-		if len(ips) > 0 {
-			return ips, nil
+		if len(ips) == 0 {
+			klog.Warningf("No IPs found in existing OVN annotation for NAD %s! Pod Name: %s, Annotation: %#v",
+				nadName, pod.Name, annotation)
 		}
-		klog.Warningf("No IPs found in existing OVN annotation! Pod Name: %s, Annotation: %#v",
-			pod.Name, annotation)
+	}
+	if len(ips) != 0 {
+		return ips, nil
 	}
 
-	// Otherwise if the annotation is not valid try to use Kube API pod IPs
-	ips := make([]net.IP, 0, len(pod.Status.PodIPs))
+	if nInfo.IsSecondary() {
+		return []net.IP{}, fmt.Errorf("no pod annotation of pod %s/%s found for network %s",
+			pod.Namespace, pod.Name, nInfo.GetNetworkName())
+	}
+
+	// Otherwise, default network, if the annotation is not valid try to use Kube API pod IPs
+	ips = make([]net.IP, 0, len(pod.Status.PodIPs))
 	for _, podIP := range pod.Status.PodIPs {
 		ip := utilnet.ParseIPSloppy(podIP.IP)
 		if ip == nil {

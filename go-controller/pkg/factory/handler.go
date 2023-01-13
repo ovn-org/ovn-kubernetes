@@ -10,6 +10,8 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 
+	networkattachmentdefinitionlister "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
+
 	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
 	egressqoslister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 
@@ -39,7 +41,7 @@ type Handler struct {
 	// priority is used to track the handler's priority of being invoked.
 	// example: a handler with priority 0 will process the received event first
 	// before a handler with priority 1.
-	priority uint32
+	priority int
 }
 
 func (h *Handler) OnAdd(obj interface{}) {
@@ -88,7 +90,7 @@ type informer struct {
 	// before a handler with priority 1, 0 being the higest priority.
 	// NOTE: we can have multiple handlers with the same priority hence the value
 	// is a map of handlers keyed by its unique id.
-	handlers map[uint32]map[uint64]*Handler
+	handlers map[int]map[uint64]*Handler
 	events   []chan *event
 	lister   listerInterface
 	// initialAddFunc will be called to deliver the initial list of objects
@@ -103,8 +105,19 @@ func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
 	i.RLock()
 	defer i.RUnlock()
 
-	for priority := 0; uint32(priority) <= minHandlerPriority; priority++ { // loop over priority higest to lowest
-		for _, handler := range i.handlers[uint32(priority)] {
+	for priority := 0; priority <= minHandlerPriority; priority++ { // loop over priority higest to lowest
+		for _, handler := range i.handlers[priority] {
+			f(handler)
+		}
+	}
+}
+
+func (i *informer) forEachQueuedHandlerReversed(f func(h *Handler)) {
+	i.RLock()
+	defer i.RUnlock()
+
+	for priority := minHandlerPriority; priority >= 0; priority-- { // loop over priority lowest to highest
+		for _, handler := range i.handlers[priority] {
 			f(handler)
 		}
 	}
@@ -120,14 +133,31 @@ func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
 		return
 	}
 
-	for priority := 0; uint32(priority) <= minHandlerPriority; priority++ { // loop over priority higest to lowest
-		for _, handler := range i.handlers[uint32(priority)] {
+	for priority := 0; priority <= minHandlerPriority; priority++ { // loop over priority higest to lowest
+		for _, handler := range i.handlers[priority] {
 			f(handler)
 		}
 	}
 }
 
-func (i *informer) addHandler(id uint64, priority uint32, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
+func (i *informer) forEachHandlerReversed(obj interface{}, f func(h *Handler)) {
+	i.RLock()
+	defer i.RUnlock()
+
+	objType := reflect.TypeOf(obj)
+	if objType != i.oType {
+		klog.Errorf("Object type %v did not match expected %v", objType, i.oType)
+		return
+	}
+
+	for priority := minHandlerPriority; priority >= 0; priority-- { // loop over priority lowest to highest
+		for _, handler := range i.handlers[priority] {
+			f(handler)
+		}
+	}
+}
+
+func (i *informer) addHandler(id uint64, priority int, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
 	handler := &Handler{
 		cache.FilteringResourceEventHandler{
 			FilterFunc: filterFunc,
@@ -334,7 +364,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 			i.enqueueEvent(nil, realObj, entry.queue, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 				start := time.Now()
-				i.forEachQueuedHandler(func(h *Handler) {
+				i.forEachQueuedHandlerReversed(func(h *Handler) {
 					h.OnDelete(e.obj)
 				})
 				metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
@@ -380,7 +410,7 @@ func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
 			}
 			metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 			start := time.Now()
-			i.forEachHandler(realObj, func(h *Handler) {
+			i.forEachHandlerReversed(realObj, func(h *Handler) {
 				h.OnDelete(realObj)
 			})
 			metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
@@ -427,6 +457,8 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return discoverylisters.NewEndpointSliceLister(sharedInformer.GetIndexer()), nil
 	case EgressQoSType:
 		return egressqoslister.NewEgressQoSLister(sharedInformer.GetIndexer()), nil
+	case NetworkAttachmentDefinitionType:
+		return networkattachmentdefinitionlister.NewNetworkAttachmentDefinitionLister(sharedInformer.GetIndexer()), nil
 	}
 
 	return nil, fmt.Errorf("cannot create lister from type %v", oType)
@@ -443,7 +475,7 @@ func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInforme
 		oType:    oType,
 		inf:      sharedInformer,
 		lister:   lister,
-		handlers: make(map[uint32]map[uint64]*Handler),
+		handlers: make(map[int]map[uint64]*Handler),
 		queueMap: make(map[ktypes.NamespacedName]*queueMapEntry),
 	}, nil
 }

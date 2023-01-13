@@ -41,6 +41,8 @@ var _ = Describe("cni_dpu tests", func() {
 				DeviceID: "",
 			},
 			timestamp: time.Time{},
+			netName:   ovntypes.DefaultNetworkName,
+			nadName:   ovntypes.DefaultNetworkName,
 		}
 		pod = &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{

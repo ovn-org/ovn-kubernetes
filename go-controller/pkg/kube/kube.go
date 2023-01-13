@@ -33,7 +33,6 @@ type Interface interface {
 	UpdateEgressIP(eIP *egressipv1.EgressIP) error
 	PatchEgressIP(name string, patchData []byte) error
 	UpdateNodeStatus(node *kapi.Node) error
-	UpdateNode(node *kapi.Node) error
 	UpdatePod(pod *kapi.Pod) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
 	GetNodes() (*kapi.NodeList, error)
@@ -253,13 +252,6 @@ func (k *Kube) UpdateNodeStatus(node *kapi.Node) error {
 	if err != nil {
 		klog.Errorf("Error in updating status on node %s: %v", node.Name, err)
 	}
-	return err
-}
-
-// UpdateNode takes the node object and sets the provided update status
-func (k *Kube) UpdateNode(node *kapi.Node) error {
-	klog.Infof("Updating node %s", node.Name)
-	_, err := k.KClient.CoreV1().Nodes().Update(context.TODO(), node, metav1.UpdateOptions{})
 	return err
 }
 

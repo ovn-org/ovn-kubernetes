@@ -141,6 +141,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				namespaceT.Name,
 			)
 
+			tPod := newPod(namespaceT.Name, tP.podName, tP.nodeName, tP.podIP)
 			fakeOvn.start(
 				&v1.NamespaceList{
 					Items: []v1.Namespace{
@@ -149,13 +150,13 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				},
 				&v1.PodList{
 					Items: []v1.Pod{
-						*newPod(namespaceT.Name, tP.podName, tP.nodeName, tP.podIP),
+						*tPod,
 					},
 				},
 			)
 			podMAC := ovntest.MustParseMAC(tP.podMAC)
 			podIPNets := []*net.IPNet{ovntest.MustParseIPNet(tP.podIP + "/24")}
-			fakeOvn.controller.logicalPortCache.add(tP.nodeName, tP.portName, fakeUUID, podMAC, podIPNets)
+			fakeOvn.controller.logicalPortCache.add(tPod, tP.nodeName, ovntypes.DefaultNetworkName, fakeUUID, podMAC, podIPNets)
 			err := fakeOvn.controller.WatchNamespaces()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -191,7 +192,6 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				Name:                 "node1",
 				NodeIP:               "1.2.3.4",
 				NodeLRPMAC:           "0a:58:0a:01:01:01",
-				LrpMAC:               "0a:58:64:40:00:02",
 				LrpIP:                "100.64.0.2",
 				LrpIPv6:              "fd98::2",
 				DrLrpIP:              "100.64.0.1",
@@ -204,7 +204,6 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				GatewayRouterNextHop: "172.16.16.1",
 				PhysicalBridgeName:   "br-eth0",
 				NodeGWIP:             "10.1.1.1/24",
-				NodeHostAddress:      []string{"9.9.9.9"},
 				NodeMgmtPortIP:       "10.1.1.2",
 				NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
 				DnatSnatIP:           "169.254.0.1",
@@ -262,7 +261,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString(node1.NodeHostAddress...))
+			err = util.SetNodeHostAddresses(nodeAnnotator, sets.NewString(node1.NodeIP))
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = nodeAnnotator.Run()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())

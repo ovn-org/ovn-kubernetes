@@ -27,6 +27,8 @@ import (
 	egressqosinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions"
 	egressqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
 
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	nadscheme "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/scheme"
 	kapi "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	knet "k8s.io/api/networking/v1"
@@ -80,9 +82,9 @@ const (
 	defaultNumEventQueues uint32 = 15
 
 	// default priorities for various handlers (also the highest priority)
-	defaultHandlerPriority uint32 = 0
+	defaultHandlerPriority int = 0
 	// lowest priority among various handlers (See GetHandlerPriority for more information)
-	minHandlerPriority uint32 = 4
+	minHandlerPriority int = 4
 )
 
 // types for dynamic handlers created when adding a network policy
@@ -124,6 +126,7 @@ var (
 	PeerNamespaceSelectorType             reflect.Type = reflect.TypeOf(&peerNamespaceSelector{})
 	PeerPodSelectorType                   reflect.Type = reflect.TypeOf(&peerPodSelector{})
 	LocalPodSelectorType                  reflect.Type = reflect.TypeOf(&localPodSelector{})
+	NetworkAttachmentDefinitionType       reflect.Type = reflect.TypeOf(&nadapi.NetworkAttachmentDefinition{})
 
 	// Resource types used in ovnk node
 	NamespaceExGwType                         reflect.Type = reflect.TypeOf(&namespaceExGw{})
@@ -158,6 +161,10 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 		return nil, err
 	}
 	if err := egressqosapi.AddToScheme(egressqosscheme.Scheme); err != nil {
+		return nil, err
+	}
+
+	if err := nadapi.AddToScheme(nadscheme.Scheme); err != nil {
 		return nil, err
 	}
 
@@ -290,6 +297,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 		informers: make(map[reflect.Type]*informer),
 		stopChan:  make(chan struct{}),
 	}
+
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
 	wf.iFactory.InformerFor(&kapi.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
@@ -408,6 +416,10 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 		if endpointSlice, ok := obj.(*discovery.EndpointSlice); ok {
 			return &endpointSlice.ObjectMeta, nil
 		}
+	case NetworkAttachmentDefinitionType:
+		if networkAttachmentDefinition, ok := obj.(*nadapi.NetworkAttachmentDefinition); ok {
+			return &networkAttachmentDefinition.ObjectMeta, nil
+		}
 	}
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
 }
@@ -423,7 +435,7 @@ type AddHandlerFuncType func(namespace string, sel labels.Selector, funcs cache.
 // By default handlers get the defaultHandlerPriority which is 0 (highest priority). Higher the number, lower the priority to get an event.
 // Example: EgressIPPodType will always get the pod event after PodType and PeerPodSelectorType will always get the event after PodType and EgressIPPodType
 // NOTE: If you are touching this function to add a new object type that uses shared objects, please make sure to update `minHandlerPriority` if needed
-func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority uint32) {
+func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority int) {
 	switch objType {
 	case EgressIPPodType:
 		return 1
@@ -513,7 +525,7 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
 }
 
-func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority uint32) (*Handler, error) {
+func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority int) (*Handler, error) {
 	inf, ok := wf.informers[objType]
 	if !ok {
 		klog.Fatalf("Tried to add handler of unknown object type %v", objType)
@@ -579,7 +591,7 @@ func (wf *WatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandler, p
 }
 
 // AddFilteredPodHandler adds a handler function that will be executed when Pod objects that match the given filters change
-func (wf *WatchFactory) AddFilteredPodHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority uint32) (*Handler, error) {
+func (wf *WatchFactory) AddFilteredPodHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority int) (*Handler, error) {
 	return wf.addHandler(PodType, namespace, sel, handlerFuncs, processExisting, priority)
 }
 
@@ -638,6 +650,16 @@ func (wf *WatchFactory) RemoveEgressQoSHandler(handler *Handler) {
 	wf.removeHandler(EgressQoSType, handler)
 }
 
+// AddNetworkAttachmentDefinitionHandler adds a handler function that will be executed on NetworkAttachmentDefinition object changes
+func (wf *WatchFactory) AddNetworkAttachmentDefinitionHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
+	return wf.addHandler(NetworkAttachmentDefinitionType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
+}
+
+// RemoveNetworkAttachmentDefinitionHandler removes an NetworkAttachmentDefinition object event handler function
+func (wf *WatchFactory) RemoveNetworkAttachmentDefinitionHandler(handler *Handler) {
+	wf.removeHandler(NetworkAttachmentDefinitionType, handler)
+}
+
 // AddEgressIPHandler adds a handler function that will be executed on EgressIP object changes
 func (wf *WatchFactory) AddEgressIPHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 	return wf.addHandler(EgressIPType, "", nil, handlerFuncs, processExisting, defaultHandlerPriority)
@@ -664,7 +686,7 @@ func (wf *WatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEventHand
 }
 
 // AddFilteredNamespaceHandler adds a handler function that will be executed when Namespace objects that match the given filters change
-func (wf *WatchFactory) AddFilteredNamespaceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority uint32) (*Handler, error) {
+func (wf *WatchFactory) AddFilteredNamespaceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority int) (*Handler, error) {
 	return wf.addHandler(NamespaceType, namespace, sel, handlerFuncs, processExisting, priority)
 }
 
@@ -674,7 +696,7 @@ func (wf *WatchFactory) RemoveNamespaceHandler(handler *Handler) {
 }
 
 // AddNodeHandler adds a handler function that will be executed on Node object changes
-func (wf *WatchFactory) AddNodeHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority uint32) (*Handler, error) {
+func (wf *WatchFactory) AddNodeHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{}) error, priority int) (*Handler, error) {
 	return wf.addHandler(NodeType, "", nil, handlerFuncs, processExisting, priority)
 }
 

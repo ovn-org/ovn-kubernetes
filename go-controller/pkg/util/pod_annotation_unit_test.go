@@ -216,7 +216,7 @@ func TestUnmarshalPodAnnotation(t *testing.T) {
 	}
 }
 
-func TestGetAllPodIPs(t *testing.T) {
+func TestGetPodIPsOfNetwork(t *testing.T) {
 	tests := []struct {
 		desc      string
 		inpPod    *v1.Pod
@@ -278,7 +278,7 @@ func TestGetAllPodIPs(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res1, e := GetAllPodIPs(tc.inpPod)
+			res1, e := GetPodIPsOfNetwork(tc.inpPod, &DefaultNetInfo{})
 			t.Log(res1, e)
 			if tc.errAssert {
 				assert.Error(t, e)

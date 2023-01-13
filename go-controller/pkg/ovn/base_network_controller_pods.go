@@ -5,9 +5,8 @@ import (
 	"net"
 	"time"
 
-	networkattachmentdefinitionapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	logicalswitchmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -27,8 +26,11 @@ import (
 )
 
 func (bnc *BaseNetworkController) allocatePodIPs(pod *kapi.Pod,
-	annotations *util.PodAnnotation) (expectedLogicalPortName string, err error) {
-	switchName := pod.Spec.NodeName
+	annotations *util.PodAnnotation, nadName string) (expectedLogicalPortName string, err error) {
+	switchName, err := bnc.getExpectedSwitchName(pod)
+	if err != nil {
+		return "", err
+	}
 	if !util.PodScheduled(pod) || !util.PodWantsNetwork(pod) || util.PodCompleted(pod) {
 		return "", nil
 	}
@@ -36,7 +38,7 @@ func (bnc *BaseNetworkController) allocatePodIPs(pod *kapi.Pod,
 	if bnc.lsManager.IsNonHostSubnetSwitch(switchName) {
 		return "", nil
 	}
-	expectedLogicalPortName = util.GetLogicalPortName(pod.Namespace, pod.Name)
+	expectedLogicalPortName = bnc.GetLogicalPortName(pod, nadName)
 	// it is possible to try to add a pod here that has no node. For example if a pod was deleted with
 	// a finalizer, and then the node was removed. In this case the pod will still exist in a running state.
 	// Terminating pods should still have network connectivity for pre-stop hooks or termination grace period
@@ -72,19 +74,38 @@ func (bnc *BaseNetworkController) allocatePodIPs(pod *kapi.Pod,
 }
 
 func (bnc *BaseNetworkController) deleteStaleLogicalSwitchPorts(expectedLogicalPorts map[string]bool) error {
-	// get all the nodes from the watchFactory
-	nodes, err := bnc.watchFactory.GetNodes()
-	if err != nil {
-		return fmt.Errorf("failed to get nodes: %v", err)
+	var switchNames []string
+
+	// get all switches that Pod logical port would be reside on.
+	topoType := bnc.TopologyType()
+	if !bnc.IsSecondary() || topoType == ovntypes.Layer3Topology {
+		// for default network and layer3 topology type networks, get all node switches.
+		nodes, err := bnc.watchFactory.GetNodes()
+		if err != nil {
+			return fmt.Errorf("failed to get nodes: %v", err)
+		}
+
+		switchNames = make([]string, 0, len(nodes))
+		for _, n := range nodes {
+			// skip nodes that are not running ovnk (inferred from host subnets)
+			switchName := bnc.GetNetworkScopedName(n.Name)
+			if bnc.lsManager.IsNonHostSubnetSwitch(switchName) {
+				continue
+			}
+			switchNames = append(switchNames, switchName)
+		}
+	} else {
+		return fmt.Errorf("topology type %s not supported", topoType)
 	}
 
+	return bnc.deleteStaleLogicalSwitchPortsOnSwitches(switchNames, expectedLogicalPorts)
+}
+
+func (bnc *BaseNetworkController) deleteStaleLogicalSwitchPortsOnSwitches(switchNames []string,
+	expectedLogicalPorts map[string]bool) error {
 	var ops []ovsdb.Operation
-	for _, n := range nodes {
-		// skip nodes that are not running ovnk (inferred from host subnets)
-		switchName := n.Name
-		if bnc.lsManager.IsNonHostSubnetSwitch(switchName) {
-			continue
-		}
+	var err error
+	for _, switchName := range switchNames {
 		p := func(item *nbdb.LogicalSwitchPort) bool {
 			return item.ExternalIDs["pod"] == "true" && !expectedLogicalPorts[item.Name]
 		}
@@ -101,7 +122,7 @@ func (bnc *BaseNetworkController) deleteStaleLogicalSwitchPorts(expectedLogicalP
 
 	_, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops)
 	if err != nil {
-		return fmt.Errorf("could not remove stale logicalPorts from switches (%+v)", err)
+		return fmt.Errorf("could not remove stale logicalPorts from switches for network %s (%+v)", bnc.GetNetworkName(), err)
 	}
 	return nil
 }
@@ -132,19 +153,22 @@ func (bnc *BaseNetworkController) lookupPortUUIDAndSwitchName(logicalPort string
 	return lsp.UUID, nodeSwitches[0].Name, nil
 }
 
-func (bnc *BaseNetworkController) deletePodLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (*lpInfo, error) {
-	var portUUID, switchName string
+func (bnc *BaseNetworkController) deletePodLogicalPort(pod *kapi.Pod, portInfo *lpInfo,
+	nadName string) (*lpInfo, error) {
+	var portUUID, switchName, logicalPort string
 	var podIfAddrs []*net.IPNet
-	var err error
 
-	// get the logical switch name that the pod's logical port is expected to be on
-	expectedSwitchName := pod.Spec.NodeName
-	podDesc := fmt.Sprintf("pod %s/%s", pod.Namespace, pod.Name)
-	logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
+	expectedSwitchName, err := bnc.getExpectedSwitchName(pod)
+	if err != nil {
+		return nil, err
+	}
+
+	podDesc := fmt.Sprintf("pod %s/%s/%s", nadName, pod.Namespace, pod.Name)
+	logicalPort = bnc.GetLogicalPortName(pod, nadName)
 	if portInfo == nil {
 		// If ovnkube-master restarts, it is also possible the Pod's logical switch port
 		// is not re-added into the cache. Delete logical switch port anyway.
-		annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
+		annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 		if err != nil {
 			if util.IsAnnotationNotSetError(err) {
 				// if the annotation doesn’t exist, that’s not an error. It means logical port does not need to be deleted.
@@ -196,7 +220,7 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *kapi.Pod, portInfo *
 					continue
 				}
 				// check if the pod addresses match in the OVN annotation
-				pAddrs, err := util.GetAllPodIPs(p)
+				pAddrs, err := util.GetPodIPsOfNetwork(p, bnc.NetInfo)
 				if err != nil {
 					continue
 				}
@@ -236,8 +260,7 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *kapi.Pod, portInfo *
 	}
 	allOps = append(allOps, ops...)
 
-	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(bnc.nbClient, "pod", pod.Namespace,
-		pod.Name)
+	recordOps, txOkCallBack, _, err := bnc.AddConfigDurationRecord("pod", pod.Namespace, pod.Name)
 	if err != nil {
 		klog.Errorf("Failed to record config duration: %v", err)
 	}
@@ -306,9 +329,36 @@ func (bnc *BaseNetworkController) waitForNodeLogicalSwitchInCache(switchName str
 }
 
 // OCPHACK this function is modified to carry ICNIv1 patches downstream
-func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodAnnotation,
-	nodeSubnets []*net.IPNet, routingExternalGWs *gatewayInfo, routingPodGWs map[string]gatewayInfo,
+func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, network *nadapi.NetworkSelectionElement,
+	podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet, routingExternalGWs *gatewayInfo, routingPodGWs map[string]gatewayInfo,
 	hybridOverlayExternalGW net.IP) error {
+	if bnc.IsSecondary() {
+		topoType := bnc.TopologyType()
+		if topoType != ovntypes.Layer3Topology {
+			return fmt.Errorf("topology type %s not supported", topoType)
+		}
+		// secondary layer3 network, see if its network-attachment's annotation has default-route key.
+		// If present, then we need to add default route for it
+		podAnnotation.Gateways = append(podAnnotation.Gateways, network.GatewayRequest...)
+		for _, podIfAddr := range podAnnotation.IPs {
+			isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
+			nodeSubnet, err := util.MatchIPNetFamily(isIPv6, nodeSubnets)
+			if err != nil {
+				return err
+			}
+			gatewayIPnet := util.GetNodeGatewayIfAddr(nodeSubnet)
+			layer3NetConfInfo := bnc.NetConfInfo.(*util.Layer3NetConfInfo)
+			for _, clusterSubnet := range layer3NetConfInfo.ClusterSubnets {
+				if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+						Dest:    clusterSubnet.CIDR,
+						NextHop: gatewayIPnet.IP,
+					})
+				}
+			}
+		}
+		return nil
+	}
 	// if there are other network attachments for the pod, then check if those network-attachment's
 	// annotation has default-route key. If present, then we need to skip adding default route for
 	// OVN interface
@@ -392,21 +442,41 @@ func (bnc *BaseNetworkController) addRoutesGatewayIP(pod *kapi.Pod, podAnnotatio
 // For some pods, like hostNetwork pods, overlay node pods, or completed pods waiting for them to be added
 // to oc.logicalPortCache will never succeed.
 func (bnc *BaseNetworkController) podExpectedInLogicalCache(pod *kapi.Pod) bool {
-	switchName := pod.Spec.NodeName
+	switchName, err := bnc.getExpectedSwitchName(pod)
+	if err != nil {
+		return false
+	}
 	return util.PodWantsNetwork(pod) && !bnc.lsManager.IsNonHostSubnetSwitch(switchName) && !util.PodCompleted(pod)
 }
 
-// OCP HACK move to default controller to avoid cyclical dependency with ICNIv1 inline
-// function is modified to return gateways as well as add routes with including ICNIv1 logic
-func (bnc *DefaultNetworkController) addLogicalPortToNetwork(pod *kapi.Pod,
-	network *networkattachmentdefinitionapi.NetworkSelectionElement) (ops []ovsdb.Operation,
+func (bnc *BaseNetworkController) getExpectedSwitchName(pod *kapi.Pod) (string, error) {
+	switchName := pod.Spec.NodeName
+	if bnc.IsSecondary() {
+		topoType := bnc.TopologyType()
+		switch topoType {
+		case ovntypes.Layer3Topology:
+			switchName = bnc.GetNetworkScopedName(pod.Spec.NodeName)
+		default:
+			return "", fmt.Errorf("topology type %s not supported", topoType)
+		}
+	}
+	return switchName, nil
+}
+
+// OCP HACK
+// function is modified to take DefaultNetworkController as a parameter
+// and to return gateways as well as add routes with including ICNIv1 logic
+func (bnc *BaseNetworkController) addLogicalPortToNetwork(oc *DefaultNetworkController, pod *kapi.Pod, nadName string,
+	network *nadapi.NetworkSelectionElement) (ops []ovsdb.Operation,
 	lsp *nbdb.LogicalSwitchPort, podAnnotation *util.PodAnnotation, newlyCreatedPort bool,
 	routingExternalGWs *gatewayInfo, routingPodGWs map[string]gatewayInfo, err error) {
 	var ls *nbdb.LogicalSwitch
 
-	podDesc := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
-	switchName := pod.Spec.NodeName
-
+	podDesc := fmt.Sprintf("%s/%s/%s", nadName, pod.Namespace, pod.Name)
+	switchName, err := bnc.getExpectedSwitchName(pod)
+	if err != nil {
+		return nil, nil, nil, false, nil, nil, err
+	}
 	// it is possible to try to add a pod here that has no node. For example if a pod was deleted with
 	// a finalizer, and then the node was removed. In this case the pod will still exist in a running state.
 	// Terminating pods should still have network connectivity for pre-stop hooks or termination grace period
@@ -426,7 +496,7 @@ func (bnc *DefaultNetworkController) addLogicalPortToNetwork(pod *kapi.Pod,
 		return nil, nil, nil, false, nil, nil, err
 	}
 
-	portName := util.GetLogicalPortName(pod.Namespace, pod.Name)
+	portName := bnc.GetLogicalPortName(pod, nadName)
 	klog.Infof("[%s] creating logical port %s for pod on switch %s", podDesc, portName, switchName)
 
 	var podMac net.HardwareAddr
@@ -489,7 +559,7 @@ func (bnc *DefaultNetworkController) addLogicalPortToNetwork(pod *kapi.Pod,
 	// rescheduled.
 	lsp.Options["requested-chassis"] = pod.Spec.NodeName
 
-	podAnnotation, err = util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
+	podAnnotation, err = util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 
 	// the IPs we allocate in this function need to be released back to the
 	// IPAM pool if there is some error in any step of addLogicalPort past
@@ -557,15 +627,17 @@ func (bnc *DefaultNetworkController) addLogicalPortToNetwork(pod *kapi.Pod,
 		}
 
 		releaseIPs = true
-		// OCP HACK
 	}
 
-	// Ensure the namespace/nsInfo exists
-	routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, ops, err := bnc.addPodToNamespace(pod.Namespace, podIfAddrs)
-	if err != nil {
-		return nil, nil, nil, false, routingExternalGWs, routingPodGWs, err
+	var hybridOverlayExternalGW net.IP
+	if oc != nil {
+		// Ensure the namespace/nsInfo exists
+		routingExternalGWs, routingPodGWs, hybridOverlayExternalGW, ops, err = oc.addPodToNamespace(pod.Namespace, podIfAddrs)
+		if err != nil {
+			return nil, nil, nil, false, routingExternalGWs, routingPodGWs, err
+		}
 	}
-
+	// OCP HACK
 	if needsIP {
 		// handle error cases separately first to ensure binding to err, otherwise the
 		// defer will fail
@@ -586,7 +658,7 @@ func (bnc *DefaultNetworkController) addLogicalPortToNetwork(pod *kapi.Pod,
 			return nil, nil, nil, false, nil, nil, fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, switch: %s",
 				podDesc, switchName)
 		}
-		err = bnc.addRoutesGatewayIP(pod, podAnnotation, nodeSubnets, routingExternalGWs, routingPodGWs, hybridOverlayExternalGW)
+		err = bnc.addRoutesGatewayIP(pod, network, podAnnotation, nodeSubnets, routingExternalGWs, routingPodGWs, hybridOverlayExternalGW)
 		if err != nil {
 			return nil, nil, nil, false, nil, nil, err
 		}
@@ -594,7 +666,7 @@ func (bnc *DefaultNetworkController) addLogicalPortToNetwork(pod *kapi.Pod,
 		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s",
 			podIfAddrs, podMac, podAnnotation.Gateways)
 		annoStart := time.Now()
-		err = bnc.updatePodAnnotationWithRetry(pod, podAnnotation, ovntypes.DefaultNetworkName)
+		err = bnc.updatePodAnnotationWithRetry(pod, podAnnotation, nadName)
 		podAnnoTime := time.Since(annoStart)
 		klog.Infof("[%s] addLogicalPort annotation time took %v", podDesc, podAnnoTime)
 		if err != nil {
@@ -614,6 +686,11 @@ func (bnc *DefaultNetworkController) addLogicalPortToNetwork(pod *kapi.Pod,
 
 	// add external ids
 	lsp.ExternalIDs = map[string]string{"namespace": pod.Namespace, "pod": "true"}
+	if bnc.IsSecondary() {
+		lsp.ExternalIDs[ovntypes.NetworkExternalID] = bnc.GetNetworkName()
+		lsp.ExternalIDs[ovntypes.NADExternalID] = nadName
+		lsp.ExternalIDs[ovntypes.TopologyExternalID] = bnc.TopologyType()
+	}
 
 	// CNI depends on the flows from port security, delay setting it until end
 	lsp.PortSecurity = addresses
@@ -738,13 +815,6 @@ func (bnc *BaseNetworkController) deletePodFromNamespace(ns string, podIfAddrs [
 	}
 
 	return ops, nil
-}
-
-func (bnc *BaseNetworkController) getPortInfo(pod *kapi.Pod) *lpInfo {
-	var portInfo *lpInfo
-	key := util.GetLogicalPortName(pod.Namespace, pod.Name)
-	portInfo, _ = bnc.logicalPortCache.get(key)
-	return portInfo
 }
 
 // WatchPods starts the watching of the Pod resource and calls back the appropriate handler logic

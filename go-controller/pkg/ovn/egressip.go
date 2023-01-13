@@ -599,7 +599,12 @@ func (oc *DefaultNetworkController) reconcileCloudPrivateIPConfig(old, new *ocpc
 		// Get the EgressIP owner reference
 		egressIPName, exists := oldCloudPrivateIPConfig.Annotations[util.OVNEgressIPOwnerRefLabel]
 		if !exists {
-			return fmt.Errorf("CloudPrivateIPConfig object: %s is missing the egress IP owner reference annotation", oldCloudPrivateIPConfig.Name)
+			// If a CloudPrivateIPConfig object does not have an egress IP owner reference annotation upon deletion,
+			// there is no way that the object will get one after deletion. Hence, simply log a warning message here
+			// for informative purposes instead of throwing the same error and retrying time and time again.
+			klog.Warningf("CloudPrivateIPConfig object %q was missing the egress IP owner reference annotation "+
+				"upon deletion", oldCloudPrivateIPConfig.Name)
+			return nil
 		}
 		// Check if the egress IP has been deleted or not, if we are processing
 		// a CloudPrivateIPConfig delete because the EgressIP has been deleted
@@ -653,7 +658,14 @@ func (oc *DefaultNetworkController) reconcileCloudPrivateIPConfig(old, new *ocpc
 		// Get the EgressIP owner reference
 		egressIPName, exists := newCloudPrivateIPConfig.Annotations[util.OVNEgressIPOwnerRefLabel]
 		if !exists {
-			return fmt.Errorf("CloudPrivateIPConfig object: %s is missing the egress IP owner reference annotation", newCloudPrivateIPConfig.Name)
+			// If a CloudPrivateIPConfig object does not have an egress IP owner reference annotation upon creation
+			// then we should simply log this as a warning. We should get an update action later down the road where we
+			// then take care of the rest. Hence, do not throw an error here to avoid rescheduling. Even though not
+			// officially supported, think of someone creating a CloudPrivateIPConfig object manually which will never
+			// get the annotation.
+			klog.Warningf("CloudPrivateIPConfig object %q is missing the egress IP owner reference annotation. Skipping",
+				oldCloudPrivateIPConfig.Name)
+			return nil
 		}
 		egressIP, err := oc.kube.GetEgressIP(egressIPName)
 		if err != nil {
@@ -1072,7 +1084,7 @@ func (oc *DefaultNetworkController) addPodEgressIPAssignments(name string, statu
 	// addLogicalPort has finished successfully setting up networking for
 	// the pod, so we can proceed with retrieving its IP and deleting the
 	// external GW configuration created in addLogicalPort for the pod.
-	logicalPort, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name))
+	logicalPort, err := oc.logicalPortCache.get(pod, types.DefaultNetworkName)
 	if err != nil {
 		return nil
 	}
@@ -1546,7 +1558,7 @@ func (oc *DefaultNetworkController) generateCacheForEgressIP() (map[string]egres
 					continue
 				}
 				// FIXME(trozet): potential race where pod is not yet added in the cache by the pod handler
-				logicalPort, err := oc.logicalPortCache.get(util.GetLogicalPortName(pod.Namespace, pod.Name))
+				logicalPort, err := oc.logicalPortCache.get(pod, types.DefaultNetworkName)
 				if err != nil {
 					klog.Errorf("Error getting logical port %s, err: %v", util.GetLogicalPortName(pod.Namespace, pod.Name), err)
 					continue
