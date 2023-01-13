@@ -587,17 +587,9 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		return err
 	}
 
-	// Initialize gateway
-	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
-		err = nc.initGatewayDPUHost(nodeAddr)
-		if err != nil {
-			return err
-		}
-	} else {
-		// Initialize gateway for OVS internal port or representor management port
-		if err := nc.initGateway(subnets, nodeAnnotator, waiter, mgmtPortConfig, nodeAddr); err != nil {
-			return err
-		}
+	// Initialize gateway for OVS internal port or representor management port
+	if err := nc.initGateway(subnets, nodeAnnotator, waiter, mgmtPortConfig, nodeAddr); err != nil {
+		return err
 	}
 
 	if err := nodeAnnotator.Run(); err != nil {

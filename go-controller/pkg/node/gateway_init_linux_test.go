@@ -626,7 +626,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 	Expect(err).NotTo(HaveOccurred())
 }
 
-func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName, hostIP, gwIP string) {
+func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName, hostCIDR, gwIP string) {
 	const (
 		clusterCIDR string = "10.1.0.0/16"
 		svcCIDR     string = "172.16.1.0/24"
@@ -641,7 +641,8 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		_, err = config.InitConfig(ctx, fexec, nil)
 		Expect(err).NotTo(HaveOccurred())
 
-		nodeAddr := v1.NodeAddress{Type: v1.NodeInternalIP, Address: hostIP}
+		hostIP := ovntest.MustParseIPNet(hostCIDR).IP
+		nodeAddr := v1.NodeAddress{Type: v1.NodeInternalIP, Address: hostIP.String()}
 		existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
 		},
@@ -667,14 +668,22 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		cnnci := NewCommonNodeNetworkControllerInfo(nil, wf, nil, nodeName, false)
-		nc := newDefaultNodeNetworkController(cnnci, stop, wg)
-
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			err := nc.initGatewayDPUHost(net.ParseIP(hostIP))
+			config.Gateway.Interface = uplinkName
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
+
+			ifAddrs := ovntest.MustParseIPNets(hostCIDR)
+			gw, err := newDPUHostSharedGateway(nodeName, gatewayNextHops, gatewayIntf, ifAddrs, wf)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(err).NotTo(HaveOccurred())
+			err = gw.Init(wf, stop, wg)
+			Expect(err).NotTo(HaveOccurred())
+
+			gw.Start()
 
 			link, err := netlink.LinkByName(uplinkName)
 			Expect(err).NotTo(HaveOccurred())
@@ -696,7 +705,7 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 			expRoute = &netlink.Route{
 				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", types.V4OVNMasqueradeIP)),
 				LinkIndex: link.Attrs().Index,
-				Src:       ovntest.MustParseIP(hostIP),
+				Src:       hostIP,
 			}
 			route, err = util.LinkRouteGetFilteredRoute(
 				expRoute,
@@ -1287,7 +1296,7 @@ var _ = Describe("Gateway Operations DPU", func() {
 		})
 
 		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway DPU host", func() {
-			shareGatewayInterfaceDPUHostTest(app, testNS, uplinkName, hostIP, gwIP)
+			shareGatewayInterfaceDPUHostTest(app, testNS, uplinkName, hostCIDR, gwIP)
 		})
 	})
 })

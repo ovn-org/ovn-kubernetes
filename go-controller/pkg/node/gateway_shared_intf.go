@@ -2056,3 +2056,51 @@ func addHostMACBindings(bridgeName string) error {
 	}
 	return nil
 }
+
+func newDPUHostSharedGateway(nodeName string, gwNextHops []net.IP, gwIntf string, gwIPs []*net.IPNet, watchFactory factory.NodeWatchFactory) (*gateway, error) {
+	klog.Info("Creating DPU Host Shared Gateway")
+
+	// A DPU host gateway is complementary to the shared gateway running
+	// on the DPU embedded CPU. it performs some initializations and
+	// watch on services for iptable rule updates and run a loadBalancerHealth checker
+	// Note: all K8s Node related annotations are handled from DPU.
+
+	gw := &gateway{
+		readyFunc:    func() (bool, error) { return true, nil },
+		watchFactory: watchFactory.(*factory.WatchFactory),
+	}
+
+	if config.Gateway.NodeportEnable {
+		gw.nodePortWatcherIptables = newNodePortWatcherIptables()
+	}
+
+	gw.initFunc = func() error {
+		klog.Info("Initializing DPU Host Shared Gateway")
+
+		if err := setNodeMasqueradeIPOnExtBridge(gwIntf); err != nil {
+			return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwIntf, err)
+		}
+
+		if err := addMasqueradeRoute(gwIntf, nodeName, gwIPs, watchFactory); err != nil {
+			return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
+		}
+
+		if err := configureSvcRouteViaInterface(gwIntf, gwNextHops); err != nil {
+			return fmt.Errorf("failed to configure service route: %v", err)
+		}
+
+		if config.Gateway.NodeportEnable {
+			if err := initSharedGatewayIPTables(); err != nil {
+				return fmt.Errorf("failed to initialize ip tables: %v", err)
+			}
+		}
+
+		if err := addHostMACBindings(gwIntf); err != nil {
+			return fmt.Errorf("failed to add MAC bindings for service routing")
+		}
+
+		return nil
+	}
+
+	return gw, nil
+}

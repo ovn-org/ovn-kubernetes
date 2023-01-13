@@ -259,18 +259,28 @@ func configureSvcRouteViaInterface(iface string, gwIPs []net.IP) error {
 func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator,
 	waiter *startupWaiter, managementPortConfig *managementPortConfig, kubeNodeIP net.IP) error {
 	klog.Info("Initializing Gateway Functionality")
-	var err error
-	var ifAddrs []*net.IPNet
 
+	// filter out unsupported modes
+	if config.OvnKubeNode.Mode != types.NodeModeFull && config.Gateway.Mode != config.GatewayModeShared {
+		return fmt.Errorf("combination of gateway mode %#v and node mode %#v not supported",
+			config.Gateway.Mode,
+			config.OvnKubeNode.Mode)
+	}
+
+	var err error
+	var egressGWInterface string
+	var ifAddrs []*net.IPNet
 	var loadBalancerHealthChecker *loadBalancerHealthChecker
 	var portClaimWatcher *portClaimWatcher
 
-	if config.Gateway.NodeportEnable && config.OvnKubeNode.Mode == types.NodeModeFull {
-		loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
-		portClaimWatcher, err = newPortClaimWatcher(nc.recorder)
+	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+		// On DPU host, force gateway interface to be the interface associated
+		// with kubeNodeIP
+		gatewayIntf, err := getInterfaceByIP(kubeNodeIP)
 		if err != nil {
 			return err
 		}
+		config.Gateway.Interface = gatewayIntf
 	}
 
 	gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
@@ -278,40 +288,57 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 		return err
 	}
 
-	egressGWInterface := ""
-	if config.Gateway.EgressGWInterface != "" {
-		egressGWInterface = interfaceForEXGW(config.Gateway.EgressGWInterface)
-	}
-
 	ifAddrs, err = getNetworkInterfaceIPAddresses(gatewayIntf)
 	if err != nil {
 		return err
 	}
 
-	// For DPU need to use the host IP addr which currently is assumed to be K8s Node cluster
-	// internal IP address.
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		// For DPU need to use the host IP addr which currently is assumed to be
+		// K8s Node cluster internal IP address.
 		ifAddrs, err = getDPUHostPrimaryIPAddresses(kubeNodeIP, ifAddrs)
+		if err != nil {
+			return err
+		}
+	} else if config.Gateway.NodeportEnable {
+		loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
+		portClaimWatcher, err = newPortClaimWatcher(nc.recorder)
 		if err != nil {
 			return err
 		}
 	}
 
-	if err := util.SetNodePrimaryIfAddrs(nodeAnnotator, ifAddrs); err != nil {
-		klog.Errorf("Unable to set primary IP net label on node, err: %v", err)
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		if err = nc.validateVTEPInterfaceMTU(); err != nil {
+			return fmt.Errorf("failed to bvalidate VTEP interface MTU, err: %v", err)
+		}
+
+		if err := util.SetNodePrimaryIfAddrs(nodeAnnotator, ifAddrs); err != nil {
+			return fmt.Errorf("unable to set primary IP net label on node, err: %v", err)
+		}
+
+		if config.Gateway.EgressGWInterface != "" {
+			egressGWInterface = interfaceForEXGW(config.Gateway.EgressGWInterface)
+		}
 	}
 
 	var gw *gateway
-	switch config.Gateway.Mode {
-	case config.GatewayModeLocal:
-		klog.Info("Preparing Local Gateway")
-		gw, err = newLocalGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
-			managementPortConfig, nc.Kube, nc.watchFactory)
-	case config.GatewayModeShared:
+	switch {
+	case config.Gateway.Mode == config.GatewayModeShared && config.OvnKubeNode.Mode != types.NodeModeDPUHost:
 		klog.Info("Preparing Shared Gateway")
 		gw, err = newSharedGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator, nc.Kube,
 			managementPortConfig, nc.watchFactory)
-	case config.GatewayModeDisabled:
+
+	case config.Gateway.Mode == config.GatewayModeShared && config.OvnKubeNode.Mode == types.NodeModeDPUHost:
+		klog.Info("Preparing DPU Host Shared Gateway")
+		gw, err = newDPUHostSharedGateway(nc.name, gatewayNextHops, gatewayIntf, ifAddrs, nc.watchFactory)
+
+	case config.Gateway.Mode == config.GatewayModeLocal:
+		klog.Info("Preparing Local Gateway")
+		gw, err = newLocalGateway(nc.name, subnets, gatewayNextHops, gatewayIntf, egressGWInterface, ifAddrs, nodeAnnotator,
+			managementPortConfig, nc.Kube, nc.watchFactory)
+
+	case config.Gateway.Mode == config.GatewayModeDisabled:
 		var chassisID string
 		klog.Info("Gateway Mode is disabled")
 		gw = &gateway{
@@ -348,9 +375,11 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 	}
 
 	readyGwFunc := func() (bool, error) {
-		controllerReady, err := isOVNControllerReady()
-		if err != nil || !controllerReady {
-			return false, err
+		if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+			controllerReady, err := isOVNControllerReady()
+			if err != nil || !controllerReady {
+				return false, err
+			}
 		}
 
 		return gw.readyFunc()
@@ -359,7 +388,7 @@ func (nc *DefaultNodeNetworkController) initGateway(subnets []*net.IPNet, nodeAn
 	waiter.AddWait(readyGwFunc, initGwFunc)
 	nc.gateway = gw
 
-	return nc.validateVTEPInterfaceMTU()
+	return nil
 }
 
 // interfaceForEXGW takes the interface requested to act as exgw bridge
@@ -378,74 +407,6 @@ func interfaceForEXGW(intfName string) string {
 		return bridge
 	}
 	return intfName
-}
-
-func (nc *DefaultNodeNetworkController) initGatewayDPUHost(kubeNodeIP net.IP) error {
-	// A DPU host gateway is complementary to the shared gateway running
-	// on the DPU embedded CPU. it performs some initializations and
-	// watch on services for iptable rule updates and run a loadBalancerHealth checker
-	// Note: all K8s Node related annotations are handled from DPU.
-	klog.Info("Initializing Shared Gateway Functionality on DPU host")
-	var err error
-
-	// Force gateway interface to be the interface associated with kubeNodeIP
-	gwIntf, err := getInterfaceByIP(kubeNodeIP)
-	if err != nil {
-		return err
-	}
-	config.Gateway.Interface = gwIntf
-
-	gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
-	if err != nil {
-		return err
-	}
-
-	ifAddrs, err := getNetworkInterfaceIPAddresses(gatewayIntf)
-	if err != nil {
-		return err
-	}
-
-	if err := setNodeMasqueradeIPOnExtBridge(gwIntf); err != nil {
-		return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwIntf, err)
-	}
-
-	if err := addMasqueradeRoute(gwIntf, nc.name, ifAddrs, nc.watchFactory); err != nil {
-		return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
-	}
-
-	err = configureSvcRouteViaInterface(gatewayIntf, gatewayNextHops)
-	if err != nil {
-		return err
-	}
-
-	gw := &gateway{
-		initFunc:     func() error { return nil },
-		readyFunc:    func() (bool, error) { return true, nil },
-		watchFactory: nc.watchFactory.(*factory.WatchFactory),
-	}
-
-	// TODO(adrianc): revisit if support for nodeIPManager is needed.
-
-	if config.Gateway.NodeportEnable {
-		if err := initSharedGatewayIPTables(); err != nil {
-			return err
-		}
-		gw.nodePortWatcherIptables = newNodePortWatcherIptables()
-		gw.loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
-		portClaimWatcher, err := newPortClaimWatcher(nc.recorder)
-		if err != nil {
-			return err
-		}
-		gw.portClaimWatcher = portClaimWatcher
-	}
-
-	if err := addHostMACBindings(gwIntf); err != nil {
-		return fmt.Errorf("failed to add MAC bindings for service routing")
-	}
-
-	err = gw.Init(nc.watchFactory, nc.stopChan, nc.wg)
-	nc.gateway = gw
-	return err
 }
 
 // CleanupClusterNode cleans up OVS resources on the k8s node on ovnkube-node daemonset deletion.
