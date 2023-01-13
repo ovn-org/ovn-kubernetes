@@ -1241,31 +1241,70 @@ spec:
 		// create the pod that will be used as the source for the connectivity test
 		createSrcPod(srcPodName, serverNodeInfo.name, retryInterval, retryTimeout, f)
 
+		// In very rare cases the 'nc' test commands do not return the expected result on the first try,
+		// but while testing has reproduced these cases, the condition is temporary and only initially
+		// after the pod has been created. Eventually the traffic tests work as expected, so they
+		// are wrapped in PollImmediate with a total duration equal to 4 times the pollingDuration (5 seconds)
+		// which should provide for 3 tries before a failure is actually flagged
+		testTimeoutInt, err := strconv.Atoi(testTimeout)
+		if err != nil {
+			framework.Failf("failed to parse test timeout duration: %v", err)
+		}
+		pollingDuration := time.Duration(4*testTimeoutInt) * time.Second
+
 		// Verify the remote host/port as explicitly allowed by the firewall policy is reachable
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host %s is permitted as defined by the external firewall policy", exFWPermitTcpDnsDest))
-		_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpDnsDest, "53")
+		err = wait.PollImmediate(2, pollingDuration, func() (bool, error) {
+			_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpDnsDest, "53")
+			if err == nil {
+				return true, nil
+			}
+			return false, nil
+		})
 		if err != nil {
 			framework.Failf("Failed to connect to the remote host %s from container %s on node %s: %v", exFWPermitTcpDnsDest, ovnContainer, serverNodeInfo.name, err)
 		}
+
 		// Verify the remote host/port as implicitly denied by the firewall policy is not reachable
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an implicitly denied host %s is not permitted as defined by the external firewall policy", exFWDenyTcpDnsDest))
-		_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWDenyTcpDnsDest, "53")
-		if err == nil {
-			framework.Failf("Succeeded in connecting the implicitly denied remote host %s from container %s on node %s", exFWDenyTcpDnsDest, ovnContainer, serverNodeInfo.name)
+		err = wait.PollImmediate(2, pollingDuration, func() (bool, error) {
+			_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWDenyTcpDnsDest, "53")
+			if err != nil {
+				return false, nil
+			}
+			return true, nil
+		})
+		if err != wait.ErrWaitTimeout {
+			framework.Failf("Succeeded in connecting the implicitly denied remote host %s from container %s on node %s: %v", exFWDenyTcpDnsDest, ovnContainer, serverNodeInfo.name, err)
 		}
+
 		// Verify the explicitly allowed host/port tcp port 80 rule is functional
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host %s is permitted as defined by the external firewall policy", exFWPermitTcpWwwDest))
-		_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpWwwDest, "80")
+		err = wait.PollImmediate(2, pollingDuration, func() (bool, error) {
+			_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpWwwDest, "80")
+			if err == nil {
+				return true, nil
+			}
+			return false, nil
+		})
 		if err != nil {
 			framework.Failf("Failed to curl the remote host %s from container %s on node %s: %v", exFWPermitTcpWwwDest, ovnContainer, serverNodeInfo.name, err)
 		}
+
 		// Verify the remote host/port 443 as implicitly denied by the firewall policy is not reachable
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an implicitly denied port on host %s is not permitted as defined by the external firewall policy", exFWPermitTcpWwwDest))
-		_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpWwwDest, "443")
-		if err == nil {
-			framework.Failf("Failed to curl the remote host %s from container %s on node %s: %v", exFWPermitTcpWwwDest, ovnContainer, serverNodeInfo.name, err)
+		err = wait.PollImmediate(2, pollingDuration, func() (bool, error) {
+			_, err = framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpWwwDest, "443")
+			if err != nil {
+				return false, nil
+			}
+			return true, nil
+		})
+		if err != wait.ErrWaitTimeout {
+			framework.Failf("Succeeded in connecting the implicitly denied remote host %s from container %s on node %s: %v", exFWPermitTcpWwwDest, ovnContainer, serverNodeInfo.name, err)
 		}
 	})
+
 	ginkgo.It("Should validate the egress firewall policy functionality against cluster nodes by using node selector", func() {
 		srcPodName := "e2e-egress-fw-src-pod"
 		frameworkNsFlag := fmt.Sprintf("--namespace=%s", f.Namespace.Name)
@@ -1414,6 +1453,7 @@ spec:
 		}
 
 	})
+
 	ginkgo.It("Should validate the egress firewall DNS does not deadlock when adding many dnsNames", func() {
 		frameworkNsFlag := fmt.Sprintf("--namespace=%s", f.Namespace.Name)
 		var egressFirewallConfig = fmt.Sprintf(`kind: EgressFirewall
