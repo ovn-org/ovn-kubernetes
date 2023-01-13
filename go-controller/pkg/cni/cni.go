@@ -11,6 +11,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	current "github.com/containernetworking/cni/pkg/types/100"
+	"github.com/k8snetworkplumbingwg/govdpa/pkg/kvdpa"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -95,6 +96,13 @@ func (pr *PodRequest) checkOrUpdatePodUID(podUID string) error {
 
 func (pr *PodRequest) getVFNetdevName() (string, error) {
 	// Get the vf device Name
+
+	// If a vDPA device exists, it takes preference over the vendor device, steering-wize
+	vdpaDevice, err := util.GetVdpaOps().GetVdpaDeviceByPci(pr.CNIConf.DeviceID)
+	if err == nil && vdpaDevice.Driver() == kvdpa.VirtioVdpaDriver {
+		return vdpaDevice.VirtioNet().NetDev(), nil
+	}
+
 	vfNetdevices, err := util.GetSriovnetOps().GetNetDevicesFromPci(pr.CNIConf.DeviceID)
 	if err != nil {
 		return "", err
