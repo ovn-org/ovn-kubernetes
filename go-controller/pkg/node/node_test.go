@@ -43,8 +43,6 @@ var _ = Describe("Node", func() {
 			mtuTooSmallForIPv4AndIPv6      = configDefaultMTU + types.GeneveHeaderLengthIPv4 - 1
 			mtuOkForIPv4ButTooSmallForIPv6 = configDefaultMTU + types.GeneveHeaderLengthIPv4
 			mtuOkForIPv4AndIPv6            = configDefaultMTU + types.GeneveHeaderLengthIPv6
-			mtuTooSmallForSingleNode       = configDefaultMTU - 1
-			mtuOkForSingleNode             = configDefaultMTU
 		)
 
 		BeforeEach(func() {
@@ -162,38 +160,6 @@ var _ = Describe("Node", func() {
 				It("should untaint the node", func() {
 					netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
 						MTU:  mtuOkForIPv4AndIPv6,
-						Name: linkName,
-					})
-
-					err := ovnNode.validateVTEPInterfaceMTU()
-					Expect(err).NotTo(HaveOccurred())
-				})
-			})
-		})
-
-		Context("with a single-node cluster", func() {
-			BeforeEach(func() {
-				config.Gateway.SingleNode = true
-			})
-
-			Context("with the node having a too small MTU", func() {
-
-				It("should taint the node", func() {
-					netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
-						MTU:  mtuTooSmallForSingleNode,
-						Name: linkName,
-					})
-
-					err := ovnNode.validateVTEPInterfaceMTU()
-					Expect(err).To(HaveOccurred())
-				})
-			})
-
-			Context("with the node having a big enough MTU", func() {
-
-				It("should untaint the node", func() {
-					netlinkLinkMock.On("Attrs").Return(&netlink.LinkAttrs{
-						MTU:  mtuOkForSingleNode,
 						Name: linkName,
 					})
 

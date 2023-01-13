@@ -39,7 +39,7 @@ type Handler struct {
 	// priority is used to track the handler's priority of being invoked.
 	// example: a handler with priority 0 will process the received event first
 	// before a handler with priority 1.
-	priority int
+	priority uint32
 }
 
 func (h *Handler) OnAdd(obj interface{}) {
@@ -88,7 +88,7 @@ type informer struct {
 	// before a handler with priority 1, 0 being the higest priority.
 	// NOTE: we can have multiple handlers with the same priority hence the value
 	// is a map of handlers keyed by its unique id.
-	handlers map[int]map[uint64]*Handler
+	handlers map[uint32]map[uint64]*Handler
 	events   []chan *event
 	lister   listerInterface
 	// initialAddFunc will be called to deliver the initial list of objects
@@ -103,19 +103,8 @@ func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
 	i.RLock()
 	defer i.RUnlock()
 
-	for priority := 0; priority <= minHandlerPriority; priority++ { // loop over priority higest to lowest
-		for _, handler := range i.handlers[priority] {
-			f(handler)
-		}
-	}
-}
-
-func (i *informer) forEachQueuedHandlerReversed(f func(h *Handler)) {
-	i.RLock()
-	defer i.RUnlock()
-
-	for priority := minHandlerPriority; priority >= 0; priority-- { // loop over priority lowest to highest
-		for _, handler := range i.handlers[priority] {
+	for priority := 0; uint32(priority) <= minHandlerPriority; priority++ { // loop over priority higest to lowest
+		for _, handler := range i.handlers[uint32(priority)] {
 			f(handler)
 		}
 	}
@@ -131,31 +120,14 @@ func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
 		return
 	}
 
-	for priority := 0; priority <= minHandlerPriority; priority++ { // loop over priority higest to lowest
-		for _, handler := range i.handlers[priority] {
+	for priority := 0; uint32(priority) <= minHandlerPriority; priority++ { // loop over priority higest to lowest
+		for _, handler := range i.handlers[uint32(priority)] {
 			f(handler)
 		}
 	}
 }
 
-func (i *informer) forEachHandlerReversed(obj interface{}, f func(h *Handler)) {
-	i.RLock()
-	defer i.RUnlock()
-
-	objType := reflect.TypeOf(obj)
-	if objType != i.oType {
-		klog.Errorf("Object type %v did not match expected %v", objType, i.oType)
-		return
-	}
-
-	for priority := minHandlerPriority; priority >= 0; priority-- { // loop over priority lowest to highest
-		for _, handler := range i.handlers[priority] {
-			f(handler)
-		}
-	}
-}
-
-func (i *informer) addHandler(id uint64, priority int, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
+func (i *informer) addHandler(id uint64, priority uint32, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
 	handler := &Handler{
 		cache.FilteringResourceEventHandler{
 			FilterFunc: filterFunc,
@@ -362,7 +334,7 @@ func (i *informer) newFederatedQueuedHandler(numEventQueues uint32) cache.Resour
 			i.enqueueEvent(nil, realObj, entry.queue, func(e *event) {
 				metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 				start := time.Now()
-				i.forEachQueuedHandlerReversed(func(h *Handler) {
+				i.forEachQueuedHandler(func(h *Handler) {
 					h.OnDelete(e.obj)
 				})
 				metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
@@ -408,7 +380,7 @@ func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
 			}
 			metrics.MetricResourceUpdateCount.WithLabelValues(name, "delete").Inc()
 			start := time.Now()
-			i.forEachHandlerReversed(realObj, func(h *Handler) {
+			i.forEachHandler(realObj, func(h *Handler) {
 				h.OnDelete(realObj)
 			})
 			metrics.MetricResourceDeleteLatency.Observe(time.Since(start).Seconds())
@@ -471,7 +443,7 @@ func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInforme
 		oType:    oType,
 		inf:      sharedInformer,
 		lister:   lister,
-		handlers: make(map[int]map[uint64]*Handler),
+		handlers: make(map[uint32]map[uint64]*Handler),
 		queueMap: make(map[ktypes.NamespacedName]*queueMapEntry),
 	}, nil
 }

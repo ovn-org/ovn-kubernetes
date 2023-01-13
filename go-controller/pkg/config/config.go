@@ -380,8 +380,6 @@ type GatewayConfig struct {
 	// RouterSubnet is the subnet to be used for the GR external port. auto-detected if not given.
 	// Must match the the kube node IP address. Currently valid for DPU only.
 	RouterSubnet string `gcfg:"router-subnet"`
-	// SingeNode indicates the cluster has only one node
-	SingleNode bool `gcfg:"single-node"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -1171,12 +1169,6 @@ var OVNGatewayFlags = []cli.Flag{
 			"Currently valid for DPUs only",
 		Destination: &cliConfig.Gateway.RouterSubnet,
 		Value:       Gateway.RouterSubnet,
-	},
-	&cli.BoolFlag{
-		Name: "single-node",
-		Usage: "Enable single node optimizations. " +
-			"Single node indicates a one node cluster and allows to simplify ovn-kubernetes gateway logic",
-		Destination: &cliConfig.Gateway.SingleNode,
 	},
 	// Deprecated CLI options
 	&cli.BoolFlag{

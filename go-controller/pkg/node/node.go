@@ -852,16 +852,12 @@ func (n *OvnNode) validateVTEPInterfaceMTU() error {
 
 	// calc required MTU
 	var requiredMTU int
-	if config.Gateway.SingleNode {
-		requiredMTU = config.Default.MTU
+	if config.IPv4Mode && !config.IPv6Mode {
+		// we run in single-stack IPv4 only
+		requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv4
 	} else {
-		if config.IPv4Mode && !config.IPv6Mode {
-			// we run in single-stack IPv4 only
-			requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv4
-		} else {
-			// we run in single-stack IPv6 or dual-stack mode
-			requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv6
-		}
+		// we run in single-stack IPv6 or dual-stack mode
+		requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv6
 	}
 
 	if mtu < requiredMTU {

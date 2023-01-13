@@ -399,14 +399,14 @@ func isNeighborEntryStable(clientContainer, targetHost string, iterations int) b
 // curlInContainer leverages a container running the netexec command to send a request to a target running
 // netexec on the given target host / protocol / port.
 // Returns a pair of either result, nil or "", error in case of an error.
-func curlInContainer(clientContainer, targetHost string, targetPort int32, endPoint string, maxTime int) (string, error) {
+func curlInContainer(clientContainer, protocol, targetHost string, targetPort int32, endPoint string, maxTime int) (string, error) {
 	cmd := []string{containerRuntime, "exec", clientContainer}
 	if utilnet.IsIPv6String(targetHost) {
 		targetHost = fmt.Sprintf("[%s]", targetHost)
 	}
 
 	// we leverage the dial command from netexec, that is already supporting multiple protocols
-	curlCommand := strings.Split(fmt.Sprintf("curl --max-time %d http://%s:%d/%s",
+	curlCommand := strings.Split(fmt.Sprintf("curl -g -q -s --max-time %d http://%s:%d/%s",
 		maxTime,
 		targetHost,
 		targetPort,
@@ -765,8 +765,8 @@ func assertACLLogs(targetNodeName string, policyNameRegex string, expectedACLVer
 	return false, nil
 }
 
-// patchServiceStringValue patches service serviceName in namespace serviceNamespace with provided string value.
-func patchServiceStringValue(c kubernetes.Interface, serviceName, serviceNamespace, jsonPath, value string) error {
+// patchService patches service serviceName in namespace serviceNamespace.
+func patchService(c kubernetes.Interface, serviceName, serviceNamespace, jsonPath, value string) error {
 	patch := []struct {
 		Op    string `json:"op"`
 		Path  string `json:"path"`
@@ -778,27 +778,6 @@ func patchServiceStringValue(c kubernetes.Interface, serviceName, serviceNamespa
 	}}
 	patchBytes, _ := json.Marshal(patch)
 
-	return patchService(c, serviceName, serviceNamespace, jsonPath, patchBytes)
-}
-
-// patchServiceBoolValue patches service serviceName in namespace serviceNamespace with provided bool value.
-func patchServiceBoolValue(c kubernetes.Interface, serviceName, serviceNamespace, jsonPath string, value bool) error {
-	patch := []struct {
-		Op    string `json:"op"`
-		Path  string `json:"path"`
-		Value bool   `json:"value"`
-	}{{
-		Op:    "replace",
-		Path:  jsonPath,
-		Value: value,
-	}}
-	patchBytes, _ := json.Marshal(patch)
-
-	return patchService(c, serviceName, serviceNamespace, jsonPath, patchBytes)
-}
-
-// patchService patches service serviceName in namespace serviceNamespace.
-func patchService(c kubernetes.Interface, serviceName, serviceNamespace, jsonPath string, patchBytes []byte) error {
 	_, err := c.CoreV1().Services(serviceNamespace).Patch(
 		context.TODO(),
 		serviceName,
@@ -810,24 +789,6 @@ func patchService(c kubernetes.Interface, serviceName, serviceNamespace, jsonPat
 	}
 
 	return nil
-}
-
-// pokeIPTableRules returns the number of iptable rules that match the provided pattern
-func pokeIPTableRules(clientContainer, pattern string) int {
-	cmd := []string{containerRuntime, "exec", clientContainer}
-	ipTCommand := strings.Split("iptables-save -c", " ")
-
-	cmd = append(cmd, ipTCommand...)
-	iptRules, err := runCommand(cmd...)
-	framework.ExpectNoError(err, "failed to get iptable rules from node %s", clientContainer)
-	numOfMatchRules := 0
-	for _, iptRule := range strings.Split(iptRules, "\n") {
-		match := strings.Contains(iptRule, pattern)
-		if match {
-			numOfMatchRules++
-		}
-	}
-	return numOfMatchRules
 }
 
 // isDualStackCluster returns 'true' if at least one of the nodes has more than one node subnet.

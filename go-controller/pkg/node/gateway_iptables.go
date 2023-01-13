@@ -274,51 +274,6 @@ func getNodePortETPLocalIPTRules(svcPort kapi.ServicePort, targetIP string) []ip
 	}
 }
 
-func computeProbability(n, i int) string {
-	return fmt.Sprintf("%0.10f", 1.0/float64(n-i+1))
-}
-
-func generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort kapi.ServicePort, externalIP string, service *kapi.Service, localEndpoints []string) []iptRule {
-	var iptRules []iptRule
-	if len(localEndpoints) == 0 {
-		// either its smart nic mode; etp&itp not implemented, OR
-		// fetching endpointSlices error-ed out prior to reaching here so nothing to do
-		return iptRules
-	}
-	numLocalEndpoints := len(localEndpoints)
-	for i, ip := range localEndpoints {
-		iptRules = append([]iptRule{
-			{
-				table: "nat",
-				chain: iptableETPChain,
-				args: []string{
-					"-p", string(svcPort.Protocol),
-					"-d", externalIP,
-					"--dport", fmt.Sprintf("%v", svcPort.Port),
-					"-j", "DNAT",
-					"--to-destination", util.JoinHostPortInt32(ip, int32(svcPort.TargetPort.IntValue())),
-					"-m", "statistic",
-					"--mode", "random",
-					"--probability", computeProbability(numLocalEndpoints, i+1),
-				},
-				protocol: getIPTablesProtocol(externalIP),
-			},
-			{
-				table: "nat",
-				chain: iptableMgmPortChain,
-				args: []string{
-					"-p", string(svcPort.Protocol),
-					"-d", ip,
-					"--dport", fmt.Sprintf("%v", int32(svcPort.TargetPort.IntValue())),
-					"-j", "RETURN",
-				},
-				protocol: getIPTablesProtocol(externalIP),
-			},
-		}, iptRules...)
-	}
-	return iptRules
-}
-
 // getExternalIPTRules returns the IPTable DNAT rules for a service of type LB or ExternalIP
 // `svcPort` corresponds to port details for this service as specified in the service object
 // `externalIP` can either be the externalIP or LB.status.ingressIP
@@ -494,7 +449,7 @@ func recreateIPTRules(table, chain string, keepIPTRules []iptRule) error {
 // case3: if svcHasLocalHostNetEndPnt and svcTypeIsITPLocal, rule that redirects clusterIP traffic to host targetPort is added.
 //
 //	if !svcHasLocalHostNetEndPnt and svcTypeIsITPLocal, rule that marks clusterIP traffic to steer it to ovn-k8s-mp0 is added.
-func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLocalHostNetEndPnt bool) []iptRule {
+func getGatewayIPTRules(service *kapi.Service, svcHasLocalHostNetEndPnt bool) []iptRule {
 	rules := make([]iptRule, 0)
 	clusterIPs := util.GetClusterIPs(service)
 	svcTypeIsETPLocal := util.ServiceExternalTrafficPolicyLocal(service)
@@ -537,11 +492,7 @@ func getGatewayIPTRules(service *kapi.Service, localEndpoints []string, svcHasLo
 					// case1 (see function description for details)
 					// DNAT traffic to masqueradeIP:nodePort instead of clusterIP:Port. We are leveraging the existing rules for NODEPORT
 					// service so no need to add skip SNAT rule to OVN-KUBE-SNAT-MGMTPORT since the corresponding nodePort svc would have one.
-					if !util.ServiceTypeHasNodePort(service) {
-						rules = append(rules, generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort, externalIP, service, localEndpoints)...)
-					} else {
-						rules = append(rules, getExternalIPTRules(svcPort, externalIP, "", svcHasLocalHostNetEndPnt, svcTypeIsETPLocal)...)
-					}
+					rules = append(rules, getExternalIPTRules(svcPort, externalIP, "", svcHasLocalHostNetEndPnt, svcTypeIsETPLocal)...)
 				}
 				// case2 (see function description for details)
 				rules = append(rules, getExternalIPTRules(svcPort, externalIP, clusterIP, svcHasLocalHostNetEndPnt, false)...)

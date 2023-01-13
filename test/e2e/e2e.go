@@ -1541,7 +1541,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			// Then, downgrade back to SingleStack and test endpoints.
 			for _, ipFamilyPolicy := range []string{"PreferDualStack", "SingleStack"} {
 				ginkgo.By(fmt.Sprintf("Changing the nodeport service to %s", ipFamilyPolicy))
-				err = patchServiceStringValue(f.ClientSet, np.Name, np.Namespace, "/spec/ipFamilyPolicy", ipFamilyPolicy)
+				err = patchService(f.ClientSet, np.Name, np.Namespace, "/spec/ipFamilyPolicy", ipFamilyPolicy)
 				framework.ExpectNoError(err)
 
 				// It is expected that endpoints take a bit of time to come up after conversion. We remove all iptables rules and all breth0 flows.

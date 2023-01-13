@@ -379,7 +379,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	Context("when a processExisting is given", func() {
-		testExisting := func(objType reflect.Type, namespace string, sel labels.Selector, priority int) {
+		testExisting := func(objType reflect.Type, namespace string, sel labels.Selector, priority uint32) {
 			if objType == EndpointSliceType {
 				wf, err = NewNodeWatchFactory(ovnClientset, nodeName)
 			} else {
@@ -401,7 +401,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			wf.removeHandler(objType, h)
 		}
 
-		testExistingFilteredHandler := func(objType reflect.Type, realObj reflect.Type, namespace string, sel labels.Selector, priority int) {
+		testExistingFilteredHandler := func(objType reflect.Type, realObj reflect.Type, namespace string, sel labels.Selector, priority uint32) {
 			if objType == EndpointSliceType {
 				wf, err = NewNodeWatchFactory(ovnClientset, nodeName)
 			} else {
@@ -1171,14 +1171,12 @@ var _ = Describe("Watch Factory Operations", func() {
 			namespace *v1.Namespace
 			added     int
 			updated   int
-			deleted   int
 		}
 		testNamespaces := make(map[string]*opTest)
 
 		for i := 0; i < 998; i++ {
 			name := fmt.Sprintf("mynamespace-%d", i)
 			namespace := newNamespace(name)
-			namespace.Status.Phase = ""
 			testNamespaces[name] = &opTest{namespace: namespace}
 			// Add all namespaces to the initial list
 			namespaces = append(namespaces, namespace)
@@ -1199,7 +1197,6 @@ var _ = Describe("Watch Factory Operations", func() {
 				defer ot.mu.Unlock()
 				Expect(ot.added).To(Equal(0))
 				ot.added++
-				Expect(namespace.Status.Phase).To(BeEmpty())
 			},
 			UpdateFunc: func(old, new interface{}) {
 				defer GinkgoRecover()
@@ -1212,22 +1209,9 @@ var _ = Describe("Watch Factory Operations", func() {
 				Expect(ot.added).To(Equal(4), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
 				Expect(ot.updated).To(Equal(0))
 				ot.updated++
-				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceActive))
-			},
-			DeleteFunc: func(obj interface{}) {
-				defer GinkgoRecover()
-				newNamespace := obj.(*v1.Namespace)
-				ot, ok := testNamespaces[newNamespace.Name]
-				Expect(ok).To(BeTrue())
-				// Verify that deletes were processed after the updates and adds
-				ot.mu.Lock()
-				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(4), "delete for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
-				Expect(ot.updated).To(Equal(4), "delete for EIP namespace %s processed before update was processed in all handlers!", newNamespace.Name)
-				Expect(ot.deleted).To(Equal(8))
-				ot.deleted = ot.deleted / 2
 				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceTerminating))
 			},
+			DeleteFunc: func(obj interface{}) {},
 		})
 
 		eipnsh, c2 := addPriorityHandler(wf, NamespaceType, EgressIPNamespaceType, cache.ResourceEventHandlerFuncs{
@@ -1240,7 +1224,6 @@ var _ = Describe("Watch Factory Operations", func() {
 				defer ot.mu.Unlock()
 				Expect(ot.added).To(Equal(1), "add for EIP namespace %s processed before initial namespace add!", namespace.Name)
 				ot.added = ot.added * 10
-				Expect(namespace.Status.Phase).To(BeEmpty())
 			},
 			UpdateFunc: func(old, new interface{}) {
 				defer GinkgoRecover()
@@ -1253,22 +1236,9 @@ var _ = Describe("Watch Factory Operations", func() {
 				Expect(ot.added).To(Equal(4), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
 				Expect(ot.updated).To(Equal(1), "update for EIP namespace %s processed before initial namespace update!", newNamespace.Name)
 				ot.updated = ot.updated * 10
-				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceActive))
-			},
-			DeleteFunc: func(obj interface{}) {
-				defer GinkgoRecover()
-				newNamespace := obj.(*v1.Namespace)
-				ot, ok := testNamespaces[newNamespace.Name]
-				Expect(ok).To(BeTrue())
-				// Verify that deletes were processed after the updates and adds
-				ot.mu.Lock()
-				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(4), "delete for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
-				Expect(ot.updated).To(Equal(4), "delete for EIP namespace %s processed before update was processed in all handlers!", newNamespace.Name)
-				Expect(ot.deleted).To(Equal(10))
-				ot.deleted = ot.deleted - 2
 				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceTerminating))
 			},
+			DeleteFunc: func(obj interface{}) {},
 		})
 		peernsh, c3 := addPriorityHandler(wf, NamespaceType, PeerNamespaceSelectorType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
@@ -1280,7 +1250,6 @@ var _ = Describe("Watch Factory Operations", func() {
 				defer ot.mu.Unlock()
 				Expect(ot.added).To(Equal(10), "add for peer namespace %s processed before EIP namespace add!", namespace.Name)
 				ot.added = ot.added - 2
-				Expect(namespace.Status.Phase).To(BeEmpty())
 			},
 			UpdateFunc: func(old, new interface{}) {
 				defer GinkgoRecover()
@@ -1293,22 +1262,9 @@ var _ = Describe("Watch Factory Operations", func() {
 				Expect(ot.added).To(Equal(4), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
 				Expect(ot.updated).To(Equal(10), "update for peer namespace %s processed before EIP namespace update!", newNamespace.Name)
 				ot.updated = ot.updated - 2
-				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceActive))
-			},
-			DeleteFunc: func(obj interface{}) {
-				defer GinkgoRecover()
-				newNamespace := obj.(*v1.Namespace)
-				ot, ok := testNamespaces[newNamespace.Name]
-				Expect(ok).To(BeTrue())
-				// Verify that deletes were processed after the updates and adds
-				ot.mu.Lock()
-				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(4), "delete for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
-				Expect(ot.updated).To(Equal(4), "delete for EIP namespace %s processed before update was processed in all handlers!", newNamespace.Name)
-				Expect(ot.deleted).To(Equal(1))
-				ot.deleted = ot.deleted * 10
 				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceTerminating))
 			},
+			DeleteFunc: func(obj interface{}) {},
 		})
 		peerpodnsh, c4 := addPriorityHandler(wf, NamespaceType, PeerNamespaceAndPodSelectorType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
@@ -1320,7 +1276,6 @@ var _ = Describe("Watch Factory Operations", func() {
 				defer ot.mu.Unlock()
 				Expect(ot.added).To(Equal(8), "add for peerPod namespace %s processed before peer namespace add!", namespace.Name)
 				ot.added = ot.added / 2
-				Expect(namespace.Status.Phase).To(BeEmpty())
 			},
 			UpdateFunc: func(old, new interface{}) {
 				defer GinkgoRecover()
@@ -1333,28 +1288,15 @@ var _ = Describe("Watch Factory Operations", func() {
 				Expect(ot.added).To(Equal(4), "update for peerPod namespace %s processed before peerPod namespace add!", newNamespace.Name)
 				Expect(ot.updated).To(Equal(8), "update for peerPod namespace %s processed before peer namespace update!", newNamespace.Name)
 				ot.updated = ot.updated / 2
-				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceActive))
-			},
-			DeleteFunc: func(obj interface{}) {
-				defer GinkgoRecover()
-				newNamespace := obj.(*v1.Namespace)
-				ot, ok := testNamespaces[newNamespace.Name]
-				Expect(ok).To(BeTrue())
-				// Verify that deletes were processed after the updates and adds
-				ot.mu.Lock()
-				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(4), "delete for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
-				Expect(ot.updated).To(Equal(4), "delete for EIP namespace %s processed before update was processed in all handlers!", newNamespace.Name)
-				Expect(ot.deleted).To(Equal(0))
-				ot.deleted++
 				Expect(newNamespace.Status.Phase).To(Equal(v1.NamespaceTerminating))
 			},
+			DeleteFunc: func(obj interface{}) {},
 		})
 		done := make(chan bool)
 		go func() {
 			// Send an update event for each namespace
 			for _, n := range namespaces {
-				n.Status.Phase = v1.NamespaceActive
+				n.Status.Phase = v1.NamespaceTerminating
 				namespaceWatch.Modify(n)
 			}
 			done <- true
@@ -1382,28 +1324,6 @@ var _ = Describe("Watch Factory Operations", func() {
 			ot.mu.Lock()
 			// ((((0 + 1) * 10) - 2) / 2) = 4
 			Expect(ot.updated).To(Equal(4), "missing update for namespace %s", ot.namespace.Name)
-			ot.mu.Unlock()
-		}
-
-		go func() {
-			// Send a delete event for each namespace
-			for _, n := range namespaces {
-				n.Status.Phase = v1.NamespaceTerminating
-				namespaceWatch.Delete(n)
-			}
-			done <- true
-		}()
-		<-done
-		// Deletes are async and may take a bit longer to finish
-		Eventually(c1.getDeleted, 10).Should(Equal(len(testNamespaces)))
-		Eventually(c2.getDeleted, 10).Should(Equal(len(testNamespaces)))
-		Eventually(c3.getDeleted, 10).Should(Equal(len(testNamespaces)))
-		Eventually(c4.getDeleted, 10).Should(Equal(len(testNamespaces)))
-
-		for _, ot := range testNamespaces {
-			ot.mu.Lock()
-			// ((((0 + 1) * 10) - 2) / 2) = 4
-			Expect(ot.deleted).To(Equal(4), "missing delete for namespace %s", ot.namespace.Name)
 			ot.mu.Unlock()
 		}
 

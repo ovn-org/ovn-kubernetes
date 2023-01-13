@@ -59,13 +59,6 @@ if [ "$OVN_DISABLE_SNAT_MULTIPLE_GWS" == false ]; then
   SKIPPED_TESTS+="e2e multiple external gateway stale conntrack entry deletion validation"
 fi
 
-if [ "$OVN_GATEWAY_MODE" == "shared" ]; then
-  if [ "$SKIPPED_TESTS" != "" ]; then
-    SKIPPED_TESTS+="|"
-  fi
-  SKIPPED_TESTS+="Should ensure load balancer service"
-fi
-
 # skipping the egress ip legacy health check test because it requires two
 # sequenced rollouts of both ovnkube-node and ovnkube-master that take a lot of
 # time.
