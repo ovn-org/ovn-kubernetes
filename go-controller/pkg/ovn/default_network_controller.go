@@ -8,6 +8,7 @@ import (
 	"time"
 
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -490,6 +491,15 @@ func (oc *DefaultNetworkController) Run(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (oc *DefaultNetworkController) GetLogicalPortName(pod *kapi.Pod, nadName string) string {
+	return util.GetLogicalPortName(pod.Namespace, pod.Name)
+}
+
+func (bnc *DefaultNetworkController) AddConfigDurationRecord(kind, namespace, name string) (
+	[]ovsdb.Operation, func(), time.Time, error) {
+	return metrics.GetConfigDurationRecorder().AddOVN(bnc.nbClient, kind, namespace, name)
 }
 
 type defaultNetworkControllerEventHandler struct {

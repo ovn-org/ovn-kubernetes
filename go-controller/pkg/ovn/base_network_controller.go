@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -62,11 +63,23 @@ type CommonNetworkControllerInfo struct {
 	multicastSupport bool
 }
 
+// NetworkControllerSpecificInterface is an interface that every type embedding BaseNetworkController must
+// implement. It defines controller-specific functions that are not shared, but are called from the
+// BaseNetworkController methods.
+type NetworkControllerSpecificInterface interface {
+	GetLogicalPortName(pod *kapi.Pod, nadName string) string
+	AddConfigDurationRecord(kind, namespace, name string) ([]ovsdb.Operation, func(), time.Time, error)
+	AddRoutesGatewayIP(pod *kapi.Pod, network *nadapi.NetworkSelectionElement,
+		podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet) error
+	GetExpectedSwitchName(pod *kapi.Pod) (string, error)
+}
+
 // BaseNetworkController structure holds per-network fields and network specific configuration
 // Note that all the methods with NetworkControllerInfo pointer receivers will be called
 // by more than one type of network controllers.
 type BaseNetworkController struct {
 	CommonNetworkControllerInfo
+	NetworkControllerSpecificInterface
 	// per controller NAD/netconf name information
 	util.NetInfo
 	util.NetConfInfo
@@ -101,12 +114,6 @@ type BaseNetworkController struct {
 	stopChan chan struct{}
 }
 
-// BaseSecondaryNetworkController structure holds per-network fields and network specific
-// configuration for secondary network controller
-type BaseSecondaryNetworkController struct {
-	BaseNetworkController
-}
-
 // NewCommonNetworkControllerInfo creates CommonNetworkControllerInfo shared by controllers
 func NewCommonNetworkControllerInfo(client clientset.Interface, kube kube.Interface, wf *factory.WatchFactory,
 	recorder record.EventRecorder, nbClient libovsdbclient.Client, sbClient libovsdbclient.Client,
@@ -126,23 +133,6 @@ func NewCommonNetworkControllerInfo(client clientset.Interface, kube kube.Interf
 
 func (bnc *BaseNetworkController) GetNetworkScopedName(name string) string {
 	return fmt.Sprintf("%s%s", bnc.GetPrefix(), name)
-}
-
-func (bnc *BaseNetworkController) GetLogicalPortName(pod *kapi.Pod, nadName string) string {
-	if !bnc.IsSecondary() {
-		return util.GetLogicalPortName(pod.Namespace, pod.Name)
-	} else {
-		return util.GetSecondaryNetworkLogicalPortName(pod.Namespace, pod.Name, nadName)
-	}
-}
-
-func (bnc *BaseNetworkController) AddConfigDurationRecord(kind, namespace, name string) (
-	[]ovsdb.Operation, func(), time.Time, error) {
-	if !bnc.IsSecondary() {
-		return metrics.GetConfigDurationRecorder().AddOVN(bnc.nbClient, kind, namespace, name)
-	}
-	// TBD: no op for secondary network for now
-	return []ovsdb.Operation{}, func() {}, time.Time{}, nil
 }
 
 // createOvnClusterRouter creates the central router for the network
