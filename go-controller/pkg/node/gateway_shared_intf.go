@@ -1230,6 +1230,13 @@ func flowsForDefaultBridge(bridge *bridgeConfiguration, extraIPs []net.IP) ([]st
 				"actions=ct(zone=%d,nat,table=3)",
 				defaultOpenFlowCookie, ofPortPatch, protoPrefix, protoPrefix, svcCIDR,
 				protoPrefix, masqIP, HostMasqCTZone))
+
+		// table 0, Reply traffic coming from OVN to outside, drop it if the DNAT wasn't done either
+		// at the GR load balancer or switch load balancer. It means the correct port wasn't provided.
+		// nodeCIDR->serviceCIDR traffic flow is internal and it shouldn't be carried to outside the cluster
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=105, in_port=%s, %s, %s_dst=%s,"+
+				"actions=drop", defaultOpenFlowCookie, ofPortPatch, protoPrefix, protoPrefix, svcCIDR))
 	}
 
 	actions := fmt.Sprintf("output:%s", ofPortPatch)
@@ -1589,12 +1596,14 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		gw.nodeIPManager = newAddressManager(nodeName, kube, cfg, watchFactory)
 		nodeIPs := gw.nodeIPManager.ListAddresses()
 
-		if err := setNodeMasqueradeIPOnExtBridge(gwBridge.bridgeName); err != nil {
-			return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwBridge.bridgeName, err)
-		}
+		if config.OvnKubeNode.Mode == types.NodeModeFull {
+			if err := setNodeMasqueradeIPOnExtBridge(gwBridge.bridgeName); err != nil {
+				return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", gwBridge.bridgeName, err)
+			}
 
-		if err := addMasqueradeRoute(gwBridge.bridgeName, nodeName, watchFactory); err != nil {
-			return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
+			if err := addMasqueradeRoute(gwBridge.bridgeName, nodeName, gwIPs, watchFactory); err != nil {
+				return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
+			}
 		}
 
 		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, nodeIPs)
@@ -1757,52 +1766,89 @@ func svcToCookie(namespace string, name string, token string, port int32) (strin
 	return fmt.Sprintf("0x%x", h.Sum64()), nil
 }
 
-func addMasqueradeRoute(netIfaceName, nodeName string, watchFactory factory.NodeWatchFactory) error {
+func addMasqueradeRoute(netIfaceName, nodeName string, ifAddrs []*net.IPNet, watchFactory factory.NodeWatchFactory) error {
+	var ipv4, ipv6 net.IP
+	findIPs := func(ips []net.IP) error {
+		var err error
+		if config.IPv4Mode && ipv4 == nil {
+			ipv4, err = util.MatchFirstIPFamily(false, ips)
+			if err != nil {
+				return fmt.Errorf("missing IP among %+v: %v", ips, err)
+			}
+		}
+		if config.IPv6Mode && ipv6 == nil {
+			ipv6, err = util.MatchFirstIPFamily(true, ips)
+			if err != nil {
+				return fmt.Errorf("missing IP among %+v: %v", ips, err)
+			}
+		}
+		return nil
+	}
+
+	// Try first with the node status IPs and fallback to the interface IPs. The
+	// fallback is a workaround for instances where the node status might not
+	// have the minimum set of IPs we need (for example, when ovnkube is
+	// restarted after enabling an IP family without actually restarting kubelet
+	// with a new configuration including an IP address for that family). Node
+	// status IPs are preferred though because a user might add arbitrary IP
+	// addresses to the interface that we don't really want to use and might
+	// cause problems.
+
+	var nodeIPs []net.IP
 	node, err := watchFactory.GetNode(nodeName)
 	if err != nil {
 		return err
 	}
-	netIfaceLink, err := util.LinkSetUp(netIfaceName)
-	if err != nil {
-		return fmt.Errorf("unable to find shared gw bridge interface: %s", netIfaceName)
-	}
-	var v4Found, v6Found bool
 	for _, nodeAddr := range node.Status.Addresses {
 		if nodeAddr.Type != kapi.NodeInternalIP {
 			continue
 		}
-		var masqIPNet *net.IPNet
-		nodeIP := net.ParseIP(nodeAddr.Address)
-		if utilnet.IsIPv6(nodeIP) && !v6Found {
-			_, masqIPNet, _ = net.ParseCIDR(fmt.Sprintf("%s/128", types.V6OVNMasqueradeIP))
-			v6Found = true
-		} else if !v4Found {
-			_, masqIPNet, _ = net.ParseCIDR(fmt.Sprintf("%s/32", types.V4OVNMasqueradeIP))
-			v4Found = true
+		nodeIP := utilnet.ParseIPSloppy(nodeAddr.Address)
+		nodeIPs = append(nodeIPs, nodeIP)
+	}
+
+	err = findIPs(nodeIPs)
+	if err != nil {
+		klog.Warningf("Unable to add OVN masquerade route to host using source node status IPs: %v", err)
+		// fallback to the interface IPs
+		var ifIPs []net.IP
+		for _, ifAddr := range ifAddrs {
+			ifIPs = append(ifIPs, ifAddr.IP)
 		}
-		mtu := config.Default.MTU
-		if config.Default.RoutableMTU != 0 {
-			mtu = config.Default.RoutableMTU
-		}
-		if masqIPNet != nil {
-			klog.Infof("Setting OVN Masquerade route with source: %s", nodeIP)
-			err = util.LinkRoutesApply(netIfaceLink, nil, []*net.IPNet{masqIPNet},
-				mtu, nodeIP)
-			if err != nil {
-				return fmt.Errorf("unable to add OVN masquerade route to host, error: %v", err)
-			}
+		err := findIPs(ifIPs)
+		if err != nil {
+			return fmt.Errorf("unable to add OVN masquerade route to host using interface IPs: %v", err)
 		}
 	}
 
-	if config.IPv4Mode && !v4Found {
-		return fmt.Errorf("could not find node IPv4 address to configure OVN masquerade route, addresses: %+v",
-			node.Status.Addresses)
+	netIfaceLink, err := util.LinkSetUp(netIfaceName)
+	if err != nil {
+		return fmt.Errorf("unable to find shared gw bridge interface: %s", netIfaceName)
 	}
 
-	if config.IPv6Mode && !v6Found {
-		return fmt.Errorf("could not find node IPv6 address to configure OVN masquerade route, addresses: %+v",
-			node.Status.Addresses)
+	mtu := config.Default.MTU
+	if config.Default.RoutableMTU != 0 {
+		mtu = config.Default.RoutableMTU
 	}
+
+	if ipv4 != nil {
+		_, masqIPNet, _ := net.ParseCIDR(fmt.Sprintf("%s/32", types.V4OVNMasqueradeIP))
+		klog.Infof("Setting OVN Masquerade route with source: %s", ipv4)
+		err = util.LinkRoutesApply(netIfaceLink, nil, []*net.IPNet{masqIPNet}, mtu, ipv4)
+		if err != nil {
+			return fmt.Errorf("unable to add OVN masquerade route to host, error: %v", err)
+		}
+	}
+
+	if ipv6 != nil {
+		_, masqIPNet, _ := net.ParseCIDR(fmt.Sprintf("%s/128", types.V6OVNMasqueradeIP))
+		klog.Infof("Setting OVN Masquerade route with source: %s", ipv6)
+		err = util.LinkRoutesApply(netIfaceLink, nil, []*net.IPNet{masqIPNet}, mtu, ipv6)
+		if err != nil {
+			return fmt.Errorf("unable to add OVN masquerade route to host, error: %v", err)
+		}
+	}
+
 	return nil
 }
 

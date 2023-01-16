@@ -221,3 +221,96 @@ func TestDeleteNATsFromRouter(t *testing.T) {
 	}
 
 }
+
+func TestDeleteRoutersWithPredicateOps(t *testing.T) {
+	fakeRouter1 := nbdb.LogicalRouter{
+		Name:        "rtr1",
+		UUID:        buildNamedUUID(),
+		ExternalIDs: map[string]string{"key": "a"},
+	}
+
+	fakeRouter2 := nbdb.LogicalRouter{
+		Name:        "rtr2",
+		UUID:        buildNamedUUID(),
+		ExternalIDs: map[string]string{"key": "a"},
+	}
+
+	fakeRouter3 := nbdb.LogicalRouter{
+		Name:        "rtr3",
+		UUID:        buildNamedUUID(),
+		ExternalIDs: map[string]string{"key": "b"},
+	}
+
+	tests := []struct {
+		desc         string
+		expectErr    bool
+		initialNbdb  libovsdbtest.TestSetup
+		expectedNbdb libovsdbtest.TestSetup
+		p            logicalRouterPredicate
+	}{
+		{
+			desc:      "remove router of specified name",
+			expectErr: false,
+			initialNbdb: libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					fakeRouter1.DeepCopy(),
+					fakeRouter2.DeepCopy(),
+					fakeRouter3.DeepCopy(),
+				},
+			},
+			expectedNbdb: libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					fakeRouter1.DeepCopy(),
+					fakeRouter3.DeepCopy(),
+				},
+			},
+			p: func(item *nbdb.LogicalRouter) bool { return item.Name == "rtr2" },
+		},
+		{
+			desc:      "remove routers of specified external_id key",
+			expectErr: false,
+			initialNbdb: libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					fakeRouter1.DeepCopy(),
+					fakeRouter2.DeepCopy(),
+					fakeRouter3.DeepCopy(),
+				},
+			},
+			expectedNbdb: libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					fakeRouter3.DeepCopy(),
+				},
+			},
+			p: func(item *nbdb.LogicalRouter) bool { return item.ExternalIDs["key"] == "a" },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(tt.initialNbdb, nil)
+			if err != nil {
+				t.Fatalf("test: \"%s\" failed to set up test harness: %v", tt.desc, err)
+			}
+			t.Cleanup(cleanup.Cleanup)
+
+			ops, err := DeleteLogicalRoutersWithPredicateOps(nbClient, nil, tt.p)
+			if err != nil && !tt.expectErr {
+				t.Fatal(fmt.Errorf("DeleteLogicalRoutersWithPredicateOps() error = %v", err))
+			}
+
+			_, err = TransactAndCheck(nbClient, ops)
+			if err != nil && !tt.expectErr {
+				t.Fatal(fmt.Errorf("TransactAndCheck() error = %v", err))
+			}
+
+			matcher := libovsdbtest.HaveData(tt.expectedNbdb.NBData)
+			success, err := matcher.Match(nbClient)
+
+			if !success {
+				t.Fatal(fmt.Errorf("test: \"%s\" didn't match expected with actual, err: %v", tt.desc, matcher.FailureMessage(nbClient)))
+			}
+			if err != nil {
+				t.Fatal(fmt.Errorf("test: \"%s\" encountered error: %v", tt.desc, err))
+			}
+		})
+	}
+}

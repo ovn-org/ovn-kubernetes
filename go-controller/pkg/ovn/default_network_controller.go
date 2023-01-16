@@ -169,6 +169,8 @@ func newDefaultNetworkControllerCommon(cnci *CommonNetworkControllerInfo,
 	oc := &DefaultNetworkController{
 		BaseNetworkController: BaseNetworkController{
 			CommonNetworkControllerInfo: *cnci,
+			NetConfInfo:                 &util.DefaultNetConfInfo{},
+			NetInfo:                     &util.DefaultNetInfo{},
 			lsManager:                   lsm.NewLogicalSwitchManager(),
 			logicalPortCache:            newPortCache(defaultStopChan),
 			namespaces:                  make(map[string]*namespaceInfo),
@@ -924,7 +926,7 @@ func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj int
 		if cachedObj != nil {
 			portInfo = cachedObj.(*lpInfo)
 		}
-		h.oc.logicalPortCache.remove(util.GetLogicalPortName(pod.Namespace, pod.Name))
+		h.oc.logicalPortCache.remove(pod, ovntypes.DefaultNetworkName)
 		return h.oc.removePod(pod, portInfo)
 
 	case factory.PolicyType:

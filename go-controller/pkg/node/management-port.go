@@ -76,6 +76,12 @@ func newManagementPort(nodeName string, hostSubnets []*net.IPNet) ManagementPort
 }
 
 func (mp *managementPort) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
+	for _, mgmtPortName := range []string{types.K8sMgmtIntfName, types.K8sMgmtIntfName + "_0"} {
+		if err := syncMgmtPortInterface(mp.hostSubnets, mgmtPortName, true); err != nil {
+			return nil, fmt.Errorf("failed to sync management port: %v", err)
+		}
+	}
+
 	// Create a OVS internal interface.
 	legacyMgmtIntfName := util.GetLegacyK8sMgmtIntfName(mp.nodeName)
 	stdout, stderr, err := util.RunOVSVsctl(
@@ -151,6 +157,6 @@ func managementPortReady() (bool, error) {
 	if !strings.Contains(stdout, "actions=output:"+ofport) {
 		return false, nil
 	}
-	klog.Info("Management port %s is ready", k8sMgmtIntfName)
+	klog.Infof("Management port %s is ready", k8sMgmtIntfName)
 	return true, nil
 }

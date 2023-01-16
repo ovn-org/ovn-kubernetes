@@ -27,9 +27,12 @@ func genOVSFindCmd(table, column, condition string) string {
 }
 
 func genOVSAddPortCmd(hostIfaceName, ifaceID, mac, ip, sandboxID, podUID string) string {
-	return fmt.Sprintf("ovs-vsctl --timeout=30 add-port br-int %s other_config:transient=true -- set interface %s external_ids:attached_mac=%s "+
-		"external_ids:iface-id=%s external_ids:iface-id-ver=%s external_ids:ip_addresses=%s external_ids:sandbox=%s",
-		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ip, sandboxID)
+	return fmt.Sprintf("ovs-vsctl --timeout=30 add-port br-int %s other_config:transient=true "+
+		"-- set interface %s external_ids:attached_mac=%s "+
+		"external_ids:iface-id=%s external_ids:iface-id-ver=%s external_ids:ip_addresses=%s external_ids:sandbox=%s "+
+		"-- --if-exists remove interface %s external_ids k8s.ovn.org/network "+
+		"-- --if-exists remove interface %s external_ids k8s.ovn.org/nad",
+		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ip, sandboxID, hostIfaceName, hostIfaceName)
 }
 
 func genOVSDelPortCmd(portName string) string {
@@ -136,6 +139,8 @@ var _ = Describe("Node DPU tests", func() {
 				Ingress:       -1,
 				Egress:        -1,
 				IsDPUHostMode: true,
+				NetName:       types.DefaultNetworkName,
+				NADName:       types.DefaultNetworkName,
 				PodUID:        "a-pod",
 			}
 

@@ -6,13 +6,20 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
 
 type portCache struct {
 	sync.RWMutex
 	stopChan <-chan struct{}
-	cache    map[string]*lpInfo
+
+	// cache of logical port info (lpInfo). The first key is podName, in the form of
+	// podNamespace/podName; the second key is NAD name associated with specific port info
+	cache map[string]map[string]*lpInfo
 }
 
 type lpInfo struct {
@@ -29,21 +36,54 @@ type lpInfo struct {
 func newPortCache(stopChan <-chan struct{}) *portCache {
 	return &portCache{
 		stopChan: stopChan,
-		cache:    make(map[string]*lpInfo),
+		cache:    make(map[string]map[string]*lpInfo),
 	}
 }
 
-func (c *portCache) get(logicalPort string) (*lpInfo, error) {
+func (c *portCache) get(pod *kapi.Pod, nadName string) (*lpInfo, error) {
+	var logicalPort string
+
+	podName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+	if nadName == types.DefaultNetworkName {
+		logicalPort = util.GetLogicalPortName(pod.Namespace, pod.Name)
+	} else {
+		logicalPort = util.GetSecondaryNetworkLogicalPortName(pod.Namespace, pod.Name, nadName)
+	}
 	c.RLock()
 	defer c.RUnlock()
-	if info, ok := c.cache[logicalPort]; ok {
-		x := *info
-		return &x, nil
+	if infoMap, ok := c.cache[podName]; ok {
+		if info, ok := infoMap[nadName]; ok {
+			x := *info
+			return &x, nil
+		}
 	}
-	return nil, fmt.Errorf("logical port %s not found in cache", logicalPort)
+	return nil, fmt.Errorf("logical port %s for pod %s not found in cache", podName, logicalPort)
 }
 
-func (c *portCache) add(logicalSwitch, logicalPort, uuid string, mac net.HardwareAddr, ips []*net.IPNet) *lpInfo {
+func (c *portCache) getAll(pod *kapi.Pod) (map[string]*lpInfo, error) {
+	podName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+	c.RLock()
+	defer c.RUnlock()
+	if infoMap, ok := c.cache[podName]; ok {
+		// make a copy of this lpInfo map and return
+		lpInfoMap := map[string]*lpInfo{}
+		for k, v := range infoMap {
+			lpInfoMap[k] = v
+		}
+		return lpInfoMap, nil
+	}
+	return nil, fmt.Errorf("logical port cache for pod %s not found", podName)
+}
+
+func (c *portCache) add(pod *kapi.Pod, logicalSwitch, nadName, uuid string, mac net.HardwareAddr, ips []*net.IPNet) *lpInfo {
+	var logicalPort string
+
+	podName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+	if nadName == types.DefaultNetworkName {
+		logicalPort = util.GetLogicalPortName(pod.Namespace, pod.Name)
+	} else {
+		logicalPort = util.GetSecondaryNetworkLogicalPortName(pod.Namespace, pod.Name, nadName)
+	}
 	c.Lock()
 	defer c.Unlock()
 	portInfo := &lpInfo{
@@ -55,14 +95,34 @@ func (c *portCache) add(logicalSwitch, logicalPort, uuid string, mac net.Hardwar
 	}
 	klog.V(5).Infof("port-cache(%s): added port %+v with IP: %s and MAC: %s",
 		logicalPort, portInfo, portInfo.ips, portInfo.mac)
-	c.cache[logicalPort] = portInfo
+	m, ok := c.cache[podName]
+	if ok {
+		m[nadName] = portInfo
+	} else {
+		m = map[string]*lpInfo{nadName: portInfo}
+		c.cache[podName] = m
+	}
 	return portInfo
 }
 
-func (c *portCache) remove(logicalPort string) {
+func (c *portCache) remove(pod *kapi.Pod, nadName string) {
+	var logicalPort string
+
+	podName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+	if nadName == types.DefaultNetworkName {
+		logicalPort = util.GetLogicalPortName(pod.Namespace, pod.Name)
+	} else {
+		logicalPort = util.GetSecondaryNetworkLogicalPortName(pod.Namespace, pod.Name, nadName)
+	}
+
 	c.Lock()
 	defer c.Unlock()
-	info, ok := c.cache[logicalPort]
+	infoMap, ok := c.cache[podName]
+	if !ok {
+		klog.V(5).Infof("port-cache(%s): port not found in cache or already marked for removal", logicalPort)
+		return
+	}
+	info, ok := infoMap[nadName]
 	if !ok || !info.expires.IsZero() {
 		klog.V(5).Infof("port-cache(%s): port not found in cache or already marked for removal", logicalPort)
 		return
@@ -81,10 +141,16 @@ func (c *portCache) remove(logicalPort string) {
 			// remove the port info if its expiration time has elapsed.
 			// This makes sure that we don't prematurely remove a port
 			// that was deleted and re-added before the timer expires.
-			if info, ok := c.cache[logicalPort]; ok && !info.expires.IsZero() {
-				if time.Now().After(info.expires) {
-					klog.V(5).Infof("port-cache(%s): removing port", logicalPort)
-					delete(c.cache, logicalPort)
+			infoMap, ok := c.cache[podName]
+			if ok {
+				if info, ok := infoMap[nadName]; ok && !info.expires.IsZero() {
+					if time.Now().After(info.expires) {
+						klog.V(5).Infof("port-cache(%s): removing port", logicalPort)
+						delete(infoMap, nadName)
+						if len(infoMap) == 0 {
+							delete(c.cache, podName)
+						}
+					}
 				}
 			}
 		case <-c.stopChan:

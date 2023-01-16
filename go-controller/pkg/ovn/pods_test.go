@@ -467,9 +467,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// port should be gone or marked for removal in logical port cache
-				logicalPort := util.GetLogicalPortName(myPod.Namespace, myPod.Name)
 				gomega.Eventually(func() bool {
-					info, err := fakeOvn.controller.logicalPortCache.get(logicalPort)
+					info, err := fakeOvn.controller.logicalPortCache.get(myPod, ovntypes.DefaultNetworkName)
 					return err != nil || !info.expires.IsZero()
 				}, 2).Should(gomega.BeTrue())
 
@@ -575,9 +574,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// port should be gone or marked for removal in logical port cache
-				logicalPort := util.GetLogicalPortName(myPod.Namespace, myPod.Name)
 				gomega.Eventually(func() bool {
-					info, err := fakeOvn.controller.logicalPortCache.get(logicalPort)
+					info, err := fakeOvn.controller.logicalPortCache.get(myPod, ovntypes.DefaultNetworkName)
 					return err != nil || !info.expires.IsZero()
 				}, 2).Should(gomega.BeTrue())
 
@@ -1939,8 +1937,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				err = fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// port should not be in cache, because it should never have been added
-				logicalPort := util.GetLogicalPortName(t.namespace, t.podName)
-				_, err = fakeOvn.controller.logicalPortCache.get(logicalPort)
+				_, err = fakeOvn.controller.logicalPortCache.get(pod, ovntypes.DefaultNetworkName)
 				gomega.Expect(err).NotTo(gomega.BeNil())
 				myPod1Key, err := retry.GetResourceKey(pod)
 				retry.CheckRetryObjectEventually(myPod1Key, true, fakeOvn.controller.retryPods)

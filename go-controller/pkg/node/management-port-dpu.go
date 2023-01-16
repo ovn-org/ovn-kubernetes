@@ -42,18 +42,27 @@ func (mp *managementPortRepresentor) Create(nodeAnnotator kube.Annotator, waiter
 	if config.OvnKubeNode.MgmtPortRepresentor != "" {
 		k8sMgmtIntfName += "_0"
 	}
+
+	klog.Infof("Lookup representor link and existing management port")
 	// Get management port representor netdevice
 	link, err := util.GetNetLinkOps().LinkByName(mp.repName)
 	if err != nil {
+		if !util.GetNetLinkOps().IsLinkNotFoundError(err) {
+			return nil, fmt.Errorf("failed to lookup %s link: %v", mp.repName, err)
+		}
 		// It may fail in case this is not the first run after reboot and management port has already been renamed.
 		link, err = util.GetNetLinkOps().LinkByName(k8sMgmtIntfName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get link device for %s. %v", mp.repName, err)
 		}
+	} else if mp.repName != k8sMgmtIntfName {
+		if err := syncMgmtPortInterface(mp.hostSubnets, k8sMgmtIntfName, false); err != nil {
+			return nil, fmt.Errorf("failed to check existing management port: %v", err)
+		}
 	}
 
 	// configure management port: rename, set MTU and set link up and connect representor port to br-int
-	klog.Infof("Create representor management port: %s", link.Attrs().Name)
+	klog.Infof("Setup representor management port: %s", link.Attrs().Name)
 	setName := link.Attrs().Name != k8sMgmtIntfName
 	setMTU := link.Attrs().MTU != config.Default.MTU
 
@@ -64,10 +73,6 @@ func (mp *managementPortRepresentor) Create(nodeAnnotator kube.Annotator, waiter
 
 		if setName {
 			if err = util.GetNetLinkOps().LinkSetName(link, k8sMgmtIntfName); err != nil {
-				// NOTE(adrianc): rename may fail with "file exists" in case an interface is already named
-				// ovn-k8s-mp*, this may happen if mgmt-port-netdev changes during deployment. ATM we are
-				// not handling it.
-				// TODO: handle mgmt-port-netdev change.
 				return nil, fmt.Errorf("failed to set link name for device %s. %v", mp.repName, err)
 			}
 		}
@@ -83,11 +88,16 @@ func (mp *managementPortRepresentor) Create(nodeAnnotator kube.Annotator, waiter
 		return nil, fmt.Errorf("failed to set link up for device %s. %v", link.Attrs().Name, err)
 	}
 
-	// Plug management port representor to OVS.
-	stdout, stderr, err := util.RunOVSVsctl(
+	ovsArgs := []string{
 		"--", "--may-exist", "add-port", "br-int", k8sMgmtIntfName,
 		"--", "set", "interface", k8sMgmtIntfName,
-		"external-ids:iface-id="+types.K8sPrefix+mp.nodeName)
+		"external-ids:iface-id=" + types.K8sPrefix + mp.nodeName,
+	}
+	if mp.repName != k8sMgmtIntfName {
+		ovsArgs = append(ovsArgs, "external-ids:ovn-orig-mgmt-port-rep-name="+mp.repName)
+	}
+	// Plug management port representor to OVS.
+	stdout, stderr, err := util.RunOVSVsctl(ovsArgs...)
 	if err != nil {
 		klog.Errorf("Failed to add port %q to br-int, stdout: %q, stderr: %q, error: %v",
 			k8sMgmtIntfName, stdout, stderr, err)
@@ -170,20 +180,34 @@ func newManagementPortNetdev(hostSubnets []*net.IPNet) ManagementPort {
 }
 
 func (mp *managementPortNetdev) Create(nodeAnnotator kube.Annotator, waiter *startupWaiter) (*managementPortConfig, error) {
-	// get Netdev that is used for management port.
+	klog.Infof("Lookup netdevice link and existing management port")
+	// get netdev that is used for management port.
 	link, err := util.GetNetLinkOps().LinkByName(mp.netdevName)
 	if err != nil {
+		if !util.GetNetLinkOps().IsLinkNotFoundError(err) {
+			return nil, fmt.Errorf("failed to lookup %s link: %v", mp.netdevName, err)
+		}
 		// this may not the first time invoked on the node after reboot
 		// netdev may have already been renamed to ovn-k8s-mp0.
 		link, err = util.GetNetLinkOps().LinkByName(types.K8sMgmtIntfName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get link device for %s. %v", mp.netdevName, err)
 		}
+	} else if mp.netdevName != types.K8sMgmtIntfName {
+		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+			// We do not expect OVS running here so just check if no old mgmt port netdevice exists and unconfigure it
+			err = unconfigureMgmtNetdevicePort(mp.hostSubnets, types.K8sMgmtIntfName)
+		} else {
+			err = syncMgmtPortInterface(mp.hostSubnets, types.K8sMgmtIntfName, false)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to sync management port: %v", err)
+		}
 	}
 
 	// configure management port: name, mac, MTU, iptables
 	// mac addr, derived from the first entry in host subnets using the .2 address as mac with a fixed prefix.
-	klog.Infof("Setup management port dpu host: %s", link.Attrs().Name)
+	klog.Infof("Setup netdevice management port: %s", link.Attrs().Name)
 	mgmtPortMac := util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(mp.hostSubnets[0]).IP)
 	setMac := link.Attrs().HardwareAddr.String() != mgmtPortMac.String()
 	setName := link.Attrs().Name != types.K8sMgmtIntfName
@@ -205,10 +229,6 @@ func (mp *managementPortNetdev) Create(nodeAnnotator kube.Annotator, waiter *sta
 		if setName {
 			err := util.GetNetLinkOps().LinkSetName(link, types.K8sMgmtIntfName)
 			if err != nil {
-				// NOTE(adrianc): rename may fail with "file exists" in case an interface is already named
-				// ovn-k8s-mp0, this may happen if mgmt-port-netdev changes during deployment. ATM we are
-				// not handling it.
-				// TODO: handle mgmt-port-netdev change.
 				return nil, fmt.Errorf("failed to set management port name. %v", err)
 			}
 		}
@@ -218,6 +238,14 @@ func (mp *managementPortNetdev) Create(nodeAnnotator kube.Annotator, waiter *sta
 			if err != nil {
 				return nil, fmt.Errorf("failed to set management port MTU. %v", err)
 			}
+		}
+	}
+
+	if mp.netdevName != types.K8sMgmtIntfName && config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		// Store original interface name for later use
+		if _, stderr, err := util.RunOVSVsctl("set", "Open_vSwitch", ".",
+			"external-ids:ovn-orig-mgmt-port-netdev-name="+mp.netdevName); err != nil {
+			return nil, fmt.Errorf("failed to store original mgmt port interface name: %s", stderr)
 		}
 	}
 

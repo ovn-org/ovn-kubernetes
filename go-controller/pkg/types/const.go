@@ -156,4 +156,14 @@ const (
 	OVSDBWaitTimeout = 0
 
 	ClusterLBGroupName = "clusterLBGroup"
+
+	// key for network name external-id
+	NetworkExternalID = OvnK8sPrefix + "/" + "network"
+	// key for NAD name external-id, only used for secondary logical switch port of a pod
+	NADExternalID = OvnK8sPrefix + "/" + "nad"
+	// key for topology type external-id, only used for secondary network logical entities
+	TopologyExternalID = OvnK8sPrefix + "/" + "topology"
+
+	// different secondary network topology type defined in CNI netconf
+	Layer3Topology = "layer3"
 )

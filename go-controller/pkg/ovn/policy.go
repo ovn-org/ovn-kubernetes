@@ -11,7 +11,6 @@ import (
 	ovsdb "github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -543,8 +542,7 @@ func (oc *DefaultNetworkController) createDefaultDenyPGAndACLs(namespace, policy
 		return err
 	}
 
-	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.nbClient, "networkpolicy",
-		namespace, policy)
+	recordOps, txOkCallBack, _, err := oc.AddConfigDurationRecord("networkpolicy", namespace, policy)
 	if err != nil {
 		klog.Errorf("Failed to record config duration: %v", err)
 	}
@@ -685,7 +683,7 @@ func (oc *DefaultNetworkController) getNewLocalPolicyPorts(np *networkPolicy,
 		// Add pod to errObjs for retry if
 		// 1. getting pod LSP from the cache fails,
 		// 2. the gotten LSP is scheduled for removal (stateful-sets).
-		portInfo, err := oc.logicalPortCache.get(logicalPortName)
+		portInfo, err := oc.logicalPortCache.get(pod, types.DefaultNetworkName)
 		if err != nil {
 			klog.Warningf("Failed to get LSP for pod %s/%s for networkPolicy %s, err: %v",
 				pod.Namespace, pod.Name, np.name, err)
@@ -1133,8 +1131,7 @@ func (oc *DefaultNetworkController) createNetworkPolicy(policy *knet.NetworkPoli
 
 		var recordOps []ovsdb.Operation
 		var txOkCallBack func()
-		recordOps, txOkCallBack, _, err = metrics.GetConfigDurationRecorder().AddOVN(oc.nbClient, "networkpolicy",
-			policy.Namespace, policy.Name)
+		recordOps, txOkCallBack, _, err = oc.AddConfigDurationRecord("networkpolicy", policy.Namespace, policy.Name)
 		if err != nil {
 			klog.Errorf("Failed to record config duration: %v", err)
 		}
@@ -1344,8 +1341,7 @@ func (oc *DefaultNetworkController) cleanupNetworkPolicy(np *networkPolicy) erro
 	if err != nil {
 		return fmt.Errorf("failed to get delete network policy port group %s ops: %v", np.portGroupName, err)
 	}
-	recordOps, txOkCallBack, _, err := metrics.GetConfigDurationRecorder().AddOVN(oc.nbClient, "networkpolicy",
-		np.namespace, np.name)
+	recordOps, txOkCallBack, _, err := oc.AddConfigDurationRecord("networkpolicy", np.namespace, np.name)
 	if err != nil {
 		klog.Errorf("Failed to record config duration: %v", err)
 	}

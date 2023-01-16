@@ -220,6 +220,8 @@ ovn_egressfirewall_enable=${OVN_EGRESSFIREWALL_ENABLE:-false}
 ovn_egressqos_enable=${OVN_EGRESSQOS_ENABLE:-false}
 #OVN_DISABLE_OVN_IFACE_ID_VER - disable usage of the OVN iface-id-ver option
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER:-false}
+#OVN_MULTI_NETWORK_ENABLE - enable multiple network support for ovn-kubernetes
+ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE:-false}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 ovn_netflow_targets=${OVN_NETFLOW_TARGETS:-}
 ovn_sflow_targets=${OVN_SFLOW_TARGETS:-}
@@ -970,6 +972,11 @@ ovn-master() {
   if [[ ${ovn_egressqos_enable} == "true" ]]; then
 	  egressqos_enabled_flag="--enable-egress-qos"
   fi
+  multi_network_enabled_flag=
+  if [[ ${ovn_multi_network_enable} == "true" ]]; then
+	  multi_network_enabled_flag="--enable-multi-network"
+  fi
+  echo "multi_network_enabled_flag=${multi_network_enabled_flag}"
 
   ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
   local ovnkube_metrics_tls_opts=""
@@ -1012,6 +1019,7 @@ ovn-master() {
     ${egressfirewall_enabled_flag} \
     ${egressqos_enabled_flag} \
     ${ovnkube_config_duration_enable_flag} \
+    ${multi_network_enabled_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --host-network-namespace ${ovn_host_network_namespace} &
 
@@ -1126,6 +1134,11 @@ ovn-node() {
   disable_ovn_iface_id_ver_flag=
   if [[ ${ovn_disable_ovn_iface_id_ver} == "true" ]]; then
       disable_ovn_iface_id_ver_flag="--disable-ovn-iface-id-ver"
+  fi
+
+  multi_network_enabled_flag=
+  if [[ ${ovn_multi_network_enable} == "true" ]]; then
+	  multi_network_enabled_flag="--enable-multi-network"
   fi
 
   netflow_targets=
@@ -1278,6 +1291,7 @@ ovn-node() {
     ${egressip_enabled_flag} \
     ${egressip_healthcheck_port_flag} \
     ${disable_ovn_iface_id_ver_flag} \
+    ${multi_network_enabled_flag} \
     ${netflow_targets} \
     ${sflow_targets} \
     ${ipfix_targets} \

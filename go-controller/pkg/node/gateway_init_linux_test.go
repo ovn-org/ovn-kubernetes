@@ -41,7 +41,7 @@ import (
 )
 
 func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
-	eth0Name, eth0MAC, eth0GWIP, eth0CIDR string, gatewayVLANID uint, l netlink.Link, hwOffload bool) {
+	eth0Name, eth0MAC, eth0GWIP, eth0CIDR string, gatewayVLANID uint, l netlink.Link, hwOffload, setNodeIP bool) {
 	const mtu string = "1234"
 	const clusterCIDR string = "10.1.0.0/16"
 
@@ -167,13 +167,16 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		_, err = config.InitConfig(ctx, fexec, nil)
 		Expect(err).NotTo(HaveOccurred())
 
-		expectedAddr, err := netlink.ParseAddr(eth0CIDR)
-		Expect(err).NotTo(HaveOccurred())
-		nodeAddr := v1.NodeAddress{Type: v1.NodeInternalIP, Address: expectedAddr.IP.String()}
-		existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
-			Name: nodeName,
-		},
-			Status: v1.NodeStatus{Addresses: []v1.NodeAddress{nodeAddr}},
+		existingNode := v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+			},
+		}
+		if setNodeIP {
+			expectedAddr, err := netlink.ParseAddr(eth0CIDR)
+			Expect(err).NotTo(HaveOccurred())
+			nodeAddr := v1.NodeAddress{Type: v1.NodeInternalIP, Address: expectedAddr.IP.String()}
+			existingNode.Status = v1.NodeStatus{Addresses: []v1.NodeAddress{nodeAddr}}
 		}
 
 		_, nodeNet, err := net.ParseCIDR(nodeSubnet)
@@ -235,7 +238,8 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
-			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", nil, nodeAnnotator, k,
+			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
+			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs, nodeAnnotator, k,
 				&fakeMgmtPortConfig, wf)
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(wf, stop, wg)
@@ -264,6 +268,20 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Expect(found).To(BeTrue())
 
 			Expect(l.Attrs().HardwareAddr.String()).To(Equal(eth0MAC))
+
+			// check that the masquerade route was added
+			expRoute := &netlink.Route{
+				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", types.V4OVNMasqueradeIP)),
+				LinkIndex: l.Attrs().Index,
+				Src:       ifAddrs[0].IP,
+			}
+			route, err := util.LinkRouteGetFilteredRoute(
+				expRoute,
+				netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_SRC,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(route).ToNot(BeNil())
+
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -553,15 +571,16 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
 
+		ifAddrs := ovntest.MustParseIPNets(hostCIDR)
+		ifAddrs[0].IP = ovntest.MustParseIP(dpuIP)
+
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
-			// provide host IP as GR IP
-			gwIPs := []*net.IPNet{ovntest.MustParseIPNet(hostCIDR)}
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops,
-				gatewayIntf, "", gwIPs, nodeAnnotator, k, &fakeMgmtPortConfig, wf)
+				gatewayIntf, "", ifAddrs, nodeAnnotator, k, &fakeMgmtPortConfig, wf)
 
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(wf, stop, wg)
@@ -571,6 +590,21 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			Expect(err).NotTo(HaveOccurred())
 
 			sharedGw.Start()
+
+			// check that the masquerade route was not added
+			l, err := netlink.LinkByName(brphys)
+			expRoute := &netlink.Route{
+				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", types.V4OVNMasqueradeIP)),
+				LinkIndex: l.Attrs().Index,
+				Src:       ifAddrs[0].IP,
+			}
+			route, err := util.LinkRouteGetFilteredRoute(
+				expRoute,
+				netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_SRC,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(route).To(BeNil())
+
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -583,7 +617,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		l3gwConfig, err := util.ParseNodeL3GatewayAnnotation(updatedNode)
 		Expect(err).To(Not(HaveOccurred()))
 		Expect(l3gwConfig.MACAddress.String()).To(Equal(hostMAC))
-		Expect(l3gwConfig.IPAddresses[0]).To(Equal(ovntest.MustParseIPNet(hostCIDR)))
+		Expect(l3gwConfig.IPAddresses[0].String()).To(Equal(ifAddrs[0].String()))
 		return nil
 	}
 
@@ -656,23 +690,35 @@ func shareGatewayInterfaceDPUHostTest(app *cli.App, testNS ns.NetNS, uplinkName,
 			err := n.initGatewayDPUHost(net.ParseIP(hostIP))
 			Expect(err).NotTo(HaveOccurred())
 
-			// Check svc routes added towards eth0GWIP
-			expectedRoutes := []string{svcCIDR}
 			link, err := netlink.LinkByName(uplinkName)
 			Expect(err).NotTo(HaveOccurred())
-			routes, err := netlink.RouteList(link, netlink.FAMILY_ALL)
-			Expect(err).NotTo(HaveOccurred())
-			for _, expRoute := range expectedRoutes {
-				found := false
-				for _, route := range routes {
-					if route.Dst != nil {
-						if route.Dst.String() == expRoute && route.Gw.String() == gwIP {
-							found = true
-						}
-					}
-				}
-				Expect(found).To(BeTrue(), fmt.Sprintf("Expected route %s was not found", expRoute))
+
+			// check that the service route was added
+			expRoute := &netlink.Route{
+				Dst:       ovntest.MustParseIPNet(svcCIDR),
+				LinkIndex: link.Attrs().Index,
+				Gw:        ovntest.MustParseIP(gwIP),
 			}
+			route, err := util.LinkRouteGetFilteredRoute(
+				expRoute,
+				netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_GW,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(route).ToNot(BeNil())
+
+			// check that the masquerade route was added
+			expRoute = &netlink.Route{
+				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", types.V4OVNMasqueradeIP)),
+				LinkIndex: link.Attrs().Index,
+				Src:       ovntest.MustParseIP(hostIP),
+			}
+			route, err = util.LinkRouteGetFilteredRoute(
+				expRoute,
+				netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_SRC,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(route).ToNot(BeNil())
+
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -926,7 +972,8 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
-			localGw, err := newLocalGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", nil,
+			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
+			localGw, err := newLocalGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, "", ifAddrs,
 				nodeAnnotator, &fakeMgmtPortConfig, k, wf)
 			Expect(err).NotTo(HaveOccurred())
 			err = localGw.Init(wf, stop, wg)
@@ -955,6 +1002,20 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`,
 			Expect(found).To(BeTrue())
 
 			Expect(l.Attrs().HardwareAddr.String()).To(Equal(eth0MAC))
+
+			// check that the masquerade route was added
+			expRoute := &netlink.Route{
+				Dst:       ovntest.MustParseIPNet(fmt.Sprintf("%s/32", types.V4OVNMasqueradeIP)),
+				LinkIndex: l.Attrs().Index,
+				Src:       ifAddrs[0].IP,
+			}
+			route, err := util.LinkRouteGetFilteredRoute(
+				expRoute,
+				netlink.RT_FILTER_DST|netlink.RT_FILTER_OIF|netlink.RT_FILTER_SRC,
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(route).ToNot(BeNil())
+
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -1106,28 +1167,34 @@ var _ = Describe("Gateway Init Operations", func() {
 		})
 
 		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway", func() {
-			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 0, link, false)
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 0, link, false, true)
 		})
 
 		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with hw-offloading", func() {
-			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 0, link, true)
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 0, link, true, true)
 		})
 
 		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with tagged VLAN", func() {
-			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 3000, link, false)
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 3000, link, false, true)
 		})
 
 		config.Gateway.Interface = eth0Name
 		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with predetermined gateway interface", func() {
-			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 0, link, false)
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 0, link, false, true)
 		})
 
 		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with tagged VLAN + predetermined gateway interface", func() {
-			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 3000, link, false)
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 3000, link, false, true)
 		})
 
 		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with predetermined gateway interface and no default route", func() {
-			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, "", eth0CIDR, 0, link, false)
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, "", eth0CIDR, 0, link, false, true)
+		})
+
+		// don't set the node status internal IP, addMasqueradeRoute will
+		// fallback to the provided interface IP
+		ovntest.OnSupportedPlatformsIt("sets up a shared interface gateway with node status internal IPs unset", func() {
+			shareGatewayInterfaceTest(app, testNS, eth0Name, eth0MAC, eth0GWIP, eth0CIDR, 0, link, false, false)
 		})
 	})
 })

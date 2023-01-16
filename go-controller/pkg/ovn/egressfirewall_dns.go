@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -128,7 +129,22 @@ func (e *EgressDNS) updateEntryForName(dnsName string) error {
 	}
 	e.dnsEntries[dnsName].dnsResolves = ips
 
-	if err := e.dnsEntries[dnsName].dnsAddressSet.SetIPs(ips); err != nil {
+	// ignore ips from clusterSubnet, since this subnet shouldn't be affected by egress firewall
+	ipsNoClusterSubnet := []net.IP{}
+	for _, ip := range ips {
+		fromClusterSubnet := false
+		for _, clusterSubnet := range config.Default.ClusterSubnets {
+			if clusterSubnet.CIDR.Contains(ip) {
+				fromClusterSubnet = true
+				break
+			}
+		}
+		if !fromClusterSubnet {
+			// no intersection, add ip
+			ipsNoClusterSubnet = append(ipsNoClusterSubnet, ip)
+		}
+	}
+	if err := e.dnsEntries[dnsName].dnsAddressSet.SetIPs(ipsNoClusterSubnet); err != nil {
 		return fmt.Errorf("cannot add IPs from EgressFirewall AddressSet %s: %v", dnsName, err)
 	}
 	return nil
