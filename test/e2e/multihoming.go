@@ -21,7 +21,7 @@ import (
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 )
 
-var _ = Describe("Multi-Homing", func() {
+var _ = Describe("Multi Homing", func() {
 	Context("Layer 3 topology", func() {
 		const (
 			podName              = "tinypod"
