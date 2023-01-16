@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
@@ -13,9 +14,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	kapi "k8s.io/api/core/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 )
 
 func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
@@ -33,7 +36,7 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 		if err != nil {
 			continue
 		}
-		expectedLogicalPortName, err := oc.allocatePodIPs(pod, annotations, ovntypes.DefaultNetworkName)
+		expectedLogicalPortName, err := oc.allocatePodIPs(pod, annotations, ovntypes.DefaultNetworkName, oc)
 		if err != nil {
 			return err
 		}
@@ -97,7 +100,7 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *kapi.Pod, portInfo *l
 		return nil
 	}
 
-	pInfo, err := oc.deletePodLogicalPort(pod, portInfo, ovntypes.DefaultNetworkName)
+	pInfo, err := oc.deletePodLogicalPort(pod, portInfo, ovntypes.DefaultNetworkName, oc)
 	if err != nil {
 		return err
 	}
@@ -153,7 +156,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 	}()
 
 	nadName := ovntypes.DefaultNetworkName
-	ops, lsp, podAnnotation, newlyCreatedPort, err = oc.addLogicalPortToNetwork(pod, nadName, network)
+	ops, lsp, podAnnotation, newlyCreatedPort, err = oc.addLogicalPortToNetwork(pod, nadName, network, oc)
 	if err != nil {
 		return err
 	}
@@ -245,4 +248,72 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *kapi.Pod) (err error) {
 		metrics.RecordPodCreated(pod, oc.NetInfo)
 	}
 	return nil
+}
+
+func (oc *DefaultNetworkController) AddRoutesGatewayIP(pod *kapi.Pod, network *nadapi.NetworkSelectionElement,
+	podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet) error {
+	// if there are other network attachments for the pod, then check if those network-attachment's
+	// annotation has default-route key. If present, then we need to skip adding default route for
+	// OVN interface
+	networks, err := util.GetK8sPodAllNetworks(pod)
+	if err != nil {
+		return fmt.Errorf("error while getting network attachment definition for [%s/%s]: %v",
+			pod.Namespace, pod.Name, err)
+	}
+	otherDefaultRouteV4 := false
+	otherDefaultRouteV6 := false
+	for _, network := range networks {
+		for _, gatewayRequest := range network.GatewayRequest {
+			if utilnet.IsIPv6(gatewayRequest) {
+				otherDefaultRouteV6 = true
+			} else {
+				otherDefaultRouteV4 = true
+			}
+		}
+	}
+
+	for _, podIfAddr := range podAnnotation.IPs {
+		isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
+		nodeSubnet, err := util.MatchIPNetFamily(isIPv6, nodeSubnets)
+		if err != nil {
+			return err
+		}
+
+		gatewayIPnet := util.GetNodeGatewayIfAddr(nodeSubnet)
+
+		otherDefaultRoute := otherDefaultRouteV4
+		if isIPv6 {
+			otherDefaultRoute = otherDefaultRouteV6
+		}
+		var gatewayIP net.IP
+		if otherDefaultRoute {
+			for _, clusterSubnet := range config.Default.ClusterSubnets {
+				if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+						Dest:    clusterSubnet.CIDR,
+						NextHop: gatewayIPnet.IP,
+					})
+				}
+			}
+			for _, serviceSubnet := range config.Kubernetes.ServiceCIDRs {
+				if isIPv6 == utilnet.IsIPv6CIDR(serviceSubnet) {
+					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+						Dest:    serviceSubnet,
+						NextHop: gatewayIPnet.IP,
+					})
+				}
+			}
+		} else {
+			gatewayIP = gatewayIPnet.IP
+		}
+
+		if gatewayIP != nil {
+			podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIP)
+		}
+	}
+	return nil
+}
+
+func (oc *DefaultNetworkController) GetExpectedSwitchName(pod *kapi.Pod) (string, error) {
+	return pod.Spec.NodeName, nil
 }

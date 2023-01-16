@@ -2,17 +2,28 @@ package ovn
 
 import (
 	"fmt"
+	"net"
 	"reflect"
 	"time"
 
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 )
+
+// BaseSecondaryNetworkController structure holds per-network fields and network specific
+// configuration for secondary network controller
+type BaseSecondaryNetworkController struct {
+	BaseNetworkController
+}
 
 func (bsnc *BaseSecondaryNetworkController) getPortInfoForSecondaryNetwork(pod *kapi.Pod) map[string]*lpInfo {
 	if !util.PodWantsNetwork(pod) {
@@ -102,7 +113,7 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 	}
 
 	// If a node does not have an assigned hostsubnet don't wait for the logical switch to appear
-	switchName, err := bsnc.getExpectedSwitchName(pod)
+	switchName, err := bsnc.GetExpectedSwitchName(pod)
 	if err != nil {
 		return err
 	}
@@ -136,7 +147,7 @@ func (bsnc *BaseSecondaryNetworkController) ensurePodForSecondaryNetwork(pod *ka
 			pod.Namespace, pod.Name, nadName, time.Since(start), libovsdbExecuteTime)
 	}()
 
-	ops, lsp, podAnnotation, newlyCreated, err := bsnc.addLogicalPortToNetwork(pod, nadName, network)
+	ops, lsp, podAnnotation, newlyCreated, err := bsnc.addLogicalPortToNetwork(pod, nadName, network, bsnc)
 	if err != nil {
 		return err
 	}
@@ -212,7 +223,7 @@ func (bsnc *BaseSecondaryNetworkController) removePodForSecondaryNetwork(pod *ka
 	bsnc.logicalPortCache.remove(pod, nadName)
 
 	// TBD namespaceInfo needed when multi-network policy support is added
-	pInfo, err := bsnc.deletePodLogicalPort(pod, portInfo, nadName)
+	pInfo, err := bsnc.deletePodLogicalPort(pod, portInfo, nadName, bsnc)
 	if err != nil {
 		return err
 	}
@@ -256,7 +267,7 @@ func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []i
 			}
 			continue
 		}
-		expectedLogicalPortName, err := bsnc.allocatePodIPs(pod, annotations, nadName)
+		expectedLogicalPortName, err := bsnc.allocatePodIPs(pod, annotations, nadName, bsnc)
 		if err != nil {
 			return err
 		}
@@ -265,4 +276,53 @@ func (bsnc *BaseSecondaryNetworkController) syncPodsForSecondaryNetwork(pods []i
 		}
 	}
 	return bsnc.deleteStaleLogicalSwitchPorts(expectedLogicalPorts)
+}
+
+func (bsnc *BaseSecondaryNetworkController) GetLogicalPortName(pod *kapi.Pod, nadName string) string {
+	return util.GetSecondaryNetworkLogicalPortName(pod.Namespace, pod.Name, nadName)
+}
+
+func (bsnc *BaseSecondaryNetworkController) AddConfigDurationRecord(kind, namespace, name string) (
+	[]ovsdb.Operation, func(), time.Time, error) {
+	// TBD: no op for secondary network for now
+	return []ovsdb.Operation{}, func() {}, time.Time{}, nil
+}
+
+func (bsnc *BaseSecondaryNetworkController) AddRoutesGatewayIP(pod *kapi.Pod, network *nadapi.NetworkSelectionElement,
+	podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet) error {
+	topoType := bsnc.TopologyType()
+	if topoType != ovntypes.Layer3Topology {
+		return fmt.Errorf("topology type %s not supported", topoType)
+	}
+	// secondary layer3 network, see if its network-attachment's annotation has default-route key.
+	// If present, then we need to add default route for it
+	podAnnotation.Gateways = append(podAnnotation.Gateways, network.GatewayRequest...)
+	for _, podIfAddr := range podAnnotation.IPs {
+		isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
+		nodeSubnet, err := util.MatchIPNetFamily(isIPv6, nodeSubnets)
+		if err != nil {
+			return err
+		}
+		gatewayIPnet := util.GetNodeGatewayIfAddr(nodeSubnet)
+		layer3NetConfInfo := bsnc.NetConfInfo.(*util.Layer3NetConfInfo)
+		for _, clusterSubnet := range layer3NetConfInfo.ClusterSubnets {
+			if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+				podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+					Dest:    clusterSubnet.CIDR,
+					NextHop: gatewayIPnet.IP,
+				})
+			}
+		}
+	}
+	return nil
+}
+
+func (bsnc *BaseSecondaryNetworkController) GetExpectedSwitchName(pod *kapi.Pod) (string, error) {
+	topoType := bsnc.TopologyType()
+	switch topoType {
+	case ovntypes.Layer3Topology:
+		return bsnc.GetNetworkScopedName(pod.Spec.NodeName), nil
+	default:
+		return "", fmt.Errorf("topology type %s not supported", topoType)
+	}
 }
