@@ -27,6 +27,9 @@ type NetConf struct {
 	// DHCP if true the address from Subnet will be deliver
 	// using DHCP
 	DHCP bool `json:"dhcp,omitempty"`
+	// Expose if true the interface address will be
+	// exposed to kubernetes
+	Expose bool `json:"expose,omitempty"`
 
 	// PciAddrs in case of using sriov
 	DeviceID string `json:"deviceID,omitempty"`

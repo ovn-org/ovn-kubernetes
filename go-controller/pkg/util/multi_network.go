@@ -112,6 +112,7 @@ type NetConfInfo interface {
 	TopologyType() string
 	MTU() int
 	IsDHCP() bool
+	IsExpose() bool
 }
 
 // DefaultNetConfInfo is structure which holds specific default network information
@@ -139,6 +140,10 @@ func (defaultNetConfInfo *DefaultNetConfInfo) MTU() int {
 }
 
 func (*DefaultNetConfInfo) IsDHCP() bool {
+	return false
+}
+
+func (*DefaultNetConfInfo) IsExpose() bool {
 	return false
 }
 
@@ -224,12 +229,17 @@ func (layer3NetConfInfo *Layer3NetConfInfo) IsDHCP() bool {
 	return false
 }
 
+func (layer3NetConfInfo *Layer3NetConfInfo) IsExpose() bool {
+	return false
+}
+
 // Layer2NetConfInfo is structure which holds specific secondary layer2 network information
 type Layer2NetConfInfo struct {
 	subnets      string
 	mtu          int
 	excludeCIDRs []string
 	DHCP         bool
+	expose       bool
 
 	ClusterSubnets []config.CIDRNetworkEntry
 	ExcludeIPs     []net.IP
@@ -279,6 +289,7 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (*Layer2NetConfInfo, err
 		excludeCIDRs:   netconf.ExcludeCIDRs,
 		ClusterSubnets: clusterSubnets,
 		DHCP:           netconf.DHCP,
+		expose:         netconf.Expose,
 		ExcludeIPs:     excludeIPs,
 	}, nil
 }
@@ -324,6 +335,10 @@ func (layer2NetConfInfo *Layer2NetConfInfo) MTU() int {
 }
 func (layer2NetConfInfo *Layer2NetConfInfo) IsDHCP() bool {
 	return layer2NetConfInfo.DHCP
+}
+
+func (layer2NetConfInfo *Layer2NetConfInfo) IsExpose() bool {
+	return layer2NetConfInfo.expose
 }
 
 // GetNADName returns key of NetAttachDefInfo.NetAttachDefs map, also used as Pod annotation key

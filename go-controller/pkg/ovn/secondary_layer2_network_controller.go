@@ -296,5 +296,39 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 		_ = oc.lsManager.AllocateIPs(switchName, []*net.IPNet{{IP: excludeIP, Mask: ipMask}})
 	}
 
+	// Attach to the distribuged router
+	if oc.IsExpose() {
+
+		// Create the port at the distributed router to attach the switch to
+		_, switchSubnet, err := net.ParseCIDR(logicalSwitch.OtherConfig["subnet"])
+		if err != nil {
+			return err
+		}
+		gwIfAddr := util.GetNodeGatewayIfAddr(switchSubnet)
+		lrpMAC := util.IPAddrToHWAddr(gwIfAddr.IP)
+
+		logicalRouterPort := nbdb.LogicalRouterPort{
+			Name:     types.RouterToSwitchPrefix + logicalSwitch.Name,
+			MAC:      lrpMAC.String(),
+			Networks: []string{gwIfAddr.String()},
+		}
+		logicalRouter := nbdb.LogicalRouter{Name: types.OVNClusterRouter}
+		if err := libovsdbops.CreateOrUpdateLogicalRouterPort(oc.nbClient, &logicalRouter, &logicalRouterPort,
+			nil, &logicalRouterPort.MAC, &logicalRouterPort.Networks); err != nil {
+			return err
+		}
+
+		// Create the LSP
+		logicalSwitchPort := nbdb.LogicalSwitchPort{
+			Name:      types.SwitchToRouterPrefix + logicalSwitch.Name,
+			Type:      "router",
+			Addresses: []string{"router"},
+			Options:   map[string]string{"router-port": logicalRouterPort.Name},
+		}
+		if err := libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &logicalSwitch, &logicalSwitchPort); err != nil {
+			return nil
+		}
+	}
+
 	return nil
 }
