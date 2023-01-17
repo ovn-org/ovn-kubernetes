@@ -6,6 +6,8 @@ import (
 
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressserviceapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
+	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -38,15 +40,22 @@ func NewFakeOVNNode(fexec *ovntest.FakeExec) *FakeOVNNode {
 }
 
 func (o *FakeOVNNode) start(ctx *cli.Context, objects ...runtime.Object) {
+	egressServiceObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	for _, object := range objects {
-		v1Objects = append(v1Objects, object)
+		if _, isEgressServiceObject := object.(*egressserviceapi.EgressServiceList); isEgressServiceObject {
+			egressServiceObjects = append(egressServiceObjects, object)
+		} else {
+			v1Objects = append(v1Objects, object)
+		}
 	}
+
 	_, err := config.InitConfig(ctx, o.fakeExec, nil)
 	Expect(err).NotTo(HaveOccurred())
 
 	o.fakeClient = &util.OVNNodeClientset{
-		KubeClient: fake.NewSimpleClientset(v1Objects...),
+		KubeClient:          fake.NewSimpleClientset(v1Objects...),
+		EgressServiceClient: egressservicefake.NewSimpleClientset(egressServiceObjects...),
 	}
 	o.init() // initializes the node
 }

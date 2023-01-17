@@ -11,6 +11,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
+	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/vishvananda/netlink"
@@ -77,15 +79,12 @@ type nodePortWatcher struct {
 	ofportPhys    string
 	ofportPatch   string
 	gwBridge      string
-	nodeName      string
 	// Map of service name to programmed iptables/OF rules
-	serviceInfo           map[ktypes.NamespacedName]*serviceConfig
-	serviceInfoLock       sync.Mutex
-	egressServiceInfo     map[ktypes.NamespacedName]*serviceEps
-	egressServiceInfoLock sync.Mutex
-	ofm                   *openflowManager
-	nodeIPManager         *addressManager
-	watchFactory          factory.NodeWatchFactory
+	serviceInfo     map[ktypes.NamespacedName]*serviceConfig
+	serviceInfoLock sync.Mutex
+	ofm             *openflowManager
+	nodeIPManager   *addressManager
+	watchFactory    factory.NodeWatchFactory
 }
 
 type serviceConfig struct {
@@ -95,11 +94,6 @@ type serviceConfig struct {
 	hasLocalHostNetworkEp bool
 	// localEndpoints stores all the local non-host-networked endpoints for this service
 	localEndpoints sets.Set[string]
-}
-
-type serviceEps struct {
-	v4 sets.Set[string]
-	v6 sets.Set[string]
 }
 
 type cidrAndFlags struct {
@@ -462,9 +456,6 @@ func addServiceRules(service *kapi.Service, localEndpoints []string, svcHasLocal
 			if err = addGatewayIptRules(service, localEndpoints, svcHasLocalHostNetEndPnt); err != nil {
 				errors = append(errors, err)
 			}
-			if err = updateEgressSVCIptRules(service, npw); err != nil {
-				errors = append(errors, err)
-			}
 		}
 	} else {
 		// For Host Only Mode
@@ -521,9 +512,6 @@ func delServiceRules(service *kapi.Service, localEndpoints []string, npw *nodePo
 			if err = delGatewayIptRules(service, localEndpoints, false); err != nil {
 				errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
 			}
-			if err = delAllEgressSVCIptRules(service, npw); err != nil {
-				errors = append(errors, fmt.Errorf("error updating service flow cache: %v", err))
-			}
 		}
 	} else {
 
@@ -547,7 +535,6 @@ func serviceUpdateNotNeeded(old, new *kapi.Service) bool {
 		reflect.DeepEqual(new.Spec.ExternalTrafficPolicy, old.Spec.ExternalTrafficPolicy) &&
 		(new.Spec.InternalTrafficPolicy != nil && old.Spec.InternalTrafficPolicy != nil &&
 			reflect.DeepEqual(*new.Spec.InternalTrafficPolicy, *old.Spec.InternalTrafficPolicy)) &&
-		!util.EgressSVCHostChanged(old, new) &&
 		(new.Spec.AllocateLoadBalancerNodePorts != nil && old.Spec.AllocateLoadBalancerNodePorts != nil &&
 			reflect.DeepEqual(*new.Spec.AllocateLoadBalancerNodePorts, *old.Spec.AllocateLoadBalancerNodePorts))
 }
@@ -598,7 +585,7 @@ func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) error {
 	if serviceUpdateNotNeeded(old, new) {
 		klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, "+
 			".Spec.ExternalIP, .Spec.ClusterIP, .Spec.ClusterIPs, .Spec.Type, .Status.LoadBalancer.Ingress, "+
-			".Spec.ExternalTrafficPolicy, .Spec.InternalTrafficPolicy, Egress service host", new.Name)
+			".Spec.ExternalTrafficPolicy, .Spec.InternalTrafficPolicy", new.Name)
 		return nil
 	}
 	// Update the service in svcConfig if we need to so that other handler
@@ -706,7 +693,7 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) error {
 func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 	var err error
 	var errors []error
-	keepIPTRules := []iptRule{}
+	keepIPTRules := []nodeipt.Rule{}
 	for _, serviceInterface := range services {
 		name := ktypes.NamespacedName{Namespace: serviceInterface.(*kapi.Service).Namespace, Name: serviceInterface.(*kapi.Service).Name}
 
@@ -742,46 +729,14 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 		if !npw.dpuMode {
 			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(service, sets.List(localEndpoints), hasLocalHostNetworkEp)...)
 		}
-
-		if !npw.dpuMode && shouldConfigureEgressSVC(service, npw) {
-			v4Eps := sets.New[string]()
-			v6Eps := sets.New[string]()
-
-			for _, epSlice := range epSlices {
-				if epSlice.AddressType == discovery.AddressTypeFQDN {
-					continue
-				}
-				epsToInsert := v4Eps
-				if epSlice.AddressType == discovery.AddressTypeIPv6 {
-					epsToInsert = v6Eps
-				}
-
-				for _, ep := range epSlice.Endpoints {
-					for _, ip := range ep.Addresses {
-						ipStr := utilnet.ParseIPSloppy(ip).String()
-						if !util.IsHostEndpoint(ipStr) {
-							epsToInsert.Insert(ipStr)
-						}
-					}
-				}
-			}
-
-			keepIPTRules = append(keepIPTRules, egressSVCIPTRulesForEndpoints(service, v4Eps.UnsortedList(), v6Eps.UnsortedList())...)
-
-			npw.egressServiceInfoLock.Lock()
-			npw.egressServiceInfo[name] = &serviceEps{v4: v4Eps, v6: v6Eps}
-			npw.egressServiceInfoLock.Unlock()
-		}
 	}
-	if !npw.dpuMode {
-		keepIPTRules = append(keepIPTRules, egressSVCIPTDefaultReturnRule())
-	}
+
 	// sync OF rules once
 	npw.ofm.requestFlowSync()
 	// sync IPtables rules once only for Full mode
 	if !npw.dpuMode {
 		// (NOTE: Order is important, add jump to iptableETPChain before jump to NP/EIP chains)
-		for _, chain := range []string{iptableITPChain, iptableESVCChain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain, iptableMgmPortChain} {
+		for _, chain := range []string{iptableITPChain, egressservice.Chain, iptableNodePortChain, iptableExternalIPChain, iptableETPChain, iptableMgmPortChain} {
 			if err = recreateIPTRules("nat", chain, keepIPTRules); err != nil {
 				errors = append(errors, err)
 			}
@@ -850,15 +805,6 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 		}
 		return apierrors.NewAggregate(errors)
 	}
-
-	// Call this in case it wasn't already called by addServiceRules
-	npw.egressServiceInfoLock.Lock()
-	_, found := npw.egressServiceInfo[namespacedName]
-	npw.egressServiceInfoLock.Unlock()
-	if found && !npw.dpuMode {
-		return updateEgressSVCIptRules(svc, npw)
-	}
-
 	return nil
 
 }
@@ -991,15 +937,6 @@ func (npw *nodePortWatcher) UpdateEndpointSlice(oldEpSlice, newEpSlice *discover
 		return apierrors.NewAggregate(errors)
 	}
 
-	// Call this in case it wasn't already called by addServiceRules
-	npw.egressServiceInfoLock.Lock()
-	_, found := npw.egressServiceInfo[namespacedName]
-	npw.egressServiceInfoLock.Unlock()
-	if found && !npw.dpuMode && svc != nil {
-		if err = updateEgressSVCIptRules(svc, npw); err != nil {
-			errors = append(errors, err)
-		}
-	}
 	return apierrors.NewAggregate(errors)
 }
 
@@ -1020,7 +957,7 @@ func (npwipt *nodePortWatcherIptables) UpdateService(old, new *kapi.Service) err
 	if serviceUpdateNotNeeded(old, new) {
 		klog.V(5).Infof("Skipping service update for: %s as change does not apply to "+
 			"any of .Spec.Ports, .Spec.ExternalIP, .Spec.ClusterIP, .Spec.ClusterIPs,"+
-			" .Spec.Type, .Status.LoadBalancer.Ingress, Egress service annotations", new.Name)
+			" .Spec.Type, .Status.LoadBalancer.Ingress", new.Name)
 		return nil
 	}
 
@@ -1056,7 +993,7 @@ func (npwipt *nodePortWatcherIptables) DeleteService(service *kapi.Service) erro
 func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) error {
 	var err error
 	var errors []error
-	keepIPTRules := []iptRule{}
+	keepIPTRules := []nodeipt.Rule{}
 	for _, serviceInterface := range services {
 		service, ok := serviceInterface.(*kapi.Service)
 		if !ok {
@@ -1779,7 +1716,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 				}
 			}
 			klog.Info("Creating Shared Gateway Node Port Watcher")
-			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge, nodeName, gw.openflowManager, gw.nodeIPManager, watchFactory)
+			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge, gw.openflowManager, gw.nodeIPManager, watchFactory)
 			if err != nil {
 				return err
 			}
@@ -1799,7 +1736,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 	return gw, nil
 }
 
-func newNodePortWatcher(gwBridge *bridgeConfiguration, nodeName string, ofm *openflowManager,
+func newNodePortWatcher(gwBridge *bridgeConfiguration, ofm *openflowManager,
 	nodeIPManager *addressManager, watchFactory factory.NodeWatchFactory) (*nodePortWatcher, error) {
 	// Get ofport of patchPort
 	ofportPatch, stderr, err := util.GetOVSOfPort("--if-exists", "get",
@@ -1856,18 +1793,16 @@ func newNodePortWatcher(gwBridge *bridgeConfiguration, nodeName string, ofm *ope
 	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(gwBridge.ips)
 
 	npw := &nodePortWatcher{
-		dpuMode:           dpuMode,
-		gatewayIPv4:       gatewayIPv4,
-		gatewayIPv6:       gatewayIPv6,
-		ofportPhys:        ofportPhys,
-		ofportPatch:       ofportPatch,
-		gwBridge:          gwBridge.bridgeName,
-		nodeName:          nodeName,
-		serviceInfo:       make(map[ktypes.NamespacedName]*serviceConfig),
-		egressServiceInfo: make(map[ktypes.NamespacedName]*serviceEps),
-		nodeIPManager:     nodeIPManager,
-		ofm:               ofm,
-		watchFactory:      watchFactory,
+		dpuMode:       dpuMode,
+		gatewayIPv4:   gatewayIPv4,
+		gatewayIPv6:   gatewayIPv6,
+		ofportPhys:    ofportPhys,
+		ofportPatch:   ofportPatch,
+		gwBridge:      gwBridge.bridgeName,
+		serviceInfo:   make(map[ktypes.NamespacedName]*serviceConfig),
+		nodeIPManager: nodeIPManager,
+		ofm:           ofm,
+		watchFactory:  watchFactory,
 	}
 	return npw, nil
 }
