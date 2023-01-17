@@ -67,7 +67,7 @@ func (c *Controller) queueServiceForEndpointSlice(endpointSlice *discovery.Endpo
 		// Once the service label is eventually added, we will get this event
 		// and re-process.
 		if errors.Is(err, services.NoServiceLabelError) {
-			klog.V(5).Infof(err.Error())
+			klog.V(5).Infof("EgressService endpoint slice missing service label: %v", err)
 		} else {
 			utilruntime.HandleError(fmt.Errorf("couldn't get key for EndpointSlice %+v: %v", endpointSlice, err))
 		}
@@ -83,5 +83,5 @@ func (c *Controller) queueServiceForEndpointSlice(endpointSlice *discovery.Endpo
 		return // we queue a service only if it's in the local caches
 	}
 
-	c.servicesQueue.Add(key)
+	c.egressServiceQueue.Add(key)
 }
