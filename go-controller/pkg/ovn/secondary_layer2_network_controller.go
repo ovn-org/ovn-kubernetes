@@ -17,6 +17,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -79,7 +80,31 @@ func (h *secondaryLayer2NetworkControllerEventHandler) IsResourceScheduled(obj i
 // if any, yielded during object creation.
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
 func (h *secondaryLayer2NetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
-	return h.oc.AddSecondaryNetworkResourceCommon(h.objType, obj)
+	switch h.objType {
+	case factory.NodeType:
+		if h.oc.IsExpose() {
+			node, ok := obj.(*kapi.Node)
+			if !ok {
+				return fmt.Errorf("failed casting %T object to *kapi.Node", obj)
+			}
+			if err := h.oc.routeTenantSubnetToJoinRouter(node.Name); err != nil {
+				return err
+			}
+			if err := h.oc.masqueradeTenantSubnet(node.Name); err != nil {
+				return err
+			}
+		}
+	case factory.PodType:
+		if err := h.oc.AddSecondaryNetworkResourceCommon(h.objType, obj); err != nil {
+			return err
+		}
+		if h.oc.IsExpose() {
+			if err := h.oc.ensureRerouteToGwPolicy(obj); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // UpdateResource updates the specified object in the cluster to its version in newObj according to its
@@ -107,6 +132,9 @@ func (h *secondaryLayer2NetworkControllerEventHandler) SyncFunc(objs []interface
 		switch h.objType {
 		case factory.PodType:
 			syncFunc = h.oc.syncPodsForSecondaryNetwork
+
+		case factory.NodeType:
+			syncFunc = h.oc.syncNodes
 
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
@@ -164,6 +192,7 @@ func NewSecondaryLayer2NetworkController(cnci *CommonNetworkControllerInfo, netI
 
 func (oc *SecondaryLayer2NetworkController) initRetryFramework() {
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
+	oc.retryNodes = oc.newRetryFramework(factory.NodeType)
 }
 
 // newRetryFramework builds and returns a retry framework for the input resource type;
@@ -206,6 +235,10 @@ func (oc *SecondaryLayer2NetworkController) Stop() {
 	close(oc.stopChan)
 	oc.wg.Wait()
 
+	if oc.nodeHandler != nil {
+		oc.watchFactory.RemoveNodeHandler(oc.nodeHandler)
+	}
+
 	if oc.podHandler != nil {
 		oc.watchFactory.RemovePodHandler(oc.podHandler)
 	}
@@ -237,6 +270,10 @@ func (oc *SecondaryLayer2NetworkController) Run() error {
 	klog.Infof("Starting all the Watchers for network %s ...", oc.GetNetworkName())
 	start := time.Now()
 
+	if err := oc.WatchNodes(); err != nil {
+		return err
+	}
+
 	if err := oc.WatchPods(); err != nil {
 		return err
 	}
@@ -249,6 +286,19 @@ func (oc *SecondaryLayer2NetworkController) Run() error {
 	}
 
 	return nil
+}
+
+// WatchNodes starts the watching of node resource and calls
+// back the appropriate handler logic
+func (oc *SecondaryLayer2NetworkController) WatchNodes() error {
+	if oc.nodeHandler != nil {
+		return nil
+	}
+	handler, err := oc.retryNodes.WatchResource()
+	if err == nil {
+		oc.nodeHandler = handler
+	}
+	return err
 }
 
 func (oc *SecondaryLayer2NetworkController) Init() error {
@@ -284,7 +334,17 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 	if err != nil {
 		return err
 	}
+	lsSubnet := logicalSwitch.OtherConfig["subnet"]
+	_, switchSubnet, err := net.ParseCIDR(lsSubnet)
+	gwIfAddr := util.GetNodeGatewayIfAddr(switchSubnet)
+	if err != nil {
+		return err
+	}
 
+	// Exclude the local router if the subnet is expose
+	if oc.IsExpose() {
+		layer2NetConfInfo.ExcludeIPs = append(layer2NetConfInfo.ExcludeIPs, gwIfAddr.IP)
+	}
 	for _, excludeIP := range layer2NetConfInfo.ExcludeIPs {
 		var ipMask net.IPMask
 		if excludeIP.To4() != nil {
@@ -298,13 +358,7 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 
 	// Attach to the distribuged router
 	if oc.IsExpose() {
-
 		// Create the port at the distributed router to attach the switch to
-		_, switchSubnet, err := net.ParseCIDR(logicalSwitch.OtherConfig["subnet"])
-		if err != nil {
-			return err
-		}
-		gwIfAddr := util.GetNodeGatewayIfAddr(switchSubnet)
 		lrpMAC := util.IPAddrToHWAddr(gwIfAddr.IP)
 
 		logicalRouterPort := nbdb.LogicalRouterPort{
@@ -328,7 +382,191 @@ func (oc *SecondaryLayer2NetworkController) Init() error {
 		if err := libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &logicalSwitch, &logicalSwitchPort); err != nil {
 			return nil
 		}
+
+		if err := oc.ensureDummyRoute(lsSubnet, gwIfAddr.IP.String()); err != nil {
+			return err
+		}
+
+		if err := oc.ensureKeepInternalTrafficNextHopPolicy(lsSubnet); err != nil {
+			return err
+		}
 	}
 
+	return nil
+}
+
+func (oc *SecondaryLayer2NetworkController) syncNodes(nodes []interface{}) error {
+	return nil
+}
+
+func (oc *SecondaryLayer2NetworkController) ensureDummyRoute(subnet, router string) error {
+	// Add a dummy route to match the tenant cluster so we can continue implementing
+	// routing with policies (if there is no match policies are not run).
+	dummyRoute := nbdb.LogicalRouterStaticRoute{
+		IPPrefix: subnet,
+		Nexthop:  router,
+		Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+	}
+
+	p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return item.Policy != nil && *item.Policy == *dummyRoute.Policy && item.Nexthop == dummyRoute.Nexthop && item.IPPrefix == dummyRoute.IPPrefix
+	}
+	if err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.nbClient, types.OVNClusterRouter, &dummyRoute, p); err != nil {
+		return fmt.Errorf("failed ensuring dummy route: %v", err)
+	}
+	return nil
+}
+
+func (oc *SecondaryLayer2NetworkController) ensureKeepInternalTrafficNextHopPolicy(subnet string) error {
+	// Add a allow policy with higher priority to keep nexthop for e/s traffic
+	// TODO: Read the internal subnets from the system
+	podCIDR := "10.244.0.0/16"
+	internalCIDR := "100.64.0.0/16"
+	policy := nbdb.LogicalRouterPolicy{
+		Match:    fmt.Sprintf("ip4.src == %s && ip4.dst == { %s, %s }", subnet, podCIDR, internalCIDR),
+		Action:   nbdb.LogicalRouterPolicyActionAllow,
+		Priority: 2,
+	}
+
+	predicate := func(item *nbdb.LogicalRouterPolicy) bool {
+		return item.Priority == policy.Priority && item.Match == policy.Match && item.Action == policy.Action
+	}
+
+	if err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.nbClient, types.OVNClusterRouter, &policy, predicate); err != nil {
+		return fmt.Errorf("failed ensuring policy at cluster router to keep e/w nexthop: %v", err)
+	}
+	return nil
+}
+
+func (oc *SecondaryLayer2NetworkController) ensureRerouteToGwPolicy(obj interface{}) error {
+	pod, ok := obj.(*kapi.Pod)
+	if !ok {
+		return fmt.Errorf("failed casting %T object to *knet.Pod", obj)
+	}
+
+	_, network, _ := util.PodWantsMultiNetwork(pod, oc.NetInfo)
+	if network == nil {
+		return fmt.Errorf("failed retrieving network")
+	}
+	nadName := util.GetNADName(network.Namespace, network.Name)
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
+	if err != nil {
+		return err
+	}
+
+	nodeLRP := &nbdb.LogicalRouterPort{
+		Name: types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + pod.Spec.NodeName,
+	}
+
+	nodeLRP, err = libovsdbops.GetLogicalRouterPort(oc.nbClient, nodeLRP)
+	if err != nil {
+		return err
+	}
+	nodeLRPIP, _, err := net.ParseCIDR(nodeLRP.Networks[0])
+	if err != nil {
+		return err
+	}
+	nodeGwAddress := nodeLRPIP.String()
+	if nodeGwAddress == "" {
+		return fmt.Errorf("missing node gw router port address")
+	}
+
+	for _, podIP := range podAnnotation.IPs {
+		// Add a reroute policy to route VM n/s traffic to the node where the VM
+		// is running
+		policy := nbdb.LogicalRouterPolicy{
+			Match:    fmt.Sprintf("ip4.src == %s", podIP.IP.String()),
+			Action:   nbdb.LogicalRouterPolicyActionReroute,
+			Nexthops: []string{nodeGwAddress},
+			Priority: 1,
+		}
+
+		predicate := func(item *nbdb.LogicalRouterPolicy) bool {
+			return item.Priority == policy.Priority && item.Match == policy.Match && item.Action == policy.Action && item.Nexthops != nil && item.Nexthop == policy.Nexthop
+		}
+
+		if err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(oc.nbClient, types.OVNClusterRouter, &policy, predicate); err != nil {
+			return fmt.Errorf("failed ensuring policy to reroute to n/s traffic: %v", err)
+		}
+	}
+	return nil
+}
+
+func (oc *SecondaryLayer2NetworkController) routeTenantSubnetToJoinRouter(nodeName string) error {
+	joinGwPort := &nbdb.LogicalRouterPort{
+		Name: types.GWRouterToJoinSwitchPrefix + types.OVNClusterRouter,
+	}
+
+	joinGwPort, err := libovsdbops.GetLogicalRouterPort(oc.nbClient, joinGwPort)
+	if err != nil {
+		return fmt.Errorf("failed getting current join logical router port %s: %v", joinGwPort.Name, err)
+	}
+
+	joinGwPortIP, _, err := net.ParseCIDR(joinGwPort.Networks[0])
+	if err != nil {
+		return err
+	}
+
+	layer2NetConfInfo := oc.NetConfInfo.(*util.Layer2NetConfInfo)
+	for _, subnet := range layer2NetConfInfo.ClusterSubnets {
+		cidr := subnet.CIDR.String()
+		route := nbdb.LogicalRouterStaticRoute{
+			IPPrefix: cidr,
+			Nexthop:  joinGwPortIP.String(),
+		}
+
+		predicate := func(item *nbdb.LogicalRouterStaticRoute) bool {
+			return item.Nexthop == route.Nexthop && item.IPPrefix == route.IPPrefix
+		}
+
+		if err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(oc.nbClient, types.GWRouterPrefix+nodeName, &route, predicate); err != nil {
+			return fmt.Errorf("failed ensuring route to join router at gw: %v", err)
+		}
+	}
+
+	return nil
+}
+
+func (oc *SecondaryLayer2NetworkController) masqueradeTenantSubnet(nodeName string) error {
+	currentGwLR := &nbdb.LogicalRouter{
+		Name: types.GWRouterPrefix + nodeName,
+	}
+
+	currentGwLR, err := libovsdbops.GetLogicalRouter(oc.nbClient, currentGwLR)
+	if err != nil {
+		return fmt.Errorf("failed getting current gw logical router %s: %v", currentGwLR.Name, err)
+	}
+
+	currentGwLRP := &nbdb.LogicalRouterPort{
+		Name: types.GWRouterToExtSwitchPrefix + currentGwLR.Name,
+	}
+	if err := oc.nbClient.Get(context.Background(), currentGwLRP); err != nil {
+		return fmt.Errorf("failed getting current gw logical router port %s: %v", currentGwLRP.Name, err)
+	}
+
+	currentGwLRPIP, _, err := net.ParseCIDR(currentGwLRP.Networks[0])
+	if err != nil {
+		return err
+	}
+
+	if err := oc.nbClient.Get(context.Background(), currentGwLR); err != nil {
+		return fmt.Errorf("failed getting current gw logical router %s: %v", currentGwLR.Name, err)
+	}
+
+	layer2NetConfInfo := oc.NetConfInfo.(*util.Layer2NetConfInfo)
+	for _, subnet := range layer2NetConfInfo.ClusterSubnets {
+		cidr := subnet.CIDR.String()
+		masqueradeNAT := &nbdb.NAT{
+			ExternalIP: currentGwLRPIP.String(),
+			LogicalIP:  cidr,
+			Type:       nbdb.NATTypeSNAT,
+			Options: map[string]string{
+				"stateless": "false",
+			},
+		}
+		if err := libovsdbops.CreateOrUpdateNATs(oc.nbClient, currentGwLR, masqueradeNAT); err != nil {
+			return fmt.Errorf("failed ensuring tenant subnet masquerade: %s")
+		}
+	}
 	return nil
 }
