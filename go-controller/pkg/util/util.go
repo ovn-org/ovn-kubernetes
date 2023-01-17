@@ -13,6 +13,7 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 
@@ -20,6 +21,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -222,16 +224,20 @@ func IsClusterIP(svcVIP string) bool {
 	return false
 }
 
-func GetSecondaryNetworkLogicalPortName(podNamespace, podName, nadName string) string {
-	return GetSecondaryNetworkPrefix(nadName) + composePortName(podNamespace, podName)
+func GetSecondaryNetworkLogicalPortName(pod *kapi.Pod, nadName string) string {
+	name := pod.Name
+	if vmName, isVM := kubevirt.OwnsPodAsVirtualMachine(pod); isVM {
+		name = vmName
+	}
+	return GetSecondaryNetworkPrefix(nadName) + composePortName(pod.Namespace, name)
 }
 
 func GetLogicalPortName(podNamespace, podName string) string {
 	return composePortName(podNamespace, podName)
 }
 
-func GetSecondaryNetworkIfaceId(podNamespace, podName, nadName string) string {
-	return GetSecondaryNetworkPrefix(nadName) + composePortName(podNamespace, podName)
+func GetSecondaryNetworkIfaceId(pod *kapi.Pod, nadName string) string {
+	return GetSecondaryNetworkLogicalPortName(pod, nadName)
 }
 
 func GetIfaceId(podNamespace, podName string) string {

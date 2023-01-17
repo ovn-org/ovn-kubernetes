@@ -132,7 +132,7 @@ func (bnc *BaseNetworkController) GetLogicalPortName(pod *kapi.Pod, nadName stri
 	if !bnc.IsSecondary() {
 		return util.GetLogicalPortName(pod.Namespace, pod.Name)
 	} else {
-		return util.GetSecondaryNetworkLogicalPortName(pod.Namespace, pod.Name, nadName)
+		return util.GetSecondaryNetworkLogicalPortName(pod, nadName)
 	}
 }
 

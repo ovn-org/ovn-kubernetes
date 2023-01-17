@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -112,13 +113,51 @@ func (h *secondaryLayer2NetworkControllerEventHandler) AddResource(obj interface
 // Given an old and a new object; The inRetryCache boolean argument is to indicate if the given resource
 // is in the retryCache or not.
 func (h *secondaryLayer2NetworkControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
-	return h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
+	switch h.objType {
+	case factory.PodType:
+		pod, ok := newObj.(*kapi.Pod)
+		if !ok {
+			return fmt.Errorf("failed casting %T object to *kapi.Pod", newObj)
+		}
+		isLiveMigrationLeftover, err := kubevirt.PodIsLiveMigrationLeftOver(h.oc.client, pod)
+		if err != nil {
+			return err
+		}
+		// If this pod is a kubevirt live migration leftover we should do nothing
+		// or we may end up overwriting lsp requested-chassis and enroute policy
+		if isLiveMigrationLeftover {
+			return nil
+		}
+		if err := h.oc.UpdateSecondaryNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache); err != nil {
+			return err
+		}
+		if h.oc.IsExpose() {
+			if err := h.oc.ensureRerouteToGwPolicy(newObj); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
 // Given an object and optionally a cachedObj; cachedObj is the internal cache entry for this object,
 // used for now for pods and network policies.
 func (h *secondaryLayer2NetworkControllerEventHandler) DeleteResource(obj, cachedObj interface{}) error {
+	pod, ok := obj.(*kapi.Pod)
+	if !ok {
+		return fmt.Errorf("failed casting %T object to *kapi.Pod", obj)
+	}
+	isLiveMigrationLeftOver, err := kubevirt.PodIsLiveMigrationLeftOver(h.oc.client, pod)
+	if err != nil {
+		return err
+	}
+
+	// Keep the LSP if this pod is what remains from a kubevirt live migration
+	if isLiveMigrationLeftOver {
+		return nil
+	}
+
 	return h.oc.DeleteSecondaryNetworkResourceCommon(h.objType, obj, cachedObj)
 }
 

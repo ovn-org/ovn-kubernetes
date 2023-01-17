@@ -360,8 +360,13 @@ func ConfigureOVS(ctx context.Context, namespace, podName, hostIfaceName string,
 
 	ifaceID := util.GetIfaceId(namespace, podName)
 	if ifInfo.NetName != types.DefaultNetworkName {
-		ifaceID = util.GetSecondaryNetworkIfaceId(namespace, podName, ifInfo.NADName)
+		pod, err := getPod(podLister, kclient, namespace, podName)
+		if err != nil {
+			return err
+		}
+		ifaceID = util.GetSecondaryNetworkIfaceId(pod, ifInfo.NADName)
 	}
+	// TODO: Do we dump son VM uuid instead ?
 	initialPodUID := ifInfo.PodUID
 
 	ipStrs := make([]string, len(ifInfo.IPs))
