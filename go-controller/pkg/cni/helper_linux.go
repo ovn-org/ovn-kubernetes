@@ -14,10 +14,12 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sys/unix"
 	"k8s.io/client-go/kubernetes"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -250,6 +252,50 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 	return hostIface, contIface, nil
 }
 
+func setupTapInterface(containerID string, ifaceName string, ifInfo *PodInterfaceInfo) (*current.Interface, *current.Interface, error) {
+	hostIface := &current.Interface{
+		Name: containerID[:15],
+		Mac:  ifInfo.MAC.String(),
+	}
+	contIface := &current.Interface{
+		Name: ifaceName,
+		Mac:  ifInfo.MAC.String(),
+	}
+
+	link := &netlink.Tuntap{
+		LinkAttrs: netlink.LinkAttrs{Name: hostIface.Name},
+		Mode:      unix.IFF_TAP,
+	}
+	netlink.LinkDel(link)
+	if err := netlink.LinkAdd(link); err != nil {
+		return nil, nil, fmt.Errorf("failed creating tap device %s: %v", hostIface.Name, err)
+	}
+
+	if err := netlink.LinkSetHardwareAddr(link, ifInfo.MAC); err != nil {
+		return nil, nil, err
+	}
+
+	if err := netlink.LinkSetMTU(link, ifInfo.MTU); err != nil {
+		return nil, nil, err
+	}
+	if err := util.GetNetLinkOps().LinkSetUp(link); err != nil {
+		return nil, nil, err
+	}
+	return hostIface, contIface, nil
+}
+
+// Setup sriov interface in the pod
+func moveTapInterface(netns ns.NetNS, hostIface, contIface *current.Interface) error {
+	err := moveIfToNetns(hostIface.Name, netns)
+	if err != nil {
+		return err
+	}
+
+	return netns.Do(func(hostNS ns.NetNS) error {
+		return renameLink(hostIface.Name, contIface.Name)
+	})
+}
+
 // Setup sriov interface in the pod
 func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo, pciAddrs string) (*current.Interface, *current.Interface, error) {
 	hostIface := &current.Interface{}
@@ -443,10 +489,20 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 
 	var hostIface, contIface *current.Interface
 
+	isKubevirt, err := kubevirt.OwnsPod(pr.ctx, kclient, pr.PodNamespace, pr.PodName)
+	if err != nil {
+		return nil, err
+	}
+
 	klog.V(5).Infof("CNI Conf %v", pr.CNIConf)
 	if pr.CNIConf.DeviceID != "" {
 		// SR-IOV Case
 		hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID)
+	} else if isKubevirt {
+		hostIface, contIface, err = setupTapInterface(pr.SandboxID, pr.IfName, ifInfo)
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		if ifInfo.IsDPUHostMode {
 			return nil, fmt.Errorf("unexpected configuration, pod request on dpu host. " +
@@ -464,6 +520,15 @@ func (pr *PodRequest) ConfigureInterface(podLister corev1listers.PodLister, kcli
 			podLister, kclient)
 		if err != nil {
 			pr.deletePorts(hostIface.Name, pr.PodNamespace, pr.PodName)
+			return nil, err
+		}
+	}
+
+	if isKubevirt {
+		// Tap devices has to be moved after ovs port is created,
+		// this operation has to be done again if the ovs services
+		// is restarted
+		if err := moveTapInterface(netns, hostIface, contIface); err != nil {
 			return nil, err
 		}
 	}
