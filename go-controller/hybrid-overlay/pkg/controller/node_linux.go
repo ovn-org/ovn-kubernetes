@@ -91,7 +91,7 @@ func podIPToCookie(podIP net.IP) string {
 // AddPod handles the pod add event
 func (n *NodeController) AddPod(pod *kapi.Pod) error {
 	// nothing to do for hostnetworked pod
-	if !util.PodWantsNetwork(pod) {
+	if util.PodWantsHostNetwork(pod) {
 		return nil
 	}
 	if util.PodCompleted(pod) {
@@ -144,7 +144,7 @@ func (n *NodeController) AddPod(pod *kapi.Pod) error {
 // DeletePod handles the pod delete event
 func (n *NodeController) DeletePod(pod *kapi.Pod) error {
 	// nothing to do for hostnetworked pods
-	if !util.PodWantsNetwork(pod) {
+	if util.PodWantsHostNetwork(pod) {
 		return nil
 	}
 	podIPs, _, err := getPodDetails(pod)

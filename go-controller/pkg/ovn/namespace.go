@@ -309,7 +309,7 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *kapi.Namespace) 
 				}
 				for _, pod := range existingPods {
 					logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
-					if !util.PodWantsNetwork(pod) {
+					if util.PodWantsHostNetwork(pod) {
 						continue
 					}
 					podIPs, err := util.GetPodIPsOfNetwork(pod, oc.NetInfo)
@@ -533,7 +533,7 @@ func (oc *DefaultNetworkController) createNamespaceAddrSetAllPods(ns string) (ad
 	} else {
 		ips = make([]net.IP, 0, len(existingPods))
 		for _, pod := range existingPods {
-			if util.PodWantsNetwork(pod) && !util.PodCompleted(pod) && util.PodScheduled(pod) {
+			if !util.PodWantsHostNetwork(pod) && !util.PodCompleted(pod) && util.PodScheduled(pod) {
 				podIPs, err := util.GetPodIPsOfNetwork(pod, oc.NetInfo)
 				if err != nil {
 					klog.Warningf(err.Error())

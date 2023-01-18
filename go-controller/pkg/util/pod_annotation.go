@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"net"
 
-	netattachdefapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	netattachdefutils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
+	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	nadutils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	v1 "k8s.io/api/core/v1"
@@ -262,29 +262,35 @@ func GetPodCIDRsWithFullMask(pod *v1.Pod) ([]*net.IPNet, error) {
 // and then falling back to the Pod Status IPs. This function is intended to
 // also return IPs for HostNetwork and other non-OVN-IPAM-ed pods.
 func GetPodIPsOfNetwork(pod *v1.Pod, nInfo NetInfo) ([]net.IP, error) {
-	// if netInfo is nil, this is called fro default network
 	ips := []net.IP{}
-	nadName := types.DefaultNetworkName
-	if nInfo.IsSecondary() {
-		on, network, err := PodWantsMultiNetwork(pod, nInfo)
+	networkMap := map[string]*nadapi.NetworkSelectionElement{}
+	if !nInfo.IsSecondary() {
+		// default network, Pod annotation is under the name of DefaultNetworkName
+		networkMap[types.DefaultNetworkName] = nil
+	} else {
+		var err error
+		var on bool
+
+		on, networkMap, err = GetPodNADToNetworkMapping(pod, nInfo)
 		if err != nil {
 			return nil, err
 		} else if !on {
 			// the pod is not attached to this specific network, don't return error
 			return []net.IP{}, nil
 		}
-		nadName = GetNADName(network.Namespace, network.Name)
 	}
-	annotation, _ := UnmarshalPodAnnotation(pod.Annotations, nadName)
-	if annotation != nil {
-		// Use the OVN annotation if valid
-		for _, ip := range annotation.IPs {
-			ips = append(ips, ip.IP)
-		}
-		// An OVN annotation should never have empty IPs, but just in case
-		if len(ips) == 0 {
-			klog.Warningf("No IPs found in existing OVN annotation for NAD %s! Pod Name: %s, Annotation: %#v",
-				nadName, pod.Name, annotation)
+	for nadName := range networkMap {
+		annotation, _ := UnmarshalPodAnnotation(pod.Annotations, nadName)
+		if annotation != nil {
+			// Use the OVN annotation if valid
+			for _, ip := range annotation.IPs {
+				ips = append(ips, ip.IP)
+			}
+			// An OVN annotation should never have empty IPs, but just in case
+			if len(ips) == 0 {
+				klog.Warningf("No IPs found in existing OVN annotation for NAD %s! Pod Name: %s, Annotation: %#v",
+					nadName, pod.Name, annotation)
+			}
 		}
 	}
 	if len(ips) != 0 {
@@ -321,8 +327,8 @@ func GetPodIPsOfNetwork(pod *v1.Pod, nInfo NetInfo) ([]net.IP, error) {
 	return []net.IP{ip}, nil
 }
 
-// GetK8sPodDefaultNetwork get pod default network from annotations
-func GetK8sPodDefaultNetwork(pod *v1.Pod) (*netattachdefapi.NetworkSelectionElement, error) {
+// GetK8sPodDefaultNetworkSelection get pod default network from annotations
+func GetK8sPodDefaultNetworkSelection(pod *v1.Pod) (*nadapi.NetworkSelectionElement, error) {
 	var netAnnot string
 
 	netAnnot, ok := pod.Annotations[DefNetworkAnnotation]
@@ -330,7 +336,7 @@ func GetK8sPodDefaultNetwork(pod *v1.Pod) (*netattachdefapi.NetworkSelectionElem
 		return nil, nil
 	}
 
-	networks, err := netattachdefutils.ParseNetworkAnnotation(netAnnot, pod.Namespace)
+	networks, err := nadutils.ParseNetworkAnnotation(netAnnot, pod.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("GetK8sPodDefaultNetwork: failed to parse CRD object: %v", err)
 	}
@@ -345,14 +351,14 @@ func GetK8sPodDefaultNetwork(pod *v1.Pod) (*netattachdefapi.NetworkSelectionElem
 	return nil, nil
 }
 
-// GetK8sPodAllNetworks get pod's all network NetworkSelectionElement from k8s.v1.cni.cncf.io/networks annotation
-func GetK8sPodAllNetworks(pod *v1.Pod) ([]*netattachdefapi.NetworkSelectionElement, error) {
-	networks, err := netattachdefutils.ParsePodNetworkAnnotation(pod)
+// GetK8sPodAllNetworkSelections get pod's all network NetworkSelectionElement from k8s.v1.cni.cncf.io/networks annotation
+func GetK8sPodAllNetworkSelections(pod *v1.Pod) ([]*nadapi.NetworkSelectionElement, error) {
+	networks, err := nadutils.ParsePodNetworkAnnotation(pod)
 	if err != nil {
-		if _, ok := err.(*netattachdefapi.NoK8sNetworkError); !ok {
+		if _, ok := err.(*nadapi.NoK8sNetworkError); !ok {
 			return nil, fmt.Errorf("failed to get all NetworkSelectionElements for pod %s/%s: %v", pod.Namespace, pod.Name, err)
 		}
-		networks = []*netattachdefapi.NetworkSelectionElement{}
+		networks = []*nadapi.NetworkSelectionElement{}
 	}
 	return networks, nil
 }

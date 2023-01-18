@@ -37,7 +37,7 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) error {
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			klog.Infof("Add for Pod: %s/%s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName())
-			if !util.PodWantsNetwork(pod) || pod.Status.Phase == kapi.PodRunning {
+			if util.PodWantsHostNetwork(pod) || pod.Status.Phase == kapi.PodRunning {
 				return
 			}
 			if util.PodScheduled(pod) {
@@ -74,7 +74,7 @@ func (n *OvnNode) watchPodsDPU(isOvnUpEnabled bool) error {
 		UpdateFunc: func(old, newer interface{}) {
 			pod := newer.(*kapi.Pod)
 			klog.Infof("Update for Pod: %s/%s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName())
-			if !util.PodWantsNetwork(pod) || pod.Status.Phase == kapi.PodRunning {
+			if util.PodWantsHostNetwork(pod) || pod.Status.Phase == kapi.PodRunning {
 				retryPods.Delete(pod.UID)
 				return
 			}
