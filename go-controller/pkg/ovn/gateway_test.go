@@ -802,15 +802,113 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				"1400")
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
 		})
+
+		ginkgo.It("ensures only a single static route per node for ovn_cluster_router", func() {
+			joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16")
+			hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23")
+			badRouteName := "wrongRoute-UUID"
+			badRoute := &nbdb.LogicalRouterStaticRoute{
+				UUID:     badRouteName,
+				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+				IPPrefix: hostSubnets[0].String(),
+				Nexthop:  "100.64.0.5",
+			}
+			badRouteName2 := "wrongRoute-UUID-2"
+			badRoute2 := &nbdb.LogicalRouterStaticRoute{
+				UUID:     badRouteName2,
+				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+				IPPrefix: hostSubnets[0].String(),
+				Nexthop:  "100.64.0.6",
+			}
+			badRouteName3 := "wrongRoute-UUID-3"
+			badRoute3 := &nbdb.LogicalRouterStaticRoute{
+				UUID:     badRouteName3,
+				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+				IPPrefix: hostSubnets[0].String(),
+				Nexthop:  "100.64.0.7",
+			}
+			// ignoreRoute has no policy, aka dst-ip. It should be ignored for removal
+			ignoreRouteName4 := "ignoreRoute-UUID"
+			ignoreRoute4 := &nbdb.LogicalRouterStaticRoute{
+				UUID:     ignoreRouteName4,
+				IPPrefix: hostSubnets[0].String(),
+				Nexthop:  "100.64.0.99",
+			}
+			expectedOVNClusterRouter := &nbdb.LogicalRouter{
+				UUID:         types.OVNClusterRouter + "-UUID",
+				Name:         types.OVNClusterRouter,
+				StaticRoutes: []string{badRouteName, badRouteName2, badRouteName3, ignoreRouteName4},
+			}
+			expectedNodeSwitch := &nbdb.LogicalSwitch{
+				UUID: nodeName + "-UUID",
+				Name: nodeName,
+			}
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterLBGroupName + "-UUID",
+				Name: types.ClusterLBGroupName,
+			}
+			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					&nbdb.LogicalSwitch{
+						UUID: types.OVNJoinSwitch + "-UUID",
+						Name: types.OVNJoinSwitch,
+					},
+					badRoute,
+					badRoute2,
+					badRoute3,
+					ignoreRoute4,
+					expectedOVNClusterRouter,
+					expectedNodeSwitch,
+					expectedClusterLBGroup,
+				},
+			})
+			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
+			defLRPIPs := ovntest.MustParseIPNets("100.64.0.1/16")
+			nodeName := "test-node"
+			l3GatewayConfig := &util.L3GatewayConfig{
+				Mode:           config.GatewayModeLocal,
+				ChassisID:      "SYSTEM-ID",
+				InterfaceID:    "INTERFACE-ID",
+				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
+				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
+				NextHops:       ovntest.MustParseIPs("169.254.33.1"),
+				NodePortEnable: true,
+			}
+			sctpSupport := false
+			config.Gateway.DisableSNATMultipleGWs = true
+
+			var err error
+			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			err = fakeOvn.controller.gatewayInit(
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			testData := []libovsdb.TestData{}
+			skipSnat := true
+
+			// remove bad route from expected data
+			expectedOVNClusterRouter.StaticRoutes = []string{ignoreRouteName4}
+			mgmtPortIP := ""
+			ginkgo.By("Gateway init should have removed bad route")
+			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch,
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
+				"1400")
+			expectedDatabaseState = append(expectedDatabaseState, ignoreRoute4)
+			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+		})
 	})
 
 	ginkgo.Context("Gateway Create Operations Local Gateway Mode", func() {
 
 		ginkgo.BeforeEach(func() {
 			config.Gateway.Mode = config.GatewayModeLocal
+			config.IPv6Mode = false
 		})
 
 		ginkgo.It("creates a dual-stack gateway in OVN", func() {
+			config.IPv6Mode = true
 			// covers both IPv4, IPv6 single stack cases since path is the same.
 			routeUUID1 := "route1-UUID"
 			leftoverJoinRoute1 := &nbdb.LogicalRouterStaticRoute{
@@ -883,6 +981,77 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			expectedOVNClusterRouter.StaticRoutes = []string{} // the leftover SGW route should have got deleted
 			// We don't set up the Allow from mgmt port ACL here
 			mgmtPortIP := ""
+			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch,
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
+				"1400")
+			gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseState))
+		})
+
+		ginkgo.It("ensures a leftover route on ovn_cluster_router to join subnet is removed", func() {
+			joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16")
+			hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23")
+			badRouteName := "wrongRoute-UUID"
+			badRoute := &nbdb.LogicalRouterStaticRoute{
+				UUID:     badRouteName,
+				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+				IPPrefix: hostSubnets[0].String(),
+				Nexthop:  "100.64.0.5",
+			}
+			expectedOVNClusterRouter := &nbdb.LogicalRouter{
+				UUID:         types.OVNClusterRouter + "-UUID",
+				Name:         types.OVNClusterRouter,
+				StaticRoutes: []string{badRouteName},
+			}
+			expectedNodeSwitch := &nbdb.LogicalSwitch{
+				UUID: nodeName + "-UUID",
+				Name: nodeName,
+			}
+			expectedClusterLBGroup := &nbdb.LoadBalancerGroup{
+				UUID: types.ClusterLBGroupName + "-UUID",
+				Name: types.ClusterLBGroupName,
+			}
+			fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					&nbdb.LogicalSwitch{
+						UUID: types.OVNJoinSwitch + "-UUID",
+						Name: types.OVNJoinSwitch,
+					},
+					badRoute,
+					expectedOVNClusterRouter,
+					expectedNodeSwitch,
+					expectedClusterLBGroup,
+				},
+			})
+			clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
+			defLRPIPs := ovntest.MustParseIPNets("100.64.0.1/16")
+			nodeName := "test-node"
+			l3GatewayConfig := &util.L3GatewayConfig{
+				Mode:           config.GatewayModeLocal,
+				ChassisID:      "SYSTEM-ID",
+				InterfaceID:    "INTERFACE-ID",
+				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
+				IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
+				NextHops:       ovntest.MustParseIPs("169.254.33.1"),
+				NodePortEnable: true,
+			}
+			sctpSupport := false
+			config.Gateway.DisableSNATMultipleGWs = true
+
+			var err error
+			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			err = fakeOvn.controller.gatewayInit(
+				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs, true)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			testData := []libovsdb.TestData{}
+			skipSnat := true
+
+			// remove bad route from expected data
+			expectedOVNClusterRouter.StaticRoutes = []string{}
+			mgmtPortIP := ""
+			ginkgo.By("Gateway init should have removed bad route")
 			expectedDatabaseState := generateGatewayInitExpectedNB(testData, expectedOVNClusterRouter, expectedNodeSwitch,
 				nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, mgmtPortIP,
 				"1400")

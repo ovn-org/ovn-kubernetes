@@ -552,7 +552,6 @@ func CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient libovsdbcl
 	opModels := []operationModel{
 		{
 			Model:          lrsr,
-			ModelPredicate: p,
 			OnModelUpdates: fields,
 			DoAfter:        func() { router.StaticRoutes = []string{lrsr.UUID} },
 			ErrNotFound:    false,
@@ -567,22 +566,96 @@ func CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient libovsdbcl
 		},
 	}
 
+	if p != nil {
+		opModels[0].ModelPredicate = p
+	}
+
 	m := newModelClient(nbClient)
 	return m.CreateOrUpdateOps(ops, opModels...)
 }
 
-// CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps looks up a logical
+// PolicyEqualPredicate determines if two static routes have the same routing policy (dst-ip or src-ip)
+// If policy is nil, OVN considers that as dst-ip
+func PolicyEqualPredicate(p1, p2 *nbdb.LogicalRouterStaticRoutePolicy) bool {
+	if p1 == nil {
+		return p2 == nil || (p2 != nil && *p2 == nbdb.LogicalRouterStaticRoutePolicyDstIP)
+	}
+
+	if p2 == nil {
+		return *p1 == nbdb.LogicalRouterStaticRoutePolicyDstIP
+	}
+
+	return *p1 == *p2
+}
+
+// CreateOrReplaceLogicalRouterStaticRouteWithPredicate looks up a logical
 // router static route from the cache based on a given predicate. If it does not
 // exist, it creates the provided logical router static route. If it does, it
 // updates it. The logical router static route is added to the provided logical
-// router
-func CreateOrUpdateLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Client, routerName string,
+// router.
+// If more than one route matches the predicate on the router, the additional routes are removed.
+func CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient libovsdbclient.Client, routerName string,
 	lrsr *nbdb.LogicalRouterStaticRoute, p logicalRouterStaticRoutePredicate, fields ...interface{}) error {
-	ops, err := CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient, nil, routerName, lrsr, p, fields...)
+
+	lr := &nbdb.LogicalRouter{Name: routerName}
+	router, err := GetLogicalRouter(nbClient, lr)
+	if err != nil {
+		return err
+	}
+	newPredicate := func(item *nbdb.LogicalRouterStaticRoute) bool {
+		for _, routeUUID := range router.StaticRoutes {
+			if routeUUID == item.UUID && p(item) {
+				return true
+			}
+		}
+		return false
+	}
+	routes, err := FindLogicalRouterStaticRoutesWithPredicate(nbClient, newPredicate)
 	if err != nil {
 		return err
 	}
 
+	var ops []libovsdb.Operation
+	m := newModelClient(nbClient)
+
+	if len(routes) > 0 {
+		lrsr.UUID = routes[0].UUID
+	}
+
+	if len(routes) > 1 {
+		// should only be a single route remove all except the first
+		routes = routes[1:]
+		opModels := make([]operationModel, 0, len(routes)+1)
+		router.StaticRoutes = []string{}
+		for _, route := range routes {
+			route := route
+			router.StaticRoutes = append(router.StaticRoutes, route.UUID)
+			opModel := operationModel{
+				Model:       route,
+				ErrNotFound: false,
+				BulkOp:      false,
+			}
+			opModels = append(opModels, opModel)
+		}
+		opModel := operationModel{
+			Model:            router,
+			ModelPredicate:   func(item *nbdb.LogicalRouter) bool { return item.Name == router.Name },
+			OnModelMutations: []interface{}{&router.StaticRoutes},
+			ErrNotFound:      true,
+			BulkOp:           false,
+		}
+		opModels = append(opModels, opModel)
+
+		ops, err = m.DeleteOps(nil, opModels...)
+		if err != nil {
+			return err
+		}
+	}
+
+	ops, err = CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient, ops, routerName, lrsr, nil, fields...)
+	if err != nil {
+		return err
+	}
 	_, err = TransactAndCheck(nbClient, ops)
 	return err
 }
@@ -617,7 +690,7 @@ func DeleteLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Client
 	return m.Delete(opModels...)
 }
 
-// DeleteLogicalRouterPolicies deletes the logical router static routes and
+// DeleteLogicalRouterStaticRoutes deletes the logical router static routes and
 // removes them from the provided logical router
 func DeleteLogicalRouterStaticRoutes(nbClient libovsdbclient.Client, routerName string, lrsrs ...*nbdb.LogicalRouterStaticRoute) error {
 	router := &nbdb.LogicalRouter{
