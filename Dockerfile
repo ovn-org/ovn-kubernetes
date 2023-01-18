@@ -23,7 +23,6 @@ FROM registry.ci.openshift.org/ocp/4.13:cli AS cli
 # - creating directories required by ovn-kubernetes
 # - git commit number
 # - ovnkube.sh script
-# - iptables wrappers
 FROM registry.ci.openshift.org/ocp/4.13:ovn-kubernetes-base
 
 USER root
@@ -44,7 +43,7 @@ RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
 	libpcap iproute iproute-tc strace \
 	containernetworking-plugins \
-	tcpdump iputils \
+	tcpdump iputils iptables \
 	libreswan \
 	ethtool conntrack-tools \
 	" && \
