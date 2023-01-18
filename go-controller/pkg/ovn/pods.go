@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/libovsdb/ovsdb"
+	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -74,8 +75,13 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 			return fmt.Errorf("failed to get nodes: %v", err)
 		}
 		for _, node := range nodes {
-			if err := oc.allocateHybridOverlayDRIP(node); err != nil {
-				return fmt.Errorf("cannot allocate hybridOverlay DRIP on node %s (%v)", node.Name, err)
+			// allocation also happens during Add/Update Node events we only want to allocate any addresses allocated as hybrid overlay
+			// distributed router ips during a previous run of ovn-k master to ensure that incoming pod events will not take the address that
+			// the node is expecting as the hybrid overlay DRIP
+			if _, ok := node.Annotations[hotypes.HybridOverlayDRIP]; ok {
+				if err := oc.allocateHybridOverlayDRIP(node); err != nil {
+					return fmt.Errorf("cannot allocate hybridOverlay DRIP on node %s (%v)", node.Name, err)
+				}
 			}
 		}
 	}
